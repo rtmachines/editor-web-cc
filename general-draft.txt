@@ -1,0 +1,104 @@
+# Product Requirements Draft
+
+## Application
+
+Build a new web based aplication in Rust.:
+
+
+The application edits and manages recipes for an industrial production line.
+It edits recipe data only. It does not communicate with machines.
+
+Use PostgreSQL and backend service in a Docker container as the database. Divide the production
+line into machines with identifiers from `M1` to `M9999999`. Each machine has
+one or more units with identifiers from `U1` to `U64`. Each main unit can have
+subunits. A subunit hierarchy can have up to five levels, such as `U1.2.4.5.6`.
+
+## Parameters and PLC data
+
+Each parameter must have a clear type, a name, a description, a unique
+identifier, and process limits. A process engineer defines the process limits.
+These limits describe the process. They are not only the limits of the data type.
+Provide parameter names and descriptions in English. Permit translations into
+other languages. Use Polish as the default user interface language.
+
+Support the required IEC data types used by CODESYS and TwinCAT 3. Support the
+required Siemens S7-1200, S7-1500, and S7-300 data types. Support one-dimensional
+and multidimensional arrays, user-defined types (UDTs), and nested structures.
+
+Each S7-300 parameter must also have a PLC memory address, such as `DB1.DBD0`.
+Machines can use different PLC types. Each machine has one PLC controller.
+
+## Recipes and versions
+
+Each recipe must have an alphanumeric reference number and a readable name.
+A recipe can have multiple versions. A version can have one of these statuses:
+`Draft`, `Approved`, or `Retired`. A recipe can have no more than one approved
+version at a time.
+
+A change to a parameter type, process limit, or UDT structure creates a new
+recipe version. Record all changes.
+
+## Users and permissions
+
+Store user logins and password hashes in the same database. Provide three user
+roles: administrator, process engineer, and operator.
+
+An administrator or process engineer can create, edit, and delete recipes when
+their permissions allow the operation. An operator can view recipes and their
+versions. An operator cannot change them. A process engineer can create and
+edit recipes and versions. An administrator has full recipe management rights.
+
+An authorized user approves a recipe version. When a new version becomes
+`Approved`, change the previous approved version to `Retired`. Enforce user
+permissions for every recipe management operation.
+
+## Safety and reliability
+
+Perform critical operations atomically to keep data consistent. The application
+is critical to industrial work. It must remain reliable and stable during
+continuous 24/7 operation. It must not crash or stop responding. Give data
+safety and reliability priority over performance.
+
+Do not add code paths that can panic. Use `Result<T>` for operations that can
+fail. Use safe Rust in application code.
+Use Crate "anyhow" for application errors, "thiserror" for lib.
+
+Design the application for safety, reliability, long-term operation, and easy
+maintenance. Handle and record errors and unexpected behavior, including edge
+cases. Write clear, unique error messages that identify the source of the
+problem. Use structured, detailed event logs to support debugging. Validate all
+external input.
+
+Design a clear and reliable user interface and user experience. Use ASD-STE100
+principles for technical English when appropriate.
+
+## Design principles
+
+Apply these principles when they solve a specific problem:
+
+- Object-oriented programming (OOP)
+- SOLID
+- Keep It Simple (KISS)
+- Do not Repeat Yourself (DRY)
+- You Aren't Gonna Need It (YAGNI)
+- GRASP
+- Separation of Concerns (SoC)
+- Composition over inheritance
+- Encapsulation
+- Loose coupling
+- High cohesion
+- Law of Demeter (LoD)
+- Tell, Don't Ask
+- Principle of Least Astonishment (POLA)
+- Convention over configuration
+- Inversion of Control (IoC)
+- Dependency Injection (DI)
+- Abstraction
+- Modularity
+- Immutability
+- Idempotency
+- Easy to Change (ETC)
+
+Use a design pattern only when it improves the structure or quality of the code.
+Use models tailored to specific tasks , simpler for simple task/mechanical task. Use subagents.
+Communicate with the chat user in Polish. Use English for documentation, specifications, and code comments (ASD-STE100)."
