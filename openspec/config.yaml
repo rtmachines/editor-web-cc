@@ -1,28 +1,65 @@
 schema: spec-driven
 
+# Project context. OpenSpec adds this text to the instructions of every artifact.
 context: |
   Language: English (en-en)
   All artifacts must be written in English (en-en).
   Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+  Domain: the recipe editor is a web application. It edits and versions the recipes of the machines of one production line (R02, A25).
+  A recipe version holds typed parameters with process limits. The application never communicates with a PLC (R03).
+  Stack: Rust stable, edition 2024, in a Cargo workspace of six crates. PostgreSQL 16 stores the data (A15).
+  The UI uses server-side rendering with axum, askama, and HTMX 2. There is no JavaScript build chain (ADR-0001).
+  The application runs 24/7 on one on-premises Docker host. Data safety has priority over performance (R30, R31, A1).
+  Read docs/architecture/overview.md first. The documents in docs/architecture/ and docs/adr/ are normative.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always state what is out of scope
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+# Per-artifact rules. Source: .claude/rules/openspec.md and CLAUDE.md, section Workflow.
+# Each item is a quoted string. An unquoted ": " makes YAML read the item as a mapping, and OpenSpec then ignores the full list.
+rules:
+  proposal:
+    - "Keep the proposal at 400 words or fewer."
+    - "Add the section `## Out of scope`. List in it what the change does not do."
+    - "In the section `## Why`, cite each R-number of `docs/architecture/overview.md` section 7 that the change satisfies."
+    - "Also cite each A-number of `overview.md` section 9 that the change uses."
+    - "The section `## Capabilities` names only the seven capabilities of `.claude/rules/openspec.md`."
+  specs:
+    - "Use only these seven capabilities: `plant-model`, `recipe-management`, `identity-access`, `audit`, `export`, `web-ui`, `operations`."
+    - "Do not add a capability without the approval of the user."
+    - "Start each requirement with the heading `### Requirement: <name>`."
+    - "Write each requirement sentence with SHALL or MUST."
+    - "Cite at least one R-number of `overview.md` section 7 or one A-number of `overview.md` section 9 in each requirement, for example `(R18)`."
+    - "Give each requirement at least one scenario with the heading `#### Scenario: <name>`. The heading has four hash marks."
+    - "Write each scenario as the bullets `- **GIVEN** ...`, `- **WHEN** ...`, and `- **THEN** ...`. Use `- **AND** ...` for one more step."
+    - "Use the terms of `domain-model.md` section 7 and the permission names of `api.md` section 3."
+    - "Follow the ASD-STE100 structural rules of `.claude/rules/docs.md`. Keep SHALL, MUST, and the OpenSpec headings in English."
+  design:
+    - "Link to the sections of `docs/architecture/` and `docs/adr/` that apply. Do not repeat their text."
+    - "Record each new design decision in a new ADR in the same change. `docs/adr/README.md` gives the number, the index row, and the decision map."
+    - "Change `docs/architecture/` only in the same change as the ADR that records the decision."
+  tasks:
+    - "Size each task for 2 hours of work or less."
+    - "Write each task as `- [ ] N.M (<scope>) <description>`."
+    - "A task that changes code in `crates/` starts with a failing test. Its scope is the crate name, for example `(recipe-domain)`."
+    - "A task in `migrations/` starts with a failing test in `recipe-db`. Its scope is `(recipe-db)`."
+    - "A task without code has its path as the scope, for example `(docs/adr)` or `(deploy)`."
+    - "A task without code names the command that checks it, for example `ste-lint.py`, `openspec validate --strict`, or `docker compose config`."
+    - "Mark a mechanical task with `[mechanical]` after the scope. A Haiku subagent does each mechanical task."
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+# Per-operation guidance. Source: CLAUDE.md, section Workflow, and CONTRIBUTING.md, section Local checks.
+operations:
+  apply:
+    guidance:
+      - "Use test-driven development with the skill `superpowers:test-driven-development`."
+      - "For a code task, write the failing test first. Run it and see it fail. Then write the code that makes it pass."
+      - "After each task, run `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`."
+      - "After each task, run `cargo test --workspace --all-features --locked`."
+      - "After each task, run `cargo fmt --all --check`."
+      - "These commands use the flags of CI in `.github/workflows/ci.yml`. All three commands must pass."
+      - "For a task without code, also run the command that the task names."
+      - "Mark the checkbox of a task only after all its commands pass."
+      - "Give each `[mechanical]` task to a Haiku subagent. Do the other tasks with Sonnet. Name the model in each `Agent()` call."
+  archive:
+    guidance:
+      - "Before the archive, run `openspec validate <change> --strict` and `openspec validate --specs --strict`."
+      - "Before the archive, run every command of the section `Local checks` in `CONTRIBUTING.md`. These commands include `cargo test`."
+      - "Do not archive the change when a command fails. Show the failure to the user."
+      - "After the archive, run `openspec validate --specs --strict` on the merged specs."
