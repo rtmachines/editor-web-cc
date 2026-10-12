@@ -1,6 +1,6 @@
 # ADR-0001: Frontend with Rust server-side rendering and HTMX
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0015 (row-version.js)
 Date: 2026-10-12
 Deciders: project owner
 
@@ -33,7 +33,7 @@ The application must run 24/7 for many years in an industrial plant. The team th
 ### Option C: JavaScript SPA (React or Svelte) with a Rust REST API
 
 - Pros: largest UI ecosystem, best tooling for complex client-side editors.
-- Cons: two languages and two toolchains, client state must be kept in sync with the server, more code for the same screens, a JSON API that must be versioned for the UI alone.
+- Cons: two languages and two toolchains. Client state must be kept in sync with the server. More code for the same screens. A JSON API that must be versioned for the UI alone.
 
 ## Decision
 
@@ -43,7 +43,7 @@ Rules:
 
 - `recipe-web` renders full pages and HTML fragments. It does not render JSON for the UI.
 - The nested UDT and array editor is built from HTML fragments. Each struct member or array row is one fragment. HTMX loads and swaps fragments.
-- JavaScript is allowed only for tree expand/collapse and for focus management. It must not hold application state.
+- JavaScript is allowed only for tree expand/collapse, for focus management, and for `row-version.js`. `row-version.js` copies the new `row_version` from the response header into the hidden form fields (amended by ADR-0015). No script holds application state.
 - HTMX 2 is vendored as a pinned file in the repository. The application does not load scripts from a CDN.
 - Every mutating form carries the `row_version` of the draft (ADR-0008).
 
@@ -64,11 +64,12 @@ Rules:
 
 ### Risks and mitigations
 
-- Risk: the UDT editor becomes too slow with many round trips. Mitigation: render a whole struct subtree in one fragment. Measure on a 1 000-parameter version (Assumption A19).
+- Risk: the UDT editor becomes too slow with many round trips. Mitigation: render a whole struct subtree in one fragment. Measure on a 4 000-parameter version (Assumptions A19, A26).
 - Risk: a future requirement needs rich client interactivity. Mitigation: HTMX fragments can coexist with an island built in Option B. A new ADR would record that change.
 
 ## Related
 
 - ADR-0008 (optimistic concurrency, `row_version` in forms)
+- ADR-0015 (amendment: `row-version.js`)
 - ADR-0012 (UI language with fluent)
 - `overview.md` section 5 (crate `recipe-web`), section 7 (R01, R39)

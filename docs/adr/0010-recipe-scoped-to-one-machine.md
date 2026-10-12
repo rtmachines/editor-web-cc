@@ -6,7 +6,7 @@ Deciders: project owner
 
 ## Context
 
-The draft describes "recipes for an industrial production line" and a line made of machines with units. It says: "Each machine has one PLC controller" and "Machines can use different PLC types." It does not say whether a recipe spans the line or one machine.
+The draft describes "recipes for an industrial production line" and a line made of machines with units. It says: "Each machine has one PLC controller" and "Machines can use different PLC types". It does not say whether a recipe spans the line or one machine.
 
 A parameter has a PLC type that must exist on a platform, and for S7-300 an address in a data block. Both are properties of one controller.
 
@@ -27,7 +27,7 @@ A parameter has a PLC type that must exist on a platform, and for S7-300 an addr
 ### Option B: Recipe per line, parameters on units of many machines
 
 - Pros: one approval for the whole line.
-- Cons: mixed platforms inside one version, address rules per parameter must look up the machine, export must be split per PLC, a conflict on one machine blocks the whole line.
+- Cons: mixed platforms inside one version. Address rules per parameter must look up the machine. Export must be split per PLC. A conflict on one machine blocks the whole line.
 
 ## Decision
 
@@ -35,7 +35,7 @@ We use Option A.
 
 - `recipe.machine_id` is `NOT NULL`. A recipe cannot move to another machine.
 - `machine.plc_platform` is propagated down with composite foreign keys: `recipe(machine_id, plc_platform)` references `machine(id, plc_platform)`. `recipe_version(recipe_id, plc_platform)` references `recipe(id, plc_platform)`. `parameter(recipe_version_id, plc_platform)` references `recipe_version(id, plc_platform)`. This lets a `CHECK` on `parameter` enforce the S7-300 address rule (I5).
-- A `Parameter.unit` must belong to the machine of the recipe. The trigger `enforce_unit_machine` on `parameter` enforces it (`data-model.md` section 4.3, invariant I10 covers the unit tree itself).
+- A `Parameter.unit` must belong to the machine of the recipe. The trigger function `enforce_unit_machine` on `parameter` enforces it (`data-model.md` section 4.3, invariant I10 covers the unit tree itself).
 - `machine.plc_platform` cannot change after the first recipe exists. A trigger rejects the update.
 - A line-level "recipe set" that groups one recipe per machine is deferred. It is a new aggregate on top of this model and does not change it.
 

@@ -89,7 +89,7 @@ migrations/, deploy/ (compose, Caddyfile placeholder), docs/{architecture,adr,pl
 deny.toml, rustfmt.toml, rust-toolchain.toml (stable, edition 2024), .gitignore, CONTRIBUTING.md
 (z reliability.md §8, angielski STE), README.md (3 akapity + linki).
 Workspace Cargo.toml: [workspace.lints] z reliability.md §2, [workspace.dependencies]
-z wersjami sprawdzonymi przez skill `rust-skills:docs` (axum, sqlx, askama, tower-sessions,
+z wersjami sprawdzonymi przez skill `rust-skills:docs` (axum, sqlx, askama,
 tokio, tracing, thiserror, anyhow, uuid, rust_decimal, serde_json z arbitrary_precision,
 argon2, fluent). Podaj powody każdej wersji w jednym zdaniu.
 Subagent Haiku: wygeneruj szkielety crate'ów i CI. Ty: workspace Cargo.toml i README.
@@ -123,6 +123,30 @@ Skille: `openspec-explore`. Model: Sonnet. Subagenci: brak.
 ---
 
 ## Faza 1 — Specyfikacja bazowa (jeden change, bez kodu)
+
+### P1.0 — Rekoncyliacja projektu (wynik przeglądu 2026-10-12)
+
+```text
+<preambuła>
+Przeczytaj docs/plan/review/2026-10-12-consolidated.md i cztery raporty obok niego.
+Moje odpowiedzi na decyzje D1–D12: <wpisz>.
+Wykonaj plan z sekcji 6 raportu skonsolidowanego jako zmianę "design-reconciliation"
+(tylko dokumenty, bez kodu, bez OpenSpec change):
+1. Nowe ADR 0014–0022 (skill architecture-decision-records), stare oznacz Superseded.
+2. Subagent A (Opus, skill postgresql-table-design): przepisz data-model.md §3–§6
+   przetestowanym SQL z raportu PostgreSQL (K2–K5, K9, I5, I10, I12), 5 segmentów ścieżki.
+3. Subagent B (Opus): domain-model.md — agregat Draft, podział komend, AuditAction, I15,
+   jedna gramatyka per value object, N-notatki → Assumptions, tabela nazw Rust ↔ SQL.
+4. Subagent C (Sonnet): api.md + reliability.md — jedna tabela kodów/statusów, jedna tabela
+   ustawień, polityka panic wg D10, Argon2 + semafor, statvfs, CSP, health na osobnym listenerze.
+5. Ty: overview.md (12 wierszy R, R43–R45, A25+, C4 z migrate) i implementation-prompts.md.
+6. Subagent D (Haiku): mechaniczne poprawki z raportu traceability Pass B i C (~90 pozycji),
+   potem scripts/ste-lint.py do zera twardych naruszeń.
+7. Świeży agent (Opus) powtarza przegląd traceability. Bramka do P1.1: zero sprzeczności w Pass B.
+Commit "docs: design reconciliation after review".
+```
+
+Skille: `architecture-decision-records`, `postgresql-table-design`, `asd-ste100`. Modele: Opus (ADR, SQL, domena, przegląd), Sonnet (api/reliability), Haiku (mechaniczne).
 
 ### P1.1 — Baseline specs z dokumentów architektury
 
@@ -210,15 +234,20 @@ Skille: jak P2.1 + `rust-skills:m03-mutability`, `rust-skills:m06-error-handling
 ```text
 <preambuła>
 `openspec-propose` dla change "app-use-cases-and-ports" (recipe-app).
-Zakres: porty (traits): RecipeRepository, PlantRepository, UserRepository, TypeCatalog,
-UnitOfWork (commit przyjmuje Vec<AuditEntry> — I13), Clock, PasswordHasher, SessionStore port.
-CurrentUser + Permission enum + matrix z api.md §3 jako dane (tabela w kodzie),
-AppError (Forbidden, NotFound, ConcurrentEdit, Storage + domain errors).
-Use case'y z domain-model.md §5 (wszystkie 24) jako struktury z execute(). Permission check =
-pierwsza instrukcja (ADR-0013). In-memory adaptery dla testów (skill architecture-patterns
-§Testing). Testy: każdy use case ma test happy path + każdy błąd z tabeli §5;
-test macierzy uprawnień generowany z tabeli api.md §3 (operacja × rola) [mechanical].
-Subagent Haiku: in-memory adaptery i test macierzy. Ty (Sonnet): use case'y Approve, Upsert, CreateVersion.
+Zakres: porty (traits): RecipeRepository (root + Draft osobno, ADR-0016), PlantRepository,
+UserRepository, SessionRepository, TypeCatalog, UnitOfWork (commit przyjmuje NonEmpty<AuditEntry>
+— I13; blokady recipe FOR UPDATE → version FOR UPDATE, ADR-0015), Clock, PasswordHasher
+(z semaforem), SecurityEventSink, LoginAttemptStore, MaintenanceStore (ścieżki commitu wg ADR-0015). CurrentUser (rola i session_epoch przeładowane per request,
+ADR-0014), Permission enum z recipe-domain, matrix z api.md §3 jako dane w kodzie,
+AppError (Forbidden, NotFound, ConcurrentEdit, Unauthenticated, Storage + domain errors).
+Use case'y z domain-model.md §5 (wszystkie 33, w tym zapytania, plus operacja wewnętrzna EnsureDerivedType bez uprawnienia) jako struktury z execute().
+Permission check = pierwsza instrukcja (ADR-0013). Polityka zatwierdzania (ADR-0022):
+separation_of_duties, kompletność limitów, content_sha256. In-memory adaptery dla testów.
+Testy: każdy use case ma test happy path + każdy błąd z tabeli §5; test macierzy uprawnień
+generowany z api.md §3 (operacja × rola, także zapytania) [mechanical]; test że SetParameterValue
+nie zmienia limitów i tłumaczeń; test idempotentnego approve (AlreadyApproved).
+Subagent Haiku: in-memory adaptery i test macierzy. Ty (Sonnet): Approve, SetParameterValue,
+CreateVersion, RebindTypeRevision.
 Review: comprehensive-review:architect-review (Opus) — zależności crate'ów zgodne z overview.md §5.
 ```
 
@@ -229,14 +258,19 @@ Skille: `architecture-patterns`, `rust-api-design`, `async-rust`, `rust-skills:d
 ```text
 <preambuła>
 `openspec-propose` dla change "db-schema-and-adapters" (recipe-db + migrations/).
-Zakres: migracje 0001_schema (DDL z data-model.md §3 bez zmian), 0002_triggers (§4),
-0003_grants (§5), 0004_seed_plc_types (§7), 0005_seed_admin (hasło z env, jednorazowo).
-Adaptery sqlx dla portów z P2.3, UnitOfWork = transakcja + zapis audit_log, mapowanie
-SQLSTATE → DbError (23505, 40001 z retry ×3, 55P03, kody triggerów E-PLT-01x/02x, E-RCP-03x).
-row_version: UPDATE ... WHERE row_version = $n, 0 rows → ConcurrentEdit.
+Zakres: deploy/db/initdb/01-roles.sh (role i baza jako superuser z Docker secrets, ADR-0020),
+migracje 0001_schema (DDL z data-model.md §3 bez zmian), 0002_triggers (§4, wszystkie),
+0003_grants (§5, granty kolumnowe, ALTER DEFAULT PRIVILEGES), 0004_seed_plc_types (§7).
+Podkomenda `recipe-server create-admin` (hasło ze stdin/secret, must_change_password).
+Adaptery sqlx dla portów z P2.3, własny SessionRepository (tabela session z user_id i epoch, bez tower-sessions, ADR-0014),
+UnitOfWork = transakcja + blokady recipe→version (ADR-0015) + zapis audit_log z łańcuchem hashy,
+mapowanie SQLSTATE → DbError (23505, 23503, 23514 z kodem triggera, 40P01, 55P03, 57014;
+bez retry 40001). row_version: UPDATE ... WHERE row_version = $n, 0 rows → ConcurrentEdit.
 Testy integracyjne (testcontainers, PostgreSQL 16): każdy trigger ma test pozytywny i
-negatywny, każdy constraint CHECK/UNIQUE ma test, każda komenda z data-model.md §6 ma
-test atomowości (błąd w środku → brak wierszy). Skill postgres + pg:postgres-database-migration.
+negatywny, każdy constraint CHECK/UNIQUE ma test, każde zabronione przejście stanu jako
+recipe_app, lista grantów kolumnowych vs plik wzorcowy, każda komenda z data-model.md §6 ma
+test atomowości (błąd w środku → brak wierszy), wyścig "dwa approve tego samego draftu",
+RemoveParameter z limitami i tłumaczeniami. Skill postgres + pg:postgres-database-migration.
 Subagent Haiku: testy constraintów z tabel DDL [mechanical]. Ty (Sonnet): UnitOfWork i mapowanie błędów.
 Subagent sql-reviewer (Opus, skill postgresql-table-design): przegląd migracji vs data-model.md;
 różnice = błąd w kodzie, nie w dokumencie, chyba że ADR.
@@ -251,12 +285,17 @@ Skille: `postgres`, `postgresql-table-design`, `pg:postgres-database-migration`,
 `openspec-propose` dla change "identity-and-sessions" (recipe-app + recipe-db + recipe-web szkielet).
 Zakres: Argon2id PasswordHasher (parametry OWASP; wersję i API crate argon2 sprawdź skillem
 rust-skills:docs), Login/Logout/ChangeOwnPassword/ResetPassword/Deactivate/Activate/SetUserRole,
-LastAdministrator, login_attempt rate limit (A22), tower-sessions z sqlx store (A21 timeouts),
-unieważnianie sesji (domain-model.md §2.3), CSRF token (api.md §7), middleware CurrentUser.
+UnlockLogin (CreateUser i ResetPassword generują hasło jednorazowe, must_change_password), LastAdministrator, throttling logowania (progresywne opóźnienie per login+IP,
+budżet per IP, licznik w osobnej zatwierdzonej transakcji pod advisory lock, A22), semafor
+Argon2, własna tabela session (token hashowany, cycle na login, session_epoch, ADR-0014),
+CSRF (pre-session token dla /login i /lang, Origin/Sec-Fetch-Site), nagłówki bezpieczeństwa
+i CSP (api.md §9), must_change_password, security_event. Middleware CurrentUser przeładowuje
+rolę, is_active i session_epoch z app_user per request.
 Minimalne strony: /login, /logout, /me/password (askama, bez stylów — style w P3.1).
-Testy: axum oneshot dla każdego endpointu × rola, test rate limitu z zegarem testowym,
-test że hash nigdy nie trafia do logów (tracing test subscriber).
-Review: comprehensive-review:security-auditor (Opus) — OWASP ASVS V2/V3 checklist.
+Testy: axum oneshot dla każdego endpointu × rola, throttling z zegarem testowym, flood logowań
+(semafor), test że hash i token nigdy nie trafiają do logów (tracing test subscriber),
+test że zmiana roli i dezaktywacja kończą sesję.
+Review: comprehensive-review:security-auditor (Opus) — OWASP ASVS V2/V3/V4 checklist.
 ```
 
 Skille: `rust-skills:domain-web`, `htmx`, `security-review`. Modele: Sonnet / Haiku (testy endpoint × rola) / Opus (security).
@@ -330,10 +369,14 @@ Skille: `design-shotgun`, `htmx`, `interaction-design`, `accessibility-audit`, `
 `openspec-propose` dla change "approval-audit-history": akcje approve/retire/discard/delete
 z potwierdzeniem (dialog HTML, nie JS confirm), widok historii receptury (/recipes/{ref}/history)
 dla wszystkich ról, widok audit (/audit) wg A20 z filtrami, porównanie dwóch wersji
-(diff parametrów: dodane/usunięte/zmienione pola, limity, wartości) — czytelne dla operatora.
-Idempotencja: podwójne kliknięcie approve → jeden wpis audytu (overview.md §8).
-Testy: scenariusz pełny approve→retire w testcontainers z asercją na audit_log (1 transakcja),
-snapshot diffu. Review: security-auditor (czy operator może wywołać POST approve? → 403 + audyt).
+(diff parametrów: dodane/usunięte/zmienione pola, limity, wartości) — czytelne dla operatora;
+ten sam diff na stronie zatwierdzania z podświetlonymi zmianami limitów (ADR-0022).
+Idempotencja: podwójne kliknięcie approve (row_version == expected + 1) → AlreadyApproved,
+jeden wpis audytu, hx-sync na przycisku. Reguły rozdziału obowiązków, kompletności limitów i flagi allow_outdated (E-RCP-024, ADR-0018)
+w UI (E-RCP-015, E-RCP-016). Akcja restore dla administratora.
+Testy: scenariusz pełny approve→retire w testcontainers z asercją na audit_log (1 transakcja,
+content_sha256 ustawiony, łańcuch hashy spójny), snapshot diffu, approve przez edytora draftu → 409.
+Review: security-auditor (operator wywołuje POST approve → 403 + security_event).
 ```
 
 Skille: `htmx`, `ux-writing` (teksty potwierdzeń STE), `security-review`. Modele: Sonnet / Haiku / Opus.
@@ -342,11 +385,14 @@ Skille: `htmx`, `ux-writing` (teksty potwierdzeń STE), `security-review`. Model
 
 ```text
 <preambuła>
-`openspec-propose` dla change "export-v1" (recipe-export + endpointy api.md §6).
-JSON Schema (draft 2020-12) w docs/architecture/export-v1.schema.json, serializer z rozwiązanymi
-TypeTree, Content-Disposition, audyt eksportu (A8), 404/409 wg api.md, przycisk w UI dla
-Approved. Testy: round-trip schema validation (crate jsonschema), golden file dla przykładu
-z api.md §6, test że Retired eksportuje się tylko po numerze wersji.
+`openspec-propose` dla change "export-v1" (recipe-domain::export dla ciała, kanonizacji i hasha; recipe-export dla schematu JSON i zapisu HTTP; endpointy api.md §2.7, dokument §6).
+JSON Schema (draft 2020-12) w crates/recipe-export/schema/export-v1.schema.json, serializer
+z rozwiązanymi TypeTree (types[].revision, długości stringów członków), content_sha256 po
+kanonizacji RFC 8785 ciała bez pól zmiennych (nazwy, status, exported_*), liczby i limity jako stringi dziesiętne (liczony w ApproveVersion, sprawdzany w ExportVersion, ADR-0019),
+flaga loadable, Content-Disposition (prefiks RETIRED_), audyt eksportu (A8), 404 E-EXP-001,
+przycisk w UI dla Approved; Retired tylko Admin/PE. Testy: walidacja schematem (crate jsonschema),
+golden file dla przykładu z api.md §6, test że hash jest stabilny między eksportami i zmienia się
+po zmianie statusu, test że mismatch daje E-EXP-002.
 Dodatkowo: docs/user/export-format.md (Diátaxis reference, STE) dla autorów systemu transferu.
 Subagent Haiku: golden files i docs reference z tabeli pól. Review: api-design-principles (Opus).
 ```
@@ -362,14 +408,17 @@ Skille: `rust-serde`, `api-design-principles`, `documentation-writer`. Modele: S
 ```text
 <preambuła>
 `openspec-propose` dla change "operations-compose" (deploy/): compose.yaml wg reliability.md §7
-(proxy Caddy, migrate, app, db, backup z backup-now), Dockerfile wielostopniowy
-(docker-build-strategies: distroless/static, non-root, healthcheck), .env.example,
-Caddyfile, skrypt backup + restore, /healthz i /readyz w recipe-server, graceful shutdown,
-timeouty, tryb read-only przy dysku < 5 % (A24), tracing JSON (reliability.md §3),
-panic hook + abort. docs/ops/runbook.md (Diátaxis how-to, STE): start, backup, restore,
-upgrade, rollback, alarmy. Testy: compose up w CI (healthchecki zielone ≤ 60 s),
-test restore z dumpu, test SIGTERM (drain). Skille docker-compose-patterns,
-docker-destructive-guardrails. Review: performance-engineer (Opus) — limity zasobów i pool.
+(proxy Caddy obowiązkowy, backup-premigrate, migrate, app, db z data-checksums i kolacją C,
+backup z backup-now i pg_dumpall --globals-only, walarchive na drugi dysk — ADR-0020),
+Dockerfile wielostopniowy (docker-build-strategies: distroless/static, non-root, healthcheck),
+Docker secrets *_FILE (bez env-file), Caddyfile z HSTS i nagłówkami, skrypty backup + restore
+z manifestem SHA-256, wewnętrzny listener /healthz i /readyz (port 9000), graceful shutdown,
+timeouty, statvfs i tryb read-only (A24), tracing JSON (reliability.md §3), CatchPanicLayer +
+watchdog (D10), nadzorowane joby w app: alerts, cleanup (purge security_event), audit chain check; tabela app_setting z audytem zmian ustawień przy starcie (ADR-0022). docs/ops/runbook.md (Diátaxis how-to, STE): start, backup,
+restore, upgrade, rollback, major upgrade PostgreSQL, alarmy. Testy: compose up w CI
+(healthchecki zielone ≤ 60 s), test restore z dumpu + WAL, test SIGTERM (drain), test że panic
+w handlerze daje 500 i proces żyje. Skille docker-compose-patterns, docker-destructive-guardrails.
+Review: performance-engineer (Opus) — limity zasobów i pool.
 ```
 
 Skille: `docker-compose-patterns`, `docker-build-strategies`, `docker-destructive-guardrails`, `rust-observability`, `documentation-writer`. Modele: Sonnet / Haiku (runbook z tabel) / Opus.
@@ -382,8 +431,9 @@ Bez nowego change (naprawy wchodzą jako change "hardening-round-1" tylko, gdy z
 1. Skill `cso` (gstack) + agent security-auditor (Opus): pełny audyt; CRITICAL/HIGH naprawione.
 2. Skill `health` (gstack): dashboard jakości; funkcje > 50 linii i pliki > 800 linii → refactor
    (skill rust-skills:rust-refactor-helper, Sonnet).
-3. Nightly soak (reliability.md §6): skrypt k6 lub oha z miksem żądań 24 h, limit pamięci
-   512 MiB, raport do docs/ops/soak-<date>.md. Uruchom 2 h lokalnie, pokaż wykres RSS.
+3. Nightly soak (reliability.md §6): skrypt k6 lub oha z miksem żądań 24 h (w tym flood
+   logowań), pułap pamięci 384 MiB przy limicie kontenera 512 MiB, raport do
+   docs/ops/soak-<date>.md. Uruchom 2 h lokalnie, pokaż wykres RSS.
 4. `accessibility-audit` na wszystkich ekranach (WCAG 2.2 AA) → lista i naprawy.
 5. Pokrycie: cargo llvm-cov ≥ 80 % per crate; luki uzupełnia subagent Haiku testami z tabel.
 Zakończ `superpowers:verification-before-completion` z wyjściem komend.
@@ -413,13 +463,24 @@ Skille: `documentation-writer`, `asd-ste100`, `changelog-automation`, `document-
 
 ```mermaid
 flowchart LR
-    P01[P0.1 CLAUDE.md + rules] --> P02[P0.2 skeleton] --> P03[P0.3 openspec cfg] --> P11[P1.1 baseline] --> P12[P1.2 archive]
-    P12 --> P21[P2.1 plant] --> P22[P2.2 recipe] --> P23[P2.3 app] --> P24[P2.4 db] --> P25[P2.5 identity]
-    P25 --> P31[P3.1 UI foundation] --> P32[P3.2 plant screens] --> P33[P3.3 editor] --> P34[P3.4 approval] --> P35[P3.5 export]
-    P35 --> P41[P4.1 ops] --> P42[P4.2 hardening] --> P43[P4.3 docs+release]
+    P10[P1.0 reconciliation] --> P01[P0.1 CLAUDE.md + rules] --> P02[P0.2 skeleton] --> P03[P0.3 openspec cfg] --> P11[P1.1 baseline] --> P12[P1.2 archive]
+    P12 --> P21[P2.1 plant] --> P22[P2.2 recipe] --> P23[P2.3 app]
+    P23 --> P24[P2.4 db]
+    P23 --> P25[P2.5 identity]
+    P24 --> P31[P3.1 UI foundation]
+    P25 --> P31
+    P31 --> P32[P3.2 plant screens] --> P33[P3.3 editor]
+    P33 --> P34[P3.4 approval]
+    P33 --> P35[P3.5 export]
+    P33 --> P41[P4.1 ops]
+    P34 --> P42[P4.2 hardening]
+    P35 --> P42
+    P41 --> P42
+    P42 --> P43[P4.3 docs+release]
 ```
 
-Równolegle można prowadzić: P2.4 z P2.5 (po P2.3), P3.5 z P3.4, P4.1 z P3.4.
+P1.0 (rekoncyliacja dokumentów) jest pierwsza, bo CLAUDE.md i reguły projektu (P0.1) cytują
+dokumenty architektury. Równolegle można prowadzić: P2.4 z P2.5 (po P2.3), P3.4 z P3.5 i P4.1 (po P3.3).
 
 ## Dobór modeli — reguła
 

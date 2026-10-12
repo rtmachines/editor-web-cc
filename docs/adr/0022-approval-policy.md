@@ -1,0 +1,110 @@
+# ADR-0022: Approval policy, audit tamper evidence and draft clarifications
+
+Status: Accepted
+Date: 2026-10-12
+Deciders: project owner
+
+## Context
+
+ADR-0013 rejected a four-eyes rule. A high finding of the security review showed the consequence. One person at an engineer workstation can widen a process limit, move the value inside it and approve within a minute. No second person sees the change. A process limit protects the process only when the person who sets the value cannot also move the limit alone.
+
+The traceability review (A8) showed that the draft says a parameter "must have ... a description ... and process limits", while the documents made both optional.
+
+The security review also found that the audit log had no tamper evidence. The architecture review (F19) found that the audit table could not store several required entries (`PasswordReset` without state, `LoginFailed` for an unknown login, `Forbidden` before a transaction).
+
+The owner accepted five decisions. Separation of duties is a configuration flag. The audit log has a hash chain in the database. A unit path has at most five levels. Descriptions and limits are required. S7-1200 and S7-1500 parameters can have an address.
+
+## Decision drivers
+
+- A safety-relevant change needs a second person or an explicit plant decision to waive it (R27, R31).
+- The draft wording "must have" for descriptions and limits (R08, R09).
+- Every mutating operation is recorded and the record is tamper-evident (R20).
+- Security events on the failure path must survive the rollback of the failed command (R35).
+
+## Considered options
+
+### Option A: Keep "any Administrator or ProcessEngineer approves" (ADR-0013)
+
+- Pros: simple.
+- Cons: a single careless or malicious user controls the whole path.
+
+### Option B: Separation of duties as a configuration flag, default on
+
+- Pros: the rule exists in code and in the database, a plant with one engineer can switch it off with an audited change.
+- Cons: a plant with one engineer needs an Administrator to approve.
+
+### Option C: Password re-entry as an electronic signature
+
+- Pros: strongest attribution.
+- Cons: a second password prompt on every approval. Kept as an option for a later ADR.
+
+## Decision
+
+The project uses **Option B**.
+
+Approval:
+
+- `approval.separation_of_duties = true` by default. The approver cannot be `created_by` of the draft and cannot appear in `draft_editor` for that draft. The error is `E-RCP-015 ApproverEditedDraft`, 409. The rule runs in `Recipe::approve()`. The database stores the editors in `draft_editor`. No trigger enforces the rule (I16).
+- The approve page shows the diff against the current Approved version. Changed limits are highlighted. The approve form carries the `row_version` of the draft.
+- At approval every numeric and string leaf has a process limit. BOOL leaves have none. The error is `E-RCP-016 LimitMissing`, 422, with the list of leaves.
+- A limit with `leaf_path` `[*]` applies to every element of one array level. The domain rejects a `[*]` row and an index row for the same array level. This amends ADR-0007.
+- `ApproveVersion` returns `E-RCP-024 TypeRevisionOutdated` for an outdated parameter unless the request carries `allow_outdated = true`. The audit entry records the flag (ADR-0018, Assumption A29).
+- `description_en` is required and non-empty for every parameter. `name_en` was already required. This amends ADR-0012.
+- `ApproveVersion` computes `content_sha256` (ADR-0019).
+
+Settings:
+
+- Table `app_setting (key, value, updated_at, updated_by)` stores the effective value of every configuration key. It has an `id` column for the audit entry.
+- At startup the server compares the configuration with the stored values. For each difference it writes the audit action `SettingChanged` with the old and the new value, and it updates the row (`reliability.md` 7.12).
+- A change of `approval.separation_of_duties` is therefore in the audit log, which has no time limit and a hash chain.
+
+Audit tamper evidence (amends ADR-0005):
+
+- `audit_log` gets `chain_seq`, `prev_hash`, and `entry_hash`. The table `audit_chain_head` holds one row with `last_seq` and `last_hash`.
+- A BEFORE INSERT trigger function owned by `audit_owner` (NOLOGIN, `SECURITY DEFINER`) sets the three columns. It runs with `search_path = pg_catalog, public, pg_temp` and schema-qualifies every name.
+- The function locks the head row `FOR UPDATE`, sets `chain_seq = last_seq + 1`, and sets `entry_hash = SHA-256(prev_hash || canonical)`. Then it moves the head. The row lock gives all audit inserts one order.
+- `canonical` is the JSON text of a constant column list. Timestamps are epoch microseconds, so the text does not depend on the session time zone.
+- A nightly job recomputes every hash in `chain_seq` order with `TimeZone = 'UTC'` in one snapshot. On a break it writes a `security_event` row of kind `audit_chain_broken`, logs `E-AUD-002`, and raises an alert.
+- Migration `0003` grants `CREATE` on the schema `public` to `audit_owner` for the ownership transfer and revokes it at once.
+- `audit_log` also gets `aggregate_type`, `aggregate_id`, `client_ip`, and `session_ref`. Parameter entries store a diff, not two full rows.
+- Off-host shipping is a site option described in the runbook, not a requirement.
+
+Security events:
+
+- A new table `security_event` records `login_failed`, `login_rejected_inactive`, `login_throttled`, `csrf_rejected`, `forbidden`, `unlock`, and `audit_chain_broken`. It stores `login_hmac` for unknown logins, `user_id` for known ones, `client_ip`, `user_agent`, `request_id` and a small `detail`. The HMAC key is the Docker secret `login_hmac_key` (`reliability.md` 7.1).
+- The port `SecurityEventSink` writes the row in its own short transaction. A failed command does not roll it back.
+- The table is append-only for `recipe_app`. Rows are kept 400 days. The `SECURITY DEFINER` function `security_event_purge()`, owned by `audit_owner`, deletes older rows. The supervised job `cleanup` calls it. The retention is a constant inside the function.
+- `audit_log.entity_id` stays `NOT NULL`. Every business audit entry has a small non-null state object.
+
+Clarifications of the draft, recorded as Assumptions:
+
+- A30: a unit path has 1 to 5 segments. The draft example `U1.2.4.5.6` has five segments and the text says "up to five levels". The earlier documents said six.
+- A31: an S7 address is required on S7-300, optional on S7-1200 and S7-1500, and not allowed on CODESYS and TwinCAT 3. One CHECK enforces the three cases. The export writes the stored value when present. The draft requires an address only for S7-300 and does not forbid it elsewhere. Non-optimized data blocks use absolute addresses.
+- A33: authentication and authorization failures go to `security_event`. A setting change is the audit action `SettingChanged`.
+- A34: separation of duties on approval is on by default. A plant can turn it off through an audited configuration value.
+- A36: at approval every numeric and string leaf has a process limit, BOOL leaves have none, and `description_en` is never empty.
+
+## Consequences
+
+### Positive
+
+- A limit change and its approval always involve two people, unless the plant decides otherwise in an audited way.
+- An edited audit row breaks the chain and is detected the next night.
+- Failed logins and forbidden requests are visible with their source address.
+
+### Negative
+
+- `draft_editor` adds one insert to every draft command.
+- A plant with one engineer must give the Administrator the approval work or switch the flag off.
+
+### Risks and mitigations
+
+- Risk: the row lock on `audit_chain_head` serializes all audit inserts. Mitigation: the insert is small and happens once per command. The soak test measures the throughput. A SERIALIZABLE command that meets a concurrent head update retries once.
+
+## Related
+
+- Amends ADR-0005, ADR-0007, ADR-0012, and ADR-0013. ADR-0014 (security_event writers), ADR-0016 (draft_editor), ADR-0018 (outdated parameters), ADR-0019 (hash at approval).
+- `domain-model.md` sections 2.2, 2.4, 3.
+- `data-model.md` sections 3.8, 3.11, 3.12, 3.15, 3.16, 3.17, 4.9, 4.12.
+- `api.md` section 3.
+- Review findings: security M8 and two high findings. Architecture F19. Traceability A7, A8, A12, A16, C6.

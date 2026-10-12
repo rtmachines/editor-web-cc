@@ -1,6 +1,6 @@
 # ADR-0008: Optimistic concurrency with a row version on the draft
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0015 (locking model, idempotent approve)
 Date: 2026-10-12
 Deciders: project owner
 
@@ -39,7 +39,7 @@ We use Option A.
 - `recipe_version.row_version` is a `BIGINT` that starts at 1. Every successful write to the version or to one of its parameters increments it in the same transaction.
 - Every edit form and every HTMX fragment that mutates the draft carries the current `row_version` in a hidden field.
 - The use case executes `UPDATE ... WHERE id = $id AND row_version = $expected`. When zero rows change, it returns `Err(ConcurrentEdit)` (I12).
-- `recipe-web` maps `ConcurrentEdit` to HTTP `409 Conflict` and renders a fragment that shows the current server value, the value the user sent, and a "reload and retry" action.
+- `recipe-web` maps `ConcurrentEdit` to HTTP `409 Conflict` and renders the fragment `conflict.html`. It shows the current server `row_version`, the login of the last editor, the time of the last change, and a "Reload version" button. The unsaved input stays in the form until the reload (`api.md` section 4).
 - The parameter rows do not have their own version column. The version row is the lock unit. This keeps I1 to I4 in one place and avoids partial conflicts inside one version.
 - Approval also checks `row_version`. An approve request with a stale version is rejected.
 
@@ -49,7 +49,7 @@ We use Option A.
 
 - No lock table, no lock cleanup, no "who holds the lock" UI.
 - A conflict is visible and the user keeps control.
-- Idempotent retries: a repeated request with the same `row_version` after a success returns `409`, not a double write.
+- Idempotent retries: a repeated request with the same `row_version` after a success returns `409`, not a double write. A repeated approve returns `AlreadyApproved` instead (ADR-0015).
 
 ### Negative
 

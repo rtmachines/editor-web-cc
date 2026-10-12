@@ -1,12 +1,12 @@
 # ADR-0004: Authentication with server-side sessions in PostgreSQL
 
-Status: Accepted
+Status: Superseded by ADR-0014
 Date: 2026-10-12
 Deciders: project owner
 
 ## Context
 
-The draft says: "Store user logins and password hashes in the same database." It does not say how a logged-in user is identified on later requests. The UI is server-rendered (ADR-0001). An export endpoint for a transfer system may need machine access later (ADR-0002).
+The draft says: "Store user logins and password hashes in the same database". It does not say how a logged-in user is identified on later requests. The UI is server-rendered (ADR-0001). An export endpoint for a transfer system may need machine access later (ADR-0002).
 
 ## Decision drivers
 
@@ -36,7 +36,7 @@ The draft says: "Store user logins and password hashes in the same database." It
 
 We use Option A now. We move to Option C when a transfer system needs the export endpoint.
 
-- Sessions use `tower-sessions` with a PostgreSQL store (sqlx). The table is `session` (see `data-model.md`).
+- Sessions use a third-party session library with a PostgreSQL store (sqlx). The table is `session` (see `data-model.md`).
 - The cookie is `HttpOnly`, `Secure`, `SameSite=Lax`. The session ID is random, 128 bits or more.
 - A session expires after 30 minutes of inactivity and after 12 hours in total. Both values are configuration values (Assumption A21, `api.md` section 7).
 - Passwords are hashed with Argon2id. The parameters follow the OWASP recommendation at the time of release. The PHC string is stored in `app_user.password_hash`.

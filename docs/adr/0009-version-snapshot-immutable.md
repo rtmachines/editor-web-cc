@@ -6,7 +6,7 @@ Deciders: project owner
 
 ## Context
 
-The draft says: "A change to a parameter type, process limit, or UDT structure creates a new recipe version." It also says: "A recipe can have no more than one approved version at a time." The draft does not say where parameter definitions live: with the machine, or with the version.
+The draft says: "A change to a parameter type, process limit, or UDT structure creates a new recipe version". It also says: "A recipe can have no more than one approved version at a time". The draft does not say where parameter definitions live: with the machine, or with the version.
 
 This is the central structural decision. It determines what an `Approved` version means and what the export contains.
 
@@ -36,7 +36,7 @@ Each version owns its `parameter` rows: definition (unit, tag, name, type revisi
 We use Option A.
 
 - `parameter`, `parameter_limit`, and `parameter_translation` rows belong to one `recipe_version`.
-- `Parameter.key` is a stable identity across versions (N4). `CreateVersion` copies every row and keeps `key`.
+- `Parameter.key` is a stable identity across versions (`domain-model.md` section 2.2). `CreateVersion` copies every row and keeps `key`.
 - A `plc_type` row is immutable. A parameter references one revision. A UDT change is a new revision (ADR-0006). To use the new revision, the engineer edits the parameter in a `Draft`.
 - A `Draft` is the only mutable version. The domain returns `Err(VersionNotEditable)` for any edit to an `Approved` or `Retired` version (I3, I4).
 - A trigger on `parameter`, `parameter_limit`, and `parameter_translation` rejects `INSERT`, `UPDATE`, and `DELETE` when the version status is not `draft`. The trigger is the second line of defence.

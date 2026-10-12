@@ -1,6 +1,6 @@
 # ADR-0002: Export contract as a versioned JSON document
 
-Status: Accepted
+Status: Superseded by ADR-0019
 Date: 2026-10-12
 Deciders: project owner
 
@@ -40,7 +40,7 @@ We use Option B and Option C together with one shared document format.
 - `recipe-export` owns the format. It serializes one `Approved` version. It never serializes a `Draft` or a `Retired` version.
 - The UI offers a download of the document for an `Approved` version.
 - The endpoint `GET /export/v1/recipes/{ref}/approved` returns the same document. It uses the session of the user in the first release. API tokens for a transfer system are a later change (ADR-0004).
-- The document contains: machine code, platform, recipe reference, version number, approval time, approver login, and for each parameter: unit path, tag, type tree, S7 address when present, limits, and value.
+- The document contains the machine code, platform, recipe reference, version number, approval time, and approver login. For each parameter it contains the unit path, tag, type tree, S7 address when present, limits, and value.
 - Every export is written to the audit log (Assumption A8).
 - The transfer of the document to the PLC is out of scope.
 

@@ -1,6 +1,6 @@
 # ADR-0011: Soft delete for recipes, versions, machines, and users
 
-Status: Accepted
+Status: Superseded by ADR-0021
 Date: 2026-10-12
 Deciders: project owner
 

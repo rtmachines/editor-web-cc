@@ -1,12 +1,12 @@
 # ADR-0003: Deployment with Docker Compose on one on-premises host
 
-Status: Accepted
+Status: Superseded by ADR-0020
 Date: 2026-10-12
 Deciders: project owner
 
 ## Context
 
-The draft says: "Use PostgreSQL and backend service in a Docker container as the database." The sentence is broken. We read it as: PostgreSQL is the database, and both the database and the backend run as Docker containers (N1). The draft does not name a deployment model.
+The draft says: "Use PostgreSQL and backend service in a Docker container as the database." The sentence is broken. We read it as: PostgreSQL is the database, and both the database and the backend run as Docker containers (Assumption A1). The draft does not name a deployment model.
 
 The application runs in an industrial plant, on the plant network, with no cloud connection. It must run 24/7 (R30).
 

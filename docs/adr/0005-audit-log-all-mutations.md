@@ -1,12 +1,12 @@
 # ADR-0005: Append-only audit log for every mutating operation
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0022 (hash chain, security_event table, diff state, indexes)
 Date: 2026-10-12
 Deciders: project owner
 
 ## Context
 
-The draft says: "Record all changes." It also says: "Handle and record errors and unexpected behavior." The draft does not say which entities are in scope and does not say what a record contains.
+The draft says: "Record all changes". It also says: "Handle and record errors and unexpected behavior". The draft does not say which entities are in scope and does not say what a record contains.
 
 The recipes control an industrial process. An investigation after an incident must answer: who changed what, when, and from what value.
 
@@ -40,10 +40,10 @@ We use Option A.
 
 - The table is `audit_log`. The record fields are in `domain-model.md` section 2.4.
 - Every command in `recipe-app` records at least one `AuditEntry`. The `UnitOfWork::commit` method takes the entries as an argument. A command without an entry does not compile (I13).
-- The entry and the change are in one transaction. A rollback removes both.
-- `before` and `after` hold the JSON form of the changed entity. For a parameter edit, they hold the parameter row. For an approval, they hold the status fields of both versions.
+- The entry and the change are in one transaction. A rollback discards both.
+- `before` and `after` hold the JSON form of the changed entity. For a parameter edit, they hold a diff of the changed fields (amended by ADR-0022). An approval writes two entries: `VersionRetired` for the previous Approved version when one exists, and `VersionApproved`. Each entry holds the status fields of its version.
 - The database role of the application has `INSERT` and `SELECT` on `audit_log`. It does not have `UPDATE` or `DELETE`.
-- Login, failed login, logout, and export are recorded as well (Assumption A8).
+- Login, logout, and export are audit actions as well (Assumption A8). A failed login is a `security_event` row (amended by ADR-0022).
 - Queries do not write audit records, except export.
 - The audit log is not an event store. The entity tables stay the source of truth.
 
@@ -63,11 +63,12 @@ We use Option A.
 ### Risks and mitigations
 
 - Risk: a developer adds a command that writes without an audit entry. Mitigation: the `commit` signature requires entries. An integration test asserts one entry per command.
-- Risk: the audit table slows writes. Mitigation: one index on `(entity_type, entity_id, occurred_at)` and one on `(occurred_at)`. No other indexes.
+- Risk: the audit table slows writes. Mitigation: only the indexes of `data-model.md` section 3.15 exist: `(aggregate_id, id)`, `(entity_type, entity_id, id)`, `(actor_user_id, id)`, and the unique `chain_seq` (amended by ADR-0022).
 
 ## Related
 
 - ADR-0009 (snapshots make `before`/`after` small per version)
-- ADR-0011 (soft delete keeps the entity that the log refers to)
+- ADR-0021 (soft delete keeps the entity that the log refers to. It supersedes ADR-0011)
+- ADR-0022 (amendment: hash chain, `security_event`, diff state, indexes)
 - `domain-model.md` section 2.4, invariant I13
 - `data-model.md` (`audit_log`, grants)

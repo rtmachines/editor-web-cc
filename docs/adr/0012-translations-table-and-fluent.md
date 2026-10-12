@@ -1,12 +1,12 @@
 # ADR-0012: Parameter translations in a table and UI text with Fluent
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0019 (translations are not exported) and ADR-0022 (description_en required)
 Date: 2026-10-12
 Deciders: project owner
 
 ## Context
 
-The draft says: "Provide parameter names and descriptions in English. Permit translations into other languages. Use Polish as the default user interface language." Two kinds of text exist: data text (parameter names and descriptions, entered by users) and UI text (labels, buttons, messages, written by developers).
+The draft says: "Provide parameter names and descriptions in English. Permit translations into other languages. Use Polish as the default user interface language". Two kinds of text exist: data text (parameter names and descriptions, entered by users) and UI text (labels, buttons, messages, written by developers).
 
 ## Decision drivers
 
@@ -33,12 +33,12 @@ The draft says: "Provide parameter names and descriptions in English. Permit tra
 
 We use Option A.
 
-- `parameter.name_en` and `parameter.description_en` are the base text and are `NOT NULL` (`description_en` may be empty).
-- `parameter_translation` has one row per `(parameter_id, lang)`. `lang` is a BCP 47 tag, validated by the domain, checked by a pattern in the database (Assumption A17). `lang = 'en'` is not allowed in the table. English lives in the base columns.
+- `parameter.name_en` and `parameter.description_en` are the base text. Both are `NOT NULL` and not empty (amended by ADR-0022, Assumption A36).
+- `parameter_translation` has one row per `(parameter_id, lang)`. `lang` matches `^[a-z]{2,3}(-[A-Z]{2})?$`, checked by the domain and by a pattern in the database (Assumption A17). `lang = 'en'` is not allowed in the table. English lives in the base columns.
 - `CreateVersion` copies the translation rows with the parameter rows (ADR-0009).
-- The export document contains the base text and all translations (ADR-0002).
+- Translations and descriptions are not exported (amended by ADR-0019).
 - UI text uses `fluent-rs`. Bundles exist for `pl` and `en`. The default is `pl`. A missing `pl` message falls back to `en`. A missing `en` message is a build error, checked by a test that loads every bundle and every message ID.
-- The user picks the UI language with `POST /lang`. The choice is stored in the session, not in `app_user` (`api.md` section 8). The default for a new session is `pl`.
+- The user picks the UI language with `POST /lang`. The plain cookie `recipe_lang` stores the choice, with the value `pl` or `en`. The session and `app_user` do not store it (`api.md` section 8). `POST /lang` works before login. Without a valid cookie the UI uses `pl`.
 - UI English text follows ASD-STE100 (R40). Polish text follows the same sentence rules where the language allows it.
 - The display name of a parameter in the UI is: translation for the UI language if present, else `name_en`.
 
@@ -58,11 +58,12 @@ We use Option A.
 ### Risks and mitigations
 
 - Risk: a template uses a raw string instead of a message ID. Mitigation: a lint test scans templates for Polish or English words outside Fluent calls.
-- Risk: a translator enters an invalid language tag. Mitigation: the UI offers a fixed list of tags. The domain validates the tag.
+- Risk: a translator enters an invalid language tag. Mitigation: the UI offers a fixed list of tags. The domain checks the tag.
 
 ## Related
 
 - ADR-0001 (templates)
 - ADR-0009 (translations in the snapshot)
+- ADR-0019 (amendment: no translations in the export), ADR-0022 (amendment: `description_en` required)
 - `domain-model.md` section 2.2 (`Translation`)
 - `data-model.md` (`parameter_translation`)
