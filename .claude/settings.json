@@ -1,0 +1,66 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo deny *)",
+      "Bash(cargo audit *)",
+      "Bash(cargo llvm-cov *)",
+      "Bash(docker compose ps *)",
+      "Bash(docker compose logs *)",
+      "Bash(docker compose config *)",
+      "Bash(docker compose -f deploy/compose.yaml ps *)",
+      "Bash(docker compose -f deploy/compose.yaml logs *)",
+      "Bash(docker compose -f deploy/compose.yaml config *)",
+      "Bash(openspec list *)",
+      "Bash(openspec status *)",
+      "Bash(openspec validate *)",
+      "Bash(openspec show *)",
+      "Bash(openspec instructions *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(python -I .claude/skills/asd-ste100/scripts/ste-lint.py *)",
+      "PowerShell(cargo build *)",
+      "PowerShell(cargo test *)",
+      "PowerShell(cargo clippy *)",
+      "PowerShell(cargo fmt *)",
+      "PowerShell(cargo deny *)",
+      "PowerShell(cargo audit *)",
+      "PowerShell(cargo llvm-cov *)",
+      "PowerShell(docker compose ps *)",
+      "PowerShell(docker compose logs *)",
+      "PowerShell(docker compose config *)",
+      "PowerShell(docker compose -f deploy/compose.yaml ps *)",
+      "PowerShell(docker compose -f deploy/compose.yaml logs *)",
+      "PowerShell(docker compose -f deploy/compose.yaml config *)",
+      "PowerShell(openspec list *)",
+      "PowerShell(openspec status *)",
+      "PowerShell(openspec validate *)",
+      "PowerShell(openspec show *)",
+      "PowerShell(openspec instructions *)",
+      "PowerShell(git status *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git log *)",
+      "PowerShell(python -I .claude/skills/asd-ste100/scripts/ste-lint.py *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR}/.claude/hooks/openspec-archive-gate.sh\"",
+            "timeout": 900,
+            "onFailure": "block",
+            "statusMessage": "Running cargo test --workspace before openspec archive"
+          }
+        ]
+      }
+    ]
+  }
+}
