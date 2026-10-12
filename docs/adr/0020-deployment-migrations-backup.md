@@ -57,7 +57,7 @@ Services (`deploy/compose.yaml`):
 | `backup-premigrate` | One-shot `pg_dump` before `migrate` | no |
 | `migrate` | `recipe-server migrate`. Holds the migrator secret. Runs after `db` is healthy and `backup-premigrate` exited 0 | no |
 | `app` | `recipe-server serve`. Starts after `migrate` exited 0. `expose` only, no `ports` | always |
-| `db` | `postgres:16.x-bookworm`, pinned. `POSTGRES_INITDB_ARGS="--data-checksums --lc-collate=C --lc-ctype=C.UTF-8"`. Port 5432 not published | always |
+| `db` | `postgres:16.<x>-bookworm`, pinned. `POSTGRES_INITDB_ARGS="--data-checksums --lc-collate=C --lc-ctype=C.UTF-8"`. Port 5432 not published | always |
 | `backup` | Daily `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` at 02:00 UTC plus `pg_dumpall --globals-only`. Retention 30 days. `backup-now` one-shot command | always |
 | `walarchive` | `pg_receivewal` to a bind mount on a second disk. Weekly `pg_basebackup`. Both connect as `recipe_replicator` | always |
 

@@ -54,7 +54,7 @@ Approval:
 
 Settings:
 
-- Table `app_setting (key, value, updated_at, updated_by)` stores the effective value of every configuration key. It has an `id` column for the audit entry.
+- Table `app_setting (key, value, updated_at, updated_by)` stores the effective value of every configuration key. It also holds the two state keys of the audit chain check. It has an `id` column for the audit entry.
 - At startup the server compares the configuration with the stored values. For each difference it writes the audit action `SettingChanged` with the old and the new value, and it updates the row (`reliability.md` 7.12).
 - A change of `approval.separation_of_duties` is therefore in the audit log, which has no time limit and a hash chain.
 
@@ -64,14 +64,15 @@ Audit tamper evidence (amends ADR-0005):
 - A BEFORE INSERT trigger function owned by `audit_owner` (NOLOGIN, `SECURITY DEFINER`) sets the three columns. It runs with `search_path = pg_catalog, public, pg_temp` and schema-qualifies every name.
 - The function locks the head row `FOR UPDATE`, sets `chain_seq = last_seq + 1`, and sets `entry_hash = SHA-256(prev_hash || canonical)`. Then it moves the head. The row lock gives all audit inserts one order.
 - `canonical` is the JSON text of a constant column list. Timestamps are epoch microseconds, so the text does not depend on the session time zone.
-- A nightly job recomputes every hash in `chain_seq` order with `TimeZone = 'UTC'` in one snapshot. On a break it writes a `security_event` row of kind `audit_chain_broken`, logs `E-AUD-002`, and raises an alert.
+- A nightly job recomputes every hash in `chain_seq` order with `TimeZone = 'UTC'` in one snapshot. It reads batches of `audit.check_batch` rows, one statement per batch, and carries the last hash forward. On a break it writes a `security_event` row of kind `audit_chain_broken`, logs `E-AUD-002`, and raises an alert.
+- After each completed check the job records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `alerts` raises an alert when no check completed in the last 24 h (`reliability.md` 3.7).
 - Migration `0003` grants `CREATE` on the schema `public` to `audit_owner` for the ownership transfer and revokes it at once.
-- `audit_log` also gets `aggregate_type`, `aggregate_id`, `client_ip`, and `session_ref`. Parameter entries store a diff, not two full rows.
+- `audit_log` also gets `aggregate_type`, `aggregate_id`, `client_ip`, and `session_ref`. Five parameter actions store a diff. Every other action stores the full row (ADR-0005).
 - Off-host shipping is a site option described in the runbook, not a requirement.
 
 Security events:
 
-- A new table `security_event` records `login_failed`, `login_rejected_inactive`, `login_throttled`, `csrf_rejected`, `forbidden`, `unlock`, and `audit_chain_broken`. It stores `login_hmac` for unknown logins, `user_id` for known ones, `client_ip`, `user_agent`, `request_id` and a small `detail`. The HMAC key is the Docker secret `login_hmac_key` (`reliability.md` 7.1).
+- A new table `security_event` records `login_failed`, `login_rejected_inactive`, `login_throttled`, `csrf_rejected`, `forbidden`, `unlock`, and `audit_chain_broken`. It stores `login_hmac` for unknown logins and for every `login_throttled` event, `user_id` for known ones, `client_ip`, `user_agent`, `request_id` and a small `detail`. The HMAC key is the Docker secret `login_hmac_key` (`reliability.md` 7.1).
 - The port `SecurityEventSink` writes the row in its own short transaction. A failed command does not roll it back.
 - The table is append-only for `recipe_app`. Rows are kept 400 days. The `SECURITY DEFINER` function `security_event_purge()`, owned by `audit_owner`, deletes older rows. The supervised job `cleanup` calls it. The retention is a constant inside the function.
 - `audit_log.entity_id` stays `NOT NULL`. Every business audit entry has a small non-null state object.

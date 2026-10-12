@@ -61,7 +61,7 @@ Commands (one use case, one transaction each):
 
 Queries are use cases too. Each query checks its permission first (ADR-0013).
 
-Every draft command inserts the user into `draft_editor(recipe_version_id, user_id, first_edit_at)`. ADR-0022 uses this table.
+A draft command is one of the eight parameter commands: `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `UpsertTranslation`, `RemoveTranslation`, `RemoveParameter`, and `RebindTypeRevision`. Only these commands insert the user into `draft_editor(recipe_version_id, user_id, first_edit_at)`. ADR-0022 uses this table.
 
 ## Consequences
 

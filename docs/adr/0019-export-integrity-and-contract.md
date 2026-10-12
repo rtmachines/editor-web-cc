@@ -47,7 +47,7 @@ Format:
 - Fields: `schema_version`, `exported_at`, `exported_by`, `loadable`, `content_sha256`, `machine { code, name, plc_platform }`, `recipe { reference_number, name }`, `version { number, status, approved_at, approved_by }`, `types[]`, `parameters[]`.
 - `types[]` holds every UDT, string, and array type in use. Each entry has `id`, `name`, `revision`, `kind`, `string_length`, and the array or struct fields. A struct member is `{name, type_id}`.
 - `parameters[]` holds `unit_path`, `tag`, `key`, `name_en`, `type_id`, `s7_address`, `limits[]`, `value`. The field name is `type_id` in every place.
-- Array order: `types[]` by `id` in byte order. `parameters[]` by `unit_path` with segments compared as integers, then `tag` in byte order. `limits[]` by `leaf_path` in byte order. `members[]` by the member ordinal of the struct. `api.md` 6.3 states this order as the rule for a consumer that builds the hashed body again.
+- Array order: `types[]` by `id` in byte order. `parameters[]` by `unit_path` with segments compared as integers (the first segment without its `U` prefix), then `tag` in byte order. `limits[]` by `leaf_path` in byte order. `members[]` by the member ordinal of the struct. `api.md` 6.3 states this order as the rule for a consumer that builds the hashed body again.
 - `parameter.ordinal` is a sort order of the UI only. It is not exported and not hashed, so every sort key of `parameters[]` is in the document.
 - A type reference is the primitive name for a primitive without a length. For every other type it is a `types[].id`.
 - Every numeric leaf of a value and every limit is a JSON string with the canonical decimal text. The canonical form of RFC 8785 writes a JSON number as a double, and a decimal can lose precision.

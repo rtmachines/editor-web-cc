@@ -41,7 +41,12 @@ We use Option A.
 - The table is `audit_log`. The record fields are in `domain-model.md` section 2.4.
 - Every command in `recipe-app` records at least one `AuditEntry`. The `UnitOfWork::commit` method takes the entries as an argument. A command without an entry does not compile (I13). Two results write no entry: an `ApproveVersion` that returns `AlreadyApproved`, and a failed or throttled `Login`, which writes a `security_event` row (`domain-model.md` 5).
 - The entry and the change are in one transaction. A rollback discards both.
-- `before` and `after` hold the JSON form of the changed entity. For a parameter edit, they hold a diff of the changed fields (amended by ADR-0022). An approval writes two entries: `VersionRetired` for the previous Approved version when one exists, and `VersionApproved`. Each entry holds the status fields of its version.
+- `before` and `after` follow one state rule (amended by ADR-0022). `domain-model.md` 2.4 and `data-model.md` 10 state the same rule:
+  - Five actions store a diff object of the changed fields: `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, and `TypeRevisionRebound`.
+  - Every other action stores the full row of the changed entity as JSON, without `password_hash`. This includes `ParameterAdded` and `ParameterRemoved`. A create stores the row in `after`, a delete stores it in `before`, and an update stores it in both.
+  - Three actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`.
+  - `VersionApproved` adds `allow_outdated` to the full row.
+- An approval writes two entries: `VersionRetired` for the previous Approved version when one exists, and `VersionApproved`. Each entry holds the full row of its version.
 - The database role of the application has `INSERT` and `SELECT` on `audit_log`. It does not have `UPDATE` or `DELETE`.
 - Login and logout are audit actions as well (Assumption A33). Export is an audit action (Assumption A8). A failed login is a `security_event` row (amended by ADR-0022).
 - Queries do not write audit records, except export.

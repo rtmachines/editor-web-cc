@@ -41,11 +41,11 @@ The project uses **Option B**.
 - `DefineUdt` with `supersedes` creates revision `n + 1` of the same name. The old revision stays immutable.
 - A "where used" query lists every parameter, and every struct member and array element type, that references a given revision. The query is recursive over `plc_type_member` and `element_type_id`.
 - A parameter is outdated when any `plc_type` in its resolved type tree has a successor revision. The tree holds the type itself, every member, and every element type, at any depth. The recipe list and the version page show this state. It is computed, not stored.
-- `RebindTypeRevision { draft, from_type_id, to_type_id }` runs in a live draft only. `to_type_id` is a newer revision of the struct of `from_type_id` on the same machine. Otherwise the command returns `E-RCP-052 RebindTargetInvalid`.
-- The command moves every parameter of the draft whose type uses `from_type_id`. A parameter uses it as the parameter type, or as the element type of an array type at any depth. `EnsureDerivedType` gives each new array type.
+- `RebindTypeRevision { draft, from_type_id, to_type_id, new_member_values }` runs in a live draft only. `new_member_values` is a map from `(parameter_key, leaf_path)` to a decimal text, a string, or a bool. `to_type_id` is a newer revision of the struct of `from_type_id` on the same machine. Otherwise the command returns `E-RCP-052 RebindTargetInvalid`.
+- The command moves every parameter of the draft whose type uses `from_type_id`. A parameter uses it as the parameter type, or as the element type of an array type at any depth. `EnsureDerivedType` gives each new array type. Its errors `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge` stop the command.
 - The command maps values and limits by member name and by array index:
   - A member with the same name and a compatible primitive keeps its value and its limits.
-  - A new member needs an explicit value in the command. The command fails with `E-RCP-028 RebindNeedsValue` otherwise.
+  - A new member takes its value from `new_member_values`. A missing entry for a new member leaf makes the command fail with `E-RCP-028 RebindNeedsValue`.
   - A removed member that had a limit makes the command fail with `E-RCP-029 RebindDropsLimit`. The engineer removes the limit first, on purpose.
   - A member whose type changed is treated as new.
 - The command checks every affected parameter first. It returns one `E-RCP-028` or `E-RCP-029` entry per failing parameter in one list, and it changes nothing.

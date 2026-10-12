@@ -59,6 +59,8 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-PLT-014` | `PlantError::UnitReferencedByApproved { path, reference }` | 409 | Unit {path} is used by the approved version of recipe {reference}. Retire that version first. |
 | `E-PLT-015` | `PlantError::DuplicateTypeName { type_name }` | 409 | Type {type_name} already exists on this machine. Create a new revision instead. |
 | `E-PLT-016` | `PlantError::StructHasNoMembers { type_name }` | 422 | Type {type_name} has no members. Add at least one member. |
+| `E-PLT-017` | `PlantError::InvalidUnitPath { text }` | 422 | {text} is not a unit path. A unit path is U and 1 to 5 numbers from 1 to 64, with a dot between two numbers. Example: U1.2. |
+| `E-PLT-018` | `PlantError::TypeTooLarge { type_name, limit }` | 422 | Type {type_name} is larger than the limit {limit}. Use fewer elements, fewer members, or fewer levels. |
 | `E-PLT-030` | `StorageError::Constraint`, trigger function `machine_platform_frozen` (data-model.md 4.5) | 409 | The PLC platform of a machine with recipes cannot change. Reference: {request_id}. |
 | `E-PLT-031` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type does not exist on the platform of the version. Reference: {request_id}. |
 | `E-PLT-032` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type belongs to another machine. Reference: {request_id}. |
@@ -80,14 +82,14 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-010` | `RecipeError::RecipeHasApprovedVersion { reference }` | 409 | Recipe {reference} has an approved version. Retire the version before you delete the recipe. |
 | `E-RCP-011` | `RecipeError::DraftAlreadyExists { reference, number }` | 409 | Recipe {reference} already has draft version {number}. Edit or discard that draft. |
 | `E-RCP-012` | `RecipeError::RecipeDeleted { reference }` | 409 | Recipe {reference} is deleted. An administrator can restore it. (On export: only `/export/v1/recipes/{ref}/versions/{n}` returns this code. `/approved` of a deleted recipe returns 404 `E-EXP-001`.) |
-| `E-RCP-013` | `RecipeError::TypeNotOnPlatform { tag, type_name, platform }` | 422 | Parameter {tag} uses type {type_name}. This type does not exist on {platform}. |
+| `E-RCP-013` | `RecipeError::TypeNotOnPlatform { tag, type_name, platform }` | 422 | Parameter {tag} uses type {type_name}. This type does not exist on {platform}. (Only an item inside `E-RCP-020 ValidationFailed`. The snapshot check reports it for a stored parameter whose type is no longer on the platform. A `TypeExpr` that is not on the platform is `E-PLT-013`.) |
 | `E-RCP-014` | `RecipeError::DuplicateTag { tag, number }` | 409 | Parameter tag {tag} is already used in version {number}. |
 | `E-RCP-015` | `RecipeError::ApproverEditedDraft { reference, number, login }` | 409 | User {login} created or edited draft {number} of recipe {reference}. A different user must approve it. |
 | `E-RCP-016` | `RecipeError::LimitMissing { tag, leaf }` | 422 | {tag}{leaf} has no process limit. Set a limit before approval. |
 | `E-RCP-017` | `RecipeError::LeafPathNotFound { tag, leaf }` | 422 | Path {leaf} does not exist in the type of {tag}. |
 | `E-RCP-018` | `RecipeError::MinGreaterThanMax { tag, leaf, min, max }` | 422 | The minimum {min} of {tag}{leaf} is greater than the maximum {max}. |
 | `E-RCP-019` | `RecipeError::LimitNotApplicable { tag, leaf }` | 422 | {tag}{leaf} is a BOOL. A BOOL has no process limit. |
-| `E-RCP-020` | `RecipeError::ValidationFailed { failures }` | 422 | {count} parameters are not valid. See the list. |
+| `E-RCP-020` | `RecipeError::ValidationFailed { items }` | 422 | {count} parameters are not valid. See the list. |
 | `E-RCP-021` | `RecipeError::SizeBudgetExceeded { budget, limit, actual }` | 422 | The version exceeds the limit of {limit} {budget}. Current count: {actual}. |
 | `E-RCP-022` | `RecipeError::S7AddressOverlap { tag, other_tag, address }` | 422 | Address {address} of {tag} overlaps with {other_tag}. |
 | `E-RCP-023` | `RecipeError::S7AddressMisaligned { tag, address }` | 422 | Address {address} of {tag} must start at an even byte. |
@@ -144,7 +146,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 
 A trigger code (`E-PLT-030..038`, `E-RCP-030..036`) reaches the user only when a domain check did not fire first. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
 
-Codes after `E-RCP-029`: `E-RCP-050 TranslationNotFound` (`RemoveTranslation`), `E-RCP-051 ParameterNotFound` (`RemoveParameter`), `E-RCP-052 RebindTargetInvalid` (`RebindTypeRevision`), and `E-RCP-053 S7AddressNotAllowed` (`AddParameter`, `UpdateParameterDefinition`). `E-RCP-001..029` has no free number, so the block `E-RCP-050..069` holds them. The `{lang}` and `{key}` values of `E-RCP-050` and `E-RCP-051` come from the URL, so their status is 404.
+Codes after `E-RCP-029`: `E-RCP-050 TranslationNotFound` (`RemoveTranslation`), `E-RCP-051 ParameterNotFound` (every draft command with `{key}` in the URL), `E-RCP-052 RebindTargetInvalid` (`RebindTypeRevision`), and `E-RCP-053 S7AddressNotAllowed` (`AddParameter`, `UpdateParameterDefinition`). `E-RCP-001..029` has no free number, so the block `E-RCP-050..069` holds them. The `{lang}` and `{key}` values of `E-RCP-050` and `E-RCP-051` come from the URL, so their status is 404. `api.md` 1 gives the rule. `E-RCP-051` and `E-RCP-050` are for a well-formed `{key}` or `{lang}` that the existing draft does not hold. `E-WEB-005` is for every other missing resource in the URL.
 
 ### 1.3 Reference shape
 
@@ -181,7 +183,7 @@ Every crate has `#![forbid(unsafe_code)]`. The workspace `Cargo.toml` sets these
 | `clippy::indexing_slicing` | deny | `v[i]` panics on a bad index. Use `get` |
 | `clippy::arithmetic_side_effects` | deny | `a + b` on integers can overflow. See 2.2 |
 | `clippy::cast_possible_truncation`, `clippy::cast_sign_loss`, `clippy::cast_possible_wrap`, `clippy::cast_precision_loss` | deny | An `as` cast silently changes the value |
-| `clippy::exit` | deny | Only `main` and the watchdog end the process |
+| `clippy::exit` | deny | `main` ends the process with a return value. The watchdog function is the one documented exception (2.3) |
 | `clippy::print_stdout`, `clippy::print_stderr` | deny | All output goes through `tracing` |
 | `clippy::large_futures` | warn | Keeps task stacks small |
 | `unused_must_use` | deny | A dropped `Result` hides an error |
@@ -211,6 +213,7 @@ The `[profile.release]` section sets `overflow-checks = true`. An overflow in re
 ### 2.3 Permitted exceptions
 
 - Test code (`#[cfg(test)]` and `tests/`) may use `unwrap`, `expect`, and indexing. The lint is set to `allow` for test targets.
+- The watchdog function of 2.4 has the attribute `#[allow(clippy::exit)]`, because it must end a stalled process with `std::process::exit(70)`. It is the only function with this attribute. A comment on the attribute names this section.
 - No other exception. `recipe-server::main` returns `anyhow::Result<()>`. A startup precondition that fails returns an error with context, and the process exits with code 1 after one `ERROR` line. A pull request that adds `#[allow(clippy::unwrap_used)]` outside tests is rejected in review.
 
 ### 2.4 Panic containment
@@ -221,7 +224,7 @@ A panic in application code is a bug, not an error. The system contains it and k
 2. `recipe-server::main` installs a panic hook with `std::panic::set_hook`. The hook writes one `tracing::error!` event with the panic message, the location, and the current `request_id` when a span is active. The hook does not end the process.
 3. `tower_http::catch_panic::CatchPanicLayer` is the outermost layer of the router. A panic inside a request becomes a `500 E-WEB-010` response with the `request_id`. The open transaction of that request is dropped and PostgreSQL rolls it back. No partial write survives (R29).
 4. Every background job of the table below runs inside a supervisor loop. A panic in one iteration is caught by the task join, logged with the `job` field, and the job restarts after `job.restart_delay`.
-5. Watchdog: an OS thread, started before the Tokio runtime, probes the internal health listener every `watchdog.probe_interval`. After `watchdog.failures` failed probes in `watchdog.window`, the thread writes one `ERROR` line and calls `std::process::exit(70)`. Docker restarts the container. This covers a stalled runtime, which `restart: always` alone does not detect.
+5. Watchdog: an OS thread, started before the Tokio runtime, probes the internal health listener every `watchdog.probe_interval`. After `watchdog.failures` failed probes in `watchdog.window`, the thread writes one `ERROR` line and calls `std::process::exit(70)` (the exception of 2.3). Docker restarts the container. This covers a stalled runtime, which `restart: always` alone does not detect.
 6. Application code never calls `std::panic::catch_unwind` itself. The two places that catch a panic are the layer in rule 3 and the supervisor in rule 4.
 
 A panic is a visible signal. The job `alerts` raises an alert when more than `alerts.panic_count` panic events occur in `alerts.panic_window` (section 3.7).
@@ -232,7 +235,7 @@ Supervised background jobs. They run inside `app`. The intervals are keys of sec
 |---|---|---|
 | `cleanup` | Deletes expired `session` rows and old `login_attempt` rows. Calls `security_event_purge()` (`data-model.md` 4.12). Uses the port `MaintenanceStore` and writes no audit entry | `session.cleanup_interval`, `login.attempt_cleanup_interval`, `security_event.purge_interval` |
 | `disk_check` | Measures free space and sets the read-only mode (7.8) | `health.disk_check_interval` |
-| `audit_chain_check` | Recomputes the audit hash chain (`data-model.md` 4.9). Writes a break through the port `SecurityEventSink` | `audit_chain.check_time` |
+| `audit_chain_check` | Recomputes the audit hash chain in batches of `audit.check_batch` rows (`data-model.md` 4.9). Writes a break through the port `SecurityEventSink`. After a completed check, it records `audit.last_check_seq` and `audit.last_check_at` in `app_setting` through the port `MaintenanceStore`, with no audit entry | `audit_chain.check_time` |
 | `clock_check` | Compares the clocks of `app` and `db` (7.9) | `clock.check_interval` |
 | `alerts` | Checks the alert conditions (3.7) | `alerts.interval` |
 
@@ -276,7 +279,7 @@ Production runs at `INFO` for all crates and `WARN` for `sqlx` and `hyper`. The 
 Never written to the log:
 
 - passwords, password hashes, and the one-time password of `CreateUser` and `ResetPassword`
-- session tokens, session ids, the `Cookie` and `Set-Cookie` headers
+- session tokens, session ids, the `Cookie` and `Set-Cookie` headers. The log holds `session_ref` (the first 16 hex characters of the session id hash, 3.2) instead of the session id
 - the `X-CSRF-Token` header and the `csrf_token` and `csrf_pre` fields
 - the `Authorization` header
 - the full request body of the login and password forms
@@ -318,6 +321,8 @@ The supervised job `alerts` runs inside `app` every `alerts.interval` (section 7
 | More than `alerts.failed_login_count` failed logins in `alerts.failed_login_window` | `security_event` |
 | Any `csrf_rejected`, or a `forbidden` on `UserManage`, in the last `alerts.security_window` | `security_event` |
 | Audit chain check failed | `security_event` kind `audit_chain_broken`, written by the job `audit_chain_check` |
+| No completed audit chain check in the last 24 h | `audit.last_check_at` in `app_setting`, written by the job `audit_chain_check` (`data-model.md` 4.9) |
+| One or more `E-EXP-002` in the last `alerts.interval` | In-process error counter of the job `alerts`. `ExportVersion` increments it (`data-model.md` 6) |
 
 A restart loop of `app` also ends this job. Docker marks the container unhealthy. The runbook names `docker compose ps` and the host monitoring as the check for a restart loop.
 
@@ -339,8 +344,8 @@ A request that passes layer (a) is well-formed. A value that passes layer (b) is
 - All JSON types derive `serde::Deserialize` with `#[serde(deny_unknown_fields)]`.
 - Form parsing uses `axum::Form` with `serde` structs. A missing required field is `422 E-WEB-008` with the field name.
 - A path parameter is parsed directly into the value object (`ReferenceNumber`, `MachineCode`, `UnitPath`, `ParameterKey`, `LangCode`). A bad path parameter never gives a 500. The rule has two cases (`api.md` 1):
-  - A path value that is a domain value object with its own error code returns that code with 422. `LangCode` returns `E-RCP-027`. `UnitPath` returns `E-PLT-002` or `E-PLT-003`. No path holds an S7 address.
-  - A path value that names a resource returns `404 E-WEB-005` when the resource does not exist. This applies also when the text cannot name a resource, for example a bad `ReferenceNumber`.
+  - A path value that is a domain value object with its own error code returns that code with 422. `LangCode` returns `E-RCP-027`. `UnitPath` returns `E-PLT-017` for a malformed text or segment and `E-PLT-002` for more than 5 segments. No path holds an S7 address.
+  - A path value that names a resource returns `404 E-WEB-005` when the resource does not exist. This applies also when the text cannot name a resource, for example a bad `ReferenceNumber`. The exemption: a command on a draft returns `404 E-RCP-051` for a well-formed `{key}` and `404 E-RCP-050` for a well-formed `{lang}` that the existing draft does not hold (`api.md` 1).
 - The `Content-Type` of a request must match the route. Every mutating route accepts only `application/x-www-form-urlencoded`. The `value` field inside the form is JSON text.
 - HTMX 2 sends the parameters of a `DELETE` in the URL by default. The `htmx-config` meta tag sets `methodsThatUseUrlParams: ["get"]`, so `hx-delete` sends a form body like `hx-post` (`api.md` 9).
 - Text fields are trimmed and normalized to Unicode NFC before layer (b).
@@ -355,7 +360,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 | Value object | Grammar or rule |
 |---|---|
 | `MachineCode` | `^M[1-9][0-9]{0,6}$`, number `1..=9999999` |
-| `UnitPath` | `^U([1-9]\|[1-5][0-9]\|6[0-4])(\.([1-9]\|[1-5][0-9]\|6[0-4])){0,4}$`, 1 to 5 segments, each `1..=64` (A6, A30) |
+| `UnitPath` | `^U([1-9]\|[1-5][0-9]\|6[0-4])(\.([1-9]\|[1-5][0-9]\|6[0-4])){0,4}$`, 1 to 5 segments, each `1..=64` (A6, A30). A malformed text or segment is `E-PLT-017`. More than 5 segments is `E-PLT-002` |
 | `ReferenceNumber` | `^[A-Z0-9][A-Z0-9_-]{0,49}$` after uppercasing (A27) |
 | `ParameterTag` | `^[A-Z][A-Z0-9_]{0,63}$` |
 | `ParameterKey` | UUID, generated by the server (A40) |
@@ -368,7 +373,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 | `S7Layout` | `domain-model.md` 2.1: `BOOL` packing, even-byte alignment, struct and array size |
 | `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved primitive name |
 | `StringLength` | Range per platform: the `StringLength` table of `domain-model.md` 2.1 |
-| `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure is `E-PLT-013` |
+| `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure of the reason table of `domain-model.md` 2.1 is `E-PLT-013`. A type above a size limit is `E-PLT-018` |
 | `ArrayDimension` | `lower <= upper`, `upper - lower < 65536`, at most 3 dimensions (A38, `domain-model.md` 2.1) |
 | `LeafPath` | Grammar: `domain-model.md` 2.1. The empty path is the parameter itself. `[*]` means every element of that array level. Resolves against the `TypeTree` |
 | `ProcessLimit` | `min <= max` when both set. Inside the type range. `max_length <= string_length`. Not on a `BOOL` leaf |
@@ -380,13 +385,13 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 - The domain converts each numeric leaf to `rust_decimal::Decimal` for range and limit checks. A number that does not fit in `Decimal` (more than 28 significant digits) is rejected with `E-RCP-005`.
 - Canonical form: the domain rewrites every numeric leaf to the canonical decimal text of `Decimal` (no exponent, no trailing zeros, `-0` becomes `0`) before storage. `1.5e2` is stored as `150`. `JSONB` keeps this canonical form. The export writes each numeric leaf and each limit as a JSON string that holds this canonical text (`api.md` 6.1). The content hash therefore does not depend on a JSON number format. Equality of two values is equality of canonical forms.
 - `REAL` and `LREAL` leaves are additionally checked to fit the IEEE 754 single or double range.
-- The JSON parser enforces the depth limit `json.max_depth` (section 7.11). A `TypeTree` deeper than this limit is rejected when the UDT is defined, so a valid value never reaches it.
-- Size budgets (Assumption A26, section 7.11): at most 16 384 scalar leaves per parameter. Per version: at most 262 144 leaves, 32 768 limit rows, and 4 000 parameters. `TypeTree` resolution counts leaves and rejects a type above the per-parameter budget at definition time. `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `RebindTypeRevision`, and `CreateVersion` check the per-version budgets with `E-RCP-021`. Statement-level triggers on `parameter` and `parameter_limit` are the last line (`E-RCP-035`, `E-RCP-036`).
+- The JSON parser enforces the depth limit `json.max_depth` (section 7.11). `DefineUdt` and `EnsureDerivedType` reject a `TypeTree` deeper than this limit with `E-PLT-018`, so a valid value never reaches it.
+- Size budgets (Assumption A26, section 7.11): at most 16 384 scalar leaves per parameter. Per version: at most 262 144 leaves, 32 768 limit rows, and 4 000 parameters. `TypeTree` resolution counts leaves. `DefineUdt` and `EnsureDerivedType` reject a type above the per-parameter budget or above `type.max_members` with `E-PLT-018`. `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `RebindTypeRevision`, and `CreateVersion` check the per-version budgets with `E-RCP-021`. Statement-level triggers on `parameter` and `parameter_limit` are the last line (`E-RCP-035`, `E-RCP-036`).
 - The shape check is exact: an array has at most 3 dimensions (Assumption A38) and exactly `(upper - lower + 1)` elements per dimension. A struct has exactly the member names. No extra key, no missing key.
 - `STRING` values are checked for byte length against `string_length` in the target encoding (Latin-1 for `STRING`, UTF-16 units for `WSTRING`).
 - `BOOL` accepts only JSON `true` and `false`. Not `0`, `1`, or `"true"`.
 - Time types (`TIME`, `LTIME`, `S5TIME`, `DATE`, `LDATE`, `TIME_OF_DAY`, `LTOD`, `DATE_AND_TIME`, `LDT`, `DTL`) are stored as ISO 8601 strings and parsed with the `time` crate. The domain checks the platform range (for example `S5TIME` up to `2h46m30s`). Type names are the names of the matrix in `data-model.md` section 7.
-- Snapshot validation (`CreateVersion`, `ApproveVersion`) runs in `spawn_blocking` before the transaction opens. The transaction then locks the rows and only re-checks `row_version`. A validation that takes longer than `timeout.validation` returns `E-WEB-009`.
+- Snapshot validation (`CreateVersion`, `ApproveVersion`) runs in `spawn_blocking` before the transaction opens. The transaction then locks the rows and re-checks `row_version`. It also repeats two checks that can change after the snapshot (`data-model.md` 6). `CreateVersion` checks the units again. `ApproveVersion` checks the limit count and the outdated types again. A validation that takes longer than `timeout.validation` returns `E-WEB-009`.
 
 ## 5. Migrations and schema evolution
 
@@ -535,6 +540,7 @@ Disk space policy (Assumption A24):
 - All containers use the host clock. The host runs NTP. A clock skew above `clock.skew_warn` between `app` and `db` produces a `WARN` event. The job `clock_check` compares the clocks with `SELECT now()` at startup and every `clock.check_interval`.
 - Log rotation is the Docker driver from section 3.5.
 - The supervised job `alerts` in `app` produces the alerts. Section 3.7 lists the conditions.
+- The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting` after each completed check (`data-model.md` 4.9). The job `alerts` raises an alert when no check completed in the last 24 h (3.7).
 
 ### 7.10 Upgrade procedure
 
@@ -544,7 +550,7 @@ Disk space policy (Assumption A24):
 4. `docker compose up -d app`. Docker replaces the container. Downtime is the graceful shutdown window plus startup, under 60 s.
 5. Check `/readyz` on the internal listener, log in, open one recipe, export one version and check its hash.
 6. Rollback: `docker compose up -d app` with the previous image tag. If the migration did not follow the expand pattern, stop `app`, restore the `_premigrate` dump, then start the previous image.
-7. Major PostgreSQL upgrade (at least twice in 10 years): follow `docs/ops/runbook.md` section "Major upgrade". It uses `pg_dumpall --globals-only` plus `pg_dump -Fc` into a new `db` volume created with the same `initdb` arguments, then a restore test, then the switch. There is no `pg_upgrade` (ADR-0020).
+7. Major PostgreSQL upgrade (at least twice in 10 years): follow `docs/ops/runbook.md` section "Major upgrade". It uses `pg_dumpall --globals-only` plus `pg_dump -Fc` into a new `db` volume created with the same `initdb` arguments, then a restore test, then the switch. There is no `pg_upgrade` (ADR-0020). `docs/ops/runbook.md` is written in plan P4.1. Until then, this section is the runbook.
 
 ### 7.11 Settings
 
@@ -618,7 +624,10 @@ This table is the single source for every numeric setting. The configuration fil
 | `watchdog.probe_interval` / `watchdog.failures` / `watchdog.window` | 10 s / 3 / 30 s | 2.4 |
 | `job.restart_delay` | 10 s | 2.4 |
 | `audit_chain.check_time` | 03:00 UTC, every night | 2.4, data-model.md 4.9 |
-| `alerts.interval` | 60 s | 2.4, 3.7 |
+| `audit.check_batch` | 10 000 rows per statement of the audit chain check | 2.4, data-model.md 4.9 |
+| `audit.last_check_seq` | State key in `app_setting`, not a configuration file key. The last `chain_seq` of the last completed audit chain check | 2.4, 7.9, 7.12, data-model.md 3.17, data-model.md 4.9 |
+| `audit.last_check_at` | State key in `app_setting`, not a configuration file key. The end time of the last completed audit chain check. The job `alerts` raises an alert when it is older than 24 h | 2.4, 3.7, 7.9, 7.12, data-model.md 3.17, data-model.md 4.9 |
+| `alerts.interval` | 60 s | 2.4, 3.7, data-model.md 6 |
 | `alerts.webhook_url` | empty, which means no webhook | 3.7 |
 | `alerts.panic_count` / `alerts.panic_window` | 3 / 10 min | 2.4, 3.7 |
 | `alerts.not_ready_for` | 1 min | 3.7 |
@@ -651,6 +660,8 @@ Transaction isolation and retry are rules in the code, not settings. `SetUserRol
 2. In one transaction it reads `app_setting` and compares each configured value with the stored value. A missing row counts as a difference with the old value `null`.
 3. For each difference it writes one audit entry `SettingChanged` with `aggregate_type = 'app_setting'`, `actor = None`, and the old and the new value. All entries of one start share one `request_id`. Then it updates or inserts the row.
 4. When the transaction fails, the server writes one `ERROR` line and does not start.
+
+The state keys `audit.last_check_seq` and `audit.last_check_at` are not configuration. The comparison skips them. The job `audit_chain_check` writes them with no audit entry (2.4).
 
 A change of `approval.separation_of_duties` therefore always has an audit entry with the old and the new value (A34). The audit log keeps the entry without a time limit.
 

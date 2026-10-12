@@ -67,7 +67,7 @@ We use Option A. ADR-0022 amends this decision: it adds Option C as the configur
 ### Risks and mitigations
 
 - Risk: a route calls a repository directly and skips the use case. Mitigation: repositories are not visible to `recipe-web`. Only `recipe-app` use cases are public.
-- Risk: a plant needs the four-eyes rule. Mitigation: Option C adds one condition in `ApproveVersion`. It is a small ADR with no schema change.
+- Risk: a plant needs the four-eyes rule. Mitigation: Option C adds one condition in `ApproveVersion` and needs the `draft_editor` table (ADR-0022).
 
 ## Related
 
