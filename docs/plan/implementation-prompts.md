@@ -124,7 +124,9 @@ Skille: `openspec-explore`. Model: Sonnet. Subagenci: brak.
 
 ## Faza 1 — Specyfikacja bazowa (jeden change, bez kodu)
 
-### P1.0 — Rekoncyliacja projektu (wynik przeglądu 2026-10-12)
+### P1.0 — Rekoncyliacja projektu (wynik przeglądu 2026-10-12) — WYKONANE
+
+Status: wykonane 2026-10-12 w siedmiu rundach (commity `97a5ea2` … ostatni z tej daty). Historia bramek: `docs/plan/review/2026-10-12-consolidated.md` §6a. Prompt poniżej zostaje jako wzorzec dla przyszłych rekoncyliacji po większych zmianach projektu.
 
 ```text
 <preambuła>

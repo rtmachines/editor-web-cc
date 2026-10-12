@@ -97,9 +97,23 @@ Each decision changes scope or cost. The author gives a recommendation. Answer "
 
 Estimated size: one session with three parallel subagents (data-model, ADRs, cross-document consistency) plus one review agent.
 
-## 6a. Reconciliation status (2026-10-12, same day)
+## 6a. Reconciliation status (2026-10-12, closed)
 
-Steps 1–9 of section 6 were applied. All five architecture documents and all 22 ADRs pass `ste-lint.py` with zero hard violations. The error-code registry in `reliability.md` section 1.2 has 91 rows with no duplicates. The gate review (step 10) is recorded below when it completes.
+Steps 1–10 of section 6 were applied in seven rounds. Each round was a fix pass followed by an independent gate review (no access to earlier findings). The gate reports are in this folder.
+
+| Gate | Pass B contradictions | Pass C blocking | Main items found |
+|---|---|---|---|
+| 1 | 66 | 5 | Names and numbers diverged between parallel rewrites; audit chain false alarms; export hash over mutable fields; login counter lost on rollback |
+| 2 | 6 | 2 | Login grant missing; FOR SHARE on a table without UPDATE grant; races on ArchiveUnit and CreateVersion; hash order not reproducible; UI language had no storage; crate dependency cycle |
+| 3 | 8 | 5 | Array types unreachable from the API (TypeExpr added); migration 0003 fails after the ownership transfer; DbError cycle; WAL archive without a replication role |
+| 4 | 11 | 1 | Chain check without batching; FK key-share deadlock on app_user; outdated check only before the transaction |
+| 5 | 7 | 2 | Time types and CHAR had no canonical form or limit semantics (leaf classes, IecLiteral, A43); FK key-share deadlock on machine; login flood unbounded |
+| 6 | 3 | 1 | htmx 2 does not swap 4xx/5xx without responseHandling; advisory lock order between callers; JoinError mapping |
+| close | — | — | Round 7 applied the gate-6 items. The gate-6 reviewer stated the residual non-blocking risk is acceptable for writing specifications |
+
+Final state: 102 error codes in one registry, every code used; 33 command and 33 query use cases with identical names in four documents; 35 audit actions; 43 Assumptions with identical copies; 790 cross-references resolve; every number equals `reliability.md` 7.11; migrations simulated as `recipe_migrator` on PostgreSQL 16; every data-model 6 statement covered by the grants; `ste-lint.py` 0 hard violations in 28 files (51 800 words).
+
+Known residual items (not blocking, to close during specification): cosmetic wording in the gate-6 list that the final round applied; the query list may need more entries when screens are designed (P3.1); the runbook file is a P4.1 deliverable.
 
 ## 7. Binding contract for the reconciliation
 
