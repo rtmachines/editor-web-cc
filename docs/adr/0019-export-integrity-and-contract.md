@@ -43,11 +43,12 @@ The project uses **Option B**. Option C is the planned next step.
 Format:
 
 - The source of truth is `crates/recipe-export/schema/export-v1.schema.json` (JSON Schema 2020-12). `api.md` section 6 describes it. A golden-file test checks every example against the schema.
-- Crates. The module `export` of `recipe-domain` owns the hashed-body builder `ExportBody`, the canonical serializer, the hash function, and `ExportError`. `recipe-export` keeps the JSON Schema file, the JSON writer of the HTTP response, and the golden tests. It depends on `recipe-domain` only, and only `recipe-web` uses it. `recipe-app` depends on `recipe-domain` only, so `ApproveVersion` computes the hash without `recipe-export`.
+- Crates. The module `export` of `recipe-domain` owns the hashed-body builder `ExportBody`, the canonical serializer, the hash function, and `ExportError`. `recipe-export` keeps the JSON Schema file, the JSON writer of the HTTP response, and the golden tests. It depends on `recipe-domain`, `serde`, and `serde_json`, and only `recipe-web` uses it. Of the workspace crates, `recipe-app` depends on `recipe-domain` only, so `ApproveVersion` computes the hash without `recipe-export`.
 - Fields: `schema_version`, `exported_at`, `exported_by`, `loadable`, `content_sha256`, `machine { code, name, plc_platform }`, `recipe { reference_number, name }`, `version { number, status, approved_at, approved_by }`, `types[]`, `parameters[]`.
 - `types[]` holds every UDT, string, and array type in use. Each entry has `id`, `name`, `revision`, `kind`, `string_length`, and the array or struct fields. A struct member is `{name, type_id}`.
 - `parameters[]` holds `unit_path`, `tag`, `key`, `name_en`, `type_id`, `s7_address`, `limits[]`, `value`. The field name is `type_id` in every place.
-- Array order: `types[]` by `id` in byte order. `parameters[]` by `unit_path` with segments compared as integers, then `ordinal`, then `tag` in byte order. `limits[]` by `leaf_path` in byte order. `members[]` by `ordinal`. `api.md` 6.3 states this order as the rule for a consumer that builds the hashed body again.
+- Array order: `types[]` by `id` in byte order. `parameters[]` by `unit_path` with segments compared as integers, then `tag` in byte order. `limits[]` by `leaf_path` in byte order. `members[]` by the member ordinal of the struct. `api.md` 6.3 states this order as the rule for a consumer that builds the hashed body again.
+- `parameter.ordinal` is a sort order of the UI only. It is not exported and not hashed, so every sort key of `parameters[]` is in the document.
 - A type reference is the primitive name for a primitive without a length. For every other type it is a `types[].id`.
 - Every numeric leaf of a value and every limit is a JSON string with the canonical decimal text. The canonical form of RFC 8785 writes a JSON number as a double, and a decimal can lose precision.
 - Translations and descriptions are not exported. ADR-0012 is amended on this point.

@@ -59,11 +59,12 @@ Services (`deploy/compose.yaml`):
 | `app` | `recipe-server serve`. Starts after `migrate` exited 0. `expose` only, no `ports` | always |
 | `db` | `postgres:16.x-bookworm`, pinned. `POSTGRES_INITDB_ARGS="--data-checksums --lc-collate=C --lc-ctype=C.UTF-8"`. Port 5432 not published | always |
 | `backup` | Daily `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` at 02:00 UTC plus `pg_dumpall --globals-only`. Retention 30 days. `backup-now` one-shot command | always |
-| `walarchive` | `pg_receivewal` to a bind mount on a second disk. Weekly base backup | always |
+| `walarchive` | `pg_receivewal` to a bind mount on a second disk. Weekly `pg_basebackup`. Both connect as `recipe_replicator` | always |
 
 Roles and secrets:
 
-- `deploy/db/initdb/01-roles.sh` runs as superuser on the first start. It creates `recipe_migrator`, `recipe_app`, `recipe_backup`, `audit_owner` (NOLOGIN) and the database. `recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE` (`data-model.md` 5.1). Migrations never create roles.
+- `deploy/db/initdb/01-roles.sh` runs as superuser on the first start. It creates `recipe_migrator`, `recipe_app`, `recipe_backup`, `recipe_replicator` (`LOGIN REPLICATION`, password from the secret `replicator_password`), `audit_owner` (NOLOGIN) and the database. It adds the `pg_hba.conf` line `host replication recipe_replicator <compose subnet> scram-sha-256`. Migrations never create roles.
+- `recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`, so that `0003_grants.sql` can transfer the audit objects to `audit_owner` (`data-model.md` 5.1). `0003` runs every grant on these objects first, then the ownership transfer. It uses no `SET ROLE` and needs no sequence grant. After the transfer the migrator holds no privilege on the audit objects. CI applies `0001` to `0004` as `recipe_migrator` on a fresh cluster and then runs the grants test.
 - Secrets are Docker secrets (`*_FILE`) only. No env file for passwords. The superuser password exists only in `db`.
 - Two more secrets hold keys of 32 bytes: `login_hmac_key` for `security_event.login_hmac` and `csrf_signing_key` for the pre-session CSRF cookie. Rotation: the operator adds a new key, both keys are accepted for `security.key_rotation_overlap`, and then the operator deletes the old key (`reliability.md` 7.1).
 - The backup uses `recipe_backup` with `pg_read_all_data`. The dump has a SHA-256 manifest. A restore verifies the manifest first.
@@ -72,7 +73,7 @@ Roles and secrets:
 Migrations:
 
 - Folder `migrations/` at the repository root. Files `NNNN_description.sql`. `0001_schema`, `0002_triggers`, `0003_grants`, `0004_seed_plc_types`.
-- Forward-only. `lock_timeout = 2s` with retry. A file that needs `CREATE INDEX CONCURRENTLY` starts with `-- no-transaction`. CI rejects table-rewriting DDL.
+- Forward-only. `lock_timeout = 2s` with retry. A file that needs `CREATE INDEX CONCURRENTLY` starts with `-- no-transaction`. CI rejects table-rewriting DDL on every table (`reliability.md` 5).
 - `ALTER DEFAULT PRIVILEGES` gives `recipe_app` SELECT on future tables.
 
 Failure policy:
@@ -120,4 +121,4 @@ Major upgrade:
 - ADR-0014 (create-admin), ADR-0022 (audit_owner).
 - `reliability.md` sections 2, 5, 7.
 - `data-model.md` sections 5 and 8.
-- Review findings: security M6, M9 and two high findings. Architecture F8, F10, F16, F17. PostgreSQL M7, M8, M9 and one high finding. Traceability A20, B69 to B76, C12, C13, C20.
+- Review findings: security M6, M9 and two high findings. Architecture F8, F10, F16, F17. PostgreSQL M7, M8, M9 and one high finding. Traceability Pass A, item 20. Traceability B69 to B76, C12, C13, C20.

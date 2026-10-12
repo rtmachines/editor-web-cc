@@ -45,11 +45,12 @@ Identity:
 - UDTs: `UNIQUE (machine_id, name, revision) NULLS NOT DISTINCT WHERE kind <> 'array' AND string_length IS NULL`.
 - Strings: `UNIQUE (machine_id, name, string_length) NULLS NOT DISTINCT WHERE string_length IS NOT NULL`.
 - Arrays: `UNIQUE (machine_id, element_type_id, dim_lower, dim_upper) WHERE kind = 'array'`.
-- `EnsureDerivedType` (internal operation, ADR-0016) does `INSERT ... ON CONFLICT DO NOTHING` and then selects the row. It is the only path that creates string and array rows.
+- A request names a type with a `TypeExpr` (`domain-model.md` 2.1), for example `ARRAY[1..8] OF STRING(16)` or `ST_Zone@3`. `AddParameter` and `UpdateParameterDefinition` carry it in `type`. `DefineUdt` carries it in `members[i].type`. The text is an input format only. The catalog stays relational (ADR-0006).
+- `EnsureDerivedType` (internal operation, ADR-0016) resolves the `TypeExpr`, the innermost element first. It finds a primitive and a struct revision by lookup. For a `STRING(n)`, a `WSTRING(n)`, and an array it does `INSERT ... ON CONFLICT DO NOTHING` and then selects the row. It is the only path that creates string and array rows. Every failure is `E-PLT-013 DerivedTypeInvalid`: a parse error, an unknown struct or revision, a type that is not on the platform, or more than 3 dimensions.
 - `EnsureDerivedType` and `DefineUdt` take `pg_advisory_xact_lock(hashtextextended(machine_id::text || ':' || name, 0))` before the insert. An array has no name, so its key uses the text `ARRAY`. There is no row lock on `plc_type`. The unique indexes are the second line (`domain-model.md` 5.1).
 - `plc_type_string_length_required`: a `STRING` or `WSTRING` primitive has `string_length`, every other row has none. The CHECK allows 1 to 16382. The domain applies the range of the platform from the `StringLength` table of `domain-model.md` 2.1, which is the only definition. `size_bytes` is `INTEGER`, because `WSTRING(16382)` needs 32 768 bytes.
 - `dims_valid` is NULL-safe. It rejects `upper - lower >= 65536` and more than 3 dimensions (Assumption A38).
-- `recipe_app` gets a column-level INSERT grant on `plc_type` that excludes `created_at`. The members of a struct are closed by a deferred constraint trigger that requires at least one member at commit.
+- `recipe_app` gets a column-level INSERT grant on `plc_type` that excludes `created_at`. The trigger function `plc_type_immutable` of `data-model.md` 4.6 closes the members of a struct after the creating transaction, because it compares `created_at` with `now()`. The deferred constraint trigger `plc_type_struct_has_member` of 4.6 requires at least one member at commit.
 
 S7-300 layout:
 

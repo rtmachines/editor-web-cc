@@ -55,7 +55,7 @@ Session table and cookie:
 - `Login` and `ChangeOwnPassword` return the new token. `recipe-web` sets the session cookie from this result. No session library is used.
 - Logout deletes the current session only.
 - `SetUserRole`, `DeactivateUser`, and `ResetPassword` delete every session of the user. `ChangeOwnPassword` deletes every session of the user and creates a new session for the current request.
-- A pre-session CSRF token (signed double-submit cookie) protects `POST /login` and `POST /lang`. The key of the Docker secret `csrf_signing_key` (32 bytes) signs the cookie. Every other POST carries the session CSRF token. The server also requires `Sec-Fetch-Site: same-origin` or a matching `Origin` header.
+- A pre-session CSRF token (signed double-submit cookie) protects `POST /login` and `POST /lang`. The key of the Docker secret `csrf_signing_key` (32 bytes) signs the cookie. Every other POST, PUT, and DELETE carries the session CSRF token. The server also requires `Sec-Fetch-Site: same-origin` or a matching `Origin` header.
 
 Identity per request:
 

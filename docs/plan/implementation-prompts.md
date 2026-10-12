@@ -198,7 +198,7 @@ Każdy prompt poniżej to jeden OpenSpec change wykonywany w cyklu z tabeli na g
 `openspec-propose` dla change "domain-plant-model" (crate recipe-domain, moduł plant).
 Zakres: MachineCode, UnitPath (1–6 segmentów, 1..=64), Machine + Unit tree (archive),
 PlcPlatform, PlcType (Primitive/Array/Struct, revision, supersedes, platforms, size_bytes,
-string_length), TypeTree::resolve (cykle → TypeCycle), LeafPath parser, S7Address parser
+string_length), TypeTree::resolve (cykle → TypeCycle), parsery LeafPath i TypeExpr (`ARRAY[1..8] OF ST_Zone@3`), S7Address parser
 + width check, PlantError z kodami E-PLT-001..007 (reliability.md §1.2).
 Bez I/O, bez sqlx. Testy: unit + proptest dla UnitPath, S7Address, LeafPath (skill proptest-testing).
 design.md: ≤ 20 linii sygnatur. tasks.md: TDD, taski parserów oznacz [mechanical].
@@ -264,7 +264,7 @@ migracje 0001_schema (DDL z data-model.md §3 bez zmian), 0002_triggers (§4, ws
 Podkomenda `recipe-server create-admin` (hasło ze stdin/secret, must_change_password).
 Adaptery sqlx dla portów z P2.3, własny SessionRepository (tabela session z user_id i epoch, bez tower-sessions, ADR-0014),
 UnitOfWork = transakcja + blokady recipe→version (ADR-0015) + zapis audit_log z łańcuchem hashy,
-mapowanie SQLSTATE → DbError (23505, 23503, 23514 z kodem triggera, 40P01, 55P03, 57014;
+mapowanie sqlx::Error → StorageError z recipe-app (recipe-db bez publicznego typu błędu) (23505, 23503, 23514 z kodem triggera, 40P01, 55P03, 57014;
 bez retry 40001). row_version: UPDATE ... WHERE row_version = $n, 0 rows → ConcurrentEdit.
 Testy integracyjne (testcontainers, PostgreSQL 16): każdy trigger ma test pozytywny i
 negatywny, każdy constraint CHECK/UNIQUE ma test, każde zabronione przejście stanu jako
@@ -409,7 +409,7 @@ Skille: `rust-serde`, `api-design-principles`, `documentation-writer`. Modele: S
 <preambuła>
 `openspec-propose` dla change "operations-compose" (deploy/): compose.yaml wg reliability.md §7
 (proxy Caddy obowiązkowy, backup-premigrate, migrate, app, db z data-checksums i kolacją C,
-backup z backup-now i pg_dumpall --globals-only, walarchive na drugi dysk — ADR-0020),
+backup z backup-now i pg_dumpall --globals-only, walarchive na drugi dysk z rolą recipe_replicator i wpisem pg_hba — ADR-0020),
 Dockerfile wielostopniowy (docker-build-strategies: distroless/static, non-root, healthcheck),
 Docker secrets *_FILE (bez env-file), Caddyfile z HSTS i nagłówkami, skrypty backup + restore
 z manifestem SHA-256, wewnętrzny listener /healthz i /readyz (port 9000), graceful shutdown,

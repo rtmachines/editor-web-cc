@@ -39,11 +39,11 @@ The recipes control an industrial process. An investigation after an incident mu
 We use Option A.
 
 - The table is `audit_log`. The record fields are in `domain-model.md` section 2.4.
-- Every command in `recipe-app` records at least one `AuditEntry`. The `UnitOfWork::commit` method takes the entries as an argument. A command without an entry does not compile (I13).
+- Every command in `recipe-app` records at least one `AuditEntry`. The `UnitOfWork::commit` method takes the entries as an argument. A command without an entry does not compile (I13). Two results write no entry: an `ApproveVersion` that returns `AlreadyApproved`, and a failed or throttled `Login`, which writes a `security_event` row (`domain-model.md` 5).
 - The entry and the change are in one transaction. A rollback discards both.
 - `before` and `after` hold the JSON form of the changed entity. For a parameter edit, they hold a diff of the changed fields (amended by ADR-0022). An approval writes two entries: `VersionRetired` for the previous Approved version when one exists, and `VersionApproved`. Each entry holds the status fields of its version.
 - The database role of the application has `INSERT` and `SELECT` on `audit_log`. It does not have `UPDATE` or `DELETE`.
-- Login, logout, and export are audit actions as well (Assumption A8). A failed login is a `security_event` row (amended by ADR-0022).
+- Login and logout are audit actions as well (Assumption A33). Export is an audit action (Assumption A8). A failed login is a `security_event` row (amended by ADR-0022).
 - Queries do not write audit records, except export.
 - The audit log is not an event store. The entity tables stay the source of truth.
 

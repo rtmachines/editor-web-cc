@@ -8,7 +8,7 @@ Deciders: project owner
 
 ADR-0013 rejected a four-eyes rule. A high finding of the security review showed the consequence. One person at an engineer workstation can widen a process limit, move the value inside it and approve within a minute. No second person sees the change. A process limit protects the process only when the person who sets the value cannot also move the limit alone.
 
-The traceability review (A8) showed that the draft says a parameter "must have ... a description ... and process limits", while the documents made both optional.
+The traceability review (Pass A, item 8) showed that the draft says a parameter "must have ... a description ... and process limits", while the documents made both optional.
 
 The security review also found that the audit log had no tamper evidence. The architecture review (F19) found that the audit table could not store several required entries (`PasswordReset` without state, `LoginFailed` for an unknown login, `Forbidden` before a transaction).
 
@@ -107,4 +107,4 @@ Clarifications of the draft, recorded as Assumptions:
 - `domain-model.md` sections 2.2, 2.4, 3.
 - `data-model.md` sections 3.8, 3.11, 3.12, 3.15, 3.16, 3.17, 4.9, 4.12.
 - `api.md` section 3.
-- Review findings: security M8 and two high findings. Architecture F19. Traceability A7, A8, A12, A16, C6.
+- Review findings: security M8 and two high findings. Architecture F19. Traceability Pass A, items 7, 8, 12, and 16. Traceability C6.

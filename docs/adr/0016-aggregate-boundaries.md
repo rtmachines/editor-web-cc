@@ -74,7 +74,7 @@ Every draft command inserts the user into `draft_editor(recipe_version_id, user_
 ### Negative
 
 - Two aggregates for one table. The persistence adapter maps both.
-- The command list grew from 24 to 33 use cases plus one internal operation. Most of the new ones are small.
+- The command list grew from 24 to 33 command use cases plus one internal operation. Most of the new ones are small.
 
 ### Risks and mitigations
 

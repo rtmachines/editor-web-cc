@@ -43,7 +43,7 @@ For example `ARRAY[1..8] OF MyUdt`.
 We use Option A.
 
 - `plc_type` rows are immutable. An edit of a UDT inserts a new row with `supersedes = <old id>`. Parameters that reference the old row keep it (ADR-0009).
-- Primitive types are seeded by a migration with `platforms` as `TEXT[]`. The application inserts only derived `STRING(n)` and `WSTRING(n)` rows, through the internal operation `EnsureDerivedType` (amended by ADR-0017).
+- Primitive types are seeded by a migration with `platforms` as `TEXT[]`. Of the primitive rows, the application inserts only the derived `STRING(n)` and `WSTRING(n)` rows, through the internal operation `EnsureDerivedType` (amended by ADR-0017).
 - An array type is a row with `kind = 'array'`, `element_type_id`, and dimensions as two integer arrays (lower bounds, upper bounds).
 - A struct type is a row with `kind = 'struct'` and ordered rows in `plc_type_member`.
 - `STRING` and `WSTRING` carry `string_length`.

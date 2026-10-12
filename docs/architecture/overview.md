@@ -41,7 +41,7 @@ C4Container
         Container(migrate, "migrate", "recipe-server migrate", "One-shot. Applies migrations before app starts")
         ContainerDb(db, "db", "PostgreSQL 16, pinned image, checksums on", "Recipes, versions, parameters, users, sessions, audit log")
         Container(bak, "backup", "pg_dump, cron", "Daily dump. backup-now one-shot command")
-        Container(wal, "walarchive", "pg_receivewal", "Continuous WAL archive to a second disk")
+        Container(wal, "walarchive", "pg_receivewal, pg_basebackup", "Continuous WAL archive and weekly base backup to a second disk")
     }
     Rel(user, proxy, "HTTPS")
     Rel(proxy, web, "HTTP, internal network")
@@ -49,10 +49,10 @@ C4Container
     Rel(migrate, db, "SQL as recipe_migrator")
     Rel(web, db, "SQL as recipe_app", "sqlx")
     Rel(bak, db, "pg_dump as recipe_backup")
-    Rel(wal, db, "replication protocol")
+    Rel(wal, db, "replication protocol as recipe_replicator")
 ```
 
-There is one application process. There is no message broker, no cache, and no second database. Compose runs seven services. Start order: `db` healthy, `backup-premigrate` exit 0, `migrate` exit 0, `app`, `proxy`. `backup` and `walarchive` depend only on `db`. Every long-running service has a healthcheck and `restart: always`. `backup-premigrate` and `migrate` have `restart: no` (ADR-0020).
+There is one application process. There is no message broker, no cache, and no second database. `walarchive` connects as `recipe_replicator`, a login role with the `REPLICATION` attribute (`data-model.md` 5.1). Compose runs seven services. Start order: `db` healthy, `backup-premigrate` exit 0, `migrate` exit 0, `app`, `proxy`. `backup` and `walarchive` depend only on `db`. Every long-running service has a healthcheck and `restart: always`. `backup-premigrate` and `migrate` have `restart: no` (ADR-0020).
 
 ## 4. Bounded contexts
 
@@ -108,15 +108,17 @@ flowchart TD
     export --> domain
     web --> domain
     db --> domain
+    server --> domain
+    server --> export
 ```
 
-`recipe-app` does not depend on `recipe-export`. `ApproveVersion` and `ExportVersion` build the hashed body and compute the hash with the module `export` of `recipe-domain` (ADR-0019).
+`recipe-app` does not depend on `recipe-export` or `recipe-db`. `ApproveVersion` and `ExportVersion` build the hashed body and compute the hash with the module `export` of `recipe-domain` (ADR-0019). `recipe-app` defines the error type `StorageError` of its ports. `recipe-db` implements the ports and maps `sqlx::Error` into `StorageError`. The only edge between the two crates is therefore `recipe-db` to `recipe-app`, and the graph has no cycle.
 
 | Crate | Error type | Allowed dependencies (examples) | Forbidden |
 |---|---|---|---|
 | `recipe-domain` | `thiserror` enums per context, and `ExportError` | `uuid`, `rust_decimal`, `serde`, `serde_json`, `serde_json_canonicalizer`, `time`, `sha2` | `sqlx`, `axum`, `tokio`, any I/O, any port trait |
-| `recipe-app` | `thiserror` (`AppError` wraps domain errors) | `recipe-domain`, `async-trait`, `tracing` | `sqlx`, `axum`, `recipe-export` |
-| `recipe-db` | `thiserror`, maps `sqlx::Error` with SQLSTATE | `sqlx` (postgres, runtime-tokio, tls-rustls), `recipe-app` | `axum` |
+| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors and `StorageError`), `AuditError`, `StorageError` | `recipe-domain`, `async-trait`, `tracing` | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
+| `recipe-db` | None public. Maps `sqlx::Error` with SQLSTATE into `StorageError` of `recipe-app` | `sqlx` (postgres, runtime-tokio, tls-rustls), `recipe-app` | `axum` |
 | `recipe-export` | None of its own. It returns `ExportError` of `recipe-domain` | `serde`, `serde_json`, `recipe-domain` | `sqlx`, `axum`, `recipe-app` |
 | `recipe-web` | `thiserror` (`WebError`, HTTP shape only) | `axum`, `askama`, `fluent`, `recipe-app`, `recipe-export` | `sqlx`, any session library |
 | `recipe-server` | `anyhow` (binary only, `main` returns `anyhow::Result`) | all crates above, `tokio`, `tracing-subscriber`, `figment` | - |
@@ -156,7 +158,7 @@ Each row is one requirement sentence from `general-draft.txt`. "Mechanism" names
 | R10 | English names and descriptions. Translations permitted. Polish default UI | `name_en`/`description_en` base columns. `parameter_translation` table. `fluent` UI bundles with `pl` default and `en` fallback. The cookie `recipe_lang` stores the choice of the UI language (A17) | ADR-0012, api.md 8 |
 | R11 | IEC data types of CODESYS and TwinCAT 3 | Seeded primitive `plc_type` rows with `platforms` containing `CodesysIec`, `TwinCat3`, including `LTIME`, `LDT`, `LDATE`, `LTOD`. `ENUM`, subrange, and alias are not supported (A39) | ADR-0006, data-model.md 7 |
 | R12 | Siemens S7-1200, S7-1500, S7-300 data types | Same catalog with `S7_1200`, `S7_1500`, `S7_300` availability (A3) | ADR-0006 |
-| R13 | One-dimensional and multidimensional arrays, UDTs, nested structures | `PlcType.kind` in `Array`, `Struct`. `dimensions` list with at most 3 entries (A38). `plc_type_member` ordered rows. Recursive `TypeTree`. Derived types get-or-create (ADR-0017) | ADR-0006, ADR-0017, I8 |
+| R13 | One-dimensional and multidimensional arrays, UDTs, nested structures | `PlcType.kind` in `Array`, `Struct`. `dimensions` list with at most 3 entries (A38). `plc_type_member` ordered rows. Recursive `TypeTree`. A request names a type with a `TypeExpr` such as `ARRAY[1..8] OF REAL`. `EnsureDerivedType` gets or creates the array and string types (ADR-0017) | domain-model.md 2.1, ADR-0006, ADR-0017, I8 |
 | R14 | Each S7-300 parameter has a PLC memory address such as `DB1.DBD0` | `S7Address` value object with width, alignment, and overlap rules (I20). `CHECK parameter_s7_address_platform`: required on S7-300, optional on S7-1200 and S7-1500, not allowed on CODESYS and TwinCAT 3 (A31) | I5, I20, data-model.md 3.12 |
 | R15 | Machines use different PLC types. One PLC controller per machine | `Machine.plc_platform` is one `NOT NULL` column. Platform frozen after the first recipe (trigger). A new controller is a new machine with the same code after archive (A32) | domain-model.md 2.1, ADR-0021 |
 | R16 | Recipe has an alphanumeric reference number and a readable name | `ReferenceNumber` value object (charset A27). Plain `UNIQUE (reference_number)`. `name NOT NULL` | I11, ADR-0021 |
@@ -179,7 +181,7 @@ Each row is one requirement sentence from `general-draft.txt`. "Mechanism" names
 | R33 | `anyhow` for application errors, `thiserror` for libraries | `anyhow` only in the binary crate `recipe-server`. `thiserror` enums in the lib crates that own errors. `recipe-export` returns `ExportError` of `recipe-domain` (A37) | overview.md 5, reliability.md 1 |
 | R34 | Design for safety, reliability, long-term operation, easy maintenance | Clean architecture with ports. Small aggregates. Forward-only migrations by a one-shot service. Pinned dependencies. Major-upgrade runbook | overview.md 5, reliability.md 5, 7 |
 | R35 | Handle and record errors and unexpected behaviour, including edge cases | Every `Err` is logged once: at the HTTP boundary for requests, at the loop boundary for background jobs (`job` field). Each command lists its complete error set | reliability.md 1, 3, domain-model.md 5 |
-| R36 | Clear, unique error messages that identify the source | Each error variant has a stable code `E-<CTX>-<nnn>`, one owner enum, and a message template with identifying values. One complete table | reliability.md 1.2 |
+| R36 | Clear, unique error messages that identify the source | Each error variant has a stable code `E-<CTX>-<nnn>`, one owner enum, and a message template with identifying values. One complete table. Authentication failures share the client code `E-IDN-003` on purpose (A42) | reliability.md 1.2 |
 | R37 | Structured, detailed event logs for debugging | `tracing` JSON. Span per request with `request_id`, `user_id`, `role`, `client_ip`, `route`. Span per use case and per SQL statement | reliability.md 3 |
 | R38 | Check all external input | Value object constructors (`parse`, not `new`). One grammar per value object. HTTP extractors reject unknown fields and over-long bodies. `/lang` redirects only to a same-origin path. `CHECK` constraints as the last line | reliability.md 4 |
 | R39 | Clear and reliable UI and UX | Server-rendered forms. Every action gives a visible result or an error fragment. No client state that can diverge from the server. Partial: visual design is produced in plan P3.1 | ADR-0001, plan P3.1 |
@@ -229,7 +231,7 @@ Requirements that are not in the draft. Each one is a decision from the analysis
 | A1 | Deployment is Docker Compose on one on-premises host. No high availability cluster. The draft sentence "Use PostgreSQL and backend service in a Docker container as the database" is broken. It is read as: PostgreSQL is the database, and the database and the backend run in Docker containers | ADR-0020 |
 | A2 | The export format is a versioned JSON document with a content hash. The transfer to the PLC is out of scope | ADR-0019 |
 | A3 | The list of supported data types per platform is the matrix in `data-model.md` section 7. The draft says "required" without a list | ADR-0006 |
-| A4 | An Operator can export an `Approved` version. Export is a read operation | api.md 3 |
+| A4 | An Operator can export an `Approved` version. Export is a read operation that writes one audit entry | api.md 3 |
 | A5 | Administrator and ProcessEngineer can approve a version. The approver must not have edited the draft (A34) | ADR-0022 |
 | A6 | Every unit path segment is in `1..=64` | domain-model.md 2.1 |
 | A7 | A recipe has at most one `Draft` at a time | domain-model.md 5 |
@@ -267,3 +269,4 @@ Requirements that are not in the draft. Each one is a decision from the analysis
 | A39 | IEC derived types (ENUM, subrange, alias) are not supported. A parameter uses a primitive, an array, or a UDT | ADR-0006 |
 | A40 | The server generates the parameter `key`. It is unique inside a version and stable across the versions of one recipe | domain-model.md 2.2 |
 | A41 | A panic is contained per request and the process restarts when it hangs. The draft words "must not crash" are read as "contain and restart". `overflow-checks` stays on | reliability.md 2, ADR-0020 |
+| A42 | Authentication failures (unknown login, wrong password, inactive user) return one client message and code `E-IDN-003`. The event log and `security_event` carry the exact reason | api.md 7.4, ADR-0014 |

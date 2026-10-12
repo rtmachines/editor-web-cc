@@ -18,20 +18,22 @@ URL policy:
 - HTML routes have no version prefix. Example: `/recipes/R-100/versions/3`.
 - The JSON export lives under `/export/v1/`. A breaking change of the export document creates `/export/v2/` (ADR-0019).
 
-Path values are the human identifiers from `domain-model.md`. The table gives the value object for each path value.
+Path values are the human identifiers from `domain-model.md`. The table gives the value object for each path value and the error for a bad value. The rule is in `reliability.md` 4.2. A path value that is a domain value object with its own error code returns that code with 422. A path value that names a resource returns `404 E-WEB-005` when the resource does not exist, also when the text cannot name one.
 
-| Path value | Value object |
-|---|---|
-| `{code}` | `MachineCode` |
-| `{uuid}` | `MachineId` (UUID) |
-| `{path}` | `UnitPath` |
-| `{name}` | `TypeName` |
-| `{ref}` | `ReferenceNumber` |
-| `{n}`, `{m}` | version number |
-| `{key}` | `ParameterKey` (UUID) |
-| `{lang}` | `LangCode` |
-| `{login}` | `Login` |
-| `{id}` | audit entry id |
+| Path value | Value object | Bad value |
+|---|---|---|
+| `{code}` | `MachineCode` | `404 E-WEB-005` |
+| `{uuid}` | `MachineId` (UUID) | `404 E-WEB-005` |
+| `{path}` | `UnitPath` | `422 E-PLT-002` or `422 E-PLT-003`. A valid path of a unit that does not exist: `404 E-WEB-005` |
+| `{name}` | `TypeName` | `404 E-WEB-005` |
+| `{ref}` | `ReferenceNumber` | `404 E-WEB-005` |
+| `{n}`, `{m}` | version number | `404 E-WEB-005` |
+| `{key}` | `ParameterKey` (UUID) | `404 E-WEB-005` |
+| `{lang}` | `LangCode` | `422 E-RCP-027` |
+| `{login}` | `Login` | `404 E-WEB-005` |
+| `{id}` | audit entry id | `404 E-WEB-005` |
+
+No path value holds an S7 address.
 
 Mutating requests use `POST`, `PUT`, or `DELETE`. HTMX sends `PUT` and `DELETE` with `hx-put` and `hx-delete`. Every mutating request carries the CSRF token (section 7). Every mutating request on a `Draft` carries `row_version` (section 4).
 
@@ -39,7 +41,15 @@ The use case names in the tables are the commands from `domain-model.md` section
 
 ## 2. Endpoints
 
-Columns: Method, Path, Use case, Permission, Request, Success, Errors. The error column lists the HTTP status and the error code from `reliability.md` section 1.2. Every endpoint can also return `401 E-WEB-004` (no session), `403 E-WEB-002` (no permission), `403 E-WEB-007` (CSRF), `422 E-WEB-008` (malformed field), `503 E-WEB-006` (read-only mode), `503 E-WEB-009` (timeout), and `500 E-WEB-010`. The tables do not repeat these seven. In read-only mode every command route except `POST /login` and `POST /logout` returns `E-WEB-006` (section 5.1).
+Columns: Method, Path, Use case, Permission, Request, Success, Errors. The error column lists the HTTP status and the error code from `reliability.md` section 1.2. Every endpoint can also return these codes:
+
+- `401 E-WEB-004` (no session), `403 E-WEB-002` (no permission), `403 E-WEB-007` (CSRF).
+- `413 E-WEB-003` (request too large), `422 E-WEB-008` (malformed field).
+- `503 E-WEB-006` (read-only mode), `503 E-WEB-009` (timeout), `500 E-WEB-010` (internal error).
+- The storage codes `503 E-DB-001`, `503 E-DB-002`, `409 E-DB-003`, `503 E-DB-004`, `503 E-DB-005`, `409 E-DB-006`, `409 E-DB-007`, `500 E-DB-008`.
+- The code of a bad path value (section 1).
+
+The tables do not repeat these codes. In read-only mode every command route returns `E-WEB-006`, except `POST /login`, `POST /logout`, and the two export routes of section 2.7 (section 5.1).
 
 ### 2.1 Auth and language
 
@@ -50,7 +60,7 @@ Columns: Method, Path, Use case, Permission, Request, Success, Errors. The error
 | POST | `/logout` | `Logout` | authenticated | CSRF token | `303` to `/login`. Deletes the session row and clears the cookie | - |
 | POST | `/lang` | - (sets the cookie `recipe_lang`, section 8) | none | `lang` in `pl` or `en`, `csrf_pre` or CSRF token, `next` | `303` to `next` when `next` is a same-origin relative path. Otherwise `303` to `/recipes`. Sets the cookie `recipe_lang`. Works without a session and in read-only mode | - |
 
-The response body and the response time of `POST /login` are the same for an unknown login, an inactive user, and a wrong password (section 7.4).
+The response body and the response time of `POST /login` are the same for an unknown login, an inactive user, and a wrong password (section 7.4, A42).
 
 ### 2.2 Machines and units
 
@@ -79,12 +89,14 @@ The response body and the response time of `POST /login` are the same for an unk
 |---|---|---|---|---|---|---|
 | GET | `/machines/{code}/types` | query | `RecipeView` | - | `200` list of UDTs, latest revision first | `404 E-WEB-005` |
 | GET | `/machines/{code}/types/new` | - | `UdtManage` | - | `200` form | - |
-| POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type_id`, `members[i].string_length` | `303` to the new type | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016` |
+| POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type` (a `TypeExpr`) | `303` to the new type | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016` |
 | GET | `/machines/{code}/types/{name}` | query | `RecipeView` | optional `rev` | `200` type tree of the latest revision, or of `rev` | `404 E-WEB-005` |
 | POST | `/machines/{code}/types/{name}/revisions` | `DefineUdt` | `UdtManage` | same as `POST /types`. The server sets `supersedes` | `303` to the new revision | same as `POST /types` |
 | GET | `/machines/{code}/types/{name}/usage` | query | `RecipeView` | optional `rev` | `200` list of recipes and parameters that use the revision, directly or through another type | `404 E-WEB-005` |
 
-A UDT is immutable. A second `POST` creates a new revision (ADR-0006). The usage query is the "where used" view that the rebind workflow needs (ADR-0018). `STRING(n)`, `WSTRING(n)`, and array types have no route. The internal operation `EnsureDerivedType` creates them when a definition or a member needs them (`domain-model.md` 5.1).
+A UDT is immutable. A second `POST` creates a new revision (ADR-0006). The usage query is the "where used" view that the rebind workflow needs (ADR-0018).
+
+The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `TypeExpr` (`domain-model.md` 2.1). Examples: `INT`, `STRING(20)`, `ST_Zone@3`, `ARRAY[1..8] OF REAL`, `ARRAY[0..1,1..2] OF ST_Zone@3`. The internal operation `EnsureDerivedType` resolves the expression and creates a missing `STRING(n)`, `WSTRING(n)`, or array type (`domain-model.md` 5.1). A bad expression returns `422 E-PLT-013`.
 
 ### 2.4 Recipes
 
@@ -111,7 +123,7 @@ A UDT is immutable. A second `POST` creates a new revision (ADR-0006). The usage
 | POST | `/recipes/{ref}/versions/{n}/approve` | `ApproveVersion` | `VersionApprove` | `row_version`, `allow_outdated` (default `false`), CSRF token | `200` version page. Shows the retired version number when one exists. An already approved version with `row_version == expected + 1` returns the same page without a change | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-RCP-015`, `409 E-WEB-001`, `422 E-RCP-008`, `422 E-RCP-016`, `422 E-RCP-020`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-024` |
 | POST | `/recipes/{ref}/versions/{n}/retire` | `RetireVersion` | `VersionRetire` | `row_version`, CSRF token | `200` version page | `404 E-WEB-005`, `409 E-RCP-009`, `409 E-RCP-012`, `409 E-WEB-001` |
 | POST | `/recipes/{ref}/versions/{n}/discard` | `DiscardDraft` | `VersionDiscard` | `row_version`, CSRF token | `303` to `/recipes/{ref}` | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-WEB-001` |
-| POST | `/recipes/{ref}/versions/{n}/rebind` | `RebindTypeRevision` | `ParameterEdit` | `row_version`, `from_type_id`, `to_type_id`, `new_member_values` (JSON text) | `200` parameter table fragment | `404 E-WEB-005`, `409 E-RCP-002`, `409 E-RCP-012`, `409 E-WEB-001`, `422 E-RCP-005`, `422 E-RCP-021`, `422 E-RCP-028`, `422 E-RCP-029`, `422 E-RCP-052` |
+| POST | `/recipes/{ref}/versions/{n}/rebind` | `RebindTypeRevision` | `ParameterEdit` | `row_version`, `from_type_id`, `to_type_id`, `new_member_values` (JSON text) | `200` parameter table fragment | `404 E-WEB-005`, `409 E-RCP-002`, `409 E-RCP-012`, `409 E-WEB-001`, `422 E-RCP-005`, `422 E-RCP-021`, `422 E-RCP-028`, `422 E-RCP-029`, `422 E-RCP-052`, `422 E-PLT-013` |
 | GET | `/recipes/{ref}/versions/{n}/diff/{m}` | query | `RecipeView` | - | `200` parameter diff between versions `n` and `m` | `404 E-WEB-005` |
 
 A version with `based_on` empty starts with no parameters. The approve `POST` is idempotent (section 4). It returns `422 E-RCP-024` for an outdated parameter unless `allow_outdated` is `true`. The audit entry `VersionApproved` records the flag (A29, ADR-0018).
@@ -126,9 +138,9 @@ All routes in this group are under `/recipes/{ref}/versions/{n}`. A mutating rou
 |---|---|---|---|---|---|---|
 | GET | `.../parameters` | query | `RecipeView` | `unit` (path filter), `page` | `200` parameter table fragment, grouped by unit, 100 rows per page | `404 E-WEB-005` |
 | GET | `.../parameters/new` | - | `ParameterEdit` | `unit` | `200` empty parameter form. The server generates `key` at `AddParameter` (A40) | `404 E-WEB-005` |
-| POST | `.../parameters` | `AddParameter` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `plc_type_id`, `string_length`, `s7_address`, `ordinal` | `200` parameter row fragment with the new `key` | `409 E-RCP-014`, `422 E-RCP-003`, `422 E-RCP-013`, `422 E-RCP-021`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-053`, `409 E-PLT-009`, `422 E-PLT-013` |
+| POST | `.../parameters` | `AddParameter` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `type` (a `TypeExpr`), `s7_address`, `ordinal`, `value` (JSON text, required), `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`, `limits[i].max_length` (`limits[]` can be empty) | `200` parameter row fragment with the new `key` | `409 E-RCP-014`, `422 E-RCP-003`, `422 E-RCP-004`, `422 E-RCP-005`, `422 E-RCP-006`, `422 E-RCP-013`, `422 E-RCP-017`, `422 E-RCP-018`, `422 E-RCP-019`, `422 E-RCP-021`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-053`, `409 E-PLT-009`, `422 E-PLT-013` |
 | GET | `.../parameters/{key}` | query | `RecipeView` | - | `200` parameter detail or edit form | `404 E-WEB-005` |
-| POST | `.../parameters/{key}/definition` | `UpdateParameterDefinition` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `plc_type_id`, `string_length`, `s7_address`, `ordinal` | `200` parameter row fragment | same as `AddParameter` |
+| POST | `.../parameters/{key}/definition` | `UpdateParameterDefinition` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `type` (a `TypeExpr`), `s7_address`, `ordinal`. When `type` names a different type than the current one: also `value` and `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`, `limits[i].max_length`, all required. Otherwise neither `value` nor `limits[]` | `200` parameter row fragment | same as `AddParameter`. A missing `value` after a type change is `422 E-RCP-005` |
 | POST | `.../parameters/{key}/value` | `SetParameterValue` | `ParameterEdit` | `row_version`, `value` (JSON text) | `200` value fragment | `422 E-RCP-004`, `422 E-RCP-005`, `422 E-RCP-021` |
 | GET | `.../parameters/{key}/limits` | query | `RecipeView` | - | `200` limits table fragment, one row per leaf path. `[*]` is one row for all elements of an array | `404 E-WEB-005` |
 | POST | `.../parameters/{key}/limits` | `ReplaceLimits` | `ParameterEdit` | `row_version`, `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`, `limits[i].max_length` | `200` limits fragment | `422 E-RCP-004`, `422 E-RCP-006`, `422 E-RCP-017`, `422 E-RCP-018`, `422 E-RCP-019`, `422 E-RCP-021` |
@@ -141,7 +153,8 @@ Rules:
 
 - A command touches only its own rows. `SetParameterValue` does not read or write `parameter_limit` or `parameter_translation`. `ReplaceLimits` replaces all limit rows of one parameter and nothing else. `UpsertTranslation` writes one language.
 - The form identifies a parameter by `key`. A `tag` can change through `UpdateParameterDefinition`. The parameter page shows the current `tag`.
-- The `value` field is the JSON text of a `ParameterValue`. The form builds it from one input per leaf. The server parses it as a whole. A partial value is `422 E-RCP-005`. The value field is not limited by the form body limit (section 7.6).
+- The `value` field is the JSON text of a `ParameterValue`. The form builds it from one input per leaf. The server parses it as a whole. A partial value is `422 E-RCP-005`. A request with a `value` field has the larger body limit of section 7.6.
+- `AddParameter` always carries `value`, and `limits[]` can be empty. `UpdateParameterDefinition` carries `value` and `limits[]` only when the type changes. Then both replace the old value and the old limits. Otherwise the value and the limits stay unchanged. `SetParameterValue` and `ReplaceLimits` change one of them without a type change.
 - The parameter table is paginated. A `Draft` with more than 100 parameters shows one unit per page by default.
 
 ### 2.7 Export
@@ -164,7 +177,7 @@ The export endpoints use the session cookie (ADR-0014). A `Draft` is never expor
 | POST | `/users/{login}/role` | `SetUserRole` | `UserManage` | `role` | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002` |
 | POST | `/users/{login}/deactivate` | `DeactivateUser` | `UserManage` | CSRF token | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002` |
 | POST | `/users/{login}/activate` | `ActivateUser` | `UserManage` | CSRF token | `200` fragment | `404 E-WEB-005`, `409 E-IDN-009` |
-| POST | `/users/{login}/reset-password` | `ResetPassword` | `UserManage` | CSRF token | `200` fragment with a one-time password, shown once. `must_change_password` is set. All sessions of the user are deleted | `404 E-WEB-005`, `422 E-IDN-006` |
+| POST | `/users/{login}/reset-password` | `ResetPassword` | `UserManage` | CSRF token | `200` fragment with a one-time password, shown once. `must_change_password` is set. All sessions of the user are deleted | `404 E-WEB-005` |
 | POST | `/users/{login}/unlock` | `UnlockLogin` | `LoginUnlock` | CSRF token | `200` fragment. The login delay counters of the user are cleared | `404 E-WEB-005` |
 | GET | `/me` | query | authenticated | - | `200` own profile | - |
 | GET | `/me/password` | - | authenticated | - | `200` password form. The only page a session with `must_change_password` can open | - |
@@ -279,7 +292,7 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | Malformed field, missing field, wrong content type (`E-WEB-008`) | `422` | `field-errors.html`: one line per field |
 | Value or shape error from the domain (`E-PLT-*`, `E-RCP-*` with status 422 in `reliability.md` section 1.2) | `422` | `field-errors.html`, with `leaf_path` for value errors. The approve summary (`E-RCP-020`) lists every failing parameter |
 | State conflict: wrong status, duplicate, last administrator, has approved version, deleted recipe, approver edited the draft, version not exportable (`E-PLT-*`, `E-RCP-*`, `E-IDN-*`, `E-EXP-003` with status 409) | `409` | `error.html` with the rule that blocks the operation |
-| Database rule without a domain code (`E-DB-003`, `E-DB-006`, `E-DB-007`) | `409` | `error.html`. The event log gets an `ERROR` line |
+| Database rule without a domain code (`StorageError` of `recipe-app`: `E-DB-003`, `E-DB-006`, `E-DB-007`) | `409` | `error.html`. The event log gets an `ERROR` line |
 | Concurrent edit (`E-WEB-001`) | `409` | `conflict.html` (section 4) |
 | Database trigger (`E-PLT-030..038`, `E-RCP-030..036`) | `409` for a state rule, `422` for a shape rule, as `reliability.md` section 1.2 gives | `error.html`. The event log gets an `ERROR` line, because the domain check should have fired first |
 | No permission (`E-WEB-002`) | `403` | `error.html` with the operation name |
@@ -290,8 +303,8 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | Missing resource in the URL (`E-WEB-005`, `E-EXP-001`, `E-RCP-050`, `E-RCP-051`) | `404` | `error.html` |
 | Request too large (`E-WEB-003`) | `413` | `error.html` |
 | Login throttled (`E-IDN-005`) | `429` | `error.html` with `Retry-After` |
-| Read-only mode (`E-WEB-006`). Every command except `Login` and `Logout` gets it. Queries, exports, `POST /login`, `POST /logout`, and `POST /lang` stay available (`reliability.md` 7.8) | `503` | `error.html` with the banner text |
-| Timeout, deadlock, pool exhausted, database unavailable (`E-WEB-009`, `E-DB-001`, `E-DB-002`, `E-DB-004`, `E-DB-005`) | `503` | `error.html` with `Retry-After` set to `http.retry_after` (`reliability.md` 7.11) |
+| Read-only mode (`E-WEB-006`). Every command except `Login`, `Logout`, and `ExportVersion` gets it. Queries, the two export routes, `POST /login`, `POST /logout`, and `POST /lang` stay available (`reliability.md` 7.8) | `503` | `error.html` with the banner text |
+| Timeout, deadlock, pool exhausted, database unavailable (`E-WEB-009`, and the `StorageError` codes `E-DB-001`, `E-DB-002`, `E-DB-004`, `E-DB-005`) | `503` | `error.html` with `Retry-After` set to `http.retry_after` (`reliability.md` 7.11) |
 | Export failure: content hash mismatch or serializer error (`E-EXP-002`, `E-EXP-004`) | `500` | JSON error body |
 | Unexpected, caught panic, unexpected database error (`E-WEB-010`, `E-AUD-001`, `E-DB-008`) | `500` | `error.html` with `request_id` and code only. Never the error chain, never SQL, never a path |
 
@@ -340,11 +353,11 @@ The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the 
 | `types[].name` | string or null | yes | Struct name. `STRING` or `WSTRING` for a length-bearing primitive. Null for an array |
 | `types[].revision` | integer | yes | Revision of a UDT. `1` for other types |
 | `types[].kind` | string | yes | `Primitive`, `Array`, or `Struct` |
-| `types[].string_length` | integer or null | yes | Only for `STRING` and `WSTRING` |
+| `types[].string_length` | integer or null | yes | Present in every entry. An integer for `STRING` and `WSTRING`, null for every other type |
 | `types[].element_type_id` | string | yes | Only for `Array`. A type reference |
 | `types[].dimensions[]` | `{lower, upper}`, integers | yes | Only for `Array`. One to 3 entries (A38) |
 | `types[].members[]` | `{name, type_id}` | yes | Only for `Struct`. Ordered by member `ordinal`. `type_id` is a type reference |
-| `parameters[]` | array | yes | Ordered by `unit_path`, `ordinal`, and `tag` (section 6.3) |
+| `parameters[]` | array | yes | Ordered by `unit_path` and `tag` (section 6.3). `parameter.ordinal` is not exported and not hashed |
 | `parameters[].unit_path` | string | yes | `UnitPath` |
 | `parameters[].tag` | string | yes | `ParameterTag` |
 | `parameters[].key` | string, UUID | yes | `ParameterKey`, stable across versions (A40) |
@@ -355,6 +368,8 @@ The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the 
 | `parameters[].value` | JSON | yes | The `ParameterValue` tree. Every numeric leaf is a JSON string with the canonical decimal text (`reliability.md` 4.4). A `BOOL` is a JSON boolean. A string or a time value is a JSON string |
 
 A type reference (`type_id`, `element_type_id`) is the primitive name for a primitive without a length, for example `INT`. For every other type it is a `types[].id`.
+
+Presence rule. A field with the rule "Only for `Array`" or "Only for `Struct`" is absent from every other `types[]` entry. It is never null. Every other field of the table is always present. It is null where the table allows null and the value does not apply. The example of section 6.2 follows this rule.
 
 Descriptions and translations are not exported. The transfer system does not need them.
 
@@ -417,8 +432,8 @@ The hash value in the example is a placeholder.
       "name_en": "Zone 1", "type_id": "7c1e9d0a-2b3f-4c4d-9e8f-0a1b2c3d4e5f",
       "s7_address": "DB1.DBB2",
       "limits": [
-        { "leaf_path": ".setpoint", "min": "20", "max": "95", "max_length": null },
-        { "leaf_path": ".label", "min": null, "max": null, "max_length": "16" }
+        { "leaf_path": ".label", "min": null, "max": null, "max_length": "16" },
+        { "leaf_path": ".setpoint", "min": "20", "max": "95", "max_length": null }
       ],
       "value": { "setpoint": "72.5", "label": "Z1" }
     }
@@ -438,10 +453,10 @@ The hash value in the example is a placeholder.
 - Field order in the document is fixed. The serializer does not emit extra fields.
 - Array order. The serializer writes each array in this order. A consumer that builds the hashed body again uses the same order:
   - `types[]`: by `id`, compared as text byte by byte.
-  - `parameters[]`: by `unit_path`, then `ordinal`, then `tag`. `unit_path` is compared segment by segment as integers. A path comes before a longer path with the same first segments. `tag` is compared byte by byte.
-  - `parameters[].limits[]`: by `leaf_path`, compared byte by byte.
-  - `types[].members[]`: by the `ordinal` of the member.
-- Before the transfer system loads a recipe into a PLC, it MUST check `loadable`. It MUST also build the hashed body from the document with the array order above, compute its SHA-256, and compare the result with `content_sha256`.
+  - `parameters[]`: by `unit_path`, then `tag`. `unit_path` is compared segment by segment as integers. A path comes before a longer path with the same first segments. `tag` is compared byte by byte. `parameter.ordinal` sorts the UI only. It is not in the document.
+  - `parameters[].limits[]`: by `leaf_path`, compared byte by byte. In the example of 6.2, `.label` comes before `.setpoint`.
+  - `types[].members[]`: by the member `ordinal` of `plc_type_member`, which the document gives as the array order.
+- Before the transfer system loads a recipe into a PLC, it MUST check `loadable`. It MUST also build the hashed body from the document with the array order above, compute its SHA-256, and compare the result with `content_sha256`. Every sort key of the hashed arrays is in the document: `id`, `unit_path`, `tag`, `leaf_path`, and the order of `members[]`.
 
 ## 7. Session and CSRF
 
@@ -475,7 +490,7 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 ### 7.3 CSRF
 
 - `SameSite=Strict` is the first line of defense.
-- Every mutating request from an authenticated session carries a token bound to the session. Forms send it in the hidden field `csrf_token`. HTMX requests send it in the header `X-CSRF-Token`. The `hx-headers` attribute on `<body>` sets the header. The token is created at login and is rotated on logout, password change, and role change.
+- Every mutating request from an authenticated session carries a token bound to the session. Forms send it in the hidden field `csrf_token`. HTMX requests send it in the header `X-CSRF-Token`. The `hx-headers` attribute on `<body>` sets the header. The token is created at login and is rotated on logout and password change.
 - `POST /login` and `POST /lang` without a session use a pre-session token: a signed double-submit cookie `__Host-recipe_csrf` and the field `csrf_pre`. `GET /login` sets the cookie. The key of the Docker secret `csrf_signing_key` signs it (`security.csrf_signing_key_file`, `reliability.md` 7.11).
 - Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. A request without either is rejected.
 - A mutating request without a valid token gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`.
@@ -501,14 +516,14 @@ The values of this section are in `reliability.md` section 7.11.
 
 ### 7.5 Account state
 
-A deactivated user gets the same `401 E-IDN-003` response as a wrong password. The code `E-IDN-004` appears only in the event log and in `security_event`.
+A deactivated user gets the same `401 E-IDN-003` response as a wrong password (A42). The code `E-IDN-004` appears only in the event log and in `security_event`.
 
 ### 7.6 Body limits
 
 | Route group | Limit |
 |---|---|
 | HTML forms | 256 KiB |
-| `POST .../parameters/{key}/value`, the `value` field of `AddParameter` and `UpdateParameterDefinition`, and the `new_member_values` field of `RebindTypeRevision` | 1 MiB |
+| The four routes that carry a parameter value: `POST .../parameters` (`AddParameter`, field `value`), `POST .../parameters/{key}/definition` (`UpdateParameterDefinition`, field `value`), `POST .../parameters/{key}/value` (`SetParameterValue`), and `POST .../rebind` (`RebindTypeRevision`, field `new_member_values`) | 1 MiB |
 | `PUT .../translations/{lang}` | 64 KiB |
 
 The values are in `reliability.md` section 7.11. A request above the limit gets `413 E-WEB-003`.

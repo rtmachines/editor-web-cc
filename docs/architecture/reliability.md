@@ -4,19 +4,19 @@ Status: Accepted (design stage, revised 2026-10-12 after review)
 Source of requirements: `general-draft.txt` (R29 to R38, R42, R43)
 Related: `overview.md`, `domain-model.md`, `data-model.md`, `api.md`, ADR-0014, ADR-0015, ADR-0019, ADR-0020, ADR-0022
 
-This document specifies how the system stays correct and available during continuous 24/7 operation. Each section names the rule and the mechanism that enforces it. Section 7.11 is the single source for every numeric setting. Other documents link to it and do not repeat a value.
+This document specifies how the system stays correct and available during continuous 24/7 operation. Each section names the rule and the mechanism that enforces it. Section 7.11 is the single source for every numeric setting. Other documents link to it. A value repeated elsewhere must equal 7.11.
 
 ## 1. Error handling
 
 ### 1.1 Error types per crate
 
-Each library crate owns its error types, except `recipe-export`, which returns `ExportError` of `recipe-domain`. The binary crate uses `anyhow`. Every variant has exactly one owner.
+Each library crate owns its error types, with two exceptions. `recipe-export` returns `ExportError` of `recipe-domain`. `recipe-db` maps into `StorageError` of `recipe-app`. The binary crate uses `anyhow`. Every variant has exactly one owner.
 
 | Crate | Error type | Variants |
 |---|---|---|
 | `recipe-domain` | `PlantError`, `RecipeError`, `IdentityError`, `ExportError` | One `thiserror` enum per bounded context. Leaf errors. Every row with prefix `E-PLT`, `E-RCP`, `E-IDN` and a number below 030 in section 1.2, and every `E-RCP-050..069` row. `ExportError` lives in the module `export` and owns every `E-EXP` row: `NoApprovedVersion { reference }`, `VersionNotExportable { reference, number }`, `ContentHashMismatch { reference, number }`, `Serialize(#[from] serde_json::Error)` |
-| `recipe-app` | `AppError`, `AuditError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `AuditWriteFailed`, `Storage(#[from] DbError)`. `stage` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check` |
-| `recipe-db` | `DbError` | `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }` |
+| `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
+| `recipe-db` | none public | Maps `sqlx::Error` into `StorageError` of `recipe-app` with the rule below. `recipe-db` depends on `recipe-app`, and `recipe-app` does not depend on `recipe-db` (`overview.md` 5) |
 | `recipe-export` | none | No error type of its own. The JSON writer of the HTTP response returns `ExportError` of `recipe-domain` |
 | `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }` |
 | `recipe-server` | `anyhow::Error` | Everything, only in `main()`, configuration loading, subcommands, and wiring |
@@ -27,9 +27,9 @@ Rules:
 - Every error type implements `Display` for the user and `Debug` for the log. `Debug` on a type that holds a secret redacts it.
 - Every error type has a `code(&self) -> ErrorCode` method. The code is stable. The message template can change. The code cannot.
 - `?` converts between layers through `From`. A `map_err` closure appears only when it adds context.
-- `recipe-db` maps `sqlx::Error` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `DbError::Constraint { code, message }` with that code. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock`. `40001` becomes `Deadlock` when the one retry of the next rule also fails. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
+- `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock`. `40001` becomes `Deadlock` when the one retry of the next rule also fails. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
 - `SetUserRole` and `DeactivateUser` run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
-- `recipe-app` maps `DbError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `DbError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
+- `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
 - `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, and the export use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. A background job logs its errors once at its loop boundary with a `job` field. Lower layers add context and propagate. They do not log the error.
 - The HTTP response contains the error code, the user message, and the `request_id`. It does not contain the `Debug` output, a stack trace, or an SQL fragment.
@@ -55,19 +55,19 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-PLT-010` | `PlantError::MachineArchived { code }` | 409 | Machine {code} is archived. |
 | `E-PLT-011` | `PlantError::MachineHasDraft { code, reference }` | 409 | Machine {code} has a draft in recipe {reference}. Approve or discard the draft first. |
 | `E-PLT-012` | `PlantError::UnitReferencedByDraft { path, reference }` | 409 | Unit {path} is used by the draft of recipe {reference}. Move or delete those parameters first. |
-| `E-PLT-013` | `PlantError::DerivedTypeInvalid { reason }` | 422 | The string length or array dimensions are not valid: {reason}. |
+| `E-PLT-013` | `PlantError::DerivedTypeInvalid { type_expr, reason }` | 422 | The type {type_expr} is not valid: {reason}. Use a type such as INT, STRING(20), ST_Zone@3, or ARRAY[1..8] OF REAL. |
 | `E-PLT-014` | `PlantError::UnitReferencedByApproved { path, reference }` | 409 | Unit {path} is used by the approved version of recipe {reference}. Retire that version first. |
 | `E-PLT-015` | `PlantError::DuplicateTypeName { type_name }` | 409 | Type {type_name} already exists on this machine. Create a new revision instead. |
 | `E-PLT-016` | `PlantError::StructHasNoMembers { type_name }` | 422 | Type {type_name} has no members. Add at least one member. |
-| `E-PLT-030` | `DbError::Constraint`, trigger function `machine_platform_frozen` (data-model.md 4.5) | 409 | The PLC platform of a machine with recipes cannot change. Reference: {request_id}. |
-| `E-PLT-031` | `DbError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type does not exist on the platform of the version. Reference: {request_id}. |
-| `E-PLT-032` | `DbError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type belongs to another machine. Reference: {request_id}. |
-| `E-PLT-033` | `DbError::Constraint`, trigger function `plc_type_immutable` (data-model.md 4.6) | 409 | A type definition cannot change. Create a new revision. Reference: {request_id}. |
-| `E-PLT-034` | `DbError::Constraint`, trigger function `plc_type_immutable` (data-model.md 4.6) | 409 | The members of a type cannot change after the type is created. Reference: {request_id}. |
-| `E-PLT-035` | `DbError::Constraint`, trigger function `plc_type_immutable` (data-model.md 4.6) | 422 | Only a struct type has members. Reference: {request_id}. |
-| `E-PLT-036` | `DbError::Constraint`, trigger function `plc_type_struct_has_member` (data-model.md 4.6) | 422 | A struct needs at least one member. Reference: {request_id}. |
-| `E-PLT-037` | `DbError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The machine code cannot change while a version that is not a draft uses it. Reference: {request_id}. |
-| `E-PLT-038` | `DbError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The unit path or the machine of a unit cannot change while a version uses the unit. Reference: {request_id}. |
+| `E-PLT-030` | `StorageError::Constraint`, trigger function `machine_platform_frozen` (data-model.md 4.5) | 409 | The PLC platform of a machine with recipes cannot change. Reference: {request_id}. |
+| `E-PLT-031` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type does not exist on the platform of the version. Reference: {request_id}. |
+| `E-PLT-032` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type belongs to another machine. Reference: {request_id}. |
+| `E-PLT-033` | `StorageError::Constraint`, trigger function `plc_type_immutable` (data-model.md 4.6) | 409 | A type definition cannot change. Create a new revision. Reference: {request_id}. |
+| `E-PLT-034` | `StorageError::Constraint`, trigger function `plc_type_immutable` (data-model.md 4.6) | 409 | The members of a type cannot change after the type is created. Reference: {request_id}. |
+| `E-PLT-035` | `StorageError::Constraint`, trigger function `plc_type_immutable` (data-model.md 4.6) | 422 | Only a struct type has members. Reference: {request_id}. |
+| `E-PLT-036` | `StorageError::Constraint`, trigger function `plc_type_struct_has_member` (data-model.md 4.6) | 422 | A struct needs at least one member. Reference: {request_id}. |
+| `E-PLT-037` | `StorageError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The machine code cannot change while a version that is not a draft uses it. Reference: {request_id}. |
+| `E-PLT-038` | `StorageError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The unit path or the machine of a unit cannot change while a version uses the unit. Reference: {request_id}. |
 | `E-RCP-001` | `RecipeError::DuplicateReference { reference }` | 409 | Reference number {reference} is already in use. |
 | `E-RCP-002` | `RecipeError::VersionNotEditable { reference, number, status }` | 409 | Version {number} of recipe {reference} is {status}. Create a new draft to make changes. |
 | `E-RCP-003` | `RecipeError::S7AddressRequired { tag }` | 422 | Parameter {tag} needs a PLC address. The machine uses an S7-300 controller. |
@@ -97,21 +97,21 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-027` | `RecipeError::InvalidLangCode { lang }` | 422 | {lang} is not a language code. Use a code such as pl or de-AT. |
 | `E-RCP-028` | `RecipeError::RebindNeedsValue { tag, leaf }` | 422 | {tag}{leaf} is a new member. Give it a value. |
 | `E-RCP-029` | `RecipeError::RebindDropsLimit { tag, leaf }` | 422 | {tag}{leaf} has a limit but no longer exists in the new revision. Delete the limit first. |
-| `E-RCP-030` | `DbError::Constraint`, trigger function `enforce_version_mutable` (data-model.md 4.1) | 409 | A parameter row cannot move to another version. Reference: {request_id}. |
-| `E-RCP-031` | `DbError::Constraint`, trigger function `enforce_version_mutable` (data-model.md 4.1) | 409 | The version is not a live draft. Reference: {request_id}. |
-| `E-RCP-032` | `DbError::Constraint`, trigger function `enforce_unit_machine` (data-model.md 4.3) | 422 | The unit does not belong to the machine of the recipe. Reference: {request_id}. |
-| `E-RCP-033` | `DbError::Constraint`, trigger function `recipe_version_transition` (data-model.md 4.7) | 409 | The version status or a frozen column of the version cannot change in this way. Reference: {request_id}. |
-| `E-RCP-034` | `DbError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The reference number or the machine of a recipe cannot change while a version uses it. Reference: {request_id}. |
-| `E-RCP-035` | `DbError::Constraint`, trigger function `version_size_budget` (data-model.md 4.10) | 422 | The version has more than 4 000 parameters. Reference: {request_id}. |
-| `E-RCP-036` | `DbError::Constraint`, trigger function `version_size_budget` (data-model.md 4.10) | 422 | The version has more than 32 768 limit rows. Reference: {request_id}. |
+| `E-RCP-030` | `StorageError::Constraint`, trigger function `enforce_version_mutable` (data-model.md 4.1) | 409 | A parameter row cannot move to another version. Reference: {request_id}. |
+| `E-RCP-031` | `StorageError::Constraint`, trigger function `enforce_version_mutable` (data-model.md 4.1) | 409 | The version is not a live draft. Reference: {request_id}. |
+| `E-RCP-032` | `StorageError::Constraint`, trigger function `enforce_unit_machine` (data-model.md 4.3) | 422 | The unit does not belong to the machine of the recipe. Reference: {request_id}. |
+| `E-RCP-033` | `StorageError::Constraint`, trigger function `recipe_version_transition` (data-model.md 4.7) | 409 | The version status or a frozen column of the version cannot change in this way. Reference: {request_id}. |
+| `E-RCP-034` | `StorageError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The reference number or the machine of a recipe cannot change while a version uses it. Reference: {request_id}. |
+| `E-RCP-035` | `StorageError::Constraint`, trigger function `version_size_budget` (data-model.md 4.10) | 422 | The version has more than 4 000 parameters. Reference: {request_id}. |
+| `E-RCP-036` | `StorageError::Constraint`, trigger function `version_size_budget` (data-model.md 4.10) | 422 | The version has more than 32 768 limit rows. Reference: {request_id}. |
 | `E-RCP-050` | `RecipeError::TranslationNotFound { reference, number, tag, lang }` | 404 | Parameter {tag} in version {number} of recipe {reference} has no translation for {lang}. |
 | `E-RCP-051` | `RecipeError::ParameterNotFound { reference, number, key }` | 404 | Parameter {key} does not exist in version {number} of recipe {reference}. |
 | `E-RCP-052` | `RecipeError::RebindTargetInvalid { type_name, reason }` | 422 | The rebind of {type_name} is not possible: {reason}. |
 | `E-RCP-053` | `RecipeError::S7AddressNotAllowed { tag, platform }` | 422 | Parameter {tag} cannot have a PLC address on platform {platform}. Delete the address. |
 | `E-IDN-001` | `IdentityError::DuplicateLogin { login }` | 409 | Login {login} is already in use. |
 | `E-IDN-002` | `IdentityError::LastAdministrator { login }` | 409 | {login} is the last active administrator. Add another administrator first. |
-| `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. |
-| `E-IDN-004` | `IdentityError::UserInactive` | 401, as `E-IDN-003` | Not shown to the user. `Login` returns `E-IDN-003` with the same body and timing. `UserInactive` is recorded as the `security_event` kind `login_rejected_inactive` and in the event log. |
+| `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42.) |
+| `E-IDN-004` | `IdentityError::UserInactive` | 401, as `E-IDN-003` | Not shown to the user. `Login` returns `E-IDN-003` with the same body and timing (A42). `UserInactive` is recorded as the `security_event` kind `login_rejected_inactive` and in the event log. |
 | `E-IDN-005` | `IdentityError::LoginThrottled { retry_after }` | 429 | Too many failed logins from this address. Try again in {retry_after} seconds. |
 | `E-IDN-006` | `IdentityError::PasswordPolicy { reason }` | 422 | The password is not accepted: {reason}. Use 12 to 128 characters that are not in the breached-password list. |
 | `E-IDN-007` | `IdentityError::MustChangePassword` | 303 | Not an error page. The server redirects to `/me/password`. |
@@ -123,14 +123,14 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-EXP-002` | `ExportError::ContentHashMismatch { reference, number }` | 500 | Version {number} of recipe {reference} does not match its stored hash. The export is refused. Contact the administrator. Reference: {request_id}. |
 | `E-EXP-003` | `ExportError::VersionNotExportable { reference, number }` | 409 | Version {number} of recipe {reference} is a draft or was discarded. Only approved and retired versions can be exported. |
 | `E-EXP-004` | `ExportError::Serialize` | 500 | The server cannot create the export document. Contact the administrator. Reference: {request_id}. |
-| `E-DB-001` | `DbError::Deadlock` | 503 | Another operation holds a lock on the same data. Try again. Reference: {request_id}. |
-| `E-DB-002` | `DbError::StatementTimeout` | 503 | The operation took too long and was stopped. Try again. Reference: {request_id}. |
-| `E-DB-003` | `DbError::Constraint { code: "E-DB-003", .. }` | 409 | The change violates a database rule. Reference: {request_id}. |
-| `E-DB-004` | `DbError::PoolTimeout` | 503 | No database connection is free. Try again. Reference: {request_id}. |
-| `E-DB-005` | `DbError::Unavailable` | 503 | The database does not answer. Try again. Reference: {request_id}. |
-| `E-DB-006` | `DbError::Duplicate { constraint }`, unknown constraint name | 409 | The change conflicts with an existing entry. Reference: {request_id}. |
-| `E-DB-007` | `DbError::MissingReference { constraint }`, unknown constraint name | 409 | The change refers to an entry that does not exist. Reference: {request_id}. |
-| `E-DB-008` | `DbError::Other { sqlstate, source }` | 500 | An unexpected database error occurred. Contact the administrator. Reference: {request_id}. |
+| `E-DB-001` | `StorageError::Deadlock` | 503 | Another operation holds a lock on the same data. Try again. Reference: {request_id}. |
+| `E-DB-002` | `StorageError::StatementTimeout` | 503 | The operation took too long and was stopped. Try again. Reference: {request_id}. |
+| `E-DB-003` | `StorageError::Constraint { code: "E-DB-003", .. }` | 409 | The change violates a database rule. Reference: {request_id}. |
+| `E-DB-004` | `StorageError::PoolTimeout` | 503 | No database connection is free. Try again. Reference: {request_id}. |
+| `E-DB-005` | `StorageError::Unavailable` | 503 | The database does not answer. Try again. Reference: {request_id}. |
+| `E-DB-006` | `StorageError::Duplicate { constraint }`, unknown constraint name | 409 | The change conflicts with an existing entry. Reference: {request_id}. |
+| `E-DB-007` | `StorageError::MissingReference { constraint }`, unknown constraint name | 409 | The change refers to an entry that does not exist. Reference: {request_id}. |
+| `E-DB-008` | `StorageError::Other { sqlstate, source }` | 500 | An unexpected database error occurred. Contact the administrator. Reference: {request_id}. |
 | `E-WEB-001` | `AppError::ConcurrentEdit { reference, number, expected, actual }` | 409 | Another user changed version {number} of recipe {reference}. Reload the page and apply your change again. |
 | `E-WEB-002` | `AppError::Forbidden { operation }` | 403 | Your role does not permit the operation {operation}. |
 | `E-WEB-003` | `WebError::PayloadTooLarge { limit }` | 413 | The request is larger than {limit}. |
@@ -338,7 +338,9 @@ A request that passes layer (a) is well-formed. A value that passes layer (b) is
 - Body limits are in section 7.11. The server returns `E-WEB-003` above the limit. The parameter value field has its own limit, because a form with 16 384 leaves does not fit in the form limit.
 - All JSON types derive `serde::Deserialize` with `#[serde(deny_unknown_fields)]`.
 - Form parsing uses `axum::Form` with `serde` structs. A missing required field is `422 E-WEB-008` with the field name.
-- A path parameter is parsed directly into the value object (`ReferenceNumber`, `MachineCode`, `UnitPath`, `ParameterKey`). A bad path parameter is `404 E-WEB-005`, not a 500.
+- A path parameter is parsed directly into the value object (`ReferenceNumber`, `MachineCode`, `UnitPath`, `ParameterKey`, `LangCode`). A bad path parameter never gives a 500. The rule has two cases (`api.md` 1):
+  - A path value that is a domain value object with its own error code returns that code with 422. `LangCode` returns `E-RCP-027`. `UnitPath` returns `E-PLT-002` or `E-PLT-003`. No path holds an S7 address.
+  - A path value that names a resource returns `404 E-WEB-005` when the resource does not exist. This applies also when the text cannot name a resource, for example a bad `ReferenceNumber`.
 - The `Content-Type` of a request must match the route. Every mutating route accepts only `application/x-www-form-urlencoded`. The `value` field inside the form is JSON text.
 - HTMX 2 sends the parameters of a `DELETE` in the URL by default. The `htmx-config` meta tag sets `methodsThatUseUrlParams: ["get"]`, so `hx-delete` sends a form body like `hx-post` (`api.md` 9).
 - Text fields are trimmed and normalized to Unicode NFC before layer (b).
@@ -366,6 +368,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 | `S7Layout` | `domain-model.md` 2.1: `BOOL` packing, even-byte alignment, struct and array size |
 | `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved primitive name |
 | `StringLength` | Range per platform: the `StringLength` table of `domain-model.md` 2.1 |
+| `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure is `E-PLT-013` |
 | `ArrayDimension` | `lower <= upper`, `upper - lower < 65536`, at most 3 dimensions (A38, `domain-model.md` 2.1) |
 | `LeafPath` | Grammar: `domain-model.md` 2.1. The empty path is the parameter itself. `[*]` means every element of that array level. Resolves against the `TypeTree` |
 | `ProcessLimit` | `min <= max` when both set. Inside the type range. `max_length <= string_length`. Not on a `BOOL` leaf |
@@ -390,10 +393,11 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 - Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`.
 - Migrations are forward-only. There is no `down` file. A rollback is a new forward migration or a restore from backup.
 - A migration that shipped is never edited. `sqlx` stores a checksum of each applied migration in `_sqlx_migrations`. A changed checksum stops the migrator with an error.
-- Roles and the database are not created by a migration. The script `deploy/db/initdb/01-roles.sh` runs once as the PostgreSQL superuser when the `db` volume is empty. It reads the Docker secrets and creates `recipe_migrator`, `recipe_app`, `audit_owner`, `recipe_backup`, and the database (`data-model.md` section 5).
+- Roles and the database are not created by a migration. The script `deploy/db/initdb/01-roles.sh` runs once as the PostgreSQL superuser when the `db` volume is empty. It reads the Docker secrets and creates `recipe_migrator`, `recipe_app`, `audit_owner`, `recipe_backup`, `recipe_replicator`, and the database. It adds the `pg_hba.conf` line for the replication connection of `recipe_replicator` (`data-model.md` section 5.1).
 - The server binary has a `migrate` subcommand: `recipe-server migrate`. The Compose service `migrate` runs it once (`restart: no`). It is the only service that holds the migrator secret. The `app` service never connects as `recipe_migrator`. At startup `app` checks that `current_user` is `recipe_app`, is not a superuser, and owns no table. It refuses to serve otherwise.
 - The migrator takes an advisory lock. Two migrators cannot run at the same time.
-- Every migration sets `lock_timeout` to `migrate.lock_timeout`. The migrator retries a migration that failed on `55P03` up to `migrate.retries` times with a pause of `migrate.retry_pause` (section 7.11). A migration that must build an index on a large table uses `CREATE INDEX CONCURRENTLY` in a file that starts with `-- no-transaction`. CI rejects a migration that rewrites a table (`ALTER TABLE ... TYPE`, `ADD COLUMN ... DEFAULT <volatile>`) on the five largest tables.
+- Every migration sets `lock_timeout` to `migrate.lock_timeout`. The migrator retries a migration that failed on `55P03` up to `migrate.retries` times with a pause of `migrate.retry_pause` (section 7.11). A migration that must build an index on a large table uses `CREATE INDEX CONCURRENTLY` in a file that starts with `-- no-transaction`. CI rejects a migration that rewrites a table or scans it under an exclusive lock (`ALTER TABLE ... TYPE`, `ADD COLUMN ... DEFAULT <volatile>`, `SET NOT NULL` without a valid `CHECK (... IS NOT NULL)` first). The rule applies to every table (`data-model.md` 8).
+- CI starts a fresh cluster, runs `01-roles.sh`, and applies `0001` to `0004` as `recipe_migrator`. Then it runs the grants test of `data-model.md` 5.3. A migration that fails as `recipe_migrator` therefore fails the build.
 - A breaking change uses the expand-and-contract pattern across releases: release N adds the new column or table and writes both. Release N+1 reads the new one. Release N+2 deletes the old one.
 - Start order in Compose: `db` healthy → `backup-premigrate` (one-shot `pg_dump` with suffix `_premigrate`) completed → `migrate` completed → `app` → `proxy`. The `depends_on` conditions encode this chain (section 7.1). The upgrade procedure in 7.10 depends on the `_premigrate` dump.
 - The first administrator is not a migration. `recipe-server create-admin` reads the login from an argument and the password from stdin or from a secret file. It does nothing when an active administrator exists. It sets `must_change_password`. The Compose file does not run it. The runbook runs it once after the first `migrate`.
@@ -405,9 +409,9 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 |---|---|---|---|
 | Unit, domain | `recipe-domain` | `cargo test`, no I/O | Every invariant in `domain-model.md` section 3 has at least one passing and one failing test. Every domain error variant (below 030 and `E-RCP-050..069`) is produced by at least one test |
 | Unit, use case | `recipe-app` | In-memory implementations of all ports | Every command in `domain-model.md` section 5 has tests for success, each listed error, and the audit entry it writes. `SetParameterValue` leaves limit and translation rows unchanged. `ReplaceLimits` leaves the value unchanged. Separation of duties: the creator and each editor of a draft get `E-RCP-015`. Limit completeness: a numeric leaf without a limit blocks approval with `E-RCP-016` |
-| Permission matrix | `recipe-app` | Generated test from the matrix in `api.md` section 3 | One test per (operation, role) pair, for commands and for queries. The test asserts `Ok` or `AppError::Forbidden`. A new use case without a matrix row fails the build. `EnsureDerivedType` is an internal operation, not a use case, and has no matrix row. A demoted user with an open session gets `Forbidden` on the next request |
+| Permission matrix | `recipe-app` | Generated test from the matrix in `api.md` section 3 | One test per (operation, role) pair, for commands and for queries. The test asserts `Ok` or `AppError::Forbidden`. A new use case without a matrix row fails the build. `EnsureDerivedType` is an internal operation, not a use case, and has no matrix row. A demoted user with an open session gets `AppError::Unauthenticated` (`401 E-WEB-004`) on the next request, not `Forbidden`, because `SetUserRole` deletes the sessions of the user and increments `session_epoch` |
 | Property | `recipe-domain` | `proptest` | `UnitPath`, `S7Address`, `ReferenceNumber`, `LeafPath` round-trip through `parse` and `Display`. `ParameterValue::validate` against random `TypeTree`s up to depth 6 with random limits: a generated valid value passes, a mutated value fails. `S7Layout`: random sets of parameters in one data block, overlap and misalignment are always detected, non-overlapping aligned sets always pass |
-| Integration, storage | `recipe-db` | `testcontainers` with the pinned `postgres` image, or `DATABASE_URL` of a Compose database in CI | Every `CHECK`, `UNIQUE`, FK, partial index, and trigger in `data-model.md` has a test that violates it and asserts the SQLSTATE and the trigger code. Every forbidden version transition (`approved→draft`, `retired→approved`, `retired→draft`, undelete of a discarded draft, change of `number`, `recipe_id`, `based_on_version_id`, `content_sha256`) is attempted as `recipe_app` and fails with `E-RCP-033`. The grants of `recipe_app` (`role_table_grants`, `role_column_grants`) equal a checked-in list. `RemoveParameter` on a parameter with limits and translations succeeds. A second `STRING(20)` on one machine succeeds. Every transactional operation in `data-model.md` section 6 has a test that fails midway and asserts no partial write |
+| Integration, storage | `recipe-db` | `testcontainers` with the pinned `postgres` image, or `DATABASE_URL` of a Compose database in CI | Every `CHECK`, `UNIQUE`, FK, partial index, and trigger in `data-model.md` has a test that violates it and asserts the SQLSTATE and the trigger code. As `recipe_app`, an update of a column outside the UPDATE grant of `recipe_version` (`number`, `recipe_id`, `based_on_version_id`) fails with SQLSTATE `42501` before any trigger runs. The test fixture runs the forbidden version transitions as the table owner `recipe_migrator`. These are `approved→draft`, `retired→approved`, `retired→draft`, and the undelete of a discarded draft. They also include a change of `number`, `recipe_id`, `based_on_version_id`, or `content_sha256`. Each one fails with `E-RCP-033`. The grants of `recipe_app` (`role_table_grants`, `role_column_grants`) equal a checked-in list. `RemoveParameter` on a parameter with limits and translations succeeds. A second `STRING(20)` on one machine succeeds. Every transactional operation in `data-model.md` section 6 has a test that fails midway and asserts no partial write |
 | Concurrency | `recipe-db` | Two connections | Two approvals of the same draft with the same `row_version`: exactly one writes. The other returns `AlreadyApproved` and writes no audit entry. An approval with an older `row_version` gets `E-WEB-001`. Two parallel audit inserts get consecutive `chain_seq` values, and the chain check passes. A parameter insert during an approval waits and then fails with `E-RCP-031`. `DeleteRecipe` during `ApproveVersion`: the second one fails. Two edits with the same `row_version`: exactly one succeeds. Two concurrent failed logins: both count |
 | HTTP | `recipe-web` | `tower::ServiceExt::oneshot` with in-memory ports | Every route: status code, error code in the body, `X-Request-Id` header, security headers, no secret in the body. Login, logout, session expiry, session epoch invalidation, CSRF rejection, pre-session CSRF on `/login` and `/lang`, `must_change_password` gate. An XSS payload corpus through every text field |
 | Load | `recipe-web` with Compose database | `oha` | Login flood: 200 concurrent `POST /login` with random logins. The container stays under its memory limit, no request waits more than 5 seconds, and the Argon2 semaphore returns `503` under load. A version at the size budget: `CreateVersion`, `ApproveVersion`, and the version page each finish under 10 seconds |
@@ -429,11 +433,11 @@ Coverage target: 80 % line coverage per crate, measured with `cargo llvm-cov`. T
 | `app` | `recipe-server` | The application and its supervised jobs, `alerts` included (2.4). Public listener on 8080 (`expose`, never `ports`). Internal listener on 9000 | `always` | `GET http://localhost:9000/readyz` every `health.check_interval`. `health.check_failures` failures mark it unhealthy |
 | `db` | `postgres:16.<x>-bookworm`, pinned | Database. `POSTGRES_INITDB_ARGS="--data-checksums --lc-collate=C --lc-ctype=C.UTF-8"`. Port 5432 not published | `always` | `pg_isready` every `health.check_interval` |
 | `backup` | same base image as `db` with cron | Daily `pg_dump`, `backup-now` one-shot command, retention. Connects as `recipe_backup` | `always` | Latest dump younger than `backup.max_age_alert`. The backup path is not on the filesystem of `pgdata` |
-| `walarchive` | same base image as `db` | `pg_receivewal` to a bind mount on a second disk (A35, ADR-0020) | `always` | Latest WAL segment younger than `wal.max_age_alert` |
+| `walarchive` | same base image as `db` | `pg_receivewal` and the weekly `pg_basebackup` to a bind mount on a second disk (A35, ADR-0020). Connects as `recipe_replicator` over the replication protocol | `always` | Latest WAL segment younger than `wal.max_age_alert` |
 
 Seven services. Start order through `depends_on`: `db` (healthy) → `backup-premigrate` (completed successfully) → `migrate` (completed successfully) → `app` → `proxy`. `walarchive` and `backup` depend only on `db`.
 
-Secrets: every password is a Docker secret mounted as a file. The application reads `*_FILE` variables only. There is no env-file option. The superuser password exists only in `db` and in the initdb script.
+Secrets: every password is a Docker secret mounted as a file. The application reads `*_FILE` variables only. There is no env-file option. The superuser password exists only in `db` and in the initdb script. The secret `replicator_password` (`secrets.replicator_password_file` of 7.11) exists only in `db` and in `walarchive`. The initdb script creates `recipe_replicator` from it (`data-model.md` 5.1).
 
 Two more Docker secrets hold keys of 32 bytes. `login_hmac_key` is the HMAC-SHA256 key of `security_event.login_hmac`. `csrf_signing_key` signs the pre-session CSRF cookie (`api.md` 7.3). The keys `security.login_hmac_key_file` and `security.csrf_signing_key_file` of 7.11 name the files. A key file holds one key per line, the newest key first. The server writes and signs with the first key and accepts every key in the file. Rotation: the operator adds the new key as the first line. Both keys are accepted for `security.key_rotation_overlap`. Then the operator deletes the old line.
 
@@ -501,7 +505,7 @@ Pool size is `db.pool_size` connections for the application and `db.health_pool_
 - The `backup` service runs `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` daily at 02:00 UTC to the `backups` volume. File name `recipe_<YYYYMMDD_HHMM>.dump`. The same run writes `globals_<YYYYMMDD_HHMM>.sql` with `pg_dumpall --globals-only`, because roles are not inside a `pg_dump`.
 - Each dump has a manifest `<name>.sha256`. The restore script verifies the manifest before it restores.
 - Retention is 30 daily dumps. Older files are deleted after a successful new dump.
-- `walarchive` streams WAL with `pg_receivewal --synchronous` to a bind mount on a second disk. A weekly `pg_basebackup` goes to the same disk. Recovery point objective: minutes. Recovery time objective: 1 hour (ADR-0020). Without the second disk the recovery point objective is 24 hours (A35).
+- `walarchive` streams WAL with `pg_receivewal --synchronous` to a bind mount on a second disk. A weekly `pg_basebackup` goes to the same disk. Both connect as `recipe_replicator`, which the `pg_hba.conf` line of `data-model.md` 5.1 admits. Recovery point objective: minutes. Recovery time objective: 1 hour (ADR-0020). Without the second disk the recovery point objective is 24 hours (A35).
 - The backup healthcheck fails when the backup path and `pgdata` are on the same filesystem.
 - The latest dump and the WAL archive are copied to the external backup storage by a site procedure (ADR-0020). The dump contains password hashes and the audit log. The site procedure MUST protect the copies with the same access control as the database.
 - A restore test runs each week and before each release. The script restores the latest dump into a scratch database. It counts the rows in each table and compares the counts with the source. It runs the audit chain check of `data-model.md` 4.9. It writes the result to the event log. A failed restore test is an `ERROR` event.
@@ -544,7 +548,7 @@ Disk space policy (Assumption A24):
 
 ### 7.11 Settings
 
-This table is the single source for every numeric setting. The configuration file uses the key in the first column. Other documents link here.
+This table is the single source for every numeric setting. The configuration file uses the key in the first column. Other documents link here. A value repeated elsewhere must equal this table.
 
 | Key | Value | Used by |
 |---|---|---|
@@ -565,6 +569,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `security.login_hmac_key_file` | `/run/secrets/login_hmac_key`. 32 bytes. HMAC-SHA256 key of `security_event.login_hmac` | 7.1, data-model.md 3.8 |
 | `security.csrf_signing_key_file` | `/run/secrets/csrf_signing_key`. 32 bytes. Signing key of the pre-session CSRF cookie | 7.1, api.md 7.3 |
 | `security.key_rotation_overlap` | 24 h. The old and the new key are both accepted | 7.1 |
+| `secrets.replicator_password_file` | `/run/secrets/replicator_password`. Password of `recipe_replicator`, read by the initdb script and by `walarchive` | 7.1, 7.7, data-model.md 5.1 |
 | `i18n.lang_cookie_max_age` | 365 days. Cookie `recipe_lang` | api.md 8 |
 | `approval.separation_of_duties` | `true` | 7.12, api.md 3.2, ADR-0022 (A34) |
 | `http.request_timeout` | 30 s | 7.4 |

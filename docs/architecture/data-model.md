@@ -30,8 +30,11 @@ Exceptions to the rules above:
 
 | Table | Exception | Reason |
 |---|---|---|
-| `login_attempt`, `security_event`, `audit_log` | `attempted_at` or `occurred_at` instead of `created_at`. No `updated_at` | Append-only event rows |
-| `session` | `id` is the SHA-256 of the cookie token, not a UUID | The raw token never reaches the database |
+| `security_event`, `audit_log` | `occurred_at` instead of `created_at`. No `updated_at` | Append-only event rows |
+| `login_attempt` | `attempted_at` instead of `created_at`. No `updated_at`, although `Login` T2 updates the row | Counter row. The only update sets `succeeded` once (section 6) |
+| `session` | `id` is the SHA-256 of the cookie token, not a UUID. No `updated_at`, although the application updates the row | The raw token never reaches the database. `last_seen_at` records the last request |
+| `parameter` | No `updated_at`, although draft commands update the row | Every draft command sets `recipe_version.updated_at` through the touch statement (section 6). The version row records the last change |
+| `parameter_limit`, `parameter_translation` | Composite primary key, no `id`. No `updated_at`, although `ReplaceLimits` and `UpsertTranslation` change the rows | Child rows of one parameter. The touch statement of section 6 records the last change on the version row |
 | `plc_type` | `created_at` cannot be set by `recipe_app` (column-level INSERT grant) | Trigger 4.6 uses `created_at = now()` to detect the creating transaction |
 | `audit_chain_head` | One row with the key `singleton BOOLEAN`. No `id`, no `created_at` | The row holds the end of the audit hash chain (4.9) |
 
@@ -431,7 +434,7 @@ CREATE INDEX plc_type_machine_id_idx ON plc_type (machine_id);
 CREATE INDEX plc_type_supersedes_type_id_idx ON plc_type (supersedes_type_id);
 ```
 
-`EnsureDerivedType` (internal operation, `domain-model.md` 5.1) creates a `STRING(n)`, `WSTRING(n)`, or array row with `INSERT ... ON CONFLICT DO NOTHING` on the matching unique index, then re-selects the row. Two concurrent calls get the same row. Before the insert it takes the advisory lock of `domain-model.md` 5.1. `DefineUdt` takes the same kind of lock for the struct name. Neither takes a row lock on `plc_type`, because `recipe_app` has no `UPDATE` grant on it.
+`EnsureDerivedType` (internal operation, `domain-model.md` 5.1) resolves a `TypeExpr` of `domain-model.md` 2.1, the innermost element first. It creates a missing `STRING(n)`, `WSTRING(n)`, or array row with `INSERT ... ON CONFLICT DO NOTHING` on the matching unique index, then re-selects the row. Two concurrent calls get the same row. Before the insert it takes the advisory lock of `domain-model.md` 5.1. `DefineUdt` takes the same kind of lock for the struct name. Neither takes a row lock on `plc_type`, because `recipe_app` has no `UPDATE` grant on it.
 
 The domain checks the absence of cycles (I8), the platform of all members, and the string length per platform (the `StringLength` table of `domain-model.md` 2.1). The database does not check these rules.
 
@@ -694,7 +697,7 @@ CREATE TABLE parameter (
     s7_address         TEXT,
     -- JSON tree with the shape of the type tree. Numbers are canonical decimals. See section 9.
     value              JSONB COMPRESSION lz4 NOT NULL,
-    -- Sort order inside the unit. Not unique. The export sorts equal values by tag
+    -- Sort order of the UI inside the unit. Not unique. UI only, not exported
     -- (api.md 6.3). At most parameter.ordinal_max (reliability.md 7.11).
     ordinal            INTEGER NOT NULL DEFAULT 0,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -740,7 +743,8 @@ CREATE TABLE parameter_limit (
     recipe_version_id  UUID NOT NULL,
     -- '' means the parameter itself (primitive type). '[*]' means every element
     -- of an array at that level. The LeafPath grammar of domain-model.md 2.1 is the
-    -- definition. An index segment has 1 to 3 indices and never contains '*'.
+    -- definition. An index segment has 1 to 3 indices and never contains '*'. An index
+    -- has at most 10 digits. The domain bounds its value to the INTEGER range.
     leaf_path          TEXT NOT NULL DEFAULT '',
     min_value          NUMERIC,
     max_value          NUMERIC,
@@ -751,7 +755,7 @@ CREATE TABLE parameter_limit (
         FOREIGN KEY (parameter_id, recipe_version_id)
         REFERENCES parameter (id, recipe_version_id) ON DELETE CASCADE,
     CONSTRAINT parameter_limit_path_format CHECK (
-        leaf_path ~ '^(\.[A-Za-z_][A-Za-z0-9_]{0,63}|\[(\*|-?[0-9]{1,9}(,-?[0-9]{1,9}){0,2})\])*$'
+        leaf_path ~ '^(\.[A-Za-z_][A-Za-z0-9_]{0,63}|\[(\*|-?[0-9]{1,10}(,-?[0-9]{1,10}){0,2})\])*$'
     ),
     CONSTRAINT parameter_limit_min_le_max CHECK (
         min_value IS NULL OR max_value IS NULL OR min_value <= max_value
@@ -890,9 +894,9 @@ The table has an `id` column, because `audit_log.entity_id` and `audit_log.aggre
 
 ## 4. Triggers and functions
 
-All trigger functions are `LANGUAGE plpgsql` with `SET search_path = pg_catalog, public, pg_temp`. The `SECURITY DEFINER` functions of 4.9 and 4.12 also schema-qualify every name. Each one raises with `ERRCODE = 'check_violation'` (SQLSTATE 23514) and a message that starts with an error code from the trigger ranges of `reliability.md` section 1.2. `recipe-db` maps the code to `DbError::Constraint { code, message }`. A trigger fires only when the domain check was bypassed. It is a defence in depth, not the first line.
+All trigger functions are `LANGUAGE plpgsql` with `SET search_path = pg_catalog, public, pg_temp`. The `SECURITY DEFINER` functions of 4.9 and 4.12 also schema-qualify every name. Each one raises with `ERRCODE = 'check_violation'` (SQLSTATE 23514) and a message that starts with an error code from the trigger ranges of `reliability.md` section 1.2. `recipe-db` maps the code to `StorageError::Constraint { code, message }` of `recipe-app`. A trigger fires only when the domain check was bypassed. It is a defence in depth, not the first line.
 
-### 4.1 `enforce_version_mutable` (I3, I4)
+### 4.1 `enforce_version_mutable` (I3)
 
 Rows of `parameter`, `parameter_limit`, and `parameter_translation` can change only while the version is a live draft. The function locks the version row with `FOR SHARE`, so a concurrent `ApproveVersion` (which holds `FOR UPDATE`) and a parameter write cannot interleave. A cascaded child delete whose parent is already gone returns `OLD`.
 
@@ -1259,7 +1263,7 @@ CREATE TRIGGER audit_log_hash_chain
     FOR EACH ROW EXECUTE FUNCTION audit_hash_chain();
 ```
 
-The application sends `chain_seq`, `prev_hash`, and `entry_hash` as NULL. The trigger sets all three. No login role holds `UPDATE` or `DELETE` on `audit_log` (section 5). `recipe_migrator` gets them only through `SET ROLE audit_owner`, and only a migration runs that statement (section 5.1). The chain can therefore break only through the superuser or through a migration. The nightly check detects both.
+The application sends `chain_seq`, `prev_hash`, and `entry_hash` as NULL. The trigger sets all three. No login role holds `UPDATE` or `DELETE` on `audit_log` (section 5). After `0003_grants.sql`, `recipe_migrator` holds no privilege on the audit objects. It can get them only through `SET ROLE audit_owner` (section 5.1). The chain can therefore break only through the superuser or through a migration. The nightly check detects both.
 
 The supervised job `audit_chain_check` runs the check every night at `audit_chain.check_time` (`reliability.md` 7.11). It runs both queries in one `REPEATABLE READ READ ONLY` transaction, so the rows and the head come from one snapshot. It recomputes every hash in `chain_seq` order:
 
@@ -1387,13 +1391,15 @@ Roles are cluster-wide. Migrations never create roles. The `db` container create
 
 ```sql
 -- deploy/db/initdb/01-roles.sh (SQL body; passwords come from /run/secrets/*)
-CREATE ROLE recipe_migrator LOGIN PASSWORD :'migrator_password';   -- owner of the schema
-CREATE ROLE recipe_app      LOGIN PASSWORD :'app_password';        -- runtime, least privilege
-CREATE ROLE recipe_backup   LOGIN PASSWORD :'backup_password';     -- pg_dump only
-CREATE ROLE audit_owner     NOLOGIN;                                -- owner of audit tables
+CREATE ROLE recipe_migrator   LOGIN PASSWORD :'migrator_password';     -- owner of the schema
+CREATE ROLE recipe_app        LOGIN PASSWORD :'app_password';          -- runtime, least privilege
+CREATE ROLE recipe_backup     LOGIN PASSWORD :'backup_password';       -- pg_dump only
+CREATE ROLE recipe_replicator LOGIN REPLICATION
+                              PASSWORD :'replicator_password';         -- walarchive only
+CREATE ROLE audit_owner       NOLOGIN;                                  -- owner of audit tables
 GRANT pg_read_all_data TO recipe_backup;
--- recipe_migrator transfers the audit tables to audit_owner in 0003. INHERIT FALSE:
--- the migrator holds no privilege of audit_owner unless a migration runs SET ROLE.
+-- 0003 transfers the audit objects to audit_owner. ALTER ... OWNER TO needs membership
+-- in the new owner. INHERIT FALSE: the migrator inherits no privilege of audit_owner.
 GRANT audit_owner TO recipe_migrator WITH INHERIT FALSE;
 CREATE DATABASE recipe OWNER recipe_migrator;
 REVOKE TEMPORARY ON DATABASE recipe FROM PUBLIC;
@@ -1401,7 +1407,15 @@ REVOKE CONNECT ON DATABASE recipe FROM PUBLIC;
 GRANT CONNECT ON DATABASE recipe TO recipe_migrator, recipe_app, recipe_backup;
 ```
 
-`recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. It does not inherit the privileges of `audit_owner`, so it has no `UPDATE` or `DELETE` on the audit tables. Only a migration runs `SET ROLE audit_owner`, only for a change of an audit object, and it runs `RESET ROLE` in the same file. Residual risk: the migrator credential can still run `SET ROLE audit_owner`. The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose any rewrite. A restore from backup also re-creates the roles with `pg_dumpall --globals-only` (`reliability.md` section 7.7).
+The same script then adds one line to `pg_hba.conf`. `COMPOSE_SUBNET` is the subnet of the internal Compose network, set in `deploy/compose.yaml`:
+
+```sh
+echo "host replication recipe_replicator ${COMPOSE_SUBNET} scram-sha-256" >> "${PGDATA}/pg_hba.conf"
+```
+
+`recipe_replicator` reads the Docker secret `replicator_password` (`secrets.replicator_password_file`, `reliability.md` 7.11). It has the `REPLICATION` attribute, no `CONNECT` grant on the database, and no grant on any table. The service `walarchive` uses it for `pg_receivewal` and for the weekly `pg_basebackup`. The `pg_hba.conf` line accepts it only for replication connections from the Compose subnet.
+
+`recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. The membership exists because PostgreSQL 16 allows `ALTER ... OWNER TO audit_owner` only to a member of `audit_owner`. The migrator does not inherit the privileges of `audit_owner`. `0003_grants.sql` runs every grant on the audit objects first, while `recipe_migrator` still owns them. Then it transfers the ownership. The implicit privileges of the old owner move to the new owner, and `audit_owner` becomes the grantor of the earlier grants. After the transfer, `recipe_migrator` holds no privilege on the audit objects. `0003_grants.sql` does not use `SET ROLE`. Only a later migration that must change an audit object runs `SET ROLE audit_owner`, and it runs `RESET ROLE` in the same file. Residual risk: the migrator credential can still run `SET ROLE audit_owner`. The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose any rewrite. A restore from backup also re-creates the roles with `pg_dumpall --globals-only` (`reliability.md` section 7.7).
 
 ### 5.2 Grants (`0003_grants.sql`, runs as `recipe_migrator`)
 
@@ -1409,8 +1423,20 @@ GRANT CONNECT ON DATABASE recipe TO recipe_migrator, recipe_app, recipe_backup;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO recipe_app, recipe_backup, audit_owner;
 
--- Ownership transfer to audit_owner. ALTER ... OWNER TO needs CREATE on the schema
--- for the new owner. audit_owner holds CREATE only for these statements.
+-- Step 1. Every GRANT on the audit objects runs first, while recipe_migrator owns them.
+-- Read everything, now and for tables added by later migrations.
+-- audit_chain_head gets SELECT only, through this statement.
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO recipe_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE recipe_migrator IN SCHEMA public
+    GRANT SELECT ON TABLES TO recipe_app;
+-- Audit tables: INSERT only. The identity columns need no sequence grant.
+GRANT INSERT ON audit_log, security_event TO recipe_app;
+-- The only path that deletes security_event rows (4.12).
+GRANT EXECUTE ON FUNCTION security_event_purge() TO recipe_app;
+
+-- Step 2. Ownership transfer to audit_owner. No SET ROLE. ALTER ... OWNER TO needs
+-- CREATE on the schema for the new owner. audit_owner holds CREATE only for these
+-- statements. The grants of step 1 stay, and audit_owner becomes their grantor.
 GRANT CREATE ON SCHEMA public TO audit_owner;
 ALTER TABLE audit_log        OWNER TO audit_owner;
 ALTER TABLE audit_chain_head OWNER TO audit_owner;
@@ -1419,14 +1445,11 @@ ALTER FUNCTION audit_canonical(audit_log) OWNER TO audit_owner;
 ALTER FUNCTION audit_hash_chain()         OWNER TO audit_owner;
 ALTER FUNCTION security_event_purge()     OWNER TO audit_owner;
 REVOKE CREATE ON SCHEMA public FROM audit_owner;
-REVOKE ALL ON audit_log, audit_chain_head, security_event FROM recipe_migrator;
+-- No REVOKE from recipe_migrator follows. The implicit privileges of the old owner
+-- moved to audit_owner with the ownership.
 
--- Read everything, now and for tables added by later migrations.
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO recipe_app;
-ALTER DEFAULT PRIVILEGES FOR ROLE recipe_migrator IN SCHEMA public
-    GRANT SELECT ON TABLES TO recipe_app;
-
--- Inserts.
+-- Step 3. Grants on the tables that recipe_migrator keeps.
+-- Inserts. Identity columns need no sequence grant.
 GRANT INSERT ON machine, unit, plc_type_member, app_user, session, login_attempt,
                 recipe, recipe_version, draft_editor, parameter, parameter_limit,
                 parameter_translation, app_setting
@@ -1435,11 +1458,6 @@ GRANT INSERT ON machine, unit, plc_type_member, app_user, session, login_attempt
 GRANT INSERT (id, kind, name, platforms, size_bytes, string_length, element_type_id,
               dim_lower, dim_upper, machine_id, revision, supersedes_type_id)
     ON plc_type TO recipe_app;
--- Audit tables are owned by audit_owner. INSERT only. audit_chain_head: SELECT only.
-GRANT INSERT ON audit_log, security_event TO recipe_app;
-GRANT USAGE ON SEQUENCE audit_log_id_seq, security_event_id_seq, login_attempt_id_seq TO recipe_app;
--- The only path that deletes security_event rows (4.12).
-GRANT EXECUTE ON FUNCTION security_event_purge() TO recipe_app;
 
 -- Updates: column-level. Identifier and structure columns are not updatable.
 GRANT UPDATE (name, plc_platform, archived_at, updated_at) ON machine TO recipe_app;
@@ -1484,7 +1502,7 @@ GRANT DELETE ON session, login_attempt, draft_editor, parameter, parameter_limit
 
 ### 5.3 Grant test
 
-A storage test (`reliability.md` section 6) runs as `recipe_app` after the migrations and compares `information_schema.role_table_grants` and `information_schema.role_column_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2, also the column grant `UPDATE (succeeded)` on `login_attempt`. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. The same test checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role.
+CI starts a fresh cluster, runs `01-roles.sh`, and applies `0001` to `0004` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app` and compares `information_schema.role_table_grants` and `information_schema.role_column_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2, also the column grant `UPDATE (succeeded)` on `login_attempt`. It holds no sequence grant. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role.
 
 ## 6. Transactional operations
 
@@ -1507,37 +1525,37 @@ Rules:
 | `CreateMachine` | RC | none | `INSERT machine`. `INSERT unit` (path `U1`) | `MachineCreated`, `UnitAdded` | `machine_code_live_unique` → `DuplicateMachineCode` |
 | `RenameMachine` | RC | `machine FOR UPDATE` | `UPDATE machine SET name` | `MachineRenamed` | `archived_at IS NOT NULL` → `MachineArchived` |
 | `ArchiveMachine` | RC | `machine FOR UPDATE`, then every recipe of the machine `FOR UPDATE` | Require no live draft (`SELECT 1 FROM recipe_version v JOIN recipe r ... WHERE status='draft' AND v.deleted_at IS NULL`). `UPDATE machine SET archived_at = now()`. Recipes stay readable | `MachineArchived` | Draft found → `MachineHasDraft` |
-| `AddUnit` | RC | `machine FOR SHARE`, then parent `unit FOR SHARE` | `INSERT unit` | `UnitAdded` | `unit_path_unique` → `DuplicateUnitPath`. `unit_depth_range` → `UnitDepthExceeded`. `unit_parent_exists` → `ParentNotFound`. Parent archived → `UnitArchived`. Machine archived → `MachineArchived` |
+| `AddUnit` | RC | `machine FOR SHARE`, then parent `unit FOR SHARE` | `INSERT unit` | `UnitAdded` | `unit_path_unique` → `DuplicateUnitPath`. `unit_depth_range` → `UnitDepthExceeded` (the domain raises `E-PLT-002` first in `UnitPath::parse`, so the `CHECK` is the last line). `unit_parent_exists` → `ParentNotFound`. Parent archived → `UnitArchived`. Machine archived → `MachineArchived` |
 | `RenameUnit` | RC | `unit FOR UPDATE` | `UPDATE unit SET name` | `UnitRenamed` | `UnitArchived` |
 | `ArchiveUnit` | RC | `machine FOR UPDATE`, then `unit FOR UPDATE` on the unit and its descendants (`WHERE machine_id = $m AND (path = $p OR path LIKE $p \|\| '.%')`) | Require no parameter of an approved version or a live draft on these units. `UPDATE unit SET archived_at = now()` for the set | `UnitArchived` (one entry per unit) | Draft reference found → `UnitReferencedByDraft`. Approved reference found → `UnitReferencedByApproved`. Last live main unit → `LastMainUnit` |
-| `DefineUdt` | RC | `pg_advisory_xact_lock(hashtextextended(machine_id::text \|\| ':' \|\| name, 0))` with the struct name (`domain-model.md` 5.1). No row lock on `plc_type` | `INSERT plc_type` (struct, `revision = previous + 1`, `supersedes_type_id`). `INSERT plc_type_member` per member. Trigger 4.6 checks at commit | `UdtDefined` | `plc_type_named_unique` → `DuplicateTypeName` (second line behind the advisory lock). Domain: `TypeCycle`, `MemberTypeNotOnPlatform`, `DerivedTypeInvalid`, `StructHasNoMembers`. Then the domain marks parameters that use the old revision as outdated (`RebindTypeRevision` is a separate draft command) |
-| `EnsureDerivedType` (internal, called inside the transaction of the caller) | of the caller | After the locks of the caller: the advisory lock of `domain-model.md` 5.1 with the key `STRING`, `WSTRING`, or `ARRAY` | `INSERT plc_type ... ON CONFLICT DO NOTHING` on `plc_type_string_unique` or `plc_type_array_unique`. `SELECT` the row | `DerivedTypeCreated` (only when a row was inserted) | Domain: `DerivedTypeInvalid` |
+| `DefineUdt` | RC | `pg_advisory_xact_lock(hashtextextended(machine_id::text \|\| ':' \|\| name, 0))` with the struct name (`domain-model.md` 5.1). No row lock on `plc_type` | `INSERT plc_type` (struct `name`, `revision = previous + 1`, `supersedes_type_id`). `EnsureDerivedType` resolves the `TypeExpr` of each `members[i].type`. `INSERT plc_type_member` per entry of `members[]`: `members[i].name` into `member_name`, the resolved type into `member_type_id`. Trigger 4.6 checks at commit | `UdtDefined` | `plc_type_named_unique` → `DuplicateTypeName` (second line behind the advisory lock). Domain: `TypeCycle`, `MemberTypeNotOnPlatform`, `DerivedTypeInvalid`, `StructHasNoMembers`. Then the domain marks parameters that use the old revision as outdated (`RebindTypeRevision` is a separate draft command) |
+| `EnsureDerivedType` (internal, called inside the transaction of the caller) | of the caller | After the locks of the caller: the advisory lock of `domain-model.md` 5.1 with the key `STRING`, `WSTRING`, or `ARRAY` | Parse the `TypeExpr` (`domain-model.md` 2.1). Resolve it, the innermost element first. A primitive: `SELECT` by `name` with `machine_id IS NULL`. A struct: `SELECT` by `(machine_id, name, revision)`. A `STRING(n)`, a `WSTRING(n)`, or an array: `INSERT plc_type ... ON CONFLICT DO NOTHING` on `plc_type_string_unique` or `plc_type_array_unique`, then `SELECT` the row | `DerivedTypeCreated` (one entry per inserted row) | Domain: `DerivedTypeInvalid` (parse error, unknown struct or revision, type not on the platform, more than 3 dimensions) |
 | `CreateRecipe` | RC | `machine FOR SHARE` | `INSERT recipe`. `INSERT recipe_version` (number 1, draft, `change_note` from the user) | `RecipeCreated`, `VersionCreated` | `recipe_reference_unique` → `DuplicateReference`. Machine archived → `MachineArchived` |
 | `RenameRecipe` | RC | `recipe FOR UPDATE` | `UPDATE recipe SET name` | `RecipeRenamed` | `RecipeDeleted` |
 | `DeleteRecipe` | RC | `recipe FOR UPDATE`, then its versions `FOR UPDATE` | Require no approved version. For `ProcessEngineer` also require no retired version. `UPDATE recipe_version SET deleted_at = now()` for the live draft. `UPDATE recipe SET deleted_at = now()` | `DraftDiscarded` (when a draft existed), `RecipeDeleted` | Approved found → `RecipeHasApprovedVersion`. Retired found and role is ProcessEngineer → `RecipeHasRetiredVersion` |
 | `RestoreRecipe` | RC | `recipe FOR UPDATE` | Require `deleted_at IS NOT NULL` and `machine.archived_at IS NULL`. `UPDATE recipe SET deleted_at = NULL` | `RecipeRestored` | Not deleted → `RecipeNotDeleted`. Machine archived → `MachineArchived` |
 | `CreateVersion` | RC | `recipe FOR UPDATE`, then `unit FOR SHARE` on the units that the parameters of `based_on` use | Check `archived_at IS NULL` on these units again. `SELECT max(number)`. `INSERT recipe_version` (draft, `based_on_version_id`). `INSERT parameter SELECT ... FROM parameter WHERE recipe_version_id = $based_on` (new `id`, same `parameter_key`). `INSERT parameter_limit SELECT ...` and `INSERT parameter_translation SELECT ...` with the new `recipe_version_id`. Before the transaction: check the snapshot (live units, live machine, types on platform, size budgets) and return the list of parameters that need a change | `VersionCreated` | `recipe_version_one_live_draft` → `DraftAlreadyExists`. Snapshot not valid → `ValidationFailed` with the list. Budget exceeded → `SizeBudgetExceeded`. `RecipeDeleted`. Machine archived → `MachineArchived`. Validation timeout → `Timeout` (`E-WEB-009`) |
 | `DiscardDraft` | RC | `recipe FOR UPDATE`, `recipe_version FOR UPDATE` | `UPDATE recipe_version SET deleted_at = now() WHERE id = $v AND status = 'draft' AND deleted_at IS NULL AND row_version = $expected` | `DraftDiscarded` | 0 rows → `VersionNotDraft` or `ConcurrentEdit`. `RecipeDeleted` |
-| `AddParameter` | RC | `recipe FOR UPDATE`, `recipe_version FOR UPDATE`, touch, `unit FOR SHARE` | `INSERT draft_editor`. `INSERT parameter` with a new `parameter_key` generated on the server (A40). `INSERT parameter_limit` rows. Triggers 4.1, 4.2, 4.3, 4.10 | `ParameterAdded` | `parameter_tag_unique` → `DuplicateTag`. Unit archived → `UnitArchived`. Domain: `S7AddressRequired`, `S7AddressNotAllowed`, `S7AddressOverlap`, `S7AddressMisaligned`, `TypeNotOnPlatform`, `DerivedTypeInvalid`, `SizeBudgetExceeded` |
-| `UpdateParameterDefinition` | RC | same as `AddParameter` | `INSERT draft_editor`. `UPDATE parameter SET unit_id, tag, name_en, description_en, plc_type_id, s7_address, ordinal WHERE id = $p AND recipe_version_id = $v`. When `plc_type_id` changed: `DELETE parameter_limit WHERE parameter_id = $p` and `INSERT` the sent limits, and `UPDATE parameter SET value` to the sent value. Limits and value stay unchanged when the type did not change | `ParameterDefinitionUpdated` | Same as `AddParameter` |
+| `AddParameter` | RC | `recipe FOR UPDATE`, `recipe_version FOR UPDATE` with the `row_version` compare, touch, `unit FOR SHARE` on the unit of `unit_path` | `INSERT draft_editor`. `EnsureDerivedType` resolves the `TypeExpr` of `type` to `plc_type_id`. `INSERT parameter` with `unit_id`, `tag`, `name_en`, `description_en`, `plc_type_id`, `s7_address`, `ordinal`, the `value` of the request, and a new `parameter_key` generated on the server (A40). `INSERT parameter_limit` per entry of `limits[]`: `leaf_path`, `min` into `min_value`, `max` into `max_value`, `max_length`. An empty `limits[]` inserts no row. Triggers 4.1, 4.2, 4.3, 4.10 | `ParameterAdded` | `parameter_tag_unique` → `DuplicateTag`. Unit archived → `UnitArchived`. Domain: `S7AddressRequired`, `S7AddressNotAllowed`, `S7AddressOverlap`, `S7AddressMisaligned`, `TypeNotOnPlatform`, `DerivedTypeInvalid`, `ValueShapeMismatch`, `ValueOutOfLimit`, `LimitOutsideTypeRange`, `LeafPathNotFound`, `MinGreaterThanMax`, `LimitNotApplicable`, `SizeBudgetExceeded` |
+| `UpdateParameterDefinition` | RC | same as `AddParameter`: the `row_version` compare, then `unit FOR SHARE` on the unit of `unit_path` | `INSERT draft_editor`. `EnsureDerivedType` resolves the `TypeExpr` of `type` to `plc_type_id`. `UPDATE parameter SET unit_id, tag, name_en, description_en, plc_type_id, s7_address, ordinal WHERE id = $p AND recipe_version_id = $v`. When `plc_type_id` changed, the request carries `value` and `limits[]`: `DELETE parameter_limit WHERE parameter_id = $p`, `INSERT parameter_limit` per entry of `limits[]` (`leaf_path`, `min` into `min_value`, `max` into `max_value`, `max_length`), and `UPDATE parameter SET value` to the `value` of the request. When the type did not change, the request carries neither, and the limits and the value stay unchanged | `ParameterDefinitionUpdated` | Same as `AddParameter`. A missing `value` after a type change → `ValueShapeMismatch` |
 | `SetParameterValue` | RC | same | `INSERT draft_editor`. `UPDATE parameter SET value WHERE id = $p AND recipe_version_id = $v`. Limit and translation rows are not touched | `ParameterValueSet` | `ValueShapeMismatch`, `ValueOutOfLimit`, `SizeBudgetExceeded` |
 | `ReplaceLimits` | RC | same | `INSERT draft_editor`. `DELETE parameter_limit WHERE parameter_id = $p`. `INSERT parameter_limit` for the sent set. Trigger 4.10 | `LimitsReplaced` | `LeafPathNotFound`, `LimitOutsideTypeRange`, `MinGreaterThanMax`, `LimitNotApplicable`, `ValueOutOfLimit` (the current value is outside the new limit), `SizeBudgetExceeded` |
 | `UpsertTranslation` | RC | same | `INSERT draft_editor`. `INSERT parameter_translation ... ON CONFLICT (parameter_id, lang) DO UPDATE SET name, description` | `TranslationUpserted` | `InvalidLangCode` |
 | `RemoveTranslation` | RC | same | `INSERT draft_editor`. `DELETE parameter_translation WHERE parameter_id = $p AND lang = $l` | `TranslationRemoved` | 0 rows → `TranslationNotFound` |
 | `RemoveParameter` | RC | same | `INSERT draft_editor`. `DELETE parameter WHERE id = $p AND recipe_version_id = $v` (cascade to limits and translations) | `ParameterRemoved` | 0 rows → `ParameterNotFound` |
-| `RebindTypeRevision` | RC | same | `INSERT draft_editor`. Check that `to_type_id` is a newer revision of the struct of `from_type_id` on the same machine. For every parameter of the draft whose type uses `from_type_id` (as the parameter type or as an array element type): `UPDATE parameter SET plc_type_id = $new, value = $mapped`. `EnsureDerivedType` gives each new array type. `DELETE` and `INSERT parameter_limit` with the mapped leaf paths. The domain maps by member name and checks every parameter before the first write | `TypeRevisionRebound` (one entry per parameter) | `RebindTargetInvalid`, `RebindNeedsValue` and `RebindDropsLimit` (one list entry per failing parameter), `ValueShapeMismatch`, `SizeBudgetExceeded` |
+| `RebindTypeRevision` | RC | same | `INSERT draft_editor`. Check that `to_type_id` is a newer revision of the struct of `from_type_id` on the same machine. For every parameter of the draft whose type uses `from_type_id` (as the parameter type or as an array element type): `UPDATE parameter SET plc_type_id = $new, value = $mapped`. `EnsureDerivedType` gives each new array type. `DELETE` and `INSERT parameter_limit` with the mapped leaf paths. The domain maps by member name and checks every parameter before the first write | `TypeRevisionRebound` (one entry per parameter) | `RebindTargetInvalid`, `RebindNeedsValue` and `RebindDropsLimit` (one list entry per failing parameter), `ValueShapeMismatch`, `SizeBudgetExceeded`, `DerivedTypeInvalid` (`E-PLT-013`, from `EnsureDerivedType` for a new array type) |
 | `ApproveVersion` | RC | `recipe FOR UPDATE`, `recipe_version FOR UPDATE` on the draft | Require `status = 'draft'` and `row_version = $expected`. Idempotent case: status already approved and `row_version = $expected + 1` → return `AlreadyApproved`, write nothing. Separation of duties: `SELECT 1 FROM draft_editor WHERE recipe_version_id = $v AND user_id = $approver` and `created_by = $approver` must both be empty when `approval.separation_of_duties` is on. Before the transaction: limit completeness, S7 overlap and alignment, and outdated types. A parameter with an outdated type stops the command unless the request carries `allow_outdated = true`. Inside the transaction the limit count is checked again. `UPDATE recipe_version SET status = 'retired', retired_at = now() WHERE recipe_id = $r AND status = 'approved' RETURNING id`. `UPDATE recipe_version SET status = 'approved', approved_by = $u, approved_at = now(), content_sha256 = $hash WHERE id = $v AND row_version = $expected` | `VersionRetired` (when a row was retired), `VersionApproved` (`after_state` holds `content_sha256` and `allow_outdated`) | `VersionNotDraft`, `DraftHasNoParameters`, `RecipeDeleted`, `ApproverEditedDraft`, `LimitMissing`, `ValidationFailed`, `S7AddressOverlap`, `S7AddressMisaligned`, `TypeRevisionOutdated` (only when `allow_outdated` is false), `ConcurrentEdit`. Validation timeout → `Timeout` (`E-WEB-009`). `recipe_version_one_approved` is the backstop for I1 |
 | `RetireVersion` | RC | `recipe FOR UPDATE`, `recipe_version FOR UPDATE` | `UPDATE recipe_version SET status = 'retired', retired_at = now() WHERE id = $v AND status = 'approved' AND row_version = $expected` | `VersionRetired` | 0 rows → `VersionNotApproved` or `ConcurrentEdit`. `RecipeDeleted` |
 | `CreateUser` | RC | none | The request has no password. Generate a one-time password and hash it (Argon2, outside the transaction). `INSERT app_user` with this hash and `must_change_password = true`. The one-time password is shown once | `UserCreated` (after state without hash) | `app_user_login_unique` → `DuplicateLogin`. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `SetUserRole` | SER | `app_user FOR UPDATE` | `SELECT count(*) FROM app_user WHERE role = 'administrator' AND is_active`. `UPDATE app_user SET role, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` | `UserRoleSet` | Count would become 0 → `LastAdministrator` |
 | `DeactivateUser` | SER | `app_user FOR UPDATE` | Same count check. `UPDATE app_user SET is_active = false, deactivated_at = now(), session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` | `UserDeactivated` | `LastAdministrator` |
 | `ActivateUser` | RC | `app_user FOR UPDATE` | `UPDATE app_user SET is_active = true, deactivated_at = NULL` | `UserActivated` | Already active → `UserAlreadyActive` |
-| `ResetPassword` | RC | `app_user FOR UPDATE` | `UPDATE app_user SET password_hash = $h, must_change_password = true, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` (all sessions of the target user) | `PasswordReset` (`after_state = {"user_id": ...}`) | Hash format `CHECK`. The one-time password is shown once. `PasswordPolicy`. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
+| `ResetPassword` | RC | `app_user FOR UPDATE` | `UPDATE app_user SET password_hash = $h, must_change_password = true, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` (all sessions of the target user) | `PasswordReset` (`after_state = {"user_id": ...}`) | Hash format `CHECK`. The server generates the one-time password, so no policy error exists. The one-time password is shown once. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `ChangeOwnPassword` | RC | `app_user FOR UPDATE` | Check the current password (Argon2, outside the transaction). `UPDATE app_user SET password_hash = $h, must_change_password = false, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u`. `INSERT session` for the current request with a new id, the new `session_epoch`, and a new `csrf_token`. The use case returns the new token, and `recipe-web` sets the cookie | `OwnPasswordChanged` | Wrong current password → `InvalidCurrentPassword` (422). A failed check also inserts a `login_attempt` row through `LoginAttemptStore`. New password outside the policy → `PasswordPolicy`. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `UnlockLogin` | RC | none | `DELETE login_attempt WHERE login = $l`. Commit with `LoginUnlocked`. After the commit, `SecurityEventSink` writes `security_event (kind = 'unlock')` | `LoginUnlocked` | — |
 | `Login` | RC, two transactions T1 and T2 (ADR-0014) | Before T1: one Argon2 permit (`argon2.acquire_timeout`, else `E-WEB-009`). T1: `pg_advisory_xact_lock(hashtextextended($login, 0))` | T1 through `LoginAttemptStore`: count the failures for `(login, client_ip)` and for `client_ip` in the throttle window → `n`. `INSERT login_attempt (succeeded = false) RETURNING id`. Commit. When `now() < last_failure + delay(n)` or the per-IP budget is exhausted: `SecurityEventSink` writes `security_event (login_throttled)`, and the use case releases the permit and returns 429 with `Retry-After`. Otherwise, outside a transaction: `SELECT app_user WHERE login`, Argon2 check (a dummy hash when the login is unknown or inactive), release the permit. T2 on success, through `UnitOfWork`: `UPDATE login_attempt SET succeeded = true WHERE id = $attempt` (`LoginAttemptStore`). `DELETE session WHERE id = $old` when the request carries a session cookie. `INSERT session (id = sha256(token), epoch = app_user.session_epoch, csrf_token)`. Commit with `UserLoggedIn`. The use case returns the token, and `recipe-web` sets the cookie. T2 on failure: `SecurityEventSink` writes `security_event (login_failed` or `login_rejected_inactive)`. The use case returns 401 with the same body and timing | `UserLoggedIn` (T2 on success). `entity_type = 'app_user'`, `entity_id` = user id, `after_state = {"session_ref": ...}` | `InvalidCredentials`, `UserInactive` (same response to the client), `LoginThrottled` (429), Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `Logout` | RC | none | Through `UnitOfWork`: `DELETE session WHERE id = $current`. Commit with `UserLoggedOut`. `recipe-web` clears the cookie | `UserLoggedOut`. `entity_type = 'app_user'`, `entity_id` = user id, `before_state = {"session_ref": ...}` | — |
-| `ExportVersion` | RC | `recipe_version FOR SHARE` | `SELECT` version, parameters, limits, types. `/approved` requires status approved. `/versions/{n}` accepts approved or retired. Rebuild the hashed body with the module `export` of `recipe-domain` and the array orders of `api.md` 6.3. Compare its SHA-256 with the stored `content_sha256`. The comparison is the same for an approved and a retired version | `VersionExported` (`after_state` holds version id, schema version, `content_sha256`) | No approved version → `NoApprovedVersion` (404). Draft or discarded → `VersionNotExportable` (409). Recipe deleted → `RecipeDeleted` (409, `/versions/{n}` only). Hash mismatch → `ContentHashMismatch` (`E-EXP-002`, 500, alert). Export timeout → `Timeout` (`E-WEB-009`) |
+| `ExportVersion` | RC | `recipe_version FOR SHARE` | `SELECT` version, parameters, limits, types. `/approved` requires status approved. `/versions/{n}` accepts approved or retired. Rebuild the hashed body with the module `export` of `recipe-domain` and the array orders of `api.md` 6.3. `parameters[]` is ordered by `unit_path`, segment by segment as integers, then by `tag` in byte order. `parameter.ordinal` is not exported and not hashed. Compare the SHA-256 of the hashed body with the stored `content_sha256`. The comparison is the same for an approved and a retired version | `VersionExported` (`after_state` holds version id, schema version, `content_sha256`) | No approved version → `NoApprovedVersion` (404). Draft or discarded → `VersionNotExportable` (409). Recipe deleted → `RecipeDeleted` (409, `/versions/{n}` only). Hash mismatch → `ContentHashMismatch` (`E-EXP-002`, 500, alert). Export timeout → `Timeout` (`E-WEB-009`) |
 | `cleanup` (supervised job, not a command) | RC, one short transaction per statement | none | Through `MaintenanceStore`: `DELETE session WHERE expires_at < now() OR created_at < now() - $absolute_timeout`. `DELETE login_attempt WHERE attempted_at < now() - $retention`. `SELECT security_event_purge()` | none | The job logs an error once at its loop boundary (`reliability.md` 2.4) |
 
 `delay(n)` is `0` for `n < 3`, otherwise `min(2^(n-3), 60)` seconds (`reliability.md` section 7.11).
@@ -1595,12 +1613,12 @@ Notes:
 - Files of the first release:
   - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`.
   - `0002_triggers.sql`: functions and triggers of section 4.
-  - `0003_grants.sql`: ownership transfer and grants of section 5.2.
+  - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. The insert uses `ON CONFLICT DO NOTHING`, so a re-run is idempotent.
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction with `SET LOCAL lock_timeout` to `migrate.lock_timeout`. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement.
-- CI rejects a migration that rewrites a table (`ALTER TABLE ... TYPE`, `SET NOT NULL` on a large table without a `CHECK` first, `ADD COLUMN ... DEFAULT` with a volatile default). Breaking changes use expand and contract.
+- CI rejects a migration that rewrites a table or scans it under an exclusive lock (`ALTER TABLE ... TYPE`, `ADD COLUMN ... DEFAULT` with a volatile default, `SET NOT NULL` without a valid `CHECK (... IS NOT NULL)` first). The rule applies to every table (`reliability.md` 5). Breaking changes use expand and contract.
 - A migration never rewrites `audit_log` rows and never drops a column that an older audit row references in `before_state` or `after_state`.
 - The one-shot service `backup-premigrate` writes a `_premigrate` dump before `migrate` starts (`reliability.md` sections 7.1 and 7.7).
 
