@@ -56,7 +56,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 
 1. Copy the shape of an existing ADR: Status, Date, Deciders, Context, Decision drivers, Considered options, Decision, Consequences, Related.
 2. Use the next free number and a short slug: `NNNN-<slug>.md`.
-3. Do not change an accepted ADR. Write a new ADR that supersedes it and set the old status to "Superseded by ADR-NNNN". For a partial change, set "Accepted. Amended by ADR-NNNN (scope)".
+3. An accepted ADR changes only by a Status line and an "Amended by" note. To replace it, write a new ADR that supersedes it and set the old status to "Superseded by ADR-NNNN". For a partial change, set "Accepted. Amended by ADR-NNNN (scope)".
 4. Add a row to the index and update the decision map.
 
 ## Status values

@@ -20,7 +20,7 @@ The application is one deployable unit (modular monolith). A context is a Rust m
 
 Recipe Management reads the Plant Model through read-only ports (`TypeCatalog`, `UnitLookup`). A parameter request names its type with a `TypeExpr` (section 2.1). The use case passes it to `EnsureDerivedType` through a port. `EnsureDerivedType` returns the type and creates a missing `STRING(n)`, `WSTRING(n)`, or array type. It is an internal operation of the Plant Model, not a use case (section 5.1). Recipe Management never writes `plc_type` itself.
 
-Domain methods take resolved values only: `&TypeTree`, `&PlatformTypes`, `&LiveUnits`, `&ApprovalPolicy`, `&DraftEditors`. No port and no I/O exist in `recipe-domain`.
+Domain methods take resolved values only: `&TypeTree`, `&TypeTrees`, `&PlatformTypes`, `&LiveUnits`, `&ApprovalPolicy`, `&DraftEditors`. No port and no I/O exist in `recipe-domain`.
 
 ## 2. Entities and value objects
 
@@ -69,7 +69,7 @@ Rules:
 | `kind` | `TypeKind` | `Primitive`, `Array`, `Struct` |
 | `name` | `TypeName` | Primitives: IEC or S7 name (`INT`, `LREAL`, `S5TIME`). Structs: user name `[A-Za-z_][A-Za-z0-9_]{0,63}`. Arrays: `None` |
 | `revision` | `u32` | Starts at 1. Increases by one with each `supersedes` step of the same struct name |
-| `platforms` | `BTreeSet<PlcPlatform>` | Platforms where this type exists |
+| `platforms` | `BTreeSet<PlcPlatform>` | Platforms where this type exists. A global primitive has the platforms of `data-model.md` 7. A struct, an array, or a sized string of a machine has only the platform of its machine (`platforms = ARRAY[machine.plc_platform]` in SQL) |
 | `size_bytes` | `Option<u32>` | Primitives only. S7 size of one element in bytes. `BOOL` is 1, its storage unit. `STRING(n)` is `n + 2`. `WSTRING(n)` is `2n + 4`. `None` for a struct and an array. `S7Layout` computes their size and does not store it |
 | `string_length` | `Option<u16>` | Only for `STRING` and `WSTRING`. The `StringLength` table below gives the range per platform |
 | `leaf_class` | `Option<LeafClass>` | Primitives only. The class of the leaf (`LeafClass` below). `None` for a struct and an array |
@@ -127,7 +127,7 @@ Rules:
 - Keywords and primitive names are upper case. The only spaces are the space before `OF` and the space after it.
 - A `bound` is inside the INTEGER range. Each `dim` follows the `ArrayDimension` rules of the `PlcType` table. An array has 1 to 3 dimensions (Assumption A38).
 - A `length` follows the `StringLength` table for the platform of the machine.
-- `STRING` without a length in a `TypeExpr` means the seed default row (`data-model.md` 7). The same rule applies to `WSTRING`.
+- `STRING` without a length in a `TypeExpr` means the seed row of the platform of the machine: `STRING(254)` on `S7_300`, `S7_1200` and `S7_1500`, and `STRING(80)` on `CodesysIec` and `TwinCat3` (`data-model.md` 7). `WSTRING` without a length means the seed row of the platform of the machine: `WSTRING(254)` on `S7_1200` and `S7_1500`, `WSTRING(80)` on `CodesysIec` and `TwinCat3`.
 - The element of an array is any `TypeExpr`, also another array.
 - A `udt` names a struct revision of the same machine.
 
@@ -144,9 +144,13 @@ Errors. Every failure of this table is `E-PLT-013 DerivedTypeInvalid` with a rea
 | The type does not exist on the platform of the machine | `WSTRING(10)` on `S7_300` |
 | A bound, a dimension, or a length is outside its range | `ARRAY[5..1] OF INT`, `STRING(300)` on `S7_1500` |
 
+`DefineUdt` is the one exception. A member whose `TypeExpr` resolves to a type that is not on the platform is `E-PLT-006 MemberTypeNotOnPlatform`, because the member name is the useful detail. Every other consumer of a `TypeExpr` reports `E-PLT-013` for a type that is not on the platform.
+
 A resolved type above a size limit is `E-PLT-018 TypeTooLarge`. The limits are 16 384 leaves (`budget.leaves_per_parameter`), `json.max_depth` levels, and 1024 members of a struct (`type.max_members`). `reliability.md` 7.11 holds the values.
 
 `TypeTree` (value object): the fully resolved tree of one `PlcType`. The domain uses it to check a `ParameterValue`, the `leaf_path` of a `ProcessLimit`, and the S7 layout.
+
+`TypeTrees` (value object): the `TypeTree` of every parameter type of one draft, keyed by `PlcTypeId`. The snapshot checks of a whole draft use it.
 
 `LeafPath` (value object): a path to one scalar inside a type tree, or to every element of one array. Grammar:
 
@@ -171,7 +175,7 @@ Width rule: the width MUST match the type.
 | 1-byte primitive | `B` |
 | 2-byte primitive | `W` |
 | 4-byte primitive | `D` |
-| 8-byte primitive, `STRING`, `WSTRING`, struct, array | `B` (address of the first byte) |
+| 8-byte primitive, `DTL` (12 bytes), `STRING`, `WSTRING`, struct, array | `B` (address of the first byte) |
 
 Alignment rule: every element wider than 1 byte, every `STRING` and `WSTRING`, every struct, and every array MUST start on an even byte. A 1-byte element (`BYTE`, `CHAR`, `SINT`, `USINT`) and a packed `BOOL` may start on any byte. `DB1.DBW3` is not valid.
 
@@ -199,20 +203,20 @@ Platform rule: an address is required on `S7_300`, optional on `S7_1200` and `S7
 
 SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0000..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0000..=U+FFFF`.
 
-Base units (Assumption A43). A `Duration` or `Instant` value is an integer count of the base unit of its type. The domain stores, hashes, and limits this count.
+Base units (Assumption A43). A `Duration` or `Instant` value is an integer count of the base unit of its type. The domain stores, hashes, and limits this count. The stored and hashed value is the decimal text of the count, so a signed and an unsigned 64-bit range both fit. The domain holds each platform range in code.
 
 | Type | Class | Base unit | Range of the count |
 |---|---|---|---|
 | `TIME` | `Duration` | milliseconds | Platform range: CODESYS and TwinCAT 0 to 4 294 967 295 (unsigned 32 bit). S7 -2 147 483 648 to 2 147 483 647 (signed 32 bit). The range is held in code |
-| `LTIME` | `Duration` | nanoseconds | `i64` |
+| `LTIME` | `Duration` | nanoseconds | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `S7_1500` -2^63 to 2^63-1 (signed 64 bit) |
 | `S5TIME` | `Duration` | milliseconds | 0 ms to 9 990 s. `S5T#0ms` is valid. The step depends on the value. It is 10 ms up to 9 990 ms and 100 ms up to 99 900 ms. It is 1 s up to 999 s and 10 s up to 9 990 s |
 | `DATE` | `Instant` | days since 1970-01-01 | The range of the platform |
-| `LDATE` | `Instant` | nanoseconds since 1970-01-01 | `i64` |
+| `LDATE` | `Instant` | nanoseconds since 1970-01-01 | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `LDATE` does not exist on S7 platforms |
 | `TIME_OF_DAY` | `Instant` | milliseconds since midnight | `0..=86_399_999` |
-| `LTOD` | `Instant` | nanoseconds since midnight | `0..=86_399_999_999_999` |
+| `LTOD` | `Instant` | nanoseconds since midnight | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `S7_1500` 0 to 2^63-1. The `tod` grammar keeps a literal below one day, `0..=86_399_999_999_999` |
 | `DATE_AND_TIME` | `Instant` | seconds since 1970-01-01 | 1990-01-01 to 2089-12-31 on the S7 platforms. The range of the platform on `CodesysIec` and `TwinCat3` |
-| `LDT` | `Instant` | nanoseconds since 1970-01-01 | `i64` |
-| `DTL` | `Instant` | nanoseconds since 1970-01-01 | `i64` |
+| `LDT` | `Instant` | nanoseconds since 1970-01-01 | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `S7_1500` 0 to 2^63-1, which is 1970-01-01 to 2262-04-11 |
+| `DTL` | `Instant` | nanoseconds since 1970-01-01 | `S7_1200` and `S7_1500`: 1970-01-01 to 2262-04-11. The count is never negative |
 
 "The range of the platform" is the IEC range of the type on that platform. The domain holds it in code, as it does for the `Numeric` types. An `Instant` has no time zone. The domain applies no offset.
 
@@ -241,7 +245,7 @@ Rules:
 - A fraction of a second has at most 3 digits for `TIME_OF_DAY`. `DATE_AND_TIME` has no fraction. `LTOD`, `LDT`, and `DTL` accept up to 9 digits.
 - The date exists in the calendar. The hour is `00..=23`.
 - The count is inside the range of the base-unit table.
-- The canonical literal writes every part that is not zero. Zero is `T#0ms` or `LT#0ns`. A fraction has no trailing zeros.
+- The canonical literal writes every part that is not zero. Zero is `T#0ms`, `LT#0ns`, or `S5T#0ms`, and its count is `0`. A fraction has no trailing zeros.
 - `parse` and `Display` round-trip.
 - A text that does not parse, or a count outside the range, is `E-RCP-005 ValueShapeMismatch` for a value. For a limit it is `E-RCP-006 LimitOutsideTypeRange`.
 - Pages and error messages show a `Duration` or `Instant` value and its limits as the canonical literal.
@@ -398,7 +402,7 @@ Session rules:
 - T1 inserts the attempt row only while the per-IP budget is not reached. After that, T1 inserts nothing, and the use case returns `LoginThrottled` from the count alone.
 - When the attempt is throttled, the use case releases the permit and returns `LoginThrottled`. Otherwise it runs the password check and releases the permit.
 - T2 sets `succeeded = true` and creates the session, or writes a `SecurityEvent`. A failed attempt below the per-IP budget therefore always counts (`data-model.md` 6).
-- In read-only mode (Assumption A24), T1 inserts no row. T2 on success inserts the attempt row with `succeeded = true`. A failed or throttled login writes only an event log line.
+- In read-only mode (Assumption A24), `Login` runs in the same way. T1 inserts the attempt row, and a failed or throttled login writes its `SecurityEvent`. These writes are small and stay inside the reserved margin of `reliability.md` 7.8.
 - The response and the timing are the same for an unknown login, an inactive user, and a wrong password (Assumption A42).
 
 `Permission` (value object, enum) lives in `recipe-domain`. The full matrix is in `api.md` section 3. Every use case, also every query use case, checks its permission as its first statement (ADR-0013).
@@ -473,7 +477,7 @@ A change of a configuration value, for example `approval.separation_of_duties`, 
 | I3 | A change of type, limit, revision, address, unit, translation, or value happens only in a live `Draft` | `Draft` is the only aggregate with parameter methods. A command on a non-draft version returns `VersionNotEditable` | Trigger function `enforce_version_mutable` on `parameter`, `parameter_limit`, `parameter_translation` (`E-RCP-030`, `E-RCP-031`). It takes `FOR SHARE` on the version |
 | I4 | A version that is not `Draft` changes only its status fields | `Recipe::retire()` changes `status` and `retired_at` only | Trigger function `recipe_version_transition` (`E-RCP-033`): allows `draft -> approved`, `approved -> retired`, `deleted_at` on a draft. It always freezes `id`, `recipe_id`, `plc_platform`, `number`, `based_on_version_id`, `created_by`, `created_at`. After approval it also freezes `approved_by`, `approved_at`, `change_note`, `content_sha256` |
 | I5 | An `S7_300` parameter has an address. An `S7_1200` or `S7_1500` parameter may have one. A `CodesysIec` or `TwinCat3` parameter has none | `Parameter::new()` returns `S7AddressRequired` or `S7AddressNotAllowed` | `CHECK parameter_s7_address_platform` enforces the three cases. Composite FK `parameter_version_platform` copies the platform |
-| I6 | The type of a parameter exists on the platform of the machine | `EnsureDerivedType` returns `E-PLT-013 DerivedTypeInvalid` for a `TypeExpr` that is not on the platform. `E-RCP-013 TypeNotOnPlatform` is only an item inside `E-RCP-020 ValidationFailed`: the snapshot check reports a stored parameter whose type is no longer on the platform | Trigger function `enforce_type_platform` on `parameter` (`E-PLT-031`, `E-PLT-032`) |
+| I6 | The type of a parameter exists on the platform of the machine | `EnsureDerivedType` returns `E-PLT-013 DerivedTypeInvalid` for a `TypeExpr` that is not on the platform. `DefineUdt` is the exception: it reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform`. `E-RCP-013 TypeNotOnPlatform` is only an item inside `E-RCP-020 ValidationFailed`: the snapshot check reports a stored parameter whose type is no longer on the platform | Trigger function `enforce_type_platform` on `parameter` (`E-PLT-031`, `E-PLT-032`) |
 | I7 | A value matches its type tree and its limits | `ParameterValue::check(&TypeTree, &[ProcessLimit])` | Not enforced. JSONB is opaque. `CHECK parameter_value_size` bounds the size |
 | I8 | A struct has no cycle | `TypeTree::resolve()` returns `TypeCycle` | Not enforced |
 | I9 | Unit path has 1 to 5 segments, each `1..=64` | `UnitPath::parse()` | `CHECK unit_path_format` |
@@ -527,15 +531,15 @@ Rules:
 
 ## 5. Domain operations
 
-Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. Each command runs in one READ COMMITTED transaction, except `Login` and the two SERIALIZABLE commands of section 5.3.
+Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing. Each command runs in one READ COMMITTED transaction, except `Login` and the two SERIALIZABLE commands of section 5.3.
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
 - `RenameMachine`, `ArchiveMachine`, `RenameUnit`, and `ArchiveUnit` take `machine FOR NO KEY UPDATE` first.
-- `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` take `machine FOR SHARE` first. `DefineUdt` then takes the advisory lock of section 5.1.
+- `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` take `machine FOR SHARE` first. `DefineUdt` then takes the advisory locks of section 5.1.
 - A recipe command reads `recipe.machine_id` without a lock before it locks the machine. The column never changes.
 - Every recipe command except `CreateRecipe` then takes `recipe FOR UPDATE` and requires `deleted_at IS NULL`. `RestoreRecipe` requires `deleted_at IS NOT NULL`. A draft command then takes `recipe_version FOR UPDATE`.
-- `AddParameter` and `UpdateParameterDefinition` then take `FOR SHARE` on the unit row. `CreateVersion` takes `FOR SHARE` on the unit rows of the base version after the recipe lock and checks `archived_at` again (I19).
+- `AddParameter` and `UpdateParameterDefinition` then take `FOR SHARE` on the unit row. Every caller of `EnsureDerivedType` takes its class-2 advisory locks last, before its first `plc_type` insert (section 5.1). `CreateVersion` takes `FOR SHARE` on the unit rows of the base version after the recipe lock and checks `archived_at` again (I19).
 - The foreign key `plc_type.machine_id` takes `FOR KEY SHARE` on a machine row that the command already holds. The insert of a derived type therefore waits for no other transaction.
 - A statement that locks several rows of one table orders them by `id`, and `app_user` rows are locked `FOR NO KEY UPDATE` (`data-model.md` 6).
 
@@ -545,10 +549,10 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 
 | Port | Operations |
 |---|---|
-| `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). The startup settings comparison (`SettingChanged`) |
-| `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. An aggregated kind increments `count` (section 2.4). In read-only mode a failed or throttled `Login` writes no row |
-| `LoginAttemptStore` | `Login` T1 counts the failures and inserts the attempt under the advisory lock, below the per-IP budget and outside read-only mode. `Login` T2 on success marks the attempt inside the `UnitOfWork` transaction, or inserts it in read-only mode. A wrong current password in `ChangeOwnPassword` also inserts an attempt |
-| `MaintenanceStore` | The job `cleanup`. It deletes expired sessions and old `login_attempt` rows, and it calls `security_event_purge()` once per batch. The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `heartbeat` records `heartbeat.last_at` in `app_setting`. No audit entry |
+| `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). The startup settings comparison (`SettingChanged`). The subcommand `create-admin` (`UserCreated`, `actor = None`) |
+| `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. An aggregated kind increments `count` (section 2.4). A failed or throttled `Login` writes its row also in read-only mode |
+| `LoginAttemptStore` | `Login` T1 counts the failures and inserts the attempt under the advisory lock, below the per-IP budget, also in read-only mode. `Login` T2 on success marks the attempt inside the `UnitOfWork` transaction. A wrong current password in `ChangeOwnPassword` also inserts an attempt |
+| `MaintenanceStore` | The job `cleanup`. It deletes expired sessions and old `login_attempt` rows in batches of `login_attempt.purge_batch`, and it calls `security_event_purge()` once per batch. The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `heartbeat` records `heartbeat.last_at` in `app_setting`. No audit entry |
 
 ### 5.1 Plant Model
 
@@ -557,14 +561,14 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 | `CreateMachine` | Machine | New machine with unit `U1` | `E-PLT-001 DuplicateMachineCode` |
 | `RenameMachine` | Machine | New `name` | `E-PLT-010 MachineArchived` |
 | `ArchiveMachine` | Machine | `archived_at` set | `E-PLT-011 MachineHasDraft` |
-| `AddUnit` | Machine | New unit under a live parent. Locks: `machine FOR SHARE`, then the parent `unit FOR SHARE` | `E-PLT-002 UnitDepthExceeded`, `E-PLT-003 ParentNotFound` (the foreign key `unit_parent_exists`, second line), `E-PLT-004 DuplicateUnitPath`, `E-PLT-009 UnitArchived` (parent), `E-PLT-010 MachineArchived`, `E-PLT-017 InvalidUnitPath` (`parent_path` or `segment`) (parent) |
+| `AddUnit` | Machine | New unit under a live parent. Locks: `machine FOR SHARE`, then the parent `unit FOR SHARE` | `E-PLT-002 UnitDepthExceeded`, `E-PLT-003 ParentNotFound` (the foreign key `unit_parent_exists`, second line), `E-PLT-004 DuplicateUnitPath`, `E-PLT-009 UnitArchived` (parent), `E-PLT-010 MachineArchived`, `E-PLT-017 InvalidUnitPath` (`parent_path` or `segment`) |
 | `RenameUnit` | Machine | New `name`. Locks: `machine FOR NO KEY UPDATE`, then the unit `FOR UPDATE` | `E-PLT-009 UnitArchived` |
 | `ArchiveUnit` | Machine | `archived_at` on the unit and its descendants. Locks: `machine FOR NO KEY UPDATE`, then the unit rows `FOR UPDATE` in `id` order. Two archives on one machine therefore run one after the other | `E-PLT-008 LastMainUnit`, `E-PLT-012 UnitReferencedByDraft`, `E-PLT-014 UnitReferencedByApproved` |
-| `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory lock of class 2 | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge` |
+| `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory locks of class 2 in the fixed order below | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge` |
 
-`EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row. `AddParameter`, `UpdateParameterDefinition`, and `DefineUdt` call it with the `TypeExpr` of the request. `RebindTypeRevision` calls it with the array shape of each moved parameter. Each caller calls it inside its own transaction. It has no permission of its own, because the calling use case checks its permission first. Its errors are `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge`. It writes the audit action `DerivedTypeCreated` only when it creates a row.
+`EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row. `AddParameter`, `UpdateParameterDefinition`, and `DefineUdt` call it with the `TypeExpr` of the request. `RebindTypeRevision` calls it with the array shape of each moved parameter. Each caller calls it inside its own transaction. It has no permission of its own, because the calling use case checks its permission first. Its errors are `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge`. `DefineUdt` reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform` instead (section 2.1). It writes the audit action `DerivedTypeCreated` only when it creates a row. A new row has only the platform of its machine in `platforms`.
 
-`DefineUdt` and `EnsureDerivedType` take `pg_advisory_xact_lock(2, hashtext(machine_id::text || ':' || name))` before the insert. Class 2 is the class of derived types (`data-model.md` 1.4). They take no row lock on `plc_type`. `name` is the struct name, `STRING`, or `WSTRING`. An array row has no name, so its key uses the text `ARRAY`. The unique indexes of `plc_type` stay as the second line. A transaction that needs several keys takes them in one order: the struct name, `STRING`, `WSTRING`, `ARRAY`.
+Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The key is `pg_advisory_xact_lock(2, hashtext(machine_id::text || ':' || name))`. `name` is the struct name, `STRING`, or `WSTRING`. An array row has no name, so its key uses the text `ARRAY`. A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the array shapes instead. The command sorts the keys in the fixed order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before the first `plc_type` insert. `EnsureDerivedType` then takes no lock of its own. No command takes a row lock on `plc_type`. The unique indexes of `plc_type` stay as the second line.
 
 ### 5.2 Recipe Management
 
@@ -574,9 +578,9 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 | `RenameRecipe` | Recipe | New `name` | `E-RCP-012 RecipeDeleted` |
 | `DeleteRecipe` | Recipe | `deleted_at` set. The live draft is discarded in the same transaction | `E-RCP-010 RecipeHasApprovedVersion`, `E-RCP-026 RecipeHasRetiredVersion` (ProcessEngineer only), `E-RCP-012 RecipeDeleted` |
 | `RestoreRecipe` | Recipe | `deleted_at` cleared (Administrator) | `E-RCP-025 RecipeNotDeleted`, `E-PLT-010 MachineArchived` (the machine of the recipe) |
-| `CreateVersion` | Recipe, Draft | New `Draft`, a copy of `based_on`. The snapshot check runs first. A failed check returns `E-RCP-020` with the items and creates no draft. A successful result lists only the outdated parameters | `E-RCP-011 DraftAlreadyExists`, `E-RCP-012 RecipeDeleted`, `E-RCP-020 ValidationFailed`, `E-RCP-021 SizeBudgetExceeded`, `E-PLT-010 MachineArchived`, `E-WEB-009 Timeout` (validation) |
+| `CreateVersion` | Recipe, Draft | New `Draft`, a copy of `based_on`. The snapshot check runs first. A failed check returns `E-RCP-020` with the items and creates no draft. A successful result lists only the outdated parameters | `E-RCP-011 DraftAlreadyExists`, `E-RCP-012 RecipeDeleted`, `E-RCP-020 ValidationFailed`, `E-RCP-021 SizeBudgetExceeded`, `E-PLT-010 MachineArchived`, `E-WEB-009 Timeout` (validation), `E-WEB-011 TaskFailed` (validation) |
 | `DiscardDraft` | Draft | `deleted_at` set | `E-RCP-007 VersionNotDraft`, `E-RCP-012 RecipeDeleted`, `E-WEB-001 ConcurrentEdit` |
-| `ApproveVersion` | Recipe, Draft | `Approved`, previous approved `Retired`, `content_sha256` set. The request carries the flag `allow_outdated` | `E-RCP-007 VersionNotDraft`, `E-RCP-008 DraftHasNoParameters`, `E-RCP-012 RecipeDeleted`, `E-RCP-015 ApproverEditedDraft`, `E-RCP-016 LimitMissing`, `E-RCP-020 ValidationFailed`, `E-RCP-022 S7AddressOverlap`, `E-RCP-023 S7AddressMisaligned`, `E-RCP-024 TypeRevisionOutdated` (only when `allow_outdated` is false), `E-EXP-004 Serialize` (hashed body), `E-WEB-001 ConcurrentEdit`, `E-WEB-009 Timeout` (validation) |
+| `ApproveVersion` | Recipe, Draft | `Approved`, previous approved `Retired`, `content_sha256` set. The request carries the flag `allow_outdated` | `E-RCP-007 VersionNotDraft`, `E-RCP-008 DraftHasNoParameters`, `E-RCP-012 RecipeDeleted`, `E-RCP-015 ApproverEditedDraft`, `E-RCP-016 LimitMissing`, `E-RCP-020 ValidationFailed`, `E-RCP-022 S7AddressOverlap`, `E-RCP-023 S7AddressMisaligned`, `E-RCP-024 TypeRevisionOutdated` (only when `allow_outdated` is false), `E-EXP-004 Serialize` (hashed body), `E-WEB-001 ConcurrentEdit`, `E-WEB-009 Timeout` (validation), `E-WEB-011 TaskFailed` (validation) |
 | `RetireVersion` | Recipe | `Retired` without replacement | `E-RCP-009 VersionNotApproved`, `E-RCP-012 RecipeDeleted`, `E-WEB-001 ConcurrentEdit` |
 | `AddParameter` | Draft | New parameter row. The server generates `key` (Assumption A40). `EnsureDerivedType` resolves the `TypeExpr` of `type`. The request carries the required `value` and the list `limits[]`, which can be empty | `E-RCP-002 VersionNotEditable`, `E-RCP-003 S7AddressRequired`, `E-RCP-004 ValueOutOfLimit`, `E-RCP-005 ValueShapeMismatch`, `E-RCP-006 LimitOutsideTypeRange`, `E-RCP-012 RecipeDeleted`, `E-RCP-014 DuplicateTag`, `E-RCP-017 LeafPathNotFound`, `E-RCP-018 MinGreaterThanMax`, `E-RCP-019 LimitNotApplicable`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap`, `E-RCP-023 S7AddressMisaligned`, `E-RCP-053 S7AddressNotAllowed`, `E-PLT-009 UnitArchived`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-018 TypeTooLarge`, `E-PLT-020 UnitNotFound` (`unit_path`), `E-WEB-001 ConcurrentEdit` |
 | `UpdateParameterDefinition` | Draft | New unit, tag, name, description, type, address, ordinal. When the type changes, the request carries a new `value` and a new `limits[]`, and both are required. Otherwise the request carries neither, and the value and the limits stay unchanged | `E-RCP-002 VersionNotEditable`, `E-RCP-003 S7AddressRequired`, `E-RCP-004 ValueOutOfLimit`, `E-RCP-005 ValueShapeMismatch` (also a missing `value` after a type change), `E-RCP-006 LimitOutsideTypeRange`, `E-RCP-012 RecipeDeleted`, `E-RCP-014 DuplicateTag`, `E-RCP-017 LeafPathNotFound`, `E-RCP-018 MinGreaterThanMax`, `E-RCP-019 LimitNotApplicable`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap`, `E-RCP-023 S7AddressMisaligned`, `E-RCP-051 ParameterNotFound`, `E-RCP-053 S7AddressNotAllowed`, `E-PLT-009 UnitArchived`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-018 TypeTooLarge`, `E-PLT-020 UnitNotFound` (`unit_path`), `E-WEB-001 ConcurrentEdit` |
@@ -600,14 +604,14 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 
 | Command | Aggregate | Result | Errors |
 |---|---|---|---|
-| `Login` | User, Session | New session, new CSRF token. Argon2 permit, then the transactions T1 and T2 (section 2.3, `data-model.md` 6). T1 holds `pg_advisory_xact_lock(1, hashtext(login))`, class 1 of `data-model.md` 1.4 | `E-IDN-003 InvalidCredentials` (also for unknown and inactive users, A42), `E-IDN-004 UserInactive` (only in the event log and `security_event`), `E-IDN-005 LoginThrottled`, `E-IDN-007 MustChangePassword` (session limited to the routes of `api.md` 7.4), `E-WEB-009 Timeout` (Argon2 permit) |
+| `Login` | User, Session | New session, new CSRF token. Argon2 permit, then the transactions T1 and T2 (section 2.3, `data-model.md` 6). T1 holds `pg_advisory_xact_lock(1, hashtext(login))`, class 1 of `data-model.md` 1.4 | `E-IDN-003 InvalidCredentials` (also unknown and inactive users, A42), `E-IDN-004 UserInactive` (only in the event log and `security_event`), `E-IDN-005 LoginThrottled`, `E-IDN-007 MustChangePassword` (session limited to the routes of `api.md` 7.4), `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `Logout` | Session | Session deleted | - |
-| `CreateUser` | User | New user. The request has no password. The server generates a one-time password, shows it once, and sets `must_change_password = true` | `E-IDN-001 DuplicateLogin`, `E-WEB-009 Timeout` (Argon2 permit) |
+| `CreateUser` | User | New user. The request has no password. The server generates a one-time password, shows it once, and sets `must_change_password = true` | `E-IDN-001 DuplicateLogin`, `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `SetUserRole` | User | New role. `session_epoch` incremented | `E-IDN-002 LastAdministrator` |
 | `DeactivateUser` | User | `is_active = false`. `session_epoch` incremented | `E-IDN-002 LastAdministrator` |
 | `ActivateUser` | User | `is_active = true` | `E-IDN-009 UserAlreadyActive` |
-| `ResetPassword` | User | One-time password, generated by the server and shown once. `must_change_password = true`. `session_epoch` incremented | `E-WEB-009 Timeout` (Argon2 permit) |
-| `ChangeOwnPassword` | User, Session | New hash. `session_epoch` incremented. New session for the current request | `E-IDN-008 InvalidCurrentPassword`, `E-IDN-006 PasswordPolicy`, `E-WEB-009 Timeout` (Argon2 permit) |
+| `ResetPassword` | User | One-time password, generated by the server and shown once. `must_change_password = true`. `session_epoch` incremented | `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
+| `ChangeOwnPassword` | User, Session | New hash. `session_epoch` incremented. New session for the current request | `E-IDN-008 InvalidCurrentPassword`, `E-IDN-006 PasswordPolicy`, `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `UnlockLogin` | User | Throttle counters of one login cleared | - |
 
 `SetUserRole` and `DeactivateUser` run in SERIALIZABLE for the last-administrator count. They retry once on `40001`, then return `E-DB-001`. All other commands run in READ COMMITTED with no retry.
@@ -624,10 +628,11 @@ A query is a use case. It checks its permission first and writes no audit entry.
 
 | Query | Permission |
 |---|---|
-| `ListMachines`, `GetMachine`, `GetUnitTree`, `ListTypes`, `GetTypeTree`, `GetTypeUsage` | `RecipeView` |
-| `ListRecipes`, `GetRecipe`, `GetVersion`, `DiffVersions`, `GetRecipeHistory` | `RecipeView` |
+| `ListMachines`, `GetMachine`, `GetUnitTree`, `GetUnit`, `ListTypes`, `GetTypeTree`, `GetTypeUsage` | `RecipeView` |
+| `ListRecipes`, `GetRecipe`, `ListVersions`, `GetVersion`, `DiffVersions`, `GetRecipeHistory` | `RecipeView` |
+| `ListParameters`, `GetParameter`, `GetLimits`, `GetTranslations` | `RecipeView` |
 | `ListUsers`, `GetUser` | `UserManage` |
-| `ListAuditEntries` | `AuditView` (Administrator) or `AuditViewRecipes` (ProcessEngineer) |
+| `ListAuditEntries`, `GetAuditEntry` | `AuditView` (Administrator) or `AuditViewRecipes` (ProcessEngineer, only entries with `aggregate_type = 'recipe'`) |
 | `ListSecurityEvents` | `AuditView` |
 | `GetOwnProfile` (`/me`) | authenticated |
 | `GetMachineForm` | `MachineManage` |
@@ -638,8 +643,10 @@ A query is a use case. It checks its permission first and writes no audit entry.
 | `GetParameterForm` | `ParameterEdit` |
 | `GetApprovalPreview` | `VersionApprove` |
 | `GetUserForm` | `UserManage` |
+| `GetLoginForm` (`/login`) | none. It needs no session, like `Login` |
+| `GetOwnPasswordForm` (`/me/password`) | authenticated, like `ChangeOwnPassword` |
 
-Every form and preview route is a query with the permission of the command that it prepares. The last eight rows are these queries. The HTTP layer still only authenticates (`api.md` 3.2).
+Every form and preview route is a query with the permission of the command that it prepares. The last ten rows are these queries. The HTTP layer still only authenticates (`api.md` 3.2).
 
 ## 6. Rust type signatures (reference only)
 
@@ -695,7 +702,7 @@ impl Draft {
 | A7 | A recipe has at most one `Draft` at a time |
 | A17 | The UI supports `pl` and `en`. The plain cookie `recipe_lang` stores the UI language. The session does not store it. `POST /lang` sets the cookie, also before login. Parameter translations accept language codes `^[a-z]{2,3}(-[A-Z]{2})?$` |
 | A22 | Login throttling is a progressive delay per (login, client IP) and a per-IP budget. There is no permanent lockout. An Administrator can unlock a login |
-| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`. A failed login writes only an event log line. The mode ends above 10 % |
+| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 % |
 | A25 | One installation serves one production line. The draft's "production line" has no entity |
 | A26 | Size budgets: 16 384 leaves per parameter, 262 144 leaves and 32 768 limit rows per version, 4 000 parameters per version |
 | A27 | A reference number matches `[A-Z0-9][A-Z0-9_-]{0,49}`. Input is folded to upper case |

@@ -46,7 +46,7 @@ Aggregates:
 - `Draft`: one `RecipeVersion` with `status = Draft` and its `Vec<Parameter>`. It owns every parameter command.
 - `ApprovedVersion`, `RetiredVersion`: read models with `row_version`, so `RetireVersion` keeps its optimistic check.
 
-Domain inputs: every domain method takes resolved values only: `&TypeTree`, `&PlatformTypes`, `&LiveUnits`, `&ApprovalPolicy`, `&DraftEditors`. The use case loads them through ports before it calls the domain.
+Domain inputs: every domain method takes resolved values only: `&TypeTree`, `&TypeTrees`, `&PlatformTypes`, `&LiveUnits`, `&ApprovalPolicy`, `&DraftEditors`. The use case loads them through ports before it calls the domain.
 
 Commands (one use case, one transaction each, except `Login` (T1, T2)):
 

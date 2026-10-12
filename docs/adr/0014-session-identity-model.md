@@ -73,7 +73,7 @@ Login throttling (values in `reliability.md` 7.11):
 - The port `LoginAttemptStore` runs T1. T2 on success is one `UnitOfWork` transaction: it sets `succeeded = true`, creates the session, and writes `UserLoggedIn`. T2 on failure writes a `security_event` through the port `SecurityEventSink`. A failed attempt below the per-IP budget therefore always counts, also under parallel requests (`data-model.md` 6).
 - Flood bound. After the per-IP budget is reached, T1 inserts no `login_attempt` row. The 429 response comes from the count alone.
 - `security_event` rows of the kinds `login_failed`, `login_throttled` and `csrf_rejected` aggregate per `(client_ip, kind, minute)`. One row holds a `count`, and later events of that minute increment it (`data-model.md` 3.8).
-- In read-only mode (Assumption A24) the login path writes `login_attempt` and `security_event` only for a successful login. A failed login writes only an event log line.
+- In read-only mode (Assumption A24) the login path keeps T1, which inserts the `login_attempt` row. A failed or throttled login also writes its `security_event` row, so the throttle still works. These writes are small and stay inside the reserved disk margin (`reliability.md` 7.8).
 - `security_event.login_hmac` is the HMAC-SHA256 of the login with the key of the Docker secret `login_hmac_key` (32 bytes). `reliability.md` 7.1 gives the key rotation.
 - `UnlockLogin` (Administrator) clears the counters of one login and writes a `security_event`.
 - Unknown, inactive and wrong-password cases return the same 401 body and run the same hash work.
