@@ -38,7 +38,7 @@ We use Option A.
 
 - `recipe_version.row_version` is a `BIGINT` that starts at 1. Every successful write to the version or to one of its parameters increments it in the same transaction.
 - Every edit form and every HTMX fragment that mutates the draft carries the current `row_version` in a hidden field.
-- The use case executes `UPDATE ... WHERE id = $id AND row_version = $expected`. When zero rows change, it returns `Err(ConcurrentEdit)` (I12).
+- The use case locks the version row `FOR UPDATE` and compares `row_version` with the expected value. A mismatch returns `Err(ConcurrentEdit)` (I12). Then the touch statement updates the row, and a trigger increments `row_version` (amended by ADR-0015).
 - `recipe-web` maps `ConcurrentEdit` to HTTP `409 Conflict` and renders the fragment `conflict.html`. It shows the current server `row_version`, the login of the last editor, the time of the last change, and a "Reload version" button. The unsaved input stays in the form until the reload (`api.md` section 4).
 - The parameter rows do not have their own version column. The version row is the lock unit. This keeps I1 to I4 in one place and avoids partial conflicts inside one version.
 - Approval also checks `row_version`. An approve request with a stale version is rejected.
@@ -59,7 +59,7 @@ We use Option A.
 ### Risks and mitigations
 
 - Risk: frequent conflicts on large drafts. Mitigation: measure. If needed, a later ADR can move the lock unit to the parameter row. The hidden field pattern stays the same.
-- Risk: a developer forgets the `WHERE row_version` clause. Mitigation: the repository method signature takes `expected_row_version`. Integration test for `ConcurrentEdit`.
+- Risk: a developer forgets the `row_version` compare. Mitigation: the repository method signature takes `expected_row_version`. Integration test for `ConcurrentEdit`.
 
 ## Related
 

@@ -198,7 +198,7 @@ Każdy prompt poniżej to jeden OpenSpec change wykonywany w cyklu z tabeli na g
 `openspec-propose` dla change "domain-plant-model" (crate recipe-domain, moduł plant).
 Zakres: MachineCode, UnitPath (1–6 segmentów, 1..=64), Machine + Unit tree (archive),
 PlcPlatform, PlcType (Primitive/Array/Struct, revision, supersedes, platforms, size_bytes,
-string_length), TypeTree::resolve (cykle → TypeCycle), parsery LeafPath i TypeExpr (`ARRAY[1..8] OF ST_Zone@3`), S7Address parser
+string_length), TypeTree::resolve (cykle → TypeCycle), parsery LeafPath, TypeExpr (`ARRAY[1..8] OF ST_Zone@3`) i IecLiteral (`T#1d2h3m4s5ms`, `DT#2026-10-12-12:30:00`, konwersja do liczby jednostek bazowych, A43), klasy liści numeric/string/bool/char/duration/instant, S7Address parser
 + width check, PlantError z kodami E-PLT-001..007 (reliability.md §1.2).
 Bez I/O, bez sqlx. Testy: unit + proptest dla UnitPath, S7Address, LeafPath (skill proptest-testing).
 design.md: ≤ 20 linii sygnatur. tasks.md: TDD, taski parserów oznacz [mechanical].
@@ -269,7 +269,7 @@ bez retry 40001). row_version: UPDATE ... WHERE row_version = $n, 0 rows → Con
 Testy integracyjne (testcontainers, PostgreSQL 16): każdy trigger ma test pozytywny i
 negatywny, każdy constraint CHECK/UNIQUE ma test, każde zabronione przejście stanu jako
 recipe_app, lista grantów kolumnowych vs plik wzorcowy, każda komenda z data-model.md §6 ma
-test atomowości (błąd w środku → brak wierszy), wyścig "dwa approve tego samego draftu",
+test atomowości (błąd w środku → brak wierszy), wyścig "dwa approve tego samego draftu", wyścig ArchiveUnit vs AddParameter z nowym typem pochodnym (kolejność blokad machine → recipe → version → unit, ADR-0015),
 RemoveParameter z limitami i tłumaczeniami. Skill postgres + pg:postgres-database-migration.
 Subagent Haiku: testy constraintów z tabel DDL [mechanical]. Ty (Sonnet): UnitOfWork i mapowanie błędów.
 Subagent sql-reviewer (Opus, skill postgresql-table-design): przegląd migracji vs data-model.md;

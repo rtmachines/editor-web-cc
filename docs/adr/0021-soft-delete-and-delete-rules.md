@@ -66,7 +66,7 @@ Delete rules (one rule, used in every document):
 - `ArchiveMachine` leaves the recipes readable and exportable. `RestoreRecipe` on a recipe of an archived machine fails with `E-PLT-010 MachineArchived`.
 - The recipe list hides deleted recipes. `show_deleted=1` is available to Administrator only.
 
-Grants: `recipe_app` has `DELETE` on `session`, `login_attempt`, `draft_editor`, `parameter`, `parameter_limit` and `parameter_translation`. The immutability trigger limits these deletes to live drafts. `recipe_app` can update only the column `succeeded` of `login_attempt`, for `Login` T2 (`data-model.md` 5.2). There is no `DELETE` on `machine`, `unit`, `recipe`, `recipe_version`, `app_user`, `plc_type`, `plc_type_member`, `audit_log` and `security_event`. `security_event` rows older than 400 days are deleted by `security_event_purge()`, a `SECURITY DEFINER` function owned by `audit_owner` (ADR-0022).
+Grants: `recipe_app` has `DELETE` on `session`, `login_attempt`, `draft_editor`, `parameter`, `parameter_limit` and `parameter_translation`. The immutability trigger limits these deletes to live drafts. `recipe_app` can update only the column `succeeded` of `login_attempt`, for `Login` T2, and the column `count` of an aggregated `security_event` row (`data-model.md` 5.2). There is no `DELETE` on `machine`, `unit`, `recipe`, `recipe_version`, `app_user`, `plc_type`, `plc_type_member`, `audit_log` and `security_event`. `security_event` rows older than 400 days are deleted by `security_event_purge()`, a `SECURITY DEFINER` function owned by `audit_owner` (ADR-0022).
 
 ## Consequences
 

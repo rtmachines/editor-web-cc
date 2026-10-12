@@ -1,6 +1,6 @@
 # ADR-0007: Process limits per scalar leaf of a parameter
 
-Status: Accepted. Amended by ADR-0022 (limits required at approval, `[*]` leaf path) and ADR-0018 (limits at rebind)
+Status: Accepted. Amended by ADR-0022 (limits required at approval, `[*]` leaf path, leaf classes) and ADR-0018 (limits at rebind)
 Date: 2026-10-12
 Deciders: project owner
 
@@ -33,10 +33,10 @@ A parameter can be a scalar, an array, or a UDT with nested members (ADR-0006). 
 
 We use Option A.
 
-- A `ProcessLimit` has a `leaf_path`, optional `min` and `max` for numeric leaves, and optional `max_length` for string leaves. The grammar of `leaf_path` is in `domain-model.md` section 2.1.
+- A `ProcessLimit` has a `leaf_path`, optional `min` and `max` for numeric, duration, and instant leaves, and optional `max_length` for string leaves (amended by ADR-0022). A duration or instant limit is a count of the base unit of its type (Assumption A43). The grammar of `leaf_path` is in `domain-model.md` section 2.1.
 - A `leaf_path` with `[*]` applies one limit to every element of one array level (amended by ADR-0022). The domain rejects a `[*]` row and an index row for the same array level.
-- A `BOOL` leaf cannot have a limit. The domain returns `Err(LimitNotApplicable)`.
-- At approval every numeric and string leaf has a limit, directly or through `[*]` (amended by ADR-0022, Assumption A36). A draft can hold a leaf without a limit. Approval then fails with `E-RCP-016 LimitMissing`.
+- A `BOOL`, `CHAR`, or `WCHAR` leaf cannot have a limit (amended by ADR-0022). The domain returns `Err(LimitNotApplicable)`.
+- At approval every numeric, string, duration, and instant leaf has a limit, directly or through `[*]` (amended by ADR-0022, Assumption A36). A draft can hold a leaf without a limit. Approval then fails with `E-RCP-016 LimitMissing`.
 - When both `min` and `max` are set, `min <= max`. Both must be inside the data type range.
 - The rows are in `parameter_limit`, unique on `(parameter_id, leaf_path)`.
 - The domain checks every value leaf first against the type range, then against the limit for that leaf (I7).

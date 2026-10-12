@@ -59,7 +59,7 @@ Services (`deploy/compose.yaml`):
 | `app` | `recipe-server serve`. Starts after `migrate` exited 0. `expose` only, no `ports` | always |
 | `db` | `postgres:16.<x>-bookworm`, pinned. `POSTGRES_INITDB_ARGS="--data-checksums --lc-collate=C --lc-ctype=C.UTF-8"`. Port 5432 not published | always |
 | `backup` | Daily `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` at 02:00 UTC plus `pg_dumpall --globals-only`. Retention 30 days. `backup-now` one-shot command | always |
-| `walarchive` | `pg_receivewal` to a bind mount on a second disk. Weekly `pg_basebackup`. Both connect as `recipe_replicator` | always |
+| `walarchive` | `pg_receivewal` to a bind mount on a second disk. Weekly `pg_basebackup`. Both connect as `recipe_replicator`. Its health is the replication lag (see Alerts) | always |
 
 Roles and secrets:
 
@@ -73,7 +73,7 @@ Roles and secrets:
 Migrations:
 
 - Folder `migrations/` at the repository root. Files `NNNN_description.sql`. `0001_schema`, `0002_triggers`, `0003_grants`, `0004_seed_plc_types`.
-- Forward-only. `lock_timeout = 2s` with retry. A file that needs `CREATE INDEX CONCURRENTLY` starts with `-- no-transaction`. CI rejects table-rewriting DDL on every table (`reliability.md` 5).
+- Forward-only. The runner sets `lock_timeout = 2s` at session level on its connection, because `sqlx` gives no hook inside the migration transaction. A lock timeout leads to a retry. A file that needs `CREATE INDEX CONCURRENTLY` starts with `-- no-transaction`. CI rejects table-rewriting DDL on every table (`reliability.md` 5).
 - `ALTER DEFAULT PRIVILEGES` gives `recipe_app` SELECT on future tables.
 
 Failure policy:
@@ -86,11 +86,13 @@ Health and disk:
 
 - `/healthz` and `/readyz` are served on an internal listener on port 9000. The body is `ok` or `not ready`. Readiness is cached for 5 seconds and does not include the disk check.
 - Free disk space is read with `statvfs` on a read-only mount of `pgdata` inside `app`. Below 5 % free, the application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`. Above 10 % the mode ends.
-- The `backup` healthcheck fails when the backup path is on the same filesystem as `pgdata`.
+- The `backup` healthcheck fails when the backup path is on the same filesystem as `pgdata`. `pgdata` is mounted read-only into `backup` for this check.
 
 Alerts:
 
 - A supervised background job `alerts` inside `app` checks the conditions of `reliability.md` 3.7. It writes to the event log and to an optional webhook.
+- WAL health is the replication lag, not the age of the last segment. The lag `pg_current_wal_lsn() - sent_lsn` of `recipe_replicator` in `pg_stat_replication` stays below `wal.max_lag_bytes` (16 MiB), and the receiver is connected. `recipe_app` reads the view through `pg_read_all_stats`.
+- A supervised job `heartbeat` writes `heartbeat.last_at` in `app_setting` every `heartbeat.interval` (5 min). The WAL stream therefore never stays idle for long, and a quiet night gives no false alert.
 - The `backup` container runs no alert cron, because its image has no `recipe-server` binary.
 
 Major upgrade:

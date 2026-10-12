@@ -50,7 +50,7 @@ Format:
 - Array order: `types[]` by `id` in byte order. `parameters[]` by `unit_path` with segments compared as integers (the first segment without its `U` prefix), then `tag` in byte order. `limits[]` by `leaf_path` in byte order. `members[]` by the member ordinal of the struct. `api.md` 6.3 states this order as the rule for a consumer that builds the hashed body again.
 - `parameter.ordinal` is a sort order of the UI only. It is not exported and not hashed, so every sort key of `parameters[]` is in the document.
 - A type reference is the primitive name for a primitive without a length. For every other type it is a `types[].id`.
-- Every numeric leaf of a value and every limit is a JSON string with the canonical decimal text. The canonical form of RFC 8785 writes a JSON number as a double, and a decimal can lose precision.
+- Every numeric, duration, and instant leaf of a value and every limit is a JSON string with the canonical decimal text. A duration or instant leaf holds a count of the base unit of its type (Assumption A43). The canonical form of RFC 8785 writes a JSON number as a double, and a decimal can lose precision.
 - Translations and descriptions are not exported. ADR-0012 is amended on this point.
 - `loadable` is `true` only for an Approved version.
 
@@ -68,7 +68,7 @@ Endpoints:
 - `GET /export/v1/recipes/{ref}/versions/{n}`: Approved or Retired. Administrator and ProcessEngineer only. A Retired version gets `loadable: false` and the file name prefix `RETIRED_`.
 - Every export writes an audit entry (A8).
 
-Planned next step (not in this release): an Ed25519 signature in a `signature` field, with the key in a Docker secret. Per-system API tokens for a transfer system come later (ADR-0004, option C).
+Planned next step (not in this release): an Ed25519 signature in a `signature` field, with the key in a Docker secret. Per-system API tokens for a transfer system come later (ADR-0014).
 
 ## Consequences
 

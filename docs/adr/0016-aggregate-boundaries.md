@@ -48,7 +48,7 @@ Aggregates:
 
 Domain inputs: every domain method takes resolved values only: `&TypeTree`, `&PlatformTypes`, `&LiveUnits`, `&ApprovalPolicy`, `&DraftEditors`. The use case loads them through ports before it calls the domain.
 
-Commands (one use case, one transaction each):
+Commands (one use case, one transaction each, except `Login` (T1, T2)):
 
 | Context | Commands |
 |---|---|
@@ -59,7 +59,7 @@ Commands (one use case, one transaction each):
 
 `EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It has no permission row. `AddParameter`, `UpdateParameterDefinition`, `DefineUdt`, and `RebindTypeRevision` call it through a port inside their own transaction. Recipe Management never writes `plc_type` itself (ADR-0017).
 
-Queries are use cases too. Each query checks its permission first (ADR-0013).
+Queries are use cases too. Each query checks its permission first (ADR-0013). A form or preview route is a query with the permission of the command that it prepares (`domain-model.md` 5.5).
 
 A draft command is one of the eight parameter commands: `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `UpsertTranslation`, `RemoveTranslation`, `RemoveParameter`, and `RebindTypeRevision`. Only these commands insert the user into `draft_editor(recipe_version_id, user_id, first_edit_at)`. ADR-0022 uses this table.
 

@@ -37,9 +37,11 @@ No path value holds an S7 address.
 
 Exemption from the `E-WEB-005` rule. `E-WEB-005 NotFound` is for an unknown `{ref}`, `{n}`, `{code}`, or `{login}`, a malformed `{key}` (not a UUID), and a `{key}` or `{lang}` of a version that does not exist. `E-RCP-051 ParameterNotFound` and `E-RCP-050 TranslationNotFound` are for a well-formed `{key}` or `{lang}` that is absent from an existing draft. The draft commands of section 2.6 return them. The two DELETE rows of section 2.6 cite both codes with this rule.
 
+Request fields. `E-WEB-005` is for URL values only. A request field that names a machine that does not exist returns `404 E-PLT-019 MachineNotFound`, for example `machine_code` of `CreateRecipe`. A request field that names a unit that does not exist returns `404 E-PLT-020 UnitNotFound`, for example `unit_path` of `AddParameter`. A missing parent in `AddUnit` returns `422 E-PLT-003 ParentNotFound`.
+
 Mutating requests use `POST`, `PUT`, or `DELETE`. HTMX sends `PUT` and `DELETE` with `hx-put` and `hx-delete`. Every mutating request carries the CSRF token (section 7). Every mutating request on a `Draft` carries `row_version` (section 4).
 
-The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016. A query is also a use case. It checks its permission first, in the same way as a command (R28).
+The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016. A query is also a use case. It checks its permission first, in the same way as a command (R28). A form or preview route names its query use case of `domain-model.md` 5.5. That query has the permission of the command that it prepares.
 
 ## 2. Endpoints
 
@@ -69,13 +71,14 @@ The response body and the response time of `POST /login` are the same for an unk
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
 | GET | `/machines` | query | `RecipeView` | `q`, `page`, `show_archived` | `200` list of live machines. `show_archived=1` adds the archived machines, each with a link to `/machines/by-id/{uuid}` | - |
-| GET | `/machines/new` | - | `MachineManage` | - | `200` form | - |
+| GET | `/machines/new` | `GetMachineForm` | `MachineManage` | - | `200` form | - |
 | POST | `/machines` | `CreateMachine` | `MachineManage` | `code`, `name`, `plc_platform`, `main_unit_name` | `303` to `/machines/{code}` | `409 E-PLT-001` |
 | GET | `/machines/{code}` | query | `RecipeView` | - | `200` page of the live machine with this code, with the unit tree | `404 E-WEB-005` |
 | GET | `/machines/by-id/{uuid}` | query | `RecipeView` | - | `200` machine page of a live or an archived machine, with the unit tree. Read-only for an archived machine | `404 E-WEB-005` |
 | POST | `/machines/{code}/rename` | `RenameMachine` | `MachineManage` | `name` | `200` fragment | `404 E-WEB-005`, `409 E-PLT-010` |
 | POST | `/machines/{code}/archive` | `ArchiveMachine` | `MachineManage` | CSRF token | `303` to `/machines` | `404 E-WEB-005`, `409 E-PLT-011` |
 | GET | `/machines/{code}/units` | query | `RecipeView` | - | `200` unit tree fragment | `404 E-WEB-005` |
+| GET | `/machines/{code}/units/new` | `GetUnitForm` | `UnitManage` | optional `parent_path` | `200` form | `404 E-WEB-005` |
 | POST | `/machines/{code}/units` | `AddUnit` | `UnitManage` | `parent_path` (empty for a main unit), `segment`, `name` | `200` tree fragment | `404 E-WEB-005`, `422 E-PLT-002`, `422 E-PLT-003`, `409 E-PLT-004`, `409 E-PLT-009`, `409 E-PLT-010`, `422 E-PLT-017` |
 | GET | `/machines/{code}/units/{path}` | query | `RecipeView` | - | `200` unit detail | `404 E-WEB-005` |
 | POST | `/machines/{code}/units/{path}/rename` | `RenameUnit` | `UnitManage` | `name` | `200` fragment | `404 E-WEB-005`, `409 E-PLT-009` |
@@ -90,7 +93,7 @@ The response body and the response time of `POST /login` are the same for an unk
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
 | GET | `/machines/{code}/types` | query | `RecipeView` | - | `200` list of UDTs, latest revision first | `404 E-WEB-005` |
-| GET | `/machines/{code}/types/new` | - | `UdtManage` | - | `200` form | - |
+| GET | `/machines/{code}/types/new` | `GetUdtForm` | `UdtManage` | - | `200` form | `404 E-WEB-005` |
 | POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type` (a `TypeExpr`) | `303` to the new type | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016`, `422 E-PLT-018` |
 | GET | `/machines/{code}/types/{name}` | query | `RecipeView` | optional `rev` | `200` type tree of the latest revision, or of `rev` | `404 E-WEB-005` |
 | POST | `/machines/{code}/types/{name}/revisions` | `DefineUdt` | `UdtManage` | same as `POST /types`. The server sets `supersedes` | `303` to the new revision | same as `POST /types` |
@@ -105,8 +108,8 @@ The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `T
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
 | GET | `/recipes` | query | `RecipeView` | `q`, `machine`, `status`, `page`, `show_deleted` | `200` list. Deleted recipes are hidden. `show_deleted=1` works only with `RecipeRestore` | - |
-| GET | `/recipes/new` | - | `RecipeCreate` | - | `200` form | - |
-| POST | `/recipes` | `CreateRecipe` | `RecipeCreate` | `machine_code`, `reference_number`, `name`, `change_note` | `303` to `/recipes/{ref}/versions/1` | `409 E-RCP-001`, `409 E-PLT-010` |
+| GET | `/recipes/new` | `GetRecipeForm` | `RecipeCreate` | - | `200` form | - |
+| POST | `/recipes` | `CreateRecipe` | `RecipeCreate` | `machine_code`, `reference_number`, `name`, `change_note` | `303` to `/recipes/{ref}/versions/1` | `409 E-RCP-001`, `409 E-PLT-010`, `404 E-PLT-019` |
 | GET | `/recipes/{ref}` | query | `RecipeView` | - | `200` recipe page with version list | `404 E-WEB-005` |
 | POST | `/recipes/{ref}/rename` | `RenameRecipe` | `RecipeEdit` | `name` | `200` fragment | `404 E-WEB-005`, `409 E-RCP-012` |
 | POST | `/recipes/{ref}/delete` | `DeleteRecipe` | `RecipeDelete` (conditional, section 3) | CSRF token | `303` to `/recipes` | `404 E-WEB-005`, `409 E-RCP-010`, `409 E-RCP-026`, `409 E-RCP-012` |
@@ -119,9 +122,10 @@ The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `T
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
 | GET | `/recipes/{ref}/versions` | query | `RecipeView` | - | `200` version list fragment | `404 E-WEB-005` |
+| GET | `/recipes/{ref}/versions/new` | `GetVersionForm` | `VersionCreate` | - | `200` form with `based_on` and `change_note` | `404 E-WEB-005` |
 | POST | `/recipes/{ref}/versions` | `CreateVersion` | `VersionCreate` | `based_on` (version number, optional), `change_note` | `303` to the new `Draft`. The draft page lists only the outdated parameters, which need a rebind. A base version can reference an archived unit, an archived machine, or a type that is not on the platform. Then the server returns `422 E-RCP-020` with the items and creates no draft | `404 E-WEB-005`, `409 E-RCP-011`, `409 E-RCP-012`, `409 E-PLT-010`, `422 E-RCP-020`, `422 E-RCP-021` |
 | GET | `/recipes/{ref}/versions/{n}` | query | `RecipeView` | `page` for the parameter table | `200` version page. Editable forms only for a `Draft` and a user with `ParameterEdit` | `404 E-WEB-005` |
-| GET | `/recipes/{ref}/versions/{n}/approve` | query | `VersionApprove` | - | `200` approve page. Shows the diff against the current `Approved` version. Limit changes are highlighted. Lists the outdated parameters and offers the flag `allow_outdated` | `404 E-WEB-005`, `409 E-RCP-007` |
+| GET | `/recipes/{ref}/versions/{n}/approve` | `GetApprovalPreview` | `VersionApprove` | - | `200` approve page. Shows the diff against the current `Approved` version. Limit changes are highlighted. Lists the outdated parameters and offers the flag `allow_outdated` | `404 E-WEB-005`, `409 E-RCP-007` |
 | POST | `/recipes/{ref}/versions/{n}/approve` | `ApproveVersion` | `VersionApprove` | `row_version`, `allow_outdated` (default `false`), CSRF token | `200` version page. Shows the retired version number when one exists. An already approved version with `row_version == expected + 1` returns the same page without a change | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-RCP-015`, `409 E-WEB-001`, `422 E-RCP-008`, `422 E-RCP-016`, `422 E-RCP-020`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-024`, `500 E-EXP-004` |
 | POST | `/recipes/{ref}/versions/{n}/retire` | `RetireVersion` | `VersionRetire` | `row_version`, CSRF token | `200` version page | `404 E-WEB-005`, `409 E-RCP-009`, `409 E-RCP-012`, `409 E-WEB-001` |
 | POST | `/recipes/{ref}/versions/{n}/discard` | `DiscardDraft` | `VersionDiscard` | `row_version`, CSRF token | `303` to `/recipes/{ref}` | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-WEB-001` |
@@ -139,8 +143,8 @@ All routes in this group are under `/recipes/{ref}/versions/{n}`. A mutating rou
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
 | GET | `.../parameters` | query | `RecipeView` | `unit` (path filter), `page` | `200` parameter table fragment, grouped by unit, 100 rows per page | `404 E-WEB-005` |
-| GET | `.../parameters/new` | - | `ParameterEdit` | `unit` | `200` empty parameter form. The server generates `key` at `AddParameter` (A40) | `404 E-WEB-005` |
-| POST | `.../parameters` | `AddParameter` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `type` (a `TypeExpr`), `s7_address`, `ordinal`, `value` (JSON text, required), `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`, `limits[i].max_length` (`limits[]` can be empty) | `200` parameter row fragment with the new `key` | `409 E-RCP-014`, `422 E-RCP-003`, `422 E-RCP-004`, `422 E-RCP-005`, `422 E-RCP-006`, `422 E-RCP-017`, `422 E-RCP-018`, `422 E-RCP-019`, `422 E-RCP-021`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-053`, `409 E-PLT-009`, `422 E-PLT-013`, `422 E-PLT-018` |
+| GET | `.../parameters/new` | `GetParameterForm` | `ParameterEdit` | `unit` | `200` empty parameter form. The server generates `key` at `AddParameter` (A40) | `404 E-WEB-005` |
+| POST | `.../parameters` | `AddParameter` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `type` (a `TypeExpr`), `s7_address`, `ordinal`, `value` (JSON text, required), `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`, `limits[i].max_length` (`limits[]` can be empty) | `200` parameter row fragment with the new `key` | `409 E-RCP-014`, `422 E-RCP-003`, `422 E-RCP-004`, `422 E-RCP-005`, `422 E-RCP-006`, `422 E-RCP-017`, `422 E-RCP-018`, `422 E-RCP-019`, `422 E-RCP-021`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-053`, `409 E-PLT-009`, `422 E-PLT-013`, `422 E-PLT-018`, `404 E-PLT-020` |
 | GET | `.../parameters/{key}` | query | `RecipeView` | - | `200` parameter detail or edit form | `404 E-WEB-005` |
 | POST | `.../parameters/{key}/definition` | `UpdateParameterDefinition` | `ParameterEdit` | `row_version`, `unit_path`, `tag`, `name_en`, `description_en`, `type` (a `TypeExpr`), `s7_address`, `ordinal`. When `type` names a different type than the current one: also `value` and `limits[i].leaf_path`, `limits[i].min`, `limits[i].max`, `limits[i].max_length`, all required. Otherwise neither `value` nor `limits[]` | `200` parameter row fragment | same as `AddParameter`. A missing `value` after a type change is `422 E-RCP-005` |
 | POST | `.../parameters/{key}/value` | `SetParameterValue` | `ParameterEdit` | `row_version`, `value` (JSON text) | `200` value fragment | `422 E-RCP-004`, `422 E-RCP-005`, `422 E-RCP-021` |
@@ -156,6 +160,7 @@ Rules:
 - A command touches only its own rows. `SetParameterValue` does not read or write `parameter_limit` or `parameter_translation`. `ReplaceLimits` replaces all limit rows of one parameter and nothing else. `UpsertTranslation` writes one language.
 - The form identifies a parameter by `key`. A `tag` can change through `UpdateParameterDefinition`. The parameter page shows the current `tag`.
 - The `value` field is the JSON text of a `ParameterValue`. The form builds it from one input per leaf. The server parses it as a whole. A partial value is `422 E-RCP-005`. A request with a `value` field has the larger body limit of section 7.6.
+- A `duration` or `instant` leaf in `value`, `limits[i].min`, `limits[i].max`, and `new_member_values` is an IEC literal, for example `T#1s` (`domain-model.md` 2.1). The server stores the count of the base unit.
 - `AddParameter` always carries `value`, and `limits[]` can be empty. `UpdateParameterDefinition` carries `value` and `limits[]` only when the type changes. Then both replace the old value and the old limits. Otherwise the value and the limits stay unchanged. `SetParameterValue` and `ReplaceLimits` change one of them without a type change.
 - The parameter table is paginated. A `Draft` with more than 100 parameters shows one unit per page by default.
 
@@ -173,7 +178,7 @@ The export endpoints use the session cookie (ADR-0014). A `Draft` is never expor
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
 | GET | `/users` | query | `UserManage` | `q`, `page` | `200` list | - |
-| GET | `/users/new` | - | `UserManage` | - | `200` form | - |
+| GET | `/users/new` | `GetUserForm` | `UserManage` | - | `200` form | - |
 | POST | `/users` | `CreateUser` | `UserManage` | `login`, `role` | `200` page of the new user with a one-time password, shown once. `must_change_password` is set | `409 E-IDN-001` |
 | GET | `/users/{login}` | query | `UserManage` | - | `200` user page with lock state | `404 E-WEB-005` |
 | POST | `/users/{login}/role` | `SetUserRole` | `UserManage` | `role` | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002` |
@@ -223,6 +228,7 @@ pub enum Permission {
 ### 3.2 Rules
 
 - The HTTP layer only authenticates. It does not decide what a role can do.
+- A form or preview route is a query use case with the permission of the command that it prepares (`domain-model.md` 5.5). The matrix row of that command names the query.
 - A role maps to a fixed set of permissions. There are no per-user overrides (ADR-0013).
 - A generated integration test checks every (operation, role) pair of the matrix below, for commands and for queries (`reliability.md` section 6).
 - Last administrator rule: `SetUserRole` and `DeactivateUser` return `Err(LastAdministrator)` when the target is the last active user with role `Administrator`. The use case counts active administrators in a `SERIALIZABLE` transaction (`data-model.md` section 6). There is no database trigger for this rule.
@@ -240,19 +246,19 @@ Legend: ✓ allowed, ✗ denied, (c) allowed with the condition in the last colu
 | View recipe history (`/recipes/{ref}/history`) | `RecipeView` | ✓ | ✓ | ✓ | - |
 | Export the `Approved` version | `VersionExport` | ✓ | ✓ | ✓ | A4 |
 | Export a `Retired` version by number | `VersionExportHistory` | ✓ | ✓ | ✗ | ADR-0019 |
-| Create recipe | `RecipeCreate` | ✓ | ✓ | ✗ | R25 |
+| Create recipe. Form query `GetRecipeForm` | `RecipeCreate` | ✓ | ✓ | ✗ | R25 |
 | Rename recipe | `RecipeEdit` | ✓ | ✓ | ✗ | R25 |
 | Delete recipe (soft) | `RecipeDelete` | (c) | (c) | ✗ | ProcessEngineer: only when the recipe has no `Approved` and no `Retired` version (`E-RCP-026`). Administrator: only when the recipe has no `Approved` version (`E-RCP-010`, I14). R23, A13 |
 | Restore recipe, list deleted recipes | `RecipeRestore` | ✓ | ✗ | ✗ | ADR-0021 |
-| Create version (new `Draft`) | `VersionCreate` | ✓ | ✓ | ✗ | R25, A7 |
-| Add, edit, delete parameters, limits, translations of a `Draft`. Rebind a type revision | `ParameterEdit` | ✓ | ✓ | ✗ | R09, R25 |
-| Approve version | `VersionApprove` | (c) | (c) | ✗ | A5, A34. Not the creator or an editor of the draft (`E-RCP-015`). The approval retires the previous `Approved` version (R27) |
+| Create version (new `Draft`). Form query `GetVersionForm` | `VersionCreate` | ✓ | ✓ | ✗ | R25, A7 |
+| Add, edit, delete parameters, limits, translations of a `Draft`. Rebind a type revision. Form query `GetParameterForm` | `ParameterEdit` | ✓ | ✓ | ✗ | R09, R25 |
+| Approve version. Preview query `GetApprovalPreview` | `VersionApprove` | (c) | (c) | ✗ | A5, A34. Not the creator or an editor of the draft (`E-RCP-015`). The approval retires the previous `Approved` version (R27) |
 | Retire version without replacement | `VersionRetire` | ✓ | ✗ | ✗ | A28 |
 | Discard `Draft` | `VersionDiscard` | ✓ | ✓ | ✗ | - |
-| Create, rename, archive machine | `MachineManage` | ✓ | ✓ | ✗ | A9 |
-| Add, rename, archive unit | `UnitManage` | ✓ | ✓ | ✗ | A9 |
-| Define UDT revision | `UdtManage` | ✓ | ✓ | ✗ | A9 |
-| Create user, set role, activate, deactivate, reset password | `UserManage` | ✓ | ✗ | ✗ | A9. Last administrator rule |
+| Create, rename, archive machine. Form query `GetMachineForm` | `MachineManage` | ✓ | ✓ | ✗ | A9 |
+| Add, rename, archive unit. Form query `GetUnitForm` | `UnitManage` | ✓ | ✓ | ✗ | A9 |
+| Define UDT revision. Form query `GetUdtForm` | `UdtManage` | ✓ | ✓ | ✗ | A9 |
+| Create user, set role, activate, deactivate, reset password. Form query `GetUserForm` | `UserManage` | ✓ | ✗ | ✗ | A9. Last administrator rule |
 | Unlock a login | `LoginUnlock` | ✓ | ✗ | ✗ | ADR-0014 |
 | Change own password | authenticated | ✓ | ✓ | ✓ | - |
 | View full audit log and security events | `AuditView` | ✓ | ✗ | ✗ | A20 |
@@ -299,10 +305,10 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | Database trigger (`E-PLT-030..038`, `E-RCP-030..036`) | `409` for a state rule, `422` for a shape rule, as `reliability.md` section 1.2 gives | `error.html`. The event log gets an `ERROR` line, because the domain check should have fired first |
 | No permission (`E-WEB-002`) | `403` | `error.html` with the operation name |
 | CSRF token missing or wrong (`E-WEB-007`) | `403` | `error.html` |
-| No session, expired session (`E-WEB-004`) | `401` | `HX-Redirect: /login` for HTMX, `303` to `/login` otherwise. This is the only status with `HX-Redirect` |
+| No session, expired session (`E-WEB-004`) | `401` | `HX-Redirect: /login` for HTMX, `303` to `/login` otherwise. `E-WEB-004` is the only code with `HX-Redirect` |
 | Wrong credentials (`E-IDN-003`) | `401` | `field-errors.html` on the login form. No redirect |
 | Wrong current password (`E-IDN-008`) | `422` | `field-errors.html` on the password form |
-| Missing resource in the URL (`E-WEB-005`, `E-EXP-001`, `E-RCP-050`, `E-RCP-051`) | `404` | `error.html` |
+| Missing resource in the URL (`E-WEB-005`, `E-EXP-001`, `E-RCP-050`, `E-RCP-051`) or in a request field (`E-PLT-019`, `E-PLT-020`) | `404` | `error.html` |
 | Request too large (`E-WEB-003`) | `413` | `error.html` |
 | Login throttled (`E-IDN-005`) | `429` | `error.html` with `Retry-After` |
 | Read-only mode (`E-WEB-006`). Every command except `Login`, `Logout`, and `ExportVersion` gets it. Queries, the two export routes, `POST /login`, `POST /logout`, and `POST /lang` stay available (`reliability.md` 7.8) | `503` | `error.html` with the banner text |
@@ -322,7 +328,7 @@ The same code appears in the structured log of the request. A user can report th
 
 ### 5.3 Content negotiation
 
-- An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML` for every status `>= 400`, except `401`, which sets `HX-Redirect`.
+- An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML` for every status `>= 400`, except `E-WEB-004`, which sets `HX-Redirect`.
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
 - The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`.
 
@@ -366,10 +372,22 @@ The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the 
 | `parameters[].name_en` | string | no | Informational. A name is not in the hash |
 | `parameters[].type_id` | string | yes | A type reference |
 | `parameters[].s7_address` | string or null | yes | The stored value when present. Always present on `S7_300`. Null on `CodesysIec` and `TwinCat3` (A31) |
-| `parameters[].limits[]` | `{leaf_path, min, max, max_length}` | yes | `min`, `max`, and `max_length` are JSON strings with the canonical decimal text, or null. `leaf_path` `[*]` applies to every element of an array. Ordered by `leaf_path` (section 6.3) |
-| `parameters[].value` | JSON | yes | The `ParameterValue` tree. Every numeric leaf is a JSON string with the canonical decimal text (`reliability.md` 4.4). A `BOOL` is a JSON boolean. A string or a time value is a JSON string |
+| `parameters[].limits[]` | `{leaf_path, min, max, max_length}` | yes | `min`, `max`, and `max_length` are JSON strings with the canonical decimal text, or null. A limit of a duration or instant leaf is a count of the base unit (table below). `leaf_path` `[*]` applies to every element of an array. Ordered by `leaf_path` (section 6.3) |
+| `parameters[].value` | JSON | yes | The `ParameterValue` tree. Every numeric, duration, and instant leaf is a JSON string with the canonical decimal text (`reliability.md` 4.4). A duration or instant leaf holds a count of the base unit of its type (table below). A `BOOL` is a JSON boolean. A string or char leaf is a JSON string |
 
 A type reference (`type_id`, `element_type_id`) is the primitive name for a primitive without a length, for example `INT`. For every other type it is a `types[].id`.
+
+Base units of time values. A consumer gets the unit from the type name of the leaf. The document carries no unit field. `domain-model.md` 2.1 is the definition (Assumption A43).
+
+| Type | Value in the document |
+|---|---|
+| `TIME`, `S5TIME` | Milliseconds |
+| `LTIME` | Nanoseconds |
+| `DATE` | Days since 1970-01-01 |
+| `LDATE`, `LDT`, `DTL` | Nanoseconds since 1970-01-01 |
+| `TIME_OF_DAY` | Milliseconds since midnight |
+| `LTOD` | Nanoseconds since midnight |
+| `DATE_AND_TIME` | Seconds since 1970-01-01 |
 
 Presence rule. A field with the rule "Only for `Array`" or "Only for `Struct`" is absent from every other `types[]` entry. It is never null. Every other field of the table is always present. It is null where the table allows null and the value does not apply. The example of section 6.2 follows this rule.
 
@@ -495,7 +513,7 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 - Every mutating request from an authenticated session carries a token bound to the session. Forms send it in the hidden field `csrf_token`. HTMX requests send it in the header `X-CSRF-Token`. The `hx-headers` attribute on `<body>` sets the header. The token is created at login and is rotated on logout and password change.
 - `POST /login` and `POST /lang` without a session use a pre-session token: a signed double-submit cookie `__Host-recipe_csrf` and the field `csrf_pre`. `GET /login` sets the cookie. The key of the Docker secret `csrf_signing_key` signs it (`security.csrf_signing_key_file`, `reliability.md` 7.11).
 - Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. A request without either is rejected.
-- A mutating request without a valid token gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`.
+- A mutating request without a valid token gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8).
 - The export endpoints are `GET` and need no token.
 - Session fixation: `Login` always creates a new session row and a new token. When the login request carries a session cookie, `Login` deletes that session row.
 
@@ -507,7 +525,7 @@ The values of this section are in `reliability.md` section 7.11.
 - Per-IP budget: after 100 failed attempts from one `client_ip` in 15 minutes, every login from that address gets `429 E-IDN-005` with `Retry-After`.
 - Order: the use case takes an Argon2 permit and then runs T1 under the advisory lock of the login. T1 counts the failures in `login_attempt`, inserts the attempt row with `succeeded = false`, and commits.
 - A throttled attempt releases the permit and gets 429. Otherwise the password check runs and the permit is released. T2 marks the attempt as a success and creates the session, or it writes a `security_event`.
-- A failed login therefore always counts (`data-model.md` 6).
+- A failed login therefore always counts (`data-model.md` 6). Two cases write no attempt row. After the per-IP budget is reached, the 429 comes from the count alone. In read-only mode a failed login writes only an event log line.
 - `UnlockLogin` clears the counters of one login. It writes a `security_event` of kind `unlock`.
 - A failed login gets one response for an unknown login, an inactive user, and a wrong password. The body, the status, and the response time are the same. The server hashes a dummy password when the user is not found or is inactive. The event log and the `security_event` row record the real reason.
 - Every Argon2id call runs under a global semaphore with 4 permits and an acquire timeout of 2 seconds. A timeout returns `503 E-WEB-009` with `Retry-After`.
@@ -552,7 +570,7 @@ Every response carries:
 | `Strict-Transport-Security` | `max-age` from `http.hsts_max_age` (`reliability.md` 7.11), `includeSubDomains` |
 | `X-Request-Id` | the `request_id` of the request |
 
-HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`. The last value makes `hx-delete` send a form body, which the form-only routes of section 2.6 require (`reliability.md` 4.2). The `<body>` tag has `hx-history="false"`. No page snapshot is stored in `localStorage` on a shared workstation.
+HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`. The value of `methodsThatUseUrlParams` makes `hx-delete` send a form body, which the form-only routes of section 2.6 require (`reliability.md` 4.2). By default HTMX inserts an inline `<style>` element for its request indicator, and `style-src 'self'` blocks it. `includeIndicatorStyles: false` stops this. The rules for `.htmx-indicator` are in the static style sheet `static/app.css`. The `<body>` tag has `hx-history="false"`. No page snapshot is stored in `localStorage` on a shared workstation.
 
 Permitted client-side scripts. No other script exists in the application:
 

@@ -68,7 +68,7 @@ We use Option A.
 ### Risks and mitigations
 
 - Risk: a developer adds a command that writes without an audit entry. Mitigation: the `commit` signature requires entries. An integration test asserts one entry per command.
-- Risk: the audit table slows writes. Mitigation: only the indexes of `data-model.md` section 3.15 exist: `(aggregate_id, id)`, `(entity_type, entity_id, id)`, `(actor_user_id, id)`, and the unique `chain_seq` (amended by ADR-0022).
+- Risk: the audit table slows writes. Mitigation: only the indexes of `data-model.md` section 3.15 exist: `(aggregate_id, id)`, `(entity_type, entity_id, id)`, `(actor_user_id, id)`, `(action, id)`, a BRIN index on `occurred_at`, and the unique `chain_seq` (amended by ADR-0022).
 
 ## Related
 

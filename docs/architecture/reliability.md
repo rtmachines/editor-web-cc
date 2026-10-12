@@ -18,7 +18,7 @@ Each library crate owns its error types, with two exceptions. `recipe-export` re
 | `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
 | `recipe-db` | none public | Maps `sqlx::Error` into `StorageError` of `recipe-app` with the rule below. `recipe-db` depends on `recipe-app`, and `recipe-app` does not depend on `recipe-db` (`overview.md` 5) |
 | `recipe-export` | none | No error type of its own. The JSON writer of the HTTP response returns `ExportError` of `recipe-domain` |
-| `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }` |
+| `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
 | `recipe-server` | `anyhow::Error` | Everything, only in `main()`, configuration loading, subcommands, and wiring |
 
 Rules:
@@ -29,7 +29,7 @@ Rules:
 - `?` converts between layers through `From`. A `map_err` closure appears only when it adds context.
 - `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock`. `40001` becomes `Deadlock` when the one retry of the next rule also fails. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
 - `SetUserRole` and `DeactivateUser` run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
-- `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
+- `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
 - `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, and the export use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. A background job logs its errors once at its loop boundary with a `job` field. Lower layers add context and propagate. They do not log the error.
 - The HTTP response contains the error code, the user message, and the `request_id`. It does not contain the `Debug` output, a stack trace, or an SQL fragment.
@@ -61,6 +61,8 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-PLT-016` | `PlantError::StructHasNoMembers { type_name }` | 422 | Type {type_name} has no members. Add at least one member. |
 | `E-PLT-017` | `PlantError::InvalidUnitPath { text }` | 422 | {text} is not a unit path. A unit path is U and 1 to 5 numbers from 1 to 64, with a dot between two numbers. Example: U1.2. |
 | `E-PLT-018` | `PlantError::TypeTooLarge { type_name, limit }` | 422 | Type {type_name} is larger than the limit {limit}. Use fewer elements, fewer members, or fewer levels. |
+| `E-PLT-019` | `PlantError::MachineNotFound { code }` | 404 | Machine {code} does not exist. Select an existing machine. |
+| `E-PLT-020` | `PlantError::UnitNotFound { path }` | 404 | Unit {path} does not exist on this machine. Select an existing unit. |
 | `E-PLT-030` | `StorageError::Constraint`, trigger function `machine_platform_frozen` (data-model.md 4.5) | 409 | The PLC platform of a machine with recipes cannot change. Reference: {request_id}. |
 | `E-PLT-031` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type does not exist on the platform of the version. Reference: {request_id}. |
 | `E-PLT-032` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type belongs to another machine. Reference: {request_id}. |
@@ -88,7 +90,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-016` | `RecipeError::LimitMissing { tag, leaf }` | 422 | {tag}{leaf} has no process limit. Set a limit before approval. |
 | `E-RCP-017` | `RecipeError::LeafPathNotFound { tag, leaf }` | 422 | Path {leaf} does not exist in the type of {tag}. |
 | `E-RCP-018` | `RecipeError::MinGreaterThanMax { tag, leaf, min, max }` | 422 | The minimum {min} of {tag}{leaf} is greater than the maximum {max}. |
-| `E-RCP-019` | `RecipeError::LimitNotApplicable { tag, leaf }` | 422 | {tag}{leaf} is a BOOL. A BOOL has no process limit. |
+| `E-RCP-019` | `RecipeError::LimitNotApplicable { tag, leaf }` | 422 | {tag}{leaf} does not accept this limit. A BOOL, CHAR, or WCHAR leaf has no limit. A string leaf has only a maximum length. |
 | `E-RCP-020` | `RecipeError::ValidationFailed { items }` | 422 | {count} parameters are not valid. See the list. |
 | `E-RCP-021` | `RecipeError::SizeBudgetExceeded { budget, limit, actual }` | 422 | The version exceeds the limit of {limit} {budget}. Current count: {actual}. |
 | `E-RCP-022` | `RecipeError::S7AddressOverlap { tag, other_tag, address }` | 422 | Address {address} of {tag} overlaps with {other_tag}. |
@@ -147,6 +149,8 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 A trigger code (`E-PLT-030..038`, `E-RCP-030..036`) reaches the user only when a domain check did not fire first. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
 
 Codes after `E-RCP-029`: `E-RCP-050 TranslationNotFound` (`RemoveTranslation`), `E-RCP-051 ParameterNotFound` (every draft command with `{key}` in the URL), `E-RCP-052 RebindTargetInvalid` (`RebindTypeRevision`), and `E-RCP-053 S7AddressNotAllowed` (`AddParameter`, `UpdateParameterDefinition`). `E-RCP-001..029` has no free number, so the block `E-RCP-050..069` holds them. The `{lang}` and `{key}` values of `E-RCP-050` and `E-RCP-051` come from the URL, so their status is 404. `api.md` 1 gives the rule. `E-RCP-051` and `E-RCP-050` are for a well-formed `{key}` or `{lang}` that the existing draft does not hold. `E-WEB-005` is for every other missing resource in the URL.
+
+`E-PLT-019 MachineNotFound` and `E-PLT-020 UnitNotFound` are for a request field that names a machine or a unit that does not exist. Their status is 404 (`api.md` 1). `E-WEB-005` is for URL values only. `E-PLT-019` belongs to `CreateRecipe` (`machine_code`) and `RestoreRecipe`. `E-PLT-020` belongs to `AddUnit` (`parent_path`), `AddParameter`, and `UpdateParameterDefinition` (`unit_path`).
 
 ### 1.3 Reference shape
 
@@ -233,9 +237,10 @@ Supervised background jobs. They run inside `app`. The intervals are keys of sec
 
 | Job | Work | Interval |
 |---|---|---|
-| `cleanup` | Deletes expired `session` rows and old `login_attempt` rows. Calls `security_event_purge()` (`data-model.md` 4.12). Uses the port `MaintenanceStore` and writes no audit entry | `session.cleanup_interval`, `login.attempt_cleanup_interval`, `security_event.purge_interval` |
+| `cleanup` | Deletes expired `session` rows and old `login_attempt` rows. Calls `security_event_purge()` once per batch of `security_event.purge_batch` rows (`data-model.md` 4.12). Uses the port `MaintenanceStore` and writes no audit entry | `session.cleanup_interval`, `login.attempt_cleanup_interval`, `security_event.purge_interval` |
 | `disk_check` | Measures free space and sets the read-only mode (7.8) | `health.disk_check_interval` |
-| `audit_chain_check` | Recomputes the audit hash chain in batches of `audit.check_batch` rows (`data-model.md` 4.9). Writes a break through the port `SecurityEventSink`. After a completed check, it records `audit.last_check_seq` and `audit.last_check_at` in `app_setting` through the port `MaintenanceStore`, with no audit entry | `audit_chain.check_time` |
+| `audit_chain_check` | Recomputes the audit hash chain up to the head that it reads first (`data-model.md` 4.9). A batch ends at `audit.check_batch` rows or `audit.check_batch_bytes`. Each batch runs in its own short transaction under `audit.check_statement_timeout`. Writes a break through the port `SecurityEventSink`. After a completed check, it records `audit.last_check_seq` and `audit.last_check_at` in `app_setting` through the port `MaintenanceStore`, with no audit entry | `audit_chain.check_time` |
+| `heartbeat` | Writes the state key `heartbeat.last_at` in `app_setting` through the port `MaintenanceStore`, with no audit entry. The write keeps the WAL stream active (7.7) | `heartbeat.interval` |
 | `clock_check` | Compares the clocks of `app` and `db` (7.9) | `clock.check_interval` |
 | `alerts` | Checks the alert conditions (3.7) | `alerts.interval` |
 
@@ -303,7 +308,7 @@ Docker uses the `json-file` log driver with `max-size` and `max-file` from `log.
 | Written | In the same transaction as the change (ADR-0005) | In its own short transaction, also when the request fails | Asynchronously, best effort |
 | Retention | Forever. Part of the backup | `security_event.retention` (section 7.11). Then the job `cleanup` deletes the rows through `security_event_purge()` (`data-model.md` 4.12) | 1 GB rolling window |
 | Reader | Administrator (all), ProcessEngineer (recipe entries), every role (recipe history page), per A20 | Administrator | Operations staff through Docker tools |
-| Tamper evidence | `entry_hash` chain, checked every night (ADR-0022) | Append-only for `recipe_app` | none |
+| Tamper evidence | `entry_hash` chain, checked every night (ADR-0022) | Append-only for `recipe_app`, except `count` of an aggregated row (`data-model.md` 3.8) | none |
 
 A business question ("who approved version 7?") is answered by the audit log. A security question ("who tried to log in as admin at 03:00?") is answered by the security events. An operations question ("why was the approval slow?") is answered by the event log. The `request_id` is present in all three and links them.
 
@@ -316,12 +321,12 @@ The supervised job `alerts` runs inside `app` every `alerts.interval` (section 7
 | More than `alerts.panic_count` panic events in `alerts.panic_window` | In-process counter of the panic hook (2.4) |
 | `/readyz` not ready for more than `alerts.not_ready_for` | In-process readiness state |
 | Latest dump older than `backup.max_age_alert` | Read-only mount of the `backups` volume |
-| WAL archive older than `wal.max_age_alert` | Read-only mount of the `walarchive` volume |
+| `recipe_replicator` not connected, or its lag `pg_current_wal_lsn() - sent_lsn` at or above `wal.max_lag_bytes` | `pg_stat_replication`. `recipe_app` reads it through `pg_read_all_stats` (`data-model.md` 5.1) |
 | Free disk below `disk.warn_percent` on `pgdata`, `backups`, or `walarchive` | `statvfs` on the read-only mounts |
-| More than `alerts.failed_login_count` failed logins in `alerts.failed_login_window` | `security_event` |
+| More than `alerts.failed_login_count` failed logins in `alerts.failed_login_window` | Sum of `count` of the `login_failed` rows in `security_event` |
 | Any `csrf_rejected`, or a `forbidden` on `UserManage`, in the last `alerts.security_window` | `security_event` |
 | Audit chain check failed | `security_event` kind `audit_chain_broken`, written by the job `audit_chain_check` |
-| No completed audit chain check in the last 24 h | `audit.last_check_at` in `app_setting`, written by the job `audit_chain_check` (`data-model.md` 4.9) |
+| `audit.last_check_at` older than `audit.max_check_age` | `audit.last_check_at` in `app_setting`, written by the job `audit_chain_check` (`data-model.md` 4.9) |
 | One or more `E-EXP-002` in the last `alerts.interval` | In-process error counter of the job `alerts`. `ExportVersion` increments it (`data-model.md` 6) |
 
 A restart loop of `app` also ends this job. Docker marks the container unhealthy. The runbook names `docker compose ps` and the host monitoring as the check for a restart loop.
@@ -346,6 +351,7 @@ A request that passes layer (a) is well-formed. A value that passes layer (b) is
 - A path parameter is parsed directly into the value object (`ReferenceNumber`, `MachineCode`, `UnitPath`, `ParameterKey`, `LangCode`). A bad path parameter never gives a 500. The rule has two cases (`api.md` 1):
   - A path value that is a domain value object with its own error code returns that code with 422. `LangCode` returns `E-RCP-027`. `UnitPath` returns `E-PLT-017` for a malformed text or segment and `E-PLT-002` for more than 5 segments. No path holds an S7 address.
   - A path value that names a resource returns `404 E-WEB-005` when the resource does not exist. This applies also when the text cannot name a resource, for example a bad `ReferenceNumber`. The exemption: a command on a draft returns `404 E-RCP-051` for a well-formed `{key}` and `404 E-RCP-050` for a well-formed `{lang}` that the existing draft does not hold (`api.md` 1).
+- A request field that names a machine or a unit that does not exist returns `404 E-PLT-019` or `404 E-PLT-020` (`api.md` 1).
 - The `Content-Type` of a request must match the route. Every mutating route accepts only `application/x-www-form-urlencoded`. The `value` field inside the form is JSON text.
 - HTMX 2 sends the parameters of a `DELETE` in the URL by default. The `htmx-config` meta tag sets `methodsThatUseUrlParams: ["get"]`, so `hx-delete` sends a form body like `hx-post` (`api.md` 9).
 - Text fields are trimmed and normalized to Unicode NFC before layer (b).
@@ -376,21 +382,23 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 | `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure of the reason table of `domain-model.md` 2.1 is `E-PLT-013`. A type above a size limit is `E-PLT-018` |
 | `ArrayDimension` | `lower <= upper`, `upper - lower < 65536`, at most 3 dimensions (A38, `domain-model.md` 2.1) |
 | `LeafPath` | Grammar: `domain-model.md` 2.1. The empty path is the parameter itself. `[*]` means every element of that array level. Resolves against the `TypeTree` |
-| `ProcessLimit` | `min <= max` when both set. Inside the type range. `max_length <= string_length`. Not on a `BOOL` leaf |
+| `ProcessLimit` | `min <= max` when both set. Inside the type range. `max_length <= string_length`. The limit fields follow the `LeafClass` of the leaf. Not on a `BOOL`, `CHAR`, or `WCHAR` leaf (`domain-model.md` 2.2) |
+| `IecLiteral` | Grammar, prefixes, and base units: `domain-model.md` 2.1. A text that does not parse, or a count outside the range, is `E-RCP-005` for a value and `E-RCP-006` for a limit |
 | `Password` (input only) | 12 to 128 characters, not in the breached-password list. Hashed at once. The plain text is dropped after hashing |
 
 ### 4.4 Parameter value JSON
 
 - The JSON is parsed by `serde_json` with the `arbitrary_precision` feature. A number stays a decimal string inside `serde_json::Number`. There is no `f64` round trip.
-- The domain converts each numeric leaf to `rust_decimal::Decimal` for range and limit checks. A number that does not fit in `Decimal` (more than 28 significant digits) is rejected with `E-RCP-005`.
-- Canonical form: the domain rewrites every numeric leaf to the canonical decimal text of `Decimal` (no exponent, no trailing zeros, `-0` becomes `0`) before storage. `1.5e2` is stored as `150`. `JSONB` keeps this canonical form. The export writes each numeric leaf and each limit as a JSON string that holds this canonical text (`api.md` 6.1). The content hash therefore does not depend on a JSON number format. Equality of two values is equality of canonical forms.
+- The domain converts each numeric, duration, or instant leaf to `rust_decimal::Decimal` for range and limit checks. A number that does not fit in `Decimal` (more than 28 significant digits) is rejected with `E-RCP-005`.
+- Canonical form: before storage the domain rewrites every numeric, duration, and instant leaf to the canonical decimal text of `Decimal`. This text has no exponent and no trailing zeros, and `-0` becomes `0`. `1.5e2` is stored as `150`. `JSONB` keeps this canonical form. The export writes each of these leaves and each limit as a JSON string that holds this canonical text (`api.md` 6.1). The content hash therefore does not depend on a JSON number format. Equality of two values is equality of canonical forms.
 - `REAL` and `LREAL` leaves are additionally checked to fit the IEEE 754 single or double range.
 - The JSON parser enforces the depth limit `json.max_depth` (section 7.11). `DefineUdt` and `EnsureDerivedType` reject a `TypeTree` deeper than this limit with `E-PLT-018`, so a valid value never reaches it.
 - Size budgets (Assumption A26, section 7.11): at most 16 384 scalar leaves per parameter. Per version: at most 262 144 leaves, 32 768 limit rows, and 4 000 parameters. `TypeTree` resolution counts leaves. `DefineUdt` and `EnsureDerivedType` reject a type above the per-parameter budget or above `type.max_members` with `E-PLT-018`. `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `RebindTypeRevision`, and `CreateVersion` check the per-version budgets with `E-RCP-021`. Statement-level triggers on `parameter` and `parameter_limit` are the last line (`E-RCP-035`, `E-RCP-036`).
 - The shape check is exact: an array has at most 3 dimensions (Assumption A38) and exactly `(upper - lower + 1)` elements per dimension. A struct has exactly the member names. No extra key, no missing key.
 - `STRING` values are checked for byte length against `string_length` in the target encoding (Latin-1 for `STRING`, UTF-16 units for `WSTRING`).
 - `BOOL` accepts only JSON `true` and `false`. Not `0`, `1`, or `"true"`.
-- Time types (`TIME`, `LTIME`, `S5TIME`, `DATE`, `LDATE`, `TIME_OF_DAY`, `LTOD`, `DATE_AND_TIME`, `LDT`, `DTL`) are stored as ISO 8601 strings and parsed with the `time` crate. The domain checks the platform range (for example `S5TIME` up to `2h46m30s`). Type names are the names of the matrix in `data-model.md` section 7.
+- `CHAR` and `WCHAR` accept a JSON string with exactly one Unicode scalar inside the range of `domain-model.md` 2.1.
+- Time types (`TIME`, `LTIME`, `S5TIME`, `DATE`, `LDATE`, `TIME_OF_DAY`, `LTOD`, `DATE_AND_TIME`, `LDT`, `DTL`) have the class `duration` or `instant` (`domain-model.md` 2.1). A request carries an IEC literal, for example `T#1d2h3m4s5ms` or `DT#2026-10-12-12:30:00`. The parser `IecLiteral` of `recipe-domain` converts it to an integer count of the base unit. The domain stores, hashes, and limits this count as canonical decimal text. The base-unit table of `domain-model.md` 2.1 gives the range of each count. Type names are the names of the matrix in `data-model.md` section 7.
 - Snapshot validation (`CreateVersion`, `ApproveVersion`) runs in `spawn_blocking` before the transaction opens. The transaction then locks the rows and re-checks `row_version`. It also repeats two checks that can change after the snapshot (`data-model.md` 6). `CreateVersion` checks the units again. `ApproveVersion` checks the limit count and the outdated types again. A validation that takes longer than `timeout.validation` returns `E-WEB-009`.
 
 ## 5. Migrations and schema evolution
@@ -401,12 +409,12 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 - Roles and the database are not created by a migration. The script `deploy/db/initdb/01-roles.sh` runs once as the PostgreSQL superuser when the `db` volume is empty. It reads the Docker secrets and creates `recipe_migrator`, `recipe_app`, `audit_owner`, `recipe_backup`, `recipe_replicator`, and the database. It adds the `pg_hba.conf` line for the replication connection of `recipe_replicator` (`data-model.md` section 5.1).
 - The server binary has a `migrate` subcommand: `recipe-server migrate`. The Compose service `migrate` runs it once (`restart: no`). It is the only service that holds the migrator secret. The `app` service never connects as `recipe_migrator`. At startup `app` checks that `current_user` is `recipe_app`, is not a superuser, and owns no table. It refuses to serve otherwise.
 - The migrator takes an advisory lock. Two migrators cannot run at the same time.
-- Every migration sets `lock_timeout` to `migrate.lock_timeout`. The migrator retries a migration that failed on `55P03` up to `migrate.retries` times with a pause of `migrate.retry_pause` (section 7.11). A migration that must build an index on a large table uses `CREATE INDEX CONCURRENTLY` in a file that starts with `-- no-transaction`. CI rejects a migration that rewrites a table or scans it under an exclusive lock (`ALTER TABLE ... TYPE`, `ADD COLUMN ... DEFAULT <volatile>`, `SET NOT NULL` without a valid `CHECK (... IS NOT NULL)` first). The rule applies to every table (`data-model.md` 8).
+- The migrator sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before `sqlx::migrate!` runs. The migrator retries a migration that failed on `55P03` up to `migrate.retries` times with a pause of `migrate.retry_pause` (section 7.11). A migration that must build an index on a large table uses `CREATE INDEX CONCURRENTLY` in a file that starts with `-- no-transaction`. CI rejects a migration that rewrites a table or scans it under an exclusive lock (`ALTER TABLE ... TYPE`, `ADD COLUMN ... DEFAULT <volatile>`, `SET NOT NULL` without a valid `CHECK (... IS NOT NULL)` first). The rule applies to every table (`data-model.md` 8).
 - CI starts a fresh cluster, runs `01-roles.sh`, and applies `0001` to `0004` as `recipe_migrator`. Then it runs the grants test of `data-model.md` 5.3. A migration that fails as `recipe_migrator` therefore fails the build.
 - A breaking change uses the expand-and-contract pattern across releases: release N adds the new column or table and writes both. Release N+1 reads the new one. Release N+2 deletes the old one.
 - Start order in Compose: `db` healthy → `backup-premigrate` (one-shot `pg_dump` with suffix `_premigrate`) completed → `migrate` completed → `app` → `proxy`. The `depends_on` conditions encode this chain (section 7.1). The upgrade procedure in 7.10 depends on the `_premigrate` dump.
 - The first administrator is not a migration. `recipe-server create-admin` reads the login from an argument and the password from stdin or from a secret file. It does nothing when an active administrator exists. It sets `must_change_password`. The Compose file does not run it. The runbook runs it once after the first `migrate`.
-- Primitive `plc_type` rows are seed data in `0004_seed_plc_types.sql`. Each row has a UUID that never changes. The insert uses `ON CONFLICT DO NOTHING`, so a re-run is idempotent (`data-model.md` 8).
+- Primitive `plc_type` rows are seed data in `0004_seed_plc_types.sql`. Each row has a UUID that never changes. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration (`data-model.md` 8).
 
 ## 6. Testing strategy
 
@@ -414,15 +422,15 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 |---|---|---|---|
 | Unit, domain | `recipe-domain` | `cargo test`, no I/O | Every invariant in `domain-model.md` section 3 has at least one passing and one failing test. Every domain error variant (below 030 and `E-RCP-050..069`) is produced by at least one test |
 | Unit, use case | `recipe-app` | In-memory implementations of all ports | Every command in `domain-model.md` section 5 has tests for success, each listed error, and the audit entry it writes. `SetParameterValue` leaves limit and translation rows unchanged. `ReplaceLimits` leaves the value unchanged. Separation of duties: the creator and each editor of a draft get `E-RCP-015`. Limit completeness: a numeric leaf without a limit blocks approval with `E-RCP-016` |
-| Permission matrix | `recipe-app` | Generated test from the matrix in `api.md` section 3 | One test per (operation, role) pair, for commands and for queries. The test asserts `Ok` or `AppError::Forbidden`. A new use case without a matrix row fails the build. `EnsureDerivedType` is an internal operation, not a use case, and has no matrix row. A demoted user with an open session gets `AppError::Unauthenticated` (`401 E-WEB-004`) on the next request, not `Forbidden`, because `SetUserRole` deletes the sessions of the user and increments `session_epoch` |
-| Property | `recipe-domain` | `proptest` | `UnitPath`, `S7Address`, `ReferenceNumber`, `LeafPath` round-trip through `parse` and `Display`. `ParameterValue::validate` against random `TypeTree`s up to depth 6 with random limits: a generated valid value passes, a mutated value fails. `S7Layout`: random sets of parameters in one data block, overlap and misalignment are always detected, non-overlapping aligned sets always pass |
+| Permission matrix | `recipe-app` | Generated test from the matrix in `api.md` section 3 | One test per (operation, role) pair, for commands and for queries. The form and preview queries of `domain-model.md` 5.5 are part of it, with the permission of the command that they prepare. The test asserts `Ok` or `AppError::Forbidden`. A new use case without a matrix row fails the build. `EnsureDerivedType` is an internal operation, not a use case, and has no matrix row. A demoted user with an open session gets `AppError::Unauthenticated` (`401 E-WEB-004`) on the next request, not `Forbidden`, because `SetUserRole` deletes the sessions of the user and increments `session_epoch` |
+| Property | `recipe-domain` | `proptest` | `UnitPath`, `S7Address`, `ReferenceNumber`, `LeafPath`, `IecLiteral` round-trip through `parse` and `Display`. `ParameterValue::validate` against random `TypeTree`s up to depth 6 with random limits: a generated valid value passes, a mutated value fails. `S7Layout`: random sets of parameters in one data block, overlap and misalignment are always detected, non-overlapping aligned sets always pass |
 | Integration, storage | `recipe-db` | `testcontainers` with the pinned `postgres` image, or `DATABASE_URL` of a Compose database in CI | Every `CHECK`, `UNIQUE`, FK, partial index, and trigger in `data-model.md` has a test that violates it and asserts the SQLSTATE and the trigger code. As `recipe_app`, an update of a column outside the UPDATE grant of `recipe_version` (`number`, `recipe_id`, `based_on_version_id`) fails with SQLSTATE `42501` before any trigger runs. The test fixture runs the forbidden version transitions as the table owner `recipe_migrator`. These are `approved→draft`, `retired→approved`, `retired→draft`, and the undelete of a discarded draft. They also include a change of `number`, `recipe_id`, `based_on_version_id`, or `content_sha256`. Each one fails with `E-RCP-033`. The grants of `recipe_app` (`role_table_grants`, `role_column_grants`) equal a checked-in list. `RemoveParameter` on a parameter with limits and translations succeeds. A second `STRING(20)` on one machine succeeds. Every transactional operation in `data-model.md` section 6 has a test that fails midway and asserts no partial write |
-| Concurrency | `recipe-db` | Two connections | Two approvals of the same draft with the same `row_version`: exactly one writes. The other returns `AlreadyApproved` and writes no audit entry. An approval with an older `row_version` gets `E-WEB-001`. Two parallel audit inserts get consecutive `chain_seq` values, and the chain check passes. A parameter insert during an approval waits and then fails with `E-RCP-031`. `DeleteRecipe` during `ApproveVersion`: the second one fails. Two edits with the same `row_version`: exactly one succeeds. Two concurrent failed logins: both count |
+| Concurrency | `recipe-db` | Two connections | Two approvals of the same draft with the same `row_version`: exactly one writes. The other returns `AlreadyApproved` and writes no audit entry. An approval with an older `row_version` gets `E-WEB-001`. Two parallel audit inserts get consecutive `chain_seq` values, and the chain check passes. A parameter insert during an approval waits and then fails with `E-RCP-031`. `DeleteRecipe` during `ApproveVersion`: the second one fails. Two edits with the same `row_version`: exactly one succeeds. Two concurrent failed logins: both count. `ArchiveUnit` against `AddParameter` with a new derived type: one waits on the machine row, and no `40P01` occurs. `ArchiveMachine` against `CreateVersion`: the same result |
 | HTTP | `recipe-web` | `tower::ServiceExt::oneshot` with in-memory ports | Every route: status code, error code in the body, `X-Request-Id` header, security headers, no secret in the body. Login, logout, session expiry, session epoch invalidation, CSRF rejection, pre-session CSRF on `/login` and `/lang`, `must_change_password` gate. An XSS payload corpus through every text field |
 | Load | `recipe-web` with Compose database | `oha` | Login flood: 200 concurrent `POST /login` with random logins. The container stays under its memory limit, no request waits more than 5 seconds, and the Argon2 semaphore returns `503` under load. A version at the size budget: `CreateVersion`, `ApproveVersion`, and the version page each finish under 10 seconds |
 | End to end | Compose stack | `playwright-cli` smoke suite | Create machine, create recipe, add parameter, set limits, approve by a second user, export, check the hash, check the audit page |
 | Soak | Compose stack, nightly CI | The same request mix for 24 h at a constant rate, with a login flood every hour | Memory of the `app` container stays under 384 MiB (section 7.11). No `ERROR` line. No restart. p99 latency stays under 500 ms |
-| Lint gate | Workspace | `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check` | Runs on every pull request |
+| Lint gate | Workspace | `cargo clippy --all-targets --all-features -- -D warnings`, `cargo fmt --check` | Runs on every pull request |
 
 Coverage target: 80 % line coverage per crate, measured with `cargo llvm-cov`. The CI job fails below the target.
 
@@ -437,8 +445,8 @@ Coverage target: 80 % line coverage per crate, measured with `cargo llvm-cov`. T
 | `migrate` | `recipe-server` with `migrate` | One-shot schema migration. Holds the migrator secret | `no` | Exit code |
 | `app` | `recipe-server` | The application and its supervised jobs, `alerts` included (2.4). Public listener on 8080 (`expose`, never `ports`). Internal listener on 9000 | `always` | `GET http://localhost:9000/readyz` every `health.check_interval`. `health.check_failures` failures mark it unhealthy |
 | `db` | `postgres:16.<x>-bookworm`, pinned | Database. `POSTGRES_INITDB_ARGS="--data-checksums --lc-collate=C --lc-ctype=C.UTF-8"`. Port 5432 not published | `always` | `pg_isready` every `health.check_interval` |
-| `backup` | same base image as `db` with cron | Daily `pg_dump`, `backup-now` one-shot command, retention. Connects as `recipe_backup` | `always` | Latest dump younger than `backup.max_age_alert`. The backup path is not on the filesystem of `pgdata` |
-| `walarchive` | same base image as `db` | `pg_receivewal` and the weekly `pg_basebackup` to a bind mount on a second disk (A35, ADR-0020). Connects as `recipe_replicator` over the replication protocol | `always` | Latest WAL segment younger than `wal.max_age_alert` |
+| `backup` | same base image as `db` with cron | Daily `pg_dump`, `backup-now` one-shot command, retention. Connects as `recipe_backup` | `always` | Latest dump younger than `backup.max_age_alert`. The backup path is not on the filesystem of `pgdata`. `pgdata` is mounted read-only into `backup` for this check |
+| `walarchive` | same base image as `db` | `pg_receivewal` and the weekly `pg_basebackup` to a bind mount on a second disk (A35, ADR-0020). Connects as `recipe_replicator` over the replication protocol | `always` | The `pg_receivewal` process runs. The job `alerts` checks the replication lag against `wal.max_lag_bytes` (3.7) |
 
 Seven services. Start order through `depends_on`: `db` (healthy) → `backup-premigrate` (completed successfully) → `migrate` (completed successfully) → `app` → `proxy`. `walarchive` and `backup` depend only on `db`.
 
@@ -511,7 +519,9 @@ Pool size is `db.pool_size` connections for the application and `db.health_pool_
 - Each dump has a manifest `<name>.sha256`. The restore script verifies the manifest before it restores.
 - Retention is 30 daily dumps. Older files are deleted after a successful new dump.
 - `walarchive` streams WAL with `pg_receivewal --synchronous` to a bind mount on a second disk. A weekly `pg_basebackup` goes to the same disk. Both connect as `recipe_replicator`, which the `pg_hba.conf` line of `data-model.md` 5.1 admits. Recovery point objective: minutes. Recovery time objective: 1 hour (ADR-0020). Without the second disk the recovery point objective is 24 hours (A35).
-- The backup healthcheck fails when the backup path and `pgdata` are on the same filesystem.
+- WAL health is the replication lag. The job `alerts` reads `pg_current_wal_lsn() - sent_lsn` of `recipe_replicator` in `pg_stat_replication`. It raises an alert when the receiver is not connected or the lag reaches `wal.max_lag_bytes` (3.7).
+- The job `heartbeat` writes `heartbeat.last_at` in `app_setting` every `heartbeat.interval`. The WAL stream therefore never stays idle for long, also on a quiet night.
+- The backup healthcheck fails when the backup path and `pgdata` are on the same filesystem. `pgdata` is mounted read-only into `backup` for this check.
 - The latest dump and the WAL archive are copied to the external backup storage by a site procedure (ADR-0020). The dump contains password hashes and the audit log. The site procedure MUST protect the copies with the same access control as the database.
 - A restore test runs each week and before each release. The script restores the latest dump into a scratch database. It counts the rows in each table and compares the counts with the source. It runs the audit chain check of `data-model.md` 4.9. It writes the result to the event log. A failed restore test is an `ERROR` event.
 - After a restore into production, the operator truncates `session` and `login_attempt`. The operator then re-applies every user deactivation and password reset recorded after the dump time, from the off-site audit copy when one exists. Last, the operator runs the audit chain check.
@@ -520,7 +530,7 @@ Pool size is `db.pool_size` connections for the application and `db.health_pool_
 
 | Volume | Content |
 |---|---|
-| `pgdata` | PostgreSQL data directory. Mounted read-only into `app` for the disk check |
+| `pgdata` | PostgreSQL data directory. Mounted read-only into `app` for the disk check and into `backup` for the filesystem check of 7.7 |
 | `backups` | Dumps from 7.7. Mounted read-only into `app` for the job `alerts` |
 | `walarchive` | Bind mount on a second disk. WAL segments and base backups. Mounted read-only into `app` for the job `alerts` |
 | `caddy` | TLS certificates |
@@ -531,7 +541,9 @@ Disk space policy (Assumption A24):
 
 - The job `disk_check` in `app` measures the free space of the `pgdata` volume with `statvfs` on its read-only mount every `health.disk_check_interval`.
 - Warning threshold: `disk.warn_percent` free. The application writes a `WARN` event every `disk.warn_log_interval`, and the job `alerts` raises the condition.
-- Hard threshold: `disk.readonly_percent` free. The application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns `503 E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`. Writes to `session`, `login_attempt`, and `security_event` continue, and so do the supervised jobs. These writes are small, and the margin of `disk.readonly_percent` is reserved for them. The UI shows a banner.
+- Hard threshold: `disk.readonly_percent` free. The application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns `503 E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`.
+- In read-only mode the `Login` path writes `login_attempt` and `security_event` rows only for a successful login. A failed or throttled login writes only an event log line (`data-model.md` 6).
+- Other writes to `session` and `security_event` continue, and so do the supervised jobs. These writes are small, and the margin of `disk.readonly_percent` is reserved for them. The UI shows a banner.
 - The application leaves read-only mode without a restart when free space rises above `disk.resume_percent`.
 - PostgreSQL itself stops at 0 % free. The hard threshold exists so that the application stops first.
 
@@ -540,7 +552,7 @@ Disk space policy (Assumption A24):
 - All containers use the host clock. The host runs NTP. A clock skew above `clock.skew_warn` between `app` and `db` produces a `WARN` event. The job `clock_check` compares the clocks with `SELECT now()` at startup and every `clock.check_interval`.
 - Log rotation is the Docker driver from section 3.5.
 - The supervised job `alerts` in `app` produces the alerts. Section 3.7 lists the conditions.
-- The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting` after each completed check (`data-model.md` 4.9). The job `alerts` raises an alert when no check completed in the last 24 h (3.7).
+- The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting` after each completed check (`data-model.md` 4.9). The job `alerts` raises an alert when `audit.last_check_at` is older than `audit.max_check_age` (3.7). The margin above the nightly interval prevents a false alert after a slow check.
 
 ### 7.10 Upgrade procedure
 
@@ -625,8 +637,13 @@ This table is the single source for every numeric setting. The configuration fil
 | `job.restart_delay` | 10 s | 2.4 |
 | `audit_chain.check_time` | 03:00 UTC, every night | 2.4, data-model.md 4.9 |
 | `audit.check_batch` | 10 000 rows per statement of the audit chain check | 2.4, data-model.md 4.9 |
+| `audit.check_batch_bytes` | 8 MiB of `before_state` and `after_state` per statement of the audit chain check | 2.4, data-model.md 4.9 |
+| `audit.check_statement_timeout` | 60 s. `statement_timeout` of one batch of the audit chain check | 2.4, data-model.md 4.9 |
+| `audit.max_check_age` | 26 h. The job `alerts` raises an alert when `audit.last_check_at` is older | 3.7, 7.9, data-model.md 4.9 |
 | `audit.last_check_seq` | State key in `app_setting`, not a configuration file key. The last `chain_seq` of the last completed audit chain check | 2.4, 7.9, 7.12, data-model.md 3.17, data-model.md 4.9 |
-| `audit.last_check_at` | State key in `app_setting`, not a configuration file key. The end time of the last completed audit chain check. The job `alerts` raises an alert when it is older than 24 h | 2.4, 3.7, 7.9, 7.12, data-model.md 3.17, data-model.md 4.9 |
+| `audit.last_check_at` | State key in `app_setting`, not a configuration file key. The end time of the last completed audit chain check. The job `alerts` compares it with `audit.max_check_age` | 2.4, 3.7, 7.9, 7.12, data-model.md 3.17, data-model.md 4.9 |
+| `heartbeat.interval` | 5 min | 2.4, 7.7, data-model.md 3.17 |
+| `heartbeat.last_at` | State key in `app_setting`, not a configuration file key. The time of the last write of the job `heartbeat` | 2.4, 7.7, 7.12, data-model.md 3.17 |
 | `alerts.interval` | 60 s | 2.4, 3.7, data-model.md 6 |
 | `alerts.webhook_url` | empty, which means no webhook | 3.7 |
 | `alerts.panic_count` / `alerts.panic_window` | 3 / 10 min | 2.4, 3.7 |
@@ -634,9 +651,11 @@ This table is the single source for every numeric setting. The configuration fil
 | `alerts.failed_login_count` / `alerts.failed_login_window` | 50 / 15 min | 3.7 |
 | `alerts.security_window` | 15 min | 3.7 |
 | `backup.time` / `backup.retention` | 02:00 UTC / 30 days | 7.7 |
-| `backup.max_age_alert` / `wal.max_age_alert` | 26 h / 15 min | 3.7, 7.1 |
+| `backup.max_age_alert` | 26 h | 3.7, 7.1 |
+| `wal.max_lag_bytes` | 16 MiB. Replication lag `pg_current_wal_lsn() - sent_lsn` of `recipe_replicator` | 3.7, 7.1, 7.7 |
 | `security_event.retention` | 400 days. A constant in `security_event_purge()`. A change needs a migration | 3.6, data-model.md 4.12 |
 | `security_event.purge_interval` | 24 h | 2.4, data-model.md 4.12 |
+| `security_event.purge_batch` | 5 000 rows per statement. A constant in `security_event_purge()`. A change needs a migration | 2.4, data-model.md 4.12 |
 | `log.max_size` / `log.max_file` | 50m / 20 | 3.5 |
 | `soak.memory_ceiling` / container limit | 384 MiB / 512 MiB | 6, 7.8 |
 | `container.app_memory` / `container.app_cpus` | 512 MiB / 1 | 7.8 |
@@ -661,7 +680,7 @@ Transaction isolation and retry are rules in the code, not settings. `SetUserRol
 3. For each difference it writes one audit entry `SettingChanged` with `aggregate_type = 'app_setting'`, `actor = None`, and the old and the new value. All entries of one start share one `request_id`. Then it updates or inserts the row.
 4. When the transaction fails, the server writes one `ERROR` line and does not start.
 
-The state keys `audit.last_check_seq` and `audit.last_check_at` are not configuration. The comparison skips them. The job `audit_chain_check` writes them with no audit entry (2.4).
+The state keys `audit.last_check_seq`, `audit.last_check_at`, and `heartbeat.last_at` are not configuration. The comparison skips them. The jobs `audit_chain_check` and `heartbeat` write them with no audit entry (2.4).
 
 A change of `approval.separation_of_duties` therefore always has an audit entry with the old and the new value (A34). The audit log keeps the entry without a time limit.
 
@@ -684,6 +703,10 @@ A change of `approval.separation_of_duties` therefore always has an audit entry 
 - `cargo audit` runs nightly against the `Cargo.lock`.
 - `Cargo.lock` is committed. Dependency updates happen once per month in one pull request, plus at once for a security advisory.
 - Minimum supported Rust version is the current stable at release time, recorded in `rust-version` of each crate. The project targets edition 2024.
-- No `unsafe`. No `static mut`. No global mutable state. Shared state is passed through axum `State` as `Arc<AppState>` with interior mutability only inside the connection pool, the Argon2 semaphore, and the read-only mode flag (`AtomicBool`).
+- No `unsafe`. No `static mut`. No global mutable state. Shared state is passed through axum `State` as `Arc<AppState>`. Interior mutability exists only in these places:
+  - the connection pool and the Argon2 semaphore,
+  - the read-only mode flag (`AtomicBool`),
+  - the atomic counters of the job `alerts` (3.7): the panic events of the panic hook and the `E-EXP-002` results,
+  - the readiness cache of 7.2 and the readiness state of 3.7, as atomics in `AppState`.
 - Every public type and function in a library crate has a doc comment. `cargo doc --no-deps` runs in CI with `-D warnings` for broken links.
 - A pull request needs: green CI, one review, and an entry in `CHANGELOG.md` when behavior changes.

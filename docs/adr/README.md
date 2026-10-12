@@ -16,7 +16,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0004](0004-auth-server-sessions.md) | Authentication with server-side sessions in PostgreSQL | Superseded by ADR-0014 | 2026-10-12 |
 | [0005](0005-audit-log-all-mutations.md) | Append-only audit log for every mutating operation | Accepted. Amended by ADR-0022 (hash chain, security_event table, diff state, indexes) | 2026-10-12 |
 | [0006](0006-plc-type-catalog-relational.md) | Relational PLC type catalog with immutable UDT revisions | Accepted. Amended by ADR-0017 (derived types) | 2026-10-12 |
-| [0007](0007-process-limits-per-leaf.md) | Process limits per scalar leaf of a parameter | Accepted. Amended by ADR-0022 (limits required at approval, `[*]` leaf path) and ADR-0018 (limits at rebind) | 2026-10-12 |
+| [0007](0007-process-limits-per-leaf.md) | Process limits per scalar leaf of a parameter | Accepted. Amended by ADR-0022 (limits required at approval, `[*]` leaf path, leaf classes) and ADR-0018 (limits at rebind) | 2026-10-12 |
 | [0008](0008-optimistic-concurrency-row-version.md) | Optimistic concurrency with a row version on the draft | Accepted. Amended by ADR-0015 (locking model, idempotent approve) | 2026-10-12 |
 | [0009](0009-version-snapshot-immutable.md) | A recipe version is a full immutable snapshot | Accepted | 2026-10-12 |
 | [0010](0010-recipe-scoped-to-one-machine.md) | A recipe belongs to exactly one machine | Accepted | 2026-10-12 |
@@ -43,7 +43,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Sessions, login, passwords, bootstrap | 0014 |
 | Audit log | 0005 + 0022 |
 | PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 |
-| Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`) |
+| Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) |
 | Concurrency | 0008 + 0015 |
 | Versions and aggregates | 0009 + 0016 |
 | Recipe scope | 0010 |

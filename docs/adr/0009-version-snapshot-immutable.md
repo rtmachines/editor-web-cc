@@ -15,7 +15,7 @@ This is the central structural decision. It determines what an `Approved` versio
 - An approved version must be reproducible later: same types, same limits, same values.
 - The draft text ties type, limit, and UDT changes to a new version. That is only possible when the version owns them.
 - Audit `before`/`after` must be small and local (ADR-0005).
-- The export must not depend on current master data (ADR-0002).
+- The export must not depend on current master data (ADR-0019).
 
 ## Considered options
 

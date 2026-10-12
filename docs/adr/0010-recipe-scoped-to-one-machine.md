@@ -13,7 +13,7 @@ A parameter has a PLC type that must exist on a platform, and for S7-300 an addr
 ## Decision drivers
 
 - Type availability and address rules depend on one platform (I5, I6).
-- The export document goes to one PLC (ADR-0002).
+- The export document goes to one PLC (ADR-0019).
 - The database must be able to enforce "S7-300 parameter has an address" without application code.
 - Keep the first release simple (R34).
 
