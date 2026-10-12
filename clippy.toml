@@ -1,0 +1,8 @@
+# reliability.md section 2.3: test code may use `unwrap`, `expect`, and indexing.
+# These options apply only inside `#[cfg(test)]` code and `#[test]` functions.
+# A helper in an integration test crate (`tests/`) is outside both. Each file in `tests/`
+# therefore starts with this attribute and a comment that names reliability.md section 2.3:
+# #![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-indexing-slicing-in-tests = true

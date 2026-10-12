@@ -1,0 +1,18 @@
+[package]
+name = "recipe-server"
+description = "Binary of the recipe editor with the subcommands serve, migrate, and create-admin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# overview.md section 5: recipe-server depends on recipe-app, recipe-db, recipe-domain, recipe-web, and anyhow.
+[dependencies]
+recipe-app = { workspace = true }
+recipe-db = { workspace = true }
+recipe-domain = { workspace = true }
+recipe-web = { workspace = true }
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

@@ -451,7 +451,7 @@ Skill `documentation-writer` (Diátaxis) + `asd-ste100` (strict dla instrukcji):
 docs/user/ — tutorial "First recipe in 15 minutes", how-to per zadanie z P3.1 (5 zadań),
 reference ekranów i uprawnień (z api.md §3), explanation "Why versions are immutable".
 docs/ops/ — uzupełnij runbook. README — aktualny. CHANGELOG (changelog-automation).
-Uruchom scripts/ste-lint.py ze skilla asd-ste100 na docs/ — zero hard violations.
+Uruchom tools/ste-lint/ste-lint.py na zakresie z ADR-0023 — zero hard violations.
 Skill `document-release` (gstack), potem `ship` (gstack): wersja 0.1.0, PR z planem testów.
 Subagent Haiku: reference screens z szablonów askama. Ty (Sonnet): tutorial i how-to.
 Review: documentation-generation:docs-architect (Opus) — spójność z docs/architecture.
@@ -498,4 +498,4 @@ dokumenty architektury. Równolegle można prowadzić: P2.4 z P2.5 (po P2.3), P3
 - Każde wymaganie R01–R42 ma test lub scenariusz w spec z tym samym numerem.
 - `docker compose up` od zera → `/readyz` 200 w ≤ 60 s, pierwszy admin z env.
 - Soak 24 h bez restartu, RSS stabilny.
-- `docs/` przechodzi `ste-lint.py`, `docs/adr/README.md` zawiera każdą decyzję z fazy 2–4.
+- Zakres z ADR-0023 przechodzi `tools/ste-lint/ste-lint.py`, `docs/adr/README.md` zawiera każdą decyzję z fazy 2–4.

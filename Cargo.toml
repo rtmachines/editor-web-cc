@@ -1,0 +1,95 @@
+# Workspace root of the recipe editor.
+# overview.md section 5 gives the crates and the dependency rule.
+# reliability.md section 2 gives the lints and the panic policy.
+
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# reliability.md section 8: the current stable at release time.
+rust-version = "1.99"
+publish = false
+
+# Shared versions. A member writes `name = { workspace = true }`.
+# Features appear here only when overview.md or reliability.md names them.
+# A member adds the other features that it uses.
+[workspace.dependencies]
+# Workspace crates. Only the edges of overview.md section 5 are permitted.
+recipe-domain = { path = "crates/recipe-domain" }
+recipe-app = { path = "crates/recipe-app" }
+recipe-db = { path = "crates/recipe-db" }
+recipe-export = { path = "crates/recipe-export" }
+recipe-web = { path = "crates/recipe-web" }
+
+# HTTP and rendering (recipe-web). Assumption A15 pins axum 0.8.
+axum = "0.8.9"
+askama = "0.16.1"
+tower-http = "0.7.1"
+
+# Runtime (recipe-server).
+tokio = "1.53.2"
+figment = "0.10.19"
+
+# Storage (recipe-db). Assumption A15 pins sqlx 0.8.
+# `macros` and `migrate` give `sqlx::migrate!` (data-model.md section 8).
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "migrate"] }
+
+# Observability.
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+
+# Errors. `anyhow` is for recipe-server only (Assumption A37).
+thiserror = "2.0.21"
+anyhow = "1.0.104"
+
+# Domain values, serialization, and the export hash.
+uuid = "1.28.0"
+rust_decimal = "1.43.0"
+serde = "1.0.229"
+serde_json = { version = "1.0.154", features = ["arbitrary_precision"] }
+serde_json_canonicalizer = "0.3.2"
+sha2 = "0.11.1"
+time = "0.3.55"
+
+# Identity (Argon2id) and i18n.
+argon2 = "0.6.0"
+fluent = "0.17.0"
+
+# Support crates of reliability.md section 2.2.
+parking_lot = "0.12.5"
+regex = "1.13.1"
+async-trait = "0.1.92"
+
+# Tests (reliability.md section 6).
+proptest = "1.12.0"
+testcontainers = "0.28.0"
+
+# reliability.md section 2.1. Every member sets `[lints] workspace = true`.
+[workspace.lints.rust]
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+cast_possible_truncation = "deny"
+cast_sign_loss = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+exit = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+large_futures = "warn"
+
+# reliability.md sections 2.1 and 2.4.
+[profile.release]
+overflow-checks = true
+panic = "unwind"

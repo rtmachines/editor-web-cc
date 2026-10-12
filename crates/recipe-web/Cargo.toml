@@ -1,0 +1,16 @@
+[package]
+name = "recipe-web"
+description = "Routers, templates, HTMX fragments, and i18n of the recipe editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# overview.md section 5: recipe-web depends on recipe-app, recipe-domain, and recipe-export.
+[dependencies]
+recipe-app = { workspace = true }
+recipe-domain = { workspace = true }
+recipe-export = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,5 @@
+# Workspace format rules. CI runs `cargo fmt --check` (reliability.md section 8).
+# Only stable options appear here.
+style_edition = "2024"
+use_field_init_shorthand = true
+use_try_shorthand = true

@@ -1,0 +1,2 @@
+# Placeholder. Step P4.1 of docs/plan/implementation-prompts.md writes the Caddy configuration.
+# ADR-0020 gives the role of the proxy: TLS termination, HSTS, and 404 on the health paths.

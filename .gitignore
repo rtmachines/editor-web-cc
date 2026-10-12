@@ -1,0 +1,18 @@
+# Build output. Cargo.lock is committed (reliability.md section 8).
+/target/
+
+# Coverage output of cargo llvm-cov.
+*.profraw
+*.profdata
+lcov.info
+/coverage/
+
+# Python cache of the tools in tools/.
+__pycache__/
+
+# Editor and OS files.
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

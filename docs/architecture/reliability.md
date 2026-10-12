@@ -697,7 +697,7 @@ A change of `approval.separation_of_duties` therefore always has an audit entry 
 - Code comments, identifiers, commit messages, documentation, and specifications are English (R42). Comments follow the ASD-STE100 structural rules in the same way as this document.
 - Each design pattern in the code names the problem it solves in the doc comment of the type that implements it (R43). A review rejects a pattern with no named problem.
 - `CONTRIBUTING.md` in the repository root repeats the rules of sections 2 and 8 and links to this document.
-- `ste-lint.py` (`.claude/skills/asd-ste100/scripts/ste-lint.py`) checks the structural ASD-STE100 rules of English text (R40). CI runs it on every Markdown file in `docs/`. One hard violation fails the job. Hard violations:
+- `ste-lint.py` checks the structural ASD-STE100 rules of English text (R40). CI runs the copy `tools/ste-lint/ste-lint.py` on the Markdown files that ADR-0023 names. One hard violation fails the job. Hard violations:
   - a semicolon in prose,
   - a sentence of more than 25 words,
   - two verbs from one synonym group in one file, for example `check` and `verify`,

@@ -1,0 +1,14 @@
+[package]
+name = "recipe-app"
+description = "Use cases, ports, permission checks, and audit entries of the recipe editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# overview.md section 5: recipe-app depends on recipe-domain.
+[dependencies]
+recipe-domain = { workspace = true }
+
+[lints]
+workspace = true

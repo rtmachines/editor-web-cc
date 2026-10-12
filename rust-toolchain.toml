@@ -1,0 +1,5 @@
+# The project uses the current stable toolchain (reliability.md section 8).
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

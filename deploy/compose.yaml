@@ -1,0 +1,4 @@
+# Placeholder. Step P4.1 of docs/plan/implementation-prompts.md writes the Compose file.
+# ADR-0020 and docs/architecture/reliability.md section 7.1 give the services and the start order.
+name: recipe-editor
+services: {}

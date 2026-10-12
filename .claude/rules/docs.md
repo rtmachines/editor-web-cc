@@ -14,7 +14,7 @@ Source: `docs/architecture/reliability.md` §8, `docs/adr/README.md`, `overview.
 - A list item does not end with "and" or "or".
 - Keep every hedge. "May fail" never becomes "fails".
 - A paragraph has one topic and at most six sentences.
-- `ste-lint.py` reports 0 hard violations on `docs/`. Passive voice and compound tenses are advisory.
+- `tools/ste-lint/ste-lint.py` reports 0 hard violations on the scope of ADR-0023. Passive voice and compound tenses are advisory.
 
 ## Diátaxis for docs/
 

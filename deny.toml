@@ -1,0 +1,63 @@
+# cargo-deny configuration (reliability.md section 8).
+# CI runs `cargo deny --locked check`. A denied license, a yanked crate,
+# a security advisory, or a banned crate under a crate that is not its wrapper fails the job.
+# The bans enforce a part of the dependency rule of overview.md section 5.
+# Review checks the other forbidden dependencies, for example `axum` and `tokio`.
+
+[graph]
+all-features = true
+
+[advisories]
+# cargo-deny always fails on a vulnerability advisory.
+# An unsound advisory fails the job for every crate in the graph.
+unsound = "all"
+# An unmaintained advisory fails the job for a direct dependency of a workspace crate.
+# For a transitive crate, the advisory is a warning, because the fix is in another crate.
+unmaintained = "workspace"
+yanked = "deny"
+# Each ignored advisory needs an entry `{ id = "RUSTSEC-...", reason = "..." }`.
+ignore = []
+
+[licenses]
+# Every license is permissive. The list covers the planned graph of the
+# workspace dependencies in Cargo.toml (checked on 2026-10-12).
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",        # matchit (axum), subtle
+    "CDLA-Permissive-2.0", # webpki-roots (sqlx with tls-rustls)
+    "ISC",                 # ring, rustls-webpki, untrusted
+    "MIT",
+    "Unicode-3.0",         # ICU crates (url, fluent)
+    "Zlib",                # foldhash
+]
+confidence-threshold = 0.9
+# The skeleton uses only a part of the planned graph. A license of the list
+# that no crate uses yet is not an error.
+unused-allowed-license = "allow"
+
+[licenses.private]
+# The workspace crates have `publish = false` and no license field.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Path dependencies between the workspace crates are not wildcards.
+allow-wildcard-paths = true
+# overview.md section 5: the dependency rule of the workspace.
+# A `wrappers` list names the only crates that can depend directly on the banned crate.
+deny = [
+    { crate = "recipe-app", wrappers = ["recipe-db", "recipe-web", "recipe-server"], reason = "overview.md section 5: recipe-domain and recipe-export do not depend on recipe-app" },
+    { crate = "recipe-web", wrappers = ["recipe-server"], reason = "overview.md section 5: only recipe-server depends on recipe-web" },
+    { crate = "recipe-export", wrappers = ["recipe-web"], reason = "overview.md section 5: only recipe-web uses recipe-export" },
+    { crate = "recipe-db", wrappers = ["recipe-server"], reason = "overview.md section 5: only recipe-server wires recipe-db. recipe-app and recipe-web do not depend on it" },
+    { crate = "sqlx", wrappers = ["recipe-db"], reason = "overview.md section 5 lists sqlx only for recipe-db. recipe-db embeds the migrations (data-model.md section 8)" },
+    # prost-derive is a proc macro under testcontainers (dev dependency of recipe-db).
+    { crate = "anyhow", wrappers = ["recipe-server", "prost-derive"], reason = "Assumption A37: only the binary crate recipe-server uses anyhow" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

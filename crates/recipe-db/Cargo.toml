@@ -1,0 +1,15 @@
+[package]
+name = "recipe-db"
+description = "PostgreSQL adapters, session store, and unit of work of the recipe editor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# overview.md section 5: recipe-db depends on recipe-app and recipe-domain.
+[dependencies]
+recipe-app = { workspace = true }
+recipe-domain = { workspace = true }
+
+[lints]
+workspace = true

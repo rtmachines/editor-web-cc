@@ -32,6 +32,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0020](0020-deployment-migrations-backup.md) | Deployment, migrations, backup and failure policy | Accepted | 2026-10-12 |
 | [0021](0021-soft-delete-and-delete-rules.md) | Soft delete, unique keys and delete rules | Accepted | 2026-10-12 |
 | [0022](0022-approval-policy.md) | Approval policy, audit tamper evidence and draft clarifications | Accepted | 2026-10-12 |
+| [0023](0023-ste-lint-scope-and-location.md) | Scope and location of the STE lint in CI | Accepted | 2026-10-12 |
 
 ## Decision map
 
@@ -51,6 +52,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Translations | 0012 |
 | Permissions and approval | 0013 + 0022 |
 | Stored settings, security event retention | 0022 |
+| STE lint scope and script location in CI | 0023 |
 
 ## How to add an ADR
 

@@ -18,7 +18,7 @@ The build order is in [docs/plan/implementation-prompts.md](docs/plan/implementa
 - The UI has a Polish `pl` bundle (default) and an English `en` bundle (ADR-0012).
 - All English text follows the ASD-STE100 structural rules (R40). Load the skill `asd-ste100` before you write prose.
 - A sentence has at most 25 words. Use the active voice. Do not use semicolons. Use one verb for one action in one file.
-- `ste-lint.py` must report 0 hard violations on `docs/`. Passive voice and compound tenses are advisory.
+- `tools/ste-lint/ste-lint.py` must report 0 hard violations on the scope of ADR-0023. Passive voice and compound tenses are advisory.
 - Exception: `docs/plan/implementation-prompts.md` is an operator file in Polish.
 
 ## Source of truth and change rule
@@ -98,11 +98,11 @@ cargo llvm-cov --workspace                                 # coverage, CI target
 docker compose -f deploy/compose.yaml up -d                # full stack, start order in reliability.md 7.1
 openspec validate --all
 openspec list
-python -I .claude/skills/asd-ste100/scripts/ste-lint.py docs/**/*.md
+bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'  # scope of ADR-0023
 ```
 
 - The `recipe-db` tests need Docker for `testcontainers`, or `DATABASE_URL` of a Compose database (`reliability.md` §6).
-- Run `ste-lint.py` from Bash. Without `globstar`, Bash expands `docs/**/*.md` to `docs/*/*.md`.
+- Run `ste-lint.py` from Bash. The command sets `globstar` and `nullglob` like the CI job. Without `globstar`, Bash expands `**` to `*`.
 
 ## Where to look
 
