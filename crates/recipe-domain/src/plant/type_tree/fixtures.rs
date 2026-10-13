@@ -123,6 +123,23 @@ pub(crate) fn struct_row(n: u128, name: &str, members: &[(&str, u128)]) -> PlcTy
     struct_row_of(machine(), n, name, members)
 }
 
+/// A machine struct row with the given revision on `PLATFORM`.
+pub(crate) fn struct_row_revision(
+    n: u128,
+    name: &str,
+    revision: u32,
+    members: &[(&str, u128)],
+) -> PlcType {
+    let mut record = struct_record(machine(), n, name, members);
+    if let RecordShape::Struct {
+        revision: stored, ..
+    } = &mut record.shape
+    {
+        *stored = revision;
+    }
+    row(record)
+}
+
 /// A struct row of the given machine on `PLATFORM`.
 pub(crate) fn struct_row_of(
     owner: MachineId,
@@ -130,7 +147,11 @@ pub(crate) fn struct_row_of(
     name: &str,
     members: &[(&str, u128)],
 ) -> PlcType {
-    row(PlcTypeRecord {
+    row(struct_record(owner, n, name, members))
+}
+
+fn struct_record(owner: MachineId, n: u128, name: &str, members: &[(&str, u128)]) -> PlcTypeRecord {
+    PlcTypeRecord {
         id: id(n),
         machine: Some(owner),
         platforms: BTreeSet::from([PLATFORM]),
@@ -146,7 +167,33 @@ pub(crate) fn struct_row_of(
                 })
                 .collect(),
         },
-    })
+    }
+}
+
+/// The same rows, each one present on `platform` only.
+///
+/// A row whose shape is not valid on `platform` keeps its platforms.
+pub(crate) fn on_platform(platform: PlcPlatform, rows: Vec<PlcType>) -> Vec<PlcType> {
+    rows.into_iter()
+        .map(|source| {
+            PlcType::try_from(PlcTypeRecord {
+                id: source.id(),
+                machine: source.machine(),
+                platforms: BTreeSet::from([platform]),
+                shape: source.shape().clone(),
+            })
+            .unwrap_or(source)
+        })
+        .collect()
+}
+
+/// Collect rows into the types of `owner` on `platform`.
+pub(crate) fn types_for(
+    owner: MachineId,
+    platform: PlcPlatform,
+    rows: Vec<PlcType>,
+) -> PlatformTypes {
+    PlatformTypes::collect(owner, platform, rows).expect("fixture ids are unique")
 }
 
 /// Collect rows into the types of `machine()` on `PLATFORM`.

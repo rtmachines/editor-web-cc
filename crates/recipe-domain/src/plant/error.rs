@@ -79,7 +79,7 @@ impl From<StringLengthReason> for DerivedTypeReason {
 ///
 /// The enum has one variant for each code in the range `E-PLT-001` to
 /// `E-PLT-049` that the value objects return. Later tasks add more variants.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum PlantError {
     /// A unit path has more than five segments (`E-PLT-002`).
     #[error("Unit path {path} has more than 5 levels. Use at most 5 levels.")]

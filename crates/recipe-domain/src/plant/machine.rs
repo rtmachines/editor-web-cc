@@ -7,7 +7,9 @@ use crate::recipe::ReferenceNumber;
 use crate::text::Text;
 use crate::timestamp::Timestamp;
 
-use super::{MachineCode, MachineId, PlantError, PlcPlatform, UnitId, UnitPath, UnitUsage};
+use super::{
+    LiveUnits, MachineCode, MachineId, PlantError, PlcPlatform, UnitId, UnitPath, UnitUsage,
+};
 
 /// A unit of a machine, such as `U1.2`.
 ///
@@ -365,6 +367,12 @@ impl Machine {
         } else {
             Err(PlantError::MachineArchived { code: self.code })
         }
+    }
+
+    /// Read the machine and the state of every unit as a [`LiveUnits`] value.
+    #[must_use]
+    pub fn live_units(&self) -> LiveUnits {
+        LiveUnits::of(self)
     }
 
     /// Return the units in path order. A parent comes before its children.

@@ -55,6 +55,75 @@ impl ErrorCode {
     /// E-PLT-021, `PlantError::DuplicateMemberName`.
     pub const PLT_021: Self = Self::new("E-PLT-021");
 
+    /// E-RCP-001, `RecipeError::DuplicateReference`.
+    pub const RCP_001: Self = Self::new("E-RCP-001");
+    /// E-RCP-002, `RecipeError::VersionNotEditable`.
+    pub const RCP_002: Self = Self::new("E-RCP-002");
+    /// E-RCP-003, `RecipeError::S7AddressRequired`.
+    pub const RCP_003: Self = Self::new("E-RCP-003");
+    /// E-RCP-004, `RecipeError::ValueOutOfLimit`.
+    pub const RCP_004: Self = Self::new("E-RCP-004");
+    /// E-RCP-005, `RecipeError::ValueShapeMismatch`.
+    pub const RCP_005: Self = Self::new("E-RCP-005");
+    /// E-RCP-006, `RecipeError::LimitOutsideTypeRange`.
+    pub const RCP_006: Self = Self::new("E-RCP-006");
+    /// E-RCP-007, `RecipeError::VersionNotDraft`.
+    pub const RCP_007: Self = Self::new("E-RCP-007");
+    /// E-RCP-008, `RecipeError::DraftHasNoParameters`.
+    pub const RCP_008: Self = Self::new("E-RCP-008");
+    /// E-RCP-009, `RecipeError::VersionNotApproved`.
+    pub const RCP_009: Self = Self::new("E-RCP-009");
+    /// E-RCP-010, `RecipeError::RecipeHasApprovedVersion`.
+    pub const RCP_010: Self = Self::new("E-RCP-010");
+    /// E-RCP-011, `RecipeError::DraftAlreadyExists`.
+    pub const RCP_011: Self = Self::new("E-RCP-011");
+    /// E-RCP-012, `RecipeError::RecipeDeleted`.
+    pub const RCP_012: Self = Self::new("E-RCP-012");
+    /// E-RCP-013, `RecipeError::TypeNotOnPlatform`.
+    pub const RCP_013: Self = Self::new("E-RCP-013");
+    /// E-RCP-014, `RecipeError::DuplicateTag`.
+    pub const RCP_014: Self = Self::new("E-RCP-014");
+    /// E-RCP-015, `RecipeError::ApproverEditedDraft`.
+    pub const RCP_015: Self = Self::new("E-RCP-015");
+    /// E-RCP-016, `RecipeError::LimitMissing`.
+    pub const RCP_016: Self = Self::new("E-RCP-016");
+    /// E-RCP-017, `RecipeError::LeafPathNotFound`.
+    pub const RCP_017: Self = Self::new("E-RCP-017");
+    /// E-RCP-018, `RecipeError::MinGreaterThanMax`.
+    pub const RCP_018: Self = Self::new("E-RCP-018");
+    /// E-RCP-019, `RecipeError::LimitNotApplicable`.
+    pub const RCP_019: Self = Self::new("E-RCP-019");
+    /// E-RCP-020, `RecipeError::ValidationFailed`.
+    pub const RCP_020: Self = Self::new("E-RCP-020");
+    /// E-RCP-021, `RecipeError::SizeBudgetExceeded`.
+    pub const RCP_021: Self = Self::new("E-RCP-021");
+    /// E-RCP-022, `RecipeError::S7AddressOverlap`.
+    pub const RCP_022: Self = Self::new("E-RCP-022");
+    /// E-RCP-023, `RecipeError::S7AddressMisaligned`.
+    pub const RCP_023: Self = Self::new("E-RCP-023");
+    /// E-RCP-024, `RecipeError::TypeRevisionOutdated`.
+    pub const RCP_024: Self = Self::new("E-RCP-024");
+    /// E-RCP-025, `RecipeError::RecipeNotDeleted`.
+    pub const RCP_025: Self = Self::new("E-RCP-025");
+    /// E-RCP-026, `RecipeError::RecipeHasRetiredVersion`.
+    pub const RCP_026: Self = Self::new("E-RCP-026");
+    /// E-RCP-027, `RecipeError::InvalidLangCode`.
+    pub const RCP_027: Self = Self::new("E-RCP-027");
+    /// E-RCP-028, `RecipeError::RebindNeedsValue`.
+    pub const RCP_028: Self = Self::new("E-RCP-028");
+    /// E-RCP-029, `RecipeError::RebindDropsLimit`.
+    pub const RCP_029: Self = Self::new("E-RCP-029");
+    /// E-RCP-050, `RecipeError::TranslationNotFound`.
+    pub const RCP_050: Self = Self::new("E-RCP-050");
+    /// E-RCP-051, `RecipeError::ParameterNotFound`.
+    pub const RCP_051: Self = Self::new("E-RCP-051");
+    /// E-RCP-052, `RecipeError::RebindTargetInvalid`.
+    pub const RCP_052: Self = Self::new("E-RCP-052");
+    /// E-RCP-053, `RecipeError::S7AddressNotAllowed`.
+    pub const RCP_053: Self = Self::new("E-RCP-053");
+    /// E-RCP-054, `RecipeError::S7AddressWidthMismatch`.
+    pub const RCP_054: Self = Self::new("E-RCP-054");
+
     const fn new(text: &'static str) -> Self {
         Self(text)
     }
@@ -94,6 +163,40 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::PLT_019,
     ErrorCode::PLT_020,
     ErrorCode::PLT_021,
+    ErrorCode::RCP_001,
+    ErrorCode::RCP_002,
+    ErrorCode::RCP_003,
+    ErrorCode::RCP_004,
+    ErrorCode::RCP_005,
+    ErrorCode::RCP_006,
+    ErrorCode::RCP_007,
+    ErrorCode::RCP_008,
+    ErrorCode::RCP_009,
+    ErrorCode::RCP_010,
+    ErrorCode::RCP_011,
+    ErrorCode::RCP_012,
+    ErrorCode::RCP_013,
+    ErrorCode::RCP_014,
+    ErrorCode::RCP_015,
+    ErrorCode::RCP_016,
+    ErrorCode::RCP_017,
+    ErrorCode::RCP_018,
+    ErrorCode::RCP_019,
+    ErrorCode::RCP_020,
+    ErrorCode::RCP_021,
+    ErrorCode::RCP_022,
+    ErrorCode::RCP_023,
+    ErrorCode::RCP_024,
+    ErrorCode::RCP_025,
+    ErrorCode::RCP_026,
+    ErrorCode::RCP_027,
+    ErrorCode::RCP_028,
+    ErrorCode::RCP_029,
+    ErrorCode::RCP_050,
+    ErrorCode::RCP_051,
+    ErrorCode::RCP_052,
+    ErrorCode::RCP_053,
+    ErrorCode::RCP_054,
 ];
 
 /// Return true when `code` has the format and a number range of section 1.2.

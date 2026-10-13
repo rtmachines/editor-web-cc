@@ -17,6 +17,15 @@ pub enum LeafSegment {
     All,
 }
 
+/// Return `path` with one more segment, as a new vector.
+///
+/// Every walk over a type tree or over a value builds the path of a child with this function.
+pub(crate) fn extended(path: &[LeafSegment], segment: LeafSegment) -> Vec<LeafSegment> {
+    let mut longer = path.to_vec();
+    longer.push(segment);
+    longer
+}
+
 /// A path to one scalar inside a type tree, such as `.zones[2].temp_max`.
 ///
 /// The empty path is the parameter itself. The grammar is the only
@@ -68,6 +77,18 @@ impl LeafPath {
         Ok(Self(segments))
     }
 
+    /// Build the path of one concrete leaf from its segments.
+    ///
+    /// The caller guarantees that the segments follow the grammar. A tree walk is the caller.
+    pub(crate) const fn from_segments(segments: Vec<LeafSegment>) -> Self {
+        Self(segments)
+    }
+
+    /// Build the empty path, which names the whole value of a parameter.
+    pub(crate) const fn whole() -> Self {
+        Self(Vec::new())
+    }
+
     /// Return the segments, from the root to the leaf.
     #[must_use]
     pub fn segments(&self) -> &[LeafSegment] {
@@ -95,6 +116,24 @@ pub struct LeafTarget {
 }
 
 impl LeafTarget {
+    /// Describe one single leaf of a tree. The count is 1.
+    pub(crate) const fn single(
+        type_id: PlcTypeId,
+        primitive: Primitive,
+        leaf_class: LeafClass,
+        size_bytes: u32,
+        string_length: Option<u16>,
+    ) -> Self {
+        Self {
+            type_id,
+            primitive,
+            leaf_class,
+            size_bytes,
+            string_length,
+            count: 1,
+        }
+    }
+
     /// Return the row of the leaf type.
     #[must_use]
     pub const fn type_id(&self) -> PlcTypeId {
@@ -202,6 +241,8 @@ fn step<'t>(node: &'t TypeNode, segment: &LeafSegment) -> Option<(&'t TypeNode, 
         _ => None,
     }
 }
+
+mod expand;
 
 #[cfg(test)]
 mod resolve;

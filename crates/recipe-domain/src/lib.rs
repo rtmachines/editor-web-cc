@@ -14,6 +14,7 @@
 #![deny(missing_docs)]
 
 pub mod error_codes;
+pub mod identity;
 pub mod plant;
 pub mod recipe;
 pub mod text;
