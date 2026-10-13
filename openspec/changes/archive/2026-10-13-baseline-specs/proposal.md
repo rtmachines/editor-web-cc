@@ -22,9 +22,7 @@ The specs use these Assumptions of `overview.md` section 9:
 
 - Add one delta spec for each capability.
 - Each requirement copies a rule of `docs/architecture/` or `docs/adr/` and cites its R-number or A-number.
-- Each scenario comes from an invariant I1 to I23 of `domain-model.md` section 3 or a row of `data-model.md` section 6.
-- Scenarios of `web-ui` can also come from `api.md` sections 4, 5, and 8.
-- Scenarios of `operations` can also come from `reliability.md` sections 1 to 7.
+- Each scenario comes from the scenario sources that `design.md`, section Decisions, names for its capability.
 
 ## Capabilities
 

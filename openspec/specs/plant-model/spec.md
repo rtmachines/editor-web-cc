@@ -1,10 +1,9 @@
-# plant-model
+# plant-model Specification
 
 ## Purpose
-
 The plant model describes the machines of one production line, their unit trees, their PLC platforms, and the PLC data types that recipe parameters use.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Machine code
 The system SHALL identify a machine by a machine code from `M1` to `M9999999`. A machine code SHALL be unique among the live machines (R05, A32, I11).
@@ -35,11 +34,11 @@ The system SHALL NOT change the PLC platform of a machine that has a recipe. A n
 
 #### Scenario: Platform change after the first recipe
 - **GIVEN** the machine `M12` with the platform `S7_300` and one recipe
-- **WHEN** an `UPDATE` statement changes the platform of `M12` to `S7_1500`
+- **WHEN** an `UPDATE` statement as the table owner `recipe_migrator` changes the platform of `M12` to `S7_1500`
 - **THEN** the database rejects the statement with `E-PLT-030`
 
 ### Requirement: Rename of a live machine
-The system SHALL rename a machine only while the machine is live (R05, A14).
+The system SHALL rename a machine only while the machine is live (A14).
 
 #### Scenario: Rename an archived machine
 - **GIVEN** the archived machine `M3`
@@ -171,6 +170,12 @@ Every type that a parameter or a struct member uses SHALL exist on the PLC platf
 - **WHEN** an `INSERT` statement adds a parameter with a type that does not exist on `S7_300`
 - **THEN** the database rejects the statement with `E-PLT-031`
 
+#### Scenario: Type of another machine
+- **GIVEN** the machines `M3` and `M4` with the platform `S7_300`
+- **AND** the type `STRING(20)` of `M4` and a draft of a recipe of `M3`
+- **WHEN** an `INSERT` statement adds a parameter of the type `STRING(20)` of `M4` to the draft of `M3`
+- **THEN** the database rejects the statement with `E-PLT-032`
+
 ### Requirement: Type expression
 The system SHALL accept a type in a request only as a type expression of `domain-model.md` section 2.1. An array SHALL have 1 to 3 dimensions (R13, R38, A38).
 
@@ -202,13 +207,13 @@ The system SHALL create a `STRING(n)`, `WSTRING(n)`, or array type of a machine 
 ### Requirement: Size limits of a type
 The system SHALL reject a type with more than 16 384 leaves or more than 32 levels. The system SHALL reject a struct with more than 1024 members (R13, A26).
 
-#### Scenario: Array above the leaf limit
+#### Scenario: Array above the size limit
 - **GIVEN** the machine `M12` with the platform `TwinCat3`
 - **WHEN** a ProcessEngineer runs `AddParameter` with the type `ARRAY[1..20000] OF INT`
 - **THEN** the system rejects the command with `E-PLT-018`
 - **AND** the system creates no type
 
-#### Scenario: Struct above the member limit
+#### Scenario: Struct above the size limit
 - **GIVEN** the machine `M12`
 - **WHEN** a ProcessEngineer runs `DefineUdt` for `ST_Big` with 1025 members
 - **THEN** the system rejects the command with `E-PLT-018`
@@ -225,6 +230,11 @@ The system SHALL create a struct only with at least one member. A new struct SHA
 - **GIVEN** the machine `M12` with the struct `ST_Zone`
 - **WHEN** a ProcessEngineer runs `DefineUdt` for a new struct with the name `ST_Zone`
 - **THEN** the system rejects the command with `E-PLT-015`
+
+#### Scenario: Struct row without a member at commit
+- **GIVEN** a transaction that inserts the struct row `ST_Empty` and no member row
+- **WHEN** the transaction commits
+- **THEN** the database rejects the commit with `E-PLT-036`
 
 ### Requirement: Struct revision
 A change of a struct SHALL create a new revision with the next revision number. A parameter that uses the old revision SHALL keep it (R19, A29, I22).
@@ -250,9 +260,9 @@ A struct SHALL NOT contain itself, directly or through its members (R13, I8).
 ### Requirement: Immutable type rows
 The system SHALL NOT change a stored type or the members of a stored type (R13, I22).
 
-#### Scenario: Update of a stored type
+#### Scenario: Change of a stored type
 - **GIVEN** the stored struct `ST_Zone@2`
-- **WHEN** an `UPDATE` statement changes the row of `ST_Zone@2`
+- **WHEN** an `UPDATE` statement as the table owner `recipe_migrator` changes the row of `ST_Zone@2`
 - **THEN** the database rejects the statement with `E-PLT-033`
 
 #### Scenario: New member of a stored type
@@ -260,15 +270,20 @@ The system SHALL NOT change a stored type or the members of a stored type (R13, 
 - **WHEN** an `INSERT` statement adds a member to `ST_Zone@2`
 - **THEN** the database rejects the statement with `E-PLT-034`
 
+#### Scenario: Member of a primitive type
+- **GIVEN** the primitive type `INT` of the catalog
+- **WHEN** an `INSERT` statement adds a member to `INT`
+- **THEN** the database rejects the statement with `E-PLT-035`
+
 ### Requirement: Frozen machine code and unit path
 The system SHALL NOT change a machine code while a version that is not a draft uses it. The same rule SHALL apply to the path and the machine of a unit (R05, R07, I23).
 
 #### Scenario: Machine code in an approved version
 - **GIVEN** the machine `M12` and an approved version of a recipe of `M12`
-- **WHEN** an `UPDATE` statement changes the code of `M12`
+- **WHEN** an `UPDATE` statement as the table owner `recipe_migrator` changes the code of `M12`
 - **THEN** the database rejects the statement with `E-PLT-037`
 
 #### Scenario: Unit path in an approved version
 - **GIVEN** the unit `U1.2` of `M12` and an approved version with a parameter on `U1.2`
-- **WHEN** an `UPDATE` statement changes the path of `U1.2`
+- **WHEN** an `UPDATE` statement as the table owner `recipe_migrator` changes the path of `U1.2`
 - **THEN** the database rejects the statement with `E-PLT-038`

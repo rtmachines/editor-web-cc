@@ -14,8 +14,8 @@ The system SHALL render the current `row_version` of a version into the hidden f
 - **WHEN** a ProcessEngineer sends a request for `GET /recipes/R-100/versions/3`
 - **THEN** every form of the page holds the hidden field `row_version` with the value 7
 
-### Requirement: Row version update after a success
-On success, the response SHALL set the header `HX-Trigger` to `{"rowVersion": <new>}`. The script `row-version.js` SHALL update every hidden `row_version` field of the page (R39, I12).
+### Requirement: New row version after a success
+On success, the response SHALL set the header `HX-Trigger` to `{"rowVersion": <new>}`. The script `row-version.js` SHALL set every hidden `row_version` field of the page to the new value (R39, I12).
 
 #### Scenario: Save with the current row version
 - **GIVEN** the draft version 3 of the recipe `R-100` with `row_version` 7
@@ -33,8 +33,8 @@ On a mismatch of `row_version`, the server SHALL return `409 E-WEB-001` with the
 - **AND** the fragment shows the `row_version` 8 and the login `anowak`
 - **AND** the unsaved input stays in the form until the reload
 
-### Requirement: Parameter edit changes the version token
-A change of a parameter value SHALL change the `row_version` of the version, not only the parameter row. Two users who edit two different parameters of one draft SHALL get a conflict on the second save (R39, I12).
+### Requirement: Parameter change sets a new row version
+A change of a parameter value SHALL change the `row_version` of the version, not only the parameter row. Two users who change two different parameters of one draft SHALL get a conflict on the second save (R39, I12).
 
 #### Scenario: Two parameters of one draft
 - **GIVEN** the draft version 3 of the recipe `R-100` with `row_version` 7
@@ -42,16 +42,16 @@ A change of a parameter value SHALL change the `row_version` of the version, not
 - **WHEN** a second ProcessEngineer sends a change of another parameter with `row_version` 7
 - **THEN** the server returns `409 E-WEB-001` with the fragment `conflict.html`
 
-### Requirement: Double submit of a form
-Every approve form and every save form SHALL have the attribute `hx-sync="closest form:drop"`. The browser SHALL drop a second submit of such a form while its request is in flight (R39, I12).
+### Requirement: Second request of a form
+Every approve form and every save form SHALL have the attribute `hx-sync="closest form:drop"`. The browser SHALL drop a second request of such a form while the first request is in flight (R39, I12).
 
-#### Scenario: Second submit during a request
+#### Scenario: Second request while a request is in flight
 - **GIVEN** a save form of the draft version 3 with a request in flight
-- **WHEN** a ProcessEngineer submits the same save form again
-- **THEN** the browser drops the second submit
+- **WHEN** a ProcessEngineer sends the same save form again
+- **THEN** the browser drops the second request
 
 ### Requirement: Idempotent approval
-An approval can carry a `row_version` one lower than the current value of an approved version. The server SHALL then render the version page with status `200` (R39, I12).
+When `ApproveVersion` returns `AlreadyApproved`, the server SHALL render the version page with status `200` (R39, I12).
 
 #### Scenario: Repeated approval
 - **GIVEN** the approved version 3 of the recipe `R-100` with `row_version` 9
@@ -113,10 +113,10 @@ When a timeout, a deadlock, pool exhaustion, or a database outage occurs, the se
 - **AND** the response sets `Retry-After` to 5 seconds
 
 ### Requirement: Internal error response
-A caught panic, a failed background task, or an unexpected database error SHALL return `500` with the fragment `error.html`. The response SHALL show the error code and the `request_id` only (R36).
+A caught panic, a failed `spawn_blocking` task, or an unexpected database error SHALL return `500` with the fragment `error.html`. The response SHALL show the error code and the `request_id` only (R36).
 
 #### Scenario: Unexpected database error
-- **GIVEN** a database error that has no domain code
+- **GIVEN** a database error with an unexpected SQLSTATE
 - **WHEN** a ProcessEngineer sends a request for `GET /recipes/R-100/versions/3`
 - **THEN** the server returns `500 E-DB-008` with the fragment `error.html`
 - **AND** the response shows the `request_id`
@@ -134,7 +134,7 @@ Every error fragment SHALL show the error code `E-<CTX>-<nnn>`, one sentence in 
 - **AND** the structured log of the request holds the same code
 
 ### Requirement: Full error page
-A request without the header `HX-Request` SHALL get a full error page with the same content as the error fragment and the page layout (R36, R39).
+A request without the header `HX-Request` SHALL get a full error page. The page SHALL have the content of the error fragment and the page layout (R01, R36, R39).
 
 #### Scenario: Missing recipe without HTMX
 - **GIVEN** no recipe `R-999` exists
@@ -161,12 +161,12 @@ In read-only mode, a command other than `Login`, `Logout`, and `ExportVersion` S
 - **AND** the page shows the read-only banner
 
 ### Requirement: Routes available in read-only mode
-In read-only mode, queries, the export routes, `POST /login`, `POST /logout`, and `POST /lang` SHALL stay available (A24).
+In read-only mode, queries, the export routes, `POST /login`, and `POST /logout` SHALL stay available (A24).
 
 #### Scenario: Version page in read-only mode
 - **GIVEN** the application in read-only mode
 - **WHEN** an Operator sends a request for `GET /recipes/R-100/versions/3`
-- **THEN** the server returns the version page with status `200`
+- **THEN** the server renders the version page with status `200`
 
 ### Requirement: Language cookie value
 The cookie `recipe_lang` SHALL hold `pl` or `en`, and the server SHALL read it on every request. A missing cookie or another value SHALL select the UI language `pl`. The server SHALL ignore the header `Accept-Language` (R10, A17).

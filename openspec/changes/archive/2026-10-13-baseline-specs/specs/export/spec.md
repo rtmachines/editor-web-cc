@@ -89,7 +89,7 @@ The hashed body SHALL hold identifiers and values only. Names, status, approval 
 - **AND** the hashed body holds no `recipe.name`
 
 ### Requirement: Hash after a rename or a retirement
-A rename of the machine or of the recipe and a retirement of the version SHALL NOT change `content_sha256` (R03, A2).
+The system SHALL NOT change `content_sha256` when a user renames the machine or the recipe, or retires the version (R03, A2).
 
 #### Scenario: Rename of the recipe
 - **GIVEN** the approved version 3 of the recipe `R-100` with the stored hash `H1`
@@ -102,7 +102,6 @@ A rename of the machine or of the recipe and a retirement of the version SHALL N
 - **GIVEN** the version 3 of the recipe `R-100` with the stored hash `H1`, which is retired
 - **WHEN** an Administrator runs `ExportVersion` through `GET /export/v1/recipes/R-100/versions/3`
 - **THEN** the document holds `content_sha256` with the value `H1`
-- **AND** the document holds `loadable` with the value `false`
 
 ### Requirement: Stored hash check
 The system SHALL rebuild the hashed body of each export and compare its hash with the stored `content_sha256`. A difference SHALL reject the export with `E-EXP-002` and return no document (R03, A2).
@@ -170,7 +169,7 @@ The system SHALL write `parameters[].s7_address` with the stored address when on
 - **THEN** the parameter `SPEED` holds `s7_address` with the value `DB1.DBW0`
 
 ### Requirement: Stable parameter key
-The system SHALL export `parameters[].key` as the parameter key that stays the same across the versions of one recipe (R03, A40).
+The system SHALL write the parameter key in `parameters[].key` (R03, A40).
 
 #### Scenario: Key across versions
 - **GIVEN** the parameter `SPEED` with the key `K1` in the version 2 and in the approved version 3 of the recipe `R-100`
@@ -186,7 +185,7 @@ The system SHALL NOT export `parameter.ordinal`. The field sorts the user interf
 - **THEN** the document holds no field `ordinal` in any entry of `parameters[]`
 
 ### Requirement: Order of parameters
-The system SHALL write `parameters[]` ordered by `unit_path` and then by `tag`. The system SHALL compare `unit_path` segment by segment as integers, without the `U` prefix (R03, A2).
+The system SHALL write `parameters[]` ordered by `unit_path` and then by `tag`. The system SHALL compare `unit_path` segment by segment as integers, without the `U` prefix. A path SHALL come before a longer path with the same first segments. The system SHALL compare `tag` byte by byte (R03, A2).
 
 #### Scenario: Unit paths with two digits
 - **GIVEN** the parameters `TEMP` on the unit `U1.10` and `SPEED` on the unit `U1.2` of the machine `M12`
@@ -227,13 +226,12 @@ The system SHALL set `Cache-Control` to `no-store` on every export response (R03
 - **THEN** the response holds `Cache-Control` with the value `no-store`
 
 ### Requirement: Audit entry of each export
-The system SHALL write one audit entry `VersionExported` for each successful export. The entry SHALL hold the version id, the schema version, and `content_sha256` (A4, A8).
+The system SHALL write one audit entry `VersionExported` for each successful export (A4, A8).
 
 #### Scenario: Successful export
 - **GIVEN** the approved version 3 of the recipe `R-100`
 - **WHEN** an Operator runs `ExportVersion` through `GET /export/v1/recipes/R-100/approved`
 - **THEN** the audit log holds one entry `VersionExported` for the version
-- **AND** the entry holds the schema version `"1"` and the stored `content_sha256`
 
 ### Requirement: Export as a read operation
 The system SHALL treat an export as a read operation. An export SHALL NOT change any recipe, version, or parameter row (R03, A4).

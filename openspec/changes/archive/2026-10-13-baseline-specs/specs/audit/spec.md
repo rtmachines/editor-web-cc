@@ -7,7 +7,7 @@ The audit capability records every business change in the audit log with its act
 ## ADDED Requirements
 
 ### Requirement: Audit entry in the change transaction
-The system SHALL write at least one audit entry in the same transaction as the change of every command. The system SHALL NOT commit a change without its audit entry (R20, I13).
+The system SHALL write at least one audit entry in the same transaction as the change of every command. `domain-model.md` section 5 names the two exceptions. The system SHALL NOT commit a change without its audit entry (R20, I13).
 
 #### Scenario: Rename of a live machine
 - **GIVEN** the live machine `M12`
@@ -24,17 +24,8 @@ The system SHALL reject a command with `E-AUD-001` when the audit entry cannot b
 - **THEN** the system rejects the command with `E-AUD-001`
 - **AND** the name of `M12` does not change
 
-### Requirement: Exceptions to the audit entry rule
-The system SHALL write no audit entry for an `ApproveVersion` that returns `AlreadyApproved`. A failed or throttled `Login` SHALL write a security event and no audit entry (R20, A33, I13).
-
-#### Scenario: Login without a matching account
-- **GIVEN** no user with the login `jdoe`
-- **WHEN** a user runs `Login` with the login `jdoe`
-- **THEN** the system writes a security event of the kind `login_failed`
-- **AND** the system writes no audit entry
-
 ### Requirement: Content of an audit entry
-The system SHALL write each audit entry with its actor, action, aggregate, changed entity, and request id. The system SHALL also write the before state, the after state, the client address, and the session reference (R20, I13).
+The system SHALL write each audit entry with its action, aggregate, changed entity, request id, and a before state or an after state. The actor SHALL be empty only for `create-admin`, the startup settings comparison, and a data migration that changes catalog rows. The system SHALL write the client address and the session reference when the request has them (R20, I13).
 
 #### Scenario: Content of a rename entry
 - **GIVEN** the live machine `M12`
@@ -52,7 +43,7 @@ The system SHALL store in `before_state` and `after_state` only the changed fiel
 - **AND** the `before_state` and the `after_state` hold only the changed fields
 
 ### Requirement: Full row for other actions
-The system SHALL store the full row of the changed entity, without `password_hash`, for every other audit action. A create SHALL store the row in `after_state`. A delete SHALL store the row in `before_state` (R20).
+The system SHALL store the full row of the changed entity, without `password_hash`, for every other audit action. A create SHALL store the row in `after_state`. A delete SHALL store the row in `before_state`. An update SHALL store the row in both (R20).
 
 #### Scenario: Parameter added to a draft
 - **GIVEN** the draft of the recipe `R-100`
@@ -71,7 +62,7 @@ The system SHALL store the full row of the changed entity, without `password_has
 The system SHALL store the `session_ref` for `UserLoggedIn` and `UserLoggedOut`. `VersionExported` SHALL store the version id, the schema version, and `content_sha256`. `VersionApproved` SHALL add `allow_outdated` to the full row (R20).
 
 #### Scenario: Logout
-- **GIVEN** the user `jkowalski` with a live session
+- **GIVEN** the user `jkowalski` with an open session
 - **WHEN** `jkowalski` runs `Logout`
 - **THEN** the audit entry holds the action `UserLoggedOut` with the entity type `app_user`
 - **AND** the `before_state` holds the `session_ref` of the deleted session
@@ -141,17 +132,15 @@ The system SHALL write each security event in its own short transaction. The sys
 #### Scenario: Forbidden command
 - **GIVEN** the live machine `M12`
 - **WHEN** an Operator runs `RenameMachine` on `M12` and the request fails with `Forbidden`
-- **THEN** the system writes a security event of the kind `forbidden`
-- **AND** the security event stays in the database after the rejection
+- **THEN** the security event of the kind `forbidden` stays in the database after the rejection
 
 ### Requirement: Kinds of security events
 The system SHALL write security events only of the kinds `login_failed`, `login_rejected_inactive`, `login_throttled`, `csrf_rejected`, `forbidden`, `unlock`, and `audit_chain_broken` (A33).
 
-#### Scenario: Throttled login
-- **GIVEN** the login `jkowalski` inside its login delay
-- **WHEN** a user runs `Login` with the login `jkowalski`
-- **THEN** the system writes a security event of the kind `login_throttled`
-- **AND** the security event holds the `login_hmac` of `jkowalski`
+#### Scenario: Unknown kind
+- **GIVEN** the constraint `security_event_kind_value` on the table `security_event`
+- **WHEN** an `INSERT` statement as `recipe_app` adds a security event of the kind `login_ok`
+- **THEN** the database rejects the statement with the constraint `security_event_kind_value`
 
 ### Requirement: Aggregated security events
 The system SHALL aggregate the events of the kinds `login_failed`, `login_throttled`, and `csrf_rejected` per client address, kind, and minute. The system SHALL increment `count` for each later event of the same minute (A33).
@@ -184,7 +173,7 @@ The system SHALL NOT allow the application role `recipe_app` to change or delete
 - **WHEN** an `UPDATE` statement as `recipe_app` changes `count` of that row
 - **THEN** the database accepts the statement
 
-### Requirement: Purge of security events
+### Requirement: Deletion of old security events
 The job `cleanup` SHALL delete security events older than 400 days through `security_event_purge()`. Each call SHALL delete at most 5 000 rows. The system SHALL keep audit entries forever (R20, A33).
 
 #### Scenario: Old security event and old audit entry
