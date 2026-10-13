@@ -11,3 +11,10 @@
 //! See `docs/architecture/overview.md` section 5 and `docs/architecture/domain-model.md`.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+pub mod error_codes;
+pub mod plant;
+pub mod recipe;
+pub mod text;
+pub mod timestamp;

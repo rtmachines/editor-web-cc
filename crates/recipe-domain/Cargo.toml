@@ -8,6 +8,12 @@ publish.workspace = true
 
 # overview.md section 5: recipe-domain depends on no workspace crate.
 [dependencies]
+thiserror = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
 
 [lints]
 workspace = true
