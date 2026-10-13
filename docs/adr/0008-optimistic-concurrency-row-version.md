@@ -1,6 +1,6 @@
 # ADR-0008: Optimistic concurrency with a row version on the draft
 
-Status: Accepted. Amended by ADR-0015 (locking model, idempotent approve)
+Status: Accepted. Amended by ADR-0015 (locking model, idempotent approve) and ADR-0028 (row version check of version commands in the domain)
 Date: 2026-10-12
 Deciders: project owner
 

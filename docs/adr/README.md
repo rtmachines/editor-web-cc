@@ -17,7 +17,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0005](0005-audit-log-all-mutations.md) | Append-only audit log for every mutating operation | Accepted. Amended by ADR-0022 (hash chain, security_event table, diff state, indexes) | 2026-10-12 |
 | [0006](0006-plc-type-catalog-relational.md) | Relational PLC type catalog with immutable UDT revisions | Accepted. Amended by ADR-0017 (derived types) | 2026-10-12 |
 | [0007](0007-process-limits-per-leaf.md) | Process limits per scalar leaf of a parameter | Accepted. Amended by ADR-0022 (limits required at approval, `[*]` leaf path, leaf classes) and ADR-0018 (limits at rebind) | 2026-10-12 |
-| [0008](0008-optimistic-concurrency-row-version.md) | Optimistic concurrency with a row version on the draft | Accepted. Amended by ADR-0015 (locking model, idempotent approve) | 2026-10-12 |
+| [0008](0008-optimistic-concurrency-row-version.md) | Optimistic concurrency with a row version on the draft | Accepted. Amended by ADR-0015 (locking model, idempotent approve) and ADR-0028 (row version check of version commands in the domain) | 2026-10-12 |
 | [0009](0009-version-snapshot-immutable.md) | A recipe version is a full immutable snapshot | Accepted | 2026-10-12 |
 | [0010](0010-recipe-scoped-to-one-machine.md) | A recipe belongs to exactly one machine | Accepted | 2026-10-12 |
 | [0011](0011-soft-delete-everywhere.md) | Soft delete for recipes, versions, machines, and users | Superseded by ADR-0021 | 2026-10-12 |
@@ -25,7 +25,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0013](0013-rbac-fixed-permissions.md) | Fixed role-based permissions checked in each use case | Accepted. Amended by ADR-0022 (separation of duties, Forbidden recorded in security_event) | 2026-10-12 |
 | [0014](0014-session-identity-model.md) | Session and identity model with an owned session table | Accepted | 2026-10-12 |
 | [0015](0015-concurrency-locking-model.md) | Concurrency and locking model | Accepted | 2026-10-12 |
-| [0016](0016-aggregate-boundaries.md) | Aggregate boundaries and command split | Accepted | 2026-10-12 |
+| [0016](0016-aggregate-boundaries.md) | Aggregate boundaries and command split | Accepted. Amended by ADR-0028 (version header, approval token, version command row check) | 2026-10-12 |
 | [0017](0017-derived-type-identity.md) | Identity of derived PLC types and S7-300 layout | Accepted | 2026-10-12 |
 | [0018](0018-udt-revision-rebind.md) | UDT revisions and the rebind of recipe drafts | Accepted | 2026-10-12 |
 | [0019](0019-export-integrity-and-contract.md) | Export integrity and the export format | Accepted | 2026-10-12 |
@@ -36,6 +36,8 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0024](0024-error-codes-member-names-s7-width.md) | Error codes for duplicate member names and the S7 address width | Accepted | 2026-10-13 |
 | [0025](0025-parse-reasons-of-value-objects.md) | Parse reasons of value objects without an own error code | Accepted | 2026-10-13 |
 | [0026](0026-ranges-of-date-and-date-and-time.md) | Platform ranges of DATE and DATE_AND_TIME | Accepted | 2026-10-13 |
+| [0027](0027-error-lists-and-draft-errors.md) | Error lists and the error of a draft command | Accepted | 2026-10-13 |
+| [0028](0028-version-header-and-approval-token.md) | Version header, approval token, and draft clarifications | Accepted | 2026-10-13 |
 
 ## Decision map
 
@@ -49,12 +51,13 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 + 0024 (member names, S7 width) |
 | Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) + 0026 (ranges of `DATE`, `DATE_AND_TIME`) |
 | Errors of value objects without an own code | 0025 |
-| Concurrency | 0008 + 0015 |
-| Versions and aggregates | 0009 + 0016 |
+| Error lists, errors of draft commands | 0027 |
+| Concurrency | 0008 + 0015 + 0028 (row version check of version commands) |
+| Versions and aggregates | 0009 + 0016 + 0028 (version header, approval token, draft load, value and text clarifications) |
 | Recipe scope | 0010 |
 | Soft delete and delete rules | 0021 |
 | Translations | 0012 |
-| Permissions and approval | 0013 + 0022 |
+| Permissions and approval | 0013 + 0022 + 0028 (approval token, `Approver`) |
 | Stored settings, security event retention | 0022 |
 | STE lint scope and script location in CI | 0023 |
 

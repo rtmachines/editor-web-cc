@@ -19,8 +19,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - ADR-0025 for the parse reasons of value objects without an own error code.
 - ADR-0026 with the platform ranges of `DATE` and `DATE_AND_TIME`.
 - The Plant Model types of `recipe-domain`: value objects, `Machine`, `PlcType`, `TypeTree`, `S7Layout`, `IecLiteral`, `PlantError`, and the error code registry.
+- ADR-0027 for the error lists `RecipeErrors` and the error `DraftError` of a draft command.
+- ADR-0028 for the version header, the approval token, the load of a draft, and the value and text clarifications.
+- The Recipe Management types of `recipe-domain`: `Recipe`, the version state machine, `Draft`, `ParameterValue`, and `ProcessLimit`. Also the S7 checks, the snapshot check, the rebind mapping, and `RecipeError`.
 
 ### Changed
 
 - `reliability.md` section 8 and the R40 row of `overview.md` section 7 refer to the lint scope of ADR-0023.
 - `reliability.md`, `domain-model.md`, `data-model.md`, and `api.md` list the codes of ADR-0024. `reliability.md` sections 1.1 and 4.3 hold the rule of ADR-0025. The base-unit table of `domain-model.md` section 2.1 holds the ranges of ADR-0026.
+- `reliability.md` sections 1.1, 4.3, 4.4, and 6 and `domain-model.md` sections 2.2, 3, 4, 5.2, and 6 hold the decisions of ADR-0027 and ADR-0028. ADR-0008 and ADR-0016 have an "Amended by" note.

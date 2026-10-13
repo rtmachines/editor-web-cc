@@ -1,6 +1,6 @@
 # ADR-0016: Aggregate boundaries and command split
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0028 (version header, approval token, version command row check)
 Date: 2026-10-12
 Deciders: project owner
 

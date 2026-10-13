@@ -263,14 +263,14 @@ Examples: `T#1d2h3m4s5ms` is the count `93784005`. `TOD#12:30:00.500` is `450005
 | `machine` | `MachineId` | Exactly one machine (ADR-0010) |
 | `reference_number` | `ReferenceNumber` | `[A-Z0-9][A-Z0-9_-]{0,49}`. Folded to upper case. Unique (Assumption A27) |
 | `name` | `Text` | Not empty, max 200 chars |
-| `versions` | `Vec<VersionHeader>` | Ordered by `number`. `VersionHeader { id, number, status, row_version }` |
+| `versions` | `Vec<VersionHeader>` | Ordered by `number`. `VersionHeader { id, number, state, row_version }`. `state` is a `VersionState`: `LiveDraft`, `Discarded`, `Approved`, or `Retired`. The status and `deleted_at` of the version give it (ADR-0028) |
 | `deleted_at` | `Option<Timestamp>` | Soft delete (ADR-0021) |
 
-The root holds headers only. It never loads parameters. `Recipe::approve()` and `Recipe::retire()` change headers and return the outcome. The use case persists the outcome through intent methods of the repository.
+The root holds headers only. It never loads parameters. `Recipe::approve()`, `Recipe::retire()`, and `Recipe::discard()` change headers and return the outcome. They take the expected row version and return `Optimistic::Conflict` on a mismatch (ADR-0028). The use case persists the outcome through intent methods of the repository.
 
 **Draft** (aggregate)
 
-A `Draft` is the one `RecipeVersion` of a recipe with `status = Draft` and `deleted_at = None`, together with its `Vec<Parameter>`. A recipe has at most one `Draft` (Assumption A7). The parameter commands load and save the `Draft` only.
+A `Draft` is the one `RecipeVersion` of a recipe with `status = Draft` and `deleted_at = None`, together with its `Vec<Parameter>`, its creator, and its `DraftEditors`. A recipe has at most one `Draft` (Assumption A7). The parameter commands load and save the `Draft` only. `Draft::load` trusts the stored values and limits. A command checks the parameter that it changes (ADR-0028).
 
 **ApprovedVersion**, **RetiredVersion** (read models)
 
@@ -359,7 +359,9 @@ Size budget (Assumption A26): at most 16 384 leaves per parameter and 262 144 le
 |---|---|---|
 | `separation_of_duties` | `bool` | Default `true` (Assumption A34). The approver cannot be `created_by` of the draft or a member of `DraftEditors` |
 
-`DraftEditors` (value object): the set of users who ran a draft command on the version.
+`DraftEditors` (value object): the set of users who ran a draft command on the version. The `Draft` loads it with the version. `Draft::check_for_approval` copies the creator and the editors into the token `ApprovalReady`, and `Recipe::approve` checks the rule against the token (ADR-0028).
+
+`Approver` (value object): the identifier and the `Login` of the approving user. `E-RCP-015` names this login.
 
 A draft command is one of the eight parameter commands of section 5.2: `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `UpsertTranslation`, `RemoveTranslation`, `RemoveParameter`, and `RebindTypeRevision`. Only these eight commands write `draft_editor`.
 
@@ -477,22 +479,22 @@ A change of a configuration value, for example `approval.separation_of_duties`, 
 | I2 | `Approved -> Retired` when another version becomes `Approved` | Same call as I1. One domain operation | Both updates and the audit rows are in one transaction |
 | I3 | A change of type, limit, revision, address, unit, translation, or value happens only in a live `Draft` | `Draft` is the only aggregate with parameter methods. A command on a non-draft version returns `VersionNotEditable` | Trigger function `enforce_version_mutable` on `parameter`, `parameter_limit`, `parameter_translation` (`E-RCP-030`, `E-RCP-031`). It takes `FOR SHARE` on the version |
 | I4 | A version that is not `Draft` changes only its status fields | `Recipe::retire()` changes `status` and `retired_at` only | Trigger function `recipe_version_transition` (`E-RCP-033`): allows `draft -> approved`, `approved -> retired`, `deleted_at` on a draft. It always freezes `id`, `recipe_id`, `plc_platform`, `number`, `based_on_version_id`, `created_by`, `created_at`. After approval it also freezes `approved_by`, `approved_at`, `change_note`, `content_sha256` |
-| I5 | An `S7_300` parameter has an address. An `S7_1200` or `S7_1500` parameter may have one. A `CodesysIec` or `TwinCat3` parameter has none | `Parameter::new()` returns `S7AddressRequired` or `S7AddressNotAllowed` | `CHECK parameter_s7_address_platform` enforces the three cases. Composite FK `parameter_version_platform` copies the platform |
+| I5 | An `S7_300` parameter has an address. An `S7_1200` or `S7_1500` parameter may have one. A `CodesysIec` or `TwinCat3` parameter has none | `Draft::add_parameter()` and `Draft::set_definition()` return `S7AddressRequired` or `S7AddressNotAllowed` (ADR-0028) | `CHECK parameter_s7_address_platform` enforces the three cases. Composite FK `parameter_version_platform` copies the platform |
 | I6 | The type of a parameter exists on the platform of the machine | `EnsureDerivedType` returns `E-PLT-013 DerivedTypeInvalid` for a `TypeExpr` that is not on the platform. `DefineUdt` is the exception: it reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform`. `E-RCP-013 TypeNotOnPlatform` is only an item inside `E-RCP-020 ValidationFailed`: the snapshot check reports a stored parameter whose type is no longer on the platform | Trigger function `enforce_type_platform` on `parameter` (`E-PLT-031`, `E-PLT-032`) |
-| I7 | A value matches its type tree and its limits | `ParameterValue::check(&TypeTree, &[ProcessLimit])` | Not enforced. JSONB is opaque. `CHECK parameter_value_size` bounds the size |
+| I7 | A value matches its type tree and its limits | `ParameterValue::parse(json, &TypeTree)` builds the value. `ParameterValue::check(&TypeTree, &[ProcessLimit])` checks the limits | Not enforced. JSONB is opaque. `CHECK parameter_value_size` bounds the size |
 | I8 | A struct has no cycle | `TypeTree::resolve()` returns `TypeCycle` | Not enforced |
 | I9 | Unit path has 1 to 5 segments, each `1..=64` | `UnitPath::parse()` | `CHECK unit_path_format` |
 | I10 | A unit has its parent in the same machine, and the parent path exists | `Machine::add_unit()` | Composite FK `unit_parent_exists (machine_id, parent_path) REFERENCES unit (machine_id, path)`. `parent_path` is a generated column. There is no `parent_id` column |
 | I11 | `reference_number` is unique. `machine.code` is unique among live machines | Repository returns `DuplicateReference` or `DuplicateMachineCode` | `UNIQUE recipe_reference_unique`. Partial unique index `machine_code_live_unique` on `(code) WHERE archived_at IS NULL` |
-| I12 | Two users cannot overwrite the same `Draft` | Use case compares `row_version` after `recipe_version FOR UPDATE` and returns `ConcurrentEdit` on a mismatch. Then it runs the touch statement | Lock order `recipe FOR UPDATE -> recipe_version FOR UPDATE`. Compare after `FOR UPDATE`, then touch. The trigger function `bump_row_version` increments the token |
+| I12 | Two users cannot overwrite the same `Draft` | Use case compares `row_version` after `recipe_version FOR UPDATE` and returns `ConcurrentEdit` on a mismatch. Then it runs the touch statement. `Recipe::approve()`, `retire()`, and `discard()` also compare it and return `Optimistic::Conflict` (ADR-0028) | Lock order `recipe FOR UPDATE -> recipe_version FOR UPDATE`. Compare after `FOR UPDATE`, then touch. The trigger function `bump_row_version` increments the token |
 | I13 | Every command has an audit entry, except the two cases of section 5 | `UnitOfWork::commit(NonEmpty<AuditEntry>)` | `recipe_app` has `INSERT` and `SELECT` only on `audit_log`. Hash chain trigger function `audit_hash_chain` with the row lock on `audit_chain_head`. The nightly check recomputes every hash and reports a break as `E-AUD-002` |
 | I14 | Deleting a recipe does not destroy history | `Recipe::delete()` sets `deleted_at`. `RecipeHasApprovedVersion` when an approved version exists | No `DELETE` grant on `recipe`, `recipe_version` for `recipe_app` |
-| I15 | The unit of a parameter is in the machine of the recipe | `LiveUnits::contains(unit_id)` in `Draft::set_definition()` | Trigger function `enforce_unit_machine` on `parameter` (`E-RCP-032`) |
-| I16 | Separation of duties at approval | `Recipe::approve(&ApprovalPolicy, &DraftEditors)` returns `ApproverEditedDraft` | Table `draft_editor` written by every draft command. Not enforced by trigger |
-| I17 | At approval every numeric, string, duration, and instant leaf has a limit. A bool or char leaf has none | `Draft::check_for_approval()` returns `LimitMissing` | Not enforced |
+| I15 | The unit of a parameter is in the machine of the recipe | `Draft::add_parameter()` and `Draft::set_definition()` take a `LiveUnit`, which only `LiveUnits::require()` creates. A unit of another machine gives `E-PLT-020` (ADR-0028) | Trigger function `enforce_unit_machine` on `parameter` (`E-RCP-032`) |
+| I16 | Separation of duties at approval | `Recipe::approve(ApprovalReady, expected_row_version, &Approver, &ApprovalPolicy)` returns `ApproverEditedDraft`. The token holds the creator and the `DraftEditors` (ADR-0028) | Table `draft_editor` written by every draft command. Not enforced by trigger |
+| I17 | At approval every numeric, string, duration, and instant leaf has a limit. A bool or char leaf has none | `Draft::check_for_approval()` returns one `LimitMissing` entry for each leaf in the `RecipeErrors` of a `DraftError` (ADR-0027) | Not enforced |
 | I18 | Size budgets (A26) | `Draft::set_value()` and `Draft::add_parameter()` return `SizeBudgetExceeded` | Statement trigger function `version_size_budget` on `parameter` and `parameter_limit` (`E-RCP-035`, `E-RCP-036`) |
-| I19 | A draft references only live units, a live machine, and a non-deleted recipe | The whole-snapshot check `Draft::check_snapshot(&LiveUnits)` runs in `CreateVersion` and `ApproveVersion` and returns `E-RCP-020 ValidationFailed` with the list. The eight draft commands check one parameter and return the specific code, for example `E-PLT-009 UnitArchived`, `E-PLT-013 DerivedTypeInvalid`, or `E-RCP-012 RecipeDeleted` | `SELECT ... FROM recipe FOR UPDATE` with `deleted_at IS NULL` as the first statement. `AddParameter` and `UpdateParameterDefinition` take `FOR SHARE` on the unit row. `CreateVersion` takes `FOR SHARE` on the unit rows of the base version and checks `archived_at` again. `ArchiveUnit` takes `machine FOR NO KEY UPDATE`, then `FOR UPDATE` on the unit rows. Every command that adds a reference to a unit takes `machine FOR SHARE` first (ADR-0015) |
-| I20 | S7 addresses do not overlap and are aligned, on every platform that has an address (A31) | `Draft::check_s7_layout(&TypeTree)` returns `S7AddressOverlap` or `S7AddressMisaligned` | `CHECK parameter_s7_address_format` checks the grammar only |
+| I19 | A draft references only live units, a live machine, and a non-deleted recipe | The whole-snapshot check `VersionSnapshot::check(&Recipe, &LiveUnits, &TypeTrees)` runs in `CreateVersion`, and `Draft::check_for_approval(&LiveUnits, &TypeTrees, allow_outdated)` runs it in `ApproveVersion` (ADR-0028). It returns `E-RCP-020 ValidationFailed` with the list. The eight draft commands check one parameter and return the specific code, for example `E-PLT-009 UnitArchived`, `E-PLT-013 DerivedTypeInvalid`, or `E-RCP-012 RecipeDeleted` | `SELECT ... FROM recipe FOR UPDATE` with `deleted_at IS NULL` as the first statement. `AddParameter` and `UpdateParameterDefinition` take `FOR SHARE` on the unit row. `CreateVersion` takes `FOR SHARE` on the unit rows of the base version and checks `archived_at` again. `ArchiveUnit` takes `machine FOR NO KEY UPDATE`, then `FOR UPDATE` on the unit rows. Every command that adds a reference to a unit takes `machine FOR SHARE` first (ADR-0015) |
+| I20 | S7 addresses do not overlap and are aligned, on every platform that has an address (A31) | `Draft::check_s7_layout(&TypeTrees)` returns `S7AddressOverlap` or `S7AddressMisaligned` | `CHECK parameter_s7_address_format` checks the grammar only |
 | I21 | The platform of a machine does not change after its first recipe | No command changes `plc_platform` of a machine with a recipe | Trigger function `machine_platform_frozen` (`E-PLT-030`). Composite FK `recipe_machine_platform` |
 | I22 | A `PlcType` row and its members never change. A struct has at least one member | `DefineUdt` creates a new revision. It returns `StructHasNoMembers` for an empty struct | Trigger function `plc_type_immutable` (`E-PLT-033`, `E-PLT-034`, `E-PLT-035`). Constraint trigger function `plc_type_struct_has_member` (`E-PLT-036`) |
 | I23 | A machine code, a unit path, and a reference number do not change while a non-draft version references them | No command changes these identifiers | Trigger function `freeze_identifiers` (`E-PLT-037`, `E-PLT-038`, `E-RCP-034`). Column grants withhold `UPDATE` on these columns |
@@ -524,9 +526,10 @@ stateDiagram-v2
 Rules:
 
 - Transitions that do not exist: `Retired -> Approved`, `Approved -> Draft`, `Retired -> Draft`. The trigger function `recipe_version_transition` rejects them.
-- `Discarded` is `Draft` with `deleted_at` set. It is not a status value.
+- `Discarded` is `Draft` with `deleted_at` set. It is not a status value. `VersionState` names the four states `LiveDraft`, `Discarded`, `Approved`, and `Retired`. `VersionState::apply` is the one transition function (ADR-0028).
 - `RetireVersion` without a replacement exists for the Administrator (Assumption A28).
-- Idempotent approve: when the version is already `Approved` and `row_version == expected + 1`, `ApproveVersion` returns `AlreadyApproved` and writes no audit entry.
+- `CreateVersion` accepts any version of the recipe as its base, also a discarded draft. Without a base, the draft has no parameters (ADR-0028).
+- Idempotent approve: when the version is already `Approved` and `row_version == expected + 1`, `ApproveVersion` returns `AlreadyApproved` and writes no audit entry. The order of the checks is the idempotent case, then the row version, then the transition (`api.md` section 4).
 - Outdated type: A parameter is outdated when any `plc_type` in its resolved type tree has a successor revision. The tree holds the type itself, every member, and every element type, at any depth. The parameter shows `outdated_type = true`. The engineer creates a draft and runs `RebindTypeRevision`. Approved and Retired versions keep the old revision (Assumption A29).
 - Approval of outdated parameters: `ApproveVersion` returns `TypeRevisionOutdated` when a parameter of the draft is outdated, unless the request carries `allow_outdated = true`. The check runs before the transaction and again after the locks inside it. A revision that commits between the two runs therefore also stops the approval. The audit entry `VersionApproved` records the flag (Assumption A29, ADR-0018).
 
@@ -590,7 +593,7 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 | `UpsertTranslation` | Draft | One translation set | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-027 InvalidLangCode`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
 | `RemoveTranslation` | Draft | One translation deleted | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-050 TranslationNotFound`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
 | `RemoveParameter` | Draft | Parameter, its limits, and its translations deleted | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
-| `RebindTypeRevision` | Draft | `{ draft, from_type_id, to_type_id, new_member_values }`. `new_member_values` is a map from `(parameter_key, leaf_path)` to a decimal text, a string, or a bool. Every parameter of the draft whose type uses `from_type_id` moves to `to_type_id`. Values and limits are mapped by member name. A new member takes its value from `new_member_values`. A missing entry gives `E-RCP-028` | `E-RCP-002 VersionNotEditable`, `E-RCP-005 ValueShapeMismatch` (a sent value of a new member), `E-RCP-012 RecipeDeleted`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-028 RebindNeedsValue`, `E-RCP-029 RebindDropsLimit`, `E-RCP-052 RebindTargetInvalid`, `E-PLT-013 DerivedTypeInvalid` (a new array type), `E-PLT-018 TypeTooLarge` (a new array type), `E-WEB-001 ConcurrentEdit` |
+| `RebindTypeRevision` | Draft | `{ draft, from_type_id, to_type_id, new_member_values }`. `new_member_values` is a map from `(parameter_key, leaf_path)` to a decimal text, a string, or a bool. Every parameter of the draft whose type uses `from_type_id` moves to `to_type_id`. Values and limits are mapped by member name. A new member takes its value from `new_member_values`. A missing entry gives `E-RCP-028` | `E-RCP-002 VersionNotEditable`, `E-RCP-005 ValueShapeMismatch` (a sent value of a new member), `E-RCP-012 RecipeDeleted`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap` (a larger revision, ADR-0028), `E-RCP-028 RebindNeedsValue`, `E-RCP-029 RebindDropsLimit`, `E-RCP-052 RebindTargetInvalid`, `E-PLT-013 DerivedTypeInvalid` (a new array type), `E-PLT-018 TypeTooLarge` (a new array type), `E-WEB-001 ConcurrentEdit` |
 
 `RebindTypeRevision` rules (ADR-0018):
 
@@ -599,7 +602,7 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 - A struct that has `from_type_id` as a member keeps its revision. The engineer defines a new revision of that struct and rebinds it with a second command.
 - The command checks every affected parameter first. It returns one `RebindNeedsValue` or `RebindDropsLimit` entry per failing parameter and leaf in one list, and it changes nothing.
 
-`ValidationFailed { items }` lists the problems of the snapshot check. A parameter item names an archived unit, a value out of limit, or a type that is no longer on the platform (the item `E-RCP-013 TypeNotOnPlatform`). A version item names a deleted recipe or an archived machine. `CreateVersion` returns `ValidationFailed` when the base version references an archived unit, an archived machine, or a type that is not on the platform. Then it creates no draft. The `303` of a successful `CreateVersion` lists only the outdated parameters.
+`ValidationFailed { items }` lists the problems of the snapshot check. A parameter item names an archived unit, a value out of limit, or a type that is no longer on the platform (the item `E-RCP-013 TypeNotOnPlatform`). It can also name a stored value that no longer fits its type (`E-RCP-005`, ADR-0028). A version item names a deleted recipe or an archived machine. `CreateVersion` returns `ValidationFailed` when the base version references an archived unit, an archived machine, or a type that is not on the platform. Then it creates no draft. The `303` of a successful `CreateVersion` lists only the outdated parameters.
 
 ### 5.3 Identity and Access
 
@@ -653,6 +656,8 @@ Every form and preview route is a query with the permission of the command that 
 
 ```rust
 pub enum VersionStatus { Draft, Approved, Retired }
+pub enum VersionState { LiveDraft, Discarded, Approved, Retired }
+pub enum Optimistic<T> { Applied(T), Conflict { expected: i64, actual: i64 } }
 
 pub enum ApprovalOutcome {
     Approved { approved: RecipeVersionId, retired: Option<RecipeVersionId> },
@@ -660,16 +665,16 @@ pub enum ApprovalOutcome {
 }
 
 impl Recipe {
-    pub fn approve(&mut self, version: RecipeVersionId, expected_row_version: i64,
-                   by: UserId, now: Timestamp, policy: &ApprovalPolicy,
-                   editors: &DraftEditors) -> Result<ApprovalOutcome, RecipeError>;
+    pub fn approval_replay(&self, number: u32, expected_row_version: i64) -> Option<ApprovalOutcome>;
+    pub fn approve(&mut self, ready: ApprovalReady, expected_row_version: i64, approver: &Approver,
+                   policy: &ApprovalPolicy) -> Result<Optimistic<ApprovalOutcome>, RecipeError>;
 }
 
 impl Draft {
-    pub fn set_value(&mut self, key: ParameterKey, value: ParameterValue, tree: &TypeTree)
-        -> Result<(), RecipeError>;
+    pub fn set_value(&mut self, key: ParameterKey, json: &str, trees: &TypeTrees)
+        -> Result<ParameterChange, DraftError>;
     pub fn check_for_approval(&self, units: &LiveUnits, trees: &TypeTrees,
-                              allow_outdated: bool) -> Result<(), RecipeError>;
+                              allow_outdated: bool) -> Result<ApprovalReady, DraftError>;
 }
 ```
 
