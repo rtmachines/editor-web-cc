@@ -17,6 +17,7 @@ mod state;
 mod tag;
 mod value;
 
+pub(crate) use draft::not_on_platform;
 pub use draft::{
     ApprovalReady, BudgetCounts, DefinitionUpdate, Draft, LEAVES_PER_VERSION,
     LIMIT_ROWS_PER_VERSION, NewParameter, PARAMETERS_PER_VERSION, Parameter, ParameterChange,

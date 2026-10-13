@@ -742,7 +742,11 @@ mod tests {
         let registry: Vec<String> = REGISTRY
             .iter()
             .map(|code| code.as_str().to_owned())
-            .filter(|code| code.starts_with("E-PLT-"))
+            .filter(|code| {
+                code.strip_prefix("E-PLT-")
+                    .and_then(|digits| digits.parse::<u32>().ok())
+                    .is_some_and(|number| number < 30)
+            })
             .collect();
         assert_eq!(registry, expected);
 

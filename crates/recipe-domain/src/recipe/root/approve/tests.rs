@@ -36,7 +36,7 @@ fn token_draft() -> Draft {
 }
 
 /// A real token of `draft`.
-fn ready(draft: &Draft) -> ApprovalReady<'_> {
+fn ready(draft: Draft) -> ApprovalReady {
     draft
         .check_for_approval(&units(false), &trees(), false)
         .unwrap()
@@ -79,7 +79,7 @@ fn approve_retires_the_approved_version_and_approves_the_draft() {
     let mut recipe = recipe_with_approved();
     let outcome = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(9),
             &policy_on(),
@@ -106,7 +106,7 @@ fn approve_of_the_first_draft_retires_nothing() {
     ]);
     let outcome = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(9),
             &policy_on(),
@@ -130,7 +130,7 @@ fn the_creator_cannot_approve_and_the_error_names_the_login() {
     let before = recipe.clone();
     let error = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(1),
             &policy_on(),
@@ -151,7 +151,7 @@ fn each_editor_cannot_approve() {
         let before = recipe.clone();
         let error = recipe
             .approve(
-                ready(&token_draft()),
+                ready(token_draft()),
                 DRAFT_ROW_VERSION,
                 &approver(n),
                 &policy_on(),
@@ -172,7 +172,7 @@ fn with_separation_of_duties_off_the_creator_can_approve() {
         let mut recipe_n = recipe.clone();
         let outcome = recipe_n
             .approve(
-                ready(&token_draft()),
+                ready(token_draft()),
                 DRAFT_ROW_VERSION,
                 &approver(n),
                 &policy,
@@ -188,7 +188,7 @@ fn with_separation_of_duties_off_the_creator_can_approve() {
     assert_eq!(state_of(&recipe, 3), LiveDraft);
     recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(1),
             &policy,
@@ -228,7 +228,7 @@ fn approve_of_an_already_approved_header_at_the_next_row_version_is_idempotent()
     let before = recipe.clone();
     let outcome = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(9),
             &policy_on(),
@@ -246,7 +246,7 @@ fn an_expected_row_version_older_than_the_header_gives_conflict() {
     let mut recipe = recipe_with_approved();
     let before = recipe.clone();
     let outcome = recipe
-        .approve(ready(&token_draft()), 6, &approver(9), &policy_on())
+        .approve(ready(token_draft()), 6, &approver(9), &policy_on())
         .unwrap();
     assert_eq!(
         outcome,
@@ -263,7 +263,7 @@ fn a_token_of_an_older_snapshot_gives_conflict() {
     let mut recipe = recipe_of(vec![header(2, Approved, 5), draft_header(LiveDraft, 9)]);
     let before = recipe.clone();
     let outcome = recipe
-        .approve(ready(&token_draft()), 9, &approver(9), &policy_on())
+        .approve(ready(token_draft()), 9, &approver(9), &policy_on())
         .unwrap();
     assert_eq!(
         outcome,
@@ -282,7 +282,7 @@ fn approve_of_a_deleted_recipe_gives_recipe_deleted() {
     let before = recipe.clone();
     let error = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(9),
             &policy_on(),
@@ -299,7 +299,7 @@ fn a_retired_or_discarded_header_gives_version_not_draft() {
         let before = recipe.clone();
         let error = recipe
             .approve(
-                ready(&token_draft()),
+                ready(token_draft()),
                 DRAFT_ROW_VERSION,
                 &approver(9),
                 &policy_on(),
@@ -321,7 +321,7 @@ fn an_approved_header_with_another_row_version_gives_version_not_draft() {
     let before = recipe.clone();
     let error = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(9),
             &policy_on(),
@@ -337,7 +337,7 @@ fn a_token_for_an_unknown_version_gives_version_not_draft() {
     let before = recipe.clone();
     let error = recipe
         .approve(
-            ready(&token_draft()),
+            ready(token_draft()),
             DRAFT_ROW_VERSION,
             &approver(9),
             &policy_on(),
@@ -361,7 +361,7 @@ fn the_approver_user_is_compared_by_identifier() {
     assert!(
         recipe
             .approve(
-                ready(&token_draft()),
+                ready(token_draft()),
                 DRAFT_ROW_VERSION,
                 &stranger,
                 &policy_on()

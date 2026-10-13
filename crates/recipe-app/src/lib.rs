@@ -8,3 +8,16 @@
 //! See `docs/architecture/overview.md` section 5 and `docs/architecture/domain-model.md` section 5.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+pub mod audit;
+pub mod auth;
+pub mod blocking;
+pub mod context;
+pub mod error;
+pub mod export;
+#[cfg(any(test, feature = "memory"))]
+pub mod memory;
+pub mod plant;
+pub mod ports;
+pub mod recipe;

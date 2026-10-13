@@ -1,7 +1,6 @@
 //! Approval checks of a draft (design D5, D12, ADR-0027, ADR-0028).
 
 use std::collections::{BTreeSet, HashSet};
-use std::marker::PhantomData;
 
 use super::{Draft, stored_limits};
 use crate::identity::UserId;
@@ -15,15 +14,17 @@ use crate::recipe::{DraftError, RecipeError, RecipeErrors, RecipeVersionId};
 /// become `Approved` (I17). Only [`Draft::check_for_approval`] creates the token. The type has
 /// no public constructor and no `Clone`, so one check gives one approval.
 ///
-/// The token borrows the draft that created it. While the token lives, no command can change
-/// that draft, so the token cannot be stale. This sequence does not compile:
+/// The token owns the checked draft (ADR-0029). While the token lives, no command can change
+/// that draft, so the token cannot be stale. The token has no lifetime, so it can leave
+/// `spawn_blocking`. A command on the draft after the check is a use after a move. This
+/// sequence does not compile:
 ///
-/// ```compile_fail,E0502
+/// ```compile_fail,E0382
 /// use recipe_domain::plant::{LiveUnits, TypeTrees};
 /// use recipe_domain::recipe::{ApprovalPolicy, Approver, Draft, ParameterKey, Recipe};
 ///
 /// fn stale_token(
-///     draft: &mut Draft,
+///     mut draft: Draft,
 ///     recipe: &mut Recipe,
 ///     (units, trees): (&LiveUnits, &TypeTrees),
 ///     (approver, policy): (&Approver, &ApprovalPolicy),
@@ -35,14 +36,14 @@ use crate::recipe::{DraftError, RecipeError, RecipeErrors, RecipeVersionId};
 /// }
 /// ```
 ///
-/// The same sequence without the change of the draft compiles:
+/// The same sequence without the command on the draft compiles:
 ///
 /// ```
 /// use recipe_domain::plant::{LiveUnits, TypeTrees};
 /// use recipe_domain::recipe::{ApprovalPolicy, Approver, Draft, Recipe};
 ///
 /// fn fresh_token(
-///     draft: &Draft,
+///     draft: Draft,
 ///     recipe: &mut Recipe,
 ///     (units, trees): (&LiveUnits, &TypeTrees),
 ///     (approver, policy): (&Approver, &ApprovalPolicy),
@@ -51,46 +52,47 @@ use crate::recipe::{DraftError, RecipeError, RecipeErrors, RecipeVersionId};
 ///     let _ = recipe.approve(ready, 1, approver, policy);
 /// }
 /// ```
-#[derive(Debug, PartialEq, Eq)]
-pub struct ApprovalReady<'d> {
-    version: RecipeVersionId,
-    number: u32,
-    row_version: i64,
-    creator: UserId,
-    editors: BTreeSet<UserId>,
+#[derive(Debug)]
+pub struct ApprovalReady {
+    draft: Draft,
     allow_outdated: bool,
-    draft: PhantomData<&'d Draft>,
 }
 
-impl ApprovalReady<'_> {
+impl ApprovalReady {
+    /// Return the checked draft. The token gives read access only.
+    #[must_use]
+    pub const fn draft(&self) -> &Draft {
+        &self.draft
+    }
+
     /// Return the identifier of the checked version.
     #[must_use]
     pub const fn version(&self) -> RecipeVersionId {
-        self.version
+        self.draft.version()
     }
 
     /// Return the number of the checked version.
     #[must_use]
     pub const fn number(&self) -> u32 {
-        self.number
+        self.draft.number()
     }
 
     /// Return the row version of the draft at the time of the check.
     #[must_use]
     pub const fn row_version(&self) -> i64 {
-        self.row_version
+        self.draft.row_version()
     }
 
     /// Return the user who created the draft.
     #[must_use]
     pub const fn creator(&self) -> UserId {
-        self.creator
+        self.draft.created_by()
     }
 
     /// Return the users who changed the draft.
     #[must_use]
     pub const fn editors(&self) -> &BTreeSet<UserId> {
-        &self.editors
+        self.draft.editors()
     }
 
     /// Return `true` when the approval accepts outdated parameters (A29).
@@ -109,8 +111,10 @@ const fn needs_limit(class: LeafClass) -> bool {
 }
 
 impl Draft {
-    /// Check the draft for an approval and return the token (design D5, D12, ADR-0028).
+    /// Check the draft for an approval and return the token (design D5, D12, ADR-0029).
     ///
+    /// The method consumes the draft, and the token owns it. A failed check drops the draft,
+    /// so a caller that needs the draft after a failure clones it first.
     /// The order is the snapshot check of the parameters and the machine. Then the check for no
     /// parameters, the limits, the S7 layout, and the outdated parameters. The snapshot check has
     /// no recipe, because a live draft of a deleted recipe cannot exist.
@@ -122,12 +126,12 @@ impl Draft {
     /// without parameters. Returns the list of `E-RCP-016` entries of [`Draft::check_limits`].
     /// Returns the errors of [`Draft::check_s7_layout`]. Returns `E-RCP-024` for the first
     /// outdated parameter when `allow_outdated` is `false`.
-    pub fn check_for_approval<'d>(
-        &'d self,
+    pub fn check_for_approval(
+        self,
         units: &LiveUnits,
         trees: &TypeTrees,
         allow_outdated: bool,
-    ) -> Result<ApprovalReady<'d>, DraftError> {
+    ) -> Result<ApprovalReady, DraftError> {
         self.check_draft_trees(trees)?;
         check_snapshot(self.parameters(), None, units, trees)?;
         if self.parameters.is_empty() {
@@ -141,13 +145,8 @@ impl Draft {
         self.check_s7_layout(trees)?;
         self.check_outdated(trees, allow_outdated)?;
         Ok(ApprovalReady {
-            version: self.version,
-            number: self.number,
-            row_version: self.row_version,
-            creator: self.created_by,
-            editors: self.editors.clone(),
+            draft: self,
             allow_outdated,
-            draft: PhantomData,
         })
     }
 

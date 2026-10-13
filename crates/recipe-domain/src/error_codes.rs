@@ -124,6 +124,84 @@ impl ErrorCode {
     /// E-RCP-054, `RecipeError::S7AddressWidthMismatch`.
     pub const RCP_054: Self = Self::new("E-RCP-054");
 
+    /// E-AUD-001, `AppError::AuditWriteFailed`.
+    pub const AUD_001: Self = Self::new("E-AUD-001");
+    /// E-AUD-002, `AuditError::ChainBroken`.
+    pub const AUD_002: Self = Self::new("E-AUD-002");
+
+    /// E-DB-001, `StorageError::Deadlock`.
+    pub const DB_001: Self = Self::new("E-DB-001");
+    /// E-DB-002, `StorageError::StatementTimeout`.
+    pub const DB_002: Self = Self::new("E-DB-002");
+    /// E-DB-003, `StorageError::Constraint`.
+    pub const DB_003: Self = Self::new("E-DB-003");
+    /// E-DB-004, `StorageError::PoolTimeout`.
+    pub const DB_004: Self = Self::new("E-DB-004");
+    /// E-DB-005, `StorageError::Unavailable`.
+    pub const DB_005: Self = Self::new("E-DB-005");
+    /// E-DB-006, `StorageError::Duplicate` with an unknown constraint name.
+    pub const DB_006: Self = Self::new("E-DB-006");
+    /// E-DB-007, `StorageError::MissingReference` with an unknown constraint name.
+    pub const DB_007: Self = Self::new("E-DB-007");
+    /// E-DB-008, `StorageError::Other`.
+    pub const DB_008: Self = Self::new("E-DB-008");
+
+    /// E-EXP-001, `ExportError::NoApprovedVersion`.
+    pub const EXP_001: Self = Self::new("E-EXP-001");
+    /// E-EXP-002, `ExportError::ContentHashMismatch`.
+    pub const EXP_002: Self = Self::new("E-EXP-002");
+    /// E-EXP-003, `ExportError::VersionNotExportable`.
+    pub const EXP_003: Self = Self::new("E-EXP-003");
+    /// E-EXP-004, `ExportError::Serialize`.
+    pub const EXP_004: Self = Self::new("E-EXP-004");
+
+    /// E-PLT-030, `StorageError::Constraint`, trigger `machine_platform_frozen`.
+    pub const PLT_030: Self = Self::new("E-PLT-030");
+    /// E-PLT-031, `StorageError::Constraint`, trigger `enforce_type_platform`.
+    pub const PLT_031: Self = Self::new("E-PLT-031");
+    /// E-PLT-032, `StorageError::Constraint`, trigger `enforce_type_platform`.
+    pub const PLT_032: Self = Self::new("E-PLT-032");
+    /// E-PLT-033, `StorageError::Constraint`, trigger `plc_type_immutable`.
+    pub const PLT_033: Self = Self::new("E-PLT-033");
+    /// E-PLT-034, `StorageError::Constraint`, trigger `plc_type_immutable`.
+    pub const PLT_034: Self = Self::new("E-PLT-034");
+    /// E-PLT-035, `StorageError::Constraint`, trigger `plc_type_immutable`.
+    pub const PLT_035: Self = Self::new("E-PLT-035");
+    /// E-PLT-036, `StorageError::Constraint`, trigger `plc_type_struct_has_member`.
+    pub const PLT_036: Self = Self::new("E-PLT-036");
+    /// E-PLT-037, `StorageError::Constraint`, trigger `freeze_identifiers`.
+    pub const PLT_037: Self = Self::new("E-PLT-037");
+    /// E-PLT-038, `StorageError::Constraint`, trigger `freeze_identifiers`.
+    pub const PLT_038: Self = Self::new("E-PLT-038");
+
+    /// E-RCP-030, `StorageError::Constraint`, trigger `enforce_version_mutable`.
+    pub const RCP_030: Self = Self::new("E-RCP-030");
+    /// E-RCP-031, `StorageError::Constraint`, trigger `enforce_version_mutable`.
+    pub const RCP_031: Self = Self::new("E-RCP-031");
+    /// E-RCP-032, `StorageError::Constraint`, trigger `enforce_unit_machine`.
+    pub const RCP_032: Self = Self::new("E-RCP-032");
+    /// E-RCP-033, `StorageError::Constraint`, trigger `recipe_version_transition`.
+    pub const RCP_033: Self = Self::new("E-RCP-033");
+    /// E-RCP-034, `StorageError::Constraint`, trigger `freeze_identifiers`.
+    pub const RCP_034: Self = Self::new("E-RCP-034");
+    /// E-RCP-035, `StorageError::Constraint`, trigger `version_size_budget`.
+    pub const RCP_035: Self = Self::new("E-RCP-035");
+    /// E-RCP-036, `StorageError::Constraint`, trigger `version_size_budget`.
+    pub const RCP_036: Self = Self::new("E-RCP-036");
+
+    /// E-WEB-001, `AppError::ConcurrentEdit`.
+    pub const WEB_001: Self = Self::new("E-WEB-001");
+    /// E-WEB-002, `AppError::Forbidden`.
+    pub const WEB_002: Self = Self::new("E-WEB-002");
+    /// E-WEB-004, `AppError::Unauthenticated`.
+    pub const WEB_004: Self = Self::new("E-WEB-004");
+    /// E-WEB-005, `AppError::NotFound`.
+    pub const WEB_005: Self = Self::new("E-WEB-005");
+    /// E-WEB-009, `AppError::Timeout`.
+    pub const WEB_009: Self = Self::new("E-WEB-009");
+    /// E-WEB-011, `AppError::TaskFailed`.
+    pub const WEB_011: Self = Self::new("E-WEB-011");
+
     const fn new(text: &'static str) -> Self {
         Self(text)
     }
@@ -132,6 +210,12 @@ impl ErrorCode {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         self.0
+    }
+
+    /// Return the registry entry with the text `text`, or `None` when no entry has it.
+    #[must_use]
+    pub fn find(text: &str) -> Option<Self> {
+        REGISTRY.iter().copied().find(|code| code.as_str() == text)
     }
 }
 
@@ -143,6 +227,20 @@ impl fmt::Display for ErrorCode {
 
 /// Every error code of the domain, in ascending order.
 pub const REGISTRY: &[ErrorCode] = &[
+    ErrorCode::AUD_001,
+    ErrorCode::AUD_002,
+    ErrorCode::DB_001,
+    ErrorCode::DB_002,
+    ErrorCode::DB_003,
+    ErrorCode::DB_004,
+    ErrorCode::DB_005,
+    ErrorCode::DB_006,
+    ErrorCode::DB_007,
+    ErrorCode::DB_008,
+    ErrorCode::EXP_001,
+    ErrorCode::EXP_002,
+    ErrorCode::EXP_003,
+    ErrorCode::EXP_004,
     ErrorCode::PLT_001,
     ErrorCode::PLT_002,
     ErrorCode::PLT_003,
@@ -163,6 +261,15 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::PLT_019,
     ErrorCode::PLT_020,
     ErrorCode::PLT_021,
+    ErrorCode::PLT_030,
+    ErrorCode::PLT_031,
+    ErrorCode::PLT_032,
+    ErrorCode::PLT_033,
+    ErrorCode::PLT_034,
+    ErrorCode::PLT_035,
+    ErrorCode::PLT_036,
+    ErrorCode::PLT_037,
+    ErrorCode::PLT_038,
     ErrorCode::RCP_001,
     ErrorCode::RCP_002,
     ErrorCode::RCP_003,
@@ -192,11 +299,24 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::RCP_027,
     ErrorCode::RCP_028,
     ErrorCode::RCP_029,
+    ErrorCode::RCP_030,
+    ErrorCode::RCP_031,
+    ErrorCode::RCP_032,
+    ErrorCode::RCP_033,
+    ErrorCode::RCP_034,
+    ErrorCode::RCP_035,
+    ErrorCode::RCP_036,
     ErrorCode::RCP_050,
     ErrorCode::RCP_051,
     ErrorCode::RCP_052,
     ErrorCode::RCP_053,
     ErrorCode::RCP_054,
+    ErrorCode::WEB_001,
+    ErrorCode::WEB_002,
+    ErrorCode::WEB_004,
+    ErrorCode::WEB_005,
+    ErrorCode::WEB_009,
+    ErrorCode::WEB_011,
 ];
 
 /// Return true when `code` has the format and a number range of section 1.2.
@@ -278,6 +398,70 @@ mod tests {
     fn registry_is_sorted_and_unique() {
         for pair in REGISTRY.windows(2) {
             assert!(pair[0] < pair[1], "{} then {}", pair[0], pair[1]);
+        }
+    }
+
+    /// The codes that tasks 2.1 adds, in text order.
+    const ADDED_CODES: [ErrorCode; 36] = [
+        ErrorCode::AUD_001,
+        ErrorCode::AUD_002,
+        ErrorCode::DB_001,
+        ErrorCode::DB_002,
+        ErrorCode::DB_003,
+        ErrorCode::DB_004,
+        ErrorCode::DB_005,
+        ErrorCode::DB_006,
+        ErrorCode::DB_007,
+        ErrorCode::DB_008,
+        ErrorCode::EXP_001,
+        ErrorCode::EXP_002,
+        ErrorCode::EXP_003,
+        ErrorCode::EXP_004,
+        ErrorCode::PLT_030,
+        ErrorCode::PLT_031,
+        ErrorCode::PLT_032,
+        ErrorCode::PLT_033,
+        ErrorCode::PLT_034,
+        ErrorCode::PLT_035,
+        ErrorCode::PLT_036,
+        ErrorCode::PLT_037,
+        ErrorCode::PLT_038,
+        ErrorCode::RCP_030,
+        ErrorCode::RCP_031,
+        ErrorCode::RCP_032,
+        ErrorCode::RCP_033,
+        ErrorCode::RCP_034,
+        ErrorCode::RCP_035,
+        ErrorCode::RCP_036,
+        ErrorCode::WEB_001,
+        ErrorCode::WEB_002,
+        ErrorCode::WEB_004,
+        ErrorCode::WEB_005,
+        ErrorCode::WEB_009,
+        ErrorCode::WEB_011,
+    ];
+
+    #[test]
+    fn added_codes_are_in_registry() {
+        for code in ADDED_CODES {
+            assert!(REGISTRY.contains(&code), "{code}");
+        }
+    }
+
+    #[test]
+    fn find_returns_the_registry_entry_of_a_text() {
+        assert_eq!(ErrorCode::find("E-RCP-031"), Some(ErrorCode::RCP_031));
+    }
+
+    #[test]
+    fn find_returns_none_for_an_unknown_text() {
+        assert_eq!(ErrorCode::find("E-XYZ-001"), None);
+    }
+
+    #[test]
+    fn find_returns_every_registry_entry_for_its_text() {
+        for code in REGISTRY {
+            assert_eq!(ErrorCode::find(code.as_str()), Some(*code));
         }
     }
 }

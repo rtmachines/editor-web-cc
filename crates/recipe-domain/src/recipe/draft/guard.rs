@@ -62,7 +62,7 @@ impl Draft {
 }
 
 /// Build the error of a type that the trees do not offer on the platform of the draft.
-pub(super) fn not_on_platform(trees: &TypeTrees, plc_type: PlcTypeId) -> PlantError {
+pub(crate) fn not_on_platform(trees: &TypeTrees, plc_type: PlcTypeId) -> PlantError {
     PlantError::DerivedTypeInvalid {
         type_expr: trees.label(plc_type),
         reason: DerivedTypeReason::NotOnPlatform,

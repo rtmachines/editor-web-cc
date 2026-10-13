@@ -7,8 +7,27 @@ rust-version.workspace = true
 publish.workspace = true
 
 # overview.md section 5: recipe-app depends on recipe-domain.
+# design.md D3 lists the other crates. recipe-app never uses sqlx or axum.
 [dependencies]
 recipe-domain = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true, features = ["rt", "time"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+parking_lot = { workspace = true, optional = true }
+# The in-memory clock starts at an OffsetDateTime and advances by a Duration.
+time = { workspace = true, optional = true }
+
+[features]
+# In-memory adapters for tests (design.md D2). recipe-server never enables it.
+memory = ["dep:parking_lot", "dep:time"]
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
+parking_lot = { workspace = true }
+time = { workspace = true }
 
 [lints]
 workspace = true

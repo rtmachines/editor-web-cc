@@ -29,6 +29,7 @@ pub use budget::{
     BudgetCounts, LEAVES_PER_VERSION, LIMIT_ROWS_PER_VERSION, PARAMETERS_PER_VERSION, check_budgets,
 };
 pub use definition::{DefinitionUpdate, Retype};
+pub(crate) use guard::not_on_platform;
 pub use parameter::{Parameter, StoredParameter};
 
 /// The live draft of a version as storage returns it, with its parameters.

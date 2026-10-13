@@ -13,7 +13,9 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod audit;
 pub mod error_codes;
+pub mod export;
 pub mod identity;
 pub mod plant;
 pub mod recipe;

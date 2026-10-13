@@ -32,6 +32,14 @@ impl From<Vec<StoredParameter>> for VersionSnapshot {
 }
 
 impl VersionSnapshot {
+    /// Return the parameters ordered by tag.
+    ///
+    /// The approval check of `CreateVersion` reads the parameters through this accessor.
+    #[must_use]
+    pub fn parameters(&self) -> &[Parameter] {
+        &self.parameters
+    }
+
     /// Check the snapshot against the recipe, the units, and the type trees (I6, I19).
     ///
     /// The check collects every problem. The parameter items come first, in tag order. The items

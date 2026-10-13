@@ -88,9 +88,9 @@ impl Recipe {
             .map_err(|_| forbidden())
     }
 
-    /// Approve a checked draft and retire the approved version (I1, I2, I16, ADR-0022, ADR-0028).
+    /// Approve a checked draft and retire the approved version (I1, I2, I16, ADR-0022, ADR-0029).
     ///
-    /// The method consumes the token. The SQL statements write the times and the row versions.
+    /// The method consumes the token, and the token owns the checked draft. The SQL statements write the times and the row versions.
     /// A replay and a stale row version are values and change nothing.
     ///
     /// # Errors
@@ -102,7 +102,7 @@ impl Recipe {
     /// separation of duties and the approver created or edited the draft.
     pub fn approve(
         &mut self,
-        ready: ApprovalReady<'_>,
+        ready: ApprovalReady,
         expected_row_version: i64,
         approver: &Approver,
         policy: &ApprovalPolicy,

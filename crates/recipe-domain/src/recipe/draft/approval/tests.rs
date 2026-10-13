@@ -214,6 +214,27 @@ fn the_token_carries_the_version_number_row_version_creator_and_editors() {
 }
 
 #[test]
+fn the_token_moves_into_a_thread_and_back() {
+    let ready = draft(vec![limited_speed(1, "SPEED")])
+        .check_for_approval(&units(false), &trees(), false)
+        .unwrap();
+    let back = std::thread::spawn(move || ready).join().unwrap();
+    assert_eq!(back.number(), 3);
+    assert_eq!(back.row_version(), 7);
+}
+
+#[test]
+fn the_token_gives_read_access_to_the_checked_draft() {
+    let ready = draft(vec![limited_speed(1, "SPEED")])
+        .check_for_approval(&units(false), &trees(), false)
+        .unwrap();
+    assert_eq!(ready.draft().version(), ready.version());
+    assert_eq!(ready.draft().row_version(), ready.row_version());
+    assert_eq!(ready.draft().number(), ready.number());
+    assert_eq!(ready.draft().parameters().len(), 1);
+}
+
+#[test]
 fn an_archived_unit_gives_e_rcp_020_before_the_limit_check() {
     let parameter = on_unit(param(1, "SPEED", INT, json!(5)), ARCHIVED_UNIT);
     let error = draft(vec![parameter])
@@ -341,8 +362,12 @@ fn trees_of_another_machine_or_platform_give_e_plt_013_in_every_whole_draft_chec
         trees_of(crate::plant::fixtures::machine(), PlcPlatform::S7_1500),
     ] {
         let errors = [
-            draft.check_for_approval(&units(false), &wrong, false),
-            draft.check_for_approval(&units(false), &wrong, true),
+            draft
+                .clone()
+                .check_for_approval(&units(false), &wrong, false),
+            draft
+                .clone()
+                .check_for_approval(&units(false), &wrong, true),
         ]
         .map(|result| result.map(|_| ()).unwrap_err());
         for error in errors {
