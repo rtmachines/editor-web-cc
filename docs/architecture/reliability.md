@@ -26,10 +26,11 @@ Rules:
 - Every error variant carries the values that identify the failure (recipe reference, version number, tag, leaf path). It never carries a password, a password hash, a session token, or a cookie value.
 - Every error type implements `Display` for the user and `Debug` for the log. `Debug` on a type that holds a secret redacts it.
 - Every error type has a `code(&self) -> ErrorCode` method. The code is stable. The message template can change. The code cannot.
+- A value object without its own row in section 1.2 returns a reason from `parse`. A reason is a field type, not an error type, and has no `code()`. The caller wraps it into its coded error (ADR-0025).
 - `?` converts between layers through `From`. A `map_err` closure appears only when it adds context.
 - `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock`. `40001` becomes `Deadlock` when the one retry of the next rule also fails. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
 - `SetUserRole` and `DeactivateUser` run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
-- `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
+- `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DuplicateMemberName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
 - `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, and the export use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
 - `AppError::TaskFailed { stage }` owns `E-WEB-011`. The use case maps the `JoinError` of a `spawn_blocking` task to it (2.4). `E-WEB-010` stays the code of a panic that `CatchPanicLayer` catches.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. A background job logs its errors once at its loop boundary with a `job` field. Lower layers add context and propagate. They do not log the error.
@@ -64,6 +65,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-PLT-018` | `PlantError::TypeTooLarge { type_name, limit }` | 422 | Type {type_name} is larger than the limit {limit}. Use fewer elements, fewer members, or fewer levels. |
 | `E-PLT-019` | `PlantError::MachineNotFound { code }` | 404 | Machine {code} does not exist. Select an existing machine. |
 | `E-PLT-020` | `PlantError::UnitNotFound { path }` | 404 | Unit {path} does not exist on this machine. Select an existing unit. |
+| `E-PLT-021` | `PlantError::DuplicateMemberName { type_name, member }` | 422 | Type {type_name} has two members with the name {member}. Give each member a different name. |
 | `E-PLT-030` | `StorageError::Constraint`, trigger function `machine_platform_frozen` (data-model.md 4.5) | 409 | The PLC platform of a machine with recipes cannot change. Reference: {request_id}. |
 | `E-PLT-031` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type does not exist on the platform of the version. Reference: {request_id}. |
 | `E-PLT-032` | `StorageError::Constraint`, trigger function `enforce_type_platform` (data-model.md 4.2) | 422 | The type belongs to another machine. Reference: {request_id}. |
@@ -113,6 +115,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-051` | `RecipeError::ParameterNotFound { reference, number, key }` | 404 | Parameter {key} does not exist in version {number} of recipe {reference}. |
 | `E-RCP-052` | `RecipeError::RebindTargetInvalid { type_name, reason }` | 422 | The rebind of {type_name} is not possible: {reason}. |
 | `E-RCP-053` | `RecipeError::S7AddressNotAllowed { tag, platform }` | 422 | Parameter {tag} cannot have a PLC address on platform {platform}. Delete the address. |
+| `E-RCP-054` | `RecipeError::S7AddressWidthMismatch { tag, address, width }` | 422 | Address {address} of {tag} does not match the type of {tag}. Use the width {width}. |
 | `E-IDN-001` | `IdentityError::DuplicateLogin { login }` | 409 | Login {login} is already in use. |
 | `E-IDN-002` | `IdentityError::LastAdministrator { login }` | 409 | {login} is the last active administrator. Add another administrator first. |
 | `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42.) |
@@ -150,7 +153,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 
 A trigger code (`E-PLT-030..038`, `E-RCP-030..036`) reaches the user only when a domain check did not fire first. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
 
-Codes after `E-RCP-029`: `E-RCP-050 TranslationNotFound` (`RemoveTranslation`), `E-RCP-051 ParameterNotFound` (every draft command with `{key}` in the URL), `E-RCP-052 RebindTargetInvalid` (`RebindTypeRevision`), and `E-RCP-053 S7AddressNotAllowed` (`AddParameter`, `UpdateParameterDefinition`). `E-RCP-001..029` has no free number, so the block `E-RCP-050..069` holds them. The `{lang}` and `{key}` values of `E-RCP-050` and `E-RCP-051` come from the URL, so their status is 404. `api.md` 1 gives the rule. `E-RCP-051` and `E-RCP-050` are for a well-formed `{key}` or `{lang}` that the existing draft does not hold. `E-WEB-005` is for every other missing resource in the URL.
+Codes after `E-RCP-029`: `E-RCP-050 TranslationNotFound` (`RemoveTranslation`), `E-RCP-051 ParameterNotFound` (every draft command with `{key}` in the URL), `E-RCP-052 RebindTargetInvalid` (`RebindTypeRevision`), `E-RCP-053 S7AddressNotAllowed` (`AddParameter`, `UpdateParameterDefinition`), and `E-RCP-054 S7AddressWidthMismatch` (`AddParameter`, `UpdateParameterDefinition`, ADR-0024). `E-RCP-001..029` has no free number, so the block `E-RCP-050..069` holds them. The `{lang}` and `{key}` values of `E-RCP-050` and `E-RCP-051` come from the URL, so their status is 404. `api.md` 1 gives the rule. `E-RCP-051` and `E-RCP-050` are for a well-formed `{key}` or `{lang}` that the existing draft does not hold. `E-WEB-005` is for every other missing resource in the URL.
 
 `E-PLT-019 MachineNotFound` and `E-PLT-020 UnitNotFound` are for a request field that names a machine or a unit that does not exist. Their status is 404 (`api.md` 1). `E-WEB-005` is for URL values only. `E-PLT-019` belongs to `CreateRecipe` (`machine_code`). `E-PLT-020` belongs to `AddParameter` and `UpdateParameterDefinition` (`unit_path`).
 
@@ -366,7 +369,7 @@ A request that passes layer (a) is well-formed. A value that passes layer (b) is
 
 ### 4.3 Domain value objects
 
-Each value object has one constructor `parse(input) -> Result<Self, Error>` and no public `new`. A value object instance is valid by construction. `domain-model.md` section 2 is the authority for every grammar. A row that names `domain-model.md` does not repeat the grammar.
+Each value object has one constructor `parse(input) -> Result<Self, Error>` and no public `new`. `Error` is the error type of its row in section 1.2, or a reason when no row exists (section 1.1, ADR-0025). A value object instance is valid by construction. `domain-model.md` section 2 is the authority for every grammar. A row that names `domain-model.md` does not repeat the grammar.
 
 | Value object | Grammar or rule |
 |---|---|

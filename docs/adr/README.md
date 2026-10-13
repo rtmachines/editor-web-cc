@@ -33,6 +33,9 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0021](0021-soft-delete-and-delete-rules.md) | Soft delete, unique keys and delete rules | Accepted | 2026-10-12 |
 | [0022](0022-approval-policy.md) | Approval policy, audit tamper evidence and draft clarifications | Accepted | 2026-10-12 |
 | [0023](0023-ste-lint-scope-and-location.md) | Scope and location of the STE lint in CI | Accepted | 2026-10-12 |
+| [0024](0024-error-codes-member-names-s7-width.md) | Error codes for duplicate member names and the S7 address width | Accepted | 2026-10-13 |
+| [0025](0025-parse-reasons-of-value-objects.md) | Parse reasons of value objects without an own error code | Accepted | 2026-10-13 |
+| [0026](0026-ranges-of-date-and-date-and-time.md) | Platform ranges of DATE and DATE_AND_TIME | Accepted | 2026-10-13 |
 
 ## Decision map
 
@@ -43,8 +46,9 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Deployment, migrations, backup, panic policy, health | 0020 |
 | Sessions, login, passwords, bootstrap | 0014 |
 | Audit log | 0005 + 0022 |
-| PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 |
-| Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) |
+| PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 + 0024 (member names, S7 width) |
+| Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) + 0026 (ranges of `DATE`, `DATE_AND_TIME`) |
+| Errors of value objects without an own code | 0025 |
 | Concurrency | 0008 + 0015 |
 | Versions and aggregates | 0009 + 0016 |
 | Recipe scope | 0010 |
