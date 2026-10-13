@@ -1,6 +1,6 @@
 # ADR-0028: Version header, approval token, and draft clarifications
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0029 (the approval token owns the draft)
 Date: 2026-10-13
 Deciders: project owner
 

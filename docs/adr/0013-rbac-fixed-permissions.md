@@ -1,6 +1,6 @@
 # ADR-0013: Fixed role-based permissions checked in each use case
 
-Status: Accepted. Amended by ADR-0022 (separation of duties, Forbidden recorded in security_event)
+Status: Accepted. Amended by ADR-0022 (separation of duties, Forbidden recorded in security_event) and ADR-0029 (failed record of a Forbidden event)
 Date: 2026-10-12
 Deciders: project owner
 

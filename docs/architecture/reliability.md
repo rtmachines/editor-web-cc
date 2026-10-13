@@ -218,7 +218,7 @@ The `[profile.release]` section sets `overflow-checks = true`. An overflow in re
 | Regular expressions | The pattern is a literal in a `static` of type `LazyLock<Result<Regex, regex::Error>>`. The first use compiles it. The caller maps an `Err` to its own error type with `map_err`, never with `expect`. A unit test compiles every pattern, so a bad pattern fails the build |
 | `Mutex` lock | Use `parking_lot::Mutex` whose `lock()` cannot return an error |
 | Tokio `JoinHandle` | `handle.await` returns `Result<T, JoinError>`. The use case maps the `JoinError` of a `spawn_blocking` task to `AppError::TaskFailed { stage }` (`E-WEB-011`). Never `unwrap` it |
-| Blocking inside async | Never `block_on` inside an async context. CPU-heavy work (Argon2id hashing, snapshot validation) runs in `spawn_blocking` |
+| Blocking inside async | Never `block_on` inside an async context. CPU-heavy work (Argon2id hashing, snapshot validation, export rebuild) runs in `spawn_blocking` |
 | Time | Use `time::OffsetDateTime::now_utc()`, which does not fail |
 
 ### 2.3 Permitted exceptions
@@ -237,7 +237,7 @@ A panic in application code is a bug, not an error. The system contains it and k
 4. Every background job of the table below runs inside a supervisor loop. A panic in one iteration is caught by the task join, logged with the `job` field, and the job restarts after `job.restart_delay`.
 5. Watchdog: an OS thread, started before the Tokio runtime, probes the internal health listener every `watchdog.probe_interval`. After `watchdog.failures` failed probes in `watchdog.window`, the thread writes one `ERROR` line and calls `std::process::exit(70)` (the exception of 2.3). Docker restarts the container. This covers a stalled runtime, which `restart: always` alone does not detect.
 6. Application code never calls `std::panic::catch_unwind` itself. Three places catch a panic: the layer in rule 3, the supervisor in rule 4, and the join of a `spawn_blocking` task.
-7. A panic inside a `spawn_blocking` task (Argon2id hashing, snapshot validation) reaches the use case as a `JoinError`. The use case maps it to `AppError::TaskFailed { stage }`, which returns `500 E-WEB-011`. The panic hook of rule 2 logs the panic.
+7. A panic inside a `spawn_blocking` task (Argon2id hashing, snapshot validation, export rebuild) reaches the use case as a `JoinError`. The use case maps it to `AppError::TaskFailed { stage }`, which returns `500 E-WEB-011`. The panic hook of rule 2 logs the panic.
 
 A panic is a visible signal. The job `alerts` raises an alert when more than `alerts.panic_count` panic events occur in `alerts.panic_window` (section 3.7).
 
@@ -495,7 +495,7 @@ The values are in section 7.11. This table gives the key and the mechanism.
 | Pool idle connection | `db.pool_idle_timeout` | `idle_timeout` |
 | Pool max lifetime | `db.pool_max_lifetime` | `max_lifetime`. Avoids stale connections after a database restart |
 | Argon2id semaphore | `argon2.acquire_timeout` | Acquire timeout. A timeout returns `503 E-WEB-009` (`AppError::Timeout`) |
-| Export generation | `timeout.export` | Timeout around the use case. Returns `503 E-WEB-009` |
+| Export generation | `timeout.export` | Timeout around the read, the locks, the rebuild in `spawn_blocking`, and the hash compare. Returns `503 E-WEB-009`. The commit runs after this limit, so a timeout never hides a committed `VersionExported` entry (ADR-0029) |
 | Snapshot validation | `timeout.validation` | Timeout around the `spawn_blocking` call. Returns `503 E-WEB-009` |
 
 ### 7.5 Connection pool

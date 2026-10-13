@@ -116,7 +116,7 @@ flowchart TD
 | Crate | Error type | Allowed dependencies (examples) | Forbidden |
 |---|---|---|---|
 | `recipe-domain` | `thiserror` enums per context, and `ExportError` | `uuid`, `rust_decimal`, `serde`, `serde_json`, `serde_json_canonicalizer`, `time`, `sha2` | `sqlx`, `axum`, `tokio`, any I/O, any port trait |
-| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors and `StorageError`), `AuditError`, `StorageError` | `recipe-domain`, `async-trait`, `tracing` | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
+| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors and `StorageError`), `AuditError`, `StorageError` | `recipe-domain`, `thiserror`, `async-trait`, `tracing`, `tokio` (`rt`, `time`), `serde_json`, `uuid` (`v4`), `parking_lot` and `time` (feature `memory` only) (ADR-0029) | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
 | `recipe-db` | None public. Maps `sqlx::Error` with SQLSTATE into `StorageError` of `recipe-app` | `sqlx` (postgres, runtime-tokio, tls-rustls), `recipe-app` | `axum` |
 | `recipe-export` | None of its own. It returns `ExportError` of `recipe-domain` | `serde`, `serde_json`, `recipe-domain` | `sqlx`, `axum`, `recipe-app` |
 | `recipe-web` | `thiserror` (`WebError`, HTTP shape only) | `axum`, `askama`, `fluent`, `recipe-app`, `recipe-export` | `sqlx`, any session library |
