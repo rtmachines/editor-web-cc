@@ -30,7 +30,7 @@ Exceptions to the rules above:
 
 | Table | Exception | Reason |
 |---|---|---|
-| `security_event`, `audit_log` | `occurred_at` instead of `created_at`. No `updated_at`, although an aggregated `security_event` row gets a new `count` | Append-only event rows. The only update is `security_event.count` (section 3.8) |
+| `security_event`, `audit_log` | `occurred_at` instead of `created_at`. No `updated_at`, although an aggregated `security_event` row gets a new `count` | Append-only event rows. The only update is `security_event.count` (section 3.8). The trigger of section 5.4 allows only `count + 1` |
 | `login_attempt` | `attempted_at` instead of `created_at`. No `updated_at`, although `Login` T2 updates the row | Counter row. The only update sets `succeeded` once (section 6) |
 | `session` | `id` is the SHA-256 of the cookie token, not a UUID. No `updated_at`, although the application updates the row | The raw token never reaches the database. `last_seen_at` records the last request |
 | `parameter` | No `updated_at`, although draft commands update the row | Every draft command sets `recipe_version.updated_at` through the touch statement (section 6). The version row records the last change |
@@ -72,7 +72,7 @@ Exceptions to the rules above:
 | `machine.name`, `unit.name`, `recipe.name`, `parameter.name_en`, `parameter_translation.name` | 1 to 200 characters |
 | `parameter.description_en`, `parameter_translation.description`, `recipe_version.change_note` | `description_en` and `change_note`: 1 to 4 000. `parameter_translation.description`: 0 to 4 000 |
 | `parameter.tag` | 1 to 64, pattern `^[A-Z][A-Z0-9_]{0,63}$` |
-| `app_user.login`, `login_attempt.login` | 3 to 64 for a valid login. `login_attempt.login` accepts 1 to 64 |
+| `app_user.login`, `login_attempt.login` | 3 to 64 for a valid login. `login_attempt.login` accepts 1 to 64 with no control character (ADR-0035) |
 | `parameter.value` | `pg_column_size` at most 1 048 576 bytes |
 | `security_event.user_agent` | at most 256 characters (`http.user_agent_max`, `reliability.md` 7.11) |
 | `audit_log.session_ref` | 16 hex characters (`log.session_ref_length`, `reliability.md` 7.11) |
@@ -547,7 +547,7 @@ CREATE INDEX session_user_id_idx ON session (user_id);
 CREATE INDEX session_expires_at_idx ON session (expires_at);
 ```
 
-On every request the application runs one query: `SELECT s.user_id, s.epoch, s.created_at, s.csrf_token, u.role, u.is_active, u.session_epoch, u.must_change_password FROM session s JOIN app_user u ON u.id = s.user_id WHERE s.id = $1 AND s.expires_at > now() AND s.created_at > now() - $absolute_timeout`. `$absolute_timeout` is `session.absolute_timeout`. The request is unauthenticated when the row is missing, `is_active` is false, or `s.epoch <> u.session_epoch`. The supervised job `cleanup` deletes rows with `expires_at < now()` or `created_at < now() - session.absolute_timeout` through the port `MaintenanceStore`. It runs every `session.cleanup_interval` (`reliability.md` 7.11).
+On every request the application runs one statement: `UPDATE session s SET last_seen_at = now(), expires_at = now() + $idle_timeout FROM app_user u WHERE s.id = $1 AND u.id = s.user_id AND s.expires_at > now() AND s.created_at > now() - $absolute_timeout AND u.is_active AND s.epoch = u.session_epoch RETURNING ...`. `$idle_timeout` is `session.idle_timeout`, and `$absolute_timeout` is `session.absolute_timeout`. The statement returns the user, the role, `must_change_password`, and the CSRF token. The request is unauthenticated when no row returns: the session is missing or expired, the user is inactive, or the epoch differs. A concurrent `DELETE` of the session therefore also gives no row (ADR-0035). The supervised job `cleanup` deletes rows with `expires_at < now()` or `created_at < now() - session.absolute_timeout` through the port `MaintenanceStore`. It runs every `session.cleanup_interval` (`reliability.md` 7.11).
 
 ### 3.7 `login_attempt`
 
@@ -569,7 +569,7 @@ CREATE INDEX login_attempt_ip_idx ON login_attempt (client_ip, attempted_at);
 CREATE INDEX login_attempt_attempted_at_idx ON login_attempt (attempted_at);
 ```
 
-The `Login` use case counts the failures and inserts its attempt row with `succeeded = false` in T1. T1 runs under `SELECT pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) and commits before the password check. T1 inserts no row when the per-IP budget is already reached. The 429 response then comes from the count alone, so a flood from one address adds no rows. T2 sets `succeeded = true` after a correct password (section 6). In read-only mode (Assumption A24), T1 and T2 run in the same way. The port `LoginAttemptStore` runs T1 and the attempt statement of T2. `recipe_app` can update the column `succeeded` only (section 5.2). The supervised job `cleanup` deletes rows older than `login.attempt_retention` every `login.attempt_cleanup_interval` through the port `MaintenanceStore` (`reliability.md` 7.11). It deletes at most `login_attempt.purge_batch` rows per statement, the oldest first, and repeats the statement while it deletes a full batch (section 6). `UnlockLogin` deletes the rows of one login.
+The `Login` use case counts the failures and inserts its attempt row with `succeeded = false` in T1. T1 runs under `SELECT pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) and commits before the password check. T1 inserts no row when the per-IP budget is already reached. The 429 response then comes from the count alone, so a flood from one address adds no rows. The class-1 lock covers one login, not one address. Parallel attempts with other logins from one address can therefore add at most `argon2.permits − 1` rows above the budget (ADR-0035). T2 sets `succeeded = true` after a correct password (section 6). In read-only mode (Assumption A24), T1 and T2 run in the same way. The port `LoginAttemptStore` runs T1 and the attempt statement of T2. `recipe_app` can update the column `succeeded` only (section 5.2). The supervised job `cleanup` deletes rows older than `login.attempt_retention` every `login.attempt_cleanup_interval` through the port `MaintenanceStore` (`reliability.md` 7.11). It deletes at most `login_attempt.purge_batch` rows per statement, the oldest first, and repeats the statement while it deletes a full batch (section 6). `UnlockLogin` deletes the rows of one login.
 
 ### 3.8 `security_event`
 
@@ -618,7 +618,7 @@ CREATE UNIQUE INDEX security_event_aggregate_unique
     WHERE kind IN ('login_failed', 'login_throttled', 'csrf_rejected');
 ```
 
-`audit_owner` owns this table. `recipe_app` has INSERT, SELECT, and the column grant `UPDATE (count)`. Rows of the kinds `login_failed`, `login_throttled`, and `csrf_rejected` aggregate per `(client_ip, kind, minute)`. The port `SecurityEventSink` writes them with `INSERT ... ON CONFLICT ... DO UPDATE SET count = security_event.count + 1` on `security_event_aggregate_unique`. The row keeps the `login_hmac`, `user_id`, `user_agent`, and `request_id` of the first event of the minute. A flood from one address therefore adds at most one row per kind and minute. Apart from `count`, the table is append-only for `recipe_app`. Rows are kept 400 days (ADR-0022). The function `security_event_purge()` (section 4.12), owned by `audit_owner`, deletes older rows in batches. The supervised job `cleanup` calls it (`reliability.md` 2.4).
+`audit_owner` owns this table. `recipe_app` has SELECT, the column grant `UPDATE (count)`, and `INSERT` on every column except `id`, `occurred_at`, and `count` (section 5.4, ADR-0035). The database therefore sets the time and the first count of each row. The trigger `security_event_guard` of section 5.4 allows an update only when `count` grows by 1 and no other column changes. Rows of the kinds `login_failed`, `login_throttled`, and `csrf_rejected` aggregate per `(client_ip, kind, minute)`. The port `SecurityEventSink` writes them with `INSERT ... ON CONFLICT ... DO UPDATE SET count = security_event.count + 1` on `security_event_aggregate_unique`. The row keeps the `login_hmac`, `user_id`, `user_agent`, and `request_id` of the first event of the minute. A flood from one address therefore adds at most one row per kind and minute. Apart from `count`, the table is append-only for `recipe_app`. Rows are kept 400 days (ADR-0022). The function `security_event_purge()` (section 4.12), owned by `audit_owner`, deletes older rows in batches. The supervised job `cleanup` calls it (`reliability.md` 2.4).
 
 ### 3.9 `recipe`
 
@@ -1447,6 +1447,7 @@ CREATE TRIGGER parameter_limit_size_budget
 | `E-RCP-035` | 4.10 | More than 4 000 parameters in a version | 422 |
 | `E-RCP-036` | 4.10 | More than 32 768 limit rows in a version | 422 |
 | `E-AUD-002` | check of 4.9 | Hash chain break | 500. Raised by the nightly job `audit_chain_check`. Never returned to a user request |
+| `E-AUD-003` | `security_event_guard` of 5.4 | An update of `security_event` that changes another column than `count`, or changes `count` by another value than 1 | 500. No command of the application causes it |
 
 ### 4.12 `security_event_purge` (ADR-0022)
 
@@ -1498,6 +1499,10 @@ GRANT pg_read_all_data TO recipe_backup;
 -- The job alerts reads the replication lag of recipe_replicator in pg_stat_replication
 -- (reliability.md 3.7). SET FALSE: recipe_app cannot SET ROLE to it.
 GRANT pg_read_all_stats TO recipe_app WITH INHERIT TRUE, SET FALSE;
+-- ADR-0035: the server log holds no DETAIL with row values of a failed statement of recipe_app,
+-- and no bind value of a slow statement.
+ALTER ROLE recipe_app SET log_error_verbosity = 'terse';
+ALTER ROLE recipe_app SET log_parameter_max_length = 0;
 -- 0003 transfers the audit objects to audit_owner. ALTER ... OWNER TO needs membership
 -- in the new owner. INHERIT FALSE: the migrator inherits no privilege of audit_owner.
 GRANT audit_owner TO recipe_migrator WITH INHERIT FALSE;
@@ -1521,7 +1526,7 @@ BEGIN
         IF v_object.object_identity IN (
                'public.audit_log', 'public.audit_chain_head', 'public.security_event',
                'public.audit_canonical(public.audit_log)', 'public.audit_hash_chain()',
-               'public.security_event_purge()')
+               'public.security_event_purge()', 'public.security_event_guard()')
            AND current_user <> 'audit_owner' THEN
             RAISE EXCEPTION 'audit object % can be dropped only by audit_owner',
                 v_object.object_identity USING ERRCODE = 'insufficient_privilege';
@@ -1643,9 +1648,48 @@ GRANT DELETE ON session, login_attempt, draft_editor, parameter, parameter_limit
 
 `recipe_app` has no `CREATE`, `TRUNCATE`, or `REFERENCES` privilege. `DELETE` on `parameter` and its children is allowed because trigger 4.1 limits it to a live draft. `row_version` is not in the UPDATE grant of `recipe_version`. Trigger 4.4 sets it.
 
+`0003_grants.sql` shipped, so the SQL block above stays as it is. Section 5.4 narrows the `INSERT` grant of `recipe_app` on `security_event` to columns and adds a guard trigger (ADR-0035).
+
 ### 5.3 Grant test
 
-CI starts a fresh cluster, runs `01-roles.sh`, and applies `0001` to `0004` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app` and compares `information_schema.role_table_grants` and `information_schema.role_column_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2, also the column grants `UPDATE (succeeded)` on `login_attempt` and `UPDATE (count)` on `security_event`. It holds no sequence grant. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role. It checks that `audit_owner` holds no `CREATE` on `public`. It checks that the guard list of the event trigger `audit_objects_dropped` names every table and function that `audit_owner` owns, and that a drop by `recipe_migrator` fails (ADR-0034). CI applies a test migration with the five steps of 5.1 and then runs the same check again.
+CI starts a fresh cluster, runs `01-roles.sh`, and applies `0001` to `0004` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app` and compares `information_schema.role_table_grants` and `information_schema.role_column_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2 and 5.4, also the column grants `UPDATE (succeeded)` on `login_attempt`, `UPDATE (count)` on `security_event`, and the column `INSERT` grants of 5.4 on `security_event`. It holds no sequence grant. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role. It checks that `audit_owner` holds no `CREATE` on `public`. It checks that the guard list of the event trigger `audit_objects_dropped` names every table and function that `audit_owner` owns, and that a drop by `recipe_migrator` fails (ADR-0034). CI applies a test migration with the five steps of 5.1 and then runs the same check again.
+
+### 5.4 Guard of `security_event` (`0005_security_event_guard.sql`)
+
+The migration changes an audit object, so it runs the five steps of section 5.1 (ADR-0035). `recipe_app` then inserts only the columns that have no database default. The database sets `occurred_at` and the first `count` of each row. The trigger allows an update only when `count` grows by 1 and no other column changes. Any other update raises `E-AUD-003` with SQLSTATE `23514`. No command of the application causes it.
+
+```sql
+-- Step 1.
+GRANT CREATE ON SCHEMA public TO audit_owner;
+-- Step 2.
+SET ROLE audit_owner;
+-- Step 3. The REVOKE comes first, because it also revokes the column privileges of the table privilege.
+REVOKE INSERT ON security_event FROM recipe_app;
+GRANT INSERT (kind, login_hmac, user_id, client_ip, user_agent, request_id, detail)
+    ON security_event TO recipe_app;
+CREATE FUNCTION security_event_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    IF NEW.count IS DISTINCT FROM (OLD.count OPERATOR(pg_catalog.+) 1)
+       OR (pg_catalog.to_jsonb(NEW) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text)
+          IS DISTINCT FROM
+          (pg_catalog.to_jsonb(OLD) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text) THEN
+        RAISE EXCEPTION 'E-AUD-003 security event % allows only count + 1', OLD.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+REVOKE EXECUTE ON FUNCTION security_event_guard() FROM PUBLIC;
+CREATE TRIGGER security_event_guard BEFORE UPDATE ON security_event
+    FOR EACH ROW EXECUTE FUNCTION security_event_guard();
+-- Step 4.
+RESET ROLE;
+-- Step 5.
+REVOKE CREATE ON SCHEMA public FROM audit_owner;
+```
+
+The function is `SECURITY INVOKER`. A trigger runs its function without an `EXECUTE` check, as `audit_hash_chain` shows. The upsert of the aggregated kinds of section 3.8 still works: the arbiter columns need only `SELECT`, and the `SET` needs only `UPDATE (count)`. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names the function.
 
 ## 6. Transactional operations
 
@@ -1697,12 +1741,12 @@ Rules:
 | `RetireVersion` | RC | `recipe FOR UPDATE`, `recipe_version FOR UPDATE` | After the lock, the domain compares `row_version` with the expected value and checks the state (ADR-0028). `UPDATE recipe_version SET status = 'retired', retired_at = now() WHERE id = $v AND row_version = $locked` (ADR-0030) | `VersionRetired` | `VersionNotApproved` or `ConcurrentEdit` before the write. `RecipeDeleted`. Trigger 4.7 → `E-RCP-033`. 0 rows → `E-DB-008` (ADR-0030) |
 | `CreateUser` | RC | none | The request has no password. Generate a one-time password and hash it (Argon2, outside the transaction). `INSERT app_user` with `login`, `role`, this hash, and `must_change_password = true`. The one-time password is shown once | `UserCreated` (after state without hash) | `app_user_login_unique` → `DuplicateLogin`. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `SetUserRole` | SER | `app_user FOR NO KEY UPDATE` | `SELECT count(*) FROM app_user WHERE role = 'administrator' AND is_active`. `UPDATE app_user SET role, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` | `UserRoleSet` | Count would become 0 → `LastAdministrator` |
-| `DeactivateUser` | SER | `app_user FOR NO KEY UPDATE` | Same count check. `UPDATE app_user SET is_active = false, deactivated_at = now(), session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` | `UserDeactivated` | `LastAdministrator` |
+| `DeactivateUser` | SER | `app_user FOR NO KEY UPDATE` | Require `is_active`. Same count check. `UPDATE app_user SET is_active = false, deactivated_at = now(), session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` | `UserDeactivated` | Already inactive → `UserAlreadyInactive` (`E-IDN-010`, ADR-0035). No write and no audit entry. `LastAdministrator` |
 | `ActivateUser` | RC | `app_user FOR NO KEY UPDATE` | `UPDATE app_user SET is_active = true, deactivated_at = NULL` | `UserActivated` | Already active → `UserAlreadyActive` |
 | `ResetPassword` | RC | `app_user FOR NO KEY UPDATE` | `UPDATE app_user SET password_hash = $h, must_change_password = true, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u` (all sessions of the target user) | `PasswordReset` (the full row without `password_hash`, section 10) | Hash format `CHECK`. The server generates the one-time password, so no policy error exists. The one-time password is shown once. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
-| `ChangeOwnPassword` | RC | `app_user FOR NO KEY UPDATE` | Check `current_password` (Argon2, outside the transaction). Hash the new `password`. `UPDATE app_user SET password_hash = $h, must_change_password = false, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u`. `INSERT session` for the current request with a new id, the new `session_epoch`, and a new `csrf_token`. The use case returns the new token, and `recipe-web` sets the cookie | `OwnPasswordChanged` | Wrong current password → `InvalidCurrentPassword` (422). A failed check also inserts a `login_attempt` row through `LoginAttemptStore`. New password outside the policy → `PasswordPolicy`. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
-| `UnlockLogin` | RC | none | `DELETE login_attempt WHERE login = $l`. Commit with `LoginUnlocked`. After the commit, `SecurityEventSink` writes `security_event (kind = 'unlock')` | `LoginUnlocked` | — |
-| `Login` | RC, two transactions T1 and T2 (ADR-0014) | Before T1: one Argon2 permit (`argon2.acquire_timeout`, else `E-WEB-009`). T1: `pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) | T1 through `LoginAttemptStore`: count the failures for `(login, client_ip)` and for `client_ip` in the throttle window → `n`. When the per-IP budget is already reached, T1 inserts nothing. Otherwise `INSERT login_attempt (succeeded = false) RETURNING id`, also in read-only mode. Commit. When `now() < last_failure + delay(n)` or the per-IP budget is exhausted, the attempt is throttled. `SecurityEventSink` writes `security_event (login_throttled)` with the `login_hmac` of the typed login, aggregated per minute (section 3.8). The use case releases the permit and returns 429 with `Retry-After`. Otherwise, outside a transaction: `SELECT app_user WHERE login`, Argon2 check of `password` (a dummy hash when the login is unknown or inactive), release the permit. T2 on success, through `UnitOfWork`: `UPDATE login_attempt SET succeeded = true WHERE id = $attempt` (`LoginAttemptStore`). `DELETE session WHERE id = $old` when the request carries a session cookie. `INSERT session (id = sha256(token), epoch = app_user.session_epoch, csrf_token)`. Commit with `UserLoggedIn`. The use case returns the token, and `recipe-web` sets the cookie. T2 on failure: `SecurityEventSink` writes `security_event (login_failed` or `login_rejected_inactive)`. `login_failed` is aggregated per minute (section 3.8). In read-only mode (Assumption A24) every step of this row runs as in normal mode. A failed or throttled login therefore still writes its `login_attempt` and `security_event` rows. These writes are small and stay inside the reserved margin of `reliability.md` 7.8. The use case returns 401 with the same body and timing | `UserLoggedIn` (T2 on success). `entity_type = 'app_user'`, `entity_id` = user id, `after_state = {"session_ref": ...}` | `InvalidCredentials`, `UserInactive` (same response to the client), `LoginThrottled` (429), Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
+| `ChangeOwnPassword` | RC | Before the check: one Argon2 permit, then T1 of `Login` with the own login and the client address (ADR-0035). The transaction: `app_user FOR NO KEY UPDATE` | Check the policy of the new `password` first. Take a permit and run T1, which inserts the attempt row. Check `current_password` (Argon2, outside the transaction). Hash the new `password`. In the transaction, require `is_active`, the `session_epoch` of the current session, and the `password_hash` of the check. `UPDATE login_attempt SET succeeded = true WHERE id = $attempt`, which can change no row after an `UnlockLogin`. `UPDATE app_user SET password_hash = $h, must_change_password = false, session_epoch = session_epoch + 1`. `DELETE session WHERE user_id = $u`. `INSERT session` for the current request with a new id, the new `session_epoch`, and a new `csrf_token`. The use case returns the new token, and `recipe-web` sets the cookie | `OwnPasswordChanged` | New password outside the policy → `PasswordPolicy`, with no attempt row. Throttled → `LoginThrottled` (`E-IDN-005`) and `security_event (login_throttled)`. Wrong current password → `InvalidCurrentPassword` (422). The attempt row of T1 stays a failure. Changed epoch, hash, or active state under the lock → `Unauthenticated` (`E-WEB-004`), no write. Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
+| `UnlockLogin` | RC | `app_user FOR NO KEY UPDATE`. The lock gives the row image of the user (ADR-0029, ADR-0035) | `WITH gone AS (DELETE FROM login_attempt WHERE login = $l RETURNING id, client_ip, attempted_at, succeeded)` gives the deleted rows for the before-image (section 10). Commit with `LoginUnlocked`. After the commit, `SecurityEventSink` writes `security_event (kind = 'unlock')`. When that write fails, the use case returns the storage error, and the unlock stays committed (ADR-0035) | `LoginUnlocked` | — |
+| `Login` | RC, two transactions T1 and T2 (ADR-0014) | Before T1: one Argon2 permit (`argon2.acquire_timeout`, else `E-WEB-009`). T1: `pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) as its own statement, so the count that follows sees every committed attempt of the login. T2: `app_user FOR NO KEY UPDATE` (ADR-0035) | T1 through `LoginAttemptStore`: count the failures for `(login, client_ip)` and for `client_ip` in the throttle window → `n`. When the per-IP budget is already reached, T1 inserts nothing. Otherwise `INSERT login_attempt (succeeded = false) RETURNING id`, also in read-only mode. Commit. When `now() < last_failure + delay(n)` or the per-IP budget is exhausted, the attempt is throttled. `SecurityEventSink` writes `security_event (login_throttled)` with the `login_hmac` of the typed login, aggregated per minute (section 3.8). The use case releases the permit and returns 429 with `Retry-After`. Otherwise, outside a transaction: `SELECT app_user WHERE login`, Argon2 check of `password` (a dummy hash when the login is unknown or inactive), release the permit. T2 on success, through `UnitOfWork`: lock the user row and require `is_active` and the `session_epoch` and `password_hash` that the check read. A difference rolls back and returns `InvalidCredentials` (ADR-0035). `UPDATE login_attempt SET succeeded = true WHERE id = $attempt` (`LoginAttemptStore`). This statement can change no row, because `UnlockLogin` can delete the attempt after T1. T2 then continues (ADR-0035). `DELETE session WHERE id = $old` when the request carries a session cookie. `INSERT session (id = sha256(token), epoch = app_user.session_epoch, csrf_token)`. Commit with `UserLoggedIn`. The use case returns the token, and `recipe-web` sets the cookie. T2 on failure: `SecurityEventSink` writes `security_event (login_failed` or `login_rejected_inactive)`. `login_failed` is aggregated per minute (section 3.8). In read-only mode (Assumption A24) every step of this row runs as in normal mode. A failed or throttled login therefore still writes its `login_attempt` and `security_event` rows. These writes are small and stay inside the reserved margin of `reliability.md` 7.8. The use case returns 401 with the same body and timing | `UserLoggedIn` (T2 on success). `entity_type = 'app_user'`, `entity_id` = user id, `after_state = {"session_ref": ...}` | `InvalidCredentials`, `UserInactive` (same response to the client), `LoginThrottled` (429), Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `Logout` | RC | none | Through `UnitOfWork`: `DELETE session WHERE id = $current`. Commit with `UserLoggedOut`. `recipe-web` clears the cookie | `UserLoggedOut`. `entity_type = 'app_user'`, `entity_id` = user id, `before_state = {"session_ref": ...}` | — |
 | `ExportVersion` | RC | `recipe_version FOR SHARE` | `SELECT` version, parameters, limits, types. `/approved` requires status approved. `/versions/{n}` accepts approved or retired. Rebuild the hashed body with the module `export` of `recipe-domain` and the array orders of `api.md` 6.3. `parameters[]` is ordered by `unit_path`, segment by segment as integers (the first segment without its `U` prefix), then by `tag` in byte order. `parameter.ordinal` is not exported and not hashed. Compare the SHA-256 of the hashed body with the stored `content_sha256`. The comparison is the same for an approved and a retired version | `VersionExported` (`after_state` holds version id, schema version, `content_sha256`) | No approved version → `NoApprovedVersion` (404). Draft or discarded → `VersionNotExportable` (409). Recipe deleted → `RecipeDeleted` (409, `/versions/{n}` only). Hash mismatch → `ContentHashMismatch` (`E-EXP-002`, 500). The alert condition "one or more `E-EXP-002` in `alerts.interval`" of `reliability.md` 3.7 raises the alert. Serializer error → `Serialize` (`E-EXP-004`, 500). Export timeout → `Timeout` (`E-WEB-009`). The rebuild runs in `spawn_blocking`, and a failed task → `TaskFailed` (`E-WEB-011`, ADR-0029) |
 | `cleanup` (supervised job, not a command) | RC, one short transaction per statement | none | Through `MaintenanceStore`: `DELETE session WHERE expires_at < now() OR created_at < now() - $absolute_timeout`. `DELETE FROM login_attempt WHERE id IN (SELECT id FROM login_attempt WHERE attempted_at < now() - $retention ORDER BY attempted_at LIMIT 5000)`, each statement in its own transaction, repeated while it deletes 5 000 rows (`login_attempt.purge_batch`). The index `login_attempt_attempted_at_idx` serves it. `SELECT security_event_purge()` once per batch, each call in its own transaction, while the call returns 5 000 (`security_event.purge_batch`, section 4.12) | none | The job logs an error once at its loop boundary (`reliability.md` 2.4) |
@@ -1766,6 +1810,7 @@ Notes:
   - `0002_triggers.sql`: functions and triggers of section 4.
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. Each row carries its `leaf_class`. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration.
+  - `0005_security_event_guard.sql`: the column grant and the guard trigger of section 5.4 (ADR-0035).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.
@@ -1849,6 +1894,7 @@ State rule for `before_state` and `after_state` (the same rule as ADR-0005 and `
 - Five actions store a diff object of the changed fields: `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, and `TypeRevisionRebound`.
 - Every other action stores the full row of the changed entity as JSON, without `password_hash`. This includes `ParameterAdded` and `ParameterRemoved`. A create stores the row in `after_state`, a delete stores it in `before_state`, and an update stores it in both.
 - The full row of a parameter holds its limit rows and its translation rows. The full row of a struct holds its member rows. The lock statement gives the row before the change, and the write statement gives the row after it (ADR-0029).
+- The full row of `LoginUnlocked` is the `app_user` row without `password_hash`, with the child array `login_attempts`. The before-state holds the newest `audit.unlock_rows` deleted attempts and the field `login_attempt_count` with the number of all deleted attempts. The after-state holds an empty array (ADR-0035).
 - Three actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`.
 - `VersionApproved` adds `allow_outdated` to the full row.
 

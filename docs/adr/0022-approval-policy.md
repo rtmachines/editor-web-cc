@@ -1,6 +1,6 @@
 # ADR-0022: Approval policy, audit tamper evidence and draft clarifications
 
-Status: Accepted. Amended by ADR-0029 (failed record of a Forbidden event)
+Status: Accepted. Amended by ADR-0029 (failed record of a Forbidden event) and ADR-0035 (column grant and guard trigger of security_event)
 Date: 2026-10-12
 Deciders: project owner
 

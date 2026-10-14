@@ -15,7 +15,7 @@ Each library crate owns its error types, with two exceptions. `recipe-export` re
 | Crate | Error type | Variants |
 |---|---|---|
 | `recipe-domain` | `PlantError`, `RecipeError`, `IdentityError`, `ExportError` | One `thiserror` enum per bounded context. Leaf errors. Every row with prefix `E-PLT`, `E-RCP`, `E-IDN` and a number below 030 in section 1.2, and every `E-RCP-050..069` row. `ExportError` lives in the module `export` and owns every `E-EXP` row: `NoApprovedVersion { reference }`, `VersionNotExportable { reference, number }`, `ContentHashMismatch { reference, number }`, `Serialize(#[from] serde_json::Error)`. Two carriers own no code (ADR-0027): `RecipeErrors` holds one or more `RecipeError` values, and `DraftError` holds a `RecipeError`, a `PlantError`, or a `RecipeErrors` |
-| `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] RecipeErrors`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `TaskFailed { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` of `Timeout` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `stage` of `TaskFailed` is `PasswordHash` or `Validation`, the two kinds of `spawn_blocking` work (2.2). `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
+| `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] RecipeErrors`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `TaskFailed { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` of `Timeout` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `stage` of `TaskFailed` is `PasswordHash` or `Validation`, the two kinds of `spawn_blocking` work (2.2), `Export` (ADR-0029), or `Token`, a failed read of random bytes from the operating system (ADR-0035). `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock { cause }`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `cause` of `Deadlock` is `Deadlock`, `LockTimeout`, or `Serialization` (ADR-0035). `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
 | `recipe-db` | none public | Maps `sqlx::Error` into `StorageError` of `recipe-app` with the rule below. `recipe-db` depends on `recipe-app`, and `recipe-app` does not depend on `recipe-db` (`overview.md` 5) |
 | `recipe-export` | none | No error type of its own. The JSON writer of the HTTP response returns `ExportError` of `recipe-domain` |
 | `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
@@ -28,12 +28,13 @@ Rules:
 - Every error type has a `code(&self) -> ErrorCode` method. The code is stable. The message template can change. The code cannot.
 - A value object without its own row in section 1.2 returns a reason from `parse`. A reason is a field type, not an error type, and has no `code()`. The caller wraps it into its coded error (ADR-0025).
 - `?` converts between layers through `From`. A `map_err` closure appears only when it adds context.
-- `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock`. `40001` becomes `Deadlock` when the one retry of the next rule also fails. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
-- `SetUserRole` and `DeactivateUser` run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
+- `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. The trigger codes are `E-PLT-030..049`, `E-RCP-030..049`, and `E-AUD-003`. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock { cause: Deadlock }`. `40001` becomes `Deadlock { cause: Serialization }`. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock { cause: LockTimeout }` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
+- `SetUserRole`, `DeactivateUser`, and the first-administrator operation of `create-admin` run in `SERIALIZABLE`. They run once more on `Deadlock { cause: Serialization }`, also when it comes from the audit insert or from the commit. A second serialization failure returns `E-DB-001` (ADR-0035). Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
 - `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DuplicateMemberName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
 - `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, and the export use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
 - `AppError::TaskFailed { stage }` owns `E-WEB-011`. The use case maps the `JoinError` of a `spawn_blocking` task to it (2.4). `E-WEB-010` stays the code of a panic that `CatchPanicLayer` catches.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. A background job logs its errors once at its loop boundary with a `job` field. Lower layers add context and propagate. They do not log the error.
+- The log line of an error holds its code and the `Display` text of each error in the chain. It never holds the `Debug` output of an error, because the `Debug` of a database error holds the row values of the detail (ADR-0035).
 - The HTTP response contains the error code, the user message, and the `request_id`. It does not contain the `Debug` output, a stack trace, or an SQL fragment.
 
 ### 1.2 Error code registry
@@ -125,8 +126,10 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-IDN-007` | `IdentityError::MustChangePassword` | 303 | Not an error page. The server redirects to `/me/password`. |
 | `E-IDN-008` | `IdentityError::InvalidCurrentPassword` | 422 | The current password is not correct. |
 | `E-IDN-009` | `IdentityError::UserAlreadyActive { login }` | 409 | User {login} is already active. |
+| `E-IDN-010` | `IdentityError::UserAlreadyInactive { login }` | 409 | User {login} is already inactive. |
 | `E-AUD-001` | `AppError::AuditWriteFailed` | 500 | The change was not saved. The system could not record the audit entry. Contact the administrator. Reference: {request_id}. |
 | `E-AUD-002` | `AuditError::ChainBroken { chain_seq }`, check of data-model.md 4.9 | 500 | Audit entry {chain_seq} does not match the hash chain. Contact the administrator. The nightly job `audit_chain_check` writes this code to the event log. The job `alerts` raises the alert. No user request returns it. |
+| `E-AUD-003` | `StorageError::Constraint { code: "E-AUD-003", .. }`, trigger `security_event_guard` of data-model.md 5.4 | 500 | A security event cannot change. Contact the administrator. Reference: {request_id}. |
 | `E-EXP-001` | `ExportError::NoApprovedVersion { reference }` | 404 | Recipe {reference} has no approved version. |
 | `E-EXP-002` | `ExportError::ContentHashMismatch { reference, number }` | 500 | Version {number} of recipe {reference} does not match its stored hash. The export is refused. Contact the administrator. Reference: {request_id}. |
 | `E-EXP-003` | `ExportError::VersionNotExportable { reference, number }` | 409 | Version {number} of recipe {reference} is a draft or was discarded. Only approved and retired versions can be exported. |
@@ -151,7 +154,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-WEB-010` | `WebError::Internal { request_id }` | 500 | An internal error occurred. Contact the administrator. Reference: {request_id}. |
 | `E-WEB-011` | `AppError::TaskFailed { stage }` | 500 | The operation {stage} did not complete. Try again. Reference: {request_id}. |
 
-A trigger code (`E-PLT-030..038`, `E-RCP-030..036`) reaches the user only when a domain check did not fire first. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
+A trigger code (`E-PLT-030..038`, `E-RCP-030..036`, `E-AUD-003`) reaches the user only when a domain check did not fire first. No command of the application changes a security event, so `E-AUD-003` always marks a defect. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
 
 Codes after `E-RCP-029`: `E-RCP-050 TranslationNotFound` (`RemoveTranslation`), `E-RCP-051 ParameterNotFound` (every draft command with `{key}` in the URL), `E-RCP-052 RebindTargetInvalid` (`RebindTypeRevision`), `E-RCP-053 S7AddressNotAllowed` (`AddParameter`, `UpdateParameterDefinition`), and `E-RCP-054 S7AddressWidthMismatch` (`AddParameter`, `UpdateParameterDefinition`, ADR-0024). `E-RCP-001..029` has no free number, so the block `E-RCP-050..069` holds them. The `{lang}` and `{key}` values of `E-RCP-050` and `E-RCP-051` come from the URL, so their status is 404. `api.md` 1 gives the rule. `E-RCP-051` and `E-RCP-050` are for a well-formed `{key}` or `{lang}` that the existing draft does not hold. `E-WEB-005` is for every other missing resource in the URL.
 
@@ -461,7 +464,7 @@ Seven services. Start order through `depends_on`: `db` (healthy) → `backup-pre
 
 Secrets: every password is a Docker secret mounted as a file. The application reads `*_FILE` variables only. There is no env-file option. The superuser password exists only in `db` and in the initdb script. The secret `replicator_password` (`secrets.replicator_password_file` of 7.11) exists only in `db` and in `walarchive`. The initdb script creates `recipe_replicator` from it (`data-model.md` 5.1).
 
-Two more Docker secrets hold keys of 32 bytes. `login_hmac_key` is the HMAC-SHA256 key of `security_event.login_hmac`. `csrf_signing_key` signs the pre-session CSRF cookie (`api.md` 7.3). The keys `security.login_hmac_key_file` and `security.csrf_signing_key_file` of 7.11 name the files. A key file holds one key per line, the newest key first. The server writes and signs with the first key and accepts every key in the file. Rotation: the operator adds the new key as the first line. Both keys are accepted for `security.key_rotation_overlap`. Then the operator deletes the old line.
+Two more Docker secrets hold keys of 32 bytes. `login_hmac_key` is the HMAC-SHA256 key of `security_event.login_hmac`. `csrf_signing_key` signs the pre-session CSRF cookie (`api.md` 7.3). The keys `security.login_hmac_key_file` and `security.csrf_signing_key_file` of 7.11 name the files. A key file holds one key per line, the newest key first. Each line holds the 32 bytes of a key as 64 lower-case hex characters (ADR-0035). The server writes and signs with the first key and accepts every key in the file. Rotation: the operator adds the new key as the first line. Both keys are accepted for `security.key_rotation_overlap`. Then the operator deletes the old line.
 
 ### 7.2 Health endpoints
 
@@ -626,6 +629,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `db.max_connections` | 50 (PostgreSQL `max_connections`) | 7.5 |
 | `db.host` / `db.port` / `db.name` | `db` / 5432 / `recipe`. The Compose service and the database of `data-model.md` 5.1 (ADR-0031) | 5, 7.1 |
 | `db.migrator_user` | `recipe_migrator`. The role of `recipe-server migrate` (ADR-0031) | 5, data-model.md 5.1 |
+| `db.app_user` | `recipe_app`. The role of `recipe-server create-admin` and of the application (ADR-0035) | 7.1, data-model.md 5.1 |
 | `db.slow_query` | 1 s (PostgreSQL `log_min_duration_statement = 1000`) | 3.3, 7.6 |
 | `timeout.export` | 10 s | 7.4 |
 | `timeout.validation` | 10 s | 4.4, 7.4 |
@@ -644,6 +648,8 @@ This table is the single source for every numeric setting. The configuration fil
 | `parameter.ordinal_max` | 100 000 | data-model.md 3.12, domain-model.md 2.2 |
 | `setting.value_max` | 1 000 characters | data-model.md 3.17 |
 | `page.parameters` | 100 rows | api.md 2.6 |
+| `page.users` | 100 rows of `ListUsers` (ADR-0035) | api.md 2.8 |
+| `audit.unlock_rows` | 100. The newest deleted attempts in the row image of `LoginUnlocked` (ADR-0035) | data-model.md 10 |
 | `health.readiness_cache` | 5 s | 7.2 |
 | `health.db_check_timeout` | 2 s | 7.2 |
 | `health.check_interval` / `health.check_failures` | 10 s / 3 | 7.1, 7.2 |
@@ -686,7 +692,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `clock.skew_warn` | 5 s | 7.9 |
 | `clock.check_interval` | 1 h | 2.4, 7.9 |
 
-Transaction isolation and retry are rules in the code, not settings. `SetUserRole` and `DeactivateUser` run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1).
+Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1).
 
 ### 7.12 Stored settings
 

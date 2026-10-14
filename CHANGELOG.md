@@ -33,6 +33,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - The migrations `0001_schema.sql` to `0004_seed_plc_types.sql` and the script `deploy/db/initdb/01-roles.sh`.
 - The `sqlx` adapters of `recipe-db`, the map of database errors, the connection pool, and the migrator.
 - The subcommand `recipe-server migrate`.
+- ADR-0035 for the identity commands, the sessions, the login throttle, and the guard of security events.
+- The Identity and Access commands and queries of `recipe-app`, the Argon2id hasher behind a semaphore, and their `sqlx` adapters.
+- The migration `0005_security_event_guard.sql`, which narrows the insert grant of `security_event` and adds a guard trigger.
+- The request pipeline of `recipe-web` with the security headers, the CSRF checks, and the session reload. Also unstyled pages for the routes of `api.md` sections 2.1 and 2.8 in `pl` and `en`.
+- The local breached-password list from SecLists and the script `tools/breached-passwords/filter.py`.
+- The subcommand `recipe-server create-admin`.
 
 ### Changed
 
@@ -41,3 +47,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - `reliability.md` sections 1.1, 4.3, 4.4, and 6 and `domain-model.md` sections 2.2, 3, 4, 5.2, and 6 hold the decisions of ADR-0027 and ADR-0028. ADR-0008 and ADR-0016 have an "Amended by" note.
 - `overview.md` section 5, `domain-model.md` sections 2.4, 5.1, 5.2, and 6, and `data-model.md` sections 6 and 10 hold the decisions of ADR-0029. `api.md` sections 2.2, 2.5, 2.6, and 3.2 and `reliability.md` sections 2.2, 2.4, and 7.4 hold them too. ADR-0005, ADR-0013, ADR-0022, and ADR-0028 have an "Amended by" note.
 - `data-model.md` sections 4.9, 5.1, 5.3, and 6 and `reliability.md` sections 7.7 and 7.11 hold the decisions of ADR-0030 to ADR-0034. ADR-0020 has an "Amended by" note.
+- `overview.md` section 5, `domain-model.md` section 5.3, and `api.md` sections 2.8, 7.1, 7.3, 7.4, and 8 hold the decisions of ADR-0035.
+- `data-model.md` sections 1.1, 1.3, 3.6 to 3.8, 4.11, 5.1, 5.3, 5.4, 6, 8, and 10 and `reliability.md` sections 1.1, 1.2, 7.1, and 7.11 hold them too. ADR-0014, ADR-0022, ADR-0029, and ADR-0034 have an "Amended by" note.
+
+### Security
+
+- `Cargo.lock` holds `rustls` 0.23.46 in place of 0.23.45 (RUSTSEC-2026-0346 to RUSTSEC-2026-0349).

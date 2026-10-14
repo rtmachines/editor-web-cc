@@ -184,13 +184,13 @@ The export endpoints use the session cookie (ADR-0014). A `Draft` is never expor
 | POST | `/users` | `CreateUser` | `UserManage` | `login`, `role` | `200` page of the new user with a one-time password, shown once. `must_change_password` is set | `409 E-IDN-001` |
 | GET | `/users/{login}` | `GetUser` | `UserManage` | - | `200` user page with lock state | `404 E-WEB-005` |
 | POST | `/users/{login}/role` | `SetUserRole` | `UserManage` | `role` | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002` |
-| POST | `/users/{login}/deactivate` | `DeactivateUser` | `UserManage` | CSRF token | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002` |
+| POST | `/users/{login}/deactivate` | `DeactivateUser` | `UserManage` | CSRF token | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002`, `409 E-IDN-010` (ADR-0035) |
 | POST | `/users/{login}/activate` | `ActivateUser` | `UserManage` | CSRF token | `200` fragment | `404 E-WEB-005`, `409 E-IDN-009` |
 | POST | `/users/{login}/reset-password` | `ResetPassword` | `UserManage` | CSRF token | `200` fragment with a one-time password, shown once. `must_change_password` is set. All sessions of the user are deleted | `404 E-WEB-005` |
 | POST | `/users/{login}/unlock` | `UnlockLogin` | `LoginUnlock` | CSRF token | `200` fragment. The login delay counters of the user are cleared | `404 E-WEB-005` |
 | GET | `/me` | `GetOwnProfile` | authenticated | - | `200` own profile | - |
 | GET | `/me/password` | `GetOwnPasswordForm` | authenticated | - | `200` password form. The only page a session with `must_change_password` can open | - |
-| POST | `/me/password` | `ChangeOwnPassword` | authenticated | `current_password`, `password` | `200` fragment with the header `HX-Refresh: true`. Every session of the user is deleted, and a new session replaces the current one. `must_change_password` is cleared. The browser loads the page again and gets the new CSRF token (section 7.3) | `422 E-IDN-006`, `422 E-IDN-008` |
+| POST | `/me/password` | `ChangeOwnPassword` | authenticated | `current_password`, `password` | `200` fragment with the header `HX-Refresh: true`. Every session of the user is deleted, and a new session replaces the current one. `must_change_password` is cleared. The browser loads the page again and gets the new CSRF token (section 7.3). A request without `HX-Request` gets `303` to `/recipes` with the new session cookie (ADR-0035) | `422 E-IDN-006`, `422 E-IDN-008`, `429 E-IDN-005` (ADR-0035) |
 
 The administrator never chooses a password for another user. `CreateUser` and `ResetPassword` generate the password (ADR-0014). Deactivate is a soft delete (ADR-0021). A deactivated user keeps the audit history and cannot log in.
 
@@ -498,7 +498,7 @@ Sessions follow ADR-0014. The session store is the `session` table in PostgreSQL
 | `Domain` | not set, as the `__Host-` prefix requires |
 | Content | a random 128-bit token only. The database stores `SHA-256(token)` as `session.id`. No user data in the cookie |
 
-The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`.
+The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035).
 
 ### 7.2 Timeouts
 
@@ -516,8 +516,10 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 - `SameSite=Strict` is the first line of defense.
 - Every mutating request from an authenticated session carries a token bound to the session. Forms send it in the hidden field `csrf_token`. HTMX requests send it in the header `X-CSRF-Token`. The `hx-headers` attribute on `<body>` sets the header. `Login` creates the token. `ChangeOwnPassword` creates a new session with a new token and returns `HX-Refresh: true`, so the browser loads the page again with the new token in `hx-headers`.
 - `POST /login` and `POST /lang` without a session use a pre-session token: a signed double-submit cookie `__Host-recipe_csrf` and the field `csrf_pre`. `GET /login` sets the cookie. The key of the Docker secret `csrf_signing_key` signs it (`security.csrf_signing_key_file`, `reliability.md` 7.11).
-- Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. A request without either is rejected.
-- A mutating request without a valid token gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8).
+- The pre-session cookie holds a 128-bit nonce and its HMAC-SHA256 under the first key. It has `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, and no `Max-Age`. The field `csrf_pre` holds the nonce. `POST /login` always accepts this token, also with a session (ADR-0035).
+- A mutating request is a request with any method except `GET`, `HEAD`, and `OPTIONS` (ADR-0035).
+- Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. An `Origin` matches the site when it equals `https://` followed by the `Host` header (ADR-0035). A request without either is rejected.
+- A mutating request without a valid token or without a valid origin gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8). When the event cannot be written, the request gets the storage error (ADR-0035).
 - The export endpoints are `GET` and need no token.
 - Session fixation: `Login` always creates a new session row and a new token. When the login request carries a session cookie, `Login` deletes that session row.
 
@@ -526,7 +528,9 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 The values of this section are in `reliability.md` section 7.11.
 
 - Login delay: after 3 failed attempts for one `(login, client_ip)` pair in 15 minutes, an attempt within `2^(n-3)` seconds after the last failure gets `429 E-IDN-005` with `Retry-After`. The cap is 60 seconds. There is no permanent lockout (Assumption A22, ADR-0014).
-- Per-IP budget: after 100 failed attempts from one `client_ip` in 15 minutes, every login from that address gets `429 E-IDN-005` with `Retry-After`.
+- Per-IP budget: after 100 failed attempts from one `client_ip` in 15 minutes, every login from that address gets `429 E-IDN-005` with `Retry-After`. Parallel attempts with other logins can add at most `argon2.permits − 1` rows above the budget (ADR-0035).
+- T1 records a throttled attempt as a failure, so the attempt starts a new delay. `Retry-After` of the login delay is the full delay of that attempt, counted from the attempt. `Retry-After` of the per-IP budget is the time until the oldest failure of the address leaves the window. Both values are whole seconds, rounded up, and at least 1 (ADR-0035).
+- `ChangeOwnPassword` runs the same throttle for the own login and the client address. A wrong current password counts as a failed attempt (ADR-0035).
 - Order: the use case takes an Argon2 permit and then runs T1 under the advisory lock of the login. T1 counts the failures in `login_attempt`, inserts the attempt row with `succeeded = false`, and commits.
 - A throttled attempt releases the permit and gets 429. Otherwise the password check runs and the permit is released. T2 marks the attempt as a success and creates the session, or it writes a `security_event`.
 - A failed login therefore always counts, also in read-only mode (`data-model.md` 6). After the per-IP budget is reached, T1 writes no attempt row, and the 429 comes from the count alone.
@@ -557,7 +561,7 @@ The values are in `reliability.md` section 7.11. A request above the limit gets 
 - The plain cookie `recipe_lang` stores the UI language. The session does not store it. The default is `pl` (R10). `en` is the second supported language (A17).
 - Cookie `recipe_lang`: value `pl` or `en`, `Max-Age` from `i18n.lang_cookie_max_age` (`reliability.md` 7.11), `Secure`, `SameSite=Strict`, `Path=/`. It holds no secret, so it needs no `HttpOnly`. The server checks the value on every request. Any other value counts as missing, and the UI uses `pl`.
 - The server ignores `Accept-Language`. A plant workstation often has an English operating system and a Polish operator.
-- `POST /lang` sets the cookie and returns `303` to the `next` field when it is a same-origin relative path that starts with `/` and not with `//`. Otherwise it returns `303` to `/recipes`. The server never redirects to the `Referer` header. `POST /lang` works before login and in read-only mode, because it writes no database row. The language change is not audited.
+- `POST /lang` sets the cookie and returns `303` to the `next` field when it is a same-origin relative path. The path starts with `/`, and its second character is neither `/` nor `\`. The path holds no `\` and no control or white-space character (ADR-0035). Otherwise it returns `303` to `/recipes`. The server never redirects to the `Referer` header. `POST /lang` works before login and in read-only mode, because it writes no database row. The language change is not audited.
 - Parameter names and descriptions show the translation for the UI language when one exists. Otherwise the English base text appears with a marker `(en)`.
 - Error messages, status words, and permission names come from `fluent` bundles. Error codes do not change with the language.
 

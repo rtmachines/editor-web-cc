@@ -115,11 +115,11 @@ flowchart TD
 
 | Crate | Error type | Allowed dependencies (examples) | Forbidden |
 |---|---|---|---|
-| `recipe-domain` | `thiserror` enums per context, and `ExportError` | `uuid`, `rust_decimal`, `serde`, `serde_json`, `serde_json_canonicalizer`, `time`, `sha2` | `sqlx`, `axum`, `tokio`, any I/O, any port trait |
-| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors and `StorageError`), `AuditError`, `StorageError` | `recipe-domain`, `thiserror`, `async-trait`, `tracing`, `tokio` (`rt`, `time`), `serde_json`, `uuid` (`v4`), `parking_lot` and `time` (feature `memory` only) (ADR-0029) | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
+| `recipe-domain` | `thiserror` enums per context, and `ExportError` | `uuid`, `rust_decimal`, `serde`, `serde_json`, `serde_json_canonicalizer`, `time`, `sha2`, `hmac` (ADR-0035) | `sqlx`, `axum`, `tokio`, any I/O, any port trait |
+| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors and `StorageError`), `AuditError`, `StorageError` | `recipe-domain`, `thiserror`, `async-trait`, `tracing`, `tokio` (`rt`, `time`, `sync`), `serde_json`, `uuid` (`v4`), `argon2`, `getrandom`, `time` (`formatting`), `parking_lot` (feature `memory` only) (ADR-0029, ADR-0035) | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
 | `recipe-db` | None public. Maps `sqlx::Error` with SQLSTATE into `StorageError` of `recipe-app` | `sqlx` (postgres, runtime-tokio, tls-rustls), `recipe-app` | `axum` |
 | `recipe-export` | None of its own. It returns `ExportError` of `recipe-domain` | `serde`, `serde_json`, `recipe-domain` | `sqlx`, `axum`, `recipe-app` |
-| `recipe-web` | `thiserror` (`WebError`, HTTP shape only) | `axum`, `askama`, `fluent`, `recipe-app`, `recipe-export` | `sqlx`, any session library |
+| `recipe-web` | `thiserror` (`WebError`, HTTP shape only) | `axum`, `askama`, `fluent`, `tower-http`, `cookie`, `subtle`, `recipe-app`, `recipe-export` (ADR-0035) | `sqlx`, any session library |
 | `recipe-server` | `anyhow` (binary only, `main` returns `anyhow::Result`) | every crate above except `recipe-export`, `tokio`, `tracing-subscriber`, `figment` | `recipe-export` (only `recipe-web` uses it) |
 
 `recipe-web` sets the session cookie from the result of the `Login` and `ChangeOwnPassword` use cases. The `session` table and its adapter in `recipe-db` belong to the project (ADR-0014).

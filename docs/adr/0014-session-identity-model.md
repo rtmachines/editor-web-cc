@@ -1,6 +1,6 @@
 # ADR-0014: Session and identity model with an owned session table
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, create-admin)
 Date: 2026-10-12
 Deciders: project owner
 
