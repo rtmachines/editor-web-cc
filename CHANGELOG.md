@@ -25,6 +25,14 @@ This file records the notable changes of the recipe editor. The format follows [
 - ADR-0029 for the ownership of the approval token, the audit row images, the scope of the export timeout, and clarifications of the application layer.
 - The application layer of `recipe-app`: the ports, the permission check, the audit entries, and the in-memory adapters. Also the Plant Model commands, the Recipe Management commands, `EnsureDerivedType`, and `ExportVersion`.
 - The modules `audit` and `export` of `recipe-domain`, and `Permission` and `Role`.
+- ADR-0030 for the guard of a version status write.
+- ADR-0031 for the configuration of the migrator and the secret files of the roles.
+- ADR-0032, which closes the databases `postgres` and `template1` to `PUBLIC`.
+- ADR-0033 for the options of the globals dump of the backup.
+- ADR-0034, which hardens the audit objects with an event trigger and a qualified operator.
+- The migrations `0001_schema.sql` to `0004_seed_plc_types.sql` and the script `deploy/db/initdb/01-roles.sh`.
+- The `sqlx` adapters of `recipe-db`, the map of database errors, the connection pool, and the migrator.
+- The subcommand `recipe-server migrate`.
 
 ### Changed
 
@@ -32,3 +40,4 @@ This file records the notable changes of the recipe editor. The format follows [
 - `reliability.md`, `domain-model.md`, `data-model.md`, and `api.md` list the codes of ADR-0024. `reliability.md` sections 1.1 and 4.3 hold the rule of ADR-0025. The base-unit table of `domain-model.md` section 2.1 holds the ranges of ADR-0026.
 - `reliability.md` sections 1.1, 4.3, 4.4, and 6 and `domain-model.md` sections 2.2, 3, 4, 5.2, and 6 hold the decisions of ADR-0027 and ADR-0028. ADR-0008 and ADR-0016 have an "Amended by" note.
 - `overview.md` section 5, `domain-model.md` sections 2.4, 5.1, 5.2, and 6, and `data-model.md` sections 6 and 10 hold the decisions of ADR-0029. `api.md` sections 2.2, 2.5, 2.6, and 3.2 and `reliability.md` sections 2.2, 2.4, and 7.4 hold them too. ADR-0005, ADR-0013, ADR-0022, and ADR-0028 have an "Amended by" note.
+- `data-model.md` sections 4.9, 5.1, 5.3, and 6 and `reliability.md` sections 7.7 and 7.11 hold the decisions of ADR-0030 to ADR-0034. ADR-0020 has an "Amended by" note.

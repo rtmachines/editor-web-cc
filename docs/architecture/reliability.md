@@ -524,7 +524,7 @@ Pool size is `db.pool_size` connections for the application and `db.health_pool_
 
 ### 7.7 Backup and restore
 
-- The `backup` service runs `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` daily at 02:00 UTC to the `backups` volume. File name `recipe_<YYYYMMDD_HHMM>.dump`. The same run writes `globals_<YYYYMMDD_HHMM>.sql` with `pg_dumpall --globals-only`, because roles are not inside a `pg_dump`.
+- The `backup` service runs `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` daily at 02:00 UTC to the `backups` volume. File name `recipe_<YYYYMMDD_HHMM>.dump`. The same run writes `globals_<YYYYMMDD_HHMM>.sql` with `pg_dumpall --globals-only --no-role-passwords -l recipe`, because roles are not inside a `pg_dump`. The file holds no password. A restore sets the role passwords from the secret files (ADR-0033).
 - Each dump has a manifest `<name>.sha256`. The restore script verifies the manifest before it restores.
 - Retention is 30 daily dumps. Older files are deleted after a successful new dump.
 - `walarchive` streams WAL with `pg_receivewal --synchronous` to a bind mount on a second disk. A weekly `pg_basebackup` goes to the same disk. Both connect as `recipe_replicator`, which the `pg_hba.conf` line of `data-model.md` 5.1 admits. Recovery point objective: minutes. Recovery time objective: 1 hour (ADR-0020). Without the second disk the recovery point objective is 24 hours (A35).
@@ -599,6 +599,9 @@ This table is the single source for every numeric setting. The configuration fil
 | `security.csrf_signing_key_file` | `/run/secrets/csrf_signing_key`. 32 bytes. Signing key of the pre-session CSRF cookie | 7.1, api.md 7.3 |
 | `security.key_rotation_overlap` | 24 h. The old and the new key are both accepted | 7.1 |
 | `secrets.replicator_password_file` | `/run/secrets/replicator_password`. Password of `recipe_replicator`, read by the initdb script and by `walarchive` | 7.1, 7.7, data-model.md 5.1 |
+| `secrets.migrator_password_file` | `/run/secrets/migrator_password`. Password of `recipe_migrator`, read by the initdb script and by `recipe-server migrate` (ADR-0031) | 5, 7.1, data-model.md 5.1 |
+| `secrets.app_password_file` | `/run/secrets/app_password`. Password of `recipe_app`, read by the initdb script (ADR-0031) | 7.1, data-model.md 5.1 |
+| `secrets.backup_password_file` | `/run/secrets/backup_password`. Password of `recipe_backup`, read by the initdb script (ADR-0031) | 7.1, 7.7, data-model.md 5.1 |
 | `i18n.lang_cookie_max_age` | 365 days. Cookie `recipe_lang` | api.md 8 |
 | `approval.separation_of_duties` | `true` | 7.12, api.md 3.2, ADR-0022 (A34) |
 | `http.request_timeout` | 30 s | 7.4 |
@@ -621,6 +624,8 @@ This table is the single source for every numeric setting. The configuration fil
 | `db.pool_idle_timeout` / `db.pool_max_lifetime` | 10 min / 30 min | 7.4 |
 | `db.pool_wait_warn` | 1 s | 7.5 |
 | `db.max_connections` | 50 (PostgreSQL `max_connections`) | 7.5 |
+| `db.host` / `db.port` / `db.name` | `db` / 5432 / `recipe`. The Compose service and the database of `data-model.md` 5.1 (ADR-0031) | 5, 7.1 |
+| `db.migrator_user` | `recipe_migrator`. The role of `recipe-server migrate` (ADR-0031) | 5, data-model.md 5.1 |
 | `db.slow_query` | 1 s (PostgreSQL `log_min_duration_statement = 1000`) | 3.3, 7.6 |
 | `timeout.export` | 10 s | 7.4 |
 | `timeout.validation` | 10 s | 4.4, 7.4 |

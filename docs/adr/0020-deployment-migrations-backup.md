@@ -1,6 +1,6 @@
 # ADR-0020: Deployment, migrations, backup and failure policy
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0033 (options of the globals dump)
 Date: 2026-10-12
 Deciders: project owner
 

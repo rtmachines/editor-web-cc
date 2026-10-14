@@ -29,7 +29,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0017](0017-derived-type-identity.md) | Identity of derived PLC types and S7-300 layout | Accepted | 2026-10-12 |
 | [0018](0018-udt-revision-rebind.md) | UDT revisions and the rebind of recipe drafts | Accepted | 2026-10-12 |
 | [0019](0019-export-integrity-and-contract.md) | Export integrity and the export format | Accepted | 2026-10-12 |
-| [0020](0020-deployment-migrations-backup.md) | Deployment, migrations, backup and failure policy | Accepted | 2026-10-12 |
+| [0020](0020-deployment-migrations-backup.md) | Deployment, migrations, backup and failure policy | Accepted. Amended by ADR-0033 (options of the globals dump) | 2026-10-12 |
 | [0021](0021-soft-delete-and-delete-rules.md) | Soft delete, unique keys and delete rules | Accepted | 2026-10-12 |
 | [0022](0022-approval-policy.md) | Approval policy, audit tamper evidence and draft clarifications | Accepted. Amended by ADR-0029 (failed record of a Forbidden event) | 2026-10-12 |
 | [0023](0023-ste-lint-scope-and-location.md) | Scope and location of the STE lint in CI | Accepted | 2026-10-12 |
@@ -39,6 +39,11 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0027](0027-error-lists-and-draft-errors.md) | Error lists and the error of a draft command | Accepted | 2026-10-13 |
 | [0028](0028-version-header-and-approval-token.md) | Version header, approval token, and draft clarifications | Accepted. Amended by ADR-0029 (the approval token owns the draft) | 2026-10-13 |
 | [0029](0029-application-layer-clarifications.md) | Approval token ownership, audit row images, and application clarifications | Accepted | 2026-10-13 |
+| [0030](0030-guard-of-a-version-status-write.md) | Guard of a version status write | Accepted | 2026-10-13 |
+| [0031](0031-migrator-configuration-and-secret-files.md) | Configuration of the migrator and the secret files of the roles | Accepted | 2026-10-13 |
+| [0032](0032-default-databases-closed-to-public.md) | Default databases closed to PUBLIC | Accepted | 2026-10-13 |
+| [0033](0033-globals-dump-of-the-backup.md) | Globals dump of the backup | Accepted | 2026-10-14 |
+| [0034](0034-hardening-of-the-audit-objects.md) | Hardening of the audit objects | Accepted | 2026-10-14 |
 
 ## Decision map
 
@@ -46,14 +51,14 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 |---|---|
 | Frontend | 0001 + 0015 (`row-version.js`) |
 | Export | 0019 |
-| Deployment, migrations, backup, panic policy, health | 0020 |
+| Deployment, migrations, backup, panic policy, health | 0020 + 0031 (migrator configuration, secret files) + 0032 (default databases) + 0033 (globals dump) |
 | Sessions, login, passwords, bootstrap | 0014 |
-| Audit log | 0005 + 0022 + 0029 (child rows and source of a full row) |
+| Audit log | 0005 + 0022 + 0029 (child rows and source of a full row) + 0034 (hardening of the audit objects) |
 | PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 + 0024 (member names, S7 width) |
 | Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) + 0026 (ranges of `DATE`, `DATE_AND_TIME`) |
 | Errors of value objects without an own code | 0025 |
 | Error lists, errors of draft commands | 0027 |
-| Concurrency | 0008 + 0015 + 0028 (row version check of version commands) |
+| Concurrency | 0008 + 0015 + 0028 (row version check of version commands) + 0030 (guard of a version status write) |
 | Versions and aggregates | 0009 + 0016 + 0028 (version header, approval token, draft load, value and text clarifications) + 0029 (token owns the draft, two command clarifications) |
 | Recipe scope | 0010 |
 | Soft delete and delete rules | 0021 |
