@@ -66,7 +66,7 @@ The tables do not repeat these codes. In read-only mode every command route retu
 
 The response body and the response time of `POST /login` are the same for an unknown login, an inactive user, and a wrong password (section 7.4, A42).
 
-Static files. `GET /static/*` serves the files of section 9 and `static/app.css`. The route needs no session and has no use case. It is outside the `must_change_password` gate of section 7.4. The response sets `Cache-Control: public, max-age` with the value of `static.cache_max_age` (`reliability.md` 7.11).
+Static files. `GET /static/*` serves the files of section 9, `static/app.css`, and the 8 font files of `design-system.md` section 5 under `/static/fonts/`. The route needs no session and has no use case. It is outside the `must_change_password` gate of section 7.4. The response sets `Cache-Control: public, max-age` with the value of `static.cache_max_age` (`reliability.md` 7.11).
 
 ### 2.2 Machines and units
 
@@ -285,7 +285,7 @@ The protocol implements ADR-0008 and ADR-0015 for every `Draft`.
 3. The use case locks the recipe row and then the version row with `FOR UPDATE` and compares `row_version` with the sent value. A mismatch rolls back and returns `Err(ConcurrentEdit { reference, number, expected, actual })`. The application never sets `row_version`. The database trigger function `bump_row_version` increments it on every update of the version row (`data-model.md` section 4.4).
 4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page.
 5. On conflict the server returns `409 E-WEB-001` with the fragment `conflict.html`. The fragment shows: the current server `row_version`, the login of the last editor, the time of the last change, and one button "Reload version". The button does `hx-get` on the version page. The unsaved input stays in the form until the reload.
-6. The `409` response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML`. The original target of the request does not change. HTMX swaps the `409` fragment because of the `responseHandling` value of section 9.
+6. The `409` response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036). The original target of the request does not change. HTMX swaps the `409` fragment because of the `responseHandling` value of section 9.
 7. Every approve and save form has `hx-sync="closest form:drop"`. A second click while a request is in flight is dropped in the browser.
 8. Idempotent approve: the version is already `Approved`, and the sent `row_version` equals the approved `row_version` minus one. Then `ApproveVersion` returns `Ok(ApprovalOutcome::AlreadyApproved)` and writes no audit entry. The server renders the version page with `200`.
 
@@ -332,7 +332,7 @@ The same code appears in the structured log of the request. A user can report th
 
 ### 5.3 Content negotiation
 
-- An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML` for every status `>= 400`, except `E-WEB-004`, which sets `HX-Redirect`. HTMX swaps a 4xx or 5xx fragment only because of the `responseHandling` value of section 9.
+- An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036) for every status `>= 400`, except `E-WEB-004`, which sets `HX-Redirect`. HTMX swaps a 4xx or 5xx fragment only because of the `responseHandling` value of section 9.
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
 - The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`.
 
@@ -577,6 +577,8 @@ Every response carries:
 | `Cache-Control` | `no-store` on every authenticated page and fragment. `public, max-age` with the value of `static.cache_max_age` (`reliability.md` 7.11) on `GET /static/*` (section 2.1) |
 | `Strict-Transport-Security` | `max-age` from `http.hsts_max_age` (`reliability.md` 7.11), `includeSubDomains` |
 | `X-Request-Id` | the `request_id` of the request |
+
+The application serves its fonts from `/static/fonts/`, so `default-src 'self'` covers them and the CSP has no `font-src`.
 
 HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`, `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`. By default HTMX 2 does not swap a 4xx or 5xx response, and `HX-Retarget` does not change that. The value of `responseHandling` swaps it, so `conflict.html`, `field-errors.html`, and `error.html` reach the page (sections 4 and 5.3). The value of `methodsThatUseUrlParams` makes `hx-delete` send a form body, which the form-only routes of section 2.6 require (`reliability.md` 4.2). By default HTMX inserts an inline `<style>` element for its request indicator, and `style-src 'self'` blocks it. `includeIndicatorStyles: false` stops this. The rules for `.htmx-indicator` are in the static style sheet `static/app.css`. The `<body>` tag has `hx-history="false"`. No page snapshot is stored in `localStorage` on a shared workstation.
 

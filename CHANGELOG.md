@@ -39,6 +39,14 @@ This file records the notable changes of the recipe editor. The format follows [
 - The request pipeline of `recipe-web` with the security headers, the CSRF checks, and the session reload. Also unstyled pages for the routes of `api.md` sections 2.1 and 2.8 in `pl` and `en`.
 - The local breached-password list from SecLists and the script `tools/breached-passwords/filter.py`.
 - The subcommand `recipe-server create-admin`.
+- ADR-0036 and `docs/architecture/design-system.md` for the design system, the typefaces, the icons, and the page layout. `overview.md` sections 7 and 9 and `api.md` sections 2.1, 4, 5.3, and 9 hold the decisions and the new Assumption A44. `docs/plan/ux-brief.md` is the non-normative input of step P3.1.
+- The style sheet `static/app.css` with every token of `design-system.md`. Tests compare the tokens with the document and compute the contrast ratio of each pair.
+- The typefaces Atkinson Hyperlegible Next and Mono as 8 WOFF2 files under `/static/fonts/`, with a SHA-256 test for each file. The OFL-1.1 license texts are in the same directory.
+- The scripts `static/row-version.js` and `static/tree.js`, and one static route for the style sheet, each script, and each font file.
+- One layout for every full page. It has a skip link, a top bar with the navigation, the language switch, and the logout button, and `main` with `#error-panel` and `#toast`.
+- The askama components for icons, status badges, alerts, notices, form fields, tables, trees, toasts, and the empty state.
+- The query `ListRecipes` of `recipe-app` and the skeleton page `GET /recipes` with the empty state.
+- The type `FieldReason` of `recipe-web`. Field reasons, missing entities, password reasons, task stages, and operation names in error messages come from the bundles.
 
 ### Changed
 
@@ -49,6 +57,10 @@ This file records the notable changes of the recipe editor. The format follows [
 - `data-model.md` sections 4.9, 5.1, 5.3, and 6 and `reliability.md` sections 7.7 and 7.11 hold the decisions of ADR-0030 to ADR-0034. ADR-0020 has an "Amended by" note.
 - `overview.md` section 5, `domain-model.md` section 5.3, and `api.md` sections 2.8, 7.1, 7.3, 7.4, and 8 hold the decisions of ADR-0035.
 - `data-model.md` sections 1.1, 1.3, 3.6 to 3.8, 4.11, 5.1, 5.3, 5.4, 6, 8, and 10 and `reliability.md` sections 1.1, 1.2, 7.1, and 7.11 hold them too. ADR-0014, ADR-0022, ADR-0029, and ADR-0034 have an "Amended by" note.
+- The pages of `api.md` sections 2.1 and 2.8 use the layout and the components. The logout form is in the top bar.
+- An HTMX error answer sets `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036).
+- A field error line shows the label of the field from the bundles. In an HTMX fragment and on the login page, the line links to its input.
+- The success message of a user command goes into `#toast`. The same answer clears `#error-panel`.
 
 ### Security
 

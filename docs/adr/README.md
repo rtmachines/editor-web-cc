@@ -45,12 +45,14 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0033](0033-globals-dump-of-the-backup.md) | Globals dump of the backup | Accepted | 2026-10-14 |
 | [0034](0034-hardening-of-the-audit-objects.md) | Hardening of the audit objects | Accepted. Amended by ADR-0035 (security_event_guard in the guard list) | 2026-10-14 |
 | [0035](0035-identity-sessions-clarifications.md) | Identity, sessions, and the guard of security events | Accepted | 2026-10-14 |
+| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted | 2026-10-14 |
 
 ## Decision map
 
 | Topic | Current ADR |
 |---|---|
-| Frontend | 0001 + 0015 (`row-version.js`) |
+| Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system, fonts, icons, layout) |
+| Design system, accessibility, UI layout | 0036 |
 | Export | 0019 |
 | Deployment, migrations, backup, panic policy, health | 0020 + 0031 (migrator configuration, secret files) + 0032 (default databases) + 0033 (globals dump) |
 | Sessions, login, passwords, bootstrap | 0014 + 0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, Origin, client address, create-admin) |
