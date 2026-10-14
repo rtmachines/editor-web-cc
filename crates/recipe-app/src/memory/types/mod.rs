@@ -3,7 +3,7 @@
 mod seed;
 
 use async_trait::async_trait;
-use recipe_domain::plant::{MachineId, PlcType, PlcTypeRecord, RecordShape};
+use recipe_domain::plant::{MachineId, PlcType, PlcTypeRecord, Primitive, RecordShape};
 
 use super::images::type_image;
 use super::rows::{TypeRow, check_violation, duplicate, missing_reference};
@@ -101,7 +101,15 @@ impl TypeCatalog for MemoryTransaction {
 
     async fn ensure_derived(&mut self, record: PlcTypeRecord) -> Result<Ensured, StorageError> {
         let candidate = PlcType::try_from(record).map_err(|_| check_violation())?;
-        if matches!(candidate.shape(), RecordShape::Struct { .. }) {
+        // The port accepts a `STRING(n)`, a `WSTRING(n)`, and an array row only.
+        let is_derived = match candidate.shape() {
+            RecordShape::Primitive { primitive, .. } => {
+                matches!(primitive, Primitive::String | Primitive::Wstring)
+            }
+            RecordShape::Array { .. } => true,
+            RecordShape::Struct { .. } => false,
+        };
+        if !is_derived {
             return Err(check_violation());
         }
         let existing = self

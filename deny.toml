@@ -50,7 +50,8 @@ deny = [
     { crate = "recipe-app", wrappers = ["recipe-db", "recipe-web", "recipe-server"], reason = "overview.md section 5: recipe-domain and recipe-export do not depend on recipe-app" },
     { crate = "recipe-web", wrappers = ["recipe-server"], reason = "overview.md section 5: only recipe-server depends on recipe-web" },
     { crate = "recipe-export", wrappers = ["recipe-web"], reason = "overview.md section 5: only recipe-web uses recipe-export" },
-    { crate = "recipe-db", wrappers = ["recipe-server"], reason = "overview.md section 5: only recipe-server wires recipe-db. recipe-app and recipe-web do not depend on it" },
+    # The self edge is a dev-dependency of recipe-db. It enables the feature test-support for the storage tests only (design D2 of db-schema-and-adapters).
+    { crate = "recipe-db", wrappers = ["recipe-server", "recipe-db"], reason = "overview.md section 5: only recipe-server wires recipe-db. recipe-app and recipe-web do not depend on it" },
     { crate = "sqlx", wrappers = ["recipe-db"], reason = "overview.md section 5 lists sqlx only for recipe-db. recipe-db embeds the migrations (data-model.md section 8)" },
     # prost-derive is a proc macro under testcontainers (dev dependency of recipe-db).
     { crate = "anyhow", wrappers = ["recipe-server", "prost-derive"], reason = "Assumption A37: only the binary crate recipe-server uses anyhow" },

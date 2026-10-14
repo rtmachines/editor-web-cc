@@ -1,2 +1,5 @@
 # Shell scripts run under bash. CRLF line endings can break them.
 *.sh text eol=lf
+# SQL files are checksummed by sqlx and compared with the document. CRLF would change them.
+*.sql text eol=lf
+crates/recipe-db/tests/grants.expected text eol=lf

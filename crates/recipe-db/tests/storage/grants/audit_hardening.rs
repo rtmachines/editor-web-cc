@@ -1,0 +1,175 @@
+//! Tests of ADR-0034: the event trigger `audit_objects_dropped` stops a drop of an audit object
+//! by every role except `audit_owner` (`data-model.md` sections 5.1 and 5.3).
+//!
+//! `recipe_migrator` owns the schema `public` through `pg_database_owner`. Only the event trigger
+//! can stop `DROP SCHEMA public CASCADE`. Each test uses its own disposable database.
+
+use std::collections::BTreeSet;
+
+use sqlx::PgConnection;
+
+use crate::support::{Role, TestDatabase, assert_privilege_denied, migration_texts};
+
+const GUARD_TRIGGER: &str = "audit_objects_dropped";
+const GUARD_FUNCTION: &str = "audit_guard.audit_objects_dropped()";
+const GUARD_SCHEMA: &str = "audit_guard";
+const IDENTITY_PREFIX: &str = "public.";
+
+/// True when the relation exists in the schema `public`.
+async fn table_exists(conn: &mut PgConnection, name: &str) -> bool {
+    sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+        .bind(format!("public.{name}"))
+        .fetch_one(conn)
+        .await
+        .unwrap()
+}
+
+/// Run one statement as `recipe_migrator` and assert SQLSTATE `42501` and an intact table.
+async fn assert_drop_is_refused(statement: &str, survivor: &str) {
+    let database = TestDatabase::create().await;
+    let mut migrator = database.connect(Role::Migrator).await;
+
+    let result = sqlx::query(statement).execute(&mut migrator).await;
+
+    assert_privilege_denied(result);
+    let mut admin = database.connect(Role::Superuser).await;
+    assert!(
+        table_exists(&mut admin, survivor).await,
+        "{survivor} is gone after: {statement}"
+    );
+}
+
+#[test]
+fn no_migration_file_holds_a_carriage_return() {
+    let files = migration_texts();
+
+    assert!(files.len() >= 4, "migration files: {}", files.len());
+    for (name, text) in &files {
+        assert!(!text.contains('\r'), "{name} holds a carriage return");
+    }
+}
+
+#[tokio::test]
+async fn the_migrator_cannot_drop_an_audit_table() {
+    // Without CASCADE the dependent function audit_canonical stops the drop with 2BP01 first.
+    assert_drop_is_refused("DROP TABLE audit_log CASCADE", "audit_log").await;
+}
+
+#[tokio::test]
+async fn the_migrator_cannot_drop_the_schema_public_with_cascade() {
+    assert_drop_is_refused("DROP SCHEMA public CASCADE", "audit_log").await;
+}
+
+#[tokio::test]
+async fn the_migrator_cannot_drop_an_audit_table_in_a_do_block() {
+    assert_drop_is_refused(
+        "DO $$ BEGIN EXECUTE 'DROP TABLE audit_chain_head'; END $$",
+        "audit_chain_head",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn audit_owner_can_drop_an_audit_table() {
+    let database = TestDatabase::create().await;
+    let mut migrator = database.connect(Role::Migrator).await;
+
+    sqlx::query("SET ROLE audit_owner")
+        .execute(&mut migrator)
+        .await
+        .unwrap();
+    sqlx::query("DROP TABLE security_event")
+        .execute(&mut migrator)
+        .await
+        .unwrap();
+
+    let mut admin = database.connect(Role::Superuser).await;
+    assert!(!table_exists(&mut admin, "security_event").await);
+}
+
+/// The single-quoted identities of `public` in the text of a function.
+fn quoted_public_identities(definition: &str) -> BTreeSet<String> {
+    definition
+        .split('\'')
+        .skip(1)
+        .step_by(2)
+        .filter(|text| text.starts_with(IDENTITY_PREFIX))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[tokio::test]
+async fn the_guard_list_equals_the_objects_that_audit_owner_owns() {
+    let database = TestDatabase::create().await;
+    let mut admin = database.connect(Role::Superuser).await;
+
+    let definition: String = sqlx::query_scalar("SELECT pg_get_functiondef($1::regprocedure)")
+        .bind(GUARD_FUNCTION)
+        .fetch_one(&mut admin)
+        .await
+        .unwrap();
+    let owned: Vec<String> = sqlx::query_scalar(
+        "SELECT i.identity::text FROM pg_class c \
+         CROSS JOIN LATERAL pg_identify_object('pg_class'::regclass, c.oid, 0) i \
+         WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') \
+           AND c.relowner = 'audit_owner'::regrole \
+         UNION ALL \
+         SELECT i.identity::text FROM pg_proc p \
+         CROSS JOIN LATERAL pg_identify_object('pg_proc'::regclass, p.oid, 0) i \
+         WHERE p.pronamespace = 'public'::regnamespace \
+           AND p.proowner = 'audit_owner'::regrole",
+    )
+    .fetch_all(&mut admin)
+    .await
+    .unwrap();
+
+    let owned: BTreeSet<String> = owned.into_iter().collect();
+    assert_eq!(owned.len(), 6, "{owned:?}");
+    assert_eq!(quoted_public_identities(&definition), owned);
+}
+
+#[tokio::test]
+async fn the_event_trigger_is_enabled_and_belongs_to_the_superuser() {
+    let database = TestDatabase::create().await;
+    let mut admin = database.connect(Role::Superuser).await;
+
+    let row: (String, String, bool) = sqlx::query_as(
+        "SELECT t.evtevent::text, t.evtenabled::text, r.rolsuper \
+         FROM pg_event_trigger t JOIN pg_roles r ON r.oid = t.evtowner \
+         WHERE t.evtname = $1",
+    )
+    .bind(GUARD_TRIGGER)
+    .fetch_one(&mut admin)
+    .await
+    .unwrap();
+
+    assert_eq!(row, ("sql_drop".to_owned(), "O".to_owned(), true));
+}
+
+#[tokio::test]
+async fn no_login_role_has_a_privilege_on_the_schema_audit_guard() {
+    let database = TestDatabase::create().await;
+    let mut admin = database.connect(Role::Superuser).await;
+
+    // recipe_backup is outside this list: pg_read_all_data grants it USAGE on every schema.
+    for role in [Role::App, Role::Migrator, Role::Replicator] {
+        for privilege in ["USAGE", "CREATE"] {
+            let held: bool = sqlx::query_scalar("SELECT has_schema_privilege($1, $2, $3)")
+                .bind(role.name())
+                .bind(GUARD_SCHEMA)
+                .bind(privilege)
+                .fetch_one(&mut admin)
+                .await
+                .unwrap();
+            assert!(!held, "{} holds {privilege} on audit_guard", role.name());
+        }
+        let can_execute: bool = sqlx::query_scalar("SELECT has_function_privilege($1, $2, $3)")
+            .bind(role.name())
+            .bind(GUARD_FUNCTION)
+            .bind("EXECUTE")
+            .fetch_one(&mut admin)
+            .await
+            .unwrap();
+        assert!(!can_execute, "{} can execute the guard", role.name());
+    }
+}

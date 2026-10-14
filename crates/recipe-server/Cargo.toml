@@ -7,12 +7,23 @@ rust-version.workspace = true
 publish.workspace = true
 
 # overview.md section 5: recipe-server depends on recipe-app, recipe-db, recipe-domain, recipe-web, and anyhow.
+# Design D15 of the change db-schema-and-adapters names figment, tokio, tracing, and serde.
+# deny.toml allows sqlx only under recipe-db, so this crate never uses sqlx.
 [dependencies]
 recipe-app = { workspace = true }
 recipe-db = { workspace = true }
 recipe-domain = { workspace = true }
 recipe-web = { workspace = true }
 anyhow = { workspace = true }
+figment = { workspace = true, features = ["toml", "env"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+testcontainers = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

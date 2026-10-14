@@ -3,12 +3,25 @@
 //! The keys are the column names of `data-model.md` sections 3.12 to 3.14. The image holds
 //! the limit rows in `limits` and the translation rows in `translations`.
 
-use serde_json::Value;
+use serde_json::{Number, Value};
 
 use super::images::{optional_text, text};
 use super::rows::{LimitRow, ParameterRow, TranslationRow};
 use crate::memory::images::{object, time_value};
 use crate::ports::RowImage;
+
+/// Return a `NUMERIC` bound as `to_jsonb` gives it: a JSON number with the digits of the column.
+///
+/// The function solves one problem: the database image holds a number, and the contract suite
+/// compares both adapters. A text that is no JSON number cannot occur, and falls back to text.
+fn numeric_value<T: ToString>(bound: Option<T>) -> Value {
+    bound.map_or(Value::Null, |bound| {
+        let digits = bound.to_string();
+        digits
+            .parse::<Number>()
+            .map_or_else(|_| Value::String(digits), Value::Number)
+    })
+}
 
 fn limit_row_image(row: &ParameterRow, limit: &LimitRow) -> Value {
     let stored = &limit.limit;
@@ -16,8 +29,8 @@ fn limit_row_image(row: &ParameterRow, limit: &LimitRow) -> Value {
         ("parameter_id", text(row.id)),
         ("recipe_version_id", text(row.version)),
         ("leaf_path", text(&stored.leaf_path)),
-        ("min_value", optional_text(stored.min)),
-        ("max_value", optional_text(stored.max)),
+        ("min_value", numeric_value(stored.min)),
+        ("max_value", numeric_value(stored.max)),
         (
             "max_length",
             stored.max_length.map_or(Value::Null, Value::from),

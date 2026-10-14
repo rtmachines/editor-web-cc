@@ -119,8 +119,8 @@ async fn the_before_state_holds_the_limits_and_the_translation_for_pl() {
     assert_eq!(limits.len(), 1);
     let limit = limits.first().unwrap();
     assert_eq!(limit.get("leaf_path"), Some(&json!("")));
-    assert_eq!(limit.get("min_value"), Some(&json!("10")));
-    assert_eq!(limit.get("max_value"), Some(&json!("250")));
+    assert_eq!(limit.get("min_value"), Some(&json!(10)));
+    assert_eq!(limit.get("max_value"), Some(&json!(250)));
 }
 
 #[tokio::test]

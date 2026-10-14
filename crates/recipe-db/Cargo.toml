@@ -1,15 +1,36 @@
 [package]
 name = "recipe-db"
-description = "PostgreSQL adapters, session store, and unit of work of the recipe editor"
+description = "PostgreSQL adapters, unit of work, and migrations of the recipe editor"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 # overview.md section 5: recipe-db depends on recipe-app and recipe-domain.
+# Design D16 of the change db-schema-and-adapters names the other dependencies.
 [dependencies]
 recipe-app = { workspace = true }
 recipe-domain = { workspace = true }
+sqlx = { workspace = true, features = ["uuid", "time", "json", "rust_decimal"] }
+tokio = { workspace = true, features = ["time"] }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+time = { workspace = true }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }
+
+[features]
+# Items that only the storage tests need (design D2). `recipe-server` and every other crate
+# never enable it. The self dev-dependency below enables it for the tests of this crate, so a
+# plain `cargo test` runs the storage tests. `deny.toml` permits this self edge.
+test-support = []
+
+[dev-dependencies]
+recipe-db = { path = ".", features = ["test-support"] }
+testcontainers = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+recipe-app = { workspace = true, features = ["memory"] }
 
 [lints]
 workspace = true

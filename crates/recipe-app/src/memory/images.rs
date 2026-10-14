@@ -3,7 +3,7 @@
 //! The keys are the column names of `data-model.md` section 3. A timestamp is the
 //! `Display` text of the instant. A struct image holds its member rows.
 
-use recipe_domain::plant::{PlcType, RecordShape};
+use recipe_domain::plant::RecordShape;
 use recipe_domain::timestamp::Timestamp;
 use serde_json::{Map, Value};
 
@@ -132,7 +132,11 @@ fn shape_columns(shape: &RecordShape) -> ShapeColumns {
 }
 
 /// Return the member rows of a struct as an array, and `None` for any other row.
-fn member_rows(plc_type: &PlcType) -> Option<Value> {
+///
+/// A member row has the columns of `plc_type_member` (`data-model.md` section 3.4). The time
+/// of a member row is the time of its struct row, because both rows come from one command.
+fn member_rows(row: &TypeRow) -> Option<Value> {
+    let plc_type = &row.plc_type;
     let RecordShape::Struct { members, .. } = plc_type.shape() else {
         return None;
     };
@@ -140,6 +144,8 @@ fn member_rows(plc_type: &PlcType) -> Option<Value> {
         .zip(members)
         .map(|(ordinal, member)| {
             object(vec![
+                ("struct_type_id", Value::String(plc_type.id().to_string())),
+                ("created_at", time_value(row.created_at)),
                 ("ordinal", Value::from(ordinal)),
                 ("member_name", Value::String(member.name.to_string())),
                 ("member_type_id", Value::String(member.type_id.to_string())),
@@ -179,7 +185,7 @@ pub(super) fn type_image(row: &TypeRow) -> RowImage {
         ("supersedes_type_id", columns.supersedes),
         ("created_at", time_value(row.created_at)),
     ];
-    if let Some(members) = member_rows(plc_type) {
+    if let Some(members) = member_rows(row) {
         pairs.push(("members", members));
     }
     RowImage::new(object(pairs))

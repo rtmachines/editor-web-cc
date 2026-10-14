@@ -198,8 +198,8 @@ async fn insert_parameter_returns_the_row_with_its_limits_and_translations() {
             "parameter_id": pid(3).to_string(),
             "recipe_version_id": vid(11).to_string(),
             "leaf_path": "",
-            "min_value": "0",
-            "max_value": "10",
+            "min_value": 0,
+            "max_value": 10,
             "max_length": null,
             "created_at": now_text(),
         }])

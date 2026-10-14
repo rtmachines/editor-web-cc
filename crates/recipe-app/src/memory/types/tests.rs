@@ -317,8 +317,20 @@ async fn insert_struct_returns_an_image_with_the_members_in_order() {
             "supersedes_type_id": Value::Null,
             "created_at": now_text(),
             "members": [
-                { "ordinal": 1, "member_name": "zeta", "member_type_id": int().to_string() },
-                { "ordinal": 2, "member_name": "alpha", "member_type_id": real().to_string() },
+                {
+                    "struct_type_id": tid(800).to_string(),
+                    "created_at": now_text(),
+                    "ordinal": 1,
+                    "member_name": "zeta",
+                    "member_type_id": int().to_string(),
+                },
+                {
+                    "struct_type_id": tid(800).to_string(),
+                    "created_at": now_text(),
+                    "ordinal": 2,
+                    "member_name": "alpha",
+                    "member_type_id": real().to_string(),
+                },
             ],
         })
     );
