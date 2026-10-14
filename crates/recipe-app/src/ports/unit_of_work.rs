@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use recipe_domain::audit::AuditEntry;
 
 use super::{
-    DraftRepository, Isolation, NonEmpty, PlantRepository, RecipeRepository, TypeCatalog,
-    UnitLookup,
+    AttemptRepository, DraftRepository, Isolation, NonEmpty, PlantRepository, RecipeRepository,
+    SessionRepository, TypeCatalog, UnitLookup, UserRepository,
 };
 use crate::error::{AppError, StorageError};
 
@@ -86,6 +86,15 @@ pub trait Transaction: Send {
 
     /// Return the PLC type catalog in this transaction.
     fn types(&mut self) -> &mut dyn TypeCatalog;
+
+    /// Return the repository of the `app_user` rows in this transaction.
+    fn users(&mut self) -> &mut dyn UserRepository;
+
+    /// Return the repository of the `session` rows in this transaction.
+    fn sessions(&mut self) -> &mut dyn SessionRepository;
+
+    /// Return the repository of the `login_attempt` rows in this transaction.
+    fn attempts(&mut self) -> &mut dyn AttemptRepository;
 
     /// Write the audit entries in this transaction, in the order of the list.
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError>;

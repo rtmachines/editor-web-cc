@@ -128,6 +128,29 @@ impl ErrorCode {
     pub const AUD_001: Self = Self::new("E-AUD-001");
     /// E-AUD-002, `AuditError::ChainBroken`.
     pub const AUD_002: Self = Self::new("E-AUD-002");
+    /// E-AUD-003, `StorageError::Constraint`, trigger `security_event_guard`.
+    pub const AUD_003: Self = Self::new("E-AUD-003");
+
+    /// E-IDN-001, `IdentityError::DuplicateLogin`.
+    pub const IDN_001: Self = Self::new("E-IDN-001");
+    /// E-IDN-002, `IdentityError::LastAdministrator`.
+    pub const IDN_002: Self = Self::new("E-IDN-002");
+    /// E-IDN-003, `IdentityError::InvalidCredentials`.
+    pub const IDN_003: Self = Self::new("E-IDN-003");
+    /// E-IDN-004, `IdentityError::UserInactive`.
+    pub const IDN_004: Self = Self::new("E-IDN-004");
+    /// E-IDN-005, `IdentityError::LoginThrottled`.
+    pub const IDN_005: Self = Self::new("E-IDN-005");
+    /// E-IDN-006, `IdentityError::PasswordPolicy`.
+    pub const IDN_006: Self = Self::new("E-IDN-006");
+    /// E-IDN-007, `IdentityError::MustChangePassword`.
+    pub const IDN_007: Self = Self::new("E-IDN-007");
+    /// E-IDN-008, `IdentityError::InvalidCurrentPassword`.
+    pub const IDN_008: Self = Self::new("E-IDN-008");
+    /// E-IDN-009, `IdentityError::UserAlreadyActive`.
+    pub const IDN_009: Self = Self::new("E-IDN-009");
+    /// E-IDN-010, `IdentityError::UserAlreadyInactive`.
+    pub const IDN_010: Self = Self::new("E-IDN-010");
 
     /// E-DB-001, `StorageError::Deadlock`.
     pub const DB_001: Self = Self::new("E-DB-001");
@@ -193,12 +216,22 @@ impl ErrorCode {
     pub const WEB_001: Self = Self::new("E-WEB-001");
     /// E-WEB-002, `AppError::Forbidden`.
     pub const WEB_002: Self = Self::new("E-WEB-002");
+    /// E-WEB-003, `WebError::PayloadTooLarge`.
+    pub const WEB_003: Self = Self::new("E-WEB-003");
     /// E-WEB-004, `AppError::Unauthenticated`.
     pub const WEB_004: Self = Self::new("E-WEB-004");
     /// E-WEB-005, `AppError::NotFound`.
     pub const WEB_005: Self = Self::new("E-WEB-005");
+    /// E-WEB-006, `WebError::ReadOnlyMode`.
+    pub const WEB_006: Self = Self::new("E-WEB-006");
+    /// E-WEB-007, `WebError::CsrfRejected`.
+    pub const WEB_007: Self = Self::new("E-WEB-007");
+    /// E-WEB-008, `WebError::BadRequest`.
+    pub const WEB_008: Self = Self::new("E-WEB-008");
     /// E-WEB-009, `AppError::Timeout`.
     pub const WEB_009: Self = Self::new("E-WEB-009");
+    /// E-WEB-010, `WebError::Internal`.
+    pub const WEB_010: Self = Self::new("E-WEB-010");
     /// E-WEB-011, `AppError::TaskFailed`.
     pub const WEB_011: Self = Self::new("E-WEB-011");
 
@@ -229,6 +262,7 @@ impl fmt::Display for ErrorCode {
 pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::AUD_001,
     ErrorCode::AUD_002,
+    ErrorCode::AUD_003,
     ErrorCode::DB_001,
     ErrorCode::DB_002,
     ErrorCode::DB_003,
@@ -241,6 +275,16 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::EXP_002,
     ErrorCode::EXP_003,
     ErrorCode::EXP_004,
+    ErrorCode::IDN_001,
+    ErrorCode::IDN_002,
+    ErrorCode::IDN_003,
+    ErrorCode::IDN_004,
+    ErrorCode::IDN_005,
+    ErrorCode::IDN_006,
+    ErrorCode::IDN_007,
+    ErrorCode::IDN_008,
+    ErrorCode::IDN_009,
+    ErrorCode::IDN_010,
     ErrorCode::PLT_001,
     ErrorCode::PLT_002,
     ErrorCode::PLT_003,
@@ -313,9 +357,14 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::RCP_054,
     ErrorCode::WEB_001,
     ErrorCode::WEB_002,
+    ErrorCode::WEB_003,
     ErrorCode::WEB_004,
     ErrorCode::WEB_005,
+    ErrorCode::WEB_006,
+    ErrorCode::WEB_007,
+    ErrorCode::WEB_008,
     ErrorCode::WEB_009,
+    ErrorCode::WEB_010,
     ErrorCode::WEB_011,
 ];
 
@@ -445,6 +494,22 @@ mod tests {
     fn added_codes_are_in_registry() {
         for code in ADDED_CODES {
             assert!(REGISTRY.contains(&code), "{code}");
+        }
+    }
+
+    /// The five codes that `WebError` of `recipe-web` owns (`reliability.md` section 1.1).
+    #[test]
+    fn web_error_codes_are_in_registry() {
+        let owned = [
+            (ErrorCode::WEB_003, "E-WEB-003"),
+            (ErrorCode::WEB_006, "E-WEB-006"),
+            (ErrorCode::WEB_007, "E-WEB-007"),
+            (ErrorCode::WEB_008, "E-WEB-008"),
+            (ErrorCode::WEB_010, "E-WEB-010"),
+        ];
+        for (code, text) in owned {
+            assert_eq!(code.as_str(), text);
+            assert_eq!(ErrorCode::find(text), Some(code));
         }
     }
 

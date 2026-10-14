@@ -1,5 +1,6 @@
 //! Session reference of an audit entry (`data-model.md` 3.15, constraint `audit_log_session_ref_format`).
 
+use crate::identity::SessionId;
 use std::fmt;
 
 /// Number of characters of a session reference (`log.session_ref_length`, `reliability.md` 7.11).
@@ -41,6 +42,12 @@ impl SessionRef {
             return Err(SessionRefReason::Format);
         }
         Ok(Self(text.to_owned()))
+    }
+
+    /// Build the reference of a session: the first 16 characters of its id.
+    #[must_use]
+    pub fn of(id: &SessionId) -> Self {
+        Self(id.as_str().chars().take(SESSION_REF_CHARS).collect())
     }
 
     /// Return the 16 characters of the reference.

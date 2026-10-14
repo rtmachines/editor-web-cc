@@ -1,0 +1,4 @@
+<ul class="field-errors" role="alert">
+{% for line in view.lines %}<li>{% if !line.field.is_empty() %}<span class="field">{{ line.field }}</span> {% endif %}{{ line.message }}</li>
+{% endfor %}</ul>
+<p><strong>{{ view.code }}</strong> {{ view.reference }}</p>

@@ -1,6 +1,6 @@
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
-use recipe_domain::identity::Login;
+use recipe_domain::identity::{IdentityError, Login};
 use recipe_domain::plant::{MachineCode, MachineId, PlantError, TypeName, UnitPath};
 use recipe_domain::recipe::{DraftError, RecipeError, RecipeErrors, ReferenceNumber};
 use uuid::Uuid;
@@ -109,6 +109,19 @@ fn stages_display_in_plain_words() {
     assert_eq!(TimeoutStage::Request.to_string(), "request");
     assert_eq!(TaskStage::PasswordHash.to_string(), "password hash");
     assert_eq!(TaskStage::Validation.to_string(), "validation");
+    assert_eq!(TaskStage::Token.to_string(), "token generation");
+}
+
+#[test]
+fn the_token_stage_gives_e_web_011() {
+    let error = AppError::TaskFailed {
+        stage: TaskStage::Token,
+    };
+    assert_eq!(error.code(), ErrorCode::WEB_011);
+    assert_eq!(
+        error.to_string(),
+        "The operation token generation did not complete. Try again."
+    );
 }
 
 #[test]
@@ -148,9 +161,33 @@ fn serialize_error_gives_exp_004() {
 
 #[test]
 fn storage_error_keeps_its_code() {
-    let error = AppError::from(StorageError::Deadlock);
+    let deadlock = StorageError::Deadlock {
+        cause: crate::error::LockFailure::Deadlock,
+    };
+    let text = deadlock.to_string();
+    let error = AppError::from(deadlock);
     assert_eq!(error.code(), ErrorCode::DB_001);
-    assert_eq!(error.to_string(), StorageError::Deadlock.to_string());
+    assert_eq!(error.to_string(), text);
+}
+
+#[test]
+fn identity_error_keeps_its_code_and_text() {
+    let inner = IdentityError::MustChangePassword;
+    let text = inner.to_string();
+    let code = inner.code();
+    let error = AppError::from(inner);
+    assert!(matches!(error, AppError::Identity(_)));
+    assert_eq!(error.code(), code);
+    assert_eq!(error.code(), ErrorCode::IDN_007);
+    assert_eq!(error.to_string(), text);
+}
+
+#[test]
+fn identity_error_with_a_login_passes_its_code() {
+    let error = AppError::from(IdentityError::UserAlreadyActive {
+        login: Login::parse("anna").unwrap(),
+    });
+    assert_eq!(error.code(), ErrorCode::IDN_009);
 }
 
 #[test]
@@ -172,6 +209,17 @@ fn draft_error_unwraps_the_list_kind() {
     let error = AppError::from(DraftError::from(RecipeErrors::from(recipe_error())));
     assert!(matches!(error, AppError::Recipes(_)));
     assert_eq!(error.code(), ErrorCode::RCP_007);
+}
+
+#[test]
+fn missing_malformed_login_names_a_user_and_never_the_typed_text() {
+    let text = Missing::MalformedLogin.to_string();
+    assert_eq!(text, "User");
+    let error = AppError::NotFound {
+        entity: Missing::MalformedLogin,
+    };
+    assert_eq!(error.code(), ErrorCode::WEB_005);
+    assert!(!error.to_string().contains("Bad Login!"));
 }
 
 #[test]

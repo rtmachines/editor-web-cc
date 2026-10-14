@@ -2,7 +2,7 @@
 # Create the roles and the database of the recipe editor.
 #
 # The postgres image runs this script once, as the superuser, on an empty data directory.
-# Source: docs/architecture/data-model.md section 5.1, ADR-0031, ADR-0032, and ADR-0034.
+# Source: docs/architecture/data-model.md section 5.1, ADR-0031, ADR-0032, ADR-0034, and ADR-0035.
 # Each password comes from a secret file (reliability.md section 7.11). psql reads the file,
 # so a password never appears in the argument list of a process.
 #
@@ -79,6 +79,10 @@ GRANT pg_read_all_data TO recipe_backup;
 -- The job alerts reads the replication lag of recipe_replicator in pg_stat_replication
 -- (reliability.md 3.7). SET FALSE: recipe_app cannot SET ROLE to it.
 GRANT pg_read_all_stats TO recipe_app WITH INHERIT TRUE, SET FALSE;
+-- ADR-0035: the server log holds no DETAIL with row values of a failed statement of recipe_app.
+ALTER ROLE recipe_app SET log_error_verbosity = 'terse';
+-- Review D6: a slow statement of recipe_app logs no bind value, for example a password hash.
+ALTER ROLE recipe_app SET log_parameter_max_length = 0;
 -- 0003 transfers the audit objects to audit_owner. ALTER ... OWNER TO needs membership
 -- in the new owner. INHERIT FALSE: the migrator inherits no privilege of audit_owner.
 GRANT audit_owner TO recipe_migrator WITH INHERIT FALSE;
@@ -102,7 +106,7 @@ BEGIN
         IF v_object.object_identity IN (
                'public.audit_log', 'public.audit_chain_head', 'public.security_event',
                'public.audit_canonical(public.audit_log)', 'public.audit_hash_chain()',
-               'public.security_event_purge()')
+               'public.security_event_purge()', 'public.security_event_guard()')
            AND current_user <> 'audit_owner' THEN
             RAISE EXCEPTION 'audit object % can be dropped only by audit_owner',
                 v_object.object_identity USING ERRCODE = 'insufficient_privilege';

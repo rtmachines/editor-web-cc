@@ -57,6 +57,7 @@ pub struct App {
     /// The data of the request.
     pub meta: RequestMeta,
     context: AppContext,
+    pub(super) database: Database,
     migrator: PgConnection,
     admin: PgConnection,
     /// The handle of the test database. The sessions above belong to it.
@@ -98,6 +99,7 @@ impl App {
                 SessionRef::parse(SESSION_REF).ok(),
             ),
             context,
+            database: connected,
             migrator,
             admin,
         }

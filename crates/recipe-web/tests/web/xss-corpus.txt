@@ -1,0 +1,9 @@
+# XSS corpus of the HTTP tests (task 6.10, design D19). One payload per line.
+# The NUL payload is not in this file. The test adds it, because a text file cannot hold it.
+<script>alert(1)</script>
+"><img src=x onerror=alert(1)>
+'"><svg/onload=alert(1)>
+javascript:alert(1)
+{{7*7}}
+</textarea><script>alert(1)</script>
+%3Cscript%3E

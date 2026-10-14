@@ -12,10 +12,11 @@ use crate::support::{Role, TestDatabase, assert_privilege_denied};
 const GRANTS: &str = include_str!("../../grants.expected");
 const AUDIT_TABLES: [&str; 3] = ["audit_log", "audit_chain_head", "security_event"];
 /// The audit functions with the argument types that identify them.
-const AUDIT_FUNCTIONS: [&str; 3] = [
+const AUDIT_FUNCTIONS: [&str; 4] = [
     "audit_canonical(audit_log)",
     "audit_hash_chain()",
     "security_event_purge()",
+    "security_event_guard()",
 ];
 const TABLE_PRIVILEGES: [&str; 7] = [
     "SELECT",
@@ -95,7 +96,7 @@ async fn assert_migrator_membership(conn: &mut PgConnection) {
     assert!(!inherit, "the membership of recipe_migrator inherits");
 }
 
-/// `audit_owner` owns the three audit tables and the three audit functions.
+/// `audit_owner` owns the three audit tables and the four audit functions.
 async fn assert_audit_owner_owns(conn: &mut PgConnection) {
     for table in AUDIT_TABLES {
         let owner: String = sqlx::query_scalar(
@@ -148,11 +149,15 @@ async fn assert_migrator_has_no_audit_privilege(database: &TestDatabase, conn: &
     assert_privilege_denied(result);
 }
 
-/// `recipe_migrator` cannot execute the two audit functions that the document revokes from `PUBLIC`.
+/// `recipe_migrator` cannot execute the three audit functions that the document revokes from `PUBLIC`.
 ///
 /// `audit_canonical` keeps the default `PUBLIC` execute right, so this check skips it.
 async fn assert_migrator_cannot_execute_audit_functions(conn: &mut PgConnection) {
-    for function in ["audit_hash_chain()", "security_event_purge()"] {
+    for function in [
+        "audit_hash_chain()",
+        "security_event_purge()",
+        "security_event_guard()",
+    ] {
         let held: bool = sqlx::query_scalar(
             "SELECT has_function_privilege('recipe_migrator'::name, $1::text, 'EXECUTE')",
         )

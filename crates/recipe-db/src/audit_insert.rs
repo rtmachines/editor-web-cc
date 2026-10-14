@@ -5,6 +5,8 @@ use recipe_domain::audit::AuditEntry;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
+use crate::address::canonical_text;
+
 /// One insert for all entries. `WITH ORDINALITY` and `ORDER BY` keep the order of the list.
 ///
 /// The statement omits `chain_seq`, `prev_hash`, and `entry_hash`. Trigger 4.9 sets them in the
@@ -35,9 +37,7 @@ pub(crate) async fn insert_entries(
     let before_states = column(entries, |e| e.before().cloned());
     let after_states = column(entries, |e| e.after().cloned());
     let request_ids: Vec<Uuid> = column(entries, |e| *e.request_id().as_uuid());
-    let client_ips: Vec<Option<String>> = column(entries, |e| {
-        e.client_ip().map(|address| address.to_string())
-    });
+    let client_ips: Vec<Option<String>> = column(entries, |e| e.client_ip().map(canonical_text));
     let session_refs: Vec<Option<&str>> =
         column(entries, |e| e.session_ref().map(|session| session.as_str()));
     sqlx::query(INSERT_AUDIT_ENTRIES)

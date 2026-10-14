@@ -45,7 +45,7 @@ const SECRETS: [(&str, &str); 4] = [
 ];
 const READY_ATTEMPTS: u32 = 240;
 const READY_PAUSE: Duration = Duration::from_millis(500);
-const EXPECTED_MIGRATIONS: i64 = 4;
+const EXPECTED_MIGRATIONS: i64 = 5;
 const ERROR_LEVEL: &str = "\"level\":\"ERROR\"";
 /// A port that no server listens on. The case with a missing secret file uses it.
 const CLOSED_PORT: u16 = 1;
@@ -277,7 +277,7 @@ fn assert_port_on_loopback(container: &ContainerAsync<GenericImage>) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn migrate_applies_four_migrations_once_and_fails_with_one_error_line() {
+async fn migrate_applies_five_migrations_once_and_fails_with_one_error_line() {
     let container = start_container().await;
     assert_port_on_loopback(&container);
     wait_until_ready(&container).await;
@@ -289,7 +289,7 @@ async fn migrate_applies_four_migrations_once_and_fails_with_one_error_line() {
     let valid_secret = dir.write("valid_secret", &format!("{MIGRATOR_PASSWORD}\n"));
     let valid = write_config(&dir, "valid.toml", host_port, &valid_secret);
 
-    // A valid configuration applies the four migrations.
+    // A valid configuration applies the five migrations.
     let first = run_migrate(valid.clone()).await;
     assert_eq!(first.status.code(), Some(0), "{}", text_of(&first));
     assert_eq!(applied_migrations(&container).await, EXPECTED_MIGRATIONS);

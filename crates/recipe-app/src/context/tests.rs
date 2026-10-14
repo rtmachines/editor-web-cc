@@ -31,6 +31,19 @@ fn new_builds_a_context_from_the_four_parts() {
     assert_eq!(context.clock.now(), fixture.clock.now());
 }
 
+#[tokio::test]
+async fn security_returns_the_sink_that_the_context_holds() {
+    let fixture = Fixture::new();
+    let context = fixture.context();
+    let event = recipe_domain::audit::SecurityEvent::csrf_rejected(
+        meta().request_id(),
+        std::net::IpAddr::from([192, 0, 2, 1]),
+        None,
+    );
+    context.security().record(event).await.unwrap();
+    assert_eq!(fixture.sink.events().len(), 1);
+}
+
 #[test]
 fn the_fixture_context_uses_the_store_the_sink_and_the_clock_of_the_fixture() {
     let fixture = Fixture::new();

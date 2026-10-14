@@ -1,7 +1,8 @@
 //! Tests of the sections 4.10 and 4.12: `version_size_budget` and `security_event_purge`.
 //!
-//! The version budget tests run as the table owner `recipe_migrator`. The purge tests run as
-//! `recipe_app`, because `audit_owner` owns `security_event` after `0003`. A bulk insert is one `INSERT ... SELECT`,
+//! The version budget tests run as the table owner `recipe_migrator`. The purge tests insert their
+//! backdated events as the superuser, because `recipe_app` cannot name `occurred_at` after `0005`
+//! (ADR-0035). They call the purge as `recipe_app`. A bulk insert is one `INSERT ... SELECT`,
 //! so a test stays fast. The rows obey every other trigger: the parameters sit in a live draft of
 //! a machine with the right platform.
 
@@ -199,8 +200,9 @@ async fn remaining_ages(conn: &mut PgConnection) -> Vec<i32> {
 async fn purge_deletes_5000_rows_per_call_and_returns_the_count() {
     let database = TestDatabase::create().await;
     let mut conn = database.connect(Role::App).await;
-    insert_events(&mut conn, PURGE_BATCH + 1, 401).await;
-    insert_events(&mut conn, 1, 1).await;
+    let mut admin = database.connect(Role::Superuser).await;
+    insert_events(&mut admin, PURGE_BATCH + 1, 401).await;
+    insert_events(&mut admin, 1, 1).await;
 
     let counts = [
         purge(&mut conn).await,
@@ -216,8 +218,9 @@ async fn purge_deletes_5000_rows_per_call_and_returns_the_count() {
 async fn purge_keeps_a_row_that_is_younger_than_400_days() {
     let database = TestDatabase::create().await;
     let mut conn = database.connect(Role::App).await;
-    insert_events(&mut conn, 1, 399).await;
-    insert_events(&mut conn, 1, 401).await;
+    let mut admin = database.connect(Role::Superuser).await;
+    insert_events(&mut admin, 1, 399).await;
+    insert_events(&mut admin, 1, 401).await;
 
     let deleted = purge(&mut conn).await;
 
@@ -228,7 +231,8 @@ async fn purge_keeps_a_row_that_is_younger_than_400_days() {
 async fn purge_deletes_the_oldest_rows_by_id_first() {
     let database = TestDatabase::create().await;
     let mut conn = database.connect(Role::App).await;
-    insert_events(&mut conn, PURGE_BATCH + 1, 401).await;
+    let mut admin = database.connect(Role::Superuser).await;
+    insert_events(&mut admin, PURGE_BATCH + 1, 401).await;
     let last_id: i64 = sqlx::query_scalar("SELECT max(id) FROM security_event")
         .fetch_one(&mut conn)
         .await

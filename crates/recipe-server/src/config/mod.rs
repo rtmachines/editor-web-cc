@@ -21,16 +21,20 @@ const DEFAULT_HOST: &str = "db";
 const DEFAULT_PORT: u16 = 5432;
 const DEFAULT_DATABASE: &str = "recipe";
 const DEFAULT_MIGRATOR_USER: &str = "recipe_migrator";
+const DEFAULT_APP_USER: &str = "recipe_app";
 const DEFAULT_MIGRATOR_PASSWORD_FILE: &str = "/run/secrets/migrator_password";
+const DEFAULT_APP_PASSWORD_FILE: &str = "/run/secrets/app_password";
 const ENV_PREFIX: &str = "RECIPE_";
 const ENV_SEPARATOR: &str = "__";
 /// The environment names without the prefix, one for each key of the settings.
-const ENV_KEYS: [&str; 5] = [
+const ENV_KEYS: [&str; 7] = [
     "db__host",
     "db__port",
     "db__name",
     "db__migrator_user",
+    "db__app_user",
     "secrets__migrator_password_file",
+    "secrets__app_password_file",
 ];
 
 /// The keys of the section `db`.
@@ -45,6 +49,8 @@ pub struct DbSettings {
     pub name: String,
     /// The login role of the migrator (`db.migrator_user`).
     pub migrator_user: String,
+    /// The login role of the application and of `create-admin` (`db.app_user`).
+    pub app_user: String,
 }
 
 impl Default for DbSettings {
@@ -54,6 +60,7 @@ impl Default for DbSettings {
             port: DEFAULT_PORT,
             name: DEFAULT_DATABASE.to_owned(),
             migrator_user: DEFAULT_MIGRATOR_USER.to_owned(),
+            app_user: DEFAULT_APP_USER.to_owned(),
         }
     }
 }
@@ -64,12 +71,15 @@ impl Default for DbSettings {
 pub struct SecretSettings {
     /// The file with the password of the migrator (`secrets.migrator_password_file`).
     pub migrator_password_file: PathBuf,
+    /// The file with the password of the application role (`secrets.app_password_file`).
+    pub app_password_file: PathBuf,
 }
 
 impl Default for SecretSettings {
     fn default() -> Self {
         Self {
             migrator_password_file: PathBuf::from(DEFAULT_MIGRATOR_PASSWORD_FILE),
+            app_password_file: PathBuf::from(DEFAULT_APP_PASSWORD_FILE),
         }
     }
 }
@@ -138,32 +148,49 @@ fn load_with(file: Option<&Path>, overrides: impl Provider) -> Result<Settings> 
 /// Returns an error when the secret file cannot be read, is not UTF-8, or breaks the secret rule
 /// of ADR-0031: it is empty, holds a carriage return, or holds more than one line.
 pub fn migrator_connection(settings: &Settings) -> Result<Connection> {
-    let path = &settings.secrets.migrator_password_file;
-    let text = std::fs::read_to_string(path).with_context(|| {
-        format!(
-            "cannot read the file of secrets.migrator_password_file {}",
-            path.display()
-        )
-    })?;
-    let secret = secret_line(&text).map_err(|fault| {
-        anyhow!(
-            "the file of secrets.migrator_password_file {} {}",
-            path.display(),
-            fault.describe()
-        )
-    })?;
+    connection(
+        settings,
+        &settings.db.migrator_user,
+        &settings.secrets.migrator_password_file,
+        "secrets.migrator_password_file",
+    )
+}
+
+/// Build the connection of the application role and read its password from the secret file.
+///
+/// `create-admin` uses it. The rules are those of [`migrator_connection`], with the key
+/// `secrets.app_password_file`.
+///
+/// # Errors
+///
+/// See [`migrator_connection`].
+pub fn app_connection(settings: &Settings) -> Result<Connection> {
+    connection(
+        settings,
+        &settings.db.app_user,
+        &settings.secrets.app_password_file,
+        "secrets.app_password_file",
+    )
+}
+
+/// Read one secret file and build the connection of `user`. `key` names the setting in errors.
+fn connection(settings: &Settings, user: &str, path: &Path, key: &str) -> Result<Connection> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("cannot read the file of {key} {}", path.display()))?;
+    let secret = secret_line(&text)
+        .map_err(|fault| anyhow!("the file of {key} {} {}", path.display(), fault.describe()))?;
     Ok(Connection {
         host: settings.db.host.clone(),
         port: settings.db.port,
         database: settings.db.name.clone(),
-        user: settings.db.migrator_user.clone(),
+        user: user.to_owned(),
         password: Password::from(secret.to_owned()),
     })
 }
 
 /// The reason why the text of a secret file is not one valid line (ADR-0031).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SecretFault {
+pub enum SecretFault {
     /// The file holds no characters, or only one line feed.
     Empty,
     /// The file holds a carriage return anywhere.
@@ -174,7 +201,7 @@ enum SecretFault {
 
 impl SecretFault {
     /// Return the words that end the error message. They never show the content of the file.
-    const fn describe(self) -> &'static str {
+    pub const fn describe(self) -> &'static str {
         match self {
             Self::Empty => "is empty",
             Self::CarriageReturn => "holds a carriage return",
@@ -187,7 +214,7 @@ impl SecretFault {
 ///
 /// The rule of ADR-0031: the file holds exactly one non-empty line and no carriage return.
 /// One trailing line feed is allowed and removed. `01-roles.sh` reads the same rule.
-fn secret_line(text: &str) -> Result<&str, SecretFault> {
+pub fn secret_line(text: &str) -> Result<&str, SecretFault> {
     if text.contains('\r') {
         return Err(SecretFault::CarriageReturn);
     }

@@ -4,4 +4,5 @@
 //! second command waits for it. No test depends on a sleep.
 
 mod approve;
+mod identity;
 mod order;

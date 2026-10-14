@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use recipe_app::error::StorageError;
+use recipe_app::error::{LockFailure, StorageError};
 use recipe_db::migrate_from_directory;
 use recipe_db::settings::MigrateSettings;
 use recipe_domain::error_codes::ErrorCode;
@@ -93,7 +93,15 @@ async fn migrate_maps_a_held_table_lock_to_e_db_001_when_no_retry_remains() {
     .await
     .unwrap_err();
 
-    assert!(matches!(error, StorageError::Deadlock), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            StorageError::Deadlock {
+                cause: LockFailure::LockTimeout
+            }
+        ),
+        "{error:?}"
+    );
     assert_eq!(error.code(), ErrorCode::DB_001);
     sqlx::query("COMMIT").execute(&mut holder).await.unwrap();
     assert_eq!(rows_in_target(&database).await, 0);

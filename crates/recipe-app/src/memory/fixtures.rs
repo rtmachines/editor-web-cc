@@ -13,6 +13,7 @@ mod tests;
 pub(crate) use actors::{actor, meta, second_engineer};
 pub(crate) use parameter::parameter_on;
 pub(crate) use plant::machine_on;
+pub(crate) use race::RaceStore;
 pub(crate) use seed::Fixture;
 
 use recipe_domain::identity::UserId;

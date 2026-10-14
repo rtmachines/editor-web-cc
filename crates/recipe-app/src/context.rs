@@ -49,6 +49,15 @@ impl AppContext {
             settings,
         }
     }
+
+    /// Return the sink of security events that the context holds.
+    ///
+    /// The accessor solves one problem: `recipe-web` records the event `csrf_rejected` and must
+    /// use the same sink as the use cases. A second argument could name another sink.
+    #[must_use]
+    pub fn security(&self) -> Arc<dyn SecurityEventSink> {
+        Arc::clone(&self.security)
+    }
 }
 
 /// A use case with a fixed operation in the catalog.

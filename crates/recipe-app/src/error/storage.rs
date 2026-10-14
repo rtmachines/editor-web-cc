@@ -5,6 +5,20 @@
 
 use recipe_domain::error_codes::ErrorCode;
 
+/// The kind of failure behind `StorageError::Deadlock` (design D16, ADR-0035 c).
+///
+/// The type solves one problem: the retry of a `SERIALIZABLE` command must tell a serialization
+/// failure from a deadlock or a lock timeout, and all three share the code `E-DB-001`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LockFailure {
+    /// The database detected a deadlock (SQLSTATE `40P01`). It is a bug in the lock order.
+    Deadlock,
+    /// A lock wait hit `lock_timeout` (SQLSTATE `55P03`).
+    LockTimeout,
+    /// A `SERIALIZABLE` transaction failed to serialize (SQLSTATE `40001`).
+    Serialization,
+}
+
 /// Error of the storage ports.
 ///
 /// The type solves one problem: `recipe-app` must not hold a `sqlx` type.
@@ -33,7 +47,10 @@ pub enum StorageError {
     },
     /// The database detected a deadlock or a lock wait that hit its limit.
     #[error("Another operation holds a lock on the same data. Try again.")]
-    Deadlock,
+    Deadlock {
+        /// The kind of lock failure. Only the retry helper and the log read it.
+        cause: LockFailure,
+    },
     /// A statement ran longer than its limit.
     #[error("The operation took too long and was stopped. Try again.")]
     StatementTimeout,
@@ -79,7 +96,7 @@ impl StorageError {
             Self::Duplicate { .. } => ErrorCode::DB_006,
             Self::MissingReference { .. } => ErrorCode::DB_007,
             Self::Constraint { code, .. } => *code,
-            Self::Deadlock => ErrorCode::DB_001,
+            Self::Deadlock { .. } => ErrorCode::DB_001,
             Self::StatementTimeout => ErrorCode::DB_002,
             Self::PoolTimeout => ErrorCode::DB_004,
             Self::Unavailable => ErrorCode::DB_005,
@@ -120,6 +137,10 @@ mod tests {
 
     use super::*;
 
+    fn deadlock(cause: LockFailure) -> StorageError {
+        StorageError::Deadlock { cause }
+    }
+
     fn other() -> StorageError {
         StorageError::Other {
             sqlstate: Some("XX000".to_owned()),
@@ -142,7 +163,9 @@ mod tests {
                 },
                 ErrorCode::DB_007,
             ),
-            (StorageError::Deadlock, ErrorCode::DB_001),
+            (deadlock(LockFailure::Deadlock), ErrorCode::DB_001),
+            (deadlock(LockFailure::LockTimeout), ErrorCode::DB_001),
+            (deadlock(LockFailure::Serialization), ErrorCode::DB_001),
             (StorageError::StatementTimeout, ErrorCode::DB_002),
             (StorageError::PoolTimeout, ErrorCode::DB_004),
             (StorageError::Unavailable, ErrorCode::DB_005),
@@ -179,7 +202,15 @@ mod tests {
                 "The change refers to an entry that does not exist.",
             ),
             (
-                StorageError::Deadlock,
+                deadlock(LockFailure::Deadlock),
+                "Another operation holds a lock on the same data. Try again.",
+            ),
+            (
+                deadlock(LockFailure::LockTimeout),
+                "Another operation holds a lock on the same data. Try again.",
+            ),
+            (
+                deadlock(LockFailure::Serialization),
                 "Another operation holds a lock on the same data. Try again.",
             ),
             (

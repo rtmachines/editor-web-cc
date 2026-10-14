@@ -114,7 +114,10 @@ fn unknown_missing_reference_name_gives_db_007() {
 
 #[test]
 fn other_storage_errors_keep_their_code_and_skip_the_closure() {
-    let error = map_storage(StorageError::Deadlock, |_| Some(AppError::Unauthenticated));
+    let deadlock = StorageError::Deadlock {
+        cause: crate::error::LockFailure::Deadlock,
+    };
+    let error = map_storage(deadlock, |_| Some(AppError::Unauthenticated));
     assert_eq!(error.code(), ErrorCode::DB_001);
 }
 

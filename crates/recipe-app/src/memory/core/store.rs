@@ -12,7 +12,7 @@ use super::journal::{DraftWrite, JournalEntry};
 use super::state::MemoryState;
 use super::transaction::MemoryTransaction;
 use crate::error::StorageError;
-use crate::memory::{Fault, MemoryClock};
+use crate::memory::{Fault, FaultPoint, MemoryClock};
 use crate::ports::Clock as _;
 use crate::ports::{Isolation, Transaction, UnitOfWork};
 
@@ -51,8 +51,20 @@ pub(super) struct Shared {
     pub(super) journal: Vec<JournalEntry>,
     pub(super) draft_writes: Vec<DraftWrite>,
     pub(super) faults: Faults,
+    pub(super) queued_faults: Vec<(FaultPoint, Fault)>,
     pub(super) clock: MemoryClock,
     pub(super) read_draft_hook: ReadDraftHook,
+}
+
+impl Shared {
+    /// Take the oldest queued fault of `point` out of the queue, or return `None`.
+    pub(super) fn take_queued(&mut self, point: FaultPoint) -> Option<Fault> {
+        let index = self
+            .queued_faults
+            .iter()
+            .position(|(queued, _fault)| *queued == point)?;
+        Some(self.queued_faults.remove(index).1)
+    }
 }
 
 /// An in-memory `UnitOfWork`.
@@ -114,6 +126,9 @@ impl MemoryStore {
     /// Returns the fault that `fail_begin` set. The journal then holds no `Begin` line.
     pub fn begin_memory(&self, isolation: Isolation) -> Result<MemoryTransaction, StorageError> {
         let mut shared = self.shared.lock();
+        if let Some(fault) = shared.take_queued(FaultPoint::Begin) {
+            return Err(fault.into());
+        }
         if let Some(fault) = shared.faults.begin {
             return Err(fault.into());
         }
@@ -124,6 +139,32 @@ impl MemoryStore {
             shared.clock.now(),
             isolation,
         ))
+    }
+
+    /// Run `work` as one pool-level transaction that commits at once (`LoginAttemptStore`,
+    /// `SessionStore`).
+    ///
+    /// The method solves one problem: a pool port opens its own transaction and cannot use
+    /// `UnitOfWork::commit`, because it writes no audit entry. It honours the fault of
+    /// `fail_begin`, journals a `Begin` line, and gives `work` the committed state, the time of the
+    /// clock, and the journal. The mutex stays locked while `work` runs, so the work is atomic.
+    ///
+    /// # Errors
+    ///
+    /// Returns the fault that `fail_begin` set. The journal then holds no `Begin` line.
+    pub(crate) fn pool_transaction<R>(
+        &self,
+        isolation: Isolation,
+        work: impl FnOnce(&mut MemoryState, Timestamp, &mut Vec<JournalEntry>) -> R,
+    ) -> Result<R, StorageError> {
+        let mut shared = self.shared.lock();
+        if let Some(fault) = shared.faults.begin {
+            return Err(fault.into());
+        }
+        shared.journal.push(JournalEntry::Begin(isolation));
+        let now = shared.clock.now();
+        let Shared { state, journal, .. } = &mut *shared;
+        Ok(work(state, now, journal))
     }
 
     /// Return a copy of the committed audit entries, in commit order.
@@ -153,6 +194,18 @@ impl MemoryStore {
     /// Make every later `begin` fail with `fault`.
     pub fn fail_begin(&self, fault: Fault) {
         self.shared.lock().faults.begin = Some(fault);
+    }
+
+    /// Make the next `times` calls at `point` fail with `fault`. Later calls succeed.
+    ///
+    /// The method solves one problem: a retry test needs a failure that happens once or twice
+    /// and then stops, while the `fail_*` methods fail every later call. A queued failure at
+    /// `Begin` leaves no `Begin` line in the journal.
+    pub fn fail_next(&self, point: FaultPoint, fault: Fault, times: u32) {
+        let mut shared = self.shared.lock();
+        for _ in 0..times {
+            shared.queued_faults.push((point, fault));
+        }
     }
 
     /// Make every later `append_audit` fail with `fault`.
@@ -208,7 +261,9 @@ impl MemoryStore {
 
     /// Stop all failures that the `fail_*` methods started.
     pub fn clear_failures(&self) {
-        self.shared.lock().faults = Faults::default();
+        let mut shared = self.shared.lock();
+        shared.faults = Faults::default();
+        shared.queued_faults.clear();
     }
 }
 

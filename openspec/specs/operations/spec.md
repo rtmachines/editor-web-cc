@@ -77,7 +77,7 @@ At startup, the service `app` SHALL check that `current_user` is `recipe_app`, i
 - **AND** `app` does not serve requests
 
 ### Requirement: First administrator
-The subcommand `recipe-server create-admin` SHALL read the login from an argument and the password from stdin or from a secret file. It SHALL do nothing when an active Administrator exists. It SHALL set `must_change_password` on the new Administrator and SHALL write the audit entry `UserCreated` with an empty actor (R21, R34).
+`recipe-server create-admin` SHALL read the login from `--login` and the password from stdin or from the file of `--password-file`. It SHALL connect as the role of `db.app_user`. It SHALL do nothing when an active Administrator exists. It SHALL check the password policy, set `must_change_password`, and write `UserCreated` with an empty actor (R21, R34, A23).
 
 #### Scenario: First run of create-admin
 - **GIVEN** a database with no active Administrator
@@ -89,6 +89,24 @@ The subcommand `recipe-server create-admin` SHALL read the login from an argumen
 - **GIVEN** an active Administrator
 - **WHEN** the operator runs `recipe-server create-admin` with a new login
 - **THEN** the subcommand does nothing
+- **AND** the subcommand writes one `INFO` line and exits with code 0
+
+#### Scenario: Password outside the policy
+- **GIVEN** a database with no active Administrator
+- **WHEN** the operator runs `recipe-server create-admin` with the login `admin` and a password of 11 characters on stdin
+- **THEN** the subcommand creates no user
+- **AND** the subcommand writes one `ERROR` line with `E-IDN-006` and exits with code 1
+
+#### Scenario: Password from a terminal
+- **GIVEN** a database with no active Administrator
+- **WHEN** the operator runs `recipe-server create-admin` with the login `admin` and stdin connected to a terminal
+- **THEN** the subcommand reads no password, creates no user, and exits with code 1
+
+#### Scenario: Password file with two lines
+- **GIVEN** a password file with two lines
+- **WHEN** the operator runs `recipe-server create-admin` with the login `admin` and `--password-file` set to that file
+- **THEN** the subcommand creates no user and exits with code 1
+- **AND** the output holds no line of the file
 
 ### Requirement: Durability settings of PostgreSQL
 The `db` service SHALL set `fsync`, `synchronous_commit`, and `full_page_writes` to `on`. The `db` service SHALL set `wal_level` to `replica` and `archive_mode` to `off`, because `walarchive` streams WAL with `pg_receivewal` (R31, A35).
@@ -463,3 +481,12 @@ The subcommand `recipe-server migrate` SHALL read the connection values from its
 - **WHEN** the operator runs `recipe-server migrate`
 - **THEN** the migrator applies `0001_schema.sql` to `0004_seed_plc_types.sql` as `recipe_migrator`
 - **AND** the subcommand exits with code 0
+
+### Requirement: No row values in the log of a storage error
+The log line of a storage error SHALL hold the error code and the messages of the error chain. It SHALL NOT hold the row values of a database detail. The database server SHALL log the errors of the application role without their detail (R35, R37).
+
+#### Scenario: Not-null failure on a user row
+- **GIVEN** a write of an `app_user` row that fails on a `NOT NULL` column
+- **WHEN** the error reaches the HTTP mapping
+- **THEN** the event log holds the code of the error
+- **AND** the event log and the server log of `db` hold no `$argon2id$`

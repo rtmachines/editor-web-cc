@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block error_panel %}{% if let Some(view) = view %}{% include "field-errors.html" %}{% endif %}{% endblock %}
+{% block content %}
+<h1>{{ t.get("login-title") }}</h1>
+<form method="post" action="/login">
+<p><label for="login">{{ t.get("login-label-login") }}</label>
+<input id="login" type="text" name="login" maxlength="64" required autocomplete="username" autocapitalize="none" spellcheck="false"></p>
+<p><label for="password">{{ t.get("login-label-password") }}</label>
+<input id="password" type="password" name="password" maxlength="128" required autocomplete="current-password"></p>
+<input type="hidden" name="csrf_pre" value="{{ nonce }}">
+<p><button type="submit">{{ t.get("login-submit") }}</button></p>
+</form>
+{% endblock %}

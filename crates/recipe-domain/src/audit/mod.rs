@@ -14,6 +14,6 @@ mod target;
 pub use action::AuditAction;
 pub use entry::{AuditContext, AuditEntry, DiffAction, RowAction, RowChange, StateAction};
 pub use request::{RequestId, UserAgent};
-pub use security::{LoginHmac, SecurityEvent, SecurityEventKind};
+pub use security::{LoginHmac, LoginSubject, SecurityEvent, SecurityEventKind};
 pub use session_ref::{SessionRef, SessionRefReason};
 pub use target::{AggregateType, AuditTarget};

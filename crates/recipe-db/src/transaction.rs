@@ -6,6 +6,7 @@
 mod draft_rows;
 mod draft_writes;
 mod drafts;
+mod identity;
 mod machines;
 mod parameter_rows;
 mod plant;
@@ -24,8 +25,8 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use recipe_app::error::StorageError;
 use recipe_app::ports::{
-    AuditWritten, DraftRepository, NonEmpty, PlantRepository, RecipeRepository, Transaction,
-    TypeCatalog, UnitLookup,
+    AttemptRepository, AuditWritten, DraftRepository, NonEmpty, PlantRepository, RecipeRepository,
+    SessionRepository, Transaction, TypeCatalog, UnitLookup, UserRepository,
 };
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::recipe::RecipeVersionId;
@@ -84,6 +85,18 @@ impl Transaction for PgTransaction {
     }
 
     fn types(&mut self) -> &mut dyn TypeCatalog {
+        self
+    }
+
+    fn users(&mut self) -> &mut dyn UserRepository {
+        self
+    }
+
+    fn sessions(&mut self) -> &mut dyn SessionRepository {
+        self
+    }
+
+    fn attempts(&mut self) -> &mut dyn AttemptRepository {
         self
     }
 

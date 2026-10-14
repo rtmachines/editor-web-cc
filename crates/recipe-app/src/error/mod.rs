@@ -12,4 +12,4 @@ pub use mapping::{
     RECIPE_VERSION_ONE_LIVE_DRAFT, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE, conflict, map_storage,
 };
 pub use missing::Missing;
-pub use storage::{AuditError, StorageError};
+pub use storage::{AuditError, LockFailure, StorageError};

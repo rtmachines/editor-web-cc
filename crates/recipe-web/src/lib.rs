@@ -8,3 +8,31 @@
 //! See `docs/architecture/overview.md` section 5 and `docs/architecture/api.md`.
 
 #![forbid(unsafe_code)]
+#![deny(missing_docs)]
+
+mod client;
+mod cookies;
+mod csrf;
+mod error;
+mod gates;
+mod hex;
+mod i18n;
+mod lang;
+mod limits;
+mod pages;
+mod pipeline;
+mod routes;
+mod session;
+mod settings;
+mod state;
+mod static_files;
+#[cfg(test)]
+mod test_support;
+
+pub use csrf::{PreSession, issue_pre_session};
+pub use error::{ByteLimit, WebError};
+pub use i18n::{BundleReason, Bundles, Lang, LangReason};
+pub use routes::{Access, router};
+pub use settings::{Cidr, CidrList, CidrReason, WebSettings};
+pub use state::{ReadOnlyMode, WebState};
+pub use static_files::{HTMX_SHA256, HTMX_VERSION};

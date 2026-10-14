@@ -20,6 +20,8 @@ use super::app::App;
 
 /// The key of the gate. The one-key advisory lock never meets the two-key locks of the adapter.
 const GATE_KEY: i64 = 7_240_200;
+/// The key of the second gate. It lets a test order the commits of two commands after the first gate.
+const SECOND_GATE_KEY: i64 = 7_240_201;
 /// The pause between two polls of `pg_stat_activity`.
 const POLL: Duration = Duration::from_millis(20);
 /// The longest time that a poll waits for its condition.
@@ -40,6 +42,24 @@ const BLOCKED_BY_GATE: &str = "SELECT count(*) FROM pg_stat_activity AS w \
                   JOIN pg_stat_activity AS g ON g.pid = b.pid \
                   WHERE g.wait_event_type = 'Lock' AND g.wait_event = 'advisory')";
 
+/// Sessions wait for the second gate in this database. A one-key lock has `objsubid` 1.
+const AT_SECOND_GATE: &str = "SELECT count(*) FROM pg_locks \
+    WHERE locktype = 'advisory' AND NOT granted AND classid = 0::oid AND objsubid = 1 \
+      AND objid = 7240201::oid \
+      AND database = (SELECT oid FROM pg_database WHERE datname = current_database())";
+
+/// The trigger text that waits for the gate when `condition` holds.
+///
+/// `condition` is PL/pgSQL text over `NEW`. The caller passes a constant.
+pub fn gate_statement(condition: &str) -> String {
+    gate_statement_for(GATE_KEY, condition)
+}
+
+/// The trigger text that waits for the advisory lock `key` when `condition` holds.
+fn gate_statement_for(key: i64, condition: &str) -> String {
+    format!("IF {condition} THEN PERFORM pg_catalog.pg_advisory_xact_lock_shared({key}); END IF;")
+}
+
 /// The settings of the pool of a race test: the default values with a long `lock_timeout`.
 pub fn pool() -> PoolSettings {
     PoolSettings {
@@ -53,9 +73,7 @@ impl App {
     ///
     /// `condition` is PL/pgSQL text over `NEW`. The caller passes a constant.
     pub async fn install_gate(&mut self, table: &str, events: &str, condition: &str) {
-        let body = format!(
-            "IF {condition} THEN PERFORM pg_catalog.pg_advisory_xact_lock_shared({GATE_KEY}); END IF;"
-        );
+        let body = gate_statement(condition);
         self.install_probe(table, "BEFORE", events, &body).await;
     }
 
@@ -77,6 +95,40 @@ impl App {
             .unwrap();
     }
 
+    /// Create the second gate: an `AFTER` row trigger that waits for the second key.
+    ///
+    /// The race tests put it on the audit insert. The chain trigger of the insert has then taken
+    /// the row lock of `audit_chain_head`, so the second command waits for that row until the
+    /// first command commits. `condition` is PL/pgSQL text over `NEW`. The caller passes a constant.
+    pub async fn install_second_gate(&mut self, table: &str, events: &str, condition: &str) {
+        let body = gate_statement_for(SECOND_GATE_KEY, condition);
+        self.install_probe(table, "AFTER", events, &body).await;
+    }
+
+    /// Close the second gate. A command that reaches it waits until `open_second_gate`.
+    pub async fn close_second_gate(&mut self) {
+        sqlx::query("SELECT pg_advisory_lock($1)")
+            .bind(SECOND_GATE_KEY)
+            .execute(self.admin())
+            .await
+            .unwrap();
+    }
+
+    /// Open the second gate. The waiting command continues.
+    pub async fn open_second_gate(&mut self) {
+        sqlx::query("SELECT pg_advisory_unlock($1)")
+            .bind(SECOND_GATE_KEY)
+            .execute(self.admin())
+            .await
+            .unwrap();
+    }
+
+    /// Poll until a session waits at the second gate.
+    pub async fn wait_until_at_second_gate(&mut self) {
+        self.poll_at_least(AT_SECOND_GATE, 1, "a command waits at the second gate")
+            .await;
+    }
+
     /// Poll until a session waits at the gate.
     pub async fn wait_until_at_gate(&mut self) {
         self.poll(AT_GATE, "a command waits at the gate").await;
@@ -88,14 +140,25 @@ impl App {
             .await;
     }
 
+    /// Poll until `count` sessions wait at the gate.
+    pub async fn wait_until_gate_holds(&mut self, count: i64) {
+        self.poll_at_least(AT_GATE, count, "the commands wait at the gate")
+            .await;
+    }
+
     async fn poll(&mut self, query: &str, what: &str) {
+        self.poll_at_least(query, 1, what).await;
+    }
+
+    /// Poll until a query that returns one count returns at least `at_least`.
+    pub async fn poll_at_least(&mut self, query: &str, at_least: i64, what: &str) {
         let start = Instant::now();
         loop {
             let waiting: i64 = sqlx::query_scalar(query)
                 .fetch_one(self.admin())
                 .await
                 .unwrap();
-            if waiting > 0 {
+            if waiting >= at_least {
                 return;
             }
             assert!(start.elapsed() < BOUND, "timeout: {what}");

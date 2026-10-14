@@ -5,14 +5,21 @@
 //! the audit log stay empty (ADR-0013). `ExportApprovedVersion` is not here, because every
 //! role holds `VersionExport`.
 
+use std::net::{IpAddr, Ipv4Addr};
+
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::identity::Role;
+use recipe_domain::identity::{Login, Role};
 
 use crate::auth::{CurrentUser, Operation};
 use crate::context::UseCase;
 use crate::error::AppError;
 use crate::export::ExportVersionByNumber;
+use crate::identity::fixtures::IdentityFixture;
+use crate::identity::{
+    ActivateUser, CreateUser, CreateUserInput, DeactivateUser, GetUser, GetUserForm, ListUsers,
+    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin,
+};
 use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
@@ -352,5 +359,208 @@ async fn restore_recipe_is_refused_for_a_process_engineer() {
         result,
         RestoreRecipe::OPERATION,
         "RestoreRecipe (ProcessEngineer)",
+    );
+}
+
+/// Assert that an identity use case refused `operation` before it opened a transaction.
+///
+/// `mark` is the journal length after the actor is built, because building the actor journals
+/// one session lookup. No new journal line may follow it.
+fn assert_identity_refused<T>(
+    fixture: &IdentityFixture,
+    mark: usize,
+    result: Result<T, AppError>,
+    operation: Operation,
+    name: &str,
+) {
+    let error = result.err();
+    assert_eq!(
+        error.as_ref().map(AppError::code),
+        Some(ErrorCode::WEB_002),
+        "{name}: error code"
+    );
+    assert!(
+        matches!(error, Some(AppError::Forbidden { operation: found }) if found == operation),
+        "{name}: refused operation"
+    );
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1, "{name}: one security event");
+    assert!(
+        events
+            .first()
+            .is_some_and(|event| event.kind() == SecurityEventKind::Forbidden),
+        "{name}: forbidden event"
+    );
+    assert_eq!(
+        fixture.store.journal().len(),
+        mark,
+        "{name}: no transaction is opened"
+    );
+    assert!(
+        fixture.store.audit_entries().is_empty(),
+        "{name}: no audit entry"
+    );
+}
+
+/// Return the login `text` as a value object.
+fn login(text: &str) -> Login {
+    Login::parse(text).unwrap()
+}
+
+/// The client address of the identity calls.
+fn client() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9))
+}
+
+#[tokio::test]
+async fn create_user_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let input = CreateUserInput {
+        login: login("berta"),
+        role: Role::Operator,
+    };
+    let result = CreateUser::new(fixture.context.clone())
+        .execute(&auth, &request, input)
+        .await;
+    assert_identity_refused(&fixture, mark, result, CreateUser::OPERATION, "CreateUser");
+}
+
+#[tokio::test]
+async fn set_user_role_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let input = SetUserRoleInput {
+        login: login("anna"),
+        role: Role::Administrator,
+    };
+    let result = SetUserRole::new(fixture.context.clone())
+        .execute(&auth, &request, input)
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        SetUserRole::OPERATION,
+        "SetUserRole",
+    );
+}
+
+#[tokio::test]
+async fn deactivate_user_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let result = DeactivateUser::new(fixture.context.clone())
+        .execute(&auth, &request, &login("anna"))
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        DeactivateUser::OPERATION,
+        "DeactivateUser",
+    );
+}
+
+#[tokio::test]
+async fn activate_user_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let result = ActivateUser::new(fixture.context.clone())
+        .execute(&auth, &request, &login("anna"))
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        ActivateUser::OPERATION,
+        "ActivateUser",
+    );
+}
+
+#[tokio::test]
+async fn reset_password_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let result = ResetPassword::new(fixture.context.clone())
+        .execute(&auth, &request, &login("anna"))
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        ResetPassword::OPERATION,
+        "ResetPassword",
+    );
+}
+
+#[tokio::test]
+async fn unlock_login_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let result = UnlockLogin::new(fixture.context.clone())
+        .execute(&auth, &request, &login("anna"), client())
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        UnlockLogin::OPERATION,
+        "UnlockLogin",
+    );
+}
+
+#[tokio::test]
+async fn list_users_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let input = ListUsersInput { q: None, page: 0 };
+    let result = ListUsers::new(fixture.context.clone())
+        .execute(&auth, &request, input)
+        .await;
+    assert_identity_refused(&fixture, mark, result, ListUsers::OPERATION, "ListUsers");
+}
+
+#[tokio::test]
+async fn get_user_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let result = GetUser::new(fixture.context.clone())
+        .execute(&auth, &request, &login("anna"))
+        .await;
+    assert_identity_refused(&fixture, mark, result, GetUser::OPERATION, "GetUser");
+}
+
+#[tokio::test]
+async fn get_user_form_checks_the_permission_first() {
+    let fixture = IdentityFixture::new();
+    fixture.seed_anna("secret-phrase-one", false);
+    let (auth, request) = fixture.actor(Role::Operator).await;
+    let mark = fixture.store.journal().len();
+    let result = GetUserForm::new(fixture.context.clone())
+        .execute(&auth, &request)
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        GetUserForm::OPERATION,
+        "GetUserForm",
     );
 }

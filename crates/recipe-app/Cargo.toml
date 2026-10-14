@@ -13,21 +13,24 @@ recipe-domain = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true, features = ["rt", "time"] }
+tokio = { workspace = true, features = ["rt", "time", "sync"] }
+argon2 = { workspace = true }
+getrandom = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 parking_lot = { workspace = true, optional = true }
 # The in-memory clock starts at an OffsetDateTime and advances by a Duration.
-time = { workspace = true, optional = true }
+# `UnlockLogin` writes the time of an attempt as RFC 3339 text, so the crate always needs `time`.
+time = { workspace = true, features = ["formatting"] }
 
 [features]
 # In-memory adapters for tests (design.md D2). recipe-server never enables it.
-memory = ["dep:parking_lot", "dep:time"]
+memory = ["dep:parking_lot"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 parking_lot = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = ["parsing"] }
 
 [lints]
 workspace = true

@@ -16,6 +16,7 @@ mod pool;
 mod race;
 mod roles;
 mod schema;
+mod security_event_guard;
 mod security_events;
 mod seed;
 mod support;

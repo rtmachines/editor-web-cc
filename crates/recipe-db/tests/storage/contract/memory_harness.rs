@@ -4,11 +4,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use recipe_app::memory::{MemoryClock, MemoryStore};
-use recipe_app::ports::UnitOfWork;
-use recipe_domain::identity::UserId;
-use uuid::Uuid;
+use std::net::IpAddr;
 
-use super::harness::Harness;
+use recipe_app::ports::{AttemptId, Clock as _, LoginAttemptStore, SessionStore, UnitOfWork};
+use recipe_domain::identity::{TypedLogin, UserId};
+use recipe_domain::timestamp::Timestamp;
+
+use super::harness::{Harness, seed_actor};
 
 /// The in-memory adapter with the seed types of the plant model.
 pub struct MemoryHarness {
@@ -17,14 +19,14 @@ pub struct MemoryHarness {
 }
 
 impl MemoryHarness {
-    /// Build an empty store with a clock at the Unix epoch and the primitive types.
-    pub fn new() -> Self {
+    /// Build a store with a clock at the Unix epoch, the primitive types, and the harness user.
+    ///
+    /// The user comes through `UserRepository::insert`, as in the postgres harness.
+    pub async fn create() -> Self {
         let store = MemoryStore::with_clock(MemoryClock::default());
         store.seed_primitive_types();
-        Self {
-            store,
-            user: UserId::from(Uuid::new_v4()),
-        }
+        let user = seed_actor(&store).await;
+        Self { store, user }
     }
 }
 
@@ -36,5 +38,31 @@ impl Harness for MemoryHarness {
 
     fn user(&self) -> UserId {
         self.user
+    }
+
+    fn session_store(&self) -> Arc<dyn SessionStore> {
+        Arc::new(self.store.clone())
+    }
+
+    fn login_attempts(&self) -> Arc<dyn LoginAttemptStore> {
+        Arc::new(self.store.clone())
+    }
+
+    async fn seed_attempts(
+        &self,
+        login: &TypedLogin,
+        client_ip: IpAddr,
+        ages: &[u64],
+        succeeded: bool,
+    ) -> Vec<AttemptId> {
+        let now = self.store.clock().now();
+        ages.iter()
+            .map(|age| {
+                let age = time::Duration::seconds(i64::try_from(*age).unwrap());
+                let at = now.as_offset_date_time().checked_sub(age).unwrap();
+                self.store
+                    .seed_attempt(login, client_ip, Timestamp::from(at), succeeded)
+            })
+            .collect()
     }
 }

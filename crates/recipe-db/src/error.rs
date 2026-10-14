@@ -5,17 +5,18 @@
 //! section 1.1:
 //!
 //! 1. A database error whose message starts with a trigger code of the ranges `E-PLT-030..049` and
-//!    `E-RCP-030..049` becomes `Constraint` with that code, whatever its SQLSTATE. This check
-//!    comes first.
+//!    `E-RCP-030..049`, or with `E-AUD-003`, becomes `Constraint` with that code, whatever its
+//!    SQLSTATE. This check comes first.
 //! 2. Then the SQLSTATE decides: `23505`, `23503`, `23514`, `40P01`, `40001`, `57014`, and `55P03`.
-//!    The SQLSTATEs of a lost connection (class `08`, `57P01`, `57P02`, `57P03`, and `53300`) give
+//!    `40P01`, `55P03`, and `40001` give `Deadlock` with the cause `Deadlock`, `LockTimeout`,
+//!    and `Serialization`. The SQLSTATEs of a lost connection (class `08`, `57P01`, `57P02`, `57P03`, and `53300`) give
 //!    `Unavailable`.
 //! 3. Then the kind of the driver error decides: a pool timeout and the connection failures.
 //! 4. Every other error becomes `Other` and keeps the original error as its source.
 
 use std::fmt;
 
-use recipe_app::error::StorageError;
+use recipe_app::error::{LockFailure, StorageError};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::recipe::RecipeVersionId;
 
@@ -36,7 +37,7 @@ const FOREIGN_KEY_VIOLATION: &str = "23503";
 /// SQLSTATE `deadlock_detected`. A deadlock is a bug in the lock order (ADR-0015).
 const DEADLOCK_DETECTED: &str = "40P01";
 
-/// SQLSTATE `serialization_failure`. P2.5 adds the one retry of the `SERIALIZABLE` commands.
+/// SQLSTATE `serialization_failure`. `serializable_once_more` retries it once.
 const SERIALIZATION_FAILURE: &str = "40001";
 
 /// SQLSTATE `query_canceled`. PostgreSQL raises it when `statement_timeout` ends a statement.
@@ -131,10 +132,14 @@ pub(crate) fn is_lock_timeout(error: &sqlx::Error) -> bool {
 /// Return the trigger code that starts a database message, when the code lies in a trigger range.
 ///
 /// The trigger ranges are `E-PLT-030..049` and `E-RCP-030..049`. Every code of the registry
-/// in these ranges has a user message.
+/// in these ranges has a user message. `E-AUD-003` of the trigger `security_event_guard` is the
+/// one trigger code outside these ranges (ADR-0035).
 fn trigger_code(message: &str) -> Option<ErrorCode> {
     let first = message.split_whitespace().next()?;
     let code = ErrorCode::find(first)?;
+    if code == ErrorCode::AUD_003 {
+        return Some(code);
+    }
     let text = code.as_str();
     let is_trigger_prefix = matches!(text.get(..6), Some("E-PLT-" | "E-RCP-"));
     let number = text.get(6..)?.parse::<u16>().ok()?;
@@ -168,6 +173,11 @@ fn trigger_constraint(error: &sqlx::Error) -> Option<StorageError> {
     constraint(code)
 }
 
+/// Build the storage error of a lock failure. All three causes share the code `E-DB-001`.
+const fn lock_failure(cause: LockFailure) -> StorageError {
+    StorageError::Deadlock { cause }
+}
+
 /// Map a database error by its SQLSTATE.
 ///
 /// A duplicate or a missing reference needs the name of the constraint. Without a name, the
@@ -183,9 +193,9 @@ fn by_sqlstate(error: &sqlx::Error) -> Option<StorageError> {
             constraint_name().map(|constraint| StorageError::MissingReference { constraint })
         }
         CHECK_VIOLATION => constraint(ErrorCode::DB_003),
-        DEADLOCK_DETECTED | SERIALIZATION_FAILURE | LOCK_NOT_AVAILABLE => {
-            Some(StorageError::Deadlock)
-        }
+        DEADLOCK_DETECTED => Some(lock_failure(LockFailure::Deadlock)),
+        LOCK_NOT_AVAILABLE => Some(lock_failure(LockFailure::LockTimeout)),
+        SERIALIZATION_FAILURE => Some(lock_failure(LockFailure::Serialization)),
         QUERY_CANCELED => Some(StorageError::StatementTimeout),
         state if is_connection_loss(state) => Some(StorageError::Unavailable),
         _ => None,

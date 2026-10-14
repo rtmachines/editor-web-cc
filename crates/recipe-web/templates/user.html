@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t.get("user-title") }}: {{ login }}</h1>
+<dl>
+<dt>{{ t.get("user-label-login") }}</dt>
+<dd>{{ login }}</dd>
+<dt>{{ t.get("user-label-role") }}</dt>
+<dd>{{ role }}</dd>
+<dt>{{ t.get("user-label-status") }}</dt>
+<dd>{{ status }}</dd>
+{% if must_change %}<dt>{{ t.get("user-label-password") }}</dt>
+<dd>{{ t.get("users-must-change-yes") }}</dd>
+{% endif %}<dt>{{ t.get("user-label-created") }}</dt>
+<dd>{{ created }}</dd>
+{% if let Some(when) = deactivated %}<dt>{{ t.get("user-label-deactivated") }}</dt>
+<dd>{{ when }}</dd>
+{% endif %}<dt>{{ t.get("user-label-failures") }}</dt>
+<dd id="failures">{{ failures }}</dd>
+<dt>{{ t.get("user-label-last-failure") }}</dt>
+<dd id="last-failure">{% if let Some(when) = last_failure %}{{ when }}{% else %}{{ t.get("user-never") }}{% endif %}</dd>
+</dl>
+<div id="user-result" role="status"></div>
+<form method="post" action="/users/{{ login }}/role" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<label for="role">{{ t.get("user-role-label") }}</label>
+<select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>
+<button type="submit">{{ t.get("user-role-submit") }}</button>
+</form>
+<form method="post" action="/users/{{ login }}/deactivate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<button type="submit">{{ t.get("user-deactivate-submit") }}</button>
+</form>
+<form method="post" action="/users/{{ login }}/activate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<button type="submit">{{ t.get("user-activate-submit") }}</button>
+</form>
+<form method="post" action="/users/{{ login }}/reset-password" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<button type="submit">{{ t.get("user-reset-submit") }}</button>
+</form>
+<form method="post" action="/users/{{ login }}/unlock" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<button type="submit">{{ t.get("user-unlock-submit") }}</button>
+</form>
+<p><a href="/users">{{ t.get("users-title") }}</a></p>
+{% include "logout-form.html" %}
+{% endblock %}

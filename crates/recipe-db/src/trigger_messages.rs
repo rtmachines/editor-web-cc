@@ -37,6 +37,7 @@ pub(crate) fn user_message(code: ErrorCode) -> Option<&'static str> {
         ),
         ErrorCode::RCP_035 => Some("The version has more than 4 000 parameters."),
         ErrorCode::RCP_036 => Some("The version has more than 32 768 limit rows."),
+        ErrorCode::AUD_003 => Some("A security event cannot change. Contact the administrator."),
         ErrorCode::DB_003 => Some("The change violates a database rule."),
         _ => None,
     }

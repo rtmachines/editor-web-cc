@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::fmt;
 
-use recipe_app::error::StorageError;
+use recipe_app::error::{LockFailure, StorageError};
 use recipe_domain::error_codes::ErrorCode;
 use sqlx::error::{DatabaseError, ErrorKind};
 
@@ -91,6 +91,21 @@ fn check_violation_with_a_trigger_code_gives_that_code_and_its_message() {
 }
 
 #[test]
+fn the_guard_of_security_event_gives_e_aud_003_and_its_message() {
+    let error =
+        database_error_with_message("23514", "E-AUD-003 security event 7 allows only count + 1");
+
+    let mapped = map_error(error);
+
+    assert!(
+        matches!(&mapped, StorageError::Constraint { code, message }
+            if *code == ErrorCode::AUD_003
+                && message.as_str() == "A security event cannot change. Contact the administrator."),
+        "{mapped:?}"
+    );
+}
+
+#[test]
 fn check_violation_without_a_trigger_code_gives_e_db_003() {
     let error = database_error_with_message("23514", "new row violates check constraint");
 
@@ -116,11 +131,16 @@ fn a_code_outside_the_trigger_ranges_gives_e_db_003() {
 }
 
 #[test]
-fn lock_not_available_maps_to_deadlock() {
+fn lock_not_available_maps_to_lock_timeout() {
     let error = database_error("55P03");
 
     assert!(is_lock_timeout(&error));
-    assert!(matches!(map_error(error), StorageError::Deadlock));
+    assert!(matches!(
+        map_error(error),
+        StorageError::Deadlock {
+            cause: LockFailure::LockTimeout
+        }
+    ));
 }
 
 #[test]
@@ -220,12 +240,34 @@ fn a_violation_without_a_constraint_name_gives_other_with_its_sqlstate() {
 }
 
 #[test]
-fn a_deadlock_and_a_serialization_failure_give_deadlock() {
-    for sqlstate in ["40P01", "40001"] {
-        let mapped = map_error(database_error(sqlstate));
+fn a_deadlock_gives_the_cause_deadlock() {
+    let mapped = map_error(database_error("40P01"));
 
-        assert!(matches!(mapped, StorageError::Deadlock), "{sqlstate}");
-    }
+    assert!(
+        matches!(
+            mapped,
+            StorageError::Deadlock {
+                cause: LockFailure::Deadlock
+            }
+        ),
+        "{mapped:?}"
+    );
+}
+
+#[test]
+fn a_serialization_failure_gives_the_cause_serialization() {
+    let mapped = map_error(database_error("40001"));
+
+    assert!(
+        matches!(
+            mapped,
+            StorageError::Deadlock {
+                cause: LockFailure::Serialization
+            }
+        ),
+        "{mapped:?}"
+    );
+    assert_eq!(mapped.code(), ErrorCode::DB_001);
 }
 
 #[test]

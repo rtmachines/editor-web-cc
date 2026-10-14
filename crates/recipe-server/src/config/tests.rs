@@ -11,7 +11,9 @@ use figment::Figment;
 use figment::providers::Serialized;
 
 use super::args::{self, Command};
-use super::{ENV_KEYS, SecretFault, Settings, load_with, migrator_connection, secret_line};
+use super::{
+    ENV_KEYS, SecretFault, Settings, app_connection, load_with, migrator_connection, secret_line,
+};
 
 static NEXT_NUMBER: AtomicU32 = AtomicU32::new(0);
 
@@ -322,7 +324,9 @@ fn config_repeated_option_gives_an_error() {
 fn config_unknown_subcommand_gives_an_error() {
     let error = args::parse(&words(&["frobnicate"])).unwrap_err();
 
-    assert!(error.to_string().contains("frobnicate"), "{error}");
+    let message = format!("{error:#}");
+    assert!(message.contains("argument 1 is not known"), "{message}");
+    assert!(!message.contains("frobnicate"), "{message}");
 }
 
 #[test]
@@ -336,15 +340,177 @@ fn config_missing_subcommand_gives_an_error() {
 fn config_unknown_option_gives_an_error() {
     let error = args::parse(&words(&["migrate", "--verbose"])).unwrap_err();
 
-    assert!(error.to_string().contains("--verbose"), "{error}");
+    let message = format!("{error:#}");
+    assert!(message.contains("argument 2 is not known"), "{message}");
+    assert!(!message.contains("--verbose"), "{message}");
 }
 
 #[test]
-fn config_serve_and_create_admin_parse_but_other_options_do_not() {
-    assert_eq!(args::parse(&words(&["serve"])).unwrap(), Command::Serve);
-    assert_eq!(
-        args::parse(&words(&["create-admin"])).unwrap(),
-        Command::CreateAdmin
+fn config_unknown_argument_never_appears_in_the_error() {
+    const SECRET: &str = "S3cret-Passw0rd-x";
+    for args in [
+        &["create-admin", "--login", "admin", SECRET][..],
+        &["create-admin", SECRET][..],
+        &["migrate", SECRET][..],
+        &["serve", SECRET][..],
+        &[SECRET][..],
+    ] {
+        let error = args::parse(&words(args)).unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("is not known"), "{args:?}: {message}");
+        assert!(!message.contains(SECRET), "{args:?}: {message}");
+        assert!(!format!("{error:?}").contains(SECRET), "{args:?}");
+    }
+    let error = args::parse(&words(&["create-admin", "--login", "admin", SECRET])).unwrap_err();
+    assert!(
+        format!("{error:#}").contains("argument 4 is not known"),
+        "{error:#}"
     );
+}
+
+#[test]
+fn config_serve_parses_but_takes_no_options() {
+    assert_eq!(args::parse(&words(&["serve"])).unwrap(), Command::Serve);
     assert!(args::parse(&words(&["serve", "--config", "x"])).is_err());
+}
+
+#[test]
+fn config_create_admin_requires_the_login() {
+    let error = args::parse(&words(&["create-admin"])).unwrap_err();
+
+    assert!(error.to_string().contains("--login"), "{error}");
+    let error = args::parse(&words(&["create-admin", "--config", "x"])).unwrap_err();
+    assert!(error.to_string().contains("--login"), "{error}");
+}
+
+#[test]
+fn config_create_admin_takes_login_password_file_and_config() {
+    let command = args::parse(&words(&["create-admin", "--login", "Boss.One"])).unwrap();
+    assert!(
+        matches!(
+            &command,
+            Command::CreateAdmin { login, password_file: None, config: None }
+                if login.as_str() == "boss.one"
+        ),
+        "{command:?}"
+    );
+
+    let command = args::parse(&words(&[
+        "create-admin",
+        "--config",
+        "/etc/recipe.toml",
+        "--password-file",
+        "/run/pw",
+        "--login",
+        "admin",
+    ]))
+    .unwrap();
+    assert!(
+        matches!(
+            &command,
+            Command::CreateAdmin { login, password_file: Some(file), config: Some(path) }
+                if login.as_str() == "admin"
+                    && file == Path::new("/run/pw")
+                    && path == Path::new("/etc/recipe.toml")
+        ),
+        "{command:?}"
+    );
+}
+
+#[test]
+fn config_create_admin_rejects_unknown_repeated_and_incomplete_options() {
+    for bad in [
+        &["create-admin", "--login", "admin", "--verbose"][..],
+        &["create-admin", "--login", "admin", "--login", "other"][..],
+        &["create-admin", "--login"][..],
+        &["create-admin", "--login", "admin", "--password-file"][..],
+        &[
+            "create-admin",
+            "--login",
+            "admin",
+            "--password-file",
+            "a",
+            "--password-file",
+            "b",
+        ][..],
+        &[
+            "create-admin",
+            "--login",
+            "admin",
+            "--config",
+            "a",
+            "--config",
+            "b",
+        ][..],
+        &["create-admin", "--login", "no"][..],
+        &["create-admin", "--login", "has space"][..],
+    ] {
+        assert!(args::parse(&words(bad)).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn config_app_user_defaults_to_recipe_app_and_its_secret_file_to_the_table() {
+    let settings = load_with(None, no_environment()).unwrap();
+
+    assert_eq!(settings.db.app_user, "recipe_app");
+    assert_eq!(
+        settings.secrets.app_password_file,
+        PathBuf::from("/run/secrets/app_password")
+    );
+}
+
+#[test]
+fn config_app_user_comes_from_the_file_and_the_environment_overrides_it() {
+    let dir = Sandbox::new();
+    let path = dir.write(
+        "recipe.toml",
+        "[db]\napp_user = \"from_file\"\n[secrets]\napp_password_file = '/file/app'\n",
+    );
+    let from_file = load_with(Some(&path), no_environment()).unwrap();
+    assert_eq!(from_file.db.app_user, "from_file");
+    assert_eq!(
+        from_file.secrets.app_password_file,
+        PathBuf::from("/file/app")
+    );
+
+    let environment = Figment::new().merge(Serialized::default("db.app_user", "from_env"));
+    let settings = load_with(Some(&path), environment).unwrap();
+    assert_eq!(settings.db.app_user, "from_env");
+}
+
+#[test]
+fn config_environment_names_include_the_app_keys() {
+    assert!(ENV_KEYS.contains(&"db__app_user"));
+    assert!(ENV_KEYS.contains(&"secrets__app_password_file"));
+}
+
+#[test]
+fn config_app_connection_uses_the_app_user_and_its_secret_file() {
+    let dir = Sandbox::new();
+    let secret = dir.write("app_secret", "app-secret-text\n");
+    let mut settings = Settings::default();
+    settings.secrets.app_password_file = secret;
+
+    let connection = app_connection(&settings).unwrap();
+
+    assert_eq!(connection.user, "recipe_app");
+    assert_eq!(connection.database, "recipe");
+    let debug = format!("{connection:?}");
+    assert!(!debug.contains("app-secret-text"), "{debug}");
+}
+
+#[test]
+fn config_app_secret_fault_names_the_key_and_hides_the_content() {
+    let dir = Sandbox::new();
+    let mut settings = Settings::default();
+    settings.secrets.app_password_file = dir.write("app_secret", "topsecretvalue\nsecondline\n");
+
+    let error = app_connection(&settings).unwrap_err();
+
+    let text = format!("{error:#}");
+    assert!(text.contains("secrets.app_password_file"), "{text}");
+    assert!(text.contains("more than one line"), "{text}");
+    assert!(!text.contains("topsecretvalue"), "{text}");
 }

@@ -10,6 +10,7 @@ use recipe_domain::recipe::ReferenceNumber;
 ///
 /// The type solves one problem: `E-WEB-005` must name the missing entity in one fixed form.
 /// `Display` gives the text of `{entity}` in the message of `E-WEB-005`.
+/// `E-WEB-005` has this one owner. A path value that does not parse uses `MalformedLogin`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Missing {
     /// A machine, found by its code.
@@ -41,6 +42,11 @@ pub enum Missing {
     },
     /// A user.
     User(Login),
+    /// A user that a `{login}` path value names, when the value is not a login.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedLogin,
 }
 
 impl Missing {
@@ -72,6 +78,7 @@ impl fmt::Display for Missing {
                 write!(f, "Version {number} of recipe {reference}")
             }
             Self::User(login) => write!(f, "User {login}"),
+            Self::MalformedLogin => f.write_str("User"),
         }
     }
 }

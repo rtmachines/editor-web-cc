@@ -124,7 +124,7 @@ async fn the_guard_list_equals_the_objects_that_audit_owner_owns() {
     .unwrap();
 
     let owned: BTreeSet<String> = owned.into_iter().collect();
-    assert_eq!(owned.len(), 6, "{owned:?}");
+    assert_eq!(owned.len(), 7, "{owned:?}");
     assert_eq!(quoted_public_identities(&definition), owned);
 }
 

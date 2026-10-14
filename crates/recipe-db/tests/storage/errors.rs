@@ -14,7 +14,7 @@
 //! | `23503`, `MissingReference` | `contract::unit::insert_unit_with_a_missing_parent_gives_missing_reference` and the other reference cases |
 //! | A constraint name that a use case does not know, `E-DB-006` and `E-DB-007` | The name reaches the use case from a real server in `an_unknown_unique_constraint_gives_duplicate_with_its_name` and `an_unknown_foreign_key_gives_missing_reference_with_its_name` here. The conversion is `map_storage` of `recipe-app`: `error::mapping::tests`, `plant::add_unit::tests`, `recipe::add_parameter::tests`, `recipe::update_definition::tests` |
 //! | `40P01`, `Deadlock`, `E-DB-001` | `two_transactions_that_lock_two_machines_in_opposite_order_give_one_deadlock` here |
-//! | `40001`, `Deadlock` | The unit test of `error`. The retry belongs to P2.5 (`SetUserRole`, `DeactivateUser`) |
+//! | `40001`, `Deadlock` with the cause `Serialization` | The unit test of `error`. The retry belongs to P2.5 (`SetUserRole`, `DeactivateUser`) |
 //! | `57014`, `StatementTimeout`, `E-DB-002` | `pool::a_statement_that_runs_too_long_gives_statement_timeout` |
 //! | `55P03`, `Deadlock`, `E-DB-001` | `pool::a_lock_wait_that_passes_the_lock_timeout_gives_deadlock` |
 //! | Pool acquire timeout, `E-DB-004` | `pool::a_pool_without_a_free_connection_gives_pool_timeout` |
@@ -23,7 +23,7 @@
 
 use std::sync::Arc;
 
-use recipe_app::error::StorageError;
+use recipe_app::error::{LockFailure, StorageError};
 use recipe_app::ports::{Isolation, UnitOfWork};
 use recipe_db::Database;
 use recipe_db::settings::PoolSettings;
@@ -138,7 +138,12 @@ async fn two_transactions_that_lock_two_machines_in_opposite_order_give_one_dead
         (left, right_result.err().unwrap())
     };
     assert!(
-        matches!(loser_error, StorageError::Deadlock),
+        matches!(
+            loser_error,
+            StorageError::Deadlock {
+                cause: LockFailure::Deadlock
+            }
+        ),
         "{loser_error:?}"
     );
     assert_eq!(loser_error.code(), ErrorCode::DB_001);

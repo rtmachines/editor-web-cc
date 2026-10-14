@@ -1,7 +1,7 @@
 //! Failure that a test injects into an in-memory adapter.
 
 use crate::error::{
-    PLC_TYPE_MEMBER_NAME_UNIQUE, PLC_TYPE_NAMED_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT,
+    LockFailure, PLC_TYPE_MEMBER_NAME_UNIQUE, PLC_TYPE_NAMED_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT,
     StorageError, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE,
 };
 
@@ -11,8 +11,11 @@ use crate::error::{
 /// source, so a test cannot store one in a shared failure slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fault {
-    /// The failure `StorageError::Deadlock` (`E-DB-001`).
+    /// The failure `StorageError::Deadlock` with the cause `LockFailure::Deadlock` (`E-DB-001`).
     Deadlock,
+    /// The failure `StorageError::Deadlock` with the cause `LockFailure::Serialization`
+    /// (`E-DB-001`, SQLSTATE `40001`).
+    Serialization,
     /// The failure `StorageError::StatementTimeout` (`E-DB-002`).
     StatementTimeout,
     /// The failure `StorageError::PoolTimeout` (`E-DB-004`).
@@ -31,6 +34,17 @@ pub enum Fault {
     DuplicateMemberName,
     /// The failure `StorageError::MissingReference` with a constraint that no command knows.
     UnknownMissingReference,
+}
+
+/// The place where a queued fault fires (`MemoryStore::fail_next`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaultPoint {
+    /// The call `begin` of the unit of work.
+    Begin,
+    /// The write of the audit entries inside `commit`.
+    AppendAudit,
+    /// The `finish` of the transaction, which is the commit of the database.
+    Finish,
 }
 
 /// The constraint name of [`Fault::UnknownMissingReference`]. No command maps it.
@@ -57,7 +71,12 @@ impl From<Fault> for StorageError {
             Fault::UnknownMissingReference => Self::MissingReference {
                 constraint: UNKNOWN_CONSTRAINT.to_owned(),
             },
-            Fault::Deadlock => Self::Deadlock,
+            Fault::Deadlock => Self::Deadlock {
+                cause: LockFailure::Deadlock,
+            },
+            Fault::Serialization => Self::Deadlock {
+                cause: LockFailure::Serialization,
+            },
             Fault::StatementTimeout => Self::StatementTimeout,
             Fault::PoolTimeout => Self::PoolTimeout,
             Fault::Unavailable => Self::Unavailable,

@@ -16,6 +16,7 @@ pub mod blocking;
 pub mod context;
 pub mod error;
 pub mod export;
+pub mod identity;
 #[cfg(any(test, feature = "memory"))]
 pub mod memory;
 pub mod plant;

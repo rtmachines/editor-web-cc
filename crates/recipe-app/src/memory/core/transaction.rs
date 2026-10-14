@@ -13,9 +13,10 @@ use super::journal::{DraftWrite, JournalEntry, Lock, LockMode, WriteKind};
 use super::state::MemoryState;
 use super::store::{MemoryStore, Shared};
 use crate::error::StorageError;
+use crate::memory::FaultPoint;
 use crate::ports::{
-    AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository, RecipeRepository,
-    Transaction, TypeCatalog, UnitLookup,
+    AttemptRepository, AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository,
+    RecipeRepository, SessionRepository, Transaction, TypeCatalog, UnitLookup, UserRepository,
 };
 
 /// An open in-memory transaction.
@@ -132,10 +133,27 @@ impl Transaction for MemoryTransaction {
         self
     }
 
+    fn users(&mut self) -> &mut dyn UserRepository {
+        self
+    }
+
+    fn sessions(&mut self) -> &mut dyn SessionRepository {
+        self
+    }
+
+    fn attempts(&mut self) -> &mut dyn AttemptRepository {
+        self
+    }
+
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {
-        if let Some(fault) = self.shared.lock().faults.append_audit {
+        let mut shared = self.shared.lock();
+        if let Some(fault) = shared.take_queued(FaultPoint::AppendAudit) {
             return Err(fault.into());
         }
+        if let Some(fault) = shared.faults.append_audit {
+            return Err(fault.into());
+        }
+        drop(shared);
         self.pending_audit.extend(entries.iter().cloned());
         Ok(())
     }
@@ -148,6 +166,9 @@ impl Transaction for MemoryTransaction {
             ));
         }
         let mut shared = this.shared.lock();
+        if let Some(fault) = shared.take_queued(FaultPoint::Finish) {
+            return Err(fault.into());
+        }
         if let Some(fault) = shared.faults.finish {
             return Err(fault.into());
         }

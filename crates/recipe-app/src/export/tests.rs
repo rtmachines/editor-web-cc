@@ -25,8 +25,9 @@ use crate::memory::fixtures::{
 };
 use crate::memory::{JournalEntry, LockMode, MemoryStore};
 use crate::ports::{
-    AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository, RecipeRepository,
-    Transaction, TypeCatalog, UnitLookup, UnitOfWork,
+    AttemptRepository, AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository,
+    RecipeRepository, SessionRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork,
+    UserRepository,
 };
 use crate::recipe::{
     ApproveVersion, ApproveVersionInput, RenameRecipe, RenameRecipeInput, RetireVersion,
@@ -428,6 +429,18 @@ impl Transaction for SlowCommitTransaction {
 
     fn types(&mut self) -> &mut dyn TypeCatalog {
         self.inner.types()
+    }
+
+    fn users(&mut self) -> &mut dyn UserRepository {
+        self.inner.users()
+    }
+
+    fn sessions(&mut self) -> &mut dyn SessionRepository {
+        self.inner.sessions()
+    }
+
+    fn attempts(&mut self) -> &mut dyn AttemptRepository {
+        self.inner.attempts()
     }
 
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {

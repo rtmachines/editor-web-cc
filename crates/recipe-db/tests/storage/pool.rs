@@ -8,7 +8,7 @@ use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 
-use recipe_app::error::StorageError;
+use recipe_app::error::{LockFailure, StorageError};
 use recipe_app::ports::{Isolation, UnitOfWork};
 use recipe_db::Database;
 use recipe_db::settings::PoolSettings;
@@ -161,7 +161,15 @@ async fn a_lock_wait_that_passes_the_lock_timeout_gives_deadlock() {
 
     let error = tx.append_audit(&list).await.unwrap_err();
 
-    assert!(matches!(error, StorageError::Deadlock), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            StorageError::Deadlock {
+                cause: LockFailure::LockTimeout
+            }
+        ),
+        "{error:?}"
+    );
     assert_eq!(error.code(), ErrorCode::DB_001);
 }
 

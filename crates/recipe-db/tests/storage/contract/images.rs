@@ -13,6 +13,7 @@ use serde_json::Value;
 pub enum Kind {
     String,
     Number,
+    Bool,
     Null,
     Array,
 }
@@ -33,6 +34,7 @@ fn kind_name(kind: Kind) -> String {
     match kind {
         Kind::String => "string",
         Kind::Number => "number",
+        Kind::Bool => "bool",
         Kind::Null => "null",
         Kind::Array => "array",
     }
@@ -151,6 +153,39 @@ pub fn version_shape(based_on: bool, stage: Stage) -> Vec<(&'static str, Kind)> 
         ("retired_at", nullable(stage == Stage::Retired)),
         ("deleted_at", nullable(stage == Stage::Discarded)),
     ]
+}
+
+/// The shape of an `app_user` image without `password_hash` (`data-model.md` section 3.5).
+pub fn user_shape(deactivated: bool) -> Vec<(&'static str, Kind)> {
+    vec![
+        ("id", Kind::String),
+        ("login", Kind::String),
+        ("role", Kind::String),
+        ("is_active", Kind::Bool),
+        ("session_epoch", Kind::Number),
+        ("must_change_password", Kind::Bool),
+        ("deactivated_at", nullable(deactivated)),
+        ("created_at", Kind::String),
+        ("updated_at", Kind::String),
+    ]
+}
+
+/// The keys whose values differ between two images, without the time of the last change.
+///
+/// The trigger `app_user_set_updated_at` sets `updated_at` to the time of the transaction, and
+/// the adapters differ in the first value of that time. Every other key counts.
+pub fn changed_keys(before: &RowImage, after: &RowImage) -> Vec<String> {
+    let (Some(old), Some(new)) = (before.as_value().as_object(), after.as_value().as_object())
+    else {
+        return vec!["not an object".to_owned()];
+    };
+    let mut keys: Vec<String> = new
+        .iter()
+        .filter(|(key, value)| key.as_str() != "updated_at" && old.get(*key) != Some(*value))
+        .map(|(key, _)| key.clone())
+        .collect();
+    keys.sort();
+    keys
 }
 
 /// The shape of a `unit` image (`data-model.md` section 3.2).

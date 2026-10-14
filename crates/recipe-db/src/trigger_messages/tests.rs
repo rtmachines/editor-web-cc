@@ -5,8 +5,9 @@ use recipe_domain::error_codes::{ErrorCode, REGISTRY};
 
 use super::user_message;
 
-/// The 16 trigger codes and the code of the check constraint without a trigger code.
-const TRIGGER_CODES: [&str; 17] = [
+/// The 16 trigger codes of the plant and recipe ranges, the trigger code `E-AUD-003`, and the code
+/// of the check constraint without a trigger code.
+const TRIGGER_CODES: [&str; 18] = [
     "E-PLT-030",
     "E-PLT-031",
     "E-PLT-032",
@@ -23,6 +24,7 @@ const TRIGGER_CODES: [&str; 17] = [
     "E-RCP-034",
     "E-RCP-035",
     "E-RCP-036",
+    "E-AUD-003",
     "E-DB-003",
 ];
 
@@ -78,10 +80,14 @@ fn user_message_is_the_row_text_without_the_reference_sentence() {
 }
 
 #[test]
-fn trigger_codes_are_exactly_the_rows_that_name_a_trigger_function_or_e_db_003() {
+fn trigger_codes_are_exactly_the_rows_that_name_a_trigger_or_e_db_003() {
     let mut documented: Vec<String> = registry_rows()
         .into_iter()
-        .filter(|row| row.source.contains("trigger function") || row.code == "E-DB-003")
+        .filter(|row| {
+            row.source.contains("trigger function")
+                || row.source.contains("trigger `")
+                || row.code == "E-DB-003"
+        })
         .map(|row| row.code)
         .collect();
     documented.sort();

@@ -6,13 +6,17 @@ use recipe_app::ports::SecurityEventSink;
 use recipe_domain::audit::{SecurityEvent, SecurityEventKind};
 use sqlx::PgPool;
 
+use crate::address::canonical_text;
 use crate::error::map_error;
 
 /// The columns of the insert. Both statements share them.
+///
+/// The list names neither `occurred_at` nor `count`. `recipe_app` holds no `INSERT` privilege on
+/// them, and the database sets the time and the first count of each row (ADR-0035).
 const INSERT_EVENT: &str = "\
 INSERT INTO security_event \
-    (kind, login_hmac, user_id, client_ip, user_agent, request_id, detail, count) \
-VALUES ($1, $2, $3, $4::inet, $5, $6, $7, $8)";
+    (kind, login_hmac, user_id, client_ip, user_agent, request_id, detail) \
+VALUES ($1, $2, $3, $4::inet, $5, $6, $7)";
 
 /// The conflict clause for the kinds that aggregate per address, kind, and minute.
 ///
@@ -56,21 +60,16 @@ fn statement_for(kind: SecurityEventKind) -> String {
 #[async_trait]
 impl SecurityEventSink for PgSecurityEventSink {
     async fn record(&self, event: SecurityEvent) -> Result<(), StorageError> {
-        let count = i32::try_from(event.count()).map_err(|error| StorageError::Other {
-            sqlstate: None,
-            source: Box::new(error),
-        })?;
         let kind = event.kind();
         let mut tx = self.pool.begin().await.map_err(map_error)?;
         sqlx::query(&statement_for(kind))
             .bind(kind.as_sql())
             .bind(event.login_hmac().map(|hmac| hmac.as_bytes().as_slice()))
             .bind(event.user().map(|user| *user.as_uuid()))
-            .bind(event.client_ip().map(|address| address.to_string()))
+            .bind(event.client_ip().map(canonical_text))
             .bind(event.user_agent().map(|agent| agent.as_str()))
             .bind(*event.request_id().as_uuid())
             .bind(event.detail())
-            .bind(count)
             .execute(&mut *tx)
             .await
             .map_err(map_error)?;

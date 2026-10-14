@@ -5,13 +5,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use recipe_app::error::StorageError;
-use recipe_app::ports::{SecurityEventSink, UnitOfWork};
+use recipe_app::ports::{LoginAttemptStore, SecurityEventSink, SessionStore, UnitOfWork};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
 use crate::error::map_error;
+use crate::login_attempts::PgLoginAttemptStore;
 use crate::options::connect_options;
 use crate::security_events::PgSecurityEventSink;
+use crate::session_store::PgSessionStore;
 use crate::settings::{Connection, PoolSettings};
 use crate::unit_of_work::PgUnitOfWork;
 
@@ -113,6 +115,18 @@ impl Database {
     #[must_use]
     pub fn security_events(&self) -> Arc<dyn SecurityEventSink> {
         Arc::new(PgSecurityEventSink::new(self.pool.clone()))
+    }
+
+    /// Return the session store. `authenticate` runs one statement on the pool.
+    #[must_use]
+    pub fn session_store(&self) -> Arc<dyn SessionStore> {
+        Arc::new(PgSessionStore::new(self.pool.clone()))
+    }
+
+    /// Return the store of T1 of `Login`. `begin_attempt` runs its own transaction.
+    #[must_use]
+    pub fn login_attempts(&self) -> Arc<dyn LoginAttemptStore> {
+        Arc::new(PgLoginAttemptStore::new(self.pool.clone()))
     }
 }
 

@@ -23,6 +23,11 @@ const CLIENT_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 7));
 
 /// A `MachineCreated` entry for the machine `machine`, written by `actor`.
 pub fn entry(actor: Option<Uuid>, machine: Uuid) -> AuditEntry {
+    entry_from(actor, machine, CLIENT_IP)
+}
+
+/// A `MachineCreated` entry for the machine `machine`, written by `actor` from `client_ip`.
+pub fn entry_from(actor: Option<Uuid>, machine: Uuid, client_ip: IpAddr) -> AuditEntry {
     AuditEntry::row(
         RowAction::MachineCreated,
         recipe_domain::audit::AuditTarget::machine(MachineId::from(machine)),
@@ -32,7 +37,7 @@ pub fn entry(actor: Option<Uuid>, machine: Uuid) -> AuditEntry {
         AuditContext {
             actor: actor.map(UserId::from),
             request_id: RequestId::from(Uuid::new_v4()),
-            client_ip: Some(CLIENT_IP),
+            client_ip: Some(client_ip),
             session_ref: SessionRef::parse(SESSION_REF).ok(),
         },
     )

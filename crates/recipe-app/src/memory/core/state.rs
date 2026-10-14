@@ -3,16 +3,19 @@
 use std::collections::BTreeMap;
 #[cfg(test)]
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 
-use recipe_domain::identity::UserId;
+use recipe_domain::identity::{SessionId, UserId};
 use recipe_domain::plant::{
     Machine, MachineId, PlantError, PlcType, PlcTypeId, StoredMachine, StoredUnit, UnitId,
 };
 use recipe_domain::recipe::{ParameterId, RecipeId, RecipeVersionId};
 use recipe_domain::timestamp::Timestamp;
 
+use crate::memory::identity::StoredSession;
 use crate::memory::recipe::{ParameterRow, RecipeRow, VersionRow};
 use crate::memory::rows::{MachineRow, TypeRow, UnitRow};
+use crate::ports::{AttemptId, AttemptRow, UserRow};
 
 /// All rows of the in-memory store.
 ///
@@ -38,6 +41,14 @@ pub struct MemoryState {
     pub(crate) editors: BTreeMap<(RecipeVersionId, UserId), Timestamp>,
     /// The rows of the table `parameter` with their limit rows and translation rows.
     pub(crate) parameters: BTreeMap<ParameterId, ParameterRow>,
+    /// The rows of the table `app_user`.
+    pub(crate) users: BTreeMap<UserId, UserRow>,
+    /// The rows of the table `session`.
+    pub(crate) sessions: HashMap<SessionId, StoredSession>,
+    /// The rows of the table `login_attempt`.
+    pub(crate) attempts: BTreeMap<AttemptId, AttemptRow>,
+    /// The last key that the identity column of `login_attempt` gave.
+    pub(crate) last_attempt_key: i64,
 }
 
 impl MemoryState {

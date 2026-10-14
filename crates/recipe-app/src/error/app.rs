@@ -2,12 +2,12 @@
 //!
 //! `Display` gives the user message of `reliability.md` section 1.2.
 //! It ends before the sentence "Reference: {request_id}.", because only the request knows the reference (design D4).
-//! The variant `Identity` follows with `IdentityError` in P2.5.
 
 use std::fmt;
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
+use recipe_domain::identity::IdentityError;
 use recipe_domain::plant::PlantError;
 use recipe_domain::recipe::{DraftError, RecipeError, RecipeErrors, ReferenceNumber};
 
@@ -39,7 +39,9 @@ impl fmt::Display for TimeoutStage {
     }
 }
 
-/// The kind of blocking work that did not complete (`E-WEB-011`).
+/// The kind of work that did not complete (`E-WEB-011`).
+///
+/// The work is a blocking task or the read of random bytes from the system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TaskStage {
     /// The Argon2id hash.
@@ -48,6 +50,8 @@ pub enum TaskStage {
     Validation,
     /// The rebuild and the hash of the export body.
     Export,
+    /// The read of random bytes for a session token, a CSRF token, or a one-time password.
+    Token,
 }
 
 impl fmt::Display for TaskStage {
@@ -56,6 +60,7 @@ impl fmt::Display for TaskStage {
             Self::PasswordHash => "password hash",
             Self::Validation => "validation",
             Self::Export => "export",
+            Self::Token => "token generation",
         })
     }
 }
@@ -78,6 +83,9 @@ pub enum AppError {
     /// An error of the export.
     #[error(transparent)]
     Export(#[from] ExportError),
+    /// An error of the Identity and Access context.
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
     /// The role does not permit the operation (`E-WEB-002`).
     #[error("Your role does not permit the operation {operation}.")]
     Forbidden {
@@ -144,6 +152,7 @@ impl AppError {
             Self::Recipe(error) => error.code(),
             Self::Recipes(errors) => errors.code(),
             Self::Export(error) => error.code(),
+            Self::Identity(error) => error.code(),
             Self::Forbidden { .. } => ErrorCode::WEB_002,
             Self::Unauthenticated => ErrorCode::WEB_004,
             Self::NotFound { .. } => ErrorCode::WEB_005,

@@ -4,6 +4,7 @@
 //! adapter connects as `recipe_app`. The tests read the audit tables as the superuser.
 
 use std::error::Error as _;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use recipe_app::error::{AppError, StorageError};
@@ -14,7 +15,9 @@ use recipe_domain::error_codes::ErrorCode;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::support::audit::{audit_count, entries, entry, head_seq, install_trigger, stored_rows};
+use crate::support::audit::{
+    audit_count, entries, entry, entry_from, head_seq, install_trigger, stored_rows,
+};
 use crate::support::fixtures;
 use crate::support::{Role, TestDatabase};
 
@@ -97,6 +100,23 @@ async fn a_commit_stores_every_column_of_an_entry() {
     assert_eq!(row.request_id, *source.request_id().as_uuid());
     assert_eq!(row.client_ip.as_deref(), Some("10.0.0.7"));
     assert_eq!(row.session_ref.as_deref(), Some("0123456789abcdef"));
+}
+
+#[tokio::test]
+async fn audit_commit_stores_a_mapped_client_address_as_ipv4_text() {
+    let mut f = Fixture::create().await;
+    let mapped = IpAddr::V6(Ipv4Addr::new(10, 0, 0, 5).to_ipv6_mapped());
+    let source = entry_from(Some(f.user), Uuid::new_v4(), mapped);
+    let tx = f.begin(Isolation::ReadCommitted).await;
+
+    f.unit_of_work
+        .commit(tx, recipe_app::ports::NonEmpty::new(source))
+        .await
+        .unwrap();
+
+    let rows = stored_rows(&mut f.admin).await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].client_ip.as_deref(), Some("10.0.0.5"));
 }
 
 #[tokio::test]

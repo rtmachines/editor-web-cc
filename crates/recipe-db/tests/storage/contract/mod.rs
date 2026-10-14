@@ -11,7 +11,7 @@ macro_rules! contract_case {
     ($case:ident, $memory:ident, $postgres:ident) => {
         #[tokio::test]
         async fn $memory() {
-            let harness = $crate::contract::MemoryHarness::new();
+            let harness = $crate::contract::MemoryHarness::create().await;
             $case(&harness).await;
         }
 
@@ -23,6 +23,8 @@ macro_rules! contract_case {
     };
 }
 
+mod attempts;
+mod chain;
 mod draft;
 mod harness;
 mod images;
@@ -34,9 +36,11 @@ mod recipe_read;
 mod recipe_seed;
 mod recipe_write;
 mod seed;
+mod sessions;
 mod type_images;
 mod types;
 mod unit;
+mod users;
 
 pub use memory_harness::MemoryHarness;
 pub use postgres_harness::PgHarness;

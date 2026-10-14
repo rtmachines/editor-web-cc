@@ -8,6 +8,7 @@ mod draft;
 mod fault;
 #[cfg(test)]
 pub(crate) mod fixtures;
+mod identity;
 mod images;
 mod plant;
 mod recipe;
@@ -20,6 +21,7 @@ pub use self::core::{
     WriteKind,
 };
 pub use clock::MemoryClock;
-pub use fault::Fault;
+pub use fault::{Fault, FaultPoint};
+pub use identity::LOGIN_LOCK_TABLE;
 pub use sink::MemorySink;
 pub use types::{DERIVED_TYPE_LOCK_TABLE, seed_type_id};

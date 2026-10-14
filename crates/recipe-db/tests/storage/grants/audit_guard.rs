@@ -9,13 +9,14 @@
 use super::sql_tokens::{Token, split_statements};
 use crate::support::migration_texts;
 
-const AUDIT_OBJECTS: [&str; 6] = [
+const AUDIT_OBJECTS: [&str; 7] = [
     "audit_log",
     "audit_chain_head",
     "security_event",
     "audit_canonical",
     "audit_hash_chain",
     "security_event_purge",
+    "security_event_guard",
 ];
 const OWNER: &str = "audit_owner";
 
@@ -85,10 +86,30 @@ pub fn audit_violations(text: &str) -> Vec<String> {
 fn every_migration_file_obeys_the_audit_guard() {
     let files = migration_texts();
 
-    assert!(files.len() >= 3, "migration files: {}", files.len());
+    assert!(files.len() >= 5, "migration files: {}", files.len());
     for (name, text) in &files {
         assert_eq!(audit_violations(text), Vec::<String>::new(), "{name}");
     }
+}
+
+#[test]
+fn the_guard_accepts_migration_0005_and_sees_its_five_steps() {
+    let files = migration_texts();
+    let (_, text) = files
+        .iter()
+        .find(|(name, _)| name == "0005_security_event_guard.sql")
+        .unwrap();
+
+    assert_eq!(audit_violations(text), Vec::<String>::new());
+    let steps = [
+        "GRANT CREATE ON SCHEMA public TO audit_owner;",
+        "SET ROLE audit_owner;",
+        "RESET ROLE;",
+        "REVOKE CREATE ON SCHEMA public FROM audit_owner;",
+    ];
+    let positions: Vec<Option<usize>> = steps.iter().map(|step| text.find(step)).collect();
+    assert!(positions.iter().all(Option::is_some), "{positions:?}");
+    assert!(positions.is_sorted(), "{positions:?}");
 }
 
 #[test]

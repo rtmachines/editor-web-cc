@@ -3,6 +3,7 @@
 pub mod app;
 pub mod audit;
 mod catalog;
+mod clock;
 mod constraint;
 mod container;
 mod database;
@@ -10,12 +11,14 @@ mod document;
 pub mod fault;
 pub mod fixtures;
 pub mod gate;
+pub mod identity;
 pub mod probe;
 mod session;
 mod temp_files;
 mod trigger;
 
 pub use catalog::missing_names;
+pub use clock::wait_for_early_second;
 pub use constraint::{FOREIGN_KEY_VIOLATION, UNIQUE_VIOLATION, assert_constraint};
 pub use container::{Role, server};
 pub use database::TestDatabase;
