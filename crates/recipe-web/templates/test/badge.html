@@ -1,0 +1,2 @@
+{% import "components/badge.html" as badges %}
+{% if large %}{{ badges::status_large(kind, word) }}{% else %}{{ badges::status(kind, word) }}{% endif %}

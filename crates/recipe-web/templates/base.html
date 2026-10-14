@@ -1,14 +1,39 @@
+{% import "components/toast.html" as toasts -%}
 <!DOCTYPE html>
-<html lang="{{ lang }}">
+<html lang="{{ layout.lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}'>
-<title>{% block title %}{{ title }}{% endblock %}</title>
+<title>{{ layout.title }} · {{ layout.t.get("app-name") }}</title>
+<link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script>
+<script src="/static/row-version.js" defer></script>
+<script src="/static/tree.js" defer></script>
 </head>
-<body hx-history="false"{% if !csrf_token.is_empty() %} hx-headers='{"X-CSRF-Token":"{{ csrf_token }}"}'{% endif %}>
+<body hx-history="false"{% if !layout.csrf_token.is_empty() %} hx-headers='{"X-CSRF-Token":"{{ layout.csrf_token }}"}'{% endif %}>
+<a class="skip-link" href="#content">{{ layout.t.get("skip-to-content") }}</a>
+<header class="topbar">
+<span class="app-name">{{ layout.t.get("app-name") }}</span>
+{% if !layout.nav.is_empty() %}<nav aria-label="{{ layout.t.get("nav-label") }}"><ul class="nav-list">
+{% for link in layout.nav %}<li><a class="nav-link" href="{{ link.path }}"{% if link.current %} aria-current="page"{% endif %}>{{ link.text }}</a></li>
+{% endfor %}</ul></nav>
+{% endif %}{% if let Some(next) = layout.next %}<form class="lang-switch" method="post" action="/lang" aria-label="{{ layout.t.get("lang-switch-label") }}">
+<input type="hidden" name="next" value="{{ next }}">
+{% if let Some(nonce) = layout.pre_nonce %}<input type="hidden" name="csrf_pre" value="{{ nonce }}">{% else %}<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">{% endif %}
+<button type="submit" name="lang" value="pl" lang="pl"{% if layout.lang.as_str() == "pl" %} aria-current="true"{% endif %}>{{ layout.t.get("lang-switch-pl") }}</button>
+<button type="submit" name="lang" value="en" lang="en"{% if layout.lang.as_str() == "en" %} aria-current="true"{% endif %}>{{ layout.t.get("lang-switch-en") }}</button>
+</form>
+{% endif %}{% if let Some(login) = layout.user_login %}<span class="user-login">{{ layout.t.get("user-signed-in") }} <span class="data">{{ login }}</span></span>
+<form method="post" action="/logout">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+<button type="submit">{{ layout.t.get("logout-submit") }}</button>
+</form>
+{% endif %}</header>
+<main id="content">
 <div id="error-panel">{% block error_panel %}{% endblock %}</div>
-<main>{% block content %}{% endblock %}</main>
+<div id="toast" role="status" aria-live="polite">{% if let Some(text) = layout.toast %}{{ toasts::success(text) }}{% endif %}</div>
+{% block content %}{% endblock %}
+</main>
 </body>
 </html>

@@ -6,20 +6,23 @@ use recipe_app::ports::UserSummary;
 use recipe_domain::identity::Role;
 use recipe_domain::timestamp::Timestamp;
 
-use crate::i18n::Lang;
+use crate::error::WebError;
+use crate::layout::{Layout, NavTarget};
+use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 
-/// Write an instant as `yyyy-mm-dd hh:mm:ss` with its offset.
+/// Write an instant as `yyyy-mm-dd hh:mm UTC` (`design-system.md` section 5).
 fn instant(stamp: &Timestamp) -> String {
-    let moment = stamp.as_offset_date_time();
+    let moment = stamp.as_offset_date_time().to_utc();
+    let date = moment.date();
     let time = moment.time();
     format!(
-        "{} {:02}:{:02}:{:02} {}",
-        moment.date(),
+        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+        date.year(),
+        u8::from(date.month()),
+        date.day(),
         time.hour(),
-        time.minute(),
-        time.second(),
-        moment.offset()
+        time.minute()
     )
 }
 
@@ -50,6 +53,7 @@ pub(super) fn role_options(
 pub(super) struct UserRow {
     login: String,
     role: String,
+    active: bool,
     status: String,
     must_change: bool,
 }
@@ -59,6 +63,7 @@ impl UserRow {
         Self {
             login: user.login.to_string(),
             role: t.role(user.role),
+            active: user.is_active,
             status: status_label(t, user.is_active),
             must_change: user.must_change_password,
         }
@@ -77,9 +82,7 @@ fn status_label(t: Texts<'_>, is_active: bool) -> String {
 #[derive(Template)]
 #[template(path = "users.html")]
 pub(crate) struct UsersPage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
     q: &'a str,
     rows: Vec<UserRow>,
@@ -89,24 +92,25 @@ pub(crate) struct UsersPage<'a> {
 
 impl<'a> UsersPage<'a> {
     /// Build the page from one page of users and the links to the pages around it.
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
     pub(super) fn new(
         t: Texts<'a>,
-        lang: Lang,
-        csrf_token: &'a str,
+        request: &PageRequest,
         q: &'a str,
         users: &[UserSummary],
         links: (Option<String>, Option<String>),
-    ) -> Self {
-        Self {
-            lang,
-            title: t.get("users-title"),
-            csrf_token,
+    ) -> Result<Self, WebError> {
+        Ok(Self {
+            layout: Layout::for_session(t, request, t.get("users-title"), Some(NavTarget::Users))?,
             t,
             q,
             rows: users.iter().map(|user| UserRow::of(t, user)).collect(),
             prev_url: links.0,
             next_url: links.1,
-        }
+        })
     }
 }
 
@@ -114,23 +118,27 @@ impl<'a> UsersPage<'a> {
 #[derive(Template)]
 #[template(path = "user-new.html")]
 pub(crate) struct NewUserPage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
     roles: Vec<RoleOption>,
 }
 
 impl<'a> NewUserPage<'a> {
     /// Build the page from the roles that the form offers.
-    pub(super) fn new(t: Texts<'a>, lang: Lang, csrf_token: &'a str, roles: &[Role]) -> Self {
-        Self {
-            lang,
-            title: t.get("user-new-title"),
-            csrf_token,
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
+    pub(super) fn new(
+        t: Texts<'a>,
+        request: &PageRequest,
+        roles: &[Role],
+    ) -> Result<Self, WebError> {
+        Ok(Self {
+            layout: Layout::for_session(t, request, t.get("user-new-title"), None)?,
             t,
             roles: role_options(t, roles, Some(Role::Operator)),
-        }
+        })
     }
 }
 
@@ -138,12 +146,11 @@ impl<'a> NewUserPage<'a> {
 #[derive(Template)]
 #[template(path = "user.html")]
 pub(crate) struct UserPage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
     login: String,
     role: String,
+    active: bool,
     status: String,
     must_change: bool,
     created: String,
@@ -155,15 +162,22 @@ pub(crate) struct UserPage<'a> {
 
 impl<'a> UserPage<'a> {
     /// Build the page from the user and the throttle state of the login.
-    pub(super) fn new(t: Texts<'a>, lang: Lang, csrf_token: &'a str, detail: &UserDetail) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
+    pub(super) fn new(
+        t: Texts<'a>,
+        request: &PageRequest,
+        detail: &UserDetail,
+    ) -> Result<Self, WebError> {
         let user = &detail.user;
-        Self {
-            lang,
-            title: t.get("user-title"),
-            csrf_token,
+        Ok(Self {
+            layout: Layout::for_session(t, request, t.get("user-title"), None)?,
             t,
             login: user.login.to_string(),
             role: t.role(user.role),
+            active: user.is_active,
             status: status_label(t, user.is_active),
             must_change: user.must_change_password,
             created: instant(&user.created_at),
@@ -171,7 +185,7 @@ impl<'a> UserPage<'a> {
             failures: detail.throttle.failures,
             last_failure: detail.throttle.last_failure.as_ref().map(instant),
             roles: role_options(t, &Role::ALL, Some(user.role)),
-        }
+        })
     }
 }
 
@@ -209,32 +223,32 @@ impl<'a> ResultFragment<'a> {
 #[derive(Template)]
 #[template(path = "user-result-page.html")]
 pub(crate) struct ResultPage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
-    message: String,
     password: Option<String>,
     login: String,
 }
 
 impl<'a> ResultPage<'a> {
     /// Build the page. `title` is the heading of the page.
+    ///
+    /// The success sentence of the fragment goes into `#toast` through the layout.
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
     pub(super) fn new(
         t: Texts<'a>,
-        lang: Lang,
-        csrf_token: &'a str,
+        request: &PageRequest,
         title: String,
         fragment: ResultFragment<'a>,
-    ) -> Self {
-        Self {
-            lang,
-            title,
-            csrf_token,
+    ) -> Result<Self, WebError> {
+        let layout = Layout::for_session(t, request, title, None)?.with_toast(fragment.message);
+        Ok(Self {
+            layout,
             t,
-            message: fragment.message,
             password: fragment.password,
             login: fragment.login,
-        }
+        })
     }
 }

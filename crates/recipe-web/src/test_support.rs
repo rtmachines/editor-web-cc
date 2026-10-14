@@ -33,6 +33,8 @@ use uuid::Uuid;
 
 use crate::client::ClientAddr;
 use crate::csrf::issue_pre_session;
+use crate::i18n::{Bundles, Lang};
+use crate::pages::Texts;
 use crate::routes::{Access, RouteEntry, assemble, table};
 use crate::{WebSettings, WebState};
 
@@ -520,4 +522,31 @@ pub(crate) fn capture_logs() -> (LogBuffer, CaptureGuard) {
 /// Build a state over a fresh `MemoryStore` with the default settings.
 pub(crate) fn state() -> WebState {
     Fixture::new().state
+}
+
+/// Return the text of `key` in `lang`.
+pub(crate) fn text(lang: Lang, key: &str) -> String {
+    let bundles = Bundles::load().unwrap();
+    Texts::new(&bundles, lang).get(key)
+}
+
+/// Return the fixed opening tag of the icon `name` (`design-system.md` section 8).
+pub(crate) fn icon_tag(name: &str) -> String {
+    format!(
+        "<svg class=\"icon\" aria-hidden=\"true\" focusable=\"false\" viewBox=\"0 0 24 24\" data-icon=\"{name}\" fill=\"none\" stroke=\"currentColor\">"
+    )
+}
+
+/// Send `GET path` in the language `code`, with the session when there is one.
+pub(crate) async fn get_page(
+    fixture: &Fixture,
+    session: Option<&TestSession>,
+    code: &str,
+    path: &str,
+) -> Reply {
+    let cookie = match session {
+        Some(session) => format!("{}; recipe_lang={code}", session.cookie),
+        None => format!("recipe_lang={code}"),
+    };
+    get_with(&fixture.router(), path, &[("cookie", cookie.as_str())]).await
 }

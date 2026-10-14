@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% import "components/empty.html" as empties %}
+{% block content %}
+<h1>{{ t.get("recipes-title") }}</h1>
+{{ empties::empty(t.get("recipes-empty")) }}
+{% endblock %}

@@ -107,10 +107,18 @@ async fn pages_own_login_form_is_polish_by_default_and_english_with_the_cookie()
         "{}",
         polish.body
     );
-    assert!(polish.body.contains("<title>Logowanie</title>"));
+    assert!(
+        polish
+            .body
+            .contains("<title>Logowanie · Edytor receptur</title>")
+    );
     let english = get_with(&fixture.router(), "/login", &[ENGLISH]).await;
     assert!(english.body.contains("<html lang=\"en\">"));
-    assert!(english.body.contains("<title>Log in</title>"));
+    assert!(
+        english
+            .body
+            .contains("<title>Log in · Recipe editor</title>")
+    );
 }
 
 // --- POST /login --------------------------------------------------------------------------------

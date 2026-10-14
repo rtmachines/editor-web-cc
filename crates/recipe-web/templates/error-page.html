@@ -1,2 +1,6 @@
 {% extends "base.html" %}
 {% block error_panel %}{% if field_errors %}{% include "field-errors.html" %}{% else %}{% include "error.html" %}{% endif %}{% endblock %}
+{% block content %}
+<h1>{{ layout.t.get("error-page-title") }}</h1>
+<p><a class="target-link" href="/recipes">{{ layout.t.get("error-page-home") }}</a></p>
+{% endblock %}

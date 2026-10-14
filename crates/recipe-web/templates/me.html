@@ -3,10 +3,9 @@
 <h1>{{ t.get("me-title") }}</h1>
 <dl>
 <dt>{{ t.get("me-label-login") }}</dt>
-<dd>{{ login }}</dd>
+<dd class="data">{{ login }}</dd>
 <dt>{{ t.get("me-label-role") }}</dt>
 <dd>{{ role }}</dd>
 </dl>
-<p><a href="/me/password">{{ t.get("me-link-password") }}</a></p>
-{% include "logout-form.html" %}
+<p><a class="target-link" href="/me/password">{{ t.get("me-link-password") }}</a></p>
 {% endblock %}

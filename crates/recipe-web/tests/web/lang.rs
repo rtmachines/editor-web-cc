@@ -141,7 +141,7 @@ async fn lang_unknown_language_shows_the_field_error_fragment() {
     let request_id = header(&response, "x-request-id");
     let body = String::from_utf8(body_bytes(response).await).unwrap();
     assert!(body.contains("E-WEB-008"), "{body}");
-    assert!(body.contains("Field lang is not valid: the language must be pl or en."));
+    assert!(body.contains("Field Language is not valid: the language must be pl or en."));
     assert!(body.contains(&request_id));
 }
 

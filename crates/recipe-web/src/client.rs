@@ -8,7 +8,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use tracing::Span;
 
-use crate::error::WebError;
+use crate::error::{FieldReason, WebError};
 use crate::pipeline::request_id_in;
 use crate::settings::CidrList;
 use crate::state::WebState;
@@ -17,8 +17,6 @@ use crate::state::WebState;
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
 /// The name of the header field in a `E-WEB-008` answer.
 const FORWARDED_FIELD: &str = "X-Forwarded-For";
-/// The reason in a `E-WEB-008` answer.
-const FORWARDED_REASON: &str = "every entry must be an IP address";
 
 /// The address of the client in canonical form.
 ///
@@ -28,6 +26,12 @@ const FORWARDED_REASON: &str = "every entry must be an IP address";
 pub(crate) struct ClientAddr(IpAddr);
 
 impl ClientAddr {
+    /// Build the address of a test client.
+    #[cfg(test)]
+    pub(crate) const fn of(ip: IpAddr) -> Self {
+        Self(ip)
+    }
+
     /// Return the address.
     pub(crate) const fn ip(self) -> IpAddr {
         self.0
@@ -40,7 +44,7 @@ impl ClientAddr {
 fn forwarded_entries(headers: &HeaderMap) -> Result<Vec<IpAddr>, WebError> {
     let bad = || WebError::BadRequest {
         field: FORWARDED_FIELD,
-        reason: FORWARDED_REASON,
+        reason: FieldReason::Forwarded,
     };
     let mut entries = Vec::new();
     for line in headers.get_all(X_FORWARDED_FOR) {

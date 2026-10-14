@@ -5,12 +5,25 @@ use recipe_domain::identity::Role;
 
 use super::*;
 
+/// Return every file below `dir`, also in the subdirectories (design D11).
+fn files_below(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for entry in fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            files.extend(files_below(&path));
+        } else {
+            files.push(path);
+        }
+    }
+    files
+}
+
 /// Return every key that `t.get("...")` or `t.with("...", ...)` names in the templates.
 fn template_keys() -> Vec<(String, String)> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("templates");
     let mut keys = Vec::new();
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
+    for path in files_below(&dir) {
         let text = fs::read_to_string(&path).unwrap();
         for marker in ["t.get(\"", "t.with(\""] {
             for part in text.split(marker).skip(1) {

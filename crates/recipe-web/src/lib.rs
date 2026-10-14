@@ -11,6 +11,8 @@
 #![deny(missing_docs)]
 
 mod client;
+#[cfg(test)]
+mod components_tests;
 mod cookies;
 mod csrf;
 mod error;
@@ -18,6 +20,7 @@ mod gates;
 mod hex;
 mod i18n;
 mod lang;
+mod layout;
 mod limits;
 mod pages;
 mod pipeline;
@@ -27,10 +30,14 @@ mod settings;
 mod state;
 mod static_files;
 #[cfg(test)]
+mod style_tests;
+#[cfg(test)]
+mod template_tests;
+#[cfg(test)]
 mod test_support;
 
 pub use csrf::{PreSession, issue_pre_session};
-pub use error::{ByteLimit, WebError};
+pub use error::{ByteLimit, FieldReason, WebError};
 pub use i18n::{BundleReason, Bundles, Lang, LangReason};
 pub use routes::{Access, router};
 pub use settings::{Cidr, CidrList, CidrReason, WebSettings};

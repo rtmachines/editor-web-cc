@@ -19,7 +19,7 @@ use super::request::PageRequest;
 use super::texts::Texts;
 use crate::cookies::{clear_session_cookie, session_cookie};
 use crate::csrf::issue_pre_session;
-use crate::error::{Retry, WebError};
+use crate::error::{FieldReason, Retry, WebError};
 use crate::state::WebState;
 
 mod templates;
@@ -36,12 +36,6 @@ const PASSWORD_PAGE: &str = "/me/password";
 const LOGIN_PAGE: &str = "/login";
 /// The HTMX header that reloads the page.
 const HX_REFRESH: HeaderName = HeaderName::from_static("hx-refresh");
-/// The reason of the field error for a login of the wrong length.
-const LOGIN_REASON: &str = "a login has 1 to 64 characters";
-/// The reason of the field error for a login with a control character.
-const LOGIN_CONTROL_REASON: &str = "a login holds no control character";
-/// The reason of the field error for a password of the wrong length.
-const PASSWORD_REASON: &str = "a password has 1 to 128 characters";
 
 /// The fields of the form of `POST /login`.
 #[derive(Deserialize)]
@@ -117,13 +111,13 @@ async fn start_session(
     let login = TypedLogin::parse(&form.login).map_err(|reason| WebError::BadRequest {
         field: "login",
         reason: match reason {
-            TypedLoginReason::Length => LOGIN_REASON,
-            TypedLoginReason::Control => LOGIN_CONTROL_REASON,
+            TypedLoginReason::Length => FieldReason::LoginLength,
+            TypedLoginReason::Control => FieldReason::LoginControl,
         },
     })?;
     let password = Password::parse(&form.password).map_err(|_reason| WebError::BadRequest {
         field: "password",
-        reason: PASSWORD_REASON,
+        reason: FieldReason::PasswordLength,
     })?;
     let input = LoginInput {
         login,
@@ -179,8 +173,7 @@ pub(crate) async fn profile(
         .execute(auth, &request.meta())
         .await?;
     let texts = Texts::new(state.bundles(), request.lang());
-    let csrf_token = request.csrf_token();
-    let page = ProfilePage::new(texts, request.lang(), &csrf_token, &own);
+    let page = ProfilePage::new(texts, &request, &own)?;
     Ok(render(&page, request.request_id())?.into_response())
 }
 
@@ -194,8 +187,7 @@ pub(crate) async fn password_form(
         .execute(auth, &request.meta())
         .await?;
     let texts = Texts::new(state.bundles(), request.lang());
-    let csrf_token = request.csrf_token();
-    let page = PasswordPage::new(texts, request.lang(), &csrf_token, form);
+    let page = PasswordPage::new(texts, &request, form)?;
     Ok(render(&page, request.request_id())?.into_response())
 }
 
@@ -213,7 +205,7 @@ pub(crate) async fn change_password(
     let current_password =
         Password::parse(&form.current_password).map_err(|_reason| WebError::BadRequest {
             field: "current_password",
-            reason: PASSWORD_REASON,
+            reason: FieldReason::PasswordLength,
         })?;
     let new_password = Password::parse(&form.password)
         .map_err(|reason| WebError::App(AppError::Identity(IdentityError::from(reason))))?;

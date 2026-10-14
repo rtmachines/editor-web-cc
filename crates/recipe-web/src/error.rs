@@ -15,11 +15,14 @@ use recipe_domain::error_codes::ErrorCode;
 mod answer;
 mod layer;
 mod log;
+mod reason;
 mod retry;
 mod status;
+mod values;
 mod view;
 
 pub(crate) use layer::render_errors;
+pub use reason::FieldReason;
 pub(crate) use retry::Retry;
 pub(crate) use view::ErrorView;
 
@@ -72,8 +75,8 @@ pub enum WebError {
     BadRequest {
         /// The name of the field. It is a fixed name in the code, never typed text.
         field: &'static str,
-        /// Why the field is not valid. It is a fixed text in the code, never typed text.
-        reason: &'static str,
+        /// Why the field is not valid. The page shows the text of its key in the UI language.
+        reason: FieldReason,
     },
     /// The CSRF token or the origin of a mutating request is not valid (`E-WEB-007`).
     #[error("The form is no longer valid. Reload the page and try again.")]
@@ -112,7 +115,7 @@ impl From<FormRejection> for WebError {
     fn from(_rejection: FormRejection) -> Self {
         Self::BadRequest {
             field: "form",
-            reason: "the form has a missing field, an unknown field, or a wrong content type",
+            reason: FieldReason::Form,
         }
     }
 }
@@ -127,4 +130,10 @@ impl IntoResponse for WebError {
 }
 
 #[cfg(test)]
+pub(crate) use view::FieldLine;
+#[cfg(test)]
+mod fragment_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod value_tests;

@@ -1,0 +1,4 @@
+{% import "components/alert.html" as alerts -%}
+{% if let Some(password) = password %}<p>{{ t.get("user-password-label") }}: <code class="data" id="one-time-password">{{ password }}</code></p>
+{{ alerts::notice("info", t.get("user-password-once")) }}
+{% endif %}<p><a class="target-link" href="/users/{{ login }}">{{ t.get("user-back-link") }}</a></p>

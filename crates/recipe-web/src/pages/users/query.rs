@@ -2,15 +2,10 @@
 
 use serde::Deserialize;
 
-use crate::error::WebError;
+use crate::error::{FieldReason, WebError};
 
 /// The most characters of the search text.
 const Q_MAX_CHARS: usize = 64;
-/// The reason of the field error for a bad search text.
-const Q_REASON: &str =
-    "the search text has at most 64 characters from a to z, 0 to 9, period, underscore, and hyphen";
-/// The reason of the field error for a bad page number.
-const PAGE_REASON: &str = "the page is a whole number from 1";
 
 /// The raw query string. A key that is not listed here gives `422 E-WEB-008`.
 #[derive(Deserialize)]
@@ -53,7 +48,7 @@ impl ListQuery {
                 if !valid {
                     return Err(WebError::BadRequest {
                         field: "q",
-                        reason: Q_REASON,
+                        reason: FieldReason::Q,
                     });
                 }
                 Some(folded)
@@ -61,7 +56,7 @@ impl ListQuery {
         };
         let bad_page = WebError::BadRequest {
             field: "page",
-            reason: PAGE_REASON,
+            reason: FieldReason::Page,
         };
         let page = match self.page.as_deref() {
             None => 1,
@@ -70,7 +65,7 @@ impl ListQuery {
         // The URL counts from 1 and the use case from 0. Page 0 has no predecessor.
         let index = page.checked_sub(1).ok_or(WebError::BadRequest {
             field: "page",
-            reason: PAGE_REASON,
+            reason: FieldReason::Page,
         })?;
         Ok(ListRequest { q, page, index })
     }

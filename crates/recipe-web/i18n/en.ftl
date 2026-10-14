@@ -115,3 +115,144 @@ user-deactivated = User { $login } is deactivated. All sessions of the user ende
 user-activated = User { $login } is active.
 user-password-reset = The password of { $login } is reset. All sessions of the user ended.
 user-unlocked = The login delay of { $login } is cleared.
+
+# Layout
+app-name = Recipe editor
+skip-to-content = Skip to the content
+nav-label = Main
+nav-recipes = Recipes
+nav-users = Users
+nav-me = My account
+lang-switch-label = Language
+lang-switch-pl = Polski
+lang-switch-en = English
+user-signed-in = Signed in as
+
+# Recipe list
+recipes-title = Recipes
+recipes-empty = No recipe to show.
+
+# States
+status-draft = Draft
+status-approved = Approved
+status-retired = Retired
+
+# Forms
+form-required = required
+
+# Error page
+error-page-title = The request failed
+error-page-home = Open the recipe list
+
+# Field labels
+field-form = Form
+field-lang = Language
+field-login = Login
+field-password = Password
+field-current-password = Current password
+field-role = Role
+field-query = Search fields
+field-q = Login contains
+field-page = Page
+field-X-Forwarded-For = Header X-Forwarded-For
+
+# Field reasons
+reason-form = the form has a missing field, an unknown field, or a wrong content type
+reason-lang = the language must be pl or en
+reason-login-length = a login has 1 to 64 characters
+reason-login-control = a login holds no control character
+reason-login-grammar = a login is 3 to 64 characters from a to z, 0 to 9, period, underscore, and hyphen
+reason-password-length = a password has 1 to 128 characters
+reason-role = choose a role from the list
+reason-query = the address has an unknown parameter or a parameter that is not text
+reason-q = the search text has at most 64 characters from a to z, 0 to 9, period, underscore, and hyphen
+reason-page = the page is a whole number from 1
+reason-forwarded = every entry must be an IP address
+
+# Missing entities
+missing-machine = Machine { $code }
+missing-machine-id = Machine { $id }
+missing-unit = Unit { $path } of machine { $code }
+missing-type = Type { $name } of machine { $code }
+missing-recipe = Recipe { $reference }
+missing-version = Version { $number } of recipe { $reference }
+missing-user = User { $login }
+missing-malformed-login = User
+
+# Password reasons and task stages
+password-reason-empty = it is empty
+password-reason-too-short = it has fewer than 12 characters
+password-reason-too-long = it has more than 128 characters
+password-reason-breached = it is in the breached-password list
+task-stage-password-hash = password hash
+task-stage-validation = validation
+task-stage-export = export
+task-stage-token = token generation
+
+# Operations
+operation-create-machine = Create machine
+operation-rename-machine = Rename machine
+operation-archive-machine = Archive machine
+operation-add-unit = Add unit
+operation-rename-unit = Rename unit
+operation-archive-unit = Archive unit
+operation-define-udt = Define UDT
+operation-create-recipe = Create recipe
+operation-rename-recipe = Rename recipe
+operation-delete-recipe = Delete recipe
+operation-restore-recipe = Restore recipe
+operation-create-version = Create version
+operation-discard-draft = Discard draft
+operation-approve-version = Approve version
+operation-retire-version = Retire version
+operation-add-parameter = Add parameter
+operation-update-parameter-definition = Change parameter definition
+operation-set-parameter-value = Set parameter value
+operation-replace-limits = Replace limits
+operation-upsert-translation = Save translation
+operation-remove-translation = Delete translation
+operation-remove-parameter = Delete parameter
+operation-rebind-type-revision = Rebind type revision
+operation-login = Log in
+operation-logout = Log out
+operation-create-user = Create user
+operation-set-user-role = Set user role
+operation-deactivate-user = Deactivate user
+operation-activate-user = Activate user
+operation-reset-password = Reset password
+operation-change-own-password = Change own password
+operation-unlock-login = Unlock login
+operation-export-version = Export version
+operation-list-machines = List machines
+operation-get-machine = Show machine
+operation-get-unit-tree = Show unit tree
+operation-get-unit = Show unit
+operation-list-types = List types
+operation-get-type-tree = Show type tree
+operation-get-type-usage = Show type usage
+operation-list-recipes = List recipes
+operation-get-recipe = Show recipe
+operation-list-versions = List versions
+operation-get-version = Show version
+operation-diff-versions = Compare versions
+operation-get-recipe-history = Show recipe history
+operation-list-parameters = List parameters
+operation-get-parameter = Show parameter
+operation-get-limits = Show limits
+operation-get-translations = Show translations
+operation-list-users = List users
+operation-get-user = Show user
+operation-list-audit-entries = List audit entries
+operation-get-audit-entry = Show audit entry
+operation-list-security-events = List security events
+operation-get-own-profile = Show own profile
+operation-get-machine-form = Open machine form
+operation-get-unit-form = Open unit form
+operation-get-udt-form = Open UDT form
+operation-get-recipe-form = Open recipe form
+operation-get-version-form = Open version form
+operation-get-parameter-form = Open parameter form
+operation-get-approval-preview = Show approval preview
+operation-get-user-form = Open user form
+operation-get-login-form = Open login form
+operation-get-own-password-form = Open password form

@@ -1,0 +1,6 @@
+{% import "components/icons.html" as icons %}
+{#- The kind comes from code (draft, approved, retired), never from user data. -#}
+{%- macro state_icon(kind) -%}{% if kind == "draft" %}{{ icons::status_draft() }}{% else if kind == "approved" %}{{ icons::status_approved() }}{% else if kind == "retired" %}{{ icons::status_retired() }}{% endif %}{%- endmacro -%}
+{%- macro status(kind, word) -%}<span class="badge badge-{{ kind }}">{{ state_icon(kind) }}<span>{{ word }}</span></span>{%- endmacro -%}
+{%- macro status_large(kind, word) -%}<span class="badge badge-large badge-{{ kind }}">{{ state_icon(kind) }}<span>{{ word }}</span></span>{%- endmacro -%}
+{%- macro user(active, word) -%}<span class="badge {% if active %}badge-active{% else %}badge-inactive{% endif %}">{% if active %}{{ icons::user_active() }}{% else %}{{ icons::user_inactive() }}{% endif %}<span>{{ word }}</span></span>{%- endmacro -%}

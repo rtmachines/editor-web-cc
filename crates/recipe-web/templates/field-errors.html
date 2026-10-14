@@ -1,4 +1,2 @@
-<ul class="field-errors" role="alert">
-{% for line in view.lines %}<li>{% if !line.field.is_empty() %}<span class="field">{{ line.field }}</span> {% endif %}{{ line.message }}</li>
-{% endfor %}</ul>
-<p><strong>{{ view.code }}</strong> {{ view.reference }}</p>
+{% import "components/alert.html" as alerts -%}
+{{ alerts::alert_fields("error", view.code, view.message, &view.lines, view.link_fields, view.reference) }}

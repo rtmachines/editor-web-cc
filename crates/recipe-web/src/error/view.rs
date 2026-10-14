@@ -2,14 +2,36 @@
 
 use askama::Template;
 
-use crate::i18n::Lang;
+use crate::layout::Layout;
 
-/// One line of `field-errors.html`.
+/// One field line of an error fragment.
+///
+/// The name comes from code (`WebError::BadRequest`), never from the request. An error of the
+/// whole form has no line.
 pub(crate) struct FieldLine {
-    /// The form field, or an empty text for an error of the whole form.
+    /// The name of the form field, which is also the `id` of its input.
     pub(crate) field: String,
-    /// The sentence in the UI language.
-    pub(crate) message: String,
+    /// The label of the field in the UI language.
+    pub(crate) label: String,
+    /// True when an input with this `id` exists on a page (design D6).
+    pub(crate) has_input: bool,
+}
+
+/// The fields that have an input with the same `id` on a page.
+///
+/// A field of this list gets a link in an error fragment. Any other field gets its label only.
+const INPUT_FIELDS: [&str; 5] = ["login", "password", "current_password", "role", "q"];
+
+/// Return true when the form field `name` has an input on a page.
+pub(crate) fn has_input(name: &str) -> bool {
+    INPUT_FIELDS.contains(&name)
+}
+
+/// Return the key of the label of the form field `name` in the bundles.
+///
+/// The key is `field-` and the name with each `_` replaced by `-`.
+pub(crate) fn field_key(name: &str) -> String {
+    format!("field-{}", name.replace('_', "-"))
 }
 
 /// What every error fragment shows: the code, one sentence, and the request id.
@@ -20,8 +42,10 @@ pub(crate) struct ErrorView {
     pub(crate) message: String,
     /// The sentence "Reference: {request_id}." in the UI language.
     pub(crate) reference: String,
-    /// The lines of `field-errors.html`.
+    /// The field lines of `field-errors.html`. Empty for an error of the whole form.
     pub(crate) lines: Vec<FieldLine>,
+    /// True when each line links to its input: an HTMX fragment and the login page.
+    pub(crate) link_fields: bool,
 }
 
 /// The fragment `error.html`.
@@ -40,13 +64,12 @@ pub(crate) struct FieldErrorsFragment<'a> {
 
 /// The full error page for a request without `HX-Request`.
 ///
-/// `csrf_token` is the token of the session for `hx-headers`. It is empty without a session.
+/// The error layer runs before the session layer, so the layout is the bare one: no navigation,
+/// no language switch, and no `hx-headers`.
 #[derive(Template)]
 #[template(path = "error-page.html")]
 pub(crate) struct ErrorPage<'a> {
-    pub(crate) lang: Lang,
-    pub(crate) csrf_token: &'a str,
-    pub(crate) title: &'a str,
+    pub(crate) layout: Layout<'a>,
     pub(crate) field_errors: bool,
     pub(crate) view: &'a ErrorView,
 }

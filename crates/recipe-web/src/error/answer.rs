@@ -12,10 +12,16 @@ use recipe_domain::identity::IdentityError;
 
 use super::log::{level_of, log_error};
 use super::status::status_of;
-use super::view::{ErrorFragment, ErrorPage, ErrorView, FieldErrorsFragment, FieldLine};
+use super::values::{
+    field_reason_text, missing_text, operation_text, password_reason_text, task_stage_text,
+};
+use super::view::{
+    ErrorFragment, ErrorPage, ErrorView, FieldErrorsFragment, FieldLine, field_key, has_input,
+};
 use super::{Retry, WebError};
 use crate::cookies::clear_session_cookie;
 use crate::i18n::Lang;
+use crate::layout::Layout;
 use crate::pages::{Texts, login_page_with_error};
 use crate::state::WebState;
 
@@ -31,6 +37,8 @@ const HX_RETARGET: HeaderName = HeaderName::from_static("hx-retarget");
 const HX_RESWAP: HeaderName = HeaderName::from_static("hx-reswap");
 /// The element that shows an error to the user.
 const ERROR_PANEL: &str = "#error-panel";
+/// The swap style of an error. The error panel scrolls into view (ADR-0036 p, `api.md` 5.3).
+const ERROR_RESWAP: &str = "innerHTML show:#error-panel:top";
 
 /// What the mapping needs to know about the request.
 pub(crate) struct ErrorContext<'a> {
@@ -47,7 +55,7 @@ pub(crate) struct ErrorContext<'a> {
 }
 
 /// Add the arguments of the identity errors that carry values.
-fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError) {
+fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError, ctx: &ErrorContext<'_>) {
     match error {
         IdentityError::LoginThrottled { retry_after } => {
             args.set("retry_after", retry_after.to_string());
@@ -56,28 +64,46 @@ fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError) {
         | IdentityError::LastAdministrator { login }
         | IdentityError::UserAlreadyActive { login }
         | IdentityError::UserAlreadyInactive { login } => args.set("login", login.to_string()),
-        IdentityError::PasswordPolicy { reason } => args.set("reason", reason.to_string()),
+        IdentityError::PasswordPolicy { reason } => args.set(
+            "reason",
+            password_reason_text(ctx.state.bundles(), ctx.lang, *reason),
+        ),
         _other => {}
     }
 }
 
 /// Return the values of the error as arguments of its `fluent` message.
-fn args_of(error: &WebError) -> FluentArgs<'static> {
+fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
+    let bundles = ctx.state.bundles();
     let mut args = FluentArgs::new();
     match error {
         WebError::PayloadTooLarge { limit } => args.set("limit", limit.to_string()),
         WebError::BadRequest { field, reason } => {
-            args.set("field", *field);
-            args.set("reason", *reason);
+            args.set("field", label_of(field, ctx));
+            args.set("reason", field_reason_text(bundles, ctx.lang, *reason));
         }
-        WebError::App(AppError::Forbidden { operation }) => args.set("operation", operation.name()),
-        WebError::App(AppError::NotFound { entity }) => args.set("entity", entity.to_string()),
+        WebError::App(AppError::Forbidden { operation }) => {
+            args.set("operation", operation_text(bundles, ctx.lang, *operation));
+        }
+        WebError::App(AppError::NotFound { entity }) => {
+            args.set("entity", missing_text(bundles, ctx.lang, entity));
+        }
         WebError::App(AppError::Timeout { stage }) => args.set("stage", stage.to_string()),
-        WebError::App(AppError::TaskFailed { stage }) => args.set("stage", stage.to_string()),
-        WebError::App(AppError::Identity(identity)) => identity_args(&mut args, identity),
+        WebError::App(AppError::TaskFailed { stage }) => {
+            args.set("stage", task_stage_text(bundles, ctx.lang, *stage));
+        }
+        WebError::App(AppError::Identity(identity)) => identity_args(&mut args, identity, ctx),
         _other => {}
     }
     args
+}
+
+/// Return the label of the form field `field` in the UI language, or the name without a label.
+fn label_of(field: &str, ctx: &ErrorContext<'_>) -> String {
+    ctx.state
+        .bundles()
+        .message(ctx.lang, &field_key(field), None)
+        .unwrap_or_else(|| field.to_owned())
 }
 
 /// Return the form field that the error names, or an empty text.
@@ -100,7 +126,7 @@ fn retry_after_of(error: &WebError, status: StatusCode, ctx: &ErrorContext<'_>) 
 /// Build the view of an error: the code, one sentence, and the reference.
 fn view_of(error: &WebError, shown: ErrorCode, ctx: &ErrorContext<'_>) -> ErrorView {
     let bundles = ctx.state.bundles();
-    let mut args = args_of(error);
+    let mut args = args_of(error, ctx);
     let message = bundles
         .message(ctx.lang, &format!("error-{shown}"), Some(&args))
         .unwrap_or_else(|| error.to_string());
@@ -108,16 +134,26 @@ fn view_of(error: &WebError, shown: ErrorCode, ctx: &ErrorContext<'_>) -> ErrorV
     let reference = bundles
         .message(ctx.lang, "error-reference", Some(&args))
         .unwrap_or_else(|| format!("Reference: {}.", ctx.request_id));
-    let lines = vec![FieldLine {
-        field: field_of(error).to_owned(),
-        message: message.clone(),
-    }];
     ErrorView {
         code: shown.as_str(),
         message,
         reference,
-        lines,
+        lines: lines_of(error, ctx),
+        link_fields: ctx.htmx || matches!(ctx.retry, Some(Retry::Login(_))),
     }
+}
+
+/// Build the field lines of an error. An error of the whole form has none.
+fn lines_of(error: &WebError, ctx: &ErrorContext<'_>) -> Vec<FieldLine> {
+    let field = field_of(error);
+    if field.is_empty() {
+        return Vec::new();
+    }
+    vec![FieldLine {
+        field: field.to_owned(),
+        label: label_of(field, ctx),
+        has_input: has_input(field),
+    }]
 }
 
 /// Render the body: a fragment for an HTMX request and a full page otherwise.
@@ -137,10 +173,10 @@ fn render(view: &ErrorView, field_errors: bool, ctx: &ErrorContext<'_>) -> Optio
             .render()
             .ok()
     } else {
+        let texts = Texts::new(ctx.state.bundles(), ctx.lang);
+        let title = format!("{} · {}", view.code, texts.get("error-page-title"));
         ErrorPage {
-            lang: ctx.lang,
-            csrf_token: "",
-            title: view.code,
+            layout: Layout::bare(texts, ctx.lang, title),
             field_errors,
             view,
         }
@@ -195,7 +231,7 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
         headers.append(SET_COOKIE, clear_session_cookie());
     } else if ctx.htmx {
         headers.insert(HX_RETARGET, HeaderValue::from_static(ERROR_PANEL));
-        headers.insert(HX_RESWAP, HeaderValue::from_static("innerHTML"));
+        headers.insert(HX_RESWAP, HeaderValue::from_static(ERROR_RESWAP));
     }
     if let (Some(Retry::Login(pre_session)), false) = (&ctx.retry, ctx.htmx) {
         headers.append(SET_COOKIE, pre_session.set_cookie().clone());

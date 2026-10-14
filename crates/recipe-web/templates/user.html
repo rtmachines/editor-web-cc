@@ -1,47 +1,49 @@
 {% extends "base.html" %}
+{% import "components/badge.html" as badges %}
 {% block content %}
-<h1>{{ t.get("user-title") }}: {{ login }}</h1>
+<h1>{{ t.get("user-title") }}: <span class="data">{{ login }}</span></h1>
 <dl>
 <dt>{{ t.get("user-label-login") }}</dt>
-<dd>{{ login }}</dd>
+<dd class="data">{{ login }}</dd>
 <dt>{{ t.get("user-label-role") }}</dt>
 <dd>{{ role }}</dd>
 <dt>{{ t.get("user-label-status") }}</dt>
-<dd>{{ status }}</dd>
+<dd>{{ badges::user(active, status) }}</dd>
 {% if must_change %}<dt>{{ t.get("user-label-password") }}</dt>
 <dd>{{ t.get("users-must-change-yes") }}</dd>
 {% endif %}<dt>{{ t.get("user-label-created") }}</dt>
-<dd>{{ created }}</dd>
+<dd class="data">{{ created }}</dd>
 {% if let Some(when) = deactivated %}<dt>{{ t.get("user-label-deactivated") }}</dt>
-<dd>{{ when }}</dd>
+<dd class="data">{{ when }}</dd>
 {% endif %}<dt>{{ t.get("user-label-failures") }}</dt>
 <dd id="failures">{{ failures }}</dd>
 <dt>{{ t.get("user-label-last-failure") }}</dt>
-<dd id="last-failure">{% if let Some(when) = last_failure %}{{ when }}{% else %}{{ t.get("user-never") }}{% endif %}</dd>
+<dd id="last-failure">{% if let Some(when) = last_failure %}<span class="data">{{ when }}</span>{% else %}{{ t.get("user-never") }}{% endif %}</dd>
 </dl>
-<div id="user-result" role="status"></div>
+<div id="user-result"></div>
 <form method="post" action="/users/{{ login }}/role" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<label for="role">{{ t.get("user-role-label") }}</label>
-<select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select>
-<button type="submit">{{ t.get("user-role-submit") }}</button>
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+<div class="field"><label for="role">{{ t.get("user-role-label") }}</label>
+<select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
+<p class="actions"><button type="submit">{{ t.get("user-role-submit") }}</button></p>
 </form>
+<div class="actions">
 <form method="post" action="/users/{{ login }}/deactivate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<button type="submit">{{ t.get("user-deactivate-submit") }}</button>
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+<button type="submit" class="btn-danger">{{ t.get("user-deactivate-submit") }}</button>
 </form>
 <form method="post" action="/users/{{ login }}/activate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
 <button type="submit">{{ t.get("user-activate-submit") }}</button>
 </form>
 <form method="post" action="/users/{{ login }}/reset-password" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
 <button type="submit">{{ t.get("user-reset-submit") }}</button>
 </form>
 <form method="post" action="/users/{{ login }}/unlock" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
 <button type="submit">{{ t.get("user-unlock-submit") }}</button>
 </form>
-<p><a href="/users">{{ t.get("users-title") }}</a></p>
-{% include "logout-form.html" %}
+</div>
+<p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
 {% endblock %}

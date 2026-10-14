@@ -3,8 +3,10 @@
 use askama::Template;
 use recipe_app::identity::{OwnPasswordForm, OwnProfile};
 
-use crate::error::ErrorView;
+use crate::error::{ErrorView, WebError};
 use crate::i18n::Lang;
+use crate::layout::{Layout, NavTarget};
+use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 
 /// The page `login.html`.
@@ -15,9 +17,7 @@ use crate::pages::texts::Texts;
 #[derive(Template)]
 #[template(path = "login.html")]
 pub(crate) struct LoginPage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
     nonce: &'a str,
     view: Option<&'a ErrorView>,
@@ -32,9 +32,7 @@ impl<'a> LoginPage<'a> {
         view: Option<&'a ErrorView>,
     ) -> Self {
         Self {
-            lang,
-            title: t.get("login-title"),
-            csrf_token: "",
+            layout: Layout::for_login(t, lang, t.get("login-title"), nonce),
             t,
             nonce,
             view,
@@ -56,30 +54,29 @@ pub(crate) fn login_page_with_error<'a>(
 #[derive(Template)]
 #[template(path = "me.html")]
 pub(crate) struct ProfilePage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
     login: &'a str,
     role: String,
 }
 
 impl<'a> ProfilePage<'a> {
-    /// Build the page from the profile of the user and the CSRF token of the session.
+    /// Build the page from the profile of the user.
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
     pub(crate) fn new(
         t: Texts<'a>,
-        lang: Lang,
-        csrf_token: &'a str,
+        request: &PageRequest,
         profile: &'a OwnProfile,
-    ) -> Self {
-        Self {
-            lang,
-            title: t.get("me-title"),
-            csrf_token,
+    ) -> Result<Self, WebError> {
+        Ok(Self {
+            layout: Layout::for_session(t, request, t.get("me-title"), Some(NavTarget::Me))?,
             t,
             login: profile.login.as_str(),
             role: t.role(profile.role),
-        }
+        })
     }
 }
 
@@ -87,28 +84,27 @@ impl<'a> ProfilePage<'a> {
 #[derive(Template)]
 #[template(path = "password.html")]
 pub(crate) struct PasswordPage<'a> {
-    lang: Lang,
-    title: String,
-    csrf_token: &'a str,
+    layout: Layout<'a>,
     t: Texts<'a>,
     must_change: bool,
 }
 
 impl<'a> PasswordPage<'a> {
-    /// Build the page from the form data and the CSRF token of the session.
+    /// Build the page from the form data.
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
     pub(crate) fn new(
         t: Texts<'a>,
-        lang: Lang,
-        csrf_token: &'a str,
+        request: &PageRequest,
         form: OwnPasswordForm,
-    ) -> Self {
-        Self {
-            lang,
-            title: t.get("password-title"),
-            csrf_token,
+    ) -> Result<Self, WebError> {
+        Ok(Self {
+            layout: Layout::for_session(t, request, t.get("password-title"), Some(NavTarget::Me))?,
             t,
             must_change: form.must_change_password,
-        }
+        })
     }
 }
 

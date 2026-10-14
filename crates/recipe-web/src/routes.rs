@@ -70,22 +70,40 @@ fn operation_row(
 
 /// Return the route table. Later tasks add one row for each page of `api.md` section 2.
 pub(crate) fn table() -> Vec<RouteEntry> {
-    let mut rows = static_and_login_rows();
+    let mut rows = static_rows();
+    rows.extend(lang_and_login_rows());
     rows.extend(own_rows());
+    rows.push(operation_row(
+        Method::GET,
+        "/recipes",
+        Operation::ListRecipes,
+        get(pages::recipes::list),
+    ));
     rows.extend(user_list_rows());
     rows.extend(user_state_rows());
     rows
 }
 
-/// Return the rows of the static file, the language, the login, and the logout.
-fn static_and_login_rows() -> Vec<RouteEntry> {
+/// Return one static row for each file of `static_files::STATIC_FILES` and `static_files::FONTS`.
+fn static_rows() -> Vec<RouteEntry> {
+    let files = static_files::STATIC_FILES.iter().map(|file| RouteEntry {
+        method: Method::GET,
+        path: file.path,
+        access: Access::Static,
+        handler: static_files::static_handler(file),
+    });
+    let fonts = static_files::FONTS.iter().map(|file| RouteEntry {
+        method: Method::GET,
+        path: file.path,
+        access: Access::Static,
+        handler: static_files::font_handler(file),
+    });
+    files.chain(fonts).collect()
+}
+
+/// Return the rows of the language, the login, and the logout.
+fn lang_and_login_rows() -> Vec<RouteEntry> {
     vec![
-        RouteEntry {
-            method: Method::GET,
-            path: "/static/htmx.min.js",
-            access: Access::Static,
-            handler: get(static_files::htmx),
-        },
         RouteEntry {
             method: Method::POST,
             path: "/lang",

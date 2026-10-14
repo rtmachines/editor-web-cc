@@ -1,21 +1,21 @@
 {% extends "base.html" %}
+{% import "components/table.html" as tables %}
+{% import "components/badge.html" as badges %}
 {% block content %}
 <h1>{{ t.get("users-title") }}</h1>
-<form method="get" action="/users">
-<p><label for="q">{{ t.get("users-search-label") }}</label>
-<input id="q" type="search" name="q" maxlength="64" pattern="[A-Za-z0-9._\-]*" value="{{ q }}">
-<button type="submit">{{ t.get("users-search-submit") }}</button></p>
+<form method="get" action="/users" class="actions">
+<div class="field"><label for="q">{{ t.get("users-search-label") }}</label>
+<input id="q" type="search" name="q" class="data" autocapitalize="none" spellcheck="false" maxlength="64" value="{{ q }}"></div>
+<button type="submit">{{ t.get("users-search-submit") }}</button>
 </form>
-<p><a href="/users/new">{{ t.get("users-new-link") }}</a></p>
-{% if rows.is_empty() %}<p>{{ t.get("users-empty") }}</p>
-{% else %}<table>
-<thead><tr><th>{{ t.get("users-col-login") }}</th><th>{{ t.get("users-col-role") }}</th><th>{{ t.get("users-col-status") }}</th><th>{{ t.get("users-col-password") }}</th></tr></thead>
-<tbody>
-{% for row in rows %}<tr><td><a href="/users/{{ row.login }}">{{ row.login }}</a></td><td>{{ row.role }}</td><td>{{ row.status }}</td><td>{% if row.must_change %}{{ t.get("users-must-change-yes") }}{% endif %}</td></tr>
+<p class="actions"><a class="target-link" href="/users/new">{{ t.get("users-new-link") }}</a></p>
+{% call tables::frame("users-caption", t.get("users-title")) %}<thead><tr>{{ tables::head(t.get("users-col-login")) }}{{ tables::head(t.get("users-col-role")) }}{{ tables::head(t.get("users-col-status")) }}{{ tables::head(t.get("users-col-password")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(4, t.get("users-empty")) }}{% else %}<tbody>
+{% for row in rows %}<tr><td class="data"><a href="/users/{{ row.login }}">{{ row.login }}</a></td><td>{{ row.role }}</td><td>{{ badges::user(row.active, row.status) }}</td><td>{% if row.must_change %}{{ t.get("users-must-change-yes") }}{% endif %}</td></tr>
 {% endfor %}</tbody>
-</table>
-{% endif %}<p>{% if let Some(url) = prev_url %}<a href="{{ url }}">{{ t.get("users-prev") }}</a>{% endif %}
-{% if let Some(url) = next_url %}<a href="{{ url }}">{{ t.get("users-next") }}</a>{% endif %}</p>
-<p><a href="/me">{{ t.get("me-title") }}</a></p>
-{% include "logout-form.html" %}
+{% endif %}{% endcall %}
+{% if prev_url.is_some() || next_url.is_some() %}<p class="actions">{% if let Some(url) = prev_url %}<a class="target-link" href="{{ url }}">{{ t.get("users-prev") }}</a>{% endif %}
+{% if let Some(url) = next_url %}<a class="target-link" href="{{ url }}">{{ t.get("users-next") }}</a>{% endif %}</p>
+{% endif %}
+<p><a class="target-link" href="/me">{{ t.get("me-title") }}</a></p>
 {% endblock %}

@@ -1,0 +1,6 @@
+{% import "components/alert.html" as alerts %}
+<button type="button" class="btn btn-secondary">{{ word }}</button>
+<button type="button" class="btn btn-danger">{{ word }}</button>
+<span class="num">{{ number }}</span>
+{{ alerts::notice("warning", word) }}
+{{ alerts::notice("success", word) }}

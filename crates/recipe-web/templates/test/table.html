@@ -1,0 +1,2 @@
+{% import "components/table.html" as tables %}
+{% call tables::frame(caption_id, caption) %}<thead><tr>{{ tables::head(head_a) }}{{ tables::head(head_b) }}</tr></thead>{% if rows.is_empty() %}{{ tables::empty_row(2, empty_text) }}{% else %}<tbody>{% for row in rows %}<tr><td>{{ row.a }}</td><td>{{ row.b }}</td></tr>{% endfor %}</tbody>{% endif %}{% endcall %}

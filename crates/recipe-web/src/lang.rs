@@ -11,14 +11,12 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 
 use crate::cookies::lang_cookie;
-use crate::error::WebError;
+use crate::error::{FieldReason, WebError};
 use crate::i18n::Lang;
 use crate::state::WebState;
 
 /// The page that a redirect uses when `next` is missing or not a same-origin path.
 const DEFAULT_NEXT: &str = "/recipes";
-/// The reason of the field error for a language that the server does not support.
-const UNSUPPORTED_LANG: &str = "the language must be pl or en";
 
 /// The fields of the form of `POST /lang`.
 #[derive(Deserialize)]
@@ -78,7 +76,7 @@ pub(crate) async fn switch(
     let Form(form) = form?;
     let lang = Lang::parse(&form.lang).map_err(|_unsupported| WebError::BadRequest {
         field: "lang",
-        reason: UNSUPPORTED_LANG,
+        reason: FieldReason::Lang,
     })?;
     let max_age = state.settings().lang_cookie_max_age;
     let mut response = StatusCode::SEE_OTHER.into_response();

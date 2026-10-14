@@ -1,0 +1,5 @@
+{% import "components/empty.html" as empties %}
+{#- Table frame of design-system.md 10.4. A call block gives the head and the body. The caption id comes from code. -#}
+{%- macro frame(caption_id, caption) -%}<div class="table-wrap" role="region" tabindex="0" aria-labelledby="{{ caption_id }}"><table><caption id="{{ caption_id }}">{{ caption }}</caption>{{ caller() }}</table></div>{%- endmacro -%}
+{%- macro head(label) -%}<th scope="col">{{ label }}</th>{%- endmacro -%}
+{%- macro empty_row(columns, text) -%}<tbody><tr><td colspan="{{ columns }}">{{ empties::empty(text) }}</td></tr></tbody>{%- endmacro -%}

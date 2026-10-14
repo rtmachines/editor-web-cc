@@ -1,13 +1,12 @@
 {% extends "base.html" %}
+{% import "components/field.html" as fields %}
 {% block error_panel %}{% if let Some(view) = view %}{% include "field-errors.html" %}{% endif %}{% endblock %}
 {% block content %}
 <h1>{{ t.get("login-title") }}</h1>
 <form method="post" action="/login">
-<p><label for="login">{{ t.get("login-label-login") }}</label>
-<input id="login" type="text" name="login" maxlength="64" required autocomplete="username" autocapitalize="none" spellcheck="false"></p>
-<p><label for="password">{{ t.get("login-label-password") }}</label>
-<input id="password" type="password" name="password" maxlength="128" required autocomplete="current-password"></p>
+{{ fields::plain(t, "login", t.get("login-label-login"), "text", true, true, 64, "username") }}
+{{ fields::plain(t, "password", t.get("login-label-password"), "password", true, false, 128, "current-password") }}
 <input type="hidden" name="csrf_pre" value="{{ nonce }}">
-<p><button type="submit">{{ t.get("login-submit") }}</button></p>
+<p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("login-submit") }}</button></p>
 </form>
 {% endblock %}

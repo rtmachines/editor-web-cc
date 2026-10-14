@@ -45,7 +45,7 @@ fn error_for(case: &str) -> WebError {
     match case {
         "field" => WebError::BadRequest {
             field: "lang",
-            reason: "the language must be pl or en",
+            reason: FieldReason::Lang,
         },
         "policy" => app(IdentityError::PasswordPolicy {
             reason: PasswordReason::TooShort,
@@ -93,7 +93,7 @@ fn error_for(case: &str) -> WebError {
         },
         _unknown => WebError::BadRequest {
             field: "case",
-            reason: "unknown test case",
+            reason: FieldReason::Form,
         },
     }
 }
@@ -180,7 +180,7 @@ fn error_mapping_web_error_codes_follow_the_registry() {
         (
             WebError::BadRequest {
                 field: "f",
-                reason: "r",
+                reason: FieldReason::Form,
             },
             ErrorCode::WEB_008,
         ),
@@ -213,7 +213,7 @@ fn error_mapping_web_error_messages_are_the_registry_texts() {
     assert_eq!(
         WebError::BadRequest {
             field: "lang",
-            reason: "the language must be pl or en"
+            reason: FieldReason::Lang
         }
         .to_string(),
         "Field lang is not valid: the language must be pl or en."
@@ -255,7 +255,7 @@ async fn error_mapping_field_error_gives_422_and_a_list_line() {
     let answer = ask_htmx("field").await;
     assert_eq!(answer.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(
-        answer.body.contains(r#"<ul class="field-errors""#),
+        answer.body.contains(r#"<ul class="field-lines""#),
         "{}",
         answer.body
     );
@@ -289,7 +289,11 @@ async fn error_mapping_htmx_error_retargets_the_error_panel() {
         let answer = ask_htmx(case).await;
         assert!(answer.status().as_u16() >= 400, "{case}");
         assert_eq!(answer.header("hx-retarget"), "#error-panel", "{case}");
-        assert_eq!(answer.header("hx-reswap"), "innerHTML", "{case}");
+        assert_eq!(
+            answer.header("hx-reswap"),
+            "innerHTML show:#error-panel:top",
+            "{case}"
+        );
         assert_eq!(answer.header("hx-redirect"), "", "{case}");
     }
 }
@@ -332,8 +336,12 @@ async fn error_mapping_page_has_no_inline_script_style_or_handler() {
         assert!(!body.contains("|safe"), "{case}");
         assert!(!body.contains(" onclick="), "{case}");
         assert!(!body.contains(" onload="), "{case}");
-        assert_eq!(body.matches("<script").count(), 1, "{case}");
-        assert!(body.contains(r#"<script src="/static/"#), "{case}");
+        assert_eq!(body.matches("<script").count(), 3, "{case}");
+        assert_eq!(
+            body.matches(r#"<script src="/static/"#).count(),
+            3,
+            "{case}"
+        );
     }
 }
 
@@ -347,7 +355,7 @@ async fn error_mapping_page_without_session_has_no_hx_headers_attribute() {
 async fn error_mapping_domain_value_error_is_422_with_field_errors() {
     let answer = ask_htmx("policy").await;
     assert_eq!(answer.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(answer.body.contains(r#"class="field-errors""#));
+    assert!(answer.body.contains(r#"role="alert""#));
     assert!(answer.body.contains("E-IDN-006"));
 }
 
@@ -355,8 +363,12 @@ async fn error_mapping_domain_value_error_is_422_with_field_errors() {
 async fn error_mapping_state_conflict_is_409_with_error_html() {
     let answer = ask_htmx("last-admin").await;
     assert_eq!(answer.status(), StatusCode::CONFLICT);
-    assert!(answer.body.contains(r#"class="error""#), "{}", answer.body);
-    assert!(!answer.body.contains("field-errors"));
+    assert!(
+        answer.body.contains(r#"class="alert alert-error""#),
+        "{}",
+        answer.body
+    );
+    assert!(!answer.body.contains("field-lines"));
     assert!(answer.body.contains("E-IDN-002"));
 }
 
@@ -365,7 +377,10 @@ async fn error_mapping_database_rules_are_409_with_error_html() {
     for (case, code) in [("db-rule", "E-DB-003"), ("trigger", "E-PLT-030")] {
         let answer = ask_htmx(case).await;
         assert_eq!(answer.status(), StatusCode::CONFLICT, "{case}");
-        assert!(answer.body.contains(r#"class="error""#), "{case}");
+        assert!(
+            answer.body.contains(r#"class="alert alert-error""#),
+            "{case}"
+        );
         assert!(answer.body.contains(code), "{case}");
     }
 }
@@ -377,7 +392,7 @@ async fn error_mapping_forbidden_is_403_and_names_the_operation() {
     assert!(
         answer
             .body
-            .contains("Your role does not permit the operation CreateMachine."),
+            .contains("Your role does not permit the operation Create machine."),
         "{}",
         answer.body
     );
@@ -418,11 +433,7 @@ async fn error_mapping_no_session_redirects_a_page_with_303() {
 async fn error_mapping_wrong_credentials_are_401_with_no_redirect() {
     let answer = ask_htmx("credentials").await;
     assert_eq!(answer.status(), StatusCode::UNAUTHORIZED);
-    assert!(
-        answer.body.contains(r#"class="field-errors""#),
-        "{}",
-        answer.body
-    );
+    assert!(answer.body.contains(r#"role="alert""#), "{}", answer.body);
     assert!(answer.body.contains("E-IDN-003"));
     assert_eq!(answer.header("hx-redirect"), "");
     assert_eq!(answer.header("location"), "");
@@ -444,7 +455,7 @@ async fn error_mapping_inactive_user_gets_the_answer_of_wrong_credentials() {
 async fn error_mapping_wrong_current_password_is_422_with_field_errors() {
     let answer = ask_htmx("current-password").await;
     assert_eq!(answer.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    assert!(answer.body.contains(r#"class="field-errors""#));
+    assert!(answer.body.contains(r#"role="alert""#));
     assert!(answer.body.contains("E-IDN-008"));
 }
 
@@ -453,7 +464,7 @@ async fn error_mapping_missing_resource_is_404() {
     let answer = ask_htmx("not-found").await;
     assert_eq!(answer.status(), StatusCode::NOT_FOUND);
     assert!(answer.body.contains("E-WEB-005"));
-    assert!(answer.body.contains(r#"class="error""#));
+    assert!(answer.body.contains(r#"class="alert alert-error""#));
 }
 
 #[tokio::test]
@@ -540,7 +551,7 @@ async fn error_mapping_text_follows_the_language_cookie() {
     assert!(english.body.contains(r#"<html lang="en">"#));
     assert!(polish.body.contains(r#"<html lang="pl">"#));
     assert!(!polish.body.contains("Your role does not permit"));
-    assert!(polish.body.contains("CreateMachine"));
+    assert!(polish.body.contains("Utworzenie maszyny"));
     assert_eq!(
         polish.body.replace(&polish.request_id(), "<id>"),
         default.body.replace(&default.request_id(), "<id>")

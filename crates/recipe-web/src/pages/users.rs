@@ -18,7 +18,7 @@ use serde::Deserialize;
 use super::render::render;
 use super::request::PageRequest;
 use super::texts::Texts;
-use crate::error::WebError;
+use crate::error::{FieldReason, WebError};
 use crate::state::WebState;
 use fluent::FluentArgs;
 use query::ListQuery;
@@ -26,14 +26,6 @@ use templates::{NewUserPage, ResultFragment, ResultPage, UserPage, UsersPage};
 
 mod query;
 mod templates;
-
-/// The reason of the field error for a bad login.
-const LOGIN_REASON: &str =
-    "a login is 3 to 64 characters from a to z, 0 to 9, period, underscore, and hyphen";
-/// The reason of the field error for a bad role.
-const ROLE_REASON: &str = "a role is administrator, process_engineer, or operator";
-/// The reason of the field error for a query string that cannot be read.
-const QUERY_REASON: &str = "the query string has an unknown key or a key that is not text";
 
 /// The fields of the form of `POST /users`.
 #[derive(Deserialize)]
@@ -84,7 +76,7 @@ fn path_login(path: Result<Path<String>, PathRejection>) -> Result<Login, WebErr
 fn field_login(text: &str) -> Result<Login, WebError> {
     Login::parse(text).map_err(|_reason| WebError::BadRequest {
         field: "login",
-        reason: LOGIN_REASON,
+        reason: FieldReason::LoginGrammar,
     })
 }
 
@@ -92,7 +84,7 @@ fn field_login(text: &str) -> Result<Login, WebError> {
 fn field_role(text: &str) -> Result<Role, WebError> {
     Role::parse(text).map_err(|_reason| WebError::BadRequest {
         field: "role",
-        reason: ROLE_REASON,
+        reason: FieldReason::Role,
     })
 }
 
@@ -113,7 +105,7 @@ pub(crate) async fn list(
 ) -> Result<Response, WebError> {
     let Query(query) = query.map_err(|_rejection| WebError::BadRequest {
         field: "query",
-        reason: QUERY_REASON,
+        reason: FieldReason::Query,
     })?;
     let checked = query.check()?;
     let input = ListUsersInput {
@@ -135,8 +127,7 @@ pub(crate) async fn list(
         .flatten()
         .map(|page| page_url(&q, page));
     let texts = Texts::new(state.bundles(), request.lang());
-    let csrf_token = request.csrf_token();
-    let page = UsersPage::new(texts, request.lang(), &csrf_token, &q, &users, (prev, next));
+    let page = UsersPage::new(texts, &request, &q, &users, (prev, next))?;
     Ok(render(&page, request.request_id())?.into_response())
 }
 
@@ -149,8 +140,7 @@ pub(crate) async fn new_form(
         .execute(request.auth()?, &request.meta())
         .await?;
     let texts = Texts::new(state.bundles(), request.lang());
-    let csrf_token = request.csrf_token();
-    let page = NewUserPage::new(texts, request.lang(), &csrf_token, &form.roles);
+    let page = NewUserPage::new(texts, &request, &form.roles)?;
     Ok(render(&page, request.request_id())?.into_response())
 }
 
@@ -161,14 +151,7 @@ fn result_page(
     title_key: &str,
     fragment: ResultFragment<'_>,
 ) -> Result<Response, WebError> {
-    let csrf_token = request.csrf_token();
-    let page = ResultPage::new(
-        texts,
-        request.lang(),
-        &csrf_token,
-        texts.get(title_key),
-        fragment,
-    );
+    let page = ResultPage::new(texts, request, texts.get(title_key), fragment)?;
     Ok(render(&page, request.request_id())?.into_response())
 }
 
@@ -231,8 +214,7 @@ pub(crate) async fn detail(
         .execute(request.auth()?, &request.meta(), &login)
         .await?;
     let texts = Texts::new(state.bundles(), request.lang());
-    let csrf_token = request.csrf_token();
-    let page = UserPage::new(texts, request.lang(), &csrf_token, &detail);
+    let page = UserPage::new(texts, &request, &detail)?;
     Ok(render(&page, request.request_id())?.into_response())
 }
 

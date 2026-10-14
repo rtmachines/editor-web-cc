@@ -1,4 +1,2 @@
-<p class="notice" role="status">{{ message }}</p>
-{% if let Some(password) = password %}<p>{{ t.get("user-password-label") }}: <code id="one-time-password">{{ password }}</code></p>
-<p>{{ t.get("user-password-once") }}</p>
-{% endif %}<p><a href="/users/{{ login }}">{{ t.get("user-back-link") }}</a></p>
+{% import "components/toast.html" as toasts -%}
+{% include "user-result-body.html" %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(message) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>

@@ -115,3 +115,144 @@ user-deactivated = Użytkownik { $login } został dezaktywowany. Wszystkie sesje
 user-activated = Użytkownik { $login } jest aktywny.
 user-password-reset = Hasło użytkownika { $login } zostało zresetowane. Wszystkie sesje użytkownika zakończyły się.
 user-unlocked = Opóźnienie logowania użytkownika { $login } zostało zdjęte.
+
+# Layout
+app-name = Edytor receptur
+skip-to-content = Przejdź do treści
+nav-label = Główna
+nav-recipes = Receptury
+nav-users = Użytkownicy
+nav-me = Moje konto
+lang-switch-label = Język
+lang-switch-pl = Polski
+lang-switch-en = English
+user-signed-in = Zalogowano jako
+
+# Recipe list
+recipes-title = Receptury
+recipes-empty = Brak receptur do pokazania.
+
+# States
+status-draft = Szkic
+status-approved = Zatwierdzona
+status-retired = Wycofana
+
+# Forms
+form-required = wymagane
+
+# Error page
+error-page-title = Żądanie nie powiodło się
+error-page-home = Otwórz listę receptur
+
+# Field labels
+field-form = Formularz
+field-lang = Język
+field-login = Login
+field-password = Hasło
+field-current-password = Obecne hasło
+field-role = Rola
+field-query = Pola wyszukiwania
+field-q = Login zawiera
+field-page = Strona
+field-X-Forwarded-For = Nagłówek X-Forwarded-For
+
+# Field reasons
+reason-form = w formularzu brakuje pola, jest nieznane pole albo zły typ treści
+reason-lang = język musi być pl albo en
+reason-login-length = login ma od 1 do 64 znaków
+reason-login-control = login nie zawiera znaku sterującego
+reason-login-grammar = login ma od 3 do 64 znaków: litery a–z, cyfry 0–9, kropka, podkreślnik i łącznik
+reason-password-length = hasło ma od 1 do 128 znaków
+reason-role = wybierz rolę z listy
+reason-query = adres ma nieznany parametr albo parametr, który nie jest tekstem
+reason-q = tekst wyszukiwania ma najwyżej 64 znaki: litery a–z, cyfry 0–9, kropka, podkreślnik i łącznik
+reason-page = numer strony to liczba całkowita od 1
+reason-forwarded = każdy wpis musi być adresem IP
+
+# Missing entities
+missing-machine = Maszyna { $code }
+missing-machine-id = Maszyna { $id }
+missing-unit = Jednostka { $path } maszyny { $code }
+missing-type = Typ { $name } maszyny { $code }
+missing-recipe = Receptura { $reference }
+missing-version = Wersja { $number } receptury { $reference }
+missing-user = Użytkownik { $login }
+missing-malformed-login = Użytkownik
+
+# Password reasons and task stages
+password-reason-empty = jest puste
+password-reason-too-short = ma mniej niż 12 znaków
+password-reason-too-long = ma więcej niż 128 znaków
+password-reason-breached = jest na liście haseł, które wyciekły
+task-stage-password-hash = obliczenie skrótu hasła
+task-stage-validation = walidacja
+task-stage-export = eksport
+task-stage-token = generowanie tokenu
+
+# Operations
+operation-create-machine = Utworzenie maszyny
+operation-rename-machine = Zmiana nazwy maszyny
+operation-archive-machine = Archiwizacja maszyny
+operation-add-unit = Dodanie jednostki
+operation-rename-unit = Zmiana nazwy jednostki
+operation-archive-unit = Archiwizacja jednostki
+operation-define-udt = Zdefiniowanie typu UDT
+operation-create-recipe = Utworzenie receptury
+operation-rename-recipe = Zmiana nazwy receptury
+operation-delete-recipe = Usunięcie receptury
+operation-restore-recipe = Przywrócenie receptury
+operation-create-version = Utworzenie wersji
+operation-discard-draft = Odrzucenie szkicu
+operation-approve-version = Zatwierdzenie wersji
+operation-retire-version = Wycofanie wersji
+operation-add-parameter = Dodanie parametru
+operation-update-parameter-definition = Zmiana definicji parametru
+operation-set-parameter-value = Ustawienie wartości parametru
+operation-replace-limits = Zastąpienie limitów
+operation-upsert-translation = Zapisanie tłumaczenia
+operation-remove-translation = Usunięcie tłumaczenia
+operation-remove-parameter = Usunięcie parametru
+operation-rebind-type-revision = Przepięcie rewizji typu
+operation-login = Logowanie
+operation-logout = Wylogowanie
+operation-create-user = Utworzenie użytkownika
+operation-set-user-role = Ustawienie roli użytkownika
+operation-deactivate-user = Dezaktywacja użytkownika
+operation-activate-user = Aktywacja użytkownika
+operation-reset-password = Reset hasła
+operation-change-own-password = Zmiana własnego hasła
+operation-unlock-login = Odblokowanie logowania
+operation-export-version = Eksport wersji
+operation-list-machines = Lista maszyn
+operation-get-machine = Podgląd maszyny
+operation-get-unit-tree = Podgląd drzewa jednostek
+operation-get-unit = Podgląd jednostki
+operation-list-types = Lista typów
+operation-get-type-tree = Podgląd drzewa typu
+operation-get-type-usage = Podgląd użycia typu
+operation-list-recipes = Lista receptur
+operation-get-recipe = Podgląd receptury
+operation-list-versions = Lista wersji
+operation-get-version = Podgląd wersji
+operation-diff-versions = Porównanie wersji
+operation-get-recipe-history = Podgląd historii receptury
+operation-list-parameters = Lista parametrów
+operation-get-parameter = Podgląd parametru
+operation-get-limits = Podgląd limitów
+operation-get-translations = Podgląd tłumaczeń
+operation-list-users = Lista użytkowników
+operation-get-user = Podgląd użytkownika
+operation-list-audit-entries = Lista wpisów audytu
+operation-get-audit-entry = Podgląd wpisu audytu
+operation-list-security-events = Lista zdarzeń bezpieczeństwa
+operation-get-own-profile = Podgląd własnego profilu
+operation-get-machine-form = Formularz maszyny
+operation-get-unit-form = Formularz jednostki
+operation-get-udt-form = Formularz typu UDT
+operation-get-recipe-form = Formularz receptury
+operation-get-version-form = Formularz wersji
+operation-get-parameter-form = Formularz parametru
+operation-get-approval-preview = Podgląd przed zatwierdzeniem
+operation-get-user-form = Formularz użytkownika
+operation-get-login-form = Formularz logowania
+operation-get-own-password-form = Formularz zmiany hasła

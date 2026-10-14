@@ -1,0 +1,4 @@
+{% import "components/icons.html" as icons %}
+{#- Disclosure node of design-system.md 10.8. The id is the UUID of the unit or type, from code, never user text. -#}
+{%- macro node(id, path, name, expanded) -%}<li><button type="button" class="tree-node" aria-expanded="{% if expanded %}true{% else %}false{% endif %}" aria-controls="tree-group-{{ id }}">{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span class="tree-path">{{ path }}</span><span>{{ name }}</span></button><ul class="tree-group" id="tree-group-{{ id }}"{% if !expanded %} hidden{% endif %}>{{ caller() }}</ul></li>{%- endmacro -%}
+{%- macro leaf(path, name) -%}<li class="tree-leaf"><span class="tree-path">{{ path }}</span><span>{{ name }}</span></li>{%- endmacro -%}

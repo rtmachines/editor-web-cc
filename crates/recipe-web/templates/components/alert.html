@@ -1,0 +1,8 @@
+{% import "components/icons.html" as icons %}
+{#- The severity comes from code (error, warning, info, success), never from user data. -#}
+{%- macro severity_icon(severity) -%}{% if severity == "error" %}{{ icons::alert_error() }}{% else if severity == "warning" %}{{ icons::alert_warning() }}{% else if severity == "info" %}{{ icons::alert_info() }}{% else if severity == "success" %}{{ icons::alert_success() }}{% endif %}{%- endmacro -%}
+{#- A static message with the look of the alert and no role, so a page that loads does not announce it. -#}
+{%- macro notice(severity, message) -%}<div class="alert alert-{{ severity }}">{{ severity_icon(severity) }}<span>{{ message }}</span></div>{%- endmacro -%}
+{%- macro alert(severity, code, message, reference) -%}<div class="alert alert-{{ severity }}" role="alert">{{ severity_icon(severity) }}<span class="alert-code">{{ code }}</span><span>{{ message }}</span><span class="alert-ref">{{ reference }}</span></div>{%- endmacro -%}
+{#- The alert with field lines between the sentence and the reference. The field names come from code. With link, each line links to the input with that id. No line gives no list. -#}
+{%- macro alert_fields(severity, code, message, lines, link, reference) -%}<div class="alert alert-{{ severity }}" role="alert">{{ severity_icon(severity) }}<span class="alert-code">{{ code }}</span><span>{{ message }}</span>{% if !lines.is_empty() %}<ul class="field-lines">{% for line in lines %}<li>{% if link && line.has_input %}<a class="target-link" href="#{{ line.field }}">{{ line.label }}</a>{% else %}{{ line.label }}{% endif %}</li>{% endfor %}</ul>{% endif %}<span class="alert-ref">{{ reference }}</span></div>{%- endmacro -%}

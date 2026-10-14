@@ -30,9 +30,18 @@ pub(crate) struct PageRequest {
     htmx: bool,
     session: Option<Authenticated>,
     cookie_session: Option<SessionId>,
+    get_target: Option<String>,
 }
 
 impl PageRequest {
+    /// Return the path and the query of a `GET` request, or `None` for another method.
+    ///
+    /// The language switch of the layout sends this text as the field `next`. A page that
+    /// answers another method has no switch, so a user cannot leave it by accident (design D5).
+    pub(crate) fn path_and_query(&self) -> Option<&str> {
+        self.get_target.as_deref()
+    }
+
     /// Return the id of the request.
     pub(crate) const fn request_id(&self) -> RequestId {
         self.request_id
@@ -113,7 +122,11 @@ impl<S: Send + Sync> FromRequestParts<S> for PageRequest {
         let cookie_session = request_cookie(&parts.headers, SESSION_COOKIE)
             .and_then(|text| SessionToken::parse(&text).ok())
             .map(|token| SessionId::of(&token));
+        let get_target = (parts.method == axum::http::Method::GET)
+            .then(|| parts.uri.path_and_query().map(ToString::to_string))
+            .flatten();
         Ok(Self {
+            get_target,
             request_id,
             client: client.ip(),
             user_agent,

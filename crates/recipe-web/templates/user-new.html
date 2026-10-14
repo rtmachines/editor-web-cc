@@ -1,14 +1,12 @@
 {% extends "base.html" %}
+{% import "components/field.html" as fields %}
 {% block content %}
 <h1>{{ t.get("user-new-title") }}</h1>
 <form method="post" action="/users">
-<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-<p><label for="login">{{ t.get("user-new-label-login") }}</label>
-<input id="login" type="text" name="login" minlength="3" maxlength="64" required autocomplete="off" autocapitalize="none" spellcheck="false"></p>
-<p><label for="role">{{ t.get("user-new-label-role") }}</label>
-<select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></p>
-<p>{{ t.get("user-new-hint") }}</p>
-<p><button type="submit">{{ t.get("user-new-submit") }}</button></p>
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+{{ fields::field(t, "login", t.get("user-new-label-login"), t.get("user-new-hint"), "text", true, true, 64, "off") }}
+<div class="field"><label for="role">{{ t.get("user-new-label-role") }}</label><select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
+<p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("user-new-submit") }}</button></p>
 </form>
-<p><a href="/users">{{ t.get("users-title") }}</a></p>
+<p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
 {% endblock %}

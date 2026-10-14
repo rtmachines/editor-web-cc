@@ -10,6 +10,7 @@ mod definition_steps;
 mod delete_recipe;
 mod discard_retire;
 mod draft_session;
+mod queries;
 mod rebind;
 mod remove_parameter;
 mod rename_restore;
@@ -30,6 +31,7 @@ pub use discard_retire::{
     DiscardDraft, DiscardDraftInput, RetireVersion, RetireVersionInput, VersionOutput,
 };
 pub use draft_session::DraftOutput;
+pub use queries::{ListRecipes, RecipeList};
 pub use rebind::{RebindTypeRevision, RebindTypeRevisionInput};
 pub use remove_parameter::{RemoveParameter, RemoveParameterInput};
 pub use rename_restore::{

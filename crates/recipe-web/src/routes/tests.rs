@@ -176,6 +176,7 @@ fn matrix() -> Vec<(Endpoint, [Want; 6])> {
             endpoint(Method::POST, "/lang", "lang=en&next=/recipes"),
             [Recipes; 6],
         ),
+        (endpoint(Method::GET, "/recipes", ""), own),
         (endpoint(Method::GET, "/users", ""), manage),
         (endpoint(Method::GET, "/users/new", ""), manage),
         (
@@ -329,8 +330,35 @@ fn expected_routes() -> Vec<(String, &'static str)> {
         .map(|(endpoint, _wants)| (endpoint.method.to_string(), endpoint.path))
         .collect();
     routes.push(("GET".to_owned(), "/static/htmx.min.js"));
+    routes.push(("GET".to_owned(), "/static/app.css"));
+    routes.push(("GET".to_owned(), "/static/row-version.js"));
+    routes.push(("GET".to_owned(), "/static/tree.js"));
+    routes.extend(
+        font_paths()
+            .into_iter()
+            .map(|path| ("GET".to_owned(), path)),
+    );
     routes.sort();
     routes
+}
+
+/// The routes of the 8 font files (design D3). `static_files::FONTS` is the one list of them.
+fn font_paths() -> Vec<&'static str> {
+    crate::static_files::FONTS
+        .iter()
+        .map(|font| font.path)
+        .collect()
+}
+
+#[test]
+fn routes_each_font_file_has_a_static_row() {
+    let rows = table();
+    let paths = font_paths();
+    assert_eq!(paths.len(), 8);
+    for path in paths {
+        let row = rows.iter().find(|row| row.path == path).unwrap();
+        assert_eq!(row.access, Access::Static, "{path}");
+    }
 }
 
 #[test]

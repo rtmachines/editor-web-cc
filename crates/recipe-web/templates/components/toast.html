@@ -1,0 +1,3 @@
+{% import "components/icons.html" as icons %}
+{#- No role here, because #toast is the live region. -#}
+{%- macro success(text) -%}<div class="toast">{{ icons::alert_success() }}<span>{{ text }}</span></div>{%- endmacro -%}

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ title }}</h1>
-{% include "user-result.html" %}
-<p><a href="/users">{{ t.get("users-title") }}</a></p>
+<h1>{{ layout.title }}</h1>
+{% include "user-result-body.html" %}
+<p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
 {% endblock %}

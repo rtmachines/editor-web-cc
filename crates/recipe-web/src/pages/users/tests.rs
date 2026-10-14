@@ -78,7 +78,7 @@ async fn pages_users_list_shows_the_users_with_a_search_form() {
     let reply = get_as(&fixture, &admin, "/users").await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert!(
-        reply.body.contains("<title>Users</title>"),
+        reply.body.contains("<title>Users · Recipe editor</title>"),
         "{}",
         reply.body
     );
@@ -303,7 +303,11 @@ async fn pages_users_detail_shows_the_user_the_throttle_state_and_five_forms() {
     }
     let reply = get_as(&fixture, &admin, "/users/user2").await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    assert!(reply.body.contains("<title>User</title>"), "{}", reply.body);
+    assert!(
+        reply.body.contains("<title>User · Recipe editor</title>"),
+        "{}",
+        reply.body
+    );
     assert!(
         reply.body.contains("<dd id=\"failures\">2</dd>"),
         "{}",
@@ -407,7 +411,11 @@ async fn pages_users_a_login_that_is_not_utf_8_gives_404_e_web_005_on_all_six_ro
             assert_eq!(htmx.status, StatusCode::NOT_FOUND, "{path}: {}", htmx.body);
             assert!(htmx.body.contains("E-WEB-005"), "{path}: {}", htmx.body);
             assert_eq!(htmx.header("hx-retarget"), "#error-panel", "{path}");
-            assert_eq!(htmx.header("hx-reswap"), "innerHTML", "{path}");
+            assert_eq!(
+                htmx.header("hx-reswap"),
+                "innerHTML show:#error-panel:top",
+                "{path}"
+            );
         }
     }
     assert!(fixture.sink.events().is_empty(), "no use case ran");
@@ -602,7 +610,9 @@ async fn pages_users_pages_follow_the_language_cookie() {
     let (fixture, admin) = world();
     let polish = get_with(&fixture.router(), "/users", &[("cookie", &admin.cookie)]).await;
     assert!(
-        polish.body.contains("<title>Użytkownicy</title>"),
+        polish
+            .body
+            .contains("<title>Użytkownicy · Edytor receptur</title>"),
         "{}",
         polish.body
     );
