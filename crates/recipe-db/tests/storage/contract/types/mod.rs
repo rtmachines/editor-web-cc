@@ -8,3 +8,4 @@ mod derived;
 mod lookup;
 mod rows;
 mod structs;
+mod usage;

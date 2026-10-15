@@ -476,6 +476,49 @@ async fn a_member_whose_struct_rows_form_a_cycle_gives_plt_005() {
 }
 
 #[tokio::test]
+async fn a_revision_with_a_member_of_an_earlier_revision_gives_plt_005_and_creates_no_type() {
+    let fixture = fixture(PlcPlatform::TwinCat3);
+    fixture
+        .store
+        .seed_type(&stored_struct(921, ("ST_A", 1), None, &[("v", real())]));
+    let before = own_rows(&fixture).len();
+    let error = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(DefineUdtMode::Revision, "ST_A", &[("old", "ST_A@1")]),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_005);
+    assert!(matches!(
+        &error,
+        AppError::Plant(PlantError::TypeCycle { type_name }) if type_name.as_str() == "ST_A"
+    ));
+    assert_eq!(own_rows(&fixture).len(), before);
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn one_struct_on_two_member_paths_is_not_a_cycle() {
+    let fixture = fixture(PlcPlatform::TwinCat3);
+    fixture
+        .store
+        .seed_type(&stored_struct(931, ("ST_Inner", 1), None, &[("v", real())]));
+    let output = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Outer",
+            &[("a", "ST_Inner@1"), ("b", "ST_Inner@1")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.revision, 1);
+}
+
+#[tokio::test]
 async fn a_member_array_above_the_leaf_limit_gives_plt_018_and_writes_nothing() {
     let fixture = fixture(PlcPlatform::TwinCat3);
     let error = run(

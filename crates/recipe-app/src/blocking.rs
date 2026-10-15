@@ -168,6 +168,33 @@ fn joined_or_failed<T>(
     joined.map_err(|_join_error| AppError::TaskFailed { stage })
 }
 
+/// The number of rows of one page of the machine list (`page.machines`, `reliability.md` section 7.11).
+const DEFAULT_PAGE_MACHINES: u32 = 100;
+/// The number of rows of one page of the type usage list (`page.type_usage`, `reliability.md` section 7.11).
+const DEFAULT_PAGE_TYPE_USAGE: u32 = 100;
+
+/// The number of rows of one page of each plant list (`reliability.md` section 7.11).
+///
+/// The type solves one problem: two queries of the Plant Model cut a list into pages.
+/// Each query reads its size from the settings and holds no number in its code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PageSizes {
+    /// The rows of one page of `ListMachines` (`page.machines`).
+    pub machines: u32,
+    /// The rows of one page of `GetTypeUsage` (`page.type_usage`).
+    pub type_usage: u32,
+}
+
+impl Default for PageSizes {
+    /// Return the sizes of `reliability.md` section 7.11: 100 rows each.
+    fn default() -> Self {
+        Self {
+            machines: DEFAULT_PAGE_MACHINES,
+            type_usage: DEFAULT_PAGE_TYPE_USAGE,
+        }
+    }
+}
+
 /// The settings that the application layer reads (`reliability.md` section 7.11).
 ///
 /// The type solves one problem: use cases must not read a configuration file. `recipe-server`
@@ -178,6 +205,8 @@ pub struct AppSettings {
     pub blocking: Blocking,
     /// The approval rule (A34).
     pub approval_policy: ApprovalPolicy,
+    /// The sizes of the pages of the plant lists.
+    pub pages: PageSizes,
 }
 
 #[cfg(test)]

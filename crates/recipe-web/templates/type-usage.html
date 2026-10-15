@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "components/badge.html" as badges %}
+{% import "components/heading.html" as headings %}
+{% import "components/pager.html" as pagers %}
+{% import "components/table.html" as tables %}
+{% block content %}
+{{ headings::h1(layout, title) }}
+{% if after_end %}{{ pagers::after_end(t, current, first_url) }}
+{% else %}{% call tables::frame("usage-caption", t.get("usage-caption")) %}<thead><tr>{{ tables::head(t.get("column-recipe")) }}{{ tables::head(t.get("column-version")) }}{{ tables::head(t.get("column-state")) }}{{ tables::head(t.get("column-tag")) }}{{ tables::head(t.get("column-type")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(5, t.get("usage-empty")) }}{% else %}<tbody>
+{% for row in rows %}<tr><td class="data">{{ row.reference }}</td><td class="num">{{ row.number }}</td><td>{{ badges::status(row.kind, row.word) }}</td><td class="data">{{ row.tag }}</td><td class="data">{{ row.type_text }}</td></tr>
+{% endfor %}</tbody>
+{% endif %}{% endcall %}{% endif %}
+{% if !previous.is_empty() || !next.is_empty() %}{{ pagers::pager(t, previous, next, current) }}
+{% endif %}<p><a class="target-link" href="{{ back_href }}">{{ back_text }}</a></p>
+{% endblock %}

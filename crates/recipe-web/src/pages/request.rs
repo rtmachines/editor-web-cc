@@ -16,6 +16,9 @@ use crate::error::WebError;
 use crate::i18n::Lang;
 use crate::pipeline::{HX_REQUEST, request_id_in};
 
+/// The header that HTMX sets to the `id` of the element that receives the answer.
+const HX_TARGET: &str = "hx-target";
+
 /// What a page handler reads from the layers before it.
 ///
 /// The type solves one problem: every handler needs the request id, the client address, the
@@ -28,12 +31,21 @@ pub(crate) struct PageRequest {
     user_agent: Option<UserAgent>,
     lang: Lang,
     htmx: bool,
+    hx_target: Option<String>,
     session: Option<Authenticated>,
     cookie_session: Option<SessionId>,
     get_target: Option<String>,
 }
 
 impl PageRequest {
+    /// Return the value of the header `HX-Target`, or `None` when the request has none.
+    ///
+    /// HTMX sets the header to the `id` of the target element, without the `#`. The layout reads
+    /// it to choose between the full page and the content answer (design D6).
+    pub(crate) fn hx_target(&self) -> Option<&str> {
+        self.hx_target.as_deref()
+    }
+
     /// Return the path and the query of a `GET` request, or `None` for another method.
     ///
     /// The language switch of the layout sends this text as the field `next`. A page that
@@ -119,6 +131,11 @@ impl<S: Send + Sync> FromRequestParts<S> for PageRequest {
             .headers
             .get(HX_REQUEST)
             .is_some_and(|value| value == "true");
+        let hx_target = parts
+            .headers
+            .get(HX_TARGET)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
         let cookie_session = request_cookie(&parts.headers, SESSION_COOKIE)
             .and_then(|text| SessionToken::parse(&text).ok())
             .map(|token| SessionId::of(&token));
@@ -132,6 +149,7 @@ impl<S: Send + Sync> FromRequestParts<S> for PageRequest {
             user_agent,
             lang: Lang::from_headers(&parts.headers),
             htmx,
+            hx_target,
             session: parts
                 .extensions
                 .get::<Option<Authenticated>>()

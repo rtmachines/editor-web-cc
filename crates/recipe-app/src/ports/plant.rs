@@ -1,11 +1,44 @@
 //! Port of the Machine aggregate (`data-model.md` section 6, design D5).
 
 use async_trait::async_trait;
-use recipe_domain::plant::{Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage};
+use recipe_domain::plant::{
+    Machine, MachineCode, MachineId, PlcPlatform, Unit, UnitId, UnitPath, UnitUsage,
+};
 use recipe_domain::text::Text;
+use recipe_domain::timestamp::Timestamp;
 
 use super::{Locked, RowImage};
 use crate::error::StorageError;
+
+/// The filter of `PlantRepository::list_machines`.
+///
+/// The type solves one problem: the list of machines has two independent choices, and a
+/// struct names each choice at the call site.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MachineFilter {
+    /// A text that the code or the name must contain, with no difference of case. `None` keeps every machine.
+    pub text: Option<Text>,
+    /// Whether the list also holds the archived machines.
+    pub include_archived: bool,
+}
+
+/// One row of the list of machines.
+///
+/// The type solves one problem: the list page needs five columns of a machine and not the
+/// whole aggregate with its unit tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MachineSummary {
+    /// The identifier of the machine.
+    pub id: MachineId,
+    /// The code of the machine.
+    pub code: MachineCode,
+    /// The name of the machine.
+    pub name: Text,
+    /// The PLC platform of the machine.
+    pub platform: PlcPlatform,
+    /// The instant of archiving, or `None` for a live machine.
+    pub archived_at: Option<Timestamp>,
+}
 
 /// The row images that `CreateMachine` writes.
 ///
@@ -43,6 +76,25 @@ pub trait PlantRepository: Send {
 
     /// Read a machine, live or archived, without a lock (`/machines/by-id/{uuid}`).
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError>;
+
+    /// Read one page of the machines without a lock (`/machines`).
+    ///
+    /// A row matches when `filter.text` is `None`, or when the code or the name contains the text
+    /// with no difference of case. An archived machine matches only with `filter.include_archived`.
+    /// The rows come in the order of the number of the code. For one code, the live machine comes
+    /// first. Then come the archived machines, the latest archiving first. The identifier ends the order.
+    /// The page starts after `offset` rows and holds at most `limit` rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Other` (`E-DB-008`) when `offset` is above `i64::MAX`.
+    /// Both adapters return this error and never an empty list for such an offset.
+    async fn list_machines(
+        &mut self,
+        filter: &MachineFilter,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<MachineSummary>, StorageError>;
 
     /// Take `machine FOR SHARE` (`AddUnit`, `CreateRecipe`, and the other commands of section 6).
     ///

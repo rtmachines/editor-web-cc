@@ -37,8 +37,28 @@ fn every_missing() -> Vec<Missing> {
         Missing::version(&reference, 1234),
         Missing::User(Login::parse("anna").unwrap()),
         Missing::MalformedLogin,
+        Missing::MalformedMachine,
+        Missing::MalformedType,
+        Missing::TypeRevision {
+            code,
+            name: TypeName::parse("ST_Zone").unwrap(),
+            revision: 9,
+        },
     ]
 }
+
+/// The nine reasons that the plant pages add (design D5), with their keys, in the order of `ALL`.
+const PLANT_REASON_KEYS: [(FieldReason, &str); 9] = [
+    (FieldReason::MachineCode, "reason-machine-code"),
+    (FieldReason::Name, "reason-name"),
+    (FieldReason::Platform, "reason-platform"),
+    (FieldReason::TypeName, "reason-type-name"),
+    (FieldReason::MemberName, "reason-member-name"),
+    (FieldReason::MemberRows, "reason-member-rows"),
+    (FieldReason::MemberCount, "reason-member-count"),
+    (FieldReason::Flag, "reason-flag"),
+    (FieldReason::SearchText, "reason-search-text"),
+];
 
 /// Assert that `key` exists in both bundles.
 fn assert_in_both(bundles: &Bundles, key: &str) {
@@ -104,6 +124,28 @@ fn values_every_field_reason_has_its_key_and_a_log_text() {
 }
 
 #[test]
+fn values_field_reason_all_lists_twenty_reasons_and_ends_with_the_plant_reasons() {
+    assert_eq!(FieldReason::ALL.len(), 20);
+    let tail = FieldReason::ALL.get(11..).unwrap();
+    let expected: Vec<FieldReason> = PLANT_REASON_KEYS
+        .iter()
+        .map(|(reason, _)| *reason)
+        .collect();
+    assert_eq!(tail, expected.as_slice());
+}
+
+#[test]
+fn values_each_plant_reason_has_its_key_and_the_english_text_of_its_bundle() {
+    let bundles = Bundles::load().unwrap();
+    for (reason, key) in PLANT_REASON_KEYS {
+        assert_eq!(reason.key(), key);
+        assert_in_both(&bundles, key);
+        let english = bundles.message(Lang::En, key, None).unwrap();
+        assert_eq!(english, reason.to_string(), "{key}");
+    }
+}
+
+#[test]
 fn values_every_password_reason_and_task_stage_has_its_key() {
     let bundles = Bundles::load().unwrap();
     for reason in [
@@ -159,6 +201,46 @@ fn values_missing_version_shows_the_number_without_a_group_separator() {
     assert_eq!(
         missing_text(&bundles, Lang::Pl, &missing),
         "Wersja 1234 receptury R-7"
+    );
+}
+
+#[test]
+fn values_missing_malformed_values_use_their_own_keys() {
+    assert_eq!(
+        missing_key(&Missing::MalformedMachine),
+        "missing-malformed-machine"
+    );
+    assert_eq!(
+        missing_key(&Missing::MalformedType),
+        "missing-malformed-type"
+    );
+    let bundles = Bundles::load().unwrap();
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &Missing::MalformedMachine),
+        "Maszyna"
+    );
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &Missing::MalformedType),
+        "Typ"
+    );
+}
+
+#[test]
+fn values_missing_type_revision_names_revision_type_and_machine_in_polish() {
+    let bundles = Bundles::load().unwrap();
+    let missing = Missing::TypeRevision {
+        code: MachineCode::parse("M1").unwrap(),
+        name: TypeName::parse("ST_Zone").unwrap(),
+        revision: 1234,
+    };
+    assert_eq!(missing_key(&missing), "missing-type-revision");
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &missing),
+        "Rewizja 1234 typu ST_Zone maszyny M1"
+    );
+    assert_eq!(
+        missing_text(&bundles, Lang::En, &missing),
+        "Revision 1234 of type ST_Zone of machine M1"
     );
 }
 

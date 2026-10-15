@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% block content %}
+{{ headings::h1(layout, t.get("me-title")) }}
+{% endblock %}

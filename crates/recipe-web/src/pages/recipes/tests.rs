@@ -112,7 +112,7 @@ async fn recipes_page_holds_the_language_switch_that_returns_to_the_list() {
     assert!(
         reply
             .body
-            .contains("<input type=\"hidden\" name=\"next\" value=\"/recipes\">"),
+            .contains("<input type=\"hidden\" id=\"lang-next\" name=\"next\" value=\"/recipes\">"),
         "{}",
         reply.body
     );

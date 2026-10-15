@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::error::{corrupt, map_error, missing_row};
 use crate::transaction::PgTransaction;
+use crate::transaction::window::{bind_window, page_offset};
 
 /// The table name of the defects.
 const TABLE: &str = "app_user";
@@ -157,11 +158,8 @@ async fn change(
 
 /// Return the `LIMIT` and `OFFSET` of a page, or an error when the numbers do not fit.
 fn page_bounds(page: u32, page_size: u32) -> Result<(i64, i64), StorageError> {
-    let offset = u64::from(page)
-        .checked_mul(u64::from(page_size))
-        .and_then(|rows| i64::try_from(rows).ok())
-        .ok_or_else(|| corrupt(TABLE, "the page lies outside the range of a row count"))?;
-    Ok((i64::from(page_size), offset))
+    let (offset, limit) = bind_window(page_offset(page, page_size)?, page_size)?;
+    Ok((limit, offset))
 }
 
 #[async_trait]

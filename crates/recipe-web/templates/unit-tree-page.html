@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+<div id="unit-tree">{% include "unit-tree.html" %}</div>
+<div id="unit-form"></div>
+<p><a class="target-link" href="{{ machine_href }}">{{ t.with_arg("machine-title", "code", code) }}</a></p>
+{% endblock %}

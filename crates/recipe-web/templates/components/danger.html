@@ -1,0 +1,4 @@
+{% import "components/icons.html" as icons %}
+{% import "components/alert.html" as alerts %}
+{#- The archive form of design-system.md 10.5. A danger action that nobody can undo stands inside a details element, so it needs two clicks. The summary shows the chevron of its state. The warning has the look of the warning alert, with an icon. The form sends POST with the token. The hx attributes are literals. The action is the address of the route, from code. -#}
+{%- macro danger(t, summary, warning, button, action, csrf) -%}<details class="danger"><summary>{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span>{{ summary }}</span></summary><form method="post" action="{{ action }}" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"><input type="hidden" name="csrf_token" value="{{ csrf }}">{{ alerts::notice("warning", warning) }}<button type="submit" class="btn-danger">{{ button }}</button></form></details>{%- endmacro -%}

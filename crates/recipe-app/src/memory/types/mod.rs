@@ -1,15 +1,17 @@
 //! In-memory `TypeCatalog` (task 4.7).
 
 mod seed;
+mod usage;
 
 use async_trait::async_trait;
-use recipe_domain::plant::{MachineId, PlcType, PlcTypeRecord, Primitive, RecordShape};
+use recipe_domain::plant::{MachineId, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape};
 
 use super::images::type_image;
+use super::plant::check_offset;
 use super::rows::{TypeRow, check_violation, duplicate, missing_reference};
 use super::{LockMode, MemoryTransaction};
 use crate::error::{PLC_TYPE_NAMED_UNIQUE, StorageError};
-use crate::ports::{DerivedTypeLock, Ensured, RowImage, TypeCatalog};
+use crate::ports::{DerivedTypeLock, Ensured, RowImage, TypeCatalog, TypeUsageRow};
 
 pub use seed::seed_type_id;
 
@@ -85,6 +87,17 @@ impl TypeCatalog for MemoryTransaction {
             .filter(|row| row.plc_type.machine().is_none_or(|owner| owner == machine))
             .map(|row| row.plc_type.clone())
             .collect())
+    }
+
+    async fn type_usage(
+        &mut self,
+        machine: MachineId,
+        type_id: PlcTypeId,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<TypeUsageRow>, StorageError> {
+        check_offset(offset)?;
+        Ok(usage::usage(self.state(), machine, type_id, offset, limit))
     }
 
     async fn lock_derived_types(

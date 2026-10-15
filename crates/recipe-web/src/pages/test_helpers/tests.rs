@@ -1,6 +1,12 @@
 //! Tests of `assert_clean_html` with literal inputs (task 7.1, design D10).
 
-use super::{assert_clean_html, assert_no_user_text_in_hx_attributes};
+use axum::http::StatusCode;
+
+use super::{
+    askama_escape, assert_clean_html, assert_error, assert_no_user_text_in_hx_attributes, encode,
+    hx_attributes, payloads,
+};
+use crate::test_support::Reply;
 
 #[test]
 #[should_panic(expected = "event handler")]
@@ -127,6 +133,73 @@ fn hx_attributes_accept_a_needle_outside_hx_attributes() {
     assert_no_user_text_in_hx_attributes("<p>a hx-get=NEEDLE</p>", "NEEDLE");
     assert_no_user_text_in_hx_attributes("<a title=\"NEEDLE\" hx-get=\"/x\">x</a>", "NEEDLE");
     assert_no_user_text_in_hx_attributes("<a data-x=\"NEEDLE\" data-hx=\"y\">x</a>", "NEEDLE");
+}
+
+#[test]
+fn hx_attributes_reader_finds_attributes_and_ignores_text() {
+    let html = "<p>an hx-boost=\"evil\" text</p><body hx-history=\"false\" data-hx-swap='x y'>\
+                <a hx-target=#a href=\"/x\">";
+    let found: Vec<(String, String, String)> = hx_attributes(html)
+        .into_iter()
+        .map(|a| (a.name, a.value, a.element))
+        .collect();
+    let expected = [
+        ("hx-history", "false", "body"),
+        ("hx-swap", "x y", "body"),
+        ("hx-target", "#a", "a"),
+    ];
+    assert_eq!(found.len(), expected.len(), "{found:?}");
+    for (item, want) in found.iter().zip(expected) {
+        assert_eq!((item.0.as_str(), item.1.as_str(), item.2.as_str()), want);
+    }
+}
+
+#[test]
+fn payloads_hold_the_corpus_lines_and_end_with_the_nul_payload() {
+    let all = payloads();
+    assert!(all.len() > 10, "{all:?}");
+    assert!(all.iter().all(|payload| !payload.starts_with('#')));
+    assert!(all.iter().any(|payload| payload.contains("<script>")));
+    assert!(
+        all.last()
+            .is_some_and(|payload| payload.starts_with('\u{0}'))
+    );
+}
+
+#[test]
+fn encode_keeps_unreserved_bytes_and_escapes_the_others() {
+    assert_eq!(encode("aZ09-._~"), "aZ09-._~");
+    assert_eq!(encode("a b&c=\u{e9}"), "a%20b%26c%3D%C3%A9");
+}
+
+#[test]
+fn askama_escape_replaces_the_five_html_characters() {
+    assert_eq!(
+        askama_escape("<a href=\"x\">&'</a>"),
+        "&#60;a href=&#34;x&#34;&#62;&#38;&#39;&#60;/a&#62;"
+    );
+    assert_eq!(askama_escape("plain text"), "plain text");
+}
+
+#[test]
+fn assert_error_accepts_the_status_with_the_code_in_the_body() {
+    let reply = Reply {
+        status: StatusCode::CONFLICT,
+        headers: axum::http::HeaderMap::new(),
+        body: "<p>E-PLT-011</p>".to_owned(),
+    };
+    assert_error(&reply, StatusCode::CONFLICT, "E-PLT-011", "conflict");
+}
+
+#[test]
+#[should_panic(expected = "wrong code")]
+fn assert_error_rejects_another_code() {
+    let reply = Reply {
+        status: StatusCode::CONFLICT,
+        headers: axum::http::HeaderMap::new(),
+        body: "<p>E-PLT-012</p>".to_owned(),
+    };
+    assert_error(&reply, StatusCode::CONFLICT, "E-PLT-011", "wrong code");
 }
 
 #[test]

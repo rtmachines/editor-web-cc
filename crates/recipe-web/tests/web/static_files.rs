@@ -92,6 +92,19 @@ async fn static_files_app_css_needs_no_session() {
 }
 
 #[tokio::test]
+async fn static_files_components_css_needs_no_session() {
+    let response = get(&app(), "/static/components.css").await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(header(&response, "content-type"), "text/css; charset=utf-8");
+    assert_eq!(header(&response, "cache-control"), "public, max-age=86400");
+    assert_eq!(header(&response, "x-content-type-options"), "nosniff");
+    assert_eq!(header(&response, "set-cookie"), "");
+    let body = String::from_utf8(body_bytes(response).await).unwrap();
+    assert!(body.contains(".badge"), "the file holds the components");
+    assert!(!body.contains(":root"), "only app.css holds :root");
+}
+
+#[tokio::test]
 async fn static_files_each_script_needs_no_session() {
     let router = app();
     for path in ["/static/row-version.js", "/static/tree.js"] {

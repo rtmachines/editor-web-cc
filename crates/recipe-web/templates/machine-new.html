@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "components/field.html" as fields %}
+{% import "components/heading.html" as headings %}
+{% block content %}
+{{ headings::h1(layout, t.get("machine-new-title")) }}
+<form method="post" action="/machines" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+{{ fields::named(t, "code", "code", t.get("field-code"), t.get("machine-code-hint"), "text", true, true, 8, "off", String::new()) }}
+{{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", String::new()) }}
+{{ fields::select(t, "plc_platform", t.get("field-plc-platform"), t.get("machine-platform-hint"), platforms, String::new(), true) }}
+{{ fields::named(t, "main_unit_name", "main_unit_name", t.get("field-main-unit-name"), t.get("machine-main-unit-hint"), "text", true, false, 200, "off", String::new()) }}
+<p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("machine-create-submit") }}</button></p>
+</form>
+<p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>
+{% endblock %}

@@ -1,0 +1,3 @@
+{% import "components/toast.html" as toasts -%}
+{#- The answer of a valid HTMX add (design D6). The tree goes into #unit-tree. The struct that includes this file has the fields t, tree, form, and message. The toast, the empty error panel, and the new empty form for the same parent go out of band. The hx-swap-oob values are literals. -#}
+{% include "unit-tree.html" %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(message) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div><div id="unit-form" hx-swap-oob="innerHTML">{% include "unit-form.html" %}</div>

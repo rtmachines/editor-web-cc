@@ -7,6 +7,7 @@ mod draft_rows;
 mod draft_writes;
 mod drafts;
 mod identity;
+mod machine_list;
 mod machines;
 mod parameter_rows;
 mod plant;
@@ -14,11 +15,13 @@ mod recipe_rows;
 mod recipe_writes;
 mod recipes;
 mod type_rows;
+mod type_usage;
 mod types;
 mod unit_rows;
 mod units;
 mod version_rows;
 mod version_writes;
+mod window;
 
 use std::collections::BTreeMap;
 

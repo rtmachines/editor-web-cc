@@ -1,15 +1,15 @@
 /*
- * Style sheet of the recipe editor. Reference: docs/architecture/design-system.md.
- * Only :root holds color values. Every other rule names a token with var().
+ * Base style sheet of the recipe editor. Reference: docs/architecture/design-system.md.
+ * It holds the tokens, the fonts, the page, the targets, the focus, the top bar, and the base
+ * rules of the buttons and the fields. components.css holds the components. A page links this
+ * file first. Only :root holds color values. Every other rule names a token with var().
  * The format is a flat list of rules. Tests read it with a strict reader.
  *
  * Class names that the templates use:
  * Layout: .skip-link .topbar .app-name .nav-list .nav-link .lang-switch .user-login
- * Blocks: .panel .actions .table-wrap .empty .toast .tree .tree-node .tree-path .tree-leaf .tree-group
+ * Blocks: .actions
  * Controls: .btn .btn-primary .btn-secondary .btn-danger .target-link
- * Text: .data .num .field .field-hint .field-required
- * State: .badge .badge-draft .badge-approved .badge-retired .badge-active .badge-inactive .badge-large
- * Feedback: .alert .alert-error .alert-warning .alert-info .alert-success .alert-code .alert-ref .field-lines
+ * Text: .data .field .field-hint .field-required
  * Other: .icon .htmx-indicator
  */
 
@@ -257,6 +257,10 @@ button, .btn, .nav-link, .tree-node, .target-link, .table-wrap a {
   min-width: var(--target);
 }
 
+.target-link {
+  gap: var(--space-2);
+}
+
 input, select {
   min-height: var(--target);
 }
@@ -493,274 +497,14 @@ input[aria-invalid="true"], select[aria-invalid="true"] {
 }
 
 .actions .field {
+  flex: 1 1 calc(var(--width-form) / 3);
+  min-width: 0;
   margin-bottom: 0;
 }
 
-/* Panel, table, empty state */
-
-.panel {
-  margin-bottom: var(--space-5);
-  padding: var(--space-4);
-  background: var(--color-surface);
-  border: var(--edge) solid var(--color-border);
-  border-radius: var(--radius);
-}
-
-.table-wrap {
-  overflow-x: auto;
-  background: var(--color-surface);
-  border: var(--edge) solid var(--color-border);
-  border-radius: var(--radius);
-}
-
-table {
+.actions .field input, .actions .field select {
   width: 100%;
-  border-collapse: collapse;
-}
-
-caption {
-  padding: var(--space-3);
-  font-weight: 700;
-  text-align: left;
-}
-
-th, td {
-  padding: 0 var(--space-3);
-  text-align: left;
-  vertical-align: middle;
-}
-
-th {
-  background: var(--color-sunken);
-  color: var(--color-text-muted);
-  border: var(--edge) solid transparent;
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
-
-.table-wrap td, .table-wrap .data {
-  overflow-wrap: break-word;
-}
-
-tr {
-  height: var(--target);
-}
-
-td {
-  border-bottom: var(--edge) solid var(--color-divider);
-}
-
-tbody tr:hover {
-  background: var(--color-sunken);
-}
-
-.num {
-  font-family: var(--font-mono);
-  text-align: right;
-}
-
-.empty {
-  max-width: none;
-  padding: var(--space-7);
-  background: var(--color-surface);
-  border: var(--edge) solid var(--color-border);
-  border-radius: var(--radius);
-  text-align: center;
-}
-
-/* Badge */
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-2);
-  border: var(--edge-badge) solid;
-  border-radius: var(--radius);
-  font-size: var(--text-sm);
-  font-weight: 700;
-}
-
-.badge .icon {
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-}
-
-.badge-large {
-  font-size: var(--text-base);
-}
-
-.badge-large .icon {
-  width: var(--icon-md);
-  height: var(--icon-md);
-}
-
-.badge-draft {
-  background: var(--color-draft-bg);
-  color: var(--color-draft-fg);
-  border-color: var(--color-draft-edge);
-}
-
-.badge-approved {
-  background: var(--color-approved-bg);
-  color: var(--color-approved-fg);
-  border-color: var(--color-approved-edge);
-}
-
-.badge-retired, .badge-inactive {
-  background: var(--color-retired-bg);
-  color: var(--color-retired-fg);
-  border-color: var(--color-retired-edge);
-}
-
-.badge-active {
-  background: var(--color-success-bg);
-  color: var(--color-success-fg);
-  border-color: var(--color-success-edge);
-}
-
-/* Alert, field lines, toast */
-
-.alert {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-4);
-  padding: var(--space-4);
-  border: var(--edge) solid;
-  border-radius: var(--radius);
-}
-
-.alert > * {
   min-width: 0;
-}
-
-.alert .icon {
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-}
-
-.alert a {
-  color: inherit;
-}
-
-.alert-error {
-  background: var(--color-error-bg);
-  color: var(--color-error-fg);
-  border-color: var(--color-error-edge);
-}
-
-.alert-warning {
-  background: var(--color-warning-bg);
-  color: var(--color-warning-fg);
-  border-color: var(--color-warning-edge);
-}
-
-.alert-info {
-  background: var(--color-info-bg);
-  color: var(--color-info-fg);
-  border-color: var(--color-info-edge);
-}
-
-.alert-success {
-  background: var(--color-success-bg);
-  color: var(--color-success-fg);
-  border-color: var(--color-success-edge);
-}
-
-.alert-code {
-  font-family: var(--font-mono);
-  font-weight: 700;
-}
-
-.alert-ref {
-  flex-basis: 100%;
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-
-.field-lines {
-  display: flex;
-  flex-direction: column;
-  gap: var(--target-gap);
-  flex-basis: 100%;
-  margin: 0;
-  padding-left: var(--space-5);
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-topbar);
-  color: var(--color-on-action);
-  border: var(--edge) solid var(--color-topbar);
-  border-radius: var(--radius);
-}
-
-.toast .icon {
-  width: var(--icon-lg);
-  height: var(--icon-lg);
-  color: var(--color-success-bg);
-}
-
-/* Tree */
-
-.tree, .tree-group {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tree-group {
-  padding-left: var(--space-5);
-}
-
-.tree-group[hidden] {
-  display: none;
-}
-
-.tree-node {
-  display: flex;
-  gap: var(--space-2);
-  justify-content: flex-start;
-  width: 100%;
-  background: transparent;
-  color: var(--color-text);
-  border: var(--edge-control) solid transparent;
-  text-align: left;
-}
-
-.tree-node > *, .tree-leaf > * {
-  min-width: 0;
-}
-
-.tree-node:hover {
-  background: var(--color-sunken);
-}
-
-.tree-node[aria-expanded="true"] [data-icon="tree-collapsed"] {
-  display: none;
-}
-
-.tree-node[aria-expanded="false"] [data-icon="tree-expanded"] {
-  display: none;
-}
-
-.tree-leaf {
-  display: flex;
-  gap: var(--space-2);
-  padding-left: calc(var(--icon-md) + var(--space-2));
-}
-
-.tree-path {
-  font-family: var(--font-mono);
-  font-size: var(--text-base);
-  overflow-wrap: anywhere;
 }
 
 /* HTMX */
@@ -784,7 +528,7 @@ tbody tr:hover {
     border-bottom-color: Highlight;
   }
 
-  .topbar, th, main form, .badge, .alert, .toast, .btn, .panel, .empty, .table-wrap, .tree-node, input, select {
+  .topbar, main form, .btn, input, select {
     border-color: ButtonBorder;
   }
 }

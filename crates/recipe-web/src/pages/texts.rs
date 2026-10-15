@@ -1,5 +1,7 @@
 //! The page texts of one request (`api.md` section 8, design D13).
 
+use std::fmt;
+
 use fluent::FluentArgs;
 use recipe_domain::identity::Role;
 
@@ -34,6 +36,18 @@ impl<'a> Texts<'a> {
         self.bundles
             .message(self.lang, key, Some(args))
             .unwrap_or_else(|| key.to_owned())
+    }
+
+    /// Return the text of the message `key` with one argument.
+    ///
+    /// The method solves one problem: a template cannot build `FluentArgs`. A label such as
+    /// "Name of member 3" or "Page 2" needs one number or one path. A component calls
+    /// `t.with_arg("udt-member-name", "number", number)`, so no page builds these texts by hand.
+    /// An unknown key or a wrong argument name shows the key, as `Texts::with` does.
+    pub(crate) fn with_arg(&self, key: &str, name: &str, value: impl fmt::Display) -> String {
+        let mut args = FluentArgs::new();
+        args.set(name.to_owned(), value.to_string());
+        self.with(key, &args)
     }
 
     /// Return the name of a role in the language of the page.

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/icons.html" as icons %}
+{% import "components/tree.html" as trees %}
+{% block content %}
+{{ headings::h1(layout, title) }}
+<h2>{{ t.get("type-revisions-title") }}</h2>
+<p class="actions">{% for link in revisions %}<a class="target-link data" href="{{ link.href }}"{% if link.current %} aria-current="page"{% endif %}>{{ link.label }}</a>{% endfor %}</p>
+{% if let Some(link) = supersedes %}<dl><dt>{{ t.get("type-supersedes") }}</dt><dd class="data"><a class="target-link" href="{{ link.href }}">{{ link.label }}</a></dd></dl>
+{% endif %}<section aria-labelledby="type-tree-title"><h2 id="type-tree-title">{{ t.get("type-tree-title") }}</h2>
+{#- The tree is one flat list. A macro cannot call itself, so a group opens here with the markup of trees::type_node and closes after its last member. -#}
+<ul class="tree">{% for item in items %}{% if item.group %}<li><div class="tree-row"><button type="button" class="tree-node" aria-expanded="{% if item.expanded %}true{% else %}false{% endif %}" aria-controls="tree-group-{{ item.id }}-{{ item.index }}">{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span class="data">{{ item.name }}</span>{% if !item.type_text.is_empty() %}<span class="data tree-type">{{ item.type_text }}</span>{% endif %}</button></div><ul class="tree-group" id="tree-group-{{ item.id }}-{{ item.index }}"{% if !item.expanded %} hidden{% endif %}>{% else %}{{ trees::type_leaf(item.name, item.type_text) }}{% endif %}{% for _close in 0..item.closes %}</ul></li>{% endfor %}{% endfor %}</ul></section>
+<p class="actions"><a class="target-link" href="{{ usage_href }}">{{ t.get("type-usage-link") }}</a>{% if let Some(href) = new_revision_href %}<a class="target-link" href="{{ href }}">{{ t.get("type-new-revision-link") }}</a>{% endif %}</p>
+<p><a class="target-link" href="{{ list_href }}">{{ list_text }}</a></p>
+{% endblock %}

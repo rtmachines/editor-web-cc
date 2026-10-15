@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/badge.html" as badges %}
+{% import "components/danger.html" as dangers %}
+{% import "components/field.html" as fields %}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if archived %}<div class="actions">{{ badges::archived_large(t.get("status-archived")) }}</div>
+{% endif %}<dl>
+<dt>{{ t.get("unit-machine") }}</dt>
+<dd><a class="target-link" href="{{ machine_href }}">{{ code }}</a></dd>
+<dt>{{ t.get("unit-path") }}</dt>
+<dd class="data">{{ path }}</dd>
+<dt>{{ t.get("field-unit-name") }}</dt>
+<dd><span id="unit-name">{{ name }}</span></dd>
+<dt>{{ t.get("field-parent-path") }}</dt>
+{% if let Some(parent) = parent %}<dd class="link-list"><a class="target-link" href="{{ parent.href }}"><span class="data">{{ parent.path }}</span> {{ parent.name }}</a></dd>{% else %}<dd>{{ t.get("unit-parent-none") }}</dd>{% endif %}
+</dl>
+<h2>{{ t.get("unit-children-title") }}</h2>
+{% if children.is_empty() %}<p>{{ t.get("unit-children-empty") }}</p>
+{% else %}<ul class="link-list">
+{% for child in children %}<li><a class="target-link" href="{{ child.href }}"><span class="data">{{ child.path }}</span> {{ child.name }}</a></li>
+{% endfor %}</ul>
+{% endif %}{% if can_rename %}<form method="post" action="{{ rename_action }}" hx-boost="true" hx-target="#unit-name" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+{{ fields::named(t, "unit_name", "name", t.get("field-unit-name"), String::new(), "text", true, false, 200, "off", name) }}
+<p class="actions"><button type="submit">{{ t.get("unit-rename-submit") }}</button></p>
+</form>
+{% endif %}{% if can_archive %}{{ dangers::danger(t, t.get("unit-archive-summary"), warning, archive_button, archive_action, layout.csrf_token) }}
+{% endif %}<p><a class="target-link" href="{{ machine_href }}">{{ t.with_arg("machine-title", "code", code) }}</a></p>
+{% endblock %}

@@ -31,11 +31,29 @@ pub enum FieldReason {
     Page,
     /// An `X-Forwarded-For` entry is not an IP address.
     Forwarded,
+    /// A machine code does not match the grammar of `MachineCode`.
+    MachineCode,
+    /// A machine name or a unit name is not valid text.
+    Name,
+    /// The PLC platform is not one of the five platforms.
+    Platform,
+    /// A type name does not match the grammar of `TypeName`, or it is the name `new`.
+    TypeName,
+    /// A member name does not match the grammar of `MemberName`.
+    MemberName,
+    /// A member row has a name and no type, or a type and no name.
+    MemberRows,
+    /// The form holds more member rows than `type.max_members`.
+    MemberCount,
+    /// A flag field holds a value other than `1`.
+    Flag,
+    /// A search text is not empty and is not valid text.
+    SearchText,
 }
 
 impl FieldReason {
     /// Every reason, in the order of the table in design D13.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 20] = [
         Self::Form,
         Self::Lang,
         Self::LoginLength,
@@ -47,6 +65,15 @@ impl FieldReason {
         Self::Q,
         Self::Page,
         Self::Forwarded,
+        Self::MachineCode,
+        Self::Name,
+        Self::Platform,
+        Self::TypeName,
+        Self::MemberName,
+        Self::MemberRows,
+        Self::MemberCount,
+        Self::Flag,
+        Self::SearchText,
     ];
 
     /// Return the key of the message of the reason in the bundles.
@@ -64,6 +91,15 @@ impl FieldReason {
             Self::Q => "reason-q",
             Self::Page => "reason-page",
             Self::Forwarded => "reason-forwarded",
+            Self::MachineCode => "reason-machine-code",
+            Self::Name => "reason-name",
+            Self::Platform => "reason-platform",
+            Self::TypeName => "reason-type-name",
+            Self::MemberName => "reason-member-name",
+            Self::MemberRows => "reason-member-rows",
+            Self::MemberCount => "reason-member-count",
+            Self::Flag => "reason-flag",
+            Self::SearchText => "reason-search-text",
         }
     }
 }
@@ -86,6 +122,23 @@ impl fmt::Display for FieldReason {
             }
             Self::Page => "the page is a whole number from 1",
             Self::Forwarded => "every entry must be an IP address",
+            Self::MachineCode => "a machine code is M and a number from 1 to 9999999",
+            Self::Name => "a name has 1 to 200 characters and no control character",
+            Self::Platform => "choose a PLC platform from the list",
+            Self::TypeName => {
+                "a type name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore. It is not new or a primitive name"
+            }
+            Self::MemberName => {
+                "a member name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore"
+            }
+            Self::MemberRows => {
+                "each member row needs a name and a type. Clear both fields of a row that you do not want"
+            }
+            Self::MemberCount => "the form holds at most 1024 member rows",
+            Self::Flag => "the value must be 1. Reload the page and try again",
+            Self::SearchText => {
+                "the search text has at most 200 characters and no control character"
+            }
         })
     }
 }

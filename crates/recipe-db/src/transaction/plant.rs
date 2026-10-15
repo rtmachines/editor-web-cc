@@ -2,12 +2,14 @@
 
 use async_trait::async_trait;
 use recipe_app::error::StorageError;
-use recipe_app::ports::{InsertedMachine, Locked, PlantRepository, RowImage};
+use recipe_app::ports::{
+    InsertedMachine, Locked, MachineFilter, MachineSummary, PlantRepository, RowImage,
+};
 use recipe_domain::plant::{Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage};
 use recipe_domain::text::Text;
 
 use super::PgTransaction;
-use super::{machines, unit_rows};
+use super::{machine_list, machines, unit_rows};
 
 #[async_trait]
 impl PlantRepository for PgTransaction {
@@ -27,6 +29,15 @@ impl PlantRepository for PgTransaction {
 
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError> {
         machines::by_id(&mut self.tx, id).await
+    }
+
+    async fn list_machines(
+        &mut self,
+        filter: &MachineFilter,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<MachineSummary>, StorageError> {
+        machine_list::list(&mut self.tx, filter, offset, limit).await
     }
 
     async fn lock_machine_shared(

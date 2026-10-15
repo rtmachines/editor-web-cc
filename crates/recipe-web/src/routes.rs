@@ -54,7 +54,7 @@ pub(crate) struct RouteEntry {
 }
 
 /// Build one row of the table for a route with a use case.
-fn operation_row(
+pub(crate) fn operation_row(
     method: Method,
     path: &'static str,
     operation: Operation,
@@ -68,7 +68,11 @@ fn operation_row(
     }
 }
 
-/// Return the route table. Later tasks add one row for each page of `api.md` section 2.
+/// Return the route table.
+///
+/// The table holds the static files, the rows of step P3.1, and the rows of the three areas of the
+/// plant model (design D12): the machines, the units, and the types. Later tasks add one row for
+/// each page of `api.md` section 2.
 pub(crate) fn table() -> Vec<RouteEntry> {
     let mut rows = static_rows();
     rows.extend(lang_and_login_rows());
@@ -81,6 +85,9 @@ pub(crate) fn table() -> Vec<RouteEntry> {
     ));
     rows.extend(user_list_rows());
     rows.extend(user_state_rows());
+    rows.extend(pages::machines::rows());
+    rows.extend(pages::units::rows());
+    rows.extend(pages::types::rows());
     rows
 }
 
@@ -334,5 +341,9 @@ pub fn router(state: WebState) -> Router {
     assemble(state, table(), Router::new())
 }
 
+#[cfg(test)]
+pub(crate) mod matrix;
+#[cfg(test)]
+mod plant_access_tests;
 #[cfg(test)]
 mod tests;

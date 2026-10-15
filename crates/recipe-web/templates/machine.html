@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/badge.html" as badges %}
+{% import "components/alert.html" as alerts %}
+{% import "components/danger.html" as dangers %}
+{% import "components/field.html" as fields %}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if !live %}<div class="actions">{{ badges::archived_large(t.get("status-archived")) }}</div>
+{{ alerts::notice("info", t.get("machine-archived-notice")) }}
+{% endif %}<dl>
+<dt>{{ t.get("field-code") }}</dt>
+<dd class="data">{{ code }}</dd>
+<dt>{{ t.get("field-machine-name") }}</dt>
+<dd><span id="machine-name">{{ name }}</span></dd>
+<dt>{{ t.get("field-plc-platform") }}</dt>
+<dd>{{ platform }}</dd>
+{% if let Some(when) = archived_at %}<dt>{{ t.get("machine-archived-at") }}</dt>
+<dd class="data">{{ when }}</dd>
+{% endif %}</dl>
+{% if live %}<p><a class="target-link" href="{{ types_href }}">{{ t.get("machine-types-link") }}</a></p>
+{% endif %}<h2>{{ t.get("machine-units-title") }}</h2>
+<div id="unit-tree">{% include "unit-tree.html" %}</div>
+{% if live %}{% if can_add %}<p class="actions"><a class="target-link" href="{{ add_href }}" hx-boost="true" hx-target="#unit-form" hx-swap="innerHTML" hx-push-url="false">{{ t.get("tree-add-main-unit") }}</a></p>
+{% endif %}<div id="unit-form"></div>
+{% if can_rename %}<form method="post" action="{{ rename_action }}" hx-boost="true" hx-target="#machine-name" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+{{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", name) }}
+<p class="actions"><button type="submit">{{ t.get("machine-rename-submit") }}</button></p>
+</form>
+{% endif %}{% if can_archive %}{{ dangers::danger(t, t.get("machine-archive-summary"), t.with_arg("machine-archive-warning", "code", code), t.with_arg("machine-archive-submit", "code", code), archive_action, layout.csrf_token) }}
+{% endif %}{% endif %}<p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>
+{% endblock %}

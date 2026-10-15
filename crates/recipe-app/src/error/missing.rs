@@ -10,7 +10,8 @@ use recipe_domain::recipe::ReferenceNumber;
 ///
 /// The type solves one problem: `E-WEB-005` must name the missing entity in one fixed form.
 /// `Display` gives the text of `{entity}` in the message of `E-WEB-005`.
-/// `E-WEB-005` has this one owner. A path value that does not parse uses `MalformedLogin`.
+/// `E-WEB-005` has this one owner. A path value that does not parse uses `MalformedLogin`,
+/// `MalformedMachine`, or `MalformedType`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Missing {
     /// A machine, found by its code.
@@ -47,6 +48,25 @@ pub enum Missing {
     /// No use case runs for it. The variant holds no text, so the typed value never reaches a
     /// message or a log line.
     MalformedLogin,
+    /// A machine that a `{code}` or `{uuid}` path value names, when the value does not parse.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedMachine,
+    /// A type that a `{name}`, `from`, or `rev` value names, when the value does not parse.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedType,
+    /// A revision of a type of a machine.
+    TypeRevision {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The name of the type.
+        name: TypeName,
+        /// The number of the revision.
+        revision: u32,
+    },
 }
 
 impl Missing {
@@ -79,6 +99,16 @@ impl fmt::Display for Missing {
             }
             Self::User(login) => write!(f, "User {login}"),
             Self::MalformedLogin => f.write_str("User"),
+            Self::MalformedMachine => f.write_str("Machine"),
+            Self::MalformedType => f.write_str("Type"),
+            Self::TypeRevision {
+                code,
+                name,
+                revision,
+            } => write!(f, "Revision {revision} of type {name} of machine {code}"),
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

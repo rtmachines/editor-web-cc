@@ -8,3 +8,10 @@ javascript:alert(1)
 </textarea><script>alert(1)</script>
 %3Cscript%3E
 <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" data-icon="alert-error" fill="none" stroke="currentColor"/onbegin=alert(1)>
+# Lines for the plant pages (task 11.1, design D14). They try to bring an hx attribute into a page.
+" hx-get="/machines/M7/archive" hx-trigger="load
+' hx-post='/machines' hx-trigger='load
+U1.2"><script>alert(1)</script>
+ARRAY[1..4] OF <script>alert(1)</script>
+ST_Zone@2"><script>alert(1)</script>
+" autofocus onfocus=alert(1) x="

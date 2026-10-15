@@ -4,27 +4,12 @@ use askama::Template;
 use recipe_app::identity::UserDetail;
 use recipe_app::ports::UserSummary;
 use recipe_domain::identity::Role;
-use recipe_domain::timestamp::Timestamp;
 
 use crate::error::WebError;
 use crate::layout::{Layout, NavTarget};
+use crate::pages::render::instant;
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
-
-/// Write an instant as `yyyy-mm-dd hh:mm UTC` (`design-system.md` section 5).
-fn instant(stamp: &Timestamp) -> String {
-    let moment = stamp.as_offset_date_time().to_utc();
-    let date = moment.date();
-    let time = moment.time();
-    format!(
-        "{:04}-{:02}-{:02} {:02}:{:02} UTC",
-        date.year(),
-        u8::from(date.month()),
-        date.day(),
-        time.hour(),
-        time.minute()
-    )
-}
 
 /// One option of a role list.
 pub(super) struct RoleOption {

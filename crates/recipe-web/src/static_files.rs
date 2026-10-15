@@ -18,8 +18,11 @@ pub const HTMX_SHA256: &str = "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45
 /// The HTMX file as downloaded from `unpkg.com/htmx.org@2.0.11/dist/htmx.min.js`, unchanged.
 pub(crate) const HTMX_BYTES: &[u8] = include_bytes!("../static/htmx.min.js");
 
-/// The style sheet of every page (`design-system.md`).
+/// The base style sheet of every page (`design-system.md`, ADR-0037 r).
 pub(crate) const APP_CSS_BYTES: &[u8] = include_bytes!("../static/app.css");
+
+/// The style sheet of the components. A page links it after `app.css`.
+pub(crate) const COMPONENTS_CSS_BYTES: &[u8] = include_bytes!("../static/components.css");
 
 /// The script that copies the new `row_version` into the forms (`api.md` section 9).
 pub(crate) const ROW_VERSION_BYTES: &[u8] = include_bytes!("../static/row-version.js");
@@ -98,8 +101,8 @@ pub(crate) struct StaticFile {
     pub(crate) media_type: &'static str,
 }
 
-/// The four files of `api.md` section 9, in the order of the route table.
-pub(crate) const STATIC_FILES: [StaticFile; 4] = [
+/// The five files of `api.md` section 9, in the order of the route table.
+pub(crate) const STATIC_FILES: [StaticFile; 5] = [
     StaticFile {
         path: "/static/htmx.min.js",
         bytes: HTMX_BYTES,
@@ -108,6 +111,11 @@ pub(crate) const STATIC_FILES: [StaticFile; 4] = [
     StaticFile {
         path: "/static/app.css",
         bytes: APP_CSS_BYTES,
+        media_type: CSS,
+    },
+    StaticFile {
+        path: "/static/components.css",
+        bytes: COMPONENTS_CSS_BYTES,
         media_type: CSS,
     },
     StaticFile {

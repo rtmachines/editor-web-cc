@@ -541,6 +541,7 @@ fn build_node(row: &PlcType, built: &mut Built) -> Result<TypeNode, PlantError> 
 }
 
 mod leaves;
+mod name_cycle;
 mod rebind;
 
 pub use leaves::Leaf;
@@ -551,6 +552,9 @@ pub(crate) mod fixtures;
 
 #[cfg(test)]
 mod limits;
+
+#[cfg(test)]
+mod name_cycle_tests;
 
 #[cfg(test)]
 mod prop;

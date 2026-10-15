@@ -10,6 +10,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{Login, Role};
+use recipe_domain::plant::MachineCode;
 
 use crate::auth::{CurrentUser, Operation};
 use crate::context::UseCase;
@@ -23,7 +24,8 @@ use crate::identity::{
 use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
-    AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
+    AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, GetMachineForm, GetUdtForm,
+    GetUnitForm, RenameMachine, RenameUnit, UdtFormInput, UnitFormInput,
 };
 use crate::recipe::{
     AddParameter, ApproveVersion, CreateRecipe, CreateVersion, DeleteRecipe, DiscardDraft,
@@ -137,6 +139,46 @@ async fn define_udt_checks_the_permission_first() {
         .execute(&operator(), &meta(), scenarios::define_udt_input())
         .await;
     assert_refused(&fixture, result, DefineUdt::OPERATION, "DefineUdt");
+}
+
+#[tokio::test]
+async fn get_machine_form_checks_the_permission_first() {
+    let fixture = scenarios::plant();
+    let result = GetMachineForm::new(fixture.context())
+        .execute(&operator(), &meta())
+        .await;
+    assert_refused(
+        &fixture,
+        result,
+        GetMachineForm::OPERATION,
+        "GetMachineForm",
+    );
+}
+
+#[tokio::test]
+async fn get_unit_form_checks_the_permission_first() {
+    let fixture = scenarios::plant();
+    let input = UnitFormInput {
+        code: MachineCode::parse("M1").unwrap(),
+        parent: None,
+    };
+    let result = GetUnitForm::new(fixture.context())
+        .execute(&operator(), &meta(), input)
+        .await;
+    assert_refused(&fixture, result, GetUnitForm::OPERATION, "GetUnitForm");
+}
+
+#[tokio::test]
+async fn get_udt_form_checks_the_permission_first() {
+    let fixture = scenarios::plant();
+    let input = UdtFormInput {
+        code: MachineCode::parse("M1").unwrap(),
+        from: None,
+    };
+    let result = GetUdtForm::new(fixture.context())
+        .execute(&operator(), &meta(), input)
+        .await;
+    assert_refused(&fixture, result, GetUdtForm::OPERATION, "GetUdtForm");
 }
 
 #[tokio::test]

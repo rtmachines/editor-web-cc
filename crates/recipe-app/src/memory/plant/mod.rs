@@ -1,7 +1,23 @@
 //! In-memory `PlantRepository` and `UnitLookup` (task 4.6).
 
+mod list;
 mod lookup;
 mod seed;
+
+/// Refuse a page offset that the SQL adapter cannot bind as `bigint`.
+///
+/// The check solves one problem: the memory adapter and the SQL adapter must answer the same
+/// request in the same way. An offset above `i64::MAX` gives the `StorageError` that
+/// `recipe-db` gives (`E-DB-008`), not an empty list.
+///
+/// # Errors
+///
+/// Returns `StorageError::Other` when `offset` is above `i64::MAX`.
+pub(super) fn check_offset(offset: u64) -> Result<(), StorageError> {
+    i64::try_from(offset)
+        .map(drop)
+        .map_err(|_| StorageError::invariant("the page offset does not fit the type bigint"))
+}
 
 use async_trait::async_trait;
 use recipe_domain::plant::{Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage};
@@ -14,7 +30,9 @@ use super::rows::{
 };
 use super::{LockMode, MemoryTransaction};
 use crate::error::{MACHINE_CODE_LIVE_UNIQUE, StorageError, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE};
-use crate::ports::{InsertedMachine, Locked, PlantRepository, RowImage};
+use crate::ports::{
+    InsertedMachine, Locked, MachineFilter, MachineSummary, PlantRepository, RowImage,
+};
 
 /// The table name of the journal for a machine lock.
 const MACHINE_TABLE: &str = "machine";
@@ -145,6 +163,16 @@ impl PlantRepository for MemoryTransaction {
 
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError> {
         self.state().try_machine(id).map_err(corrupt)
+    }
+
+    async fn list_machines(
+        &mut self,
+        filter: &MachineFilter,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<MachineSummary>, StorageError> {
+        check_offset(offset)?;
+        Ok(list::list(self.state(), filter, offset, limit))
     }
 
     async fn lock_machine_shared(

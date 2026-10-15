@@ -3,6 +3,8 @@
 //! A test template below `templates/test/` calls one macro and takes every text from a struct field,
 //! so it holds no literal word. The expected markup is written here, in the form of the design.
 
+mod plant;
+mod plant_forms;
 mod structure;
 
 use askama::Template;

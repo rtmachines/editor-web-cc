@@ -1,0 +1,4 @@
+{% import "components/tree.html" as trees %}
+<ul class="tree">
+{% call trees::type_node(id, index, name, type_text, expanded) %}{{ trees::type_leaf(leaf_name, leaf_type) }}{% endcall %}
+</ul>

@@ -292,6 +292,20 @@ async fn list_returns_one_page_of_page_size_rows() {
 }
 
 #[tokio::test]
+async fn list_with_an_offset_above_i64_max_is_a_storage_error_as_in_the_sql_adapter() {
+    let store = store();
+    store.seed_user(&new_user(1, "anna", Role::Operator));
+    let mut tx = begin(&store);
+
+    let beyond = tx.users().list(None, u32::MAX, u32::MAX).await;
+
+    assert!(matches!(
+        beyond.unwrap_err(),
+        StorageError::Other { sqlstate: None, .. }
+    ));
+}
+
+#[tokio::test]
 async fn summary_by_login_gives_the_user_without_a_hash() {
     let store = store();
     store.seed_user(&new_user(1, "anna", Role::Administrator));

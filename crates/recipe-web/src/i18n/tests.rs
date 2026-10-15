@@ -162,7 +162,7 @@ fn codes_with_a_message() -> Vec<String> {
 /// Return the user message of a code from its row of the registry, without the reference.
 ///
 /// The parenthetical note of a row (for example the note of `E-IDN-003`) is not part of the text.
-fn registry_message(code: &str) -> Option<&'static str> {
+pub(super) fn registry_message(code: &str) -> Option<&'static str> {
     REGISTRY
         .lines()
         .filter(|line| line.starts_with("| `E-"))
@@ -179,7 +179,7 @@ fn registry_message(code: &str) -> Option<&'static str> {
 /// Turn a registry text into the `fluent` text: each `{name}` becomes `{ $name }`.
 ///
 /// The sentence "Reference: {request_id}." is left out, because the page adds it.
-fn fluent_text(registry: &str) -> String {
+pub(super) fn fluent_text(registry: &str) -> String {
     let text = registry
         .strip_suffix(" Reference: {request_id}.")
         .unwrap_or(registry);
@@ -200,7 +200,7 @@ fn fluent_text(registry: &str) -> String {
 }
 
 /// Return the text of the message `key` in a `.ftl` source.
-fn ftl_message<'a>(source: &'a str, key: &str) -> Option<&'a str> {
+pub(super) fn ftl_message<'a>(source: &'a str, key: &str) -> Option<&'a str> {
     source
         .lines()
         .find_map(|line| line.strip_prefix(key)?.strip_prefix(" = "))
@@ -279,7 +279,7 @@ const DESIGN_TEXTS: &[(&str, &str, &str)] = &[
     ("field-password", "Password", "Hasło"),
     ("field-current-password", "Current password", "Obecne hasło"),
     ("field-role", "Role", "Rola"),
-    ("field-query", "Search fields", "Pola wyszukiwania"),
+    ("field-query", "Search", "Wyszukiwanie"),
     ("field-q", "Login contains", "Login zawiera"),
     ("field-page", "Page", "Strona"),
 ];

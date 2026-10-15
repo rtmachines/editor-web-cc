@@ -20,11 +20,49 @@ pub(crate) struct FieldLine {
 /// The fields that have an input with the same `id` on a page.
 ///
 /// A field of this list gets a link in an error fragment. Any other field gets its label only.
-const INPUT_FIELDS: [&str; 5] = ["login", "password", "current_password", "role", "q"];
+/// The users page keeps `q`. The plant pages add the names of design D5. Two forms of one page can
+/// use one name, so the `id` of an input is the name of its form, for example `machine_name`.
+const INPUT_FIELDS: [&str; 15] = [
+    "login",
+    "password",
+    "current_password",
+    "role",
+    "q",
+    "code",
+    "machine_name",
+    "plc_platform",
+    "main_unit_name",
+    "parent_path",
+    "segment",
+    "unit_name",
+    "type_name",
+    "machine_q",
+    "show_archived",
+];
+
+/// The name of the list of member rows. The list is a `fieldset`, so it has no input of its own.
+const ROW_LIST: &str = "members";
+
+/// The `id` of the first input of the list of member rows.
+const FIRST_ROW_INPUT: &str = "members-0-name";
 
 /// Return true when the form field `name` has an input on a page.
+///
+/// The list of member rows counts too. Its error line links to the first input of the list.
 pub(crate) fn has_input(name: &str) -> bool {
-    INPUT_FIELDS.contains(&name)
+    name == ROW_LIST || INPUT_FIELDS.contains(&name)
+}
+
+/// Return the `id` of the input that an error line of the form field `name` links to.
+///
+/// A field has an input with its own name, except the list of member rows. An error of the whole
+/// list links to the first input of the list (`design-system.md` 10.5).
+pub(crate) fn input_id(name: &str) -> &str {
+    if name == ROW_LIST {
+        FIRST_ROW_INPUT
+    } else {
+        name
+    }
 }
 
 /// Return the key of the label of the form field `name` in the bundles.

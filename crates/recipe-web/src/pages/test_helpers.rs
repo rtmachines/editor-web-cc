@@ -3,9 +3,70 @@
 use std::iter::Peekable;
 use std::str::Chars;
 
+use axum::http::StatusCode;
+
 use crate::test_support::Reply;
 
 mod tests;
+
+/// The payloads of the corpus file, one per line. A line that starts with `#` is a comment.
+const CORPUS: &str = include_str!("../../tests/web/xss-corpus.txt");
+/// A payload with a NUL character. A text file cannot hold it, so the tests add it.
+const NUL_PAYLOAD: &str = "\u{0}<script>alert(1)</script>";
+
+/// The `Content-Security-Policy` of every response (`api.md` section 9).
+pub(crate) const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+/// Return the payloads of the corpus file and the NUL payload.
+pub(crate) fn payloads() -> Vec<String> {
+    let mut payloads: Vec<String> = CORPUS
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(str::to_owned)
+        .collect();
+    payloads.push(NUL_PAYLOAD.to_owned());
+    payloads
+}
+
+/// Percent-encode every byte that is not an unreserved character, so a payload fits a form or a path.
+pub(crate) fn encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                char::from(byte).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
+}
+
+/// Escape a text like askama does in HTML (`&`, `<`, `>`, `"`, and `'`).
+pub(crate) fn askama_escape(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '&' => "&#38;".to_owned(),
+            '<' => "&#60;".to_owned(),
+            '>' => "&#62;".to_owned(),
+            '"' => "&#34;".to_owned(),
+            '\'' => "&#39;".to_owned(),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+/// Assert this status with the code in the body.
+pub(crate) fn assert_error(reply: &Reply, status: StatusCode, code: &str, what: &str) {
+    assert_eq!(reply.status, status, "{what}: {}", reply.body);
+    assert!(reply.body.contains(code), "{what}: {}", reply.body);
+}
+
+/// Assert an HTMX error answer: the status, the code in the body, and the retarget to the error panel.
+pub(crate) fn assert_htmx_error(reply: &Reply, status: StatusCode, code: &str) {
+    assert_error(reply, status, code, code);
+    assert_eq!(reply.header("hx-retarget"), "#error-panel", "{code}");
+}
 
 /// Return the `Set-Cookie` text of the cookie `name`, or `None`.
 pub(crate) fn set_cookie_of(reply: &Reply, name: &str) -> Option<String> {
@@ -130,6 +191,45 @@ pub(crate) fn assert_clean_html(body: &str) {
             "event handler {name}"
         );
     }
+}
+
+/// An `hx-*` attribute of a start tag.
+pub(crate) struct HxAttribute {
+    /// The name without a `data-` prefix.
+    pub(crate) name: String,
+    /// The full value of the attribute.
+    pub(crate) value: String,
+    /// The lower case name of the element that holds the attribute.
+    pub(crate) element: String,
+}
+
+/// Return the `hx-*` and `data-hx-*` attributes of every start tag of `html` that have a value.
+///
+/// The reader uses the tokenizer of `assert_clean_html`. An attribute starts inside a tag only, so
+/// the text of a paragraph is no attribute. A quoted value may hold spaces.
+pub(crate) fn hx_attributes(html: &str) -> Vec<HxAttribute> {
+    let mut found = Vec::new();
+    for tag in start_tags(html) {
+        for (name, value) in tag.attributes {
+            let bare = name.strip_prefix("data-").unwrap_or(&name);
+            if bare.starts_with("hx-") {
+                found.push(HxAttribute {
+                    name: bare.to_owned(),
+                    value,
+                    element: tag.name.clone(),
+                });
+            }
+        }
+    }
+    found
+}
+
+/// Return the name and the value of every `hx-*` attribute that has a value in `html`.
+pub(crate) fn hx_pairs(html: &str) -> Vec<(String, String)> {
+    hx_attributes(html)
+        .into_iter()
+        .map(|attribute| (attribute.name, attribute.value))
+        .collect()
 }
 
 /// Assert that no attribute whose name starts with `hx-` or `data-hx-` holds `needle` (design D13).

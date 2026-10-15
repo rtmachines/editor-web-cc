@@ -37,7 +37,7 @@ mod template_tests;
 mod test_support;
 
 pub use csrf::{PreSession, issue_pre_session};
-pub use error::{ByteLimit, FieldReason, WebError};
+pub use error::{ByteLimit, FieldReason, RowField, WebError};
 pub use i18n::{BundleReason, Bundles, Lang, LangReason};
 pub use routes::{Access, router};
 pub use settings::{Cidr, CidrList, CidrReason, WebSettings};

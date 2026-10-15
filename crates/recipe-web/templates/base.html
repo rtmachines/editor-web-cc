@@ -1,4 +1,8 @@
 {% import "components/toast.html" as toasts -%}
+{% if layout.is_content() -%}
+<title>{{ layout.title }} · {{ layout.t.get("app-name") }}</title>
+{% if let Some(next) = layout.next %}<input type="hidden" id="lang-next" name="next" value="{{ next }}" hx-swap-oob="true">
+{% endif %}{% else -%}
 <!DOCTYPE html>
 <html lang="{{ layout.lang }}">
 <head>
@@ -7,6 +11,7 @@
 <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}'>
 <title>{{ layout.title }} · {{ layout.t.get("app-name") }}</title>
 <link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/components.css">
 <script src="/static/htmx.min.js"></script>
 <script src="/static/row-version.js" defer></script>
 <script src="/static/tree.js" defer></script>
@@ -19,7 +24,7 @@
 {% for link in layout.nav %}<li><a class="nav-link" href="{{ link.path }}"{% if link.current %} aria-current="page"{% endif %}>{{ link.text }}</a></li>
 {% endfor %}</ul></nav>
 {% endif %}{% if let Some(next) = layout.next %}<form class="lang-switch" method="post" action="/lang" aria-label="{{ layout.t.get("lang-switch-label") }}">
-<input type="hidden" name="next" value="{{ next }}">
+<input type="hidden" id="lang-next" name="next" value="{{ next }}">
 {% if let Some(nonce) = layout.pre_nonce %}<input type="hidden" name="csrf_pre" value="{{ nonce }}">{% else %}<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">{% endif %}
 <button type="submit" name="lang" value="pl" lang="pl"{% if layout.lang.as_str() == "pl" %} aria-current="true"{% endif %}>{{ layout.t.get("lang-switch-pl") }}</button>
 <button type="submit" name="lang" value="en" lang="en"{% if layout.lang.as_str() == "en" %} aria-current="true"{% endif %}>{{ layout.t.get("lang-switch-en") }}</button>
@@ -30,10 +35,10 @@
 <button type="submit">{{ layout.t.get("logout-submit") }}</button>
 </form>
 {% endif %}</header>
-<main id="content">
+<main id="content">{% endif %}
 <div id="error-panel">{% block error_panel %}{% endblock %}</div>
 <div id="toast" role="status" aria-live="polite">{% if let Some(text) = layout.toast %}{{ toasts::success(text) }}{% endif %}</div>
 {% block content %}{% endblock %}
-</main>
+{% if !layout.is_content() %}</main>
 </body>
-</html>
+</html>{% endif %}

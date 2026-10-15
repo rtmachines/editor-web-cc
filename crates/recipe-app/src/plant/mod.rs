@@ -7,6 +7,7 @@ mod create_machine;
 mod define_udt;
 mod derived_lock;
 mod ensure_derived;
+mod queries;
 mod rename_machine;
 #[cfg(test)]
 mod short_rows;
@@ -21,5 +22,12 @@ pub use add_unit::{AddUnit, AddUnitInput, AddUnitOutput};
 pub use archive_machine::{ArchiveMachine, ArchiveMachineInput, ArchiveMachineOutput};
 pub use archive_unit::{ArchiveUnit, ArchiveUnitInput, ArchiveUnitOutput};
 pub use create_machine::{CreateMachine, CreateMachineInput, CreateMachineOutput};
+pub use queries::{
+    GetMachine, GetMachineForm, GetMachineInput, GetTypeTree, GetTypeUsage, GetUdtForm, GetUnit,
+    GetUnitForm, GetUnitTree, ListMachines, ListMachinesInput, ListTypes, MachineForm, MachineList,
+    MachineRef, MachineView, TypeList, TypeListRow, TypeRef, TypeUsage, TypeUsageInput,
+    TypeUsageLine, TypeView, TypesInput, UdtForm, UdtFormInput, UnitForm, UnitFormInput, UnitRef,
+    UnitTreeInput, UnitView,
+};
 pub use rename_machine::{RenameMachine, RenameMachineInput, RenameMachineOutput};
 pub use rename_unit::{RenameUnit, RenameUnitInput, RenameUnitOutput};

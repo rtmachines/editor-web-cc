@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import "components/table.html" as tables %}
+{% import "components/badge.html" as badges %}
+{% import "components/field.html" as fields %}
+{% import "components/heading.html" as headings %}
+{% import "components/pager.html" as pagers %}
+{% block content %}
+{{ headings::h1(layout, t.get("machines-title")) }}
+<form method="get" action="/machines" class="actions">
+<div class="field"><label for="machine_q">{{ t.get("field-machine-q") }}</label>
+<input id="machine_q" type="search" name="q" class="data" autocapitalize="none" autocomplete="off" spellcheck="false" maxlength="200" value="{{ q }}"></div>
+{{ fields::check(t, "show_archived", t.get("field-show-archived"), show_archived) }}
+<button type="submit">{{ t.get("machines-search-submit") }}</button>
+</form>
+{% if can_create %}<p class="actions"><a class="target-link" href="/machines/new">{{ t.get("machines-new-link") }}</a></p>
+{% endif %}
+{% if after_end %}{{ pagers::after_end(t, current, first_url) }}
+{% else %}{% call tables::frame("machines-caption", t.get("machines-caption")) %}<thead><tr>{{ tables::head(t.get("column-code")) }}{{ tables::head(t.get("column-name")) }}{{ tables::head(t.get("column-platform")) }}{{ tables::head(t.get("column-state")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(4, t.get("machines-empty")) }}{% else %}<tbody>
+{% for row in rows %}<tr><td class="data"><a href="{{ row.href }}">{{ row.code }}</a></td><td>{{ row.name }}</td><td>{{ row.platform }}</td><td>{% if row.archived %}{{ badges::archived(t.get("status-archived")) }}{% endif %}</td></tr>
+{% endfor %}</tbody>
+{% endif %}{% endcall %}{% endif %}
+{% if !previous_url.is_empty() || !next_url.is_empty() %}{{ pagers::pager(t, previous_url, next_url, current) }}
+{% endif %}
+{% endblock %}

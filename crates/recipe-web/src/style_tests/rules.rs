@@ -1,10 +1,11 @@
-//! Rule tests of `app.css` (design D4, tasks 2.3 and 2.4).
+//! Rule tests of `app.css` (design D4, tasks 2.3 and 2.4, ADR-0037 r).
 //!
-//! `EXPECTED` pins the declarations that the design names. The other tests check the format
-//! rules of `design-system.md` sections 5, 7, 11, and 12 on every rule of the sheet.
+//! `APP_EXPECTED` pins the declarations of the base rules that the design names. The rules of the
+//! components live in `component_rules`. The other tests check the format rules of
+//! `design-system.md` sections 5, 7, 11, and 12 on every rule of both style sheets.
 
 use super::css::{Rule, is_named_color, parse_sheet, parse_tables};
-use super::{APP_CSS, DESIGN, sheet};
+use super::{APP_CSS, COMPONENTS_CSS, DESIGN, app_sheet, components_sheet, sheet};
 
 /// The system colors of forced-colors mode (`design-system.md` section 12).
 const SYSTEM_COLORS: [&str; 8] = [
@@ -54,9 +55,9 @@ const COLOR_PROPERTIES: [&str; 18] = [
     "accent-color",
 ];
 
-/// The class names that the templates of later tasks use. `app.css` lists them in its first
-/// comment and holds at least one rule for each.
-const CLASSES: [&str; 44] = [
+/// The class names of the base rules that the templates use. `app.css` lists them in its first
+/// comment and holds at least one rule for each. `components.css` lists its own classes.
+const APP_CLASSES: [&str; 19] = [
     "skip-link",
     "topbar",
     "app-name",
@@ -64,7 +65,6 @@ const CLASSES: [&str; 44] = [
     "nav-link",
     "lang-switch",
     "user-login",
-    "panel",
     "actions",
     "btn",
     "btn-primary",
@@ -72,39 +72,15 @@ const CLASSES: [&str; 44] = [
     "btn-danger",
     "target-link",
     "data",
-    "table-wrap",
-    "num",
     "field",
     "field-hint",
     "field-required",
-    "badge",
-    "badge-draft",
-    "badge-approved",
-    "badge-retired",
-    "badge-active",
-    "badge-inactive",
-    "badge-large",
-    "alert",
-    "alert-error",
-    "alert-warning",
-    "alert-info",
-    "alert-success",
-    "alert-code",
-    "alert-ref",
-    "field-lines",
-    "toast",
-    "tree",
-    "tree-node",
-    "tree-path",
-    "tree-leaf",
-    "tree-group",
-    "empty",
     "icon",
     "htmx-indicator",
 ];
 
-/// The expected declarations: selector, property, value. A rule at the top level.
-const EXPECTED: &[(&str, &str, &str)] = &[
+/// The expected declarations of `app.css`: selector, property, value. A rule at the top level.
+const APP_EXPECTED: &[(&str, &str, &str)] = &[
     // The page (task 2.3).
     ("body", "font-family", "var(--font-sans)"),
     ("body", "font-size", "var(--text-base)"),
@@ -147,28 +123,6 @@ const EXPECTED: &[(&str, &str, &str)] = &[
     (".data", "font-family", "var(--font-mono)"),
     (".data", "font-size", "var(--text-base)"),
     (".data", "overflow-wrap", "anywhere"),
-    // The table (task 2.4, section 10.4).
-    (".table-wrap", "overflow-x", "auto"),
-    (
-        ".table-wrap",
-        "border",
-        "var(--edge) solid var(--color-border)",
-    ),
-    ("table", "width", "100%"),
-    ("th", "padding", "0 var(--space-3)"),
-    ("td", "padding", "0 var(--space-3)"),
-    ("th", "background", "var(--color-sunken)"),
-    ("th", "color", "var(--color-text-muted)"),
-    ("th", "font-size", "var(--text-sm)"),
-    ("tr", "height", "var(--target)"),
-    (
-        "td",
-        "border-bottom",
-        "var(--edge) solid var(--color-divider)",
-    ),
-    ("tbody tr:hover", "background", "var(--color-sunken)"),
-    (".num", "text-align", "right"),
-    (".num", "font-family", "var(--font-mono)"),
     // The form field and the buttons (section 10.5).
     (".field-hint", "color", "var(--color-text-muted)"),
     (".field-hint", "font-size", "var(--text-sm)"),
@@ -202,81 +156,17 @@ const EXPECTED: &[(&str, &str, &str)] = &[
     (".btn-danger", "color", "var(--color-error-fg)"),
     (".btn-danger", "border-color", "var(--color-error-edge)"),
     (".btn:disabled", "background", "var(--color-sunken)"),
-    // The badge (section 10.9).
-    (".badge", "border", "var(--edge-badge) solid"),
-    (".badge", "font-size", "var(--text-sm)"),
-    (".badge .icon", "width", "var(--icon-sm)"),
-    (".badge-large", "font-size", "var(--text-base)"),
-    (".badge-large .icon", "width", "var(--icon-md)"),
-    (".badge-draft", "color", "var(--color-draft-fg)"),
-    (".badge-draft", "background", "var(--color-draft-bg)"),
-    (".badge-draft", "border-color", "var(--color-draft-edge)"),
-    (
-        ".badge-approved",
-        "border-color",
-        "var(--color-approved-edge)",
-    ),
-    (
-        ".badge-retired",
-        "border-color",
-        "var(--color-retired-edge)",
-    ),
-    (".badge-active", "border-color", "var(--color-success-edge)"),
-    (".badge-inactive", "color", "var(--color-retired-fg)"),
-    // The alert, the field lines, and the toast (sections 10.6 and 10.7).
-    (".alert", "border", "var(--edge) solid"),
-    (".alert .icon", "width", "var(--icon-lg)"),
-    (".alert-error", "color", "var(--color-error-fg)"),
-    (".alert-error", "background", "var(--color-error-bg)"),
-    (".alert-error", "border-color", "var(--color-error-edge)"),
-    (
-        ".alert-warning",
-        "border-color",
-        "var(--color-warning-edge)",
-    ),
-    (".alert-info", "border-color", "var(--color-info-edge)"),
-    (
-        ".alert-success",
-        "border-color",
-        "var(--color-success-edge)",
-    ),
-    (".alert-code", "font-family", "var(--font-mono)"),
-    (".alert-code", "font-weight", "700"),
-    (".alert-ref", "font-size", "var(--text-sm)"),
-    (".field-lines", "display", "flex"),
-    (".field-lines", "flex-direction", "column"),
-    (".field-lines", "gap", "var(--target-gap)"),
-    (".toast", "background", "var(--color-topbar)"),
-    (".toast", "color", "var(--color-on-action)"),
-    (".toast .icon", "color", "var(--color-success-bg)"),
-    // The tree, the empty state, and the panel (sections 10.8, 10.10, 6).
-    (".tree-group[hidden]", "display", "none"),
-    (
-        ".tree-node[aria-expanded=\"true\"] [data-icon=\"tree-collapsed\"]",
-        "display",
-        "none",
-    ),
-    (
-        ".tree-node[aria-expanded=\"false\"] [data-icon=\"tree-expanded\"]",
-        "display",
-        "none",
-    ),
-    (".tree-path", "font-family", "var(--font-mono)"),
-    (
-        ".tree-leaf",
-        "padding-left",
-        "calc(var(--icon-md) + var(--space-2))",
-    ),
-    (".empty", "padding", "var(--space-7)"),
-    (".empty", "background", "var(--color-surface)"),
-    (".panel", "border", "var(--edge) solid var(--color-border)"),
-    (".empty", "border", "var(--edge) solid var(--color-border)"),
+    // The indicator of a request (`api.md` section 9).
     (".htmx-indicator", "opacity", "0"),
     (".htmx-request .htmx-indicator", "opacity", "1"),
 ];
 
 /// Return the rules at the top level or in the media block, whose selector list holds `selector`.
-fn rules_of<'a>(sheet: &'a [Rule], selector: &str, media: Option<&str>) -> Vec<&'a Rule> {
+pub(super) fn rules_of<'a>(
+    sheet: &'a [Rule],
+    selector: &str,
+    media: Option<&str>,
+) -> Vec<&'a Rule> {
     sheet
         .iter()
         .filter(|rule| rule.media.as_deref() == media)
@@ -285,7 +175,7 @@ fn rules_of<'a>(sheet: &'a [Rule], selector: &str, media: Option<&str>) -> Vec<&
 }
 
 /// Return the value of a property in the last matching rule.
-fn value_of(sheet: &[Rule], selector: &str, property: &str) -> Option<String> {
+pub(super) fn value_of(sheet: &[Rule], selector: &str, property: &str) -> Option<String> {
     rules_of(sheet, selector, None)
         .iter()
         .rev()
@@ -328,7 +218,7 @@ fn rule_decls(sheet: &[Rule]) -> Vec<(&Rule, &str, &str)> {
 }
 
 /// Return the class names in a text: every identifier after a dot.
-fn classes_in(text: &str) -> Vec<String> {
+pub(super) fn classes_in(text: &str) -> Vec<String> {
     let mut classes = Vec::new();
     let mut parts = text.split('.');
     parts.next();
@@ -406,10 +296,13 @@ fn undefined_tokens(sheet: &[Rule]) -> Vec<String> {
 }
 
 #[test]
-fn rules_the_sheet_is_a_flat_list_with_at_most_one_media_level() {
+fn rules_the_sheets_are_flat_lists_with_at_most_one_media_level() {
     let sheet = sheet();
     assert!(sheet.len() > 60, "found {} rules", sheet.len());
+    assert!(app_sheet().len() > 30, "app.css holds the base rules");
+    assert!(components_sheet().len() > 30, "components.css holds rules");
     assert!(!APP_CSS.contains("@import"));
+    assert!(!COMPONENTS_CSS.contains("@import"));
     for rule in &sheet {
         if let Some(media) = &rule.media {
             assert_eq!(media, "(forced-colors: active)");
@@ -419,8 +312,8 @@ fn rules_the_sheet_is_a_flat_list_with_at_most_one_media_level() {
 
 #[test]
 fn rules_each_expected_declaration_has_the_value_of_the_design() {
-    let sheet = sheet();
-    for (selector, property, expected) in EXPECTED {
+    let sheet = app_sheet();
+    for (selector, property, expected) in APP_EXPECTED {
         let actual = value_of(&sheet, selector, property);
         assert_eq!(actual.as_deref(), Some(*expected), "{selector} {property}");
     }
@@ -560,6 +453,7 @@ fn rules_nothing_moves() {
         }
     }
     assert!(!APP_CSS.contains("@keyframes"));
+    assert!(!COMPONENTS_CSS.contains("@keyframes"));
 }
 
 #[test]
@@ -628,7 +522,7 @@ fn rules_flex_items_with_text_shrink() {
 
 #[test]
 fn rules_forced_colors_keeps_the_focus_and_the_current_link_visible() {
-    let sheet = sheet();
+    let sheet = app_sheet();
     let focus = rules_of(&sheet, ":focus-visible", Some("(forced-colors: active)"));
     assert!(
         focus
@@ -645,7 +539,7 @@ fn rules_forced_colors_keeps_the_focus_and_the_current_link_visible() {
             .iter()
             .any(|r| r.value("border-bottom-color") == Some("Highlight"))
     );
-    let framed = rules_of(&sheet, ".badge", Some("(forced-colors: active)"));
+    let framed = rules_of(&sheet, ".topbar", Some("(forced-colors: active)"));
     assert!(
         framed
             .iter()
@@ -706,10 +600,10 @@ const LATIN: &str = "U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+
 /// The `unicode-range` of the subset `latin-ext`, as the package declares it.
 const LATIN_EXT: &str = "U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF";
 
-#[test]
-fn rules_the_first_comment_lists_every_class_and_each_class_has_a_rule() {
-    let sheet = sheet();
-    let comment = APP_CSS
+/// Assert that the first comment of `css` lists every class of `classes` and that a rule of
+/// `sheet` names each one.
+pub(super) fn assert_classes_listed_and_used(css: &str, sheet: &[Rule], classes: &[&str]) {
+    let comment = css
         .trim_start()
         .strip_prefix("/*")
         .and_then(|rest| rest.split_once("*/"))
@@ -720,8 +614,13 @@ fn rules_the_first_comment_lists_every_class_and_each_class_has_a_rule() {
         .iter()
         .flat_map(|rule| rule.selectors.iter().flat_map(|s| classes_in(s)))
         .collect();
-    for class in CLASSES {
+    for class in classes {
         assert!(listed.iter().any(|c| c == class), "comment lacks .{class}");
         assert!(used.iter().any(|c| c == class), "no rule for .{class}");
     }
+}
+
+#[test]
+fn rules_the_first_comment_lists_every_class_and_each_class_has_a_rule() {
+    assert_classes_listed_and_used(APP_CSS, &app_sheet(), &APP_CLASSES);
 }

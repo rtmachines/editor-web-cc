@@ -1,0 +1,11 @@
+{% import "components/tree.html" as trees -%}
+{% import "components/icons.html" as icons -%}
+{#- The unit tree (design D7). The struct that includes this file has the fields t and tree. Askama refuses a macro that stands inside its own expansion, so trees::unit_node cannot hold a child node. The macro open writes the start of a node with the markup of trees::unit_node, and the level macros write the end. A macro cannot call itself, so one macro writes one level. The nodes of depth 5 have no child. -#}
+{%- macro leaf(t, n) -%}{{ trees::unit_leaf(t, n.path, n.name, n.href, n.add_href, n.focus, n.archived) }}{%- endmacro -%}
+{%- macro open(t, n) -%}<li><div class="tree-row"><button type="button" class="tree-node" aria-expanded="{% if n.expanded %}true{% else %}false{% endif %}" aria-controls="tree-group-{{ n.id }}">{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span class="tree-path">{{ n.path }}</span></button>{{ trees::unit_row_end(t, n.path, n.name, n.href, n.add_href, n.focus, n.archived) }}</div><ul class="tree-group" id="tree-group-{{ n.id }}"{% if !n.expanded %} hidden{% endif %}>{%- endmacro -%}
+{%- macro level5(t, nodes) -%}{% for e in nodes %}{{ leaf(t, e) }}{% endfor %}{%- endmacro -%}
+{%- macro level4(t, nodes) -%}{% for d in nodes %}{% if d.children.is_empty() %}{{ leaf(t, d) }}{% else %}{{ open(t, d) }}{{ level5(t, &d.children) }}</ul></li>{% endif %}{% endfor %}{%- endmacro -%}
+{%- macro level3(t, nodes) -%}{% for c in nodes %}{% if c.children.is_empty() %}{{ leaf(t, c) }}{% else %}{{ open(t, c) }}{{ level4(t, &c.children) }}</ul></li>{% endif %}{% endfor %}{%- endmacro -%}
+{%- macro level2(t, nodes) -%}{% for b in nodes %}{% if b.children.is_empty() %}{{ leaf(t, b) }}{% else %}{{ open(t, b) }}{{ level3(t, &b.children) }}</ul></li>{% endif %}{% endfor %}{%- endmacro -%}
+{%- macro level1(t, nodes) -%}{% for a in nodes %}{% if a.children.is_empty() %}{{ leaf(t, a) }}{% else %}{{ open(t, a) }}{{ level2(t, &a.children) }}</ul></li>{% endif %}{% endfor %}{%- endmacro -%}
+<ul class="tree">{{ level1(t, &tree.roots) }}</ul>

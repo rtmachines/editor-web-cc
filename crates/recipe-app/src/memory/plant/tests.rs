@@ -15,7 +15,7 @@ use crate::error::{MACHINE_CODE_LIVE_UNIQUE, StorageError, UNIT_PARENT_EXISTS, U
 use crate::memory::{
     JournalEntry, Lock, LockMode, MemoryClock, MemoryStore, MemoryTransaction, fixtures,
 };
-use crate::ports::{Isolation, NonEmpty, Transaction, UnitOfWork};
+use crate::ports::{Isolation, MachineFilter, NonEmpty, Transaction, UnitOfWork};
 
 const NOW_SECONDS: i64 = 1_000;
 
@@ -164,6 +164,27 @@ async fn machine_by_code_finds_the_live_machine_and_skips_the_archived_one() {
         .unwrap();
     assert!(none.is_none());
     assert!(locks(&store).is_empty());
+}
+
+#[tokio::test]
+async fn list_machines_with_an_offset_above_i64_max_is_a_storage_error_as_in_the_sql_adapter() {
+    let store = store();
+    store.seed_machine(&machine(1, "M1"));
+    let mut tx = begin(&store, Isolation::ReadOnly);
+    let filter = MachineFilter::default();
+    let largest = u64::try_from(i64::MAX).unwrap();
+
+    let at_limit = tx.plant().list_machines(&filter, largest, 10).await;
+    let beyond = tx
+        .plant()
+        .list_machines(&filter, largest.checked_add(1).unwrap(), 10)
+        .await;
+
+    assert!(at_limit.unwrap().is_empty());
+    assert!(matches!(
+        beyond.unwrap_err(),
+        StorageError::Other { sqlstate: None, .. }
+    ));
 }
 
 #[tokio::test]

@@ -11,14 +11,16 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::IdentityError;
 
 use super::log::{level_of, log_error};
+use super::plant::plant_args;
 use super::status::status_of;
 use super::values::{
     field_reason_text, missing_text, operation_text, password_reason_text, task_stage_text,
 };
 use super::view::{
     ErrorFragment, ErrorPage, ErrorView, FieldErrorsFragment, FieldLine, field_key, has_input,
+    input_id,
 };
-use super::{Retry, WebError};
+use super::{Retry, RowField, WebError};
 use crate::cookies::clear_session_cookie;
 use crate::i18n::Lang;
 use crate::layout::Layout;
@@ -35,6 +37,10 @@ const HX_REDIRECT: HeaderName = HeaderName::from_static("hx-redirect");
 const HX_RETARGET: HeaderName = HeaderName::from_static("hx-retarget");
 /// The HTMX header that sets the swap style of the answer.
 const HX_RESWAP: HeaderName = HeaderName::from_static("hx-reswap");
+/// The HTMX header that controls the address bar. The value `false` keeps the address.
+const HX_PUSH_URL: HeaderName = HeaderName::from_static("hx-push-url");
+/// The value of `HX-Push-Url` of an error: a refused form keeps the URL of its page (ADR-0037 z).
+const KEEP_URL: &str = "false";
 /// The element that shows an error to the user.
 const ERROR_PANEL: &str = "#error-panel";
 /// The swap style of an error. The error panel scrolls into view (ADR-0036 p, `api.md` 5.3).
@@ -82,6 +88,10 @@ fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
             args.set("field", label_of(field, ctx));
             args.set("reason", field_reason_text(bundles, ctx.lang, *reason));
         }
+        WebError::BadRow { row, field, reason } => {
+            args.set("field", row_label_of(*row, *field, ctx));
+            args.set("reason", field_reason_text(bundles, ctx.lang, *reason));
+        }
         WebError::App(AppError::Forbidden { operation }) => {
             args.set("operation", operation_text(bundles, ctx.lang, *operation));
         }
@@ -93,6 +103,7 @@ fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
             args.set("stage", task_stage_text(bundles, ctx.lang, *stage));
         }
         WebError::App(AppError::Identity(identity)) => identity_args(&mut args, identity, ctx),
+        WebError::App(AppError::Plant(plant)) => plant_args(&mut args, plant, bundles, ctx.lang),
         _other => {}
     }
     args
@@ -106,12 +117,16 @@ fn label_of(field: &str, ctx: &ErrorContext<'_>) -> String {
         .unwrap_or_else(|| field.to_owned())
 }
 
-/// Return the form field that the error names, or an empty text.
-const fn field_of(error: &WebError) -> &'static str {
-    match error {
-        WebError::BadRequest { field, .. } => field,
-        _other => "",
-    }
+/// Return the label of one input of a member row, for example "Name of member 3".
+///
+/// The label takes the number of the row, which counts from 1. The index of the row counts from 0.
+fn row_label_of(row: u16, field: RowField, ctx: &ErrorContext<'_>) -> String {
+    let texts = Texts::new(ctx.state.bundles(), ctx.lang);
+    texts.with_arg(
+        field.label_key(),
+        "number",
+        u32::from(row).saturating_add(1),
+    )
 }
 
 /// Return the `Retry-After` seconds of an answer, if it needs the header.
@@ -144,16 +159,22 @@ fn view_of(error: &WebError, shown: ErrorCode, ctx: &ErrorContext<'_>) -> ErrorV
 }
 
 /// Build the field lines of an error. An error of the whole form has none.
+///
+/// The field of a line is the `id` of the input that the line links to.
 fn lines_of(error: &WebError, ctx: &ErrorContext<'_>) -> Vec<FieldLine> {
-    let field = field_of(error);
-    if field.is_empty() {
-        return Vec::new();
+    match error {
+        WebError::BadRequest { field, .. } => vec![FieldLine {
+            field: input_id(field).to_owned(),
+            label: label_of(field, ctx),
+            has_input: has_input(field),
+        }],
+        WebError::BadRow { row, field, .. } => vec![FieldLine {
+            field: format!("members-{row}-{}", field.id_suffix()),
+            label: row_label_of(*row, *field, ctx),
+            has_input: true,
+        }],
+        _other => Vec::new(),
     }
-    vec![FieldLine {
-        field: field.to_owned(),
-        label: label_of(field, ctx),
-        has_input: has_input(field),
-    }]
 }
 
 /// Render the body: a fragment for an HTMX request and a full page otherwise.
@@ -198,8 +219,9 @@ fn redirect(path: &'static str) -> Response {
 ///
 /// The status comes from the column HTTP of `reliability.md` section 1.2. `E-IDN-004` renders as
 /// `E-IDN-003` and logs its own code (A42). `E-IDN-007` is the redirect to `/me/password`.
-/// `E-WEB-004` redirects to `/login` and ends the session cookie with `Max-Age=0`. For an HTMX request every status of 400 or more, except
-/// `E-WEB-004`, retargets the answer to `#error-panel` (`api.md` section 5.3).
+/// `E-WEB-004` redirects to `/login` and ends the session cookie with `Max-Age=0`. For an HTMX
+/// request every status of 400 or more, except `E-WEB-004`, retargets the answer to `#error-panel`
+/// (`api.md` section 5.3). The same answer sets `HX-Push-Url: false`, so the URL stays.
 pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     let code = error.code();
     let shown = if code == ErrorCode::IDN_004 {
@@ -232,6 +254,7 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     } else if ctx.htmx {
         headers.insert(HX_RETARGET, HeaderValue::from_static(ERROR_PANEL));
         headers.insert(HX_RESWAP, HeaderValue::from_static(ERROR_RESWAP));
+        headers.insert(HX_PUSH_URL, HeaderValue::from_static(KEEP_URL));
     }
     if let (Some(Retry::Login(pre_session)), false) = (&ctx.retry, ctx.htmx) {
         headers.append(SET_COOKIE, pre_session.set_cookie().clone());

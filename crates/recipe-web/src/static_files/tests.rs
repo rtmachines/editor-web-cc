@@ -217,7 +217,7 @@ fn script_selector_calls_reject_a_built_argument() {
 }
 
 #[test]
-fn static_files_table_lists_the_four_files_with_their_media_types() {
+fn static_files_table_lists_the_five_files_with_their_media_types() {
     let listed: Vec<(&str, &str)> = STATIC_FILES
         .iter()
         .map(|file| (file.path, file.media_type))
@@ -227,6 +227,7 @@ fn static_files_table_lists_the_four_files_with_their_media_types() {
         [
             ("/static/htmx.min.js", "application/javascript"),
             ("/static/app.css", "text/css; charset=utf-8"),
+            ("/static/components.css", "text/css; charset=utf-8"),
             ("/static/row-version.js", "application/javascript"),
             ("/static/tree.js", "application/javascript"),
         ]
@@ -234,6 +235,20 @@ fn static_files_table_lists_the_four_files_with_their_media_types() {
     for file in &STATIC_FILES {
         assert!(!file.bytes.is_empty(), "{}", file.path);
     }
+}
+
+#[test]
+fn static_files_the_two_style_sheets_are_the_embedded_bytes_of_their_files() {
+    let app = std::str::from_utf8(APP_CSS_BYTES).unwrap();
+    let components = std::str::from_utf8(COMPONENTS_CSS_BYTES).unwrap();
+    assert!(app.contains(":root"));
+    assert!(!components.contains("@font-face"));
+    let served: Vec<&[u8]> = STATIC_FILES
+        .iter()
+        .filter(|file| file.path.ends_with(".css"))
+        .map(|file| file.bytes)
+        .collect();
+    assert_eq!(served, [APP_CSS_BYTES, COMPONENTS_CSS_BYTES]);
 }
 
 #[test]

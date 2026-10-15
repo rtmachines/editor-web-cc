@@ -2,9 +2,28 @@
 
 use async_trait::async_trait;
 use recipe_domain::plant::{MachineId, PlcType, PlcTypeId, PlcTypeRecord, TypeName};
+use recipe_domain::recipe::{ParameterTag, ReferenceNumber, VersionStatus};
 
 use super::RowImage;
 use crate::error::StorageError;
+
+/// One parameter that uses a type revision (`TypeCatalog::type_usage`).
+///
+/// The type solves one problem: both adapters must return the same five columns of a row.
+/// A struct names them, so the adapters agree on their order and their meaning.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TypeUsageRow {
+    /// The reference number of the recipe.
+    pub reference: ReferenceNumber,
+    /// The number of the version.
+    pub number: u32,
+    /// The status of the version. A live draft has the status `Draft`.
+    pub status: VersionStatus,
+    /// The tag of the parameter.
+    pub tag: ParameterTag,
+    /// The type of the parameter. It holds the revision that the request names.
+    pub parameter_type: PlcTypeId,
+}
 
 /// One class-2 advisory lock key of a derived type (`data-model.md` section 1.4).
 ///
@@ -59,6 +78,29 @@ pub trait TypeCatalog: Send {
     ///
     /// The use case builds `PlatformTypes::collect` from the result.
     async fn type_rows(&mut self, machine: MachineId) -> Result<Vec<PlcType>, StorageError>;
+
+    /// Read one page of the parameters that use the type `type_id` without a lock (`GetTypeUsage`).
+    ///
+    /// A parameter uses the type when its type is `type_id`. It also uses the type when its
+    /// type holds `type_id` through a member or an array element, on any level.
+    /// The result has one row for each parameter, also when its type holds `type_id` twice.
+    /// The rows come from the recipes of `machine` that are not deleted.
+    /// They come from the versions that are not discarded.
+    /// The rows come in the byte order of the reference number, then the newest version first,
+    /// then in the byte order of the tag.
+    /// The page starts after `offset` rows and holds at most `limit` rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Other` (`E-DB-008`) when `offset` is above `i64::MAX`.
+    /// Both adapters return this error and never an empty list for such an offset.
+    async fn type_usage(
+        &mut self,
+        machine: MachineId,
+        type_id: PlcTypeId,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<TypeUsageRow>, StorageError>;
 
     /// Run `pg_advisory_xact_lock(2, hashtext(machine_id || ':' || name))` for each key.
     ///

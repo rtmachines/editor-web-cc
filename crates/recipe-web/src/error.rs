@@ -15,6 +15,7 @@ use recipe_domain::error_codes::ErrorCode;
 mod answer;
 mod layer;
 mod log;
+mod plant;
 mod reason;
 mod retry;
 mod status;
@@ -54,6 +55,44 @@ impl fmt::Display for ByteLimit {
     }
 }
 
+/// The input of a member row that a field error names (`WebError::BadRow`).
+///
+/// The type solves one problem: the error line of a row must name the row and link to the right
+/// input. A row has two inputs, so the error holds which one failed. The label comes from the key
+/// `udt-member-name` or `udt-member-type`. The link goes to `#members-<row>-name` or
+/// `#members-<row>-type`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowField {
+    /// The name of the member.
+    Name,
+    /// The type of the member.
+    Type,
+}
+
+impl RowField {
+    /// Return the key of the label in the bundles. The label takes the number of the row.
+    pub(crate) const fn label_key(self) -> &'static str {
+        match self {
+            Self::Name => "udt-member-name",
+            Self::Type => "udt-member-type",
+        }
+    }
+
+    /// Return the last part of the `id` of the input: `name` or `type`.
+    pub(crate) const fn id_suffix(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Type => "type",
+        }
+    }
+}
+
+impl fmt::Display for RowField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.id_suffix())
+    }
+}
+
 /// The error of a handler or a layer of `recipe-web`.
 ///
 /// The type solves one problem: one error type maps to the HTTP answer, so no handler builds an
@@ -76,6 +115,19 @@ pub enum WebError {
         /// The name of the field. It is a fixed name in the code, never typed text.
         field: &'static str,
         /// Why the field is not valid. The page shows the text of its key in the UI language.
+        reason: FieldReason,
+    },
+    /// A field of one member row is not valid (`E-WEB-008`).
+    ///
+    /// The error line shows the label of the field with the number of the row. It links to the
+    /// input of that row.
+    #[error("Field {field} of member row {row} is not valid: {reason}.")]
+    BadRow {
+        /// The index of the row, counted from 0, as in `members[<row>].name`.
+        row: u16,
+        /// The input of the row that is not valid.
+        field: RowField,
+        /// Why the input is not valid. The page shows the text of its key in the UI language.
         reason: FieldReason,
     },
     /// The CSRF token or the origin of a mutating request is not valid (`E-WEB-007`).
@@ -101,7 +153,7 @@ impl WebError {
         match self {
             Self::App(error) => error.code(),
             Self::PayloadTooLarge { .. } => ErrorCode::WEB_003,
-            Self::BadRequest { .. } => ErrorCode::WEB_008,
+            Self::BadRequest { .. } | Self::BadRow { .. } => ErrorCode::WEB_008,
             Self::CsrfRejected => ErrorCode::WEB_007,
             Self::ReadOnlyMode => ErrorCode::WEB_006,
             Self::Internal { .. } => ErrorCode::WEB_010,
@@ -133,6 +185,12 @@ impl IntoResponse for WebError {
 pub(crate) use view::FieldLine;
 #[cfg(test)]
 mod fragment_tests;
+#[cfg(test)]
+mod plant_args_tests;
+#[cfg(test)]
+mod push_url_tests;
+#[cfg(test)]
+mod row_field_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

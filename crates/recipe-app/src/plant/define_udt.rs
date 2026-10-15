@@ -238,7 +238,8 @@ fn member_error(
 /// Resolve the tree of the new struct over the rows and the new row.
 ///
 /// The check finds a cycle through existing structs (`E-PLT-005`) and a tree above a size limit
-/// (`E-PLT-018`).
+/// (`E-PLT-018`). It then compares the struct names on each path, so a struct cannot hold an
+/// earlier revision of itself (ADR-0038).
 fn check_tree(
     derived: &DerivedTypes,
     (machine, platform): (MachineId, PlcPlatform),
@@ -247,8 +248,7 @@ fn check_tree(
     let mut rows = derived.rows().to_vec();
     rows.push(row.clone());
     let types = PlatformTypes::collect(machine, platform, rows)?;
-    TypeTree::resolve(row.id(), &types)?;
-    Ok(())
+    TypeTree::resolve(row.id(), &types)?.check_struct_names()
 }
 
 #[cfg(test)]

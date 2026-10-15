@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use recipe_domain::error_codes::ErrorCode;
 
-use super::{AppSettings, Blocking};
+use super::{AppSettings, Blocking, PageSizes};
 use crate::error::{AppError, TaskStage, TimeoutStage};
 
 const SHORT: Duration = Duration::from_millis(20);
@@ -150,4 +150,15 @@ fn defaults_follow_section_7_11() {
         Blocking::new(Duration::from_secs(10), Duration::from_secs(10))
     );
     assert!(settings.approval_policy.separation_of_duties);
+}
+
+#[test]
+fn page_sizes_default_to_100_rows_each() {
+    let expected = PageSizes {
+        machines: 100,
+        type_usage: 100,
+    };
+
+    assert_eq!(PageSizes::default(), expected);
+    assert_eq!(AppSettings::default().pages, expected);
 }

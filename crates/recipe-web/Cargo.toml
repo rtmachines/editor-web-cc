@@ -34,3 +34,9 @@ tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 [lints]
 workspace = true
+
+# Design D15 of the change web-plant-model: the dev server for the test in a browser.
+# `test = true` makes `cargo test` run the unit tests of the example.
+[[example]]
+name = "dev_server"
+test = true

@@ -8,12 +8,12 @@ use tower::ServiceExt as _;
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::identity::Role;
 
+use super::matrix::{
+    Endpoint, PRINCIPALS, Want, answer, assert_error, assert_want, endpoint, fill,
+};
 use super::*;
 use crate::csrf::issue_pre_session;
-use crate::test_support::{
-    Fixture, PEER, Reply, TestSession, call, cookie_pair, deactivate_user, get_with, post_fields,
-    post_pre_session, request, state,
-};
+use crate::test_support::{Fixture, PEER, call, cookie_pair, request, state};
 
 const BODY_LIMIT: usize = 64 * 1024;
 
@@ -87,76 +87,42 @@ fn routes_static_file_has_no_operation() {
 
 // --- Endpoint x role (task 6.9, design D19) ------------------------------------------------------
 
-/// The password of every seeded account.
-const PASSWORD: &str = "correct horse battery";
-/// The password of `PASSWORD` as a form value.
-const PASSWORD_FIELD: &str = "correct+horse+battery";
 /// The host of the test requests.
 const HOST: &str = "recipes.plant.local";
 /// The origin of the foreign-origin requests.
 const FOREIGN_ORIGIN: &str = "https://evil.example";
 
-/// The six principals of design D19.
-#[derive(Clone, Copy, Debug)]
-enum Principal {
-    /// A request without a session cookie.
-    NoSession,
-    /// A session of an Administrator.
-    Administrator,
-    /// A session of a ProcessEngineer.
-    ProcessEngineer,
-    /// A session of an Operator.
-    Operator,
-    /// A session of a user with `must_change_password`.
-    MustChange,
-    /// The session of a user who was deactivated after the session started.
-    Deactivated,
-}
-
-/// The principals in the order of the columns of `matrix`.
-const PRINCIPALS: [Principal; 6] = [
-    Principal::NoSession,
-    Principal::Administrator,
-    Principal::ProcessEngineer,
-    Principal::Operator,
-    Principal::MustChange,
-    Principal::Deactivated,
-];
-
-/// The expected answer of one cell of the matrix.
-#[derive(Clone, Copy, Debug)]
-enum Want {
-    /// `200` with the page or the fragment.
-    Page,
-    /// `303` to `/login`. A page request without a valid session gets it (`E-WEB-004`).
-    Login,
-    /// `303` to `/me/password`. A user with `must_change_password` gets it (`E-IDN-007`).
-    Password,
-    /// `303` to `/recipes`. A command without `HX-Request` gets it after success.
-    Recipes,
-    /// `401` with the code in the body.
-    Unauthorized(&'static str),
-    /// `403` with `E-WEB-002` in the body. The role has no permission.
-    Forbidden,
-    /// `409` with the code in the body.
-    Conflict(&'static str),
-}
-
-/// One endpoint of the matrix with a form body that the endpoint accepts.
-struct Endpoint {
-    method: Method,
-    path: &'static str,
-    body: &'static str,
-}
-
-fn endpoint(method: Method, path: &'static str, body: &'static str) -> Endpoint {
-    Endpoint { method, path, body }
-}
-
-/// The matrix of `api.md` sections 2.1 and 2.8. Each row holds the answer of each principal.
+/// The rows of the matrix: the rows of P3.1 and the rows of the three areas of design D12.
+///
+/// The types of the matrix live in `routes::matrix`, so the test modules of the areas can build
+/// their own rows.
 fn matrix() -> Vec<(Endpoint, [Want; 6])> {
+    let mut rows = p31_matrix();
+    rows.extend(pages::machines::route_tests::route_rows());
+    rows.extend(pages::units::route_tests::route_rows());
+    rows.extend(pages::types::route_tests::route_rows());
+    rows
+}
+
+/// The number of the rows of `rows` that send a mutating method.
+fn mutating_rows(rows: &[(Endpoint, [Want; 6])]) -> usize {
+    rows.iter()
+        .filter(|(endpoint, _wants)| crate::csrf::is_mutating(&endpoint.method))
+        .count()
+}
+
+/// The matrix of `api.md` sections 2.1 and 2.8, the rows of step P3.1. Each row holds the answer
+/// of each principal.
+fn p31_matrix() -> Vec<(Endpoint, [Want; 6])> {
+    let mut rows = p31_session_rows();
+    rows.extend(p31_user_rows());
+    rows.extend(p31_own_rows());
+    rows
+}
+
+/// The rows of P3.1 for the login, the logout, the language, and the recipe list.
+fn p31_session_rows() -> Vec<(Endpoint, [Want; 6])> {
     use Want::*;
-    let manage = [Login, Page, Forbidden, Forbidden, Password, Login];
     let own = [Login, Page, Page, Page, Password, Login];
     vec![
         (endpoint(Method::GET, "/login", ""), [Page; 6]),
@@ -177,6 +143,14 @@ fn matrix() -> Vec<(Endpoint, [Want; 6])> {
             [Recipes; 6],
         ),
         (endpoint(Method::GET, "/recipes", ""), own),
+    ]
+}
+
+/// The rows of P3.1 for the user list, the user form, the user page, and the user commands.
+fn p31_user_rows() -> Vec<(Endpoint, [Want; 6])> {
+    use Want::*;
+    let manage = [Login, Page, Forbidden, Forbidden, Password, Login];
+    vec![
         (endpoint(Method::GET, "/users", ""), manage),
         (endpoint(Method::GET, "/users/new", ""), manage),
         (
@@ -208,6 +182,14 @@ fn matrix() -> Vec<(Endpoint, [Want; 6])> {
             manage,
         ),
         (endpoint(Method::POST, "/users/{login}/unlock", ""), manage),
+    ]
+}
+
+/// The rows of P3.1 for the own profile and the own password.
+fn p31_own_rows() -> Vec<(Endpoint, [Want; 6])> {
+    use Want::*;
+    let own = [Login, Page, Page, Page, Password, Login];
+    vec![
         (endpoint(Method::GET, "/me", ""), own),
         (
             endpoint(Method::GET, "/me/password", ""),
@@ -222,92 +204,6 @@ fn matrix() -> Vec<(Endpoint, [Want; 6])> {
             [Login, Recipes, Recipes, Recipes, Recipes, Login],
         ),
     ]
-}
-
-/// The login of the account that a principal uses. `NoSession` logs in as the Administrator.
-fn login_of(principal: Principal) -> &'static str {
-    match principal {
-        Principal::NoSession | Principal::Administrator => "user1",
-        Principal::ProcessEngineer => "user2",
-        Principal::Operator => "user3",
-        Principal::MustChange => "user4",
-        Principal::Deactivated => "user5",
-    }
-}
-
-/// Build a fixture with five accounts that share `PASSWORD`, and the session of `principal`.
-async fn world(principal: Principal) -> (Fixture, Option<TestSession>) {
-    let fixture = Fixture::new();
-    fixture.seed_account(1, Role::Administrator, PASSWORD, false);
-    fixture.seed_account(2, Role::ProcessEngineer, PASSWORD, false);
-    fixture.seed_account(3, Role::Operator, PASSWORD, false);
-    fixture.seed_account(4, Role::Administrator, PASSWORD, true);
-    fixture.seed_account(5, Role::Administrator, PASSWORD, false);
-    let session = match principal {
-        Principal::NoSession => None,
-        Principal::Administrator => Some(fixture.session_of(1)),
-        Principal::ProcessEngineer => Some(fixture.session_of(2)),
-        Principal::Operator => Some(fixture.session_of(3)),
-        Principal::MustChange => Some(fixture.session_of(4)),
-        Principal::Deactivated => {
-            let session = fixture.session_of(5);
-            deactivate_user(&fixture, "user5").await;
-            Some(session)
-        }
-    };
-    (fixture, session)
-}
-
-/// Send the request of `endpoint` as `principal` and return the answer.
-///
-/// The login sends its own pre-session token. Each other mutating request sends the session token
-/// of the principal, and a `GET` sends the session cookie only. The path `{login}` names `user2`.
-async fn answer(endpoint: &Endpoint, principal: Principal) -> Reply {
-    let (fixture, session) = world(principal).await;
-    let router = fixture.router();
-    let path = endpoint.path.replace("{login}", "user2");
-    let cookies: Vec<(&str, &str)> = session
-        .iter()
-        .map(|session| ("cookie", session.cookie.as_str()))
-        .collect();
-    if endpoint.method == Method::POST && endpoint.path == "/login" {
-        let fields = format!("login={}&password={PASSWORD_FIELD}", login_of(principal));
-        return post_pre_session(&fixture, &path, &fields, &cookies).await;
-    }
-    if endpoint.method == Method::POST && endpoint.path == "/lang" {
-        return post_pre_session(&fixture, &path, endpoint.body, &cookies).await;
-    }
-    if endpoint.method == Method::GET {
-        return get_with(&router, &path, &cookies).await;
-    }
-    post_fields(&router, &path, session.as_ref(), &[], endpoint.body).await
-}
-
-fn assert_redirect(reply: &Reply, location: &str, what: &str) {
-    assert_eq!(
-        reply.status,
-        StatusCode::SEE_OTHER,
-        "{what}: {}",
-        reply.body
-    );
-    assert_eq!(reply.header("location"), location, "{what}");
-}
-
-fn assert_error(reply: &Reply, status: StatusCode, code: &str, what: &str) {
-    assert_eq!(reply.status, status, "{what}: {}", reply.body);
-    assert!(reply.body.contains(code), "{what}: {}", reply.body);
-}
-
-fn assert_want(reply: &Reply, want: Want, what: &str) {
-    match want {
-        Want::Page => assert_eq!(reply.status, StatusCode::OK, "{what}: {}", reply.body),
-        Want::Login => assert_redirect(reply, "/login", what),
-        Want::Password => assert_redirect(reply, "/me/password", what),
-        Want::Recipes => assert_redirect(reply, "/recipes", what),
-        Want::Forbidden => assert_error(reply, StatusCode::FORBIDDEN, "E-WEB-002", what),
-        Want::Unauthorized(code) => assert_error(reply, StatusCode::UNAUTHORIZED, code, what),
-        Want::Conflict(code) => assert_error(reply, StatusCode::CONFLICT, code, what),
-    }
 }
 
 #[tokio::test]
@@ -331,6 +227,7 @@ fn expected_routes() -> Vec<(String, &'static str)> {
         .collect();
     routes.push(("GET".to_owned(), "/static/htmx.min.js"));
     routes.push(("GET".to_owned(), "/static/app.css"));
+    routes.push(("GET".to_owned(), "/static/components.css"));
     routes.push(("GET".to_owned(), "/static/row-version.js"));
     routes.push(("GET".to_owned(), "/static/tree.js"));
     routes.extend(
@@ -369,6 +266,59 @@ fn route_coverage_table_holds_the_routes_of_the_matrix_and_the_static_file() {
         .collect();
     listed.sort();
     assert_eq!(listed, expected_routes());
+}
+
+/// The method and the path of each row, as pairs.
+fn keys_of(rows: &[RouteEntry]) -> Vec<(String, &'static str)> {
+    rows.iter()
+        .map(|row| (row.method.to_string(), row.path))
+        .collect()
+}
+
+#[test]
+fn routes_table_collects_the_rows_of_each_area() {
+    let listed = keys_of(&table());
+    let areas = [
+        ("machines", pages::machines::rows()),
+        ("units", pages::units::rows()),
+        ("types", pages::types::rows()),
+    ];
+    for (area, rows) in &areas {
+        for key in keys_of(rows) {
+            assert!(listed.contains(&key), "{area}: {key:?} is not in the table");
+        }
+    }
+    let area_rows: usize = areas.iter().map(|(_area, rows)| rows.len()).sum();
+    let static_rows = expected_routes().len().checked_sub(matrix().len()).unwrap();
+    let parts = [static_rows, p31_matrix().len(), area_rows];
+    assert_eq!(listed.len(), parts.iter().sum::<usize>());
+}
+
+#[test]
+fn routes_matrix_collects_the_rows_of_each_area() {
+    let keys: Vec<(String, &'static str)> = matrix()
+        .iter()
+        .map(|(endpoint, _wants)| (endpoint.method.to_string(), endpoint.path))
+        .collect();
+    let areas = [
+        ("machines", pages::machines::route_tests::route_rows()),
+        ("units", pages::units::route_tests::route_rows()),
+        ("types", pages::types::route_tests::route_rows()),
+    ];
+    for (area, rows) in &areas {
+        for (endpoint, _wants) in rows {
+            let key = (endpoint.method.to_string(), endpoint.path);
+            assert!(keys.contains(&key), "{area}: {key:?} is not in the matrix");
+        }
+    }
+    let area_rows: usize = areas.iter().map(|(_area, rows)| rows.len()).sum();
+    let expected = p31_matrix().len().checked_add(area_rows).unwrap();
+    assert_eq!(matrix().len(), expected);
+}
+
+#[test]
+fn routes_the_rows_of_p31_hold_ten_mutating_rows() {
+    assert_eq!(mutating_rows(&p31_matrix()), 10);
 }
 
 /// The four defects of design D19 for one mutating request.
@@ -465,6 +415,33 @@ fn bad_request(
     builder.body(Body::from(body)).unwrap()
 }
 
+/// Send `bad` and assert `403 E-WEB-007`, one `csrf_rejected` event, and no change of the data.
+async fn assert_csrf_rejected(fixture: &Fixture, router: &Router, bad: Request<Body>, what: &str) {
+    let events_before = fixture.sink.events().len();
+    let state_before = format!("{:?}", fixture.store.state());
+    let audit_before = fixture.store.audit_entries().len();
+    let reply = call(router, bad).await;
+    assert_error(&reply, StatusCode::FORBIDDEN, "E-WEB-007", what);
+    let events = fixture.sink.events();
+    assert_eq!(
+        events.len(),
+        events_before.checked_add(1).unwrap(),
+        "{what}"
+    );
+    assert!(
+        events
+            .last()
+            .is_some_and(|event| event.kind() == SecurityEventKind::CsrfRejected),
+        "{what}"
+    );
+    assert_eq!(
+        format!("{:?}", fixture.store.state()),
+        state_before,
+        "{what}"
+    );
+    assert_eq!(fixture.store.audit_entries().len(), audit_before, "{what}");
+}
+
 #[tokio::test]
 async fn route_coverage_each_mutating_route_rejects_four_bad_requests() {
     let fixture = Fixture::new();
@@ -476,9 +453,9 @@ async fn route_coverage_each_mutating_route_rejects_four_bad_requests() {
         .filter(|row| crate::csrf::is_mutating(&row.method))
         .map(|row| (row.method, row.path))
         .collect();
-    assert_eq!(mutating.len(), 10);
+    assert_eq!(mutating.len(), mutating_rows(&matrix()));
     for (method, template) in mutating {
-        let path = template.replace("{login}", "user2");
+        let path = fill(template);
         let pre_mode = path == "/login" || path == "/lang";
         let (own, other) = if pre_mode {
             (&credentials.pre, &credentials.other_pre)
@@ -492,30 +469,8 @@ async fn route_coverage_each_mutating_route_rejects_four_bad_requests() {
             Defect::NoOriginNoMetadata,
         ] {
             let what = format!("{method} {path} {defect:?}");
-            let events_before = fixture.sink.events().len();
-            let state_before = format!("{:?}", fixture.store.state());
-            let audit_before = fixture.store.audit_entries().len();
             let bad = bad_request(method.clone(), &path, pre_mode, defect, own, other);
-            let reply = call(&router, bad).await;
-            assert_error(&reply, StatusCode::FORBIDDEN, "E-WEB-007", &what);
-            let events = fixture.sink.events();
-            assert_eq!(
-                events.len(),
-                events_before.checked_add(1).unwrap(),
-                "{what}"
-            );
-            assert!(
-                events
-                    .last()
-                    .is_some_and(|event| event.kind() == SecurityEventKind::CsrfRejected),
-                "{what}"
-            );
-            assert_eq!(
-                format!("{:?}", fixture.store.state()),
-                state_before,
-                "{what}"
-            );
-            assert_eq!(fixture.store.audit_entries().len(), audit_before, "{what}");
+            assert_csrf_rejected(&fixture, &router, bad, &what).await;
         }
     }
 }
@@ -537,7 +492,7 @@ async fn route_coverage_a_patch_to_a_listed_path_stops_before_any_handler() {
         .map(|row| row.path)
         .collect();
     for template in paths {
-        let path = template.replace("{login}", "user2");
+        let path = fill(template);
         let what = format!("PATCH {path}");
         let events_before = fixture.sink.events().len();
         let state_before = format!("{:?}", fixture.store.state());

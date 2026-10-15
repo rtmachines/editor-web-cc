@@ -1,9 +1,13 @@
-//! Tests that keep `static/app.css` equal to `docs/architecture/design-system.md` (design D4).
+//! Tests that keep `static/app.css` and `static/components.css` equal to
+//! `docs/architecture/design-system.md` (design D4, ADR-0037 r).
 //!
-//! The token test compares each token table with the one `:root` block. The contrast test computes
-//! the WCAG 2.2 ratio of each pair of section 4. The rule tests live in `rules`.
+//! The token test compares each token table with the one `:root` block of `app.css`. The contrast
+//! test computes the WCAG 2.2 ratio of each pair of section 4. The rule tests of the base rules live
+//! in `rules` and `review_rules`. The rule tests of the components live in `component_rules`.
 
+mod component_rules;
 mod css;
+mod fix_rules;
 mod review_rules;
 mod rules;
 
@@ -11,12 +15,28 @@ use css::{Rule, collapse, contrast_ratio, parse_sheet, parse_tables};
 
 /// The design system document.
 const DESIGN: &str = include_str!("../../../docs/architecture/design-system.md");
-/// The style sheet.
+/// The base style sheet. A page links it first.
 const APP_CSS: &str = include_str!("../static/app.css");
+/// The component style sheet. A page links it second.
+const COMPONENTS_CSS: &str = include_str!("../static/components.css");
 
-/// Read the style sheet.
-fn sheet() -> Vec<Rule> {
+/// Read the base style sheet.
+fn app_sheet() -> Vec<Rule> {
     parse_sheet(APP_CSS).unwrap()
+}
+
+/// Read the component style sheet.
+fn components_sheet() -> Vec<Rule> {
+    parse_sheet(COMPONENTS_CSS).unwrap()
+}
+
+/// Read both style sheets as one list of rules, in the order that a page links them.
+///
+/// A rule of the components comes after a rule of the base, as in the browser.
+fn sheet() -> Vec<Rule> {
+    let mut rules = app_sheet();
+    rules.extend(components_sheet());
+    rules
 }
 
 /// Return the custom properties of the one `:root` block, in source order.
@@ -48,7 +68,7 @@ fn documented_tokens() -> Vec<(String, String)> {
 fn tokens_every_documented_token_equals_the_root_value_in_document_order() {
     let documented = documented_tokens();
     assert!(documented.len() > 60, "found {} rows", documented.len());
-    let actual = root_tokens(&sheet());
+    let actual = root_tokens(&app_sheet());
     for (name, value) in &documented {
         let found = actual.iter().find(|(other, _value)| other == name);
         assert_eq!(found.map(|(_name, v)| v), Some(value), "{name}");
@@ -59,7 +79,7 @@ fn tokens_every_documented_token_equals_the_root_value_in_document_order() {
 #[test]
 fn tokens_every_root_property_has_a_row_in_a_token_table() {
     let documented = documented_tokens();
-    for (name, _value) in root_tokens(&sheet()) {
+    for (name, _value) in root_tokens(&app_sheet()) {
         assert!(
             documented.iter().any(|(other, _value)| *other == name),
             "{name} has no row"
@@ -78,7 +98,7 @@ fn tokens_the_document_has_no_duplicate_token_row() {
 
 #[test]
 fn contrast_every_pair_of_section_4_reaches_its_minimum() {
-    let root = root_tokens(&sheet());
+    let root = root_tokens(&app_sheet());
     let color = |name: &str| -> String {
         root.iter()
             .find(|(other, _value)| other == name)

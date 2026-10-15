@@ -11,9 +11,9 @@ use crate::context::AppContext;
 use crate::error::StorageError;
 use crate::memory::fixtures::Fixture;
 use crate::ports::{
-    AttemptRepository, AuditWritten, DraftRepository, InsertedMachine, Isolation, Locked, NonEmpty,
-    PlantRepository, RecipeRepository, RowImage, SessionRepository, Transaction, TypeCatalog,
-    UnitLookup, UnitOfWork, UserRepository,
+    AttemptRepository, AuditWritten, DraftRepository, InsertedMachine, Isolation, Locked,
+    MachineFilter, MachineSummary, NonEmpty, PlantRepository, RecipeRepository, RowImage,
+    SessionRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
 };
 
 /// A unit of work whose transactions drop the last row image of `insert_machine` and `archive_units`.
@@ -95,6 +95,18 @@ impl PlantRepository for ShortRowsTransaction {
 
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError> {
         self.inner.plant().machine_by_id(id).await
+    }
+
+    async fn list_machines(
+        &mut self,
+        filter: &MachineFilter,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<MachineSummary>, StorageError> {
+        self.inner
+            .plant()
+            .list_machines(filter, offset, limit)
+            .await
     }
 
     async fn lock_machine_shared(

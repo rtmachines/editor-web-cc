@@ -10,6 +10,22 @@ use crate::pages::{PageRequest, Texts};
 /// The page that the language switch of the login page returns to.
 const LOGIN_PATH: &str = "/login";
 
+/// The value of `HX-Target` that asks for the content answer: the `id` of `main`.
+const CONTENT_TARGET: &str = "content";
+
+/// The shape of the answer of a page route (design D6, ADR-0037 w).
+///
+/// The type solves one problem: a boosted link or form moves to a new page and swaps only `main`.
+/// The answer must not repeat the skip link and the top bar. One value tells `base.html` which
+/// shape to write, and the heading macro reads it to move the focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Shape {
+    /// The full page: the skip link, the top bar, and `main`.
+    Page,
+    /// The content of `main`, the `title` element, and the field `next` of the language switch.
+    Content,
+}
+
 /// A page that the navigation links to.
 ///
 /// The type solves one problem: the navigation must show a link exactly when the use case of the
@@ -19,6 +35,8 @@ const LOGIN_PATH: &str = "/login";
 pub(crate) enum NavTarget {
     /// The recipe list, `/recipes`.
     Recipes,
+    /// The machine list, `/machines`. Every page below `/machines` marks this link as current.
+    Machines,
     /// The user list, `/users`.
     Users,
     /// The own profile, `/me`.
@@ -26,13 +44,14 @@ pub(crate) enum NavTarget {
 }
 
 impl NavTarget {
-    /// Every target, in the order of the top bar.
-    const ALL: [Self; 3] = [Self::Recipes, Self::Users, Self::Me];
+    /// Every target, in the order of the top bar (ADR-0037 q).
+    const ALL: [Self; 4] = [Self::Recipes, Self::Machines, Self::Users, Self::Me];
 
     /// Return the path of the page.
     pub(crate) const fn path(self) -> &'static str {
         match self {
             Self::Recipes => "/recipes",
+            Self::Machines => "/machines",
             Self::Users => "/users",
             Self::Me => "/me",
         }
@@ -42,6 +61,7 @@ impl NavTarget {
     pub(crate) const fn text_key(self) -> &'static str {
         match self {
             Self::Recipes => "nav-recipes",
+            Self::Machines => "nav-machines",
             Self::Users => "nav-users",
             Self::Me => "nav-me",
         }
@@ -51,6 +71,7 @@ impl NavTarget {
     pub(crate) const fn operation(self) -> Operation {
         match self {
             Self::Recipes => Operation::ListRecipes,
+            Self::Machines => Operation::ListMachines,
             Self::Users => Operation::ListUsers,
             Self::Me => Operation::GetOwnProfile,
         }
@@ -115,13 +136,15 @@ pub(crate) struct Layout<'a> {
     pub(crate) next: Option<String>,
     /// The success sentence for `#toast`, or `None`.
     pub(crate) toast: Option<String>,
+    /// The shape of the answer: the full page or the content of `main`.
+    pub(crate) shape: Shape,
 }
 
 impl<'a> Layout<'a> {
     /// Build the layout of a page with a session.
     ///
     /// `current` marks the navigation link of the page. The switch appears only when the
-    /// request is a `GET`.
+    /// request is a `GET`. An HTMX request with `HX-Target: content` gets the content shape.
     ///
     /// # Errors
     ///
@@ -134,6 +157,11 @@ impl<'a> Layout<'a> {
     ) -> Result<Self, WebError> {
         let auth = request.auth()?;
         let user = auth.user();
+        let shape = if request.is_htmx() && request.hx_target() == Some(CONTENT_TARGET) {
+            Shape::Content
+        } else {
+            Shape::Page
+        };
         Ok(Self {
             lang: request.lang(),
             title,
@@ -144,6 +172,7 @@ impl<'a> Layout<'a> {
             user_login: Some(user.login().to_string()),
             next: request.path_and_query().map(str::to_owned),
             toast: None,
+            shape,
         })
     }
 
@@ -168,7 +197,13 @@ impl<'a> Layout<'a> {
             user_login: None,
             next: None,
             toast: None,
+            shape: Shape::Page,
         }
+    }
+
+    /// Return true when the answer is the content of `main` and not the full page.
+    pub(crate) const fn is_content(&self) -> bool {
+        matches!(self.shape, Shape::Content)
     }
 
     /// Return the layout with the success sentence for `#toast`.

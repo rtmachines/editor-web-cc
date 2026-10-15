@@ -2,16 +2,26 @@
 
 use async_trait::async_trait;
 use recipe_app::error::StorageError;
-use recipe_app::ports::{DerivedTypeLock, Ensured, RowImage, TypeCatalog};
-use recipe_domain::plant::{MachineId, PlcType, PlcTypeRecord};
+use recipe_app::ports::{DerivedTypeLock, Ensured, RowImage, TypeCatalog, TypeUsageRow};
+use recipe_domain::plant::{MachineId, PlcType, PlcTypeId, PlcTypeRecord};
 
 use super::PgTransaction;
-use super::type_rows;
+use super::{type_rows, type_usage};
 
 #[async_trait]
 impl TypeCatalog for PgTransaction {
     async fn type_rows(&mut self, machine: MachineId) -> Result<Vec<PlcType>, StorageError> {
         type_rows::rows(&mut self.tx, machine).await
+    }
+
+    async fn type_usage(
+        &mut self,
+        machine: MachineId,
+        type_id: PlcTypeId,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<TypeUsageRow>, StorageError> {
+        type_usage::usage(&mut self.tx, machine, type_id, offset, limit).await
     }
 
     async fn lock_derived_types(

@@ -1,0 +1,2 @@
+{#- The one h1 of a page (design D10). Only the content answer gets tabindex and autofocus, so HTMX moves the focus to the new heading after the swap. A full page keeps the plain h1. -#}
+{%- macro h1(layout, text) -%}<h1{% if layout.is_content() %} tabindex="-1" autofocus{% endif %}>{{ text }}</h1>{%- endmacro -%}

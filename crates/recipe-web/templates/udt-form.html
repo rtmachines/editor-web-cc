@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% import "components/alert.html" as alerts %}
+{% import "components/heading.html" as headings %}
+{% import "components/rows.html" as repeated %}
+{% block content %}
+{% if row_focus %}<h1>{{ title }}</h1>{% else %}{{ headings::h1(layout, title) }}{% endif %}
+<form method="post" action="{{ action }}" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
+{% if !revision %}<div class="field"><label for="type_name">{{ t.get("field-type-name") }} <span class="field-required">{{ t.get("form-required") }}</span></label><span class="field-hint" id="type_name-hint">{{ t.get("udt-name-hint") }}</span><input id="type_name" name="name" type="text" class="data" autocapitalize="none" spellcheck="false" maxlength="64" autocomplete="off" aria-required="true" aria-describedby="type_name-hint" value="{{ type_name }}"></div>
+{% endif %}<fieldset id="members"><legend>{{ t.get("field-members") }}</legend>
+<span class="field-hint" id="udt-type-hint">{{ t.get("udt-type-hint") }}</span>
+{% for row in rows %}{{ repeated::member_row(t, row.index, row.number, row.name, row.type_text, row.focus) }}
+{% endfor %}<datalist id="type-choices">{% for choice in choices %}<option value="{{ choice }}">{% endfor %}</datalist>
+<span class="field-hint">{{ t.get("udt-empty-rows-hint") }}</span>
+</fieldset>
+<div class="actions">{% if at_max %}{{ alerts::notice("info", t.get("udt-max-rows")) }}{% else %}<button type="submit" name="add" value="1" class="btn btn-secondary">{{ t.get("udt-add-member") }}</button>{% endif %}
+<button type="submit" class="btn btn-primary">{% if revision %}{{ t.get("udt-revision-submit") }}{% else %}{{ t.get("udt-create-submit") }}{% endif %}</button></div>
+</form>
+<p><a class="target-link" href="{{ list_href }}">{{ list_text }}</a></p>
+{% endblock %}

@@ -1,5 +1,6 @@
 //! Contract cases of `list` and `summary_by_login` of `UserRepository` (design D9).
 
+use recipe_app::error::StorageError;
 use recipe_app::ports::Transaction;
 use recipe_domain::identity::Role;
 
@@ -78,6 +79,17 @@ async fn list_pages_count_from_zero(h: &dyn Harness) {
     assert!(past_the_end.is_empty());
 }
 
+async fn list_with_an_offset_above_i64_max_is_a_storage_error(h: &dyn Harness) {
+    let mut tx = seeded(h).await;
+
+    let beyond = tx.users().list(None, u32::MAX, u32::MAX).await;
+
+    assert!(matches!(
+        beyond.unwrap_err(),
+        StorageError::Other { sqlstate: None, .. }
+    ));
+}
+
 async fn summary_by_login_gives_the_columns_of_the_query(h: &dyn Harness) {
     let user = new_user("akowal", Role::ProcessEngineer);
     seed_user(h.unit_of_work().as_ref(), &user).await;
@@ -116,6 +128,11 @@ contract_case!(
     list_pages_count_from_zero,
     list_pages_count_from_zero_memory,
     list_pages_count_from_zero_postgres
+);
+contract_case!(
+    list_with_an_offset_above_i64_max_is_a_storage_error,
+    list_with_an_offset_above_i64_max_is_a_storage_error_memory,
+    list_with_an_offset_above_i64_max_is_a_storage_error_postgres
 );
 contract_case!(
     summary_by_login_gives_the_columns_of_the_query,

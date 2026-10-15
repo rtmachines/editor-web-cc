@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/table.html" as tables %}
+{% block content %}
+{{ headings::h1(layout, title) }}
+{% if let Some(href) = new_href %}<p class="actions"><a class="target-link" href="{{ href }}">{{ t.get("types-new-link") }}</a></p>
+{% endif %}{% call tables::frame("types-caption", t.get("types-caption")) %}<thead><tr>{{ tables::head(t.get("column-name")) }}{{ tables::head(t.get("column-revision")) }}{{ tables::head(t.get("column-members")) }}{{ tables::head(t.get("column-state")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(4, t.get("types-empty")) }}{% else %}<tbody>
+{% for row in rows %}<tr><td class="data"><a href="{{ row.href }}">{{ row.name }}</a></td><td class="num">{{ row.revision }}</td><td class="num">{{ row.members }}</td><td>{% if row.latest %}{{ t.get("type-latest") }}{% endif %}</td></tr>
+{% endfor %}</tbody>
+{% endif %}{% endcall %}
+<p><a class="target-link" href="{{ machine_href }}">{{ machine_text }}</a></p>
+{% endblock %}

@@ -6,47 +6,19 @@
 use axum::http::StatusCode;
 use recipe_domain::identity::Role;
 
-use super::sweep_tests::PAGES;
+use super::sweep_tests::{get_page_patterns, path_of};
 use crate::components_tests::assert_fixed_svg_tags;
 use crate::pages::test_helpers::{
-    assert_clean_html, assert_no_user_text_in_hx_attributes, field_value,
+    askama_escape, assert_clean_html, assert_no_user_text_in_hx_attributes, encode, field_value,
+    payloads,
 };
 use crate::test_support::{Fixture, Reply, TestSession, get_with, post_fields, post_pre_session};
 
-/// The payloads of the corpus file, one per line. A line that starts with `#` is a comment.
-const CORPUS: &str = include_str!("../../tests/web/xss-corpus.txt");
-/// A payload with a NUL character. A text file cannot hold it, so the test adds it.
-const NUL_PAYLOAD: &str = "\u{0}<script>alert(1)</script>";
 /// The markup that a payload brings into a page. A page holds none of it.
 ///
 /// An `<svg` tag is not in the list. A page may hold the fixed icon tags of `design-system.md`
 /// section 8, so `assert_fixed_svg_tags` checks each `<svg` instead (design D10).
 const FORBIDDEN_MARKUP: [&str; 3] = ["<img", "onerror=", "onload="];
-
-/// Return the payloads of the corpus file and the NUL payload.
-fn payloads() -> Vec<String> {
-    let mut payloads: Vec<String> = CORPUS
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
-        .collect();
-    payloads.push(NUL_PAYLOAD.to_owned());
-    payloads
-}
-
-/// Percent-encode every byte that is not an unreserved character, so a payload fits a form or a path.
-fn encode(text: &str) -> String {
-    text.bytes()
-        .map(|byte| {
-            if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
-                char::from(byte).to_string()
-            } else {
-                format!("%{byte:02X}")
-            }
-        })
-        .collect()
-}
 
 /// Assert that an answer holds no markup of `payload` (design D19).
 ///
@@ -81,17 +53,40 @@ const RAW_QUERY_PAYLOADS: [&str; 6] = [
     "a&b=(c)",
     "javascript:alert(1)",
 ];
-/// The route patterns whose handler has a `Query` extractor. A foreign query name is an error there.
-const PATTERNS_WITH_QUERY_EXTRACTOR: [&str; 1] = ["/users"];
 /// The route pattern of the login page. It needs no session and keeps no query in the field `next`.
 const LOGIN_PATTERN: &str = "/login";
+/// A query key that no page lists. A page with a `Query` extractor refuses it.
+const FOREIGN_KEY: &str = "x";
 
-/// Return the pattern and the path of every GET page that accepts any query (`sweep_tests::PAGES`).
-fn query_pages() -> Vec<(&'static str, &'static str)> {
-    PAGES
-        .into_iter()
-        .filter(|(pattern, _path)| !PATTERNS_WITH_QUERY_EXTRACTOR.contains(pattern))
-        .collect()
+/// Return `path` with the query `key=value` appended.
+pub(super) fn with_query(path: &str, key: &str, value: &str) -> String {
+    let separator = if path.contains('?') { '&' } else { '?' };
+    format!("{path}{separator}{key}={value}")
+}
+
+/// Return the pattern and the path of every GET page of the route table that accepts any query.
+///
+/// The function solves one problem: a page without a `Query` extractor writes its whole URI into
+/// the field `next` of the language switch, so the corpus must reach that field on each such page.
+/// A fixed list would go stale when a page changes. So the function reads the rows of `table()` and
+/// sends the key `x` to each GET page. A page with a `Query` extractor answers `422`. A page
+/// without one answers `200`, and it joins the list. Any other answer fails the test.
+pub(super) async fn query_pages(
+    fixture: &Fixture,
+    session: &TestSession,
+) -> Vec<(&'static str, String)> {
+    let mut found = Vec::new();
+    for pattern in get_page_patterns() {
+        let path = path_of(pattern).unwrap();
+        let probe = with_query(&path, FOREIGN_KEY, "1");
+        let reply = get_query_page(fixture, session, pattern, &probe).await;
+        let known = [StatusCode::OK, StatusCode::UNPROCESSABLE_ENTITY];
+        assert!(known.contains(&reply.status), "{probe}: {}", reply.status);
+        if reply.status == StatusCode::OK {
+            found.push((pattern, path));
+        }
+    }
+    found
 }
 
 /// Send `GET path` as the session, or without a session for the login page.
@@ -108,20 +103,6 @@ async fn get_query_page(
         &cookie
     };
     get_with(&fixture.router(), path, headers).await
-}
-
-/// Escape a text like askama does in an HTML attribute (`&`, `<`, `>`, `"`, and `'`).
-fn askama_escape(text: &str) -> String {
-    text.chars()
-        .map(|c| match c {
-            '&' => "&#38;".to_owned(),
-            '<' => "&#60;".to_owned(),
-            '>' => "&#62;".to_owned(),
-            '"' => "&#34;".to_owned(),
-            '\'' => "&#39;".to_owned(),
-            other => other.to_string(),
-        })
-        .collect()
 }
 
 /// Assert that a page shows `path` escaped in the field `next` and holds no markup of `payload`.
@@ -159,18 +140,22 @@ async fn xss_next_field_of_the_switch_escapes_a_quote_of_the_query() {
 #[tokio::test]
 async fn xss_next_field_of_the_switch_escapes_the_raw_bytes_of_a_query() {
     let (fixture, session) = administrator();
-    for (pattern, page) in query_pages() {
+    fixture.seed_plant();
+    for (pattern, page) in query_pages(&fixture, &session).await {
         for payload in RAW_QUERY_PAYLOADS {
-            let path = format!("{page}?x={payload}");
+            let path = with_query(&page, FOREIGN_KEY, payload);
             let reply = get_query_page(&fixture, &session, pattern, &path).await;
             assert_reflected_safely(&reply, pattern, &path, payload);
         }
     }
 }
 
-#[test]
-fn xss_the_query_pages_are_every_page_without_a_query_extractor() {
-    let patterns: Vec<&str> = query_pages().iter().map(|(pattern, _)| *pattern).collect();
+#[tokio::test]
+async fn xss_the_query_pages_are_every_get_page_of_the_table_without_a_query_extractor() {
+    let (fixture, session) = administrator();
+    fixture.seed_plant();
+    let found = query_pages(&fixture, &session).await;
+    let patterns: Vec<&str> = found.iter().map(|(pattern, _path)| *pattern).collect();
     assert_eq!(
         patterns,
         [
@@ -179,7 +164,12 @@ fn xss_the_query_pages_are_every_page_without_a_query_extractor() {
             "/me/password",
             "/recipes",
             "/users/new",
-            "/users/{login}"
+            "/users/{login}",
+            "/machines/new",
+            "/machines/by-id/{uuid}",
+            "/machines/{code}/units",
+            "/machines/{code}/units/{path}",
+            "/machines/{code}/types",
         ]
     );
 }
@@ -187,9 +177,11 @@ fn xss_the_query_pages_are_every_page_without_a_query_extractor() {
 #[tokio::test]
 async fn xss_corpus_in_the_query_of_the_pages_is_escaped() {
     let (fixture, session) = administrator();
+    fixture.seed_plant();
+    let pages = query_pages(&fixture, &session).await;
     for payload in payloads() {
-        for (pattern, page) in query_pages() {
-            let path = format!("{page}?x={}", encode(&payload));
+        for (pattern, page) in &pages {
+            let path = with_query(page, FOREIGN_KEY, &encode(&payload));
             let reply = get_query_page(&fixture, &session, pattern, &path).await;
             assert_reflected_safely(&reply, pattern, &path, &payload);
             assert!(!reply.body.contains(&payload), "{path}");

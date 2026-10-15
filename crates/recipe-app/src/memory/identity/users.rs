@@ -6,6 +6,7 @@ use recipe_domain::timestamp::Timestamp;
 
 use super::images::user_image;
 use crate::error::{APP_USER_LOGIN_UNIQUE, StorageError};
+use crate::memory::plant::check_offset;
 use crate::memory::rows::{duplicate, missing_row};
 use crate::memory::{LockMode, MemoryTransaction};
 use crate::ports::{Locked, NewUser, RowImage, UserRepository, UserRow, UserSummary};
@@ -173,11 +174,12 @@ impl UserRepository for MemoryTransaction {
             .filter(|row| filter.is_none_or(|text| row.login.as_str().contains(text)))
             .collect();
         rows.sort_by(|left, right| left.login.cmp(&right.login));
+        let offset = u64::from(page)
+            .checked_mul(u64::from(page_size))
+            .ok_or_else(|| StorageError::invariant("the page offset has no product"))?;
+        check_offset(offset)?;
         let size = usize::try_from(page_size).unwrap_or(usize::MAX);
-        let skipped = usize::try_from(page)
-            .ok()
-            .and_then(|number| number.checked_mul(size))
-            .unwrap_or(usize::MAX);
+        let skipped = usize::try_from(offset).unwrap_or(usize::MAX);
         Ok(rows
             .into_iter()
             .skip(skipped)

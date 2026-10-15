@@ -1,0 +1,4 @@
+{% import "components/tree.html" as trees %}
+<ul class="tree">
+{% call trees::unit_node(t, id, path, name, href, add_href, expanded, focus, archived) %}{{ trees::unit_leaf(t, leaf_path, leaf_name, leaf_href, leaf_add_href, leaf_focus, leaf_archived) }}{% endcall %}
+</ul>

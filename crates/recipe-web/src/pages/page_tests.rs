@@ -63,9 +63,15 @@ pub(super) fn assert_layout(body: &str, lang: Lang, code: &str) {
     assert!(body.contains("<meta name=\"htmx-config\""));
 }
 
-/// Assert the style sheet, the three scripts, and no inline style.
+/// Assert the two style sheets in their order, the three scripts, and no inline style.
 pub(super) fn assert_assets(body: &str) {
-    assert!(body.contains("<link rel=\"stylesheet\" href=\"/static/app.css\">"));
+    let app = at(body, "<link rel=\"stylesheet\" href=\"/static/app.css\">");
+    let components = at(
+        body,
+        "<link rel=\"stylesheet\" href=\"/static/components.css\">",
+    );
+    assert!(app < components, "app.css comes first: {body}");
+    assert_eq!(body.matches("<link").count(), 2, "{body}");
     assert_eq!(body.matches("<script").count(), 3, "{body}");
     let positions: Vec<usize> = SCRIPTS.iter().map(|tag| at(body, tag)).collect();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
@@ -231,7 +237,7 @@ fn link(path: &str, current: bool, word: &str) -> String {
 }
 
 #[tokio::test]
-async fn page_nav_of_an_operator_has_recipes_and_account_and_no_users() {
+async fn page_nav_of_an_operator_has_recipes_machines_and_account_and_no_users() {
     let fixture = Fixture::new();
     let session = fixture.seed_session(2, Role::Operator, false);
     for (lang, code) in LANGS {
@@ -240,6 +246,7 @@ async fn page_nav_of_an_operator_has_recipes_and_account_and_no_users() {
         let label = text(lang, "nav-label");
         assert!(nav.starts_with(&format!(" aria-label=\"{label}\"><ul class=\"nav-list\">")));
         assert!(nav.contains(&link("/recipes", false, &text(lang, "nav-recipes"))));
+        assert!(nav.contains(&link("/machines", false, &text(lang, "nav-machines"))));
         assert!(nav.contains(&link("/me", true, &text(lang, "nav-me"))));
         assert!(!nav.contains("/users"), "{nav}");
         assert_eq!(nav.matches("aria-current").count(), 1);
@@ -247,19 +254,31 @@ async fn page_nav_of_an_operator_has_recipes_and_account_and_no_users() {
 }
 
 #[tokio::test]
-async fn page_nav_of_an_administrator_has_three_links_in_order() {
+async fn page_nav_of_an_administrator_has_four_links_in_order() {
     let (fixture, session) = administrator();
     let reply = get_page(&fixture, Some(&session), "en", "/me").await;
     let nav = nav_of(&reply.body);
     let positions = [
         at(&nav, &link("/recipes", false, "Recipes")),
+        at(&nav, &link("/machines", false, "Machines")),
         at(&nav, &link("/users", false, "Users")),
         at(&nav, &link("/me", true, "My account")),
     ];
-    assert!(
-        positions[0] < positions[1] && positions[1] < positions[2],
-        "{nav}"
-    );
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{nav}");
+}
+
+#[tokio::test]
+async fn page_nav_marks_the_machine_list_as_current_on_the_machine_list() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(2, Role::ProcessEngineer, false);
+    for (lang, code) in LANGS {
+        let reply = get_page(&fixture, Some(&session), code, "/machines").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let nav = nav_of(&reply.body);
+        let word = text(lang, "nav-machines");
+        assert!(nav.contains(&link("/machines", true, &word)), "{nav}");
+        assert_eq!(nav.matches("aria-current").count(), 1, "{nav}");
+    }
 }
 
 #[tokio::test]
@@ -306,7 +325,11 @@ async fn page_switch_on_the_user_list_sends_next_with_the_query_and_the_token() 
         switch.contains(" method=\"post\" action=\"/lang\""),
         "{switch}"
     );
-    assert!(switch.contains("<input type=\"hidden\" name=\"next\" value=\"/users?q=ab\">"));
+    assert!(
+        switch.contains(
+            "<input type=\"hidden\" id=\"lang-next\" name=\"next\" value=\"/users?q=ab\">"
+        )
+    );
     let token = format!(
         "<input type=\"hidden\" name=\"csrf_token\" value=\"{}\">",
         session.csrf
@@ -331,7 +354,9 @@ async fn page_switch_on_the_login_page_sends_the_nonce_of_the_cookie() {
         cookie.starts_with(&format!("__Host-recipe_csrf={nonce}.")),
         "{cookie}"
     );
-    assert!(switch.contains("<input type=\"hidden\" name=\"next\" value=\"/login\">"));
+    assert!(
+        switch.contains("<input type=\"hidden\" id=\"lang-next\" name=\"next\" value=\"/login\">")
+    );
     assert!(!switch.contains("csrf_token"));
     assert_eq!(
         field_value(&reply.body.replace(&switch, ""), "csrf_pre"),
@@ -419,7 +444,9 @@ async fn page_switch_after_a_failed_login_keeps_the_nonce_of_the_new_cookie() {
         cookie.starts_with(&format!("__Host-recipe_csrf={nonce}.")),
         "{cookie}"
     );
-    assert!(switch.contains("<input type=\"hidden\" name=\"next\" value=\"/login\">"));
+    assert!(
+        switch.contains("<input type=\"hidden\" id=\"lang-next\" name=\"next\" value=\"/login\">")
+    );
     assert!(!switch.contains("csrf_token"));
 }
 

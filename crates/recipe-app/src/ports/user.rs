@@ -163,6 +163,11 @@ pub trait UserRepository: Send {
     ///
     /// A `filter` keeps the logins that contain it as plain text, so `_` is no wildcard.
     /// `page` counts from 0 and each page holds `page_size` rows.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Other` (`E-DB-008`) when `page * page_size` is above `i64::MAX`.
+    /// The SQL adapter and the memory adapter both return it.
     async fn list(
         &mut self,
         filter: Option<&str>,

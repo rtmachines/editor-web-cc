@@ -295,6 +295,8 @@ async fn error_mapping_htmx_error_retargets_the_error_panel() {
             "{case}"
         );
         assert_eq!(answer.header("hx-redirect"), "", "{case}");
+        // Design D17 (U3): a refused form keeps the URL of its page.
+        assert_eq!(answer.header("hx-push-url"), "false", "{case}");
     }
 }
 
@@ -304,6 +306,7 @@ async fn error_mapping_full_page_without_hx_request() {
     assert_eq!(answer.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(answer.header("hx-retarget"), "");
     assert_eq!(answer.header("hx-reswap"), "");
+    assert_eq!(answer.header("hx-push-url"), "");
     assert!(
         answer.body.starts_with("<!DOCTYPE html>"),
         "{}",
@@ -418,6 +421,7 @@ async fn error_mapping_no_session_redirects_htmx_with_a_header() {
     assert_eq!(answer.header("hx-redirect"), "/login");
     assert_eq!(answer.header("hx-retarget"), "");
     assert_eq!(answer.header("hx-reswap"), "");
+    assert_eq!(answer.header("hx-push-url"), "");
     assert_eq!(answer.header("location"), "");
 }
 
