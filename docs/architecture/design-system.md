@@ -2,7 +2,7 @@
 
 Status: Accepted (design stage, 2026-10-14)
 Source of requirements: `general-draft.txt` (R10, R36, R39, R40), A44
-Related: `overview.md`, `api.md`, `reliability.md`, ADR-0001, ADR-0012, ADR-0013, ADR-0015, ADR-0036
+Related: `overview.md`, `api.md`, `reliability.md`, ADR-0001, ADR-0012, ADR-0013, ADR-0015, ADR-0036, ADR-0037
 
 ## 1. Scope
 
@@ -12,6 +12,13 @@ The values live in `crates/recipe-web/static/app.css` as CSS custom properties o
 
 - The token test compares each row of each token table with the custom property of `app.css` that has the same name.
 - The contrast test computes the WCAG contrast ratio of each row of section 4 from the values of `app.css`. A ratio below the minimum of its row fails the test.
+
+The style rules live in two style sheets (ADR-0037):
+
+- `static/app.css` holds the tokens, the fonts, the base elements, the targets, and the focus. It also holds the page layout, the top bar, and the base rules of the fields and the buttons. It holds the utilities `.actions`, `.target-link`, `.data`, and `.htmx-indicator` too.
+- `static/components.css` holds the components of sections 10.4 and 10.6 to 10.11. It also holds the parts of section 10.5 that step P3.2 adds. These are the select, the checkbox, the list proposals, the repeated rows, and the danger disclosure.
+
+Every full page links `app.css` first and `components.css` second. Only `app.css` holds `:root`.
 
 The UI meets WCAG 2.2 level AA (A44).
 
@@ -194,7 +201,7 @@ The px values apply to the default root size of 16 px.
 
 ## 6. Spacing and layout
 
-The use column gives typical uses. A rule of `app.css` can use a space token in another place.
+The use column gives typical uses. A rule of a style sheet can use a space token in another place.
 
 | Token | Value | Use |
 |---|---|---|
@@ -284,15 +291,15 @@ Every icon tag is fixed and complete. `<name>` is the name of the icon in the ic
 |---|---|---|
 | `status-draft` | Version state `Draft` | Pencil |
 | `status-approved` | Version state `Approved` | Check mark in a circle |
-| `status-retired` | Version state `Retired` | Archive box |
+| `status-retired` | Version state `Retired`. State "Archived" of a machine or a unit (section 9) | Archive box |
 | `user-active` | Active user | Check mark in a circle |
 | `user-inactive` | Inactive user | Slashed circle |
 | `alert-error` | Error message | Octagon with an exclamation mark |
 | `alert-warning` | Warning message | Triangle with an exclamation mark |
 | `alert-info` | Information message | Circle with the letter i |
 | `alert-success` | Success message | Check mark |
-| `tree-collapsed` | Collapsed tree node | Chevron that points right |
-| `tree-expanded` | Expanded tree node | Chevron that points down |
+| `tree-collapsed` | Collapsed tree node. Closed danger disclosure (section 10.5) | Chevron that points right |
+| `tree-expanded` | Expanded tree node. Open danger disclosure (section 10.5) | Chevron that points down |
 
 ## 9. States
 
@@ -305,6 +312,7 @@ The word key is the message id of the word in the `fluent` bundles `pl` and `en`
 | `Retired` | `status-retired` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
 | User active | `user-status-active` | `--color-success-fg`, `--color-success-bg`, `--color-success-edge` | `user-active` |
 | User inactive | `user-status-inactive` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `user-inactive` |
+| Archived machine or unit | `status-archived` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
 
 | Feedback | Tokens | Icon |
 |---|---|---|
@@ -335,12 +343,19 @@ Every full page uses one layout (ADR-0036). The regions come in this order:
 - The full error page shows the top bar with the application name only, because the error layer runs before the session layer. It has no navigation and no language switch.
 - The `main` of the full error page holds the error in `#error-panel` and the `h1` of section 10.6. Then it shows one link to `/recipes` with a text from the bundles.
 
+Answers to HTMX (ADR-0037):
+
+- An HTMX request with `HX-Target: content` gets the content of `main` and the `title` element. The answer also updates the field `next` of the language switch out of band.
+- The `h1` of that answer has `tabindex="-1"` and `autofocus`, so the focus moves to the new heading. A full page has no `autofocus` on its `h1`.
+- Another HTMX request gets the fragment of its target. A request without `HX-Request` gets the full page.
+
 ### 10.2 Navigation
 
 - The navigation is a `nav` element. It holds a list of links.
 - The accessible name of the `nav` is the word "Main" from the bundles. A screen reader therefore does not say "navigation" twice.
 - The navigation shows a link only when the catalog row of the query of the target page allows the role. `Operation::requirement().allows(role)` of `recipe-app` gives the answer.
-- The queries are `ListRecipes` for `/recipes`, `ListUsers` for `/users`, and `GetOwnProfile` for `/me`. `authorize` uses the same row, so the navigation and the permission check cannot disagree.
+- The queries are `ListRecipes` for `/recipes`, `ListMachines` for `/machines`, `ListUsers` for `/users`, and `GetOwnProfile` for `/me`. `authorize` uses the same row, so the navigation and the permission check cannot disagree.
+- The links come in this order: recipes, machines, users, own profile (ADR-0037).
 - The use case of the target page still checks the permission (ADR-0013).
 - The link of the current page has `aria-current="page"`. It shows the ground `--color-topbar-hover`, a bottom border of `--edge-current` in `--color-on-action`, and the weight 700.
 - Hover: the ground `--color-topbar-hover`. Focus: section 7.
@@ -382,6 +397,19 @@ Form field:
 - An input has the ground `--color-surface`, the border `--color-border`, and the text size `--text-base`. An input for data uses `--font-mono`.
 - An input for data also has `autocapitalize="none"` and `spellcheck="false"`. A touch keyboard then does not change the first letter of a login or a code.
 - A disabled input has the ground `--color-sunken` and the text `--color-text-muted`.
+- A `select` has the look of an input. Each `option` text comes from the bundles or is data.
+- A checkbox stands inside its `label`. The `label` is the target of `--target` and keeps the gap `--target-gap` to the next target.
+- A text input with a list of proposals uses a `datalist` and `autocomplete="off"`. The `list` attribute names a fixed `id`. The proposals are data. Typing stays the main way to enter a value, because the browser draws the list rows.
+- Two forms of one page can have a field with one name. Then the `id` of each input and the name of each field error use a name of the form, for example `machine_name` and `unit_name` (ADR-0037).
+
+Repeated rows (ADR-0037):
+
+- A list of rows, for example the members of a UDT, is one `fieldset` with a `legend` and the `id` of the list name, for example `members`.
+- Each row is a group of inputs with the row number in its label. The row number starts at 1.
+- The input of the indexed field `members[i].name` has the `id` `members-<i>-name`. The index `i` starts at 0.
+- A field error of a row names the row number and the field, for example "Name of member 3". The line links to the input of that row.
+- A field error of the whole list names the list. The line links to the first input of the list.
+- A form that adds a row gives the first input of the new row the attribute `autofocus`.
 
 Field errors (ADR-0036):
 
@@ -399,6 +427,7 @@ Buttons:
 - A secondary button has the ground `--color-surface`, the text `--color-action`, and the border `--color-border`.
 - A danger button has the ground `--color-surface`, the text `--color-error-fg`, and the border `--color-error-edge`.
 - A form has at most one primary button.
+- A danger action that the system cannot undo, for example an archive, stands inside a `details` element. Its `summary` names the action and is a target of `--target`. The `summary` shows the icon `tree-collapsed` or `tree-expanded` for the closed or the open state. The danger button inside names the object, for example the machine code.
 - A disabled button has the attribute `disabled`, the ground `--color-sunken`, the text `--color-text-muted`, and the border `--color-border`.
 - Every button shows a word. An icon in a button stands next to the word.
 
@@ -449,14 +478,27 @@ The unit tree and the type tree use the disclosure pattern of WAI-ARIA, not the 
 - The tree is a set of nested lists. No element has `role="tree"` or `role="treeitem"`.
 - The root list of a tree has the class `tree`, because `tree.js` reacts only inside `.tree`.
 - Each node with children is a `button` with `aria-expanded` and `aria-controls`. `aria-controls` names the `id` of the group, the list of its children.
-- The `id` of a group is a fixed prefix and the UUID of the unit or the type.
+- The `id` of a group of the unit tree is a fixed prefix and the UUID of the unit. One type can occur twice in a type tree. So a group of the type tree adds a hyphen and the index of the node in preorder to its `id` (ADR-0037).
 - A collapsed group has the attribute `hidden`.
 - The button shows the icon `tree-collapsed` or `tree-expanded` next to the words of the node.
 - A node without children has no `aria-expanded`.
 - The unit path of a node uses `--font-mono`.
 - Click, Enter, and Space work through the native button. Tab moves the focus between the nodes.
 - `tree.js` toggles `aria-expanded` of the button and the attribute `hidden` of the group. It finds the group with `document.getElementById`. The focus stays on the button.
-- In step P3.2, HTMX loads the children of a node.
+- The server renders the whole tree. No request loads the children of a node (ADR-0037).
+- A group indents its nodes by `--space-4`. Five levels then fit a width of 320 CSS px.
+
+The unit tree (ADR-0037):
+
+- The button of a node shows the icon and the unit path. The link next to it shows the unit name and opens the unit page.
+- A leaf shows the unit path and the link.
+- Each row is a flex row. Its button, its link, and its link "Add a sub-unit" keep the gap `--target-gap`. Two rows keep the gap `--space-4`, so a row that wraps at a small width still reads as one group (ADR-0037 (c)).
+- Each link of a row has the class `.target-link`. The button has no fixed width.
+- A row wraps at a small width. The unit path does not break inside.
+- The nodes of depth 1 and 2 are expanded. The ancestors of the focus unit are also expanded. The link of the focus unit has the attribute `autofocus`.
+- A user with `UnitManage` gets the link "Add a sub-unit" on each live node of depth 1 to 4. Its `aria-label` names the unit path.
+- The form that the link "Add a sub-unit" loads has an `h2` with the parent path. Its first input has the attribute `autofocus`.
+- An archived unit shows the state "Archived" of section 9.
 
 ### 10.9 Status badge
 
@@ -480,7 +522,7 @@ The unit tree and the type tree use the disclosure pattern of WAI-ARIA, not the 
 
 ## 11. Motion and user preferences
 
-- No rule of `app.css` sets an animation or a transition.
+- No rule of a style sheet sets an animation or a transition.
 - The rules for `.htmx-indicator` live in `app.css` (`api.md` section 9). They change only `opacity`.
 - A rule for `forced-colors: active` keeps every border and the focus outline. An element with a colored ground also has a border, so its shape stays visible. Where the border must not show in normal mode, its color is `transparent`.
 - In forced-colors mode, the bottom border of the current navigation link and of the current language button stays visible (sections 10.2 and 10.3).
@@ -490,7 +532,7 @@ The unit tree and the type tree use the disclosure pattern of WAI-ARIA, not the 
 
 `api.md` section 9 gives the rules for scripts, `hx-*` attributes, and the filter `|safe`. ADR-0012 gives the rules for UI text. This section adds these rules only:
 
-- A template gets its look only from the classes of `app.css`. A rule of `app.css` uses a font family, a text size, or a space only through its token.
+- A template gets its look only from the classes of the two style sheets of section 1. A rule of a style sheet uses a font family, a text size, or a space only through its token.
 - A rule outside `:root` names a color only through its token. The only other color values are `transparent`, `currentColor`, and the system colors of forced-colors mode.
 - These system colors are `Canvas`, `CanvasText`, `LinkText`, `ButtonText`, `ButtonBorder`, `Highlight`, `HighlightText`, and `GrayText`.
 - No template holds a literal word (ADR-0036). A test removes the askama tags and the markup of each template and finds no letter.

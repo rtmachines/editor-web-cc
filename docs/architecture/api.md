@@ -37,6 +37,8 @@ No path value holds an S7 address.
 
 Exemption from the `E-WEB-005` rule. `E-WEB-005 NotFound` is for an unknown `{ref}`, `{n}`, `{code}`, or `{login}`, a malformed `{key}` (not a UUID), and a `{key}` or `{lang}` of a version that does not exist. `E-RCP-051 ParameterNotFound` and `E-RCP-050 TranslationNotFound` are for a well-formed `{key}` or `{lang}` that is absent from an existing draft. The draft commands of section 2.6 return them. The two DELETE rows of section 2.6 cite both codes with this rule.
 
+Query values. A query value of a `GET` route can name a resource that the route needs. It then follows the rule of the path value with the same value object, for example `parent_path`, `from`, and `rev` of section 2 (ADR-0037). A query value that only selects a message, such as `archived`, is a request field. A malformed value gives the code of its value object, or `422 E-WEB-008` when the value object has no code.
+
 Request fields. `E-WEB-005` is for URL values only. A request field that names a machine that does not exist returns `404 E-PLT-019 MachineNotFound`, for example `machine_code` of `CreateRecipe`. A request field that names a unit that does not exist returns `404 E-PLT-020 UnitNotFound`, for example `unit_path` of `AddParameter`. A missing parent in `AddUnit` returns `422 E-PLT-003 ParentNotFound`.
 
 Mutating requests use `POST`, `PUT`, or `DELETE`. HTMX sends `PUT` and `DELETE` with `hx-put` and `hx-delete`. Every mutating request carries the CSRF token (section 7). Every mutating request on a `Draft` carries `row_version` (section 4).
@@ -66,25 +68,31 @@ The tables do not repeat these codes. In read-only mode every command route retu
 
 The response body and the response time of `POST /login` are the same for an unknown login, an inactive user, and a wrong password (section 7.4, A42).
 
-Static files. `GET /static/*` serves the files of section 9, `static/app.css`, and the 8 font files of `design-system.md` section 5 under `/static/fonts/`. The route needs no session and has no use case. It is outside the `must_change_password` gate of section 7.4. The response sets `Cache-Control: public, max-age` with the value of `static.cache_max_age` (`reliability.md` 7.11).
+Static files. `GET /static/*` serves the files of section 9, the style sheets `static/app.css` and `static/components.css` (ADR-0037), and the 8 font files of `design-system.md` section 5 under `/static/fonts/`. The route needs no session and has no use case. It is outside the `must_change_password` gate of section 7.4. The response sets `Cache-Control: public, max-age` with the value of `static.cache_max_age` (`reliability.md` 7.11).
 
 ### 2.2 Machines and units
 
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
-| GET | `/machines` | `ListMachines` | `RecipeView` | `q`, `page`, `show_archived` | `200` list of live machines. `show_archived=1` adds the archived machines, each with a link to `/machines/by-id/{uuid}` | - |
+| GET | `/machines` | `ListMachines` | `RecipeView` | `q`, `page`, `show_archived`, optional `archived` | `200` list of live machines, `page.machines` rows per page. `show_archived=1` adds the archived machines, each with a link to `/machines/by-id/{uuid}` | - |
 | GET | `/machines/new` | `GetMachineForm` | `MachineManage` | - | `200` form | - |
 | POST | `/machines` | `CreateMachine` | `MachineManage` | `code`, `name`, `plc_platform`, `main_unit_name` | `303` to `/machines/{code}` | `409 E-PLT-001` |
-| GET | `/machines/{code}` | `GetMachine` | `RecipeView` | - | `200` page of the live machine with this code, with the unit tree | `404 E-WEB-005` |
+| GET | `/machines/{code}` | `GetMachine` | `RecipeView` | optional `archived` | `200` page of the live machine with this code, with the unit tree | `404 E-WEB-005` |
 | GET | `/machines/by-id/{uuid}` | `GetMachine` | `RecipeView` | - | `200` machine page of a live or an archived machine, with the unit tree. Read-only for an archived machine | `404 E-WEB-005` |
-| POST | `/machines/{code}/rename` | `RenameMachine` | `MachineManage` | `name` | `200` fragment | `404 E-WEB-005`, `409 E-PLT-010` |
-| POST | `/machines/{code}/archive` | `ArchiveMachine` | `MachineManage` | CSRF token | `303` to `/machines` | `404 E-WEB-005`, `409 E-PLT-011` |
-| GET | `/machines/{code}/units` | `GetUnitTree` | `RecipeView` | - | `200` unit tree fragment | `404 E-WEB-005` |
+| POST | `/machines/{code}/rename` | `RenameMachine` | `MachineManage` | `name` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010` |
+| POST | `/machines/{code}/archive` | `ArchiveMachine` | `MachineManage` | CSRF token | `303` to `/machines?archived={code}` (ADR-0037) | `404 E-WEB-005`, `409 E-PLT-011` |
+| GET | `/machines/{code}/units` | `GetUnitTree` | `RecipeView` | - | `200` fragment of the whole unit tree. A request without `HX-Request` gets the page of the tree (ADR-0037) | `404 E-WEB-005` |
 | GET | `/machines/{code}/units/new` | `GetUnitForm` | `UnitManage` | optional `parent_path` | `200` form | `404 E-WEB-005` |
-| POST | `/machines/{code}/units` | `AddUnit` | `UnitManage` | `parent_path` (empty for a main unit), `segment`, `name` | `200` tree fragment | `404 E-WEB-005`, `422 E-PLT-002`, `422 E-PLT-003`, `409 E-PLT-004`, `409 E-PLT-009`, `409 E-PLT-010`, `422 E-PLT-017` |
+| POST | `/machines/{code}/units` | `AddUnit` | `UnitManage` | `parent_path` (empty for a main unit), `segment`, `name` | `200` tree fragment with the new unit as the focus unit. A request without `HX-Request` gets `303` to `/machines/{code}` (ADR-0037) | `404 E-WEB-005`, `422 E-PLT-002`, `422 E-PLT-003`, `409 E-PLT-004`, `409 E-PLT-009`, `409 E-PLT-010`, `422 E-PLT-017` |
 | GET | `/machines/{code}/units/{path}` | `GetUnit` | `RecipeView` | - | `200` unit detail | `404 E-WEB-005` |
-| POST | `/machines/{code}/units/{path}/rename` | `RenameUnit` | `UnitManage` | `name` | `200` fragment | `404 E-WEB-005`, `409 E-PLT-009` |
-| POST | `/machines/{code}/units/{path}/archive` | `ArchiveUnit` | `UnitManage` | CSRF token | `200` tree fragment. The unit and its descendants are archived | `404 E-WEB-005`, `409 E-PLT-009`, `409 E-PLT-012`, `409 E-PLT-014`, `409 E-PLT-008` |
+| POST | `/machines/{code}/units/{path}/rename` | `RenameUnit` | `UnitManage` | `name` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}/units/{path}` | `404 E-WEB-005`, `409 E-PLT-009` |
+| POST | `/machines/{code}/units/{path}/archive` | `ArchiveUnit` | `UnitManage` | CSRF token | `303` to `/machines/{code}?archived={path}`. The unit and its descendants are archived (ADR-0037) | `404 E-WEB-005`, `409 E-PLT-009`, `409 E-PLT-012`, `409 E-PLT-014`, `409 E-PLT-008` |
+
+`q` of `ListMachines` is a `Text`. It matches a part of the code or of the name, with no difference between upper and lower case. The rows come in the order of the code number. `page` starts at 1 (ADR-0037).
+
+A malformed `parent_path` of `GetUnitForm` gives the code of `UnitPath` (section 1). A valid `parent_path` of a unit that is not live gives `404 E-WEB-005`. A live parent of depth 5 gives `422 E-PLT-002`, because its child would have six levels.
+
+`archived` holds the code or the unit path of the last archive. The page shows a success message only when the query finds that machine or unit archived (ADR-0037).
 
 `/machines/{code}` and every route under it resolve to the live machine with that code. An archived machine keeps its history at `/machines/by-id/{uuid}`, because a new machine can use its code (A32, ADR-0021).
 
@@ -94,12 +102,16 @@ Static files. `GET /static/*` serves the files of section 9, `static/app.css`, a
 
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
-| GET | `/machines/{code}/types` | `ListTypes` | `RecipeView` | - | `200` list of UDTs, latest revision first | `404 E-WEB-005` |
-| GET | `/machines/{code}/types/new` | `GetUdtForm` | `UdtManage` | - | `200` form | `404 E-WEB-005` |
-| POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type` (a `TypeExpr`) | `303` to the new type | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016`, `422 E-PLT-018`, `422 E-PLT-021` |
+| GET | `/machines/{code}/types` | `ListTypes` | `RecipeView` | - | `200` list of UDTs, one row per revision. Inside one name the latest revision comes first | `404 E-WEB-005` |
+| GET | `/machines/{code}/types/new` | `GetUdtForm` | `UdtManage` | optional `from` (ADR-0037) | `200` form. With `from`, the form of a new revision of `from` with the members of its latest revision | `404 E-WEB-005` |
+| POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type` (a `TypeExpr`), optional `add` (ADR-0037) | `303` to the new type. With `add=1`, the query `GetUdtForm` runs in place of `DefineUdt`. Then `200` with the form, the sent rows, and one more empty row | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016`, `422 E-PLT-018`, `422 E-PLT-021` |
 | GET | `/machines/{code}/types/{name}` | `GetTypeTree` | `RecipeView` | optional `rev` | `200` type tree of the latest revision, or of `rev` | `404 E-WEB-005` |
 | POST | `/machines/{code}/types/{name}/revisions` | `DefineUdt` | `UdtManage` | same as `POST /types`. The server sets `supersedes` | `303` to the new revision | same as `POST /types` |
-| GET | `/machines/{code}/types/{name}/usage` | `GetTypeUsage` | `RecipeView` | optional `rev` | `200` list of recipes and parameters that use the revision, directly or through another type | `404 E-WEB-005` |
+| GET | `/machines/{code}/types/{name}/usage` | `GetTypeUsage` | `RecipeView` | optional `rev`, `page` | `200` list of recipes and parameters that use the revision, directly or through another type. `page.type_usage` rows per page | `404 E-WEB-005` |
+
+A malformed `from` gives `404 E-WEB-005`, as a malformed `{name}` does. A `rev` that is not a revision number, or a revision that does not exist, gives `404 E-WEB-005`. The usage list shows the versions `Draft`, `Approved`, and `Retired` of the recipes that are not deleted (ADR-0037).
+
+The struct name `new` gives `422 E-WEB-008`, because the route `/types/new` would hide the page of the struct (ADR-0037).
 
 A UDT is immutable. A second `POST` creates a new revision (ADR-0006). The usage query is the "where used" view that the rebind workflow needs (ADR-0018).
 
@@ -333,6 +345,7 @@ The same code appears in the structured log of the request. A user can report th
 ### 5.3 Content negotiation
 
 - An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036) for every status `>= 400`, except `E-WEB-004`, which sets `HX-Redirect`. HTMX swaps a 4xx or 5xx fragment only because of the `responseHandling` value of section 9.
+- The same HTMX error response also sets `HX-Push-Url: false`. A refused form with `hx-push-url="true"` then keeps the URL of its page (ADR-0037 (z)).
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
 - The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`.
 

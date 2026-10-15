@@ -1,6 +1,6 @@
 # ADR-0036: Design system and UI foundation
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0037 (style sheets in (h), navigation link in (i), whole unit tree in (n))
 Date: 2026-10-14
 Deciders: project owner
 

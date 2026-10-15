@@ -45,19 +45,22 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0033](0033-globals-dump-of-the-backup.md) | Globals dump of the backup | Accepted | 2026-10-14 |
 | [0034](0034-hardening-of-the-audit-objects.md) | Hardening of the audit objects | Accepted. Amended by ADR-0035 (security_event_guard in the guard list) | 2026-10-14 |
 | [0035](0035-identity-sessions-clarifications.md) | Identity, sessions, and the guard of security events | Accepted | 2026-10-14 |
-| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted | 2026-10-14 |
+| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted. Amended by ADR-0037 (style sheets, navigation link, whole unit tree) | 2026-10-14 |
+| [0037](0037-plant-model-pages.md) | Pages of the plant model | Accepted. Amended by ADR-0038 (datalist of a new revision, browser test of `E-PLT-005`) | 2026-10-14 |
+| [0038](0038-struct-cycle-across-revisions.md) | Struct cycle across revisions | Accepted | 2026-10-15 |
 
 ## Decision map
 
 | Topic | Current ADR |
 |---|---|
-| Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system, fonts, icons, layout) |
-| Design system, accessibility, UI layout | 0036 |
+| Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system, fonts, icons, layout) + 0037 (`hx-boost` forms, two style sheets) |
+| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) |
+| Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) |
 | Export | 0019 |
 | Deployment, migrations, backup, panic policy, health | 0020 + 0031 (migrator configuration, secret files) + 0032 (default databases) + 0033 (globals dump) |
 | Sessions, login, passwords, bootstrap | 0014 + 0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, Origin, client address, create-admin) |
 | Audit log | 0005 + 0022 + 0029 (child rows and source of a full row) + 0034 (audit hardening) + 0035 (security_event guard, LoginUnlocked image) |
-| PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 + 0024 (member names, S7 width) |
+| PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 + 0024 (member names, S7 width) + 0038 (struct cycle across revisions) |
 | Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) + 0026 (ranges of `DATE`, `DATE_AND_TIME`) |
 | Errors of value objects without an own code | 0025 |
 | Error lists, errors of draft commands | 0027 |

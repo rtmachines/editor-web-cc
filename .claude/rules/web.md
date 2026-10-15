@@ -34,7 +34,11 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 - Only three scripts exist: `static/htmx.min.js` (vendored HTMX 2, unchanged), `static/row-version.js` (at most 20 lines), `static/tree.js` (at most 50 lines).
 - Do not add a script, an inline script, an inline style, or an inline event handler.
 - User data never appears in an `hx-*` attribute or in a `<script>` tag.
+- A URL with user data goes into a form `action` or a link `href` with `hx-boost="true"`. Each `hx-*` attribute of a page template holds a literal (ADR-0037).
+- The one exception is `hx-headers` on `<body>` in `base.html`. It holds the CSRF token of the session (api.md §7.3).
+- No URL holds the CSRF token. A form that sends `csrf_token` never sends a `GET` request.
 - Never apply the askama filter `|safe` to a value that is not a literal.
+- The style rules live in `static/app.css` and `static/components.css`. `design-system.md` section 1 says which rule goes into which file.
 
 ## Requests, concurrency, errors (api.md §4, §5, §7)
 
@@ -44,7 +48,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 - Every form on a draft page has the hidden field `row_version`. Every mutating request on a draft sends it.
 - A success sets `HX-Trigger: {"rowVersion": <new>}`. A mismatch gives `409 E-WEB-001` with `conflict.html`.
 - Every error fragment shows its code `E-<CTX>-<nnn>`, one sentence in the UI language, and the `request_id`.
-- An HTMX error response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036).
+- An HTMX error response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036). It also sets `HX-Push-Url: false` (ADR-0037 (z)).
 - Tokens, components, icons, and touch targets come from `docs/architecture/design-system.md`. No page shows a state by color alone.
 - Only `E-WEB-004` (no session or expired session) uses `HX-Redirect: /login` (api.md §5.1).
 - A session with `must_change_password` gets `303` to `/me/password` on every other route (`E-IDN-007`, api.md §7.4).

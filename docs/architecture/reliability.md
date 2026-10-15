@@ -649,6 +649,8 @@ This table is the single source for every numeric setting. The configuration fil
 | `setting.value_max` | 1 000 characters | data-model.md 3.17 |
 | `page.parameters` | 100 rows | api.md 2.6 |
 | `page.users` | 100 rows of `ListUsers` (ADR-0035) | api.md 2.8 |
+| `page.machines` | 100 rows of `ListMachines` (ADR-0037) | api.md 2.2 |
+| `page.type_usage` | 100 rows of `GetTypeUsage` (ADR-0037) | api.md 2.3 |
 | `audit.unlock_rows` | 100. The newest deleted attempts in the row image of `LoginUnlocked` (ADR-0035) | data-model.md 10 |
 | `health.readiness_cache` | 5 s | 7.2 |
 | `health.db_check_timeout` | 2 s | 7.2 |

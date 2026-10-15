@@ -102,7 +102,7 @@ Rules:
 
 - A migration seeds the global primitives. The application creates only derived types through `EnsureDerivedType`. `EnsureDerivedType` returns the existing row when the shape exists.
 - A struct is immutable. An edit of a struct creates a new `PlcType` with `supersedes = Some(old)` and `revision = old.revision + 1`. Parameters that reference the old revision keep it. The domain marks them `outdated_type` (Assumption A29).
-- A struct cannot contain itself, directly or through members (no cycle).
+- A struct cannot contain itself, directly or through members (no cycle). Two revisions of one struct are the same type for this rule (ADR-0038).
 - The member names of a struct are unique. A duplicate name is `E-PLT-021 DuplicateMemberName` (ADR-0024).
 - All member types of a struct MUST exist on every platform of the struct.
 - A derived type MUST exist on the platform of its machine.
@@ -483,7 +483,7 @@ A change of a configuration value, for example `approval.separation_of_duties`, 
 | I5 | An `S7_300` parameter has an address. An `S7_1200` or `S7_1500` parameter may have one. A `CodesysIec` or `TwinCat3` parameter has none | `Draft::add_parameter()` and `Draft::set_definition()` return `S7AddressRequired` or `S7AddressNotAllowed` (ADR-0028) | `CHECK parameter_s7_address_platform` enforces the three cases. Composite FK `parameter_version_platform` copies the platform |
 | I6 | The type of a parameter exists on the platform of the machine | `EnsureDerivedType` returns `E-PLT-013 DerivedTypeInvalid` for a `TypeExpr` that is not on the platform. `DefineUdt` is the exception: it reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform`. `E-RCP-013 TypeNotOnPlatform` is only an item inside `E-RCP-020 ValidationFailed`: the snapshot check reports a stored parameter whose type is no longer on the platform | Trigger function `enforce_type_platform` on `parameter` (`E-PLT-031`, `E-PLT-032`) |
 | I7 | A value matches its type tree and its limits | `ParameterValue::parse(json, &TypeTree)` builds the value. `ParameterValue::check(&TypeTree, &[ProcessLimit])` checks the limits | Not enforced. JSONB is opaque. `CHECK parameter_value_size` bounds the size |
-| I8 | A struct has no cycle | `TypeTree::resolve()` returns `TypeCycle` | Not enforced |
+| I8 | A struct has no cycle. Two revisions of one struct are the same type (ADR-0038) | `TypeTree::resolve()` returns `TypeCycle` for a cycle of identifiers. `DefineUdt` also returns it when a struct name occurs twice on one path of the new tree | Not enforced |
 | I9 | Unit path has 1 to 5 segments, each `1..=64` | `UnitPath::parse()` | `CHECK unit_path_format` |
 | I10 | A unit has its parent in the same machine, and the parent path exists | `Machine::add_unit()` | Composite FK `unit_parent_exists (machine_id, parent_path) REFERENCES unit (machine_id, path)`. `parent_path` is a generated column. There is no `parent_id` column |
 | I11 | `reference_number` is unique. `machine.code` is unique among live machines | Repository returns `DuplicateReference` or `DuplicateMachineCode` | `UNIQUE recipe_reference_unique`. Partial unique index `machine_code_live_unique` on `(code) WHERE archived_at IS NULL` |

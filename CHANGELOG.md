@@ -47,6 +47,17 @@ This file records the notable changes of the recipe editor. The format follows [
 - The askama components for icons, status badges, alerts, notices, form fields, tables, trees, toasts, and the empty state.
 - The query `ListRecipes` of `recipe-app` and the skeleton page `GET /recipes` with the empty state.
 - The type `FieldReason` of `recipe-web`. Field reasons, missing entities, password reasons, task stages, and operation names in error messages come from the bundles.
+- ADR-0037 for the pages of machines, units, and UDT types. It records the whole unit tree, the forms with `hx-boost`, and the member rows of the UDT form. It also records the form of a new revision and the second style sheet.
+- The machine queries `ListMachines`, `GetMachine`, and `GetMachineForm` of `recipe-app`. Each query checks the permission in its first statement.
+- The unit queries `GetUnitTree`, `GetUnitForm`, and `GetUnit` of `recipe-app`.
+- The Plant Model queries `ListTypes`, `GetTypeTree`, `GetUdtForm`, and `GetTypeUsage` of `recipe-app`.
+- The port reads `list_machines` and `type_usage` with an in-memory adapter and a `sqlx` adapter. The settings `page.machines` and `page.type_usage` set the page sizes.
+- The pages of `api.md` section 2.2 in `pl` and `en`. They show the machine list, the machine form, and the machine page. They also show the unit tree, the unit form, and the unit page.
+- The pages of `api.md` section 2.3 in `pl` and `en`: the type list, the UDT form with member rows, the type tree, and the usage page.
+- The style sheet `static/components.css`. It holds the rules of the select, the checkbox, the datalist, the member row, and the pager. It also holds the rules of the tree rows, the archived badge, and the danger disclosure.
+- The example `examples/dev_server.rs` of `recipe-web`. It serves the pages on `127.0.0.1` with the in-memory adapters for a test in a browser.
+- ADR-0038 for a struct cycle across revisions. `DefineUdt` refuses a struct whose type tree holds a struct with the same name.
+- The messages of the Plant Model error codes in `pl` and `en`.
 
 ### Changed
 
@@ -61,6 +72,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - An HTMX error answer sets `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036).
 - A field error line shows the label of the field from the bundles. In an HTMX fragment and on the login page, the line links to its input.
 - The success message of a user command goes into `#toast`. The same answer clears `#error-panel`.
+- `design-system.md` sections 1, 6, 8, 9, 10.1, 10.2, 10.5, 10.8, 11, and 12 hold the decisions of ADR-0037. `api.md` sections 1, 2.1, 2.2, and 2.3 and `reliability.md` section 7.11 hold them too. ADR-0036 has an "Amended by" note.
+- The navigation shows the link to the machines after the link to the recipes. A boosted form or link of a page replaces the content of `main` and the page title.
+- An HTMX error answer sets `HX-Push-Url: false`, so a refused form keeps the URL of its page. `api.md` sections 1 and 5.3 and I8 of `domain-model.md` hold the decisions of ADR-0037 (z) and ADR-0038.
 
 ### Security
 
