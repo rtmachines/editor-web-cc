@@ -1,0 +1,12 @@
+# Configuration of `cargo audit` (nightly job `.github/workflows/audit.yml`).
+# Each ignored advisory has a comment that gives the reason.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071: `rsa` (Marvin Attack). No fixed version exists.
+    # `rsa` enters Cargo.lock only through `sqlx-mysql`. The workspace never
+    # builds `sqlx-mysql`: `cargo tree -i rsa --all-features --target all`
+    # prints nothing. `cargo deny` checks the real graph and keeps no
+    # exception for this advisory, so it fails if `rsa` enters the graph.
+    "RUSTSEC-2023-0071",
+]
