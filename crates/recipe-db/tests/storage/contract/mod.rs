@@ -24,7 +24,9 @@ macro_rules! contract_case {
 }
 
 mod attempts;
+mod audit_reads;
 mod chain;
+mod diff_reads;
 mod draft;
 mod harness;
 mod images;

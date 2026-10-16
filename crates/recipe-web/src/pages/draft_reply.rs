@@ -19,6 +19,8 @@ use crate::state::WebState;
 
 /// The HTMX header that fires an event in the browser after the swap.
 const HX_TRIGGER: HeaderName = HeaderName::from_static("hx-trigger");
+/// The HTMX header that sets the address in the history of the browser.
+const HX_PUSH_URL: HeaderName = HeaderName::from_static("hx-push-url");
 
 /// Build the error of a form with every line and the form with the sent input (ADR-0041 (e)).
 ///
@@ -118,10 +120,40 @@ pub(crate) fn success(
     body: Html<String>,
     request_id: RequestId,
 ) -> Result<Response, WebError> {
-    let trigger = HeaderValue::try_from(format!("{{\"rowVersion\": {}}}", output.row_version))
+    with_row_version(body.into_response(), output.row_version, request_id)
+}
+
+/// Add `HX-Trigger: {"rowVersion": <n>}` with `row_version` to `response` (`api.md` 4).
+///
+/// # Errors
+///
+/// Returns `WebError::Internal` (`E-WEB-010`) when the header value is not valid.
+pub(crate) fn with_row_version(
+    mut response: Response,
+    row_version: i64,
+    request_id: RequestId,
+) -> Result<Response, WebError> {
+    let trigger = HeaderValue::try_from(format!("{{\"rowVersion\": {row_version}}}"))
         .map_err(|_invalid| WebError::Internal { request_id })?;
-    let mut response = body.into_response();
     response.headers_mut().insert(HX_TRIGGER, trigger);
+    Ok(response)
+}
+
+/// Add `HX-Push-Url` with the site path `href` to `response` (ADR-0049 (e)).
+///
+/// A reload then reads the page of `href` and does not send the `POST` again. The header is a
+/// response header, not an `hx-*` attribute (ADR-0037 (f)).
+///
+/// # Errors
+///
+/// Returns `WebError::Internal` (`E-WEB-010`) when the header value is not valid.
+pub(crate) fn with_push_url(
+    mut response: Response,
+    href: &str,
+    request_id: RequestId,
+) -> Result<Response, WebError> {
+    let push = HeaderValue::try_from(href).map_err(|_invalid| WebError::Internal { request_id })?;
+    response.headers_mut().insert(HX_PUSH_URL, push);
     Ok(response)
 }
 

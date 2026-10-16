@@ -10,6 +10,8 @@
  * State: .badge .badge-draft .badge-approved .badge-retired .badge-active .badge-inactive .badge-large .badge-deleted .badge-outdated
  * Feedback: .alert .alert-error .alert-warning .alert-info .alert-success .alert-code .alert-ref .alert-head .field-lines .field-error .field-error-code
  * Leaf grid: .leaf-grid .row-all .grid-note .grid-toggle
+ * Diff: .badge-diff-limit .badge-diff-changed .badge-diff-added .badge-diff-removed .diff-summary .diff-section .diff-limits .diff-value .diff-none
+ * Formatted JSON and cursor pager: .json .pager-end
  */
 
 /* Panel, table, empty state */
@@ -450,7 +452,7 @@ details:not([open]) > summary [data-icon="tree-expanded"] {
   margin-bottom: var(--space-5);
 }
 
-.pager-current {
+.pager-current, .pager-end {
   display: inline-flex;
   align-items: center;
   min-height: var(--target);
@@ -577,10 +579,114 @@ form:has(.leaf-grid) > :not(.tree) {
   margin-left: 0;
 }
 
+/*
+ * Diff (design-system.md 10.13, ADR-0050). The tables stand inside a `.table-wrap` frame. No cell
+ * and no row is sticky, because a sticky cell in a frame that scrolls sideways can hide a focused
+ * control (WCAG 2.4.11). Each state badge is a `.badge` with one of the four classes below. The
+ * tokens come from the table of section 9.
+ */
+
+.badge-diff-limit {
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  border-color: var(--color-error-edge);
+}
+
+.badge-diff-changed {
+  background: var(--color-info-bg);
+  color: var(--color-info-fg);
+  border-color: var(--color-info-edge);
+}
+
+.badge-diff-added {
+  background: var(--color-success-bg);
+  color: var(--color-success-fg);
+  border-color: var(--color-success-edge);
+}
+
+.badge-diff-removed {
+  background: var(--color-retired-bg);
+  color: var(--color-retired-fg);
+  border-color: var(--color-retired-edge);
+}
+
+.diff-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--target-gap);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.diff-summary li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.diff-section {
+  margin-bottom: var(--space-5);
+}
+
+.diff-section h2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.table-wrap.diff-limits {
+  border-color: var(--color-error-edge);
+}
+
+/* The class sets the side of both cells, because the class beats the type selector `th`. */
+
+.diff-value {
+  text-align: right;
+}
+
+td.diff-value {
+  font-family: var(--font-mono);
+}
+
+.diff-none {
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+}
+
+/*
+ * Formatted JSON (design-system.md 10.14, ADR-0051). The text wraps, so a page at 320 CSS px
+ * does not scroll sideways. In a table the column keeps the width of three targets.
+ */
+
+pre.json {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3);
+  background: var(--color-sunken);
+  color: var(--color-text);
+  border: var(--edge) solid var(--color-border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.table-wrap pre.json {
+  margin: 0;
+  min-width: calc(var(--target) * 3);
+}
+
 /* Forced colors */
 
 @media (forced-colors: active) {
   th, .badge, .alert, .toast, .panel, .empty, .table-wrap, .tree-node, fieldset {
+    border-color: ButtonBorder;
+  }
+
+  .table-wrap.diff-limits, pre.json {
     border-color: ButtonBorder;
   }
 }

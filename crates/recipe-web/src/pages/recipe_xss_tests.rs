@@ -8,7 +8,7 @@
 
 use axum::http::StatusCode;
 
-use super::recipe_sweep_tests::{attribute_values, post_endpoints, sweep_pages};
+use super::recipe_sweep_tests::{TOKEN_ONLY_ROUTES, attribute_values, post_endpoints, sweep_pages};
 use super::recipes::test_world::recipe_world;
 use super::xss_tests::with_query;
 use crate::components_tests::assert_fixed_svg_tags;
@@ -494,7 +494,7 @@ fn recipe_xss_the_field_table_names_only_routes_of_the_endpoint_table() {
     }
     for route in &routes {
         assert!(
-            cases().iter().any(|case| case.0 == *route),
+            TOKEN_ONLY_ROUTES.contains(route) || cases().iter().any(|case| case.0 == *route),
             "no field of {route}"
         );
     }

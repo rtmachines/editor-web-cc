@@ -64,6 +64,13 @@ pub(super) struct LimitRecord {
     max_length: Option<i16>,
 }
 
+impl LimitRecord {
+    /// Return the primary key of the parameter that owns the row.
+    pub(super) const fn parameter_id(&self) -> Uuid {
+        self.parameter_id
+    }
+}
+
 /// One `parameter_translation` row.
 #[derive(sqlx::FromRow)]
 pub(super) struct TranslationRecord {
@@ -71,6 +78,13 @@ pub(super) struct TranslationRecord {
     lang: String,
     name: String,
     description: String,
+}
+
+impl TranslationRecord {
+    /// Return the primary key of the parameter that owns the row.
+    pub(super) const fn parameter_id(&self) -> Uuid {
+        self.parameter_id
+    }
 }
 
 /// Build the stored limit of a limit row. A corrupt row gives a storage error.
@@ -107,7 +121,7 @@ pub(super) fn stored_translation(record: &TranslationRecord) -> Result<Translati
 }
 
 /// Group the rows of a child table by the parameter that owns them. The order of rows stays.
-fn group<T, R>(
+pub(super) fn group<T, R>(
     rows: &[R],
     owner: impl Fn(&R) -> Uuid,
     build: impl Fn(&R) -> Result<T, StorageError>,

@@ -5,7 +5,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use std::net::IpAddr;
 
-use recipe_app::ports::{AttemptId, LoginAttemptStore, SessionStore, UnitOfWork};
+use recipe_app::ports::{
+    AttemptId, LoginAttemptStore, SecurityEventSink, SessionStore, UnitOfWork,
+};
 use recipe_db::Database;
 use recipe_db::settings::PoolSettings;
 use recipe_domain::identity::{TypedLogin, UserId};
@@ -24,6 +26,7 @@ pub struct PgHarness {
     unit_of_work: Arc<dyn UnitOfWork>,
     session_store: Arc<dyn SessionStore>,
     login_attempts: Arc<dyn LoginAttemptStore>,
+    security_events: Arc<dyn SecurityEventSink>,
     user: UserId,
 }
 
@@ -48,6 +51,7 @@ impl PgHarness {
             unit_of_work,
             session_store: connected.session_store(),
             login_attempts: connected.login_attempts(),
+            security_events: connected.security_events(),
             user,
         }
     }
@@ -69,6 +73,10 @@ impl Harness for PgHarness {
 
     fn login_attempts(&self) -> Arc<dyn LoginAttemptStore> {
         Arc::clone(&self.login_attempts)
+    }
+
+    fn security_events(&self) -> Arc<dyn SecurityEventSink> {
+        Arc::clone(&self.security_events)
     }
 
     async fn seed_attempts(

@@ -1,6 +1,7 @@
 //! In-memory `RecipeRepository` (task 4.8).
 
 mod build;
+mod diff_reads;
 mod images;
 mod lookup;
 mod parameter_image;

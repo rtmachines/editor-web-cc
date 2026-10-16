@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use recipe_app::ports::{
-    AttemptId, Isolation, LoginAttemptStore, NewUser, NonEmpty, RowImage, SessionStore,
-    Transaction, UnitOfWork,
+    AttemptId, Isolation, LoginAttemptStore, NewUser, NonEmpty, RowImage, SecurityEventSink,
+    SessionStore, Transaction, UnitOfWork,
 };
 use recipe_domain::audit::{
     AuditContext, AuditEntry, AuditTarget, RequestId, RowAction, RowChange,
@@ -82,6 +82,9 @@ pub trait Harness: Send + Sync {
 
     /// The pool-level `LoginAttemptStore` of the adapter (task 5.6).
     fn login_attempts(&self) -> Arc<dyn LoginAttemptStore>;
+
+    /// The `SecurityEventSink` of the adapter. `AuditReads::security_events` reads its rows.
+    fn security_events(&self) -> Arc<dyn SecurityEventSink>;
 
     /// Insert attempts with a fixed time: `ages[i]` seconds before the time of the adapter.
     ///

@@ -14,11 +14,24 @@ use super::state::MemoryState;
 use super::store::{MemoryStore, Shared};
 use crate::error::StorageError;
 use crate::memory::FaultPoint;
+use crate::memory::sink::RecordedEvent;
 use crate::ports::{
-    AttemptRepository, AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository,
-    RecipeReads, RecipeRepository, SessionRepository, Transaction, TypeCatalog, UnitLookup,
-    UserRepository,
+    AttemptRepository, AuditReads, AuditWritten, DiffReads, DraftRepository, Isolation, NonEmpty,
+    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, Transaction, TypeCatalog,
+    UnitLookup, UserRepository,
 };
+
+/// The length of the audit log and of the event list of the sink at the `begin` of a transaction.
+///
+/// The type solves one problem: a read must see one state. It sees the entries and events that
+/// were committed when it began, together with the labels and users of its copy of the state.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct VisibleLogs {
+    /// The number of committed audit entries.
+    pub(super) audit: usize,
+    /// The number of recorded security events.
+    pub(super) events: usize,
+}
 
 /// An open in-memory transaction.
 ///
@@ -34,6 +47,7 @@ pub struct MemoryTransaction {
     pending_audit: Vec<AuditEntry>,
     now: Timestamp,
     isolation: Isolation,
+    visible: VisibleLogs,
 }
 
 impl MemoryTransaction {
@@ -42,6 +56,7 @@ impl MemoryTransaction {
         state: MemoryState,
         now: Timestamp,
         isolation: Isolation,
+        visible: VisibleLogs,
     ) -> Self {
         Self {
             shared,
@@ -49,6 +64,7 @@ impl MemoryTransaction {
             pending_audit: Vec::new(),
             now,
             isolation,
+            visible,
         }
     }
 
@@ -72,22 +88,44 @@ impl MemoryTransaction {
         MemoryStore::from_shared(Arc::clone(&self.shared)).run_read_draft_hook();
     }
 
-    /// Return a copy of the latest committed state, not the working copy of this transaction.
+    /// Return a copy of the state that `read_draft` sees at the isolation level of the transaction.
+    ///
+    /// A `RepeatableRead` transaction gets its working copy, which is the state at `begin`. This
+    /// models the one snapshot of PostgreSQL in `REPEATABLE READ` (ADR-0050 (f)). Every other
+    /// level gets the latest committed state, not the working copy of the transaction.
     pub(crate) fn committed_state(&self) -> MemoryState {
+        if self.isolation == Isolation::RepeatableRead {
+            return self.state.clone();
+        }
         self.shared.lock().state.clone()
     }
 
-    /// Return a copy of the committed audit entries with their commit times, in commit order.
+    /// Return a copy of the audit entries that were committed at `begin`, with their commit times.
     ///
-    /// The entries of this transaction are not in the result.
-    pub(crate) fn committed_audit(&self) -> Vec<(Timestamp, AuditEntry)> {
+    /// The entries are in commit order. The entries of this transaction and the entries that
+    /// commit after `begin` are not in the result.
+    ///
+    /// A query uses this method. A command that reads the log after a lock needs the latest log,
+    /// as `read_draft` reads the latest state.
+    pub(crate) fn audit_at_begin(&self) -> Vec<(Timestamp, AuditEntry)> {
         let shared = self.shared.lock();
         shared
             .audit_times
             .iter()
             .copied()
             .zip(shared.audit.iter().cloned())
+            .take(self.visible.audit)
             .collect()
+    }
+
+    /// Return a copy of the events that the sink held at `begin`, with their times, in record order.
+    ///
+    /// A query uses this method. A command that reads the events after a lock needs the latest
+    /// events, as `read_draft` reads the latest state.
+    pub(crate) fn events_at_begin(&self) -> Vec<RecordedEvent> {
+        let mut events = self.shared.lock().sink.recorded();
+        events.truncate(self.visible.events);
+        events
     }
 
     /// Return the instant of `now()` in this transaction: the time of the clock at `begin`.
@@ -140,6 +178,14 @@ impl Transaction for MemoryTransaction {
     }
 
     fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
+        self
+    }
+
+    fn audit_reads(&mut self) -> &mut dyn AuditReads {
+        self
+    }
+
+    fn diff_reads(&mut self) -> &mut dyn DiffReads {
         self
     }
 
@@ -202,3 +248,6 @@ impl Transaction for MemoryTransaction {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -17,6 +17,10 @@ pub(crate) const LANG_COOKIE: &str = "recipe_lang";
 const PL_SOURCE: &str = include_str!("../i18n/pl.ftl");
 /// The texts of the English bundle.
 const EN_SOURCE: &str = include_str!("../i18n/en.ftl");
+/// The texts of the Polish bundle that the approval and audit pages add.
+const PL_APPROVAL_SOURCE: &str = include_str!("../i18n/pl-approval.ftl");
+/// The texts of the English bundle that the approval and audit pages add.
+const EN_APPROVAL_SOURCE: &str = include_str!("../i18n/en-approval.ftl");
 
 /// The reason that a text is not a supported language.
 ///
@@ -111,27 +115,36 @@ pub struct Bundles {
     en: FluentBundle<FluentResource>,
 }
 
-/// Build the bundle of one language from its `.ftl` source.
-fn load_bundle(lang: Lang, source: &str) -> Result<FluentBundle<FluentResource>, BundleReason> {
+/// Build the bundle of one language from its `.ftl` sources.
+///
+/// The function solves one problem: a file must stay below 800 lines, so a language has more than
+/// one file. A key that two files of one language define fails the load. A later file therefore
+/// cannot shadow an earlier text without notice.
+fn load_bundle(lang: Lang, sources: &[&str]) -> Result<FluentBundle<FluentResource>, BundleReason> {
     let reason = BundleReason { lang };
-    let resource = FluentResource::try_new(source.to_owned()).map_err(|_failed| reason)?;
     let locale = lang.as_str().parse().map_err(|_failed| reason)?;
     let mut bundle = FluentBundle::new_concurrent(vec![locale]);
     bundle.set_use_isolating(false);
-    bundle.add_resource(resource).map_err(|_failed| reason)?;
+    for source in sources {
+        let resource = FluentResource::try_new((*source).to_owned()).map_err(|_failed| reason)?;
+        bundle.add_resource(resource).map_err(|_failed| reason)?;
+    }
     Ok(bundle)
 }
 
 impl Bundles {
     /// Load the bundles `pl` and `en` from the files in `i18n/`.
     ///
+    /// Each language has two files: the main file and the approval file.
+    ///
     /// # Errors
     ///
-    /// Returns the [`BundleReason`] of the first file that does not parse or that holds a key twice.
+    /// Returns the [`BundleReason`] of the first language whose files do not parse or hold a key
+    /// twice, also across the two files of the language.
     pub fn load() -> Result<Self, BundleReason> {
         Ok(Self {
-            pl: load_bundle(Lang::Pl, PL_SOURCE)?,
-            en: load_bundle(Lang::En, EN_SOURCE)?,
+            pl: load_bundle(Lang::Pl, &[PL_SOURCE, PL_APPROVAL_SOURCE])?,
+            en: load_bundle(Lang::En, &[EN_SOURCE, EN_APPROVAL_SOURCE])?,
         })
     }
 
@@ -161,15 +174,16 @@ impl Bundles {
         self.bundle(lang).has_message(key)
     }
 
-    /// Return the message ids of the source file of `lang`.
+    /// Return the message ids of the source files of `lang`.
     #[cfg(test)]
     pub(crate) fn keys(&self, lang: Lang) -> Vec<&'static str> {
-        let source = match lang {
-            Lang::Pl => PL_SOURCE,
-            Lang::En => EN_SOURCE,
+        let sources = match lang {
+            Lang::Pl => [PL_SOURCE, PL_APPROVAL_SOURCE],
+            Lang::En => [EN_SOURCE, EN_APPROVAL_SOURCE],
         };
-        source
-            .lines()
+        sources
+            .into_iter()
+            .flat_map(str::lines)
             .filter_map(|line| line.split_once(" =").map(|(id, _text)| id))
             .filter(|id| {
                 !id.starts_with('-')
@@ -194,3 +208,9 @@ mod review_texts_tests;
 
 #[cfg(test)]
 mod recipe_texts_tests;
+
+#[cfg(test)]
+mod resource_tests;
+
+#[cfg(test)]
+mod approval_texts_tests;

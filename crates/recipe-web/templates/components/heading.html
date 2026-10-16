@@ -1,2 +1,4 @@
 {#- The one h1 of a page (design D10). Only the content answer gets tabindex and autofocus, so HTMX moves the focus to the new heading after the swap. A full page keeps the plain h1. -#}
 {%- macro h1(layout, text) -%}<h1{% if layout.is_content() %} tabindex="-1" autofocus{% endif %}>{{ text }}</h1>{%- endmacro -%}
+{#- The h1 of a page that can show a success sentence in #toast (ADR-0049 (e)). With a toast, the h1 names #toast in aria-describedby, so a screen reader reads the sentence with the heading after the focus moves. -#}
+{%- macro h1_toast(layout, text) -%}<h1{% if layout.is_content() %} tabindex="-1" autofocus{% endif %}{% if layout.toast.is_some() %} aria-describedby="toast"{% endif %}>{{ text }}</h1>{%- endmacro -%}

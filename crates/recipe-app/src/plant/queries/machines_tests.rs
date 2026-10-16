@@ -44,6 +44,10 @@ fn pages_of(size: u32) -> AppSettings {
             recipes: 100,
             versions: 100,
             parameters: 100,
+            audit: 100,
+            history: 100,
+            security_events: 100,
+            diff: 50,
         },
         ..AppSettings::default()
     }

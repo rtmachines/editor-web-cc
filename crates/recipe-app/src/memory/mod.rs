@@ -2,6 +2,7 @@
 //!
 //! It follows every lint of `reliability.md` section 2. `recipe-server` never wires it.
 
+mod audit;
 mod clock;
 mod core;
 mod draft;

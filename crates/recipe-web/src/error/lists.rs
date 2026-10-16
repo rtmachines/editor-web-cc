@@ -195,6 +195,16 @@ impl FieldError {
         })
     }
 
+    /// Return the line with `subject`, for example the label of the input that the line names.
+    ///
+    /// The summary shows the subject next to the sentence, so a reader sees the input of a domain
+    /// error whose message names no input (ADR-0041 (f)).
+    pub(crate) fn with_subject(self, subject: String) -> Self {
+        let mut line = self.0;
+        line.subject = Some(subject);
+        Self(line)
+    }
+
     /// Build the line of one error of the Plant Model with a subject and an input.
     fn plant_line(error: &PlantError, subject: Option<String>, target: Option<String>) -> Self {
         Self::from(Line {

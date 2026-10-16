@@ -30,8 +30,8 @@ impl Fixture {
         let store = MemoryStore::with_clock(clock.clone());
         store.seed_primitive_types();
         Self {
+            sink: store.sink(),
             store,
-            sink: MemorySink::default(),
             clock,
         }
     }

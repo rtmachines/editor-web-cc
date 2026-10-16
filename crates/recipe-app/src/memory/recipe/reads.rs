@@ -291,7 +291,7 @@ impl RecipeReads for MemoryTransaction {
         recipe: RecipeId,
         at: Timestamp,
     ) -> Result<Option<Login>, StorageError> {
-        actor_at(self.state(), &self.committed_audit(), (recipe, at))
+        actor_at(self.state(), &self.audit_at_begin(), (recipe, at))
     }
 
     async fn parameter_page(

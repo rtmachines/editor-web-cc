@@ -337,7 +337,7 @@ fn forbidden_step(reference: &ReferenceNumber, number: u32, step: Transition) ->
 
 mod approve;
 mod stored;
-pub use approve::{ApprovalOutcome, ApprovalPolicy, Approver};
+pub use approve::{ApprovalOutcome, ApprovalPolicy, Approver, breaks_separation_of_duties};
 pub use stored::{StoredRecipe, StoredRecipeReason, StoredVersionHeader};
 #[cfg(test)]
 mod build;

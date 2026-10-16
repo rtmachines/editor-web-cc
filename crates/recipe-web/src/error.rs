@@ -31,6 +31,7 @@ pub use conflict::ConflictView;
 pub(crate) use form::FormErrors;
 pub use form::RenderedForm;
 pub(crate) use layer::render_errors;
+pub(crate) use lists::line_view;
 #[cfg_attr(
     not(test),
     expect(

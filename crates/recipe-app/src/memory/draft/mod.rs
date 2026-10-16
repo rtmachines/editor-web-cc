@@ -144,10 +144,13 @@ impl DraftRepository for MemoryTransaction {
         Ok(stored)
     }
 
-    /// Read the latest committed rows, as a statement of a `READ COMMITTED` transaction does.
+    /// Read the rows that the isolation level of the transaction shows, as PostgreSQL does.
     ///
-    /// A hook from `MemoryStore::on_read_draft` runs first and models a request that commits
-    /// between the earlier reads of the transaction and this statement.
+    /// A `READ COMMITTED` transaction reads the latest committed rows. A `RepeatableRead`
+    /// transaction reads the state at `begin` (ADR-0050 (f)). `ApproveVersion` uses the first
+    /// level, and `GetApprovalPreview` uses the second level. A hook from
+    /// `MemoryStore::on_read_draft` runs first and models a request that commits between the
+    /// earlier reads of the transaction and this statement.
     async fn read_draft(
         &mut self,
         version: RecipeVersionId,

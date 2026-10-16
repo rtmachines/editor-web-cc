@@ -2,8 +2,11 @@
 //!
 //! Every value that a message shows as text comes from the bundle of the UI language.
 
+use std::num::NonZeroU64;
+
 use axum::http::StatusCode;
 use recipe_app::auth::Operation;
+use recipe_app::ports::AuditEntryId;
 use recipe_domain::identity::Role;
 
 use recipe_app::error::{Missing, TaskStage};
@@ -52,6 +55,8 @@ fn every_missing() -> Vec<Missing> {
             number: 1234,
             key: ParameterKey::from(Uuid::nil()),
         },
+        Missing::AuditEntry(AuditEntryId::from(NonZeroU64::new(1234).unwrap())),
+        Missing::MalformedAuditEntry,
     ]
 }
 
@@ -173,6 +178,7 @@ fn values_every_password_reason_and_task_stage_has_its_key() {
         TaskStage::Validation,
         TaskStage::Export,
         TaskStage::Token,
+        TaskStage::Diff,
     ] {
         assert_in_both(&bundles, task_stage_key(stage));
         let english = bundles
@@ -262,6 +268,25 @@ fn values_missing_recipe_values_use_their_own_keys_and_polish_texts() {
     assert_eq!(
         missing_text(&bundles, Lang::Pl, &parameter),
         "Parametr 00000000-0000-0000-0000-000000000000 wersji 1234 receptury R-7"
+    );
+}
+
+#[test]
+fn values_missing_audit_entry_names_the_full_id_in_polish_and_a_malformed_id_names_none() {
+    let bundles = Bundles::load().unwrap();
+    let missing = every_missing().remove(15);
+    assert_eq!(missing_key(&missing), "missing-audit-entry");
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &missing),
+        "Wpis audytu 1234"
+    );
+    assert_eq!(
+        missing_key(&Missing::MalformedAuditEntry),
+        "missing-malformed-audit-entry"
+    );
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &Missing::MalformedAuditEntry),
+        "Wpis audytu"
     );
 }
 

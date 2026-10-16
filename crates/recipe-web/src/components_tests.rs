@@ -3,6 +3,7 @@
 //! A test template below `templates/test/` calls one macro and takes every text from a struct field,
 //! so it holds no literal word. The expected markup is written here, in the form of the design.
 
+mod approval;
 mod errors;
 mod grid;
 mod plant;
@@ -56,10 +57,34 @@ const ICONS: [(&str, &str); 11] = [
     ("tree-expanded", r#"<path d="M6 9l6 6 6-6"/>"#),
 ];
 
+/// The icons of the diff states (`design-system.md` sections 8 and 9, ADR-0050 (k)).
+///
+/// They stay apart from `ICONS`, because the icon page of the first tests renders only the first
+/// eleven icons.
+const DIFF_ICONS: [(&str, &str); 4] = [
+    (
+        "diff-limit",
+        r#"<path d="M7 5v14"/><path d="M17 5v14"/><path d="M12 12v.01"/>"#,
+    ),
+    (
+        "diff-changed",
+        r#"<path d="M4 8h14"/><path d="M14 4l4 4-4 4"/><path d="M20 16H6"/><path d="M10 12l-4 4 4 4"/>"#,
+    ),
+    (
+        "diff-added",
+        r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8"/><path d="M8 12h8"/>"#,
+    ),
+    (
+        "diff-removed",
+        r#"<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8"/>"#,
+    ),
+];
+
 /// Return the complete markup of the icon `name`.
 fn icon(name: &str) -> String {
     let shapes = ICONS
         .iter()
+        .chain(DIFF_ICONS.iter())
         .find(|(known, _)| *known == name)
         .map(|(_, shapes)| *shapes)
         .unwrap();
@@ -68,7 +93,11 @@ fn icon(name: &str) -> String {
 
 /// Assert that every `<svg` of `html` opens with the fixed tag of one icon.
 pub(crate) fn assert_fixed_svg_tags(html: &str) {
-    let fixed: Vec<String> = ICONS.iter().map(|(name, _)| icon_tag(name)).collect();
+    let fixed: Vec<String> = ICONS
+        .iter()
+        .chain(DIFF_ICONS.iter())
+        .map(|(name, _)| icon_tag(name))
+        .collect();
     for (at, _) in html.match_indices("<svg") {
         let rest = html.get(at..).unwrap();
         assert!(

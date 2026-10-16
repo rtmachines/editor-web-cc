@@ -29,6 +29,8 @@ const PATH_VALUE: &str = "U1.2";
 const NAME_VALUE: &str = "ST_Zone";
 /// The reference number that the placeholder `{ref}` names. It is the recipe `R-100` of `M7`.
 const REF_VALUE: &str = "R-100";
+/// The audit entry that the placeholder `{id}` names. It is the first entry of the store.
+const ID_VALUE: &str = "1";
 /// The version number that the placeholder `{n}` names. It is the live draft of `R-100`.
 const N_VALUE: &str = "3";
 /// The language code that the placeholder `{lang}` names. It is the translation of `LINE`.
@@ -109,6 +111,7 @@ pub(crate) fn endpoint(method: Method, path: &'static str, body: &'static str) -
 /// - `{name}` is `ST_Zone`.
 /// - `{uuid}` is the fixed identifier of the archived machine `M12`.
 /// - `{ref}` is `R-100`.
+/// - `{id}` is `1`, the first audit entry.
 /// - `{n}` is `3`, the live draft of `R-100`.
 /// - `{key}` is the key of the parameter `LINE`.
 /// - `{lang}` is `pl`.
@@ -120,6 +123,7 @@ pub(crate) fn fill(template: &str) -> String {
         .replace("{name}", NAME_VALUE)
         .replace("{uuid}", &M12_ID.to_string())
         .replace("{ref}", REF_VALUE)
+        .replace("{id}", ID_VALUE)
         .replace("{n}", N_VALUE)
         .replace("{key}", &LINE_KEY.to_string())
         .replace("{lang}", LANG_VALUE)

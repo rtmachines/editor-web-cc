@@ -3,7 +3,11 @@
 //! `own` holds the login, logout, profile, and password pages. Each handler parses the request
 //! into value objects, calls one use case, and renders one template.
 
+mod approval;
+pub(crate) mod audit;
+mod diff_view;
 mod draft_reply;
+pub(crate) mod history;
 pub(crate) mod machines;
 mod own;
 #[cfg(test)]
@@ -29,6 +33,7 @@ mod render;
 mod request;
 #[cfg(test)]
 mod review_fix_tests;
+pub(crate) mod security_events;
 #[cfg(test)]
 mod session_end_tests;
 #[cfg(test)]

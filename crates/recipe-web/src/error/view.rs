@@ -22,8 +22,9 @@ pub(crate) struct FieldLine {
 /// A field of this list gets a link in an error fragment. Any other field gets its label only.
 /// The users page keeps `q`. The plant pages add the names of design D5. Two forms of one page can
 /// use one name, so the `id` of an input is the name of its form, for example `machine_name`.
-/// The recipe pages add the field ids of design D6.
-const INPUT_FIELDS: [&str; 31] = [
+/// The recipe pages add the field ids of design D6. The audit list and the security events add the
+/// visible filter inputs of ADR-0051. A hidden field has no entry.
+const INPUT_FIELDS: [&str; 38] = [
     "login",
     "password",
     "current_password",
@@ -55,6 +56,13 @@ const INPUT_FIELDS: [&str; 31] = [
     "type",
     "s7_address",
     "ordinal",
+    "entity_type",
+    "action",
+    "actor",
+    "from",
+    "to",
+    "kind",
+    "client_ip",
 ];
 
 /// The name of the list of member rows. The list is a `fieldset`, so it has no input of its own.

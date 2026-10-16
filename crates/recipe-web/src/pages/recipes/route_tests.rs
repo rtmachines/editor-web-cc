@@ -13,11 +13,28 @@ use crate::routes::matrix::{Endpoint, Want, endpoint};
 /// Administrator, the ProcessEngineer, the Operator, the user who must change the password, and the
 /// deactivated user (`api.md` section 3.3).
 pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
-    use Want::{Forbidden, Login, Page, Password, Redirect};
+    use Want::{Conflict, Forbidden, Login, Page, Password, Redirect};
     let view = [Login, Page, Page, Page, Password, Login];
     let create = [Login, Page, Page, Forbidden, Password, Login];
     let created = Redirect("/recipes/R-500/versions/1");
     let renamed = Redirect("/recipes/R-100");
+    // `R-100` is live and has an approved version, so the delete is refused and the restore too.
+    let delete = [
+        Login,
+        Conflict("E-RCP-010"),
+        Conflict("E-RCP-010"),
+        Forbidden,
+        Password,
+        Login,
+    ];
+    let restore = [
+        Login,
+        Conflict("E-RCP-025"),
+        Forbidden,
+        Forbidden,
+        Password,
+        Login,
+    ];
     vec![
         (endpoint(Method::GET, "/recipes", ""), view),
         (endpoint(Method::GET, "/recipes/new", ""), create),
@@ -33,6 +50,11 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
         (
             endpoint(Method::POST, "/recipes/{ref}/rename", "name=Renamed"),
             [Login, renamed, renamed, Forbidden, Password, Login],
+        ),
+        (endpoint(Method::POST, "/recipes/{ref}/delete", ""), delete),
+        (
+            endpoint(Method::POST, "/recipes/{ref}/restore", ""),
+            restore,
         ),
     ]
 }

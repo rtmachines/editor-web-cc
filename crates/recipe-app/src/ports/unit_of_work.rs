@@ -4,8 +4,9 @@ use async_trait::async_trait;
 use recipe_domain::audit::AuditEntry;
 
 use super::{
-    AttemptRepository, DraftRepository, Isolation, NonEmpty, PlantRepository, RecipeReads,
-    RecipeRepository, SessionRepository, TypeCatalog, UnitLookup, UserRepository,
+    AttemptRepository, AuditReads, DiffReads, DraftRepository, Isolation, NonEmpty,
+    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, TypeCatalog, UnitLookup,
+    UserRepository,
 };
 use crate::error::{AppError, StorageError};
 
@@ -78,6 +79,10 @@ pub trait Transaction: Send {
     fn recipes(&mut self) -> &mut dyn RecipeRepository;
     /// Return the read port of the recipe pages in this transaction.
     fn recipe_reads(&mut self) -> &mut dyn RecipeReads;
+    /// Return the read port of the audit views in this transaction (ADR-0051).
+    fn audit_reads(&mut self) -> &mut dyn AuditReads;
+    /// Return the read port of the diff of two versions in this transaction (ADR-0050).
+    fn diff_reads(&mut self) -> &mut dyn DiffReads;
     /// Return the repository of the Draft aggregate in this transaction.
     fn drafts(&mut self) -> &mut dyn DraftRepository;
     /// Return the repository of the Machine aggregate in this transaction.

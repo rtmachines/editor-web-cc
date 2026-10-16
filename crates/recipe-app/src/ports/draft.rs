@@ -27,10 +27,12 @@ pub trait DraftRepository: Send {
         version: RecipeVersionId,
     ) -> Result<Option<StoredDraft>, StorageError>;
 
-    /// Read the draft with its editors and parameters without a lock (`ApproveVersion`).
+    /// Read the draft with its editors and parameters without a lock.
     ///
-    /// The result holds a version in any state. A missing version gives `None`. The caller
-    /// reads before its transaction and never runs a command on the result (design D10).
+    /// `ApproveVersion` reads before its write transaction and never runs a command on the
+    /// result (design D10). `GetApprovalPreview` reads in a `RepeatableRead` transaction and gets
+    /// the state at `begin` (ADR-0050 (f)). The result holds a version in any state. A missing
+    /// version gives `None`.
     async fn read_draft(
         &mut self,
         version: RecipeVersionId,

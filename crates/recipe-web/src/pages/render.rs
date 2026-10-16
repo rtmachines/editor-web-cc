@@ -75,7 +75,7 @@ pub(crate) fn see_other_path(
 }
 
 /// Percent-encode a key or a value of a query string. Only `A-Z a-z 0-9 - . _ ~` stay as they are.
-fn encode_query(text: &str) -> String {
+pub(crate) fn encode_query(text: &str) -> String {
     let Ok(encoded) = urlencode_strict(text);
     encoded.to_string()
 }

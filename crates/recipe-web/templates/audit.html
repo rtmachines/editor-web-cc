@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/field.html" as fields %}
+{% import "components/pager.html" as pagers %}
+{#- The audit list of ADR-0051. The filter form sends GET and holds no token and no cursor. Its hx attributes are literals, and its action is the literal path. The aggregate and the entity of a link stay as hidden fields. The notices and the pager stand in boosted containers, so their links keep the content answer and the URL. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if let Some(href) = security_href %}<p class="actions"><a class="target-link" href="{{ href }}">{{ t.get("audit-security-link") }}</a></p>
+{% endif %}<h2>{{ t.get("audit-filter-heading") }}</h2>
+<form method="get" action="/audit" class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">
+{% if let Some(id) = aggregate_hidden %}<input type="hidden" name="aggregate" value="{{ id }}">
+{% endif %}{% if let Some(entity) = entity_hidden %}<input type="hidden" name="entity_type" value="{{ entity.entity_type }}">
+<input type="hidden" name="entity_id" value="{{ entity.entity_id }}">
+{% else %}{{ fields::select(t, "entity_type", t.get("audit-filter-entity-type"), String::new(), entity_types, entity_type, false) }}
+{% endif %}<div class="field"><label for="action">{{ t.get("audit-filter-action") }}</label><select id="action" name="action"><option value="">{{ t.get("audit-filter-any-action") }}</option>{% for group in actions %}<optgroup label="{{ group.label }}">{% for option in group.options %}<option value="{{ option.value }}"{% if option.value == action %} selected{% endif %}>{{ option.text }}</option>{% endfor %}</optgroup>{% endfor %}</select></div>
+{{ fields::named(t, "actor", "actor", t.get("audit-filter-actor"), String::new(), "text", false, true, 64, "off", actor) }}
+{{ fields::named(t, "from", "from", t.get("audit-filter-from"), String::new(), "text", false, true, 10, "off", from) }}
+{{ fields::named(t, "to", "to", t.get("audit-filter-to"), String::new(), "text", false, true, 10, "off", to) }}
+<button type="submit" class="btn btn-primary">{{ t.get("audit-filter-submit") }}</button>
+<a class="target-link" href="/audit">{{ t.get("audit-filter-clear") }}</a>
+</form>
+{% if aggregate_notice.is_some() || object_notice.is_some() %}<div hx-boost="true" hx-target="#content" hx-push-url="true">
+{% if let Some(notice) = aggregate_notice %}<p>{{ notice.text }} <a class="target-link" href="{{ notice.clear_href }}">{{ t.get("audit-filter-aggregate-clear") }}</a></p>
+{% endif %}{% if let Some(notice) = object_notice %}<p>{{ notice.text }} <a class="target-link" href="{{ notice.clear_href }}">{{ t.get("audit-filter-object-clear") }}</a></p>
+{% endif %}</div>
+{% endif %}{% include "audit-table.html" %}
+<div hx-boost="true" hx-target="#content" hx-push-url="true">{{ pagers::cursor_pager(t, pager_label, newest, older) }}</div>
+{% endblock %}

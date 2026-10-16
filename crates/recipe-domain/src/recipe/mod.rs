@@ -2,6 +2,7 @@
 //!
 //! The module holds the value objects, the identifiers, and the error type of this context.
 
+mod diff;
 mod draft;
 mod error;
 mod ids;
@@ -17,6 +18,10 @@ mod state;
 mod tag;
 mod value;
 
+pub use diff::{
+    DefinitionChange, DiffBounds, DiffKind, DiffKindReason, DiffPair, DiffPart, DiffRow, DiffRows,
+    diff_pairs,
+};
 pub(crate) use draft::not_on_platform;
 pub use draft::{
     ApprovalReady, BudgetCounts, DefinitionUpdate, Draft, LEAVES_PER_VERSION,
@@ -37,7 +42,7 @@ pub use rebind::{
 pub use reference_number::{ReferenceNumber, ReferenceNumberReason};
 pub use root::{
     ApprovalOutcome, ApprovalPolicy, Approver, Recipe, RecipeDeleter, StoredRecipe,
-    StoredRecipeReason, StoredVersionHeader, VersionHeader,
+    StoredRecipeReason, StoredVersionHeader, VersionHeader, breaks_separation_of_duties,
 };
 pub use snapshot::{SnapshotError, SnapshotItem, VersionSnapshot};
 pub use state::{

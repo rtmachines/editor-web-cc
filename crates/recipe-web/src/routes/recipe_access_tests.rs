@@ -20,7 +20,7 @@ use crate::pages::{parameters, recipes, versions};
 use crate::test_support::{get_with, post_fields};
 
 /// The number of the routes of the recipe, version, and parameter pages that the Operator refuses.
-const REFUSED_ROUTES: usize = 14;
+const REFUSED_ROUTES: usize = 19;
 
 /// Return the matrix rows of the three areas, each with the answer of the six principals.
 fn area_rows() -> Vec<(Endpoint, [Want; 6])> {

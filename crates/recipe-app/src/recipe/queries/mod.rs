@@ -12,8 +12,21 @@ use crate::auth::{CurrentUser, Operation};
 use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{PlantRepository, Transaction};
 
+mod approval_preview;
+#[cfg(test)]
+mod approval_preview_gate_tests;
+#[cfg(test)]
+mod approval_preview_parity_tests;
+#[cfg(test)]
+mod approval_preview_tests;
 #[cfg(test)]
 mod count_tests;
+mod diff;
+mod diff_page;
+#[cfg(test)]
+mod diff_page_tests;
+#[cfg(test)]
+mod diff_tests;
 mod outdated;
 mod parameter_form;
 #[cfg(test)]
@@ -39,6 +52,10 @@ mod versions;
 #[cfg(test)]
 mod versions_tests;
 
+pub use approval_preview::{ApprovalPreview, ApprovalPreviewInput, GetApprovalPreview};
+pub use diff::{
+    DiffChoice, DiffPage, DiffSection, DiffSummary, DiffVersions, DiffVersionsInput, VersionDiff,
+};
 pub use outdated::{OutdatedParameter, StructRevision};
 pub use parameter_form::{GetParameterForm, GetParameterFormInput, ParameterForm};
 pub use parameters::{
@@ -81,7 +98,7 @@ fn cut_page<T>(mut rows: Vec<T>, size: u32) -> (Vec<T>, bool) {
 }
 
 /// Read the recipe with `reference`, deleted or not, or return `NotFound` (`E-WEB-005`).
-async fn read_recipe(
+pub(crate) async fn read_recipe(
     tx: &mut dyn Transaction,
     reference: &ReferenceNumber,
 ) -> Result<Recipe, AppError> {
@@ -100,7 +117,7 @@ async fn read_recipe(
 ///
 /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted and the role
 /// cannot restore it.
-fn require_visible(user: &CurrentUser, recipe: &Recipe) -> Result<(), AppError> {
+pub(crate) fn require_visible(user: &CurrentUser, recipe: &Recipe) -> Result<(), AppError> {
     if recipe.is_deleted() && !Operation::RestoreRecipe.requirement().allows(user.role()) {
         return Err(AppError::Recipe(RecipeError::RecipeDeleted {
             reference: recipe.reference().clone(),

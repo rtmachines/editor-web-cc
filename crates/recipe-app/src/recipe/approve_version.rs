@@ -24,6 +24,16 @@ pub struct ApproveVersionInput {
     pub allow_outdated: bool,
 }
 
+/// The result of `ApproveVersion` (ADR-0049 (e)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApproveVersionOutput {
+    /// The decision of the domain method, or `AlreadyApproved` for a replay.
+    pub outcome: ApprovalOutcome,
+    /// The number of the version that this call retired. It is `None` when this call retired
+    /// no version, also for a replay.
+    pub retired: Option<u32>,
+}
+
 /// Approves the live draft of a recipe and retires the previous approved version.
 ///
 /// The use case solves one problem: the content hash and the snapshot check take much CPU time,
@@ -65,10 +75,15 @@ impl ApproveVersion {
         user: &CurrentUser,
         meta: &RequestMeta,
         input: ApproveVersionInput,
-    ) -> Result<ApprovalOutcome, AppError> {
+    ) -> Result<ApproveVersionOutput, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let ready = match prepare(&self.ctx, &input).await? {
-            Prepared::Done(outcome) => return Ok(outcome),
+            Prepared::Done(outcome) => {
+                return Ok(ApproveVersionOutput {
+                    outcome,
+                    retired: None,
+                });
+            }
             Prepared::Ready(ready) => ready,
         };
         approve_in_transaction(&self.ctx, (user, meta), &input, ready).await

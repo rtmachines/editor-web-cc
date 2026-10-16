@@ -6,6 +6,8 @@ use recipe_domain::identity::Login;
 use recipe_domain::plant::{MachineCode, MachineId, TypeName, UnitPath};
 use recipe_domain::recipe::{ParameterKey, ReferenceNumber};
 
+use crate::ports::AuditEntryId;
+
 /// An entity that a request names and that the database does not hold.
 ///
 /// The type solves one problem: `E-WEB-005` must name the missing entity in one fixed form.
@@ -91,6 +93,15 @@ pub enum Missing {
         /// The number of the revision.
         revision: u32,
     },
+    /// An audit entry that does not exist, or an entry outside the scope of the role (ADR-0051 (c)).
+    ///
+    /// Both cases give the same value, so the answer does not show that the entry exists.
+    AuditEntry(AuditEntryId),
+    /// An audit entry that an `{id}` path value names, when the value does not parse.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedAuditEntry,
 }
 
 impl Missing {
@@ -141,6 +152,8 @@ impl fmt::Display for Missing {
                 name,
                 revision,
             } => write!(f, "Revision {revision} of type {name} of machine {code}"),
+            Self::AuditEntry(id) => write!(f, "Audit entry {id}"),
+            Self::MalformedAuditEntry => f.write_str("Audit entry"),
         }
     }
 }

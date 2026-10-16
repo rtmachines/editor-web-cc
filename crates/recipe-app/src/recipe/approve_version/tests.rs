@@ -165,6 +165,7 @@ async fn run(
             input(number, expected, allow_outdated),
         )
         .await
+        .map(|output| output.outcome)
 }
 
 #[test]

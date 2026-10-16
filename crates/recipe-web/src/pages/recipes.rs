@@ -20,14 +20,15 @@ use crate::routes::{RouteEntry, operation_row};
 
 pub(crate) mod fields;
 mod form;
+mod lifecycle;
 mod list;
 pub(crate) mod page;
 mod rename;
 
 /// Return the route rows of the recipe pages.
 ///
-/// The rows are `/recipes`, `/recipes/new`, `/recipes/{ref}`, and the commands to create and to
-/// rename a recipe. The removal and the restore of `api.md` section 2.4 come in a later step.
+/// The rows are `/recipes`, `/recipes/new`, `/recipes/{ref}`, and the commands to create, rename,
+/// delete, and restore a recipe.
 pub(crate) fn rows() -> Vec<RouteEntry> {
     vec![
         operation_row(
@@ -59,6 +60,18 @@ pub(crate) fn rows() -> Vec<RouteEntry> {
             "/recipes/{ref}/rename",
             Operation::RenameRecipe,
             post(rename::rename),
+        ),
+        operation_row(
+            Method::POST,
+            "/recipes/{ref}/delete",
+            Operation::DeleteRecipe,
+            post(lifecycle::delete),
+        ),
+        operation_row(
+            Method::POST,
+            "/recipes/{ref}/restore",
+            Operation::RestoreRecipe,
+            post(lifecycle::restore),
         ),
     ]
 }
@@ -138,6 +151,8 @@ pub(crate) fn path_reference(
 
 #[cfg(test)]
 mod form_tests;
+#[cfg(test)]
+mod lifecycle_tests;
 #[cfg(test)]
 mod list_tests;
 #[cfg(test)]

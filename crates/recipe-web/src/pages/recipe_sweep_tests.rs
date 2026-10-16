@@ -43,7 +43,7 @@ const AFTER_END_PAGES: [&str; 5] = [
 ///
 /// A name or a value that is not in the list fails the test. The test also fails when a literal of
 /// the list appears in no answer, so the list cannot go stale.
-const HX_LITERALS: [(&str, &[&str]); 7] = [
+const HX_LITERALS: [(&str, &[&str]); 8] = [
     ("hx-boost", &["true"]),
     (
         "hx-target",
@@ -72,6 +72,19 @@ const HX_LITERALS: [(&str, &[&str]); 7] = [
     ("hx-sync", &["closest form:drop"]),
     ("hx-swap-oob", &["true", "innerHTML"]),
     ("hx-history", &["false"]),
+    ("hx-disabled-elt", &["find button"]),
+];
+/// The commands whose form holds no text field, so the XSS field table has no case for them.
+///
+/// The delete and the restore of a recipe send only the CSRF token. The approve form also sends
+/// the `row_version` and a checkbox. The retire and the discard forms also send the `row_version`
+/// (ADR-0049).
+pub(super) const TOKEN_ONLY_ROUTES: [&str; 5] = [
+    "/recipes/{ref}/delete",
+    "/recipes/{ref}/restore",
+    "/recipes/{ref}/versions/{n}/approve",
+    "/recipes/{ref}/versions/{n}/retire",
+    "/recipes/{ref}/versions/{n}/discard",
 ];
 /// Commands that fail: the path template, the body, and the status of the answer.
 ///
@@ -137,7 +150,19 @@ pub(super) fn post_endpoints() -> Vec<(Endpoint, Want)> {
 fn statuses_of(want: Want) -> Vec<StatusCode> {
     match want {
         Want::Conflict(_code) => vec![StatusCode::CONFLICT],
+        Want::Status(status, _code) => vec![status],
         _success => vec![StatusCode::OK, StatusCode::SEE_OTHER],
+    }
+}
+
+/// Return the statuses of a command with a stale `row_version` when the matrix expects `want`.
+///
+/// A command that the matrix refuses before the row check keeps that refusal. Every other
+/// command answers `409`.
+fn stale_statuses(want: Want) -> Vec<StatusCode> {
+    match want {
+        Want::Status(status, _code) => vec![status],
+        _other => vec![StatusCode::CONFLICT],
     }
 }
 
@@ -197,7 +222,7 @@ async fn error_answers(code: &str) -> Vec<Answer> {
             statuses: vec![status],
         });
     }
-    for (endpoint, _want) in post_endpoints() {
+    for (endpoint, want) in post_endpoints() {
         if !endpoint.body.contains("row_version=1") {
             continue;
         }
@@ -206,7 +231,7 @@ async fn error_answers(code: &str) -> Vec<Answer> {
         answers.push(Answer {
             what: format!("{code} POST {} stale", endpoint.path),
             reply,
-            statuses: vec![StatusCode::CONFLICT],
+            statuses: stale_statuses(want),
         });
     }
     answers

@@ -10,15 +10,16 @@ use std::collections::BTreeSet;
 use askama::Template;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use recipe_app::auth::Operation;
 use recipe_app::recipe::{
     GetVersion, GetVersionInput, ListParameters, ListParametersInput, ParameterList, VersionView,
 };
 use recipe_domain::plant::UnitPath;
-use recipe_domain::recipe::{ParameterKey, VersionState};
+use recipe_domain::recipe::{ParameterKey, ReferenceNumber, VersionState};
 use serde::Deserialize;
 
+use super::actions::{VersionActions, version_actions};
 use super::outdated::{OutdatedList, version_list};
 use super::parameter_table::ParameterTable;
 use super::path_version;
@@ -79,6 +80,7 @@ struct VersionPage<'a> {
     outdated: OutdatedList,
     table: ParameterTable,
     add_href: Option<String>,
+    actions: VersionActions,
 }
 
 /// Return the address of the form of a new parameter, or `None` when the page shows no link.
@@ -100,6 +102,14 @@ fn add_href(
     Ok(editable.then(|| format!("{base}/parameters/new{unit}")))
 }
 
+/// Return `layout` with the success sentence `toast` in `#toast`, or `layout` as it is for `None`.
+fn with_toast(layout: Layout<'_>, toast: Option<String>) -> Layout<'_> {
+    match toast {
+        Some(text) => layout.with_toast(text),
+        None => layout,
+    }
+}
+
 impl<'a> VersionPage<'a> {
     /// Build the page from the version and one page of its parameters.
     ///
@@ -110,7 +120,7 @@ impl<'a> VersionPage<'a> {
         t: Texts<'a>,
         request: &PageRequest,
         (view, list): (&VersionView, &ParameterList),
-        page: Page,
+        (page, toast): (Page, Option<String>),
         outdated: OutdatedList,
     ) -> Result<Self, WebError> {
         let detail = &view.detail;
@@ -125,6 +135,7 @@ impl<'a> VersionPage<'a> {
             t.with("version-title", &args),
             Some(NavTarget::Recipes),
         )?;
+        let layout = with_toast(layout, toast);
         let keys: BTreeSet<ParameterKey> = view.outdated.iter().map(|item| item.key).collect();
         let (kind, key) = state_badge(detail.state);
         let machine = &view.machine;
@@ -151,6 +162,7 @@ impl<'a> VersionPage<'a> {
             outdated,
             table: ParameterTable::new(t, &base, list, &keys, page),
             add_href: add_href(request, view, &base, list)?,
+            actions: version_actions(t, request.auth()?.user().role(), view),
             layout,
         })
     }
@@ -163,8 +175,35 @@ pub(crate) async fn version(
     query: Result<Query<VersionQuery>, QueryRejection>,
     request: PageRequest,
 ) -> Result<Response, WebError> {
-    let (reference, number) = path_version(path)?;
+    let target = path_version(path)?;
     let (unit, page) = query_values(query)?.check()?;
+    let answer = version_answer(&state, &request, target, (unit, page), None).await?;
+    Ok(answer.html.into_response())
+}
+
+/// The rendered version page and the `row_version` of the version that it shows.
+pub(crate) struct VersionAnswer {
+    /// The page, or the content answer of an HTMX request.
+    pub(crate) html: Html<String>,
+    /// The `row_version` of the first read, for the header `HX-Trigger` of a command answer.
+    pub(crate) row_version: i64,
+}
+
+/// Render the version page with an optional success sentence in `#toast`.
+///
+/// A command that ends on the version page calls this function with its toast, for example the
+/// approval (ADR-0049 (e)). The `h1` then names the toast in `aria-describedby`.
+///
+/// # Errors
+///
+/// Returns the errors of `GetVersion` and `ListParameters`, and `E-WEB-004` without a session.
+pub(crate) async fn version_answer(
+    state: &WebState,
+    request: &PageRequest,
+    (reference, number): (ReferenceNumber, u32),
+    (unit, page): (Option<UnitPath>, Page),
+    toast: Option<String>,
+) -> Result<VersionAnswer, WebError> {
     let user = request.auth()?.user();
     let ctx = state.identity().app().clone();
     let target = GetVersionInput {
@@ -185,7 +224,10 @@ pub(crate) async fn version(
         .execute(user, &request.meta(), input)
         .await?;
     let t = Texts::new(state.bundles(), request.lang());
-    let outdated = version_list(&request, &view, t)?;
-    let version_page = VersionPage::new(t, &request, (&view, &list), page, outdated)?;
-    Ok(render(&version_page, request.request_id())?.into_response())
+    let outdated = version_list(request, &view, t)?;
+    let version_page = VersionPage::new(t, request, (&view, &list), (page, toast), outdated)?;
+    Ok(VersionAnswer {
+        html: render(&version_page, request.request_id())?,
+        row_version: view.detail.row_version,
+    })
 }

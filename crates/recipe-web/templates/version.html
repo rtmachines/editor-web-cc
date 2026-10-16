@@ -2,9 +2,10 @@
 {% import "components/heading.html" as headings %}
 {% import "components/badge.html" as badges %}
 {% import "rebind-form.html" as rebinds %}
-{#- The version page of design D7 and ADR-0043 (j). Only a live draft and a role with ParameterEdit get the link Add a parameter. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). Each hx attribute is a literal. The href holds the reference number and has hx-boost (ADR-0037 (f)). -#}
+{% import "components/danger.html" as dangers %}
+{#- The version page of design D7 and ADR-0043 (j). Only a live draft and a role with ParameterEdit get the link Add a parameter. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). Each hx attribute is a literal. The href holds the reference number and has hx-boost (ADR-0037 (f)). The action area holds the approve link, the history link, and at most one danger action, as the role and the state permit (ADR-0049 (f) and (i), ADR-0051 (g)). -#}
 {% block content %}
-{{ headings::h1(layout, layout.title) }}
+{{ headings::h1_toast(layout, layout.title) }}
 <div class="actions">{{ badges::status_large(kind, word) }}{% if deleted %}{{ badges::deleted_large(t.get("status-deleted")) }}{% endif %}</div>
 <dl>
 <dt>{{ t.get("version-change-note") }}</dt>
@@ -24,7 +25,10 @@
 <dt>{{ t.get("recipe-machine") }}</dt>
 <dd><a class="target-link" href="{{ machine_href }}">{{ machine }}</a></dd>
 </dl>
-{#- The list of the outdated parameters and the rebind forms (ADR-0043 (l)). The answer of a rebind swaps it out of band. -#}
+<h2>{{ t.get("version-actions-heading") }}</h2>
+<p class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">{% if let Some(link) = actions.approve %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endif %}<a class="target-link" href="{{ actions.history_href }}">{{ t.get("recipe-history-link") }}</a></p>
+{% if let Some(danger) = actions.danger %}{{ dangers::danger_versioned(t, danger.summary, danger.notice, danger.button, danger.action, layout.csrf_token, actions.row_version) }}
+{% endif %}{#- The list of the outdated parameters and the rebind forms (ADR-0043 (l)). The answer of a rebind swaps it out of band. -#}
 {{ rebinds::outdated_list(t, outdated) }}
 <div id="parameter-table">{% include "parameter-table.html" %}</div>
 {% if let Some(href) = add_href %}<p class="actions"><a class="target-link" href="{{ href }}" hx-boost="true" hx-target="#parameter-form" hx-swap="innerHTML" hx-push-url="false">{{ t.get("parameter-add-link") }}</a></p>

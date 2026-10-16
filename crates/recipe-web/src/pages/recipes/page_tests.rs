@@ -90,6 +90,33 @@ async fn recipes_page_of_a_deleted_recipe_shows_the_state_to_an_administrator_wi
     );
 }
 
+/// The boosted container and the link to the history of `reference` (ADR-0051 (g)).
+fn history_link(reference: &str) -> String {
+    format!(
+        "<p class=\"actions\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\"><a class=\"target-link\" href=\"/recipes/{reference}/history\">History</a></p>"
+    )
+}
+
+#[tokio::test]
+async fn recipes_page_links_to_the_history_for_every_role() {
+    let world = recipe_world();
+    for session in [&world.operator, &world.engineer, &world.admin] {
+        let reply = world.get_en(session, "/recipes/R-100").await;
+        let main = main_of(&reply.body);
+        assert_eq!(main.matches("/history\"").count(), 1, "{main}");
+        assert!(main.contains(&history_link("R-100")), "{main}");
+        assert_clean_html(&reply.body);
+    }
+}
+
+#[tokio::test]
+async fn recipes_page_of_a_deleted_recipe_links_to_the_history_for_an_administrator() {
+    let world = recipe_world();
+    let reply = world.get_en(&world.admin, "/recipes/R-300").await;
+    let main = main_of(&reply.body);
+    assert!(main.contains(&history_link("R-300")), "{main}");
+}
+
 #[tokio::test]
 async fn recipes_page_of_a_deleted_recipe_gives_e_rcp_012_to_the_other_roles() {
     let world = recipe_world();

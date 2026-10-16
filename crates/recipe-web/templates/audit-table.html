@@ -1,0 +1,7 @@
+{% import "components/table.html" as tables -%}
+{#- The table of audit entries (ADR-0051 e). The recipe history and the audit list include it. A row shows the time, the actor, the action, and the object. When linked is true, the time cell also holds the link to the entry page. The href holds the id of the entry and comes from code. -#}
+{% call tables::frame("audit-caption", caption) %}<thead><tr>{{ tables::head(t.get("audit-col-time")) }}{{ tables::head(t.get("audit-col-actor")) }}{{ tables::head(t.get("audit-col-action")) }}{{ tables::head(t.get("audit-col-entity")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(4, empty) }}{% else %}<tbody>
+{% for row in rows %}<tr><td><span class="data">{{ row.time }}</span>{% if let Some(href) = row.href %} <a class="target-link" href="{{ href }}">{{ row.link_text }}</a>{% endif %}</td><td class="data">{{ row.actor }}</td><td>{{ row.action }}</td><td>{{ row.entity }}</td></tr>
+{% endfor %}</tbody>
+{% endif %}{% endcall %}

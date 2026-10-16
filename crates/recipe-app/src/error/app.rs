@@ -26,6 +26,8 @@ pub enum TimeoutStage {
     Export,
     /// The whole request.
     Request,
+    /// The wait for a diff permit and the diff of two versions (ADR-0050 (g)).
+    Diff,
 }
 
 impl fmt::Display for TimeoutStage {
@@ -35,6 +37,7 @@ impl fmt::Display for TimeoutStage {
             Self::Validation => "validation",
             Self::Export => "export",
             Self::Request => "request",
+            Self::Diff => "diff",
         })
     }
 }
@@ -52,6 +55,8 @@ pub enum TaskStage {
     Export,
     /// The read of random bytes for a session token, a CSRF token, or a one-time password.
     Token,
+    /// The diff of two versions (ADR-0050 (g)).
+    Diff,
 }
 
 impl fmt::Display for TaskStage {
@@ -61,6 +66,7 @@ impl fmt::Display for TaskStage {
             Self::Validation => "validation",
             Self::Export => "export",
             Self::Token => "token generation",
+            Self::Diff => "diff",
         })
     }
 }

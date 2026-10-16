@@ -5,12 +5,12 @@ use recipe_domain::export::Sha256;
 use recipe_domain::plant::{PlatformTypes, TypeTrees};
 use recipe_domain::recipe::{
     ApprovalOutcome, ApprovalPolicy, ApprovalReady, Approver, Draft, Recipe, RecipeId,
-    RecipeVersionId,
+    RecipeVersionId, VersionHeader,
 };
 use serde_json::Value;
 
-use super::ApproveVersionInput;
 use super::prepare::Ready;
+use super::{ApproveVersionInput, ApproveVersionOutput};
 use crate::audit::version_entry;
 use crate::auth::{CurrentUser, RequestMeta};
 use crate::context::AppContext;
@@ -113,6 +113,33 @@ async fn write_approval(
     ))
 }
 
+/// Lock the root and then the draft row in the order of ADR-0015 (design D12 step 4).
+///
+/// # Errors
+///
+/// Returns `NotFound` (`E-WEB-005`) when the root or the draft row is gone.
+async fn lock_root_and_draft(
+    tx: &mut dyn Transaction,
+    (recipe, token): (RecipeId, &ApprovalReady),
+    input: &ApproveVersionInput,
+) -> Result<(Recipe, RowImage), AppError> {
+    let Locked { state, .. } =
+        tx.recipes()
+            .lock_recipe(recipe)
+            .await?
+            .ok_or_else(|| AppError::NotFound {
+                entity: Missing::Recipe(input.reference.clone()),
+            })?;
+    let before = tx
+        .recipes()
+        .lock_version(token.version())
+        .await?
+        .ok_or_else(|| AppError::NotFound {
+            entity: Missing::version(&input.reference, token.number()),
+        })?;
+    Ok((state, before))
+}
+
 /// Run the transaction of design D12 steps 4 to 6 and commit the approval.
 ///
 /// # Errors
@@ -125,29 +152,14 @@ pub(super) async fn approve_in_transaction(
     (user, meta): (&CurrentUser, &RequestMeta),
     input: &ApproveVersionInput,
     ready: Ready,
-) -> Result<ApprovalOutcome, AppError> {
+) -> Result<ApproveVersionOutput, AppError> {
     let Ready {
         recipe: recipe_id,
         token,
         hash,
     } = ready;
     let mut tx = ctx.uow.begin(Isolation::ReadCommitted).await?;
-    let Locked {
-        state: mut recipe, ..
-    } = tx
-        .recipes()
-        .lock_recipe(recipe_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound {
-            entity: Missing::Recipe(input.reference.clone()),
-        })?;
-    let before = tx
-        .recipes()
-        .lock_version(token.version())
-        .await?
-        .ok_or_else(|| AppError::NotFound {
-            entity: Missing::version(&input.reference, token.number()),
-        })?;
+    let (mut recipe, before) = lock_root_and_draft(tx.as_mut(), (recipe_id, &token), input).await?;
     let checked = recheck(tx.as_mut(), token.draft(), input.allow_outdated).await?;
     let approver = Approver {
         user: user.user(),
@@ -156,9 +168,13 @@ pub(super) async fn approve_in_transaction(
     let policy = &ctx.settings.approval_policy;
     let outcome = decide(&mut recipe, token, input, (&approver, policy))?;
     let ApprovalOutcome::Approved { approved, retired } = outcome else {
-        return Ok(outcome);
+        return Ok(ApproveVersionOutput {
+            outcome,
+            retired: None,
+        });
     };
     checked?;
+    let retired_number = retired_number(&recipe, retired)?;
     let approval = Approval {
         recipe: recipe_id,
         approved,
@@ -167,7 +183,34 @@ pub(super) async fn approve_in_transaction(
     };
     let entries = write_approval(tx.as_mut(), approval, (input, before), (user, meta)).await?;
     ctx.uow.commit(tx, entries).await?;
-    Ok(outcome)
+    Ok(ApproveVersionOutput {
+        outcome,
+        retired: retired_number,
+    })
+}
+
+/// Return the number of the retired version from the headers of the locked root (ADR-0049 (e)).
+///
+/// # Errors
+///
+/// Returns `E-DB-008` when the root retired a version that it does not list.
+fn retired_number(
+    recipe: &Recipe,
+    retired: Option<RecipeVersionId>,
+) -> Result<Option<u32>, AppError> {
+    retired
+        .map(|old| {
+            recipe
+                .versions()
+                .iter()
+                .find(|header| header.id() == old)
+                .map(VersionHeader::number)
+                .ok_or_else(|| {
+                    StorageError::invariant("the root retired a version that it does not list")
+                        .into()
+                })
+        })
+        .transpose()
 }
 
 /// Run `Recipe::approve` on the locked root and map its conflict (design D10).

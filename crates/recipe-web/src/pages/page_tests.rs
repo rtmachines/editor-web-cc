@@ -254,7 +254,7 @@ async fn page_nav_of_an_operator_has_recipes_machines_and_account_and_no_users()
 }
 
 #[tokio::test]
-async fn page_nav_of_an_administrator_has_four_links_in_order() {
+async fn page_nav_of_an_administrator_has_five_links_in_order() {
     let (fixture, session) = administrator();
     let reply = get_page(&fixture, Some(&session), "en", "/me").await;
     let nav = nav_of(&reply.body);
@@ -262,9 +262,11 @@ async fn page_nav_of_an_administrator_has_four_links_in_order() {
         at(&nav, &link("/recipes", false, "Recipes")),
         at(&nav, &link("/machines", false, "Machines")),
         at(&nav, &link("/users", false, "Users")),
+        at(&nav, &link("/audit", false, "Audit")),
         at(&nav, &link("/me", true, "My account")),
     ];
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{nav}");
+    assert_eq!(nav.matches("<li").count(), 5, "{nav}");
 }
 
 #[tokio::test]

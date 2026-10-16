@@ -12,7 +12,7 @@ use axum::body::Body;
 use axum::http::{Method, StatusCode};
 use recipe_domain::audit::SecurityEventKind;
 
-use super::recipe_sweep_tests::{post_endpoints, sweep_pages};
+use super::recipe_sweep_tests::{TOKEN_ONLY_ROUTES, post_endpoints, sweep_pages};
 use super::test_helpers::assert_error;
 use super::{parameters, recipes, versions};
 use crate::csrf::is_mutating;
@@ -96,7 +96,12 @@ fn recipe_security_the_endpoint_table_names_every_mutating_route_of_the_areas() 
 fn recipe_security_the_endpoint_table_holds_a_body_for_every_command() {
     for (endpoint, _want) in post_endpoints() {
         assert!(is_mutating(&endpoint.method), "{}", endpoint.path);
-        assert!(!endpoint.body.is_empty(), "no body for {}", endpoint.path);
+        let token_only = TOKEN_ONLY_ROUTES.contains(&endpoint.path);
+        assert!(
+            token_only || !endpoint.body.is_empty(),
+            "no body for {}",
+            endpoint.path
+        );
     }
 }
 

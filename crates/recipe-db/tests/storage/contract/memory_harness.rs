@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use recipe_app::memory::{MemoryClock, MemoryStore};
 use std::net::IpAddr;
 
-use recipe_app::ports::{AttemptId, Clock as _, LoginAttemptStore, SessionStore, UnitOfWork};
+use recipe_app::ports::{
+    AttemptId, Clock as _, LoginAttemptStore, SecurityEventSink, SessionStore, UnitOfWork,
+};
 use recipe_domain::identity::{TypedLogin, UserId};
 use recipe_domain::timestamp::Timestamp;
 
@@ -46,6 +48,10 @@ impl Harness for MemoryHarness {
 
     fn login_attempts(&self) -> Arc<dyn LoginAttemptStore> {
         Arc::new(self.store.clone())
+    }
+
+    fn security_events(&self) -> Arc<dyn SecurityEventSink> {
+        Arc::new(self.store.sink())
     }
 
     async fn seed_attempts(
