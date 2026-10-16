@@ -57,6 +57,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0045](0045-nested-arrays-inside-a-group.md) | Nested arrays inside a group | Accepted | 2026-10-15 |
 | [0046](0046-permission-check-of-a-form-route.md) | Permission check of a form route | Accepted | 2026-10-15 |
 | [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted | 2026-10-15 |
+| [0048](0048-browser-regression-suite-with-playwright.md) | Browser regression suite with Playwright | Accepted | 2026-10-16 |
 
 ## Decision map
 
@@ -86,6 +87,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Dependencies of the application layer | 0029 + 0035 (Argon2, random bytes, semaphore) |
 | Stored settings, security event retention | 0022 |
 | STE lint scope and script location in CI | 0023 |
+| Browser tests | 0048 (Playwright regression suite on the dev server, smoke suite on the Compose stack) |
 
 ## How to add an ADR
 

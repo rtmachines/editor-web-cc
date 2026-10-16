@@ -438,10 +438,16 @@ Bez nowego change (naprawy wchodzą jako change "hardening-round-1" tylko, gdy z
    docs/ops/soak-<date>.md. Uruchom 2 h lokalnie, pokaż wykres RSS.
 4. `accessibility-audit` na wszystkich ekranach (WCAG 2.2 AA) → lista i naprawy.
 5. Pokrycie: cargo llvm-cov ≥ 80 % per crate; luki uzupełnia subagent Haiku testami z tabel.
+6. Playwright (ADR-0048): katalog `e2e/` (Playwright Test, wersje dokładne, `npm ci`, tylko
+   Chromium, Node LTS w `e2e/.nvmrc`). Pakiet regresji na `examples/dev_server.rs` z seedem
+   przez HTTP: 320/768/1280 px bez przewijania w bok, ścieżka klawiatury przez siatkę, Enter
+   zapisuje bez `fields` i `limit_mode`, fokus po podmianie, WCAG 2.4.11, kontrole CSP.
+   Job CI na każdy push i PR, retries 0, trace jako artefakt. Pakiet smoke z reliability.md §6
+   na stosie Compose. Testy pisze `playwright-cli`, hasła tylko ze zmiennych środowiska.
 Zakończ `superpowers:verification-before-completion` z wyjściem komend.
 ```
 
-Skille: `cso`, `health`, `accessibility-audit`, `rust-performance`, `rust-testing`. Modele: Opus (audyty), Sonnet (naprawy), Haiku (testy).
+Skille: `cso`, `health`, `accessibility-audit`, `rust-performance`, `rust-testing`, `playwright-cli`. Modele: Opus (audyty), Sonnet (naprawy), Haiku (testy).
 
 ### P4.3 — Dokumentacja i release
 

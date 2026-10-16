@@ -74,6 +74,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The error list of a form. `#error-panel` shows at most 20 lines, and the form comes back with a line under each bad input.
 - The conflict answer shows the `row_version` of the server, the login of the last editor, and the time of the last change.
 - A body limit for each route group. A parameter value can have 4 MiB, and a translation 64 KiB.
+- ADR-0048 for a browser regression suite with Playwright Test in `e2e/`. The regression suite runs on the dev server in CI, and the smoke suite runs on the Compose stack.
 
 ### Changed
 
