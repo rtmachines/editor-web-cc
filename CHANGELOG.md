@@ -58,6 +58,22 @@ This file records the notable changes of the recipe editor. The format follows [
 - The example `examples/dev_server.rs` of `recipe-web`. It serves the pages on `127.0.0.1` with the in-memory adapters for a test in a browser.
 - ADR-0038 for a struct cycle across revisions. `DefineUdt` refuses a struct whose type tree holds a struct with the same name.
 - The messages of the Plant Model error codes in `pl` and `en`.
+- ADR-0039 for the form of a parameter value and the leaf grid. ADR-0040 for the POST routes of translations and removals. ADR-0041 for the error lists of a form.
+- ADR-0042 for the snapshot reads of draft queries. ADR-0043 for the pages of the recipe editor.
+- The read port `RecipeReads` with an in-memory adapter and a `sqlx` adapter. `Isolation::RepeatableRead` opens a `REPEATABLE READ READ ONLY` transaction.
+- The recipe queries `ListRecipes`, `ListDeletedRecipes`, `GetRecipe`, `GetRecipeForm`, `ListVersions`, `GetVersionForm`, and `GetVersion` of `recipe-app`.
+- The parameter queries `ListParameters`, `GetParameter`, `GetLimits`, `GetTranslations`, and `GetParameterForm`. `GetParameterForm` shows the tree of a type without a write.
+- The settings `page.recipes`, `page.versions`, `page.parameters`, `form.array_chunk`, and `i18n.translation_langs`.
+- `LeafTexts`, `ParameterValue::from_texts`, and `ParameterValue::texts` in `recipe-domain`. A value travels as one text per leaf.
+- The type `Expected` for the expected form of a value, and `MemberValue` for the new members of a rebind.
+- `rebind_new_leaves` in `recipe-domain`. The rebind form and the command use the same rule for the new member leaves.
+- The pages of `api.md` section 2.4 in `pl` and `en`: the recipe list with search and filters, the recipe form, the recipe page, and the rename.
+- The pages of `api.md` section 2.5: the version list, the version form, and the version page with the parameter table and the unit links.
+- The pages of `api.md` section 2.6: the parameter form with the leaf grid, the parameter page, the value, the limits, the translations, and the removals.
+- The list of outdated parameters and the rebind form on the version page.
+- The error list of a form. `#error-panel` shows at most 20 lines, and the form comes back with a line under each bad input.
+- The conflict answer shows the `row_version` of the server, the login of the last editor, and the time of the last change.
+- A body limit for each route group. A parameter value can have 4 MiB, and a translation 64 KiB.
 
 ### Changed
 
@@ -75,6 +91,17 @@ This file records the notable changes of the recipe editor. The format follows [
 - `design-system.md` sections 1, 6, 8, 9, 10.1, 10.2, 10.5, 10.8, 11, and 12 hold the decisions of ADR-0037. `api.md` sections 1, 2.1, 2.2, and 2.3 and `reliability.md` section 7.11 hold them too. ADR-0036 has an "Amended by" note.
 - The navigation shows the link to the machines after the link to the recipes. A boosted form or link of a page replaces the content of `main` and the page title.
 - An HTMX error answer sets `HX-Push-Url: false`, so a refused form keeps the URL of its page. `api.md` sections 1 and 5.3 and I8 of `domain-model.md` hold the decisions of ADR-0037 (z) and ADR-0038.
+- `api.md` sections 1, 2.4 to 2.6, 4, 7.6, and 9 and `reliability.md` sections 4.2, 4.4, and 7.11 hold the decisions of ADR-0039 to ADR-0043. `domain-model.md` sections 2.1 and 5.2, `data-model.md` section 6, and `design-system.md` sections 8, 9, 10.4, 10.5, and 10.8 hold them too.
+- ADR-0001, ADR-0027, ADR-0029, and ADR-0036 have an "Amended by" note. `http.body_limit.value` is 4 MiB.
+- The draft functions of `recipe-domain` return every fault of one parameter in one `RecipeErrors`. The field `expected` of `ValueShapeMismatch` is an `Expected`.
+- `AddParameter`, `UpdateParameterDefinition`, and `SetParameterValue` take a `ValueInput`. `RebindTypeRevision` takes a `MemberValue` for each new member leaf.
+- The forms of machines, units, and UDT types answer every bad field at once (ADR-0041).
+- The recipe list page of step P3.1 shows the table, the pages, and the search form.
+- `design-system.md` sections 9, 10.4, and 10.6 and `api.md` sections 2.5 and 2.6 hold decisions of the implementation. ADR-0036 has a second "Amended by" note.
+- ADR-0044 limits the rebind forms of one version page to `form.rebind_leaves` new member fields. Only a user with `ParameterEdit` on a live draft gets them. ADR-0043 has an "Amended by" note.
+- ADR-0045 keeps an array inside a group of the leaf grid in that group, with no toggle of its own. `design-system.md` section 10.8 holds the rule. ADR-0039 has an "Amended by" note.
+- ADR-0046 runs the form query of a route before the route reads its fields. The form query checks the permission of its purpose. `api.md` section 3 and `domain-model.md` section 5.5 hold the rule. ADR-0041 has an "Amended by" note.
+- ADR-0047 shows a refused form without HTMX on a page of the session with the sent texts. Every HTMX error answer empties `#toast`, and `#toast` sticks at the top of the view. The removal of a parameter shows a toast. `design-system.md` section 10 holds the rules. ADR-0036 has an "Amended by" note.
 
 ### Security
 

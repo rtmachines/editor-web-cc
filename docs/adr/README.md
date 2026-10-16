@@ -10,7 +10,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 
 | ADR | Title | Status | Date |
 |---|---|---|---|
-| [0001](0001-frontend-rust-ssr-htmx.md) | Frontend with Rust server-side rendering and HTMX | Accepted. Amended by ADR-0015 (row-version.js) | 2026-10-12 |
+| [0001](0001-frontend-rust-ssr-htmx.md) | Frontend with Rust server-side rendering and HTMX | Accepted. Amended by ADR-0015 (row-version.js) and ADR-0039 (whole value in one form) | 2026-10-12 |
 | [0002](0002-export-contract-json.md) | Export contract as a versioned JSON document | Superseded by ADR-0019 | 2026-10-12 |
 | [0003](0003-deployment-docker-compose.md) | Deployment with Docker Compose on one on-premises host | Superseded by ADR-0020 | 2026-10-12 |
 | [0004](0004-auth-server-sessions.md) | Authentication with server-side sessions in PostgreSQL | Superseded by ADR-0014 | 2026-10-12 |
@@ -36,26 +36,39 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0024](0024-error-codes-member-names-s7-width.md) | Error codes for duplicate member names and the S7 address width | Accepted | 2026-10-13 |
 | [0025](0025-parse-reasons-of-value-objects.md) | Parse reasons of value objects without an own error code | Accepted | 2026-10-13 |
 | [0026](0026-ranges-of-date-and-date-and-time.md) | Platform ranges of DATE and DATE_AND_TIME | Accepted | 2026-10-13 |
-| [0027](0027-error-lists-and-draft-errors.md) | Error lists and the error of a draft command | Accepted | 2026-10-13 |
+| [0027](0027-error-lists-and-draft-errors.md) | Error lists and the error of a draft command | Accepted. Amended by ADR-0041 (lists of a value and of limits) | 2026-10-13 |
 | [0028](0028-version-header-and-approval-token.md) | Version header, approval token, and draft clarifications | Accepted. Amended by ADR-0029 (the approval token owns the draft) | 2026-10-13 |
-| [0029](0029-application-layer-clarifications.md) | Approval token ownership, audit row images, and application clarifications | Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked) | 2026-10-13 |
+| [0029](0029-application-layer-clarifications.md) | Approval token ownership, audit row images, and application clarifications | Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked) and ADR-0039 (transport of `new_member_values`) | 2026-10-13 |
 | [0030](0030-guard-of-a-version-status-write.md) | Guard of a version status write | Accepted | 2026-10-13 |
 | [0031](0031-migrator-configuration-and-secret-files.md) | Configuration of the migrator and the secret files of the roles | Accepted | 2026-10-13 |
 | [0032](0032-default-databases-closed-to-public.md) | Default databases closed to PUBLIC | Accepted | 2026-10-13 |
 | [0033](0033-globals-dump-of-the-backup.md) | Globals dump of the backup | Accepted | 2026-10-14 |
 | [0034](0034-hardening-of-the-audit-objects.md) | Hardening of the audit objects | Accepted. Amended by ADR-0035 (security_event_guard in the guard list) | 2026-10-14 |
 | [0035](0035-identity-sessions-clarifications.md) | Identity, sessions, and the guard of security events | Accepted | 2026-10-14 |
-| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted. Amended by ADR-0037 (style sheets, navigation link, whole unit tree) | 2026-10-14 |
+| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted. Amended by ADR-0037 (style sheets, navigation link, whole unit tree) and ADR-0039 (inputs and groups in the leaf grid). Amended by ADR-0041 (alert of `field-errors.html`) and ADR-0047 (refused form page, empty toast) | 2026-10-14 |
 | [0037](0037-plant-model-pages.md) | Pages of the plant model | Accepted. Amended by ADR-0038 (datalist of a new revision, browser test of `E-PLT-005`) | 2026-10-14 |
 | [0038](0038-struct-cycle-across-revisions.md) | Struct cycle across revisions | Accepted | 2026-10-15 |
+| [0039](0039-parameter-value-form.md) | Form of a parameter value | Accepted. Amended by ADR-0045 (groups of a nested array) | 2026-10-15 |
+| [0040](0040-post-routes-for-translations-and-removal.md) | POST routes for translations and for the removal of a parameter | Accepted | 2026-10-15 |
+| [0041](0041-error-lists-of-a-form.md) | Error lists of a form | Accepted. Amended by ADR-0046 (form query before the fields) | 2026-10-15 |
+| [0042](0042-snapshot-reads-of-draft-queries.md) | Snapshot reads of draft queries | Accepted | 2026-10-15 |
+| [0043](0043-recipe-editor-pages.md) | Pages of the recipe editor | Accepted. Amended by ADR-0044 (bound of the rebind forms) | 2026-10-15 |
+| [0044](0044-bound-of-the-rebind-forms.md) | Bound of the rebind forms | Accepted | 2026-10-15 |
+| [0045](0045-nested-arrays-inside-a-group.md) | Nested arrays inside a group | Accepted | 2026-10-15 |
+| [0046](0046-permission-check-of-a-form-route.md) | Permission check of a form route | Accepted | 2026-10-15 |
+| [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted | 2026-10-15 |
 
 ## Decision map
 
 | Topic | Current ADR |
 |---|---|
-| Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system, fonts, icons, layout) + 0037 (`hx-boost` forms, two style sheets) |
-| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) |
-| Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) |
+| Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system) + 0037 (`hx-boost` forms, style sheets) + 0039 (value form) + 0040 (POST routes) |
+| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) + 0039 (leaf grid) + 0043 (deleted state) + 0045 (nested arrays inside a group) |
+| Error page, page of a refused form, toast | 0036 + 0047 (refused form page in the session layout, empty toast after an error, sticky toast) |
+| Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) + 0041 (error lists) |
+| Permission check and fields of a form route | 0013 + 0041 + 0046 (form query with a purpose, check before the fields) |
+| Pages of recipes, versions, and parameters | 0039 (value form, leaf grid) + 0040 (POST routes) + 0041 (error lists) + 0043 (lists, deleted recipe, translations, rebind, conflict) + 0044 (rebind bound) |
+| Isolation of queries | 0042 |
 | Export | 0019 |
 | Deployment, migrations, backup, panic policy, health | 0020 + 0031 (migrator configuration, secret files) + 0032 (default databases) + 0033 (globals dump) |
 | Sessions, login, passwords, bootstrap | 0014 + 0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, Origin, client address, create-admin) |
@@ -63,13 +76,13 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | PLC types, UDT revisions, derived types, S7-300 layout | 0006 + 0017 + 0018 + 0024 (member names, S7 width) + 0038 (struct cycle across revisions) |
 | Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) + 0026 (ranges of `DATE`, `DATE_AND_TIME`) |
 | Errors of value objects without an own code | 0025 |
-| Error lists, errors of draft commands | 0027 |
+| Error lists, errors of draft commands | 0027 + 0041 (every fault of a value and of limits, form error lists) + 0047 (page of a refused form without HTMX) |
 | Concurrency | 0008 + 0015 + 0028 (row version check of version commands) + 0030 (guard of a version status write) + 0035 (lock failure cause) |
 | Versions and aggregates | 0009 + 0016 + 0028 (version header, approval token, draft load, value and text clarifications) + 0029 (token owns the draft, two command clarifications) |
 | Recipe scope | 0010 |
 | Soft delete and delete rules | 0021 |
-| Translations | 0012 |
-| Permissions and approval | 0013 + 0022 + 0028 (approval token, `Approver`) + 0029 (failed record of a Forbidden event) |
+| Translations | 0012 + 0043 (fixed list of language tags) |
+| Permissions and approval | 0013 + 0022 + 0028 (approval token, `Approver`) + 0029 (failed record of a Forbidden event) + 0046 (form queries) |
 | Dependencies of the application layer | 0029 + 0035 (Argon2, random bytes, semaphore) |
 | Stored settings, security event retention | 0022 |
 | STE lint scope and script location in CI | 0023 |

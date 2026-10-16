@@ -9,6 +9,9 @@ Source: `docs/architecture/api.md` §1 to §9, ADR-0001, ADR-0008, ADR-0015. Loa
 - Only the export routes under `/export/v1/` return JSON.
 - A path value parses into its value object. A bad path value never gives a 500. §1 gives the code of each bad value.
 - Every mutating route accepts only `application/x-www-form-urlencoded`. Request structs use `#[serde(deny_unknown_fields)]`.
+- Every mutating route uses `POST`. No route uses `PUT` or `DELETE` (ADR-0040).
+- A parameter value travels as one field per leaf: `value` and the leaf path. A reader of pairs rejects an unknown key (ADR-0039).
+- A form answer lists every bad field at once. It puts the summary into `#error-panel` and swaps the form out of band with a line under each field (ADR-0041).
 - UI text comes from the `fluent` bundles `pl` (default) and `en`. The cookie `recipe_lang` holds the choice (api.md §8).
 
 ## HTMX configuration (api.md §9)
@@ -42,7 +45,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 
 ## Requests, concurrency, errors (api.md §4, §5, §7)
 
-- Every `POST`, `PUT`, and `DELETE` carries the CSRF token: the field `csrf_token` or the header `X-CSRF-Token`.
+- Every mutating request (every method except `GET`, `HEAD`, and `OPTIONS`) carries the CSRF token: the field `csrf_token` or the header `X-CSRF-Token`.
 - `POST /login` and `POST /lang` without a session use the pre-session token `csrf_pre`. A bad token gives `403 E-WEB-007`.
 - A mutating request needs a matching `Origin` header or `Sec-Fetch-Site: same-origin`. A rejection writes a `csrf_rejected` security event.
 - Every form on a draft page has the hidden field `row_version`. Every mutating request on a draft sends it.

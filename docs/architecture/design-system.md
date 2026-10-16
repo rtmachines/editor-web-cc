@@ -291,11 +291,11 @@ Every icon tag is fixed and complete. `<name>` is the name of the icon in the ic
 |---|---|---|
 | `status-draft` | Version state `Draft` | Pencil |
 | `status-approved` | Version state `Approved` | Check mark in a circle |
-| `status-retired` | Version state `Retired`. State "Archived" of a machine or a unit (section 9) | Archive box |
+| `status-retired` | Version state `Retired`. State "Archived" of a machine or a unit. State "Deleted" of a recipe (section 9) | Archive box |
 | `user-active` | Active user | Check mark in a circle |
 | `user-inactive` | Inactive user | Slashed circle |
 | `alert-error` | Error message | Octagon with an exclamation mark |
-| `alert-warning` | Warning message | Triangle with an exclamation mark |
+| `alert-warning` | Warning message. State "Outdated" of a parameter (section 9) | Triangle with an exclamation mark |
 | `alert-info` | Information message | Circle with the letter i |
 | `alert-success` | Success message | Check mark |
 | `tree-collapsed` | Collapsed tree node. Closed danger disclosure (section 10.5) | Chevron that points right |
@@ -313,6 +313,9 @@ The word key is the message id of the word in the `fluent` bundles `pl` and `en`
 | User active | `user-status-active` | `--color-success-fg`, `--color-success-bg`, `--color-success-edge` | `user-active` |
 | User inactive | `user-status-inactive` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `user-inactive` |
 | Archived machine or unit | `status-archived` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
+| Discarded draft (ADR-0043) | `status-discarded` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
+| Deleted recipe (ADR-0043) | `status-deleted` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
+| Outdated parameter (ADR-0043) | `status-outdated` | `--color-warning-fg`, `--color-warning-bg`, `--color-warning-edge` | `alert-warning` |
 
 | Feedback | Tokens | Icon |
 |---|---|---|
@@ -342,6 +345,7 @@ Every full page uses one layout (ADR-0036). The regions come in this order:
 - The login page has no session. On `GET /login`, its top bar holds the application name and the language switch with `csrf_pre`.
 - The full error page shows the top bar with the application name only, because the error layer runs before the session layer. It has no navigation and no language switch.
 - The `main` of the full error page holds the error in `#error-panel` and the `h1` of section 10.6. Then it shows one link to `/recipes` with a text from the bundles.
+- A form can get field errors on a request with a session and without HTMX. The answer is then the page of the refused form (ADR-0047 (a)). That page has the layout of the session with no language switch, the summary, one `h1`, and the form.
 
 Answers to HTMX (ADR-0037):
 
@@ -384,6 +388,15 @@ Answers to HTMX (ADR-0037):
 - A cell with data uses `--font-mono`. A cell with a number aligns its content to the right.
 - A table with no rows shows the empty state (section 10.10) in place of the table body.
 
+The leaf grid (ADR-0039):
+
+- The leaf grid is a table of section 10.4 inside a form. It has one row per leaf of a parameter and the columns path, value, minimum, maximum, maximum length, and type (ADR-0039 (j)).
+- The first cell of a row is a `th` with `scope="row"` and an `id`. It holds the leaf path in `--font-mono`.
+- Each input of a row names the row header and its column header in `aria-labelledby`. A cell of the grid has no `label` element.
+- A cell with an input has a padding of `--space-1` on each side. Two inputs in adjacent cells or rows therefore keep the gap `--target-gap`.
+- A row `[*]` stands before the elements of its array level. It has the ground `--color-sunken`.
+- A cell that has no limit of its class shows a word from the bundles, for example "not applicable", in `--color-text-muted`.
+
 ### 10.5 Form field and buttons
 
 Form field:
@@ -416,8 +429,9 @@ Field errors (ADR-0036):
 - An HTMX answer with the status `422` goes into `#error-panel` (`api.md` section 5.3).
 - Each line of `field-errors.html` shows the label of the field from the bundles. The key of the label is `field-` and the field name with each `_` replaced by `-`, for example `field-current-password`.
 - In an HTMX fragment and on the login page with its form, the line links to `#<field>`, the `id` of the input.
-- The full error page shows the label without a link.
-- Step P3.3 adds an error line under the input. A form that renders with its own errors shows this line.
+- The full error page shows the label without a link. The page of a refused form links each line to its input (ADR-0047 (a)).
+- A form that renders with its own errors shows an error line under each input with an error (ADR-0041). In the leaf grid, the line stands under the input in its cell (ADR-0039).
+- An error answer of a form puts the summary into `#error-panel` and swaps the form out of band. The form keeps the sent input (ADR-0041).
 - The error line shows the `alert-error` icon, the code in `--font-mono`, and one sentence in `--color-error-fg`.
 - An input with an error line has `aria-invalid="true"` and the border `--color-error-edge`. `aria-describedby` also names the error line.
 
@@ -435,7 +449,8 @@ Buttons:
 
 `api.md` section 5.2 gives the content of an error fragment: the code, one sentence, and the `request_id`. This section gives the structure and the look.
 
-- Each fragment `error.html` and `field-errors.html` is one `div` with `role="alert"`. The `div` holds the icon, the code, the sentence, the field lines, and the reference. Only `field-errors.html` has field lines.
+- The fragment `error.html` is one `div` with `role="alert"`. The `div` holds the icon, the code, the sentence, and the reference.
+- In `field-errors.html`, the element with `role="alert"` holds only the icon, the code, and the count of the lines (ADR-0041 (d)). The list of the field lines and the reference come after that element.
 - `#error-panel` itself has no role and no `aria-live` (section 10.1).
 - An HTMX error answer sets `HX-Reswap: innerHTML show:#error-panel:top` (`api.md` section 5.3). The error therefore scrolls into view.
 - The focus does not move. A screen reader therefore reads the alert once.
@@ -460,6 +475,7 @@ The full error page:
 - It shows the same `div` in `#error-panel`.
 - It has one `h1` with the text of the key `error-page-title`.
 - Its page title has the form `<code> · <error-page-title> · <app-name>`.
+- The page of a refused form has the same `h1` and the same page title. The form with the sent texts follows the `h1` (ADR-0047 (a)).
 
 ### 10.7 Status region and toast
 
@@ -468,7 +484,8 @@ The full error page:
 - A success message goes into `#toast` with the `alert-success` icon (ADR-0036).
 - The same answer clears `#error-panel` with an out-of-band swap (`hx-swap-oob`). The value of that attribute is a literal, never a variable.
 - The toast has the ground `--color-topbar` and the text `--color-on-action`. The `alert-success` icon has the color `--color-success-bg`.
-- The message stays until the next swap, because no script may remove it.
+- The message stays until the next success answer or the next HTMX error answer, because no script may delete it. Every HTMX error answer ends with an empty `#toast` out of band (ADR-0047 (b)).
+- `#toast` sticks at the top of the view with `position: sticky` and `top: 0`. `html` has `scroll-padding-top`, so a focused element does not hide under the toast (WCAG 2.4.11, ADR-0047 (c)).
 - A one-time password stays in the page content. Its container has no live role.
 
 ### 10.8 Tree
@@ -487,6 +504,15 @@ The unit tree and the type tree use the disclosure pattern of WAI-ARIA, not the 
 - `tree.js` toggles `aria-expanded` of the button and the attribute `hidden` of the group. It finds the group with `document.getElementById`. The focus stays on the button.
 - The server renders the whole tree. No request loads the children of a node (ADR-0037).
 - A group indents its nodes by `--space-4`. Five levels then fit a width of 320 CSS px.
+
+The groups of the leaf grid (ADR-0039):
+
+- An array with more than `form.array_chunk` elements splits into groups (`reliability.md` section 7.11). Each group is one `tbody` of the leaf grid.
+- An array inside a group does not split. It shows all its rows inside that group, with no toggle of its own, because a `tbody` cannot hold a `tbody` (ADR-0045).
+- A toggle row stands in its own `tbody` before the `tbody` of its group, so the toggle stays visible when the group is closed. The row holds a `button` of this section that names the index range and the count of the elements.
+- The grid stands inside an element `.tree`, so `tree.js` toggles the group.
+- The `id` of a group is the prefix `grid-group-` and the index of the group in the grid.
+- A group is closed, except the first group of an array and each group with an error line. An input in a closed group still submits with the form.
 
 The unit tree (ADR-0037):
 
@@ -535,7 +561,7 @@ The unit tree (ADR-0037):
 - A template gets its look only from the classes of the two style sheets of section 1. A rule of a style sheet uses a font family, a text size, or a space only through its token.
 - A rule outside `:root` names a color only through its token. The only other color values are `transparent`, `currentColor`, and the system colors of forced-colors mode.
 - These system colors are `Canvas`, `CanvasText`, `LinkText`, `ButtonText`, `ButtonBorder`, `Highlight`, `HighlightText`, and `GrayText`.
-- No template holds a literal word (ADR-0036). A test removes the askama tags and the markup of each template and finds no letter.
+- No template holds a literal word (ADR-0036). A test deletes the askama tags and the markup of each template and finds no letter.
 - Every icon uses the fixed tag of section 8.
 - Every full page uses the layout of section 10.1. A fragment does not repeat the layout.
 - A link outside `nav` and outside `.btn` keeps its underline, because `--color-action` on `--color-text` has only 2.10:1 (WCAG 1.4.1).

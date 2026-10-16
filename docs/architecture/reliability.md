@@ -14,11 +14,11 @@ Each library crate owns its error types, with two exceptions. `recipe-export` re
 
 | Crate | Error type | Variants |
 |---|---|---|
-| `recipe-domain` | `PlantError`, `RecipeError`, `IdentityError`, `ExportError` | One `thiserror` enum per bounded context. Leaf errors. Every row with prefix `E-PLT`, `E-RCP`, `E-IDN` and a number below 030 in section 1.2, and every `E-RCP-050..069` row. `ExportError` lives in the module `export` and owns every `E-EXP` row: `NoApprovedVersion { reference }`, `VersionNotExportable { reference, number }`, `ContentHashMismatch { reference, number }`, `Serialize(#[from] serde_json::Error)`. Two carriers own no code (ADR-0027): `RecipeErrors` holds one or more `RecipeError` values, and `DraftError` holds a `RecipeError`, a `PlantError`, or a `RecipeErrors` |
+| `recipe-domain` | `PlantError`, `RecipeError`, `IdentityError`, `ExportError` | One `thiserror` enum per bounded context. Leaf errors. Every row with prefix `E-PLT`, `E-RCP`, `E-IDN` and a number below 030 in section 1.2, and every `E-RCP-050..069` row. `ExportError` lives in the module `export` and owns every `E-EXP` row: `NoApprovedVersion { reference }`, `VersionNotExportable { reference, number }`, `ContentHashMismatch { reference, number }`, `Serialize(#[from] serde_json::Error)`. Two carriers own no code (ADR-0027): `RecipeErrors` holds one or more `RecipeError` values, and `DraftError` holds a `RecipeError`, a `PlantError`, or a `RecipeErrors`. `ValueFaults` holds the faults of one value and owns no code. A draft function turns it into `RecipeErrors` (ADR-0041). `LeafTextsError` is a parse reason of `LeafTexts` without a code (ADR-0025, ADR-0039) |
 | `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] RecipeErrors`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `TaskFailed { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` of `Timeout` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `stage` of `TaskFailed` is `PasswordHash` or `Validation`, the two kinds of `spawn_blocking` work (2.2), `Export` (ADR-0029), or `Token`, a failed read of random bytes from the operating system (ADR-0035). `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock { cause }`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `cause` of `Deadlock` is `Deadlock`, `LockTimeout`, or `Serialization` (ADR-0035). `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
 | `recipe-db` | none public | Maps `sqlx::Error` into `StorageError` of `recipe-app` with the rule below. `recipe-db` depends on `recipe-app`, and `recipe-app` does not depend on `recipe-db` (`overview.md` 5) |
 | `recipe-export` | none | No error type of its own. The JSON writer of the HTTP response returns `ExportError` of `recipe-domain` |
-| `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
+| `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `BadRow { row, field, reason }` (ADR-0037), `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. Two carriers own no code. `Fields { lines, form }` holds a non-empty list of field errors, and `code()` returns the code of the first line (ADR-0041). `Conflict { error, view }` holds `AppError::ConcurrentEdit` and the data of the last change, and `code()` returns `E-WEB-001` of the inner error (ADR-0043). `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
 | `recipe-server` | `anyhow::Error` | Everything, only in `main()`, configuration loading, subcommands, and wiring |
 
 Rules:
@@ -104,7 +104,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-026` | `RecipeError::RecipeHasRetiredVersion { reference }` | 409 | Recipe {reference} has a retired version. Only an administrator can delete it. |
 | `E-RCP-027` | `RecipeError::InvalidLangCode { lang }` | 422 | {lang} is not a language code. Use a code such as pl or de-AT. |
 | `E-RCP-028` | `RecipeError::RebindNeedsValue { tag, leaf }` | 422 | {tag}{leaf} is a new member. Give it a value. |
-| `E-RCP-029` | `RecipeError::RebindDropsLimit { tag, leaf }` | 422 | {tag}{leaf} has a limit but no longer exists in the new revision. Delete the limit first. |
+| `E-RCP-029` | `RecipeError::RebindDropsLimit { tag, leaf }` | 422 | {tag}{leaf} has a limit, but the new revision has no such member or gives the member another type. Delete the limit first. After the rebind, set the limit again. |
 | `E-RCP-030` | `StorageError::Constraint`, trigger function `enforce_version_mutable` (data-model.md 4.1) | 409 | A parameter row cannot move to another version. Reference: {request_id}. |
 | `E-RCP-031` | `StorageError::Constraint`, trigger function `enforce_version_mutable` (data-model.md 4.1) | 409 | The version is not a live draft. Reference: {request_id}. |
 | `E-RCP-032` | `StorageError::Constraint`, trigger function `enforce_unit_machine` (data-model.md 4.3) | 422 | The unit does not belong to the machine of the recipe. Reference: {request_id}. |
@@ -356,16 +356,16 @@ A request that passes layer (a) is well-formed. A value that passes layer (b) is
 
 ### 4.2 HTTP layer rules
 
-- Body limits are in section 7.11. The server returns `E-WEB-003` above the limit. The parameter value field has its own limit, because a form with 16 384 leaves does not fit in the form limit.
+- Body limits are in section 7.11. The server returns `E-WEB-003` above the limit. The value fields of a parameter have their own limit, because a form with 16 384 leaves does not fit in the form limit.
 - All JSON types derive `serde::Deserialize` with `#[serde(deny_unknown_fields)]`.
-- Form parsing uses `axum::Form` with `serde` structs. A missing required field is `422 E-WEB-008` with the field name.
+- Form parsing uses `axum::Form` with `serde` structs. A missing required field is `422 E-WEB-008` with the field name. A form with indexed fields or value fields is read as pairs of key and value, and the reader rejects an unknown key (ADR-0037, ADR-0039).
 - A path parameter is parsed directly into the value object (`ReferenceNumber`, `MachineCode`, `UnitPath`, `ParameterKey`, `LangCode`). A bad path parameter never gives a 500. The rule has two cases (`api.md` 1):
   - A path value that is a domain value object with its own error code returns that code with 422. `LangCode` returns `E-RCP-027`. `UnitPath` returns `E-PLT-017` for a malformed text or segment and `E-PLT-002` for more than 5 segments. No path holds an S7 address.
   - A path value that names a resource returns `404 E-WEB-005` when the resource does not exist. This applies also when the text cannot name a resource, for example a bad `ReferenceNumber`. The exemption: a command on a draft returns `404 E-RCP-051` for a well-formed `{key}` and `404 E-RCP-050` for a well-formed `{lang}` that the existing draft does not hold (`api.md` 1).
 - A request field that names a machine or a unit that does not exist returns `404 E-PLT-019` or `404 E-PLT-020` (`api.md` 1).
-- The `Content-Type` of a request must match the route. Every mutating route accepts only `application/x-www-form-urlencoded`. The `value` field inside the form is JSON text.
-- HTMX 2 sends the parameters of a `DELETE` in the URL by default. The `htmx-config` meta tag sets `methodsThatUseUrlParams: ["get"]`, so `hx-delete` sends a form body like `hx-post` (`api.md` 9).
-- Text fields are trimmed and normalized to Unicode NFC before layer (b).
+- The `Content-Type` of a request must match the route. Every mutating route accepts only `application/x-www-form-urlencoded`. A parameter value travels as one field per leaf (ADR-0039).
+- Every mutating route uses `POST` (ADR-0040). The `htmx-config` meta tag keeps `methodsThatUseUrlParams: ["get"]` (`api.md` 9).
+- Text fields are trimmed and normalized to Unicode NFC before layer (b). Exception: the text of a `String` or `Char` leaf of a value is kept as sent (ADR-0039).
 - The `row_version` of a draft is a hidden form field. A missing `row_version` on a mutating draft request is `422 E-WEB-008`.
 - The `next` field of `POST /lang` must be a relative path that starts with `/` and not with `//`. Anything else is replaced by `/recipes`.
 - The `lang` field of `POST /lang` and the cookie `recipe_lang` accept only `pl` and `en`. The server ignores any other cookie value and uses `pl`.
@@ -399,6 +399,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 
 ### 4.4 Parameter value JSON
 
+- A form carries the text of each leaf (ADR-0039). `recipe-domain` builds the JSON form of each leaf from its text and its `LeafClass` (`domain-model.md` 2.1). Then the rules of this section apply.
 - The JSON is parsed by `serde_json` with the `arbitrary_precision` feature. A number stays a decimal string inside `serde_json::Number`. There is no `f64` round trip.
 - The domain converts each numeric, duration, or instant leaf to `rust_decimal::Decimal` for range and limit checks. A number that does not fit in `Decimal` (more than 28 significant digits) is rejected with `E-RCP-005`.
 - Canonical form: before storage the domain rewrites every numeric, duration, and instant leaf to the canonical decimal text of `Decimal`. This text has no exponent and no trailing zeros, and `-0` becomes `0`. `1.5e2` is stored as `150`. `JSONB` keeps this canonical form. The export writes each of these leaves and each limit as a JSON string that holds this canonical text (`api.md` 6.1). The content hash therefore does not depend on a JSON number format. Equality of two values is equality of canonical forms.
@@ -520,7 +521,7 @@ Pool size is `db.pool_size` connections for the application and `db.health_pool_
 | `shared_buffers` | `pg.shared_buffers` (7.11) | Default guidance |
 | `log_min_duration_statement` | `db.slow_query` (7.11) | Slow statements appear in the database log |
 | `log_lock_waits` | `on` | Every lock wait above `deadlock_timeout` is logged |
-| `default_transaction_isolation` | `read committed` | Every command except `SetUserRole` and `DeactivateUser` runs in it. Those two set `SERIALIZABLE` explicitly (ADR-0015, section 7.11) |
+| `default_transaction_isolation` | `read committed` | Every command except `SetUserRole` and `DeactivateUser` runs in it. Those two set `SERIALIZABLE` explicitly (ADR-0015, section 7.11). The draft queries of ADR-0042 set `REPEATABLE READ` explicitly |
 | `timezone` | `UTC` | All timestamps are `TIMESTAMPTZ`. The UI converts to the plant time zone |
 | data checksums | on, set at `initdb` | Detects silent corruption. Cannot be enabled later without a rebuild |
 | collation | `C` for `lc-collate`, `C.UTF-8` for `lc-ctype`, set at `initdb` | A glibc update cannot corrupt text indexes. The UI sorts names with `COLLATE "und-x-icu"` |
@@ -610,7 +611,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `http.request_timeout` | 30 s | 7.4 |
 | `http.body_read_timeout` | 10 s | 7.4 |
 | `http.body_limit.form` | 256 KiB | api.md 7.6 |
-| `http.body_limit.value` | 1 MiB | api.md 7.6 |
+| `http.body_limit.value` | 4 MiB | api.md 7.6, ADR-0039 |
 | `http.body_limit.translation` | 64 KiB | api.md 7.6 |
 | `http.trusted_proxies` | CIDR list, default the Compose network | api.md 7.1 |
 | `http.public_port` / `http.internal_port` | 8080 / 9000 | 7.1, 7.2 |
@@ -651,6 +652,11 @@ This table is the single source for every numeric setting. The configuration fil
 | `page.users` | 100 rows of `ListUsers` (ADR-0035) | api.md 2.8 |
 | `page.machines` | 100 rows of `ListMachines` (ADR-0037) | api.md 2.2 |
 | `page.type_usage` | 100 rows of `GetTypeUsage` (ADR-0037) | api.md 2.3 |
+| `page.recipes` | 100 rows of `ListRecipes` and `ListDeletedRecipes` (ADR-0043) | api.md 2.4 |
+| `page.versions` | 100 rows of the version list of `GetRecipe` and `ListVersions` (ADR-0043) | api.md 2.4, api.md 2.5 |
+| `form.array_chunk` | 100 elements per group of an array in the leaf grid (ADR-0039) | design-system.md 10.8 |
+| `form.rebind_leaves` | 16 384 new member leaves in the rebind forms of one version page (ADR-0044) | api.md 2.5 |
+| `i18n.translation_langs` | `pl`. The list of language tags of the translation rows (ADR-0012, ADR-0043) | api.md 2.6 |
 | `audit.unlock_rows` | 100. The newest deleted attempts in the row image of `LoginUnlocked` (ADR-0035) | data-model.md 10 |
 | `health.readiness_cache` | 5 s | 7.2 |
 | `health.db_check_timeout` | 2 s | 7.2 |
@@ -694,7 +700,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `clock.skew_warn` | 5 s | 7.9 |
 | `clock.check_interval` | 1 h | 2.4, 7.9 |
 
-Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1).
+Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1). A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 run in `REPEATABLE READ READ ONLY`. A query never retries.
 
 ### 7.12 Stored settings
 

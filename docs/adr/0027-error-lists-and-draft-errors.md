@@ -1,6 +1,6 @@
 # ADR-0027: Error lists and the error of a draft command
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0041 (the draft commands of a value and of limits return `RecipeErrors`)
 Date: 2026-10-13
 Deciders: project owner
 

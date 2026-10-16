@@ -1,6 +1,6 @@
 # ADR-0029: Approval token ownership, audit row images, and application clarifications
 
-Status: Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked)
+Status: Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked) and ADR-0039 (transport of `new_member_values`)
 Date: 2026-10-13
 Deciders: project owner
 

@@ -1,6 +1,6 @@
 # ADR-0036: Design system and UI foundation
 
-Status: Accepted. Amended by ADR-0037 (style sheets in (h), navigation link in (i), whole unit tree in (n))
+Status: Accepted. Amended by ADR-0037 (style sheets in (h), navigation link in (i), whole unit tree in (n)) and ADR-0039 (inputs and groups in the leaf grid). Amended by ADR-0041 (the alert of `field-errors.html` holds only the code and the count). Amended by ADR-0047 (page of a refused form in (i) and (o), empty toast after an error in (m))
 Date: 2026-10-14
 Deciders: project owner
 

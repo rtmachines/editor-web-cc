@@ -202,6 +202,8 @@ Platform rule: an address is required on `S7_300`, optional on `S7_1200` and `S7
 | `Duration` | `TIME`, `LTIME`, `S5TIME` | JSON string with an `IecLiteral` | Canonical decimal text of the count of the base unit | `min`, `max` in the base unit |
 | `Instant` | `DATE`, `LDATE`, `TIME_OF_DAY`, `LTOD`, `DATE_AND_TIME`, `LDT`, `DTL` | JSON string with an `IecLiteral` | Canonical decimal text of the count of the base unit | `min`, `max` in the base unit |
 
+A form carries the text of each leaf (ADR-0039). The text of a `Numeric` leaf is decimal text with a dot. The text of a `Bool` leaf is `true` or `false`. The text of a `String` or `Char` leaf is the string, and the text of a `Duration` or `Instant` leaf is an `IecLiteral`. `recipe-domain` builds the JSON form of the table from the text. A page shows the text of each leaf in the same form, with the canonical decimal text and the canonical literal.
+
 SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0000..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0000..=U+FFFF`.
 
 Base units (Assumption A43). A `Duration` or `Instant` value is an integer count of the base unit of its type. The domain stores, hashes, and limits this count. The stored and hashed value is the decimal text of the count, so a signed and an unsigned 64-bit range both fit. The domain holds each platform range in code.
@@ -594,7 +596,7 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 | `UpsertTranslation` | Draft | One translation set | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-027 InvalidLangCode`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
 | `RemoveTranslation` | Draft | One translation deleted | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-050 TranslationNotFound`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
 | `RemoveParameter` | Draft | Parameter, its limits, and its translations deleted | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
-| `RebindTypeRevision` | Draft | `{ draft, from_type_id, to_type_id, new_member_values }`. `new_member_values` is a map from `(parameter_key, leaf_path)` to a JSON number, a JSON string, or a JSON bool (ADR-0029). Every parameter of the draft whose type uses `from_type_id` moves to `to_type_id`. Values and limits are mapped by member name. A new member takes its value from `new_member_values`. A missing entry gives `E-RCP-028` | `E-RCP-002 VersionNotEditable`, `E-RCP-005 ValueShapeMismatch` (a sent value of a new member), `E-RCP-012 RecipeDeleted`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap` (a larger revision, ADR-0028), `E-RCP-028 RebindNeedsValue`, `E-RCP-029 RebindDropsLimit`, `E-RCP-052 RebindTargetInvalid`, `E-PLT-018 TypeTooLarge` (a new array type), `E-WEB-001 ConcurrentEdit` |
+| `RebindTypeRevision` | Draft | `{ draft, from_type_id, to_type_id, new_member_values }`. `new_member_values` is a map from `(parameter_key, leaf_path)` to the text of the leaf (ADR-0039). The class of the leaf converts the text as for a value (section 2.1). Every parameter of the draft whose type uses `from_type_id` moves to `to_type_id`. Values and limits are mapped by member name. A new member takes its value from `new_member_values`. A missing entry gives `E-RCP-028` | `E-RCP-002 VersionNotEditable`, `E-RCP-005 ValueShapeMismatch` (a sent value of a new member), `E-RCP-012 RecipeDeleted`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap` (a larger revision, ADR-0028), `E-RCP-028 RebindNeedsValue`, `E-RCP-029 RebindDropsLimit`, `E-RCP-052 RebindTargetInvalid`, `E-PLT-018 TypeTooLarge` (a new array type), `E-WEB-001 ConcurrentEdit` |
 
 `RebindTypeRevision` rules (ADR-0018):
 
@@ -602,6 +604,8 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 - A parameter uses `from_type_id` when it is the parameter type, or the element type of an array type at any depth. `EnsureDerivedType` gives each new array type.
 - A struct that has `from_type_id` as a member keeps its revision. The engineer defines a new revision of that struct and rebinds it with a second command.
 - The command checks every affected parameter first. It returns one `RebindNeedsValue` or `RebindDropsLimit` entry per failing parameter and leaf in one list, and it changes nothing.
+
+`AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, and `ReplaceLimits` check every leaf of the value and every limit row. They return every fault of one parameter in one `RecipeErrors` (ADR-0027, ADR-0041). The faults of the leaves come first in preorder, and the faults of the limit rows follow in their order. A check of the unit, the type, the tag, the S7 address, or a budget keeps its single error.
 
 `ValidationFailed { items }` lists the problems of the snapshot check. A parameter item names an archived unit, a value out of limit, or a type that is no longer on the platform (the item `E-RCP-013 TypeNotOnPlatform`). It can also name a stored value that no longer fits its type (`E-RCP-005`, ADR-0028). A version item names a deleted recipe or an archived machine. `CreateVersion` returns `ValidationFailed` when the base version references an archived unit, an archived machine, or a type that is not on the platform. Then it creates no draft. The `303` of a successful `CreateVersion` lists only the outdated parameters.
 
@@ -635,6 +639,7 @@ A query is a use case. It checks its permission first and writes no audit entry.
 |---|---|
 | `ListMachines`, `GetMachine`, `GetUnitTree`, `GetUnit`, `ListTypes`, `GetTypeTree`, `GetTypeUsage` | `RecipeView` |
 | `ListRecipes`, `GetRecipe`, `ListVersions`, `GetVersion`, `DiffVersions`, `GetRecipeHistory` | `RecipeView` |
+| `ListDeletedRecipes` (`ListRecipes` with `show_deleted`, ADR-0043) | `RecipeRestore` |
 | `ListParameters`, `GetParameter`, `GetLimits`, `GetTranslations` | `RecipeView` |
 | `ListUsers`, `GetUser` | `UserManage` |
 | `ListAuditEntries`, `GetAuditEntry` | `AuditView` (Administrator) or `AuditViewRecipes` (ProcessEngineer, only entries with `aggregate_type = 'recipe'`) |
@@ -643,7 +648,7 @@ A query is a use case. It checks its permission first and writes no audit entry.
 | `GetMachineForm` | `MachineManage` |
 | `GetUnitForm` | `UnitManage` |
 | `GetUdtForm` | `UdtManage` |
-| `GetRecipeForm` | `RecipeCreate` |
+| `GetRecipeForm` | `RecipeCreate` for the purpose `CreateRecipe`, `RecipeEdit` for the purpose `RenameRecipe` (ADR-0046) |
 | `GetVersionForm` | `VersionCreate` |
 | `GetParameterForm` | `ParameterEdit` |
 | `GetApprovalPreview` | `VersionApprove` |
@@ -652,6 +657,8 @@ A query is a use case. It checks its permission first and writes no audit entry.
 | `GetOwnPasswordForm` (`/me/password`) | authenticated, like `ChangeOwnPassword` |
 
 Every form and preview route is a query with the permission of the command that it prepares. The last ten rows are these queries. The HTTP layer still only authenticates (`api.md` 3.2).
+
+The input of a form query names the command that it serves, the purpose. The query checks the permission of that command (ADR-0046).
 
 ## 6. Rust type signatures (reference only)
 
