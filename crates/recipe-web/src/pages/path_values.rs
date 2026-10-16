@@ -13,6 +13,7 @@ use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query};
 use recipe_app::error::{AppError, Missing};
 use recipe_domain::plant::{MachineCode, MachineId, PlantError, TypeName, UnitPath};
+use recipe_domain::recipe::{LangCode, ParameterKey, ReferenceNumber};
 use uuid::Uuid;
 
 use crate::error::{FieldReason, WebError};
@@ -109,6 +110,52 @@ pub(crate) fn archived_machine(text: &str) -> Result<MachineCode, WebError> {
         field: "archived",
         reason: FieldReason::MachineCode,
     })
+}
+
+/// Read the path value `{ref}` of the recipe pages. ASCII letters fold to upper case.
+///
+/// The recipe pages (wave 4) are the first callers. Each wave removes the attribute `expect` of
+/// the parsers that it starts to use, because the build then reports an unfulfilled expectation.
+///
+/// # Errors
+///
+/// Returns `404 E-WEB-005` with `Missing::MalformedRecipe` when the text is not a reference number.
+pub(crate) fn reference(text: &str) -> Result<ReferenceNumber, WebError> {
+    ReferenceNumber::parse(text).map_err(|_reason| not_found(Missing::MalformedRecipe))
+}
+
+/// Read the path value `{n}`: a version number, a whole number from 1 with no sign and no zero in
+/// front.
+///
+/// # Errors
+///
+/// Returns `404 E-WEB-005` with `Missing::MalformedVersion` for any other text.
+pub(crate) fn version_number(text: &str) -> Result<u32, WebError> {
+    whole_number(text)
+        .filter(|number| *number > 0)
+        .ok_or_else(|| not_found(Missing::MalformedVersion))
+}
+
+/// Read the path value `{key}`: a parameter key in the hyphenated form of a UUID.
+///
+/// # Errors
+///
+/// Returns `404 E-WEB-005` with `Missing::MalformedParameter` when the text is not such a UUID.
+pub(crate) fn parameter_key(text: &str) -> Result<ParameterKey, WebError> {
+    let malformed = || not_found(Missing::MalformedParameter);
+    if text.len() != HYPHENATED_UUID_LENGTH {
+        return Err(malformed());
+    }
+    ParameterKey::parse(text).map_err(|_reason| malformed())
+}
+
+/// Read the path value `{lang}`: the code of a translation language.
+///
+/// # Errors
+///
+/// Returns `422 E-RCP-027` when the text is not a language code or is `en`.
+pub(crate) fn lang(text: &str) -> Result<LangCode, WebError> {
+    LangCode::parse(text).map_err(|error| WebError::App(error.into()))
 }
 
 /// A page of a list. The URL counts from 1 and the use case counts from 0.
@@ -268,5 +315,7 @@ pub(crate) fn path_code_type(
     Ok((machine_code(&code)?, type_name(&name)?))
 }
 
+#[cfg(test)]
+mod recipe_tests;
 #[cfg(test)]
 mod tests;

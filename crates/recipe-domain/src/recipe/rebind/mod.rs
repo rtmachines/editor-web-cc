@@ -13,15 +13,30 @@ use map::Mapped;
 
 mod apply;
 mod build;
+mod leaves;
 mod level;
 mod limit;
 mod map;
 mod shape;
 mod target;
+pub(in crate::recipe) use build::build_value;
+pub use leaves::{RebindLeaves, rebind_new_leaves};
 pub use shape::ArrayShape;
 #[cfg(test)]
 mod test_support;
 mod value;
+
+/// The value of one new member leaf of a rebind (ADR-0018, ADR-0039 (f)).
+///
+/// The type solves one problem: a request carries the value in JSON form or as the text of a
+/// form field. The class of the new leaf converts both forms with one set of rules.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MemberValue {
+    /// The JSON form of the leaf (`reliability.md` section 4.4).
+    Json(serde_json::Value),
+    /// The text of a form field.
+    Text(String),
+}
 
 /// The request of `RebindTypeRevision` (`domain-model.md` section 5.2).
 ///
@@ -34,9 +49,7 @@ pub struct RebindRequest {
     /// The newer revision of the same struct.
     pub to: PlcTypeId,
     /// The values of the new leaves, by parameter and concrete leaf path.
-    ///
-    /// A value is a decimal text, a string, or a bool in JSON form.
-    pub new_member_values: BTreeMap<(ParameterKey, LeafPath), serde_json::Value>,
+    pub new_member_values: BTreeMap<(ParameterKey, LeafPath), MemberValue>,
 }
 
 /// The rule that a rebind request breaks (`E-RCP-052`, ADR-0025).

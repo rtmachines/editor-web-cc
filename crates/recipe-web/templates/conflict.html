@@ -1,0 +1,3 @@
+{% import "components/alert.html" as alerts -%}
+{#- The conflict of a draft (design D10, api.md 4). The lines come from the bundles. The href is the path of the version page. The only hx attribute is the literal hx-boost. No form stands here, so the input of the user stays. -#}
+<div class="alert alert-error" role="alert">{{ alerts::severity_icon("error") }}<span class="alert-code">{{ view.code }}</span><span>{{ view.message }}</span><ul class="field-lines"><li>{{ conflict.row_version }}</li><li>{{ conflict.last_change }}</li><li>{{ conflict.warning }}</li></ul><a class="target-link" href="{{ conflict.href }}" hx-boost="true">{{ conflict.reload }}</a><span class="alert-ref">{{ view.reference }}</span></div>

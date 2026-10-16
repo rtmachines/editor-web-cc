@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
-use crate::plant::TypeTree;
+use crate::plant::{Primitive, TypeTree};
 use crate::recipe::value::test_support::{REAL, TIME, ZONE_JSON, primitive_tree, zone_tree};
-use crate::recipe::value::{ParameterValue, StoredValue, ValueFault};
+use crate::recipe::value::{Expected, ParameterValue, StoredValue, ValueFault};
 
 /// Read a stored JSON value against a tree.
 fn read(json: Value, tree: &TypeTree) -> Result<ParameterValue, ValueFault> {
@@ -41,7 +41,12 @@ fn time_leaf_survives_the_stored_form_as_a_number() {
 fn stored_iec_literal_for_a_time_leaf_gives_a_fault() {
     let fault = read(json!("T#90m"), &primitive_tree(TIME)).unwrap_err();
     assert_eq!(fault.leaf().to_string(), "");
-    assert_eq!(fault.expected(), "a count of type TIME");
+    assert_eq!(
+        fault.expected(),
+        Some(&Expected::Count {
+            type_name: Primitive::Time,
+        })
+    );
 }
 
 #[test]

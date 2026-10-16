@@ -16,7 +16,8 @@ use crate::error::StorageError;
 use crate::memory::FaultPoint;
 use crate::ports::{
     AttemptRepository, AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository,
-    RecipeRepository, SessionRepository, Transaction, TypeCatalog, UnitLookup, UserRepository,
+    RecipeReads, RecipeRepository, SessionRepository, Transaction, TypeCatalog, UnitLookup,
+    UserRepository,
 };
 
 /// An open in-memory transaction.
@@ -76,6 +77,19 @@ impl MemoryTransaction {
         self.shared.lock().state.clone()
     }
 
+    /// Return a copy of the committed audit entries with their commit times, in commit order.
+    ///
+    /// The entries of this transaction are not in the result.
+    pub(crate) fn committed_audit(&self) -> Vec<(Timestamp, AuditEntry)> {
+        let shared = self.shared.lock();
+        shared
+            .audit_times
+            .iter()
+            .copied()
+            .zip(shared.audit.iter().cloned())
+            .collect()
+    }
+
     /// Return the instant of `now()` in this transaction: the time of the clock at `begin`.
     #[must_use]
     pub const fn now(&self) -> Timestamp {
@@ -125,6 +139,10 @@ impl Transaction for MemoryTransaction {
         self
     }
 
+    fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
+        self
+    }
+
     fn drafts(&mut self) -> &mut dyn DraftRepository {
         self
     }
@@ -160,7 +178,11 @@ impl Transaction for MemoryTransaction {
 
     async fn finish(self: Box<Self>, _written: AuditWritten) -> Result<(), StorageError> {
         let this = *self;
-        if this.isolation == Isolation::ReadOnly {
+        // A query transaction reads one locked state (ADR-0042 (e)), so both levels are read only.
+        if matches!(
+            this.isolation,
+            Isolation::ReadOnly | Isolation::RepeatableRead
+        ) {
             return Err(StorageError::invariant(
                 "a read-only transaction cannot finish",
             ));
@@ -173,6 +195,9 @@ impl Transaction for MemoryTransaction {
             return Err(fault.into());
         }
         shared.state = this.state;
+        shared
+            .audit_times
+            .extend(std::iter::repeat_n(this.now, this.pending_audit.len()));
         shared.audit.extend(this.pending_audit);
         Ok(())
     }

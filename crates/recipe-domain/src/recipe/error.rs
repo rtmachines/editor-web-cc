@@ -4,8 +4,8 @@ use crate::error_codes::ErrorCode;
 use crate::identity::Login;
 use crate::plant::{LeafPath, PlantError, PlcPlatform, S7Address, S7Width, TypeName};
 use crate::recipe::{
-    LangCode, ParameterKey, ParameterTag, RebindTargetReason, ReferenceNumber, SnapshotItem,
-    VersionStatus,
+    Expected, LangCode, ParameterKey, ParameterTag, RebindTargetReason, ReferenceNumber,
+    SnapshotItem, VersionStatus,
 };
 
 use std::fmt;
@@ -209,8 +209,8 @@ pub enum RecipeError {
         tag: ParameterTag,
         /// The path of the part that does not match. The empty path names the whole value.
         leaf: LeafPath,
-        /// The form that the type needs.
-        expected: String,
+        /// The form that the type needs. The web layer maps it to a key of the bundles.
+        expected: Expected,
     },
     /// A bound or a length of a limit is outside the range of the type (`E-RCP-006`).
     #[error("Process limit of {tag}{leaf} is outside the range of the data type.")]
@@ -332,9 +332,9 @@ pub enum RecipeError {
         /// The concrete path of the new scalar leaf.
         leaf: LeafPath,
     },
-    /// A rebind removes a member that has a limit (`E-RCP-029`).
+    /// A rebind removes or retypes a member that has a limit (`E-RCP-029`).
     #[error(
-        "{tag}{leaf} has a limit but no longer exists in the new revision. Delete the limit first."
+        "{tag}{leaf} has a limit, but the new revision has no such member or gives the member another type. Delete the limit first. After the rebind, set the limit again."
     )]
     RebindDropsLimit {
         /// The tag of the parameter.
@@ -482,6 +482,13 @@ impl From<RecipeError> for RecipeErrors {
             first: Box::new(error),
             rest: Vec::new(),
         }
+    }
+}
+
+impl Extend<RecipeError> for RecipeErrors {
+    /// Append errors after the existing entries, in their order.
+    fn extend<I: IntoIterator<Item = RecipeError>>(&mut self, errors: I) {
+        self.rest.extend(errors);
     }
 }
 

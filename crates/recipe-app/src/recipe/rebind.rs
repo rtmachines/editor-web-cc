@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 
 use recipe_domain::audit::DiffAction;
 use recipe_domain::plant::{LeafPath, PlatformTypes, PlcTypeId, TypeTrees};
-use recipe_domain::recipe::{ParameterKey, RebindPlan, RebindRequest, ReferenceNumber};
+use recipe_domain::recipe::{
+    MemberValue, ParameterKey, RebindPlan, RebindRequest, ReferenceNumber,
+};
 
 use self::new_types::{ensure_new_types, plan_mismatch};
 use super::draft_session::{
@@ -32,8 +34,8 @@ pub struct RebindTypeRevisionInput {
     pub from: PlcTypeId,
     /// The newer revision of the same struct.
     pub to: PlcTypeId,
-    /// The values of the new leaves, by parameter and concrete leaf path.
-    pub new_member_values: BTreeMap<(ParameterKey, LeafPath), serde_json::Value>,
+    /// The values of the new leaves, by parameter and concrete leaf path, as JSON or form text.
+    pub new_member_values: BTreeMap<(ParameterKey, LeafPath), MemberValue>,
 }
 
 /// Moves every parameter of a live draft from one struct revision to a newer one.
@@ -158,5 +160,7 @@ impl RebindTypeRevision {
 pub(super) mod fixtures;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod texts_tests;
 #[cfg(test)]
 mod write_tests;

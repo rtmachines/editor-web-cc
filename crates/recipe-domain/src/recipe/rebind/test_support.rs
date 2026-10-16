@@ -167,13 +167,30 @@ pub(super) fn request(from: u128, to: u128) -> RebindRequest {
     }
 }
 
-/// A request with values for new members. A pair is parameter number, leaf path, and value.
+/// A request with JSON values for new members. A pair is parameter number, leaf path, and value.
 pub(super) fn request_with(from: u128, to: u128, values: &[(u128, &str, Value)]) -> RebindRequest {
     let mut built = request(from, to);
     for (n, path, value) in values {
-        built
-            .new_member_values
-            .insert((key(*n), LeafPath::parse(path).unwrap()), value.clone());
+        built.new_member_values.insert(
+            (key(*n), LeafPath::parse(path).unwrap()),
+            super::MemberValue::Json(value.clone()),
+        );
+    }
+    built
+}
+
+/// A request with form texts for new members. A pair is parameter number, leaf path, and text.
+pub(super) fn request_with_texts(
+    from: u128,
+    to: u128,
+    values: &[(u128, &str, &str)],
+) -> RebindRequest {
+    let mut built = request(from, to);
+    for (n, path, text) in values {
+        built.new_member_values.insert(
+            (key(*n), LeafPath::parse(path).unwrap()),
+            super::MemberValue::Text((*text).to_owned()),
+        );
     }
     built
 }

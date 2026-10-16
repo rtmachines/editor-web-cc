@@ -1,13 +1,18 @@
 //! Rows, parameters, and requests that the tests of `RebindTypeRevision` share.
+//!
+//! The tests of the other draft commands also use the typed struct rows, the leaf texts, and
+//! the error lines of this file.
 
 use std::collections::BTreeSet;
 
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    ArrayDimension, ArrayDimensions, LeafPath, MemberName, PlcPlatform, PlcType, PlcTypeId,
-    PlcTypeRecord, Primitive, RecordShape, S7Address, TypeMember, TypeName,
+    ArrayDimension, ArrayDimensions, LeafClass, LeafPath, MemberName, PlcPlatform, PlcType,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, TypeMember, TypeName,
 };
-use recipe_domain::recipe::{StoredLimit, StoredParameter, StoredValue};
+use recipe_domain::recipe::{
+    LeafTexts, MemberValue, RecipeError, StoredLimit, StoredParameter, StoredValue, ValueInput,
+};
 use serde_json::{Value, json};
 
 use super::{RebindTypeRevision, RebindTypeRevisionInput};
@@ -39,12 +44,28 @@ fn int() -> PlcTypeId {
     seed_type_id(Primitive::Int, None).unwrap()
 }
 
+/// The identifier of the seed row of `primitive` without a string length.
+pub(in crate::recipe) fn primitive_id(primitive: Primitive) -> PlcTypeId {
+    seed_type_id(primitive, None).unwrap()
+}
+
 /// A struct row of the machine 1 with `INT` members.
 pub(super) fn struct_row(
     platform: PlcPlatform,
-    (id, name, revision): (u128, &str, u32),
+    header: (u128, &str, u32),
     supersedes: Option<u128>,
     members: &[&str],
+) -> PlcType {
+    let typed: Vec<(&str, PlcTypeId)> = members.iter().map(|name| (*name, int())).collect();
+    typed_struct_row(platform, header, supersedes, &typed)
+}
+
+/// A struct row of the machine 1 with the given member names and member types.
+pub(in crate::recipe) fn typed_struct_row(
+    platform: PlcPlatform,
+    (id, name, revision): (u128, &str, u32),
+    supersedes: Option<u128>,
+    members: &[(&str, PlcTypeId)],
 ) -> PlcType {
     PlcType::try_from(PlcTypeRecord {
         id: tid(id),
@@ -56,14 +77,66 @@ pub(super) fn struct_row(
             supersedes: supersedes.map(tid),
             members: members
                 .iter()
-                .map(|member| TypeMember {
+                .map(|(member, type_id)| TypeMember {
                     name: MemberName::parse(member).unwrap(),
-                    type_id: int(),
+                    type_id: *type_id,
                 })
                 .collect(),
         },
     })
     .unwrap()
+}
+
+/// A global `CHAR` row of `TwinCat3`. The seed of the memory store has no `CHAR`.
+pub(in crate::recipe) fn char_row(id: u128) -> PlcType {
+    PlcType::try_from(PlcTypeRecord {
+        id: tid(id),
+        machine: None,
+        platforms: BTreeSet::from([PlcPlatform::TwinCat3]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::Char,
+            leaf_class: LeafClass::Char,
+            size_bytes: 1,
+            string_length: None,
+        },
+    })
+    .unwrap()
+}
+
+/// The value input of a form: one text per leaf path, in the given order.
+pub(in crate::recipe) fn leaf_texts(pairs: &[(&str, &str)]) -> ValueInput {
+    let pairs = pairs
+        .iter()
+        .map(|(path, text)| (LeafPath::parse(path).unwrap(), (*text).to_owned()))
+        .collect();
+    ValueInput::Texts(LeafTexts::parse(pairs).unwrap())
+}
+
+/// The code and the quoted leaf path of each entry of a list error, in the order of the list.
+///
+/// An error that is not a list gives no line, so an assertion on the lines fails.
+pub(in crate::recipe) fn error_lines(error: &AppError) -> Vec<String> {
+    let AppError::Recipes(list) = error else {
+        return Vec::new();
+    };
+    list.iter()
+        .map(|entry| format!("{} '{}'", entry.code(), entry_leaf(entry)))
+        .collect()
+}
+
+/// The leaf path of one list entry, or an empty text for an entry without a leaf.
+fn entry_leaf(entry: &RecipeError) -> String {
+    match entry {
+        RecipeError::ValueShapeMismatch { leaf, .. }
+        | RecipeError::ValueOutOfLimit { leaf, .. }
+        | RecipeError::LimitOutsideTypeRange { leaf, .. }
+        | RecipeError::LeafPathNotFound { leaf, .. }
+        | RecipeError::MinGreaterThanMax { leaf, .. }
+        | RecipeError::LimitNotApplicable { leaf, .. }
+        | RecipeError::RebindNeedsValue { leaf, .. }
+        | RecipeError::RebindDropsLimit { leaf, .. } => leaf.to_string(),
+        _ => String::new(),
+    }
 }
 
 /// An array row of the machine 1 with the bounds `1..=upper`.
@@ -183,15 +256,33 @@ pub(super) fn request(from: u128, to: u128) -> RebindTypeRevisionInput {
     }
 }
 
-/// The same request with the value `value` for the leaf `path` of the parameter `n`.
+/// The same request with the JSON value `value` for the leaf `path` of the parameter `n`.
 pub(super) fn with_value(
+    input: RebindTypeRevisionInput,
+    at: (u128, &str),
+    value: &Value,
+) -> RebindTypeRevisionInput {
+    with_member(input, at, MemberValue::Json(value.clone()))
+}
+
+/// The same request with the form text `text` for the leaf `path` of the parameter `n`.
+pub(super) fn with_text(
+    input: RebindTypeRevisionInput,
+    at: (u128, &str),
+    text: &str,
+) -> RebindTypeRevisionInput {
+    with_member(input, at, MemberValue::Text(text.to_owned()))
+}
+
+/// The same request with `value` for the leaf `path` of the parameter `n`.
+fn with_member(
     mut input: RebindTypeRevisionInput,
     (n, path): (u128, &str),
-    value: &Value,
+    value: MemberValue,
 ) -> RebindTypeRevisionInput {
     input
         .new_member_values
-        .insert((pkey(n), LeafPath::parse(path).unwrap()), value.clone());
+        .insert((pkey(n), LeafPath::parse(path).unwrap()), value);
     input
 }
 

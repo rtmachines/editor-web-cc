@@ -3,7 +3,7 @@
 use rust_decimal::Decimal;
 use serde_json::json;
 
-use super::add::support::{INT, draft_with};
+use super::add::support::{INT, TABLE, draft_with};
 use super::support::stored_parameter;
 use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, PlcPlatform};
@@ -12,12 +12,27 @@ use crate::text::Text;
 
 /// A stored limit on the whole value from 0 to `max`.
 pub(super) fn stored_limit_to(max: i64) -> StoredLimit {
+    stored_limit_on("", max)
+}
+
+/// A stored limit on the leaves of `path` from 0 to `max`.
+pub(super) fn stored_limit_on(path: &str, max: i64) -> StoredLimit {
     StoredLimit {
-        leaf_path: LeafPath::parse("").unwrap(),
+        leaf_path: LeafPath::parse(path).unwrap(),
         min: Some(Decimal::from(0)),
         max: Some(Decimal::from(max)),
         max_length: None,
     }
+}
+
+/// A draft with `SPEED_TABLE` (`ARRAY[1..8] OF INT`, values 1 to 8, limit 0 to 3000 on `[*]`).
+///
+/// The key of `SPEED_TABLE` derives from 1.
+pub(super) fn draft_with_table() -> Draft {
+    let mut table = stored_parameter(1, "SPEED_TABLE", id(TABLE), None);
+    table.value = json!([1, 2, 3, 4, 5, 6, 7, 8]).into();
+    table.limits = vec![stored_limit_on("[*]", 3000)];
+    draft_with(PlcPlatform::TwinCat3, vec![table])
 }
 
 /// A translation into `lang` with the name `name` and no description.

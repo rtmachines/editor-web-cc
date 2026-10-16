@@ -6,8 +6,8 @@ use crate::error_codes::REGISTRY;
 use crate::identity::Login;
 use crate::plant::{LeafPath, PlcPlatform, S7Address, S7Width, TypeName};
 use crate::recipe::{
-    LangCode, ParameterKey, ParameterTag, RebindTargetReason, SnapshotError, SnapshotItem,
-    VersionStatus,
+    Expected, LangCode, ParameterKey, ParameterTag, RebindTargetReason, SnapshotError,
+    SnapshotItem, VersionStatus,
 };
 use std::collections::BTreeSet;
 
@@ -348,12 +348,12 @@ fn parameter_samples() -> Vec<Sample> {
             RecipeError::ValueShapeMismatch {
                 tag: tag(),
                 leaf: leaf(),
-                expected: "true or false".to_owned(),
+                expected: Expected::Bool,
             },
             vec![
                 ("tag", tag().to_string()),
                 ("leaf", leaf().to_string()),
-                ("expected", "true or false".to_owned()),
+                ("expected", Expected::Bool.to_string()),
             ],
         ),
         (

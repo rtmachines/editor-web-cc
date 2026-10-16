@@ -1,9 +1,21 @@
-use crate::plant::TypeTree;
+use rust_decimal::Decimal;
+
 use crate::plant::fixtures::id;
+use crate::plant::{MemberName, Primitive, TypeTree};
 use crate::recipe::value::test_support::{
     INT, REAL, USINT, ZONE_JSON, int_array_tree, primitive_tree, zone_tree,
 };
-use crate::recipe::value::{ParameterValue, ValueFault};
+use crate::recipe::value::{Expected, ParameterValue, ValueFault};
+
+/// The members of `ST_Zone` as the expectation of an object fault names them.
+fn zone_members() -> Expected {
+    Expected::Object {
+        members: ["temp_sp", "active", "ramps", "label"]
+            .into_iter()
+            .map(|name| MemberName::parse(name).unwrap())
+            .collect(),
+    }
+}
 
 /// Parse `json` and return the stored JSON text.
 fn stored_text(json: &str, tree: &TypeTree) -> String {
@@ -39,10 +51,7 @@ fn missing_member_gives_a_fault_at_the_struct_path() {
     let json = r#"{"temp_sp": 1, "active": true, "ramps": [1, 2, 3]}"#;
     let fault = fault(json, &zone_tree());
     assert_eq!(fault.leaf().to_string(), "");
-    assert_eq!(
-        fault.expected(),
-        "an object with the members temp_sp, active, ramps, label"
-    );
+    assert_eq!(fault.expected(), Some(&zone_members()));
 }
 
 #[test]
@@ -56,7 +65,7 @@ fn array_with_two_elements_instead_of_three_gives_a_fault_at_the_array() {
     let json = r#"{"temp_sp": 1, "active": true, "ramps": [1, 2], "label": ""}"#;
     let fault = fault(json, &zone_tree());
     assert_eq!(fault.leaf().to_string(), ".ramps");
-    assert_eq!(fault.expected(), "an array of 3 elements");
+    assert_eq!(fault.expected(), Some(&Expected::ArrayCount { count: 3 }));
 }
 
 #[test]
@@ -72,7 +81,11 @@ fn string_for_an_int_names_the_type_range() {
     assert_eq!(fault.leaf().to_string(), "");
     assert_eq!(
         fault.expected(),
-        "a number of type INT from -32768 to 32767"
+        Some(&Expected::NumberRange {
+            type_name: Primitive::Int,
+            low: Decimal::from(-32_768),
+            high: Decimal::from(32_767),
+        })
     );
 }
 
@@ -125,7 +138,12 @@ fn negative_value_for_an_unsigned_type_gives_a_fault() {
 #[test]
 fn fraction_for_an_integer_type_gives_a_fault() {
     let fault = fault("1.5", &primitive_tree(INT));
-    assert_eq!(fault.expected(), "an integer of type INT");
+    assert_eq!(
+        fault.expected(),
+        Some(&Expected::Integer {
+            type_name: Primitive::Int,
+        })
+    );
 }
 
 #[test]
@@ -163,7 +181,7 @@ fn json_nested_300_levels_gives_a_fault_without_a_panic() {
 fn invalid_json_gives_a_fault() {
     let fault = fault("{not json", &zone_tree());
     assert_eq!(fault.leaf().to_string(), "");
-    assert_eq!(fault.expected(), "valid JSON text");
+    assert_eq!(fault.expected(), Some(&Expected::Json));
 }
 
 #[test]
@@ -180,19 +198,19 @@ fn nested_arrays(levels: usize) -> String {
     format!("{}1{}", "[".repeat(levels), "]".repeat(levels))
 }
 
-const DEPTH_EXPECTED: &str = "a JSON value with at most 32 levels";
+const DEPTH_EXPECTED: Expected = Expected::Depth { levels: 32 };
 
 #[test]
 fn json_with_33_levels_gives_a_depth_fault_at_the_empty_path() {
     let fault = fault(&nested_arrays(33), &primitive_tree(INT));
     assert_eq!(fault.leaf().to_string(), "");
-    assert_eq!(fault.expected(), DEPTH_EXPECTED);
+    assert_eq!(fault.expected(), Some(&DEPTH_EXPECTED));
 }
 
 #[test]
 fn json_with_32_levels_gives_no_depth_fault() {
     let fault = fault(&nested_arrays(32), &primitive_tree(INT));
-    assert_ne!(fault.expected(), DEPTH_EXPECTED);
+    assert_ne!(fault.expected(), Some(&DEPTH_EXPECTED));
 }
 
 #[test]
@@ -200,7 +218,7 @@ fn objects_count_as_levels_too() {
     let deep = format!("{}1{}", r#"{"a":"#.repeat(33), "}".repeat(33));
     assert_eq!(
         fault(&deep, &primitive_tree(INT)).expected(),
-        DEPTH_EXPECTED
+        Some(&DEPTH_EXPECTED)
     );
 }
 
@@ -210,5 +228,5 @@ fn a_stored_value_with_33_levels_gives_the_depth_fault() {
     let json: serde_json::Value = serde_json::from_str(&nested_arrays(33)).unwrap();
     let stored = StoredValue::from(json);
     let fault = ParameterValue::try_from((&stored, &primitive_tree(INT))).unwrap_err();
-    assert_eq!(fault.expected(), DEPTH_EXPECTED);
+    assert_eq!(fault.expected(), Some(&DEPTH_EXPECTED));
 }

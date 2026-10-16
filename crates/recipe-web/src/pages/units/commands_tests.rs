@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 
 use super::test_world::{seed_approved_use, world};
 use crate::i18n::Lang;
+use crate::pages::draft_reply::refusal_tests::assert_operator_refused;
 use crate::pages::test_helpers::{assert_clean_html, assert_htmx_error};
 use crate::test_support::plant::{ENGLISH, HTMX, cookie_of, main_of, text_with};
 use crate::test_support::{icon_tag, post_fields, text};
@@ -13,6 +14,44 @@ use crate::test_support::{icon_tag, post_fields, text};
 const RENAME: &str = "/machines/M7/units/U1.2/rename";
 /// The archive route of the unit `U1.2` of `M7`.
 const ARCHIVE: &str = "/machines/M7/units/U1.2/archive";
+/// The opening tag of the rename form when an answer swaps it out of band (ADR-0041 (e)).
+const OOB_RENAME_TAG: &str = "<form id=\"unit-rename-form\" method=\"post\" action=\"/machines/M7/units/U1.2/rename\" hx-boost=\"true\" hx-target=\"#unit-name\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\" hx-swap-oob=\"true\">";
+
+/// ADR-0041 (h): a success swaps the rename form out of band with the saved name and no line.
+#[tokio::test]
+async fn units_rename_by_htmx_swaps_the_clean_form_with_the_saved_name() {
+    let world = world();
+    let reply = world
+        .post(&world.engineer, RENAME, "name=Press+infeed", true)
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let form = reply.body.split(OOB_RENAME_TAG).nth(1).unwrap();
+    assert!(form.contains("value=\"Press infeed\""), "{form}");
+    assert!(form.contains("id=\"unit-rename-submit\""), "{form}");
+    for mark in ["aria-invalid", "field-error"] {
+        assert!(!form.contains(mark), "{mark}: {form}");
+    }
+    assert_clean_html(&reply.body);
+}
+
+/// Spec "Every field error at once": a bad name swaps the form with the sent text and its line.
+#[tokio::test]
+async fn units_rename_with_a_bad_name_swaps_the_form_with_the_sent_text_and_a_line() {
+    let world = world();
+    let before = world.audit_count();
+    let reply = world.post(&world.engineer, RENAME, "name=+", true).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert!(reply.body.contains("Errors: 1."), "{}", reply.body);
+    let form = reply.body.split(OOB_RENAME_TAG).nth(1).unwrap();
+    assert!(form.contains("value=\" \""), "{form}");
+    assert!(form.contains("aria-invalid=\"true\""), "{form}");
+    assert!(
+        form.contains("<div class=\"field-error\" id=\"unit_name-error\">"),
+        "{form}"
+    );
+    assert_eq!(world.audit_count(), before);
+}
 
 // --- Rename: success ----------------------------------------------------------------------------
 
@@ -103,6 +142,41 @@ async fn units_rename_of_an_archived_unit_gives_409_e_plt_009() {
         )
         .await;
     assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-009");
+}
+
+/// K12, ADR-0041 (e): a refused rename swaps the form with the sent name and no stale line.
+#[tokio::test]
+async fn units_rename_refused_by_the_use_case_swaps_the_form_without_a_line() {
+    let world = world();
+    let reply = world
+        .post(
+            &world.engineer,
+            "/machines/M31/units/U2/rename",
+            "name=Kept",
+            true,
+        )
+        .await;
+    assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-009");
+    assert!(reply.body.contains("Errors: 1."), "{}", reply.body);
+    let (_before, rest) = reply
+        .body
+        .split_once("<form id=\"unit-rename-form\"")
+        .unwrap();
+    let (tag, form) = rest.split_once('>').unwrap();
+    assert!(tag.contains("hx-swap-oob=\"true\""), "{tag}");
+    assert!(form.contains("value=\"Kept\""), "{form}");
+    for mark in ["aria-invalid", "field-error"] {
+        assert!(!form.contains(mark), "{mark}: {form}");
+    }
+}
+
+/// K13, ADR-0013: an Operator with a bad field gets `403 E-WEB-002` and no form.
+#[tokio::test]
+async fn units_rename_of_an_operator_with_a_bad_field_gives_e_web_002_and_no_form() {
+    let world = world();
+    for body in ["name=+", "name=A&extra=1"] {
+        assert_operator_refused(&world, RENAME, body).await;
+    }
 }
 
 #[tokio::test]

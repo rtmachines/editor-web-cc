@@ -1,0 +1,3 @@
+{% import "components/toast.html" as toasts -%}
+{#- The answer of a valid HTMX rename of a recipe (design D7). The new name goes into #recipe-name. The toast and the empty error panel go out of band. The handler appends the clean form out of band (ADR-0041 (h)). The hx-swap-oob values are literals. -#}
+{{ name }}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(message) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>

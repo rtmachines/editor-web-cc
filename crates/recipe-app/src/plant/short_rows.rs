@@ -12,8 +12,8 @@ use crate::error::StorageError;
 use crate::memory::fixtures::Fixture;
 use crate::ports::{
     AttemptRepository, AuditWritten, DraftRepository, InsertedMachine, Isolation, Locked,
-    MachineFilter, MachineSummary, NonEmpty, PlantRepository, RecipeRepository, RowImage,
-    SessionRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
+    MachineFilter, MachineSummary, NonEmpty, PlantRepository, RecipeReads, RecipeRepository,
+    RowImage, SessionRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
 };
 
 /// A unit of work whose transactions drop the last row image of `insert_machine` and `archive_units`.
@@ -38,6 +38,10 @@ struct ShortRowsTransaction {
 impl Transaction for ShortRowsTransaction {
     fn recipes(&mut self) -> &mut dyn RecipeRepository {
         self.inner.recipes()
+    }
+
+    fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
+        self.inner.recipe_reads()
     }
 
     fn drafts(&mut self) -> &mut dyn DraftRepository {

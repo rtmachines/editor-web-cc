@@ -10,8 +10,8 @@ use recipe_domain::plant::{
     TypeExpr, TypeMember, TypeName, UnitPath,
 };
 use recipe_domain::recipe::{
-    LimitInput, LimitList, Ordinal, ParameterTag, RecipeDeleter, StoredParameter, StoredValue,
-    Translation,
+    LimitInput, LimitList, MemberValue, Ordinal, ParameterTag, RecipeDeleter, StoredParameter,
+    StoredValue, Translation, ValueInput,
 };
 use serde_json::json;
 
@@ -310,7 +310,7 @@ pub(crate) fn add_parameter_input() -> AddParameterInput {
         type_expr: TypeExpr::parse("INT").unwrap(),
         s7_address: None,
         ordinal: Ordinal::parse(1).unwrap(),
-        value_json: "120".to_owned(),
+        value: ValueInput::Json("120".to_owned()),
         limits: LimitList::parse(vec![bounds("10", "250")]).unwrap(),
     }
 }
@@ -340,7 +340,7 @@ pub(crate) fn set_value_input() -> SetParameterValueInput {
         number: 1,
         expected_row_version: 1,
         key: pkey(1),
-        value_json: "130".to_owned(),
+        value: ValueInput::Json("130".to_owned()),
     }
 }
 
@@ -401,7 +401,7 @@ pub(crate) fn rebind_input() -> RebindTypeRevisionInput {
         to: tid(ZONE_2),
         new_member_values: BTreeMap::from([(
             (pkey(ZONE_PARAMETER), LeafPath::parse(".extra").unwrap()),
-            json!(7),
+            MemberValue::Json(json!(7)),
         )]),
     }
 }

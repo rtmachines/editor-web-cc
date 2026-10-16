@@ -1,0 +1,2 @@
+{% import "components/badge.html" as badges %}
+{% if kind == "deleted" %}{% if large %}{{ badges::deleted_large(word) }}{% else %}{{ badges::deleted(word) }}{% endif %}{% else %}{% if large %}{{ badges::outdated_large(word) }}{% else %}{{ badges::outdated(word) }}{% endif %}{% endif %}

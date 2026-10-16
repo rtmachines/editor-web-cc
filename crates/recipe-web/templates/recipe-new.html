@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "components/field.html" as fields %}
+{% import "components/heading.html" as headings %}
+{#- The form of a new recipe (design D6 and D7). The block form renders alone as the out-of-band form of an error answer (ADR-0041 (e)). The machine select has an empty first option. Each hx attribute is a literal. -#}
+{% block content %}
+{{ headings::h1(layout, t.get("recipe-new-title")) }}
+{% block form %}<form id="recipe-new-form" method="post" action="/recipes" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{{ fields::select(t, "machine_code", t.get("field-machine-code"), String::new(), form.machines, form.machine, true, form.errors.lines("machine_code")) }}
+{{ fields::named(t, "reference_number", "reference_number", t.get("field-reference-number"), t.get("recipe-reference-hint"), "text", true, true, 50, "off", form.reference, form.errors.lines("reference_number")) }}
+{{ fields::named(t, "recipe_name", "name", t.get("field-recipe-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("recipe_name")) }}
+{{ fields::named(t, "change_note", "change_note", t.get("field-change-note"), t.get("recipe-change-note-hint"), "text", true, false, 4000, "off", form.note, form.errors.lines("change_note")) }}
+<p class="actions"><button type="submit" id="recipe-create-submit" class="btn btn-primary">{{ t.get("recipe-create-submit") }}</button></p>
+</form>{% endblock %}
+<p><a class="target-link" href="/recipes">{{ t.get("recipes-title") }}</a></p>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% import "components/alert.html" as alerts %}
+{% import "components/heading.html" as headings %}
+{% import "components/grid.html" as grids %}
+{% import "components/icons.html" as icons %}
+{#- The page of a parameter and the page of the form of a new parameter (design D7, ADR-0043 (k)). A live draft and a role with ParameterEdit get the edit form, the translation forms, and the danger disclosure of the removal, else the read-only grid and rows. The page holds one form with the definition fields (ADR-0039 (i)). The form of a new parameter on this page is plain, because the page has no #parameter-rows. The removal answers the content of the version page and pushes its address (design D7). Each hx attribute is a literal, and each action and href holds the user data (ADR-0037 (f)). -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if let Some(summary) = summary.as_ref() %}<div id="parameter-summary">{% include "parameter-summary.html" %}</div>
+{% endif %}{% if let Some(form) = form.as_ref() %}{% include "parameter-form.html" %}
+{% endif %}{% if let Some(view) = values.as_ref() %}{{ grids::read_only(t, view) }}
+{% endif %}{% if let Some(block) = translations.as_ref() %}<div id="translations">{% include "translations.html" %}</div>
+{% endif %}{% if let Some(remove) = remove.as_ref() %}<details class="danger"><summary>{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span>{{ t.get("parameter-delete-summary") }}</span></summary><form method="post" action="{{ remove.action }}" hx-boost="true" hx-target="#content" hx-swap="innerHTML" hx-sync="closest form:drop"><input type="hidden" name="csrf_token" value="{{ remove.csrf_token }}"><input type="hidden" name="row_version" value="{{ remove.row_version }}">{{ alerts::notice("warning", t.get("parameter-delete-warning")) }}<button type="submit" id="parameter-delete-submit" class="btn-danger">{{ t.with_arg("parameter-delete-submit", "tag", remove.tag) }}</button></form></details>
+{% endif %}<p><a class="target-link" href="{{ version_href }}">{{ version_text }}</a></p>
+{% endblock %}

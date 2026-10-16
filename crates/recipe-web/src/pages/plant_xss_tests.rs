@@ -304,6 +304,11 @@ async fn plant_xss_machine_fields_that_the_server_refuses_give_their_error_code(
             let what = format!("POST /machines {field}");
             assert_refused(&reply, "E-WEB-008", &payload, &what);
             assert_error_panel(&reply, &what);
+            if field == "code" && !payload.is_empty() {
+                // ADR-0041 (e): the out-of-band form shows the sent text escaped.
+                let value = format!("value=\"{}\"", askama_escape(&payload));
+                assert!(reply.body.contains(&value), "{what}: {}", reply.body);
+            }
         }
     }
 }

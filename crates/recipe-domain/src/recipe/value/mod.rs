@@ -4,6 +4,9 @@
 
 mod check;
 mod decimal;
+mod expected;
+#[cfg(test)]
+mod expected_tests;
 mod fault;
 mod leaf;
 mod leaves;
@@ -15,13 +18,18 @@ mod request_leaf;
 mod stored;
 #[cfg(test)]
 pub(in crate::recipe) mod test_support;
+mod texts;
+#[cfg(test)]
+mod texts_tests;
 mod walk;
 
 pub(in crate::recipe) use decimal::{canonical, parse_decimal};
-pub use fault::ValueFault;
+pub use expected::Expected;
+pub use fault::{ValueFault, ValueFaults};
 pub(crate) use numeric::{is_integer, numeric_range};
-pub(in crate::recipe) use request_leaf::request_leaf;
+pub(in crate::recipe) use request_leaf::{request_leaf, request_text};
 pub use stored::StoredValue;
+pub use texts::{LeafText, LeafTexts, LeafTextsError, ValueInput};
 pub(in crate::recipe) use walk::plc_index;
 
 use serde_json::Value;
@@ -31,9 +39,9 @@ use crate::plant::{PlcPlatform, PlcTypeId};
 /// The canonical stored form of the value of one parameter (invariant I7).
 ///
 /// The type solves one problem: code cannot hold a value that did not pass the shape and range
-/// check of its type tree. Only [`ParameterValue::parse`] and the conversion from a stored value
-/// create it. A numeric, duration, or instant leaf is a JSON number with canonical decimal
-/// text.
+/// check of its type tree. Only [`ParameterValue::parse`], [`ParameterValue::from_texts`], and
+/// the conversion from a stored value create it. A numeric, duration, or instant leaf is a JSON
+/// number with canonical decimal text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterValue {
     root: PlcTypeId,

@@ -227,6 +227,62 @@ fn every_mark_of_the_table_equals_the_catalog_result() {
     assert_eq!(comparison.cells, expected);
 }
 
+/// Compare each form query of `rows` with its purposes (ADR-0046 (c)).
+///
+/// A row that names a form query must also name a purpose of that query whose requirement shows
+/// the permission of the row. Each other row gives one difference.
+fn compare_purposes(rows: &[DocRow], operations: &[Operation]) -> Vec<String> {
+    let names =
+        |row: &DocRow, operation: &Operation| row.names.iter().any(|n| n == operation.name());
+    let mut differences = Vec::new();
+    for row in rows {
+        let forms = operations
+            .iter()
+            .filter(|operation| !operation.purposes().is_empty() && names(row, operation));
+        for form in forms {
+            let served = form.purposes().iter().any(|purpose| {
+                names(row, purpose)
+                    && requirement_labels(purpose.requirement()).contains(&row.permission)
+            });
+            if !served {
+                differences.push(format!(
+                    "row `{form}` with permission {}: no purpose of the row needs it",
+                    row.permission
+                ));
+            }
+        }
+    }
+    differences
+}
+
+#[test]
+fn every_row_of_a_form_query_names_a_purpose_with_the_permission_of_the_row() {
+    let rows = parse_table(matrix_section());
+    let differences = compare_purposes(&rows, &Operation::ALL);
+    assert!(differences.is_empty(), "{differences:#?}");
+}
+
+const PURPOSE_TABLE: &str = "\
+| Operation | Permission | Administrator | ProcessEngineer | Operator | Condition |
+|---|---|---|---|---|---|
+| Rename (`RenameRecipe`). Form query `GetRecipeForm` with the purpose `RenameRecipe` | `RecipeEdit` | ✓ | ✓ | ✗ | R25 |
+";
+
+#[test]
+fn a_form_query_under_the_permission_of_another_purpose_is_a_difference() {
+    let right = parse_table(PURPOSE_TABLE);
+    assert!(compare_purposes(&right, &Operation::ALL).is_empty());
+    let wrong = PURPOSE_TABLE.replace("| `RecipeEdit` |", "| `RecipeCreate` |");
+    let differences = compare_purposes(&parse_table(&wrong), &Operation::ALL);
+    assert_eq!(
+        differences,
+        vec![
+            "row `GetRecipeForm` with permission RecipeCreate: no purpose of the row needs it"
+                .to_owned()
+        ]
+    );
+}
+
 const SMALL_TABLE: &str = "\
 | Operation | Permission | Administrator | ProcessEngineer | Operator | Condition |
 |---|---|---|---|---|---|

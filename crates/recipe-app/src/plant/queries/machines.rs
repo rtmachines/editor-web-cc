@@ -5,7 +5,9 @@
 use recipe_domain::plant::{Machine, MachineCode, MachineId, PlcPlatform, UnitPath};
 
 use super::{live_machine, page_window};
-use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
+use crate::auth::{
+    CurrentUser, FormPurpose, MachineFormPurpose, Operation, RequestMeta, authorize,
+};
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{Isolation, MachineFilter, MachineSummary, PlantRepository};
@@ -213,6 +215,13 @@ async fn find_machine(
     }
 }
 
+/// The parsed request of `GetMachineForm`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MachineFormInput {
+    /// The command that the form serves. The query checks its permission (ADR-0046 (b)).
+    pub purpose: MachineFormPurpose,
+}
+
 /// The data of the page `New machine`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MachineForm {
@@ -223,7 +232,7 @@ pub struct MachineForm {
 /// Gives the data of the form that creates a machine.
 ///
 /// The query solves one problem: the form must offer exactly the platforms of the domain, and
-/// only a role with `MachineManage` may open it. The query reads no port.
+/// only a role that may run the command of the purpose may open it. The query reads no port.
 #[derive(Clone)]
 pub struct GetMachineForm {
     ctx: AppContext,
@@ -244,15 +253,23 @@ impl GetMachineForm {
     ///
     /// # Errors
     ///
-    /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
+    /// Returns `Forbidden` (`E-WEB-002`) with the command of the purpose when the role lacks its
+    /// permission.
     /// Returns `AppError::Storage` when the sink cannot write the `forbidden` event.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
         user: &CurrentUser,
         meta: &RequestMeta,
+        input: MachineFormInput,
     ) -> Result<MachineForm, AppError> {
-        authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
+        authorize(
+            input.purpose.operation(),
+            user,
+            meta,
+            self.ctx.security.as_ref(),
+        )
+        .await?;
         Ok(MachineForm {
             platforms: PlcPlatform::ALL,
         })

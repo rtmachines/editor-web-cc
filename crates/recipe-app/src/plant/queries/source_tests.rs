@@ -1,8 +1,9 @@
 //! Source test of design D14: the permission check is the first statement of every query.
 //!
 //! The test reads the source of each query file. The body of each `execute` function must start
-//! with `authorize(Self::OPERATION`. This rule keeps a query from reading a port before it
-//! checks the permission (ADR-0013).
+//! with `authorize(Self::OPERATION`. A form query starts with `authorize(input.purpose.operation()`,
+//! the check of the command of its purpose (ADR-0046 (b)). This rule keeps a query from reading
+//! a port before it checks the permission (ADR-0013).
 
 use std::ffi::OsStr;
 use std::path::Path;
@@ -23,6 +24,16 @@ const EXECUTE: &str = "pub async fn execute";
 /// The text that the first statement of each `execute` body must start with.
 const FIRST_STATEMENT: &str = "authorize(Self::OPERATION";
 
+/// The first statement of a form query: the check of the command of its purpose (ADR-0046 (b)).
+const PURPOSE_STATEMENT: &str = "authorize(input.purpose.operation()";
+
+/// Return true when `body` starts with one of the two forms of the permission check.
+/// The test ignores white space, because rustfmt can put each argument on its own line.
+fn starts_with_the_check(body: &str) -> bool {
+    let compact: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+    compact.starts_with(FIRST_STATEMENT) || compact.starts_with(PURPOSE_STATEMENT)
+}
+
 /// Return the text of each `execute` body in `source`, from its first statement to the end of the file.
 fn bodies(source: &str) -> Vec<&str> {
     source
@@ -40,7 +51,7 @@ fn the_body_of_each_execute_function_starts_with_the_permission_check() {
         assert!(!found.is_empty(), "{name}: no execute function");
         for body in found {
             assert!(
-                body.starts_with(FIRST_STATEMENT),
+                starts_with_the_check(body),
                 "{name}: the first statement is {:?}",
                 body.lines().next()
             );
@@ -58,6 +69,21 @@ fn a_body_that_starts_with_another_statement_is_found() {
 
     assert!(!bodies(late).iter().all(|b| b.starts_with(FIRST_STATEMENT)));
     assert!(bodies(early).iter().all(|b| b.starts_with(FIRST_STATEMENT)));
+}
+
+#[test]
+fn a_body_that_checks_the_permission_of_its_purpose_is_accepted() {
+    let purpose = "pub async fn execute(&self) -> Result<(), AppError> {\n\
+                   authorize(input.purpose.operation(), user, meta, sink).await?;\n}";
+    let late = "pub async fn execute(&self) -> Result<(), AppError> {\n\
+                let machine = read_live_machine(&self.ctx, input.code).await?;\n\
+                authorize(input.purpose.operation(), user, meta, sink).await?;\n}";
+    let other = "pub async fn execute(&self) -> Result<(), AppError> {\n\
+                 authorize(Operation::GetMachine, user, meta, sink).await?;\n}";
+
+    assert!(bodies(purpose).iter().all(|b| starts_with_the_check(b)));
+    assert!(!bodies(late).iter().all(|b| starts_with_the_check(b)));
+    assert!(!bodies(other).iter().all(|b| starts_with_the_check(b)));
 }
 
 #[test]

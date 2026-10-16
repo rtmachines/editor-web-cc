@@ -2,7 +2,7 @@
 
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{TypeExpr, UnitPath};
-use recipe_domain::recipe::{LimitInput, LimitList, Ordinal, ParameterTag};
+use recipe_domain::recipe::{LimitInput, LimitList, Ordinal, ParameterTag, ValueInput};
 use recipe_domain::text::LongText;
 
 use super::super::DraftOutput;
@@ -40,15 +40,24 @@ pub(super) fn with_type(
     }
 }
 
-/// The same request with a new value and new limits.
+/// The same request with a new value as JSON text and new limits.
 pub(super) fn with_retype(
     request: UpdateParameterDefinitionInput,
     value: &str,
     limits: Vec<LimitInput>,
 ) -> UpdateParameterDefinitionInput {
+    retyped(request, ValueInput::Json(value.to_owned()), limits)
+}
+
+/// The same request with the new value `value` and new limits.
+pub(super) fn retyped(
+    request: UpdateParameterDefinitionInput,
+    value: ValueInput,
+    limits: Vec<LimitInput>,
+) -> UpdateParameterDefinitionInput {
     UpdateParameterDefinitionInput {
         retype: Some(RetypeInput {
-            value_json: value.to_owned(),
+            value,
             limits: LimitList::parse(limits).unwrap(),
         }),
         ..request

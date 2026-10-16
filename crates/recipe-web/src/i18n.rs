@@ -191,3 +191,6 @@ mod plant_texts_tests;
 
 #[cfg(test)]
 mod review_texts_tests;
+
+#[cfg(test)]
+mod recipe_texts_tests;

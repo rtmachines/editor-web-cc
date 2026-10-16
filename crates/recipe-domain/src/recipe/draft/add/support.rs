@@ -3,14 +3,16 @@
 use uuid::Uuid;
 
 use super::super::support::{address, stored_draft_with, stored_parameter, tag};
-use crate::plant::fixtures::{id, machine, other_machine, primitive_row, struct_row, types_for};
+use crate::plant::fixtures::{
+    array_row, id, machine, other_machine, primitive_row, struct_row, types_for,
+};
 use crate::plant::{
     LeafPath, LiveUnit, Machine, MachineCode, MachineId, PlcPlatform, PlcType, Primitive,
     StoredMachine, StoredUnit, TypeTrees, UnitId, UnitPath,
 };
 use crate::recipe::{
-    Draft, DraftError, LimitInput, LimitList, NewParameter, Ordinal, Parameter, ParameterId,
-    ParameterKey, StoredParameter, VersionState,
+    Draft, DraftError, LeafTexts, LimitInput, LimitList, NewParameter, Ordinal, Parameter,
+    ParameterId, ParameterKey, StoredParameter, ValueInput, VersionState,
 };
 use crate::text::{LongText, Text};
 
@@ -20,6 +22,8 @@ pub(in crate::recipe::draft) const BOOL: u128 = 3;
 /// A struct with the members `speed` (INT) and `run` (BOOL).
 pub(in crate::recipe::draft) const ST_ZONE: u128 = 4;
 pub(in crate::recipe::draft) const DINT: u128 = 5;
+/// The array `ARRAY[1..8] OF INT`.
+pub(in crate::recipe::draft) const TABLE: u128 = 6;
 /// A type identifier that `TypeTrees` was asked for and could not resolve.
 pub(in crate::recipe::draft) const UNRESOLVED: u128 = 99;
 /// A type identifier that `TypeTrees` was never asked for.
@@ -32,12 +36,13 @@ fn rows() -> Vec<PlcType> {
         primitive_row(BOOL, Primitive::Bool),
         primitive_row(DINT, Primitive::Dint),
         struct_row(ST_ZONE, "ST_Zone", &[("speed", INT), ("run", BOOL)]),
+        array_row(TABLE, INT, &[(1, 8)]),
     ]
 }
 
 /// The trees of the test types for `owner` on `platform`.
 pub(in crate::recipe::draft) fn trees_of(owner: MachineId, platform: PlcPlatform) -> TypeTrees {
-    let ids = [INT, REAL, BOOL, DINT, ST_ZONE, UNRESOLVED].map(id);
+    let ids = [INT, REAL, BOOL, DINT, ST_ZONE, TABLE, UNRESOLVED].map(id);
     TypeTrees::resolve(ids, &types_for(owner, platform, rows()))
 }
 
@@ -102,9 +107,18 @@ pub(in crate::recipe::draft) fn new_parameter(
         plc_type: id(type_n),
         s7_address: None,
         ordinal: Ordinal::parse(u32::try_from(n).unwrap()).unwrap(),
-        value_json: value_json.to_owned(),
+        value: ValueInput::Json(value_json.to_owned()),
         limits: LimitList::parse(Vec::new()).unwrap(),
     }
+}
+
+/// The value input of a form: one text per leaf path.
+pub(in crate::recipe::draft) fn texts_input(pairs: &[(&str, &str)]) -> ValueInput {
+    let pairs = pairs
+        .iter()
+        .map(|(path, text)| (LeafPath::parse(path).unwrap(), (*text).to_owned()))
+        .collect();
+    ValueInput::Texts(LeafTexts::parse(pairs).unwrap())
 }
 
 /// A new parameter with an address.

@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use super::ParameterValue;
+use super::expected::Expected;
 use super::fault::ValueFault;
 use super::leaf::Mode;
 use super::walk::canonicalize;
@@ -20,7 +21,7 @@ impl ParameterValue {
     /// Returns the [`ValueFault`] of the first part that does not match the tree.
     pub fn parse(json: &str, tree: &TypeTree) -> Result<Self, ValueFault> {
         let parsed = serde_json::from_str::<Value>(json)
-            .map_err(|_| ValueFault::mismatch(Vec::new(), "valid JSON text"))?;
+            .map_err(|_| ValueFault::mismatch(Vec::new(), Expected::Json))?;
         canonicalize(parsed, tree, Mode::Request)
     }
 }

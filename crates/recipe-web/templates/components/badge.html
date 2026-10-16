@@ -6,4 +6,10 @@
 {#- The state "Archived" of a machine or a unit (design-system.md 9): the icon and the tokens of Retired. The word comes from the key status-archived. -#}
 {%- macro archived(word) -%}{{ status("retired", word) }}{%- endmacro -%}
 {%- macro archived_large(word) -%}{{ status_large("retired", word) }}{%- endmacro -%}
+{#- The state "Deleted" of a recipe (design-system.md 9): the icon of Retired and the tokens of Retired. The word comes from the key status-deleted. -#}
+{%- macro deleted(word) -%}<span class="badge badge-deleted">{{ icons::status_retired() }}<span>{{ word }}</span></span>{%- endmacro -%}
+{%- macro deleted_large(word) -%}<span class="badge badge-large badge-deleted">{{ icons::status_retired() }}<span>{{ word }}</span></span>{%- endmacro -%}
+{#- The state "Outdated" of a parameter (design-system.md 9): the icon and the tokens of the warning. The word comes from the key status-outdated. -#}
+{%- macro outdated(word) -%}<span class="badge badge-outdated">{{ icons::alert_warning() }}<span>{{ word }}</span></span>{%- endmacro -%}
+{%- macro outdated_large(word) -%}<span class="badge badge-large badge-outdated">{{ icons::alert_warning() }}<span>{{ word }}</span></span>{%- endmacro -%}
 {%- macro user(active, word) -%}<span class="badge {% if active %}badge-active{% else %}badge-inactive{% endif %}">{% if active %}{{ icons::user_active() }}{% else %}{{ icons::user_inactive() }}{% endif %}<span>{{ word }}</span></span>{%- endmacro -%}

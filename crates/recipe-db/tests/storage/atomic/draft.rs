@@ -15,7 +15,8 @@ use recipe_app::recipe::{
 };
 use recipe_domain::plant::{LeafPath, PlcTypeId, TypeExpr, UnitPath};
 use recipe_domain::recipe::{
-    LangCode, LimitInput, LimitList, Ordinal, ParameterKey, ParameterTag, Translation,
+    LangCode, LimitInput, LimitList, MemberValue, Ordinal, ParameterKey, ParameterTag, Translation,
+    ValueInput,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -79,7 +80,7 @@ fn add_input(world: &World, expected: i64) -> AddParameterInput {
         type_expr: TypeExpr::parse("STRING(20)").unwrap(),
         s7_address: None,
         ordinal: Ordinal::parse(1).unwrap(),
-        value_json: "\"abc\"".to_owned(),
+        value: ValueInput::Json("\"abc\"".to_owned()),
         limits: limits(vec![]),
     }
 }
@@ -144,7 +145,7 @@ fn update_input(world: &World, param: &Param, expected: i64) -> UpdateParameterD
         s7_address: None,
         ordinal: Ordinal::parse(0).unwrap(),
         retype: Some(RetypeInput {
-            value_json: "5".to_owned(),
+            value: ValueInput::Json("5".to_owned()),
             limits: limits(vec![limit("1", "9")]),
         }),
     }
@@ -209,7 +210,7 @@ fn set_value_input(world: &World, param: &Param, expected: i64) -> SetParameterV
         number: 1,
         expected_row_version: expected,
         key: param.key,
-        value_json: "7".to_owned(),
+        value: ValueInput::Json("7".to_owned()),
     }
 }
 
@@ -579,7 +580,7 @@ fn rebind_input(rebind: &Rebind, expected: i64) -> RebindTypeRevisionInput {
         to: PlcTypeId::from(rebind.to),
         new_member_values: BTreeMap::from([(
             (rebind.key, LeafPath::parse(".m2").unwrap()),
-            json!(7),
+            MemberValue::Json(json!(7)),
         )]),
     }
 }

@@ -385,9 +385,9 @@ fn a_change_of_a_real_draft_gives_the_diff_of_its_leaf() {
     })
     .unwrap();
     let key: ParameterKey = pkey(1);
-    let change = draft
-        .set_value(key, r#"{"temp_sp": 90, "setpoint": 10}"#, &rig.trees)
-        .unwrap();
+    let value =
+        recipe_domain::recipe::ValueInput::Json(r#"{"temp_sp": 90, "setpoint": 10}"#.to_owned());
+    let change = draft.set_value(key, &value, &rig.trees).unwrap();
     let diff = value_diff(&change, &rig.trees).unwrap();
     let stored = change.after().unwrap().value().as_json().clone();
     assert_eq!(diff.before, json!({"value": {".temp_sp": 85.5}}));

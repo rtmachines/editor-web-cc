@@ -4,14 +4,21 @@ mod generate;
 
 use proptest::prelude::*;
 
-use self::generate::{Counts, Mutation, generate_limits, generate_value, tighten_first_numeric};
-use crate::plant::TypeTree;
+use std::collections::BTreeSet;
+
+use self::generate::{
+    Counts, MixedSpec, Mutation, generate_limits, generate_value, mixed_specs,
+    tighten_first_numeric,
+};
 use crate::plant::strategy::{GeneratedTypes, type_trees};
+use crate::plant::{Primitive, TypeTree};
 use crate::recipe::limit::ProcessLimit;
-use crate::recipe::value::{ParameterValue, ValueFault};
+use crate::recipe::value::{LeafTexts, ParameterValue, ValueFault};
 
 /// Number of cases of each property. The trees are large, so the count stays moderate.
 const CASES: u32 = 64;
+/// Number of cases of the round trip over every leaf class. These trees are small.
+const MIXED_CASES: u32 = 256;
 /// Size of the pool of random numbers that drives one generated value.
 const POOL_SIZE: usize = 256;
 
@@ -148,6 +155,66 @@ proptest! {
             prop_assert_eq!(back, Ok(limit));
         }
     }
+
+    #[test]
+    fn texts_of_a_value_build_the_same_value_again(
+        generated in type_trees(),
+        seeds in pool(),
+    ) {
+        let tree = resolved(&generated)?;
+        let (json, _) = generate_value(&tree, &seeds, Mutation::None);
+        let parsed = parse(&json, &tree).map_err(|f| TestCaseError::fail(f.to_string()))?;
+        let texts = parsed
+            .texts(&tree)
+            .map_err(|f| TestCaseError::fail(f.to_string()))?;
+        let pairs = texts.into_iter().map(|leaf| (leaf.path, leaf.text)).collect();
+        let leaf_texts = LeafTexts::parse(pairs).map_err(|e| TestCaseError::fail(e.to_string()))?;
+        let rebuilt = ParameterValue::from_texts(&tree, &leaf_texts);
+        prop_assert_eq!(rebuilt, Ok(parsed));
+    }
+}
+
+/// Build the value of a mixed spec from its stored form, write its texts, and build it again.
+fn mixed_round_trip(spec: &MixedSpec) -> Result<(), TestCaseError> {
+    let (tree, stored) = spec.build().map_err(TestCaseError::fail)?;
+    let value = ParameterValue::try_from((&stored, &tree))
+        .map_err(|fault| TestCaseError::fail(fault.to_string()))?;
+    let texts = value
+        .texts(&tree)
+        .map_err(|fault| TestCaseError::fail(fault.to_string()))?;
+    let pairs = texts
+        .into_iter()
+        .map(|leaf| (leaf.path, leaf.text))
+        .collect();
+    let leaf_texts =
+        LeafTexts::parse(pairs).map_err(|error| TestCaseError::fail(error.to_string()))?;
+    prop_assert_eq!(ParameterValue::from_texts(&tree, &leaf_texts), Ok(value));
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(MIXED_CASES))]
+
+    #[test]
+    fn texts_of_every_leaf_class_build_the_same_value_again(spec in mixed_specs()) {
+        mixed_round_trip(&spec)?;
+    }
+}
+
+#[test]
+fn mixed_specs_reach_every_primitive() {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+
+    let mut runner = TestRunner::deterministic();
+    let strategy = mixed_specs();
+    let mut reached = BTreeSet::new();
+    for _ in 0..300 {
+        let spec = strategy.new_tree(&mut runner).unwrap().current();
+        reached.extend(spec.primitives());
+    }
+    let every: BTreeSet<Primitive> = Primitive::ALL.into_iter().collect();
+    assert_eq!(reached, every);
 }
 
 #[test]

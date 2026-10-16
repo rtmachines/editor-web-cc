@@ -5,8 +5,13 @@
 
 use std::fmt;
 
+mod purpose;
 mod requirement;
 
+pub use purpose::{
+    FormPurpose, MachineFormPurpose, ParameterFormPurpose, RecipeFormPurpose, UdtFormPurpose,
+    UnitFormPurpose, VersionFormPurpose,
+};
 pub use requirement::Requirement;
 
 /// One use case or route of `api.md` section 3.3.

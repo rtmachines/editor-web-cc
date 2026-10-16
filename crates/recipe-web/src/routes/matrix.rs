@@ -10,6 +10,7 @@ use recipe_domain::identity::Role;
 
 pub(crate) use crate::pages::test_helpers::assert_error;
 use crate::test_support::plant::M12_ID;
+use crate::test_support::recipes::LINE_KEY;
 use crate::test_support::{
     Fixture, Reply, TestSession, deactivate_user, get_with, post_fields, post_pre_session,
 };
@@ -24,8 +25,14 @@ const LOGIN_VALUE: &str = "user2";
 const CODE_VALUE: &str = "M7";
 /// The unit path that the placeholder `{path}` names. It is a live unit of `M7` with children.
 const PATH_VALUE: &str = "U1.2";
-/// The struct name that the placeholder `{name}` names. It is a struct of `M7` in two revisions.
+/// The struct name that the placeholder `{name}` names. It is a struct of `M7` in three revisions.
 const NAME_VALUE: &str = "ST_Zone";
+/// The reference number that the placeholder `{ref}` names. It is the recipe `R-100` of `M7`.
+const REF_VALUE: &str = "R-100";
+/// The version number that the placeholder `{n}` names. It is the live draft of `R-100`.
+const N_VALUE: &str = "3";
+/// The language code that the placeholder `{lang}` names. It is the translation of `LINE`.
+const LANG_VALUE: &str = "pl";
 
 /// The six principals of design D19.
 #[derive(Clone, Copy, Debug)]
@@ -101,6 +108,10 @@ pub(crate) fn endpoint(method: Method, path: &'static str, body: &'static str) -
 /// - `{path}` is `U1.2`.
 /// - `{name}` is `ST_Zone`.
 /// - `{uuid}` is the fixed identifier of the archived machine `M12`.
+/// - `{ref}` is `R-100`.
+/// - `{n}` is `3`, the live draft of `R-100`.
+/// - `{key}` is the key of the parameter `LINE`.
+/// - `{lang}` is `pl`.
 pub(crate) fn fill(template: &str) -> String {
     template
         .replace("{login}", LOGIN_VALUE)
@@ -108,6 +119,10 @@ pub(crate) fn fill(template: &str) -> String {
         .replace("{path}", PATH_VALUE)
         .replace("{name}", NAME_VALUE)
         .replace("{uuid}", &M12_ID.to_string())
+        .replace("{ref}", REF_VALUE)
+        .replace("{n}", N_VALUE)
+        .replace("{key}", &LINE_KEY.to_string())
+        .replace("{lang}", LANG_VALUE)
 }
 
 /// The login of the account that a principal uses. `NoSession` logs in as the Administrator.
@@ -130,7 +145,7 @@ pub(crate) async fn world(principal: Principal) -> (Fixture, Option<TestSession>
     fixture.seed_account(3, Role::Operator, PASSWORD, false);
     fixture.seed_account(4, Role::Administrator, PASSWORD, true);
     fixture.seed_account(5, Role::Administrator, PASSWORD, false);
-    fixture.seed_plant();
+    fixture.seed_recipes();
     let session = match principal {
         Principal::NoSession => None,
         Principal::Administrator => Some(fixture.session_of(1)),
@@ -199,5 +214,7 @@ pub(crate) fn assert_want(reply: &Reply, want: Want, what: &str) {
     }
 }
 
+#[cfg(test)]
+mod recipe_tests;
 #[cfg(test)]
 mod tests;

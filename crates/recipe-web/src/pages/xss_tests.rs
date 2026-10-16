@@ -162,7 +162,7 @@ async fn xss_the_query_pages_are_every_get_page_of_the_table_without_a_query_ext
             "/login",
             "/me",
             "/me/password",
-            "/recipes",
+            "/recipes/new",
             "/users/new",
             "/users/{login}",
             "/machines/new",
@@ -170,6 +170,7 @@ async fn xss_the_query_pages_are_every_get_page_of_the_table_without_a_query_ext
             "/machines/{code}/units",
             "/machines/{code}/units/{path}",
             "/machines/{code}/types",
+            "/recipes/{ref}/versions/new",
         ]
     );
 }

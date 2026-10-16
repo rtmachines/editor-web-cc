@@ -12,4 +12,6 @@ pub enum Isolation {
     Serializable,
     /// The read before the transaction of a command. It takes no lock (design D5).
     ReadOnly,
+    /// The level of a draft query: one snapshot, no lock, no retry (`REPEATABLE READ`, ADR-0042).
+    RepeatableRead,
 }

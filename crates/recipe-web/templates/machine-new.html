@@ -1,15 +1,16 @@
 {% extends "base.html" %}
 {% import "components/field.html" as fields %}
 {% import "components/heading.html" as headings %}
+{#- The form of a new machine (design D6). The block form renders alone as the out-of-band form of an error answer (ADR-0041 (e)). The platform select has an empty first option. Each hx attribute is a literal. -#}
 {% block content %}
 {{ headings::h1(layout, t.get("machine-new-title")) }}
-<form method="post" action="/machines" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-{{ fields::named(t, "code", "code", t.get("field-code"), t.get("machine-code-hint"), "text", true, true, 8, "off", String::new()) }}
-{{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", String::new()) }}
-{{ fields::select(t, "plc_platform", t.get("field-plc-platform"), t.get("machine-platform-hint"), platforms, String::new(), true) }}
-{{ fields::named(t, "main_unit_name", "main_unit_name", t.get("field-main-unit-name"), t.get("machine-main-unit-hint"), "text", true, false, 200, "off", String::new()) }}
-<p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("machine-create-submit") }}</button></p>
-</form>
+{% block form %}<form id="machine-new-form" method="post" action="/machines" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{{ fields::named(t, "code", "code", t.get("field-code"), t.get("machine-code-hint"), "text", true, true, 8, "off", form.code, form.errors.lines("code")) }}
+{{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("machine_name")) }}
+{{ fields::select(t, "plc_platform", t.get("field-plc-platform"), t.get("machine-platform-hint"), form.platforms, form.platform, true, form.errors.lines("plc_platform")) }}
+{{ fields::named(t, "main_unit_name", "main_unit_name", t.get("field-main-unit-name"), t.get("machine-main-unit-hint"), "text", true, false, 200, "off", form.main_unit, form.errors.lines("main_unit_name")) }}
+<p class="actions"><button type="submit" id="machine-create-submit" class="btn btn-primary">{{ t.get("machine-create-submit") }}</button></p>
+</form>{% endblock %}
 <p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>
 {% endblock %}

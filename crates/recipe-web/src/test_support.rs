@@ -1,6 +1,7 @@
 //! Support code of the unit tests: a state over an in-memory store, test routes, and sessions.
 
 pub(crate) mod plant;
+pub(crate) mod recipes;
 
 use std::cell::RefCell;
 use std::net::SocketAddr;

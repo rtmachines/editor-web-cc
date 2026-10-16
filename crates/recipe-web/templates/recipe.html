@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/badge.html" as badges %}
+{% import "components/field.html" as fields %}
+{#- The recipe page of design D7. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). The rename form shows only when form.shown is true. The block rename_form renders alone as the out-of-band form of the rename answers (ADR-0041 (e) and (h)). Each hx attribute is a literal. The action holds the reference number and has hx-boost (ADR-0037 (f)). -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if deleted %}<div class="actions">{{ badges::deleted_large(t.get("status-deleted")) }}</div>
+{% endif %}<dl>
+<dt>{{ t.get("recipe-machine") }}</dt>
+<dd><a class="target-link" href="{{ machine_href }}">{{ machine }}</a></dd>
+<dt>{{ t.get("recipe-name") }}</dt>
+<dd><span id="recipe-name">{{ name }}</span></dd>
+</dl>
+{% block rename_form %}{% if form.shown %}<form id="recipe-rename-form" method="post" action="{{ form.action }}" hx-boost="true" hx-target="#recipe-name" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{{ fields::named(t, "recipe_name", "name", t.get("field-recipe-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("recipe_name")) }}
+<p class="actions"><button type="submit" id="recipe-rename-submit">{{ t.get("recipe-rename-submit") }}</button></p>
+</form>
+{% endif %}{% endblock %}{% if let Some(href) = new_version_href %}<p class="actions"><a class="target-link" href="{{ href }}">{{ t.get("version-new-link") }}</a></p>
+{% endif %}<div id="versions-table">{% include "versions-table.html" %}</div>
+<p><a class="target-link" href="/recipes">{{ t.get("recipes-title") }}</a></p>
+{% endblock %}

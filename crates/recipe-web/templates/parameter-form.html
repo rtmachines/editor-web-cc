@@ -1,0 +1,21 @@
+{% import "components/alert.html" as alerts -%}
+{% import "components/field.html" as fields -%}
+{% import "components/grid.html" as grids -%}
+{#- The parameter form of design D6 to D8. The struct that renders or includes this file has the fields t and form. The form of a new parameter sends to .../parameters and appends the answer row to #parameter-rows. The edit form sends to .../definition and swaps #parameter-summary. Each hx attribute is a literal, and the action holds the user data (ADR-0037 (f)). The form of a new parameter on its own page targets #content like the other stand-alone forms, and its out-of-band form keeps these attributes. The two in-page forms have show:none and focus-scroll:true, so a save does not scroll to the target and the focused input stays in view (RQ-2). The edit form of the page has no hx attribute. The save button is the first submit button, so Enter saves (ADR-0039 (i)). Each submit button has a fixed id (ADR-0041 (e)). The hidden field value_type names the type of the shown grid. -#}
+<form id="{% if form.edit %}parameter-edit-form{% else %}parameter-new-form{% endif %}" method="post" action="{{ form.action }}"{% if form.boosted %}{% if form.edit %} hx-boost="true" hx-target="#parameter-summary" hx-swap="innerHTML show:none focus-scroll:true" hx-push-url="false" hx-sync="closest form:drop"{% else if form.standalone %} hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"{% else %} hx-boost="true" hx-target="#parameter-rows" hx-swap="beforeend show:none focus-scroll:true" hx-push-url="false" hx-sync="closest form:drop"{% endif %}{% endif %}{% if form.oob %} hx-swap-oob="true"{% endif %}>
+{% if !form.heading.is_empty() %}<h2>{{ form.heading }}</h2>
+{% endif %}{{ grids::actions(t, form.save_id, form.save_label) }}
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+<input type="hidden" name="row_version" value="{{ form.shown.texts.row_version }}">
+{% if !form.shown.value_type.is_empty() %}<input type="hidden" name="value_type" value="{{ form.shown.value_type }}">
+{% endif %}{{ fields::select(t, "unit_path", t.get("field-unit-path"), String::new(), form.units.as_slice(), form.shown.texts.unit, true, form.errors.lines("unit_path")) }}
+{{ fields::named(t, "tag", "tag", t.get("field-tag"), t.get("parameter-tag-hint"), "text", true, true, 64, "off", form.shown.texts.tag, form.errors.lines("tag")) }}
+{{ fields::named(t, "name_en", "name_en", t.get("field-name-en"), String::new(), "text", true, false, 200, "off", form.shown.texts.name_en, form.errors.lines("name_en")) }}
+{{ fields::named(t, "description_en", "description_en", t.get("field-description-en"), String::new(), "text", true, false, 4000, "off", form.shown.texts.description_en, form.errors.lines("description_en")) }}
+{% let type_lines = form.errors.lines("type") %}<div class="field"><label for="type">{{ t.get("field-type") }} <span class="field-required">{{ t.get("form-required") }}</span></label><span class="field-hint" id="type-hint">{{ t.get("udt-type-hint") }}</span><input id="type" name="type" type="text" class="data" list="type-choices" autocomplete="off" autocapitalize="none" spellcheck="false" aria-required="true" aria-describedby="type-hint{% if !type_lines.is_empty() %} type-error{% endif %}" value="{{ form.shown.texts.type_text }}"{% if !type_lines.is_empty() %} aria-invalid="true"{% endif %}>{{ fields::error_line("type", type_lines) }}</div>
+<datalist id="type-choices">{% for choice in form.choices %}<option value="{{ choice }}">{% endfor %}</datalist>
+{% if form.has_s7 %}{{ fields::named(t, "s7_address", "s7_address", t.get("field-s7-address"), t.get("parameter-s7-hint"), "text", form.s7_required, true, 24, "off", form.shown.texts.s7_address, form.errors.lines("s7_address")) }}
+{% endif %}{{ fields::named(t, "ordinal", "ordinal", t.get("field-ordinal"), t.get("parameter-ordinal-hint"), "text", true, true, 6, "off", form.shown.texts.ordinal, form.errors.lines("ordinal")) }}
+{% if let Some(view) = form.shown.grid.as_ref() %}{% if !form.shown.notice.is_empty() %}{{ alerts::notice("info", form.shown.notice) }}
+{% endif %}{{ grids::grid(t, view, form.errors) }}{% else %}<p class="field-hint">{{ t.get("parameter-fields-first") }}</p>{% endif %}
+</form>

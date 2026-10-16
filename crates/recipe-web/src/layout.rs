@@ -79,6 +79,7 @@ impl NavTarget {
 }
 
 /// One link of the navigation.
+#[derive(Clone)]
 pub(crate) struct NavLink {
     /// The path of the page.
     pub(crate) path: &'static str,
@@ -201,6 +202,23 @@ impl<'a> Layout<'a> {
         }
     }
 
+    /// Build the layout of the page of a refused form from the session parts of `frame`.
+    ///
+    /// The page answers a `POST`, so it has no language switch (ADR-0036 (j)).
+    pub(crate) fn refused(
+        texts: Texts<'a>,
+        lang: Lang,
+        title: String,
+        frame: &SessionFrame,
+    ) -> Self {
+        Self {
+            nav: frame.nav.clone(),
+            csrf_token: frame.csrf_token.clone(),
+            user_login: Some(frame.user_login.clone()),
+            ..Self::bare(texts, lang, title)
+        }
+    }
+
     /// Return true when the answer is the content of `main` and not the full page.
     pub(crate) const fn is_content(&self) -> bool {
         matches!(self.shape, Shape::Content)
@@ -213,6 +231,34 @@ impl<'a> Layout<'a> {
             toast: Some(text),
             ..self
         }
+    }
+}
+
+/// The session parts of the layout that the page of a refused form needs (K5, `api.md` 5.3).
+///
+/// The type solves one problem: the error layer runs before the session layer and has no session.
+/// A form handler copies these parts when it refuses a request without HTMX. The error layer then
+/// shows the form in the layout of the session. The parts hold the CSRF token, so the type has no
+/// `Debug`.
+pub(crate) struct SessionFrame {
+    /// The navigation links of the role of the session.
+    nav: Vec<NavLink>,
+    /// The CSRF token of the session.
+    csrf_token: String,
+    /// The login of the user.
+    user_login: String,
+}
+
+impl SessionFrame {
+    /// Copy the session parts of `request`, or return `None` when the request has no session.
+    pub(crate) fn of(texts: Texts<'_>, request: &PageRequest) -> Option<Self> {
+        let auth = request.auth().ok()?;
+        let user = auth.user();
+        Some(Self {
+            nav: nav_links(texts, user.role(), auth.must_change_password(), None),
+            csrf_token: request.csrf_token(),
+            user_login: user.login().to_string(),
+        })
     }
 }
 

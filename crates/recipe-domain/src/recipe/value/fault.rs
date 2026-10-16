@@ -2,10 +2,14 @@
 
 use std::fmt;
 
+use super::expected::Expected;
 use crate::plant::{LeafPath, LeafSegment};
 
 /// The path of a fault that concerns the whole value.
 static WHOLE_VALUE: LeafPath = LeafPath::whole();
+
+/// The expected form of a value that belongs to another root type than its tree.
+static PARAMETER_TYPE: Expected = Expected::ParameterType;
 
 /// The reason why a value does not match its type tree or its limits.
 ///
@@ -20,8 +24,8 @@ pub enum ValueFault {
     Mismatch {
         /// Path of the part that does not match. The empty path names the whole value.
         leaf: LeafPath,
-        /// Short English text of the form that the type needs, for example `true or false`.
-        expected: String,
+        /// The form that the type needs.
+        expected: Expected,
     },
     /// The tree or a limit belongs to another root type than the value.
     WrongTree,
@@ -45,10 +49,10 @@ pub enum ValueFault {
 
 impl ValueFault {
     /// Build a mismatch at the given path segments.
-    pub(super) fn mismatch(segments: Vec<LeafSegment>, expected: impl Into<String>) -> Self {
+    pub(super) fn mismatch(segments: Vec<LeafSegment>, expected: Expected) -> Self {
         Self::Mismatch {
             leaf: LeafPath::from_segments(segments),
-            expected: expected.into(),
+            expected,
         }
     }
 
@@ -65,15 +69,89 @@ impl ValueFault {
         }
     }
 
-    /// Return the short text of the form that the type needs.
+    /// Return the form that the type needs.
+    ///
+    /// A fault of the shape returns its form. A fault of a limit returns `None`.
     #[must_use]
-    pub fn expected(&self) -> &str {
+    pub const fn expected(&self) -> Option<&Expected> {
         match self {
-            Self::Mismatch { expected, .. } => expected,
-            Self::WrongTree => "a tree and limits of the root type of the value",
-            Self::LimitConflict { .. } => "one limit for each leaf",
-            Self::OutOfLimit { .. } => "a value inside the limits",
+            Self::Mismatch { expected, .. } => Some(expected),
+            Self::WrongTree => Some(&PARAMETER_TYPE),
+            Self::LimitConflict { .. } | Self::OutOfLimit { .. } => None,
         }
+    }
+}
+
+/// One or more faults of one value, in the order of the leaves (ADR-0041).
+///
+/// The type solves one problem: a draft command reports every fault of a value at once. The
+/// list cannot be empty and owns no code. A draft function turns it into `RecipeErrors`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValueFaults {
+    first: ValueFault,
+    rest: Vec<ValueFault>,
+}
+
+impl ValueFaults {
+    /// Build a list from a vector. Return `None` for an empty vector.
+    #[must_use]
+    pub fn from_vec(faults: Vec<ValueFault>) -> Option<Self> {
+        let mut entries = faults.into_iter();
+        let first = entries.next()?;
+        Some(Self {
+            first,
+            rest: entries.collect(),
+        })
+    }
+
+    /// Return the first fault of the list.
+    #[must_use]
+    pub const fn first(&self) -> &ValueFault {
+        &self.first
+    }
+
+    /// Return the number of faults. The count is never zero.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.rest.len().saturating_add(1)
+    }
+
+    /// Return `false`. A list always holds at least one fault.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        false
+    }
+
+    /// Iterate over the faults in order.
+    pub fn iter(&self) -> impl Iterator<Item = &ValueFault> {
+        std::iter::once(&self.first).chain(self.rest.iter())
+    }
+
+    /// Convert the list into a vector of its faults in order.
+    #[must_use]
+    pub fn into_vec(self) -> Vec<ValueFault> {
+        std::iter::once(self.first).chain(self.rest).collect()
+    }
+}
+
+impl From<ValueFault> for ValueFaults {
+    fn from(fault: ValueFault) -> Self {
+        Self {
+            first: fault,
+            rest: Vec::new(),
+        }
+    }
+}
+
+impl fmt::Display for ValueFaults {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (index, fault) in self.iter().enumerate() {
+            if index > 0 {
+                f.write_str("\n")?;
+            }
+            write!(f, "{fault}")?;
+        }
+        Ok(())
     }
 }
 

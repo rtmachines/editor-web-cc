@@ -9,23 +9,41 @@ use axum::extract::rejection::FormRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use recipe_app::error::AppError;
+use recipe_app::ports::NonEmpty;
 use recipe_domain::audit::RequestId;
 use recipe_domain::error_codes::ErrorCode;
 
 mod answer;
+mod conflict;
+mod form;
 mod layer;
+mod lists;
 mod log;
 mod plant;
 mod reason;
+mod recipe;
 mod retry;
 mod status;
 mod values;
 mod view;
 
+pub use conflict::ConflictView;
+pub(crate) use form::FormErrors;
+pub use form::RenderedForm;
 pub(crate) use layer::render_errors;
+#[cfg_attr(
+    not(test),
+    expect(
+        unused_imports,
+        reason = "the form handlers of wave 4 and later call it"
+    )
+)]
+pub(crate) use lists::{DraftFault, draft_lines};
+pub use lists::{FieldError, LineArg, item_lines, leaf_lines};
 pub use reason::FieldReason;
+pub(crate) use recipe::leaf_of;
 pub(crate) use retry::Retry;
-pub(crate) use view::ErrorView;
+pub(crate) use view::{ErrorView, LineView, ListView, NO_LINES};
 
 /// Bytes in one KiB.
 const KIB: usize = 1024;
@@ -130,6 +148,28 @@ pub enum WebError {
         /// Why the input is not valid. The page shows the text of its key in the UI language.
         reason: FieldReason,
     },
+    /// Every bad field and every fault of one form (ADR-0041). The code is the code of the first line.
+    ///
+    /// The answer lists the lines in `#error-panel`. An HTMX answer also swaps `form` out of band.
+    #[error("{}", lists::lines_text(.lines))]
+    Fields {
+        /// The lines in the order of the form, at least one.
+        lines: NonEmpty<FieldError>,
+        /// The form with the sent texts and a line under each bad input, if the handler has one.
+        form: Option<RenderedForm>,
+    },
+    /// Another user changed the draft first (`E-WEB-001`, design D10).
+    ///
+    /// The answer `conflict.html` shows the current `row_version` and the last change of `view`.
+    /// It holds no out-of-band form, so the input of the user stays in the form. The error is
+    /// boxed, so `WebError` stays small (`clippy::result_large_err`).
+    #[error("{error}")]
+    Conflict {
+        /// The error `AppError::ConcurrentEdit` of the command.
+        error: Box<AppError>,
+        /// The result of the read of the version.
+        view: ConflictView,
+    },
     /// The CSRF token or the origin of a mutating request is not valid (`E-WEB-007`).
     #[error("The form is no longer valid. Reload the page and try again.")]
     CsrfRejected,
@@ -154,6 +194,8 @@ impl WebError {
             Self::App(error) => error.code(),
             Self::PayloadTooLarge { .. } => ErrorCode::WEB_003,
             Self::BadRequest { .. } | Self::BadRow { .. } => ErrorCode::WEB_008,
+            Self::Fields { lines, .. } => lines.first().code(),
+            Self::Conflict { error, .. } => error.code(),
             Self::CsrfRejected => ErrorCode::WEB_007,
             Self::ReadOnlyMode => ErrorCode::WEB_006,
             Self::Internal { .. } => ErrorCode::WEB_010,
@@ -184,13 +226,27 @@ impl IntoResponse for WebError {
 #[cfg(test)]
 pub(crate) use view::FieldLine;
 #[cfg(test)]
+mod draft_lines_tests;
+#[cfg(test)]
 mod fragment_tests;
+#[cfg(test)]
+mod lists_tests;
 #[cfg(test)]
 mod plant_args_tests;
 #[cfg(test)]
 mod push_url_tests;
 #[cfg(test)]
+mod reason_tests;
+#[cfg(test)]
+mod recipe_answer_tests;
+#[cfg(test)]
+mod recipe_tests;
+#[cfg(test)]
+mod refused_page_tests;
+#[cfg(test)]
 mod row_field_tests;
+#[cfg(test)]
+mod summary_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

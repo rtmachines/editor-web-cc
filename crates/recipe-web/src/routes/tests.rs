@@ -92,7 +92,7 @@ const HOST: &str = "recipes.plant.local";
 /// The origin of the foreign-origin requests.
 const FOREIGN_ORIGIN: &str = "https://evil.example";
 
-/// The rows of the matrix: the rows of P3.1 and the rows of the three areas of design D12.
+/// The rows of the matrix: the rows of P3.1 and the rows of the six areas of design D12.
 ///
 /// The types of the matrix live in `routes::matrix`, so the test modules of the areas can build
 /// their own rows.
@@ -101,6 +101,9 @@ fn matrix() -> Vec<(Endpoint, [Want; 6])> {
     rows.extend(pages::machines::route_tests::route_rows());
     rows.extend(pages::units::route_tests::route_rows());
     rows.extend(pages::types::route_tests::route_rows());
+    rows.extend(pages::recipes::route_tests::route_rows());
+    rows.extend(pages::versions::route_tests::route_rows());
+    rows.extend(pages::parameters::route_tests::route_rows());
     rows
 }
 
@@ -120,10 +123,10 @@ fn p31_matrix() -> Vec<(Endpoint, [Want; 6])> {
     rows
 }
 
-/// The rows of P3.1 for the login, the logout, the language, and the recipe list.
+/// The rows of P3.1 for the login, the logout, and the language. The row `GET /recipes` moved to
+/// the area `recipes` (design D12).
 fn p31_session_rows() -> Vec<(Endpoint, [Want; 6])> {
     use Want::*;
-    let own = [Login, Page, Page, Page, Password, Login];
     vec![
         (endpoint(Method::GET, "/login", ""), [Page; 6]),
         (
@@ -142,7 +145,6 @@ fn p31_session_rows() -> Vec<(Endpoint, [Want; 6])> {
             endpoint(Method::POST, "/lang", "lang=en&next=/recipes"),
             [Recipes; 6],
         ),
-        (endpoint(Method::GET, "/recipes", ""), own),
     ]
 }
 
@@ -282,6 +284,9 @@ fn routes_table_collects_the_rows_of_each_area() {
         ("machines", pages::machines::rows()),
         ("units", pages::units::rows()),
         ("types", pages::types::rows()),
+        ("recipes", pages::recipes::rows()),
+        ("versions", pages::versions::rows()),
+        ("parameters", pages::parameters::rows()),
     ];
     for (area, rows) in &areas {
         for key in keys_of(rows) {
@@ -304,6 +309,9 @@ fn routes_matrix_collects_the_rows_of_each_area() {
         ("machines", pages::machines::route_tests::route_rows()),
         ("units", pages::units::route_tests::route_rows()),
         ("types", pages::types::route_tests::route_rows()),
+        ("recipes", pages::recipes::route_tests::route_rows()),
+        ("versions", pages::versions::route_tests::route_rows()),
+        ("parameters", pages::parameters::route_tests::route_rows()),
     ];
     for (area, rows) in &areas {
         for (endpoint, _wants) in rows {
@@ -314,6 +322,22 @@ fn routes_matrix_collects_the_rows_of_each_area() {
     let area_rows: usize = areas.iter().map(|(_area, rows)| rows.len()).sum();
     let expected = p31_matrix().len().checked_add(area_rows).unwrap();
     assert_eq!(matrix().len(), expected);
+}
+
+#[test]
+fn routes_the_recipe_list_row_comes_from_the_recipes_area_and_stands_once() {
+    let rows = table();
+    let list: Vec<&RouteEntry> = rows
+        .iter()
+        .filter(|row| row.method == Method::GET && row.path == "/recipes")
+        .collect();
+    assert_eq!(list.len(), 1);
+    assert_eq!(
+        list.first().unwrap().access,
+        Access::Operation(Operation::ListRecipes)
+    );
+    let area = pages::recipes::rows();
+    assert!(keys_of(&area).contains(&("GET".to_owned(), "/recipes")));
 }
 
 #[test]

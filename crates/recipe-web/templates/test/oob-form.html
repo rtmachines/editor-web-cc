@@ -1,0 +1,2 @@
+{% import "components/field.html" as fields -%}
+<form id="test-form" method="post" action="/test/form"{% if oob %} hx-swap-oob="true"{% endif %}>{{ fields::named(t, "tag", "tag", t.get("field-tag"), String::new(), "text", false, true, 64, "off", value, errors.lines("tag")) }}<input type="hidden" name="row_version" value="{{ row_version }}"><input type="hidden" name="csrf_token" value="{{ csrf }}"></form>

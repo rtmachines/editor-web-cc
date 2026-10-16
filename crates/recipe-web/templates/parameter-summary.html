@@ -1,0 +1,20 @@
+{% import "components/toast.html" as toasts -%}
+{#- The definition of a parameter in #parameter-summary (design D7). The struct that renders or includes this file has the fields t and summary. The answer of a save also clears #error-panel and shows the toast out of band. The hx-swap-oob values are literals. -#}
+<dl>
+<dt>{{ t.get("parameter-key") }}</dt>
+<dd class="data">{{ summary.key }}</dd>
+<dt>{{ t.get("field-unit-path") }}</dt>
+<dd class="data">{{ summary.unit }}</dd>
+<dt>{{ t.get("field-tag") }}</dt>
+<dd class="data">{{ summary.tag }}</dd>
+<dt>{{ t.get("field-name-en") }}</dt>
+<dd>{{ summary.name_en }}</dd>
+<dt>{{ t.get("field-description-en") }}</dt>
+<dd>{{ summary.description_en }}</dd>
+<dt>{{ t.get("field-type") }}</dt>
+<dd class="data">{{ summary.type_text }}</dd>
+{% if let Some(address) = summary.s7_address.as_ref() %}<dt>{{ t.get("field-s7-address") }}</dt>
+<dd class="data">{{ address }}</dd>
+{% endif %}<dt>{{ t.get("field-ordinal") }}</dt>
+<dd class="data">{{ summary.ordinal }}</dd>
+</dl>{% if !summary.toast.is_empty() %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(summary.toast) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% endif %}

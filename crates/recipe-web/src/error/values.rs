@@ -35,6 +35,10 @@ pub(super) const fn missing_key(missing: &Missing) -> &'static str {
         Missing::MalformedLogin => "missing-malformed-login",
         Missing::MalformedMachine => "missing-malformed-machine",
         Missing::MalformedType => "missing-malformed-type",
+        Missing::MalformedRecipe => "missing-malformed-recipe",
+        Missing::MalformedVersion => "missing-malformed-version",
+        Missing::MalformedParameter => "missing-malformed-parameter",
+        Missing::Parameter { .. } => "missing-parameter",
         Missing::TypeRevision { .. } => "missing-type-revision",
     }
 }
@@ -59,7 +63,21 @@ fn missing_args(missing: &Missing) -> FluentArgs<'static> {
             args.set("number", number.to_string());
         }
         Missing::User(login) => args.set("login", login.to_string()),
-        Missing::MalformedLogin | Missing::MalformedMachine | Missing::MalformedType => {}
+        Missing::MalformedLogin
+        | Missing::MalformedMachine
+        | Missing::MalformedType
+        | Missing::MalformedRecipe
+        | Missing::MalformedVersion
+        | Missing::MalformedParameter => {}
+        Missing::Parameter {
+            reference,
+            number,
+            key,
+        } => {
+            args.set("reference", reference.to_string());
+            args.set("number", number.to_string());
+            args.set("key", key.to_string());
+        }
         Missing::TypeRevision {
             code,
             name,

@@ -12,6 +12,7 @@ use recipe_app::ports::{Isolation, Transaction, UnitOfWork};
 use recipe_db::Database;
 use recipe_db::settings::PoolSettings;
 use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::identity::{Login, Role as UserRole};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -185,6 +186,52 @@ async fn a_read_only_transaction_rejects_the_audit_insert() {
         "{error:?}"
     );
     assert_eq!(error.code(), ErrorCode::DB_008);
+}
+
+#[tokio::test]
+async fn a_repeatable_read_transaction_rejects_the_audit_insert() {
+    let f = Fixture::create().await;
+    let (list, _) = entries(Some(f.user), 1);
+    let mut tx = f.begin(Isolation::RepeatableRead).await;
+
+    let error = tx.append_audit(&list).await.unwrap_err();
+
+    assert!(
+        matches!(&error, StorageError::Other { sqlstate: Some(state), .. }
+            if state == READ_ONLY_SQL_TRANSACTION),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::DB_008);
+}
+
+/// A write is forbidden in the transaction, so no trigger can report `transaction_isolation`.
+/// The test shows the level through its effect: a commit of another session between two reads
+/// does not change the second read. `READ COMMITTED` would show the new role.
+#[tokio::test]
+async fn a_repeatable_read_transaction_keeps_the_snapshot_of_its_first_read() {
+    let mut f = Fixture::create().await;
+    let login: String = sqlx::query_scalar("SELECT login FROM app_user WHERE id = $1")
+        .bind(f.user)
+        .fetch_one(&mut f.admin)
+        .await
+        .unwrap();
+    let login = Login::parse(&login).unwrap();
+    let mut tx = f.begin(Isolation::RepeatableRead).await;
+    let first = tx.users().find_by_login(&login).await.unwrap().unwrap();
+
+    sqlx::query("UPDATE app_user SET role = 'operator' WHERE id = $1")
+        .bind(f.user)
+        .execute(&mut f.admin)
+        .await
+        .unwrap();
+    let second = tx.users().find_by_login(&login).await.unwrap().unwrap();
+    drop(tx);
+    let mut later = f.begin(Isolation::ReadOnly).await;
+    let committed = later.users().find_by_login(&login).await.unwrap().unwrap();
+
+    assert_eq!(first.role, UserRole::Administrator);
+    assert_eq!(second.role, UserRole::Administrator);
+    assert_eq!(committed.role, UserRole::Operator);
 }
 
 #[tokio::test]

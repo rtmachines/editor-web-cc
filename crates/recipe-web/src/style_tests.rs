@@ -8,6 +8,7 @@
 mod component_rules;
 mod css;
 mod fix_rules;
+mod recipe_rules;
 mod review_rules;
 mod rules;
 

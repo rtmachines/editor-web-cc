@@ -3,6 +3,7 @@
 use serde_json::{Number, Value};
 
 use super::decimal::{MAX_SIGNIFICANT_DIGITS, canonical, parse_decimal};
+use super::expected::Expected;
 use super::numeric::{is_integer, numeric_range};
 use crate::plant::{IecLiteral, LeafClass, PlcPlatform, Primitive, TimeType};
 
@@ -32,13 +33,13 @@ pub(super) struct LeafType {
 
 /// Convert a leaf to its canonical stored form.
 ///
-/// The function returns the short text of the expected form when the value does not match.
-pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, String> {
+/// The function returns the expected form when the value does not match.
+pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     match leaf.primitive.leaf_class() {
         LeafClass::Numeric => numeric(value, leaf.primitive),
         LeafClass::Bool => match value {
             Value::Bool(_) => Ok(value.clone()),
-            _ => Err(String::from("true or false")),
+            _ => Err(Expected::Bool),
         },
         LeafClass::String => string(value, leaf),
         LeafClass::Char => character(value, leaf.primitive),
@@ -47,13 +48,13 @@ pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, String> {
 }
 
 /// Convert a `STRING` or `WSTRING` leaf. The text must fit the length of the type.
-fn string(value: &Value, leaf: LeafType) -> Result<Value, String> {
+fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     let is_wide = leaf.primitive == Primitive::Wstring;
     let length = leaf.string_length.unwrap_or_default();
     let expected = if is_wide {
-        format!("a string of at most {length} UTF-16 units")
+        Expected::Wstring { length }
     } else {
-        format!("a string of at most {length} characters from Latin-1")
+        Expected::String { length }
     };
     let Value::String(text) = value else {
         return Err(expected);
@@ -72,11 +73,11 @@ fn string(value: &Value, leaf: LeafType) -> Result<Value, String> {
 }
 
 /// Convert a `CHAR` or `WCHAR` leaf. The text must hold one scalar inside the range of the type.
-fn character(value: &Value, primitive: Primitive) -> Result<Value, String> {
-    let (highest, label) = if primitive == Primitive::Wchar {
-        (WCHAR_MAX, "U+FFFF")
+fn character(value: &Value, primitive: Primitive) -> Result<Value, Expected> {
+    let highest = if primitive == Primitive::Wchar {
+        WCHAR_MAX
     } else {
-        (LATIN_1_MAX, "U+00FF")
+        LATIN_1_MAX
     };
     let is_valid = match value {
         Value::String(text) => {
@@ -91,18 +92,18 @@ fn character(value: &Value, primitive: Primitive) -> Result<Value, String> {
     if is_valid {
         Ok(value.clone())
     } else {
-        Err(format!("one character from U+0000 to {label}"))
+        Err(Expected::Char { max: highest })
     }
 }
 
 /// Convert a time leaf. The result is the count.
 ///
 /// A request carries an IEC literal. Storage carries the count as a JSON number.
-fn time(value: &Value, leaf: LeafType) -> Result<Value, String> {
-    let name = leaf.primitive.name();
+fn time(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
+    let type_name = leaf.primitive;
     let expected = || match leaf.mode {
-        Mode::Request => format!("an IEC literal of type {name}"),
-        Mode::Stored => format!("a count of type {name}"),
+        Mode::Request => Expected::Literal { type_name },
+        Mode::Stored => Expected::Count { type_name },
     };
     let time_type = TimeType::of(leaf.primitive, leaf.platform).ok_or_else(expected)?;
     let literal = match (leaf.mode, value) {
@@ -125,7 +126,7 @@ fn count_value(count: i128) -> Option<Value> {
 }
 
 /// Convert a numeric leaf. The result is a JSON number with canonical decimal text.
-fn numeric(value: &Value, primitive: Primitive) -> Result<Value, String> {
+fn numeric(value: &Value, primitive: Primitive) -> Result<Value, Expected> {
     let Value::Number(number) = value else {
         return Err(numeric_expected(primitive));
     };
@@ -133,7 +134,9 @@ fn numeric(value: &Value, primitive: Primitive) -> Result<Value, String> {
         .and_then(canonical)
         .ok_or_else(|| numeric_expected(primitive))?;
     if is_integer(primitive) && decimal.scale() != 0 {
-        return Err(format!("an integer of type {}", primitive.name()));
+        return Err(Expected::Integer {
+            type_name: primitive,
+        });
     }
     let (low, high) = numeric_range(primitive).ok_or_else(|| numeric_expected(primitive))?;
     if decimal < low || decimal > high {
@@ -146,16 +149,18 @@ fn numeric(value: &Value, primitive: Primitive) -> Result<Value, String> {
         .map_err(|_| numeric_expected(primitive))
 }
 
-/// Write the expected form of a numeric leaf.
-fn numeric_expected(primitive: Primitive) -> String {
+/// Return the expected form of a numeric leaf.
+fn numeric_expected(primitive: Primitive) -> Expected {
     match numeric_range(primitive) {
-        Some((low, high)) if is_integer(primitive) => {
-            format!("a number of type {} from {low} to {high}", primitive.name())
-        }
-        _ => format!(
-            "a number of type {} with at most {MAX_SIGNIFICANT_DIGITS} significant digits",
-            primitive.name()
-        ),
+        Some((low, high)) if is_integer(primitive) => Expected::NumberRange {
+            type_name: primitive,
+            low,
+            high,
+        },
+        _ => Expected::NumberDigits {
+            type_name: primitive,
+            digits: MAX_SIGNIFICANT_DIGITS,
+        },
     }
 }
 

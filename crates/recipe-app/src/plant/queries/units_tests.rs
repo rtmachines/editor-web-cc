@@ -63,6 +63,7 @@ async fn form_as(
     parent: Option<&str>,
 ) -> Result<UnitForm, AppError> {
     let input = UnitFormInput {
+        purpose: crate::auth::UnitFormPurpose::AddUnit,
         code: code(machine_code),
         parent: parent.map(path),
     };
@@ -317,7 +318,7 @@ async fn an_operator_gets_forbidden_from_the_form_and_the_store_stays_unread() {
     assert!(matches!(
         error,
         AppError::Forbidden {
-            operation: Operation::GetUnitForm
+            operation: Operation::AddUnit
         }
     ));
     assert!(fixture.store.journal().is_empty());

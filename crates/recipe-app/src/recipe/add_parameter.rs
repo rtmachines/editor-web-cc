@@ -4,6 +4,7 @@ use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{S7Address, TypeExpr, UnitPath};
 use recipe_domain::recipe::{
     LimitList, NewParameter, Ordinal, ParameterId, ParameterKey, ParameterTag, ReferenceNumber,
+    ValueInput,
 };
 use recipe_domain::text::{LongText, Text};
 use uuid::Uuid;
@@ -38,8 +39,8 @@ pub struct AddParameterInput {
     pub s7_address: Option<S7Address>,
     /// The position of the parameter in its draft.
     pub ordinal: Ordinal,
-    /// The value as JSON text. The domain parses it against the type tree.
-    pub value_json: String,
+    /// The value as JSON text or as one text per leaf. The domain checks it against the type tree.
+    pub value: ValueInput,
     /// The process limits of the parameter. The list can be empty.
     pub limits: LimitList,
 }
@@ -120,7 +121,7 @@ impl AddParameter {
             plc_type: resolved.type_id,
             s7_address: input.s7_address,
             ordinal: input.ordinal,
-            value_json: input.value_json,
+            value: input.value,
             limits: input.limits,
         };
         open.draft.add_parameter(new, &resolved.trees)?;
@@ -149,3 +150,5 @@ impl AddParameter {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod texts_tests;

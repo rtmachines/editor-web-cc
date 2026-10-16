@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% import "components/field.html" as fields %}
+{% import "components/heading.html" as headings %}
+{#- The form of a new version (design D6 and D7, ADR-0043 (h)). The select lists each version and the empty draft. The block form renders alone as the out-of-band form of an error answer (ADR-0041 (e)). The action holds the reference number and has hx-boost (ADR-0037 (f)). Each hx attribute is a literal. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% block form %}<form id="version-new-form" method="post" action="{{ form.action }}" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{{ fields::select(t, "based_on", t.get("field-based-on"), t.get("version-based-on-hint"), form.choices, form.based_on, false, form.errors.lines("based_on")) }}
+{{ fields::named(t, "change_note", "change_note", t.get("field-change-note"), t.get("recipe-change-note-hint"), "text", true, false, 4000, "off", form.note, form.errors.lines("change_note")) }}
+<p class="actions"><button type="submit" id="version-create-submit" class="btn btn-primary">{{ t.get("version-create-submit") }}</button></p>
+</form>{% endblock %}
+<p><a class="target-link" href="{{ recipe_href }}">{{ recipe_text }}</a></p>
+{% endblock %}

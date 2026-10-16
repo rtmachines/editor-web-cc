@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{#- The full page of a refused form for a request without HTMX (api.md section 5.3, ADR-0041 (e)). It has the layout of the session and the summary with a link to each input. The error layer inserts the form with the sent texts and its error lines after the heading. -#}
+{% block error_panel %}{% include "field-errors.html" %}{% endblock %}
+{% block content %}
+<h1>{{ layout.t.get("error-page-title") }}</h1>
+{% endblock %}

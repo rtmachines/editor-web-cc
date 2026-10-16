@@ -48,6 +48,8 @@ impl fmt::Debug for ReadDraftHook {
 pub(super) struct Shared {
     pub(super) state: MemoryState,
     pub(super) audit: Vec<AuditEntry>,
+    /// The commit time of each entry of `audit`, in the same order (`occurred_at` in SQL).
+    pub(super) audit_times: Vec<Timestamp>,
     pub(super) journal: Vec<JournalEntry>,
     pub(super) draft_writes: Vec<DraftWrite>,
     pub(super) faults: Faults,

@@ -8,7 +8,7 @@ use axum::http::{Method, StatusCode};
 
 use super::page_tests::{LANGS, administrator, assert_assets, assert_layout, get_page};
 use super::test_helpers::{CSP, assert_clean_html};
-use super::{machines, types, units};
+use super::{machines, parameters, recipes, types, units, versions};
 use crate::components_tests::assert_fixed_svg_tags;
 use crate::routes::{Access, table};
 use crate::test_support::{Reply, TestSession};
@@ -25,14 +25,14 @@ const HTMX_CONFIG: [&str; 7] = [
 ];
 /// The route pattern of the login page. It is the one page that needs no session.
 const LOGIN_PATTERN: &str = "/login";
-/// The seven full GET pages of step P3.1 with the path that the test requests.
+/// The six full GET pages of step P3.1 with the path that the test requests.
 ///
-/// `{login}` is the seeded user `user1`.
-const P31_PAGES: [(&str, &str); 7] = [
+/// The page `/recipes` moved to the area `recipes` (design D12). `{login}` is the seeded user
+/// `user1`.
+const P31_PAGES: [(&str, &str); 6] = [
     ("/login", "/login"),
     ("/me", "/me"),
     ("/me/password", "/me/password"),
-    ("/recipes", "/recipes"),
     ("/users", "/users"),
     ("/users/new", "/users/new"),
     ("/users/{login}", "/users/user1"),
@@ -40,8 +40,8 @@ const P31_PAGES: [(&str, &str); 7] = [
 
 /// Return each full GET page of the route table with the path that the test requests.
 ///
-/// The seven pages of P3.1 come first. The test modules of the three areas of design D12 add the
-/// pages of the machines, the units, and the types.
+/// The six pages of P3.1 come first. The test modules of the six areas of design D12 add the
+/// pages of the machines, the units, the types, the recipes, the versions, and the parameters.
 fn pages() -> Vec<(&'static str, String)> {
     let mut pages: Vec<(&'static str, String)> = P31_PAGES
         .iter()
@@ -50,6 +50,9 @@ fn pages() -> Vec<(&'static str, String)> {
     pages.extend(machines::route_tests::sweep_pages());
     pages.extend(units::route_tests::sweep_pages());
     pages.extend(types::route_tests::sweep_pages());
+    pages.extend(recipes::route_tests::sweep_pages());
+    pages.extend(versions::route_tests::sweep_pages());
+    pages.extend(parameters::route_tests::sweep_pages());
     pages
 }
 
@@ -128,6 +131,9 @@ fn sweep_pages_collect_the_pages_of_p31_and_of_each_area() {
         ("machines", machines::route_tests::sweep_pages()),
         ("units", units::route_tests::sweep_pages()),
         ("types", types::route_tests::sweep_pages()),
+        ("recipes", recipes::route_tests::sweep_pages()),
+        ("versions", versions::route_tests::sweep_pages()),
+        ("parameters", parameters::route_tests::sweep_pages()),
     ];
     for (area, area_pages) in &areas {
         for page in area_pages {
@@ -142,7 +148,7 @@ fn sweep_pages_collect_the_pages_of_p31_and_of_each_area() {
 #[tokio::test]
 async fn sweep_every_get_page_has_layout_headers_and_clean_markup_in_both_languages() {
     let (fixture, session) = administrator();
-    fixture.seed_plant();
+    fixture.seed_recipes();
     for pattern in get_page_patterns() {
         let path = path_of(pattern).unwrap();
         let session_of_page = (pattern != LOGIN_PATTERN).then_some(&session);

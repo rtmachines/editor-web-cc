@@ -4,14 +4,16 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::super::add::support::{
-    INT, NOT_ASKED, draft_with, draft_with_speed, limit_row, snapshot, trees_on,
+    INT, NOT_ASKED, draft_with, draft_with_speed, limit_row, snapshot, texts_input, trees_on,
 };
-use super::super::edit_support::{draft_with_content, stored_limit_to};
+use super::super::edit_support::{draft_with_content, draft_with_table, stored_limit_to};
 use super::super::support::{key, stored_parameter};
 use crate::error_codes::ErrorCode;
-use crate::plant::PlcPlatform;
 use crate::plant::fixtures::id;
-use crate::recipe::{Draft, DraftError, LimitInput, LimitList, Parameter};
+use crate::plant::{PlcPlatform, Primitive};
+use crate::recipe::{
+    Draft, DraftError, Expected, LimitInput, LimitList, Parameter, RecipeError, ValueInput,
+};
 
 fn limits(rows: Vec<LimitInput>) -> LimitList {
     LimitList::parse(rows).unwrap()
@@ -21,11 +23,27 @@ fn speed(draft: &Draft) -> Parameter {
     draft.parameter(key(1)).unwrap().clone()
 }
 
+fn json(text: &str) -> ValueInput {
+    ValueInput::Json(text.to_owned())
+}
+
+/// The message of each entry of a rejected command that returned a list.
+fn entry_texts(error: DraftError) -> Vec<String> {
+    match error {
+        DraftError::List(list) => Some(list.into_vec()),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap()
+    .iter()
+    .map(ToString::to_string)
+    .collect()
+}
+
 fn set_value_rejected(draft: &mut Draft, json_text: &str, code: ErrorCode) -> DraftError {
     let trees = trees_on(PlcPlatform::TwinCat3);
     let before = snapshot(draft);
     let error = draft
-        .set_value(key(1), json_text, &trees)
+        .set_value(key(1), &json(json_text), &trees)
         .expect_err("the command must fail");
     assert_eq!(error.code(), code, "{error}");
     assert_eq!(
@@ -56,7 +74,7 @@ fn a_new_value_inside_the_limit_keeps_limits_and_translations() {
     let mut draft = draft_with_content();
     let trees = trees_on(PlcPlatform::TwinCat3);
     let old = speed(&draft);
-    let change = draft.set_value(key(1), "150", &trees).unwrap();
+    let change = draft.set_value(key(1), &json("150"), &trees).unwrap();
     let after = change.after().unwrap();
     assert_eq!(after.value(), &json!(150).into());
     assert_eq!(after.limits(), old.limits());
@@ -79,7 +97,21 @@ fn a_value_above_the_stored_limit_gives_e_rcp_004() {
 #[test]
 fn a_json_string_for_an_int_gives_e_rcp_005() {
     let mut draft = draft_with_content();
-    set_value_rejected(&mut draft, "\"fast\"", ErrorCode::RCP_005);
+    let error = set_value_rejected(&mut draft, "\"fast\"", ErrorCode::RCP_005);
+    let range = Expected::NumberRange {
+        type_name: Primitive::Int,
+        low: Decimal::from(-32_768),
+        high: Decimal::from(32_767),
+    };
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap();
+    assert!(matches!(
+        list.first(),
+        RecipeError::ValueShapeMismatch { expected, .. } if *expected == range
+    ));
 }
 
 #[test]
@@ -102,9 +134,102 @@ fn an_unknown_key_gives_e_rcp_051_for_a_value() {
     let mut draft = draft_with_speed();
     let trees = trees_on(PlcPlatform::TwinCat3);
     let before = snapshot(&draft);
-    let error = draft.set_value(key(77), "1", &trees).unwrap_err();
+    let error = draft.set_value(key(77), &json("1"), &trees).unwrap_err();
     assert_eq!(error.code(), ErrorCode::RCP_051);
     assert_eq!(snapshot(&draft), before);
+}
+
+#[test]
+fn two_leaves_above_the_limit_give_two_e_rcp_004_entries_in_leaf_order() {
+    let mut draft = draft_with_table();
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let before = snapshot(&draft);
+    let value = texts_input(&[
+        ("[1]", "1"),
+        ("[2]", "2"),
+        ("[3]", "3500"),
+        ("[4]", "4"),
+        ("[5]", "5"),
+        ("[6]", "4000"),
+        ("[7]", "7"),
+        ("[8]", "8"),
+    ]);
+    let error = draft.set_value(key(1), &value, &trees).unwrap_err();
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Value 3500 of SPEED_TABLE[3] is outside the process limit 0 to 3000.",
+            "Value 4000 of SPEED_TABLE[6] is outside the process limit 0 to 3000.",
+        ]
+    );
+    assert_eq!(snapshot(&draft), before);
+}
+
+#[test]
+fn a_bad_leaf_and_a_leaf_above_the_limit_give_both_faults_in_leaf_order() {
+    let mut draft = draft_with_table();
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let before = snapshot(&draft);
+    let value = texts_input(&[
+        ("[1]", "x"),
+        ("[2]", "2"),
+        ("[3]", "3500"),
+        ("[4]", "4"),
+        ("[5]", "5"),
+        ("[6]", "6"),
+        ("[7]", "7"),
+        ("[8]", "8"),
+    ]);
+    let error = draft.set_value(key(1), &value, &trees).unwrap_err();
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Value of SPEED_TABLE[1] does not match the type. Expected an integer of type INT.",
+            "Value 3500 of SPEED_TABLE[3] is outside the process limit 0 to 3000.",
+        ]
+    );
+    assert_eq!(snapshot(&draft), before);
+}
+
+#[test]
+fn a_single_fault_of_a_value_stays_a_list() {
+    let mut draft = draft_with_content();
+    let error = set_value_rejected(&mut draft, "250", ErrorCode::RCP_004);
+    assert_eq!(entry_texts(error).len(), 1);
+}
+
+#[test]
+fn two_bad_limit_rows_give_a_list_in_row_order() {
+    let mut draft = draft_with_content();
+    let rows = vec![
+        limit_row(".speed", None, Some("5")),
+        limit_row("", Some("10"), Some("5")),
+    ];
+    let error = replace_rejected(&mut draft, rows, ErrorCode::RCP_017);
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Path .speed does not exist in the type of SPEED.",
+            "The minimum 10 of SPEED is greater than the maximum 5.",
+        ]
+    );
+}
+
+#[test]
+fn a_value_fault_comes_before_a_limit_row_fault() {
+    let mut draft = draft_with_content();
+    let rows = vec![
+        limit_row(".speed", None, Some("5")),
+        limit_row("", Some("0"), Some("100")),
+    ];
+    let error = replace_rejected(&mut draft, rows, ErrorCode::RCP_004);
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Value 120 of SPEED is outside the process limit 0 to 100.",
+            "Path .speed does not exist in the type of SPEED.",
+        ]
+    );
 }
 
 #[test]

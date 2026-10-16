@@ -25,10 +25,11 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
         Password,
         Login,
     ];
+    // The world of the matrix seeds `ST_Zone@3` (design D12), so a new revision is the fourth.
     let revised = [
         Login,
-        Redirect("/machines/M7/types/ST_Zone?rev=3"),
-        Redirect("/machines/M7/types/ST_Zone?rev=3"),
+        Redirect("/machines/M7/types/ST_Zone?rev=4"),
+        Redirect("/machines/M7/types/ST_Zone?rev=4"),
         Forbidden,
         Password,
         Login,

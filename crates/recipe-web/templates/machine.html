@@ -4,6 +4,7 @@
 {% import "components/alert.html" as alerts %}
 {% import "components/danger.html" as dangers %}
 {% import "components/field.html" as fields %}
+{#- The block rename_form renders alone as the out-of-band form of the rename answers (ADR-0041 (e) and (h)). It stands outside the test of live, because form.shown is true only for a live machine. -#}
 {% block content %}
 {{ headings::h1(layout, layout.title) }}
 {% if !live %}<div class="actions">{{ badges::archived_large(t.get("status-archived")) }}</div>
@@ -23,11 +24,11 @@
 <div id="unit-tree">{% include "unit-tree.html" %}</div>
 {% if live %}{% if can_add %}<p class="actions"><a class="target-link" href="{{ add_href }}" hx-boost="true" hx-target="#unit-form" hx-swap="innerHTML" hx-push-url="false">{{ t.get("tree-add-main-unit") }}</a></p>
 {% endif %}<div id="unit-form"></div>
-{% if can_rename %}<form method="post" action="{{ rename_action }}" hx-boost="true" hx-target="#machine-name" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-{{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", name) }}
-<p class="actions"><button type="submit">{{ t.get("machine-rename-submit") }}</button></p>
+{% endif %}{% block rename_form %}{% if form.shown %}<form id="machine-rename-form" method="post" action="{{ form.action }}" hx-boost="true" hx-target="#machine-name" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("machine_name")) }}
+<p class="actions"><button type="submit" id="machine-rename-submit">{{ t.get("machine-rename-submit") }}</button></p>
 </form>
-{% endif %}{% if can_archive %}{{ dangers::danger(t, t.get("machine-archive-summary"), t.with_arg("machine-archive-warning", "code", code), t.with_arg("machine-archive-submit", "code", code), archive_action, layout.csrf_token) }}
-{% endif %}{% endif %}<p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>
+{% endif %}{% endblock %}{% if can_archive %}{{ dangers::danger(t, t.get("machine-archive-summary"), t.with_arg("machine-archive-warning", "code", code), t.with_arg("machine-archive-submit", "code", code), archive_action, layout.csrf_token) }}
+{% endif %}<p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>
 {% endblock %}

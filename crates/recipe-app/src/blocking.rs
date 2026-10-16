@@ -172,17 +172,29 @@ fn joined_or_failed<T>(
 const DEFAULT_PAGE_MACHINES: u32 = 100;
 /// The number of rows of one page of the type usage list (`page.type_usage`, `reliability.md` section 7.11).
 const DEFAULT_PAGE_TYPE_USAGE: u32 = 100;
+/// The number of rows of one page of the recipe list (`page.recipes`, `reliability.md` section 7.11).
+const DEFAULT_PAGE_RECIPES: u32 = 100;
+/// The number of rows of one page of the version list (`page.versions`, `reliability.md` section 7.11).
+const DEFAULT_PAGE_VERSIONS: u32 = 100;
+/// The number of rows of one page of the parameter table (`page.parameters`, `reliability.md` section 7.11).
+const DEFAULT_PAGE_PARAMETERS: u32 = 100;
 
-/// The number of rows of one page of each plant list (`reliability.md` section 7.11).
+/// The number of rows of one page of each list (`reliability.md` section 7.11).
 ///
-/// The type solves one problem: two queries of the Plant Model cut a list into pages.
-/// Each query reads its size from the settings and holds no number in its code.
+/// The type solves one problem: the queries of the Plant Model and of the recipe pages cut a
+/// list into pages. Each query reads its size from the settings and holds no number in its code.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageSizes {
     /// The rows of one page of `ListMachines` (`page.machines`).
     pub machines: u32,
     /// The rows of one page of `GetTypeUsage` (`page.type_usage`).
     pub type_usage: u32,
+    /// The rows of one page of `ListRecipes` (`page.recipes`).
+    pub recipes: u32,
+    /// The rows of one page of `GetRecipe` and `ListVersions` (`page.versions`).
+    pub versions: u32,
+    /// The rows of one page of `ListParameters` (`page.parameters`).
+    pub parameters: u32,
 }
 
 impl Default for PageSizes {
@@ -191,6 +203,9 @@ impl Default for PageSizes {
         Self {
             machines: DEFAULT_PAGE_MACHINES,
             type_usage: DEFAULT_PAGE_TYPE_USAGE,
+            recipes: DEFAULT_PAGE_RECIPES,
+            versions: DEFAULT_PAGE_VERSIONS,
+            parameters: DEFAULT_PAGE_PARAMETERS,
         }
     }
 }
@@ -205,7 +220,7 @@ pub struct AppSettings {
     pub blocking: Blocking,
     /// The approval rule (A34).
     pub approval_policy: ApprovalPolicy,
-    /// The sizes of the pages of the plant lists.
+    /// The sizes of the pages of the lists.
     pub pages: PageSizes,
 }
 

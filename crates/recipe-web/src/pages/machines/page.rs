@@ -13,6 +13,7 @@ use recipe_app::auth::Operation;
 use recipe_app::plant::{GetMachine, GetMachineInput, MachineRef, MachineView};
 use serde::Deserialize;
 
+use super::commands::RenameForm;
 use super::tree::{Scope, UnitTree};
 use super::{platform_text, query_values};
 use crate::error::WebError;
@@ -33,7 +34,7 @@ pub(crate) struct CodeQuery {
 /// The page `machine.html`.
 ///
 /// The type solves one problem: one template shows a live machine with its forms and an archived
-/// machine without them. The flags `can_rename`, `can_archive`, and `can_add` are true only for a
+/// machine without them. The flags `can_archive`, `can_add`, and `form.shown` are true only for a
 /// live machine and a role that holds the permission of the command (`Operation::requirement`).
 #[derive(Template)]
 #[template(path = "machine.html")]
@@ -46,13 +47,13 @@ struct MachinePage<'a> {
     archived_at: Option<String>,
     tree: UnitTree,
     live: bool,
-    can_rename: bool,
     can_archive: bool,
     can_add: bool,
     types_href: String,
     add_href: String,
-    rename_action: String,
     archive_action: String,
+    /// The rename form. It is shown only for a live machine and a role with the permission.
+    form: RenameForm,
 }
 
 impl<'a> MachinePage<'a> {
@@ -74,6 +75,8 @@ impl<'a> MachinePage<'a> {
         let allows = |operation: Operation| live && operation.requirement().allows(role);
         // The tree of an archived machine shows every unit and has no link (ADR-0037 d).
         let scope = if live { Scope::Live } else { Scope::All };
+        let form = RenameForm::new(code, machine.name().to_string(), request.csrf_token())
+            .shown(allows(Operation::RenameMachine));
         Ok(Self {
             layout,
             t,
@@ -83,13 +86,12 @@ impl<'a> MachinePage<'a> {
             archived_at: machine.archived_at().as_ref().map(instant),
             tree: UnitTree::build(machine, scope, role, None, live),
             live,
-            can_rename: allows(Operation::RenameMachine),
             can_archive: allows(Operation::ArchiveMachine),
             can_add: allows(Operation::AddUnit),
             types_href: format!("/machines/{code}/types"),
             add_href: format!("/machines/{code}/units/new"),
-            rename_action: format!("/machines/{code}/rename"),
             archive_action: format!("/machines/{code}/archive"),
+            form,
         })
     }
 }

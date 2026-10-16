@@ -26,8 +26,18 @@ async fn types_form_of_a_new_type_has_the_name_one_empty_row_and_the_create_butt
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let main = main_of(&reply.body);
     assert!(main.contains("<h1>New UDT type</h1>"), "{main}");
-    let form = format!("<form method=\"post\" action=\"/machines/M7/types\" {FORM_ATTRIBUTES}");
+    let form = format!(
+        "<form id=\"udt-form\" method=\"post\" action=\"/machines/M7/types\" {FORM_ATTRIBUTES}"
+    );
     assert!(main.contains(&form), "{main}");
+    assert!(
+        main.contains("<button type=\"submit\" name=\"add\" value=\"1\" id=\"udt-add-member\""),
+        "{main}"
+    );
+    assert!(
+        main.contains("<button type=\"submit\" id=\"udt-define-submit\""),
+        "{main}"
+    );
     let token = format!(
         "<input type=\"hidden\" name=\"csrf_token\" value=\"{}\">",
         world.engineer.csrf
@@ -176,8 +186,8 @@ async fn types_form_rows_have_the_labels_and_the_inputs_of_the_row_macro() {
 async fn types_form_with_a_csrf_token_in_the_query_gives_422() {
     let world = world();
     for path in [
-        "/machines/M7/types/new?csrf_token=abc",
-        "/machines/M7/types/new?from=ST_Zone&csrf_token=abc",
+        "/machines/M7/types/new?csrf_token=tok-zz-qq",
+        "/machines/M7/types/new?from=ST_Zone&csrf_token=tok-zz-qq",
         "/machines/M7/types/new?x=1",
         "/machines/M7/types/new?name=ST_A",
     ] {
@@ -189,12 +199,13 @@ async fn types_form_with_a_csrf_token_in_the_query_gives_422() {
             reply.body
         );
         assert!(reply.body.contains("E-WEB-008"), "{path}: {}", reply.body);
-        assert!(!reply.body.contains("abc"), "{path}: {}", reply.body);
+        // The token text has letters outside 0-9a-f, so a request id (a UUID) cannot hold it.
+        assert!(!reply.body.contains("tok-zz-qq"), "{path}: {}", reply.body);
     }
     let htmx = get_as(
         &world,
         &world.engineer,
-        "/machines/M7/types/new?csrf_token=abc",
+        "/machines/M7/types/new?csrf_token=tok-zz-qq",
         &[HTMX],
     )
     .await;

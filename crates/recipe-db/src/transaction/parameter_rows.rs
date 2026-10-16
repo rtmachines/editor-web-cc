@@ -32,8 +32,9 @@ const SELECT_TRANSLATIONS: &str = "\
 SELECT parameter_id, lang, name, description FROM parameter_translation \
 WHERE recipe_version_id = $1 ORDER BY parameter_id, lang COLLATE \"C\"";
 
+/// One `parameter` row. `parameter_reads` reads the same columns for one key.
 #[derive(sqlx::FromRow)]
-struct ParameterRecord {
+pub(super) struct ParameterRecord {
     id: Uuid,
     parameter_key: Uuid,
     unit_id: Uuid,
@@ -46,8 +47,16 @@ struct ParameterRecord {
     ordinal: i32,
 }
 
+impl ParameterRecord {
+    /// Return the primary key of the row. The child rows name it.
+    pub(super) const fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
+/// One `parameter_limit` row.
 #[derive(sqlx::FromRow)]
-struct LimitRecord {
+pub(super) struct LimitRecord {
     parameter_id: Uuid,
     leaf_path: String,
     min_value: Option<Decimal>,
@@ -55,15 +64,17 @@ struct LimitRecord {
     max_length: Option<i16>,
 }
 
+/// One `parameter_translation` row.
 #[derive(sqlx::FromRow)]
-struct TranslationRecord {
+pub(super) struct TranslationRecord {
     parameter_id: Uuid,
     lang: String,
     name: String,
     description: String,
 }
 
-fn stored_limit(record: &LimitRecord) -> Result<StoredLimit, StorageError> {
+/// Build the stored limit of a limit row. A corrupt row gives a storage error.
+pub(super) fn stored_limit(record: &LimitRecord) -> Result<StoredLimit, StorageError> {
     Ok(StoredLimit {
         leaf_path: LeafPath::parse(&record.leaf_path)
             .map_err(|error| corrupt("parameter_limit", error))?,
@@ -77,7 +88,8 @@ fn stored_limit(record: &LimitRecord) -> Result<StoredLimit, StorageError> {
     })
 }
 
-fn stored_translation(record: &TranslationRecord) -> Result<Translation, StorageError> {
+/// Build the translation of a translation row. An empty description is `None`.
+pub(super) fn stored_translation(record: &TranslationRecord) -> Result<Translation, StorageError> {
     let description = if record.description.is_empty() {
         None
     } else {
@@ -107,7 +119,8 @@ fn group<T, R>(
     Ok(grouped)
 }
 
-fn stored_parameter(
+/// Build the stored parameter of its row with its limits and translations.
+pub(super) fn stored_parameter(
     record: ParameterRecord,
     limits: Vec<StoredLimit>,
     translations: Vec<Translation>,

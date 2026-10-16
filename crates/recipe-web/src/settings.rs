@@ -3,6 +3,8 @@
 use std::fmt;
 use std::time::Duration;
 
+use recipe_domain::recipe::LangCode;
+
 mod cidr;
 
 pub use cidr::{Cidr, CidrList, CidrReason};
@@ -11,10 +13,16 @@ pub use cidr::{Cidr, CidrList, CidrReason};
 const DEFAULT_TRUSTED_PROXY: &str = "172.28.0.0/16";
 /// Default of `http.body_limit.form`: 256 KiB.
 const DEFAULT_BODY_LIMIT_FORM: usize = 256 * 1024;
-/// Default of `http.body_limit.value`: 1 MiB.
-const DEFAULT_BODY_LIMIT_VALUE: usize = 1024 * 1024;
+/// Default of `http.body_limit.value`: 4 MiB (ADR-0039).
+const DEFAULT_BODY_LIMIT_VALUE: usize = 4 * 1024 * 1024;
 /// Default of `http.body_limit.translation`: 64 KiB.
 const DEFAULT_BODY_LIMIT_TRANSLATION: usize = 64 * 1024;
+/// Default of `i18n.translation_langs`: the one language `pl` (ADR-0043).
+const DEFAULT_TRANSLATION_LANG: &str = "pl";
+/// Default of `form.array_chunk`: 100 elements per group of the leaf grid (ADR-0039 (l)).
+const DEFAULT_ARRAY_CHUNK: usize = 100;
+/// Default of `form.rebind_leaves`: 16 384 new member leaves in the rebind forms of one page (ADR-0044).
+const DEFAULT_REBIND_LEAVES: usize = 16_384;
 /// Seconds in one day.
 const SECONDS_PER_DAY: u64 = 86_400;
 /// Default of `http.hsts_max_age` in seconds: 365 days.
@@ -48,6 +56,12 @@ pub struct WebSettings {
     pub retry_after: Duration,
     /// The `Max-Age` of the cookie `recipe_lang` (`i18n.lang_cookie_max_age`).
     pub lang_cookie_max_age: Duration,
+    /// The languages of the translation rows (`i18n.translation_langs`).
+    pub translation_langs: Vec<LangCode>,
+    /// The number of elements in one group of an array in the leaf grid (`form.array_chunk`).
+    pub form_array_chunk: usize,
+    /// The bound on the new member leaves of all rebind forms of one version page (`form.rebind_leaves`).
+    pub form_rebind_leaves: usize,
 }
 
 impl Default for WebSettings {
@@ -62,6 +76,11 @@ impl Default for WebSettings {
             hsts_max_age: Duration::from_secs(DEFAULT_HSTS_MAX_AGE_SECONDS),
             retry_after: Duration::from_secs(DEFAULT_RETRY_AFTER_SECONDS),
             lang_cookie_max_age: Duration::from_secs(DEFAULT_LANG_COOKIE_MAX_AGE_SECONDS),
+            translation_langs: LangCode::parse(DEFAULT_TRANSLATION_LANG)
+                .map(|lang| vec![lang])
+                .unwrap_or_default(),
+            form_array_chunk: DEFAULT_ARRAY_CHUNK,
+            form_rebind_leaves: DEFAULT_REBIND_LEAVES,
         }
     }
 }

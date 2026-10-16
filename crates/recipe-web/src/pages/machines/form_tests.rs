@@ -4,14 +4,20 @@
 use axum::http::StatusCode;
 
 use crate::i18n::Lang;
-use crate::pages::test_helpers::{assert_clean_html, assert_no_user_text_in_hx_attributes};
+use crate::pages::test_helpers::{
+    assert_clean_html, assert_htmx_error, assert_no_user_text_in_hx_attributes,
+};
 use crate::test_support::plant::{cookie_of, world};
 use crate::test_support::text;
 
 /// A valid body of the form.
 const GOOD: &str = "code=M99&name=Press+line+2&plc_platform=S7_300&main_unit_name=Infeed";
-/// The opening tag of the create form (design D6).
-const FORM_TAG: &str = "<form method=\"post\" action=\"/machines\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\">";
+/// The opening tag of the create form (design D6). The fixed `id` serves the out-of-band swap.
+const FORM_TAG: &str = "<form id=\"machine-new-form\" method=\"post\" action=\"/machines\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\">";
+/// The opening tag of the same form when an error answer swaps it out of band (ADR-0041 (e)).
+const OOB_FORM_TAG: &str = "<form id=\"machine-new-form\" method=\"post\" action=\"/machines\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\" hx-swap-oob=\"true\">";
+/// The `id` of each input of the form, in the order of the form.
+const INPUT_IDS: [&str; 4] = ["code", "machine_name", "plc_platform", "main_unit_name"];
 /// The five platforms: the value of the form and the key of the text.
 const PLATFORMS: [(&str, &str); 5] = [
     ("CodesysIec", "platform-codesys-iec"),
@@ -68,7 +74,7 @@ const BAD_FIELDS: [(&str, &str, &str); 8] = [
 /// Return the markup of the create form of a page.
 fn form_of(body: &str) -> &str {
     let (_before, rest) = body
-        .split_once("<form method=\"post\" action=\"/machines\"")
+        .split_once("<form id=\"machine-new-form\" method=\"post\" action=\"/machines\"")
         .unwrap();
     rest.split("</form>").next().unwrap()
 }
@@ -285,16 +291,25 @@ async fn machines_create_is_forbidden_for_an_operator_and_creates_nothing() {
     assert_eq!(world.audit_count(), before);
 }
 
+/// ADR-0041 (e): a refused use case swaps the form with only its own line, under the code.
 #[tokio::test]
-async fn machines_create_with_the_code_of_a_live_machine_gives_409_in_the_error_panel() {
+async fn machines_create_with_the_code_of_a_live_machine_puts_e_plt_001_under_the_code() {
     let world = world();
     let body = "code=M7&name=Again&plc_platform=S7_300&main_unit_name=Infeed";
     let before = world.audit_count();
     let reply = world.post(&world.engineer, "/machines", body, true).await;
-    assert_eq!(reply.status, StatusCode::CONFLICT, "{}", reply.body);
-    assert!(reply.body.contains("E-PLT-001"), "{}", reply.body);
-    assert_eq!(reply.header("hx-retarget"), "#error-panel");
-    assert!(!reply.body.contains("<form"), "the fragment holds no form");
+    assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-001");
+    assert!(reply.body.contains("Errors: 1."), "{}", reply.body);
+    assert!(reply.body.contains("href=\"#code\""), "{}", reply.body);
+    let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+    assert!(form.contains("value=\"Again\""), "{form}");
+    assert_eq!(form.matches("aria-invalid=\"true\"").count(), 1, "{form}");
+    assert_eq!(form.matches("class=\"field-error\"").count(), 1, "{form}");
+    let (_before, line) = form
+        .split_once("<div class=\"field-error\" id=\"code-error\">")
+        .unwrap();
+    assert!(line.contains("E-PLT-001"), "{form}");
+    assert_clean_html(&reply.body);
     assert_eq!(world.audit_count(), before);
 }
 
@@ -311,13 +326,69 @@ async fn machines_create_names_the_field_and_the_reason_of_each_bad_value() {
         assert!(reply.body.contains(&label), "{body}: {}", reply.body);
         assert!(reply.body.contains(&format!("href=\"#{field}\"")), "{body}");
         assert!(reply.body.contains(&text(Lang::En, reason)), "{body}");
-        assert!(!reply.body.contains("<form"), "{body}");
+        let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+        let line = format!("<div class=\"field-error\" id=\"{field}-error\">");
+        assert!(form.contains(&line), "{body}: {form}");
+        assert_eq!(form.matches("class=\"field-error\"").count(), 1, "{body}");
     }
     assert_eq!(
         world.audit_count(),
         before,
         "a rejected form creates nothing"
     );
+}
+
+/// Spec "Every field error at once": four bad fields give four lines and the form with the texts.
+#[tokio::test]
+async fn machines_create_lists_every_bad_field_and_swaps_the_form_with_the_sent_texts() {
+    let world = world();
+    let before = world.audit_count();
+    let body = "code=%3Cb%3E&name=+&plc_platform=S7-300&main_unit_name=%01";
+    let reply = world.post(&world.engineer, "/machines", body, true).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert!(reply.body.contains("Errors: 4."), "{}", reply.body);
+    for id in INPUT_IDS {
+        assert!(reply.body.contains(&format!("href=\"#{id}\"")), "{id}");
+    }
+    let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+    assert!(form.contains("value=\"&#60;b&#62;\""), "{form}");
+    assert_eq!(form.matches("aria-invalid=\"true\"").count(), 4, "{form}");
+    for id in INPUT_IDS {
+        let line = format!("<div class=\"field-error\" id=\"{id}-error\">");
+        assert!(form.contains(&line), "{id}: {form}");
+    }
+    assert!(
+        form.contains("<button type=\"submit\" id=\"machine-create-submit\""),
+        "{form}"
+    );
+    let token = format!("name=\"csrf_token\" value=\"{}\"", world.engineer.csrf);
+    assert!(form.contains(&token), "{form}");
+    assert_clean_html(&reply.body);
+    assert_eq!(
+        world.audit_count(),
+        before,
+        "a rejected form creates nothing"
+    );
+}
+
+/// The out-of-band form keeps the chosen platform and the other sent texts.
+#[tokio::test]
+async fn machines_create_keeps_the_chosen_platform_in_the_form_of_an_error_answer() {
+    let world = world();
+    let body = "code=X7&name=Press&plc_platform=TwinCat3&main_unit_name=Infeed";
+    let reply = world.post(&world.engineer, "/machines", body, true).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert!(reply.body.contains("Errors: 1."), "{}", reply.body);
+    let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+    assert!(
+        form.contains("<option value=\"TwinCat3\" selected>"),
+        "{form}"
+    );
+    assert_eq!(form.matches(" selected").count(), 1, "{form}");
+    assert!(form.contains("value=\"Press\""), "{form}");
+    assert!(form.contains("value=\"Infeed\""), "{form}");
+    assert_eq!(form.matches("aria-invalid=\"true\"").count(), 1, "{form}");
 }
 
 #[tokio::test]

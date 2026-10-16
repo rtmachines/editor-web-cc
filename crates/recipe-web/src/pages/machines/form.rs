@@ -1,21 +1,30 @@
 //! `GET /machines/new` and `POST /machines`: the form and the creation of a machine
-//! (`api.md` section 2.2, design D5 and D6).
+//! (`api.md` section 2.2, design D5 and D6, ADR-0041).
 //!
-//! A rejected HTMX request puts its error into `#error-panel` and leaves the form as it is, so the
-//! user keeps the typed values. A valid request answers `303` to the page of the new machine.
+//! A valid request answers `303` to the page of the new machine. A request with bad fields gets
+//! `422 E-WEB-008` with one line per field. An HTMX request also gets the form with the sent texts
+//! out of band, with a line under each bad input. A domain error of the use case gets the same
+//! form with only its own line, for example `E-PLT-001` under the code.
 
 use askama::Template;
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::plant::{CreateMachine, CreateMachineInput, GetMachineForm, MachineForm};
-use recipe_domain::plant::{MachineCode, PlcPlatform};
+use recipe_app::auth::MachineFormPurpose;
+use recipe_app::error::AppError;
+use recipe_app::plant::{
+    CreateMachine, CreateMachineInput, GetMachineForm, MachineForm, MachineFormInput,
+};
+use recipe_app::ports::NonEmpty;
+use recipe_domain::plant::{MachineCode, PlantError, PlcPlatform};
 use recipe_domain::text::Text;
 use serde::Deserialize;
 
 use super::platform_text;
-use crate::error::{FieldReason, WebError};
+use crate::error::{FieldError, FieldReason, FormErrors, WebError};
 use crate::layout::{Layout, NavTarget};
+use crate::pages::draft_reply::{refusal_lines, refused};
+use crate::pages::recipes::fields::FieldLines;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
@@ -37,35 +46,39 @@ pub(crate) struct CreateFields {
     _csrf_token: Option<String>,
 }
 
-/// Build the error of a field that is not valid.
-const fn invalid(field: &'static str, reason: FieldReason) -> WebError {
-    WebError::BadRequest { field, reason }
-}
-
-/// Read a name field. `field` is the `id` of its input.
-fn name_field(text: &str, field: &'static str) -> Result<Text, WebError> {
-    Text::parse(text).map_err(|_reason| invalid(field, FieldReason::Name))
-}
-
 impl CreateFields {
-    /// Turn the four fields into the input of `CreateMachine`, in the order of the form.
+    /// Turn the four fields into the input of `CreateMachine`. Read every field (ADR-0041 (a)).
     ///
     /// # Errors
     ///
-    /// Returns `422 E-WEB-008` for the first field that is not valid.
-    fn check(&self) -> Result<CreateMachineInput, WebError> {
-        let code = MachineCode::parse(&self.code)
-            .map_err(|_reason| invalid("code", FieldReason::MachineCode))?;
-        let name = name_field(&self.name, "machine_name")?;
-        let platform = PlcPlatform::parse(&self.plc_platform)
-            .map_err(|_reason| invalid("plc_platform", FieldReason::Platform))?;
-        let main_unit_name = name_field(&self.main_unit_name, "main_unit_name")?;
-        Ok(CreateMachineInput {
-            code,
-            name,
-            platform,
-            main_unit_name,
-        })
+    /// Returns one line `E-WEB-008` for each field that is not valid, in the order of the form.
+    fn check(&self) -> Result<CreateMachineInput, NonEmpty<FieldError>> {
+        let mut lines = FieldLines::default();
+        let code = lines.field(
+            MachineCode::parse(&self.code),
+            "code",
+            FieldReason::MachineCode,
+        );
+        let name = lines.field(Text::parse(&self.name), "machine_name", FieldReason::Name);
+        let platform = lines.field(
+            PlcPlatform::parse(&self.plc_platform),
+            "plc_platform",
+            FieldReason::Platform,
+        );
+        let main_unit_name = lines.field(
+            Text::parse(&self.main_unit_name),
+            "main_unit_name",
+            FieldReason::Name,
+        );
+        let input = (|| {
+            Some(CreateMachineInput {
+                code: code?,
+                name: name?,
+                platform: platform?,
+                main_unit_name: main_unit_name?,
+            })
+        })();
+        lines.finish(input)
     }
 }
 
@@ -75,43 +88,92 @@ struct PlatformOption {
     text: String,
 }
 
+/// The data of the form of a new machine: the platforms, the texts, and the error lines.
+struct NewMachineForm {
+    csrf_token: String,
+    platforms: Vec<PlatformOption>,
+    code: String,
+    name: String,
+    platform: String,
+    main_unit: String,
+    /// True when the answer swaps the form out of band (ADR-0041 (e)).
+    oob: bool,
+    errors: FormErrors,
+}
+
+impl NewMachineForm {
+    /// Build an empty form from the platforms that the query offers.
+    fn new(t: Texts<'_>, form: &MachineForm, csrf_token: String) -> Self {
+        // The empty first option is selected, so the user chooses the platform (D20, U4).
+        // The platform never changes later, so the browser must not pick one by default.
+        let platforms = std::iter::once(PlatformOption {
+            value: "",
+            text: t.get("field-platform-choose"),
+        })
+        .chain(form.platforms.iter().map(|platform| PlatformOption {
+            value: platform.as_str(),
+            text: platform_text(t, *platform),
+        }))
+        .collect();
+        Self {
+            csrf_token,
+            platforms,
+            code: String::new(),
+            name: String::new(),
+            platform: String::new(),
+            main_unit: String::new(),
+            oob: false,
+            errors: FormErrors::default(),
+        }
+    }
+
+    /// Return the form with the sent texts and the error lines, swapped out of band.
+    fn sent(self, fields: &CreateFields, errors: FormErrors) -> Self {
+        Self {
+            code: fields.code.clone(),
+            name: fields.name.clone(),
+            platform: fields.plc_platform.clone(),
+            main_unit: fields.main_unit_name.clone(),
+            oob: true,
+            errors,
+            ..self
+        }
+    }
+}
+
 /// The page `machine-new.html`.
 #[derive(Template)]
 #[template(path = "machine-new.html")]
 struct NewMachinePage<'a> {
     layout: Layout<'a>,
     t: Texts<'a>,
-    platforms: Vec<PlatformOption>,
+    form: NewMachineForm,
 }
 
-impl<'a> NewMachinePage<'a> {
-    /// Build the page from the platforms that the query offers.
-    ///
-    /// # Errors
-    ///
-    /// Returns `E-WEB-004` when the request has no session.
-    fn new(t: Texts<'a>, request: &PageRequest, form: &MachineForm) -> Result<Self, WebError> {
-        Ok(Self {
-            layout: Layout::for_session(
-                t,
-                request,
-                t.get("machine-new-title"),
-                Some(NavTarget::Machines),
-            )?,
-            t,
-            // The empty first option is selected, so the user chooses the platform (D20, U4).
-            // The platform never changes later, so the browser must not pick one by default.
-            platforms: std::iter::once(PlatformOption {
-                value: "",
-                text: t.get("field-platform-choose"),
-            })
-            .chain(form.platforms.iter().map(|platform| PlatformOption {
-                value: platform.as_str(),
-                text: platform_text(t, *platform),
-            }))
-            .collect(),
-        })
-    }
+/// The block `form` of `machine-new.html` alone: the form that an error answer swaps out of band.
+#[derive(Template)]
+#[template(path = "machine-new.html", block = "form")]
+struct NewMachineFormBlock<'a> {
+    t: Texts<'a>,
+    form: NewMachineForm,
+}
+
+/// Run `GetMachineForm` with `purpose`. The query checks the permission of that command first.
+///
+/// Each write route runs it before its field check, so a role without the right gets
+/// `403 E-WEB-002` and no form (ADR-0046 (a)).
+pub(super) async fn machine_form(
+    state: &WebState,
+    request: &PageRequest,
+    purpose: MachineFormPurpose,
+) -> Result<MachineForm, WebError> {
+    Ok(GetMachineForm::new(state.identity().app().clone())
+        .execute(
+            request.auth()?.user(),
+            &request.meta(),
+            MachineFormInput { purpose },
+        )
+        .await?)
 }
 
 /// `GET /machines/new`: show the form of a new machine. The query checks the permission first.
@@ -119,12 +181,40 @@ pub(crate) async fn new_form(
     State(state): State<WebState>,
     request: PageRequest,
 ) -> Result<Response, WebError> {
-    let form = GetMachineForm::new(state.identity().app().clone())
-        .execute(request.auth()?.user(), &request.meta())
-        .await?;
+    let form = machine_form(&state, &request, MachineFormPurpose::CreateMachine).await?;
     let t = Texts::new(state.bundles(), request.lang());
-    let page = NewMachinePage::new(t, &request, &form)?;
+    let layout = Layout::for_session(
+        t,
+        &request,
+        t.get("machine-new-title"),
+        Some(NavTarget::Machines),
+    )?;
+    let page = NewMachinePage {
+        form: NewMachineForm::new(t, &form, layout.csrf_token.clone()),
+        layout,
+        t,
+    };
     Ok(render(&page, request.request_id())?.into_response())
+}
+
+/// Build the error of a form with bad fields: every line and the form with the sent texts.
+///
+/// The error of `GetMachineForm` wins, for example `403 E-WEB-002` for a role without the right.
+async fn refuse(
+    state: &WebState,
+    request: &PageRequest,
+    fields: &CreateFields,
+    lines: NonEmpty<FieldError>,
+) -> WebError {
+    let form = match machine_form(state, request, MachineFormPurpose::CreateMachine).await {
+        Ok(form) => form,
+        Err(error) => return error,
+    };
+    let t = Texts::new(state.bundles(), request.lang());
+    refused(state, request, lines, |errors| NewMachineFormBlock {
+        t,
+        form: NewMachineForm::new(t, &form, request.csrf_token()).sent(fields, errors),
+    })
 }
 
 /// `POST /machines`: create a machine with its main unit and go to the page of the machine.
@@ -133,11 +223,31 @@ pub(crate) async fn create(
     request: PageRequest,
     form: Result<Form<CreateFields>, FormRejection>,
 ) -> Result<Response, WebError> {
+    // The form query checks the permission of `CreateMachine` before the fields are read (ADR-0046).
+    machine_form(&state, &request, MachineFormPurpose::CreateMachine).await?;
     let Form(fields) = form?;
-    let input = fields.check()?;
+    let input = match fields.check() {
+        Ok(input) => input,
+        Err(lines) => return Err(refuse(&state, &request, &fields, lines).await),
+    };
     let code = input.code;
-    CreateMachine::new(state.identity().app().clone())
+    let created = CreateMachine::new(state.identity().app().clone())
         .execute(request.auth()?.user(), &request.meta(), input)
-        .await?;
+        .await;
+    if let Err(error) = created {
+        return Err(match refusal_lines(error, code_input) {
+            Ok(lines) => refuse(&state, &request, &fields, lines).await,
+            Err(other) => other,
+        });
+    }
     see_other_path(&format!("/machines/{code}"), request.request_id(), [])
+}
+
+/// Return the input that a refused `CreateMachine` names: the code of `E-PLT-001`.
+fn code_input(error: &AppError) -> Option<String> {
+    matches!(
+        error,
+        AppError::Plant(PlantError::DuplicateMachineCode { .. })
+    )
+    .then(|| "code".to_owned())
 }

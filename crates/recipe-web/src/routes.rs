@@ -19,7 +19,7 @@ use crate::client::client_address;
 use crate::csrf::csrf_layer;
 use crate::error::{WebError, render_errors};
 use crate::gates::gates;
-use crate::limits::body_limit;
+use crate::limits::{body_limit, largest_limit};
 use crate::pages;
 use crate::pipeline::request_id_in;
 use crate::session::session_layer;
@@ -70,24 +70,21 @@ pub(crate) fn operation_row(
 
 /// Return the route table.
 ///
-/// The table holds the static files, the rows of step P3.1, and the rows of the three areas of the
-/// plant model (design D12): the machines, the units, and the types. Later tasks add one row for
-/// each page of `api.md` section 2.
+/// The table holds the static files and the rows of step P3.1. It also holds the rows of six
+/// areas (design D12): the machines, the units, the types, the recipes, the versions, and the
+/// parameters. Later tasks add one row for each page of `api.md` section 2 to its area.
 pub(crate) fn table() -> Vec<RouteEntry> {
     let mut rows = static_rows();
     rows.extend(lang_and_login_rows());
     rows.extend(own_rows());
-    rows.push(operation_row(
-        Method::GET,
-        "/recipes",
-        Operation::ListRecipes,
-        get(pages::recipes::list),
-    ));
+    rows.extend(pages::recipes::rows());
     rows.extend(user_list_rows());
     rows.extend(user_state_rows());
     rows.extend(pages::machines::rows());
     rows.extend(pages::units::rows());
     rows.extend(pages::types::rows());
+    rows.extend(pages::versions::rows());
+    rows.extend(pages::parameters::rows());
     rows
 }
 
@@ -326,7 +323,7 @@ pub(crate) fn assemble(
         .layer(from_fn_with_state(state.clone(), csrf_layer))
         .layer(from_fn_with_state(state.clone(), session_layer))
         .layer(from_fn_with_state(Arc::new(access), resolve_access))
-        .layer(DefaultBodyLimit::max(settings.body_limit_form))
+        .layer(DefaultBodyLimit::max(largest_limit(&settings)))
         .layer(from_fn_with_state(state.clone(), body_limit))
         .layer(from_fn_with_state(state.clone(), client_address))
         .layer(from_fn_with_state(state.clone(), render_errors))
@@ -345,5 +342,7 @@ pub fn router(state: WebState) -> Router {
 pub(crate) mod matrix;
 #[cfg(test)]
 mod plant_access_tests;
+#[cfg(test)]
+mod recipe_access_tests;
 #[cfg(test)]
 mod tests;

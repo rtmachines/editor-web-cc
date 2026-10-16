@@ -1,8 +1,8 @@
-use crate::plant::TypeTree;
+use crate::plant::{Primitive, TypeTree};
 use crate::recipe::value::test_support::{
     BOOL, CHAR, DATE, LTIME, REAL, TIME, WCHAR, primitive_tree, string_tree, wstring_tree,
 };
-use crate::recipe::value::{ParameterValue, ValueFault};
+use crate::recipe::value::{Expected, ParameterValue, ValueFault};
 
 /// Parse `json` and return the stored JSON text.
 fn stored_text(json: &str, tree: &TypeTree) -> String {
@@ -21,10 +21,7 @@ fn fault(json: &str, tree: &TypeTree) -> ValueFault {
 fn string_with_a_character_outside_latin_1_gives_a_fault() {
     let fault = fault(r#""Łódź""#, &string_tree(10));
     assert_eq!(fault.leaf().to_string(), "");
-    assert_eq!(
-        fault.expected(),
-        "a string of at most 10 characters from Latin-1"
-    );
+    assert_eq!(fault.expected(), Some(&Expected::String { length: 10 }));
 }
 
 #[test]
@@ -55,7 +52,7 @@ fn number_for_a_string_gives_a_fault() {
 #[test]
 fn wstring_counts_utf16_units() {
     let fault = fault(r#""a😀""#, &wstring_tree(2));
-    assert_eq!(fault.expected(), "a string of at most 2 UTF-16 units");
+    assert_eq!(fault.expected(), Some(&Expected::Wstring { length: 2 }));
 }
 
 #[test]
@@ -71,7 +68,7 @@ fn wstring_accepts_characters_outside_latin_1() {
 #[test]
 fn number_and_text_for_a_bool_give_a_fault() {
     let tree = primitive_tree(BOOL);
-    assert_eq!(fault("1", &tree).expected(), "true or false");
+    assert_eq!(fault("1", &tree).expected(), Some(&Expected::Bool));
     assert!(ParameterValue::parse(r#""true""#, &tree).is_err());
     assert!(ParameterValue::parse("null", &tree).is_err());
 }
@@ -112,7 +109,12 @@ fn time_literal_is_stored_as_a_count() {
 #[test]
 fn time_literal_with_parts_in_the_wrong_order_gives_a_fault() {
     let fault = fault(r#""T#2h1d""#, &primitive_tree(TIME));
-    assert_eq!(fault.expected(), "an IEC literal of type TIME");
+    assert_eq!(
+        fault.expected(),
+        Some(&Expected::Literal {
+            type_name: Primitive::Time,
+        })
+    );
 }
 
 #[test]

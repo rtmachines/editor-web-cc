@@ -3,14 +3,13 @@
 //! An Operator has no permission for these operations. Each call returns `E-WEB-002` before it
 //! opens a transaction. The sink then holds one `forbidden` event, and the store journal and
 //! the audit log stay empty (ADR-0013). `ExportApprovedVersion` is not here, because every
-//! role holds `VersionExport`.
+//! role holds `VersionExport`. `purpose_tests.rs` holds the tests of the form queries (ADR-0046).
 
 use std::net::{IpAddr, Ipv4Addr};
 
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{Login, Role};
-use recipe_domain::plant::MachineCode;
 
 use crate::auth::{CurrentUser, Operation};
 use crate::context::UseCase;
@@ -24,22 +23,22 @@ use crate::identity::{
 use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
-    AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, GetMachineForm, GetUdtForm,
-    GetUnitForm, RenameMachine, RenameUnit, UdtFormInput, UnitFormInput,
+    AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
 };
 use crate::recipe::{
     AddParameter, ApproveVersion, CreateRecipe, CreateVersion, DeleteRecipe, DiscardDraft,
-    RebindTypeRevision, RemoveParameter, RemoveTranslation, RenameRecipe, ReplaceLimits,
-    RestoreRecipe, RetireVersion, SetParameterValue, UpdateParameterDefinition, UpsertTranslation,
+    ListDeletedRecipes, RebindTypeRevision, RecipeListInput, RemoveParameter, RemoveTranslation,
+    RenameRecipe, ReplaceLimits, RestoreRecipe, RetireVersion, SetParameterValue,
+    UpdateParameterDefinition, UpsertTranslation,
 };
 
 /// The Operator `mhoffman`, who has no recipe or plant permission.
-fn operator() -> CurrentUser {
+pub(super) fn operator() -> CurrentUser {
     actor(Role::Operator)
 }
 
 /// Assert that `result` is the refusal of `operation` and that nothing else happened.
-fn assert_refused<T>(
+pub(super) fn assert_refused<T>(
     fixture: &Fixture,
     result: Result<T, AppError>,
     operation: Operation,
@@ -142,46 +141,6 @@ async fn define_udt_checks_the_permission_first() {
 }
 
 #[tokio::test]
-async fn get_machine_form_checks_the_permission_first() {
-    let fixture = scenarios::plant();
-    let result = GetMachineForm::new(fixture.context())
-        .execute(&operator(), &meta())
-        .await;
-    assert_refused(
-        &fixture,
-        result,
-        GetMachineForm::OPERATION,
-        "GetMachineForm",
-    );
-}
-
-#[tokio::test]
-async fn get_unit_form_checks_the_permission_first() {
-    let fixture = scenarios::plant();
-    let input = UnitFormInput {
-        code: MachineCode::parse("M1").unwrap(),
-        parent: None,
-    };
-    let result = GetUnitForm::new(fixture.context())
-        .execute(&operator(), &meta(), input)
-        .await;
-    assert_refused(&fixture, result, GetUnitForm::OPERATION, "GetUnitForm");
-}
-
-#[tokio::test]
-async fn get_udt_form_checks_the_permission_first() {
-    let fixture = scenarios::plant();
-    let input = UdtFormInput {
-        code: MachineCode::parse("M1").unwrap(),
-        from: None,
-    };
-    let result = GetUdtForm::new(fixture.context())
-        .execute(&operator(), &meta(), input)
-        .await;
-    assert_refused(&fixture, result, GetUdtForm::OPERATION, "GetUdtForm");
-}
-
-#[tokio::test]
 async fn create_recipe_checks_the_permission_first() {
     let fixture = scenarios::plant();
     let result = CreateRecipe::new(fixture.context())
@@ -215,6 +174,26 @@ async fn restore_recipe_checks_the_permission_first() {
         .execute(&operator(), &meta(), scenarios::restore_recipe_input())
         .await;
     assert_refused(&fixture, result, RestoreRecipe::OPERATION, "RestoreRecipe");
+}
+
+#[tokio::test]
+async fn list_deleted_recipes_checks_the_permission_first() {
+    let fixture = scenarios::deleted();
+    let input = RecipeListInput {
+        text: None,
+        machine: None,
+        status: None,
+        page: 0,
+    };
+    let result = ListDeletedRecipes::new(fixture.context())
+        .execute(&operator(), &meta(), input)
+        .await;
+    assert_refused(
+        &fixture,
+        result,
+        ListDeletedRecipes::OPERATION,
+        "ListDeletedRecipes",
+    );
 }
 
 #[tokio::test]

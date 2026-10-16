@@ -4,7 +4,7 @@ use std::fmt;
 
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{MachineCode, MachineId, TypeName, UnitPath};
-use recipe_domain::recipe::ReferenceNumber;
+use recipe_domain::recipe::{ParameterKey, ReferenceNumber};
 
 /// An entity that a request names and that the database does not hold.
 ///
@@ -58,6 +58,30 @@ pub enum Missing {
     /// No use case runs for it. The variant holds no text, so the typed value never reaches a
     /// message or a log line.
     MalformedType,
+    /// A recipe that a `{ref}` path value names, when the value does not parse.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedRecipe,
+    /// A version that a `{n}` path value names, when the value does not parse.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedVersion,
+    /// A parameter that a `{key}` path value names, when the value does not parse.
+    ///
+    /// No use case runs for it. The variant holds no text, so the typed value never reaches a
+    /// message or a log line.
+    MalformedParameter,
+    /// A parameter that a version does not hold.
+    Parameter {
+        /// The reference number of the recipe.
+        reference: ReferenceNumber,
+        /// The number of the version.
+        number: u32,
+        /// The key of the parameter.
+        key: ParameterKey,
+    },
     /// A revision of a type of a machine.
     TypeRevision {
         /// The code of the machine.
@@ -101,6 +125,17 @@ impl fmt::Display for Missing {
             Self::MalformedLogin => f.write_str("User"),
             Self::MalformedMachine => f.write_str("Machine"),
             Self::MalformedType => f.write_str("Type"),
+            Self::MalformedRecipe => f.write_str("Recipe"),
+            Self::MalformedVersion => f.write_str("Version"),
+            Self::MalformedParameter => f.write_str("Parameter"),
+            Self::Parameter {
+                reference,
+                number,
+                key,
+            } => write!(
+                f,
+                "Parameter {key} of version {number} of recipe {reference}"
+            ),
             Self::TypeRevision {
                 code,
                 name,
@@ -110,5 +145,7 @@ impl fmt::Display for Missing {
     }
 }
 
+#[cfg(test)]
+mod recipe_tests;
 #[cfg(test)]
 mod tests;

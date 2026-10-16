@@ -210,7 +210,7 @@ fn a_valid_definition_passes_step_one() {
     let mut draft = draft_with(PlcPlatform::S7_300, Vec::new());
     let trees = trees_on(PlcPlatform::S7_300);
     let new = NewParameter {
-        value_json: "true".to_owned(),
+        value: crate::recipe::ValueInput::Json("true".to_owned()),
         ..new_parameter_at(2, "RUN", BOOL, "DB1.DBX0.0")
     };
     assert!(super::support::try_add(&mut draft, &trees, new).is_ok());

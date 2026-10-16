@@ -70,6 +70,15 @@ fn error_for(case: &str) -> WebError {
         "not-found" => app(AppError::NotFound {
             entity: Missing::User(login()),
         }),
+        other => more_error_for(other),
+    }
+}
+
+/// Return the error of the cases that `error_for` does not hold.
+fn more_error_for(case: &str) -> WebError {
+    match case {
+        // A trigger code without a key in the bundles: the message falls back to English.
+        "trigger-audit" => app(constraint("E-AUD-003")),
         "too-large" => WebError::PayloadTooLarge {
             limit: ByteLimit::from(256 * 1024),
         },
@@ -564,9 +573,9 @@ async fn error_mapping_text_follows_the_language_cookie() {
 
 #[tokio::test]
 async fn error_mapping_code_without_a_bundle_key_falls_back_to_english() {
-    // The bundles hold the keys of the codes that the pages return. `E-PLT-030` has no key yet.
+    // The bundles hold the keys of the codes that the pages return. `E-AUD-003` has no key.
     let answer = ask(
-        "trigger",
+        "trigger-audit",
         &[("hx-request", "true"), ("cookie", "recipe_lang=pl")],
     )
     .await;

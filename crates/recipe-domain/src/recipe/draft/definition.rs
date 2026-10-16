@@ -4,11 +4,10 @@ use super::add::step_content::parse_content;
 use super::add::step_definition::DefinitionParts;
 use super::{Draft, ParameterChange};
 use crate::plant::{LeafPath, LiveUnit, PlcTypeId, S7Address, TypeTrees};
-use crate::recipe::{DraftError, LimitList, Ordinal, ParameterKey, ParameterTag, RecipeError};
+use crate::recipe::{
+    DraftError, Expected, LimitList, Ordinal, ParameterKey, ParameterTag, RecipeError, ValueInput,
+};
 use crate::text::{LongText, Text};
-
-/// The text of `E-RCP-005` when a type change comes without a value.
-const RETYPE_EXPECTED: &str = "a new value for the new type";
 
 /// The new definition of a parameter, after the use case parsed the unit.
 ///
@@ -38,8 +37,8 @@ pub struct DefinitionUpdate {
 /// old limits do not fit the new type.
 #[derive(Clone, Debug)]
 pub struct Retype {
-    /// The new value as JSON text.
-    pub value_json: String,
+    /// The new value as JSON text or as the texts of a form.
+    pub value: ValueInput,
     /// The new process limits.
     pub limits: LimitList,
 }
@@ -57,7 +56,8 @@ impl Draft {
     /// # Errors
     ///
     /// Returns `E-RCP-051` for an unknown key. Then it returns the errors of the checks of
-    /// `add_parameter`. A type change without `retype` gives `E-RCP-005`.
+    /// `add_parameter`, with the list of every fault of `retype` (ADR-0041). A type change
+    /// without `retype` gives one `E-RCP-005`.
     pub fn set_definition(
         &mut self,
         key: ParameterKey,
@@ -76,7 +76,7 @@ impl Draft {
         let content = match retype {
             Some(retype) => {
                 let (value, limits) =
-                    parse_content(&update.tag, &retype.value_json, &retype.limits, tree)?;
+                    parse_content(&update.tag, &retype.value, &retype.limits, tree)?;
                 let rows = limits.iter().map(|limit| limit.to_stored()).collect();
                 Some((value.to_stored(), rows))
             }
@@ -84,7 +84,7 @@ impl Draft {
                 return Err(RecipeError::ValueShapeMismatch {
                     tag: update.tag,
                     leaf: LeafPath::whole(),
-                    expected: RETYPE_EXPECTED.to_owned(),
+                    expected: Expected::NewValue,
                 }
                 .into());
             }

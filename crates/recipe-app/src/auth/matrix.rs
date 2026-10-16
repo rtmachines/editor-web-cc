@@ -3,9 +3,9 @@
 //! The tables below are copied by hand from section 3.3. They do not call
 //! `Operation::requirement`, so the test compares the code with the document.
 
-use recipe_domain::identity::Role;
+use recipe_domain::identity::{Permission, Role};
 
-use super::{Operation, authorize};
+use super::{Operation, Requirement, authorize};
 use crate::error::AppError;
 use crate::memory::MemorySink;
 use crate::memory::fixtures::{actor, meta};
@@ -100,6 +100,90 @@ const MATRIX: [(Operation, [Access; 3]); 68] = [
     (Operation::GetUserForm, [Allowed, Denied, Denied]),
     (Operation::GetLoginForm, [Allowed, Allowed, Allowed]),
     (Operation::GetOwnPasswordForm, [Allowed, Allowed, Allowed]),
+];
+
+/// The purposes of the form queries and the permission of each one, copied from ADR-0046 (c).
+const PURPOSES: [(Operation, Operation, Permission); 16] = [
+    (
+        Operation::GetMachineForm,
+        Operation::CreateMachine,
+        Permission::MachineManage,
+    ),
+    (
+        Operation::GetMachineForm,
+        Operation::RenameMachine,
+        Permission::MachineManage,
+    ),
+    (
+        Operation::GetUnitForm,
+        Operation::AddUnit,
+        Permission::UnitManage,
+    ),
+    (
+        Operation::GetUnitForm,
+        Operation::RenameUnit,
+        Permission::UnitManage,
+    ),
+    (
+        Operation::GetUdtForm,
+        Operation::DefineUdt,
+        Permission::UdtManage,
+    ),
+    (
+        Operation::GetRecipeForm,
+        Operation::CreateRecipe,
+        Permission::RecipeCreate,
+    ),
+    (
+        Operation::GetRecipeForm,
+        Operation::RenameRecipe,
+        Permission::RecipeEdit,
+    ),
+    (
+        Operation::GetVersionForm,
+        Operation::CreateVersion,
+        Permission::VersionCreate,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::AddParameter,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::UpdateParameterDefinition,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::SetParameterValue,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::ReplaceLimits,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::UpsertTranslation,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::RemoveTranslation,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::RemoveParameter,
+        Permission::ParameterEdit,
+    ),
+    (
+        Operation::GetParameterForm,
+        Operation::RebindTypeRevision,
+        Permission::ParameterEdit,
+    ),
 ];
 
 /// The 30 commands that stop in read-only mode (Assumption A24, design D7).
@@ -197,6 +281,49 @@ fn matrix_has_exactly_one_row_per_operation() {
         problems.join(", ")
     );
     assert_eq!(MATRIX.len(), Operation::ALL.len());
+}
+
+#[test]
+fn every_form_query_serves_exactly_the_purposes_of_adr_0046() {
+    for operation in Operation::ALL {
+        let expected: Vec<Operation> = PURPOSES
+            .iter()
+            .filter(|(form, _, _)| *form == operation)
+            .map(|(_, purpose, _)| *purpose)
+            .collect();
+        assert_eq!(operation.purposes(), expected.as_slice(), "{operation}");
+    }
+}
+
+#[test]
+fn each_purpose_needs_the_permission_of_its_row() {
+    for (form, purpose, permission) in PURPOSES {
+        assert_eq!(
+            purpose.requirement(),
+            Requirement::Permission(permission),
+            "{form} for {purpose}"
+        );
+    }
+}
+
+#[test]
+fn a_form_query_allows_a_role_that_may_run_one_of_its_purposes() {
+    for operation in Operation::ALL {
+        let purposes = operation.purposes();
+        if purposes.is_empty() {
+            continue;
+        }
+        for role in ROLES {
+            let by_purpose = purposes
+                .iter()
+                .any(|purpose| purpose.requirement().allows(role));
+            assert_eq!(
+                operation.requirement().allows(role),
+                by_purpose,
+                "{operation} for {role:?}"
+            );
+        }
+    }
 }
 
 #[test]

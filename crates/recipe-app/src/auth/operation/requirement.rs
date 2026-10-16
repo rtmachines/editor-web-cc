@@ -47,8 +47,11 @@ impl Operation {
                 Requirement::Permission(Permission::UnitManage)
             }
             Self::DefineUdt | Self::GetUdtForm => Requirement::Permission(Permission::UdtManage),
-            Self::CreateRecipe | Self::GetRecipeForm => {
-                Requirement::Permission(Permission::RecipeCreate)
+            Self::CreateRecipe => Requirement::Permission(Permission::RecipeCreate),
+            // The two purposes need two permissions (ADR-0046 (c)). The query checks the one of
+            // its purpose, so this requirement only names who may open the form at all.
+            Self::GetRecipeForm => {
+                Requirement::AnyOf(Permission::RecipeCreate, Permission::RecipeEdit)
             }
             Self::RenameRecipe => Requirement::Permission(Permission::RecipeEdit),
             Self::DeleteRecipe => Requirement::Permission(Permission::RecipeDelete),

@@ -10,6 +10,7 @@ mod isolation;
 mod nonempty;
 mod plant;
 mod recipe;
+mod recipe_reads;
 mod row_image;
 mod security;
 mod session;
@@ -28,6 +29,10 @@ pub use isolation::Isolation;
 pub use nonempty::NonEmpty;
 pub use plant::{InsertedMachine, MachineFilter, MachineSummary, PlantRepository};
 pub use recipe::{InsertedRecipe, NewVersion, RecipeRepository, SharedVersion};
+pub use recipe_reads::{
+    ParameterRow, RecipeFilter, RecipeReads, RecipeSummary, UnitCount, VersionDetail,
+    VersionSummary,
+};
 pub use row_image::{Locked, RowImage};
 pub use security::SecurityEventSink;
 pub use session::{NewSession, SessionLimits, SessionRepository, SessionRow, SessionStore};

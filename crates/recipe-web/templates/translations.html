@@ -1,0 +1,11 @@
+{% import "translation-row.html" as rows -%}
+{% import "components/toast.html" as toasts -%}
+{#- The translation rows of a parameter (ADR-0043 (f)). The struct that renders or includes this file has the fields t and block. The English base text stands once above the rows. The answer of a removal also clears #error-panel and shows the toast out of band. The hx-swap-oob values are literals. -#}
+<h2>{{ t.get("translations-caption") }}</h2>
+<dl>
+<dt>{{ t.get("translations-col-base") }}</dt>
+<dd>{{ block.name_en }}</dd>
+<dd>{{ block.description_en }}</dd>
+</dl>
+{% for row in block.rows %}{{ rows::translation_row(t, row) }}
+{% endfor %}{% if !block.toast.is_empty() %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(block.toast) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% endif %}

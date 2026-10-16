@@ -11,17 +11,19 @@ use crate::pages::test_helpers::{
 use crate::test_support::plant::{ENGLISH, HTMX, World, cookie_of, main_of, text_with};
 use crate::test_support::text;
 
-/// The opening tag of the form of the fragment (design D6).
-const FORM_TAG: &str = "<form method=\"post\" action=\"/machines/M7/units\" hx-boost=\"true\" hx-target=\"#unit-tree\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
+/// The opening tag of the form of the fragment (design D6). The fixed `id` serves the out-of-band
+/// swap of an error answer (ADR-0041 (e)).
+const FORM_TAG: &str = "<form id=\"unit-add-form\" method=\"post\" action=\"/machines/M7/units\" hx-boost=\"true\" hx-target=\"#unit-tree\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
 /// The opening tag of the form of the page. The page has no `#unit-tree`, so the form is plain.
-const PLAIN_FORM_TAG: &str = "<form method=\"post\" action=\"/machines/M7/units\">";
+const PLAIN_FORM_TAG: &str =
+    "<form id=\"unit-add-form\" method=\"post\" action=\"/machines/M7/units\">";
 /// The number of live units of `M7` with depth 1 to 4. Each one is a parent in the list.
 const M7_PARENTS: usize = 42;
 
 /// Return the markup of the form of a fragment or a page, from `<form` to `</form>`.
 fn form_of(body: &str) -> &str {
     let (_before, rest) = body
-        .split_once("<form method=\"post\" action=\"/machines/")
+        .split_once("<form id=\"unit-add-form\" method=\"post\" action=\"/machines/")
         .unwrap();
     rest.split("</form>").next().unwrap()
 }
@@ -184,7 +186,7 @@ async fn units_form_fragment_holds_the_hint_the_name_field_the_token_and_one_pri
         );
         assert!(form.contains(&token), "{form}");
         let button = format!(
-            "<button type=\"submit\" class=\"btn btn-primary\">{}</button>",
+            "<button type=\"submit\" id=\"unit-create-submit\" class=\"btn btn-primary\">{}</button>",
             text(lang, "unit-create-submit")
         );
         assert_eq!(form.matches(&button).count(), 1, "{lang}: {form}");

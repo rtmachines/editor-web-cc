@@ -49,11 +49,39 @@ pub enum FieldReason {
     Flag,
     /// A search text is not empty and is not valid text.
     SearchText,
+    /// A reference number does not match the grammar of `ReferenceNumber`.
+    ReferenceNumber,
+    /// A change note is empty, too long, or holds a control character.
+    ChangeNote,
+    /// A description is empty, too long, or holds a control character.
+    Description,
+    /// A translated description is too long or holds a control character.
+    TranslationDescription,
+    /// A parameter tag does not match the grammar of `ParameterTag`.
+    Tag,
+    /// The order in the unit is not a whole number from 0 to 100000.
+    Ordinal,
+    /// A PLC address does not match the grammar of `S7Address`.
+    S7Address,
+    /// The base version is not a version of the list.
+    BasedOn,
+    /// The state is not a state of the list.
+    Status,
+    /// A value field names a path twice, names `[*]`, or names no path of the type.
+    ValueKey,
+    /// A limit row has no path, or it has no minimum, maximum, or maximum length.
+    LimitRow,
+    /// A maximum length is not a whole number inside the length of the type.
+    MaxLength,
+    /// The language is not a language of the list.
+    LangList,
+    /// A hidden field of the form is missing or not valid, so the page must load again.
+    Reload,
 }
 
 impl FieldReason {
     /// Every reason, in the order of the table in design D13.
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 34] = [
         Self::Form,
         Self::Lang,
         Self::LoginLength,
@@ -74,6 +102,20 @@ impl FieldReason {
         Self::MemberCount,
         Self::Flag,
         Self::SearchText,
+        Self::ReferenceNumber,
+        Self::ChangeNote,
+        Self::Description,
+        Self::TranslationDescription,
+        Self::Tag,
+        Self::Ordinal,
+        Self::S7Address,
+        Self::BasedOn,
+        Self::Status,
+        Self::ValueKey,
+        Self::LimitRow,
+        Self::MaxLength,
+        Self::LangList,
+        Self::Reload,
     ];
 
     /// Return the key of the message of the reason in the bundles.
@@ -100,7 +142,60 @@ impl FieldReason {
             Self::MemberCount => "reason-member-count",
             Self::Flag => "reason-flag",
             Self::SearchText => "reason-search-text",
+            Self::ReferenceNumber => "reason-reference-number",
+            Self::ChangeNote => "reason-change-note",
+            Self::Description => "reason-description",
+            Self::TranslationDescription => "reason-translation-description",
+            Self::Tag => "reason-tag",
+            Self::Ordinal => "reason-ordinal",
+            Self::S7Address => "reason-s7-address",
+            Self::BasedOn => "reason-based-on",
+            Self::Status => "reason-status",
+            Self::ValueKey => "reason-value-key",
+            Self::LimitRow => "reason-limit-row",
+            Self::MaxLength => "reason-max-length",
+            Self::LangList => "reason-lang-list",
+            Self::Reload => "reason-reload",
         }
+    }
+}
+
+/// Return the English text of a reason of the recipe forms (design D13).
+///
+/// A reason of the older forms gives an empty text, because `Display` writes those texts itself.
+const fn recipe_text(reason: FieldReason) -> &'static str {
+    match reason {
+        FieldReason::ReferenceNumber => {
+            "a reference number has 1 to 50 characters from A to Z, 0 to 9, underscore, and hyphen. It starts with a letter or a digit"
+        }
+        FieldReason::ChangeNote => {
+            "a change note has 1 to 4000 characters and no control character except a line end"
+        }
+        FieldReason::Description => {
+            "a description has 1 to 4000 characters and no control character except a line end"
+        }
+        FieldReason::TranslationDescription => {
+            "a description has 0 to 4000 characters and no control character except a line end"
+        }
+        FieldReason::Tag => {
+            "a tag has 1 to 64 characters from A to Z, 0 to 9, and underscore. It starts with a letter"
+        }
+        FieldReason::Ordinal => "the order is a whole number from 0 to 100000",
+        FieldReason::S7Address => {
+            "a PLC address has the form DB1.DBX0.0, DB1.DBB0, DB1.DBW0, or DB1.DBD0"
+        }
+        FieldReason::BasedOn => "choose a version from the list",
+        FieldReason::Status => "choose a state from the list",
+        FieldReason::ValueKey => "each value field names one path of the type once, with no [*]",
+        FieldReason::LimitRow => {
+            "each limit row has a path and a minimum, a maximum, or a maximum length"
+        }
+        FieldReason::MaxLength => {
+            "the maximum length is a whole number from 1 to the length of the type, at most 16382"
+        }
+        FieldReason::LangList => "choose a language from the list",
+        FieldReason::Reload => "reload the page and try again",
+        _older => "",
     }
 }
 
@@ -139,6 +234,7 @@ impl fmt::Display for FieldReason {
             Self::SearchText => {
                 "the search text has at most 200 characters and no control character"
             }
+            other => recipe_text(*other),
         })
     }
 }

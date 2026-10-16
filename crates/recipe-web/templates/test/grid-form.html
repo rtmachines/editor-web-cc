@@ -1,0 +1,2 @@
+{% import "components/grid.html" as grids %}
+<form id="parameter-form" method="post" action="{{ action }}">{{ grids::actions(t, "parameter-save", t.get("parameter-save-submit")) }}{{ grids::grid(t, view, errors) }}</form>

@@ -1,7 +1,7 @@
 //! The use case `SetParameterValue` (`domain-model.md` section 5.2, design D10).
 
 use recipe_domain::audit::DiffAction;
-use recipe_domain::recipe::{ParameterKey, ReferenceNumber};
+use recipe_domain::recipe::{ParameterKey, ReferenceNumber, ValueInput};
 
 use super::draft_session::{
     DraftOutput, DraftTarget, MachineLock, OpenDraft, parameter_diff_entry,
@@ -23,8 +23,8 @@ pub struct SetParameterValueInput {
     pub expected_row_version: i64,
     /// The key of the parameter in the URL.
     pub key: ParameterKey,
-    /// The new value as JSON text. The domain parses it against the type tree.
-    pub value_json: String,
+    /// The new value as JSON text or as one text per leaf. The domain checks it against the tree.
+    pub value: ValueInput,
 }
 
 /// Sets the value of one parameter of a live draft.
@@ -76,9 +76,7 @@ impl SetParameterValue {
         };
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::None).await?;
         let parameter = open.parameter_id(input.key)?;
-        let change = open
-            .draft
-            .set_value(input.key, &input.value_json, &open.trees)?;
+        let change = open.draft.set_value(input.key, &input.value, &open.trees)?;
         let diff = value_diff(&change, &open.trees)?;
         let mut open = open.touch(user).await?;
         let version = open.draft.version();
@@ -99,3 +97,5 @@ impl SetParameterValue {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod texts_tests;

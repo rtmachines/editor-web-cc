@@ -4,6 +4,7 @@ use super::{Draft, Parameter, ParameterChange};
 use crate::plant::{LiveUnit, PlcTypeId, S7Address, TypeTrees};
 use crate::recipe::{
     DraftError, LimitList, Ordinal, ParameterId, ParameterKey, ParameterTag, ProcessLimit,
+    ValueInput,
 };
 use crate::text::{LongText, Text};
 
@@ -14,7 +15,7 @@ pub(super) mod step_definition;
 ///
 /// The type solves one problem: `Draft::add_parameter` gets every part of the parameter in one
 /// value. A caller cannot pass the parts in the wrong order. The server generates `id` and
-/// `key` (A40). The value stays JSON text until the draft parses it with the type tree.
+/// `key` (A40). The value stays an input until the draft parses it with the type tree.
 #[derive(Clone, Debug)]
 pub struct NewParameter {
     /// The stable identity of the new parameter.
@@ -35,8 +36,8 @@ pub struct NewParameter {
     pub s7_address: Option<S7Address>,
     /// The position of the parameter in its draft.
     pub ordinal: Ordinal,
-    /// The value as JSON text.
-    pub value_json: String,
+    /// The value as JSON text or as the texts of a form.
+    pub value: ValueInput,
     /// The process limits of the request.
     pub limits: LimitList,
 }
@@ -52,18 +53,19 @@ impl Draft {
     ///
     /// # Errors
     ///
-    /// Returns the error of the first check that fails. The codes are `E-RCP-014`, `E-PLT-020`,
-    /// `E-PLT-013`, `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, `E-RCP-023`, `E-RCP-017`,
-    /// `E-RCP-019`, `E-RCP-006`, `E-RCP-018`, `E-RCP-005`, `E-RCP-004`, `E-RCP-021`, and
-    /// `E-RCP-022`. A failed type resolution returns its `PlantError`.
+    /// Returns the error of the first group that fails. The first group gives one error:
+    /// `E-RCP-014`, `E-PLT-020`, `E-PLT-013`, `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or
+    /// `E-RCP-023`. The second group gives a list with every fault (ADR-0041). The list holds
+    /// `E-RCP-005` and `E-RCP-004` in the preorder of the leaves. Then it holds `E-RCP-017`,
+    /// `E-RCP-019`, `E-RCP-006`, and `E-RCP-018` in the order of the limit rows. The third group
+    /// gives `E-RCP-021` or `E-RCP-022`. A failed type resolution returns its `PlantError`.
     pub fn add_parameter(
         &mut self,
         new: NewParameter,
         trees: &TypeTrees,
     ) -> Result<ParameterChange, DraftError> {
         let tree = self.check_new_definition(&new, trees)?;
-        let (value, limits) =
-            step_content::parse_content(&new.tag, &new.value_json, &new.limits, tree)?;
+        let (value, limits) = step_content::parse_content(&new.tag, &new.value, &new.limits, tree)?;
         let rows = limits.iter().map(ProcessLimit::to_stored).collect();
         let parameter = Parameter::from_new(new, value.to_stored(), rows);
         self.replace_parameters(vec![parameter.clone()], trees)?;

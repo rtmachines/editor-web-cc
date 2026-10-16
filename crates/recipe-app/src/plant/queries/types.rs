@@ -12,7 +12,7 @@ use recipe_domain::plant::{
 
 use super::type_text::type_text;
 use super::{TypeRef, live_machine, pick_revision, revisions_of};
-use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
+use crate::auth::{CurrentUser, FormPurpose, Operation, RequestMeta, UdtFormPurpose, authorize};
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
 use crate::ports::Isolation;
@@ -261,6 +261,8 @@ impl GetTypeTree {
 /// The parsed request of `GetUdtForm`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UdtFormInput {
+    /// The command that the form serves. The query checks its permission (ADR-0046 (b)).
+    pub purpose: UdtFormPurpose,
     /// The code of the live machine.
     pub code: MachineCode,
     /// The struct whose latest revision the form copies. `None` means a new struct.
@@ -306,7 +308,8 @@ impl GetUdtForm {
     ///
     /// # Errors
     ///
-    /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
+    /// Returns `Forbidden` (`E-WEB-002`) with the command of the purpose when the role lacks its
+    /// permission.
     /// Returns `NotFound` (`E-WEB-005`) when no live machine has the code or when the machine has
     /// no struct with the name `from`.
     /// Returns `AppError::Storage` when the database fails or when a member has a type that the
@@ -318,7 +321,13 @@ impl GetUdtForm {
         meta: &RequestMeta,
         input: UdtFormInput,
     ) -> Result<UdtForm, AppError> {
-        authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
+        authorize(
+            input.purpose.operation(),
+            user,
+            meta,
+            self.ctx.security.as_ref(),
+        )
+        .await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
         let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
         let groups = grouped(&types);

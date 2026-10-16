@@ -4,6 +4,9 @@ mod build;
 mod images;
 mod lookup;
 mod parameter_image;
+mod reads;
+#[cfg(test)]
+mod reads_tests;
 mod rows;
 mod seed;
 #[cfg(test)]

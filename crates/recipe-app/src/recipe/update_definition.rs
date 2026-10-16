@@ -4,6 +4,7 @@ use recipe_domain::audit::DiffAction;
 use recipe_domain::plant::{S7Address, TypeExpr, UnitPath};
 use recipe_domain::recipe::{
     DefinitionUpdate, LimitList, Ordinal, ParameterKey, ParameterTag, ReferenceNumber, Retype,
+    ValueInput,
 };
 use recipe_domain::text::{LongText, Text};
 
@@ -23,10 +24,19 @@ use crate::ports::NonEmpty;
 /// type change can carry both (ADR-0029). One optional struct keeps the two parts together.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RetypeInput {
-    /// The new value as JSON text. The domain parses it against the type tree.
-    pub value_json: String,
+    /// The new value as JSON text or as one text per leaf. The domain checks it against the tree.
+    pub value: ValueInput,
     /// The new process limits. The list can be empty.
     pub limits: LimitList,
+}
+
+impl From<RetypeInput> for Retype {
+    fn from(input: RetypeInput) -> Self {
+        Self {
+            value: input.value,
+            limits: input.limits,
+        }
+    }
 }
 
 /// The parsed request of `UpdateParameterDefinition`.
@@ -122,10 +132,7 @@ impl UpdateParameterDefinition {
             ordinal: input.ordinal,
         };
         let has_retype = input.retype.is_some();
-        let retype = input.retype.map(|retype| Retype {
-            value_json: retype.value_json,
-            limits: retype.limits,
-        });
+        let retype = input.retype.map(Retype::from);
         let change = open
             .draft
             .set_definition(input.key, update, retype, &resolved.trees)?;
@@ -163,3 +170,5 @@ mod errors;
 mod requests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod texts_tests;

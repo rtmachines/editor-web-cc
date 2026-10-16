@@ -30,7 +30,10 @@ pub use limit::{LimitFault, LimitInput, LimitList, LimitListReason, ProcessLimit
 
 pub use optimistic::Optimistic;
 pub use ordinal::{Ordinal, OrdinalReason};
-pub use rebind::{ArrayShape, RebindPlan, RebindRequest, RebindTargetReason};
+pub use rebind::{
+    ArrayShape, MemberValue, RebindLeaves, RebindPlan, RebindRequest, RebindTargetReason,
+    rebind_new_leaves,
+};
 pub use reference_number::{ReferenceNumber, ReferenceNumberReason};
 pub use root::{
     ApprovalOutcome, ApprovalPolicy, Approver, Recipe, RecipeDeleter, StoredRecipe,
@@ -42,4 +45,7 @@ pub use state::{
     VersionStatusReason,
 };
 pub use tag::{ParameterTag, ParameterTagReason};
-pub use value::{ParameterValue, StoredValue, ValueFault};
+pub use value::{
+    Expected, LeafText, LeafTexts, LeafTextsError, ParameterValue, StoredValue, ValueFault,
+    ValueFaults, ValueInput,
+};

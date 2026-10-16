@@ -26,7 +26,7 @@ pub(in crate::recipe) fn parse_decimal(text: &str) -> Option<Decimal> {
 }
 
 /// Return `true` when `text` matches `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`.
-fn is_json_number(text: &str) -> bool {
+pub(super) fn is_json_number(text: &str) -> bool {
     let (mantissa, exponent) = match text.split_once(['e', 'E']) {
         Some((mantissa, exponent)) => (mantissa, Some(exponent)),
         None => (text, None),

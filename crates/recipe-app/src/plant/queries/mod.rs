@@ -35,8 +35,9 @@ mod world;
 
 pub use machines::{
     GetMachine, GetMachineForm, GetMachineInput, ListMachines, ListMachinesInput, MachineForm,
-    MachineList, MachineRef, MachineView,
+    MachineFormInput, MachineList, MachineRef, MachineView,
 };
+pub(crate) use type_text::type_text;
 pub use types::{
     GetTypeTree, GetUdtForm, ListTypes, TypeList, TypeListRow, TypeView, TypesInput, UdtForm,
     UdtFormInput,

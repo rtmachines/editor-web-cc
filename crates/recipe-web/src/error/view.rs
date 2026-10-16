@@ -22,7 +22,8 @@ pub(crate) struct FieldLine {
 /// A field of this list gets a link in an error fragment. Any other field gets its label only.
 /// The users page keeps `q`. The plant pages add the names of design D5. Two forms of one page can
 /// use one name, so the `id` of an input is the name of its form, for example `machine_name`.
-const INPUT_FIELDS: [&str; 15] = [
+/// The recipe pages add the field ids of design D6.
+const INPUT_FIELDS: [&str; 31] = [
     "login",
     "password",
     "current_password",
@@ -38,6 +39,22 @@ const INPUT_FIELDS: [&str; 15] = [
     "type_name",
     "machine_q",
     "show_archived",
+    "recipe_q",
+    "recipe_machine",
+    "recipe_status",
+    "show_deleted",
+    "machine_code",
+    "reference_number",
+    "recipe_name",
+    "change_note",
+    "based_on",
+    "unit_path",
+    "tag",
+    "name_en",
+    "description_en",
+    "type",
+    "s7_address",
+    "ordinal",
 ];
 
 /// The name of the list of member rows. The list is a `fieldset`, so it has no input of its own.
@@ -84,7 +101,53 @@ pub(crate) struct ErrorView {
     pub(crate) lines: Vec<FieldLine>,
     /// True when each line links to its input: an HTMX fragment and the login page.
     pub(crate) link_fields: bool,
+    /// The summary of a list of errors (ADR-0041 (d)). It replaces the sentence and the lines.
+    pub(crate) list: Option<ListView>,
+    /// The lines of `conflict.html` (design D10). Only `E-WEB-001` of a draft has them.
+    pub(crate) conflict: Option<ConflictLines>,
 }
+
+/// The lines of `conflict.html` in the UI language (design D10).
+pub(crate) struct ConflictLines {
+    /// The sentence `conflict-row-version` with the `row_version` of the server.
+    pub(crate) row_version: String,
+    /// The sentence `conflict-last-change`, or `conflict-no-editor` without a last change.
+    pub(crate) last_change: String,
+    /// The sentence `conflict-reload-warning`.
+    pub(crate) warning: String,
+    /// The label `conflict-reload` of the link.
+    pub(crate) reload: String,
+    /// The path of the version page, for example `/recipes/R-100/versions/3`.
+    pub(crate) href: String,
+}
+
+/// One line of a list of errors, in the UI language (design D9).
+///
+/// The summary in `#error-panel` and the line under the input show the same view, so the two
+/// places cannot disagree (ADR-0041).
+pub(crate) struct LineView {
+    /// The code `E-<CTX>-<nnn>` of the line.
+    pub(crate) code: &'static str,
+    /// The data that the line is about, such as a tag. Empty when the message names it.
+    pub(crate) subject: String,
+    /// One sentence in the UI language.
+    pub(crate) message: String,
+    /// The `id` of the input of the line. Empty when no input exists.
+    pub(crate) target: String,
+}
+
+/// The summary of a list of errors in `#error-panel` (ADR-0041 (d)).
+pub(crate) struct ListView {
+    /// The sentence `errors-count` with the count of every line.
+    pub(crate) count: String,
+    /// The first lines of the list, at most 20.
+    pub(crate) lines: Vec<LineView>,
+    /// The sentence `errors-more` with the count of the other lines. Empty when no line is left.
+    pub(crate) more: String,
+}
+
+/// The lines of an input without an error. A field macro takes it as the default.
+pub(crate) const NO_LINES: &[LineView] = &[];
 
 /// The fragment `error.html`.
 #[derive(Template)]

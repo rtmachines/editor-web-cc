@@ -157,6 +157,9 @@ fn page_sizes_default_to_100_rows_each() {
     let expected = PageSizes {
         machines: 100,
         type_usage: 100,
+        recipes: 100,
+        versions: 100,
+        parameters: 100,
     };
 
     assert_eq!(PageSizes::default(), expected);

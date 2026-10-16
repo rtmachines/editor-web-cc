@@ -1,20 +1,22 @@
 {% extends "base.html" %}
 {% import "components/alert.html" as alerts %}
+{% import "components/field.html" as fields %}
 {% import "components/heading.html" as headings %}
 {% import "components/rows.html" as repeated %}
+{#- The UDT form (design D6 and D8). The block form renders alone as the out-of-band form of an error answer (ADR-0041 (e)). The form, the add button, and the define button have fixed ids. Each hx attribute is a literal. -#}
 {% block content %}
 {% if row_focus %}<h1>{{ title }}</h1>{% else %}{{ headings::h1(layout, title) }}{% endif %}
-<form method="post" action="{{ action }}" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-{% if !revision %}<div class="field"><label for="type_name">{{ t.get("field-type-name") }} <span class="field-required">{{ t.get("form-required") }}</span></label><span class="field-hint" id="type_name-hint">{{ t.get("udt-name-hint") }}</span><input id="type_name" name="name" type="text" class="data" autocapitalize="none" spellcheck="false" maxlength="64" autocomplete="off" aria-required="true" aria-describedby="type_name-hint" value="{{ type_name }}"></div>
+{% block form %}<form id="udt-form" method="post" action="{{ form.action }}" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{% if !form.revision %}{% let name_lines = form.errors.lines("type_name") %}<div class="field"><label for="type_name">{{ t.get("field-type-name") }} <span class="field-required">{{ t.get("form-required") }}</span></label><span class="field-hint" id="type_name-hint">{{ t.get("udt-name-hint") }}</span><input id="type_name" name="name" type="text" class="data" autocapitalize="none" spellcheck="false" maxlength="64" autocomplete="off" aria-required="true" aria-describedby="type_name-hint{% if !name_lines.is_empty() %} type_name-error{% endif %}" value="{{ form.type_name }}"{% if !name_lines.is_empty() %} aria-invalid="true"{% endif %}>{{ fields::error_line("type_name", name_lines) }}</div>
 {% endif %}<fieldset id="members"><legend>{{ t.get("field-members") }}</legend>
 <span class="field-hint" id="udt-type-hint">{{ t.get("udt-type-hint") }}</span>
-{% for row in rows %}{{ repeated::member_row(t, row.index, row.number, row.name, row.type_text, row.focus) }}
-{% endfor %}<datalist id="type-choices">{% for choice in choices %}<option value="{{ choice }}">{% endfor %}</datalist>
+{% for row in form.rows %}{{ repeated::member_row(t, row.index, row.number, row.name, row.type_text, row.focus, form.errors.lines(row.name_id.as_str()), form.errors.lines(row.type_id.as_str())) }}
+{% endfor %}<datalist id="type-choices">{% for choice in form.choices %}<option value="{{ choice }}">{% endfor %}</datalist>
 <span class="field-hint">{{ t.get("udt-empty-rows-hint") }}</span>
 </fieldset>
-<div class="actions">{% if at_max %}{{ alerts::notice("info", t.get("udt-max-rows")) }}{% else %}<button type="submit" name="add" value="1" class="btn btn-secondary">{{ t.get("udt-add-member") }}</button>{% endif %}
-<button type="submit" class="btn btn-primary">{% if revision %}{{ t.get("udt-revision-submit") }}{% else %}{{ t.get("udt-create-submit") }}{% endif %}</button></div>
-</form>
+<div class="actions">{% if form.at_max %}{{ alerts::notice("info", t.get("udt-max-rows")) }}{% else %}<button type="submit" name="add" value="1" id="udt-add-member" class="btn btn-secondary">{{ t.get("udt-add-member") }}</button>{% endif %}
+<button type="submit" id="udt-define-submit" class="btn btn-primary">{% if form.revision %}{{ t.get("udt-revision-submit") }}{% else %}{{ t.get("udt-create-submit") }}{% endif %}</button></div>
+</form>{% endblock %}
 <p><a class="target-link" href="{{ list_href }}">{{ list_text }}</a></p>
 {% endblock %}

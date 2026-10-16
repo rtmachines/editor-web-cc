@@ -6,7 +6,7 @@
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{LeafPath, PlcPlatform, S7Address, TypeExpr, UnitPath};
-use recipe_domain::recipe::{LimitInput, LimitList, Ordinal, ParameterTag};
+use recipe_domain::recipe::{LimitInput, LimitList, Ordinal, ParameterTag, ValueInput};
 
 use super::{AddParameter, AddParameterInput};
 use crate::memory::fixtures::{Fixture, actor, meta, parameter_on, reference, text, uid, vid};
@@ -34,7 +34,7 @@ fn int_request(value: &str, limits: Vec<LimitInput>) -> AddParameterInput {
         type_expr: TypeExpr::parse("INT").unwrap(),
         s7_address: None,
         ordinal: Ordinal::parse(1).unwrap(),
-        value_json: value.to_owned(),
+        value: ValueInput::Json(value.to_owned()),
         limits: LimitList::parse(limits).unwrap(),
     }
 }

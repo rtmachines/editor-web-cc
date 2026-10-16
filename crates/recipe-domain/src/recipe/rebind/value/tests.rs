@@ -2,10 +2,12 @@ use serde_json::{Value, json};
 
 use super::super::test_support::{
     MODE_1, MODE_2, NAME_1, NAME_2, OLD_1, OLD_2, RAMP_1, RAMP_2, ZONE_2, ZONE_3, ZONES_2,
-    draft_with, key, number, param, plan_of, planned_json, request, request_with, trees,
+    draft_with, key, number, param, plan_of, planned_json, request, request_with,
+    request_with_texts, trees,
 };
 use crate::error_codes::ErrorCode;
-use crate::recipe::{DraftError, ParameterTag, RecipeError};
+use crate::plant::{MemberName, Primitive};
+use crate::recipe::{DraftError, Expected, ParameterTag, RecipeError};
 
 /// The entries of a rejected plan, as text of code and message.
 fn entries(error: DraftError) -> Vec<RecipeError> {
@@ -36,6 +38,59 @@ fn new_member_takes_its_value_from_the_map_and_kept_member_stays() {
     assert_eq!(
         planned_json(&plan, 1),
         json!({"setpoint": 5, "temp_max": 70})
+    );
+}
+
+#[test]
+fn text_of_a_new_int_member_converts_by_the_class_of_the_leaf() {
+    let draft = zone_draft();
+    let request = request_with_texts(ZONE_2, ZONE_3, &[(1, ".temp_max", "70")]);
+
+    let plan = plan_of(&draft, &request);
+
+    assert_eq!(
+        planned_json(&plan, 1),
+        json!({"setpoint": 5, "temp_max": 70})
+    );
+}
+
+#[test]
+fn text_with_a_comma_for_a_new_int_member_expects_an_integer() {
+    let draft = zone_draft();
+    let request = request_with_texts(ZONE_2, ZONE_3, &[(1, ".temp_max", "1,5")]);
+
+    let error = draft.plan_rebind(&request, &trees()).unwrap_err();
+
+    let list = entries(error);
+    assert_eq!(list.len(), 1);
+    assert!(matches!(
+        &list[0],
+        RecipeError::ValueShapeMismatch {
+            leaf,
+            expected: Expected::Integer {
+                type_name: Primitive::Int,
+            },
+            ..
+        } if leaf.to_string() == ".temp_max"
+    ));
+}
+
+#[test]
+fn text_of_a_new_string_member_is_kept_as_sent() {
+    let draft = draft_with(vec![param(
+        1,
+        "TITLE",
+        NAME_1,
+        json!({"setpoint": 3}),
+        Vec::new(),
+    )]);
+    let request = request_with_texts(NAME_1, NAME_2, &[(1, ".label", " ab")]);
+
+    let plan = plan_of(&draft, &request);
+
+    assert_eq!(
+        planned_json(&plan, 1),
+        json!({"setpoint": 3, "label": " ab"})
     );
 }
 
@@ -87,9 +142,40 @@ fn json_string_for_an_int_member_gives_e_rcp_005() {
     let list = entries(error);
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].code(), ErrorCode::RCP_005);
+    let range = Expected::NumberRange {
+        type_name: Primitive::Int,
+        low: rust_decimal::Decimal::from(-32_768),
+        high: rust_decimal::Decimal::from(32_767),
+    };
     assert!(matches!(
         &list[0],
-        RecipeError::ValueShapeMismatch { leaf, .. } if leaf.to_string() == ".temp_max"
+        RecipeError::ValueShapeMismatch { leaf, expected, .. }
+            if leaf.to_string() == ".temp_max" && *expected == range
+    ));
+}
+
+/// K7 (a): a sent value of a path that is no new leaf of the parameter is an entry, not dropped.
+#[test]
+fn value_of_an_unknown_member_path_gives_e_rcp_005() {
+    let draft = zone_draft();
+    let request = request_with(
+        ZONE_2,
+        ZONE_3,
+        &[(1, ".temp_max", number(70)), (1, ".bogus", number(1))],
+    );
+
+    let error = draft.plan_rebind(&request, &trees()).unwrap_err();
+
+    let list = entries(error);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].code(), ErrorCode::RCP_005);
+    assert!(matches!(
+        &list[0],
+        RecipeError::ValueShapeMismatch {
+            leaf,
+            expected: Expected::KnownLeaf,
+            ..
+        } if leaf.to_string() == ".bogus"
     ));
 }
 
@@ -245,6 +331,13 @@ fn stored_value_of_the_wrong_shape_gives_e_rcp_005() {
     let list = entries(error);
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].code(), ErrorCode::RCP_005);
+    let object = Expected::Object {
+        members: vec![MemberName::parse("setpoint").unwrap()],
+    };
+    assert!(matches!(
+        &list[0],
+        RecipeError::ValueShapeMismatch { expected, .. } if *expected == object
+    ));
 }
 
 #[test]

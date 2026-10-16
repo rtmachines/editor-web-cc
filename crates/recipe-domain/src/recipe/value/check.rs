@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 
 use super::ParameterValue;
-use super::fault::ValueFault;
+use super::fault::{ValueFault, ValueFaults};
 use super::leaves::{ValueLeaf, value_leaves};
 use super::numeric::numeric_range;
 use super::{canonical, parse_decimal};
@@ -15,39 +15,83 @@ use crate::plant::{LeafPath, PlcPlatform, Primitive, TimeType, TypeTree};
 use crate::recipe::limit::{ProcessLimit, bound_text};
 
 impl ParameterValue {
-    /// Check the value against `limits`, the process limits of its parameter (invariant I7).
+    /// Check the value against `limits` and return the first fault (invariant I7).
     ///
-    /// The cost is the number of leaves plus the number of leaves that the limits cover. The
-    /// function reports in this order. First a tree or a limit of another root type. Then two
-    /// limits for one leaf. Then the first leaf in tree order that is outside its limits.
+    /// [`ParameterValue::check_all`] gives the order of the faults.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first fault of [`ParameterValue::check_all`].
+    pub fn check(&self, tree: &TypeTree, limits: &[ProcessLimit]) -> Result<(), ValueFault> {
+        self.check_all(tree, limits)
+            .map_err(|faults| faults.first().clone())
+    }
+
+    /// Check the value against `limits` and return every fault (invariant I7, ADR-0041).
+    ///
+    /// The cost is the number of leaves plus the number of leaves that the limits cover. A tree
+    /// or a limit of another root type gives one fault. Otherwise the list first holds each leaf
+    /// that two limits cover, in the order of the limits. Then it holds each leaf outside its
+    /// limits, in tree order.
     ///
     /// # Errors
     ///
     /// Returns [`ValueFault::WrongTree`] when `tree` or a limit has another root type or platform.
-    /// Returns [`ValueFault::LimitConflict`] when two limits cover one leaf.
-    /// Returns [`ValueFault::OutOfLimit`] when a leaf is outside its limits.
-    pub fn check(&self, tree: &TypeTree, limits: &[ProcessLimit]) -> Result<(), ValueFault> {
-        let is_same = |root, platform| root == self.root && platform == self.platform;
-        let is_wrong_tree = !is_same(tree.root_type(), tree.platform())
-            || limits.iter().any(|l| !is_same(l.root_type(), l.platform()));
-        if is_wrong_tree {
-            return Err(ValueFault::WrongTree);
+    /// Returns [`ValueFault::LimitConflict`] for each leaf that two limits cover.
+    /// Returns [`ValueFault::OutOfLimit`] for each leaf outside its limits.
+    pub fn check_all(&self, tree: &TypeTree, limits: &[ProcessLimit]) -> Result<(), ValueFaults> {
+        if tree.root_type() != self.root || tree.platform() != self.platform {
+            return Err(ValueFault::WrongTree.into());
         }
-        let cover = covered_leaves(limits, tree)?;
-        let leaves = value_leaves(&self.json, tree).ok_or(ValueFault::WrongTree)?;
-        leaves
-            .iter()
-            .filter_map(|leaf| cover.get(&leaf.path).map(|limit| (leaf, *limit)))
-            .try_for_each(|(leaf, limit)| check_leaf(leaf, limit, tree.platform()))
+        let faults = ordered_faults(&self.json, tree, limits, BTreeMap::new())?;
+        ValueFaults::from_vec(faults).map_or(Ok(()), Err)
     }
 }
 
-/// Map each concrete leaf path to the limit that covers it. Two limits for one leaf conflict.
+/// Check the leaves of `json` against `limits` and merge the faults of the leaves in `shape`.
+///
+/// `shape` holds the fault of each leaf that did not convert (ADR-0041 (b)). Such a leaf gets no
+/// check against its limit. The list first holds each leaf that two limits cover, in the order
+/// of the limits. Then it holds the fault of each leaf in `shape` and of each leaf outside its
+/// limits, in tree order.
+///
+/// # Errors
+///
+/// Returns [`ValueFault::WrongTree`] when a limit has another root type or platform than `tree`,
+/// or when `json` has not the shape of `tree`.
+pub(super) fn ordered_faults(
+    json: &Value,
+    tree: &TypeTree,
+    limits: &[ProcessLimit],
+    mut shape: BTreeMap<LeafPath, ValueFault>,
+) -> Result<Vec<ValueFault>, ValueFault> {
+    let is_other_tree = |limit: &ProcessLimit| {
+        limit.root_type() != tree.root_type() || limit.platform() != tree.platform()
+    };
+    if limits.iter().any(is_other_tree) {
+        return Err(ValueFault::WrongTree);
+    }
+    let (cover, mut faults) = covered_leaves(limits, tree)?;
+    let leaves = value_leaves(json, tree).ok_or(ValueFault::WrongTree)?;
+    for leaf in &leaves {
+        if let Some(fault) = shape.remove(&leaf.path) {
+            faults.push(fault);
+        } else if let Some(limit) = cover.get(&leaf.path) {
+            faults.extend(check_leaf(leaf, limit, tree.platform()).err());
+        }
+    }
+    faults.extend(shape.into_values());
+    Ok(faults)
+}
+
+/// Map each concrete leaf path to the limit that covers it, and list each leaf that two limits
+/// cover.
 fn covered_leaves<'a>(
     limits: &'a [ProcessLimit],
     tree: &TypeTree,
-) -> Result<BTreeMap<LeafPath, &'a ProcessLimit>, ValueFault> {
+) -> Result<(BTreeMap<LeafPath, &'a ProcessLimit>, Vec<ValueFault>), ValueFault> {
     let mut cover = BTreeMap::new();
+    let mut conflicts = Vec::new();
     for limit in limits {
         let paths = limit
             .leaf_path()
@@ -58,15 +102,13 @@ fn covered_leaves<'a>(
                 Entry::Vacant(slot) => {
                     slot.insert(limit);
                 }
-                Entry::Occupied(taken) => {
-                    return Err(ValueFault::LimitConflict {
-                        leaf: taken.key().clone(),
-                    });
-                }
+                Entry::Occupied(taken) => conflicts.push(ValueFault::LimitConflict {
+                    leaf: taken.key().clone(),
+                }),
             }
         }
     }
-    Ok(cover)
+    Ok((cover, conflicts))
 }
 
 /// Check one leaf against the limit that covers it.

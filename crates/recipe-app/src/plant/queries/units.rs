@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use recipe_domain::plant::{Machine, MachineCode, PlantError, Unit, UnitPath};
 
 use super::read_live_machine;
-use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
+use crate::auth::{CurrentUser, FormPurpose, Operation, RequestMeta, UnitFormPurpose, authorize};
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing};
 
@@ -68,6 +68,8 @@ impl GetUnitTree {
 /// The parsed request of `GetUnitForm`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UnitFormInput {
+    /// The command that the form serves. The query checks its permission (ADR-0046 (b)).
+    pub purpose: UnitFormPurpose,
     /// The code of the live machine.
     pub code: MachineCode,
     /// The parent unit that the URL names. `None` means a main unit.
@@ -112,7 +114,8 @@ impl GetUnitForm {
     ///
     /// # Errors
     ///
-    /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
+    /// Returns `Forbidden` (`E-WEB-002`) with the command of the purpose when the role lacks its
+    /// permission.
     /// Returns `NotFound` (`E-WEB-005`) when no live machine has the code, or when the parent is
     /// not a live unit of the machine.
     /// Returns `PlantError::UnitDepthExceeded` (`E-PLT-002`) when the parent has depth 5.
@@ -124,7 +127,13 @@ impl GetUnitForm {
         meta: &RequestMeta,
         input: UnitFormInput,
     ) -> Result<UnitForm, AppError> {
-        authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
+        authorize(
+            input.purpose.operation(),
+            user,
+            meta,
+            self.ctx.security.as_ref(),
+        )
+        .await?;
         let machine = read_live_machine(&self.ctx, input.code).await?;
         let segment = proposed_segment(&machine, input.parent.as_ref())?;
         let parents = machine

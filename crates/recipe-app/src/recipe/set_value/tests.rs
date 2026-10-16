@@ -2,7 +2,7 @@ use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::PlcPlatform;
-use recipe_domain::recipe::VersionState;
+use recipe_domain::recipe::{ValueInput, VersionState};
 use serde_json::json;
 
 use super::{SetParameterValue, SetParameterValueInput};
@@ -26,7 +26,7 @@ fn input(value: &str, expected: i64) -> SetParameterValueInput {
         number: 1,
         expected_row_version: expected,
         key: speed_key(),
-        value_json: value.to_owned(),
+        value: ValueInput::Json(value.to_owned()),
     }
 }
 

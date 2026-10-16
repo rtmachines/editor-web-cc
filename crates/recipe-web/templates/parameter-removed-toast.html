@@ -1,0 +1,3 @@
+{% import "components/toast.html" as toasts -%}
+{#- The toast of the removal of a parameter (design D7, design-system.md 10.7). With oob, the toast and the empty error panel go out of band after the parameter table. Without oob, the handler puts the toast into the status region of the content answer, because HTMX swaps an out-of-band element before the content. The hx-swap-oob values are literals. -#}
+{% if oob %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(text) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% else %}{{ toasts::success(text) }}{% endif %}

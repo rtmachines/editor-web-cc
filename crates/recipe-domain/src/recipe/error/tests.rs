@@ -1,5 +1,6 @@
 use super::*;
 use crate::plant::{LeafPath, PlantError, UnitPath};
+use crate::recipe::Expected;
 
 fn lang(text: &str) -> RecipeError {
     RecipeError::InvalidLangCode {
@@ -72,7 +73,7 @@ fn content_variants_have_their_code_registry_row_and_message() {
             RecipeError::ValueShapeMismatch {
                 tag: tag(),
                 leaf: leaf(),
-                expected: "true or false".to_owned(),
+                expected: Expected::Bool,
             },
             ErrorCode::RCP_005,
             "Value of SPEED.zones[2] does not match the type. Expected true or false.",

@@ -5,13 +5,13 @@ use serde_json::json;
 
 use super::super::support::{address, stored_parameter};
 use super::support::{
-    BOOL, INT, ST_ZONE, assert_rejected, draft_with, draft_with_speed, limit_row, many_parameters,
-    new_parameter, new_parameter_at, snapshot, trees_on,
+    BOOL, INT, ST_ZONE, TABLE, assert_rejected, draft_with, draft_with_speed, limit_row,
+    many_parameters, new_parameter, new_parameter_at, snapshot, texts_input, trees_on,
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, PlcPlatform};
-use crate::recipe::{Draft, LimitList, NewParameter, StoredLimit};
+use crate::recipe::{Draft, DraftError, LimitList, NewParameter, StoredLimit};
 
 fn limited(value_json: &str, rows: Vec<crate::recipe::LimitInput>) -> NewParameter {
     NewParameter {
@@ -24,6 +24,95 @@ fn reject(new: NewParameter, code: ErrorCode) -> String {
     let mut draft = draft_with_speed();
     let trees = trees_on(PlcPlatform::TwinCat3);
     assert_rejected(&mut draft, &trees, new, code).to_string()
+}
+
+/// The message of each entry of a rejected command that returned a list.
+fn entry_texts(error: DraftError) -> Vec<String> {
+    match error {
+        DraftError::List(list) => Some(list.into_vec()),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap()
+    .iter()
+    .map(ToString::to_string)
+    .collect()
+}
+
+#[test]
+fn two_bad_leaves_and_two_bad_limit_rows_give_one_list_in_order() {
+    let mut draft = draft_with_speed();
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let rows = vec![
+        limit_row(".x", None, Some("5")),
+        limit_row("[*]", Some("10"), Some("5")),
+    ];
+    let new = NewParameter {
+        value: texts_input(&[
+            ("[1]", "x"),
+            ("[2]", "2"),
+            ("[3]", "1,5"),
+            ("[4]", "4"),
+            ("[5]", "5"),
+            ("[6]", "6"),
+            ("[7]", "7"),
+            ("[8]", "8"),
+        ]),
+        limits: LimitList::parse(rows).unwrap(),
+        ..new_parameter(2, "TABLE", TABLE, "0")
+    };
+    let error = assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_005);
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Value of TABLE[1] does not match the type. Expected an integer of type INT.",
+            "Value of TABLE[3] does not match the type. Expected an integer of type INT.",
+            "Path .x does not exist in the type of TABLE.",
+            "The minimum 10 of TABLE[*] is greater than the maximum 5.",
+        ]
+    );
+}
+
+#[test]
+fn a_bad_leaf_keeps_the_range_faults_of_the_other_leaves_in_preorder() {
+    let mut draft = draft_with_speed();
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let rows = vec![
+        limit_row("[*]", Some("0"), Some("3000")),
+        limit_row(".x", None, Some("5")),
+    ];
+    let new = NewParameter {
+        value: texts_input(&[
+            ("[1]", "3500"),
+            ("[2]", "2"),
+            ("[3]", "x"),
+            ("[4]", "4"),
+            ("[5]", "4000"),
+            ("[6]", "6"),
+            ("[7]", "7"),
+            ("[8]", "8"),
+        ]),
+        limits: LimitList::parse(rows).unwrap(),
+        ..new_parameter(2, "TABLE", TABLE, "0")
+    };
+    let error = assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_004);
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Value 3500 of TABLE[1] is outside the process limit 0 to 3000.",
+            "Value of TABLE[3] does not match the type. Expected an integer of type INT.",
+            "Value 4000 of TABLE[5] is outside the process limit 0 to 3000.",
+            "Path .x does not exist in the type of TABLE.",
+        ]
+    );
+}
+
+#[test]
+fn a_single_fault_of_a_new_parameter_stays_a_list() {
+    let mut draft = draft_with_speed();
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let new = new_parameter(2, "TEMP", INT, "\"fast\"");
+    let error = assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_005);
+    assert_eq!(entry_texts(error).len(), 1);
 }
 
 #[test]
@@ -256,9 +345,18 @@ fn a_definition_error_wins_over_a_bad_limit() {
 }
 
 #[test]
-fn a_bad_limit_wins_over_a_bad_value() {
+fn a_bad_value_and_a_bad_limit_give_a_list_with_the_value_first() {
+    let mut draft = draft_with_speed();
+    let trees = trees_on(PlcPlatform::TwinCat3);
     let new = limited("\"x\"", vec![limit_row("", None, Some("40000"))]);
-    reject(new, ErrorCode::RCP_006);
+    let error = assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_005);
+    assert_eq!(
+        entry_texts(error),
+        [
+            "Value of TEMP does not match the type. Expected a number of type INT from -32768 to 32767.",
+            "Process limit of TEMP is outside the range of the data type.",
+        ]
+    );
 }
 
 #[test]

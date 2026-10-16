@@ -11,8 +11,8 @@ use crate::pages::test_helpers::{
 use crate::test_support::plant::{cookie_of, main_of, text_with};
 use crate::test_support::{icon_tag, text};
 
-/// The opening tag of the rename form (design D6).
-const RENAME_TAG: &str = "<form method=\"post\" action=\"/machines/M7/units/U1.2/rename\" hx-boost=\"true\" hx-target=\"#unit-name\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
+/// The opening tag of the rename form (design D6). The fixed `id` serves the out-of-band swap.
+const RENAME_TAG: &str = "<form id=\"unit-rename-form\" method=\"post\" action=\"/machines/M7/units/U1.2/rename\" hx-boost=\"true\" hx-target=\"#unit-name\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
 /// The opening tag of the archive form (design D6).
 const ARCHIVE_TAG: &str = "<form method=\"post\" action=\"/machines/M7/units/U1.2/archive\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\">";
 /// The number of live units under `U1.2`: 4 children, 5 under `U1.2.4`, and 6 under `U1.2.4.5`.
@@ -180,6 +180,10 @@ async fn units_page_of_an_engineer_has_the_rename_form_with_the_literal_hx_attri
         );
         assert!(form.contains("id=\"unit_name\" name=\"name\""), "{form}");
         assert!(form.contains(">Rename unit</button>"), "{form}");
+        assert!(
+            form.contains("<button type=\"submit\" id=\"unit-rename-submit\">"),
+            "{form}"
+        );
     }
 }
 

@@ -9,7 +9,7 @@ use recipe_domain::identity::Role;
 use recipe_app::error::{Missing, TaskStage};
 use recipe_domain::identity::{Login, PasswordReason};
 use recipe_domain::plant::{MachineCode, MachineId, TypeName, UnitPath};
-use recipe_domain::recipe::ReferenceNumber;
+use recipe_domain::recipe::{ParameterKey, ReferenceNumber};
 use uuid::Uuid;
 
 use super::reason::FieldReason;
@@ -43,6 +43,14 @@ fn every_missing() -> Vec<Missing> {
             code,
             name: TypeName::parse("ST_Zone").unwrap(),
             revision: 9,
+        },
+        Missing::MalformedRecipe,
+        Missing::MalformedVersion,
+        Missing::MalformedParameter,
+        Missing::Parameter {
+            reference,
+            number: 1234,
+            key: ParameterKey::from(Uuid::nil()),
         },
     ]
 }
@@ -124,9 +132,9 @@ fn values_every_field_reason_has_its_key_and_a_log_text() {
 }
 
 #[test]
-fn values_field_reason_all_lists_twenty_reasons_and_ends_with_the_plant_reasons() {
-    assert_eq!(FieldReason::ALL.len(), 20);
-    let tail = FieldReason::ALL.get(11..).unwrap();
+fn values_field_reason_all_lists_34_reasons_with_the_plant_reasons_at_11_to_19() {
+    assert_eq!(FieldReason::ALL.len(), 34);
+    let tail = FieldReason::ALL.get(11..20).unwrap();
     let expected: Vec<FieldReason> = PLANT_REASON_KEYS
         .iter()
         .map(|(reason, _)| *reason)
@@ -222,6 +230,38 @@ fn values_missing_malformed_values_use_their_own_keys() {
     assert_eq!(
         missing_text(&bundles, Lang::Pl, &Missing::MalformedType),
         "Typ"
+    );
+}
+
+#[test]
+fn values_missing_recipe_values_use_their_own_keys_and_polish_texts() {
+    let bundles = Bundles::load().unwrap();
+    let cases = [
+        (
+            Missing::MalformedRecipe,
+            "missing-malformed-recipe",
+            "Receptura",
+        ),
+        (
+            Missing::MalformedVersion,
+            "missing-malformed-version",
+            "Wersja",
+        ),
+        (
+            Missing::MalformedParameter,
+            "missing-malformed-parameter",
+            "Parametr",
+        ),
+    ];
+    for (missing, key, polish) in cases {
+        assert_eq!(missing_key(&missing), key);
+        assert_eq!(missing_text(&bundles, Lang::Pl, &missing), polish);
+    }
+    let parameter = every_missing().remove(14);
+    assert_eq!(missing_key(&parameter), "missing-parameter");
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &parameter),
+        "Parametr 00000000-0000-0000-0000-000000000000 wersji 1234 receptury R-7"
     );
 }
 

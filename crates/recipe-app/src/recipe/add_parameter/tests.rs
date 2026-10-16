@@ -3,7 +3,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{LeafPath, PlcPlatform, TypeExpr, UnitPath};
 use recipe_domain::recipe::{
-    LimitInput, LimitList, Ordinal, ParameterTag, StoredParameter, VersionState,
+    LimitInput, LimitList, Ordinal, ParameterTag, StoredParameter, ValueInput, VersionState,
 };
 use serde_json::json;
 
@@ -43,7 +43,7 @@ fn input(type_text: &str, value: &str, limits: Vec<LimitInput>) -> AddParameterI
         type_expr: TypeExpr::parse(type_text).unwrap(),
         s7_address: None,
         ordinal: Ordinal::parse(1).unwrap(),
-        value_json: value.to_owned(),
+        value: ValueInput::Json(value.to_owned()),
         limits: LimitList::parse(limits).unwrap(),
     }
 }

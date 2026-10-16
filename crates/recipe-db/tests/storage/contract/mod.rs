@@ -34,6 +34,7 @@ mod machine_list;
 mod memory_harness;
 mod postgres_harness;
 mod recipe_read;
+mod recipe_reads;
 mod recipe_seed;
 mod recipe_write;
 mod seed;

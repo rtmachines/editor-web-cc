@@ -1,0 +1,10 @@
+{% import "components/table.html" as tables -%}
+{% import "components/badge.html" as badges -%}
+{% import "components/pager.html" as pagers -%}
+{#- The version table of a recipe (design D7, ADR-0043 (a)). The recipe page includes it inside #versions-table. The pager links go to the route of this fragment. Only the wrapper of the pager is boosted, so the link of a version opens its page. Each hx attribute is a literal. -#}
+{% if versions.after_end %}<div hx-boost="true" hx-target="#versions-table" hx-swap="innerHTML" hx-push-url="false">{{ pagers::after_end(t, versions.current, versions.first_url) }}</div>{% else %}{% call tables::frame("versions-caption", t.get("versions-caption")) %}<thead><tr>{{ tables::head(t.get("versions-col-number")) }}{{ tables::head(t.get("versions-col-state")) }}{{ tables::head(t.get("versions-col-change-note")) }}{{ tables::head(t.get("versions-col-created")) }}{{ tables::head(t.get("versions-col-approved")) }}</tr></thead>
+<tbody>
+{% for row in versions.rows %}<tr><td class="num"><a href="{{ row.href }}">{{ row.number }}</a></td><td>{{ badges::status(row.kind, row.word) }}</td><td>{{ row.note }}</td><td class="data">{{ row.created }}</td><td class="data">{% if row.approved.is_empty() %}{{ t.get("recipes-none") }}{% else %}{{ row.approved }}{% endif %}</td></tr>
+{% endfor %}</tbody>{% endcall %}
+{% if !versions.previous_url.is_empty() || !versions.next_url.is_empty() %}<div hx-boost="true" hx-target="#versions-table" hx-swap="innerHTML" hx-push-url="false">{{ pagers::pager(t, versions.previous_url, versions.next_url, versions.current) }}</div>
+{% endif %}{% endif %}

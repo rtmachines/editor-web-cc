@@ -1,6 +1,27 @@
 {% extends "base.html" %}
-{% import "components/empty.html" as empties %}
+{% import "components/table.html" as tables %}
+{% import "components/badge.html" as badges %}
+{% import "components/field.html" as fields %}
+{% import "components/heading.html" as headings %}
+{% import "components/pager.html" as pagers %}
+{#- The recipe list of ADR-0043 (a) to (d). The search form sends GET and holds no token. The checkbox of the deleted recipes shows only to a role with RecipeRestore. -#}
 {% block content %}
-<h1>{{ t.get("recipes-title") }}</h1>
-{{ empties::empty(t.get("recipes-empty")) }}
+{{ headings::h1(layout, t.get("recipes-title")) }}
+<form method="get" action="/recipes" class="actions">
+{{ fields::named(t, "recipe_q", "q", t.get("field-recipe-q"), t.get("recipes-search-hint"), "search", false, false, 200, "off", q) }}
+{{ fields::named_select(t, "recipe_machine", "machine", t.get("field-recipe-machine"), String::new(), machines, machine, false) }}
+{{ fields::named_select(t, "recipe_status", "status", t.get("field-recipe-status"), String::new(), states, status, false) }}
+{% if can_show_deleted %}{{ fields::check(t, "show_deleted", t.get("field-show-deleted"), show_deleted) }}
+{% endif %}<button type="submit">{{ t.get("recipes-filter-submit") }}</button>
+</form>
+{% if can_create %}<p class="actions"><a class="target-link" href="/recipes/new">{{ t.get("recipes-new-link") }}</a></p>
+{% endif %}
+{% if after_end %}{{ pagers::after_end(t, current, first_url) }}
+{% else %}{% call tables::frame("recipes-caption", t.get("recipes-caption")) %}<thead><tr>{{ tables::head(t.get("recipes-col-reference")) }}{{ tables::head(t.get("recipes-col-name")) }}{{ tables::head(t.get("recipes-col-machine")) }}{{ tables::head(t.get("recipes-col-approved")) }}{{ tables::head(t.get("recipes-col-draft")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(5, t.get("recipes-empty")) }}{% else %}<tbody>
+{% for row in rows %}<tr><td class="data"><a href="{{ row.href }}">{{ row.reference }}</a>{% if row.deleted %} {{ badges::deleted(t.get("status-deleted")) }}{% endif %}</td><td>{{ row.name }}</td><td class="data">{{ row.machine }}</td><td>{% if let Some(link) = row.approved %}<a href="{{ link.href }}">{{ link.number }}</a> {{ badges::status("approved", t.get("status-approved")) }}{% else %}{{ t.get("recipes-none") }}{% endif %}</td><td>{% if let Some(link) = row.draft %}<a href="{{ link.href }}">{{ link.number }}</a> {{ badges::status("draft", t.get("status-draft")) }}{% else %}{{ t.get("recipes-none") }}{% endif %}</td></tr>
+{% endfor %}</tbody>
+{% endif %}{% endcall %}{% endif %}
+{% if !previous_url.is_empty() || !next_url.is_empty() %}{{ pagers::pager(t, previous_url, next_url, current) }}
+{% endif %}
 {% endblock %}

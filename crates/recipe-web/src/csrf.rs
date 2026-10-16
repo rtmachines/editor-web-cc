@@ -20,6 +20,7 @@ use subtle::ConstantTimeEq as _;
 use crate::client::ClientAddr;
 use crate::cookies::{CSRF_COOKIE, request_cookie};
 use crate::error::{ByteLimit, WebError};
+use crate::limits::request_limit;
 use crate::pipeline::request_id_of;
 use crate::routes::Access;
 use crate::state::WebState;
@@ -202,8 +203,9 @@ pub(crate) async fn csrf_layer(
     if !origin_matches(request.headers()) {
         return Err(reject(&state, rejection_event(&request)).await);
     }
+    let limit = request_limit(state.settings(), &request);
     let (parts, body) = request.into_parts();
-    let body = buffer_body(body, state.settings().body_limit_form).await?;
+    let body = buffer_body(body, limit).await?;
     let is_form = parts
         .headers
         .get(CONTENT_TYPE)
@@ -228,5 +230,7 @@ pub(crate) async fn csrf_layer(
     Ok(next.run(request).await)
 }
 
+#[cfg(test)]
+mod limit_tests;
 #[cfg(test)]
 mod tests;

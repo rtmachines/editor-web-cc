@@ -1,0 +1,13 @@
+{% import "components/table.html" as tables -%}
+{% import "components/empty.html" as empties -%}
+{% import "components/pager.html" as pagers -%}
+{% import "components/parameter.html" as parameters -%}
+{#- The parameter table of a version (design D7, ADR-0043 (j)). A draft with more than page.parameters parameters shows one unit, and the links name each unit with its count. The link of the shown unit has aria-current. The body #parameter-rows takes the row of a new parameter. -#}
+{% if !table.units.is_empty() %}<nav aria-label="{{ t.get("parameters-units-label") }}"><ul class="link-list">{% for unit in table.units %}<li><a class="target-link" href="{{ unit.href }}"{% if unit.current %} aria-current="page"{% endif %}>{{ unit.text }}</a></li>{% endfor %}</ul></nav>
+{% endif %}{% if table.after_end %}{{ pagers::after_end(t, table.current, table.first_url) }}
+{% else %}{% call tables::frame("parameters-caption", t.get("parameters-caption")) %}<thead><tr>{{ tables::head(t.get("parameters-col-tag")) }}{{ tables::head(t.get("parameters-col-name")) }}{{ tables::head(t.get("parameters-col-type")) }}{{ tables::head(t.get("parameters-col-unit")) }}{% if table.has_address %}{{ tables::head(t.get("parameters-col-address")) }}{% endif %}{{ tables::head(t.get("parameters-col-state")) }}</tr></thead>
+{% if table.rows.is_empty() %}<tbody id="parameter-empty"><tr><td colspan="{{ table.columns }}">{{ empties::empty(t.get("parameters-empty")) }}</td></tr></tbody>{% endif %}<tbody id="parameter-rows">
+{% for row in table.rows %}{{ parameters::row(t, row, table.has_address, false) }}
+{% endfor %}</tbody>{% endcall %}
+{% if !table.previous_url.is_empty() || !table.next_url.is_empty() %}{{ pagers::pager(t, table.previous_url, table.next_url, table.current) }}
+{% endif %}{% endif %}

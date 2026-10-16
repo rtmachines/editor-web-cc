@@ -13,6 +13,7 @@ use recipe_app::plant::{GetUnit, UnitRef, UnitView};
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{MachineCode, Unit};
 
+use super::commands::RenameForm;
 use crate::error::WebError;
 use crate::layout::{Layout, NavTarget};
 use crate::pages::path_values::path_code_unit;
@@ -42,7 +43,7 @@ impl UnitLink {
 /// The page `unit.html`.
 ///
 /// The type solves one problem: one template shows a live unit with its forms and an archived unit
-/// without them. The flags `can_rename` and `can_archive` are true only for a live unit and a role
+/// without them. The flags `form.shown` and `can_archive` are true only for a live unit and a role
 /// that holds the permission of the command (`Operation::requirement`).
 #[derive(Template)]
 #[template(path = "unit.html")]
@@ -56,12 +57,12 @@ struct UnitPage<'a> {
     machine_href: String,
     parent: Option<UnitLink>,
     children: Vec<UnitLink>,
-    can_rename: bool,
     can_archive: bool,
-    rename_action: String,
     archive_action: String,
     warning: String,
     archive_button: String,
+    /// The rename form. It is shown only for a live unit and a role with the permission.
+    form: RenameForm,
 }
 
 impl<'a> UnitPage<'a> {
@@ -79,12 +80,15 @@ impl<'a> UnitPage<'a> {
         let title = t.with_arg("unit-title", "path", path);
         let layout = Layout::for_session(t, request, title, Some(NavTarget::Machines))?;
         let count = t.with_arg("unit-archive-count", "count", view.descendants);
+        let name = view.unit.name().to_string();
+        let form = RenameForm::new((code, path), name.clone(), request.csrf_token())
+            .shown(allows(Operation::RenameUnit));
         Ok(Self {
             layout,
             t,
             code: code.to_string(),
             path: path.to_string(),
-            name: view.unit.name().to_string(),
+            name,
             archived: !live,
             machine_href: format!("/machines/{code}"),
             parent: view.parent.as_ref().map(|unit| UnitLink::of(code, unit)),
@@ -93,12 +97,11 @@ impl<'a> UnitPage<'a> {
                 .iter()
                 .map(|unit| UnitLink::of(code, unit))
                 .collect(),
-            can_rename: allows(Operation::RenameUnit),
             can_archive: allows(Operation::ArchiveUnit),
-            rename_action: format!("/machines/{code}/units/{path}/rename"),
             archive_action: format!("/machines/{code}/units/{path}/archive"),
             warning: format!("{} {count}", t.get("unit-archive-warning")),
             archive_button: t.with_arg("unit-archive-submit", "path", path),
+            form,
         })
     }
 }

@@ -7,8 +7,9 @@
  * Class names that the templates use:
  * Blocks: .panel .table-wrap .num .empty .toast .tree .tree-node .tree-path .tree-type .tree-leaf .tree-group .tree-row .danger .link-list
  * Forms: .pager .pager-current .check .member-row .member-fields
- * State: .badge .badge-draft .badge-approved .badge-retired .badge-active .badge-inactive .badge-large
- * Feedback: .alert .alert-error .alert-warning .alert-info .alert-success .alert-code .alert-ref .field-lines
+ * State: .badge .badge-draft .badge-approved .badge-retired .badge-active .badge-inactive .badge-large .badge-deleted .badge-outdated
+ * Feedback: .alert .alert-error .alert-warning .alert-info .alert-success .alert-code .alert-ref .alert-head .field-lines .field-error .field-error-code
+ * Leaf grid: .leaf-grid .row-all .grid-note .grid-toggle
  */
 
 /* Panel, table, empty state */
@@ -128,10 +129,16 @@ tbody tr:hover {
   border-color: var(--color-approved-edge);
 }
 
-.badge-retired, .badge-inactive {
+.badge-retired, .badge-inactive, .badge-deleted {
   background: var(--color-retired-bg);
   color: var(--color-retired-fg);
   border-color: var(--color-retired-edge);
+}
+
+.badge-outdated {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-fg);
+  border-color: var(--color-warning-edge);
 }
 
 .badge-active {
@@ -190,9 +197,13 @@ tbody tr:hover {
   border-color: var(--color-success-edge);
 }
 
+/* The code never breaks. The sentence next to it wraps between words (design-system.md 5). */
+
 .alert-code {
+  flex: none;
   font-family: var(--font-mono);
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .alert-ref {
@@ -202,6 +213,14 @@ tbody tr:hover {
   overflow-wrap: anywhere;
 }
 
+.alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-3);
+  flex-basis: 100%;
+}
+
 .field-lines {
   display: flex;
   flex-direction: column;
@@ -209,6 +228,67 @@ tbody tr:hover {
   flex-basis: 100%;
   margin: 0;
   padding-left: var(--space-5);
+}
+
+/*
+ * The code of a summary line stays whole. The sentence may shrink, breaks only between words,
+ * and wraps below the code in a narrow panel. So a long leaf path never widens the page (section 5).
+ * A long word breaks only when it does not fit the panel.
+ */
+
+.field-lines .target-link {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.field-lines .target-link > :last-child {
+  min-width: 0;
+  flex: 1 1 calc(var(--target) * 3);
+  overflow-wrap: break-word;
+}
+
+/* The error line under an input: one `p` for each line (design-system.md 10.5) */
+
+.field-error {
+  margin-top: var(--space-1);
+  color: var(--color-error-fg);
+  font-size: var(--text-sm);
+  overflow-wrap: break-word;
+}
+
+/*
+ * The icon and the code stay whole. The sentence breaks only between words and keeps a minimum
+ * width of three targets. A narrower room wraps it below the code (design-system.md 5 and 10.5).
+ */
+
+.field-error p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: none;
+  margin: 0;
+}
+
+.field-error p > * {
+  min-width: 0;
+}
+
+.field-error p > :last-child {
+  flex: 1 1 calc(var(--target) * 3);
+}
+
+.field-error .icon {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.field-error-code {
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .toast {
@@ -432,6 +512,69 @@ legend {
   flex: 1 1 calc(var(--width-form) / 3);
   min-width: 0;
   margin-bottom: 0;
+}
+
+/*
+ * Leaf grid (design-system.md 10.4 and 10.8, ADR-0039).
+ * The grid stands inside a `.table-wrap` frame. The frame scrolls sideways when the cells need
+ * more room than the frame has. The path column scrolls with the other columns. A sticky column
+ * can hide a focused input in a frame that scrolls sideways (WCAG 2.4.11). The header row is not
+ * sticky either.
+ */
+
+.leaf-grid tbody[hidden] {
+  display: none;
+}
+
+/*
+ * The leaf grid is a table inside a form (design-system.md 10.4). A table uses the full width of
+ * `main` and a form uses at most `--width-form` (design-system.md 6). So the form box has no
+ * maximum width, and each child except the grid holder `.tree` keeps `--width-form`.
+ */
+
+form:has(.leaf-grid) {
+  max-width: none;
+}
+
+form:has(.leaf-grid) > :not(.tree) {
+  max-width: var(--width-form);
+}
+
+.leaf-grid th[scope="row"] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  overflow-wrap: break-word;
+}
+
+.leaf-grid td {
+  padding: var(--space-1);
+}
+
+.leaf-grid td input, .leaf-grid td select {
+  width: 100%;
+}
+
+.leaf-grid td input {
+  min-width: calc(var(--target) * 3);
+}
+
+.row-all, .leaf-grid .row-all th[scope="row"] {
+  background: var(--color-sunken);
+}
+
+.grid-note {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.grid-toggle {
+  padding: var(--space-1);
+}
+
+.grid-toggle .tree-node {
+  margin-left: 0;
 }
 
 /* Forced colors */

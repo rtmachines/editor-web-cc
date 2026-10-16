@@ -1,2 +1,2 @@
 {% import "components/alert.html" as alerts -%}
-{{ alerts::alert_fields("error", view.code, view.message, &view.lines, view.link_fields, view.reference) }}
+{% if let Some(conflict) = view.conflict %}{% include "conflict.html" %}{% else if let Some(list) = view.list %}{{ alerts::summary("error", view.code, list, view.link_fields, view.reference) }}{% else %}{{ alerts::alert_fields("error", view.code, view.message, &view.lines, view.link_fields, view.reference) }}{% endif %}

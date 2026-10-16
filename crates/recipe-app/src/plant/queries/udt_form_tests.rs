@@ -88,6 +88,7 @@ async fn form_as(
     from: Option<&str>,
 ) -> Result<UdtForm, AppError> {
     let input = UdtFormInput {
+        purpose: crate::auth::UdtFormPurpose::DefineUdt,
         code: code(machine_code),
         from: from.map(name),
     };

@@ -121,7 +121,7 @@ fn limit_on_a_removed_member_gives_e_rcp_029() {
     assert_eq!(
         texts(error),
         vec![
-            "OLD.old_max has a limit but no longer exists in the new revision. Delete the limit first."
+            "OLD.old_max has a limit, but the new revision has no such member or gives the member another type. Delete the limit first. After the rebind, set the limit again."
         ]
     );
 }
@@ -143,7 +143,7 @@ fn star_limit_on_a_removed_member_of_an_array_root_gives_e_rcp_029() {
     assert_eq!(
         texts(error),
         vec![
-            "OLDS[*].old_max has a limit but no longer exists in the new revision. Delete the limit first."
+            "OLDS[*].old_max has a limit, but the new revision has no such member or gives the member another type. Delete the limit first. After the rebind, set the limit again."
         ]
     );
 }
@@ -247,6 +247,6 @@ fn drops_limit_has_its_code_registry_row_and_message() {
     assert!(crate::error_codes::REGISTRY.contains(&ErrorCode::RCP_029));
     assert_eq!(
         error.to_string(),
-        "SPEED.zones[2].temp_max has a limit but no longer exists in the new revision. Delete the limit first."
+        "SPEED.zones[2].temp_max has a limit, but the new revision has no such member or gives the member another type. Delete the limit first. After the rebind, set the limit again."
     );
 }

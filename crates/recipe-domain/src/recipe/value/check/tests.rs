@@ -4,7 +4,7 @@ use crate::recipe::value::test_support::{
     INT, REAL, TIME, ZONE_JSON, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
 };
-use crate::recipe::value::{ParameterValue, ValueFault};
+use crate::recipe::value::{LeafTexts, ParameterValue, ValueFault};
 
 fn limit(
     tree: &TypeTree,
@@ -230,6 +230,38 @@ fn conflict_is_reported_before_a_value_fault() {
     ];
     let fault = value("9", &tree).check(&tree, &limits).unwrap_err();
     assert!(matches!(fault, ValueFault::LimitConflict { .. }));
+}
+
+#[test]
+fn texts_with_a_bad_leaf_keep_the_conflict_first_and_the_leaves_in_tree_order() {
+    let tree = int_array_tree(&[(1, 3)]);
+    let limits = [
+        range(&tree, "[*]", None, Some("10")),
+        range(&tree, "[2]", None, Some("10")),
+    ];
+    let pairs = [("[1]", "20"), ("[2]", "x"), ("[3]", "30"), ("[9]", "1")]
+        .map(|(path, text)| (LeafPath::parse(path).unwrap(), text.to_owned()));
+    let texts = LeafTexts::parse(pairs.to_vec()).unwrap();
+    let faults = ParameterValue::from_texts_checked(&tree, &texts, &limits).unwrap_err();
+    let kinds: Vec<String> = faults
+        .iter()
+        .map(|fault| match fault {
+            ValueFault::LimitConflict { leaf } => format!("conflict {leaf}"),
+            ValueFault::OutOfLimit { leaf, .. } => format!("range {leaf}"),
+            ValueFault::Mismatch { leaf, .. } => format!("shape {leaf}"),
+            ValueFault::WrongTree => "wrong tree".to_owned(),
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "conflict [2]",
+            "range [1]",
+            "shape [2]",
+            "range [3]",
+            "shape [9]"
+        ]
+    );
 }
 
 #[test]

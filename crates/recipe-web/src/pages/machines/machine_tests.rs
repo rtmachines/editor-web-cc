@@ -11,8 +11,8 @@ use crate::pages::test_helpers::{
 use crate::test_support::plant::{ENGLISH, M7_ID, M12_ID, cookie_of, main_of, text_with, world};
 use crate::test_support::{icon_tag, text};
 
-/// The opening tag of the rename form (design D6).
-const RENAME_TAG: &str = "<form method=\"post\" action=\"/machines/M7/rename\" hx-boost=\"true\" hx-target=\"#machine-name\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
+/// The opening tag of the rename form (design D6). The fixed `id` serves the out-of-band swap.
+const RENAME_TAG: &str = "<form id=\"machine-rename-form\" method=\"post\" action=\"/machines/M7/rename\" hx-boost=\"true\" hx-target=\"#machine-name\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
 /// The opening tag of the archive form (design D6).
 const ARCHIVE_TAG: &str = "<form method=\"post\" action=\"/machines/M7/archive\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\">";
 /// The link "Add a main unit" with its literal `hx-*` attributes (design D6).
@@ -115,6 +115,10 @@ async fn machines_page_of_an_engineer_has_the_rename_form_with_literal_hx_attrib
     );
     assert!(form.contains("id=\"machine_name\" name=\"name\""), "{form}");
     assert!(form.contains(">Rename machine</button>"), "{form}");
+    assert!(
+        form.contains("<button type=\"submit\" id=\"machine-rename-submit\">"),
+        "{form}"
+    );
     assert!(!form.contains("method=\"get\""));
 }
 

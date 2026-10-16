@@ -1,7 +1,8 @@
 //! The open transaction (design D3).
 //!
-//! One struct implements the five sub-ports of `recipe-app`. Each accessor returns `self`, and
-//! each port has its own module with its `impl`.
+//! One struct implements the sub-ports of `recipe-app`. Each accessor returns `self`, and each
+//! port has its own module with its `impl`. The read port `RecipeReads` of the recipe pages has
+//! its `impl` here, and its SQL lives in `recipe_list`, `version_reads`, and `parameter_reads`.
 
 mod draft_rows;
 mod draft_writes;
@@ -9,8 +10,10 @@ mod drafts;
 mod identity;
 mod machine_list;
 mod machines;
+mod parameter_reads;
 mod parameter_rows;
 mod plant;
+mod recipe_list;
 mod recipe_rows;
 mod recipe_writes;
 mod recipes;
@@ -19,6 +22,7 @@ mod type_usage;
 mod types;
 mod unit_rows;
 mod units;
+mod version_reads;
 mod version_rows;
 mod version_writes;
 mod window;
@@ -28,11 +32,15 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use recipe_app::error::StorageError;
 use recipe_app::ports::{
-    AttemptRepository, AuditWritten, DraftRepository, NonEmpty, PlantRepository, RecipeRepository,
-    SessionRepository, Transaction, TypeCatalog, UnitLookup, UserRepository,
+    AttemptRepository, AuditWritten, DraftRepository, NonEmpty, ParameterRow, PlantRepository,
+    RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary, SessionRepository, Transaction,
+    TypeCatalog, UnitCount, UnitLookup, UserRepository, VersionDetail, VersionSummary,
 };
 use recipe_domain::audit::AuditEntry;
-use recipe_domain::recipe::RecipeVersionId;
+use recipe_domain::identity::Login;
+use recipe_domain::plant::UnitId;
+use recipe_domain::recipe::{ParameterKey, RecipeId, RecipeVersionId, StoredParameter};
+use recipe_domain::timestamp::Timestamp;
 use sqlx::Postgres;
 
 use crate::audit_insert::insert_entries;
@@ -75,6 +83,10 @@ impl Transaction for PgTransaction {
         self
     }
 
+    fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
+        self
+    }
+
     fn drafts(&mut self) -> &mut dyn DraftRepository {
         self
     }
@@ -112,5 +124,67 @@ impl Transaction for PgTransaction {
     /// Commit. A deferred trigger can fail here, so the error goes through the same map.
     async fn finish(self: Box<Self>, _written: AuditWritten) -> Result<(), StorageError> {
         self.tx.commit().await.map_err(map_error)
+    }
+}
+
+/// The read port of the recipe pages (design D5). No method takes a lock.
+#[async_trait]
+impl RecipeReads for PgTransaction {
+    async fn list_recipes(
+        &mut self,
+        filter: &RecipeFilter,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<RecipeSummary>, StorageError> {
+        recipe_list::list(&mut self.tx, filter, offset, limit).await
+    }
+
+    async fn version_page(
+        &mut self,
+        recipe: RecipeId,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<VersionSummary>, StorageError> {
+        version_reads::page(&mut self.tx, recipe, offset, limit).await
+    }
+
+    async fn version_detail(
+        &mut self,
+        version: RecipeVersionId,
+    ) -> Result<Option<VersionDetail>, StorageError> {
+        version_reads::by_id(&mut self.tx, version).await
+    }
+
+    async fn last_change(
+        &mut self,
+        recipe: RecipeId,
+        at: Timestamp,
+    ) -> Result<Option<Login>, StorageError> {
+        version_reads::last_actor(&mut self.tx, recipe, at).await
+    }
+
+    async fn parameter_page(
+        &mut self,
+        version: RecipeVersionId,
+        unit: Option<UnitId>,
+        offset: u64,
+        limit: u32,
+    ) -> Result<Vec<ParameterRow>, StorageError> {
+        parameter_reads::page(&mut self.tx, version, unit, offset, limit).await
+    }
+
+    async fn unit_counts(
+        &mut self,
+        version: RecipeVersionId,
+    ) -> Result<Vec<UnitCount>, StorageError> {
+        parameter_reads::counts(&mut self.tx, version).await
+    }
+
+    async fn parameter_by_key(
+        &mut self,
+        version: RecipeVersionId,
+        key: ParameterKey,
+    ) -> Result<Option<StoredParameter>, StorageError> {
+        parameter_reads::by_key(&mut self.tx, version, key).await
     }
 }

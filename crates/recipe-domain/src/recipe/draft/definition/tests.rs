@@ -4,7 +4,8 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::super::add::support::{
-    DINT, INT, UNRESOLVED, draft_with, draft_with_speed, limit_row, live_unit, snapshot, trees_on,
+    DINT, INT, TABLE, UNRESOLVED, draft_with, draft_with_speed, limit_row, live_unit, snapshot,
+    texts_input, trees_on,
 };
 use super::super::edit_support::draft_with_content;
 use super::super::support::{key, stored_parameter, tag};
@@ -12,7 +13,9 @@ use super::{DefinitionUpdate, Retype};
 use crate::error_codes::ErrorCode;
 use crate::plant::PlcPlatform;
 use crate::plant::fixtures::id;
-use crate::recipe::{Draft, DraftError, LimitInput, LimitList, Ordinal};
+use crate::recipe::{
+    Draft, DraftError, Expected, LimitInput, LimitList, Ordinal, RecipeError, ValueInput,
+};
 use crate::text::{LongText, Text};
 
 fn update(tag_text: &str, type_n: u128) -> DefinitionUpdate {
@@ -29,9 +32,76 @@ fn update(tag_text: &str, type_n: u128) -> DefinitionUpdate {
 
 fn retype(value_json: &str, rows: Vec<LimitInput>) -> Retype {
     Retype {
-        value_json: value_json.to_owned(),
+        value: ValueInput::Json(value_json.to_owned()),
         limits: LimitList::parse(rows).unwrap(),
     }
+}
+
+#[test]
+fn a_retype_with_a_bad_text_and_a_bad_row_gives_one_list() {
+    let mut draft = draft_with_content();
+    let new = Retype {
+        value: texts_input(&[("", "abc")]),
+        limits: LimitList::parse(vec![limit_row("", Some("10"), Some("5"))]).unwrap(),
+    };
+    let error = assert_rejected(
+        &mut draft,
+        update("SPEED", DINT),
+        Some(new),
+        ErrorCode::RCP_005,
+    );
+    let texts: Vec<String> = match error {
+        DraftError::List(list) => list.into_vec(),
+        DraftError::Recipe(_) | DraftError::Plant(_) => Vec::new(),
+    }
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    assert_eq!(
+        texts,
+        [
+            "Value of SPEED does not match the type. Expected an integer of type DINT.",
+            "The minimum 10 of SPEED is greater than the maximum 5.",
+        ]
+    );
+}
+
+#[test]
+fn a_retype_with_a_bad_leaf_keeps_the_range_fault_of_another_leaf() {
+    let mut draft = draft_with_content();
+    let new = Retype {
+        value: texts_input(&[
+            ("[1]", "x"),
+            ("[2]", "2"),
+            ("[3]", "3500"),
+            ("[4]", "4"),
+            ("[5]", "5"),
+            ("[6]", "6"),
+            ("[7]", "7"),
+            ("[8]", "8"),
+        ]),
+        limits: LimitList::parse(vec![limit_row("[*]", Some("0"), Some("3000"))]).unwrap(),
+    };
+    let error = assert_rejected(
+        &mut draft,
+        update("SPEED", TABLE),
+        Some(new),
+        ErrorCode::RCP_005,
+    );
+    let texts: Vec<String> = match error {
+        DraftError::List(list) => list.into_vec(),
+        DraftError::Recipe(_) | DraftError::Plant(_) => Vec::new(),
+    }
+    .iter()
+    .map(ToString::to_string)
+    .collect();
+    assert_eq!(
+        texts,
+        [
+            "Value of SPEED[1] does not match the type. Expected an integer of type INT.",
+            "Value 3500 of SPEED[3] is outside the process limit 0 to 3000.",
+        ]
+    );
 }
 
 fn assert_rejected(
@@ -62,6 +132,13 @@ fn a_type_change_without_a_value_gives_e_rcp_005() {
         error.to_string(),
         "Value of SPEED does not match the type. Expected a new value for the new type."
     );
+    assert!(matches!(
+        error,
+        DraftError::Recipe(RecipeError::ValueShapeMismatch {
+            expected: Expected::NewValue,
+            ..
+        })
+    ));
 }
 
 #[test]

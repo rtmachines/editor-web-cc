@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use super::ParameterValue;
+use super::expected::Expected;
 use super::fault::ValueFault;
 use super::leaf::{LeafType, Mode, convert};
 use crate::plant::limits::MAX_DEPTH;
@@ -36,7 +37,7 @@ pub(super) fn canonicalize(
     if exceeds_depth(&json) {
         return Err(ValueFault::mismatch(
             Vec::new(),
-            format!("a JSON value with at most {MAX_DEPTH} levels"),
+            Expected::Depth { levels: MAX_DEPTH },
         ));
     }
     let mut stack = vec![Task {
@@ -106,8 +107,9 @@ fn struct_tasks<'a>(
     members: &'a [(MemberName, TypeNode)],
     path: &[LeafSegment],
 ) -> Result<Vec<Task<'a>>, ValueFault> {
-    let names: Vec<&str> = members.iter().map(|(name, _)| name.as_str()).collect();
-    let expected = || format!("an object with the members {}", names.join(", "));
+    let expected = || Expected::Object {
+        members: members.iter().map(|(name, _)| name.clone()).collect(),
+    };
     let Value::Object(map) = slot else {
         return Err(ValueFault::mismatch(path.to_vec(), expected()));
     };
@@ -145,10 +147,10 @@ fn dimension_items<'a>(
     here: &[LeafSegment],
 ) -> Result<(ArrayDimension, &'a mut Vec<Value>), ValueFault> {
     let Some(dimension) = dimensions.iter().nth(level) else {
-        return Err(ValueFault::mismatch(here.to_vec(), "an array"));
+        return Err(ValueFault::mismatch(here.to_vec(), Expected::Array));
     };
     let count = dimension.count();
-    let expected = || format!("an array of {count} elements");
+    let expected = || Expected::ArrayCount { count };
     let Value::Array(items) = slot else {
         return Err(ValueFault::mismatch(here.to_vec(), expected()));
     };
@@ -169,21 +171,18 @@ fn array_tasks(task: Task<'_>) -> Result<Vec<Task<'_>>, ValueFault> {
         ..
     } = task.node
     else {
-        return Err(ValueFault::mismatch(task.path, "an array"));
+        return Err(ValueFault::mismatch(task.path, Expected::Array));
     };
     let here = located(&task.path, &task.indexes);
     let (dimension, items) = dimension_items(task.slot, dimensions, task.level, &here)?;
     let Some(next_level) = task.level.checked_add(1) else {
-        return Err(ValueFault::mismatch(here, "an array"));
+        return Err(ValueFault::mismatch(here, Expected::Array));
     };
     let is_last = next_level == dimensions.len();
     let mut tasks = Vec::with_capacity(items.len());
     for (position, item) in items.iter_mut().enumerate() {
         let Some(index) = plc_index(dimension.lower(), position) else {
-            return Err(ValueFault::mismatch(
-                here,
-                "an index inside the INTEGER range",
-            ));
+            return Err(ValueFault::mismatch(here, Expected::Index));
         };
         let mut reached = task.indexes.clone();
         reached.push(index);

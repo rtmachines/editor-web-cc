@@ -15,7 +15,7 @@ use recipe_app::recipe::{
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{TypeExpr, UnitPath};
 use recipe_domain::recipe::{
-    ApprovalOutcome, LimitInput, LimitList, Ordinal, ParameterKey, ParameterTag,
+    ApprovalOutcome, LimitInput, LimitList, Ordinal, ParameterKey, ParameterTag, ValueInput,
 };
 
 use crate::atomic::world::{Param, World, actions_named, long_text, second_user, status, text};
@@ -92,7 +92,7 @@ fn set_value_input(world: &World, key: ParameterKey, expected: i64) -> SetParame
         number: 1,
         expected_row_version: expected,
         key,
-        value_json: "7".to_owned(),
+        value: ValueInput::Json("7".to_owned()),
     }
 }
 
@@ -173,7 +173,7 @@ fn add_input(world: &World, expected: i64) -> AddParameterInput {
         type_expr: TypeExpr::parse("STRING(20)").unwrap(),
         s7_address: None,
         ordinal: Ordinal::parse(1).unwrap(),
-        value_json: "\"abc\"".to_owned(),
+        value: ValueInput::Json("\"abc\"".to_owned()),
         limits: LimitList::parse(Vec::<LimitInput>::new()).unwrap(),
     }
 }

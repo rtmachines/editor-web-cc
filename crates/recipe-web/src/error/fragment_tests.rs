@@ -260,7 +260,12 @@ async fn fragment_error_is_one_alert_with_icon_code_sentence_and_reference() {
     )
     .await;
     assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
-    let body = reply.body.trim();
+    // The answer ends with the empty status region out of band (design-system.md 10.7).
+    let body = reply
+        .body
+        .trim()
+        .strip_suffix("<div id=\"toast\" hx-swap-oob=\"innerHTML\"></div>")
+        .unwrap();
     let open = format!(
         "<div class=\"alert alert-error\" role=\"alert\">{}",
         icon_tag("alert-error")

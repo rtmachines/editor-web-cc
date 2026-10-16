@@ -9,18 +9,24 @@ use recipe_app::error::AppError;
 use recipe_domain::audit::RequestId;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::IdentityError;
+use recipe_domain::plant::LeafPath;
+use recipe_domain::recipe::{ParameterTag, RecipeError};
 
+use super::lists::list_view;
 use super::log::{level_of, log_error};
 use super::plant::plant_args;
+use super::recipe::recipe_line_args;
 use super::status::status_of;
 use super::values::{
     field_reason_text, missing_text, operation_text, password_reason_text, task_stage_text,
 };
+use super::view::ConflictLines;
 use super::view::{
     ErrorFragment, ErrorPage, ErrorView, FieldErrorsFragment, FieldLine, field_key, has_input,
     input_id,
 };
-use super::{Retry, RowField, WebError};
+use super::{ConflictView, ListView, RenderedForm};
+use super::{Retry, RowField, WebError, item_lines, leaf_lines};
 use crate::cookies::clear_session_cookie;
 use crate::i18n::Lang;
 use crate::layout::Layout;
@@ -45,6 +51,24 @@ const KEEP_URL: &str = "false";
 const ERROR_PANEL: &str = "#error-panel";
 /// The swap style of an error. The error panel scrolls into view (ADR-0036 p, `api.md` 5.3).
 const ERROR_RESWAP: &str = "innerHTML show:#error-panel:top";
+/// The element of an HTMX error answer that empties `#toast` out of band, so no earlier success
+/// message stands next to the error (`design-system.md` section 10.7). The values are literals.
+const TOAST_CLEAR: &str = "<div id=\"toast\" hx-swap-oob=\"innerHTML\"></div>";
+/// The end tag of `main`. The page of a refused form inserts the form before it.
+const MAIN_END: &str = "</main>";
+
+/// The full page of a refused form for a request without HTMX (`api.md` section 5.3).
+///
+/// The page has the layout of the session, the summary in `#error-panel`, and one `h1`. The
+/// answer inserts the form with the sent texts after the `h1`, so no template uses `|safe`.
+#[derive(Template)]
+#[template(path = "refused-form-page.html")]
+struct RefusedFormPage<'a> {
+    /// The layout of the session.
+    layout: Layout<'a>,
+    /// The summary of the lines.
+    view: &'a ErrorView,
+}
 
 /// What the mapping needs to know about the request.
 pub(crate) struct ErrorContext<'a> {
@@ -92,21 +116,42 @@ fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
             args.set("field", row_label_of(*row, *field, ctx));
             args.set("reason", field_reason_text(bundles, ctx.lang, *reason));
         }
-        WebError::App(AppError::Forbidden { operation }) => {
-            args.set("operation", operation_text(bundles, ctx.lang, *operation));
-        }
-        WebError::App(AppError::NotFound { entity }) => {
-            args.set("entity", missing_text(bundles, ctx.lang, entity));
-        }
-        WebError::App(AppError::Timeout { stage }) => args.set("stage", stage.to_string()),
-        WebError::App(AppError::TaskFailed { stage }) => {
-            args.set("stage", task_stage_text(bundles, ctx.lang, *stage));
-        }
-        WebError::App(AppError::Identity(identity)) => identity_args(&mut args, identity, ctx),
-        WebError::App(AppError::Plant(plant)) => plant_args(&mut args, plant, bundles, ctx.lang),
+        WebError::App(app) => app_args(&mut args, app, ctx),
+        WebError::Conflict { error: app, .. } => app_args(&mut args, app, ctx),
         _other => {}
     }
     args
+}
+
+/// Add the arguments of an error of a use case.
+fn app_args(args: &mut FluentArgs<'static>, error: &AppError, ctx: &ErrorContext<'_>) {
+    let bundles = ctx.state.bundles();
+    match error {
+        AppError::Forbidden { operation } => {
+            args.set("operation", operation_text(bundles, ctx.lang, *operation));
+        }
+        AppError::NotFound { entity } => {
+            args.set("entity", missing_text(bundles, ctx.lang, entity));
+        }
+        AppError::Timeout { stage } => args.set("stage", stage.to_string()),
+        AppError::TaskFailed { stage } => {
+            args.set("stage", task_stage_text(bundles, ctx.lang, *stage));
+        }
+        AppError::Identity(identity) => identity_args(args, identity, ctx),
+        AppError::Plant(plant) => plant_args(args, plant, bundles, ctx.lang),
+        AppError::ConcurrentEdit {
+            reference, number, ..
+        } => {
+            args.set("reference", reference.to_string());
+            args.set("number", number.to_string());
+        }
+        AppError::Recipe(recipe) => {
+            for (name, arg) in recipe_line_args(recipe) {
+                args.set(name, arg.text(bundles, ctx.lang));
+            }
+        }
+        _other => {}
+    }
 }
 
 /// Return the label of the form field `field` in the UI language, or the name without a label.
@@ -142,9 +187,15 @@ fn retry_after_of(error: &WebError, status: StatusCode, ctx: &ErrorContext<'_>) 
 fn view_of(error: &WebError, shown: ErrorCode, ctx: &ErrorContext<'_>) -> ErrorView {
     let bundles = ctx.state.bundles();
     let mut args = args_of(error, ctx);
-    let message = bundles
-        .message(ctx.lang, &format!("error-{shown}"), Some(&args))
-        .unwrap_or_else(|| error.to_string());
+    let list = list_of(error, ctx);
+    // A summary shows no sentence of its own, so a list never builds its long English text.
+    let message = if list.is_some() {
+        String::new()
+    } else {
+        bundles
+            .message(ctx.lang, &format!("error-{shown}"), Some(&args))
+            .unwrap_or_else(|| error.to_string())
+    };
     args.set("request_id", ctx.request_id.to_string());
     let reference = bundles
         .message(ctx.lang, "error-reference", Some(&args))
@@ -154,7 +205,72 @@ fn view_of(error: &WebError, shown: ErrorCode, ctx: &ErrorContext<'_>) -> ErrorV
         message,
         reference,
         lines: lines_of(error, ctx),
-        link_fields: ctx.htmx || matches!(ctx.retry, Some(Retry::Login(_))),
+        link_fields: ctx.htmx
+            || matches!(ctx.retry, Some(Retry::Login(_)))
+            || page_form(error, ctx).is_some(),
+        list,
+        conflict: conflict_of(error, ctx),
+    }
+}
+
+/// Build the lines of `conflict.html` for a conflict on a draft (design D10).
+///
+/// The `row_version` comes from the read of the version. When the read failed, it comes from the
+/// error, and the answer shows no login and no time.
+fn conflict_of(error: &WebError, ctx: &ErrorContext<'_>) -> Option<ConflictLines> {
+    let WebError::Conflict { error: app, view } = error else {
+        return None;
+    };
+    let AppError::ConcurrentEdit {
+        reference,
+        number,
+        actual,
+        ..
+    } = app.as_ref()
+    else {
+        return None;
+    };
+    let t = Texts::new(ctx.state.bundles(), ctx.lang);
+    let (row_version, last_change) = match view {
+        ConflictView::Read {
+            row_version,
+            last_change,
+        } => (*row_version, last_change.as_deref()),
+        ConflictView::Unread(_failure) => (*actual, None),
+    };
+    let last_change = last_change.map_or_else(
+        || t.get("conflict-no-editor"),
+        |(login, time)| {
+            let mut args = FluentArgs::new();
+            args.set("login", login.to_string());
+            args.set("time", time.clone());
+            t.with("conflict-last-change", &args)
+        },
+    );
+    Some(ConflictLines {
+        row_version: t.with_arg("conflict-row-version", "row_version", row_version),
+        last_change,
+        warning: t.get("conflict-reload-warning"),
+        reload: t.get("conflict-reload"),
+        href: format!("/recipes/{reference}/versions/{number}"),
+    })
+}
+
+/// Build the summary of an error with a list: the lines of a form, the entries of a list of
+/// recipe errors, or the items of `E-RCP-020` (ADR-0027, ADR-0041).
+fn list_of(error: &WebError, ctx: &ErrorContext<'_>) -> Option<ListView> {
+    let bundles = ctx.state.bundles();
+    let no_input = |_path: &LeafPath| None;
+    let no_row = |_tag: &ParameterTag| None;
+    match error {
+        WebError::Fields { lines, .. } => Some(list_view(lines.iter(), bundles, ctx.lang)),
+        WebError::App(AppError::Recipes(errors)) => {
+            Some(list_view(&leaf_lines(errors, &no_input), bundles, ctx.lang))
+        }
+        WebError::App(AppError::Recipe(RecipeError::ValidationFailed { items })) => {
+            Some(list_view(&item_lines(items, &no_row), bundles, ctx.lang))
+        }
+        _other => None,
     }
 }
 
@@ -206,6 +322,69 @@ fn render(view: &ErrorView, field_errors: bool, ctx: &ErrorContext<'_>) -> Optio
     }
 }
 
+/// Return the form of a refused request without HTMX that has the session parts of the layout.
+fn page_form<'e>(error: &'e WebError, ctx: &ErrorContext<'_>) -> Option<&'e RenderedForm> {
+    match error {
+        WebError::Fields {
+            form: Some(form), ..
+        } if !ctx.htmx && form.frame().is_some() => Some(form),
+        _other => None,
+    }
+}
+
+/// Render the full page of a refused form: the session layout, the summary, and the form.
+///
+/// The form keeps the sent texts and the lines under its inputs (ADR-0041 (e)). It loses every
+/// `hx-*` attribute, because the page is not a swap and has no target of the page that sent the
+/// form. A second save is a normal `POST` (ADR-0047 (a)). Askama escapes each value of the page,
+/// so the literal `</main>` of the layout is the last match.
+fn refused_page(view: &ErrorView, form: &RenderedForm, ctx: &ErrorContext<'_>) -> Option<String> {
+    let frame = form.frame()?;
+    let texts = Texts::new(ctx.state.bundles(), ctx.lang);
+    let title = format!("{} · {}", view.code, texts.get("error-page-title"));
+    let page = RefusedFormPage {
+        layout: Layout::refused(texts, ctx.lang, title, frame),
+        view,
+    }
+    .render()
+    .ok()?;
+    let (head, tail) = page.rsplit_once(MAIN_END)?;
+    Some(format!("{head}{}{MAIN_END}{tail}", form.page_html()))
+}
+
+/// Render the body of an error answer.
+///
+/// An HTMX answer of `WebError::Fields` with a form appends the form after the fragment. The
+/// form swaps out of band (ADR-0041 (e)). Every HTMX answer also empties `#toast` out of band.
+/// A full page shows the form only when the handler gave the session parts of the layout.
+/// `field-errors.html` also renders the lines of a conflict (design D10).
+fn body_of(
+    error: &WebError,
+    shown: ErrorCode,
+    status: StatusCode,
+    ctx: &ErrorContext<'_>,
+) -> String {
+    let own_fragment = matches!(error, WebError::Fields { .. } | WebError::Conflict { .. });
+    let field_errors =
+        own_fragment || status == StatusCode::UNPROCESSABLE_ENTITY || shown == ErrorCode::IDN_003;
+    let view = view_of(error, shown, ctx);
+    if let Some(page) = page_form(error, ctx).and_then(|form| refused_page(&view, form, ctx)) {
+        return page;
+    }
+    let mut body = render(&view, field_errors, ctx)
+        .unwrap_or_else(|| format!("{} {}", view.code, view.reference));
+    if ctx.htmx {
+        if let WebError::Fields {
+            form: Some(form), ..
+        } = error
+        {
+            body.push_str(form.as_str());
+        }
+        body.push_str(TOAST_CLEAR);
+    }
+    body
+}
+
 /// Build a redirect answer.
 fn redirect(path: &'static str) -> Response {
     let mut response = StatusCode::SEE_OTHER.into_response();
@@ -242,10 +421,7 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
             .append(SET_COOKIE, clear_session_cookie());
         return response;
     }
-    let field_errors = status == StatusCode::UNPROCESSABLE_ENTITY || shown == ErrorCode::IDN_003;
-    let view = view_of(error, shown, ctx);
-    let body = render(&view, field_errors, ctx)
-        .unwrap_or_else(|| format!("{} {}", view.code, view.reference));
+    let body = body_of(error, shown, status, ctx);
     let mut response = (status, Html(body)).into_response();
     let headers = response.headers_mut();
     if shown == ErrorCode::WEB_004 {

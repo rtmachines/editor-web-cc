@@ -88,13 +88,13 @@ fn mixed_draft() -> Draft {
 /// The request for the mixed draft: `active` is the only new member.
 fn valued_request() -> RebindRequest {
     let mut built = request(ZONE_2, ZONE_3);
-    let no = serde_json::json!(false);
+    let no = || crate::recipe::MemberValue::Json(serde_json::json!(false));
     built
         .new_member_values
-        .insert((key(1), LeafPath::parse(".active").unwrap()), no.clone());
+        .insert((key(1), LeafPath::parse(".active").unwrap()), no());
     for index in 1..=4 {
         let path = LeafPath::parse(&format!("[{index}].active")).unwrap();
-        built.new_member_values.insert((key(2), path), no.clone());
+        built.new_member_values.insert((key(2), path), no());
     }
     built
 }

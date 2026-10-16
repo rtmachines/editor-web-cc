@@ -34,7 +34,7 @@ fn group(items: Vec<Value>, size: usize) -> Vec<Value> {
 /// element counts. `leaf` gives the value of each scalar leaf. It gets the concrete path of the
 /// leaf, which starts with `path`. The function uses an explicit stack. A leaf comes in
 /// declaration order, and array elements come in row-major order.
-pub(super) fn build_value(
+pub(in crate::recipe) fn build_value(
     node: &TypeNode,
     path: Vec<LeafSegment>,
     leaf: &mut impl FnMut(&[LeafSegment], &TypeNode) -> Value,

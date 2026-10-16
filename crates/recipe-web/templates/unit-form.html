@@ -1,13 +1,14 @@
 {% import "components/field.html" as fields -%}
 {% import "components/alert.html" as alerts -%}
 {#- The form of a new unit (design D6). The struct that includes this file has the fields t and form. The h2 names the parent. The form holds the parent list, the segment, the name, and the token. Without a free segment, the sentence stands in place of the form, so no create button exists. A boosted form has literal hx attributes and targets #unit-tree. The form of the page has none, because the page has no #unit-tree. The segment input is written here, because it needs the attributes inputmode and maxlength 2 and the macro named has no inputmode. The first input gets autofocus only when form.autofocus is true. -#}
-<h2>{{ form.heading }}</h2>
-{% if let Some(segment) = form.segment %}<form method="post" action="{{ form.action }}"{% if form.boosted %} hx-boost="true" hx-target="#unit-tree" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"{% endif %}>
+{#- The form of an error answer (form.oob) has no h2, so it starts with the form. It has the literal hx-swap-oob, the sent texts, and a line under each bad input (ADR-0041 (e)). The id of the form and of the button are fixed. -#}
+{% if !form.oob %}<h2>{{ form.heading }}</h2>
+{% endif %}{% if let Some(segment) = form.segment %}<form id="unit-add-form" method="post" action="{{ form.action }}"{% if form.boosted %} hx-boost="true" hx-target="#unit-tree" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"{% endif %}{% if form.oob %} hx-swap-oob="true"{% endif %}>
 <input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
-{{ fields::select(t, "parent_path", t.get("field-parent-path"), String::new(), form.parents, form.selected, false) }}
-<div class="field"><label for="segment">{{ t.get("field-segment") }} <span class="field-required">{{ t.get("form-required") }}</span></label><span class="field-hint" id="segment-hint">{{ t.get("unit-segment-hint") }}</span><input id="segment" name="segment" type="text" class="data" autocapitalize="none" spellcheck="false" inputmode="numeric" maxlength="2" autocomplete="off" aria-required="true" aria-describedby="segment-hint" value="{{ segment }}"{% if form.autofocus %} autofocus{% endif %}></div>
-{{ fields::named(t, "unit_name", "name", t.get("field-unit-name"), String::new(), "text", true, false, 200, "off", String::new()) }}
-<p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("unit-create-submit") }}</button></p>
+{{ fields::select(t, "parent_path", t.get("field-parent-path"), String::new(), form.parents, form.selected, false, form.errors.lines("parent_path")) }}
+{% let segment_lines = form.errors.lines("segment") %}<div class="field"><label for="segment">{{ t.get("field-segment") }} <span class="field-required">{{ t.get("form-required") }}</span></label><span class="field-hint" id="segment-hint">{{ t.get("unit-segment-hint") }}</span><input id="segment" name="segment" type="text" class="data" autocapitalize="none" spellcheck="false" inputmode="numeric" maxlength="2" autocomplete="off" aria-required="true" aria-describedby="segment-hint{% if !segment_lines.is_empty() %} segment-error{% endif %}" value="{{ segment }}"{% if !segment_lines.is_empty() %} aria-invalid="true"{% endif %}{% if form.autofocus %} autofocus{% endif %}>{{ fields::error_line("segment", segment_lines) }}</div>
+{{ fields::named(t, "unit_name", "name", t.get("field-unit-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("unit_name")) }}
+<p class="actions"><button type="submit" id="unit-create-submit" class="btn btn-primary">{{ t.get("unit-create-submit") }}</button></p>
 </form>
 {% else %}{{ alerts::notice("warning", t.get("unit-no-free-segment")) }}
 {% endif %}

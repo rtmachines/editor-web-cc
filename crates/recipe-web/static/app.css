@@ -155,8 +155,11 @@
 
 /* Page */
 
+/* The scroll padding keeps a focused element below a toast that sticks at the top (WCAG 2.4.11). */
+
 html {
   color-scheme: light;
+  scroll-padding-top: calc(var(--target) + var(--space-4));
 }
 
 *, *::before, *::after {
@@ -182,6 +185,18 @@ main {
   max-width: var(--width-page);
   margin: 0 auto;
   padding: var(--space-6);
+}
+
+/*
+ * The status region stays at the start of `main` (design-system.md 10.1 and 10.7). It sticks at
+ * the top of the view, so the toast of a save at the foot of a long page is visible. It stands
+ * above the content of the page. An empty region has no height.
+ */
+
+#toast {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 h1, h2 {

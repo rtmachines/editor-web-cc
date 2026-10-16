@@ -41,6 +41,9 @@ fn pages_of(size: u32) -> AppSettings {
         pages: PageSizes {
             machines: size,
             type_usage: 100,
+            recipes: 100,
+            versions: 100,
+            parameters: 100,
         },
         ..AppSettings::default()
     }
@@ -489,7 +492,13 @@ async fn the_machine_form_offers_the_five_platforms_and_reads_no_port() {
     let fixture = Fixture::new();
 
     let form = GetMachineForm::new(fixture.context())
-        .execute(&actor(Role::ProcessEngineer), &meta())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            super::machines::MachineFormInput {
+                purpose: crate::auth::MachineFormPurpose::CreateMachine,
+            },
+        )
         .await
         .unwrap();
 

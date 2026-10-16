@@ -142,6 +142,9 @@ fn pages_of(size: u32) -> AppSettings {
         pages: PageSizes {
             machines: 100,
             type_usage: size,
+            recipes: 100,
+            versions: 100,
+            parameters: 100,
         },
         ..AppSettings::default()
     }

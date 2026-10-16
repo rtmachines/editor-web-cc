@@ -3,54 +3,88 @@
 use crate::plant::{LeafPath, PlantError, TypeTree, TypeTrees};
 use crate::recipe::draft::{BudgetCounts, Draft, check_budgets};
 use crate::recipe::{
-    DraftError, LimitFault, LimitList, ParameterTag, ParameterValue, ProcessLimit, RecipeError,
-    StoredLimit, StoredValue, ValueFault,
+    DraftError, Expected, LimitFault, LimitList, ParameterTag, ParameterValue, ProcessLimit,
+    RecipeError, RecipeErrors, StoredLimit, StoredValue, ValueFault, ValueFaults, ValueInput,
 };
 
-/// The text of `E-RCP-005` when the value belongs to another root type than the tree.
-const WRONG_TREE_EXPECTED: &str = "a value of the type of the parameter";
-
-/// Parse the limits and the value of a new parameter and check the value against the limits.
+/// Parse the limits and the value of a parameter and check the value against the limits.
 ///
-/// The order is the limits in the order of the request. Then the shape of the value. Then the
-/// value against the limits (design D6, step 2).
+/// The function collects every fault (ADR-0041). The faults of the value come first, in the
+/// preorder of the leaves. The faults of the limit rows follow in the order of the request. The
+/// value is checked against the rows that parsed (design D6, step 2).
 pub(in crate::recipe::draft) fn parse_content(
     tag: &ParameterTag,
-    value_json: &str,
+    value: &ValueInput,
     rows: &LimitList,
     tree: &TypeTree,
-) -> Result<(ParameterValue, Vec<ProcessLimit>), RecipeError> {
-    let limits = parse_limits(tag, rows, tree)?;
-    let value = parse_value(tag, value_json, &limits, tree)?;
-    Ok((value, limits))
+) -> Result<(ParameterValue, Vec<ProcessLimit>), RecipeErrors> {
+    let (limits, row_errors) = parse_limits(tag, rows, tree);
+    match (
+        checked_value(tag, value, &limits, tree),
+        RecipeErrors::from_vec(row_errors),
+    ) {
+        (Ok(value), None) => Ok((value, limits)),
+        (Ok(_), Some(errors)) => Err(errors),
+        (Err(mut errors), tail) => {
+            errors.extend(tail.into_iter().flat_map(RecipeErrors::into_vec));
+            Err(errors)
+        }
+    }
 }
 
 /// Parse the limit rows of a request against the type tree, in the order of the request.
+///
+/// The function returns the rows that parsed and the error of each row that did not.
 pub(in crate::recipe::draft) fn parse_limits(
     tag: &ParameterTag,
     rows: &LimitList,
     tree: &TypeTree,
-) -> Result<Vec<ProcessLimit>, RecipeError> {
-    rows.rows()
-        .iter()
-        .map(|row| ProcessLimit::parse(row, tree))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|fault| limit_error(tag, fault))
+) -> (Vec<ProcessLimit>, Vec<RecipeError>) {
+    let mut limits = Vec::with_capacity(rows.rows().len());
+    let mut errors = Vec::new();
+    for row in rows.rows() {
+        match ProcessLimit::parse(row, tree) {
+            Ok(limit) => limits.push(limit),
+            Err(fault) => errors.push(limit_error(tag, fault)),
+        }
+    }
+    (limits, errors)
 }
 
 /// Parse the value of a request and check it against the limits (design D6, step 2).
-pub(in crate::recipe::draft) fn parse_value(
+///
+/// The texts of a form give every fault of the shape and every fault against the limits, in
+/// the preorder of the leaves (ADR-0041 (b)). A JSON value stops at its first fault of the shape.
+pub(in crate::recipe::draft) fn checked_value(
     tag: &ParameterTag,
-    value_json: &str,
+    input: &ValueInput,
     limits: &[ProcessLimit],
     tree: &TypeTree,
-) -> Result<ParameterValue, RecipeError> {
-    let value = ParameterValue::parse(value_json, tree).map_err(|fault| value_error(tag, fault))?;
-    check_value(tag, &value, limits, tree)?;
-    Ok(value)
+) -> Result<ParameterValue, RecipeErrors> {
+    match input {
+        ValueInput::Json(json) => ParameterValue::parse(json, tree)
+            .map_err(ValueFaults::from)
+            .and_then(|value| value.check_all(tree, limits).map(|()| value)),
+        ValueInput::Texts(texts) => ParameterValue::from_texts_checked(tree, texts, limits),
+    }
+    .map_err(|faults| value_errors(tag, faults))
 }
 
-/// Check a parsed value against the limits.
+/// Check a parsed value against the limits and return every fault.
+pub(in crate::recipe::draft) fn check_faults(
+    tag: &ParameterTag,
+    value: &ParameterValue,
+    limits: &[ProcessLimit],
+    tree: &TypeTree,
+) -> Vec<RecipeError> {
+    value
+        .check_all(tree, limits)
+        .err()
+        .map(|faults| value_errors(tag, faults).into_vec())
+        .unwrap_or_default()
+}
+
+/// Check a parsed value against the limits and return the first fault.
 pub(in crate::recipe) fn check_value(
     tag: &ParameterTag,
     value: &ParameterValue,
@@ -103,6 +137,19 @@ fn limit_error(tag: &ParameterTag, fault: LimitFault) -> RecipeError {
     }
 }
 
+/// Wrap every fault of a value with the tag of the parameter, in the order of the faults.
+fn value_errors(tag: &ParameterTag, faults: ValueFaults) -> RecipeErrors {
+    let mut errors = RecipeErrors::from(value_error(tag, faults.first().clone()));
+    errors.extend(
+        faults
+            .into_vec()
+            .into_iter()
+            .skip(1)
+            .map(|fault| value_error(tag, fault)),
+    );
+    errors
+}
+
 /// Wrap the fault of a value with the tag of the parameter.
 fn value_error(tag: &ParameterTag, fault: ValueFault) -> RecipeError {
     let tag = tag.clone();
@@ -115,7 +162,7 @@ fn value_error(tag: &ParameterTag, fault: ValueFault) -> RecipeError {
         ValueFault::WrongTree => RecipeError::ValueShapeMismatch {
             tag,
             leaf: LeafPath::whole(),
-            expected: WRONG_TREE_EXPECTED.to_owned(),
+            expected: Expected::ParameterType,
         },
         ValueFault::LimitConflict { leaf } => RecipeError::LimitNotApplicable { tag, leaf },
         ValueFault::OutOfLimit {

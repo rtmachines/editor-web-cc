@@ -1,0 +1,19 @@
+{% import "components/alert.html" as alerts -%}
+{% import "components/field.html" as fields -%}
+{% import "components/icons.html" as icons -%}
+{% import "components/toast.html" as toasts -%}
+{#- One translation row of ADR-0043 (f) and ADR-0040 (a), (b), (f). The action holds the tag, so the form needs no select. A row of a tag outside i18n.translation_langs shows its texts and only the removal (ADR-0043 (f)). Each hx attribute is a literal (ADR-0037 (f)). A save swaps the row, and a removal swaps every row in #translations. The removal stands in the danger disclosure of design-system.md 10.5. Each submit button has a fixed id (ADR-0041 (e)). -#}
+{%- macro translation_form(t, row) -%}<form id="translation-{{ row.lang }}-form" method="post" action="{{ row.action }}" hx-boost="true" hx-target="closest .translation-row" hx-swap="outerHTML" hx-push-url="false" hx-sync="closest form:drop"{% if row.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ row.csrf_token }}">
+<input type="hidden" name="row_version" value="{{ row.row_version }}">
+{{ fields::named(t, row.name_id, "name", t.with_arg("field-translation-name", "lang", row.lang), String::new(), "text", true, false, 200, "off", row.name, row.errors.lines(row.name_id.as_str())) }}
+{{ fields::named(t, row.description_id, "description", t.with_arg("field-translation-description", "lang", row.lang), String::new(), "text", false, false, 4000, "off", row.description, row.errors.lines(row.description_id.as_str())) }}
+<p class="actions"><button type="submit" id="translation-{{ row.lang }}-save" class="btn btn-primary">{{ t.with_arg("translation-save-submit", "lang", row.lang) }}</button></p>
+</form>{%- endmacro -%}
+{%- macro translation_row(t, row) -%}<div class="translation-row" id="translation-{{ row.lang }}">
+<h3>{{ row.lang }}</h3>
+{% if row.editable && row.listed %}{{ translation_form(t, row) }}
+{% else %}{% if row.stored %}<dl><dt>{{ t.with_arg("field-translation-name", "lang", row.lang) }}</dt><dd>{{ row.name }}</dd><dt>{{ t.with_arg("field-translation-description", "lang", row.lang) }}</dt><dd>{{ row.description }}</dd></dl>{% else %}<p>{{ t.get("translation-none") }}</p>{% endif %}
+{% endif %}{% if row.editable && row.stored %}<details class="danger"><summary>{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span>{{ t.with_arg("translation-delete-summary", "lang", row.lang) }}</span></summary><form method="post" action="{{ row.delete_action }}" hx-boost="true" hx-target="#translations" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"><input type="hidden" name="csrf_token" value="{{ row.csrf_token }}"><input type="hidden" name="row_version" value="{{ row.row_version }}">{{ alerts::notice("warning", t.get("translation-delete-warning")) }}<button type="submit" id="translation-{{ row.lang }}-delete" class="btn-danger">{{ t.with_arg("translation-delete-submit", "lang", row.lang) }}</button></form></details>
+{% endif %}</div>{%- endmacro -%}
+{%- if form_only -%}{{ translation_form(t, row) }}{%- else -%}{{ translation_row(t, row) }}{% if !row.toast.is_empty() %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(row.toast) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% endif %}{%- endif %}
