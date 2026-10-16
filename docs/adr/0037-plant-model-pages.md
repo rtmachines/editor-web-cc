@@ -1,6 +1,6 @@
 # ADR-0037: Pages of the plant model
 
-Status: Accepted. Amended by ADR-0038 (datalist of a new revision in (i), browser test of `E-PLT-005` in (u))
+Status: Accepted. Amended by ADR-0038 (datalist of a new revision in (i), browser test of `E-PLT-005` in (u)) and ADR-0051 (navigation link "Audit" after (q))
 Date: 2026-10-14
 Deciders: project owner
 

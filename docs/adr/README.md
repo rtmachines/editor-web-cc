@@ -45,31 +45,37 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0033](0033-globals-dump-of-the-backup.md) | Globals dump of the backup | Accepted | 2026-10-14 |
 | [0034](0034-hardening-of-the-audit-objects.md) | Hardening of the audit objects | Accepted. Amended by ADR-0035 (security_event_guard in the guard list) | 2026-10-14 |
 | [0035](0035-identity-sessions-clarifications.md) | Identity, sessions, and the guard of security events | Accepted | 2026-10-14 |
-| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted. Amended by ADR-0037 (style sheets, navigation link, whole unit tree) and ADR-0039 (inputs and groups in the leaf grid). Amended by ADR-0041 (alert of `field-errors.html`) and ADR-0047 (refused form page, empty toast) | 2026-10-14 |
-| [0037](0037-plant-model-pages.md) | Pages of the plant model | Accepted. Amended by ADR-0038 (datalist of a new revision, browser test of `E-PLT-005`) | 2026-10-14 |
+| [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted. Amended by ADR-0037 (style sheets, navigation link, whole unit tree) and ADR-0039 (inputs and groups in the leaf grid). Amended by ADR-0041 (alert of `field-errors.html`) and ADR-0047 (refused form page, empty toast). Amended by ADR-0051 (query list of the navigation) | 2026-10-14 |
+| [0037](0037-plant-model-pages.md) | Pages of the plant model | Accepted. Amended by ADR-0038 (datalist of a new revision, browser test of `E-PLT-005`) and ADR-0051 (navigation link "Audit") | 2026-10-14 |
 | [0038](0038-struct-cycle-across-revisions.md) | Struct cycle across revisions | Accepted | 2026-10-15 |
 | [0039](0039-parameter-value-form.md) | Form of a parameter value | Accepted. Amended by ADR-0045 (groups of a nested array) | 2026-10-15 |
 | [0040](0040-post-routes-for-translations-and-removal.md) | POST routes for translations and for the removal of a parameter | Accepted | 2026-10-15 |
 | [0041](0041-error-lists-of-a-form.md) | Error lists of a form | Accepted. Amended by ADR-0046 (form query before the fields) | 2026-10-15 |
-| [0042](0042-snapshot-reads-of-draft-queries.md) | Snapshot reads of draft queries | Accepted | 2026-10-15 |
+| [0042](0042-snapshot-reads-of-draft-queries.md) | Snapshot reads of draft queries | Accepted. Amended by ADR-0050 (approval preview and diff in one snapshot, draft read of the in-memory adapter) | 2026-10-15 |
 | [0043](0043-recipe-editor-pages.md) | Pages of the recipe editor | Accepted. Amended by ADR-0044 (bound of the rebind forms) | 2026-10-15 |
 | [0044](0044-bound-of-the-rebind-forms.md) | Bound of the rebind forms | Accepted | 2026-10-15 |
 | [0045](0045-nested-arrays-inside-a-group.md) | Nested arrays inside a group | Accepted | 2026-10-15 |
 | [0046](0046-permission-check-of-a-form-route.md) | Permission check of a form route | Accepted | 2026-10-15 |
 | [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted | 2026-10-15 |
 | [0048](0048-browser-regression-suite-with-playwright.md) | Browser regression suite with Playwright | Accepted | 2026-10-16 |
+| [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted | 2026-10-16 |
+| [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted | 2026-10-16 |
+| [0051](0051-audit-history-and-security-event-views.md) | Audit, history, and security event views | Accepted | 2026-10-16 |
 
 ## Decision map
 
 | Topic | Current ADR |
 |---|---|
 | Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system) + 0037 (`hx-boost` forms, style sheets) + 0039 (value form) + 0040 (POST routes) |
-| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) + 0039 (leaf grid) + 0043 (deleted state) + 0045 (nested arrays inside a group) |
+| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) + 0039 (leaf grid) + 0043 (deleted state) + 0045 (nested arrays inside a group). Diff: 0050 (states and icons). Audit: 0051 (pagers, navigation link) |
 | Error page, page of a refused form, toast | 0036 + 0047 (refused form page in the session layout, empty toast after an error, sticky toast) |
 | Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) + 0041 (error lists) |
 | Permission check and fields of a form route | 0013 + 0041 + 0046 (form query with a purpose, check before the fields) |
 | Pages of recipes, versions, and parameters | 0039 (value form, leaf grid) + 0040 (POST routes) + 0041 (error lists) + 0043 (lists, deleted recipe, translations, rebind, conflict) + 0044 (rebind bound) |
-| Isolation of queries | 0042 |
+| Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) |
+| Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags) |
+| Audit, history, and security event pages | 0051 (read port, cursor, filters, scope of A20, formatted JSON) |
+| Isolation of queries | 0042 + 0050 (approval preview and diff in one snapshot) |
 | Export | 0019 |
 | Deployment, migrations, backup, panic policy, health | 0020 + 0031 (migrator configuration, secret files) + 0032 (default databases) + 0033 (globals dump) |
 | Sessions, login, passwords, bootstrap | 0014 + 0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, Origin, client address, create-admin) |
@@ -84,6 +90,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Soft delete and delete rules | 0021 |
 | Translations | 0012 + 0043 (fixed list of language tags) |
 | Permissions and approval | 0013 + 0022 + 0028 (approval token, `Approver`) + 0029 (failed record of a Forbidden event) + 0046 (form queries) |
+| Separation of duties on the preview | 0049 (one domain function for the preview and the approval) |
 | Dependencies of the application layer | 0029 + 0035 (Argon2, random bytes, semaphore) |
 | Stored settings, security event retention | 0022 |
 | STE lint scope and script location in CI | 0023 |

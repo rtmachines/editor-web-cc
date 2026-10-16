@@ -31,7 +31,7 @@ Rules:
 - `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. The trigger codes are `E-PLT-030..049`, `E-RCP-030..049`, and `E-AUD-003`. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock { cause: Deadlock }`. `40001` becomes `Deadlock { cause: Serialization }`. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock { cause: LockTimeout }` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
 - `SetUserRole`, `DeactivateUser`, and the first-administrator operation of `create-admin` run in `SERIALIZABLE`. They run once more on `Deadlock { cause: Serialization }`, also when it comes from the audit insert or from the commit. A second serialization failure returns `E-DB-001` (ADR-0035). Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
 - `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DuplicateMemberName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
-- `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, and the export use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
+- `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, the export, and the diff of two versions (ADR-0050) use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
 - `AppError::TaskFailed { stage }` owns `E-WEB-011`. The use case maps the `JoinError` of a `spawn_blocking` task to it (2.4). `E-WEB-010` stays the code of a panic that `CatchPanicLayer` catches.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. A background job logs its errors once at its loop boundary with a `job` field. Lower layers add context and propagate. They do not log the error.
 - The log line of an error holds its code and the `Display` text of each error in the chain. It never holds the `Debug` output of an error, because the `Debug` of a database error holds the row values of the detail (ADR-0035).
@@ -502,6 +502,7 @@ The values are in section 7.11. This table gives the key and the mechanism.
 | Argon2id semaphore | `argon2.acquire_timeout` | Acquire timeout. A timeout returns `503 E-WEB-009` (`AppError::Timeout`) |
 | Export generation | `timeout.export` | Timeout around the read, the locks, the rebuild in `spawn_blocking`, and the hash compare. Returns `503 E-WEB-009`. The commit runs after this limit, so a timeout never hides a committed `VersionExported` entry (ADR-0029) |
 | Snapshot validation | `timeout.validation` | Timeout around the `spawn_blocking` call. Returns `503 E-WEB-009` |
+| Diff of two versions | `timeout.validation` | Timeout around the wait for a `diff.permits` permit and the `spawn_blocking` call. Returns `503 E-WEB-009`. The query takes the permit before its `REPEATABLE READ` transaction and holds it to the end of the render (ADR-0050) |
 
 ### 7.5 Connection pool
 
@@ -655,6 +656,12 @@ This table is the single source for every numeric setting. The configuration fil
 | `page.type_usage` | 100 rows of `GetTypeUsage` (ADR-0037) | api.md 2.3 |
 | `page.recipes` | 100 rows of `ListRecipes` and `ListDeletedRecipes` (ADR-0043) | api.md 2.4 |
 | `page.versions` | 100 rows of the version list of `GetRecipe` and `ListVersions` (ADR-0043) | api.md 2.4, api.md 2.5 |
+| `page.diff` | 50 parameters of one page of `DiffVersions` and `GetApprovalPreview`, over all its sections (ADR-0050) | api.md 2.5 |
+| `diff.leaf_rows` | 1 000 rows of one parameter in one section of a diff (ADR-0050) | api.md 2.5 |
+| `diff.permits` | 2 diffs that run at the same time in `spawn_blocking` (ADR-0050) | 7.4 |
+| `page.audit` | 100 rows of `ListAuditEntries` (ADR-0051) | api.md 2.9 |
+| `page.history` | 100 rows of `GetRecipeHistory` (ADR-0051) | api.md 2.9 |
+| `page.security_events` | 100 rows of `ListSecurityEvents` (ADR-0051) | api.md 2.9 |
 | `form.array_chunk` | 100 elements per group of an array in the leaf grid (ADR-0039) | design-system.md 10.8 |
 | `form.rebind_leaves` | 16 384 new member leaves in the rebind forms of one version page (ADR-0044) | api.md 2.5 |
 | `i18n.translation_langs` | `pl`. The list of language tags of the translation rows (ADR-0012, ADR-0043) | api.md 2.6 |
@@ -701,7 +708,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `clock.skew_warn` | 5 s | 7.9 |
 | `clock.check_interval` | 1 h | 2.4, 7.9 |
 
-Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1). A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 run in `REPEATABLE READ READ ONLY`. A query never retries.
+Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1). A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 and the queries `GetApprovalPreview` and `DiffVersions` of ADR-0050 run in `REPEATABLE READ READ ONLY`. A query never retries.
 
 ### 7.12 Stored settings
 

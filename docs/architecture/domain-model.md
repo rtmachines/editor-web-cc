@@ -684,6 +684,19 @@ impl Draft {
     pub fn check_for_approval(self, units: &LiveUnits, trees: &TypeTrees,
                               allow_outdated: bool) -> Result<ApprovalReady, DraftError>;
 }
+
+impl Draft {
+    // The separation of duties for the preview. It runs before `check_for_approval` (ADR-0049).
+    pub fn check_approver(&self, approver: &Approver, policy: &ApprovalPolicy) -> Result<(), RecipeError>;
+}
+
+// The rule of the separation of duties (I16). `Draft::check_approver` and `Recipe::approve` call it.
+// `Recipe::approve` passes the creator and the editors of the `ApprovalReady` token (ADR-0049).
+pub fn breaks_separation_of_duties(creator: UserId, editors: &BTreeSet<UserId>,
+                                   approver: &Approver, policy: &ApprovalPolicy) -> bool;
+
+// The diff of the parameter pairs of one page (ADR-0050). Pure. No port, no page.
+pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> DiffRows;
 ```
 
 ## 7. Glossary (ubiquitous language)
@@ -706,6 +719,9 @@ impl Draft {
 | Rebind | Move every parameter of a draft that uses one struct revision to a newer revision of the same struct |
 | Export | Serialize an approved or retired version to the JSON export document (ADR-0019) |
 | Security event | A record of a failed or rejected security action, kept outside the audit chain |
+| Diff | The list of changes between two versions of one recipe. Parameters match by `key` (ADR-0050) |
+| Approval preview | The page that shows the diff, the outdated parameters, and the blockers before an approval (ADR-0049) |
+| Recipe history | The audit entries of one recipe without their states, newest first (ADR-0051) |
 
 ## 8. Assumptions used here
 

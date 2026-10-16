@@ -300,6 +300,10 @@ Every icon tag is fixed and complete. `<name>` is the name of the icon in the ic
 | `alert-success` | Success message | Check mark |
 | `tree-collapsed` | Collapsed tree node. Closed danger disclosure (section 10.5) | Chevron that points right |
 | `tree-expanded` | Expanded tree node. Open danger disclosure (section 10.5) | Chevron that points down |
+| `diff-limit` | Diff state "Limit changed" (ADR-0050) | Two vertical bars with a dot between them |
+| `diff-changed` | Diff states "Value changed", "Definition changed", and "Translation changed" (ADR-0050) | Two arrows that point in opposite directions |
+| `diff-added` | Diff state of a parameter that only the new version holds (ADR-0050) | Plus sign in a square |
+| `diff-removed` | Diff state of a parameter that only the old version holds (ADR-0050) | Minus sign in a square |
 
 ## 9. States
 
@@ -316,6 +320,12 @@ The word key is the message id of the word in the `fluent` bundles `pl` and `en`
 | Discarded draft (ADR-0043) | `status-discarded` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
 | Deleted recipe (ADR-0043) | `status-deleted` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `status-retired` |
 | Outdated parameter (ADR-0043) | `status-outdated` | `--color-warning-fg`, `--color-warning-bg`, `--color-warning-edge` | `alert-warning` |
+| Diff: limit changed (ADR-0050) | `diff-state-limit` | `--color-error-fg`, `--color-error-bg`, `--color-error-edge` | `diff-limit` |
+| Diff: value changed (ADR-0050) | `diff-state-value` | `--color-info-fg`, `--color-info-bg`, `--color-info-edge` | `diff-changed` |
+| Diff: definition changed (ADR-0050) | `diff-state-definition` | `--color-info-fg`, `--color-info-bg`, `--color-info-edge` | `diff-changed` |
+| Diff: translation changed (ADR-0050) | `diff-state-translation` | `--color-info-fg`, `--color-info-bg`, `--color-info-edge` | `diff-changed` |
+| Diff: parameter only in the new version (ADR-0050) | `diff-state-added` | `--color-success-fg`, `--color-success-bg`, `--color-success-edge` | `diff-added` |
+| Diff: parameter only in the old version (ADR-0050) | `diff-state-removed` | `--color-retired-fg`, `--color-retired-bg`, `--color-retired-edge` | `diff-removed` |
 
 | Feedback | Tokens | Icon |
 |---|---|---|
@@ -358,8 +368,8 @@ Answers to HTMX (ADR-0037):
 - The navigation is a `nav` element. It holds a list of links.
 - The accessible name of the `nav` is the word "Main" from the bundles. A screen reader therefore does not say "navigation" twice.
 - The navigation shows a link only when the catalog row of the query of the target page allows the role. `Operation::requirement().allows(role)` of `recipe-app` gives the answer.
-- The queries are `ListRecipes` for `/recipes`, `ListMachines` for `/machines`, `ListUsers` for `/users`, and `GetOwnProfile` for `/me`. `authorize` uses the same row, so the navigation and the permission check cannot disagree.
-- The links come in this order: recipes, machines, users, own profile (ADR-0037).
+- The queries are `ListRecipes` for `/recipes`, `ListMachines` for `/machines`, `ListUsers` for `/users`, `ListAuditEntries` for `/audit`, and `GetOwnProfile` for `/me`. `authorize` uses the same row, so the navigation and the permission check cannot disagree.
+- The links come in this order: recipes, machines, users, audit, own profile (ADR-0037, ADR-0051).
 - The use case of the target page still checks the permission (ADR-0013).
 - The link of the current page has `aria-current="page"`. It shows the ground `--color-topbar-hover`, a bottom border of `--edge-current` in `--color-on-action`, and the weight 700.
 - Hover: the ground `--color-topbar-hover`. Focus: section 7.
@@ -545,6 +555,44 @@ The unit tree (ADR-0037):
 - A `dl` shows the fields of one entity, for example a user.
 - A `dt` uses the weight 700 and `--color-text-muted` at `--text-sm`. A `dd` has no indent and follows its `dt`.
 - A `dd` with data uses the class `.data`. A date uses the format of section 5.
+
+### 10.12 Pagers
+
+The page pager of a list with page numbers:
+
+- It is a `nav` element with the class `pager` and the accessible name of the key `pager-label`.
+- It holds the link to the previous page, the number of the current page with `aria-current="page"`, and the link to the next page. A missing page omits its link.
+- Each link has the class `.target-link` and the size `--target`.
+- A page after the last page shows the notice `list-page-after-end` and a link to the first page.
+
+The cursor pager of a list with the cursor `before` (ADR-0051):
+
+- It is a `nav` element with the class `pager` and the accessible name of the key `pager-label`.
+- It holds the link "Newest entries" without `before`.
+- When an older row exists, it holds the link "Older entries" with `before` set to the id of the last row.
+- The last page shows the text "No older entries" in place of the second link.
+- Each link has the class `.target-link` and the size `--target`.
+
+### 10.13 Diff
+
+The diff page and the approval preview group the changes by kind (ADR-0050):
+
+- A summary list stands at the top. Each item shows the state of its section (section 9), its count, and a link to the section. The state stands before the link, so the link underline does not cross the badge. The link text is the name of the section.
+- Each section is a `section` element with an `h2` and a table of section 10.4. The `h2` holds the state badge and the name of the section. The `section` element has no `aria-labelledby`.
+- The pager of a section has the accessible name of the key `diff-pager-label`, which holds the name of the section.
+- The table of the limits section has a border of `--color-error-edge`. The other tables keep `--color-border`.
+- A cell with a value or a limit uses `--font-mono`. The columns of the values and of the limits align to the right, also in their header cells. An empty side shows a word from the bundles, for example "none", in `--color-text-muted`.
+- In a section, only the first row of a parameter links its tag to the parameter page. The other rows of that parameter show the tag as text.
+- No cell and no row of a diff table is sticky (section 10.4).
+
+### 10.14 Formatted JSON
+
+- The state of an audit entry and the detail of a security event stand in a `pre` element with the class `json` (ADR-0051).
+- The element uses `--font-mono` at `--text-sm`, the ground `--color-sunken`, and the border `--color-border`.
+- It wraps long lines with `white-space: pre-wrap` and `overflow-wrap: anywhere`, so a page at 320 CSS px does not scroll sideways.
+- On the audit entry page, an `h2` stands before each `pre` element. In the table of the security events, the column header names the `pre` element.
+- A `pre` element has no `tabindex`.
+- The text comes from the template with its escape. No template uses `|safe` (section 12).
 
 ## 11. Motion and user preferences
 
