@@ -83,6 +83,8 @@ pub struct VersionDetail {
     pub state: VersionState,
     /// The change note of the version.
     pub change_note: LongText,
+    /// The number of the base version of this version, or `None` for a version without a base.
+    pub based_on: Option<u32>,
     /// The login of the user who created the version.
     pub created_by: Login,
     /// The login of the user who approved the version, or `None` for a version never approved.

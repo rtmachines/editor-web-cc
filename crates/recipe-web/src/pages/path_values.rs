@@ -8,10 +8,13 @@
 //! no text, so no typed value reaches a message or a log line. A unit path gives the code of
 //! `UnitPath`. A query value of a `GET` form gives `422 E-WEB-008` with a fixed field name.
 
+use std::num::NonZeroU64;
+
 use axum::extract::path::ErrorKind;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query};
 use recipe_app::error::{AppError, Missing};
+use recipe_app::ports::AuditEntryId;
 use recipe_domain::plant::{MachineCode, MachineId, PlantError, TypeName, UnitPath};
 use recipe_domain::recipe::{LangCode, ParameterKey, ReferenceNumber};
 use uuid::Uuid;
@@ -186,6 +189,47 @@ pub(crate) fn page(text: Option<&str>) -> Result<Page, WebError> {
     let number = whole_number(text).ok_or_else(bad)?;
     let index = number.checked_sub(1).ok_or_else(bad)?;
     Ok(Page { number, index })
+}
+
+/// Read the query value `before` of a cursor list: a positive whole number with no sign and no zero
+/// in front (ADR-0051 (d)). A missing or empty value starts at the newest row.
+///
+/// # Errors
+///
+/// Returns `422 E-WEB-008` with the field `before` and `FieldReason::Cursor` for any other text.
+pub(crate) fn cursor(text: Option<&str>) -> Result<Option<NonZeroU64>, WebError> {
+    let Some(text) = text.filter(|text| !text.is_empty()) else {
+        return Ok(None);
+    };
+    positive_number(text).map(Some).ok_or(WebError::BadRequest {
+        field: "before",
+        reason: FieldReason::Cursor,
+    })
+}
+
+/// Parse a positive whole number with no sign and no zero in front, or return `None`.
+pub(crate) fn positive_number(text: &str) -> Option<NonZeroU64> {
+    let canonical = text.bytes().all(|byte| byte.is_ascii_digit()) && !text.starts_with('0');
+    canonical
+        .then(|| text.parse::<u64>().ok().and_then(NonZeroU64::new))
+        .flatten()
+}
+
+/// Read the route `/audit/{id}`: a positive whole number with no sign and no zero in front.
+///
+/// A rejection of axum and a malformed text give the same answer. The error holds no text.
+///
+/// # Errors
+///
+/// Returns `404 E-WEB-005` with `Missing::MalformedAuditEntry` for any other text.
+pub(crate) fn path_audit_entry(
+    path: Result<Path<String>, PathRejection>,
+) -> Result<AuditEntryId, WebError> {
+    let malformed = || not_found(Missing::MalformedAuditEntry);
+    let Path(text) = path.map_err(|_rejection| malformed())?;
+    positive_number(&text)
+        .map(AuditEntryId::from)
+        .ok_or_else(malformed)
 }
 
 /// Read a flag field such as `show_archived` or `add`. A missing value is false.

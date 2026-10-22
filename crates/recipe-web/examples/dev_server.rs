@@ -33,7 +33,7 @@ use recipe_app::identity::{
     Argon2Hasher, Argon2Params, HashFailure, HashGate, IdentityContext, IdentitySettings,
     NONCE_BYTES, PasswordHasher as _, random_nonce,
 };
-use recipe_app::memory::{MemoryClock, MemorySink, MemoryStore};
+use recipe_app::memory::{MemoryClock, MemoryStore};
 use recipe_app::ports::NewUser;
 use recipe_domain::identity::{
     KeyRing, KeyRingReason, Login, LoginReason, NewPassword, PasswordReason, Role, UserId,
@@ -243,7 +243,7 @@ fn build_state(
     seed_store(&store, &hasher, password)?;
     let app = AppContext::new(
         Arc::new(store.clone()),
-        Arc::new(MemorySink::default()),
+        Arc::new(store.sink()),
         Arc::new(clock.clone()),
         AppSettings::default(),
     );
@@ -467,6 +467,7 @@ mod tests {
             (Primitive::Real, None),
             (Primitive::Lreal, None),
             (Primitive::Time, None),
+            (Primitive::Ltime, None),
             (Primitive::String, Some(254)),
             (Primitive::String, Some(80)),
             (Primitive::Wstring, Some(254)),

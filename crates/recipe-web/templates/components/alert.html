@@ -3,6 +3,8 @@
 {%- macro severity_icon(severity) -%}{% if severity == "error" %}{{ icons::alert_error() }}{% else if severity == "warning" %}{{ icons::alert_warning() }}{% else if severity == "info" %}{{ icons::alert_info() }}{% else if severity == "success" %}{{ icons::alert_success() }}{% endif %}{%- endmacro -%}
 {#- A static message with the look of the alert and no role, so a page that loads does not announce it. -#}
 {%- macro notice(severity, message) -%}<div class="alert alert-{{ severity }}">{{ severity_icon(severity) }}<span>{{ message }}</span></div>{%- endmacro -%}
+{#- The markup of notice with a block of the caller in place of one text, for example a heading and a list (design D3). It has no role. -#}
+{%- macro notice_block(severity) -%}<div class="alert alert-{{ severity }}">{{ severity_icon(severity) }}<div>{{ caller() }}</div></div>{%- endmacro -%}
 {%- macro alert(severity, code, message, reference) -%}<div class="alert alert-{{ severity }}" role="alert">{{ severity_icon(severity) }}<span class="alert-code">{{ code }}</span><span>{{ message }}</span><span class="alert-ref">{{ reference }}</span></div>{%- endmacro -%}
 {#- The alert with field lines between the sentence and the reference. The field names come from code. With link, each line links to the input with that id. No line gives no list. -#}
 {#- The text of one line of a list: the code, the subject as data, and the sentence. -#}

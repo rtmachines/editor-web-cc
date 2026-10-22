@@ -90,12 +90,12 @@ async fn success_writes_one_version_approved_entry_with_the_content_hash() {
     let own_lines = fixture.store.journal().len();
     let user = approver();
     let request = meta();
-    let outcome = ApproveVersion::new(fixture.context())
+    let output = ApproveVersion::new(fixture.context())
         .execute(&user, &request, input(1, 1, false))
         .await
         .unwrap();
     assert_eq!(
-        outcome,
+        output.outcome,
         ApprovalOutcome::Approved {
             approved: vid(101),
             retired: None,
@@ -148,7 +148,8 @@ async fn a_previous_approved_version_is_retired_before_the_approval_is_written()
     let outcome = ApproveVersion::new(fixture.context())
         .execute(&approver(), &meta(), input(2, 1, false))
         .await
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert_eq!(
         outcome,
         ApprovalOutcome::Approved {
@@ -219,7 +220,8 @@ async fn an_editor_gives_rcp_015_and_a_third_user_passes() {
     let outcome = use_case
         .execute(&actor(Role::Administrator), &meta(), input(1, 1, false))
         .await
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert!(matches!(outcome, ApprovalOutcome::Approved { .. }));
     assert_eq!(version_state(&fixture.store, 1), VersionState::Approved);
 }
@@ -237,7 +239,8 @@ async fn without_separation_of_duties_the_creator_passes() {
     let outcome = ApproveVersion::new(fixture.context_with(policy))
         .execute(&actor(Role::ProcessEngineer), &meta(), input(1, 1, false))
         .await
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert!(matches!(outcome, ApprovalOutcome::Approved { .. }));
     assert_eq!(fixture.store.audit_entries().len(), 1);
 }
@@ -292,7 +295,8 @@ async fn a_racing_approval_and_a_racing_revision_give_already_approved() {
     let outcome = ApproveVersion::new(context)
         .execute(&approver(), &meta(), input(1, 1, false))
         .await
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert_eq!(outcome, ApprovalOutcome::AlreadyApproved);
     assert_eq!(fixture.store.journal(), locks_of(101, None));
     assert!(fixture.store.audit_entries().is_empty());
@@ -307,7 +311,8 @@ async fn allow_outdated_approves_and_records_the_flag() {
     let outcome = ApproveVersion::new(fixture.context())
         .execute(&approver(), &meta(), input(1, 1, true))
         .await
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert!(matches!(outcome, ApprovalOutcome::Approved { .. }));
     let entries = fixture.store.audit_entries();
     assert_eq!(entries.len(), 1);
@@ -326,10 +331,63 @@ async fn an_approval_by_another_request_before_the_locks_gives_already_approved(
     let outcome = ApproveVersion::new(context)
         .execute(&approver(), &meta(), input(1, 1, false))
         .await
-        .unwrap();
+        .unwrap()
+        .outcome;
     assert_eq!(outcome, ApprovalOutcome::AlreadyApproved);
     assert_eq!(fixture.store.journal(), locks_of(101, None));
     assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn an_approval_that_retires_the_old_version_names_its_number() {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PLATFORM, 1, "M1");
+    fixture.seed_approved_and_draft(&machine, 1, "R-1");
+    fixture
+        .store
+        .seed_parameter(vid(102), &parameter_on(PLATFORM, 1, "T1", uid(102), 0));
+    let output = ApproveVersion::new(fixture.context())
+        .execute(&actor(Role::Administrator), &meta(), input(2, 1, false))
+        .await
+        .unwrap();
+    assert_eq!(output.retired, Some(1));
+    assert_eq!(
+        output.outcome,
+        ApprovalOutcome::Approved {
+            approved: vid(102),
+            retired: Some(vid(101)),
+        }
+    );
+}
+
+#[tokio::test]
+async fn a_first_approval_names_no_retired_version() {
+    let fixture = Fixture::new();
+    simple_draft(&fixture);
+    let output = ApproveVersion::new(fixture.context())
+        .execute(&approver(), &meta(), input(1, 1, false))
+        .await
+        .unwrap();
+    assert!(matches!(output.outcome, ApprovalOutcome::Approved { .. }));
+    assert_eq!(output.retired, None);
+}
+
+#[tokio::test]
+async fn a_replay_names_no_retired_version() {
+    let fixture = Fixture::new();
+    fixture.seed_machine_on(PLATFORM, 1, "M1");
+    // An earlier request approved version 2 and retired version 1.
+    let recipe = recipe_at(&[
+        (101, VersionState::Retired, 3),
+        (102, VersionState::Approved, 2),
+    ]);
+    store_recipe(&fixture.store, PLATFORM, &recipe);
+    let output = ApproveVersion::new(fixture.context())
+        .execute(&approver(), &meta(), input(2, 1, false))
+        .await
+        .unwrap();
+    assert_eq!(output.outcome, ApprovalOutcome::AlreadyApproved);
+    assert_eq!(output.retired, None);
 }
 
 #[tokio::test]

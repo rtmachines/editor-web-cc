@@ -39,13 +39,21 @@ pub(crate) enum NavTarget {
     Machines,
     /// The user list, `/users`.
     Users,
+    /// The audit list, `/audit` (ADR-0051 j).
+    Audit,
     /// The own profile, `/me`.
     Me,
 }
 
 impl NavTarget {
-    /// Every target, in the order of the top bar (ADR-0037 q).
-    const ALL: [Self; 4] = [Self::Recipes, Self::Machines, Self::Users, Self::Me];
+    /// Every target, in the order of the top bar (ADR-0037 q, ADR-0051 j).
+    const ALL: [Self; 5] = [
+        Self::Recipes,
+        Self::Machines,
+        Self::Users,
+        Self::Audit,
+        Self::Me,
+    ];
 
     /// Return the path of the page.
     pub(crate) const fn path(self) -> &'static str {
@@ -53,6 +61,7 @@ impl NavTarget {
             Self::Recipes => "/recipes",
             Self::Machines => "/machines",
             Self::Users => "/users",
+            Self::Audit => "/audit",
             Self::Me => "/me",
         }
     }
@@ -63,6 +72,7 @@ impl NavTarget {
             Self::Recipes => "nav-recipes",
             Self::Machines => "nav-machines",
             Self::Users => "nav-users",
+            Self::Audit => "nav-audit",
             Self::Me => "nav-me",
         }
     }
@@ -73,6 +83,7 @@ impl NavTarget {
             Self::Recipes => Operation::ListRecipes,
             Self::Machines => Operation::ListMachines,
             Self::Users => Operation::ListUsers,
+            Self::Audit => Operation::ListAuditEntries,
             Self::Me => Operation::GetOwnProfile,
         }
     }
@@ -222,6 +233,24 @@ impl<'a> Layout<'a> {
     /// Return true when the answer is the content of `main` and not the full page.
     pub(crate) const fn is_content(&self) -> bool {
         matches!(self.shape, Shape::Content)
+    }
+
+    /// Return the layout with the switch target `path` for a content answer of a `POST`.
+    ///
+    /// The method solves one problem: a command ends on a page and pushes its address, but the
+    /// layout of a `POST` has no switch target. The content answer then sets `#lang-next` to
+    /// `path`, so the language switch returns to the page that the address bar shows. A full page
+    /// and a layout that already has a target stay as they are (design D5).
+    #[must_use]
+    pub(crate) fn with_pushed_path(self, path: String) -> Self {
+        if self.is_content() && self.next.is_none() {
+            Self {
+                next: Some(path),
+                ..self
+            }
+        } else {
+            self
+        }
     }
 
     /// Return the layout with the success sentence for `#toast`.

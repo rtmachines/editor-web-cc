@@ -146,6 +146,18 @@ impl Recipe {
         self.versions.iter().find(|v| v.number == number)
     }
 
+    /// Return the header of the version in the state Approved, or `None` when there is none.
+    ///
+    /// A recipe has at most one Approved version (invariant I1, `domain-model.md` section 3).
+    /// The method solves one problem: the rule to find that version lives in one place.
+    /// A reader of the Approved version calls this method and does not search the headers.
+    #[must_use]
+    pub fn approved_version(&self) -> Option<&VersionHeader> {
+        self.versions
+            .iter()
+            .find(|v| v.state == VersionState::Approved)
+    }
+
     /// Replace the name of the recipe.
     ///
     /// # Errors
@@ -337,8 +349,10 @@ fn forbidden_step(reference: &ReferenceNumber, number: u32, step: Transition) ->
 
 mod approve;
 mod stored;
-pub use approve::{ApprovalOutcome, ApprovalPolicy, Approver};
+pub use approve::{ApprovalOutcome, ApprovalPolicy, Approver, breaks_separation_of_duties};
 pub use stored::{StoredRecipe, StoredRecipeReason, StoredVersionHeader};
+#[cfg(test)]
+mod approved_version;
 #[cfg(test)]
 mod build;
 #[cfg(test)]

@@ -56,6 +56,12 @@ fn nav_target_names_its_path_text_key_and_query() {
             "nav-users",
             Operation::ListUsers,
         ),
+        (
+            NavTarget::Audit,
+            "/audit",
+            "nav-audit",
+            Operation::ListAuditEntries,
+        ),
         (NavTarget::Me, "/me", "nav-me", Operation::GetOwnProfile),
     ];
     for (target, path, key, operation) in rows {
@@ -66,11 +72,15 @@ fn nav_target_names_its_path_text_key_and_query() {
 }
 
 #[test]
-fn nav_links_of_an_administrator_show_all_four_pages_in_order() {
+fn nav_links_of_an_administrator_show_all_five_pages_in_order() {
+    // ADR-0051 (j): the fifth link "Audit" stands after "Users".
     let bundles = Bundles::load().unwrap();
     let texts = crate::pages::Texts::new(&bundles, Lang::En);
     let links = nav_links(texts, Role::Administrator, false, None);
-    assert_eq!(paths(&links), ["/recipes", "/machines", "/users", "/me"]);
+    assert_eq!(
+        paths(&links),
+        ["/recipes", "/machines", "/users", "/audit", "/me"]
+    );
     assert!(links.iter().all(|link| !link.current));
     assert_eq!(
         links.first().map(|link| link.text.as_str()),
@@ -84,12 +94,55 @@ fn nav_links_of_an_administrator_show_all_four_pages_in_order() {
 
 #[test]
 fn nav_links_of_a_process_engineer_and_an_operator_hide_the_user_list() {
+    // ADR-0051 (j): the ProcessEngineer sees "Audit" (`AuditViewRecipes`), the Operator does not.
     let bundles = Bundles::load().unwrap();
     let texts = crate::pages::Texts::new(&bundles, Lang::Pl);
-    for role in [Role::ProcessEngineer, Role::Operator] {
+    let expected = [
+        (
+            Role::ProcessEngineer,
+            vec!["/recipes", "/machines", "/audit", "/me"],
+        ),
+        (Role::Operator, vec!["/recipes", "/machines", "/me"]),
+    ];
+    for (role, paths_of_role) in expected {
         let links = nav_links(texts, role, false, None);
-        assert_eq!(paths(&links), ["/recipes", "/machines", "/me"], "{role}");
+        assert_eq!(paths(&links), paths_of_role, "{role}");
     }
+}
+
+#[test]
+fn nav_links_audit_link_has_its_text_in_both_languages_and_follows_the_row_of_the_query() {
+    let bundles = Bundles::load().unwrap();
+    for (lang, word) in [(Lang::En, "Audit"), (Lang::Pl, "Audyt")] {
+        let texts = crate::pages::Texts::new(&bundles, lang);
+        for role in Role::ALL {
+            let audit = nav_links(texts, role, false, Some(NavTarget::Audit))
+                .into_iter()
+                .find(|link| link.path == "/audit");
+            let allowed = Operation::ListAuditEntries.requirement().allows(role);
+            assert_eq!(audit.is_some(), allowed, "{role} {lang}");
+            if let Some(link) = audit {
+                assert_eq!(link.text, word);
+                assert!(link.current);
+            }
+        }
+    }
+}
+
+#[test]
+fn nav_links_audit_link_is_current_only_on_the_audit_target() {
+    let bundles = Bundles::load().unwrap();
+    let texts = crate::pages::Texts::new(&bundles, Lang::En);
+    let links = nav_links(texts, Role::Administrator, false, Some(NavTarget::Machines));
+    let audit = links.iter().find(|link| link.path == "/audit").unwrap();
+    assert!(!audit.current);
+}
+
+#[test]
+fn nav_links_audit_link_is_hidden_while_the_password_must_change() {
+    let bundles = Bundles::load().unwrap();
+    let texts = crate::pages::Texts::new(&bundles, Lang::En);
+    assert!(nav_links(texts, Role::Administrator, true, Some(NavTarget::Audit)).is_empty());
 }
 
 #[test]
@@ -102,6 +155,7 @@ fn nav_links_follow_the_requirement_of_the_query() {
             NavTarget::Recipes,
             NavTarget::Machines,
             NavTarget::Users,
+            NavTarget::Audit,
             NavTarget::Me,
         ] {
             let allowed = target.operation().requirement().allows(role);

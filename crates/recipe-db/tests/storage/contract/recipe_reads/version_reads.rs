@@ -5,7 +5,9 @@ use recipe_domain::identity::Login;
 use recipe_domain::recipe::{RecipeId, RecipeVersionId, VersionState};
 use recipe_domain::text::LongText;
 
-use super::fixtures::{approve_as, begin_read, create_named, far_past, second_user, touch_by};
+use super::fixtures::{
+    approve_as, begin_read, create_named, discard, far_past, second_user, touch_by,
+};
 use crate::contract::harness::{FIXTURE_NOTE, Harness};
 use crate::contract::recipe_seed::{approve, create_version, plant, retire, version_id};
 
@@ -119,6 +121,67 @@ async fn version_detail_of_a_draft_has_no_approver_and_a_missing_version_gives_n
     assert!(missing.is_none());
 }
 
+async fn version_detail_of_a_version_without_a_base_has_no_base_number(h: &dyn Harness) {
+    let plant = plant(h, 25, "M25").await;
+    let recipe = create_named(h, &plant, 25, "REF-25", "Recipe").await;
+    let first = recipe.versions()[0].id();
+    approve(h, first).await;
+    create_version(h, (recipe.id(), version_id(125)), 2, None).await;
+
+    let created = detail(h, first).await.unwrap();
+    let empty = detail(h, version_id(125)).await.unwrap();
+
+    assert_eq!(created.based_on, None);
+    assert_eq!(empty.based_on, None);
+}
+
+// The version 4 is based on the version 1, so a rule "number minus 1" gives 3 and fails.
+async fn version_detail_gives_the_number_of_the_base_version(h: &dyn Harness) {
+    let plant = plant(h, 26, "M26").await;
+    let recipe = create_named(h, &plant, 26, "REF-26", "Recipe").await;
+    let first = recipe.versions()[0].id();
+    approve(h, first).await;
+    retire(h, first).await;
+    create_version(h, (recipe.id(), version_id(126)), 2, Some(first)).await;
+    approve(h, version_id(126)).await;
+    retire(h, version_id(126)).await;
+    create_version(h, (recipe.id(), version_id(226)), 3, Some(version_id(126))).await;
+    approve(h, version_id(226)).await;
+    create_version(h, (recipe.id(), version_id(326)), 4, Some(first)).await;
+
+    let second = detail(h, version_id(126)).await.unwrap();
+    let third = detail(h, version_id(226)).await.unwrap();
+    let fourth = detail(h, version_id(326)).await.unwrap();
+
+    assert_eq!(second.based_on, Some(1));
+    assert_eq!(third.based_on, Some(2));
+    assert_eq!(fourth.based_on, Some(1));
+}
+
+// The version 2 is a discarded draft and the version 4 names it as its base. The number 3 would
+// follow from the rule "number minus 1", and the number 1 from the rule "newest version that is
+// not discarded".
+async fn version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft(
+    h: &dyn Harness,
+) {
+    let plant = plant(h, 27, "M27").await;
+    let recipe = create_named(h, &plant, 27, "REF-27", "Recipe").await;
+    let first = recipe.versions()[0].id();
+    approve(h, first).await;
+    retire(h, first).await;
+    create_version(h, (recipe.id(), version_id(127)), 2, Some(first)).await;
+    discard(h, version_id(127)).await;
+    create_version(h, (recipe.id(), version_id(227)), 3, None).await;
+    discard(h, version_id(227)).await;
+    create_version(h, (recipe.id(), version_id(327)), 4, Some(version_id(127))).await;
+
+    let base = detail(h, version_id(127)).await.unwrap();
+    let fourth = detail(h, version_id(327)).await.unwrap();
+
+    assert_eq!(base.state, VersionState::Discarded);
+    assert_eq!(fourth.based_on, Some(2));
+}
+
 // The recipe numbers differ from the machine numbers. `machine_id(n)` and `recipe_id(n)` share
 // one UUID, and the seed of a machine names the machine as the aggregate of its entry.
 async fn last_change_gives_the_last_actor_at_the_exact_time_only(h: &dyn Harness) {
@@ -160,6 +223,21 @@ contract_case!(
     version_detail_of_a_draft_has_no_approver_and_a_missing_version_gives_none,
     version_detail_of_a_draft_has_no_approver_and_a_missing_version_gives_none_memory,
     version_detail_of_a_draft_has_no_approver_and_a_missing_version_gives_none_postgres
+);
+contract_case!(
+    version_detail_of_a_version_without_a_base_has_no_base_number,
+    version_detail_of_a_version_without_a_base_has_no_base_number_memory,
+    version_detail_of_a_version_without_a_base_has_no_base_number_postgres
+);
+contract_case!(
+    version_detail_gives_the_number_of_the_base_version,
+    version_detail_gives_the_number_of_the_base_version_memory,
+    version_detail_gives_the_number_of_the_base_version_postgres
+);
+contract_case!(
+    version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft,
+    version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft_memory,
+    version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft_postgres
 );
 contract_case!(
     last_change_gives_the_last_actor_at_the_exact_time_only,

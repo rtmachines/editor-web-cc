@@ -147,8 +147,8 @@ async fn type_rows_give_the_global_rows_and_the_rows_of_the_machine() {
     assert!(ids.contains(&tid(501)));
     assert!(!ids.contains(&tid(502)));
     let global = rows.iter().filter(|row| row.machine().is_none()).count();
-    assert_eq!(global, 10);
-    assert_eq!(rows.len(), 11);
+    assert_eq!(global, 11);
+    assert_eq!(rows.len(), 12);
     assert!(ids.contains(&int()));
 }
 
@@ -379,7 +379,7 @@ async fn a_rolled_back_type_insert_keeps_nothing() {
     drop(tx);
     let mut tx = begin(&store);
     let rows = tx.types().type_rows(mid(1)).await.unwrap();
-    assert_eq!(rows.len(), 10);
+    assert_eq!(rows.len(), 11);
 }
 
 #[tokio::test]

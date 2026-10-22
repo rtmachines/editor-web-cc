@@ -40,6 +40,7 @@ pub(crate) use layer::render_errors;
 )]
 pub(crate) use lists::{DraftFault, draft_lines};
 pub use lists::{FieldError, LineArg, item_lines, leaf_lines};
+pub(crate) use lists::{SHOWN_LINES, line_view, more_text};
 pub use reason::FieldReason;
 pub(crate) use recipe::leaf_of;
 pub(crate) use retry::Retry;
@@ -135,6 +136,18 @@ pub enum WebError {
         /// Why the field is not valid. The page shows the text of its key in the UI language.
         reason: FieldReason,
     },
+    /// A query value of a page without an input of that name is not valid (`E-WEB-008`).
+    ///
+    /// The variant solves one problem: one field name can be a visible input on one page and only
+    /// a query value on another page. The code that reads the value knows which case it has. The
+    /// error line shows the label and the reason, but it has no link (`design-system.md` 10.5).
+    #[error("Field {field} is not valid: {reason}.")]
+    BadQuery {
+        /// The name of the query value. It is a fixed name in the code, never typed text.
+        field: &'static str,
+        /// Why the value is not valid. The page shows the text of its key in the UI language.
+        reason: FieldReason,
+    },
     /// A field of one member row is not valid (`E-WEB-008`).
     ///
     /// The error line shows the label of the field with the number of the row. It links to the
@@ -156,7 +169,16 @@ pub enum WebError {
         /// The lines in the order of the form, at least one.
         lines: NonEmpty<FieldError>,
         /// The form with the sent texts and a line under each bad input, if the handler has one.
+        ///
+        /// A caller that sets `failure` sets `form` to `None`.
         form: Option<RenderedForm>,
+        /// The failure of a read that the handler needed for its form, if that read failed.
+        ///
+        /// A caller sets `failure` only together with `form: None`, because the form needs the
+        /// read that failed. The answer then holds the lines and no form. The mapping of
+        /// `WebError` logs the failure once, in the line of the error. The error is boxed, so
+        /// `WebError` stays small.
+        failure: Option<Box<AppError>>,
     },
     /// Another user changed the draft first (`E-WEB-001`, design D10).
     ///
@@ -193,7 +215,9 @@ impl WebError {
         match self {
             Self::App(error) => error.code(),
             Self::PayloadTooLarge { .. } => ErrorCode::WEB_003,
-            Self::BadRequest { .. } | Self::BadRow { .. } => ErrorCode::WEB_008,
+            Self::BadRequest { .. } | Self::BadQuery { .. } | Self::BadRow { .. } => {
+                ErrorCode::WEB_008
+            }
             Self::Fields { lines, .. } => lines.first().code(),
             Self::Conflict { error, .. } => error.code(),
             Self::CsrfRejected => ErrorCode::WEB_007,

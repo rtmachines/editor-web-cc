@@ -4,7 +4,9 @@
 //! and the module `memory` implements it for tests.
 
 mod attempt;
+mod audit_reads;
 mod clock;
+mod diff_reads;
 mod draft;
 mod isolation;
 mod nonempty;
@@ -23,7 +25,13 @@ pub use attempt::{
     AttemptId, AttemptKey, AttemptOutcome, AttemptRepository, AttemptRow, DeletedAttempts,
     LoginAttemptStore, LoginThrottleState,
 };
+pub use audit_reads::{
+    AggregateId, AuditEntityType, AuditEntryId, AuditFilter, AuditReads, AuditRecord, AuditRow,
+    AuditScope, CursorPage, EntityFilter, EntityId, EntityLabel, LoginMatch, SecurityEventFilter,
+    SecurityEventId, SecurityEventRow, TimeRange,
+};
 pub use clock::Clock;
+pub use diff_reads::{ChangeFlags, DiffReads, DiffSides};
 pub use draft::DraftRepository;
 pub use isolation::Isolation;
 pub use nonempty::NonEmpty;

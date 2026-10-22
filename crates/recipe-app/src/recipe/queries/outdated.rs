@@ -254,9 +254,26 @@ pub(super) fn outdated_parameters(
     }
     let types = PlatformTypes::collect(machine.id(), machine.platform(), types)?;
     let trees = TypeTrees::resolve(rows.iter().map(|row| row.plc_type), &types);
+    outdated_with_trees(rows, (&types, &trees), budget)
+}
+
+/// Return the outdated parameters of `rows` with the type trees that the caller resolved.
+///
+/// The function solves one problem: a caller that already resolved the trees of the rows does
+/// not resolve them a second time. `trees` can hold more trees than the rows use. A row whose
+/// type has no tree in `trees` is not outdated, as in [`outdated_parameters`].
+///
+/// # Errors
+///
+/// Returns the `PlantError` of the type rows when they break a rule of the domain.
+pub(super) fn outdated_with_trees(
+    rows: &[ParameterRow],
+    (types, trees): (&PlatformTypes, &TypeTrees),
+    budget: RebindBudget,
+) -> Result<Outdated, AppError> {
     let mut catalog = Catalog {
-        types: &types,
-        trees: &trees,
+        types,
+        trees,
         targets: BTreeMap::new(),
     };
     let mut tally = Tally::new(budget);
@@ -265,8 +282,8 @@ pub(super) fn outdated_parameters(
         let Some(outdated) = trees.outdated(row.plc_type) else {
             continue;
         };
-        let from = struct_row(&types, outdated.type_name(), outdated.current())?;
-        let to = struct_row(&types, outdated.type_name(), outdated.newest())?;
+        let from = struct_row(types, outdated.type_name(), outdated.current())?;
+        let to = struct_row(types, outdated.type_name(), outdated.newest())?;
         let holder = trees
             .tree(row.plc_type)
             .and_then(|tree| holder_of(tree, outdated.type_name(), outdated.current()));

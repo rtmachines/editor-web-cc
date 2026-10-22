@@ -3,7 +3,6 @@
 //! The module solves one problem: the tests of the form, the commands, and the pages of a parameter
 //! send the same fields to the same draft. One list of fields and one sender keep them equal.
 
-use axum::http::StatusCode;
 use recipe_app::auth::RequestMeta;
 use recipe_app::identity::authenticate;
 use recipe_app::recipe::{UpsertTranslation, UpsertTranslationInput};
@@ -12,7 +11,10 @@ use recipe_domain::identity::SessionToken;
 use recipe_domain::recipe::{LangCode, ParameterKey, ReferenceNumber, Translation};
 use recipe_domain::text::Text;
 
-use crate::pages::test_helpers::{assert_htmx_error, encode};
+use crate::pages::test_helpers::encode;
+// The tests of `parameters` import these two names from here. `assert_panel_error` is their name of
+// `assert_htmx_error`. `position` is the shared helper.
+pub(crate) use crate::pages::test_helpers::{assert_htmx_error as assert_panel_error, position};
 use crate::test_support::Reply;
 use crate::test_support::plant::{ENGLISH, HTMX, World};
 
@@ -136,21 +138,4 @@ pub(crate) async fn get_form_fragment(world: &World, path: &str) -> Reply {
     world
         .get(&world.engineer, path, &[ENGLISH, HTMX, FORM_TARGET])
         .await
-}
-
-/// Assert an HTMX error answer in `#error-panel` that keeps the URL (`api.md` section 5.3).
-pub(crate) fn assert_panel_error(reply: &Reply, status: StatusCode, code: &str) {
-    assert_htmx_error(reply, status, code);
-    assert_eq!(reply.header("hx-push-url"), "false", "{code}");
-    assert_eq!(
-        reply.header("hx-reswap"),
-        "innerHTML show:#error-panel:top",
-        "{code}"
-    );
-}
-
-/// Return the position of `needle` in `body`. The test fails when `body` lacks it.
-pub(crate) fn position(body: &str, needle: &str) -> usize {
-    assert!(body.contains(needle), "missing {needle:?} in {body}");
-    body.find(needle).unwrap()
 }

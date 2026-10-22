@@ -41,13 +41,13 @@ struct Found {
 fn pick(recipe: Recipe, target: Target<'_>) -> Result<Found, AppError> {
     let reference = recipe.reference().clone();
     let header = match target {
-        Target::Approved(_) => recipe
-            .versions()
-            .iter()
-            .find(|header| header.state() == VersionState::Approved)
-            .ok_or_else(|| ExportError::NoApprovedVersion {
-                reference: reference.clone(),
-            })?,
+        Target::Approved(_) => {
+            recipe
+                .approved_version()
+                .ok_or_else(|| ExportError::NoApprovedVersion {
+                    reference: reference.clone(),
+                })?
+        }
         Target::Number(_, number) => {
             let header = recipe.version(number).ok_or_else(|| AppError::NotFound {
                 entity: Missing::version(&reference, number),

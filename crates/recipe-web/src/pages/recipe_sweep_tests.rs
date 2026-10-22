@@ -7,7 +7,8 @@
 
 use std::collections::BTreeSet;
 
-use axum::http::{Method, StatusCode};
+use axum::http::header::LOCATION;
+use axum::http::{HeaderMap, Method, StatusCode};
 
 use super::page_tests::{LANGS, assert_assets, assert_layout};
 use super::test_helpers::{CSP, HxAttribute, assert_clean_html, field_value, hx_attributes};
@@ -73,6 +74,18 @@ const HX_LITERALS: [(&str, &[&str]); 7] = [
     ("hx-swap-oob", &["true", "innerHTML"]),
     ("hx-history", &["false"]),
 ];
+/// The commands whose form holds no text field, so the XSS field table has no case for them.
+///
+/// The delete and the restore of a recipe send only the CSRF token. The approve form also sends
+/// the `row_version` and a checkbox. The retire and the discard forms also send the `row_version`
+/// (ADR-0049).
+pub(super) const TOKEN_ONLY_ROUTES: [&str; 5] = [
+    "/recipes/{ref}/delete",
+    "/recipes/{ref}/restore",
+    "/recipes/{ref}/versions/{n}/approve",
+    "/recipes/{ref}/versions/{n}/retire",
+    "/recipes/{ref}/versions/{n}/discard",
+];
 /// Commands that fail: the path template, the body, and the status of the answer.
 ///
 /// Each one gives an error fragment with the out-of-band form or the conflict fragment. The row
@@ -137,7 +150,19 @@ pub(super) fn post_endpoints() -> Vec<(Endpoint, Want)> {
 fn statuses_of(want: Want) -> Vec<StatusCode> {
     match want {
         Want::Conflict(_code) => vec![StatusCode::CONFLICT],
+        Want::Status(status, _code) => vec![status],
         _success => vec![StatusCode::OK, StatusCode::SEE_OTHER],
+    }
+}
+
+/// Return the statuses of a command with a stale `row_version` when the matrix expects `want`.
+///
+/// A command that the matrix refuses before the row check keeps that refusal. Every other
+/// command answers `409`.
+fn stale_statuses(want: Want) -> Vec<StatusCode> {
+    match want {
+        Want::Status(status, _code) => vec![status],
+        _other => vec![StatusCode::CONFLICT],
     }
 }
 
@@ -197,7 +222,7 @@ async fn error_answers(code: &str) -> Vec<Answer> {
             statuses: vec![status],
         });
     }
-    for (endpoint, _want) in post_endpoints() {
+    for (endpoint, want) in post_endpoints() {
         if !endpoint.body.contains("row_version=1") {
             continue;
         }
@@ -206,7 +231,7 @@ async fn error_answers(code: &str) -> Vec<Answer> {
         answers.push(Answer {
             what: format!("{code} POST {} stale", endpoint.path),
             reply,
-            statuses: vec![StatusCode::CONFLICT],
+            statuses: stale_statuses(want),
         });
     }
     answers
@@ -235,7 +260,7 @@ pub(super) fn attribute_values<'a>(body: &'a str, name: &str) -> Vec<&'a str> {
 }
 
 /// Return the start tag and the markup up to `</form>` of every `<form` in `body`.
-fn forms(body: &str) -> Vec<(&str, &str)> {
+pub(super) fn forms(body: &str) -> Vec<(&str, &str)> {
     body.match_indices("<form")
         .filter_map(|(at, _)| body.get(at..))
         .map(|rest| {
@@ -257,7 +282,7 @@ fn is_full(reply: &Reply) -> bool {
 // --- The rules ----------------------------------------------------------------------------------------
 
 /// Assert that `attribute` is a literal of the list, or `hx-headers` of `<body>`.
-fn assert_literal(attribute: &HxAttribute, what: &str) {
+pub(super) fn assert_literal(attribute: &HxAttribute, what: &str) {
     let HxAttribute {
         name,
         value,
@@ -279,7 +304,7 @@ fn assert_literal(attribute: &HxAttribute, what: &str) {
 }
 
 /// Assert that none of the URLs of an answer holds the CSRF token or its field name.
-fn assert_urls_without_token(answer: &Answer, token: &str) {
+pub(super) fn assert_urls_without_token(answer: &Answer, token: &str) {
     let Answer { what, reply, .. } = answer;
     let mut urls: Vec<String> = ["href", "action"]
         .iter()
@@ -296,6 +321,70 @@ fn assert_urls_without_token(answer: &Answer, token: &str) {
         assert!(!url.contains("csrf_token"), "{what}: {url}");
         assert!(!url.contains(token), "{what}: token in {url}");
     }
+}
+
+/// Run `assert_literal` on each `hx-*` attribute of `html`.
+fn assert_literals(html: &str) {
+    for attribute in hx_attributes(html) {
+        assert_literal(&attribute, "bad page");
+    }
+}
+
+/// Return an answer with the body `body`, the status `200`, and no header.
+fn answer_with_body(body: &str) -> Answer {
+    let reply = Reply {
+        status: StatusCode::OK,
+        headers: HeaderMap::new(),
+        body: body.to_owned(),
+    };
+    Answer {
+        what: "bad page".to_owned(),
+        reply,
+        statuses: vec![StatusCode::OK],
+    }
+}
+
+#[test]
+#[should_panic(expected = "bad page: unknown attribute hx-get=/x on <a>")]
+fn recipe_sweep_check_finds_an_hx_get_that_the_list_does_not_name() {
+    assert_literals("<a hx-get=\"/x\">");
+}
+
+#[test]
+#[should_panic(expected = "bad page: hx-headers outside <body>")]
+fn recipe_sweep_check_finds_hx_headers_outside_the_body() {
+    assert_literals("<div hx-headers='{}'>");
+}
+
+#[test]
+#[should_panic(expected = "bad page: /y?csrf_token=1")]
+fn recipe_sweep_check_finds_the_field_name_csrf_token_in_a_url() {
+    let answer = answer_with_body("<a href=\"/y?csrf_token=1\">");
+    assert_urls_without_token(&answer, "SECRET");
+}
+
+#[test]
+#[should_panic(expected = "hx-target=\"#row-x1\" is no literal")]
+fn recipe_sweep_check_finds_an_hx_value_with_user_data() {
+    assert_literals("<a hx-target=\"#row-x1\">");
+}
+
+#[test]
+#[should_panic(expected = "token in /x?t=SECRET")]
+fn recipe_sweep_check_finds_the_token_in_an_href() {
+    let answer = answer_with_body("<a href=\"/x?t=SECRET\">");
+    assert_urls_without_token(&answer, "SECRET");
+}
+
+#[test]
+#[should_panic(expected = "token in /z?SECRET")]
+fn recipe_sweep_check_finds_the_token_in_the_header_location() {
+    let mut answer = answer_with_body("<p>");
+    answer
+        .reply
+        .headers
+        .insert(LOCATION, "/z?SECRET".parse().unwrap());
+    assert_urls_without_token(&answer, "SECRET");
 }
 
 /// Return the token of the Administrator of a world. The session token is fixed for `user1`.

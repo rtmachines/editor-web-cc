@@ -45,14 +45,19 @@ fn approve_input(world: &World, expected_row_version: i64) -> ApproveVersionInpu
     }
 }
 
-/// Start `ApproveVersion` as a future that owns its inputs.
+/// Start `ApproveVersion` as a future that owns its inputs. It returns the outcome of the output.
 fn approve(
     app: &App,
     user: &CurrentUser,
     input: &ApproveVersionInput,
 ) -> impl Future<Output = Result<ApprovalOutcome, AppError>> + Send + 'static {
     let (ctx, user, meta, input) = (app.context(), user.clone(), app.meta.clone(), input.clone());
-    async move { ApproveVersion::new(ctx).execute(&user, &meta, input).await }
+    async move {
+        ApproveVersion::new(ctx)
+            .execute(&user, &meta, input)
+            .await
+            .map(|output| output.outcome)
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

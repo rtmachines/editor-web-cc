@@ -18,6 +18,7 @@ use super::path_values::{reference, version_number};
 use crate::error::WebError;
 use crate::routes::{RouteEntry, operation_row};
 
+mod actions;
 mod form;
 mod list;
 mod outdated;
@@ -49,9 +50,10 @@ pub(crate) fn path_version(
 /// Return the route rows of the version pages.
 ///
 /// The rows are `/recipes/{ref}/versions`, `/recipes/{ref}/versions/new`, the version page, the
-/// command that creates a version, and the rebind (`api.md` section 2.5).
+/// command that creates a version, the rebind, and the rows of [`lifecycle_rows`] (`api.md`
+/// section 2.5).
 pub(crate) fn rows() -> Vec<RouteEntry> {
-    vec![
+    let mut rows = vec![
         operation_row(
             Method::GET,
             "/recipes/{ref}/versions",
@@ -82,13 +84,60 @@ pub(crate) fn rows() -> Vec<RouteEntry> {
             Operation::RebindTypeRevision,
             post(rebind::rebind),
         ),
+    ];
+    rows.extend(lifecycle_rows());
+    rows
+}
+
+/// Return the route rows of the approval preview, the diff page, the approval, the retire, and
+/// the discard (ADR-0049, ADR-0050).
+fn lifecycle_rows() -> Vec<RouteEntry> {
+    vec![
+        operation_row(
+            Method::GET,
+            "/recipes/{ref}/versions/{n}/approve",
+            Operation::GetApprovalPreview,
+            get(super::approval::preview::preview),
+        ),
+        operation_row(
+            Method::GET,
+            "/recipes/{ref}/versions/{n}/diff/{m}",
+            Operation::DiffVersions,
+            get(super::diff::diff),
+        ),
+        operation_row(
+            Method::POST,
+            "/recipes/{ref}/versions/{n}/approve",
+            Operation::ApproveVersion,
+            post(super::approval::approve::approve),
+        ),
+        operation_row(
+            Method::POST,
+            "/recipes/{ref}/versions/{n}/retire",
+            Operation::RetireVersion,
+            post(actions::retire),
+        ),
+        operation_row(
+            Method::POST,
+            "/recipes/{ref}/versions/{n}/discard",
+            Operation::DiscardDraft,
+            post(actions::discard),
+        ),
     ]
 }
 
 #[cfg(test)]
+mod actions_tests;
+#[cfg(test)]
+mod compare_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
+mod lang_next_tests;
+#[cfg(test)]
 mod large_tests;
+#[cfg(test)]
+mod layout_tests;
 #[cfg(test)]
 mod list_tests;
 #[cfg(test)]

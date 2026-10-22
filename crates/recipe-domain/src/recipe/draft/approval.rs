@@ -6,7 +6,10 @@ use super::{Draft, stored_limits};
 use crate::identity::UserId;
 use crate::plant::{LeafClass, LeafPath, LiveUnits, TypeTrees};
 use crate::recipe::snapshot::check_snapshot;
-use crate::recipe::{DraftError, RecipeError, RecipeErrors, RecipeVersionId};
+use crate::recipe::{
+    ApprovalPolicy, Approver, DraftError, RecipeError, RecipeErrors, RecipeVersionId,
+    breaks_separation_of_duties,
+};
 
 /// The proof that a draft passed the checks of an approval.
 ///
@@ -111,6 +114,31 @@ const fn needs_limit(class: LeafClass) -> bool {
 }
 
 impl Draft {
+    /// Check that `approver` may approve this draft under `policy` (I16, ADR-0049 (c)).
+    ///
+    /// The approval preview calls this method before [`Draft::check_for_approval`], so the page
+    /// can show `E-RCP-015` together with the other blockers. The rule is
+    /// [`breaks_separation_of_duties`], which `Recipe::approve` also calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RecipeError::ApproverEditedDraft`] (`E-RCP-015`) when the policy requires
+    /// separation of duties and the approver created or edited the draft.
+    pub fn check_approver(
+        &self,
+        approver: &Approver,
+        policy: &ApprovalPolicy,
+    ) -> Result<(), RecipeError> {
+        if breaks_separation_of_duties(self.created_by, &self.editors, approver, policy) {
+            return Err(RecipeError::ApproverEditedDraft {
+                reference: self.reference.clone(),
+                number: self.number,
+                login: approver.login.clone(),
+            });
+        }
+        Ok(())
+    }
+
     /// Check the draft for an approval and return the token (design D5, D12, ADR-0029).
     ///
     /// The method consumes the draft, and the token owns it. A failed check drops the draft,

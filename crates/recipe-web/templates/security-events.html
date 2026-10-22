@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/field.html" as fields %}
+{% import "components/pager.html" as pagers %}
+{% import "components/table.html" as tables %}
+{#- The security events of ADR-0051 (h). The filter form sends GET and holds no token and no cursor. Its hx attributes are literals, and its action is the literal path. The detail stands in a pre element with the class json, and the column header names it. Askama escapes every text, and no filter marks one safe. The pager stands in a boosted container. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+<h2>{{ t.get("audit-filter-heading") }}</h2>
+<form method="get" action="/security-events" class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">
+{{ fields::select(t, "kind", t.get("security-filter-kind"), String::new(), kinds, kind, false) }}
+{{ fields::named(t, "login", "login", t.get("security-filter-login"), t.get("security-filter-login-hint"), "text", false, true, 64, "off", login) }}
+{{ fields::named(t, "client_ip", "client_ip", t.get("security-filter-client-ip"), String::new(), "text", false, true, 45, "off", client_ip) }}
+{{ fields::named(t, "from", "from", t.get("audit-filter-from"), String::new(), "text", false, true, 10, "off", from) }}
+{{ fields::named(t, "to", "to", t.get("audit-filter-to"), String::new(), "text", false, true, 10, "off", to) }}
+<button type="submit" class="btn btn-primary">{{ t.get("audit-filter-submit") }}</button>
+<a class="target-link" href="/security-events">{{ t.get("audit-filter-clear") }}</a>
+</form>
+{% call tables::frame("security-caption", caption) %}<thead><tr>{{ tables::head(t.get("audit-col-time")) }}{{ tables::head(t.get("security-filter-kind")) }}{{ tables::head(t.get("security-col-count")) }}{{ tables::head(t.get("security-filter-client-ip")) }}{{ tables::head(t.get("security-col-agent")) }}{{ tables::head(t.get("security-col-request")) }}{{ tables::head(t.get("security-filter-login")) }}{{ tables::head(t.get("security-col-detail")) }}</tr></thead>
+{% if rows.is_empty() %}{{ tables::empty_row(8, empty) }}{% else %}<tbody>
+{% for row in rows %}<tr><td><span class="data time">{{ row.time }}</span></td><td>{{ row.kind }}</td><td class="num">{{ row.count }}</td><td class="data">{{ row.client_ip }}</td><td class="data">{{ row.user_agent }}</td><td class="data">{{ row.request_id }}</td><td class="data">{{ row.login }}</td><td>{% if let Some(text) = row.detail %}<pre class="json">{{ text }}</pre>{% endif %}</td></tr>
+{% endfor %}</tbody>
+{% endif %}{% endcall %}
+<div hx-boost="true" hx-target="#content" hx-push-url="true">{{ pagers::cursor_pager(t, pager_label, newest, older) }}</div>
+{% endblock %}

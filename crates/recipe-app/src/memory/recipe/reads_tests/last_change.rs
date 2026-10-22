@@ -182,6 +182,27 @@ async fn last_change_matches_an_export_entry_by_its_own_time() {
 }
 
 #[tokio::test]
+async fn last_change_ignores_an_entry_that_commits_after_the_begin_of_its_read() {
+    let store = store();
+    seed_user(&store, 2, "jkowalski");
+    seed_user(&store, 3, "anowak");
+    seed_live(&store, (1, "R-1", "One"), ONE_DRAFT);
+    later(&store);
+    rename_as(&store, (1, 2), "First").await;
+    let at = updated_at(&store);
+    let mut read = begin(&store, Isolation::RepeatableRead);
+    rename_as(&store, (1, 3), "Second").await;
+
+    let found = read.recipe_reads().last_change(rid(1), at).await.unwrap();
+
+    assert_eq!(updated_at(&store), at, "both entries share the time");
+    assert_eq!(
+        found.map(|login| login.as_str().to_owned()).as_deref(),
+        Some("jkowalski")
+    );
+}
+
+#[tokio::test]
 async fn last_change_takes_the_entry_written_last_when_two_entries_share_a_time() {
     let store = store();
     seed_user(&store, 2, "jkowalski");

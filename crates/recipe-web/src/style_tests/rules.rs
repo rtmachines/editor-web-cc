@@ -3,9 +3,13 @@
 //! `APP_EXPECTED` pins the declarations of the base rules that the design names. The rules of the
 //! components live in `component_rules`. The other tests check the format rules of
 //! `design-system.md` sections 5, 7, 11, and 12 on every rule of both style sheets.
+//! The module `scroll_padding` holds the tests of the scroll padding of `html` (QA15-1, ADR-0049 (m)).
+
+mod scroll_padding;
 
 use super::css::{Rule, is_named_color, parse_sheet, parse_tables};
 use super::{APP_CSS, COMPONENTS_CSS, DESIGN, app_sheet, components_sheet, sheet};
+use scroll_padding::WIDE_VIEW;
 
 /// The system colors of forced-colors mode (`design-system.md` section 12).
 const SYSTEM_COLORS: [&str; 8] = [
@@ -305,9 +309,30 @@ fn rules_the_sheets_are_flat_lists_with_at_most_one_media_level() {
     assert!(!COMPONENTS_CSS.contains("@import"));
     for rule in &sheet {
         if let Some(media) = &rule.media {
-            assert_eq!(media, "(forced-colors: active)");
+            assert!(
+                media == "(forced-colors: active)" || is_scroll_padding_rule(rule),
+                "{media} {:?}",
+                rule.selectors
+            );
         }
     }
+    // `WIDE_VIEW` belongs to `app.css`. No rule of `components.css` may use it.
+    for rule in components_sheet() {
+        assert_ne!(
+            rule.media.as_deref(),
+            Some(WIDE_VIEW),
+            "{:?}",
+            rule.selectors
+        );
+    }
+}
+
+/// Return whether `rule` is the one rule of `WIDE_VIEW`: the scroll padding of `html` (QA15-1).
+fn is_scroll_padding_rule(rule: &Rule) -> bool {
+    rule.media.as_deref() == Some(WIDE_VIEW)
+        && rule.selectors == ["html"]
+        && rule.decls.len() == 1
+        && rule.value("scroll-padding-top").is_some()
 }
 
 #[test]

@@ -9,7 +9,7 @@ use crate::identity::UserId;
 use crate::plant::PlcPlatform;
 use crate::recipe::draft::support::{stored_draft_with, user};
 use crate::recipe::snapshot::fixtures::{INT, limited, param, range, trees, units};
-use crate::recipe::{ApprovalReady, Draft};
+use crate::recipe::{ApprovalReady, Draft, breaks_separation_of_duties};
 
 use VersionState::{Approved, Discarded, LiveDraft, Retired};
 
@@ -72,6 +72,55 @@ fn policy_on() -> ApprovalPolicy {
 #[test]
 fn the_default_policy_requires_separation_of_duties() {
     assert!(ApprovalPolicy::default().separation_of_duties);
+}
+
+/// The editors 2 and 3 of the draft of the token.
+fn editors() -> std::collections::BTreeSet<UserId> {
+    [user(2), user(3)].into()
+}
+
+#[test]
+fn separation_of_duties_breaks_for_the_creator_and_each_editor() {
+    for n in [1, 2, 3] {
+        assert!(
+            breaks_separation_of_duties(user(1), &editors(), &approver(n), &policy_on()),
+            "user {n}"
+        );
+    }
+}
+
+#[test]
+fn separation_of_duties_breaks_for_a_creator_who_is_also_an_editor() {
+    let editors: std::collections::BTreeSet<UserId> = [user(1), user(2)].into();
+    assert!(breaks_separation_of_duties(
+        user(1),
+        &editors,
+        &approver(1),
+        &policy_on()
+    ));
+}
+
+#[test]
+fn separation_of_duties_holds_for_another_user() {
+    assert!(!breaks_separation_of_duties(
+        user(1),
+        &editors(),
+        &approver(9),
+        &policy_on()
+    ));
+}
+
+#[test]
+fn separation_of_duties_off_never_breaks() {
+    let off = ApprovalPolicy {
+        separation_of_duties: false,
+    };
+    for n in [1, 2, 9] {
+        assert!(
+            !breaks_separation_of_duties(user(1), &editors(), &approver(n), &off),
+            "user {n}"
+        );
+    }
 }
 
 #[test]

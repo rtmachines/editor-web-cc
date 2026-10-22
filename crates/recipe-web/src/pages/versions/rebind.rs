@@ -296,7 +296,11 @@ pub(crate) async fn rebind(
     let (reference, number) = path_version(path)?;
     check_access(&state, &request, (&reference, number)).await?;
     let sent = read_form(form, FieldSet::Rebind)?;
-    let fields = |lines| WebError::Fields { lines, form: None };
+    let fields = |lines| WebError::Fields {
+        lines,
+        form: None,
+        failure: None,
+    };
     let hidden = hidden_fields(&sent).map_err(fields)?;
     let form = sent_form(&state, &request, (&reference, number), &hidden).await?;
     let values = member_values(&sent, form.as_ref()).map_err(fields)?;

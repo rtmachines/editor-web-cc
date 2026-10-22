@@ -40,6 +40,8 @@ pub(super) const fn missing_key(missing: &Missing) -> &'static str {
         Missing::MalformedParameter => "missing-malformed-parameter",
         Missing::Parameter { .. } => "missing-parameter",
         Missing::TypeRevision { .. } => "missing-type-revision",
+        Missing::AuditEntry(_) => "missing-audit-entry",
+        Missing::MalformedAuditEntry => "missing-malformed-audit-entry",
     }
 }
 
@@ -68,7 +70,9 @@ fn missing_args(missing: &Missing) -> FluentArgs<'static> {
         | Missing::MalformedType
         | Missing::MalformedRecipe
         | Missing::MalformedVersion
-        | Missing::MalformedParameter => {}
+        | Missing::MalformedParameter
+        | Missing::MalformedAuditEntry => {}
+        Missing::AuditEntry(id) => args.set("id", id.to_string()),
         Missing::Parameter {
             reference,
             number,
@@ -135,6 +139,7 @@ pub(super) const fn task_stage_key(stage: TaskStage) -> &'static str {
         TaskStage::Validation => "task-stage-validation",
         TaskStage::Export => "task-stage-export",
         TaskStage::Token => "task-stage-token",
+        TaskStage::Diff => "task-stage-diff",
     }
 }
 

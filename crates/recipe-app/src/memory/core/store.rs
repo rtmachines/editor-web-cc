@@ -10,9 +10,9 @@ use recipe_domain::timestamp::Timestamp;
 
 use super::journal::{DraftWrite, JournalEntry};
 use super::state::MemoryState;
-use super::transaction::MemoryTransaction;
+use super::transaction::{MemoryTransaction, VisibleLogs};
 use crate::error::StorageError;
-use crate::memory::{Fault, FaultPoint, MemoryClock};
+use crate::memory::{Fault, FaultPoint, MemoryClock, MemorySink};
 use crate::ports::Clock as _;
 use crate::ports::{Isolation, Transaction, UnitOfWork};
 
@@ -44,7 +44,7 @@ impl fmt::Debug for ReadDraftHook {
 }
 
 /// The state that all clones of a store and all its transactions share.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct Shared {
     pub(super) state: MemoryState,
     pub(super) audit: Vec<AuditEntry>,
@@ -56,9 +56,34 @@ pub(super) struct Shared {
     pub(super) queued_faults: Vec<(FaultPoint, Fault)>,
     pub(super) clock: MemoryClock,
     pub(super) read_draft_hook: ReadDraftHook,
+    /// The security event sink of the store. It shares the clock (ADR-0051 (a)).
+    pub(super) sink: MemorySink,
+}
+
+impl Default for Shared {
+    /// Build an empty state with the default clock, shared by the sink.
+    fn default() -> Self {
+        Self::with_clock(MemoryClock::default())
+    }
 }
 
 impl Shared {
+    /// Build an empty state whose transactions and sink take their time from `clock`.
+    fn with_clock(clock: MemoryClock) -> Self {
+        Self {
+            state: MemoryState::default(),
+            audit: Vec::new(),
+            audit_times: Vec::new(),
+            journal: Vec::new(),
+            draft_writes: Vec::new(),
+            faults: Faults::default(),
+            queued_faults: Vec::new(),
+            sink: MemorySink::with_clock(clock.clone()),
+            clock,
+            read_draft_hook: ReadDraftHook::default(),
+        }
+    }
+
     /// Take the oldest queued fault of `point` out of the queue, or return `None`.
     pub(super) fn take_queued(&mut self, point: FaultPoint) -> Option<Fault> {
         let index = self
@@ -88,11 +113,17 @@ impl MemoryStore {
     #[must_use]
     pub fn with_clock(clock: MemoryClock) -> Self {
         Self {
-            shared: Arc::new(Mutex::new(Shared {
-                clock,
-                ..Shared::default()
-            })),
+            shared: Arc::new(Mutex::new(Shared::with_clock(clock))),
         }
+    }
+
+    /// Return a handle of the security event sink of the store.
+    ///
+    /// The handle shares the events and the clock of the store. The read model of the audit
+    /// views reads these events (ADR-0051 (a)).
+    #[must_use]
+    pub fn sink(&self) -> MemorySink {
+        self.shared.lock().sink.clone()
     }
 
     /// Build a handle of the store that owns `shared`.
@@ -135,11 +166,16 @@ impl MemoryStore {
             return Err(fault.into());
         }
         shared.journal.push(JournalEntry::Begin(isolation));
+        let visible = VisibleLogs {
+            audit: shared.audit.len(),
+            events: shared.sink.recorded_count(),
+        };
         Ok(MemoryTransaction::new(
             Arc::clone(&self.shared),
             shared.state.clone(),
             shared.clock.now(),
             isolation,
+            visible,
         ))
     }
 

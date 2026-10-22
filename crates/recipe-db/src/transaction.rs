@@ -4,6 +4,8 @@
 //! port has its own module with its `impl`. The read port `RecipeReads` of the recipe pages has
 //! its `impl` here, and its SQL lives in `recipe_list`, `version_reads`, and `parameter_reads`.
 
+mod audit_reads;
+mod diff_reads;
 mod draft_rows;
 mod draft_writes;
 mod drafts;
@@ -17,6 +19,7 @@ mod recipe_list;
 mod recipe_rows;
 mod recipe_writes;
 mod recipes;
+mod security_event_reads;
 mod type_rows;
 mod type_usage;
 mod types;
@@ -32,11 +35,14 @@ use std::collections::BTreeMap;
 use async_trait::async_trait;
 use recipe_app::error::StorageError;
 use recipe_app::ports::{
-    AttemptRepository, AuditWritten, DraftRepository, NonEmpty, ParameterRow, PlantRepository,
-    RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary, SessionRepository, Transaction,
-    TypeCatalog, UnitCount, UnitLookup, UserRepository, VersionDetail, VersionSummary,
+    AggregateId, AttemptRepository, AuditEntryId, AuditFilter, AuditReads, AuditRecord, AuditRow,
+    AuditScope, AuditWritten, ChangeFlags, CursorPage, DiffReads, DiffSides, DraftRepository,
+    EntityLabel, NonEmpty, ParameterRow, PlantRepository, RecipeFilter, RecipeReads,
+    RecipeRepository, RecipeSummary, SecurityEventFilter, SecurityEventId, SecurityEventRow,
+    SessionRepository, Transaction, TypeCatalog, UnitCount, UnitLookup, UserRepository,
+    VersionDetail, VersionSummary,
 };
-use recipe_domain::audit::AuditEntry;
+use recipe_domain::audit::{AggregateType, AuditEntry};
 use recipe_domain::identity::Login;
 use recipe_domain::plant::UnitId;
 use recipe_domain::recipe::{ParameterKey, RecipeId, RecipeVersionId, StoredParameter};
@@ -84,6 +90,14 @@ impl Transaction for PgTransaction {
     }
 
     fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
+        self
+    }
+
+    fn audit_reads(&mut self) -> &mut dyn AuditReads {
+        self
+    }
+
+    fn diff_reads(&mut self) -> &mut dyn DiffReads {
         self
     }
 
@@ -186,5 +200,80 @@ impl RecipeReads for PgTransaction {
         key: ParameterKey,
     ) -> Result<Option<StoredParameter>, StorageError> {
         parameter_reads::by_key(&mut self.tx, version, key).await
+    }
+}
+
+/// The read port of the audit views (ADR-0051). No method takes a lock.
+///
+/// The SQL of the audit entries lives in `audit_reads`, and the SQL of the security events lives
+/// in `security_event_reads`. The caller opens the transaction with `Isolation::ReadOnly`.
+#[async_trait]
+impl AuditReads for PgTransaction {
+    async fn entries(
+        &mut self,
+        filter: &AuditFilter,
+        scope: AuditScope,
+        before: Option<AuditEntryId>,
+        limit: u32,
+    ) -> Result<CursorPage<AuditRow>, StorageError> {
+        audit_reads::entries(&mut self.tx, filter, scope, before, limit).await
+    }
+
+    async fn entry(
+        &mut self,
+        id: AuditEntryId,
+        scope: AuditScope,
+    ) -> Result<Option<AuditRecord>, StorageError> {
+        audit_reads::entry(&mut self.tx, id, scope).await
+    }
+
+    async fn history(
+        &mut self,
+        recipe: RecipeId,
+        before: Option<AuditEntryId>,
+        limit: u32,
+    ) -> Result<CursorPage<AuditRow>, StorageError> {
+        audit_reads::history(&mut self.tx, recipe, before, limit).await
+    }
+
+    async fn security_events(
+        &mut self,
+        filter: &SecurityEventFilter,
+        before: Option<SecurityEventId>,
+        limit: u32,
+    ) -> Result<CursorPage<SecurityEventRow>, StorageError> {
+        security_event_reads::security_events(&mut self.tx, filter, before, limit).await
+    }
+
+    async fn aggregate_label(
+        &mut self,
+        aggregate_type: AggregateType,
+        id: AggregateId,
+    ) -> Result<EntityLabel, StorageError> {
+        audit_reads::aggregate_label(&mut self.tx, aggregate_type, id).await
+    }
+}
+
+/// The read port of the diff (ADR-0050). No method takes a lock.
+///
+/// The SQL lives in `diff_reads`. The caller opens the transaction with
+/// `Isolation::RepeatableRead`, so the flags and the pairs come from one snapshot.
+#[async_trait]
+impl DiffReads for PgTransaction {
+    async fn change_flags(
+        &mut self,
+        old: Option<RecipeVersionId>,
+        new: RecipeVersionId,
+    ) -> Result<Vec<ChangeFlags>, StorageError> {
+        diff_reads::change_flags(&mut self.tx, old, new).await
+    }
+
+    async fn pairs(
+        &mut self,
+        old: Option<RecipeVersionId>,
+        new: Option<RecipeVersionId>,
+        keys: &[ParameterKey],
+    ) -> Result<DiffSides, StorageError> {
+        diff_reads::pairs(&mut self.tx, old, new, keys).await
     }
 }

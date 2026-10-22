@@ -8,20 +8,15 @@
 
 use axum::http::StatusCode;
 
-use super::recipe_sweep_tests::{attribute_values, post_endpoints, sweep_pages};
+use super::recipe_sweep_tests::{TOKEN_ONLY_ROUTES, attribute_values, post_endpoints, sweep_pages};
 use super::recipes::test_world::recipe_world;
+use super::xss_kit::{assert_error_panel, assert_refused, assert_safe, has_control};
 use super::xss_tests::with_query;
-use crate::components_tests::assert_fixed_svg_tags;
-use crate::pages::test_helpers::{
-    askama_escape, assert_clean_html, assert_no_user_text_in_hx_attributes, encode, field_value,
-    payloads,
-};
+use crate::pages::test_helpers::{askama_escape, encode, field_value, payloads};
 use crate::routes::matrix::{Endpoint, fill};
 use crate::test_support::plant::{HTMX, World};
 use crate::test_support::{Reply, post_pre_session};
 
-/// The most `<script>` tags that an answer may hold. They are the three files of `base.html`.
-const MAX_SCRIPT_TAGS: usize = 3;
 /// The path of the draft 3 of `R-100`.
 const DRAFT: &str = "/recipes/R-100/versions/3";
 /// The query values that no payload can satisfy: a template with `{}` and the code of the answer.
@@ -75,52 +70,6 @@ const FIELD_NAMES: [&str; 5] = [
     "limits[{}].min",
     "new_member_values[{}].x",
 ];
-
-/// Return true when `Text::parse` refuses the payload, because it holds a control character.
-fn has_control(payload: &str) -> bool {
-    payload.chars().any(char::is_control)
-}
-
-/// Return true when escaping changes the payload, so the raw payload must not appear in an answer.
-fn escapes(payload: &str) -> bool {
-    askama_escape(payload) != payload
-}
-
-/// Assert that an answer holds no markup of `payload` (design D14).
-fn assert_safe(reply: &Reply, payload: &str, what: &str) {
-    let body = &reply.body;
-    assert_clean_html(body);
-    assert_fixed_svg_tags(body);
-    assert_no_user_text_in_hx_attributes(body, payload);
-    assert!(!body.contains("<img"), "{what}: <img in {body}");
-    let scripts = body.matches("<script").count();
-    assert!(scripts <= MAX_SCRIPT_TAGS, "{what}: {scripts} scripts");
-    if escapes(payload) {
-        assert!(!body.contains(payload), "{what}: raw payload in {body}");
-    }
-}
-
-/// Assert a refused request: a client error status, the error code, and a safe body.
-fn assert_refused(reply: &Reply, code: &str, payload: &str, what: &str) {
-    assert!(
-        reply.status.is_client_error(),
-        "{what}: {} {}",
-        reply.status,
-        reply.body
-    );
-    assert!(
-        reply.body.contains(code),
-        "{what}: no {code} in {}",
-        reply.body
-    );
-    assert_safe(reply, payload, what);
-}
-
-/// Assert that an HTMX answer sends its error into `#error-panel` and keeps the URL.
-fn assert_error_panel(reply: &Reply, what: &str) {
-    assert_eq!(reply.header("hx-retarget"), "#error-panel", "{what}");
-    assert_eq!(reply.header("hx-push-url"), "false", "{what}");
-}
 
 /// Return the tag of the element with the `id`, up to the end of the tag.
 fn tag_of<'a>(body: &'a str, id: &str) -> &'a str {
@@ -494,7 +443,7 @@ fn recipe_xss_the_field_table_names_only_routes_of_the_endpoint_table() {
     }
     for route in &routes {
         assert!(
-            cases().iter().any(|case| case.0 == *route),
+            TOKEN_ONLY_ROUTES.contains(route) || cases().iter().any(|case| case.0 == *route),
             "no field of {route}"
         );
     }

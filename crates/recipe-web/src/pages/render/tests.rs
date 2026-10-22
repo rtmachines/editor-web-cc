@@ -1,4 +1,7 @@
 //! Tests of the redirect helpers of `render.rs` (task 6.1, design D19).
+//!
+//! The file also holds the tests of the link builders `query_url`, `page_url`, and `cursor_url`
+//! (step-7 item S7-4).
 
 use axum::http::header::{LOCATION, SET_COOKIE};
 use axum::http::{HeaderValue, StatusCode};
@@ -8,7 +11,7 @@ use uuid::Uuid;
 
 use askama::Template;
 
-use super::{page_url, see_other_path};
+use super::{cursor_url, page_url, query_url, see_other_path};
 use crate::error::WebError;
 use crate::i18n::{Bundles, Lang};
 use crate::pages::Texts;
@@ -160,6 +163,57 @@ fn render_page_url_encodes_the_key_too_and_keeps_only_the_unreserved_characters(
     );
     let reserved = page_url("/p", &[("k", "/=?\"'<>\n\u{e9}")], 1);
     assert_eq!(reserved, "/p?k=%2F%3D%3F%22%27%3C%3E%0A%C3%A9&page=1");
+}
+
+#[test]
+fn render_query_url_without_a_pair_gives_the_bare_path() {
+    assert_eq!(query_url("/recipes/R-1/diff", &[]), "/recipes/R-1/diff");
+}
+
+#[test]
+fn render_query_url_with_one_pair_adds_a_question_mark_and_no_ampersand() {
+    assert_eq!(query_url("/p", &[("rv", "7")]), "/p?rv=7");
+}
+
+#[test]
+fn render_query_url_keeps_the_order_of_several_pairs() {
+    let url = query_url("/p", &[("kind", "added"), ("rv", "7"), ("a", "1")]);
+    assert_eq!(url, "/p?kind=added&rv=7&a=1");
+}
+
+#[test]
+fn render_query_url_encodes_a_value_and_a_key_that_need_it() {
+    assert_eq!(query_url("/p", &[("q", SEARCH)]), format!("/p?q={ENCODED}"));
+    assert_eq!(query_url("/p", &[("a&b", "c d")]), "/p?a%26b=c%20d");
+}
+
+#[test]
+fn render_query_url_encodes_an_empty_value_as_an_empty_text() {
+    assert_eq!(query_url("/p", &[("q", ""), ("rv", "2")]), "/p?q=&rv=2");
+}
+
+#[test]
+fn render_cursor_url_encodes_the_values_and_puts_the_cursor_last() {
+    let url = cursor_url(
+        "/audit",
+        &[("actor", "a b"), ("action", ""), ("from", "2026-10-16")],
+        Some(7),
+    );
+    assert_eq!(url, "/audit?actor=a%20b&from=2026-10-16&before=7");
+    assert_eq!(cursor_url("/audit", &[("actor", "")], None), "/audit");
+}
+
+#[test]
+fn render_cursor_url_builds_the_older_page_link_of_the_history() {
+    let url = cursor_url("/recipes/R-500/history", &[], Some(40));
+    assert_eq!(url, "/recipes/R-500/history?before=40");
+}
+
+#[test]
+fn render_cursor_url_builds_the_link_to_the_audit_list_of_an_aggregate() {
+    let id = "12345678-0000-0000-0000-000000000000";
+    let url = cursor_url("/audit", &[("aggregate", id)], None);
+    assert_eq!(url, format!("/audit?aggregate={id}"));
 }
 
 #[test]

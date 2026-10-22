@@ -6,7 +6,7 @@ use std::cmp::Reverse;
 
 use recipe_domain::identity::{Login, Permission};
 use recipe_domain::plant::{Machine, PlcType};
-use recipe_domain::recipe::{Recipe, RecipeId, ReferenceNumber, VersionState};
+use recipe_domain::recipe::{Recipe, RecipeId, ReferenceNumber, VersionHeader, VersionState};
 use recipe_domain::timestamp::Timestamp;
 
 use super::outdated::{OutdatedParameter, RebindBudget, outdated_parameters};
@@ -193,7 +193,7 @@ impl GetVersionForm {
             })
             .collect();
         choices.sort_by_key(|choice| Reverse(choice.number));
-        let default_based_on = default_base(&choices);
+        let default_based_on = default_base(&recipe, &choices);
         Ok(VersionForm {
             reference: input.reference,
             choices,
@@ -212,12 +212,11 @@ fn deleted(recipe: &Recipe) -> AppError {
 /// Choose the default base: the approved version, else the newest version.
 ///
 /// `choices` come with the newest number first.
-fn default_base(choices: &[VersionChoice]) -> Option<u32> {
-    choices
-        .iter()
-        .find(|choice| choice.state == VersionState::Approved)
-        .or_else(|| choices.first())
-        .map(|choice| choice.number)
+fn default_base(recipe: &Recipe, choices: &[VersionChoice]) -> Option<u32> {
+    recipe
+        .approved_version()
+        .map(VersionHeader::number)
+        .or_else(|| choices.first().map(|choice| choice.number))
 }
 
 /// The parsed request of `GetVersion`.

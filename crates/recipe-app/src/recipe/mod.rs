@@ -23,7 +23,7 @@ mod translation;
 mod update_definition;
 
 pub use add_parameter::{AddParameter, AddParameterInput, AddParameterOutput};
-pub use approve_version::{ApproveVersion, ApproveVersionInput};
+pub use approve_version::{ApproveVersion, ApproveVersionInput, ApproveVersionOutput};
 pub use create_recipe::{CreateRecipe, CreateRecipeInput, CreateRecipeOutput};
 pub use create_version::{CreateVersion, CreateVersionInput, CreateVersionOutput};
 pub use delete_recipe::{DeleteRecipe, DeleteRecipeInput, DeleteRecipeOutput};
@@ -32,14 +32,17 @@ pub use discard_retire::{
 };
 pub use draft_session::DraftOutput;
 pub use queries::{
-    GetLimits, GetParameter, GetParameterForm, GetParameterFormInput, GetRecipe, GetRecipeForm,
-    GetRecipeInput, GetTranslations, GetVersion, GetVersionForm, GetVersionFormInput,
-    GetVersionInput, LastChange, LimitsView, ListDeletedRecipes, ListParameters,
-    ListParametersInput, ListRecipes, ListVersions, ListVersionsInput, OutdatedParameter,
-    ParameterForm, ParameterList, ParameterRef, ParameterView, RecipeForm, RecipeFormInput,
-    RecipeList, RecipeListInput, RecipeView, StructRevision, TranslationsView, VersionChoice,
-    VersionForm, VersionList, VersionView,
+    ApprovalPreview, ApprovalPreviewInput, DiffChoice, DiffPage, DiffSection, DiffSummary,
+    DiffVersions, DiffVersionsInput, GetApprovalPreview, GetLimits, GetParameter, GetParameterForm,
+    GetParameterFormInput, GetRecipe, GetRecipeForm, GetRecipeInput, GetTranslations, GetVersion,
+    GetVersionForm, GetVersionFormInput, GetVersionInput, LastChange, LimitsView,
+    ListDeletedRecipes, ListParameters, ListParametersInput, ListRecipes, ListVersions,
+    ListVersionsInput, OutdatedParameter, ParameterForm, ParameterList, ParameterRef,
+    ParameterView, RecipeForm, RecipeFormInput, RecipeList, RecipeListInput, RecipeView,
+    StructRevision, TranslationsView, VersionChoice, VersionDiff, VersionForm, VersionList,
+    VersionView,
 };
+pub(crate) use queries::{read_recipe, require_visible};
 pub use rebind::{RebindTypeRevision, RebindTypeRevisionInput};
 pub use remove_parameter::{RemoveParameter, RemoveParameterInput};
 pub use rename_restore::{

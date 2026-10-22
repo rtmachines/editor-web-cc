@@ -85,6 +85,9 @@ pub(crate) fn table() -> Vec<RouteEntry> {
     rows.extend(pages::types::rows());
     rows.extend(pages::versions::rows());
     rows.extend(pages::parameters::rows());
+    rows.extend(pages::history::rows());
+    rows.extend(pages::audit::rows());
+    rows.extend(pages::security_events::rows());
     rows
 }
 
@@ -338,6 +341,8 @@ pub fn router(state: WebState) -> Router {
     assemble(state, table(), Router::new())
 }
 
+#[cfg(test)]
+mod approval_access_tests;
 #[cfg(test)]
 pub(crate) mod matrix;
 #[cfg(test)]

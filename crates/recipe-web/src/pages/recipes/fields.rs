@@ -83,7 +83,12 @@ impl FieldLines {
     ///
     /// Returns `WebError::Fields` (`E-WEB-008`) with each line of a bad field.
     pub(crate) fn check(self) -> Result<(), WebError> {
-        self.into_lines()
-            .map_or(Ok(()), |lines| Err(WebError::Fields { lines, form: None }))
+        self.into_lines().map_or(Ok(()), |lines| {
+            Err(WebError::Fields {
+                lines,
+                form: None,
+                failure: None,
+            })
+        })
     }
 }

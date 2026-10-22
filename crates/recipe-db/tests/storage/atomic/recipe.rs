@@ -393,11 +393,12 @@ async fn approve_version_retires_the_old_approved_version_and_approves_the_draft
     let input = approve_input(&mut app, &world, draft, 2).await;
     let before = app.head().await;
 
-    ApproveVersion::new(app.context())
+    let output = ApproveVersion::new(app.context())
         .execute(&approver, &app.meta, input)
         .await
         .unwrap();
 
+    assert_eq!(output.retired, Some(1));
     assert_eq!(status(&mut app, draft).await, "approved");
     assert_eq!(status(&mut app, world.version).await, "retired");
     let hashed = app

@@ -31,7 +31,7 @@ const SPEED_MAX: &str = "3000";
 const ZONE_VALUE: &str = r#"{"speed":0,"temp_max":0}"#;
 
 /// One parameter of the draft: the fields that differ from parameter to parameter.
-struct Spec {
+pub(super) struct Spec {
     /// The number in the last field of the identifier.
     n: u128,
     key: Uuid,
@@ -46,7 +46,7 @@ struct Spec {
 
 impl Spec {
     /// Build a spec without limits.
-    fn new(
+    pub(super) fn new(
         (n, key, tag): (u128, Uuid, &'static str),
         (unit, address): (&'static str, &'static str),
         plc_type: PlcTypeId,
@@ -65,7 +65,7 @@ impl Spec {
     }
 
     /// Add a limit from 0 to `SPEED_MAX` on the leaf `path`.
-    fn limited(mut self, path: &str) -> Self {
+    pub(super) fn limited(mut self, path: &str) -> Self {
         self.limits.push(StoredLimit {
             leaf_path: LeafPath::parse(path).unwrap(),
             min: Some("0".parse().unwrap()),
@@ -160,7 +160,7 @@ fn tree_of(state: &MemoryState, plant: &PlantIds, type_id: PlcTypeId) -> TypeTre
 }
 
 /// Build the row of one parameter. The value is parsed against the tree of its type.
-fn stored(spec: Spec, state: &MemoryState, plant: &PlantIds) -> StoredParameter {
+pub(super) fn stored(spec: Spec, state: &MemoryState, plant: &PlantIds) -> StoredParameter {
     let machine = state.machine(plant.m7).unwrap();
     let unit = machine
         .unit(&UnitPath::parse(spec.unit).unwrap())

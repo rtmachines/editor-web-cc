@@ -2,7 +2,8 @@
 {% import "components/heading.html" as headings %}
 {% import "components/badge.html" as badges %}
 {% import "components/field.html" as fields %}
-{#- The recipe page of design D7. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). The rename form shows only when form.shown is true. The block rename_form renders alone as the out-of-band form of the rename answers (ADR-0041 (e) and (h)). Each hx attribute is a literal. The action holds the reference number and has hx-boost (ADR-0037 (f)). -#}
+{% import "components/danger.html" as dangers %}
+{#- The recipe page of design D7. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). The rename form shows only when form.shown is true. The block rename_form renders alone as the out-of-band form of the rename answers (ADR-0041 (e) and (h)). Each hx attribute is a literal. The action holds the reference number and has hx-boost (ADR-0037 (f)). The link to the history shows for every role and for a deleted recipe (ADR-0051 (g)). Its href holds the reference number and its container has hx-boost. The link to a new version and the link to the history stand in one row of links, as on the version page (ADR-0049 (i)). -#}
 {% block content %}
 {{ headings::h1(layout, layout.title) }}
 {% if deleted %}<div class="actions">{{ badges::deleted_large(t.get("status-deleted")) }}</div>
@@ -17,7 +18,8 @@
 {{ fields::named(t, "recipe_name", "name", t.get("field-recipe-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("recipe_name")) }}
 <p class="actions"><button type="submit" id="recipe-rename-submit">{{ t.get("recipe-rename-submit") }}</button></p>
 </form>
-{% endif %}{% endblock %}{% if let Some(href) = new_version_href %}<p class="actions"><a class="target-link" href="{{ href }}">{{ t.get("version-new-link") }}</a></p>
-{% endif %}<div id="versions-table">{% include "versions-table.html" %}</div>
-<p><a class="target-link" href="/recipes">{{ t.get("recipes-title") }}</a></p>
+{% endif %}{% endblock %}<p class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">{% if let Some(href) = new_version_href %}<a class="target-link" href="{{ href }}">{{ t.get("version-new-link") }}</a>{% endif %}<a class="target-link" href="{{ history_href }}">{{ t.get("recipe-history-link") }}</a></p>
+<div id="versions-table">{% include "versions-table.html" %}</div>
+{% if let Some(delete) = delete %}{{ dangers::danger_action(t, t.get("delete-recipe-summary"), t.get("delete-recipe-notice"), delete.button, delete.action, layout.csrf_token) }}
+{% endif %}<p><a class="target-link" href="/recipes">{{ t.get("recipes-title") }}</a></p>
 {% endblock %}

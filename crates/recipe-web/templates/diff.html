@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/badge.html" as badges %}
+{% import "components/diff.html" as diffs %}
+{#- The diff page of two versions (ADR-0050, design D4 and D7). The header comes first, then the state Deleted of a deleted recipe, then the summary and the sections of the shared view. The page has no form, so a deleted recipe needs no other change. Each href comes from code. The empty value no_jump omits the first item of the summary, which is the link to a form. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if deleted %}<div class="actions">{{ badges::deleted_large(t.get("status-deleted")) }}</div>
+{% endif %}{{ diffs::summary(t, diff, no_jump, no_jump) }}
+{{ diffs::sections(t, diff) }}
+<p><a class="target-link" href="{{ back_href }}">{{ back_text }}</a></p>
+{% endblock %}

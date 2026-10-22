@@ -31,6 +31,13 @@ const NOT_S7_300: &[PlcPlatform] = &[
 /// The platforms with `WSTRING(254)`.
 const S7_WIDE: &[PlcPlatform] = &[PlcPlatform::S7_1200, PlcPlatform::S7_1500];
 
+/// The platforms with `LTIME`: the IEC family and `S7_1500`.
+const LTIME_PLATFORMS: &[PlcPlatform] = &[
+    PlcPlatform::CodesysIec,
+    PlcPlatform::TwinCat3,
+    PlcPlatform::S7_1500,
+];
+
 /// The high bits that mark a seed identifier.
 const SEED_ID_PREFIX: u128 = 0x5eed_0000_0000_0000_0000_0000_0000_0000;
 
@@ -54,7 +61,9 @@ const fn seed(
 }
 
 /// The seed rows. The position in this list gives the identifier.
-const SEEDS: [Seed; 10] = [
+///
+/// Append a new row at the end, so that no identifier changes.
+const SEEDS: [Seed; 11] = [
     seed(Primitive::Bool, None, ALL),
     seed(Primitive::Int, None, ALL),
     seed(Primitive::Dint, None, ALL),
@@ -65,12 +74,13 @@ const SEEDS: [Seed; 10] = [
     seed(Primitive::String, Some(80), IEC),
     seed(Primitive::Wstring, Some(254), S7_WIDE),
     seed(Primitive::Wstring, Some(80), IEC),
+    seed(Primitive::Ltime, None, LTIME_PLATFORMS),
 ];
 
 /// Return the identifier of a seed row, or `None` when the row is not in the seed.
 ///
 /// The seed has `BOOL`, `INT`, `DINT`, `REAL`, `LREAL`, `TIME`, `STRING(254)`, `STRING(80)`,
-/// `WSTRING(254)`, and `WSTRING(80)`. A primitive without length takes `None`.
+/// `WSTRING(254)`, `WSTRING(80)`, and `LTIME`. A primitive without length takes `None`.
 #[must_use]
 pub fn seed_type_id(primitive: Primitive, string_length: Option<u16>) -> Option<PlcTypeId> {
     let index = SEEDS
@@ -118,9 +128,9 @@ fn seed_row(row: &Seed) -> Option<PlcType> {
 impl MemoryStore {
     /// Insert the global primitive rows of `data-model.md` section 7 that the tests need.
     ///
-    /// The rows are `BOOL`, `INT`, `DINT`, `REAL`, `LREAL`, `TIME`, the seed `STRING(254)` and
-    /// `STRING(80)`, and the seed `WSTRING(254)` and `WSTRING(80)`, with the platforms of the
-    /// matrix. [`seed_type_id`] gives their identifiers. `seed_type` adds more rows.
+    /// The rows are `BOOL`, `INT`, `DINT`, `REAL`, `LREAL`, `TIME`, `LTIME`, and the seed `STRING`
+    /// and `WSTRING` rows of 254 and 80 characters. Each row has the platforms of the matrix.
+    /// [`seed_type_id`] gives their identifiers. `seed_type` adds more rows.
     pub fn seed_primitive_types(&self) {
         for row in SEEDS.iter().filter_map(seed_row) {
             self.seed_type(&row);

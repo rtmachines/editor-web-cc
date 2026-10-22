@@ -108,7 +108,7 @@ fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
     let mut args = FluentArgs::new();
     match error {
         WebError::PayloadTooLarge { limit } => args.set("limit", limit.to_string()),
-        WebError::BadRequest { field, reason } => {
+        WebError::BadRequest { field, reason } | WebError::BadQuery { field, reason } => {
             args.set("field", label_of(field, ctx));
             args.set("reason", field_reason_text(bundles, ctx.lang, *reason));
         }
@@ -283,6 +283,11 @@ fn lines_of(error: &WebError, ctx: &ErrorContext<'_>) -> Vec<FieldLine> {
             field: input_id(field).to_owned(),
             label: label_of(field, ctx),
             has_input: has_input(field),
+        }],
+        WebError::BadQuery { field, .. } => vec![FieldLine {
+            field: (*field).to_owned(),
+            label: label_of(field, ctx),
+            has_input: false,
         }],
         WebError::BadRow { row, field, .. } => vec![FieldLine {
             field: format!("members-{row}-{}", field.id_suffix()),

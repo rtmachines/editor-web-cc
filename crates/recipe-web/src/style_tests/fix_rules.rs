@@ -4,8 +4,8 @@
 //! Each test reads one declaration. A rule of a base class lives in `app.css`. A new rule of a
 //! component lives in `components.css` (design D9).
 
-use super::rules::value_of;
-use super::{app_sheet, components_sheet, root_tokens};
+use super::rules::{assert_classes_listed_and_used, value_of};
+use super::{COMPONENTS_CSS, app_sheet, components_sheet, root_tokens};
 
 /// Assert that `selector` sets `property` to `expected` in `sheet`.
 fn assert_rule(sheet: &[super::css::Rule], selector: &str, property: &str, expected: &str) {
@@ -112,6 +112,23 @@ fn fix_rules_the_empty_state_in_a_table_has_no_border_of_its_own() {
         "border",
         "var(--edge) solid var(--color-border)",
     );
+}
+
+// --- DR-3: the time of a table row stands on one line -----------------------------------------------
+
+#[test]
+fn fix_rules_the_time_of_a_table_row_does_not_break() {
+    assert_rule(
+        &components_sheet(),
+        ".table-wrap .time",
+        "white-space",
+        "nowrap",
+    );
+}
+
+#[test]
+fn fix_rules_the_first_comment_of_components_css_lists_the_time_class() {
+    assert_classes_listed_and_used(COMPONENTS_CSS, &components_sheet(), &["time"]);
 }
 
 // --- U7: the tree row ------------------------------------------------------------------------------

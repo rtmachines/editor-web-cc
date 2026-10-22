@@ -116,22 +116,23 @@ fn zero_int(fixture: &Fixture) -> StoredValue {
     ParameterValue::parse("0", &tree).unwrap().to_stored()
 }
 
-/// Seed an `INT` parameter `tag` on a unit that the machine does not hold.
+/// Seed an `INT` parameter `tag` with the value 0 and no limit on the unit `unit` of `version`.
 ///
-/// The snapshot check of `CreateVersion` reports the parameter with `E-PLT-020`.
-pub(crate) fn seed_parameter_on_unknown_unit(
+/// `n` makes the identifier and the ordinal unique in the version.
+pub(crate) fn seed_parameter_on_unit(
     fixture: &Fixture,
     version: RecipeVersionId,
+    unit: UnitId,
     (n, tag): (u32, &str),
 ) {
     let id = Uuid::from_u128(PARAMETER_BASE | u128::from(n));
     let parameter = StoredParameter {
         id: ParameterId::from(id),
         key: ParameterKey::from(id),
-        unit: UnitId::from(Uuid::from_u128(PARAMETER_BASE | 0xFFFF)),
+        unit,
         tag: ParameterTag::parse(tag).unwrap(),
         name_en: text(tag),
-        description_en: LongText::parse("A parameter on an unknown unit").unwrap(),
+        description_en: LongText::parse("A seeded parameter without a limit").unwrap(),
         translations: Vec::new(),
         plc_type: seed_type_id(Primitive::Int, None).unwrap(),
         s7_address: None,
@@ -140,4 +141,16 @@ pub(crate) fn seed_parameter_on_unknown_unit(
         ordinal: Ordinal::parse(n).unwrap(),
     };
     fixture.store.seed_parameter(version, &parameter);
+}
+
+/// Seed an `INT` parameter `tag` on a unit that the machine does not hold.
+///
+/// The snapshot check of `CreateVersion` reports the parameter with `E-PLT-020`.
+pub(crate) fn seed_parameter_on_unknown_unit(
+    fixture: &Fixture,
+    version: RecipeVersionId,
+    (n, tag): (u32, &str),
+) {
+    let unit = UnitId::from(Uuid::from_u128(PARAMETER_BASE | 0xFFFF));
+    seed_parameter_on_unit(fixture, version, unit, (n, tag));
 }

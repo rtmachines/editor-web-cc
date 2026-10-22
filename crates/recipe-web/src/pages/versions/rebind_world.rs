@@ -11,7 +11,6 @@
 
 use std::collections::BTreeSet;
 
-use axum::http::StatusCode;
 use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
@@ -26,9 +25,11 @@ use recipe_domain::text::{LongText, Text};
 use uuid::Uuid;
 
 use crate::WebSettings;
+// The rebind tests in `versions` import this name from here. It is their name of `assert_htmx_error`.
+pub(super) use crate::pages::test_helpers::assert_htmx_error as assert_htmx_answer;
 use crate::test_support::plant::World;
 use crate::test_support::recipes::ZONES_KEY;
-use crate::test_support::{CSRF_KEY_NEW, Fixture, Reply};
+use crate::test_support::{CSRF_KEY_NEW, Fixture};
 
 /// The version page of the draft of `R-100`.
 pub(super) const DRAFT_PAGE: &str = "/recipes/R-100/versions/3";
@@ -110,19 +111,6 @@ pub(super) fn summary_lines(body: &str) -> usize {
 pub(super) fn oob_form<'a>(body: &'a str, id: &str) -> &'a str {
     let (_before, rest) = body.split_once(&format!("<form id=\"{id}\"")).unwrap();
     rest.split("</form>").next().unwrap()
-}
-
-/// Assert an HTMX error answer: the status, the code, and the three headers of `api.md` 5.3.
-pub(super) fn assert_htmx_answer(reply: &Reply, status: StatusCode, code: &str) {
-    assert_eq!(reply.status, status, "{code}: {}", reply.body);
-    assert!(reply.body.contains(code), "{code}: {}", reply.body);
-    assert_eq!(reply.header("hx-retarget"), "#error-panel", "{code}");
-    assert_eq!(
-        reply.header("hx-reswap"),
-        "innerHTML show:#error-panel:top",
-        "{code}"
-    );
-    assert_eq!(reply.header("hx-push-url"), "false", "{code}");
 }
 
 /// Build the world of `recipe_world` with the bound `form.rebind_leaves` set to `bound`.

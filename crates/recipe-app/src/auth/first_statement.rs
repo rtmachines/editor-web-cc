@@ -11,6 +11,9 @@ use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{Login, Role};
 
+use crate::audit::{
+    AuditListInput, GetAuditEntry, ListAuditEntries, ListSecurityEvents, SecurityEventListInput,
+};
 use crate::auth::{CurrentUser, Operation};
 use crate::context::UseCase;
 use crate::error::AppError;
@@ -25,11 +28,12 @@ use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
     AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
 };
+use crate::ports::{AuditEntryId, AuditFilter, TimeRange};
 use crate::recipe::{
-    AddParameter, ApproveVersion, CreateRecipe, CreateVersion, DeleteRecipe, DiscardDraft,
-    ListDeletedRecipes, RebindTypeRevision, RecipeListInput, RemoveParameter, RemoveTranslation,
-    RenameRecipe, ReplaceLimits, RestoreRecipe, RetireVersion, SetParameterValue,
-    UpdateParameterDefinition, UpsertTranslation,
+    AddParameter, ApprovalPreviewInput, ApproveVersion, CreateRecipe, CreateVersion, DeleteRecipe,
+    DiffChoice, DiscardDraft, GetApprovalPreview, ListDeletedRecipes, RebindTypeRevision,
+    RecipeListInput, RemoveParameter, RemoveTranslation, RenameRecipe, ReplaceLimits,
+    RestoreRecipe, RetireVersion, SetParameterValue, UpdateParameterDefinition, UpsertTranslation,
 };
 
 /// The Operator `mhoffman`, who has no recipe or plant permission.
@@ -229,6 +233,28 @@ async fn approve_version_checks_the_permission_first() {
 }
 
 #[tokio::test]
+async fn get_approval_preview_checks_the_permission_first() {
+    let fixture = scenarios::approved_and_draft();
+    let input = ApprovalPreviewInput {
+        reference: scenarios::approve_input(2).reference,
+        number: 2,
+        choice: DiffChoice {
+            kind: None,
+            page: 0,
+        },
+    };
+    let result = GetApprovalPreview::new(fixture.context())
+        .execute(&operator(), &meta(), input)
+        .await;
+    assert_refused(
+        &fixture,
+        result,
+        GetApprovalPreview::OPERATION,
+        "GetApprovalPreview",
+    );
+}
+
+#[tokio::test]
 async fn retire_version_checks_the_permission_first() {
     let fixture = scenarios::retired();
     let result = RetireVersion::new(fixture.context())
@@ -351,6 +377,34 @@ async fn export_version_by_number_checks_the_permission_first() {
         ExportVersionByNumber::OPERATION,
         "ExportVersionByNumber",
     );
+}
+
+#[tokio::test]
+async fn list_audit_entries_checks_the_permission_first() {
+    let fixture = Fixture::new();
+    let input = AuditListInput {
+        filter: AuditFilter::default(),
+        before: None,
+    };
+    let result = ListAuditEntries::new(fixture.context())
+        .execute(&operator(), &meta(), input)
+        .await;
+    assert_refused(
+        &fixture,
+        result,
+        ListAuditEntries::OPERATION,
+        "ListAuditEntries",
+    );
+}
+
+#[tokio::test]
+async fn get_audit_entry_checks_the_permission_first() {
+    let fixture = Fixture::new();
+    let id = AuditEntryId::from(std::num::NonZeroU64::MIN);
+    let result = GetAuditEntry::new(fixture.context())
+        .execute(&operator(), &meta(), id)
+        .await;
+    assert_refused(&fixture, result, GetAuditEntry::OPERATION, "GetAuditEntry");
 }
 
 #[tokio::test]
@@ -566,6 +620,30 @@ async fn get_user_checks_the_permission_first() {
         .execute(&auth, &request, &login("anna"))
         .await;
     assert_identity_refused(&fixture, mark, result, GetUser::OPERATION, "GetUser");
+}
+
+#[tokio::test]
+async fn list_security_events_is_refused_for_a_process_engineer_before_a_read() {
+    let fixture = IdentityFixture::new();
+    let (auth, request) = fixture.actor(Role::ProcessEngineer).await;
+    let mark = fixture.store.journal().len();
+    let input = SecurityEventListInput {
+        kind: None,
+        login: None,
+        client_ip: None,
+        range: TimeRange::default(),
+        before: None,
+    };
+    let result = ListSecurityEvents::new(fixture.context.clone())
+        .execute(&auth, &request, input)
+        .await;
+    assert_identity_refused(
+        &fixture,
+        mark,
+        result,
+        ListSecurityEvents::OPERATION,
+        "ListSecurityEvents (ProcessEngineer)",
+    );
 }
 
 #[tokio::test]

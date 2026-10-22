@@ -32,7 +32,11 @@ use crate::state::WebState;
 
 /// Build the error of lines without a form: the page has no form of the route.
 fn lines_error(lines: NonEmpty<FieldError>) -> WebError {
-    WebError::Fields { lines, form: None }
+    WebError::Fields {
+        lines,
+        form: None,
+        failure: None,
+    }
 }
 
 /// Read the hidden field `row_version` of a fragment route.

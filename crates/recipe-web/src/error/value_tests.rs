@@ -2,8 +2,11 @@
 //!
 //! Every value that a message shows as text comes from the bundle of the UI language.
 
+use std::num::NonZeroU64;
+
 use axum::http::StatusCode;
 use recipe_app::auth::Operation;
+use recipe_app::ports::AuditEntryId;
 use recipe_domain::identity::Role;
 
 use recipe_app::error::{Missing, TaskStage};
@@ -16,6 +19,7 @@ use super::reason::FieldReason;
 use super::values::{missing_key, operation_key, password_reason_key, task_stage_key};
 use super::values::{missing_text, text_or};
 use crate::i18n::{Bundles, Lang};
+use crate::test_support::visible_text::visible_text;
 use crate::test_support::{Fixture, Reply, TestSession, get_with, post_fields};
 
 /// Return one `Missing` for each variant.
@@ -52,6 +56,8 @@ fn every_missing() -> Vec<Missing> {
             number: 1234,
             key: ParameterKey::from(Uuid::nil()),
         },
+        Missing::AuditEntry(AuditEntryId::from(NonZeroU64::new(1234).unwrap())),
+        Missing::MalformedAuditEntry,
     ]
 }
 
@@ -90,21 +96,6 @@ fn kebab_key(operation: Operation) -> String {
     key
 }
 
-/// Return the text that a user reads: the markup is gone.
-fn visible_text(html: &str) -> String {
-    let mut text = String::new();
-    let mut in_tag = false;
-    for c in html.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _other if !in_tag => text.push(c),
-            _skipped => {}
-        }
-    }
-    text
-}
-
 /// Send an HTMX request in the language `code` with the session.
 async fn htmx_get(fixture: &Fixture, session: &TestSession, code: &str, path: &str) -> Reply {
     let cookie = format!("{}; recipe_lang={code}", session.cookie);
@@ -132,8 +123,8 @@ fn values_every_field_reason_has_its_key_and_a_log_text() {
 }
 
 #[test]
-fn values_field_reason_all_lists_34_reasons_with_the_plant_reasons_at_11_to_19() {
-    assert_eq!(FieldReason::ALL.len(), 34);
+fn values_field_reason_all_lists_41_reasons_with_the_plant_reasons_at_11_to_19() {
+    assert_eq!(FieldReason::ALL.len(), 41);
     let tail = FieldReason::ALL.get(11..20).unwrap();
     let expected: Vec<FieldReason> = PLANT_REASON_KEYS
         .iter()
@@ -173,6 +164,7 @@ fn values_every_password_reason_and_task_stage_has_its_key() {
         TaskStage::Validation,
         TaskStage::Export,
         TaskStage::Token,
+        TaskStage::Diff,
     ] {
         assert_in_both(&bundles, task_stage_key(stage));
         let english = bundles
@@ -262,6 +254,25 @@ fn values_missing_recipe_values_use_their_own_keys_and_polish_texts() {
     assert_eq!(
         missing_text(&bundles, Lang::Pl, &parameter),
         "Parametr 00000000-0000-0000-0000-000000000000 wersji 1234 receptury R-7"
+    );
+}
+
+#[test]
+fn values_missing_audit_entry_names_the_full_id_in_polish_and_a_malformed_id_names_none() {
+    let bundles = Bundles::load().unwrap();
+    let missing = every_missing().remove(15);
+    assert_eq!(missing_key(&missing), "missing-audit-entry");
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &missing),
+        "Wpis audytu 1234"
+    );
+    assert_eq!(
+        missing_key(&Missing::MalformedAuditEntry),
+        "missing-malformed-audit-entry"
+    );
+    assert_eq!(
+        missing_text(&bundles, Lang::Pl, &Missing::MalformedAuditEntry),
+        "Wpis audytu"
     );
 }
 

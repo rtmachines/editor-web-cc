@@ -77,11 +77,26 @@ pub enum FieldReason {
     LangList,
     /// A hidden field of the form is missing or not valid, so the page must load again.
     Reload,
+    /// A filter date does not have the form `YYYY-MM-DD`, or the day does not exist.
+    Date,
+    /// The filter date `to` is before the filter date `from`.
+    DateOrder,
+    /// A filter value is not a value of its fixed list.
+    Choice,
+    /// A filter identifier is not a UUID in the hyphenated form.
+    Uuid,
+    /// The filter `entity_id` has a value, but the filter `entity_type` has none.
+    EntityWithoutType,
+    /// The filter `client_ip` is not an IPv4 address or an IPv6 address.
+    Address,
+    /// The cursor `before` of a list page is not a positive whole number.
+    Cursor,
 }
 
 impl FieldReason {
-    /// Every reason, in the order of the table in design D13.
-    pub const ALL: [Self; 34] = [
+    /// Every reason, in the order of the table in design D13. The reasons of the filter inputs
+    /// of design D6 come last.
+    pub const ALL: [Self; 41] = [
         Self::Form,
         Self::Lang,
         Self::LoginLength,
@@ -116,6 +131,13 @@ impl FieldReason {
         Self::MaxLength,
         Self::LangList,
         Self::Reload,
+        Self::Date,
+        Self::DateOrder,
+        Self::Choice,
+        Self::Uuid,
+        Self::EntityWithoutType,
+        Self::Address,
+        Self::Cursor,
     ];
 
     /// Return the key of the message of the reason in the bundles.
@@ -156,6 +178,13 @@ impl FieldReason {
             Self::MaxLength => "reason-max-length",
             Self::LangList => "reason-lang-list",
             Self::Reload => "reason-reload",
+            Self::Date => "reason-date",
+            Self::DateOrder => "reason-date-order",
+            Self::Choice => "reason-choice",
+            Self::Uuid => "reason-uuid",
+            Self::EntityWithoutType => "reason-entity-without-type",
+            Self::Address => "reason-address",
+            Self::Cursor => "reason-cursor",
         }
     }
 }
@@ -199,6 +228,24 @@ const fn recipe_text(reason: FieldReason) -> &'static str {
     }
 }
 
+/// Return the English text of a reason of the filter inputs (design D6 and D8).
+///
+/// Any other reason gives the text of `recipe_text`.
+const fn filter_text(reason: FieldReason) -> &'static str {
+    match reason {
+        FieldReason::Date => "a date has the form YYYY-MM-DD, for example 2026-10-17",
+        FieldReason::DateOrder => "the end date is the same as the start date or later",
+        FieldReason::Choice => "choose a value from the list",
+        FieldReason::Uuid => {
+            "an identifier has 36 characters in the form 8-4-4-4-12 of the digits 0 to 9 and the letters a to f"
+        }
+        FieldReason::EntityWithoutType => "choose an object type for the object",
+        FieldReason::Address => "an address is an IPv4 or an IPv6 address, for example 192.0.2.10",
+        FieldReason::Cursor => "the link of the page is not valid. Open the first page of the list",
+        other => recipe_text(other),
+    }
+}
+
 impl fmt::Display for FieldReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
@@ -234,7 +281,7 @@ impl fmt::Display for FieldReason {
             Self::SearchText => {
                 "the search text has at most 200 characters and no control character"
             }
-            other => recipe_text(*other),
+            other => filter_text(*other),
         })
     }
 }

@@ -11,7 +11,9 @@ use std::path::Path;
 /// The query files and their text. A new query file needs a row here.
 /// The test `every_file_with_an_execute_function_is_listed` fails without it.
 /// The test files (`*_tests.rs`) are not query files.
-const SOURCES: [(&str, &str); 4] = [
+const SOURCES: [(&str, &str); 6] = [
+    ("approval_preview.rs", include_str!("approval_preview.rs")),
+    ("diff.rs", include_str!("diff.rs")),
     ("parameter_form.rs", include_str!("parameter_form.rs")),
     ("parameters.rs", include_str!("parameters.rs")),
     ("recipes.rs", include_str!("recipes.rs")),

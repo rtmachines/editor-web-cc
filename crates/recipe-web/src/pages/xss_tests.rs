@@ -6,7 +6,7 @@
 use axum::http::StatusCode;
 use recipe_domain::identity::Role;
 
-use super::sweep_tests::{get_page_patterns, path_of};
+use super::sweep_tests::{get_page_patterns, path_of, seed_audit_entry};
 use crate::components_tests::assert_fixed_svg_tags;
 use crate::pages::test_helpers::{
     askama_escape, assert_clean_html, assert_no_user_text_in_hx_attributes, encode, field_value,
@@ -76,6 +76,7 @@ pub(super) async fn query_pages(
     session: &TestSession,
 ) -> Vec<(&'static str, String)> {
     let mut found = Vec::new();
+    seed_audit_entry(fixture).await;
     for pattern in get_page_patterns() {
         let path = path_of(pattern).unwrap();
         let probe = with_query(&path, FOREIGN_KEY, "1");
@@ -171,6 +172,7 @@ async fn xss_the_query_pages_are_every_get_page_of_the_table_without_a_query_ext
             "/machines/{code}/units/{path}",
             "/machines/{code}/types",
             "/recipes/{ref}/versions/new",
+            "/audit/{id}",
         ]
     );
 }

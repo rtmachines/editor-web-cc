@@ -12,6 +12,8 @@ use recipe_domain::identity::Role;
 use super::view::field_key;
 use crate::i18n::{Bundles, Lang};
 use crate::settings::{CidrList, WebSettings};
+use crate::test_support::source_walk::{files_below, is_test_path};
+use crate::test_support::visible_text::visible_text;
 use crate::test_support::{
     CSRF_KEY_NEW, Fixture, Reply, TestSession, get_with, icon_tag, post_fields, post_pre_session,
     text,
@@ -128,21 +130,6 @@ async fn fragment_login_page_links_the_label_to_the_input() {
         reply.body.contains("id=\"login\""),
         "the link needs its input"
     );
-}
-
-/// Return the text that a user reads: the markup is gone.
-fn visible_text(html: &str) -> String {
-    let mut text = String::new();
-    let mut in_tag = false;
-    for c in html.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _other if !in_tag => text.push(c),
-            _skipped => {}
-        }
-    }
-    text
 }
 
 #[tokio::test]
@@ -324,30 +311,16 @@ async fn fragment_a_page_error_sets_no_reswap() {
     assert_eq!(reply.header("hx-reswap"), "");
 }
 
-// --- Decision D8: every field name of a BadRequest has its label --------------------------------
+// --- Decision D8: every field name of a BadRequest or a BadQuery has its label -----------------
 
-/// Return true for a file or a directory that holds test code.
-fn is_test_path(path: &Path) -> bool {
-    path.components().any(|part| {
-        let name = part.as_os_str().to_string_lossy();
-        let stem = name.strip_suffix(".rs").unwrap_or(&name);
-        stem == "tests" || stem.ends_with("_tests") || stem.starts_with("test_")
-    })
-}
-
-/// Collect the `.rs` files below `dir` that hold no test code.
-fn source_files(dir: &Path, found: &mut Vec<PathBuf>) {
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if is_test_path(path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap()) {
-            continue;
-        }
-        if path.is_dir() {
-            source_files(&path, found);
-        } else if path.extension().is_some_and(|suffix| suffix == "rs") {
-            found.push(path);
-        }
-    }
+/// Collect the `.rs` files below `src/` that hold no test code.
+fn source_files() -> Vec<PathBuf> {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    files_below(&manifest.join("src"))
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|suffix| suffix == "rs"))
+        .filter(|path| !is_test_path(path.strip_prefix(manifest).unwrap()))
+        .collect()
 }
 
 /// Return the value of `const NAME: &str = "value";` in `source`.
@@ -357,11 +330,15 @@ fn constant_value(source: &str, name: &str) -> String {
     rest.split('"').next().unwrap().to_owned()
 }
 
-/// Return the field names that `BadRequest { field: ... }` names in the code of `source`.
+/// Return the field names that `BadRequest { field: ... }` and `BadQuery { field: ... }` name in
+/// the code of `source`.
 fn bad_request_fields(source: &str) -> Vec<String> {
     let code = source.split("#[cfg(test)]").next().unwrap();
     let mut names = Vec::new();
-    for rest in code.split("BadRequest {").skip(1) {
+    let starts = ["BadRequest {", "BadQuery {"]
+        .into_iter()
+        .flat_map(|marker| code.split(marker).skip(1));
+    for rest in starts {
         let Some((between, after)) = rest.split_once("field:") else {
             continue;
         };
@@ -384,11 +361,7 @@ fn bad_request_fields(source: &str) -> Vec<String> {
 
 #[test]
 fn fragment_every_bad_request_field_has_a_label_in_both_bundles() {
-    let mut files = Vec::new();
-    source_files(
-        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-        &mut files,
-    );
+    let files = source_files();
     let mut names: Vec<String> = files
         .iter()
         .flat_map(|path| bad_request_fields(&fs::read_to_string(path).unwrap()))
@@ -403,6 +376,7 @@ fn fragment_every_bad_request_field_has_a_label_in_both_bundles() {
         "q",
         "page",
         "form",
+        "kind",
     ] {
         assert!(
             names.iter().any(|name| name == known),

@@ -10,13 +10,14 @@ use crate::contract::seed::{
 };
 
 /// The primitives that both adapters seed without a length.
-const SHARED_PRIMITIVES: [Primitive; 6] = [
+const SHARED_PRIMITIVES: [Primitive; 7] = [
     Primitive::Bool,
     Primitive::Int,
     Primitive::Dint,
     Primitive::Real,
     Primitive::Lreal,
     Primitive::Time,
+    Primitive::Ltime,
 ];
 
 fn has_primitive(rows: &[PlcType], wanted: Primitive, length: Option<u16>) -> bool {
@@ -97,6 +98,14 @@ async fn the_seed_rows_name_the_platforms_of_the_matrix(h: &dyn Harness) {
     assert_eq!(
         platforms_of(Primitive::Int, None),
         PlcPlatform::ALL.into_iter().collect::<BTreeSet<_>>()
+    );
+    assert_eq!(
+        platforms_of(Primitive::Ltime, None),
+        BTreeSet::from([
+            PlcPlatform::CodesysIec,
+            PlcPlatform::TwinCat3,
+            PlcPlatform::S7_1500,
+        ])
     );
     assert!(!platforms_of(Primitive::Lreal, None).contains(&PlcPlatform::S7_300));
     assert!(platforms_of(Primitive::String, Some(80)).contains(&PlcPlatform::TwinCat3));

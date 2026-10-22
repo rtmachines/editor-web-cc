@@ -39,20 +39,32 @@ fn is_severe(code: ErrorCode) -> bool {
     status_of(code).is_server_error() || is_database_rule(code)
 }
 
+/// Return the name of a failed read that the answer could not use, and its failure.
+///
+/// A conflict keeps the failed read of the version. A refused form keeps the failed read of its
+/// form. Every other error has no such read.
+fn read_failure(error: &WebError) -> Option<(&'static str, &AppError)> {
+    match error {
+        WebError::Conflict { view, .. } => view.failure().map(|failure| ("version", failure)),
+        WebError::Fields {
+            failure: Some(failure),
+            ..
+        } => Some(("form", failure.as_ref())),
+        _other => None,
+    }
+}
+
 /// Return the level of the line for an error.
 ///
 /// A 5xx status and a rule of the database give `ERROR`. A throttled login, a rejected CSRF
 /// token, and a denied user-management operation give `WARN`. Every other 4xx gives `INFO`.
 ///
-/// A conflict whose read of the version failed takes the level of that failure, when it is higher.
+/// An error with a failed read takes the level of that failure, when it is higher.
 pub(crate) fn level_of(error: &WebError, code: ErrorCode, status: StatusCode) -> Level {
     if status.is_server_error() || is_database_rule(code) {
         return Level::ERROR;
     }
-    if let WebError::Conflict { view, .. } = error
-        && let Some(failure) = view.failure()
-        && is_severe(failure.code())
-    {
+    if read_failure(error).is_some_and(|(_read, failure)| is_severe(failure.code())) {
         return Level::ERROR;
     }
     let denied_user_management = matches!(
@@ -70,17 +82,17 @@ pub(crate) fn level_of(error: &WebError, code: ErrorCode, status: StatusCode) ->
 ///
 /// This is the only place that logs an error of a request. Lower layers propagate it.
 ///
-/// A conflict whose read of the version failed adds the chain of that failure to the same line.
-/// A list of recipe errors writes its count and its first 20 entries.
+/// An error with a failed read, for example of the version of a conflict, adds the chain of that
+/// failure to the same line. A list of recipe errors writes its count and its first 20 entries.
 pub(crate) fn log_error(error: &WebError, code: ErrorCode, level: Level, request_id: RequestId) {
     let mut chain = match error {
         WebError::App(AppError::Recipes(errors)) => errors_text(errors),
         _other => display_chain(error),
     };
-    if let WebError::Conflict { view, .. } = error
-        && let Some(failure) = view.failure()
-    {
-        chain.push_str(": the read of the version failed: ");
+    if let Some((read, failure)) = read_failure(error) {
+        chain.push_str(": the read of the ");
+        chain.push_str(read);
+        chain.push_str(" failed: ");
         chain.push_str(&display_chain(failure));
     }
     if level == Level::ERROR {

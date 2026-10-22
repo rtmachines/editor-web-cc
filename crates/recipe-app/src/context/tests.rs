@@ -44,6 +44,27 @@ async fn security_returns_the_sink_that_the_context_holds() {
     assert_eq!(fixture.sink.events().len(), 1);
 }
 
+#[tokio::test]
+async fn every_clone_of_a_context_shares_the_diff_gate_of_the_settings() {
+    let fixture = Fixture::new();
+    let settings = crate::blocking::AppSettings {
+        diff: crate::blocking::DiffSettings {
+            permits: 3,
+            ..crate::blocking::DiffSettings::default()
+        },
+        ..crate::blocking::AppSettings::default()
+    };
+    let context = fixture.context_with(settings);
+    let copy = context.clone();
+    let deadline = context.settings.blocking.diff_deadline().unwrap();
+
+    let permit = context.diff_gate.acquire(deadline).await.unwrap();
+
+    assert_eq!(copy.diff_gate.available(), 2);
+    drop(permit);
+    assert_eq!(copy.diff_gate.available(), 3);
+}
+
 #[test]
 fn the_fixture_context_uses_the_store_the_sink_and_the_clock_of_the_fixture() {
     let fixture = Fixture::new();

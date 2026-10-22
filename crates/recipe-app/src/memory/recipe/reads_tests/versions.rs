@@ -4,14 +4,26 @@ use recipe_domain::recipe::VersionState;
 
 use super::support::{begin, seed_live, seed_user};
 use crate::error::StorageError;
-use crate::memory::fixtures::{long_text, rid, store, timestamp, vid};
-use crate::ports::{Isolation, Transaction};
+use crate::memory::fixtures::{long_text, rid, store, timestamp, user, vid};
+use crate::ports::{Isolation, NewVersion, Transaction};
 
 const FOUR_STATES: &[(u128, VersionState)] = &[
     (11, VersionState::Retired),
     (12, VersionState::Approved),
     (13, VersionState::Discarded),
     (14, VersionState::LiveDraft),
+];
+
+/// The version 1 is retired and the version 2 is approved. Neither version has a base.
+const RETIRED_AND_APPROVED: &[(u128, VersionState)] =
+    &[(11, VersionState::Retired), (12, VersionState::Approved)];
+
+/// The versions 1 and 4 are retired and the versions 2 and 3 are discarded. No live draft exists.
+const NO_LIVE_DRAFT: &[(u128, VersionState)] = &[
+    (11, VersionState::Retired),
+    (12, VersionState::Discarded),
+    (13, VersionState::Discarded),
+    (14, VersionState::Retired),
 ];
 
 #[tokio::test]
@@ -118,6 +130,58 @@ async fn version_detail_returns_the_header_the_logins_and_the_times() {
     assert_eq!(draft.state, VersionState::LiveDraft);
     assert_eq!(draft.approved_by, None);
     assert_eq!(draft.approved_at, None);
+}
+
+// The case `Some(11)` names an older base, so a rule "number minus 1" gives 2 and fails.
+#[tokio::test]
+async fn version_detail_returns_the_number_of_the_base_version() {
+    let cases = [(None, None), (Some(12), Some(2)), (Some(11), Some(1))];
+    for (base, expected) in cases {
+        let store = store();
+        seed_user(&store, 9, "jkowalski");
+        seed_live(&store, (1, "R-1", "One"), RETIRED_AND_APPROVED);
+        let mut tx = begin(&store, Isolation::ReadCommitted);
+        let new = NewVersion {
+            recipe: rid(1),
+            version: vid(15),
+            number: 3,
+            based_on: base.map(vid),
+            change_note: long_text("Note"),
+            creator: user(9),
+        };
+        tx.recipes().insert_version(new).await.unwrap();
+
+        let first = tx.recipe_reads().version_detail(vid(11)).await.unwrap();
+        let read = tx.recipe_reads().version_detail(vid(15)).await.unwrap();
+
+        assert_eq!(first.unwrap().based_on, None, "base: {base:?}");
+        assert_eq!(read.unwrap().based_on, expected, "base: {base:?}");
+    }
+}
+
+// The version 2 is a discarded draft and the version 5 names it as its base. The number 4 would
+// follow from the rule "number minus 1", and the number 1 from the rule "oldest version".
+#[tokio::test]
+async fn version_detail_returns_the_number_of_a_base_version_that_is_a_discarded_draft() {
+    let store = store();
+    seed_user(&store, 9, "jkowalski");
+    seed_live(&store, (1, "R-1", "One"), NO_LIVE_DRAFT);
+    let mut tx = begin(&store, Isolation::ReadCommitted);
+    let new = NewVersion {
+        recipe: rid(1),
+        version: vid(15),
+        number: 5,
+        based_on: Some(vid(12)),
+        change_note: long_text("Note"),
+        creator: user(9),
+    };
+    tx.recipes().insert_version(new).await.unwrap();
+
+    let base = tx.recipe_reads().version_detail(vid(12)).await.unwrap();
+    let read = tx.recipe_reads().version_detail(vid(15)).await.unwrap();
+
+    assert_eq!(base.unwrap().state, VersionState::Discarded);
+    assert_eq!(read.unwrap().based_on, Some(2));
 }
 
 #[tokio::test]

@@ -6,14 +6,14 @@ use crate::layout::Layout;
 
 /// One field line of an error fragment.
 ///
-/// The name comes from code (`WebError::BadRequest`), never from the request. An error of the
-/// whole form has no line.
+/// The name comes from code (`WebError::BadRequest` or `WebError::BadQuery`), never from the
+/// request. An error of the whole form has no line.
 pub(crate) struct FieldLine {
     /// The name of the form field, which is also the `id` of its input.
     pub(crate) field: String,
     /// The label of the field in the UI language.
     pub(crate) label: String,
-    /// True when an input with this `id` exists on a page (design D6).
+    /// True when the page of the answer shows an input with this `id` (design D6).
     pub(crate) has_input: bool,
 }
 
@@ -22,8 +22,10 @@ pub(crate) struct FieldLine {
 /// A field of this list gets a link in an error fragment. Any other field gets its label only.
 /// The users page keeps `q`. The plant pages add the names of design D5. Two forms of one page can
 /// use one name, so the `id` of an input is the name of its form, for example `machine_name`.
-/// The recipe pages add the field ids of design D6.
-const INPUT_FIELDS: [&str; 31] = [
+/// The recipe pages add the field ids of design D6. The audit list and the security events add the
+/// visible filter inputs of ADR-0051. A hidden field has no entry. A line of `WebError::BadQuery`
+/// never links (ADR-0050 (e)).
+const INPUT_FIELDS: [&str; 38] = [
     "login",
     "password",
     "current_password",
@@ -55,6 +57,13 @@ const INPUT_FIELDS: [&str; 31] = [
     "type",
     "s7_address",
     "ordinal",
+    "entity_type",
+    "action",
+    "actor",
+    "from",
+    "to",
+    "kind",
+    "client_ip",
 ];
 
 /// The name of the list of member rows. The list is a `fieldset`, so it has no input of its own.

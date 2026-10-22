@@ -1,5 +1,7 @@
 //! Approval of a version (design D4, D5, ADR-0022, ADR-0028).
 
+use std::collections::BTreeSet;
+
 use super::*;
 use crate::identity::{Login, UserId};
 use crate::recipe::ApprovalReady;
@@ -11,6 +13,20 @@ use crate::recipe::ApprovalReady;
 pub struct ApprovalPolicy {
     /// When `true`, a user who created or edited the draft cannot approve it (I16).
     pub separation_of_duties: bool,
+}
+
+/// Return `true` when the approver created or edited the draft and the policy forbids it (I16).
+///
+/// The function is the one place of the rule (ADR-0049 (c)). `Recipe::approve` and
+/// `Draft::check_approver` call it. It compares only the user identifiers.
+#[must_use]
+pub fn breaks_separation_of_duties(
+    creator: UserId,
+    editors: &BTreeSet<UserId>,
+    approver: &Approver,
+    policy: &ApprovalPolicy,
+) -> bool {
+    policy.separation_of_duties && (approver.user == creator || editors.contains(&approver.user))
 }
 
 impl Default for ApprovalPolicy {
@@ -133,9 +149,7 @@ impl Recipe {
                 actual: header.row_version,
             });
         }
-        if policy.separation_of_duties
-            && (approver.user == ready.creator() || ready.editors().contains(&approver.user))
-        {
+        if breaks_separation_of_duties(ready.creator(), ready.editors(), approver, policy) {
             return Err(RecipeError::ApproverEditedDraft {
                 reference: self.reference.clone(),
                 number: header.number,

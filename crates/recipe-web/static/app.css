@@ -155,11 +155,29 @@
 
 /* Page */
 
-/* The scroll padding keeps a focused element below a toast that sticks at the top (WCAG 2.4.11). */
+/*
+ * The scroll padding keeps a focused element below a toast that sticks at the top
+ * (design-system.md 10.7, WCAG 2.4.11). The padding must be at least as high as the toast.
+ * The toast has 2 * space-3 of padding, 2 * edge of border, and one line of 17 px * 1.5 for each
+ * line of text. Its text is 134 px narrower than the view. The measure is the approval toast of
+ * ADR-0049 (m), which names two versions. With numbers of three digits in `pl`, its longest
+ * message has 55 characters.
+ * QA15 measured 3 lines (102.5 px) at 320 px and 2 lines (77 px) at 481 px with numbers of one
+ * digit. The other line counts are estimates. Below 48rem (768 px) the estimate is 3 lines at
+ * most, so the padding covers 4 lines: 24 + 2 + 102 + 16 = 144 px. From 48rem the estimate is
+ * 1 line (51.5 px), so one target and the gap are enough: 60 px. A toast with a long code or a
+ * long unit path can need more lines (ADR-0049 (m)).
+ */
 
 html {
   color-scheme: light;
-  scroll-padding-top: calc(var(--target) + var(--space-4));
+  scroll-padding-top: calc(var(--space-3) * 2 + var(--edge) * 2 + var(--text-base) * var(--leading) * 4 + var(--space-4));
+}
+
+@media (min-width: 48rem) {
+  html {
+    scroll-padding-top: calc(var(--target) + var(--space-4));
+  }
 }
 
 *, *::before, *::after {

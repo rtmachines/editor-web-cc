@@ -5,6 +5,7 @@
 //! test computes the WCAG 2.2 ratio of each pair of section 4. The rule tests of the base rules live
 //! in `rules` and `review_rules`. The rule tests of the components live in `component_rules`.
 
+mod approval_rules;
 mod component_rules;
 mod css;
 mod fix_rules;

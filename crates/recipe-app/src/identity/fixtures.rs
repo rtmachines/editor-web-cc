@@ -185,7 +185,7 @@ impl IdentityFixture {
         let start = OffsetDateTime::from_unix_timestamp(START_SECONDS).unwrap();
         let clock = MemoryClock::new(start);
         let store = MemoryStore::with_clock(clock.clone());
-        let sink = MemorySink::default();
+        let sink = store.sink();
         let settings = IdentitySettings::default();
         let app = AppContext::new(
             unit_of_work(&store),

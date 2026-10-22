@@ -3,6 +3,8 @@
 //! A save at the foot of a long page must show its toast. HTMX 2 applies no `show` modifier to an
 //! out-of-band swap, so `#toast` stays in view with `position: sticky` at the start of `main`
 //! (`design-system.md` sections 10.1 and 10.7). No script moves the page.
+//!
+//! The scroll padding of `html` has its tests in `style_tests/rules/scroll_padding.rs` (QA15-1, ADR-0049 (m)).
 
 /// The base style sheet. It holds the page layout (`design-system.md` section 1).
 const APP_CSS: &str = include_str!("../../../static/app.css");
@@ -25,16 +27,6 @@ fn toast_region_sticks_at_the_top_of_the_view_above_the_sticky_grid_cells() {
             "{declaration}: {rule:?}"
         );
     }
-}
-
-#[test]
-fn toast_region_keeps_a_focused_element_below_the_toast() {
-    let rule = declarations("html");
-    assert!(
-        rule.iter()
-            .any(|line| line == "scroll-padding-top: calc(var(--target) + var(--space-4));"),
-        "{rule:?}"
-    );
 }
 
 #[tokio::test]

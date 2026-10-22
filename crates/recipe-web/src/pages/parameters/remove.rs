@@ -10,7 +10,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::rejection::{FormRejection, PathRejection};
 use axum::extract::{Form, Path, Query, State};
 use axum::http::header::CONTENT_LENGTH;
-use axum::http::{HeaderName, HeaderValue, Uri};
+use axum::http::{HeaderName, Uri};
 use axum::response::{Html, Response};
 use recipe_app::auth::ParameterFormPurpose;
 use recipe_app::error::AppError;
@@ -24,7 +24,7 @@ use super::reply::{Ctx, Target, load, missing_key};
 use super::table::table_body;
 use super::translation_routes::{RowFields, sent_row_version};
 use crate::error::WebError;
-use crate::pages::draft_reply::{conflict, success};
+use crate::pages::draft_reply::{conflict, success, with_push_url};
 use crate::pages::path_values::Page;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
@@ -33,8 +33,6 @@ use crate::state::WebState;
 
 /// The value of `HX-Target` that asks for the content of a page (ADR-0037 (w)).
 const CONTENT: &str = "content";
-/// The HTMX header that puts an address into the history of the browser.
-const HX_PUSH_URL: HeaderName = HeaderName::from_static("hx-push-url");
 /// The HTMX header that fires an event after the swap.
 const HX_TRIGGER: &str = "hx-trigger";
 /// The first page of a list.
@@ -115,10 +113,8 @@ async fn version_content(
     let response = version(State(state), values, query, request).await?;
     let toast = toast_html(toast, false, request_id)?;
     let response = with_toast_region(response, &toast, request_id).await?;
-    let mut response = with_trigger(response, &output, request_id)?;
-    let push = HeaderValue::try_from(href).map_err(|_invalid| WebError::Internal { request_id })?;
-    response.headers_mut().insert(HX_PUSH_URL, push);
-    Ok(response)
+    let response = with_trigger(response, &output, request_id)?;
+    with_push_url(response, &href, request_id)
 }
 
 /// `POST .../parameters/{key}/delete`: remove the parameter with its limits and translations.

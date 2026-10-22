@@ -409,6 +409,48 @@ fn units_of_another_machine_give_e_plt_020_items() {
     assert_eq!(codes, vec![ErrorCode::PLT_020]);
 }
 
+/// The approver with the user number `n`. The login names the number.
+fn approver(n: u128) -> crate::recipe::Approver {
+    crate::recipe::Approver {
+        user: user(n),
+        login: crate::identity::Login::parse(&format!("user{n}")).unwrap(),
+    }
+}
+
+#[test]
+fn check_approver_rejects_the_creator_and_each_editor_with_e_rcp_015() {
+    let draft = draft(vec![limited_speed(1, "SPEED")]);
+    let policy = crate::recipe::ApprovalPolicy::default();
+    for n in [1, 2, 3] {
+        let error = draft.check_approver(&approver(n), &policy).unwrap_err();
+        assert_eq!(error.code(), ErrorCode::RCP_015, "user {n}");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "User user{n} created or edited draft 3 of recipe R-1. A different user must approve it."
+            )
+        );
+    }
+}
+
+#[test]
+fn check_approver_accepts_another_user() {
+    let draft = draft(vec![limited_speed(1, "SPEED")]);
+    let policy = crate::recipe::ApprovalPolicy::default();
+    assert!(draft.check_approver(&approver(9), &policy).is_ok());
+}
+
+#[test]
+fn check_approver_accepts_the_creator_and_an_editor_with_the_policy_off() {
+    let draft = draft(vec![limited_speed(1, "SPEED")]);
+    let off = crate::recipe::ApprovalPolicy {
+        separation_of_duties: false,
+    };
+    for n in [1, 2] {
+        assert!(draft.check_approver(&approver(n), &off).is_ok(), "user {n}");
+    }
+}
+
 #[test]
 fn an_empty_draft_accepts_trees_and_units_of_any_machine() {
     let empty = draft(Vec::new());

@@ -7,6 +7,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::test_support::source_walk::files_below;
+
 /// The kind of an askama construct.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
@@ -354,21 +356,6 @@ fn unescaped_output(template: &str) -> Vec<String> {
             Piece::Askama(_, body) => body_problems(body),
         })
         .collect()
-}
-
-/// Return every file below `dir`, in a stable order.
-fn files_below(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            files.extend(files_below(&path));
-        } else {
-            files.push(path);
-        }
-    }
-    files.sort();
-    files
 }
 
 /// Return the path and the text of every template.

@@ -4,11 +4,24 @@ use std::iter::Peekable;
 use std::str::Chars;
 
 use axum::http::StatusCode;
+use recipe_app::auth::RequestMeta;
+use recipe_app::blocking::{AppSettings, Blocking, PageSizes};
+use recipe_app::identity::new_request_id;
+use recipe_app::recipe::{ApproveVersion, ApproveVersionInput, CreateVersion, CreateVersionInput};
+use recipe_domain::recipe::ReferenceNumber;
+use recipe_domain::text::LongText;
 
-use crate::test_support::Reply;
+use crate::test_support::recipes::approval::ApprovalData;
+use crate::test_support::{Fixture, Reply};
 
 mod tests;
 
+/// The value of `HX-Retarget` of an HTMX error answer.
+const ERROR_PANEL: &str = "#error-panel";
+/// The value of `HX-Reswap` of an HTMX error answer (ADR-0036).
+const ERROR_RESWAP: &str = "innerHTML show:#error-panel:top";
+/// The empty toast that every HTMX error answer swaps out of band (ADR-0049 (k)).
+pub(crate) const TOAST_CLEAR: &str = "<div id=\"toast\" hx-swap-oob=\"innerHTML\"></div>";
 /// The payloads of the corpus file, one per line. A line that starts with `#` is a comment.
 const CORPUS: &str = include_str!("../../tests/web/xss-corpus.txt");
 /// A payload with a NUL character. A text file cannot hold it, so the tests add it.
@@ -62,10 +75,42 @@ pub(crate) fn assert_error(reply: &Reply, status: StatusCode, code: &str, what: 
     assert!(reply.body.contains(code), "{what}: {}", reply.body);
 }
 
-/// Assert an HTMX error answer: the status, the code in the body, and the retarget to the error panel.
+/// Assert the HTMX headers of an error answer (`api.md` section 5.3, ADR-0036, ADR-0037 (z)).
+///
+/// An HTMX request gets `HX-Retarget`, `HX-Reswap`, and `HX-Push-Url: false`. A plain request gets
+/// none of them. `what` names the case in each failure message.
+fn assert_error_headers(reply: &Reply, htmx: bool, what: &str) {
+    let expected = if htmx {
+        (ERROR_PANEL, ERROR_RESWAP, "false")
+    } else {
+        ("", "", "")
+    };
+    let (retarget, reswap, push) = (
+        reply.header("hx-retarget"),
+        reply.header("hx-reswap"),
+        reply.header("hx-push-url"),
+    );
+    let actual = (retarget.as_str(), reswap.as_str(), push.as_str());
+    assert_eq!(actual, expected, "{what}: {:?}", reply.headers);
+}
+
+/// Assert an HTMX error answer: the status, the code in the body, and the three headers.
+///
+/// Do not use it for `E-WEB-004`. That answer sets `HX-Redirect: /login` and none of the three
+/// headers (`api.md` section 5.1).
 pub(crate) fn assert_htmx_error(reply: &Reply, status: StatusCode, code: &str) {
     assert_error(reply, status, code, code);
-    assert_eq!(reply.header("hx-retarget"), "#error-panel", "{code}");
+    assert_error_headers(reply, true, code);
+}
+
+/// Assert the headers and the empty toast of a refusal, and that it sends no `HX-Redirect`.
+///
+/// An HTMX request gets the three headers and one empty toast. A plain request gets neither.
+pub(crate) fn assert_refusal_headers(reply: &Reply, htmx: bool, what: &str) {
+    assert_error_headers(reply, htmx, what);
+    assert_eq!(reply.header("hx-redirect"), "", "{what}");
+    let toasts = reply.body.matches(TOAST_CLEAR).count();
+    assert_eq!(toasts, usize::from(htmx), "{what}: {}", reply.body);
 }
 
 /// Return the `Set-Cookie` text of the cookie `name`, or `None`.
@@ -82,6 +127,97 @@ pub(crate) fn field_value(body: &str, name: &str) -> String {
     let marker = format!("name=\"{name}\" value=\"");
     let (_before, rest) = body.split_once(&marker).unwrap();
     rest.split('"').next().unwrap().to_owned()
+}
+
+/// Return the part of `main` from the first `start` to the next `end`, or to the end.
+///
+/// The function fails when `start` is not in `main`.
+pub(crate) fn part_of<'a>(main: &'a str, start: &str, end: &str) -> &'a str {
+    assert!(main.contains(start), "{start} is not in {main}");
+    let rest = &main[main.find(start).unwrap()..];
+    let to = rest[start.len()..]
+        .find(end)
+        .map_or(rest.len(), |at| at.checked_add(start.len()).unwrap());
+    &rest[..to]
+}
+
+/// Return the section `kind` of the diff in `main`.
+pub(crate) fn section<'a>(main: &'a str, kind: &str) -> &'a str {
+    part_of(
+        main,
+        &format!("<section class=\"diff-section\" id=\"diff-{kind}\""),
+        "</section>",
+    )
+}
+
+/// Return the position of `needle` in `text`, or fail with `text`.
+pub(crate) fn position(text: &str, needle: &str) -> usize {
+    assert!(text.contains(needle), "{needle} is not in {text}");
+    text.find(needle).unwrap()
+}
+
+/// Assert that `first` and `second` stand in `text` and that `first` comes before `second`.
+///
+/// The check fails when a view swaps the old and the new side of a row.
+pub(crate) fn assert_before(text: &str, first: &str, second: &str) {
+    let (at_first, at_second) = (position(text, first), position(text, second));
+    assert!(
+        at_first < at_second,
+        "{first} must come before {second}: {text}"
+    );
+}
+
+/// A fixture with the approval data, `diff` parameters on each page of a diff, and `blocking`.
+///
+/// The fixture lets a test cut a diff into many pages and make the diff stage fail.
+pub(crate) async fn small_pages(diff: u32, blocking: Blocking) -> (Fixture, ApprovalData) {
+    let defaults = AppSettings::default();
+    let settings = AppSettings {
+        blocking,
+        pages: PageSizes {
+            diff,
+            ..defaults.pages
+        },
+        ..defaults
+    };
+    let fixture = Fixture::with_app_settings(settings);
+    let data = fixture.seed_approval_recipes().await;
+    (fixture, data)
+}
+
+/// Return the data of a seed request with a new request identifier.
+fn seed_meta() -> RequestMeta {
+    RequestMeta::new(new_request_id().unwrap(), None, None, None)
+}
+
+/// Approve the draft version 2 of `R-500` and start the draft version 3 of `R-500` on it.
+///
+/// Version 3 has the same parameters as version 2, because nobody edits it. So a diff of version 3
+/// against version 2 and the approval preview of version 3 have no change. Call it once for each
+/// fixture, after `seed_approval_recipes`.
+pub(crate) async fn seed_unedited_version_3(fixture: &Fixture, data: &ApprovalData) {
+    let ctx = fixture.state.identity().app().clone();
+    let reference = ReferenceNumber::parse("R-500").unwrap();
+    let approve = ApproveVersionInput {
+        reference: reference.clone(),
+        number: 2,
+        expected_row_version: data.r500_v2_row_version,
+        allow_outdated: false,
+    };
+    ApproveVersion::new(ctx.clone())
+        .execute(&data.admin_user(), &seed_meta(), approve)
+        .await
+        .unwrap();
+    let create = CreateVersionInput {
+        reference,
+        based_on: Some(2),
+        change_note: LongText::parse("Third version").unwrap(),
+    };
+    let created = CreateVersion::new(ctx)
+        .execute(&data.anowak_user(), &seed_meta(), create)
+        .await
+        .unwrap();
+    assert_eq!(created.number, 3);
 }
 
 /// The characters of a page, one at a time, with one look ahead.
@@ -246,4 +382,101 @@ pub(crate) fn assert_no_user_text_in_hx_attributes(body: &str, needle: &str) {
             }
         }
     }
+}
+
+/// A tag of a page: its lower case name, whether it closes, and its attributes in source order.
+///
+/// The type solves one problem: `StartTag` drops an attribute with no value, such as `required`,
+/// and it has no end tags. A sweep that checks a missing attribute needs both.
+pub(crate) struct Tag {
+    /// The lower case name of the element.
+    pub(crate) name: String,
+    /// True for an end tag such as `</p>`.
+    pub(crate) closing: bool,
+    /// The attributes in source order. An attribute with no value has `None`.
+    pub(crate) attributes: Vec<(String, Option<String>)>,
+}
+
+impl Tag {
+    /// Return the value of the attribute `name`. An attribute with no value gives an empty text.
+    pub(crate) fn attribute(&self, name: &str) -> Option<&str> {
+        let found = self.attributes.iter().find(|(known, _value)| known == name);
+        found.map(|(_name, value)| value.as_deref().unwrap_or_default())
+    }
+}
+
+/// Return true for a character that separates attributes.
+fn is_separator(c: &char) -> bool {
+    c.is_ascii_whitespace() || *c == '/'
+}
+
+/// Read the tag that `cursor` is in. The cursor stands behind the `<`.
+///
+/// A quoted value may hold `<` and `>`. An unquoted value keeps a leading `/`. Only white space
+/// separates a name from its `=` and the `=` from its value.
+fn read_tag(cursor: &mut Cursor<'_>) -> Tag {
+    let closing = cursor.next_if_eq(&'/').is_some();
+    let name = take_while(cursor, |c| !is_separator(&c) && c != '>');
+    let mut attributes = Vec::new();
+    loop {
+        skip_while(cursor, |c| is_separator(&c));
+        if cursor.peek().is_none_or(|c| *c == '>') {
+            break;
+        }
+        let attribute = take_while(cursor, |c| !is_separator(&c) && !"=>".contains(c));
+        if attribute.is_empty() {
+            cursor.next();
+            continue;
+        }
+        skip_while(cursor, |c| c.is_ascii_whitespace());
+        let value = cursor.next_if_eq(&'=').map(|_equals| {
+            skip_while(cursor, |c| c.is_ascii_whitespace());
+            take_value(cursor)
+        });
+        attributes.push((attribute.to_ascii_lowercase(), value));
+    }
+    Tag {
+        name: name.to_ascii_lowercase(),
+        closing,
+        attributes,
+    }
+}
+
+/// Skip a comment, a doctype, or another declaration. The cursor stands on the `!`.
+///
+/// A comment ends at `-->`. The dash count starts at two, so `<!-->` ends at once, like in a browser.
+fn skip_declaration(cursor: &mut Cursor<'_>) {
+    cursor.next();
+    let is_comment = cursor.next_if_eq(&'-').is_some() && cursor.next_if_eq(&'-').is_some();
+    if !is_comment {
+        skip_while(cursor, |c| c != '>');
+        cursor.next();
+        return;
+    }
+    let mut dashes = 2_u8;
+    for c in cursor.by_ref() {
+        match c {
+            '-' => dashes = dashes.saturating_add(1),
+            '>' if dashes >= 2 => return,
+            _other => dashes = 0,
+        }
+    }
+}
+
+/// Return all start tags and end tags of `html` in source order.
+///
+/// A page escapes every `<` of a text, so each `<` that a letter or `/` follows opens a tag. The
+/// reader skips the markup inside a comment.
+pub(crate) fn tags(html: &str) -> Vec<Tag> {
+    let mut found = Vec::new();
+    let mut cursor = html.chars().peekable();
+    while let Some(c) = cursor.next() {
+        let next = cursor.peek().copied().filter(|_| c == '<');
+        match next {
+            Some('!') => skip_declaration(&mut cursor),
+            Some(n) if n.is_ascii_alphabetic() || n == '/' => found.push(read_tag(&mut cursor)),
+            _other => {}
+        }
+    }
+    found
 }

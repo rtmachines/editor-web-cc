@@ -23,10 +23,14 @@
 //! Each S7 address has the width of its type and does not overlap another address of the draft.
 //! A test sends a value command for each parameter to prove it.
 
+pub(crate) mod approval;
+#[cfg(test)]
+mod approval_tests;
 #[cfg(test)]
 mod invariant_tests;
 pub(crate) mod large;
 mod parameters;
+mod settings;
 
 use std::collections::BTreeSet;
 

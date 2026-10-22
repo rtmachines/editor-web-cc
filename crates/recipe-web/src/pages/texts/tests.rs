@@ -4,20 +4,7 @@ use std::path::Path;
 use recipe_domain::identity::Role;
 
 use super::*;
-
-/// Return every file below `dir`, also in the subdirectories (design D11).
-fn files_below(dir: &Path) -> Vec<std::path::PathBuf> {
-    let mut files = Vec::new();
-    for entry in fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.is_dir() {
-            files.extend(files_below(&path));
-        } else {
-            files.push(path);
-        }
-    }
-    files
-}
+use crate::test_support::source_walk::{files_below, is_test_path};
 
 /// The calls of the templates that take the key as the first argument.
 const TEMPLATE_MARKERS: [&str; 3] = ["t.get(\"", "t.with(\"", "t.with_arg(\""];
@@ -139,15 +126,6 @@ fn literal_keys(source: &str) -> Vec<String> {
     ));
     found.sort();
     found.into_iter().map(|(_at, key)| key).collect()
-}
-
-/// Return true when the path is a test file or a helper of the tests, by the name of its parts.
-fn is_test_path(path: &Path) -> bool {
-    path.components().any(|part| {
-        let name = part.as_os_str().to_string_lossy();
-        let name = name.strip_suffix(".rs").unwrap_or(&name);
-        name == "tests" || name.ends_with("_tests") || name.starts_with("test_")
-    })
 }
 
 /// Return every literal key of the code below `src/`, with the file. Test files are left out.

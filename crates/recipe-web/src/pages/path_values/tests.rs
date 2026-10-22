@@ -3,6 +3,7 @@
 //! The value tests call each parser with a table of good and bad texts. The route tests send a
 //! request through a small router, because only axum can make the rejection of a path value.
 
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use axum::Router;
@@ -18,7 +19,7 @@ use recipe_domain::plant::PlantError;
 use tower::ServiceExt as _;
 
 use super::{
-    archived_machine, flag, machine_code, machine_id, page, path_code, path_code_type,
+    archived_machine, cursor, flag, machine_code, machine_id, page, path_code, path_code_type,
     path_code_unit, path_machine_id, revision, type_name, unit_path,
 };
 use crate::error::{FieldReason, WebError};
@@ -204,6 +205,29 @@ fn path_values_page_refuses_zero_a_sign_a_leading_zero_and_text() {
         let error = page(Some(text)).err().unwrap();
         assert!(
             is_bad_request(&error, "page", FieldReason::Page),
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn path_values_cursor_refuses_zero_a_sign_a_leading_zero_and_text_with_the_reason_cursor() {
+    assert_eq!(cursor(None).unwrap(), None);
+    assert_eq!(cursor(Some("")).unwrap(), None);
+    assert_eq!(cursor(Some("7")).unwrap().map(NonZeroU64::get), Some(7));
+    for text in [
+        "0",
+        "01",
+        "+1",
+        "-1",
+        " 1",
+        "1.5",
+        "abc",
+        "18446744073709551616",
+    ] {
+        let error = cursor(Some(text)).unwrap_err();
+        assert!(
+            is_bad_request(&error, "before", FieldReason::Cursor),
             "{text:?}"
         );
     }

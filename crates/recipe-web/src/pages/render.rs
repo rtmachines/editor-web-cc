@@ -80,20 +80,54 @@ fn encode_query(text: &str) -> String {
     encoded.to_string()
 }
 
-/// Build the address of one page of a list, for example `/machines?q=a%26b&page=2`.
+/// Build the address of a page with a query, for example `/machines?q=a%26b&show_archived=1`.
 ///
-/// The function solves one problem: the search text of a list goes into the link to the next page.
-/// A raw `&`, `#`, `+`, or `%` would change the meaning of the link. Each key and each value is
-/// percent-encoded with the strict set of askama, so the link keeps the text whole. The `page`
-/// number comes last. `path` comes from code, never from the request. The pager macro writes the
-/// address into `href`, where askama escapes it for HTML.
-pub(crate) fn page_url(path: &str, query: &[(&str, &str)], page: u32) -> String {
+/// The function solves one problem: one encoding of the query pairs for the list pages and the diff
+/// pages. [`encode_query`] percent-encodes each key and each value, so the link keeps the text
+/// whole. A query with no pair gives the bare `path`. `path` comes from code, never from the
+/// request. [`page_url`] and [`cursor_url`] build on it, so no page encodes a pair by hand.
+pub(crate) fn query_url(path: &str, query: &[(&str, &str)]) -> String {
+    if query.is_empty() {
+        return path.to_owned();
+    }
     let pairs: Vec<String> = query
         .iter()
         .map(|(key, value)| format!("{}={}", encode_query(key), encode_query(value)))
-        .chain(std::iter::once(format!("page={page}")))
         .collect();
     format!("{path}?{}", pairs.join("&"))
+}
+
+/// Build the address of one page of a list, for example `/machines?q=a%26b&page=2`.
+///
+/// The function solves one problem: the search text of a list goes into the link to the next page.
+/// A raw `&`, `#`, `+`, or `%` would change the meaning of the link. [`query_url`] encodes each key
+/// and each value with the strict set of askama, so the link keeps the text whole. The `page`
+/// number comes last. `path` comes from code, never from the request. The pager macro writes the
+/// address into `href`, where askama escapes it for HTML.
+pub(crate) fn page_url(path: &str, query: &[(&str, &str)], page: u32) -> String {
+    let number = page.to_string();
+    let pairs: Vec<(&str, &str)> = query
+        .iter()
+        .copied()
+        .chain(std::iter::once(("page", number.as_str())))
+        .collect();
+    query_url(path, &pairs)
+}
+
+/// Build the address of a page of a cursor list: the path, the filters, and the cursor `before`.
+///
+/// The function solves one problem: the audit pages, the security events, and the history page
+/// link to other pages with the same rule. [`query_url`] encodes the pairs. `path` comes from code.
+/// An empty value is left out. The cursor comes last.
+pub(crate) fn cursor_url(path: &str, pairs: &[(&str, &str)], before: Option<u64>) -> String {
+    let cursor = before.map(|id| id.to_string());
+    let query: Vec<(&str, &str)> = pairs
+        .iter()
+        .copied()
+        .filter(|(_key, value)| !value.is_empty())
+        .chain(cursor.as_deref().map(|id| ("before", id)))
+        .collect();
+    query_url(path, &query)
 }
 
 /// Return true when `location` is a path of this site: one `/` first, no `\`, and ASCII only.

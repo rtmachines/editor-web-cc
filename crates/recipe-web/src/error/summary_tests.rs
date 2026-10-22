@@ -52,6 +52,7 @@ async fn fields(Path(count): Path<u16>) -> Result<&'static str, WebError> {
     Err(WebError::Fields {
         lines: NonEmpty::try_from(lines).unwrap(),
         form: None,
+        failure: None,
     })
 }
 

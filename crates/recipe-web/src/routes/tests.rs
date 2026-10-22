@@ -104,7 +104,37 @@ fn matrix() -> Vec<(Endpoint, [Want; 6])> {
     rows.extend(pages::recipes::route_tests::route_rows());
     rows.extend(pages::versions::route_tests::route_rows());
     rows.extend(pages::parameters::route_tests::route_rows());
+    rows.extend(p34_rows());
     rows
+}
+
+/// The rows of step P3.4: history, audit, and security events (wave 3), and the approval preview
+/// (wave 4).
+///
+/// The rows of delete and restore live in `pages::recipes::route_tests`. The rows of the approval
+/// and of the diff live in `pages::versions::route_tests`, so the security sweeps of the recipe
+/// areas find them. Each row holds the answer of each principal. The placeholders of
+/// `routes::matrix::fill` name `R-100`, the audit entry 1, and the old side `{m}` of a diff (2).
+pub(super) fn p34_rows() -> Vec<(Endpoint, [Want; 6])> {
+    use Want::*;
+    let view = [Login, Page, Page, Page, Password, Login];
+    let audit = [Login, Page, Page, Forbidden, Password, Login];
+    // The store of the matrix holds no audit entry, so a role with a permission gets `404`.
+    let absent = Status(StatusCode::NOT_FOUND, "E-WEB-005");
+    let entry = [Login, absent, absent, Forbidden, Password, Login];
+    let events = [Login, Page, Forbidden, Forbidden, Password, Login];
+    // The Administrator `user1` created `R-100`, so the preview shows `E-RCP-015` with `200`.
+    let approve = [Login, Page, Page, Forbidden, Password, Login];
+    vec![
+        (endpoint(Method::GET, "/audit", ""), audit),
+        (endpoint(Method::GET, "/audit/{id}", ""), entry),
+        (endpoint(Method::GET, "/security-events", ""), events),
+        (endpoint(Method::GET, "/recipes/{ref}/history", ""), view),
+        (
+            endpoint(Method::GET, "/recipes/{ref}/versions/{n}/approve", ""),
+            approve,
+        ),
+    ]
 }
 
 /// The number of the rows of `rows` that send a mutating method.
@@ -287,6 +317,9 @@ fn routes_table_collects_the_rows_of_each_area() {
         ("recipes", pages::recipes::rows()),
         ("versions", pages::versions::rows()),
         ("parameters", pages::parameters::rows()),
+        ("history", pages::history::rows()),
+        ("audit", pages::audit::rows()),
+        ("security_events", pages::security_events::rows()),
     ];
     for (area, rows) in &areas {
         for key in keys_of(rows) {
@@ -320,7 +353,11 @@ fn routes_matrix_collects_the_rows_of_each_area() {
         }
     }
     let area_rows: usize = areas.iter().map(|(_area, rows)| rows.len()).sum();
-    let expected = p31_matrix().len().checked_add(area_rows).unwrap();
+    let expected = p31_matrix()
+        .len()
+        .checked_add(area_rows)
+        .and_then(|rows| rows.checked_add(p34_rows().len()))
+        .unwrap();
     assert_eq!(matrix().len(), expected);
 }
 

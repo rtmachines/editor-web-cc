@@ -148,7 +148,7 @@ async fn seed_plant_holds_the_primitive_types_and_the_four_types_of_m7() {
     let (fixture, ids) = seeded();
     let rows = begin(&fixture).types().type_rows(ids.m7).await.unwrap();
     let global = rows.iter().filter(|row| row.machine().is_none()).count();
-    assert_eq!(global, 10);
+    assert_eq!(global, 11);
     let own = rows
         .iter()
         .filter(|row| row.machine() == Some(ids.m7))

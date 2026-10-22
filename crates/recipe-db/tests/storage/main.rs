@@ -15,6 +15,7 @@ mod migrate;
 mod pool;
 mod race;
 mod roles;
+mod scenario;
 mod schema;
 mod security_event_guard;
 mod security_events;

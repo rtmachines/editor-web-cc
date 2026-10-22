@@ -20,10 +20,10 @@ use crate::pages::{parameters, recipes, versions};
 use crate::test_support::{get_with, post_fields};
 
 /// The number of the routes of the recipe, version, and parameter pages that the Operator refuses.
-const REFUSED_ROUTES: usize = 14;
+const REFUSED_ROUTES: usize = 19;
 
 /// Return the matrix rows of the three areas, each with the answer of the six principals.
-fn area_rows() -> Vec<(Endpoint, [Want; 6])> {
+pub(super) fn area_rows() -> Vec<(Endpoint, [Want; 6])> {
     let mut rows = recipes::route_tests::route_rows();
     rows.extend(versions::route_tests::route_rows());
     rows.extend(parameters::route_tests::route_rows());
@@ -229,6 +229,38 @@ async fn recipe_access_a_process_engineer_with_a_bad_field_still_gets_the_lines(
     }
 }
 
+/// Check that one refused request answers `403 E-WEB-002` and records one `forbidden` event.
+///
+/// The helper sends the request as `principal`. `fill` replaces the placeholders of the path and
+/// of the body of `endpoint`.
+pub(super) async fn assert_one_forbidden_event(endpoint: &Endpoint, principal: Principal) {
+    let (fixture, session) = world(principal).await;
+    let session = session.unwrap();
+    let router = fixture.router();
+    let path = fill(endpoint.path);
+    let body = fill(endpoint.body);
+    let what = format!("{} {path} as {principal:?}", endpoint.method);
+    let events_before = fixture.sink.events().len();
+    let reply = if endpoint.method == Method::GET {
+        get_with(&router, &path, &[("cookie", session.cookie.as_str())]).await
+    } else {
+        post_fields(&router, &path, Some(&session), &[], &body).await
+    };
+    assert_error(&reply, StatusCode::FORBIDDEN, "E-WEB-002", &what);
+    let events = fixture.sink.events();
+    assert_eq!(
+        events.len(),
+        events_before.checked_add(1).unwrap(),
+        "{what}"
+    );
+    assert!(
+        events
+            .last()
+            .is_some_and(|event| event.kind() == SecurityEventKind::Forbidden),
+        "{what}"
+    );
+}
+
 #[tokio::test]
 async fn recipe_access_a_forbidden_answer_records_one_forbidden_event() {
     let rows = forbidden_rows();
@@ -238,30 +270,6 @@ async fn recipe_access_a_forbidden_answer_records_one_forbidden_event() {
         "the write routes of the three areas"
     );
     for endpoint in rows {
-        let (fixture, session) = world(Principal::Operator).await;
-        let session = session.unwrap();
-        let router = fixture.router();
-        let path = fill(endpoint.path);
-        let body = fill(endpoint.body);
-        let what = format!("{} {path} as Operator", endpoint.method);
-        let events_before = fixture.sink.events().len();
-        let reply = if endpoint.method == Method::GET {
-            get_with(&router, &path, &[("cookie", session.cookie.as_str())]).await
-        } else {
-            post_fields(&router, &path, Some(&session), &[], &body).await
-        };
-        assert_error(&reply, StatusCode::FORBIDDEN, "E-WEB-002", &what);
-        let events = fixture.sink.events();
-        assert_eq!(
-            events.len(),
-            events_before.checked_add(1).unwrap(),
-            "{what}"
-        );
-        assert!(
-            events
-                .last()
-                .is_some_and(|event| event.kind() == SecurityEventKind::Forbidden),
-            "{what}"
-        );
+        assert_one_forbidden_event(&endpoint, Principal::Operator).await;
     }
 }

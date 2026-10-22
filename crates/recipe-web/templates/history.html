@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{% import "components/badge.html" as badges %}
+{% import "components/pager.html" as pagers %}
+{#- The history page of a recipe (ADR-0051 g). The table shows no state. The cursor pager stands in a boosted container, so its links keep the content answer and the URL. Each hx attribute is a literal. Each href comes from code. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+{% if deleted %}<div class="actions">{{ badges::deleted_large(t.get("status-deleted")) }}</div>
+{% endif %}{% if let Some(href) = whole_href %}<p class="actions"><a class="target-link" href="{{ href }}">{{ t.get("audit-whole-recipe") }}</a></p>
+{% endif %}{% include "audit-table.html" %}
+<div hx-boost="true" hx-target="#content" hx-push-url="true">{{ pagers::cursor_pager(t, pager_label, newest, older) }}</div>
+<p><a class="target-link" href="{{ recipe_href }}">{{ recipe_text }}</a></p>
+{% endblock %}

@@ -33,6 +33,10 @@ const FIRST_PAGE: Page = Page {
     number: 1,
     index: 0,
 };
+/// The number of columns of the table.
+const COLUMNS: u8 = 5;
+/// The number of columns with the column Actions of the restore form.
+const COLUMNS_WITH_ACTIONS: u8 = 6;
 /// The values of the state filter and the key of the word of each (ADR-0043 (b)).
 const STATES: [(&str, VersionState, &str); 3] = [
     ("draft", VersionState::LiveDraft, "status-draft"),
@@ -175,6 +179,10 @@ struct RecipesPage<'a> {
     machines: Vec<Choice>,
     states: Vec<Choice>,
     can_show_deleted: bool,
+    /// True when the list shows the deleted recipes to a role that restores them (ADR-0049 (h)).
+    can_restore: bool,
+    /// The number of table columns. The restore form adds the column Actions.
+    columns: u8,
     can_create: bool,
     rows: Vec<RecipeRow>,
     previous_url: String,
@@ -230,12 +238,22 @@ impl<'a> RecipesPage<'a> {
         let (previous_url, next_url) =
             pager_links(LIST_PATH, (checked.page, list.has_next, after_end), &pairs);
         let first_url = page_url(LIST_PATH, &pairs, 1);
+        let can_show_deleted = Operation::ListDeletedRecipes.requirement().allows(role);
+        let can_restore = checked.show_deleted
+            && can_show_deleted
+            && Operation::RestoreRecipe.requirement().allows(role);
         Ok(Self {
             layout,
             t,
             machines,
             states: state_choices(t),
-            can_show_deleted: Operation::ListDeletedRecipes.requirement().allows(role),
+            can_show_deleted,
+            can_restore,
+            columns: if can_restore {
+                COLUMNS_WITH_ACTIONS
+            } else {
+                COLUMNS
+            },
             can_create: Operation::CreateRecipe.requirement().allows(role),
             rows: list.rows.iter().map(RecipeRow::from).collect(),
             previous_url,

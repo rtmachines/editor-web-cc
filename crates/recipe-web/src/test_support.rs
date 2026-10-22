@@ -2,6 +2,8 @@
 
 pub(crate) mod plant;
 pub(crate) mod recipes;
+pub(crate) mod source_walk;
+pub(crate) mod visible_text;
 
 use std::cell::RefCell;
 use std::net::SocketAddr;
@@ -96,17 +98,26 @@ impl Fixture {
 
     /// Build a fixture with the given web settings and the given key file for the CSRF cookie.
     pub(crate) fn with_settings(web: WebSettings, csrf_keys: &str) -> Self {
+        Self::build(web, csrf_keys, AppSettings::default())
+    }
+
+    /// Build a fixture from the three parts that a test changes.
+    ///
+    /// The function solves one problem: `with_settings` and `with_app_settings` must wire the state
+    /// in one way. Only the web settings, the key file, and the settings `app_settings` of the use
+    /// cases differ between them.
+    fn build(web: WebSettings, csrf_keys: &str, app_settings: AppSettings) -> Self {
         install_global_subscriber();
         let start = OffsetDateTime::from_unix_timestamp(START_SECONDS).unwrap();
         let clock = MemoryClock::new(start);
         let store = MemoryStore::with_clock(clock.clone());
-        let sink = MemorySink::default();
+        let sink = store.sink();
         let settings = IdentitySettings::default();
         let app = AppContext::new(
             Arc::new(store.clone()),
             Arc::new(sink.clone()),
             Arc::new(clock),
-            AppSettings::default(),
+            app_settings,
         );
         let hasher = Arc::new(Argon2Hasher::new(TEST_PARAMS).unwrap());
         let gate = HashGate::new(

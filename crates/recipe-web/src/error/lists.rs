@@ -20,7 +20,9 @@ use super::{FieldReason, LineView, ListView, RowField, WebError};
 use crate::i18n::{Bundles, Lang};
 
 /// The number of lines that the summary in `#error-panel` shows (ADR-0041 (d)).
-const SHOWN_LINES: usize = 20;
+///
+/// The blocker notice of the approval preview shows the same number of lines (ADR-0049 (c)).
+pub(crate) const SHOWN_LINES: usize = 20;
 
 /// One argument of the message of a line.
 ///
@@ -195,6 +197,16 @@ impl FieldError {
         })
     }
 
+    /// Return the line with `subject`, for example the label of the input that the line names.
+    ///
+    /// The summary shows the subject next to the sentence, so a reader sees the input of a domain
+    /// error whose message names no input (ADR-0041 (f)).
+    pub(crate) fn with_subject(self, subject: String) -> Self {
+        let mut line = self.0;
+        line.subject = Some(subject);
+        Self(line)
+    }
+
     /// Build the line of one error of the Plant Model with a subject and an input.
     fn plant_line(error: &PlantError, subject: Option<String>, target: Option<String>) -> Self {
         Self::from(Line {
@@ -347,21 +359,39 @@ pub(crate) fn list_view<'a>(
             views.push(line_view(line, bundles, lang));
         }
     }
-    let count_text = |key: &str, count: usize, fallback: String| {
-        let mut args = FluentArgs::new();
-        args.set("count", count.to_string());
-        text_or(bundles, lang, key, Some(&args), fallback)
-    };
-    let more = match total.checked_sub(SHOWN_LINES) {
-        Some(other) if other > 0 => {
-            count_text("errors-more", other, format!("Other errors: {other}."))
-        }
-        _none => String::new(),
-    };
     ListView {
-        count: count_text("errors-count", total, format!("Errors: {total}.")),
+        count: count_text(
+            bundles,
+            lang,
+            "errors-count",
+            total,
+            format!("Errors: {total}."),
+        ),
         lines: views,
-        more,
+        more: more_text(total, bundles, lang),
+    }
+}
+
+/// Return the text of the message `key` with the argument `count`.
+fn count_text(bundles: &Bundles, lang: Lang, key: &str, count: usize, fallback: String) -> String {
+    let mut args = FluentArgs::new();
+    args.set("count", count.to_string());
+    text_or(bundles, lang, key, Some(&args), fallback)
+}
+
+/// Return the sentence `errors-more` for a list of `total` lines in `lang` (ADR-0041 (d)).
+///
+/// The sentence counts the lines after the first `SHOWN_LINES`. It is empty when no line is left.
+pub(crate) fn more_text(total: usize, bundles: &Bundles, lang: Lang) -> String {
+    match total.checked_sub(SHOWN_LINES) {
+        Some(other) if other > 0 => count_text(
+            bundles,
+            lang,
+            "errors-more",
+            other,
+            format!("Other errors: {other}."),
+        ),
+        _none => String::new(),
     }
 }
 

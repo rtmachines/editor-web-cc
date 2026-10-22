@@ -147,7 +147,7 @@ async fn with_children(
     version: Uuid,
     record: ParameterRecord,
 ) -> Result<StoredParameter, StorageError> {
-    let id = record.id();
+    let id = *record.id().as_uuid();
     let limits = sqlx::query_as::<_, LimitRecord>(SELECT_LIMITS)
         .bind(version)
         .bind(id)

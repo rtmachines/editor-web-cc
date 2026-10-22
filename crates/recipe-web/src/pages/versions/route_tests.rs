@@ -2,8 +2,9 @@
 //!
 //! `routes::tests` and `pages::sweep_tests` collect both lists. Wave 4 adds the rows of the version
 //! list, the version form, and the version page. Wave 5 adds the row of the rebind (task 12.2).
+//! Step P3.4 adds the rows of the approval (task 10.2) and of the diff page (task 12.1).
 
-use axum::http::Method;
+use axum::http::{Method, StatusCode};
 
 use crate::routes::matrix::{Endpoint, Want, endpoint};
 
@@ -46,7 +47,64 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
             ),
             [Login, rebound, rebound, Forbidden, Password, Login],
         ),
+        approve_row(),
+        (
+            endpoint(Method::GET, "/recipes/{ref}/versions/{n}/diff/{m}", ""),
+            view,
+        ),
+        retire_row(),
+        discard_row(),
     ]
+}
+
+/// Return the matrix row of the retire of version 3 of `R-100`.
+///
+/// Only the Administrator holds `VersionRetire`. Version 3 is the live draft, so the retire gives
+/// `E-RCP-009`.
+fn retire_row() -> (Endpoint, [Want; 6]) {
+    use Want::{Conflict, Forbidden, Login, Password};
+    let not_approved = Conflict("E-RCP-009");
+    let path = "/recipes/{ref}/versions/{n}/retire";
+    (
+        endpoint(Method::POST, path, "row_version=1"),
+        [Login, not_approved, Forbidden, Forbidden, Password, Login],
+    )
+}
+
+/// Return the matrix row of the discard of the draft 3 of `R-100`.
+///
+/// The Administrator and the ProcessEngineer hold `VersionDiscard`. A command without `HX-Request`
+/// answers `303` to the recipe page.
+fn discard_row() -> (Endpoint, [Want; 6]) {
+    use Want::{Forbidden, Login, Password, Redirect};
+    let discarded = Redirect("/recipes/R-100");
+    let path = "/recipes/{ref}/versions/{n}/discard";
+    (
+        endpoint(Method::POST, path, "row_version=1"),
+        [Login, discarded, discarded, Forbidden, Password, Login],
+    )
+}
+
+/// Return the matrix row of the approval of the draft 3 of `R-100`.
+///
+/// `ApproveVersion` runs `check_for_approval` before the transaction and the check of the approver
+/// in `Recipe::approve` after it. The missing limits of the draft 3 therefore give `E-RCP-016` also
+/// for `user1`, the creator of `R-100`.
+fn approve_row() -> (Endpoint, [Want; 6]) {
+    use Want::{Forbidden, Login, Password, Status};
+    let unapprovable = Status(StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-016");
+    let path = "/recipes/{ref}/versions/{n}/approve";
+    (
+        endpoint(Method::POST, path, "row_version=1"),
+        [
+            Login,
+            unapprovable,
+            unapprovable,
+            Forbidden,
+            Password,
+            Login,
+        ],
+    )
 }
 
 /// A rebind of `ZONES` from `ST_Zone@2` to `ST_Zone@3` with the value of each new leaf.
@@ -72,6 +130,14 @@ pub(crate) fn sweep_pages() -> Vec<(&'static str, String)> {
         (
             "/recipes/{ref}/versions/{n}",
             "/recipes/R-100/versions/3".to_owned(),
+        ),
+        (
+            "/recipes/{ref}/versions/{n}/approve",
+            "/recipes/R-100/versions/3/approve".to_owned(),
+        ),
+        (
+            "/recipes/{ref}/versions/{n}/diff/{m}",
+            "/recipes/R-100/versions/3/diff/2".to_owned(),
         ),
     ]
 }

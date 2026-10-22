@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% import "components/heading.html" as headings %}
+{#- The audit entry of ADR-0051 (f). The states stand in a pre element with the class json. Askama escapes the text, and no filter marks it safe. The trace rows stand only for a role with the permission AuditView. The two links stand in a boosted container and hold the literal hx attributes. Each href comes from code. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+<dl>
+<dt>{{ t.get("audit-entry-time") }}</dt>
+<dd class="data">{{ time }}</dd>
+<dt>{{ t.get("audit-entry-actor") }}</dt>
+<dd class="data">{{ actor }}</dd>
+<dt>{{ t.get("audit-entry-action") }}</dt>
+<dd>{{ action }}</dd>
+<dt>{{ t.get("audit-entry-entity-type") }}</dt>
+<dd>{{ entity_type }}</dd>
+<dt>{{ t.get("audit-entry-entity") }}</dt>
+<dd class="data">{{ entity }}</dd>
+<dt>{{ t.get("audit-entry-aggregate") }}</dt>
+<dd class="data">{{ aggregate }}</dd>
+<dt>{{ t.get("audit-entry-request") }}</dt>
+<dd class="data">{{ request_id }}</dd>
+{% if let Some(trace) = trace %}<dt>{{ t.get("audit-entry-chain") }}</dt>
+<dd class="data">{{ trace.chain_seq }}</dd>
+{% if let Some(address) = trace.client_ip %}<dt>{{ t.get("audit-entry-client") }}</dt>
+<dd class="data">{{ address }}</dd>
+{% endif %}{% if let Some(session) = trace.session_ref %}<dt>{{ t.get("audit-entry-session") }}</dt>
+<dd class="data">{{ session }}</dd>
+{% endif %}{% endif %}</dl>
+<div class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">
+<a class="target-link" href="{{ object_href }}">{{ t.get("audit-entry-object-link") }}</a>
+<a class="target-link" href="{{ aggregate_href }}">{{ t.get("audit-entry-aggregate-link") }}</a>
+<a class="target-link" href="{{ list_href }}">{{ t.get("audit-title") }}</a>
+</div>
+<h2>{{ t.get("audit-entry-before") }}</h2>
+{% if let Some(text) = before %}<pre class="json">{{ text }}</pre>{% else %}<p>{{ t.get("audit-entry-no-state") }}</p>{% endif %}
+<h2>{{ t.get("audit-entry-after") }}</h2>
+{% if let Some(text) = after %}<pre class="json">{{ text }}</pre>{% else %}<p>{{ t.get("audit-entry-no-state") }}</p>{% endif %}
+{% endblock %}

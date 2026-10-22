@@ -25,9 +25,9 @@ use crate::memory::fixtures::{
 };
 use crate::memory::{JournalEntry, LockMode, MemoryStore};
 use crate::ports::{
-    AttemptRepository, AuditWritten, DraftRepository, Isolation, NonEmpty, PlantRepository,
-    RecipeReads, RecipeRepository, SessionRepository, Transaction, TypeCatalog, UnitLookup,
-    UnitOfWork, UserRepository,
+    AttemptRepository, AuditReads, AuditWritten, DiffReads, DraftRepository, Isolation, NonEmpty,
+    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, Transaction, TypeCatalog,
+    UnitLookup, UnitOfWork, UserRepository,
 };
 use crate::recipe::{
     ApproveVersion, ApproveVersionInput, RenameRecipe, RenameRecipeInput, RetireVersion,
@@ -417,6 +417,14 @@ impl Transaction for SlowCommitTransaction {
 
     fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
         self.inner.recipe_reads()
+    }
+
+    fn audit_reads(&mut self) -> &mut dyn AuditReads {
+        self.inner.audit_reads()
+    }
+
+    fn diff_reads(&mut self) -> &mut dyn DiffReads {
+        self.inner.diff_reads()
     }
 
     fn drafts(&mut self) -> &mut dyn DraftRepository {

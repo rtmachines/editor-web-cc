@@ -151,6 +151,16 @@ fn login_of(state: &MemoryState, id: UserId) -> Result<Login, StorageError> {
         .ok_or_else(|| corrupt_rows(&"the user of a version does not exist"))
 }
 
+/// Return the number of the base version `id`. A missing row breaks the foreign key, so the
+/// storage is corrupt.
+fn number_of(state: &MemoryState, id: RecipeVersionId) -> Result<u32, StorageError> {
+    state
+        .versions
+        .get(&id)
+        .map(|base| base.number)
+        .ok_or_else(|| corrupt_rows(&"the base of a version does not exist"))
+}
+
 /// Build the detail of a version row.
 fn detail(state: &MemoryState, row: &VersionRow) -> Result<VersionDetail, StorageError> {
     Ok(VersionDetail {
@@ -159,6 +169,10 @@ fn detail(state: &MemoryState, row: &VersionRow) -> Result<VersionDetail, Storag
         number: row.number,
         state: row.state().map_err(|reason| corrupt_rows(&reason))?,
         change_note: row.change_note.clone(),
+        based_on: row
+            .based_on
+            .map(|base| number_of(state, base))
+            .transpose()?,
         created_by: login_of(state, row.created_by)?,
         approved_by: row
             .approved_by
@@ -291,7 +305,7 @@ impl RecipeReads for MemoryTransaction {
         recipe: RecipeId,
         at: Timestamp,
     ) -> Result<Option<Login>, StorageError> {
-        actor_at(self.state(), &self.committed_audit(), (recipe, at))
+        actor_at(self.state(), &self.audit_at_begin(), (recipe, at))
     }
 
     async fn parameter_page(

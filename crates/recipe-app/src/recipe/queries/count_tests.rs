@@ -27,11 +27,11 @@ use crate::error::StorageError;
 use crate::memory::MemoryStore;
 use crate::memory::fixtures::{Fixture, actor, meta, mid, parameter_on, reference, text, uid, vid};
 use crate::ports::{
-    AttemptRepository, AuditWritten, DerivedTypeLock, DraftRepository, Ensured, InsertedMachine,
-    Isolation, Locked, MachineFilter, MachineSummary, NonEmpty, ParameterRow, PlantRepository,
-    RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary, RowImage, SessionRepository,
-    Transaction, TypeCatalog, TypeUsageRow, UnitCount, UnitLookup, UnitOfWork, UserRepository,
-    VersionDetail, VersionSummary,
+    AttemptRepository, AuditReads, AuditWritten, DerivedTypeLock, DiffReads, DraftRepository,
+    Ensured, InsertedMachine, Isolation, Locked, MachineFilter, MachineSummary, NonEmpty,
+    ParameterRow, PlantRepository, RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary,
+    RowImage, SessionRepository, Transaction, TypeCatalog, TypeUsageRow, UnitCount, UnitLookup,
+    UnitOfWork, UserRepository, VersionDetail, VersionSummary,
 };
 
 /// The platform of the test machine.
@@ -80,6 +80,16 @@ impl Transaction for CountingTransaction {
 
     fn recipe_reads(&mut self) -> &mut dyn RecipeReads {
         self
+    }
+
+    fn audit_reads(&mut self) -> &mut dyn AuditReads {
+        self.count();
+        self.inner.audit_reads()
+    }
+
+    fn diff_reads(&mut self) -> &mut dyn DiffReads {
+        self.count();
+        self.inner.diff_reads()
     }
 
     fn drafts(&mut self) -> &mut dyn DraftRepository {

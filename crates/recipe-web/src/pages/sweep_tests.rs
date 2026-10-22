@@ -11,7 +11,8 @@ use super::test_helpers::{CSP, assert_clean_html};
 use super::{machines, parameters, recipes, types, units, versions};
 use crate::components_tests::assert_fixed_svg_tags;
 use crate::routes::{Access, table};
-use crate::test_support::{Reply, TestSession};
+use crate::test_support::{Fixture, Reply, TestSession, deactivate_user};
+use recipe_domain::identity::Role;
 
 /// The settings of the `htmx-config` meta tag that a page must hold (`api.md` section 9).
 const HTMX_CONFIG: [&str; 7] = [
@@ -38,10 +39,21 @@ const P31_PAGES: [(&str, &str); 6] = [
     ("/users/{login}", "/users/user1"),
 ];
 
+/// The history page, the audit pages, and the security events page of P3.4 (ADR-0051).
+///
+/// The audit entry `1` is the first entry that the sweep world writes.
+const P34_PAGES: [(&str, &str); 4] = [
+    ("/recipes/{ref}/history", "/recipes/R-100/history"),
+    ("/audit", "/audit"),
+    ("/audit/{id}", "/audit/1"),
+    ("/security-events", "/security-events"),
+];
+
 /// Return each full GET page of the route table with the path that the test requests.
 ///
 /// The six pages of P3.1 come first. The test modules of the six areas of design D12 add the
 /// pages of the machines, the units, the types, the recipes, the versions, and the parameters.
+/// The four pages of P3.4 come last.
 fn pages() -> Vec<(&'static str, String)> {
     let mut pages: Vec<(&'static str, String)> = P31_PAGES
         .iter()
@@ -53,7 +65,21 @@ fn pages() -> Vec<(&'static str, String)> {
     pages.extend(recipes::route_tests::sweep_pages());
     pages.extend(versions::route_tests::sweep_pages());
     pages.extend(parameters::route_tests::sweep_pages());
+    pages.extend(
+        P34_PAGES
+            .iter()
+            .map(|(pattern, path)| (*pattern, (*path).to_owned())),
+    );
     pages
+}
+
+/// Write the audit entry `1` through a use case, so that `GET /audit/1` answers `200`.
+///
+/// The function solves one problem: the sweep fixtures hold no audit entry, and a page of the list
+/// `P34_PAGES` shows one. The use case `DeactivateUser` writes the entry of the user `user8`.
+pub(super) async fn seed_audit_entry(fixture: &Fixture) {
+    let _operator = fixture.seed_session(8, Role::Operator, false);
+    deactivate_user(fixture, "user8").await;
 }
 
 /// Return the patterns of the rows `GET` with an operation. Static files are not pages.
@@ -141,7 +167,14 @@ fn sweep_pages_collect_the_pages_of_p31_and_of_each_area() {
         }
     }
     let area_count: usize = areas.iter().map(|(_area, rows)| rows.len()).sum();
-    let expected = P31_PAGES.len().checked_add(area_count).unwrap();
+    for (pattern, path) in P34_PAGES {
+        assert!(listed.contains(&(pattern, path.to_owned())), "{pattern}");
+    }
+    let expected = P31_PAGES
+        .len()
+        .checked_add(area_count)
+        .and_then(|count| count.checked_add(P34_PAGES.len()))
+        .unwrap();
     assert_eq!(listed.len(), expected);
 }
 
@@ -149,6 +182,7 @@ fn sweep_pages_collect_the_pages_of_p31_and_of_each_area() {
 async fn sweep_every_get_page_has_layout_headers_and_clean_markup_in_both_languages() {
     let (fixture, session) = administrator();
     fixture.seed_recipes();
+    seed_audit_entry(&fixture).await;
     for pattern in get_page_patterns() {
         let path = path_of(pattern).unwrap();
         let session_of_page = (pattern != LOGIN_PATTERN).then_some(&session);

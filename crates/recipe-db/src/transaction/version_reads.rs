@@ -21,15 +21,17 @@ const SELECT_PAGE: &str = "\
 SELECT number, status, deleted_at, change_note, created_at, approved_at \
 FROM recipe_version WHERE recipe_id = $1 ORDER BY number DESC OFFSET $2 LIMIT $3";
 
-/// The header of one version with the logins of its actors. A version without an approver has
-/// no row of the second join.
+/// The header of one version with the logins of its actors and the number of its base. A
+/// version without an approver has no row of the `a` join. A version without a base has no row
+/// of the `b` join. The join keys of `b` are the target of `recipe_version_based_on_same_recipe`.
 const SELECT_DETAIL: &str = "\
 SELECT v.id, v.recipe_id, v.number, v.status, v.deleted_at, v.change_note, \
-    c.login AS created_by, a.login AS approved_by, \
+    b.number AS based_on, c.login AS created_by, a.login AS approved_by, \
     v.created_at, v.approved_at, v.updated_at, v.row_version \
 FROM recipe_version v \
 JOIN app_user c ON c.id = v.created_by \
 LEFT JOIN app_user a ON a.id = v.approved_by \
+LEFT JOIN recipe_version b ON b.recipe_id = v.recipe_id AND b.id = v.based_on_version_id \
 WHERE v.id = $1";
 
 /// The login of the actor of the newest audit entry of the recipe `$1` at the instant `$2`.
@@ -59,6 +61,7 @@ struct DetailRecord {
     status: String,
     deleted_at: Option<OffsetDateTime>,
     change_note: String,
+    based_on: Option<i32>,
     created_by: String,
     approved_by: Option<String>,
     created_at: OffsetDateTime,
@@ -105,6 +108,7 @@ fn detail(record: DetailRecord) -> Result<VersionDetail, StorageError> {
         state: state(&record.status, record.deleted_at)?,
         change_note: LongText::parse(&record.change_note)
             .map_err(|error| corrupt("recipe_version", error))?,
+        based_on: record.based_on.map(number).transpose()?,
         created_by: login(&record.created_by)?,
         approved_by: record.approved_by.as_deref().map(login).transpose()?,
         created_at: Timestamp::from(record.created_at),

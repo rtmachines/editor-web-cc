@@ -70,11 +70,13 @@ fn lists_fields_have_the_code_of_the_first_line() {
     let error = WebError::Fields {
         lines: NonEmpty::try_from(lines).unwrap(),
         form: None,
+        failure: None,
     };
     assert_eq!(error.code(), ErrorCode::RCP_004);
     let first_web = WebError::Fields {
         lines: NonEmpty::new(FieldError::bad_request("tag", FieldReason::Tag)),
         form: None,
+        failure: None,
     };
     assert_eq!(first_web.code(), ErrorCode::WEB_008);
 }
@@ -87,7 +89,12 @@ fn lists_the_display_of_fields_holds_the_english_text_of_each_line() {
     ])
     .unwrap();
     let lines = NonEmpty::try_from(leaf_lines(&errors, &value_input)).unwrap();
-    let text = WebError::Fields { lines, form: None }.to_string();
+    let text = WebError::Fields {
+        lines,
+        form: None,
+        failure: None,
+    }
+    .to_string();
     assert!(text.contains("Value 3500 of SPEED_TABLE[3]"), "{text}");
     assert!(text.contains("Value 4000 of SPEED_TABLE[6]"), "{text}");
 }
@@ -99,7 +106,12 @@ fn lists_the_log_text_of_100_lines_holds_the_count_and_only_the_first_20_lines()
         .collect();
     let errors = RecipeErrors::from_vec(entries).unwrap();
     let lines = NonEmpty::try_from(leaf_lines(&errors, &value_input)).unwrap();
-    let text = WebError::Fields { lines, form: None }.to_string();
+    let text = WebError::Fields {
+        lines,
+        form: None,
+        failure: None,
+    }
+    .to_string();
     assert_eq!(text.lines().count(), 21, "{text}");
     assert_eq!(
         text.lines().next(),

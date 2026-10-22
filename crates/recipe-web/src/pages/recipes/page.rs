@@ -59,7 +59,17 @@ struct RecipePage<'a> {
     deleted: bool,
     form: RenameForm,
     new_version_href: Option<String>,
+    history_href: String,
+    delete: Option<DeleteAction>,
     versions: VersionTable,
+}
+
+/// The delete form of the recipe page (ADR-0049 (g)). The role holds `RecipeDelete`.
+struct DeleteAction {
+    /// The address of the route, for example `/recipes/R-100/delete`.
+    action: String,
+    /// The text of the danger button, which names the reference number.
+    button: String,
 }
 
 impl<'a> RecipePage<'a> {
@@ -102,6 +112,11 @@ impl<'a> RecipePage<'a> {
             .shown(allows(Operation::RenameRecipe)),
             new_version_href: allows(Operation::CreateVersion)
                 .then(|| format!("/recipes/{reference}/versions/new")),
+            history_href: format!("/recipes/{reference}/history"),
+            delete: allows(Operation::DeleteRecipe).then(|| DeleteAction {
+                action: format!("/recipes/{reference}/delete"),
+                button: t.with_arg("delete-recipe-button", "reference", reference),
+            }),
             versions: VersionTable::new(t, reference, &view.versions, page),
             layout,
         })

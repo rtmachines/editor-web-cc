@@ -9,7 +9,7 @@ use super::test_world::recipe_world;
 use crate::pages::draft_reply::refusal_tests::assert_operator_refused;
 use crate::pages::test_helpers::{assert_clean_html, assert_error, assert_htmx_error};
 use crate::test_support::icon_tag;
-use crate::test_support::plant::main_of;
+use crate::test_support::plant::{ENGLISH, POLISH, main_of};
 
 /// The opening tag of the rename form on the recipe page of `R-100`.
 const RENAME_TAG: &str = "<form id=\"recipe-rename-form\" method=\"post\" action=\"/recipes/R-100/rename\" hx-boost=\"true\" hx-target=\"#recipe-name\" hx-swap=\"innerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
@@ -88,6 +88,70 @@ async fn recipes_page_of_a_deleted_recipe_shows_the_state_to_an_administrator_wi
         main.contains("<a href=\"/recipes/R-300/versions/1\">1</a>"),
         "{main}"
     );
+}
+
+/// The opening tag of the one row of links of the recipe page (ADR-0049 (i), ADR-0051 (g)).
+const ROW_OPEN: &str =
+    "<p class=\"actions\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\">";
+
+/// The boosted row of `reference` with the optional link to a new version and the history link.
+///
+/// `new_label` is the text of the new version link, or `None` when the row has no such link.
+fn links_row(reference: &str, new_label: Option<&str>, history_label: &str) -> String {
+    let new_link = new_label.map_or_else(String::new, |label| {
+        format!("<a class=\"target-link\" href=\"/recipes/{reference}/versions/new\">{label}</a>")
+    });
+    format!(
+        "{ROW_OPEN}{new_link}<a class=\"target-link\" href=\"/recipes/{reference}/history\">{history_label}</a></p>"
+    )
+}
+
+/// The row of `reference` in English with the history link only.
+fn history_link(reference: &str) -> String {
+    links_row(reference, None, "History")
+}
+
+/// The fixed expectation of the row of `R-100` for each role and each language (ADR-0049 (i)).
+///
+/// The Operator has no right to create a version. The two other roles have it.
+#[tokio::test]
+async fn recipes_page_holds_one_row_with_the_links_that_the_role_may_use_in_both_languages() {
+    let world = recipe_world();
+    let roles = [
+        ("Operator", &world.operator, false),
+        ("ProcessEngineer", &world.engineer, true),
+        ("Administrator", &world.admin, true),
+    ];
+    let languages = [
+        (ENGLISH, "New version", "History"),
+        (POLISH, "Nowa wersja", "Historia"),
+    ];
+    for (role, session, may_create) in roles {
+        for (cookie, new_label, history_label) in languages {
+            let reply = world.get(session, "/recipes/R-100", &[cookie]).await;
+            assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+            let main = main_of(&reply.body);
+            let case = format!("{role} {history_label}: {main}");
+            assert_eq!(main.matches(ROW_OPEN).count(), 1, "{case}");
+            assert_eq!(main.matches("/history\"").count(), 1, "{case}");
+            assert_eq!(
+                main.matches("/versions/new\"").count(),
+                usize::from(may_create),
+                "{case}"
+            );
+            let row = links_row("R-100", may_create.then_some(new_label), history_label);
+            assert!(main.contains(&row), "{case}");
+            assert_clean_html(&reply.body);
+        }
+    }
+}
+
+#[tokio::test]
+async fn recipes_page_of_a_deleted_recipe_links_to_the_history_for_an_administrator() {
+    let world = recipe_world();
+    let reply = world.get_en(&world.admin, "/recipes/R-300").await;
+    let main = main_of(&reply.body);
+    assert!(main.contains(&history_link("R-300")), "{main}");
 }
 
 #[tokio::test]

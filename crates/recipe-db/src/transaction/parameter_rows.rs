@@ -49,8 +49,8 @@ pub(super) struct ParameterRecord {
 
 impl ParameterRecord {
     /// Return the primary key of the row. The child rows name it.
-    pub(super) const fn id(&self) -> Uuid {
-        self.id
+    pub(super) fn id(&self) -> ParameterId {
+        ParameterId::from(self.id)
     }
 }
 
@@ -64,6 +64,13 @@ pub(super) struct LimitRecord {
     max_length: Option<i16>,
 }
 
+impl LimitRecord {
+    /// Return the primary key of the parameter that owns the row.
+    pub(super) fn parameter_id(&self) -> ParameterId {
+        ParameterId::from(self.parameter_id)
+    }
+}
+
 /// One `parameter_translation` row.
 #[derive(sqlx::FromRow)]
 pub(super) struct TranslationRecord {
@@ -71,6 +78,13 @@ pub(super) struct TranslationRecord {
     lang: String,
     name: String,
     description: String,
+}
+
+impl TranslationRecord {
+    /// Return the primary key of the parameter that owns the row.
+    pub(super) fn parameter_id(&self) -> ParameterId {
+        ParameterId::from(self.parameter_id)
+    }
 }
 
 /// Build the stored limit of a limit row. A corrupt row gives a storage error.
@@ -107,12 +121,12 @@ pub(super) fn stored_translation(record: &TranslationRecord) -> Result<Translati
 }
 
 /// Group the rows of a child table by the parameter that owns them. The order of rows stays.
-fn group<T, R>(
+pub(super) fn group<T, R>(
     rows: &[R],
-    owner: impl Fn(&R) -> Uuid,
+    owner: impl Fn(&R) -> ParameterId,
     build: impl Fn(&R) -> Result<T, StorageError>,
-) -> Result<BTreeMap<Uuid, Vec<T>>, StorageError> {
-    let mut grouped: BTreeMap<Uuid, Vec<T>> = BTreeMap::new();
+) -> Result<BTreeMap<ParameterId, Vec<T>>, StorageError> {
+    let mut grouped: BTreeMap<ParameterId, Vec<T>> = BTreeMap::new();
     for row in rows {
         grouped.entry(owner(row)).or_default().push(build(row)?);
     }
@@ -171,13 +185,17 @@ pub(super) async fn of_version(
         .fetch_all(connection)
         .await
         .map_err(map_error)?;
-    let mut limits = group(&limits, |row| row.parameter_id, stored_limit)?;
-    let mut translations = group(&translations, |row| row.parameter_id, stored_translation)?;
+    let mut limits = group(&limits, LimitRecord::parameter_id, stored_limit)?;
+    let mut translations = group(
+        &translations,
+        TranslationRecord::parameter_id,
+        stored_translation,
+    )?;
     parameters
         .into_iter()
         .map(|record| {
-            let limits = limits.remove(&record.id).unwrap_or_default();
-            let translations = translations.remove(&record.id).unwrap_or_default();
+            let limits = limits.remove(&record.id()).unwrap_or_default();
+            let translations = translations.remove(&record.id()).unwrap_or_default();
             stored_parameter(record, limits, translations)
         })
         .collect()

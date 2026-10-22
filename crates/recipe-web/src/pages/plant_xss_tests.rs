@@ -9,16 +9,11 @@ use axum::http::StatusCode;
 use recipe_domain::identity::Role;
 
 use super::machines::test_world::seed_machines;
+use super::xss_kit::{assert_error_panel, assert_refused, assert_safe, has_control};
 use super::xss_tests::{query_pages, with_query};
-use crate::components_tests::assert_fixed_svg_tags;
-use crate::pages::test_helpers::{
-    askama_escape, assert_clean_html, assert_no_user_text_in_hx_attributes, encode, field_value,
-    payloads,
-};
+use crate::pages::test_helpers::{askama_escape, encode, field_value, payloads};
 use crate::test_support::{Fixture, Reply, TestSession, get_with, post_fields};
 
-/// The most `<script>` tags that an answer may hold. They are the three files of `base.html`.
-const MAX_SCRIPT_TAGS: usize = 3;
 /// The header of an HTMX request.
 const HTMX: (&str, &str) = ("hx-request", "true");
 /// The form of a valid new machine. A test replaces one value.
@@ -85,16 +80,6 @@ const REFUSED_POSTS: [(&str, &str, &str); 7] = [
     ),
 ];
 
-/// Return true when escaping changes the payload, so the raw payload must not appear in an answer.
-fn escapes(payload: &str) -> bool {
-    askama_escape(payload) != payload
-}
-
-/// Return true when `Text::parse` refuses the payload, because it holds a control character.
-fn has_control(payload: &str) -> bool {
-    payload.chars().any(char::is_control)
-}
-
 /// Fill the hole `{}` of a target with the encoded payload.
 fn fill(target: &str, payload: &str) -> String {
     target.replace("{}", &encode(payload))
@@ -126,44 +111,6 @@ impl Plant {
         let router = self.fixture.router();
         post_fields(&router, path, Some(&self.admin), &[HTMX], body).await
     }
-}
-
-/// Assert that an answer holds no markup of `payload` (design D14).
-///
-/// The page keeps its own scripts with `src`. No inline script, no image, and no event handler may
-/// appear, no `hx-*` attribute may hold the payload, and each `<svg` is a fixed icon tag.
-fn assert_safe(reply: &Reply, payload: &str, what: &str) {
-    let body = &reply.body;
-    assert_clean_html(body);
-    assert_fixed_svg_tags(body);
-    assert_no_user_text_in_hx_attributes(body, payload);
-    assert!(!body.contains("<img"), "{what}: <img in {body}");
-    let scripts = body.matches("<script").count();
-    assert!(scripts <= MAX_SCRIPT_TAGS, "{what}: {scripts} scripts");
-    if escapes(payload) {
-        assert!(!body.contains(payload), "{what}: raw payload in {body}");
-    }
-}
-
-/// Assert a refused request: a client error status, the error code, and a safe body.
-fn assert_refused(reply: &Reply, code: &str, payload: &str, what: &str) {
-    assert!(
-        reply.status.is_client_error(),
-        "{what}: {} {}",
-        reply.status,
-        reply.body
-    );
-    assert!(
-        reply.body.contains(code),
-        "{what}: no {code} in {}",
-        reply.body
-    );
-    assert_safe(reply, payload, what);
-}
-
-/// Assert that an HTMX answer sends its error into `#error-panel`.
-fn assert_error_panel(reply: &Reply, what: &str) {
-    assert_eq!(reply.header("hx-retarget"), "#error-panel", "{what}");
 }
 
 /// Return the form body of a new machine with the field `field` set to `value`.
