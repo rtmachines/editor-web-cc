@@ -1,6 +1,6 @@
 # ADR-0041: Error lists of a form
 
-Status: Accepted. Amended by ADR-0046 (a form route runs its form query before it reads the fields in (a))
+Status: Accepted. Amended by ADR-0046 (a form route runs its form query before it reads the fields in (a)). Amended by ADR-0050 (point (d): a query value without an input gives a line with no link)
 Date: 2026-10-15
 Deciders: project owner
 

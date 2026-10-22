@@ -1,6 +1,6 @@
 # ADR-0047: Refused form page and place of the toast
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0049 (point (m): below 48rem, the scroll padding of `html` in (c) covers a toast of four lines)
 Date: 2026-10-15
 Deciders: project owner
 

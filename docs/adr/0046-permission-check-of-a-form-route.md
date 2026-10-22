@@ -1,6 +1,6 @@
 # ADR-0046: Permission check of a form route
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0049 (the approve, retire, discard, delete, and restore routes keep the order of the Risks section in (l))
 Date: 2026-10-15
 Deciders: project owner
 

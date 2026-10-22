@@ -48,7 +48,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 - A command sorts its class-2 keys in the order struct name, `STRING`, `WSTRING`, `ARRAY`. It takes them before its first `plc_type` insert.
 - Only the `sqlx` migrator uses the one-key form `pg_advisory_lock(bigint)`.
 - Isolation is `READ COMMITTED` with no retry. `SetUserRole` and `DeactivateUser` run `SERIALIZABLE` and retry once on `40001`.
-- A query reads in `READ COMMITTED READ ONLY`. A draft query of ADR-0042 reads in `REPEATABLE READ READ ONLY`. A query never retries.
+- A query reads in `READ COMMITTED READ ONLY`. A draft query of ADR-0042 and the preview and diff queries of ADR-0050 read in `REPEATABLE READ READ ONLY`. A query never retries.
 
 ## Tests (reliability §6)
 

@@ -75,6 +75,27 @@ This file records the notable changes of the recipe editor. The format follows [
 - The conflict answer shows the `row_version` of the server, the login of the last editor, and the time of the last change.
 - A body limit for each route group. A parameter value can have 4 MiB, and a translation 64 KiB.
 - ADR-0048 for a browser regression suite with Playwright Test in `e2e/`. The regression suite runs on the dev server in CI, and the smoke suite runs on the Compose stack.
+- ADR-0049 for the approval preview and the lifecycle actions. ADR-0050 for the diff of two versions. ADR-0051 for the audit, history, and security event views.
+- `breaks_separation_of_duties` and `Draft::check_approver` in `recipe-domain`. The approval preview and `Recipe::approve` use one rule for the separation of duties (I16).
+- The module `recipe/diff` of `recipe-domain` with the pure function `diff_pairs`. It compares the definition, the value per leaf, the limit rows, and the translations of each parameter by `ParameterKey`.
+- The read port `DiffReads` with an in-memory adapter and a `sqlx` adapter. It gives the change flags, the counts, and the pairs of the parameters of one page.
+- The query `GetApprovalPreview` of `recipe-app`. It runs the checks of the approval without a write. Its blockers equal the errors of `ApproveVersion` on the same state.
+- The query `DiffVersions` of `recipe-app`. One page holds at most `page.diff` parameters over all its sections.
+- `GetApprovalPreview` and `DiffVersions` read in one `Isolation::RepeatableRead` transaction. Each query takes a `diff.permits` permit before the transaction and holds it to the end of the render.
+- `TimeoutStage::Diff` and `TaskStage::Diff` in `recipe-app`. A diff that exceeds `timeout.validation` gives `503 E-WEB-009`.
+- The read port `AuditReads` with an in-memory adapter and a `sqlx` adapter. Each list has the cursor `before`, the filters, and the scope of A20.
+- The audit queries `ListAuditEntries`, `GetAuditEntry`, `GetRecipeHistory`, and `ListSecurityEvents` of `recipe-app`. Each query checks the permission in its first statement.
+- The day type `UtcDay` of `recipe-app` for the filters `from` and `to`. Both days are inside the range.
+- The settings `page.audit`, `page.history`, `page.security_events`, `page.diff`, `diff.leaf_rows`, and `diff.permits`.
+- The resource files `i18n/en-approval.ftl` and `i18n/pl-approval.ftl` with the texts of the new pages. Each bundle loads two resource files.
+- The askama macros `danger_versioned` and `cursor_pager`, and the icons `diff-limit`, `diff-changed`, `diff-added`, and `diff-removed`.
+- The rules of the diff tables, the limits frame, and `pre.json` in `static/components.css` (`design-system.md` sections 10.13 and 10.14).
+- The approval preview of `api.md` section 2.5 in `pl` and `en`. It shows the diff to the current Approved version with the limits first, the outdated parameters, and the blockers.
+- The approve, retire, and discard actions on the version page. The retire and the discard forms stand in danger disclosures. A success of the approval or the retirement sets `HX-Push-Url`.
+- The delete form of the recipe page in a danger disclosure, and a restore form in each deleted row of `/recipes?show_deleted=1`.
+- The diff page `GET /recipes/{ref}/versions/{n}/diff/{m}` in `pl` and `en`. It groups the changes by kind, with the limits first, and has pages for each section.
+- The pages of `api.md` section 2.9 in `pl` and `en`. They show the recipe history, the audit list with filters, the audit entry with formatted JSON, and the security events.
+- A scenario test of `recipe-db` on PostgreSQL: create, edit, approve, version 2, approve, retire. It checks one transaction per command, `content_sha256`, and the hash chain.
 
 ### Changed
 
@@ -103,7 +124,20 @@ This file records the notable changes of the recipe editor. The format follows [
 - ADR-0045 keeps an array inside a group of the leaf grid in that group, with no toggle of its own. `design-system.md` section 10.8 holds the rule. ADR-0039 has an "Amended by" note.
 - ADR-0046 runs the form query of a route before the route reads its fields. The form query checks the permission of its purpose. `api.md` section 3 and `domain-model.md` section 5.5 hold the rule. ADR-0041 has an "Amended by" note.
 - ADR-0047 shows a refused form without HTMX on a page of the session with the sent texts. Every HTMX error answer empties `#toast`, and `#toast` sticks at the top of the view. The removal of a parameter shows a toast. `design-system.md` section 10 holds the rules. ADR-0036 has an "Amended by" note.
+- `api.md` sections 1, 2.4, 2.5, 2.9, 3.2, and 4 and `reliability.md` sections 1.1, 7.4, and 7.11 hold the decisions of ADR-0049 to ADR-0051.
+- `design-system.md` sections 8, 9, 10.2, 10.12, 10.13, and 10.14 and `domain-model.md` sections 6 and 7 hold them too. ADR-0036, ADR-0037, ADR-0041, ADR-0042, ADR-0046, and ADR-0047 have an "Amended by" note.
+- Below 48rem, the scroll padding of `html` covers a toast of four lines, so a focused element does not hide under the toast (ADR-0049 (m)).
+- `WebError::BadQuery` gives `422 E-WEB-008` for a bad query value of a page without an input of that name. Its error line has no link (ADR-0050 (e)).
+- `FieldReason` has seven reasons of the filter inputs: `Date`, `DateOrder`, `Choice`, `Uuid`, `EntityWithoutType`, `Address`, and `Cursor`.
+- The security event page states next to the filter `login` that an aggregated row matches by its first event only (ADR-0051 (h)).
+- `.claude/rules/web.md` and `.claude/rules/sql.md` hold the rules of ADR-0049 and ADR-0050 for the action forms and for the isolation of the preview and the diff.
+- The navigation shows the link "Audit" after the link to the users. The link shows when the matrix row of `ListAuditEntries` allows the role.
+- `ApproveVersion` returns `ApproveVersionOutput` with the outcome and the number of the retired version.
+- The version page shows a row of links after its header: the approve link, the compare links, and the history link. The actions stand at the end of `main`.
+- `VersionDetail` has the field `based_on`, the number of the base version.
+- In a `RepeatableRead` transaction, the in-memory adapter reads the draft from the state at the start of the transaction (ADR-0050 (f)).
 
 ### Security
 
 - `Cargo.lock` holds `rustls` 0.23.46 in place of 0.23.45 (RUSTSEC-2026-0346 to RUSTSEC-2026-0349).
+- `Cargo.lock` holds `rustls-webpki` 0.103.16 in place of 0.103.15 (RUSTSEC-2026-0382) and `webpki-roots` 1.0.10 in place of 1.0.9 (RUSTSEC-2026-0381).

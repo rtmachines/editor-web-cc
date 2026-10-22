@@ -15,10 +15,10 @@ Each library crate owns its error types, with two exceptions. `recipe-export` re
 | Crate | Error type | Variants |
 |---|---|---|
 | `recipe-domain` | `PlantError`, `RecipeError`, `IdentityError`, `ExportError` | One `thiserror` enum per bounded context. Leaf errors. Every row with prefix `E-PLT`, `E-RCP`, `E-IDN` and a number below 030 in section 1.2, and every `E-RCP-050..069` row. `ExportError` lives in the module `export` and owns every `E-EXP` row: `NoApprovedVersion { reference }`, `VersionNotExportable { reference, number }`, `ContentHashMismatch { reference, number }`, `Serialize(#[from] serde_json::Error)`. Two carriers own no code (ADR-0027): `RecipeErrors` holds one or more `RecipeError` values, and `DraftError` holds a `RecipeError`, a `PlantError`, or a `RecipeErrors`. `ValueFaults` holds the faults of one value and owns no code. A draft function turns it into `RecipeErrors` (ADR-0041). `LeafTextsError` is a parse reason of `LeafTexts` without a code (ADR-0025, ADR-0039) |
-| `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] RecipeErrors`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `TaskFailed { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` of `Timeout` is `Argon2Permit`, `Validation`, `Export`, or `Request`. `stage` of `TaskFailed` is `PasswordHash` or `Validation`, the two kinds of `spawn_blocking` work (2.2), `Export` (ADR-0029), or `Token`, a failed read of random bytes from the operating system (ADR-0035). `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock { cause }`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `cause` of `Deadlock` is `Deadlock`, `LockTimeout`, or `Serialization` (ADR-0035). `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
+| `recipe-app` | `AppError`, `AuditError`, `StorageError` | `AppError`: `#[from] PlantError`, `#[from] RecipeError`, `#[from] RecipeErrors`, `#[from] IdentityError`, `#[from] ExportError`, plus `Forbidden { operation }`, `Unauthenticated`, `NotFound { entity }`, `ConcurrentEdit { reference, number, expected, actual }`, `Timeout { stage }`, `TaskFailed { stage }`, `AuditWriteFailed`, `Storage(#[from] StorageError)`. `stage` of `Timeout` is `Argon2Permit`, `Validation`, `Export`, `Request`, or `Diff` (ADR-0050). `stage` of `TaskFailed` is `PasswordHash` or `Validation`, the two kinds of `spawn_blocking` work (2.2), `Export` (ADR-0029), `Token`, a failed read of random bytes from the operating system (ADR-0035), or `Diff` (ADR-0050). `AuditError`: `ChainBroken { chain_seq }`, raised by the job `audit_chain_check`. `StorageError` is the error type of the storage ports: `Duplicate { constraint }`, `MissingReference { constraint }`, `Constraint { code, message }`, `Deadlock { cause }`, `StatementTimeout`, `PoolTimeout`, `Unavailable`, `Other { sqlstate, source }`. `cause` of `Deadlock` is `Deadlock`, `LockTimeout`, or `Serialization` (ADR-0035). `source` is a boxed `std::error::Error`, so `recipe-app` holds no `sqlx` type |
 | `recipe-db` | none public | Maps `sqlx::Error` into `StorageError` of `recipe-app` with the rule below. `recipe-db` depends on `recipe-app`, and `recipe-app` does not depend on `recipe-db` (`overview.md` 5) |
 | `recipe-export` | none | No error type of its own. The JSON writer of the HTTP response returns `ExportError` of `recipe-domain` |
-| `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `BadRow { row, field, reason }` (ADR-0037), `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. Two carriers own no code. `Fields { lines, form }` holds a non-empty list of field errors, and `code()` returns the code of the first line (ADR-0041). `Conflict { error, view }` holds `AppError::ConcurrentEdit` and the data of the last change, and `code()` returns `E-WEB-001` of the inner error (ADR-0043). `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
+| `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `BadRow { row, field, reason }` (ADR-0037), `BadQuery { field, reason }` (a query value with no input on the page, ADR-0050 (e)), `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. Two carriers own no code. `Fields { lines, form }` holds a non-empty list of field errors, and `code()` returns the code of the first line (ADR-0041). `Conflict { error, view }` holds `AppError::ConcurrentEdit` and the data of the last change, and `code()` returns `E-WEB-001` of the inner error (ADR-0043). `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
 | `recipe-server` | `anyhow::Error` | Everything, only in `main()`, configuration loading, subcommands, and wiring |
 
 Rules:
@@ -31,7 +31,7 @@ Rules:
 - `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. The trigger codes are `E-PLT-030..049`, `E-RCP-030..049`, and `E-AUD-003`. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock { cause: Deadlock }`. `40001` becomes `Deadlock { cause: Serialization }`. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock { cause: LockTimeout }` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
 - `SetUserRole`, `DeactivateUser`, and the first-administrator operation of `create-admin` run in `SERIALIZABLE`. They run once more on `Deadlock { cause: Serialization }`, also when it comes from the audit insert or from the commit. A second serialization failure returns `E-DB-001` (ADR-0035). Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
 - `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DuplicateMemberName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
-- `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, and the export use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
+- `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, the export, and the diff of two versions (ADR-0050) use it. `recipe-web` maps the request timeout of `TimeoutLayer` to `AppError::Timeout { stage: Request }`, so every timeout has one code.
 - `AppError::TaskFailed { stage }` owns `E-WEB-011`. The use case maps the `JoinError` of a `spawn_blocking` task to it (2.4). `E-WEB-010` stays the code of a panic that `CatchPanicLayer` catches.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. A background job logs its errors once at its loop boundary with a `job` field. Lower layers add context and propagate. They do not log the error.
 - The log line of an error holds its code and the `Display` text of each error in the chain. It never holds the `Debug` output of an error, because the `Debug` of a database error holds the row values of the detail (ADR-0035).
@@ -149,7 +149,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-WEB-005` | `AppError::NotFound { entity }` | 404 | {entity} does not exist. |
 | `E-WEB-006` | `WebError::ReadOnlyMode` | 503 | The system is in read-only mode because disk space is low. Contact the administrator. |
 | `E-WEB-007` | `WebError::CsrfRejected` | 403 | The form is no longer valid. Reload the page and try again. |
-| `E-WEB-008` | `WebError::BadRequest { field, reason }` | 422 | Field {field} is not valid: {reason}. |
+| `E-WEB-008` | `WebError::BadRequest { field, reason }`, `WebError::BadQuery { field, reason }` (ADR-0050 (e)), `WebError::BadRow { row, field, reason }` | 422 | Field {field} is not valid: {reason}. |
 | `E-WEB-009` | `AppError::Timeout { stage }` | 503 | The request took too long and was stopped. Try again. Reference: {request_id}. |
 | `E-WEB-010` | `WebError::Internal { request_id }` | 500 | An internal error occurred. Contact the administrator. Reference: {request_id}. |
 | `E-WEB-011` | `AppError::TaskFailed { stage }` | 500 | The operation {stage} did not complete. Try again. Reference: {request_id}. |
@@ -221,7 +221,7 @@ The `[profile.release]` section sets `overflow-checks = true`. An overflow in re
 | Regular expressions | The pattern is a literal in a `static` of type `LazyLock<Result<Regex, regex::Error>>`. The first use compiles it. The caller maps an `Err` to its own error type with `map_err`, never with `expect`. A unit test compiles every pattern, so a bad pattern fails the build |
 | `Mutex` lock | Use `parking_lot::Mutex` whose `lock()` cannot return an error |
 | Tokio `JoinHandle` | `handle.await` returns `Result<T, JoinError>`. The use case maps the `JoinError` of a `spawn_blocking` task to `AppError::TaskFailed { stage }` (`E-WEB-011`). Never `unwrap` it |
-| Blocking inside async | Never `block_on` inside an async context. CPU-heavy work (Argon2id hashing, snapshot validation, export rebuild) runs in `spawn_blocking` |
+| Blocking inside async | Never `block_on` inside an async context. CPU-heavy work (Argon2id hashing, snapshot validation, export rebuild, diff of two versions) runs in `spawn_blocking` |
 | Time | Use `time::OffsetDateTime::now_utc()`, which does not fail |
 
 ### 2.3 Permitted exceptions
@@ -240,7 +240,7 @@ A panic in application code is a bug, not an error. The system contains it and k
 4. Every background job of the table below runs inside a supervisor loop. A panic in one iteration is caught by the task join, logged with the `job` field, and the job restarts after `job.restart_delay`.
 5. Watchdog: an OS thread, started before the Tokio runtime, probes the internal health listener every `watchdog.probe_interval`. After `watchdog.failures` failed probes in `watchdog.window`, the thread writes one `ERROR` line and calls `std::process::exit(70)` (the exception of 2.3). Docker restarts the container. This covers a stalled runtime, which `restart: always` alone does not detect.
 6. Application code never calls `std::panic::catch_unwind` itself. Three places catch a panic: the layer in rule 3, the supervisor in rule 4, and the join of a `spawn_blocking` task.
-7. A panic inside a `spawn_blocking` task (Argon2id hashing, snapshot validation, export rebuild) reaches the use case as a `JoinError`. The use case maps it to `AppError::TaskFailed { stage }`, which returns `500 E-WEB-011`. The panic hook of rule 2 logs the panic.
+7. A panic inside a `spawn_blocking` task (Argon2id hashing, snapshot validation, export rebuild, diff of two versions) reaches the use case as a `JoinError`. The use case maps it to `AppError::TaskFailed { stage }`, which returns `500 E-WEB-011`. The panic hook of rule 2 logs the panic.
 
 A panic is a visible signal. The job `alerts` raises an alert when more than `alerts.panic_count` panic events occur in `alerts.panic_window` (section 3.7).
 
@@ -502,6 +502,7 @@ The values are in section 7.11. This table gives the key and the mechanism.
 | Argon2id semaphore | `argon2.acquire_timeout` | Acquire timeout. A timeout returns `503 E-WEB-009` (`AppError::Timeout`) |
 | Export generation | `timeout.export` | Timeout around the read, the locks, the rebuild in `spawn_blocking`, and the hash compare. Returns `503 E-WEB-009`. The commit runs after this limit, so a timeout never hides a committed `VersionExported` entry (ADR-0029) |
 | Snapshot validation | `timeout.validation` | Timeout around the `spawn_blocking` call. Returns `503 E-WEB-009` |
+| Diff of two versions | `timeout.validation` | Timeout around the wait for a `diff.permits` permit and the `spawn_blocking` call. Returns `503 E-WEB-009`. The query takes the permit before its `REPEATABLE READ` transaction and holds it to the end of the render (ADR-0050) |
 
 ### 7.5 Connection pool
 
@@ -655,6 +656,12 @@ This table is the single source for every numeric setting. The configuration fil
 | `page.type_usage` | 100 rows of `GetTypeUsage` (ADR-0037) | api.md 2.3 |
 | `page.recipes` | 100 rows of `ListRecipes` and `ListDeletedRecipes` (ADR-0043) | api.md 2.4 |
 | `page.versions` | 100 rows of the version list of `GetRecipe` and `ListVersions` (ADR-0043) | api.md 2.4, api.md 2.5 |
+| `page.diff` | 50 parameters of one page of `DiffVersions` and `GetApprovalPreview`, over all its sections (ADR-0050) | api.md 2.5 |
+| `diff.leaf_rows` | 1 000 rows of one parameter in one section of a diff (ADR-0050) | api.md 2.5 |
+| `diff.permits` | 2 diffs that run at the same time in `spawn_blocking` (ADR-0050) | 7.4 |
+| `page.audit` | 100 rows of `ListAuditEntries` (ADR-0051) | api.md 2.9 |
+| `page.history` | 100 rows of `GetRecipeHistory` (ADR-0051) | api.md 2.9 |
+| `page.security_events` | 100 rows of `ListSecurityEvents` (ADR-0051) | api.md 2.9 |
 | `form.array_chunk` | 100 elements per group of an array in the leaf grid (ADR-0039) | design-system.md 10.8 |
 | `form.rebind_leaves` | 16 384 new member leaves in the rebind forms of one version page (ADR-0044) | api.md 2.5 |
 | `i18n.translation_langs` | `pl`. The list of language tags of the translation rows (ADR-0012, ADR-0043) | api.md 2.6 |
@@ -701,7 +708,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `clock.skew_warn` | 5 s | 7.9 |
 | `clock.check_interval` | 1 h | 2.4, 7.9 |
 
-Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1). A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 run in `REPEATABLE READ READ ONLY`. A query never retries.
+Transaction isolation and retry are rules in the code, not settings. `SetUserRole`, `DeactivateUser`, and the first-administrator operation run in `SERIALIZABLE`. They retry once on `40001`, then return `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1). A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 and the queries `GetApprovalPreview` and `DiffVersions` of ADR-0050 run in `REPEATABLE READ READ ONLY`. A query never retries.
 
 ### 7.12 Stored settings
 

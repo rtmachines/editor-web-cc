@@ -37,7 +37,7 @@ No path value holds an S7 address.
 
 Exemption from the `E-WEB-005` rule. `E-WEB-005 NotFound` is for an unknown `{ref}`, `{n}`, `{code}`, or `{login}`, a malformed `{key}` (not a UUID), and a `{key}` or `{lang}` of a version that does not exist. `E-RCP-051 ParameterNotFound` and `E-RCP-050 TranslationNotFound` are for a well-formed `{key}` or `{lang}` that is absent from an existing draft. The draft commands of section 2.6 return them. The two DELETE rows of section 2.6 cite both codes with this rule.
 
-Query values. A query value of a `GET` route can name a resource that the route needs. It then follows the rule of the path value with the same value object, for example `parent_path`, `from`, and `rev` of section 2 (ADR-0037). A query value that only selects a message, such as `archived`, is a request field. A malformed value gives the code of its value object, or `422 E-WEB-008` when the value object has no code.
+Query values. A query value of a `GET` route can name a resource that the route needs. It then follows the rule of the path value with the same value object, for example `parent_path`, `from`, and `rev` of section 2 (ADR-0037). A query value that only selects a message, such as `archived`, is a request field. A malformed value gives the code of its value object, or `422 E-WEB-008` when the value object has no code. The audit filter `actor` of section 2.9 is an exception (ADR-0051 (d)).
 
 Request fields. `E-WEB-005` is for URL values only. A request field that names a machine that does not exist returns `404 E-PLT-019 MachineNotFound`, for example `machine_code` of `CreateRecipe`. A request field that names a unit that does not exist returns `404 E-PLT-020 UnitNotFound`, for example `unit_path` of `AddParameter`. A missing parent in `AddUnit` returns `422 E-PLT-003 ParentNotFound`.
 
@@ -133,7 +133,9 @@ The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `T
 
 `q` is a `Text`. It matches a part of the reference number or of the name, with no difference between upper and lower case. `machine` follows the rule of the path value `{code}` (section 1). `status` is `draft`, `approved`, or `retired` and keeps a recipe with a version in that state. The rows come in the byte order of the reference number (ADR-0043).
 
-A deleted recipe. An Administrator reads its recipe page and its version pages with the state "Deleted" and no form. Every other `GET` route with `{ref}` of sections 2.4 to 2.6 answers `409 E-RCP-012` to every other role. A form route, such as `.../versions/new` or `.../parameters/new`, answers `409 E-RCP-012` to every role with the permission of its command (ADR-0043, ADR-0046).
+A deleted recipe. An Administrator reads its recipe page and its version pages with the state "Deleted" and no form. Every other `GET` route with `{ref}` of sections 2.4 to 2.6 answers `409 E-RCP-012` to every other role. A form route, such as `.../versions/new` or `.../parameters/new`, answers `409 E-RCP-012` to every role with the permission of its command (ADR-0043, ADR-0046). The approval preview is a form route. The diff route of section 2.5 and the history route of section 2.9 follow the rule of the other `GET` routes. An Administrator reads them, and every other role gets `409 E-RCP-012` (ADR-0050, ADR-0051).
+
+The recipe page holds the delete form in a danger disclosure for a role with `RecipeDelete`. The list with `show_deleted=1` holds a restore form in each deleted row. The pages of a deleted recipe keep no form (ADR-0049).
 
 ### 2.5 Versions
 
@@ -143,12 +145,12 @@ A deleted recipe. An Administrator reads its recipe page and its version pages w
 | GET | `/recipes/{ref}/versions/new` | `GetVersionForm` | `VersionCreate` | - | `200` form with `based_on` and `change_note` | `404 E-WEB-005`, `409 E-RCP-012` |
 | POST | `/recipes/{ref}/versions` | `CreateVersion` | `VersionCreate` | `based_on` (version number, optional), `change_note` | `303` to the new `Draft`. The draft page lists only the outdated parameters, which need a rebind. A base version can reference an archived unit, an archived machine, or a type that is not on the platform. Then the server returns `422 E-RCP-020` with the items and creates no draft | `404 E-WEB-005`, `409 E-RCP-011`, `409 E-RCP-012`, `409 E-PLT-010`, `422 E-RCP-020`, `422 E-RCP-021`, `422 E-WEB-008` (`based_on`) |
 | GET | `/recipes/{ref}/versions/{n}` | `GetVersion` | `RecipeView` | `page` and `unit` for the parameter table (ADR-0043 (j)) | `200` version page. Editable forms only for a `Draft` and a user with `ParameterEdit` | `404 E-WEB-005`, `409 E-RCP-012` |
-| GET | `/recipes/{ref}/versions/{n}/approve` | `GetApprovalPreview` | `VersionApprove` | - | `200` approve page. Shows the diff against the current `Approved` version. Limit changes are highlighted. Lists the outdated parameters and offers the flag `allow_outdated` | `404 E-WEB-005`, `409 E-RCP-007` |
+| GET | `/recipes/{ref}/versions/{n}/approve` | `GetApprovalPreview` | `VersionApprove` | `kind`, `page`, `rv` (ADR-0050) | `200` approve page. Shows the diff against the current `Approved` version. Limit changes are highlighted. Lists the outdated parameters and offers the flag `allow_outdated`. Shows the blockers of the approval (ADR-0049) | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012` |
 | POST | `/recipes/{ref}/versions/{n}/approve` | `ApproveVersion` | `VersionApprove` | `row_version`, `allow_outdated` (default `false`), CSRF token | `200` version page. Shows the retired version number when one exists. An already approved version with `row_version == expected + 1` returns the same page without a change | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-RCP-015`, `409 E-WEB-001`, `422 E-RCP-008`, `422 E-RCP-016`, `422 E-RCP-020`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-024`, `500 E-EXP-004` |
 | POST | `/recipes/{ref}/versions/{n}/retire` | `RetireVersion` | `VersionRetire` | `row_version`, CSRF token | `200` version page | `404 E-WEB-005`, `409 E-RCP-009`, `409 E-RCP-012`, `409 E-WEB-001` |
 | POST | `/recipes/{ref}/versions/{n}/discard` | `DiscardDraft` | `VersionDiscard` | `row_version`, CSRF token | `303` to `/recipes/{ref}` | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-WEB-001` |
 | POST | `/recipes/{ref}/versions/{n}/rebind` | `RebindTypeRevision` | `ParameterEdit` | `row_version`, `from_type_id`, `to_type_id`, one field `new_member_values[<key>]<leaf path>` per new member leaf (ADR-0039) | `200` parameter table fragment | `404 E-WEB-005`, `409 E-RCP-002`, `409 E-RCP-012`, `409 E-WEB-001`, `422 E-RCP-005`, `422 E-RCP-021`, `422 E-RCP-022`, `422 E-RCP-028`, `422 E-RCP-029`, `422 E-RCP-052`, `422 E-PLT-018` |
-| GET | `/recipes/{ref}/versions/{n}/diff/{m}` | `DiffVersions` | `RecipeView` | - | `200` parameter diff between versions `n` and `m` | `404 E-WEB-005` |
+| GET | `/recipes/{ref}/versions/{n}/diff/{m}` | `DiffVersions` | `RecipeView` | `kind`, `page` (ADR-0050) | `200` parameter diff between versions `n` and `m` | `404 E-WEB-005`, `409 E-RCP-012` |
 
 A version with `based_on` empty starts with no parameters. The approve `POST` is idempotent (section 4). It returns `422 E-RCP-024` for an outdated parameter unless `allow_outdated` is `true`. The audit entry `VersionApproved` records the flag (A29, ADR-0018).
 
@@ -157,6 +159,10 @@ A version with `based_on` empty starts with no parameters. The approve `POST` is
 Only a user with `ParameterEdit` on a live `Draft` gets the rebind forms, with at most `form.rebind_leaves` new member fields on one page (ADR-0044).
 
 `based_on` of `CreateVersion` is a request field. A number that names no version of the recipe gives `422 E-WEB-008` with the field `based_on` (ADR-0043).
+
+The approve page is the review step of the approval (ADR-0049). It runs the checks of the approval without a write and shows each blocker. With a blocker, it shows no approve form. The retire and the discard forms stand in danger disclosures on the version page. An HTMX success of the approval and of the retirement sets `HX-Push-Url` to the path of the version page.
+
+The diff compares the definition, the value per leaf, the limit rows, and the translations of each parameter, matched by `key`. In `.../diff/{m}`, `m` is the old side. The page groups the changes by kind. `kind` names one section, and `page` counts the pages of that section, with `page.diff` parameters per page (ADR-0050). The preview carries the `row_version` of its first page in `rv`.
 
 ### 2.6 Parameters
 
@@ -220,12 +226,22 @@ The administrator never chooses a password for another user. `CreateUser` and `R
 
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
-| GET | `/audit` | `ListAuditEntries` | `AuditView` or `AuditViewRecipes` | `aggregate`, `entity_type`, `entity_id`, `actor`, `action`, `from`, `to`, `before` (cursor) | `200` audit list, newest first. A user with only `AuditViewRecipes` sees entries with `aggregate_type = 'recipe'`: the entity types `recipe`, `recipe_version`, and `parameter`. A limit or translation change is a `parameter` entry (`data-model.md` 10) | - |
+| GET | `/audit` | `ListAuditEntries` | `AuditView` or `AuditViewRecipes` | `aggregate`, `entity_type`, `entity_id`, `actor`, `action`, `from`, `to`, `before` (cursor) | `200` audit list, newest first. A user with only `AuditViewRecipes` sees entries with `aggregate_type = 'recipe'`: the entity types `recipe`, `recipe_version`, and `parameter`. A limit or translation change is a `parameter` entry (`data-model.md` 10) | `422 E-WEB-008` |
 | GET | `/audit/{id}` | `GetAuditEntry` | same as above | - | `200` one entry with `before` and `after` as formatted JSON | `404 E-WEB-005` |
 | GET | `/recipes/{ref}/history` | `GetRecipeHistory` | `RecipeView` | `before` (cursor) | `200` audit entries with `aggregate_id` of the recipe, without `before` and `after` bodies | `404 E-WEB-005` |
-| GET | `/security-events` | `ListSecurityEvents` | `AuditView` | `kind`, `login`, `client_ip`, `from`, `to`, `before` | `200` list of security events | - |
+| GET | `/security-events` | `ListSecurityEvents` | `AuditView` | `kind`, `login`, `client_ip`, `from`, `to`, `before` | `200` list of security events | `422 E-WEB-008` |
 
 The `/recipes/{ref}/history` route is the recipe timeline. Every role can open it (R24). It does not show user data or machine changes. The audit list uses cursor pagination on the entry id (`data-model.md` section 3.15).
+
+Rules of the three lists (ADR-0051):
+
+- Each list shows the newest row first, at most `page.audit`, `page.history`, or `page.security_events` rows. `before` is the id of a row, a positive integer.
+- `aggregate` is the id of an aggregate (a UUID). `entity_id` is a UUID and needs `entity_type`. `entity_type`, `action`, and `kind` take a value of the fixed lists of `data-model.md` sections 3.8 and 10.
+- `actor` is a `Login`. A malformed `actor` gives `422 E-WEB-008`. A well-formed `actor` that names no user gives the empty list. This is an exception to the rule of a query value of section 1, because a `404` would show which logins exist (A42).
+- `login` is a `TypedLogin`. A malformed `login` gives `422 E-WEB-008`. `client_ip` is an IP address. `from` and `to` are dates `YYYY-MM-DD` in UTC, and both days are inside the range.
+- A malformed value, `entity_id` without `entity_type`, or `to` before `from` gives `422 E-WEB-008`. An empty field means no filter.
+- A user with only `AuditViewRecipes` gets an empty list for a filter value outside the recipe scope. `GET /audit/{id}` of an entry outside that scope gives `404 E-WEB-005`.
+- `login` matches the user of the login and the `login_hmac` of the login under the current key of the key ring (`KeyRing::sign`). An event under an older key does not match. No page shows `login_hmac`.
 
 ### 2.10 Health
 
@@ -253,7 +269,7 @@ pub enum Permission {
 
 - The HTTP layer only authenticates. It does not decide what a role can do.
 - A form or preview route is a query use case with the permission of the command that it prepares (`domain-model.md` 5.5). The matrix row of that command names the query.
-- The input of a form query names the command that it serves, the purpose. The query checks the permission of that command, and a `forbidden` event names that command. A write route of a form runs its form query before it reads its fields (ADR-0046).
+- The input of a form query names the command that it serves, the purpose. The query checks the permission of that command, and a `forbidden` event names that command. A write route of a form runs its form query before it reads its fields (ADR-0046). The five action routes of ADR-0049 have no form query and read their body first (ADR-0049 (l)).
 - A role maps to a fixed set of permissions. There are no per-user overrides (ADR-0013).
 - A generated integration test checks every (operation, role) pair of the matrix below, for commands and for queries (`reliability.md` section 6).
 - Last administrator rule: `SetUserRole` and `DeactivateUser` return `Err(LastAdministrator)` when the target is the last active user with role `Administrator`. The use case counts active administrators in a `SERIALIZABLE` transaction (`data-model.md` section 6). There is no database trigger for this rule.
@@ -306,10 +322,10 @@ The protocol implements ADR-0008 and ADR-0015 for every `Draft`.
 1. `GET /recipes/{ref}/versions/{n}` renders the current `row_version` of the version into a hidden field `row_version` of every form on the page.
 2. Every mutating request on that version sends `row_version`.
 3. The use case locks the recipe row and then the version row with `FOR UPDATE` and compares `row_version` with the sent value. A mismatch rolls back and returns `Err(ConcurrentEdit { reference, number, expected, actual })`. The application never sets `row_version`. The database trigger function `bump_row_version` increments it on every update of the version row (`data-model.md` section 4.4).
-4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page.
+4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page. The one exception is a discard success: it answers `303` without `HX-Trigger` (ADR-0049 (f)).
 5. On conflict the server returns `409 E-WEB-001` with the fragment `conflict.html`. The fragment shows: the current server `row_version`, the login of the last editor, the time of the last change, and one button "Reload version". The button is a link to the version page with `hx-boost="true"` (ADR-0043). The unsaved input stays in the form until the reload. The time is `updated_at` of the version, and the last editor is the actor of the audit entry of that time (ADR-0043).
 6. The `409` response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036). The original target of the request does not change. HTMX swaps the `409` fragment because of the `responseHandling` value of section 9.
-7. Every approve and save form has `hx-sync="closest form:drop"`. A second click while a request is in flight is dropped in the browser.
+7. Every approve and save form has `hx-sync="closest form:drop"`. A second click while a request is in flight is dropped in the browser. The retire, discard, delete, and restore forms have the same attribute (ADR-0049).
 8. Idempotent approve: the version is already `Approved`, and the sent `row_version` equals the approved `row_version` minus one. Then `ApproveVersion` returns `Ok(ApprovalOutcome::AlreadyApproved)` and writes no audit entry. The server renders the version page with `200`.
 
 A parameter edit changes the `row_version` of the version, not only of the parameter row. Two users who edit two different parameters of the same `Draft` get a conflict on the second save. This is intended. A `Draft` is one unit of work for approval.
