@@ -11,7 +11,7 @@ use axum::http::header::LOCATION;
 use axum::http::{HeaderMap, Method, StatusCode};
 
 use super::page_tests::{LANGS, assert_assets, assert_layout};
-use super::test_helpers::{CSP, HxAttribute, assert_clean_html, field_value, hx_attributes};
+use super::test_helpers::{CSP, HxAttribute, assert_clean_html, field_value, hx_attributes, tags};
 use super::{parameters, recipes, versions};
 use crate::components_tests::assert_fixed_svg_tags;
 use crate::csrf::is_mutating;
@@ -292,6 +292,10 @@ pub(super) fn assert_literal(attribute: &HxAttribute, what: &str) {
         assert_eq!(element, "body", "{what}: hx-headers outside <body>");
         return;
     }
+    if name == "hx-boost" && value == "false" {
+        assert_eq!(element, "a", "{what}: hx-boost=false outside an anchor");
+        return;
+    }
     let known = HX_LITERALS.iter().find(|(known, _values)| known == name);
     assert!(
         known.is_some(),
@@ -323,11 +327,27 @@ pub(super) fn assert_urls_without_token(answer: &Answer, token: &str) {
     }
 }
 
-/// Run `assert_literal` on each `hx-*` attribute of `html`.
+/// Assert that only an anchor to an export route has the literal `hx-boost="false"` (ADR-0052 (c)).
+pub(super) fn assert_false_boost_on_export_links(html: &str, what: &str) {
+    for tag in tags(html) {
+        if tag.closing || tag.attribute("hx-boost") != Some("false") {
+            continue;
+        }
+        let href = tag.attribute("href").unwrap_or_default();
+        assert!(
+            href.starts_with("/export/"),
+            "{what}: hx-boost=false outside an export link: <{}> {href}",
+            tag.name
+        );
+    }
+}
+
+/// Run `assert_literal` and the rule of the export link on each `hx-*` attribute of `html`.
 fn assert_literals(html: &str) {
     for attribute in hx_attributes(html) {
         assert_literal(&attribute, "bad page");
     }
+    assert_false_boost_on_export_links(html, "bad page");
 }
 
 /// Return an answer with the body `body`, the status `200`, and no header.
@@ -348,6 +368,23 @@ fn answer_with_body(body: &str) -> Answer {
 #[should_panic(expected = "bad page: unknown attribute hx-get=/x on <a>")]
 fn recipe_sweep_check_finds_an_hx_get_that_the_list_does_not_name() {
     assert_literals("<a hx-get=\"/x\">");
+}
+
+#[test]
+fn recipe_sweep_check_accepts_hx_boost_false_on_an_export_link() {
+    assert_literals("<a href=\"/export/v1/recipes/R-100/approved\" hx-boost=\"false\">");
+}
+
+#[test]
+#[should_panic(expected = "bad page: hx-boost=false outside an anchor")]
+fn recipe_sweep_check_finds_hx_boost_false_outside_an_anchor() {
+    assert_literals("<div hx-boost=\"false\">");
+}
+
+#[test]
+#[should_panic(expected = "bad page: hx-boost=false outside an export link")]
+fn recipe_sweep_check_finds_hx_boost_false_on_another_link() {
+    assert_literals("<a href=\"/recipes/R-100\" hx-boost=\"false\">");
 }
 
 #[test]
@@ -456,6 +493,7 @@ async fn recipe_sweep_each_hx_value_is_a_literal_of_the_list() {
             assert_literal(&attribute, &answer.what);
             seen.push((attribute.name, attribute.value));
         }
+        assert_false_boost_on_export_links(&answer.reply.body, &answer.what);
     }
     let stale: Vec<String> = HX_LITERALS
         .iter()

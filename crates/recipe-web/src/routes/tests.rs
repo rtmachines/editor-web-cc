@@ -251,12 +251,21 @@ async fn endpoint_role_each_route_answers_each_principal() {
 
 // --- Route coverage (task 6.9, design D19) -------------------------------------------------------
 
-/// The routes of the matrix and the static file, as sorted pairs of method and path.
+/// The two export routes of `api.md` section 2.7. Task 7.4 writes their rows of the six principals
+/// in its own file, so the matrix does not hold them (design D12).
+const EXPORT_ROUTES: [&str; 2] = [
+    "/export/v1/recipes/{ref}/approved",
+    "/export/v1/recipes/{ref}/versions/{n}",
+];
+
+/// The routes of the matrix, the export routes, and the static file, as sorted pairs of method
+/// and path.
 fn expected_routes() -> Vec<(String, &'static str)> {
     let mut routes: Vec<(String, &'static str)> = matrix()
         .iter()
         .map(|(endpoint, _wants)| (endpoint.method.to_string(), endpoint.path))
         .collect();
+    routes.extend(EXPORT_ROUTES.map(|path| ("GET".to_owned(), path)));
     routes.push(("GET".to_owned(), "/static/htmx.min.js"));
     routes.push(("GET".to_owned(), "/static/app.css"));
     routes.push(("GET".to_owned(), "/static/components.css"));
@@ -291,7 +300,7 @@ fn routes_each_font_file_has_a_static_row() {
 }
 
 #[test]
-fn route_coverage_table_holds_the_routes_of_the_matrix_and_the_static_file() {
+fn route_coverage_table_holds_the_routes_of_the_matrix_the_export_area_and_the_static_files() {
     let mut listed: Vec<(String, &'static str)> = table()
         .iter()
         .map(|row| (row.method.to_string(), row.path))
@@ -320,6 +329,7 @@ fn routes_table_collects_the_rows_of_each_area() {
         ("history", pages::history::rows()),
         ("audit", pages::audit::rows()),
         ("security_events", pages::security_events::rows()),
+        ("export", pages::export::rows()),
     ];
     for (area, rows) in &areas {
         for key in keys_of(rows) {
@@ -327,7 +337,11 @@ fn routes_table_collects_the_rows_of_each_area() {
         }
     }
     let area_rows: usize = areas.iter().map(|(_area, rows)| rows.len()).sum();
-    let static_rows = expected_routes().len().checked_sub(matrix().len()).unwrap();
+    let static_rows = expected_routes()
+        .len()
+        .checked_sub(matrix().len())
+        .and_then(|rows| rows.checked_sub(EXPORT_ROUTES.len()))
+        .unwrap();
     let parts = [static_rows, p31_matrix().len(), area_rows];
     assert_eq!(listed.len(), parts.iter().sum::<usize>());
 }

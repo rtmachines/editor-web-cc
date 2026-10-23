@@ -42,6 +42,19 @@ pub(crate) struct ActionLink {
     pub(crate) text: String,
 }
 
+/// The export link of an Approved or a Retired version (ADR-0052 (b), (c), and (e)).
+///
+/// The link is a plain download link and not a boosted one. The page shows the notice of a
+/// Retired version before it.
+pub(crate) struct ExportLink {
+    /// The address of the export route, for example `/export/v1/recipes/R-100/approved`.
+    pub(crate) href: String,
+    /// The text of the link, which names the version and the file type.
+    pub(crate) text: String,
+    /// True for a Retired version. The page then shows the notice and names it in the link.
+    pub(crate) retired: bool,
+}
+
 /// The danger action of a version: the retire form or the discard form (ADR-0049 (f)).
 pub(crate) struct DangerForm {
     /// The text of the `summary`.
@@ -66,6 +79,9 @@ pub(crate) struct VersionActions {
     /// The Approved link stands first. A link shows only when its version exists and has another
     /// number than the shown version. One version gets one link (design D7).
     pub(crate) compare: Vec<ActionLink>,
+    /// The export link of an Approved or a Retired version of a live recipe, for a role that the
+    /// matrix row of the export allows. It stays in read-only mode (A24).
+    pub(crate) export: Option<ExportLink>,
     /// The retire or the discard action, or `None`. A page holds at most one danger action.
     pub(crate) danger: Option<DangerForm>,
     /// The address of the history of the recipe.
@@ -116,6 +132,35 @@ fn compare_links(t: Texts<'_>, view: &VersionView) -> Vec<ActionLink> {
     .collect()
 }
 
+/// Build the export link of `view` for `role`, or `None` when the page shows none.
+///
+/// The function solves one problem: the page must not show an export that the route refuses. A
+/// Draft, a discarded draft, and each version of a deleted recipe get no link. The role needs the
+/// operation of the route that the link opens, as the matrix of `api.md` section 3.3 says.
+fn export_link(t: Texts<'_>, role: Role, view: &VersionView) -> Option<ExportLink> {
+    let number = view.detail.number;
+    let reference = view.recipe.reference();
+    let (operation, href, retired) = match view.detail.state {
+        VersionState::Approved => (
+            Operation::ExportApprovedVersion,
+            format!("/export/v1/recipes/{reference}/approved"),
+            false,
+        ),
+        VersionState::Retired => (
+            Operation::ExportVersionByNumber,
+            format!("/export/v1/recipes/{reference}/versions/{number}"),
+            true,
+        ),
+        VersionState::LiveDraft | VersionState::Discarded => return None,
+    };
+    let shown = !view.recipe.is_deleted() && operation.requirement().allows(role);
+    shown.then(|| ExportLink {
+        href,
+        text: t.with_arg("version-export-link", "number", number),
+        retired,
+    })
+}
+
 /// Build the action area of `view` for `role`.
 ///
 /// A deleted recipe gets no action, only the compare links and the history link (ADR-0043 (e)).
@@ -147,6 +192,7 @@ pub(crate) fn version_actions(t: Texts<'_>, role: Role, view: &VersionView) -> V
     VersionActions {
         approve,
         compare: compare_links(t, view),
+        export: export_link(t, role, view),
         danger,
         history_href: format!("/recipes/{reference}/history"),
         row_version: detail.row_version,

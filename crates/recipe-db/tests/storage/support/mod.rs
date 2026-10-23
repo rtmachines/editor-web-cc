@@ -16,6 +16,7 @@ pub mod probe;
 mod session;
 mod temp_files;
 mod trigger;
+pub mod writers;
 
 pub use catalog::missing_names;
 pub use clock::wait_for_early_second;

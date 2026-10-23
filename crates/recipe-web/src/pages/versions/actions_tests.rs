@@ -25,6 +25,10 @@ const APPROVE_LINK: &str =
     "<a class=\"target-link\" href=\"/recipes/R-100/versions/3/approve\">Approve version 3</a>";
 /// The link to the history of `R-100` (ADR-0051 (g)).
 const HISTORY_LINK: &str = "<a class=\"target-link\" href=\"/recipes/R-100/history\">History</a>";
+/// The address of the export of the approved version of `R-100` (ADR-0052 (b)).
+const APPROVED_EXPORT_HREF: &str = "href=\"/export/v1/recipes/R-100/approved\"";
+/// The address of the export of the retired version 1 of `R-100` (ADR-0052 (b)).
+const RETIRED_EXPORT_HREF: &str = "href=\"/export/v1/recipes/R-100/versions/1\"";
 /// The opening tag of a danger action.
 pub(super) const DANGER: &str = "<details class=\"danger\">";
 
@@ -34,10 +38,27 @@ fn form_of<'a>(main: &'a str, tag: &str) -> &'a str {
     rest.split("</form>").next().unwrap()
 }
 
-/// Assert the row of links right after the header `dl` and the history link in its container.
+/// The opening of the export row of an Approved or a Retired version (ADR-0052 (c)).
+pub(super) const EXPORT_ROW: &str =
+    "<p class=\"actions\"><a class=\"btn btn-secondary\" href=\"/export/v1/";
+
+/// Return the text after the header `dl`, and after the export row when the page has one.
+///
+/// The export row stands directly after `</dl>`, with the notice of a Retired version before it.
+/// The boosted row of links follows it (ADR-0052 (c) and (e)).
+pub(super) fn links_area(main: &str) -> &str {
+    let after_header = main.split_once("</dl>").unwrap().1.trim_start();
+    if after_header.starts_with(LINKS_TAG) {
+        return after_header;
+    }
+    let export = after_header.split_once("</p>").unwrap();
+    assert!(export.0.contains(EXPORT_ROW), "{main}");
+    export.1.trim_start()
+}
+
+/// Assert the row of links after the header `dl` and the export row, with the history link in it.
 fn assert_action_area(main: &str) {
-    let (_before, area) = main.split_once("</dl>").unwrap();
-    let area = area.trim_start().strip_prefix(LINKS_TAG).expect(main);
+    let area = links_area(main).strip_prefix(LINKS_TAG).expect(main);
     let links = area.split("</p>").next().unwrap();
     assert!(links.contains(HISTORY_LINK), "{main}");
 }
@@ -138,6 +159,7 @@ async fn actions_approved_version_shows_the_retire_form_only_to_the_administrato
     assert_danger_form(main, RETIRE_FORM_TAG, texts);
     assert!(!main.contains("/approve\""), "{main}");
     assert!(!main.contains("/discard\""), "{main}");
+    assert!(main.contains(APPROVED_EXPORT_HREF), "{main}");
     let engineer = world
         .get_en(&world.engineer, "/recipes/R-100/versions/2")
         .await;
@@ -145,6 +167,7 @@ async fn actions_approved_version_shows_the_retire_form_only_to_the_administrato
     assert_action_area(main);
     assert!(!main.contains("<form"), "{main}");
     assert!(!main.contains(DANGER), "{main}");
+    assert!(main.contains(APPROVED_EXPORT_HREF), "{main}");
 }
 
 /// A disabled button loses the focus. So the forms of the version actions have no
@@ -170,7 +193,7 @@ async fn actions_retired_version_and_operator_draft_show_only_the_history_link()
     let operator = world
         .get_en(&world.operator, "/recipes/R-100/versions/3")
         .await;
-    for reply in [retired, operator] {
+    for reply in [&retired, &operator] {
         assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
         let main = main_of(&reply.body);
         assert_action_area(main);
@@ -178,6 +201,13 @@ async fn actions_retired_version_and_operator_draft_show_only_the_history_link()
         assert!(!main.contains(DANGER), "{main}");
         assert!(!main.contains("/approve\""), "{main}");
     }
+    // The Administrator also sees the export link of the retired version. A draft has none.
+    assert!(
+        retired.body.contains(RETIRED_EXPORT_HREF),
+        "{}",
+        retired.body
+    );
+    assert!(!operator.body.contains("/export/"), "{}", operator.body);
 }
 
 #[tokio::test]

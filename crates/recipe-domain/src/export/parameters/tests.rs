@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 
+use super::ParameterEntry;
 use crate::error_codes::ErrorCode;
 use crate::export::test_rows::{
     length_limit, parameter, range_limit, stored_parameter, unit_id, units, word_address,
@@ -9,7 +10,10 @@ use crate::export::test_support::{
 };
 use crate::export::{ExportHeader, HashedBody};
 use crate::identity::UserId;
-use crate::plant::{MachineCode, PlcPlatform};
+use crate::plant::{
+    ArrayDimension, ArrayDimensions, MachineCode, MemberName, PlcPlatform, Primitive, TypeName,
+    TypeNode, UnitPath,
+};
 use crate::recipe::{
     Draft, Parameter, RecipeError, ReferenceNumber, SnapshotItem, StoredDraft, StoredParameter,
     VersionSnapshot, VersionState,
@@ -260,6 +264,129 @@ fn item_codes(error: RecipeError) -> Vec<ErrorCode> {
         return Vec::new();
     };
     items.iter().map(SnapshotItem::code).collect()
+}
+
+#[test]
+fn the_serialized_value_of_zone1_holds_setpoint_before_label() {
+    let body = build(PlcPlatform::S7_300, &[Parameter::from(rows().remove(1))]).unwrap();
+    let text = serde_json::to_string(&body).unwrap();
+    assert!(
+        text.contains(r#""value":{"setpoint":"72.5","label":"Z1"}"#),
+        "{text}"
+    );
+}
+
+/// The identifier of the struct `Pair` that the tests build by hand.
+const PAIR: &str = "50000000-0000-4000-8000-000000000001";
+/// The identifier of an array of `Pair` that the tests build by hand.
+const PAIR_ARRAY: &str = "50000000-0000-4000-8000-000000000002";
+/// The identifier of the struct `Outer` that the tests build by hand.
+const OUTER: &str = "50000000-0000-4000-8000-000000000003";
+
+fn leaf(id: &str, primitive: Primitive) -> TypeNode {
+    TypeNode::Leaf {
+        type_id: type_id(id),
+        primitive,
+        leaf_class: primitive.leaf_class(),
+        size_bytes: primitive.fixed_size_bytes().unwrap(),
+        string_length: None,
+    }
+}
+
+/// The struct `Pair` with the members `zeta` and `alpha`, in this order.
+fn pair() -> TypeNode {
+    TypeNode::Struct {
+        type_id: type_id(PAIR),
+        name: TypeName::parse("Pair").unwrap(),
+        revision: 1,
+        members: vec![
+            (
+                MemberName::parse("zeta").unwrap(),
+                leaf(INT, Primitive::Int),
+            ),
+            (
+                MemberName::parse("alpha").unwrap(),
+                leaf(BOOL, Primitive::Bool),
+            ),
+        ],
+    }
+}
+
+fn array_of(element: TypeNode, bounds: &[(i32, i32)]) -> TypeNode {
+    let dimensions = bounds
+        .iter()
+        .map(|&(lower, upper)| ArrayDimension::parse(lower, upper).unwrap())
+        .collect();
+    TypeNode::Array {
+        type_id: type_id(PAIR_ARRAY),
+        dimensions: ArrayDimensions::parse(dimensions).unwrap(),
+        element: Box::new(element),
+    }
+}
+
+/// Return the JSON text of the entry of a parameter of type `root` with `value`.
+fn entry_text(root: &TypeNode, value: Value) -> String {
+    let pairs = parameter(1, ("U1", "PAIRS"), PAIR, value);
+    let unit = UnitPath::parse("U1").unwrap();
+    serde_json::to_string(&ParameterEntry::of(&pairs, &unit, root)).unwrap()
+}
+
+#[test]
+fn a_struct_inside_an_array_keeps_its_member_order() {
+    let root = array_of(pair(), &[(1, 2)]);
+    let value = json!([{ "zeta": 1, "alpha": true }, { "zeta": 2, "alpha": false }]);
+    let text = entry_text(&root, value);
+    let expected = r#""value":[{"zeta":"1","alpha":true},{"zeta":"2","alpha":false}]}"#;
+    assert!(text.ends_with(expected), "{text}");
+}
+
+#[test]
+fn a_two_dimensional_array_of_a_struct_keeps_the_member_and_element_order() {
+    let root = array_of(pair(), &[(1, 2), (0, 1)]);
+    let value = json!([
+        [{ "zeta": 1, "alpha": true }, { "zeta": 2, "alpha": false }],
+        [{ "zeta": 3, "alpha": true }, { "zeta": 4, "alpha": false }]
+    ]);
+    let text = entry_text(&root, value);
+    let expected = concat!(
+        r#""value":[[{"zeta":"1","alpha":true},{"zeta":"2","alpha":false}],"#,
+        r#"[{"zeta":"3","alpha":true},{"zeta":"4","alpha":false}]]}"#
+    );
+    assert!(text.ends_with(expected), "{text}");
+}
+
+#[test]
+fn a_struct_member_and_an_array_member_of_a_struct_keep_their_order() {
+    let outer = TypeNode::Struct {
+        type_id: type_id(OUTER),
+        name: TypeName::parse("Outer").unwrap(),
+        revision: 1,
+        members: vec![
+            (MemberName::parse("zeta").unwrap(), pair()),
+            (
+                MemberName::parse("alpha").unwrap(),
+                array_of(pair(), &[(1, 2)]),
+            ),
+        ],
+    };
+    let value = json!({
+        "zeta": { "zeta": 1, "alpha": true },
+        "alpha": [{ "zeta": 2, "alpha": false }, { "zeta": 3, "alpha": true }]
+    });
+    let text = entry_text(&outer, value);
+    let expected = concat!(
+        r#""value":{"zeta":{"zeta":"1","alpha":true},"#,
+        r#""alpha":[{"zeta":"2","alpha":false},{"zeta":"3","alpha":true}]}}"#
+    );
+    assert!(text.ends_with(expected), "{text}");
+}
+
+#[test]
+fn a_key_outside_the_members_comes_after_the_members_in_byte_order() {
+    let value = json!({ "omega": 9, "zeta": 1, "beta": "b", "alpha": true });
+    let text = entry_text(&pair(), value);
+    let expected = r#""value":{"zeta":"1","alpha":true,"beta":"b","omega":"9"}}"#;
+    assert!(text.ends_with(expected), "{text}");
 }
 
 #[test]

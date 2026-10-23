@@ -4,6 +4,7 @@
 //! same scenario. The tests of `auth::first_statement` and `audit::coverage` use both.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use recipe_domain::plant::{
     LeafPath, MachineCode, MemberName, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
@@ -20,11 +21,12 @@ use super::{
     timestamp, uid, user, vid,
 };
 use crate::export::{ExportApprovedInput, ExportByNumberInput};
-use crate::memory::seed_type_id;
+use crate::memory::{BodyWriter, seed_type_id};
 use crate::plant::{
     AddUnitInput, ArchiveMachineInput, ArchiveUnitInput, CreateMachineInput, DefineUdtInput,
     DefineUdtMode, RenameMachineInput, RenameUnitInput,
 };
+use crate::ports::DocumentWriter;
 use crate::recipe::{
     AddParameterInput, ApproveVersion, ApproveVersionInput, CreateRecipeInput, CreateVersionInput,
     DeleteRecipeInput, DiscardDraftInput, RebindTypeRevisionInput, RemoveParameterInput,
@@ -120,9 +122,11 @@ pub(crate) fn zone_draft() -> Fixture {
 
 /// A fixture with the approved version 1 of `R-1`, approved by `anowak`.
 ///
-/// The approval writes audit entries. A test that counts entries must skip them.
+/// The fixture holds the user rows of the fixed actors, so the export finds the login of the
+/// approver. The approval writes audit entries. A test that counts entries must skip them.
 pub(crate) async fn approved_version() -> Fixture {
     let fixture = draft();
+    fixture.seed_actors();
     ApproveVersion::new(fixture.context())
         .execute(&second_engineer(), &meta(), approve_input(1))
         .await
@@ -419,4 +423,9 @@ pub(crate) fn export_number_input() -> ExportByNumberInput {
         reference: reference("R-1"),
         number: 1,
     }
+}
+
+/// The writer of the export use cases in the scenarios: the in-memory [`BodyWriter`].
+pub(crate) fn body_writer() -> Arc<dyn DocumentWriter> {
+    Arc::new(BodyWriter)
 }

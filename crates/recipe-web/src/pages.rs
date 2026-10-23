@@ -18,6 +18,7 @@ mod diff;
 mod diff_lang_tests;
 mod diff_view;
 mod draft_reply;
+pub(crate) mod export;
 pub(crate) mod history;
 #[cfg(test)]
 mod lifecycle_body_tests;

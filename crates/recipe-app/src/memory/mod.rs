@@ -5,6 +5,7 @@
 mod audit;
 mod clock;
 mod core;
+mod document_writer;
 mod draft;
 mod fault;
 #[cfg(test)]
@@ -22,6 +23,7 @@ pub use self::core::{
     WriteKind,
 };
 pub use clock::MemoryClock;
+pub use document_writer::BodyWriter;
 pub use fault::{Fault, FaultPoint};
 pub use identity::LOGIN_LOCK_TABLE;
 pub use sink::MemorySink;

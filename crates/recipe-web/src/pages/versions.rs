@@ -131,6 +131,8 @@ mod actions_tests;
 #[cfg(test)]
 mod compare_tests;
 #[cfg(test)]
+mod export_link_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
 mod lang_next_tests;

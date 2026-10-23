@@ -8,7 +8,7 @@ use std::sync::Arc;
 use recipe_domain::audit::AuditContext;
 
 use crate::auth::{CurrentUser, Operation, RequestMeta};
-use crate::blocking::{AppSettings, DiffGate};
+use crate::blocking::{AppSettings, DiffGate, ExportGate};
 use crate::ports::{Clock, SecurityEventSink, UnitOfWork};
 
 /// The ports and settings that every use case needs.
@@ -31,13 +31,16 @@ pub struct AppContext {
     pub(crate) settings: AppSettings,
     /// The gate of the parallel diffs (`diff.permits`). Every clone shares it (ADR-0050 (g)).
     pub(crate) diff_gate: DiffGate,
+    /// The gate of the parallel exports (`export.permits`). Every clone shares it (ADR-0056 (f)).
+    pub(crate) export_gate: ExportGate,
 }
 
 impl AppContext {
     /// Build the context from the adapters and the settings.
     ///
     /// `recipe-server` calls it once at startup with the `sqlx` adapters. The context builds the
-    /// gate of `diff.permits` from the settings (ADR-0050 (g)).
+    /// gate of `diff.permits` (ADR-0050 (g)) and the gate of `export.permits` (ADR-0056 (f))
+    /// from the settings.
     #[must_use]
     pub fn new(
         uow: Arc<dyn UnitOfWork>,
@@ -50,6 +53,7 @@ impl AppContext {
             security,
             clock,
             diff_gate: DiffGate::new(settings.diff.permits),
+            export_gate: ExportGate::new(settings.export.permits),
             settings,
         }
     }

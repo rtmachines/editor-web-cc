@@ -34,9 +34,13 @@ pub use pre_session::{PreSession, issue_pre_session};
 /// The header that carries the session token of HTMX requests.
 const X_CSRF_TOKEN: &str = "x-csrf-token";
 /// The header that a browser sets with the relation of the request to the site.
-const SEC_FETCH_SITE: &str = "sec-fetch-site";
+///
+/// The CSRF layer and the guard of the export routes (ADR-0055) read it.
+pub(crate) const SEC_FETCH_SITE: &str = "sec-fetch-site";
 /// The value of `Sec-Fetch-Site` for a request from the same origin.
-const SAME_ORIGIN: &str = "same-origin";
+///
+/// The CSRF layer and the guard of the export routes (ADR-0055) compare with it.
+pub(crate) const SAME_ORIGIN: &str = "same-origin";
 /// The scheme of an `Origin` that matches the site. The site runs behind HTTPS only.
 const ORIGIN_PREFIX: &str = "https://";
 /// The form field of the session token.
@@ -158,8 +162,9 @@ fn pre_session_matches(state: &WebState, headers: &HeaderMap, body: &[u8], is_fo
 /// Build the event `csrf_rejected` of a request.
 ///
 /// The event holds the request id, the client address, and the `User-Agent`. It holds no token.
-/// A request without a client address is a defect of the pipeline and gives `E-WEB-010`.
-fn rejection_event(request: &Request) -> Result<SecurityEvent, WebError> {
+/// A request without a client address is a defect of the pipeline and gives `E-WEB-010`. The
+/// CSRF layer and the guard of the export routes (ADR-0055) call it.
+pub(crate) fn rejection_event(request: &Request) -> Result<SecurityEvent, WebError> {
     let request_id = request_id_of(request);
     let Some(client) = request.extensions().get::<ClientAddr>().copied() else {
         return Err(WebError::Internal { request_id });
@@ -176,7 +181,8 @@ fn rejection_event(request: &Request) -> Result<SecurityEvent, WebError> {
 ///
 /// The function takes the event, not the request, because a request body is not `Sync` and the
 /// future must stay `Send`. When the write fails, the request gets the storage error (ADR-0035 t).
-async fn reject(state: &WebState, event: Result<SecurityEvent, WebError>) -> WebError {
+/// The CSRF layer and the guard of the export routes (ADR-0055) call it.
+pub(crate) async fn reject(state: &WebState, event: Result<SecurityEvent, WebError>) -> WebError {
     let event = match event {
         Ok(event) => event,
         Err(error) => return error,

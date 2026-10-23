@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::plant::TypeNode;
+use super::type_reference::TypeReference;
+use crate::plant::{PlcTypeId, TypeNode};
 
 /// Revision of every type that is not a struct.
 const PLAIN_REVISION: u32 = 1;
@@ -20,7 +21,7 @@ struct Bounds {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct Member {
     name: String,
-    type_id: String,
+    type_id: TypeReference,
 }
 
 /// One entry of `types[]`.
@@ -28,15 +29,19 @@ struct Member {
 /// The type solves one problem: the presence rule of `api.md` section 6.1. The fields
 /// `element_type_id`, `dimensions`, and `members` exist only for their kind and are never null.
 /// Every other field is always present.
+///
+/// The order of the fields is part of the contract of `api.md` section 6.1. The document writer
+/// uses this `Serialize` and writes the fields in this order. Do not change the order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub(super) struct TypeEntry {
-    id: String,
+pub struct TypeEntry {
+    #[serde(serialize_with = "super::display_text")]
+    id: PlcTypeId,
     name: Option<String>,
     revision: u32,
     kind: &'static str,
     string_length: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    element_type_id: Option<String>,
+    element_type_id: Option<TypeReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     dimensions: Option<Vec<Bounds>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,22 +50,22 @@ pub(super) struct TypeEntry {
 
 /// Return the type reference of a node.
 ///
-/// The reference is the primitive name for a primitive without a length. For every other type
-/// it is the identifier of the type row.
-pub(super) fn type_ref(node: &TypeNode) -> String {
+/// The reference is the primitive for a primitive without a length. For every other type it is
+/// the identifier of the type row.
+pub(super) const fn type_ref(node: &TypeNode) -> TypeReference {
     match node {
         TypeNode::Leaf {
             primitive,
             string_length: None,
             ..
-        } => primitive.name().to_owned(),
-        other => other.type_id().to_string(),
+        } => TypeReference::Primitive(*primitive),
+        other => TypeReference::Row(other.type_id()),
     }
 }
 
 /// Build the entry of a node, or `None` for a primitive without a length.
 fn entry_of(node: &TypeNode) -> Option<TypeEntry> {
-    let id = node.type_id().to_string();
+    let id = node.type_id();
     match node {
         TypeNode::Leaf {
             primitive,
@@ -128,9 +133,11 @@ fn entry_of(node: &TypeNode) -> Option<TypeEntry> {
 /// Collect the entries of `types[]` for the root nodes of the parameter types.
 ///
 /// The walk uses an explicit stack and never recurses (`reliability.md` section 2.2). Each type
-/// appears once. The entries come ordered by `id`, compared as text byte by byte.
+/// appears once. The entries come ordered by `id`, compared as text byte by byte. The order of
+/// `PlcTypeId` compares the bytes of the UUID. Its lowercase hex text with hyphens has the same
+/// order.
 pub(super) fn collect_types<'a>(roots: impl IntoIterator<Item = &'a TypeNode>) -> Vec<TypeEntry> {
-    let mut entries: BTreeMap<String, TypeEntry> = BTreeMap::new();
+    let mut entries: BTreeMap<PlcTypeId, TypeEntry> = BTreeMap::new();
     let mut stack: Vec<&TypeNode> = roots.into_iter().collect();
     while let Some(node) = stack.pop() {
         let Some(entry) = entry_of(node) else {
@@ -146,7 +153,7 @@ pub(super) fn collect_types<'a>(roots: impl IntoIterator<Item = &'a TypeNode>) -
                 stack.extend(members.iter().map(|(_, child)| child));
             }
         }
-        entries.insert(entry.id.clone(), entry);
+        entries.insert(entry.id, entry);
     }
     entries.into_values().collect()
 }

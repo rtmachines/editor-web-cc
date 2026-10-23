@@ -368,7 +368,7 @@ async fn rebind_type_revision_checks_the_permission_first() {
 #[tokio::test]
 async fn export_version_by_number_checks_the_permission_first() {
     let fixture = scenarios::retired();
-    let result = ExportVersionByNumber::new(fixture.context())
+    let result = ExportVersionByNumber::new(fixture.context(), scenarios::body_writer())
         .execute(&operator(), &meta(), scenarios::export_number_input())
         .await;
     assert_refused(

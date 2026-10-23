@@ -16,6 +16,7 @@ use recipe_domain::error_codes::ErrorCode;
 mod answer;
 mod conflict;
 mod form;
+mod json;
 mod layer;
 mod lists;
 mod log;
@@ -251,6 +252,8 @@ impl IntoResponse for WebError {
 pub(crate) use view::FieldLine;
 #[cfg(test)]
 mod draft_lines_tests;
+#[cfg(test)]
+mod export_json_tests;
 #[cfg(test)]
 mod fragment_tests;
 #[cfg(test)]

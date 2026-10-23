@@ -71,6 +71,10 @@ async-trait = "0.1.92"
 # Tests (reliability.md section 6).
 proptest = "1.12.0"
 testcontainers = "0.28.0"
+# Schema tests of recipe-export (design D4 of export-v1). No HTTP, TLS, file, or ICU code.
+# Only a dev-dependency may use it. cargo-deny skips the licences of dev-only crates
+# (`licenses.include-dev` is false), so `MIT-0` of `borrow-or-share` passes `cargo deny check`.
+jsonschema = { version = "0.60.0", default-features = false, features = ["arbitrary-precision"] }
 
 # reliability.md section 2.1. Every member sets `[lints] workspace = true`.
 [workspace.lints.rust]

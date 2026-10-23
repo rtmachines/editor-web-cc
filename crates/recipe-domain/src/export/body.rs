@@ -24,13 +24,16 @@ pub struct ExportHeader {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct MachineBody {
-    code: String,
-    plc_platform: &'static str,
+    #[serde(serialize_with = "super::display_text")]
+    code: MachineCode,
+    #[serde(serialize_with = "super::display_text")]
+    plc_platform: PlcPlatform,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct RecipeBody {
-    reference_number: String,
+    #[serde(serialize_with = "super::display_text")]
+    reference_number: ReferenceNumber,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -141,11 +144,11 @@ impl HashedBody {
             .collect();
         Ok(Self {
             machine: MachineBody {
-                code: header.machine.to_string(),
-                plc_platform: header.platform.as_str(),
+                code: header.machine,
+                plc_platform: header.platform,
             },
             recipe: RecipeBody {
-                reference_number: header.reference.to_string(),
+                reference_number: header.reference.clone(),
             },
             version: VersionBody {
                 number: header.version,
@@ -154,4 +157,43 @@ impl HashedBody {
             parameters,
         })
     }
+
+    /// Return the code of the machine, the value of `machine.code`.
+    #[must_use]
+    pub const fn machine_code(&self) -> MachineCode {
+        self.machine.code
+    }
+
+    /// Return the PLC platform of the machine, the value of `machine.plc_platform`.
+    #[must_use]
+    pub const fn platform(&self) -> PlcPlatform {
+        self.machine.plc_platform
+    }
+
+    /// Return the reference number of the recipe, the value of `recipe.reference_number`.
+    #[must_use]
+    pub const fn reference_number(&self) -> &ReferenceNumber {
+        &self.recipe.reference_number
+    }
+
+    /// Return the number of the version, the value of `version.number`.
+    #[must_use]
+    pub const fn version_number(&self) -> u32 {
+        self.version.number
+    }
+
+    /// Return the entries of `types[]`, ordered by `id`.
+    #[must_use]
+    pub fn types(&self) -> &[TypeEntry] {
+        &self.types
+    }
+
+    /// Return the entries of `parameters[]`, ordered by `unit_path` and then by `tag`.
+    #[must_use]
+    pub fn parameters(&self) -> &[ParameterEntry] {
+        &self.parameters
+    }
 }
+
+#[cfg(test)]
+mod tests;

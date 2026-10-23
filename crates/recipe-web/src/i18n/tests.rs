@@ -153,8 +153,10 @@ fn codes_with_a_message() -> Vec<String> {
         .map(|n| format!("E-IDN-{n:03}"));
     let web = (1..=11).map(|n| format!("E-WEB-{n:03}"));
     let db = (1..=8).map(|n| format!("E-DB-{n:03}"));
+    let export = (1..=3).map(|n| format!("E-EXP-{n:03}"));
     idn.chain(web)
         .chain(db)
+        .chain(export)
         .chain(std::iter::once("E-AUD-001".to_owned()))
         .collect()
 }

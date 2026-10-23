@@ -65,6 +65,23 @@ async fn every_clone_of_a_context_shares_the_diff_gate_of_the_settings() {
     assert_eq!(copy.diff_gate.available(), 3);
 }
 
+#[tokio::test]
+async fn every_clone_of_a_context_shares_the_export_gate_of_the_settings() {
+    let fixture = Fixture::new();
+    let settings = crate::blocking::AppSettings {
+        export: crate::blocking::ExportSettings { permits: 3 },
+        ..crate::blocking::AppSettings::default()
+    };
+    let context = fixture.context_with(settings);
+    let copy = context.clone();
+
+    let permit = context.export_gate.acquire().await.unwrap();
+
+    assert_eq!(copy.export_gate.available(), 2);
+    drop(permit);
+    assert_eq!(copy.export_gate.available(), 3);
+}
+
 #[test]
 fn the_fixture_context_uses_the_store_the_sink_and_the_clock_of_the_fixture() {
     let fixture = Fixture::new();

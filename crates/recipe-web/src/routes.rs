@@ -18,6 +18,8 @@ use tracing::Span;
 use crate::client::client_address;
 use crate::csrf::csrf_layer;
 use crate::error::{WebError, render_errors};
+use crate::export_guard::export_guard;
+use crate::export_path::is_export_path;
 use crate::gates::gates;
 use crate::limits::{body_limit, largest_limit};
 use crate::pages;
@@ -70,9 +72,11 @@ pub(crate) fn operation_row(
 
 /// Return the route table.
 ///
-/// The table holds the static files and the rows of step P3.1. It also holds the rows of six
-/// areas (design D12): the machines, the units, the types, the recipes, the versions, and the
-/// parameters. Later tasks add one row for each page of `api.md` section 2 to its area.
+/// The table holds the static files and the rows of step P3.1. It also holds the rows of ten
+/// areas (design D12). The first six areas are the machines, the units, the types, the recipes,
+/// the versions, and the parameters. The other four areas are the history, the audit log, the
+/// security events, and the export routes. Later tasks add one row for each page of `api.md`
+/// section 2 to its area.
 pub(crate) fn table() -> Vec<RouteEntry> {
     let mut rows = static_rows();
     rows.extend(lang_and_login_rows());
@@ -88,6 +92,7 @@ pub(crate) fn table() -> Vec<RouteEntry> {
     rows.extend(pages::history::rows());
     rows.extend(pages::audit::rows());
     rows.extend(pages::security_events::rows());
+    rows.extend(pages::export::rows());
     rows
 }
 
@@ -250,14 +255,17 @@ impl AccessTable {
     }
 
     fn lookup(&self, path: &str, method: &Method) -> Lookup {
-        // axum answers HEAD with the handler of GET, so HEAD uses the row of GET.
-        let wanted = if *method == Method::HEAD {
-            &Method::GET
-        } else {
-            method
-        };
         let Some(rows) = self.rows.get(path) else {
             return Lookup::Unlisted;
+        };
+        // axum answers HEAD with the handler of GET, so HEAD uses the row of GET. An export route
+        // accepts only GET, so HEAD gets the answer of an unlisted method there (ADR-0054).
+        let wanted = if *method != Method::HEAD {
+            method
+        } else if is_export_path(path) {
+            return Lookup::OtherMethod;
+        } else {
+            &Method::GET
         };
         rows.iter()
             .find(|(listed, _access)| listed == wanted)
@@ -314,7 +322,15 @@ pub(crate) fn assemble(
     let mut routes = Router::new();
     for entry in entries {
         access.insert(entry.path, entry.method, entry.access);
-        routes = routes.route(entry.path, entry.handler);
+        // The guard of ADR-0055 wraps the handler only. The router layers below wrap the guard.
+        let handler = if is_export_path(entry.path) {
+            entry
+                .handler
+                .layer(from_fn_with_state(state.clone(), export_guard))
+        } else {
+            entry.handler
+        };
+        routes = routes.route(entry.path, handler);
     }
     let settings = state.settings().clone();
     // A layer that is added later runs earlier. The order of design D11 is therefore the reverse

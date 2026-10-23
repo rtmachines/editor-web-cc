@@ -7,7 +7,7 @@
 
 use axum::http::StatusCode;
 
-use super::actions_tests::LINKS_TAG;
+use super::actions_tests::{LINKS_TAG, links_area};
 use crate::pages::audit::test_world::{AuditWorld, audit_world};
 use crate::pages::test_helpers::assert_clean_html;
 use crate::test_support::plant::{ENGLISH, HTMX, TARGET_CONTENT, main_of};
@@ -25,10 +25,9 @@ fn link(n: u32, m: u32, text: &str) -> String {
     format!("<a class=\"target-link\" href=\"/recipes/R-500/versions/{n}/diff/{m}\">{text}</a>")
 }
 
-/// Return the row of links after the header `dl` of `main`.
+/// Return the boosted row of links after the header `dl` and the export row of `main`.
 fn row_of(main: &str) -> &str {
-    let (_before, area) = main.split_once("</dl>").unwrap();
-    let area = area.trim_start().strip_prefix(LINKS_TAG).expect(main);
+    let area = links_area(main).strip_prefix(LINKS_TAG).expect(main);
     area.split("</p>").next().unwrap()
 }
 

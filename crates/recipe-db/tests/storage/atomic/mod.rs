@@ -5,6 +5,7 @@
 //! and does not move the head of the audit chain.
 
 mod draft;
+mod export;
 mod identity;
 mod plant;
 mod recipe;

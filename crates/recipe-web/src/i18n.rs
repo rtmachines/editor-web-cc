@@ -217,3 +217,6 @@ mod approval_texts_tests;
 
 #[cfg(test)]
 mod approval_usage_tests;
+
+#[cfg(test)]
+mod export_texts_tests;

@@ -34,6 +34,9 @@ error-E-DB-005 = The database does not answer. Try again.
 error-E-DB-006 = The change conflicts with an existing entry.
 error-E-DB-007 = The change refers to an entry that does not exist.
 error-E-DB-008 = An unexpected database error occurred. Contact the administrator.
+error-E-EXP-001 = Recipe { $reference } has no approved version.
+error-E-EXP-002 = Version { $number } of recipe { $reference } does not match its stored hash. The export is refused. Contact the administrator.
+error-E-EXP-003 = Version { $number } of recipe { $reference } is a draft or was discarded. Only approved and retired versions can be exported.
 error-E-AUD-001 = The change was not saved. The system could not record the audit entry. Contact the administrator.
 
 # Roles
@@ -583,6 +586,8 @@ version-approved-by = Approver
 version-approved-at = Approved at
 version-updated-at = Last change
 version-platform = PLC platform
+version-export-link = Export version { $number } as JSON
+version-export-retired-notice = The file name starts with RETIRED_. The file marks this version as not loadable into a PLC.
 parameters-caption = Parameters
 parameters-col-tag = Tag
 parameters-col-name = Name

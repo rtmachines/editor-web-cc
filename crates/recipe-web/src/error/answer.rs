@@ -8,6 +8,7 @@ use fluent::FluentArgs;
 use recipe_app::error::AppError;
 use recipe_domain::audit::RequestId;
 use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::export::ExportError;
 use recipe_domain::identity::IdentityError;
 use recipe_domain::plant::LeafPath;
 use recipe_domain::recipe::{ParameterTag, RecipeError};
@@ -102,8 +103,23 @@ fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError, ctx: &Er
     }
 }
 
+/// Add the arguments of the export errors: `reference` and `number` (design D7 (d)).
+fn export_args(args: &mut FluentArgs<'static>, error: &ExportError) {
+    match error {
+        ExportError::NoApprovedVersion { reference } => {
+            args.set("reference", reference.to_string());
+        }
+        ExportError::ContentHashMismatch { reference, number }
+        | ExportError::VersionNotExportable { reference, number } => {
+            args.set("reference", reference.to_string());
+            args.set("number", number.to_string());
+        }
+        ExportError::Serialize(_failure) => {}
+    }
+}
+
 /// Return the values of the error as arguments of its `fluent` message.
-fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
+pub(super) fn args_of(error: &WebError, ctx: &ErrorContext<'_>) -> FluentArgs<'static> {
     let bundles = ctx.state.bundles();
     let mut args = FluentArgs::new();
     match error {
@@ -138,6 +154,7 @@ fn app_args(args: &mut FluentArgs<'static>, error: &AppError, ctx: &ErrorContext
             args.set("stage", task_stage_text(bundles, ctx.lang, *stage));
         }
         AppError::Identity(identity) => identity_args(args, identity, ctx),
+        AppError::Export(export) => export_args(args, export),
         AppError::Plant(plant) => plant_args(args, plant, bundles, ctx.lang),
         AppError::ConcurrentEdit {
             reference, number, ..
@@ -175,12 +192,32 @@ fn row_label_of(row: u16, field: RowField, ctx: &ErrorContext<'_>) -> String {
 }
 
 /// Return the `Retry-After` seconds of an answer, if it needs the header.
-fn retry_after_of(error: &WebError, status: StatusCode, ctx: &ErrorContext<'_>) -> Option<u64> {
+pub(super) fn retry_after_of(
+    error: &WebError,
+    status: StatusCode,
+    ctx: &ErrorContext<'_>,
+) -> Option<u64> {
     if let WebError::App(AppError::Identity(IdentityError::LoginThrottled { retry_after })) = error
     {
         return Some(*retry_after);
     }
     (status == StatusCode::SERVICE_UNAVAILABLE).then(|| ctx.state.settings().retry_after.as_secs())
+}
+
+/// Return the sentence of the code `shown` in the UI language, with the arguments `args`.
+///
+/// The sentence holds no reference. When the bundle has no text for the code or the arguments,
+/// the sentence is the English `Display` text of the error.
+pub(super) fn sentence_of(
+    error: &WebError,
+    shown: ErrorCode,
+    args: &FluentArgs<'_>,
+    ctx: &ErrorContext<'_>,
+) -> String {
+    ctx.state
+        .bundles()
+        .message(ctx.lang, &format!("error-{shown}"), Some(args))
+        .unwrap_or_else(|| error.to_string())
 }
 
 /// Build the view of an error: the code, one sentence, and the reference.
@@ -192,9 +229,7 @@ fn view_of(error: &WebError, shown: ErrorCode, ctx: &ErrorContext<'_>) -> ErrorV
     let message = if list.is_some() {
         String::new()
     } else {
-        bundles
-            .message(ctx.lang, &format!("error-{shown}"), Some(&args))
-            .unwrap_or_else(|| error.to_string())
+        sentence_of(error, shown, &args, ctx)
     };
     args.set("request_id", ctx.request_id.to_string());
     let reference = bundles
@@ -399,14 +434,12 @@ fn redirect(path: &'static str) -> Response {
     response
 }
 
-/// Map an error to the HTTP answer and write its one log line.
+/// Write the one log line of an error. Return the code that the answer shows and its status.
 ///
-/// The status comes from the column HTTP of `reliability.md` section 1.2. `E-IDN-004` renders as
-/// `E-IDN-003` and logs its own code (A42). `E-IDN-007` is the redirect to `/me/password`.
-/// `E-WEB-004` redirects to `/login` and ends the session cookie with `Max-Age=0`. For an HTMX
-/// request every status of 400 or more, except `E-WEB-004`, retargets the answer to `#error-panel`
-/// (`api.md` section 5.3). The same answer sets `HX-Push-Url: false`, so the URL stays.
-pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
+/// The status comes from the column HTTP of `reliability.md` section 1.2. `E-IDN-004` shows as
+/// `E-IDN-003`, and the log line keeps its own code (A42). The HTML answer and the JSON answer
+/// both call this function, so each error gets one log line (`reliability.md` section 1.1).
+pub(super) fn logged(error: &WebError, ctx: &ErrorContext<'_>) -> (ErrorCode, StatusCode) {
     let code = error.code();
     let shown = if code == ErrorCode::IDN_004 {
         ErrorCode::IDN_003
@@ -415,15 +448,35 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     };
     let status = status_of(shown);
     log_error(error, code, level_of(error, code, status), ctx.request_id);
+    (shown, status)
+}
 
+/// Return the redirect of a session code, if the code has one.
+///
+/// `E-IDN-007` is the redirect to `/me/password`. `E-WEB-004` redirects to `/login` and ends the
+/// session cookie with `Max-Age=0`, but only when `htmx` is false.
+pub(super) fn session_redirect(shown: ErrorCode, htmx: bool) -> Option<Response> {
     if shown == ErrorCode::IDN_007 {
-        return redirect(PASSWORD_PATH);
+        return Some(redirect(PASSWORD_PATH));
     }
-    if shown == ErrorCode::WEB_004 && !ctx.htmx {
-        let mut response = redirect(LOGIN_PATH);
-        response
-            .headers_mut()
-            .append(SET_COOKIE, clear_session_cookie());
+    if shown != ErrorCode::WEB_004 || htmx {
+        return None;
+    }
+    let mut response = redirect(LOGIN_PATH);
+    response
+        .headers_mut()
+        .append(SET_COOKIE, clear_session_cookie());
+    Some(response)
+}
+
+/// Map an error to the HTTP answer and write its one log line.
+///
+/// `E-IDN-007` and `E-WEB-004` without HTMX are redirects (`session_redirect`). For an HTMX
+/// request every status of 400 or more, except `E-WEB-004`, retargets the answer to `#error-panel`
+/// (`api.md` section 5.3). The same answer sets `HX-Push-Url: false`, so the URL stays.
+pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
+    let (shown, status) = logged(error, ctx);
+    if let Some(response) = session_redirect(shown, ctx.htmx) {
         return response;
     }
     let body = body_of(error, shown, status, ctx);

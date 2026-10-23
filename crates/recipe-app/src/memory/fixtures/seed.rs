@@ -1,10 +1,18 @@
 //! The fixture that bundles a store, a sink, and a clock, and seeds recipes.
 
+use recipe_domain::identity::{PasswordHash, Role};
 use recipe_domain::plant::{Machine, PlcPlatform};
 use recipe_domain::recipe::{Recipe, RecipeVersionId, VersionState};
 
-use super::{instant, machine_on, recipe_with, reference, rid, text, user, vid};
+use super::{
+    actor, instant, machine_on, recipe_with, reference, rid, second_engineer, text, user, vid,
+};
 use crate::memory::{MemoryClock, MemorySink, MemoryStore};
+use crate::ports::NewUser;
+
+/// A valid PHC string for a seeded actor.
+const ACTOR_HASH: &str =
+    "$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0$ZG91YmxlZG91YmxlZG91YmxlZG91Ymxl";
 
 /// Return the number of the version `number` of recipe `n`, as the `u128` of a version id.
 fn version_key(n: u128, number: u128) -> u128 {
@@ -33,6 +41,28 @@ impl Fixture {
             sink: store.sink(),
             store,
             clock,
+        }
+    }
+
+    /// Store the user rows of the fixed actors: `admin`, `jkowalski`, `anowak`, and `mhoffman`.
+    ///
+    /// The seeded versions name `jkowalski` as creator and approver, and `ApproveVersion` of a
+    /// test names `anowak`. `version_detail` then finds a login for each of them (design D14).
+    pub(crate) fn seed_actors(&self) {
+        let actors = [
+            actor(Role::Administrator),
+            actor(Role::ProcessEngineer),
+            second_engineer(),
+            actor(Role::Operator),
+        ];
+        for current in actors {
+            self.store.seed_user(&NewUser {
+                id: current.user(),
+                login: current.login().clone(),
+                password_hash: PasswordHash::parse(ACTOR_HASH).unwrap(),
+                role: current.role(),
+                must_change_password: false,
+            });
         }
     }
 

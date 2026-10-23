@@ -4,9 +4,12 @@
 //! trigger that the superuser of the harness creates. The failed command leaves no row and does
 //! not move the head of the audit chain.
 
+use std::sync::Arc;
+
 use recipe_app::export::{
     ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportVersionByNumber,
 };
+use recipe_app::memory::BodyWriter;
 use recipe_app::recipe::{
     ApproveVersion, ApproveVersionInput, CreateRecipe, CreateRecipeInput, CreateVersion,
     CreateVersionInput, DeleteRecipe, DeleteRecipeInput, DiscardDraft, DiscardDraftInput,
@@ -441,7 +444,7 @@ async fn approve_version_fails_on_the_second_update_and_keeps_the_old_version_ap
 
 // RetireVersion
 
-async fn retire_input(app: &mut App, world: &World) -> RetireVersionInput {
+pub(super) async fn retire_input(app: &mut App, world: &World) -> RetireVersionInput {
     RetireVersionInput {
         reference: world.reference.clone(),
         number: 1,
@@ -487,7 +490,7 @@ async fn retire_version_fails_in_the_audit_insert_and_keeps_the_version_approved
 // ExportVersion
 
 /// Approve the draft of a world with the use case, so the stored hash matches the rebuilt body.
-async fn approved_by_use_case(app: &mut App) -> World {
+pub(super) async fn approved_by_use_case(app: &mut App) -> World {
     let world = World::create(app).await;
     world.add_speed(app, world.version, "SPEED").await;
     let approver = second_user(app).await;
@@ -499,7 +502,7 @@ async fn approved_by_use_case(app: &mut App) -> World {
     world
 }
 
-fn export_input(world: &World) -> ExportApprovedInput {
+pub(super) fn export_input(world: &World) -> ExportApprovedInput {
     ExportApprovedInput {
         reference: world.reference.clone(),
     }
@@ -511,7 +514,7 @@ async fn export_version_writes_one_entry_with_the_content_hash() {
     let world = approved_by_use_case(&mut app).await;
     let before = app.head().await;
 
-    let exported = ExportApprovedVersion::new(app.context())
+    let exported = ExportApprovedVersion::new(app.context(), Arc::new(BodyWriter))
         .execute(&app.user, &app.meta, export_input(&world))
         .await
         .unwrap();
@@ -534,7 +537,7 @@ async fn export_version_fails_in_the_audit_insert_and_leaves_no_entry() {
     app.install_probe("audit_log", "BEFORE", "INSERT", FAULT)
         .await;
 
-    let error = ExportApprovedVersion::new(app.context())
+    let error = ExportApprovedVersion::new(app.context(), Arc::new(BodyWriter))
         .execute(&app.user, &app.meta, export_input(&world))
         .await
         .unwrap_err();
@@ -560,7 +563,7 @@ async fn retired_by_use_case(app: &mut App) -> World {
     world
 }
 
-fn export_by_number_input(world: &World) -> ExportByNumberInput {
+pub(super) fn export_by_number_input(world: &World) -> ExportByNumberInput {
     ExportByNumberInput {
         reference: world.reference.clone(),
         number: 1,
@@ -574,7 +577,7 @@ async fn export_by_number_of_a_retired_version_writes_one_entry_with_the_stored_
     assert_eq!(status(&mut app, world.version).await, "retired");
     let before = app.head().await;
 
-    let exported = ExportVersionByNumber::new(app.context())
+    let exported = ExportVersionByNumber::new(app.context(), Arc::new(BodyWriter))
         .execute(&app.user, &app.meta, export_by_number_input(&world))
         .await
         .unwrap();
@@ -604,7 +607,7 @@ async fn export_by_number_of_a_retired_version_fails_in_the_audit_insert_and_lea
     app.install_probe("audit_log", "BEFORE", "INSERT", FAULT)
         .await;
 
-    let error = ExportVersionByNumber::new(app.context())
+    let error = ExportVersionByNumber::new(app.context(), Arc::new(BodyWriter))
         .execute(&app.user, &app.meta, export_by_number_input(&world))
         .await
         .unwrap_err();

@@ -1,22 +1,24 @@
 //! The flow shared by both export routes (`data-model.md` section 6, row `ExportVersion`).
 
+use std::sync::Arc;
+
 use recipe_domain::audit::{AuditEntry, AuditTarget, StateAction};
-use recipe_domain::export::{ExportError, ExportHeader, HashedBody, Sha256};
-use recipe_domain::plant::{Machine, PlatformTypes, TypeTrees};
+use recipe_domain::export::{ExportError, ExportStatus, SCHEMA_VERSION, Sha256};
+use recipe_domain::identity::Login;
+use recipe_domain::plant::Machine;
 use recipe_domain::recipe::{
-    Parameter, Recipe, RecipeError, RecipeId, RecipeVersionId, ReferenceNumber, VersionState,
+    Recipe, RecipeError, RecipeId, RecipeVersionId, ReferenceNumber, VersionState,
 };
+use recipe_domain::timestamp::Timestamp;
 use serde_json::json;
 
+use super::document::{KnownFacts, Written, read_rows, write_document};
 use super::output::ExportedVersion;
 use crate::auth::{CurrentUser, RequestMeta};
-use crate::blocking::Blocking;
+use crate::blocking::ExportPermit;
 use crate::context::{AppContext, audit_context};
-use crate::error::{AppError, Missing};
-use crate::ports::{Isolation, NonEmpty, SharedVersion, Transaction};
-
-/// The value of `schema_version` in the document and in the audit entry (`api.md` section 6.1).
-const SCHEMA_VERSION: &str = "1";
+use crate::error::{AppError, Missing, StorageError};
+use crate::ports::{DocumentWriter, Isolation, NonEmpty, SharedVersion, Transaction};
 
 /// The version that an export route names.
 #[derive(Clone, Copy, Debug)]
@@ -67,18 +69,19 @@ fn pick(recipe: Recipe, target: Target<'_>) -> Result<Found, AppError> {
     })
 }
 
-/// Check that the state allows the export on this route.
+/// Check that the state allows the export on this route, and return the status of the document.
 ///
 /// The function solves one problem: step 2 and the lock of step 3 apply the same rule, because
-/// another request can change the state between them.
+/// another request can change the state between them. The flow converts the state only here.
 fn check_exportable(
     state: VersionState,
     target: Target<'_>,
     reference: &ReferenceNumber,
     number: u32,
-) -> Result<(), ExportError> {
+) -> Result<ExportStatus, ExportError> {
     match (state, target) {
-        (VersionState::Approved, _) | (VersionState::Retired, Target::Number(..)) => Ok(()),
+        (VersionState::Approved, _) => Ok(ExportStatus::Approved),
+        (VersionState::Retired, Target::Number(..)) => Ok(ExportStatus::Retired),
         (_, Target::Approved(_)) => Err(ExportError::NoApprovedVersion {
             reference: reference.clone(),
         }),
@@ -103,49 +106,6 @@ async fn find(ctx: &AppContext, target: Target<'_>) -> Result<Found, AppError> {
             entity: Missing::Recipe(reference.clone()),
         })?;
     pick(recipe, target)
-}
-
-/// Rebuild the hashed body of the locked version (step 3).
-///
-/// The function reads the rows in the transaction. Then the build of the body and its
-/// SHA-256 run in `spawn_blocking`, so the limit `timeout.export` can stop the wait.
-async fn rebuild(
-    tx: &mut dyn Transaction,
-    blocking: Blocking,
-    found: &Found,
-    machine: &Machine,
-) -> Result<(HashedBody, Sha256), AppError> {
-    let machine_id = machine.id();
-    let parameters: Vec<Parameter> = tx
-        .recipes()
-        .version_parameters(found.version)
-        .await?
-        .into_iter()
-        .map(Parameter::from)
-        .collect();
-    let units = tx
-        .units()
-        .live_units(machine_id)
-        .await?
-        .ok_or_else(|| AppError::NotFound {
-            entity: Missing::MachineId(machine_id),
-        })?;
-    let rows = tx.types().type_rows(machine_id).await?;
-    let types = PlatformTypes::collect(machine_id, machine.platform(), rows)?;
-    let trees = TypeTrees::resolve(parameters.iter().map(Parameter::plc_type), &types);
-    let header = ExportHeader {
-        machine: machine.code(),
-        platform: machine.platform(),
-        reference: found.recipe.reference().clone(),
-        version: found.number,
-    };
-    blocking
-        .rebuild_export(move || -> Result<(HashedBody, Sha256), AppError> {
-            let body = HashedBody::build(&header, &parameters, &units, &trees)?;
-            let hash = body.sha256()?;
-            Ok((body, hash))
-        })
-        .await?
 }
 
 /// Build the entry `VersionExported` (`data-model.md` section 10).
@@ -190,26 +150,22 @@ async fn reread_recipe(
     Ok(Found { recipe, ..found })
 }
 
-/// The result of the timed part of the export: the open transaction and the checked body.
-struct Prepared {
-    tx: Box<dyn Transaction>,
+/// The locked version after the second state check.
+struct Checked {
     shared: SharedVersion,
     found: Found,
+    status: ExportStatus,
     machine: Machine,
-    body: HashedBody,
-    hash: Sha256,
 }
 
-/// Lock the version `FOR SHARE`, rebuild its body, and compare the hash.
+/// Lock the version `FOR SHARE`, read the recipe again, check the state, and read the machine.
 ///
-/// The function returns the open transaction. The caller commits it after the limit
-/// `timeout.export`, and a timeout drops the transaction, which rolls it back.
-async fn lock_and_rebuild(
-    ctx: &AppContext,
+/// These are steps 1 and 2 of design D6 (c) inside the transaction of the command.
+async fn lock_and_check(
+    tx: &mut dyn Transaction,
     target: Target<'_>,
     found: Found,
-) -> Result<Prepared, AppError> {
-    let mut tx = ctx.uow.begin(Isolation::ReadCommitted).await?;
+) -> Result<Checked, AppError> {
     let shared: SharedVersion = tx
         .recipes()
         .lock_version_shared(found.version)
@@ -217,9 +173,8 @@ async fn lock_and_rebuild(
         .ok_or_else(|| AppError::NotFound {
             entity: Missing::version(found.recipe.reference(), found.number),
         })?;
-    let found = reread_recipe(tx.as_mut(), target, found).await?;
-    let reference = found.recipe.reference();
-    check_exportable(shared.state, target, reference, found.number)?;
+    let found = reread_recipe(tx, target, found).await?;
+    let status = check_exportable(shared.state, target, found.recipe.reference(), found.number)?;
     let machine_id = found.recipe.machine();
     let machine =
         tx.plant()
@@ -228,21 +183,87 @@ async fn lock_and_rebuild(
             .ok_or_else(|| AppError::NotFound {
                 entity: Missing::MachineId(machine_id),
             })?;
-    let (body, hash) = rebuild(tx.as_mut(), ctx.settings.blocking, &found, &machine).await?;
-    if shared.content_sha256 != Some(hash) {
-        return Err(ExportError::ContentHashMismatch {
-            reference: found.recipe.reference().clone(),
-            number: found.number,
-        }
-        .into());
-    }
-    Ok(Prepared {
-        tx,
+    Ok(Checked {
         shared,
         found,
+        status,
         machine,
-        body,
-        hash,
+    })
+}
+
+/// Read the instant and the login of the approval of the locked version (step 3).
+///
+/// An approved or a retired version always has both. A missing value is corrupt data.
+///
+/// # Errors
+///
+/// Returns `StorageError::Other` (`E-DB-008`) when the row, the instant, or the login is missing.
+async fn read_approval(
+    tx: &mut dyn Transaction,
+    version: RecipeVersionId,
+) -> Result<(Timestamp, Login), AppError> {
+    let detail = tx
+        .recipe_reads()
+        .version_detail(version)
+        .await?
+        .ok_or_else(|| StorageError::invariant("the locked version has no row"))?;
+    let approved_at = detail
+        .approved_at
+        .ok_or_else(|| StorageError::invariant("an exported version has no approval time"))?;
+    let approved_by = detail
+        .approved_by
+        .ok_or_else(|| StorageError::invariant("an exported version has no approver"))?;
+    Ok((approved_at, approved_by))
+}
+
+/// The result of the timed part of the export: the open transaction and the written document.
+struct Prepared {
+    tx: Box<dyn Transaction>,
+    recipe: RecipeId,
+    version: RecipeVersionId,
+    reference: ReferenceNumber,
+    number: u32,
+    status: ExportStatus,
+    written: Written,
+}
+
+/// Lock and check the version, read its rows, and write the document (steps 1 to 5).
+///
+/// The function returns the open transaction. The caller commits it after the limit
+/// `timeout.export`, and a timeout or an error drops the transaction, which rolls it back.
+/// The blocking task of step 5 takes `permit` (ADR-0056 (c)).
+async fn lock_and_write(
+    ctx: &AppContext,
+    (writer, user): (&Arc<dyn DocumentWriter>, &CurrentUser),
+    (target, found): (Target<'_>, Found),
+    permit: ExportPermit,
+) -> Result<Prepared, AppError> {
+    let mut tx = ctx.uow.begin(Isolation::ReadCommitted).await?;
+    let checked = lock_and_check(tx.as_mut(), target, found).await?;
+    let (version, number) = (checked.found.version, checked.found.number);
+    let reference = checked.found.recipe.reference().clone();
+    let (approved_at, approved_by) = read_approval(tx.as_mut(), version).await?;
+    let rows = read_rows(tx.as_mut(), &checked.machine, (&reference, version, number)).await?;
+    let facts = KnownFacts {
+        exported_at: ctx.clock.now(),
+        exported_by: user.login().clone(),
+        status: checked.status,
+        approved_at,
+        approved_by,
+        machine_name: checked.machine.name().clone(),
+        recipe_name: checked.found.recipe.name().clone(),
+    };
+    let task = (ctx.settings.blocking, permit);
+    let stored = checked.shared.content_sha256;
+    let written = write_document(task, Arc::clone(writer), (rows, facts), stored).await?;
+    Ok(Prepared {
+        tx,
+        recipe: checked.shared.recipe,
+        version,
+        reference,
+        number,
+        status: checked.status,
+        written,
     })
 }
 
@@ -254,41 +275,41 @@ async fn commit_export(
 ) -> Result<ExportedVersion, AppError> {
     let Prepared {
         tx,
-        shared,
-        found,
-        machine,
-        body,
-        hash,
+        recipe,
+        version,
+        reference,
+        number,
+        status,
+        written: Written { document, hash },
     } = prepared;
-    let entry = exported_entry((shared.recipe, found.version), hash, (user, meta));
+    let entry = exported_entry((recipe, version), hash, (user, meta));
     ctx.uow.commit(tx, NonEmpty::new(entry)).await?;
     Ok(ExportedVersion {
-        body,
+        document,
+        reference,
+        number,
+        status,
         content_sha256: hash,
-        status: shared.state.status(),
-        machine_name: machine.name().clone(),
-        recipe_name: found.recipe.name().clone(),
-        approved_by: shared.approved_by,
-        approved_at: shared.approved_at,
-        exported_at: ctx.clock.now(),
-        exported_by: user.login().clone(),
     })
 }
 
 /// Run the export (`E-WEB-009` with the stage `Export`, `E-WEB-011` with the stage `export`).
 ///
-/// The function solves one problem: both routes read, lock, check, and audit in the same way.
-/// `timeout.export` covers the read, the locks, the rebuild, and the hash compare. The commit
-/// runs after that limit, so a client that gets `E-WEB-009` finds no entry. The caller has
-/// checked the permission of its route.
+/// The function solves one problem: both routes read, lock, check, write, and audit in the same
+/// way. `timeout.export` covers the wait for a permit of `export.permits`, the reads, the locks,
+/// the rebuild, the hash compare, and the writer. The wait for the permit comes before the first
+/// read opens a transaction (ADR-0056 (b)). The commit runs after that limit, so a client that
+/// gets `E-WEB-009` finds no entry. The caller has checked the permission of its route.
 ///
 /// # Errors
 ///
 /// Returns `NotFound` (`E-WEB-005`) for an unknown recipe or version number.
-/// Returns `ExportError` (`E-EXP-001`, `E-EXP-002`, `E-EXP-003`) and `RecipeError::RecipeDeleted`
-/// (`E-RCP-012`). Returns `Timeout` (`E-WEB-009`) and `Storage` errors.
+/// Returns `ExportError` (`E-EXP-001` to `E-EXP-004`) and `RecipeError::RecipeDeleted`
+/// (`E-RCP-012`). Returns `Timeout` (`E-WEB-009`), `TaskFailed` (`E-WEB-011`), and `Storage`
+/// errors.
 pub(super) async fn export_version(
     ctx: &AppContext,
+    writer: &Arc<dyn DocumentWriter>,
     who: (&CurrentUser, &RequestMeta),
     target: Target<'_>,
 ) -> Result<ExportedVersion, AppError> {
@@ -296,8 +317,9 @@ pub(super) async fn export_version(
         .settings
         .blocking
         .export(async {
+            let permit = ctx.export_gate.acquire().await?;
             let found = find(ctx, target).await?;
-            lock_and_rebuild(ctx, target, found).await
+            lock_and_write(ctx, (writer, who.0), (target, found), permit).await
         })
         .await?;
     commit_export(ctx, who, prepared).await

@@ -34,6 +34,9 @@ error-E-DB-005 = Baza danych nie odpowiada. Spróbuj ponownie.
 error-E-DB-006 = Zmiana koliduje z istniejącym wpisem.
 error-E-DB-007 = Zmiana odwołuje się do wpisu, którego nie ma.
 error-E-DB-008 = Wystąpił nieoczekiwany błąd bazy danych. Skontaktuj się z administratorem.
+error-E-EXP-001 = Receptura { $reference } nie ma wersji zatwierdzonej.
+error-E-EXP-002 = Wersja { $number } receptury { $reference } nie zgadza się z zapisanym skrótem. Eksport jest odrzucony. Skontaktuj się z administratorem.
+error-E-EXP-003 = Wersja { $number } receptury { $reference } jest szkicem albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.
 error-E-AUD-001 = Zmiana nie została zapisana. System nie mógł zapisać wpisu audytu. Skontaktuj się z administratorem.
 
 # Role
@@ -583,6 +586,8 @@ version-approved-by = Zatwierdzający
 version-approved-at = Zatwierdzono
 version-updated-at = Ostatnia zmiana
 version-platform = Platforma PLC
+version-export-link = Eksportuj wersję { $number } do pliku JSON
+version-export-retired-notice = Nazwa pliku zaczyna się od RETIRED_. Plik oznacza, że tej wersji nie można załadować do PLC.
 parameters-caption = Parametry
 parameters-col-tag = Znacznik
 parameters-col-name = Nazwa

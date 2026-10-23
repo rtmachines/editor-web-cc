@@ -593,7 +593,7 @@ async fn export_approved_version_writes_one_export_entry() {
     let skip = fixture.store.audit_entries().len();
     let user = actor(Role::Operator);
     let request = meta();
-    ExportApprovedVersion::new(fixture.context())
+    ExportApprovedVersion::new(fixture.context(), scenarios::body_writer())
         .execute(&user, &request, scenarios::export_approved_input())
         .await
         .unwrap();
@@ -616,7 +616,7 @@ async fn export_version_by_number_writes_one_export_entry() {
     let skip = fixture.store.audit_entries().len();
     let user = actor(Role::Administrator);
     let request = meta();
-    ExportVersionByNumber::new(fixture.context())
+    ExportVersionByNumber::new(fixture.context(), scenarios::body_writer())
         .execute(&user, &request, scenarios::export_number_input())
         .await
         .unwrap();

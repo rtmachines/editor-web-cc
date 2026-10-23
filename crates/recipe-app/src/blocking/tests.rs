@@ -4,11 +4,17 @@ use std::time::Duration;
 
 use recipe_domain::error_codes::ErrorCode;
 
-use super::{AppSettings, Blocking, DiffGate, DiffPermit, DiffSettings, PageSizes};
+use super::{
+    AppSettings, Blocking, DiffGate, DiffPermit, DiffSettings, ExportGate, ExportPermit,
+    ExportSettings, PageSizes,
+};
 use crate::error::{AppError, TaskStage, TimeoutStage};
 
 const SHORT: Duration = Duration::from_millis(20);
 const LONG: Duration = Duration::from_millis(400);
+/// Bound of a wait for an export permit. A task that ends frees the permit at once, so the bound
+/// only turns a leaked permit into a failure. It is virtual time in a test with a paused clock.
+const PERMIT_WAIT_BOUND: Duration = Duration::from_secs(10);
 
 #[tokio::test]
 async fn validate_passes_the_result_through() {
@@ -114,21 +120,32 @@ async fn export_passes_the_error_of_the_future() {
     assert!(matches!(error, AppError::Unauthenticated));
 }
 
+/// Return a gate of the exports with one permit and its permit.
+async fn one_export_permit() -> (ExportGate, ExportPermit) {
+    let gate = ExportGate::new(1);
+    let permit = gate.acquire().await.unwrap();
+    (gate, permit)
+}
+
 #[tokio::test]
-async fn export_rebuild_passes_the_result_of_the_closure() {
+async fn export_rebuild_passes_the_result_of_the_closure_and_frees_the_permit() {
+    let (gate, permit) = one_export_permit().await;
     let value = Blocking::default()
-        .rebuild_export(|| 20_u8.checked_add(22))
+        .rebuild_export(permit, || 20_u8.checked_add(22))
         .await
         .unwrap();
     assert_eq!(value, Some(42));
+    assert_eq!(gate.available(), 1);
 }
 
 #[tokio::test]
 async fn a_panicking_export_rebuild_gives_task_failed_with_the_export_stage() {
+    let (gate, permit) = one_export_permit().await;
     let error = Blocking::default()
-        .rebuild_export(|| std::hint::black_box(Option::<u8>::None).unwrap())
+        .rebuild_export(permit, || std::hint::black_box(Option::<u8>::None).unwrap())
         .await
         .unwrap_err();
+    assert_eq!(gate.available(), 1);
     assert_eq!(error.code(), ErrorCode::WEB_011);
     assert!(matches!(
         error,
@@ -179,6 +196,98 @@ fn diff_settings_follow_section_7_11() {
 
     assert_eq!(DiffSettings::default(), expected);
     assert_eq!(AppSettings::default().diff, expected);
+}
+
+#[test]
+fn export_settings_follow_section_7_11() {
+    let expected = ExportSettings { permits: 2 };
+
+    assert_eq!(ExportSettings::default(), expected);
+    assert_eq!(AppSettings::default().export, expected);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_export_permit_waits_until_the_first_returns() {
+    let (gate, held) = one_export_permit().await;
+    let mut second = std::pin::pin!(gate.acquire());
+
+    let waited = tokio::time::timeout(Duration::from_secs(60), &mut second).await;
+    assert!(waited.is_err());
+    drop(held);
+    let permit = second.await.unwrap();
+
+    assert_eq!(gate.available(), 0);
+    drop(permit);
+    assert_eq!(gate.available(), 1);
+}
+
+/// The limit of `timeout.export` elapses while the rebuild runs. The paused clock moves only
+/// through `advance`, which the test calls after the closure signals its start.
+#[tokio::test(start_paused = true)]
+async fn an_export_rebuild_beyond_the_limit_keeps_its_permit_until_the_task_ends() {
+    let blocking = Blocking::new(Duration::from_secs(10), SHORT);
+    let (gate, permit) = one_export_permit().await;
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (started_sender, started) = tokio::sync::oneshot::channel::<()>();
+    let work = move || {
+        started_sender.send(()).is_ok() && released.recv_timeout(Duration::from_secs(5)).is_ok()
+    };
+    let export = blocking.export(blocking.rebuild_export(permit, work));
+    let pass_the_limit = async {
+        started.await.unwrap();
+        tokio::time::advance(SHORT.checked_add(Duration::from_millis(1)).unwrap()).await;
+    };
+
+    let (result, ()) = tokio::join!(export, pass_the_limit);
+    let error = result.unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::WEB_009);
+    assert!(matches!(
+        error,
+        AppError::Timeout {
+            stage: TimeoutStage::Export
+        }
+    ));
+    assert_eq!(gate.available(), 0);
+    release.send(()).unwrap();
+    let returned = tokio::time::timeout(PERMIT_WAIT_BOUND, gate.acquire())
+        .await
+        .expect("the end of the task did not free the permit");
+    drop(returned.unwrap());
+    assert_eq!(gate.available(), 1);
+}
+
+/// The pool has one thread, which a held task occupies, so the rebuild waits in the queue
+/// until the limit elapses. The drop of the export future must abort the queued task.
+#[test]
+fn an_export_rebuild_queued_beyond_the_limit_never_runs_and_frees_the_permit() {
+    one_blocking_thread().block_on(async {
+        let blocking = Blocking::new(Duration::from_secs(10), SHORT);
+        let (gate, permit) = one_export_permit().await;
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let busy = tokio::task::spawn_blocking(move || {
+            released.recv_timeout(Duration::from_secs(5)).is_ok()
+        });
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+
+        let error = blocking
+            .export(blocking.rebuild_export(permit, move || flag.store(true, Ordering::SeqCst)))
+            .await
+            .unwrap_err();
+        release.send(()).unwrap();
+        assert!(busy.await.unwrap());
+        let next = tokio::time::timeout(PERMIT_WAIT_BOUND, gate.acquire())
+            .await
+            .expect("the dropped export future did not free the permit")
+            .unwrap();
+
+        assert_eq!(error.code(), ErrorCode::WEB_009);
+        assert!(!ran.load(Ordering::SeqCst));
+        assert_eq!(gate.available(), 0);
+        drop(next);
+        assert_eq!(gate.available(), 1);
+    });
 }
 
 /// Return the deadline of a diff of `blocking`, which starts now.

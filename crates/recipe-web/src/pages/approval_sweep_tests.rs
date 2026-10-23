@@ -26,7 +26,8 @@ use recipe_domain::audit::{SecurityEvent, UserAgent};
 use super::audit::test_world::{AuditWorld, audit_world};
 use super::page_tests::{LANGS, assert_assets, assert_layout};
 use super::recipe_sweep_tests::{
-    Answer as RecipeAnswer, assert_literal, assert_urls_without_token, attribute_values, forms,
+    Answer as RecipeAnswer, assert_false_boost_on_export_links, assert_literal,
+    assert_urls_without_token, attribute_values, forms,
 };
 use super::sweep_tests::get_page_patterns;
 use super::test_helpers::{CSP, Tag, assert_clean_html, hx_attributes, small_pages, tags};
@@ -547,6 +548,7 @@ async fn approval_sweep_each_hx_value_is_a_literal_of_the_list() {
             assert_literal(&attribute, &answer.what);
             seen.insert((attribute.name, attribute.value));
         }
+        assert_false_boost_on_export_links(&answer.reply.body, &answer.what);
     }
     let listed = HELD_LITERALS
         .iter()

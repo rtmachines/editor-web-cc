@@ -3,7 +3,8 @@
 {% import "components/badge.html" as badges %}
 {% import "rebind-form.html" as rebinds %}
 {% import "components/danger.html" as dangers %}
-{#- The version page of design D7 and ADR-0043 (j). Only a live draft and a role with ParameterEdit get the link Add a parameter. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). Each hx attribute is a literal. The href holds the reference number and has hx-boost (ADR-0037 (f)). The row of links after the header holds the approve link, the compare links, and the history link, as the role and the state permit (ADR-0049 (i), ADR-0050 (l), ADR-0051 (g)). The compare links stay on the page of a deleted recipe, because they are reads. The row has no heading. The heading Actions and at most one danger action stand at the end of main, and only when the page has a danger action (ADR-0049 (f) and (i), design D7). -#}
+{% import "components/alert.html" as alerts %}
+{#- The version page of design D7 and ADR-0043 (j). Only a live draft and a role with ParameterEdit get the link Add a parameter. A deleted recipe shows the state Deleted and no form (ADR-0043 (e)). Each hx attribute is a literal. The href holds the reference number and has hx-boost (ADR-0037 (f)). The export link of an Approved or a Retired version stands in its own row right after the header, with the notice of a Retired version before it. It is a plain download link with the literal hx-boost false, outside every boosted element (ADR-0052). The row of links after it holds the approve link, the compare links, and the history link, as the role and the state permit (ADR-0049 (i), ADR-0050 (l), ADR-0051 (g)). The compare links stay on the page of a deleted recipe, because they are reads. The row has no heading. The heading Actions and at most one danger action stand at the end of main, and only when the page has a danger action (ADR-0049 (f) and (i), design D7). -#}
 {% block content %}
 {{ headings::h1_toast(layout, layout.title) }}
 <div class="actions">{{ badges::status_large(kind, word) }}{% if deleted %}{{ badges::deleted_large(t.get("status-deleted")) }}{% endif %}</div>
@@ -25,7 +26,9 @@
 <dt>{{ t.get("recipe-machine") }}</dt>
 <dd><a class="target-link" href="{{ machine_href }}">{{ machine }}</a></dd>
 </dl>
-<p class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">{% if let Some(link) = actions.approve %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endif %}{% for link in actions.compare %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endfor %}<a class="target-link" href="{{ actions.history_href }}">{{ t.get("recipe-history-link") }}</a></p>
+{% if let Some(link) = actions.export %}{% if link.retired %}<div id="export-notice">{{ alerts::notice("info", t.get("version-export-retired-notice")) }}</div>
+{% endif %}<p class="actions"><a class="btn btn-secondary" href="{{ link.href }}" hx-boost="false"{% if link.retired %} aria-describedby="export-notice"{% endif %}>{{ link.text }}</a></p>
+{% endif %}<p class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">{% if let Some(link) = actions.approve %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endif %}{% for link in actions.compare %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endfor %}<a class="target-link" href="{{ actions.history_href }}">{{ t.get("recipe-history-link") }}</a></p>
 {#- The list of the outdated parameters and the rebind forms (ADR-0043 (l)). The answer of a rebind swaps it out of band. -#}
 {{ rebinds::outdated_list(t, outdated) }}
 {#- Each rebind form starts with its own h2. So the parameter table has its own h2 before #parameter-table, outside that element. The h2 stays on every version page and in place when a rebind swaps the table. #}

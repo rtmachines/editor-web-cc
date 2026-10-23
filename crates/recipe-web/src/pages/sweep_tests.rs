@@ -7,9 +7,11 @@
 use axum::http::{Method, StatusCode};
 
 use super::page_tests::{LANGS, administrator, assert_assets, assert_layout, get_page};
-use super::test_helpers::{CSP, assert_clean_html};
+use super::recipe_sweep_tests::assert_false_boost_on_export_links;
+use super::test_helpers::{CSP, assert_clean_html, tags};
 use super::{machines, parameters, recipes, types, units, versions};
 use crate::components_tests::assert_fixed_svg_tags;
+use crate::export_path::is_export_path;
 use crate::routes::{Access, table};
 use crate::test_support::{Fixture, Reply, TestSession, deactivate_user};
 use recipe_domain::identity::Role;
@@ -83,10 +85,14 @@ pub(super) async fn seed_audit_entry(fixture: &Fixture) {
 }
 
 /// Return the patterns of the rows `GET` with an operation. Static files are not pages.
+///
+/// An export row answers a JSON file and not a page (ADR-0053), so the function leaves out each
+/// row under the prefix of the export routes (design D12).
 pub(super) fn get_page_patterns() -> Vec<&'static str> {
     table()
         .into_iter()
         .filter(|row| row.method == Method::GET && matches!(row.access, Access::Operation(_)))
+        .filter(|row| !is_export_path(row.path))
         .map(|row| row.path)
         .collect()
 }
@@ -194,4 +200,93 @@ async fn sweep_every_get_page_has_layout_headers_and_clean_markup_in_both_langua
             assert_csrf_header(&reply, &session, pattern);
         }
     }
+}
+
+// --- The export links (design D11 T14, ADR-0052 (c)) ----------------------------------------------
+
+/// The pattern of the version page.
+const VERSION_PATTERN: &str = "/recipes/{ref}/versions/{n}";
+/// The version pages with an export link: the retired version 1 and the approved version 2 of
+/// `R-100`. The pages of `pages()` show the draft version 3, which has no export link.
+const EXPORT_LINK_PAGES: [&str; 2] = ["/recipes/R-100/versions/1", "/recipes/R-100/versions/2"];
+/// The void elements of HTML. They have no end tag, so they never hold a link.
+const VOID_ELEMENTS: [&str; 13] = [
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
+    "wbr",
+];
+
+/// Assert that each anchor to an export route has `hx-boost="false"` and no boosted ancestor.
+///
+/// The function keeps a stack of the open elements. An end tag closes its element and every
+/// element that opened after it. It also asserts that `hx-boost="false"` stands only on an export
+/// link. Return the number of the export anchors in `html`.
+fn assert_export_links_unboosted(html: &str, what: &str) -> usize {
+    let mut open: Vec<(String, bool)> = Vec::new();
+    let mut links = 0_usize;
+    for tag in tags(html) {
+        if tag.closing {
+            if let Some(at) = open.iter().rposition(|(name, _boosted)| *name == tag.name) {
+                open.truncate(at);
+            }
+            continue;
+        }
+        let href = tag.attribute("href").unwrap_or_default();
+        if tag.name == "a" && href.starts_with("/export/") {
+            links = links.checked_add(1).unwrap();
+            let boost = tag.attribute("hx-boost");
+            assert_eq!(boost, Some("false"), "{what}: hx-boost of {href}");
+            let boosted = open.iter().any(|(_name, boosted)| *boosted);
+            assert!(!boosted, "{what}: boosted ancestor of {href}");
+        }
+        if !VOID_ELEMENTS.contains(&tag.name.as_str()) {
+            let boosted = tag.attribute("hx-boost") == Some("true");
+            open.push((tag.name.clone(), boosted));
+        }
+    }
+    assert_false_boost_on_export_links(html, what);
+    links
+}
+
+#[tokio::test]
+async fn sweep_every_export_link_has_a_false_boost_and_no_boosted_ancestor_in_both_languages() {
+    let (fixture, session) = administrator();
+    fixture.seed_recipes();
+    seed_audit_entry(&fixture).await;
+    let mut paths: Vec<(&str, String)> = get_page_patterns()
+        .into_iter()
+        .map(|pattern| (pattern, path_of(pattern).unwrap()))
+        .collect();
+    paths.extend(EXPORT_LINK_PAGES.map(|path| (VERSION_PATTERN, path.to_owned())));
+    let mut links = 0_usize;
+    for (pattern, path) in &paths {
+        let session_of_page = (*pattern != LOGIN_PATTERN).then_some(&session);
+        for (_lang, code) in LANGS {
+            let reply = get_page(&fixture, session_of_page, code, path).await;
+            assert_eq!(reply.status, StatusCode::OK, "{code} {path}");
+            let seen = assert_export_links_unboosted(&reply.body, &format!("{code} {path}"));
+            links = links.checked_add(seen).unwrap();
+        }
+    }
+    let least = EXPORT_LINK_PAGES.len().checked_mul(LANGS.len()).unwrap();
+    assert!(links >= least, "the sweep saw {links} export links");
+}
+
+#[test]
+#[should_panic(expected = "fragment: boosted ancestor of /export/v1/recipes/R-1/approved")]
+fn sweep_export_link_check_finds_a_boosted_ancestor() {
+    let html = r#"<main hx-boost="true"><p class="actions"><a href="/export/v1/recipes/R-1/approved" hx-boost="false">x</a></p></main>"#;
+    assert_export_links_unboosted(html, "fragment");
+}
+
+#[test]
+#[should_panic(expected = "fragment: hx-boost of /export/v1/recipes/R-1/approved")]
+fn sweep_export_link_check_finds_a_link_without_the_false_boost() {
+    let html = r#"<p><a href="/export/v1/recipes/R-1/approved">x</a></p>"#;
+    assert_export_links_unboosted(html, "fragment");
+}
+
+#[test]
+fn sweep_export_link_check_accepts_a_link_after_a_closed_boosted_element() {
+    let html = r#"<nav hx-boost="true"><a href="/recipes">r</a></nav><br><p><a href="/export/v1/recipes/R-1/approved" hx-boost="false">x</a></p>"#;
+    assert_eq!(assert_export_links_unboosted(html, "fragment"), 1);
 }

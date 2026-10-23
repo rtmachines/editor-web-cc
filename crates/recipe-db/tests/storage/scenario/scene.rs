@@ -5,10 +5,12 @@
 //! actor, and the audit actions that the command must write.
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 
 use recipe_app::auth::{CurrentUser, RequestMeta};
 use recipe_app::export::{ExportByNumberInput, ExportVersionByNumber};
 use recipe_app::identity::new_request_id;
+use recipe_app::memory::BodyWriter;
 use recipe_app::ports::VersionSummary;
 use recipe_app::recipe::{
     AddParameter, AddParameterInput, ApproveVersion, ApproveVersionInput, ApproveVersionOutput,
@@ -227,7 +229,7 @@ impl Scene {
             reference: self.reference.clone(),
             number,
         };
-        ExportVersionByNumber::new(self.app.context())
+        ExportVersionByNumber::new(self.app.context(), Arc::new(BodyWriter))
             .execute(&self.app.user, &meta, input)
             .await
             .unwrap()

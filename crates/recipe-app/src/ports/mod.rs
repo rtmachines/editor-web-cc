@@ -7,6 +7,7 @@ mod attempt;
 mod audit_reads;
 mod clock;
 mod diff_reads;
+mod document_writer;
 mod draft;
 mod isolation;
 mod nonempty;
@@ -32,6 +33,7 @@ pub use audit_reads::{
 };
 pub use clock::Clock;
 pub use diff_reads::{ChangeFlags, DiffReads, DiffSides};
+pub use document_writer::DocumentWriter;
 pub use draft::DraftRepository;
 pub use isolation::Isolation;
 pub use nonempty::NonEmpty;

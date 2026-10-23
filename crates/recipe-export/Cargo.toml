@@ -9,6 +9,19 @@ publish.workspace = true
 # overview.md section 5: recipe-export depends on recipe-domain.
 [dependencies]
 recipe-domain = { workspace = true }
+# ADR-0019 and design D5 (d) of export-v1: the document writer and the error body use serde_json.
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Tests of export-v1: the schema tests (design D4), the golden tests (design D11 row T5, D14),
+# and the tests of `error_body`. The golden tests build their bodies with `uuid`, `time`, and
+# `rust_decimal` values.
+[dev-dependencies]
+jsonschema = { workspace = true }
+rust_decimal = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

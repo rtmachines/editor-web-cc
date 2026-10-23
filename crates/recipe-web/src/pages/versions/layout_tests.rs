@@ -8,7 +8,7 @@
 //! The parameter table has its own `h2` right before `#parameter-table`, outside that element (step-7
 //! item S7-17).
 
-use super::actions_tests::{DANGER, LINKS_TAG};
+use super::actions_tests::{DANGER, EXPORT_ROW, LINKS_TAG, links_area};
 use crate::i18n::Lang;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::position;
@@ -88,8 +88,10 @@ async fn layout_approved_version_retire_action_stands_under_its_heading_at_the_e
         .get_en(&world.admin, "/recipes/R-100/versions/2")
         .await;
     let main = main_of(&reply.body);
+    // The export row follows `</dl>` (ADR-0052 (c)). Then the boosted row of links.
     let after_header = main.split_once("</dl>").unwrap().1;
-    assert!(after_header.trim_start().starts_with(LINKS_TAG), "{main}");
+    assert!(after_header.trim_start().starts_with(EXPORT_ROW), "{main}");
+    assert!(links_area(main).starts_with(LINKS_TAG), "{main}");
     assert_danger_at_the_end(main, "/recipes/R-100/versions/2/retire");
 }
 

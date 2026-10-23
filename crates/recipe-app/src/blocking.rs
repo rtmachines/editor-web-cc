@@ -33,9 +33,9 @@ enum Mode {
 /// The type solves one problem: CPU work such as the snapshot check must not block the async
 /// workers, and a slow stage must end with a known error instead of a hang. `validate` runs a
 /// closure in `spawn_blocking` inside `timeout.validation`. `rebuild_export` runs the export
-/// rebuild in `spawn_blocking`. `export` limits a future with `timeout.export`, which includes
-/// that rebuild. A panic in a closure becomes `E-WEB-011`, and an elapsed limit becomes
-/// `E-WEB-009`.
+/// rebuild in `spawn_blocking` with a permit of the export gate. `export` limits a future with
+/// `timeout.export`, which includes that rebuild. A panic in a closure becomes `E-WEB-011`, and
+/// an elapsed limit becomes `E-WEB-009`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Blocking {
     validation: Duration,
@@ -102,25 +102,40 @@ impl Blocking {
         }
     }
 
-    /// Run `work` on a blocking thread and wait for it without a limit of its own.
+    /// Run the export `work` on a blocking thread and wait for it without a limit of its own.
     ///
     /// The future of `export` limits the wait, because `timeout.export` covers the rebuild.
+    /// The blocking task holds `permit` and gives it back when it ends (ADR-0056 (c)). A caller
+    /// that drops the future aborts the task. A task that has not started then never starts, and
+    /// the drop of its closure gives the permit back. Tokio cannot stop a running blocking task.
+    /// A running task keeps the permit until it ends. So at most `export.permits` export tasks
+    /// run at the same time.
     ///
     /// # Errors
     ///
     /// Returns `AppError::TaskFailed` with the stage `Export` when `work` panics.
-    pub async fn rebuild_export<T, F>(&self, work: F) -> Result<T, AppError>
+    pub(crate) async fn rebuild_export<T, F>(
+        &self,
+        permit: ExportPermit,
+        work: F,
+    ) -> Result<T, AppError>
     where
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        joined_or_failed(tokio::task::spawn_blocking(work).await, TaskStage::Export)
+        let (handle, _abort_on_drop) = spawn_aborting(move || {
+            let value = work();
+            drop(permit);
+            value
+        });
+        joined_or_failed(handle.await, TaskStage::Export)
     }
 
     /// Run `future` and wait at most `timeout.export`.
     ///
-    /// The future covers the read, the locks, the rebuild in `rebuild_export`, and the hash
-    /// compare. The commit of the audit entry runs after this limit (ADR-0029).
+    /// The future covers the wait for an `export.permits` permit, the read, the locks, and the
+    /// task of `rebuild_export` (ADR-0056). That task runs the rebuild, the hash compare, and the
+    /// writer. The commit of the audit entry runs after this limit (ADR-0029).
     ///
     /// # Errors
     ///
@@ -187,8 +202,7 @@ impl Blocking {
         if Instant::now() >= deadline {
             return Err(diff_timeout());
         }
-        let mut handle = tokio::task::spawn_blocking(move || (work(), permit));
-        let _abort_on_drop = AbortOnDrop(handle.abort_handle());
+        let (mut handle, _abort_on_drop) = spawn_aborting(move || (work(), permit));
         match tokio::time::timeout_at(deadline, &mut handle).await {
             Err(_elapsed) => {
                 handle.abort();
@@ -201,8 +215,9 @@ impl Blocking {
 
 /// Aborts a blocking task when the guard drops.
 ///
-/// The type solves one problem: a caller can drop the future of `Blocking::diff`, for example
-/// when the client closes the connection. A dropped `JoinHandle` only detaches its task.
+/// The type solves one problem: a caller can drop the future of `Blocking::diff` or
+/// `Blocking::rebuild_export`. For example, the client closes the connection, or a limit
+/// elapses. A dropped `JoinHandle` only detaches its task.
 /// Without the guard, a task that waits in the queue of the blocking pool starts later for no
 /// reader and holds its permit. The abort keeps a queued task from its start. A thread of the
 /// pool takes the task from the queue and drops its closure. That drop gives the permit back,
@@ -216,9 +231,64 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// Spawn `work` on the blocking pool. Return its handle and a guard that aborts it on drop.
+///
+/// The function solves one problem: the diff and the export rebuild both move a permit into a
+/// blocking task. A dropped future must keep a queued task from its start (see `AbortOnDrop`).
+fn spawn_aborting<T, F>(work: F) -> (tokio::task::JoinHandle<T>, AbortOnDrop)
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = tokio::task::spawn_blocking(work);
+    let guard = AbortOnDrop(handle.abort_handle());
+    (handle, guard)
+}
+
 const fn diff_timeout() -> AppError {
     AppError::Timeout {
         stage: TimeoutStage::Diff,
+    }
+}
+
+/// A semaphore of permits that every clone of the gate shares.
+///
+/// The type solves one problem: the diff gate and the export gate bound parallel blocking work
+/// in the same way. Each gate wraps this type and adds its own rule for the wait.
+#[derive(Clone, Debug)]
+struct Gate {
+    permits: Arc<Semaphore>,
+    /// The message of the invariant error when the gate is closed.
+    closed: &'static str,
+}
+
+impl Gate {
+    /// Build a gate with `permits` permits. A count above the largest count of the semaphore
+    /// gives the largest count.
+    fn new(permits: usize, closed: &'static str) -> Self {
+        Self {
+            permits: Arc::new(Semaphore::new(permits.min(Semaphore::MAX_PERMITS))),
+            closed,
+        }
+    }
+
+    /// Wait for a permit without a limit of its own.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Storage` when the gate is closed. No code closes it.
+    async fn acquire(&self) -> Result<OwnedSemaphorePermit, AppError> {
+        let permit = Arc::clone(&self.permits)
+            .acquire_owned()
+            .await
+            .map_err(|_closed| StorageError::invariant(self.closed))?;
+        Ok(permit)
+    }
+
+    /// Return the number of free permits.
+    #[cfg(test)]
+    fn available(&self) -> usize {
+        self.permits.available_permits()
     }
 }
 
@@ -229,7 +299,7 @@ const fn diff_timeout() -> AppError {
 /// clone of the context shares it.
 #[derive(Clone, Debug)]
 pub(crate) struct DiffGate {
-    permits: Arc<Semaphore>,
+    gate: Gate,
 }
 
 impl DiffGate {
@@ -237,7 +307,7 @@ impl DiffGate {
     /// gives the largest count.
     pub(crate) fn new(permits: usize) -> Self {
         Self {
-            permits: Arc::new(Semaphore::new(permits.min(Semaphore::MAX_PERMITS))),
+            gate: Gate::new(permits, "the diff gate is closed"),
         }
     }
 
@@ -248,20 +318,67 @@ impl DiffGate {
     /// Returns `AppError::Timeout` with the stage `Diff` (`E-WEB-009`) when the deadline passes.
     /// Returns `AppError::Storage` when the gate is closed. No code closes it.
     pub(crate) async fn acquire(&self, deadline: Instant) -> Result<DiffPermit, AppError> {
-        let waiting = Arc::clone(&self.permits).acquire_owned();
-        let acquired = tokio::time::timeout_at(deadline, waiting)
+        let permit = tokio::time::timeout_at(deadline, self.gate.acquire())
             .await
-            .map_err(|_elapsed| diff_timeout())?;
-        let permit =
-            acquired.map_err(|_closed| StorageError::invariant("the diff gate is closed"))?;
+            .map_err(|_elapsed| diff_timeout())??;
         Ok(DiffPermit { _permit: permit })
     }
 
     /// Return the number of free permits.
     #[cfg(test)]
     pub(crate) fn available(&self) -> usize {
-        self.permits.available_permits()
+        self.gate.available()
     }
+}
+
+/// The gate of the exports that run at the same time (`export.permits`, ADR-0056).
+///
+/// The type solves one problem: an export task holds the rows, the body, and the document in
+/// memory, and Tokio cannot stop it after `timeout.export`. The gate bounds the parallel export
+/// tasks. `AppContext::new` builds one gate, and every clone of the context shares it.
+#[derive(Clone, Debug)]
+pub(crate) struct ExportGate {
+    gate: Gate,
+}
+
+impl ExportGate {
+    /// Build a gate with `permits` permits. A count above the largest count of the semaphore
+    /// gives the largest count.
+    pub(crate) fn new(permits: usize) -> Self {
+        Self {
+            gate: Gate::new(permits, "the export gate is closed"),
+        }
+    }
+
+    /// Wait for a permit (ADR-0056 (b)).
+    ///
+    /// The wait has no limit of its own. `ExportVersion` waits inside `Blocking::export`, so
+    /// `timeout.export` limits the wait.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Storage` when the gate is closed. No code closes it.
+    pub(crate) async fn acquire(&self) -> Result<ExportPermit, AppError> {
+        let permit = self.gate.acquire().await?;
+        Ok(ExportPermit { _permit: permit })
+    }
+
+    /// Return the number of free permits.
+    #[cfg(test)]
+    pub(crate) fn available(&self) -> usize {
+        self.gate.available()
+    }
+}
+
+/// A permit of the export gate (ADR-0056).
+///
+/// The type solves one problem: the permit must live as long as the blocking task of the
+/// rebuild, also after `timeout.export`. `Blocking::rebuild_export` moves the permit into that
+/// task, and the end of the task gives the permit back.
+#[derive(Debug)]
+pub(crate) struct ExportPermit {
+    /// The permit. Its drop gives it back to the gate, so no code reads it.
+    _permit: OwnedSemaphorePermit,
 }
 
 /// A permit of the diff gate (ADR-0050 (g)).
@@ -396,6 +513,26 @@ impl Default for DiffSettings {
     }
 }
 
+/// The number of exports that run at the same time (`export.permits`, `reliability.md` section 7.11).
+const DEFAULT_EXPORT_PERMITS: usize = 2;
+
+/// The bounds of an export (ADR-0056, `reliability.md` section 7.11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExportSettings {
+    /// The exports that run the read, the rebuild, the hash compare, and the writer at the same
+    /// time (`export.permits`).
+    pub permits: usize,
+}
+
+impl Default for ExportSettings {
+    /// Return the bound of `reliability.md` section 7.11: 2 permits.
+    fn default() -> Self {
+        Self {
+            permits: DEFAULT_EXPORT_PERMITS,
+        }
+    }
+}
+
 /// The settings that the application layer reads (`reliability.md` section 7.11).
 ///
 /// The type solves one problem: use cases must not read a configuration file. `recipe-server`
@@ -410,6 +547,8 @@ pub struct AppSettings {
     pub pages: PageSizes,
     /// The bounds of a diff of two versions.
     pub diff: DiffSettings,
+    /// The bounds of an export.
+    pub export: ExportSettings,
 }
 
 #[cfg(test)]
