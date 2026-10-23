@@ -6,7 +6,7 @@ This file gives Codex the instructions of this repository. Claude Code reads `CL
 
 1. `CLAUDE.md`: the purpose, the workspace map, the dependency rule, the hard rules, and the commands.
 2. `.claude/rules/rust.md`, `.claude/rules/web.md`, `.claude/rules/sql.md`, `.claude/rules/docs.md`, and `.claude/rules/openspec.md`.
-3. For step P3.4: `target/p34-brief.md` (the rules of the code agents) and `openspec/changes/archive/2026-10-22-approval-audit-history/design.md`.
+3. For step P3.5: `target/p35-brief.md` (the rules of the code agents) and `openspec/changes/archive/2026-10-23-export-v1/design.md`.
 
 The documents in `docs/architecture/` and `docs/adr/` are normative. Code, specs, and tests follow them. When two documents disagree, report the conflict as a finding.
 

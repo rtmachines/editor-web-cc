@@ -38,7 +38,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0026](0026-ranges-of-date-and-date-and-time.md) | Platform ranges of DATE and DATE_AND_TIME | Accepted | 2026-10-13 |
 | [0027](0027-error-lists-and-draft-errors.md) | Error lists and the error of a draft command | Accepted. Amended by ADR-0041 (lists of a value and of limits) | 2026-10-13 |
 | [0028](0028-version-header-and-approval-token.md) | Version header, approval token, and draft clarifications | Accepted. Amended by ADR-0029 (the approval token owns the draft) | 2026-10-13 |
-| [0029](0029-application-layer-clarifications.md) | Approval token ownership, audit row images, and application clarifications | Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked) and ADR-0039 (transport of `new_member_values`) | 2026-10-13 |
+| [0029](0029-application-layer-clarifications.md) | Approval token ownership, audit row images, and application clarifications | Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked), ADR-0039 (transport of `new_member_values`), and ADR-0056 (scope of `timeout.export`) | 2026-10-13 |
 | [0030](0030-guard-of-a-version-status-write.md) | Guard of a version status write | Accepted | 2026-10-13 |
 | [0031](0031-migrator-configuration-and-secret-files.md) | Configuration of the migrator and the secret files of the roles | Accepted | 2026-10-13 |
 | [0032](0032-default-databases-closed-to-public.md) | Default databases closed to PUBLIC | Accepted | 2026-10-13 |
@@ -58,9 +58,14 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0046](0046-permission-check-of-a-form-route.md) | Permission check of a form route | Accepted. Amended by ADR-0049 (the five action routes read the body first) | 2026-10-15 |
 | [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted. Amended by ADR-0049 (m) (scroll padding of a toast of several lines) | 2026-10-15 |
 | [0048](0048-browser-regression-suite-with-playwright.md) | Browser regression suite with Playwright | Accepted | 2026-10-16 |
-| [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted | 2026-10-16 |
+| [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted. Amended by ADR-0052 (export link in the action area) | 2026-10-16 |
 | [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted | 2026-10-16 |
 | [0051](0051-audit-history-and-security-event-views.md) | Audit, history, and security event views | Accepted | 2026-10-16 |
+| [0052](0052-export-link-on-the-version-page.md) | Export link on the version page | Accepted | 2026-10-22 |
+| [0053](0053-error-answers-of-the-export-routes.md) | Error answers of the export routes | Accepted | 2026-10-22 |
+| [0054](0054-get-only-on-the-export-routes.md) | Only GET on the export routes | Accepted | 2026-10-22 |
+| [0055](0055-navigation-guard-of-the-export-routes.md) | Navigation guard of the export routes | Accepted | 2026-10-22 |
+| [0056](0056-bound-on-the-parallel-exports.md) | Bound on the parallel exports | Accepted | 2026-10-23 |
 
 ## Decision map
 
@@ -72,11 +77,11 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) + 0041 (error lists) |
 | Permission check and fields of a form route | 0013 + 0041 + 0046 (form query with a purpose, check before the fields) + 0049 (l) (the five action routes read the body first) |
 | Pages of recipes, versions, and parameters | 0039 (value form, leaf grid) + 0040 (POST routes) + 0041 (error lists) + 0043 (lists, deleted recipe, translations, rebind, conflict) + 0044 (rebind bound) |
-| Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) |
+| Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) + 0052 (export link in the action area) |
 | Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags) |
 | Audit, history, and security event pages | 0051 (read port, cursor, filters, scope of A20, formatted JSON) |
 | Isolation of queries | 0042 + 0050 (approval preview and diff in one snapshot) |
-| Export | 0019 |
+| Export | 0019 + 0052 (link on the version page) + 0053 (JSON errors, session redirects) + 0054 (only `GET`) + 0055 (guard) + 0056 (permits) |
 | Deployment, migrations, backup, panic policy, health | 0020 + 0031 (migrator configuration, secret files) + 0032 (default databases) + 0033 (globals dump) |
 | Sessions, login, passwords, bootstrap | 0014 + 0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, Origin, client address, create-admin) |
 | Audit log | 0005 + 0022 + 0029 (child rows and source of a full row) + 0034 (audit hardening) + 0035 (security_event guard, LoginUnlocked image) |

@@ -500,7 +500,7 @@ The values are in section 7.11. This table gives the key and the mechanism.
 | Pool idle connection | `db.pool_idle_timeout` | `idle_timeout` |
 | Pool max lifetime | `db.pool_max_lifetime` | `max_lifetime`. Avoids stale connections after a database restart |
 | Argon2id semaphore | `argon2.acquire_timeout` | Acquire timeout. A timeout returns `503 E-WEB-009` (`AppError::Timeout`) |
-| Export generation | `timeout.export` | Timeout around the read, the locks, the rebuild in `spawn_blocking`, and the hash compare. Returns `503 E-WEB-009`. The commit runs after this limit, so a timeout never hides a committed `VersionExported` entry (ADR-0029) |
+| Export generation | `timeout.export` | Timeout around the wait for an `export.permits` permit, the read, the locks, the rebuild in `spawn_blocking`, the hash compare, and the writer. Returns `503 E-WEB-009`. The use case takes the permit before its transaction. The blocking task holds the permit to its end (ADR-0056). The commit runs after this limit, so a timeout never hides a committed `VersionExported` entry (ADR-0029) |
 | Snapshot validation | `timeout.validation` | Timeout around the `spawn_blocking` call. Returns `503 E-WEB-009` |
 | Diff of two versions | `timeout.validation` | Timeout around the wait for a `diff.permits` permit and the `spawn_blocking` call. Returns `503 E-WEB-009`. The query takes the permit before its `REPEATABLE READ` transaction and holds it to the end of the render (ADR-0050) |
 
@@ -659,6 +659,7 @@ This table is the single source for every numeric setting. The configuration fil
 | `page.diff` | 50 parameters of one page of `DiffVersions` and `GetApprovalPreview`, over all its sections (ADR-0050) | api.md 2.5 |
 | `diff.leaf_rows` | 1 000 rows of one parameter in one section of a diff (ADR-0050) | api.md 2.5 |
 | `diff.permits` | 2 diffs that run at the same time in `spawn_blocking` (ADR-0050) | 7.4 |
+| `export.permits` | 2 exports that run the read, the rebuild, the hash compare, and the writer at the same time (ADR-0056) | 7.4 |
 | `page.audit` | 100 rows of `ListAuditEntries` (ADR-0051) | api.md 2.9 |
 | `page.history` | 100 rows of `GetRecipeHistory` (ADR-0051) | api.md 2.9 |
 | `page.security_events` | 100 rows of `ListSecurityEvents` (ADR-0051) | api.md 2.9 |

@@ -39,6 +39,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 - Do not add a script, an inline script, an inline style, or an inline event handler.
 - User data never appears in an `hx-*` attribute or in a `<script>` tag.
 - A URL with user data goes into a form `action` or a link `href` with `hx-boost="true"`. Each `hx-*` attribute of a page template holds a literal (ADR-0037).
+- The export link of the version page is the exception. It has the literal `hx-boost="false"` and no boosted ancestor, because its answer is a file (ADR-0052 (c)).
 - The one exception is `hx-headers` on `<body>` in `base.html`. It holds the CSRF token of the session (api.md §7.3).
 - No URL holds the CSRF token. A form that sends `csrf_token` never sends a `GET` request.
 - Never apply the askama filter `|safe` to a value that is not a literal.
@@ -49,6 +50,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 - Every mutating request (every method except `GET`, `HEAD`, and `OPTIONS`) carries the CSRF token: the field `csrf_token` or the header `X-CSRF-Token`.
 - `POST /login` and `POST /lang` without a session use the pre-session token `csrf_pre`. A bad token gives `403 E-WEB-007`.
 - A mutating request needs a matching `Origin` header or `Sec-Fetch-Site: same-origin`. A rejection writes a `csrf_rejected` security event.
+- A guard on `/export/v1/` refuses a `Sec-Fetch-Site` other than `same-origin` or `none`, and `HX-Request: true`. It gives `403 E-WEB-007` as JSON and a `csrf_rejected` event (ADR-0055).
 - Every form on a draft page has the hidden field `row_version`. Every mutating request on a draft sends it.
 - A success sets `HX-Trigger: {"rowVersion": <new>}`. A mismatch gives `409 E-WEB-001` with `conflict.html`.
 - Every error fragment shows its code `E-<CTX>-<nnn>`, one sentence in the UI language, and the `request_id`.

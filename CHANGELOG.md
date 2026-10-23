@@ -96,6 +96,21 @@ This file records the notable changes of the recipe editor. The format follows [
 - The diff page `GET /recipes/{ref}/versions/{n}/diff/{m}` in `pl` and `en`. It groups the changes by kind, with the limits first, and has pages for each section.
 - The pages of `api.md` section 2.9 in `pl` and `en`. They show the recipe history, the audit list with filters, the audit entry with formatted JSON, and the security events.
 - A scenario test of `recipe-db` on PostgreSQL: create, edit, approve, version 2, approve, retire. It checks one transaction per command, `content_sha256`, and the hash chain.
+- ADR-0052 for the export link on the version page. It has the rules for the link, the notice of a `Retired` version, and the roles that see them.
+- ADR-0053 for the error answers of the export routes. Each error answer is a JSON object with its `message` in the UI language. `E-WEB-004` and `E-IDN-007` keep their redirects.
+- ADR-0054, which allows only `GET` on the export routes.
+- ADR-0055 for the navigation guard of the export routes.
+- The schema file `crates/recipe-export/schema/export-v1.schema.json` (draft 2020-12, closed on each object with fixed fields). Its tests use the dev-dependency `jsonschema` 0.60.0.
+- `write_document`, `file_name`, and `error_body` of `recipe-export`. Golden documents hold the example of `api.md` section 6.2 and a `Retired` version.
+- `DocumentFacts`, `ExportStatus`, `SCHEMA_VERSION`, `utc_text`, `OrderedValue`, and the read-only accessors of `HashedBody` and its entries in `recipe-domain`. A type reference in these entries is a domain type, not text.
+- ADR-0056 and the setting `export.permits` (2), which bounds the exports that run at the same time. A wait past `timeout.export` gives `503 E-WEB-009`.
+- The port `DocumentWriter` of `recipe-app` and its in-memory double `BodyWriter`.
+- The messages of `E-EXP-001` to `E-EXP-003` in `pl` and `en`.
+- The routes `GET /export/v1/recipes/{ref}/approved` and `GET /export/v1/recipes/{ref}/versions/{n}` of `api.md` section 2.7. Each success sets the file headers. Each error with a code gives the answer of ADR-0053.
+- The navigation guard of ADR-0055 on both export routes. It refuses a `Sec-Fetch-Site` other than `same-origin` or `none`, and `HX-Request: true`. The answer is `403 E-WEB-007` as JSON, with one `csrf_rejected` event.
+- The export link and the notice of a `Retired` version on the version page (ADR-0052), with the texts in `pl` and `en`.
+- The how-to guide `docs/user/check-export-document.md`.
+- The PostgreSQL tests of the export: a changed value under the stored hash, a retirement, and a writer error.
 
 ### Changed
 
@@ -136,6 +151,11 @@ This file records the notable changes of the recipe editor. The format follows [
 - The version page shows a row of links after its header: the approve link, the compare links, and the history link. The actions stand at the end of `main`.
 - `VersionDetail` has the field `based_on`, the number of the base version.
 - In a `RepeatableRead` transaction, the in-memory adapter reads the draft from the state at the start of the transaction (ADR-0050 (f)).
+- `api.md` sections 2.7, 5.1, 5.3, and 7.3 and `.claude/rules/web.md` hold the decisions of ADR-0052 to ADR-0055. ADR-0049 has an "Amended by" note.
+- `ExportApprovedVersion::new` and `ExportVersionByNumber::new` take the writer of the document. `ExportedVersion` holds the document bytes, the reference number, the version number, the status, and `content_sha256`.
+- The export flow writes the document in its blocking task after the hash check and before the commit of `VersionExported`. A writer error gives `E-EXP-004` and no audit entry.
+- The value of a struct parameter in the export keeps the member order of its type. `content_sha256` does not change.
+- A `HEAD` request on an export route gets the answer of an unlisted method, and the use case does not run (ADR-0054).
 
 ### Security
 

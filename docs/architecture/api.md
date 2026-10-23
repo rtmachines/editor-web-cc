@@ -203,6 +203,8 @@ Rules:
 
 The export endpoints use the session cookie (ADR-0014). A `Draft` is never exportable. Each successful export writes one audit entry (A8). Section 6 defines the document. The second route exists for rollback and audit use. Operators do not have `VersionExportHistory` (section 3).
 
+The export routes accept only `GET`. A `HEAD` request gets the answer of a method that the route table does not list. The use case does not run, and the audit log gets no entry (ADR-0054). The version page links to the export of its version (ADR-0052). A navigation guard refuses a cross-site or same-site request and an HTMX request before the use case (section 7.3, ADR-0055).
+
 ### 2.8 Users
 
 | Method | Path | Use case | Permission | Request | Success | Errors |
@@ -359,6 +361,8 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | Export failure: content hash mismatch or serializer error (`E-EXP-002`, `E-EXP-004`) | `500` | JSON error body on the export routes. `ApproveVersion` returns `E-EXP-004` with `error.html` |
 | Unexpected, caught panic, failed `spawn_blocking` task, unexpected database error (`E-WEB-010`, `E-WEB-011`, `E-AUD-001`, `E-DB-008`) | `500` | `error.html` with `request_id` and code only. Never the error chain, never SQL, never a path |
 
+On a path under `/export/v1/`, every family with a status of 400 or more gets the JSON body of section 5.3. That body replaces the fragment. `E-WEB-004` and `E-IDN-007` keep their redirects (ADR-0053).
+
 ### 5.2 Error fragment content
 
 Every error fragment shows:
@@ -374,7 +378,7 @@ The same code appears in the structured log of the request. A user can report th
 - An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036) for every status `>= 400`, except `E-WEB-004`, which sets `HX-Redirect`. HTMX swaps a 4xx or 5xx fragment only because of the `responseHandling` value of section 9.
 - The same HTMX error response also sets `HX-Push-Url: false`. A refused form with `hx-push-url="true"` then keeps the URL of its page (ADR-0037 (z)).
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
-- The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`.
+- The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`. `message` is the sentence of the code in the UI language, without the reference. The answer has no `HX-*` header, also for an HTMX request. A request without a valid session gets `303` to `/login`, and a session with `must_change_password` gets `303` to `/me/password` (ADR-0053).
 
 ## 6. Export document (v1)
 
@@ -561,6 +565,7 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 - Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. An `Origin` matches the site when it equals `https://` followed by the `Host` header (ADR-0035). A request without either is rejected.
 - A mutating request without a valid token or without a valid origin gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8). When the event cannot be written, the request gets the storage error (ADR-0035).
 - The export endpoints are `GET` and need no token.
+- A guard runs before the use case on the two export routes, after the session layer and the gates. A request with a `Sec-Fetch-Site` header other than `same-origin` or `none` gets `403 E-WEB-007`. A request with `HX-Request: true` gets the same answer. The answer is the JSON body of section 5.3, and the guard writes one `csrf_rejected` event. A request without `Sec-Fetch-Site` passes (ADR-0055).
 - Session fixation: `Login` always creates a new session row and a new token. When the login request carries a session cookie, `Login` deletes that session row.
 
 ### 7.4 Login protection
