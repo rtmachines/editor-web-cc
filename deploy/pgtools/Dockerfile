@@ -15,6 +15,8 @@ ADD --checksum=sha256:cc232108374e8e2b537045f2d5eaa1229f619db314c3ba6a14d38b35dc
     /usr/local/bin/supercronic
 
 COPY --chmod=0755 bin/ /usr/local/bin/
+# Create the directory first so COPY keeps its search permission for uid 999.
+RUN mkdir -p -m 0755 /etc/pgtools
 COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/
 COPY --chmod=0644 restore-code.sql restore-code.expected /etc/pgtools/
 

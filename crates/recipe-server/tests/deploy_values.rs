@@ -76,3 +76,29 @@ fn deploy_values_equal_the_settings_table() {
         report.message()
     );
 }
+
+#[test]
+fn pgtools_creates_a_searchable_config_directory_before_copy() {
+    let dockerfile = include_str!("../../../deploy/pgtools/Dockerfile");
+    let lines = lines::code_lines(dockerfile);
+    let position = |instruction| {
+        lines
+            .iter()
+            .position(|line| line.trim() == instruction)
+            .expect("pgtools Dockerfile must retain the config directory, copies, and user")
+    };
+    // COPY uses its file mode for a missing destination directory too.
+    let directory = position("RUN mkdir -p -m 0755 /etc/pgtools");
+    let user = position("USER 999:999");
+    assert!(directory < user, "root must create /etc/pgtools");
+    for instruction in [
+        "COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/",
+        "COPY --chmod=0644 restore-code.sql restore-code.expected /etc/pgtools/",
+    ] {
+        let copy = position(instruction);
+        assert!(
+            directory < copy && copy < user,
+            "create /etc/pgtools with mode 0755 before {instruction} and USER"
+        );
+    }
+}
