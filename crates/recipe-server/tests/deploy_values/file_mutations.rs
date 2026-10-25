@@ -143,7 +143,7 @@ fn a_changed_schedule_or_time_zone_is_a_fault() {
     assert_mutations_fail(&CRONTAB);
 }
 
-const SCRIPT_CONSTANTS: [Mutation; 12] = [
+const SCRIPT_CONSTANTS: [Mutation; 13] = [
     // Bash rejects a unit in an arithmetic value, although 720h equals 30 days.
     (
         "backup-once",
@@ -218,6 +218,12 @@ const SCRIPT_CONSTANTS: [Mutation; 12] = [
         "LOG_TAIL_LINES=20",
         "LOG_TAIL_LINES=10",
         "pitr_check.log_tail",
+    ),
+    (
+        "pitr-check",
+        "READY_POLL_SECONDS=1",
+        "READY_POLL_SECONDS=2",
+        "pitr_check.ready_poll",
     ),
 ];
 

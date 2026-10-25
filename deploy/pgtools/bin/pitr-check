@@ -47,6 +47,7 @@ SCRATCH_SUPERUSER=postgres
 SCRATCH_PORT=5433 # scratch.port in reliability.md section 7.11
 STOP_TIMEOUT_SECONDS=60 # scratch.stop_timeout in reliability.md section 7.11
 START_TIMEOUT_SECONDS=600 # scratch.pitr_start_timeout in reliability.md section 7.11
+READY_POLL_SECONDS=1 # pitr_check.ready_poll in reliability.md section 7.11
 LOG_TAIL_LINES=20 # pitr_check.log_tail in reliability.md section 7.11
 
 WAL_DIR=${WAL_DIR:-/wal}
@@ -160,6 +161,22 @@ write_scratch_config() {
   : >"$data_dir/recovery.signal"
 }
 
+# pg_ctl can report standby before hot_standby=off permits connections.
+# Use the remaining Step 3 budget and stop when the postmaster exits.
+wait_for_connections() {
+  while [ "$SECONDS" -lt "$start_deadline" ]; do
+    [ -f "$data_dir/postmaster.pid" ] || return 1
+    pg_ctl --pgdata="$data_dir" status >/dev/null 2>&1 || return 1
+    if pg_isready --quiet --host="$socket_dir" --port="$SCRATCH_PORT" \
+      --username="$SCRATCH_SUPERUSER" --dbname="$DB_NAME" --timeout="$READY_POLL_SECONDS"; then
+      [ "$SECONDS" -lt "$start_deadline" ]
+      return
+    fi
+    sleep "$READY_POLL_SECONDS"
+  done
+  return 1
+}
+
 # check_recovered: the checks of ADR-0068 (n) and ADR-0077 (e) on the recovered cluster.
 check_recovered() {
   local state found chain
@@ -208,9 +225,10 @@ pg_verifybackup --quiet "$data_dir" >&2 || fail "pg_verifybackup failed"
 log INFO "base backup copied and checked" "\"base\":\"$newest\""
 
 # Step 3: the scratch cluster recovers from the copy and the archive. The lock stays with this script.
+start_deadline=$((SECONDS + START_TIMEOUT_SECONDS))
 write_scratch_config
-if ! pg_ctl --pgdata="$data_dir" --log="$scratch/server.log" --wait \
-  --timeout="$START_TIMEOUT_SECONDS" start 9>&- >&2; then
+if [ "$SECONDS" -ge "$start_deadline" ] || ! pg_ctl --pgdata="$data_dir" --log="$scratch/server.log" --wait \
+  --timeout="$((start_deadline - SECONDS))" start 9>&- >&2 || ! wait_for_connections; then
   tail -n "$LOG_TAIL_LINES" -- "$scratch/server.log" >&2 || true
   fail "the scratch cluster did not finish the recovery"
 fi

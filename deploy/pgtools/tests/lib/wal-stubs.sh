@@ -155,6 +155,10 @@ log=""
 for a in "$@"; do
   case $a in --pgdata=*) pgdata=${a#--pgdata=} ;; --log=*) log=${a#--log=} ;; esac
 done
+if [ "$action" = status ]; then
+  [ -f "$pgdata/postmaster.pid" ]
+  exit $?
+fi
 echo "EVENT pg_ctl $action" >>"$STUB_LOG"
 echo "ARGV pg_ctl $*" >>"$STUB_LOG"
 if [ "$action" = start ]; then
@@ -179,5 +183,7 @@ make_wal_stubs() {
   make_wal_stub_cleanup
   make_wal_stub_children
   make_wal_stub_scratch
+  # The startup regression tests cover delayed readiness and postmaster exits.
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT/stubs/pg_isready"
   chmod 0755 "$ROOT"/stubs/*
 }

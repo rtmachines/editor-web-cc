@@ -31,7 +31,7 @@ const ENV_ADDRESSES: [(&str, &str); 3] = [
 type Assignment = (&'static str, &'static str, &'static str, Bare);
 
 /// The constants of the pgtools scripts. Each one has a comment with its key in the script.
-pub const SCRIPT_ASSIGNMENTS: [Assignment; 11] = [
+pub const SCRIPT_ASSIGNMENTS: [Assignment; 12] = [
     (
         "backup-health",
         "MAX_AGE_SECONDS",
@@ -87,6 +87,12 @@ pub const SCRIPT_ASSIGNMENTS: [Assignment; 11] = [
         "LOG_TAIL_LINES",
         "pitr_check.log_tail",
         Bare::Plain,
+    ),
+    (
+        "pitr-check",
+        "READY_POLL_SECONDS",
+        "pitr_check.ready_poll",
+        Bare::Seconds,
     ),
 ];
 /// The settings of the scratch clusters that both scripts set (`reliability.md` 7.11 rows `scratch.*`).

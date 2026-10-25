@@ -90,6 +90,7 @@ const DURATION_KEYS: &[&str] = &[
     "security_event.retention",
     "security_event.purge_interval",
     "scratch.stop_timeout",
+    "pitr_check.ready_poll",
     "scratch.restore_start_timeout",
     "scratch.pitr_start_timeout",
     "shutdown.drain",

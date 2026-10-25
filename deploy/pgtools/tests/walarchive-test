@@ -96,6 +96,7 @@ case_wal_base_secret_no_newline
 case_wal_base_parallel
 case_wal_pitr_gates
 case_wal_pitr_runs
+bash "$HERE/pitr-start-test" || bad "pitr startup regression tests"
 
 [ "$SKIPPED" -eq 0 ] || printf 'walarchive-test: %d skipped\n' "$SKIPPED"
 printf 'walarchive-test: %d passed, %d failed\n' "$PASSED" "$FAILED"

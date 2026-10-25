@@ -890,6 +890,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `scratch.restore_start_timeout` / `scratch.pitr_start_timeout` | 60 s / 600 s. The `pg_ctl start` timeout of the cluster of `restore-test`, and of the cluster of `pitr-check` with its recovery, inside the recovery time objective of 1 h (ADR-0077 (g)) | 7.7 |
 | `restore_test.detail_length` | 160 characters of a tool message in an `ERROR` line of `restore-test` (ADR-0077 (g)) | 7.7 |
 | `pitr_check.log_tail` | 20 lines of the server log on stderr after a failed start of the scratch cluster of `pitr-check` (ADR-0077 (g)) | 7.7 |
+| `pitr_check.ready_poll` | 1 s. The interval of the connection check while the scratch cluster of `pitr-check` finishes its recovery. The checks stay inside `scratch.pitr_start_timeout` | 7.7 |
 | `wal.max_lag_bytes` | 16 MiB. Replication lag `pg_current_wal_lsn() - sent_lsn` of `recipe_replicator` | 3.7, 7.1, 7.7 |
 | `security_event.retention` | 400 days. A constant in `security_event_purge()`. A change needs a migration | 3.6, data-model.md 4.12 |
 | `security_event.purge_interval` | 24 h | 2.4, data-model.md 4.12 |
