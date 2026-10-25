@@ -11,6 +11,7 @@ mod document;
 pub mod fault;
 pub mod fixtures;
 pub mod gate;
+pub mod hold;
 pub mod identity;
 pub mod probe;
 mod session;

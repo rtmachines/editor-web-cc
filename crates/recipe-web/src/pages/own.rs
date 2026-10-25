@@ -80,7 +80,13 @@ pub(crate) async fn login_form(
     GetLoginForm::new().execute()?;
     let pre_session = issue_pre_session(state.csrf_keys())?;
     let texts = Texts::new(state.bundles(), request.lang());
-    let page = LoginPage::new(texts, request.lang(), pre_session.nonce(), None);
+    let page = LoginPage::new(
+        texts,
+        request.lang(),
+        pre_session.nonce(),
+        None,
+        request.read_only(),
+    );
     let mut response = render(&page, request.request_id())?.into_response();
     response.headers_mut().append(
         axum::http::header::SET_COOKIE,

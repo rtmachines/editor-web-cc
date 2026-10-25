@@ -25,6 +25,19 @@ fn read_only_mode_clones_share_one_flag() {
 }
 
 #[test]
+fn read_only_mode_works_as_a_read_only_switch_that_shares_its_flag() {
+    use recipe_app::ports::ReadOnlySwitch;
+
+    let mode = ReadOnlyMode::default();
+    let switch: Arc<dyn ReadOnlySwitch> = Arc::new(mode.clone());
+    assert!(!switch.is_on());
+    switch.set(true);
+    assert!(mode.is_on());
+    mode.set(false);
+    assert!(!switch.is_on());
+}
+
+#[test]
 fn state_clones_share_the_read_only_flag() {
     let first = state();
     let second = first.clone();

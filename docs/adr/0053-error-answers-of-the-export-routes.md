@@ -1,6 +1,6 @@
 # ADR-0053: Error answers of the export routes
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0057 (the text answer of the backstop panic layer is the one exception to (a))
 Date: 2026-10-22
 Deciders: project owner
 

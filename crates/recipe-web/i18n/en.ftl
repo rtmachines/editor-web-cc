@@ -21,7 +21,7 @@ error-E-IDN-008 = The current password is not correct.
 error-E-IDN-009 = User { $login } is already active.
 error-E-IDN-010 = User { $login } is already inactive.
 error-E-WEB-005 = { $entity } does not exist.
-error-E-WEB-006 = The system is in read-only mode because disk space is low. Contact the administrator.
+error-E-WEB-006 = The system is in read-only mode because the free disk space is low or unknown. Contact the administrator.
 error-E-WEB-009 = The request took too long and was stopped. Try again.
 error-E-WEB-010 = An internal error occurred. Contact the administrator.
 error-E-WEB-011 = The operation { $stage } did not complete. Try again.
@@ -130,6 +130,7 @@ lang-switch-label = Language
 lang-switch-pl = Polski
 lang-switch-en = English
 user-signed-in = Signed in as
+readonly-banner = Read-only mode: the free disk space is low or unknown. Changes are blocked. You can view, export, log in, and log out.
 
 # Recipe list
 recipes-title = Recipes

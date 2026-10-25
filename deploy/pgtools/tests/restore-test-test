@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# Test script T25 (restore part) of the recipe-pgtools image.
+#
+# It tests restore-test with stubs of initdb, pg_ctl, pg_restore, and psql on PATH (design D14 row
+# T25, ADR-0067, ADR-0076, ADR-0078). The stubs model a scratch server and write each call to a log. The
+# cases test the order of the steps, the stop points, the arguments, and the cleanup.
+# It needs flock, sha256sum, and GNU coreutils. The image recipe-pgtools has them.
+#
+# Run in CI inside a container of the image, with the directory deploy/pgtools mounted:
+#   docker run --rm --entrypoint bash -v "$PWD/deploy/pgtools:/pgtools:ro" \
+#     recipe-pgtools /pgtools/tests/restore-test-test
+#
+# Cases that need the real database (CI job "compose", design D11 step 7) and not these stubs:
+#   - the real initdb with --auth-local=peer and the real scram login with a wrong password
+#   - the real pg_ctl start with the settings of the scratch cluster, on the private socket
+#   - pg_restore --create with the sections: which entry lands in pre-data and in post-data
+#     (ADR-0076 (d)), and the output format of pg_restore --list
+#   - the real psql output of the count query (\gexec) and of the audit chain check
+#   - the rule that a role without CONNECT on the database still passes the login step
+#   - the real layout of pg_dumpall --globals-only (the lines \restrict and \unrestrict), the real
+#     enabled state of a trigger in a dump (ALTER TABLE ... DISABLE TRIGGER in post-data), and the
+#     real command line of a postmaster (the stale PID check reads /proc/<pid>/cmdline)
+# The storage test crates/recipe-db/tests/storage/restore_code.rs covers the query
+# restore-code.sql and the names of restore-code.expected on a real server. Its test
+# the_globals_file_of_pg_dumpall_has_only_the_restrict_pair_as_backslash_lines runs the real
+# pg_dumpall and checks the layout of the globals file.
+#
+# When the variable CI is set, each SKIP counts as a failure.
+set -uo pipefail
+umask 077
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BIN=${PGTOOLS_BIN:-$HERE/../bin}
+REAL_DATE=$(command -v date)
+REAL_RM=$(command -v rm)
+export REAL_DATE REAL_RM
+SHM_DIRS=()
+PASSED=0
+FAILED=0
+SKIPPED=0
+CASE=""
+B=""
+RC=0
+RESTORE_NAME=""
+RESTORE_BASE=""
+SECRET="unused"
+
+# A missing case function must fail the run. Bash runs this handler in a subshell.
+# So the handler cannot raise FAILED. It prints a FAIL line and writes a marker file instead.
+# The last line of this script reads the marker file.
+command_not_found_handle() {
+  bad "command not found: $1"
+  : >"${ROOT:?}/command-not-found"
+  return 127
+}
+
+# The functions live in tests/lib. Each file sets only functions.
+# A file that cannot be read stops the run.
+# shellcheck source=lib/helpers.sh
+source "$HERE/lib/helpers.sh" || exit 1
+# shellcheck source=lib/restore-stubs.sh
+source "$HERE/lib/restore-stubs.sh" || exit 1
+# shellcheck source=lib/restore-helpers.sh
+source "$HERE/lib/restore-helpers.sh" || exit 1
+# shellcheck source=lib/restore-set-cases.sh
+source "$HERE/lib/restore-set-cases.sh" || exit 1
+# shellcheck source=lib/restore-code-cases.sh
+source "$HERE/lib/restore-code-cases.sh" || exit 1
+# shellcheck source=lib/restore-data-cases.sh
+source "$HERE/lib/restore-data-cases.sh" || exit 1
+# shellcheck source=lib/restore-globals-cases.sh
+source "$HERE/lib/restore-globals-cases.sh" || exit 1
+# shellcheck source=lib/restore-stale-cases.sh
+source "$HERE/lib/restore-stale-cases.sh" || exit 1
+# shellcheck source=lib/restore-run-cases.sh
+source "$HERE/lib/restore-run-cases.sh" || exit 1
+
+ROOT=$(mktemp -d)
+trap cleanup EXIT
+
+make_restore_stubs
+case_restore_static_rules
+case_restore_usage
+case_restore_missing_marker
+case_restore_no_set
+case_restore_manifest_mismatch
+case_restore_manifest_files
+case_restore_set_selection
+case_restore_newest_set
+case_restore_parallel_runs
+case_restore_code_files
+case_restore_globals_layout
+case_restore_globals_meta_commands
+case_restore_globals_keys
+case_restore_globals_control_characters
+case_restore_globals_pair
+case_restore_unknown_entries
+case_restore_refused_kinds
+case_restore_name_lines_outside_the_grammar
+case_restore_changed_pre_data_code
+case_restore_missing_and_extra_pre_data_code
+case_restore_changed_post_data_code
+case_restore_disabled_trigger
+case_restore_unchanged_code_passes
+case_restore_counts
+case_restore_counts_without_final_newline
+case_restore_counts_bad_line
+case_restore_empty_counts
+case_restore_no_audit_table
+case_restore_chain_check
+case_restore_logins
+case_restore_login_wrong_password_succeeds
+case_restore_login_fails
+case_restore_login_roles
+case_restore_happy_path
+case_restore_initdb_arguments
+case_restore_server_settings
+case_restore_no_production_connection
+case_restore_passwords
+case_restore_globals
+case_restore_tool_failures
+case_restore_cleanup_fails
+case_restore_stale_scratch
+case_restore_stale_pid_of_another_process
+case_restore_stale_pid_not_a_process
+case_restore_signal
+
+[ "$SKIPPED" -eq 0 ] || printf 'restore-test-test: %d skipped\n' "$SKIPPED"
+printf 'restore-test-test: %d passed, %d failed\n' "$PASSED" "$FAILED"
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] && [ ! -e "$ROOT/command-not-found" ]

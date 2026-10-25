@@ -620,6 +620,8 @@ CREATE UNIQUE INDEX security_event_aggregate_unique
 
 `audit_owner` owns this table. `recipe_app` has SELECT, the column grant `UPDATE (count)`, and `INSERT` on every column except `id`, `occurred_at`, and `count` (section 5.4, ADR-0035). The database therefore sets the time and the first count of each row. The trigger `security_event_guard` of section 5.4 allows an update only when `count` grows by 1 and no other column changes. Rows of the kinds `login_failed`, `login_throttled`, and `csrf_rejected` aggregate per `(client_ip, kind, minute)`. The port `SecurityEventSink` writes them with `INSERT ... ON CONFLICT ... DO UPDATE SET count = security_event.count + 1` on `security_event_aggregate_unique`. The row keeps the `login_hmac`, `user_id`, `user_agent`, and `request_id` of the first event of the minute. A flood from one address therefore adds at most one row per kind and minute. Apart from `count`, the table is append-only for `recipe_app`. Rows are kept 400 days (ADR-0022). The function `security_event_purge()` (section 4.12), owned by `audit_owner`, deletes older rows in batches. The supervised job `cleanup` calls it (`reliability.md` 2.4).
 
+The migration `0006_operations.sql` adds the index `security_event_occurred_at_idx` on `occurred_at` (section 5.5, ADR-0069 (k)). The index serves `security_event_purge()` and the two alert sums of `reliability.md` 3.7. A row of the kind `audit_chain_broken` holds the `request_id` of the run of the job `audit_chain_check` (ADR-0060 (s)).
+
 ### 3.9 `recipe`
 
 ```sql
@@ -921,15 +923,17 @@ INSERT INTO audit_chain_head (singleton, last_seq, last_hash) VALUES (true, 0, N
 
 ### 3.17 `app_setting`
 
-The effective value of every configuration key that the server reads (`reliability.md` 7.12). At startup the server compares its configuration with these rows. For each difference it writes the audit action `SettingChanged` and updates the row (ADR-0022).
+The effective value of each configuration key of `serve` (`reliability.md` 7.12). Of the configuration keys, the table holds only the 18 keys of `serve` of ADR-0062 (a). The keys of `migrate` and `create-admin` stay out of it (ADR-0062 (c)). The three state keys below are also rows of the table. At startup the server compares its configuration with these rows. For each difference it writes the audit action `SettingChanged` and updates the row (ADR-0022).
+
+For the derived key `alerts.webhook_url`, the stored value is the fingerprint and not the effective value. The fingerprint is `sha256:` and 64 lower-case hex characters of the URL in the secret file. With no webhook, the row holds the empty text (ADR-0063 (c), (d)).
 
 ```sql
 CREATE TABLE app_setting (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     -- Key of reliability.md section 7.11, for example 'approval.separation_of_duties'.
     key         TEXT NOT NULL,
-    -- Canonical text of the effective value. At most setting.value_max characters
-    -- (reliability.md 7.11).
+    -- Canonical text of the effective value, or the text form of a state key (ADR-0073 (i)).
+    -- At most setting.value_max characters (reliability.md 7.11).
     value       TEXT NOT NULL,
     -- NULL when the startup comparison writes the row.
     updated_by  UUID REFERENCES app_user (id),
@@ -947,6 +951,10 @@ CREATE TRIGGER app_setting_set_updated_at
 The table has an `id` column, because `audit_log.entity_id` and `audit_log.aggregate_id` are UUIDs. A `SettingChanged` entry has `aggregate_type = 'app_setting'` and `entity_type = 'app_setting'`. Its `before_state` and `after_state` hold the full row with the old and the new value (section 10).
 
 Three keys are state, not configuration: `audit.last_check_seq`, `audit.last_check_at`, and `heartbeat.last_at` (`reliability.md` 7.11). The job `audit_chain_check` writes the first two through the port `MaintenanceStore` after each completed check (4.9). The job `heartbeat` writes `heartbeat.last_at` every `heartbeat.interval`, so the WAL stream never stays idle for long (`reliability.md` 7.7). Both jobs write with `updated_by = NULL` and no audit entry. The startup comparison skips the three keys.
+
+`audit.last_check_seq` holds the decimal text of the `chain_seq`, with no sign and no leading zero. `audit.last_check_at` and `heartbeat.last_at` hold an instant in RFC 3339 form in UTC, with the suffix `Z` and six fraction digits, for example `2026-10-23T02:00:00.000000Z`. A reader that finds another form returns a `StorageError`, not "no value" (ADR-0073 (i)).
+
+The oldest `created_at` of the table is the first start of the installation. The job `alerts` reads it for the start grace of `reliability.md` 3.7 (ADR-0060 (x), (y)).
 
 ## 4. Triggers and functions
 
@@ -1320,24 +1328,42 @@ CREATE TRIGGER audit_log_hash_chain
     FOR EACH ROW EXECUTE FUNCTION audit_hash_chain();
 ```
 
-The application sends `chain_seq`, `prev_hash`, and `entry_hash` as NULL. The trigger sets all three. No login role holds `UPDATE` or `DELETE` on `audit_log` (section 5). After `0003_grants.sql`, `recipe_migrator` holds no privilege on the audit objects. It can get them only through `SET ROLE audit_owner` (section 5.1). The chain can therefore break only through the superuser or through a migration. The nightly check detects both.
+The application sends `chain_seq`, `prev_hash`, and `entry_hash` as NULL. The trigger sets all three. No login role holds `UPDATE` or `DELETE` on `audit_log` (section 5). After `0003_grants.sql`, `recipe_migrator` holds no privilege on the audit objects. It can get them only through `SET ROLE audit_owner` (section 5.1). The chain can therefore break only through the superuser or through a migration. The nightly check finds such a break. ADR-0086 names the changes that it cannot find.
 
-The supervised job `audit_chain_check` runs the check every night at `audit.check_time` (`reliability.md` 7.11). It keeps no long snapshot, so it does not hold back VACUUM:
+The supervised job `audit_chain_check` runs the check every night at `audit.check_time` (`reliability.md` 7.11). It also runs one catch-up check after a start (ADR-0060 (v), (w)):
 
-1. In one short transaction the job reads the head (`last_seq`, `last_hash`). This run checks only the rows with `chain_seq <= $head_seq`. Later rows wait for the next run.
+- At the start, `audit.last_check_at` can be missing or older than `audit.catchup_age`. Then the job runs one more check after `audit.catchup_delay`.
+- The nightly run and the catch-up share one loop and never overlap.
+- The catch-up reads `audit.last_check_at` again before it starts. It skips the check when a newer check completed.
+- The supervisor gives each run its `RunKind`. Only a run of kind `CatchUp` can skip. The nightly run never skips (ADR-0088 (b)).
+
+Each check keeps no long snapshot, so it does not hold back VACUUM:
+
+1. In one short `READ ONLY` transaction the job reads the head (`last_seq`, `last_hash`), the bounds of `audit_log`, and the anchor `audit.last_check_seq` (ADR-0086). `SET LOCAL statement_timeout` sets `audit.check_statement_timeout`. This run checks only the rows with `chain_seq <= $head_seq`. Later rows wait for the next run.
 2. The job reads these rows in `chain_seq` order in batches. A batch ends at `audit.check_batch` rows or at `audit.check_batch_bytes` of `before_state` and `after_state`, whichever comes first. A batch holds at least one row.
 3. Each batch is one statement in its own short `READ ONLY` transaction. `SET LOCAL statement_timeout` sets `audit.check_statement_timeout` for each batch.
 4. The job carries the last `chain_seq` and the last `entry_hash` of a batch forward into the next batch.
 
 ```sql
--- Step 1, one short transaction: the end of the range of this run.
-SELECT h.last_seq, h.last_hash FROM public.audit_chain_head AS h WHERE h.singleton;
+-- Step 1, one short transaction: the end of the range of this run, the bounds of audit_log,
+-- and the anchor (ADR-0086). The unique index audit_log_chain_seq_unique serves min and max.
+-- An empty table gives NULL bounds. A missing anchor row gives NULL, which counts as 0.
+BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY;
+SET LOCAL statement_timeout = '60s';   -- audit.check_statement_timeout
+SELECT h.last_seq, h.last_hash,
+       (SELECT min(a.chain_seq) FROM public.audit_log AS a)   AS min_seq,
+       (SELECT max(a.chain_seq) FROM public.audit_log AS a)   AS max_seq,
+       (SELECT s.value FROM public.app_setting AS s
+        WHERE s.key = 'audit.last_check_seq')                 AS anchor
+FROM public.audit_chain_head AS h WHERE h.singleton;
+COMMIT;
 
 -- Step 2, one short transaction per batch.
 -- $after_seq and $after_hash are the last chain_seq and entry_hash of the previous batch
 -- (0 and NULL for the first batch). $head_seq is last_seq of step 1.
 -- $batch is audit.check_batch. $batch_bytes is audit.check_batch_bytes.
 -- first_break is the first row that breaks the chain (E-AUD-002), or NULL.
+-- last_clean is the chain_seq before first_break: the row before it, or $after_seq (ADR-0086 (e)).
 BEGIN ISOLATION LEVEL READ COMMITTED READ ONLY;
 SET LOCAL TimeZone = 'UTC';
 SET LOCAL statement_timeout = '60s';   -- audit.check_statement_timeout
@@ -1368,21 +1394,54 @@ WITH sized AS (
            lag(b.entry_hash, 1, $after_hash::bytea) OVER w AS previous_hash
     FROM batch AS b
     WINDOW w AS (ORDER BY b.chain_seq)
+), checked AS (
+    SELECT c.chain_seq, c.previous_seq, c.entry_hash,
+           (c.chain_seq IS DISTINCT FROM c.previous_seq + 1
+            OR c.prev_hash IS DISTINCT FROM c.previous_hash
+            OR c.entry_hash IS DISTINCT FROM c.recomputed)  AS broken
+    FROM chain AS c
 )
-SELECT min(chain_seq) FILTER (
-           WHERE chain_seq IS DISTINCT FROM previous_seq + 1
-              OR prev_hash IS DISTINCT FROM previous_hash
-              OR entry_hash IS DISTINCT FROM recomputed)   AS first_break,
+-- previous_seq grows with chain_seq, so its minimum over the broken rows is the value at first_break.
+SELECT min(chain_seq)    FILTER (WHERE broken)             AS first_break,
+       min(previous_seq) FILTER (WHERE broken)             AS last_clean,
        count(*)                                            AS row_count,
        max(chain_seq)                                      AS last_seq,
        (array_agg(entry_hash ORDER BY chain_seq DESC))[1]  AS last_hash
-FROM chain;
+FROM checked;
 COMMIT;
 ```
 
-The job repeats the batch statement while `first_break` is NULL, `row_count` is above 0, and `last_seq` is below `$head_seq`. The unique index `audit_log_chain_seq_unique` serves each batch as a range scan. After the last batch the job compares the last `chain_seq` and `entry_hash` with `last_seq` and `last_hash` of step 1. For an empty table both pairs are 0 and NULL. A difference is a break. On a break the job stops, writes a `security_event` row of kind `audit_chain_broken`, and logs `E-AUD-002` (`AuditError::ChainBroken`). The alerts job raises the alert (`reliability.md` 3.7).
+Step 1 applies the rules of ADR-0086 (c) in this order. `H` is `last_seq`, and `A` is the anchor. The first rule that applies is the break and names its `chain_seq`:
 
-A check is completed when it reaches the head of step 1 or a break. Then the job records `audit.last_check_seq` (the last `chain_seq` before a break, or the head) and `audit.last_check_at` in `app_setting` through the port `MaintenanceStore` (3.17). The alerts job raises an alert when `audit.last_check_at` is older than `audit.max_check_age` (`reliability.md` 3.7).
+1. `min_seq` is below 1. The break names `min_seq`.
+2. `max_seq` is above `H`. The break names `max_seq`.
+3. `H` is below `A`. The break names `H` + 1.
+4. `H` is above 0, and `min_seq` is NULL or above 1. The break names 1.
+5. `max_seq` is below `H`. The break names `max_seq` + 1.
+
+An empty table with `H` = 0 has no break. After a break in step 1 the job reads no batch. A head with `H` above 0 and a NULL `last_hash` is no storage fault. The end check below names it as a break (ADR-0086 (d)).
+
+The job repeats the batch statement while `first_break` is NULL, `row_count` is above 0, and `last_seq` is below `$head_seq`. The unique index `audit_log_chain_seq_unique` serves each batch as a range scan. A clean batch does not prove that the rows up to the head exist. After the last batch the job therefore compares the last `chain_seq` and `entry_hash` with `last_seq` and `last_hash` of step 1. For an empty table both pairs are 0 and NULL. A difference is a break:
+
+- An end below `H` names the last `chain_seq` of the check + 1. With no checked row, that value is 1.
+- An end equal to `H` with another hash names `H`. A head with `H` above 0 and a NULL `last_hash` gives this break, because every row has an `entry_hash`.
+- A break inside a batch names `first_break`.
+
+On a break the job stops and writes a `security_event` row of kind `audit_chain_broken` through `SecurityEventSink`. It records the state keys of the next paragraph. Then it returns `E-AUD-002` as `AppError::Audit(AuditError::ChainBroken)`, and the supervisor logs it (ADR-0089 (a)). The alerts job raises the alert (`reliability.md` 3.7).
+
+A check is completed when it reaches the head of step 1 or a break. Then the job records `audit.last_check_seq` first and `audit.last_check_at` second, in `app_setting` through the port `MaintenanceStore` (3.17). A completed check is thus never announced before its anchor persists. The alerts job raises an alert when `audit.last_check_at` is older than `audit.max_check_age` (`reliability.md` 3.7).
+
+The value of `audit.last_check_seq` is the end of a clean prefix: the last `chain_seq` up to which a completed check read the chain without a break. The value never decreases (ADR-0086 (e)):
+
+- After a check without a break, the value is `H`.
+- After a break inside a batch, the value is the larger value of `A` and `last_clean` of that batch.
+- After a break at the end check with an end below `H`, the value is the larger value of `A` and the end. With no checked row, the end is 0.
+- After a break at the end check with an end equal to `H`, the value is the larger value of `A` and `H` - 1.
+- After a break in step 1, the value is `A`.
+
+For example, the rows 1, 2, and 100 with the head 100 and the anchor 0 give a break at 100 with `last_clean` 2. The job records 2.
+
+The anchor is not a start position. Each check starts at the first row, so no check skips a broken row (ADR-0073 (a)).
 
 ### 4.10 `version_size_budget` (Assumption A26)
 
@@ -1496,9 +1555,9 @@ CREATE ROLE recipe_replicator LOGIN REPLICATION
                               PASSWORD :'replicator_password';         -- walarchive only
 CREATE ROLE audit_owner       NOLOGIN;                                  -- owner of audit tables
 GRANT pg_read_all_data TO recipe_backup;
--- The job alerts reads the replication lag of recipe_replicator in pg_stat_replication
--- (reliability.md 3.7). SET FALSE: recipe_app cannot SET ROLE to it.
-GRANT pg_read_all_stats TO recipe_app WITH INHERIT TRUE, SET FALSE;
+-- ADR-0069: the function replication_state() of audit_owner reads pg_stat_replication
+-- (section 5.5). recipe_app holds no pg_read_all_stats and reads no statement text.
+GRANT pg_read_all_stats TO audit_owner WITH INHERIT TRUE;
 -- ADR-0035: the server log holds no DETAIL with row values of a failed statement of recipe_app,
 -- and no bind value of a slow statement.
 ALTER ROLE recipe_app SET log_error_verbosity = 'terse';
@@ -1526,7 +1585,8 @@ BEGIN
         IF v_object.object_identity IN (
                'public.audit_log', 'public.audit_chain_head', 'public.security_event',
                'public.audit_canonical(public.audit_log)', 'public.audit_hash_chain()',
-               'public.security_event_purge()', 'public.security_event_guard()')
+               'public.security_event_purge()', 'public.security_event_guard()',
+               'public.replication_state()')
            AND current_user <> 'audit_owner' THEN
             RAISE EXCEPTION 'audit object % can be dropped only by audit_owner',
                 v_object.object_identity USING ERRCODE = 'insufficient_privilege';
@@ -1539,17 +1599,23 @@ CREATE EVENT TRIGGER audit_objects_dropped ON sql_drop
     EXECUTE FUNCTION audit_guard.audit_objects_dropped();
 ```
 
-The same script then adds one line to `pg_hba.conf`. `COMPOSE_SUBNET` is the subnet of the internal Compose network, set in `deploy/compose.yaml`:
+The same script then writes a new `pg_hba.conf` in place of the catch-all line of the image (ADR-0069 (r) to (t)). `COMPOSE_SUBNET` is the subnet of the network `backend`, set in `deploy/.env`. The file holds these lines in this order:
 
-```sh
-echo "host replication recipe_replicator ${COMPOSE_SUBNET} scram-sha-256" >> "${PGDATA}/pg_hba.conf"
-```
+1. The socket line admits `postgres` only, with the method `peer`. Only a process of the system user `postgres` can log in through the socket.
+2. The `host` lines admit `recipe_migrator`, `recipe_app`, and `recipe_backup` to the database `recipe`. Each line admits only `${COMPOSE_SUBNET}` with `scram-sha-256`.
+3. One `host` line admits `recipe_replicator` to `replication` from `${COMPOSE_SUBNET}` with `scram-sha-256`.
+4. The probe line `host recipe pg_isready 127.0.0.1/32 scram-sha-256` serves the healthcheck of `db` (ADR-0070 (q)).
+5. A final line rejects every other connection.
+
+No role `pg_isready` exists, and `01-roles.sh` never creates one. The probe ends at the password request of the server, so `db` writes no `FATAL` line. The superuser has no TCP login. The production script holds no test switch. The storage harness mounts a test-only init script that puts the host lines of the harness at the top of `pg_hba.conf` (ADR-0069 (u)).
 
 `recipe_replicator` reads the Docker secret `replicator_password` (`secrets.replicator_password_file`, `reliability.md` 7.11). It has the `REPLICATION` attribute, no `CONNECT` grant on the database, and no grant on any table. The service `walarchive` uses it for `pg_receivewal` and for the weekly `pg_basebackup`. The `pg_hba.conf` line accepts it only for replication connections from the Compose subnet.
 
-`recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. The membership exists because PostgreSQL 16 allows `ALTER ... OWNER TO audit_owner` only to a member of `audit_owner`. The migrator does not inherit the privileges of `audit_owner`. `0003_grants.sql` runs every grant on the audit objects first, while `recipe_migrator` still owns them. Then it transfers the ownership. The implicit privileges of the old owner move to the new owner, and `audit_owner` becomes the grantor of the earlier grants. After the transfer, `recipe_migrator` holds no privilege on the audit objects. `0003_grants.sql` does not use `SET ROLE`. A later migration runs `SET ROLE audit_owner` for two purposes only. It changes an audit object, or it writes the audit rows of a data migration that changes catalog rows (sections 8 and 10). Only a migration file runs `SET ROLE`, and the same file runs `RESET ROLE`.
+`01-roles.sh` runs only on an empty volume. For an older volume, the runbook gives the grant statements, the new guard function, and the new `pg_hba.conf` as the superuser (ADR-0069 (v)).
 
-`audit_owner` holds no `CREATE` on `public` after `0003`. A statement such as `CREATE INDEX` or `CREATE OR REPLACE FUNCTION` on an audit object needs it. A migration with such a change runs five steps in one file:
+`recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. The membership exists because PostgreSQL 16 allows `ALTER ... OWNER TO audit_owner` only to a member of `audit_owner`. The migrator does not inherit the privileges of `audit_owner`. `0003_grants.sql` runs every grant on the audit objects first, while `recipe_migrator` still owns them. Then it transfers the ownership. The implicit privileges of the old owner move to the new owner, and `audit_owner` becomes the grantor of the earlier grants. After the transfer, `recipe_migrator` holds no privilege on the audit objects. `0003_grants.sql` does not use `SET ROLE`. A later migration runs `SET ROLE audit_owner` for three purposes only. It creates an object that `audit_owner` owns, or it changes an audit object (section 5.5, ADR-0069 (m)). It can also write the audit rows of a data migration that changes catalog rows (sections 8 and 10). Only a migration file runs `SET ROLE`, and the same file runs `RESET ROLE`.
+
+`audit_owner` holds no `CREATE` on `public` after `0003`. A statement such as `CREATE INDEX` or `CREATE OR REPLACE FUNCTION` on an audit object needs it. A new object of `audit_owner` needs it too (section 5.5). A migration with such a change runs five steps in one file:
 
 1. `GRANT CREATE ON SCHEMA public TO audit_owner` (as `recipe_migrator`, the owner of the schema).
 2. `SET ROLE audit_owner`.
@@ -1559,7 +1625,7 @@ echo "host replication recipe_replicator ${COMPOSE_SUBNET} scram-sha-256" >> "${
 
 A concurrent index on an audit object is a runbook procedure, not a migration. A migration with `CREATE INDEX CONCURRENTLY` holds that one statement only (section 8), so it cannot run the five steps. The operator connects as `recipe_migrator` and runs the five steps in one `psql` session, with `CREATE INDEX CONCURRENTLY` as step 3 (`reliability.md` 7.10). The next migration records the index with `CREATE INDEX IF NOT EXISTS` as step 3 of the five steps.
 
-Residual risk: the migrator credential can still run `SET ROLE audit_owner`. The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose any rewrite. A restore from backup also re-creates the roles from the globals dump of `reliability.md` section 7.7. That dump holds no password, so the restore sets the passwords from the secret files (ADR-0033). The event trigger `audit_objects_dropped` stops a drop of an audit object by every role except `audit_owner`, also by the owner of `public` (ADR-0034).
+Residual risk: the migrator credential can still run `SET ROLE audit_owner`. With that role it also gets the read rights of `pg_read_all_stats` (ADR-0069). The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose a changed row when the later hashes and the head stay unchanged. They do not expose every rewrite, and ADR-0022 and ADR-0086 name the limits. A full rewrite with recomputed hashes and a new head stays undetectable without an off-host copy. A restore from backup also re-creates the roles from the globals dump of `reliability.md` section 7.7. That dump holds no password, so the restore sets the passwords from the secret files (ADR-0033). The event trigger `audit_objects_dropped` stops a drop of an audit object by every role except `audit_owner`, also by the owner of `public` (ADR-0034).
 
 ### 5.2 Grants (`0003_grants.sql`, runs as `recipe_migrator`)
 
@@ -1652,7 +1718,7 @@ GRANT DELETE ON session, login_attempt, draft_editor, parameter, parameter_limit
 
 ### 5.3 Grant test
 
-CI starts a fresh cluster, runs `01-roles.sh`, and applies `0001` to `0004` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app` and compares `information_schema.role_table_grants` and `information_schema.role_column_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2 and 5.4, also the column grants `UPDATE (succeeded)` on `login_attempt`, `UPDATE (count)` on `security_event`, and the column `INSERT` grants of 5.4 on `security_event`. It holds no sequence grant. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role. It checks that `audit_owner` holds no `CREATE` on `public`. It checks that the guard list of the event trigger `audit_objects_dropped` names every table and function that `audit_owner` owns, and that a drop by `recipe_migrator` fails (ADR-0034). CI applies a test migration with the five steps of 5.1 and then runs the same check again.
+CI starts a fresh cluster, runs `01-roles.sh`, and applies every migration of `migrations/` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app`. It compares `information_schema.role_table_grants`, `information_schema.role_column_grants`, and `information_schema.role_routine_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2, 5.4, and 5.5. It also holds the column grants `UPDATE (succeeded)` on `login_attempt`, `UPDATE (count)` on `security_event`, and the column `INSERT` grants of 5.4 on `security_event`. It holds the routine rows of `security_event_purge()` and `replication_state()` (ADR-0069 (q)). It holds no sequence grant. The test checks with `has_function_privilege` that `PUBLIC`, `recipe_backup`, and `recipe_migrator` cannot run `replication_state()` (ADR-0069 (i)). It checks that `recipe_app` holds no `pg_read_all_stats` and that `audit_owner` holds it. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role. It checks that `audit_owner` holds no `CREATE` on `public`. It checks that the guard list of the event trigger `audit_objects_dropped` names every table and function that `audit_owner` owns, and that a drop by `recipe_migrator` fails (ADR-0034). CI applies a test migration with the five steps of 5.1 and then runs the same check again.
 
 ### 5.4 Guard of `security_event` (`0005_security_event_guard.sql`)
 
@@ -1690,6 +1756,45 @@ REVOKE CREATE ON SCHEMA public FROM audit_owner;
 ```
 
 The function is `SECURITY INVOKER`. A trigger runs its function without an `EXECUTE` check, as `audit_hash_chain` shows. The upsert of the aggregated kinds of section 3.8 still works: the arbiter columns need only `SELECT`, and the `SET` needs only `UPDATE (count)`. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names the function.
+
+### 5.5 Operations objects (`0006_operations.sql`)
+
+The migration creates two objects that `audit_owner` owns, so it runs the five steps of section 5.1 (ADR-0069 (m)). Step 3 creates the index `security_event_occurred_at_idx` of section 3.8 and the function `replication_state()`.
+
+- The index serves `security_event_purge()` and the two alert sums of `reliability.md` 3.7 (ADR-0069 (k)).
+- A plain `CREATE INDEX` is permitted, because `security_event` is small at this release (ADR-0069 (l)). A storage test with 50 000 rows checks with `EXPLAIN` that the three statements use the index.
+- The job `alerts` reads the replication condition of `reliability.md` 3.7 through the function (ADR-0068 (p), ADR-0069 (j)).
+- The function reads only the row of `recipe_replicator` with `application_name = 'walarchive'`. The weekly base backup adds a second row of `recipe_replicator`, which the function ignores.
+- `audit_owner` inherits `pg_read_all_stats` (section 5.1). The function is `SECURITY DEFINER`, so it reads `sent_lsn` as `audit_owner`.
+
+```sql
+-- Step 1.
+GRANT CREATE ON SCHEMA public TO audit_owner;
+-- Step 2.
+SET ROLE audit_owner;
+-- Step 3.
+CREATE INDEX security_event_occurred_at_idx ON security_event (occurred_at);
+-- One row. connected is false and lag_bytes is NULL when no row of walarchive exists.
+-- A row without sent_lsn gives connected true and lag_bytes NULL (ADR-0090 (a)).
+-- The lag is pg_current_wal_lsn() - sent_lsn (reliability.md 3.7, wal.max_lag_bytes).
+CREATE FUNCTION replication_state(OUT connected BOOLEAN, OUT lag_bytes NUMERIC)
+LANGUAGE sql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp AS $$
+    SELECT pg_catalog.count(r.pid) OPERATOR(pg_catalog.>) 0,
+           pg_catalog.max(pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), r.sent_lsn))
+    FROM pg_catalog.pg_stat_replication AS r
+    WHERE r.usename OPERATOR(pg_catalog.=) 'recipe_replicator'::pg_catalog.name
+      AND r.application_name OPERATOR(pg_catalog.=) 'walarchive'::pg_catalog.text;
+$$;
+REVOKE EXECUTE ON FUNCTION replication_state() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION replication_state() TO recipe_app;
+-- Step 4.
+RESET ROLE;
+-- Step 5.
+REVOKE CREATE ON SCHEMA public FROM audit_owner;
+```
+
+After `0006`, `audit_owner` owns 8 tables and functions. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names each of them, also the function (ADR-0069 (o)). Only the superuser can replace the guard function (ADR-0069 (p)).
 
 ## 6. Transactional operations
 
@@ -1748,8 +1853,9 @@ Rules:
 | `UnlockLogin` | RC | `app_user FOR NO KEY UPDATE`. The lock gives the row image of the user (ADR-0029, ADR-0035) | `WITH gone AS (DELETE FROM login_attempt WHERE login = $l RETURNING id, client_ip, attempted_at, succeeded)` gives the deleted rows for the before-image (section 10). Commit with `LoginUnlocked`. After the commit, `SecurityEventSink` writes `security_event (kind = 'unlock')`. When that write fails, the use case returns the storage error, and the unlock stays committed (ADR-0035) | `LoginUnlocked` | — |
 | `Login` | RC, two transactions T1 and T2 (ADR-0014) | Before T1: one Argon2 permit (`argon2.acquire_timeout`, else `E-WEB-009`). T1: `pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) as its own statement, so the count that follows sees every committed attempt of the login. T2: `app_user FOR NO KEY UPDATE` (ADR-0035) | T1 through `LoginAttemptStore`: count the failures for `(login, client_ip)` and for `client_ip` in the throttle window → `n`. When the per-IP budget is already reached, T1 inserts nothing. Otherwise `INSERT login_attempt (succeeded = false) RETURNING id`, also in read-only mode. Commit. When `now() < last_failure + delay(n)` or the per-IP budget is exhausted, the attempt is throttled. `SecurityEventSink` writes `security_event (login_throttled)` with the `login_hmac` of the typed login, aggregated per minute (section 3.8). The use case releases the permit and returns 429 with `Retry-After`. Otherwise, outside a transaction: `SELECT app_user WHERE login`, Argon2 check of `password` (a dummy hash when the login is unknown or inactive), release the permit. T2 on success, through `UnitOfWork`: lock the user row and require `is_active` and the `session_epoch` and `password_hash` that the check read. A difference rolls back and returns `InvalidCredentials` (ADR-0035). `UPDATE login_attempt SET succeeded = true WHERE id = $attempt` (`LoginAttemptStore`). This statement can change no row, because `UnlockLogin` can delete the attempt after T1. T2 then continues (ADR-0035). `DELETE session WHERE id = $old` when the request carries a session cookie. `INSERT session (id = sha256(token), epoch = app_user.session_epoch, csrf_token)`. Commit with `UserLoggedIn`. The use case returns the token, and `recipe-web` sets the cookie. T2 on failure: `SecurityEventSink` writes `security_event (login_failed` or `login_rejected_inactive)`. `login_failed` is aggregated per minute (section 3.8). In read-only mode (Assumption A24) every step of this row runs as in normal mode. A failed or throttled login therefore still writes its `login_attempt` and `security_event` rows. These writes are small and stay inside the reserved margin of `reliability.md` 7.8. The use case returns 401 with the same body and timing | `UserLoggedIn` (T2 on success). `entity_type = 'app_user'`, `entity_id` = user id, `after_state = {"session_ref": ...}` | `InvalidCredentials`, `UserInactive` (same response to the client), `LoginThrottled` (429), Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `Logout` | RC | none | Through `UnitOfWork`: `DELETE session WHERE id = $current`. Commit with `UserLoggedOut`. `recipe-web` clears the cookie | `UserLoggedOut`. `entity_type = 'app_user'`, `entity_id` = user id, `before_state = {"session_ref": ...}` | — |
-| `ExportVersion` | RC | `recipe_version FOR SHARE` | `SELECT` version, parameters, limits, types. `/approved` requires status approved. `/versions/{n}` accepts approved or retired. Rebuild the hashed body with the module `export` of `recipe-domain` and the array orders of `api.md` 6.3. `parameters[]` is ordered by `unit_path`, segment by segment as integers (the first segment without its `U` prefix), then by `tag` in byte order. `parameter.ordinal` is not exported and not hashed. Compare the SHA-256 of the hashed body with the stored `content_sha256`. The comparison is the same for an approved and a retired version | `VersionExported` (`after_state` holds version id, schema version, `content_sha256`) | No approved version → `NoApprovedVersion` (404). Draft or discarded → `VersionNotExportable` (409). Recipe deleted → `RecipeDeleted` (409, `/versions/{n}` only). Hash mismatch → `ContentHashMismatch` (`E-EXP-002`, 500). The alert condition "one or more `E-EXP-002` in `alerts.interval`" of `reliability.md` 3.7 raises the alert. Serializer error → `Serialize` (`E-EXP-004`, 500). Export timeout → `Timeout` (`E-WEB-009`). The rebuild runs in `spawn_blocking`, and a failed task → `TaskFailed` (`E-WEB-011`, ADR-0029) |
-| `cleanup` (supervised job, not a command) | RC, one short transaction per statement | none | Through `MaintenanceStore`: `DELETE session WHERE expires_at < now() OR created_at < now() - $absolute_timeout`. `DELETE FROM login_attempt WHERE id IN (SELECT id FROM login_attempt WHERE attempted_at < now() - $retention ORDER BY attempted_at LIMIT 5000)`, each statement in its own transaction, repeated while it deletes 5 000 rows (`login_attempt.purge_batch`). The index `login_attempt_attempted_at_idx` serves it. `SELECT security_event_purge()` once per batch, each call in its own transaction, while the call returns 5 000 (`security_event.purge_batch`, section 4.12) | none | The job logs an error once at its loop boundary (`reliability.md` 2.4) |
+| `ExportVersion` | RC | `recipe_version FOR SHARE` | `SELECT` version, parameters, limits, types. `/approved` requires status approved. `/versions/{n}` accepts approved or retired. Rebuild the hashed body with the module `export` of `recipe-domain` and the array orders of `api.md` 6.3. `parameters[]` is ordered by `unit_path`, segment by segment as integers (the first segment without its `U` prefix), then by `tag` in byte order. `parameter.ordinal` is not exported and not hashed. Compare the SHA-256 of the hashed body with the stored `content_sha256`. The comparison is the same for an approved and a retired version | `VersionExported` (`after_state` holds version id, schema version, `content_sha256`) | No approved version → `NoApprovedVersion` (404). Draft or discarded → `VersionNotExportable` (409). Recipe deleted → `RecipeDeleted` (409, `/versions/{n}` only). Hash mismatch → `ContentHashMismatch` (`E-EXP-002`, 500). The alert condition `export_hash_mismatch` of `reliability.md` 3.7 raises the alert. Serializer error → `Serialize` (`E-EXP-004`, 500). Export timeout → `Timeout` (`E-WEB-009`). The rebuild runs in `spawn_blocking`, and a failed task → `TaskFailed` (`E-WEB-011`, ADR-0029) |
+| `cleanup` (supervised job, not a command) | RC, one short transaction per statement | none | Through `MaintenanceStore`: `DELETE session WHERE expires_at < now() OR created_at < now() - $absolute_timeout`. `DELETE FROM login_attempt WHERE id IN (SELECT id FROM login_attempt WHERE attempted_at < now() - $retention ORDER BY attempted_at LIMIT 5000)`, each statement in its own transaction, repeated while it deletes 5 000 rows (`login_attempt.purge_batch`). The index `login_attempt_attempted_at_idx` serves it. `SELECT security_event_purge()` once per batch, each call in its own transaction, while the call returns 5 000 (`security_event.purge_batch`, section 4.12) | none | The supervisor logs an error of the job once (`reliability.md` 1.1, 2.4) |
+| `CompareSettings` (internal, step 7 of the start of `serve`, not a command) | RC, one transaction | `app_setting FOR NO KEY UPDATE` on every row except the three state keys, ordered by `id`: `SELECT id, key, value, to_jsonb(s) FROM app_setting s WHERE key <> ALL($state_keys) ORDER BY id FOR NO KEY UPDATE`. No other row lock. `app_setting` is outside the lock chain of ADR-0015 | Through `SettingRepository` of the transaction. Compare each configured key with its locked row (`reliability.md` 7.12). A missing row is a difference with the old value `null`. A locked row without a configured key stays unchanged. Per difference: `INSERT INTO app_setting (key, value) VALUES ($k, $v) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = NULL`. Trigger `app_setting_set_updated_at` sets `updated_at` on the update path. No statement writes a state key. `upsert` refuses a state key before any write. The operation also runs in read-only mode (ADR-0061 (e)). With no difference, it writes nothing and ends without a commit (ADR-0079) | `SettingChanged` (one entry per difference). `actor = None`, `aggregate_type = 'app_setting'`, the full row before and after (section 10). All entries of one start share one `request_id` | A state key in `upsert` → `E-DB-008`, no write. Each `StorageError` of the transaction. A failed audit insert → `AuditWriteFailed` (`E-AUD-001`). Each failure gives one `ERROR` line, and the server does not start (`reliability.md` 7.12, ADR-0061 (b)) |
 
 `delay(n)` is `0` for `n < 3`, otherwise `min(2^(n-3), 60)` seconds (`reliability.md` section 7.11).
 
@@ -1811,6 +1917,7 @@ Notes:
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. Each row carries its `leaf_class`. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration.
   - `0005_security_event_guard.sql`: the column grant and the guard trigger of section 5.4 (ADR-0035).
+  - `0006_operations.sql`: the index on `security_event.occurred_at`, the function `replication_state()`, and its grant of section 5.5 (ADR-0069).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.

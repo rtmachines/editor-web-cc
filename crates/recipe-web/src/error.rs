@@ -198,7 +198,8 @@ pub enum WebError {
     CsrfRejected,
     /// The system is in read-only mode (`E-WEB-006`).
     #[error(
-        "The system is in read-only mode because disk space is low. Contact the administrator."
+        "The system is in read-only mode because the free disk space is low or unknown. \
+         Contact the administrator."
     )]
     ReadOnlyMode,
     /// A defect of the server, for example a route without an operation (`E-WEB-010`).

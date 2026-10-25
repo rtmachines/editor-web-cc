@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use recipe_app::identity::IdentityContext;
-use recipe_app::ports::SecurityEventSink;
+use recipe_app::ports::{ReadOnlySwitch, SecurityEventSink};
 use recipe_domain::identity::KeyRing;
 
 use crate::i18n::{BundleReason, Bundles};
@@ -28,6 +28,18 @@ impl ReadOnlyMode {
     /// Turn the read-only mode on or off. The disk check calls it.
     pub fn set(&self, on: bool) {
         self.0.store(on, Ordering::SeqCst);
+    }
+}
+
+/// The jobs of `recipe-app` set and read the flag through the port, so they need no
+/// `recipe-web` type.
+impl ReadOnlySwitch for ReadOnlyMode {
+    fn set(&self, on: bool) {
+        Self::set(self, on);
+    }
+
+    fn is_on(&self) -> bool {
+        Self::is_on(self)
     }
 }
 

@@ -321,6 +321,20 @@ pub(super) async fn export_version(
             let found = find(ctx, target).await?;
             lock_and_write(ctx, (writer, who.0), (target, found), permit).await
         })
-        .await?;
+        .await
+        .inspect_err(|error| count_hash_mismatch(ctx, error))?;
     commit_export(ctx, who, prepared).await
+}
+
+/// Count the result `E-EXP-002` for the job `alerts` (ADR-0073).
+///
+/// The function solves one problem: a hash mismatch of a stored export may show a corrupt audit
+/// trail. The flow decides it before the commit, so this is the one place that counts it.
+fn count_hash_mismatch(ctx: &AppContext, error: &AppError) {
+    if matches!(
+        error,
+        AppError::Export(ExportError::ContentHashMismatch { .. })
+    ) {
+        ctx.counters.record_export_hash_mismatch();
+    }
 }

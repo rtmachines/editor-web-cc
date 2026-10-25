@@ -12,7 +12,7 @@ use recipe_domain::plant::PlantError;
 use recipe_domain::recipe::{DraftError, RecipeError, RecipeErrors, ReferenceNumber};
 
 use super::missing::Missing;
-use super::storage::StorageError;
+use super::storage::{AuditError, StorageError};
 use crate::auth::Operation;
 
 /// The stage of a use case that ran out of time (`E-WEB-009`).
@@ -145,6 +145,11 @@ pub enum AppError {
     /// An error of the storage ports.
     #[error(transparent)]
     Storage(#[from] StorageError),
+    /// The audit chain check found a break (`E-AUD-002`, ADR-0089 (a)).
+    ///
+    /// Only the job `audit_chain_check` returns it. No request returns it.
+    #[error(transparent)]
+    Audit(#[from] AuditError),
 }
 
 impl AppError {
@@ -167,6 +172,7 @@ impl AppError {
             Self::TaskFailed { .. } => ErrorCode::WEB_011,
             Self::AuditWriteFailed { .. } => ErrorCode::AUD_001,
             Self::Storage(error) => error.code(),
+            Self::Audit(error) => error.code(),
         }
     }
 }

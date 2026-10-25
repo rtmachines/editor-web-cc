@@ -1,2 +1,97 @@
-# Placeholder. Step P4.1 of docs/plan/implementation-prompts.md writes the Caddy configuration.
-# ADR-0020 gives the role of the proxy: TLS termination, HSTS, and 404 on the health paths.
+# Caddyfile of the service proxy (production). ADR-0065 gives the decisions.
+# The file deploy/Caddyfile.dev differs in the tls line and in the auto_https line.
+#
+# Environment: SITE_ADDRESS is a host name or an IP address.
+# It has no scheme and no port. Compose must set it with ${SITE_ADDRESS:?}.
+# Secret files: /run/secrets/tls_cert and /run/secrets/tls_key (plant PKI).
+
+{
+	# ADR-0065 (c): no admin endpoint. A certificate rotation recreates the container.
+	admin off
+	# ADR-0070 (d): the container root is read-only. Caddy writes no autosave file.
+	persist_config off
+	# ADR-0065 (b): Caddy never asks a public CA for a certificate.
+	# The plant certificate is the only one. The redirect of the HTTP site stays.
+	auto_https disable_certs
+
+	servers {
+		# ADR-0065 (e): the Compose file publishes no UDP port, so no HTTP/3.
+		protocols h1 h2
+
+		# ADR-0065 (m): when a plant device stands in front of Caddy, remove the
+		# comment marks and give one /32 for each device. Add the same CIDR to
+		# http.trusted_proxies of app. The runbook names both steps.
+		# trusted_proxies static 192.0.2.10/32
+	}
+}
+
+# ADR-0065 (f), (g): a default applies only when the answer has no value.
+# The answers of app keep their values. The answers of Caddy get the defaults.
+# The CSP equals the table of api.md section 9.
+(default_headers) {
+	header {
+		?Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "same-origin"
+	}
+	header -Server
+}
+
+# ADR-0065 (f): the HTTPS answers also get HSTS. The HTTP site does not import this one.
+# The HSTS value equals http.hsts_max_age (reliability.md 7.11).
+(https_headers) {
+	import default_headers
+	header ?Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+
+# ADR-0065 (d): a plain HTTP request gets a permanent redirect to the same path.
+# The code 308 is the code of the automatic redirect of Caddy. It keeps the method.
+# RFC 6797 section 7.2: an answer over plain HTTP has no HSTS (ADR-0065 (f)).
+http://{$SITE_ADDRESS} {
+	import default_headers
+
+	redir https://{host}{uri} 308
+}
+
+{$SITE_ADDRESS} {
+	# ADR-0065 (b): the certificate and the key of the plant PKI.
+	tls /run/secrets/tls_cert /run/secrets/tls_key
+
+	import https_headers
+
+	# ADR-0065 (h): the health paths exist on the internal listener of app only.
+	# The path matcher ignores case, merges slashes, and decodes escapes.
+	@health path /healthz* /readyz*
+	handle @health {
+		respond 404
+	}
+
+	handle {
+		# ADR-0065 (a): plain HTTP to app inside the Compose network.
+		reverse_proxy app:8080 {
+			transport http {
+				# ADR-0065 (i): proxy.upstream_keepalive (reliability.md 7.11).
+				# The value stays below http.body_read_timeout (10 s) of app.
+				keepalive 5s
+			}
+		}
+	}
+
+	# ADR-0065 (f), (p): Caddy writes its own error answer, for example the 502 while
+	# app restarts. That answer does not pass the main route, so the route imports
+	# the same headers. The answer of app never reaches it.
+	handle_errors {
+		import https_headers
+
+		# ADR-0065 (q), api.md section 5.3: an HTMX request keeps its page.
+		# The text goes into the error panel.
+		@htmx header HX-Request true
+		header @htmx {
+			HX-Retarget "#error-panel"
+			HX-Reswap "innerHTML show:#error-panel:top"
+			HX-Push-Url "false"
+		}
+
+		respond "{err.status_code} {err.status_text}"
+	}
+}

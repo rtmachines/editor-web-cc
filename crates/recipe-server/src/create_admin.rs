@@ -1,16 +1,15 @@
-//! The password source and the input of the subcommand `create-admin` (design D17).
+//! The subcommand `create-admin`: the password source, the input, and the run (ADR-0035 (h)).
 //!
 //! The password comes from `--password-file` or from one line of stdin. Both sources follow the
 //! secret-file rules of ADR-0031. The text then goes through `NewPassword::parse`, so a policy
 //! failure gives `E-IDN-006`.
 
 use std::fmt;
-use std::io::{BufRead, Read};
+use std::io::{BufRead, IsTerminal, Read};
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
-use recipe_app::error::AppError;
 use recipe_app::identity::{
     Argon2Hasher, BootstrapOutcome, HashGate, IdentitySettings, bootstrap_administrator,
     new_request_id,
@@ -19,7 +18,8 @@ use recipe_db::Database;
 use recipe_db::settings::{Connection, PoolSettings};
 use recipe_domain::identity::{IdentityError, Login, NewPassword};
 
-use crate::config::secret_line;
+use crate::coded::coded;
+use crate::config::{self, secret_line};
 
 /// The most bytes that the subcommand reads from stdin. A password has at most 128 characters.
 const STDIN_LIMIT_BYTES: u64 = 1024;
@@ -112,10 +112,7 @@ pub fn read_password(
         None => (stdin.read_text()?, "stdin".to_owned()),
     };
     let line = secret_line(&text).map_err(|fault| anyhow!("{origin} {}", fault.describe()))?;
-    NewPassword::parse(line).map_err(|reason| {
-        let error = IdentityError::from(reason);
-        anyhow!("{}: {error}", error.code())
-    })
+    NewPassword::parse(line).map_err(|reason| coded(IdentityError::from(reason)))
 }
 
 /// Connect as the application role and create the first administrator.
@@ -149,10 +146,36 @@ pub async fn create(target: &Connection, input: CreateAdminInput) -> Result<Boot
     .map_err(coded)
 }
 
-/// Turn an error into an `anyhow` error whose message starts with the error code.
-fn coded(error: impl Into<AppError>) -> anyhow::Error {
-    let error = error.into();
-    anyhow!("{}: {error}", error.code())
+/// Read the configuration and the secrets for `create-admin`, then create the administrator.
+///
+/// The function reads the settings, the password, and the secret file of the connection before it
+/// starts the runtime and opens a connection.
+///
+/// # Errors
+///
+/// Returns the error of the configuration, of the password source, of the runtime, or of the
+/// creation.
+pub fn run(login: Login, password_file: Option<&Path>, config_file: Option<&Path>) -> Result<()> {
+    let settings = config::load(config_file)?;
+    let stdin = std::io::stdin();
+    let mut input = StdinInput::new(stdin.lock(), stdin.is_terminal());
+    let password = read_password(password_file, &mut input)?;
+    let target = config::app_connection(&settings)?;
+    let input = CreateAdminInput { login, password };
+    let login = input.login.clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("cannot start the async runtime")?;
+    match runtime.block_on(create(&target, input))? {
+        BootstrapOutcome::Created => {
+            tracing::info!(login = %login, "the administrator is created");
+        }
+        BootstrapOutcome::AdministratorExists => {
+            tracing::info!("an active administrator exists, nothing is created");
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

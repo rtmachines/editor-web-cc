@@ -34,6 +34,15 @@ tower = { version = "0.5.3", default-features = false }
 tokio = "1.53.2"
 figment = "0.10.19"
 
+# Serving loop, webhook client, and disk checks (recipe-server, ADR-0058, ADR-0060, ADR-0063).
+hyper = "1.12.0"
+hyper-util = "0.1.21"
+hyper-rustls = { version = "0.27.10", default-features = false }
+rustls = { version = "0.23.46", default-features = false }
+http-body-util = "0.1.5"
+tokio-util = "0.7.20"
+rustix = "1.1.5"
+
 # Storage (recipe-db). Assumption A15 pins sqlx 0.8.
 # `macros` and `migrate` give `sqlx::migrate!` (data-model.md section 8).
 sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "tls-rustls", "macros", "migrate"] }

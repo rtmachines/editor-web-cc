@@ -1,6 +1,6 @@
 # ADR-0034: Hardening of the audit objects
 
-Status: Accepted. Amended by ADR-0035 (security_event_guard in the guard list)
+Status: Accepted. Amended by ADR-0035 (security_event_guard in the guard list). Amended by ADR-0069 (`public.replication_state()` in the guard list)
 Date: 2026-10-14
 Deciders: project owner
 

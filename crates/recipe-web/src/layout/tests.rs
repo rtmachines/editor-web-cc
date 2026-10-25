@@ -10,7 +10,7 @@ use axum::routing::get;
 use recipe_app::auth::Operation;
 use recipe_domain::identity::Role;
 
-use super::{Layout, NavTarget, Shape, nav_links};
+use super::{Layout, NavTarget, ReadOnlyFlag, Shape, nav_links};
 use crate::client::ClientAddr;
 use crate::error::WebError;
 use crate::i18n::{Bundles, Lang};
@@ -245,7 +245,13 @@ async fn path_and_query_of_another_method_is_none() {
 fn layout_for_login_has_the_nonce_and_next_login_and_no_session_data() {
     let bundles = Bundles::load().unwrap();
     let texts = crate::pages::Texts::new(&bundles, Lang::En);
-    let layout = Layout::for_login(texts, Lang::En, "Sign in".to_owned(), "abc");
+    let layout = Layout::for_login(
+        texts,
+        Lang::En,
+        "Sign in".to_owned(),
+        "abc",
+        ReadOnlyFlag::default(),
+    );
     assert_eq!(layout.pre_nonce.as_deref(), Some("abc"));
     assert_eq!(layout.next.as_deref(), Some("/login"));
     assert!(layout.nav.is_empty());
@@ -258,7 +264,12 @@ fn layout_for_login_has_the_nonce_and_next_login_and_no_session_data() {
 fn layout_bare_has_no_navigation_switch_token_or_user() {
     let bundles = Bundles::load().unwrap();
     let texts = crate::pages::Texts::new(&bundles, Lang::Pl);
-    let layout = Layout::bare(texts, Lang::Pl, "E-WEB-005".to_owned());
+    let layout = Layout::bare(
+        texts,
+        Lang::Pl,
+        "E-WEB-005".to_owned(),
+        ReadOnlyFlag::default(),
+    );
     assert!(layout.nav.is_empty());
     assert_eq!(layout.next, None);
     assert_eq!(layout.pre_nonce, None);
@@ -270,7 +281,8 @@ fn layout_bare_has_no_navigation_switch_token_or_user() {
 fn layout_with_toast_sets_the_toast_text() {
     let bundles = Bundles::load().unwrap();
     let texts = crate::pages::Texts::new(&bundles, Lang::En);
-    let layout = Layout::bare(texts, Lang::En, "t".to_owned()).with_toast("Done.".to_owned());
+    let layout = Layout::bare(texts, Lang::En, "t".to_owned(), ReadOnlyFlag::default())
+        .with_toast("Done.".to_owned());
     assert_eq!(layout.toast.as_deref(), Some("Done."));
 }
 
@@ -320,8 +332,19 @@ async fn ask_content_page(headers: &[(&str, &str)]) -> Reply {
 fn layout_of_the_login_page_and_the_error_page_has_the_page_shape() {
     let bundles = Bundles::load().unwrap();
     let texts = crate::pages::Texts::new(&bundles, Lang::En);
-    let login = Layout::for_login(texts, Lang::En, "Sign in".to_owned(), "abc");
-    let bare = Layout::bare(texts, Lang::En, "E-WEB-005".to_owned());
+    let login = Layout::for_login(
+        texts,
+        Lang::En,
+        "Sign in".to_owned(),
+        "abc",
+        ReadOnlyFlag::default(),
+    );
+    let bare = Layout::bare(
+        texts,
+        Lang::En,
+        "E-WEB-005".to_owned(),
+        ReadOnlyFlag::default(),
+    );
     for layout in [login, bare] {
         assert_eq!(layout.shape, Shape::Page);
         assert!(!layout.is_content());

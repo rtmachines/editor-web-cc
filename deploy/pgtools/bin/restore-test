@@ -1,0 +1,591 @@
+#!/usr/bin/env bash
+# restore-test: restore the newest backup set into a private scratch cluster and check it.
+#
+# Source: ADR-0067 (c) to (l) as amended by ADR-0076 and ADR-0078, ADR-0066, ADR-0074, ADR-0033,
+# reliability.md sections 7.7 and 7.11, design D10. The service backup runs it every Sunday
+# (supercronic). Before a release, the operator runs: docker compose exec backup restore-test
+#
+# Steps (the numbers are the steps of ADR-0067):
+#   1. The marker, the lock, and the newest complete set (ADR-0074 (c)). sha256sum -c --strict
+#      on the manifest. A mismatch stops the test before any tool runs. The counts file and the
+#      globals file pass their gates (the pair \restrict and \unrestrict, and no other meta-command).
+#   2. Each FUNCTION, TRIGGER, and EVENT TRIGGER entry of pg_restore --list names a line of
+#      restore-code.expected (ADR-0076 (b)). An unknown entry stops the test. An entry of the
+#      kind PROCEDURE, AGGREGATE, MATERIALIZED VIEW, or OPERATOR stops it too (ADR-0078 (b)).
+#   3. A private scratch cluster on the backup disk, the globals file, and a random password
+#      for each login role.
+#   4. pg_restore --section=pre-data. The lines of restore-code.sql for the kinds FUNCTION, CHECK,
+#      and GENERATED must equal restore-code.expected (ADR-0076 (c)).
+#   5. pg_restore --section=data and then post-data. The lines of every kind must equal the file.
+#   6. The row counts of the counts file and of the restored tables are equal in both directions.
+#   7. The audit chain check of data-model.md section 4.9.
+#   8. Each login role logs in over 127.0.0.1 with its password. A wrong password must fail.
+#   9. One JSON result line. A failed step writes one ERROR line and exits with 1.
+# A trap stops the scratch server and deletes the scratch directory on each exit. The marker,
+# the lock, the directory .scratch, and every file of a set stay.
+#
+# The test reads no production password. No tool reaches the production cluster: the script
+# clears the variables PG* and every call names the private socket or 127.0.0.1.
+# A password never enters argv or a shell variable. It lives in a file of the tmpfs.
+#
+# Environment. The defaults are the production values. The test script sets the others.
+#   BACKUP_DIR          the backup disk, default /backups
+#   BACKUP_PGPASS_DIR   the tmpfs for the secret files, default /run/pgpass
+#   RESTORE_CODE_DIR    the directory of restore-code.sql and restore-code.expected, default /etc/pgtools
+#   PGDATABASE          the name of the database in the dump, default recipe
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=restore-test
+MARKER_NAME=.backup-marker
+SCRATCH_NAME=.scratch
+LOCK_NAME=.lock
+SCRATCH_PORT=5433 # scratch.port of reliability.md section 7.11 (ADR-0077 (g))
+START_TIMEOUT_SECONDS=60 # scratch.restore_start_timeout of 7.11: the start of the scratch server
+STOP_TIMEOUT_SECONDS=60 # scratch.stop_timeout of 7.11: the stop of the scratch server
+DETAIL_LENGTH=160 # restore_test.detail_length of 7.11: the characters of a tool message in an ERROR line
+# scratch.* of reliability.md section 7.11 (ADR-0067 (e), (f)).
+SCRATCH_SETTINGS=(
+  shared_buffers=64MB maintenance_work_mem=64MB max_connections=10
+  max_parallel_workers_per_gather=0 max_parallel_maintenance_workers=0
+  fsync=off wal_level=minimal max_wal_senders=0
+)
+SET_GRAMMAR='^recipe_([0-9]{8}_[0-9]{4})(_premigrate|_now)?\.dump\.sha256$'
+# An entry of pg_restore --list is "<dump id>; <class oid> <object oid> <kind> <name> <owner>".
+# The kinds of ADR-0076 (b) have a name list. The kinds of ADR-0078 (b) stop the test.
+CHECKED_PREFIX='^[0-9]+; [0-9]+ [0-9]+ (FUNCTION|TRIGGER|EVENT TRIGGER) '
+ENTRY_GRAMMAR='^[0-9]+; [0-9]+ [0-9]+ (FUNCTION|TRIGGER|EVENT TRIGGER) (.+) [^ ]+$'
+REFUSED_GRAMMAR='^[0-9]+; [0-9]+ [0-9]+ (PROCEDURE|AGGREGATE|MATERIALIZED VIEW|OPERATOR) '
+COUNTS_GRAMMAR='^[^|]+\|[0-9]+$'
+# pg_dumpall writes "\restrict KEY" and "\unrestrict KEY". The key has the characters of
+# restrict_chars in src/bin/pg_dump/dumputils.c (REL_16_STABLE), and valid_restrict_key
+# refuses an empty key.
+RESTRICT_GRAMMAR='^\\restrict ([A-Za-z0-9]+)$'
+UNRESTRICT_GRAMMAR='^\\unrestrict ([A-Za-z0-9]+)$'
+COMMENT_OR_BLANK_GRAMMAR='^([[:space:]]*|--.*)$'
+ROLE_GRAMMAR='^[a-z_][a-z0-9_]*$'
+PRE_DATA_KINDS='^(FUNCTION|CHECK|GENERATED)\|'
+ALL_KINDS='^.'
+
+BACKUP_DIR=${BACKUP_DIR:-/backups}
+PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
+CODE_DIR=${RESTORE_CODE_DIR:-/etc/pgtools}
+DB_NAME=${PGDATABASE:-recipe}
+# No variable of libpq may point a tool to the production cluster.
+unset PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE \
+  PGDATABASE PGOPTIONS PGSSLMODE PGSSLROOTCERT PGSSLCERT PGSSLKEY PGCONNECT_TIMEOUT
+
+error_logged=0
+work_dir=""
+scratch=""
+data_dir=""
+socket_dir=""
+superuser=""
+server_started=0
+set_stamp=""
+base=""
+manifest_name=""
+dump_path=""
+globals_path=""
+counts_path=""
+table_count=0
+login_roles=()
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked name.
+log() {
+  if [ "$1" = ERROR ]; then
+    error_logged=1
+  fi
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message> [<extra JSON fields>]: write the one ERROR line and stop.
+fail() {
+  log ERROR "$@"
+  exit 1
+}
+
+# clean <text>: the text with each character outside a short safe set replaced by a question mark.
+# A name from a dump is external input, so it never enters a log line unchecked.
+clean() {
+  local text=${1:0:$DETAIL_LENGTH}
+  printf '%s' "$text" | tr -c 'A-Za-z0-9_ ().,:|=-' '?'
+}
+
+# tool_detail <file>: the first line of the message of a tool, cleaned.
+tool_detail() {
+  local line=""
+  line=$(sed -n '1p' -- "$1") || line=""
+  clean "$line"
+}
+
+# stop_server <data directory>: stop a scratch server at once. It never needs a clean shutdown.
+stop_server() {
+  pg_ctl --pgdata="$1" --mode=immediate --wait --timeout="$STOP_TIMEOUT_SECONDS" stop >/dev/null 2>&1
+}
+
+# remove_dir <directory> <parent>: delete one directory of this script below its parent.
+remove_dir() {
+  case $1 in
+    "$2"/run.*) ;;
+    *) return 1 ;;
+  esac
+  if [ -d "$1" ] && [ ! -L "$1" ]; then
+    rm -r -- "${1:?}"
+  fi
+}
+
+# cleanup runs on each exit. The secret files go first and on a best effort.
+cleanup() {
+  local status=$? stopped=1
+  trap - EXIT
+  if [ -n "$work_dir" ] && ! remove_dir "$work_dir" "$PGPASS_DIR"; then
+    log ERROR "cannot delete the password directory of this run"
+    status=1
+  fi
+  if [ "$server_started" -eq 1 ] || { [ -n "$data_dir" ] && [ -f "$data_dir/postmaster.pid" ]; }; then
+    stop_server "$data_dir" || stopped=0
+  fi
+  if [ "$stopped" -eq 0 ]; then
+    log ERROR "cannot stop the scratch server of this run"
+    status=1
+  elif [ -n "$scratch" ] && ! remove_dir "$scratch" "$BACKUP_DIR/$SCRATCH_NAME"; then
+    log ERROR "cannot delete the scratch directory of this run"
+    status=1
+  fi
+  if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
+    log ERROR "restore test failed unexpectedly" "\"exit_code\":$status"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+# A signal must run the trap, so the server stops and the scratch directory goes.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# scratch_psql <arguments>: psql as the system user over the private socket of the scratch cluster.
+scratch_psql() {
+  psql --no-psqlrc --quiet --no-align --tuples-only --no-password -v ON_ERROR_STOP=1 \
+    --host="$socket_dir" --port="$SCRATCH_PORT" --username="$superuser" "$@"
+}
+
+# random_secret <file>: 24 random bytes as hex text in a new file. The value never enters argv.
+random_secret() {
+  od -An -N24 -tx1 /dev/urandom | tr -d ' \n' >"$1"
+}
+
+# is_scratch_postmaster <data directory>: succeeds only when the PID in postmaster.pid is a postgres
+# process that was started for that data directory. pg_ctl stop sends a signal to that PID. After a
+# restart of the container, another process can hold the PID of a stale file, and it gets no signal.
+# The command line of a postmaster is "<path>/postgres -D <data directory>".
+is_scratch_postmaster() {
+  local pid arg args=()
+  pid=$(sed -n '1p' -- "$1/postmaster.pid") || return 1
+  [[ $pid =~ ^[1-9][0-9]*$ ]] || return 1
+  [ -r "/proc/$pid/cmdline" ] || return 1
+  mapfile -d '' -t args <"/proc/$pid/cmdline" || return 1
+  [ "${args[0]-}" != "" ] && [ "${args[0]##*/}" = postgres ] || return 1
+  for arg in "${args[@]:1}"; do
+    if [ "$arg" = "$1" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# delete_stale_runs: a killed run leaves a directory run.* below .scratch. The lock proves that
+# no other run lives, so every such directory is stale. A symbolic link is never followed.
+# The script stops a server only when is_scratch_postmaster agrees. Else it deletes the directory.
+delete_stale_runs() {
+  local dir
+  for dir in "$BACKUP_DIR/$SCRATCH_NAME"/run.*; do
+    if [ ! -d "$dir" ] || [ -L "$dir" ]; then
+      continue
+    fi
+    if [ -f "$dir/data/postmaster.pid" ] && is_scratch_postmaster "$dir/data"; then
+      stop_server "$dir/data" || true
+    fi
+    remove_dir "$dir" "$BACKUP_DIR/$SCRATCH_NAME" || fail "cannot delete a stale scratch directory"
+    log INFO "stale scratch directory deleted" "\"directory\":\"$(clean "${dir##*/}")\""
+  done
+}
+
+# select_set: the newest manifest by the anchored grammar of ADR-0074 (c). Only a regular file counts.
+select_set() {
+  local manifest name
+  for manifest in "$BACKUP_DIR"/recipe_*.dump.sha256; do
+    name=${manifest##*/}
+    [[ $name =~ $SET_GRAMMAR ]] || continue
+    if [ -f "$manifest" ] && [ ! -L "$manifest" ]; then
+      set_stamp=${BASH_REMATCH[1]}${BASH_REMATCH[2]-}
+    fi
+  done
+  [ -n "$set_stamp" ] || fail "no complete backup set found"
+  base=recipe_$set_stamp
+  manifest_name=$base.dump.sha256
+  dump_path=$BACKUP_DIR/$base.dump
+  globals_path=$BACKUP_DIR/globals_$set_stamp.sql
+  counts_path=$BACKUP_DIR/$base.counts
+}
+
+# check_manifest: the manifest lists exactly the three files of the set, and each hash is right.
+check_manifest() {
+  local listed expected file
+  for file in "$dump_path" "$globals_path" "$counts_path"; do
+    if [ ! -f "$file" ] || [ -L "$file" ]; then
+      fail "the newest set lacks a regular file" "\"set\":\"$base\""
+    fi
+  done
+  listed=$(sed -E -e 's/^[0-9a-f]{64} [ *]//' -- "$BACKUP_DIR/$manifest_name" | sort) \
+    || fail "cannot read the manifest of the newest set"
+  expected=$(printf '%s\n' "${dump_path##*/}" "${globals_path##*/}" "${counts_path##*/}" | sort)
+  [ "$listed" = "$expected" ] || fail "the manifest does not list exactly the files of the set"
+  if ! (cd "$BACKUP_DIR" && sha256sum -c --strict -- "$manifest_name") \
+    >"$work_dir/manifest.out" 2>&1; then
+    cat -- "$work_dir/manifest.out" >&2
+    fail "the manifest of the newest set does not verify" "\"set\":\"$base\""
+  fi
+}
+
+# check_counts: the counts file is external input. Each line has the grammar. The loop counts the
+# tables, so the last line counts also without its newline.
+check_counts() {
+  local line
+  table_count=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    [[ $line =~ $COUNTS_GRAMMAR ]] || fail "the counts file has a bad line"
+    table_count=$((table_count + 1))
+  done <"$counts_path"
+}
+
+# check_globals: the globals file is external input, and psql runs its SQL as the scratch
+# superuser. This gate refuses each psql meta-command: every line with a backslash at any place.
+# It accepts one pair \restrict KEY and \unrestrict KEY of pg_dumpall (pg_dumpall.c, REL_16_STABLE).
+# The pair has the same key. \restrict is the first line that is no comment and no blank line.
+# \unrestrict is the last such line, and the SQL stands between them.
+# Outside the pair, a line holds no control character except a tab.
+# The gate does not refuse plain SQL between the two lines.
+# That SQL runs as the scratch superuser of the private scratch cluster.
+check_globals() {
+  local line key="" phase=0 pair_fault="the globals file has no valid restrict pair"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ $line =~ $RESTRICT_GRAMMAR ]]; then
+      [ "$phase" -eq 0 ] || fail "$pair_fault"
+      key=${BASH_REMATCH[1]}
+      phase=1
+    elif [[ $line =~ $UNRESTRICT_GRAMMAR ]]; then
+      { [ "$phase" -eq 1 ] && [ "${BASH_REMATCH[1]}" = "$key" ]; } || fail "$pair_fault"
+      phase=2
+    elif [[ $line == *\\* ]]; then
+      fail "the globals file holds a psql meta-command"
+    elif [ "$phase" -ne 1 ] && [[ ${line//$'\t'/} == *[[:cntrl:]]* ]]; then
+      fail "the globals file holds a control character"
+    elif [[ ! $line =~ $COMMENT_OR_BLANK_GRAMMAR ]]; then
+      [ "$phase" -eq 1 ] || fail "$pair_fault"
+    fi
+  done <"$globals_path"
+  [ "$phase" -eq 2 ] || fail "$pair_fault"
+}
+
+# check_names: step 2. Each function, trigger, and event trigger of the dump is in the file.
+# A line of a checked kind that does not match the grammar stops the test (fail closed).
+check_names() {
+  local line entry kind
+  awk -F'|' '$1 == "FUNCTION" || $1 == "TRIGGER" || $1 == "EVENT TRIGGER" { print $1 "|" $2 }' \
+    "$CODE_DIR/restore-code.expected" | sort -u >"$work_dir/names.expected"
+  pg_restore --list "$dump_path" >"$work_dir/listing" 2>"$work_dir/list.err" \
+    || fail "pg_restore cannot list the dump" "\"detail\":\"$(tool_detail "$work_dir/list.err")\""
+  while IFS= read -r line; do
+    if [[ $line =~ $REFUSED_GRAMMAR ]]; then
+      fail "the dump holds an entry of a kind that the restore test refuses" \
+        "\"kind\":\"${BASH_REMATCH[1]}\""
+    fi
+    [[ $line =~ $CHECKED_PREFIX ]] || continue
+    kind=${BASH_REMATCH[1]}
+    [[ $line =~ $ENTRY_GRAMMAR ]] \
+      || fail "an entry of pg_restore --list does not match the grammar" "\"kind\":\"$kind\""
+    entry="${BASH_REMATCH[1]}|${BASH_REMATCH[2]}"
+    if ! grep -qxF -- "$entry" "$work_dir/names.expected"; then
+      fail "the dump holds an entry that restore-code.expected does not hold" \
+        "\"entry\":\"$(clean "$entry")\""
+    fi
+  done <"$work_dir/listing"
+}
+
+# start_cluster: step 3. initdb with the arguments of reliability.md 7.1 and a private socket.
+start_cluster() {
+  mkdir -p -- "$BACKUP_DIR/$SCRATCH_NAME"
+  scratch=$(mktemp -d "$BACKUP_DIR/$SCRATCH_NAME/run.XXXXXX") || fail "cannot create the scratch directory"
+  data_dir=$scratch/data
+  socket_dir=$scratch/sock
+  mkdir -m 0700 -- "$socket_dir"
+  superuser=$(id -un) || fail "cannot read the name of the system user"
+  random_secret "$work_dir/superuser.pw"
+  initdb --pgdata="$data_dir" --username="$superuser" --auth-local=peer \
+    --auth-host=scram-sha-256 --pwfile="$work_dir/superuser.pw" --data-checksums \
+    --lc-collate=C --lc-ctype=C.UTF-8 >/dev/null 2>"$work_dir/initdb.err" \
+    || fail "initdb failed" "\"detail\":\"$(tool_detail "$work_dir/initdb.err")\""
+  {
+    printf '%s\n' "${SCRATCH_SETTINGS[@]}"
+    printf '%s\n' "listen_addresses='127.0.0.1'" "port=$SCRATCH_PORT" \
+      "unix_socket_directories='$socket_dir'" "unix_socket_permissions=0700"
+  } >>"$data_dir/postgresql.conf"
+  server_started=1
+  # Descriptor 9 holds the lock. The server must not keep it.
+  pg_ctl --pgdata="$data_dir" --log="$scratch/server.log" --wait \
+    --timeout="$START_TIMEOUT_SECONDS" start >/dev/null 2>"$work_dir/pg_ctl.err" 9>&- \
+    || fail "the scratch server did not start" "\"detail\":\"$(tool_detail "$work_dir/pg_ctl.err")\""
+}
+
+# restore_globals: the globals file gives one known error. The system user exists already.
+restore_globals() {
+  local line
+  scratch_psql --dbname=postgres --file="$globals_path" -v ON_ERROR_STOP=0 \
+    >/dev/null 2>"$work_dir/globals.err" || fail "psql cannot read the globals file"
+  while IFS= read -r line; do
+    case $line in
+      *"ERROR:  role \"$superuser\" already exists") ;;
+      *ERROR:*) fail "the globals file gave an error that is not known" \
+        "\"detail\":\"$(clean "${line#*ERROR:}")\"" ;;
+    esac
+  done <"$work_dir/globals.err"
+}
+
+# set_passwords: a random password for each login role of the globals file. The statement goes
+# to the server through standard input, so the password is in no argument.
+set_passwords() {
+  local roles role
+  roles=$(scratch_psql --dbname=postgres --command="SELECT rolname FROM pg_catalog.pg_roles WHERE rolcanlogin AND rolname <> current_user ORDER BY rolname") \
+    || fail "cannot list the login roles"
+  while IFS= read -r role; do
+    [ -n "$role" ] || continue
+    [[ $role =~ $ROLE_GRAMMAR ]] || fail "a login role has a name outside the pattern"
+    login_roles+=("$role")
+  done <<<"$roles"
+  [ "${#login_roles[@]}" -gt 0 ] || fail "the restored cluster has no login role"
+  for role in "${login_roles[@]}"; do
+    random_secret "$work_dir/pw.$role"
+    { printf "ALTER ROLE %s PASSWORD '" "$role"; cat -- "$work_dir/pw.$role"; printf "';\n"; } \
+      | scratch_psql --dbname=postgres || fail "cannot set the password of a login role" "\"role\":\"$role\""
+  done
+}
+
+# restore_section <section>: one pg_restore call. The first call creates the database of the dump.
+restore_section() {
+  local target=$DB_NAME create=()
+  if [ "$1" = pre-data ]; then
+    target=postgres
+    create=(--create)
+  fi
+  pg_restore --exit-on-error --no-password --host="$socket_dir" --port="$SCRATCH_PORT" \
+    --username="$superuser" --section="$1" ${create[@]+"${create[@]}"} --dbname="$target" \
+    "$dump_path" >/dev/null 2>"$work_dir/restore.err" \
+    || fail "pg_restore failed" "\"section\":\"$1\",\"detail\":\"$(tool_detail "$work_dir/restore.err")\""
+}
+
+# check_database: the restore created the database that the script names.
+check_database() {
+  local found
+  found=$(scratch_psql --dbname=postgres --command="SELECT count(*) FROM pg_catalog.pg_database WHERE datname = '$DB_NAME'") \
+    || fail "cannot read the list of databases"
+  [ "$found" = 1 ] || fail "the dump did not create the database of the expected name"
+}
+
+# sorted_kinds <regex> <file> <out>: the lines of the file that match, in byte order.
+sorted_kinds() {
+  { grep -E -- "$1" "$2" || true; } | sort >"$3"
+}
+
+# compare_code <stage> <regex of the kinds>: restore-code.sql against restore-code.expected.
+compare_code() {
+  local missing extra first
+  scratch_psql --dbname="$DB_NAME" --file="$CODE_DIR/restore-code.sql" >"$work_dir/code.actual" \
+    2>"$work_dir/code.err" || fail "restore-code.sql failed" "\"detail\":\"$(tool_detail "$work_dir/code.err")\""
+  sorted_kinds "$2" "$CODE_DIR/restore-code.expected" "$work_dir/code.want"
+  sorted_kinds "$2" "$work_dir/code.actual" "$work_dir/code.have"
+  comm -23 "$work_dir/code.want" "$work_dir/code.have" >"$work_dir/code.missing"
+  comm -13 "$work_dir/code.want" "$work_dir/code.have" >"$work_dir/code.extra"
+  missing=$(($(wc -l <"$work_dir/code.missing")))
+  extra=$(($(wc -l <"$work_dir/code.extra")))
+  if [ "$missing" -ne 0 ] || [ "$extra" -ne 0 ]; then
+    first=$(cat -- "$work_dir/code.missing" "$work_dir/code.extra" | sed -n '1p' | cut -d'|' -f1,2)
+    fail "the code after the restore of $1 differs from restore-code.expected" \
+      "\"missing\":$missing,\"extra\":$extra,\"first\":\"$(clean "$first")\""
+  fi
+}
+
+COUNT_QUERY=""
+IFS= read -r -d '' COUNT_QUERY <<'SQL' || true
+SELECT format('SELECT %L, count(*) FROM %I.%I', n.nspname || '.' || c.relname, n.nspname, c.relname)
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname <> 'information_schema'
+  AND n.nspname !~ '^pg_'
+  AND NOT (n.nspname = 'public' AND c.relname IN ('session', 'login_attempt'))
+ORDER BY n.nspname, c.relname \gexec
+SQL
+
+# fail_first_table <message> <file>: the ERROR line names the table of the first line of the file.
+fail_first_table() {
+  local line
+  line=$(sed -n '1p' -- "$2")
+  fail "$1" "\"table\":\"$(clean "${line%%|*}")\""
+}
+
+# compare_counts: step 6. The tables and the row counts equal the counts file in both directions.
+compare_counts() {
+  scratch_psql --dbname="$DB_NAME" <<<"$COUNT_QUERY" >"$work_dir/counts.actual" \
+    || fail "the count query failed on the restored database"
+  sort -- "$counts_path" >"$work_dir/counts.want"
+  sort -- "$work_dir/counts.actual" >"$work_dir/counts.have"
+  cut -d'|' -f1 "$work_dir/counts.want" | sort -u >"$work_dir/tables.want"
+  cut -d'|' -f1 "$work_dir/counts.have" | sort -u >"$work_dir/tables.have"
+  comm -23 "$work_dir/tables.want" "$work_dir/tables.have" >"$work_dir/tables.missing"
+  comm -13 "$work_dir/tables.want" "$work_dir/tables.have" >"$work_dir/tables.extra"
+  comm -23 "$work_dir/counts.want" "$work_dir/counts.have" >"$work_dir/counts.differ"
+  if [ -s "$work_dir/tables.missing" ]; then
+    fail_first_table "a table of the counts file is missing in the restore" "$work_dir/tables.missing"
+  fi
+  if [ -s "$work_dir/tables.extra" ]; then
+    fail_first_table "a restored table is not in the counts file" "$work_dir/tables.extra"
+  fi
+  if [ -s "$work_dir/counts.differ" ]; then
+    fail_first_table "the row count of a table differs from the counts file" "$work_dir/counts.differ"
+  fi
+}
+
+# The audit chain check of data-model.md section 4.9 over the whole table: breaks, head, last row.
+# The text equals the text of pitr-check.
+CHAIN_SQL=""
+IFS= read -r -d '' CHAIN_SQL <<'SQL' || true
+WITH batch AS (
+    SELECT a.chain_seq, a.prev_hash, a.entry_hash,
+           pg_catalog.sha256(COALESCE(a.prev_hash, '\x'::bytea)
+               || pg_catalog.convert_to(public.audit_canonical(a), 'UTF8')) AS recomputed
+    FROM public.audit_log AS a
+), chain AS (
+    SELECT b.*,
+           lag(b.chain_seq, 1, 0::bigint) OVER w AS previous_seq,
+           lag(b.entry_hash, 1, NULL::bytea) OVER w AS previous_hash
+    FROM batch AS b
+    WINDOW w AS (ORDER BY b.chain_seq)
+)
+SELECT (SELECT count(*) FROM chain
+        WHERE chain_seq IS DISTINCT FROM previous_seq + 1
+           OR prev_hash IS DISTINCT FROM previous_hash
+           OR entry_hash IS DISTINCT FROM recomputed) AS breaks,
+       h.last_seq = COALESCE((SELECT max(chain_seq) FROM public.audit_log), 0) AS head_matches,
+       h.last_hash IS NOT DISTINCT FROM
+           (SELECT entry_hash FROM public.audit_log ORDER BY chain_seq DESC LIMIT 1) AS hash_matches
+FROM public.audit_chain_head AS h
+WHERE h.singleton
+SQL
+
+# check_chain: step 7. A database with no table has no audit_log table and nothing to check.
+check_chain() {
+  local exists result
+  exists=$(scratch_psql --dbname="$DB_NAME" --command="SELECT to_regclass('public.audit_log') IS NOT NULL") \
+    || fail "cannot look for the audit_log table"
+  if [ "$exists" != t ]; then
+    [ "$table_count" -eq 0 ] || fail "the restored database has tables but no audit_log table"
+    log INFO "the database has no table, the audit chain check is skipped"
+    return 0
+  fi
+  result=$(scratch_psql --dbname="$DB_NAME" --command="$CHAIN_SQL") \
+    || fail "the audit chain check could not run"
+  [ "$result" = "0|t|t" ] || fail "the audit chain check failed" "\"result\":\"$(clean "$result")\""
+}
+
+# write_pgpass <file> <role> <password file>: one libpq line. The password is hex text.
+write_pgpass() {
+  { printf '127.0.0.1:%s:%s:%s:' "$SCRATCH_PORT" "$DB_NAME" "$2"; cat -- "$3"; printf '\n'; } >"$1"
+}
+
+# try_login <role> <pgpass file>: 0 the server accepted the password, 1 it refused the password,
+# 2 another error. A role without CONNECT on the database passes the authentication first.
+try_login() {
+  env PGPASSFILE="$2" psql --no-psqlrc --quiet --no-align --tuples-only --no-password \
+    --host=127.0.0.1 --port="$SCRATCH_PORT" --username="$1" --dbname="$DB_NAME" \
+    --command='SELECT 1' >/dev/null 2>"$work_dir/login.err" && return 0
+  if grep -q 'password authentication failed' "$work_dir/login.err"; then
+    return 1
+  fi
+  if grep -q 'permission denied for database' "$work_dir/login.err"; then
+    return 0
+  fi
+  return 2
+}
+
+# check_logins: step 8. The right password works and a wrong password fails, for each role.
+check_logins() {
+  local role status
+  random_secret "$work_dir/wrong.pw"
+  for role in "${login_roles[@]}"; do
+    write_pgpass "$work_dir/pgpass.good" "$role" "$work_dir/pw.$role"
+    write_pgpass "$work_dir/pgpass.bad" "$role" "$work_dir/wrong.pw"
+    status=0
+    try_login "$role" "$work_dir/pgpass.good" || status=$?
+    [ "$status" -eq 0 ] || fail "a login with the right password failed" "\"role\":\"$role\""
+    status=0
+    try_login "$role" "$work_dir/pgpass.bad" || status=$?
+    [ "$status" -ne 0 ] || fail "a login with a wrong password succeeded" "\"role\":\"$role\""
+    [ "$status" -eq 1 ] || fail "a login with a wrong password gave an unexpected error" "\"role\":\"$role\""
+  done
+}
+
+# --- run ----------------------------------------------------------------------------------
+
+[ "$#" -eq 0 ] || fail "usage: restore-test"
+case $BACKUP_DIR in
+  /?*) ;;
+  *) fail "BACKUP_DIR must be an absolute path" ;;
+esac
+[[ $DB_NAME =~ $ROLE_GRAMMAR ]] || fail "bad PGDATABASE"
+
+# Step 1: the gates. A refused run starts no tool.
+[ -f "$BACKUP_DIR/$MARKER_NAME" ] || fail "the marker file of the backup disk is missing"
+for file in restore-code.sql restore-code.expected; do
+  [ -f "$CODE_DIR/$file" ] || fail "restore-code.sql or restore-code.expected is missing"
+done
+mkdir -p -- "$BACKUP_DIR/$SCRATCH_NAME"
+exec 9>>"$BACKUP_DIR/$SCRATCH_NAME/$LOCK_NAME"
+flock -n 9 || fail "another restore test holds the lock"
+delete_stale_runs
+[ -d "$PGPASS_DIR" ] || fail "the directory of the secret files is missing"
+work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX") || fail "cannot create the directory of the secret files"
+select_set
+check_manifest
+check_counts
+check_globals
+log INFO "restore test started" "\"set\":\"$base\""
+
+# Step 2: the names of the dump.
+check_names
+
+# Step 3: the scratch cluster, the globals file, and the passwords.
+start_cluster
+restore_globals
+set_passwords
+
+# Step 4: pre-data, then the code of the kinds that pre-data holds.
+restore_section pre-data
+check_database
+compare_code pre-data "$PRE_DATA_KINDS"
+
+# Step 5: the data and post-data, then the code of every kind.
+restore_section data
+restore_section post-data
+compare_code post-data "$ALL_KINDS"
+
+# Steps 6 to 8: the row counts, the audit chain, and the logins.
+compare_counts
+check_chain
+check_logins
+
+# Step 9: the result line.
+log INFO "restore test passed" "\"set\":\"$base\",\"tables\":$table_count,\"roles\":${#login_roles[@]}"

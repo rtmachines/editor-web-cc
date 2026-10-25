@@ -17,8 +17,8 @@ use crate::memory::FaultPoint;
 use crate::memory::sink::RecordedEvent;
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DiffReads, DraftRepository, Isolation, NonEmpty,
-    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, Transaction, TypeCatalog,
-    UnitLookup, UserRepository,
+    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, SettingRepository,
+    Transaction, TypeCatalog, UnitLookup, UserRepository,
 };
 
 /// The length of the audit log and of the event list of the sink at the `begin` of a transaction.
@@ -209,6 +209,10 @@ impl Transaction for MemoryTransaction {
         self
     }
 
+    fn settings(&mut self) -> &mut dyn SettingRepository {
+        self
+    }
+
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {
         let mut shared = self.shared.lock();
         if let Some(fault) = shared.take_queued(FaultPoint::AppendAudit) {
@@ -249,5 +253,6 @@ impl Transaction for MemoryTransaction {
     }
 }
 
+mod settings;
 #[cfg(test)]
 mod tests;

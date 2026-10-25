@@ -111,6 +111,65 @@ This file records the notable changes of the recipe editor. The format follows [
 - The export link and the notice of a `Retired` version on the version page (ADR-0052), with the texts in `pl` and `en`.
 - The how-to guide `docs/user/check-export-document.md`.
 - The PostgreSQL tests of the export: a changed value under the stored hash, a retirement, and a writer error.
+- ADR-0057 for the two panic containment layers. ADR-0058 for the serving loop and the request timeouts. ADR-0059 for the health probe, the readiness rule, and the health router.
+- ADR-0060 for the supervised jobs, their ports, and the library target of `recipe-server`. ADR-0061 for the start order of `serve`. ADR-0062 for the 18 configuration keys of `serve` and the secret files.
+- ADR-0063 for the webhook of the alerts. ADR-0064 for the images. ADR-0065 for the TLS of the proxy, the networks `edge` and `egress`, and the default trusted proxy.
+- ADR-0066 for the backup disks, the file sets, and the schedule. ADR-0067 for the restore test. ADR-0068 for the WAL archive and the base backups. ADR-0069 for the hardening of the database access.
+- ADR-0070 for the container limits, the networks, the healthchecks, and the stack test. ADR-0071 for the read-only banner. ADR-0072, which keeps the export routes outside the request timeout.
+- ADR-0073 for the read faults of the jobs and the audit chain alert. ADR-0074 for the names of the files on the backup disks. ADR-0075 for the names of the alert conditions.
+- ADR-0076 for the name list of the restore test. ADR-0077 for the marker entry of the recovery check, the WAL cutoff, and the scratch constants. ADR-0078 for the trigger state and the refused kinds of the restore test.
+- ADR-0079 for the row of the startup settings comparison. ADR-0080 for a blank `RUST_LOG` and the exit text of `main`. ADR-0081 for the CPU limit of the recovery check.
+- ADR-0082 for the upgrade and the rollback of `app` without its dependencies. ADR-0083 for the image of `backup` and `walarchive` in the upgrade and the rollback. ADR-0084 for the code of a generated column in the restore of `pre-data`.
+- ADR-0085 for the pause after an accept fault. ADR-0086 for the bounds and the anchor of the audit chain check. ADR-0087 for the drain of the internal listener.
+- ADR-0088 for the run interface of the jobs and the cut count. ADR-0089 for the errors of the jobs, the first run of `disk_check`, and the stop line. ADR-0090 for a `NULL` `sent_lsn` and a pool close that reaches its limit.
+- ADR-0091 for the readiness cache of the health router. ADR-0092 for the panic isolation of one webhook call. ADR-0093 for the stored times and the counter totals of the job `alerts`. ADR-0094 for the trigger of the CI stack test.
+- The subcommand `recipe-server healthcheck` (ADR-0059). It sends `GET /readyz` to the internal listener with `std` only. It exits with code 0 only for the status 200.
+- The subcommand `recipe-server serve` (ADR-0061). It checks the configuration and both key files before it opens a listener. It also measures the free space on `pgdata` and compares the settings.
+- `serve` opens the internal listener before the public listener. A watchdog thread probes `/healthz` and ends the process with exit code 70 after `watchdog.failures` failed probes in `watchdog.window`.
+- On `SIGTERM`, `serve` drains the connections and the jobs, closes the pools, stops the internal listener, and stops the runtime. During the drain, `/healthz` returns `ok` and `/readyz` returns `not ready`.
+- The stop of `serve` writes one `WARN` line with the counts of the cut connections and jobs only when a count is above 0. A pool close that reaches its limit writes one `WARN` line, and the exit code stays 0 (ADR-0087 to ADR-0090).
+- The accept loop of `recipe-server` on `hyper`. It closes a connection that sends no request headers within `http.body_read_timeout`. It pauses for `http.accept_error_pause` after an accept fault (ADR-0058, ADR-0085).
+- The request timeout of 30 s. A slow request gives `503 E-WEB-009`, and a body that stops gives the same code. The export routes under `/export/v1/` keep their own limits (ADR-0072).
+- The health router in `recipe-web` with `/healthz` and `/readyz` on the internal port. `/readyz` caches its result for 5 s and stays ready on a database with a newer migration (ADR-0059, ADR-0091).
+- The adapters `ReadinessProbe` and `Database::close` in `recipe-db`. The readiness rule refuses a missing migration, a changed checksum, and a failed migration row.
+- `init_logging` in `recipe-server` with `EnvFilter` and the span list. It writes one JSON object per line. A `RUST_LOG` without a directive gives the default filter. A bad `RUST_LOG` stops the start with one `ERROR` line (ADR-0080).
+- The panic hook of `recipe-server`. It writes one JSON `ERROR` line with the `request_id` and the field `job`, and it counts the panic.
+- The inner and the backstop `CatchPanicLayer` of `recipe-web`. A panic in a request gives `E-WEB-010`. The backstop answers with a plain text `500` and the header `X-Request-Id` (ADR-0057).
+- The ports `MaintenanceStore`, `AuditChainReads`, `OperationsReads`, `ReadinessProbe`, `DiskSpace`, `BackupDirectory`, `AlertWebhook`, and `ReadOnlySwitch` in `recipe-app`, with in-memory adapters. `SettingRepository` joins `Transaction`.
+- The six supervised jobs `cleanup`, `disk_check`, `audit_chain_check`, `heartbeat`, `clock_check`, and `alerts`. Each job has the method `run_once(request_id, kind)`.
+- The supervisor, the schedules, and the span `job` in `recipe-server`. The supervisor aborts the open job iterations after the drain deadline.
+- The job `audit_chain_check`. A break writes the security event `audit_chain_broken` and gives `E-AUD-002` as `AppError::Audit`. `AuditError` joins `AppError` (ADR-0086, ADR-0089).
+- The job `alerts`. It writes one `WARN` line with the field `alert` for each active condition, with the names of ADR-0075. The condition `low_disk` has the field `volume`.
+- The webhook adapter of `recipe-server`. It sends one HTTPS `POST` for each active condition, and it reads the URL only from the secret file `alerts_webhook_url`. A failed call writes one `WARN` line without the URL (ADR-0063, ADR-0092).
+- `AppContext::with_counters` and the counter of `E-EXP-002` in the export flow. The job `alerts` raises one alert when an export returned `E-EXP-002` since its last run.
+- The module `setting` of `recipe-domain` with `SettingKey`, `SettingValue`, and `SettingId`. It also holds the fingerprint of the webhook URL. The change also adds `AuditTarget::app_setting` and the constructor `SecurityEvent::audit_chain_broken`.
+- The internal operation `CompareSettings`. At the start, it compares each configuration key with `app_setting` in one transaction. It writes one `SettingChanged` entry with `actor = None` for each changed value, also in read-only mode (ADR-0079).
+- The adapters of `SettingRepository` and `MaintenanceStore` in `recipe-db`, and the adapter of `AuditChainReads` with the SQL of `data-model.md` section 4.9.
+- The 18 operator keys of `serve`, the check of the key files, and the webhook file. A refusal names the key and never its value (ADR-0062, ADR-0063).
+- The adapters `DiskSpace` (with `rustix`), `BackupDirectory`, and the clock in `recipe-server`. The job `disk_check` turns read-only mode on below 5 % free space and on a failed measurement (ADR-0073).
+- The read-only banner in the layout, with the key `readonly-banner` in `pl` and `en`. It stands directly after `<main id="content">` and before `#error-panel` (ADR-0071).
+- The migration `0006_operations.sql` with the index `security_event_occurred_at_idx` and the function `replication_state()`. `recipe_app` reads the replication state through that function and holds no `pg_read_all_stats`.
+- `01-roles.sh` writes the whole `pg_hba.conf` of `data-model.md` section 5.1. `data-model.md` section 5.5 describes the operations objects.
+- `recipe-server serve`, `migrate`, and `create-admin` refuse to start when a variable `PG*` exists. The connect options of `recipe-db` use no pgpass file and the TLS mode `disable`. `migrate` stops after 10 s without a connection (ADR-0069).
+- The Compose stack in `deploy/compose.yaml` with seven services and the profile `pitr`. It has the networks `edge`, `egress`, and `backend`, and the last has `internal: true`. Each service drops every Linux capability.
+- The files `deploy/compose.build.yaml`, `deploy/compose.dev.yaml`, and `deploy/.env.example`. The limits of each service come from the keys `container.*` of `reliability.md` section 7.11 (ADR-0070).
+- `deploy/Dockerfile` and `.dockerignore` for the image of `recipe-server` on `distroless/static-debian13:nonroot` with the user 65532. Line-ending rules for the container files are in `.gitattributes` (ADR-0064).
+- `deploy/Caddyfile` and `deploy/Caddyfile.dev` for the edge. Caddy handles TLS, redirects HTTP to HTTPS, and returns `404` for `/healthz*` and `/readyz*`. A `502` for an HTMX request carries `HX-Retarget` and `HX-Push-Url: false` (ADR-0065).
+- The secret files of `deploy/compose.yaml`: the passwords of the database roles, `login_hmac_key`, `csrf_signing_key`, `alerts_webhook_url`, `tls_cert`, and `tls_key`. A key file holds one key per line, the newest key first.
+- The key rotation procedure in the runbook. The server accepts both keys during `security.key_rotation_overlap`.
+- The image `recipe-pgtools` in `deploy/pgtools/` with the scripts `backup-entry`, `backup-once`, `backup-now`, `backup-health`, and `restore-test`. A nightly dump at 02:00 UTC writes the dump, the globals, the counts, and the manifest (ADR-0066).
+- The restore test of `deploy/pgtools/bin/restore-test` with `restore-code.sql` and `restore-code.expected`. It restores the newest set into a private scratch cluster. It compares the code of the dump with the list of the release (ADR-0067, ADR-0076, ADR-0078).
+- The scripts `walarchive-entry`, `walarchive-health`, `basebackup-once`, and `pitr-check` with `crontab.walarchive`. `pg_receivewal` streams the WAL, and `pitr-check` recovers a scratch cluster from the newest base backup (ADR-0068, ADR-0077).
+- The marker files `.backup-marker` and `.walarchive-marker`. The scripts of `backup` and `walarchive` refuse to start without the marker of their disk (ADR-0074).
+- The test scripts `backup-test`, `restore-test-test`, and `walarchive-test` in `deploy/pgtools/tests/`.
+- The CI job `compose` in `.github/workflows/ci.yml`. It builds both images, starts the stack from zero, and runs the login, isolation, recovery, pgtools, stop, and same-filesystem checks. It runs on `workflow_dispatch` and on a push to `main` (ADR-0094).
+- The CI job `musl-unwind` for the panic tests on musl. The scripts of both jobs are in `deploy/ci/`.
+- The runbook `docs/ops/runbook.md`. It covers the host preparation, the first start, the backup and restore, the upgrade and rollback, the rotations, the alarms, and read-only mode.
+- The test `deploy_values` in `recipe-server`. It compares the values in the files of `deploy/` with `reliability.md` section 7.11 and has mutation tests for the comparison.
+- The integration tests of `serve` in `crates/recipe-server/tests/serve.rs` with a PostgreSQL container. They run the built binary and check `/healthz`, `/readyz`, the first settings entries, a key file fault, and `SIGTERM`.
+- The tests `healthcheck`, `panic_hook`, `supervisor_panic_hook`, `watchdog_exit`, `pg_env`, `logging_start`, and `serve_env` of `recipe-server`.
+- The PostgreSQL tests of `recipe-db` for the settings, the maintenance store, the audit chain reads, the operations reads, `restore-code.expected`, and the new grants.
+- The workspace dependencies `hyper`, `hyper-util`, `hyper-rustls`, `rustls`, `http-body-util`, `tokio-util`, and `rustix`. `Cargo.lock` holds the new crate `matchers`.
 
 ### Changed
 
@@ -156,6 +215,23 @@ This file records the notable changes of the recipe editor. The format follows [
 - The export flow writes the document in its blocking task after the hash check and before the commit of `VersionExported`. A writer error gives `E-EXP-004` and no audit entry.
 - The value of a struct parameter in the export keeps the member order of its type. `content_sha256` does not change.
 - A `HEAD` request on an export route gets the answer of an unlisted method, and the use case does not run (ADR-0054).
+- `reliability.md` sections 1.1, 1.2, 2.1, 2.3, 2.4, 3.1 to 3.5, 3.7, 5, 6, 7.1 to 7.4, 7.6 to 7.12, and 8 hold these decisions. Section 7.11 holds the new settings, and section 7.12 lists the 18 keys of `serve`.
+- `overview.md` sections 3, 5, 7, and 9 and `domain-model.md` sections 2.4, 5, and 8 hold them too. `overview.md` section 9 changes the Assumptions A18 and A24, and `domain-model.md` section 8 keeps its copy of A24 equal.
+- `data-model.md` sections 3.8, 3.17, 4.9, 5.1, 5.3, 5.5, 6, and 8 hold them too. Section 5.5 is new and describes the operations objects of `0006_operations.sql`.
+- `api.md` sections 2.10, 3.2, 5.1, 5.2, 5.3, 7.1, and 9 and `design-system.md` sections 6, 10.1, and 10.7 hold them too.
+- ADR-0020 has an "Amended by" note for ADR-0057, ADR-0059, ADR-0061, ADR-0065, ADR-0066, ADR-0069, ADR-0073, ADR-0082, and ADR-0083. ADR-0022 has one for ADR-0062, ADR-0063, and ADR-0086.
+- ADR-0031 has a note for ADR-0062, and ADR-0034 has one for ADR-0069. ADR-0036 has one for ADR-0057 and ADR-0071.
+- ADR-0037, ADR-0047, ADR-0049, and ADR-0053 have an "Amended by" note for ADR-0057. The ADRs 0057 to 0094 also amend each other, for example ADR-0058 by ADR-0072, ADR-0085, and ADR-0087 to ADR-0089.
+- `docs/adr/README.md` has the new rows of the index and the decision map. The topic "Deployment, migrations, backup, panic policy, health" lists the ADRs 0057 to 0094.
+- `recipe-server` is a binary with a library target. `main` stays thin, and the tests import the modules from the library (ADR-0060). `CLAUDE.md` lists the subcommand `healthcheck`.
+- A background job logs a handled fault once at `WARN`. The backstop panic layer and the supervisor of the jobs log an error. `CLAUDE.md`, `.claude/rules/rust.md`, and `overview.md` section 7 (R35) state the rule.
+- `.claude/rules/rust.md` names the six places that catch a panic. `.claude/rules/web.md` states the answer of the backstop `CatchPanicLayer` as an exception. `.claude/rules/sql.md` states the rule for a generated column and the routine grants in `grants.expected`.
+- `AGENTS.md` names `target/p41-brief.md` and the design of this change, and it states the rule of ADR-0084 (d) for a migration.
+- The default of `http.trusted_proxies` is `172.28.0.2/32`, the fixed address of `proxy` (ADR-0065).
+- Assumption A18 states that Caddy handles every TLS connection of a client. Assumption A24 states that a failed measurement of the free space also turns read-only mode on.
+- `recipe_app` no longer holds `pg_read_all_stats`. The function `replication_state()` of `audit_owner` reads the replication state, and `public.replication_state()` is in the guard list of ADR-0034.
+- The service `backup` runs `supercronic` and has the limit `container.backup_memory` of 512 MiB in place of 128 MiB (ADR-0067).
+- `Cargo.lock` holds `tokio` 1.54.1 in place of 1.53.2.
 
 ### Security
 

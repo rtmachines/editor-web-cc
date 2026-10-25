@@ -21,7 +21,7 @@ error-E-IDN-008 = Obecne hasło jest niepoprawne.
 error-E-IDN-009 = Użytkownik { $login } jest już aktywny.
 error-E-IDN-010 = Użytkownik { $login } jest już nieaktywny.
 error-E-WEB-005 = Zasób nie istnieje: { $entity }.
-error-E-WEB-006 = System działa w trybie tylko do odczytu, bo brakuje miejsca na dysku. Skontaktuj się z administratorem.
+error-E-WEB-006 = System działa w trybie tylko do odczytu, bo brakuje miejsca na dysku lub nie można go zmierzyć. Skontaktuj się z administratorem.
 error-E-WEB-009 = Żądanie trwało zbyt długo i zostało przerwane. Spróbuj ponownie.
 error-E-WEB-010 = Wystąpił błąd wewnętrzny. Skontaktuj się z administratorem.
 error-E-WEB-011 = Operacja { $stage } nie zakończyła się. Spróbuj ponownie.
@@ -130,6 +130,7 @@ lang-switch-label = Język
 lang-switch-pl = Polski
 lang-switch-en = English
 user-signed-in = Zalogowano jako
+readonly-banner = Tryb tylko do odczytu: brakuje miejsca na dysku lub nie można go zmierzyć. Zmiany są zablokowane. Możesz przeglądać, eksportować, logować się i wylogować.
 
 # Recipe list
 recipes-title = Receptury

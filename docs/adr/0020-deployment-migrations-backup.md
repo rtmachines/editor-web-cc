@@ -1,6 +1,6 @@
 # ADR-0020: Deployment, migrations, backup and failure policy
 
-Status: Accepted. Amended by ADR-0033 (options of the globals dump)
+Status: Accepted. Amended by ADR-0033 (options of the globals dump). Amended by ADR-0057 (two panic layers) and ADR-0059 (status codes and readiness rule of the health endpoints). Amended by ADR-0061 (`SettingChanged` at the start in read-only mode) and ADR-0065 (no re-encryption to the upstream). Amended by ADR-0066 (retention of every file set) and ADR-0069 (`replication_state()` and the whole `pg_hba.conf`). Amended by ADR-0073 (read-only mode on a failed measurement of the free space). Amended by ADR-0082 (`--no-deps` in the upgrade and the rollback of `app`). Amended by ADR-0083 (the image of `backup` and `walarchive` in the upgrade and the rollback)
 Date: 2026-10-12
 Deciders: project owner
 

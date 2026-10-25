@@ -27,9 +27,11 @@ fn table_value(table: &str, key: &str) -> String {
         .unwrap_or_else(|| String::from("<key not found>"))
 }
 
+/// Read a duration such as `10 min`. A cell can continue with a sentence after the unit.
 fn duration_of(text: &str) -> Duration {
-    let (number, unit) = text.split_once(' ').unwrap();
-    let number: u64 = number.parse().unwrap();
+    let mut words = text.split_whitespace();
+    let number: u64 = words.next().unwrap().parse().unwrap();
+    let unit = words.next().unwrap().trim_end_matches('.');
     let seconds = match unit {
         "s" => Some(number),
         "min" => number.checked_mul(60),
@@ -91,6 +93,7 @@ fn pool_defaults_equal_the_settings_table() {
     assert_eq!(settings.max_lifetime, duration("db.pool_max_lifetime"));
     let size: u32 = table_value(&table, "db.pool_size").parse().unwrap();
     assert_eq!(settings.size, size);
+    assert_eq!(settings.wait_warn, duration("db.pool_wait_warn"));
 }
 
 #[test]
@@ -107,6 +110,10 @@ fn migrate_defaults_equal_the_settings_table() {
     assert_eq!(
         settings.retry_pause,
         duration_of(&table_value(&table, "migrate.retry_pause"))
+    );
+    assert_eq!(
+        settings.connect_timeout,
+        duration_of(&table_value(&table, "migrate.connect_timeout"))
     );
 }
 

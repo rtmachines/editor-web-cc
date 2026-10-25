@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# backup-now: the operator command `docker compose exec backup backup-now` (ADR-0066 (i)).
+# It runs backup-once with the suffix _now. The exit code of backup-once is the exit code here.
+set -euo pipefail
+umask 077
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec "$here/backup-once" _now

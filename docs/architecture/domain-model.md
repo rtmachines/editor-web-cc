@@ -462,7 +462,7 @@ The use case writes the `AuditEntry` in the same transaction as the change (ADR-
 |---|---|
 | `id` | `i64` (identity) |
 | `occurred_at` | `Timestamp` |
-| `kind` | `SecurityEventKind`: `LoginFailed`, `LoginRejectedInactive`, `LoginThrottled`, `CsrfRejected`, `Forbidden`, `Unlock`, `AuditChainBroken` (written by the nightly audit chain check). SQL values (`data-model.md` 3.8): `login_failed`, `login_rejected_inactive`, `login_throttled`, `csrf_rejected`, `forbidden`, `unlock`, `audit_chain_broken` |
+| `kind` | `SecurityEventKind`: `LoginFailed`, `LoginRejectedInactive`, `LoginThrottled`, `CsrfRejected`, `Forbidden`, `Unlock`, `AuditChainBroken` (written by the job `audit_chain_check`). SQL values (`data-model.md` 3.8): `login_failed`, `login_rejected_inactive`, `login_throttled`, `csrf_rejected`, `forbidden`, `unlock`, `audit_chain_broken` |
 | `login_hmac` | `Option<Hmac>` (HMAC of the login field, never the plain text. Set when no account matches, and always for `LoginThrottled`) |
 | `user` | `Option<UserId>` |
 | `client_ip`, `user_agent` | `Option<IpAddr>` (`None` only for `AuditChainBroken`), `Option<Text>` |
@@ -538,7 +538,7 @@ Rules:
 
 ## 5. Domain operations
 
-Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing. Each command runs in one READ COMMITTED transaction, except `Login` and the two SERIALIZABLE commands of section 5.3.
+Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing. Each command runs in one READ COMMITTED transaction, except `Login` and the two SERIALIZABLE commands of section 5.3.
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
@@ -556,10 +556,24 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 
 | Port | Operations |
 |---|---|
-| `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). The startup settings comparison (`SettingChanged`). The subcommand `create-admin` (`UserCreated`, `actor = None`) |
-| `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. An aggregated kind increments `count` (section 2.4). A failed or throttled `Login` writes its row also in read-only mode |
+| `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). The startup settings comparison `CompareSettings` (`SettingChanged`, `actor = None`). It writes the rows of `app_setting` through `SettingRepository` of the transaction, also in read-only mode (ADR-0061 (e)). The subcommand `create-admin` (`UserCreated`, `actor = None`) |
+| `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. The row `audit_chain_broken` of that job holds the `request_id` of the run (ADR-0060 (s)). An aggregated kind increments `count` (section 2.4). A failed or throttled `Login` writes its row also in read-only mode |
 | `LoginAttemptStore` | `Login` T1 counts the failures and inserts the attempt under the advisory lock, below the per-IP budget, also in read-only mode. `Login` T2 on success marks the attempt inside the `UnitOfWork` transaction. A wrong current password in `ChangeOwnPassword` also inserts an attempt |
-| `MaintenanceStore` | The job `cleanup`. It deletes expired sessions and old `login_attempt` rows in batches of `login_attempt.purge_batch`, and it calls `security_event_purge()` once per batch. The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `heartbeat` records `heartbeat.last_at` in `app_setting`. No audit entry |
+| `MaintenanceStore` | The job `cleanup`. It deletes expired sessions and old `login_attempt` rows in batches of `login_attempt.purge_batch`, and it calls `security_event_purge()` once per batch. `reliability.md` 2.4 gives the interval of each delete (ADR-0060 (l)). The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `heartbeat` records `heartbeat.last_at` in `app_setting`. No audit entry |
+
+The jobs and the health router also use ports that write nothing to the database (ADR-0060 (a) to (f)):
+
+| Port | Adapter | Operations |
+|---|---|---|
+| `AuditChainReads` | `recipe-db` | The job `audit_chain_check` reads the head and the batches of `data-model.md` 4.9 |
+| `OperationsReads` | `recipe-db` | The job `alerts` reads every value of one run in one `READ ONLY` transaction |
+| `ReadinessProbe` | `recipe-db`, on the health pool | `/readyz` runs the readiness check of `reliability.md` 7.2 |
+| `DiskSpace` | `recipe-server` | The job `disk_check` reads the free space of a volume |
+| `BackupDirectory` | `recipe-server` | The job `alerts` reads the time of the newest complete backup set |
+| `AlertWebhook` | `recipe-server` | The job `alerts` sends one `POST` for each active condition (ADR-0063) |
+| `ReadOnlySwitch` | `recipe-web::ReadOnlyMode` | The job `disk_check` turns read-only mode on and off |
+
+Each port has an in-memory adapter for the tests. Each job is one iteration `run_once` in `recipe-app`. `recipe-server` runs the loop.
 
 ### 5.1 Plant Model
 
@@ -732,7 +746,7 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A7 | A recipe has at most one `Draft` at a time |
 | A17 | The UI supports `pl` and `en`. The plain cookie `recipe_lang` stores the UI language. The session does not store it. `POST /lang` sets the cookie, also before login. Parameter translations accept language codes `^[a-z]{2,3}(-[A-Z]{2})?$` |
 | A22 | Login throttling is a progressive delay per (login, client IP) and a per-IP budget. There is no permanent lockout. An Administrator can unlock a login |
-| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 % |
+| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. A failed measurement of the free space also turns the mode on. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, `VersionExported`, and the `SettingChanged` entries of the startup settings comparison. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 %. Only a measurement that succeeds can end the mode |
 | A25 | One installation serves one production line. The draft's "production line" has no entity |
 | A26 | Size budgets: 16 384 leaves per parameter, 262 144 leaves and 32 768 limit rows per version, 4 000 parameters per version |
 | A27 | A reference number matches `[A-Z0-9][A-Z0-9_-]{0,49}`. Input is folded to upper case |

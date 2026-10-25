@@ -9,6 +9,7 @@ use recipe_domain::audit::AuditContext;
 
 use crate::auth::{CurrentUser, Operation, RequestMeta};
 use crate::blocking::{AppSettings, DiffGate, ExportGate};
+use crate::operations::AlertCounters;
 use crate::ports::{Clock, SecurityEventSink, UnitOfWork};
 
 /// The ports and settings that every use case needs.
@@ -33,6 +34,8 @@ pub struct AppContext {
     pub(crate) diff_gate: DiffGate,
     /// The gate of the parallel exports (`export.permits`). Every clone shares it (ADR-0056 (f)).
     pub(crate) export_gate: ExportGate,
+    /// The counters of the job `alerts`. Every clone shares them (ADR-0073).
+    pub(crate) counters: AlertCounters,
 }
 
 impl AppContext {
@@ -54,8 +57,28 @@ impl AppContext {
             clock,
             diff_gate: DiffGate::new(settings.diff.permits),
             export_gate: ExportGate::new(settings.export.permits),
+            counters: AlertCounters::default(),
             settings,
         }
+    }
+
+    /// Return the context with `counters` in place of its own counters.
+    ///
+    /// The method solves one problem: the job `alerts` reads the counters that the use cases
+    /// write. `recipe-server` builds one [`AlertCounters`] and gives a clone to the context
+    /// and to the job. A clone of the context shares the same counters.
+    #[must_use]
+    pub fn with_counters(self, counters: AlertCounters) -> Self {
+        Self { counters, ..self }
+    }
+
+    /// Return the counters of the job `alerts` that the context holds.
+    ///
+    /// The accessor solves one problem: a test of the wiring must show that the use cases write
+    /// to the counters that the job `alerts` reads. A second counter set would hide an alert.
+    #[must_use]
+    pub fn counters(&self) -> &AlertCounters {
+        &self.counters
     }
 
     /// Return the sink of security events that the context holds.
@@ -71,7 +94,8 @@ impl AppContext {
 /// A use case with a fixed operation in the catalog.
 ///
 /// The trait solves one problem: the permission check of a use case must name an operation
-/// of the catalog, so a use case without a catalog row does not compile (design D7).
+/// of the catalog.
+/// A use case without a catalog row does not compile (design D7).
 pub trait UseCase {
     /// The operation that `authorize` checks first.
     const OPERATION: Operation;

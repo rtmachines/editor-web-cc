@@ -5,49 +5,15 @@
 //! `RECIPE_` values on a child process.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use figment::Figment;
 use figment::providers::Serialized;
 
 use super::args::{self, Command};
+use super::test_support::Sandbox;
 use super::{
     ENV_KEYS, SecretFault, Settings, app_connection, load_with, migrator_connection, secret_line,
 };
-
-static NEXT_NUMBER: AtomicU32 = AtomicU32::new(0);
-
-/// A temporary directory of one test. The drop removes it.
-struct Sandbox(PathBuf);
-
-impl Sandbox {
-    fn new() -> Self {
-        let number = NEXT_NUMBER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "recipe-server-config-{}-{number}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-
-    fn path(&self, name: &str) -> PathBuf {
-        self.0.join(name)
-    }
-
-    fn write(&self, name: &str, text: &str) -> PathBuf {
-        let path = self.path(name);
-        std::fs::write(&path, text).unwrap();
-        path
-    }
-}
-
-impl Drop for Sandbox {
-    fn drop(&mut self) {
-        // A leftover directory in the temporary folder does no harm.
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
 
 /// A provider without any value. It stands for an environment without `RECIPE_` values.
 fn no_environment() -> Figment {

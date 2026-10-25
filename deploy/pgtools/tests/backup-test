@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Test script T25 (backup part) of the recipe-pgtools image.
+#
+# It tests backup-once, backup-now, and backup-health with stubs of psql, pg_dump,
+# pg_dumpall, and date on PATH (design D14 row T25, ADR-0066).
+# It needs flock, sha256sum, and GNU coreutils. The image recipe-pgtools has them.
+#
+# Run in CI inside a container of the image, with the directory deploy/pgtools mounted:
+#   docker run --rm --entrypoint bash -v "$PWD/deploy/pgtools:/pgtools:ro" \
+#     recipe-pgtools /pgtools/tests/backup-test
+#
+# Cases that need the real database (CI job "compose", design D11) and not these stubs:
+#   - the real psql session: REPEATABLE READ snapshot, the count query, and \gexec
+#   - pg_dump --snapshot with the exported snapshot, and pg_dumpall -l recipe as recipe_backup
+#   - the login with the pgpass file, and the mode of the real tmpfs /run/pgpass
+#
+# The health cases need a second filesystem for the fake pgdata. The variable PGTOOLS_TEST_OTHER_FS
+# names a directory on it, default /dev/shm. A case without it prints SKIP.
+# When the variable CI is set, each SKIP counts as a failure.
+set -uo pipefail
+umask 077
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BIN=${PGTOOLS_BIN:-$HERE/../bin}
+OTHER_FS_DIR=${PGTOOLS_TEST_OTHER_FS:-/dev/shm}
+REAL_DATE=$(command -v date)
+REAL_RM=$(command -v rm)
+export REAL_DATE REAL_RM
+SHM_DIRS=()
+LAST_BASE=""
+FOREIGN_FILES=()
+FOREIGN_MANIFEST_TEXT=""
+LAST_TEMP=()
+OTHER_PGDATA=""
+SECRET='ab:c\d9'
+SNAPSHOT_ID=00000003-0000001B-1
+PASSED=0
+FAILED=0
+SKIPPED=0
+CASE=""
+B=""
+RC=0
+
+# A missing case function must fail the run. Bash runs this handler in a subshell.
+# So the handler cannot raise FAILED. It prints a FAIL line and writes a marker file instead.
+# The last line of this script reads the marker file (CR-O2-12).
+command_not_found_handle() {
+  bad "command not found: $1"
+  : >"${ROOT:?}/command-not-found"
+  return 127
+}
+
+# The functions live in tests/lib. Each file sets only functions.
+# A file that cannot be read stops the run.
+# shellcheck source=lib/helpers.sh
+source "$HERE/lib/helpers.sh" || exit 1
+# shellcheck source=lib/stubs.sh
+source "$HERE/lib/stubs.sh" || exit 1
+# shellcheck source=lib/once-cases.sh
+source "$HERE/lib/once-cases.sh" || exit 1
+# shellcheck source=lib/delete-cases.sh
+source "$HERE/lib/delete-cases.sh" || exit 1
+# shellcheck source=lib/health-cases.sh
+source "$HERE/lib/health-cases.sh" || exit 1
+
+ROOT=$(mktemp -d)
+trap cleanup EXIT
+
+make_stubs
+make_extra_stubs
+case_static_rules
+case_missing_marker
+case_happy_path
+case_no_tables
+case_suffixes
+case_retention_all_old
+case_retention_mixed
+case_retention_keeps_temp_and_foreign
+failed_run_case dump-fails STUB_PG_DUMP_FAIL=1
+failed_run_case dumpall-fails STUB_DUMPALL_FAIL=1
+case_psql_not_usable
+case_session_ends
+case_session_exit_status
+case_entry
+case_pgpass_removed_first
+case_cleanup_delete_fails
+case_publish_delete_fails
+case_published_delete_fails
+case_published_delete_continues
+case_sync_after_manifest
+case_name_exists
+case_temp_name_exists
+case_rename_never_replaces
+case_parallel_runs
+case_secret_file_rules
+case_health_second_fs
+case_health_same_fs
+case_health_no_pg_version
+
+[ "$SKIPPED" -eq 0 ] || printf 'backup-test: %d skipped\n' "$SKIPPED"
+printf 'backup-test: %d passed, %d failed\n' "$PASSED" "$FAILED"
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] && [ ! -e "$ROOT/command-not-found" ]

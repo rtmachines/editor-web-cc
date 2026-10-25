@@ -64,6 +64,9 @@ pub struct PoolSettings {
     pub idle_timeout: Duration,
     /// The age after which the pool replaces a connection (`db.pool_max_lifetime`).
     pub max_lifetime: Duration,
+    /// The wait for a free connection above which the pool writes a `WARN` event
+    /// (`db.pool_wait_warn`).
+    pub wait_warn: Duration,
 }
 
 impl Default for PoolSettings {
@@ -76,11 +79,13 @@ impl Default for PoolSettings {
             size: 10,
             idle_timeout: Duration::from_secs(10 * 60),
             max_lifetime: Duration::from_secs(30 * 60),
+            wait_warn: Duration::from_secs(1),
         }
     }
 }
 
-/// The lock timeout and the retry rule of the migrator (`reliability.md` section 5).
+/// The connect timeout, the lock timeout, and the retry rule of the migrator (`reliability.md`
+/// section 5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MigrateSettings {
     /// The longest wait for one lock during a migration (`migrate.lock_timeout`).
@@ -89,6 +94,8 @@ pub struct MigrateSettings {
     pub retries: u32,
     /// The pause before a retry (`migrate.retry_pause`).
     pub retry_pause: Duration,
+    /// The longest time that one attempt waits for the connection (`migrate.connect_timeout`).
+    pub connect_timeout: Duration,
 }
 
 impl Default for MigrateSettings {
@@ -97,6 +104,7 @@ impl Default for MigrateSettings {
             lock_timeout: Duration::from_secs(2),
             retries: 10,
             retry_pause: Duration::from_secs(5),
+            connect_timeout: Duration::from_secs(10),
         }
     }
 }

@@ -2,7 +2,9 @@
 # Create the roles and the database of the recipe editor.
 #
 # The postgres image runs this script once, as the superuser, on an empty data directory.
-# Source: docs/architecture/data-model.md section 5.1, ADR-0031, ADR-0032, ADR-0034, and ADR-0035.
+# Source: docs/architecture/data-model.md section 5.1, ADR-0031, ADR-0032, ADR-0034, ADR-0035,
+# and ADR-0069. The script writes the whole pg_hba.conf (ADR-0069 (r) to (t)). It holds no test
+# switch. The storage tests mount their own second init script (ADR-0069 (u)).
 # Each password comes from a secret file (reliability.md section 7.11). psql reads the file,
 # so a password never appears in the argument list of a process.
 #
@@ -30,11 +32,12 @@ fail() {
 # Check that a value is an IPv4 address with a prefix length, for example 172.28.0.0/16.
 is_ipv4_cidr() {
   local value=$1 octet
-  [[ $value =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$ ]] || return 1
+  local byte='(0|[1-9][0-9]{0,2})'
+  local prefix='([1-9]|[12][0-9]|3[0-2])'
+  [[ $value =~ ^${byte}\.${byte}\.${byte}\.${byte}/${prefix}$ ]] || return 1
   for octet in "${BASH_REMATCH[@]:1:4}"; do
-    (( 10#$octet <= 255 )) || return 1
+    (( octet <= 255 )) || return 1
   done
-  (( 10#${BASH_REMATCH[5]} <= 32 ))
 }
 
 # Check that a secret file is readable and holds exactly one non-empty line without "\r".
@@ -76,12 +79,12 @@ CREATE ROLE recipe_replicator LOGIN REPLICATION
                               PASSWORD :'replicator_password';         -- walarchive only
 CREATE ROLE audit_owner       NOLOGIN;                                  -- owner of audit tables
 GRANT pg_read_all_data TO recipe_backup;
--- The job alerts reads the replication lag of recipe_replicator in pg_stat_replication
--- (reliability.md 3.7). SET FALSE: recipe_app cannot SET ROLE to it.
-GRANT pg_read_all_stats TO recipe_app WITH INHERIT TRUE, SET FALSE;
--- ADR-0035: the server log holds no DETAIL with row values of a failed statement of recipe_app.
+-- ADR-0069: the function replication_state() of audit_owner reads pg_stat_replication
+-- (section 5.5). recipe_app holds no pg_read_all_stats and reads no statement text.
+GRANT pg_read_all_stats TO audit_owner WITH INHERIT TRUE;
+-- ADR-0035: the server log holds no DETAIL with row values of a failed statement of recipe_app,
+-- and no bind value of a slow statement.
 ALTER ROLE recipe_app SET log_error_verbosity = 'terse';
--- Review D6: a slow statement of recipe_app logs no bind value, for example a password hash.
 ALTER ROLE recipe_app SET log_parameter_max_length = 0;
 -- 0003 transfers the audit objects to audit_owner. ALTER ... OWNER TO needs membership
 -- in the new owner. INHERIT FALSE: the migrator inherits no privilege of audit_owner.
@@ -106,7 +109,8 @@ BEGIN
         IF v_object.object_identity IN (
                'public.audit_log', 'public.audit_chain_head', 'public.security_event',
                'public.audit_canonical(public.audit_log)', 'public.audit_hash_chain()',
-               'public.security_event_purge()', 'public.security_event_guard()')
+               'public.security_event_purge()', 'public.security_event_guard()',
+               'public.replication_state()')
            AND current_user <> 'audit_owner' THEN
             RAISE EXCEPTION 'audit object % can be dropped only by audit_owner',
                 v_object.object_identity USING ERRCODE = 'insufficient_privilege';
@@ -119,5 +123,23 @@ CREATE EVENT TRIGGER audit_objects_dropped ON sql_drop
     EXECUTE FUNCTION audit_guard.audit_objects_dropped();
 SQL
 
-# The replication connection of recipe_replicator, from the Compose subnet only.
-printf 'host replication recipe_replicator %s scram-sha-256\n' "$subnet" >> "${PGDATA}/pg_hba.conf"
+# The client rules of data-model.md section 5.1, in place of every line of the image.
+# The first matching line wins. Only a process of the system user postgres logs in through the
+# socket (method peer). The four login roles connect from the Compose subnet only. The probe line
+# serves the healthcheck of db: no role pg_isready exists, so the probe ends at the password
+# request (ADR-0070 (q)).
+# The new file replaces the old one in one rename. umask 077 gives it mode 0600.
+hba_file="${PGDATA}/pg_hba.conf"
+umask 077
+{
+  printf '# Written by 01-roles.sh (data-model.md section 5.1, ADR-0069).\n'
+  printf '# TYPE  DATABASE     USER               ADDRESS          METHOD\n'
+  printf 'local   all          postgres                            peer\n'
+  printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\n' "$subnet"
+  printf 'host    recipe       recipe_app         %-16s scram-sha-256\n' "$subnet"
+  printf 'host    recipe       recipe_backup      %-16s scram-sha-256\n' "$subnet"
+  printf 'host    replication  recipe_replicator  %-16s scram-sha-256\n' "$subnet"
+  printf 'host    recipe       pg_isready         127.0.0.1/32     scram-sha-256\n'
+  printf 'host    all          all                all              reject\n'
+} > "${hba_file}.new"
+mv -- "${hba_file}.new" "$hba_file"

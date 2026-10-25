@@ -27,7 +27,7 @@ use crate::pipeline::request_id_in;
 use crate::session::session_layer;
 use crate::state::WebState;
 use crate::static_files;
-use crate::{lang, pipeline};
+use crate::{lang, panic, pipeline, timeout};
 
 /// What a route needs from the caller.
 ///
@@ -333,8 +333,9 @@ pub(crate) fn assemble(
         routes = routes.route(entry.path, handler);
     }
     let settings = state.settings().clone();
-    // A layer that is added later runs earlier. The order of design D11 is therefore the reverse
-    // of this list: render_errors, client, body limit, access, session, csrf, gates, handler.
+    // A layer that is added later runs earlier. The order of design D5 is therefore the reverse
+    // of this list: render_errors, inner panic layer, request timeout, body deadline, client,
+    // body limit, DefaultBodyLimit, access, session, csrf, gates, handler.
     let routes = routes
         .merge(unlisted)
         .fallback(not_found)
@@ -345,6 +346,9 @@ pub(crate) fn assemble(
         .layer(DefaultBodyLimit::max(largest_limit(&settings)))
         .layer(from_fn_with_state(state.clone(), body_limit))
         .layer(from_fn_with_state(state.clone(), client_address))
+        .layer(timeout::body_deadline(&settings))
+        .layer(from_fn_with_state(state.clone(), timeout::request_timeout))
+        .layer(panic::inner_layer())
         .layer(from_fn_with_state(state.clone(), render_errors))
         .with_state(state);
     pipeline::wrap(routes, &settings)

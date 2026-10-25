@@ -3,3 +3,10 @@
 # SQL files are checksummed by sqlx and compared with the document. CRLF would change them.
 *.sql text eol=lf
 crates/recipe-db/tests/grants.expected text eol=lf
+# Container and proxy files run on Linux. CRLF line endings can break them (ADR-0064 (g)).
+Caddyfile* text eol=lf
+Dockerfile text eol=lf
+crontab.* text eol=lf
+deploy/pgtools/bin/* text eol=lf
+deploy/pgtools/tests/* text eol=lf
+deploy/pgtools/restore-code.expected text eol=lf

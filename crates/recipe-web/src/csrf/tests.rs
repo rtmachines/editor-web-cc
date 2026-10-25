@@ -1,11 +1,16 @@
 //! Tests of the CSRF layer (task 6.6, design D12, ADR-0035 e, s, t).
 
+use std::time::Duration;
+
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::http::{Method, StatusCode};
+use http_body_util::channel::Channel;
+use recipe_app::error::{AppError, TimeoutStage};
 use recipe_app::memory::Fault;
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::identity::{KeyRing, Role};
+use tower_http::timeout::DeadlineBody;
 
 use super::{buffer_body, is_mutating, issue_pre_session};
 use crate::error::WebError;
@@ -259,6 +264,35 @@ async fn csrf_buffer_above_the_limit_gives_e_web_003() {
     );
     let kept: Bytes = buffer_body(Body::from(vec![b'a'; 10]), 10).await.unwrap();
     assert_eq!(kept.len(), 10);
+}
+
+/// A body that stops past its deadline gives `E-WEB-009` (design D15, ADR-0058 (j)).
+#[tokio::test(start_paused = true)]
+async fn csrf_buffer_of_a_body_that_stops_gives_e_web_009() {
+    let (_sender, channel) = Channel::<Bytes>::new(1);
+    let body = Body::new(DeadlineBody::new(Duration::from_secs(1), channel));
+    let error = buffer_body(body, 10).await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            WebError::App(AppError::Timeout {
+                stage: TimeoutStage::Request
+            })
+        ),
+        "{error:?}"
+    );
+}
+
+/// Every other body error keeps `E-WEB-003` (ADR-0058 (j)).
+#[tokio::test]
+async fn csrf_buffer_of_a_body_that_breaks_off_keeps_e_web_003() {
+    let (sender, channel) = Channel::<Bytes, std::io::Error>::new(1);
+    sender.abort(std::io::Error::other("the client closed the connection"));
+    let error = buffer_body(Body::new(channel), 10).await.unwrap_err();
+    assert!(
+        matches!(error, WebError::PayloadTooLarge { .. }),
+        "{error:?}"
+    );
 }
 
 // --- The origin --------------------------------------------------------------------------------

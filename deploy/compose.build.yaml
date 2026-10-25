@@ -1,0 +1,29 @@
+# Build override for development and CI (ADR-0064 (i)). It adds build: and nothing else.
+# Use: docker compose -f compose.yaml -f compose.build.yaml build
+# Every service of an image of the project gets the same build section.
+# Paths are relative to this file. The tag comes from image: in compose.yaml.
+name: recipe-editor
+
+# The context of recipe-server is the repository root (see the header of deploy/Dockerfile).
+x-server-build: &server-build
+  context: ..
+  dockerfile: deploy/Dockerfile
+
+# The context of recipe-pgtools is its own directory (bin/ and the crontab files).
+x-pgtools-build: &pgtools-build
+  context: ./pgtools
+  dockerfile: Dockerfile
+
+services:
+  app:
+    build: *server-build
+  migrate:
+    build: *server-build
+  backup:
+    build: *pgtools-build
+  backup-premigrate:
+    build: *pgtools-build
+  walarchive:
+    build: *pgtools-build
+  pitr-check:
+    build: *pgtools-build

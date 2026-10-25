@@ -40,7 +40,7 @@ C4Container
         Container(pre, "backup-premigrate", "pg_dump, one-shot", "Dump with the suffix _premigrate before migrate")
         Container(migrate, "migrate", "recipe-server migrate", "One-shot. Applies migrations before app starts")
         ContainerDb(db, "db", "PostgreSQL 16, pinned image, checksums on", "Recipes, versions, parameters, users, sessions, audit log")
-        Container(bak, "backup", "pg_dump, cron", "Daily dump. backup-now one-shot command")
+        Container(bak, "backup", "pg_dump, supercronic", "Daily dump, weekly restore test in a private scratch cluster. backup-now one-shot command")
         Container(wal, "walarchive", "pg_receivewal, pg_basebackup", "Continuous WAL archive and weekly base backup to a second disk")
     }
     Rel(user, proxy, "HTTPS")
@@ -52,7 +52,7 @@ C4Container
     Rel(wal, db, "replication protocol as recipe_replicator")
 ```
 
-There is one application process. There is no message broker, no cache, and no second database. `walarchive` connects as `recipe_replicator`, a login role with the `REPLICATION` attribute (`data-model.md` 5.1). Compose runs seven services. Start order: `db` healthy, `backup-premigrate` exit 0, `migrate` exit 0, `app`, `proxy`. `backup` and `walarchive` depend only on `db`. Every long-running service has a healthcheck and `restart: always`. `backup-premigrate` and `migrate` have `restart: no` (ADR-0020).
+There is one application process. There is no message broker, no cache, and no second database. `walarchive` connects as `recipe_replicator`, a login role with the `REPLICATION` attribute (`data-model.md` 5.1). Compose runs seven services. Start order: `db` healthy, `backup-premigrate` exit 0, `migrate` exit 0, `app`, `proxy`. `backup` and `walarchive` depend only on `db`. Every long-running service has a healthcheck and `restart: always`. `backup-premigrate` and `migrate` have `restart: no` (ADR-0020). The service `backup` also runs the weekly restore test (ADR-0067). `reliability.md` section 7.1 gives the networks and the healthchecks of the services, and section 7.8 gives their limits (ADR-0065, ADR-0070).
 
 ## 4. Bounded contexts
 
@@ -91,14 +91,15 @@ crates/
                            HTTP response, golden tests. Only recipe-web uses it.
   recipe-web/              lib. axum routers, askama templates, HTMX fragments, i18n, security headers,
                            session cookie.
-  recipe-server/           bin. Configuration, wiring, subcommands serve | migrate | create-admin.
+  recipe-server/           bin + lib. Configuration, wiring, supervisor of the jobs, watchdog, panic hook,
+                           subcommands serve | migrate | create-admin | healthcheck. Not published.
 ```
 
 Dependency rule (an arrow means "depends on"):
 
 ```mermaid
 flowchart TD
-    server[recipe-server bin] --> web[recipe-web]
+    server[recipe-server bin + lib] --> web[recipe-web]
     server --> db[recipe-db]
     server --> app[recipe-app]
     web --> app
@@ -113,14 +114,23 @@ flowchart TD
 
 `recipe-app` does not depend on `recipe-export` or `recipe-db`. `ApproveVersion` and `ExportVersion` build the hashed body and compute the hash with the module `export` of `recipe-domain` (ADR-0019). `recipe-app` defines the error type `StorageError` of its ports. `recipe-db` implements the ports and maps `sqlx::Error` into `StorageError`. The only edge between the two crates is therefore `recipe-db` to `recipe-app`, and the graph has no cycle.
 
+The supervised jobs follow the same rule (ADR-0060):
+
+- `recipe-app` holds the ports of the jobs and one iteration of each job (`run_once`). It has no loop and no schedule.
+- `recipe-db` implements the ports that read or write the database. `recipe-web::ReadOnlyMode` implements `ReadOnlySwitch`.
+- `recipe-server` implements `DiskSpace`, `BackupDirectory`, and `AlertWebhook`. It holds the supervisor, the schedules, the watchdog thread, the panic hook, and the wiring.
+- `recipe-server` has a library target with every module and a thin `main.rs`. The tests of the crate import the modules from the library.
+
+Internal operations have no permission and no row of the matrix: `EnsureDerivedType`, the six supervised jobs, and the startup settings comparison `CompareSettings`. `api.md` section 3.2 lists them.
+
 | Crate | Error type | Allowed dependencies (examples) | Forbidden |
 |---|---|---|---|
 | `recipe-domain` | `thiserror` enums per context, and `ExportError` | `uuid`, `rust_decimal`, `serde`, `serde_json`, `serde_json_canonicalizer`, `time`, `sha2`, `hmac` (ADR-0035) | `sqlx`, `axum`, `tokio`, any I/O, any port trait |
-| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors and `StorageError`), `AuditError`, `StorageError` | `recipe-domain`, `thiserror`, `async-trait`, `tracing`, `tokio` (`rt`, `time`, `sync`), `serde_json`, `uuid` (`v4`), `argon2`, `getrandom`, `time` (`formatting`), `parking_lot` (feature `memory` only) (ADR-0029, ADR-0035) | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
+| `recipe-app` | `thiserror`: `AppError` (wraps the domain errors, `StorageError`, and `AuditError`), `AuditError`, `StorageError` | `recipe-domain`, `thiserror`, `async-trait`, `tracing`, `tokio` (`rt`, `time`, `sync`), `serde_json`, `uuid` (`v4`), `argon2`, `getrandom`, `time` (`formatting`), `parking_lot` (feature `memory` only) (ADR-0029, ADR-0035) | `sqlx`, `axum`, `recipe-export`, `recipe-db` |
 | `recipe-db` | None public. Maps `sqlx::Error` with SQLSTATE into `StorageError` of `recipe-app` | `sqlx` (postgres, runtime-tokio, tls-rustls), `recipe-app` | `axum` |
 | `recipe-export` | None of its own. It returns `ExportError` of `recipe-domain` | `serde`, `serde_json`, `recipe-domain` | `sqlx`, `axum`, `recipe-app` |
 | `recipe-web` | `thiserror` (`WebError`, HTTP shape only) | `axum`, `askama`, `fluent`, `tower-http`, `cookie`, `subtle`, `recipe-app`, `recipe-export` (ADR-0035) | `sqlx`, any session library |
-| `recipe-server` | `anyhow` (binary only, `main` returns `anyhow::Result`) | every crate above except `recipe-export`, `tokio`, `tracing-subscriber`, `figment` | `recipe-export` (only `recipe-web` uses it) |
+| `recipe-server` | `anyhow` (the binary and its library target of ADR-0060 (bb), `main` returns `anyhow::Result`) | every crate above except `recipe-export`, `tokio`, `tracing-subscriber` (`env-filter`), `figment`, `axum`, `hyper`, `hyper-util`, `tokio-util`, `tower`, `time`, `rustix` (Unix only), `hyper-rustls`, `rustls`, `http-body-util` (ADR-0060, ADR-0063) | `recipe-export` (only `recipe-web` uses it), `sqlx` |
 
 `recipe-web` sets the session cookie from the result of the `Login` and `ChangeOwnPassword` use cases. The `session` table and its adapter in `recipe-db` belong to the project (ADR-0014).
 
@@ -179,7 +189,7 @@ Each row is one requirement sentence from `general-draft.txt`. "Mechanism" names
 | R32 | No panic paths. `Result<T>`. Safe Rust | `#![forbid(unsafe_code)]`. Clippy `deny` on `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`. No `expect` exception in `main`. Iterators instead of indexing | reliability.md 2 |
 | R33 | `anyhow` for application errors, `thiserror` for libraries | `anyhow` only in the binary crate `recipe-server`. `thiserror` enums in the lib crates that own errors. `recipe-export` returns `ExportError` of `recipe-domain` (A37) | overview.md 5, reliability.md 1 |
 | R34 | Design for safety, reliability, long-term operation, easy maintenance | Clean architecture with ports. Small aggregates. Forward-only migrations by a one-shot service. Pinned dependencies. Major-upgrade runbook | overview.md 5, reliability.md 5, 7 |
-| R35 | Handle and record errors and unexpected behaviour, including edge cases | Every `Err` is logged once: at the HTTP boundary for requests, at the loop boundary for background jobs (`job` field). Each command lists its complete error set | reliability.md 1, 3, domain-model.md 5 |
+| R35 | Handle and record errors and unexpected behaviour, including edge cases | Every `Err` is logged once: at the HTTP boundary for requests, in the supervisor for background jobs (`job` field). A job logs a handled fault once at `WARN`. Each command lists its complete error set | reliability.md 1, 3, domain-model.md 5 |
 | R36 | Clear, unique error messages that identify the source | Each error variant has a stable code `E-<CTX>-<nnn>`, one owner enum, and a message template with identifying values. One complete table. Authentication failures share the client code `E-IDN-003` on purpose (A42) | reliability.md 1.2 |
 | R37 | Structured, detailed event logs for debugging | `tracing` JSON. Span per request with `request_id`, `user_id`, `role`, `client_ip`, `route`. Span per use case and per SQL statement | reliability.md 3 |
 | R38 | Check all external input | Value object constructors (`parse`, not `new`). One grammar per value object. HTTP extractors reject unknown fields and over-long bodies. `/lang` redirects only to a same-origin path. `CHECK` constraints as the last line | reliability.md 4 |
@@ -244,13 +254,13 @@ Requirements that are not in the draft. Each one is a decision from the analysis
 | A15 | Technology versions: Rust stable (edition 2024), PostgreSQL 16 pinned minor, axum 0.8, sqlx 0.8, askama, HTMX 2 | ADR-0001, ADR-0020 |
 | A16 | Backup is a daily `pg_dump` plus a continuous WAL archive. Restore is tested weekly and before each release | ADR-0020 |
 | A17 | The UI supports `pl` and `en`. The plain cookie `recipe_lang` stores the UI language. The session does not store it. `POST /lang` sets the cookie, also before login. Parameter translations accept language codes `^[a-z]{2,3}(-[A-Z]{2})?$` | ADR-0012 |
-| A18 | TLS is terminated by the Caddy container. Caddy is mandatory. When the plant terminates TLS elsewhere, Caddy re-encrypts to the upstream | ADR-0020 |
+| A18 | The Caddy container terminates every TLS connection of a client. Caddy is mandatory. A plant device in front of Caddy sends TLS to Caddy, and Caddy terminates it. Caddy sends plain HTTP to `app` inside the Compose network | ADR-0020, ADR-0065 |
 | A19 | Expected scale: fewer than 100 users, fewer than 10 000 recipes, fewer than 4 000 parameters per version. No partitioning | data-model.md |
 | A20 | Audit visibility: Administrator reads the full audit log. ProcessEngineer reads only entries about recipes, versions, and parameters. Operator reads none. The recipe history page stays visible to all roles | api.md 3 |
 | A21 | Session timeouts are configuration values. Defaults: 30 minutes idle, 12 hours absolute | reliability.md 7.11 |
 | A22 | Login throttling is a progressive delay per (login, client IP) and a per-IP budget. There is no permanent lockout. An Administrator can unlock a login | ADR-0014 |
 | A23 | Password policy: minimum 12 and maximum 128 characters, checked against a breached-password list | ADR-0014 |
-| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, and `VersionExported`. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 % | reliability.md 7.8, ADR-0020 |
+| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. A failed measurement of the free space also turns the mode on. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, `VersionExported`, and the `SettingChanged` entries of the startup settings comparison. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 %. Only a measurement that succeeds can end the mode | reliability.md 7.8, ADR-0020, ADR-0061, ADR-0073 |
 | A25 | One installation serves one production line. The draft's "production line" has no entity | domain-model.md 1 |
 | A26 | Size budgets: 16 384 leaves per parameter, 262 144 leaves and 32 768 limit rows per version, 4 000 parameters per version | domain-model.md I18 |
 | A27 | A reference number matches `[A-Z0-9][A-Z0-9_-]{0,49}`. Input is folded to upper case | domain-model.md 2.2 |

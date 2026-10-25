@@ -8,6 +8,11 @@
 //! `MigrateSettings::default()`, which equals the table of section 7.11.
 
 pub mod args;
+pub mod key_file;
+pub mod serve;
+#[cfg(test)]
+mod test_support;
+pub mod webhook;
 
 use std::path::{Path, PathBuf};
 

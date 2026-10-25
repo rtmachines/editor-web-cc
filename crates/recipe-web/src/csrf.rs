@@ -24,6 +24,7 @@ use crate::limits::request_limit;
 use crate::pipeline::request_id_of;
 use crate::routes::Access;
 use crate::state::WebState;
+use crate::timeout::{is_body_timeout, timed_out};
 
 mod form;
 mod pre_session;
@@ -108,13 +109,18 @@ fn origin_matches(headers: &HeaderMap) -> bool {
 /// Read a request body up to `limit` bytes.
 ///
 /// A body above the limit gives `E-WEB-003`. A body that breaks off before its end gives the same
-/// answer, because the client cannot read an answer anyway.
+/// answer, because the client cannot read an answer anyway. A body that misses its deadline gives
+/// `E-WEB-009` (ADR-0058 (j)).
 async fn buffer_body(body: Body, limit: usize) -> Result<Bytes, WebError> {
-    to_bytes(body, limit)
-        .await
-        .map_err(|_too_large| WebError::PayloadTooLarge {
-            limit: ByteLimit::from(limit),
-        })
+    to_bytes(body, limit).await.map_err(|error| {
+        if is_body_timeout(&error) {
+            timed_out()
+        } else {
+            WebError::PayloadTooLarge {
+                limit: ByteLimit::from(limit),
+            }
+        }
+    })
 }
 
 /// Return the value of the header `X-CSRF-Token`. A value that is not text counts as empty.

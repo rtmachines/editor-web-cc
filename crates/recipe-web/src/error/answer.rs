@@ -30,7 +30,7 @@ use super::{ConflictView, ListView, RenderedForm};
 use super::{Retry, RowField, WebError, item_lines, leaf_lines};
 use crate::cookies::clear_session_cookie;
 use crate::i18n::Lang;
-use crate::layout::Layout;
+use crate::layout::{Layout, ReadOnlyFlag};
 use crate::pages::{Texts, login_page_with_error};
 use crate::state::WebState;
 
@@ -346,14 +346,15 @@ fn render(view: &ErrorView, field_errors: bool, ctx: &ErrorContext<'_>) -> Optio
         }
     } else if let Some(Retry::Login(pre_session)) = &ctx.retry {
         let texts = Texts::new(ctx.state.bundles(), ctx.lang);
-        login_page_with_error(texts, ctx.lang, pre_session.nonce(), view)
+        let read_only = ReadOnlyFlag::of(ctx.state);
+        login_page_with_error(texts, ctx.lang, pre_session.nonce(), view, read_only)
             .render()
             .ok()
     } else {
         let texts = Texts::new(ctx.state.bundles(), ctx.lang);
         let title = format!("{} · {}", view.code, texts.get("error-page-title"));
         ErrorPage {
-            layout: Layout::bare(texts, ctx.lang, title),
+            layout: Layout::bare(texts, ctx.lang, title, ReadOnlyFlag::of(ctx.state)),
             field_errors,
             view,
         }
@@ -383,7 +384,7 @@ fn refused_page(view: &ErrorView, form: &RenderedForm, ctx: &ErrorContext<'_>) -
     let texts = Texts::new(ctx.state.bundles(), ctx.lang);
     let title = format!("{} · {}", view.code, texts.get("error-page-title"));
     let page = RefusedFormPage {
-        layout: Layout::refused(texts, ctx.lang, title, frame),
+        layout: Layout::refused(texts, ctx.lang, title, frame, ReadOnlyFlag::of(ctx.state)),
         view,
     }
     .render()

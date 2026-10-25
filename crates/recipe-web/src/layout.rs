@@ -6,6 +6,7 @@ use recipe_domain::identity::Role;
 use crate::error::WebError;
 use crate::i18n::Lang;
 use crate::pages::{PageRequest, Texts};
+use crate::state::WebState;
 
 /// The page that the language switch of the login page returns to.
 const LOGIN_PATH: &str = "/login";
@@ -124,6 +125,28 @@ fn nav_links(
         .collect()
 }
 
+/// Whether the read-only mode was on when a page layout was built (design D12, ADR-0071).
+///
+/// The type solves one problem: the banner must show on every page and on every error page.
+/// `of` is the only place that reads the `ReadOnlyMode` for a page. The gate takes one value per
+/// request and uses it for the `503` decision. The error layer runs outside the gate and reads the
+/// mode again (ADR-0071 (e)). Each layout constructor requires the value, so a new layout cannot
+/// omit the banner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ReadOnlyFlag(bool);
+
+impl ReadOnlyFlag {
+    /// Read the mode of `state` once.
+    pub(crate) fn of(state: &WebState) -> Self {
+        Self(state.read_only().is_on())
+    }
+
+    /// Return true when the mode is on.
+    pub(crate) const fn is_on(self) -> bool {
+        self.0
+    }
+}
+
 /// What `base.html` shows around the content of a page.
 ///
 /// The type solves one problem: every full page needs the same top bar, and the error layer
@@ -150,6 +173,8 @@ pub(crate) struct Layout<'a> {
     pub(crate) toast: Option<String>,
     /// The shape of the answer: the full page or the content of `main`.
     pub(crate) shape: Shape,
+    /// The read-only mode of the request. `base.html` shows the banner while it is on.
+    pub(crate) read_only: ReadOnlyFlag,
 }
 
 impl<'a> Layout<'a> {
@@ -185,20 +210,32 @@ impl<'a> Layout<'a> {
             next: request.path_and_query().map(str::to_owned),
             toast: None,
             shape,
+            read_only: request.read_only(),
         })
     }
 
     /// Build the layout of the login page. The switch returns to `/login`.
-    pub(crate) fn for_login(texts: Texts<'a>, lang: Lang, title: String, nonce: &str) -> Self {
+    pub(crate) fn for_login(
+        texts: Texts<'a>,
+        lang: Lang,
+        title: String,
+        nonce: &str,
+        read_only: ReadOnlyFlag,
+    ) -> Self {
         Self {
             pre_nonce: Some(nonce.to_owned()),
             next: Some(LOGIN_PATH.to_owned()),
-            ..Self::bare(texts, lang, title)
+            ..Self::bare(texts, lang, title, read_only)
         }
     }
 
     /// Build the layout of the full error page: no navigation, no switch, and no token.
-    pub(crate) const fn bare(texts: Texts<'a>, lang: Lang, title: String) -> Self {
+    pub(crate) const fn bare(
+        texts: Texts<'a>,
+        lang: Lang,
+        title: String,
+        read_only: ReadOnlyFlag,
+    ) -> Self {
         Self {
             lang,
             title,
@@ -210,6 +247,7 @@ impl<'a> Layout<'a> {
             next: None,
             toast: None,
             shape: Shape::Page,
+            read_only,
         }
     }
 
@@ -221,12 +259,13 @@ impl<'a> Layout<'a> {
         lang: Lang,
         title: String,
         frame: &SessionFrame,
+        read_only: ReadOnlyFlag,
     ) -> Self {
         Self {
             nav: frame.nav.clone(),
             csrf_token: frame.csrf_token.clone(),
             user_login: Some(frame.user_login.clone()),
-            ..Self::bare(texts, lang, title)
+            ..Self::bare(texts, lang, title, read_only)
         }
     }
 
@@ -291,5 +330,7 @@ impl SessionFrame {
     }
 }
 
+#[cfg(test)]
+mod banner_tests;
 #[cfg(test)]
 mod tests;

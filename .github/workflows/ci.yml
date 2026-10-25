@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,6 +19,106 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  compose:
+    name: Compose stack
+    # ADR-0094: Run the stack test on manual dispatch and pushes to main.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      RECIPE_VERSION: ci
+      COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_SUBNET: 172.28.0.0/16
+      COMPOSE_IP_RANGE: 172.28.1.0/24
+      PROXY_ADDRESS: 172.28.0.2
+      SITE_ADDRESS: localhost
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the CI scripts
+        run: bash deploy/ci/check.sh
+      - name: Prepare the disks and secrets (D11 steps 1 and 2)
+        run: bash deploy/ci/prepare.sh
+      - name: Set up Buildx (D11 step 3)
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build recipe-server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: recipe-server:ci
+          cache-from: type=gha,scope=recipe-server
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=recipe-server' || '' }}
+      - name: Build recipe-pgtools
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/pgtools
+          file: deploy/pgtools/Dockerfile
+          load: true
+          push: false
+          tags: recipe-pgtools:ci
+          cache-from: type=gha,scope=recipe-pgtools
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,mode=max,scope=recipe-pgtools' || '' }}
+      - name: Start from zero (D11 step 4)
+        run: bash deploy/ci/start.sh
+      - name: Check login and hidden health paths (D11 step 5)
+        run: bash deploy/ci/login.sh
+      - name: Check the redirect, uid, and database rejection (D11 step 6)
+        run: bash deploy/ci/isolation.sh
+      - name: Check backup and recovery (D11 step 7)
+        run: bash deploy/ci/recovery.sh
+      - name: Run the pgtools tests (D11 step 8)
+        run: bash deploy/ci/pgtools.sh
+      - name: Stop with a request in flight (D11 step 9)
+        run: bash deploy/ci/stop.sh
+      - name: Refuse one filesystem (D11 step 10)
+        run: bash deploy/ci/same-filesystem.sh
+      - name: Install the toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: compose-config
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the production refusal of insecure cookies
+        run: bash deploy/ci/rust-tests.sh secure
+      - name: Show failure diagnostics (D11 step 11)
+        if: failure()
+        run: bash deploy/ci/diagnostics.sh
+      - name: Release the runner resources
+        if: always()
+        run: bash deploy/ci/cleanup.sh
+
+  musl-unwind:
+    name: Panic unwind on musl
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      CC_x86_64_unknown_linux_musl: musl-gcc
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the musl toolchain
+        run: bash deploy/ci/rust-tests.sh setup
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: musl-unwind
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run the panic tests
+        run: bash deploy/ci/rust-tests.sh panic
+
   fmt:
     name: Format
     runs-on: ubuntu-latest

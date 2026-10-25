@@ -18,3 +18,15 @@ __pycache__/
 Thumbs.db
 # Playwright CLI output (may contain credentials)
 .playwright-cli/
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# Deploy secrets and env file (ADR-0062 (p)).
+/deploy/.env
+/deploy/secrets/

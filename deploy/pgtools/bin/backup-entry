@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# backup-entry: the entry of the container backup (design D9, ADR-0064, ADR-0066 (b), (j), (n)).
+# It refuses to start without the marker file of the backup disk. Then it runs supercronic in
+# the foreground as the main process. The crontab holds the nightly dump and the weekly restore
+# test. The flag -passthrough-logs gives each JSON line of a job to the container log unchanged.
+set -euo pipefail
+umask 077
+
+JOB=backup-entry
+MARKER_NAME=.backup-marker
+BACKUP_DIR=${BACKUP_DIR:-/backups}
+CRONTAB=${BACKUP_CRONTAB:-/etc/pgtools/crontab.backup}
+
+# log <level> <message>. Every value is a fixed text.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2"
+}
+
+if [ ! -f "$BACKUP_DIR/$MARKER_NAME" ]; then
+  log ERROR "the marker file of the backup disk is missing"
+  exit 1
+fi
+
+if [ ! -r "$CRONTAB" ]; then
+  log ERROR "the crontab file is missing"
+  exit 1
+fi
+
+log INFO "scheduler started"
+exec supercronic -json -passthrough-logs "$CRONTAB"
