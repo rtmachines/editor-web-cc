@@ -5,7 +5,7 @@ use recipe_app::identity::{OwnPasswordForm, OwnProfile};
 
 use crate::error::{ErrorView, WebError};
 use crate::i18n::Lang;
-use crate::layout::{Layout, NavTarget};
+use crate::layout::{Layout, NavTarget, ReadOnlyFlag};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 
@@ -30,9 +30,10 @@ impl<'a> LoginPage<'a> {
         lang: Lang,
         nonce: &'a str,
         view: Option<&'a ErrorView>,
+        read_only: ReadOnlyFlag,
     ) -> Self {
         Self {
-            layout: Layout::for_login(t, lang, t.get("login-title"), nonce),
+            layout: Layout::for_login(t, lang, t.get("login-title"), nonce, read_only),
             t,
             nonce,
             view,
@@ -46,8 +47,9 @@ pub(crate) fn login_page_with_error<'a>(
     lang: Lang,
     nonce: &'a str,
     view: &'a ErrorView,
+    read_only: ReadOnlyFlag,
 ) -> LoginPage<'a> {
-    LoginPage::new(t, lang, nonce, Some(view))
+    LoginPage::new(t, lang, nonce, Some(view), read_only)
 }
 
 /// The page `me.html`.

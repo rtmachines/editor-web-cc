@@ -247,7 +247,9 @@ Rules of the three lists (ADR-0051):
 
 ### 2.10 Health
 
-The health endpoints are not on the public listener. `recipe-server` opens a second listener on port 9000 on the internal Docker network. It serves `GET /healthz` and `GET /readyz`. Both return `text/plain` with the body `ok` or `not ready`. The proxy answers `404` for `/healthz*` and `/readyz*` on the public site. `reliability.md` section 7.2 defines the checks.
+The health endpoints are not on the public listener. `recipe-server` opens a second listener on `http.internal_port` (9000) on the internal Docker network. It serves `GET /healthz` and `GET /readyz`. Both return `text/plain` with the body `ok` and the status `200`, or the body `not ready` and the status `503` (ADR-0059 (g)). The proxy answers `404` for `/healthz*` and `/readyz*` on the public site. `reliability.md` section 7.2 defines the checks.
+
+`reliability.md` section 7.2 gives the health router, its layers, and the subcommand `healthcheck` (ADR-0059 (a), (k) to (m)).
 
 ## 3. Permission matrix
 
@@ -277,6 +279,7 @@ pub enum Permission {
 - Last administrator rule: `SetUserRole` and `DeactivateUser` return `Err(LastAdministrator)` when the target is the last active user with role `Administrator`. The use case counts active administrators in a `SERIALIZABLE` transaction (`data-model.md` section 6). There is no database trigger for this rule.
 - Separation of duties: `ApproveVersion` returns `Err(ApproverEditedDraft)` when the approver is `created_by` of the draft or has a row in `draft_editor` for it. The configuration value `approval.separation_of_duties` is `true` by default (A34). The server stores it in `app_setting`. A change of the value writes the audit entry `SettingChanged` at the next start (`reliability.md` 7.12).
 - `EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It has no permission and no matrix row. The calling use case (`AddParameter`, `UpdateParameterDefinition`, `DefineUdt`, `RebindTypeRevision`) checks its own permission first.
+- The six supervised jobs (`cleanup`, `disk_check`, `audit_chain_check`, `heartbeat`, `clock_check`, `alerts`) and the startup settings comparison `CompareSettings` are internal operations too. They have no permission and no matrix row (ADR-0060 (t)).
 - A `Forbidden` result writes one `security_event` row in its own transaction through the port `SecurityEventSink` (A33). The use case has no business transaction at that point. When that row cannot be written, the use case returns the storage error instead of `E-WEB-002` (ADR-0029).
 
 ### 3.3 Matrix
@@ -363,6 +366,12 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 
 On a path under `/export/v1/`, every family with a status of 400 or more gets the JSON body of section 5.3. That body replaces the fragment. `E-WEB-004` and `E-IDN-007` keep their redirects (ADR-0053).
 
+A caught panic gives `500 E-WEB-010` with the answer of sections 5.2 and 5.3 (ADR-0057 (a), (b)). That answer is the page, the HTMX fragment, or the JSON body on `/export/v1/`. The answer of the backstop is the one exception to sections 5.1 to 5.3 (ADR-0057 (c) to (e)):
+
+- The backstop is the second `CatchPanicLayer` directly inside the layer `request_id`. It catches a panic of `TraceLayer`, the header layers, and `render_errors`.
+- Its answer is a plain `500` with `Content-Type: text/plain`. The body holds the code `E-WEB-010` and the English text of its row in `reliability.md` section 1.2 without the reference.
+- The layer `request_id` adds `X-Request-Id`. The answer has no `HX-*` header and no JSON body, also on `/export/v1/`.
+
 ### 5.2 Error fragment content
 
 Every error fragment shows:
@@ -371,7 +380,7 @@ Every error fragment shows:
 - one sentence in the UI language that tells the user what to do,
 - the `request_id`.
 
-The same code appears in the structured log of the request. A user can report the code and the `request_id`. The operator finds the log line with them (R36).
+The same code appears in the structured log of the request. A user can report the code and the `request_id`. The operator finds the log line with them (R36). The answer of the backstop of section 5.1 is the one exception.
 
 ### 5.3 Content negotiation
 
@@ -379,6 +388,7 @@ The same code appears in the structured log of the request. A user can report th
 - The same HTMX error response also sets `HX-Push-Url: false`. A refused form with `hx-push-url="true"` then keeps the URL of its page (ADR-0037 (z)).
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
 - The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`. `message` is the sentence of the code in the UI language, without the reference. The answer has no `HX-*` header, also for an HTMX request. A request without a valid session gets `303` to `/login`, and a session with `must_change_password` gets `303` to `/me/password` (ADR-0053).
+- The answer of the backstop of section 5.1 is the one exception to these rules (ADR-0057 (e)).
 
 ## 6. Export document (v1)
 
@@ -542,7 +552,9 @@ Sessions follow ADR-0014. The session store is the `session` table in PostgreSQL
 | `Domain` | not set, as the `__Host-` prefix requires |
 | Content | a random 128-bit token only. The database stores `SHA-256(token)` as `session.id`. No user data in the cookie |
 
-The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035).
+The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035). The answer of the backstop of section 5.1 gets HSTS only from the defaults of Caddy (section 9, ADR-0057 (j)).
+
+The default of the trusted-proxy list `http.trusted_proxies` is `172.28.0.2/32`, the address of `proxy` (ADR-0065 (j)). A request from another container of the Compose network therefore uses its socket address as `client_ip`. When a plant device stands in front of Caddy, its CIDR goes into the `trusted_proxies` of Caddy and into `http.trusted_proxies`. The runbook advises one `/32` for each device (ADR-0065 (m)).
 
 ### 7.2 Timeouts
 
@@ -624,6 +636,12 @@ Every response carries:
 | `X-Request-Id` | the `request_id` of the request |
 
 The application serves its fonts from `/static/fonts/`, so `default-src 'self'` covers them and the CSP has no `font-src`.
+
+The health router of section 2.10 has the layer `request_id` and the security headers of this section (ADR-0059 (l)).
+
+The answer of the backstop of section 5.1 is the one exception. It gets only `X-Request-Id` from `app`, and Caddy adds its defaults (ADR-0057 (j)).
+
+Caddy sets HSTS, CSP, `nosniff`, and `Referrer-Policy` only as defaults. A default applies only when the answer has no value. The answers of `app` therefore keep their own values, and the answers of Caddy get the same headers. Caddy deletes the header `Server` (ADR-0065 (f), (g)).
 
 HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`, `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`. By default HTMX 2 does not swap a 4xx or 5xx response, and `HX-Retarget` does not change that. The value of `responseHandling` swaps it, so `conflict.html`, `field-errors.html`, and `error.html` reach the page (sections 4 and 5.3). The value of `methodsThatUseUrlParams` keeps the parameters of every method other than `GET` in the body. No route uses `DELETE` (ADR-0040). By default HTMX inserts an inline `<style>` element for its request indicator, and `style-src 'self'` blocks it. `includeIndicatorStyles: false` stops this. The rules for `.htmx-indicator` are in the static style sheet `static/app.css`. The `<body>` tag has `hx-history="false"`. No page snapshot is stored in `localStorage` on a shared workstation.
 

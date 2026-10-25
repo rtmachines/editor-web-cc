@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::auth::Operation;
-use crate::error::StorageError;
+use crate::error::{AuditError, StorageError};
 
 fn reference() -> ReferenceNumber {
     ReferenceNumber::parse("R-100").unwrap()
@@ -43,9 +43,16 @@ fn concurrent_edit() -> AppError {
     }
 }
 
+fn assert_code_and_message(cases: impl IntoIterator<Item = (AppError, ErrorCode, &'static str)>) {
+    for (error, code, message) in cases {
+        assert_eq!(error.code(), code, "{error:?}");
+        assert_eq!(error.to_string(), message);
+    }
+}
+
 #[test]
-fn own_variants_have_their_codes_and_messages() {
-    let cases = [
+fn request_variants_have_their_codes_and_messages() {
+    assert_code_and_message([
         (
             concurrent_edit(),
             ErrorCode::WEB_001,
@@ -70,6 +77,12 @@ fn own_variants_have_their_codes_and_messages() {
             ErrorCode::WEB_005,
             "Recipe R-100 does not exist.",
         ),
+    ]);
+}
+
+#[test]
+fn runtime_variants_have_their_codes_and_messages() {
+    assert_code_and_message([
         (
             AppError::Timeout {
                 stage: TimeoutStage::Validation,
@@ -91,11 +104,7 @@ fn own_variants_have_their_codes_and_messages() {
             ErrorCode::AUD_001,
             "The change was not saved. The system could not record the audit entry. Contact the administrator.",
         ),
-    ];
-    for (error, code, message) in cases {
-        assert_eq!(error.code(), code, "{error:?}");
-        assert_eq!(error.to_string(), message);
-    }
+    ]);
 }
 
 #[test]
@@ -190,6 +199,23 @@ fn identity_error_with_a_login_passes_its_code() {
         login: Login::parse("anna").unwrap(),
     });
     assert_eq!(error.code(), ErrorCode::IDN_009);
+}
+
+#[test]
+fn audit_error_keeps_its_code_and_text() {
+    let inner = AuditError::ChainBroken { chain_seq: 42 };
+    let text = inner.to_string();
+    let error = AppError::from(inner);
+    assert!(matches!(
+        error,
+        AppError::Audit(AuditError::ChainBroken { chain_seq: 42 })
+    ));
+    assert_eq!(error.code(), ErrorCode::AUD_002);
+    assert_eq!(
+        error.to_string(),
+        "Audit entry 42 does not match the hash chain. Contact the administrator."
+    );
+    assert_eq!(error.to_string(), text);
 }
 
 #[test]

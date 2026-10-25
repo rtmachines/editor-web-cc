@@ -1,3 +1,4 @@
+{% import "components/alert.html" as alerts -%}
 {% import "components/toast.html" as toasts -%}
 {% if layout.is_content() -%}
 <title>{{ layout.title }} · {{ layout.t.get("app-name") }}</title>
@@ -35,7 +36,7 @@
 <button type="submit">{{ layout.t.get("logout-submit") }}</button>
 </form>
 {% endif %}</header>
-<main id="content">{% endif %}
+<main id="content">{% endif %}{% if layout.read_only.is_on() %}{{ alerts::notice("warning", layout.t.get("readonly-banner")) }}{% endif %}
 <div id="error-panel">{% block error_panel %}{% endblock %}</div>
 <div id="toast" role="status" aria-live="polite">{% if let Some(text) = layout.toast %}{{ toasts::success(text) }}{% endif %}</div>
 {% block content %}{% endblock %}

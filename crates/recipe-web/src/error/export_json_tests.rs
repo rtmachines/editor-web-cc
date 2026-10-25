@@ -1,11 +1,14 @@
 //! Tests of the JSON error answers on the export paths (design D11 row T10, ADR-0053).
 //!
 //! The test routes live only in this file. One route under `/export/v1/` raises an error of each
-//! family. One route needs a session, so the session layer and the gates raise their errors.
+//! family. One route needs a session, so the session layer and the gates raise their errors. One
+//! route panics, so the inner panic layer gives `E-WEB-010` (ADR-0057 (b)). One route outlasts the
+//! request timeout and still gets the answer of its handler, because the timeout skips the export
+//! paths (ADR-0072 (a)).
 
 use axum::Router;
-use axum::extract::Path;
 use axum::extract::connect_info::MockConnectInfo;
+use axum::extract::{Path, State};
 use axum::http::{Method, StatusCode};
 use axum::routing::{MethodRouter, get};
 use recipe_app::auth::Operation;
@@ -15,6 +18,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
 use recipe_domain::identity::{IdentityError, Role};
 use recipe_domain::recipe::{RecipeError, ReferenceNumber};
+use tokio::time::Instant;
 use uuid::Uuid;
 
 use super::{ByteLimit, FieldReason, WebError};
@@ -116,6 +120,23 @@ async fn reached() -> &'static str {
     REACHED
 }
 
+/// The message of the test panic. No answer may hold it.
+const PANIC_TEXT: &str = "the test value is missing";
+
+/// A handler that panics. Only test code may call `expect` (`reliability.md` section 2.3).
+///
+/// `black_box` hides the `None` from the optimizer and from clippy.
+async fn explode() -> &'static str {
+    std::hint::black_box(None::<&'static str>).expect(PANIC_TEXT)
+}
+
+/// A handler that outlasts the request timeout. The test clock is paused, so it costs no real time.
+async fn outlast_the_timeout(State(state): State<WebState>) -> &'static str {
+    let wait = state.settings().request_timeout.saturating_mul(2);
+    tokio::time::sleep(wait).await;
+    REACHED
+}
+
 fn row(path: &'static str, access: Access, handler: MethodRouter<WebState>) -> RouteEntry {
     RouteEntry {
         method: Method::GET,
@@ -125,12 +146,14 @@ fn row(path: &'static str, access: Access, handler: MethodRouter<WebState>) -> R
     }
 }
 
-/// Build the router with the three test routes and a client at `PEER`.
+/// Build the router with the five test routes and a client at `PEER`.
 ///
 /// `/export/v10/{case}` is outside the prefix `/export/v1/`. It proves that the prefix ends with `/`.
 fn router(fixture: &Fixture) -> Router {
     let rows = vec![
         row("/export/v1/test/{case}", Access::Static, get(raise)),
+        row("/export/v1/panic", Access::Static, get(explode)),
+        row("/export/v1/slow", Access::Static, get(outlast_the_timeout)),
         row(
             "/export/v1/session/{case}",
             Access::Operation(Operation::ExportApprovedVersion),
@@ -238,6 +261,40 @@ async fn export_json_each_error_family_is_a_json_body_in_field_order() {
         let reply = ask(&fixture, &path, &[]).await;
         assert_json(&reply, status, code, case);
     }
+}
+
+/// A panic in an export handler gives the JSON body of `E-WEB-010` (ADR-0057 (b), ADR-0053 (a)).
+#[tokio::test]
+async fn export_json_a_panic_in_the_handler_is_the_json_body_of_e_web_010() {
+    let fixture = Fixture::new();
+    let reply = ask(&fixture, "/export/v1/panic", &[ENGLISH]).await;
+    let body = assert_json(
+        &reply,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "E-WEB-010",
+        "panic",
+    );
+    assert_eq!(
+        body.message,
+        "An internal error occurred. Contact the administrator."
+    );
+    assert!(!reply.body.contains(PANIC_TEXT), "{}", reply.body);
+}
+
+/// A handler that outlasts the request timeout still gets its own answer on an export path.
+///
+/// The request timeout skips the export paths (ADR-0072 (a)). The test clock is paused, so the
+/// answer comes after twice the limit and costs no real time (ADR-0072 (e)).
+#[tokio::test(start_paused = true)]
+async fn export_json_a_slow_handler_outlasts_the_request_timeout() {
+    let fixture = Fixture::new();
+    let limit = fixture.state.settings().request_timeout;
+    let started = Instant::now();
+    let reply = ask(&fixture, "/export/v1/slow", &[ENGLISH]).await;
+    let waited = limit.saturating_mul(2);
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.body, REACHED);
+    assert!(started.elapsed() >= waited, "{:?}", started.elapsed());
 }
 
 /// An HTMX request gets the `403 E-WEB-007` of the guard before the handler (ADR-0053 (c),

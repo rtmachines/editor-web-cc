@@ -1,4 +1,400 @@
-# Placeholder. Step P4.1 of docs/plan/implementation-prompts.md writes the Compose file.
-# ADR-0020 and docs/architecture/reliability.md section 7.1 give the services and the start order.
+# Compose project of the recipe editor: the seven services of docs/architecture/reliability.md 7.1.
+# Source: ADR-0020, ADR-0062 to ADR-0070, ADR-0077, and design D9 of the change operations-compose.
+#
+# Start order (depends_on): db -> backup-premigrate -> migrate -> app -> proxy.
+# backup and walarchive depend on db only.
+#
+# Every value of reliability.md 7.11 in this file equals that table. The test
+# crates/recipe-server/tests/deploy_values.rs compares them. Change both together.
+# The interpolation values come from deploy/.env (see deploy/.env.example). No value is a password.
+# Each secret is the host file ${RECIPE_SECRETS_DIR}/<name> and the container file /run/secrets/<name>.
+#
+# Images: compose.build.yaml adds build: for the images of the project (ADR-0064).
+# compose.dev.yaml adds Caddyfile.dev and the published port 127.0.0.1:8443:443 (ADR-0065 (o)).
 name: recipe-editor
-services: {}
+
+# The logging anchor of the seven services (ADR-0070 (s), (t)).
+# log.max_size 50m, log.max_file 20, log.mode non-blocking, log.max_buffer_size 4m.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: "20"
+    mode: non-blocking
+    max-buffer-size: 4m
+
+services:
+  # TLS termination, redirect to HTTPS, 404 for the health paths (ADR-0065).
+  # Caddy runs as root of its image (uid 0), so tls_cert and tls_key belong to uid 0.
+  proxy:
+    image: caddy:2.11.7-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
+    restart: always
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?}
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      edge: {}
+      backend:
+        ipv4_address: ${PROXY_ADDRESS:?}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    secrets:
+      - tls_cert
+      - tls_key
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://app:9000/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    logging: *logging
+
+  # One-shot pg_dump with the suffix _premigrate before the migration (ADR-0066 (i)).
+  backup-premigrate:
+    image: recipe-pgtools:${RECIPE_VERSION:?}
+    command: ["backup-once", "_premigrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    volumes:
+      - backups:/backups
+    tmpfs:
+      - /run/pgpass
+    secrets:
+      - backup_password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    logging: *logging
+
+  # One-shot schema migration. It holds the migrator secret and no other secret.
+  migrate:
+    image: recipe-server:${RECIPE_VERSION:?}
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      backup-premigrate:
+        condition: service_completed_successfully
+    environment:
+      RECIPE_SECRETS__MIGRATOR_PASSWORD_FILE: /run/secrets/migrator_password
+    networks:
+      - backend
+    secrets:
+      - migrator_password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    logging: *logging
+
+  # The application and its supervised jobs (ADR-0059, ADR-0061).
+  # The public listener (8080) and the internal listener (9000) are exposed, never published.
+  # The three read-only volumes serve the disk check and the alerts. The mount paths equal
+  # the paths of the services backup and walarchive.
+  app:
+    image: recipe-server:${RECIPE_VERSION:?}
+    command: ["serve"]
+    restart: always
+    # app.stop_grace_period 40 s. shutdown.drain 30 s + shutdown.pool_close 5 s +
+    # shutdown.runtime_stop 3 s is 38 s, below it (reliability.md 7.3).
+    stop_grace_period: 40s
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      RECIPE_DB__HOST: db
+      RECIPE_DB__PORT: "5432"
+      RECIPE_DB__NAME: recipe
+      RECIPE_DB__APP_USER: recipe_app
+      RECIPE_SECRETS__APP_PASSWORD_FILE: /run/secrets/app_password
+      RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE: /run/secrets/login_hmac_key
+      RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE: /run/secrets/csrf_signing_key
+      RECIPE_HTTP__TRUSTED_PROXIES: ${PROXY_ADDRESS:?}/32
+      RECIPE_HTTP__PUBLIC_PORT: "8080"
+      RECIPE_HTTP__INTERNAL_PORT: "9000"
+      RECIPE_APPROVAL__SEPARATION_OF_DUTIES: "true"
+      RECIPE_ALERTS__WEBHOOK_URL_FILE: /run/secrets/alerts_webhook_url
+      RECIPE_SESSION__SECURE: "true"
+      RECIPE_SESSION__IDLE_TIMEOUT: "1800"
+      RECIPE_SESSION__ABSOLUTE_TIMEOUT: "43200"
+      RECIPE_I18N__TRANSLATION_LANGS: pl
+    expose:
+      - "8080"
+      - "9000"
+    networks:
+      - backend
+      - egress
+    volumes:
+      - pgdata:/var/lib/postgresql/data:ro
+      - backups:/backups:ro
+      - walarchive:/wal:ro
+    secrets:
+      - app_password
+      - login_hmac_key
+      - csrf_signing_key
+      - alerts_webhook_url
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/recipe-server", "healthcheck", "--path", "/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    logging: *logging
+
+  # The database. Only the network backend. The roles and pg_hba.conf come from 01-roles.sh.
+  db:
+    image: postgres:16.15-bookworm@sha256:d81f7b51697014367236d07ec58b54153fc28f828b72bf247fe5c7487520bcb0
+    user: "999:999"
+    restart: always
+    # db.stop_grace_period 60 s and db.shm_size 256 MiB.
+    stop_grace_period: 60s
+    shm_size: 256m
+    # The settings of reliability.md 7.6. pg.shared_buffers is 25 % of the 2 GiB of db.
+    # pg.max_wal_senders is 3, pg.wal_keep_size is 1 GB, pg.checkpoint_timeout is 5 min.
+    # db.max_connections is 50. db.slow_query is 1 s, which is 1000 ms.
+    command:
+      - postgres
+      - -c
+      - fsync=on
+      - -c
+      - synchronous_commit=on
+      - -c
+      - full_page_writes=on
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=off
+      - -c
+      - max_wal_senders=3
+      - -c
+      - wal_keep_size=1GB
+      - -c
+      - checkpoint_timeout=5min
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - max_connections=50
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      - log_lock_waits=on
+      - -c
+      - default_transaction_isolation=read committed
+      - -c
+      - timezone=UTC
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_INITDB_ARGS: --data-checksums --lc-collate=C --lc-ctype=C.UTF-8
+      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}
+    networks:
+      - backend
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/initdb/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+    secrets:
+      - postgres_password
+      - migrator_password
+      - app_password
+      - backup_password
+      - replicator_password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    # The probe uses the pg_hba.conf line of the role name pg_isready (ADR-0069 (s)).
+    # db is healthy only after its init, because the init server has no TCP listener.
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "pg_isready", "-d", "recipe"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    logging: *logging
+
+  # Daily pg_dump, weekly restore test, backup-now, and retention (ADR-0066, ADR-0067).
+  # pgdata is read-only. backup-health uses it to compare the filesystems.
+  backup:
+    image: recipe-pgtools:${RECIPE_VERSION:?}
+    command: ["backup-entry"]
+    init: true
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    volumes:
+      - backups:/backups
+      - pgdata:/var/lib/postgresql/data:ro
+    tmpfs:
+      - /run/pgpass
+    secrets:
+      - backup_password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # container.backup_memory 512 MiB, container.small_cpus 0.5.
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "backup-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    logging: *logging
+
+  # pg_receivewal and the weekly pg_basebackup (ADR-0068). It holds the replicator secret only.
+  walarchive:
+    image: recipe-pgtools:${RECIPE_VERSION:?}
+    command: ["walarchive-entry"]
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    volumes:
+      - walarchive:/wal
+    tmpfs:
+      - /run/pgpass
+    secrets:
+      - replicator_password
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "walarchive-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+      start_interval: 1s
+    logging: *logging
+
+  # CI recovery check (ADR-0077 (d)). It is not one of the seven services.
+  # The profile pitr keeps it out of "up". CI runs it with "docker compose run --rm pitr-check"
+  # and gives PITR_CI, PITR_MARKER_SEQ, and PITR_MARKER_HASH with -e.
+  # It mounts no secret and joins no network. container.backup_memory 512 MiB, container.small_cpus 0.5 (ADR-0081).
+  pitr-check:
+    image: recipe-pgtools:${RECIPE_VERSION:?}
+    command: ["pitr-check"]
+    profiles:
+      - pitr
+    restart: "no"
+    network_mode: none
+    volumes:
+      - walarchive:/wal
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+
+# The network backend holds the seven services. It has no route to a host outside Compose.
+# The network edge holds proxy and the published ports. The network egress holds app only.
+# A change of the subnet edits COMPOSE_SUBNET, COMPOSE_IP_RANGE, and PROXY_ADDRESS together.
+# ip_range excludes PROXY_ADDRESS, so Docker never gives that address to another container.
+networks:
+  edge: {}
+  egress: {}
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${COMPOSE_SUBNET:?}
+          ip_range: ${COMPOSE_IP_RANGE:?}
+
+# backups and walarchive bind to directories of the second disk (ADR-0066 (a)).
+# A missing host directory stops the start, as the marker file does.
+volumes:
+  pgdata: {}
+  caddy: {}
+  backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${RECIPE_BACKUP_DIR:?}
+  walarchive:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${RECIPE_WALARCHIVE_DIR:?}
+
+# Secret files of the host (ADR-0062 (l) to (o)). Only the host file sets owner and mode.
+secrets:
+  postgres_password:
+    file: ${RECIPE_SECRETS_DIR:?}/postgres_password
+  migrator_password:
+    file: ${RECIPE_SECRETS_DIR:?}/migrator_password
+  app_password:
+    file: ${RECIPE_SECRETS_DIR:?}/app_password
+  backup_password:
+    file: ${RECIPE_SECRETS_DIR:?}/backup_password
+  replicator_password:
+    file: ${RECIPE_SECRETS_DIR:?}/replicator_password
+  login_hmac_key:
+    file: ${RECIPE_SECRETS_DIR:?}/login_hmac_key
+  csrf_signing_key:
+    file: ${RECIPE_SECRETS_DIR:?}/csrf_signing_key
+  alerts_webhook_url:
+    file: ${RECIPE_SECRETS_DIR:?}/alerts_webhook_url
+  tls_cert:
+    file: ${RECIPE_SECRETS_DIR:?}/tls_cert
+  tls_key:
+    file: ${RECIPE_SECRETS_DIR:?}/tls_key

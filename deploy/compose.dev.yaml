@@ -1,0 +1,15 @@
+# Development and CI override (ADR-0065 (o)). It changes proxy only.
+# Use: docker compose -f compose.yaml -f compose.dev.yaml up
+# Caddyfile.dev uses "tls internal", so the stack needs no certificate file.
+# The published port binds to 127.0.0.1, so the host does not publish the application on its LAN.
+# The tag !override replaces the ports of compose.yaml. A plain list would add to them.
+# The tag !reset removes the certificate secrets of proxy, so the dev stack needs no certificate file.
+name: recipe-editor
+
+services:
+  proxy:
+    ports: !override
+      - "127.0.0.1:8443:443"
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+    secrets: !reset []

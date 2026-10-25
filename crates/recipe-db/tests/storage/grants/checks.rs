@@ -12,11 +12,12 @@ use crate::support::{Role, TestDatabase, assert_privilege_denied};
 const GRANTS: &str = include_str!("../../grants.expected");
 const AUDIT_TABLES: [&str; 3] = ["audit_log", "audit_chain_head", "security_event"];
 /// The audit functions with the argument types that identify them.
-const AUDIT_FUNCTIONS: [&str; 4] = [
+const AUDIT_FUNCTIONS: [&str; 5] = [
     "audit_canonical(audit_log)",
     "audit_hash_chain()",
     "security_event_purge()",
     "security_event_guard()",
+    "replication_state()",
 ];
 const TABLE_PRIVILEGES: [&str; 7] = [
     "SELECT",
@@ -38,6 +39,12 @@ const COLUMN_GRANTS: &str = "SELECT c.relname::text || '.' || a.attname::text ||
      CROSS JOIN LATERAL aclexplode(a.attacl) x \
      WHERE x.grantee = 'recipe_app'::regrole \
        AND c.relnamespace = 'public'::regnamespace AND NOT a.attisdropped";
+/// The routine grants of ADR-0069 (q). The signature of `pg_proc` identifies an overloaded name.
+const ROUTINE_GRANTS: &str = "SELECT p.oid::regprocedure::text || '|' || g.privilege_type::text \
+     FROM information_schema.role_routine_grants g \
+     JOIN pg_proc p ON p.pronamespace = 'public'::regnamespace \
+      AND pg_catalog.nameconcatoid(p.proname, p.oid)::text = g.specific_name::text \
+     WHERE g.grantee = 'recipe_app' AND g.specific_schema = 'public'";
 
 /// The lines of `grants.expected` as a set.
 fn expected_lines() -> BTreeSet<String> {
@@ -51,7 +58,7 @@ fn expected_lines() -> BTreeSet<String> {
 /// The grants that `recipe_app` holds, in the line format of `grants.expected`.
 async fn actual_lines(conn: &mut PgConnection) -> BTreeSet<String> {
     let mut lines = BTreeSet::new();
-    for query in [TABLE_GRANTS, COLUMN_GRANTS] {
+    for query in [TABLE_GRANTS, COLUMN_GRANTS, ROUTINE_GRANTS] {
         let rows: Vec<String> = sqlx::query_scalar(query)
             .fetch_all(&mut *conn)
             .await
@@ -96,7 +103,7 @@ async fn assert_migrator_membership(conn: &mut PgConnection) {
     assert!(!inherit, "the membership of recipe_migrator inherits");
 }
 
-/// `audit_owner` owns the three audit tables and the four audit functions.
+/// `audit_owner` owns the three audit tables and the five audit functions.
 async fn assert_audit_owner_owns(conn: &mut PgConnection) {
     for table in AUDIT_TABLES {
         let owner: String = sqlx::query_scalar(
@@ -149,7 +156,7 @@ async fn assert_migrator_has_no_audit_privilege(database: &TestDatabase, conn: &
     assert_privilege_denied(result);
 }
 
-/// `recipe_migrator` cannot execute the three audit functions that the document revokes from `PUBLIC`.
+/// `recipe_migrator` cannot execute the four audit functions that the document revokes from `PUBLIC`.
 ///
 /// `audit_canonical` keeps the default `PUBLIC` execute right, so this check skips it.
 async fn assert_migrator_cannot_execute_audit_functions(conn: &mut PgConnection) {
@@ -157,6 +164,7 @@ async fn assert_migrator_cannot_execute_audit_functions(conn: &mut PgConnection)
         "audit_hash_chain()",
         "security_event_purge()",
         "security_event_guard()",
+        "replication_state()",
     ] {
         let held: bool = sqlx::query_scalar(
             "SELECT has_function_privilege('recipe_migrator'::name, $1::text, 'EXECUTE')",

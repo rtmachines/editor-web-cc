@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# backup-health: healthcheck of the service backup (ADR-0066 (d)).
+#
+# It exits 0 when all three checks pass. Otherwise it writes one ERROR line and exits 1.
+#   1. The filesystem of BACKUP_DIR differs from the filesystem of PGDATA (stat -c %d).
+#      PGDATA must hold the regular file PG_VERSION. Else the volume of pgdata is not mounted.
+#   2. The marker file of the backup disk exists.
+#   3. A complete set is younger than backup.max_age_alert. Every suffix counts, also _premigrate.
+# A complete set has the dump, the globals file, the counts file, and the manifest.
+# The check writes nothing and deletes nothing.
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=backup-health
+MAX_AGE_SECONDS=93600 # backup.max_age_alert, 26 h, in reliability.md section 7.11
+MARKER_NAME=.backup-marker
+
+BACKUP_DIR=${BACKUP_DIR:-/backups}
+PGDATA_DIR=${PGDATA:-/var/lib/postgresql/data}
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked name.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message>: write the one ERROR line and stop.
+fail() {
+  log ERROR "$1"
+  exit 1
+}
+
+# is_file <path>: a regular file and not a link.
+is_file() {
+  [ -f "$1" ] && [ ! -L "$1" ]
+}
+
+[ -d "$BACKUP_DIR" ] || fail "the backup directory is missing"
+[ -d "$PGDATA_DIR" ] || fail "the directory of pgdata is missing"
+is_file "$PGDATA_DIR/PG_VERSION" || fail "the file PG_VERSION is missing, so pgdata is not mounted"
+
+backup_device=$(stat -c %d -- "$BACKUP_DIR")
+pgdata_device=$(stat -c %d -- "$PGDATA_DIR")
+if [ "$backup_device" = "$pgdata_device" ]; then
+  fail "the backup directory is on the filesystem of pgdata"
+fi
+
+is_file "$BACKUP_DIR/$MARKER_NAME" || fail "the marker file of the backup disk is missing"
+
+now=$(date +%s)
+newest_set=""
+for manifest in "$BACKUP_DIR"/recipe_*.dump.sha256; do
+  name=${manifest##*/}
+  [[ $name =~ ^recipe_([0-9]{8}_[0-9]{4})(_premigrate|_now)?\.dump\.sha256$ ]] || continue
+  ts=${BASH_REMATCH[1]}
+  suffix=${BASH_REMATCH[2]-}
+  base=recipe_${ts}${suffix}
+  is_file "$manifest" || continue
+  is_file "$BACKUP_DIR/$base.dump" || continue
+  is_file "$BACKUP_DIR/$base.counts" || continue
+  is_file "$BACKUP_DIR/globals_${ts}${suffix}.sql" || continue
+  age=$((now - $(stat -c %Y -- "$manifest")))
+  if [ "$age" -lt "$MAX_AGE_SECONDS" ]; then
+    newest_set=$base
+  fi
+done
+
+[ -n "$newest_set" ] || fail "no complete set is younger than the maximum age"
+log INFO "backup is healthy" "\"set\":\"$newest_set\""

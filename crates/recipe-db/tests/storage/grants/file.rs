@@ -1,7 +1,9 @@
 //! Format tests of `tests/grants.expected`. They need no database.
 //!
 //! A table grant is the line `table|PRIVILEGE`. A column grant is the line `table.column|PRIVILEGE`.
-//! The names come from the `CREATE TABLE` blocks of `data-model.md` section 3.
+//! A routine grant is the line `function()|EXECUTE` (ADR-0069 (q)). The table names come from the
+//! `CREATE TABLE` blocks of `data-model.md` section 3. The function names come from the
+//! `CREATE FUNCTION` blocks of sections 4.12 and 5.5.
 
 use crate::support::{created_names, document_sql};
 
@@ -10,8 +12,18 @@ const SECTIONS: [&str; 18] = [
     "3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12",
     "3.13", "3.14", "3.15", "3.16", "3.17",
 ];
+/// The sections that create the functions that `recipe_app` can execute.
+const ROUTINE_SECTIONS: [&str; 2] = ["4.12", "5.5"];
 const MIGRATION_TABLE: &str = "_sqlx_migrations";
-const PRIVILEGES: [&str; 4] = ["SELECT", "INSERT", "UPDATE", "DELETE"];
+const PRIVILEGES: [&str; 5] = ["SELECT", "INSERT", "UPDATE", "DELETE", ROUTINE_PRIVILEGE];
+const ROUTINE_PRIVILEGE: &str = "EXECUTE";
+/// The end of the object of a routine line. Each routine of the file has no argument.
+const ROUTINE_SUFFIX: &str = "()";
+/// The routine lines of `data-model.md` section 5.3.
+const ROUTINE_LINES: [&str; 2] = [
+    "replication_state()|EXECUTE",
+    "security_event_purge()|EXECUTE",
+];
 /// Keywords that start a table constraint, not a column definition.
 const CONSTRAINT_KEYWORDS: [&str; 6] = [
     "CONSTRAINT",
@@ -50,12 +62,22 @@ fn is_identifier(text: &str) -> bool {
     starts_well && chars.all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
 }
 
-/// True when the object of a grant line is `table` or `table.column` with identifiers only.
-fn is_object(object: &str) -> bool {
-    match object.split_once('.') {
-        None => is_identifier(object),
-        Some((table, column)) => is_identifier(table) && is_identifier(column),
+/// True when the object fits the privilege: `function()` for `EXECUTE`, else `table` or
+/// `table.column`, with identifiers only.
+fn is_object(object: &str, privilege: &str) -> bool {
+    if let Some(function) = object.strip_suffix(ROUTINE_SUFFIX) {
+        return privilege == ROUTINE_PRIVILEGE && is_identifier(function);
     }
+    privilege != ROUTINE_PRIVILEGE
+        && match object.split_once('.') {
+            None => is_identifier(object),
+            Some((table, column)) => is_identifier(table) && is_identifier(column),
+        }
+}
+
+/// The function name of a routine line, or `None` for a table or a column line.
+fn routine_name(object: &str) -> Option<&str> {
+    object.strip_suffix(ROUTINE_SUFFIX)
 }
 
 /// The top-level items of a `CREATE TABLE` body. The text starts after the opening parenthesis.
@@ -117,12 +139,55 @@ fn every_line_has_the_form_object_bar_privilege() {
     for line in &lines {
         let parsed = split_line(line);
         assert!(parsed.is_some(), "unknown privilege or missing bar: {line}");
-        let (object, _) = parsed.unwrap();
+        let (object, privilege) = parsed.unwrap();
         assert!(
-            is_object(object),
-            "object is not table or table.column: {line}"
+            is_object(object, privilege),
+            "object does not fit the privilege: {line}"
         );
     }
+}
+
+#[test]
+fn the_object_check_rejects_a_routine_with_a_table_privilege_and_a_table_with_execute() {
+    assert!(is_object("replication_state()", "EXECUTE"));
+    assert!(is_object("security_event.count", "UPDATE"));
+    assert!(!is_object("replication_state()", "SELECT"));
+    assert!(!is_object("security_event", "EXECUTE"));
+    assert!(!is_object("replication_state(text)", "EXECUTE"));
+}
+
+#[test]
+fn the_file_holds_the_routine_lines_of_section_5_3() {
+    let lines = grant_lines();
+
+    let routines: Vec<&str> = lines
+        .iter()
+        .map(String::as_str)
+        .filter(|line| line.ends_with(ROUTINE_PRIVILEGE))
+        .collect();
+
+    assert_eq!(routines, ROUTINE_LINES);
+}
+
+#[test]
+fn every_routine_line_names_a_function_of_section_4_12_or_5_5() {
+    let functions = created_names(&document_sql(&ROUTINE_SECTIONS, &[])).functions;
+    let lines = grant_lines();
+    let mut checked = 0_usize;
+
+    for line in &lines {
+        let (object, _) = split_line(line).unwrap();
+        let Some(function) = routine_name(object) else {
+            continue;
+        };
+        assert!(
+            functions.iter().any(|name| name == function),
+            "{line} names no function of 4.12 or 5.5: {functions:?}"
+        );
+        checked = checked.checked_add(1).unwrap();
+    }
+
+    assert!(checked > 0, "grants.expected holds no routine line");
 }
 
 #[test]
@@ -144,6 +209,9 @@ fn every_table_is_a_table_of_section_3_or_sqlx_migrations() {
 
     for line in &lines {
         let (object, _) = split_line(line).unwrap();
+        if routine_name(object).is_some() {
+            continue;
+        }
         let table = object.split_once('.').map_or(object, |(table, _)| table);
         let known = table == MIGRATION_TABLE || tables.iter().any(|name| name == table);
         assert!(known, "table of {line} is not in section 3: {tables:?}");

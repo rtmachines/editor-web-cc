@@ -55,8 +55,8 @@ const TRIGGER_NUMBERS: std::ops::RangeInclusive<u16> = 30..=49;
 
 /// The cause of a `StorageError::Other` that a defect of the stored data or of a use case gives.
 ///
-/// The enum solves one problem: the three defects need a cause that names the failure, and one
-/// private type replaces three hand-written error types. No variant holds a secret.
+/// The enum solves one problem: the four defects need a cause that names the failure, and one
+/// private type replaces four hand-written error types. No variant holds a secret.
 #[derive(Debug, thiserror::Error)]
 enum RowError {
     /// A stored row breaks a rule of the domain.
@@ -79,6 +79,14 @@ enum RowError {
         /// The version that the write names.
         version: RecipeVersionId,
     },
+    /// An upsert names a state key, which the port refuses.
+    #[error("the upsert of the table {table} names the state key {key}")]
+    ReservedKey {
+        /// The table of the row.
+        table: &'static str,
+        /// The refused key. A key name is not a secret.
+        key: String,
+    },
 }
 
 impl From<RowError> for StorageError {
@@ -95,6 +103,16 @@ pub(crate) fn corrupt(table: &'static str, reason: impl fmt::Display) -> Storage
     RowError::Corrupt {
         table,
         reason: reason.to_string(),
+    }
+    .into()
+}
+
+/// Build the storage error of an upsert that names a state key (`E-DB-008`). The upsert refuses
+/// the key before any write, so no stored row is wrong.
+pub(crate) fn reserved_key(table: &'static str, key: &str) -> StorageError {
+    RowError::ReservedKey {
+        table,
+        key: key.to_owned(),
     }
     .into()
 }

@@ -329,6 +329,47 @@ async fn an_unlock_event_is_one_row_with_count_1_and_the_actor_in_detail() {
 }
 
 #[tokio::test]
+async fn an_audit_chain_broken_row_has_no_client_address_and_holds_the_request_id_of_the_run() {
+    let mut f = Fixture::create().await;
+    let request = Uuid::new_v4();
+
+    f.sink
+        .record(SecurityEvent::audit_chain_broken(RequestId::from(request)))
+        .await
+        .unwrap();
+
+    let expected = StoredEvent {
+        kind: "audit_chain_broken".to_owned(),
+        login_hmac: None,
+        user_id: None,
+        client_ip: None,
+        user_agent: None,
+        request_id: request,
+        detail: None,
+        count: 1,
+    };
+    assert_eq!(f.rows().await, vec![expected]);
+}
+
+#[tokio::test]
+async fn two_audit_chain_broken_events_stay_two_rows() {
+    let mut f = Fixture::create().await;
+
+    for _ in 0..2 {
+        f.sink
+            .record(SecurityEvent::audit_chain_broken(RequestId::from(
+                Uuid::new_v4(),
+            )))
+            .await
+            .unwrap();
+    }
+
+    let rows = f.rows().await;
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| row.count == 1));
+}
+
+#[tokio::test]
 async fn a_login_rejected_inactive_event_is_one_row_with_count_1() {
     let mut f = Fixture::create().await;
 

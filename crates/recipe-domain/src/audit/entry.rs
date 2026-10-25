@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use super::{AuditAction, AuditTarget, RequestId, SessionRef};
 use crate::identity::UserId;
+use crate::setting::SettingId;
 
 pub use kind::{DiffAction, RowAction, StateAction};
 
@@ -129,6 +130,37 @@ impl AuditEntry {
         Self::build(action.into(), target, before, after, context)
     }
 
+    /// Build the entry of a startup setting change.
+    ///
+    /// The startup settings comparison writes it, not a user. The entry therefore has no
+    /// actor, no client address, and no session. It keeps the full rows as it gets them.
+    /// The comparison updates or inserts a row and never deletes one. A missing row has no
+    /// old state, so `before` is `None` and the entry is a create.
+    #[must_use]
+    pub fn setting_changed(
+        setting: SettingId,
+        before: Option<Value>,
+        after: Value,
+        request_id: RequestId,
+    ) -> Self {
+        let change = match before {
+            None => RowChange::Create { after },
+            Some(before) => RowChange::Update { before, after },
+        };
+        let context = AuditContext {
+            actor: None,
+            request_id,
+            client_ip: None,
+            session_ref: None,
+        };
+        Self::row(
+            RowAction::SettingChanged,
+            AuditTarget::app_setting(setting),
+            change,
+            context,
+        )
+    }
+
     /// Return the action.
     #[must_use]
     pub const fn action(&self) -> AuditAction {
@@ -183,6 +215,7 @@ mod tests {
     use super::*;
     use crate::plant::MachineId;
     use crate::recipe::{ParameterId, RecipeId, RecipeVersionId};
+    use crate::setting::SettingId;
     use serde_json::json;
     use std::net::{IpAddr, Ipv4Addr};
     use uuid::Uuid;
@@ -353,6 +386,55 @@ mod tests {
         );
     }
 
+    fn setting_row(value: &str) -> Value {
+        json!({"key": "approval.separation_of_duties", "value": value, "updated_by": null})
+    }
+
+    #[test]
+    fn a_setting_change_keeps_the_full_row_before_and_after_and_has_no_actor() {
+        let setting = SettingId::from(id(8));
+        let entry = AuditEntry::setting_changed(
+            setting,
+            Some(setting_row("true")),
+            setting_row("false"),
+            RequestId::from(id(12)),
+        );
+        assert_eq!(entry.action(), AuditAction::SettingChanged);
+        assert_eq!(entry.target(), &AuditTarget::app_setting(setting));
+        assert_eq!(entry.before(), Some(&setting_row("true")));
+        assert_eq!(entry.after(), Some(&setting_row("false")));
+        assert_eq!(entry.actor(), None);
+        assert_eq!(entry.request_id(), RequestId::from(id(12)));
+        assert_eq!(entry.client_ip(), None);
+        assert_eq!(entry.session_ref(), None);
+    }
+
+    #[test]
+    fn a_setting_change_of_a_missing_row_keeps_only_the_after_state() {
+        let entry = AuditEntry::setting_changed(
+            SettingId::from(id(8)),
+            None,
+            setting_row("true"),
+            RequestId::from(id(12)),
+        );
+        assert_eq!(entry.before(), None);
+        assert_eq!(entry.after(), Some(&setting_row("true")));
+        assert_eq!(entry.actor(), None);
+    }
+
+    #[test]
+    fn a_setting_change_copies_a_fingerprint_row_without_change() {
+        let fingerprint = format!("sha256:{}", "ab".repeat(32));
+        let row = json!({"key": "alerts.webhook_url", "value": fingerprint});
+        let entry = AuditEntry::setting_changed(
+            SettingId::from(id(9)),
+            Some(json!({"key": "alerts.webhook_url", "value": ""})),
+            row.clone(),
+            RequestId::from(id(12)),
+        );
+        assert_eq!(entry.after(), Some(&row));
+    }
+
     #[test]
     fn an_entry_without_actor_address_and_session_is_possible() {
         let bare = AuditContext {
@@ -362,12 +444,9 @@ mod tests {
             session_ref: None,
         };
         let entry = AuditEntry::row(
-            RowAction::SettingChanged,
-            machine_target(),
-            RowChange::Update {
-                before: json!({}),
-                after: json!({}),
-            },
+            RowAction::UserCreated,
+            AuditTarget::app_user(UserId::from(id(10))),
+            RowChange::Create { after: json!({}) },
             bare,
         );
         assert_eq!(entry.actor(), None);

@@ -1,15 +1,21 @@
 //! The hand-written parser of the command line (design D15, D17).
 //!
-//! Three subcommands with at most three options need no parser crate.
+//! Four subcommands with at most three options need no parser crate (ADR-0059 (f)).
 
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow, bail};
 use recipe_domain::identity::Login;
 
+use crate::probe::ProbePath;
+
+#[cfg(test)]
+mod tests;
+
 /// The usage text that an argument error appends to its message.
 const USAGE: &str = "usage: recipe-server migrate [--config <path>] | recipe-server serve | \
-recipe-server create-admin --login <login> [--password-file <path>] [--config <path>]";
+recipe-server create-admin --login <login> [--password-file <path>] [--config <path>] | \
+recipe-server healthcheck [--path <path>]";
 
 /// One subcommand of the binary with its options.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +37,11 @@ pub enum Command {
         /// The path of the TOML file (`--config`).
         config: Option<PathBuf>,
     },
+    /// Probe the internal listener once. Docker runs this subcommand (ADR-0059).
+    Healthcheck {
+        /// The path to probe (`--path`). The default is `/readyz`.
+        path: ProbePath,
+    },
 }
 
 /// Parse the arguments after the program name.
@@ -38,8 +49,8 @@ pub enum Command {
 /// # Errors
 ///
 /// Returns an error for a missing subcommand, an unknown subcommand, an unknown option, an
-/// option without a value, a repeated option, a missing `--login`, and a login that breaks the
-/// grammar.
+/// option without a value, a repeated option, a missing `--login`, a login that breaks the
+/// grammar, and a probe path that is not safe in a request line.
 pub fn parse(args: &[String]) -> Result<Command> {
     let mut words = args.iter().zip(1_usize..);
     let Some((subcommand, position)) = words.next() else {
@@ -49,6 +60,7 @@ pub fn parse(args: &[String]) -> Result<Command> {
         "migrate" => parse_migrate(words),
         "serve" => no_options(words, Command::Serve),
         "create-admin" => parse_create_admin(words),
+        "healthcheck" => parse_healthcheck(words),
         _unknown => Err(not_known(position)),
     }
 }
@@ -93,6 +105,22 @@ fn parse_migrate(mut words: Words<'_>) -> Result<Command> {
     Ok(Command::Migrate {
         config: config.map(PathBuf::from),
     })
+}
+
+fn parse_healthcheck(mut words: Words<'_>) -> Result<Command> {
+    let mut path = None;
+    while let Some((word, position)) = words.next() {
+        if word != "--path" {
+            return Err(not_known(position));
+        }
+        take_value("--path", &mut path, &mut words)?;
+    }
+    let path = match path {
+        Some(text) => ProbePath::parse(&text)
+            .map_err(|reason| anyhow!("the option --path is not valid: {reason}. {USAGE}"))?,
+        None => ProbePath::readiness(),
+    };
+    Ok(Command::Healthcheck { path })
 }
 
 fn parse_create_admin(mut words: Words<'_>) -> Result<Command> {

@@ -19,5 +19,6 @@ pub mod export;
 pub mod identity;
 pub mod plant;
 pub mod recipe;
+pub mod setting;
 pub mod text;
 pub mod timestamp;

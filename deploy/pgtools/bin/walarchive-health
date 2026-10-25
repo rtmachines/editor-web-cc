@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# walarchive-health: healthcheck of the service walarchive (ADR-0068 (d), reliability.md 7.1).
+#
+# It exits 0 when a process pg_receivewal runs. Otherwise it writes one ERROR line and exits 1.
+# The check reads the directory /proc and needs no other tool. A process in the state Z (zombie)
+# does not count. The check writes nothing and deletes nothing.
+#
+# Environment. The default is the production value. The test script sets the other.
+#   WALARCHIVE_PROC_DIR   the process directory, default /proc
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=walarchive-health
+PROCESS_NAME=pg_receivewal
+PROC_DIR=${WALARCHIVE_PROC_DIR:-/proc}
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked name.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message>: write the one ERROR line and stop.
+fail() {
+  log ERROR "$1"
+  exit 1
+}
+
+# is_live <pid directory>: the process has the exact name and is not a zombie.
+# The stat file reads "pid (name) state ...". The state is the first word after the last ")".
+is_live() {
+  local dir=$1 comm stat rest
+  [ -r "$dir/comm" ] && [ -r "$dir/stat" ] || return 1
+  comm=$(<"$dir/comm") || return 1
+  [ "$comm" = "$PROCESS_NAME" ] || return 1
+  stat=$(<"$dir/stat") || return 1
+  rest=${stat##*) }
+  [ "${rest%% *}" != "Z" ]
+}
+
+[ -d "$PROC_DIR" ] || fail "the process directory is missing"
+
+for dir in "$PROC_DIR"/*; do
+  name=${dir##*/}
+  [[ $name =~ ^[0-9]+$ ]] || continue
+  if is_live "$dir"; then
+    log INFO "pg_receivewal runs" "\"pid\":$name"
+    exit 0
+  fi
+done
+
+fail "no process pg_receivewal runs"

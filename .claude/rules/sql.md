@@ -24,6 +24,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 - `CREATE INDEX CONCURRENTLY` goes in a file that starts with `-- no-transaction` and holds that one statement.
 - A breaking change uses expand and contract across three releases.
 - Each seed row keeps one UUID forever and uses `ON CONFLICT DO NOTHING`.
+- A generated column or a column default calls only built-in functions of `pg_catalog`. The review checks this rule (ADR-0084 (d)).
 
 ## Roles and grants (data-model §5)
 
@@ -55,4 +56,4 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 - Every trigger has a positive test and a negative test. The negative test asserts the SQLSTATE and the trigger code.
 - Every `CHECK`, `UNIQUE`, foreign key, and partial index has a test that violates it.
 - Every operation of `data-model.md` §6 has a test that fails midway and finds no partial write.
-- The grant test compares `role_table_grants` and `role_column_grants` with `grants.expected`.
+- The grant test compares `role_table_grants`, `role_column_grants`, and `role_routine_grants` with `grants.expected` (ADR-0069 (q)).

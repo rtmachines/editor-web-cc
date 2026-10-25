@@ -22,7 +22,7 @@ pub enum SecurityEventKind {
     Forbidden,
     /// An administrator lifted a login throttle.
     Unlock,
-    /// The nightly audit chain check found a broken hash chain.
+    /// The job `audit_chain_check` found a broken hash chain.
     AuditChainBroken,
 }
 
@@ -213,6 +213,24 @@ impl SecurityEvent {
             user: Some(target),
             detail: Some(json!({ "unlocked_by": unlocked_by.as_uuid().to_string() })),
             ..Self::request_event(SecurityEventKind::Unlock, request_id, client_ip, user_agent)
+        }
+    }
+
+    /// Build an `AuditChainBroken` event of the job `audit_chain_check`.
+    ///
+    /// The job has no request, so the event has no client address, no subject, and no
+    /// User-Agent. The request id is the id of the job run (`data-model.md` 3.8).
+    #[must_use]
+    pub fn audit_chain_broken(request_id: RequestId) -> Self {
+        Self {
+            kind: SecurityEventKind::AuditChainBroken,
+            login_hmac: None,
+            user: None,
+            client_ip: None,
+            user_agent: None,
+            request_id,
+            detail: None,
+            count: 1,
         }
     }
 
@@ -421,6 +439,20 @@ mod tests {
             event.detail(),
             Some(&serde_json::json!({"unlocked_by": Uuid::from_u128(12).to_string()}))
         );
+    }
+
+    #[test]
+    fn audit_chain_broken_has_no_client_address_and_no_subject() {
+        let request = RequestId::from(Uuid::from_u128(21));
+        let event = SecurityEvent::audit_chain_broken(request);
+        assert_eq!(event.kind(), SecurityEventKind::AuditChainBroken);
+        assert_eq!(event.request_id(), request);
+        assert_eq!(event.client_ip(), None);
+        assert_eq!(event.user_agent(), None);
+        assert_eq!(event.user(), None);
+        assert_eq!(event.login_hmac(), None);
+        assert_eq!(event.detail(), None);
+        assert_eq!(event.count(), 1);
     }
 
     #[test]

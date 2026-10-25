@@ -1,0 +1,4 @@
+# Schedule of the service walarchive (supercronic). Times are in UTC.
+# basebackup.time is Sunday 03:30 (reliability.md section 7.11, ADR-0068 (f)).
+CRON_TZ=UTC
+30 3 * * 0 basebackup-once

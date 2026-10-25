@@ -1,6 +1,6 @@
 # ADR-0049: Approval preview and lifecycle actions
 
-Status: Accepted. Amended by ADR-0052 (export link in the action area)
+Status: Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer in (k))
 Date: 2026-10-16
 Deciders: project owner
 

@@ -30,8 +30,8 @@ use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DerivedTypeLock, DiffReads, DraftRepository,
     Ensured, InsertedMachine, Isolation, Locked, MachineFilter, MachineSummary, NonEmpty,
     ParameterRow, PlantRepository, RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary,
-    RowImage, SessionRepository, Transaction, TypeCatalog, TypeUsageRow, UnitCount, UnitLookup,
-    UnitOfWork, UserRepository, VersionDetail, VersionSummary,
+    RowImage, SessionRepository, SettingRepository, Transaction, TypeCatalog, TypeUsageRow,
+    UnitCount, UnitLookup, UnitOfWork, UserRepository, VersionDetail, VersionSummary,
 };
 
 /// The platform of the test machine.
@@ -123,6 +123,11 @@ impl Transaction for CountingTransaction {
     fn attempts(&mut self) -> &mut dyn AttemptRepository {
         self.count();
         self.inner.attempts()
+    }
+
+    fn settings(&mut self) -> &mut dyn SettingRepository {
+        self.count();
+        self.inner.settings()
     }
 
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {

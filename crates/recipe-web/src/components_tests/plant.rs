@@ -7,7 +7,7 @@
 use askama::Template;
 
 use super::{Bundles, Lang, Texts, assert_fixed_svg_tags, icon, text};
-use crate::layout::{Layout, Shape};
+use crate::layout::{Layout, ReadOnlyFlag, Shape};
 
 /// The group id that a tree test passes. The real id is the UUID of a unit or a type.
 const UUID: &str = "0b9d8a4e-5f1c-4c52-9c1e-2f6f3c1a7e10";
@@ -31,7 +31,7 @@ struct HeadingPage<'a> {
 fn heading(content: bool, text: &str) -> String {
     let bundles = Bundles::load().unwrap();
     let texts = Texts::new(&bundles, Lang::En);
-    let mut layout = Layout::bare(texts, Lang::En, "t".to_owned());
+    let mut layout = Layout::bare(texts, Lang::En, "t".to_owned(), ReadOnlyFlag::default());
     if content {
         layout.shape = Shape::Content;
     }

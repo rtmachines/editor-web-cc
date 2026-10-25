@@ -28,7 +28,7 @@ pub const TEMPLATE_DATABASE: &str = "recipe";
 /// The label that marks the containers of this test binary. The next run removes them.
 const LABEL_KEY: &str = "org.recipe-editor.storage-tests";
 const LABEL_VALUE: &str = "recipe-db";
-/// The subnet that `01-roles.sh` writes into the line of `pg_hba.conf`.
+/// The subnet that `01-roles.sh` writes into the lines of `pg_hba.conf`.
 const COMPOSE_SUBNET: &str = "172.28.0.0/16";
 const INITDB_ARGS: &str = "--data-checksums --lc-collate=C --lc-ctype=C.UTF-8";
 /// The address that the published port binds to. No other host can reach the container.
@@ -41,6 +41,14 @@ const INIT_SCRIPT_SOURCE: &str = concat!(
     "/../../deploy/db/initdb/01-roles.sh"
 );
 const INIT_SCRIPT_TARGET: &str = "/docker-entrypoint-initdb.d/01-roles.sh";
+/// The test-only init script with the host lines of the harness (ADR-0069 (u)). The tests of
+/// `recipe-server` mount the same file.
+const TEST_HOSTS_SOURCE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/storage/support/02-test-hosts.sh"
+);
+/// The name sorts after `01-roles.sh`, so the image runs it second.
+const TEST_HOSTS_TARGET: &str = "/docker-entrypoint-initdb.d/02-test-hosts.sh";
 const EXECUTABLE_MODE: u32 = 0o755;
 const SECRET_MODE: u32 = 0o644;
 /// The start returns at once. `wait_for_login` waits for the final start of the server.
@@ -259,7 +267,8 @@ async fn prepare_template(server: &Server) -> Result<(), String> {
 }
 
 fn container_request() -> Result<testcontainers::ContainerRequest<GenericImage>, String> {
-    let script = read_script()?;
+    let script = read_script(INIT_SCRIPT_SOURCE)?;
+    let test_hosts = read_script(TEST_HOSTS_SOURCE)?;
     let mut request = GenericImage::new(IMAGE, IMAGE_TAG)
         .with_exposed_port(POSTGRES_PORT.tcp())
         .with_wait_for(WaitFor::millis(START_GRACE_MILLIS))
@@ -273,6 +282,10 @@ fn container_request() -> Result<testcontainers::ContainerRequest<GenericImage>,
         .with_copy_to(
             CopyTargetOptions::new(INIT_SCRIPT_TARGET).with_mode(EXECUTABLE_MODE),
             script.into_bytes(),
+        )
+        .with_copy_to(
+            CopyTargetOptions::new(TEST_HOSTS_TARGET).with_mode(EXECUTABLE_MODE),
+            test_hosts.into_bytes(),
         );
     for role in Role::WITH_SECRET_FILE {
         let content = format!("{}\n", role.password());
@@ -299,13 +312,11 @@ fn bind_to_loopback(host_config: &mut testcontainers::bollard::models::HostConfi
     )]));
 }
 
-/// Read the init script. A checkout with CRLF line endings must not break the shell script.
-fn read_script() -> Result<String, String> {
-    std::fs::read_to_string(INIT_SCRIPT_SOURCE)
+/// Read an init script. A checkout with CRLF line endings must not break the shell script.
+fn read_script(path: &str) -> Result<String, String> {
+    std::fs::read_to_string(path)
         .map(|text| text.replace("\r\n", "\n"))
-        .map_err(|error| {
-            format!("Cannot read the init script deploy/db/initdb/01-roles.sh: {error}")
-        })
+        .map_err(|error| format!("Cannot read the init script {path}: {error}"))
 }
 
 /// Wait until the server accepts a TCP login of the superuser.

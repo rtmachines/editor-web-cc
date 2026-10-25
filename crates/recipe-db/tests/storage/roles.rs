@@ -1,5 +1,7 @@
 //! Tests of the delta requirement "Roles from the database init script".
 
+use std::process::{Command, Output};
+
 use sqlx::Row as _;
 
 use crate::support::{Role, TestDatabase, connect, connect_error, server};
@@ -9,6 +11,23 @@ const INSUFFICIENT_PRIVILEGE: &str = "42501";
 /// SQLSTATE of "invalid password".
 const INVALID_PASSWORD: &str = "28P01";
 const DATABASES: [&str; 3] = ["recipe", "postgres", "template1"];
+/// A text that only the statement of another session holds.
+const STATEMENT_MARKER: &str = "statement-text-of-another-session";
+/// The lines of `support/02-test-hosts.sh`. The harness connects from the Docker host.
+const HARNESS_HBA_LINES: &[&str] = &[
+    "host all all all scram-sha-256",
+    "host replication recipe_replicator all scram-sha-256",
+];
+/// The lines of `01-roles.sh` in the order of `data-model.md` 5.1, with the subnet of the harness.
+const PRODUCTION_HBA_LINES: &[&str] = &[
+    "local all postgres peer",
+    "host recipe recipe_migrator 172.28.0.0/255.255.0.0 scram-sha-256",
+    "host recipe recipe_app 172.28.0.0/255.255.0.0 scram-sha-256",
+    "host recipe recipe_backup 172.28.0.0/255.255.0.0 scram-sha-256",
+    "host replication recipe_replicator 172.28.0.0/255.255.0.0 scram-sha-256",
+    "host recipe pg_isready 127.0.0.1/255.255.255.255 scram-sha-256",
+    "host all all all reject",
+];
 
 #[tokio::test]
 async fn the_five_roles_have_the_right_attributes() {
@@ -196,17 +215,120 @@ async fn the_membership_of_the_migrator_in_audit_owner_does_not_inherit() {
 }
 
 #[tokio::test]
-async fn recipe_app_reads_statistics_but_cannot_switch_to_the_role() {
+async fn only_audit_owner_holds_pg_read_all_stats() {
+    // ADR-0069 (f): the function replication_state() of audit_owner reads the statistics.
     let mut conn = connect(server(), Role::Superuser, "postgres").await;
 
-    let row = sqlx::query(
-        "SELECT inherit_option, set_option FROM pg_auth_members \
-         WHERE roleid = 'pg_read_all_stats'::regrole AND member = 'recipe_app'::regrole",
+    // The predefined role pg_monitor is a member of pg_read_all_stats in every cluster.
+    let members: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT pg_get_userbyid(member)::text, inherit_option FROM pg_auth_members \
+         WHERE roleid = 'pg_read_all_stats'::regrole \
+           AND member <> 'pg_monitor'::regrole ORDER BY 1",
     )
-    .fetch_one(&mut conn)
+    .fetch_all(&mut conn)
     .await
     .unwrap();
+    assert_eq!(members, vec![("audit_owner".to_owned(), true)]);
 
-    assert!(row.get::<bool, _>("inherit_option"));
-    assert!(!row.get::<bool, _>("set_option"));
+    for role in Role::WITH_SECRET_FILE {
+        let held: bool = sqlx::query_scalar("SELECT pg_has_role($1, 'pg_read_all_stats', 'USAGE')")
+            .bind(role.name())
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert!(!held, "{} holds pg_read_all_stats", role.name());
+    }
+}
+
+#[tokio::test]
+async fn recipe_app_reads_no_statement_text_of_another_session() {
+    let database = TestDatabase::create().await;
+    let mut other = database.connect(Role::Migrator).await;
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut other)
+        .await
+        .unwrap();
+    sqlx::query(&format!("SELECT '{STATEMENT_MARKER}'"))
+        .execute(&mut other)
+        .await
+        .unwrap();
+    let mut app = database.connect(Role::App).await;
+
+    let text: Option<String> =
+        sqlx::query_scalar("SELECT query FROM pg_stat_activity WHERE pid = $1")
+            .bind(pid)
+            .fetch_one(&mut app)
+            .await
+            .unwrap();
+
+    let text = text.unwrap_or_default();
+    assert!(!text.contains(STATEMENT_MARKER), "{text}");
+    let mut admin = database.connect(Role::Superuser).await;
+    let seen: String = sqlx::query_scalar("SELECT query FROM pg_stat_activity WHERE pid = $1")
+        .bind(pid)
+        .fetch_one(&mut admin)
+        .await
+        .unwrap();
+    assert!(seen.contains(STATEMENT_MARKER), "{seen}");
+}
+
+#[tokio::test]
+async fn pg_hba_conf_holds_the_harness_lines_and_then_the_lines_of_the_init_script() {
+    // data-model.md 5.1: the harness lines of 02-test-hosts.sh come first (ADR-0069 (u)).
+    let mut conn = connect(server(), Role::Superuser, "postgres").await;
+
+    let rules: Vec<String> = sqlx::query_scalar(
+        "SELECT concat_ws(' ', type, array_to_string(database, ','), \
+             array_to_string(user_name, ','), \
+             CASE WHEN netmask IS NULL THEN address ELSE address || '/' || netmask END, \
+             auth_method) \
+         FROM pg_hba_file_rules ORDER BY rule_number",
+    )
+    .fetch_all(&mut conn)
+    .await
+    .unwrap();
+    let faults: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM pg_hba_file_rules WHERE error IS NOT NULL")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+
+    let expected: Vec<&str> = [HARNESS_HBA_LINES, PRODUCTION_HBA_LINES].concat();
+    assert_eq!(faults, 0);
+    assert_eq!(rules, expected);
+}
+
+/// Run `psql -U postgres` through the socket of the harness container, as the given system user.
+fn socket_psql(system_user: Option<&str>) -> Output {
+    let mut command = Command::new("docker");
+    command.arg("exec");
+    if let Some(user) = system_user {
+        command.args(["-u", user]);
+    }
+    command
+        .arg(&server().container_id)
+        .args(["psql", "-U", "postgres", "-d", "postgres", "--no-psqlrc"])
+        .args(["-tAc", "SELECT 1"])
+        .output()
+        .expect("docker exec runs")
+}
+
+#[test]
+fn the_superuser_logs_in_through_the_socket_as_the_system_user_postgres() {
+    // Spec scenario "Superuser through the socket": the line `local all postgres peer`.
+    let output = socket_psql(Some("postgres"));
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "1");
+}
+
+#[test]
+fn the_superuser_cannot_log_in_through_the_socket_as_another_system_user() {
+    // Spec scenario "Superuser through the socket from another system user": `docker exec`
+    // without `-u` runs as root, and `peer` compares the system user with the role name.
+    let output = socket_psql(None);
+
+    assert!(!output.status.success(), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Peer authentication failed"), "{stderr}");
 }

@@ -5,8 +5,8 @@ use recipe_domain::audit::AuditEntry;
 
 use super::{
     AttemptRepository, AuditReads, DiffReads, DraftRepository, Isolation, NonEmpty,
-    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, TypeCatalog, UnitLookup,
-    UserRepository,
+    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, SettingRepository,
+    TypeCatalog, UnitLookup, UserRepository,
 };
 use crate::error::{AppError, StorageError};
 
@@ -102,6 +102,9 @@ pub trait Transaction: Send {
 
     /// Return the repository of the `login_attempt` rows in this transaction.
     fn attempts(&mut self) -> &mut dyn AttemptRepository;
+
+    /// Return the repository of the configuration rows of `app_setting` in this transaction.
+    fn settings(&mut self) -> &mut dyn SettingRepository;
 
     /// Write the audit entries in this transaction, in the order of the list.
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError>;

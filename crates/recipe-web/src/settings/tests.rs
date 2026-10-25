@@ -128,6 +128,11 @@ fn default_durations_equal_the_table() {
     );
     assert_eq!(settings.hsts_max_age, duration("http.hsts_max_age"));
     assert_eq!(settings.retry_after, duration("http.retry_after"));
+    assert_eq!(settings.request_timeout, duration("http.request_timeout"));
+    assert_eq!(
+        settings.body_read_timeout,
+        duration("http.body_read_timeout")
+    );
     assert_eq!(
         settings.lang_cookie_max_age,
         duration("i18n.lang_cookie_max_age")
@@ -135,11 +140,13 @@ fn default_durations_equal_the_table() {
 }
 
 #[test]
-fn default_trusted_proxies_is_the_compose_subnet() {
+fn default_trusted_proxies_is_the_one_address_of_the_proxy() {
     let settings = WebSettings::default();
-    let inside: IpAddr = "172.28.0.2".parse().unwrap();
+    let proxy: IpAddr = "172.28.0.2".parse().unwrap();
+    let neighbor: IpAddr = "172.28.0.3".parse().unwrap();
     let outside: IpAddr = "203.0.113.9".parse().unwrap();
-    assert!(settings.trusted_proxies.contains(inside));
+    assert!(settings.trusted_proxies.contains(proxy));
+    assert!(!settings.trusted_proxies.contains(neighbor));
     assert!(!settings.trusted_proxies.contains(outside));
 }
 

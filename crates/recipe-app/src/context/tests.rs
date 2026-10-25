@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use super::{AppContext, audit_context};
 use crate::memory::fixtures::{Fixture, actor, meta};
+use crate::operations::AlertCounters;
 use crate::ports::Clock as _;
 
 #[test]
@@ -80,6 +81,44 @@ async fn every_clone_of_a_context_shares_the_export_gate_of_the_settings() {
     assert_eq!(copy.export_gate.available(), 2);
     drop(permit);
     assert_eq!(copy.export_gate.available(), 3);
+}
+
+#[test]
+fn with_counters_makes_the_context_and_its_clones_share_the_given_counters() {
+    let fixture = Fixture::new();
+    let counters = AlertCounters::default();
+    let context = fixture.context().with_counters(counters.clone());
+    let copy = context.clone();
+
+    context.counters.record_export_hash_mismatch();
+    copy.counters.record_export_hash_mismatch();
+
+    assert_eq!(counters.export_hash_mismatches(), 2);
+    assert_eq!(counters.panics(), 0);
+}
+
+#[test]
+fn counters_returns_the_counters_that_the_context_holds() {
+    let fixture = Fixture::new();
+    let counters = AlertCounters::default();
+    let context = fixture.context().with_counters(counters.clone());
+
+    context.counters().record_panic();
+
+    assert_eq!(counters.panics(), 1);
+    assert_eq!(counters.export_hash_mismatches(), 0);
+}
+
+#[test]
+fn new_gives_each_context_its_own_counters() {
+    let fixture = Fixture::new();
+    let first = fixture.context();
+    let second = fixture.context();
+
+    first.counters.record_export_hash_mismatch();
+
+    assert_eq!(first.counters.export_hash_mismatches(), 1);
+    assert_eq!(second.counters.export_hash_mismatches(), 0);
 }
 
 #[test]

@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+# basebackup-once: take one checked base backup into the WAL archive disk (ADR-0068 (f) to (k)).
+#
+# Layout of the disk (design D10):
+#   $WAL_DIR/<segment>                WAL segments of pg_receivewal, at the top
+#   $WAL_DIR/base/base_<YYYYMMDD_HHMMSS>   one base backup, plain format, checked
+#   $WAL_DIR/base/.tmp-base_<...>     the base backup of a running or killed run
+#   $WAL_DIR/.walarchive-marker, .lock, .pitr-scratch   always stay
+# A reader finds a base backup only by the anchored grammar ^base_[0-9]{8}_[0-9]{6}$ of the
+# whole name, with LC_ALL=C (ADR-0077 (d)). A name that does not match is never deleted.
+#
+# Steps: marker, lock, pgpass file, pg_basebackup into the temp name, pg_verifybackup, rename to the
+# final name. Only after a passed check the retention runs: it keeps the newest basebackup.retention
+# base backups and pg_archivecleanup deletes the WAL segments before the lowest start segment of all
+# kept base backups (ADR-0077 (f)). A failed pg_basebackup or pg_verifybackup deletes no base backup
+# and no WAL segment.
+#
+# Environment. The defaults are the production values. The test script sets the others.
+#   WAL_DIR                  the WAL archive disk, default /wal
+#   WALARCHIVE_PGPASS_DIR    the tmpfs for the pgpass file, default /run/pgpass
+#   WALARCHIVE_SECRET_FILE   the password file of recipe_replicator, default /run/secrets/replicator_password
+#   PGHOST PGPORT PGUSER     the connection, default db, 5432, recipe_replicator
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=basebackup-once
+RETENTION_COUNT=4 # basebackup.retention in reliability.md section 7.11
+MARKER_NAME=.walarchive-marker
+LOCK_NAME=.lock
+BASE_RE='^base_[0-9]{8}_[0-9]{6}$'
+LABEL_RE='^START WAL LOCATION: [0-9A-F]+/[0-9A-F]+ \(file ([0-9A-F]{24})\)$'
+
+WAL_DIR=${WAL_DIR:-/wal}
+PGPASS_DIR=${WALARCHIVE_PGPASS_DIR:-/run/pgpass}
+SECRET_FILE=${WALARCHIVE_SECRET_FILE:-/run/secrets/replicator_password}
+export PGHOST=${PGHOST:-db}
+export PGPORT=${PGPORT:-5432}
+export PGUSER=${PGUSER:-recipe_replicator}
+
+error_logged=0
+work_dir=""
+tmp_dir=""
+BASE_DIR=$WAL_DIR/base
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked name.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message> [<extra JSON fields>]: write the one ERROR line and stop.
+fail() {
+  error_logged=1
+  log ERROR "$@"
+  exit 1
+}
+
+# remove_tree <path>: delete one base backup directory after a check of the prefix and the grammar.
+# The temp name of this run and a final name of the grammar are the only names that pass.
+remove_tree() {
+  local path=$1 name=${1##*/}
+  case $path in
+    "$BASE_DIR"/.tmp-base_*) ;;
+    "$BASE_DIR"/base_*)
+      [[ $name =~ $BASE_RE ]] || fail "refusing to delete a name outside the grammar of a base backup"
+      ;;
+    *) fail "refusing to delete a path outside the base backup directory" ;;
+  esac
+  if [ -d "$path" ] && [ ! -L "$path" ]; then
+    rm -r -- "${path:?}"
+  fi
+}
+
+# cleanup removes the pgpass file and the temp base backup of this run. It never touches another name.
+cleanup() {
+  local status=$?
+  trap - EXIT
+  case $work_dir in
+    "$PGPASS_DIR"/run.*)
+      rm -f -- "${work_dir:?}/pgpass" || true
+      rmdir -- "${work_dir:?}" || true
+      ;;
+  esac
+  if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
+    if ! remove_tree "$tmp_dir"; then
+      log ERROR "cannot delete the temp base backup of this run" "\"base\":\"${tmp_dir##*/}\""
+      status=1
+    fi
+  fi
+  if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
+    log ERROR "base backup run failed unexpectedly" "\"exit_code\":$status"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+# check_secret_file <path>: one line, no carriage return, not empty (ADR-0031).
+# The checks use counts only, so the password never enters a shell variable.
+check_secret_file() {
+  local path=$1 total newlines carriage nul first_line
+  [ -f "$path" ] && [ -r "$path" ] || fail "cannot read the password file of recipe_replicator"
+  total=$(wc -c <"$path")
+  newlines=$(tr -cd '\n' <"$path" | wc -c)
+  carriage=$(tr -cd '\r' <"$path" | wc -c)
+  nul=$(tr -cd '\000' <"$path" | wc -c)
+  [ $((total - newlines)) -gt 0 ] || fail "the password file of recipe_replicator is empty"
+  [ "$carriage" -eq 0 ] || fail "the password file of recipe_replicator holds a carriage return"
+  [ "$nul" -eq 0 ] || fail "the password file of recipe_replicator holds a NUL byte"
+  [ "$newlines" -le 1 ] || fail "the password file of recipe_replicator holds more than one line"
+  if [ "$newlines" -eq 1 ]; then
+    first_line=$(head -n 1 -- "$path" | wc -c)
+    [ "$first_line" -eq "$total" ] || fail "the password file of recipe_replicator holds more than one line"
+  fi
+}
+
+# write_pgpass: one libpq line for the replication protocol. sed escapes \ and : (libpq rule).
+write_pgpass() {
+  [ -d "$PGPASS_DIR" ] || fail "the directory of the pgpass file is missing"
+  work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX")
+  export PGPASSFILE=$work_dir/pgpass
+  {
+    printf '%s:%s:replication:%s:' "$PGHOST" "$PGPORT" "$PGUSER"
+    # The second expression ends the line with a newline when the secret file has none.
+    sed -e 's/[\\:]/\\&/g' -e '$a\' -- "$SECRET_FILE"
+  } >"$PGPASSFILE"
+}
+
+# start_segment <base backup name>: the first WAL segment that the label of the base backup names.
+start_segment() {
+  local label=$BASE_DIR/$1/backup_label line
+  [ -f "$label" ] && [ ! -L "$label" ] || return 1
+  while IFS= read -r line; do
+    if [[ $line =~ $LABEL_RE ]]; then
+      printf '%s' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  done <"$label"
+  return 1
+}
+
+# cutoff <base backup name>...: the lowest start segment of the named base backups (ADR-0077 (f)).
+# The comparison uses the 16 hex characters after the 8 of the timeline, as pg_archivecleanup does.
+# It sets cutoff_segment and cutoff_base. A label that cannot be read stops the run.
+cutoff() {
+  local name segment
+  cutoff_segment=""
+  cutoff_base=""
+  for name in "$@"; do
+    segment=$(start_segment "$name") \
+      || fail "cannot read the start segment of a kept base backup" "\"base\":\"$name\""
+    if [ -z "$cutoff_segment" ] || [[ ${segment:8} < ${cutoff_segment:8} ]]; then
+      cutoff_segment=$segment
+      cutoff_base=$name
+    fi
+  done
+}
+
+# retention: keep the newest RETENTION_COUNT base backups. The base backup of this run always stays.
+# The read of every kept label comes first, so a bad label stops the run before any delete.
+# pg_archivecleanup then gets the lowest start segment of all kept base backups (ADR-0077 (f)).
+retention() {
+  local path name names=() count i limit
+  local old=() kept=()
+  for path in "$BASE_DIR"/base_*; do
+    name=${path##*/}
+    [[ $name =~ $BASE_RE ]] && [ -d "$path" ] && [ ! -L "$path" ] || continue
+    names+=("$name")
+  done
+  count=${#names[@]}
+  limit=$((count - RETENTION_COUNT))
+  for ((i = 0; i < count; i++)); do
+    name=${names[$i]}
+    if [ "$i" -lt "$limit" ] && [ "$name" != "$final_name" ]; then
+      old+=("$name")
+    else
+      kept+=("$name")
+    fi
+  done
+  [ "${#kept[@]}" -gt 0 ] || fail "no base backup is kept"
+  cutoff "${kept[@]}"
+  for name in ${old[@]+"${old[@]}"}; do
+    remove_tree "$BASE_DIR/$name"
+    log INFO "old base backup deleted" "\"base\":\"$name\""
+  done
+  pg_archivecleanup "$WAL_DIR" "$cutoff_segment" \
+    || fail "pg_archivecleanup failed" "\"before\":\"$cutoff_segment\""
+  log INFO "wal segments before the lowest start segment of the kept base backups deleted" \
+    "\"base\":\"$cutoff_base\",\"before\":\"$cutoff_segment\""
+}
+
+# --- run ----------------------------------------------------------------------------------
+
+[ "$#" -eq 0 ] || fail "usage: basebackup-once"
+case $WAL_DIR in
+  /?*) ;;
+  *) fail "WAL_DIR must be an absolute path" ;;
+esac
+[[ $PGHOST =~ ^[A-Za-z0-9._-]+$ && $PGPORT =~ ^[0-9]+$ ]] || fail "bad PGHOST or PGPORT"
+[[ $PGUSER =~ ^[a-z_][a-z0-9_]*$ ]] || fail "bad PGUSER"
+
+# Step 1: marker, lock, and the names of the new base backup.
+if [ ! -f "$WAL_DIR/$MARKER_NAME" ] || [ -L "$WAL_DIR/$MARKER_NAME" ]; then
+  fail "the marker file of the WAL archive disk is missing"
+fi
+exec 9>>"$WAL_DIR/$LOCK_NAME"
+flock -n 9 || fail "another base backup run holds the lock"
+if [ ! -e "$BASE_DIR" ] && [ ! -L "$BASE_DIR" ]; then
+  mkdir -- "$BASE_DIR"
+fi
+[ -d "$BASE_DIR" ] && [ ! -L "$BASE_DIR" ] || fail "the base backup directory is not a directory"
+
+ts=$(date -u +%Y%m%d_%H%M%S)
+final_name=base_$ts
+final_dir=$BASE_DIR/$final_name
+temp_dir=$BASE_DIR/.tmp-$final_name
+for candidate in "$final_dir" "$temp_dir"; do
+  if [ -e "$candidate" ] || [ -L "$candidate" ]; then
+    fail "a name of the new base backup exists" "\"base\":\"${candidate##*/}\""
+  fi
+done
+tmp_dir=$temp_dir
+log INFO "base backup started" "\"base\":\"$final_name\""
+
+# Step 2: the pgpass file in the tmpfs.
+check_secret_file "$SECRET_FILE"
+write_pgpass
+
+# Step 3: the base backup and its check. A failure here deletes only the temp name of this run.
+pg_basebackup --pgdata="$tmp_dir" --wal-method=fetch -Fp --checkpoint=fast \
+  --manifest-checksums=SHA256 --no-password || fail "pg_basebackup failed"
+chmod 0700 -- "$tmp_dir"
+pg_verifybackup --quiet "$tmp_dir" >&2 || fail "pg_verifybackup failed"
+
+# Step 4: sync, then the rename publishes the checked base backup.
+sync
+mv -T -- "$tmp_dir" "$final_dir"
+sync
+log INFO "base backup completed" "\"base\":\"$final_name\""
+
+# Step 5: the retention runs only after a passed check.
+retention

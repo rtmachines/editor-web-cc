@@ -81,6 +81,7 @@ recipe_version|INSERT
 recipe_version|SELECT
 recipe|INSERT
 recipe|SELECT
+replication_state()|EXECUTE
 security_event.client_ip|INSERT
 security_event.count|UPDATE
 security_event.detail|INSERT
@@ -89,6 +90,7 @@ security_event.login_hmac|INSERT
 security_event.request_id|INSERT
 security_event.user_agent|INSERT
 security_event.user_id|INSERT
+security_event_purge()|EXECUTE
 security_event|SELECT
 session.csrf_token|UPDATE
 session.expires_at|UPDATE

@@ -1,8 +1,9 @@
-//! Request pipeline layers (design D11, steps 1 to 3).
+//! Request pipeline layers (design D11 of `identity-and-sessions`, design D5 of `operations-compose`).
 //!
-//! `wrap` puts the request id outside, the trace layer inside it, and the security headers inside
-//! the trace layer. A layer that is added later runs earlier, so the request id exists for every
-//! answer, also for an early rejection. The layers of steps 4 to 9 sit in `routes::assemble`.
+//! `wrap` puts the request id outside and the backstop panic layer inside it. It puts the trace
+//! layer inside the backstop and the security headers inside the trace layer. A layer that is added
+//! later runs earlier. So the request id exists for every answer, also for an early rejection and a
+//! caught panic. The layers of steps 4 to 9 sit in `routes::assemble`.
 
 use axum::Router;
 use axum::extract::{Request, State};
@@ -21,6 +22,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use uuid::Uuid;
 
+use crate::panic;
 use crate::settings::WebSettings;
 
 /// The value of `Content-Security-Policy` (`api.md` section 9).
@@ -45,7 +47,7 @@ const HSTS_FALLBACK: &str = "max-age=31536000; includeSubDomains";
 /// The function ignores an `X-Request-Id` header of the client, so a client cannot choose the
 /// text that the log and the audit entries hold. Handlers read the id from the request
 /// extension [`RequestId`].
-async fn request_id(
+pub(crate) async fn request_id(
     State(counter): State<Arc<AtomicU64>>,
     mut request: Request,
     next: Next,
@@ -60,6 +62,13 @@ async fn request_id(
         response.headers_mut().insert(X_REQUEST_ID, value);
     }
     response
+}
+
+/// Return the state of the layer `request_id`: a new counter for the unique fallback.
+///
+/// The public router and the health router each build their own counter with this function.
+pub(crate) fn request_id_state() -> Arc<AtomicU64> {
+    Arc::new(AtomicU64::new(0))
 }
 
 /// Return the milliseconds since 1970 and the nanoseconds inside the current millisecond.
@@ -150,20 +159,19 @@ fn finish_span(response: &Response, latency: Duration, span: &Span) {
     tracing::info!("request finished");
 }
 
-/// Return the value of `Strict-Transport-Security` for `settings`.
-fn hsts_value(settings: &WebSettings) -> HeaderValue {
-    let text = format!(
-        "max-age={}; includeSubDomains",
-        settings.hsts_max_age.as_secs()
-    );
+/// Return the value of `Strict-Transport-Security` for `max_age`.
+fn hsts_value(max_age: Duration) -> HeaderValue {
+    let text = format!("max-age={}; includeSubDomains", max_age.as_secs());
     HeaderValue::from_str(&text).unwrap_or_else(|_invalid| HeaderValue::from_static(HSTS_FALLBACK))
 }
 
-/// Add the request id and the security headers of `api.md` section 9 to every answer of `router`.
+/// Add the security headers of `api.md` section 9 to every answer of `router`.
 ///
-/// `Cache-Control: no-store` is the default. A handler that sets its own value, as the static
-/// route does, keeps it.
-pub(crate) fn wrap(router: Router, settings: &WebSettings) -> Router {
+/// The function solves one problem: the public router and the health router must send the same
+/// headers. `Cache-Control: no-store` is the default. A handler that sets its own value keeps it.
+/// A layer that is added later runs earlier. So the order, outer first, is the CSP, `nosniff`, the
+/// referrer policy, HSTS, and `Cache-Control`. The caller adds the trace layer outside these.
+pub(crate) fn security_headers(router: Router, hsts_max_age: Duration) -> Router {
     router
         .layer(SetResponseHeaderLayer::if_not_present(
             CACHE_CONTROL,
@@ -171,7 +179,7 @@ pub(crate) fn wrap(router: Router, settings: &WebSettings) -> Router {
         ))
         .layer(SetResponseHeaderLayer::overriding(
             STRICT_TRANSPORT_SECURITY,
-            hsts_value(settings),
+            hsts_value(hsts_max_age),
         ))
         .layer(SetResponseHeaderLayer::overriding(
             REFERRER_POLICY,
@@ -185,6 +193,15 @@ pub(crate) fn wrap(router: Router, settings: &WebSettings) -> Router {
             CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CSP),
         ))
+}
+
+/// Add the request id and the security headers of `api.md` section 9 to every answer of `router`.
+///
+/// `Cache-Control: no-store` is the default. A handler that sets its own value, as the static
+/// route does, keeps it. The backstop catches a panic of the trace layer, the header layers, and
+/// `render_errors`. Its answer gets only `X-Request-Id` of these headers (ADR-0057 (j)).
+pub(crate) fn wrap(router: Router, settings: &WebSettings) -> Router {
+    security_headers(router, settings.hsts_max_age)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(make_span)
@@ -193,7 +210,8 @@ pub(crate) fn wrap(router: Router, settings: &WebSettings) -> Router {
                 .on_eos(())
                 .on_failure(()),
         )
-        .layer(from_fn_with_state(Arc::new(AtomicU64::new(0)), request_id))
+        .layer(panic::backstop_layer())
+        .layer(from_fn_with_state(request_id_state(), request_id))
 }
 
 #[cfg(test)]

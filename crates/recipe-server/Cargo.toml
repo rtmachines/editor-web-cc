@@ -4,7 +4,11 @@ description = "Binary of the recipe editor with the subcommands serve, migrate, 
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-publish.workspace = true
+publish = false
+
+# ADR-0060 (bb): the library target holds every module, and the binary stays thin.
+[lib]
+path = "src/lib.rs"
 
 # overview.md section 5: recipe-server depends on recipe-app, recipe-db, recipe-domain, recipe-web, and anyhow.
 # Design D15 of the change db-schema-and-adapters names figment, tokio, tracing, and serde.
@@ -15,15 +19,40 @@ recipe-db = { workspace = true }
 recipe-domain = { workspace = true }
 recipe-web = { workspace = true }
 anyhow = { workspace = true }
+axum = { workspace = true }
 figment = { workspace = true, features = ["toml", "env"] }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, features = ["tokio", "server", "server-graceful", "http1", "service", "client-legacy"] }
+# ADR-0063 (h), (i): the webhook client uses `ring` only. No `aws-lc` crate enters the graph.
+hyper-rustls = { workspace = true, features = ["http1", "tls12", "ring", "webpki-tokio"] }
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+http-body-util = { workspace = true }
+tokio ={ workspace = true, features = ["rt-multi-thread", "net", "time", "macros", "sync", "signal"] }
+tokio-util = { workspace = true }
+tower = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["json"] }
+tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 serde = { workspace = true, features = ["derive"] }
+# The system clock and the manifest times are `OffsetDateTime` values (design D3).
+time = { workspace = true }
+# The adapters of the ports `DiskSpace` and `BackupDirectory` implement `#[async_trait]` traits.
+async-trait = { workspace = true }
+
+# ADR-0060 (c): `statvfs` of `rustix` builds on Unix only. Windows gets `DiskFault::Unsupported`.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs", "std"] }
+
+# ADR-0062 (b): only a build with the feature `dev` accepts `session.secure=false`.
+# The feature is not in a default list, and the release image never enables it.
+[features]
+dev = []
 
 [dev-dependencies]
+# Task 7.8: the tests of the start wire the in-memory adapters. Only test builds enable the feature.
+recipe-app = { workspace = true, features = ["memory"] }
 testcontainers = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+tower-http = { workspace = true, features = ["catch-panic"] }
 
 [lints]
 workspace = true

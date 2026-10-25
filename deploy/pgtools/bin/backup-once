@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+# backup-once [<suffix>]: write one complete, checked backup set to the second disk.
+#
+# The suffix is empty (daily run), _premigrate (service backup-premigrate), or _now (backup-now).
+# Source: ADR-0066 (e) to (o), ADR-0033, ADR-0031, design D10, reliability.md section 7.7.
+#
+# A set has four files: recipe_<ts><suffix>.dump, globals_<ts><suffix>.sql,
+# recipe_<ts><suffix>.counts, and the manifest recipe_<ts><suffix>.dump.sha256. The manifest comes
+# last. The counts file has one line "<schema>.<table>|<rows>" for each table of the snapshot,
+# except session and login_attempt.
+#
+# Environment. The defaults are the production values. The test script sets the others.
+#   BACKUP_DIR          the backup disk, default /backups
+#   BACKUP_PGPASS_DIR   the tmpfs for the pgpass file, default /run/pgpass
+#   BACKUP_SECRET_FILE  the password file of recipe_backup, default /run/secrets/backup_password
+#   PGHOST PGPORT PGDATABASE PGUSER   the connection, default db, 5432, recipe, recipe_backup
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=backup-once
+RETENTION_DAYS=30 # backup.retention in reliability.md section 7.11
+SECONDS_PER_DAY=86400
+MARKER_NAME=.backup-marker
+LOCK_NAME=.lock
+
+BACKUP_DIR=${BACKUP_DIR:-/backups}
+PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
+SECRET_FILE=${BACKUP_SECRET_FILE:-/run/secrets/backup_password}
+export PGHOST=${PGHOST:-db}
+export PGPORT=${PGPORT:-5432}
+export PGDATABASE=${PGDATABASE:-recipe}
+export PGUSER=${PGUSER:-recipe_backup}
+
+error_logged=0
+work_dir=""
+session_pid=""
+session_in=""
+session_out=""
+tmp_files=()
+published=()
+manifest_path=""
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked name.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message> [<extra JSON fields>]: write the one ERROR line and stop.
+fail() {
+  error_logged=1
+  log ERROR "$@"
+  exit 1
+}
+
+# safe_remove <path>: delete one regular file of a set after a check of the path prefix.
+safe_remove() {
+  local path=$1
+  case $path in
+    "$BACKUP_DIR"/.tmp-recipe_* | "$BACKUP_DIR"/.tmp-globals_* \
+      | "$BACKUP_DIR"/recipe_* | "$BACKUP_DIR"/globals_*) ;;
+    *) fail "refusing to delete a path outside the names of a set" ;;
+  esac
+  if [ -f "$path" ] && [ ! -L "$path" ]; then
+    rm -- "${path:?}"
+  fi
+}
+
+close_session() {
+  [ -n "$session_pid" ] || return 0
+  local pid=$session_pid fd_in=$session_in fd_out=$session_out status=0
+  session_pid=""
+  # bash can close a finished coproc itself, so a second close may fail. That is no fault.
+  { exec {fd_in}>&-; } 2>/dev/null || true
+  wait "$pid" || status=$?
+  { exec {fd_out}<&-; } 2>/dev/null || true
+  return "$status"
+}
+
+# cleanup removes the files of this run when the run did not publish its manifest.
+# It never touches a file that this run did not create.
+cleanup() {
+  local status=$? path complete=0 delete_failed=0
+  trap - EXIT
+  # The pgpass file goes first and on a best effort. A failed delete of a temp file cannot keep it.
+  case $work_dir in
+    "$PGPASS_DIR"/run.*)
+      rm -f -- "${work_dir:?}/pgpass" || true
+      rmdir -- "${work_dir:?}" || true
+      ;;
+  esac
+  if [ -n "$session_pid" ]; then
+    kill "$session_pid" 2>/dev/null || true
+    close_session || true
+  fi
+  for path in ${published[@]+"${published[@]}"}; do
+    if [ "$path" = "$manifest_path" ]; then
+      complete=1
+    fi
+  done
+  # A failed delete must not stop the loop under set -e. It writes one ERROR line for its file.
+  # The base name of the path is a checked name of this run.
+  # A failed delete does not set error_logged, so the fallback line below still runs.
+  for path in ${tmp_files[@]+"${tmp_files[@]}"}; do
+    if ! safe_remove "$path"; then
+      delete_failed=1
+      log ERROR "cannot delete a file of this run" "\"file\":\"${path##*/}\""
+    fi
+  done
+  if [ "$complete" -eq 0 ]; then
+    for path in ${published[@]+"${published[@]}"}; do
+      if ! safe_remove "$path"; then
+        delete_failed=1
+        log ERROR "cannot delete a file of this run" "\"file\":\"${path##*/}\""
+      fi
+    done
+  fi
+  if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
+    log ERROR "backup run failed unexpectedly" "\"exit_code\":$status"
+  fi
+  if [ "$delete_failed" -eq 1 ] && [ "$status" -eq 0 ]; then
+    status=1
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+# A closed snapshot session must give a failed write and not a signal.
+trap '' PIPE
+
+# check_secret_file <path>: one line, no carriage return, not empty (ADR-0031).
+# The checks use counts only, so the password never enters a shell variable.
+check_secret_file() {
+  local path=$1 total newlines carriage nul first_line
+  [ -f "$path" ] && [ -r "$path" ] || fail "cannot read the password file of recipe_backup"
+  total=$(wc -c <"$path")
+  newlines=$(tr -cd '\n' <"$path" | wc -c)
+  carriage=$(tr -cd '\r' <"$path" | wc -c)
+  nul=$(tr -cd '\000' <"$path" | wc -c)
+  [ $((total - newlines)) -gt 0 ] || fail "the password file of recipe_backup is empty"
+  [ "$carriage" -eq 0 ] || fail "the password file of recipe_backup holds a carriage return"
+  [ "$nul" -eq 0 ] || fail "the password file of recipe_backup holds a NUL byte"
+  [ "$newlines" -le 1 ] || fail "the password file of recipe_backup holds more than one line"
+  if [ "$newlines" -eq 1 ]; then
+    first_line=$(head -n 1 -- "$path" | wc -c)
+    [ "$first_line" -eq "$total" ] || fail "the password file of recipe_backup holds more than one line"
+  fi
+}
+
+# write_pgpass: one libpq line. sed escapes \ and : in the password (libpq rule).
+write_pgpass() {
+  [ -d "$PGPASS_DIR" ] || fail "the directory of the pgpass file is missing"
+  work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX")
+  export PGPASSFILE=$work_dir/pgpass
+  {
+    printf '%s:%s:%s:%s:' "$PGHOST" "$PGPORT" "$PGDATABASE" "$PGUSER"
+    sed -e 's/[\\:]/\\&/g' -- "$SECRET_FILE"
+  } >"$PGPASSFILE"
+}
+
+# send <line>: write one line to the snapshot session.
+send() {
+  printf '%s\n' "$1" >&"$session_in" || fail "the snapshot session is closed"
+}
+
+# wait_for <regex>: read lines of the session until one matches. The match is in $session_line.
+wait_for() {
+  while IFS= read -r session_line <&"$session_out"; do
+    if [[ $session_line =~ $1 ]]; then
+      return 0
+    fi
+  done
+  fail "the snapshot session ended before it answered"
+}
+
+COUNT_QUERY=""
+IFS= read -r -d '' COUNT_QUERY <<'SQL' || true
+SELECT format('SELECT %L, count(*) FROM %I.%I', n.nspname || '.' || c.relname, n.nspname, c.relname)
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE c.relkind = 'r'
+  AND n.nspname <> 'information_schema'
+  AND n.nspname !~ '^pg_'
+  AND NOT (n.nspname = 'public' AND c.relname IN ('session', 'login_attempt'))
+ORDER BY n.nspname, c.relname \gexec
+SQL
+
+# publish <tmp path> <final path>: a hard link never replaces a file. Then the temp name goes.
+publish() {
+  ln -T -- "$1" "$2" || fail "cannot publish a file of the set without replacing a file"
+  published+=("$2")
+  safe_remove "$1"
+}
+
+# newest_name <suffix>: the name of the newest manifest of one kind, or an empty text.
+newest_name() {
+  local manifest name newest=""
+  for manifest in "$BACKUP_DIR"/recipe_*.dump.sha256; do
+    name=${manifest##*/}
+    if [[ $name =~ ^recipe_[0-9]{8}_[0-9]{4}(_premigrate|_now)?\.dump\.sha256$ ]] \
+      && [ "${BASH_REMATCH[1]-}" = "$1" ] && [ -f "$manifest" ] && [ ! -L "$manifest" ]; then
+      newest=$name
+    fi
+  done
+  printf '%s' "$newest"
+}
+
+# delete_set <timestamp> <suffix>: the manifest goes first, so a half-deleted set is incomplete.
+delete_set() {
+  local ts=$1 suffix=$2 file
+  for file in "recipe_${ts}${suffix}.dump.sha256" "recipe_${ts}${suffix}.dump" \
+    "recipe_${ts}${suffix}.counts" "globals_${ts}${suffix}.sql"; do
+    safe_remove "$BACKUP_DIR/$file"
+  done
+  log INFO "old set deleted" "\"set\":\"recipe_${ts}${suffix}\""
+}
+
+# retention: delete each complete set older than backup.retention (ADR-0066 (k)).
+# The newest daily set and the newest _premigrate set stay. Other files stay.
+retention() {
+  local cutoff manifest name newest_daily newest_premigrate
+  cutoff=$(($(date +%s) - RETENTION_DAYS * SECONDS_PER_DAY))
+  newest_daily=$(newest_name "")
+  newest_premigrate=$(newest_name "_premigrate")
+  for manifest in "$BACKUP_DIR"/recipe_*.dump.sha256; do
+    name=${manifest##*/}
+    [[ $name =~ ^recipe_([0-9]{8}_[0-9]{4})(_premigrate|_now)?\.dump\.sha256$ ]] || continue
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || continue
+    if [ "$name" = "$newest_daily" ] || [ "$name" = "$newest_premigrate" ]; then
+      continue
+    fi
+    if [ "$(stat -c %Y -- "$manifest")" -lt "$cutoff" ]; then
+      delete_set "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]-}"
+    fi
+  done
+}
+
+# --- run ----------------------------------------------------------------------------------
+
+[ "$#" -le 1 ] || fail "usage: backup-once [<suffix>]"
+suffix=${1-}
+case $suffix in
+  "" | _premigrate | _now) ;;
+  *) fail "the suffix must be empty, _premigrate, or _now" ;;
+esac
+case $BACKUP_DIR in
+  /?*) ;;
+  *) fail "BACKUP_DIR must be an absolute path" ;;
+esac
+[[ $PGHOST =~ ^[A-Za-z0-9._-]+$ && $PGPORT =~ ^[0-9]+$ ]] || fail "bad PGHOST or PGPORT"
+[[ $PGDATABASE =~ ^[a-z_][a-z0-9_]*$ && $PGUSER =~ ^[a-z_][a-z0-9_]*$ ]] \
+  || fail "bad PGDATABASE or PGUSER"
+
+# Step 1: marker, lock, and the names of the new set.
+[ -f "$BACKUP_DIR/$MARKER_NAME" ] || fail "the marker file of the backup disk is missing"
+exec 9>>"$BACKUP_DIR/$LOCK_NAME"
+flock -n 9 || fail "another backup run holds the lock"
+
+ts=$(date -u +%Y%m%d_%H%M)
+base=recipe_${ts}${suffix}
+dump_name=$base.dump
+globals_name=globals_${ts}${suffix}.sql
+counts_name=$base.counts
+manifest_name=$base.dump.sha256
+for name in "$dump_name" "$globals_name" "$counts_name" "$manifest_name"; do
+  for candidate in "$name" ".tmp-$name"; do
+    if [ -e "$BACKUP_DIR/$candidate" ] || [ -L "$BACKUP_DIR/$candidate" ]; then
+      fail "a file with a name of the new set exists" "\"file\":\"$candidate\""
+    fi
+  done
+done
+tmp_dump=$BACKUP_DIR/.tmp-$dump_name
+tmp_globals=$BACKUP_DIR/.tmp-$globals_name
+tmp_counts=$BACKUP_DIR/.tmp-$counts_name
+tmp_manifest=$BACKUP_DIR/.tmp-$manifest_name
+manifest_path=$BACKUP_DIR/$manifest_name
+tmp_files=("$tmp_dump" "$tmp_globals" "$tmp_counts" "$tmp_manifest")
+log INFO "backup started" "\"set\":\"$base\""
+
+# Step 2: the pgpass file in the tmpfs.
+check_secret_file "$SECRET_FILE"
+write_pgpass
+
+# Step 3: the snapshot session counts the rows and stays open until pg_dump ends.
+coproc PSQL { exec psql --no-psqlrc --quiet --no-align --tuples-only --no-password -v ON_ERROR_STOP=1; }
+session_pid=$PSQL_PID
+session_in=${PSQL[1]}
+session_out=${PSQL[0]}
+send 'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY;'
+send 'SELECT pg_export_snapshot() \gset'
+send '\echo :pg_export_snapshot'
+wait_for '^[0-9A-F]{8}-[0-9A-F]{8}-[0-9]+$'
+snapshot=$session_line
+send "\\o '$tmp_counts'"
+send "$COUNT_QUERY"
+send '\o'
+send '\echo COUNTS_DONE'
+wait_for '^COUNTS_DONE$'
+# Before the first migration the database has no table, so the counts file may be empty.
+[ -f "$tmp_counts" ] || fail "the counts file is missing"
+
+# Step 4: the dump and the globals file.
+pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt \
+  --snapshot="$snapshot" --no-password --file="$tmp_dump" || fail "pg_dump failed"
+close_session || fail "the snapshot session failed"
+pg_dumpall --globals-only --no-role-passwords -l "$PGDATABASE" --no-password \
+  --file="$tmp_globals" || fail "pg_dumpall failed"
+
+# Step 5: sync, publish the three files, then the manifest last.
+sync
+publish "$tmp_dump" "$BACKUP_DIR/$dump_name"
+publish "$tmp_globals" "$BACKUP_DIR/$globals_name"
+publish "$tmp_counts" "$BACKUP_DIR/$counts_name"
+(cd "$BACKUP_DIR" && sha256sum -- "$dump_name" "$globals_name" "$counts_name") >"$tmp_manifest"
+sync
+publish "$tmp_manifest" "$manifest_path"
+# The new manifest must be durable before the retention deletes an old set.
+sync
+log INFO "backup completed" "\"set\":\"$base\",\"dump_bytes\":$(stat -c %s -- "$BACKUP_DIR/$dump_name")"
+
+# Step 6: the retention runs only after a complete new set.
+retention

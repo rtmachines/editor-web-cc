@@ -101,9 +101,18 @@ fn the_script_stops_on_a_secret_file_with_a_second_line() {
 
 #[test]
 fn the_script_stops_when_the_subnet_is_not_an_ipv4_cidr() {
-    for (index, subnet) in ["", "172.28.0.0", "172.28.0.0/33", "999.1.1.1/16", "::1/128"]
-        .iter()
-        .enumerate()
+    for (index, subnet) in [
+        "",
+        "172.28.0.0",
+        "172.28.0.0/33",
+        "999.1.1.1/16",
+        "::1/128",
+        "0.0.0.0/0",
+        "172.010.0.0/16",
+        "172.28.0.0/016",
+    ]
+    .iter()
+    .enumerate()
     {
         let run = run_script(&format!("subnet-{index}"), NO_BAD_SECRET, "", subnet);
 

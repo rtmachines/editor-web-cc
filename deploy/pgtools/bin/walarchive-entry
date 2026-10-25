@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# walarchive-entry: the entry of the container walarchive (design D9, D10, ADR-0068 (a) to (c)).
+#
+# It refuses to start without the marker file of the WAL archive disk (ADR-0074 (a)). Then it
+# writes the pgpass file from the secret of recipe_replicator and starts two children:
+#   pg_receivewal --synchronous   without a replication slot, application_name=walarchive
+#   supercronic                   the weekly job basebackup-once from crontab.walarchive
+# The first exit of a child ends the container. Docker (restart: always) starts it again.
+#
+# Environment. The defaults are the production values. The test script sets the others.
+#   WAL_DIR                  the WAL archive disk, default /wal
+#   WALARCHIVE_PGPASS_DIR    the tmpfs for the pgpass file, default /run/pgpass
+#   WALARCHIVE_SECRET_FILE   the password file of recipe_replicator, default /run/secrets/replicator_password
+#   WALARCHIVE_CRONTAB       the crontab, default /etc/pgtools/crontab.walarchive
+#   PGHOST PGPORT PGUSER     the connection, default db, 5432, recipe_replicator
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=walarchive-entry
+MARKER_NAME=.walarchive-marker
+
+WAL_DIR=${WAL_DIR:-/wal}
+PGPASS_DIR=${WALARCHIVE_PGPASS_DIR:-/run/pgpass}
+SECRET_FILE=${WALARCHIVE_SECRET_FILE:-/run/secrets/replicator_password}
+CRONTAB=${WALARCHIVE_CRONTAB:-/etc/pgtools/crontab.walarchive}
+# The jobs of supercronic read the same connection values.
+export PGHOST=${PGHOST:-db}
+export PGPORT=${PGPORT:-5432}
+export PGUSER=${PGUSER:-recipe_replicator}
+
+error_logged=0
+work_dir=""
+stopping=0
+receiver_pid=""
+cron_pid=""
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked name.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message> [<extra JSON fields>]: write the one ERROR line and stop.
+fail() {
+  error_logged=1
+  log ERROR "$@"
+  exit 1
+}
+
+# signal_children: ask both children to stop. A child that is gone is no fault.
+signal_children() {
+  local pid
+  for pid in "$receiver_pid" "$cron_pid"; do
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+# on_stop_signal: the signal of docker stop. The children stop, and wait -n returns.
+on_stop_signal() {
+  stopping=1
+  signal_children
+}
+
+# cleanup stops the children and removes the pgpass file of this run. It runs on each exit.
+cleanup() {
+  local status=$? pid
+  trap - EXIT TERM INT
+  signal_children
+  for pid in "$receiver_pid" "$cron_pid"; do
+    if [ -n "$pid" ]; then
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+  case $work_dir in
+    "$PGPASS_DIR"/run.*)
+      rm -f -- "${work_dir:?}/pgpass" || true
+      rmdir -- "${work_dir:?}" || true
+      ;;
+  esac
+  if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
+    log ERROR "walarchive entry failed unexpectedly" "\"exit_code\":$status"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+
+# check_secret_file <path>: one line, no carriage return, not empty (ADR-0031).
+# The checks use counts only, so the password never enters a shell variable.
+check_secret_file() {
+  local path=$1 total newlines carriage nul first_line
+  [ -f "$path" ] && [ -r "$path" ] || fail "cannot read the password file of recipe_replicator"
+  total=$(wc -c <"$path")
+  newlines=$(tr -cd '\n' <"$path" | wc -c)
+  carriage=$(tr -cd '\r' <"$path" | wc -c)
+  nul=$(tr -cd '\000' <"$path" | wc -c)
+  [ $((total - newlines)) -gt 0 ] || fail "the password file of recipe_replicator is empty"
+  [ "$carriage" -eq 0 ] || fail "the password file of recipe_replicator holds a carriage return"
+  [ "$nul" -eq 0 ] || fail "the password file of recipe_replicator holds a NUL byte"
+  [ "$newlines" -le 1 ] || fail "the password file of recipe_replicator holds more than one line"
+  if [ "$newlines" -eq 1 ]; then
+    first_line=$(head -n 1 -- "$path" | wc -c)
+    [ "$first_line" -eq "$total" ] || fail "the password file of recipe_replicator holds more than one line"
+  fi
+}
+
+# write_pgpass: one libpq line for the replication protocol. sed escapes \ and : (libpq rule).
+write_pgpass() {
+  [ -d "$PGPASS_DIR" ] || fail "the directory of the pgpass file is missing"
+  work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX")
+  {
+    printf '%s:%s:replication:%s:' "$PGHOST" "$PGPORT" "$PGUSER"
+    # The second expression ends the line with a newline when the secret file has none.
+    sed -e 's/[\\:]/\\&/g' -e '$a\' -- "$SECRET_FILE"
+  } >"$work_dir/pgpass"
+}
+
+# --- run ----------------------------------------------------------------------------------
+
+[ "$#" -eq 0 ] || fail "usage: walarchive-entry"
+case $WAL_DIR in
+  /?*) ;;
+  *) fail "WAL_DIR must be an absolute path" ;;
+esac
+[[ $PGHOST =~ ^[A-Za-z0-9._-]+$ && $PGPORT =~ ^[0-9]+$ ]] || fail "bad PGHOST or PGPORT"
+[[ $PGUSER =~ ^[a-z_][a-z0-9_]*$ ]] || fail "bad PGUSER"
+
+# Step 1: the marker comes first. Without it the script starts nothing and writes nothing.
+if [ ! -f "$WAL_DIR/$MARKER_NAME" ] || [ -L "$WAL_DIR/$MARKER_NAME" ]; then
+  fail "the marker file of the WAL archive disk is missing"
+fi
+[ -r "$CRONTAB" ] || fail "the crontab file is missing"
+
+# Step 2: the pgpass file in the tmpfs.
+check_secret_file "$SECRET_FILE"
+write_pgpass
+
+# Step 3: the two children. Only pg_receivewal sees the pgpass file.
+trap on_stop_signal TERM INT
+log INFO "wal stream started"
+PGPASSFILE=$work_dir/pgpass pg_receivewal --synchronous --no-loop --no-password \
+  --directory="$WAL_DIR" \
+  --dbname="host=$PGHOST port=$PGPORT user=$PGUSER application_name=walarchive" &
+receiver_pid=$!
+supercronic -json -passthrough-logs "$CRONTAB" &
+cron_pid=$!
+
+# Step 4: the first exit of a child ends the container (ADR-0068 (c)).
+status=0
+exited_pid=""
+wait -n -p exited_pid "$receiver_pid" "$cron_pid" || status=$?
+if [ "$stopping" -eq 1 ]; then
+  log INFO "stopped by signal"
+  exit 0
+fi
+case $exited_pid in
+  "$receiver_pid") child=pg_receivewal ;;
+  "$cron_pid") child=supercronic ;;
+  *) child=unknown ;;
+esac
+error_logged=1
+log ERROR "a child process exited" "\"child\":\"$child\",\"exit_code\":$status"
+if [ "$status" -eq 0 ]; then
+  status=1
+fi
+exit "$status"

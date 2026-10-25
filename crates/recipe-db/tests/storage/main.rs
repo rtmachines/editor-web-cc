@@ -6,20 +6,26 @@
 //! The binary starts one container for all tests. Each module covers one area.
 
 mod atomic;
+mod audit_chain;
 mod constraints;
 mod contract;
 mod errors;
 mod grants;
 mod hardening;
+mod maintenance;
 mod migrate;
+mod operations;
+mod operations_schema;
 mod pool;
 mod race;
+mod restore_code;
 mod roles;
 mod scenario;
 mod schema;
 mod security_event_guard;
 mod security_events;
 mod seed;
+mod settings;
 mod support;
 mod triggers;
 mod unit_of_work;

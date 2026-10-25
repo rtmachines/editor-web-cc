@@ -9,6 +9,7 @@ use recipe_app::identity::Authenticated;
 use recipe_domain::identity::IdentityError;
 
 use crate::error::WebError;
+use crate::layout::ReadOnlyFlag;
 use crate::routes::Access;
 use crate::state::WebState;
 
@@ -40,11 +41,16 @@ impl Access {
 ///
 /// The password gate comes first and gives `E-IDN-007`, which is a `303` to `/me/password`. The
 /// read-only gate gives `E-WEB-006`. A request that matched no route goes on.
+///
+/// The gate reads the read-only mode once, before any other statement. It stores the value in the
+/// request for the layout of the page (design D12). A request that matched no route gets it too.
 pub(crate) async fn gates(
     State(state): State<WebState>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Result<Response, WebError> {
+    let read_only = ReadOnlyFlag::of(&state);
+    request.extensions_mut().insert(read_only);
     let Some(access) = request.extensions().get::<Access>().copied() else {
         return Ok(next.run(request).await);
     };
@@ -58,7 +64,7 @@ pub(crate) async fn gates(
             IdentityError::MustChangePassword,
         )));
     }
-    if state.read_only().is_on() && !access.runs_in_read_only() {
+    if read_only.is_on() && !access.runs_in_read_only() {
         return Err(WebError::ReadOnlyMode);
     }
     Ok(next.run(request).await)

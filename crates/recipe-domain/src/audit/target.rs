@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::identity::UserId;
 use crate::plant::{MachineId, PlcTypeId, UnitId};
 use crate::recipe::{ParameterId, RecipeId, RecipeVersionId};
+use crate::setting::SettingId;
 
 /// Root of an aggregate. The column `audit_log.aggregate_type` stores its SQL text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -54,6 +55,7 @@ enum EntityType {
     RecipeVersion,
     Parameter,
     AppUser,
+    AppSetting,
 }
 
 impl EntityType {
@@ -66,6 +68,7 @@ impl EntityType {
             Self::RecipeVersion => "recipe_version",
             Self::Parameter => "parameter",
             Self::AppUser => "app_user",
+            Self::AppSetting => "app_setting",
         }
     }
 }
@@ -75,8 +78,8 @@ impl EntityType {
 /// Each constructor takes the identifiers that `data-model.md` section 10 pairs for
 /// one entity type. A wrong pair of aggregate and entity therefore cannot be built.
 /// A change of a limit row or a translation row uses [`AuditTarget::parameter`].
-/// The targets `app_setting` and the global `plc_type` row of a data migration are
-/// not built here. No use case of the application layer writes them.
+/// The global `plc_type` row of a data migration is not built here.
+/// No use case of the application layer writes it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AuditTarget {
     entity: EntityType,
@@ -166,6 +169,13 @@ impl AuditTarget {
         Self::new(EntityType::AppUser, id, AggregateType::AppUser, id)
     }
 
+    /// Target a setting row. The setting is its own aggregate.
+    #[must_use]
+    pub fn app_setting(setting: SettingId) -> Self {
+        let id = *setting.as_uuid();
+        Self::new(EntityType::AppSetting, id, AggregateType::AppSetting, id)
+    }
+
     /// Return the text of the column `entity_type`, the table name of the changed row.
     #[must_use]
     pub const fn entity_type(&self) -> &'static str {
@@ -194,6 +204,7 @@ impl AuditTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::setting::SettingId;
 
     const CONSTRAINT_VALUES: [&str; 5] =
         ["machine", "recipe", "app_user", "app_setting", "plc_type"];
@@ -287,8 +298,18 @@ mod tests {
     }
 
     #[test]
+    fn a_setting_is_its_own_aggregate() {
+        let target = AuditTarget::app_setting(SettingId::from(id(8)));
+        assert_eq!(target.entity_type(), "app_setting");
+        assert_eq!(target.aggregate_type(), AggregateType::AppSetting);
+        assert_eq!(target.entity_id(), &id(8));
+        assert_eq!(target.aggregate_id(), &id(8));
+    }
+
+    #[test]
     fn every_entity_type_text_matches_the_format_constraint() {
         let targets = [
+            AuditTarget::app_setting(SettingId::from(id(8))),
             AuditTarget::machine(MachineId::from(id(1))),
             AuditTarget::unit(MachineId::from(id(1)), UnitId::from(id(2))),
             AuditTarget::plc_type(MachineId::from(id(1)), PlcTypeId::from(id(3))),

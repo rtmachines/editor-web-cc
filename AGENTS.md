@@ -6,7 +6,7 @@ This file gives Codex the instructions of this repository. Claude Code reads `CL
 
 1. `CLAUDE.md`: the purpose, the workspace map, the dependency rule, the hard rules, and the commands.
 2. `.claude/rules/rust.md`, `.claude/rules/web.md`, `.claude/rules/sql.md`, `.claude/rules/docs.md`, and `.claude/rules/openspec.md`.
-3. For step P3.5: `target/p35-brief.md` (the rules of the code agents) and `openspec/changes/archive/2026-10-23-export-v1/design.md`.
+3. For step P4.1: `target/p41-brief.md` (the rules of the code agents) and `openspec/changes/operations-compose/design.md`.
 
 The documents in `docs/architecture/` and `docs/adr/` are normative. Code, specs, and tests follow them. When two documents disagree, report the conflict as a finding.
 
@@ -45,6 +45,7 @@ Give each finding the file and the line, the fault, the evidence, and a proposed
 - Templates have no inline script, no inline style, and no inline event handler. Each `hx-*` attribute holds a literal. No URL holds the CSRF token. No `|safe` applies to a value that is not a literal.
 - Each mutating route checks CSRF and `row_version` and puts the error code into the fragment (`.claude/rules/web.md`).
 - A value, a limit, or a number in a diff or an audit view is canonical decimal text (A43).
+- A migration that adds or changes a generated column or a column default calls only built-in functions of `pg_catalog` in that expression (ADR-0084 (d)).
 - A function has at most 50 lines, and a file has at most 800 lines.
 - Each task starts with a failing test. A test of a required state must fail on a plausible bug.
 - English text follows the ASD-STE100 rules: at most 25 words in a sentence, the active voice, and no semicolons.

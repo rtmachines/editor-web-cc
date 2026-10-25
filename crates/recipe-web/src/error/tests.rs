@@ -240,7 +240,8 @@ fn error_mapping_web_error_messages_are_the_registry_texts() {
     );
     assert_eq!(
         WebError::ReadOnlyMode.to_string(),
-        "The system is in read-only mode because disk space is low. Contact the administrator."
+        "The system is in read-only mode because the free disk space is low or unknown. \
+         Contact the administrator."
     );
     assert_eq!(
         WebError::Internal {

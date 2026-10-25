@@ -3,8 +3,8 @@
 use std::time::{Duration, Instant};
 
 use recipe_app::error::{LockFailure, StorageError};
-use recipe_db::migrate_from_directory;
-use recipe_db::settings::MigrateSettings;
+use recipe_db::settings::{Connection, MigrateSettings, Password};
+use recipe_db::{migrate, migrate_from_directory};
 use recipe_domain::error_codes::ErrorCode;
 use sqlx::PgConnection;
 
@@ -12,6 +12,8 @@ use crate::support::{Role, TempMigrations, TestDatabase, connect, server};
 
 const CREATE_TARGET: &str = "CREATE TABLE lock_target (id INTEGER PRIMARY KEY)";
 const LOCK_TARGET: &str = "LOCK TABLE lock_target IN ACCESS EXCLUSIVE MODE";
+/// The time above the connect timeout after which the test stops the migrator and fails.
+const CONNECT_SLACK: Duration = Duration::from_secs(5);
 /// A migration that waits for the lock of `lock_target`.
 const TOUCH_MIGRATION: [(&str, &str); 1] =
     [("0001_touch.sql", "INSERT INTO lock_target (id) VALUES (1);")];
@@ -21,6 +23,7 @@ fn settings(lock_ms: u64, retries: u32, pause_ms: u64) -> MigrateSettings {
         lock_timeout: Duration::from_millis(lock_ms),
         retries,
         retry_pause: Duration::from_millis(pause_ms),
+        connect_timeout: MigrateSettings::default().connect_timeout,
     }
 }
 
@@ -171,6 +174,39 @@ async fn migrate_does_not_retry_an_error_that_is_not_a_lock_timeout() {
 
     assert!(matches!(error, StorageError::Other { .. }), "{error:?}");
     assert!(started.elapsed() < Duration::from_millis(1_500));
+}
+
+/// A listener that never accepts: the handshake of TCP completes in the backlog, and no
+/// PostgreSQL answer ever comes. The wait ends only through the connect timeout.
+#[tokio::test]
+async fn migrate_gives_unavailable_when_the_server_does_not_answer_within_the_connect_timeout() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let target = Connection {
+        host: "127.0.0.1".to_owned(),
+        port: listener.local_addr().unwrap().port(),
+        database: "recipe".to_owned(),
+        user: "recipe_migrator".to_owned(),
+        password: Password::from("not-a-real-secret".to_owned()),
+    };
+    let connect_timeout = Duration::from_millis(300);
+    let settings = MigrateSettings {
+        connect_timeout,
+        ..MigrateSettings::default()
+    };
+    let outer_bound = connect_timeout.checked_add(CONNECT_SLACK).unwrap();
+    let started = Instant::now();
+
+    let result = tokio::time::timeout(outer_bound, migrate(&target, &settings)).await;
+
+    let elapsed = started.elapsed();
+    let error = result
+        .expect("the connect timeout did not end the wait of the migrator")
+        .unwrap_err();
+    assert!(matches!(error, StorageError::Unavailable), "{error:?}");
+    assert_eq!(error.code(), ErrorCode::DB_005);
+    assert!(elapsed >= connect_timeout, "{elapsed:?}");
+    assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+    drop(listener);
 }
 
 #[tokio::test]

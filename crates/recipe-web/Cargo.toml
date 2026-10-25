@@ -14,7 +14,8 @@ recipe-domain = { workspace = true }
 recipe-export = { workspace = true }
 axum = { workspace = true }
 askama = { workspace = true }
-tower-http = { workspace = true, features = ["set-header", "trace"] }
+tower-http = { workspace = true, features = ["catch-panic", "set-header", "timeout", "trace"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 fluent = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tracing = { workspace = true }
@@ -26,7 +27,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 recipe-app = { workspace = true, features = ["memory"] }
 tower = { workspace = true, features = ["util"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+# The channel body of the test of the body deadline (design D14 row T10).
+http-body-util = { workspace = true, features = ["channel"] }
 parking_lot = { workspace = true }
 sha2 = { workspace = true }
 time = { workspace = true }

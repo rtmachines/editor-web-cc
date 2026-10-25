@@ -29,7 +29,7 @@ use crate::memory::{JournalEntry, LockMode, MemoryStore};
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DiffReads, DocumentWriter, DraftRepository,
     Isolation, NonEmpty, PlantRepository, RecipeReads, RecipeRepository, SessionRepository,
-    Transaction, TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
+    SettingRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
 };
 use crate::recipe::{
     ApproveVersion, ApproveVersionInput, RenameRecipe, RenameRecipeInput, RetireVersion,
@@ -504,6 +504,10 @@ impl Transaction for SlowCommitTransaction {
         self.inner.attempts()
     }
 
+    fn settings(&mut self) -> &mut dyn SettingRepository {
+        self.inner.settings()
+    }
+
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {
         self.inner.append_audit(entries).await
     }
@@ -734,4 +738,5 @@ async fn an_export_beyond_the_limit_keeps_its_permit_until_the_writer_ends() {
     assert_eq!(fixture.store.audit_entries().len(), before);
 }
 
+mod counters;
 mod writer;

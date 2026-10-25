@@ -1,0 +1,22 @@
+# Allow list of the build inputs of deploy/Dockerfile (ADR-0064 (f)).
+# The first line excludes everything. A file that no line below names stays out of the context.
+*
+
+# Workspace manifest and lock file.
+!Cargo.toml
+!Cargo.lock
+
+# Source of the six crates, with their embedded data files.
+!crates/
+
+# sqlx::migrate! embeds this directory.
+!migrations/
+
+# Build output and credential files never enter the context, also inside an allowed directory.
+crates/*/target
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

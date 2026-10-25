@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# Check startup without PostgreSQL, Docker, or flock. Run with bash.+# The fake tools advance SECONDS to test the full startup budget without a long wait.
+set -uo pipefail
+
+PITR_BIN=$(cd "$(dirname "${BASH_SOURCE[0]}")/../bin" && pwd)/pitr-check
+TEST_ROOT=$(mktemp -d)
+trap 'rm -r -- "${TEST_ROOT:?}"' EXIT
+TEST_FAILED=0
+TEST_PASSED=0
+
+pg_verifybackup() { return 0; }
+flock() { return 0; }
+
+pg_ctl() {
+  local action=${!#} i
+  case $action in
+    start)
+      for ((i = 1; i <= 25; i++)); do
+        printf 'server log %s\n' "$i"
+      done >"$scratch/server.log"
+      touch "$data_dir/postmaster.pid"
+      SECONDS=$((SECONDS + TEST_START_ELAPSED))
+      [ "$TEST_MODE" != missing-pid ] || rm -- "$data_dir/postmaster.pid"
+      [ "$TEST_MODE" != start-fails ]
+      ;;
+    status) [ "$TEST_MODE" != dead-postmaster ] ;;
+    stop) rm -f -- "$data_dir/postmaster.pid" ;;
+  esac
+}
+
+pg_isready() {
+  TEST_PROBES=$((TEST_PROBES + 1))
+  printf 'probe\n' >>"$TEST_CASE/probes"
+  [ "$TEST_PROBES" -gt "$TEST_REJECTS" ]
+}
+
+sleep() {
+  printf 'sleep %s\n' "$1" >>"$TEST_CASE/sleeps"
+  SECONDS=$((SECONDS + $1))
+  if [ "$TEST_MODE" = exits-during-poll ]; then
+    rm -- "$data_dir/postmaster.pid"
+  fi
+}
+
+psql() {
+  local arg sql=""
+  printf 'psql\n' >>"$TEST_CASE/queries"
+  [ "$TEST_REJECTS" -eq 0 ] || [ "$TEST_PROBES" -gt "$TEST_REJECTS" ] || return 1
+  for arg in "$@"; do
+    case $arg in --command=*) sql=${arg#--command=} ;; esac
+  done
+  case $sql in
+    *pg_is_in_recovery*)
+      if [ "$TEST_MODE" = still-recovering ]; then printf 'f\n'; else printf 't\n'; fi ;;
+    *audit_chain_head*) printf '0|t|t\n' ;;
+    *audit_log*) printf '1\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+test_expect() {
+  local label=$1
+  shift
+  if "$@"; then
+    TEST_PASSED=$((TEST_PASSED + 1))
+  else
+    TEST_FAILED=$((TEST_FAILED + 1))
+    printf 'FAIL: %s: %s\n' "$TEST_MODE" "$label" >&2
+  fi
+}
+
+# test_start <mode> <rejected probes> <seconds in pg_ctl> <exit code>
+test_start() {
+  TEST_MODE=$1 TEST_REJECTS=$2 TEST_START_ELAPSED=$3 TEST_PROBES=0
+  TEST_CASE=$TEST_ROOT/$TEST_MODE
+  mkdir -p "$TEST_CASE/wal/base/base_20261025_000000"
+  touch "$TEST_CASE/wal/.walarchive-marker"
+  local status=0
+  (
+    export WAL_DIR=$TEST_CASE/wal PITR_CI=1 PITR_MARKER_SEQ=1
+    export PITR_MARKER_HASH=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    export TEST_MODE TEST_REJECTS TEST_START_ELAPSED TEST_PROBES TEST_CASE
+    export -f pg_verifybackup flock pg_ctl pg_isready sleep psql
+    bash "$PITR_BIN"
+  ) >"$TEST_CASE/out" 2>"$TEST_CASE/err" || status=$?
+  test_expect 'exit code' test "$status" -eq "$4"
+  test_expect 'scratch cleanup' test -z "$(find "$TEST_CASE/wal/.pitr-scratch" -mindepth 1 -print)"
+  if [ "$4" -eq 0 ]; then
+    test_expect 'success' grep -q 'pitr check passed' "$TEST_CASE/out"
+    test_expect 'three recovery checks' test "$(grep -c psql "$TEST_CASE/queries")" -eq 3
+  else
+    test_expect 'one ERROR line' test "$(grep -c '"level":"ERROR"' "$TEST_CASE/out")" -eq 1
+  fi
+}
+
+test_start immediate 0 0 0
+test_start delayed 2 0 0
+test_expect 'two short waits' test "$(grep -c '^sleep 1$' "$TEST_CASE/sleeps")" = 2
+
+for TEST_MODE in timeout missing-pid dead-postmaster start-fails; do
+  test_start "$TEST_MODE" 1000 599 1
+  test_expect 'startup failure' grep -q 'the scratch cluster did not finish the recovery' "$TEST_CASE/out"
+  test_expect 'no recovery query' test ! -e "$TEST_CASE/queries"
+  test_expect 'log tail starts at line six' grep -qx 'server log 6' "$TEST_CASE/err"
+  test_expect 'log tail ends at line 25' grep -qx 'server log 25' "$TEST_CASE/err"
+  test_expect 'log tail omits line five' test "$(grep -c '^server log 5$' "$TEST_CASE/err")" = 0
+  if [ "$TEST_MODE" = timeout ]; then
+    test_expect 'one probe within the remaining budget' test "$(grep -c probe "$TEST_CASE/probes")" = 1
+  else
+    test_expect 'no probe after an exit' test ! -e "$TEST_CASE/probes"
+    test_expect 'no wait after an exit' test ! -e "$TEST_CASE/sleeps"
+  fi
+done
+
+test_start exits-during-poll 1000 0 1
+test_expect 'one probe before the exit' test "$(grep -c probe "$TEST_CASE/probes")" = 1
+test_expect 'one wait before the exit' test "$(grep -c '^sleep 1$' "$TEST_CASE/sleeps")" = 1
+test_expect 'log tail after the exit' grep -qx 'server log 25' "$TEST_CASE/err"
+test_expect 'no query after the exit' test ! -e "$TEST_CASE/queries"
+
+test_start budget-expired 0 600 1
+test_expect 'no probe after the deadline' test ! -e "$TEST_CASE/probes"
+test_expect 'no query after the deadline' test ! -e "$TEST_CASE/queries"
+test_expect 'log tail after the deadline' grep -qx 'server log 25' "$TEST_CASE/err"
+
+test_start still-recovering 0 0 1
+test_expect 'recovery state check stays' grep -q 'the scratch cluster is still in recovery' "$TEST_CASE/out"
+printf 'pitr-start-test: %s passed, %s failed\n' "$TEST_PASSED" "$TEST_FAILED"
+[ "$TEST_FAILED" -eq 0 ]

@@ -226,7 +226,7 @@ A full page has these regions in this order (section 10.1):
 
 1. The skip link.
 2. The top bar.
-3. `main` with `id="content"`. It starts with `#error-panel` and the status region `#toast`, then the one `h1`.
+3. `main` with `id="content"`. Section 10.1 gives the order of its content, also the read-only banner.
 
 - A panel and a form with fields in `main` have the border `--color-border`. `--color-divider` is only for a row divider (section 10.4).
 - A form that holds only one action button inside `.actions` has no border of its own.
@@ -344,7 +344,11 @@ Every full page uses one layout (ADR-0036). The regions come in this order:
 
 1. A skip link to `#content`. It is the first focusable element of the page. It is visible when it has the focus.
 2. The top bar `header`. It holds the application name, the navigation (section 10.2), the language switch (section 10.3), the login of the user, and the logout button.
-3. `main` with `id="content"`. It starts with `#error-panel` and `#toast`, then holds exactly one `h1`.
+3. `main` with `id="content"`. In read-only mode it starts with the read-only banner. Then come `#error-panel` and `#toast`, and then exactly one `h1`.
+
+- The read-only banner is `alert::notice("warning", text)` of section 10.6 with the icon `alert-warning` (ADR-0071).
+- The text comes from the bundle key `readonly-banner`. The banner has no role, no button, and no link. The icon and the text show the state, not the color alone.
+- The full page, the content answer of `HX-Target: content`, the login page, and the full error page show the banner. Without read-only mode, no page shows it.
 
 - `#error-panel` is the target of `HX-Retarget` for an error (`api.md` section 5.3). It has no role and no `aria-live`. The fragment inside it has `role="alert"` (section 10.6).
 - `#toast` is the status region (section 10.7).
@@ -494,7 +498,7 @@ The full error page:
 - A success message goes into `#toast` with the `alert-success` icon (ADR-0036).
 - The same answer clears `#error-panel` with an out-of-band swap (`hx-swap-oob`). The value of that attribute is a literal, never a variable.
 - The toast has the ground `--color-topbar` and the text `--color-on-action`. The `alert-success` icon has the color `--color-success-bg`.
-- The message stays until the next success answer or the next HTMX error answer, because no script may delete it. Every HTMX error answer ends with an empty `#toast` out of band (ADR-0047 (b)).
+- The message stays until the next success answer or the next HTMX error answer, because no script may delete it. Every HTMX error answer ends with an empty `#toast` out of band (ADR-0047 (b)). The answer of the backstop panic layer is the one exception (`api.md` section 5.1, ADR-0057 (e)).
 - `#toast` sticks at the top of the view with `position: sticky` and `top: 0`. `html` has `scroll-padding-top`, so a focused element does not hide under the toast (WCAG 2.4.11, ADR-0047 (c)).
 - A one-time password stays in the page content. Its container has no live role.
 

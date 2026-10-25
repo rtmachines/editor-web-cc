@@ -1,11 +1,11 @@
-//! SHA-256 hash of an export document (`domain-model.md` section 2.2, `api.md` section 6.1).
+//! SHA-256 digest (`domain-model.md` section 2.2, `api.md` section 6.1).
 
 use std::fmt;
 
 /// Number of characters of the text form of a SHA-256 hash.
 const TEXT_LEN: usize = 64;
 
-/// SHA-256 hash of an export document.
+/// SHA-256 digest of an export document or of an audit entry (`data-model.md` section 4.9).
 ///
 /// The text form has 64 lower-case hexadecimal characters. The type solves one problem:
 /// a stored or exported hash always holds the 32 bytes of a digest.

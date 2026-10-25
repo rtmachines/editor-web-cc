@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# Test script T25 (walarchive part) of the recipe-pgtools image.
+#
+# It tests walarchive-entry, walarchive-health, basebackup-once, and pitr-check with stubs of
+# pg_receivewal, pg_basebackup, pg_verifybackup, pg_archivecleanup, supercronic, pg_ctl, psql, and
+# date on PATH (design D14 row T25, ADR-0068, ADR-0077).
+# It needs flock, sha256sum, and GNU coreutils. The image recipe-pgtools has them.
+#
+# Run in CI inside a container of the image, with the directory deploy/pgtools mounted:
+#   docker run --rm --entrypoint bash -v "$PWD/deploy/pgtools:/pgtools:ro" \
+#     recipe-pgtools /pgtools/tests/walarchive-test
+#
+# Cases that need the real database or the real tools (CI job "compose", design D11 step 7):
+#   - the real pg_receivewal --synchronous stream and the replication login with the pgpass file
+#   - the real pg_basebackup, pg_verifybackup, and pg_archivecleanup on a real archive
+#   - the real recovery of pitr-check: pg_ctl start, the recovery from a copy of a real base backup
+#     with restore_command and the .partial fallback, and the audit chain check on the scratch cluster
+#   - the mode of the real tmpfs /run/pgpass
+#
+# The parallel-run case and the busy-lock case of pitr-check need a real flock. A case without it
+# prints SKIP.
+# When the variable CI is set, each SKIP counts as a failure.
+set -uo pipefail
+umask 077
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BIN=${PGTOOLS_BIN:-$HERE/../bin}
+REAL_DATE=$(command -v date)
+export REAL_DATE
+SHM_DIRS=()
+LAST_BASE=""
+SECRET='ab:c\d9'
+PASSED=0
+FAILED=0
+SKIPPED=0
+CASE=""
+W=""
+RC=0
+BG_PID=""
+WTS=""
+WNOW=0
+
+# A missing case function must fail the run. Bash runs this handler in a subshell.
+# So the handler cannot raise FAILED. It prints a FAIL line and writes a marker file instead.
+# The last line of this script reads the marker file.
+command_not_found_handle() {
+  bad "command not found: $1"
+  : >"${ROOT:?}/command-not-found"
+  return 127
+}
+
+# The functions live in tests/lib. Each file sets only functions.
+# A file that cannot be read stops the run.
+# shellcheck source=lib/helpers.sh
+source "$HERE/lib/helpers.sh" || exit 1
+# shellcheck source=lib/wal-helpers.sh
+source "$HERE/lib/wal-helpers.sh" || exit 1
+# shellcheck source=lib/wal-stubs.sh
+source "$HERE/lib/wal-stubs.sh" || exit 1
+# shellcheck source=lib/wal-entry-cases.sh
+source "$HERE/lib/wal-entry-cases.sh" || exit 1
+# shellcheck source=lib/wal-base-cases.sh
+source "$HERE/lib/wal-base-cases.sh" || exit 1
+# shellcheck source=lib/wal-pitr-cases.sh
+source "$HERE/lib/wal-pitr-cases.sh" || exit 1
+
+ROOT=$(mktemp -d)
+trap cleanup EXIT
+
+make_wal_stubs
+case_wal_static_rules
+case_wal_static_entry
+static_base_rules
+static_pitr_rules
+case_wal_missing_marker
+case_wal_entry_args
+case_wal_entry_receiver_exit
+case_wal_entry_sigterm
+case_wal_entry_crontab_missing
+case_wal_entry_secret_escape
+for label in empty cr two-lines nul missing; do wal_secret_case "$label"; done
+case_wal_health
+case_wal_base_happy
+case_wal_base_retention
+case_wal_base_few
+case_wal_base_high_start
+case_wal_base_timeline_ignored
+case_wal_base_foreign_names
+case_wal_base_verify_fails
+case_wal_base_basebackup_fails
+case_wal_base_cleanup_fails
+case_wal_base_bad_label
+case_wal_base_name_exists
+case_wal_base_args_and_secret
+case_wal_base_secret_no_newline
+case_wal_base_parallel
+case_wal_pitr_gates
+case_wal_pitr_runs
+bash "$HERE/pitr-start-test" || bad "pitr startup regression tests"
+
+[ "$SKIPPED" -eq 0 ] || printf 'walarchive-test: %d skipped\n' "$SKIPPED"
+printf 'walarchive-test: %d passed, %d failed\n' "$PASSED" "$FAILED"
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] && [ ! -e "$ROOT/command-not-found" ]

@@ -14,6 +14,7 @@ use crate::client::ClientAddr;
 use crate::cookies::{SESSION_COOKIE, request_cookie};
 use crate::error::WebError;
 use crate::i18n::Lang;
+use crate::layout::ReadOnlyFlag;
 use crate::pipeline::{HX_REQUEST, request_id_in};
 
 /// The header that HTMX sets to the `id` of the element that receives the answer.
@@ -35,9 +36,17 @@ pub(crate) struct PageRequest {
     session: Option<Authenticated>,
     cookie_session: Option<SessionId>,
     get_target: Option<String>,
+    read_only: ReadOnlyFlag,
 }
 
 impl PageRequest {
+    /// Return the read-only mode that the gate stored for this request.
+    ///
+    /// A request that never passed the gate gets the mode off. Every page route passes it.
+    pub(crate) const fn read_only(&self) -> ReadOnlyFlag {
+        self.read_only
+    }
+
     /// Return the value of the header `HX-Target`, or `None` when the request has none.
     ///
     /// HTMX sets the header to the `id` of the target element, without the `#`. The layout reads
@@ -142,7 +151,13 @@ impl<S: Send + Sync> FromRequestParts<S> for PageRequest {
         let get_target = (parts.method == axum::http::Method::GET)
             .then(|| parts.uri.path_and_query().map(ToString::to_string))
             .flatten();
+        let read_only = parts
+            .extensions
+            .get::<ReadOnlyFlag>()
+            .copied()
+            .unwrap_or_default();
         Ok(Self {
+            read_only,
             get_target,
             request_id,
             client: client.ip(),

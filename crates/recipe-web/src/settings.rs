@@ -9,8 +9,12 @@ mod cidr;
 
 pub use cidr::{Cidr, CidrList, CidrReason};
 
-/// Default of `http.trusted_proxies`: the subnet of the Compose network (`01-roles.sh`).
-const DEFAULT_TRUSTED_PROXY: &str = "172.28.0.0/16";
+/// Default of `http.trusted_proxies`: the one address of `proxy` in the Compose network (ADR-0065 (j)).
+const DEFAULT_TRUSTED_PROXY: &str = "172.28.0.2/32";
+/// Default of `http.request_timeout` in seconds.
+const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 30;
+/// Default of `http.body_read_timeout` in seconds.
+const DEFAULT_BODY_READ_TIMEOUT_SECONDS: u64 = 10;
 /// Default of `http.body_limit.form`: 256 KiB.
 const DEFAULT_BODY_LIMIT_FORM: usize = 256 * 1024;
 /// Default of `http.body_limit.value`: 4 MiB (ADR-0039).
@@ -54,6 +58,10 @@ pub struct WebSettings {
     pub hsts_max_age: Duration,
     /// The `Retry-After` of a 503 answer (`http.retry_after`).
     pub retry_after: Duration,
+    /// The time that one request may take from its start to its answer (`http.request_timeout`).
+    pub request_timeout: Duration,
+    /// The time that the client may take to send the whole request body (`http.body_read_timeout`).
+    pub body_read_timeout: Duration,
     /// The `Max-Age` of the cookie `recipe_lang` (`i18n.lang_cookie_max_age`).
     pub lang_cookie_max_age: Duration,
     /// The languages of the translation rows (`i18n.translation_langs`).
@@ -75,6 +83,8 @@ impl Default for WebSettings {
             static_cache_max_age: Duration::from_secs(SECONDS_PER_DAY),
             hsts_max_age: Duration::from_secs(DEFAULT_HSTS_MAX_AGE_SECONDS),
             retry_after: Duration::from_secs(DEFAULT_RETRY_AFTER_SECONDS),
+            request_timeout: Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECONDS),
+            body_read_timeout: Duration::from_secs(DEFAULT_BODY_READ_TIMEOUT_SECONDS),
             lang_cookie_max_age: Duration::from_secs(DEFAULT_LANG_COOKIE_MAX_AGE_SECONDS),
             translation_langs: LangCode::parse(DEFAULT_TRANSLATION_LANG)
                 .map(|lang| vec![lang])

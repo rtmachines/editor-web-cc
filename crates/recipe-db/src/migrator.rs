@@ -18,6 +18,7 @@ use crate::settings::{Connection, MigrateSettings};
 /// Apply the migrations of the directory `migrations/` that this crate embeds.
 ///
 /// Each attempt opens one new connection without a pool and sets `lock_timeout` on it.
+/// A server that does not answer within `connect_timeout` ends the attempt without a retry.
 /// An attempt that fails with SQLSTATE `55P03` closes its connection. The function then waits
 /// `retry_pause` and tries again, at most `retries` times. A migration that it applied before
 /// stays applied. The last failure maps to `StorageError`: `E-DB-001` for a lock timeout.
@@ -28,8 +29,16 @@ use crate::settings::{Connection, MigrateSettings};
 /// `StorageError::Unavailable` when the server does not answer, and `StorageError::Other`
 /// for every other failure.
 pub async fn migrate(target: &Connection, settings: &MigrateSettings) -> Result<(), StorageError> {
-    static MIGRATOR: Migrator = sqlx::migrate!("../../migrations");
-    run_with_retries(target, settings, &MIGRATOR).await
+    run_with_retries(target, settings, &EMBEDDED).await
+}
+
+/// The migrations of the directory `migrations/`, embedded at build time.
+static EMBEDDED: Migrator = sqlx::migrate!("../../migrations");
+
+/// Return the embedded migrations. The readiness probe compares them with the database
+/// (ADR-0059). The caller reads the list and never runs it.
+pub(crate) fn embedded() -> &'static Migrator {
+    &EMBEDDED
 }
 
 /// Apply the migration files of a directory that the program reads at run time.
@@ -57,6 +66,8 @@ pub async fn migrate_from_directory(
 enum Failure {
     /// The attempt could not open the connection or set the timeout.
     Connect(sqlx::Error),
+    /// The server did not answer within `migrate.connect_timeout`.
+    ConnectTimeout,
     /// The migration run failed.
     Migrate(MigrateError),
 }
@@ -69,7 +80,7 @@ impl Failure {
             | Self::Migrate(
                 MigrateError::Execute(error) | MigrateError::ExecuteMigration(error, _),
             ) => Some(error),
-            Self::Migrate(_) => None,
+            Self::ConnectTimeout | Self::Migrate(_) => None,
         }
     }
 
@@ -83,6 +94,7 @@ impl Failure {
             | Self::Migrate(
                 MigrateError::Execute(error) | MigrateError::ExecuteMigration(error, _),
             ) => map_error(error),
+            Self::ConnectTimeout => StorageError::Unavailable,
             Self::Migrate(other) => StorageError::Other {
                 sqlstate: None,
                 source: Box::new(other),
@@ -121,7 +133,7 @@ async fn attempt(
     settings: &MigrateSettings,
     migrator: &Migrator,
 ) -> Result<(), Failure> {
-    let mut connection = open(target, settings).await.map_err(Failure::Connect)?;
+    let mut connection = open(target, settings).await?;
     let result = migrator
         .run(&mut connection)
         .await
@@ -132,15 +144,20 @@ async fn attempt(
 }
 
 /// Open the dedicated connection and set `lock_timeout` for the whole session.
-async fn open(
-    target: &Connection,
-    settings: &MigrateSettings,
-) -> Result<PgConnection, sqlx::Error> {
-    let mut connection = connect_options(target).connect().await?;
+///
+/// A server that accepts the TCP connection and never answers would hold the migrator for ever.
+/// `connect_timeout` ends that wait (ADR-0069 (d)).
+async fn open(target: &Connection, settings: &MigrateSettings) -> Result<PgConnection, Failure> {
+    let mut connection =
+        tokio::time::timeout(settings.connect_timeout, connect_options(target).connect())
+            .await
+            .map_err(|_elapsed| Failure::ConnectTimeout)?
+            .map_err(Failure::Connect)?;
     let timeout = format!("{}ms", settings.lock_timeout.as_millis());
     sqlx::query("SELECT set_config('lock_timeout', $1, false)")
         .bind(timeout)
         .execute(&mut connection)
-        .await?;
+        .await
+        .map_err(Failure::Connect)?;
     Ok(connection)
 }

@@ -9,7 +9,7 @@
 use super::sql_tokens::{Token, split_statements};
 use crate::support::migration_texts;
 
-const AUDIT_OBJECTS: [&str; 7] = [
+const AUDIT_OBJECTS: [&str; 8] = [
     "audit_log",
     "audit_chain_head",
     "security_event",
@@ -17,6 +17,7 @@ const AUDIT_OBJECTS: [&str; 7] = [
     "audit_hash_chain",
     "security_event_purge",
     "security_event_guard",
+    "replication_state",
 ];
 const OWNER: &str = "audit_owner";
 
@@ -92,13 +93,12 @@ fn every_migration_file_obeys_the_audit_guard() {
     }
 }
 
-#[test]
-fn the_guard_accepts_migration_0005_and_sees_its_five_steps() {
+/// Assert that the guard accepts one migration file and that the file holds the five steps.
+fn assert_guard_accepts_the_five_steps_of(file: &str) {
     let files = migration_texts();
-    let (_, text) = files
-        .iter()
-        .find(|(name, _)| name == "0005_security_event_guard.sql")
-        .unwrap();
+    let found = files.iter().find(|(name, _)| name == file);
+    assert!(found.is_some(), "migration {file} is missing");
+    let (_, text) = found.unwrap();
 
     assert_eq!(audit_violations(text), Vec::<String>::new());
     let steps = [
@@ -110,6 +110,23 @@ fn the_guard_accepts_migration_0005_and_sees_its_five_steps() {
     let positions: Vec<Option<usize>> = steps.iter().map(|step| text.find(step)).collect();
     assert!(positions.iter().all(Option::is_some), "{positions:?}");
     assert!(positions.is_sorted(), "{positions:?}");
+}
+
+#[test]
+fn the_guard_accepts_migration_0005_and_sees_its_five_steps() {
+    assert_guard_accepts_the_five_steps_of("0005_security_event_guard.sql");
+}
+
+#[test]
+fn the_guard_accepts_migration_0006_and_sees_its_five_steps() {
+    assert_guard_accepts_the_five_steps_of("0006_operations.sql");
+}
+
+#[test]
+fn the_guard_rejects_a_dropped_replication_state_function() {
+    let text = "DROP FUNCTION replication_state();";
+
+    assert_eq!(audit_violations(text).len(), 1);
 }
 
 #[test]

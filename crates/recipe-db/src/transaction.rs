@@ -20,6 +20,7 @@ mod recipe_rows;
 mod recipe_writes;
 mod recipes;
 mod security_event_reads;
+mod settings;
 mod type_rows;
 mod type_usage;
 mod types;
@@ -39,8 +40,8 @@ use recipe_app::ports::{
     AuditScope, AuditWritten, ChangeFlags, CursorPage, DiffReads, DiffSides, DraftRepository,
     EntityLabel, NonEmpty, ParameterRow, PlantRepository, RecipeFilter, RecipeReads,
     RecipeRepository, RecipeSummary, SecurityEventFilter, SecurityEventId, SecurityEventRow,
-    SessionRepository, Transaction, TypeCatalog, UnitCount, UnitLookup, UserRepository,
-    VersionDetail, VersionSummary,
+    SessionRepository, SettingRepository, Transaction, TypeCatalog, UnitCount, UnitLookup,
+    UserRepository, VersionDetail, VersionSummary,
 };
 use recipe_domain::audit::{AggregateType, AuditEntry};
 use recipe_domain::identity::Login;
@@ -126,6 +127,10 @@ impl Transaction for PgTransaction {
     }
 
     fn attempts(&mut self) -> &mut dyn AttemptRepository {
+        self
+    }
+
+    fn settings(&mut self) -> &mut dyn SettingRepository {
         self
     }
 
