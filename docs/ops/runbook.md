@@ -68,7 +68,7 @@ df --output=source,target "$(docker info --format '{{.DockerRootDir}}')" "$RECIP
 
 5. Check that the column `Filesystem` of the first line differs from the two other lines.
 
-If one line equals the first, the healthcheck of `backup` fails (`reliability.md` 7.7).
+If one line equals the first, the healthcheck of `backup` fails (`reliability.md` 7.7). The section "Service unhealthy" gives the next step.
 
 A network share may not keep the `fsync` of the WAL stream.
 The marker files have the names of ADR-0074 (a).
@@ -1099,7 +1099,7 @@ The mode ends after the first measurement that succeeds and shows more than `dis
 A restart loop of `app` ends the job `alerts`, so no alert comes (`reliability.md` 3.7).
 Use the host monitoring for this case.
 
-1. Run `docker compose ps`. Look for a service that restarts or shows `unhealthy`.
+1. Run `docker compose ps`. Look for a service that restarts or shows `unhealthy`. For a service other than `app`, use the section "Service unhealthy".
 2. Run `docker compose logs app`. Read the `ERROR` line of the failed start.
 3. If the line names a variable `PG*`, list the names in the Compose output:
 
@@ -1111,6 +1111,82 @@ docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 5. Run `docker compose up -d`.
 
 A variable of the host shell does not reach a container, so `unset` has no effect on the server.
+
+## Service unhealthy
+
+Docker marks a service `unhealthy` after `health.check_failures` failed checks in a row (`reliability.md` 7.1, ADR-0070 (n)).
+Docker runs a check every `health.check_interval`. A service shows `starting` until its first check passes.
+This section covers `proxy`, `app`, `db`, `backup`, and `walarchive`. The one-shot services have no healthcheck.
+
+### Read why a service is unhealthy
+
+1. Run `docker compose ps -a`. Look for `unhealthy`, `Restarting`, or `Exited`.
+2. Read the last results of the healthcheck of one service:
+
+```bash
+docker inspect --format '{{range .State.Health.Log}}{{.ExitCode}} {{.Output}}{{end}}' "$(docker compose ps -q <service>)"
+```
+
+3. Run the check by hand with the command of the next table. Read the exit code with `echo $?`. Exit code 0 is a pass.
+4. Run `docker compose logs --tail 50 <service>`. Read the `ERROR` lines (section "Read the logs").
+5. Find the row of the service in the next table.
+
+| Service | The check passes when | Run the check by hand | Next |
+|---|---|---|---|
+| `proxy` | `wget` inside `proxy` gets `http://app:9000/healthz`. So `app` answers on its internal listener. | `docker compose exec proxy wget -q -O /dev/null http://app:9000/healthz` | The check does not test TLS or the certificate. If `app` is not `healthy`, fix `app` first. If `app` is `healthy`, no document gives a cause or a fix. |
+| `app` | `recipe-server healthcheck --path /readyz` exits with code 0. The health pool runs `SELECT 1`, and every migration of the binary is in `_sqlx_migrations` (`reliability.md` 7.2). | `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz` | Use the row `not_ready` of the section "Alarms" and the section "Restart loop". If the `ERROR` line names `alerts.webhook_url_file`, use the section "Change the webhook". |
+| `db` | `pg_isready -h 127.0.0.1 -p 5432 -U pg_isready -d recipe` exits with code 0. `db` is healthy only after its init (ADR-0070 (q)). | `docker compose exec db pg_isready -h 127.0.0.1 -p 5432 -U pg_isready -d recipe` | Read `docker compose logs db`. `app`, `backup`, and `walarchive` depend on `db` (`reliability.md` 7.1). After a change of `pg_hba.conf`, see the end of the section "Subnet change". For any other cause, no document gives a fix. |
+| `backup` | `backup-health` exits with code 0. The backup directory is not on the filesystem of `pgdata`. The marker file exists. A complete set is younger than `backup.max_age_alert`. | `docker compose exec backup backup-health`. The check writes nothing and deletes nothing. | Use the table "Messages of backup-health". |
+| `walarchive` | `walarchive-health` exits with code 0. A process `pg_receivewal` runs. The check does not test the lag. The job `alerts` tests it against `wal.max_lag_bytes`. | `docker compose exec walarchive walarchive-health`. The check writes nothing and deletes nothing. | Use the table "Messages of walarchive". |
+| `backup-premigrate` and `migrate` | They have no healthcheck. Exit code 0 is a pass (`reliability.md` 7.1). | `docker compose ps -a`, then `docker compose logs backup-premigrate migrate` | The service `app` starts only after `migrate` ends with exit code 0. See step 12 of "Upgrade" and step 3 of "Start the stack". For `backup-premigrate`, use the table "Messages of backup-once". |
+
+After you fix the cause, restart the service with the section "Restart one service".
+
+### Messages of backup-health
+
+The script writes one `ERROR` line with a field `message`.
+
+| Message | Cause | Action |
+|---|---|---|
+| `the backup directory is missing` | The container has no directory `/backups`. | Run steps 6 and 7 of the section "Create the environment file". Check the value of `RECIPE_BACKUP_DIR`. |
+| `the directory of pgdata is missing` or `the file PG_VERSION is missing, so pgdata is not mounted` | `backup` has no read-only mount of the volume `pgdata`. | Compare your `compose.yaml` with the file of the release. No document gives a further action. |
+| `the backup directory is on the filesystem of pgdata` | `RECIPE_BACKUP_DIR` is on the disk of the Docker root directory. | Run steps 4 and 5 of the section "Prepare the second disk". |
+| `the marker file of the backup disk is missing` | The file `.backup-marker` is not in `RECIPE_BACKUP_DIR`. | Run `install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"`. |
+| `no complete set is younger than the maximum age` | No run made a set within `backup.max_age_alert`. A run failed, did not end, or did not start. | Use the row `backup_age` of the section "Alarms". Then use the table "Messages of backup-once". |
+
+The script `backup-entry` writes the message about the marker file too. Then the container `backup` stops and Docker starts it again.
+
+### Messages of backup-once
+
+The nightly run, `backup-now`, and `backup-premigrate` run the same script. `backup-now` prints the line on the terminal.
+Read the other runs with `docker compose logs backup` and `docker compose logs backup-premigrate`.
+
+| Message | Cause | Action |
+|---|---|---|
+| `another backup run holds the lock` | Another run writes in `RECIPE_BACKUP_DIR`. It is the nightly run, `backup-now`, or `backup-premigrate`. A run that does not end holds the lock too. | Run `docker compose top backup`. If a process `backup-once` runs, wait for its end. Then run the command again. |
+| `a file with a name of the new set exists` | The name of a set holds the UTC minute. A second run in the same minute finds the names. A temp file of a killed run can hold a name. | Wait one minute. Run the command again. |
+| `the marker file of the backup disk is missing` | The file `.backup-marker` is not in `RECIPE_BACKUP_DIR`. | Use the same action as in the table "Messages of backup-health". |
+| `cannot read the password file of recipe_backup` or a message that starts with `the password file of recipe_backup` | The file `backup_password` is unreadable, is empty, or has a wrong form. | Check the owner and the mode as in the section "Create the secret files". The file holds one line and no carriage return. |
+| `cannot publish a file of the set without replacing a file` | The filesystem of the second disk may lack hard links (ADR-0074 (e)). | Check the filesystem as in step 1 of the section "Prepare the second disk". |
+| `pg_dump failed`, `pg_dumpall failed`, or `the snapshot session ended before it answered` | The tool or the database stopped the run. | Read the lines above the message. Run `docker compose ps db`. No document gives a further action. |
+
+A run of `backup-once` has no time limit (ADR-0074 (d)). If `db` does not answer, the run holds the lock.
+Then each later run and `backup-premigrate` stops with `another backup run holds the lock`. The held run deletes nothing.
+After `backup.max_age_alert`, `backup-health` fails and the alert `backup_age` is active.
+Find the run with `docker compose top backup`. No document gives the time after which a run counts as hung.
+No document gives the command that ends a hung run.
+
+### Messages of walarchive
+
+The container ends when `pg_receivewal` or `supercronic` exits (ADR-0068 (c)). Docker then starts it again.
+The `ERROR` lines are in `docker compose logs walarchive`.
+
+| Message | Cause | Action |
+|---|---|---|
+| `no process pg_receivewal runs` | `pg_receivewal` stopped, or the container just restarted. | Read `docker compose logs walarchive`. Use the next rows. |
+| `a child process exited` | The field `child` names `pg_receivewal` or `supercronic`. The field `exit_code` gives its code. | Read the lines above it, for the text of `pg_receivewal`. If `df` shows a full disk, use the section "Low disk space". If the alert `replication` stays active, use the section "A gap in the WAL stream". |
+| `the marker file of the WAL archive disk is missing` | The file `.walarchive-marker` is not in `RECIPE_WALARCHIVE_DIR`. | Run `install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"`. |
+| `cannot read the password file of recipe_replicator` or a message that starts with `the password file of recipe_replicator` | The file `replicator_password` is unreadable, is empty, or has a wrong form. | Check the owner and the mode as in the section "Create the secret files". The file holds one line and no carriage return. |
 
 ## Destructive commands
 
@@ -1141,7 +1217,7 @@ Read the address in the output of `docker compose config` at the service `proxy`
 - [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
 - [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
 - [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
-- [ADR-0061](../adr/0061-start-order-of-serve.md), [ADR-0087](../adr/0087-drain-of-the-internal-listener.md)
+- [ADR-0059](../adr/0059-health-probe-readiness-and-health-router.md), [ADR-0061](../adr/0061-start-order-of-serve.md), [ADR-0066](../adr/0066-backup-disks-file-sets-and-schedule.md), [ADR-0087](../adr/0087-drain-of-the-internal-listener.md)
 - [ADR-0071](../adr/0071-read-only-banner.md), [ADR-0073](../adr/0073-read-faults-and-the-audit-chain-alert.md), [ADR-0088](../adr/0088-run-interface-of-the-jobs-and-cut-count.md), [ADR-0089](../adr/0089-job-errors-first-disk-run-and-stop-line.md), [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md)
 
 ## Known gaps
