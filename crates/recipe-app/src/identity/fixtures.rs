@@ -53,13 +53,35 @@ pub(crate) fn assert_one_time_password(password: &OneTimePassword) {
     assert!(NewPassword::parse(text).is_ok(), "{text}");
 }
 
-/// Count the `SERIALIZABLE` transactions that the store opened, a failed run included.
-pub(crate) fn serializable_runs(store: &MemoryStore) -> usize {
+/// Count the transactions that the store opened with `isolation`.
+///
+/// A `Begin` that fails opens no transaction and leaves no line in the journal.
+fn begin_count(store: &MemoryStore, isolation: Isolation) -> usize {
     store
         .journal()
         .iter()
-        .filter(|entry| matches!(entry, JournalEntry::Begin(Isolation::Serializable)))
+        .filter(|entry| matches!(entry, JournalEntry::Begin(level) if *level == isolation))
         .count()
+}
+
+/// Count the `SERIALIZABLE` transactions that the store opened, a retried run included.
+///
+/// Only `bootstrap_administrator` opens such a transaction.
+pub(crate) fn serializable_runs(store: &MemoryStore) -> usize {
+    begin_count(store, Isolation::Serializable)
+}
+
+/// Count the `READ COMMITTED` transactions that the store opened, a failed run included.
+///
+/// `SetUserRole` and `DeactivateUser` open one such transaction and never run again. The session
+/// store also opens such transactions, so a test compares the count before and after the command.
+pub(crate) fn read_committed_runs(store: &MemoryStore) -> usize {
+    begin_count(store, Isolation::ReadCommitted)
+}
+
+/// Return the lines of the journal after the first `start` lines.
+pub(crate) fn journal_since(store: &MemoryStore, start: usize) -> Vec<JournalEntry> {
+    store.journal().into_iter().skip(start).collect()
 }
 
 /// Return the hash that [`FakeHasher`] makes of `password`.

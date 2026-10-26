@@ -25,8 +25,9 @@ pub enum AdminChange {
 /// Refuse a change that would leave the system without an active administrator.
 ///
 /// It solves one problem: `SetUserRole` and `DeactivateUser` share one rule. The use case passes
-/// the target row that it locked and the number of active administrators that it counted in the
-/// same serializable transaction. That number includes the target when the target is active.
+/// the target row that it locked and the number of active administrators that it counted after
+/// it took the guard lock of the last administrator (ADR-0096). That number includes the target
+/// when the target is active.
 ///
 /// # Errors
 ///

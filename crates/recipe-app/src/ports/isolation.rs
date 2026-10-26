@@ -6,9 +6,10 @@
 /// `data-model.md` section 6 requires, and the adapter does not guess it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Isolation {
-    /// The default level of a command (`READ COMMITTED`, no retry).
+    /// The default level of a command (`READ COMMITTED`, no retry). `SetUserRole` and
+    /// `DeactivateUser` use it after the guard lock of the last Administrator (ADR-0096).
     ReadCommitted,
-    /// The level of `SetUserRole` and `DeactivateUser` (`SERIALIZABLE`).
+    /// The level of `bootstrap_administrator` (`SERIALIZABLE`, one more run, ADR-0035 (h)).
     Serializable,
     /// The read before the transaction of a command. It takes no lock (design D5).
     ReadOnly,

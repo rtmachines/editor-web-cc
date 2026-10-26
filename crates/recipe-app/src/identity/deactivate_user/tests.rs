@@ -10,9 +10,12 @@ use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing};
 use crate::identity::authenticate;
-use crate::identity::fixtures::{IdentityFixture, actor_id, anna_id, fake_hash, serializable_runs};
-use crate::memory::{Fault, FaultPoint};
-use crate::ports::{NewUser, UserRow};
+use crate::identity::fixtures::{
+    IdentityFixture, actor_id, anna_id, fake_hash, journal_since, read_committed_runs,
+    serializable_runs,
+};
+use crate::memory::{Fault, FaultPoint, JournalEntry, Lock, LockMode};
+use crate::ports::{Isolation, NewUser, UserRow};
 
 fn anna() -> Login {
     Login::parse("anna").unwrap()
@@ -61,9 +64,10 @@ fn the_operation_is_deactivate_user() {
 }
 
 #[tokio::test]
-async fn a_success_deactivates_the_user_and_raises_the_epoch_in_a_serializable_transaction() {
+async fn a_success_deactivates_the_user_and_raises_the_epoch_in_one_read_committed_transaction() {
     let fixture = fixture();
     let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let runs_before = read_committed_runs(&fixture.store);
     DeactivateUser::new(fixture.context.clone())
         .execute(&auth, &meta, &anna())
         .await
@@ -72,7 +76,38 @@ async fn a_success_deactivates_the_user_and_raises_the_epoch_in_a_serializable_t
     assert!(!row.is_active);
     assert!(row.deactivated_at.is_some());
     assert_eq!(row.session_epoch, 1);
-    assert_eq!(serializable_runs(&fixture.store), 1);
+    assert_eq!(read_committed_runs(&fixture.store), runs_before + 1);
+    assert_eq!(serializable_runs(&fixture.store), 0);
+}
+
+#[tokio::test]
+async fn the_guard_lock_is_the_first_port_call_after_the_permission_check() {
+    let fixture = fixture();
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let start = fixture.store.journal().len();
+    DeactivateUser::new(fixture.context.clone())
+        .execute(&auth, &meta, &anna())
+        .await
+        .unwrap();
+    let journal = journal_since(&fixture.store, start);
+    let guard = Lock {
+        table: "advisory_class_4",
+        mode: LockMode::Advisory,
+        key: "0".to_owned(),
+    };
+    let user = Lock {
+        table: "app_user",
+        mode: LockMode::ForNoKeyUpdate,
+        key: anna_id().to_string(),
+    };
+    assert_eq!(
+        journal,
+        vec![
+            JournalEntry::Begin(Isolation::ReadCommitted),
+            JournalEntry::Lock(guard),
+            JournalEntry::Lock(user),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -222,7 +257,7 @@ async fn the_permission_check_comes_first_for_an_operator_and_a_process_engineer
 }
 
 #[tokio::test]
-async fn one_serialization_failure_gives_a_second_run_that_succeeds() {
+async fn a_serialization_failure_returns_its_error_and_runs_no_second_time() {
     for point in [
         FaultPoint::Begin,
         FaultPoint::AppendAudit,
@@ -231,30 +266,26 @@ async fn one_serialization_failure_gives_a_second_run_that_succeeds() {
         let fixture = fixture();
         let (auth, meta) = fixture.actor(Role::Administrator).await;
         fixture.store.fail_next(point, Fault::Serialization, 1);
-        DeactivateUser::new(fixture.context.clone())
+        let runs_before = read_committed_runs(&fixture.store);
+        let error = DeactivateUser::new(fixture.context.clone())
             .execute(&auth, &meta, &anna())
             .await
-            .unwrap();
-        assert!(!anna_row(&fixture).is_active, "{point:?}");
-        assert_eq!(anna_row(&fixture).session_epoch, 1, "{point:?}");
-        assert_eq!(fixture.store.audit_entries().len(), 1, "{point:?}");
+            .unwrap_err();
+        // The audit insert reports its own failure as `E-AUD-001`. The other points give `E-DB-001`.
+        let expected = if point == FaultPoint::AppendAudit {
+            ErrorCode::AUD_001
+        } else {
+            ErrorCode::DB_001
+        };
+        assert_eq!(error.code(), expected, "{point:?}");
+        let opened = read_committed_runs(&fixture.store) - runs_before;
+        // A failed `Begin` opens no transaction. Any other point shows one run and no second.
+        assert_eq!(opened, usize::from(point != FaultPoint::Begin), "{point:?}");
+        assert_eq!(serializable_runs(&fixture.store), 0, "{point:?}");
+        assert!(anna_row(&fixture).is_active, "{point:?}");
+        assert_eq!(anna_row(&fixture).session_epoch, 0, "{point:?}");
+        assert!(fixture.store.audit_entries().is_empty(), "{point:?}");
     }
-}
-
-#[tokio::test]
-async fn two_serialization_failures_give_e_db_001_and_change_nothing() {
-    let fixture = fixture();
-    let (auth, meta) = fixture.actor(Role::Administrator).await;
-    fixture
-        .store
-        .fail_next(FaultPoint::Finish, Fault::Serialization, 2);
-    let error = DeactivateUser::new(fixture.context.clone())
-        .execute(&auth, &meta, &anna())
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::DB_001);
-    assert_eq!(serializable_runs(&fixture.store), 2);
-    assert!(anna_row(&fixture).is_active);
 }
 
 #[tokio::test]
@@ -262,10 +293,41 @@ async fn a_deadlock_gives_e_db_001_at_once_with_no_second_run() {
     let fixture = fixture();
     let (auth, meta) = fixture.actor(Role::Administrator).await;
     fixture.store.fail_finish(Fault::Deadlock);
+    let runs_before = read_committed_runs(&fixture.store);
     let error = DeactivateUser::new(fixture.context.clone())
         .execute(&auth, &meta, &anna())
         .await
         .unwrap_err();
     assert_eq!(error.code(), ErrorCode::DB_001);
-    assert_eq!(serializable_runs(&fixture.store), 1);
+    assert_eq!(read_committed_runs(&fixture.store), runs_before + 1);
+}
+
+#[tokio::test]
+async fn a_lock_timeout_at_the_guard_lock_gives_e_db_001_and_writes_nothing() {
+    let fixture = fixture();
+    let session = fixture.seed_anna_session(1);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    fixture
+        .store
+        .fail_next(FaultPoint::LockAdministratorGuard, Fault::LockTimeout, 1);
+    let start = fixture.store.journal().len();
+    let error = DeactivateUser::new(fixture.context.clone())
+        .execute(&auth, &meta, &anna())
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_001);
+    assert_eq!(
+        journal_since(&fixture.store, start),
+        vec![JournalEntry::Begin(Isolation::ReadCommitted)],
+        "one Begin and no lock"
+    );
+    assert!(anna_row(&fixture).is_active);
+    assert_eq!(anna_row(&fixture).session_epoch, 0);
+    assert!(fixture.store.audit_entries().is_empty());
+    assert!(
+        authenticate(&fixture.context, &session)
+            .await
+            .unwrap()
+            .is_some()
+    );
 }
