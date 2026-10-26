@@ -23,7 +23,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0011](0011-soft-delete-everywhere.md) | Soft delete for recipes, versions, machines, and users | Superseded by ADR-0021 | 2026-10-12 |
 | [0012](0012-translations-table-and-fluent.md) | Parameter translations in a table and UI text with Fluent | Accepted. Amended by ADR-0019 (translations are not exported) and ADR-0022 (description_en required) | 2026-10-12 |
 | [0013](0013-rbac-fixed-permissions.md) | Fixed role-based permissions checked in each use case | Accepted. Amended by ADR-0022 (separation of duties, Forbidden recorded in security_event) and ADR-0029 (failed record of a Forbidden event) | 2026-10-12 |
-| [0014](0014-session-identity-model.md) | Session and identity model with an owned session table | Accepted. Amended by ADR-0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, create-admin) | 2026-10-12 |
+| [0014](0014-session-identity-model.md) | Session and identity model with an owned session table | Accepted. Amended by a note: the idle and absolute limits are a security control (essential exception of WCAG 2.2.1 Timing Adjustable). The UI shows no expiry warning or extension. Amended by ADR-0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, create-admin) | 2026-10-12 |
 | [0015](0015-concurrency-locking-model.md) | Concurrency and locking model | Accepted | 2026-10-12 |
 | [0016](0016-aggregate-boundaries.md) | Aggregate boundaries and command split | Accepted. Amended by ADR-0028 (version header, approval token, version command row check) | 2026-10-12 |
 | [0017](0017-derived-type-identity.md) | Identity of derived PLC types and S7-300 layout | Accepted | 2026-10-12 |
@@ -86,19 +86,19 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0074](0074-names-on-the-backup-disks.md) | Names of the files on the backup disks | Accepted | 2026-10-23 |
 | [0075](0075-names-of-the-alert-conditions.md) | Names of the alert conditions | Accepted. Amended by ADR-0093 (b) | 2026-10-23 |
 | [0076](0076-name-list-of-the-restore-test.md) | Name list of the restore test | Accepted. Amended by ADR-0078 (enabled state of a trigger, refused kinds of entries) | 2026-10-23 |
-| [0077](0077-recovery-check-wal-cutoff-and-scratch-constants.md) | Marker entry of the recovery check, WAL cutoff, and scratch constants | Accepted | 2026-10-24 |
+| [0077](0077-recovery-check-wal-cutoff-and-scratch-constants.md) | Marker entry of the recovery check, WAL cutoff, and scratch constants | Accepted. Amended by a note on (g). The row `pitr_check.ready_poll` is the connection check of the scratch cluster, not the archive poll that goes away (`reliability.md` 7.11) | 2026-10-24 |
 | [0078](0078-trigger-state-and-refused-kinds-of-the-restore-test.md) | Trigger state and refused kinds of the restore test | Accepted. Amended by ADR-0084 (d) (a mitigation of the `DEFAULT` risk) | 2026-10-24 |
 | [0079](0079-row-of-the-startup-settings-comparison.md) | Row of the startup settings comparison | Accepted | 2026-10-24 |
 | [0080](0080-blank-rust-log-and-the-exit-text-of-main.md) | Blank RUST_LOG and the exit text of main | Accepted | 2026-10-24 |
 | [0081](0081-cpu-limit-of-the-recovery-check.md) | CPU limit of the recovery check | Accepted | 2026-10-24 |
 | [0082](0082-upgrade-and-rollback-without-dependencies.md) | Upgrade and rollback without the dependencies of app | Accepted. Amended by ADR-0083 (the previous tag reaches only `app` in step 6) | 2026-10-24 |
-| [0083](0083-pgtools-image-in-the-upgrade-and-the-rollback.md) | Image of `backup` and `walarchive` in the upgrade and the rollback | Accepted | 2026-10-24 |
+| [0083](0083-pgtools-image-in-the-upgrade-and-the-rollback.md) | Image of `backup` and `walarchive` in the upgrade and the rollback | Accepted. Amended by a note (VX11-4: reconciles the normative wording) | 2026-10-24 |
 | [0084](0084-generated-column-code-in-the-pre-data-restore.md) | Code of a generated column in the restore of `pre-data` | Accepted | 2026-10-24 |
 | [0085](0085-pause-after-an-accept-fault.md) | Pause after an accept fault | Accepted | 2026-10-24 |
 | [0086](0086-bounds-and-anchor-of-the-audit-chain-check.md) | Bounds and anchor of the audit chain check | Accepted. Amended by a note (item (h) changes ADR-0073 for the anchor of an empty chain table) | 2026-10-24 |
 | [0087](0087-drain-of-the-internal-listener.md) | Drain of the internal listener | Accepted. Amended by ADR-0088 (the cut count of the jobs as the third number of the `WARN` line of the stop) | 2026-10-24 |
 | [0088](0088-run-interface-of-the-jobs-and-cut-count.md) | Run interface of the jobs and the cut count of the jobs | Accepted. Amended by ADR-0089 (b) (items (a) and (d): the first run of `disk_check` inside the span `job`). Amended by ADR-0089 (c) (item (e): the stop line only for a cut) | 2026-10-24 |
-| [0089](0089-job-errors-first-disk-run-and-stop-line.md) | Errors of the jobs, the first run of `disk_check`, and the stop line | Accepted. Amended by ADR-0090 (answers of two open items: a `NULL` `sent_lsn` and `CloseOutcome::TimedOut`) | 2026-10-24 |
+| [0089](0089-job-errors-first-disk-run-and-stop-line.md) | Errors of the jobs, the first run of `disk_check`, and the stop line | Accepted. Amended by ADR-0090 (answers of two open items: a `NULL` `sent_lsn` and `CloseOutcome::TimedOut`). Amended by a note (section 7.3) | 2026-10-24 |
 | [0090](0090-null-sent-lsn-and-pool-close-timeout.md) | A `NULL` `sent_lsn` and a pool close that reaches its limit | Accepted | 2026-10-24 |
 | [0091](0091-readiness-cache-of-the-health-router.md) | Readiness cache of the health router | Accepted. Amended by a note (item (e)). | 2026-10-24 |
 | [0092](0092-webhook-call-panic-isolation.md) | Panic isolation of one webhook call | Accepted | 2026-10-25 |

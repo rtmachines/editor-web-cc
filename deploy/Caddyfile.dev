@@ -1,16 +1,17 @@
 # Caddyfile of the service proxy (development and CI). ADR-0065 gives the decisions.
-# The file deploy/Caddyfile is the production file. The files differ in the tls line and in the auto_https line.
+# ADR-0065 (o): this dev file differs from deploy/Caddyfile in the tls line, the auto_https line, and the skip_install_trust option.
 # The compose.dev.yaml file mounts this file and publishes 127.0.0.1:8443:443 (ADR-0065 (o)).
 #
 # Environment: SITE_ADDRESS is a host name or an IP address.
 # It has no scheme and no port. Compose must set it with ${SITE_ADDRESS:?}.
 # The certificate comes from the internal CA of Caddy. The CI job needs no certificate file.
-
 {
 	# ADR-0065 (c): no admin endpoint. A change of the file recreates the container.
 	admin off
 	# ADR-0070 (d): the container root is read-only. Caddy writes no autosave file.
 	persist_config off
+	# Caddy must not install its local CA into the read-only system trust store.
+	skip_install_trust
 	# ADR-0065 (b): this file has no auto_https disable_certs.
 	# The internal CA needs the certificate automation of Caddy.
 

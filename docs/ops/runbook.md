@@ -665,7 +665,7 @@ The runbook never deletes `pgdata`.
 
 ### Alarms
 
-The job `alerts` writes one `WARN` line for each active condition. The field `alert` holds the name.
+The job `alerts` writes one `WARN` line for each active condition. The field `alert` holds the name. The condition `low_disk` writes one line for each low or unreadable volume. That line has the field `volume`.
 Read the lines with `docker compose logs app`.
 `reliability.md` 3.7 gives the conditions and the webhook.
 

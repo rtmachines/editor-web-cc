@@ -1,6 +1,6 @@
 # ADR-0014: Session and identity model with an owned session table
 
-Status: Accepted. Amended by ADR-0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, create-admin)
+Status: Accepted. Amended by a note: the idle and absolute limits are a security control (essential exception of WCAG 2.2.1 Timing Adjustable). The UI shows no expiry warning or extension. Amended by ADR-0035 (throttle of ChangeOwnPassword, credential check at the commit, key format, pre-session cookie, create-admin)
 Date: 2026-10-12
 Deciders: project owner
 

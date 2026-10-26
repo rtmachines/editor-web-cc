@@ -563,7 +563,7 @@ The default of the trusted-proxy list `http.trusted_proxies` is `172.28.0.2/32`,
 | Idle timeout | 30 min | The session ends when there is no request for this time |
 | Absolute timeout | 12 h | The session ends this long after login, with or without activity |
 
-The values are in `reliability.md` section 7.11 (A21). A session that ends returns `401 E-WEB-004`. The supervised job `cleanup` deletes expired session rows every `session.cleanup_interval`.
+The values are in `reliability.md` section 7.11 (A21). The idle and absolute limits are a security control (essential exception of WCAG 2.2.1 Timing Adjustable), so the UI shows no expiry warning or extension. A session that ends returns `401 E-WEB-004`. The supervised job `cleanup` deletes expired session rows every `session.cleanup_interval`.
 
 A session row holds `user_id` and the `session_epoch` of the user at login. On every request the server reads `role`, `is_active`, `must_change_password`, and `session_epoch` from `app_user`. The session is invalid when the user is inactive or when the epoch differs. `SetUserRole`, `DeactivateUser`, `ResetPassword` delete the sessions of the user. `ChangeOwnPassword` deletes every session of the user and creates a new session for the current request. All deletions run in the transaction of the command.
 

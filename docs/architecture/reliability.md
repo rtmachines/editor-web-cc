@@ -576,7 +576,7 @@ ADR-0058 (l) to (p) holds the stop. ADR-0087 amends the drain of the internal li
    - `cut_internal`: the cut connections of the internal listener,
    - `cut_jobs`: the cut job iterations.
 
-   When all three counts are 0, the stop writes no such line.
+   When all three counts are 0, the stop writes no such line. A full stop writes one `INFO` line, "the server stopped", through the step 1 logger (ADR-0061), and an early or failed start writes none.
 7. The Compose setting `stop_grace_period` of the service `app` is `app.stop_grace_period`.
 
 Two sum rules hold for the values of 7.11. A test reads both from 7.11 (ADR-0058 (p), ADR-0070 (v)):
@@ -748,7 +748,7 @@ Disk space policy (Assumption A24):
 3. The old image checks the newest set with `docker compose exec backup restore-test`. Then five commands run in this order (ADR-0097 (h), (h4)):
    1. `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`. Wait for exit code 0.
    2. `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time, and that dump fails in the same UTC minute (ADR-0082). Wait for exit code 0 of `migrate`.
-   3. On failure of command 1 or 2, stop here. Set the previous tag in `deploy/.env` again. The old `app` keeps running on the old schema when the migration follows the expand pattern.
+   3. On failure of command 1 or 2, stop here. Set the previous tag in `deploy/.env` again. The old `app` keeps running on the old schema when the migration follows the expand pattern. A release with two or more migration files can fail after the first file, so use a forward correction or the `_premigrate` restore (ADR-0083).
    4. The guard step: the superuser replaces `audit_guard.audit_objects_dropped()` with `CREATE OR REPLACE FUNCTION` of the new `01-roles.sh`. This step is the only place that replaces the function on an older volume.
    5. A query computes the SHA-256 of `pg_get_functiondef` of the function, with `search_path = pg_catalog`. It must equal field 4 of the line `FUNCTION|audit_guard audit_objects_dropped()` of the new `deploy/pgtools/restore-code.expected`. No `backup-now` runs before the hash matches. The release notes name commands 4 and 5 as a "manual superuser step".
    - A failure of command 4 or 5 leaves the new schema and the old guard. The operator runs commands 4 and 5 again (`docs/ops/runbook.md`, section "Upgrade").
