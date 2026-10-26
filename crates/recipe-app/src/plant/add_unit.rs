@@ -1,15 +1,17 @@
 //! The use case `AddUnit` (`domain-model.md` section 5.1, `data-model.md` section 6).
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
-use recipe_domain::plant::{MachineCode, PlantError, UnitId, UnitPath};
+use recipe_domain::plant::{MachineCode, MachineId, PlantError, UnitId, UnitPath};
 use recipe_domain::text::Text;
 use uuid::Uuid;
 
 use super::resolve::live_machine_id;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
-use crate::error::{AppError, Missing, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE, map_storage};
-use crate::ports::{Isolation, Locked, NonEmpty};
+use crate::error::{
+    AppError, Missing, StorageError, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE, map_storage,
+};
+use crate::ports::{Isolation, Locked, NonEmpty, RowImage};
 
 /// The parsed request of `AddUnit`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,31 +104,41 @@ impl AddUnit {
             .plant()
             .insert_unit(machine_id, &unit)
             .await
-            .map_err(|error| {
-                map_storage(error, |constraint| match constraint {
-                    UNIT_PATH_UNIQUE => {
-                        Some(PlantError::DuplicateUnitPath { path: path.clone() }.into())
-                    }
-                    UNIT_PARENT_EXISTS => {
-                        Some(PlantError::ParentNotFound { path: path.clone() }.into())
-                    }
-                    _ => None,
-                })
-            })?;
-        let entries = NonEmpty::new(AuditEntry::row(
-            RowAction::UnitAdded,
-            AuditTarget::unit(machine_id, unit.id()),
-            RowChange::Create {
-                after: after.into_value(),
-            },
-            audit_context(user, meta),
-        ));
+            .map_err(|error| map_insert_error(error, &path))?;
+        let entries = unit_added_entries(machine_id, unit.id(), after, user, meta);
         self.ctx.uow.commit(tx, entries).await?;
         Ok(AddUnitOutput {
             unit: unit.id(),
             path,
         })
     }
+}
+
+/// Map the constraint that `insert_unit` violates to the domain error of the path.
+fn map_insert_error(error: StorageError, path: &UnitPath) -> AppError {
+    map_storage(error, |constraint| match constraint {
+        UNIT_PATH_UNIQUE => Some(PlantError::DuplicateUnitPath { path: path.clone() }.into()),
+        UNIT_PARENT_EXISTS => Some(PlantError::ParentNotFound { path: path.clone() }.into()),
+        _ => None,
+    })
+}
+
+/// Build the one audit entry `UnitAdded` from the inserted row.
+fn unit_added_entries(
+    machine_id: MachineId,
+    unit_id: UnitId,
+    after: RowImage,
+    user: &CurrentUser,
+    meta: &RequestMeta,
+) -> NonEmpty<AuditEntry> {
+    NonEmpty::new(AuditEntry::row(
+        RowAction::UnitAdded,
+        AuditTarget::unit(machine_id, unit_id),
+        RowChange::Create {
+            after: after.into_value(),
+        },
+        audit_context(user, meta),
+    ))
 }
 
 #[cfg(test)]
