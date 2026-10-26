@@ -20,7 +20,7 @@ use support::temp::{TempDir, random_secret};
 const LABEL_VALUE: &str = "recipe-server";
 const MIN_SECRET_LENGTH: usize = 32;
 /// `0001` to `0006` (`data-model.md` section 8).
-const EXPECTED_MIGRATIONS: i64 = 6;
+const EXPECTED_MIGRATIONS: i64 = 8;
 /// A port that no server listens on. The case with a missing secret file uses it.
 const CLOSED_PORT: u16 = 1;
 
@@ -85,7 +85,7 @@ async fn migrate_applies_every_migration_once_and_fails_with_one_error_line() {
     let valid_secret = dir.write("valid_secret", &format!("{MIGRATOR_PASSWORD}\n"));
     let valid = write_config(&dir, "valid.toml", host_port, &valid_secret);
 
-    // A valid configuration applies the six migrations.
+    // A valid configuration applies the eight migrations.
     let first = run_migrate(valid.clone()).await;
     assert_eq!(first.status.code(), Some(0), "{}", text_of(&first));
     assert_eq!(applied_migrations(&container).await, EXPECTED_MIGRATIONS);
