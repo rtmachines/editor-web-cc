@@ -95,7 +95,7 @@ install -d -m 0700 -o root -g root "$RECIPE_SECRETS_DIR"
 
 Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`.
 
-3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it. ADR-0063 (e) gives the rules of the URL.
+3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it. The section "Alert webhook" gives the rules of the URL.
 4. Leave `alerts_webhook_url` empty when the plant has no webhook:
 
 ```bash
@@ -648,6 +648,101 @@ diff <(openssl x509 -in <new certificate> -noout -pubkey) <(openssl pkey -in <ne
 A rotation recreates the container `proxy`, so the service stops for a short time (ADR-0065 (c)).
 If TLS fails, copy the two `.old` files over `tls_cert` and `tls_key`. Then repeat step 6.
 A bad pair stops TLS, so do not skip steps 2 and 3.
+
+## Alert webhook
+
+The job `alerts` sends one HTTPS `POST` for each active alert condition to the webhook host (`reliability.md` 3.7, ADR-0063).
+The body is `{"alert":"<name>"}` with the header `Content-Type: application/json`. It holds no other field (ADR-0063 (l)).
+The value `<name>` is a name from the table in the section "Alarms" (ADR-0075 (c)).
+The secret file `alerts_webhook_url` holds the URL. The file `compose.yaml` sets `RECIPE_ALERTS__WEBHOOK_URL_FILE` to its path in `app`.
+The section "Create the secret files" creates the file. The server reads the file at each start only.
+
+### Rules of the URL
+
+The server checks the file at each start. A broken file stops the start (ADR-0063 (a), (b)).
+
+- The file holds one line. The server accepts one final line feed.
+- The file holds no carriage return.
+- The URL is absolute and has a host.
+- The scheme of the URL is `https`.
+- The URL holds a token of at least 128 random bits (ADR-0063 (e)). No code checks this rule.
+- An empty file means no webhook. The start then writes one `INFO` line.
+
+The client follows no redirect. If the webhook host redirects, write the final URL into the file (`reliability.md` 3.7).
+With the settings of `compose.yaml`, the client trusts the webpki roots only. A certificate of a plant authority may therefore fail. See the section "Known gaps".
+One run sends all calls at the same time. The value of `alerts.webhook_timeout` limits them together (ADR-0063 (m)).
+
+### Change the webhook
+
+The URL is a secret. Do not put it in a shell command, because the shell history keeps it.
+
+1. Create an empty new file:
+
+```bash
+install -m 0600 /dev/null "$RECIPE_SECRETS_DIR/alerts_webhook_url.new"
+```
+
+2. Open the new file in an editor. Write the new URL as one line.
+3. Set the owner and the mode of the new file. Then move it over the old file:
+
+```bash
+chown 65532 "$RECIPE_SECRETS_DIR/alerts_webhook_url.new"
+chmod 0400 "$RECIPE_SECRETS_DIR/alerts_webhook_url.new"
+mv "$RECIPE_SECRETS_DIR/alerts_webhook_url.new" "$RECIPE_SECRETS_DIR/alerts_webhook_url"
+```
+
+4. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the URL.
+5. Run `docker compose up -d --force-recreate --no-deps app`.
+6. Run `docker compose ps app` until `app` shows `healthy`.
+7. Compute the fingerprint of the file. The command prints a hash and does not print the URL:
+
+```bash
+tr -d '\n' < "$RECIPE_SECRETS_DIR/alerts_webhook_url" | sha256sum
+```
+
+8. Open `/audit` as an Administrator. Filter the action `SettingChanged`.
+9. Open the newest entry of the key `alerts.webhook_url`. Compare the value of `after` with `sha256:` and the hash of step 7.
+
+While `app` restarts, Caddy answers `502` (ADR-0065 (p)).
+The server writes the entry `SettingChanged` at the start, and only when the fingerprint differs (`reliability.md` 7.12).
+The entry shows that the URL changed. It does not show the host (ADR-0063 (c)).
+No command sends a test call. A call goes out only for an active condition. The entry therefore checks the file and does not check the connection.
+If `app` does not become `healthy`, read its `ERROR` line. The line names the key `alerts.webhook_url_file` and one of these texts:
+
+- `holds a carriage return`
+- `holds more than one line`
+- `does not use the scheme https`
+- `holds a text that is not an absolute URL`
+- `cannot be read` and an error kind
+
+Repeat the steps from step 1 with a new URL.
+
+### Disable the webhook
+
+1. Do steps 1 to 6 of the section "Change the webhook". In step 2, leave the new file empty.
+2. Run `docker compose logs --no-log-prefix app | grep -F 'alerts have no webhook'`. Check that the output names the key `alerts.webhook_url_file`.
+
+The entry `SettingChanged` for the key `alerts.webhook_url` then shows an empty value in `after`.
+
+### Find a failed call
+
+A failed call writes one `WARN` line with the field `condition`. The field holds the name of the condition. The line holds no part of the URL (ADR-0063 (g), (n)).
+Read the lines of the last day:
+
+```bash
+docker compose logs --no-log-prefix --since 24h app | grep -F '"condition":"'
+```
+
+| Text of the line | Possible cause | Action |
+|---|---|---|
+| `The connection to the webhook host failed.` | The webhook host is down, or the name or the route from the network `egress` fails. | Check the host name in the URL. Check the route from `egress` with the owner of the plant network. |
+| `The TLS handshake with the webhook host failed.` | The certificate of the webhook host may come from a plant authority that the webpki roots do not hold. | See the section "Known gaps". |
+| `The webhook call took too long.` | The webhook host did not answer within `alerts.webhook_timeout`. | Check the load of the webhook host. |
+| `The webhook host answered with the status <code>.` | The status is outside `2xx`. | For `301`, `302`, or `303`, write the final URL. For other codes, check the URL and the token with the owner of the webhook host. |
+
+The job does not retry a failed call. The next run sends the call again while the condition stays active. The value of `alerts.interval` sets the time between runs.
+A short condition may therefore end before the webhook host gets the call. The `alert` lines in the log still show it.
+The job writes no line for a call that works. A missing line with `condition` shows no fault. It does not show that the webhook host got the call.
 
 ## Subnet change
 
