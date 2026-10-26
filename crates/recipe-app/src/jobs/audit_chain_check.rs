@@ -125,10 +125,7 @@ impl AuditChainCheck {
             None => self.check_batches(&head).await?,
         };
         match verdict {
-            None => self
-                .record_state(head.position.seq)
-                .await
-                .map_err(AppError::from),
+            None => Ok(self.record_state(head.position.seq).await?),
             Some(verdict) => self.report_break(request_id, verdict).await,
         }
     }
