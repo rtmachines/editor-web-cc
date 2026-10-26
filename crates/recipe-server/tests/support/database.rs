@@ -36,6 +36,8 @@ const TEST_HOSTS_SOURCE: &str = concat!(
 );
 const TEST_HOSTS_TARGET: &str = "/docker-entrypoint-initdb.d/02-test-hosts.sh";
 const EXECUTABLE_MODE: u32 = 0o755;
+/// The container secret files stay world-readable. The container user id differs from the host
+/// user id, so a mode of `0o600` would lock the PostgreSQL user out. The files hold test values.
 const SECRET_MODE: u32 = 0o644;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 const READY_ATTEMPTS: u32 = 240;
