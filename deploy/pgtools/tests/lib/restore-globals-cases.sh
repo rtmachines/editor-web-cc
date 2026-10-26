@@ -7,6 +7,53 @@
 META="the globals file holds a psql meta-command"
 PAIR="the globals file has no valid restrict pair"
 
+# A backup writer must not change the SQL that psql receives after the globals check.
+case_restore_globals_swap_after_check() {
+  new_restore_case globals-swap-after-check
+  cp -- "$B/globals_$RESTORE_NAME.sql" "$CASE/globals.checked"
+  restore_run STUB_GLOBALS_SWAP=1
+  expect_eq "globals swap: exit code" "$RC" 0
+  expect_eq "globals swap: the globals file ran" "$(event_count globals)" 1
+  expect_ok "globals swap: the backup file changed" \
+    grep -qF "COPY (SELECT 1) TO PROGRAM 'touch /tmp/x';" "$B/globals_$RESTORE_NAME.sql"
+  expect_ok "globals swap: psql received the checked content" \
+    cmp -s -- "$CASE/globals.checked" "$CASE/stub/globals.received"
+  expect_no "globals swap: psql received no swapped content" \
+    grep -qF 'TO PROGRAM' "$CASE/stub/globals.received"
+  expect_ok "globals swap: psql read the private copy" \
+    grep -qF "$CASE/pgpass/run." "$CASE/stub/globals.path"
+  expect_eq "globals swap: no pgpass file stays" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+  case $(uname -s) in
+    MINGW* | MSYS*) ;;
+    *) expect_eq "globals swap: the copy has mode 0600" "$(cat "$CASE/stub/globals.mode")" 600 ;;
+  esac
+}
+
+# The disk checksum can pass after a writer replaces the file that supplied the private copy.
+case_restore_globals_swap_before_manifest_check() {
+  new_restore_case globals-swap-before-manifest-check
+  cp -- "$B/globals_$RESTORE_NAME.sql" "$CASE/stub/manifest-globals.sql"
+  printf 'CREATE ROLE swapped;\n' >>"$B/globals_$RESTORE_NAME.sql"
+  mkdir "$CASE/hash-stubs"
+  cat >"$CASE/hash-stubs/sha256sum" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ]; then
+  for file in "$BACKUP_DIR"/globals_*.sql; do
+    cp -- "$STUB_DIR/manifest-globals.sql" "$file"
+  done
+fi
+exec "$REAL_SHA256SUM" "$@"
+EOF
+  chmod 0755 "$CASE/hash-stubs/sha256sum"
+  restore_run "REAL_SHA256SUM=$(command -v sha256sum)" "PATH=$CASE/hash-stubs:$ROOT/stubs:$PATH"
+  expect_no "globals copy mismatch: exit code is not 0" test "$RC" -eq 0
+  expect_eq "globals copy mismatch: one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "globals copy mismatch: the ERROR line says so" \
+    error_has 'the globals copy does not match the manifest'
+  expect_eq "globals copy mismatch: no tool ran" "$(wc -c <"$CASE/stub/log")" 0
+  expect_eq "globals copy mismatch: no pgpass file stays" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+}
+
 # globals_case <name> <text in the ERROR line> <line>...: the globals file of the set holds exactly
 # these lines. The manifest is new. The gate stops the test before any tool runs.
 globals_case() {

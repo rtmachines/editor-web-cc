@@ -6,14 +6,16 @@
 # (supercronic). Before a release, the operator runs: docker compose exec backup restore-test
 #
 # Steps (the numbers are the steps of ADR-0067):
-#   1. The marker, the lock, and the newest complete set (ADR-0074 (c)). sha256sum -c --strict
-#      on the manifest. A mismatch stops the test before any tool runs. The counts file and the
-#      globals file pass their gates, including the role grammar of ADR-0095.
+#   1. The marker, the lock, and the newest complete set (ADR-0074 (c)).
+#      Copy the globals file once into the private tmpfs directory with mode 0600.
+#      Run sha256sum -c --strict on the manifest and compare the copy's hash with its manifest entry.
+#      A mismatch stops the test before any PostgreSQL tool runs.
+#      Check the counts file and the globals copy, including the role grammar of ADR-0095.
 #   2. Each FUNCTION, TRIGGER, and EVENT TRIGGER entry of pg_restore --list names a line of
 #      restore-code.expected (ADR-0076 (b)). An unknown entry stops the test. An entry of the
 #      kind PROCEDURE, AGGREGATE, MATERIALIZED VIEW, or OPERATOR stops it too (ADR-0078 (b)).
-#   3. A private scratch cluster on the backup disk, the globals file, and a random password
-#      for each login role.
+#   3. A private scratch cluster on the backup disk, the checked globals copy, and a random password for each login role.
+#      psql reads only the private copy, so a later change on the backup disk cannot replace its SQL.
 #   4. pg_restore --section=pre-data. The lines of restore-code.sql for the kinds FUNCTION, CHECK,
 #      and GENERATED must equal restore-code.expected (ADR-0076 (c)).
 #   5. pg_restore --section=data and then post-data. The lines of every kind must equal the file.
@@ -84,6 +86,7 @@ base=""
 manifest_name=""
 dump_path=""
 globals_path=""
+globals_copy=""
 counts_path=""
 table_count=0
 login_roles=()
@@ -229,7 +232,7 @@ select_set() {
 
 # check_manifest: the manifest lists exactly the three files of the set, and each hash is right.
 check_manifest() {
-  local listed expected file
+  local listed expected file globals_hash copy_hash
   for file in "$dump_path" "$globals_path" "$counts_path"; do
     if [ ! -f "$file" ] || [ -L "$file" ]; then
       fail "the newest set lacks a regular file" "\"set\":\"$base\""
@@ -239,11 +242,19 @@ check_manifest() {
     || fail "cannot read the manifest of the newest set"
   expected=$(printf '%s\n' "${dump_path##*/}" "${globals_path##*/}" "${counts_path##*/}" | sort)
   [ "$listed" = "$expected" ] || fail "the manifest does not list exactly the files of the set"
+  globals_copy=$work_dir/${globals_path##*/}
+  cat -- "$globals_path" >"$globals_copy" || fail "cannot copy the globals file"
+  chmod 0600 -- "$globals_copy" || fail "cannot set the globals copy permissions"
+  globals_hash=$(awk -v name="${globals_path##*/}" \
+    'substr($0, 67) == name { print substr($0, 1, 64) }' "$BACKUP_DIR/$manifest_name") \
+    || fail "cannot read the manifest of the newest set"
   if ! (cd "$BACKUP_DIR" && sha256sum -c --strict -- "$manifest_name") \
     >"$work_dir/manifest.out" 2>&1; then
     cat -- "$work_dir/manifest.out" >&2
     fail "the manifest of the newest set does not verify" "\"set\":\"$base\""
   fi
+  copy_hash=$(sha256sum -- "$globals_copy") || fail "cannot hash the globals copy"
+  [ "${copy_hash%% *}" = "$globals_hash" ] || fail "the globals copy does not match the manifest"
 }
 
 # check_counts: the counts file is external input. Each line has the grammar. The loop counts the
@@ -269,7 +280,7 @@ check_globals() {
   # shellcheck source=../lib/globals-grammar.sh
   source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/globals-grammar.sh" \
     || fail "cannot load the globals grammar"
-  if ! report=$(check_globals_file "$globals_path" 2>&1); then
+  if ! report=$(check_globals_file "$globals_copy" 2>&1); then
     fail "$(clean "${report#ERROR: }")"
   fi
 }
@@ -327,7 +338,7 @@ start_cluster() {
 # restore_globals: the globals file gives one known error. The system user exists already.
 restore_globals() {
   local line
-  scratch_psql --dbname=postgres --file="$globals_path" -v ON_ERROR_STOP=0 \
+  scratch_psql --dbname=postgres --file="$globals_copy" -v ON_ERROR_STOP=0 \
     >/dev/null 2>"$work_dir/globals.err" || fail "psql cannot read the globals file"
   while IFS= read -r line; do
     case $line in
