@@ -1804,6 +1804,74 @@ REVOKE CREATE ON SCHEMA public FROM audit_owner;
 
 After `0006`, `audit_owner` owns 8 tables and functions. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names each of them, also the function (ADR-0069 (o)). Only the superuser can replace the guard function (ADR-0069 (p)).
 
+### 5.6 Qualified operators of two definer functions (`0007_audit_definer_operators.sql`)
+
+The migration replaces the bodies of `audit_hash_chain()` (section 4.9) and `security_event_purge()` (section 4.12). It runs the five steps of section 5.1 (ADR-0098 (a)). `0002_triggers.sql` shipped, so its text stays.
+
+- Each operator becomes `OPERATOR(pg_catalog.<op>)`. `IN (subquery)` becomes `OPERATOR(pg_catalog.=) ANY (subquery)`.
+- A type with a normal name gets the schema `pg_catalog`. A type keyword of the SQL standard, such as `BIGINT`, needs no schema.
+- Every `OPERATOR(...)` form has one precedence and groups from left to right. The migration therefore keeps the old grouping with parentheses.
+- Each statement repeats `SECURITY DEFINER` and `SET search_path = pg_catalog, public, pg_temp`. Without them, `CREATE OR REPLACE FUNCTION` resets both.
+- `CREATE OR REPLACE FUNCTION` keeps the owner and the ACL. The results do not change, so no hash of an existing entry changes.
+- A storage test scans the body of every function that `audit_owner` owns and finds no bare operator (ADR-0098 (f)). A second test reads `pg_proc` and finds the same attributes, owner, and ACL (ADR-0098 (g)).
+
+```sql
+-- Step 1.
+GRANT CREATE ON SCHEMA public TO audit_owner;
+-- Step 2.
+SET ROLE audit_owner;
+-- Step 3. CREATE OR REPLACE keeps the owner and the ACL. SECURITY DEFINER and the search_path repeat.
+CREATE OR REPLACE FUNCTION audit_hash_chain() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+    v_seq  BIGINT;
+    v_prev pg_catalog.bytea;
+BEGIN
+    -- The row lock serializes all audit inserts. It waits for the commit of the previous writer.
+    SELECT h.last_seq, h.last_hash INTO STRICT v_seq, v_prev
+    FROM public.audit_chain_head AS h
+    WHERE h.singleton
+    FOR UPDATE;
+
+    NEW.chain_seq  := v_seq OPERATOR(pg_catalog.+) 1;
+    NEW.prev_hash  := v_prev;
+    NEW.entry_hash := pg_catalog.sha256(
+        COALESCE(v_prev, '\x'::pg_catalog.bytea)
+        OPERATOR(pg_catalog.||) pg_catalog.convert_to(public.audit_canonical(NEW), 'UTF8'));
+
+    UPDATE public.audit_chain_head
+    SET last_seq = NEW.chain_seq, last_hash = NEW.entry_hash
+    WHERE singleton;
+    RETURN NEW;
+END;
+$$;
+CREATE OR REPLACE FUNCTION security_event_purge() RETURNS BIGINT
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, public, pg_temp AS $$
+DECLARE
+    v_deleted BIGINT;
+BEGIN
+    -- One batch: security_event.retention 400 days, security_event.purge_batch 5000 rows.
+    -- The primary key gives the oldest rows first.
+    -- Every OPERATOR form groups from left to right, so the parentheses keep the old grouping.
+    DELETE FROM public.security_event
+    WHERE id OPERATOR(pg_catalog.=) ANY (
+        SELECT e.id FROM public.security_event AS e
+        WHERE e.occurred_at OPERATOR(pg_catalog.<)
+              (pg_catalog.now() OPERATOR(pg_catalog.-) '400 days'::pg_catalog.interval)
+        ORDER BY e.id
+        LIMIT 5000);
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    RETURN v_deleted;
+END;
+$$;
+-- Step 4.
+RESET ROLE;
+-- Step 5.
+REVOKE CREATE ON SCHEMA public FROM audit_owner;
+```
+
 ## 6. Transactional operations
 
 Every command runs in exactly one transaction, except `Login` and `ChangeOwnPassword`, which use the two short transactions T1 and T2 (see the rows, ADR-0035 (b)). A `security_event` row has its own short transaction through the port `SecurityEventSink`. The commit path of each operation is in `domain-model.md` section 5. `EnsureDerivedType` is an internal operation and runs inside the transaction of its caller. The use case opens the transaction through `UnitOfWork`. The audit `INSERT` is part of the same transaction. The `COMMIT` either persists everything or nothing (R29).

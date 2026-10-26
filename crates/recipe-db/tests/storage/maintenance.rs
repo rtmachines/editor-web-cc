@@ -298,6 +298,25 @@ async fn maintenance_event_purge_deletes_batches_of_5000_and_keeps_recent_rows()
     assert_eq!(f.count("SELECT count(*) FROM security_event").await, 2);
 }
 
+/// ADR-0098 (h): the condition holds the grouping `occurred_at < (now() - 400 days)`.
+#[tokio::test]
+async fn maintenance_event_purge_keeps_an_event_of_399_days_and_deletes_one_of_401_days() {
+    let mut f = Fixture::create().await;
+    f.seed_events(1, 399).await;
+    f.seed_events(1, 401).await;
+
+    let first = f.store.purge_security_events().await;
+    let second = f.store.purge_security_events().await;
+
+    assert_eq!((first.unwrap(), second.unwrap()), (1, 0));
+    let remaining: Vec<bool> =
+        sqlx::query_scalar("SELECT occurred_at < now() - interval '400 days' FROM security_event")
+            .fetch_all(&mut f.admin)
+            .await
+            .unwrap();
+    assert_eq!(remaining, [false], "only the event of 399 days remains");
+}
+
 #[tokio::test]
 async fn maintenance_a_failure_in_the_second_event_batch_keeps_the_first_batch_deleted() {
     let mut f = Fixture::create().await;
