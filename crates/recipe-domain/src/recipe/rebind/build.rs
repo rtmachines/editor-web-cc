@@ -139,39 +139,46 @@ pub(super) fn visit_elements(
             visit(cursor.slot, &cursor.prefix);
             continue;
         };
-        let dimension = dimensions.iter().nth(cursor.level)?;
-        let Value::Array(items) = cursor.slot else {
-            return None;
-        };
-        if u32::try_from(items.len()) != Ok(dimension.count()) {
-            return None;
-        }
-        let next_level = cursor.level.checked_add(1)?;
-        let is_last = next_level == dimensions.len();
-        let mut children = Vec::with_capacity(items.len());
-        for (position, item) in items.iter_mut().enumerate() {
-            let mut indexes = cursor.indexes.clone();
-            indexes.push(plc_index(dimension.lower(), position)?);
-            children.push(if is_last {
-                Cursor {
-                    slot: item,
-                    array: cursor.array.checked_add(1)?,
-                    level: 0,
-                    indexes: Vec::new(),
-                    prefix: extended(&cursor.prefix, LeafSegment::Index(indexes)),
-                }
-            } else {
-                Cursor {
-                    slot: item,
-                    array: cursor.array,
-                    level: next_level,
-                    indexes,
-                    prefix: cursor.prefix.clone(),
-                }
-            });
-        }
-        children.reverse();
-        stack.extend(children);
+        stack.extend(enter_level(cursor, dimensions)?);
     }
     Some(())
+}
+
+/// Make the cursors of the elements of one array level, in reverse order for the stack.
+///
+/// The function returns `None` when the value does not have the shape of the dimension.
+fn enter_level<'v>(cursor: Cursor<'v>, dimensions: &ArrayDimensions) -> Option<Vec<Cursor<'v>>> {
+    let dimension = dimensions.iter().nth(cursor.level)?;
+    let Value::Array(items) = cursor.slot else {
+        return None;
+    };
+    if u32::try_from(items.len()) != Ok(dimension.count()) {
+        return None;
+    }
+    let next_level = cursor.level.checked_add(1)?;
+    let is_last = next_level == dimensions.len();
+    let mut children = Vec::with_capacity(items.len());
+    for (position, item) in items.iter_mut().enumerate() {
+        let mut indexes = cursor.indexes.clone();
+        indexes.push(plc_index(dimension.lower(), position)?);
+        children.push(if is_last {
+            Cursor {
+                slot: item,
+                array: cursor.array.checked_add(1)?,
+                level: 0,
+                indexes: Vec::new(),
+                prefix: extended(&cursor.prefix, LeafSegment::Index(indexes)),
+            }
+        } else {
+            Cursor {
+                slot: item,
+                array: cursor.array,
+                level: next_level,
+                indexes,
+                prefix: cursor.prefix.clone(),
+            }
+        });
+    }
+    children.reverse();
+    Some(children)
 }

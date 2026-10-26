@@ -77,6 +77,24 @@ struct ShapeColumns {
     supersedes: Value,
 }
 
+/// Return the columns of a row of `kind` with no shape column set.
+///
+/// Each shape arm overrides only the columns that its kind uses.
+fn unshaped(kind: &'static str) -> ShapeColumns {
+    ShapeColumns {
+        kind,
+        name: Value::Null,
+        size_bytes: Value::Null,
+        string_length: Value::Null,
+        leaf_class: Value::Null,
+        element_type_id: Value::Null,
+        dim_lower: Value::Null,
+        dim_upper: Value::Null,
+        revision: DEFAULT_REVISION,
+        supersedes: Value::Null,
+    }
+}
+
 fn shape_columns(shape: &RecordShape) -> ShapeColumns {
     match shape {
         RecordShape::Primitive {
@@ -85,31 +103,20 @@ fn shape_columns(shape: &RecordShape) -> ShapeColumns {
             size_bytes,
             string_length,
         } => ShapeColumns {
-            kind: "primitive",
             name: Value::String(primitive.name().to_owned()),
             size_bytes: Value::from(*size_bytes),
             string_length: Value::from(*string_length),
             leaf_class: Value::String(leaf_class.as_sql().to_owned()),
-            element_type_id: Value::Null,
-            dim_lower: Value::Null,
-            dim_upper: Value::Null,
-            revision: DEFAULT_REVISION,
-            supersedes: Value::Null,
+            ..unshaped("primitive")
         },
         RecordShape::Array {
             element,
             dimensions,
         } => ShapeColumns {
-            kind: "array",
-            name: Value::Null,
-            size_bytes: Value::Null,
-            string_length: Value::Null,
-            leaf_class: Value::Null,
             element_type_id: Value::String(element.to_string()),
             dim_lower: dimensions.iter().map(|d| Value::from(d.lower())).collect(),
             dim_upper: dimensions.iter().map(|d| Value::from(d.upper())).collect(),
-            revision: DEFAULT_REVISION,
-            supersedes: Value::Null,
+            ..unshaped("array")
         },
         RecordShape::Struct {
             name,
@@ -117,16 +124,10 @@ fn shape_columns(shape: &RecordShape) -> ShapeColumns {
             supersedes,
             ..
         } => ShapeColumns {
-            kind: "struct",
             name: Value::String(name.to_string()),
-            size_bytes: Value::Null,
-            string_length: Value::Null,
-            leaf_class: Value::Null,
-            element_type_id: Value::Null,
-            dim_lower: Value::Null,
-            dim_upper: Value::Null,
             revision: *revision,
             supersedes: supersedes.map_or(Value::Null, |id| Value::String(id.to_string())),
+            ..unshaped("struct")
         },
     }
 }

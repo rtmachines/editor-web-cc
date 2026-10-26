@@ -123,6 +123,26 @@ impl Recipe {
         approver: &Approver,
         policy: &ApprovalPolicy,
     ) -> Result<Optimistic<ApprovalOutcome>, RecipeError> {
+        let (approved, approved_state) =
+            match self.check_approval(&ready, expected_row_version, approver, policy)? {
+                ApprovalCheck::Finished(result) => return Ok(result),
+                ApprovalCheck::Proceed { approved, state } => (approved, state),
+            };
+        let retired = self.retire_others(approved, approved_state);
+        Ok(Optimistic::Applied(ApprovalOutcome::Approved {
+            approved,
+            retired,
+        }))
+    }
+
+    /// Run every check of an approval in order. Change nothing.
+    fn check_approval(
+        &self,
+        ready: &ApprovalReady,
+        expected_row_version: i64,
+        approver: &Approver,
+        policy: &ApprovalPolicy,
+    ) -> Result<ApprovalCheck, RecipeError> {
         self.require_not_deleted()?;
         let not_draft = |number| forbidden_step(&self.reference, number, Transition::Approve);
         let header = self
@@ -130,24 +150,18 @@ impl Recipe {
             .iter()
             .find(|v| v.id == ready.version())
             .ok_or_else(|| not_draft(ready.number()))?;
-        if is_replay(header, expected_row_version) {
-            return Ok(Optimistic::Applied(ApprovalOutcome::AlreadyApproved));
+        if let Some(finished) = replay_or_conflict(header, expected_row_version) {
+            return Ok(ApprovalCheck::Finished(finished));
         }
-        if header.row_version != expected_row_version {
-            return Ok(Optimistic::Conflict {
-                expected: expected_row_version,
-                actual: header.row_version,
-            });
-        }
-        let approved_state = header
+        let state = header
             .state
             .apply(Transition::Approve)
             .map_err(|_| not_draft(header.number))?;
         if ready.row_version() != header.row_version {
-            return Ok(Optimistic::Conflict {
+            return Ok(ApprovalCheck::Finished(Optimistic::Conflict {
                 expected: ready.row_version(),
                 actual: header.row_version,
-            });
+            }));
         }
         if breaks_separation_of_duties(ready.creator(), ready.editors(), approver, policy) {
             return Err(RecipeError::ApproverEditedDraft {
@@ -156,7 +170,18 @@ impl Recipe {
                 login: approver.login.clone(),
             });
         }
-        let approved = header.id;
+        Ok(ApprovalCheck::Proceed {
+            approved: header.id,
+            state,
+        })
+    }
+
+    /// Set the approved state and retire the other approved version. Return the retired identifier.
+    fn retire_others(
+        &mut self,
+        approved: RecipeVersionId,
+        approved_state: VersionState,
+    ) -> Option<RecipeVersionId> {
         let mut retired = None;
         for other in &mut self.versions {
             if other.id == approved {
@@ -166,11 +191,35 @@ impl Recipe {
                 retired = Some(other.id);
             }
         }
-        Ok(Optimistic::Applied(ApprovalOutcome::Approved {
-            approved,
-            retired,
-        }))
+        retired
     }
+}
+
+/// The result of the checks of an approval.
+///
+/// The type solves one problem: a check ends the approval early with a value, or lets it go on.
+enum ApprovalCheck {
+    /// The approval ends with this value and changes nothing.
+    Finished(Optimistic<ApprovalOutcome>),
+    /// Every check passed. The version takes the new state.
+    Proceed {
+        approved: RecipeVersionId,
+        state: VersionState,
+    },
+}
+
+/// Return the value of a replay or of a stale row version of the request, if there is one.
+fn replay_or_conflict(
+    header: &VersionHeader,
+    expected_row_version: i64,
+) -> Option<Optimistic<ApprovalOutcome>> {
+    if is_replay(header, expected_row_version) {
+        return Some(Optimistic::Applied(ApprovalOutcome::AlreadyApproved));
+    }
+    (header.row_version != expected_row_version).then_some(Optimistic::Conflict {
+        expected: expected_row_version,
+        actual: header.row_version,
+    })
 }
 
 #[cfg(test)]
