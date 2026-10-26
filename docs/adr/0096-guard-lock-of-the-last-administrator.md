@@ -1,6 +1,6 @@
 # ADR-0096: Guard lock of the last Administrator
 
-Status: Accepted
+Status: Accepted. Amended by a note on (c). `run_admin_change` reads the actor row again after it takes the guard lock. Both commands refuse with `E-WEB-002` (`AppError::Forbidden`) when the actor lost the permission or the active flag. The refusal writes only a `forbidden` security event.
 Date: 2026-10-25
 Deciders: project owner
 

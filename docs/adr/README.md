@@ -105,7 +105,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0093](0093-stored-times-and-totals-of-the-alerts-job.md) | Stored times and counter totals of the job `alerts` | Accepted | 2026-10-25 |
 | [0094](0094-trigger-of-the-ci-stack-test.md) | Trigger of the CI stack test | Accepted | 2026-10-25 |
 | [0095](0095-role-grammar-of-the-globals-file.md) | Role grammar of the globals file in the restore test | Accepted | 2026-10-25 |
-| [0096](0096-guard-lock-of-the-last-administrator.md) | Guard lock of the last Administrator | Accepted | 2026-10-25 |
+| [0096](0096-guard-lock-of-the-last-administrator.md) | Guard lock of the last Administrator | Accepted. Amended by a note on (c). `run_admin_change` reads the actor row again after it takes the guard lock. Both commands refuse with `E-WEB-002` (`AppError::Forbidden`) when the actor lost the permission or the active flag. The refusal writes only a `forbidden` security event. | 2026-10-25 |
 | [0097](0097-schema-free-names-in-the-drop-guard.md) | Names without a schema in the drop guard of the audit objects | Accepted | 2026-10-25 |
 | [0098](0098-audit-log-insert-columns-and-qualified-operators.md) | Insert columns of `audit_log` and qualified operators of two definer functions | Accepted | 2026-10-25 |
 | [0099](0099-stream-before-the-replacement-base-backup.md) | Stream before the replacement base backup after a WAL gap | Accepted | 2026-10-26 |
