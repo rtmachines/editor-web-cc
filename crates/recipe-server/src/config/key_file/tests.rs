@@ -69,6 +69,56 @@ fn key_file_ring_faults_keep_their_reason() {
 }
 
 #[test]
+fn key_file_blank_line_after_the_last_key_is_an_empty_line_fault() {
+    for (text, line) in [
+        (format!("{KEY_A}\n\n"), 2),
+        (format!("{KEY_A}\n{KEY_B}\n\n"), 3),
+    ] {
+        let fault = parse_key_file(&text).unwrap_err();
+
+        assert_eq!(
+            fault,
+            KeyFileFault::Ring(KeyRingReason::EmptyLine { line }),
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn key_file_length_counts_characters_and_not_bytes() {
+    // Each multi-byte character has 2 bytes. Only the count of characters decides the length.
+    for letter in ['ł', 'é'] {
+        let at_limit = letter.to_string().repeat(64);
+        let one_under = letter.to_string().repeat(63);
+        let one_over = letter.to_string().repeat(65);
+        let hex_and_letter = format!("{}{letter}", &KEY_A[..62]);
+
+        assert_eq!(
+            parse_key_file(&at_limit).unwrap_err(),
+            KeyFileFault::Ring(KeyRingReason::NotLowerHex { line: 1 }),
+            "{at_limit:?}"
+        );
+        assert_eq!(
+            parse_key_file(&one_under).unwrap_err(),
+            KeyFileFault::Ring(KeyRingReason::Length { line: 1 }),
+            "{one_under:?}"
+        );
+        assert_eq!(
+            parse_key_file(&one_over).unwrap_err(),
+            KeyFileFault::Ring(KeyRingReason::Length { line: 1 }),
+            "{one_over:?}"
+        );
+        // 62 digits and one letter have 63 characters and 64 bytes.
+        assert_eq!(hex_and_letter.len(), 64);
+        assert_eq!(
+            parse_key_file(&hex_and_letter).unwrap_err(),
+            KeyFileFault::Ring(KeyRingReason::Length { line: 1 }),
+            "{hex_and_letter:?}"
+        );
+    }
+}
+
+#[test]
 fn key_file_fault_text_never_holds_the_content() {
     let secret_text = format!("{}\r\n", KEY_A.replace('0', "z"));
     let texts = [
