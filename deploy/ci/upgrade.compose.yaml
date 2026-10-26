@@ -1,0 +1,29 @@
+# The upgrade test keeps the old init script on the existing database volume.
+services:
+  db:
+    volumes:
+      - ${UPGRADE_PREVIOUS_DIR:?}/deploy/db/initdb/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+  # Upgrade step 2. CI invokes each job explicitly, so scheduled jobs cannot overlap.
+  backup:
+    environment:
+      BACKUP_CRONTAB: /dev/null
+  walarchive:
+    environment:
+      WALARCHIVE_CRONTAB: /dev/null
+  # Restore only the copied rollback set with the previous image.
+  upgrade-rollback:
+    image: recipe-pgtools:ci-previous
+    profiles: [upgrade-rollback]
+    command: [restore-test]
+    network_mode: none
+    environment:
+      BACKUP_DIR: /backups/upgrade-rollback
+    volumes:
+      - backups:/backups
+    tmpfs:
+      - /run/pgpass
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5

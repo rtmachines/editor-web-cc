@@ -96,6 +96,63 @@ jobs:
         if: always()
         run: bash deploy/ci/cleanup.sh
 
+  upgrade:
+    name: Upgrade an older volume
+    # Match the Compose stack policy of ADR-0094. Dispatch this job on a branch.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      RECIPE_VERSION: ci-upgrade
+      COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_SUBNET: 172.28.0.0/16
+      COMPOSE_IP_RANGE: 172.28.1.0/24
+      PROXY_ADDRESS: 172.28.0.2
+      SITE_ADDRESS: localhost
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - name: Check out the full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the CI scripts
+        run: bash deploy/ci/check.sh
+      - name: Prepare the disks and secrets
+        run: bash deploy/ci/prepare.sh
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the previous images and check the old backup (step 3)
+        run: bash deploy/ci/upgrade.sh previous
+      - name: Build and load the new server image (step 4)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: recipe-server:ci-upgrade
+          cache-from: type=gha,scope=recipe-server
+      - name: Build and load the new pgtools image (step 4)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/pgtools
+          file: deploy/pgtools/Dockerfile
+          load: true
+          push: false
+          tags: recipe-pgtools:ci-upgrade
+          cache-from: type=gha,scope=recipe-pgtools
+      - name: Upgrade and check both restore paths (steps 5 to 23)
+        run: bash deploy/ci/upgrade.sh upgrade
+      - name: Show upgrade failure diagnostics
+        if: failure()
+        run: bash deploy/ci/diagnostics.sh
+      - name: Release the upgrade project and volumes
+        if: always()
+        run: bash deploy/ci/upgrade.sh cleanup
+
   musl-unwind:
     name: Panic unwind on musl
     runs-on: ubuntu-24.04

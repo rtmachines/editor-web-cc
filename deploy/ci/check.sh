@@ -8,6 +8,7 @@ do
   bash -n "$script"
 done
 python3 -I -B deploy/ci/test_http_probe.py
+python3 -I -B deploy/ci/test_upgrade_checks.py
 python3 -I -B - <<'PY'
 from pathlib import Path
 import re

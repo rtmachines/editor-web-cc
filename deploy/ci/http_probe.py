@@ -53,8 +53,9 @@ def check_redirect(status, headers, destination, body=""):
 
 
 class Client:
-    def __init__(self, state):
+    def __init__(self, state, connection_factory=None):
         self.state = state
+        self.connection_factory = connection_factory or http.client.HTTPSConnection
         self.cookies_path = state / "cookies.json"
         self.cookies = {}
         if self.cookies_path.exists():
@@ -62,7 +63,7 @@ class Client:
         self.context = ssl.create_default_context(cafile=str(state / "root.crt"))
 
     def request(self, path, fields=None):
-        connection = http.client.HTTPSConnection("localhost", 8443, timeout=40, context=self.context)
+        connection = self.connection_factory("localhost", 8443, timeout=40, context=self.context)
         headers = {"Cookie": "; ".join(f"{key}={value}" for key, value in self.cookies.items())}
         body = None
         if fields is not None:
