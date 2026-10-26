@@ -1587,11 +1587,12 @@ DECLARE
     v_object RECORD;
 BEGIN
     FOR v_object IN SELECT * FROM pg_catalog.pg_event_trigger_dropped_objects() LOOP
-        IF v_object.object_identity IN (
-               'public.audit_log', 'public.audit_chain_head', 'public.security_event',
-               'public.audit_canonical(public.audit_log)', 'public.audit_hash_chain()',
-               'public.security_event_purge()', 'public.security_event_guard()',
-               'public.replication_state()')
+        IF v_object.object_type IN ('table', 'function')
+           AND v_object.address_names[pg_catalog.array_upper(v_object.address_names, 1)] IN (
+               'audit_log', 'audit_chain_head', 'security_event',
+               'audit_canonical', 'audit_hash_chain',
+               'security_event_purge', 'security_event_guard',
+               'replication_state')
            AND current_user <> 'audit_owner' THEN
             RAISE EXCEPTION 'audit object % can be dropped only by audit_owner',
                 v_object.object_identity USING ERRCODE = 'insufficient_privilege';
@@ -1630,7 +1631,9 @@ No role `pg_isready` exists, and `01-roles.sh` never creates one. The probe ends
 
 A concurrent index on an audit object is a runbook procedure, not a migration. A migration with `CREATE INDEX CONCURRENTLY` holds that one statement only (section 8), so it cannot run the five steps. The operator connects as `recipe_migrator` and runs the five steps in one `psql` session, with `CREATE INDEX CONCURRENTLY` as step 3 (`reliability.md` 7.10). The next migration records the index with `CREATE INDEX IF NOT EXISTS` as step 3 of the five steps.
 
-Residual risk: the migrator credential can still run `SET ROLE audit_owner`. With that role it also gets the read rights of `pg_read_all_stats` (ADR-0069). The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose a changed row when the later hashes and the head stay unchanged. They do not expose every rewrite, and ADR-0022 and ADR-0086 name the limits. A full rewrite with recomputed hashes and a new head stays undetectable without an off-host copy. A restore from backup also re-creates the roles from the globals dump of `reliability.md` section 7.7. That dump holds no password, so the restore sets the passwords from the secret files (ADR-0033). The event trigger `audit_objects_dropped` stops a drop of an audit object by every role except `audit_owner`, also by the owner of `public` (ADR-0034).
+Residual risk: the migrator credential can still run `SET ROLE audit_owner`. With that role it also gets the read rights of `pg_read_all_stats` (ADR-0069). The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose a changed row when the later hashes and the head stay unchanged. They do not expose every rewrite, and ADR-0022 and ADR-0086 name the limits. A full rewrite with recomputed hashes and a new head stays undetectable without an off-host copy. A restore from backup also re-creates the roles from the globals dump of `reliability.md` section 7.7. That dump holds no password, so the restore sets the passwords from the secret files (ADR-0033). The event trigger `audit_objects_dropped` stops a drop of an audit object by every role except `audit_owner`. It compares the object type and the bare name, so a rename of `public` no longer bypasses it (ADR-0034, ADR-0097).
+
+A rename of `public` stays possible for `recipe_migrator`. After the rename, the migrator can create a new schema `public` with a look-alike `audit_log` that has no trigger. The application then writes new entries to that table, and the nightly check reads it. The real history stays in the renamed schema. This path adds no authority beyond `SET ROLE audit_owner`, which the migrator already has (ADR-0097).
 
 ### 5.2 Grants (`0003_grants.sql`, runs as `recipe_migrator`)
 
