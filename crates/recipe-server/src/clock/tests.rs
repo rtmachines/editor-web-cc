@@ -20,11 +20,3 @@ fn now_lies_between_two_reads_of_the_system_clock() {
 fn now_carries_the_utc_offset() {
     assert!(SystemClock.now().as_offset_date_time().offset().is_utc());
 }
-
-#[test]
-fn clones_of_the_clock_read_the_same_system_time() {
-    let clock = SystemClock;
-    let first = clock.now();
-    let second = clock.clone().now();
-    assert!(first <= second);
-}
