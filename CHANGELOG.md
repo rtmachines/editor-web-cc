@@ -17,6 +17,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Nightly `cargo audit` workflow.
 - ADR-0023 for the scope and the location of the STE lint.
 - `tools/ste-lint/`, a copy of the script `ste-lint.py` under the MIT license.
+- The file `LICENSE` with the MIT license for the project.
 - ADR-0024 with the codes `E-PLT-021 DuplicateMemberName` and `E-RCP-054 S7AddressWidthMismatch`.
 - ADR-0025 for the parse reasons of value objects without an own error code.
 - ADR-0026 with the platform ranges of `DATE` and `DATE_AND_TIME`.
