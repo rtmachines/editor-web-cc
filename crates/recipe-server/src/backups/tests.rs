@@ -177,6 +177,33 @@ async fn a_directory_with_the_name_of_a_manifest_is_not_a_set() {
     assert_eq!(newest, None);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_with_the_name_of_a_manifest_is_not_a_set() {
+    use std::os::unix::fs::symlink;
+
+    let sandbox = Sandbox::new();
+    // The target is a real manifest in a sub-directory. The adapter does not scan sub-directories.
+    fs::create_dir(sandbox.0.join("elsewhere")).unwrap();
+    sandbox.file_at("elsewhere/recipe_20261023_0200.dump.sha256", 2_000_000);
+    symlink(
+        sandbox.0.join("elsewhere/recipe_20261023_0200.dump.sha256"),
+        sandbox.0.join("recipe_20261023_0200.dump.sha256"),
+    )
+    .unwrap();
+
+    let only_link = sandbox.adapter().newest_complete_set().await.unwrap();
+
+    assert_eq!(only_link, None);
+
+    // A link does not hide an older real set and does not give its own time.
+    sandbox.complete_set("recipe_20261022_0200", 1_000_000);
+
+    let with_real_set = sandbox.adapter().newest_complete_set().await.unwrap();
+
+    assert_eq!(with_real_set, Some(timestamp(1_000_000)));
+}
+
 #[tokio::test]
 async fn a_missing_directory_is_a_fault_and_not_an_empty_answer() {
     let sandbox = Sandbox::new();
@@ -237,7 +264,14 @@ fn the_fault_text_names_no_path() {
         .block_on(FileBackupDirectory::new(missing).newest_complete_set())
         .unwrap_err();
 
+    // The `Display` text is a fixed sentence. The `Debug` text shows the wrapped error.
+    // It shows the marker when the adapter puts the path into that error.
+    assert!(matches!(fault, BackupFault::Unreadable(_)), "got {fault:?}");
     assert!(!fault.to_string().contains("secret-directory-name"));
+    assert!(
+        !format!("{fault:?}").contains("secret-directory-name"),
+        "got {fault:?}"
+    );
 }
 
 #[test]
