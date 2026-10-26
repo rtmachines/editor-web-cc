@@ -61,9 +61,12 @@ Use this procedure to change the members of a type. You cannot edit a type that 
 
 1. On the page of the machine, select **Open the UDT types**. Select the name of the type.
 2. On the page of the type, select **New revision**. The page **New revision of ST_Zone** opens.
-3. The form holds the members of the latest revision. It has no field **Type name**, because the name stays the same.
-4. Change a name or a type expression. Select **Add a member** for more rows. Clear both fields of a row that you do not want.
-5. Select **Create revision**.
+3. Change a name or a type expression.
+4. Select **Add a member** for more rows.
+5. Clear both fields of a row that you do not want.
+6. Select **Create revision**.
+
+The form holds the members of the latest revision. It has no field **Type name**, because the name stays the same.
 
 The page **Type ST_Zone@2** opens. Its section **Supersedes** links to the revision before it.
 

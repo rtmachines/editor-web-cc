@@ -35,29 +35,35 @@ Without the permission, the parameter page shows the values and the limits as re
 
 ### Open the draft
 
-1. Choose **Recipes** in the top bar. Find the recipe in the list. Use the field **Search** and the button **Show** to narrow the list.
-2. Look at the column **Draft** of the recipe. If it shows a version number, open that number.
-3. If the column shows **none**, open the reference number of the recipe. Then choose **New version**.
-4. Choose a **Base version**, write a **Change note**, and choose **Create version**.
+1. Choose **Recipes** in the top bar.
+2. Find the recipe in the list. Use the field **Search** and the button **Show** to narrow the list.
+3. Look at the column **Draft** of the recipe. If it shows a version number, open that number.
+4. If the column shows **none**, open the reference number of the recipe. Then choose **New version**.
+5. Choose a **Base version**, write a **Change note**, and choose **Create version**.
 
-The editor opens the new draft after step 4 (`api.md` section 2.5). A recipe holds one draft at a time. A second draft gives `409 E-RCP-011`. The message names the number of the existing draft. Open that draft.
+The editor opens the new draft after step 5 (`api.md` section 2.5). A recipe holds one draft at a time. A second draft gives `409 E-RCP-011`. The message names the number of the existing draft. Open that draft.
 
 The page of the version shows the badge **Draft** at the top.
 
 ### Find the parameter
 
-1. Look at the table **Parameters**. It shows the columns **Tag**, **Name**, **Type**, **Unit**, and **State**. A platform with PLC addresses adds the column **PLC address**.
-2. If the draft has many parameters, the table shows one unit. Use the links above the table to change the unit. Each link names a unit and its number of parameters.
-3. Open the tag of the parameter.
+1. Look at the table **Parameters**.
+2. If the draft has many parameters, the table shows one unit.
+3. Use the links above the table to change the unit.
+4. Open the tag of the parameter.
+
+The table shows the columns **Tag**, **Name**, **Type**, **Unit**, and **State**. A platform with PLC addresses adds the column **PLC address**. Each link above the table names a unit and its number of parameters.
 
 The page of the parameter opens. Its title is **Parameter** and the tag. It shows the definition and the form to edit it.
 
 ### Change a value or a limit
 
-1. Find the table **Values and process limits**. Each row is one leaf of the type. The columns are **Path**, **Value**, **Minimum**, **Maximum**, **Maximum length**, and **Type**.
+1. Find the table **Values and process limits**.
 2. Write the new value in the column **Value** of the row. For a BOOL leaf, choose **TRUE** or **FALSE**.
 3. To change a process limit, write the new number in the column **Minimum** or **Maximum** of the same row.
 4. For a text leaf, change **Maximum length**.
+
+Each row of the table is one leaf of the type. The columns are **Path**, **Value**, **Minimum**, **Maximum**, **Maximum length**, and **Type**.
 
 Follow the hint above the table for the form of a number or of a time. A number uses a dot, for example `1.5`. A duration or an instant uses an IEC literal, for example `T#1s` (`domain-model.md` section 2.1).
 

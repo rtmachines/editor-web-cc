@@ -32,8 +32,9 @@ Use this procedure when you compare a version with the approved version or with 
 
 1. Open **Recipes** in the main menu. Open your recipe.
 2. Find the table **Versions**. Select the number of the version in the column **Version**.
-3. Find the row of links under the version data. Select **Compare with the approved version N** or **Compare with the base version N**.
-4. Read the diff page. The title names the new version, the recipe, and the old version.
+3. Find the row of links under the version data.
+4. Select **Compare with the approved version N** or **Compare with the base version N**.
+5. Read the diff page. The title names the new version, the recipe, and the old version.
 
 The version page shows a link only when that version exists and differs from the shown version. A version that has no base and no other approved version shows no compare link. Then use procedure B.
 
@@ -56,9 +57,11 @@ Use this procedure when you do not know which version holds a change.
 
 1. Open the recipe page. Select **History**. The version page has the same link.
 2. Read the table **Entries of the history**. The newest entry stands first.
-3. Find the entries with the object **Version** and an action such as **Version created** or **Version approved**. The object shows the version number.
+3. Find the entries with the object **Version** and an action such as **Version created** or **Version approved**.
 4. Select **Older entries** to read older entries. Select **Newest entries** to go back.
 5. Use the numbers in procedure B.
+
+The object of an entry shows the version number.
 
 The history shows the time, the user, the action, and the object. It does not show the old and new values. A page holds at most 100 entries ([`reliability.md`](../architecture/reliability.md) section 7.11). The text **No older entries.** replaces the link **Older entries** on the last page.
 
@@ -66,10 +69,12 @@ The history shows the time, the user, the action, and the object. It does not sh
 
 The page has a summary list and one table for each section that holds a change. A section without a change does not appear.
 
-1. Read the list under **Summary of the changes**. Each item names a section and gives the number of parameters, and for some sections the number of rows.
-2. Select the name of a section. The link goes to the table on this page or to the first page of that section.
+1. Read the list under **Summary of the changes**.
+2. Select the name of a section.
 3. In each table, read the old side and the new side in the same row.
 4. Read the last column **Change**. It shows the state of the row.
+
+Each item of the summary names a section and gives the number of parameters, and for some sections the number of rows. The link of a section goes to the table on this page or to the first page of that section.
 
 The summary ends with the count **Parameters without a change**. If the two versions have the same parameters, the page shows the text "Versions N and M have the same parameters."
 

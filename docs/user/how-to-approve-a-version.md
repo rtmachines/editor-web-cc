@@ -25,7 +25,7 @@ This guide links to the rules and does not repeat them.
 ## Prerequisites
 
 - Your role is Administrator or ProcessEngineer. These roles have the permission `VersionApprove`.
-- You did not create the draft and you did not edit it. By default, the person who changed a draft cannot approve it ([ADR-0022](../adr/0022-approval-policy.md)).
+- You did not create the draft and you did not edit it. By default, the person who changed a draft cannot approve it. The setting `approval.separation_of_duties` controls this rule ([ADR-0022](../adr/0022-approval-policy.md)).
 - The draft has at least one parameter.
 - The recipe is not deleted.
 
@@ -33,11 +33,19 @@ This guide links to the rules and does not repeat them.
 
 1. Choose **Recipes** in the main navigation. Open the recipe. Open the draft in the table **Versions**.
 2. Choose the link **Approve version 4**. The number is the number of your draft. The approval page opens.
-3. Look at the top of the page. If the box **The approval is not possible** shows, go to the section "Errors on this path". The page then has no form.
-4. Read the section **Summary of the changes** and the sections below it. The editor compares the draft with the current approved version. The section **Process limits** highlights each changed limit. See [how to compare two versions](how-to-compare-two-versions.md).
-5. Read the notice in the form **Approval**. It names the approved version that the approval retires. For a first approval, it says that every parameter is new.
-6. Look for the group **Outdated parameters**. If it shows, decide what to do with the outdated parameters. See "Outdated parameters" below.
-7. Choose **Approve version 4** once. The server processes the request and the version page opens.
+3. Look at the top of the page.
+4. If the box **The approval is not possible** shows, go to the section "Errors on this path".
+5. Read the section **Summary of the changes** and the sections below it.
+6. Read the notice in the form **Approval**.
+7. Look for the group **Outdated parameters**.
+8. If it shows, decide what to do with the outdated parameters. See "Outdated parameters" below.
+9. Choose **Approve version 4** once. The server processes the request and the version page opens.
+
+If the box **The approval is not possible** shows, the page has no form.
+
+The editor compares the draft with the current approved version. The section **Process limits** highlights each changed limit. See [how to compare two versions](how-to-compare-two-versions.md).
+
+The notice in the form **Approval** names the approved version that the approval retires. For a first approval, it says that every parameter is new.
 
 You can choose **Go to the approval form** in the summary to jump to the form.
 
