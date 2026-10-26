@@ -19,6 +19,7 @@ COPY --chmod=0755 bin/ /usr/local/bin/
 RUN mkdir -p -m 0755 /etc/pgtools
 COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/
 COPY --chmod=0644 restore-code.sql restore-code.expected /etc/pgtools/
+COPY --chmod=0644 lib/globals-grammar.sh /etc/pgtools/
 
 # The base image sets the entry of the database. This image runs a script of bin/ instead.
 ENTRYPOINT []

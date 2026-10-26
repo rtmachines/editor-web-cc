@@ -63,8 +63,7 @@ case_restore_globals_keys() {
     "\\restrict $RESTRICT_KEY" "$sql" "\\unrestrict ${RESTRICT_KEY,,}"
 }
 
-# A comment or blank line outside the pair holds no control character, except a tab. psql could
-# read such a character as more than a comment. The lines inside the pair are plain SQL.
+# Every line holds no control character except a tab. PostgreSQL can end a comment at a CR byte.
 case_restore_globals_control_characters() {
   local open="\\restrict $RESTRICT_KEY" close="\\unrestrict $RESTRICT_KEY" sql='CREATE ROLE recipe_app;'
   local text="the globals file holds a control character"
@@ -79,6 +78,85 @@ case_restore_globals_control_characters() {
   write_manifest "$RESTORE_NAME"
   restore_run
   expect_eq "globals comment with a tab: exit code" "$RC" 0
+  globals_nul_case globals-control-nul-between $'\\restrict key\n-- note' $'\n\\unrestrict key\n' 2
+  globals_nul_case globals-control-nul-at-end $'\\restrict key\n\\unrestrict key\n' '' 3
+}
+
+# Bash cannot store a NUL byte in a variable. Write that byte directly into the file.
+globals_nul_case() {
+  local name=$1 before
+  new_restore_case "$name"
+  printf '%s\0%s' "$2" "$3" >"$B/globals_$RESTORE_NAME.sql"
+  write_manifest "$RESTORE_NAME"
+  before=$(set_listing)
+  restore_run
+  restore_failed_checks "$name" "$before"
+  expect_ok "$name: the ERROR line names the control character" \
+    error_has 'the globals file holds a control character'
+  expect_ok "$name: the ERROR line names the line" error_has "line $4"
+  expect_eq "$name: no tool ran" "$(wc -c <"$CASE/stub/log")" 0
+}
+
+# Each form of ADR-0095 (b) must reach the restore steps.
+globals_pass_case() {
+  local name=$1
+  shift
+  new_restore_case "$name"
+  printf '%s\n' "\\restrict $RESTRICT_KEY" "$@" "\\unrestrict $RESTRICT_KEY" \
+    >"$B/globals_$RESTORE_NAME.sql"
+  write_manifest "$RESTORE_NAME"
+  restore_run
+  expect_eq "$name: exit code" "$RC" 0
+  expect_eq "$name: the globals file ran" "$(event_count globals)" 1
+}
+
+case_restore_globals_grammar_accepts() {
+  globals_pass_case globals-form-set 'SET default_transaction_read_only = off;' \
+    "SET client_encoding = 'UTF8';" 'SET standard_conforming_strings = on;'
+  globals_pass_case globals-form-create 'CREATE ROLE recipe_app;'
+  globals_pass_case globals-form-attributes \
+    'ALTER ROLE postgres WITH SUPERUSER INHERIT CREATEROLE CREATEDB LOGIN REPLICATION BYPASSRLS;' \
+    'ALTER ROLE audit_owner WITH NOSUPERUSER NOINHERIT NOCREATEROLE NOCREATEDB NOLOGIN NOREPLICATION NOBYPASSRLS;'
+  globals_pass_case globals-form-setting "ALTER ROLE recipe_app SET log_error_verbosity TO 'terse';" \
+    "ALTER ROLE recipe_app SET log_parameter_max_length TO '0';"
+  globals_pass_case globals-form-grant 'GRANT audit_owner TO recipe_migrator;' \
+    'GRANT audit_owner TO recipe_migrator WITH INHERIT FALSE GRANTED BY postgres;' \
+    'GRANT pg_read_all_data TO recipe_backup GRANTED BY postgres;' \
+    'GRANT pg_read_all_stats TO audit_owner WITH ADMIN OPTION, INHERIT TRUE, SET FALSE;' \
+    'GRANT audit_owner TO recipe_migrator WITH SET TRUE;'
+}
+
+# Every bad statement occupies line 3. The error must identify that line without its text.
+globals_grammar_case() {
+  local name=$1
+  shift
+  globals_case "$name" 'the globals file holds a statement outside the role grammar' \
+    "\\restrict $RESTRICT_KEY" '-- Roles' "$@" "\\unrestrict $RESTRICT_KEY"
+  expect_ok "$name: the ERROR line names line 3" error_has 'line 3'
+}
+
+case_restore_globals_grammar_rejects() {
+  globals_grammar_case globals-copy "COPY (SELECT 1) TO PROGRAM 'id';"
+  globals_grammar_case globals-do 'DO $$ BEGIN NULL; END $$;'
+  globals_grammar_case globals-function 'CREATE FUNCTION evil() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;'
+  globals_grammar_case globals-preload "SET session_preload_libraries = 'x';"
+  globals_grammar_case globals-role-preload "ALTER ROLE recipe_app SET session_preload_libraries TO 'x';"
+  globals_grammar_case globals-password "ALTER ROLE recipe_app PASSWORD 'x';"
+  globals_grammar_case globals-grant-option 'GRANT audit_owner TO recipe_migrator WITH UNKNOWN TRUE;'
+  globals_grammar_case globals-setting-quote "ALTER ROLE recipe_app SET log_error_verbosity TO 'ter''se';"
+  globals_grammar_case globals-two-statements 'CREATE ROLE recipe_app; CREATE ROLE evil;'
+  globals_grammar_case globals-trailing-text 'CREATE ROLE recipe_app; note'
+  globals_grammar_case globals-split-statement 'CREATE ROLE' 'recipe_app;'
+  globals_grammar_case globals-quoted-role 'CREATE ROLE "recipe_app";'
+  globals_grammar_case globals-lower-case 'create ROLE recipe_app;'
+  globals_grammar_case globals-login-password "ALTER ROLE recipe_app WITH LOGIN PASSWORD 'x';"
+  globals_grammar_case globals-hyphen-role 'CREATE ROLE recipe-app;'
+  globals_grammar_case globals-program-grant 'GRANT pg_execute_server_program TO recipe_app;'
+  globals_case globals-control-cr-between 'the globals file holds a control character' \
+    "\\restrict $RESTRICT_KEY" "-- note$(printf '\r')COPY (SELECT 1) TO PROGRAM 'id';" \
+    "\\unrestrict $RESTRICT_KEY"
+  globals_case globals-control-between 'the globals file holds a control character' \
+    "\\restrict $RESTRICT_KEY" $'-- note\001' "\\unrestrict $RESTRICT_KEY"
 }
 
 # One pair, in the right order, with the SQL between the two lines and nowhere else.

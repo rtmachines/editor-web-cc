@@ -8,7 +8,7 @@
 # Steps (the numbers are the steps of ADR-0067):
 #   1. The marker, the lock, and the newest complete set (ADR-0074 (c)). sha256sum -c --strict
 #      on the manifest. A mismatch stops the test before any tool runs. The counts file and the
-#      globals file pass their gates (the pair \restrict and \unrestrict, and no other meta-command).
+#      globals file pass their gates, including the role grammar of ADR-0095.
 #   2. Each FUNCTION, TRIGGER, and EVENT TRIGGER entry of pg_restore --list names a line of
 #      restore-code.expected (ADR-0076 (b)). An unknown entry stops the test. An entry of the
 #      kind PROCEDURE, AGGREGATE, MATERIALIZED VIEW, or OPERATOR stops it too (ADR-0078 (b)).
@@ -32,6 +32,7 @@
 #   BACKUP_DIR          the backup disk, default /backups
 #   BACKUP_PGPASS_DIR   the tmpfs for the secret files, default /run/pgpass
 #   RESTORE_CODE_DIR    the directory of restore-code.sql and restore-code.expected, default /etc/pgtools
+#   RESTORE_GLOBALS_DIR the directory of globals-grammar.sh, default /etc/pgtools
 #   PGDATABASE          the name of the database in the dump, default recipe
 set -euo pipefail
 umask 077
@@ -59,12 +60,6 @@ CHECKED_PREFIX='^[0-9]+; [0-9]+ [0-9]+ (FUNCTION|TRIGGER|EVENT TRIGGER) '
 ENTRY_GRAMMAR='^[0-9]+; [0-9]+ [0-9]+ (FUNCTION|TRIGGER|EVENT TRIGGER) (.+) [^ ]+$'
 REFUSED_GRAMMAR='^[0-9]+; [0-9]+ [0-9]+ (PROCEDURE|AGGREGATE|MATERIALIZED VIEW|OPERATOR) '
 COUNTS_GRAMMAR='^[^|]+\|[0-9]+$'
-# pg_dumpall writes "\restrict KEY" and "\unrestrict KEY". The key has the characters of
-# restrict_chars in src/bin/pg_dump/dumputils.c (REL_16_STABLE), and valid_restrict_key
-# refuses an empty key.
-RESTRICT_GRAMMAR='^\\restrict ([A-Za-z0-9]+)$'
-UNRESTRICT_GRAMMAR='^\\unrestrict ([A-Za-z0-9]+)$'
-COMMENT_OR_BLANK_GRAMMAR='^([[:space:]]*|--.*)$'
 ROLE_GRAMMAR='^[a-z_][a-z0-9_]*$'
 PRE_DATA_KINDS='^(FUNCTION|CHECK|GENERATED)\|'
 ALL_KINDS='^.'
@@ -267,28 +262,16 @@ check_counts() {
 # It accepts one pair \restrict KEY and \unrestrict KEY of pg_dumpall (pg_dumpall.c, REL_16_STABLE).
 # The pair has the same key. \restrict is the first line that is no comment and no blank line.
 # \unrestrict is the last such line, and the SQL stands between them.
-# Outside the pair, a line holds no control character except a tab.
-# The gate does not refuse plain SQL between the two lines.
-# That SQL runs as the scratch superuser of the private scratch cluster.
+# The backslash branch precedes the grammar, so each meta-command keeps its error message.
+# The control-byte check precedes comments, also between the pair. Only the role grammar permits SQL.
 check_globals() {
-  local line key="" phase=0 pair_fault="the globals file has no valid restrict pair"
-  while IFS= read -r line || [ -n "$line" ]; do
-    if [[ $line =~ $RESTRICT_GRAMMAR ]]; then
-      [ "$phase" -eq 0 ] || fail "$pair_fault"
-      key=${BASH_REMATCH[1]}
-      phase=1
-    elif [[ $line =~ $UNRESTRICT_GRAMMAR ]]; then
-      { [ "$phase" -eq 1 ] && [ "${BASH_REMATCH[1]}" = "$key" ]; } || fail "$pair_fault"
-      phase=2
-    elif [[ $line == *\\* ]]; then
-      fail "the globals file holds a psql meta-command"
-    elif [ "$phase" -ne 1 ] && [[ ${line//$'\t'/} == *[[:cntrl:]]* ]]; then
-      fail "the globals file holds a control character"
-    elif [[ ! $line =~ $COMMENT_OR_BLANK_GRAMMAR ]]; then
-      [ "$phase" -eq 1 ] || fail "$pair_fault"
-    fi
-  done <"$globals_path"
-  [ "$phase" -eq 2 ] || fail "$pair_fault"
+  local report
+  # shellcheck source=../lib/globals-grammar.sh
+  source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/globals-grammar.sh" \
+    || fail "cannot load the globals grammar"
+  if ! report=$(check_globals_file "$globals_path" 2>&1); then
+    fail "$(clean "${report#ERROR: }")"
+  fi
 }
 
 # check_names: step 2. Each function, trigger, and event trigger of the dump is in the file.

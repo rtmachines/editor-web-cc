@@ -97,7 +97,8 @@ new_restore_case() {
 
 # restore_run [VAR=value ...]: run restore-test with the stubs and the code files of the case.
 restore_run() {
-  run_script "RESTORE_CODE_DIR=$CASE/code" PGDATABASE=recipe "$@" -- restore-test
+  run_script "RESTORE_CODE_DIR=$CASE/code" "RESTORE_GLOBALS_DIR=$HERE/../lib" \
+    PGDATABASE=recipe "$@" -- restore-test
 }
 
 # set_listing: the listing of the backup directory without the scratch directory.
