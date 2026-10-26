@@ -13,14 +13,23 @@
 //! - the `*` of `count(*)`, `t.*`, and `SELECT *`
 //! - each group `OPERATOR(pg_catalog.…)`
 //!
-//! The words `IN`, `LIKE`, `ILIKE`, `BETWEEN`, and `SIMILAR` count as operators, because the
-//! parser resolves them to an operator through the `search_path`. `IS DISTINCT FROM` is no hit,
-//! because the parser takes the equality operator of the type, not of the `search_path`.
+//! These words and phrases count as operators, because the parser resolves each one to an operator
+//! through the `search_path`:
+//!
+//! - `IN`, `LIKE`, `ILIKE`, `BETWEEN`, and `SIMILAR`
+//! - `IS DISTINCT FROM` and `IS NOT DISTINCT FROM`, which look up `=`
+//! - `NULLIF(a, b)`, which looks up `=`
+//! - `CASE x WHEN`, the simple form of `CASE`, which looks up `=`. A `CASE` that starts with
+//!   `WHEN` is no hit. A comment between `CASE` and the next word makes a false hit.
+//!
+//! `GROUP BY`, `ORDER BY`, `DISTINCT`, `UNION`, `GREATEST`, and `min()` use the default btree
+//! operator class of the type, not a name in the `search_path`. They are no hit. The qualified
+//! form of `ORDER BY x USING <op>` is out of scope, because the `<op>` is an operator hit.
 
 const OPERATOR_CHARACTERS: &str = "+-*/<>=~!@#%^&|`?";
 /// A character in an operator that stops the removal of a trailing `+` or `-`.
 const SPECIAL_CHARACTERS: &str = "~!@#%^&|`?";
-const WORD_OPERATORS: [&str; 5] = ["in", "like", "ilike", "between", "similar"];
+const WORD_OPERATORS: [&str; 6] = ["in", "like", "ilike", "between", "similar", "nullif"];
 /// A word that opens a list of `name = value` items.
 const ASSIGNMENT_WORDS: [&str; 2] = ["set", "using"];
 /// A word that ends such a list.
@@ -47,6 +56,8 @@ struct Scan {
     line: usize,
     hits: Vec<String>,
     previous: Previous,
+    /// The word before `previous`, when `previous` is a word.
+    word_before: Option<String>,
     depth: usize,
     /// True inside `SET` or `USING`, as long as no list-end word came.
     in_list: bool,
@@ -241,6 +252,26 @@ impl Scan {
         true
     }
 
+    /// The hit of the word `DISTINCT` after `IS` or `IS NOT`. `SELECT DISTINCT` is no hit.
+    fn distinct_hit(&self) -> Option<&'static str> {
+        match (&self.previous, &self.word_before) {
+            (Previous::Word(word), _) if word == "is" => Some("IS DISTINCT FROM"),
+            (Previous::Word(word), Some(before)) if word == "not" && before == "is" => {
+                Some("IS NOT DISTINCT FROM")
+            }
+            _ => None,
+        }
+    }
+
+    /// True when the word after the cursor is not `WHEN`. Then `CASE` has an operand.
+    fn case_has_operand(&mut self) -> bool {
+        let saved = (self.position, self.line);
+        self.skip_white_space();
+        let next = self.read_word();
+        (self.position, self.line) = saved;
+        !next.eq_ignore_ascii_case("when")
+    }
+
     fn word(&mut self) {
         let word = self.read_word();
         let lower = word.to_ascii_lowercase();
@@ -250,6 +281,15 @@ impl Scan {
         }
         if WORD_OPERATORS.contains(&lower.as_str()) {
             self.hit(&word.to_ascii_uppercase());
+        }
+        if lower == "distinct"
+            && let Some(what) = self.distinct_hit()
+        {
+            self.hit(what);
+        }
+        let after_end = self.previous == Previous::Word("end".to_owned());
+        if lower == "case" && !after_end && self.case_has_operand() {
+            self.hit("CASE x WHEN");
         }
         if lower == "diagnostics" {
             self.in_diagnostics = true;
@@ -263,6 +303,10 @@ impl Scan {
             self.in_list = false;
             self.assignment_next = false;
         }
+        self.word_before = match &self.previous {
+            Previous::Word(before) => Some(before.clone()),
+            _ => None,
+        };
         self.previous = Previous::Word(lower);
     }
 
@@ -410,12 +454,13 @@ pub fn unqualified_operators(body: &str) -> Vec<String> {
     scan.hits
 }
 
-/// The body of the first `CREATE FUNCTION <name>(` of a migration text: the text between the
-/// first two `$$` after it. This is the `prosrc` of the function.
+/// The body of the first `CREATE FUNCTION <name>(` or `CREATE OR REPLACE FUNCTION <name>(` of a
+/// migration text: the text between the first two `$$` after it. This is the `prosrc` of the
+/// function.
 pub fn function_body(migration: &str, name: &str) -> String {
-    let header = format!("CREATE FUNCTION {name}(");
-    let start = migration
-        .find(&header)
+    let start = ["CREATE FUNCTION", "CREATE OR REPLACE FUNCTION"]
+        .iter()
+        .find_map(|keywords| migration.find(&format!("{keywords} {name}(")))
         .expect("the text holds the function");
     let after = migration.get(start..).unwrap();
     let open = after.find("$$").unwrap().saturating_add(2);
@@ -437,15 +482,28 @@ mod tests {
     }
 
     #[test]
-    fn the_scanner_finds_no_hit_in_replication_state_and_security_event_guard() {
+    fn the_scanner_finds_no_hit_in_replication_state_and_the_guard_of_0007() {
         let operations = migration("0006_operations.sql");
-        let guard = migration("0005_security_event_guard.sql");
+        let replaced = migration("0007_audit_definer_operators.sql");
 
         let state = unqualified_operators(&function_body(&operations, "replication_state"));
-        let trigger = unqualified_operators(&function_body(&guard, "security_event_guard"));
+        let trigger = unqualified_operators(&function_body(&replaced, "security_event_guard"));
 
         assert_eq!(state, Vec::<String>::new());
         assert_eq!(trigger, Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_scanner_finds_the_two_distinct_forms_of_the_guard_of_0005() {
+        let guard = migration("0005_security_event_guard.sql");
+
+        let hits = unqualified_operators(&function_body(&guard, "security_event_guard"));
+
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        assert!(
+            hits.iter().all(|hit| hit.starts_with("IS DISTINCT FROM ")),
+            "{hits:?}"
+        );
     }
 
     #[test]
@@ -484,6 +542,15 @@ mod tests {
             ),
             ("x := a OPERATOR(+) b;", "OPERATOR(+) at line 1"),
             ("x := a=-b;", "= at line 1"),
+            ("x := a IS DISTINCT FROM b;", "IS DISTINCT FROM at line 1"),
+            (
+                "x := a\n  is   not\n distinct from b;",
+                "IS NOT DISTINCT FROM at line 3",
+            ),
+            ("x := NULLIF(a, b);", "NULLIF at line 1"),
+            ("x := nullif (a, b);", "NULLIF at line 1"),
+            ("x := CASE a WHEN 1 THEN 2 END;", "CASE x WHEN at line 1"),
+            ("x := CASE\n(a) WHEN 1 THEN 2 END;", "CASE x WHEN at line 1"),
         ];
 
         for (body, expected) in cases {
@@ -524,8 +591,11 @@ mod tests {
             "SELECT count(*), t.* FROM t;",
             "SELECT * FROM t;",
             "x := a OPERATOR(pg_catalog.*) 2 OPERATOR ( pg_catalog.+ ) 1e-3;",
-            "x := a IS DISTINCT FROM b;",
             "x := 1..2;",
+            "SELECT DISTINCT a FROM t;",
+            "x := CASE WHEN a OPERATOR(pg_catalog.=) b THEN 1 END;",
+            "CASE\n WHEN a THEN NULL; END CASE;",
+            "x := a IS NOT NULL;",
         ];
 
         for body in skipped {

@@ -244,4 +244,4 @@ This file records the notable changes of the recipe editor. The format follows [
 - (F4) Every use case checks the permission first. `Logout` and `ChangeOwnPassword` now check it as their first statement.
 - (F5) `ChangeOwnPassword` uses two transactions, T1 and T2 (ADR-0035 (b), amended).
 - (F6) The role `recipe_app` gets `INSERT` on eleven columns of `audit_log` in place of the whole table (migration `0008`, ADR-0098). The database sets `id`, `occurred_at`, and the three chain columns. An insert that names another column fails with `42501`.
-- (F7) The `SECURITY DEFINER` functions `audit_hash_chain()` and `security_event_purge()` schema-qualify their operators (migration `0007`, ADR-0098).
+- (F7) The `SECURITY DEFINER` functions `audit_hash_chain()` and `security_event_purge()` schema-qualify their operators (migration `0007`, ADR-0098). The trigger function `security_event_guard()` does the same and replaces `IS DISTINCT FROM` with qualified operators. The operator scan finds `IS [NOT] DISTINCT FROM`, `NULLIF`, and `CASE x WHEN`.

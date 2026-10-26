@@ -1763,7 +1763,7 @@ RESET ROLE;
 REVOKE CREATE ON SCHEMA public FROM audit_owner;
 ```
 
-The function is `SECURITY INVOKER`. A trigger runs its function without an `EXECUTE` check, as `audit_hash_chain` shows. The upsert of the aggregated kinds of section 3.8 still works: the arbiter columns need only `SELECT`, and the `SET` needs only `UPDATE (count)`. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names the function.
+The function is `SECURITY INVOKER`. A trigger runs its function without an `EXECUTE` check, as `audit_hash_chain` shows. `0007_audit_definer_operators.sql` replaces the body with the same results (section 5.6). The upsert of the aggregated kinds of section 3.8 still works: the arbiter columns need only `SELECT`, and the `SET` needs only `UPDATE (count)`. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names the function.
 
 ### 5.5 Operations objects (`0006_operations.sql`)
 
@@ -1804,16 +1804,18 @@ REVOKE CREATE ON SCHEMA public FROM audit_owner;
 
 After `0006`, `audit_owner` owns 8 tables and functions. The guard list of the event trigger `audit_objects_dropped` (section 5.1) names each of them, also the function (ADR-0069 (o)). Only the superuser can replace the guard function (ADR-0069 (p)).
 
-### 5.6 Qualified operators of two definer functions (`0007_audit_definer_operators.sql`)
+### 5.6 Qualified operators of three audit functions (`0007_audit_definer_operators.sql`)
 
-The migration replaces the bodies of `audit_hash_chain()` (section 4.9) and `security_event_purge()` (section 4.12). It runs the five steps of section 5.1 (ADR-0098 (a)). `0002_triggers.sql` shipped, so its text stays.
+The migration replaces the bodies of `audit_hash_chain()` (section 4.9), `security_event_purge()` (section 4.12), and `security_event_guard()` (section 5.4). It runs the five steps of section 5.1 (ADR-0098 (a)). `0002_triggers.sql` shipped, so its text stays.
 
 - Each operator becomes `OPERATOR(pg_catalog.<op>)`. `IN (subquery)` becomes `OPERATOR(pg_catalog.=) ANY (subquery)`.
+- `a IS DISTINCT FROM b` also looks up the operator `=` in the `search_path`. The guard therefore uses `(a IS NULL) OPERATOR(pg_catalog.<>) (b IS NULL) OR COALESCE(a OPERATOR(pg_catalog.<>) b, false)`. The result is the same, also for `NULL`.
 - A type with a normal name gets the schema `pg_catalog`. A type keyword of the SQL standard, such as `BIGINT`, needs no schema.
 - Every `OPERATOR(...)` form has one precedence and groups from left to right. The migration therefore keeps the old grouping with parentheses.
-- Each statement repeats `SECURITY DEFINER` and `SET search_path = pg_catalog, public, pg_temp`. Without them, `CREATE OR REPLACE FUNCTION` resets both.
-- `CREATE OR REPLACE FUNCTION` keeps the owner and the ACL. The results do not change, so no hash of an existing entry changes.
-- A storage test scans the body of every function that `audit_owner` owns and finds no bare operator (ADR-0098 (f)). A second test reads `pg_proc` and finds the same attributes, owner, and ACL (ADR-0098 (g)).
+- The two definer functions repeat `SECURITY DEFINER` and `SET search_path = pg_catalog, public, pg_temp`. Without them, `CREATE OR REPLACE FUNCTION` resets both.
+- `security_event_guard()` stays `SECURITY INVOKER` and repeats the `search_path`.
+- `CREATE OR REPLACE FUNCTION` keeps the owner and the ACL. The results do not change, so no hash of an existing entry changes. The trigger `security_event_guard` keeps its binding.
+- A storage test scans the body of every function that `audit_owner` owns and finds no bare operator (ADR-0098 (f)). A second test reads `pg_proc` of the three functions and finds the same attributes, owner, and ACL (ADR-0098 (g)). A third test shows on a table of values that the `IS DISTINCT FROM` form gives the same result as the old text, also for `NULL`.
 
 ```sql
 -- Step 1.
@@ -1864,6 +1866,27 @@ BEGIN
         LIMIT 5000);
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
     RETURN v_deleted;
+END;
+$$;
+CREATE OR REPLACE FUNCTION security_event_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    -- The old text used IS DISTINCT FROM, which looks up the operator = in the search_path.
+    -- The form (a IS NULL) <> (b IS NULL) OR COALESCE(a <> b, false) gives the same result,
+    -- also for NULL. It uses the operator <> of pg_catalog only.
+    IF ((NEW.count IS NULL) OPERATOR(pg_catalog.<>) ((OLD.count OPERATOR(pg_catalog.+) 1) IS NULL))
+       OR COALESCE(NEW.count OPERATOR(pg_catalog.<>) (OLD.count OPERATOR(pg_catalog.+) 1), false)
+       OR (((pg_catalog.to_jsonb(NEW) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text) IS NULL)
+           OPERATOR(pg_catalog.<>)
+           ((pg_catalog.to_jsonb(OLD) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text) IS NULL))
+       OR COALESCE((pg_catalog.to_jsonb(NEW) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text)
+                   OPERATOR(pg_catalog.<>)
+                   (pg_catalog.to_jsonb(OLD) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text),
+                   false) THEN
+        RAISE EXCEPTION 'E-AUD-003 security event % allows only count + 1', OLD.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
 END;
 $$;
 -- Step 4.
@@ -2021,7 +2044,7 @@ Notes:
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. Each row carries its `leaf_class`. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration.
   - `0005_security_event_guard.sql`: the column grant and the guard trigger of section 5.4 (ADR-0035).
   - `0006_operations.sql`: the index on `security_event.occurred_at`, the function `replication_state()`, and its grant of section 5.5 (ADR-0069).
-  - `0007_audit_definer_operators.sql`: the qualified operators and types of `audit_hash_chain()` and `security_event_purge()` (ADR-0098 (a)).
+  - `0007_audit_definer_operators.sql`: the qualified operators and types of `audit_hash_chain()`, `security_event_purge()`, and `security_event_guard()` (ADR-0098 (a)).
   - `0008_audit_log_insert_columns.sql`: the column `INSERT` grants on `audit_log` of section 5.2 (ADR-0098 (b)).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.

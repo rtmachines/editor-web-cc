@@ -1,5 +1,5 @@
--- Qualified operators and types of two definer functions (data-model.md section 5.6, ADR-0098 (a)).
--- The file changes two audit objects, so it runs the five steps of data-model.md section 5.1.
+-- Qualified operators and types of three audit functions (data-model.md section 5.6, ADR-0098 (a)).
+-- The file changes three audit objects, so it runs the five steps of data-model.md section 5.1.
 
 -- Step 1.
 GRANT CREATE ON SCHEMA public TO audit_owner;
@@ -49,6 +49,27 @@ BEGIN
         LIMIT 5000);
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
     RETURN v_deleted;
+END;
+$$;
+CREATE OR REPLACE FUNCTION security_event_guard() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    -- The old text used IS DISTINCT FROM, which looks up the operator = in the search_path.
+    -- The form (a IS NULL) <> (b IS NULL) OR COALESCE(a <> b, false) gives the same result,
+    -- also for NULL. It uses the operator <> of pg_catalog only.
+    IF ((NEW.count IS NULL) OPERATOR(pg_catalog.<>) ((OLD.count OPERATOR(pg_catalog.+) 1) IS NULL))
+       OR COALESCE(NEW.count OPERATOR(pg_catalog.<>) (OLD.count OPERATOR(pg_catalog.+) 1), false)
+       OR (((pg_catalog.to_jsonb(NEW) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text) IS NULL)
+           OPERATOR(pg_catalog.<>)
+           ((pg_catalog.to_jsonb(OLD) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text) IS NULL))
+       OR COALESCE((pg_catalog.to_jsonb(NEW) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text)
+                   OPERATOR(pg_catalog.<>)
+                   (pg_catalog.to_jsonb(OLD) OPERATOR(pg_catalog.-) 'count'::pg_catalog.text),
+                   false) THEN
+        RAISE EXCEPTION 'E-AUD-003 security event % allows only count + 1', OLD.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
 END;
 $$;
 -- Step 4.
