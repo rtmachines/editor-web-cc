@@ -16,7 +16,6 @@
 //! runs of one job therefore never overlap. A trigger that is due while a run is open fires when
 //! that run ends.
 
-use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
@@ -38,6 +37,9 @@ const MINUTE: Duration = Duration::from_secs(60);
 const MAX_SUBSECOND_NANOS: u32 = 999_999_999;
 
 /// A value of a schedule that the constructor refuses.
+///
+/// The type has no `code()` and does not implement `std::error::Error`. It is a reason type like
+/// `ProbeFault`. The caller wraps the fault with `anyhow!` and names the job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScheduleFault {
     /// An interval is zero. The job would run in a burst.
@@ -57,8 +59,6 @@ impl fmt::Display for ScheduleFault {
         })
     }
 }
-
-impl Error for ScheduleFault {}
 
 /// A time of day in UTC, to the minute.
 ///
@@ -143,10 +143,13 @@ enum Trigger {
     Every(Duration),
     /// Fire at the next occurrence of a time of day in UTC.
     ///
-    /// A long run must not lose the nightly occurrence. The trigger therefore keeps the due
-    /// occurrence as an offset `due` since the start. It sets `due` once, from the time of day.
-    /// It clears `due` only when it fires. An occurrence that passes during a run is overdue
-    /// and fires at once after that run. Several passed occurrences give one run.
+    /// The trigger keeps the due occurrence as an offset `due` since the start. An occurrence that
+    /// passes while another trigger runs is overdue and fires at once after that run. Several
+    /// passed occurrences give one run.
+    ///
+    /// `fire` clears `due` when this trigger fires. The schedule arms the trigger again after the
+    /// run. A run of this trigger that lasts 24 hours or more skips the occurrence that passes
+    /// during it.
     Daily {
         time: TimeOfDay,
         due: Option<Duration>,
@@ -160,6 +163,7 @@ impl Trigger {
             && due.is_none()
         {
             let wait = time.delay_from(now.since_midnight);
+            // A process cannot run long enough for the sum to overflow `Duration`.
             *due = Some(now.since_start.checked_add(wait).unwrap_or(Duration::MAX));
         }
     }
@@ -202,7 +206,7 @@ impl Trigger {
 /// The type solves one problem: the intervals, the nightly time, and the catch-up of the jobs
 /// follow different rules, and the supervisor must run them in one loop without overlap. A
 /// schedule keeps which one-shot trigger already fired, so the supervisor asks it for the next
-/// wait after every run.
+/// wait before the first run and after every run.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Schedule {
     triggers: Vec<Trigger>,
@@ -261,8 +265,9 @@ impl Schedule {
     /// The wait before the next run and the kind of that run, or `None` when no trigger can fire
     /// again.
     ///
-    /// The caller calls this function at the start and at the end of each run. The trigger with
-    /// the shortest wait wins. A one-shot trigger that wins is spent and gives `RunKind::CatchUp`.
+    /// The caller calls this function before the first wait and after each run ends. The
+    /// trigger with the shortest wait wins. A one-shot trigger that wins is spent and gives
+    /// `RunKind::CatchUp`.
     /// When a one-shot trigger and another trigger have the same wait, the other trigger wins and
     /// the run is `RunKind::Scheduled`. The one-shot trigger then stays pending.
     ///

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Result, anyhow};
 use recipe_app::error::AppError;
 use recipe_app::jobs::RunKind;
 use recipe_app::jobs::alerts::{AlertPorts, AlertSources, AlertVolumes, Alerts};
@@ -23,7 +23,7 @@ use recipe_domain::timestamp::Timestamp;
 
 use super::host::{Host, MainPool};
 use super::plan::ServeSettings;
-use crate::schedule::{Schedule, TimeOfDay};
+use crate::schedule::{Schedule, ScheduleFault, TimeOfDay};
 use crate::supervisor::{JobName, JobRun, Supervisor};
 
 /// Implement [`JobRun`] for jobs whose method `run_once` has the shape of the trait.
@@ -201,17 +201,17 @@ fn alerts_job(
 }
 
 fn every(job: JobName, interval: Duration) -> Result<Schedule> {
-    Schedule::every(interval).with_context(|| schedule_text(job))
+    Schedule::every(interval).map_err(|fault| schedule_error(job, fault))
 }
 
 fn now_then_every(job: JobName, interval: Duration) -> Result<Schedule> {
-    Schedule::now_then_every(interval).with_context(|| schedule_text(job))
+    Schedule::now_then_every(interval).map_err(|fault| schedule_error(job, fault))
 }
 
 /// The nightly schedule of `audit_chain_check`, with the catch-up run when `catchup` is true.
 fn audit_schedule(settings: &ServeSettings, catchup: bool) -> Result<Schedule> {
     let time = TimeOfDay::parse(settings.audit_check_hour, settings.audit_check_minute)
-        .with_context(|| schedule_text(JobName::AuditChainCheck))?;
+        .map_err(|fault| schedule_error(JobName::AuditChainCheck, fault))?;
     let nightly = Schedule::daily_at(time);
     Ok(if catchup {
         nightly.with_once_after(settings.audit_catchup_delay)
@@ -220,8 +220,12 @@ fn audit_schedule(settings: &ServeSettings, catchup: bool) -> Result<Schedule> {
     })
 }
 
-fn schedule_text(job: JobName) -> String {
-    format!("the schedule of the job {} is not valid", job.as_str())
+/// The error of a schedule that the constructor refuses, with the job and the reason.
+fn schedule_error(job: JobName, fault: ScheduleFault) -> anyhow::Error {
+    anyhow!(
+        "the schedule of the job {} is not valid: {fault}",
+        job.as_str()
+    )
 }
 
 #[cfg(test)]
