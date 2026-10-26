@@ -21,7 +21,7 @@ use net::{Answer, free_ports, http_get, poll_until, port_is_open};
 use process::{ServerProcess, has_line};
 use support::cli::{lines_with, run_migrate, text_of};
 use support::database::{
-    MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
+    APP_PASSWORD, MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
 };
 use support::temp::{TempDir, random_secret};
 
@@ -65,7 +65,7 @@ impl Setup {
     fn new() -> Self {
         let dir = TempDir::new();
         let migrator_secret = dir.write("migrator_secret", &format!("{MIGRATOR_PASSWORD}\n"));
-        let app_secret = dir.write("app_secret", "test-app-password\n");
+        let app_secret = dir.write("app_secret", &format!("{APP_PASSWORD}\n"));
         let login_key = dir.write("login_key", &format!("{}\n", random_secret()));
         let csrf_key = dir.write("csrf_key", &format!("{}\n", random_secret()));
         Self {
