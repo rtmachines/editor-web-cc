@@ -42,7 +42,7 @@ This rule needs a stable object to approve. The approver reviews a draft that no
 
 The approval stores a content hash of the version. An export document holds this hash. A transfer system can recompute it and find a file in which someone edited a hashed field after the download ([ADR-0019](../adr/0019-export-integrity-and-contract.md)).
 
-The column "In hash" of [`api.md`](../architecture/api.md) section 6.1 names the hashed fields. The hash does not cover fields such as `loadable`, the status, and the names. [Export document format](export-format.md) lists the keys. [Check an export document before a PLC load](check-export-document.md) shows how.
+The column "In hash" of [`api.md`](../architecture/api.md) section 6.1 names the hashed fields. The hash does not cover fields such as `loadable`, the status, and the machine name, the recipe name, and the English parameter names. [Export document format](export-format.md) lists the keys. [Check an export document before a PLC load](check-export-document.md) shows how.
 
 The hash only has meaning when the version behind it never changes.
 
