@@ -104,6 +104,41 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
 }
 
 #[test]
+fn deploy_values_ci_same_filesystem_drops_all_capabilities() {
+    let script = include_str!("../../../deploy/ci/same-filesystem.sh");
+    let script = script.replace("\\\r\n", " ").replace("\\\n", " ");
+    let lines = lines::code_lines(&script);
+    let runs: Vec<_> = lines
+        .iter()
+        .filter(|line| line.contains("docker run "))
+        .collect();
+    assert_eq!(runs.len(), 2, "retain both fixture and healthcheck runs");
+    for run in runs {
+        let options = run.split(r#""recipe-pgtools:"#).next().unwrap();
+        let words: Vec<_> = options.split_whitespace().collect();
+        assert!(
+            words.windows(2).any(|pair| pair == ["--cap-drop", "ALL"]),
+            "each run must drop all capabilities: {run}"
+        );
+        assert!(
+            words
+                .windows(2)
+                .any(|pair| pair == ["--security-opt", "no-new-privileges:true"]),
+            "each run must prevent new privileges: {run}"
+        );
+        let added: Vec<_> = words
+            .windows(2)
+            .filter_map(|pair| (pair[0] == "--cap-add").then_some(pair[1]))
+            .collect();
+        if words.windows(2).any(|pair| pair == ["--user", "0:0"]) {
+            assert_eq!(added, ["CHOWN"], "the fixture needs only CHOWN");
+        } else {
+            assert!(added.is_empty(), "backup-health needs no capabilities");
+        }
+    }
+}
+
+#[test]
 fn deploy_values_ci_memory_logs_each_cgroup_metric() {
     let script = include_str!("../../../deploy/ci/memory.sh");
     let lines = lines::code_lines(script);
