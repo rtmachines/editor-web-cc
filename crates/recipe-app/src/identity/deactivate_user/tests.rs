@@ -17,6 +17,14 @@ use crate::identity::fixtures::{
 use crate::memory::{Fault, FaultPoint, JournalEntry, Lock, LockMode};
 use crate::ports::{Isolation, NewUser, UserRow};
 
+fn demote_actor(row: &mut UserRow) {
+    row.role = Role::Operator;
+}
+
+fn deactivate_actor(row: &mut UserRow) {
+    row.is_active = false;
+}
+
 fn anna() -> Login {
     Login::parse("anna").unwrap()
 }
@@ -330,4 +338,56 @@ async fn a_lock_timeout_at_the_guard_lock_gives_e_db_001_and_writes_nothing() {
             .unwrap()
             .is_some()
     );
+}
+
+#[tokio::test]
+async fn an_actor_who_loses_the_permission_before_the_guard_lock_gets_e_web_002_and_writes_nothing()
+{
+    for change in [demote_actor as fn(&mut UserRow), deactivate_actor] {
+        let fixture = IdentityFixture::with_actor_race(change);
+        fixture.seed_anna("secret-phrase-one", false);
+        seed_second_administrator(&fixture);
+        let session = fixture.seed_anna_session(1);
+        let (auth, meta) = fixture.actor(Role::Administrator).await;
+        let start = fixture.store.journal().len();
+        let error = DeactivateUser::new(fixture.context.clone())
+            .execute(&auth, &meta, &anna())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                AppError::Forbidden {
+                    operation: Operation::DeactivateUser
+                }
+            ),
+            "{error:?}"
+        );
+        assert_eq!(error.code(), ErrorCode::WEB_002);
+        let events = fixture.sink.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
+        let guard = Lock {
+            table: "advisory_class_4",
+            mode: LockMode::Advisory,
+            key: "0".to_owned(),
+        };
+        assert_eq!(
+            journal_since(&fixture.store, start),
+            vec![
+                JournalEntry::Begin(Isolation::ReadCommitted),
+                JournalEntry::Lock(guard)
+            ],
+            "the command stops after the guard lock"
+        );
+        assert!(anna_row(&fixture).is_active);
+        assert_eq!(anna_row(&fixture).session_epoch, 0);
+        assert!(fixture.store.audit_entries().is_empty());
+        assert!(
+            authenticate(&fixture.context, &session)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
 }

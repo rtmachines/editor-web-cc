@@ -59,6 +59,7 @@ impl DeactivateUser {
             &self.ctx,
             auth,
             meta,
+            Self::OPERATION,
             login,
             AdminChange::Deactivate,
             RowAction::UserDeactivated,

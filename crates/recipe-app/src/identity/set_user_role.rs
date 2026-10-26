@@ -68,6 +68,7 @@ impl SetUserRole {
             &self.ctx,
             auth,
             meta,
+            Self::OPERATION,
             &login,
             AdminChange::SetRole(role),
             RowAction::UserRoleSet,

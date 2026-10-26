@@ -158,7 +158,7 @@ async fn parallel_failed_logins_of_other_logins_pass_the_budget_by_at_most_the_p
 // Race 3: two Administrators demote each other.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_second_demotion_waits_for_the_guard_lock_and_then_returns_last_administrator() {
+async fn the_second_demotion_waits_for_the_guard_lock_and_then_is_refused_for_the_demoted_actor() {
     let mut app = App::create_with(&gate::pool()).await;
     let ctx = app.identity();
     let first_admin = app.admin_session(&ctx).await;
@@ -185,7 +185,8 @@ async fn the_second_demotion_waits_for_the_guard_lock_and_then_returns_last_admi
 
     let results = [one.await.unwrap(), two.await.unwrap()];
     assert!(results[0].is_ok(), "{results:?}");
-    assert_eq!(error_code(&results[1]), ErrorCode::IDN_002);
+    // The first command demoted the actor of the second one, so the second one loses the permission.
+    assert_eq!(error_code(&results[1]), ErrorCode::WEB_002);
     assert_eq!(app.rows(ACTIVE_ADMINISTRATORS).await, 1);
     assert_eq!(app.rows(AUDIT_ROLE_SET).await, 1);
 }
@@ -205,6 +206,53 @@ fn demote(
         };
         SetUserRole::new(ctx).execute(&auth, &meta, input).await
     })
+}
+
+// Race 3a: an Administrator who is demoted while the command of that Administrator waits.
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_administrator_demoted_during_the_wait_for_the_guard_lock_gets_forbidden() {
+    let mut app = App::create_with(&gate::pool()).await;
+    let ctx = app.identity();
+    let first_admin = app.admin_session(&ctx).await;
+    let first_login = first_admin.user().login().clone();
+    let second = app
+        .seed_user("second-admin", Role::Administrator, PASSWORD)
+        .await;
+    let token = app.seed_session(second).await;
+    let second_admin = app.sign_in(&ctx, &token).await;
+    app.seed_user("target", Role::Operator, PASSWORD).await;
+    // The second Administrator demotes the first one and waits before its update.
+    app.install_gate("app_user", "UPDATE", "true").await;
+    app.close_gate().await;
+
+    let demotion = demote(&ctx, &app, second_admin, first_login);
+    app.wait_until_at_gate().await;
+    // The first Administrator passed the permission check and now waits for the guard lock.
+    let command = set_role(
+        &ctx,
+        &app,
+        first_admin,
+        login("target"),
+        Role::ProcessEngineer,
+    );
+    app.poll_at_least(
+        WAITING_FOR_GUARD_LOCK,
+        1,
+        "the command of the first Administrator waits for the guard lock",
+    )
+    .await;
+    app.open_gate().await;
+
+    demotion.await.unwrap().unwrap();
+    let result = command.await.unwrap();
+    assert_eq!(error_code(&result), ErrorCode::WEB_002);
+    assert_eq!(app.rows(AUDIT_ROLE_SET).await, 1, "only the demotion");
+    assert_eq!(
+        app.text("SELECT role FROM app_user WHERE login = 'target'")
+            .await,
+        "operator"
+    );
 }
 
 // Race 3b: three Administrators, two deactivations that both commit in turn.

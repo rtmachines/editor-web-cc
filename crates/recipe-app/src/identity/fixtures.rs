@@ -20,7 +20,7 @@ use crate::blocking::AppSettings;
 use crate::context::AppContext;
 use crate::memory::fixtures::RaceStore;
 use crate::memory::{JournalEntry, MemoryClock, MemorySink, MemoryStore};
-use crate::ports::{Isolation, NewSession, NewUser, UnitOfWork};
+use crate::ports::{Isolation, NewSession, NewUser, UnitOfWork, UserRow};
 
 /// A key file with one valid key of 64 lower-case hex characters.
 const LOGIN_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
@@ -143,6 +143,16 @@ impl IdentityFixture {
     /// `READ COMMITTED` transaction opens.
     pub(crate) fn with_race(hook: impl FnOnce(&MemoryStore) + Send + 'static) -> Self {
         Self::build(|store| Arc::new(RaceStore::new(store.clone(), hook)))
+    }
+
+    /// Build a fixture in which `change` edits the row of the acting user [`actor_id`] after the
+    /// permission check and before the first `READ COMMITTED` transaction opens.
+    ///
+    /// This models a second Administrator who commits while the command waits for the guard lock.
+    pub(crate) fn with_actor_race(change: fn(&mut UserRow)) -> Self {
+        Self::with_race(move |store| {
+            store.update_state(|state, _now| change(state.users.get_mut(&actor_id()).unwrap()));
+        })
     }
 
     /// Seed the active Operator `anna` with the hash of `password`.

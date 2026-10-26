@@ -26,6 +26,25 @@ pub async fn authorize(
     if op.requirement().allows(user.role()) {
         return Ok(());
     }
+    refuse(op, user, meta, sink).await
+}
+
+/// Record the `forbidden` security event of a refusal and return `AppError::Forbidden`.
+///
+/// The function solves one problem: a command that checks the permission again after a lock
+/// must refuse in the same way as the first check. `authorize` calls it too. The function
+/// always returns `Err`.
+///
+/// # Errors
+///
+/// Returns `AppError::Forbidden` after the event is written.
+/// Returns `AppError::Storage` when the sink cannot write the event.
+pub(crate) async fn refuse(
+    op: Operation,
+    user: &CurrentUser,
+    meta: &RequestMeta,
+    sink: &dyn SecurityEventSink,
+) -> Result<(), AppError> {
     let event = SecurityEvent::forbidden(
         user.user(),
         op.name(),
