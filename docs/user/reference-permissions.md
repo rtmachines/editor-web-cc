@@ -50,7 +50,7 @@ Conditions of the `yes (c)` cells:
 
 - **Delete a recipe**, Administrator: only when the recipe has no **Approved** version (`E-RCP-010`).
 - **Delete a recipe**, Process engineer: only when the recipe has no **Approved** version and no **Retired** version (`E-RCP-026`).
-- **Approve a version**, Administrator and Process engineer: the approver must not have created or edited the draft (`E-RCP-015`).
+- **Approve a version**, Administrator and Process engineer: by default, the approver must not have created or edited the draft (`E-RCP-015`).
 
 An approval retires the previous **Approved** version (`api.md` section 3.3).
 
@@ -58,7 +58,8 @@ An approval retires the previous **Approved** version (`api.md` section 3.3).
 
 - The server checks the permission of every action. Each form checks the permission of its action before it shows any field (ADR-0046).
 - No user holds a permission that differs from the permissions of the role (ADR-0013).
-- The user who created or edited a draft cannot approve it. The server refuses with `E-RCP-015`, and a different user must approve the draft (ADR-0022, invariant I16 in [`domain-model.md`](../architecture/domain-model.md)).
+- By default, the user who created or edited a draft cannot approve it. The setting `approval.separation_of_duties` controls this rule ([ADR-0022](../adr/0022-approval-policy.md), [`reliability.md`](../architecture/reliability.md) section 7.11).
+- When the rule applies, the server refuses with `E-RCP-015`, and a different user must approve the draft (invariant I16 in [`domain-model.md`](../architecture/domain-model.md)).
 - Only an Administrator and a Process engineer can export a **Retired** version by number. For the export format and its integrity rules, see ADR-0019.
 - The last active Administrator cannot be deactivated, and the role of that user cannot change. The server refuses with `E-IDN-002` (ADR-0096).
 

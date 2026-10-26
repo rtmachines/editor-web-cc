@@ -97,7 +97,7 @@ You see the message **Parameter SPEED is added.** The table **Parameters** has a
 
 Click **Approve version 1**.
 
-You see the page **Approval of version 1 of recipe R-100**. An error notice shows the code `E-RCP-015`. The notice says that a different user must approve the draft. The page has no button **Approve version 1**, because you edited the draft.
+You see the page **Approval of version 1 of recipe R-100**. By default, an error notice shows the code `E-RCP-015`. The notice says that a different user must approve the draft. The page has no button **Approve version 1**, because you edited the draft. The setting `approval.separation_of_duties` controls this rule ([ADR-0022](../adr/0022-approval-policy.md)).
 
 ### Step 12. Log out
 
