@@ -102,3 +102,59 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
         );
     }
 }
+
+#[test]
+fn deploy_values_ci_memory_logs_each_cgroup_metric() {
+    let script = include_str!("../../../deploy/ci/memory.sh");
+    let lines = lines::code_lines(script);
+    for instruction in [
+        r#"peak=$(sudo -n cat "$path/memory.peak" 2>/dev/null) || peak="#,
+        r#"anon=$(sudo -n awk '$1 == "anon" { print $2 }' "$path/memory.stat" 2>/dev/null) || anon="#,
+        r#"file=$(sudo -n awk '$1 == "file" { print $2 }' "$path/memory.stat" 2>/dev/null) || file="#,
+        r#"oom_kill=$(sudo -n awk '$1 == "oom_kill" { print $2 }' "$path/memory.events" 2>/dev/null) || oom_kill="#,
+        r#"memory_log "memory.peak $service peak=$peak limit=$limit anon=$anon file=$file oom_kill=$oom_kill""#,
+    ] {
+        assert!(
+            lines.iter().any(|line| line.trim() == instruction),
+            "missing {instruction}"
+        );
+    }
+    for metric in ["peak", "limit", "anon", "file", "oom_kill"] {
+        let guard = format!("[[ ${metric} =~ ^[0-9]+$ ]] || {metric}=unavailable");
+        assert!(
+            lines.iter().any(|line| line.trim() == guard),
+            "missing {guard}"
+        );
+    }
+}
+
+#[test]
+fn deploy_values_ci_memory_fails_only_on_oom_kills() {
+    let script = include_str!("../../../deploy/ci/memory.sh");
+    assert!(script.contains(
+        r#"if [[ $oom_kill =~ ^[0-9]+$ && $oom_kill =~ [1-9] ]]; then
+    memory_log "memory.oom_kill $service oom_kill=$oom_kill: OOM kill detected"
+    return 1
+  fi
+  return 0"#
+    ));
+    let reader = script.split("memory_cgroup() {").nth(1).unwrap();
+    let reader = reader.split("\n}").next().unwrap();
+    assert_eq!(reader.matches("return 1").count(), 1);
+    assert!(!reader.contains("(("), "the peak must remain log-only");
+}
+
+#[test]
+fn deploy_values_ci_memory_propagates_oom_failures() {
+    let script = include_str!("../../../deploy/ci/memory.sh");
+    for instruction in [
+        r#"memory_cgroup "$service" "${path:-/sys/fs/cgroup/unavailable}" "$limit""#,
+        r#"memory_service "$service" || status=$?"#,
+        r#"memory_peak "$service" "$id" || status=$?"#,
+        r#"memory_peak pitr-check "$name" || status=$?"#,
+        r#"wait "$watcher" || status=$?"#,
+    ] {
+        assert!(script.contains(instruction), "missing {instruction}");
+    }
+    assert!(!script.contains(r#"wait "$watcher" || true"#));
+}

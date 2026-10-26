@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Read cgroup v2 peaks on the disposable GitHub runner.
+# Read cgroup v2 memory metrics on the disposable GitHub runner.
 set -euo pipefail
 umask 077
 
@@ -7,20 +7,35 @@ memory_log() {
   printf '%s\n' "$1" | tee -a "$CI_STATE/memory.log" || true
 }
 
+memory_cgroup() {
+  local service=$1 path=$2 limit=$3 peak anon file oom_kill
+  peak=$(sudo -n cat "$path/memory.peak" 2>/dev/null) || peak=
+  anon=$(sudo -n awk '$1 == "anon" { print $2 }' "$path/memory.stat" 2>/dev/null) || anon=
+  file=$(sudo -n awk '$1 == "file" { print $2 }' "$path/memory.stat" 2>/dev/null) || file=
+  oom_kill=$(sudo -n awk '$1 == "oom_kill" { print $2 }' "$path/memory.events" 2>/dev/null) || oom_kill=
+  [[ $peak =~ ^[0-9]+$ ]] || peak=unavailable
+  [[ $limit =~ ^[0-9]+$ ]] || limit=unavailable
+  [[ $anon =~ ^[0-9]+$ ]] || anon=unavailable
+  [[ $file =~ ^[0-9]+$ ]] || file=unavailable
+  [[ $oom_kill =~ ^[0-9]+$ ]] || oom_kill=unavailable
+  memory_log "memory.peak $service peak=$peak limit=$limit anon=$anon file=$file oom_kill=$oom_kill"
+  # The peak includes file cache. Only an OOM kill fails this check.
+  if [[ $oom_kill =~ ^[0-9]+$ && $oom_kill =~ [1-9] ]]; then
+    memory_log "memory.oom_kill $service oom_kill=$oom_kill: OOM kill detected"
+    return 1
+  fi
+  return 0
+}
+
 memory_peak() {
-  local service=$1 reference=$2 id path peak limit
+  local service=$1 reference=$2 id path= limit=
   id=$(docker inspect --format '{{.Id}}' "$reference" 2>/dev/null) || id=
   if [[ $id =~ ^[0-9a-f]{64}$ ]]; then
     path=$(sudo -n find /sys/fs/cgroup -type d \
       \( -name "$id" -o -name "docker-$id.scope" \) -print -quit 2>/dev/null) || path=
-    peak=$(sudo -n cat "${path:-/sys/fs/cgroup/unavailable}/memory.peak" 2>/dev/null) || peak=
     limit=$(docker inspect --format '{{.HostConfig.Memory}}' "$id" 2>/dev/null) || limit=
-    if [[ $peak =~ ^[0-9]+$ && $limit =~ ^[0-9]+$ ]]; then
-      memory_log "memory.peak $service $peak of $limit"
-      return 0
-    fi
   fi
-  memory_log 'memory.peak unavailable'
+  memory_cgroup "$service" "${path:-/sys/fs/cgroup/unavailable}" "$limit"
 }
 
 memory_service() {
@@ -33,7 +48,7 @@ memory_exec() {
   local service=$1 status=0
   shift
   compose exec -T "$service" "$@" || status=$?
-  memory_service "$service"
+  memory_service "$service" || status=$?
   return "$status"
 }
 
@@ -51,7 +66,7 @@ memory_hold() {
 }
 
 memory_watch() {
-  local service=$1 reference=$2 deadline=$((SECONDS + $3)) id state
+  local service=$1 reference=$2 deadline=$((SECONDS + $3)) id state status=0
   while (( SECONDS < deadline ))
   do
     if [[ -n $reference ]]; then
@@ -61,14 +76,14 @@ memory_watch() {
     fi
     if [[ $id =~ ^[0-9a-f]+$ ]]; then
       if docker exec "$id" test -f /tmp/ci-memory-done 2>/dev/null; then
-        memory_peak "$service" "$id"
+        memory_peak "$service" "$id" || status=$?
         docker exec "$id" touch /tmp/ci-memory-release 2>/dev/null || true
-        return 0
+        return "$status"
       fi
       state=$(docker inspect --format '{{.State.Status}}' "$id" 2>/dev/null) || state=
       if [[ $state == exited || $state == dead ]]; then
-        memory_peak "$service" "$id"
-        return 0
+        memory_peak "$service" "$id" || status=$?
+        return "$status"
       fi
     fi
     sleep 0.2
@@ -98,9 +113,9 @@ memory_pitr() {
     pitr-check bash /ci-memory.sh hold pitr-check || status=$?
   if (( status != 0 )) && kill -0 "$watcher" 2>/dev/null; then
     kill "$watcher" 2>/dev/null || true
-    memory_peak pitr-check "$name"
+    memory_peak pitr-check "$name" || status=$?
   fi
-  wait "$watcher" || true
+  wait "$watcher" || status=$?
   docker rm "$name" >/dev/null
   return "$status"
 }
