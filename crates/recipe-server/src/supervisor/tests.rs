@@ -14,11 +14,17 @@ use recipe_domain::audit::RequestId;
 use tokio::time::{Instant, sleep};
 use tokio_util::sync::CancellationToken;
 
+use super::span_tests::lines_with;
 use super::support::{
     Behavior, Event, LogCapture, PausedClock, bounded, object_of, probe, secs, settings,
 };
 use super::{JobName, Supervisor};
 use crate::schedule::{Schedule, TimeOfDay};
+
+/// The text that marks a log line of the level `ERROR`.
+const ERROR_LEVEL: &str = "\"level\":\"ERROR\"";
+/// The text that marks a log line of the level `WARN`.
+const WARN_LEVEL: &str = "\"level\":\"WARN\"";
 
 /// A supervisor with a paused clock at midnight and a token that the test cancels.
 fn start() -> (Supervisor, CancellationToken, Instant) {
@@ -85,7 +91,7 @@ async fn the_job_goes_on_after_an_error_and_the_supervisor_logs_it_once() {
         assert!(supervisor.drain(secs(5)).await.is_complete());
         // An error does not shorten the wait: the next run starts one interval after the end.
         assert_eq!(seen.starts(), vec![60, 120]);
-        let errors = filter_level(&logs.lines(), "ERROR");
+        let errors = lines_with(&logs.lines(), ERROR_LEVEL);
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert!(errors[0].contains("\"job\":\"cleanup\""), "{errors:?}");
         assert!(errors[0].contains("E-WEB-004"), "{errors:?}");
@@ -111,9 +117,9 @@ async fn lines_of_failed_first_run(name: JobName) -> Vec<String> {
 async fn a_failed_run_of_alerts_gives_one_warn_line_and_no_error_line() {
     bounded(async {
         let lines = lines_of_failed_first_run(JobName::Alerts).await;
-        let warns = filter_level(&lines, "WARN");
+        let warns = lines_with(&lines, WARN_LEVEL);
         assert_eq!(warns.len(), 1, "{lines:?}");
-        assert!(filter_level(&lines, "ERROR").is_empty(), "{lines:?}");
+        assert!(lines_with(&lines, ERROR_LEVEL).is_empty(), "{lines:?}");
         let span = object_of(&warns[0], "span");
         assert!(span.contains("\"job\":\"alerts\""), "{warns:?}");
         assert!(span.contains("\"iteration\":1"), "{warns:?}");
@@ -129,9 +135,9 @@ async fn a_failed_run_of_alerts_gives_one_warn_line_and_no_error_line() {
 async fn a_failed_run_of_another_job_still_gives_one_error_line_and_no_warn_line() {
     bounded(async {
         let lines = lines_of_failed_first_run(JobName::Cleanup).await;
-        let errors = filter_level(&lines, "ERROR");
+        let errors = lines_with(&lines, ERROR_LEVEL);
         assert_eq!(errors.len(), 1, "{lines:?}");
-        assert!(filter_level(&lines, "WARN").is_empty(), "{lines:?}");
+        assert!(lines_with(&lines, WARN_LEVEL).is_empty(), "{lines:?}");
         let span = object_of(&errors[0], "span");
         assert!(span.contains("\"job\":\"cleanup\""), "{errors:?}");
         assert!(span.contains("\"outcome\":\"E-WEB-004\""), "{errors:?}");
@@ -167,9 +173,9 @@ async fn a_failed_request_id_gives_one_error_line_also_for_alerts() {
         // The run never starts, so the probe sees no start.
         assert!(seen.starts().is_empty());
         let lines = logs.lines();
-        let errors = filter_level(&lines, "ERROR");
+        let errors = lines_with(&lines, ERROR_LEVEL);
         assert_eq!(errors.len(), 1, "{lines:?}");
-        assert!(filter_level(&lines, "WARN").is_empty(), "{lines:?}");
+        assert!(lines_with(&lines, WARN_LEVEL).is_empty(), "{lines:?}");
         let span = object_of(&errors[0], "span");
         assert!(span.contains("\"job\":\"alerts\""), "{errors:?}");
         assert!(span.contains("\"outcome\":\"E-WEB-011\""), "{errors:?}");
@@ -181,16 +187,6 @@ async fn a_failed_request_id_gives_one_error_line_also_for_alerts() {
         assert!(!errors[0].contains("request_id"), "{errors:?}");
     })
     .await;
-}
-
-/// The lines of `lines` with the level `level`.
-fn filter_level(lines: &[String], level: &str) -> Vec<String> {
-    let needle = format!("\"level\":\"{level}\"");
-    lines
-        .iter()
-        .filter(|line| line.contains(&needle))
-        .cloned()
-        .collect()
 }
 
 #[tokio::test(start_paused = true)]
