@@ -606,8 +606,10 @@ docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_at
 ```
 
 8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
-9. Run `docker compose up -d --no-deps app`.
-10. Check the audit chain: wait for the next completed run of the job `audit_chain_check`. Run no command for it.
+9. Start `app` after a record of the restored audit time:
+   1. Record the value of `audit.last_check_at` with the `app_setting` command of the first place below step 10. If the command prints no row, record "missing".
+   2. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
+10. Check the audit chain. Wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
 The section "Copy the backups off site" describes the off-site audit copy of step 8.
 The next completed run is the applicable run that completes first (ADR-0100, `data-model.md` 4.9).
@@ -615,7 +617,11 @@ The catch-up run starts after `audit.catchup_delay`. It applies when the restore
 The nightly run at `audit.check_time` stays active in all cases. A newer completed nightly check suppresses the catch-up run.
 Read the result in three places.
 
-The first place is `audit.last_check_at` in `app_setting`. A value later than the time of step 9 shows a completed check. The value is a time in UTC.
+The first place is `audit.last_check_at` in `app_setting`. The value is a time in UTC.
+The restore brings back the value of the dump. That value can lie in the future, for example after a correction of the clock (`reliability.md` 3.7, clock trust).
+Step 9 records this value with the command below before the start of `app`.
+After step 9, read the value again. A value that differs from the recorded value shows a completed check.
+A value equal to the recorded value is not a new check. An active `audit_check_age` shows that the check is not done.
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "SELECT value FROM app_setting WHERE key = 'audit.last_check_at'"
@@ -981,6 +987,7 @@ For `postgres`, no service of the stack uses the password after the init of `db`
 The server `app` reads 17 configuration keys from its environment. It derives the 18th key, `alerts.webhook_url`, from the webhook file (ADR-0062 (a), ADR-0063 (c)).
 The file `compose.yaml` holds the environment entries of `app`. An entry has the form `RECIPE_<SECTION>__<NAME>`, with a double underscore between the parts.
 For example, the key `approval.separation_of_duties` is the entry `RECIPE_APPROVAL__SEPARATION_OF_DUTIES`.
+
 The file `.env` holds only the eight values of the Compose interpolation. `app` does not read it (ADR-0062 (i), (j)).
 The only value of `.env` in the environment of `app` is `PROXY_ADDRESS`, inside the entry `RECIPE_HTTP__TRUSTED_PROXIES`.
 A secret never goes into an environment entry. A key with the suffix `_file` names a secret file (ADR-0062 (g), (h)).
@@ -1034,6 +1041,7 @@ A change of a code default needs a new release. See the sections "Read-only mode
 The job `alerts` sends one HTTPS `POST` for each active alert condition to the webhook host (`reliability.md` 3.7, ADR-0063).
 The body is `{"alert":"<name>"}` with the header `Content-Type: application/json`. It holds no other field (ADR-0063 (l)).
 The value `<name>` is a name from the table in the section "Alarms" (ADR-0075 (c)).
+
 The secret file `alerts_webhook_url` holds the URL. The file `compose.yaml` sets `RECIPE_ALERTS__WEBHOOK_URL_FILE` to its path in `app`.
 The section "Create the secret files" creates the file. The server reads the file at each start only.
 

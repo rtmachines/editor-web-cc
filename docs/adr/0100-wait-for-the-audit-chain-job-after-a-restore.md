@@ -68,7 +68,7 @@ The project uses **Option A**.
   - The nightly run at `audit.check_time`. It stays active in all cases.
   - A newer completed nightly check suppresses the catch-up run.
 - (c) The operator reads the result in three places:
-  - `audit.last_check_at` in `app_setting`. A value later than the start of `app` in the restore procedure shows a completed check.
+  - `audit.last_check_at` in `app_setting`. The operator records the restored value before the start of `app`. A value that differs from the recorded value after the start shows a completed check. A value equal to the recorded value is not a new check. The restored value can lie in the future (`reliability.md` section 3.7, clock trust). An active `audit_check_age` shows that the check is not done.
   - The event log of `app`. An `ERROR` line of the job `audit_chain_check` with `error_code` `E-AUD-002` shows a break.
   - The alert condition `audit_chain_broken` of `reliability.md` section 3.7. It is active after a break, and the webhook sends its name (ADR-0063).
 - (d) A completed check with no `E-AUD-002` line and no active `audit_chain_broken` shows a chain without a break.
@@ -107,7 +107,7 @@ Changes of other documents:
 ### Risks and mitigations
 
 - Risk: a break in the restored chain stays unknown until the next run. Mitigation: the restore test of step 1 checked the same set. The alert `audit_chain_broken` and the webhook report a break of the next run without the operator.
-- Risk: the operator reads the restored `audit.last_check_at` as the time of a new check. Mitigation: item (c) compares the value with the start of `app` in the restore procedure.
+- Risk: the operator reads the restored `audit.last_check_at` as the time of a new check. Mitigation: item (c) compares the value with the value that the operator recorded before the start of `app`. A restored value in the future gives no false proof.
 - Risk: the restored `audit.last_check_at` is younger than `audit.catchup_age`, so no catch-up run applies. Mitigation: the nightly run stays active at `audit.check_time`, as item (b) states.
 
 ## Related
