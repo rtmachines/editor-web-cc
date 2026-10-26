@@ -5,6 +5,72 @@ Run each `docker compose` command in the directory `deploy/` of the release.
 Replace each value in angle brackets.
 The rules behind the steps are in [reliability.md](../architecture/reliability.md) and in the ADRs of the section "Related".
 
+**Contents**
+
+- [Host preparation](#host-preparation)
+  - [Check the host](#check-the-host)
+  - [Create the environment file](#create-the-environment-file)
+  - [Prepare the second disk](#prepare-the-second-disk)
+  - [Create the secret files](#create-the-secret-files)
+  - [Check the host firewall](#check-the-host-firewall)
+- [First start, first administrator, and image transfer](#first-start-first-administrator-and-image-transfer)
+  - [Load the images](#load-the-images)
+  - [Start the stack](#start-the-stack)
+  - [Check the client rules of the database](#check-the-client-rules-of-the-database)
+  - [Create the first administrator](#create-the-first-administrator)
+- [Check client_ip of the first login](#check-client_ip-of-the-first-login)
+- [Destructive commands](#destructive-commands)
+- [Stop, start, and restart](#stop-start-and-restart)
+  - [Stop the whole stack](#stop-the-whole-stack)
+  - [Start the whole stack again](#start-the-whole-stack-again)
+  - [Restart one service](#restart-one-service)
+  - [Stop and start, or down and up](#stop-and-start-or-down-and-up)
+  - [After a host reboot](#after-a-host-reboot)
+- [Backup now, restore test, and restore into production](#backup-now-restore-test-and-restore-into-production)
+  - [Run a backup now](#run-a-backup-now)
+  - [Run the restore test](#run-the-restore-test)
+  - [Statement outside the role grammar](#statement-outside-the-role-grammar)
+  - [Copy the backups off site](#copy-the-backups-off-site)
+  - [Delete orphan temp files](#delete-orphan-temp-files)
+  - [Restore into production](#restore-into-production)
+- [Upgrade and rollback](#upgrade-and-rollback)
+  - [Upgrade](#upgrade)
+  - [Rollback](#rollback)
+  - [Keep the images for a rollback](#keep-the-images-for-a-rollback)
+  - [Concurrent index on an audit object](#concurrent-index-on-an-audit-object)
+- [Major upgrade](#major-upgrade)
+- [Key rotation](#key-rotation)
+- [Certificate rotation](#certificate-rotation)
+- [Change a database password](#change-a-database-password)
+- [Change a setting](#change-a-setting)
+- [Alert webhook](#alert-webhook)
+  - [Rules of the URL](#rules-of-the-url)
+  - [Change the webhook](#change-the-webhook)
+  - [Disable the webhook](#disable-the-webhook)
+  - [Find a failed call](#find-a-failed-call)
+- [Subnet change](#subnet-change)
+- [A gap in the WAL stream](#a-gap-in-the-wal-stream)
+- [A plant device in front of Caddy](#a-plant-device-in-front-of-caddy)
+- [An older volume](#an-older-volume)
+- [Read the logs](#read-the-logs)
+  - [Read the lines of a service](#read-the-lines-of-a-service)
+  - [Filter the lines of app](#filter-the-lines-of-app)
+  - [Find the lines of a user report](#find-the-lines-of-a-user-report)
+  - [Read the lines of a job](#read-the-lines-of-a-job)
+  - [Keep the logs longer](#keep-the-logs-longer)
+- [Alarms, read-only mode, and restart loop](#alarms-read-only-mode-and-restart-loop)
+  - [Alarms](#alarms)
+  - [Low disk space](#low-disk-space)
+  - [Read-only mode](#read-only-mode)
+  - [Restart loop](#restart-loop)
+- [Service unhealthy](#service-unhealthy)
+  - [Read why a service is unhealthy](#read-why-a-service-is-unhealthy)
+  - [Messages of backup-health](#messages-of-backup-health)
+  - [Messages of backup-once](#messages-of-backup-once)
+  - [Messages of walarchive](#messages-of-walarchive)
+- [Known gaps](#known-gaps)
+- [Related](#related)
+
 ## Host preparation
 
 ### Check the host
@@ -20,7 +86,7 @@ The command prints names and no values. The server refuses to start with a varia
 
 1. Copy `.env.example` to `.env`.
 2. Set the eight values of `.env`. Each directory is an absolute path.
-3. Set `RECIPE_BACKUP_DIR` and `RECIPE_WALARCHIVE_DIR` to directories on the second disk. `RECIPE_WALARCHIVE_DIR` must not be the mount point of the second disk. Then its parent directory is on the second disk too, and the gap procedure moves files there as a rename (ADR-0099 (c)).
+3. Set `RECIPE_BACKUP_DIR` and `RECIPE_WALARCHIVE_DIR` to directories on the second disk. Do not use the mount point for `RECIPE_WALARCHIVE_DIR`.
 4. Set `RECIPE_SECRETS_DIR` to a directory outside the repository.
 5. Load the values into the shell. Do not export them:
 
@@ -43,6 +109,8 @@ docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 
 9. Check that the command prints nothing.
 
+Without the mount point, the parent directory of `RECIPE_WALARCHIVE_DIR` is on the second disk too.
+The gap procedure moves files there as a rename (ADR-0099 (c)).
 The host commands use the shell values only. Compose reads `.env` itself.
 A shell variable with the same name wins over `.env`, so repeat steps 6 and 7 after each edit of `.env`.
 Compose passes only the entries of `environment:` to a container. A `PG*` variable of the host shell does not reach it.
@@ -95,7 +163,7 @@ install -d -m 0700 -o root -g root "$RECIPE_SECRETS_DIR"
 
 Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`.
 
-3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it. The section "Alert webhook" gives the rules of the URL.
+3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it.
 4. Leave `alerts_webhook_url` empty when the plant has no webhook:
 
 ```bash
@@ -136,6 +204,7 @@ setfacl -m u:999:r,u:65532:r "$RECIPE_SECRETS_DIR/migrator_password"
 10. Check the ACL of both files with `getfacl`. The owning group has no right.
 
 ADR-0062 (l) to (o) gives the rules of this section.
+The section "Alert webhook" gives the rules of the URL of step 3.
 
 ### Check the host firewall
 
@@ -237,6 +306,33 @@ unset admin_password
 3. Change the password at `/me/password`.
 4. Run the check of the section "Check client_ip of the first login".
 
+## Check client_ip of the first login
+
+A wrong `PROXY_ADDRESS` gives each client the address of `proxy` (ADR-0065).
+
+1. Open the login page from a workstation. Log in with a wrong password.
+2. Open `/security-events` as an administrator.
+3. Filter the kind `login_failed` and the login that you used.
+4. Compare `client_ip` with the address of the workstation.
+5. If `client_ip` equals `PROXY_ADDRESS`, compare `PROXY_ADDRESS` in `.env` with the output of `docker compose config`.
+6. For a plant device in front of Caddy, use the section "A plant device in front of Caddy".
+
+The file `compose.yaml` holds `${PROXY_ADDRESS:?}` and not an address.
+Read the address in the output of `docker compose config` at the service `proxy` (`ipv4_address`) and at the entry `RECIPE_HTTP__TRUSTED_PROXIES` of the service `app`.
+
+## Destructive commands
+
+- Never run `docker compose down -v`.
+- Never run `docker volume rm` on `pgdata`.
+- Each delete step of this page names what it deletes.
+- Each delete step of a set, a file, or a directory of the backup disks follows a passed restore test.
+- The section "Subnet change" runs `docker compose down` without `-v`. It deletes no volume.
+- Never run `docker image prune -a` or `docker system prune -a`. They delete every image that no container uses. This includes the images that a rollback needs (section "Keep the images for a rollback").
+- Never run `docker volume prune --all`. It deletes every named volume that no container uses. After `docker compose down`, this includes `pgdata`.
+- Never run `docker system prune`, with or without options. It can delete stopped containers and networks of the stack.
+- The one allowed prune command is `docker image prune` without `-a`. It deletes dangling images only.
+- To delete the images of an old release, first check that you keep the image files and the release notes of that release. Then run `docker image rm recipe-server:<old tag> recipe-pgtools:<old tag>`. Docker refuses to delete an image that a container uses.
+
 ## Stop, start, and restart
 
 The services `proxy`, `app`, `db`, `backup`, and `walarchive` have the restart policy `always`.
@@ -320,7 +416,8 @@ A service that you stopped with `docker compose stop` can start again after a re
 3. Check that the host mounts the second disk. A missing host directory stops the start of `backup` and `walarchive`.
 4. Run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. Check that the exit code is 0.
 5. Run `iptables -S DOCKER-USER`. Check that the `ESTABLISHED,RELATED` rule and the three `DROP` rules are present.
-6. If a rule is missing, run the section "Check the host firewall" again. Save the rules with the method of the host.
+6. If a rule is missing, run the section "Check the host firewall" again.
+7. Save the rules with the method of the host.
 
 A host reboot ends the containers, so the WAL stream stops until `walarchive` runs again.
 If the alert `replication` stays active, use the section "A gap in the WAL stream".
@@ -421,7 +518,7 @@ It also leaves directories `.tmp-base_*` in `base/` on the WAL archive disk (ADR
 This step deletes only these files and directories.
 
 1. Choose a time away from `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11.
-2. Run the restore test of the previous section. Continue only after it passes.
+2. Run the section "Run the restore test". Continue only after it passes.
 3. Run `docker compose top backup walarchive`. Check that no process `backup-once`, `basebackup-once`, or `restore-test` runs.
 4. Check that `backup-premigrate` does not run with `docker compose ps -a backup-premigrate`.
 5. List the files that the next step deletes:
@@ -508,10 +605,11 @@ The count must be 0. A count above 0 means a password may be in the log.
 docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_attempt"
 ```
 
-8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists (section "Copy the backups off site").
+8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
 9. Run `docker compose up -d --no-deps app`.
 10. Check the audit chain: wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
+The section "Copy the backups off site" describes the off-site audit copy of step 8.
 The next run is the catch-up run or the nightly run (ADR-0100, `data-model.md` 4.9).
 The catch-up run starts after `audit.catchup_delay`. It runs only when the restored `audit.last_check_at` is older than `audit.catchup_age` at the start of `app`.
 In all other cases, the nightly run at `audit.check_time` is the next run.
@@ -556,7 +654,7 @@ A rollback needs the images of the previous release. See the section "Keep the i
 9. Wait for exit code 0 of `backup-premigrate` with `docker compose ps -a backup-premigrate`.
 10. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
 11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
-12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6). The old `app` keeps running.
+12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6).
 13. Start the guard step. Run `docker compose exec -u postgres db psql -d recipe`.
 14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
 
@@ -670,7 +768,8 @@ Check the images after each upgrade:
 2. Check that each list shows the tag of the running release and the previous tag.
 3. Run `docker image inspect --format '{{.Id}}' recipe-server:<previous tag>`. Run the same command for `recipe-pgtools:<previous tag>`.
 4. Compare each image ID with the release notes of the previous release.
-5. If an image is missing, load it with steps 1 to 5 of the section "Load the images". Do not run steps 6 and 7 there.
+5. If an image is missing, load it with steps 1 to 5 of the section "Load the images".
+6. After such a load, do not run steps 6 and 7 of that section.
 
 To free disk space, run the command below. It deletes only dangling images. A dangling image has no tag:
 
@@ -734,7 +833,7 @@ The files `login_hmac_key` and `csrf_signing_key` hold one key per line, the new
 
 The command writes the new key as the first line and keeps the old line. It prints no key.
 
-2. Count the keys and the lines of each new file. The two numbers must be equal, and each must be 2:
+2. Count the keys and the lines of each new file. Both numbers must be 2:
 
 ```bash
 grep -c -E '^[0-9a-f]{64}$' "$RECIPE_SECRETS_DIR/<name>.new"
@@ -754,7 +853,7 @@ mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
 6. Open the login page from a workstation. Log in with your account. Check that the login works.
 7. Wait for the value of `security.key_rotation_overlap` (`reliability.md` 7.11). Count the time from step 4.
 8. Delete the old line from the key file. This step deletes one key and no data.
-9. Run the two commands of step 2 on `"$RECIPE_SECRETS_DIR/<name>"`. Check that the two numbers are equal and that each is 1.
+9. Run the two commands of step 2 on `"$RECIPE_SECRETS_DIR/<name>"`. Check that both numbers are 1.
 10. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/<name>"`. Check that the output is `400 65532`.
 11. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the key file.
 12. Run `docker compose up -d --force-recreate --no-deps app` again.
@@ -822,7 +921,7 @@ A running container keeps the file that it started with (ADR-0065 (c)). `db` and
 
 Replace `<name>` with a file of the table. Replace `<role>` with the role of the same row.
 
-1. Do steps 1 and 2 of the section "Stop the whole stack". No run of `backup` or `walarchive` must be active.
+1. Do steps 1 and 2 of the section "Stop the whole stack". No `backup` or `walarchive` run must be active.
 2. Create the new file. The command prints no password:
 
 ```bash
@@ -904,7 +1003,8 @@ The server reads the environment at each start only. To change a key of the firs
 4. Run `docker compose up -d --force-recreate --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (ADR-0082).
 5. Run `docker compose ps app` until `app` shows `healthy`.
 6. Open `/audit` as an Administrator. Filter the action `SettingChanged`.
-7. Open the newest entry of the changed key. Check that `after` shows the new value and `before` shows the old value.
+7. Open the newest entry of the changed key.
+8. Check that `after` shows the new value and `before` shows the old value.
 
 While `app` restarts, Caddy answers `502` (ADR-0065 (p)).
 The server writes one entry `SettingChanged` for each key whose value differs from the stored value. All entries of one start share one `request_id`. The audit log keeps the entries without a time limit (`reliability.md` 7.12).
@@ -974,7 +1074,8 @@ tr -d '\n' < "$RECIPE_SECRETS_DIR/alerts_webhook_url" | sha256sum
 ```
 
 8. Open `/audit` as an Administrator. Filter the action `SettingChanged`.
-9. Open the newest entry of the key `alerts.webhook_url`. Compare the value of `after` with `sha256:` and the hash of step 7.
+9. Open the newest entry of the key `alerts.webhook_url`.
+10. Compare the value of `after` with `sha256:` and the hash of step 7.
 
 While `app` restarts, Caddy answers `502` (ADR-0065 (p)).
 The server writes the entry `SettingChanged` at the start, and only when the fingerprint differs (`reliability.md` 7.12).
@@ -1028,10 +1129,10 @@ The host lines of `pg_hba.conf` name the subnet, so they change too.
 3. Run steps 6 and 7 of the section "Create the environment file". The new values show.
 4. Write the lines of `pg_hba.conf` with the new subnet. Use steps 5 to 8 of the section "An older volume".
 5. Run `docker compose down`. The command deletes the containers and the networks. It deletes no volume.
-6. Start the stack with the steps of the section "Start the whole stack again". Do not run `docker compose up -d`.
-   After a rollback, read the warning in the section "Rollback" first.
-7. Run the check of the section "Check the client rules of the database".
-8. Run the section "Check the host firewall" again.
+6. After a rollback, read the warning in the section "Rollback" first.
+7. Start the stack with the steps of the section "Start the whole stack again". Do not run `docker compose up -d`.
+8. Run the check of the section "Check the client rules of the database".
+9. Run the section "Check the host firewall" again.
 
 If `db` does not start, put the old file back in the volume of `db`. Then change the lines and start again:
 
@@ -1080,36 +1181,45 @@ find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]????????????
 
 7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains. The marker file, `.lock`, `base`, and `.pitr-scratch` stay.
 8. Run `docker compose up -d --no-deps walarchive`. The stream starts on a directory without segments.
-9. Check the stream. The check passes when the result has exactly one row, the state `streaming`, and a `flush_lsn`. Take no base backup before it passes:
+9. Check the stream. Take no base backup before it passes:
 
 ```bash
 docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT state, flush_lsn FROM pg_stat_replication WHERE usename = 'recipe_replicator' AND application_name = 'walarchive'"
 ```
 
-10. Take the replacement base backup. The output holds the line `base backup completed`. Note its field `base`.
-    If the output says `another base backup run holds the lock`, run this step again after the weekly run ends:
+The check passes when the result has exactly one row, the state `streaming`, and a `flush_lsn`.
+
+10. Take the replacement base backup. The output holds the line `base backup completed`. Note its field `base`:
 
 ```bash
 docker compose exec walarchive basebackup-once
 ```
 
-11. Switch the WAL segment. Note the returned position. The server then closes the segment that holds the end of the base backup:
+If the output says `another base backup run holds the lock`, run this step again after the weekly run ends.
+
+11. Switch the WAL segment. Note the returned position:
 
 ```bash
 docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT pg_switch_wal()"
 ```
 
-12. Run the flush check until it returns `t`. The value `t` shows that the archive holds the end segment of the base backup as a complete file. Run the query again by hand until then:
+The server then closes the segment that holds the end of the base backup.
+
+12. Run the flush check until it returns `t`. Run the query again by hand until then:
 
 ```bash
 docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT EXISTS (SELECT 1 FROM pg_stat_replication WHERE application_name = 'walarchive' AND usename = 'recipe_replicator' AND flush_lsn >= '<position>'::pg_lsn)"
 ```
 
-13. Check the WAL of the base backup in the archive. The check passes on the exit code 0. Replace `<base>` with the field `base` of step 10:
+The value `t` shows that the archive holds the end segment of the base backup as a complete file.
+
+13. Check the WAL of the base backup in the archive. Replace `<base>` with the field `base` of step 10:
 
 ```bash
 docker compose exec walarchive pg_verifybackup --quiet --skip-checksums --wal-directory=/wal /wal/base/<base>
 ```
+
+The check passes on the exit code 0.
 
 14. Wait until the alert `replication` is inactive.
 
@@ -1165,7 +1275,7 @@ REVOKE pg_read_all_stats FROM recipe_app;
 ```
 
 3. Run `\drg recipe_app`. Check that the result shows no `pg_read_all_stats`.
-4. Do not replace the guard function now. Steps 13 to 17 of the section "Upgrade" replace it after `migrate` (ADR-0097 (h3)).
+4. Do not replace the guard function now. Steps 13 to 17 of "Upgrade" replace it after `migrate` (ADR-0097 (h3)).
 5. Copy the old file:
 
 ```bash
@@ -1320,10 +1430,12 @@ For `pgdata`, use the section "Read-only mode".
 
 For `backups` or `walarchive`, do these steps:
 
-1. If the condition `backup_age` is active too, use its row first. The retention runs only after a complete new set (`reliability.md` 7.7).
+1. If the condition `backup_age` is active too, use its row first.
 2. Run the section "Delete orphan temp files". It deletes only the temp names of killed runs.
-3. If the volume stays low, extend the filesystem of the second disk with the site procedure. No document gives that procedure.
+3. If the volume stays low, extend the filesystem of the second disk with the site procedure.
 
+The retention runs only after a complete new set (`reliability.md` 7.7).
+No document gives the site procedure of step 3.
 Delete no set, no base backup, and no WAL segment by hand.
 The scripts delete them by `backup.retention` and `basebackup.retention` (`reliability.md` 7.7, ADR-0099).
 These two values are constants of the scripts `backup-once` and `basebackup-once`. A change needs a new release.
@@ -1379,16 +1491,17 @@ The mode ends after the first measurement that succeeds and shows more than `dis
 A restart loop of `app` ends the job `alerts`, so no alert comes (`reliability.md` 3.7).
 Use the host monitoring for this case.
 
-1. Run `docker compose ps`. Look for a service that restarts or shows `unhealthy`. For a service other than `app`, use the section "Service unhealthy".
-2. Run `docker compose logs app`. Read the `ERROR` line of the failed start.
-3. If the line names a variable `PG*`, list the names in the Compose output:
+1. Run `docker compose ps`. Look for a service that restarts or shows `unhealthy`.
+2. For a service other than `app`, use the section "Service unhealthy".
+3. Run `docker compose logs app`. Read the `ERROR` line of the failed start.
+4. If the line names a variable `PG*`, list the names in the Compose output:
 
 ```bash
 docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 ```
 
-4. Delete that variable from `compose.yaml`, or from `.env` when `compose.yaml` reads its value there.
-5. Run `docker compose up -d --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again").
+5. Delete that variable from `compose.yaml`, or from `.env` when `compose.yaml` reads its value there.
+6. Run `docker compose up -d --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again").
 
 A variable of the host shell does not reach a container, so `unset` has no effect on the server.
 
@@ -1407,9 +1520,10 @@ This section covers `proxy`, `app`, `db`, `backup`, and `walarchive`. The one-sh
 docker inspect --format '{{range .State.Health.Log}}{{.ExitCode}} {{.Output}}{{end}}' "$(docker compose ps -q <service>)"
 ```
 
-3. Run the check by hand with the command of the next table. Read the exit code with `echo $?`. Exit code 0 is a pass.
-4. Run `docker compose logs --tail 50 <service>`. Read the `ERROR` lines (section "Read the logs").
-5. Find the row of the service in the next table.
+3. Run the check by hand with the command of the next table.
+4. Read the exit code with `echo $?`. Exit code 0 is a pass.
+5. Run `docker compose logs --tail 50 <service>`. Read the `ERROR` lines (section "Read the logs").
+6. Find the row of the service in the next table.
 
 | Service | The check passes when | Run the check by hand | Next |
 |---|---|---|---|
@@ -1468,44 +1582,6 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 | `the marker file of the WAL archive disk is missing` | The file `.walarchive-marker` is not in `RECIPE_WALARCHIVE_DIR`. | Run `install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"`. |
 | `cannot read the password file of recipe_replicator` or a message that starts with `the password file of recipe_replicator` | The file `replicator_password` is unreadable, is empty, or has a wrong form. | Check the owner and the mode as in the section "Create the secret files". The file holds one line and no carriage return. |
 
-## Destructive commands
-
-- Never run `docker compose down -v`.
-- Never run `docker volume rm` on `pgdata`.
-- Each delete step of this page names what it deletes.
-- Each delete step of a set, a file, or a directory of the backup disks follows a passed restore test.
-- The section "Subnet change" runs `docker compose down` without `-v`. It deletes no volume.
-- Never run `docker image prune -a` or `docker system prune -a`. They delete every image that no container uses. This includes the images that a rollback needs (section "Keep the images for a rollback").
-- Never run `docker volume prune --all`. It deletes every named volume that no container uses. After `docker compose down`, this includes `pgdata`.
-- Never run `docker system prune`, with or without options. It can delete stopped containers and networks of the stack.
-- The one allowed prune command is `docker image prune` without `-a`. It deletes dangling images only.
-- To delete the images of an old release, first check that you keep the image files and the release notes of that release. Then run `docker image rm recipe-server:<old tag> recipe-pgtools:<old tag>`. Docker refuses to delete an image that a container uses.
-
-## Check client_ip of the first login
-
-A wrong `PROXY_ADDRESS` gives each client the address of `proxy` (ADR-0065).
-
-1. Open the login page from a workstation. Log in with a wrong password.
-2. Open `/security-events` as an administrator.
-3. Filter the kind `login_failed` and the login that you used.
-4. Compare `client_ip` with the address of the workstation.
-5. If `client_ip` equals `PROXY_ADDRESS`, compare `PROXY_ADDRESS` in `.env` with the output of `docker compose config`.
-6. For a plant device in front of Caddy, use the section "A plant device in front of Caddy".
-
-The file `compose.yaml` holds `${PROXY_ADDRESS:?}` and not an address.
-Read the address in the output of `docker compose config` at the service `proxy` (`ipv4_address`) and at the entry `RECIPE_HTTP__TRUSTED_PROXIES` of the service `app`.
-
-## Related
-
-- [reliability.md](../architecture/reliability.md): sections 3.1, 3.2, 3.5, 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, 7.11, and 7.12
-- [api.md](../architecture/api.md): section 2.9
-- [ADR-0020](../adr/0020-deployment-migrations-backup.md), [ADR-0031](../adr/0031-migrator-configuration-and-secret-files.md), [ADR-0033](../adr/0033-globals-dump-of-the-backup.md), [ADR-0035](../adr/0035-identity-sessions-clarifications.md), [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md), [ADR-0063](../adr/0063-webhook-of-the-alerts.md)
-- [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
-- [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
-- [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
-- [ADR-0059](../adr/0059-health-probe-readiness-and-health-router.md), [ADR-0061](../adr/0061-start-order-of-serve.md), [ADR-0066](../adr/0066-backup-disks-file-sets-and-schedule.md), [ADR-0087](../adr/0087-drain-of-the-internal-listener.md)
-- [ADR-0071](../adr/0071-read-only-banner.md), [ADR-0073](../adr/0073-read-faults-and-the-audit-chain-alert.md), [ADR-0088](../adr/0088-run-interface-of-the-jobs-and-cut-count.md), [ADR-0089](../adr/0089-job-errors-first-disk-run-and-stop-line.md), [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md)
-
 ## Known gaps
 
 The documents do not yet close the gaps below. Each bullet gives the workaround of this page, if one exists.
@@ -1543,3 +1619,42 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
   - Settings: a change of the keys `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port` ([Change a setting](#change-a-setting))
 
 A later change will close these gaps with its own ADR.
+
+## Related
+
+- [reliability.md](../architecture/reliability.md): sections 1.2, 2.4, 3.1 to 3.7, 6, 7.1, 7.2, 7.3, 7.7, 7.8, 7.9, 7.10, 7.11, and 7.12
+- [api.md](../architecture/api.md): sections 2.8, 2.9, 3, 5.2, and 6
+- [data-model.md](../architecture/data-model.md): sections 4.9, 5.1, and 8
+- [domain-model.md](../architecture/domain-model.md): section 2.3
+- [overview.md](../architecture/overview.md): section 9
+- [ADR-0020](../adr/0020-deployment-migrations-backup.md): Deployment, migrations, backup and failure policy
+- [ADR-0031](../adr/0031-migrator-configuration-and-secret-files.md): Configuration of the migrator and the secret files of the roles
+- [ADR-0033](../adr/0033-globals-dump-of-the-backup.md): Globals dump of the backup
+- [ADR-0035](../adr/0035-identity-sessions-clarifications.md): Identity, sessions, and the guard of security events
+- [ADR-0059](../adr/0059-health-probe-readiness-and-health-router.md): Health probe subcommand, readiness rule, and health router layers
+- [ADR-0061](../adr/0061-start-order-of-serve.md): Start order of serve
+- [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md): Configuration keys of serve, their delivery, and the secret files
+- [ADR-0063](../adr/0063-webhook-of-the-alerts.md): Webhook of the alerts
+- [ADR-0064](../adr/0064-images-and-their-distribution.md): Images and their distribution
+- [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md): TLS of the proxy and the default trusted proxy
+- [ADR-0066](../adr/0066-backup-disks-file-sets-and-schedule.md): Backup disks, file sets, and schedule
+- [ADR-0067](../adr/0067-restore-test-in-the-backup-service.md): Restore test in the backup service
+- [ADR-0068](../adr/0068-wal-archive-and-base-backups.md): WAL archive and base backups
+- [ADR-0069](../adr/0069-hardening-of-the-database-access.md): Hardening of the database access
+- [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md): Container limits, networks, healthchecks, and the stack test
+- [ADR-0071](../adr/0071-read-only-banner.md): Read-only banner
+- [ADR-0073](../adr/0073-read-faults-and-the-audit-chain-alert.md): Read faults of the jobs and the audit chain alert
+- [ADR-0074](../adr/0074-names-on-the-backup-disks.md): Names of the files on the backup disks
+- [ADR-0075](../adr/0075-names-of-the-alert-conditions.md): Names of the alert conditions
+- [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md): Marker entry of the recovery check, WAL cutoff, and scratch constants
+- [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md): Upgrade and rollback without the dependencies of app
+- [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md): Image of `backup` and `walarchive` in the upgrade and the rollback
+- [ADR-0084](../adr/0084-generated-column-code-in-the-pre-data-restore.md): Code of a generated column in the restore of `pre-data`
+- [ADR-0087](../adr/0087-drain-of-the-internal-listener.md): Drain of the internal listener
+- [ADR-0088](../adr/0088-run-interface-of-the-jobs-and-cut-count.md): Run interface of the jobs and the cut count of the jobs
+- [ADR-0089](../adr/0089-job-errors-first-disk-run-and-stop-line.md): Errors of the jobs, the first run of `disk_check`, and the stop line
+- [ADR-0095](../adr/0095-role-grammar-of-the-globals-file.md): Role grammar of the globals file in the restore test
+- [ADR-0096](../adr/0096-guard-lock-of-the-last-administrator.md): Guard lock of the last Administrator
+- [ADR-0097](../adr/0097-schema-free-names-in-the-drop-guard.md): Names without a schema in the drop guard of the audit objects
+- [ADR-0099](../adr/0099-stream-before-the-replacement-base-backup.md): Stream before the replacement base backup after a WAL gap
+- [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md): Wait for the scheduled audit chain check after a restore
