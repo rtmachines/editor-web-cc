@@ -960,7 +960,8 @@ The host lines of `pg_hba.conf` name the subnet, so they change too.
 3. Run steps 6 and 7 of the section "Create the environment file". The new values show.
 4. Write the lines of `pg_hba.conf` with the new subnet. Use steps 5 to 8 of the section "An older volume".
 5. Run `docker compose down`. The command deletes the containers and the networks. It deletes no volume.
-6. Run `docker compose up -d`. After a rollback, read the warning in the section "Rollback" first.
+6. Start the stack with the steps of the section "Start the whole stack again". Do not run `docker compose up -d`.
+   After a rollback, read the warning in the section "Rollback" first.
 7. Run the check of the section "Check the client rules of the database".
 8. Run the section "Check the host firewall" again.
 
@@ -1017,7 +1018,8 @@ find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]????????????
 docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT state, flush_lsn FROM pg_stat_replication WHERE usename = 'recipe_replicator' AND application_name = 'walarchive'"
 ```
 
-10. Take the replacement base backup. The output holds the line `base backup completed`. Note its field `base`:
+10. Take the replacement base backup. The output holds the line `base backup completed`. Note its field `base`.
+    If the output says `another base backup run holds the lock`, run this step again after the weekly run ends:
 
 ```bash
 docker compose exec walarchive basebackup-once
@@ -1294,7 +1296,12 @@ If the disk has no such file, extend its filesystem with the site procedure.
 If the free space looks fine and the banner stays, find the cause in this list:
 
 - The free space is between `disk.readonly_percent` and `disk.resume_percent`. Increase the free space until it is above `disk.resume_percent`.
-- The measurement fails each run. `app` reads `pgdata` through a read-only mount. Run `docker compose config | grep 'pgdata:/var/lib/postgresql/data:ro'`. The output must show the line.
+- The measurement fails each run. `app` reads `pgdata` through a read-only mount. Run the command below. The output must show the line `/var/lib/postgresql/data false`. The value `false` shows a read-only mount.
+
+```bash
+docker inspect --format '{{ range .Mounts }}{{ .Destination }} {{ .RW }}{{ println }}{{ end }}' "$(docker compose ps -q app)"
+```
+
 - If the mount line is present, run `docker compose ps` and read the health of `app` and `db`. No document gives a further fix.
 
 The mode ends after the first measurement that succeeds and shows more than `disk.resume_percent` free.
@@ -1313,7 +1320,7 @@ docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 ```
 
 4. Delete that variable from `compose.yaml`, or from `.env` when `compose.yaml` reads its value there.
-5. Run `docker compose up -d`.
+5. Run `docker compose up -d --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again").
 
 A variable of the host shell does not reach a container, so `unset` has no effect on the server.
 
