@@ -69,7 +69,7 @@ At most two cargo agents run at the same time. The instruction files change only
 ## 7. Integration
 
 - [x] 7.1 (CHANGELOG.md) [mechanical] Add the entries of F1 to F7 under "Unreleased". The F1 entry says that the change narrows F1 and does not close it (ADR-0095 (h)). Add the release note line "manual superuser step" for the guard function of an older volume (ADR-0097 (h3)).
-- [ ] 7.2 (workspace) [sonnet] Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, `cargo fmt --check`, `openspec validate --all --strict`, and `ste-lint.py` on the scope of ADR-0023. Check: each command passes, and the CI stack test and the upgrade job of 4.4 pass on the branch.
+- [x] 7.2 (workspace) [sonnet] Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, `cargo fmt --check`, `openspec validate --all --strict`, and `ste-lint.py` on the scope of ADR-0023. Check: each command passes, and the CI stack test and the upgrade job of 4.4 pass on the branch.
 
 ## 8. STE checks
 
