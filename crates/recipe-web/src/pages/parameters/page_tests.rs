@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use super::test_kit::{parameter_path, position};
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_clean_html, assert_error, field_value};
-use crate::test_support::plant::main_of;
+use crate::test_support::plant::{ENGLISH, POLISH, main_of};
 use crate::test_support::recipes::{HOLD_KEY, LINE_A_KEY, SPEED_KEY};
 
 #[tokio::test]
@@ -73,5 +73,34 @@ async fn parameters_page_of_a_missing_or_malformed_key_gives_e_web_005() {
     for path in [unknown.as_str(), "/recipes/R-100/versions/3/parameters/x"] {
         let reply = world.get_en(&world.engineer, path).await;
         assert_error(&reply, StatusCode::NOT_FOUND, "E-WEB-005", path);
+    }
+}
+
+/// Return the text of the `<div id="...">` block `id` up to its first closing tag.
+fn block_of<'a>(body: &'a str, id: &str) -> &'a str {
+    let open = format!("<div id=\"{id}\">");
+    let start = body.split(&open).nth(1).unwrap();
+    start.split("</div>").next().unwrap()
+}
+
+#[tokio::test]
+async fn parameters_page_marks_the_english_definition_texts_with_lang_en_in_both_ui_languages() {
+    let world = recipe_world();
+    for (ui_lang, header) in [("pl", POLISH), ("en", ENGLISH)] {
+        let reply = world
+            .get(&world.engineer, &parameter_path(SPEED_KEY, ""), &[header])
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{ui_lang}: {}", reply.body);
+        for id in ["parameter-summary", "translations"] {
+            let block = block_of(&reply.body, id);
+            assert!(
+                block.contains("<dd lang=\"en\">SPEED</dd>"),
+                "{ui_lang} {id}: {block}"
+            );
+            assert!(
+                block.contains("<dd lang=\"en\">A parameter of the press line</dd>"),
+                "{ui_lang} {id}: {block}"
+            );
+        }
     }
 }

@@ -8,9 +8,9 @@
 <dt>{{ t.get("field-tag") }}</dt>
 <dd class="data">{{ summary.tag }}</dd>
 <dt>{{ t.get("field-name-en") }}</dt>
-<dd>{{ summary.name_en }}</dd>
+<dd lang="en">{{ summary.name_en }}</dd>
 <dt>{{ t.get("field-description-en") }}</dt>
-<dd>{{ summary.description_en }}</dd>
+<dd lang="en">{{ summary.description_en }}</dd>
 <dt>{{ t.get("field-type") }}</dt>
 <dd class="data">{{ summary.type_text }}</dd>
 {% if let Some(address) = summary.s7_address.as_ref() %}<dt>{{ t.get("field-s7-address") }}</dt>
