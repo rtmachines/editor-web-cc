@@ -1,4 +1,4 @@
-//! Tests of the pairs of settings that share a default (finding CR-A8-3).
+//! Tests of the pairs of settings that share a default.
 //!
 //! Three pairs have equal defaults: `interval` and `not_ready_for` (60 s), `failed_login_window`
 //! and `security_window` (15 min), and `backup_max_age_alert` and `audit_max_check_age` (26 h).

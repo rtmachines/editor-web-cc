@@ -52,7 +52,8 @@ impl AlertCondition {
 
     /// Return the stable name of the condition (ADR-0075 (a)).
     ///
-    /// The name has lower-case ASCII letters and underscores only, and it starts with a letter. It never changes (ADR-0075 (b)).
+    /// The name has lower-case ASCII letters and underscores only, and it starts with a letter.
+    /// It never changes (ADR-0075 (b)).
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -77,7 +78,8 @@ impl AlertCondition {
 /// none either (ADR-0063 (g)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WebhookFault {
-    /// The connection to the host failed.
+    /// The connection to the host failed. A panic of the call gives this value too, for that call
+    /// only (`reliability.md` section 2.4, rule 6).
     Connection,
     /// The TLS handshake failed.
     Tls,

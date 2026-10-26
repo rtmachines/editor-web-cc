@@ -40,7 +40,8 @@ const DEFAULT_BATCH_BYTES: u64 = 8 * 1024 * 1024;
 pub struct AuditChainCheckSettings {
     /// The most rows of one batch (`audit.check_batch`).
     pub batch_rows: u32,
-    /// The most bytes of `before_state` and `after_state` in one batch (`audit.check_batch_bytes`).
+    /// The most bytes of `before_state` and `after_state` in one batch
+    /// (`audit.check_batch_bytes`).
     pub batch_bytes: u64,
 }
 
@@ -112,8 +113,8 @@ impl AuditChainCheck {
     /// # Errors
     ///
     /// Returns `AppError::Audit(AuditError::ChainBroken)` (`E-AUD-002`) after the security event
-    /// and the two state keys. It returns `AppError::Storage` when a read or a write fails. The
-    /// check is then not completed, so a fault of the event write records no state key.
+    /// and the two state keys. It returns `AppError::Storage` when a read or a write fails. A fault
+    /// of the event write records no state key.
     pub async fn run_once(&self, request_id: RequestId, kind: RunKind) -> Result<(), AppError> {
         if kind == RunKind::CatchUp && self.newer_check_exists().await? {
             return Ok(());
@@ -210,8 +211,9 @@ impl AuditChainCheck {
 
 /// Return the end after a clean batch, or a fault when the batch broke its contract.
 ///
-/// A batch must move the end forward and must not pass the head. A batch that does neither
-/// would loop for ever or check rows that the head does not cover.
+/// A batch must move the end forward and must not pass the head. A batch that does not move the
+/// end forward would loop for ever. A batch that passes the head would check rows that the head
+/// does not cover.
 fn advance(
     end: &ChainPosition,
     next: ChainPosition,

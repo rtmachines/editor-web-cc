@@ -3,16 +3,16 @@
 //! Purpose: stop writes before a full disk can damage the data.
 //!
 //! Schedule: every `health.disk_check_interval`, and once at start after the database check.
-//! The volume `pgdata` sets the mode. The volumes `backups` and `walarchive` give a warning.
+//! The volume `pgdata` sets the mode.
 //!
 //! One run reads the free space of `pgdata` and compares it with three thresholds. Below
 //! `disk.readonly_percent` the job turns the mode on. Above `disk.resume_percent` it turns the mode
 //! off. Between both it leaves the mode unchanged (reliability.md section 7.8). A failed
 //! measurement turns the mode on, and only a measurement that succeeds can turn it off again
 //! (ADR-0073 (d)). A reading with more free blocks than total blocks is invalid, so the job treats
-//! it as a failed measurement. The job writes its `WARN` lines itself and returns `Ok` after a fault of the
-//! disk, because a fault is a handled fault (ADR-0089 (d)). The job `alerts` reads the volumes
-//! `backups` and `walarchive`, so this job never reads them.
+//! it as a failed measurement. The job writes its `WARN` lines itself and returns `Ok` after a
+//! fault of the disk, because a fault is a handled fault (ADR-0089 (d)). The job `alerts` reads the
+//! volumes `backups` and `walarchive`, so this job never reads them.
 
 use std::cmp::Ordering;
 use std::io;
@@ -28,7 +28,8 @@ use super::RunKind;
 use crate::error::AppError;
 use crate::ports::{Clock, DiskFault, DiskSpace, FreeSpace, ReadOnlySwitch};
 
-/// The name of the only volume that this job reads. The `WARN` lines hold it in the field `volume`.
+/// The name of the only volume that this job reads.
+/// The `WARN` lines hold it in the field `volume`.
 const VOLUME: &str = "pgdata";
 /// Value of a time atomic before its first line. No instant has this value.
 const NEVER: i64 = i64::MIN;

@@ -8,9 +8,9 @@
 //!
 //! A run reads the time of the database with one call of the port, then reads the clock of the
 //! host. The difference in both directions counts. A skew above `clock.skew_warn` gives one `WARN`
-//! line with the fields `skew` and `limit`. Both fields show a full `Duration`. A skew equal to the limit gives no
-//! line. A fault of the read is a storage error. The run returns it and the supervisor logs it once
-//! at `ERROR` (ADR-0060 (q), ADR-0089 (d)).
+//! line with the fields `skew` and `limit`. Both fields show a full `Duration`. A skew equal to the
+//! limit gives no line. A fault of the read is a storage error. The run returns it and the
+//! supervisor logs it once at `ERROR` (ADR-0060 (q), ADR-0089 (d)).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -81,7 +81,8 @@ impl ClockCheck {
     ///
     /// # Errors
     ///
-    /// Returns the `StorageError` of the read as `AppError::Storage`. The run then compares nothing.
+    /// Returns the `StorageError` of the read as `AppError::Storage`.
+    /// The run then compares nothing.
     pub async fn run_once(&self, _request_id: RequestId, _kind: RunKind) -> Result<(), AppError> {
         let database = self.reads.database_now().await?;
         let host = self.clock.now();

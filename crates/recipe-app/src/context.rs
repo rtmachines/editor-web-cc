@@ -34,7 +34,7 @@ pub struct AppContext {
     pub(crate) diff_gate: DiffGate,
     /// The gate of the parallel exports (`export.permits`). Every clone shares it (ADR-0056 (f)).
     pub(crate) export_gate: ExportGate,
-    /// The counters of the job `alerts`. Every clone shares them (ADR-0073).
+    /// The counters of the job `alerts`. Every clone shares them (ADR-0060 (z)).
     pub(crate) counters: AlertCounters,
 }
 

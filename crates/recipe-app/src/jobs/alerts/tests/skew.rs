@@ -1,4 +1,4 @@
-//! Tests of the border of a stored time in the future (ADR-0093 (a), finding CR-A8-2).
+//! Tests of the border of a stored time in the future (ADR-0093 (a)).
 //!
 //! A stored time later than `database_now` by at most `alerts.interval` has the age zero. A later
 //! time is untrusted, and its condition stays active. Each border is tested at 1 ns before, exactly

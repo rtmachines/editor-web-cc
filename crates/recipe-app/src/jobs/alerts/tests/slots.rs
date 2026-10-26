@@ -1,4 +1,4 @@
-//! Tests of the exact panic slots, the cursor, and the threshold of `panics` (finding CR-A8-3).
+//! Tests of the exact panic slots, the cursor, and the threshold of `panics`.
 //!
 //! A test that reads only the result of a run misses a clamp of one slot. These tests read the
 //! slots and the cursor of the job after each run, with different times in each slot.

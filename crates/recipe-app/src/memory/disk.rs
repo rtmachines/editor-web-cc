@@ -53,8 +53,9 @@ struct Inner {
 /// In-memory adapter of [`DiskSpace`].
 ///
 /// The type solves one problem: the tests of the job `disk_check` need a free space for each of
-/// the two paths `pgdata` and `backups`, and they need a failure of one call. A fault wins over
-/// the reading of the path. A clone shares the readings, the counter, and the faults.
+/// the three volumes `pgdata`, `backups`, and `walarchive`, and they need a failure of one call.
+/// A fault wins over the reading of the path. A clone shares the readings, the counter, and the
+/// faults.
 #[derive(Clone, Debug, Default)]
 pub struct MemoryDiskSpace {
     /// The values of the adapter.
