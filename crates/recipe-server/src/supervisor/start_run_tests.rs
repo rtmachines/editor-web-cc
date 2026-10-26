@@ -285,3 +285,34 @@ async fn the_loop_does_not_repeat_the_start_run() {
     })
     .await;
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_finished_start_run_leaves_no_open_count() {
+    bounded(async {
+        let (mut supervisor, _stop) = start();
+        // The start run ends at once. The first loop run at 60 s hangs.
+        let (job, mut seen) = probe(
+            Instant::now(),
+            secs(0),
+            &[Behavior::Succeed, Behavior::Hang],
+        );
+        let job = Arc::new(job);
+        assert!(
+            supervisor
+                .run_at_start(JobName::DiskCheck, &job)
+                .await
+                .is_ok()
+        );
+        supervisor.spawn_shared(
+            JobName::DiskCheck,
+            Schedule::every(secs(60)).unwrap(),
+            Arc::clone(&job),
+        );
+        sleep(secs(70)).await;
+        assert_eq!(seen.starts(), vec![0, 60]);
+        // A count that the start run did not release would give 2 and not 1.
+        let outcome = supervisor.drain(secs(0)).await;
+        assert_eq!(outcome.cut(), 1);
+    })
+    .await;
+}
