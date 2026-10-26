@@ -15,6 +15,29 @@ IMAGES = {
 }
 
 
+class PreviousRefError(ValueError):
+    """Reject a previous ref before the image build."""
+
+
+def select_previous_ref(upgrade_from, event_name, before):
+    """Return the explicit ref, the push SHA, or None for the merge base."""
+    if upgrade_from:
+        return upgrade_from
+    if event_name == "push":
+        if before == "0" * 40:
+            raise PreviousRefError("the push before commit is the zero SHA. Stop and report.")
+        if re.fullmatch(r"[0-9a-fA-F]{40}", before) is None:
+            raise PreviousRefError("the push before commit is not a valid SHA. Stop and report.")
+        return before
+    return None
+
+
+def check_previous_commit(previous, head):
+    """Compare commit IDs after Git resolves each ref."""
+    if previous == head:
+        raise PreviousRefError("the previous commit equals HEAD. Stop and report.")
+
+
 def guard_statement(source):
     start = "CREATE FUNCTION audit_guard.audit_objects_dropped() RETURNS event_trigger"
     if source.count(start) != 1:
@@ -51,6 +74,12 @@ def check_images(config, tag):
 
 
 def main():
+    if sys.argv[1] == "previous-ref":
+        print(select_previous_ref(*sys.argv[2:]) or "")
+        return
+    if sys.argv[1] == "previous-commit":
+        check_previous_commit(*sys.argv[2:])
+        return
     action, path, *arguments = sys.argv[1:]
     source = pathlib.Path(path).read_text(encoding="utf-8")
     if action == "guard":
@@ -68,6 +97,9 @@ def main():
 if __name__ == "__main__":
     try:
         main()
+    except PreviousRefError as error:
+        print(f"CI: {error}", file=sys.stderr)
+        sys.exit(1)
     except (ValueError, KeyError, OSError):
         print("CI: the upgrade gate failed. Check the input and the preceding job output.", file=sys.stderr)
         sys.exit(1)

@@ -7,12 +7,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 [[ $COMPOSE_PROJECT_NAME == "recipe-ci-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}" ]] \
   || fail "the upgrade project does not belong to this job"
 export UPGRADE_PREVIOUS_DIR=$CI_ROOT/previous
+UPGRADE_COMPOSE_DIR=$GITHUB_WORKSPACE
 
 compose() {
   sudo --preserve-env=COMPOSE_PROJECT_NAME,RECIPE_VERSION,RECIPE_BACKUP_DIR,RECIPE_WALARCHIVE_DIR,RECIPE_SECRETS_DIR,COMPOSE_SUBNET,COMPOSE_IP_RANGE,PROXY_ADDRESS,SITE_ADDRESS,UPGRADE_PREVIOUS_DIR \
     docker compose -p "$COMPOSE_PROJECT_NAME" \
-    -f "$GITHUB_WORKSPACE/deploy/compose.yaml" \
-    -f "$GITHUB_WORKSPACE/deploy/compose.dev.yaml" \
+    -f "$UPGRADE_COMPOSE_DIR/deploy/compose.yaml" \
+    -f "$UPGRADE_COMPOSE_DIR/deploy/compose.dev.yaml" \
     -f "$GITHUB_WORKSPACE/deploy/ci/upgrade.compose.yaml" "$@"
 }
 
@@ -82,6 +83,7 @@ restore_tag_on_failure() {
   then
     # Upgrade step 12. Select the previous tag without replacing the running app.
     export RECIPE_VERSION=ci-previous
+    UPGRADE_COMPOSE_DIR=$UPGRADE_PREVIOUS_DIR
     check_images
     printf 'CI: the upgrade stopped before the guard step. The previous image tag is selected.\n' >&2
   fi

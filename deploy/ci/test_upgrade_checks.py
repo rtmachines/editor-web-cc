@@ -3,6 +3,8 @@
 import importlib.util
 import copy
 import pathlib
+import subprocess
+import sys
 import unittest
 
 
@@ -12,6 +14,44 @@ class UpgradeChecksTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("upgrade_checks", path)
         self.checks = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.checks)
+
+    def test_push_selects_the_before_commit(self):
+        before = "a" * 40
+        self.assertEqual(self.checks.select_previous_ref("", "push", before), before)
+
+    def test_push_rejects_the_zero_sha(self):
+        with self.assertRaisesRegex(ValueError, "zero SHA"):
+            self.checks.select_previous_ref("", "push", "0" * 40)
+
+    def test_push_rejects_a_missing_or_invalid_before_sha(self):
+        for before in ("", "main", "a" * 39, "g" * 40):
+            with self.subTest(before=before), self.assertRaises(ValueError):
+                self.checks.select_previous_ref("", "push", before)
+
+    def test_explicit_ref_overrides_the_event(self):
+        for event, before in (("push", "a" * 40), ("push", "0" * 40), ("workflow_dispatch", "")):
+            with self.subTest(event=event, before=before):
+                self.assertEqual(self.checks.select_previous_ref("v1.2.3", event, before), "v1.2.3")
+
+    def test_no_ref_requests_the_merge_base(self):
+        for event in ("", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertIsNone(self.checks.select_previous_ref("", event, "a" * 40))
+
+    def test_previous_commit_must_differ_from_head(self):
+        self.checks.check_previous_commit("a" * 40, "b" * 40)
+        with self.assertRaisesRegex(ValueError, "previous commit equals HEAD"):
+            self.checks.check_previous_commit("a" * 40, "a" * 40)
+
+    def test_equal_commits_exit_with_one_clear_message(self):
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", str(pathlib.Path(__file__).with_name("upgrade_checks.py")),
+             "previous-commit", "a" * 40, "a" * 40],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "CI: the previous commit equals HEAD. Stop and report.\n")
 
     def test_extracts_only_the_guard_statement(self):
         statement = (

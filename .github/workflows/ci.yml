@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      upgrade_from:
+        description: Previous release ref for the upgrade test
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -106,6 +111,8 @@ jobs:
       contents: read
     env:
       RECIPE_VERSION: ci-upgrade
+      UPGRADE_FROM: ${{ inputs.upgrade_from }}
+      UPGRADE_BEFORE: ${{ github.event.before }}
       COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}
       COMPOSE_SUBNET: 172.28.0.0/16
       COMPOSE_IP_RANGE: 172.28.1.0/24

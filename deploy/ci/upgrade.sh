@@ -4,24 +4,40 @@
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/upgrade-common.sh"
 
+previous_commit() {
+  local ref base head
+  ref=$(upgrade_check previous-ref "${UPGRADE_FROM:-}" "${GITHUB_EVENT_NAME:-}" "${UPGRADE_BEFORE:-}") || return 1
+  if [[ -z $ref ]]
+  then
+    ref=$(git merge-base origin/main HEAD) \
+      || fail "cannot find the merge base with origin/main. Stop and report."
+  fi
+  base=$(git rev-parse --verify --end-of-options "$ref^{commit}" 2>/dev/null) \
+    || fail "cannot resolve the previous ref to a commit. Stop and report."
+  head=$(git rev-parse --verify HEAD) \
+    || fail "cannot resolve HEAD to a commit. Stop and report."
+  upgrade_check previous-commit "$base" "$head" || return 1
+  printf '%s\n' "$base"
+}
+
 build_previous() {
   local base
-  base=$(git merge-base origin/main HEAD) \
-    || fail "cannot build the previous images from the merge base with origin/main. Stop and report."
+  base=$(previous_commit) || return 1
   git worktree add --detach "$UPGRADE_PREVIOUS_DIR" "$base" \
-    || fail "cannot build the previous images from the merge base with origin/main. Stop and report."
+    || fail "cannot create the previous worktree. Stop and report."
   printf 'Previous release: %s\n' "$base"
   if ! docker buildx build --load --tag recipe-server:ci-previous \
       --file "$UPGRADE_PREVIOUS_DIR/deploy/Dockerfile" "$UPGRADE_PREVIOUS_DIR" \
     || ! docker buildx build --load --tag recipe-pgtools:ci-previous \
       --file "$UPGRADE_PREVIOUS_DIR/deploy/pgtools/Dockerfile" "$UPGRADE_PREVIOUS_DIR/deploy/pgtools"
   then
-    fail "cannot build the previous images from the merge base with origin/main. Stop and report."
+    fail "cannot build the previous images. Stop and report."
   fi
 }
 
 start_previous() {
   export RECIPE_VERSION=ci-previous
+  UPGRADE_COMPOSE_DIR=$UPGRADE_PREVIOUS_DIR
   check_images
   compose up -d --wait --wait-timeout 180 db
   compose up -d backup-premigrate
@@ -72,6 +88,7 @@ check_smoke() {
 upgrade() {
   # Upgrade steps 5 and 6. CI uses an explicit tag instead of a release .env file.
   export RECIPE_VERSION=ci-upgrade
+  UPGRADE_COMPOSE_DIR=$GITHUB_WORKSPACE
   check_images
   # Upgrade step 7 does not apply. CI has no plant device before Caddy.
   # Upgrade steps 8 and 9. Keep the old app running while the rollback set completes.

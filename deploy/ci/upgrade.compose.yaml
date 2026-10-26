@@ -1,4 +1,5 @@
-# The upgrade test keeps the old init script on the existing database volume.
+# Both releases use this overlay to disable scheduled jobs.
+# The new stack keeps the old init mount, so Compose does not replace db.
 services:
   db:
     volumes:
