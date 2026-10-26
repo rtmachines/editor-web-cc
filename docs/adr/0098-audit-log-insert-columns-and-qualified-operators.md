@@ -1,6 +1,6 @@
 # ADR-0098: Insert columns of `audit_log` and qualified operators of two definer functions
 
-Status: Accepted
+Status: Accepted. Amended by the code review of hardening-round-1 (migration 0007 also replaces `security_event_guard()`, and the scanner of (f) reports `IS DISTINCT FROM`, `NULLIF`, and the simple `CASE`)
 Date: 2026-10-25
 Deciders: project owner
 

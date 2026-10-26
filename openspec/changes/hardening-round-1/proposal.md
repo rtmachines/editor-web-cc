@@ -14,7 +14,7 @@ The change uses A9 and A16.
 - F4. `ChangeOwnPassword` and `Logout` call `authorize` as the first statement. A source test of the identity use cases keeps the rule.
 - F5. CLAUDE.md, `.claude/rules/sql.md`, `AGENTS.md`, and `data-model.md` section 6 name `ChangeOwnPassword` as the second command with two transactions (ADR-0035 (b)).
 - F6. `recipe_app` inserts only eleven columns of `audit_log`. The database sets `id`, `occurred_at`, and the three chain columns (ADR-0098).
-- F7. A forward migration qualifies the operators and types of `audit_hash_chain()` and `security_event_purge()`. It keeps the grouping of each expression and the attributes of both functions (ADR-0098).
+- F7. A forward migration qualifies the operators and types of `audit_hash_chain()` and `security_event_purge()`. The code review adds `security_event_guard()`, because `IS DISTINCT FROM` also uses a search-path lookup. It keeps the grouping of each expression and the attributes of both functions (ADR-0098).
 - ADR-0015, ADR-0022, ADR-0034, ADR-0035, ADR-0067, and ADR-0078 get "Amended by" notes.
 
 ## Capabilities
