@@ -25,7 +25,9 @@ const repoRoot = path.resolve(__dirname, '..');
 export default defineConfig({
   testDir: './tests',
   globalSetup: './tests/global-setup.ts',
-  fullyParallel: true,
+  fullyParallel: false,
+  // The in-memory store of the dev server loses concurrent writes. One worker runs the suite.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: [['html', { open: 'never' }], ['list']],
