@@ -599,7 +599,14 @@ The files `login_hmac_key` and `csrf_signing_key` hold one key per line, the new
 
 The command writes the new key as the first line and keeps the old line. It prints no key.
 
-2. Set the owner and the mode of each new file. Then move it over the old file:
+2. Count the keys and the lines of each new file. The two numbers must be equal, and each must be 2:
+
+```bash
+grep -c -E '^[0-9a-f]{64}$' "$RECIPE_SECRETS_DIR/<name>.new"
+grep -c '' "$RECIPE_SECRETS_DIR/<name>.new"
+```
+
+3. Set the owner and the mode of each new file. Then move it over the old file:
 
 ```bash
 chown 65532 "$RECIPE_SECRETS_DIR/<name>.new"
@@ -607,16 +614,29 @@ chmod 0400 "$RECIPE_SECRETS_DIR/<name>.new"
 mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
 ```
 
-3. Run `docker compose up -d --force-recreate --no-deps app`.
-4. Wait for `security.key_rotation_overlap` of `reliability.md` 7.11.
-5. Delete the old line from the key file. This step deletes one key and no data.
-6. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/<name>"`. Check that the output is `400 65532`.
-7. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the key file.
-8. Run `docker compose up -d --force-recreate --no-deps app` again.
+4. Run `docker compose up -d --force-recreate --no-deps app`.
+5. Run `docker compose ps app` until `app` shows `healthy`.
+6. Open the login page from a workstation. Log in with your account. Check that the login works.
+7. Wait for the value of `security.key_rotation_overlap` (`reliability.md` 7.11). Count the time from step 4.
+8. Delete the old line from the key file. This step deletes one key and no data.
+9. Run the two commands of step 2 on `"$RECIPE_SECRETS_DIR/<name>"`. Check that the two numbers are equal and that each is 1.
+10. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/<name>"`. Check that the output is `400 65532`.
+11. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the key file.
+12. Run `docker compose up -d --force-recreate --no-deps app` again.
+13. Run `docker compose ps app` until `app` shows `healthy`.
+14. Log in again from a workstation. Check that the login works.
 
-The server accepts both keys during the overlap.
-Steps 1 and 2 need no check of this kind, because they set the owner and the mode before the move.
-An editor can change the owner or the mode in step 5 and can leave a copy in the directory.
+The server accepts every key of the file.
+The server stops the start of `app` when a line of a key file is not 64 lower-case hex characters (ADR-0035 (d)).
+Then use the section "Restart loop" to read the `ERROR` line. The line names the key `security.login_hmac_key_file` or `security.csrf_signing_key_file`.
+Steps 1 to 3 need no check of the owner and the mode, because they set both before the move.
+An editor can change the owner or the mode in step 8 and can leave a copy in the directory.
+
+The key `login_hmac_key` has one more effect. The filter `login` of `/security-events` signs the typed login with the first key (`api.md` 2.9).
+After step 4, the filter finds an event of an unknown login only when the server wrote the event under the new key.
+An event of a login that belongs to a user stays visible, because the filter also matches the user.
+The key `csrf_signing_key` signs the pre-session cookie of the login page. After step 12, a login page that was open before step 4 may fail.
+The user then gets `403 E-WEB-007`. The user opens the login page again to get a new cookie.
 
 ## Certificate rotation
 
@@ -648,6 +668,72 @@ diff <(openssl x509 -in <new certificate> -noout -pubkey) <(openssl pkey -in <ne
 A rotation recreates the container `proxy`, so the service stops for a short time (ADR-0065 (c)).
 If TLS fails, copy the two `.old` files over `tls_cert` and `tls_key`. Then repeat step 6.
 A bad pair stops TLS, so do not skip steps 2 and 3.
+A change of the key alone needs a new certificate, because the certificate holds the public key. Use the same steps with the new pair.
+
+## Change a database password
+
+Change a password when it may be exposed.
+`db` reads the password files at its init only (`reliability.md` 7.1, `01-roles.sh`). A new file therefore changes no password in the database.
+The step `ALTER ROLE` sets the new password from the new file, as step 6 of "Restore into production" does (ADR-0033).
+A running container keeps the file that it started with (ADR-0065 (c)). `db` and the service that uses the password must start again.
+
+| Role | File | Services that read the file | Start again after the change |
+|---|---|---|---|
+| `postgres` | `postgres_password` | `db` only | No service |
+| `recipe_migrator` | `migrator_password` | `migrate` | No service. `migrate` reads the file at its next run |
+| `recipe_app` | `app_password` | `app` | `app` |
+| `recipe_backup` | `backup_password` | `backup` and `backup-premigrate` | `backup` |
+| `recipe_replicator` | `replicator_password` | `walarchive` | `walarchive` |
+
+Replace `<name>` with a file of the table. Replace `<role>` with the role of the same row.
+
+1. Do steps 1 and 2 of the section "Stop the whole stack". No run of `backup` or `walarchive` must be active.
+2. Create the new file. The command prints no password:
+
+```bash
+( umask 077 && openssl rand -hex 32 > "$RECIPE_SECRETS_DIR/<name>.new" )
+```
+
+3. Set the owner and the mode of the new file as the table of "Create the secret files" gives.
+4. For `app_password` and `migrator_password`, give the new file the ACL of step 8 of "Create the secret files".
+5. Move the new file over the old file:
+
+```bash
+mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
+```
+
+6. Run `docker compose up -d --force-recreate --no-deps db`.
+7. Run `docker compose ps db` until `db` shows `healthy`.
+8. Set the new password. Psql reads the file inside `db`, so no password reaches a command line:
+
+```bash
+docker compose exec -T -u postgres db psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc --dbname postgres <<'SQL'
+\set new_password `cat /run/secrets/<name>`
+SET log_statement = 'none';
+SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+ALTER ROLE <role> PASSWORD :'new_password';
+SQL
+```
+
+9. Count the lines of the log of `db` that name a role next to `PASSWORD`. The count must be 0:
+
+```bash
+docker compose logs db | grep -c -E 'ROLE (postgres|recipe_[a-z]+) PASSWORD'
+```
+
+10. Run `docker compose up -d --force-recreate --no-deps <service>` for the service of the last column of the table.
+11. Run `docker compose ps -a`. Check that `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
+12. For `recipe_app`, run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. Check that the exit code is 0.
+13. For `recipe_backup`, run `docker compose exec backup backup-now`. Check that the output holds the line `backup completed`.
+14. For `recipe_replicator`, run `docker compose logs --tail 20 walarchive`. Check that the output holds no `ERROR` line.
+
+Do steps 8 to 10 without a pause. Between them, a new connection of the service can fail with the old password.
+If step 8 fails, the role keeps its old password. Run step 8 again and do not start step 10 first.
+During the restart of `db` in step 6, `app`, `backup`, and `walarchive` cannot reach the database.
+Read the notes of the section "Restart one service". A long stop of `db` can leave a gap in the WAL stream. See the section "A gap in the WAL stream".
+For `recipe_migrator`, no service uses the new password before the next run of `migrate` in the section "Upgrade". No document gives an earlier test.
+For `postgres`, no service of the stack uses the password after the init of `db`.
 
 ## Alert webhook
 
@@ -1213,7 +1299,8 @@ Read the address in the output of `docker compose config` at the service `proxy`
 ## Related
 
 - [reliability.md](../architecture/reliability.md): sections 3.1, 3.2, 3.5, 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, and 7.11
-- [ADR-0020](../adr/0020-deployment-migrations-backup.md), [ADR-0033](../adr/0033-globals-dump-of-the-backup.md), [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md), [ADR-0063](../adr/0063-webhook-of-the-alerts.md)
+- [api.md](../architecture/api.md): section 2.9
+- [ADR-0020](../adr/0020-deployment-migrations-backup.md), [ADR-0031](../adr/0031-migrator-configuration-and-secret-files.md), [ADR-0033](../adr/0033-globals-dump-of-the-backup.md), [ADR-0035](../adr/0035-identity-sessions-clarifications.md), [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md), [ADR-0063](../adr/0063-webhook-of-the-alerts.md)
 - [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
 - [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
 - [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
