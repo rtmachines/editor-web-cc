@@ -99,7 +99,20 @@ A version page shows these items from top to bottom. Each item appears only for 
 
 | Screen | Route | What it shows | Main actions | Permission to open |
 |---|---|---|---|---|
-| Parameter { $tag } | `GET /recipes/{ref}/versions/{n}/parameters/{key}` | The parameter summary, the value grid, and the translations. On a draft with `ParameterEdit`, the edit form, the translation forms, and the removal. | **Delete parameter { $tag }** in the disclosure **Delete the parameter** (draft), and a link back to the version page | `RecipeView` |
+| New parameter | `GET /recipes/{ref}/versions/{n}/parameters/new` | The form of a new parameter. See the list below this table. | **Add parameter**, **Show value fields** | `ParameterEdit` |
+| Parameter { $tag } | `GET /recipes/{ref}/versions/{n}/parameters/{key}` | The parameter summary, the value grid, and the translations. On a draft with `ParameterEdit`, the edit form, the translation forms, and the removal. The edit form has the same fields as the form of a new parameter. | **Save parameter**, **Show value fields**, **Delete parameter { $tag }** in the disclosure **Delete the parameter** (draft), and a link back to the version page | `RecipeView` |
+
+The form of a new parameter has these fields from top to bottom. The edit form of a parameter has the same fields.
+
+- **Unit**: a list of the live units of the machine. The form marks it as required.
+- **Tag**: a text field with a hint. The form marks it as required.
+- **English name** and **English description**: text fields. The form marks both as required.
+- **Type**: a text field with a list of suggested types. The form marks it as required.
+- **PLC address**: a text field with a hint. It shows only for a Siemens platform. The form marks it as required only for **Siemens S7-300**.
+- **Order in the unit**: a text field with a hint. The form marks it as required.
+- The value grid with the caption **Values and process limits**. Until you enter a type and select **Show value fields**, the form shows the text "Enter the type and then show the value fields."
+
+The button **Show value fields** shows the grid for the type that you entered. The first button of the form is **Add parameter**, or **Save parameter** in the edit form. The key Enter in a field saves the form.
 
 ## Export (`api.md` section 2.7)
 
