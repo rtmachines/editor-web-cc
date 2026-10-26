@@ -54,11 +54,9 @@ A new revision does not change any existing version. The editor marks the affect
 
 The approval of a draft with outdated parameters needs an explicit flag. The audit entry records the flag.
 
-## What you do instead of an edit
+## What happens instead of an edit
 
-1. You create a draft from the version that you want to change. The draft is a copy.
-2. You change the parameters in the draft.
-3. A second person approves the draft.
+A change starts as a new draft of the version that you want to change. The draft is a copy. You change the parameters in the draft, and a second person approves the draft.
 
 The approval makes the draft Approved and retires the previous Approved version in one transaction (R27, `domain-model.md` section 5.2). The recipe never has two approved versions.
 
