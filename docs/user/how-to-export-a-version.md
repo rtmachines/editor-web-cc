@@ -67,6 +67,8 @@ The export works in read-only mode (A24). The link stays on the page. The banner
 
 A failed export does not save a file. The browser shows a JSON text in the same tab (ADR-0052, ADR-0053). The text holds `code`, `message`, and `request_id`. Write down the three values. Go back with the browser.
 
+A fault of the server may give plain text and not JSON (`api.md` section 5.1). The text shows the code `E-WEB-010` and no `request_id`. Write down the code and the time. Give both to the administrator. The administrator finds the line in the log by the time.
+
 | Code or status | What you see | What to do |
 |---|---|---|
 | `E-EXP-001` | `404`. The recipe has no approved version. | Open the recipe again. Another user may have retired the version after you opened the page. |
@@ -77,6 +79,7 @@ A failed export does not save a file. The browser shows a JSON text in the same 
 | `E-WEB-002` | `403`. Your role does not permit the operation. | Ask your supervisor. Only a role with `VersionExportHistory` exports a `Retired` version. |
 | `E-WEB-007` | `403`. The server refused a request that did not come from the editor. | Open the version page again. Use the link on the page. |
 | `E-WEB-009` | `503`. The request took too long. | Wait a short time. Try again. |
+| `E-WEB-010` | `500`. An internal error occurred. The text may be plain text with no `request_id`. | Call the administrator. Give the code and the time. Give the `request_id` if the text shows it. |
 
 Many users may export at the same time. The server then lets only a few exports run together (ADR-0056). An export that waits too long gives `E-WEB-009`. Try again.
 
