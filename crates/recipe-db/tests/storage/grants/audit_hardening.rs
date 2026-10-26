@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 
-use sqlx::PgConnection;
+use sqlx::{Connection, PgConnection};
 
 use crate::support::{Role, TestDatabase, assert_privilege_denied, migration_texts};
 
@@ -67,6 +67,45 @@ async fn the_migrator_cannot_drop_an_audit_table_in_a_do_block() {
         "audit_chain_head",
     )
     .await;
+}
+
+/// The schema name that the rename test gives to `public`.
+const RENAMED_SCHEMA: &str = "moved";
+
+/// ADR-0097 (f): the rename of `public` must not open a path around the drop guard.
+///
+/// The test renames `public` and drops the renamed schema with `CASCADE` in one transaction.
+/// The test commits only when the drop succeeds, so a database error never leaves a rename behind.
+#[tokio::test]
+async fn the_migrator_cannot_drop_the_schema_after_a_rename() {
+    let database = TestDatabase::create().await;
+    let mut migrator = database.connect(Role::Migrator).await;
+
+    let mut transaction = migrator.begin().await.unwrap();
+    sqlx::query(&format!("ALTER SCHEMA public RENAME TO {RENAMED_SCHEMA}"))
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    let dropped = sqlx::query(&format!("DROP SCHEMA {RENAMED_SCHEMA} CASCADE"))
+        .execute(&mut *transaction)
+        .await;
+    let drop_succeeded = dropped.is_ok();
+    if drop_succeeded {
+        transaction.commit().await.unwrap();
+    } else {
+        transaction.rollback().await.unwrap();
+    }
+
+    assert!(
+        !drop_succeeded,
+        "DROP SCHEMA {RENAMED_SCHEMA} CASCADE succeeded: the guard did not fire for {RENAMED_SCHEMA}.audit_log"
+    );
+    assert_privilege_denied(dropped);
+    let mut admin = database.connect(Role::Superuser).await;
+    assert!(
+        table_exists(&mut admin, "audit_log").await,
+        "audit_log is gone from the schema public"
+    );
 }
 
 #[tokio::test]

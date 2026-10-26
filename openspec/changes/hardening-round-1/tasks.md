@@ -18,7 +18,7 @@ At most two cargo agents run at the same time. The instruction files change only
 
 ## 0. Probe
 
-- [ ] 0.1 (recipe-db) [sonnet] Write the negative test of the audit spec delta "Drop guard after a schema rename" in `tests/storage/grants/audit_hardening.rs`. As `recipe_migrator`, the test renames `public` and drops it with `CASCADE` in one transaction. It expects SQLSTATE `42501` and an intact `audit_log`. Run it and see it fail before any change (ADR-0097 (f)). When it passes, stop: the finding F3 is false, ADR-0097 stays Proposed, and the agent reports to the project owner. The test needs Docker for `testcontainers`. The run on the workstation needs the approval of the user, else it runs in CI. Check: the failure output of `cargo test -p recipe-db audit_hardening` names the drop of `moved.audit_log`.
+- [x] 0.1 (recipe-db) [sonnet] Write the negative test of the audit spec delta "Drop guard after a schema rename" in `tests/storage/grants/audit_hardening.rs`. As `recipe_migrator`, the test renames `public` and drops it with `CASCADE` in one transaction. It expects SQLSTATE `42501` and an intact `audit_log`. Run it and see it fail before any change (ADR-0097 (f)). When it passes, stop: the finding F3 is false, ADR-0097 stays Proposed, and the agent reports to the project owner. The test needs Docker for `testcontainers`. The run on the workstation needs the approval of the user, else it runs in CI. Check: the failure output of `cargo test -p recipe-db audit_hardening` names the drop of `moved.audit_log`.
 
 ## 1. Decision records
 
