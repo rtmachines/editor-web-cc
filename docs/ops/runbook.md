@@ -241,6 +241,20 @@ unset admin_password
 2. Check that the exit code is 0 and the output holds the line `restore test passed`.
 3. Check that the line names the set that you expect (ADR-0067).
 
+### Statement outside the role grammar
+
+The restore test stops at a statement of the globals file outside the role grammar (ADR-0095).
+A role setting outside the grammar comes from a change by hand.
+
+1. Read the line number in the `ERROR` line of the output.
+2. Open the globals file `globals_<YYYYMMDD_HHMM><suffix>.sql` of the set that the test checked.
+3. Read the line with that line number.
+4. Delete that setting from the role in the database.
+5. If the setting is needed, extend the grammar in a change (ADR-0095 (e)).
+6. Run `docker compose exec backup backup-now`.
+7. Run `docker compose exec backup restore-test`.
+8. Check that the exit code is 0 and the output holds the line `restore test passed`.
+
 ### Copy the backups off site
 
 1. Copy the latest dump and the WAL archive to the external backup storage with the site procedure (ADR-0020).
@@ -358,28 +372,61 @@ The steps follow `reliability.md` 7.10 (ADR-0082, ADR-0083).
 
 ### Upgrade
 
-1. Read the release notes. Note whether the migration follows the expand pattern.
+1. Read the release notes. Note whether the migration follows the expand pattern. Note the line "manual superuser step".
 2. Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
 3. Run `docker compose exec backup restore-test` with the old image. Continue only after it passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.
 6. Run steps 6 and 7 of the section "Create the environment file". The image tags show the new tag.
 7. If the plant has a device, use steps 1 to 3 of "A plant device in front of Caddy" again.
-8. Run `docker compose up -d backup-premigrate migrate`. The `_premigrate` dump runs first.
-9. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
-10. If `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6). The old `app` keeps running.
-11. Run `docker compose up -d --no-deps app`. Docker replaces the container of `app` only.
-12. Check `/readyz` with `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`.
-13. If you used step 7, run `docker compose up -d --force-recreate --no-deps proxy`.
-14. Run the check of the section "Check client_ip of the first login".
-15. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
-16. Run the three commands of the next list while the new `app` serves.
+8. Run `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`.
+9. Wait for exit code 0 of `backup-premigrate` with `docker compose ps -a backup-premigrate`.
+10. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
+11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
+12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6). The old `app` keeps running.
+13. Start the guard step. Run `docker compose exec -u postgres db psql -d recipe`.
+14. Run the statement `CREATE FUNCTION audit_guard.audit_objects_dropped()` of the new `deploy/db/initdb/01-roles.sh` as `CREATE OR REPLACE FUNCTION`.
+15. Compute the hash of the function in the same session:
+
+```sql
+SET search_path = pg_catalog;
+SELECT encode(sha256(convert_to(pg_get_functiondef('audit_guard.audit_objects_dropped()'::regprocedure), 'UTF8')), 'hex');
+```
+
+16. Leave `psql` with `\q`. Read field 4 of the expected line:
+
+```bash
+grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' deploy/pgtools/restore-code.expected | cut -d'|' -f4
+```
+
+17. Compare the two hashes. Continue only when they are equal. Otherwise run steps 13 to 17 again.
+18. Run `docker compose up -d --no-deps app`. Docker replaces the container of `app` only.
+19. Check `/readyz` with `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`.
+20. If you used step 7, run `docker compose up -d --force-recreate --no-deps proxy`.
+21. Run the check of the section "Check client_ip of the first login".
+22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
+23. Run the three commands of the next list while the new `app` serves.
 
 The restore test of step 3 checks the newest complete set of the old schema with the old image (ADR-0083).
+The rollback set of step 8 holds the old guard function. The old image therefore accepts it after a rollback restore (ADR-0097 (h1)).
+Only the superuser can replace the guard function (ADR-0069 (p)). The release notes name steps 13 to 17 as a "manual superuser step".
+Run no `backup-now` before step 17 passes.
+The guard step is the one place that replaces the guard function. The section "An older volume" uses this place too.
 
-The old `app` of step 10 keeps running on the old schema only when the migration follows the expand pattern.
+Never run two `app` containers at the same time (ADR-0096).
+The old `app` has no guard lock of the last Administrator, so the two versions do not exclude each other.
+Step 18 replaces the one container of `app`.
+
+The old `app` of step 12 keeps running on the old schema only when the migration follows the expand pattern.
 A release with two or more migration files can fail after the first file. Then no image matches the schema.
 Choose one of two actions (ADR-0083). The first is a forward fix. The second is a restore of the `_premigrate` dump with the second list of the section "Rollback".
+
+Recovery after a failure between two steps (ADR-0097 (h2)):
+
+- Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop.
+- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old.
+- A step from 13 to 17 fails: the schema is new and the guard function is old. Run steps 13 to 17 again. Run no `backup-now` until step 17 passes.
+- A step of the next list fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
 
 The three commands give the new image of `recipe-pgtools` to `backup` and `walarchive`:
 
@@ -570,7 +617,8 @@ A new release replaces `Caddyfile` and `compose.yaml`. The section "Upgrade" wri
 `01-roles.sh` runs on an empty volume only.
 For an older volume, the superuser applies the changes of ADR-0069 (v) by hand.
 Do this before the upgrade that adds the migration `0006`.
-The script `deploy/db/initdb/01-roles.sh` holds the text of the `GRANT` and of the function.
+The script `deploy/db/initdb/01-roles.sh` holds the text of the `GRANT`.
+The guard step of the section "Upgrade" replaces the guard function after `migrate`.
 The `REVOKE` cancels the grant of the previous script (ADR-0069 (f)).
 
 1. Run `docker compose exec -u postgres db psql -d recipe`.
@@ -582,7 +630,7 @@ REVOKE pg_read_all_stats FROM recipe_app;
 ```
 
 3. Run `\drg recipe_app`. Check that the result shows no `pg_read_all_stats`.
-4. Run the statement `CREATE FUNCTION audit_guard.audit_objects_dropped()` of the script as `CREATE OR REPLACE FUNCTION`. Only the superuser can replace this function (ADR-0069 (p)).
+4. Do not replace the guard function now. Steps 13 to 17 of the section "Upgrade" replace it after `migrate` (ADR-0097 (h3)).
 5. Copy the old file:
 
 ```bash

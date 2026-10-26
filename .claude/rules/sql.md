@@ -11,7 +11,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 - An enumerated column is `TEXT` with `CHECK (... IN (...))`. No `CREATE TYPE ... AS ENUM`.
 - Every foreign key column has an index, unless a primary key or a unique constraint starts with that column.
 - Soft delete uses a nullable `deleted_at` or `archived_at` column (ADR-0021).
-- Every function sets `search_path = pg_catalog, public, pg_temp`. A `SECURITY DEFINER` function also schema-qualifies every name.
+- Every function sets `search_path = pg_catalog, public, pg_temp`. A `SECURITY DEFINER` function also schema-qualifies every table, function, operator, and type name. A type keyword such as `BIGINT` needs no schema (ADR-0098).
 - §1.1 lists the tables that are exceptions. §1.2 maps Rust names to SQL names. §1.3 gives the text limits.
 - A trigger error message starts with its code from `reliability.md` §1.2. §4.11 maps each trigger code to its function.
 
@@ -29,6 +29,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 ## Roles and grants (data-model §5)
 
 - Roles come only from `deploy/db/initdb/01-roles.sh`. A migration never creates a role.
+- A new role statement in `01-roles.sh` needs a form of the role grammar in `deploy/pgtools/lib/globals-grammar.sh` (ADR-0095).
 - `recipe_app` gets column-level `UPDATE` grants. Identifier columns, structure columns, and `row_version` get none.
 - `recipe_app` deletes only rows that are not business history. Soft delete covers the rest.
 - A row lock (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`) needs an `UPDATE` grant on a column of the table.
@@ -39,16 +40,17 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 
 ## Locks and transactions (data-model §1.4, §6)
 
-- One transaction per command, except `Login` (T1 and T2). Lock order: `machine` → `recipe` → `recipe_version` → `unit` → children.
+- One transaction per command, except `Login` and `ChangeOwnPassword` (T1 and T2, ADR-0035 (b)). Lock order: `machine` → `recipe` → `recipe_version` → `unit` → children.
 - A command takes only the locks that it needs, always in this order.
+- An identity command locks in the order class-4 lock → `app_user` → `session` → `audit_chain_head`. Only `SetUserRole` and `DeactivateUser` take the class-4 lock (ADR-0096 (e)).
 - A draft command locks `recipe_version` `FOR UPDATE`, requires a live draft, and compares `row_version`.
 - Then the draft command runs the touch statement and writes `draft_editor`. Separation of duties (I16) reads `draft_editor`.
 - The audit insert runs in the transaction of the command. §10 gives the state rule and the `aggregate_type` of each entity.
 - A statement that locks several rows of one table orders them by `id`. `app_user` rows get `FOR NO KEY UPDATE`.
-- Advisory locks use `pg_advisory_xact_lock(class, key)`. Class 1 is `Login` T1. Class 2 is the class of derived types. No code takes class 3.
+- Advisory locks use `pg_advisory_xact_lock(class, key)`. Class 1 is `Login` T1. Class 2 is the class of derived types. No code takes class 3. Class 4 with the key 0 is the guard lock of the last Administrator (ADR-0096).
 - A command sorts its class-2 keys in the order struct name, `STRING`, `WSTRING`, `ARRAY`. It takes them before its first `plc_type` insert.
 - Only the `sqlx` migrator uses the one-key form `pg_advisory_lock(bigint)`.
-- Isolation is `READ COMMITTED` with no retry. `SetUserRole` and `DeactivateUser` run `SERIALIZABLE` and retry once on `40001`.
+- Isolation is `READ COMMITTED` with no retry. Only `create-admin` runs `SERIALIZABLE` and runs once more on `40001` (ADR-0035 (h), ADR-0096).
 - A query reads in `READ COMMITTED READ ONLY`. A draft query of ADR-0042 and the preview and diff queries of ADR-0050 read in `REPEATABLE READ READ ONLY`. A query never retries.
 
 ## Tests (reliability §6)

@@ -56,7 +56,7 @@ Dependency rule:
 
 - No panic paths. Outside tests the lints deny `unwrap`, `expect`, `panic!`, indexing, lossy casts, and unchecked arithmetic (`reliability.md` §2).
 - Library crates use `thiserror`. Only `recipe-server` uses `anyhow`, and `main` returns `anyhow::Result<()>` (`reliability.md` §1.1, A37).
-- A command runs in one transaction (`Login` uses T1 and T2). It locks rows in the order `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015).
+- A command runs in one transaction. `Login` and `ChangeOwnPassword` use the two transactions T1 and T2 (ADR-0035 (b)). A command locks rows in the order `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015).
 - Inside a transaction, no use case waits for I/O or for a lock that it does not hold. Validation runs before it (`reliability.md` §7.4).
 - A command writes its audit entries through `UnitOfWork::commit(NonEmpty<AuditEntry>)`. `domain-model.md` §5 gives each commit path and the two cases without an entry.
 - Security events go through `SecurityEventSink` in their own short transaction (ADR-0015, ADR-0022).
