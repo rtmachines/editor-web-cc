@@ -4,7 +4,7 @@
 
 This guide shows how to check an export document of the recipe editor before you load the recipe into a PLC.
 
-The reader is the author of a transfer system or an engineer who loads a file into a PLC. The check finds a file in which someone edited a field with "In hash: yes" (`api.md` section 6.1). The hash does not cover the fields with "In hash: no", for example `loadable`, `version.status`, `version.approved_by`, `exported_at`, and the names (`api.md` section 6.1). Step 2 finds a document that the transfer system must not load.
+The reader is the author of a transfer system or an engineer who loads a file into a PLC. The check finds a file in which someone edited a field with "In hash: yes" (`api.md` section 6.1). The hash does not cover the fields with "In hash: no", for example `loadable`, `version.status`, `version.approved_by`, `exported_at`, `machine.name`, `recipe.name`, and `parameters[].name_en` (`api.md` section 6.1). Step 2 finds a document that the transfer system must not load.
 
 ## Sources
 
