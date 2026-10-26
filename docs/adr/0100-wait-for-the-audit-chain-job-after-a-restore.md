@@ -71,7 +71,12 @@ The project uses **Option A**.
   - `audit.last_check_at` in `app_setting`. The operator records the restored value before the start of `app`. A value that differs from the recorded value after the start shows a completed check. A value equal to the recorded value is not a new check. The restored value can lie in the future (`reliability.md` section 3.7, clock trust). An active `audit_check_age` shows that the check is not done.
   - The event log of `app`. An `ERROR` line of the job `audit_chain_check` with `error_code` `E-AUD-002` shows a break.
   - The alert condition `audit_chain_broken` of `reliability.md` section 3.7. It is active after a break, and the webhook sends its name (ADR-0063).
-- (d) A completed check with no `E-AUD-002` line and no active `audit_chain_broken` shows a chain without a break.
+- (d) The durable proof of a chain without a break is the table `security_event`. A completed check as in (c) and no new row of the kind `audit_chain_broken` show a chain without a break.
+  - The operator records the highest `id` of `security_event` before the start of `app`, together with the value of `audit.last_check_at`. A new row is a row with a higher `id`.
+  - The job writes the row of a break before it records `audit.last_check_at` (`data-model.md` section 4.9). A completed check after a break therefore leaves a new row.
+  - The dump holds the old rows of `security_event` (`reliability.md` section 7.7). The comparison with `id` excludes them. The column `occurred_at` is not safe, because a restored row can carry a future time.
+  - The `ERROR` line and the alert `audit_chain_broken` are diagnostic signals. Docker can drop log lines (`reliability.md` section 3.5). A failed snapshot of the job `alerts` evaluates no condition (`reliability.md` section 3.7).
+  - A missing `E-AUD-002` line or an inactive alert alone does not show a chain without a break.
 - (e) A run that returns another code is not a completed check. The operator reads the code in the `ERROR` line and follows its row in `reliability.md` section 1.2. The condition `audit_check_age` becomes active when `audit.last_check_at` is older than `audit.max_check_age`.
 - (f) This ADR adds no rule of the job. The rules stay in `data-model.md` section 4.9, `reliability.md` sections 3.7 and 7.11, ADR-0060, ADR-0073, ADR-0086, and ADR-0088.
 - (g) This ADR amends the second risk of ADR-0086. The mitigation "The operator runs the audit chain check after each restore" now means items (a) to (e).

@@ -608,7 +608,8 @@ docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_at
 8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
 9. Start `app` after a record of the restored audit time:
    1. Record the value of `audit.last_check_at` with the `app_setting` command of the first place below step 10. If the command prints no row, record "missing".
-   2. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
+   2. Record the highest `id` of `security_event` with the `security_event` command below step 10.
+   3. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
 10. Check the audit chain. Wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
 The section "Copy the backups off site" describes the off-site audit copy of step 8.
@@ -636,7 +637,24 @@ docker compose logs --no-log-prefix app | grep -F '"job":"audit_chain_check"' | 
 
 The third place is the alert condition `audit_chain_broken` (section "Alarms"). It becomes active after a break.
 
-A completed check with no `E-AUD-002` line and no active `audit_chain_broken` shows a chain without a break.
+The durable proof of a chain without a break is the table `security_event` (ADR-0100).
+A completed check as in the first place and no new row of the kind `audit_chain_broken` show a chain without a break.
+Step 9 records the highest `id` of the table with the command below, before the start of `app`:
+
+```bash
+docker compose exec -u postgres db psql -d recipe -c "SELECT coalesce(max(id), 0) FROM security_event"
+```
+
+After the check completes, count the new rows of the kind. Replace `<id>` with the recorded value. The count must be 0:
+
+```bash
+docker compose exec -u postgres db psql -d recipe -c "SELECT count(*) FROM security_event WHERE kind = 'audit_chain_broken' AND id > <id>"
+```
+
+The dump brings back the old rows, so the count uses `id` and not `occurred_at`. A restored row can carry a future time.
+The job writes the row of a break before it records `audit.last_check_at`.
+Docker can drop log lines, and a failed snapshot of the job `alerts` evaluates no condition (`reliability.md` 3.5 and 3.7).
+The `E-AUD-002` line and the alert are diagnostic signals. A missing line or an inactive alert alone does not show a chain without a break.
 A check without a break writes no log line, so a missing line alone does not show a completed check.
 A run that returns another error code is not a completed check, and `audit.last_check_at` keeps its value.
 Read that code in the `ERROR` line and follow its row in `reliability.md` 1.2.
