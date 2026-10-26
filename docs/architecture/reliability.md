@@ -697,7 +697,7 @@ Copies and restore:
   8. Each login role logs in over `127.0.0.1` with its random password. A login with a wrong password must fail.
   9. It writes one JSON line with the result to the event log. A failed step is an `ERROR` event and ends the script with a code other than 0.
 - A `trap` deletes the scratch cluster on each exit of the script.
-- After a restore into production, the operator truncates `session` and `login_attempt`. The operator then re-applies every user deactivation and password reset recorded after the dump time, from the off-site audit copy when one exists. Last, the operator runs the audit chain check.
+- After a restore into production, the operator truncates `session` and `login_attempt`. The operator then re-applies every user deactivation and password reset recorded after the dump time, from the off-site audit copy when one exists. Last, the operator waits for the next completed run of the job `audit_chain_check` and reads its result (ADR-0100).
 
 ### 7.8 Volumes, resources, disk full
 

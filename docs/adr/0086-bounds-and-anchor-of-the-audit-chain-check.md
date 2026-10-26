@@ -1,6 +1,6 @@
 # ADR-0086: Bounds and anchor of the audit chain check
 
-Status: Accepted. Amended by a note: item (h) changes ADR-0073 for the anchor of an empty chain table. ADR-0073 has a matching note
+Status: Accepted. Amended by a note: item (h) changes ADR-0073 for the anchor of an empty chain table. ADR-0073 has a matching note. Amended by ADR-0100 (the audit chain check after a restore: wait for the next run of the job)
 Date: 2026-10-24
 Deciders: project owner
 
