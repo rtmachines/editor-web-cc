@@ -275,7 +275,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The project owner accepted the other low-severity items as they are.
 - The save toast of a parameter does not show the new row version. The new row version appears only in the hidden field `row_version` of the form.
 - The version page has no picker for two free version numbers. It links only to the diff with the approved version and with the base version. Another pair needs a typed address of the diff route.
-- The version page does not show the content hash. The hash appears only in the export file, as `content_sha256`.
+- The version page does not show the content hash. The export file holds the hash as `content_sha256`. The audit entry of an approval shows it in the state after.
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
