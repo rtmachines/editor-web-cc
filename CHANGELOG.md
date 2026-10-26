@@ -268,7 +268,7 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ### Known gaps
 
-- The soak test of `reliability.md` section 6 did not run. No 2 h local run, no RSS chart, and no `docs/ops/soak-<date>.md` exist for 0.1.0.
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
 - Seven tests with `#[cfg(unix)]` passed only in CI on Linux, not on the Windows development host. Two of them are in `crates/recipe-server/tests`: `sigterm_stops_a_started_server_with_code_0_and_the_stopped_line` and `temporary_directories_and_files_are_private_to_the_owner`.
 - The other five are in `crates/recipe-server/src`: `a_link_with_the_name_of_a_manifest_is_not_a_set`, `a_directory_without_the_read_right_is_a_fault`, `free_space_of_the_temporary_directory_is_consistent`, `a_missing_path_is_unreadable`, and `the_text_of_an_unreadable_fault_names_no_path`.
 - Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
