@@ -35,11 +35,11 @@ Without the permission, the parameter page shows the values and the limits as re
 
 ### Open the draft
 
-1. Choose **Recipes** in the top bar.
+1. Select **Recipes** in the top bar.
 2. Find the recipe in the list. Use the field **Search** and the button **Show** to narrow the list.
 3. Look at the column **Draft** of the recipe. If it shows a version number, open that number.
-4. If the column shows **none**, open the reference number of the recipe. Then choose **New version**.
-5. Choose a **Base version**, write a **Change note**, and choose **Create version**.
+4. If the column shows **none**, open the reference number of the recipe. Then select **New version**.
+5. Select a **Base version**, write a **Change note**, and select **Create version**.
 
 The editor opens the new draft after step 5 (`api.md` section 2.5). A recipe holds one draft at a time. A second draft gives `409 E-RCP-011`. The message names the number of the existing draft. Open that draft.
 
@@ -59,7 +59,7 @@ The page of the parameter opens. Its title is **Parameter** and the tag. It show
 ### Change a value or a limit
 
 1. Find the table **Values and process limits**.
-2. Write the new value in the column **Value** of the row. For a BOOL leaf, choose **TRUE** or **FALSE**.
+2. Write the new value in the column **Value** of the row. For a BOOL leaf, select **TRUE** or **FALSE**.
 3. To change a process limit, write the new number in the column **Minimum** or **Maximum** of the same row.
 4. For a text leaf, change **Maximum length**.
 
