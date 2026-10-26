@@ -366,7 +366,7 @@ The option `--no-deps` skips the `depends_on` checks (ADR-0082), so the steps wa
 
 1. Run `docker compose up -d --no-deps db`.
 2. Run `docker compose ps db` until `db` shows `healthy`.
-3. Run `docker compose up -d --no-deps app`.
+3. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
 4. Run `docker compose ps app` until `app` shows `healthy`.
 5. Run `docker compose up -d --no-deps proxy backup walarchive`.
 6. Run `docker compose ps -a`. Check that `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
@@ -381,7 +381,7 @@ If `app` does not become `healthy`, use the section "Alarms, read-only mode, and
 Replace `<service>` with `proxy`, `app`, `db`, `backup`, or `walarchive`.
 
 1. Run `docker compose stop <service>`.
-2. Run `docker compose up -d --no-deps <service>`.
+2. Run `docker compose up -d --no-deps <service>`. For `app` after a rollback, use "Start app after a rollback".
 3. Run `docker compose ps <service>` until the service shows `healthy`.
 
 Without `--no-deps`, a start of `app` or `proxy` runs `backup-premigrate` and `migrate` again (ADR-0082).
@@ -610,9 +610,9 @@ docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_at
 10. Check the audit chain: wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
 The section "Copy the backups off site" describes the off-site audit copy of step 8.
-The next run is the catch-up run or the nightly run (ADR-0100, `data-model.md` 4.9).
-The catch-up run starts after `audit.catchup_delay`. It runs only when the restored `audit.last_check_at` is older than `audit.catchup_age` at the start of `app`.
-In all other cases, the nightly run at `audit.check_time` is the next run.
+The next completed run is the applicable run that completes first (ADR-0100, `data-model.md` 4.9).
+The catch-up run starts after `audit.catchup_delay`. It applies when the restored `audit.last_check_at` is missing or older than `audit.catchup_age` at the start of `app`.
+The nightly run at `audit.check_time` stays active in all cases. A newer completed nightly check suppresses the catch-up run.
 Read the result in three places.
 
 The first place is `audit.last_check_at` in `app_setting`. A value later than the time of step 9 shows a completed check. The value is a time in UTC.
@@ -746,6 +746,13 @@ The restore goes into a new `db` volume. The switch step is open, as the section
 6. Run step 10 of the section "Restore into production".
 7. Run the three commands of the upgrade with the tag of `.env`.
 
+#### Start app after a rollback
+
+After a rollback with the expand pattern, `.env` keeps the new tag. A later command can then start `app` with the new image (ADR-0083).
+Every command that starts or recreates `app` therefore passes the previous tag in the same way as step 1 of the rollback.
+Put `RECIPE_VERSION=<previous tag>` before `docker compose`. Keep the other options of the command, for example `--force-recreate`.
+This holds until the section "Upgrade" sets a new tag.
+
 ### Keep the images for a rollback
 
 A plant host can have no registry. A release moves the images as files of `docker save` (ADR-0064 (j)).
@@ -848,7 +855,7 @@ chmod 0400 "$RECIPE_SECRETS_DIR/<name>.new"
 mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
 ```
 
-4. Run `docker compose up -d --force-recreate --no-deps app`.
+4. Run `docker compose up -d --force-recreate --no-deps app`. After a rollback, use "Start app after a rollback".
 5. Run `docker compose ps app` until `app` shows `healthy`.
 6. Open the login page from a workstation. Log in with your account. Check that the login works.
 7. Wait for the value of `security.key_rotation_overlap` (`reliability.md` 7.11). Count the time from step 4.
@@ -856,7 +863,7 @@ mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
 9. Run the two commands of step 2 on `"$RECIPE_SECRETS_DIR/<name>"`. Check that both numbers are 1.
 10. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/<name>"`. Check that the output is `400 65532`.
 11. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the key file.
-12. Run `docker compose up -d --force-recreate --no-deps app` again.
+12. Run `docker compose up -d --force-recreate --no-deps app` again. After a rollback, use "Start app after a rollback".
 13. Run `docker compose ps app` until `app` shows `healthy`.
 14. Log in again from a workstation. Check that the login works.
 
@@ -956,7 +963,7 @@ SQL
 docker compose logs db | grep -c -E 'ROLE (postgres|recipe_[a-z]+) PASSWORD'
 ```
 
-10. Run `docker compose up -d --force-recreate --no-deps <service>` for the service of the last column of the table.
+10. Run `docker compose up -d --force-recreate --no-deps <service>` for the service of the last column of the table. For `app` after a rollback, use "Start app after a rollback".
 11. Run `docker compose ps -a`. Check that `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
 12. For `recipe_app`, run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. Check that the exit code is 0.
 13. For `recipe_backup`, run `docker compose exec backup backup-now`. Check that the output holds the line `backup completed`.
@@ -1000,7 +1007,7 @@ The server reads the environment at each start only. To change a key of the firs
 1. Open `compose.yaml`. In the service `app`, find the entry of the key.
 2. Write the new value in double quotes, as the other entries do.
 3. Run `docker compose config | grep -F '<entry name>:'`. Check that the output shows the new value.
-4. Run `docker compose up -d --force-recreate --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (ADR-0082).
+4. Run `docker compose up -d --force-recreate --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (ADR-0082). After a rollback, use "Start app after a rollback".
 5. Run `docker compose ps app` until `app` shows `healthy`.
 6. Open `/audit` as an Administrator. Filter the action `SettingChanged`.
 7. Open the newest entry of the changed key.
@@ -1065,7 +1072,7 @@ mv "$RECIPE_SECRETS_DIR/alerts_webhook_url.new" "$RECIPE_SECRETS_DIR/alerts_webh
 ```
 
 4. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the URL.
-5. Run `docker compose up -d --force-recreate --no-deps app`.
+5. Run `docker compose up -d --force-recreate --no-deps app`. After a rollback, use "Start app after a rollback".
 6. Run `docker compose ps app` until `app` shows `healthy`.
 7. Compute the fingerprint of the file. The command prints a hash and does not print the URL:
 
@@ -1252,7 +1259,7 @@ trusted_proxies static 192.0.2.10/32 192.0.2.11/32
 RECIPE_HTTP__TRUSTED_PROXIES: ${PROXY_ADDRESS:?}/32,192.0.2.10/32,192.0.2.11/32
 ```
 
-4. Run `docker compose up -d --force-recreate --no-deps proxy app`.
+4. Run `docker compose up -d --force-recreate --no-deps proxy app`. After a rollback, use "Start app after a rollback".
 5. Run the check of the section "Check client_ip of the first login".
 
 A new release replaces `Caddyfile` and `compose.yaml`. The section "Upgrade" writes the entries again.
@@ -1502,7 +1509,7 @@ docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 ```
 
 5. Delete that variable from `compose.yaml`, or from `.env` when `compose.yaml` reads its value there.
-6. Run `docker compose up -d --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again").
+6. Run `docker compose up -d --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again"). After a rollback, use "Start app after a rollback".
 
 A variable of the host shell does not reach a container, so `unset` has no effect on the server.
 

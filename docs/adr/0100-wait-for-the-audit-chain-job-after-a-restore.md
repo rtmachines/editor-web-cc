@@ -63,9 +63,10 @@ The code and the documents give these facts on the result of a check:
 The project uses **Option A**.
 
 - (a) After a restore into production, the operator runs no command for the audit chain check. The operator waits for the next completed run of the job `audit_chain_check`.
-- (b) The next run is one of two runs. `data-model.md` section 4.9 gives the rules of both:
-  - The catch-up run after `audit.catchup_delay`. It runs when the restored `audit.last_check_at` is older than `audit.catchup_age` at the start of `app`.
-  - The nightly run at `audit.check_time`, in all other cases.
+- (b) The next completed run is the applicable run that completes first. `data-model.md` section 4.9 gives the rules of both runs:
+  - The catch-up run after `audit.catchup_delay`. It applies when the restored `audit.last_check_at` is missing or older than `audit.catchup_age` at the start of `app`.
+  - The nightly run at `audit.check_time`. It stays active in all cases.
+  - A newer completed nightly check suppresses the catch-up run.
 - (c) The operator reads the result in three places:
   - `audit.last_check_at` in `app_setting`. A value later than the start of `app` in the restore procedure shows a completed check.
   - The event log of `app`. An `ERROR` line of the job `audit_chain_check` with `error_code` `E-AUD-002` shows a break.
@@ -99,7 +100,7 @@ Changes of other documents:
 
 - The result of the check comes only after the next run of the job.
 - Without the catch-up run, the delay is up to one day, the interval of the nightly run at `audit.check_time`.
-- With the catch-up run, the delay is `audit.catchup_delay` plus the time of the check.
+- With the catch-up run, the delay is `audit.catchup_delay` plus the time of the check, or less when the nightly run completes first.
 - Users can work on the restored database before the first check of the production chain completes.
 - The operator reads the result after the run, not at the end of the restore procedure.
 
@@ -107,7 +108,7 @@ Changes of other documents:
 
 - Risk: a break in the restored chain stays unknown until the next run. Mitigation: the restore test of step 1 checked the same set. The alert `audit_chain_broken` and the webhook report a break of the next run without the operator.
 - Risk: the operator reads the restored `audit.last_check_at` as the time of a new check. Mitigation: item (c) compares the value with the start of `app` in the restore procedure.
-- Risk: the restored `audit.last_check_at` is younger than `audit.catchup_age`, so no catch-up run starts. Mitigation: the nightly run follows at `audit.check_time`, as item (b) states.
+- Risk: the restored `audit.last_check_at` is younger than `audit.catchup_age`, so no catch-up run applies. Mitigation: the nightly run stays active at `audit.check_time`, as item (b) states.
 
 ## Related
 
