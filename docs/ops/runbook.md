@@ -1252,7 +1252,7 @@ The `request_id` is also present in the audit log and in the security events (`r
 
 ### Read the lines of a job
 
-The supervisor writes a line for a failed run and for a panic of a job only. A run that ends well writes no line (ADR-0100 (c), `crates/recipe-server/src/supervisor.rs`).
+The supervisor writes a line for a failed run and for a panic of a job only. A run that ends well writes no line (ADR-0100, `crates/recipe-server/src/supervisor.rs`).
 So a missing line shows no fault, and it does not show that a run happened.
 A failed run writes an `ERROR` line with the field `error_code`. The job `alerts` writes a `WARN` line instead (ADR-0089 (d)).
 A panic writes an `ERROR` line with the value `panic` in the field `outcome` of the span (ADR-0088 (a)).
@@ -1510,7 +1510,7 @@ Read the address in the output of `docker compose config` at the service `proxy`
 
 The documents do not yet close the gaps below. Each bullet gives the workaround of this page, if one exists.
 
-- The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up`. Read the subnets again and write the firewall rules again (section "Check the host firewall").
+- The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up` (section [Stop and start, or down and up](#stop-and-start-or-down-and-up)). Read the subnets again and write the firewall rules again (section "Check the host firewall").
 - No document gives the mechanism that makes a new volume the volume of `db`. The restore, the rollback, and the major upgrade therefore stop before the volume switch. No workaround.
 - No document gives the steps to recover production from the WAL archive. The recovery point of minutes (ADR-0020, `reliability.md` 7.7) has no procedure yet. The workaround is a restore of a dump, with a loss of up to 24 hours.
 - No document gives the transfer of the external images `caddy` and `postgres`, or the digest check after `docker load`. The section "Load the images" names only `recipe-server` and `recipe-pgtools`. No workaround.
@@ -1524,5 +1524,22 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - The restore into a new volume and the major upgrade do not handle the WAL archive (`walarchive`). After a restore into a new cluster, the old base backups can name higher segments than the new cluster (ADR-0077). The section "A gap in the WAL stream" covers an outage only. No workaround.
 - No procedure recovers access when the only administrator cannot log in. The command `create-admin` does nothing when an active administrator exists. Only a user with `UserManage` resets a password (`api.md` section 3). No workaround.
 - A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
+- No document gives a procedure for the cases below. Each item links the section where the case appears. That section gives the part of the procedure that exists.
+  - Alarms: an action for `panics`, `audit_chain_broken`, `export_hash_mismatch`, and `security_events` ([Alarms](#alarms))
+  - Alarms: a fix when `not_ready` comes from a migration with another checksum ([Alarms](#alarms))
+  - Disks: an extension of the filesystem of the second disk ([Low disk space](#low-disk-space))
+  - Disks: free space on the disk of `pgdata` ([Read-only mode](#read-only-mode))
+  - Disks: a measurement of `pgdata` that keeps failing ([The mode stays on](#the-mode-stays-on))
+  - Alert webhook: a test call ([Change the webhook](#change-the-webhook))
+  - Service unhealthy: the time after which a run of `backup-once` counts as hung, and the command that ends it ([Messages of backup-once](#messages-of-backup-once))
+  - Service unhealthy: `proxy` unhealthy while `app` is healthy, and `db` unhealthy for a cause other than a change of `pg_hba.conf` ([Read why a service is unhealthy](#read-why-a-service-is-unhealthy))
+  - Rotation: a test of a new `recipe_migrator` password before the next run of `migrate` ([Change a database password](#change-a-database-password))
+  - Off-site copy: a copy tool and a schedule ([Copy the backups off site](#copy-the-backups-off-site))
+  - Off-site copy: a check of a copy of the base backups and of the WAL segments ([Copy the backups off site](#copy-the-backups-off-site))
+  - Off-site copy: the restore of a set from a copy to the host ([Copy the backups off site](#copy-the-backups-off-site))
+  - Off-site copy: the read of an audit entry from a copy ([Copy the backups off site](#copy-the-backups-off-site))
+  - Images: the time that a release stays rollback-ready ([Keep the images for a rollback](#keep-the-images-for-a-rollback))
+  - Index: a `psql` session as `recipe_migrator` for a concurrent index ([Concurrent index on an audit object](#concurrent-index-on-an-audit-object))
+  - Settings: a change of the keys `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port` ([Change a setting](#change-a-setting))
 
 A later change will close these gaps with its own ADR.
