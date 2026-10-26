@@ -826,26 +826,99 @@ docker compose exec -u postgres db sh -c 'cp -p -- "$PGDATA/pg_hba.conf.old" "$P
 
 The runbook never deletes `pgdata`.
 
+## Read the logs
+
+The server `app` writes its event log to stdout, as one JSON object per line (`reliability.md` 3.1).
+Docker keeps a rolling window of lines for each container. The keys `log.max_size` and `log.max_file` of `reliability.md` 7.11 set its size (`reliability.md` 3.5).
+Docker discards the oldest lines first. A full log buffer can also drop lines.
+The image of `app` holds no shell, so run each filter on the host with `grep`.
+The filters of this section read the lines of `app`.
+
+### Read the lines of a service
+
+- Run `docker compose logs --tail 100 app` to read the last 100 lines.
+- Run `docker compose logs --since 1h --no-log-prefix app` to read the last hour without the service prefix. Replace `1h` with another time span.
+- Run `docker compose logs --follow app` to read new lines as they come. Press Ctrl+C to stop.
+- Replace `app` with `proxy`, `db`, `backup`, or `walarchive` to read another service.
+
+A failed start also writes the text `Error: ` and the error chain to stderr after its JSON `ERROR` line. That text is not JSON (`reliability.md` 3.1).
+
+### Filter the lines of app
+
+Each line has the fields `timestamp`, `level`, `fields`, and `target`. The fields `span` and `spans` occur only inside a span (`crates/recipe-server/src/logging.rs`).
+The values of an event are in `fields`. The values `request_id` and `job` of a span are in `span` (`reliability.md` 3.2).
+Use `grep -F` with the pattern `"<field>":"<value>"` and no space:
+
+| Goal | Pattern |
+|---|---|
+| Read the errors | `"level":"ERROR"` |
+| Read the warnings | `"level":"WARN"` |
+| Read one error code | `"error_code":"E-AUD-002"` |
+| Read one request | `"request_id":"<request_id>"` |
+| Read one job | `"job":"audit_chain_check"` |
+| Read one alert condition | `"alert":"low_disk"` |
+| Read one volume of `low_disk` | `"volume":"pgdata"` |
+
+Run the filter on the output of `docker compose logs`. This example reads the errors of the last day:
+
+```bash
+docker compose logs --no-log-prefix --since 24h app | grep -F '"level":"ERROR"'
+```
+
+To combine two patterns, add a second `grep -F` after the first one.
+A user error with the HTTP status 4xx is an `INFO` line, so a search for `ERROR` does not find it (`reliability.md` 3.3).
+The names of the alert conditions are in the section "Alarms". The names of the jobs are in `reliability.md` 2.4.
+
+### Find the lines of a user report
+
+The error fragment of the UI shows the error code and the `request_id` (`api.md` 5.2).
+
+1. Read the code and the `request_id` in the error fragment.
+2. Run `docker compose logs --no-log-prefix app | grep -F '"request_id":"<request_id>"'`.
+3. Read the field `error_code` of the lines.
+
+The line of the backstop panic layer holds no `request_id`. Search for the code `E-WEB-010` in that case (`reliability.md` 3.2).
+The `request_id` is also present in the audit log and in the security events (`reliability.md` 3.6).
+
+### Read the lines of a job
+
+The supervisor writes a line for a failed run and for a panic of a job only. A run that ends well writes no line (ADR-0100 (c), `crates/recipe-server/src/supervisor.rs`).
+So a missing line shows no fault, and it does not show that a run happened.
+A failed run writes an `ERROR` line with the field `error_code`. The job `alerts` writes a `WARN` line instead (ADR-0089 (d)).
+A panic writes an `ERROR` line with the value `panic` in the field `outcome` of the span (ADR-0088 (a)).
+
+```bash
+docker compose logs --no-log-prefix app | grep -F '"job":"audit_chain_check"'
+docker compose logs --no-log-prefix app | grep -F '"outcome":"panic"'
+```
+
+To see whether the audit chain check completed, read `audit.last_check_at` as the section "Restore into production" shows.
+
+### Keep the logs longer
+
+The rolling window of Docker keeps about 1 GB for each container. The application writes no log file.
+A site that needs a longer window forwards stdout to its own collector (`reliability.md` 3.5). No document gives the setup of that collector.
+
 ## Alarms, read-only mode, and restart loop
 
 ### Alarms
 
 The job `alerts` writes one `WARN` line for each active condition. The field `alert` holds the name. The condition `low_disk` writes one line for each low or unreadable volume. That line has the field `volume`.
-Read the lines with `docker compose logs app`.
+Read the lines with the commands of the section "Read the logs".
 `reliability.md` 3.7 gives the conditions and the webhook.
 
-| Name | First action |
-|---|---|
-| `panics` | Read the panic lines in `docker compose logs app`. Note the field `request_id` or `job`. |
-| `not_ready` | Run `docker compose ps`. Read the health of `db` and `app`. Read `docker compose logs db app`. |
-| `backup_age` | Run `docker compose logs backup`. Read the last `ERROR` line. Then run `docker compose exec backup backup-now`. |
-| `replication` | Run `docker compose ps walarchive` and `docker compose logs walarchive`. For a gap, use the section "A gap in the WAL stream". |
-| `low_disk` | Read the field `volume` of the line: `pgdata`, `backups`, or `walarchive`. Free space on that disk. Delete only files outside the three volumes. Delete no set, no base backup, and no WAL segment by hand. For `pgdata`, use the section "Read-only mode". |
-| `failed_logins` | Open `/security-events`. Filter the kind `login_failed`. Read `login` and `client_ip`. |
-| `security_events` | Open `/security-events`. Filter the kind `csrf_rejected`. Read `client_ip`. Then filter the kind `forbidden`. Read `client_ip`. |
-| `audit_chain_broken` | Read the line `E-AUD-002` in `docker compose logs app`. It names the `chain_seq`. Open the row in `/security-events`. |
-| `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. |
-| `export_hash_mismatch` | Read the line `E-EXP-002` in `docker compose logs app`. It names the recipe and the version. |
+| Name | First action | Then |
+|---|---|---|
+| `panics` | Read the panic lines in `docker compose logs app`. Note the field `request_id` or `job`. | No document gives a further action. A panic is a bug, and the server keeps serving (`reliability.md` 2.4). |
+| `not_ready` | Run `docker compose ps`. Read the health of `db` and `app`. Read `docker compose logs db app`. | Run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /healthz`. Run it again with `--path /readyz`. If `app` restarts, use the section "Restart loop". If only `/readyz` fails and `db` is healthy, a migration of the binary may be missing from `_sqlx_migrations` or may have another checksum (`reliability.md` 7.2). No document gives a fix. |
+| `backup_age` | Run `docker compose logs backup`. Read the last `ERROR` line. Then run `docker compose exec backup backup-now`. | None beyond the first action. |
+| `replication` | Run `docker compose ps walarchive` and `docker compose logs walarchive`. For a gap, use the section "A gap in the WAL stream". | None beyond the first action. |
+| `low_disk` | Read the field `volume` of the line: `pgdata`, `backups`, or `walarchive`. Free space on that disk. Delete only files outside the three volumes. Delete no set, no base backup, and no WAL segment by hand. For `pgdata`, use the section "Read-only mode". | None beyond the first action. |
+| `failed_logins` | Open `/security-events`. Filter the kind `login_failed`. Read `login` and `client_ip`. | If a user cannot log in, an Administrator opens `/users/<login>` and uses the unlock form (`LoginUnlock`, `api.md` 2.8). If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". |
+| `security_events` | Open `/security-events`. Filter the kind `csrf_rejected`. Read `client_ip`. Then filter the kind `forbidden`. Read `client_ip`. | If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". No document gives another action. |
+| `audit_chain_broken` | Read the line `E-AUD-002` in `docker compose logs app`. It names the `chain_seq`. Open the row in `/security-events`. | The condition stays active while the newest row is younger than `audit.max_check_age`. Each nightly check adds a row while the chain stays broken (`reliability.md` 3.7). No document gives a fix. |
+| `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. | A run that returns an error code is not a completed check. Follow the row of that code in `reliability.md` 1.2 (ADR-0100 (e)). A stored time that is later than the time of `db` by more than `alerts.interval` also keeps the alert active (`reliability.md` 3.7). |
+| `export_hash_mismatch` | Read the line `E-EXP-002` in `docker compose logs app`. It names the recipe and the version. | The server refuses the export of that version (`reliability.md` 1.2). No document gives a fix. |
 
 ### Read-only mode
 
@@ -900,12 +973,13 @@ Read the address in the output of `docker compose config` at the service `proxy`
 
 ## Related
 
-- [reliability.md](../architecture/reliability.md): sections 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, and 7.11
+- [reliability.md](../architecture/reliability.md): sections 3.1, 3.2, 3.5, 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, and 7.11
 - [ADR-0020](../adr/0020-deployment-migrations-backup.md), [ADR-0033](../adr/0033-globals-dump-of-the-backup.md), [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md), [ADR-0063](../adr/0063-webhook-of-the-alerts.md)
 - [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
 - [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
 - [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
 - [ADR-0061](../adr/0061-start-order-of-serve.md), [ADR-0087](../adr/0087-drain-of-the-internal-listener.md)
+- [ADR-0088](../adr/0088-run-interface-of-the-jobs-and-cut-count.md), [ADR-0089](../adr/0089-job-errors-first-disk-run-and-stop-line.md), [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md)
 
 ## Known gaps
 
