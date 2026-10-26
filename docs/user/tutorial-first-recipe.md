@@ -7,12 +7,24 @@ In this lesson you create the recipe `R-100` on the machine `M1`. You add one pa
 You need these items:
 
 - An account with the role **Process engineer**, for example the login `anowak`. You already changed your one-time password.
-- The permissions `RecipeView`, `RecipeCreate`, `ParameterEdit`, and `VersionExport`. [reference-permissions.md](reference-permissions.md) lists the permissions of each role.
+- The permissions `RecipeView`, `RecipeCreate`, `ParameterEdit`, `VersionApprove`, and `VersionExport`. [reference-permissions.md](reference-permissions.md) lists the permissions of each role.
 - The machine `M1` with the main unit `U1`. The PLC platform of `M1` is not **Siemens S7-300**.
 - No recipe with the reference number `R-100`.
 - A colleague with an account of the role **Administrator** or **Process engineer**. The colleague must not be you. The colleague approves your draft in steps 13 to 15.
 
-Developers can get a practice environment. Set the variable `RECIPE_DEV_PASSWORD` to 12 to 128 characters. Then run `cargo run -p recipe-web --example dev_server` and open `http://127.0.0.1:8080/login`. The server seeds the logins `engineer` (Process engineer) and `admin` (Administrator) and no machine. Create `M1` first with the link **New machine** on the page **Machines**.
+Developers can get a practice environment. The server seeds the logins `engineer` (Process engineer) and `admin` (Administrator) and no machine. Do these steps to start the server and create `M1`:
+
+1. Set the variable `RECIPE_DEV_PASSWORD` to 12 to 128 characters.
+2. Run `cargo run -p recipe-web --example dev_server`.
+3. Open `http://127.0.0.1:8080/login`. Click **English**.
+4. Log in as `engineer` with the password of `RECIPE_DEV_PASSWORD`.
+5. Click **Machines**. Then click **New machine**.
+6. Enter `M1` in **Machine code**. Enter a name in **Machine name**.
+7. Select **CODESYS (IEC 61131-3)** in **PLC platform**.
+8. Enter a name in **Name of the main unit**. Click **Create machine**.
+9. Click **Log out**. Then click **Polski** to set the default language again.
+
+The form creates the main unit `U1`. The role **Process engineer** has the permission `MachineManage`, which the form needs.
 
 ## Steps
 
@@ -22,7 +34,7 @@ The editor starts in Polish. This lesson shows the English texts. Step 2 switche
 
 Open the address of the editor in your browser. Add `/login` to the address.
 
-You see the page **Log in** with the fields **Login** and **Password**.
+You see the page **Logowanie** with the fields **Login** and **Hasło**. Step 2 changes them to **Log in**, **Login**, and **Password**.
 
 ### Step 2. Switch the language
 
@@ -115,7 +127,7 @@ The colleague sees the page **Recipe R-100**. The table **Versions** shows versi
 
 The colleague clicks `1` in the column **Version**. The colleague then clicks **Approve version 1**.
 
-The colleague sees the page **Approval of version 1 of recipe R-100**. The section **Summary of the changes** lists the added parameter `SPEED`. The heading **Approval** shows the text **Recipe R-100 has no approved version. Every parameter is new.**
+The colleague sees the page **Approval of version 1 of recipe R-100**. The section **Summary of the changes** shows **Added parameters** with **Parameters: 1**. The section **Added parameters** lists `SPEED` in its table. The heading **Approval** shows the text **Recipe R-100 has no approved version. Every parameter is new.**
 
 ### Step 15. Let your colleague approve the version
 

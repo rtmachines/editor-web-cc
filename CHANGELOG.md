@@ -175,6 +175,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The workspace dependencies `hyper`, `hyper-util`, `hyper-rustls`, `rustls`, `http-body-util`, `tokio-util`, and `rustix`. `Cargo.lock` holds the new crate `matchers`.
 - ADR-0095 for the role grammar of the globals file. ADR-0096 for the guard lock of the last Administrator. ADR-0097 for the names without schema in the drop guard.
 - ADR-0098 for the insert columns of `audit_log` and the qualified operators. ADR-0099 for the start of the WAL stream before the replacement base backup.
+- ADR-0100 for the wait for the scheduled audit chain check after a restore. ADR-0101 for the PostgreSQL container of the storage tests. ADR-0102 for the end of the restore procedure after the result of the audit chain check.
 - The migrations `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`.
 - The CI job `upgrade`. It upgrades an older volume with the new release and runs the checks of the upgrade.
 - The section "Known gaps" in `docs/ops/runbook.md`. It lists the operations gaps that the documents do not yet close.

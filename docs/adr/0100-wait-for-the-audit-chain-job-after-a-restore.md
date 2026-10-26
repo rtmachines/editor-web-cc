@@ -1,6 +1,6 @@
 # ADR-0100: Wait for the scheduled audit chain check after a restore
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0102 (the restore procedure ends after the operator reads and accepts the result of the next completed run)
 Date: 2026-10-26
 Deciders: project owner
 

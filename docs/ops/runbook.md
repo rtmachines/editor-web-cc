@@ -630,6 +630,8 @@ The section "Copy the backups off site" describes the off-site audit copy of ste
 The next completed run is the applicable run that completes first (ADR-0100, `data-model.md` 4.9).
 The catch-up run starts after `audit.catchup_delay`. It applies when the restored `audit.last_check_at` is missing or older than `audit.catchup_age` at the start of `app`.
 The nightly run at `audit.check_time` stays active in all cases. A newer completed nightly check suppresses the catch-up run.
+`reliability.md` 7.11 gives the values of these settings. The wait is the delay to the start of the run plus the time of the check (ADR-0100).
+No setting limits the time of the whole check. `audit.check_statement_timeout` limits the head read and each batch. `audit.max_check_age` only raises an alert. The wait therefore has no fixed upper limit.
 Read the result in three places.
 
 The first place is `audit.last_check_at` in `app_setting`. The value is a time in UTC.
@@ -646,7 +648,7 @@ A value equal to the recorded value is not a new check.
 An active `audit_check_age` is unresolved evidence about the age or the clock trust of the check (ADR-0093 (a)). It does not prove that no check completed. Investigate it in section "Alarms, read-only mode, and restart loop" before you accept the result.
 
 The second place is the event log of `app`. An `ERROR` line of the job `audit_chain_check` with the `error_code` `E-AUD-002` shows a break.
-Use the command form of the section "Read the logs", subsection "Read the lines of a job", and add the pattern of the code:
+The command below uses the form of the subsection "Read the lines of a job" in the section "Read the logs". It adds the pattern of the code:
 
 ```bash
 docker compose logs --no-log-prefix app | grep -F '"job":"audit_chain_check"' | grep -F '"error_code":"E-AUD-002"'
@@ -676,7 +678,7 @@ The `E-AUD-002` line and the alert are diagnostic signals. A missing line or an 
 A check without a break writes no log line, so a missing line alone does not show a completed check.
 
 A run that returns another error code is not a completed check, and `audit.last_check_at` keeps its value.
-Read that code in the `ERROR` line and follow its row in `reliability.md` 1.2.
+Read that code in the `ERROR` line. Then follow its row in `reliability.md` 1.2.
 
 The alert `audit_check_age` becomes active when `audit.last_check_at` is older than `audit.max_check_age`.
 
@@ -1437,8 +1439,8 @@ The `request_id` is also present in the audit log and in the security events (`r
 
 ### Read the lines of a job
 
-The supervisor writes a line for a failed run and for a panic of a job only. A run that ends well writes no line (ADR-0100, `crates/recipe-server/src/supervisor.rs`).
-So a missing line shows no fault, and it does not show that a run happened.
+The supervisor writes a line for a failed run and for a panic of a job only. The supervisor writes no line for a run that ends well (ADR-0100, `crates/recipe-server/src/supervisor.rs`).
+So a missing line does not show that no fault occurred. It also does not show that a run happened.
 A failed run writes an `ERROR` line with the field `error_code`. The job `alerts` writes a `WARN` line instead (ADR-0089 (d)).
 A panic writes an `ERROR` line with the value `panic` in the field `outcome` of the span (ADR-0088 (a)).
 
@@ -1472,7 +1474,7 @@ Read the lines with the commands of the section "Read the logs".
 | `failed_logins` | Open `/security-events`. Filter the kind `login_failed`. Read `login` and `client_ip`. | If a user cannot log in, an Administrator opens `/users/<login>` and uses the unlock form (`LoginUnlock`, `api.md` 2.8). If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". |
 | `security_events` | Open `/security-events`. Filter the kind `csrf_rejected`. Read `client_ip`. Then filter the kind `forbidden`. Read `client_ip`. | If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". No document gives another action. |
 | `audit_chain_broken` | Read the line `E-AUD-002` in `docker compose logs app`. It names the `chain_seq`. Open the row in `/security-events`. | The condition stays active while the newest row is younger than `audit.max_check_age`. Each nightly check adds a row while the chain stays broken (`reliability.md` 3.7). No document gives a fix. |
-| `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. | A run that returns an error code is not a completed check. Follow the row of that code in `reliability.md` 1.2 (ADR-0100 (e)). A stored time that is later than the time of `db` by more than `alerts.interval` also keeps the alert active (`reliability.md` 3.7). |
+| `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. | A run that returns an error code other than `E-AUD-002` is not a completed check. Follow the row of that code in `reliability.md` 1.2 (ADR-0100 (e)). A stored time that is later than the time of `db` by more than `alerts.interval` also keeps the alert active (`reliability.md` 3.7). |
 | `export_hash_mismatch` | Read the line `E-EXP-002` in `docker compose logs app`. It names the recipe and the version. | The server refuses the export of that version (`reliability.md` 1.2). No document gives a fix. |
 
 ### Low disk space
@@ -1683,6 +1685,7 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - No document gives a procedure for the cases below. Each item links the section where the case appears. That section gives the part of the procedure that exists.
   - Alarms: an action for `panics`, `audit_chain_broken`, `export_hash_mismatch`, and `security_events` ([Alarms](#alarms))
   - Alarms: a fix when `not_ready` comes from a migration with another checksum ([Alarms](#alarms))
+  - Restore: an action when the run of `audit_chain_check` in step 10 fails or does not complete ([Restore into production](#restore-into-production))
   - Disks: an extension of the filesystem of the second disk ([Low disk space](#low-disk-space))
   - Disks: free space on the disk of `pgdata` ([Read-only mode](#read-only-mode))
   - Disks: a measurement of `pgdata` that keeps failing ([The mode stays on](#the-mode-stays-on))
@@ -1739,3 +1742,4 @@ A later change will close these gaps with its own ADR.
 - [ADR-0097](../adr/0097-schema-free-names-in-the-drop-guard.md): Names without a schema in the drop guard of the audit objects
 - [ADR-0099](../adr/0099-stream-before-the-replacement-base-backup.md): Stream before the replacement base backup after a WAL gap
 - [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md): Wait for the scheduled audit chain check after a restore
+- [ADR-0102](../adr/0102-end-the-restore-after-the-audit-chain-result.md): End the restore after the result of the audit chain check
