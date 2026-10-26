@@ -20,7 +20,7 @@ use super::support::cli::level_marker;
 /// The pause between two checks of a child that may have exited.
 const EXIT_POLL_PAUSE: Duration = Duration::from_millis(50);
 /// The text that the `ERROR` line holds when `serve` cannot bind one of its two ports.
-const BIND_FAULT: &str = "listener cannot bind its port";
+pub const BIND_FAULT: &str = "listener cannot bind its port";
 
 /// The lines of one pipe. The reader thread sends them, and the owner keeps what it received.
 struct Pipe {

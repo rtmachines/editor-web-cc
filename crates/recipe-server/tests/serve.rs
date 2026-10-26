@@ -7,6 +7,8 @@
 //! to ports that it finds free just before the start, so no test uses a fixed port. Every wait has
 //! a limit, and the helper kills a child that hangs.
 
+use std::io::ErrorKind;
+use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
@@ -19,8 +21,8 @@ mod net;
 mod process;
 mod support;
 
-use net::{Answer, free_ports, http_get, poll_until, port_is_open};
-use process::{ServerProcess, has_line};
+use net::{Answer, free_ports, hold_ports, http_get, poll_until, port_is_open};
+use process::{BIND_FAULT, ServerProcess, has_line};
 use support::cli::{level_marker, lines_with, run_migrate, text_of};
 use support::database::{
     APP_PASSWORD, MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
@@ -169,18 +171,23 @@ fn wait_for<T>(server: &mut ServerProcess, what: &str, mut probe: impl FnMut() -
     found.unwrap()
 }
 
-/// Wait for the exit of a child that must not open a listener. Probe both ports while it runs.
+/// Start the server on two ports that the test holds, and wait for its exit.
 ///
-/// A port probe after the exit cannot fail, because an exited process holds no socket.
-fn wait_exit_while_ports_stay_closed(server: &mut ServerProcess, what: &str) -> Output {
-    let ports = [server.internal_port(), server.public_port()];
-    let _ = poll_until(EXIT_LIMIT, || {
-        for port in ports {
-            assert!(!port_is_open(port), "{what}: port {port} is open");
-        }
-        server.exited().then_some(())
-    });
-    server.wait_exit(EXIT_LIMIT)
+/// The server must fail before it opens a listener. A listener that it opens would fail to bind a
+/// held port, and the error line would name the bind. The helper rejects that line. The test thus
+/// proves "no listener" without a probe, and no other test can take the ports in the meantime.
+fn run_failing_start(environment: &[(&str, String)], what: &str) -> (ServerProcess, Output) {
+    let held = hold_ports();
+    let mut server =
+        ServerProcess::spawn_on_ports(environment, held.public_port(), held.internal_port());
+    let output = server.wait_exit(EXIT_LIMIT);
+    drop(held);
+    let text = text_of(&output);
+    assert!(
+        !text.contains(BIND_FAULT),
+        "{what}: the server tried to open a listener:\n{text}"
+    );
+    (server, output)
 }
 
 /// Wait until `/readyz` answers 200 on the internal port. A start that passed step 10 does this.
@@ -193,13 +200,25 @@ fn wait_until_ready_answer(server: &mut ServerProcess) -> Answer {
 }
 
 #[test]
-fn free_ports_are_two_different_ports_that_nothing_listens_on() {
+fn held_ports_are_two_different_ports_that_no_other_socket_can_bind() {
+    let held = hold_ports();
+    let ports = [held.public_port(), held.internal_port()];
+
+    assert_ne!(ports[0], ports[1]);
+    for port in ports {
+        let second_bind = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port));
+        let kind = second_bind.err().map(|error| error.kind());
+        assert_eq!(kind, Some(ErrorKind::AddrInUse), "{port}");
+        // The held listener itself accepts the connection, so the probe sees an open port.
+        assert!(port_is_open(port), "{port}");
+    }
+}
+
+#[test]
+fn free_ports_are_two_different_ports() {
     let (public_port, internal_port) = free_ports();
 
     assert_ne!(public_port, internal_port);
-    for port in [public_port, internal_port] {
-        assert!(!port_is_open(port), "{port}");
-    }
 }
 
 /// `/healthz` answers 200 `ok` once the internal listener accepts connections (step 8 of ADR-0061).
@@ -274,9 +293,7 @@ async fn a_start_with_a_wrong_role_exits_with_code_1_and_one_error_line_and_open
             ),
         ],
     );
-    let mut server = start_server(&environment);
-
-    let output = wait_exit_while_ports_stay_closed(&mut server, "wrong role");
+    let (mut server, output) = run_failing_start(&environment, "wrong role");
 
     let text = text_of(&output);
     assert_eq!(output.status.code(), Some(1), "{text}");
@@ -349,9 +366,7 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
             CLOSED_PORT,
             &[(variable, file.to_str().unwrap().to_owned())],
         );
-        let mut server = start_server(&environment);
-
-        let output = wait_exit_while_ports_stay_closed(&mut server, key);
+        let (_server, output) = run_failing_start(&environment, key);
 
         let text = text_of(&output);
         assert_eq!(output.status.code(), Some(1), "{key}: {text}");
@@ -364,14 +379,16 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sigterm_stops_the_server_with_code_0_and_closes_both_listeners() {
+async fn sigterm_stops_a_started_server_with_code_0_and_the_stopped_line() {
     let setup = Setup::new();
     let database = Database::start(&setup).await;
     let mut server = start_server(&setup.environment(database.port));
     wait_until_ready_answer(&mut server);
-    let (public_port, internal_port) = (server.public_port(), server.internal_port());
-    assert!(port_is_open(internal_port));
-    assert!(port_is_open(public_port));
+    // Both listeners are open before the signal, so the signal stops a fully started server.
+    // A probe after the exit proves nothing. An exited process holds no socket, and another test
+    // may take a freed port.
+    assert!(port_is_open(server.internal_port()));
+    assert!(port_is_open(server.public_port()));
 
     send_sigterm(&server);
     let output = server.wait_exit(STOP_LIMIT);
@@ -380,9 +397,6 @@ async fn sigterm_stops_the_server_with_code_0_and_closes_both_listeners() {
     assert_eq!(output.status.code(), Some(0), "{text}");
     assert_eq!(lines_with(&output, "ERROR"), 0, "{text}");
     assert!(has_line(server.stdout_lines(), "INFO", STOPPED), "{text}");
-    // Both ports were open before the signal. So the closed ports show that the stop released them.
-    assert!(!port_is_open(internal_port));
-    assert!(!port_is_open(public_port));
 }
 
 /// Send `SIGTERM` to the child with the `kill` program, so the test needs no new crate.
