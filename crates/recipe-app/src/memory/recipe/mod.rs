@@ -16,7 +16,7 @@ mod tests;
 use async_trait::async_trait;
 use recipe_domain::export::Sha256;
 use recipe_domain::identity::UserId;
-use recipe_domain::plant::MachineId;
+use recipe_domain::plant::{MachineId, PlcPlatform};
 use recipe_domain::recipe::{
     ParameterId, Recipe, RecipeId, RecipeVersionId, ReferenceNumber, StoredParameter, VersionState,
     VersionStatus,
@@ -33,7 +33,7 @@ pub(crate) use rows::{ParameterRow, RecipeRow, VersionRow};
 use super::rows::{
     check_violation, corrupt_rows, duplicate, illegal_transition, missing_reference, missing_row,
 };
-use super::{LockMode, MemoryTransaction};
+use super::{LockMode, MemoryState, MemoryTransaction};
 use crate::error::{RECIPE_REFERENCE_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT, StorageError};
 use crate::ports::{InsertedRecipe, Locked, NewVersion, RecipeRepository, RowImage, SharedVersion};
 
@@ -106,54 +106,9 @@ impl MemoryTransaction {
     fn put_version(&mut self, new: &NewVersion) -> Result<RowImage, StorageError> {
         let now = self.now();
         let state = self.state();
-        let Some(recipe) = state.recipes.get(&new.recipe) else {
-            return Err(missing_reference(VERSION_RECIPE_PLATFORM));
-        };
-        let siblings = || state.versions.values().filter(|v| v.recipe == new.recipe);
-        if state.versions.contains_key(&new.version) {
-            return Err(duplicate(VERSION_PKEY));
-        }
-        if new.number == 0 || new.number > VERSION_NUMBER_MAX {
-            return Err(check_violation());
-        }
-        if siblings().any(|v| v.number == new.number) {
-            return Err(duplicate(VERSION_NUMBER_UNIQUE));
-        }
-        let base_is_sibling = new
-            .based_on
-            .is_none_or(|base| siblings().any(|v| v.id == base));
-        if !base_is_sibling {
-            return Err(missing_reference(VERSION_BASED_ON_SAME_RECIPE));
-        }
-        if siblings().any(|v| v.state() == Ok(VersionState::LiveDraft)) {
-            return Err(duplicate(RECIPE_VERSION_ONE_LIVE_DRAFT));
-        }
-        let row = VersionRow {
-            id: new.version,
-            recipe: new.recipe,
-            platform: recipe.platform,
-            number: new.number,
-            status: VersionStatus::Draft,
-            row_version: 1,
-            based_on: new.based_on,
-            change_note: new.change_note.clone(),
-            content_sha256: None,
-            created_by: new.creator,
-            created_at: now,
-            updated_at: now,
-            approved_by: None,
-            approved_at: None,
-            retired_at: None,
-            deleted_at: None,
-        };
-        let copies = new.based_on.map_or_else(Vec::new, |base| {
-            state
-                .parameters
-                .values()
-                .filter(|parameter| parameter.version == base)
-                .map(|parameter| copy_parameter(parameter, new.version, now))
-                .collect()
-        });
+        let platform = check_new_version(state, new)?;
+        let row = new_version_row(new, platform, now);
+        let copies = inherited_parameters(state, new, now);
         let image = version_image(&row);
         self.state_mut().versions.insert(row.id, row);
         for copy in copies {
@@ -161,6 +116,71 @@ impl MemoryTransaction {
         }
         Ok(image)
     }
+}
+
+/// Check the constraints of `recipe_version` for a new row and return the platform of its recipe.
+fn check_new_version(state: &MemoryState, new: &NewVersion) -> Result<PlcPlatform, StorageError> {
+    let Some(recipe) = state.recipes.get(&new.recipe) else {
+        return Err(missing_reference(VERSION_RECIPE_PLATFORM));
+    };
+    let siblings = || state.versions.values().filter(|v| v.recipe == new.recipe);
+    if state.versions.contains_key(&new.version) {
+        return Err(duplicate(VERSION_PKEY));
+    }
+    if new.number == 0 || new.number > VERSION_NUMBER_MAX {
+        return Err(check_violation());
+    }
+    if siblings().any(|v| v.number == new.number) {
+        return Err(duplicate(VERSION_NUMBER_UNIQUE));
+    }
+    let base_is_sibling = new
+        .based_on
+        .is_none_or(|base| siblings().any(|v| v.id == base));
+    if !base_is_sibling {
+        return Err(missing_reference(VERSION_BASED_ON_SAME_RECIPE));
+    }
+    if siblings().any(|v| v.state() == Ok(VersionState::LiveDraft)) {
+        return Err(duplicate(RECIPE_VERSION_ONE_LIVE_DRAFT));
+    }
+    Ok(recipe.platform)
+}
+
+/// Build the row of a new draft version.
+fn new_version_row(new: &NewVersion, platform: PlcPlatform, now: Timestamp) -> VersionRow {
+    VersionRow {
+        id: new.version,
+        recipe: new.recipe,
+        platform,
+        number: new.number,
+        status: VersionStatus::Draft,
+        row_version: 1,
+        based_on: new.based_on,
+        change_note: new.change_note.clone(),
+        content_sha256: None,
+        created_by: new.creator,
+        created_at: now,
+        updated_at: now,
+        approved_by: None,
+        approved_at: None,
+        retired_at: None,
+        deleted_at: None,
+    }
+}
+
+/// Copy the parameters of the base version of a new version, if it has a base version.
+fn inherited_parameters(
+    state: &MemoryState,
+    new: &NewVersion,
+    now: Timestamp,
+) -> Vec<ParameterRow> {
+    new.based_on.map_or_else(Vec::new, |base| {
+        state
+            .parameters
+            .values()
+            .filter(|parameter| parameter.version == base)
+            .map(|parameter| copy_parameter(parameter, new.version, now))
+            .collect()
+    })
 }
 
 /// Copy a parameter row into another version with a new identifier and the same key.

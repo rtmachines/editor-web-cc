@@ -256,9 +256,9 @@ where
     U::try_from(value).map_err(bad)
 }
 
-/// Build the columns of a new row from a valid domain type.
-fn new_row(plc_type: &PlcType) -> Result<NewTypeRow, StorageError> {
-    let mut row = NewTypeRow {
+/// Build the columns that every new row shares, with the defaults of a primitive row.
+fn base_row(plc_type: &PlcType) -> NewTypeRow {
+    NewTypeRow {
         id: *plc_type.id().as_uuid(),
         kind: "primitive",
         name: None,
@@ -276,7 +276,12 @@ fn new_row(plc_type: &PlcType) -> Result<NewTypeRow, StorageError> {
         machine_id: plc_type.machine().map(|machine| *machine.as_uuid()),
         revision: 1,
         supersedes_type_id: None,
-    };
+    }
+}
+
+/// Build the columns of a new row from a valid domain type.
+fn new_row(plc_type: &PlcType) -> Result<NewTypeRow, StorageError> {
+    let mut row = base_row(plc_type);
     match plc_type.shape() {
         RecordShape::Primitive {
             primitive,

@@ -1,5 +1,7 @@
 //! In-memory `LoginAttemptStore` and `SessionStore`: pool-level ports with their own transaction.
 
+use std::net::IpAddr;
+
 use async_trait::async_trait;
 use recipe_domain::identity::{AttemptCount, SessionId, ThrottlePolicy};
 use recipe_domain::timestamp::Timestamp;
@@ -27,29 +29,54 @@ fn begin(
         mode: LockMode::Advisory,
         key: key.login.as_str().to_owned(),
     }));
-    let start = before(now, policy.window);
-    let failures: Vec<&AttemptRow> = state
-        .attempts
-        .values()
-        .filter(|row| !row.succeeded && row.attempted_at > start && row.client_ip == client_ip)
-        .collect();
-    let pair: Vec<&&AttemptRow> = failures
-        .iter()
-        .filter(|row| row.login == key.login)
-        .collect();
-    let count = AttemptCount {
-        pair_failures: u32::try_from(pair.len()).unwrap_or(u32::MAX),
-        last_pair_failure: pair.iter().map(|row| row.attempted_at).max(),
-        address_failures: u32::try_from(failures.len()).unwrap_or(u32::MAX),
-        oldest_address_failure: failures.iter().map(|row| row.attempted_at).min(),
-        now,
-    };
+    let count = count_failures(state, now, key, policy, &client_ip);
     if policy.budget_reached(count.address_failures) {
         return Ok(AttemptOutcome {
             count,
             attempt: None,
         });
     }
+    let id = insert_failed_attempt(state, now, key, client_ip)?;
+    Ok(AttemptOutcome {
+        count,
+        attempt: Some(id),
+    })
+}
+
+/// Count the failures of the window for the pair and for the address of `begin`.
+fn count_failures(
+    state: &MemoryState,
+    now: Timestamp,
+    key: &AttemptKey,
+    policy: &ThrottlePolicy,
+    client_ip: &IpAddr,
+) -> AttemptCount {
+    let start = before(now, policy.window);
+    let failures: Vec<&AttemptRow> = state
+        .attempts
+        .values()
+        .filter(|row| !row.succeeded && row.attempted_at > start && row.client_ip == *client_ip)
+        .collect();
+    let pair: Vec<&&AttemptRow> = failures
+        .iter()
+        .filter(|row| row.login == key.login)
+        .collect();
+    AttemptCount {
+        pair_failures: u32::try_from(pair.len()).unwrap_or(u32::MAX),
+        last_pair_failure: pair.iter().map(|row| row.attempted_at).max(),
+        address_failures: u32::try_from(failures.len()).unwrap_or(u32::MAX),
+        oldest_address_failure: failures.iter().map(|row| row.attempted_at).min(),
+        now,
+    }
+}
+
+/// Store the attempt of `begin` as a failure and return its new key.
+fn insert_failed_attempt(
+    state: &mut MemoryState,
+    now: Timestamp,
+    key: &AttemptKey,
+    client_ip: IpAddr,
+) -> Result<AttemptId, StorageError> {
     let next = state
         .last_attempt_key
         .checked_add(1)
@@ -66,10 +93,7 @@ fn begin(
             succeeded: false,
         },
     );
-    Ok(AttemptOutcome {
-        count,
-        attempt: Some(id),
-    })
+    Ok(id)
 }
 
 /// Run the statement of `SessionStore::authenticate` on the committed state (design D10).
