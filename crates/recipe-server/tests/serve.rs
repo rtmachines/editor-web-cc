@@ -8,6 +8,7 @@
 //! a limit, and the helper kills a child that hangs.
 
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::time::Duration;
 
 #[path = "support/net.rs"]
@@ -164,6 +165,20 @@ fn wait_for<T>(server: &mut ServerProcess, what: &str, mut probe: impl FnMut() -
     found.unwrap()
 }
 
+/// Wait for the exit of a child that must not open a listener. Probe both ports while it runs.
+///
+/// A port probe after the exit cannot fail, because an exited process holds no socket.
+fn wait_exit_while_ports_stay_closed(server: &mut ServerProcess, what: &str) -> Output {
+    let ports = [server.internal_port(), server.public_port()];
+    let _ = poll_until(EXIT_LIMIT, || {
+        for port in ports {
+            assert!(!port_is_open(port), "{what}: port {port} is open");
+        }
+        server.exited().then_some(())
+    });
+    server.wait_exit(EXIT_LIMIT)
+}
+
 /// Wait until `/readyz` answers 200 on the internal port. A start that passed step 10 does this.
 fn wait_until_ready_answer(server: &mut ServerProcess) -> Answer {
     let internal_port = server.internal_port();
@@ -250,7 +265,7 @@ async fn a_start_with_a_wrong_role_exits_with_code_1_and_one_error_line_and_open
     );
     let mut server = start_server(&environment);
 
-    let output = server.wait_exit(EXIT_LIMIT);
+    let output = wait_exit_while_ports_stay_closed(&mut server, "wrong role");
 
     let text = text_of(&output);
     assert_eq!(output.status.code(), Some(1), "{text}");
@@ -262,8 +277,6 @@ async fn a_start_with_a_wrong_role_exits_with_code_1_and_one_error_line_and_open
     );
     assert!(!text.contains(MIGRATOR_PASSWORD), "{text}");
     assert!(!has_line(server.stdout_lines(), "INFO", STARTED), "{text}");
-    assert!(!port_is_open(server.internal_port()));
-    assert!(!port_is_open(server.public_port()));
     // Step 7 writes the first audit entries. A refused role never reaches it.
     assert_eq!(database.count(AUDIT_ENTRIES).await, 0);
 }
@@ -326,7 +339,7 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
         );
         let mut server = start_server(&environment);
 
-        let output = server.wait_exit(EXIT_LIMIT);
+        let output = wait_exit_while_ports_stay_closed(&mut server, key);
 
         let text = text_of(&output);
         assert_eq!(output.status.code(), Some(1), "{key}: {text}");
@@ -334,8 +347,6 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
         assert!(text.contains(COMMAND_FAILED), "{key}: {text}");
         assert!(text.contains(key), "{key}: {text}");
         assert!(!text.contains(KEY_MARKER), "{key}: {text}");
-        assert!(!port_is_open(server.internal_port()), "{key}");
-        assert!(!port_is_open(server.public_port()), "{key}");
     }
 }
 
@@ -357,6 +368,7 @@ async fn sigterm_stops_the_server_with_code_0_and_closes_both_listeners() {
     assert_eq!(output.status.code(), Some(0), "{text}");
     assert_eq!(lines_with(&output, "ERROR"), 0, "{text}");
     assert!(has_line(server.stdout_lines(), "INFO", STOPPED), "{text}");
+    // Both ports were open before the signal. So the closed ports show that the stop released them.
     assert!(!port_is_open(internal_port));
     assert!(!port_is_open(public_port));
 }
