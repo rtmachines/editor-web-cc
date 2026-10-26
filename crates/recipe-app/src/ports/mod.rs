@@ -57,6 +57,8 @@ pub use draft::DraftRepository;
 pub use isolation::Isolation;
 pub use maintenance::MaintenanceStore;
 pub use nonempty::NonEmpty;
+#[cfg(any(test, feature = "memory"))]
+pub(crate) use operations_reads::APPLICATION_ROLE;
 pub use operations_reads::{
     OperationsReads, OperationsSnapshot, ReplicationState, RoleCheck, SnapshotWindows,
 };
