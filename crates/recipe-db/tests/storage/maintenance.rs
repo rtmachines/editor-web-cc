@@ -392,11 +392,13 @@ async fn maintenance_state_write_inserts_one_row_and_then_updates_it_with_a_null
         .record_state(&StateValue::HeartbeatLastAt(instant(0, 0)))
         .await
         .unwrap();
-    let id: Uuid = sqlx::query_scalar("SELECT id FROM app_setting WHERE key = $1")
-        .bind(HEARTBEAT_KEY)
-        .fetch_one(&mut f.admin)
-        .await
-        .unwrap();
+    let (id, inserted_by): (Uuid, Option<Uuid>) =
+        sqlx::query_as("SELECT id, updated_by FROM app_setting WHERE key = $1")
+            .bind(HEARTBEAT_KEY)
+            .fetch_one(&mut f.admin)
+            .await
+            .unwrap();
+    assert_eq!(inserted_by, None);
     let user = fixtures::user(&mut f.admin).await;
     sqlx::query("UPDATE app_setting SET updated_by = $1 WHERE key = $2")
         .bind(user)
