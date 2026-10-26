@@ -491,8 +491,8 @@ sha256sum -c --strict -- recipe_<stamp>.dump.sha256
 7. Protect the copies with the same access control as the database.
 
 A set without a manifest is not complete, so the last copy of the manifest keeps a failed copy from looking complete (`reliability.md` 7.7).
-The restore test checks the newest set. A dump may hold code that rewrote the sets of the disk, and the test may not show it (ADR-0084).
-The test therefore comes before the copy.
+A passed restore test does not show that the dump code left the set unchanged. A dump may hold code that rewrote the sets of the disk (ADR-0084).
+The site procedure therefore keeps the existing protected copies. It does not replace them with a new copy.
 The dump holds password hashes and the audit log. The globals file holds no password.
 No document gives a check of a copy of the base backups or of the WAL segments. `basebackup-once` checked each base backup before it gave the final name (`reliability.md` 7.7).
 No document gives the steps that restore a set from a copy to the host.
@@ -1622,6 +1622,7 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
   - Off-site copy: a check of a copy of the base backups and of the WAL segments ([Copy the backups off site](#copy-the-backups-off-site))
   - Off-site copy: the restore of a set from a copy to the host ([Copy the backups off site](#copy-the-backups-off-site))
   - Off-site copy: the read of an audit entry from a copy ([Copy the backups off site](#copy-the-backups-off-site))
+  - Off-site copy: the exclusion of a set that dump code rewrote from the copy (ADR-0084, [Copy the backups off site](#copy-the-backups-off-site))
   - Images: the time that a release stays rollback-ready ([Keep the images for a rollback](#keep-the-images-for-a-rollback))
   - Index: a `psql` session as `recipe_migrator` for a concurrent index ([Concurrent index on an audit object](#concurrent-index-on-an-audit-object))
   - Settings: a change of the keys `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port` ([Change a setting](#change-a-setting))
