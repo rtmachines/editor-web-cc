@@ -11,6 +11,7 @@
 #   STUB_LIST_FAIL=1              pg_restore --list fails.
 #   STUB_LIST_SLEEP=<seconds>     pg_restore --list waits.
 #   STUB_INITDB_FAIL=1            initdb fails.
+#   STUB_GLOBALS_SWAP=1           initdb replaces the globals file after its check.
 #   STUB_PGCTL_START_FAIL=1       pg_ctl start fails.
 #   STUB_PGCTL_STOP_FAIL=1        pg_ctl stop fails.
 #   STUB_RESTORE_FAIL=<section>   pg_restore fails in that section (pre-data, data, post-data).
@@ -42,6 +43,11 @@ for a in "$@"; do
 done
 echo "EVENT initdb" >>"$STUB_LOG"
 echo "ARGV initdb $*" >>"$STUB_LOG"
+if [ -n "${STUB_GLOBALS_SWAP:-}" ]; then
+  for file in "$BACKUP_DIR"/globals_*.sql; do
+    printf "%s\n" "COPY (SELECT 1) TO PROGRAM 'touch /tmp/x';" >"$file"
+  done
+fi
 if [ -n "${STUB_INITDB_FAIL:-}" ]; then
   echo "initdb: error: could not create directory" >&2
   exit 1
@@ -144,6 +150,9 @@ make_stub_psql_files() {
 case $file in
   *globals_*)
     echo "EVENT globals" >>"$STUB_LOG"
+    cat -- "$file" >"$STUB_DIR/globals.received"
+    printf '%s\n' "$file" >"$STUB_DIR/globals.path"
+    stat -c %a -- "$file" >"$STUB_DIR/globals.mode"
     if [ -z "${STUB_GLOBALS_QUIET:-}" ]; then
       echo "psql:$file:3: ERROR:  role \"$(id -un)\" already exists" >&2
     fi

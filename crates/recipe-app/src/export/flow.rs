@@ -326,10 +326,10 @@ pub(super) async fn export_version(
     commit_export(ctx, who, prepared).await
 }
 
-/// Count the result `E-EXP-002` for the job `alerts` (ADR-0073).
+/// Count the result `E-EXP-002` for the job `alerts` (ADR-0060 (z)).
 ///
-/// The function solves one problem: a hash mismatch of a stored export may show a corrupt audit
-/// trail. The flow decides it before the commit, so this is the one place that counts it.
+/// The function solves one problem: a hash mismatch shows that the stored rows of the version
+/// changed. The flow decides it before the commit, so this is the one place that counts it.
 fn count_hash_mismatch(ctx: &AppContext, error: &AppError) {
     if matches!(
         error,

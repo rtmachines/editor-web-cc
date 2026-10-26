@@ -150,8 +150,8 @@ impl Deadline {
         }
     }
 
-    /// The time that is left. A spent budget gives `Timeout`, because a socket timeout of zero
-    /// is an error of the operating system.
+    /// The time that is left. A spent budget gives `Timeout`, because the standard library refuses
+    /// a timeout of zero.
     fn remaining(&self) -> Result<Duration, ProbeFault> {
         self.budget
             .checked_sub(self.started.elapsed())

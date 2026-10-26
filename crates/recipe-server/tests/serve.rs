@@ -7,20 +7,25 @@
 //! to ports that it finds free just before the start, so no test uses a fixed port. Every wait has
 //! a limit, and the helper kills a child that hangs.
 
+use std::io::ErrorKind;
+use std::net::{Ipv4Addr, TcpListener};
 use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::time::Duration;
 
+#[path = "support/environment.rs"]
+mod environment;
 #[path = "support/net.rs"]
 mod net;
 #[path = "support/process.rs"]
 mod process;
 mod support;
 
-use net::{Answer, free_ports, http_get, poll_until, port_is_open};
-use process::{ServerProcess, has_line};
-use support::cli::{lines_with, run_migrate, text_of};
+use net::{Answer, free_ports, hold_ports, http_get, poll_until, port_is_open};
+use process::{BIND_FAULT, ServerProcess, has_line};
+use support::cli::{level_marker, lines_with, run_migrate, text_of};
 use support::database::{
-    MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
+    APP_PASSWORD, MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
 };
 use support::temp::{TempDir, random_secret};
 
@@ -41,8 +46,6 @@ const CLOSED_PORT: u16 = 1;
 const SETTING_COUNT: u32 = 18;
 /// The count after a third start changed one setting.
 const SETTING_COUNT_AFTER_CHANGE: u32 = 19;
-/// A log line of the level `ERROR`.
-const ERROR_MARKER: &str = "\"level\":\"ERROR\"";
 const SETTING_CHANGED: &str = "SELECT count(*) FROM audit_log WHERE action = 'SettingChanged'";
 const AUDIT_ENTRIES: &str = "SELECT count(*) FROM audit_log";
 const STARTED: &str = "the server started";
@@ -50,6 +53,10 @@ const STARTED: &str = "the server started";
 const STOPPED: &str = "the server stopped";
 const COMMAND_FAILED: &str = "the command failed";
 const KEY_MARKER: &str = "keymarker-not-a-hex-key-0123456789";
+/// The exact body of `/healthz` and of a ready `/readyz` (`OK_BODY` in `recipe-web`).
+const OK_BODY: &str = "ok";
+/// The exact body of `/readyz` before the server is ready (`NOT_READY_BODY` in `recipe-web`).
+const NOT_READY_BODY: &str = "not ready";
 
 /// The files of one run. The ports come with the started server.
 struct Setup {
@@ -64,7 +71,7 @@ impl Setup {
     fn new() -> Self {
         let dir = TempDir::new();
         let migrator_secret = dir.write("migrator_secret", &format!("{MIGRATOR_PASSWORD}\n"));
-        let app_secret = dir.write("app_secret", "test-app-password\n");
+        let app_secret = dir.write("app_secret", &format!("{APP_PASSWORD}\n"));
         let login_key = dir.write("login_key", &format!("{}\n", random_secret()));
         let csrf_key = dir.write("csrf_key", &format!("{}\n", random_secret()));
         Self {
@@ -164,6 +171,25 @@ fn wait_for<T>(server: &mut ServerProcess, what: &str, mut probe: impl FnMut() -
     found.unwrap()
 }
 
+/// Start the server on two ports that the test holds, and wait for its exit.
+///
+/// The server must fail before it opens a listener. A listener that it opens would fail to bind a
+/// held port, and the error line would name the bind. The helper rejects that line. The test thus
+/// proves "no listener" without a probe, and no other test can take the ports in the meantime.
+fn run_failing_start(environment: &[(&str, String)], what: &str) -> (ServerProcess, Output) {
+    let held = hold_ports();
+    let mut server =
+        ServerProcess::spawn_on_ports(environment, held.public_port(), held.internal_port());
+    let output = server.wait_exit(EXIT_LIMIT);
+    drop(held);
+    let text = text_of(&output);
+    assert!(
+        !text.contains(BIND_FAULT),
+        "{what}: the server tried to open a listener:\n{text}"
+    );
+    (server, output)
+}
+
 /// Wait until `/readyz` answers 200 on the internal port. A start that passed step 10 does this.
 fn wait_until_ready_answer(server: &mut ServerProcess) -> Answer {
     let internal_port = server.internal_port();
@@ -174,17 +200,31 @@ fn wait_until_ready_answer(server: &mut ServerProcess) -> Answer {
 }
 
 #[test]
-fn free_ports_are_two_different_ports_that_nothing_listens_on() {
-    let (public_port, internal_port) = free_ports();
+fn held_ports_are_two_different_ports_that_no_other_socket_can_bind() {
+    let held = hold_ports();
+    let ports = [held.public_port(), held.internal_port()];
 
-    assert_ne!(public_port, internal_port);
-    for port in [public_port, internal_port] {
-        assert!(!port_is_open(port), "{port}");
+    assert_ne!(ports[0], ports[1]);
+    for port in ports {
+        let second_bind = TcpListener::bind((Ipv4Addr::UNSPECIFIED, port));
+        let kind = second_bind.err().map(|error| error.kind());
+        assert_eq!(kind, Some(ErrorKind::AddrInUse), "{port}");
+        // The held listener itself accepts the connection, so the probe sees an open port.
+        assert!(port_is_open(port), "{port}");
     }
 }
 
+#[test]
+fn free_ports_are_two_different_ports() {
+    let (public_port, internal_port) = free_ports();
+
+    assert_ne!(public_port, internal_port);
+}
+
+/// `/healthz` answers 200 `ok` once the internal listener accepts connections (step 8 of ADR-0061).
+/// This test does not wait for the end of the start. The next test covers `/readyz` (ADR-0091 (e)).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn healthz_answers_200_ok_on_the_internal_listener_after_the_start() {
+async fn healthz_answers_200_ok_once_the_internal_listener_accepts_connections() {
     let setup = Setup::new();
     let database = Database::start(&setup).await;
     let mut server = start_server(&setup.environment(database.port));
@@ -195,16 +235,21 @@ async fn healthz_answers_200_ok_on_the_internal_listener_after_the_start() {
     });
 
     assert_eq!(answer.status, 200, "{}", server.log());
-    assert!(answer.body.contains("ok"), "{}", answer.body);
-    assert!(!server.log().contains(ERROR_MARKER), "{}", server.log());
+    assert_eq!(answer.body, OK_BODY);
+    assert!(
+        !server.log().contains(&level_marker("ERROR")),
+        "{}",
+        server.log()
+    );
 }
 
-/// `/readyz` answers 503 `not ready` until the public listener is bound, and 200 after that
-/// (ADR-0091 (e)). The window of the 503 spans the steps 9 and 10 of the start, a few
-/// milliseconds. A test cannot observe it without a race, so it checks the other side: every
-/// answer before the 200 is a 503, and the public port accepts a connection at the 200.
+/// `/readyz` answers 200 once the public listener accepts connections (ADR-0091 (e)).
+/// The window of the 503 spans steps 9 and 10 of the start and lasts a few milliseconds.
+/// This test cannot observe it without a race. The unit test
+/// `readyz_answers_503_until_the_public_listener_is_bound` in `src/serve/tests/ready.rs`
+/// covers the 503. This test accepts a 503 before the 200 and checks the public port at the 200.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn readyz_answers_200_only_when_the_public_listener_accepts_connections() {
+async fn readyz_answers_200_once_the_public_listener_accepts_connections() {
     let setup = Setup::new();
     let database = Database::start(&setup).await;
     let mut server = start_server(&setup.environment(database.port));
@@ -214,13 +259,13 @@ async fn readyz_answers_200_only_when_the_public_listener_accepts_connections() 
         let answer = http_get(internal_port, "/readyz")?;
         if answer.status != 200 {
             assert_eq!(answer.status, 503, "{}", answer.body);
-            assert!(answer.body.contains("not ready"), "{}", answer.body);
+            assert_eq!(answer.body, NOT_READY_BODY);
             return None;
         }
         Some(answer)
     });
 
-    assert!(answer.body.contains("ok"), "{}", answer.body);
+    assert_eq!(answer.body, OK_BODY);
     assert!(port_is_open(public_port), "{}", server.log());
     // The server opens the gate before it writes the line, and the reader thread adds a delay.
     let started = poll_until(LOG_LIMIT, || {
@@ -248,9 +293,7 @@ async fn a_start_with_a_wrong_role_exits_with_code_1_and_one_error_line_and_open
             ),
         ],
     );
-    let mut server = start_server(&environment);
-
-    let output = server.wait_exit(EXIT_LIMIT);
+    let (mut server, output) = run_failing_start(&environment, "wrong role");
 
     let text = text_of(&output);
     assert_eq!(output.status.code(), Some(1), "{text}");
@@ -262,8 +305,6 @@ async fn a_start_with_a_wrong_role_exits_with_code_1_and_one_error_line_and_open
     );
     assert!(!text.contains(MIGRATOR_PASSWORD), "{text}");
     assert!(!has_line(server.stdout_lines(), "INFO", STARTED), "{text}");
-    assert!(!port_is_open(server.internal_port()));
-    assert!(!port_is_open(server.public_port()));
     // Step 7 writes the first audit entries. A refused role never reaches it.
     assert_eq!(database.count(AUDIT_ENTRIES).await, 0);
 }
@@ -305,7 +346,8 @@ async fn the_first_start_writes_the_setting_entries_and_an_equal_start_writes_no
 fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_key() {
     let setup = Setup::new();
     let missing = setup.dir.join("absent_key");
-    let unreadable = setup.dir.write("bad_key", &format!("{KEY_MARKER}\n"));
+    // The file exists and has text, but the text is not a hex key.
+    let malformed_key_file = setup.dir.write("bad_key", &format!("{KEY_MARKER}\n"));
     let cases = [
         (
             "RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE",
@@ -314,7 +356,7 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
         ),
         (
             "RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE",
-            unreadable,
+            malformed_key_file,
             "security.csrf_signing_key_file",
         ),
     ];
@@ -324,9 +366,7 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
             CLOSED_PORT,
             &[(variable, file.to_str().unwrap().to_owned())],
         );
-        let mut server = start_server(&environment);
-
-        let output = server.wait_exit(EXIT_LIMIT);
+        let (_server, output) = run_failing_start(&environment, key);
 
         let text = text_of(&output);
         assert_eq!(output.status.code(), Some(1), "{key}: {text}");
@@ -334,21 +374,21 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
         assert!(text.contains(COMMAND_FAILED), "{key}: {text}");
         assert!(text.contains(key), "{key}: {text}");
         assert!(!text.contains(KEY_MARKER), "{key}: {text}");
-        assert!(!port_is_open(server.internal_port()), "{key}");
-        assert!(!port_is_open(server.public_port()), "{key}");
     }
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn sigterm_stops_the_server_with_code_0_and_closes_both_listeners() {
+async fn sigterm_stops_a_started_server_with_code_0_and_the_stopped_line() {
     let setup = Setup::new();
     let database = Database::start(&setup).await;
     let mut server = start_server(&setup.environment(database.port));
     wait_until_ready_answer(&mut server);
-    let (public_port, internal_port) = (server.public_port(), server.internal_port());
-    assert!(port_is_open(internal_port));
-    assert!(port_is_open(public_port));
+    // Both listeners are open before the signal, so the signal stops a fully started server.
+    // A probe after the exit proves nothing. An exited process holds no socket, and another test
+    // may take a freed port.
+    assert!(port_is_open(server.internal_port()));
+    assert!(port_is_open(server.public_port()));
 
     send_sigterm(&server);
     let output = server.wait_exit(STOP_LIMIT);
@@ -357,8 +397,6 @@ async fn sigterm_stops_the_server_with_code_0_and_closes_both_listeners() {
     assert_eq!(output.status.code(), Some(0), "{text}");
     assert_eq!(lines_with(&output, "ERROR"), 0, "{text}");
     assert!(has_line(server.stdout_lines(), "INFO", STOPPED), "{text}");
-    assert!(!port_is_open(internal_port));
-    assert!(!port_is_open(public_port));
 }
 
 /// Send `SIGTERM` to the child with the `kill` program, so the test needs no new crate.

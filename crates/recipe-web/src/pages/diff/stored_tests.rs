@@ -1,5 +1,5 @@
-//! HTTP tests of a stored row that does not fit its type (ADR-0050 (c), design D9, review item
-//! CR-Z3-3). Test code.
+//! HTTP tests of a stored row that does not fit its type (ADR-0050 (c), design D9).
+//! Test code.
 //!
 //! Every write path checks a value and a limit row, so such a row is corrupt data. The diff page
 //! and the approval preview answer `500 E-DB-008` with the error page. They show no row of the

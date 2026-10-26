@@ -15,7 +15,8 @@ use crate::plant::fixtures::{
     wstring_row,
 };
 use crate::plant::{
-    LeafClass, LeafPath, PlcPlatform, PlcType, Primitive, TimeType, TypeNode, TypeTree,
+    ArrayDimensions, LeafClass, LeafPath, MemberName, PlcPlatform, PlcType, Primitive, TimeType,
+    TypeNode, TypeTree,
 };
 use crate::recipe::limit::{LimitInput, ProcessLimit};
 use crate::recipe::value::leaves::value_leaves;
@@ -81,70 +82,95 @@ pub(super) fn generate_value(
                 counts.leaves = counts.leaves.saturating_add(1);
             }
             TypeNode::Struct { members, .. } => {
-                let mut map = Map::new();
-                for (name, _) in members {
-                    map.insert(name.as_str().to_owned(), Value::Null);
-                }
-                if mutation == Mutation::ExtraKey(counts.structs) {
-                    map.insert("extra".to_owned(), Value::Null);
-                }
-                counts.structs = counts.structs.saturating_add(1);
-                *task.slot = Value::Object(map);
-                let Value::Object(map) = task.slot else {
-                    continue;
-                };
-                let mut slots: BTreeMap<&str, &mut Value> = map
-                    .iter_mut()
-                    .map(|(key, slot)| (key.as_str(), slot))
-                    .collect();
-                let mut children = Vec::new();
-                for (name, node) in members {
-                    if let Some(slot) = slots.remove(name.as_str()) {
-                        children.push(Task {
-                            slot,
-                            node,
-                            level: 0,
-                        });
-                    }
-                }
-                stack.extend(children.into_iter().rev());
+                push_struct_members(task.slot, members, mutation, &mut counts, &mut stack);
             }
             TypeNode::Array {
                 dimensions,
                 element,
                 ..
-            } => {
-                let Some(dimension) = dimensions.iter().nth(task.level) else {
-                    continue;
-                };
-                let count = usize::try_from(dimension.count()).unwrap_or_default();
-                let mut items = vec![Value::Null; count];
-                if mutation == Mutation::ShortArray(counts.arrays) {
-                    items.pop();
-                }
-                counts.arrays = counts.arrays.saturating_add(1);
-                *task.slot = Value::Array(items);
-                let Value::Array(items) = task.slot else {
-                    continue;
-                };
-                let next_level = task.level.saturating_add(1);
-                let (node, level) = if next_level == dimensions.len() {
-                    (element.as_ref(), 0)
-                } else {
-                    (task.node, next_level)
-                };
-                stack.extend(
-                    items
-                        .iter_mut()
-                        .map(|slot| Task { slot, node, level })
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev(),
-                );
-            }
+            } => push_array_items(task, dimensions, element, mutation, &mut counts, &mut stack),
         }
     }
     (json, counts)
+}
+
+/// Fill the slot of a struct with an object. Push one task for each member in reverse order.
+///
+/// The mutation `ExtraKey` adds the key `extra` to the object that it selects.
+fn push_struct_members<'a>(
+    slot: &'a mut Value,
+    members: &'a [(MemberName, TypeNode)],
+    mutation: Mutation,
+    counts: &mut Counts,
+    stack: &mut Vec<Task<'a>>,
+) {
+    let mut map = Map::new();
+    for (name, _) in members {
+        map.insert(name.as_str().to_owned(), Value::Null);
+    }
+    if mutation == Mutation::ExtraKey(counts.structs) {
+        map.insert("extra".to_owned(), Value::Null);
+    }
+    counts.structs = counts.structs.saturating_add(1);
+    *slot = Value::Object(map);
+    let Value::Object(map) = slot else {
+        return;
+    };
+    let mut slots: BTreeMap<&str, &mut Value> = map
+        .iter_mut()
+        .map(|(key, slot)| (key.as_str(), slot))
+        .collect();
+    let mut children = Vec::new();
+    for (name, node) in members {
+        if let Some(slot) = slots.remove(name.as_str()) {
+            children.push(Task {
+                slot,
+                node,
+                level: 0,
+            });
+        }
+    }
+    stack.extend(children.into_iter().rev());
+}
+
+/// Fill the slot of an array dimension with a list. Push one task for each item in reverse order.
+///
+/// The mutation `ShortArray` removes the last item of the list that it selects.
+fn push_array_items<'a>(
+    task: Task<'a>,
+    dimensions: &ArrayDimensions,
+    element: &'a TypeNode,
+    mutation: Mutation,
+    counts: &mut Counts,
+    stack: &mut Vec<Task<'a>>,
+) {
+    let Some(dimension) = dimensions.iter().nth(task.level) else {
+        return;
+    };
+    let count = usize::try_from(dimension.count()).unwrap_or_default();
+    let mut items = vec![Value::Null; count];
+    if mutation == Mutation::ShortArray(counts.arrays) {
+        items.pop();
+    }
+    counts.arrays = counts.arrays.saturating_add(1);
+    *task.slot = Value::Array(items);
+    let Value::Array(items) = task.slot else {
+        return;
+    };
+    let next_level = task.level.saturating_add(1);
+    let (node, level) = if next_level == dimensions.len() {
+        (element, 0)
+    } else {
+        (task.node, next_level)
+    };
+    stack.extend(
+        items
+            .iter_mut()
+            .map(|slot| Task { slot, node, level })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev(),
+    );
 }
 
 /// Generate the JSON of one leaf. A wrong leaf has the other JSON type.

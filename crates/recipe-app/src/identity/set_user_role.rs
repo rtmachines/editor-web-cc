@@ -1,4 +1,4 @@
-//! The use case `SetUserRole` (design D8, ADR-0035 c).
+//! The use case `SetUserRole` (design D8, ADR-0096).
 
 use recipe_domain::audit::RowAction;
 use recipe_domain::identity::{AdminChange, Login, Role};
@@ -22,7 +22,8 @@ pub struct SetUserRoleInput {
 ///
 /// The use case solves one problem: a role change must end every session of the user, because a
 /// session must never keep a role that the row no longer holds. It also must never remove the
-/// last active Administrator. It runs `SERIALIZABLE` and once more after a serialization failure.
+/// last active Administrator. It runs in one `READ COMMITTED` transaction and takes the guard
+/// lock of the last Administrator first. It has no retry.
 #[derive(Clone)]
 pub struct SetUserRole {
     ctx: IdentityContext,
@@ -46,7 +47,7 @@ impl SetUserRole {
     /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
     /// Returns `NotFound` (`E-WEB-005`) when the login is unknown.
     /// Returns `LastAdministrator` (`E-IDN-002`) when the change removes the last Administrator.
-    /// Returns `AppError::Storage` with `E-DB-001` after a second serialization failure or a deadlock.
+    /// Returns `AppError::Storage` with `E-DB-001` after a deadlock or a lock timeout.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` for another database failure.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
@@ -67,6 +68,7 @@ impl SetUserRole {
             &self.ctx,
             auth,
             meta,
+            Self::OPERATION,
             &login,
             AdminChange::SetRole(role),
             RowAction::UserRoleSet,

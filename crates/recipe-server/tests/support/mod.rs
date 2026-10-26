@@ -2,7 +2,8 @@
 //!
 //! Every item of these modules is used by every test crate that includes them. A crate that
 //! needs less than this includes none of them. The helpers that only `serve.rs` uses live in
-//! `process.rs` and `net.rs`, which that file includes by `#[path]`.
+//! `process.rs` and `net.rs`, which that file includes by `#[path]`. The file `environment.rs`
+//! needs only the standard library. Each test crate that starts a child includes it by `#[path]`.
 
 pub mod cli;
 pub mod database;

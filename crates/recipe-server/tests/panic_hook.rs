@@ -33,7 +33,7 @@ impl io::Write for ChannelWriter {
 /// The function stores the line of the panic in `line`, so the test needs no typed line number.
 /// `Result::expect` is `#[track_caller]`, so the location is the call on the line after `line!()`.
 fn explode(line: &AtomicU32) {
-    let too_large = u32::from(u8::MAX).saturating_add(1);
+    let too_large = u32::from(u8::MAX).checked_add(1).unwrap();
     line.store(line!().checked_add(1).unwrap(), Ordering::SeqCst);
     u8::try_from(too_large).expect("the test panic");
 }

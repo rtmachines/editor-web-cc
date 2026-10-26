@@ -1,4 +1,4 @@
-//! Helpers for a test that holds a pool connection in use (task 4.5, finding D5-05).
+//! Helpers for a test that holds a pool connection in use (task 4.5).
 //!
 //! A test never sleeps a fixed time to prove that a connection is in use. It polls
 //! `pg_stat_activity` with a bound. Every step that waits for a spawned task has an outer time

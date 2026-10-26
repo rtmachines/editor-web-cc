@@ -20,7 +20,7 @@ use crate::blocking::AppSettings;
 use crate::context::AppContext;
 use crate::memory::fixtures::RaceStore;
 use crate::memory::{JournalEntry, MemoryClock, MemorySink, MemoryStore};
-use crate::ports::{Isolation, NewSession, NewUser, UnitOfWork};
+use crate::ports::{Isolation, NewSession, NewUser, UnitOfWork, UserRow};
 
 /// A key file with one valid key of 64 lower-case hex characters.
 const LOGIN_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
@@ -53,13 +53,35 @@ pub(crate) fn assert_one_time_password(password: &OneTimePassword) {
     assert!(NewPassword::parse(text).is_ok(), "{text}");
 }
 
-/// Count the `SERIALIZABLE` transactions that the store opened, a failed run included.
-pub(crate) fn serializable_runs(store: &MemoryStore) -> usize {
+/// Count the transactions that the store opened with `isolation`.
+///
+/// A `Begin` that fails opens no transaction and leaves no line in the journal.
+fn begin_count(store: &MemoryStore, isolation: Isolation) -> usize {
     store
         .journal()
         .iter()
-        .filter(|entry| matches!(entry, JournalEntry::Begin(Isolation::Serializable)))
+        .filter(|entry| matches!(entry, JournalEntry::Begin(level) if *level == isolation))
         .count()
+}
+
+/// Count the `SERIALIZABLE` transactions that the store opened, a retried run included.
+///
+/// Only `bootstrap_administrator` opens such a transaction.
+pub(crate) fn serializable_runs(store: &MemoryStore) -> usize {
+    begin_count(store, Isolation::Serializable)
+}
+
+/// Count the `READ COMMITTED` transactions that the store opened, a failed run included.
+///
+/// `SetUserRole` and `DeactivateUser` open one such transaction and never run again. The session
+/// store also opens such transactions, so a test compares the count before and after the command.
+pub(crate) fn read_committed_runs(store: &MemoryStore) -> usize {
+    begin_count(store, Isolation::ReadCommitted)
+}
+
+/// Return the lines of the journal after the first `start` lines.
+pub(crate) fn journal_since(store: &MemoryStore, start: usize) -> Vec<JournalEntry> {
+    store.journal().into_iter().skip(start).collect()
 }
 
 /// Return the hash that [`FakeHasher`] makes of `password`.
@@ -121,6 +143,16 @@ impl IdentityFixture {
     /// `READ COMMITTED` transaction opens.
     pub(crate) fn with_race(hook: impl FnOnce(&MemoryStore) + Send + 'static) -> Self {
         Self::build(|store| Arc::new(RaceStore::new(store.clone(), hook)))
+    }
+
+    /// Build a fixture in which `change` edits the row of the acting user [`actor_id`] after the
+    /// permission check and before the first `READ COMMITTED` transaction opens.
+    ///
+    /// This models a second Administrator who commits while the command waits for the guard lock.
+    pub(crate) fn with_actor_race(change: fn(&mut UserRow)) -> Self {
+        Self::with_race(move |store| {
+            store.update_state(|state, _now| change(state.users.get_mut(&actor_id()).unwrap()));
+        })
     }
 
     /// Seed the active Operator `anna` with the hash of `password`.

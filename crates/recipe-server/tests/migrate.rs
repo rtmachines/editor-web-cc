@@ -6,12 +6,17 @@
 //! The container and the runs of the binary come from `tests/support/`. `recipe-server` must not
 //! depend on `sqlx`, so the test reads `_sqlx_migrations` with the `psql` of the container.
 
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 mod support;
 
-use support::cli::{lines_with, run_migrate, run_migrate_with_env, text_of};
+use support::cli::{
+    CHILD_LIMIT, OUTPUT_LIMIT, lines_with, read_capped, run_bounded, run_migrate,
+    run_migrate_with_env, text_of,
+};
 use support::database::{
     MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
 };
@@ -20,7 +25,7 @@ use support::temp::{TempDir, random_secret};
 const LABEL_VALUE: &str = "recipe-server";
 const MIN_SECRET_LENGTH: usize = 32;
 /// `0001` to `0006` (`data-model.md` section 8).
-const EXPECTED_MIGRATIONS: i64 = 6;
+const EXPECTED_MIGRATIONS: i64 = 8;
 /// A port that no server listens on. The case with a missing secret file uses it.
 const CLOSED_PORT: u16 = 1;
 
@@ -61,12 +66,93 @@ fn temporary_directories_have_random_names_and_are_new() {
     assert!(std::fs::create_dir(&*first).is_err());
 }
 
-/// The published port must listen on the loopback address only (review S2).
+#[cfg(unix)]
+#[test]
+fn temporary_directories_and_files_are_private_to_the_owner() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = TempDir::new();
+    let file = dir.write(
+        "secret", "value
+",
+    );
+
+    let directory_mode = std::fs::metadata(&*dir).unwrap().permissions().mode();
+    let file_mode = std::fs::metadata(&file).unwrap().permissions().mode();
+    assert_eq!(directory_mode & 0o777, 0o700);
+    assert_eq!(file_mode & 0o777, 0o600);
+}
+
+#[test]
+fn read_capped_keeps_the_first_bytes_and_drops_the_rest() {
+    let kept = read_capped(Cursor::new(b"0123456789".to_vec()), 4);
+
+    assert_eq!(kept, b"0123");
+}
+
+#[test]
+fn read_capped_keeps_a_short_input_whole() {
+    let kept = read_capped(Cursor::new(b"abc".to_vec()), 4);
+
+    assert_eq!(kept, b"abc");
+}
+
+/// A command that prints a short text and exits.
+fn printing_command() -> Command {
+    #[cfg(unix)]
+    {
+        let mut command = Command::new("echo");
+        command.arg("out");
+        command
+    }
+    #[cfg(not(unix))]
+    {
+        Command::new("hostname")
+    }
+}
+
+/// A command that runs for about 30 seconds.
+fn sleeping_command() -> Command {
+    #[cfg(unix)]
+    {
+        let mut command = Command::new("sleep");
+        command.arg("30");
+        command
+    }
+    #[cfg(not(unix))]
+    {
+        let mut command = Command::new("ping");
+        command.args(["-n", "30", "127.0.0.1"]);
+        command
+    }
+}
+
+#[test]
+fn run_bounded_returns_the_output_of_a_child_that_exits() {
+    let output = run_bounded(printing_command(), Duration::from_secs(20), 1024);
+
+    assert!(output.status.success());
+    assert!(!output.stdout.is_empty());
+}
+
+#[test]
+fn run_bounded_truncates_the_output_at_the_limit() {
+    let output = run_bounded(printing_command(), Duration::from_secs(20), 2);
+
+    assert_eq!(output.stdout.len(), 2);
+}
+
+#[test]
+#[should_panic(expected = "did not exit within")]
+fn run_bounded_kills_a_child_that_runs_too_long() {
+    run_bounded(sleeping_command(), Duration::from_millis(300), 1024);
+}
+
+/// The published port must listen on the loopback address only.
 fn assert_port_on_loopback(container: &Postgres) {
-    let output = Command::new("docker")
-        .args(["port", container.id(), "5432/tcp"])
-        .output()
-        .unwrap();
+    let mut command = Command::new("docker");
+    command.args(["port", container.id(), "5432/tcp"]);
+    let output = run_bounded(command, CHILD_LIMIT, OUTPUT_LIMIT);
     let text = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(output.status.success(), "docker port failed: {text}");
     assert!(!text.trim().is_empty(), "docker port lists no binding");
@@ -85,7 +171,7 @@ async fn migrate_applies_every_migration_once_and_fails_with_one_error_line() {
     let valid_secret = dir.write("valid_secret", &format!("{MIGRATOR_PASSWORD}\n"));
     let valid = write_config(&dir, "valid.toml", host_port, &valid_secret);
 
-    // A valid configuration applies the six migrations.
+    // A valid configuration applies the eight migrations.
     let first = run_migrate(valid.clone()).await;
     assert_eq!(first.status.code(), Some(0), "{}", text_of(&first));
     assert_eq!(applied_migrations(&container).await, EXPECTED_MIGRATIONS);

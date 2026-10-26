@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::type_reference::TypeReference;
-use crate::plant::{PlcTypeId, TypeNode};
+use crate::plant::{ArrayDimensions, MemberName, PlcTypeId, TypeName, TypeNode};
 
 /// Revision of every type that is not a struct.
 const PLAIN_REVISION: u32 = 1;
@@ -71,62 +71,82 @@ fn entry_of(node: &TypeNode) -> Option<TypeEntry> {
             primitive,
             string_length: Some(length),
             ..
-        } => Some(TypeEntry {
-            id,
-            name: Some(primitive.name().to_owned()),
-            revision: PLAIN_REVISION,
-            kind: "Primitive",
-            string_length: Some(*length),
-            element_type_id: None,
-            dimensions: None,
-            members: None,
-        }),
+        } => Some(sized_primitive_entry(id, primitive.name(), *length)),
         TypeNode::Leaf { .. } => None,
         TypeNode::Array {
             dimensions,
             element,
             ..
-        } => Some(TypeEntry {
-            id,
-            name: None,
-            revision: PLAIN_REVISION,
-            kind: "Array",
-            string_length: None,
-            element_type_id: Some(type_ref(element)),
-            dimensions: Some(
-                dimensions
-                    .iter()
-                    .map(|dimension| Bounds {
-                        lower: dimension.lower(),
-                        upper: dimension.upper(),
-                    })
-                    .collect(),
-            ),
-            members: None,
-        }),
+        } => Some(array_entry(id, dimensions, element)),
         TypeNode::Struct {
             name,
             revision,
             members,
             ..
-        } => Some(TypeEntry {
-            id,
-            name: Some(name.to_string()),
-            revision: *revision,
-            kind: "Struct",
-            string_length: None,
-            element_type_id: None,
-            dimensions: None,
-            members: Some(
-                members
-                    .iter()
-                    .map(|(member, child)| Member {
-                        name: member.as_str().to_owned(),
-                        type_id: type_ref(child),
-                    })
-                    .collect(),
-            ),
-        }),
+        } => Some(struct_entry(id, name, *revision, members)),
+    }
+}
+
+/// Build the entry of a primitive that has a string length.
+fn sized_primitive_entry(id: PlcTypeId, name: &str, length: u16) -> TypeEntry {
+    TypeEntry {
+        id,
+        name: Some(name.to_owned()),
+        revision: PLAIN_REVISION,
+        kind: "Primitive",
+        string_length: Some(length),
+        element_type_id: None,
+        dimensions: None,
+        members: None,
+    }
+}
+
+/// Build the entry of an array with its element reference and its bounds.
+fn array_entry(id: PlcTypeId, dimensions: &ArrayDimensions, element: &TypeNode) -> TypeEntry {
+    TypeEntry {
+        id,
+        name: None,
+        revision: PLAIN_REVISION,
+        kind: "Array",
+        string_length: None,
+        element_type_id: Some(type_ref(element)),
+        dimensions: Some(
+            dimensions
+                .iter()
+                .map(|dimension| Bounds {
+                    lower: dimension.lower(),
+                    upper: dimension.upper(),
+                })
+                .collect(),
+        ),
+        members: None,
+    }
+}
+
+/// Build the entry of a struct with its members in declaration order.
+fn struct_entry(
+    id: PlcTypeId,
+    name: &TypeName,
+    revision: u32,
+    members: &[(MemberName, TypeNode)],
+) -> TypeEntry {
+    TypeEntry {
+        id,
+        name: Some(name.to_string()),
+        revision,
+        kind: "Struct",
+        string_length: None,
+        element_type_id: None,
+        dimensions: None,
+        members: Some(
+            members
+                .iter()
+                .map(|(member, child)| Member {
+                    name: member.as_str().to_owned(),
+                    type_id: type_ref(child),
+                })
+                .collect(),
+        ),
     }
 }
 

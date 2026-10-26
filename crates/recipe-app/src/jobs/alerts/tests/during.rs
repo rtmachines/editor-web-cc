@@ -111,7 +111,8 @@ async fn panics_during_the_webhook_call_are_counted_once_by_the_next_run() {
     assert_eq!(sent_by_one_run(&rig).await, Vec::new());
 }
 
-/// Run the job until it holds a call at `gate`. Then drop the run, as a stop of the supervisor does.
+/// Run the job until it holds a call at `gate`. Then drop the run, as a stop of the
+/// supervisor does.
 async fn drop_run_at(rig: &Rig, gate: &Gate) {
     let first = run(rig);
     tokio::pin!(first);

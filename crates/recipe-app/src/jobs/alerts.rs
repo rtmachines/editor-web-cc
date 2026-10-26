@@ -249,8 +249,8 @@ struct RunState {
 ///
 /// The type solves one problem: the operator must learn about a fault that needs action without
 /// a person who watches the logs (`reliability.md` section 3.7). It keeps its run state as atomics
-/// (`reliability.md` section 8, ADR-0060 (aa)): the last totals of the two counters and the slots of the
-/// panic times (ADR-0073 (g)).
+/// (`reliability.md` section 8, ADR-0060 (aa)): the last totals of the two counters and the slots
+/// of the panic times (ADR-0073 (g)).
 pub struct Alerts {
     /// The ports that the job calls.
     ports: AlertPorts,
@@ -402,8 +402,9 @@ impl Alerts {
         }
         let fresh = new_since(panic_total, &self.state.panics);
         self.record_panics(moment.now, fresh);
-        // The total follows the slots with no await between them. A run that the caller drops later
-        // has then counted each panic once, and the next run takes only the panics above this total.
+        // The total follows the slots with no await between them. A run that the caller drops
+        // later has then counted each panic once, and the next run takes only the panics above this
+        // total.
         self.state.panics.store(panic_total, Ordering::Relaxed);
         let cursor = self.state.next_slot.load(Ordering::Relaxed);
         let oldest = slots.get(cursor).map(|slot| slot.load(Ordering::Relaxed));
@@ -413,7 +414,8 @@ impl Alerts {
             .is_some_and(|age| age <= seconds(self.settings.panic_window))
     }
 
-    /// Write `now` into the slots of the oldest panics. A run with more panics than slots fills all slots.
+    /// Write `now` into the slots of the oldest panics. A run with more panics than slots
+    /// fills all slots.
     fn record_panics(&self, now: i64, fresh: u64) {
         let slots = &self.state.panic_times;
         let count = usize::try_from(fresh)
@@ -497,7 +499,8 @@ impl Alerts {
         }
     }
 
-    /// Keep the mismatch total of this run. The call comes last, so a run that stops early counts again.
+    /// Keep the mismatch total of this run. The call comes last, so a run that stops early
+    /// counts again.
     ///
     /// The panic total is not here. [`Alerts::panics`] stores it with the slots, because a panic
     /// must reach the slots once (ADR-0073 (g)).

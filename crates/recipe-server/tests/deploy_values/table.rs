@@ -31,6 +31,7 @@ fn values_of(cell: &str, key_count: usize) -> Vec<&str> {
 
 impl Table {
     /// Read the rows between the heading and the next heading.
+    /// A key that appears twice stops the test run and names the key.
     pub fn parse(markdown: &str, heading: &str) -> Table {
         let mut rows = BTreeMap::new();
         let mut in_section = false;
@@ -53,7 +54,11 @@ impl Table {
                 continue;
             }
             for (key, value) in keys.into_iter().zip(values) {
-                rows.insert(key.to_owned(), value.to_owned());
+                let earlier = rows.insert(key.to_owned(), value.to_owned());
+                assert!(
+                    earlier.is_none(),
+                    "duplicate key `{key}` in the table {heading}: the document must give each key one row"
+                );
             }
         }
         Table { rows }
@@ -105,4 +110,39 @@ impl Table {
     pub fn expected(&self, key: &str) -> Option<(Canon, String)> {
         Some((self.canon(key)?, self.shown(key)))
     }
+}
+
+fn table_text(rows: &[&str]) -> String {
+    format!(
+        "### 7.11 Settings\n\n| Key | Value | Used by |\n|---|---|---|\n{}\n",
+        rows.join("\n")
+    )
+}
+
+#[test]
+#[should_panic(expected = "duplicate key `http.request_timeout`")]
+fn table_duplicate_key_in_two_rows_fails_and_names_the_key() {
+    let markdown = table_text(&[
+        "| `http.request_timeout` | 30 s | 7.3 |",
+        "| `shutdown.drain` | 30 s | 7.3 |",
+        "| `http.request_timeout` | 25 s | 7.3 |",
+    ]);
+    Table::parse(&markdown, HEADING_SETTINGS);
+}
+
+#[test]
+#[should_panic(expected = "duplicate key `shutdown.drain`")]
+fn table_duplicate_key_inside_one_row_fails_and_names_the_key() {
+    let markdown = table_text(&["| `shutdown.drain` / `shutdown.drain` | 30 s / 40 s | 7.3 |"]);
+    Table::parse(&markdown, HEADING_SETTINGS);
+}
+
+#[test]
+fn table_distinct_keys_read_without_a_fault() {
+    let markdown = table_text(&[
+        "| `shutdown.drain` / `app.stop_grace_period` | 30 s / 40 s | 7.3 |",
+        "| `http.request_timeout` | 30 s | 7.3 |",
+    ]);
+    let table = Table::parse(&markdown, HEADING_SETTINGS);
+    assert_eq!(table.len(), 3);
 }

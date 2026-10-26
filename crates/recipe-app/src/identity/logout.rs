@@ -39,8 +39,14 @@ impl Logout {
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(&self, auth: &Authenticated, meta: &RequestMeta) -> Result<(), AppError> {
+        authorize(
+            Self::OPERATION,
+            auth.user(),
+            meta,
+            self.ctx.app.security.as_ref(),
+        )
+        .await?;
         let user = auth.user();
-        authorize(Self::OPERATION, user, meta, self.ctx.app.security.as_ref()).await?;
         let mut tx = self.ctx.app.uow.begin(Isolation::ReadCommitted).await?;
         tx.sessions().delete(auth.session_id()).await?;
         let entry = AuditEntry::state(

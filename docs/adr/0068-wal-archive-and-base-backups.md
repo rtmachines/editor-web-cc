@@ -1,6 +1,6 @@
 # ADR-0068: WAL archive and base backups
 
-Status: Accepted. Amended by ADR-0077 (WAL cutoff, marker entry and base backup of `pitr-check`). Amended by ADR-0081 (CPU limit of the temporary container of `pitr-check`)
+Status: Accepted. Amended by ADR-0077 (WAL cutoff, marker entry and base backup of `pitr-check`). Amended by ADR-0081 (CPU limit of the temporary container of `pitr-check`). Amended by ADR-0099 (order of the gap procedure, target directory of the moved segments)
 Date: 2026-10-23
 Deciders: project owner
 

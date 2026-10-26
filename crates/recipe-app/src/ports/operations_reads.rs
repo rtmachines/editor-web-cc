@@ -13,7 +13,7 @@ use crate::error::StorageError;
 ///
 /// The role name is fixed, because `01-roles.sh` creates it and the migrations grant to it.
 /// A `db.app_user` with another value therefore fails this check.
-const APPLICATION_ROLE: &str = "recipe_app";
+pub(crate) const APPLICATION_ROLE: &str = "recipe_app";
 
 /// The windows of the two sums that count security events.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

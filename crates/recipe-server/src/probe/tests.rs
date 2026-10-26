@@ -169,6 +169,9 @@ fn every_status_line_other_than_http_1_1_200_is_a_failure() {
         ("\u{0}\u{1}garbage garbage\r\n", ProbeFault::NotHttp),
         ("HTTP/1.1 204 No Content\r\n\r\n", ProbeFault::Status(204)),
         ("HTTP/1.1 500 Oops\r\n\r\n", ProbeFault::Status(500)),
+        // The probe reads the first line only. A status line on a later line does not count.
+        ("x-early: 1\r\nHTTP/1.1 200 OK\r\n\r\n", ProbeFault::NotHttp),
+        ("\r\nHTTP/1.1 200 OK\r\n\r\n", ProbeFault::NotHttp),
     ];
     for (line, expected) in cases {
         let (address, server) = serve_once(reply(line));
@@ -213,6 +216,22 @@ fn a_connection_that_stays_silent_ends_at_the_budget() {
     assert!(elapsed >= budget, "ended early after {elapsed:?}");
     assert!(elapsed < Duration::from_millis(600), "took {elapsed:?}");
     server.join().unwrap();
+}
+
+#[test]
+fn a_spent_budget_is_a_timeout_before_any_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let address = listener.local_addr().unwrap();
+
+    let result = probe(address, &readiness(), Duration::ZERO);
+
+    assert_eq!(result, Err(ProbeFault::Timeout));
+    let accepted = listener
+        .accept()
+        .map(|_connection| ())
+        .map_err(|e| e.kind());
+    assert_eq!(accepted, Err(ErrorKind::WouldBlock), "the probe connected");
 }
 
 /// The number of probes of the repeat test. One early wake of a socket timeout is rare, so the

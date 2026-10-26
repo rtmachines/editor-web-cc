@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::routes::{Access, RouteEntry, assemble, table};
-use crate::test_support::{PEER, state};
+use crate::test_support::{PEER, install, state};
 
 const BODY_LIMIT: usize = 1024 * 1024;
 const HTMX_CONFIG: &str = r#"{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}"#;
@@ -649,7 +649,7 @@ async fn logged(case: &str, headers: &[(&str, &str)]) -> (Answer, Vec<String>) {
         .with_target(false)
         .with_max_level(tracing::Level::TRACE)
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = install(subscriber);
     let answer = ask(case, headers).await;
     (answer, captured.lines())
 }
@@ -738,7 +738,7 @@ async fn error_mapping_a_response_without_an_error_writes_no_log_line() {
         .with_ansi(false)
         .with_max_level(tracing::Level::TRACE)
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = install(subscriber);
     let request = Request::builder()
         .uri("/static/htmx.min.js")
         .body(Body::empty())

@@ -1,6 +1,6 @@
 # ADR-0015: Concurrency and locking model
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0096 (the isolation and the retry of `SetUserRole` and `DeactivateUser`)
 Date: 2026-10-12
 Deciders: project owner
 

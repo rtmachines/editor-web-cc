@@ -29,7 +29,8 @@ const SEPARATORS: [(usize, u8); 7] = [
     (26, b'Z'),
 ];
 
-/// Return the text of a `chain_seq`: decimal, no sign, no leading zero. A negative number has none.
+/// Return the text of a `chain_seq`: decimal, no sign, no leading zero.
+/// A negative number has none.
 pub(super) fn chain_seq_text(seq: ChainSeq) -> Option<String> {
     u64::try_from(seq.get())
         .ok()
@@ -50,8 +51,8 @@ pub(super) fn parse_chain_seq(text: &str) -> Option<ChainSeq> {
 
 /// Return the text of an instant: RFC 3339 in UTC with `Z` and six fraction digits.
 ///
-/// The text cuts the time below one microsecond, as `TIMESTAMPTZ` does. An instant whose UTC year
-/// is outside `0..=9999` has no text.
+/// The text drops the time below one microsecond. An instant whose UTC year is outside
+/// `0..=9999` has no text.
 pub(super) fn instant_text(at: Timestamp) -> Option<String> {
     let utc = at
         .as_offset_date_time()

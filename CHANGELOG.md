@@ -1,20 +1,23 @@
 # Changelog
 
-This file records the notable changes of the recipe editor. The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
+This file records the notable changes of the recipe editor. The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). The section `Known gaps` is an extension of this project.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-26
+
 ### Added
 
-- Cargo workspace with the six crates of `overview.md` section 5. Each crate is a skeleton without application code.
+- Cargo workspace with the six crates of `overview.md` section 5. Each crate began as a skeleton without application code.
 - Workspace lints of `reliability.md` section 2.1 and the release profile of section 2.4.
 - `deny.toml` with six bans from the dependency rule of `overview.md` section 5, a license allow list, and advisory checks.
 - CI workflow for format, clippy, tests, documentation, `cargo deny`, coverage, and the STE lint.
 - `tools/coverage-gate.py`, which applies the coverage target of 80 % lines to each crate.
-- A test in `recipe-server` that runs the skeleton `main`.
+- A test in `recipe-server` that ran the skeleton `main`.
 - Nightly `cargo audit` workflow.
 - ADR-0023 for the scope and the location of the STE lint.
 - `tools/ste-lint/`, a copy of the script `ste-lint.py` under the MIT license.
+- The file `LICENSE` with the MIT license for the project.
 - ADR-0024 with the codes `E-PLT-021 DuplicateMemberName` and `E-RCP-054 S7AddressWidthMismatch`.
 - ADR-0025 for the parse reasons of value objects without an own error code.
 - ADR-0026 with the platform ranges of `DATE` and `DATE_AND_TIME`.
@@ -170,6 +173,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - The tests `healthcheck`, `panic_hook`, `supervisor_panic_hook`, `watchdog_exit`, `pg_env`, `logging_start`, and `serve_env` of `recipe-server`.
 - The PostgreSQL tests of `recipe-db` for the settings, the maintenance store, the audit chain reads, the operations reads, `restore-code.expected`, and the new grants.
 - The workspace dependencies `hyper`, `hyper-util`, `hyper-rustls`, `rustls`, `http-body-util`, `tokio-util`, and `rustix`. `Cargo.lock` holds the new crate `matchers`.
+- ADR-0095 for the role grammar of the globals file. ADR-0096 for the guard lock of the last Administrator. ADR-0097 for the names without schema in the drop guard.
+- ADR-0098 for the insert columns of `audit_log` and the qualified operators. ADR-0099 for the start of the WAL stream before the replacement base backup.
+- ADR-0100 for the wait for the scheduled audit chain check after a restore. ADR-0101 for the PostgreSQL container of the storage tests. ADR-0102 for the end of the restore procedure after the result of the audit chain check.
+- The migrations `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`.
+- The CI job `upgrade`. It upgrades an older volume with the new release and runs the checks of the upgrade.
+- The section "Known gaps" in `docs/ops/runbook.md`. It lists the operations gaps that the documents do not yet close.
 
 ### Changed
 
@@ -232,8 +241,45 @@ This file records the notable changes of the recipe editor. The format follows [
 - `recipe_app` no longer holds `pg_read_all_stats`. The function `replication_state()` of `audit_owner` reads the replication state, and `public.replication_state()` is in the guard list of ADR-0034.
 - The service `backup` runs `supercronic` and has the limit `container.backup_memory` of 512 MiB in place of 128 MiB (ADR-0067).
 - `Cargo.lock` holds `tokio` 1.54.1 in place of 1.53.2.
+- Release note, manual superuser step: on an older volume, the superuser replaces the guard function during the upgrade (ADR-0097 (h3)). The section "An older volume" of `docs/ops/runbook.md` describes this step.
+- The CI jobs `compose` and `upgrade` give their stack checks, upgrade checks, failure diagnostics, and cleanup a step time limit. They name the reason of each skipped check and fail on an OOM kill.
+- The shell tracing scan of CI covers every script of `deploy/` and of the workflows.
+- The test helpers of `recipe-server` bound the time of each child process that they run, and the helper `run_bounded` also bounds the output. The helpers run each Docker call. The serve tests hold their ports.
+- `Schedule` has no public `Default`, and `ScheduleFault` has no `Error` implementation.
+
+### Fixed
+
+- After a gap in the WAL stream, the runbook starts the stream before the replacement base backup. This order keeps the recovery point (ADR-0099).
+- The job `disk_check` starts its log interval when the measurement ends.
+- The span of a request has the level `ERROR`, so `request_id` stays in the log under a `warn` filter.
+- The English definition texts in the parameter summary and the translations page carry the attribute `lang="en"` (WCAG 3.1.2).
 
 ### Security
 
 - `Cargo.lock` holds `rustls` 0.23.46 in place of 0.23.45 (RUSTSEC-2026-0346 to RUSTSEC-2026-0349).
 - `Cargo.lock` holds `rustls-webpki` 0.103.16 in place of 0.103.15 (RUSTSEC-2026-0382) and `webpki-roots` 1.0.10 in place of 1.0.9 (RUSTSEC-2026-0381).
+- (F1) The restore test refuses each statement of the globals file that is outside a closed role grammar (ADR-0095). This change narrows finding F1 and does not close it. A crafted entry of the dump file can still run SQL (ADR-0095 (h)).
+- (F2) `SetUserRole` and `DeactivateUser` take the guard lock of the last Administrator first (ADR-0096). The lock is advisory class 4 with key 0. Both commands run in one `READ COMMITTED` transaction with no retry.
+- (F3) The drop guard of the audit objects compares the object type and the bare name, without the schema (ADR-0097). A renamed schema `public` no longer lets a drop pass the guard.
+- (F4) Every use case checks the permission first. `Logout` and `ChangeOwnPassword` now check it as their first statement.
+- (F5) `ChangeOwnPassword` uses two transactions, T1 and T2 (ADR-0035 (b), amended).
+- (F6) The role `recipe_app` gets `INSERT` on eleven columns of `audit_log` in place of the whole table (migration `0008`, ADR-0098). The database sets `id`, `occurred_at`, and the three chain columns. An insert that names another column fails with `42501`.
+- (F7) The `SECURITY DEFINER` functions `audit_hash_chain()` and `security_event_purge()` schema-qualify their operators (migration `0007`, ADR-0098). The trigger function `security_event_guard()` does the same and replaces `IS DISTINCT FROM` with qualified operators. The operator scan finds `IS [NOT] DISTINCT FROM`, `NULLIF`, and `CASE x WHEN`.
+- `SetUserRole` and `DeactivateUser` read the actor again after they take the guard lock. They refuse with `E-WEB-002` when the actor lost the permission or the active flag (ADR-0096).
+- The restore test runs `psql` on a private copy of the checked globals file.
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- Seven tests with `#[cfg(unix)]` passed only in CI on Linux, not on the Windows development host. Two of them are in `crates/recipe-server/tests`: `sigterm_stops_a_started_server_with_code_0_and_the_stopped_line` and `temporary_directories_and_files_are_private_to_the_owner`.
+- The other five are in `crates/recipe-server/src`: `a_link_with_the_name_of_a_manifest_is_not_a_set`, `a_directory_without_the_read_right_is_a_fault`, `free_space_of_the_temporary_directory_is_consistent`, `a_missing_path_is_unreadable`, and `the_text_of_an_unreadable_fault_names_no_path`.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The project owner accepted the other low-severity items as they are.
+- The save toast of a parameter does not show the new row version. The new row version appears only in the hidden field `row_version` of the form.
+- The version page has no picker for two free version numbers. It links only to the diff with the approved version and with the base version. Another pair needs a typed address of the diff route.
+- The version page does not show the content hash. The export file holds the hash as `content_sha256`. The audit entry of an approval shows it in the state after.
+- The type page does not show the S7 layout of a type.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
+
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.1.0

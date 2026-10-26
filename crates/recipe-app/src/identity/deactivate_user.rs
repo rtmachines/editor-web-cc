@@ -1,4 +1,4 @@
-//! The use case `DeactivateUser` (design D8, ADR-0035 a and c).
+//! The use case `DeactivateUser` (design D8, ADR-0096).
 
 use recipe_domain::audit::RowAction;
 use recipe_domain::identity::{AdminChange, Login};
@@ -13,7 +13,8 @@ use crate::error::AppError;
 ///
 /// The use case solves one problem: a deactivated user must lose every session at once, and the
 /// system must keep one active Administrator. The row stays, because audit entries refer to it.
-/// It runs `SERIALIZABLE` and once more after a serialization failure.
+/// It runs in one `READ COMMITTED` transaction and takes the guard lock of the last Administrator
+/// first. It has no retry.
 #[derive(Clone)]
 pub struct DeactivateUser {
     ctx: IdentityContext,
@@ -38,7 +39,7 @@ impl DeactivateUser {
     /// Returns `NotFound` (`E-WEB-005`) when the login is unknown.
     /// Returns `UserAlreadyInactive` (`E-IDN-010`) for an inactive user. The use case writes nothing then.
     /// Returns `LastAdministrator` (`E-IDN-002`) when the change removes the last Administrator.
-    /// Returns `AppError::Storage` with `E-DB-001` after a second serialization failure or a deadlock.
+    /// Returns `AppError::Storage` with `E-DB-001` after a deadlock or a lock timeout.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` for another database failure.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
@@ -58,6 +59,7 @@ impl DeactivateUser {
             &self.ctx,
             auth,
             meta,
+            Self::OPERATION,
             login,
             AdminChange::Deactivate,
             RowAction::UserDeactivated,

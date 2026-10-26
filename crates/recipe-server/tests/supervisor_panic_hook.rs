@@ -75,7 +75,7 @@ struct PanickingJob;
 
 impl JobRun for PanickingJob {
     async fn run(&self, _request_id: RequestId, _kind: RunKind) -> Result<(), AppError> {
-        let too_large = u32::from(u8::MAX).saturating_add(1);
+        let too_large = u32::from(u8::MAX).checked_add(1).unwrap();
         let _small: u8 = u8::try_from(too_large).expect(PANIC_MESSAGE);
         Ok(())
     }

@@ -6,7 +6,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 volume=${COMPOSE_PROJECT_NAME}-one-filesystem
 docker volume create --label "recipe.ci=$COMPOSE_PROJECT_NAME" "$volume" >/dev/null
-docker run --rm --network none --user 0:0 --security-opt no-new-privileges:true \
+docker run --rm --network none --user 0:0 --cap-drop ALL --cap-add CHOWN \
+  --security-opt no-new-privileges:true \
   --mount "type=volume,src=$volume,dst=/fixture" --entrypoint bash \
   "recipe-pgtools:$RECIPE_VERSION" -euc '
     umask 077

@@ -1,7 +1,8 @@
 # Build override for development and CI (ADR-0064 (i)). It adds build: and nothing else.
 # Use: docker compose -f compose.yaml -f compose.build.yaml build
 # Every service of an image of the project gets the same build section.
-# Paths are relative to this file. The tag comes from image: in compose.yaml.
+# Context paths are relative to the directory of compose.yaml. Each dockerfile path is relative to its context.
+# The tag comes from image: in compose.yaml.
 name: recipe-editor
 
 # The context of recipe-server is the repository root (see the header of deploy/Dockerfile).

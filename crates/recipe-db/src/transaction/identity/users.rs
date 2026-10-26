@@ -32,6 +32,15 @@ SELECT id, login, password_hash, role, is_active, session_epoch, must_change_pas
     deactivated_at, created_at, updated_at, to_jsonb(u) - 'password_hash' AS image \
 FROM app_user u WHERE login = $1 FOR NO KEY UPDATE";
 
+/// The class of the guard lock of the last Administrator (`data-model.md` section 1.4, ADR-0096).
+const ADMINISTRATOR_GUARD_CLASS: i32 = 4;
+
+/// The only key of the guard lock of the last Administrator.
+const ADMINISTRATOR_GUARD_KEY: i32 = 0;
+
+/// The guard lock (ADR-0096 (b)). It is the first statement of `SetUserRole` and `DeactivateUser`.
+const LOCK_ADMINISTRATOR_GUARD: &str = "SELECT pg_advisory_xact_lock($1, $2)";
+
 const COUNT_ACTIVE_ADMINISTRATORS: &str = "\
 SELECT count(*) FROM app_user WHERE role = 'administrator' AND is_active";
 
@@ -190,6 +199,16 @@ impl UserRepository for PgTransaction {
                 })
             })
             .transpose()
+    }
+
+    async fn lock_administrator_guard(&mut self) -> Result<(), StorageError> {
+        sqlx::query(LOCK_ADMINISTRATOR_GUARD)
+            .bind(ADMINISTRATOR_GUARD_CLASS)
+            .bind(ADMINISTRATOR_GUARD_KEY)
+            .execute(&mut *self.tx)
+            .await
+            .map_err(map_error)?;
+        Ok(())
     }
 
     async fn count_active_administrators(&mut self) -> Result<u32, StorageError> {

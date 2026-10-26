@@ -1,6 +1,6 @@
 # ADR-0060: Supervised jobs, their ports, the catch-up, and the library target
 
-Status: Accepted. Amended by ADR-0073 (read faults of the jobs and the audit chain alert). Amended by ADR-0088 (the method `run_once(request_id, kind)`, the one loop of `cleanup` and its due times). Amended by ADR-0089 (d) (item (q): the `Err` of a failed snapshot of `alerts` at `WARN`)
+Status: Accepted. Amended by ADR-0073 (read faults of the jobs and the audit chain alert). Amended by ADR-0088 (the method `run_once(request_id, kind)`, the one loop of `cleanup` and its due times). Amended by ADR-0089 (d) (item (q): the `Err` of a failed snapshot of `alerts` at `WARN`). Amended by a note: section 8 of `reliability.md` also lists the open-run counter of the supervisor, which item (aa) does not name
 Date: 2026-10-23
 Deciders: project owner
 

@@ -69,7 +69,7 @@ impl MemoryMaintenance {
 
     /// Add `count` security events that are older than the retention.
     ///
-    /// The sink of the store keeps no old rows, so the adapter keeps a backlog counter.
+    /// The purge never deletes sink events, so a backlog counter stands in.
     /// `purge_security_events` takes at most [`SECURITY_PURGE_BATCH`] rows from the counter.
     pub fn seed_expired_security_events(&self, count: u64) {
         self.store.update_state(|state, _now| {

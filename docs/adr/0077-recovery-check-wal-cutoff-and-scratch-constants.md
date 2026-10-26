@@ -1,6 +1,6 @@
 # ADR-0077: Marker entry of the recovery check, WAL cutoff, and scratch constants
 
-Status: Accepted
+Status: Accepted. Amended by a note on (g). The row `pitr_check.ready_poll` is the connection check of the scratch cluster, not the archive poll that goes away (`reliability.md` 7.11).
 Date: 2026-10-24
 Deciders: project owner
 

@@ -114,6 +114,8 @@ impl Opened {
 
     /// Close everything in the stop order and report what the drain cut.
     ///
+    /// The drain waits for the public listener and the jobs to end. It counts what it cuts.
+    ///
     /// The order is: turn readiness off, disarm the watchdog, stop the public listener and the
     /// jobs.
     /// Then it closes both pools and writes one `WARN` line for each pool that timed out.

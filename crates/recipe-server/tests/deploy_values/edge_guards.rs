@@ -1,6 +1,6 @@
 //! Behavior guards for the edge inputs of `indent_of` and of the address plan check.
 //!
-//! These tests pass before and after the removal of saturating arithmetic (finding CRX-S10-2). They show
+//! These tests pass before and after the removal of saturating arithmetic. They show
 //! that the change keeps the behavior of an empty line, a blank line, and a prefix of 0 or 32.
 
 use std::collections::BTreeMap;

@@ -17,7 +17,7 @@ do
   sleep 0.1
 done
 compose stop app
-wait "$request_pid"
+wait "$request_pid" || fail "the shutdown request check failed"
 trap - EXIT
 [[ $(docker inspect --format '{{.State.Status}}|{{.State.ExitCode}}|{{.State.OOMKilled}}' "$app") == 'exited|0|false' ]] \
   || fail "app did not stop with exit code zero"

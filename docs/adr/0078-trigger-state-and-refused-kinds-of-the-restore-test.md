@@ -1,6 +1,6 @@
 # ADR-0078: Trigger state and refused kinds of the restore test
 
-Status: Accepted. Amended by ADR-0084 (d) (a mitigation of the `DEFAULT` risk)
+Status: Accepted. Amended by ADR-0084 (d) (a mitigation of the `DEFAULT` risk). Amended by ADR-0095 (g) (the words "so no code of the dump runs" apply only to a stop on a refused kind)
 Date: 2026-10-24
 Deciders: project owner
 

@@ -4,8 +4,8 @@
 <h2>{{ t.get("translations-caption") }}</h2>
 <dl>
 <dt>{{ t.get("translations-col-base") }}</dt>
-<dd>{{ block.name_en }}</dd>
-<dd>{{ block.description_en }}</dd>
+<dd lang="en">{{ block.name_en }}</dd>
+<dd lang="en">{{ block.description_en }}</dd>
 </dl>
 {% for row in block.rows %}{{ rows::translation_row(t, row) }}
 {% endfor %}{% if !block.toast.is_empty() %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(block.toast) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% endif %}

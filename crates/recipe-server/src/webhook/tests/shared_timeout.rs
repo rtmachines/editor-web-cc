@@ -1,4 +1,4 @@
-//! Test that `run_bounded` uses ONE timeout for the whole run (finding VW9-4, ADR-0063).
+//! Test that `run_bounded` uses ONE timeout for the whole run (ADR-0063).
 //!
 //! A mutant that starts a new timeout for each `join_next` lets the second call finish after
 //! 12 s with a timeout of 10 s. The test uses paused time and no socket.

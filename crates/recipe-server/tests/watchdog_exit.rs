@@ -68,7 +68,8 @@ fn a_hung_server_ends_the_process_with_exit_code_70_and_one_error_line() {
             "--test-threads",
             "1",
         ])
-        .env(CHILD_PORT, port.to_string());
+        .env(CHILD_PORT, port.to_string())
+        .env_remove("RUST_LOG");
 
     let output = run_bounded(command, CHILD_LIMIT);
 

@@ -1,18 +1,18 @@
 //! The use case `UpdateParameterDefinition` (`domain-model.md` section 5.2, design D17).
 
-use recipe_domain::audit::DiffAction;
+use recipe_domain::audit::{AuditEntry, DiffAction};
 use recipe_domain::plant::{S7Address, TypeExpr, UnitPath};
 use recipe_domain::recipe::{
-    DefinitionUpdate, LimitList, Ordinal, ParameterKey, ParameterTag, ReferenceNumber, Retype,
-    ValueInput,
+    DefinitionUpdate, LimitList, Ordinal, ParameterId, ParameterKey, ParameterTag, ReferenceNumber,
+    Retype, ValueInput,
 };
 use recipe_domain::text::{LongText, Text};
 
 use super::definition_steps::{lock_live_unit, map_tag_error, resolve_type};
 use super::draft_session::{
-    DraftOutput, DraftTarget, MachineLock, OpenDraft, parameter_diff_entry,
+    DraftOutput, DraftTarget, MachineLock, OpenDraft, TouchedDraft, parameter_diff_entry,
 };
-use crate::audit::definition_diff;
+use crate::audit::{StateDiff, definition_diff};
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::AppError;
@@ -119,49 +119,94 @@ impl UpdateParameterDefinition {
             expected_row_version: input.expected_row_version,
         };
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::Shared).await?;
-        let parameter = open.parameter_id(input.key)?;
-        let unit = lock_live_unit(&mut open, &input.unit_path).await?;
-        let resolved = resolve_type(&mut open, &input.type_expr, audit_context(user, meta)).await?;
-        let update = DefinitionUpdate {
-            unit,
+        let written = WrittenKey {
+            key: input.key,
+            number: input.number,
             tag: input.tag.clone(),
-            name_en: input.name_en,
-            description_en: input.description_en,
-            plc_type: resolved.type_id,
-            s7_address: input.s7_address,
-            ordinal: input.ordinal,
         };
-        let has_retype = input.retype.is_some();
-        let retype = input.retype.map(Retype::from);
-        let change = open
-            .draft
-            .set_definition(input.key, update, retype, &resolved.trees)?;
-        let diff = definition_diff(&change, &resolved.trees)?;
+        let staged = stage_definition(&mut open, (user, meta), input).await?;
         let mut open = open.touch(user).await?;
-        let version = open.draft.version();
-        let written = open.draft.parameter(input.key)?;
-        let drafts = open.tx.drafts();
-        drafts
-            .update_definition(version, written)
-            .await
-            .map_err(|error| map_tag_error(error, &input.tag, input.number))?;
-        if has_retype {
-            drafts
-                .set_value(version, input.key, written.value())
-                .await?;
-            drafts
-                .replace_limits(version, input.key, written.limits())
-                .await?;
-        }
+        write_definition(&mut open, &written, staged.has_retype).await?;
         let updated = parameter_diff_entry(
             DiffAction::ParameterDefinitionUpdated,
-            (open.recipe, parameter),
-            diff,
+            (open.recipe, staged.parameter),
+            staged.diff,
             (user, meta),
         );
-        open.commit(&self.ctx, NonEmpty::with_last(resolved.created, updated))
+        open.commit(&self.ctx, NonEmpty::with_last(staged.created, updated))
             .await
     }
+}
+
+/// The parameter of a request and the values that map a tag conflict.
+struct WrittenKey {
+    key: ParameterKey,
+    number: u32,
+    tag: ParameterTag,
+}
+
+/// The result of the domain step, before the touch statement.
+struct StagedDefinition {
+    parameter: ParameterId,
+    diff: StateDiff,
+    created: Vec<AuditEntry>,
+    has_retype: bool,
+}
+
+/// Lock the unit, resolve the type, run the domain method, and build the diff.
+async fn stage_definition(
+    open: &mut OpenDraft,
+    (user, meta): (&CurrentUser, &RequestMeta),
+    input: UpdateParameterDefinitionInput,
+) -> Result<StagedDefinition, AppError> {
+    let parameter = open.parameter_id(input.key)?;
+    let unit = lock_live_unit(open, &input.unit_path).await?;
+    let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
+    let update = DefinitionUpdate {
+        unit,
+        tag: input.tag,
+        name_en: input.name_en,
+        description_en: input.description_en,
+        plc_type: resolved.type_id,
+        s7_address: input.s7_address,
+        ordinal: input.ordinal,
+    };
+    let has_retype = input.retype.is_some();
+    let retype = input.retype.map(Retype::from);
+    let change = open
+        .draft
+        .set_definition(input.key, update, retype, &resolved.trees)?;
+    let diff = definition_diff(&change, &resolved.trees)?;
+    Ok(StagedDefinition {
+        parameter,
+        diff,
+        created: resolved.created,
+        has_retype,
+    })
+}
+
+/// Write the definition row, and the value and limit rows after a type change.
+async fn write_definition(
+    open: &mut TouchedDraft,
+    written: &WrittenKey,
+    has_retype: bool,
+) -> Result<(), AppError> {
+    let version = open.draft.version();
+    let parameter = open.draft.parameter(written.key)?;
+    let drafts = open.tx.drafts();
+    drafts
+        .update_definition(version, parameter)
+        .await
+        .map_err(|error| map_tag_error(error, &written.tag, written.number))?;
+    if has_retype {
+        drafts
+            .set_value(version, written.key, parameter.value())
+            .await?;
+        drafts
+            .replace_limits(version, written.key, parameter.limits())
+            .await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

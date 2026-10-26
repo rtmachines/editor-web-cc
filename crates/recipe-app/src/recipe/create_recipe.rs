@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, RECIPE_REFERENCE_UNIQUE, map_storage};
-use crate::ports::{Isolation, Locked, NewVersion, NonEmpty};
+use crate::ports::{InsertedRecipe, Isolation, Locked, NewVersion, NonEmpty, Transaction};
 
 /// The parsed request of `CreateRecipe`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,67 +94,99 @@ impl CreateRecipe {
         let code = input.machine_code;
         let machine_id = live_machine_of_field(&self.ctx, code).await?;
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;
-        let Locked { state: machine, .. } = tx
-            .plant()
-            .lock_machine_shared(machine_id)
-            .await?
-            .ok_or(PlantError::MachineNotFound { code })?;
-        if !machine.is_live() {
-            return Err(PlantError::MachineArchived { code }.into());
-        }
-        let output = CreateRecipeOutput {
-            recipe: RecipeId::from(Uuid::new_v4()),
-            version: RecipeVersionId::from(Uuid::new_v4()),
-        };
-        let recipe = Recipe::create(
-            output.recipe,
-            machine_id,
-            input.reference.clone(),
-            input.name,
-            output.version,
-        );
-        let first = NewVersion {
-            recipe: output.recipe,
-            version: output.version,
-            number: 1,
-            based_on: None,
-            change_note: input.change_note,
-            creator: user.user(),
-        };
-        let inserted = tx
-            .recipes()
-            .insert_recipe(&recipe, first)
-            .await
-            .map_err(|error| {
-                map_storage(error, |constraint| {
-                    (constraint == RECIPE_REFERENCE_UNIQUE).then(|| {
-                        RecipeError::DuplicateReference {
-                            reference: input.reference.clone(),
-                        }
-                        .into()
-                    })
-                })
-            })?;
-        let context = audit_context(user, meta);
-        let mut entries = NonEmpty::new(AuditEntry::row(
-            RowAction::RecipeCreated,
-            AuditTarget::recipe(output.recipe),
-            RowChange::Create {
-                after: inserted.recipe.into_value(),
-            },
-            context.clone(),
-        ));
-        entries.push(AuditEntry::row(
-            RowAction::VersionCreated,
-            AuditTarget::recipe_version(output.recipe, output.version),
-            RowChange::Create {
-                after: inserted.version.into_value(),
-            },
-            context,
-        ));
+        lock_live_machine(tx.as_mut(), machine_id, code).await?;
+        let (output, inserted) = insert_new_recipe(tx.as_mut(), user, machine_id, input).await?;
+        let entries = creation_entries(user, meta, output, inserted);
         self.ctx.uow.commit(tx, entries).await?;
         Ok(output)
     }
+}
+
+/// Lock the machine `FOR SHARE` and require it live under that lock.
+async fn lock_live_machine(
+    tx: &mut dyn Transaction,
+    machine_id: MachineId,
+    code: MachineCode,
+) -> Result<(), AppError> {
+    let Locked { state: machine, .. } = tx
+        .plant()
+        .lock_machine_shared(machine_id)
+        .await?
+        .ok_or(PlantError::MachineNotFound { code })?;
+    if !machine.is_live() {
+        return Err(PlantError::MachineArchived { code }.into());
+    }
+    Ok(())
+}
+
+/// Insert the recipe with its version 1 and map a taken reference number to `E-RCP-001`.
+async fn insert_new_recipe(
+    tx: &mut dyn Transaction,
+    user: &CurrentUser,
+    machine_id: MachineId,
+    input: CreateRecipeInput,
+) -> Result<(CreateRecipeOutput, InsertedRecipe), AppError> {
+    let output = CreateRecipeOutput {
+        recipe: RecipeId::from(Uuid::new_v4()),
+        version: RecipeVersionId::from(Uuid::new_v4()),
+    };
+    let recipe = Recipe::create(
+        output.recipe,
+        machine_id,
+        input.reference.clone(),
+        input.name,
+        output.version,
+    );
+    let first = NewVersion {
+        recipe: output.recipe,
+        version: output.version,
+        number: 1,
+        based_on: None,
+        change_note: input.change_note,
+        creator: user.user(),
+    };
+    let inserted = tx
+        .recipes()
+        .insert_recipe(&recipe, first)
+        .await
+        .map_err(|error| {
+            map_storage(error, |constraint| {
+                (constraint == RECIPE_REFERENCE_UNIQUE).then(|| {
+                    RecipeError::DuplicateReference {
+                        reference: input.reference.clone(),
+                    }
+                    .into()
+                })
+            })
+        })?;
+    Ok((output, inserted))
+}
+
+/// Build the audit entries `RecipeCreated` and `VersionCreated` of one creation.
+fn creation_entries(
+    user: &CurrentUser,
+    meta: &RequestMeta,
+    output: CreateRecipeOutput,
+    inserted: InsertedRecipe,
+) -> NonEmpty<AuditEntry> {
+    let context = audit_context(user, meta);
+    let mut entries = NonEmpty::new(AuditEntry::row(
+        RowAction::RecipeCreated,
+        AuditTarget::recipe(output.recipe),
+        RowChange::Create {
+            after: inserted.recipe.into_value(),
+        },
+        context.clone(),
+    ));
+    entries.push(AuditEntry::row(
+        RowAction::VersionCreated,
+        AuditTarget::recipe_version(output.recipe, output.version),
+        RowChange::Create {
+            after: inserted.version.into_value(),
+        },
+        context,
+    ));
+    entries
 }
 
 #[cfg(test)]

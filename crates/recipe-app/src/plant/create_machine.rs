@@ -1,6 +1,6 @@
 //! The use case `CreateMachine` (`domain-model.md` section 5.1, `data-model.md` section 6).
 
-use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
+use recipe_domain::audit::{AuditContext, AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{Machine, MachineCode, MachineId, PlantError, PlcPlatform, UnitId};
 use recipe_domain::text::Text;
 use uuid::Uuid;
@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, MACHINE_CODE_LIVE_UNIQUE, StorageError, map_storage};
-use crate::ports::{Isolation, NonEmpty};
+use crate::ports::{InsertedMachine, Isolation, NonEmpty};
 
 /// The parsed request of `CreateMachine`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,34 +87,43 @@ impl CreateMachine {
                     .then(|| PlantError::DuplicateMachineCode { code }.into())
             })
         })?;
-        if machine.units().count() != inserted.units.len() {
-            return Err(StorageError::invariant(
-                "insert_machine returned a different number of unit images than units",
-            )
-            .into());
-        }
-        let context = audit_context(user, meta);
-        let mut entries = NonEmpty::new(AuditEntry::row(
-            RowAction::MachineCreated,
-            AuditTarget::machine(machine.id()),
-            RowChange::Create {
-                after: inserted.machine.into_value(),
-            },
-            context.clone(),
-        ));
-        for (unit, image) in machine.units().zip(inserted.units) {
-            entries.push(AuditEntry::row(
-                RowAction::UnitAdded,
-                AuditTarget::unit(machine.id(), unit.id()),
-                RowChange::Create {
-                    after: image.into_value(),
-                },
-                context.clone(),
-            ));
-        }
+        let entries = creation_entries(&machine, inserted, audit_context(user, meta))?;
         self.ctx.uow.commit(tx, entries).await?;
         Ok(output)
     }
+}
+
+/// Build the audit entries of a new machine: one for the machine and one for each unit.
+fn creation_entries(
+    machine: &Machine,
+    inserted: InsertedMachine,
+    context: AuditContext,
+) -> Result<NonEmpty<AuditEntry>, AppError> {
+    if machine.units().count() != inserted.units.len() {
+        return Err(StorageError::invariant(
+            "insert_machine returned a different number of unit images than units",
+        )
+        .into());
+    }
+    let mut entries = NonEmpty::new(AuditEntry::row(
+        RowAction::MachineCreated,
+        AuditTarget::machine(machine.id()),
+        RowChange::Create {
+            after: inserted.machine.into_value(),
+        },
+        context.clone(),
+    ));
+    for (unit, image) in machine.units().zip(inserted.units) {
+        entries.push(AuditEntry::row(
+            RowAction::UnitAdded,
+            AuditTarget::unit(machine.id(), unit.id()),
+            RowChange::Create {
+                after: image.into_value(),
+            },
+            context.clone(),
+        ));
+    }
+    Ok(entries)
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! Proof that the check of the Compose override files can fail (design D9, finding VX10-3).
+//! Proof that the check of the Compose override files can fail (design D9).
 //!
 //! `compose.dev.yaml` may change the port, the volumes, and the secrets of `proxy`. `compose.build.yaml`
 //! may add `build:` only. Any other key is a controlled setting, so the check reports a fault.

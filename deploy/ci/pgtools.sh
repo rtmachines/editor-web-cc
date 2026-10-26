@@ -9,8 +9,7 @@ for suite in backup-test restore-test-test walarchive-test
 do
   docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges:true \
     --memory 512m --memory-swap 512m --cpus 0.5 \
-    -e CI=true -e PGTOOLS_BIN=/usr/local/bin --entrypoint bash \
+    -e CI=true -e PGTOOLS_BIN=/usr/local/bin -e PGTOOLS_CRONTAB_DIR=/etc/pgtools --entrypoint bash \
     --mount "type=bind,src=$GITHUB_WORKSPACE/deploy/pgtools,dst=/pgtools,readonly" \
-    --mount "type=bind,src=$GITHUB_WORKSPACE/deploy/pgtools/crontab.walarchive,dst=/usr/local/crontab.walarchive,readonly" \
     "recipe-pgtools:$RECIPE_VERSION" "/pgtools/tests/$suite"
 done

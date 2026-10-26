@@ -16,13 +16,11 @@ use super::sink::RecordedEvent;
 use super::{Fault, MemoryState, MemoryStore};
 use crate::auth::{Operation, Requirement};
 use crate::error::StorageError;
+use crate::ports::APPLICATION_ROLE;
 use crate::ports::{
     Isolation, OperationsReads, OperationsSnapshot, ReplicationState, RoleCheck, SnapshotWindows,
     TimeStateKey,
 };
-
-/// The role that a correct connection uses (`reliability.md` section 5).
-const APPLICATION_ROLE: &str = "recipe_app";
 
 /// A method of [`OperationsReads`]. A fault and a call counter belong to one method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

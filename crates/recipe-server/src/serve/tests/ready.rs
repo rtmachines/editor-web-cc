@@ -1,4 +1,4 @@
-//! The startup gate of `/readyz` (finding CRX-S8-2, ADR-0061 step 10).
+//! The startup gate of `/readyz` (ADR-0061 step 10).
 //!
 //! Step 8 opens the internal listener. Step 9 reads the state before the public bind of step 10.
 //! A request to `/readyz` in that window must get `503`. The test holds step 9, sends the request

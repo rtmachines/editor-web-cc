@@ -3,8 +3,8 @@
 use tracing::Level;
 
 use super::support::{
-    HOUR, LogCapture, MINUTE, Rig, TEN_MINUTES, TOTAL, after, rig, rig_with, run, set_available,
-    set_time, times,
+    HOUR, LogCapture, MINUTE, Rig, TEN_MINUTES, TOTAL, after, rig, rig_slow, rig_with, run,
+    set_available, set_time, times,
 };
 use crate::jobs::disk_check::DiskCheckSettings;
 use crate::ports::ReadOnlySwitch;
@@ -151,6 +151,21 @@ async fn a_mode_that_is_on_before_the_first_run_writes_one_line_between_both_thr
     run_expecting(&rig, &logs, 0, 1).await;
     run_expecting(&rig, &logs, TEN_MINUTES - 1, 1).await;
     run_expecting(&rig, &logs, TEN_MINUTES, 2).await;
+}
+
+#[tokio::test]
+async fn the_log_interval_starts_when_the_measurement_ends() {
+    let (logs, _guard) = LogCapture::install();
+    let rig = rig_slow(400);
+    set_available(&rig, LOW);
+    run(&rig).await.unwrap();
+    assert_eq!(logs.count(), 1);
+    set_time(&rig, after(400, TEN_MINUTES - 1));
+    run(&rig).await.unwrap();
+    assert_eq!(logs.count(), 1);
+    set_time(&rig, after(400, TEN_MINUTES));
+    run(&rig).await.unwrap();
+    assert_eq!(logs.count(), 2);
 }
 
 #[tokio::test]

@@ -490,7 +490,7 @@ A change of a configuration value, for example `approval.separation_of_duties`, 
 | I10 | A unit has its parent in the same machine, and the parent path exists | `Machine::add_unit()` | Composite FK `unit_parent_exists (machine_id, parent_path) REFERENCES unit (machine_id, path)`. `parent_path` is a generated column. There is no `parent_id` column |
 | I11 | `reference_number` is unique. `machine.code` is unique among live machines | Repository returns `DuplicateReference` or `DuplicateMachineCode` | `UNIQUE recipe_reference_unique`. Partial unique index `machine_code_live_unique` on `(code) WHERE archived_at IS NULL` |
 | I12 | Two users cannot overwrite the same `Draft` | Use case compares `row_version` after `recipe_version FOR UPDATE` and returns `ConcurrentEdit` on a mismatch. Then it runs the touch statement. `Recipe::approve()`, `retire()`, and `discard()` also compare it and return `Optimistic::Conflict` (ADR-0028) | Lock order `recipe FOR UPDATE -> recipe_version FOR UPDATE`. Compare after `FOR UPDATE`, then touch. The trigger function `bump_row_version` increments the token |
-| I13 | Every command has an audit entry, except the two cases of section 5 | `UnitOfWork::commit(NonEmpty<AuditEntry>)` | `recipe_app` has `INSERT` and `SELECT` only on `audit_log`. Hash chain trigger function `audit_hash_chain` with the row lock on `audit_chain_head`. The nightly check recomputes every hash and reports a break as `E-AUD-002` |
+| I13 | Every command has an audit entry, except the two cases of section 5 | `UnitOfWork::commit(NonEmpty<AuditEntry>)` | `recipe_app` has `SELECT` on `audit_log` and column `INSERT` on eleven columns of it (ADR-0098). Hash chain trigger function `audit_hash_chain` with the row lock on `audit_chain_head`. The nightly check recomputes every hash and reports a break as `E-AUD-002` |
 | I14 | Deleting a recipe does not destroy history | `Recipe::delete()` sets `deleted_at`. `RecipeHasApprovedVersion` when an approved version exists | No `DELETE` grant on `recipe`, `recipe_version` for `recipe_app` |
 | I15 | The unit of a parameter is in the machine of the recipe | `Draft::add_parameter()` and `Draft::set_definition()` take a `LiveUnit`, which only `LiveUnits::require()` creates. A unit of another machine gives `E-PLT-020` (ADR-0028) | Trigger function `enforce_unit_machine` on `parameter` (`E-RCP-032`) |
 | I16 | Separation of duties at approval | `Recipe::approve(ApprovalReady, expected_row_version, &Approver, &ApprovalPolicy)` returns `ApproverEditedDraft`. The token holds the creator and the `DraftEditors` (ADR-0028) | Table `draft_editor` written by every draft command. Not enforced by trigger |
@@ -538,7 +538,7 @@ Rules:
 
 ## 5. Domain operations
 
-Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing. Each command runs in one READ COMMITTED transaction, except `Login` and the two SERIALIZABLE commands of section 5.3.
+Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing. Each command runs in one READ COMMITTED transaction, except `Login` and `ChangeOwnPassword`. `Login` and `ChangeOwnPassword` use two transactions, T1 and T2 (ADR-0035 (b)). The bootstrap of `create-admin` is the one SERIALIZABLE command (ADR-0096 (h)).
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
@@ -637,7 +637,7 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 | `ChangeOwnPassword` | User, Session | New hash. `session_epoch` incremented. New session for the current request. The login throttle applies to the own login and the client address (ADR-0035) | `E-IDN-008 InvalidCurrentPassword`, `E-IDN-006 PasswordPolicy`, `E-IDN-005 LoginThrottled`, `E-WEB-004 Unauthenticated` (the epoch, the hash, or the active state changed after the check), `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `UnlockLogin` | User | Throttle counters of one login cleared | - |
 
-`SetUserRole` and `DeactivateUser` run in SERIALIZABLE for the last-administrator count. They retry once on `40001`, then return `E-DB-001`. All other commands run in READ COMMITTED with no retry.
+`SetUserRole` and `DeactivateUser` run in READ COMMITTED. They first take the guard lock of the last Administrator (class 4, `data-model.md` 1.4), so two such commands run one after the other. They have no retry (ADR-0096). All other commands run in READ COMMITTED with no retry.
 
 ### 5.4 Export
 
@@ -736,6 +736,8 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | Diff | The list of changes between two versions of one recipe. Parameters match by `key` (ADR-0050) |
 | Approval preview | The page that shows the diff, the outdated parameters, and the blockers before an approval (ADR-0049) |
 | Recipe history | The audit entries of one recipe without their states, newest first (ADR-0051) |
+| Guard lock of the last Administrator | The advisory lock of class 4 and key 0. `SetUserRole` and `DeactivateUser` take it first, so two such commands run one after the other (ADR-0096). |
+| Role grammar | The five statement forms that the restore test accepts in the globals file (ADR-0095). |
 
 ## 8. Assumptions used here
 

@@ -30,7 +30,7 @@ use uuid::Uuid;
 
 use super::{HealthSettings, HealthState, health_router};
 use crate::settings::WebSettings;
-use crate::test_support::{Fixture, PEER, Reply, call, capture_logs, get_with, request};
+use crate::test_support::{Fixture, PEER, Reply, call, capture_logs, get_with, install, request};
 
 /// The start of the clock, in Unix seconds.
 const START_SECONDS: i64 = 1_000_000;
@@ -662,7 +662,7 @@ fn production_logs() -> (Sink, DefaultGuard) {
         .without_time()
         .with_max_level(tracing::Level::INFO)
         .finish();
-    (sink, tracing::subscriber::set_default(subscriber))
+    (sink, install(subscriber))
 }
 
 #[tokio::test(start_paused = true)]

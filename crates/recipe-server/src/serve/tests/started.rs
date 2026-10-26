@@ -1,4 +1,4 @@
-//! The startup `INFO` event (`reliability.md` 3.3, finding CRX-S8-8).
+//! The startup `INFO` event (`reliability.md` 3.3).
 //!
 //! A start that passes step 10 writes exactly one event. A refusal and a stop signal before step 10
 //! write none.

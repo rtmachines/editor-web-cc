@@ -75,9 +75,10 @@ pub struct CloseReport {
 }
 
 impl CloseReport {
-    /// Write the cut line of the report (ADR-0088).
+    /// Write the cut line of the report (ADR-0088, ADR-0089 (c)).
     ///
-    /// A cut gets one `WARN` line with the three counts. A clean report writes nothing. The close
+    /// A cut gets one `WARN` line with the three counts. It writes only when one count is above 0.
+    /// A clean report writes nothing. The close
     /// has already written the line of a pool that timed out. The panic of the watchdog thread has
     /// its line from the panic hook.
     pub fn log(&self) {
@@ -100,7 +101,8 @@ impl CloseReport {
 pub(super) struct ServerParts {
     /// The runtime of step 3. It runs every task below.
     pub runtime: Runtime,
-    /// The stop signal of step 4. It is `None` after the signal ended a wait.
+    /// The stop signal of step 4. [`Server::wait_for_signal`] takes it, so it is `None` after a
+    /// wait starts.
     pub signal: Option<Signal>,
     /// The public listener of step 10.
     pub public: ListenerHandle,
@@ -116,7 +118,11 @@ pub(super) struct ServerParts {
     pub watchdog: Box<dyn WatchdogControl>,
     /// The readiness handle. `begin_shutdown` turns `/readyz` off.
     pub health: HealthState,
-    /// The flag of the read-only mode.
+    /// The flag of the read-only mode. Only the test accessor [`Server::read_only`] reads it.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "only the test accessor reads the flag")
+    )]
     pub read_only: ReadOnlyMode,
     /// The times of the stop.
     pub shutdown: ShutdownSettings,
@@ -138,20 +144,23 @@ impl Server {
     }
 
     /// The runtime of the server.
+    #[cfg(test)]
     #[must_use]
-    pub const fn runtime(&self) -> &Runtime {
+    pub(super) const fn runtime(&self) -> &Runtime {
         &self.parts.runtime
     }
 
     /// The readiness handle.
+    #[cfg(test)]
     #[must_use]
-    pub const fn health(&self) -> &HealthState {
+    pub(super) const fn health(&self) -> &HealthState {
         &self.parts.health
     }
 
     /// The flag of the read-only mode.
+    #[cfg(test)]
     #[must_use]
-    pub const fn read_only(&self) -> &ReadOnlyMode {
+    pub(super) const fn read_only(&self) -> &ReadOnlyMode {
         &self.parts.read_only
     }
 
@@ -166,10 +175,11 @@ impl Server {
 
     /// Close everything in the stop order of ADR-0087 and ADR-0090.
     ///
-    /// The method writes the `WARN` line of each pool that timed out, before it stops the internal
-    /// listener (ADR-0090 (b)). [`Server::stop`] writes the cut line and the `INFO` line.
+    /// The method writes the `WARN` line of each pool that timed out and of each accept loop that
+    /// panicked. It writes them before it stops the internal listener (ADR-0090 (b)).
+    /// [`Server::stop`] writes the cut line and the `INFO` line.
     #[must_use]
-    pub fn close(self) -> CloseReport {
+    pub(super) fn close(self) -> CloseReport {
         Opened::from(self.parts).close()
     }
 

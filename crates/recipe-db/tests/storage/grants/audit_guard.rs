@@ -123,6 +123,16 @@ fn the_guard_accepts_migration_0006_and_sees_its_five_steps() {
 }
 
 #[test]
+fn the_guard_accepts_migration_0007_and_sees_its_five_steps() {
+    assert_guard_accepts_the_five_steps_of("0007_audit_definer_operators.sql");
+}
+
+#[test]
+fn the_guard_accepts_migration_0008_and_sees_its_five_steps() {
+    assert_guard_accepts_the_five_steps_of("0008_audit_log_insert_columns.sql");
+}
+
+#[test]
 fn the_guard_rejects_a_dropped_replication_state_function() {
     let text = "DROP FUNCTION replication_state();";
 

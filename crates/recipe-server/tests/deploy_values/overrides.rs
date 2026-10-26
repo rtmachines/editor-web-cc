@@ -1,4 +1,4 @@
-//! The check of the Compose override files (design D9, finding VX10-3).
+//! The check of the Compose override files (design D9).
 //!
 //! The reader of `lines.rs` cannot merge a file into `compose.yaml`. So the rule is stricter than a
 //! merge: an override may hold only the keys that D9 names. Any other key is a controlled setting

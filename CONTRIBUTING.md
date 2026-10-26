@@ -49,7 +49,7 @@ Permitted exceptions:
 
 - Test code (`#[cfg(test)]` and `tests/`) can use `unwrap`, `expect`, and indexing.
 - `clippy.toml` permits them in `#[test]` functions and in `#[cfg(test)]` code.
-- Each file in `tests/` starts with `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]` and a comment that names `reliability.md` section 2.3.
+- The root file of each integration test crate in `tests/` starts with `#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]` and a comment that names `reliability.md` section 2.3. The attribute covers every module of that test crate.
 - The watchdog function is the only item with `#[allow(clippy::exit)]`. A comment on the attribute names `reliability.md` section 2.3.
 - `recipe-server::main` returns `anyhow::Result<()>` and has no `expect`. A failed startup check writes one `ERROR` line, and the process exits with code 1.
 - A review rejects every other `#[allow]` of these lints outside tests.
@@ -57,7 +57,7 @@ Permitted exceptions:
 Panic containment (`reliability.md` section 2.4):
 
 - A panic hook writes one `tracing::error!` event and does not end the process.
-- `CatchPanicLayer` is the outermost layer of the router. A panic in a request gives `500 E-WEB-010`.
+- The backstop `CatchPanicLayer` sits directly inside the request id layer, so every answer has a request id. A panic in a request gives `500 E-WEB-010`.
 - A supervisor loop restarts a background job after a panic.
 - A watchdog thread ends a stalled process with exit code 70, and Docker restarts the container.
 - Application code never calls `std::panic::catch_unwind`.
@@ -69,13 +69,13 @@ Panic containment (`reliability.md` section 2.4):
   - `recipe-app` outside `recipe-db`, `recipe-web`, and `recipe-server`,
   - `recipe-web` outside `recipe-server`,
   - `recipe-export` outside `recipe-web`,
-  - `recipe-db` outside `recipe-server`,
+  - `recipe-db` outside `recipe-server` and its own dev-dependency, which enables the feature `test-support` for the storage tests,
   - `sqlx` outside `recipe-db`,
   - `anyhow` outside `recipe-server` (Assumption A37).
 - The proc macro `prost-derive` under `testcontainers` is the one third-party exception to the `anyhow` ban.
 - Review checks the other forbidden dependencies of `overview.md` section 5, for example `axum` and `tokio` in `recipe-domain`.
 - `cargo deny check` runs in CI. It fails on a denied license, a yanked crate, a security advisory, or a banned dependency edge.
-- `cargo audit` runs nightly against the `Cargo.lock`.
+- `cargo audit` runs nightly against the `Cargo.lock`. `npm audit` runs nightly against `e2e/package-lock.json`.
 - `Cargo.lock` is in the repository. Dependency updates happen once per month in one pull request. A security advisory gets an update at once.
 - The minimum supported Rust version is the current stable at release time. `rust-version` in the workspace `Cargo.toml` records it. The project uses edition 2024.
 
@@ -89,7 +89,7 @@ Panic containment (`reliability.md` section 2.4):
 
 ## Local checks
 
-Run these commands before you open a pull request. CI runs the same checks.
+Run these commands before you open a pull request. CI runs the same checks on each pull request.
 
 ```bash
 cargo fmt --all --check
@@ -103,6 +103,23 @@ bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{arc
 ```
 
 The coverage target is 80 % line coverage per crate (`reliability.md` section 6). `tools/coverage-gate.py` applies it to each crate. A crate with no executable line passes.
+
+### Browser regression suite
+
+The Playwright suite in `e2e/` runs against `examples/dev_server.rs` (ADR-0048). It needs Node 22. CI runs it on each pull request.
+
+```bash
+cd e2e
+npm ci
+npx playwright install chromium
+E2E_PASSWORD=<12 to 128 characters> npm test
+```
+
+The variable `RECIPE_DEV_PORT` changes the port of the development server. The default port of the suite is 18080.
+
+### Jobs outside pull requests
+
+The jobs `compose` and `upgrade` of `.github/workflows/ci.yml` run only on a push to `main` and on a manual dispatch (ADR-0094). A pull request does not start them. The input `upgrade_from` of a dispatch names the previous release ref of the upgrade test. Without the input, `deploy/ci/upgrade.sh` selects the previous commit. The upgrade test runs only on a Linux CI runner.
 
 ## Pull requests
 

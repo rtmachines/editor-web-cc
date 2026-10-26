@@ -5,6 +5,12 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 const SECRET_WORDS: usize = 4;
+/// Only the owner may enter a temporary directory. The secret files of a test live in it.
+#[cfg(unix)]
+const DIRECTORY_MODE: u32 = 0o700;
+/// Only the owner may read or write a temporary file.
+#[cfg(unix)]
+const FILE_MODE: u32 = 0o600;
 const DIRECTORY_PREFIX: &str = "recipe-server-test";
 
 /// A random hexadecimal secret of 64 characters.
@@ -29,16 +35,55 @@ impl TempDir {
             std::process::id(),
             random_secret()
         ));
-        std::fs::create_dir(&path).unwrap();
+        create_directory(&path);
         Self(path)
     }
 
     /// Write a file into the directory and return its path.
     pub fn write(&self, name: &str, content: &str) -> PathBuf {
         let path = self.0.join(name);
-        std::fs::write(&path, content).unwrap();
+        write_file(&path, content);
         path
     }
+}
+
+/// Create a new directory that only the owner may enter. The call fails when the path exists.
+#[cfg(unix)]
+fn create_directory(path: &Path) {
+    use std::os::unix::fs::DirBuilderExt;
+
+    std::fs::DirBuilder::new()
+        .mode(DIRECTORY_MODE)
+        .create(path)
+        .unwrap();
+}
+
+/// Create a new directory. The call fails when the path exists.
+#[cfg(not(unix))]
+fn create_directory(path: &Path) {
+    std::fs::create_dir(path).unwrap();
+}
+
+/// Write a file that only the owner may read or write. An existing file gets the new content.
+#[cfg(unix)]
+fn write_file(path: &Path, content: &str) {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(FILE_MODE)
+        .open(path)
+        .unwrap();
+    file.write_all(content.as_bytes()).unwrap();
+}
+
+/// Write a file. An existing file gets the new content.
+#[cfg(not(unix))]
+fn write_file(path: &Path, content: &str) {
+    std::fs::write(path, content).unwrap();
 }
 
 impl Deref for TempDir {

@@ -1,4 +1,4 @@
-//! The one more run of a `SERIALIZABLE` command (design D8, ADR-0035 c).
+//! The one more run of a `SERIALIZABLE` command (design D8, ADR-0035 h).
 
 use std::future::Future;
 
@@ -23,12 +23,11 @@ fn is_serialization_failure(error: &AppError) -> bool {
 
 /// Run `body` and run it once more after a serialization failure.
 ///
-/// The function solves one problem: `SetUserRole`, `DeactivateUser`, and
-/// `bootstrap_administrator` run `SERIALIZABLE`, and PostgreSQL may abort one of two
-/// concurrent transactions with `40001`. The database promises that a retry can succeed. A
-/// deadlock or a lock timeout never runs again, because the lock order of ADR-0015 prevents the
-/// first and the second needs a person to look. A second serialization failure, in either
-/// form, becomes `AppError::Storage` with the code `E-DB-001`.
+/// The function solves one problem: `bootstrap_administrator` runs `SERIALIZABLE`, and
+/// PostgreSQL may abort one of two concurrent transactions with `40001`. The database promises
+/// that a retry can succeed. A deadlock or a lock timeout never runs again, because the lock
+/// order of ADR-0015 prevents the first and the second needs a person to look. A second
+/// serialization failure, in either form, becomes `AppError::Storage` with the code `E-DB-001`.
 ///
 /// `body` builds a new future for each run. The future must open its own transaction.
 ///

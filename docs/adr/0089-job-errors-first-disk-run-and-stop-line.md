@@ -1,6 +1,6 @@
 # ADR-0089: Errors of the jobs, the first run of `disk_check`, and the stop line
 
-Status: Accepted. Amended by ADR-0090 (answers of two open items: a `NULL` `sent_lsn` and `CloseOutcome::TimedOut`)
+Status: Accepted. Amended by ADR-0090 (answers of two open items: a `NULL` `sent_lsn` and `CloseOutcome::TimedOut`). Amended by a note (section 7.3: the `INFO` line of a full stop)
 Date: 2026-10-24
 Deciders: project owner
 

@@ -1,16 +1,22 @@
 //! Tests of the request pipeline (task 6.5, design D11 steps 2 and 4 to 9, D14).
 
+use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, StatusCode};
+use axum::routing::get;
+use parking_lot::Mutex;
 use recipe_domain::identity::Role;
+use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
-use super::build_request_id;
+use super::{build_request_id, wrap};
 use crate::settings::{CidrList, WebSettings};
 use crate::test_support::{
-    Fixture, REACHED, call, capture_logs, get_with, post_pre_session, post_with, request,
+    Fixture, REACHED, call, capture_logs, get_with, install, post_pre_session, post_with, request,
 };
 
 /// The key file of the pre-session CSRF cookie in these tests.
@@ -546,4 +552,63 @@ async fn pipeline_trace_line_holds_no_request_body() {
     let text = logs.text();
     assert!(text.contains("status=200"), "{text}");
     assert!(!text.contains("hunter2-secret-body"), "{text}");
+}
+
+/// A writer that copies every line of the log into a shared buffer.
+#[derive(Clone, Default)]
+struct Lines(Arc<Mutex<Vec<u8>>>);
+
+impl io::Write for Lines {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.lock().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for Lines {
+    type Writer = Self;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// A handler that writes one `ERROR` line without a request id of its own.
+async fn fails_with_a_line() -> &'static str {
+    tracing::error!("inner fault");
+    REACHED
+}
+
+#[tokio::test]
+async fn pipeline_error_line_holds_the_request_id_under_a_warn_filter() {
+    // The global subscriber of the tests keeps the callsites enabled. The subscriber of this
+    // thread then decides, and it lets only `WARN` and `ERROR` pass, like `RUST_LOG=warn`.
+    let _global = capture_logs();
+    let lines = Lines::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(lines.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .finish();
+    let _scoped = install(subscriber);
+    let fixture = Fixture::new();
+    let inner = Router::new().route("/inner-fault", get(fails_with_a_line));
+    let router = wrap(inner, fixture.state.settings());
+    let reply = get_with(&router, "/inner-fault", &[]).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let text = String::from_utf8_lossy(&lines.0.lock()).into_owned();
+    let line = text
+        .lines()
+        .find(|line| line.contains("inner fault"))
+        .expect(&text);
+    let id = reply.header("x-request-id");
+    assert!(line.contains("ERROR"), "{line}");
+    assert!(
+        line.contains(&format!("request_id={id}")),
+        "no request_id in {line}"
+    );
 }

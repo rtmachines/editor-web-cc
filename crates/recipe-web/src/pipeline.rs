@@ -130,13 +130,16 @@ pub(crate) fn request_id_of(request: &Request) -> RequestId {
 /// The span holds the request id, the method, and the `User-Agent` cut to 256 characters. The
 /// layers that learn the route, the client address, the session, and the answer record the other
 /// fields later. The span holds no header besides `User-Agent`, no query, and no body.
+///
+/// The span has the level `ERROR`, so a log filter such as `warn` keeps it. An `INFO` span would
+/// be off, and the `WARN` and `ERROR` lines of the request would lose the `request_id`.
 fn make_span(request: &Request) -> Span {
     let agent = request
         .headers()
         .get(USER_AGENT)
         .and_then(|value| value.to_str().ok())
         .map(|text| UserAgent::from(text).as_str().to_owned());
-    tracing::info_span!(
+    tracing::error_span!(
         "http_request",
         request_id = %request_id_of(request),
         method = %request.method(),

@@ -18,20 +18,48 @@ pub struct Answer {
     pub body: String,
 }
 
-/// Find two different ports that nothing listens on, for the keys `http.public_port` and
+/// Two listeners that the test keeps open, for the keys `http.public_port` and
 /// `http.internal_port`.
 ///
-/// The function binds two listeners on port 0 on all addresses, as `serve` does. It holds both at
-/// the same time, so the two ports differ. It reads the ports and frees the listeners again.
+/// While a `HeldPorts` lives, no other process or thread can bind its two ports. A child that
+/// tries to bind them fails with an address-in-use error. The ports stay taken until the drop.
+pub struct HeldPorts {
+    public: TcpListener,
+    internal: TcpListener,
+}
+
+impl HeldPorts {
+    /// The port of the first listener.
+    pub fn public_port(&self) -> u16 {
+        self.public.local_addr().unwrap().port()
+    }
+
+    /// The port of the second listener.
+    pub fn internal_port(&self) -> u16 {
+        self.internal.local_addr().unwrap().port()
+    }
+}
+
+/// Bind two listeners on port 0 on all addresses, as `serve` does, and keep them open.
+///
+/// The function holds both at the same time, so the two ports differ.
+pub fn hold_ports() -> HeldPorts {
+    HeldPorts {
+        public: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap(),
+        internal: TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap(),
+    }
+}
+
+/// Find two different ports that nothing holds just now, for the keys `http.public_port` and
+/// `http.internal_port`.
+///
+/// The function takes the ports of `hold_ports` and frees the listeners again.
 ///
 /// The caller must use the ports at once. Another process may take a freed port at any time.
+/// A test that needs a port that stays closed must use `hold_ports` and not this function.
 pub fn free_ports() -> (u16, u16) {
-    let first = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
-    let second = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).unwrap();
-    (
-        first.local_addr().unwrap().port(),
-        second.local_addr().unwrap().port(),
-    )
+    let held = hold_ports();
+    (held.public_port(), held.internal_port())
 }
 
 /// Call `probe` until it returns a value, at most for `limit`. Return `None` after the limit.

@@ -1,9 +1,9 @@
 //! The routing of the three cut counts of the stop (ADR-0088 (e), design D4).
 //!
-//! The test keeps open work in each of the three places: two public connections, one internal
-//! connection, and one job run. None of them ends. The stop must cut every one and put each count
-//! into its own field of the report. The times are short and real, because the loops need real
-//! sockets.
+//! The test keeps open work in each of the three places: three public connections, two internal
+//! connections, and one job run. None of them ends. The stop must cut every one and put each count
+//! into its own field of the report. The three counts differ, so a swap of two routes fails the
+//! test. The times are short and real, because the loops need real sockets.
 
 use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -41,9 +41,9 @@ const RESTART_DELAY: Duration = Duration::from_secs(10);
 /// The run interval of the job. The first run starts at once.
 const JOB_INTERVAL: Duration = Duration::from_secs(60);
 
-/// The open work of the test, by place.
-const PUBLIC_CONNECTIONS: usize = 2;
-const INTERNAL_CONNECTIONS: usize = 1;
+/// The open work of the test, by place. The three counts differ on purpose.
+const PUBLIC_CONNECTIONS: usize = 3;
+const INTERNAL_CONNECTIONS: usize = 2;
 const JOB_RUNS: usize = 1;
 
 /// A job run that reports its start and never ends.
@@ -187,7 +187,7 @@ fn each_count_of_the_cut_goes_into_its_own_field_and_the_cut_line_shows_them() {
     report.log();
     let warnings = logs.at_level("WARN");
     assert_eq!(warnings.len(), 1, "{warnings:?}");
-    for text in ["\"cut_public\":2", "\"cut_internal\":1", "\"cut_jobs\":1"] {
+    for text in ["\"cut_public\":3", "\"cut_internal\":2", "\"cut_jobs\":1"] {
         assert!(warnings[0].contains(text), "{text} in {warnings:?}");
     }
 }

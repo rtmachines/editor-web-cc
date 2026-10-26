@@ -2,8 +2,9 @@
 //!
 //! `serve` reads 17 keys from the environment. The 18th key, `alerts.webhook_url`, is derived
 //! from the webhook file (ADR-0063). The function [`load`] reads and checks every key, both key
-//! files, and the webhook file. It does this before the server opens a port. A refusal names the
-//! key only. It never shows a secret value, a file content, a path, or the webhook URL.
+//! files, and the webhook file. It does this before the server opens a port. A refusal
+//! for a key file or the webhook file names the key only. It never shows a secret value,
+//! a file content, a path, or the webhook URL.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

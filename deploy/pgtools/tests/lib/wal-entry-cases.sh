@@ -7,6 +7,7 @@ EXPECTED_PGPASS='db:5432:replication:recipe_replicator:ab\:c\\d9'
 # The rules of every script of the image (ADR-0066 (m) to (o)).
 case_wal_static_rules() {
   local s f
+  local crontab_dir=${PGTOOLS_CRONTAB_DIR:-$HERE/..}
   for s in "${WAL_SCRIPTS[@]}"; do
     f=$BIN/$s
     expect_ok "static $s: file exists" test -f "$f"
@@ -23,10 +24,10 @@ case_wal_static_rules() {
       "$(grep -E '(^|[^a-z_-])rm ' "$f" 2>/dev/null | grep -vE '^[[:space:]]*#' \
         | grep -vcE 'rm( -r| -f| -rf)? -- "\$\{[a-z_]+:\?\}' || true)" "0"
   done
-  expect_ok "static crontab: exists" test -f "$BIN/../crontab.walarchive"
-  expect_no "static crontab: no carriage return" grep -q $'\r' "$BIN/../crontab.walarchive"
+  expect_ok "static crontab: exists" test -f "$crontab_dir/crontab.walarchive"
+  expect_no "static crontab: no carriage return" grep -q $'\r' "$crontab_dir/crontab.walarchive"
   expect_eq "static crontab: lines" \
-    "$(grep -vE '^(#|$)' "$BIN/../crontab.walarchive" 2>/dev/null | tr '\n' ',')" \
+    "$(grep -vE '^(#|$)' "$crontab_dir/crontab.walarchive" 2>/dev/null | tr '\n' ',')" \
     "CRON_TZ=UTC,30 3 * * 0 basebackup-once,"
 }
 
