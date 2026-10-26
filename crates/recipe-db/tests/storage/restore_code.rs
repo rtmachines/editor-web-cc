@@ -7,7 +7,9 @@
 //! after `01-roles.sh` and every migration.
 
 use std::collections::BTreeSet;
-use std::process::Command;
+use std::fmt::Write as _;
+use std::io::Write as _;
+use std::process::{Command, Output, Stdio};
 
 use sqlx::{PgConnection, Row as _};
 
@@ -20,6 +22,11 @@ const QUERY_PATH: &str = concat!(
 const EXPECTED_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../deploy/pgtools/restore-code.expected"
+);
+/// The one file that holds the role grammar of the globals file (ADR-0095 (i)).
+const GRAMMAR_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../deploy/pgtools/lib/globals-grammar.sh"
 );
 /// The kinds of a line, in byte order.
 const KINDS: [&str; 5] = ["CHECK", "EVENT TRIGGER", "FUNCTION", "GENERATED", "TRIGGER"];
@@ -244,14 +251,8 @@ async fn a_disabled_trigger_changes_exactly_the_line_of_that_trigger() {
     assert!(extra[0].starts_with(prefix), "{extra:?}");
 }
 
-/// The globals file of `backup-once` is `pg_dumpall --globals-only --no-role-passwords`. The gate of
-/// `restore-test` accepts the pair `\restrict KEY` and `\unrestrict KEY` and no other backslash. This
-/// test shows the layout of the real tool of the image: the pair is the first and the last line that
-/// is no comment and no blank line, the keys are equal and alphanumeric, and no other line has a
-/// backslash.
-#[tokio::test]
-async fn the_globals_file_of_pg_dumpall_has_only_the_restrict_pair_as_backslash_lines() {
-    let _database = TestDatabase::create().await;
+/// The output of the real `pg_dumpall --globals-only --no-role-passwords` of the database container.
+fn real_globals() -> String {
     let output = Command::new("docker")
         .args(["exec", "--user", "postgres", &server().container_id])
         .args(["pg_dumpall", "--globals-only", "--no-role-passwords"])
@@ -262,7 +263,18 @@ async fn the_globals_file_of_pg_dumpall_has_only_the_restrict_pair_as_backslash_
         "pg_dumpall failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+/// The globals file of `backup-once` is `pg_dumpall --globals-only --no-role-passwords`. The gate of
+/// `restore-test` accepts the pair `\restrict KEY` and `\unrestrict KEY` and no other backslash. This
+/// test shows the layout of the real tool of the image: the pair is the first and the last line that
+/// is no comment and no blank line, the keys are equal and alphanumeric, and no other line has a
+/// backslash.
+#[tokio::test]
+async fn the_globals_file_of_pg_dumpall_has_only_the_restrict_pair_as_backslash_lines() {
+    let _database = TestDatabase::create().await;
+    let text = real_globals();
 
     let code: Vec<&str> = text
         .lines()
@@ -275,6 +287,123 @@ async fn the_globals_file_of_pg_dumpall_has_only_the_restrict_pair_as_backslash_
     assert!(!open.is_empty() && open.bytes().all(|byte| byte.is_ascii_alphanumeric()));
     let backslash_lines = text.lines().filter(|line| line.contains('\\')).count();
     assert_eq!(backslash_lines, 2, "other lines hold a backslash:\n{text}");
+}
+
+/// Write every byte of the text as `\xHH` for the `printf` builtin of `bash`. A CR byte then
+/// reaches the file of the container unchanged.
+fn printf_escape(text: &str) -> String {
+    text.bytes().fold(String::new(), |mut escaped, byte| {
+        let _ = write!(escaped, "\\x{byte:02x}");
+        escaped
+    })
+}
+
+/// Run `check_globals_file` of the grammar file on the text, in `bash` in the database container.
+/// The script comes through stdin: the grammar file, then a step that writes the text to a file.
+/// The exit status of the script is the status of the function.
+fn check_globals_in_container(grammar: &str, globals: &str) -> Output {
+    let script = format!(
+        "{grammar}\nglobals_file=$(mktemp) || exit 99\n\
+         printf '{}' >\"$globals_file\"\n\
+         check_globals_file \"$globals_file\"\n",
+        printf_escape(globals)
+    );
+    let mut child = Command::new("docker")
+        .args(["exec", "-i", "--user", "postgres", &server().container_id])
+        .args(["bash", "-s"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("docker exec runs");
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(script.as_bytes())
+        .expect("the script reaches bash");
+    child.wait_with_output().expect("docker exec ends")
+}
+
+/// Replace the first line that equals `target`. Return the new text and the number of that line.
+fn replace_line(text: &str, target: &str, replacement: &str) -> (String, usize) {
+    let index = text
+        .split('\n')
+        .position(|line| line == target)
+        .ok_or_else(|| format!("the real output has no line {target:?}"))
+        .unwrap();
+    let lines: Vec<&str> = text
+        .split('\n')
+        .enumerate()
+        .map(|(position, line)| if position == index { replacement } else { line })
+        .collect();
+    (lines.join("\n"), index.saturating_add(1))
+}
+
+/// The grammar file of ADR-0095 (i) accepts the real output of `pg_dumpall` and refuses three
+/// mutations of it. The mutations are a CR byte that hides SQL in a comment between the
+/// `\restrict` and `\unrestrict` lines, two statements on one line, and a role setting outside
+/// the closed list of names. The function names the line number of the fault.
+#[tokio::test]
+async fn the_grammar_file_accepts_the_real_globals_and_refuses_three_mutations() {
+    let _database = TestDatabase::create().await;
+    let grammar = read(GRAMMAR_PATH);
+    let real = real_globals();
+    let accepted = check_globals_in_container(&grammar, &real);
+    assert!(
+        accepted.status.success(),
+        "the grammar refuses the real output.\nstdout: {}\nstderr: {}\ninput:\n{real}",
+        String::from_utf8_lossy(&accepted.stdout),
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let log_line = "ALTER ROLE recipe_app SET log_parameter_max_length TO '0';";
+    let cases = [
+        (
+            "a CR byte in a comment",
+            replace_line(
+                &real,
+                "-- Roles",
+                "-- Roles\rCOPY (SELECT 1) TO PROGRAM 'id';",
+            ),
+        ),
+        (
+            "two statements on one line",
+            replace_line(
+                &real,
+                "CREATE ROLE recipe_app;",
+                "CREATE ROLE recipe_app; CREATE ROLE evil;",
+            ),
+        ),
+        ("a setting outside the closed list", {
+            // The new statement stands on the line after the replaced line.
+            let (text, line) = replace_line(
+                &real,
+                log_line,
+                &format!(
+                    "{log_line}
+ALTER ROLE recipe_app SET session_preload_libraries TO 'x';"
+                ),
+            );
+            (text, line.saturating_add(1))
+        }),
+    ];
+
+    for (name, (mutated, line_number)) in &cases {
+        let refused = check_globals_in_container(&grammar, mutated);
+        let report = format!(
+            "{}{}",
+            String::from_utf8_lossy(&refused.stdout),
+            String::from_utf8_lossy(&refused.stderr)
+        );
+        assert!(
+            !refused.status.success(),
+            "the grammar accepts {name}.\ninput:\n{mutated:?}"
+        );
+        assert!(
+            report.contains(&line_number.to_string()),
+            "the fault of {name} does not name line {line_number}.\nreport: {report}"
+        );
+    }
 }
 
 /// The `kind|name` pairs of the entries `FUNCTION`, `TRIGGER`, and `EVENT TRIGGER` of a
