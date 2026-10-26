@@ -143,8 +143,10 @@ impl DiskCheck {
     /// Never returns `Err` at present. The signature follows the run interface of all jobs
     /// (ADR-0088 (d)).
     pub async fn run_once(&self, _request_id: RequestId, _kind: RunKind) -> Result<(), AppError> {
+        let measurement = self.measure().await;
+        // The clock is read after the measurement, so the time of a line is the time of the reading.
         let now = epoch_seconds(self.clock.now());
-        match self.measure().await {
+        match measurement {
             Ok((space, assessment)) => self.apply(space, assessment, now),
             Err(DiskFault::Unsupported) => self.note_unsupported(),
             Err(fault) => self.note_unreadable(&fault, now),

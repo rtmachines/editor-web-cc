@@ -1,9 +1,11 @@
 //! Helpers that the tests of the job `disk_check` share.
 
 use std::fmt::Debug;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use recipe_domain::audit::RequestId;
 use recipe_domain::timestamp::Timestamp;
@@ -18,7 +20,7 @@ use crate::error::AppError;
 use crate::jobs::RunKind;
 use crate::jobs::disk_check::{DiskCheck, DiskCheckSettings};
 use crate::memory::{DiskFailure, DiskReading, MemoryClock, MemoryDiskSpace, MemoryReadOnly};
-use crate::ports::FreeSpace;
+use crate::ports::{DiskFault, DiskSpace, FreeSpace};
 
 /// The time of the clock at the start of a test, in Unix seconds.
 const BASE_SECONDS: i64 = 1_000_000;
@@ -49,6 +51,43 @@ pub(super) struct Rig {
     pub job: DiskCheck,
 }
 
+/// A disk port whose first reading takes time on the clock.
+///
+/// It solves one problem: a test must show that the job reads the clock after the measurement.
+/// The first call moves the shared clock forward by `delay` and then answers like `inner`.
+pub(super) struct SlowDisk {
+    /// The adapter that answers the call.
+    inner: MemoryDiskSpace,
+    /// The clock that the first call moves forward.
+    clock: MemoryClock,
+    /// The time that the first call takes.
+    delay: TimeDuration,
+    /// True after the first call.
+    used: AtomicBool,
+}
+
+impl SlowDisk {
+    /// Build a port that moves `clock` forward by `delay` seconds on its first call.
+    pub fn new(inner: MemoryDiskSpace, clock: MemoryClock, delay: i64) -> Self {
+        Self {
+            inner,
+            clock,
+            delay: TimeDuration::seconds(delay),
+            used: AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait]
+impl DiskSpace for SlowDisk {
+    async fn free_space(&self, path: &Path) -> Result<FreeSpace, DiskFault> {
+        if !self.used.swap(true, Ordering::Relaxed) {
+            self.clock.advance(self.delay);
+        }
+        self.inner.free_space(path).await
+    }
+}
+
 /// The path of the volume `pgdata` in the tests.
 pub(super) fn pgdata() -> PathBuf {
     PathBuf::from("/srv/pgdata")
@@ -72,11 +111,25 @@ pub(super) fn rig() -> Rig {
 
 /// Build a job with `settings`. The switch starts as `mode_on`, and `pgdata` has 50 % free.
 pub(super) fn rig_with(settings: DiskCheckSettings, mode_on: bool) -> Rig {
+    build_rig(settings, mode_on, None)
+}
+
+/// Build a job with the default settings whose first measurement takes `delay` seconds.
+pub(super) fn rig_slow(delay: i64) -> Rig {
+    build_rig(DiskCheckSettings::default(), false, Some(delay))
+}
+
+/// Build the rig. A `delay` makes the first measurement move the clock forward by that time.
+fn build_rig(settings: DiskCheckSettings, mode_on: bool, delay: Option<i64>) -> Rig {
     let disk = MemoryDiskSpace::default();
     let switch = MemoryReadOnly::new(mode_on);
     let clock = MemoryClock::new(OffsetDateTime::from_unix_timestamp(BASE_SECONDS).unwrap());
+    let port: Arc<dyn DiskSpace> = match delay {
+        Some(seconds) => Arc::new(SlowDisk::new(disk.clone(), clock.clone(), seconds)),
+        None => Arc::new(disk.clone()),
+    };
     let job = DiskCheck::new(
-        Arc::new(disk.clone()),
+        port,
         Arc::new(switch.clone()),
         Arc::new(clock.clone()),
         pgdata(),
