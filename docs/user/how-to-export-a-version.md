@@ -55,7 +55,9 @@ The content hash is the key `content_sha256` in the file. It has 64 characters, 
 
 Open the file in a text editor to read the hash. The hash stays the same for one version, also after a rename or a retirement (`api.md` section 6.1). The file also holds the key `loadable`. It is `true` only for an `Approved` version.
 
-Do not edit the file. A changed value in the file does not match the hash. The transfer system then refuses the file. [Check an export document before a PLC load](check-export-document.md) shows the check.
+Do not edit the file. The hash covers only the fields with "In hash: yes" in [`api.md`](../architecture/api.md) section 6.1. A changed value in one of these fields does not match the hash.
+
+The hash does not cover `loadable`, `version.status`, `version.approved_by`, `exported_at`, and the names. A change in one of these fields does not change the hash. [Export document format](export-format.md) lists the keys. [Check an export document before a PLC load](check-export-document.md) shows the check.
 
 ## Read-only mode
 
