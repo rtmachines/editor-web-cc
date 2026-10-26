@@ -1,5 +1,5 @@
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -15,6 +15,8 @@ use recipe_domain::audit::RequestId;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{CredentialFailure, IdentityError, Login, PasswordReason};
 use tower::ServiceExt as _;
+use tracing::Dispatch;
+use tracing::subscriber::{DefaultGuard, NoSubscriber};
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
@@ -603,6 +605,19 @@ async fn error_mapping_unknown_test_case_does_not_reach_a_success_page() {
     assert_eq!(answer.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+/// A registered dispatch that no thread installs. It lives until the test process ends.
+///
+/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
+/// dispatch, a callsite takes its interest from the thread that hits it first. A test thread
+/// without a subscriber then caches `Interest::never` for all threads.
+static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
+
+/// Install a subscriber for the current thread. The drop of the guard removes it.
+fn install(subscriber: impl Into<Dispatch>) -> DefaultGuard {
+    LazyLock::force(&KEEPALIVE);
+    tracing::dispatcher::set_default(&subscriber.into())
+}
+
 /// A writer that copies every line of the log into a shared buffer.
 #[derive(Clone, Default)]
 struct Captured(Arc<Mutex<Vec<u8>>>);
@@ -649,7 +664,7 @@ async fn logged(case: &str, headers: &[(&str, &str)]) -> (Answer, Vec<String>) {
         .with_target(false)
         .with_max_level(tracing::Level::TRACE)
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = install(subscriber);
     let answer = ask(case, headers).await;
     (answer, captured.lines())
 }
@@ -738,7 +753,7 @@ async fn error_mapping_a_response_without_an_error_writes_no_log_line() {
         .with_ansi(false)
         .with_max_level(tracing::Level::TRACE)
         .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = install(subscriber);
     let request = Request::builder()
         .uri("/static/htmx.min.js")
         .body(Body::empty())
