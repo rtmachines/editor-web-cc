@@ -80,19 +80,20 @@ The grey color and the archive box also show these states: **Deleted** (a recipe
 | Screen | Route | What it shows | Main actions | Permission to open |
 |---|---|---|---|---|
 | New version of recipe { $reference } | `GET /recipes/{ref}/versions/new` | Fields **Base version** and **Change note**. The new draft copies the parameters of the base version. | **Create version** | `VersionCreate` |
-| Version { $number } of recipe { $reference } | `GET /recipes/{ref}/versions/{n}` | The fields **State**, **Change note**, **Author**, **Created at**, **Approver**, **Approved at**, **Last change**, and **PLC platform**. The table **Parameters**, grouped by unit, with 100 rows per page. The section **Actions** lists the links and forms of the version. | See the list below this table. | `RecipeView` |
+| Version { $number } of recipe { $reference } | `GET /recipes/{ref}/versions/{n}` | The fields **State**, **Change note**, **Author**, **Created at**, **Approver**, **Approved at**, **Last change**, and **PLC platform**. The table **Parameters**, grouped by unit, with 100 rows per page. The page also holds the links and forms of the list below this table. | See the list below this table. | `RecipeView` |
 | Approval of version { $number } of recipe { $reference } | `GET /recipes/{ref}/versions/{n}/approve` | The approval notice, the diff with the approved version, and the list **Outdated parameters**. A blocker replaces the form. | **Approve version { $number }**, **Back to version { $number }**, and the checkbox **Approve with the outdated parameters** | `VersionApprove` |
 | Changes of version { $new } of recipe { $reference } against version { $old } | `GET /recipes/{ref}/versions/{n}/diff/{m}` | The changes between two versions, matched by parameter key. The changes group by kind: definition, value, limits, and translations. | A link back to the version page | `RecipeView` |
 
-The section **Actions** of a version page shows these items. Each item appears only for the state and the role that its command allows.
+A version page shows these items from top to bottom. Each item appears only for the state and the role that its command allows.
 
-- **Approve version { $number }** for a draft.
-- **Compare with the approved version { $number }** and **Compare with the base version { $number }**.
-- **Export version { $number } as JSON** for an approved or a retired version.
-- **Add a parameter** and **Rebind parameters** for a draft.
+- Under the fields: **Export version { $number } as JSON** for an approved or a retired version. A retired version shows a notice before the link.
+- In the next row of links, which has no heading: **Approve version { $number }** for a draft.
+- In the same row: **Compare with the approved version { $number }**, **Compare with the base version { $number }**, and **History**. **History** shows for every version.
+- Above the table **Parameters**: the table **Outdated parameters** and the rebind forms of a draft. Each form has the heading **Rebind { $from } to { $to }**. It also has the button **Rebind parameters**.
+- Under the table **Parameters**: the link **Add a parameter** for a draft.
+- The section **Actions** stands at the end of the page. It holds one of the two items below.
 - **Retire version { $number }** in the disclosure **Retire this version** for an approved version.
 - **Discard draft { $number }** in the disclosure **Discard this draft** for a draft.
-- **History** for every version.
 
 ## Parameters (`api.md` section 2.6)
 
