@@ -24,7 +24,7 @@ Each library crate owns its error types, with two exceptions. `recipe-export` re
 Rules:
 
 - Every error variant carries the values that identify the failure (recipe reference, version number, tag, leaf path). It never carries a password, a password hash, a session token, or a cookie value.
-- Every error type implements `Display` for the user and `Debug` for the log. `Debug` on a type that holds a secret redacts it.
+- Every error type implements `Display` for the user message and for the log line. `Debug` on a type that holds a secret redacts it. The log never uses `Debug`.
 - Every error type has a `code(&self) -> ErrorCode` method. The code is stable. The message template can change. The code cannot.
 - A value object without its own row in section 1.2 returns a reason from `parse`. A reason is a field type, not an error type, and has no `code()`. The caller wraps it into its coded error (ADR-0025). `WebhookFault`, the reason of a failed call of the port `AlertWebhook`, is a reason of the same kind (ADR-0060 (r)). `DiskFault` of the port `DiskSpace` and `BackupFault` of the port `BackupDirectory` are reasons of the same kind too (ADR-0073 (b)).
 - `?` converts between layers through `From`. A `map_err` closure appears only when it adds context.
@@ -965,6 +965,7 @@ A change of `approval.separation_of_duties` therefore always has an audit entry 
   - the flag `draining` of the health router (`AtomicBool`). `begin_shutdown()` sets it once, and no code clears it. A late probe result does not make the readiness state ready (ADR-0091 (b)),
   - the flag `gate_open` of the health router (`AtomicBool`). The start of `serve` opens it once, after the public listener is bound. No code closes it (ADR-0091 (e)),
   - the cancel tokens of the supervisor of the jobs and the flags of the watchdog handle (`arm`, `disarm`, `stop`),
+  - the open-run counter of the supervisor of the jobs (`Arc<AtomicUsize>`, field `open`). A guard in the task of each run adds one when the run starts. It subtracts one when the run ends or panics, or when the drain aborts it. Many tasks write it, so it is atomic. The guard uses `AcqRel`. `drain` reads it once with `Acquire`, before `abort_all`. That value is the number of runs that the drain cut (ADR-0060 (aa)),
   - the run state of a job between runs, as atomics in the job (ADR-0060 (aa)). It holds the start of the last security event purge of `cleanup` and the due times of its two other cadences (ADR-0088 (c)). It also holds the time of the last low-disk `WARN` line of `disk_check`, the time of its last read-fault `WARN` line, and its `Unsupported` flag (ADR-0073 (d)). For `alerts`, it holds the two counter totals of the last run and the times of the newest panics in `alerts.panic_count` + 1 slots (ADR-0073 (g)).
 - Every public type and function in a library crate has a doc comment. `cargo doc --no-deps` runs in CI with `-D warnings` for broken links.
 - A pull request needs: green CI, one review, and an entry in `CHANGELOG.md` when behavior changes.
