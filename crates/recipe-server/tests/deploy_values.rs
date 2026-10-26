@@ -158,3 +158,149 @@ fn deploy_values_ci_memory_propagates_oom_failures() {
     }
     assert!(!script.contains(r#"wait "$watcher" || true"#));
 }
+
+fn deploy_scripts(directory: &std::path::Path) -> Vec<(std::path::PathBuf, String)> {
+    let mut scripts = Vec::new();
+    for entry in std::fs::read_dir(directory).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            scripts.extend(deploy_scripts(&path));
+            continue;
+        }
+        let bytes = std::fs::read(&path).unwrap();
+        let extension = path.extension().and_then(|value| value.to_str());
+        if bytes.starts_with(b"#!")
+            || matches!(
+                extension,
+                Some("sh" | "bash" | "py" | "ps1" | "cmd" | "bat")
+            )
+        {
+            scripts.push((path, String::from_utf8(bytes).unwrap()));
+        }
+    }
+    scripts
+}
+
+fn volume_deletions(script: &str) -> Vec<String> {
+    let script = script.replace("\\\r\n", " ").replace("\\\n", " ");
+    lines::code_lines(&script)
+        .into_iter()
+        .filter_map(|line| {
+            let words: Vec<_> = line.split_whitespace().collect();
+            let deletion = words
+                .windows(2)
+                .any(|pair| matches!(pair, ["volume", "rm" | "prune"] | ["system", "prune"]));
+            let down = words.iter().position(|word| *word == "down");
+            let volumes = down.is_some_and(|position| {
+                words.iter().skip(position).any(|word| {
+                    *word == "--volumes"
+                        || (word.starts_with('-') && !word.starts_with("--") && word.contains('v'))
+                })
+            });
+            (deletion || volumes).then(|| words.join(" "))
+        })
+        .collect()
+}
+
+#[test]
+fn deploy_values_ci_volume_deletions_stay_in_throwaway_scripts() {
+    let deploy = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy");
+    let mut actual = Vec::new();
+    for (path, script) in deploy_scripts(&deploy) {
+        for command in volume_deletions(&script) {
+            actual.push((path.strip_prefix(&deploy).unwrap().to_path_buf(), command));
+        }
+    }
+    let mut expected = vec![
+        (
+            "ci/cleanup.sh".into(),
+            "compose down --volumes --remove-orphans || exit 1".into(),
+        ),
+        (
+            "ci/cleanup.sh".into(),
+            r#"docker volume rm "$volume" >/dev/null"#.into(),
+        ),
+        (
+            "ci/upgrade.sh".into(),
+            "compose --profile upgrade-rollback down -v --remove-orphans".into(),
+        ),
+    ];
+    actual.sort();
+    expected.sort();
+    assert_eq!(
+        actual, expected,
+        "deploy scripts must retain only the CI deletions"
+    );
+}
+
+#[test]
+fn deploy_values_ci_volume_removal_keeps_label_and_name_guards() {
+    let cleanup = include_str!("../../../deploy/ci/cleanup.sh");
+    let code: Vec<_> = lines::code_lines(cleanup)
+        .into_iter()
+        .map(str::trim)
+        .collect();
+    assert!(code.starts_with(&[
+        "set -euo pipefail",
+        "umask 077",
+        r#"source "$(dirname "${BASH_SOURCE[0]}")/common.sh""#,
+        "compose down --volumes --remove-orphans || exit 1",
+        "volume=${COMPOSE_PROJECT_NAME}-one-filesystem",
+        r#"if docker volume inspect "$volume" >/dev/null 2>&1"#,
+        "then",
+        r#"[[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]"#,
+        r#"docker volume rm "$volume" >/dev/null"#,
+        "fi",
+    ]));
+    assert!(cleanup.contains(
+        "# The label check and run-scoped name restrict deletion to this fixture on a throwaway CI runner.\n  # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata."
+    ));
+    let common = include_str!("../../../deploy/ci/common.sh");
+    assert!(lines::code_lines(common).starts_with(&[
+        "set -euo pipefail",
+        "umask 077",
+        r#": "${GITHUB_WORKSPACE:?}" "${RUNNER_TEMP:?}" "${COMPOSE_PROJECT_NAME:?}""#,
+        "[[ ${GITHUB_ACTIONS:-} == true ]] || exit 1",
+        "[[ $COMPOSE_PROJECT_NAME =~ ^recipe-ci-[0-9]+-[0-9]+$ ]] || exit 1",
+    ]));
+    assert!(common.contains(r#"docker compose --project-name "$COMPOSE_PROJECT_NAME""#));
+    let workflow = include_str!("../../../.github/workflows/ci.yml");
+    assert!(workflow.contains(
+        "COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}"
+    ));
+}
+
+#[test]
+fn deploy_values_ci_upgrade_volume_deletion_keeps_project_guards() {
+    let upgrade = include_str!("../../../deploy/ci/upgrade.sh");
+    assert!(lines::code_lines(upgrade).starts_with(&[
+        "set -euo pipefail",
+        r#"source "$(dirname "${BASH_SOURCE[0]}")/upgrade-common.sh""#,
+    ]));
+    let common = include_str!("../../../deploy/ci/upgrade-common.sh");
+    assert!(lines::code_lines(common).starts_with(&[
+        "set -euo pipefail",
+        r#"source "$(dirname "${BASH_SOURCE[0]}")/common.sh""#,
+        r#"[[ ${CI:-} == true && ${RUNNER_OS:-} == Linux ]] || fail "the upgrade test requires Linux CI""#,
+        r#"[[ $COMPOSE_PROJECT_NAME == "recipe-ci-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}" ]] \"#,
+        r#"  || fail "the upgrade project does not belong to this job""#,
+    ]));
+    assert!(common.contains(r#"docker compose -p "$COMPOSE_PROJECT_NAME""#));
+}
+
+#[test]
+fn deploy_values_ci_volume_scan_detects_destructive_variants() {
+    for command in [
+        "docker volume rm pgdata",
+        "sudo docker volume  rm pgdata",
+        "docker volume \\\nrm pgdata",
+        "docker volume prune -f",
+        "docker system prune --volumes",
+        "docker compose down -v",
+        "docker compose down --volumes",
+        "compose --project-name production down --remove-orphans -v",
+    ] {
+        assert_eq!(volume_deletions(command).len(), 1, "missed {command}");
+    }
+    assert!(volume_deletions("# docker volume rm pgdata\ndocker volume inspect pgdata").is_empty());
+}

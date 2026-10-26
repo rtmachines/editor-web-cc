@@ -10,6 +10,8 @@ volume=${COMPOSE_PROJECT_NAME}-one-filesystem
 if docker volume inspect "$volume" >/dev/null 2>&1
 then
   [[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]
+  # The label check and run-scoped name restrict deletion to this fixture on a throwaway CI runner.
+  # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata.
   docker volume rm "$volume" >/dev/null
 fi
 for disk in backups walarchive
