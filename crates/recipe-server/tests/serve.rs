@@ -202,8 +202,10 @@ fn free_ports_are_two_different_ports_that_nothing_listens_on() {
     }
 }
 
+/// `/healthz` answers 200 `ok` once the internal listener accepts connections (step 8 of ADR-0061).
+/// This test does not wait for the end of the start. The next test covers `/readyz` (ADR-0091 (e)).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn healthz_answers_200_ok_on_the_internal_listener_after_the_start() {
+async fn healthz_answers_200_ok_once_the_internal_listener_accepts_connections() {
     let setup = Setup::new();
     let database = Database::start(&setup).await;
     let mut server = start_server(&setup.environment(database.port));
