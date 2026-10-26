@@ -6,7 +6,7 @@ This guide shows how to save the JSON file of a version of a recipe. The transfe
 
 The reader is an operator at the machine or a process engineer. The guide does not show how to read the file. [Check an export document before a PLC load](check-export-document.md) does that.
 
-The UI has the languages Polski and English. This guide uses the English texts. The buttons **Polski** and **English** switch the language.
+The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This guide uses the English texts.
 
 ## Prerequisites
 

@@ -6,7 +6,7 @@ This guide shows how to define a new UDT type on a machine. It also shows how to
 
 The reader is a process engineer or an administrator. The result is the type tree of the new type or revision.
 
-The pages of the editor use the language `pl` by default. This guide gives the `en` texts. To switch, use the **Language** control in the top bar and select **English**.
+The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This guide uses the English texts.
 
 ## Prerequisites
 

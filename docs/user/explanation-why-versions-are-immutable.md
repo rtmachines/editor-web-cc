@@ -6,7 +6,7 @@ This page explains why you cannot edit an approved version of a recipe. It has n
 
 The reader is a process engineer, an operator, or an auditor. You ask why you cannot "just fix" a value in a version that already ran on a machine.
 
-The UI has the languages Polish (default) and English. This page describes the English texts. Use the buttons **Polski** and **English** in the page header to switch the language.
+The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This page uses the English texts.
 
 ## What a version is
 

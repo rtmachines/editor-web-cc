@@ -6,7 +6,7 @@ This guide shows how to compare two versions of one recipe and how to read the c
 
 The reader is a process engineer, an operator, or an auditor. You want to know what changed between version `m` and version `n` before you approve, load, or review a version.
 
-The UI has the languages Polish (default) and English. This guide describes the English texts. Use the buttons **Polski** and **English** in the page header to switch the language.
+The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This guide uses the English texts.
 
 ## Sources
 

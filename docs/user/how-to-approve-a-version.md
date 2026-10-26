@@ -6,7 +6,7 @@ This guide shows how to approve a draft version of a recipe. After the approval,
 
 The reader is a ProcessEngineer or an Administrator who reviews the draft of a colleague. The guide also shows how to retire an approved version and how to discard a draft.
 
-The UI has the languages Polish and English. This guide shows the English texts. Choose **English** in the header to read them. The buttons **Polski** and **English** switch the language.
+The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This guide uses the English texts.
 
 ## Sources
 

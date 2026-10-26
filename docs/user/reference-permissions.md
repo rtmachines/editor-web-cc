@@ -2,7 +2,7 @@
 
 This page lists the roles of the recipe editor and the actions that each role may perform. It states the rules and the refusals only. For the steps of an action, use the [user guide index](README.md).
 
-The UI starts in Polish. To read the English texts of this page, choose **English** in the **Language** switch.
+The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This page uses the English texts.
 
 ## Roles
 
