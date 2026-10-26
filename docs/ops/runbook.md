@@ -354,8 +354,59 @@ A role setting outside the grammar comes from a change by hand.
 
 ### Copy the backups off site
 
-1. Copy the latest dump and the WAL archive to the external backup storage with the site procedure (ADR-0020).
-2. Protect the copies with the same access control as the database.
+The off-site copy protects the sets and the WAL archive when the host or the second disk is lost.
+No document gives a copy tool or a schedule. The site chooses both with its own procedure (`reliability.md` 7.7, ADR-0020).
+This section names the files to copy, the host directories, and the check of a copy.
+
+| What | Host path | Files to copy |
+|---|---|---|
+| Sets | `$RECIPE_BACKUP_DIR` | For each set: `recipe_<stamp>.dump`, `globals_<stamp>.sql`, `recipe_<stamp>.counts`, and `recipe_<stamp>.dump.sha256` |
+| Base backups | `$RECIPE_WALARCHIVE_DIR/base` | Each directory `base_<YYYYMMDD_HHMMSS>` |
+| WAL segments | `$RECIPE_WALARCHIVE_DIR` | The segment files and the `.partial` file at the top of the directory |
+
+`<stamp>` is the part of the dump name between `recipe_` and `.dump`, as in the section "Restore into production".
+Do not copy the names that start with `.tmp-`, the marker files, `.lock`, and the directory `.pitr-scratch`.
+A run in progress or a killed run leaves them (`reliability.md` 7.7).
+The files belong to uid 999 and have the mode `0600`. The top directory of `RECIPE_WALARCHIVE_DIR` has the mode `0700`.
+The copy therefore runs as `root` or as uid 999.
+
+The `backup` service writes one set each day at `backup.time`. `walarchive` writes WAL all the time.
+A restore from a copy may lose every change after the copy.
+A copy changes nothing on the host. Never move or delete a set, a base backup, or a WAL segment of the host (ADR-0099, section "Low disk space").
+
+1. Run the section "Run the restore test". Continue only after it passes.
+2. Read the name of the set in the line `restore test passed`.
+3. Copy the three data files of that set. Copy its manifest `recipe_<stamp>.dump.sha256` last.
+4. Copy the base backups and the WAL segments of the table.
+5. Check the copy of the set. Run the command in the directory of the copy:
+
+```bash
+sha256sum -c --strict -- recipe_<stamp>.dump.sha256
+```
+
+6. Check that the command prints `OK` for each of the three data files and ends with exit code 0.
+7. Protect the copies with the same access control as the database.
+
+A set without a manifest is not complete, so the last copy of the manifest keeps a failed copy from looking complete (`reliability.md` 7.7).
+The restore test checks the newest set. A dump may hold code that rewrote the sets of the disk, and the test may not show it (ADR-0084).
+The test therefore comes before the copy.
+The dump holds password hashes and the audit log. The globals file holds no password.
+No document gives a check of a copy of the base backups or of the WAL segments. `basebackup-once` checked each base backup before it gave the final name (`reliability.md` 7.7).
+No document gives the steps that restore a set from a copy to the host.
+
+Copy these host files too, with the same protection:
+
+- The file `deploy/.env` and the files of `RECIPE_SECRETS_DIR`. Step 6 of "Restore into production" reads the secret files.
+- The files `Caddyfile` and `compose.yaml`, if you edited them. A release replaces both files (section "A plant device in front of Caddy").
+- The image files and the release notes of the running release and of the previous release. A release moves the images as files (ADR-0064 (j), (k)).
+
+Copy the secret files again after the sections "Key rotation", "Certificate rotation", and "Change a database password".
+
+The audit copy of step 8 of "Restore into production" is the off-site copy of a set.
+That set has a later dump time than the set that you restore.
+Its dump holds the audit entries up to its dump time (`reliability.md` 7.7).
+You can run the section "Run a backup now" before step 1, so the set holds the newest entries.
+No document gives the steps that read an entry from a copy.
 
 ### Delete orphan temp files
 
@@ -451,7 +502,7 @@ The count must be 0. A count above 0 means a password may be in the log.
 docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_attempt"
 ```
 
-8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
+8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists (section "Copy the backups off site").
 9. Run `docker compose up -d --no-deps app`.
 10. Check the audit chain: wait for the next run of the job `audit_chain_check`. The alert `audit_chain_broken` stays inactive.
 
@@ -468,6 +519,7 @@ The alert `audit_check_age` is active when this value is older than `audit.max_c
 ## Upgrade and rollback
 
 The steps follow `reliability.md` 7.10 (ADR-0082, ADR-0083).
+A rollback needs the images of the previous release. See the section "Keep the images for a rollback".
 
 ### Upgrade
 
@@ -540,6 +592,8 @@ Keep the new `app`. Keep every set. Read the `ERROR` line in the output of `rest
 
 ### Rollback
 
+Check first that the images of the previous tag exist (section "Keep the images for a rollback").
+
 1. Run the command below to start the previous `app` on the newer schema:
 
 ```bash
@@ -564,6 +618,40 @@ The restore goes into a new `db` volume. The switch step is open, as the section
 5. Run `docker compose up -d --no-deps app`.
 6. Run step 10 of the section "Restore into production".
 7. Run the three commands of the upgrade with the tag of `.env`.
+
+### Keep the images for a rollback
+
+A plant host can have no registry. A release moves the images as files of `docker save` (ADR-0064 (j)).
+A rollback starts the previous image of `app` (`reliability.md` 7.10 step 6).
+After a restore of the `_premigrate` set, the three commands of the upgrade also start the previous image of `recipe-pgtools` (ADR-0083 (d)).
+Without the image, Compose tries to pull it, and the rollback stops.
+Keep these images on the host:
+
+- `recipe-server` and `recipe-pgtools` with the tag of the running release
+- `recipe-server` and `recipe-pgtools` with the previous tag
+
+No document says how long a release stays rollback-ready. Delete the images of a release only when you decide that you will not roll back to it.
+Keep the image files and the release notes of that release (section "Copy the backups off site").
+You can then load the images again with the section "Load the images".
+Docker stores the images in its root directory. That is the disk of `pgdata` (section "Low disk space").
+
+Check the images after each upgrade:
+
+1. Run `docker image ls recipe-server`. Run the same command for `recipe-pgtools`.
+2. Check that each list shows the tag of the running release and the previous tag.
+3. Run `docker image inspect --format '{{.Id}}' recipe-server:<previous tag>`. Run the same command for `recipe-pgtools:<previous tag>`.
+4. Compare each image ID with the release notes of the previous release.
+5. If an image is missing, load it with steps 1 to 5 of the section "Load the images". Do not run steps 6 and 7 there.
+
+To free disk space, run the command below. It deletes only dangling images. A dangling image has no tag:
+
+```bash
+docker image prune
+```
+
+Docker asks for confirmation. A `docker load` of a tag that already exists can leave the old image without a tag.
+The command keeps every image that has a tag. It therefore keeps the images of the previous release.
+To delete the images of an old release, read the section "Destructive commands" first.
 
 ### Concurrent index on an audit object
 
@@ -1281,6 +1369,11 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 - Each delete step of this page names what it deletes.
 - Each delete step of a set, a file, or a directory of the backup disks follows a passed restore test.
 - The section "Subnet change" runs `docker compose down` without `-v`. It deletes no volume.
+- Never run `docker image prune -a` or `docker system prune -a`. They delete every image that no container uses. This includes the images that a rollback needs (section "Keep the images for a rollback").
+- Never run `docker volume prune --all`. It deletes every named volume that no container uses. After `docker compose down`, this includes `pgdata`.
+- Never run `docker system prune`, with or without options. It can delete stopped containers and networks of the stack.
+- The one allowed prune command is `docker image prune` without `-a`. It deletes dangling images only.
+- To delete the images of an old release, first check that you keep the image files and the release notes of that release. Then run `docker image rm recipe-server:<old tag> recipe-pgtools:<old tag>`. Docker refuses to delete an image that a container uses.
 
 ## Check client_ip of the first login
 
