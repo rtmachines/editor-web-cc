@@ -66,9 +66,9 @@ install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-mark
 df --output=source,target "$(docker info --format '{{.DockerRootDir}}')" "$RECIPE_BACKUP_DIR" "$RECIPE_WALARCHIVE_DIR"
 ```
 
-5. Check that the column `Filesystem` of the first line differs from the two other lines.
+5. Check that the column `Filesystem` of the first data line differs from the two other data lines.
 
-If one line equals the first, the healthcheck of `backup` fails (`reliability.md` 7.7). The section "Service unhealthy" gives the next step.
+If one data line equals the first, the healthcheck of `backup` fails (`reliability.md` 7.7). The section "Service unhealthy" gives the next step.
 
 A network share may not keep the `fsync` of the WAL stream.
 The marker files have the names of ADR-0074 (a).
@@ -191,7 +191,7 @@ To delete a rule of an old subnet, run its command again with `-D` in place of `
 
 1. Run `docker compose up -d`. Compose starts the services in the order of `reliability.md` 7.1.
 2. Run `docker compose ps` until `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
-3. Check that `migrate` and `backup-premigrate` show exit code 0.
+3. Run `docker compose ps -a migrate backup-premigrate`. Check that both show `Exited (0)`.
 4. Run the section "Check the host firewall".
 
 ### Check the client rules of the database
@@ -342,12 +342,18 @@ If the alert `replication` stays active, use the section "A gap in the WAL strea
 
 The restore test stops at a statement of the globals file outside the role grammar (ADR-0095).
 A role setting outside the grammar comes from a change by hand.
+The grammar accepts a role setting for `log_error_verbosity` and `log_parameter_max_length` only.
 
 1. Read the line number in the `ERROR` line of the output.
 2. Open the globals file `globals_<YYYYMMDD_HHMM><suffix>.sql` of the set that the test checked.
 3. Read the line with that line number.
-4. Delete that setting from the role in the database.
-5. If the setting is needed, extend the grammar in a change (ADR-0095 (e)).
+4. Run the command below in the directory `deploy/`. Use the role and the setting name of that line:
+
+```bash
+docker compose exec -u postgres db psql -d recipe -c "ALTER ROLE <role> RESET <setting>"
+```
+
+5. If the site needs the setting, extend the grammar in a change (ADR-0095 (e)).
 6. Run `docker compose exec backup backup-now`.
 7. Run `docker compose exec backup restore-test`.
 8. Check that the exit code is 0 and the output holds the line `restore test passed`.
@@ -536,7 +542,14 @@ A rollback needs the images of the previous release. See the section "Keep the i
 11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
 12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6). The old `app` keeps running.
 13. Start the guard step. Run `docker compose exec -u postgres db psql -d recipe`.
-14. Run the statement `CREATE FUNCTION audit_guard.audit_objects_dropped()` of the new `deploy/db/initdb/01-roles.sh` as `CREATE OR REPLACE FUNCTION`.
+14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
+
+```bash
+sed -n '/^CREATE FUNCTION audit_guard\.audit_objects_dropped()/,/^\$\$;$/p' db/initdb/01-roles.sh \
+  | sed '1s/^CREATE FUNCTION/CREATE OR REPLACE FUNCTION/'
+```
+
+The command prints the statement of the new `01-roles.sh` from `CREATE OR REPLACE FUNCTION` to the line `$$;`.
 15. Compute the hash of the function in the same session:
 
 ```sql
@@ -547,7 +560,7 @@ SELECT encode(sha256(convert_to(pg_get_functiondef('audit_guard.audit_objects_dr
 16. Leave `psql` with `\q`. Read field 4 of the expected line:
 
 ```bash
-grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' deploy/pgtools/restore-code.expected | cut -d'|' -f4
+grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.expected | cut -d'|' -f4
 ```
 
 17. Compare the two hashes. Continue only when they are equal. Otherwise run steps 13 to 17 again.
@@ -655,8 +668,26 @@ To delete the images of an old release, read the section "Destructive commands" 
 
 ### Concurrent index on an audit object
 
-`reliability.md` 7.10 step 7 and `data-model.md` 5.1 give this procedure.
-It is not part of the normal upgrade.
+This procedure is not part of the normal upgrade. Run it only when a release needs a concurrent index on an audit object.
+A migration cannot create this index. `CREATE INDEX CONCURRENTLY` must be the only statement of its file (`data-model.md` 5.1 and 8).
+The role `recipe_migrator` runs five statements in one `psql` session (`reliability.md` 7.10 step 7).
+The client rules let this role connect from the Compose subnet only. No document gives a command that opens a session as this role.
+
+1. Open one `psql` session as `recipe_migrator` on the database `recipe`.
+2. Run the five statements in this order:
+
+```sql
+GRANT CREATE ON SCHEMA public TO audit_owner;
+SET ROLE audit_owner;
+CREATE INDEX CONCURRENTLY <index_name> ON <audit_table> (<column>);
+RESET ROLE;
+REVOKE CREATE ON SCHEMA public FROM audit_owner;
+```
+
+3. Run all five statements, also when the index statement fails. The role `audit_owner` must not keep `CREATE` on `public`.
+4. Leave `psql` with `\q`.
+
+The next migration records the same index with `CREATE INDEX IF NOT EXISTS` (`data-model.md` 5.1).
 
 ## Major upgrade
 
