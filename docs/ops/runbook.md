@@ -237,6 +237,94 @@ unset admin_password
 3. Change the password at `/me/password`.
 4. Run the check of the section "Check client_ip of the first login".
 
+## Stop, start, and restart
+
+The services `proxy`, `app`, `db`, `backup`, and `walarchive` have the restart policy `always`.
+The services `backup-premigrate` and `migrate` are one-shot services with the policy `no`. They run once at a start and exit with code 0 (`reliability.md` 7.1).
+Compose does not run a one-shot service again unless a command starts it.
+
+### Stop the whole stack
+
+1. Choose a time away from `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11.
+2. Run `docker compose top backup walarchive`. Check that no process `backup-once`, `basebackup-once`, or `restore-test` runs.
+3. Run `docker compose stop proxy`. No new request then reaches `app`.
+4. Run `docker compose stop app`. Docker waits at most `app.stop_grace_period` for the exit.
+5. Run `docker compose stop`. Compose stops `backup` and `walarchive` first and `db` last. Docker waits at most `db.stop_grace_period` for `db`.
+6. Run `docker compose ps -a`. Check that `app` shows `Exited (0)`.
+7. Run `docker compose logs --tail 20 app`. Check that one `INFO` line says `the server stopped`.
+
+The order of steps 3 to 5 is the reverse of the start order in `reliability.md` 7.1.
+`db` stops last, so `app` closes its database pools while `db` still runs (`reliability.md` 7.3).
+The exit code of `app` is 0, also after a cut drain.
+After a cut, one `WARN` line gives the counts `cut_public`, `cut_internal`, and `cut_jobs`. A cut loses no data (ADR-0087).
+If the exit code is not 0, Docker may have sent `SIGKILL`. Read the last lines of `docker compose logs app`.
+A stop during a run of `backup` or `walarchive` can leave temp files. The section "Delete orphan temp files" deletes them.
+
+### Start the whole stack again
+
+Use these steps after a stop of the same release. After a change of `RECIPE_VERSION`, use the section "Upgrade".
+Do not run `docker compose up -d` here. Compose then runs `backup-premigrate` and `migrate` again.
+The run of `backup-premigrate` writes a new `_premigrate` set of the current schema.
+That new set is then the newest one. The section "Rollback" restores the newest `_premigrate` set.
+The option `--no-deps` skips the `depends_on` checks (ADR-0082), so the steps wait for `healthy` by hand.
+
+1. Run `docker compose up -d --no-deps db`.
+2. Run `docker compose ps db` until `db` shows `healthy`.
+3. Run `docker compose up -d --no-deps app`.
+4. Run `docker compose ps app` until `app` shows `healthy`.
+5. Run `docker compose up -d --no-deps proxy backup walarchive`.
+6. Run `docker compose ps -a`. Check that `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
+7. Run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. Check that the exit code is 0.
+
+A service shows `starting` until its first healthcheck passes.
+`migrate` and `backup-premigrate` keep the exit code 0 of their last run. After `docker compose down`, they do not exist.
+If `app` does not become `healthy`, use the section "Alarms, read-only mode, and restart loop".
+
+### Restart one service
+
+Replace `<service>` with `proxy`, `app`, `db`, `backup`, or `walarchive`.
+
+1. Run `docker compose stop <service>`.
+2. Run `docker compose up -d --no-deps <service>`.
+3. Run `docker compose ps <service>` until the service shows `healthy`.
+
+Without `--no-deps`, a start of `app` or `proxy` runs `backup-premigrate` and `migrate` again (ADR-0082).
+Do not restart `backup-premigrate` or `migrate` by hand. The section "Upgrade" runs them.
+Start `db` before `app`. The option `--no-deps` does not wait for `db`.
+While `app` restarts, Caddy answers `502` (ADR-0065 (p)). While `db` is down, `/readyz` answers `not ready` (`reliability.md` 7.2).
+After a restart of `db`, check the health of `app` with the last step of the section "Start the whole stack again".
+A long stop of `db` or `walarchive` can leave a gap in the WAL stream. See the section "A gap in the WAL stream".
+Before you stop `backup` or `walarchive`, do steps 1 and 2 of the section "Stop the whole stack".
+
+### Stop and start, or down and up
+
+- `docker compose stop` keeps the containers and the networks. The next start reuses them.
+- `docker compose down` deletes the containers and the networks. It deletes no volume.
+- The next `docker compose up` creates the containers again and can give `edge` and `egress` new subnets.
+- The network `backend` keeps `COMPOSE_SUBNET`.
+
+After `docker compose down` and `docker compose up`, run the section "Check the host firewall" again. The `DROP` rules name the subnets.
+A deliberate change of `COMPOSE_SUBNET` follows the section "Subnet change".
+After `docker compose down`, use the steps of "Start the whole stack again". They create the containers.
+Never run `docker compose down -v` (section "Destructive commands").
+
+### After a host reboot
+
+When the Docker service starts, Docker starts the containers with the policy `always`.
+Docker does not apply `depends_on` then. `app` can fail its start while `db` is not ready, and Docker starts it again (ADR-0061 (b)).
+The one-shot services do not run, because their policy is `no`.
+A service that you stopped with `docker compose stop` can start again after a reboot.
+
+1. Run `docker compose ps -a`. Wait until `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
+2. If a service restarts, run `docker compose logs <service>`. For `app`, use the section "Alarms, read-only mode, and restart loop".
+3. Check that the host mounts the second disk. A missing host directory stops the start of `backup` and `walarchive`.
+4. Run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. Check that the exit code is 0.
+5. Run `iptables -S DOCKER-USER`. Check that the `ESTABLISHED,RELATED` rule and the three `DROP` rules are present.
+6. If a rule is missing, run the section "Check the host firewall" again. Save the rules with the method of the host.
+
+A host reboot ends the containers, so the WAL stream stops until `walarchive` runs again.
+If the alert `replication` stays active, use the section "A gap in the WAL stream".
+
 ## Backup now, restore test, and restore into production
 
 ### Run a backup now
@@ -812,11 +900,12 @@ Read the address in the output of `docker compose config` at the service `proxy`
 
 ## Related
 
-- [reliability.md](../architecture/reliability.md): sections 3.7, 7.1, 7.7, 7.8, 7.10, and 7.11
+- [reliability.md](../architecture/reliability.md): sections 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, and 7.11
 - [ADR-0020](../adr/0020-deployment-migrations-backup.md), [ADR-0033](../adr/0033-globals-dump-of-the-backup.md), [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md), [ADR-0063](../adr/0063-webhook-of-the-alerts.md)
 - [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
 - [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
 - [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
+- [ADR-0061](../adr/0061-start-order-of-serve.md), [ADR-0087](../adr/0087-drain-of-the-internal-listener.md)
 
 ## Known gaps
 
