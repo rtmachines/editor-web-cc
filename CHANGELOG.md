@@ -273,6 +273,10 @@ This file records the notable changes of the recipe editor. The format follows [
 - The other five are in `crates/recipe-server/src`: `a_link_with_the_name_of_a_manifest_is_not_a_set`, `a_directory_without_the_read_right_is_a_fault`, `free_space_of_the_temporary_directory_is_consistent`, `a_missing_path_is_unreadable`, and `the_text_of_an_unreadable_fault_names_no_path`.
 - Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
 - The project owner accepted the other low-severity items as they are.
+- The save toast of a parameter does not show the new row version. The new row version appears only in the hidden field `row_version` of the form.
+- The version page has no picker for two free version numbers. It links only to the diff with the approved version and with the base version. Another pair needs a typed address of the diff route.
+- The version page does not show the content hash. The hash appears only in the export file, as `content_sha256`.
+- The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 [Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.1.0...HEAD
