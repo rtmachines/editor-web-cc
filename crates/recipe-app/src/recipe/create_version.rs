@@ -368,22 +368,10 @@ impl CreateVersion {
         checked: Option<BaseChecked>,
     ) -> Result<CreateVersionOutput, AppError> {
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;
-        lock_live_machine(tx.as_mut(), target.machine).await?;
-        let Locked {
-            state: mut recipe, ..
-        } = tx
-            .recipes()
-            .lock_recipe(target.recipe)
-            .await?
-            .ok_or_else(|| AppError::NotFound {
-                entity: Missing::Recipe(input.reference.clone()),
-            })?;
         let version = RecipeVersionId::from(Uuid::new_v4());
-        // The domain call comes first: a deleted recipe gives `E-RCP-012` before any unit item.
-        let number = recipe.create_version(version)?.number();
-        if let Some(base) = &checked {
-            recheck_units(tx.as_mut(), &base.unit_uses).await?;
-        }
+        let unit_uses = checked.as_ref().map(|base| base.unit_uses.as_slice());
+        let number =
+            lock_and_number(tx.as_mut(), target, &input.reference, version, unit_uses).await?;
         let new = NewVersion {
             recipe: target.recipe,
             version,
@@ -392,32 +380,73 @@ impl CreateVersion {
             change_note: input.change_note,
             creator: user.user(),
         };
-        let image = tx.recipes().insert_version(new).await.map_err(|error| {
-            map_storage(error, |constraint| {
-                (constraint == RECIPE_VERSION_ONE_LIVE_DRAFT).then(|| {
-                    RecipeError::DraftAlreadyExists {
-                        reference: input.reference.clone(),
-                        number,
-                    }
-                    .into()
-                })
-            })
-        })?;
-        let entries = NonEmpty::new(AuditEntry::row(
-            RowAction::VersionCreated,
-            AuditTarget::recipe_version(target.recipe, version),
-            RowChange::Create {
-                after: image.into_value(),
-            },
-            audit_context(user, meta),
-        ));
-        self.ctx.uow.commit(tx, entries).await?;
+        let entry = insert_version_entry(tx.as_mut(), new, &input.reference, (user, meta)).await?;
+        self.ctx.uow.commit(tx, NonEmpty::new(entry)).await?;
         Ok(CreateVersionOutput {
             version,
             number,
             outdated: checked.map(|base| base.outdated).unwrap_or_default(),
         })
     }
+}
+
+/// Take the machine and recipe locks, number the version, and check the units again.
+///
+/// The domain call comes before the unit check: a deleted recipe gives `E-RCP-012` before any
+/// unit item.
+async fn lock_and_number(
+    tx: &mut dyn Transaction,
+    target: Target,
+    reference: &ReferenceNumber,
+    version: RecipeVersionId,
+    unit_uses: Option<&[(ParameterTag, UnitId)]>,
+) -> Result<u32, AppError> {
+    lock_live_machine(tx, target.machine).await?;
+    let Locked {
+        state: mut recipe, ..
+    } = tx
+        .recipes()
+        .lock_recipe(target.recipe)
+        .await?
+        .ok_or_else(|| AppError::NotFound {
+            entity: Missing::Recipe(reference.clone()),
+        })?;
+    let number = recipe.create_version(version)?.number();
+    if let Some(unit_uses) = unit_uses {
+        recheck_units(tx, unit_uses).await?;
+    }
+    Ok(number)
+}
+
+/// Insert the version row and build its audit entry.
+///
+/// A second live draft gives `E-RCP-011`.
+async fn insert_version_entry(
+    tx: &mut dyn Transaction,
+    new: NewVersion,
+    reference: &ReferenceNumber,
+    (user, meta): (&CurrentUser, &RequestMeta),
+) -> Result<AuditEntry, AppError> {
+    let (recipe, version, number) = (new.recipe, new.version, new.number);
+    let image = tx.recipes().insert_version(new).await.map_err(|error| {
+        map_storage(error, |constraint| {
+            (constraint == RECIPE_VERSION_ONE_LIVE_DRAFT).then(|| {
+                RecipeError::DraftAlreadyExists {
+                    reference: reference.clone(),
+                    number,
+                }
+                .into()
+            })
+        })
+    })?;
+    Ok(AuditEntry::row(
+        RowAction::VersionCreated,
+        AuditTarget::recipe_version(recipe, version),
+        RowChange::Create {
+            after: image.into_value(),
+        },
+        audit_context(user, meta),
+    ))
 }
 
 #[cfg(test)]

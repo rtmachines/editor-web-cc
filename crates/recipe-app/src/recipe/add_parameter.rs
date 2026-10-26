@@ -1,7 +1,7 @@
 //! The use case `AddParameter` (`domain-model.md` section 5.2, design D10, D11).
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
-use recipe_domain::plant::{S7Address, TypeExpr, UnitPath};
+use recipe_domain::plant::{LiveUnit, PlcTypeId, S7Address, TypeExpr, UnitPath};
 use recipe_domain::recipe::{
     LimitList, NewParameter, Ordinal, ParameterId, ParameterKey, ParameterTag, ReferenceNumber,
     ValueInput,
@@ -10,11 +10,11 @@ use recipe_domain::text::{LongText, Text};
 use uuid::Uuid;
 
 use super::definition_steps::{lock_live_unit, map_tag_error, resolve_type};
-use super::draft_session::{DraftOutput, DraftTarget, MachineLock, OpenDraft};
+use super::draft_session::{DraftOutput, DraftTarget, MachineLock, OpenDraft, TouchedDraft};
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::AppError;
-use crate::ports::NonEmpty;
+use crate::ports::{NonEmpty, RowImage};
 
 /// The parsed request of `AddParameter`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,28 +111,11 @@ impl AddParameter {
         let key = ParameterKey::from(Uuid::new_v4());
         let id = ParameterId::from(Uuid::new_v4());
         let tag = input.tag.clone();
-        let new = NewParameter {
-            id,
-            key,
-            unit,
-            tag: input.tag,
-            name_en: input.name_en,
-            description_en: input.description_en,
-            plc_type: resolved.type_id,
-            s7_address: input.s7_address,
-            ordinal: input.ordinal,
-            value: input.value,
-            limits: input.limits,
-        };
+        let number = input.number;
+        let new = new_parameter(input, unit, resolved.type_id, (id, key));
         open.draft.add_parameter(new, &resolved.trees)?;
         let mut open = open.touch(user).await?;
-        let version = open.draft.version();
-        let image = open
-            .tx
-            .drafts()
-            .insert_parameter(version, open.draft.parameter(key)?)
-            .await
-            .map_err(|error| map_tag_error(error, &tag, input.number))?;
+        let image = insert_parameter(&mut open, key, &tag, number).await?;
         let added = AuditEntry::row(
             RowAction::ParameterAdded,
             AuditTarget::parameter(open.recipe, id),
@@ -146,6 +129,43 @@ impl AddParameter {
             .await?;
         Ok(AddParameterOutput { draft, key })
     }
+}
+
+/// Build the domain request of the new parameter from the parsed form.
+fn new_parameter(
+    input: AddParameterInput,
+    unit: LiveUnit,
+    plc_type: PlcTypeId,
+    (id, key): (ParameterId, ParameterKey),
+) -> NewParameter {
+    NewParameter {
+        id,
+        key,
+        unit,
+        tag: input.tag,
+        name_en: input.name_en,
+        description_en: input.description_en,
+        plc_type,
+        s7_address: input.s7_address,
+        ordinal: input.ordinal,
+        value: input.value,
+        limits: input.limits,
+    }
+}
+
+/// Insert the new parameter and give the row image for the audit entry.
+async fn insert_parameter(
+    open: &mut TouchedDraft,
+    key: ParameterKey,
+    tag: &ParameterTag,
+    number: u32,
+) -> Result<RowImage, AppError> {
+    let version = open.draft.version();
+    open.tx
+        .drafts()
+        .insert_parameter(version, open.draft.parameter(key)?)
+        .await
+        .map_err(|error| map_tag_error(error, tag, number))
 }
 
 #[cfg(test)]
