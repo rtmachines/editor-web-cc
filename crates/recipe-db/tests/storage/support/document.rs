@@ -11,6 +11,10 @@ const DOCUMENT: &str = concat!(
     "/../../docs/architecture/data-model.md"
 );
 const MIGRATIONS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");
+const INIT_SCRIPT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../deploy/db/initdb/01-roles.sh"
+);
 const SQL_FENCE: &str = "```sql";
 const CLOSING_FENCE: &str = "```";
 
@@ -91,6 +95,15 @@ pub fn migration_sql(file: &str) -> String {
     let path = migration_path(file);
     let text = std::fs::read_to_string(&path)
         .map_err(|error| format!("cannot read migration {}: {error}", path.display()))
+        .unwrap();
+    normalize(&text)
+}
+
+/// The normalized text of the init script `01-roles.sh`. The call fails with a clear message
+/// when the file does not exist.
+pub fn init_script_sql() -> String {
+    let text = std::fs::read_to_string(INIT_SCRIPT)
+        .map_err(|error| format!("cannot read 01-roles.sh: {error}"))
         .unwrap();
     normalize(&text)
 }
