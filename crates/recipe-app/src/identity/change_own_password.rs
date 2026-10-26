@@ -68,8 +68,14 @@ impl ChangeOwnPassword {
         meta: &RequestMeta,
         input: ChangeOwnPasswordInput,
     ) -> Result<IssuedSession, AppError> {
+        authorize(
+            Self::OPERATION,
+            auth.user(),
+            meta,
+            self.ctx.app.security.as_ref(),
+        )
+        .await?;
         let user = auth.user();
-        authorize(Self::OPERATION, user, meta, self.ctx.app.security.as_ref()).await?;
         let ChangeOwnPasswordInput {
             client_ip,
             current_password,

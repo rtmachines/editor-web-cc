@@ -24,6 +24,8 @@ mod reset_password;
 mod retry;
 mod set_user_role;
 mod settings;
+#[cfg(test)]
+mod source_tests;
 mod throttle;
 mod unlock_login;
 
