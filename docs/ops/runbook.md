@@ -111,6 +111,7 @@ docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 
 Without the mount point, the parent directory of `RECIPE_WALARCHIVE_DIR` is on the second disk too.
 The gap procedure moves files there as a rename (ADR-0099 (c)).
+
 The host commands use the shell values only. Compose reads `.env` itself.
 A shell variable with the same name wins over `.env`, so repeat steps 6 and 7 after each edit of `.env`.
 Compose passes only the entries of `environment:` to a container. A `PG*` variable of the host shell does not reach it.
@@ -239,6 +240,7 @@ iptables -I DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 Each `DROP` rule drops routed traffic from outside to a Compose subnet (ADR-0070 (e)).
 The Docker chain sees a packet after the address translation. The `conntrack` match `! --ctstate DNAT` therefore keeps the published ports of `proxy` open.
 The `-s` match keeps the traffic inside one network. The `ESTABLISHED,RELATED` rule keeps the replies to connections that start inside Compose.
+
 ADR-0063 (p) asks for a rule that limits `egress` to the webhook host. No document gives that rule, so this page gives none.
 
 Run this section again after a subnet change, and after `docker compose down` and `docker compose up`. Docker can give `edge` and `egress` new subnets.
@@ -351,17 +353,21 @@ Compose does not run a one-shot service again unless a command starts it.
 
 The order of steps 3 to 5 is the reverse of the start order in `reliability.md` 7.1.
 `db` stops last, so `app` closes its database pools while `db` still runs (`reliability.md` 7.3).
+
 The exit code of `app` is 0, also after a cut drain.
 After a cut, one `WARN` line gives the counts `cut_public`, `cut_internal`, and `cut_jobs`. A cut loses no data (ADR-0087).
 If the exit code is not 0, Docker may have sent `SIGKILL`. Read the last lines of `docker compose logs app`.
+
 A stop during a run of `backup` or `walarchive` can leave temp files. The section "Delete orphan temp files" deletes them.
 
 ### Start the whole stack again
 
 Use these steps after a stop of the same release. After a change of `RECIPE_VERSION`, use the section "Upgrade".
+
 Do not run `docker compose up -d` here. Compose then runs `backup-premigrate` and `migrate` again.
 The run of `backup-premigrate` writes a new `_premigrate` set of the current schema.
 That new set is then the newest one. The section "Rollback" restores the newest `_premigrate` set.
+
 The option `--no-deps` skips the `depends_on` checks (ADR-0082), so the steps wait for `healthy` by hand.
 
 1. Run `docker compose up -d --no-deps db`.
@@ -387,8 +393,10 @@ Replace `<service>` with `proxy`, `app`, `db`, `backup`, or `walarchive`.
 Without `--no-deps`, a start of `app` or `proxy` runs `backup-premigrate` and `migrate` again (ADR-0082).
 Do not restart `backup-premigrate` or `migrate` by hand. The section "Upgrade" runs them.
 Start `db` before `app`. The option `--no-deps` does not wait for `db`.
+
 While `app` restarts, Caddy answers `502` (ADR-0065 (p)). While `db` is down, `/readyz` answers `not ready` (`reliability.md` 7.2).
 After a restart of `db`, check the health of `app` with the last step of the section "Start the whole stack again".
+
 A long stop of `db` or `walarchive` can leave a gap in the WAL stream. See the section "A gap in the WAL stream".
 Before you stop `backup` or `walarchive`, do steps 1 and 2 of the section "Stop the whole stack".
 
@@ -491,9 +499,12 @@ sha256sum -c --strict -- recipe_<stamp>.dump.sha256
 7. Protect the copies with the same access control as the database.
 
 A set without a manifest is not complete, so the last copy of the manifest keeps a failed copy from looking complete (`reliability.md` 7.7).
+
 A passed restore test does not show that the dump code left the set unchanged. A dump may hold code that rewrote the sets of the disk (ADR-0084).
 The site procedure therefore keeps the existing protected copies. It does not replace them with a new copy.
+
 The dump holds password hashes and the audit log. The globals file holds no password.
+
 No document gives a check of a copy of the base backups or of the WAL segments. `basebackup-once` checked each base backup before it gave the final name (`reliability.md` 7.7).
 No document gives the steps that restore a set from a copy to the host.
 
@@ -546,6 +557,7 @@ Warning: this procedure is not complete for 0.1.0. See [Known gaps](#known-gaps)
 The restore goes into a new `db` volume (ADR-0020).
 The old volume `pgdata` stays on the host.
 The step that makes a new volume the volume of `db` is open. No document gives its command. See "Known gaps".
+
 The steps below start with an empty new cluster as `db`. It holds no database `recipe` and no project role.
 `<stamp>` is the part of the dump file name between `recipe_` and `.dump`, for example `<YYYYMMDD_HHMM>_now`.
 
@@ -607,12 +619,14 @@ docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_at
 
 8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
 9. Start `app` after a record of the restored audit time:
-   1. Record the value of `audit.last_check_at` with the `app_setting` command of the first place below step 10. If the command prints no row, record "missing".
-   2. Record the highest `id` of `security_event` with the `security_event` command below step 10.
-   3. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
+   1. Record the value of `audit.last_check_at` with the `app_setting` command of the first place below step 10.
+   2. If the command prints no row, record "missing".
+   3. Record the highest `id` of `security_event` with the `security_event` command below step 10.
+   4. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
 10. Check the audit chain. Wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
 The section "Copy the backups off site" describes the off-site audit copy of step 8.
+
 The next completed run is the applicable run that completes first (ADR-0100, `data-model.md` 4.9).
 The catch-up run starts after `audit.catchup_delay`. It applies when the restored `audit.last_check_at` is missing or older than `audit.catchup_age` at the start of `app`.
 The nightly run at `audit.check_time` stays active in all cases. A newer completed nightly check suppresses the catch-up run.
@@ -621,12 +635,15 @@ Read the result in three places.
 The first place is `audit.last_check_at` in `app_setting`. The value is a time in UTC.
 The restore brings back the value of the dump. That value can lie in the future, for example after a correction of the clock (`reliability.md` 3.7, clock trust).
 Step 9 records this value with the command below before the start of `app`.
-After step 9, read the value again. A value that differs from the recorded value shows a completed check.
-A value equal to the recorded value is not a new check. An active `audit_check_age` is unresolved evidence about the age or the clock trust of the check (ADR-0093 (a)). It does not prove that no check completed. Investigate it in section "Alarms, read-only mode, and restart loop" before you accept the result.
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "SELECT value FROM app_setting WHERE key = 'audit.last_check_at'"
 ```
+
+After step 9, read the value again. A value that differs from the recorded value shows a completed check.
+A value equal to the recorded value is not a new check.
+
+An active `audit_check_age` is unresolved evidence about the age or the clock trust of the check (ADR-0093 (a)). It does not prove that no check completed. Investigate it in section "Alarms, read-only mode, and restart loop" before you accept the result.
 
 The second place is the event log of `app`. An `ERROR` line of the job `audit_chain_check` with the `error_code` `E-AUD-002` shows a break.
 Use the command form of the section "Read the logs", subsection "Read the lines of a job", and add the pattern of the code:
@@ -653,11 +670,14 @@ docker compose exec -u postgres db psql -d recipe -c "SELECT count(*) FROM secur
 
 The dump brings back the old rows, so the count uses `id` and not `occurred_at`. A restored row can carry a future time.
 The job writes the row of a break before it records `audit.last_check_at`.
+
 Docker can drop log lines, and a failed snapshot of the job `alerts` evaluates no condition (`reliability.md` 3.5 and 3.7).
 The `E-AUD-002` line and the alert are diagnostic signals. A missing line or an inactive alert alone does not show a chain without a break.
 A check without a break writes no log line, so a missing line alone does not show a completed check.
+
 A run that returns another error code is not a completed check, and `audit.last_check_at` keeps its value.
 Read that code in the `ERROR` line and follow its row in `reliability.md` 1.2.
+
 The alert `audit_check_age` becomes active when `audit.last_check_at` is older than `audit.max_check_age`.
 
 ## Upgrade and rollback
@@ -711,6 +731,7 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 
 The restore test of step 3 checks the newest complete set of the old schema with the old image (ADR-0083).
 The rollback set of step 8 holds the old guard function. The old image therefore accepts it after a rollback restore (ADR-0097 (h1)).
+
 Only the superuser can replace the guard function (ADR-0069 (p)). The release notes name steps 13 to 17 as a "manual superuser step".
 Run no `backup-now` before step 17 passes.
 The guard step is the one place that replaces the guard function. The section "An older volume" uses this place too.
@@ -760,6 +781,7 @@ If the migration did not follow the expand pattern, use the `_premigrate` dump.
 Warning: this restore loses every change and audit entry after the `_premigrate` dump.
 The lost period runs from the `_premigrate` dump to the stop of `app`.
 No test checks the `_premigrate` set. The test before the upgrade checks a set of the same schema (ADR-0083).
+
 The restore goes into a new `db` volume. The switch step is open, as the section "Restore into production" says. See "Known gaps".
 
 1. Run `docker compose stop app`.
@@ -816,6 +838,7 @@ To delete the images of an old release, read the section "Destructive commands" 
 
 This procedure is not part of the normal upgrade. Run it only when a release needs a concurrent index on an audit object.
 A migration cannot create this index. `CREATE INDEX CONCURRENTLY` must be the only statement of its file (`data-model.md` 5.1 and 8).
+
 The role `recipe_migrator` runs five statements in one `psql` session (`reliability.md` 7.10 step 7).
 The client rules let this role connect from the Compose subnet only. No document gives a command that opens a session as this role.
 
@@ -849,6 +872,7 @@ The new volume uses the same `initdb` arguments as `compose.yaml`. The project d
 
 The test comes before the switch (`reliability.md` 7.10 step 8).
 The switch makes the new volume the volume of `db`. No document gives the command of this switch (ADR-0020), so the switch step is open. See "Known gaps".
+
 After the switch, restore the `_now` set with steps 4 to 10 of the section "Restore into production". Use the name of the `_now` set for `<stamp>`.
 Keep the old volume `pgdata` on the host.
 
@@ -900,6 +924,7 @@ An editor can change the owner or the mode in step 8 and can leave a copy in the
 The key `login_hmac_key` has one more effect. The filter `login` of `/security-events` signs the typed login with the first key (`api.md` 2.9).
 After step 4, the filter finds an event of an unknown login only when the server wrote the event under the new key.
 An event of a login that belongs to a user stays visible, because the filter also matches the user.
+
 The key `csrf_signing_key` signs the pre-session cookie of the login page. After step 12, a login page that was open before step 4 may fail.
 The user then gets `403 E-WEB-007`. The user opens the login page again to get a new cookie.
 
@@ -987,7 +1012,9 @@ SQL
 docker compose logs db | grep -c -E 'ROLE (postgres|recipe_[a-z]+) PASSWORD'
 ```
 
-10. Run `docker compose up -d --force-recreate --no-deps <service>` for the service of the last column of the table. For `app` after a rollback, use "Start app after a rollback".
+10. Restart the service of the last column of the table:
+    1. Run `docker compose up -d --force-recreate --no-deps <service>`.
+    2. For `app` after a rollback, use "Start app after a rollback" instead.
 11. Run `docker compose ps -a`. Check that `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
 12. For `recipe_app`, run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. Check that the exit code is 0.
 13. For `recipe_backup`, run `docker compose exec backup backup-now`. Check that the output holds the line `backup completed`.
@@ -995,8 +1022,10 @@ docker compose logs db | grep -c -E 'ROLE (postgres|recipe_[a-z]+) PASSWORD'
 
 Do steps 8 to 10 without a pause. Between them, a new connection of the service can fail with the old password.
 If step 8 fails, the role keeps its old password. Run step 8 again and do not start step 10 first.
+
 During the restart of `db` in step 6, `app`, `backup`, and `walarchive` cannot reach the database.
 Read the notes of the section "Restart one service". A long stop of `db` can leave a gap in the WAL stream. See the section "A gap in the WAL stream".
+
 For `recipe_migrator`, no service uses the new password before the next run of `migrate` in the section "Upgrade". No document gives an earlier test.
 For `postgres`, no service of the stack uses the password after the init of `db`.
 
@@ -1025,6 +1054,7 @@ These keys have a procedure:
 No document describes a change of the other keys. These are `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port`.
 The keys that name a file path and the key `alerts.webhook_ca_file` are also in this group. The section "Known gaps" names the last key.
 Other files of the stack use these values. `Caddyfile` sends requests to `app:8080`, and the health check of `proxy` uses `app:9000`.
+
 The value `false` for `session.secure` stops the start in a release build (ADR-0062 (b)). Keep the value `true`.
 
 The server reads the environment at each start only. To change a key of the first three rows, do these steps:
@@ -1046,6 +1076,7 @@ If no entry shows, the value may equal the stored value, or the name in `compose
 
 A bad value stops the start. `app` writes one `ERROR` line and exits with code 1 (`reliability.md` 7.12, ADR-0061 (b)).
 The line names the key, or it holds the text `the configuration is not valid` for a value of the wrong type. A value of `0` for a timeout is also bad.
+
 The restart policy `always` then restarts `app`. Use the section "Restart loop" to read the line.
 Write the old value again. Then run step 4.
 
@@ -1077,6 +1108,7 @@ The server checks the file at each start. A broken file stops the start (ADR-006
 
 The client follows no redirect. If the webhook host redirects, write the final URL into the file (`reliability.md` 3.7).
 With the settings of `compose.yaml`, the client trusts the webpki roots only. A certificate of a plant authority may therefore fail. See the section "Known gaps".
+
 One run sends all calls at the same time. The value of `alerts.webhook_timeout` limits them together (ADR-0063 (m)).
 
 ### Change the webhook
@@ -1114,7 +1146,9 @@ tr -d '\n' < "$RECIPE_SECRETS_DIR/alerts_webhook_url" | sha256sum
 While `app` restarts, Caddy answers `502` (ADR-0065 (p)).
 The server writes the entry `SettingChanged` at the start, and only when the fingerprint differs (`reliability.md` 7.12).
 The entry shows that the URL changed. It does not show the host (ADR-0063 (c)).
+
 No command sends a test call. A call goes out only for an active condition. The entry therefore checks the file and does not check the connection.
+
 If `app` does not become `healthy`, read its `ERROR` line. The line names the key `alerts.webhook_url_file` and one of these texts:
 
 - `holds a carriage return`
@@ -1150,6 +1184,7 @@ docker compose logs --no-log-prefix --since 24h app | grep -F '"condition":"'
 
 The job does not retry a failed call. The next run sends the call again while the condition stays active. The value of `alerts.interval` sets the time between runs.
 A short condition may therefore end before the webhook host gets the call. The `alert` lines in the log still show it.
+
 The job writes no line for a call that works. A missing line with `condition` shows no fault. It does not show that the webhook host got the call.
 
 ## Subnet change
@@ -1181,9 +1216,11 @@ The alert `replication` is active during the outage.
 
 The procedure moves the WAL segment files and the `.partial` file from the top of `RECIPE_WALARCHIVE_DIR` (ADR-0068 (l)).
 The marker file, `.lock`, the directory `base`, and the directory `.pitr-scratch` stay.
+
 The names of the segment files have 24 upper-case hex characters (PostgreSQL 16 documentation, section 30.6).
 The first 8 characters give the timeline, the next 8 the log number, and the last 8 the segment number.
 `pg_receivewal` adds the suffix `.partial` to the segment that it writes. Every other name at the top of `RECIPE_WALARCHIVE_DIR` stays in place.
+
 Run all steps in one shell, because steps 3 to 6 use the variable `target`.
 
 1. Run `docker compose exec backup restore-test`. Continue only after it passes.
@@ -1345,6 +1382,7 @@ The runbook never deletes `pgdata`.
 The server `app` writes its event log to stdout, as one JSON object per line (`reliability.md` 3.1).
 Docker keeps a rolling window of lines for each container. The keys `log.max_size` and `log.max_file` of `reliability.md` 7.11 set its size (`reliability.md` 3.5).
 Docker discards the oldest lines first. A full log buffer can also drop lines.
+
 The image of `app` holds no shell, so run each filter on the host with `grep`.
 The filters of this section read the lines of `app`.
 
@@ -1380,8 +1418,10 @@ docker compose logs --no-log-prefix --since 24h app | grep -F '"level":"ERROR"'
 ```
 
 To combine two patterns, add a second `grep -F` after the first one.
+
 An ordinary validation error of a user, with the HTTP status 4xx, is an `INFO` line. A search for `ERROR` does not find it.
 Some 4xx errors have the level `WARN` or `ERROR`. `reliability.md` 3.3 gives the level policy.
+
 The names of the alert conditions are in the section "Alarms". The names of the jobs are in `reliability.md` 2.4.
 
 ### Find the lines of a user report
@@ -1471,9 +1511,11 @@ For `backups` or `walarchive`, do these steps:
 
 The retention runs only after a complete new set (`reliability.md` 7.7).
 No document gives the site procedure of step 3.
+
 Delete no set, no base backup, and no WAL segment by hand.
 The scripts delete them by `backup.retention` and `basebackup.retention` (`reliability.md` 7.7, ADR-0099).
 These two values are constants of the scripts `backup-once` and `basebackup-once`. A change needs a new release.
+
 A full disk of `walarchive` stops `pg_receivewal` (ADR-0077).
 Read the section "Destructive commands" before each delete.
 
@@ -1536,7 +1578,9 @@ docker compose config | grep -o '^ *PG[A-Za-z_]*:'
 ```
 
 5. Delete that variable from `compose.yaml`, or from `.env` when `compose.yaml` reads its value there.
-6. Run `docker compose up -d --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again"). After a rollback, use "Start app after a rollback".
+6. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
+
+Without `--no-deps` in step 6, Compose runs `backup-premigrate` and `migrate` again (section "Start the whole stack again").
 
 A variable of the host shell does not reach a container, so `unset` has no effect on the server.
 
@@ -1602,6 +1646,7 @@ Read the other runs with `docker compose logs backup` and `docker compose logs b
 A run of `backup-once` has no time limit (ADR-0074 (d)). If `db` does not answer, the run holds the lock.
 Then each later run and `backup-premigrate` stops with `another backup run holds the lock`. The held run deletes nothing.
 After `backup.max_age_alert`, `backup-health` fails and the alert `backup_age` is active.
+
 Find the run with `docker compose top backup`. No document gives the time after which a run counts as hung.
 No document gives the command that ends a hung run.
 
