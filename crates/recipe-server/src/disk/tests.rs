@@ -32,11 +32,16 @@ async fn a_missing_path_is_unreadable() {
 #[cfg(unix)]
 #[tokio::test]
 async fn the_text_of_an_unreadable_fault_names_no_path() {
-    let missing = std::env::temp_dir().join("recipe-server-disk-secret-name");
+    let marker = "recipe-server-disk-secret-name";
+    let missing = std::env::temp_dir().join(marker);
 
     let fault = SystemDiskSpace.free_space(&missing).await.unwrap_err();
 
-    assert!(!fault.to_string().contains("recipe-server-disk-secret-name"));
+    // The `Display` text is a fixed sentence. The `Debug` text shows the wrapped error.
+    // It shows the marker when the adapter puts the path into that error.
+    assert!(matches!(fault, DiskFault::Unreadable(_)), "got {fault:?}");
+    assert!(!fault.to_string().contains(marker));
+    assert!(!format!("{fault:?}").contains(marker), "got {fault:?}");
 }
 
 #[cfg(not(unix))]
