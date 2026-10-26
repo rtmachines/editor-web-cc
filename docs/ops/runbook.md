@@ -622,7 +622,7 @@ The first place is `audit.last_check_at` in `app_setting`. The value is a time i
 The restore brings back the value of the dump. That value can lie in the future, for example after a correction of the clock (`reliability.md` 3.7, clock trust).
 Step 9 records this value with the command below before the start of `app`.
 After step 9, read the value again. A value that differs from the recorded value shows a completed check.
-A value equal to the recorded value is not a new check. An active `audit_check_age` shows that the check is not done.
+A value equal to the recorded value is not a new check. An active `audit_check_age` is unresolved evidence about the age or the clock trust of the check (ADR-0093 (a)). It does not prove that no check completed. Investigate it in section "Alarms, read-only mode, and restart loop" before you accept the result.
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "SELECT value FROM app_setting WHERE key = 'audit.last_check_at'"
@@ -766,7 +766,7 @@ The restore goes into a new `db` volume. The switch step is open, as the section
 2. Use steps 4 to 8 of "Restore into production" for the newest `_premigrate` set. Use its name as `<stamp>`.
 3. Set the previous tag in `.env`.
 4. Run steps 6 and 7 of the section "Create the environment file". The image tags show the previous tag.
-5. Run `docker compose up -d --no-deps app`.
+5. Run step 9 of the section "Restore into production". `.env` holds the previous tag.
 6. Run step 10 of the section "Restore into production".
 7. Run the three commands of the upgrade with the tag of `.env`.
 
@@ -1040,6 +1040,7 @@ The server reads the environment at each start only. To change a key of the firs
 
 While `app` restarts, Caddy answers `502` (ADR-0065 (p)).
 The server writes one entry `SettingChanged` for each key whose value differs from the stored value. All entries of one start share one `request_id`. The audit log keeps the entries without a time limit (`reliability.md` 7.12).
+
 The server reads only the names of the table in ADR-0062 (a). It does not read a misspelled name, so the default of the key stays.
 If no entry shows, the value may equal the stored value, or the name in `compose.yaml` may be wrong. Repeat step 3.
 

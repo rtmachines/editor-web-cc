@@ -68,7 +68,7 @@ The project uses **Option A**.
   - The nightly run at `audit.check_time`. It stays active in all cases.
   - A newer completed nightly check suppresses the catch-up run.
 - (c) The operator reads the result in three places:
-  - `audit.last_check_at` in `app_setting`. The operator records the restored value before the start of `app`. A value that differs from the recorded value after the start shows a completed check. A value equal to the recorded value is not a new check. The restored value can lie in the future (`reliability.md` section 3.7, clock trust). An active `audit_check_age` shows that the check is not done.
+  - `audit.last_check_at` in `app_setting`. The operator records the restored value before the start of `app`. A value that differs from the recorded value after the start shows a completed check. A value equal to the recorded value is not a new check. The restored value can lie in the future (`reliability.md` section 3.7, clock trust). An active `audit_check_age` is unresolved evidence about the age or the clock trust of the check (ADR-0093 (a)). It does not prove that no check completed. The operator investigates it (section "Alarms, read-only mode, and restart loop" of the runbook, `reliability.md` section 3.7) before accepting the result.
   - The event log of `app`. An `ERROR` line of the job `audit_chain_check` with `error_code` `E-AUD-002` shows a break.
   - The alert condition `audit_chain_broken` of `reliability.md` section 3.7. It is active after a break, and the webhook sends its name (ADR-0063).
 - (d) The durable proof of a chain without a break is the table `security_event`. A completed check as in (c) and no new row of the kind `audit_chain_broken` show a chain without a break.
