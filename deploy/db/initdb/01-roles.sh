@@ -106,11 +106,12 @@ DECLARE
     v_object RECORD;
 BEGIN
     FOR v_object IN SELECT * FROM pg_catalog.pg_event_trigger_dropped_objects() LOOP
-        IF v_object.object_identity IN (
-               'public.audit_log', 'public.audit_chain_head', 'public.security_event',
-               'public.audit_canonical(public.audit_log)', 'public.audit_hash_chain()',
-               'public.security_event_purge()', 'public.security_event_guard()',
-               'public.replication_state()')
+        IF v_object.object_type IN ('table', 'function')
+           AND v_object.address_names[pg_catalog.array_upper(v_object.address_names, 1)] IN (
+               'audit_log', 'audit_chain_head', 'security_event',
+               'audit_canonical', 'audit_hash_chain',
+               'security_event_purge', 'security_event_guard',
+               'replication_state')
            AND current_user <> 'audit_owner' THEN
             RAISE EXCEPTION 'audit object % can be dropped only by audit_owner',
                 v_object.object_identity USING ERRCODE = 'insufficient_privilege';
