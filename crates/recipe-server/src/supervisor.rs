@@ -99,8 +99,9 @@ pub struct SupervisorSettings {
 pub trait JobRun: Send + Sync + 'static {
     /// Run the job one time. Return `Err` only for an error of level `ERROR`.
     ///
-    /// `kind` names the trigger that fired the run. A job with one trigger ignores it. The job
-    /// logs a handled fault itself at `WARN`. The supervisor logs the `Err` once.
+    /// `kind` gives the kind of the run, such as a scheduled run or a catch-up run. A job with one
+    /// trigger ignores it. The job logs a handled fault itself at `WARN`. The supervisor logs the
+    /// `Err` once.
     fn run(
         &self,
         request_id: RequestId,
@@ -193,7 +194,8 @@ impl Supervisor {
 
     /// Run the first run of a job now, before the loops start, and wait for its end.
     ///
-    /// The run gets the span `job` with `iteration` 1, a new `request_id`, and [`RunKind::Scheduled`].
+    /// The run gets the span `job` with `iteration` 1, a new `request_id`, and
+    /// [`RunKind::Scheduled`].
     /// The span field `outcome` shows `ok`, the error code, or `panic` after the join. The method
     /// writes no line for an `Err` or a panic, because the caller owns the failure of the start.
     /// A drop of the returned future aborts the run at once.
@@ -240,7 +242,8 @@ impl Supervisor {
         *count
     }
 
-    /// Start the loop of one job. The time since the start of the schedule begins now.
+    /// Start the loop of one job. The loop takes ownership of `run`. The time since the start of
+    /// the schedule begins now. Use [`Supervisor::spawn_shared`] to keep a handle on the job.
     pub fn spawn<R: JobRun>(&mut self, name: JobName, schedule: Schedule, run: R) {
         self.spawn_shared(name, schedule, Arc::new(run));
     }
@@ -248,7 +251,7 @@ impl Supervisor {
     /// Start the loop of one job on a job instance that the caller keeps.
     ///
     /// The loop continues the numbers of [`Supervisor::run_at_start`] of the same job.
-    /// Task 7.8 must pass the same `Arc` to `run_at_start` and then to `spawn_shared`.
+    /// The caller passes the same `Arc` to `run_at_start` and then to `spawn_shared`.
     pub fn spawn_shared<R: JobRun>(&mut self, name: JobName, schedule: Schedule, run: Arc<R>) {
         let job = JobLoop {
             name,
@@ -267,12 +270,12 @@ impl Supervisor {
 
     /// Stop the jobs and wait for the open runs up to the deadline.
     ///
-    /// The function cancels the own token of the supervisor first, so no loop starts a run after
-    /// the call. It never cancels the token of the caller. A run that is open may end by itself
-    /// before the deadline. After the deadline, the function aborts every open run. It does not
-    /// wait for an aborted run, because a run that does not yield would block the stop without a
-    /// bound. The pool close of the caller waits for the database connections of the aborted
-    /// runs, and an open transaction rolls back (ADR-0060 (j), ADR-0087 (d)).
+    /// The function first cancels the child token of the supervisor, so no loop starts a run
+    /// after the call. It never cancels the token of the caller. A run that is open may end
+    /// by itself before the deadline. After the deadline, the function aborts every open run.
+    /// It does not wait for an aborted run, because a run that does not yield would block
+    /// the stop without a bound. The pool close of the caller waits for the database connections
+    /// of the aborted runs, and an open transaction rolls back (ADR-0060 (j), ADR-0087 (d)).
     pub async fn drain(mut self, deadline: Duration) -> DrainOutcome {
         self.stop.cancel();
         let finished = tokio::time::timeout(deadline, async {
@@ -378,8 +381,10 @@ impl<R: JobRun> JobLoop<R> {
     /// Run the job once, with the run kind `kind`, in its own task and wait for the join.
     ///
     /// The span `job` encloses the run (ADR-0088 (a)). The task carries the span, so every event
-    /// of the run gets the field `job`, also under the filter `warn` or `error`. The loop records the field `outcome` after the join.
+    /// of the run gets the field `job`, also under the filter `warn` or `error`. The loop records
+    /// the field `outcome` after the join.
     async fn iterate(&mut self, kind: RunKind) -> Outcome {
+        // Each run adds one. A process cannot run long enough to reach u64::MAX.
         self.iteration = self.iteration.checked_add(1).unwrap_or(self.iteration);
         let span = job_span(self.name, self.iteration);
         let request_id = match (self.request_ids)() {
