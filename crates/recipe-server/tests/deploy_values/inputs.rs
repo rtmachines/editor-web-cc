@@ -77,15 +77,16 @@ fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
 }
 
-/// Read a file as bytes. A CRLF line ending is read as LF by the line functions.
+/// Read a file as text. A CRLF line ending of a Windows checkout becomes LF, so a mutation matches.
 fn read_text(path: &str) -> String {
     let full = repository_root().join(path);
     let bytes = std::fs::read(&full)
         .map_err(|error| format!("cannot read {}: {error}", full.display()))
         .unwrap();
-    String::from_utf8(bytes)
+    let text = String::from_utf8(bytes)
         .map_err(|error| format!("{} is not UTF-8: {error}", full.display()))
-        .unwrap()
+        .unwrap();
+    text.replace("\r\n", "\n")
 }
 
 fn file_name(path: &str) -> &str {
