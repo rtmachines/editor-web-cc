@@ -51,6 +51,10 @@ const STARTED: &str = "the server started";
 const STOPPED: &str = "the server stopped";
 const COMMAND_FAILED: &str = "the command failed";
 const KEY_MARKER: &str = "keymarker-not-a-hex-key-0123456789";
+/// The exact body of `/healthz` and of a ready `/readyz` (`OK_BODY` in `recipe-web`).
+const OK_BODY: &str = "ok";
+/// The exact body of `/readyz` before the server is ready (`NOT_READY_BODY` in `recipe-web`).
+const NOT_READY_BODY: &str = "not ready";
 
 /// The files of one run. The ports come with the started server.
 struct Setup {
@@ -210,7 +214,7 @@ async fn healthz_answers_200_ok_on_the_internal_listener_after_the_start() {
     });
 
     assert_eq!(answer.status, 200, "{}", server.log());
-    assert!(answer.body.contains("ok"), "{}", answer.body);
+    assert_eq!(answer.body, OK_BODY);
     assert!(
         !server.log().contains(&level_marker("ERROR")),
         "{}",
@@ -234,13 +238,13 @@ async fn readyz_answers_200_once_the_public_listener_accepts_connections() {
         let answer = http_get(internal_port, "/readyz")?;
         if answer.status != 200 {
             assert_eq!(answer.status, 503, "{}", answer.body);
-            assert!(answer.body.contains("not ready"), "{}", answer.body);
+            assert_eq!(answer.body, NOT_READY_BODY);
             return None;
         }
         Some(answer)
     });
 
-    assert!(answer.body.contains("ok"), "{}", answer.body);
+    assert_eq!(answer.body, OK_BODY);
     assert!(port_is_open(public_port), "{}", server.log());
     // The server opens the gate before it writes the line, and the reader thread adds a delay.
     let started = poll_until(LOG_LIMIT, || {
@@ -323,7 +327,8 @@ async fn the_first_start_writes_the_setting_entries_and_an_equal_start_writes_no
 fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_key() {
     let setup = Setup::new();
     let missing = setup.dir.join("absent_key");
-    let unreadable = setup.dir.write("bad_key", &format!("{KEY_MARKER}\n"));
+    // The file exists and has text, but the text is not a hex key.
+    let malformed_key_file = setup.dir.write("bad_key", &format!("{KEY_MARKER}\n"));
     let cases = [
         (
             "RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE",
@@ -332,7 +337,7 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
         ),
         (
             "RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE",
-            unreadable,
+            malformed_key_file,
             "security.csrf_signing_key_file",
         ),
     ];
