@@ -46,11 +46,6 @@ async fn spans_of_start_once(script: &[Behavior]) -> (Result<(), StartRunFault>,
     (result, receiver.try_iter().collect())
 }
 
-/// The lines of level `ERROR` of `lines`.
-fn error_lines(lines: &[String]) -> Vec<String> {
-    lines_with(lines, "\"level\":\"ERROR\"")
-}
-
 #[tokio::test(start_paused = true)]
 async fn the_warn_line_of_the_start_run_gets_job_and_iteration_1_from_the_span() {
     bounded(async {
@@ -98,13 +93,14 @@ async fn a_start_run_that_fails_returns_the_error_and_records_its_code() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_start_run_that_fails_writes_no_error_line_of_its_own() {
+async fn a_start_run_that_fails_writes_no_line_of_its_own() {
     bounded(async {
         let logs = LogCapture::start();
         assert!(start_once(&[Behavior::Fail]).await.is_err());
+        // The only line is the `WARN` line of the job. The supervisor writes none.
         let lines = logs.lines();
+        assert_eq!(lines.len(), 1, "{lines:?}");
         assert_eq!(lines_with(&lines, WARN_TEXT).len(), 1, "{lines:?}");
-        assert!(error_lines(&lines).is_empty(), "{lines:?}");
     })
     .await;
 }
@@ -122,15 +118,18 @@ async fn a_start_run_that_panics_returns_the_panic_and_records_it() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_start_run_that_panics_writes_no_error_line_of_its_own() {
+async fn a_start_run_that_panics_writes_no_line_of_its_own() {
     bounded(async {
         let logs = LogCapture::start();
         assert!(matches!(
             start_once(&[Behavior::Panic]).await,
             Err(StartRunFault::Panicked)
         ));
+        // The panic hook of the server is not installed in a unit test. The only line is the
+        // `WARN` line that the job writes before it panics.
         let lines = logs.lines();
-        assert!(error_lines(&lines).is_empty(), "{lines:?}");
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert_eq!(lines_with(&lines, WARN_TEXT).len(), 1, "{lines:?}");
     })
     .await;
 }
