@@ -51,8 +51,7 @@ Compose passes only the entries of `environment:` to a container. A `PG*` variab
 
 1. Create an ext4 or xfs filesystem on the second disk. The publish of a set needs hard links (ADR-0074 (e)).
 2. Mount the disk. Do not use a network share (ADR-0068).
-3. Check that both directories lie outside the filesystem of the volume `pgdata`.
-4. Create both directories and both marker files:
+3. Create both directories and both marker files:
 
 ```bash
 install -d -m 0755 -o 999 -g 999 "$RECIPE_BACKUP_DIR"
@@ -60,6 +59,16 @@ install -d -m 0700 -o 999 -g 999 "$RECIPE_WALARCHIVE_DIR"
 install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"
 install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"
 ```
+
+4. List the disk of the Docker root directory, where the volume `pgdata` will lie, and the disk of each directory:
+
+```bash
+df --output=source,target "$(docker info --format '{{.DockerRootDir}}')" "$RECIPE_BACKUP_DIR" "$RECIPE_WALARCHIVE_DIR"
+```
+
+5. Check that the column `Filesystem` of the first line differs from the two other lines.
+
+If one line equals the first, the healthcheck of `backup` fails (`reliability.md` 7.7).
 
 A network share may not keep the `fsync` of the WAL stream.
 The marker files have the names of ADR-0074 (a).
@@ -401,7 +410,7 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' deploy/pgtools/restore-c
 
 17. Compare the two hashes. Continue only when they are equal. Otherwise run steps 13 to 17 again.
 18. Run `docker compose up -d --no-deps app`. Docker replaces the container of `app` only.
-19. Check `/readyz` with `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`.
+19. Check `/readyz` with `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /readyz`. The command ends with exit code 0.
 20. If you used step 7, run `docker compose up -d --force-recreate --no-deps proxy`.
 21. Run the check of the section "Check client_ip of the first login".
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
@@ -433,7 +442,7 @@ The three commands give the new image of `recipe-pgtools` to `backup` and `walar
 1. Run `docker compose up -d --no-deps backup walarchive`.
 2. Run `docker compose exec backup backup-now`.
 3. Run `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
-4. If the test names a `_premigrate` set of the same UTC minute, rerun commands 2 and 3 later.
+   - If the test names a `_premigrate` set of the same UTC minute, rerun commands 2 and 3 later.
 
 Command 1 can stop a job that runs at `backup.time` or `basebackup.time`. Step 2 avoids these times.
 If the restore test of command 3 fails, a rollback does not start by itself (ADR-0083 (f)).
@@ -449,6 +458,8 @@ RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app
 
 2. Keep the new tag in `.env`. The schema stays newer.
 3. Run the three commands of the upgrade with the tag of `.env`.
+
+Warning: `.env` holds the new tag, so a later `docker compose up -d` gives `app` the new image again (ADR-0083).
 
 If the migration did not follow the expand pattern, use the `_premigrate` dump.
 Warning: this restore loses every change and audit entry after the `_premigrate` dump.
@@ -507,17 +518,44 @@ mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
 3. Run `docker compose up -d --force-recreate --no-deps app`.
 4. Wait for `security.key_rotation_overlap` of `reliability.md` 7.11.
 5. Delete the old line from the key file. This step deletes one key and no data.
-6. Run `docker compose up -d --force-recreate --no-deps app` again.
+6. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/<name>"`. Check that the output is `400 65532`.
+7. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the key file.
+8. Run `docker compose up -d --force-recreate --no-deps app` again.
 
 The server accepts both keys during the overlap.
+Steps 1 and 2 need no check of this kind, because they set the owner and the mode before the move.
+An editor can change the owner or the mode in step 5 and can leave a copy in the directory.
 
 ## Certificate rotation
 
-1. Copy the new certificate and the new key to `tls_cert` and `tls_key`.
-2. Check the owner `0` and the mode `0400` of both files.
-3. Run `docker compose up -d --force-recreate --no-deps proxy`.
+1. Keep a copy of the old pair:
+
+```bash
+cp -p "$RECIPE_SECRETS_DIR/tls_cert" "$RECIPE_SECRETS_DIR/tls_cert.old"
+cp -p "$RECIPE_SECRETS_DIR/tls_key" "$RECIPE_SECRETS_DIR/tls_key.old"
+```
+
+2. Check that `openssl` reads the new certificate. The command prints the subject and the end date:
+
+```bash
+openssl x509 -in <new certificate> -noout -subject -enddate
+```
+
+3. Check that the new key matches the new certificate. The command prints nothing when both public keys are equal:
+
+```bash
+diff <(openssl x509 -in <new certificate> -noout -pubkey) <(openssl pkey -in <new key> -pubout)
+```
+
+4. Copy the new certificate and the new key to `tls_cert` and `tls_key`.
+5. Check the owner `0` and the mode `0400` of both files.
+6. Run `docker compose up -d --force-recreate --no-deps proxy`.
+7. Open the login page from a workstation. Check that the browser accepts the certificate.
+8. Delete the two copies with `rm -- "$RECIPE_SECRETS_DIR"/tls_cert.old "$RECIPE_SECRETS_DIR"/tls_key.old`. This step deletes the old pair only.
 
 A rotation recreates the container `proxy`, so the service stops for a short time (ADR-0065 (c)).
+If TLS fails, copy the two `.old` files over `tls_cert` and `tls_key`. Then repeat step 6.
+A bad pair stops TLS, so do not skip steps 2 and 3.
 
 ## Subnet change
 
@@ -530,7 +568,7 @@ The host lines of `pg_hba.conf` name the subnet, so they change too.
 3. Run steps 6 and 7 of the section "Create the environment file". The new values show.
 4. Write the lines of `pg_hba.conf` with the new subnet. Use steps 5 to 8 of the section "An older volume".
 5. Run `docker compose down`. The command deletes the containers and the networks. It deletes no volume.
-6. Run `docker compose up -d`.
+6. Run `docker compose up -d`. After a rollback, read the warning in the section "Rollback" first.
 7. Run the check of the section "Check the client rules of the database".
 8. Run the section "Check the host firewall" again.
 
@@ -712,7 +750,7 @@ Read the lines with `docker compose logs app`.
 | `replication` | Run `docker compose ps walarchive` and `docker compose logs walarchive`. For a gap, use the section "A gap in the WAL stream". |
 | `low_disk` | Read the field `volume` of the line: `pgdata`, `backups`, or `walarchive`. Free space on that disk. Delete only files outside the three volumes. Delete no set, no base backup, and no WAL segment by hand. For `pgdata`, use the section "Read-only mode". |
 | `failed_logins` | Open `/security-events`. Filter the kind `login_failed`. Read `login` and `client_ip`. |
-| `security_events` | Open `/security-events`. Filter the kinds `csrf_rejected` and `forbidden`. Read `client_ip`. |
+| `security_events` | Open `/security-events`. Filter the kind `csrf_rejected`. Read `client_ip`. Then filter the kind `forbidden`. Read `client_ip`. |
 | `audit_chain_broken` | Read the line `E-AUD-002` in `docker compose logs app`. It names the `chain_seq`. Open the row in `/security-events`. |
 | `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. |
 | `export_hash_mismatch` | Read the line `E-EXP-002` in `docker compose logs app`. It names the recipe and the version. |
@@ -762,8 +800,11 @@ A wrong `PROXY_ADDRESS` gives each client the address of `proxy` (ADR-0065).
 2. Open `/security-events` as an administrator.
 3. Filter the kind `login_failed` and the login that you used.
 4. Compare `client_ip` with the address of the workstation.
-5. If `client_ip` equals `PROXY_ADDRESS`, check the value of `PROXY_ADDRESS` in `.env` and in `compose.yaml`.
+5. If `client_ip` equals `PROXY_ADDRESS`, compare `PROXY_ADDRESS` in `.env` with the output of `docker compose config`.
 6. For a plant device in front of Caddy, use the section "A plant device in front of Caddy".
+
+The file `compose.yaml` holds `${PROXY_ADDRESS:?}` and not an address.
+Read the address in the output of `docker compose config` at the service `proxy` (`ipv4_address`) and at the entry `RECIPE_HTTP__TRUSTED_PROXIES` of the service `app`.
 
 ## Related
 
