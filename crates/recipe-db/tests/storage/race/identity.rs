@@ -4,16 +4,16 @@
 //! the superuser makes a command wait at a known statement (the gate of `support::gate`), and a
 //! poll of `pg_locks` or `pg_stat_activity` proves that the other command reached its own point.
 //! Only then the test opens the gate. A test trigger that calls `nextval` on a sequence counts
-//! the runs of a `SERIALIZABLE` command, because a sequence ignores the rollback.
+//! the runs of a command, because a sequence ignores the rollback.
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
 use recipe_app::error::AppError;
 use recipe_app::identity::{
-    BlockingHasher, BootstrapOutcome, ChangeOwnPassword, ChangeOwnPasswordInput, DeactivateUser,
-    HashGate, Login, LoginInput, ResetPassword, SetUserRole, SetUserRoleInput, authenticate,
-    bootstrap_administrator,
+    Authenticated, BlockingHasher, BootstrapOutcome, ChangeOwnPassword, ChangeOwnPasswordInput,
+    DeactivateUser, HashGate, IdentityContext, Login, LoginInput, ResetPassword, SetUserRole,
+    SetUserRoleInput, authenticate, bootstrap_administrator,
 };
 use recipe_app::ports::{AttemptKey, AttemptOutcome};
 use recipe_domain::audit::RequestId;
@@ -21,10 +21,9 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{
     Login as UserLogin, NewPassword, Password, Role, SessionId, ThrottlePolicy, TypedLogin,
 };
-use sqlx::Connection as _;
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use crate::support::Role as DbRole;
 use crate::support::app::App;
 use crate::support::gate::{self, assert_no_deadlock, error_code};
 use crate::support::identity::{FastHasher, PASSWORD, PERMIT_WAIT};
@@ -46,6 +45,18 @@ const ACTIVE_ADMINISTRATORS: &str =
 /// The sessions of the user `anna`.
 const ANNA_SESSIONS: &str =
     "SELECT count(*) FROM session s JOIN app_user u ON u.id = s.user_id WHERE u.login = 'anna'";
+/// A session waits for the guard lock of the last Administrator (class 4, key 0) in this database.
+const WAITING_FOR_GUARD_LOCK: &str = "SELECT count(*) FROM pg_locks \
+    WHERE locktype = 'advisory' AND NOT granted AND classid = 4::oid AND objid = 0::oid \
+      AND objsubid = 2 \
+      AND database = (SELECT oid FROM pg_database WHERE datname = current_database())";
+/// The sessions of the user `target`.
+const TARGET_SESSIONS: &str =
+    "SELECT count(*) FROM session s JOIN app_user u ON u.id = s.user_id WHERE u.login = 'target'";
+/// The audit entries of a role change.
+const AUDIT_ROLE_SET: &str = "SELECT count(*) FROM audit_log WHERE action = 'UserRoleSet'";
+/// The audit entries of a deactivation.
+const AUDIT_DEACTIVATED: &str = "SELECT count(*) FROM audit_log WHERE action = 'UserDeactivated'";
 /// A password that meets the policy.
 const NEW_PASSWORD: &str = "Replacement-password-2024";
 
@@ -147,7 +158,7 @@ async fn parallel_failed_logins_of_other_logins_pass_the_budget_by_at_most_the_p
 // Race 3: two Administrators demote each other.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn two_administrators_who_demote_each_other_leave_one_administrator() {
+async fn the_second_demotion_waits_for_the_guard_lock_and_then_returns_last_administrator() {
     let mut app = App::create_with(&gate::pool()).await;
     let ctx = app.identity();
     let first_admin = app.admin_session(&ctx).await;
@@ -157,48 +168,131 @@ async fn two_administrators_who_demote_each_other_leave_one_administrator() {
         .await;
     let token = app.seed_session(second).await;
     let second_admin = app.sign_in(&ctx, &token).await;
-    // Both commands read two active Administrators, and both wait before their update.
+    // The first command holds the guard lock and the row of its target. It waits before its update.
     app.install_gate("app_user", "UPDATE", "true").await;
-    // The second gate orders the commits: after the first gate, one command writes its audit
-    // entry and waits. The other one waits for the chain head until the first command commits.
-    app.install_second_gate("audit_log", "INSERT", "true").await;
     app.close_gate().await;
-    app.close_second_gate().await;
-    let meta = app.meta.clone();
-    let demote = |auth: recipe_app::identity::Authenticated, target: UserLogin| {
-        let (ctx, meta) = (ctx.clone(), meta.clone());
-        tokio::spawn(async move {
-            let input = SetUserRoleInput {
-                login: target,
-                role: Role::Operator,
-            };
-            SetUserRole::new(ctx).execute(&auth, &meta, input).await
-        })
-    };
 
-    let one = demote(first_admin, login("second-admin"));
-    let two = demote(second_admin, first_login);
-    app.wait_until_gate_holds(2).await;
+    let one = demote(&ctx, &app, first_admin, login("second-admin"));
+    app.wait_until_at_gate().await;
+    let two = demote(&ctx, &app, second_admin, first_login);
+    app.poll_at_least(
+        WAITING_FOR_GUARD_LOCK,
+        1,
+        "the second demotion waits for the guard lock",
+    )
+    .await;
     app.open_gate().await;
-    app.wait_until_at_second_gate().await;
-    app.wait_until_blocked_by_gate().await;
-    app.open_second_gate().await;
 
     let results = [one.await.unwrap(), two.await.unwrap()];
-    for result in &results {
-        assert_no_deadlock(result);
-    }
-    let winners = results.iter().filter(|r| r.is_ok()).count();
-    assert_eq!(winners, 1, "{results:?}");
-    let loser = results.iter().find(|r| r.is_err()).unwrap();
-    assert_eq!(error_code(loser), ErrorCode::IDN_002);
+    assert!(results[0].is_ok(), "{results:?}");
+    assert_eq!(error_code(&results[1]), ErrorCode::IDN_002);
     assert_eq!(app.rows(ACTIVE_ADMINISTRATORS).await, 1);
+    assert_eq!(app.rows(AUDIT_ROLE_SET).await, 1);
 }
 
-// Race 4: DeactivateUser while the target sends requests.
+/// Start `SetUserRole` that demotes `target` to Operator.
+fn demote(
+    ctx: &IdentityContext,
+    app: &App,
+    auth: Authenticated,
+    target: UserLogin,
+) -> JoinHandle<Result<(), AppError>> {
+    let (ctx, meta) = (ctx.clone(), app.meta.clone());
+    tokio::spawn(async move {
+        let input = SetUserRoleInput {
+            login: target,
+            role: Role::Operator,
+        };
+        SetUserRole::new(ctx).execute(&auth, &meta, input).await
+    })
+}
+
+// Race 3b: three Administrators, two deactivations that both commit in turn.
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deactivate_user_succeeds_while_the_target_session_sends_requests() {
+async fn the_second_of_two_deactivations_waits_for_the_guard_lock_and_then_commits() {
+    let mut app = App::create_with(&gate::pool()).await;
+    let ctx = app.identity();
+    let first_admin = app.admin_session(&ctx).await;
+    let first_login = first_admin.user().login().clone();
+    app.seed_user("second-admin", Role::Administrator, PASSWORD)
+        .await;
+    let third = app
+        .seed_user("third-admin", Role::Administrator, PASSWORD)
+        .await;
+    let token = app.seed_session(third).await;
+    let third_admin = app.sign_in(&ctx, &token).await;
+    // The first command deactivates the second Administrator and waits before its update.
+    app.install_gate("app_user", "UPDATE", "true").await;
+    app.close_gate().await;
+
+    let one = deactivate(&ctx, &app, first_admin, login("second-admin"));
+    app.wait_until_at_gate().await;
+    let two = deactivate(&ctx, &app, third_admin, first_login);
+    app.poll_at_least(
+        WAITING_FOR_GUARD_LOCK,
+        1,
+        "the second deactivation waits for the guard lock",
+    )
+    .await;
+    app.open_gate().await;
+
+    one.await.unwrap().unwrap();
+    two.await.unwrap().unwrap();
+    assert_eq!(app.rows(ACTIVE_ADMINISTRATORS).await, 1);
+    assert_eq!(
+        app.text("SELECT login FROM app_user WHERE is_active AND role = 'administrator'")
+            .await,
+        "third-admin"
+    );
+    assert_eq!(app.rows(AUDIT_DEACTIVATED).await, 2);
+}
+
+/// Start `DeactivateUser` on `target`.
+fn deactivate(
+    ctx: &IdentityContext,
+    app: &App,
+    auth: Authenticated,
+    target: UserLogin,
+) -> JoinHandle<Result<(), AppError>> {
+    let (ctx, meta) = (ctx.clone(), app.meta.clone());
+    tokio::spawn(async move {
+        DeactivateUser::new(ctx)
+            .execute(&auth, &meta, &target)
+            .await
+    })
+}
+
+/// Start `SetUserRole` that sets `role` for `target`.
+fn set_role(
+    ctx: &IdentityContext,
+    app: &App,
+    auth: Authenticated,
+    target: UserLogin,
+    role: Role,
+) -> JoinHandle<Result<(), AppError>> {
+    let (ctx, meta) = (ctx.clone(), app.meta.clone());
+    tokio::spawn(async move {
+        let input = SetUserRoleInput {
+            login: target,
+            role,
+        };
+        SetUserRole::new(ctx).execute(&auth, &meta, input).await
+    })
+}
+
+// Race 4: a command on a target that sends requests.
+
+/// The command that the test runs on the user `target`.
+#[derive(Clone, Copy)]
+enum Change {
+    SetRole,
+    Deactivate,
+}
+
+/// Run `change` on `target`, hold it before its update, and let `target` touch its session
+/// three times. Each touch commits. The command then needs one run and ends every session.
+async fn touch_during_change(change: Change) -> App {
     let mut app = App::create_with(&gate::pool()).await;
     let ctx = app.identity();
     let auth = app.admin_session(&ctx).await;
@@ -208,12 +302,10 @@ async fn deactivate_user_succeeds_while_the_target_session_sends_requests() {
     app.install_counted_gate("app_user", "BEFORE", "UPDATE", "true")
         .await;
     app.close_gate().await;
-    let (command_ctx, meta) = (ctx.clone(), app.meta.clone());
-    let command = tokio::spawn(async move {
-        DeactivateUser::new(command_ctx)
-            .execute(&auth, &meta, &login("target"))
-            .await
-    });
+    let command = match change {
+        Change::SetRole => set_role(&ctx, &app, auth, login("target"), Role::ProcessEngineer),
+        Change::Deactivate => deactivate(&ctx, &app, auth, login("target")),
+    };
     // The command holds the row of the user and waits before its update.
     app.wait_until_at_gate().await;
 
@@ -223,94 +315,29 @@ async fn deactivate_user_succeeds_while_the_target_session_sends_requests() {
     }
     app.open_gate().await;
 
-    command.await.unwrap().unwrap();
-    let runs = app.counted_runs().await;
-    assert!((1..=2).contains(&runs), "{runs} runs");
-    assert_eq!(
-        runs, 2,
-        "the touch commits after the snapshot of the first run"
-    );
+    let result = command.await.unwrap();
+    assert_no_deadlock(&result);
+    result.unwrap();
+    assert_eq!(app.counted_runs().await, 1, "one run, no retry");
+    assert_eq!(app.rows(TARGET_SESSIONS).await, 0);
+    assert!(authenticate(&ctx, &token).await.unwrap().is_none());
+    app
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deactivate_user_runs_once_while_the_target_session_sends_requests() {
+    let mut app = touch_during_change(Change::Deactivate).await;
+
     assert_eq!(
         app.text("SELECT is_active::text FROM app_user WHERE login = 'target'")
             .await,
         "false"
     );
-    assert_eq!(app.rows("SELECT count(*) FROM session WHERE epoch >= 0 AND user_id = (SELECT id FROM app_user WHERE login = 'target')").await, 0);
-    assert!(authenticate(&ctx, &token).await.unwrap().is_none());
-}
-
-// Race 5: a serialization failure at the commit gives one more run.
-
-/// The command that the test runs.
-#[derive(Clone, Copy)]
-enum Change {
-    SetRole,
-    Deactivate,
-}
-
-/// Run `change` on `target` and let a conflicting `SERIALIZABLE` transaction commit after the
-/// audit insert of the first run. Only `COMMIT` is left then, and it fails with `40001`.
-async fn serialization_failure_at_commit(change: Change) -> App {
-    let mut app = App::create_with(&gate::pool()).await;
-    let ctx = app.identity();
-    let auth = app.admin_session(&ctx).await;
-    let bystander = app
-        .seed_user("bystander", Role::Administrator, PASSWORD)
-        .await;
-    let target = app.seed_user("target", Role::Operator, PASSWORD).await;
-    app.install_run_counter().await;
-    app.install_counted_gate("audit_log", "AFTER", "INSERT", "true")
-        .await;
-    app.close_gate().await;
-    let meta = app.meta.clone();
-    let command = tokio::spawn(async move {
-        match change {
-            Change::SetRole => {
-                let input = SetUserRoleInput {
-                    login: login("target"),
-                    role: Role::ProcessEngineer,
-                };
-                SetUserRole::new(ctx).execute(&auth, &meta, input).await
-            }
-            Change::Deactivate => {
-                DeactivateUser::new(ctx)
-                    .execute(&auth, &meta, &login("target"))
-                    .await
-            }
-        }
-    });
-    // The first run wrote its audit entry and waits. Its reads and writes are done.
-    app.wait_until_at_gate().await;
-
-    // The conflicting transaction reads the target and writes a user that the count of the first
-    // run read. Each transaction then reads what the other one writes, and the other one commits.
-    let mut other = app.session(DbRole::Migrator).await;
-    sqlx::query("BEGIN ISOLATION LEVEL SERIALIZABLE")
-        .execute(&mut other)
-        .await
-        .unwrap();
-    sqlx::query("SELECT role FROM app_user WHERE id = $1")
-        .bind(*target.as_uuid())
-        .fetch_one(&mut other)
-        .await
-        .unwrap();
-    sqlx::query("UPDATE app_user SET must_change_password = true WHERE id = $1")
-        .bind(*bystander.as_uuid())
-        .execute(&mut other)
-        .await
-        .unwrap();
-    sqlx::query("COMMIT").execute(&mut other).await.unwrap();
-    other.close().await.unwrap();
-    app.open_gate().await;
-
-    command.await.unwrap().unwrap();
-    assert_eq!(app.counted_runs().await, 2, "one more run after the 40001");
-    app
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn set_user_role_runs_once_more_after_a_serialization_failure_at_the_commit() {
-    let mut app = serialization_failure_at_commit(Change::SetRole).await;
+async fn set_user_role_runs_once_while_the_target_session_sends_requests() {
+    let mut app = touch_during_change(Change::SetRole).await;
 
     assert_eq!(
         app.text("SELECT role FROM app_user WHERE login = 'target'")
@@ -319,15 +346,29 @@ async fn set_user_role_runs_once_more_after_a_serialization_failure_at_the_commi
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn deactivate_user_runs_once_more_after_a_serialization_failure_at_the_commit() {
-    let mut app = serialization_failure_at_commit(Change::Deactivate).await;
+// Race 5: a touch after the delete of the sessions.
 
-    assert_eq!(
-        app.text("SELECT is_active::text FROM app_user WHERE login = 'target'")
-            .await,
-        "false"
-    );
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_touch_after_the_delete_waits_for_the_commit_and_finds_no_session() {
+    let mut app = App::create_with(&gate::pool()).await;
+    let ctx = app.identity();
+    let auth = app.admin_session(&ctx).await;
+    let target = app.seed_user("target", Role::Operator, PASSWORD).await;
+    let token = app.seed_session(target).await;
+    // The command deleted the session rows and waits before its audit insert.
+    app.install_gate("audit_log", "INSERT", "true").await;
+    app.close_gate().await;
+    let command = set_role(&ctx, &app, auth, login("target"), Role::ProcessEngineer);
+    app.wait_until_at_gate().await;
+
+    let touch_ctx = ctx.clone();
+    let touch = tokio::spawn(async move { authenticate(&touch_ctx, &token).await });
+    app.wait_until_blocked_by_gate().await;
+    app.open_gate().await;
+
+    command.await.unwrap().unwrap();
+    assert!(touch.await.unwrap().unwrap().is_none());
+    assert_eq!(app.rows(AUDIT_ROLE_SET).await, 1);
 }
 
 // Race 6: a reset commits between the check and the final transaction.
