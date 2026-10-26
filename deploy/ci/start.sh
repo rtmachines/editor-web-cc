@@ -9,7 +9,7 @@ compose config --quiet
 timeout 300s bash -c '
   source "$GITHUB_WORKSPACE/deploy/ci/common.sh"
   compose pull --ignore-buildable --quiet
-'
+' || fail "the image pull failed or exceeded 300 seconds"
 deadline=$((SECONDS + 60))
 memory_premigrate
 memory_watch backup-premigrate '' 60 &
@@ -18,8 +18,8 @@ trap 'kill "$memory_pid" 2>/dev/null || true' EXIT
 timeout 60s bash -c '
   source "$GITHUB_WORKSPACE/deploy/ci/common.sh"
   compose -f "$CI_STATE/memory.compose.yaml" up -d --no-build
-'
-wait "$memory_pid"
+' || fail "the stack start failed or exceeded 60 seconds"
+wait "$memory_pid" || fail "the startup memory check failed"
 trap - EXIT
 while (( SECONDS < deadline ))
 do

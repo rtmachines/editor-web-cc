@@ -3,6 +3,11 @@
 set -euo pipefail
 umask 077
 
+fail() {
+  printf 'CI: %s\n' "$1" >&2
+  exit 1
+}
+
 case ${1:?} in
   setup)
     sudo apt-get update -qq
@@ -38,5 +43,5 @@ case ${1:?} in
         }
       '
     ;;
-  *) exit 1 ;;
+  *) fail "usage: rust-tests.sh setup|panic|secure" ;;
 esac

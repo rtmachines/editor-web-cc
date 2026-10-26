@@ -72,7 +72,8 @@ SQL
   actual=$(compose exec -T -u postgres db psql -X -qAt -v ON_ERROR_STOP=1 -d recipe <"$CI_STATE/guard.sql")
   # Upgrade steps 16 and 17. EOF closes psql before the comparison.
   expected=$(grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' \
-    "$GITHUB_WORKSPACE/deploy/pgtools/restore-code.expected" | cut -d'|' -f4)
+    "$GITHUB_WORKSPACE/deploy/pgtools/restore-code.expected" | cut -d'|' -f4) \
+    || fail "cannot read the expected guard SHA-256"
   [[ $expected =~ ^[0-9a-f]{64}$ && $actual == "$expected" ]] \
     || fail "the guard SHA-256 differs from the new restore-code.expected"
   printf 'The guard SHA-256 matches the new image.\n'

@@ -4,8 +4,8 @@ set -euo pipefail
 umask 077
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-[[ $(sudo stat -c %a "$RECIPE_BACKUP_DIR") == 755 ]]
-[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 700 ]]
+[[ $(sudo stat -c %a "$RECIPE_BACKUP_DIR") == 755 ]] || fail "the backup directory mode is not 755"
+[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 700 ]] || fail "the WAL archive directory mode is not 700"
 found=false
 for manifest in "$RECIPE_BACKUP_DIR"/recipe_*_now.dump.sha256
 do
@@ -20,12 +20,16 @@ do
 done
 $found || fail "no new backup set exists"
 compose exec -T walarchive bash -eu -c '
+  fail() {
+    printf "CI: %s\n" "$1" >&2
+    exit 1
+  }
   found=false
   for path in /wal/base/base_*
   do
     test -d "$path" || continue
-    test "$(stat -c %a "$path")" = 700
+    test "$(stat -c %a "$path")" = 700 || fail "a WAL base directory mode is not 700"
     found=true
   done
-  "$found"
+  "$found" || fail "no WAL base directory exists"
 '

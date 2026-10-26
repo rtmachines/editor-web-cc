@@ -238,6 +238,35 @@ fn volume_deletions(script: &str) -> Vec<String> {
 }
 
 #[test]
+fn deploy_values_ci_cleanup_continues_after_failures() {
+    let cleanup = include_str!("../../../deploy/ci/cleanup.sh");
+    let code: Vec<_> = lines::code_lines(cleanup)
+        .into_iter()
+        .map(str::trim)
+        .collect();
+    assert!(
+        !code.iter().any(|line| line.contains("|| exit")),
+        "cleanup must save failures and continue"
+    );
+    assert!(code.windows(2).any(|pair| pair
+        == [
+            "status=0",
+            "compose down --volumes --remove-orphans || status=$?",
+        ]));
+    assert!(code.contains(&r#"docker volume rm "$volume" >/dev/null || status=$?"#));
+    assert!(code.ends_with(&[
+        "for disk in backups walarchive",
+        "do",
+        r#"if mountpoint -q "$CI_ROOT/$disk""#,
+        "then",
+        r#"sudo umount "$CI_ROOT/$disk" || status=$?"#,
+        "fi",
+        "done",
+        r#"exit "$status""#,
+    ]));
+}
+
+#[test]
 fn deploy_values_ci_volume_deletions_stay_in_throwaway_scripts() {
     let deploy = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy");
     let mut actual = Vec::new();
@@ -249,11 +278,11 @@ fn deploy_values_ci_volume_deletions_stay_in_throwaway_scripts() {
     let mut expected = vec![
         (
             "ci/cleanup.sh".into(),
-            "compose down --volumes --remove-orphans || exit 1".into(),
+            "compose down --volumes --remove-orphans || status=$?".into(),
         ),
         (
             "ci/cleanup.sh".into(),
-            r#"docker volume rm "$volume" >/dev/null"#.into(),
+            r#"docker volume rm "$volume" >/dev/null || status=$?"#.into(),
         ),
         (
             "ci/upgrade.sh".into(),
@@ -279,16 +308,21 @@ fn deploy_values_ci_volume_removal_keeps_label_and_name_guards() {
         "set -euo pipefail",
         "umask 077",
         r#"source "$(dirname "${BASH_SOURCE[0]}")/common.sh""#,
-        "compose down --volumes --remove-orphans || exit 1",
+        "status=0",
+        "compose down --volumes --remove-orphans || status=$?",
         "volume=${COMPOSE_PROJECT_NAME}-one-filesystem",
         r#"if docker volume inspect "$volume" >/dev/null 2>&1"#,
         "then",
-        r#"[[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]"#,
-        r#"docker volume rm "$volume" >/dev/null"#,
+        r#"if [[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]"#,
+        "then",
+        r#"docker volume rm "$volume" >/dev/null || status=$?"#,
+        "else",
+        "status=1",
+        "fi",
         "fi",
     ]));
     assert!(cleanup.contains(
-        "# The label check and run-scoped name restrict deletion to this fixture on a throwaway CI runner.\n  # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata."
+        "# The label check and run-scoped name restrict deletion to this fixture on a throwaway CI runner.\n    # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata."
     ));
     let common = include_str!("../../../deploy/ci/common.sh");
     assert!(lines::code_lines(common).starts_with(&[
@@ -338,4 +372,68 @@ fn deploy_values_ci_volume_scan_detects_destructive_variants() {
         assert_eq!(volume_deletions(command).len(), 1, "missed {command}");
     }
     assert!(volume_deletions("# docker volume rm pgdata\ndocker volume inspect pgdata").is_empty());
+}
+
+#[test]
+fn deploy_values_ci_diagnostics_reject_silent_exits() {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/ci");
+    for (path, script) in deploy_scripts(&directory) {
+        let name = path.file_name().unwrap().to_str().unwrap();
+        if name == "cleanup.sh" {
+            continue;
+        }
+        for (index, line) in script.lines().enumerate() {
+            if name == "common.sh" && matches!(index, 6 | 7) {
+                continue;
+            }
+            assert!(
+                !line.contains("|| exit 1") && !line.contains("*) exit 1"),
+                "{} has a silent exit: {line}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn deploy_values_ci_diagnostics_name_mode_failures() {
+    let script = include_str!("../../../deploy/ci/modes.sh");
+    let script = script.replace("\\\n", " ");
+    for check in [
+        r#"[[ $(sudo stat -c %a "$RECIPE_BACKUP_DIR") == 755 ]]"#,
+        r#"[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 700 ]]"#,
+        r#"test "$(stat -c %a "$path")" = 700"#,
+        r#""$found""#,
+    ] {
+        assert!(
+            script
+                .lines()
+                .any(|line| { line.trim().starts_with(check) && line.contains("|| fail ") }),
+            "the mode check needs a diagnostic: {check}"
+        );
+    }
+}
+
+#[test]
+fn deploy_values_ci_diagnostics_print_step_evidence() {
+    let workflow = include_str!("../../../.github/workflows/ci.yml");
+    assert!(workflow.replace("\r\n", "\n").contains(
+        "if: failure()\n        timeout-minutes: 3\n        run: bash deploy/ci/diagnostics.sh"
+    ));
+    let diagnostics = include_str!("../../../deploy/ci/diagnostics.sh");
+    for (producer, evidence) in [
+        (include_str!("../../../deploy/ci/isolation.sh"), "tcp.log"),
+        (
+            include_str!("../../../deploy/ci/same-filesystem.sh"),
+            "same-filesystem.log",
+        ),
+    ] {
+        assert!(producer.contains(&format!(r#">"$CI_STATE/{evidence}" 2>&1"#)));
+        assert!(
+            diagnostics
+                .lines()
+                .any(|line| { line.contains("redact.py") && line.contains(evidence) }),
+            "diagnostics must print {evidence} through the redactor"
+        );
+    }
 }

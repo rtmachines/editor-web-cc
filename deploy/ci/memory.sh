@@ -121,7 +121,11 @@ memory_pitr() {
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
-  [[ ${1:-} == hold ]] || exit 1
+  fail() {
+    printf 'CI: %s\n' "$1" >&2
+    exit 1
+  }
+  [[ ${1:-} == hold ]] || fail "usage: memory.sh hold command"
   shift
   memory_hold "$@"
 fi
