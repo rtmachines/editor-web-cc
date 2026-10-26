@@ -89,7 +89,7 @@ A version page shows these items from top to bottom. Each item appears only for 
 - Under the fields: **Export version { $number } as JSON** for an approved or a retired version. A retired version shows a notice before the link.
 - In the next row of links, which has no heading: **Approve version { $number }** for a draft.
 - In the same row: **Compare with the approved version { $number }**, **Compare with the base version { $number }**, and **History**. **History** shows for every version.
-- Above the table **Parameters**: the table **Outdated parameters** and the rebind forms of a draft. Each form has the heading **Rebind { $from } to { $to }**. It also has the button **Rebind parameters**.
+- Above the table **Parameters**: the table **Outdated parameters** and the rebind forms of a draft. Each form has the heading **Rebind { $from } to { $to }**. It also has the button **Rebind parameters**. When the forms exceed the limit `form.rebind_leaves`, a size notice replaces the inputs and the button ([ADR-0044](../adr/0044-bound-of-the-rebind-forms.md)).
 - Under the table **Parameters**: the link **Add a parameter** for a draft.
 - The section **Actions** stands at the end of the page. It holds one of the two items below.
 - **Retire version { $number }** in the disclosure **Retire this version** for an approved version.
