@@ -200,9 +200,9 @@ async fn healthz_answers_200_ok_on_the_internal_listener_after_the_start() {
 }
 
 /// `/readyz` answers 503 `not ready` until the public listener is bound, and 200 after that
-/// (ADR-0091 (e)). The window of the 503 spans the steps 9 and 10 of the start, a few
-/// milliseconds. A test cannot observe it without a race, so it checks the other side: every
-/// answer before the 200 is a 503, and the public port accepts a connection at the 200.
+/// (ADR-0091 (e)). The window of the 503 spans steps 9 and 10 of the start. It lasts a few
+/// milliseconds. A test cannot observe it without a race. So it checks the other side.
+/// Every answer before the 200 is a 503, and the public port accepts a connection at the 200.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn readyz_answers_200_only_when_the_public_listener_accepts_connections() {
     let setup = Setup::new();

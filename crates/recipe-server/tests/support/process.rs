@@ -44,6 +44,9 @@ impl Pipe {
 }
 
 /// A running `recipe-server serve`.
+///
+/// The `Drop` impl kills the child. When the test process itself gets `SIGKILL`, `Drop` does not
+/// run, and the `serve` child keeps running. The project accepts this for test code.
 pub struct ServerProcess {
     child: Child,
     stdout: Pipe,
@@ -206,7 +209,8 @@ impl ServerProcess {
 
     /// Kill the child and wait for it. The call does nothing for a child that already exited.
     pub fn kill(&mut self) {
-        // The child may have exited already. Then both calls fail, and that is fine.
+        // The child may have exited already. Then `kill` returns `Ok(())` and `wait` returns the
+        // saved exit status. Both results are ignored here.
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

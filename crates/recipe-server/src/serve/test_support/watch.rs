@@ -51,6 +51,8 @@ impl Watch {
         let Some(health) = self.state.health.lock().unwrap().clone() else {
             return;
         };
+        // The test pins the `Debug` text `draining: true` of `HealthState` on purpose. A change of
+        // the `Debug` output must update this check and the test that reads it.
         let draining = format!("{health:?}").contains("draining: true");
         if draining && !self.state.readiness_reported.swap(true, Ordering::SeqCst) {
             self.log.push(Event::ReadinessOff);

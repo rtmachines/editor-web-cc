@@ -61,6 +61,9 @@ pub type Postgres = ContainerAsync<GenericImage>;
 ///
 /// Several tests of one process start containers at the same time. A second removal would stop
 /// the container of a test that already runs.
+///
+/// The `Once` works for one process per test binary. A runner that starts several processes of
+/// one binary, such as `cargo nextest`, can remove the containers of a concurrent run.
 static OLD_CONTAINERS: Once = Once::new();
 
 /// Remove the containers that earlier runs with the label value `label_value` left behind.
@@ -100,7 +103,8 @@ fn bind_to_loopback(host_config: &mut HostConfig) {
 /// Start the container. The call fails with a clear message when Docker is not available.
 ///
 /// `label_value` marks the container, so the next run of the same test file can remove a
-/// container that a killed run left behind.
+/// container that a killed run left behind. The removal runs once per process. See
+/// `OLD_CONTAINERS` for the limit with several processes of one test binary.
 pub async fn start_container(label_value: &'static str) -> Postgres {
     OLD_CONTAINERS.call_once(|| remove_old_containers(label_value));
     // A checkout with CRLF line endings must not break the shell script.

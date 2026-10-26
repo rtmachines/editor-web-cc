@@ -147,7 +147,7 @@ fn run_bounded_kills_a_child_that_runs_too_long() {
     run_bounded(sleeping_command(), Duration::from_millis(300), 1024);
 }
 
-/// The published port must listen on the loopback address only (review S2).
+/// The published port must listen on the loopback address only.
 fn assert_port_on_loopback(container: &Postgres) {
     let output = Command::new("docker")
         .args(["port", container.id(), "5432/tcp"])

@@ -124,7 +124,7 @@ pub(in crate::serve) enum Point {
 #[derive(Default)]
 struct FireState {
     point: Option<Point>,
-    /// Do not yield after the signal fired, so the step ends in the same poll (finding VX10-1).
+    /// Do not yield after the signal fired, so the step ends in the same poll (ADR-0061 (f)).
     immediate: bool,
     sender: Option<oneshot::Sender<()>>,
 }
@@ -220,7 +220,7 @@ struct HoldState {
 /// A wait in the first read of the state of step 9. A test arms it and releases it later.
 ///
 /// The wait lets a test send a request to the running internal listener while the start is
-/// between step 8 and step 10 (finding CRX-S8-2).
+/// between step 8 and step 10 (ADR-0061 step 10).
 #[derive(Clone, Default)]
 pub(in crate::serve) struct Hold(Arc<HoldState>);
 

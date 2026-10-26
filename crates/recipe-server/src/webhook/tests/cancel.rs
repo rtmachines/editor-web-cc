@@ -1,4 +1,4 @@
-//! Tests that `run_bounded` cancels its calls (finding CRX-S7-3, ADR-0063).
+//! Tests that `run_bounded` cancels its calls (ADR-0063).
 //!
 //! Each call holds a guard. The drop of the guard proves that the runtime dropped the future of
 //! the call. The tests use paused time and no socket.

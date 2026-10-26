@@ -1,4 +1,4 @@
-//! Proof that the checks on the isolation of `pitr-check` can fail (finding CR-S10-3).
+//! Proof that the checks on the isolation of `pitr-check` can fail.
 //!
 //! The service `pitr-check` joins no network and mounts no secret (design D10, `compose.yaml`).
 //! Each case changes one copy of `compose.yaml` and asserts a fault that names the service.

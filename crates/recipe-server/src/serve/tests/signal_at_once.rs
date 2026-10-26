@@ -1,4 +1,4 @@
-//! A stop signal that arrives while a step ends in the same poll ends the start (finding VX10-1).
+//! A stop signal that arrives while a step ends in the same poll ends the start (ADR-0061 (f)).
 //!
 //! The stub fires the signal inside step 9 and the step returns at once. The step never yields,
 //! so the start must see the signal by itself. ADR-0061 says that a signal before step 10 ends
