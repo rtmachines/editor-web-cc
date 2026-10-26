@@ -242,7 +242,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Release note, manual superuser step: on an older volume, the superuser replaces the guard function during the upgrade (ADR-0097 (h3)). The section "An older volume" of `docs/ops/runbook.md` describes this step.
 - The CI jobs `compose` and `upgrade` give their stack checks, upgrade checks, failure diagnostics, and cleanup a step time limit. They name the reason of each skipped check and fail on an OOM kill.
 - The shell tracing scan of CI covers every script of `deploy/` and of the workflows.
-- The tests of `recipe-server` bound the time and the output of each child process and each Docker call. The serve tests hold their ports.
+- The test helpers of `recipe-server` bound the time of each child process that they run, and the helper `run_bounded` also bounds the output. The helpers run each Docker call. The serve tests hold their ports.
 - `Schedule` has no public `Default`, and `ScheduleFault` has no `Error` implementation.
 
 ### Fixed
