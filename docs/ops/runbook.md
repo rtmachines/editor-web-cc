@@ -222,7 +222,7 @@ docker compose exec -u postgres db psql -d recipe -c "SELECT line_number, type, 
 
 ### Create the first administrator
 
-The command does nothing when an active administrator exists.
+The command does nothing when an active administrator exists. If the only administrator cannot log in, see [Known gaps](#known-gaps).
 The new administrator must change the password at the first login.
 
 1. Run the command below. It reads the password without an echo and passes it on stdin.
@@ -298,6 +298,8 @@ A live run writes under a temp name (`reliability.md` 7.7, ADR-0077 (h)).
 The check of step 3 shows one instant, so the time of step 1 keeps a scheduled run away from steps 5 and 6.
 
 ### Restore into production
+
+Warning: this procedure is not complete for 0.1.0. See [Known gaps](#known-gaps).
 
 The restore goes into a new `db` volume (ADR-0020).
 The old volume `pgdata` stays on the host.
@@ -481,6 +483,8 @@ The restore goes into a new `db` volume. The switch step is open, as the section
 It is not part of the normal upgrade.
 
 ## Major upgrade
+
+Warning: this procedure is not complete for 0.1.0. See [Known gaps](#known-gaps).
 
 A major upgrade of PostgreSQL is a dump and a restore into a new `db` volume.
 The new volume uses the same `initdb` arguments as `compose.yaml`. The project does not use `pg_upgrade` (ADR-0020).
@@ -825,5 +829,13 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - The trusted-proxy entries in `Caddyfile` and `compose.yaml` do not survive a release. A new release replaces both files. After each upgrade, write the entries again (sections "Upgrade" and "A plant device in front of Caddy").
 - The rule that a restore goes into a new volume is only in a non-normative design note (D13). No ADR holds it. No workaround.
 - No command runs the audit chain check on demand. The job `audit_chain_check` runs by schedule at `audit.check_time`, and once after `audit.catchup_delay` at a start of `app` when `audit.last_check_at` is older than `audit.catchup_age`. After a restore, wait for the next run.
+- The soak test of `reliability.md` section 6 is not implemented. The repository holds no soak script and no nightly CI job for it. The 2 h local run with an RSS chart did not run, so no file `docs/ops/soak-<date>.md` exists. The limits of that test stay unproven. They are `soak.memory_ceiling` of `reliability.md` 7.11, zero restarts, and the p99 latency bound of section 6. No workaround.
+- The section "Check the host firewall" gives no rule that limits the network `egress` to the webhook host (ADR-0063 (p)). No workaround.
+- The file `compose.yaml` sets no `RECIPE_ALERTS__WEBHOOK_CA_FILE` and mounts no CA file. The key `alerts.webhook_ca_file` therefore stays empty, and the webhook client trusts the webpki roots only (ADR-0063 (j)). No workaround.
+- No test measures the recovery time objective of `reliability.md` 7.7 (ADR-0020).
+- The procedure "Restore into production" assumes an empty cluster with no project role and no database `recipe`. On an empty volume, the service `db` runs `db/initdb/01-roles.sh` and creates them (`deploy/compose.yaml`, `deploy/db/initdb/01-roles.sh`). The procedure is not complete for 0.1.0. No workaround.
+- The restore into a new volume and the major upgrade do not handle the WAL archive (`walarchive`). After a restore into a new cluster, the old base backups can name higher segments than the new cluster (ADR-0077). The section "A gap in the WAL stream" covers an outage only. No workaround.
+- No procedure recovers access when the only administrator cannot log in. The command `create-admin` does nothing when an active administrator exists. Only a user with `UserManage` resets a password (`api.md` section 3). No workaround.
+- A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
 
 A later change will close these gaps with its own ADR.
