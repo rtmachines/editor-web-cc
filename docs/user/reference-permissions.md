@@ -16,7 +16,7 @@ Each role maps to a fixed set of permissions (ADR-0013).
 
 ## Permissions by action
 
-The table lists each action with its permission name. The permission names are the variants of the `Permission` enum (`api.md` section 3.1). [`api.md`](../architecture/api.md) section 3.3 is the authority for every cell of this table.
+The table lists each action with its permission name. The permission names are the variants of the `Permission` enum (`api.md` section 3.1). [`api.md`](../architecture/api.md) section 3.3 is the normative matrix. It wins when the two tables differ.
 
 `yes` means that the role may take the action. `no` means that the role may not take it. `yes (c)` means that the role may take the action only under the condition that follows the table.
 
@@ -65,23 +65,9 @@ An approval retires the previous **Approved** version (`api.md` section 3.3).
 
 ## Refusals
 
-When the role lacks the permission of an action, the server returns HTTP status `403` with the code `E-WEB-002`. The text names the refused action (`api.md` section 5.1):
+When the role lacks the permission of an action, the server returns HTTP status `403` with the code `E-WEB-002`. The server records the refusal as a security event (`api.md` section 3.2). If the acting user loses the permission or the active state during a user change, the server also refuses with `E-WEB-002` (ADR-0096).
 
-> Your role does not permit the operation {operation}.
-
-The server records the refusal as a security event (`api.md` section 3.2). If the acting user loses the permission or the active state during a user change, the server also refuses with `E-WEB-002` (ADR-0096).
-
-The table lists the other refusal codes that the rules of this page can show. The codes and their texts are in [`reliability.md`](../architecture/reliability.md) section 1.2.
-
-| Code | HTTP status | English text | When it appears |
-|---|---|---|---|
-| `E-WEB-002` | `403` | Your role does not permit the operation {operation}. | The role lacks the permission of the action. |
-| `E-WEB-004` | `401` | Log in to continue. | There is no session, or the session expired. |
-| `E-WEB-006` | `503` | The system is in read-only mode because the free disk space is low or unknown. Contact the administrator. | The server refuses every change of data, except log in, log out, and export. |
-| `E-RCP-010` | `409` | Recipe {reference} has an approved version. An Administrator can retire the version. | An Administrator deletes a recipe that has an **Approved** version. |
-| `E-RCP-015` | `409` | User {login} created or edited draft {number} of recipe {reference}. A different user must approve it. | The approver created or edited the draft. |
-| `E-RCP-026` | `409` | Recipe {reference} has a retired version. Only an administrator can delete it. | A Process engineer deletes a recipe that has a **Retired** version. |
-| `E-IDN-002` | `409` | {login} is the last active administrator. Add another administrator first. | A user action deactivates or changes the role of the last active Administrator. |
+The codes of all refusals and their texts are in [`reliability.md`](../architecture/reliability.md) section 1.2.
 
 ## Related pages
 
