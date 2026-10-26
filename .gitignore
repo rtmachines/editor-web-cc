@@ -27,6 +27,11 @@ node_modules/
 /playwright/.cache/
 /playwright/.auth/
 
+# Browser regression suite, ADR-0048. node_modules/ above covers e2e/node_modules/.
+/e2e/test-results/
+/e2e/playwright-report/
+/e2e/.auth/
+
 # Deploy secrets and env file (ADR-0062 (p)).
 /deploy/.env
 /deploy/secrets/
