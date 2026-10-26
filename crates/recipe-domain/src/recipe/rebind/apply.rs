@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use super::{RebindPlan, RebindTargetReason};
-use crate::plant::{PlcTypeId, TypeNode, TypeTree, TypeTrees};
+use crate::plant::{MemberName, PlcTypeId, TypeNode, TypeTree, TypeTrees};
 use crate::recipe::draft::{check_value, stored_limits, stored_value};
 use crate::recipe::{
     Draft, DraftError, Parameter, ParameterChange, ParameterKey, ProcessLimit, RecipeError,
@@ -53,19 +53,10 @@ fn matching_children<'a>(
                 ..
             },
         ) => {
-            if left_name != right_name
-                || left_revision != right_revision
-                || left_members.len() != right_members.len()
-            {
+            if left_name != right_name || left_revision != right_revision {
                 return None;
             }
-            left_members
-                .iter()
-                .zip(right_members)
-                .map(|((left_member, left), (right_member, right))| {
-                    (left_member == right_member).then_some((left, right))
-                })
-                .collect()
+            paired_members(left_members, right_members)
         }
         (
             TypeNode::Array {
@@ -81,6 +72,24 @@ fn matching_children<'a>(
         ) => (left_dimensions == right_dimensions).then(|| vec![(left.as_ref(), right.as_ref())]),
         _ => None,
     }
+}
+
+/// Pair the members of two structs by position. Return `None` when the lists differ in length
+/// or in a member name.
+fn paired_members<'a>(
+    planned: &'a [(MemberName, TypeNode)],
+    real: &'a [(MemberName, TypeNode)],
+) -> Option<Vec<(&'a TypeNode, &'a TypeNode)>> {
+    if planned.len() != real.len() {
+        return None;
+    }
+    planned
+        .iter()
+        .zip(real)
+        .map(|((left_member, left), (right_member, right))| {
+            (left_member == right_member).then_some((left, right))
+        })
+        .collect()
 }
 
 /// Everything that `apply_rebind` needs to check one affected parameter.
