@@ -1346,7 +1346,8 @@ docker compose logs --no-log-prefix --since 24h app | grep -F '"level":"ERROR"'
 ```
 
 To combine two patterns, add a second `grep -F` after the first one.
-A user error with the HTTP status 4xx is an `INFO` line, so a search for `ERROR` does not find it (`reliability.md` 3.3).
+An ordinary validation error of a user, with the HTTP status 4xx, is an `INFO` line. A search for `ERROR` does not find it.
+Some 4xx errors have the level `WARN` or `ERROR`. `reliability.md` 3.3 gives the level policy.
 The names of the alert conditions are in the section "Alarms". The names of the jobs are in `reliability.md` 2.4.
 
 ### Find the lines of a user report
