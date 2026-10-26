@@ -30,7 +30,7 @@ An approved version keeps the same types, limits, and values for its whole life.
 
 ### The audit log shows who changed what
 
-Every command writes an audit entry in the same transaction as the change (R20, [ADR-0005](../adr/0005-audit-log-all-mutations.md)). The application cannot edit or delete an entry. Each entry also holds a hash of the previous entry. A changed entry therefore breaks the chain, and a nightly job reports the break ([ADR-0022](../adr/0022-approval-policy.md)).
+Each committed change records its audit entry in the same transaction as the change (R20, [ADR-0005](../adr/0005-audit-log-all-mutations.md)). [`domain-model.md`](../architecture/domain-model.md) section 5 lists the commit paths and the cases without an entry. The application cannot edit or delete an entry. Each entry also holds a hash of the previous entry. A changed entry therefore breaks the chain, and a nightly job reports the break ([ADR-0022](../adr/0022-approval-policy.md)).
 
 ### A second person approves the change
 
