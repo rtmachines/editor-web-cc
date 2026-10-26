@@ -292,14 +292,14 @@ The check of step 3 shows one instant, so the time of step 1 keeps a scheduled r
 
 The restore goes into a new `db` volume (ADR-0020).
 The old volume `pgdata` stays on the host.
-The step that makes a new volume the volume of `db` is open. No document gives its command.
+The step that makes a new volume the volume of `db` is open. No document gives its command. See "Known gaps".
 The steps below start with an empty new cluster as `db`. It holds no database `recipe` and no project role.
 `<stamp>` is the part of the dump file name between `recipe_` and `.dump`, for example `<YYYYMMDD_HHMM>_now`.
 
 Warning: a restore of a dump loses every change and audit entry after the dump time. The loss is up to 24 hours.
 Keep `pgdata` and the WAL archive disk unchanged.
 A recovery from the WAL archive gives a recovery point of minutes (`reliability.md` 7.7, ADR-0068 (l), R31).
-This page gives no steps for that recovery.
+This page gives no steps for that recovery. See "Known gaps".
 
 1. Run the restore test. Continue only after it passes. The test checks the newest complete set.
 2. Run `docker compose stop app`.
@@ -454,7 +454,7 @@ If the migration did not follow the expand pattern, use the `_premigrate` dump.
 Warning: this restore loses every change and audit entry after the `_premigrate` dump.
 The lost period runs from the `_premigrate` dump to the stop of `app`.
 No test checks the `_premigrate` set. The test before the upgrade checks a set of the same schema (ADR-0083).
-The restore goes into a new `db` volume. The switch step is open, as the section "Restore into production" says.
+The restore goes into a new `db` volume. The switch step is open, as the section "Restore into production" says. See "Known gaps".
 
 1. Run `docker compose stop app`.
 2. Use steps 4 to 8 of "Restore into production" for the newest `_premigrate` set. Use its name as `<stamp>`.
@@ -480,7 +480,7 @@ The new volume uses the same `initdb` arguments as `compose.yaml`. The project d
 4. Check that the line `restore test passed` names the `_now` set of step 2.
 
 The test comes before the switch (`reliability.md` 7.10 step 8).
-The switch makes the new volume the volume of `db`. No document gives the command of this switch (ADR-0020), so the switch step is open.
+The switch makes the new volume the volume of `db`. No document gives the command of this switch (ADR-0020), so the switch step is open. See "Known gaps".
 After the switch, restore the `_now` set with steps 4 to 10 of the section "Restore into production". Use the name of the `_now` set for `<stamp>`.
 Keep the old volume `pgdata` on the host.
 
@@ -772,3 +772,17 @@ A wrong `PROXY_ADDRESS` gives each client the address of `proxy` (ADR-0065).
 - [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
 - [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
 - [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
+
+## Known gaps
+
+The documents do not yet close the gaps below. Each bullet gives the workaround of this page, if one exists.
+
+- The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up`. Read the subnets again and write the firewall rules again (section "Check the host firewall").
+- No document gives the mechanism that makes a new volume the volume of `db`. The restore, the rollback, and the major upgrade therefore stop before the volume switch. No workaround.
+- No document gives the steps to recover production from the WAL archive. The recovery point of minutes (ADR-0020, `reliability.md` 7.7) has no procedure yet. The workaround is a restore of a dump, with a loss of up to 24 hours.
+- No document gives the transfer of the external images `caddy` and `postgres`, or the digest check after `docker load`. The section "Load the images" names only `recipe-server` and `recipe-pgtools`. No workaround.
+- The trusted-proxy entries in `Caddyfile` and `compose.yaml` do not survive a release. A new release replaces both files. After each upgrade, write the entries again (sections "Upgrade" and "A plant device in front of Caddy").
+- The rule that a restore goes into a new volume is only in a non-normative design note (D13). No ADR holds it. No workaround.
+- No command runs the audit chain check on demand. The job `audit_chain_check` runs by schedule at `audit.check_time`, and once after `audit.catchup_delay` at a start of `app` when `audit.last_check_at` is older than `audit.catchup_age`. After a restore, wait for the next run.
+
+A later change will close these gaps with its own ADR.
