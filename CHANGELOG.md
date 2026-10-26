@@ -232,8 +232,16 @@ This file records the notable changes of the recipe editor. The format follows [
 - `recipe_app` no longer holds `pg_read_all_stats`. The function `replication_state()` of `audit_owner` reads the replication state, and `public.replication_state()` is in the guard list of ADR-0034.
 - The service `backup` runs `supercronic` and has the limit `container.backup_memory` of 512 MiB in place of 128 MiB (ADR-0067).
 - `Cargo.lock` holds `tokio` 1.54.1 in place of 1.53.2.
+- Release note, manual superuser step: on an older volume, the superuser replaces the guard function during the upgrade (ADR-0097 (h3)). The section "An older volume" of `docs/ops/runbook.md` describes this step.
 
 ### Security
 
 - `Cargo.lock` holds `rustls` 0.23.46 in place of 0.23.45 (RUSTSEC-2026-0346 to RUSTSEC-2026-0349).
 - `Cargo.lock` holds `rustls-webpki` 0.103.16 in place of 0.103.15 (RUSTSEC-2026-0382) and `webpki-roots` 1.0.10 in place of 1.0.9 (RUSTSEC-2026-0381).
+- (F1) The restore test refuses each statement of the globals file that is outside a closed role grammar (ADR-0095). This change narrows finding F1 and does not close it. A crafted entry of the dump file can still run SQL (ADR-0095 (h)).
+- (F2) `SetUserRole` and `DeactivateUser` take the guard lock of the last Administrator first (ADR-0096). The lock is advisory class 4 with key 0. Both commands run in one `READ COMMITTED` transaction with no retry.
+- (F3) The drop guard of the audit objects compares the object type and the bare name, without the schema (ADR-0097). A renamed schema `public` no longer lets a drop pass the guard.
+- (F4) Every use case checks the permission first. `Logout` and `ChangeOwnPassword` now check it as their first statement.
+- (F5) `ChangeOwnPassword` uses two transactions, T1 and T2 (ADR-0035 (b), amended).
+- (F6) The role `recipe_app` gets `INSERT` on eleven columns of `audit_log` in place of the whole table (migration `0008`, ADR-0098). The database sets `id`, `occurred_at`, and the three chain columns. An insert that names another column fails with `42501`.
+- (F7) The `SECURITY DEFINER` functions `audit_hash_chain()` and `security_event_purge()` schema-qualify their operators (migration `0007`, ADR-0098).

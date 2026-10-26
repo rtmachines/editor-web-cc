@@ -68,14 +68,14 @@ At most two cargo agents run at the same time. The instruction files change only
 
 ## 7. Integration
 
-- [ ] 7.1 (CHANGELOG.md) [mechanical] Add the entries of F1 to F7 under "Unreleased". The F1 entry says that the change narrows F1 and does not close it (ADR-0095 (h)). Add the release note line "manual superuser step" for the guard function of an older volume (ADR-0097 (h3)).
+- [x] 7.1 (CHANGELOG.md) [mechanical] Add the entries of F1 to F7 under "Unreleased". The F1 entry says that the change narrows F1 and does not close it (ADR-0095 (h)). Add the release note line "manual superuser step" for the guard function of an older volume (ADR-0097 (h3)).
 - [ ] 7.2 (workspace) [sonnet] Run `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test`, `cargo fmt --check`, `openspec validate --all --strict`, and `ste-lint.py` on the scope of ADR-0023. Check: each command passes, and the CI stack test and the upgrade job of 4.4 pass on the branch.
 
 ## 8. STE checks
 
 - [x] 8.1 (docs/adr) [sonnet] After wave B, run `ste-lint.py` on the six amended ADRs, the four new ADRs, and `docs/adr/README.md`. Fix each hard violation without a change of meaning. Check: 0 hard violations.
 - [x] 8.2 (docs, instruction files) [sonnet] After wave C, run `ste-lint.py` on the files of tasks 2.2, 3.3, 3.4, 4.3, 5.3, and 6.3. Check sentence length and the format rules of `.claude/rules/docs.md`. Report a hard violation in an exact line of `design.md` to the project owner. Do not change it. Check: 0 hard violations in the other lines.
-- [ ] 8.3 (docs, CHANGELOG.md) [sonnet] After task 7.1, run `ste-lint.py` on the files of tasks 4.2 and 7.1. Check: 0 hard violations.
+- [x] 8.3 (docs, CHANGELOG.md) [sonnet] After task 7.1, run `ste-lint.py` on the files of tasks 4.2 and 7.1. Check: 0 hard violations.
 
 ## Workflow follow-up
 
