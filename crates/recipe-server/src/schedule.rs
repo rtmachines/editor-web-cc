@@ -207,7 +207,7 @@ impl Trigger {
 /// follow different rules, and the supervisor must run them in one loop without overlap. A
 /// schedule keeps which one-shot trigger already fired, so the supervisor asks it for the next
 /// wait before the first run and after every run.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Schedule {
     triggers: Vec<Trigger>,
 }
@@ -247,7 +247,10 @@ impl Schedule {
     /// Run one time, `delay` after the start.
     #[must_use]
     pub fn once_after(delay: Duration) -> Self {
-        Self::default().with_once_after(delay)
+        Self {
+            triggers: Vec::new(),
+        }
+        .with_once_after(delay)
     }
 
     /// Add one run, `delay` after the start, to this schedule.
