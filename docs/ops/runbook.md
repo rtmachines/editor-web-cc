@@ -913,23 +913,91 @@ Read the lines with the commands of the section "Read the logs".
 | `not_ready` | Run `docker compose ps`. Read the health of `db` and `app`. Read `docker compose logs db app`. | Run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /healthz`. Run it again with `--path /readyz`. If `app` restarts, use the section "Restart loop". If only `/readyz` fails and `db` is healthy, a migration of the binary may be missing from `_sqlx_migrations` or may have another checksum (`reliability.md` 7.2). No document gives a fix. |
 | `backup_age` | Run `docker compose logs backup`. Read the last `ERROR` line. Then run `docker compose exec backup backup-now`. | None beyond the first action. |
 | `replication` | Run `docker compose ps walarchive` and `docker compose logs walarchive`. For a gap, use the section "A gap in the WAL stream". | None beyond the first action. |
-| `low_disk` | Read the field `volume` of the line: `pgdata`, `backups`, or `walarchive`. Free space on that disk. Delete only files outside the three volumes. Delete no set, no base backup, and no WAL segment by hand. For `pgdata`, use the section "Read-only mode". | None beyond the first action. |
+| `low_disk` | Read the field `volume` of the line: `pgdata`, `backups`, or `walarchive`. | Use the section "Low disk space". For `pgdata`, use the section "Read-only mode" too. |
 | `failed_logins` | Open `/security-events`. Filter the kind `login_failed`. Read `login` and `client_ip`. | If a user cannot log in, an Administrator opens `/users/<login>` and uses the unlock form (`LoginUnlock`, `api.md` 2.8). If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". |
 | `security_events` | Open `/security-events`. Filter the kind `csrf_rejected`. Read `client_ip`. Then filter the kind `forbidden`. Read `client_ip`. | If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". No document gives another action. |
 | `audit_chain_broken` | Read the line `E-AUD-002` in `docker compose logs app`. It names the `chain_seq`. Open the row in `/security-events`. | The condition stays active while the newest row is younger than `audit.max_check_age`. Each nightly check adds a row while the chain stays broken (`reliability.md` 3.7). No document gives a fix. |
 | `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. | A run that returns an error code is not a completed check. Follow the row of that code in `reliability.md` 1.2 (ADR-0100 (e)). A stored time that is later than the time of `db` by more than `alerts.interval` also keeps the alert active (`reliability.md` 3.7). |
 | `export_hash_mismatch` | Read the line `E-EXP-002` in `docker compose logs app`. It names the recipe and the version. | The server refuses the export of that version (`reliability.md` 1.2). No document gives a fix. |
 
+### Low disk space
+
+The condition `low_disk` is active when a volume has less free space than `disk.warn_percent` (`reliability.md` 3.7).
+The webhook body names no volume, so read the field `volume` of the `WARN` lines (ADR-0075 (d), (e)).
+The three volumes lie on these disks:
+
+| Volume | Disk |
+|---|---|
+| `pgdata` | The disk of the Docker root directory |
+| `backups` | The second disk, in the directory `RECIPE_BACKUP_DIR` |
+| `walarchive` | The second disk, in the directory `RECIPE_WALARCHIVE_DIR` |
+
+1. Read the volume of the condition:
+
+```bash
+docker compose logs --no-log-prefix --since 1h app | grep -F '"alert":"low_disk"'
+```
+
+2. List the use of the three disks:
+
+```bash
+df -h "$(docker info --format '{{.DockerRootDir}}')" "$RECIPE_BACKUP_DIR" "$RECIPE_WALARCHIVE_DIR"
+```
+
+3. Read the column `Use%` of the disk of that volume. The free space is about 100 % minus `Use%`.
+
+For `pgdata`, use the section "Read-only mode".
+
+For `backups` or `walarchive`, do these steps:
+
+1. If the condition `backup_age` is active too, use its row first. The retention runs only after a complete new set (`reliability.md` 7.7).
+2. Run the section "Delete orphan temp files". It deletes only the temp names of killed runs.
+3. If the volume stays low, extend the filesystem of the second disk with the site procedure. No document gives that procedure.
+
+Delete no set, no base backup, and no WAL segment by hand.
+The scripts delete them by `backup.retention` and `basebackup.retention` (`reliability.md` 7.7, ADR-0099).
+These two values are constants of the scripts `backup-once` and `basebackup-once`. A change needs a new release.
+A full disk of `walarchive` stops `pg_receivewal` (ADR-0077).
+Read the section "Destructive commands" before each delete.
+
 ### Read-only mode
 
-The application enters read-only mode when the free space of `pgdata` is low or unknown (`reliability.md` 7.8).
-The UI shows the read-only banner, and a change returns `E-WEB-006`.
+The server turns read-only mode on and off by itself. The operator has no switch, no setting, and no command for it.
+The job `disk_check` measures the free space of `pgdata` every `health.disk_check_interval` (`reliability.md` 7.8).
 
-1. Read the mount point: `docker volume inspect --format '{{ .Mountpoint }}' recipe-editor_pgdata`.
-2. Run `df -h <mount point>`.
-3. Free space on the disk of the volume. Delete only files outside the volumes `pgdata`, `backups`, and `walarchive`.
-4. Delete no set, no base backup, and no WAL segment by hand. Delete nothing inside `pgdata`.
-5. Wait for the next measurement. The mode ends without a restart (`reliability.md` 7.8).
+- The mode turns on when the free space is below `disk.readonly_percent`.
+- The mode also turns on when the measurement fails. The free space can be fine in this case.
+- The mode turns off, without a restart, when a measurement shows more than `disk.resume_percent` free.
+- Between the two thresholds, the mode does not change.
+
+The values of `disk.*` are code defaults and not configuration keys (`reliability.md` 7.11). A change needs a new release.
+
+Each page shows the read-only banner (ADR-0071). The server writes no log line when the mode changes, so the banner shows the mode.
+Every query, `Login`, `Logout`, and `ExportVersion` still work (A24 in `overview.md` 9).
+Every other command returns `503` with the code `E-WEB-006`.
+
+To end the mode, do these steps:
+
+1. Run `docker compose logs --no-log-prefix --since 1h app | grep -F '"volume":"pgdata"'`.
+2. If a line says `The free disk space cannot be read.`, use the case "The mode stays on" below.
+3. Read the mount point: `docker volume inspect --format '{{ .Mountpoint }}' recipe-editor_pgdata`.
+4. Run `df -h <mount point>`.
+5. Increase the free space of that disk. Delete only files outside the volumes `pgdata`, `backups`, and `walarchive`.
+6. Delete no set, no base backup, and no WAL segment by hand. Delete nothing inside `pgdata`.
+7. Wait for `health.disk_check_interval`. Load a page again. The banner goes away when the free space is above `disk.resume_percent`.
+
+No document names a file that is safe to delete outside the three volumes.
+If the disk has no such file, extend its filesystem with the site procedure.
+
+#### The mode stays on
+
+If the free space looks fine and the banner stays, find the cause in this list:
+
+- The free space is between `disk.readonly_percent` and `disk.resume_percent`. Increase the free space until it is above `disk.resume_percent`.
+- The measurement fails each run. `app` reads `pgdata` through a read-only mount. Run `docker compose config | grep 'pgdata:/var/lib/postgresql/data:ro'`. The output must show the line.
+- If the mount line is present, run `docker compose ps` and read the health of `app` and `db`. No document gives a further fix.
+
+The mode ends after the first measurement that succeeds and shows more than `disk.resume_percent` free.
 
 ### Restart loop
 
@@ -979,7 +1047,7 @@ Read the address in the output of `docker compose config` at the service `proxy`
 - [ADR-0070](../adr/0070-container-limits-networks-healthchecks-and-stack-test.md), [ADR-0074](../adr/0074-names-on-the-backup-disks.md), [ADR-0075](../adr/0075-names-of-the-alert-conditions.md), [ADR-0077](../adr/0077-recovery-check-wal-cutoff-and-scratch-constants.md)
 - [ADR-0082](../adr/0082-upgrade-and-rollback-without-dependencies.md), [ADR-0083](../adr/0083-pgtools-image-in-the-upgrade-and-the-rollback.md)
 - [ADR-0061](../adr/0061-start-order-of-serve.md), [ADR-0087](../adr/0087-drain-of-the-internal-listener.md)
-- [ADR-0088](../adr/0088-run-interface-of-the-jobs-and-cut-count.md), [ADR-0089](../adr/0089-job-errors-first-disk-run-and-stop-line.md), [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md)
+- [ADR-0071](../adr/0071-read-only-banner.md), [ADR-0073](../adr/0073-read-faults-and-the-audit-chain-alert.md), [ADR-0088](../adr/0088-run-interface-of-the-jobs-and-cut-count.md), [ADR-0089](../adr/0089-job-errors-first-disk-run-and-stop-line.md), [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md)
 
 ## Known gaps
 
