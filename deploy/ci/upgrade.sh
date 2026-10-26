@@ -23,7 +23,8 @@ previous_commit() {
 build_previous() {
   local base
   base=$(previous_commit) || return 1
-  git worktree add --detach "$UPGRADE_PREVIOUS_DIR" "$base" \
+  # The shared umask is 077. The postgres user of the db container must read the mounted init script.
+  (umask 022 && git worktree add --detach "$UPGRADE_PREVIOUS_DIR" "$base") \
     || fail "cannot create the previous worktree. Stop and report."
   printf 'Previous release: %s\n' "$base"
   if ! docker buildx build --load --tag recipe-server:ci-previous \
