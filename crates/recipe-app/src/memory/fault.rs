@@ -16,6 +16,9 @@ pub enum Fault {
     /// The failure `StorageError::Deadlock` with the cause `LockFailure::Serialization`
     /// (`E-DB-001`, SQLSTATE `40001`).
     Serialization,
+    /// The failure `StorageError::Deadlock` with the cause `LockFailure::LockTimeout`
+    /// (`E-DB-001`, SQLSTATE `55P03`).
+    LockTimeout,
     /// The failure `StorageError::StatementTimeout` (`E-DB-002`).
     StatementTimeout,
     /// The failure `StorageError::PoolTimeout` (`E-DB-004`).
@@ -45,6 +48,8 @@ pub enum FaultPoint {
     AppendAudit,
     /// The `finish` of the transaction, which is the commit of the database.
     Finish,
+    /// The call `UserRepository::lock_administrator_guard`, which is the wait for the guard lock.
+    LockAdministratorGuard,
 }
 
 /// The constraint name of [`Fault::UnknownMissingReference`]. No command maps it.
@@ -76,6 +81,9 @@ impl From<Fault> for StorageError {
             },
             Fault::Serialization => Self::Deadlock {
                 cause: LockFailure::Serialization,
+            },
+            Fault::LockTimeout => Self::Deadlock {
+                cause: LockFailure::LockTimeout,
             },
             Fault::StatementTimeout => Self::StatementTimeout,
             Fault::PoolTimeout => Self::PoolTimeout,

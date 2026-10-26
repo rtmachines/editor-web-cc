@@ -112,6 +112,17 @@ async fn count_active_administrators_counts_only_active_administrators(h: &dyn H
     assert_eq!((start, with_boss, without_boss), (1, 2, 1));
 }
 
+async fn the_guard_lock_of_the_last_administrator_is_taken_twice_without_a_wait(h: &dyn Harness) {
+    let mut tx = begin(h).await;
+
+    tx.users().lock_administrator_guard().await.unwrap();
+    // A second call in the same transaction holds the lock already and does not wait.
+    tx.users().lock_administrator_guard().await.unwrap();
+
+    // The lock changes no row: the harness administrator is still the only one.
+    assert_eq!(tx.users().count_active_administrators().await.unwrap(), 1);
+}
+
 contract_case!(
     insert_gives_an_image_without_the_hash,
     insert_gives_an_image_without_the_hash_memory,
@@ -136,4 +147,9 @@ contract_case!(
     count_active_administrators_counts_only_active_administrators,
     count_active_administrators_counts_only_active_administrators_memory,
     count_active_administrators_counts_only_active_administrators_postgres
+);
+contract_case!(
+    the_guard_lock_of_the_last_administrator_is_taken_twice_without_a_wait,
+    the_guard_lock_of_the_last_administrator_is_taken_twice_without_a_wait_memory,
+    the_guard_lock_of_the_last_administrator_is_taken_twice_without_a_wait_postgres
 );

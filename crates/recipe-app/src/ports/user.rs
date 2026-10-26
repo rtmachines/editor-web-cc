@@ -127,6 +127,15 @@ pub trait UserRepository: Send {
         login: &Login,
     ) -> Result<Option<Locked<UserRow>>, StorageError>;
 
+    /// Take the guard lock of the last Administrator (ADR-0096 (b)).
+    ///
+    /// The lock is the advisory lock of class 4 and key 0. It lasts until the end of the
+    /// transaction. A second call in the same transaction does not wait. The wait obeys
+    /// `db.lock_timeout`, and a timeout gives `StorageError::Deadlock` with `LockTimeout`.
+    /// `SetUserRole` and `DeactivateUser` call it first, so the count of
+    /// `count_active_administrators` sees each commit of an earlier holder.
+    async fn lock_administrator_guard(&mut self) -> Result<(), StorageError>;
+
     /// Count the active users with the role `administrator` (last-administrator rule).
     async fn count_active_administrators(&mut self) -> Result<u32, StorageError>;
 

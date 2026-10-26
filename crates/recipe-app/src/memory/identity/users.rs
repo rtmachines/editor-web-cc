@@ -8,13 +8,17 @@ use super::images::user_image;
 use crate::error::{APP_USER_LOGIN_UNIQUE, StorageError};
 use crate::memory::plant::check_offset;
 use crate::memory::rows::{duplicate, missing_row};
-use crate::memory::{LockMode, MemoryTransaction};
+use crate::memory::{FaultPoint, LockMode, MemoryTransaction};
 use crate::ports::{Locked, NewUser, RowImage, UserRepository, UserRow, UserSummary};
 
 /// The table name of the journal for a user lock.
 const USER_TABLE: &str = "app_user";
 /// The name of the primary key of `app_user`.
 const USER_PKEY: &str = "app_user_pkey";
+/// The lock class of the journal line for the guard lock of the last Administrator.
+const ADMINISTRATOR_GUARD_TABLE: &str = "advisory_class_4";
+/// The only key of the guard lock of the last Administrator.
+const ADMINISTRATOR_GUARD_KEY: &str = "0";
 
 /// Raise the session epoch by 1, or fail when the number overflows.
 fn bump_epoch(row: &mut UserRow) -> Result<(), StorageError> {
@@ -76,6 +80,19 @@ impl UserRepository for MemoryTransaction {
         self.lock(USER_TABLE, LockMode::ForNoKeyUpdate, &row.id.to_string());
         let before = user_image(&row);
         Ok(Some(Locked { state: row, before }))
+    }
+
+    async fn lock_administrator_guard(&mut self) -> Result<(), StorageError> {
+        // A timeout takes no lock, so the journal gets no line.
+        if let Some(fault) = self.take_queued_fault(FaultPoint::LockAdministratorGuard) {
+            return Err(fault.into());
+        }
+        self.lock(
+            ADMINISTRATOR_GUARD_TABLE,
+            LockMode::Advisory,
+            ADMINISTRATOR_GUARD_KEY,
+        );
+        Ok(())
     }
 
     async fn count_active_administrators(&mut self) -> Result<u32, StorageError> {

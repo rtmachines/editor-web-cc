@@ -4,8 +4,8 @@ use recipe_domain::identity::Role;
 use serde_json::Value;
 
 use super::{at, begin, hash_a, hash_b, locks, login, new_user, store, text, user_id};
-use crate::error::{APP_USER_LOGIN_UNIQUE, StorageError};
-use crate::memory::{Lock, LockMode};
+use crate::error::{APP_USER_LOGIN_UNIQUE, LockFailure, StorageError};
+use crate::memory::{Fault, FaultPoint, Lock, LockMode};
 use crate::ports::Transaction as _;
 
 fn without_hash(image: &Value) -> bool {
@@ -71,6 +71,42 @@ async fn lock_by_login_of_an_unknown_login_gives_none_and_no_lock() {
     let locked = tx.users().lock_by_login(&login("anna")).await.unwrap();
     assert!(locked.is_none());
     assert_eq!(locks(&store), Vec::new());
+}
+
+#[tokio::test]
+async fn lock_administrator_guard_journals_the_advisory_lock_of_class_4_and_key_0() {
+    let store = store();
+    let mut tx = begin(&store);
+    tx.users().lock_administrator_guard().await.unwrap();
+    assert_eq!(
+        locks(&store),
+        vec![Lock {
+            table: "advisory_class_4",
+            mode: LockMode::Advisory,
+            key: "0".to_owned(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn a_lock_timeout_at_the_guard_lock_gives_the_lock_failure_and_no_journal_line() {
+    let store = store();
+    store.fail_next(FaultPoint::LockAdministratorGuard, Fault::LockTimeout, 1);
+    let mut tx = begin(&store);
+    let error = tx.users().lock_administrator_guard().await.unwrap_err();
+    assert!(
+        matches!(
+            error,
+            StorageError::Deadlock {
+                cause: LockFailure::LockTimeout
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(locks(&store), Vec::new());
+    // The fault fires once. The next call takes the lock.
+    tx.users().lock_administrator_guard().await.unwrap();
+    assert_eq!(locks(&store).len(), 1);
 }
 
 #[tokio::test]

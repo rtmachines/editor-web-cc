@@ -13,8 +13,8 @@ use super::journal::{DraftWrite, JournalEntry, Lock, LockMode, WriteKind};
 use super::state::MemoryState;
 use super::store::{MemoryStore, Shared};
 use crate::error::StorageError;
-use crate::memory::FaultPoint;
 use crate::memory::sink::RecordedEvent;
+use crate::memory::{Fault, FaultPoint};
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DiffReads, DraftRepository, Isolation, NonEmpty,
     PlantRepository, RecipeReads, RecipeRepository, SessionRepository, SettingRepository,
@@ -132,6 +132,11 @@ impl MemoryTransaction {
     #[must_use]
     pub const fn now(&self) -> Timestamp {
         self.now
+    }
+
+    /// Take the oldest queued fault of `point`, or return `None` (`MemoryStore::fail_next`).
+    pub fn take_queued_fault(&self, point: FaultPoint) -> Option<Fault> {
+        self.shared.lock().take_queued(point)
     }
 
     /// Record a lock call in the journal of the store.
