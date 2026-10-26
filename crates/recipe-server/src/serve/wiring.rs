@@ -88,3 +88,6 @@ pub(super) fn health_state(host: &dyn Host, plan: &Plan) -> (ReadinessState, Hea
     let health = HealthState::new(readiness.clone(), clock, plan.settings.health);
     (readiness, health)
 }
+
+#[cfg(test)]
+mod tests;
