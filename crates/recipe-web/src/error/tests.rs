@@ -1,5 +1,5 @@
 use std::io;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
@@ -15,14 +15,12 @@ use recipe_domain::audit::RequestId;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{CredentialFailure, IdentityError, Login, PasswordReason};
 use tower::ServiceExt as _;
-use tracing::Dispatch;
-use tracing::subscriber::{DefaultGuard, NoSubscriber};
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
 use super::*;
 use crate::routes::{Access, RouteEntry, assemble, table};
-use crate::test_support::{PEER, state};
+use crate::test_support::{PEER, install, state};
 
 const BODY_LIMIT: usize = 1024 * 1024;
 const HTMX_CONFIG: &str = r#"{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}"#;
@@ -603,19 +601,6 @@ async fn error_mapping_request_id_of_the_page_is_the_header_value() {
 async fn error_mapping_unknown_test_case_does_not_reach_a_success_page() {
     let answer = ask("no-such-case", &[]).await;
     assert_eq!(answer.status(), StatusCode::UNPROCESSABLE_ENTITY);
-}
-
-/// A registered dispatch that no thread installs. It lives until the test process ends.
-///
-/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
-/// dispatch, a callsite takes its interest from the thread that hits it first. A test thread
-/// without a subscriber then caches `Interest::never` for all threads.
-static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
-
-/// Install a subscriber for the current thread. The drop of the guard removes it.
-fn install(subscriber: impl Into<Dispatch>) -> DefaultGuard {
-    LazyLock::force(&KEEPALIVE);
-    tracing::dispatcher::set_default(&subscriber.into())
 }
 
 /// A writer that copies every line of the log into a shared buffer.

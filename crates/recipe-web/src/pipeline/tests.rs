@@ -16,7 +16,7 @@ use uuid::Uuid;
 use super::{build_request_id, wrap};
 use crate::settings::{CidrList, WebSettings};
 use crate::test_support::{
-    Fixture, REACHED, call, capture_logs, get_with, post_pre_session, post_with, request,
+    Fixture, REACHED, call, capture_logs, get_with, install, post_pre_session, post_with, request,
 };
 
 /// The key file of the pre-session CSRF cookie in these tests.
@@ -594,7 +594,7 @@ async fn pipeline_error_line_holds_the_request_id_under_a_warn_filter() {
         .with_ansi(false)
         .with_max_level(tracing::Level::WARN)
         .finish();
-    let _scoped = tracing::subscriber::set_default(subscriber);
+    let _scoped = install(subscriber);
     let fixture = Fixture::new();
     let inner = Router::new().route("/inner-fault", get(fails_with_a_line));
     let router = wrap(inner, fixture.state.settings());

@@ -7,7 +7,7 @@ pub(crate) mod visible_text;
 
 use std::cell::RefCell;
 use std::net::SocketAddr;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use axum::Router;
@@ -33,6 +33,8 @@ use recipe_domain::identity::{
 };
 use time::OffsetDateTime;
 use tower::ServiceExt as _;
+use tracing::Dispatch;
+use tracing::subscriber::{DefaultGuard, NoSubscriber};
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
@@ -531,6 +533,22 @@ pub(crate) fn capture_logs() -> (LogBuffer, CaptureGuard) {
     let buffer = LogBuffer::default();
     CAPTURE.with(|slot| *slot.borrow_mut() = Some(buffer.clone()));
     (buffer, CaptureGuard)
+}
+
+/// A registered dispatch that no thread installs. It lives until the test process ends.
+///
+/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
+/// dispatch, a callsite takes its interest from the thread that hits it first. A test thread
+/// without a subscriber then caches `Interest::never` for all threads.
+static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
+
+/// Install a subscriber for the current thread. The drop of the guard removes it.
+///
+/// A test that sets its own subscriber calls this function and never `set_default`. The function
+/// differs from `capture_logs`: that one captures into a buffer through the global subscriber.
+pub(crate) fn install(subscriber: impl Into<Dispatch>) -> DefaultGuard {
+    LazyLock::force(&KEEPALIVE);
+    tracing::dispatcher::set_default(&subscriber.into())
 }
 
 /// Build a state over a fresh `MemoryStore` with the default settings.
