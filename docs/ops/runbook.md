@@ -854,6 +854,58 @@ Read the notes of the section "Restart one service". A long stop of `db` can lea
 For `recipe_migrator`, no service uses the new password before the next run of `migrate` in the section "Upgrade". No document gives an earlier test.
 For `postgres`, no service of the stack uses the password after the init of `db`.
 
+## Change a setting
+
+The server `app` reads 17 configuration keys from its environment. It derives the 18th key, `alerts.webhook_url`, from the webhook file (ADR-0062 (a), ADR-0063 (c)).
+The file `compose.yaml` holds the environment entries of `app`. An entry has the form `RECIPE_<SECTION>__<NAME>`, with a double underscore between the parts.
+For example, the key `approval.separation_of_duties` is the entry `RECIPE_APPROVAL__SEPARATION_OF_DUTIES`.
+The file `.env` holds only the eight values of the Compose interpolation. `app` does not read it (ADR-0062 (i), (j)).
+The only value of `.env` in the environment of `app` is `PROXY_ADDRESS`, inside the entry `RECIPE_HTTP__TRUSTED_PROXIES`.
+A secret never goes into an environment entry. A key with the suffix `_file` names a secret file (ADR-0062 (g), (h)).
+
+These keys have a procedure:
+
+| Goal | Key | Where to change it |
+|---|---|---|
+| Turn separation of duties on or off | `approval.separation_of_duties`, the value `true` or `false` | `compose.yaml`, with the steps below |
+| Change the session timeouts | `session.idle_timeout` and `session.absolute_timeout`, whole seconds | `compose.yaml`, with the steps below |
+| Change the languages of the translations | `i18n.translation_langs`, a comma list of language tags | `compose.yaml`, with the steps below |
+| Add a trusted proxy | `http.trusted_proxies`, a comma list of networks | Section "A plant device in front of Caddy" |
+| Change or disable the webhook | The file named by `alerts.webhook_url_file` | Sections "Change the webhook" and "Disable the webhook" |
+| Change the login or CSRF key | The files named by `security.login_hmac_key_file` and `security.csrf_signing_key_file` | Section "Key rotation" |
+| Change the password of the role `recipe_app` | The file named by `secrets.app_password_file` | Section "Change a database password" |
+
+No document describes a change of the other keys. These are `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port`.
+The keys that name a file path and the key `alerts.webhook_ca_file` are also in this group. The section "Known gaps" names the last key.
+Other files of the stack use these values. `Caddyfile` sends requests to `app:8080`, and the health check of `proxy` uses `app:9000`.
+The value `false` for `session.secure` stops the start in a release build (ADR-0062 (b)). Keep the value `true`.
+
+The server reads the environment at each start only. To change a key of the first three rows, do these steps:
+
+1. Open `compose.yaml`. In the service `app`, find the entry of the key.
+2. Write the new value in double quotes, as the other entries do.
+3. Run `docker compose config | grep -F '<entry name>:'`. Check that the output shows the new value.
+4. Run `docker compose up -d --force-recreate --no-deps app`. Without `--no-deps`, Compose runs `backup-premigrate` and `migrate` again (ADR-0082).
+5. Run `docker compose ps app` until `app` shows `healthy`.
+6. Open `/audit` as an Administrator. Filter the action `SettingChanged`.
+7. Open the newest entry of the changed key. Check that `after` shows the new value and `before` shows the old value.
+
+While `app` restarts, Caddy answers `502` (ADR-0065 (p)).
+The server writes one entry `SettingChanged` for each key whose value differs from the stored value. All entries of one start share one `request_id`. The audit log keeps the entries without a time limit (`reliability.md` 7.12).
+The server reads only the names of the table in ADR-0062 (a). It does not read a misspelled name, so the default of the key stays.
+If no entry shows, the value may equal the stored value, or the name in `compose.yaml` may be wrong. Repeat step 3.
+
+A bad value stops the start. `app` writes one `ERROR` line and exits with code 1 (`reliability.md` 7.12, ADR-0061 (b)).
+The line names the key, or it holds the text `the configuration is not valid` for a value of the wrong type. A value of `0` for a timeout is also bad.
+The restart policy `always` then restarts `app`. Use the section "Restart loop" to read the line.
+Write the old value again. Then run step 4.
+
+A new release replaces `compose.yaml`, and the edit is lost (section "Known gaps"). After each upgrade, write the edit again.
+Do it before the step of the section "Upgrade" that replaces `app`. Otherwise the next start records the value of the new file with an entry `SettingChanged`.
+
+The other values of `reliability.md` 7.11 are code defaults and not configuration keys (ADR-0062 (a)). Examples are `disk.*`, `backup.retention`, and `basebackup.retention`.
+A change of a code default needs a new release. See the sections "Read-only mode" and "Low disk space".
+
 ## Alert webhook
 
 The job `alerts` sends one HTTPS `POST` for each active alert condition to the webhook host (`reliability.md` 3.7, ADR-0063).
@@ -1429,7 +1481,7 @@ Read the address in the output of `docker compose config` at the service `proxy`
 
 ## Related
 
-- [reliability.md](../architecture/reliability.md): sections 3.1, 3.2, 3.5, 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, and 7.11
+- [reliability.md](../architecture/reliability.md): sections 3.1, 3.2, 3.5, 3.7, 7.1, 7.2, 7.3, 7.7, 7.8, 7.10, 7.11, and 7.12
 - [api.md](../architecture/api.md): section 2.9
 - [ADR-0020](../adr/0020-deployment-migrations-backup.md), [ADR-0031](../adr/0031-migrator-configuration-and-secret-files.md), [ADR-0033](../adr/0033-globals-dump-of-the-backup.md), [ADR-0035](../adr/0035-identity-sessions-clarifications.md), [ADR-0062](../adr/0062-configuration-keys-and-secret-files.md), [ADR-0063](../adr/0063-webhook-of-the-alerts.md)
 - [ADR-0064](../adr/0064-images-and-their-distribution.md), [ADR-0065](../adr/0065-proxy-tls-and-default-trusted-proxy.md), [ADR-0068](../adr/0068-wal-archive-and-base-backups.md), [ADR-0069](../adr/0069-hardening-of-the-database-access.md)
