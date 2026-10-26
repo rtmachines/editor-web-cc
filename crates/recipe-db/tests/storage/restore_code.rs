@@ -400,7 +400,9 @@ ALTER ROLE recipe_app SET session_preload_libraries TO 'x';"
             "the grammar accepts {name}.\ninput:\n{mutated:?}"
         );
         assert!(
-            report.contains(&line_number.to_string()),
+            report
+                .lines()
+                .any(|text| text.ends_with(&format!("at line {line_number}"))),
             "the fault of {name} does not name line {line_number}.\nreport: {report}"
         );
     }
