@@ -510,17 +510,33 @@ docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_at
 
 8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists (section "Copy the backups off site").
 9. Run `docker compose up -d --no-deps app`.
-10. Check the audit chain: wait for the next run of the job `audit_chain_check`. The alert `audit_chain_broken` stays inactive.
+10. Check the audit chain: wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
-No command runs the chain check on demand. The job runs at `audit.check_time` of `reliability.md` 7.11.
-After a start of `app`, it runs once more after `audit.catchup_delay`. It does so only when `audit.last_check_at` is missing or older than `audit.catchup_age`.
-The value `audit.last_check_at` shows the time of the last completed check (`data-model.md` 4.9). Read it:
+The next run is the catch-up run or the nightly run (ADR-0100, `data-model.md` 4.9).
+The catch-up run starts after `audit.catchup_delay`. It runs only when the restored `audit.last_check_at` is older than `audit.catchup_age` at the start of `app`.
+In all other cases, the nightly run at `audit.check_time` is the next run.
+Read the result in three places.
+
+The first place is `audit.last_check_at` in `app_setting`. A value later than the time of step 9 shows a completed check. The value is a time in UTC.
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "SELECT value FROM app_setting WHERE key = 'audit.last_check_at'"
 ```
 
-The alert `audit_check_age` is active when this value is older than `audit.max_check_age`.
+The second place is the event log of `app`. An `ERROR` line of the job `audit_chain_check` with the `error_code` `E-AUD-002` shows a break.
+Use the command form of the section "Read the logs", subsection "Read the lines of a job", and add the pattern of the code:
+
+```bash
+docker compose logs --no-log-prefix app | grep -F '"job":"audit_chain_check"' | grep -F '"error_code":"E-AUD-002"'
+```
+
+The third place is the alert condition `audit_chain_broken` (section "Alarms"). It becomes active after a break.
+
+A completed check with no `E-AUD-002` line and no active `audit_chain_broken` shows a chain without a break.
+A check without a break writes no log line, so a missing line alone does not show a completed check.
+A run that returns another error code is not a completed check, and `audit.last_check_at` keeps its value.
+Read that code in the `ERROR` line and follow its row in `reliability.md` 1.2.
+The alert `audit_check_age` becomes active when `audit.last_check_at` is older than `audit.max_check_age`.
 
 ## Upgrade and rollback
 
@@ -1500,7 +1516,6 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - No document gives the transfer of the external images `caddy` and `postgres`, or the digest check after `docker load`. The section "Load the images" names only `recipe-server` and `recipe-pgtools`. No workaround.
 - The trusted-proxy entries in `Caddyfile` and `compose.yaml` do not survive a release. A new release replaces both files. After each upgrade, write the entries again (sections "Upgrade" and "A plant device in front of Caddy").
 - The rule that a restore goes into a new volume is only in a non-normative design note (D13). No ADR holds it. No workaround.
-- No command runs the audit chain check on demand. The job `audit_chain_check` runs by schedule at `audit.check_time`, and once after `audit.catchup_delay` at a start of `app` when `audit.last_check_at` is older than `audit.catchup_age`. After a restore, wait for the next run.
 - The soak test of `reliability.md` section 6 is not implemented. The repository holds no soak script and no nightly CI job for it. The 2 h local run with an RSS chart did not run, so no file `docs/ops/soak-<date>.md` exists. The limits of that test stay unproven. They are `soak.memory_ceiling` of `reliability.md` 7.11, zero restarts, and the p99 latency bound of section 6. No workaround.
 - The section "Check the host firewall" gives no rule that limits the network `egress` to the webhook host (ADR-0063 (p)). No workaround.
 - The file `compose.yaml` sets no `RECIPE_ALERTS__WEBHOOK_CA_FILE` and mounts no CA file. The key `alerts.webhook_ca_file` therefore stays empty, and the webhook client trusts the webpki roots only (ADR-0063 (j)). No workaround.
