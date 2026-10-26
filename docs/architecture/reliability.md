@@ -663,7 +663,7 @@ WAL archive (ADR-0068, ADR-0077):
 
 - `walarchive` streams WAL with `pg_receivewal --synchronous` and the connection value `application_name=walarchive` to its volume on a second disk. It uses no replication slot. `pg_receivewal` and `pg_basebackup` connect as `recipe_replicator`, which the `pg_hba.conf` line of `data-model.md` 5.1 admits.
 - Recovery point objective: minutes. Recovery time objective: 1 hour (ADR-0020). Without the second disk the recovery point objective is 24 hours (A35).
-- An outage longer than `pg.wal_keep_size` leaves a gap. The runbook then moves the old segments aside, takes a new base backup, and starts the stream again (ADR-0068 (e)).
+- An outage longer than `pg.wal_keep_size` leaves a gap. The runbook then moves the old segments aside and starts the stream again. After `pg_stat_replication` shows the stream, it takes a new base backup and checks the WAL of that base backup in the archive (ADR-0068 (e), ADR-0099).
 - `basebackup-once` runs at `basebackup.time`. It runs `pg_basebackup --wal-method=fetch -Fp --checkpoint=fast --manifest-checksums=SHA256`, and then `pg_verifybackup` checks the new base backup.
 - After a passed check, the script keeps the newest `basebackup.retention` base backups. Then `pg_archivecleanup` deletes the WAL segments before the lowest start segment of all kept base backups (ADR-0077 (f)).
 - The start segment comes from the line `START WAL LOCATION` of the `backup_label`. The comparison uses the 16 hex characters after the timeline, as `pg_archivecleanup` does. A failed `pg_verifybackup` deletes no base backup and no WAL segment.

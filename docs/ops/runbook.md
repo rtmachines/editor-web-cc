@@ -20,7 +20,7 @@ The command prints names and no values. The server refuses to start with a varia
 
 1. Copy `.env.example` to `.env`.
 2. Set the eight values of `.env`. Each directory is an absolute path.
-3. Set `RECIPE_BACKUP_DIR` and `RECIPE_WALARCHIVE_DIR` to directories on the second disk.
+3. Set `RECIPE_BACKUP_DIR` and `RECIPE_WALARCHIVE_DIR` to directories on the second disk. `RECIPE_WALARCHIVE_DIR` must not be the mount point of the second disk. Then its parent directory is on the second disk too, and the gap procedure moves files there as a rename (ADR-0099 (c)).
 4. Set `RECIPE_SECRETS_DIR` to a directory outside the repository.
 5. Load the values into the shell. Do not export them:
 
@@ -542,25 +542,29 @@ docker compose run --rm --no-deps -u postgres --entrypoint sh db -c 'cp -p -- "$
 
 ## A gap in the WAL stream
 
-An outage of `walarchive` longer than `pg.wal_keep_size` leaves a gap (ADR-0068 (e)).
+An outage of `walarchive` longer than `pg.wal_keep_size` leaves a gap (ADR-0068 (e), ADR-0099).
 The alert `replication` is active during the outage.
 
-The step moves the WAL segment files and the `.partial` file from the top of `RECIPE_WALARCHIVE_DIR` (ADR-0068 (l)).
+The procedure moves the WAL segment files and the `.partial` file from the top of `RECIPE_WALARCHIVE_DIR` (ADR-0068 (l)).
 The marker file, `.lock`, the directory `base`, and the directory `.pitr-scratch` stay.
-The documents do not name the target directory. Use a directory on the WAL archive disk. Below, `<moved directory>` is its path.
+The names of the segment files have 24 upper-case hex characters (PostgreSQL 16 documentation, section 30.6).
+The first 8 characters give the timeline, the next 8 the log number, and the last 8 the segment number.
+`pg_receivewal` adds the suffix `.partial` to the segment that it writes. Every other name at the top of `RECIPE_WALARCHIVE_DIR` stays in place.
+Run all steps in one shell, because steps 3 to 6 use the variable `target`.
 
 1. Run `docker compose exec backup restore-test`. Continue only after it passes.
 2. Run `docker compose stop walarchive`.
-3. Create the target directory:
+3. Create the target directory. The command fails on an existing name:
 
 ```bash
-install -d -m 0700 -o 999 -g 999 <moved directory>
+target="${RECIPE_WALARCHIVE_DIR%/}.moved-$(date -u +%Y%m%d_%H%M%S)"
+mkdir -m 0700 -- "$target"
 ```
 
-4. Check that both paths show the same number:
+4. Check that both paths show the same number. If the numbers differ, stop the procedure before any move:
 
 ```bash
-stat -c %d "$RECIPE_WALARCHIVE_DIR" <moved directory>
+stat -c %d "$RECIPE_WALARCHIVE_DIR" "$target"
 ```
 
 5. List the files that step 6 moves:
@@ -572,21 +576,52 @@ find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]????????????
 6. Move the files of the list:
 
 ```bash
-find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]???????????????????????' -o -name '[0-9A-F]???????????????????????.partial' \) -exec mv -t <moved directory> -- {} +
+find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]???????????????????????' -o -name '[0-9A-F]???????????????????????.partial' \) -exec mv -t "$target" -- {} +
 ```
 
-7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains and that the marker file and `base` stay.
-8. Take a new base backup:
+7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains. The marker file, `.lock`, `base`, and `.pitr-scratch` stay.
+8. Run `docker compose up -d --no-deps walarchive`. The stream starts on a directory without segments.
+9. Check the stream. The check passes when the result has exactly one row, the state `streaming`, and a `flush_lsn`. Take no base backup before it passes:
 
 ```bash
-docker compose run --rm --no-deps walarchive basebackup-once
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT state, flush_lsn FROM pg_stat_replication WHERE usename = 'recipe_replicator' AND application_name = 'walarchive'"
 ```
 
-9. Check that the output holds the line `base backup completed`.
-10. Run `docker compose up -d --no-deps walarchive`.
-11. Wait until the alert `replication` is inactive.
+10. Take the replacement base backup. The output holds the line `base backup completed`. Note its field `base`:
 
-Keep the moved files until the next restore test and the next `basebackup-once` pass. This section deletes nothing.
+```bash
+docker compose exec walarchive basebackup-once
+```
+
+11. Switch the WAL segment. Note the returned position. The server then closes the segment that holds the end of the base backup:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT pg_switch_wal()"
+```
+
+12. Run the flush check until it returns `t`. The value `t` shows that the archive holds the end segment of the base backup as a complete file. Run the query again by hand until then:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT EXISTS (SELECT 1 FROM pg_stat_replication WHERE application_name = 'walarchive' AND usename = 'recipe_replicator' AND flush_lsn >= '<position>'::pg_lsn)"
+```
+
+13. Check the WAL of the base backup in the archive. The check passes on the exit code 0. Replace `<base>` with the field `base` of step 10:
+
+```bash
+docker compose exec walarchive pg_verifybackup --quiet --skip-checksums --wal-directory=/wal /wal/base/<base>
+```
+
+14. Wait until the alert `replication` is inactive.
+
+If step 9 finds no row or another state, take no base backup.
+Read `docker compose logs walarchive` and fix the cause, for example a missing marker file or secret.
+Then run step 9 again. The old segments stay in the target directory, so the wait loses no segment.
+If step 13 fails, the archive misses WAL of the base backup. Run the procedure again from step 2 with a new target directory.
+
+This section deletes nothing. Delete the target directory by hand, not with a script.
+Delete it only when `/wal/base` holds no name of the form `^base_[0-9]{8}_[0-9]{6}$` that is lower than `<base>` in byte order.
+Until then, the moved segments keep the older base backups recoverable up to the start of the gap.
+List the names with `docker compose exec walarchive ls /wal/base`.
 
 ## A plant device in front of Caddy
 
