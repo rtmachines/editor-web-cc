@@ -1,6 +1,6 @@
 # ADR-0095: Role grammar of the globals file in the restore test
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-25
 Deciders: project owner
 

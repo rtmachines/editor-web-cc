@@ -104,6 +104,10 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0092](0092-webhook-call-panic-isolation.md) | Panic isolation of one webhook call | Accepted | 2026-10-25 |
 | [0093](0093-stored-times-and-totals-of-the-alerts-job.md) | Stored times and counter totals of the job `alerts` | Accepted | 2026-10-25 |
 | [0094](0094-trigger-of-the-ci-stack-test.md) | Trigger of the CI stack test | Accepted | 2026-10-25 |
+| [0095](0095-role-grammar-of-the-globals-file.md) | Role grammar of the globals file in the restore test | Accepted | 2026-10-25 |
+| [0096](0096-guard-lock-of-the-last-administrator.md) | Guard lock of the last Administrator | Accepted | 2026-10-25 |
+| [0097](0097-schema-free-names-in-the-drop-guard.md) | Names without a schema in the drop guard of the audit objects | Accepted | 2026-10-25 |
+| [0098](0098-audit-log-insert-columns-and-qualified-operators.md) | Insert columns of `audit_log` and qualified operators of two definer functions | Accepted | 2026-10-25 |
 
 ## Decision map
 
@@ -137,6 +141,10 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Separation of duties on the preview | 0049 (one domain function for the preview and the approval) |
 | Dependencies of the application layer | 0029 + 0035 (Argon2, random bytes, semaphore) |
 | Stored settings, security event retention | 0022 + 0062 (the 18 keys of `serve`) + 0063 (fingerprint of the webhook URL) + 0079 (locks and statements of the startup comparison) |
+| Role grammar of the globals file in the restore test | 0095 (role grammar of the globals file, check before the restore step runs it) |
+| Last administrator guard | 0096 (guard lock of the last Administrator, `READ COMMITTED` with the lock first) |
+| Drop guard of the audit objects | 0097 (names without a schema in the drop guard) |
+| Audit log insert and definer functions | 0098 (insert columns of `audit_log`, qualified operators of two definer functions) |
 | STE lint scope and script location in CI | 0023 |
 | Browser tests | 0048 (Playwright regression suite on the dev server, smoke suite on the Compose stack) |
 

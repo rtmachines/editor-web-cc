@@ -22,8 +22,8 @@ At most two cargo agents run at the same time. The instruction files change only
 
 ## 1. Decision records
 
-- [ ] 1.1 (docs/adr) [mechanical] Set the Status of ADR-0095, ADR-0096, and ADR-0098 to "Accepted". Set ADR-0097 to "Accepted" only after task 0.1 showed the failure. Add the four rows to the index of `docs/adr/README.md`. Add their topics to the decision map. Check: `git diff --stat docs/adr` names only the four ADRs and `README.md`.
-- [ ] 1.2 (docs/adr) [mechanical] Add an "Amended by" note and the matching Status line to six ADRs. ADR-0096 amends ADR-0015, ADR-0022, and ADR-0035. ADR-0097 amends ADR-0034. ADR-0095 (f) amends ADR-0067, and ADR-0095 (g) amends ADR-0078. Change no other line. Check: `git diff --stat docs/adr` names only these six files.
+- [x] 1.1 (docs/adr) [mechanical] Set the Status of ADR-0095, ADR-0096, and ADR-0098 to "Accepted". Set ADR-0097 to "Accepted" only after task 0.1 showed the failure. Add the four rows to the index of `docs/adr/README.md`. Add their topics to the decision map. Check: `git diff --stat docs/adr` names only the four ADRs and `README.md`.
+- [x] 1.2 (docs/adr) [mechanical] Add an "Amended by" note and the matching Status line to six ADRs. ADR-0096 amends ADR-0015, ADR-0022, and ADR-0035. ADR-0097 amends ADR-0034. ADR-0095 (f) amends ADR-0067, and ADR-0095 (g) amends ADR-0078. Change no other line. Check: `git diff --stat docs/adr` names only these six files.
 
 ## 2. Permission check first (F4) and the two transactions of ChangeOwnPassword (F5)
 
@@ -73,7 +73,7 @@ At most two cargo agents run at the same time. The instruction files change only
 
 ## 8. STE checks
 
-- [ ] 8.1 (docs/adr) [sonnet] After wave B, run `ste-lint.py` on the six amended ADRs, the four new ADRs, and `docs/adr/README.md`. Fix each hard violation without a change of meaning. Check: 0 hard violations.
+- [x] 8.1 (docs/adr) [sonnet] After wave B, run `ste-lint.py` on the six amended ADRs, the four new ADRs, and `docs/adr/README.md`. Fix each hard violation without a change of meaning. Check: 0 hard violations.
 - [ ] 8.2 (docs, instruction files) [sonnet] After wave C, run `ste-lint.py` on the files of tasks 2.2, 3.3, 3.4, 4.3, 5.3, and 6.3. Check sentence length and the format rules of `.claude/rules/docs.md`. Report a hard violation in an exact line of `design.md` to the project owner. Do not change it. Check: 0 hard violations in the other lines.
 - [ ] 8.3 (docs, CHANGELOG.md) [sonnet] After task 7.1, run `ste-lint.py` on the files of tasks 4.2 and 7.1. Check: 0 hard violations.
 

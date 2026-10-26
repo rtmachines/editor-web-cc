@@ -1,6 +1,6 @@
 # ADR-0098: Insert columns of `audit_log` and qualified operators of two definer functions
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-25
 Deciders: project owner
 

@@ -1,6 +1,6 @@
 # ADR-0097: Names without a schema in the drop guard of the audit objects
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-25
 Deciders: project owner
 

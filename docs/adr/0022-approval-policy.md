@@ -1,6 +1,6 @@
 # ADR-0022: Approval policy, audit tamper evidence and draft clarifications
 
-Status: Accepted. Amended by ADR-0029 (failed record of a Forbidden event) and ADR-0035 (column grant and guard trigger of security_event). Amended by ADR-0062 (`app_setting` stores the 18 keys of `serve` only) and ADR-0063 (the fingerprint of the webhook URL in `app_setting`). Amended by ADR-0086 (bounds and anchor of the audit chain check)
+Status: Accepted. Amended by ADR-0029 (failed record of a Forbidden event) and ADR-0035 (column grant and guard trigger of security_event). Amended by ADR-0062 (`app_setting` stores the 18 keys of `serve` only) and ADR-0063 (the fingerprint of the webhook URL in `app_setting`). Amended by ADR-0086 (bounds and anchor of the audit chain check). Amended by ADR-0096 (the retry sentence of Risks and mitigations)
 Date: 2026-10-12
 Deciders: project owner
 

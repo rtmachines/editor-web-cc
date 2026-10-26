@@ -1,6 +1,6 @@
 # ADR-0035: Identity, sessions, and the guard of security events
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0096 (the known limit of code review M7 for `SetUserRole` and `DeactivateUser`)
 Date: 2026-10-14
 Deciders: project owner
 

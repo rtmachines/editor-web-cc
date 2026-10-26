@@ -1,6 +1,6 @@
 # ADR-0096: Guard lock of the last Administrator
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-25
 Deciders: project owner
 
