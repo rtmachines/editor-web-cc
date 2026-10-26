@@ -6,7 +6,7 @@
 use sqlx::{Connection, PgConnection};
 use uuid::Uuid;
 
-use crate::support::{Role, TestDatabase};
+use crate::support::{Role, TestDatabase, assert_privilege_denied};
 
 /// The batch statement of `data-model.md` section 4.9 (step 2 of the nightly check).
 /// `$1` is `$after_seq`, `$2` is `$head_seq`, `$3` is `$batch`, `$4` is `$batch_bytes`,
@@ -200,34 +200,66 @@ async fn the_check_statement_finds_a_changed_after_state_at_its_sequence() {
     assert_eq!(first_break, Some(3));
 }
 
-/// `recipe_app` holds `INSERT` on all columns of `audit_log`. Trigger 4.9 must replace the three
-/// chain columns, so a forged value never reaches the table (review Q8).
+/// The forged chain columns of the next two tests.
+const FORGED_SEQ: i64 = 99;
+
+/// An insert with forged chain columns, bound to `$1` (`chain_seq`), `$2` (`prev_hash`),
+/// `$3` (`entry_hash`), and `$4` (the entity, aggregate, and request identifier).
+const FORGED_INSERT: &str = "\
+INSERT INTO audit_log \
+    (chain_seq, prev_hash, entry_hash, action, entity_type, entity_id, aggregate_type, \
+     aggregate_id, after_state, request_id) \
+VALUES ($1, $2, $3, 'CreateMachine', 'machine', $4, 'machine', $4, '{\"a\":1}'::jsonb, $4) \
+RETURNING chain_seq";
+
+/// `recipe_app` holds `INSERT` on the eleven application columns only (ADR-0098 (b), (c)). An
+/// insert that names a chain column fails with `42501`, so no entry and no new head appear.
 #[tokio::test]
 async fn recipe_app_cannot_forge_the_chain_columns_of_an_insert() {
-    const FORGED_SEQ: i64 = 99;
     let forged_prev = vec![0x11_u8; 32];
     let forged_hash = vec![0x22_u8; 32];
     let database = TestDatabase::create().await;
     let mut admin = database.connect(Role::Superuser).await;
     insert_entry(&mut admin).await;
-    let (_, first_hash) = hashes(&mut admin, 1).await;
+    let head_before = head(&mut admin).await;
     let mut app = database.connect(Role::App).await;
 
-    let seq: i64 = sqlx::query_scalar(
-        "INSERT INTO audit_log \
-             (chain_seq, prev_hash, entry_hash, action, entity_type, entity_id, aggregate_type, \
-              aggregate_id, after_state, request_id) \
-         VALUES ($1, $2, $3, 'CreateMachine', 'machine', $4, 'machine', $4, \
-                 '{\"a\":1}'::jsonb, $4) \
-         RETURNING chain_seq",
-    )
-    .bind(FORGED_SEQ)
-    .bind(&forged_prev)
-    .bind(&forged_hash)
-    .bind(Uuid::new_v4())
-    .fetch_one(&mut app)
-    .await
-    .unwrap();
+    let result: Result<i64, sqlx::Error> = sqlx::query_scalar(FORGED_INSERT)
+        .bind(FORGED_SEQ)
+        .bind(&forged_prev)
+        .bind(&forged_hash)
+        .bind(Uuid::new_v4())
+        .fetch_one(&mut app)
+        .await;
+
+    assert_privilege_denied(result);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
+        .fetch_one(&mut admin)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(head(&mut admin).await, head_before);
+    assert_eq!(check(&mut admin).await.0, None);
+}
+
+/// The superuser can name the chain columns. Trigger 4.9 still replaces all three, so a forged
+/// value never reaches the table.
+#[tokio::test]
+async fn trigger_4_9_overrides_forged_chain_columns_of_the_superuser() {
+    let forged_prev = vec![0x11_u8; 32];
+    let forged_hash = vec![0x22_u8; 32];
+    let mut admin = connection().await;
+    insert_entry(&mut admin).await;
+    let (_, first_hash) = hashes(&mut admin, 1).await;
+
+    let seq: i64 = sqlx::query_scalar(FORGED_INSERT)
+        .bind(FORGED_SEQ)
+        .bind(&forged_prev)
+        .bind(&forged_hash)
+        .bind(Uuid::new_v4())
+        .fetch_one(&mut admin)
+        .await
+        .unwrap();
 
     assert_eq!(seq, 2);
     let (prev, entry) = hashes(&mut admin, 2).await;
@@ -242,6 +274,106 @@ async fn recipe_app_cannot_forge_the_chain_columns_of_an_insert() {
     assert_eq!(forged_rows, 0);
     assert_eq!(head(&mut admin).await, (2, Some(entry)));
     assert_eq!(check(&mut admin).await.0, None);
+}
+
+/// A normal insert of the application names the eleven granted columns only. The database sets
+/// `id` and `occurred_at`, and trigger 4.9 sets the chain columns.
+#[tokio::test]
+async fn recipe_app_inserts_a_normal_entry_with_the_granted_columns() {
+    let database = TestDatabase::create().await;
+    let mut app = database.connect(Role::App).await;
+    let entity = Uuid::new_v4();
+
+    let seq: i64 = sqlx::query_scalar(
+        "INSERT INTO audit_log (actor_user_id, action, entity_type, entity_id, aggregate_type, \
+             aggregate_id, before_state, after_state, request_id, client_ip, session_ref) \
+         VALUES (NULL, 'CreateMachine', 'machine', $1, 'machine', $1, NULL, \
+                 '{\"a\":1}'::jsonb, $2, '10.0.0.7'::inet, '0123456789abcdef') \
+         RETURNING chain_seq",
+    )
+    .bind(entity)
+    .bind(Uuid::new_v4())
+    .fetch_one(&mut app)
+    .await
+    .unwrap();
+
+    assert_eq!(seq, 1);
+    let mut admin = database.connect(Role::Superuser).await;
+    let (id, set_by_database): (i64, bool) = sqlx::query_as(
+        "SELECT id, occurred_at BETWEEN now() - interval '1 minute' AND now() \
+         FROM audit_log WHERE chain_seq = 1",
+    )
+    .fetch_one(&mut admin)
+    .await
+    .unwrap();
+    assert_eq!(id, 1);
+    assert!(set_by_database);
+    assert_eq!(check(&mut admin).await.0, None);
+}
+
+/// One column that `recipe_app` cannot name, with an insert that names it. `$1` is the entity,
+/// aggregate, and request identifier.
+const DENIED_COLUMNS: [(&str, &str); 5] = [
+    (
+        "id",
+        "INSERT INTO audit_log (id, action, entity_type, entity_id, aggregate_type, \
+             aggregate_id, request_id) \
+         OVERRIDING SYSTEM VALUE \
+         VALUES (99, 'CreateMachine', 'machine', $1, 'machine', $1, $1)",
+    ),
+    (
+        "occurred_at",
+        "INSERT INTO audit_log (occurred_at, action, entity_type, entity_id, aggregate_type, \
+             aggregate_id, request_id) \
+         VALUES ('2001-01-01T00:00:00Z', 'CreateMachine', 'machine', $1, 'machine', $1, $1)",
+    ),
+    (
+        "chain_seq",
+        "INSERT INTO audit_log (chain_seq, action, entity_type, entity_id, aggregate_type, \
+             aggregate_id, request_id) \
+         VALUES (99, 'CreateMachine', 'machine', $1, 'machine', $1, $1)",
+    ),
+    (
+        "prev_hash",
+        "INSERT INTO audit_log (prev_hash, action, entity_type, entity_id, aggregate_type, \
+             aggregate_id, request_id) \
+         VALUES ('\\x11'::bytea, 'CreateMachine', 'machine', $1, 'machine', $1, $1)",
+    ),
+    (
+        "entry_hash",
+        "INSERT INTO audit_log (entry_hash, action, entity_type, entity_id, aggregate_type, \
+             aggregate_id, request_id) \
+         VALUES ('\\x22'::bytea, 'CreateMachine', 'machine', $1, 'machine', $1, $1)",
+    ),
+];
+
+#[tokio::test]
+async fn recipe_app_cannot_name_a_column_that_the_database_or_the_trigger_sets() {
+    let database = TestDatabase::create().await;
+    let mut admin = database.connect(Role::Superuser).await;
+    insert_entry(&mut admin).await;
+    let head_before = head(&mut admin).await;
+    let mut app = database.connect(Role::App).await;
+
+    for (column, statement) in DENIED_COLUMNS {
+        let result = sqlx::query(statement)
+            .bind(Uuid::new_v4())
+            .execute(&mut app)
+            .await;
+
+        let code = result
+            .as_ref()
+            .err()
+            .and_then(|error| error.as_database_error())
+            .and_then(|error| error.code().map(|code| code.into_owned()));
+        assert_eq!(code.as_deref(), Some("42501"), "{column}: {result:?}");
+    }
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log")
+        .fetch_one(&mut admin)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+    assert_eq!(head(&mut admin).await, head_before);
 }
 
 #[tokio::test]

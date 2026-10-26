@@ -1872,6 +1872,33 @@ RESET ROLE;
 REVOKE CREATE ON SCHEMA public FROM audit_owner;
 ```
 
+### 5.7 Insert columns of `audit_log` (`0008_audit_log_insert_columns.sql`)
+
+The migration changes an audit object, so it runs the five steps of section 5.1 (ADR-0098 (b), (c)). `0003_grants.sql` shipped, so its text stays. `recipe_app` then inserts only the eleven columns that the application writes.
+
+- The database sets `id` and `occurred_at`. Trigger 4.9 sets `chain_seq`, `prev_hash`, and `entry_hash`.
+- An insert of `recipe_app` that names one of these five columns fails with SQLSTATE `42501`. This holds for `id` with `OVERRIDING SYSTEM VALUE` too.
+- The eleven columns are the columns of the insert in `crates/recipe-db/src/audit_insert.rs`.
+- The `REVOKE` comes first. It also revokes the column privileges that the table privilege held.
+- A holder of the `recipe_app` credential can still choose `actor_user_id`, `request_id`, `client_ip`, and `session_ref` (ADR-0098 (j)).
+
+```sql
+-- Step 1.
+GRANT CREATE ON SCHEMA public TO audit_owner;
+-- Step 2.
+SET ROLE audit_owner;
+-- Step 3. The REVOKE comes first, because it also revokes the column privileges of the table privilege.
+-- The grant holds no id, occurred_at, chain_seq, prev_hash, or entry_hash.
+REVOKE INSERT ON audit_log FROM recipe_app;
+GRANT INSERT (actor_user_id, action, entity_type, entity_id, aggregate_type, aggregate_id,
+              before_state, after_state, request_id, client_ip, session_ref)
+    ON audit_log TO recipe_app;
+-- Step 4.
+RESET ROLE;
+-- Step 5.
+REVOKE CREATE ON SCHEMA public FROM audit_owner;
+```
+
 ## 6. Transactional operations
 
 Every command runs in exactly one transaction, except `Login` and `ChangeOwnPassword`, which use the two short transactions T1 and T2 (see the rows, ADR-0035 (b)). A `security_event` row has its own short transaction through the port `SecurityEventSink`. The commit path of each operation is in `domain-model.md` section 5. `EnsureDerivedType` is an internal operation and runs inside the transaction of its caller. The use case opens the transaction through `UnitOfWork`. The audit `INSERT` is part of the same transaction. The `COMMIT` either persists everything or nothing (R29).
