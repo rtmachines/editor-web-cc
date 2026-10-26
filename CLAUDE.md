@@ -27,7 +27,7 @@ The build order is in [docs/plan/implementation-prompts.md](docs/plan/implementa
 - A new design decision is a new ADR. Change `docs/architecture/` only in the same change as that ADR.
 - An accepted ADR changes only by its Status line and an "Amended by" note. A full replacement is a new ADR.
 - The decision map of `docs/adr/README.md` names the current ADR of each topic. Do not apply a superseded ADR.
-- `general-draft.txt` holds the requirements. `overview.md` §7 maps them to R01 to R45. §9 lists the Assumptions A1 to A43.
+- `general-draft.txt` holds the requirements. `overview.md` §7 maps them to R01 to R45. §9 lists the Assumptions A1 to A44.
 - `docs/plan/review/` holds the review history. It is not normative.
 - When two documents disagree, or a request disagrees with a document, stop and ask the user.
 
@@ -50,7 +50,7 @@ Dependency rule:
 - `recipe-db` implements the ports of `recipe-app`. It has no public error type. It maps `sqlx::Error` by SQLSTATE into `StorageError`.
 - Only `recipe-web` uses `recipe-export`. `recipe-server` does not depend on it.
 - `recipe-web` uses no `sqlx` and no session library. The `session` table and its adapter belong to the project (ADR-0014).
-- Other paths: `migrations/` (forward-only SQL), `deploy/` (Compose, Caddy, `db/initdb/01-roles.sh`), `openspec/` (specs and changes).
+- Other paths: `migrations/` (forward-only SQL), `deploy/` (Compose, Caddy, `db/initdb/01-roles.sh`), `openspec/` (specs and changes), `e2e/` (Playwright browser regression suite, ADR-0048), `tools/` (STE lint, coverage gate).
 
 ## Hard rules
 
@@ -90,18 +90,19 @@ Each OpenSpec change follows this cycle. The names in backticks are skills.
 
 ```bash
 cargo clippy --all-targets --all-features -- -D warnings  # lint gate of CI
-cargo test                                                 # every test of the workspace
+cargo test --workspace --all-features --locked            # every test of the workspace, as in CI
 cargo test -p recipe-domain unit_path                      # one crate, tests whose name contains "unit_path"
 cargo fmt --check
-cargo deny check                                           # licenses, advisories, yanked crates
-cargo llvm-cov --workspace                                 # coverage, CI target 80 % lines per crate
-docker compose -f deploy/compose.yaml up -d                # full stack, start order in reliability.md 7.1
+cargo deny check                                           # licenses, advisories, yanked crates, banned dependency edges
+cargo llvm-cov --workspace                                 # coverage. CONTRIBUTING.md gives the gate of 80 % lines per crate
+docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.dev.yaml up -d --build  # dev stack, needs deploy/.env and the secret files, start order in reliability.md 7.1
 openspec validate --all
 openspec list
+cd e2e && npm ci && E2E_PASSWORD=<12 to 128 characters> npm test  # browser regression suite (ADR-0048), Node 22
 bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'  # scope of ADR-0023
 ```
 
-- The `recipe-db` tests need Docker for `testcontainers`, or `DATABASE_URL` of a Compose database (`reliability.md` §6).
+- The `recipe-db` tests need Docker. They start their own PostgreSQL container with `testcontainers` (`reliability.md` §6, ADR-0101).
 - Run `ste-lint.py` from Bash. The command sets `globstar` and `nullglob` like the CI job. Without `globstar`, Bash expands `**` to `*`.
 
 ## Where to look

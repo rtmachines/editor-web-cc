@@ -35,15 +35,24 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 ```
 
-The tests of `recipe-db` need Docker for `testcontainers`, or a `DATABASE_URL` that names a Compose database.
+The tests of `recipe-db` need Docker. They start their own PostgreSQL container with `testcontainers` (ADR-0101).
 
 To see the pages in a browser without a database, run the development server. It uses in-memory adapters and loses all data when it stops.
 
 1. Set the variable `RECIPE_DEV_PASSWORD` to a password of 12 to 128 characters.
 2. Run `cargo run -p recipe-web --example dev_server`.
 3. Open `http://127.0.0.1:8080/login`.
+4. Log in as `admin` (Administrator), `engineer` (Process engineer), or `operator` (Operator) with the password of step 1.
 
-The full stack starts with `docker compose -f deploy/compose.yaml up -d`. Do not use that command in production before you prepare the host, the environment file, and the secret files. The production start is in the section [First start, first administrator, and image transfer](docs/ops/runbook.md#first-start-first-administrator-and-image-transfer) of the runbook.
+The variable `RECIPE_DEV_PORT` changes the port 8080.
+
+A development stack uses three Compose files. First, prepare the directories, the environment file `deploy/.env`, and the secret files as the section [Host preparation](docs/ops/runbook.md#host-preparation) of the runbook tells. Then run this command:
+
+```bash
+docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.dev.yaml up -d --build
+```
+
+The production start uses only `compose.yaml`. It is in the section [First start, first administrator, and image transfer](docs/ops/runbook.md#first-start-first-administrator-and-image-transfer) of the runbook.
 
 ## Workspace
 
@@ -58,4 +67,4 @@ The Cargo workspace has six crates in `crates/`.
 | `recipe-web` | axum routers, askama templates, HTMX fragments, i18n, security headers, and the session cookie. |
 | `recipe-server` | Binary and library. Configuration, wiring, the supervised jobs, and the subcommands `serve`, `migrate`, `create-admin`, and `healthcheck`. |
 
-Other paths: `migrations/` (forward-only SQL), `deploy/` (Compose, Caddy, and the backup scripts), and `openspec/` (specifications and changes).
+Other paths: `migrations/` (forward-only SQL), `deploy/` (Compose, Caddy, and the backup scripts), and `openspec/` (specifications and changes). The directory `e2e/` holds the Playwright browser regression suite (ADR-0048), and `tools/` holds the STE lint and the coverage gate.
