@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
 
+#[path = "support/environment.rs"]
+mod environment;
 #[path = "support/net.rs"]
 mod net;
 #[path = "support/process.rs"]
@@ -19,7 +21,7 @@ mod support;
 
 use net::{Answer, free_ports, http_get, poll_until, port_is_open};
 use process::{ServerProcess, has_line};
-use support::cli::{lines_with, run_migrate, text_of};
+use support::cli::{level_marker, lines_with, run_migrate, text_of};
 use support::database::{
     APP_PASSWORD, MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
 };
@@ -42,8 +44,6 @@ const CLOSED_PORT: u16 = 1;
 const SETTING_COUNT: u32 = 18;
 /// The count after a third start changed one setting.
 const SETTING_COUNT_AFTER_CHANGE: u32 = 19;
-/// A log line of the level `ERROR`.
-const ERROR_MARKER: &str = "\"level\":\"ERROR\"";
 const SETTING_CHANGED: &str = "SELECT count(*) FROM audit_log WHERE action = 'SettingChanged'";
 const AUDIT_ENTRIES: &str = "SELECT count(*) FROM audit_log";
 const STARTED: &str = "the server started";
@@ -211,7 +211,11 @@ async fn healthz_answers_200_ok_on_the_internal_listener_after_the_start() {
 
     assert_eq!(answer.status, 200, "{}", server.log());
     assert!(answer.body.contains("ok"), "{}", answer.body);
-    assert!(!server.log().contains(ERROR_MARKER), "{}", server.log());
+    assert!(
+        !server.log().contains(&level_marker("ERROR")),
+        "{}",
+        server.log()
+    );
 }
 
 /// `/readyz` answers 200 once the public listener accepts connections (ADR-0091 (e)).

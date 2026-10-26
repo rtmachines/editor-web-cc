@@ -14,7 +14,10 @@ use std::process::Command;
 use std::time::Duration;
 
 mod bounded_run;
+#[path = "support/environment.rs"]
+mod environment;
 use bounded_run::run_bounded;
+use environment::remove_foreign_variables;
 
 /// The variable that tells the child where to write. Without it, the child test does nothing.
 const OUTPUT_VARIABLE: &str = "SERVE_ENV_TEST_OUTPUT";
@@ -231,24 +234,11 @@ fn environment(files: &[(&str, &Path)]) -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Compare the start of `name` with `prefix` and ignore the case of ASCII letters.
-fn starts_with_ignore_case(name: &str, prefix: &str) -> bool {
-    name.get(..prefix.len())
-        .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
-}
-
 /// Build the child command for the child test `test`. The host environment must not change it.
 fn child_command(test: &str, output: &Path, variables: &[(&str, String)]) -> Command {
     let mut command = Command::new(std::env::current_exe().unwrap());
     command.args(["--exact", test, "--test-threads=1"]);
-    for (name, _value) in std::env::vars_os() {
-        let name_text = name.to_string_lossy();
-        if starts_with_ignore_case(&name_text, "PG")
-            || starts_with_ignore_case(&name_text, "RECIPE_")
-        {
-            command.env_remove(&name);
-        }
-    }
+    remove_foreign_variables(&mut command);
     command.env(OUTPUT_VARIABLE, output);
     for (name, value) in variables {
         command.env(name, value);

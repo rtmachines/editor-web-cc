@@ -103,9 +103,14 @@ pub fn text_of(output: &Output) -> String {
     )
 }
 
+/// The text that marks the level `level` in a log line of the server, for example `ERROR`.
+pub fn level_marker(level: &str) -> String {
+    format!("\"level\":\"{level}\"")
+}
+
 /// The number of log lines on the standard output with the level `level`, for example `ERROR`.
 pub fn lines_with(output: &Output, level: &str) -> usize {
-    let marker = format!("\"level\":\"{level}\"");
+    let marker = level_marker(level);
     String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| line.contains(&marker))

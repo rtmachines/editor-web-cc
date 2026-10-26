@@ -13,14 +13,14 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use super::environment::remove_foreign_variables;
 use super::net::{free_ports, http_get, poll_until};
+use super::support::cli::level_marker;
 
 /// The pause between two checks of a child that may have exited.
 const EXIT_POLL_PAUSE: Duration = Duration::from_millis(50);
 /// The text that the `ERROR` line holds when `serve` cannot bind one of its two ports.
 const BIND_FAULT: &str = "listener cannot bind its port";
-/// The prefixes of the variables that the child must not inherit.
-const FOREIGN_PREFIXES: [&str; 3] = ["PG", "RECIPE_", "RUST_LOG"];
 
 /// The lines of one pipe. The reader thread sends them, and the owner keeps what it received.
 struct Pipe {
@@ -118,16 +118,8 @@ impl ServerProcess {
     /// `PG*`, `RECIPE_*`, and `RUST_LOG`.
     fn spawn(environment: &[(&str, String)], public_port: u16, internal_port: u16) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_recipe-server"));
-        command.arg("serve");
-        for (name, _value) in std::env::vars_os() {
-            let upper = name.to_string_lossy().to_ascii_uppercase();
-            if FOREIGN_PREFIXES
-                .iter()
-                .any(|prefix| upper.starts_with(prefix))
-            {
-                command.env_remove(&name);
-            }
-        }
+        command.arg("serve").env_remove("RUST_LOG");
+        remove_foreign_variables(&mut command);
         for (name, value) in environment {
             command.env(name, value);
         }
@@ -224,7 +216,7 @@ impl Drop for ServerProcess {
 
 /// Tell whether one line has the level `level` and holds `message`.
 pub fn has_line(lines: &[String], level: &str, message: &str) -> bool {
-    let marker = format!("\"level\":\"{level}\"");
+    let marker = level_marker(level);
     lines
         .iter()
         .any(|line| line.contains(&marker) && line.contains(message))

@@ -14,7 +14,10 @@ use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 mod bounded_run;
+#[path = "support/environment.rs"]
+mod environment;
 use bounded_run::run_bounded;
+use environment::{remove_foreign_variables, starts_with_ignore_case};
 
 const ERROR_LEVEL: &str = "\"level\":\"ERROR\"";
 /// A value that would change every session of the role. It must never appear in the output.
@@ -27,15 +30,6 @@ const CONNECT_SLACK: Duration = Duration::from_secs(5);
 /// The longest run of a child process. A hung child is killed after it.
 const CHILD_LIMIT: Duration = Duration::from_secs(40);
 const HEX_WORDS: usize = 2;
-
-/// Compare the start of `name` with `prefix` and ignore the case of ASCII letters.
-///
-/// Windows keeps a name such as `pgHost` in the environment of a child process. A name that is
-/// shorter than the prefix, or that cuts a character in two, does not match.
-fn starts_with_ignore_case(name: &str, prefix: &str) -> bool {
-    name.get(..prefix.len())
-        .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
-}
 
 #[test]
 fn the_prefix_compare_ignores_case_and_short_names() {
@@ -52,15 +46,7 @@ fn the_prefix_compare_ignores_case_and_short_names() {
 fn binary(arguments: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_recipe-server"));
     command.args(arguments).env_remove("RUST_LOG");
-    // The host environment must not change the test. Each test sets only its own values.
-    for (name, _value) in std::env::vars_os() {
-        let name_text = name.to_string_lossy();
-        if starts_with_ignore_case(&name_text, "PG")
-            || starts_with_ignore_case(&name_text, "RECIPE_")
-        {
-            command.env_remove(&name);
-        }
-    }
+    remove_foreign_variables(&mut command);
     command
 }
 
