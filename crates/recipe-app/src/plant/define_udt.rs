@@ -17,7 +17,7 @@ use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{
     AppError, Missing, PLC_TYPE_MEMBER_NAME_UNIQUE, PLC_TYPE_NAMED_UNIQUE, map_storage,
 };
-use crate::ports::{Isolation, NonEmpty};
+use crate::ports::{Isolation, NonEmpty, RowImage, TypeCatalog};
 
 /// Whether `DefineUdt` creates a new struct or a new revision of a struct.
 ///
@@ -108,55 +108,16 @@ impl DefineUdt {
         let (revision, supersedes) = next_revision(&rows, machine_id, &input)?;
         let platform = machine.platform();
         let mut derived = DerivedTypes::new(machine_id, platform, rows, audit_context(user, meta));
-        let mut members = Vec::with_capacity(input.members.len());
-        for (name, expr) in &input.members {
-            let type_id = derived
-                .ensure_expr(tx.types(), expr)
-                .await
-                .map_err(|error| member_error(error, &input.name, name, platform))?;
-            members.push(TypeMember {
-                name: name.clone(),
-                type_id,
-            });
-        }
-        let row = PlcType::try_from(PlcTypeRecord {
-            id: PlcTypeId::from(Uuid::new_v4()),
-            machine: Some(machine_id),
-            platforms: BTreeSet::from([platform]),
-            shape: RecordShape::Struct {
-                name: input.name.clone(),
-                revision,
-                supersedes,
-                members,
-            },
-        })?;
+        let members = ensure_members(&mut derived, tx.types(), &input, platform).await?;
+        let row = struct_row(
+            &input,
+            (machine_id, platform),
+            (revision, supersedes),
+            members,
+        )?;
         check_tree(&derived, (machine_id, platform), &row)?;
-        let after = tx.types().insert_struct(&row).await.map_err(|error| {
-            map_storage(error, |constraint| match constraint {
-                PLC_TYPE_NAMED_UNIQUE => Some(
-                    PlantError::DuplicateTypeName {
-                        type_name: input.name.clone(),
-                    }
-                    .into(),
-                ),
-                PLC_TYPE_MEMBER_NAME_UNIQUE => input.members.first().map(|(member, _)| {
-                    PlantError::DuplicateMemberName {
-                        type_name: input.name.clone(),
-                        member: member.clone(),
-                    }
-                    .into()
-                }),
-                _ => None,
-            })
-        })?;
-        let defined = AuditEntry::row(
-            RowAction::UdtDefined,
-            AuditTarget::plc_type(machine_id, row.id()),
-            RowChange::Create {
-                after: after.into_value(),
-            },
-            audit_context(user, meta),
-        );
+        let after = insert_struct_row(tx.types(), &row, &input).await?;
+        let defined = udt_defined_entry(user, meta, machine_id, &row, after);
         let (_, created) = derived.into_parts();
         self.ctx
             .uow
@@ -167,6 +128,94 @@ impl DefineUdt {
             revision,
         })
     }
+}
+
+/// Resolve the type expression of each member to a type row, in the order of the members.
+///
+/// A member type that is not on the platform gets the member name (`E-PLT-006`).
+async fn ensure_members(
+    derived: &mut DerivedTypes,
+    catalog: &mut dyn TypeCatalog,
+    input: &DefineUdtInput,
+    platform: PlcPlatform,
+) -> Result<Vec<TypeMember>, AppError> {
+    let mut members = Vec::with_capacity(input.members.len());
+    for (name, expr) in &input.members {
+        let type_id = derived
+            .ensure_expr(catalog, expr)
+            .await
+            .map_err(|error| member_error(error, &input.name, name, platform))?;
+        members.push(TypeMember {
+            name: name.clone(),
+            type_id,
+        });
+    }
+    Ok(members)
+}
+
+/// Build the new struct row with a fresh identifier.
+fn struct_row(
+    input: &DefineUdtInput,
+    (machine, platform): (MachineId, PlcPlatform),
+    (revision, supersedes): (u32, Option<PlcTypeId>),
+    members: Vec<TypeMember>,
+) -> Result<PlcType, AppError> {
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: PlcTypeId::from(Uuid::new_v4()),
+        machine: Some(machine),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Struct {
+            name: input.name.clone(),
+            revision,
+            supersedes,
+            members,
+        },
+    })?;
+    Ok(row)
+}
+
+/// Insert the struct row and map the two unique constraints to their plant errors.
+async fn insert_struct_row(
+    catalog: &mut dyn TypeCatalog,
+    row: &PlcType,
+    input: &DefineUdtInput,
+) -> Result<RowImage, AppError> {
+    catalog.insert_struct(row).await.map_err(|error| {
+        map_storage(error, |constraint| match constraint {
+            PLC_TYPE_NAMED_UNIQUE => Some(
+                PlantError::DuplicateTypeName {
+                    type_name: input.name.clone(),
+                }
+                .into(),
+            ),
+            PLC_TYPE_MEMBER_NAME_UNIQUE => input.members.first().map(|(member, _)| {
+                PlantError::DuplicateMemberName {
+                    type_name: input.name.clone(),
+                    member: member.clone(),
+                }
+                .into()
+            }),
+            _ => None,
+        })
+    })
+}
+
+/// Build the audit entry of a defined struct from the image of the inserted row.
+fn udt_defined_entry(
+    user: &CurrentUser,
+    meta: &RequestMeta,
+    machine: MachineId,
+    row: &PlcType,
+    after: RowImage,
+) -> AuditEntry {
+    AuditEntry::row(
+        RowAction::UdtDefined,
+        AuditTarget::plc_type(machine, row.id()),
+        RowChange::Create {
+            after: after.into_value(),
+        },
+        audit_context(user, meta),
+    )
 }
 
 /// Return the revision of the new row and the row that it supersedes.
