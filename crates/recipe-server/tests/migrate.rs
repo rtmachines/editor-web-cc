@@ -14,7 +14,8 @@ use std::time::Duration;
 mod support;
 
 use support::cli::{
-    lines_with, read_capped, run_bounded, run_migrate, run_migrate_with_env, text_of,
+    CHILD_LIMIT, OUTPUT_LIMIT, lines_with, read_capped, run_bounded, run_migrate,
+    run_migrate_with_env, text_of,
 };
 use support::database::{
     MIGRATOR_PASSWORD, Postgres, host_port, query, start_container, wait_until_ready,
@@ -149,10 +150,9 @@ fn run_bounded_kills_a_child_that_runs_too_long() {
 
 /// The published port must listen on the loopback address only.
 fn assert_port_on_loopback(container: &Postgres) {
-    let output = Command::new("docker")
-        .args(["port", container.id(), "5432/tcp"])
-        .output()
-        .unwrap();
+    let mut command = Command::new("docker");
+    command.args(["port", container.id(), "5432/tcp"]);
+    let output = run_bounded(command, CHILD_LIMIT, OUTPUT_LIMIT);
     let text = String::from_utf8_lossy(&output.stdout).into_owned();
     assert!(output.status.success(), "docker port failed: {text}");
     assert!(!text.trim().is_empty(), "docker port lists no binding");

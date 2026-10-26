@@ -15,6 +15,7 @@ use testcontainers::core::{ExecCommand, IntoContainerPort};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, CopyTargetOptions, GenericImage, ImageExt};
 
+use super::cli::{CHILD_LIMIT, OUTPUT_LIMIT, run_bounded};
 use super::temp::random_secret;
 
 const IMAGE: &str = "postgres";
@@ -67,14 +68,14 @@ pub type Postgres = ContainerAsync<GenericImage>;
 static OLD_CONTAINERS: Once = Once::new();
 
 /// Remove the containers that earlier runs with the label value `label_value` left behind.
+///
+/// The removal is best effort: a failed `docker` command leaves the containers. A `docker` command
+/// that does not exit within `CHILD_LIMIT` fails the test, as in every other bounded run.
 fn remove_old_containers(label_value: &str) {
     let filter = format!("label={LABEL_KEY}={label_value}");
-    let Ok(listing) = Command::new("docker")
-        .args(["ps", "-aq", "--filter", &filter])
-        .output()
-    else {
-        return;
-    };
+    let mut list = Command::new("docker");
+    list.args(["ps", "-aq", "--filter", &filter]);
+    let listing = run_bounded(list, CHILD_LIMIT, OUTPUT_LIMIT);
     let identifiers: Vec<String> = String::from_utf8_lossy(&listing.stdout)
         .split_whitespace()
         .map(str::to_owned)
@@ -82,10 +83,11 @@ fn remove_old_containers(label_value: &str) {
     if identifiers.is_empty() {
         return;
     }
-    let _ = Command::new("docker")
+    let mut remove = Command::new("docker");
+    remove
         .args(["rm", "--force", "--volumes"])
-        .args(&identifiers)
-        .output();
+        .args(&identifiers);
+    let _ = run_bounded(remove, CHILD_LIMIT, OUTPUT_LIMIT);
 }
 
 /// Publish the PostgreSQL port on 127.0.0.1 only, on a free host port.

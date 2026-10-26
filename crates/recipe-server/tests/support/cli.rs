@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-/// The time that a run of `migrate` may take before the helper kills the child.
-const CHILD_LIMIT: Duration = Duration::from_secs(60);
+/// The time that a child may run before the helper kills it.
+pub const CHILD_LIMIT: Duration = Duration::from_secs(60);
 /// The number of bytes that the helper keeps of each pipe. It reads and drops the rest.
-const OUTPUT_LIMIT: usize = 1024 * 1024;
+pub const OUTPUT_LIMIT: usize = 1024 * 1024;
 /// The pause between two checks of a child that may have exited.
 const EXIT_POLL_PAUSE: Duration = Duration::from_millis(50);
 
