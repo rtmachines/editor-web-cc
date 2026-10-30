@@ -1,6 +1,6 @@
 # ADR-0083: Image of `backup` and `walarchive` in the upgrade and the rollback
 
-Status: Accepted. Amended by a note (VX11-4: reconciles the normative wording)
+Status: Accepted. Amended by a note (VX11-4: reconciles the normative wording). Amended by ADR-0103 (item (d): `walarchive` starts before `app` after a rollback restore)
 Date: 2026-10-24
 Deciders: project owner
 

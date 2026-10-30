@@ -517,6 +517,8 @@ Coverage target: 80 % line coverage per crate, measured with `cargo llvm-cov`. T
 
 Seven services. Start order through `depends_on`: `db` (healthy) → `backup-premigrate` (completed successfully) → `migrate` (completed successfully) → `app` → `proxy`. `walarchive` and `backup` depend only on `db`.
 
+Two one-shot services are not part of the seven. `pitr-check` has the profile `pitr`, and `restore-volume` has the profile `restore` (7.7, ADR-0103 (h)). `docker compose up` starts neither of them.
+
 Images (ADR-0064):
 
 - The project builds `recipe-server:<version>` and `recipe-pgtools:<version>`. `compose.yaml` names them with `image:` and `${RECIPE_VERSION}`. Each external image has a pinned digest.
@@ -535,7 +537,9 @@ Networks and capabilities (ADR-0065, ADR-0070):
 
 Healthchecks: each healthcheck uses `health.check_interval`, `health.check_failures`, `health.check_timeout`, `health.start_period`, and `health.start_interval` (ADR-0070 (n), (o)).
 
-Secrets: every password is a Docker secret mounted as a file. The application reads `*_FILE` variables only. There is no env-file option. The file `deploy/.env` holds only the eight values of the Compose interpolation and no password. The application never reads it (ADR-0062 (i), (j)). The superuser password exists only in `db` and in the initdb script. Its file is `secrets.postgres_password_file` (ADR-0069 (e)). The secret `replicator_password` (`secrets.replicator_password_file` of 7.11) exists only in `db` and in `walarchive`. The initdb script creates `recipe_replicator` from it (`data-model.md` 5.1).
+Secrets: every password is a Docker secret mounted as a file. The application reads `*_FILE` variables only. There is no env-file option. The file `deploy/.env` holds only the nine values of the Compose interpolation and no password. The application never reads it (ADR-0062 (i), (j)). The ninth value `RECIPE_PGDATA_VOLUME` names the volume `pgdata` (7.8, ADR-0103 (d)).
+
+The superuser password exists only in `db` and in the initdb script. Its file is `secrets.postgres_password_file` (ADR-0069 (e)). The secret `replicator_password` (`secrets.replicator_password_file` of 7.11) exists only in `db` and in `walarchive`. The initdb script creates `recipe_replicator` from it (`data-model.md` 5.1).
 
 Secret files on the host (ADR-0062 (l) to (o), ADR-0065 (b)):
 
@@ -699,21 +703,64 @@ Copies and restore:
 - A `trap` deletes the scratch cluster on each exit of the script.
 - After a restore into production, the operator truncates `session` and `login_attempt`. The operator then re-applies every user deactivation and password reset recorded after the dump time, from the off-site audit copy when one exists. Last, the operator waits for the next completed run of the job `audit_chain_check` and reads its result (ADR-0100, ADR-0102).
 
+Restore into production (ADR-0103):
+
+- Every restore into production writes into a new, empty volume. The rule covers a restore of the same major version, the rollback with `_premigrate`, and the major upgrade (ADR-0103 (a)).
+- Each restore uses one order. `restore-test` passes first. Then the operator stops `app` and `backup`, and `restore-volume` fills the new volume while `db` runs on the old volume (ADR-0103 (b)).
+- When the set to restore is not the newest set, steps 1 to 8 of `restore-volume` (ADR-0103 (i)) are the test of that set. The login check of step 8 of the restore test then has no equal before the switch.
+- Then the switch of 7.8 runs. The operator sets the role passwords in `db` from the secret files (ADR-0033). Then the new WAL line starts.
+- Then the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Last, the operator runs `docker compose up -d --no-deps app`, then `docker compose up -d --no-deps proxy backup`. The wait of the bullet "After a restore into production" follows.
+- `restore-volume` runs in a temporary container of `recipe-pgtools` with `network_mode: none`. It mounts no secret. Its image has the tag of the schema of the set (ADR-0083 (a)).
+- The script refuses a target that is not empty. It takes `flock` on the existing lock of the restore test and opens it read-only (ADR-0103 (i)).
+- It runs the gates of steps 1 and 2 of the restore test and writes nothing to `/backups`. Then it runs `initdb` with the arguments of 7.1.
+- It restores the checked globals file and the dump. It runs the comparisons, the counts, and the audit chain check of steps 4 to 7 of the restore test.
+- The script sets no known password. Until the operator sets the passwords after the switch, no password login succeeds (ADR-0103 (k)).
+- Its temporary server has no TCP listener and keeps `fsync` on. It uses the `scratch.*` sizes and the waits `restore_volume.start_timeout` and `restore_volume.stop_timeout` of 7.11 (ADR-0103 (j)).
+- Then the script runs the two `REVOKE` statements of `data-model.md` 5.1 and writes `pg_hba.conf`. A function of the shared file of ADR-0103 (l), (m) gives each of them.
+- The script then compares the configuration files and the top-level names of the data directory with the state after `initdb` (ADR-0103 (o)).
+- It also compares the values of ADR-0103 (m) with the file `restore-roles.expected` of its image. The values are `pg_hba.conf`, the access lists, the role attributes, the role memberships, the role settings, and the grants. A storage test compares that file with a cluster of `01-roles.sh` and all migrations (ADR-0103 (m)). The file holds a placeholder for the subnet. The script puts `COMPOSE_SUBNET` into it before the comparison.
+- A difference ends the run. The user accepts the residual risk of a catalog change that these comparisons cannot find (ADR-0103 (o)).
+- Last, the script stops the server with a clean shutdown. Its last line holds the system identifier of the new cluster. After a failed run, the operator deletes the new volume.
+
+WAL line after a switch (ADR-0103 (r) to (v)):
+
+- Every switch starts a new WAL line before `app` starts. The rule also covers a switch back after the move of the old segments (ADR-0103 (g)).
+- The operator moves the old segments, the `.partial` file, and every base backup of `/wal/base` into a target directory of ADR-0099 (c). It also moves `/wal/.system-identifier`. The file `old-system-identifier` there keeps the system identifier of the old cluster.
+- `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier (ADR-0103 (s)).
+- The release note of the operations change gives the one step that writes the file on an existing installation.
+- Then the operator starts `walarchive`. The operator runs the stream check, the base backup, the segment switch, the flush check, and the WAL check of ADR-0099 (a).
+- The operator deletes the old `pgdata` volume and that target directory only after three conditions. A `restore-test` passed on a set of the new cluster. The flush check and the WAL check of ADR-0099 (a) passed on the new WAL line.
+- The third condition is an age of the switch above `volume_switch.keep_min_age`. No script and no retention deletes them (ADR-0103 (t)).
+- `restore_command` reads `/wal` only. The moved files are therefore no recovery source for the running stack (ADR-0103 (v)).
+- A recovery of the old cluster needs a procedure that reads the target directory in a separate container. Never move the files back into `/wal` while `walarchive` writes there.
+
 ### 7.8 Volumes, resources, disk full
 
 | Volume | Content |
 |---|---|
-| `pgdata` | PostgreSQL data directory. Mounted read-only into `app` for the disk check and into `backup` for the filesystem check of 7.7 |
+| `pgdata` | PostgreSQL data directory. An external volume. `RECIPE_PGDATA_VOLUME` of `deploy/.env` names it. Compose never creates or deletes it, and the operator creates it with `docker volume create` (ADR-0103 (c), (d)). Mounted read-only into `app` for the disk check and into `backup` for the filesystem check of 7.7 |
 | `backups` | Dumps from 7.7. A named volume with a bind to a second disk (ADR-0066 (a)). Mounted read-only into `app` for the job `alerts` |
 | `walarchive` | A named volume with a bind to a second disk. WAL segments and base backups. Mounted read-only into `app` for the job `alerts` |
 | `caddy` | TLS state of Caddy, mounted on `/data` of `proxy`. The Caddyfile sets `persist_config off` (ADR-0070 (d)) |
+
+Volume switch (ADR-0103 (e) to (g)):
+
+- A new volume gets the name `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>`. The time is UTC.
+- The switch stops and deletes the containers of `proxy`, `app`, `backup`, `walarchive`, and `db`. It never runs `docker compose down` and never `docker compose start`.
+- Then the operator runs `pg_controldata` on the old volume. The state must be `shut down`. Else the operator keeps the old name, starts `db` again, and then stops and deletes its container again. The operator writes the old name and the system identifier of the old cluster into the change log of the site. Then the operator sets `RECIPE_PGDATA_VOLUME` to the new name.
+- Before `up`, the operator runs `pg_controldata` on the new volume in a `recipe-pgtools` container with `--network none` and a read-only mount.
+- The state must be `shut down`. The system identifier must equal the field `system_identifier` of the line `restore volume completed`. Else the operator stops, deletes no volume, and runs the switch back at once (ADR-0103 (f)).
+- Then the operator runs `docker compose up -d --no-deps db`. `docker inspect` shows the new volume in `db`, `app`, and `backup`.
+- A switch back uses the same steps with the old name. It needs no state of the volume that it leaves and never starts `db` on that volume. Its system identifier must equal the identifier that the first switch wrote into the change log (ADR-0103 (f), (g)).
+- After `db` starts, a switch back starts `walarchive` before `app`. After the move of the old segments, the new WAL line of 7.7 starts first (ADR-0103 (g)). Then the operator starts `app`, then `proxy` and `backup`.
+- When the identifier check of a switch back fails, the operator starts no `db` and deletes no volume. The site stays down until the operator finds the cause. The switch back loses each write after the switch. After a major upgrade, it also needs the old `compose.yaml` and the old images.
 
 Resource limits per container are the keys `container.*` of 7.11 (ADR-0070 (f) to (m), ADR-0081):
 
 - Each service gets `mem_limit` equal to `memswap_limit`, so the limit is hard and has no swap. Each service gets `cpus`.
 - `app` has `container.app_memory` and `container.app_cpus`. `db` has `container.db_memory` and `container.db_cpus`.
-- `backup` has `container.backup_memory`. `proxy` and `walarchive` have `container.small_memory`. `migrate` and `backup-premigrate` have `container.oneshot_memory`.
-- `proxy`, `backup`, `walarchive`, `migrate`, and `backup-premigrate` have `container.small_cpus`. The temporary container of `pitr-check` also has `container.small_cpus` (ADR-0081 (a)).
+- `backup` and the temporary containers of `pitr-check` and `restore-volume` have `container.backup_memory`. `proxy` and `walarchive` have `container.small_memory`. `migrate` and `backup-premigrate` have `container.oneshot_memory`.
+- `proxy`, `backup`, `walarchive`, `migrate`, and `backup-premigrate` have `container.small_cpus`. The temporary containers of `pitr-check` and `restore-volume` also have `container.small_cpus` (ADR-0081 (a), ADR-0103 (h)).
 - `app` runs `runtime.worker_threads` Tokio workers, so a long render does not stop `/healthz` on one CPU (ADR-0061 (h)).
 - ADR-0070 (m) gives the minimum host and the versions of Docker Engine and Compose.
 
@@ -758,9 +805,11 @@ Disk space policy (Assumption A24):
    2. `docker compose exec backup backup-now`. The new `_now` set holds the new schema.
    3. `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
    - If the test names a `_premigrate` set of the same UTC minute, run commands 2 and 3 again in a later minute.
-6. Rollback: `RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app`. Without `--no-deps`, the previous `migrate` runs against the newer schema and fails, and `app` does not start (ADR-0082 (b)). `deploy/.env` keeps the new tag, because the schema stays newer (ADR-0083 (c)). If the migration did not follow the expand pattern, stop `app` and restore the `_premigrate` dump. Then set the previous tag in `deploy/.env` and run `docker compose up -d --no-deps app` (ADR-0083 (d)). Last, run the three commands of step 5 with the tag of `deploy/.env`. `backup` and `walarchive` then run the image of the schema (7.7).
+6. Rollback: `RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app`. Without `--no-deps`, the previous `migrate` runs against the newer schema and fails, and `app` does not start (ADR-0082 (b)). `deploy/.env` keeps the new tag, because the schema stays newer (ADR-0083 (c)).
+   - If the migration did not follow the expand pattern, restore the `_premigrate` dump into a new volume in the order of 7.7, "Restore into production". Set the previous tag in `deploy/.env` before `restore-volume` runs (ADR-0103 (b), (q)).
+   - Before `app` starts, the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Then run `docker compose up -d --no-deps app` (ADR-0083 (d)), then `docker compose up -d --no-deps proxy`. Last, run the three commands of step 5 with the tag of `deploy/.env`. `backup` and `walarchive` then run the image of the schema (7.7).
 7. Concurrent index on an audit object (`data-model.md` 5.1). The operator connects as `recipe_migrator` and runs these statements in one `psql` session: `GRANT CREATE ON SCHEMA public TO audit_owner`, `SET ROLE audit_owner`, `CREATE INDEX CONCURRENTLY`, `RESET ROLE`, `REVOKE CREATE ON SCHEMA public FROM audit_owner`. The next migration records the index with `CREATE INDEX IF NOT EXISTS`.
-8. Major PostgreSQL upgrade (at least twice in 10 years): follow `docs/ops/runbook.md` section "Major upgrade". It uses `pg_dumpall --globals-only` plus `pg_dump -Fc` into a new `db` volume created with the same `initdb` arguments, then a restore test, then the switch. There is no `pg_upgrade` (ADR-0020).
+8. Major PostgreSQL upgrade (at least twice in 10 years): follow `docs/ops/runbook.md` section "Major upgrade". It uses `pg_dumpall --globals-only` plus `pg_dump -Fc` and a restore test of that set. Then `restore-volume` of the new release fills a new `db` volume with the same `initdb` arguments. The switch of 7.8 follows (ADR-0103 (b), (p)). The rollback after the switch is a switch back to the old volume. There is no `pg_upgrade` (ADR-0020).
 
 ### 7.11 Settings
 
@@ -888,8 +937,8 @@ This table is the single source for every numeric setting. A key of the first co
 | `backup.max_age_alert` | 26 h | 3.7, 7.1, 7.7 |
 | `restore_test.time` | Sunday 05:00 UTC (ADR-0067 (a)) | 7.7 |
 | `basebackup.time` / `basebackup.retention` | Sunday 03:30 UTC / 4 base backups (ADR-0068 (f), (i)) | 7.7 |
-| `scratch.shared_buffers` / `scratch.maintenance_work_mem` / `scratch.max_connections` | 64 MB / 64 MB / 10. The scratch clusters of `restore-test` and `pitr-check` (ADR-0067 (e)) | 7.7 |
-| `scratch.max_parallel_workers_per_gather` / `scratch.max_parallel_maintenance_workers` | 0 / 0. The scratch clusters of `restore-test` and `pitr-check` (ADR-0067 (e)) | 7.7 |
+| `scratch.shared_buffers` / `scratch.maintenance_work_mem` / `scratch.max_connections` | 64 MB / 64 MB / 10. The scratch clusters of `restore-test` and `pitr-check`, and the temporary server of `restore-volume` (ADR-0067 (e), ADR-0103 (j)) | 7.7 |
+| `scratch.max_parallel_workers_per_gather` / `scratch.max_parallel_maintenance_workers` | 0 / 0. The scratch clusters of `restore-test` and `pitr-check`, and the temporary server of `restore-volume` (ADR-0067 (e), ADR-0103 (j)) | 7.7 |
 | `scratch.restore_fsync` / `scratch.restore_wal_level` / `scratch.restore_max_wal_senders` | `off` / `minimal` / 0, for the cluster of `restore-test` only (ADR-0067 (f)) | 7.7 |
 | `scratch.pitr_hot_standby` | `off`, for the cluster of `pitr-check` only. The lower `scratch.max_connections` then does not stop the recovery (ADR-0068 (o)) | 7.7 |
 | `scratch.port` / `scratch.stop_timeout` | 5433 / 60 s. The port and the `pg_ctl stop` timeout of the scratch servers of `restore-test` and `pitr-check` (ADR-0077 (g)) | 7.7 |
@@ -897,6 +946,8 @@ This table is the single source for every numeric setting. A key of the first co
 | `restore_test.detail_length` | 160 characters of a tool message in an `ERROR` line of `restore-test` (ADR-0077 (g)) | 7.7 |
 | `pitr_check.log_tail` | 20 lines of the server log on stderr after a failed start of the scratch cluster of `pitr-check` (ADR-0077 (g)) | 7.7 |
 | `pitr_check.ready_poll` | 1 s. The interval of the connection check while the scratch cluster of `pitr-check` finishes its recovery. The checks stay inside `scratch.pitr_start_timeout` | 7.7 |
+| `restore_volume.start_timeout` / `restore_volume.stop_timeout` | 60 s / 600 s. The `pg_ctl start` and the `pg_ctl stop` timeout of the temporary server of `restore-volume`. The fast stop writes the shutdown checkpoint with `fsync` on. The wait stays inside the recovery time objective of 1 h (ADR-0103 (y)) | 7.7 |
+| `volume_switch.keep_min_age` | 30 days, equal to `backup.retention`. The minimum age of a switch before the operator deletes the old `pgdata` volume and the moved WAL files (ADR-0103 (t), (y)) | 7.7 |
 | `wal.max_lag_bytes` | 16 MiB. Replication lag `pg_current_wal_lsn() - sent_lsn` of `recipe_replicator` | 3.7, 7.1, 7.7 |
 | `security_event.retention` | 400 days. A constant in `security_event_purge()`. A change needs a migration | 3.6, data-model.md 4.12 |
 | `security_event.purge_interval` | 24 h | 2.4, data-model.md 4.12 |
@@ -907,8 +958,8 @@ This table is the single source for every numeric setting. A key of the first co
 | `container.app_memory` / `container.app_cpus` | 512 MiB / 1 | 7.8 |
 | `container.db_memory` / `container.db_cpus` | 2 GiB / 2 | 7.8 |
 | `container.small_memory` | 128 MiB each for `proxy` and `walarchive` (ADR-0070 (i)) | 7.8 |
-| `container.small_cpus` | 0.5 each for `proxy`, `backup`, `walarchive`, `migrate`, `backup-premigrate`, and the temporary container of `pitr-check` (ADR-0070 (j), ADR-0081 (a)) | 7.7, 7.8 |
-| `container.backup_memory` | 512 MiB for `backup` and for the temporary container of `pitr-check` (ADR-0067 (b)) | 7.7, 7.8 |
+| `container.small_cpus` | 0.5 each for `proxy`, `backup`, `walarchive`, `migrate`, `backup-premigrate`, and the temporary containers of `pitr-check` and `restore-volume` (ADR-0070 (j), ADR-0081 (a), ADR-0103 (h)) | 7.7, 7.8 |
+| `container.backup_memory` | 512 MiB for `backup` and for the temporary containers of `pitr-check` and `restore-volume` (ADR-0067 (b), ADR-0103 (h)) | 7.7, 7.8 |
 | `container.oneshot_memory` | 256 MiB each for `migrate` and `backup-premigrate` (ADR-0070 (h)) | 7.8 |
 | `pg.max_wal_senders` | 3 | 7.6 |
 | `pg.wal_keep_size` | 1 GB | 7.6 |

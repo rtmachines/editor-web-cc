@@ -1,6 +1,6 @@
 # ADR-0099: Stream before the replacement base backup after a WAL gap
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0103 (item (c): the delete rule after a switch, moved files are a recovery source only for a separate procedure)
 Date: 2026-10-26
 Deciders: project owner
 

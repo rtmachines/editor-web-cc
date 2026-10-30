@@ -1,6 +1,6 @@
 # ADR-0069: Hardening of the database access
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0103 (items (r) and (v): one shared file holds the client rules, a cluster of `restore-volume`)
 Date: 2026-10-23
 Deciders: project owner
 

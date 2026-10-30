@@ -552,13 +552,13 @@ The check of step 3 shows one instant, so the time of step 1 keeps a scheduled r
 
 ### Restore into production
 
-Warning: this procedure is not complete for 0.1.0. See [Known gaps](#known-gaps).
+ADR-0103 replaces the restore steps of this procedure. The operations change of ADR-0103 gives the new steps. Until then, do not run the steps that restore into `db`. See [Known gaps](#known-gaps).
 
-The restore goes into a new `db` volume (ADR-0020).
+The restore goes into a new `db` volume (ADR-0103 (a)).
 The old volume `pgdata` stays on the host.
-The step that makes a new volume the volume of `db` is open. No document gives its command. See "Known gaps".
+ADR-0103 gives the order: the command `restore-volume` fills the new volume before the switch. That command and the switch do not exist yet.
 
-The steps below start with an empty new cluster as `db`. It holds no database `recipe` and no project role.
+Steps 4 and 5 show the commands that `restore-volume` will run. Do not run them on `db`.
 `<stamp>` is the part of the dump file name between `recipe_` and `.dump`, for example `<YYYYMMDD_HHMM>_now`.
 
 Warning: a restore of a dump loses every change and audit entry after the dump time. The loss is up to 24 hours.
@@ -766,6 +766,8 @@ Keep the new `app`. Keep every set. Read the `ERROR` line in the output of `rest
 
 ### Rollback
 
+ADR-0103 replaces the restore steps of the rollback with the `_premigrate` dump. The operations change of ADR-0103 gives the new steps. Until then, do not restore into `db`. See [Known gaps](#known-gaps).
+
 Check first that the images of the previous tag exist (section "Keep the images for a rollback").
 
 1. Run the command below to start the previous `app` on the newer schema:
@@ -784,15 +786,7 @@ Warning: this restore loses every change and audit entry after the `_premigrate`
 The lost period runs from the `_premigrate` dump to the stop of `app`.
 No test checks the `_premigrate` set. The test before the upgrade checks a set of the same schema (ADR-0083).
 
-The restore goes into a new `db` volume. The switch step is open, as the section "Restore into production" says. See "Known gaps".
-
-1. Run `docker compose stop app`.
-2. Use steps 4 to 8 of "Restore into production" for the newest `_premigrate` set. Use its name as `<stamp>`.
-3. Set the previous tag in `.env`.
-4. Run steps 6 and 7 of the section "Create the environment file". The image tags show the previous tag.
-5. Run step 9 of the section "Restore into production". `.env` holds the previous tag.
-6. Run step 10 of the section "Restore into production".
-7. Run the three commands of the upgrade with the tag of `.env`.
+The restore goes into a new `db` volume (ADR-0103 (a)). The command `restore-volume` and the switch do not exist yet, so this procedure has no steps. See [Known gaps](#known-gaps).
 
 #### Start app after a rollback
 
@@ -862,7 +856,7 @@ The next migration records the same index with `CREATE INDEX IF NOT EXISTS` (`da
 
 ## Major upgrade
 
-Warning: this procedure is not complete for 0.1.0. See [Known gaps](#known-gaps).
+ADR-0103 replaces the restore steps of this procedure. The operations change of ADR-0103 gives the new steps. Until then, do not run the steps that restore into `db`. See [Known gaps](#known-gaps).
 
 A major upgrade of PostgreSQL is a dump and a restore into a new `db` volume.
 The new volume uses the same `initdb` arguments as `compose.yaml`. The project does not use `pg_upgrade` (ADR-0020).
@@ -873,9 +867,9 @@ The new volume uses the same `initdb` arguments as `compose.yaml`. The project d
 4. Check that the line `restore test passed` names the `_now` set of step 2.
 
 The test comes before the switch (`reliability.md` 7.10 step 8).
-The switch makes the new volume the volume of `db`. No document gives the command of this switch (ADR-0020), so the switch step is open. See "Known gaps".
-
-After the switch, restore the `_now` set with steps 4 to 10 of the section "Restore into production". Use the name of the `_now` set for `<stamp>`.
+ADR-0103 gives the next steps. The command `restore-volume` of the new release fills a new volume with the `_now` set. Then the switch makes the new volume the volume of `db`.
+The command `restore-volume` and the switch do not exist yet. The procedure stops here. See "Known gaps".
+Run `docker compose start app`, so that `app` serves again on the old volume.
 Keep the old volume `pgdata` on the host.
 
 ## Key rotation
@@ -1669,17 +1663,17 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 The documents do not yet close the gaps below. Each bullet gives the workaround of this page, if one exists.
 
 - The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up` (section [Stop and start, or down and up](#stop-and-start-or-down-and-up)). Read the subnets again and write the firewall rules again (section "Check the host firewall").
-- No document gives the mechanism that makes a new volume the volume of `db`. The restore, the rollback, and the major upgrade therefore stop before the volume switch. No workaround.
+- ADR-0103 gives the volume switch, the command `restore-volume`, and the new WAL line after a switch. The operations change of ADR-0103 has not shipped. Until then, the restore, the rollback with the `_premigrate` dump, and the major upgrade stop before the volume switch. No workaround.
+- A restore of a set with the schema of 0.1.0 has no procedure, also the rollback restore of a `_premigrate` set. The image of 0.1.0 has no `restore-volume` (ADR-0103 (h), (q)). The `backup-now` of the upgrade makes the first set that `restore-volume` can restore. No workaround.
+- `deploy/.env` keeps eight values until the operations change ships. `reliability.md` 7.1 and ADR-0062 (i) already name nine. Do not add `RECIPE_PGDATA_VOLUME` before that release.
+- The code of a dump runs as the superuser of the cluster that `restore-volume` fills, and that cluster becomes production. The checks of ADR-0103 (m) and (o) cannot find each change inside the catalog. The user accepts this residual risk (ADR-0103 (o)). A later ADR may restore `pre-data` as a role that is not a superuser (ADR-0084). No workaround.
 - No document gives the steps to recover production from the WAL archive. The recovery point of minutes (ADR-0020, `reliability.md` 7.7) has no procedure yet. The workaround is a restore of a dump, with a loss of up to 24 hours.
 - No document gives the transfer of the external images `caddy` and `postgres`, or the digest check after `docker load`. The section "Load the images" names only `recipe-server` and `recipe-pgtools`. No workaround.
 - The trusted-proxy entries in `Caddyfile` and `compose.yaml` do not survive a release. A new release replaces both files. After each upgrade, write the entries again (sections "Upgrade" and "A plant device in front of Caddy").
-- The rule that a restore goes into a new volume is only in a non-normative design note (D13). No ADR holds it. No workaround.
 - The soak test of `reliability.md` section 6 is not implemented. The repository holds no soak script and no nightly CI job for it. The 2 h local run with an RSS chart did not run, so no file `docs/ops/soak-<date>.md` exists. The limits of that test stay unproven. They are `soak.memory_ceiling` of `reliability.md` 7.11, zero restarts, and the p99 latency bound of section 6. No workaround.
 - The section "Check the host firewall" gives no rule that limits the network `egress` to the webhook host (ADR-0063 (p)). No workaround.
 - The file `compose.yaml` sets no `RECIPE_ALERTS__WEBHOOK_CA_FILE` and mounts no CA file. The key `alerts.webhook_ca_file` therefore stays empty, and the webhook client trusts the webpki roots only (ADR-0063 (j)). No workaround.
 - No test measures the recovery time objective of `reliability.md` 7.7 (ADR-0020).
-- The procedure "Restore into production" assumes an empty cluster with no project role and no database `recipe`. On an empty volume, the service `db` runs `db/initdb/01-roles.sh` and creates them (`deploy/compose.yaml`, `deploy/db/initdb/01-roles.sh`). The procedure is not complete for 0.1.0. No workaround.
-- The restore into a new volume and the major upgrade do not handle the WAL archive (`walarchive`). After a restore into a new cluster, the old base backups can name higher segments than the new cluster (ADR-0077). The section "A gap in the WAL stream" covers an outage only. No workaround.
 - No procedure recovers access when the only administrator cannot log in. The command `create-admin` does nothing when an active administrator exists. Only a user with `UserManage` resets a password (`api.md` section 3). No workaround.
 - A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
 - No document gives a procedure for the cases below. Each item links the section where the case appears. That section gives the part of the procedure that exists.
@@ -1743,3 +1737,4 @@ A later change will close these gaps with its own ADR.
 - [ADR-0099](../adr/0099-stream-before-the-replacement-base-backup.md): Stream before the replacement base backup after a WAL gap
 - [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md): Wait for the scheduled audit chain check after a restore
 - [ADR-0102](../adr/0102-end-the-restore-after-the-audit-chain-result.md): End the restore after the result of the audit chain check
+- [ADR-0103](../adr/0103-volume-switch-restore-target-and-wal-line.md): Volume switch, restore target, and WAL line after a switch
