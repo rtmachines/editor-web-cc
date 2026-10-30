@@ -2,7 +2,8 @@
 # walarchive-entry: the entry of the container walarchive (design D9, D10, ADR-0068 (a) to (c)).
 #
 # It refuses to start without the marker file of the WAL archive disk (ADR-0074 (a)). Then it
-# writes the pgpass file from the secret of recipe_replicator and starts two children:
+# writes the pgpass file from the secret of recipe_replicator. The identifier guard checks that
+# the WAL archive belongs to the cluster of db (ADR-0103 (s), design D7). Then it starts two children:
 #   pg_receivewal --synchronous   without a replication slot, application_name=walarchive
 #   supercronic                   the weekly job basebackup-once from crontab.walarchive
 # The first exit of a child ends the container. Docker (restart: always) starts it again.
@@ -12,6 +13,7 @@
 #   WALARCHIVE_PGPASS_DIR    the tmpfs for the pgpass file, default /run/pgpass
 #   WALARCHIVE_SECRET_FILE   the password file of recipe_replicator, default /run/secrets/replicator_password
 #   WALARCHIVE_CRONTAB       the crontab, default /etc/pgtools/crontab.walarchive
+#   WALARCHIVE_LIB_DIR       the directory of wal-identity.sh, default /etc/pgtools
 #   PGHOST PGPORT PGUSER     the connection, default db, 5432, recipe_replicator
 set -euo pipefail
 umask 077
@@ -25,6 +27,7 @@ WAL_DIR=${WAL_DIR:-/wal}
 PGPASS_DIR=${WALARCHIVE_PGPASS_DIR:-/run/pgpass}
 SECRET_FILE=${WALARCHIVE_SECRET_FILE:-/run/secrets/replicator_password}
 CRONTAB=${WALARCHIVE_CRONTAB:-/etc/pgtools/crontab.walarchive}
+LIB_DIR=${WALARCHIVE_LIB_DIR:-/etc/pgtools}
 # The jobs of supercronic read the same connection values.
 export PGHOST=${PGHOST:-db}
 export PGPORT=${PGPORT:-5432}
@@ -138,7 +141,12 @@ fi
 check_secret_file "$SECRET_FILE"
 write_pgpass
 
-# Step 3: the two children. Only pg_receivewal sees the pgpass file.
+# Step 3: the identifier guard. It writes /wal/.system-identifier on the first start.
+# shellcheck source=../lib/wal-identity.sh
+source "$LIB_DIR/wal-identity.sh" || fail "cannot load wal-identity.sh"
+wal_identity_guard "$work_dir/pgpass"
+
+# Step 4: the two children. Only pg_receivewal sees the pgpass file.
 trap on_stop_signal TERM INT
 log INFO "wal stream started"
 PGPASSFILE=$work_dir/pgpass pg_receivewal --synchronous --no-loop --no-password \
@@ -148,7 +156,7 @@ receiver_pid=$!
 supercronic -json -passthrough-logs "$CRONTAB" &
 cron_pid=$!
 
-# Step 4: the first exit of a child ends the container (ADR-0068 (c)).
+# Step 5: the first exit of a child ends the container (ADR-0068 (c)).
 status=0
 exited_pid=""
 wait -n -p exited_pid "$receiver_pid" "$cron_pid" || status=$?

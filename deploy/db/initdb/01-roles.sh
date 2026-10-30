@@ -5,6 +5,8 @@
 # Source: docs/architecture/data-model.md section 5.1, ADR-0031, ADR-0032, ADR-0034, ADR-0035,
 # and ADR-0069. The script writes the whole pg_hba.conf (ADR-0069 (r) to (t)). It holds no test
 # switch. The storage tests mount their own second init script (ADR-0069 (u)).
+# The subnet check, the pg_hba.conf lines, and the REVOKE statements of the default databases
+# live in the shared file /etc/recipe-db/cluster-access.sh (ADR-0103 (l), design D1).
 # Each password comes from a secret file (reliability.md section 7.11). psql reads the file,
 # so a password never appears in the argument list of a process.
 #
@@ -29,16 +31,9 @@ fail() {
   exit 1
 }
 
-# Check that a value is an IPv4 address with a prefix length, for example 172.28.0.0/16.
-is_ipv4_cidr() {
-  local value=$1 octet
-  local byte='(0|[1-9][0-9]{0,2})'
-  local prefix='([1-9]|[12][0-9]|3[0-2])'
-  [[ $value =~ ^${byte}\.${byte}\.${byte}\.${byte}/${prefix}$ ]] || return 1
-  for octet in "${BASH_REMATCH[@]:1:4}"; do
-    (( octet <= 255 )) || return 1
-  done
-}
+# The shared client rules: check_compose_subnet, write_hba_conf, and print_default_db_revokes.
+# The database image mounts the file at this fixed path.
+source /etc/recipe-db/cluster-access.sh
 
 # Check that a secret file is readable and holds exactly one non-empty line without "\r".
 check_secret_file() {
@@ -55,15 +50,17 @@ check_secret_file() {
 
 # Fail before any change when an input is wrong.
 subnet=${COMPOSE_SUBNET:-}
-is_ipv4_cidr "$subnet" \
+check_compose_subnet "$subnet" \
   || fail "COMPOSE_SUBNET must be an IPv4 CIDR, for example 172.28.0.0/16"
 [ -n "${PGDATA:-}" ] || fail "PGDATA is not set"
 for name in migrator app backup replicator; do
   check_secret_file "${SECRET_DIR}/${name}_password"
 done
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc \
-  --dbname postgres <<'SQL'
+# One psql run reads the statements of both heredocs and the REVOKE statements of the shared
+# file, in this order.
+{
+cat <<'SQL'
 \set migrator_password `cat "$SECRET_DIR/migrator_password"`
 \set app_password `cat "$SECRET_DIR/app_password"`
 \set backup_password `cat "$SECRET_DIR/backup_password"`
@@ -94,8 +91,10 @@ REVOKE TEMPORARY ON DATABASE recipe FROM PUBLIC;
 REVOKE CONNECT ON DATABASE recipe FROM PUBLIC;
 GRANT CONNECT ON DATABASE recipe TO recipe_migrator, recipe_app, recipe_backup;
 -- ADR-0032: a normal session of a login role reaches no default database.
-REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
-REVOKE CONNECT, TEMPORARY ON DATABASE template1 FROM PUBLIC;
+-- The shared file prints the two REVOKE statements here.
+SQL
+print_default_db_revokes
+cat <<'SQL'
 -- ADR-0034: only audit_owner can drop an audit object, also through the owner of public.
 \connect recipe
 CREATE SCHEMA audit_guard;
@@ -123,24 +122,8 @@ REVOKE EXECUTE ON FUNCTION audit_guard.audit_objects_dropped() FROM PUBLIC;
 CREATE EVENT TRIGGER audit_objects_dropped ON sql_drop
     EXECUTE FUNCTION audit_guard.audit_objects_dropped();
 SQL
+} | psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc \
+  --dbname postgres
 
 # The client rules of data-model.md section 5.1, in place of every line of the image.
-# The first matching line wins. Only a process of the system user postgres logs in through the
-# socket (method peer). The four login roles connect from the Compose subnet only. The probe line
-# serves the healthcheck of db: no role pg_isready exists, so the probe ends at the password
-# request (ADR-0070 (q)).
-# The new file replaces the old one in one rename. umask 077 gives it mode 0600.
-hba_file="${PGDATA}/pg_hba.conf"
-umask 077
-{
-  printf '# Written by 01-roles.sh (data-model.md section 5.1, ADR-0069).\n'
-  printf '# TYPE  DATABASE     USER               ADDRESS          METHOD\n'
-  printf 'local   all          postgres                            peer\n'
-  printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\n' "$subnet"
-  printf 'host    recipe       recipe_app         %-16s scram-sha-256\n' "$subnet"
-  printf 'host    recipe       recipe_backup      %-16s scram-sha-256\n' "$subnet"
-  printf 'host    replication  recipe_replicator  %-16s scram-sha-256\n' "$subnet"
-  printf 'host    recipe       pg_isready         127.0.0.1/32     scram-sha-256\n'
-  printf 'host    all          all                all              reject\n'
-} > "${hba_file}.new"
-mv -- "${hba_file}.new" "$hba_file"
+write_hba_conf "$subnet" "${PGDATA}/pg_hba.conf"

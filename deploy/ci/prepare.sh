@@ -8,7 +8,8 @@ sudo apt-get update -qq
 sudo apt-get install --yes --no-install-recommends acl
 [[ ! -e $CI_ROOT ]] || fail "the runner directory already exists"
 mkdir -m 0700 -- "$CI_ROOT" "$CI_STATE"
-for disk in backups walarchive
+# The WAL disk is the parent of the archive directory. The sibling target of a WAL move is then on the same disk.
+for disk in backups walarchive-disk
 do
   truncate -s 4G "$CI_ROOT/$disk.img"
   mkfs.ext4 -q -F "$CI_ROOT/$disk.img"
@@ -17,7 +18,7 @@ do
   sudo chown 999:999 "$CI_ROOT/$disk"
 done
 sudo chmod 0755 "$RECIPE_BACKUP_DIR"
-sudo chmod 0700 "$RECIPE_WALARCHIVE_DIR"
+sudo install -d -o 999 -g 999 -m 0700 "$RECIPE_WALARCHIVE_DIR"
 sudo install -o 999 -g 999 -m 0600 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"
 sudo install -o 999 -g 999 -m 0600 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"
 sudo install -d -o root -g root -m 0700 "$RECIPE_SECRETS_DIR"
@@ -38,4 +39,6 @@ sudo install -o 65532 -g 65532 -m 0400 /dev/null "$RECIPE_SECRETS_DIR/alerts_web
 openssl rand -hex 32 >"$CI_STATE/admin_password"
 openssl rand -hex 32 >"$CI_STATE/new_password"
 sudo install -o 65532 -g 65532 -m 0400 "$CI_STATE/admin_password" "$RECIPE_SECRETS_DIR/admin_password"
+# The job upgrade takes its volume from the previous release in start_previous.
+[[ ${GITHUB_JOB:-} == upgrade ]] || create_pgdata_volume
 printf 'CI disks and secrets are ready.\n'

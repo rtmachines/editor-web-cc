@@ -9,6 +9,8 @@ do
 done
 python3 -I -B deploy/ci/test_http_probe.py
 python3 -I -B deploy/ci/test_upgrade_checks.py
+python3 -I -B deploy/ci/test_restore_switch.py
+python3 -I -B deploy/ci/test_migration_freeze.py
 python3 -I -B - <<'PY'
 from pathlib import Path
 import re
@@ -55,6 +57,30 @@ def test_shell_tracing():
 
 
 test_shell_tracing()
+
+
+def test_migration_freeze_job():
+    # The job needs the full history to compare the migrations with the base.
+    lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
+    header = '  migration-freeze:'
+    if header not in lines:
+        raise SystemExit('ci.yml has no job migration-freeze')
+    start = lines.index(header) + 1
+    end = start
+    # A job body is indented by four spaces or more. Blank lines belong to it too.
+    while end < len(lines) and (lines[end].startswith('    ') or not lines[end].strip()):
+        end += 1
+    body = '\n'.join(lines[start:end])
+    if 'fetch-depth: 0' not in body:
+        raise SystemExit('migration-freeze does not fetch the full history')
+    if 'run: python3 -I -B deploy/ci/migration_freeze.py' not in body:
+        raise SystemExit('migration-freeze does not run migration_freeze.py')
+    if re.search(r'^    if:', body, re.M):
+        raise SystemExit('migration-freeze has an if: condition')
+    print('CI migration-freeze job check passed.')
+
+
+test_migration_freeze_job()
 paths = list(Path('.github/workflows').rglob('*'))
 paths.extend(Path('deploy').rglob('*'))
 for path in paths:

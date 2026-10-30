@@ -121,6 +121,16 @@ def password(client):
         raise HttpCheckError("the command did not rotate the session cookie", status, body)
 
 
+def relogin(client):
+    """Log in after the password change. The session cookie is new and the answer is the recipe list."""
+    fields = {"login": "ci-admin", "password": client.secret("new_password")}
+    fields["csrf_pre"] = client.token("/login", "csrf_pre")
+    status, headers, body = client.request("/login", fields)
+    check_redirect(status, headers, "/recipes", body)
+    if "__Host-recipe_session" not in client.cookies:
+        raise HttpCheckError("the session cookie is missing", status, body)
+
+
 def health(client):
     for path in ("/healthz", "/readyz?x=1", "/HEALTHZ", "/healthz/", "//healthz", "/readyz%2F"):
         status, headers, body = client.request(path)
@@ -130,6 +140,23 @@ def health(client):
             raise HttpCheckError("a public health path returned X-Request-Id", status, body)
         if body:
             raise HttpCheckError("a public health path returned a nonempty body", status, body)
+
+
+EXPORT_PATH = "/export/v1/recipes/CI-UPGRADE/versions/1"
+
+
+def export(client, name):
+    """Write the content hash of the fixture export to a file of the state directory."""
+    if not re.fullmatch(r"[a-z][a-z0-9.-]{0,63}", name):
+        raise ValueError("the export file name is invalid")
+    status, _, body = client.request(EXPORT_PATH)
+    if status != 200:
+        raise HttpCheckError("the export did not return 200", status, body)
+    document = json.loads(body)
+    digest = document.get("content_sha256")
+    if document.get("loadable") is not True or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise HttpCheckError("the export has no loadable content hash", status, "")
+    (client.state / name).write_text(digest + "\n", encoding="ascii")
 
 
 def redirect():
@@ -150,9 +177,11 @@ def main():
     action = sys.argv[1]
     if action == "redirect":
         redirect()
+    elif action == "export":
+        export(Client(pathlib.Path(os.environ["CI_STATE"])), sys.argv[2])
     else:
         client = Client(pathlib.Path(os.environ["CI_STATE"]))
-        {"login": login, "password": password, "health": health}[action](client)
+        {"login": login, "relogin": relogin, "password": password, "health": health}[action](client)
     print("CI HTTP check passed.")
 
 

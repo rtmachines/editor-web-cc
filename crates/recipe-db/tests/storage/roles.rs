@@ -332,3 +332,88 @@ fn the_superuser_cannot_log_in_through_the_socket_as_another_system_user() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Peer authentication failed"), "{stderr}");
 }
+
+/// The path where the harness container holds the shared file of the client rules (ADR-0103 (l)).
+const CLUSTER_ACCESS: &str = "/etc/recipe-db/cluster-access.sh";
+const HARNESS_SUBNET: &str = "172.28.0.0/16";
+/// The two statements of ADR-0032 for the default databases.
+const DEFAULT_DB_REVOKES: &str = "REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;\n\
+     REVOKE CONNECT, TEMPORARY ON DATABASE template1 FROM PUBLIC;\n";
+
+/// Source the shared file in a bash of the harness container and run the given commands.
+fn run_cluster_access(commands: &str) -> Output {
+    let program = format!("source {CLUSTER_ACCESS} && {commands}");
+    Command::new("docker")
+        .args(["exec", &server().container_id, "bash", "-c", &program])
+        .output()
+        .expect("docker exec runs")
+}
+
+/// The expected line of `PRODUCTION_HBA_LINES` in the text form of the file: the subnet as a
+/// prefix length, not as a netmask.
+fn hba_line_as_written(line: &str) -> String {
+    line.replace("172.28.0.0/255.255.0.0", HARNESS_SUBNET)
+        .replace("127.0.0.1/255.255.255.255", "127.0.0.1/32")
+}
+
+#[test]
+fn write_hba_conf_writes_the_seven_production_lines() {
+    // ADR-0103 (l): the shared function writes the lines of ADR-0069 (r) to (t).
+    let output = run_cluster_access(&format!(
+        "write_hba_conf {HARNESS_SUBNET} /tmp/cluster-access-hba.conf \
+         && cat /tmp/cluster-access-hba.conf && stat -c %a /tmp/cluster-access-hba.conf"
+    ));
+
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut lines: Vec<&str> = text.lines().collect();
+    let mode = lines.pop().expect("stat prints the mode");
+    let rules: Vec<String> = lines
+        .iter()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let expected: Vec<String> = PRODUCTION_HBA_LINES
+        .iter()
+        .map(|line| hba_line_as_written(line))
+        .collect();
+    assert_eq!(rules, expected);
+    assert_eq!(mode, "600");
+}
+
+#[test]
+fn print_default_db_revokes_prints_the_two_statements_of_adr_0032() {
+    let output = run_cluster_access("print_default_db_revokes");
+
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), DEFAULT_DB_REVOKES);
+}
+
+#[test]
+fn check_compose_subnet_accepts_a_good_subnet_and_refuses_a_bad_one() {
+    let good = run_cluster_access(&format!("check_compose_subnet {HARNESS_SUBNET}"));
+    assert!(good.status.success(), "{good:?}");
+
+    for bad in [
+        "",
+        "172.28.0.0",
+        "172.28.0.0/33",
+        "999.1.1.1/16",
+        "::1/128",
+        "0.0.0.0/0",
+        "172.010.0.0/16",
+    ] {
+        let output = run_cluster_access(&format!("check_compose_subnet '{bad}'"));
+
+        assert!(!output.status.success(), "subnet {bad:?}: {output:?}");
+    }
+}
+
+#[test]
+fn sourcing_the_shared_file_runs_no_command() {
+    let output = run_cluster_access("true");
+
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stdout.is_empty(), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+}

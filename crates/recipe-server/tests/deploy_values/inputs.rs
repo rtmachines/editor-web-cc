@@ -11,8 +11,9 @@ use crate::compose::{
 use crate::defaults::{check_dockerfile_ports, check_script_defaults, check_secret_dir};
 use crate::fault::Report;
 use crate::files::{
-    check_caddyfile, check_crontab, check_env_example, check_scratch_settings,
-    check_script_assignments, parse_env,
+    DB_CONTEXT_LIST, PGTOOLS_CONTEXT_LIST, PGTOOLS_DOCKERFILE, check_caddyfile,
+    check_context_lists, check_crontab, check_env_example, check_line_endings,
+    check_scratch_settings, check_script_assignments, parse_env,
 };
 use crate::lines::Compose;
 use crate::overrides::{BUILD, DEV, check_override};
@@ -30,7 +31,12 @@ pub const COMPOSE_DEV: &str = "deploy/compose.dev.yaml";
 pub const COMPOSE_BUILD: &str = "deploy/compose.build.yaml";
 pub const ENV_EXAMPLE: &str = "deploy/.env.example";
 pub const INITDB: &str = "deploy/db/initdb/01-roles.sh";
+pub const CLUSTER_ACCESS: &str = "deploy/db/cluster-access.sh";
 pub const DOCKERFILE: &str = "deploy/Dockerfile";
+/// The attribute file of Git. It sets the line endings of the build context (design D2).
+pub const GITATTRIBUTES_FILE: &str = ".gitattributes";
+/// The directories that hold the sources of the `COPY` lines of the pgtools Dockerfile.
+const CONTEXT_DIRECTORIES: [&str; 2] = ["deploy/db", "deploy/pgtools"];
 const CADDYFILES: [&str; 2] = ["deploy/Caddyfile", "deploy/Caddyfile.dev"];
 /// The crontab files, and the key of `reliability.md` 7.11 and the command for each line.
 const CRONTABS: [(&str, &[(&str, &str)]); 2] = [
@@ -47,7 +53,7 @@ const CRONTABS: [(&str, &[(&str, &str)]); 2] = [
     ),
 ];
 /// Every script of `deploy/pgtools/bin/`. A script holds a constant or a default of 7.11, or none.
-const SCRIPTS: [&str; 9] = [
+const SCRIPTS: [&str; 10] = [
     "backup-entry",
     "backup-health",
     "backup-now",
@@ -55,6 +61,7 @@ const SCRIPTS: [&str; 9] = [
     "basebackup-once",
     "pitr-check",
     "restore-test",
+    "restore-volume",
     "walarchive-entry",
     "walarchive-health",
 ];
@@ -71,6 +78,8 @@ pub struct Source {
 #[derive(Clone)]
 pub struct Inputs {
     files: Vec<Source>,
+    /// The repository paths of every file under `CONTEXT_DIRECTORIES`.
+    listing: Vec<String>,
 }
 
 fn repository_root() -> PathBuf {
@@ -89,6 +98,23 @@ fn read_text(path: &str) -> String {
     text.replace("\r\n", "\n")
 }
 
+/// The paths of the files under a directory, from the repository root, with `/` as the separator.
+fn list_files(directory: &str, found: &mut Vec<String>) {
+    let full = repository_root().join(directory);
+    let entries = std::fs::read_dir(&full)
+        .map_err(|error| format!("cannot list {}: {error}", full.display()))
+        .unwrap();
+    for entry in entries {
+        let entry = entry.unwrap();
+        let path = format!("{directory}/{}", entry.file_name().to_string_lossy());
+        if entry.file_type().unwrap().is_dir() {
+            list_files(&path, found);
+        } else {
+            found.push(path);
+        }
+    }
+}
+
 fn file_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -103,7 +129,12 @@ impl Inputs {
             COMPOSE_BUILD.to_owned(),
             ENV_EXAMPLE.to_owned(),
             INITDB.to_owned(),
+            CLUSTER_ACCESS.to_owned(),
             DOCKERFILE.to_owned(),
+            GITATTRIBUTES_FILE.to_owned(),
+            PGTOOLS_DOCKERFILE.to_owned(),
+            DB_CONTEXT_LIST.to_owned(),
+            PGTOOLS_CONTEXT_LIST.to_owned(),
         ];
         paths.extend(CADDYFILES.map(String::from));
         paths.extend(CRONTABS.iter().map(|(path, _)| (*path).to_owned()));
@@ -115,7 +146,16 @@ impl Inputs {
                 path,
             })
             .collect();
-        Inputs { files }
+        let mut listing = Vec::new();
+        for directory in CONTEXT_DIRECTORIES {
+            list_files(directory, &mut listing);
+        }
+        Inputs { files, listing }
+    }
+
+    /// The repository paths of the files that the `COPY` lines can name.
+    pub fn listing(&self) -> &[String] {
+        &self.listing
     }
 
     /// The text of a file under test.
@@ -134,7 +174,10 @@ impl Inputs {
             .expect("the name of a file under test");
         assert!(target.text.contains(from), "{name} does not hold {from:?}");
         target.text = target.text.replace(from, to);
-        Inputs { files }
+        Inputs {
+            files,
+            listing: self.listing.clone(),
+        }
     }
 
     fn with_paths<'a>(&'a self, paths: &'a [&str]) -> impl Iterator<Item = &'a Source> {
@@ -150,7 +193,7 @@ fn check_scripts(inputs: &Inputs, settings: &Table) -> Report {
         let text = inputs.text(&format!("{SCRIPT_DIRECTORY}{name}"));
         report.absorb(check_script_assignments(name, text, settings));
         report.absorb(check_script_defaults(name, text, settings));
-        if name == "restore-test" || name == "pitr-check" {
+        if matches!(name, "restore-test" | "pitr-check" | "restore-volume") {
             report.absorb(check_scratch_settings(name, text, settings));
         }
     }
@@ -224,9 +267,23 @@ pub fn check_all(inputs: &Inputs) -> Report {
         &BUILD,
     ));
     report.absorb(check_env_example(inputs.text(ENV_EXAMPLE)));
-    report.absorb(check_initdb(inputs.text(INITDB), &settings));
+    report.absorb(check_initdb(
+        inputs.text(INITDB),
+        inputs.text(CLUSTER_ACCESS),
+        &settings,
+    ));
     report.absorb(check_secret_dir(inputs.text(INITDB), &settings));
     report.absorb(check_dockerfile_ports(inputs.text(DOCKERFILE), &settings));
+    report.absorb(check_context_lists(
+        inputs.text(PGTOOLS_DOCKERFILE),
+        inputs.text(DB_CONTEXT_LIST),
+        inputs.text(PGTOOLS_CONTEXT_LIST),
+    ));
+    report.absorb(check_line_endings(
+        inputs.text(PGTOOLS_DOCKERFILE),
+        inputs.text(GITATTRIBUTES_FILE),
+        inputs.listing(),
+    ));
     for source in inputs.with_paths(&CADDYFILES) {
         report.absorb(check_caddyfile(&source.path, &source.text, &settings));
     }

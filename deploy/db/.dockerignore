@@ -1,0 +1,7 @@
+# Allow list of the named build context db of the image recipe-pgtools (ADR-0064 (f), ADR-0103 (l)).
+# The first line excludes everything. A file that no line below names stays out of the context.
+# Each line names one source of a `COPY --from=db` line of deploy/pgtools/Dockerfile.
+*
+
+# Shared client rules of the cluster.
+!cluster-access.sh

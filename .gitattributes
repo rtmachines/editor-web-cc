@@ -10,3 +10,7 @@ crontab.* text eol=lf
 deploy/pgtools/bin/* text eol=lf
 deploy/pgtools/tests/* text eol=lf
 deploy/pgtools/restore-code.expected text eol=lf
+deploy/pgtools/restore-roles.expected text eol=lf
+# The allow lists of the build contexts of the image recipe-pgtools (ADR-0064 (f)).
+deploy/db/.dockerignore text eol=lf
+deploy/pgtools/.dockerignore text eol=lf

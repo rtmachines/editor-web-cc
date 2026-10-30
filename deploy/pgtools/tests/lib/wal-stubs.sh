@@ -123,7 +123,11 @@ EOF
 }
 
 # The stubs of the scratch cluster of pitr-check.
-#   psql: without STUB_PSQL_OK=1 it fails. With it, it answers the three checks of the script.
+#   psql: the command IDENTIFY_SYSTEM answers the identifier guard of walarchive-entry.
+#     STUB_SYSID=n          the system identifier, default 7354987216845319027
+#     STUB_IDENTIFY_FAIL=1  the connection fails
+#     STUB_IDENTIFY_OUT=t   the whole answer line
+#   psql: without STUB_PSQL_OK=1 every other command fails. With it, it answers the three checks of the script.
 #     STUB_PSQL_RECOVERY=f  the cluster is still in recovery
 #     STUB_PSQL_COUNT=n     the number of rows with the marker identity
 #     STUB_PSQL_CHAIN=text  the result of the chain check
@@ -136,6 +140,18 @@ cmd=""
 for a in "$@"; do
   case $a in --command=*) cmd=${a#--command=} ;; esac
 done
+case $cmd in
+  IDENTIFY_SYSTEM)
+    # The replication connection of the identifier guard. The log lines start with CALL and ARGV,
+    # so that count_events does not count them as a started tool.
+    echo "CALL psql identify" >>"$STUB_LOG"
+    echo "ARGV psql-identify $*" >>"$STUB_LOG"
+    if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ]; then echo "CALL psql pgpass present" >>"$STUB_LOG"; fi
+    [ -z "${STUB_IDENTIFY_FAIL:-}" ] || exit 2
+    echo "${STUB_IDENTIFY_OUT:-${STUB_SYSID:-7354987216845319027}|1|0/3000060|}"
+    exit 0
+    ;;
+esac
 echo "EVENT psql" >>"$STUB_LOG"
 echo "ARGV psql $*" >>"$STUB_LOG"
 echo "ENV PGHOST=${PGHOST:-} PGPORT=${PGPORT:-} PGUSER=${PGUSER:-} PGPASSWORD=${PGPASSWORD:-} PGPASSFILE=${PGPASSFILE:-}" >>"$STUB_LOG"

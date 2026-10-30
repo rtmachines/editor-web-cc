@@ -80,6 +80,7 @@ trap cleanup EXIT
 
 make_restore_stubs
 case_restore_static_rules
+case_restore_steps_library
 case_restore_usage
 case_restore_missing_marker
 case_restore_no_set

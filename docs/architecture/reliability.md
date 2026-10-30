@@ -727,7 +727,8 @@ WAL line after a switch (ADR-0103 (r) to (v)):
 - Every switch starts a new WAL line before `app` starts. The rule also covers a switch back after the move of the old segments (ADR-0103 (g)).
 - The operator moves the old segments, the `.partial` file, and every base backup of `/wal/base` into a target directory of ADR-0099 (c). It also moves `/wal/.system-identifier`. The file `old-system-identifier` there keeps the system identifier of the old cluster.
 - `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier (ADR-0103 (s)).
-- The release note of the operations change gives the one step that writes the file on an existing installation.
+- In a gap of the WAL stream (ADR-0099 (a)), `/wal/.system-identifier` stays in `/wal`. The cluster does not change in a gap, so its identifier stays the same (ADR-0103 (s)).
+- An existing installation has segments and no file. It writes the file once, before `walarchive` first starts with the image of the first release with the guard. Step 5 of 7.10 gives this step.
 - Then the operator starts `walarchive`. The operator runs the stream check, the base backup, the segment switch, the flush check, and the WAL check of ADR-0099 (a).
 - The operator deletes the old `pgdata` volume and that target directory only after three conditions. A `restore-test` passed on a set of the new cluster. The flush check and the WAL check of ADR-0099 (a) passed on the new WAL line.
 - The third condition is an age of the switch above `volume_switch.keep_min_age`. No script and no retention deletes them (ADR-0103 (t)).
@@ -750,7 +751,7 @@ Volume switch (ADR-0103 (e) to (g)):
 - Then the operator runs `pg_controldata` on the old volume. The state must be `shut down`. Else the operator keeps the old name, starts `db` again, and then stops and deletes its container again. The operator writes the old name and the system identifier of the old cluster into the change log of the site. Then the operator sets `RECIPE_PGDATA_VOLUME` to the new name.
 - Before `up`, the operator runs `pg_controldata` on the new volume in a `recipe-pgtools` container with `--network none` and a read-only mount.
 - The state must be `shut down`. The system identifier must equal the field `system_identifier` of the line `restore volume completed`. Else the operator stops, deletes no volume, and runs the switch back at once (ADR-0103 (f)).
-- Then the operator runs `docker compose up -d --no-deps db`. `docker inspect` shows the new volume in `db`, `app`, and `backup`.
+- Then the operator runs `docker compose up -d --no-deps db`. `docker inspect` of `db` then shows the new volume. After the start of `app` and `backup`, `docker inspect` of each container shows the new volume (ADR-0103 (f)).
 - A switch back uses the same steps with the old name. It needs no state of the volume that it leaves and never starts `db` on that volume. Its system identifier must equal the identifier that the first switch wrote into the change log (ADR-0103 (f), (g)).
 - After `db` starts, a switch back starts `walarchive` before `app`. After the move of the old segments, the new WAL line of 7.7 starts first (ADR-0103 (g)). Then the operator starts `app`, then `proxy` and `backup`.
 - When the identifier check of a switch back fails, the operator starts no `db` and deletes no volume. The site stays down until the operator finds the cause. The switch back loses each write after the switch. After a major upgrade, it also needs the old `compose.yaml` and the old images.
@@ -792,8 +793,10 @@ Disk space policy (Assumption A24):
 
 1. Read the release notes. Note whether the migration follows the expand pattern.
 2. Load the new image files with `docker load`. Compare the SHA-256 of each file before the load and the image ID after it (ADR-0064 (j), (k)). Do not stop the running stack yet. Set `RECIPE_VERSION` in `deploy/.env` to the new release tag.
+   - `deploy/.env` must hold `RECIPE_PGDATA_VOLUME` before the first Compose command. The first upgrade to a release with ADR-0103 sets this value (ADR-0103 (d)).
+   - Then compare the name of `pgdata` in `docker compose config` with the volume of `/var/lib/postgresql/data` in `docker inspect` of the running `db` container. A difference stops the upgrade.
 3. The old image checks the newest set with `docker compose exec backup restore-test`. Then five commands run in this order (ADR-0097 (h), (h4)):
-   1. `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`. Wait for exit code 0.
+   1. `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`. Wait for exit code 0. In the first release with the mount of ADR-0103 (l), this command replaces `db` once on the same volume. `app` loses its connections for the start time of `db` (ADR-0103 (z)).
    2. `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time, and that dump fails in the same UTC minute (ADR-0082). Wait for exit code 0 of `migrate`.
    3. On failure of command 1 or 2, stop here. Set the previous tag in `deploy/.env` again. The old `app` keeps running on the old schema when the migration follows the expand pattern. A release with two or more migration files can fail after the first file, so use a forward correction or the `_premigrate` restore (ADR-0083).
    4. The guard step: the superuser replaces `audit_guard.audit_objects_dropped()` with `CREATE OR REPLACE FUNCTION` of the new `01-roles.sh`. This step is the only place that replaces the function on an older volume.
@@ -805,9 +808,12 @@ Disk space policy (Assumption A24):
    2. `docker compose exec backup backup-now`. The new `_now` set holds the new schema.
    3. `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
    - If the test names a `_premigrate` set of the same UTC minute, run commands 2 and 3 again in a later minute.
+   - The first release with the guard of 7.7 needs one step before command 1. The step runs only when `/wal/.system-identifier` is missing. Read the system identifier in `db`. Pipe it into the old `walarchive` container.
+   - That container compares the value with the system identifier in the page header of the newest complete segment in `/wal`. A difference stops the step, and the step writes no file. Else the container writes `/wal/.system-identifier`. The release notes name this step (ADR-0103 (s)).
 6. Rollback: `RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app`. Without `--no-deps`, the previous `migrate` runs against the newer schema and fails, and `app` does not start (ADR-0082 (b)). `deploy/.env` keeps the new tag, because the schema stays newer (ADR-0083 (c)).
    - If the migration did not follow the expand pattern, restore the `_premigrate` dump into a new volume in the order of 7.7, "Restore into production". Set the previous tag in `deploy/.env` before `restore-volume` runs (ADR-0103 (b), (q)).
-   - Before `app` starts, the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Then run `docker compose up -d --no-deps app` (ADR-0083 (d)), then `docker compose up -d --no-deps proxy`. Last, run the three commands of step 5 with the tag of `deploy/.env`. `backup` and `walarchive` then run the image of the schema (7.7).
+   - After the switch and the role passwords, `walarchive` starts with the previous tag of `deploy/.env`, and the new WAL line of 7.7 runs. Both happen before `app` starts (ADR-0103 (q), (s)).
+   - Then the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Then run `docker compose up -d --no-deps app`, then `docker compose up -d --no-deps proxy backup` (ADR-0083 (d), ADR-0103 (b), (q)). `backup` and `walarchive` then run the image of the schema (7.7).
 7. Concurrent index on an audit object (`data-model.md` 5.1). The operator connects as `recipe_migrator` and runs these statements in one `psql` session: `GRANT CREATE ON SCHEMA public TO audit_owner`, `SET ROLE audit_owner`, `CREATE INDEX CONCURRENTLY`, `RESET ROLE`, `REVOKE CREATE ON SCHEMA public FROM audit_owner`. The next migration records the index with `CREATE INDEX IF NOT EXISTS`.
 8. Major PostgreSQL upgrade (at least twice in 10 years): follow `docs/ops/runbook.md` section "Major upgrade". It uses `pg_dumpall --globals-only` plus `pg_dump -Fc` and a restore test of that set. Then `restore-volume` of the new release fills a new `db` volume with the same `initdb` arguments. The switch of 7.8 follows (ADR-0103 (b), (p)). The rollback after the switch is a switch back to the old volume. There is no `pg_upgrade` (ADR-0020).
 

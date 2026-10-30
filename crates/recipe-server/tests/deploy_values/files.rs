@@ -1,6 +1,6 @@
 //! Checks of the values in `deploy/.env.example`, the Caddyfiles, the crontab files, and the pgtools scripts.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::canon::{Bare, Canon, canon};
 use crate::fault::Report;
@@ -9,18 +9,21 @@ use crate::table::Table;
 
 const ENV_FILE: &str = "deploy/.env.example";
 
-/// The eight values of the Compose interpolation (`reliability.md` 7.1, "Secrets", and design D9).
+/// The nine values of the Compose interpolation (`reliability.md` 7.1, "Secrets", ADR-0103 (d), and design D9).
 /// The file holds no password, key, or token.
-const ENV_KEYS: [&str; 8] = [
+const ENV_KEYS: [&str; 9] = [
     "COMPOSE_IP_RANGE",
     "COMPOSE_SUBNET",
     "PROXY_ADDRESS",
     "RECIPE_BACKUP_DIR",
+    "RECIPE_PGDATA_VOLUME",
     "RECIPE_SECRETS_DIR",
     "RECIPE_VERSION",
     "RECIPE_WALARCHIVE_DIR",
     "SITE_ADDRESS",
 ];
+const VOLUME_KEY: &str = "RECIPE_PGDATA_VOLUME";
+const VOLUME_PREFIX: &str = "recipe-editor_pgdata_";
 /// The addresses of design D9 (the row `deploy/.env.example`) and of `reliability.md` 7.11 (`http.trusted_proxies`).
 const ENV_ADDRESSES: [(&str, &str); 3] = [
     ("COMPOSE_SUBNET", "172.28.0.0/16"),
@@ -31,7 +34,7 @@ const ENV_ADDRESSES: [(&str, &str); 3] = [
 type Assignment = (&'static str, &'static str, &'static str, Bare);
 
 /// The constants of the pgtools scripts. Each one has a comment with its key in the script.
-pub const SCRIPT_ASSIGNMENTS: [Assignment; 12] = [
+pub const SCRIPT_ASSIGNMENTS: [Assignment; 14] = [
     (
         "backup-health",
         "MAX_AGE_SECONDS",
@@ -83,6 +86,18 @@ pub const SCRIPT_ASSIGNMENTS: [Assignment; 12] = [
         Bare::Seconds,
     ),
     (
+        "restore-volume",
+        "START_TIMEOUT_SECONDS",
+        "restore_volume.start_timeout",
+        Bare::Seconds,
+    ),
+    (
+        "restore-volume",
+        "STOP_TIMEOUT_SECONDS",
+        "restore_volume.stop_timeout",
+        Bare::Seconds,
+    ),
+    (
         "pitr-check",
         "LOG_TAIL_LINES",
         "pitr_check.log_tail",
@@ -95,7 +110,7 @@ pub const SCRIPT_ASSIGNMENTS: [Assignment; 12] = [
         Bare::Seconds,
     ),
 ];
-/// The settings of the scratch clusters that both scripts set (`reliability.md` 7.11 rows `scratch.*`).
+/// The settings of the scratch clusters that the three scripts set (`reliability.md` 7.11 rows `scratch.*`).
 const SCRATCH_COMMON: [(&str, &str); 5] = [
     ("shared_buffers", "scratch.shared_buffers"),
     ("maintenance_work_mem", "scratch.maintenance_work_mem"),
@@ -126,10 +141,13 @@ pub fn parse_env(text: &str) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-/// The file holds exactly the eight values, and the three addresses equal design D9.
+/// The file holds exactly the nine values, its header counts them, and the three addresses equal design D9.
+/// The volume name has the form of ADR-0103 (e).
 pub fn check_env_example(text: &str) -> Report {
     let mut report = Report::default();
     let env = parse_env(text);
+    check_env_header(&mut report, text);
+    check_volume_name(&mut report, &env);
     let found: Vec<String> = env.keys().map(ToString::to_string).collect();
     let want: Vec<String> = ENV_KEYS.map(String::from).to_vec();
     report.compare_list(ENV_FILE, "the names of the values", &want, Some(found));
@@ -140,6 +158,41 @@ pub fn check_env_example(text: &str) -> Report {
         }
     }
     report
+}
+
+/// The header line `# The file holds <count> values and no password, key, or token.` names the count of `ENV_KEYS`.
+fn check_env_header(report: &mut Report, text: &str) {
+    let header = text
+        .lines()
+        .find(|line| line.starts_with("# The file holds "))
+        .unwrap_or("missing");
+    if !header.starts_with("# The file holds nine values ") {
+        report.fail(
+            ENV_FILE,
+            "header count",
+            "# The file holds nine values",
+            header,
+        );
+    }
+}
+
+/// `RECIPE_PGDATA_VOLUME` is `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>` (ADR-0103 (e)).
+fn check_volume_name(report: &mut Report, env: &BTreeMap<&str, &str>) {
+    let found = env.get(VOLUME_KEY).copied().unwrap_or("missing");
+    let stamp = found.strip_prefix(VOLUME_PREFIX).unwrap_or("");
+    let is_stamp = stamp.split_once('_').is_some_and(|(date, time)| {
+        date.len() == 8
+            && time.len() == 6
+            && date.chars().chain(time.chars()).all(|c| c.is_ascii_digit())
+    });
+    if !is_stamp {
+        report.fail(
+            ENV_FILE,
+            VOLUME_KEY,
+            "recipe-editor_pgdata_<YYYYMMDD_HHMMSS>",
+            found,
+        );
+    }
 }
 
 /// The upstream keep-alive, the HSTS age, and the port of `reverse_proxy` of a Caddyfile
@@ -418,15 +471,15 @@ pub fn check_script_assignments(script: &str, text: &str, table: &Table) -> Repo
 }
 
 /// A script sets the settings of its scratch cluster to the values of 7.11.
-/// `pitr-check` sets no `fsync` option (ADR-0067 (f)).
+/// `pitr-check` and `restore-volume` set no `fsync` option (ADR-0067 (f), ADR-0103 (j)).
 pub fn check_scratch_settings(script: &str, text: &str, table: &Table) -> Report {
     let mut report = Report::default();
     let lines = code_lines(text);
     let file = format!("deploy/pgtools/bin/{script}");
-    let own: &[(&str, &str)] = if script == "restore-test" {
-        &SCRATCH_RESTORE
-    } else {
-        &SCRATCH_PITR
+    let own: &[(&str, &str)] = match script {
+        "restore-test" => &SCRATCH_RESTORE,
+        "pitr-check" => &SCRATCH_PITR,
+        _ => &[],
     };
     for (name, key) in SCRATCH_COMMON.iter().chain(own) {
         report.cover(key);
@@ -444,8 +497,221 @@ pub fn check_scratch_settings(script: &str, text: &str, table: &Table) -> Report
             Bare::Plain,
         );
     }
-    if script == "pitr-check" && !setting_words(&lines, "fsync").is_empty() {
+    if script != "restore-test" && !setting_words(&lines, "fsync").is_empty() {
         report.fail(&file, "fsync", "no fsync setting", "a fsync setting");
+    }
+    report
+}
+
+/// The `Dockerfile` of the image `recipe-pgtools` and the allow lists of its two build contexts.
+pub const PGTOOLS_DOCKERFILE: &str = "deploy/pgtools/Dockerfile";
+pub const DB_CONTEXT_LIST: &str = "deploy/db/.dockerignore";
+pub const PGTOOLS_CONTEXT_LIST: &str = "deploy/pgtools/.dockerignore";
+/// The name of the second build context. It is `deploy/db` (`compose.build.yaml`, design D2).
+const DB_CONTEXT: &str = "db";
+
+/// Remove a leading `./` and a trailing `/`. A directory source `bin/` and the entry `!bin` then match.
+fn context_name(path: &str) -> &str {
+    path.trim_start_matches("./").trim_end_matches('/')
+}
+
+/// The names of the build stages: `FROM image AS name`. A `COPY --from=name` of a stage reads no context.
+fn stage_names(lines: &[&str]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            let (first, second_last) = (words.first()?, words.iter().rev().nth(1)?);
+            (first.eq_ignore_ascii_case("FROM") && second_last.eq_ignore_ascii_case("AS"))
+                .then(|| words.last().map(|name| (*name).to_owned()))
+                .flatten()
+        })
+        .collect()
+}
+
+/// The sources of the `COPY` lines of the Dockerfile for each context: `(db, pgtools)`.
+/// A source with `--from=db` belongs to the db context. A source without `--from` belongs to the
+/// pgtools context. A wildcard or an unknown `--from` is a fault, because no list can name it.
+fn copy_sources(report: &mut Report, dockerfile: &str) -> (BTreeSet<String>, BTreeSet<String>) {
+    let joined = dockerfile.replace("\\\r\n", " ").replace("\\\n", " ");
+    let lines = code_lines(&joined);
+    let stages = stage_names(&lines);
+    let (mut db, mut pgtools) = (BTreeSet::new(), BTreeSet::new());
+    for line in lines {
+        let mut words = line.split_whitespace();
+        if !words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("COPY"))
+        {
+            continue;
+        }
+        let (flags, mut paths): (Vec<&str>, Vec<&str>) =
+            words.partition(|word| word.starts_with("--"));
+        paths.pop();
+        let from = flags.iter().find_map(|flag| flag.strip_prefix("--from="));
+        let target = match from {
+            None => &mut pgtools,
+            Some(DB_CONTEXT) => &mut db,
+            Some(name) if stages.iter().any(|stage| stage == name) => continue,
+            Some(name) => {
+                report.fail(
+                    PGTOOLS_DOCKERFILE,
+                    line,
+                    "--from of the context db or of a stage",
+                    name,
+                );
+                continue;
+            }
+        };
+        for path in paths {
+            if path.contains(['*', '?', '[']) {
+                report.fail(
+                    PGTOOLS_DOCKERFILE,
+                    path,
+                    "a source without a wildcard",
+                    line,
+                );
+            }
+            target.insert(context_name(path).to_owned());
+        }
+    }
+    (db, pgtools)
+}
+
+/// The names that an allow list admits. The first line of code is `*`. Every other line is `!name`.
+fn admitted_names(report: &mut Report, file: &str, text: &str) -> Vec<String> {
+    let lines = code_lines(text);
+    if lines.first().map(|line| line.trim()) != Some("*") {
+        report.fail(
+            file,
+            "first line",
+            "*",
+            lines.first().copied().unwrap_or("no line"),
+        );
+    }
+    let mut names = Vec::new();
+    for line in lines.iter().skip(1) {
+        match line.trim().strip_prefix('!') {
+            Some(name) => names.push(context_name(name).to_owned()),
+            None => report.fail(file, line.trim(), "a line !name", "another line"),
+        }
+    }
+    names.sort();
+    names
+}
+
+/// Each allow list admits exactly the sources of the `COPY` lines for its context (ADR-0064 (f), ADR-0103 (l)).
+/// A `COPY` source is a path of the Dockerfile. A directory source `bin/` is admitted as `!bin`.
+/// A file in a directory is admitted by its own path, so `!lib` would admit too much.
+/// The list of the other context never admits the same source. So `deploy/pgtools/tests/` stays out.
+pub fn check_context_lists(dockerfile: &str, db_list: &str, pgtools_list: &str) -> Report {
+    let mut report = Report::default();
+    let (db, pgtools) = copy_sources(&mut report, dockerfile);
+    for (file, list, sources) in [
+        (DB_CONTEXT_LIST, db_list, db),
+        (PGTOOLS_CONTEXT_LIST, pgtools_list, pgtools),
+    ] {
+        let admitted = admitted_names(&mut report, file, list);
+        let want: Vec<String> = sources.into_iter().collect();
+        report.compare_list(file, "the names that !name admits", &want, Some(admitted));
+    }
+    report
+}
+
+/// The path of the attribute file, as the faults of `check_line_endings` show it.
+const ATTRIBUTES_FILE: &str = ".gitattributes";
+
+/// True when the glob `pattern` matches the whole `text`. `*` matches any run of characters but `/`.
+/// `?` matches one character but `/`. Every other character matches itself.
+fn glob_matches(pattern: &[char], text: &[char]) -> bool {
+    match pattern.split_first() {
+        None => text.is_empty(),
+        Some(('*', rest)) => {
+            for skip in 0..=text.len() {
+                if glob_matches(rest, text.get(skip..).unwrap_or_default()) {
+                    return true;
+                }
+                if text.get(skip) == Some(&'/') {
+                    return false;
+                }
+            }
+            false
+        }
+        Some((c, rest)) => text.split_first().is_some_and(|(first, tail)| {
+            ((*c == '?' && *first != '/') || c == first) && glob_matches(rest, tail)
+        }),
+    }
+}
+
+/// True when some line of `.gitattributes` sets `text` and `eol=lf` for the path.
+/// Supported subset: a comment, an empty line, and `pattern attribute...`.
+/// A pattern is a path from the repository root, or a name without `/` that matches at any depth.
+/// A pattern may use `*` and `?`. It never uses `**`, a trailing `/`, `!`, or a character class.
+/// An attribute is `text` or `eol=lf` as a plain word. The check does not model `-text` or the
+/// override order of Git, so a later line `-text` for the same path is outside its scope.
+fn has_lf_rule(attributes: &str, path: &str) -> bool {
+    let chars = |text: &str| text.chars().collect::<Vec<char>>();
+    let name = path.rsplit('/').next().unwrap_or(path);
+    code_lines(attributes).iter().any(|line| {
+        let mut words = line.split_whitespace();
+        let Some(pattern) = words.next() else {
+            return false;
+        };
+        let pattern = pattern.trim_start_matches('/');
+        let rest: Vec<&str> = words.collect();
+        let target = if pattern.contains('/') { path } else { name };
+        glob_matches(&chars(pattern), &chars(target))
+            && rest.contains(&"text")
+            && rest.contains(&"eol=lf")
+    })
+}
+
+/// The files of the repository that a `COPY` source names. A file is its own path.
+/// A directory source is each file under it. An empty answer means that the source does not exist.
+fn files_of_source(listing: &[String], path: &str) -> Vec<String> {
+    let prefix = format!("{path}/");
+    listing
+        .iter()
+        .filter(|file| file.as_str() == path || file.starts_with(&prefix))
+        .cloned()
+        .collect()
+}
+
+/// Each file that a `COPY` line of the Dockerfile names has a `text eol=lf` rule in `.gitattributes`.
+/// The two allow lists have one too. A CRLF line ending of a Windows checkout then never reaches the
+/// build context (ADR-0064 (g), design D2). `listing` holds the repository paths under `deploy/db`
+/// and `deploy/pgtools`. A source that the listing lacks is a fault. A `COPY` from a stage names no file.
+/// The pattern matching follows `has_lf_rule`.
+pub fn check_line_endings(dockerfile: &str, attributes: &str, listing: &[String]) -> Report {
+    let mut report = Report::default();
+    let (db, pgtools) = copy_sources(&mut report, dockerfile);
+    let mut wanted: BTreeSet<String> = [DB_CONTEXT_LIST, PGTOOLS_CONTEXT_LIST]
+        .map(String::from)
+        .into();
+    for (directory, sources) in [("deploy/db", db), ("deploy/pgtools", pgtools)] {
+        for source in sources {
+            let path = format!("{directory}/{source}");
+            let files = files_of_source(listing, &path);
+            if files.is_empty() {
+                report.fail(
+                    &path,
+                    &source,
+                    "a file or a directory of the repository",
+                    "none",
+                );
+            }
+            wanted.extend(files);
+        }
+    }
+    for path in wanted {
+        if !has_lf_rule(attributes, &path) {
+            report.fail(
+                ATTRIBUTES_FILE,
+                &path,
+                "a rule with text and eol=lf",
+                "no rule",
+            );
+        }
     }
     report
 }

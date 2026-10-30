@@ -34,6 +34,25 @@ case_restore_static_rules() {
     'set -euo pipefail|umask 077|'
 }
 
+# The shared steps live in /etc/pgtools/restore-steps.sh (change restore-volume-switch, design D3).
+# The library defines each function and restore-test defines none of them.
+case_restore_steps_library() {
+  local library=${PGTOOLS_ETC:-/etc/pgtools}/restore-steps.sh name
+  local names=(log fail clean tool_detail select_set check_manifest check_counts check_globals
+    check_names restore_section sorted_kinds compare_code fail_first_table compare_counts check_chain)
+  expect_ok "steps library: restore-steps.sh exists" test -f "$library"
+  expect_ok "steps library: bash -n restore-steps.sh" bash -n "$library"
+  expect_no "steps library: carriage return" grep -q $'\r' "$library"
+  for name in "${names[@]}"; do
+    expect_ok "steps library: the library defines $name" \
+      bash -c 'source "$1" && declare -F -- "$2" >/dev/null' _ "$library" "$name"
+    expect_no "steps library: restore-test does not define $name" \
+      grep -Eq "^$name\(\) \{" "$BIN/restore-test"
+  done
+  expect_ok "steps library: restore-test sources the library" \
+    grep -Eq '^source .*restore-steps\.sh' "$BIN/restore-test"
+}
+
 case_restore_usage() {
   new_restore_case usage
   run_script "RESTORE_CODE_DIR=$CASE/code" -- restore-test extra

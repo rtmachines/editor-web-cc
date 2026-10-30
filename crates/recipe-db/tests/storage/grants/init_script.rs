@@ -119,3 +119,35 @@ fn the_script_stops_when_the_subnet_is_not_an_ipv4_cidr() {
         assert_stopped(&run);
     }
 }
+
+/// The text of the init script, to check what it holds and what it leaves to the shared file.
+fn script_text() -> String {
+    std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/db/initdb/01-roles.sh"
+    ))
+    .expect("01-roles.sh is readable")
+}
+
+#[test]
+fn the_script_takes_the_client_rules_from_the_shared_file() {
+    // ADR-0103 (l): the shared file holds the hba lines and the default database REVOKEs.
+    let text = script_text();
+
+    assert!(
+        text.lines()
+            .any(|line| line == "source /etc/recipe-db/cluster-access.sh"),
+        "the script sources the shared file at its fixed path"
+    );
+    assert!(
+        !text
+            .lines()
+            .any(|line| line.trim_start().starts_with("printf 'host")),
+        "the script holds no hba line"
+    );
+    assert!(
+        !text.lines().any(|line| line.contains("REVOKE")
+            && (line.contains("postgres") || line.contains("template1"))),
+        "the script holds no REVOKE on a default database"
+    );
+}

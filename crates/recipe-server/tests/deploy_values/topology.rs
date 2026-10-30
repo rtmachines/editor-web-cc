@@ -13,8 +13,9 @@ const FILE: &str = "deploy/compose.yaml";
 /// The log driver of the logging anchor (`reliability.md` 3.5, ADR-0070 (s)).
 const LOG_DRIVER: &str = "json-file";
 
-/// The seven services of `reliability.md` 7.1 and the CI check `pitr-check` (design D9).
-const SERVICES: [&str; 8] = [
+/// The seven services of `reliability.md` 7.1, the CI check `pitr-check` (design D9), and the
+/// restore service `restore-volume` (ADR-0103 (h)).
+const SERVICES: [&str; 9] = [
     "app",
     "backup",
     "backup-premigrate",
@@ -22,10 +23,26 @@ const SERVICES: [&str; 8] = [
     "migrate",
     "pitr-check",
     "proxy",
+    "restore-volume",
     "walarchive",
 ];
 /// The services that mount a tmpfs on `/run/pgpass` (`reliability.md` 7.1, "Networks and capabilities").
-const PGPASS_SERVICES: [&str; 3] = ["backup", "backup-premigrate", "walarchive"];
+const PGPASS_SERVICES: [&str; 4] = [
+    "backup",
+    "backup-premigrate",
+    "restore-volume",
+    "walarchive",
+];
+/// The one-shot services outside the seven. Each has `network_mode: none`, no secret, and no network.
+const ISOLATED_SERVICES: [&str; 2] = ["pitr-check", "restore-volume"];
+/// The service that fills a new volume (ADR-0103 (h), design D6) and its mounts and variable.
+const RESTORE_SERVICE: &str = "restore-volume";
+const RESTORE_PROFILE: &str = "restore";
+/// The backup disk is read-only. The operator mounts the target volume with `-v` at run time.
+const RESTORE_BACKUPS_MOUNT: &str = "backups:/backups:ro";
+const RESTORE_SUBNET_VARIABLE: &str = "${COMPOSE_SUBNET:?}";
+/// The stamp of the set is the argument of the run, so the entrypoint is the script itself.
+const RESTORE_ENTRYPOINT: &str = "restore-volume";
 /// The services with `read_only: true` (`reliability.md` 7.1).
 const READ_ONLY_SERVICES: [&str; 2] = ["app", "proxy"];
 /// The Docker secrets of `reliability.md` 7.1 and design D9, one host file for each.
@@ -45,6 +62,10 @@ const SECRET_DIR_VARIABLE: &str = "${RECIPE_SECRETS_DIR:?}";
 const PROXY_VARIABLE: &str = "${PROXY_ADDRESS:?}";
 /// The mount path of the secrets inside a container (`reliability.md` 7.11, keys `*_file`).
 const SECRET_MOUNT: &str = "/run/secrets/";
+/// The bind mount of the shared client rules into `db` (ADR-0103 (l), design D1).
+const CLUSTER_ACCESS_MOUNT: &str = "./db/cluster-access.sh:/etc/recipe-db/cluster-access.sh:ro";
+/// The file name of those rules. No other service mounts it as source or as target.
+const CLUSTER_ACCESS_FILE: &str = "cluster-access.sh";
 
 fn expect_scalar(report: &mut Report, service: &Service, field_name: &str, want: &str) {
     let found = service.scalar(field_name);
@@ -123,6 +144,8 @@ fn check_special_options(report: &mut Report, compose: &Compose) {
             );
         }
     }
+    check_cluster_access_mount(report, compose);
+    check_restore_service(report, compose);
     if let Some(proxy) = compose.service("proxy")
         && !proxy
             .list("volumes")
@@ -133,12 +156,34 @@ fn check_special_options(report: &mut Report, compose: &Compose) {
     }
 }
 
+/// `db` mounts the shared client rules read-only. No other service mounts that file.
+fn check_cluster_access_mount(report: &mut Report, compose: &Compose) {
+    for service in &compose.services {
+        let volumes = service.list("volumes");
+        if service.name == "db" {
+            if !volumes.iter().any(|item| item == CLUSTER_ACCESS_MOUNT) {
+                report.fail(FILE, "db.volumes", CLUSTER_ACCESS_MOUNT, "missing");
+            }
+        } else if let Some(item) = volumes
+            .iter()
+            .find(|item| item.contains(CLUSTER_ACCESS_FILE))
+        {
+            report.fail(
+                FILE,
+                &format!("{}.volumes", service.name),
+                "no mount of cluster-access.sh",
+                item,
+            );
+        }
+    }
+}
+
 fn check_service_networks(report: &mut Report, compose: &Compose) {
     for service in &compose.services {
         let want: &[&str] = match service.name {
             "proxy" => &["backend", "edge"],
             "app" => &["backend", "egress"],
-            "pitr-check" => &[],
+            "pitr-check" | RESTORE_SERVICE => &[],
             _ => &["backend"],
         };
         let want: Vec<String> = want.iter().map(|name| (*name).to_owned()).collect();
@@ -152,11 +197,11 @@ fn check_service_networks(report: &mut Report, compose: &Compose) {
     }
 }
 
-/// `pitr-check` has `network_mode: none` and mounts no secret. No other service has a `network_mode`.
-/// Design D10 and the comment above `pitr-check` in `compose.yaml`.
+/// `pitr-check` and `restore-volume` have `network_mode: none` and mount no secret.
+/// No other service has a `network_mode`. Design D10 and the comments in `compose.yaml`.
 fn check_isolation(report: &mut Report, service: &Service) {
     let mode = service.scalar("network_mode");
-    if service.name != "pitr-check" {
+    if !ISOLATED_SERVICES.contains(&service.name) {
         if let Some(found) = mode {
             report.fail(
                 FILE,
@@ -172,9 +217,59 @@ fn check_isolation(report: &mut Report, service: &Service) {
     if !secrets.is_empty() {
         report.fail(
             FILE,
-            "pitr-check.secrets",
+            &format!("{}.secrets", service.name),
             "no secret",
             format!("{secrets:?}"),
+        );
+    }
+}
+
+/// `restore-volume` has the profile `restore`, so `docker compose up` never starts it.
+/// It mounts the backup disk read-only and nothing else: no `pgdata`, no `cluster-access.sh`.
+/// The image holds the copy of the client rules. It gets `COMPOSE_SUBNET` for those rules.
+/// The entrypoint is the script, so the stamp of `docker compose run` is its argument.
+/// ADR-0103 (h), (l), design D4 and D6.
+fn check_restore_service(report: &mut Report, compose: &Compose) {
+    let Some(service) = compose.service(RESTORE_SERVICE) else {
+        return;
+    };
+    let name = service.name;
+    let profile = [RESTORE_PROFILE.to_owned()];
+    report.compare_list(
+        FILE,
+        &format!("{name}.profiles"),
+        &profile,
+        Some(service.list("profiles")),
+    );
+    let mounts = [RESTORE_BACKUPS_MOUNT.to_owned()];
+    report.compare_list(
+        FILE,
+        &format!("{name}.volumes"),
+        &mounts,
+        Some(service.list("volumes")),
+    );
+    let entrypoint = [RESTORE_ENTRYPOINT.to_owned()];
+    report.compare_list(
+        FILE,
+        &format!("{name}.entrypoint"),
+        &entrypoint,
+        Some(service.list("entrypoint")),
+    );
+    if service.scalar("command").is_some() {
+        report.fail(
+            FILE,
+            &format!("{name}.command"),
+            "no command",
+            "a command key",
+        );
+    }
+    let subnet = service.env("COMPOSE_SUBNET");
+    if subnet != Some(RESTORE_SUBNET_VARIABLE) {
+        report.fail(
+            FILE,
+            &format!("{name}.environment.COMPOSE_SUBNET"),
+            RESTORE_SUBNET_VARIABLE,
+            subnet.unwrap_or("missing"),
         );
     }
 }
@@ -196,6 +291,7 @@ pub fn check_security(compose: &Compose) -> Report {
     }
     check_special_options(&mut report, compose);
     check_service_networks(&mut report, compose);
+    report.absorb(check_pgdata_volume(compose));
     report
 }
 
@@ -232,7 +328,9 @@ pub fn check_logging(compose: &Compose, table: &Table) -> Report {
         );
     }
     for service in &compose.services {
-        if service.name != "pitr-check" && service.scalar("logging") != Some("*logging") {
+        if !ISOLATED_SERVICES.contains(&service.name)
+            && service.scalar("logging") != Some("*logging")
+        {
             report.fail(
                 FILE,
                 &format!("{}.logging", service.name),
@@ -240,6 +338,34 @@ pub fn check_logging(compose: &Compose, table: &Table) -> Report {
                 "missing",
             );
         }
+    }
+    report
+}
+
+/// The volume `pgdata` is external and Compose takes its name from `RECIPE_PGDATA_VOLUME`.
+/// It has no other key, so Compose never creates or deletes it (ADR-0103 (c), design D6).
+fn check_pgdata_volume(compose: &Compose) -> Report {
+    let mut report = Report::default();
+    let volumes = section(&compose.all, 0, "volumes:");
+    let pgdata = section(&volumes, 2, "pgdata:");
+    for (name, want) in [("external", "true"), ("name", "${RECIPE_PGDATA_VOLUME:?}")] {
+        let found = field_at(&pgdata, 4, name);
+        if found != Some(want) {
+            report.fail(
+                FILE,
+                &format!("volumes.pgdata.{name}"),
+                want,
+                found.unwrap_or("missing"),
+            );
+        }
+    }
+    if pgdata.len() != 2 {
+        report.fail(
+            FILE,
+            "volumes.pgdata keys",
+            "external and name only",
+            pgdata.join(" ").trim().to_owned(),
+        );
     }
     report
 }

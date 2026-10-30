@@ -66,6 +66,7 @@ jobs:
         with:
           context: deploy/pgtools
           file: deploy/pgtools/Dockerfile
+          build-contexts: db=deploy/db
           load: true
           push: false
           tags: recipe-pgtools:ci
@@ -162,6 +163,7 @@ jobs:
         with:
           context: deploy/pgtools
           file: deploy/pgtools/Dockerfile
+          build-contexts: db=deploy/db
           load: true
           push: false
           tags: recipe-pgtools:ci-upgrade
@@ -178,6 +180,101 @@ jobs:
         if: always()
         timeout-minutes: 5
         run: bash deploy/ci/upgrade.sh cleanup
+
+  restore-switch:
+    name: Restore into a new volume
+    # ADR-0094: Run the stack test on manual dispatch and pushes to main. Dispatch this job on a branch.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    # The step limits sum to 111 minutes, with 3 for diagnostics and 5 for cleanup. This leaves 9 minutes below the job limit.
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    env:
+      RECIPE_VERSION: ci-restore-switch
+      COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_SUBNET: 172.28.0.0/16
+      COMPOSE_IP_RANGE: 172.28.1.0/24
+      PROXY_ADDRESS: 172.28.0.2
+      SITE_ADDRESS: localhost
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the CI scripts
+        run: bash deploy/ci/check.sh
+      - name: Prepare the disks and secrets
+        run: bash deploy/ci/prepare.sh
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build recipe-server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: recipe-server:ci-restore-switch
+          cache-from: type=gha,scope=recipe-server
+      - name: Build recipe-pgtools
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/pgtools
+          file: deploy/pgtools/Dockerfile
+          build-contexts: db=deploy/db
+          load: true
+          push: false
+          tags: recipe-pgtools:ci-restore-switch
+          cache-from: type=gha,scope=recipe-pgtools
+      # Allow 25 minutes to start the stack, write the data, and test the backup.
+      # Keep the sum of the step limits below the job limit so diagnostics can run after a timeout.
+      - name: Start the stack, write the data, and test the backup (D9 step 1)
+        timeout-minutes: 25
+        run: bash deploy/ci/restore-switch.sh prepare
+      # Allow 6 minutes to fill the new volume with restore-volume.
+      - name: Restore the backup set into a new volume (D9 step 2)
+        timeout-minutes: 6
+        run: bash deploy/ci/restore-switch.sh restore
+      # Allow 8 minutes for the switch. It starts db twice and waits for the crash recovery.
+      - name: Switch db to the new volume (D9 step 2)
+        timeout-minutes: 8
+        run: bash deploy/ci/restore-switch.sh switch
+      # Allow 5 minutes for the client-rule checks, the passwords, and the logins. Each probe starts one container.
+      - name: Check the client rules and set the passwords (D9 step 3)
+        timeout-minutes: 5
+        run: bash deploy/ci/restore-switch.sh access
+      # Allow 8 minutes to move the old WAL files and to start the new WAL line. It takes a base backup.
+      - name: Start the new WAL line (D9 step 3)
+        timeout-minutes: 8
+        run: bash deploy/ci/restore-switch.sh wal-line
+      # Allow 20 minutes to start app, check the data, and run pitr-check and the backups.
+      - name: Check the data and the new WAL line (D9 step 4)
+        timeout-minutes: 20
+        run: bash deploy/ci/restore-switch.sh check
+      # Allow 6 minutes for the three negative cases. One of them runs initdb in a one-shot container.
+      - name: Refuse the three wrong restores (D9 step 5)
+        timeout-minutes: 6
+        run: bash deploy/ci/restore-switch.sh refuse
+      # Allow 20 minutes for the switch back. It runs two times, starts db once, and starts the new WAL line again.
+      # The run ends with the login, the export, and the comparison of the files and the roles of both clusters.
+      - name: Switch back to the old volume (D9 step 6)
+        timeout-minutes: 20
+        run: bash deploy/ci/restore-switch.sh switch-back
+      # Allow 5 minutes to stop the project with the volume option and to check that both data volumes stay.
+      - name: Keep the external data volumes (D9 step 7)
+        timeout-minutes: 5
+        run: bash deploy/ci/restore-switch.sh keep
+      # Allow 3 minutes for diagnostics and 5 minutes for cleanup.
+      - name: Show restore-switch failure diagnostics
+        if: failure()
+        timeout-minutes: 3
+        run: bash deploy/ci/diagnostics.sh
+      - name: Release the restore-switch project and volumes
+        if: always()
+        timeout-minutes: 5
+        run: bash deploy/ci/restore-switch.sh cleanup
 
   musl-unwind:
     name: Panic unwind on musl
@@ -326,3 +423,18 @@ jobs:
           shopt -s globstar nullglob
           files=(docs/architecture/**/*.md docs/adr/**/*.md docs/ops/**/*.md docs/user/**/*.md README.md CONTRIBUTING.md CHANGELOG.md)
           python3 -I tools/ste-lint/ste-lint.py "${files[@]}"
+
+  migration-freeze:
+    name: Migration freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the frozen migrations
+        run: python3 -I -B deploy/ci/migration_freeze.py

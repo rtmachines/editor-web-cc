@@ -1,5 +1,5 @@
 # Both releases use this overlay to disable scheduled jobs.
-# The new stack keeps the old init mount, so Compose does not replace db.
+# The init script does not run on the existing volume. The new stack replaces db once on that volume.
 services:
   db:
     volumes:

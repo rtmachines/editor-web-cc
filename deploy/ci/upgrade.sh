@@ -30,17 +30,30 @@ build_previous() {
   if ! docker buildx build --load --tag recipe-server:ci-previous \
       --file "$UPGRADE_PREVIOUS_DIR/deploy/Dockerfile" "$UPGRADE_PREVIOUS_DIR" \
     || ! docker buildx build --load --tag recipe-pgtools:ci-previous \
+      --build-context db="$UPGRADE_PREVIOUS_DIR/deploy/db" \
       --file "$UPGRADE_PREVIOUS_DIR/deploy/pgtools/Dockerfile" "$UPGRADE_PREVIOUS_DIR/deploy/pgtools"
   then
     fail "cannot build the previous images. Stop and report."
   fi
 }
 
+previous_pgdata_is_external() {
+  # Release v0.1.0 declares pgdata without external. Its stack then creates the volume itself.
+  grep -A1 -E '^  pgdata:' "$UPGRADE_PREVIOUS_DIR/deploy/compose.yaml" \
+    | grep -Eq '^[[:space:]]+external:[[:space:]]*true'
+}
+
 start_previous() {
   export RECIPE_VERSION=ci-previous
   UPGRADE_COMPOSE_DIR=$UPGRADE_PREVIOUS_DIR
   check_images
+  # An external pgdata needs the volume before up. The name stays the same for both releases.
+  if previous_pgdata_is_external
+  then
+    create_pgdata_volume
+  fi
   compose up -d --wait --wait-timeout 180 db
+  [[ $(db_volume) == "$RECIPE_PGDATA_VOLUME" ]] || fail "the previous database does not use the volume of the upgrade"
   compose up -d backup-premigrate
   wait_job backup-premigrate
   compose up -d --no-deps migrate
@@ -54,7 +67,6 @@ start_previous() {
   check_image app recipe-server:ci-previous
   check_image backup recipe-pgtools:ci-previous
   container app >"$CI_STATE/old-app.id"
-  container db >"$CI_STATE/old-db.id"
   backup_now old-now
   # Upgrade step 3. The old image must accept the exact old _now set.
   check_restore "$(cat "$CI_STATE/old-now.set")" old-restore.log
@@ -87,6 +99,110 @@ check_smoke() {
   python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/upgrade_smoke.py" check
 }
 
+db_volume() {
+  local name
+  name=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$(container db)")
+  [[ -n $name ]] || fail "the database container has no data volume"
+  printf '%s\n' "$name"
+}
+
+db_system_identifier() {
+  local id
+  id=$(sql -c 'SELECT system_identifier FROM pg_control_system()')
+  [[ $id =~ ^[0-9]+$ ]] || fail "cannot read the system identifier of the database"
+  printf '%s\n' "$id"
+}
+
+# Upgrade step 2 and ADR-0103 (d). The new stack must use the data volume of the running db.
+VOLUME_NAME_MESSAGE="the pgdata volume of the new stack differs from the data volume of the running db. Stop and report."
+
+check_volume_name() {
+  # Every command here has its own fail line. A mutation runs this function in a condition, where set -e is off.
+  local expected actual
+  compose config --format json >"$CI_STATE/volume-config.json" \
+    || fail "cannot read the Compose configuration of the new stack"
+  expected=$(upgrade_check volume-name "$CI_STATE/volume-config.json") \
+    || fail "cannot read the pgdata volume name of the new stack"
+  actual=$(db_volume) || fail "cannot read the data volume of the running db"
+  [[ $expected == "$actual" ]] || fail "$VOLUME_NAME_MESSAGE"
+}
+
+check_volume_name_mutation() {
+  # A wrong existing volume must stop the upgrade before any Compose command starts a container of the new stack.
+  local wrong=${RECIPE_PGDATA_VOLUME}_wrong db_before
+  db_before=$(container db)
+  # The label lets delete_ci_volumes remove this empty volume. The mutation never mounts it.
+  docker volume create --label "recipe.ci=$COMPOSE_PROJECT_NAME" "$wrong" >/dev/null
+  if (RECIPE_PGDATA_VOLUME=$wrong; check_volume_name) 2>"$CI_STATE/volume-mutation.log"
+  then
+    fail "the name check did not stop the upgrade for a wrong existing volume"
+  fi
+  grep -Fxq "CI: $VOLUME_NAME_MESSAGE" "$CI_STATE/volume-mutation.log" \
+    || fail "the name check stopped the upgrade for another reason"
+  [[ $(container db) == "$db_before" ]] || fail "the name check mutation replaced the database container"
+  [[ $(db_volume) == "$(cat "$CI_STATE/db.volume")" ]] \
+    || fail "the name check mutation changed the data volume of the database"
+  printf 'CI: the name check stopped the upgrade for the wrong volume %s.\n' "$wrong"
+}
+
+# Design D8. This is the step of the operator. It runs in the old walarchive container, which reads the id on stdin.
+# The new walarchive refuses old segments when the file is missing. A release with the guard has the file already.
+# The container is the image of the previous release. The step uses only bash, coreutils, and grep.
+WAL_IDENTITY_STEP=$(cat <<'STEP'
+set -euo pipefail
+umask 077
+export LC_ALL=C
+dir=${WAL_DIR:-/wal}
+file=$dir/.system-identifier
+IFS= read -r id
+[[ $id =~ ^[0-9]+$ ]] || { printf 'CI: the system identifier of db is not a number.\n' >&2; exit 1; }
+if [[ -e $file || -L $file ]]; then
+  printf 'CI: the segment check does not run. The file .system-identifier exists.\n'
+  exit 0
+fi
+# A complete segment has 24 upper-case hex characters and no .partial suffix. LC_ALL=C sorts them by age.
+segment=
+for _ in $(seq 30); do
+  segment=$(ls -1 -- "$dir" | { grep -E '^[0-9A-F]{24}$' || true; } | sort | tail -n 1)
+  [[ -n $segment ]] && break
+  sleep 1
+done
+[[ -n $segment ]] || { printf 'CI: the WAL archive holds no complete segment.\n' >&2; exit 1; }
+# The long header of the first page holds xlp_info at offset 2 and xlp_sysid at offset 24 (little-endian).
+read -r info < <(od -An -t u2 --endian=little -j 2 -N 2 -- "$dir/$segment")
+read -r sysid < <(od -An -t u8 --endian=little -j 24 -N 8 -- "$dir/$segment")
+[[ $info =~ ^[0-9]+$ && $sysid =~ ^[0-9]+$ ]] \
+  || { printf 'CI: cannot read the header of the WAL segment %s.\n' "$segment" >&2; exit 1; }
+(( info & 2 )) || { printf 'CI: the first page of the WAL segment %s has no long header.\n' "$segment" >&2; exit 1; }
+[[ $sysid == "$id" ]] \
+  || { printf 'CI: the header of the WAL segment %s holds another system identifier.\n' "$segment" >&2; exit 1; }
+printf 'CI: the segment check passed. The segment %s holds the system identifier of db.\n' "$segment"
+temp=$(mktemp "$dir/.system-identifier.tmp.XXXXXX")
+printf '%s\n' "$id" >"$temp"
+ln -T -- "$temp" "$file" || { rm -f -- "$temp"; printf 'CI: cannot publish the file .system-identifier.\n' >&2; exit 1; }
+rm -f -- "$temp"
+STEP
+)
+
+write_wal_identity() {
+  local id
+  id=$(db_system_identifier)
+  # Close the current segment, so that a complete segment holds the latest WAL of this cluster.
+  sql -c 'SELECT pg_switch_wal()' >/dev/null
+  # The step prints one line. The job checks it against the state of the file before the step.
+  local mode=ran file=$RECIPE_WALARCHIVE_DIR/.system-identifier
+  if sudo test -e "$file" || sudo test -L "$file"
+  then
+    mode=skipped
+  fi
+  printf '%s\n' "$id" | compose exec -T walarchive bash -c "$WAL_IDENTITY_STEP" | tee "$CI_STATE/wal-identity.log" \
+    || fail "the segment check of the existing installation failed. Stop and report."
+  upgrade_check wal-identity "$CI_STATE/wal-identity.log" "$mode"
+  [[ $(sudo cat -- "$RECIPE_WALARCHIVE_DIR/.system-identifier") == "$(db_system_identifier)" ]] \
+    || fail "the file .system-identifier does not hold the identifier of db"
+  printf 'CI: the file .system-identifier holds the system identifier of db.\n'
+}
+
 upgrade() {
   # Upgrade steps 5 and 6. CI uses an explicit tag instead of a release .env file.
   export RECIPE_VERSION=ci-upgrade
@@ -95,6 +211,12 @@ upgrade() {
   # Upgrade step 7 does not apply. CI has no plant device before Caddy.
   # Upgrade steps 8 and 9. Keep the old app running while the rollback set completes.
   trap restore_tag_on_failure EXIT
+  # The new mount of cluster-access.sh replaces db on the same volume. Record the identity of the cluster first.
+  db_volume >"$CI_STATE/db.volume"
+  db_system_identifier >"$CI_STATE/db.system-id"
+  # Upgrade step 2. Check the volume name before the first Compose command that starts a container of the new stack.
+  check_volume_name_mutation
+  check_volume_name
   wait_backup_minute
   compose up -d backup-premigrate
   wait_job backup-premigrate
@@ -106,7 +228,8 @@ upgrade() {
   check_image migrate recipe-server:ci-upgrade
   trap - EXIT
   [[ $(container app) == "$(cat "$CI_STATE/old-app.id")" ]] || fail "the old app changed before the guard step"
-  [[ $(container db) == "$(cat "$CI_STATE/old-db.id")" ]] || fail "the upgrade replaced the database container"
+  [[ $(db_volume) == "$(cat "$CI_STATE/db.volume")" ]] || fail "the upgrade changed the data volume of the database"
+  [[ $(db_system_identifier) == "$(cat "$CI_STATE/db.system-id")" ]] || fail "the upgrade changed the system identifier of the database"
   replace_guard
   # Upgrade steps 18 and 19. Compose replaces the single app container.
   compose up -d --no-deps --wait --wait-timeout 180 app
@@ -114,6 +237,8 @@ upgrade() {
   compose exec -T app /usr/local/bin/recipe-server healthcheck --path /readyz
   # Upgrade step 20 does not apply without a plant device.
   check_smoke
+  # The old walarchive still runs. The new one refuses old segments without the file of this step.
+  write_wal_identity
   # Upgrade step 23, commands 1 to 3. Wait for a later minute before backup-now.
   compose up -d --no-deps --wait --wait-timeout 180 backup walarchive
   check_image backup recipe-pgtools:ci-upgrade
@@ -140,14 +265,18 @@ restore_previous() {
 
 cleanup() {
   # Delete only this job's project and volumes, including failed one-shot containers.
-  compose --profile upgrade-rollback down -v --remove-orphans
-  for disk in backups walarchive
+  local status=0
+  compose --profile upgrade-rollback down -v --remove-orphans || status=$?
+  delete_ci_volumes || status=$?
+  # A previous release without external pgdata owns an unlabelled volume. It stays on the disposable runner.
+  for disk in backups walarchive-disk
   do
     if mountpoint -q "$CI_ROOT/$disk"
     then
-      sudo umount "$CI_ROOT/$disk"
+      sudo umount "$CI_ROOT/$disk" || status=$?
     fi
   done
+  return "$status"
 }
 
 case ${1:-} in

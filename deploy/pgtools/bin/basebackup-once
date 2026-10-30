@@ -9,8 +9,9 @@
 # A reader finds a base backup only by the anchored grammar ^base_[0-9]{8}_[0-9]{6}$ of the
 # whole name, with LC_ALL=C (ADR-0077 (d)). A name that does not match is never deleted.
 #
-# Steps: marker, lock, pgpass file, pg_basebackup into the temp name, pg_verifybackup, rename to the
-# final name. Only after a passed check the retention runs: it keeps the newest basebackup.retention
+# Steps: marker, lock, pgpass file, identifier guard, pg_basebackup into the temp name,
+# pg_verifybackup, rename to the final name. The guard stops the run when the WAL archive belongs to
+# another cluster than the server (ADR-0103 (s), design D7). Only after a passed check the retention runs: it keeps the newest basebackup.retention
 # base backups and pg_archivecleanup deletes the WAL segments before the lowest start segment of all
 # kept base backups (ADR-0077 (f)). A failed pg_basebackup or pg_verifybackup deletes no base backup
 # and no WAL segment.
@@ -19,6 +20,7 @@
 #   WAL_DIR                  the WAL archive disk, default /wal
 #   WALARCHIVE_PGPASS_DIR    the tmpfs for the pgpass file, default /run/pgpass
 #   WALARCHIVE_SECRET_FILE   the password file of recipe_replicator, default /run/secrets/replicator_password
+#   WALARCHIVE_LIB_DIR       the directory of wal-identity.sh, default /etc/pgtools
 #   PGHOST PGPORT PGUSER     the connection, default db, 5432, recipe_replicator
 set -euo pipefail
 umask 077
@@ -35,6 +37,7 @@ LABEL_RE='^START WAL LOCATION: [0-9A-F]+/[0-9A-F]+ \(file ([0-9A-F]{24})\)$'
 WAL_DIR=${WAL_DIR:-/wal}
 PGPASS_DIR=${WALARCHIVE_PGPASS_DIR:-/run/pgpass}
 SECRET_FILE=${WALARCHIVE_SECRET_FILE:-/run/secrets/replicator_password}
+LIB_DIR=${WALARCHIVE_LIB_DIR:-/etc/pgtools}
 export PGHOST=${PGHOST:-db}
 export PGPORT=${PGPORT:-5432}
 export PGUSER=${PGUSER:-recipe_replicator}
@@ -227,17 +230,23 @@ log INFO "base backup started" "\"base\":\"$final_name\""
 check_secret_file "$SECRET_FILE"
 write_pgpass
 
-# Step 3: the base backup and its check. A failure here deletes only the temp name of this run.
+# Step 3: the identifier guard. It writes /wal/.system-identifier when the archive has no segment.
+# The guard runs before the first byte of the base backup and before any delete.
+# shellcheck source=../lib/wal-identity.sh
+source "$LIB_DIR/wal-identity.sh" || fail "cannot load wal-identity.sh"
+wal_identity_guard "$PGPASSFILE"
+
+# Step 4: the base backup and its check. A failure here deletes only the temp name of this run.
 pg_basebackup --pgdata="$tmp_dir" --wal-method=fetch -Fp --checkpoint=fast \
   --manifest-checksums=SHA256 --no-password || fail "pg_basebackup failed"
 chmod 0700 -- "$tmp_dir"
 pg_verifybackup --quiet "$tmp_dir" >&2 || fail "pg_verifybackup failed"
 
-# Step 4: sync, then the rename publishes the checked base backup.
+# Step 5: sync, then the rename publishes the checked base backup.
 sync
 mv -T -- "$tmp_dir" "$final_dir"
 sync
 log INFO "base backup completed" "\"base\":\"$final_name\""
 
-# Step 5: the retention runs only after a passed check.
+# Step 6: the retention runs only after a passed check.
 retention

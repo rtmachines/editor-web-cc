@@ -85,7 +85,7 @@ The command prints names and no values. The server refuses to start with a varia
 ### Create the environment file
 
 1. Copy `.env.example` to `.env`.
-2. Set the eight values of `.env`. Each directory is an absolute path.
+2. Set the nine values of `.env`. Each directory is an absolute path.
 3. Set `RECIPE_BACKUP_DIR` and `RECIPE_WALARCHIVE_DIR` to directories on the second disk. Do not use the mount point for `RECIPE_WALARCHIVE_DIR`.
 4. Set `RECIPE_SECRETS_DIR` to a directory outside the repository.
 5. Load the values into the shell. Do not export them:
@@ -115,6 +115,40 @@ The gap procedure moves files there as a rename (ADR-0099 (c)).
 The host commands use the shell values only. Compose reads `.env` itself.
 A shell variable with the same name wins over `.env`, so repeat steps 6 and 7 after each edit of `.env`.
 Compose passes only the entries of `environment:` to a container. A `PG*` variable of the host shell does not reach it.
+
+The ninth value, `RECIPE_PGDATA_VOLUME`, is a volume name and not a directory. The next section sets it.
+
+### Create the first volume
+
+Use this section for a new installation. An existing installation keeps the name of its running volume (ADR-0103 (d)).
+Compose never creates the volume `pgdata`. The value `RECIPE_PGDATA_VOLUME` of `.env` names it (ADR-0103 (c), (d)).
+
+1. Print a new name. The name has the form `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>` in UTC (ADR-0103 (e)):
+
+```bash
+date -u +recipe-editor_pgdata_%Y%m%d_%H%M%S
+```
+
+2. Write the name as the value of `RECIPE_PGDATA_VOLUME` in `.env`.
+3. Load the values into the shell again. Do not export them:
+
+```bash
+. ./.env
+```
+
+4. Create the volume:
+
+```bash
+docker volume create "$RECIPE_PGDATA_VOLUME"
+```
+
+5. Check that the command prints the name of step 2:
+
+```bash
+docker volume inspect --format '{{ .Name }}' "$RECIPE_PGDATA_VOLUME"
+```
+
+Repeat step 3 in each new shell. The shell gets the name from `.env` only.
 
 ### Prepare the second disk
 
@@ -690,13 +724,15 @@ A rollback needs the images of the previous release. See the section "Keep the i
 ### Upgrade
 
 1. Read the release notes. Note whether the migration follows the expand pattern. Note the line "manual superuser step".
-2. Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
+2. Do the name check below before any other Compose command. Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
 3. Run `docker compose exec backup restore-test` with the old image. Continue only after it passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.
 6. Run steps 6 and 7 of the section "Create the environment file". The image tags show the new tag.
 7. If the plant has a device, use steps 1 to 3 of "A plant device in front of Caddy" again.
 8. Run `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`.
+   - In the first release with the mount of ADR-0103 (l), this command replaces `db` once on the same volume.
+   - `app` loses its connections for the start time of `db`.
 9. Wait for exit code 0 of `backup-premigrate` with `docker compose ps -a backup-premigrate`.
 10. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
 11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
@@ -729,7 +765,33 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 20. If you used step 7, run `docker compose up -d --force-recreate --no-deps proxy`.
 21. Run the check of the section "Check client_ip of the first login".
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
-23. Run the three commands of the next list while the new `app` serves.
+23. Do the segment check below. Then run the three commands of the list after it, while the new `app` serves.
+
+Name check of step 2 (ADR-0103 (d)):
+The release needs the value `RECIPE_PGDATA_VOLUME` in `.env`. Without it, every Compose command stops.
+A wrong name of an existing empty volume gives `db` a new empty cluster. The name check stops the upgrade before that.
+
+1. Read the volume of the running `db`. The command does not use Compose:
+
+```bash
+docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$(docker ps -q --filter label=com.docker.compose.project=recipe-editor --filter label=com.docker.compose.service=db)"
+```
+
+2. Write the printed name as the value of `RECIPE_PGDATA_VOLUME` in `.env`. The name is normally `recipe-editor_pgdata`.
+3. Load the values into the shell again. Do not export them:
+
+```bash
+. ./.env
+```
+
+4. Print the name of `pgdata` in the new stack:
+
+```bash
+docker compose config | awk '/^volumes:/{v=1;next} /^[^ ]/{v=0} v&&/^  pgdata:/{p=1;next} v&&/^  [^ ]/{p=0} p&&/^    name:/{print $2}'
+```
+
+5. Compare the names of steps 1 and 4. If they differ, stop the upgrade and report both names.
+6. After a stop, run no Compose command that starts or replaces a container.
 
 The restore test of step 3 checks the newest complete set of the old schema with the old image (ADR-0083).
 The rollback set of step 8 holds the old guard function. The old image therefore accepts it after a rollback restore (ADR-0097 (h1)).
@@ -751,7 +813,76 @@ Recovery after a failure between two steps (ADR-0097 (h2)):
 - Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop.
 - Step 11 fails: follow step 12 and ADR-0083. The guard function stays old.
 - A step from 13 to 17 fails: the schema is new and the guard function is old. Run steps 13 to 17 again. Run no `backup-now` until step 17 passes.
-- A step of the next list fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
+- A step of the segment check or of the next list fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
+
+Segment check of step 23 (ADR-0103 (s)):
+The new `walarchive` refuses to start when `/wal` holds a segment and the file `/wal/.system-identifier` is missing.
+An installation of 0.1.0 is in this state. Run the check once, before command 1 of the next list.
+The check runs in the old `walarchive` container, which still runs. It runs only when the file is missing.
+Run all steps in one shell, because steps 2 and 3 use the variable `step`.
+
+1. Store the step in a shell variable:
+
+```bash
+step=$(cat <<'STEP'
+set -euo pipefail
+umask 077
+export LC_ALL=C
+dir=/wal
+file=$dir/.system-identifier
+IFS= read -r id
+[[ $id =~ ^[0-9]+$ ]] || { printf 'ERROR: the system identifier of db is not a number.\n' >&2; exit 1; }
+if [[ -e $file || -L $file ]]; then
+  printf 'The segment check does not run. The file .system-identifier exists.\n'
+  exit 0
+fi
+segment=$(ls -1 -- "$dir" | { grep -E '^[0-9A-F]{24}$' || true; } | sort | tail -n 1)
+[[ -n $segment ]] || { printf 'ERROR: the WAL archive holds no complete segment.\n' >&2; exit 1; }
+read -r info < <(od -An -t u2 --endian=little -j 2 -N 2 -- "$dir/$segment")
+read -r sysid < <(od -An -t u8 --endian=little -j 24 -N 8 -- "$dir/$segment")
+[[ $info =~ ^[0-9]+$ && $sysid =~ ^[0-9]+$ ]] \
+  || { printf 'ERROR: cannot read the header of the WAL segment %s.\n' "$segment" >&2; exit 1; }
+(( info & 2 )) || { printf 'ERROR: the first page of the WAL segment %s has no long header.\n' "$segment" >&2; exit 1; }
+[[ $sysid == "$id" ]] \
+  || { printf 'ERROR: the header of the WAL segment %s holds another system identifier.\n' "$segment" >&2; exit 1; }
+printf 'The segment check passed. The segment %s holds the system identifier of db.\n' "$segment"
+temp=$(mktemp "$dir/.system-identifier.tmp.XXXXXX")
+printf '%s\n' "$id" >"$temp"
+ln -T -- "$temp" "$file" || { rm -f -- "$temp"; printf 'ERROR: cannot publish the file .system-identifier.\n' >&2; exit 1; }
+rm -f -- "$temp"
+STEP
+)
+```
+
+2. Read the system identifier in `db` as `postgres`. Pipe it into the old `walarchive` container:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT system_identifier FROM pg_control_system()" \
+  | docker compose exec -T walarchive bash -c "$step"
+```
+
+3. If the old `walarchive` container is gone, use a new container of the previous image. Put the previous tag before `docker compose`:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT system_identifier FROM pg_control_system()" \
+  | RECIPE_VERSION=<previous tag> docker compose run --rm --no-deps -T --entrypoint sh walarchive -c 'exec bash -c "$1"' sh "$step"
+```
+
+4. Read the output of step 2 or 3. It has one of these lines:
+   - `The segment check passed.` The step wrote the file.
+   - `The segment check does not run.` The file exists, so the step wrote nothing.
+   - An `ERROR` line. The step wrote no file. Stop here and do not start the new `walarchive`.
+5. Check that the file holds the identifier of `db`. Check that both commands print the same number:
+
+```bash
+cat "$RECIPE_WALARCHIVE_DIR/.system-identifier"
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT system_identifier FROM pg_control_system()"
+```
+
+The step compares the identifier of `db` with `xlp_sysid` of the newest complete segment in `/wal`.
+`xlp_sysid` is 8 bytes at offset 24 of the first page, little-endian.
+The step therefore checks the value and does not trust the volume name.
+If the step finds no complete segment, run `SELECT pg_switch_wal()` in `db` as `postgres`. Then run the step again.
 
 The three commands give the new image of `recipe-pgtools` to `backup` and `walarchive`:
 
@@ -1031,7 +1162,7 @@ The server `app` reads 17 configuration keys from its environment. It derives th
 The file `compose.yaml` holds the environment entries of `app`. An entry has the form `RECIPE_<SECTION>__<NAME>`, with a double underscore between the parts.
 For example, the key `approval.separation_of_duties` is the entry `RECIPE_APPROVAL__SEPARATION_OF_DUTIES`.
 
-The file `.env` holds only the eight values of the Compose interpolation. `app` does not read it (ADR-0062 (i), (j)).
+The file `.env` holds only the nine values of the Compose interpolation. `app` does not read it (ADR-0062 (i), (j)).
 The only value of `.env` in the environment of `app` is `PROXY_ADDRESS`, inside the entry `RECIPE_HTTP__TRUSTED_PROXIES`.
 A secret never goes into an environment entry. A key with the suffix `_file` names a secret file (ADR-0062 (g), (h)).
 
@@ -1211,7 +1342,8 @@ An outage of `walarchive` longer than `pg.wal_keep_size` leaves a gap (ADR-0068 
 The alert `replication` is active during the outage.
 
 The procedure moves the WAL segment files and the `.partial` file from the top of `RECIPE_WALARCHIVE_DIR` (ADR-0068 (l)).
-The marker file, `.lock`, the directory `base`, and the directory `.pitr-scratch` stay.
+The marker file, `.lock`, the directory `base`, the directory `.pitr-scratch`, and the file `.system-identifier` stay.
+The cluster does not change in a gap, so its system identifier stays the same (ADR-0103 (s)).
 
 The names of the segment files have 24 upper-case hex characters (PostgreSQL 16 documentation, section 30.6).
 The first 8 characters give the timeline, the next 8 the log number, and the last 8 the segment number.
@@ -1246,8 +1378,9 @@ find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]????????????
 find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]???????????????????????' -o -name '[0-9A-F]???????????????????????.partial' \) -exec mv -t "$target" -- {} +
 ```
 
-7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains. The marker file, `.lock`, `base`, and `.pitr-scratch` stay.
+7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains. The marker file, `.lock`, `base`, `.pitr-scratch`, and `.system-identifier` stay.
 8. Run `docker compose up -d --no-deps walarchive`. The stream starts on a directory without segments.
+   - The guard finds the file `.system-identifier` and no segment. It compares the identifier with the identifier of `db` and passes.
 9. Check the stream. Take no base backup before it passes:
 
 ```bash
@@ -1479,7 +1612,7 @@ The three volumes lie on these disks:
 
 | Volume | Disk |
 |---|---|
-| `pgdata` | The disk of the Docker root directory |
+| `pgdata` | The disk of the Docker root directory. The value `RECIPE_PGDATA_VOLUME` of `.env` names the volume |
 | `backups` | The second disk, in the directory `RECIPE_BACKUP_DIR` |
 | `walarchive` | The second disk, in the directory `RECIPE_WALARCHIVE_DIR` |
 
@@ -1535,11 +1668,12 @@ To end the mode, do these steps:
 
 1. Run `docker compose logs --no-log-prefix --since 1h app | grep -F '"volume":"pgdata"'`.
 2. If a line says `The free disk space cannot be read.`, use the case "The mode stays on" below.
-3. Read the mount point: `docker volume inspect --format '{{ .Mountpoint }}' recipe-editor_pgdata`.
-4. Run `df -h <mount point>`.
-5. Increase the free space of that disk. Delete only files outside the volumes `pgdata`, `backups`, and `walarchive`.
-6. Delete no set, no base backup, and no WAL segment by hand. Delete nothing inside `pgdata`.
-7. Wait for `health.disk_check_interval`. Load a page again. The banner goes away when the free space is above `disk.resume_percent`.
+3. Load the values of `.env` with `. ./.env`. Do not export them.
+4. Read the mount point: `docker volume inspect --format '{{ .Mountpoint }}' "$RECIPE_PGDATA_VOLUME"`.
+5. Run `df -h <mount point>`.
+6. Increase the free space of that disk. Delete only files outside the volumes `pgdata`, `backups`, and `walarchive`.
+7. Delete no set, no base backup, and no WAL segment by hand. Delete nothing inside `pgdata`.
+8. Wait for `health.disk_check_interval`. Load a page again. The banner goes away when the free space is above `disk.resume_percent`.
 
 No document names a file that is safe to delete outside the three volumes.
 If the disk has no such file, extend its filesystem with the site procedure.
@@ -1650,6 +1784,7 @@ No document gives the command that ends a hung run.
 
 The container ends when `pg_receivewal` or `supercronic` exits (ADR-0068 (c)). Docker then starts it again.
 The `ERROR` lines are in `docker compose logs walarchive`.
+`basebackup-once` runs the same guard of the file `.system-identifier`. It writes its messages to its output.
 
 | Message | Cause | Action |
 |---|---|---|
@@ -1657,6 +1792,13 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 | `a child process exited` | The field `child` names `pg_receivewal` or `supercronic`. The field `exit_code` gives its code. | Read the lines above it, for the text of `pg_receivewal`. If `df` shows a full disk, use the section "Low disk space". If the alert `replication` stays active, use the section "A gap in the WAL stream". |
 | `the marker file of the WAL archive disk is missing` | The file `.walarchive-marker` is not in `RECIPE_WALARCHIVE_DIR`. | Run `install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"`. |
 | `cannot read the password file of recipe_replicator` or a message that starts with `the password file of recipe_replicator` | The file `replicator_password` is unreadable, is empty, or has a wrong form. | Check the owner and the mode as in the section "Create the secret files". The file holds one line and no carriage return. |
+| `segments are in the WAL archive and the file .system-identifier is missing` | `RECIPE_WALARCHIVE_DIR` holds a segment file or a `.partial` file and no file `.system-identifier`. An installation of 0.1.0 is in this state until the segment check runs. The container refuses to start. | Run the segment check of step 23 of the section "Upgrade". Do not create the file by hand. If the old container is gone, use its command with the previous image. |
+| `the file .system-identifier holds the identifier of another system` | The file names another cluster than the running `db`. The segments may come from that cluster. The fields `file_identifier` and `server_identifier` show both numbers. | Do not edit, move, or delete the file. Run the name check of step 2 of the section "Upgrade". If the names agree, no document gives a further action. |
+| `the file .system-identifier is malformed` | The file is empty, holds a carriage return, holds a character other than a digit, or holds more than one line. | Run `cat -A "$RECIPE_WALARCHIVE_DIR/.system-identifier"`. Do not edit the file by hand. No document gives a further action. |
+| `cannot read the file .system-identifier` | The file is not a regular file, is a link, or user 999 cannot read it. | Run `ls -ln "$RECIPE_WALARCHIVE_DIR/.system-identifier"`. Do not replace the file. No document gives a further action. |
+| `cannot read the system identifier of the server` | The replication connection to `db` failed, or `IDENTIFY_SYSTEM` gave no number. | Run `docker compose ps db`. Read the lines above the message. Check the password file as in the row of `recipe_replicator`. |
+| `cannot write the file .system-identifier` | `walarchive` could not create the temp file or the hard link in `RECIPE_WALARCHIVE_DIR`. The disk may be full, read-only, or without hard links (ADR-0074 (e)). | Use the section "Low disk space". Check the filesystem as in step 1 of the section "Prepare the second disk". |
+| `cannot load wal-identity.sh` | The image `recipe-pgtools` lacks the file of the guard. | Compare the image ID with the release notes as in step 5 of the section "Load the images". |
 
 ## Known gaps
 
@@ -1665,7 +1807,6 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up` (section [Stop and start, or down and up](#stop-and-start-or-down-and-up)). Read the subnets again and write the firewall rules again (section "Check the host firewall").
 - ADR-0103 gives the volume switch, the command `restore-volume`, and the new WAL line after a switch. The operations change of ADR-0103 has not shipped. Until then, the restore, the rollback with the `_premigrate` dump, and the major upgrade stop before the volume switch. No workaround.
 - A restore of a set with the schema of 0.1.0 has no procedure, also the rollback restore of a `_premigrate` set. The image of 0.1.0 has no `restore-volume` (ADR-0103 (h), (q)). The `backup-now` of the upgrade makes the first set that `restore-volume` can restore. No workaround.
-- `deploy/.env` keeps eight values until the operations change ships. `reliability.md` 7.1 and ADR-0062 (i) already name nine. Do not add `RECIPE_PGDATA_VOLUME` before that release.
 - The code of a dump runs as the superuser of the cluster that `restore-volume` fills, and that cluster becomes production. The checks of ADR-0103 (m) and (o) cannot find each change inside the catalog. The user accepts this residual risk (ADR-0103 (o)). A later ADR may restore `pre-data` as a role that is not a superuser (ADR-0084). No workaround.
 - No document gives the steps to recover production from the WAL archive. The recovery point of minutes (ADR-0020, `reliability.md` 7.7) has no procedure yet. The workaround is a restore of a dump, with a loss of up to 24 hours.
 - No document gives the transfer of the external images `caddy` and `postgres`, or the digest check after `docker load`. The section "Load the images" names only `recipe-server` and `recipe-pgtools`. No workaround.

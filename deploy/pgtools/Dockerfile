@@ -18,8 +18,10 @@ COPY --chmod=0755 bin/ /usr/local/bin/
 # Create the directory first so COPY keeps its search permission for uid 999.
 RUN mkdir -p -m 0755 /etc/pgtools
 COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/
-COPY --chmod=0644 restore-code.sql restore-code.expected /etc/pgtools/
-COPY --chmod=0644 lib/globals-grammar.sh /etc/pgtools/
+COPY --chmod=0644 restore-code.sql restore-code.expected restore-roles.sql restore-roles.expected /etc/pgtools/
+COPY --chmod=0644 lib/globals-grammar.sh lib/restore-steps.sh lib/wal-identity.sh /etc/pgtools/
+# The named build context db is deploy/db. It holds the shared client rules of the cluster (ADR-0103 (l)).
+COPY --chmod=0644 --from=db cluster-access.sh /etc/pgtools/cluster-access.sh
 
 # The base image sets the entry of the database. This image runs a script of bin/ instead.
 ENTRYPOINT []

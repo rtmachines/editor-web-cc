@@ -19,6 +19,7 @@ mod operations_schema;
 mod pool;
 mod race;
 mod restore_code;
+mod restore_roles;
 mod roles;
 mod scenario;
 mod schema;

@@ -49,6 +49,7 @@ The variable `RECIPE_DEV_PORT` changes the port 8080.
 A development stack uses three Compose files. First, prepare the directories, the environment file `deploy/.env`, and the secret files as the section [Host preparation](docs/ops/runbook.md#host-preparation) of the runbook tells. Then run this command:
 
 ```bash
+docker volume create "$RECIPE_PGDATA_VOLUME"
 docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.dev.yaml up -d --build
 ```
 

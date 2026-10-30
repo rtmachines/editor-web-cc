@@ -108,7 +108,7 @@ case_wal_entry_args() {
   expect_eq "entry: pgpass directory removed" "$(find "$CASE/pgpass" -mindepth 1 | wc -l | tr -d ' ')" "0"
   expect_no "entry: pg_receivewal stopped" pid_alive "$CASE/stub/receivewal.pid"
   expect_ok "entry: no password in output" no_secret
-  expect_eq "entry: the archive stays" "$(ls -A "$W" | LC_ALL=C sort | tr '\n' ' ')" ".lock .walarchive-marker base "
+  expect_eq "entry: the archive stays" "$(ls -A "$W" | LC_ALL=C sort | tr '\n' ' ')" ".lock .system-identifier .walarchive-marker base "
 }
 
 case_wal_entry_receiver_exit() {
@@ -161,6 +161,281 @@ case_wal_entry_secret_escape() {
   expect_eq "entry: a secret with a newline gives one line end" "$(cat "$CASE/stub/pgpass.last" 2>/dev/null)" "0a"
   expect_eq "entry: a secret with a newline gives one line" \
     "$(wc -l <"$CASE/stub/pgpass.seen" 2>/dev/null | tr -d ' ')" "1"
+}
+
+# --- identifier guard (ADR-0103 (s), design D7) ------------------------------------------------
+
+ID_FILE_NAME=.system-identifier
+MSG_NO_FILE='segments are in the WAL archive and the file .system-identifier is missing'
+MSG_OTHER='the file .system-identifier holds the identifier of another system'
+MSG_MALFORMED='the file .system-identifier is malformed'
+MSG_UNREADABLE='cannot read the file .system-identifier'
+MSG_NO_SERVER='cannot read the system identifier of the server'
+ID_LISTING='.lock .system-identifier .walarchive-marker base '
+
+# guard_run [VAR=value ...]: a run of walarchive-entry that ends after two seconds when the guard passes.
+guard_run() { wal_run STUB_SUPERCRONIC_SLEEP=2 "$@" -- walarchive-entry; }
+
+id_file_content() { cat "$W/$ID_FILE_NAME" 2>/dev/null; }
+
+top_listing() { ls -A "$W" | LC_ALL=C sort | tr '\n' ' '; }
+
+# log_line <text>: the number of the first line of the log of the stubs that holds the text.
+log_line() { grep -nF -- "$1" "$CASE/stub/log" | head -n 1 | cut -d: -f1; }
+
+# expect_guard_passed <name>: pg_receivewal started once, and the guard wrote no message.
+expect_guard_passed() {
+  expect_eq "$1: pg_receivewal started" "$(count_events 'pg_receivewal start')" "1"
+  expect_eq "$1: no guard message" "$(grep -ci 'identifier' "$CASE/out" || true)" "0"
+}
+
+# expect_guard_refused <name> <message> <snapshot-before>: one ERROR line with the message,
+# no tool started, and no change of /wal.
+expect_guard_refused() {
+  wal_expect_refused "$1" "$3"
+  expect_message "$1" "$2"
+}
+
+# make_ln_stub: a stub of ln in $CASE/lnstub that acts on a call which names the identifier file.
+#   STUB_LN_WINNER_ID=n  another run publishes the file with the identifier n just before this call
+#   STUB_LN_BARRIER=dir  the call waits until two runs have reached it
+# It sets LN_ENV for wal_run.
+make_ln_stub() {
+  mkdir -p "$CASE/lnstub" "$CASE/barrier"
+  cat >"$CASE/lnstub/ln" <<'EOF'
+#!/usr/bin/env bash
+last=${!#}
+case $last in
+  */.system-identifier)
+    if [ -n "${STUB_LN_WINNER_ID:-}" ] && [ ! -e "$last" ]; then
+      printf '%s\n' "$STUB_LN_WINNER_ID" >"$last"
+    fi
+    if [ -n "${STUB_LN_BARRIER:-}" ]; then
+      : >"$STUB_LN_BARRIER/arrived.$$"
+      n=100
+      while [ "$(ls "$STUB_LN_BARRIER" | wc -l)" -lt 2 ] && [ "$n" -gt 0 ]; do
+        sleep 0.1
+        n=$((n - 1))
+      done
+    fi
+    ;;
+esac
+exec "$REAL_LN" "$@"
+EOF
+  chmod 0755 "$CASE/lnstub/ln"
+  LN_ENV=("PATH=$CASE/lnstub:$ROOT/stubs:$PATH" "REAL_LN=$(command -v ln)")
+}
+
+case_guard_static() {
+  local f=$HERE/../lib/wal-identity.sh out rc
+  expect_ok "static identity: file exists" test -f "$f"
+  expect_ok "static identity: bash -n" bash -n "$f"
+  expect_no "static identity: no carriage return" grep -q $'\r' "$f"
+  expect_no "static identity: no PGPASSWORD" grep -qE 'PGPASSWORD=|export PGPASSWORD' "$f"
+  expect_eq "static identity: every rm has the guarded form" \
+    "$(grep -E '(^|[^a-z_-])rm ' "$f" 2>/dev/null | grep -vE '^[[:space:]]*#' \
+      | grep -vcE 'rm( -r| -f| -rf)? -- "\$\{[a-z_]+:\?\}' || true)" "0"
+  # The file runs nothing at source time. A clean environment has none of the names it uses.
+  out=$(cd "$ROOT" && env -i PATH="$PATH" bash -c 'set -euo pipefail; source "$1"' _ "$f" 2>&1)
+  rc=$?
+  expect_eq "static identity: sourcing exit code" "$rc" "0"
+  expect_eq "static identity: sourcing prints nothing" "$out" ""
+  expect_ok "static entry: sources the guard" grep -qF 'wal-identity.sh' "$BIN/walarchive-entry"
+}
+
+# Scenario "First start of the WAL archive".
+case_guard_first_start() {
+  wal_new_case guard-first
+  guard_run
+  expect_eq "guard first start: file content" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "guard first start: file mode" "$(stat -c %a "$W/$ID_FILE_NAME" 2>/dev/null)" "600"
+  expect_eq "guard first start: one line" "$(wc -l <"$W/$ID_FILE_NAME" 2>/dev/null | tr -d ' ')" "1"
+  expect_guard_passed "guard first start"
+  expect_eq "guard first start: only the file is new" "$(top_listing)" "$ID_LISTING"
+  expect_ok "guard first start: replication connection" grep -qF 'replication=true' "$CASE/stub/log"
+  expect_ok "guard first start: the pgpass file exists" grep -qF 'CALL psql pgpass present' "$CASE/stub/log"
+  expect_ok "guard first start: the guard runs before pg_receivewal" \
+    test "$(log_line 'CALL psql identify')" -lt "$(log_line 'EVENT pg_receivewal start')"
+  expect_no "guard first start: no password in the log" grep -qF -- 'c\d9' "$CASE/stub/log"
+}
+
+# Names that are no segment of ADR-0099 (d) do not count. The first start still works.
+case_guard_other_names() {
+  wal_new_case guard-names
+  : >"$W/0000000100000000000000A"
+  : >"$W/00000001000000000000000a"
+  : >"$W/0000000100000000000000001"
+  : >"$W/000000010000000000000001.history"
+  : >"$W/000000010000000000000001.partial.tmp"
+  : >"$W/00000002.history"
+  guard_run
+  expect_eq "guard other names: file content" "$(id_file_content)" "$WAL_SYSID"
+  expect_guard_passed "guard other names"
+}
+
+# Scenario "Segments without the file". A segment or a .partial file counts.
+case_guard_segments_without_file() {
+  local before label
+  for label in segment partial both; do
+    wal_new_case "guard-nofile-$label"
+    case $label in
+      segment) printf 'segment\n' >"$W/$(seg_name 1)" ;;
+      partial) printf 'partial\n' >"$W/$(seg_name 2).partial" ;;
+      both) make_segments 1 3 ;;
+    esac
+    before=$(wal_snapshot)
+    guard_run
+    expect_guard_refused "guard segments without file ($label)" "$MSG_NO_FILE" "$before"
+    expect_no "guard segments without file ($label): no file" test -e "$W/$ID_FILE_NAME"
+  done
+}
+
+# Scenario "Another system".
+case_guard_other_system() {
+  local before
+  wal_new_case guard-other
+  printf '%s\n' "$OTHER_SYSID" >"$W/$ID_FILE_NAME"
+  make_segments 1 3
+  before=$(wal_snapshot)
+  guard_run
+  expect_guard_refused "guard another system" "$MSG_OTHER" "$before"
+  expect_eq "guard another system: file kept" "$(id_file_content)" "$OTHER_SYSID"
+  wal_new_case guard-other-nosegment
+  printf '%s\n' "$OTHER_SYSID" >"$W/$ID_FILE_NAME"
+  before=$(wal_snapshot)
+  guard_run
+  expect_guard_refused "guard another system, no segment" "$MSG_OTHER" "$before"
+}
+
+# Scenario "Same system".
+case_guard_same_system() {
+  local before
+  wal_new_case guard-same
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  make_segments 1 3
+  before=$(wal_snapshot)
+  guard_run
+  expect_guard_passed "guard same system"
+  expect_eq "guard same system: archive unchanged" "$(wal_snapshot)" "$before"
+  wal_new_case guard-same-nonewline
+  printf '%s' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  make_segments 1 3
+  guard_run
+  expect_guard_passed "guard same system, no line end"
+}
+
+# Scenario "Gap of the WAL stream": the operator moved the segments, and the file stays.
+case_guard_gap() {
+  local before
+  wal_new_case guard-gap
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  before=$(wal_snapshot)
+  guard_run
+  expect_guard_passed "guard gap"
+  expect_eq "guard gap: file kept" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "guard gap: archive unchanged" "$(wal_snapshot)" "$before"
+}
+
+# Scenario "Malformed identifier file": empty, CR, a character other than a digit, more than one line.
+guard_malformed_case() {
+  local label=$1 before
+  wal_new_case "guard-malformed-$label"
+  case $label in
+    empty) : >"$W/$ID_FILE_NAME" ;;
+    empty-with-segment)
+      : >"$W/$ID_FILE_NAME"
+      make_segments 1 3
+      ;;
+    line-end-only) printf '\n' >"$W/$ID_FILE_NAME" ;;
+    cr) printf '%s\r\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+    non-digit) printf '73549x7216845319027\n' >"$W/$ID_FILE_NAME" ;;
+    space) printf '%s \n' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+    minus) printf -- '-%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+    nul) printf '7354987216\000845319027\n' >"$W/$ID_FILE_NAME" ;;
+    two-lines) printf '%s\n%s\n' "$WAL_SYSID" "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+    blank-line) printf '%s\n\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+    no-end-two-lines) printf '%s\n%s' "$WAL_SYSID" "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+  esac
+  before=$(wal_snapshot)
+  guard_run
+  expect_guard_refused "guard malformed ($label)" "$MSG_MALFORMED" "$before"
+}
+
+# The file is a directory, or the server gives no identifier.
+case_guard_unreadable() {
+  local before
+  wal_new_case guard-dir
+  mkdir "$W/$ID_FILE_NAME"
+  before=$(wal_snapshot)
+  guard_run
+  expect_guard_refused "guard file is a directory" "$MSG_UNREADABLE" "$before"
+  wal_new_case guard-server-down
+  before=$(wal_snapshot)
+  guard_run STUB_IDENTIFY_FAIL=1
+  expect_guard_refused "guard server down" "$MSG_NO_SERVER" "$before"
+  wal_new_case guard-server-bad-answer
+  before=$(wal_snapshot)
+  guard_run 'STUB_IDENTIFY_OUT=x|1|0/0|'
+  expect_guard_refused "guard bad answer of the server" "$MSG_NO_SERVER" "$before"
+}
+
+# Two first starts: the loser of the ln reads the file again and compares (design D7).
+# The stub of ln makes the loss certain. A real race follows in case_guard_two_first_starts.
+case_guard_lost_race() {
+  wal_new_case guard-lost-same
+  make_ln_stub
+  guard_run "${LN_ENV[@]}" "STUB_LN_WINNER_ID=$WAL_SYSID"
+  expect_guard_passed "guard lost race, same system"
+  expect_eq "guard lost race, same system: file" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "guard lost race, same system: no temp file" "$(top_listing)" "$ID_LISTING"
+  wal_new_case guard-lost-other
+  make_ln_stub
+  guard_run "${LN_ENV[@]}" "STUB_LN_WINNER_ID=$OTHER_SYSID"
+  expect_eq "guard lost race, other system: exit code" "$RC" "1"
+  expect_eq "guard lost race, other system: one ERROR line" "$(error_count "$CASE/out")" "1"
+  expect_message "guard lost race, other system" "$MSG_OTHER"
+  expect_eq "guard lost race, other system: no tool started" "$(count_events '')" "0"
+  expect_eq "guard lost race, other system: file of the winner" "$(id_file_content)" "$OTHER_SYSID"
+  expect_eq "guard lost race, other system: no temp file" "$(top_listing)" "$ID_LISTING"
+}
+
+# Two real runs reach the publish at the same time. Both must start pg_receivewal.
+case_guard_two_first_starts() {
+  local pid_a pid_b
+  wal_new_case guard-race
+  make_ln_stub
+  OUTTAG=a WAL_BG=1 wal_run "${LN_ENV[@]}" "STUB_LN_BARRIER=$CASE/barrier" STUB_SUPERCRONIC_SLEEP=2 -- walarchive-entry
+  pid_a=$BG_PID
+  OUTTAG=b WAL_BG=1 wal_run "${LN_ENV[@]}" "STUB_LN_BARRIER=$CASE/barrier" STUB_SUPERCRONIC_SLEEP=2 -- walarchive-entry
+  pid_b=$BG_PID
+  BG_PID=$pid_a
+  OUTTAG=a wait_bg
+  BG_PID=$pid_b
+  OUTTAG=b wait_bg
+  expect_eq "guard race: both runs reached the publish" "$(find "$CASE/barrier" -type f | wc -l | tr -d ' ')" "2"
+  expect_eq "guard race: pg_receivewal started twice" "$(count_events 'pg_receivewal start')" "2"
+  expect_eq "guard race: no guard message in run a" "$(grep -ci 'identifier' "$CASE/outa" || true)" "0"
+  expect_eq "guard race: no guard message in run b" "$(grep -ci 'identifier' "$CASE/outb" || true)" "0"
+  expect_eq "guard race: file content" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "guard race: no temp file" "$(top_listing)" "$ID_LISTING"
+}
+
+case_wal_guard() {
+  local label
+  case_guard_static
+  case_guard_first_start
+  case_guard_other_names
+  case_guard_segments_without_file
+  case_guard_other_system
+  case_guard_same_system
+  case_guard_gap
+  for label in empty empty-with-segment line-end-only cr non-digit space minus nul two-lines blank-line \
+    no-end-two-lines; do
+    guard_malformed_case "$label"
+  done
+  case_guard_unreadable
+  case_guard_lost_race
+  case_guard_two_first_starts
 }
 
 # --- walarchive-health ------------------------------------------------------------------------

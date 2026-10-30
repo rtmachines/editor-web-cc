@@ -31,7 +31,7 @@ Facts that each option must handle:
 ## Decision drivers
 
 - Data safety comes before the time of the procedure. The old cluster stays unchanged until the switch.
-- A wrong volume name fails closed. It never starts an empty cluster.
+- A wrong volume name fails closed. It never starts an empty cluster, and an upgrade never continues on a volume other than the volume of the running `db`.
 - The production restore uses the code path that the weekly restore test proves.
 - A restored cluster never serves a connection under the client rules of the image.
 - Each write of the new cluster reaches the WAL archive.
@@ -85,6 +85,9 @@ Volume switch (conflict 6):
   - A name without a volume stops `docker compose up` with an error. It does not start an empty cluster.
 - (d) `RECIPE_PGDATA_VOLUME` is the ninth value of `deploy/.env`. It is mandatory and has no default. This item amends ADR-0062 (i).
   - An existing installation sets the name that `docker inspect` of the running `db` container shows for `/var/lib/postgresql/data`, normally `recipe-editor_pgdata`.
+  - The operator sets the name in step 2 of `reliability.md` section 7.10, before the first Compose command of the upgrade. `${RECIPE_PGDATA_VOLUME:?}` stops every Compose command without the value.
+  - Directly after the edit, the operator reads the name of `pgdata` in `docker compose config`. The operator compares it with the name that `docker inspect` of the running `db` container shows for `/var/lib/postgresql/data`. A difference stops the upgrade.
+  - The check also covers a name of an existing empty volume. Without the check, a replacement of `db` on that volume makes a new cluster.
   - A new installation creates its first volume in the host preparation with `docker volume create`. The name has the form of (e).
 - (e) A new volume gets the name `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>`. The time is UTC, in the form of the target directory of ADR-0099 (c).
 - (f) The switch has these steps:
@@ -155,7 +158,7 @@ Restore target (conflicts 3 and 4):
   - `restore-roles.expected` holds the lines of `pg_hba.conf` with a placeholder for the subnet. `restore-volume` puts its value `COMPOSE_SUBNET` of (h) into the placeholder before the comparison. The storage test proves the file with a test subnet. `COMPOSE_SUBNET` is already a value of `deploy/.env` (ADR-0062 (i)), so the count of (d) stays at nine.
   - `restore-roles.expected` knows one state of the roles. Each change of a role attribute or a membership in `01-roles.sh` therefore ships with a forward step for existing clusters. A new backup set then holds the new values.
   - Until the first backup set after such an upgrade, a restore uses the `recipe-pgtools` image of the previous release, as in a rollback (q). After such a restore, the operator runs the upgrade to the current release again. That upgrade runs the forward step again, so each forward step must be idempotent. This is a decision of the user of 2026-10-29.
-  - The test also compares `postgresql.conf` and `postgresql.auto.conf` of both clusters. `db` gets `listen_addresses = '*'` only from the sample file of the image.
+  - A storage test has no cluster of `restore-volume`. The CI job `restore-switch` of the operations change of (z) therefore compares `postgresql.conf` and `postgresql.auto.conf` of a cluster of `restore-volume` with a cluster of `01-roles.sh`. `db` gets `listen_addresses = '*'` only from the sample file of the image.
 - (n) After the switch, the entrypoint of `db` finds `PG_VERSION` and skips the init. `01-roles.sh` does not run on a cluster of `restore-volume`.
 - (o) The code of the dump runs as the superuser of the target cluster during the restore (ADR-0084, ADR-0095 (h)). That cluster then becomes production. ADR-0084 accepts this risk only for a scratch cluster that the run deletes.
   - In step 8 of (i), `restore-volume` compares `postgresql.conf`, `postgresql.auto.conf`, and `pg_ident.conf` with the copies that step 4 kept in `/run/pgpass`.
@@ -192,8 +195,15 @@ WAL line after a switch (conflict 5):
   5. Also move each directory of `/wal/base` that matches `^base_[0-9]{8}_[0-9]{6}$` into the directory `base` of the target directory.
   6. Run step 8 of ADR-0099 (a). The command starts `walarchive` with the image of the tag in `deploy/.env`.
   7. Run steps 9 to 13 of ADR-0099 (a). They are the stream check, the base backup, the segment switch, the flush check, and the WAL check.
-  - After step 6, `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier. The release note of the operations change gives the one step that writes the file on an existing installation.
+  - After step 6, `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier.
   - The scripts get this guard in the operations change of (z).
+  - An existing installation has segments and no file. The operator writes the file once, before `walarchive` first starts with the image of the first release with the guard.
+  - For this step, the operator reads the system identifier in `db` and pipes it into the old `walarchive` container. That container writes `/wal/.system-identifier`. The release notes of that release name this step.
+  - The step runs only when `/wal/.system-identifier` is missing.
+  - Before the write, the container compares the value with `xlp_sysid` of the newest complete segment in `/wal`. That value is 8 bytes at offset 24 of the first page, the long page header, little-endian.
+  - A difference stops the step, and the step writes no file. The step therefore checks the identifier and does not trust the volume name of (d).
+  - "A gap in the WAL stream" of ADR-0099 (a) keeps `/wal/.system-identifier` in `/wal`. The cluster does not change in a gap, so its identifier stays the same. Only step 4 of (s) moves the file.
+  - This item amends step 7 of ADR-0099 (a). The file `/wal/.system-identifier` also stays in `/wal` in that step.
   - The marker file, `/wal/.lock`, `/wal/.pitr-scratch`, and the empty directory `/wal/base` stay. A directory `.tmp-base_*` of a killed run stays under ADR-0077 (h).
   - Step 14 of ADR-0099 (a) runs after the start of `app`, because the job `alerts` runs in `app`.
 - (t) The operator deletes the old `pgdata` volume and the target directory of (s) only when three conditions hold:
@@ -231,9 +241,11 @@ Changes of other documents:
   - `reliability.md` sections 7.1, 7.7, 7.8, 7.10, and 7.11. `data-model.md` section 5.1. `.claude/rules/sql.md`, the line of the role source.
   - `docs/ops/runbook.md`: a first line in the sections "Restore into production", "Rollback", and "Major upgrade", the citation of the new-volume rule, and "Known gaps".
   - A later OpenSpec change of the capability `operations` changes `compose.yaml`, `deploy/.env.example`, the pgtools scripts, the tests, the spec, and the runbook procedures.
-  - That change also adds the CI step of (p).
+  - That change also adds the CI step of (p) and the CI job `restore-switch` of (m).
   - In that change, the harnesses of ADR-0101 that mount `01-roles.sh` also mount the shared file of (l). They are `crates/recipe-db/tests/storage/support/container.rs` and `crates/recipe-server/tests/support/database.rs`.
   - In that change, the `deploy_values` checks that read the `printf` lines of `01-roles.sh` read the shared file (`crates/recipe-server/tests/deploy_values/secrets.rs`).
+  - The mount of (l) changes the service configuration of `db`. In the first release with that mount, step 3 command 1 of `reliability.md` section 7.10 therefore replaces `db` once on the same volume. `app` loses its connections for the start time of `db`. This is a decision of the user of 2026-10-30.
+  - In that change, the CI job `upgrade` no longer requires the same `db` container. It checks that the new `db` container mounts the same volume and that `pg_control_system()` returns the same `system_identifier` as before the upgrade.
 
 ## Consequences
 
@@ -253,12 +265,15 @@ Changes of other documents:
 - The old volume and the moved WAL files use disk space for at least `volume_switch.keep_min_age`.
 - A rollback restore to 0.1.0 has no procedure.
 - The release that changes the major version of `db` holds no migration file (p).
+- An existing installation writes `/wal/.system-identifier` once, before the guard of (s) first runs.
+- The first upgrade to the release with the mount of (l) replaces `db` once (z).
 
 ### Risks and mitigations
 
 - Risk: a typo in `-v <new volume>` or a missing `-v` option fills a stray volume or an anonymous volume. Mitigation: step 4 of (f) compares the system identifier before `db` starts.
 - Risk: the operator keeps an old `app` or `backup` container, and a later `start` reuses the old mount. Mitigation: the switch uses `rm` and `up -d --no-deps` only, and step 6 of (f) checks the mounts.
 - Risk: the operator sets a wrong existing volume, for example the old one. Mitigation: step 4 of (f), the change log of the site, and the `docker inspect` checks of (f).
+- Risk: the operator sets a wrong existing volume at an upgrade. Mitigation: the comparison of (d) stops the upgrade, and the segment check of (s) writes no identifier file of another system.
 - Risk: a reboot during the switch. Mitigation: the deleted containers do not come back. The new `db` starts on the new volume, or no `db` container exists. Both states are safe.
 - Risk: the operator deletes the old volume too early. Mitigation: the three conditions of (t).
 - Risk: a check of (f) fails after step 1, and a clean-up deletes the old volume. Mitigation: step 4 of (f) deletes no volume and runs the switch back of (g) at once.
@@ -269,7 +284,8 @@ Changes of other documents:
 - Amends ADR-0020 (every restore goes into a new volume), ADR-0032 (a function of the shared file prints the `REVOKE` statements), ADR-0062 (i) (nine values).
 - Amends ADR-0067 (b) and the steps of the restore test (shared steps with `restore-volume`), ADR-0069 (r), (v) (shared file of the client rules).
 - Amends ADR-0070 (j) (the temporary container of `restore-volume` in `container.small_cpus`), ADR-0077 (f) (old base backups move with the line).
-- Amends ADR-0083 (d) (`walarchive` and `backup` start before `app` after a rollback restore), ADR-0095 (the check also in `restore-volume`), ADR-0099 (c) (delete rule after a switch).
+- Amends ADR-0083 (d) (`walarchive` and `backup` start before `app` after a rollback restore), ADR-0095 (the check also in `restore-volume`).
+- Amends ADR-0099 (a) (the identifier file stays in a gap) and ADR-0099 (c) (delete rule after a switch).
 - ADR-0033 (passwords from the secret files), ADR-0064 (f) (build contexts), ADR-0068 (WAL archive), ADR-0084 (e) (residual risk of `pre-data`).
 - ADR-0100 and ADR-0102 (end of a restore), ADR-0101 (storage tests).
 - `docs/architecture/reliability.md` sections 7.1, 7.7, 7.8, 7.10, 7.11. `docs/architecture/data-model.md` section 5.1.

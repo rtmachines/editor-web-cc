@@ -79,6 +79,7 @@ case_wal_entry_sigterm
 case_wal_entry_crontab_missing
 case_wal_entry_secret_escape
 for label in empty cr two-lines nul missing; do wal_secret_case "$label"; done
+case_wal_guard
 case_wal_health
 case_wal_base_happy
 case_wal_base_retention
@@ -93,6 +94,12 @@ case_wal_base_bad_label
 case_wal_base_name_exists
 case_wal_base_args_and_secret
 case_wal_base_secret_no_newline
+case_wal_base_guard_no_file
+case_wal_base_guard_other_system
+case_wal_base_guard_malformed
+case_wal_base_guard_no_server
+case_wal_base_guard_match
+case_wal_base_guard_first_start
 case_wal_base_parallel
 case_wal_pitr_gates
 case_wal_pitr_runs
