@@ -301,6 +301,12 @@ class RestoreSwitchTextTests(unittest.TestCase):
         self.assertIn('docker kill "$(container db)"', body)
         self.assertIn("rm -f proxy app backup walarchive db", body)
 
+    def test_wait_backup_minute_has_one_definition_in_common_sh(self):
+        # A second copy of the helper can lose a suffix. The copy in restore-switch.sh lost _now.
+        found = {path.name: path.read_text(encoding="utf-8").count("\nwait_backup_minute() {\n")
+                 for path in sorted(CI.glob("*.sh"))}
+        self.assertEqual({name: count for name, count in found.items() if count}, {"common.sh": 1})
+
     def test_controldata_runs_without_network_and_with_a_read_only_mount(self):
         body = shell_function("controldata")
         self.assertIn("--network none", body)
@@ -409,7 +415,8 @@ class StubbedSubcommandTests(unittest.TestCase):
             self.skipTest("bash is not available")
 
     def run_subcommand(self, name, state=None, stub_env=None, docker_stub=DOCKER_SWITCH_STUB, tree=None,
-                       sudo_stub=SUDO_STUB, stub_python=False, read=(), stub_files=None, python_stub=None):
+                       sudo_stub=SUDO_STUB, stub_python=False, read=(), stub_files=None, python_stub=None,
+                       extra_stubs=None):
         """Run one subcommand with stubs. Return the process, the call log, and the files of CI_STATE."""
         with tempfile.TemporaryDirectory() as temp:
             directory = pathlib.Path(temp)
@@ -443,6 +450,8 @@ class StubbedSubcommandTests(unittest.TestCase):
             write_stub(stubs / "sleep", "exit 0")
             if stub_python:
                 write_stub(stubs / "python3", python_stub or PYTHON_STUB)
+            for key, value in (extra_stubs or {}).items():
+                write_stub(stubs / key, value)
             env = {key: value for key, value in os.environ.items() if not key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_"))}
             env.update({
                 "GITHUB_ACTIONS": "true",
@@ -1054,11 +1063,37 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertIn("CI: wal-line: the file .system-identifier of the new line is missing or wrong.", done.stderr)
 
 
+# The stub gives the minute 20260101_0000 to the first STUB_DATE_SWITCH calls and 20260101_0001 after them.
+# It logs each minute that it gives. Other formats go to the real date.
+DATE_MINUTE_STUB = r"""
+if [[ $* != "-u +%Y%m%d_%H%M" ]]; then exec /usr/bin/date "$@"; fi
+count=$(( $(cat "$STUB_DIR/date.count" 2>/dev/null || echo 0) + 1 ))
+echo "$count" >"$STUB_DIR/date.count"
+if (( count <= ${STUB_DATE_SWITCH:-2} )); then stamp=20260101_0000; else stamp=20260101_0001; fi
+echo "date $stamp" >>"$STUB_LOG"
+echo "$stamp"
+"""
+
+
 class CheckBehaviorTests(StubbedSubcommandTests):
-    def run_check(self, stub_env=None, state=None, tree=None):
+    def run_check(self, stub_env=None, state=None, tree=None, extra_stubs=None):
         env = {**WAL_ENV, "STUB_BASE_NAME": CHECK_BASE, **(stub_env or {})}
         return self.run_subcommand("check", CHECK_STATE if state is None else state, env, DOCKER_WAL_STUB,
-                                   tree=CHECK_TREE if tree is None else tree, sudo_stub=SUDO_EXEC_STUB, stub_python=True)
+                                   tree=CHECK_TREE if tree is None else tree, sudo_stub=SUDO_EXEC_STUB, stub_python=True,
+                                   extra_stubs=extra_stubs)
+
+    def test_check_waits_for_a_minute_without_a_set_before_backup_now(self):
+        # backup-once refuses a name of an existing set. Prepare wrote a _now set in the same minute in CI run 41092760611.
+        for suffix in ("_now", "_premigrate"):
+            with self.subTest(suffix=suffix):
+                tree = {**CHECK_TREE, f"backups/recipe_20260101_0000{suffix}.dump.sha256": "manifest"}
+                done, log, _ = self.run_check(tree=tree, extra_stubs={"date": DATE_MINUTE_STUB})
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertInOrder(log, [
+                    r" exec -T walarchive basebackup-once\n",
+                    r"date 20260101_0001\n",
+                    r" exec -T backup backup-now\n",
+                ])
 
     def test_check_runs_every_step_in_order(self):
         done, log, _ = self.run_check()

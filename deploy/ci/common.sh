@@ -67,3 +67,21 @@ container() {
 http_probe() {
   python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/http_probe.py" "$@"
 }
+
+wait_backup_minute() {
+  # backup-once refuses a name of an existing set, and a set name holds only the minute.
+  # Wait for a minute without a _premigrate set and without a _now set.
+  # A later minute also makes the new set sort after the premigration set.
+  local deadline=$((SECONDS + 65)) stamp
+  while true
+  do
+    stamp=$(date -u +%Y%m%d_%H%M)
+    if ! sudo test -f "$RECIPE_BACKUP_DIR/recipe_${stamp}_premigrate.dump.sha256" \
+      && ! sudo test -f "$RECIPE_BACKUP_DIR/recipe_${stamp}_now.dump.sha256"
+    then
+      return 0
+    fi
+    (( SECONDS < deadline )) || fail "the backup minute did not advance"
+    sleep 1
+  done
+}

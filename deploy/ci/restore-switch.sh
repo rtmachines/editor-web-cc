@@ -22,16 +22,6 @@ record_counts() {
   done
 }
 
-wait_backup_minute() {
-  # A later minute makes the new set sort after the premigration set.
-  local deadline=$((SECONDS + 65))
-  while sudo test -f "$RECIPE_BACKUP_DIR/recipe_$(date -u +%Y%m%d_%H%M)_premigrate.dump.sha256"
-  do
-    (( SECONDS < deadline )) || fail "the backup minute did not advance"
-    sleep 1
-  done
-}
-
 prepare() {
   log "restore-switch prepare: start the stack"
   bash "$GITHUB_WORKSPACE/deploy/ci/start.sh"

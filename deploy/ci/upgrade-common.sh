@@ -50,21 +50,6 @@ check_image() {
   [[ $actual == "$expected" ]] || fail "$1 does not use the expected image"
 }
 
-wait_backup_minute() {
-  local deadline=$((SECONDS + 65)) stamp
-  while true
-  do
-    stamp=$(date -u +%Y%m%d_%H%M)
-    if ! sudo test -f "$RECIPE_BACKUP_DIR/recipe_${stamp}_premigrate.dump.sha256" \
-      && ! sudo test -f "$RECIPE_BACKUP_DIR/recipe_${stamp}_now.dump.sha256"
-    then
-      return 0
-    fi
-    (( SECONDS < deadline )) || fail "the backup minute did not advance"
-    sleep 1
-  done
-}
-
 check_restore() {
   local expected=$1 log=$2
   compose exec -T backup restore-test | tee "$CI_STATE/$log"
