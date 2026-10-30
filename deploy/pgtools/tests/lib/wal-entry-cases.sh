@@ -40,6 +40,15 @@ case_wal_static_entry() {
   expect_ok "static entry: wait -n" grep -qE 'wait -n' "$f"
 }
 
+# The image holds the mount point of the tmpfs /run/pgpass with mode 1777 and the owner root.
+# runc gives the tmpfs the mode of an existing mount point. A restart then keeps the mode of the first start.
+case_wal_pgpass_mount_point() {
+  local dir=/run/pgpass
+  expect_ok "image: the mount point $dir is a directory" test -d "$dir"
+  expect_no "image: the mount point $dir is no symbolic link" test -L "$dir"
+  expect_eq "image: the mode and the owner of $dir" "$(stat -c %a:%u -- "$dir" 2>/dev/null)" "1777:0"
+}
+
 # The ADR-0031 rule: the secret file holds one line. A bad file starts no child.
 wal_secret_case() {
   local label=$1 before
@@ -254,6 +263,7 @@ case_guard_first_start() {
   expect_eq "guard first start: only the file is new" "$(top_listing)" "$ID_LISTING"
   expect_ok "guard first start: replication connection" grep -qF 'replication=true' "$CASE/stub/log"
   expect_ok "guard first start: the pgpass file exists" grep -qF 'CALL psql pgpass present' "$CASE/stub/log"
+  expect_ok "guard first start: the pgpass line matches the connection" grep -qF 'CALL psql pgpass match' "$CASE/stub/log"
   expect_ok "guard first start: the guard runs before pg_receivewal" \
     test "$(log_line 'CALL psql identify')" -lt "$(log_line 'EVENT pg_receivewal start')"
   expect_no "guard first start: no password in the log" grep -qF -- 'c\d9' "$CASE/stub/log"

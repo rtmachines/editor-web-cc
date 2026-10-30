@@ -4,6 +4,7 @@ import importlib.util
 import copy
 import os
 import pathlib
+import re
 import shutil
 import struct
 import subprocess
@@ -19,7 +20,7 @@ def wal_header(system_id, info=0x0002):
 
 
 def wal_identity_step():
-    """Return the script that upgrade.sh runs in the old walarchive container."""
+    """Return the script that upgrade.sh runs in a new walarchive container."""
     source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
     return source.split("WAL_IDENTITY_STEP=$(cat <<'STEP'\n", 1)[1].split("\nSTEP\n)", 1)[0]
 
@@ -27,10 +28,11 @@ def wal_identity_step():
 class WalIdentityCase:
     """Run the real step against a temporary WAL directory with one complete segment."""
 
-    def __init__(self, test, segment_sysid, info=0x0002):
+    def __init__(self, test, segment_sysid, info=0x0002, with_segment=True):
         self.test = test
         self.segment_sysid = segment_sysid
         self.info = info
+        self.with_segment = with_segment
 
     def __enter__(self):
         bash = shutil.which("bash")
@@ -40,7 +42,8 @@ class WalIdentityCase:
         self.temp = tempfile.TemporaryDirectory()
         self.directory = pathlib.Path(self.temp.name)
         self.file = self.directory / ".system-identifier"
-        (self.directory / "000000010000000000000001").write_bytes(wal_header(self.segment_sysid, self.info))
+        if self.with_segment:
+            (self.directory / "000000010000000000000001").write_bytes(wal_header(self.segment_sysid, self.info))
         return self
 
     def __exit__(self, *exc):
@@ -49,7 +52,9 @@ class WalIdentityCase:
     def run(self, identifier):
         env = {**os.environ, "WAL_DIR": str(self.directory)}
         # Bytes keep the stdin of the step free of CR on every host.
-        done = subprocess.run([self.bash, "-c", wal_identity_step()], input=(identifier + "\n").encode(),
+        # A function named sleep makes the wait for a segment end at once in the test.
+        script = "sleep() { :; }\n" + wal_identity_step()
+        done = subprocess.run([self.bash, "-c", script], input=(identifier + "\n").encode(),
                               capture_output=True, check=False, env=env)
         return subprocess.CompletedProcess(done.args, done.returncode, done.stdout.decode(), done.stderr.decode())
 
@@ -339,17 +344,38 @@ class UpgradeScriptTests(unittest.TestCase):
         self.assertNotIn("com.docker.compose.project", body)
         self.assertNotIn("docker volume rm", body)
 
-    def test_wal_identity_step_runs_in_the_old_walarchive_container_before_the_new_one_starts(self):
+    def test_wal_identity_step_runs_in_a_new_walarchive_container_before_the_db_replacement(self):
         source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
+        self.assertFalse("compose exec -T walarchive" in source, "upgrade.sh must not use compose exec into walarchive")
         step = source.split("\nwrite_wal_identity() {", 1)[1].split("\n}\n", 1)[0]
+        run_form = r"RECIPE_VERSION=ci-previous\s+compose run --rm --no-deps -T --entrypoint sh walarchive"
+        run = re.search(run_form, step)
+        self.assertIsNotNone(run, "the step must run in a new container with the previous tag")
         self.assertLess(step.index("db_system_identifier"), step.index("pg_switch_wal"))
-        self.assertLess(step.index("pg_switch_wal"), step.index("compose exec -T walarchive bash -c"))
-        self.assertIn("| compose exec -T walarchive bash -c \"$WAL_IDENTITY_STEP\"", step)
-        self.assertLess(step.index("compose exec -T walarchive"), step.index("sudo cat"))
+        wait = step[step.index("pg_switch_wal"):run.start()]
+        self.assertIn("RECIPE_WALARCHIVE_DIR", wait)
+        self.assertRegex(wait, r"(?m)^\s*(for|while|until)\b")
+        self.assertIn("sleep", wait)
+        self.assertIn("$WAL_IDENTITY_STEP", step[run.start():])
+        self.assertLess(run.start(), step.index("sudo cat"))
         body = source.split("\nupgrade() {", 1)[1].split("\n}\n", 1)[0]
-        start = body.index("compose up -d --no-deps --wait --wait-timeout 180 backup walarchive")
-        self.assertLess(body.index("write_wal_identity"), start)
         self.assertEqual(body.count("write_wal_identity"), 1)
+        name_check = body.index("\n  check_volume_name\n")
+        replacement = body.index("compose up -d backup-premigrate")
+        self.assertLess(name_check, body.index("write_wal_identity"))
+        self.assertLess(body.index("write_wal_identity"), replacement)
+
+    def test_wal_identity_step_stops_for_a_wal_directory_with_only_a_partial_segment(self):
+        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
+            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(5))
+            result = case.run("5")
+            self.assertEqual(result.returncode, 1)
+            lines = [line for line in result.stderr.splitlines() if line.strip()]
+            self.assertEqual(len(lines), 1, result.stderr)
+            self.assertIn("holds no complete segment", lines[0])
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
+                             ["000000010000000000000001.partial"])
 
     def test_wal_identity_step_skips_when_the_file_exists(self):
         with WalIdentityCase(self, segment_sysid=5) as case:
@@ -448,7 +474,7 @@ class UpgradeScriptTests(unittest.TestCase):
         source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
         step = source.split("\nwrite_wal_identity() {", 1)[1].split("\n}\n", 1)[0]
         state = step.index("sudo test -e")
-        run = step.index("compose exec -T walarchive bash -c")
+        run = step.index('"$WAL_IDENTITY_STEP"')
         self.assertLess(state, run)
         self.assertRegex(step[run:], r'\| tee "\$CI_STATE/wal-identity\.log"')
         check = step.index('upgrade_check wal-identity "$CI_STATE/wal-identity.log"')

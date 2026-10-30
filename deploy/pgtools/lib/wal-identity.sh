@@ -26,10 +26,12 @@ guard_file_id=""
 
 # read_server_identifier <pgpass file>: sets guard_server_id from IDENTIFY_SYSTEM.
 # The answer line is systemid|timeline|xlogpos|dbname. Only the first field counts.
+# libpq matches the database field of the pgpass line against dbname. Without dbname, it uses the
+# user name. So the connection names dbname=replication, as pg_receivewal and pg_basebackup do.
 read_server_identifier() {
   local answer first
   answer=$(PGPASSFILE=$1 psql --no-psqlrc --quiet --no-align --tuples-only --no-password \
-    --dbname="host=$PGHOST port=$PGPORT user=$PGUSER replication=true application_name=walarchive_identity" \
+    --dbname="host=$PGHOST port=$PGPORT user=$PGUSER dbname=replication replication=true application_name=walarchive_identity" \
     --command=IDENTIFY_SYSTEM 2>/dev/null) || fail "cannot read the system identifier of the server"
   first=${answer%%|*}
   [[ $first =~ $IDENTIFIER_GRAMMAR ]] || fail "cannot read the system identifier of the server"

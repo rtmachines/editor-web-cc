@@ -212,13 +212,19 @@ An existing installation SHALL write `/wal/.system-identifier` once, before `wal
 
 #### Scenario: Existing installation before the guard
 - **GIVEN** a directory `/wal` with segments of `db` and no file `.system-identifier`
-- **WHEN** the operator pipes the system identifier of `db` into the old `walarchive` container before the upgrade
+- **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image, before the upgrade replaces `db`
 - **THEN** `/wal/.system-identifier` holds the identifier of `db`
 - **AND** `walarchive-entry` of the new image starts `pg_receivewal`
 
 #### Scenario: Segments of another system before the guard
 - **GIVEN** a directory `/wal` whose newest complete segment holds a system identifier other than that of `db`, and no file `.system-identifier`
-- **WHEN** the operator pipes the system identifier of `db` into the old `walarchive` container
+- **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image
+- **THEN** the step writes one `ERROR` line and stops
+- **AND** no file `/wal/.system-identifier` exists
+
+#### Scenario: No complete segment
+- **GIVEN** a directory `/wal` with a `.partial` file, no complete segment, and no file `.system-identifier`
+- **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image
 - **THEN** the step writes one `ERROR` line and stops
 - **AND** no file `/wal/.system-identifier` exists
 
@@ -226,6 +232,19 @@ An existing installation SHALL write `/wal/.system-identifier` once, before `wal
 - **GIVEN** a directory `/wal` that already holds the file `.system-identifier`
 - **WHEN** the upgrade reaches the step of the identifier file
 - **THEN** the step does not run, and the file does not change
+
+### Requirement: Position and form of the identifier step
+The step of the identifier file SHALL run before the upgrade replaces `db`. It SHALL run in a new container of the previous image with `docker compose run`. It SHALL NOT use `docker compose exec` into the old `walarchive` container (R31, A35).
+
+#### Scenario: Step before the replacement of db
+- **GIVEN** an installation of 0.1.0 with segments in `/wal` and no file `.system-identifier`
+- **WHEN** the upgrade reaches `docker compose up -d backup-premigrate`, which replaces `db`
+- **THEN** `/wal/.system-identifier` already holds the identifier of `db`
+
+#### Scenario: Old walarchive in a restart loop
+- **GIVEN** a directory `/wal` with segments of `db`, no file `.system-identifier`, and an old `walarchive` container that restarts in a loop
+- **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image
+- **THEN** `/wal/.system-identifier` holds the identifier of `db`
 
 ### Requirement: Data volume at the upgrade
 Before the first Compose command of an upgrade, `deploy/.env` SHALL hold `RECIPE_PGDATA_VOLUME`. The operator SHALL compare the name of `pgdata` in `docker compose config` with the volume that `docker inspect` of the running `db` shows for `/var/lib/postgresql/data`. A difference SHALL stop the upgrade. When the upgrade replaces `db`, the new container SHALL mount the same volume and SHALL have the same system identifier (R31, R34).

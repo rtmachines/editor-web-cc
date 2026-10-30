@@ -728,7 +728,7 @@ WAL line after a switch (ADR-0103 (r) to (v)):
 - The operator moves the old segments, the `.partial` file, and every base backup of `/wal/base` into a target directory of ADR-0099 (c). It also moves `/wal/.system-identifier`. The file `old-system-identifier` there keeps the system identifier of the old cluster.
 - `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier (ADR-0103 (s)).
 - In a gap of the WAL stream (ADR-0099 (a)), `/wal/.system-identifier` stays in `/wal`. The cluster does not change in a gap, so its identifier stays the same (ADR-0103 (s)).
-- An existing installation has segments and no file. It writes the file once, before `walarchive` first starts with the image of the first release with the guard. Step 5 of 7.10 gives this step.
+- An existing installation has segments and no file. It writes the file once, before `walarchive` first starts with the image of the first release with the guard. Step 2 of 7.10 gives this step. It runs before the replacement of `db` (ADR-0104 (a)).
 - Then the operator starts `walarchive`. The operator runs the stream check, the base backup, the segment switch, the flush check, and the WAL check of ADR-0099 (a).
 - The operator deletes the old `pgdata` volume and that target directory only after three conditions. A `restore-test` passed on a set of the new cluster. The flush check and the WAL check of ADR-0099 (a) passed on the new WAL line.
 - The third condition is an age of the switch above `volume_switch.keep_min_age`. No script and no retention deletes them (ADR-0103 (t)).
@@ -792,9 +792,14 @@ Disk space policy (Assumption A24):
 ### 7.10 Upgrade procedure
 
 1. Read the release notes. Note whether the migration follows the expand pattern.
-2. Load the new image files with `docker load`. Compare the SHA-256 of each file before the load and the image ID after it (ADR-0064 (j), (k)). Do not stop the running stack yet. Set `RECIPE_VERSION` in `deploy/.env` to the new release tag.
+2. Load the new image files with `docker load`. Compare the SHA-256 of each file before the load and the image ID after it (ADR-0064 (j), (k)). Do not stop the running stack yet.
    - `deploy/.env` must hold `RECIPE_PGDATA_VOLUME` before the first Compose command. The first upgrade to a release with ADR-0103 sets this value (ADR-0103 (d)).
    - Then compare the name of `pgdata` in `docker compose config` with the volume of `/var/lib/postgresql/data` in `docker inspect` of the running `db` container. A difference stops the upgrade.
+   - The first release with the guard of 7.7 then needs one step. The step runs only when `/wal/.system-identifier` is missing. It runs before command 1 of step 3 replaces `db` (ADR-0104 (a)).
+   - Read the system identifier in `db`. Pipe it into a new container of the previous image: `docker compose run --rm --no-deps -T --entrypoint sh walarchive`. Never use `docker compose exec` into the old `walarchive` (ADR-0104 (b)).
+   - That container compares the value with the system identifier in the page header of the newest complete segment in `/wal`. A difference stops the step, and the step writes no file. Else the container writes `/wal/.system-identifier`. The release notes name this step (ADR-0103 (s)).
+   - Without a complete segment in `/wal`, the step writes no file. Then run `SELECT pg_switch_wal()` in `db`, wait for a complete segment, and run the step again (ADR-0104 (d)).
+   - Then set `RECIPE_VERSION` in `deploy/.env` to the new release tag. The step therefore runs with the previous tag.
 3. The old image checks the newest set with `docker compose exec backup restore-test`. Then five commands run in this order (ADR-0097 (h), (h4)):
    1. `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`. Wait for exit code 0. In the first release with the mount of ADR-0103 (l), this command replaces `db` once on the same volume. `app` loses its connections for the start time of `db` (ADR-0103 (z)).
    2. `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time, and that dump fails in the same UTC minute (ADR-0082). Wait for exit code 0 of `migrate`.
@@ -808,8 +813,7 @@ Disk space policy (Assumption A24):
    2. `docker compose exec backup backup-now`. The new `_now` set holds the new schema.
    3. `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
    - If the test names a `_premigrate` set of the same UTC minute, run commands 2 and 3 again in a later minute.
-   - The first release with the guard of 7.7 needs one step before command 1. The step runs only when `/wal/.system-identifier` is missing. Read the system identifier in `db`. Pipe it into the old `walarchive` container.
-   - That container compares the value with the system identifier in the page header of the newest complete segment in `/wal`. A difference stops the step, and the step writes no file. Else the container writes `/wal/.system-identifier`. The release notes name this step (ADR-0103 (s)).
+   - In the first release with the guard of 7.7, the new `walarchive` of command 1 needs the file of step 2. Without the file, it refuses to start (ADR-0104 (a)).
 6. Rollback: `RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app`. Without `--no-deps`, the previous `migrate` runs against the newer schema and fails, and `app` does not start (ADR-0082 (b)). `deploy/.env` keeps the new tag, because the schema stays newer (ADR-0083 (c)).
    - If the migration did not follow the expand pattern, restore the `_premigrate` dump into a new volume in the order of 7.7, "Restore into production". Set the previous tag in `deploy/.env` before `restore-volume` runs (ADR-0103 (b), (q)).
    - After the switch and the role passwords, `walarchive` starts with the previous tag of `deploy/.env`, and the new WAL line of 7.7 runs. Both happen before `app` starts (ADR-0103 (q), (s)).

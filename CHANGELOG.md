@@ -4,15 +4,27 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- The pgtools command `restore-volume` (ADR-0103). It restores a dump set into a new volume.
+- The runbook sections "Restore into production" and "Switch back" (ADR-0103).
+- The CI job `restore-switch`, which tests the volume switch (ADR-0103).
+
 ### Changed
 
 - Upgrade notes for an existing installation of 0.1.0 (ADR-0103). The section "Upgrade" of `docs/ops/runbook.md` gives the steps. The release holds no migration file, so the schema of `db` does not change.
   - Name check: set `RECIPE_PGDATA_VOLUME` in `deploy/.env` to the volume of the running `db`, normally `recipe-editor_pgdata`. Compare the name of `pgdata` in `docker compose config` with the output of `docker inspect` of `db`. A difference stops the upgrade (step 2 of the section "Upgrade").
-  - Step of the segment check: the new `walarchive` refuses to start when `/wal` holds segments and no file `/wal/.system-identifier`. Run the step in the old `walarchive` container before the new one starts. It compares the identifier of `db` with the newest complete segment and writes the file once.
+  - Step of the segment check: the new `walarchive` refuses to start when `/wal` holds segments and no file `/wal/.system-identifier`. Run the step in step 2 of the section "Upgrade", before `backup-premigrate` replaces `db` (ADR-0104). Run it in a new container of the previous image with `docker compose run --rm --no-deps -T --entrypoint sh walarchive`. Never use `docker compose exec` into the old `walarchive`. The step compares the identifier of `db` with the newest complete segment and writes the file once.
   - One replacement of `db`: `docker compose up -d backup-premigrate` replaces `db` once on the same volume. `app` loses its connections for the start time of `db`.
   - Never run `docker compose down -v`.
   - Rule of the 0.1.0 `compose.yaml`: a rollback to 0.1.0 is safe only while `RECIPE_PGDATA_VOLUME` is `recipe-editor_pgdata` and no switch ran. The file `/wal/.system-identifier` stays, and the old scripts ignore it.
   - After a switch, never use the 0.1.0 `compose.yaml`. It starts `db` on the old cluster and serves old data without an error. After the delete of the old volume, it makes an empty cluster. The 0.1.0 `walarchive` has no guard and streams another system into `/wal`.
+- The runbook sections "Rollback" and "Major upgrade" use the volume switch of ADR-0103 instead of a restore into `db`.
+- The delete rule of ADR-0103 (t) replaces the rule to never delete `pgdata`.
+
+### Fixed
+
+- The image `recipe-pgtools` creates the mount point `/run/pgpass` with the mode 1777 (ADR-0104). In 0.1.0, `walarchive` and `backup` can restart in a loop after a restart of the container. Each start then writes `mktemp: failed to create directory via template '/run/pgpass/run.XXXXXX': Permission denied`.
 
 ## [0.1.0] - 2026-10-26
 

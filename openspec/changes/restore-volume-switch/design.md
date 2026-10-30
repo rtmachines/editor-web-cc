@@ -106,19 +106,21 @@ Current state of the code (branch `docs/restore-volume-switch`, commit `cdf925c`
 
 ### D8. Step for an existing installation
 
-The first start of the new `walarchive` image finds segments and no file, so it refuses to start. ADR-0103 (s) and `reliability.md` 7.10 step 5 therefore give one step before command 1 of that step. The step runs only when `/wal/.system-identifier` is missing. The release notes and the runbook section "Upgrade" use this form:
+The first start of the new `walarchive` image finds segments and no file, so it refuses to start. ADR-0103 (s), ADR-0104, and `reliability.md` 7.10 step 2 therefore give one step. The step runs before command 1 of step 3 replaces `db` (ADR-0104 (a)). The step runs only when `/wal/.system-identifier` is missing. The release notes and the runbook section "Upgrade" use this form:
 
 1. Read `SELECT system_identifier FROM pg_control_system()` in `db` as `postgres`.
-2. Pipe the value into the old `walarchive` container.
+2. Pipe the value into a new container of the previous image: `docker compose run --rm --no-deps -T --entrypoint sh walarchive`. Never use `docker compose exec` into the old `walarchive` container (ADR-0104 (b)).
 3. That container finds the newest complete segment in `/wal` by the segment grammar, with `LC_ALL=C`. It reads `xlp_sysid` from the long page header of the first page: 8 bytes at offset 24, little-endian.
 4. A difference between the two values stops the step with one `ERROR` line. The step then writes no file.
 5. Else the container writes `/wal/.system-identifier` with `umask 077`, a temp name, and `ln -T`.
 
 The step checks the value and does not trust the volume name. A wrong volume name at the upgrade gives `db` the identifier of another cluster, and step 4 then stops (ADR-0103 (d), (s)).
 
-When the old `walarchive` container is already gone, the step runs in `docker compose run --rm --no-deps --entrypoint sh walarchive` with the previous tag in `deploy/.env`. Steps 3 to 5 stay the same.
+`deploy/.env` still holds the previous tag in step 2 of `reliability.md` 7.10. The step does not depend on the state of the old `walarchive` container. After the replacement of `db`, the old container of 0.1.0 can restart in a loop, because its image has no mount point `/run/pgpass` (ADR-0104). The `Dockerfile` of `recipe-pgtools` now creates `/run/pgpass` with the mode 1777 before `USER 999:999`.
 
-The CI job `upgrade` runs the same step when the file is missing. A previous release with the guard already has the file, so the job then skips the step.
+Without a complete segment in `/wal`, the step writes no file. The operator runs `SELECT pg_switch_wal()` in `db`, waits for a complete segment, and runs the step again (ADR-0104 (d)).
+
+The CI job `upgrade` runs the same step in the same form before `backup-premigrate`, with the previous tag. Before the step, it runs `SELECT pg_switch_wal()` and waits for a complete segment while the old `walarchive` streams. A previous release with the guard already has the file, so the job then skips the step (ADR-0104 (e)).
 
 `reliability.md` 7.10 step 2 sets `RECIPE_PGDATA_VOLUME` before the first Compose command of the upgrade. Then it compares the name of `pgdata` in `docker compose config` with the volume that `docker inspect` of the running `db` shows for `/var/lib/postgresql/data`. A difference stops the upgrade (ADR-0103 (d)).
 
@@ -146,7 +148,7 @@ The CI job `upgrade` runs the same step when the file is missing. A previous rel
 
 - The sections "Restore into production", "Rollback", and "Major upgrade" get the steps of ADR-0103 (b), (f), (g), (q), and (s), with commands. Each first line that says "incomplete" goes away.
 - "Host preparation" creates the first volume. "Create the environment file" names nine values. "Change a setting" names nine values. "A gap in the WAL stream" keeps `/wal/.system-identifier` in place (ADR-0103 (s)). "Low disk space" and "Read-only mode" read the volume name from `.env` and hold no literal `recipe-editor_pgdata`.
-- "Upgrade" gets the name step and its check in step 2. It also gets the one replacement of `db` in step 3 command 1, and D8 before step 5 command 1.
+- "Upgrade" gets the name step and its check in step 2. It also gets D8 in step 2 and the one replacement of `db` in step 3 command 1 (ADR-0104 (a)).
 - "Rollback" gets the rule of the migration plan, step 4: never use the 0.1.0 `compose.yaml` after a switch.
 - `README.md` and the dev-stack line of `CLAUDE.md` add `docker volume create "$RECIPE_PGDATA_VOLUME"` before the first `up`.
 - The runbook follows ADR-0103 (t) for the delete of an old `pgdata` volume. "Destructive commands" replaces the line "Never run `docker volume rm` on `pgdata`" with the delete rule of ADR-0103 (t). "An older volume" replaces the line "The runbook never deletes `pgdata`" with a link to that rule.
@@ -168,7 +170,7 @@ No task runs on Codex now. Every task except a `[mechanical]` task runs on a Son
 
 ## Migration Plan
 
-1. The release note names four manual steps of an existing installation. Set `RECIPE_PGDATA_VOLUME` and check it in step 2 of `reliability.md` 7.10. Run the step of D8 before the new `walarchive` starts. Keep `docker compose down -v` forbidden. Expect one replacement of `db` in step 3 command 1.
+1. The release note names four manual steps of an existing installation. Set `RECIPE_PGDATA_VOLUME` and check it in step 2 of `reliability.md` 7.10. Run the step of D8 before the replacement of `db` in step 3 command 1 (ADR-0104 (a)). Keep `docker compose down -v` forbidden. Expect one replacement of `db` in step 3 command 1.
 2. The release holds no migration file. The schema of `db` does not change.
 3. A rollback of this release to 0.1.0 is safe only while `RECIPE_PGDATA_VOLUME` is `recipe-editor_pgdata` and no switch ran. The 0.1.0 `compose.yaml` mounts the Compose volume `recipe-editor_pgdata`. The file `/wal/.system-identifier` stays, and the old scripts ignore it.
 4. After a switch, never use the 0.1.0 `compose.yaml`. It starts `db` on the old cluster and serves old data without an error. After the delete of the old volume, it makes an empty cluster. The 0.1.0 `walarchive` has no guard and streams another system into `/wal`. The release notes and the runbook section "Rollback" state this rule.

@@ -148,6 +148,36 @@ case $cmd in
     echo "ARGV psql-identify $*" >>"$STUB_LOG"
     if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ]; then echo "CALL psql pgpass present" >>"$STUB_LOG"; fi
     [ -z "${STUB_IDENTIFY_FAIL:-}" ] || exit 2
+    # The pgpass lookup of libpq. The first four fields must match host, port, dbname, and user.
+    # A missing dbname takes the user name. Without a match, libpq sends no password.
+    host="" port="" user="" dbname=""
+    for a in "$@"; do
+      case $a in --dbname=*) conninfo=${a#--dbname=} ;; *) continue ;; esac
+      for pair in $conninfo; do
+        case $pair in
+          host=*) host=${pair#host=} ;;
+          port=*) port=${pair#port=} ;;
+          user=*) user=${pair#user=} ;;
+          dbname=*) dbname=${pair#dbname=} ;;
+        esac
+      done
+    done
+    [ -n "$dbname" ] || dbname=$user
+    matched=0
+    if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ]; then
+      while IFS=: read -r f_host f_port f_db f_user _; do
+        if [[ ($f_host == '*' || $f_host == "$host") && ($f_port == '*' || $f_port == "$port") &&
+          ($f_db == '*' || $f_db == "$dbname") && ($f_user == '*' || $f_user == "$user") ]]; then
+          matched=1
+          break
+        fi
+      done <"$PGPASSFILE"
+    fi
+    if [ "$matched" -ne 1 ]; then
+      echo 'psql: error: fe_sendauth: no password supplied' >&2
+      exit 2
+    fi
+    echo "CALL psql pgpass match" >>"$STUB_LOG"
     echo "${STUB_IDENTIFY_OUT:-${STUB_SYSID:-7354987216845319027}|1|0/3000060|}"
     exit 0
     ;;

@@ -17,8 +17,7 @@ static_base_rules() {
 new_base_case() {
   local i
   wal_new_case "$1"
-  printf '%s
-' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   for ((i = 1; i <= $2; i++)); do
     make_base $((i * 10)) $((i * 2))
   done
@@ -113,8 +112,7 @@ case_wal_base_few() {
 # 14, and no segment from 14 up is deleted. A cutoff from the oldest name would delete segments 14 to 29.
 case_wal_base_high_start() {
   wal_new_case base-high-start
-  printf '%s
-' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   make_base 20 30
   make_base 10 20
   make_segments 1 30
@@ -134,8 +132,7 @@ case_wal_base_high_start() {
 # segment sets the cutoff, and the cutoff keeps its timeline text.
 case_wal_base_timeline_ignored() {
   wal_new_case base-timeline
-  printf '%s
-' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   make_base 10 9
   printf 'START WAL LOCATION: 0/3000028 (file 000000020000000000000003)\n' >"$W/base/$LAST_BASE/backup_label"
   make_segments 1 30
@@ -333,8 +330,7 @@ case_wal_base_guard_no_file() {
 # Scenario "Another system".
 case_wal_base_guard_other_system() {
   guard_base_case base-guard-other 2
-  printf '%s
-' "$OTHER_SYSID" >"$W/$ID_FILE_NAME"
+  printf '%s\n' "$OTHER_SYSID" >"$W/$ID_FILE_NAME"
   guard_snapshot
   wal_run -- basebackup-once
   expect_base_guard_refused "base guard, another system" "$MSG_OTHER"
@@ -347,14 +343,10 @@ case_wal_base_guard_malformed() {
   for label in letters empty cr two-lines; do
     guard_base_case "base-guard-malformed-$label" 2
     case $label in
-      letters) printf 'abc
-' >"$W/$ID_FILE_NAME" ;;
+      letters) printf 'abc\n' >"$W/$ID_FILE_NAME" ;;
       empty) : >"$W/$ID_FILE_NAME" ;;
-      cr) printf '%s
-' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
-      two-lines) printf '%s
-%s
-' "$WAL_SYSID" "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+      cr) printf '%s\r\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+      two-lines) printf '%s\n%s\n' "$WAL_SYSID" "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
     esac
     guard_snapshot
     wal_run -- basebackup-once
@@ -365,8 +357,7 @@ case_wal_base_guard_malformed() {
 # The server answers nothing. The run stops before pg_basebackup.
 case_wal_base_guard_no_server() {
   guard_base_case base-guard-noserver 2
-  printf '%s
-' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   guard_snapshot
   wal_run STUB_IDENTIFY_FAIL=1 -- basebackup-once
   expect_base_guard_refused "base guard, no server answer" "$MSG_NO_SERVER"
@@ -375,8 +366,7 @@ case_wal_base_guard_no_server() {
 # The file names the cluster of the server. The run goes on, and the file stays as it was.
 case_wal_base_guard_match() {
   new_base_case base-guard-match 2
-  printf '%s
-' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   wal_run STUB_START_SEG=14 -- basebackup-once
   expect_eq "base guard, same system: exit code" "$RC" "0"
   expect_eq "base guard, same system: no ERROR line" "$(error_count "$CASE/out")" "0"
@@ -395,6 +385,7 @@ case_wal_base_guard_first_start() {
   expect_eq "base guard, first start: file content" "$(id_file_content)" "$WAL_SYSID"
   expect_eq "base guard, first start: file mode" "$(stat -c %a "$W/$ID_FILE_NAME" 2>/dev/null)" "600"
   expect_ok "base guard, first start: base backup published" base_exists "base_$WTS"
+  expect_ok "base guard, first start: the pgpass line matches the connection" grep -qF 'CALL psql pgpass match' "$CASE/stub/log"
 }
 
 case_wal_base_parallel() {

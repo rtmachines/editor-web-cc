@@ -70,6 +70,7 @@ trap cleanup EXIT
 make_wal_stubs
 case_wal_static_rules
 case_wal_static_entry
+case_wal_pgpass_mount_point
 static_base_rules
 static_pitr_rules
 case_wal_missing_marker

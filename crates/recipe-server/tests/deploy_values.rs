@@ -106,6 +106,19 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
 }
 
 #[test]
+fn pgtools_creates_the_pgpass_mount_point_before_user() {
+    // runc gives a tmpfs the mode of an existing mount point. Without the directory in the image,
+    // a restart finds the mount point of the first start with mode 0755 and the owner root.
+    let dockerfile = include_str!("../../../deploy/pgtools/Dockerfile");
+    let lines = lines::code_lines(dockerfile);
+    let position = |instruction| lines.iter().position(|line| line.trim() == instruction);
+    let directory = position("RUN mkdir -p -m 1777 /run/pgpass")
+        .expect("pgtools Dockerfile must create the mount point /run/pgpass with mode 1777");
+    let user = position("USER 999:999").expect("pgtools Dockerfile must set USER 999:999");
+    assert!(directory < user, "root must create /run/pgpass before USER");
+}
+
+#[test]
 fn deploy_values_ci_same_filesystem_drops_all_capabilities() {
     let script = include_str!("../../../deploy/ci/same-filesystem.sh");
     let script = script.replace("\\\r\n", " ").replace("\\\n", " ");

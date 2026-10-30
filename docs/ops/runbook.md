@@ -36,6 +36,7 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
   - [Rollback](#rollback)
+  - [Switch back](#switch-back)
   - [Keep the images for a rollback](#keep-the-images-for-a-rollback)
   - [Concurrent index on an audit object](#concurrent-index-on-an-audit-object)
 - [Major upgrade](#major-upgrade)
@@ -359,7 +360,7 @@ Read the address in the output of `docker compose config` at the service `proxy`
 ## Destructive commands
 
 - Never run `docker compose down -v`.
-- Never run `docker volume rm` on `pgdata`.
+- The volume that `RECIPE_PGDATA_VOLUME` names is never a target of `docker volume rm`. Delete an old `pgdata` volume only when the three conditions of ADR-0103 (t) hold. First, a `restore-test` passed on a set of the new cluster. Second, the flush check and the WAL check passed on the new WAL line. Third, the switch is older than `volume_switch.keep_min_age` (`reliability.md` 7.11). No script and no retention deletes the volume.
 - Each delete step of this page names what it deletes.
 - Each delete step of a set, a file, or a directory of the backup disks follows a passed restore test.
 - The section "Subnet change" runs `docker compose down` without `-v`. It deletes no volume.
@@ -586,33 +587,85 @@ The check of step 3 shows one instant, so the time of step 1 keeps a scheduled r
 
 ### Restore into production
 
-ADR-0103 replaces the restore steps of this procedure. The operations change of ADR-0103 gives the new steps. Until then, do not run the steps that restore into `db`. See [Known gaps](#known-gaps).
+The restore writes into a new volume and never into the volume of the running `db` (ADR-0103 (a)).
+The command `restore-volume` fills the new volume while `db` runs on the old volume.
+Then the switch makes the new volume the volume of `db` (ADR-0103 (b)). The old volume stays unchanged.
 
-The restore goes into a new `db` volume (ADR-0103 (a)).
-The old volume `pgdata` stays on the host.
-ADR-0103 gives the order: the command `restore-volume` fills the new volume before the switch. That command and the switch do not exist yet.
+Use these placeholders:
 
-Steps 4 and 5 show the commands that `restore-volume` will run. Do not run them on `db`.
-`<stamp>` is the part of the dump file name between `recipe_` and `.dump`, for example `<YYYYMMDD_HHMM>_now`.
+- `<stamp>` is the part of the dump file name between `recipe_` and `.dump`, for example `<YYYYMMDD_HHMM>_now`.
+- `<new volume>` is the name that step 3 prints. `<old volume>` is the value of `RECIPE_PGDATA_VOLUME` in `.env` before step 5.
+- `<identifier>` is the field `system_identifier` that step 4 prints. `<old identifier>` is the number that step 5 writes into the change log.
+- `<tag>` is the tag of the image of the old cluster. Normally it is the value of `RECIPE_VERSION` in `.env`.
 
 Warning: a restore of a dump loses every change and audit entry after the dump time. The loss is up to 24 hours.
-Keep `pgdata` and the WAL archive disk unchanged.
+Delete no volume and no file of the WAL archive during the procedure. ADR-0103 (t) gives the delete rule.
 A recovery from the WAL archive gives a recovery point of minutes (`reliability.md` 7.7, ADR-0068 (l), R31).
 This page gives no steps for that recovery. See "Known gaps".
 
-1. Run the restore test. Continue only after it passes. The test checks the newest complete set.
-2. Run `docker compose stop app`.
-3. Read the name of the set in the line `restore test passed`. Restore that set.
-4. Restore the globals file. The file gives one known error, the existing role `postgres`:
+If the set is not the newest set, steps 1 to 8 of `restore-volume` are the test of that set (ADR-0103 (b)).
+The login check of step 8 of `restore-test` then has no equal before the switch.
+
+1. Run the restore test as in "Run the restore test". Continue only after it passes. The test checks the newest complete set.
+   Read the name of the set in the line `restore test passed`. Restore that set.
+2. Stop `app` and `backup`. No write after this point reaches the restored cluster, and no retention deletes the set:
 
 ```bash
-docker compose exec -T -u postgres db psql --no-psqlrc --no-password --dbname postgres < "$RECIPE_BACKUP_DIR/globals_<stamp>.sql"
+docker compose stop app backup
 ```
 
-5. Restore the dump. Any `ERROR` line stops the restore:
+3. Create the new volume. The command prints its name, which has the form `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>` in UTC (ADR-0103 (e)):
 
 ```bash
-docker compose exec -T -u postgres db pg_restore --exit-on-error --no-password --create --dbname postgres < "$RECIPE_BACKUP_DIR/recipe_<stamp>.dump"
+docker volume create "recipe-editor_pgdata_$(date -u +%Y%m%d_%H%M%S)"
+```
+
+4. Fill the new volume. The container has no network and no secret. `db` keeps running on the old volume:
+
+```bash
+docker compose run --rm --no-deps -T -v "<new volume>:/var/lib/postgresql/data" restore-volume <stamp>
+```
+
+   The last output line holds `restore volume completed`, the name of the set, and the field `system_identifier`. Note that field.
+   If the command exits with a code other than 0, read its `ERROR` line. The new volume holds no production data and `.env` does not name it.
+   Delete the new volume with `docker volume rm <new volume>`, fix the cause, and start again at step 3 (ADR-0103 (i)).
+   To end the attempt, start `app` and `backup` as in "Stop, start, and restart".
+
+5. Run the switch (ADR-0103 (f)). Never run `docker compose down` or `docker compose start` here:
+   1. Stop the five containers and delete them. The commands delete containers only:
+
+```bash
+docker compose stop proxy app backup walarchive db
+docker compose rm -f proxy app backup walarchive db
+```
+
+   2. Read the state of the old volume without a network. The line `Database cluster state` must show `shut down`:
+
+```bash
+docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C -v "<old volume>:/var/lib/postgresql/data:ro" --entrypoint pg_controldata "recipe-pgtools:<tag>" /var/lib/postgresql/data
+```
+
+   3. If the state differs, keep the old name in `.env` and run `docker compose up -d --no-deps db`. Then run sub-step 1 and sub-step 2 again.
+   4. Write the old name and the line `Database system identifier` of that output into the change log of the site.
+   5. Write `<new volume>` as the value of `RECIPE_PGDATA_VOLUME` in `.env`. Load the values into the shell again. Do not export them:
+
+```bash
+. ./.env
+```
+
+   6. Print the name of `pgdata`. It must equal `<new volume>`:
+
+```bash
+docker compose config | awk '/^volumes:/{v=1;next} /^[^ ]/{v=0} v&&/^  pgdata:/{p=1;next} v&&/^  [^ ]/{p=0} p&&/^    name:/{print $2}'
+```
+
+   7. Run the command of sub-step 2 again with `<new volume>`. The state must be `shut down`. The identifier must equal `<identifier>`.
+      Else stop and delete no volume. Run the [Switch back](#switch-back) of ADR-0103 (g) at once.
+   8. Start `db`. Run `docker compose ps db` until `db` shows `healthy`. Then check that `db` mounts the new volume:
+
+```bash
+docker compose up -d --no-deps db
+docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$(docker ps -q --filter label=com.docker.compose.project=recipe-editor --filter label=com.docker.compose.service=db)"
 ```
 
 6. Set the password of each login role from its secret file (ADR-0033). Never type a password on a command line:
@@ -635,6 +688,7 @@ ALTER ROLE recipe_replicator PASSWORD :'replicator_password';
 SQL
 ```
 
+Until this step, no role has a known password, so no password login succeeds (ADR-0103 (k)).
 Psql reads each secret file inside `db`, so no password reaches a command line.
 The setting `log_min_duration_statement = -1` stops the slow-statement line from holding a password (`reliability.md` 3.4).
 Count the lines of the log of `db` that name a role next to `PASSWORD`. The count prints no log line:
@@ -645,18 +699,68 @@ docker compose logs db | grep -c -E 'ROLE (postgres|recipe_[a-z]+) PASSWORD'
 
 The count must be 0. A count above 0 means a password may be in the log.
 
-7. Truncate the tables `session` and `login_attempt`:
+7. Start the new WAL line before `app` (ADR-0103 (r), (s)). Run the sub-steps in one shell, because they share the variable `target`:
+   1. Create the target directory. The command fails on an existing name:
+
+```bash
+target="${RECIPE_WALARCHIVE_DIR%/}.moved-$(date -u +%Y%m%d_%H%M%S)"
+mkdir -m 0700 -- "$target"
+```
+
+   2. Check that both paths show the same number, as in step 4 of "A gap in the WAL stream". If they differ, stop before any move:
+
+```bash
+stat -c %d "$RECIPE_WALARCHIVE_DIR" "$target"
+```
+
+   3. Write the line `Database system identifier` of the old cluster into the file `old-system-identifier`:
+
+```bash
+printf '%s\n' 'Database system identifier: <old identifier>' > "$target/old-system-identifier"
+```
+
+   4. Move the segment files, the `.partial` file, and the file `.system-identifier`:
+
+```bash
+find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]???????????????????????' -o -name '[0-9A-F]???????????????????????.partial' -o -name '.system-identifier' \) -exec mv -t "$target" -- {} +
+```
+
+   5. Move each base backup of the old cluster into the directory `base` of the target:
+
+```bash
+mkdir -m 0700 -- "$target/base"
+find "$RECIPE_WALARCHIVE_DIR/base" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/base_[0-9]{8}_[0-9]{6}' -exec mv -t "$target/base" -- {} +
+```
+
+   6. Check that no segment file, no base backup, and no file `.system-identifier` remain:
+
+```bash
+ls -A "$RECIPE_WALARCHIVE_DIR" "$RECIPE_WALARCHIVE_DIR/base"
+```
+
+   7. Run `docker compose up -d --no-deps walarchive`. At its start, `walarchive` writes the file `.system-identifier` of the new cluster.
+   8. Run steps 9 to 13 of "A gap in the WAL stream". Take no base backup before the stream check passes.
+
+   The marker file, `.lock`, `.pitr-scratch`, and the directory `base` stay in the archive directory.
+   Do not delete the target directory. ADR-0103 (t) gives the delete rule.
+
+8. Truncate the tables `session` and `login_attempt`. Then re-apply the user changes:
+   1. Truncate the tables:
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_attempt"
 ```
 
-8. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
+   2. Re-apply each user deactivation and password reset recorded after the dump time. Use the off-site audit copy, if one exists.
+
 9. Start `app` after a record of the restored audit time:
    1. Record the value of `audit.last_check_at` with the `app_setting` command of the first place below step 10.
    2. If the command prints no row, record "missing".
    3. Record the highest `id` of `security_event` with the `security_event` command below step 10.
    4. Run `docker compose up -d --no-deps app`. After a rollback, use "Start app after a rollback".
+   5. Run `docker compose up -d --no-deps proxy backup`.
+   6. Check with the `docker inspect` command of step 5 that `app` and `backup` mount the new volume. Use the service names `app` and `backup`.
+   7. Wait until the alert `replication` is inactive (step 14 of "A gap in the WAL stream").
 10. Check the audit chain. Wait for the next completed run of the job `audit_chain_check`. Run no command for it.
 
 The section "Copy the backups off site" describes the off-site audit copy of step 8.
@@ -724,7 +828,7 @@ A rollback needs the images of the previous release. See the section "Keep the i
 ### Upgrade
 
 1. Read the release notes. Note whether the migration follows the expand pattern. Note the line "manual superuser step".
-2. Do the name check below before any other Compose command. Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
+2. Do the name check below before any other Compose command. Then do the segment check below. Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
 3. Run `docker compose exec backup restore-test` with the old image. Continue only after it passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.
@@ -765,7 +869,7 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 20. If you used step 7, run `docker compose up -d --force-recreate --no-deps proxy`.
 21. Run the check of the section "Check client_ip of the first login".
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
-23. Do the segment check below. Then run the three commands of the list after it, while the new `app` serves.
+23. Run the three commands of the list below, while the new `app` serves.
 
 Name check of step 2 (ADR-0103 (d)):
 The release needs the value `RECIPE_PGDATA_VOLUME` in `.env`. Without it, every Compose command stops.
@@ -793,33 +897,14 @@ docker compose config | awk '/^volumes:/{v=1;next} /^[^ ]/{v=0} v&&/^  pgdata:/{
 5. Compare the names of steps 1 and 4. If they differ, stop the upgrade and report both names.
 6. After a stop, run no Compose command that starts or replaces a container.
 
-The restore test of step 3 checks the newest complete set of the old schema with the old image (ADR-0083).
-The rollback set of step 8 holds the old guard function. The old image therefore accepts it after a rollback restore (ADR-0097 (h1)).
-
-Only the superuser can replace the guard function (ADR-0069 (p)). The release notes name steps 13 to 17 as a "manual superuser step".
-Run no `backup-now` before step 17 passes.
-The guard step is the one place that replaces the guard function. The section "An older volume" uses this place too.
-
-Never run two `app` containers at the same time (ADR-0096).
-The old `app` has no guard lock of the last Administrator, so the two versions do not exclude each other.
-Step 18 replaces the one container of `app`.
-
-The old `app` of step 12 keeps running on the old schema only when the migration follows the expand pattern.
-A release with two or more migration files can fail after the first file. Then no image matches the schema.
-Choose one of two actions (ADR-0083). The first is a forward fix. The second is a restore of the `_premigrate` dump with the second list of the section "Rollback".
-
-Recovery after a failure between two steps (ADR-0097 (h2)):
-
-- Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop.
-- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old.
-- A step from 13 to 17 fails: the schema is new and the guard function is old. Run steps 13 to 17 again. Run no `backup-now` until step 17 passes.
-- A step of the segment check or of the next list fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
-
-Segment check of step 23 (ADR-0103 (s)):
+Segment check of step 2 (ADR-0103 (s), ADR-0104):
 The new `walarchive` refuses to start when `/wal` holds a segment and the file `/wal/.system-identifier` is missing.
-An installation of 0.1.0 is in this state. Run the check once, before command 1 of the next list.
-The check runs in the old `walarchive` container, which still runs. It runs only when the file is missing.
-Run all steps in one shell, because steps 2 and 3 use the variable `step`.
+An installation of 0.1.0 is in this state. Run the check once in step 2, after the name check.
+The check must run before step 8 replaces `db`. In step 2, `.env` still holds the previous tag.
+The check runs in a new container of the previous image. Never use `docker compose exec` into the old `walarchive` container.
+The old `walarchive` of 0.1.0 can restart in a loop after a restart of `db` or of the host. The check does not need that container.
+The check runs only when the file is missing.
+Run all steps in one shell, because step 2 uses the variable `step`.
 
 1. Store the step in a shell variable:
 
@@ -854,25 +939,18 @@ STEP
 )
 ```
 
-2. Read the system identifier in `db` as `postgres`. Pipe it into the old `walarchive` container:
+2. Read the system identifier in `db` as `postgres`. Pipe it into a new container of the previous image:
 
 ```bash
 docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT system_identifier FROM pg_control_system()" \
-  | docker compose exec -T walarchive bash -c "$step"
+  | docker compose run --rm --no-deps -T --entrypoint sh walarchive -c 'exec bash -c "$1"' sh "$step"
 ```
 
-3. If the old `walarchive` container is gone, use a new container of the previous image. Put the previous tag before `docker compose`:
-
-```bash
-docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT system_identifier FROM pg_control_system()" \
-  | RECIPE_VERSION=<previous tag> docker compose run --rm --no-deps -T --entrypoint sh walarchive -c 'exec bash -c "$1"' sh "$step"
-```
-
-4. Read the output of step 2 or 3. It has one of these lines:
+3. Read the output of step 2. It has one of these lines:
    - `The segment check passed.` The step wrote the file.
    - `The segment check does not run.` The file exists, so the step wrote nothing.
-   - An `ERROR` line. The step wrote no file. Stop here and do not start the new `walarchive`.
-5. Check that the file holds the identifier of `db`. Check that both commands print the same number:
+   - An `ERROR` line. The step wrote no file. Stop the upgrade here.
+4. Check that the file holds the identifier of `db`. Check that both commands print the same number:
 
 ```bash
 cat "$RECIPE_WALARCHIVE_DIR/.system-identifier"
@@ -882,7 +960,32 @@ docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT system_ident
 The step compares the identifier of `db` with `xlp_sysid` of the newest complete segment in `/wal`.
 `xlp_sysid` is 8 bytes at offset 24 of the first page, little-endian.
 The step therefore checks the value and does not trust the volume name.
-If the step finds no complete segment, run `SELECT pg_switch_wal()` in `db` as `postgres`. Then run the step again.
+If the step finds no complete segment, run `SELECT pg_switch_wal()` in `db` as `postgres`.
+Wait for a complete segment in `RECIPE_WALARCHIVE_DIR`. Then run step 2 again.
+A new complete segment arrives only while the old `walarchive` streams.
+
+The restore test of step 3 checks the newest complete set of the old schema with the old image (ADR-0083).
+The rollback set of step 8 holds the old guard function. The old image therefore accepts it after a rollback restore (ADR-0097 (h1)).
+
+Only the superuser can replace the guard function (ADR-0069 (p)). The release notes name steps 13 to 17 as a "manual superuser step".
+Run no `backup-now` before step 17 passes.
+The guard step is the one place that replaces the guard function. The section "An older volume" uses this place too.
+
+Never run two `app` containers at the same time (ADR-0096).
+The old `app` has no guard lock of the last Administrator, so the two versions do not exclude each other.
+Step 18 replaces the one container of `app`.
+
+The old `app` of step 12 keeps running on the old schema only when the migration follows the expand pattern.
+A release with two or more migration files can fail after the first file. Then no image matches the schema.
+Choose one of two actions (ADR-0083). The first is a forward fix. The second is a restore of the `_premigrate` dump with the second list of the section "Rollback".
+
+Recovery after a failure between two steps (ADR-0097 (h2)):
+
+- Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop.
+- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old.
+- A step from 13 to 17 fails: the schema is new and the guard function is old. Run steps 13 to 17 again. Run no `backup-now` until step 17 passes.
+- A step of the segment check fails: nothing changed, and the step wrote no file. Read the `ERROR` line. Stop the upgrade, except for the case without a complete segment.
+- A command of the list of step 23 fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
 
 The three commands give the new image of `recipe-pgtools` to `backup` and `walarchive`:
 
@@ -896,8 +999,6 @@ If the restore test of command 3 fails, a rollback does not start by itself (ADR
 Keep the new `app`. Keep every set. Read the `ERROR` line in the output of `restore-test`.
 
 ### Rollback
-
-ADR-0103 replaces the restore steps of the rollback with the `_premigrate` dump. The operations change of ADR-0103 gives the new steps. Until then, do not restore into `db`. See [Known gaps](#known-gaps).
 
 Check first that the images of the previous tag exist (section "Keep the images for a rollback").
 
@@ -917,7 +1018,40 @@ Warning: this restore loses every change and audit entry after the `_premigrate`
 The lost period runs from the `_premigrate` dump to the stop of `app`.
 No test checks the `_premigrate` set. The test before the upgrade checks a set of the same schema (ADR-0083).
 
-The restore goes into a new `db` volume (ADR-0103 (a)). The command `restore-volume` and the switch do not exist yet, so this procedure has no steps. See [Known gaps](#known-gaps).
+The restore goes into a new `db` volume and never into the volume of the running `db` (ADR-0103 (a), (q)).
+It runs `restore-volume` with the previous tag, which is the tag of the schema of the set.
+A rollback restore to the schema of 0.1.0 has no procedure, because the image of 0.1.0 has no `restore-volume` (ADR-0103 (q)).
+
+Use these placeholders in addition to the placeholders of [Restore into production](#restore-into-production):
+
+- `<tag>` is the new tag. It is the value of `RECIPE_VERSION` in `.env` now, and it is the tag of the old cluster.
+- `<stamp>` is the name of the `_premigrate` set, for example `<YYYYMMDD_HHMM>_premigrate`.
+
+1. Stop `app` and `backup`. Then create the new volume. Run steps 2 and 3 of "Restore into production".
+   Skip step 1 of that list. Steps 1 to 8 of `restore-volume` test the `_premigrate` set (ADR-0103 (b)).
+2. Set `RECIPE_VERSION` in `.env` to the previous tag. Load the values into the shell again with `. ./.env`.
+   `walarchive` and `backup` then start with the previous image (ADR-0103 (q)).
+3. Fill the new volume. Run step 4 of "Restore into production" with `<stamp>` of the `_premigrate` set.
+4. Run the switch. Run step 5 of "Restore into production". If its sub-step 7 fails, run the [Switch back](#switch-back) at once.
+5. Set the role passwords. Run step 6 of "Restore into production".
+6. Start the new WAL line. Run step 7 of "Restore into production". `walarchive` starts with the previous tag, before `app` (ADR-0103 (q), (s)).
+7. Truncate `session` and `login_attempt`, and re-apply the user changes. Run step 8 of "Restore into production".
+8. Record the values of sub-steps 1 to 3 of step 9 of "Restore into production". Then start `app`, and then `proxy` and `backup`:
+
+```bash
+docker compose up -d --no-deps app
+docker compose up -d --no-deps proxy backup
+```
+
+9. Run sub-steps 6 and 7 of step 9 of "Restore into production". Then run step 10, the check of the audit chain.
+
+`.env` holds the previous tag, so the first command starts the previous image of `app`. Do not use "Start app after a rollback" here.
+A later upgrade sets a new tag in `.env`.
+
+Warning: never use the `compose.yaml` of 0.1.0 after a switch.
+That file starts `db` on the old cluster and serves old data without an error.
+After the delete of the old volume, that file makes an empty cluster.
+The `walarchive` of 0.1.0 has no guard and streams another system into `/wal`.
 
 #### Start app after a rollback
 
@@ -925,6 +1059,52 @@ After a rollback with the expand pattern, `.env` keeps the new tag. A later comm
 Every command that starts or recreates `app` therefore passes the previous tag in the same way as step 1 of the rollback.
 Put `RECIPE_VERSION=<previous tag>` before `docker compose`. Keep the other options of the command, for example `--force-recreate`.
 This holds until the section "Upgrade" sets a new tag.
+
+### Switch back
+
+The switch back returns `db` to the old volume (ADR-0103 (g)). It uses the steps of the switch with the old name.
+Use it when sub-step 7 of step 5 of "Restore into production" fails. Use it also to return to the old data.
+
+Warning: the switch back loses each write after the switch. The old volume does not change.
+Delete no volume. After a major upgrade, the switch back also needs the old `compose.yaml` and the old images (see "Major upgrade").
+
+Use these placeholders in addition to the placeholders of "Restore into production":
+
+- `<old volume>` and `<old identifier>` are the name and the identifier that the first switch wrote into the change log.
+- `<left volume>` is the value of `RECIPE_PGDATA_VOLUME` in `.env` now. `<left identifier>` is its `system_identifier`.
+- `<tag>` is the tag of the image of the cluster in `<old volume>`. Use the `recipe-pgtools` image of that tag.
+
+1. Stop the five containers and delete them. Run sub-step 1 of step 5 of "Restore into production". Never run `docker compose down`.
+2. Read the identifier of the volume that you leave. The state can differ from `shut down`. Never start `db` on this volume:
+
+```bash
+docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C -v "<left volume>:/var/lib/postgresql/data:ro" --entrypoint pg_controldata "recipe-pgtools:<tag>" /var/lib/postgresql/data
+```
+
+   Write `<left volume>` into the change log. Write the line `Database system identifier` too, if the output holds it.
+3. Write `<old volume>` as the value of `RECIPE_PGDATA_VOLUME` in `.env`. Run sub-steps 5 and 6 of step 5 of "Restore into production".
+   The name that sub-step 6 prints must equal `<old volume>`.
+4. Run the command of sub-step 2 of step 5 of "Restore into production" with `<old volume>`.
+   The state must be `shut down`. The identifier must equal `<old identifier>`.
+5. If the check of step 4 fails, stop. Start no `db` and delete no volume. Keep both volumes and the entry of the change log.
+   The site stays down until you find the cause.
+6. Start `db`. Run sub-step 8 of step 5 of "Restore into production" with `<old volume>`.
+7. Start `walarchive` before `app`. Choose one of two cases:
+   1. If sub-step 4 of step 7 of "Restore into production" did not run, `/wal` still holds the old cluster line. Run this command, then step 9 of "A gap in the WAL stream":
+
+```bash
+docker compose up -d --no-deps walarchive
+```
+
+   2. If that sub-step ran, start the new WAL line again. Run step 7 of "Restore into production" with `<left identifier>` in place of `<old identifier>`.
+8. Start `app`, and then `proxy` and `backup` (ADR-0103 (g)):
+
+```bash
+docker compose up -d --no-deps app
+docker compose up -d --no-deps proxy backup
+```
+
+9. Run sub-step 6 of step 9 of "Restore into production". Then wait until the alert `replication` is inactive.
 
 ### Keep the images for a rollback
 
@@ -987,8 +1167,6 @@ The next migration records the same index with `CREATE INDEX IF NOT EXISTS` (`da
 
 ## Major upgrade
 
-ADR-0103 replaces the restore steps of this procedure. The operations change of ADR-0103 gives the new steps. Until then, do not run the steps that restore into `db`. See [Known gaps](#known-gaps).
-
 A major upgrade of PostgreSQL is a dump and a restore into a new `db` volume.
 The new volume uses the same `initdb` arguments as `compose.yaml`. The project does not use `pg_upgrade` (ADR-0020).
 
@@ -998,10 +1176,47 @@ The new volume uses the same `initdb` arguments as `compose.yaml`. The project d
 4. Check that the line `restore test passed` names the `_now` set of step 2.
 
 The test comes before the switch (`reliability.md` 7.10 step 8).
-ADR-0103 gives the next steps. The command `restore-volume` of the new release fills a new volume with the `_now` set. Then the switch makes the new volume the volume of `db`.
-The command `restore-volume` and the switch do not exist yet. The procedure stops here. See "Known gaps".
-Run `docker compose start app`, so that `app` serves again on the old volume.
-Keep the old volume `pgdata` on the host.
+The command `restore-volume` of the new release then fills a new volume with the `_now` set.
+The switch makes that volume the volume of `db` (ADR-0103 (b), (p)).
+The release that changes the major version holds no migration file (ADR-0103 (p)). Do not run `backup-premigrate` or `migrate`.
+
+Use the placeholders of [Restore into production](#restore-into-production) and these two:
+
+- `<old tag>` is the value of `RECIPE_VERSION` in `.env` before step 7. It is the tag of the old cluster.
+- `<new tag>` is the tag of the new release. It is the tag of the cluster in the new volume.
+
+If a step before step 8 fails, set `<old tag>` in `.env` again. Then run `docker compose start app`, so that `app` serves again on the old volume.
+
+5. Write `<old tag>` into the change log of the site. Keep the old `compose.yaml` and the images of `<old tag>`. The switch back needs them (ADR-0103 (g)).
+6. Do the name check of the section "Upgrade" (ADR-0103 (d)). A difference stops the procedure.
+7. Load the new images as in "Load the images". Do not stop `db`. Step 6 of that section writes `<new tag>` into `.env`.
+8. Fill the new volume and run the switch. Run steps 2 to 5 of "Restore into production".
+   Skip step 1 of that list, because steps 3 and 4 above are the test. Use the `_now` set of step 2 as `<stamp>`.
+   - Step 4 runs `restore-volume` with the `recipe-pgtools` image of `<new tag>`. That image builds on the `db` image of the new major version (ADR-0103 (p)).
+   - In sub-steps 2 and 3 of step 5, `<tag>` is `<old tag>`. In sub-step 7, `<tag>` is `<new tag>`.
+   - Sub-step 8 of step 5 changes the image and the volume of `db` in one replacement (ADR-0103 (p)).
+   - If sub-step 7 fails, run the [Switch back](#switch-back) at once.
+9. Set the role passwords. Run step 6 of "Restore into production".
+10. Start the new WAL line. Run step 7 of "Restore into production". `walarchive` starts with `<new tag>`, before `app` (ADR-0103 (s)).
+    Keep the images of `<old tag>` while the moved files in the target directory exist (ADR-0103 (p)).
+11. Truncate `session` and `login_attempt`, and re-apply the user changes. Run step 8 of "Restore into production".
+12. Record the values of sub-steps 1 to 3 of step 9 of "Restore into production". Then run its sub-steps 4 to 7.
+    `.env` holds `<new tag>`, so `app` starts with the new image. Do not use "Start app after a rollback".
+13. Run step 10 of "Restore into production", the check of the audit chain.
+14. Check `/readyz`, log in, and export one version. Run steps 19 and 22 of "Upgrade".
+15. Run `backup-now` and then `restore-test` on the new cluster. Wait for a UTC minute later than the `_now` set of step 2. The test must pass:
+
+```bash
+docker compose exec backup backup-now
+docker compose exec backup restore-test
+```
+
+The rollback of a major upgrade is the [Switch back](#switch-back) (ADR-0103 (p)).
+A dump of the new major version does not restore into the old one. The switch back loses each write after the switch.
+The old volume stays unchanged.
+
+1. Put the old `compose.yaml` of step 5 back. Set `RECIPE_VERSION` in `.env` to `<old tag>`.
+2. Run the [Switch back](#switch-back). In that section, `<tag>` is `<old tag>`.
 
 ## Key rotation
 
@@ -1504,7 +1719,7 @@ To put the old file back, run the command below. After a reload, run step 9 agai
 docker compose exec -u postgres db sh -c 'cp -p -- "$PGDATA/pg_hba.conf.old" "$PGDATA/pg_hba.conf"'
 ```
 
-The runbook never deletes `pgdata`.
+The runbook deletes no `pgdata` volume. The section [Destructive commands](#destructive-commands) gives the delete rule (ADR-0103 (t)).
 
 ## Read the logs
 
@@ -1792,12 +2007,13 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 | `a child process exited` | The field `child` names `pg_receivewal` or `supercronic`. The field `exit_code` gives its code. | Read the lines above it, for the text of `pg_receivewal`. If `df` shows a full disk, use the section "Low disk space". If the alert `replication` stays active, use the section "A gap in the WAL stream". |
 | `the marker file of the WAL archive disk is missing` | The file `.walarchive-marker` is not in `RECIPE_WALARCHIVE_DIR`. | Run `install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"`. |
 | `cannot read the password file of recipe_replicator` or a message that starts with `the password file of recipe_replicator` | The file `replicator_password` is unreadable, is empty, or has a wrong form. | Check the owner and the mode as in the section "Create the secret files". The file holds one line and no carriage return. |
-| `segments are in the WAL archive and the file .system-identifier is missing` | `RECIPE_WALARCHIVE_DIR` holds a segment file or a `.partial` file and no file `.system-identifier`. An installation of 0.1.0 is in this state until the segment check runs. The container refuses to start. | Run the segment check of step 23 of the section "Upgrade". Do not create the file by hand. If the old container is gone, use its command with the previous image. |
+| `segments are in the WAL archive and the file .system-identifier is missing` | `RECIPE_WALARCHIVE_DIR` holds a segment file or a `.partial` file and no file `.system-identifier`. An installation of 0.1.0 is in this state until the segment check runs. The container refuses to start. | Run the segment check of step 2 of the section "Upgrade". When `.env` holds the new tag, put `RECIPE_VERSION=<previous tag>` before `docker compose run`. Do not create the file by hand. |
 | `the file .system-identifier holds the identifier of another system` | The file names another cluster than the running `db`. The segments may come from that cluster. The fields `file_identifier` and `server_identifier` show both numbers. | Do not edit, move, or delete the file. Run the name check of step 2 of the section "Upgrade". If the names agree, no document gives a further action. |
 | `the file .system-identifier is malformed` | The file is empty, holds a carriage return, holds a character other than a digit, or holds more than one line. | Run `cat -A "$RECIPE_WALARCHIVE_DIR/.system-identifier"`. Do not edit the file by hand. No document gives a further action. |
 | `cannot read the file .system-identifier` | The file is not a regular file, is a link, or user 999 cannot read it. | Run `ls -ln "$RECIPE_WALARCHIVE_DIR/.system-identifier"`. Do not replace the file. No document gives a further action. |
 | `cannot read the system identifier of the server` | The replication connection to `db` failed, or `IDENTIFY_SYSTEM` gave no number. | Run `docker compose ps db`. Read the lines above the message. Check the password file as in the row of `recipe_replicator`. |
 | `cannot write the file .system-identifier` | `walarchive` could not create the temp file or the hard link in `RECIPE_WALARCHIVE_DIR`. The disk may be full, read-only, or without hard links (ADR-0074 (e)). | Use the section "Low disk space". Check the filesystem as in step 1 of the section "Prepare the second disk". |
+| `mktemp: failed to create directory via template '/run/pgpass/run.XXXXXX': Permission denied` | The image `recipe-pgtools` of 0.1.0 has no mount point `/run/pgpass`. After a restart of the container, uid 999 cannot write into the tmpfs. The same fault can stop `backup` of 0.1.0 (ADR-0104). | Step 23 of the section "Upgrade" replaces the container with the image of the fix. The segment check does not need the old container. |
 | `cannot load wal-identity.sh` | The image `recipe-pgtools` lacks the file of the guard. | Compare the image ID with the release notes as in step 5 of the section "Load the images". |
 
 ## Known gaps
@@ -1805,7 +2021,6 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 The documents do not yet close the gaps below. Each bullet gives the workaround of this page, if one exists.
 
 - The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up` (section [Stop and start, or down and up](#stop-and-start-or-down-and-up)). Read the subnets again and write the firewall rules again (section "Check the host firewall").
-- ADR-0103 gives the volume switch, the command `restore-volume`, and the new WAL line after a switch. The operations change of ADR-0103 has not shipped. Until then, the restore, the rollback with the `_premigrate` dump, and the major upgrade stop before the volume switch. No workaround.
 - A restore of a set with the schema of 0.1.0 has no procedure, also the rollback restore of a `_premigrate` set. The image of 0.1.0 has no `restore-volume` (ADR-0103 (h), (q)). The `backup-now` of the upgrade makes the first set that `restore-volume` can restore. No workaround.
 - The code of a dump runs as the superuser of the cluster that `restore-volume` fills, and that cluster becomes production. The checks of ADR-0103 (m) and (o) cannot find each change inside the catalog. The user accepts this residual risk (ADR-0103 (o)). A later ADR may restore `pre-data` as a role that is not a superuser (ADR-0084). No workaround.
 - No document gives the steps to recover production from the WAL archive. The recovery point of minutes (ADR-0020, `reliability.md` 7.7) has no procedure yet. The workaround is a restore of a dump, with a loss of up to 24 hours.

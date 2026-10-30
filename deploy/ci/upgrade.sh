@@ -145,9 +145,9 @@ check_volume_name_mutation() {
   printf 'CI: the name check stopped the upgrade for the wrong volume %s.\n' "$wrong"
 }
 
-# Design D8. This is the step of the operator. It runs in the old walarchive container, which reads the id on stdin.
+# Design D8 and ADR-0104 (b). This is the step of the operator. It runs in a new walarchive container, which reads the id on stdin.
 # The new walarchive refuses old segments when the file is missing. A release with the guard has the file already.
-# The container is the image of the previous release. The step uses only bash, coreutils, and grep.
+# The container uses the image of the previous release. The step uses only bash, coreutils, and grep.
 WAL_IDENTITY_STEP=$(cat <<'STEP'
 set -euo pipefail
 umask 077
@@ -184,23 +184,37 @@ rm -f -- "$temp"
 STEP
 )
 
+# ADR-0104 (e). The host waits at most this many seconds for the old walarchive to close one WAL segment.
+WAL_SEGMENT_WAIT_SECONDS=60
+
 write_wal_identity() {
-  local id
+  local id file=$RECIPE_WALARCHIVE_DIR/.system-identifier attempt names mode=ran
   id=$(db_system_identifier)
-  # Close the current segment, so that a complete segment holds the latest WAL of this cluster.
+  # Close the current segment while the old walarchive streams. The old stream then leaves a complete segment.
   sql -c 'SELECT pg_switch_wal()' >/dev/null
+  # The host user cannot read the directory of the archive. Wait for one complete segment, not a .partial file.
+  for ((attempt = 0; attempt < WAL_SEGMENT_WAIT_SECONDS; attempt++))
+  do
+    names=$(sudo ls -1 -- "$RECIPE_WALARCHIVE_DIR") || fail "cannot list the WAL archive directory"
+    if grep -Eq '^[0-9A-F]{24}$' <<<"$names"
+    then
+      break
+    fi
+    sleep 1
+  done
+  grep -Eq '^[0-9A-F]{24}$' <<<"$names"     || fail "the old walarchive wrote no complete WAL segment within $WAL_SEGMENT_WAIT_SECONDS seconds. Stop and report."
   # The step prints one line. The job checks it against the state of the file before the step.
-  local mode=ran file=$RECIPE_WALARCHIVE_DIR/.system-identifier
   if sudo test -e "$file" || sudo test -L "$file"
   then
     mode=skipped
   fi
-  printf '%s\n' "$id" | compose exec -T walarchive bash -c "$WAL_IDENTITY_STEP" | tee "$CI_STATE/wal-identity.log" \
-    || fail "the segment check of the existing installation failed. Stop and report."
+  # The step runs in a new container with the previous tag. The job exported the new tag before.
+  printf '%s
+' "$id"     | RECIPE_VERSION=ci-previous compose run --rm --no-deps -T --entrypoint sh walarchive -c 'exec bash -c "$1"' sh "$WAL_IDENTITY_STEP"     | tee "$CI_STATE/wal-identity.log"     || fail "the segment check of the existing installation failed. Stop and report."
   upgrade_check wal-identity "$CI_STATE/wal-identity.log" "$mode"
-  [[ $(sudo cat -- "$RECIPE_WALARCHIVE_DIR/.system-identifier") == "$(db_system_identifier)" ]] \
-    || fail "the file .system-identifier does not hold the identifier of db"
-  printf 'CI: the file .system-identifier holds the system identifier of db.\n'
+  [[ $(sudo cat -- "$file") == "$(db_system_identifier)" ]]     || fail "the file .system-identifier does not hold the identifier of db"
+  printf 'CI: the file .system-identifier holds the system identifier of db.
+'
 }
 
 upgrade() {
@@ -217,6 +231,9 @@ upgrade() {
   # Upgrade step 2. Check the volume name before the first Compose command that starts a container of the new stack.
   check_volume_name_mutation
   check_volume_name
+  # ADR-0104 (a), (b), (e). The step runs before the one replacement of db. The old walarchive still streams.
+  # The new walarchive refuses old segments without the file of this step. The step needs no old container.
+  write_wal_identity
   wait_backup_minute
   compose up -d backup-premigrate
   wait_job backup-premigrate
@@ -237,8 +254,6 @@ upgrade() {
   compose exec -T app /usr/local/bin/recipe-server healthcheck --path /readyz
   # Upgrade step 20 does not apply without a plant device.
   check_smoke
-  # The old walarchive still runs. The new one refuses old segments without the file of this step.
-  write_wal_identity
   # Upgrade step 23, commands 1 to 3. Wait for a later minute before backup-now.
   compose up -d --no-deps --wait --wait-timeout 180 backup walarchive
   check_image backup recipe-pgtools:ci-upgrade

@@ -1,6 +1,6 @@
 # ADR-0103: Volume switch, restore target, and WAL line after a switch
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0104 (item (s): the step of the identifier file runs before the replacement of `db`, in a new container of the previous image)
 Date: 2026-10-29
 Deciders: project owner
 
