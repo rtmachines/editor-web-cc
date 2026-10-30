@@ -6,9 +6,9 @@ The application runs 24/7 on one on-premises Docker host. Caddy handles TLS. The
 
 ## Status
 
-This repository holds release 0.1.0. It has the route groups of `docs/architecture/api.md` section 2, the Compose stack of `docs/architecture/reliability.md` section 7, and the backup and the restore. The [changelog](CHANGELOG.md) lists every change.
+This repository holds release 0.2.0. It has the route groups of `docs/architecture/api.md` section 2, the Compose stack of `docs/architecture/reliability.md` section 7, and the backup, the restore, and the volume switch of ADR-0103. The [changelog](CHANGELOG.md) lists every change.
 
-## Known gaps of 0.1.0
+## Known gaps of 0.2.0
 
 - The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
 - Seven tests with `#[cfg(unix)]` ran only in CI on Linux.
