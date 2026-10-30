@@ -1,6 +1,6 @@
 # ADR-0067: Restore test in the backup service
 
-Status: Accepted. Amended by ADR-0076 (name list and trigger lines of the restore test). Amended by ADR-0083 (the restore test in the upgrade and the rollback, the image of the schema). Amended by ADR-0084 (item (k) and the first risk: the code of a generated column in the restore of `pre-data`). Amended by ADR-0095 (f) (the first risk: step 3 runs the globals file before the check of step 4). Amended by ADR-0103 (the steps of the restore test also serve `restore-volume`, item (b): `container.backup_memory` for its container). Amended by ADR-0105 (item (a): in step 3 of `reliability.md` 7.10, `restore-test` runs in a new container of the previous image)
+Status: Accepted. Amended by ADR-0076 (name list and trigger lines of the restore test). Amended by ADR-0083 (the restore test in the upgrade and the rollback, the image of the schema). Amended by ADR-0084 (item (k) and the first risk: the code of a generated column in the restore of `pre-data`). Amended by ADR-0095 (f) (the first risk: step 3 runs the globals file before the check of step 4). Amended by ADR-0103 (the steps of the restore test also serve `restore-volume`, item (b): `container.backup_memory` for its container). Amended by ADR-0105 (item (a): in step 3 of `reliability.md` 7.10, `restore-test` runs in a new container of the previous image). Amended by ADR-0106 (item (b): `container.backup_memory` for the temporary container of `pitr-volume`)
 Date: 2026-10-23
 Deciders: project owner
 

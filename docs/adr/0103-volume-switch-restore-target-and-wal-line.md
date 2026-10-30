@@ -1,6 +1,6 @@
 # ADR-0103: Volume switch, restore target, and WAL line after a switch
 
-Status: Accepted. Amended by ADR-0104 (item (s): the step of the identifier file runs before the replacement of `db`, in a new container). Amended by ADR-0105 (items (d), (f), (g), (i), (m), (o), (p), (q), (s), (z): volume tags, the name check, and the moved rules)
+Status: Accepted. Amended by ADR-0104 (item (s): the step of the identifier file runs before the replacement of `db`, in a new container). Amended by ADR-0105 (items (d), (f), (g), (i), (m), (o), (p), (q), (s), (z): volume tags, the name check, and the moved rules). Amended by ADR-0106 (item (f): the checks of a switch after a recovery. Items (g) and (s): the timeline in the change log, the history files, and the guard. Item (x): the recovery from the WAL archive)
 Date: 2026-10-29
 Deciders: project owner
 

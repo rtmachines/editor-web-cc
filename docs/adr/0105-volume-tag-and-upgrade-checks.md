@@ -1,6 +1,6 @@
 # ADR-0105: Tag of a data volume and the checks of the upgrade
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0106 (item (b): the change log also holds the timeline of each volume)
 Date: 2026-10-30
 Deciders: project owner
 
