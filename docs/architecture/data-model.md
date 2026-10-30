@@ -1546,7 +1546,7 @@ Note: `0007_audit_definer_operators.sql` replaces the body of this function (ADR
 
 ### 5.1 Roles
 
-Roles are cluster-wide. Migrations never create roles. The `db` container creates them once at first start from Docker secrets through `deploy/db/initdb/01-roles.sh`, which runs as the PostgreSQL superuser:
+Roles are cluster-wide. Migrations never create roles. A production cluster gets its roles from one of two sources (ADR-0103 (k)). The first source is `deploy/db/initdb/01-roles.sh` on an empty volume. The second source is the checked globals file of a backup set in `restore-volume` (`reliability.md` 7.7). On an empty volume, the `db` container creates the roles once at first start from Docker secrets through `01-roles.sh`, which runs as the PostgreSQL superuser:
 
 ```sql
 -- deploy/db/initdb/01-roles.sh (SQL body; passwords come from /run/secrets/*)
@@ -1605,7 +1605,7 @@ CREATE EVENT TRIGGER audit_objects_dropped ON sql_drop
     EXECUTE FUNCTION audit_guard.audit_objects_dropped();
 ```
 
-The same script then writes a new `pg_hba.conf` in place of the catch-all line of the image (ADR-0069 (r) to (t)). `COMPOSE_SUBNET` is the subnet of the network `backend`, set in `deploy/.env`. The file holds these lines in this order:
+The same script then writes a new `pg_hba.conf` in place of the catch-all line of the image (ADR-0069 (r) to (t)). One shared file in `deploy/db/` holds the lines and the function that writes them. It also holds the function that prints the two `REVOKE` statements of ADR-0032 above. `01-roles.sh` and `restore-volume` both source it, so no second copy exists (ADR-0103 (l), (m)). `COMPOSE_SUBNET` is the subnet of the network `backend`, set in `deploy/.env`. The file holds these lines in this order:
 
 1. The socket line admits `postgres` only, with the method `peer`. Only a process of the system user `postgres` can log in through the socket.
 2. The `host` lines admit `recipe_migrator`, `recipe_app`, and `recipe_backup` to the database `recipe`. Each line admits only `${COMPOSE_SUBNET}` with `scram-sha-256`.
@@ -1618,6 +1618,8 @@ No role `pg_isready` exists, and `01-roles.sh` never creates one. The probe ends
 `recipe_replicator` reads the Docker secret `replicator_password` (`secrets.replicator_password_file`, `reliability.md` 7.11). It has the `REPLICATION` attribute, no `CONNECT` grant on the database, and no grant on any table. The service `walarchive` uses it for `pg_receivewal` and for the weekly `pg_basebackup`. The `pg_hba.conf` line accepts it only for replication connections from the Compose subnet.
 
 `01-roles.sh` runs only on an empty volume. For an older volume, the runbook gives the grant statements, the new guard function, and the new `pg_hba.conf` as the superuser (ADR-0069 (v)).
+
+A cluster that `restore-volume` fills never runs `01-roles.sh` (ADR-0103 (h) to (n)). The roles, the database `recipe`, and the schema `audit_guard` with its event trigger come from the backup set. The roles are the roles of the set, not of the current script. `reliability.md` 7.7, "Restore into production", gives the `pg_hba.conf`, the `REVOKE` statements, and the passwords of such a cluster.
 
 `recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. The membership exists because PostgreSQL 16 allows `ALTER ... OWNER TO audit_owner` only to a member of `audit_owner`. The migrator does not inherit the privileges of `audit_owner`. `0003_grants.sql` runs every grant on the audit objects first, while `recipe_migrator` still owns them. Then it transfers the ownership. The implicit privileges of the old owner move to the new owner, and `audit_owner` becomes the grantor of the earlier grants. After the transfer, `recipe_migrator` holds no privilege on the audit objects. `0003_grants.sql` does not use `SET ROLE`. A later migration runs `SET ROLE audit_owner` for three purposes only. It creates an object that `audit_owner` owns, or it changes an audit object (section 5.5, ADR-0069 (m)). It can also write the audit rows of a data migration that changes catalog rows (sections 8 and 10). Only a migration file runs `SET ROLE`, and the same file runs `RESET ROLE`.
 

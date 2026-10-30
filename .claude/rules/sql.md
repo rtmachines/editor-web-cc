@@ -28,8 +28,9 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 
 ## Roles and grants (data-model §5)
 
-- Roles come only from `deploy/db/initdb/01-roles.sh`. A migration never creates a role.
+- A production cluster gets its roles only from `deploy/db/initdb/01-roles.sh` on an empty volume, or from the checked globals file of a backup set in `restore-volume` (ADR-0103). A migration never creates a role.
 - A new role statement in `01-roles.sh` needs a form of the role grammar in `deploy/pgtools/lib/globals-grammar.sh` (ADR-0095).
+- Each change of a role attribute or a role membership in `01-roles.sh` ships with an idempotent forward step for existing clusters (ADR-0103 (m)).
 - `recipe_app` gets column-level `UPDATE` grants. Identifier columns, structure columns, and `row_version` get none.
 - `recipe_app` deletes only rows that are not business history. Soft delete covers the rest.
 - A row lock (`FOR UPDATE`, `FOR NO KEY UPDATE`, `FOR SHARE`, `FOR KEY SHARE`) needs an `UPDATE` grant on a column of the table.

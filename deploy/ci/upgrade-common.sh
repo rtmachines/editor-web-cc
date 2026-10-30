@@ -10,7 +10,7 @@ export UPGRADE_PREVIOUS_DIR=$CI_ROOT/previous
 UPGRADE_COMPOSE_DIR=$GITHUB_WORKSPACE
 
 compose() {
-  sudo --preserve-env=COMPOSE_PROJECT_NAME,RECIPE_VERSION,RECIPE_BACKUP_DIR,RECIPE_WALARCHIVE_DIR,RECIPE_SECRETS_DIR,COMPOSE_SUBNET,COMPOSE_IP_RANGE,PROXY_ADDRESS,SITE_ADDRESS,UPGRADE_PREVIOUS_DIR \
+  sudo --preserve-env=COMPOSE_PROJECT_NAME,RECIPE_VERSION,RECIPE_BACKUP_DIR,RECIPE_WALARCHIVE_DIR,RECIPE_SECRETS_DIR,RECIPE_PGDATA_VOLUME,COMPOSE_SUBNET,COMPOSE_IP_RANGE,PROXY_ADDRESS,SITE_ADDRESS,UPGRADE_PREVIOUS_DIR \
     docker compose -p "$COMPOSE_PROJECT_NAME" \
     -f "$UPGRADE_COMPOSE_DIR/deploy/compose.yaml" \
     -f "$UPGRADE_COMPOSE_DIR/deploy/compose.dev.yaml" \
@@ -48,21 +48,6 @@ check_image() {
   actual=$(docker inspect --format '{{.Image}}' "$(container "$1")")
   expected=$(docker image inspect --format '{{.Id}}' "$2")
   [[ $actual == "$expected" ]] || fail "$1 does not use the expected image"
-}
-
-wait_backup_minute() {
-  local deadline=$((SECONDS + 65)) stamp
-  while true
-  do
-    stamp=$(date -u +%Y%m%d_%H%M)
-    if ! sudo test -f "$RECIPE_BACKUP_DIR/recipe_${stamp}_premigrate.dump.sha256" \
-      && ! sudo test -f "$RECIPE_BACKUP_DIR/recipe_${stamp}_now.dump.sha256"
-    then
-      return 0
-    fi
-    (( SECONDS < deadline )) || fail "the backup minute did not advance"
-    sleep 1
-  done
 }
 
 check_restore() {

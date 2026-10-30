@@ -3,6 +3,9 @@
 
 WAL_TIMELINE=00000001
 WAL_LOG_ID=00000000
+# The system identifier that the stub of psql answers, and one other identifier.
+WAL_SYSID=7354987216845319027
+OTHER_SYSID=7354987216845319028
 
 # seg_name <number>: the file name of a WAL segment, 24 upper-case hex characters.
 seg_name() { printf '%s%s%08X' "$WAL_TIMELINE" "$WAL_LOG_ID" "$1"; }
@@ -43,7 +46,7 @@ wal_run() {
   shift
   local cmd=(env PATH="$ROOT/stubs:$PATH" WAL_DIR="$W" WALARCHIVE_PGPASS_DIR="$CASE/pgpass"
     WALARCHIVE_SECRET_FILE="$CASE/secret" WALARCHIVE_CRONTAB="$CASE/crontab"
-    WALARCHIVE_PROC_DIR="$CASE/proc" STUB_LOG="$CASE/stub/log" STUB_DIR="$CASE/stub"
+    WALARCHIVE_PROC_DIR="$CASE/proc" WALARCHIVE_LIB_DIR="$HERE/../lib" STUB_LOG="$CASE/stub/log" STUB_DIR="$CASE/stub"
     STUB_TS="$WTS" ${envs[@]+"${envs[@]}"} bash "$BIN/$script" "$@")
   if [ -n "${WAL_BG:-}" ]; then
     "${cmd[@]}" >"$CASE/out${OUTTAG:-}" 2>"$CASE/err${OUTTAG:-}" &

@@ -1,0 +1,23 @@
+# Allow list of the build inputs of deploy/pgtools/Dockerfile (ADR-0064 (f), ADR-0103 (l)).
+# The first line excludes everything. A file that no line below names stays out of the context.
+# Each line names one source of a `COPY` line without `--from`. A directory source has its name.
+# A file in a directory has its own path. The suites in tests/ are mounted and never copied.
+*
+
+# Scripts of the services.
+!bin
+
+# Crontab files of supercronic.
+!crontab.backup
+!crontab.walarchive
+
+# Restore code and role files, with their expected text.
+!restore-code.sql
+!restore-code.expected
+!restore-roles.sql
+!restore-roles.expected
+
+# Shell libraries.
+!lib/globals-grammar.sh
+!lib/restore-steps.sh
+!lib/wal-identity.sh

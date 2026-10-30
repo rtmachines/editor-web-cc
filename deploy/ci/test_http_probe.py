@@ -41,6 +41,28 @@ class HttpProbeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.probe.check_redirect(status, {"location": location}, "/recipes")
 
+    def relogin_client(self, status=303, location="/recipes", cookies=None):
+        client = Mock()
+        client.secret.side_effect = lambda name: {"new_password": "NEW-VALUE"}[name]
+        client.token.return_value = "pre-token"
+        client.request.return_value = (status, {"location": location}, "")
+        client.cookies = {"__Host-recipe_session": "value"} if cookies is None else cookies
+        return client
+
+    def test_relogin_sends_the_changed_password_and_expects_the_recipe_list(self):
+        client = self.relogin_client()
+        self.probe.relogin(client)
+        client.token.assert_called_once_with("/login", "csrf_pre")
+        client.request.assert_called_once_with(
+            "/login", {"login": "ci-admin", "password": "NEW-VALUE", "csrf_pre": "pre-token"})
+
+    def test_relogin_rejects_the_forced_password_change_and_a_missing_cookie(self):
+        for client in (self.relogin_client(location="/me/password"), self.relogin_client(status=401),
+                       self.relogin_client(cookies={})):
+            with self.subTest():
+                with self.assertRaises(ValueError):
+                    self.probe.relogin(client)
+
     def test_health_accepts_caddy_404_for_all_six_paths(self):
         client = Mock()
         client.request.return_value = (404, {}, "")

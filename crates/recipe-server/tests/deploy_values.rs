@@ -93,7 +93,9 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
     assert!(directory < user, "root must create /etc/pgtools");
     for instruction in [
         "COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/",
-        "COPY --chmod=0644 restore-code.sql restore-code.expected /etc/pgtools/",
+        "COPY --chmod=0644 restore-code.sql restore-code.expected restore-roles.sql restore-roles.expected /etc/pgtools/",
+        "COPY --chmod=0644 lib/globals-grammar.sh lib/restore-steps.sh lib/wal-identity.sh /etc/pgtools/",
+        "COPY --chmod=0644 --from=db cluster-access.sh /etc/pgtools/cluster-access.sh",
     ] {
         let copy = position(instruction);
         assert!(
@@ -101,6 +103,19 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
             "create /etc/pgtools with mode 0755 before {instruction} and USER"
         );
     }
+}
+
+#[test]
+fn pgtools_creates_the_pgpass_mount_point_before_user() {
+    // runc gives a tmpfs the mode of an existing mount point. Without the directory in the image,
+    // a restart finds the mount point of the first start with mode 0755 and the owner root.
+    let dockerfile = include_str!("../../../deploy/pgtools/Dockerfile");
+    let lines = lines::code_lines(dockerfile);
+    let position = |instruction| lines.iter().position(|line| line.trim() == instruction);
+    let directory = position("RUN mkdir -p -m 1777 /run/pgpass")
+        .expect("pgtools Dockerfile must create the mount point /run/pgpass with mode 1777");
+    let user = position("USER 999:999").expect("pgtools Dockerfile must set USER 999:999");
+    assert!(directory < user, "root must create /run/pgpass before USER");
 }
 
 #[test]
@@ -237,6 +252,15 @@ fn volume_deletions(script: &str) -> Vec<String> {
         .collect()
 }
 
+fn delete_ci_volumes_body(common: &str) -> Vec<&str> {
+    lines::code_lines(common)
+        .into_iter()
+        .map(str::trim)
+        .skip_while(|line| *line != "delete_ci_volumes() {")
+        .take_while(|line| *line != "}")
+        .collect()
+}
+
 #[test]
 fn deploy_values_ci_cleanup_continues_after_failures() {
     let cleanup = include_str!("../../../deploy/ci/cleanup.sh");
@@ -253,9 +277,14 @@ fn deploy_values_ci_cleanup_continues_after_failures() {
             "status=0",
             "compose down --volumes --remove-orphans || status=$?",
         ]));
-    assert!(code.contains(&r#"docker volume rm "$volume" >/dev/null || status=$?"#));
+    assert!(code.contains(&"delete_ci_volumes || status=$?"));
+    let common = include_str!("../../../deploy/ci/common.sh");
+    let delete = delete_ci_volumes_body(common);
+    assert!(!delete.iter().any(|line| line.contains("|| exit")));
+    assert!(delete.contains(&r#"docker volume rm "$volume" >/dev/null || status=$?"#));
+    assert!(delete.ends_with(&[r#"return "$status""#]));
     assert!(code.ends_with(&[
-        "for disk in backups walarchive",
+        "for disk in backups walarchive-disk",
         "do",
         r#"if mountpoint -q "$CI_ROOT/$disk""#,
         "then",
@@ -271,22 +300,32 @@ fn deploy_values_ci_volume_deletions_stay_in_throwaway_scripts() {
     let deploy = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy");
     let mut actual = Vec::new();
     for (path, script) in deploy_scripts(&deploy) {
+        let relative: Vec<_> = path
+            .strip_prefix(&deploy)
+            .unwrap()
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
         for command in volume_deletions(&script) {
-            actual.push((path.strip_prefix(&deploy).unwrap().to_path_buf(), command));
+            actual.push((relative.join("/"), command));
         }
     }
-    let mut expected = vec![
+    let mut expected: Vec<(String, String)> = vec![
         (
             "ci/cleanup.sh".into(),
             "compose down --volumes --remove-orphans || status=$?".into(),
         ),
         (
-            "ci/cleanup.sh".into(),
+            "ci/common.sh".into(),
             r#"docker volume rm "$volume" >/dev/null || status=$?"#.into(),
         ),
         (
+            "ci/restore-switch.sh".into(),
+            r#"compose --profile restore --profile pitr down -v --remove-orphans || fail "keep: the project stop failed.""#.into(),
+        ),
+        (
             "ci/upgrade.sh".into(),
-            "compose --profile upgrade-rollback down -v --remove-orphans".into(),
+            "compose --profile upgrade-rollback down -v --remove-orphans || status=$?".into(),
         ),
     ];
     actual.sort();
@@ -310,21 +349,28 @@ fn deploy_values_ci_volume_removal_keeps_label_and_name_guards() {
         r#"source "$(dirname "${BASH_SOURCE[0]}")/common.sh""#,
         "status=0",
         "compose down --volumes --remove-orphans || status=$?",
-        "volume=${COMPOSE_PROJECT_NAME}-one-filesystem",
-        r#"if docker volume inspect "$volume" >/dev/null 2>&1"#,
-        "then",
+        "delete_ci_volumes || status=$?",
+        "for disk in backups walarchive-disk",
+    ]));
+    let common = include_str!("../../../deploy/ci/common.sh");
+    assert!(common.contains(
+        "# The label check and run-scoped name restrict deletion to the volumes of this job on a throwaway CI runner.\n    # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata."
+    ));
+    assert!(delete_ci_volumes_body(common).starts_with(&[
+        "delete_ci_volumes() {",
+        "local ids status=0 volume",
+        r#"ids=$(docker volume ls -q --filter "label=recipe.ci=$COMPOSE_PROJECT_NAME") || return 1"#,
+        "for volume in $ids",
+        "do",
         r#"if [[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]"#,
         "then",
         r#"docker volume rm "$volume" >/dev/null || status=$?"#,
         "else",
         "status=1",
         "fi",
-        "fi",
+        "done",
+        r#"return "$status""#,
     ]));
-    assert!(cleanup.contains(
-        "# The label check and run-scoped name restrict deletion to this fixture on a throwaway CI runner.\n    # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata."
-    ));
-    let common = include_str!("../../../deploy/ci/common.sh");
     assert!(lines::code_lines(common).starts_with(&[
         "set -euo pipefail",
         "umask 077",

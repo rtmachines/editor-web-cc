@@ -21,7 +21,7 @@ const HEALTH_FIELDS: [(&str, &str); 5] = [
     ("start_interval", "health.start_interval"),
 ];
 /// The memory key and the CPU key of 7.11 for each service (`reliability.md` 7.8, "Resource limits").
-const LIMITS: [(&str, &str, &str); 8] = [
+const LIMITS: [(&str, &str, &str); 9] = [
     ("proxy", "container.small_memory", "container.small_cpus"),
     (
         "backup-premigrate",
@@ -43,6 +43,11 @@ const LIMITS: [(&str, &str, &str); 8] = [
     ),
     (
         "pitr-check",
+        "container.backup_memory",
+        "container.small_cpus",
+    ),
+    (
+        "restore-volume",
         "container.backup_memory",
         "container.small_cpus",
     ),

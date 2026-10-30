@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Test script of the volume-switch restore in the recipe-pgtools image (ADR-0103, design D1 and D2).
+#
+# The cases test the files that the image installs for restore-volume. They also test the script
+# with stubs of initdb, pg_ctl, pg_restore, psql, pg_controldata, sync, and flock on PATH (design D4).
+# The stubs model a temporary server and write each call to a log.
+# It needs flock and GNU coreutils. The image recipe-pgtools has them.
+#
+# Run in CI inside a container of the image, with the directories deploy/pgtools and deploy/db
+# mounted read-only at /pgtools and /db:
+#   docker run --rm --entrypoint bash -v "$PWD/deploy/pgtools:/pgtools:ro" -v "$PWD/deploy/db:/db:ro" \
+#     recipe-pgtools /pgtools/tests/restore-volume-test
+#
+# When the variable CI is set, each SKIP counts as a failure.
+set -uo pipefail
+umask 077
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# The directory of the installed files. The directory deploy/db is the source of the shared file.
+ETC=${PGTOOLS_CRONTAB_DIR:-/etc/pgtools}
+DB_DIR=${PGTOOLS_DB_DIR:-$HERE/../../../db}
+BIN=${PGTOOLS_BIN:-$HERE/../bin}
+REAL_DATE=$(command -v date)
+REAL_RM=$(command -v rm)
+REAL_FLOCK=$(command -v flock || true)
+REAL_ID=$(command -v id)
+REAL_COMM=$(command -v comm)
+export REAL_DATE REAL_RM REAL_FLOCK REAL_ID REAL_COMM
+PASSED=0
+FAILED=0
+SKIPPED=0
+SHM_DIRS=()
+CASE=""
+B=""
+RC=0
+RESTORE_NAME=""
+RESTORE_BASE=""
+SECRET="unused"
+ROOT=""
+
+# A missing case function must fail the run. Bash runs this handler in a subshell.
+# So the handler cannot raise FAILED. It prints a FAIL line and writes a marker file instead.
+# The last line of this script reads the marker file.
+command_not_found_handle() {
+  bad "command not found: $1"
+  : >"${ROOT:?}/command-not-found"
+  return 127
+}
+
+# The functions live in tests/lib. Each file sets only functions.
+# A file that cannot be read stops the run.
+# shellcheck source=lib/helpers.sh
+source "$HERE/lib/helpers.sh" || exit 1
+# shellcheck source=lib/restore-stubs.sh
+source "$HERE/lib/restore-stubs.sh" || exit 1
+# shellcheck source=lib/restore-helpers.sh
+source "$HERE/lib/restore-helpers.sh" || exit 1
+# shellcheck source=lib/restore-volume-stubs.sh
+source "$HERE/lib/restore-volume-stubs.sh" || exit 1
+# shellcheck source=lib/restore-volume-cases.sh
+source "$HERE/lib/restore-volume-cases.sh" || exit 1
+# shellcheck source=lib/restore-volume-gate-cases.sh
+source "$HERE/lib/restore-volume-gate-cases.sh" || exit 1
+# shellcheck source=lib/restore-volume-start-cases.sh
+source "$HERE/lib/restore-volume-start-cases.sh" || exit 1
+# shellcheck source=lib/restore-volume-access-cases.sh
+source "$HERE/lib/restore-volume-access-cases.sh" || exit 1
+# shellcheck source=lib/restore-volume-stop-cases.sh
+source "$HERE/lib/restore-volume-stop-cases.sh" || exit 1
+
+# The image copies cluster-access.sh from the build context db (design D2). The copy has the bytes
+# of the file in deploy/db and the mode 0644.
+case_cluster_access_in_image() {
+  local installed=$ETC/cluster-access.sh source=$DB_DIR/cluster-access.sh
+  expect_ok "cluster-access.sh exists in the image" test -f "$installed"
+  expect_ok "the source cluster-access.sh is readable at $source" test -r "$source"
+  expect_ok "the installed cluster-access.sh equals the source" cmp -s -- "$installed" "$source"
+  expect_eq "the mode of the installed cluster-access.sh" "$(stat -c %a -- "$installed" 2>/dev/null)" "644"
+}
+
+# The image copies the restore role files from the build context deploy/pgtools (ADR-0103).
+# Each copy has the bytes of the file in deploy/pgtools and the mode 0644.
+case_restore_roles_in_image() {
+  local name installed source
+  for name in restore-roles.sql restore-roles.expected; do
+    installed=$ETC/$name
+    source=$HERE/../$name
+    expect_ok "$name exists in the image" test -f "$installed"
+    expect_ok "the installed $name equals the source" cmp -s -- "$installed" "$source"
+    expect_eq "the mode of the installed $name" "$(stat -c %a -- "$installed" 2>/dev/null)" "644"
+  done
+}
+
+ROOT=$(mktemp -d)
+trap cleanup EXIT
+
+# The directory of the libraries of the script. It holds the three files that the image installs
+# in /etc/pgtools, copied from their sources.
+mkdir "$ROOT/etc"
+cp -- "$HERE/../lib/restore-steps.sh" "$HERE/../lib/globals-grammar.sh" "$DB_DIR/cluster-access.sh" "$ROOT/etc/"
+
+case_cluster_access_in_image
+case_restore_roles_in_image
+
+if [ -z "$REAL_FLOCK" ]; then
+  skip "flock is missing, so the cases of the script cannot run"
+else
+  make_volume_stubs
+  case_volume_static_rules
+  case_volume_stubs
+  case_volume_usage
+  case_volume_bad_stamp
+  case_volume_good_stamp
+  case_volume_target_not_empty
+  case_volume_identity
+  case_volume_target_missing
+  case_volume_bad_subnet
+  case_volume_missing_subnet
+  case_volume_missing_library
+  case_volume_missing_lock
+  case_volume_lock_read_only
+  case_volume_lock_held
+  case_volume_keeps_stale_run
+  case_volume_writes_nothing
+  case_volume_steps_library
+  case_volume_gate_inputs
+  case_volume_gate_set
+  case_volume_gate_manifest
+  case_volume_gate_counts
+  case_volume_gate_globals
+  case_volume_gate_names
+  case_volume_initdb_arguments
+  case_volume_initdb_environment
+  case_volume_initdb_copies
+  case_volume_initdb_fails
+  case_volume_start_arguments
+  case_volume_start_no_forbidden_option
+  case_volume_start_fails
+  case_volume_restore_order
+  case_volume_start_library
+  case_volume_bad_database_name
+  case_volume_restore_failures
+  case_volume_code_comparison
+  case_volume_counts_and_chain
+  case_volume_access_revokes
+  case_volume_access_revoke_fails
+  case_volume_access_hba
+  case_volume_access_hba_fails
+  case_volume_hba_publish_after_write
+  case_volume_hba_publish_each_write
+  case_volume_access_query
+  case_volume_access_query_fails
+  case_volume_access_roles_differ
+  case_volume_access_roles_order
+  case_volume_access_roles_subnet
+  case_volume_access_files_missing
+  case_volume_access_config_changed
+  case_volume_access_top_level
+  case_volume_access_forged_baseline
+  case_volume_access_no_work_files
+  case_volume_access_static
+  case_volume_stop_arguments
+  case_volume_stop_fails
+  case_volume_state_not_shut_down
+  case_volume_controldata_fails
+  case_volume_sync_fails
+  case_volume_completed_line
+  case_volume_trap_keeps_target
+  case_volume_trap_before_server
+  case_volume_trap_live_cluster
+  case_volume_trap_signal
+  case_volume_stop_static
+fi
+
+[ "$SKIPPED" -eq 0 ] || printf 'restore-volume-test: %d skipped\n' "$SKIPPED"
+printf 'restore-volume-test: %d passed, %d failed\n' "$PASSED" "$FAILED"
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] && [ ! -e "$ROOT/command-not-found" ]

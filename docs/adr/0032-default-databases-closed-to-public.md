@@ -1,6 +1,6 @@
 # ADR-0032: Default databases closed to PUBLIC
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0103 (a function of a shared file prints the two statements for `01-roles.sh` and `restore-volume`)
 Date: 2026-10-13
 Deciders: project owner
 

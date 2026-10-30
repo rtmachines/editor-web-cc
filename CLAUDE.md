@@ -95,6 +95,7 @@ cargo test -p recipe-domain unit_path                      # one crate, tests wh
 cargo fmt --check
 cargo deny check                                           # licenses, advisories, yanked crates, banned dependency edges
 cargo llvm-cov --workspace                                 # coverage. CONTRIBUTING.md gives the gate of 80 % lines per crate
+docker volume create "$RECIPE_PGDATA_VOLUME"  # once: the external data volume, name from deploy/.env (ADR-0103)
 docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/compose.dev.yaml up -d --build  # dev stack, needs deploy/.env and the secret files, start order in reliability.md 7.1
 openspec validate --all
 openspec list

@@ -1,9 +1,9 @@
 //! The PostgreSQL container of the tests that run the built binary.
 //!
-//! The container is `postgres:16.15-bookworm` with `deploy/db/initdb/01-roles.sh` and the four
-//! secret files, as the storage tests of `recipe-db` start it. No shared test crate exists, so the
-//! tests of `recipe-server` include this file. The tests cannot use `sqlx`, so they read the
-//! database with the `psql` of the container.
+//! The container is `postgres:16.15-bookworm` with `deploy/db/initdb/01-roles.sh`, the shared file
+//! `deploy/db/cluster-access.sh`, and the four secret files, as the storage tests of `recipe-db`
+//! start it. No shared test crate exists, so the tests of `recipe-server` include this file.
+//! The tests cannot use `sqlx`, so they read the database with the `psql` of the container.
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -29,6 +29,13 @@ const INIT_SCRIPT_SOURCE: &str = concat!(
     "/../../deploy/db/initdb/01-roles.sh"
 );
 const INIT_SCRIPT_TARGET: &str = "/docker-entrypoint-initdb.d/01-roles.sh";
+/// The shared client rules of the cluster. The image mounts them outside the initdb directory,
+/// so the entrypoint never runs them (ADR-0103 (l)).
+const CLUSTER_ACCESS_SOURCE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../deploy/db/cluster-access.sh"
+);
+const CLUSTER_ACCESS_TARGET: &str = "/etc/recipe-db/cluster-access.sh";
 /// The test-only init script of the storage harness of `recipe-db` (ADR-0069 (u)). The test
 /// connects from the Docker host, and `01-roles.sh` admits only the Compose subnet.
 const TEST_HOSTS_SOURCE: &str = concat!(
@@ -113,6 +120,9 @@ pub async fn start_container(label_value: &'static str) -> Postgres {
     let script = std::fs::read_to_string(INIT_SCRIPT_SOURCE)
         .expect("deploy/db/initdb/01-roles.sh is readable")
         .replace("\r\n", "\n");
+    let cluster_access = std::fs::read_to_string(CLUSTER_ACCESS_SOURCE)
+        .expect("deploy/db/cluster-access.sh is readable")
+        .replace("\r\n", "\n");
     let test_hosts = std::fs::read_to_string(TEST_HOSTS_SOURCE)
         .expect("the test-only init script 02-test-hosts.sh is readable")
         .replace("\r\n", "\n");
@@ -127,6 +137,10 @@ pub async fn start_container(label_value: &'static str) -> Postgres {
         .with_copy_to(
             CopyTargetOptions::new(INIT_SCRIPT_TARGET).with_mode(EXECUTABLE_MODE),
             script.into_bytes(),
+        )
+        .with_copy_to(
+            CopyTargetOptions::new(CLUSTER_ACCESS_TARGET).with_mode(EXECUTABLE_MODE),
+            cluster_access.into_bytes(),
         )
         .with_copy_to(
             CopyTargetOptions::new(TEST_HOSTS_TARGET).with_mode(EXECUTABLE_MODE),

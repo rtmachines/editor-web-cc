@@ -13,9 +13,11 @@ static_base_rules() {
 
 # new_base_case <name> <count>: <count> old base backups. The i-th is (10 * i) days old and starts at
 # segment (2 * i). The archive holds the segments 1 to 30 and the partial segment 31.
+# The identifier file names the system of the stub of psql, as the guard of the archive needs.
 new_base_case() {
   local i
   wal_new_case "$1"
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   for ((i = 1; i <= $2; i++)); do
     make_base $((i * 10)) $((i * 2))
   done
@@ -110,6 +112,7 @@ case_wal_base_few() {
 # 14, and no segment from 14 up is deleted. A cutoff from the oldest name would delete segments 14 to 29.
 case_wal_base_high_start() {
   wal_new_case base-high-start
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   make_base 20 30
   make_base 10 20
   make_segments 1 30
@@ -129,6 +132,7 @@ case_wal_base_high_start() {
 # segment sets the cutoff, and the cutoff keeps its timeline text.
 case_wal_base_timeline_ignored() {
   wal_new_case base-timeline
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
   make_base 10 9
   printf 'START WAL LOCATION: 0/3000028 (file 000000020000000000000003)\n' >"$W/base/$LAST_BASE/backup_label"
   make_segments 1 30
@@ -287,6 +291,103 @@ case_wal_base_args_and_secret() {
 
 # A second run stops at the lock. The fake flock of some hosts grants every lock, so the case needs a
 # real flock. The image has one.
+# --- identifier guard (ADR-0103 (s), design D7) -------------------------------------------------
+# The guard of wal-identity.sh runs after the lock and the pgpass file, and before pg_basebackup.
+# The constants MSG_* and ID_FILE_NAME and the function id_file_content come from wal-entry-cases.sh.
+
+# guard_base_case <name> <count>: like new_base_case, but with no identifier file.
+# The archive holds <count> old base backups and the segments 1 to 30.
+guard_base_case() {
+  new_base_case "$1" "$2"
+  rm -f -- "$W/$ID_FILE_NAME"
+}
+
+# expect_base_guard_refused <name> <message>: the run stopped before any backup tool started.
+# The state of the archive and of the base backups is the state before the run.
+expect_base_guard_refused() {
+  base_expect_unchanged "$1" "$GUARD_TOP" "$GUARD_BASE"
+  expect_message "$1" "$2"
+  expect_eq "$1: no pg_basebackup" "$(count_events 'pg_basebackup')" "0"
+  expect_eq "$1: no pg_verifybackup" "$(count_events 'pg_verifybackup')" "0"
+  expect_eq "$1: no base backup name" "$(find "$W/base" -name "*base_$WTS" | wc -l | tr -d ' ')" "0"
+}
+
+# guard_snapshot: keep the state before the run for expect_base_guard_refused.
+guard_snapshot() {
+  GUARD_TOP=$(wal_listing)
+  GUARD_BASE=$(base_tree)
+}
+
+# Scenario "Segments without the file".
+case_wal_base_guard_no_file() {
+  guard_base_case base-guard-nofile 2
+  guard_snapshot
+  wal_run -- basebackup-once
+  expect_base_guard_refused "base guard, segments without the file" "$MSG_NO_FILE"
+  expect_no "base guard, segments without the file: no file" test -e "$W/$ID_FILE_NAME"
+}
+
+# Scenario "Another system".
+case_wal_base_guard_other_system() {
+  guard_base_case base-guard-other 2
+  printf '%s\n' "$OTHER_SYSID" >"$W/$ID_FILE_NAME"
+  guard_snapshot
+  wal_run -- basebackup-once
+  expect_base_guard_refused "base guard, another system" "$MSG_OTHER"
+  expect_eq "base guard, another system: file kept" "$(id_file_content)" "$OTHER_SYSID"
+}
+
+# Scenario "Malformed identifier file".
+case_wal_base_guard_malformed() {
+  local label
+  for label in letters empty cr two-lines; do
+    guard_base_case "base-guard-malformed-$label" 2
+    case $label in
+      letters) printf 'abc\n' >"$W/$ID_FILE_NAME" ;;
+      empty) : >"$W/$ID_FILE_NAME" ;;
+      cr) printf '%s\r\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+      two-lines) printf '%s\n%s\n' "$WAL_SYSID" "$WAL_SYSID" >"$W/$ID_FILE_NAME" ;;
+    esac
+    guard_snapshot
+    wal_run -- basebackup-once
+    expect_base_guard_refused "base guard, malformed file ($label)" "$MSG_MALFORMED"
+  done
+}
+
+# The server answers nothing. The run stops before pg_basebackup.
+case_wal_base_guard_no_server() {
+  guard_base_case base-guard-noserver 2
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  guard_snapshot
+  wal_run STUB_IDENTIFY_FAIL=1 -- basebackup-once
+  expect_base_guard_refused "base guard, no server answer" "$MSG_NO_SERVER"
+}
+
+# The file names the cluster of the server. The run goes on, and the file stays as it was.
+case_wal_base_guard_match() {
+  new_base_case base-guard-match 2
+  printf '%s\n' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  wal_run STUB_START_SEG=14 -- basebackup-once
+  expect_eq "base guard, same system: exit code" "$RC" "0"
+  expect_eq "base guard, same system: no ERROR line" "$(error_count "$CASE/out")" "0"
+  expect_eq "base guard, same system: pg_basebackup ran" "$(count_events 'pg_basebackup done')" "1"
+  expect_eq "base guard, same system: file kept" "$(id_file_content)" "$WAL_SYSID"
+  expect_ok "base guard, same system: the guard runs before pg_basebackup"     test "$(log_line 'CALL psql identify')" -lt "$(log_line 'EVENT pg_basebackup start')"
+  expect_ok "base guard, same system: the pgpass file exists for the guard"     grep -qF 'CALL psql pgpass present' "$CASE/stub/log"
+  expect_ok "base guard, same system: base backup published" base_exists "base_$WTS"
+}
+
+# No segment and no file: the guard writes the file, and the run goes on.
+case_wal_base_guard_first_start() {
+  wal_new_case base-guard-first
+  wal_run STUB_START_SEG=14 -- basebackup-once
+  expect_eq "base guard, first start: exit code" "$RC" "0"
+  expect_eq "base guard, first start: file content" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "base guard, first start: file mode" "$(stat -c %a "$W/$ID_FILE_NAME" 2>/dev/null)" "600"
+  expect_ok "base guard, first start: base backup published" base_exists "base_$WTS"
+  expect_ok "base guard, first start: the pgpass line matches the connection" grep -qF 'CALL psql pgpass match' "$CASE/stub/log"
+}
+
 case_wal_base_parallel() {
   if ! flock_is_real; then
     skip "flock on this host grants a second lock (fake flock)"

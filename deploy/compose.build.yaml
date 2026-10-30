@@ -11,9 +11,12 @@ x-server-build: &server-build
   dockerfile: deploy/Dockerfile
 
 # The context of recipe-pgtools is its own directory (bin/ and the crontab files).
+# The named context db is deploy/db. The Dockerfile copies cluster-access.sh from it.
 x-pgtools-build: &pgtools-build
   context: ./pgtools
   dockerfile: Dockerfile
+  additional_contexts:
+    db: ./db
 
 services:
   app:
@@ -27,4 +30,6 @@ services:
   walarchive:
     build: *pgtools-build
   pitr-check:
+    build: *pgtools-build
+  restore-volume:
     build: *pgtools-build

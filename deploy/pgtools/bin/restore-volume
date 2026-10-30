@@ -1,0 +1,401 @@
+#!/usr/bin/env bash
+# restore-volume: restore a backup set into a new, empty volume and prepare it as a data directory.
+#
+# Source: ADR-0103 (h) to (o), ADR-0067, ADR-0095, reliability.md sections 7.7 and 7.11, design D4.
+# The operator runs it in a temporary container of the image recipe-pgtools while db runs on the
+# old volume: docker compose run --rm -v <new volume>:/var/lib/postgresql/data restore-volume <stamp>
+#
+# Steps (the numbers are the steps of ADR-0103 (i)):
+#   1. Refuse a target that is not empty, a stamp outside the grammar of the set names, and a bad
+#      COMPOSE_SUBNET. A live data directory is never empty, so the script cannot write over a cluster.
+#   2. Open the existing lock /backups/.scratch/.lock read-only and take flock on it.
+#      A missing lock file stops the run. The script never creates the lock file and never runs the
+#      cleanup of stale runs of restore-test.
+#   3. The gates of steps 1 and 2 of restore-test: the manifest, the role grammar, the name list,
+#      and the refused kinds. The script writes nothing to /backups.
+#   4. initdb into the target with the arguments of reliability.md section 7.1.
+#   5. A temporary server on a private socket, with every setting passed by pg_ctl -o.
+#   6. The globals file, the dump, the code comparisons, the counts, and the audit chain check.
+#   7. The REVOKE statements of the default databases and the file pg_hba.conf.
+#   8. The comparisons with restore-roles.expected, the configuration files, and the top-level names.
+#   9. A fast stop. pg_controldata must show the state shut down. Then sync.
+#   10. One JSON line "restore volume completed" with the name of the set and the system identifier.
+# A failed step writes one ERROR line and ends the script with a code other than 0.
+# A trap runs on each exit. It stops the temporary server when it runs and deletes the work directory
+# in /run/pgpass. It deletes no file of the target. The operator deletes the new volume after a failure.
+#
+# The script reads no production password and holds no secret. Every output line is one JSON object.
+#
+# Environment. The defaults are the production values. The test script sets the others.
+#   COMPOSE_SUBNET      the Compose subnet of the client rules, mandatory, for example 172.28.0.0/16
+#   PGDATA              the target data directory, default /var/lib/postgresql/data (the image sets it)
+#   BACKUP_DIR          the backup disk, default /backups
+#   BACKUP_PGPASS_DIR   the tmpfs for the work directory and its secret files, default /run/pgpass
+#   RESTORE_CODE_DIR    the directory of restore-code.* and restore-roles.*, default /etc/pgtools
+#   RESTORE_GLOBALS_DIR the directory of restore-steps.sh, globals-grammar.sh, and cluster-access.sh,
+#                       default /etc/pgtools
+#   PGDATABASE          the name of the database in the dump, default recipe
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+
+JOB=restore-volume
+MARKER_NAME=.backup-marker
+SCRATCH_NAME=.scratch
+LOCK_NAME=.lock
+START_TIMEOUT_SECONDS=60 # restore_volume.start_timeout of 7.11: the start of the temporary server
+STOP_TIMEOUT_SECONDS=600 # restore_volume.stop_timeout of 7.11: the fast stop of step 9, also the stop of the trap
+DETAIL_LENGTH=160 # restore_test.detail_length of 7.11, also the limit of a name in an ERROR line here
+# scratch.* sizes of reliability.md section 7.11 (ADR-0067 (e), ADR-0103 (j)). The server keeps the
+# durability settings of initdb, and it has no TCP listener, so no setting names a port.
+SERVER_SETTINGS=(
+  shared_buffers=64MB maintenance_work_mem=64MB max_connections=10
+  max_parallel_workers_per_gather=0 max_parallel_maintenance_workers=0
+)
+# The stamp part of the set names of reliability.md section 7.7 (ADR-0074 (c)).
+STAMP_GRAMMAR='^[0-9]{8}_[0-9]{4}(_premigrate|_now)?$'
+# The system identifier of pg_control is an unsigned 64-bit number, so it has at most 20 digits.
+IDENTIFIER_GRAMMAR='^[0-9]{1,20}$'
+# The configuration files that step 4 copies and step 8 compares (ADR-0103 (o)).
+CONFIG_FILES=(postgresql.conf postgresql.auto.conf pg_ident.conf)
+# The baselines of those checks. Step 4 sets them and step 8 reads them. They stay in the memory of
+# the script, because a process of uid 999 can write below the directory of the work files (ADR-0105 (q)).
+declare -A config_sha256_baseline=()
+top_level_baseline=""
+
+BACKUP_DIR=${BACKUP_DIR:-/backups}
+PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
+CODE_DIR=${RESTORE_CODE_DIR:-/etc/pgtools}
+TARGET_DIR=${PGDATA:-/var/lib/postgresql/data}
+DB_NAME=${PGDATABASE:-recipe}
+# No variable of libpq may point a tool to the production cluster.
+unset PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE \
+  PGDATABASE PGOPTIONS PGSSLMODE PGSSLROOTCERT PGSSLCERT PGSSLKEY PGCONNECT_TIMEOUT
+
+# The steps that restore-test shares with restore-volume (ADR-0103 (j)) and the client rules (ADR-0103 (l)).
+# shellcheck source=../lib/restore-steps.sh
+source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/restore-steps.sh" \
+  || { echo "restore-volume: cannot load restore-steps.sh" >&2; exit 1; }
+# shellcheck source=../../db/cluster-access.sh
+source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/cluster-access.sh" \
+  || { echo "restore-volume: cannot load cluster-access.sh" >&2; exit 1; }
+
+error_logged=0
+stamp=""
+work_dir=""
+superuser=""
+set_stamp=""
+base=""
+manifest_name=""
+dump_path=""
+globals_path=""
+globals_copy=""
+counts_path=""
+table_count=0
+socket_dir=""
+server_may_run=0
+system_identifier=""
+
+# remove_work_dir: delete the work directory of this run. The path must be a run.* directory below
+# the directory of the secret files, and it must not be a symbolic link.
+remove_work_dir() {
+  case $work_dir in
+    "$PGPASS_DIR"/run.*) ;;
+    *) return 1 ;;
+  esac
+  if [ -d "$work_dir" ] && [ ! -L "$work_dir" ]; then
+    rm -r -- "${work_dir:?}"
+  fi
+}
+
+# cleanup runs on each exit. It stops the temporary server only when this run started it, and it
+# deletes the work directory with the secret files. It never deletes a file of the target.
+# The stop is immediate, because the operator deletes the volume after a failed run.
+# A fault of the cleanup is a WARN line. The ERROR line of the failed step stays the only one.
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ "$server_may_run" -eq 1 ] && [ -f "$TARGET_DIR/postmaster.pid" ]; then
+    if ! pg_ctl --pgdata="$TARGET_DIR" --mode=immediate -w -t "$STOP_TIMEOUT_SECONDS" stop >/dev/null 2>&1; then
+      log WARN "cannot stop the temporary server of this run"
+      status=1
+    fi
+  fi
+  if [ -n "$work_dir" ] && ! remove_work_dir; then
+    log WARN "cannot delete the work directory of this run"
+    status=1
+  fi
+  if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
+    log ERROR "restore volume failed unexpectedly" "\"exit_code\":$status"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+# A signal must run the trap, so the server stops and the work directory goes.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# check_run_user: step 1. The run needs uid 999 and the user name postgres (ADR-0105 (r)).
+# The files of the target must belong to the postgres user of the database image.
+check_run_user() {
+  local uid user
+  uid=$(id -u) && user=$(id -un) && [[ $uid =~ ^[0-9]+$ ]] || fail "cannot read the user id of this run"
+  [ "$uid" = 999 ] || fail "restore-volume must run as uid 999" "\"uid\":$uid"
+  [ "$user" = postgres ] || fail "restore-volume must run as the user postgres" "\"user\":\"$(clean "$user")\""
+}
+
+# check_inputs: step 1. The user, the stamp, COMPOSE_SUBNET, and the target. A refused run starts no tool.
+check_inputs() {
+  local first
+  check_run_user
+  [[ $stamp =~ $STAMP_GRAMMAR ]] \
+    || fail "the stamp is outside the grammar of the set names" "\"stamp\":\"$(clean "$stamp")\""
+  check_compose_subnet "${COMPOSE_SUBNET-}" \
+    || fail "COMPOSE_SUBNET is not an IPv4 subnet with a prefix length"
+  case $BACKUP_DIR in
+    /?*) ;;
+    *) fail "BACKUP_DIR must be an absolute path" ;;
+  esac
+  [[ $DB_NAME =~ $ROLE_GRAMMAR ]] || fail "bad PGDATABASE"
+  [ -d "$TARGET_DIR" ] || fail "the target directory is missing"
+  first=$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -print -quit) \
+    || fail "cannot read the target directory"
+  [ -z "$first" ] || fail "the target directory is not empty"
+}
+
+# take_lock: step 2. The lock file of restore-test must exist. Descriptor 9 holds the lock until the
+# script ends. The script opens the file for reading only, so it cannot create or change it.
+take_lock() {
+  local lock=$BACKUP_DIR/$SCRATCH_NAME/$LOCK_NAME
+  if [ ! -f "$lock" ] || [ -L "$lock" ]; then
+    fail "the lock file of the restore test is missing"
+  fi
+  exec 9<"$lock" || fail "cannot open the lock file of the restore test"
+  flock -n 9 || fail "another restore test or restore volume holds the lock"
+}
+
+# run_gates: step 3. The gates of steps 1 and 2 of restore-test, for the set of the stamp. The work
+# directory in the tmpfs holds the private copy of the globals file and the files of the later steps.
+# The script writes nothing to the backup disk.
+run_gates() {
+  local file
+  [ -f "$BACKUP_DIR/$MARKER_NAME" ] || fail "the marker file of the backup disk is missing"
+  for file in restore-code.sql restore-code.expected; do
+    [ -f "$CODE_DIR/$file" ] || fail "restore-code.sql or restore-code.expected is missing"
+  done
+  for file in restore-roles.sql restore-roles.expected; do
+    [ -f "$CODE_DIR/$file" ] || fail "restore-roles.sql or restore-roles.expected is missing"
+  done
+  [ -d "$PGPASS_DIR" ] || fail "the directory of the secret files is missing"
+  work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX") || fail "cannot create the directory of the secret files"
+  set_paths "$stamp"
+  if [ ! -f "$BACKUP_DIR/$manifest_name" ] || [ -L "$BACKUP_DIR/$manifest_name" ]; then
+    fail "no complete backup set found for the stamp" "\"stamp\":\"$stamp\""
+  fi
+  check_manifest
+  check_counts
+  check_globals
+  log INFO "restore volume started" "\"set\":\"$base\""
+  check_names
+}
+
+# init_cluster: step 4. initdb with the arguments of reliability.md 7.1 and a random password file
+# in the work directory. initdb runs without LC_ALL and keeps the LANG of the image (design D4).
+# With LC_ALL=C, initdb would write lc_messages, lc_monetary, lc_numeric, and lc_time as C.
+# Then the script keeps the SHA-256 values of the three configuration files and the top-level names
+# in shell variables for the checks of step 8. It writes no baseline file (ADR-0105 (q)).
+init_cluster() {
+  local file
+  superuser=$(id -un) || fail "cannot read the name of the system user"
+  random_secret "$work_dir/superuser.pw"
+  env -u LC_ALL initdb --pgdata="$TARGET_DIR" --username="$superuser" --auth-local=peer \
+    --auth-host=scram-sha-256 --pwfile="$work_dir/superuser.pw" --data-checksums \
+    --lc-collate=C --lc-ctype=C.UTF-8 >/dev/null 2>"$work_dir/initdb.err" \
+    || fail "initdb failed" "\"detail\":\"$(tool_detail "$work_dir/initdb.err")\""
+  for file in "${CONFIG_FILES[@]}"; do
+    config_sha256_baseline[$file]=$(config_sha256 "$file") \
+      || fail "cannot keep a copy of a configuration file" "\"file\":\"$file\""
+  done
+  top_level_baseline=$(top_level_names) || fail "cannot list the top-level names of the new cluster"
+}
+
+# start_server: step 5. A temporary server on a private socket in the work directory. It has no TCP
+# listener. Every setting goes through pg_ctl -o, so the script writes no configuration file.
+# The server log is in the work directory, because a new name in the target would fail step 8.
+# The wait is restore_volume.start_timeout. Descriptor 9 holds the lock, and the server must not keep it.
+start_server() {
+  local options="-c listen_addresses=''" setting
+  socket_dir=$work_dir/sock
+  mkdir -m 0700 -- "$socket_dir" || fail "cannot create the socket directory"
+  server_may_run=1
+  options+=" -c unix_socket_directories='$socket_dir'"
+  for setting in "${SERVER_SETTINGS[@]}"; do
+    options+=" -c $setting"
+  done
+  pg_ctl --pgdata="$TARGET_DIR" --log="$work_dir/server.log" -w -t "$START_TIMEOUT_SECONDS" \
+    -o "$options" start >/dev/null 2>"$work_dir/pg_ctl.err" 9>&- \
+    || fail "the temporary server did not start" "\"detail\":\"$(tool_detail "$work_dir/pg_ctl.err")\""
+}
+
+# restore_dump: step 6. The order of restore-test: the globals file, pre-data with the code of its
+# kinds, data and post-data with the code of every kind, the counts, and the audit chain check.
+# The script sets no role password. The operator sets the passwords after the switch (ADR-0103 (k)).
+restore_dump() {
+  restore_globals
+  restore_section pre-data
+  check_database
+  compare_code pre-data "$PRE_DATA_KINDS"
+  restore_section data
+  restore_section post-data
+  compare_code post-data "$ALL_KINDS"
+  compare_counts
+  check_chain
+}
+
+# set_access: step 7. The statements of print_default_db_revokes and the file pg_hba.conf of
+# write_hba_conf. Both come from cluster-access.sh, so the script holds no second copy of their text.
+# The function write_hba_conf runs in the context of the test below, where errexit is off. A
+# partial file therefore does not stop the call. The comparison of step 8 finds a partial file.
+set_access() {
+  print_default_db_revokes | scratch_psql --dbname=postgres >/dev/null 2>"$work_dir/revoke.err" \
+    || fail "psql cannot revoke the default access of the databases" \
+      "\"detail\":\"$(tool_detail "$work_dir/revoke.err")\""
+  write_hba_conf "$COMPOSE_SUBNET" "$TARGET_DIR/pg_hba.conf" || fail "cannot write pg_hba.conf"
+}
+
+# first_difference <want> <have>: the first line of the second file that differs from the line at the
+# same place in the first file. The caller uses it when both files hold the same lines in another order.
+first_difference() {
+  awk 'FILENAME == ARGV[1] { want[FNR] = $0; next } want[FNR] != $0 { print; exit }' "$1" "$2"
+}
+
+# compare_roles: ADR-0103 (m). The query of restore-roles.sql runs as the superuser in the new
+# database. Its lines equal restore-roles.expected with the subnet in the placeholder, in the same order.
+# The ERROR line names the first line by its kind and its name. No line holds an OID or a password hash.
+compare_roles() {
+  local missing extra first
+  sed "s|@COMPOSE_SUBNET@|$COMPOSE_SUBNET|g" "$CODE_DIR/restore-roles.expected" >"$work_dir/roles.want" \
+    || fail "cannot read restore-roles.expected"
+  scratch_psql --dbname="$DB_NAME" --file="$CODE_DIR/restore-roles.sql" >"$work_dir/roles.have" \
+    2>"$work_dir/roles.err" \
+    || fail "restore-roles.sql failed" "\"detail\":\"$(tool_detail "$work_dir/roles.err")\""
+  cmp -s -- "$work_dir/roles.want" "$work_dir/roles.have" && return 0
+  sort -- "$work_dir/roles.want" >"$work_dir/roles.want.sorted"
+  sort -- "$work_dir/roles.have" >"$work_dir/roles.have.sorted"
+  comm -23 "$work_dir/roles.want.sorted" "$work_dir/roles.have.sorted" >"$work_dir/roles.missing"
+  comm -13 "$work_dir/roles.want.sorted" "$work_dir/roles.have.sorted" >"$work_dir/roles.extra"
+  missing=$(($(wc -l <"$work_dir/roles.missing")))
+  extra=$(($(wc -l <"$work_dir/roles.extra")))
+  first=$(cat -- "$work_dir/roles.missing" "$work_dir/roles.extra" | sed -n '1p')
+  [ -n "$first" ] || first=$(first_difference "$work_dir/roles.want" "$work_dir/roles.have")
+  first=$(printf '%s\n' "$first" | cut -d'|' -f1,2)
+  fail "the roles and the access of the new cluster differ from restore-roles.expected" \
+    "\"missing\":$missing,\"extra\":$extra,\"first\":\"$(clean "$first")\""
+}
+
+# config_sha256 <file>: print the SHA-256 value of a configuration file of the target.
+config_sha256() {
+  local line
+  line=$(sha256sum -- "$TARGET_DIR/$1" 2>/dev/null) || return 1
+  printf '%s\n' "${line%% *}"
+}
+
+# top_level_names: print the sorted names at the top of the target, without the files of a running server.
+top_level_names() {
+  find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name postmaster.pid ! -name postmaster.opts \
+    -printf '%f\n' | sort
+}
+
+# check_config_files: ADR-0103 (o). The SHA-256 values of the three configuration files equal the values of step 4.
+check_config_files() {
+  local file now
+  for file in "${CONFIG_FILES[@]}"; do
+    now=$(config_sha256 "$file") && [ "$now" = "${config_sha256_baseline[$file]:-}" ] \
+      || fail "a configuration file of the new cluster changed after initdb" "\"file\":\"$file\""
+  done
+}
+
+# check_top_level: ADR-0103 (o). The names at the top of the target equal the names after initdb.
+# The files postmaster.pid and postmaster.opts of the running server do not count.
+# The lists live in shell variables. A process of uid 999 can write below /run/pgpass during step 8 (ADR-0105 (q)).
+check_top_level() {
+  local now added removed added_count removed_count first
+  now=$(top_level_names) || fail "cannot list the top-level names of the target"
+  added=$(comm -13 <(printf '%s\n' "$top_level_baseline") <(printf '%s\n' "$now"))
+  removed=$(comm -23 <(printf '%s\n' "$top_level_baseline") <(printf '%s\n' "$now"))
+  added_count=$(printf '%s' "$added" | grep -c '^' || true)
+  removed_count=$(printf '%s' "$removed" | grep -c '^' || true)
+  [ "$added_count" -ne 0 ] || [ "$removed_count" -ne 0 ] || return 0
+  first=$(printf '%s\n%s\n' "$added" "$removed" | sed -n '/./{p;q}')
+  fail "the top-level names of the target differ from the names after initdb" \
+    "\"added\":$added_count,\"removed\":$removed_count,\"first\":\"$(clean "$first")\""
+}
+
+# check_access: step 8. The roles and the access, the configuration files, and the top-level names.
+check_access() {
+  compare_roles
+  check_config_files
+  check_top_level
+}
+
+# stop_server: step 9, first part. The fast stop writes the shutdown checkpoint. The wait is
+# restore_volume.stop_timeout. After a clean stop, the trap has no server to stop.
+stop_server() {
+  pg_ctl --pgdata="$TARGET_DIR" --mode=fast -w -t "$STOP_TIMEOUT_SECONDS" stop >/dev/null     2>"$work_dir/pg_ctl.err"     || fail "the temporary server did not stop" "\"detail\":\"$(tool_detail "$work_dir/pg_ctl.err")\""
+  server_may_run=0
+}
+
+# check_shutdown: step 9, second part. pg_controldata must show the state shut down. The script keeps
+# the system identifier for the last line. LC_ALL=C makes the field names English.
+check_shutdown() {
+  local state
+  pg_controldata --pgdata="$TARGET_DIR" >"$work_dir/controldata.out" 2>"$work_dir/controldata.err"     || fail "pg_controldata failed" "\"detail\":\"$(tool_detail "$work_dir/controldata.err")\""
+  state=$(sed -n 's/^Database cluster state: *//p' "$work_dir/controldata.out" | sed -n '1p')
+  system_identifier=$(sed -n 's/^Database system identifier: *//p' "$work_dir/controldata.out" | sed -n '1p')
+  [ "$state" = "shut down" ]     || fail "the cluster did not shut down cleanly" "\"state\":\"$(clean "$state")\""
+  [[ $system_identifier =~ $IDENTIFIER_GRAMMAR ]] || fail "pg_controldata gave no system identifier"
+}
+
+# flush_disks: step 9, third part. The data of the new volume reaches the disk before the last line.
+flush_disks() {
+  sync 2>"$work_dir/sync.err" || fail "sync failed" "\"detail\":\"$(tool_detail "$work_dir/sync.err")\""
+}
+
+# --- run ----------------------------------------------------------------------------------
+
+[ "$#" -eq 1 ] || fail "usage: restore-volume <stamp>"
+stamp=$1
+
+# Step 1: the target, the stamp, and COMPOSE_SUBNET.
+check_inputs
+
+# Step 2: the lock of the restore test.
+take_lock
+
+# Step 3: the gates of restore-test for the set of the stamp.
+run_gates
+
+# Step 4: initdb into the target.
+init_cluster
+
+# Step 5: the temporary server.
+start_server
+
+# Step 6: the globals file, the dump, the code comparisons, the counts, and the audit chain check.
+restore_dump
+
+# Step 7: the REVOKE statements of the default databases and the file pg_hba.conf.
+set_access
+
+# Step 8: the comparisons with restore-roles.expected, the configuration files, and the top-level names.
+check_access
+
+# Step 9: the fast stop, the state shut down, and sync.
+stop_server
+check_shutdown
+flush_disks
+
+# Step 10: the last line.
+log INFO "restore volume completed" "\"set\":\"$base\",\"system_identifier\":\"$system_identifier\""

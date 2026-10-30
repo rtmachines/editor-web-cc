@@ -45,7 +45,7 @@ const HEALTHCHECK: [Mutation; 6] = [
 ];
 
 const HEALTH_SERVICES: [&str; 5] = ["proxy", "app", "db", "backup", "walarchive"];
-const ALL_SERVICES: [&str; 8] = [
+const ALL_SERVICES: [&str; 9] = [
     "proxy",
     "backup-premigrate",
     "migrate",
@@ -54,6 +54,7 @@ const ALL_SERVICES: [&str; 8] = [
     "backup",
     "walarchive",
     "pitr-check",
+    "restore-volume",
 ];
 
 /// One mutation changes the same text in several services. Each of them must report its own fault,
@@ -86,6 +87,7 @@ fn a_changed_limit_is_a_fault_in_each_service() {
         "backup",
         "walarchive",
         "pitr-check",
+        "restore-volume",
     ];
     let cases: [(&str, &str, &str, &[&str]); 6] = [
         ("cpus: 0.5", "cpus: 0.6", "cpus", &small),
@@ -105,13 +107,13 @@ fn a_changed_limit_is_a_fault_in_each_service() {
             "mem_limit: 512m",
             "mem_limit: 640m",
             "mem_limit",
-            &["app", "backup", "pitr-check"],
+            &["app", "backup", "pitr-check", "restore-volume"],
         ),
         (
             "memswap_limit: 512m",
             "swap_limit: 512m",
             "memswap_limit",
-            &["app", "backup", "pitr-check"],
+            &["app", "backup", "pitr-check", "restore-volume"],
         ),
         (
             "memswap_limit: 256m",
@@ -128,6 +130,12 @@ fn a_changed_limit_is_a_fault_in_each_service() {
 #[test]
 fn a_changed_security_option_or_logging_anchor_is_a_fault_in_each_service() {
     let logged = &ALL_SERVICES[..7];
+    let pgpass = [
+        "backup",
+        "backup-premigrate",
+        "restore-volume",
+        "walarchive",
+    ];
     let cases: [(&str, &str, &str, &[&str]); 5] = [
         ("- ALL", "- NET_RAW", "cap_drop", &ALL_SERVICES),
         (
@@ -143,12 +151,7 @@ fn a_changed_security_option_or_logging_anchor_is_a_fault_in_each_service() {
             &["app", "proxy"],
         ),
         ("logging: *logging", "logging: *other", "logging", logged),
-        (
-            "tmpfs:",
-            "ramfs:",
-            "tmpfs",
-            &["backup", "backup-premigrate", "walarchive"],
-        ),
+        ("tmpfs:", "ramfs:", "tmpfs", &pgpass),
     ];
     for (from, to, suffix, services) in cases {
         assert_each_service("compose.yaml", from, to, services, suffix);
@@ -429,7 +432,7 @@ fn a_changed_application_value_port_or_probe_line_is_a_fault() {
     assert_mutations_fail(&APP_ENV_AND_PORTS);
 }
 
-const SECURITY: [Mutation; 10] = [
+const SECURITY: [Mutation; 12] = [
     // A list in flow style hides no item.
     (
         "compose.yaml",
@@ -475,6 +478,20 @@ const SECURITY: [Mutation; 10] = [
         "read_only",
     ),
     ("compose.yaml", "    expose:", "    ports:", "app.ports"),
+    // `db` mounts another file on the target of the shared client rules.
+    (
+        "compose.yaml",
+        "- ./db/cluster-access.sh:/etc/recipe-db/cluster-access.sh:ro",
+        "- ./db/other.sh:/etc/recipe-db/cluster-access.sh:ro",
+        "db.volumes",
+    ),
+    // `proxy` mounts the shared client rules too.
+    (
+        "compose.yaml",
+        "- ./Caddyfile:/etc/caddy/Caddyfile:ro",
+        "- ./db/cluster-access.sh:/etc/recipe-db/cluster-access.sh:ro",
+        "proxy.volumes",
+    ),
     (
         "compose.yaml",
         "      - login_hmac_key",
@@ -600,7 +617,72 @@ fn a_changed_network_address_or_trusted_proxy_line_is_a_fault() {
     assert_mutations_fail(&NETWORK_AND_PROXIES);
 }
 
-const ENV_EXAMPLE: [Mutation; 2] = [
+/// `pgdata` is an external volume that `RECIPE_PGDATA_VOLUME` names (ADR-0103 (c), design D6).
+const PGDATA_VOLUME: [Mutation; 5] = [
+    (
+        "compose.yaml",
+        "external: true",
+        "external: false",
+        "volumes.pgdata.external",
+    ),
+    (
+        "compose.yaml",
+        "    external: true",
+        "    # external: true",
+        "volumes.pgdata.external",
+    ),
+    (
+        "compose.yaml",
+        "name: ${RECIPE_PGDATA_VOLUME:?}",
+        "name: ${RECIPE_PGDATA_VOLUME}",
+        "volumes.pgdata.name",
+    ),
+    (
+        "compose.yaml",
+        "name: ${RECIPE_PGDATA_VOLUME:?}",
+        "name: recipe-editor_pgdata",
+        "volumes.pgdata.name",
+    ),
+    (
+        "compose.yaml",
+        "external: true",
+        "external: true
+    driver: local",
+        "volumes.pgdata keys",
+    ),
+];
+
+#[test]
+fn a_changed_pgdata_volume_declaration_is_a_fault() {
+    assert_mutations_fail(&PGDATA_VOLUME);
+}
+
+const ENV_EXAMPLE: [Mutation; 6] = [
+    // The ninth value is mandatory, its form is fixed, and the header counts nine values.
+    (
+        ".env.example",
+        "RECIPE_PGDATA_VOLUME=",
+        "RECIPE_PGDATA=",
+        "the names of the values",
+    ),
+    (
+        ".env.example",
+        "RECIPE_PGDATA_VOLUME=recipe-editor_pgdata_20261030_120000",
+        "RECIPE_PGDATA_VOLUME=pgdata",
+        "RECIPE_PGDATA_VOLUME",
+    ),
+    (
+        ".env.example",
+        "The file holds nine values",
+        "The file holds eight values",
+        "header count",
+    ),
+    (
+        ".env.example",
+        "The file holds nine values",
+        "The file holds the values",
+        "header count",
+    ),
     (
         ".env.example",
         "SITE_ADDRESS=",

@@ -4,7 +4,7 @@
 //! the path is the name of the Docker secret. The row `db.migrator_user` gives the name of a role.
 
 use crate::fault::Report;
-use crate::inputs::INITDB;
+use crate::inputs::{CLUSTER_ACCESS, INITDB};
 use crate::lines::Compose;
 use crate::table::Table;
 
@@ -65,7 +65,7 @@ pub fn check_secret_lists(compose: &Compose, table: &Table) -> Report {
     report
 }
 
-/// The user of a `pg_hba.conf` line that `01-roles.sh` writes, for example `printf 'host recipe user ...`.
+/// The user of a `pg_hba.conf` line that `cluster-access.sh` writes, for example `printf 'host recipe user ...`.
 fn hba_user(line: &str) -> Option<&str> {
     let mut words = line.split_whitespace();
     words.find(|word| *word == "'host")?;
@@ -81,7 +81,8 @@ fn created_role(line: &str) -> Option<&str> {
 }
 
 /// The initdb script reads the four password files and creates the migrator role of 7.11.
-pub fn check_initdb(text: &str, table: &Table) -> Report {
+/// The shared client rules in `cluster-access.sh` hold the `pg_hba.conf` line of that role (ADR-0103 (l)).
+pub fn check_initdb(text: &str, cluster_access: &str, table: &Table) -> Report {
     let mut report = Report::default();
     for key in INITDB_SECRETS {
         report.cover(key);
@@ -103,9 +104,12 @@ pub fn check_initdb(text: &str, table: &Table) -> Report {
         let label = format!("{MIGRATOR_USER} CREATE ROLE");
         report.fail(INITDB, &label, user.clone(), "missing");
     }
-    if !text.lines().any(|line| hba_user(line) == Some(&user)) {
+    if !cluster_access
+        .lines()
+        .any(|line| hba_user(line) == Some(&user))
+    {
         let label = format!("{MIGRATOR_USER} pg_hba.conf line");
-        report.fail(INITDB, &label, user, "missing");
+        report.fail(CLUSTER_ACCESS, &label, user, "missing");
     }
     report
 }

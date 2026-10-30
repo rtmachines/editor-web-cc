@@ -1,6 +1,6 @@
 # ADR-0070: Container limits, networks, healthchecks, and the stack test
 
-Status: Accepted. Amended by ADR-0081 (the temporary container of `pitr-check` in `container.small_cpus`). Amended by ADR-0087 (the term `shutdown.internal_drain` of the first sum rule of (v)). Amended by a note (item (u)). Amended by ADR-0094 (item (w): the trigger rule of the job `compose`).
+Status: Accepted. Amended by ADR-0081 (the temporary container of `pitr-check` in `container.small_cpus`). Amended by ADR-0087 (the term `shutdown.internal_drain` of the first sum rule of (v)). Amended by a note (item (u)). Amended by ADR-0094 (item (w): the trigger rule of the job `compose`). Amended by ADR-0103 (item (j): the temporary container of `restore-volume` in `container.small_cpus`).
 Date: 2026-10-23
 Deciders: project owner
 

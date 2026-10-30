@@ -73,6 +73,31 @@ def check_images(config, tag):
             raise ValueError(f"the image tag of {service} differs from the release tag")
 
 
+def pgdata_volume_name(config):
+    """Return the volume name that the new stack gives to pgdata."""
+    name = config["volumes"]["pgdata"]["name"]
+    if not isinstance(name, str) or not name:
+        raise ValueError("the pgdata volume has no name")
+    return name
+
+
+SEGMENT_PASSED = re.compile(r"The segment check passed\. The segment [0-9A-F]{24}(\.partial)? holds the system identifier of db\.")
+SEGMENT_SKIPPED = "The segment check does not run. The file .system-identifier exists."
+
+
+def check_wal_identity_log(output, mode):
+    """Check the log of the step of design D8 against the state of the file before the step."""
+    lines = [line for line in output.splitlines() if line.startswith("The segment check")]
+    if mode == "ran":
+        ok = len(lines) == 1 and SEGMENT_PASSED.fullmatch(lines[0]) is not None
+    elif mode == "skipped":
+        ok = lines == [SEGMENT_SKIPPED]
+    else:
+        raise ValueError("unknown segment check mode")
+    if not ok:
+        raise ValueError("the log of the segment check does not match the state of the identifier file")
+
+
 def main():
     if sys.argv[1] == "previous-ref":
         print(select_previous_ref(*sys.argv[2:]) or "")
@@ -90,6 +115,10 @@ def main():
         print(backup_set(source, arguments[0]))
     elif action == "images":
         check_images(json.loads(source), arguments[0])
+    elif action == "volume-name":
+        print(pgdata_volume_name(json.loads(source)))
+    elif action == "wal-identity":
+        check_wal_identity_log(source, arguments[0])
     else:
         raise ValueError("unknown upgrade check")
 

@@ -123,7 +123,12 @@ EOF
 }
 
 # The stubs of the scratch cluster of pitr-check.
-#   psql: without STUB_PSQL_OK=1 it fails. With it, it answers the three checks of the script.
+#   psql: the command IDENTIFY_SYSTEM answers the identifier guard of walarchive-entry.
+#     STUB_SYSID=n          the system identifier, default 7354987216845319027
+#     STUB_IDENTIFY_FAIL=1  the connection fails
+#     STUB_IDENTIFY_ERR=t   with STUB_IDENTIFY_FAIL, the text t is the error message on stderr
+#     STUB_IDENTIFY_OUT=t   the whole answer line
+#   psql: without STUB_PSQL_OK=1 every other command fails. With it, it answers the three checks of the script.
 #     STUB_PSQL_RECOVERY=f  the cluster is still in recovery
 #     STUB_PSQL_COUNT=n     the number of rows with the marker identity
 #     STUB_PSQL_CHAIN=text  the result of the chain check
@@ -136,6 +141,51 @@ cmd=""
 for a in "$@"; do
   case $a in --command=*) cmd=${a#--command=} ;; esac
 done
+case $cmd in
+  IDENTIFY_SYSTEM)
+    # The replication connection of the identifier guard. The log lines start with CALL and ARGV,
+    # so that count_events does not count them as a started tool.
+    echo "CALL psql identify" >>"$STUB_LOG"
+    echo "ARGV psql-identify $*" >>"$STUB_LOG"
+    if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ]; then echo "CALL psql pgpass present" >>"$STUB_LOG"; fi
+    if [ -n "${STUB_IDENTIFY_FAIL:-}" ]; then
+      [ -z "${STUB_IDENTIFY_ERR:-}" ] || printf '%s\n' "$STUB_IDENTIFY_ERR" >&2
+      exit 2
+    fi
+    # The pgpass lookup of libpq. The first four fields must match host, port, dbname, and user.
+    # A missing dbname takes the user name. Without a match, libpq sends no password.
+    host="" port="" user="" dbname=""
+    for a in "$@"; do
+      case $a in --dbname=*) conninfo=${a#--dbname=} ;; *) continue ;; esac
+      for pair in $conninfo; do
+        case $pair in
+          host=*) host=${pair#host=} ;;
+          port=*) port=${pair#port=} ;;
+          user=*) user=${pair#user=} ;;
+          dbname=*) dbname=${pair#dbname=} ;;
+        esac
+      done
+    done
+    [ -n "$dbname" ] || dbname=$user
+    matched=0
+    if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ]; then
+      while IFS=: read -r f_host f_port f_db f_user _; do
+        if [[ ($f_host == '*' || $f_host == "$host") && ($f_port == '*' || $f_port == "$port") &&
+          ($f_db == '*' || $f_db == "$dbname") && ($f_user == '*' || $f_user == "$user") ]]; then
+          matched=1
+          break
+        fi
+      done <"$PGPASSFILE"
+    fi
+    if [ "$matched" -ne 1 ]; then
+      echo 'psql: error: fe_sendauth: no password supplied' >&2
+      exit 2
+    fi
+    echo "CALL psql pgpass match" >>"$STUB_LOG"
+    echo "${STUB_IDENTIFY_OUT:-${STUB_SYSID:-7354987216845319027}|1|0/3000060|}"
+    exit 0
+    ;;
+esac
 echo "EVENT psql" >>"$STUB_LOG"
 echo "ARGV psql $*" >>"$STUB_LOG"
 echo "ENV PGHOST=${PGHOST:-} PGPORT=${PGPORT:-} PGUSER=${PGUSER:-} PGPASSWORD=${PGPASSWORD:-} PGPASSFILE=${PGPASSFILE:-}" >>"$STUB_LOG"

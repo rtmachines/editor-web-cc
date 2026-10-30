@@ -231,6 +231,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/initdb/01-roles.sh:/docker-entrypoint-initdb.d/01-roles.sh:ro
+      - ./db/cluster-access.sh:/etc/recipe-db/cluster-access.sh:ro
     secrets:
       - postgres_password
       - migrator_password
@@ -344,6 +345,34 @@ services:
     memswap_limit: 512m
     cpus: 0.5
 
+  # Restore of a backup set into a new, empty volume (ADR-0103 (h)). It is not one of the seven services.
+  # The profile restore keeps it out of "up". The operator mounts the target volume with -v:
+  # "docker compose run --rm -v <new volume>:/var/lib/postgresql/data restore-volume <stamp>".
+  # The entrypoint is the script, so the stamp is its argument. The image holds the client rules
+  # (cluster-access.sh), so the service mounts no file of deploy/db and no pgdata.
+  # It mounts no secret and joins no network. COMPOSE_SUBNET feeds the client rules.
+  # container.backup_memory 512 MiB, container.small_cpus 0.5 (ADR-0103 (h)).
+  restore-volume:
+    image: recipe-pgtools:${RECIPE_VERSION:?}
+    entrypoint: ["restore-volume"]
+    profiles:
+      - restore
+    restart: "no"
+    network_mode: none
+    environment:
+      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}
+    volumes:
+      - backups:/backups:ro
+    tmpfs:
+      - /run/pgpass
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+
 # The network backend holds the seven services. It has no route to a host outside Compose.
 # The network edge holds proxy and the published ports. The network egress holds app only.
 # A change of the subnet edits COMPOSE_SUBNET, COMPOSE_IP_RANGE, and PROXY_ADDRESS together.
@@ -360,8 +389,11 @@ networks:
 
 # backups and walarchive bind to directories of the second disk (ADR-0066 (a)).
 # A missing host directory stops the start, as the marker file does.
+# pgdata is external. Compose never creates or deletes it (ADR-0103 (c)).
 volumes:
-  pgdata: {}
+  pgdata:
+    external: true
+    name: ${RECIPE_PGDATA_VOLUME:?}
   caddy: {}
   backups:
     driver: local

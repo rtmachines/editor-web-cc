@@ -4,7 +4,7 @@
 
 use crate::inputs::{Mutation, assert_mutations_fail};
 
-const SECRET_AND_ROLE: [Mutation; 14] = [
+const SECRET_AND_ROLE: [Mutation; 15] = [
     // The environment variable of `migrate` and of `db` that holds a secret path.
     (
         "compose.yaml",
@@ -70,9 +70,16 @@ const SECRET_AND_ROLE: [Mutation; 14] = [
         "db.migrator_user",
     ),
     (
-        "01-roles.sh",
+        "cluster-access.sh",
         "host    recipe       recipe_migrator ",
         "host    recipe       recipe_migrate  ",
+        "db.migrator_user",
+    ),
+    // The shared client rules hold the `pg_hba.conf` line of the migrator (ADR-0103 (l)).
+    (
+        "cluster-access.sh",
+        "        printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\\n' \"$subnet\" &&\n",
+        "",
         "db.migrator_user",
     ),
     // A changed row of the table is a fault in each file that repeats it.

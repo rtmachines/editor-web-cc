@@ -49,8 +49,17 @@ const TEST_HOSTS_SOURCE: &str = concat!(
 );
 /// The name sorts after `01-roles.sh`, so the image runs it second.
 const TEST_HOSTS_TARGET: &str = "/docker-entrypoint-initdb.d/02-test-hosts.sh";
+/// The shared file of the client rules (ADR-0103 (l)). The path is outside the init directory,
+/// so the image never runs it. The init script sources it from the same path.
+const CLUSTER_ACCESS_SOURCE: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../deploy/db/cluster-access.sh"
+);
+const CLUSTER_ACCESS_TARGET: &str = "/etc/recipe-db/cluster-access.sh";
 const EXECUTABLE_MODE: u32 = 0o755;
 const SECRET_MODE: u32 = 0o644;
+/// The mode of a file that bash sources and never runs.
+const SOURCED_MODE: u32 = 0o644;
 /// The start returns at once. `wait_for_login` waits for the final start of the server.
 /// The init scripts run on the Unix socket only, so a TCP login proves that they are done.
 const START_GRACE_MILLIS: u64 = 100;
@@ -269,6 +278,7 @@ async fn prepare_template(server: &Server) -> Result<(), String> {
 fn container_request() -> Result<testcontainers::ContainerRequest<GenericImage>, String> {
     let script = read_script(INIT_SCRIPT_SOURCE)?;
     let test_hosts = read_script(TEST_HOSTS_SOURCE)?;
+    let cluster_access = read_script(CLUSTER_ACCESS_SOURCE)?;
     let mut request = GenericImage::new(IMAGE, IMAGE_TAG)
         .with_exposed_port(POSTGRES_PORT.tcp())
         .with_wait_for(WaitFor::millis(START_GRACE_MILLIS))
@@ -286,6 +296,10 @@ fn container_request() -> Result<testcontainers::ContainerRequest<GenericImage>,
         .with_copy_to(
             CopyTargetOptions::new(TEST_HOSTS_TARGET).with_mode(EXECUTABLE_MODE),
             test_hosts.into_bytes(),
+        )
+        .with_copy_to(
+            CopyTargetOptions::new(CLUSTER_ACCESS_TARGET).with_mode(SOURCED_MODE),
+            cluster_access.into_bytes(),
         );
     for role in Role::WITH_SECRET_FILE {
         let content = format!("{}\n", role.password());
