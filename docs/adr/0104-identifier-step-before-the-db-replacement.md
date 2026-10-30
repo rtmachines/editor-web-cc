@@ -1,6 +1,6 @@
 # ADR-0104: Step of the identifier file before the replacement of db
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0105 (item (c) step 2 and item (d): the step reads a `.partial` file without a complete segment. Item (c) step 4: `sync` before and after `ln -T`). Note: the name check and the one replacement of `db` that this ADR cites as ADR-0103 (d) and (z) are ADR-0105 (j) and (k)
 Date: 2026-10-30
 Deciders: project owner
 

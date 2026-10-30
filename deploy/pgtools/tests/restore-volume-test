@@ -23,7 +23,9 @@ BIN=${PGTOOLS_BIN:-$HERE/../bin}
 REAL_DATE=$(command -v date)
 REAL_RM=$(command -v rm)
 REAL_FLOCK=$(command -v flock || true)
-export REAL_DATE REAL_RM REAL_FLOCK
+REAL_ID=$(command -v id)
+REAL_COMM=$(command -v comm)
+export REAL_DATE REAL_RM REAL_FLOCK REAL_ID REAL_COMM
 PASSED=0
 FAILED=0
 SKIPPED=0
@@ -110,6 +112,7 @@ else
   case_volume_bad_stamp
   case_volume_good_stamp
   case_volume_target_not_empty
+  case_volume_identity
   case_volume_target_missing
   case_volume_bad_subnet
   case_volume_missing_subnet
@@ -143,6 +146,8 @@ else
   case_volume_access_revoke_fails
   case_volume_access_hba
   case_volume_access_hba_fails
+  case_volume_hba_publish_after_write
+  case_volume_hba_publish_each_write
   case_volume_access_query
   case_volume_access_query_fails
   case_volume_access_roles_differ
@@ -151,6 +156,8 @@ else
   case_volume_access_files_missing
   case_volume_access_config_changed
   case_volume_access_top_level
+  case_volume_access_forged_baseline
+  case_volume_access_no_work_files
   case_volume_access_static
   case_volume_stop_arguments
   case_volume_stop_fails

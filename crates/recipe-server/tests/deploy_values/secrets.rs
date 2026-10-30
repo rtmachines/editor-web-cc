@@ -81,7 +81,7 @@ fn created_role(line: &str) -> Option<&str> {
 }
 
 /// The initdb script reads the four password files and creates the migrator role of 7.11.
-/// The shared client rules in `cluster-access.sh` hold the `pg_hba.conf` line of that role (ADR-0103 (z)).
+/// The shared client rules in `cluster-access.sh` hold the `pg_hba.conf` line of that role (ADR-0103 (l)).
 pub fn check_initdb(text: &str, cluster_access: &str, table: &Table) -> Report {
     let mut report = Report::default();
     for key in INITDB_SECRETS {

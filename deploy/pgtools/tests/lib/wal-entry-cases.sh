@@ -235,6 +235,68 @@ EOF
   LN_ENV=("PATH=$CASE/lnstub:$ROOT/stubs:$PATH" "REAL_LN=$(command -v ln)")
 }
 
+# make_sync_stub: a stub of sync in $CASE/syncstub. It records "SYNC <name>" and whether the final
+# file exists at that call, then it succeeds. It acts only on calls with an argument.
+#   STUB_SYNC_FAIL=file  the call on a temp name of the identifier file fails
+#   STUB_SYNC_FAIL=dir   the call on the directory /wal fails
+# It sets SYNC_ENV for wal_run.
+make_sync_stub() {
+  mkdir -p "$CASE/syncstub"
+  cat >"$CASE/syncstub/sync" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = "--" ] && shift
+[ "$#" -gt 0 ] || exit 0
+final=no
+[ -e "$WAL_DIR/.system-identifier" ] && final=yes
+case $1 in
+  "$WAL_DIR"/.system-identifier.tmp.*) kind=file name=TEMP ;;
+  "$WAL_DIR") kind=dir name=WAL_DIR ;;
+  *) kind=other name=$1 ;;
+esac
+echo "SYNC $name final=$final" >>"$STUB_LOG"
+[ "${STUB_SYNC_FAIL:-}" = "$kind" ] && exit 1
+exit 0
+EOF
+  chmod 0755 "$CASE/syncstub/sync"
+  SYNC_ENV=("PATH=$CASE/syncstub:$ROOT/stubs:$PATH")
+}
+
+# sync_log: the SYNC lines of the log of the stubs, joined with a semicolon.
+sync_log() { grep '^SYNC ' "$CASE/stub/log" 2>/dev/null | paste -sd ';' -; }
+
+# The first start writes the file with two sync calls (ADR-0105 (t)).
+# The first call names the temp file before the link. The second names /wal after it.
+case_guard_sync_calls() {
+  wal_new_case guard-sync-calls
+  make_sync_stub
+  guard_run "${SYNC_ENV[@]}"
+  expect_guard_passed "guard sync calls"
+  expect_eq "guard sync calls: order" "$(sync_log)" "SYNC TEMP final=no;SYNC WAL_DIR final=yes"
+  expect_eq "guard sync calls: file" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "guard sync calls: no temp file" "$(top_listing)" "$ID_LISTING"
+}
+
+# A failed sync on the temp file leaves no temp name and no final file. A failed sync on /wal
+# leaves no temp name. Each run writes one ERROR line.
+case_guard_sync_fail() {
+  local before
+  wal_new_case guard-sync-fail-file
+  make_sync_stub
+  before=$(wal_snapshot)
+  guard_run "${SYNC_ENV[@]}" STUB_SYNC_FAIL=file
+  expect_guard_refused "guard sync fail on the file" "cannot write the file .system-identifier" "$before"
+  expect_eq "guard sync fail on the file: only the first call" "$(sync_log)" "SYNC TEMP final=no"
+  wal_new_case guard-sync-fail-dir
+  make_sync_stub
+  guard_run "${SYNC_ENV[@]}" STUB_SYNC_FAIL=dir
+  expect_eq "guard sync fail on the dir: exit code" "$RC" "1"
+  expect_eq "guard sync fail on the dir: one ERROR line" "$(error_count "$CASE/out")" "1"
+  expect_message "guard sync fail on the dir" "the file .system-identifier exists, but the sync of the directory failed"
+  expect_eq "guard sync fail on the dir: the file stays" "$(id_file_content)" "$WAL_SYSID"
+  expect_eq "guard sync fail on the dir: no tool started" "$(count_events '')" "0"
+  expect_eq "guard sync fail on the dir: no temp file" "$(top_listing)" "$ID_LISTING"
+}
+
 case_guard_static() {
   local f=$HERE/../lib/wal-identity.sh out rc
   expect_ok "static identity: file exists" test -f "$f"
@@ -389,6 +451,20 @@ case_guard_unreadable() {
   expect_guard_refused "guard bad answer of the server" "$MSG_NO_SERVER" "$before"
 }
 
+# The server is down and psql prints a two-line error with a quote and a control character.
+# The ERROR line keeps the cleaned first line in the field detail (ADR-0105 (s)).
+case_guard_error_detail() {
+  local before err
+  wal_new_case guard-error-detail
+  before=$(wal_snapshot)
+  err=$'psql: error: bad "host" (db)\001end\nSECOND LINE'
+  guard_run STUB_IDENTIFY_FAIL=1 "STUB_IDENTIFY_ERR=$err"
+  expect_guard_refused "guard error detail" "$MSG_NO_SERVER" "$before"
+  expect_eq "guard error detail: field detail" \
+    "$(grep -cF -- '"message":"cannot read the system identifier of the server","detail":"psql: error: bad ?host? (db)?end"}' "$CASE/out" || true)" "1"
+  expect_eq "guard error detail: no second line" "$(grep -c 'SECOND' "$CASE/out" || true)" "0"
+}
+
 # Two first starts: the loser of the ln reads the file again and compares (design D7).
 # The stub of ln makes the loss certain. A real race follows in case_guard_two_first_starts.
 case_guard_lost_race() {
@@ -444,7 +520,10 @@ case_wal_guard() {
     guard_malformed_case "$label"
   done
   case_guard_unreadable
+  case_guard_error_detail
   case_guard_lost_race
+  case_guard_sync_calls
+  case_guard_sync_fail
   case_guard_two_first_starts
 }
 

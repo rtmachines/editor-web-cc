@@ -49,11 +49,13 @@ class WalIdentityCase:
     def __exit__(self, *exc):
         self.temp.cleanup()
 
-    def run(self, identifier):
+    def run(self, identifier, prelude=""):
         env = {**os.environ, "WAL_DIR": str(self.directory)}
         # Bytes keep the stdin of the step free of CR on every host.
         # A function named sleep makes the wait for a segment end at once in the test.
-        script = "sleep() { :; }\n" + wal_identity_step()
+        # On Windows, fsync of a file fails. A default sync stub keeps the test local. The prelude can replace it.
+        sync_stub = "sync() { :; }\n" if os.name == "nt" else ""
+        script = "sleep() { :; }\n" + sync_stub + prelude + wal_identity_step()
         done = subprocess.run([self.bash, "-c", script], input=(identifier + "\n").encode(),
                               capture_output=True, check=False, env=env)
         return subprocess.CompletedProcess(done.args, done.returncode, done.stdout.decode(), done.stderr.decode())
@@ -65,8 +67,29 @@ def shell_function(name):
     return f"{name}() {{" + source.split(f"\n{name}() {{", 1)[1].split("\n}\n", 1)[0] + "\n}\n"
 
 
+def runbook_identity_step():
+    """Return the script block of step 1 of the segment check in the runbook section Upgrade."""
+    runbook = pathlib.Path(__file__).resolve().parents[2] / "docs" / "ops" / "runbook.md"
+    text = runbook.read_text(encoding="utf-8").replace("\r\n", "\n")
+    section = text.split("\n## Upgrade", 1)[1].split("\n## ", 1)[0]
+    blocks = re.findall(r"```bash\n(step=\$\(cat <<'STEP'\n.*?\nSTEP\n\))\n```", section, re.S)
+    if len(blocks) != 1:
+        raise AssertionError(f"the section Upgrade must hold exactly one step block, found {len(blocks)}")
+    return blocks[0].split("\n", 1)[1].rsplit("\nSTEP\n)", 1)[0]
+
+
 NAME_MESSAGE = ("CI: the pgdata volume of the new stack differs from the data volume of the running db."
                 " Stop and report.")
+EXTERNAL_MESSAGE = "CI: the pgdata volume of the new stack is not external. Stop and report."
+VARIABLE_MESSAGE = ("CI: the pgdata volume name of the new stack differs from RECIPE_PGDATA_VOLUME."
+                    " Stop and report.")
+# The section volumes of a compose.yaml. The stub of compose prints the file and fills in the variable.
+GOOD_COMPOSE = "services: {}\nvolumes:\n  pgdata:\n    external: true\n    name: ${RECIPE_PGDATA_VOLUME:?}\n  caddy: {}\n"
+NAME_FIRST_COMPOSE = "volumes:\n  pgdata:\n    name: ${RECIPE_PGDATA_VOLUME:?}\n    external: true\n  caddy: {}\n"
+OLD_COMPOSE = "services: {}\nvolumes:\n  pgdata: {}\n  caddy: {}\n"
+NOT_EXTERNAL_COMPOSE = GOOD_COMPOSE.replace("external: true", "external: false")
+OTHER_NAME_COMPOSE = GOOD_COMPOSE.replace("${RECIPE_PGDATA_VOLUME:?}", "other_pgdata")
+INLINE_COMPOSE = "volumes:\n  pgdata: {external: true, name: ${RECIPE_PGDATA_VOLUME:?}}\n"
 
 
 class NameCheckCase:
@@ -76,7 +99,14 @@ class NameCheckCase:
 set -euo pipefail
 export RECIPE_PGDATA_VOLUME=project_pgdata
 COMPOSE_PROJECT_NAME=project
-compose() { printf '{"volumes":{"pgdata":{"name":"%s"}}}' "$RECIPE_PGDATA_VOLUME"; }
+compose() {
+  printf '%s %s\n' "$UPGRADE_COMPOSE_DIR" "$*" >>"$CI_STATE/compose.log"
+  if [[ ${REPLACE_DB:-0} == 1 ]]; then printf 'bbbb\n' >"$CI_STATE/db.id"; fi
+  [[ ${1:-} == config ]] || return 1
+  printf 'name: project\n'
+  if [[ ${STUB_FIXED:-0} == 1 ]]; then printf 'volumes:\n  pgdata:\n    external: true\n    name: %s\n' "$RECIPE_PGDATA_VOLUME"; return 0; fi
+  sed 's|\${RECIPE_PGDATA_VOLUME:?}|'"$RECIPE_PGDATA_VOLUME"'|' "$UPGRADE_COMPOSE_DIR/deploy/compose.yaml"
+}
 db_volume() { printf '%s\n' "$RUNNING"; }
 container() { cat -- "$CI_STATE/db.id"; }
 docker() {
@@ -90,24 +120,38 @@ upgrade_check() { "$PYTHON" -I -B "$CHECKS" "$@"; }
     def __init__(self, test):
         self.test = test
 
-    def run(self, call, running="project_pgdata", replace_db=False):
+    def run(self, call, running="project_pgdata", replace_db=False, compose_text=GOOD_COMPOSE, previous_text=GOOD_COMPOSE,
+            fixed_config=False):
         bash = shutil.which("bash")
         if bash is None:
             self.test.skipTest("bash is not available")
         with tempfile.TemporaryDirectory() as temp:
-            state = pathlib.Path(temp)
+            state = pathlib.Path(temp) / "state"
+            state.mkdir()
+            for name, text in (("new", compose_text), ("previous", previous_text)):
+                directory = pathlib.Path(temp) / name / "deploy"
+                directory.mkdir(parents=True)
+                (directory / "compose.yaml").write_text(text, encoding="utf-8", newline="\n")
             (state / "db.id").write_text("aaaa\n")
             (state / "db.volume").write_text("project_pgdata\n")
             source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
-            message = next(line for line in source.splitlines() if line.startswith("VOLUME_NAME_MESSAGE="))
-            script = "\n".join([self.PRELUDE, message, shell_function("check_volume_name"),
-                                shell_function("check_volume_name_mutation"), call])
+            messages = [line for line in source.splitlines() if line.startswith("VOLUME_") and "_MESSAGE=" in line]
+            self.test.assertEqual(len(messages), 3)
+            script = "\n".join([self.PRELUDE, *messages, shell_function("check_volume_name"),
+                                shell_function("check_volume_name_mutation"),
+                                shell_function("check_volume_external_mutation"), call])
             env = {**os.environ, "CI_STATE": state.as_posix(), "RUNNING": running, "PYTHON": sys.executable,
+                   "UPGRADE_COMPOSE_DIR": (pathlib.Path(temp) / "new").as_posix(),
+                   "UPGRADE_PREVIOUS_DIR": (pathlib.Path(temp) / "previous").as_posix(),
+                   "STUB_FIXED": "1" if fixed_config else "0",
                    "CHECKS": pathlib.Path(__file__).with_name("upgrade_checks.py").as_posix(),
                    "REPLACE_DB": "1" if replace_db else "0"}
             done = subprocess.run([bash, "-c", script], input=b"", capture_output=True, check=False, env=env)
             docker_log = state / "docker.log"
             log = docker_log.read_text() if docker_log.exists() else ""
+            compose_log = state / "compose.log"
+            text = compose_log.read_text() if compose_log.exists() else ""
+            self.compose_log = text.replace(state.as_posix(), "$CI_STATE").replace(pathlib.Path(temp).as_posix(), "$TEMP")
             return (done.returncode, done.stdout.decode().replace("\r", ""),
                     done.stderr.decode().replace("\r", ""), log)
 
@@ -202,10 +246,11 @@ class UpgradeChecksTests(unittest.TestCase):
                 self.checks.pgdata_volume_name(bad)
 
     def test_segment_check_log_must_match_the_state_of_the_identifier_file(self):
-        passed = ("CI: the segment check passed. The segment 000000010000000000000003"
+        passed = ("The segment check passed. The segment 000000010000000000000003"
                   " holds the system identifier of db.\n")
-        skipped = "CI: the segment check does not run. The file .system-identifier exists.\n"
+        skipped = "The segment check does not run. The file .system-identifier exists.\n"
         self.checks.check_wal_identity_log(passed, "ran")
+        self.checks.check_wal_identity_log(passed.replace("0003 ", "0003.partial "), "ran")
         self.checks.check_wal_identity_log(skipped, "skipped")
         wrong_name = passed.replace("000000010000000000000003", "0000000100000000000003")
         for output, mode in ((skipped, "ran"), (passed, "skipped"), ("", "ran"), ("", "skipped"),
@@ -220,7 +265,7 @@ class UpgradeChecksTests(unittest.TestCase):
             config = pathlib.Path(temp) / "config.json"
             config.write_text('{"volumes": {"pgdata": {"name": "abc_pgdata"}}}', encoding="utf-8")
             log = pathlib.Path(temp) / "wal.log"
-            log.write_text("CI: the segment check does not run. The file .system-identifier exists.\n", encoding="utf-8")
+            log.write_text("The segment check does not run. The file .system-identifier exists.\n", encoding="utf-8")
             done = subprocess.run([sys.executable, "-I", "-B", script, "volume-name", str(config)],
                                   capture_output=True, text=True, check=False)
             self.assertEqual((done.returncode, done.stdout), (0, "abc_pgdata\n"))
@@ -365,17 +410,107 @@ class UpgradeScriptTests(unittest.TestCase):
         self.assertLess(name_check, body.index("write_wal_identity"))
         self.assertLess(body.index("write_wal_identity"), replacement)
 
-    def test_wal_identity_step_stops_for_a_wal_directory_with_only_a_partial_segment(self):
+    def test_restore_test_runs_in_a_new_previous_container_before_the_premigrate_backup(self):
+        source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
+        body = source.split("\nupgrade() {", 1)[1].split("\n}\n", 1)[0]
+        run_form = "RECIPE_VERSION=ci-previous compose run --rm --no-deps -T backup restore-test"
+        self.assertEqual(body.count(run_form), 1)
+        start = body.index(run_form)
+        self.assertLess(body.index("\n  write_wal_identity\n"), start)
+        self.assertLess(start, body.index("compose up -d backup-premigrate"))
+        self.assertNotRegex(source, r"compose exec( -T)? backup restore-test")
+        self.assertNotIn("restore-test", source.split("\nstart_previous() {", 1)[1].split("\n}\n", 1)[0])
+        self.assertRegex(
+            body[start:],
+            r'(?s)^[^\n]*\| tee "\$CI_STATE/old-restore\.log"\n\s*upgrade_check restore "\$CI_STATE/old-restore\.log" "\$\(cat "\$CI_STATE/old-now\.set"\)"',
+        )
+
+    def test_wal_identity_step_writes_the_file_from_a_partial_file_of_the_same_system(self):
         with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
             (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(5))
+            result = case.run("5")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = [line for line in result.stdout.splitlines() if line.strip()]
+            self.assertEqual(len(lines), 1, result.stdout)
+            self.assertIn("segment check passed", lines[0])
+            self.assertEqual(case.file.read_bytes(), b"5\n")
+            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
+                             [".system-identifier", "000000010000000000000001.partial"])
+
+    def test_wal_identity_step_reads_the_newest_partial_file(self):
+        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
+            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(9))
+            (case.directory / "000000010000000000000002.partial").write_bytes(wal_header(5))
+            result = case.run("5")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(case.file.read_bytes(), b"5\n")
+
+    def test_wal_identity_step_refuses_a_partial_file_of_another_system(self):
+        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
+            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(7))
             result = case.run("5")
             self.assertEqual(result.returncode, 1)
             lines = [line for line in result.stderr.splitlines() if line.strip()]
             self.assertEqual(len(lines), 1, result.stderr)
-            self.assertIn("holds no complete segment", lines[0])
+            self.assertIn("holds another system identifier", lines[0])
             self.assertEqual(result.stdout, "")
             self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
                              ["000000010000000000000001.partial"])
+
+    def test_wal_identity_step_refuses_a_partial_file_without_a_long_header(self):
+        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
+            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(5, info=0x0001))
+            result = case.run("5")
+            self.assertEqual(result.returncode, 1)
+            lines = [line for line in result.stderr.splitlines() if line.strip()]
+            self.assertEqual(len(lines), 1, result.stderr)
+            self.assertIn("has no long header", lines[0])
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
+                             ["000000010000000000000001.partial"])
+
+    def test_wal_identity_step_ignores_a_matching_partial_file_when_a_complete_segment_exists(self):
+        with WalIdentityCase(self, segment_sysid=6) as case:
+            (case.directory / "000000010000000000000002.partial").write_bytes(wal_header(5))
+            result = case.run("5")
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("holds another system identifier", result.stderr)
+            self.assertFalse(case.file.exists())
+
+    def test_wal_identity_step_runs_sync_on_the_temp_file_before_ln_and_on_the_directory_after_it(self):
+        with WalIdentityCase(self, segment_sysid=5) as case:
+            log = case.directory.parent / (case.directory.name + ".calls")
+            self.addCleanup(lambda: log.unlink(missing_ok=True))
+            prelude = (f'CALLS="{log.as_posix()}"\n'
+                       'sync() { printf "sync %s\\n" "$*" >>"$CALLS"; }\n'
+                       'ln() { printf "ln %s\\n" "$*" >>"$CALLS"; command ln "$@"; }\n')
+            result = case.run("5", prelude)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [line.rstrip("\r").split(" ", 1) for line in log.read_text().splitlines()] if log.exists() else []
+            # Options such as -- or -d do not change which path the call names.
+            kinds = [(name, [part for part in rest.split() if not part.startswith("-")]) for name, rest in calls]
+            self.assertEqual([name for name, _ in kinds], ["sync", "ln", "sync"], calls)
+            directory = str(case.directory)
+            temp = kinds[0][1]
+            self.assertEqual(len(temp), 1, calls)
+            self.assertTrue(temp[0].startswith(directory + "/.system-identifier.tmp."), calls)
+            self.assertIn(temp[0], kinds[1][1])
+            self.assertEqual(kinds[2][1], [directory], calls)
+
+    def test_wal_identity_step_names_the_published_file_when_only_the_directory_sync_fails(self):
+        with WalIdentityCase(self, segment_sysid=5) as case:
+            prelude = 'sync() { local last; for last; do :; done; [ ! -d "$last" ]; }\n'
+            result = case.run("5", prelude)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stderr.strip().splitlines(),
+                             ["ERROR: the file .system-identifier exists, but the sync of the directory failed."])
+            self.assertEqual(case.file.read_text().strip(), "5")
+            self.assertEqual([p.name for p in case.directory.iterdir() if ".tmp." in p.name], [])
+
+    def test_runbook_step_equals_wal_identity_step_of_upgrade_sh(self):
+        runbook = runbook_identity_step().replace("\r\n", "\n").rstrip("\n")
+        script = wal_identity_step().replace("\r\n", "\n").rstrip("\n")
+        self.assertEqual(runbook, script)
 
     def test_wal_identity_step_skips_when_the_file_exists(self):
         with WalIdentityCase(self, segment_sysid=5) as case:
@@ -421,6 +556,51 @@ class UpgradeScriptTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(stderr, NAME_MESSAGE + "\n")
 
+    def test_name_check_refuses_a_volume_that_is_not_external(self):
+        for text in (OLD_COMPOSE, NOT_EXTERNAL_COMPOSE, INLINE_COMPOSE.replace("external: true", "external: false")):
+            with self.subTest(text=text):
+                code, _, stderr, _ = NameCheckCase(self).run("check_volume_name", compose_text=text)
+                self.assertEqual((code, stderr), (1, EXTERNAL_MESSAGE + "\n"))
+
+    def test_name_check_refuses_a_name_other_than_the_variable(self):
+        code, _, stderr, _ = NameCheckCase(self).run("check_volume_name", compose_text=OTHER_NAME_COMPOSE,
+                                                      running="other_pgdata")
+        self.assertEqual((code, stderr), (1, VARIABLE_MESSAGE + "\n"))
+
+    def test_name_check_reads_name_and_external_in_any_order(self):
+        code, _, stderr, _ = NameCheckCase(self).run("check_volume_name", compose_text=NAME_FIRST_COMPOSE)
+        self.assertEqual((code, stderr), (0, ""))
+
+    def test_name_check_runs_one_config_command_and_nothing_else(self):
+        case = NameCheckCase(self)
+        for text in (OLD_COMPOSE, OTHER_NAME_COMPOSE, GOOD_COMPOSE):
+            with self.subTest(text=text):
+                case.run("check_volume_name", compose_text=text, running="other_pgdata")
+                self.assertEqual(case.compose_log, "$TEMP/new config\n")
+
+    def test_external_mutation_expects_case_1_on_a_copy_and_keeps_db(self):
+        for previous in (GOOD_COMPOSE, NAME_FIRST_COMPOSE, OLD_COMPOSE):
+            with self.subTest(previous=previous):
+                case = NameCheckCase(self)
+                code, stdout, stderr, log = case.run("check_volume_external_mutation", previous_text=previous)
+                self.assertEqual(code, 0, stderr)
+                self.assertIn("the name check stopped the upgrade for a pgdata volume that is not external", stdout)
+                self.assertEqual(case.compose_log, "$CI_STATE/previous-no-external config\n")
+                self.assertEqual(log, "")
+
+    def test_external_mutation_fails_when_the_check_does_not_stop(self):
+        code, _, stderr, _ = NameCheckCase(self).run("check_volume_external_mutation", fixed_config=True)
+        self.assertEqual(code, 1)
+        self.assertIn("the name check did not stop the upgrade for a pgdata volume that is not external", stderr)
+
+    def test_external_mutation_fails_when_db_changes(self):
+        code, _, stderr, _ = NameCheckCase(self).run("check_volume_external_mutation", replace_db=True)
+        self.assertEqual(code, 1)
+        self.assertIn("replaced the database container", stderr)
+        code, _, stderr, _ = NameCheckCase(self).run("check_volume_external_mutation", running="other_pgdata")
+        self.assertEqual(code, 1)
+        self.assertIn("changed the data volume of the database", stderr)
+
     def test_name_check_mutation_expects_the_stop_and_keeps_db(self):
         code, stdout, stderr, log = NameCheckCase(self).run("check_volume_name_mutation")
         self.assertEqual(code, 0, stderr)
@@ -442,9 +622,13 @@ class UpgradeScriptTests(unittest.TestCase):
         body = source.split("\nupgrade() {", 1)[1].split("\n}\n", 1)[0]
         record = body.index('db_volume >"$CI_STATE/db.volume"')
         mutation = body.index("\n  check_volume_name_mutation\n")
+        external = body.index("\n  check_volume_external_mutation\n")
         gate = body.index("\n  check_volume_name\n")
         self.assertLess(record, mutation)
-        self.assertLess(mutation, gate)
+        self.assertLess(mutation, external)
+        self.assertLess(external, gate)
+        self.assertLess(external, body.index("write_wal_identity"))
+        self.assertEqual(body.count("\n  check_volume_external_mutation\n"), 1)
         for command in ("compose up", "wait_job", "replace_guard"):
             with self.subTest(command=command):
                 self.assertLess(gate, body.index(command))
@@ -452,8 +636,13 @@ class UpgradeScriptTests(unittest.TestCase):
 
     def test_name_check_compares_compose_config_with_the_running_db(self):
         check = shell_function("check_volume_name")
-        self.assertIn("compose config --format json", check)
-        self.assertIn("upgrade_check volume-name", check)
+        runbook = pathlib.Path(__file__).resolve().parents[2] / "docs" / "ops" / "runbook.md"
+        text = runbook.read_text(encoding="utf-8").replace("\r\n", "\n")
+        section = text.split("\n## Upgrade", 1)[1].split("\n## ", 1)[0]
+        commands = re.findall(r"^docker compose config \| (awk '.*')$", section, re.M)
+        self.assertEqual(len(commands), 1)
+        self.assertIn(commands[0], check)
+        self.assertIn("compose config", check)
         self.assertIn("db_volume", check)
         self.assertNotIn("compose up", check)
 

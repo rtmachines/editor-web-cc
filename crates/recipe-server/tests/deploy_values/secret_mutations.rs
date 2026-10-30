@@ -75,10 +75,10 @@ const SECRET_AND_ROLE: [Mutation; 15] = [
         "host    recipe       recipe_migrate  ",
         "db.migrator_user",
     ),
-    // The shared client rules hold the `pg_hba.conf` line of the migrator (ADR-0103 (z)).
+    // The shared client rules hold the `pg_hba.conf` line of the migrator (ADR-0103 (l)).
     (
         "cluster-access.sh",
-        "      printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\\n' \"$subnet\"\n",
+        "        printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\\n' \"$subnet\" &&\n",
         "",
         "db.migrator_user",
     ),

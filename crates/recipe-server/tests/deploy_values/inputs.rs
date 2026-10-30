@@ -66,6 +66,9 @@ const SCRIPTS: [&str; 10] = [
     "walarchive-health",
 ];
 const SCRIPT_DIRECTORY: &str = "deploy/pgtools/bin/";
+/// The libraries of `deploy/pgtools/lib/` that hold a constant of 7.11. A library has no default.
+const LIBRARY_SCRIPTS: [&str; 1] = ["wal-identity.sh"];
+const LIBRARY_DIRECTORY: &str = "deploy/pgtools/lib/";
 
 /// A file under test: the path from the repository root and its text.
 #[derive(Clone)]
@@ -139,6 +142,7 @@ impl Inputs {
         paths.extend(CADDYFILES.map(String::from));
         paths.extend(CRONTABS.iter().map(|(path, _)| (*path).to_owned()));
         paths.extend(SCRIPTS.map(|name| format!("{SCRIPT_DIRECTORY}{name}")));
+        paths.extend(LIBRARY_SCRIPTS.map(|name| format!("{LIBRARY_DIRECTORY}{name}")));
         let files = paths
             .into_iter()
             .map(|path| Source {
@@ -196,6 +200,10 @@ fn check_scripts(inputs: &Inputs, settings: &Table) -> Report {
         if matches!(name, "restore-test" | "pitr-check" | "restore-volume") {
             report.absorb(check_scratch_settings(name, text, settings));
         }
+    }
+    for name in LIBRARY_SCRIPTS {
+        let text = inputs.text(&format!("{LIBRARY_DIRECTORY}{name}"));
+        report.absorb(check_script_assignments(name, text, settings));
     }
     report
 }

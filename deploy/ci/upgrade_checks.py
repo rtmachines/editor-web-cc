@@ -81,13 +81,13 @@ def pgdata_volume_name(config):
     return name
 
 
-SEGMENT_PASSED = re.compile(r"CI: the segment check passed\. The segment [0-9A-F]{24} holds the system identifier of db\.")
-SEGMENT_SKIPPED = "CI: the segment check does not run. The file .system-identifier exists."
+SEGMENT_PASSED = re.compile(r"The segment check passed\. The segment [0-9A-F]{24}(\.partial)? holds the system identifier of db\.")
+SEGMENT_SKIPPED = "The segment check does not run. The file .system-identifier exists."
 
 
 def check_wal_identity_log(output, mode):
     """Check the log of the step of design D8 against the state of the file before the step."""
-    lines = [line for line in output.splitlines() if line.startswith("CI: the segment check")]
+    lines = [line for line in output.splitlines() if line.startswith("The segment check")]
     if mode == "ran":
         ok = len(lines) == 1 and SEGMENT_PASSED.fullmatch(lines[0]) is not None
     elif mode == "skipped":

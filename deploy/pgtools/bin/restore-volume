@@ -59,6 +59,10 @@ STAMP_GRAMMAR='^[0-9]{8}_[0-9]{4}(_premigrate|_now)?$'
 IDENTIFIER_GRAMMAR='^[0-9]{1,20}$'
 # The configuration files that step 4 copies and step 8 compares (ADR-0103 (o)).
 CONFIG_FILES=(postgresql.conf postgresql.auto.conf pg_ident.conf)
+# The baselines of those checks. Step 4 sets them and step 8 reads them. They stay in the memory of
+# the script, because a process of uid 999 can write below the directory of the work files (ADR-0105 (q)).
+declare -A config_sha256_baseline=()
+top_level_baseline=""
 
 BACKUP_DIR=${BACKUP_DIR:-/backups}
 PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
@@ -133,9 +137,19 @@ trap 'exit 143' TERM
 trap 'exit 130' INT
 trap 'exit 129' HUP
 
-# check_inputs: step 1. The stamp, COMPOSE_SUBNET, and the target. A refused run starts no tool.
+# check_run_user: step 1. The run needs uid 999 and the user name postgres (ADR-0105 (r)).
+# The files of the target must belong to the postgres user of the database image.
+check_run_user() {
+  local uid user
+  uid=$(id -u) && user=$(id -un) && [[ $uid =~ ^[0-9]+$ ]] || fail "cannot read the user id of this run"
+  [ "$uid" = 999 ] || fail "restore-volume must run as uid 999" "\"uid\":$uid"
+  [ "$user" = postgres ] || fail "restore-volume must run as the user postgres" "\"user\":\"$(clean "$user")\""
+}
+
+# check_inputs: step 1. The user, the stamp, COMPOSE_SUBNET, and the target. A refused run starts no tool.
 check_inputs() {
   local first
+  check_run_user
   [[ $stamp =~ $STAMP_GRAMMAR ]] \
     || fail "the stamp is outside the grammar of the set names" "\"stamp\":\"$(clean "$stamp")\""
   check_compose_subnet "${COMPOSE_SUBNET-}" \
@@ -190,7 +204,8 @@ run_gates() {
 # init_cluster: step 4. initdb with the arguments of reliability.md 7.1 and a random password file
 # in the work directory. initdb runs without LC_ALL and keeps the LANG of the image (design D4).
 # With LC_ALL=C, initdb would write lc_messages, lc_monetary, lc_numeric, and lc_time as C.
-# Then the script keeps the three configuration files and the top-level names for the checks of step 8.
+# Then the script keeps the SHA-256 values of the three configuration files and the top-level names
+# in shell variables for the checks of step 8. It writes no baseline file (ADR-0105 (q)).
 init_cluster() {
   local file
   superuser=$(id -un) || fail "cannot read the name of the system user"
@@ -200,11 +215,10 @@ init_cluster() {
     --lc-collate=C --lc-ctype=C.UTF-8 >/dev/null 2>"$work_dir/initdb.err" \
     || fail "initdb failed" "\"detail\":\"$(tool_detail "$work_dir/initdb.err")\""
   for file in "${CONFIG_FILES[@]}"; do
-    cp -- "$TARGET_DIR/$file" "$work_dir/$file.initdb" \
+    config_sha256_baseline[$file]=$(config_sha256 "$file") \
       || fail "cannot keep a copy of a configuration file" "\"file\":\"$file\""
   done
-  find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort >"$work_dir/top-level.initdb" \
-    || fail "cannot list the top-level names of the new cluster"
+  top_level_baseline=$(top_level_names) || fail "cannot list the top-level names of the new cluster"
 }
 
 # start_server: step 5. A temporary server on a private socket in the work directory. It has no TCP
@@ -281,30 +295,42 @@ compare_roles() {
     "\"missing\":$missing,\"extra\":$extra,\"first\":\"$(clean "$first")\""
 }
 
-# check_config_files: ADR-0103 (o). The three configuration files equal the copies of step 4.
+# config_sha256 <file>: print the SHA-256 value of a configuration file of the target.
+config_sha256() {
+  local line
+  line=$(sha256sum -- "$TARGET_DIR/$1" 2>/dev/null) || return 1
+  printf '%s\n' "${line%% *}"
+}
+
+# top_level_names: print the sorted names at the top of the target, without the files of a running server.
+top_level_names() {
+  find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name postmaster.pid ! -name postmaster.opts \
+    -printf '%f\n' | sort
+}
+
+# check_config_files: ADR-0103 (o). The SHA-256 values of the three configuration files equal the values of step 4.
 check_config_files() {
-  local file
+  local file now
   for file in "${CONFIG_FILES[@]}"; do
-    cmp -s -- "$work_dir/$file.initdb" "$TARGET_DIR/$file" \
+    now=$(config_sha256 "$file") && [ "$now" = "${config_sha256_baseline[$file]:-}" ] \
       || fail "a configuration file of the new cluster changed after initdb" "\"file\":\"$file\""
   done
 }
 
 # check_top_level: ADR-0103 (o). The names at the top of the target equal the names after initdb.
 # The files postmaster.pid and postmaster.opts of the running server do not count.
+# The lists live in shell variables. A process of uid 999 can write below /run/pgpass during step 8 (ADR-0105 (q)).
 check_top_level() {
-  local added removed first
-  find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name postmaster.pid ! -name postmaster.opts \
-    -printf '%f\n' | sort >"$work_dir/top-level.now" \
-    || fail "cannot list the top-level names of the target"
-  comm -13 "$work_dir/top-level.initdb" "$work_dir/top-level.now" >"$work_dir/top-level.added"
-  comm -23 "$work_dir/top-level.initdb" "$work_dir/top-level.now" >"$work_dir/top-level.removed"
-  added=$(($(wc -l <"$work_dir/top-level.added")))
-  removed=$(($(wc -l <"$work_dir/top-level.removed")))
-  [ "$added" -ne 0 ] || [ "$removed" -ne 0 ] || return 0
-  first=$(cat -- "$work_dir/top-level.added" "$work_dir/top-level.removed" | sed -n '1p')
+  local now added removed added_count removed_count first
+  now=$(top_level_names) || fail "cannot list the top-level names of the target"
+  added=$(comm -13 <(printf '%s\n' "$top_level_baseline") <(printf '%s\n' "$now"))
+  removed=$(comm -23 <(printf '%s\n' "$top_level_baseline") <(printf '%s\n' "$now"))
+  added_count=$(printf '%s' "$added" | grep -c '^' || true)
+  removed_count=$(printf '%s' "$removed" | grep -c '^' || true)
+  [ "$added_count" -ne 0 ] || [ "$removed_count" -ne 0 ] || return 0
+  first=$(printf '%s\n%s\n' "$added" "$removed" | sed -n '/./{p;q}')
   fail "the top-level names of the target differ from the names after initdb" \
-    "\"added\":$added,\"removed\":$removed,\"first\":\"$(clean "$first")\""
+    "\"added\":$added_count,\"removed\":$removed_count,\"first\":\"$(clean "$first")\""
 }
 
 # check_access: step 8. The roles and the access, the configuration files, and the top-level names.

@@ -25,8 +25,8 @@ Current state of the code (branch `docs/restore-volume-switch`, commit `cdf925c`
 **Non-Goals:**
 
 - No change of production Rust code, of a migration, or of `grants.expected`.
-- No new ADR. ADR-0103 is a draft of this pull request until the merge. ADR-0103, the Status line of ADR-0099, and `reliability.md` 7.7, 7.8, and 7.10 already hold the decisions of this design.
-- No task changes `docs/architecture/` or an ADR.
+- ADR-0104 and ADR-0105 amend ADR-0103 inside this change. ADR-0103 keeps its accepted text of commit `cdf925c` and changes only by its Status line.
+- ADR-0103, ADR-0104, ADR-0105, and `reliability.md` 7.7, 7.8, and 7.10 hold the decisions of this design. No task changes `docs/architecture/` or an ADR.
 - No automation of the switch. The switch stays a runbook procedure. Only CI scripts run its steps.
 
 ## Decisions
@@ -35,10 +35,10 @@ Current state of the code (branch `docs/restore-volume-switch`, commit `cdf925c`
 
 - Path: `deploy/db/cluster-access.sh`. It defines three functions and runs no command at source time.
 - `check_compose_subnet <subnet>` holds the subnet grammar of `01-roles.sh`. `01-roles.sh` calls it before its first change, as today. `restore-volume` calls it in step 1.
-- `write_hba_conf <subnet> <file>` writes the seven lines of ADR-0069 (r) to (t) to a temp file and renames it.
+- `write_hba_conf <subnet> <file>` writes the seven lines of ADR-0069 (r) to (t) to a temp file. It renames the temp file only after the write succeeds (ADR-0105 (u)).
 - `print_default_db_revokes` prints the two `REVOKE` statements of ADR-0032 for `postgres` and `template1`. The two statements for `recipe` stay in `01-roles.sh`, because `restore-volume` gets the access list of `recipe` from the dump.
 - `db` mounts the file read-only at `/etc/recipe-db/cluster-access.sh`. This path is outside `/docker-entrypoint-initdb.d`, so the entrypoint never runs it. `01-roles.sh` sources this fixed path. No variable changes the path, so ADR-0069 (u) stays.
-- The new mount changes the service configuration of `db`. In this release, step 3 command 1 of `reliability.md` 7.10 therefore replaces `db` once on the same volume (ADR-0103 (z)). The CI job `upgrade` checks the volume name and the system identifier of the new container (task 1.5).
+- The new mount changes the service configuration of `db`. In this release, step 3 command 1 of `reliability.md` 7.10 therefore replaces `db` once on the same volume (ADR-0105 (k)). The CI job `upgrade` checks the volume name and the system identifier of the new container (task 1.5).
 - The `recipe-pgtools` image copies the file to `/etc/pgtools/cluster-access.sh`.
 - Alternative: two copies and an equality test. ADR-0103 (l) rejects a second copy.
 
@@ -63,8 +63,10 @@ Current state of the code (branch `docs/restore-volume-switch`, commit `cdf925c`
 
 - The script follows the ten steps of ADR-0103 (i). Each step is one function. The stub suite `deploy/pgtools/tests/restore-volume-test` tests each stop point, like `restore-test-test`.
 - Step 1: the target `/var/lib/postgresql/data` is empty when `find -mindepth 1 -maxdepth 1` prints nothing. The stamp grammar is the stamp part of the manifest grammar of `reliability.md` 7.7.
+- Step 1 also checks that `id -u` prints 999 and that `id -un` prints `postgres` (ADR-0105 (r)).
 - Step 2: `exec 9<"/backups/.scratch/.lock"` and `flock 9`. The script never creates the lock file.
 - Step 4: `initdb` uses the arguments of `reliability.md` 7.1, `--auth-local=peer`, `--auth-host=scram-sha-256`, and a random `--pwfile` in the work directory of the tmpfs `/run/pgpass`.
+- Step 4 keeps the SHA-256 values of the three configuration files and the list of top-level names in shell variables. It writes no baseline into `/run/pgpass` (ADR-0105 (q)).
 - Step 4 runs `initdb` with `env -u LC_ALL` and the value `LANG` of the image. The other pgtools scripts export `LC_ALL=C`. Without this rule, `initdb` writes `lc_messages`, `lc_monetary`, `lc_numeric`, and `lc_time` as `C`. The entrypoint of `db` writes them from `LANG=en_US.utf8`.
 - Step 5: `pg_ctl start -w -t <restore_volume.start_timeout>` with `-o` for `listen_addresses=''`, the private socket directory, and the five `scratch.*` sizes. The script passes no `fsync` option.
 - Step 5 writes the server log to `/run/pgpass/<work>/server.log`. A log inside the target is a new top-level name, and step 8 refuses it.
@@ -100,6 +102,8 @@ Current state of the code (branch `docs/restore-volume-switch`, commit `cdf925c`
 - The guard reads the server identifier with `IDENTIFY_SYSTEM` over the replication connection of the script.
 - A segment exists when one name at the top of `/wal` matches the segment grammar or the `.partial` form of ADR-0099 (d).
 - The guard writes a new file under a temp name and publishes it with `ln -T` without `-f` (ADR-0074 (b)). When the link fails, it reads the file again and compares. This handles two first starts at the same time.
+- The guard runs `sync` on the temp file before `ln -T` and on `/wal` after it (ADR-0105 (t)).
+- A failed `IDENTIFY_SYSTEM` keeps the first line of the libpq error in the field `detail`, cleaned with `clean` of `restore-steps.sh` (ADR-0105 (s)).
 - The file holds one line: the decimal identifier.
 - The guard refuses a malformed file with its own message. A malformed file is empty, holds a CR, holds a character other than an ASCII digit, or holds more than one line. The runbook section "Messages of walarchive" names that message.
 - A gap of the WAL stream moves the segments and keeps the file. The guard then finds the file and no segment, compares the identifier, and passes.
@@ -111,18 +115,24 @@ The first start of the new `walarchive` image finds segments and no file, so it 
 1. Read `SELECT system_identifier FROM pg_control_system()` in `db` as `postgres`.
 2. Pipe the value into a new container of the previous image: `docker compose run --rm --no-deps -T --entrypoint sh walarchive`. Never use `docker compose exec` into the old `walarchive` container (ADR-0104 (b)).
 3. That container finds the newest complete segment in `/wal` by the segment grammar, with `LC_ALL=C`. It reads `xlp_sysid` from the long page header of the first page: 8 bytes at offset 24, little-endian.
+   Without a complete segment, it reads the newest `.partial` file in the same way (ADR-0105 (h)).
 4. A difference between the two values stops the step with one `ERROR` line. The step then writes no file.
-5. Else the container writes `/wal/.system-identifier` with `umask 077`, a temp name, and `ln -T`.
+5. Else the container writes `/wal/.system-identifier` with `umask 077`, a temp name, `sync`, and `ln -T`. Then it runs `sync` on `/wal` (ADR-0105 (t)).
 
-The step checks the value and does not trust the volume name. A wrong volume name at the upgrade gives `db` the identifier of another cluster, and step 4 then stops (ADR-0103 (d), (s)).
+The step checks the value and does not trust the volume name. A wrong volume name at the upgrade gives `db` the identifier of another cluster, and step 4 then stops (ADR-0105 (j), (n)).
+
+The runbook and the value `WAL_IDENTITY_STEP` of `deploy/ci/upgrade.sh` hold the same script. A unit test of `deploy/ci/test_upgrade_checks.py` compares the two texts (ADR-0105 (p)).
 
 `deploy/.env` still holds the previous tag in step 2 of `reliability.md` 7.10. The step does not depend on the state of the old `walarchive` container. After the replacement of `db`, the old container of 0.1.0 can restart in a loop, because its image has no mount point `/run/pgpass` (ADR-0104). The `Dockerfile` of `recipe-pgtools` now creates `/run/pgpass` with the mode 1777 before `USER 999:999`.
 
-Without a complete segment in `/wal`, the step writes no file. The operator runs `SELECT pg_switch_wal()` in `db`, waits for a complete segment, and runs the step again (ADR-0104 (d)).
+Without a complete segment and without a `.partial` file in `/wal`, the step writes no file. The operator runs `SELECT pg_switch_wal()` in `db`, waits for a complete segment, and runs the step again (ADR-0104 (d)).
 
 The CI job `upgrade` runs the same step in the same form before `backup-premigrate`, with the previous tag. Before the step, it runs `SELECT pg_switch_wal()` and waits for a complete segment while the old `walarchive` streams. A previous release with the guard already has the file, so the job then skips the step (ADR-0104 (e)).
 
-`reliability.md` 7.10 step 2 sets `RECIPE_PGDATA_VOLUME` before the first Compose command of the upgrade. Then it compares the name of `pgdata` in `docker compose config` with the volume that `docker inspect` of the running `db` shows for `/var/lib/postgresql/data`. A difference stops the upgrade (ADR-0103 (d)).
+`reliability.md` 7.10 step 2 installs the files of the new release in a new directory first (ADR-0105 (e), (i)). Then it sets `RECIPE_PGDATA_VOLUME` before the first Compose command of the upgrade.
+The name check refuses three cases (ADR-0105 (j)). `pgdata` is not `external: true` in `docker compose config`. Its name differs from `RECIPE_PGDATA_VOLUME`. Its name differs from the volume of the running `db`.
+
+`reliability.md` 7.10 step 3 runs `restore-test` with `docker compose run --rm --no-deps backup` and the previous tag, not with `docker compose exec` (ADR-0105 (g)).
 
 ### D9. CI job `restore-switch`
 
@@ -135,7 +145,7 @@ The CI job `upgrade` runs the same step in the same form before `backup-premigra
   5. `refuse` runs the negative cases: `restore-volume` on the live volume, and `up` with a missing external volume.
   6. `switch-back` returns to the old volume. It checks the old data and the WAL line again. `keep` runs `docker compose down -v` and checks that both data volumes stay.
 - A CI proof of the major upgrade with an image of a newer major version is out of scope (ADR-0103 (p)).
-- The job compares `postgresql.conf` and `postgresql.auto.conf` of the old cluster of `01-roles.sh` and the new cluster of `restore-volume`. It runs the comparison after the clean stop of each cluster (ADR-0103 (m)). It compares the whole files. A filter of lines, for example of the `lc_*` lines, is not permitted. A storage test has no cluster of `restore-volume`, so no storage test compares these files.
+- The job compares `postgresql.conf` and `postgresql.auto.conf` of the old cluster of `01-roles.sh` and the new cluster of `restore-volume`. It runs the comparison after the clean stop of each cluster (ADR-0105 (m)). It compares the whole files. A filter of lines, for example of the `lc_*` lines, is not permitted. A storage test has no cluster of `restore-volume`, so no storage test compares these files.
 - Every external volume of a CI run has the label `recipe.ci=<project name>`. `deploy/ci/cleanup.sh`, `upgrade.sh cleanup`, and `restore-switch.sh cleanup` delete only volumes with that label.
 
 ### D10. CI step of the major upgrade
@@ -147,9 +157,10 @@ The CI job `upgrade` runs the same step in the same form before `backup-premigra
 ### D11. Runbook
 
 - The sections "Restore into production", "Rollback", and "Major upgrade" get the steps of ADR-0103 (b), (f), (g), (q), and (s), with commands. Each first line that says "incomplete" goes away.
-- "Host preparation" creates the first volume. "Create the environment file" names nine values. "Change a setting" names nine values. "A gap in the WAL stream" keeps `/wal/.system-identifier` in place (ADR-0103 (s)). "Low disk space" and "Read-only mode" read the volume name from `.env` and hold no literal `recipe-editor_pgdata`.
+- "Host preparation" creates the first volume. "Create the environment file" names nine values. "Change a setting" names nine values. "A gap in the WAL stream" keeps `/wal/.system-identifier` in place (ADR-0105 (o)). "Low disk space" and "Read-only mode" read the volume name from `.env` and hold no literal `recipe-editor_pgdata`.
 - "Upgrade" gets the name step and its check in step 2. It also gets D8 in step 2 and the one replacement of `db` in step 3 command 1 (ADR-0104 (a)).
 - "Rollback" gets the rule of the migration plan, step 4: never use the 0.1.0 `compose.yaml` after a switch.
+- "Restore into production", "Rollback", "Switch back", and "Major upgrade" follow the tag rule of ADR-0105 (a) to (f). The change log gets the tag of each volume that a switch leaves.
 - `README.md` and the dev-stack line of `CLAUDE.md` add `docker volume create "$RECIPE_PGDATA_VOLUME"` before the first `up`.
 - The runbook follows ADR-0103 (t) for the delete of an old `pgdata` volume. "Destructive commands" replaces the line "Never run `docker volume rm` on `pgdata`" with the delete rule of ADR-0103 (t). "An older volume" replaces the line "The runbook never deletes `pgdata`" with a link to that rule.
 - "Known gaps" loses the lines of the volume switch and of the eight values. The lines of 0.1.0 sets, the residual risk, and the WAL recovery stay.
@@ -157,6 +168,11 @@ The CI job `upgrade` runs the same step in the same form before `backup-premigra
 ### D12. Agents
 
 No task runs on Codex now. Every task except a `[mechanical]` task runs on a Sonnet agent with effort high, one task per agent. A `[mechanical]` task runs on Haiku. The STE checks run on Sonnet. Opus reviews only.
+
+### D13. CI proof of the name check
+
+- The job `upgrade` runs the name check of D8 once on a copy of the previous `compose.yaml` without `external: true`. It expects the refusal of case 1 of ADR-0105 (j) (task 12.11).
+- After the refusal, `db` keeps its container ID and its volume, as in task 6.4.
 
 ## Risks / Trade-offs
 
@@ -170,7 +186,7 @@ No task runs on Codex now. Every task except a `[mechanical]` task runs on a Son
 
 ## Migration Plan
 
-1. The release note names four manual steps of an existing installation. Set `RECIPE_PGDATA_VOLUME` and check it in step 2 of `reliability.md` 7.10. Run the step of D8 before the replacement of `db` in step 3 command 1 (ADR-0104 (a)). Keep `docker compose down -v` forbidden. Expect one replacement of `db` in step 3 command 1.
+1. The release note names the manual steps of an existing installation. Install the new files in a new directory. Set `RECIPE_PGDATA_VOLUME` and check it in step 2 of `reliability.md` 7.10 (ADR-0105 (i), (j)). Run `restore-test` in a new container (ADR-0105 (g)). Run the step of D8 before the replacement of `db` in step 3 command 1 (ADR-0104 (a)). Keep `docker compose down -v` forbidden. Expect one replacement of `db` in step 3 command 1.
 2. The release holds no migration file. The schema of `db` does not change.
 3. A rollback of this release to 0.1.0 is safe only while `RECIPE_PGDATA_VOLUME` is `recipe-editor_pgdata` and no switch ran. The 0.1.0 `compose.yaml` mounts the Compose volume `recipe-editor_pgdata`. The file `/wal/.system-identifier` stays, and the old scripts ignore it.
 4. After a switch, never use the 0.1.0 `compose.yaml`. It starts `db` on the old cluster and serves old data without an error. After the delete of the old volume, it makes an empty cluster. The 0.1.0 `walarchive` has no guard and streams another system into `/wal`. The release notes and the runbook section "Rollback" state this rule.

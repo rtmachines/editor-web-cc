@@ -26,7 +26,7 @@
 - **THEN** the file holds nine values, and `RECIPE_PGDATA_VOLUME` is one of them
 
 ### Requirement: Client rules from one shared file
-`01-roles.sh` and `restore-volume` SHALL write `pg_hba.conf` with one function of one shared file in `deploy/db/`. Both SHALL run the two `REVOKE` statements of the default databases from a second function of that file. A cluster of `restore-volume` SHALL have the client rules of a cluster of `01-roles.sh` (R34, A1).
+`01-roles.sh` and `restore-volume` SHALL write `pg_hba.conf` with one function of one shared file in `deploy/db/`. Both SHALL run the two `REVOKE` statements of the default databases from a second function of that file. A cluster of `restore-volume` SHALL have the client rules of a cluster of `01-roles.sh`. A failed write SHALL NOT publish a part of `pg_hba.conf` (R34, A1).
 
 #### Scenario: Superuser over TCP on a restored cluster
 - **GIVEN** the service `db` on a volume that `restore-volume` filled
@@ -37,6 +37,12 @@
 - **GIVEN** a cluster of `01-roles.sh` and a cluster of `restore-volume` with the same value `COMPOSE_SUBNET`
 - **WHEN** the operator compares their files `pg_hba.conf`
 - **THEN** the two files hold the same lines in the same order
+
+#### Scenario: Failed write of the client rules
+- **GIVEN** a data directory with a file `pg_hba.conf` and a temp name that the function cannot write
+- **WHEN** `write_hba_conf` runs
+- **THEN** the function fails
+- **AND** the file `pg_hba.conf` does not change
 
 ### Requirement: Service of the restore into a new volume
 The one-shot service `restore-volume` SHALL have the profile `restore`, `network_mode: none`, the mount `backups:/backups:ro`, a tmpfs on `/run/pgpass`, and no secret. `docker compose up` SHALL NOT start it. The operator SHALL run it with the `recipe-pgtools` image of the schema of the set (R31, R34).
@@ -53,7 +59,7 @@ The one-shot service `restore-volume` SHALL have the profile `restore`, `network
 - **AND** it mounts `backups` read-only
 
 ### Requirement: Restore into a new volume
-Every restore into production SHALL write into a new, empty volume while `db` runs on the old volume. `restore-volume` SHALL refuse a target that is not empty and a stamp outside the grammar of the set names. It SHALL run the gates of steps 1 and 2 of `restore-test` before `initdb` runs. It SHALL write nothing to `/backups` (R31, R34).
+Every restore into production SHALL write into a new, empty volume while `db` runs on the old volume. `restore-volume` SHALL refuse a target that is not empty and a stamp outside the grammar of the set names. It SHALL refuse a user other than uid 999 with the name `postgres`. It SHALL run the gates of steps 1 and 2 of `restore-test` before `initdb` runs. It SHALL write nothing to `/backups` (R31, R34).
 
 #### Scenario: Target is the live volume
 - **GIVEN** the running service `db` on its volume
@@ -64,6 +70,11 @@ Every restore into production SHALL write into a new, empty volume while `db` ru
 #### Scenario: Stamp outside the grammar
 - **GIVEN** an empty new volume
 - **WHEN** the operator runs `restore-volume` with the stamp `20261030_1200_old`
+- **THEN** the script writes one `ERROR` line before any PostgreSQL tool runs
+
+#### Scenario: Wrong user of the restore
+- **GIVEN** an empty new volume
+- **WHEN** `restore-volume` runs as a uid other than 999, or as uid 999 with a name other than `postgres`
 - **THEN** the script writes one `ERROR` line before any PostgreSQL tool runs
 
 #### Scenario: Manifest mismatch before the restore
@@ -84,7 +95,7 @@ Every restore into production SHALL write into a new, empty volume while `db` ru
 - **THEN** the database rejects the login
 
 ### Requirement: Checks of a restored cluster
-Before the clean shutdown, `restore-volume` SHALL compare six kinds of values with `restore-roles.expected`. They are the client rules, the access lists of three databases, the role attributes, the role memberships, the role settings, and the grants. It SHALL compare the configuration files and the top-level names of the data directory with the state after `initdb`. A difference SHALL end the run (R31, R34).
+Before the clean shutdown, `restore-volume` SHALL compare six kinds of values with `restore-roles.expected`. They are the client rules, the access lists of three databases, the role attributes, the role memberships, the role settings, and the grants. It SHALL compare the configuration files and the top-level names of the data directory with the state after `initdb`. It SHALL keep that state in shell variables and SHALL NOT write it into `/run/pgpass`. A difference SHALL end the run (R31, R34).
 
 #### Scenario: Changed role attribute
 - **GIVEN** a globals file that passes the role grammar and gives `recipe_app` the attribute `CREATEROLE`
@@ -93,6 +104,11 @@ Before the clean shutdown, `restore-volume` SHALL compare six kinds of values wi
 
 #### Scenario: Changed configuration file
 - **GIVEN** a dump whose code writes a line into `postgresql.auto.conf` during the restore
+- **WHEN** `restore-volume` compares the configuration files
+- **THEN** the script writes one `ERROR` line and exits with a code other than 0
+
+#### Scenario: Changed copy in the tmpfs
+- **GIVEN** a dump whose code changes `postgresql.auto.conf` and writes files into `/run/pgpass` during the restore
 - **WHEN** `restore-volume` compares the configuration files
 - **THEN** the script writes one `ERROR` line and exits with a code other than 0
 
@@ -201,6 +217,12 @@ Every switch SHALL start a new WAL line before `app` starts. The operator SHALL 
 - **THEN** `/wal/.system-identifier` still holds the identifier of `db`
 - **AND** `pg_receivewal` starts
 
+#### Scenario: Failed read of the server identifier
+- **GIVEN** a replication connection to `db` that fails with an error of libpq
+- **WHEN** `walarchive-entry` starts
+- **THEN** the script writes one `ERROR` line with the field `detail`, which holds the cleaned first line of that error
+- **AND** the script writes no file to `/wal`
+
 #### Scenario: Malformed identifier file
 - **GIVEN** a file `/wal/.system-identifier` that is empty, holds a CR, or holds a character other than a digit
 - **WHEN** `walarchive-entry` or `basebackup-once` starts
@@ -208,7 +230,7 @@ Every switch SHALL start a new WAL line before `app` starts. The operator SHALL 
 - **AND** the script writes no file to `/wal`
 
 ### Requirement: Identifier file of an existing installation
-An existing installation SHALL write `/wal/.system-identifier` once, before `walarchive` first starts with an image that has the guard. The step SHALL run only when the file is missing. It SHALL compare the identifier of `db` with the system identifier in the page header of the newest complete segment. A difference SHALL stop the step, and the step SHALL write no file (R31, A35).
+An existing installation SHALL write `/wal/.system-identifier` once, before `walarchive` first starts with an image that has the guard. The step SHALL run only when the file is missing. It SHALL compare the identifier of `db` with the system identifier in the page header of the newest complete segment. Without a complete segment, it SHALL read the page header of the newest `.partial` file. A difference SHALL stop the step, and the step SHALL write no file (R31, A35).
 
 #### Scenario: Existing installation before the guard
 - **GIVEN** a directory `/wal` with segments of `db` and no file `.system-identifier`
@@ -222,8 +244,19 @@ An existing installation SHALL write `/wal/.system-identifier` once, before `wal
 - **THEN** the step writes one `ERROR` line and stops
 - **AND** no file `/wal/.system-identifier` exists
 
-#### Scenario: No complete segment
-- **GIVEN** a directory `/wal` with a `.partial` file, no complete segment, and no file `.system-identifier`
+#### Scenario: Only a partial file of db
+- **GIVEN** a directory `/wal` with a `.partial` file of `db`, no complete segment, and no file `.system-identifier`
+- **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image
+- **THEN** `/wal/.system-identifier` holds the identifier of `db`
+
+#### Scenario: Partial file without a long header
+- **GIVEN** a directory `/wal` with no complete segment and a `.partial` file whose first page has no long page header
+- **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image
+- **THEN** the step writes one `ERROR` line and stops
+- **AND** no file `/wal/.system-identifier` exists
+
+#### Scenario: No segment and no partial file
+- **GIVEN** a directory `/wal` with no complete segment, no `.partial` file, and no file `.system-identifier`
 - **WHEN** the operator pipes the system identifier of `db` into a new container of the previous image
 - **THEN** the step writes one `ERROR` line and stops
 - **AND** no file `/wal/.system-identifier` exists
@@ -247,7 +280,7 @@ The step of the identifier file SHALL run before the upgrade replaces `db`. It S
 - **THEN** `/wal/.system-identifier` holds the identifier of `db`
 
 ### Requirement: Data volume at the upgrade
-Before the first Compose command of an upgrade, `deploy/.env` SHALL hold `RECIPE_PGDATA_VOLUME`. The operator SHALL compare the name of `pgdata` in `docker compose config` with the volume that `docker inspect` of the running `db` shows for `/var/lib/postgresql/data`. A difference SHALL stop the upgrade. When the upgrade replaces `db`, the new container SHALL mount the same volume and SHALL have the same system identifier (R31, R34).
+Before the name check, the operator SHALL install the new release in a new directory `deploy/`. `deploy/.env` SHALL hold `RECIPE_PGDATA_VOLUME` before the first Compose command. The name check SHALL stop the upgrade when `pgdata` is not `external: true`, or when its name differs from `RECIPE_PGDATA_VOLUME` or from the volume of the running `db`. A new `db` container SHALL mount the same volume and SHALL have the same system identifier (R31, R34).
 
 #### Scenario: Wrong existing volume at the upgrade
 - **GIVEN** a running `db` on its volume and a value `RECIPE_PGDATA_VOLUME` that names another existing volume
@@ -255,11 +288,51 @@ Before the first Compose command of an upgrade, `deploy/.env` SHALL hold `RECIPE
 - **THEN** the upgrade stops before any Compose command that starts or replaces a container
 - **AND** `db` keeps its container and its volume
 
+#### Scenario: Files of the previous release at the name check
+- **GIVEN** a running `db` of release 0.1.0 and the `compose.yaml` of 0.1.0, which declares `pgdata` without `external: true`
+- **WHEN** the operator runs the name check of the upgrade
+- **THEN** the upgrade stops before any Compose command that starts or replaces a container
+
+#### Scenario: Name other than the value of the environment file
+- **GIVEN** a `compose.yaml` whose external volume `pgdata` has a name other than `RECIPE_PGDATA_VOLUME`
+- **WHEN** the operator runs the name check of the upgrade
+- **THEN** the upgrade stops before any Compose command that starts or replaces a container
+
 #### Scenario: Replacement of the database at the first upgrade
 - **GIVEN** a stack of release 0.1.0 and a passed name check
 - **WHEN** the upgrade runs `docker compose up -d backup-premigrate`, and Compose replaces `db`
 - **THEN** the new `db` container mounts the same volume
 - **AND** `pg_control_system()` returns the same `system_identifier` as before the upgrade
+
+### Requirement: Restore test before the upgrade
+Before the upgrade replaces `db`, `restore-test` SHALL run in a new container of the previous image with `docker compose run --rm --no-deps backup`. It SHALL NOT use `docker compose exec` into the old `backup` container (R31).
+
+#### Scenario: Old backup in a restart loop
+- **GIVEN** an old `backup` container of 0.1.0 that restarts in a loop, and a complete set of the old schema
+- **WHEN** the operator runs the restore test of the upgrade with the previous tag
+- **THEN** the test runs in a new container and names the newest complete set
+- **AND** `db` keeps its container
+
+### Requirement: Tag of a data volume
+Each start of `db` or `app` on a data volume SHALL use the `compose.yaml` and the tag that fit that volume. The `db` image of that `compose.yaml` SHALL have the PostgreSQL major version of the volume. ADR-0083 SHALL permit the `app` image of that tag on the schema of the volume. The change log of the site SHALL hold the tag of each volume that a switch leaves (R31, R34).
+
+#### Scenario: Failed restore in a rollback
+- **GIVEN** a rollback restore of a `_premigrate` set, a `deploy/.env` with the previous tag, and an old volume with the newer schema
+- **WHEN** `restore-volume` fails before the switch sets the new name
+- **THEN** the operator sets the new tag in `deploy/.env` again
+- **AND** `app` and `backup` start with the new tag on the old volume
+
+#### Scenario: Switch back after a rollback restore
+- **GIVEN** a switch of a rollback restore and a change log that holds the new tag next to the old volume
+- **WHEN** the operator runs the switch back
+- **THEN** `deploy/.env` holds the new tag before `db` starts
+- **AND** `walarchive`, `app`, and `backup` start with the new tag on the old volume
+
+#### Scenario: Restart of the old cluster in a major upgrade
+- **GIVEN** a major upgrade, and an old volume whose state is not `shut down` after the first step of the switch
+- **WHEN** the operator starts `db` again on the old volume
+- **THEN** the command runs in the directory `deploy/` of the old release
+- **AND** `db` starts with the image of the old major version
 
 ### Requirement: Delete rule of the old volume
 No script and no retention SHALL delete the old `pgdata` volume or the target directory of a switch. The operator SHALL delete them only after three conditions. A `restore-test` passed on a set of the new cluster. The flush check and the WAL check passed on the new line. The switch is older than `volume_switch.keep_min_age` (R31).

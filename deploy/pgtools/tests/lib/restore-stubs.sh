@@ -40,6 +40,10 @@
 #   STUB_CONFIG_REMOVE=<file>     pg_ctl start deletes that configuration file.
 #   STUB_TOPLEVEL_ADD=<name>      pg_ctl start creates a file with that name in the target.
 #   STUB_TOPLEVEL_REMOVE=<name>   pg_ctl start deletes that name from the target.
+#   STUB_FORGE_BASELINE=config    pg_ctl start appends to postgresql.auto.conf. Then it writes the changed file as
+#                                 a baseline copy into each work directory below BACKUP_PGPASS_DIR.
+#   STUB_FORGE_BASELINE=toplevel  pg_ctl start creates the name planted in the target. Then it writes the new
+#                                 list of names as top-level.initdb into each work directory below BACKUP_PGPASS_DIR.
 #   STUB_HBA_BLOCK=1              pg_ctl start creates a directory where the script writes its temporary file.
 #   STUB_SNAPSHOT_WORK=1          pg_ctl start copies the directory of its --log file to STUB_DIR/work.
 # The files STUB_DIR/restored.counts and STUB_DIR/login-roles hold the answers of the count query
@@ -83,6 +87,21 @@ EOF
 make_stub_pg_ctl() {
   cat >"$ROOT/stubs/pg_ctl" <<'EOF'
 #!/usr/bin/env bash
+# forge_baseline <pgdata>: a process of uid 999 changes the target and the files below BACKUP_PGPASS_DIR.
+forge_baseline() {
+  local dir file
+  case $STUB_FORGE_BASELINE in
+    config) echo "# forged by the server" >>"$1/postgresql.auto.conf" ;;
+    toplevel) : >"$1/planted" ;;
+  esac
+  while IFS= read -r dir; do
+    for file in postgresql.conf postgresql.auto.conf pg_ident.conf; do
+      cp -- "$1/$file" "$dir/$file.initdb"
+    done
+    find "$1" -mindepth 1 -maxdepth 1 ! -name postmaster.pid ! -name postmaster.opts \
+      -printf '%f\n' | sort >"$dir/top-level.initdb"
+  done < <(find "$BACKUP_PGPASS_DIR" -mindepth 1 -type d)
+}
 pgdata="" action="" logfile=""
 for a in "$@"; do
   case $a in
@@ -106,6 +125,7 @@ case $action in
     [ -z "${STUB_CONFIG_REMOVE:-}" ] || "$REAL_RM" -f -- "$pgdata/$STUB_CONFIG_REMOVE"
     [ -z "${STUB_TOPLEVEL_ADD:-}" ] || : >"$pgdata/$STUB_TOPLEVEL_ADD"
     [ -z "${STUB_TOPLEVEL_REMOVE:-}" ] || "$REAL_RM" -rf -- "${pgdata:?}/$STUB_TOPLEVEL_REMOVE"
+    [ -z "${STUB_FORGE_BASELINE:-}" ] || forge_baseline "$pgdata"
     [ -z "${STUB_HBA_BLOCK:-}" ] || mkdir "$pgdata/pg_hba.conf.new"
     ;;
   stop)

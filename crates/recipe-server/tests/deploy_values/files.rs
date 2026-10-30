@@ -34,7 +34,8 @@ const ENV_ADDRESSES: [(&str, &str); 3] = [
 type Assignment = (&'static str, &'static str, &'static str, Bare);
 
 /// The constants of the pgtools scripts. Each one has a comment with its key in the script.
-pub const SCRIPT_ASSIGNMENTS: [Assignment; 14] = [
+/// The file is a name in `deploy/pgtools/bin/`, or a name that ends in `.sh` in `deploy/pgtools/lib/`.
+pub const SCRIPT_ASSIGNMENTS: [Assignment; 16] = [
     (
         "backup-health",
         "MAX_AGE_SECONDS",
@@ -68,6 +69,18 @@ pub const SCRIPT_ASSIGNMENTS: [Assignment; 14] = [
     ),
     (
         "restore-test",
+        "DETAIL_LENGTH",
+        "restore_test.detail_length",
+        Bare::Plain,
+    ),
+    (
+        "restore-volume",
+        "DETAIL_LENGTH",
+        "restore_test.detail_length",
+        Bare::Plain,
+    ),
+    (
+        "wal-identity.sh",
         "DETAIL_LENGTH",
         "restore_test.detail_length",
         Bare::Plain,
@@ -441,7 +454,7 @@ fn setting_words(lines: &[&str], name: &str) -> Vec<String> {
         .collect()
 }
 
-/// A script sets the constants of `SCRIPT_ASSIGNMENTS` for its name to the values of 7.11.
+/// A script or a library sets the constants of `SCRIPT_ASSIGNMENTS` for its name to the values of 7.11.
 pub fn check_script_assignments(script: &str, text: &str, table: &Table) -> Report {
     let mut report = Report::default();
     let lines = code_lines(text);
@@ -451,7 +464,12 @@ pub fn check_script_assignments(script: &str, text: &str, table: &Table) -> Repo
         }
         report.cover(key);
         let label = format!("{name} ({key})");
-        let path = format!("deploy/pgtools/bin/{script}");
+        let directory = if script.ends_with(".sh") {
+            "lib"
+        } else {
+            "bin"
+        };
+        let path = format!("deploy/pgtools/{directory}/{script}");
         let values = assignment_values(&lines, name);
         let [found] = values.as_slice() else {
             fail_not_once(&mut report, &path, &label, values.len());

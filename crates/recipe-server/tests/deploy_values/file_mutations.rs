@@ -147,7 +147,7 @@ fn a_changed_schedule_or_time_zone_is_a_fault() {
     assert_mutations_fail(&CRONTAB);
 }
 
-const SCRIPT_CONSTANTS: [Mutation; 13] = [
+const SCRIPT_CONSTANTS: [Mutation; 15] = [
     // Bash rejects a unit in an arithmetic value, although 720h equals 30 days.
     (
         "backup-once",
@@ -216,6 +216,19 @@ const SCRIPT_CONSTANTS: [Mutation; 13] = [
         "DETAIL_LENGTH=160",
         "DETAIL_LENGTH=80",
         "restore_test.detail_length",
+    ),
+    (
+        "restore-volume",
+        "DETAIL_LENGTH=160",
+        "DETAIL_LENGTH=161",
+        "restore-volume",
+    ),
+    // The library `wal-identity.sh` holds its own copy of the constant.
+    (
+        "wal-identity.sh",
+        "DETAIL_LENGTH=160",
+        "DETAIL_LENGTH=161",
+        "wal-identity.sh",
     ),
     (
         "pitr-check",

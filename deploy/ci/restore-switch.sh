@@ -85,6 +85,8 @@ controldata_field() {
 
 # The line of restore-volume and the id of the system are numbers of at most 20 digits.
 IDENTIFIER_PATTERN='^[0-9]{1,20}$'
+# A legal image tag has 1 to 128 characters and starts with a letter, a digit, or an underscore.
+TAG_PATTERN='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
 
 restore() {
   # ADR-0103 (b) steps 2 to 4. db keeps running on the old volume.
@@ -164,7 +166,8 @@ start_db() {
 }
 
 switch() {
-  # ADR-0103 (f) steps 1 to 5. The change log gets the old name and its identifier for the switch back.
+  # ADR-0103 (f) steps 1 to 5. The change log gets the old name, its tag, and its identifier for the switch back.
+  # The tag is the image tag of the job (ADR-0105 (b)).
   local old new expected state identifier
   [[ -s $CI_STATE/new.volume && -s $CI_STATE/new.system-identifier ]] || fail "switch: run restore first."
   new=$(<"$CI_STATE/new.volume")
@@ -181,7 +184,7 @@ switch() {
   identifier=$(controldata_field "$old" 'Database system identifier')
   [[ $identifier =~ $IDENTIFIER_PATTERN ]] || fail "switch: the system identifier of the old volume is invalid."
   printf '%s\n' "$old" >"$CI_STATE/old.volume"
-  printf 'volume: %s\nDatabase system identifier: %s\n' "$old" "$identifier" >"$CI_STATE/change.log"
+  printf 'volume: %s\ntag: %s\nDatabase system identifier: %s\n' "$old" "${RECIPE_VERSION:?}" "$identifier" >"$CI_STATE/change.log"
   export RECIPE_PGDATA_VOLUME=$new
   log "switch: step 3, Compose shows the volume $new"
   require_compose_volume switch "$new"
@@ -335,6 +338,11 @@ archive_segments() {
 
 archive_bases() {
   # Print the names of the base backup directories in /wal/base. A .tmp-base directory has another name.
+  # basebackup-once creates /wal/base at its first run. Before that run, the list is empty.
+  if ! sudo test -e "$RECIPE_WALARCHIVE_DIR/base" && ! sudo test -L "$RECIPE_WALARCHIVE_DIR/base"
+  then
+    return 0
+  fi
   sudo find "$RECIPE_WALARCHIVE_DIR/base" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex "$BASE_REGEX" -printf '%f\n' | sort
 }
 
@@ -731,7 +739,7 @@ refuse() {
   log "refuse: done"
 }
 
-# The configuration files that the comparison reads whole (ADR-0103 (m), design.md D9).
+# The configuration files that the comparison reads whole (ADR-0103 (m), ADR-0105 (m), design.md D9).
 CONFIG_FILES=(postgresql.conf postgresql.auto.conf)
 
 read_config_files() {
@@ -769,14 +777,25 @@ first_identifier() {
   sed -En 's/^Database system identifier: ([0-9]{1,20})$/\1/;T;p;q' "$1"
 }
 
+old_tag() {
+  # Print the tag of the first entry of a change log. A missing or illegal tag stops the run (ADR-0105 (d)).
+  local tag
+  tag=$(awk '/^volume: / { entries++ } entries == 1 && /^tag: / { sub(/^tag: /, ""); print; exit }' "$1")
+  [[ -n $tag ]] || fail "switch-back: the change log holds no tag line for the old volume."
+  [[ $tag =~ $TAG_PATTERN ]] || fail "switch-back: the tag in the change log is not a legal tag."
+  printf '%s\n' "$tag"
+}
+
 switch_back_core() {
   # ADR-0103 (g). These are the steps of (f) with the old name. The first argument is the change log.
   # The second argument is capture or plain. Only capture saves the two configuration files of each cluster.
-  local change_log=$1 old leaving expected output state="" identifier=""
+  local change_log=$1 old leaving leaving_tag expected output state="" identifier="" old_image_tag
   old=$(<"$CI_STATE/old.volume")
   leaving=$RECIPE_PGDATA_VOLUME
+  leaving_tag=${RECIPE_VERSION:?}
   expected=$(first_identifier "$change_log")
   [[ $expected =~ $IDENTIFIER_PATTERN ]] || fail "switch-back: the change log holds no identifier line."
+  old_image_tag=$(old_tag "$change_log")
   log "switch-back: step 1, stop the services and delete the containers"
   stop_services stop
   log "switch-back: step 2, write the volume $leaving into the change log"
@@ -788,13 +807,14 @@ switch_back_core() {
   fi
   [[ $identifier =~ $IDENTIFIER_PATTERN ]] \
     || fail "switch-back: pg_controldata shows no system identifier of the volume that the run leaves."
-  printf 'volume: %s\nDatabase system identifier: %s\n' "$leaving" "$identifier" >>"$change_log"
+  printf 'volume: %s\ntag: %s\nDatabase system identifier: %s\n' "$leaving" "$leaving_tag" "$identifier" >>"$change_log"
   if [[ $2 == capture ]]
   then
     printf '%s\n' "$state" >"$CI_STATE/state.new"
     read_config_files "$leaving" new
   fi
   export RECIPE_PGDATA_VOLUME=$old
+  export RECIPE_VERSION=$old_image_tag
   log "switch-back: step 3, Compose shows the volume $old"
   require_compose_volume switch-back "$old"
   log "switch-back: step 4, read the state of the volume $old and compare its identifier with the change log"
@@ -843,7 +863,7 @@ check_first_target_stays() {
 }
 
 compare_whole() {
-  # ADR-0103 (m). The first argument names the value. The other two are the files of the old and the new cluster.
+  # ADR-0103 (m) and ADR-0105 (m). The first argument names the value. The other two are the files of the old and the new cluster.
   # The files are whole. No line is filtered. The text of the first difference is only for the log.
   local difference
   if cmp -s -- "$2" "$3"
@@ -883,6 +903,7 @@ switch_back() {
   [[ $old =~ ^[A-Za-z0-9_.-]+$ && $RECIPE_PGDATA_VOLUME != "$old" ]] \
     || fail "switch-back: the active volume is the old volume."
   expected=$(first_identifier "$CI_STATE/change.log")
+  old_tag "$CI_STATE/change.log" >/dev/null
   log "switch-back: part 1, read the roles of the new cluster while it runs"
   capture_roles new
   run_wrong_switch_back

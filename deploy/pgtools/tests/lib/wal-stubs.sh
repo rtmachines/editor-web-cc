@@ -126,6 +126,7 @@ EOF
 #   psql: the command IDENTIFY_SYSTEM answers the identifier guard of walarchive-entry.
 #     STUB_SYSID=n          the system identifier, default 7354987216845319027
 #     STUB_IDENTIFY_FAIL=1  the connection fails
+#     STUB_IDENTIFY_ERR=t   with STUB_IDENTIFY_FAIL, the text t is the error message on stderr
 #     STUB_IDENTIFY_OUT=t   the whole answer line
 #   psql: without STUB_PSQL_OK=1 every other command fails. With it, it answers the three checks of the script.
 #     STUB_PSQL_RECOVERY=f  the cluster is still in recovery
@@ -147,7 +148,10 @@ case $cmd in
     echo "CALL psql identify" >>"$STUB_LOG"
     echo "ARGV psql-identify $*" >>"$STUB_LOG"
     if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ]; then echo "CALL psql pgpass present" >>"$STUB_LOG"; fi
-    [ -z "${STUB_IDENTIFY_FAIL:-}" ] || exit 2
+    if [ -n "${STUB_IDENTIFY_FAIL:-}" ]; then
+      [ -z "${STUB_IDENTIFY_ERR:-}" ] || printf '%s\n' "$STUB_IDENTIFY_ERR" >&2
+      exit 2
+    fi
     # The pgpass lookup of libpq. The first four fields must match host, port, dbname, and user.
     # A missing dbname takes the user name. Without a match, libpq sends no password.
     host="" port="" user="" dbname=""

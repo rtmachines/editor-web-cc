@@ -28,6 +28,8 @@ check_compose_subnet() {
 # serves the healthcheck of db: no role pg_isready exists, so the probe ends at the password
 # request (ADR-0070 (q)).
 # The function writes a temporary file and replaces the target in one rename.
+# The rename runs only after every write succeeds, so a failed write never publishes a part of the file.
+# The writes join with && because a group returns only the status of its last command.
 # The subshell gives the temporary file mode 0600 and leaves the umask of the caller alone.
 write_hba_conf() {
   local subnet=${1:?write_hba_conf needs the Compose subnet}
@@ -35,17 +37,17 @@ write_hba_conf() {
   (
     umask 077
     {
-      printf '# Written by 01-roles.sh (data-model.md section 5.1, ADR-0069).\n'
-      printf '# TYPE  DATABASE     USER               ADDRESS          METHOD\n'
-      printf 'local   all          postgres                            peer\n'
-      printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\n' "$subnet"
-      printf 'host    recipe       recipe_app         %-16s scram-sha-256\n' "$subnet"
-      printf 'host    recipe       recipe_backup      %-16s scram-sha-256\n' "$subnet"
-      printf 'host    replication  recipe_replicator  %-16s scram-sha-256\n' "$subnet"
-      printf 'host    recipe       pg_isready         127.0.0.1/32     scram-sha-256\n'
-      printf 'host    all          all                all              reject\n'
-    } > "${hba_file}.new"
-    mv -- "${hba_file}.new" "$hba_file"
+      printf '# Written by 01-roles.sh (data-model.md section 5.1, ADR-0069).\n' &&
+        printf '# TYPE  DATABASE     USER               ADDRESS          METHOD\n' &&
+        printf 'local   all          postgres                            peer\n' &&
+        printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\n' "$subnet" &&
+        printf 'host    recipe       recipe_app         %-16s scram-sha-256\n' "$subnet" &&
+        printf 'host    recipe       recipe_backup      %-16s scram-sha-256\n' "$subnet" &&
+        printf 'host    replication  recipe_replicator  %-16s scram-sha-256\n' "$subnet" &&
+        printf 'host    recipe       pg_isready         127.0.0.1/32     scram-sha-256\n' &&
+        printf 'host    all          all                all              reject\n'
+    } > "${hba_file}.new" &&
+      mv -- "${hba_file}.new" "$hba_file"
   )
 }
 

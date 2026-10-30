@@ -237,27 +237,19 @@ case_volume_initdb_environment() {
   expect_ok "static: initdb runs with env -u LC_ALL" grep -Eq '^[[:space:]]+env -u LC_ALL initdb ' "$BIN/restore-volume"
 }
 
-# Step 4: the work directory holds copies of the three configuration files and the list of the
-# top-level names, both as initdb left them (ADR-0103 (o)). The target keeps its files.
+# Step 4: the script keeps no copy of the configuration files and no list of the top-level names
+# in the work directory (ADR-0105 (q)). The target keeps the files of initdb.
 case_volume_initdb_copies() {
   new_volume_case initdb-copies
   volume_run
   local work file
   work=$(volume_work_copy)
   expect_eq "copies: exit code" "$RC" 0
-  for file in postgresql.conf postgresql.auto.conf pg_ident.conf; do
-    expect_ok "copies: $file.initdb equals the file of the target" cmp -s -- "$CASE/pgdata/$file" "$work/$file.initdb"
-    expect_ok "copies: $file.initdb is not empty" test -s "$work/$file.initdb"
-    expect_eq "copies: $file.initdb has mode 600" "$(stat -c %a -- "$work/$file.initdb")" 600
+  for file in postgresql.conf postgresql.auto.conf pg_ident.conf pg_hba.conf; do
+    expect_no "copies: no $file.initdb in the work directory" test -e "$work/$file.initdb"
   done
-  expect_no "copies: no copy of pg_hba.conf" test -e "$work/pg_hba.conf.initdb"
-  expect_eq "copies: the list of top-level names" "$(tr '\n' '|' <"$work/top-level.initdb")" "$INITDB_NAMES|"
-  # The running server adds postmaster.pid. Step 8 compares the names after the stop.
-  expect_eq "copies: the list equals the names of the target before the server" \
-    "$(find "$CASE/pgdata" -mindepth 1 -maxdepth 1 ! -name postmaster.pid -printf '%f\n' | LC_ALL=C sort | tr '\n' '|')" "$INITDB_NAMES|"
-  expect_eq "copies: the list has mode 600" "$(stat -c %a -- "$work/top-level.initdb")" 600
-  expect_eq "copies: the files of the target keep the text of initdb" \
-    "$(cat "$CASE/pgdata/postgresql.conf")" "# stub of initdb: postgresql.conf"
+  expect_no "copies: no top-level.initdb in the work directory" test -e "$work/top-level.initdb"
+  expect_eq "copies: the files of the target keep the text of initdb"     "$(cat "$CASE/pgdata/postgresql.conf")" "# stub of initdb: postgresql.conf"
 }
 
 # Step 4: a failed initdb writes one ERROR line. The target stays empty and no server starts.

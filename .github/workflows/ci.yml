@@ -144,10 +144,11 @@ jobs:
         run: bash deploy/ci/prepare.sh
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      # Allow 40 minutes to build and start the previous release and check its backup.
-      # Allow 20 minutes for the upgrade and both restore paths, below the job limit.
-      - name: Build the previous images and check the old backup (step 3)
-        timeout-minutes: 40
+      # Allow 35 minutes to build and start the previous release and write its backup.
+      # Allow 30 minutes for the checks of steps 2 and 3, the upgrade, and three restore tests.
+      # The step limits sum to 73 minutes with diagnostics and cleanup, below the job limit.
+      - name: Build the previous images and write the old backup (before step 2)
+        timeout-minutes: 35
         run: bash deploy/ci/upgrade.sh previous
       - name: Build and load the new server image (step 4)
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -168,8 +169,8 @@ jobs:
           push: false
           tags: recipe-pgtools:ci-upgrade
           cache-from: type=gha,scope=recipe-pgtools
-      - name: Upgrade and check both restore paths (steps 5 to 23)
-        timeout-minutes: 20
+      - name: Check the volume and the old backup, upgrade, and check both restore paths (steps 2 to 23)
+        timeout-minutes: 30
         run: bash deploy/ci/upgrade.sh upgrade
       # Allow 3 minutes for diagnostics and 5 minutes for cleanup.
       - name: Show upgrade failure diagnostics

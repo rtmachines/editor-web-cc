@@ -14,8 +14,8 @@ The change uses A1, A15, and A35.
 - `restore-test` and `restore-volume` share one library in `deploy/pgtools/lib/` (ADR-0103 (j)).
 - The file `restore-roles.expected` and a storage test prove the roles, the grants, and the client rules of a restored cluster.
 - **BREAKING** `walarchive-entry` and `basebackup-once` check `/wal/.system-identifier`. The release notes and the runbook give the one step for an existing installation (ADR-0103 (s)).
-- The upgrade sets `RECIPE_PGDATA_VOLUME` and compares it with the mount of the running `db` before the first Compose command. The one step of the identifier file compares the identifier with the newest segment (ADR-0103 (d), (s)).
-- The first upgrade to this release replaces `db` once on the same volume, because `db` gets a new mount (ADR-0103 (z)).
+- The upgrade sets `RECIPE_PGDATA_VOLUME` and compares it with the mount of the running `db` before the first Compose command. The one step of the identifier file compares the identifier with the newest segment (ADR-0105 (j), (n)).
+- The first upgrade to this release replaces `db` once on the same volume, because `db` gets a new mount (ADR-0105 (k)).
 - A CI job `restore-switch` runs the restore, the switch, the WAL line, and the switch back.
 - A CI step fails a release that changes the major version of `db` and adds a migration file (ADR-0103 (p)).
 - The runbook gets the full procedures of the restore, the rollback restore, and the major upgrade.

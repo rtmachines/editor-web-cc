@@ -346,6 +346,9 @@ class AccessTextTests(unittest.TestCase):
 
 STUB_SET = "recipe_20260101_0000_now"
 OLD_VOLUME = f"{PROJECT}_pgdata"
+JOB_TAG = "ci-restore-switch"
+# The three lines that switch writes for the old volume: the name, the tag, and the system identifier.
+OLD_ENTRY = f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\nDatabase system identifier: 1111\n"
 
 DOCKER_SWITCH_STUB = r"""
 echo "$*" >>"$STUB_LOG"
@@ -446,7 +449,7 @@ class StubbedSubcommandTests(unittest.TestCase):
                 "GITHUB_WORKSPACE": str(ROOT),
                 "RUNNER_TEMP": str(directory / "runner"),
                 "COMPOSE_PROJECT_NAME": PROJECT,
-                "RECIPE_VERSION": "ci-restore-switch",
+                "RECIPE_VERSION": JOB_TAG,
                 "CI_WAIT_ATTEMPTS": "3",
                 "PATH": f"{stubs}{os.pathsep}{env['PATH']}",
                 "STUB_LOG": str(log),
@@ -539,7 +542,7 @@ class SwitchBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(files["switch.unclean-state"], "in production\n")
         self.assertEqual(files["old.volume"], OLD_VOLUME + "\n")
-        self.assertEqual(files["change.log"], f"volume: {OLD_VOLUME}\nDatabase system identifier: 1111\n")
+        self.assertEqual(files["change.log"], OLD_ENTRY)
         self.assertEqual(files["active.volume"], self.NEW + "\n")
         self.assertIn("CI: switch: the first stop left the state 'in production'. db starts again.", done.stdout)
 
@@ -819,7 +822,7 @@ WAL_TREE = {
     "walarchive-disk/walarchive/.pitr-scratch": None,
 }
 WAL_STATE = {
-    "change.log": f"volume: {OLD_VOLUME}\nDatabase system identifier: 1111\n",
+    "change.log": OLD_ENTRY,
     "old.volume": OLD_VOLUME + "\n",
     "new.volume": "recipe-editor_pgdata_20260101_000000\n",
     "new.system-identifier": ARCHIVE_ID + "\n",
@@ -940,6 +943,17 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertTrue(any(line.endswith(f"/{SEGMENT_ONE}") for line in manifest))
         self.assertTrue(any(line.endswith("/old-system-identifier") for line in manifest))
         self.assertTrue(any(line.endswith(f"/base/{OLD_BASE}/backup_manifest") for line in manifest))
+
+    def test_wal_line_accepts_an_archive_without_the_base_directory(self):
+        # basebackup-once creates /wal/base at its first run. Before that run, the old line has no base backup.
+        tree = {key: value for key, value in WAL_TREE.items() if "/base/" not in key}
+        done, _, files = self.run_wal_line(tree=tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["wal-old.bases"], "")
+        self.assertEqual(files["wal-new.base"], NEW_BASE + "\n")
+        _, moved = self.moved_entries(files["tree.list"])
+        self.assertIn("base", moved)
+        self.assertFalse(any(name.startswith("base/") for name in moved))
 
     def test_wal_line_copies_the_identifier_line_of_the_change_log(self):
         done, _, files = self.run_wal_line(read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
@@ -1450,8 +1464,10 @@ BACK_NEW = "recipe-editor_pgdata_20260101_000000"
 BACK_MOVED = "walarchive-disk/walarchive.moved-29990101_000000"
 BACK_BASE = "base_20260401_000000"
 BACK_TREE = {key.replace(MOVED, BACK_MOVED): value for key, value in CHECK_TREE.items()}
+BACK_OLD_TAG = "ci-old-tag"
 BACK_STATE = {
     **CHECK_STATE,
+    "change.log": OLD_ENTRY.replace(JOB_TAG, BACK_OLD_TAG),
     "wal-target.dir": f"@RUN@/{BACK_MOVED}\n",
     "wal-target.manifest": CHECK_MANIFEST.replace(MOVED, BACK_MOVED),
     "row-counts.refuse": COUNTS_FILE,
@@ -1464,6 +1480,7 @@ BACK_ENV = {
 }
 BACK_CASES = r"""
   *" compose "*" up "*" db "*)
+    echo "VER=${RECIPE_VERSION:-}" >>"$STUB_LOG.env"
     touch "$STUB_DIR/db.exists"
     echo "$RECIPE_PGDATA_VOLUME" >"$STUB_DIR/db.volume"
     ;;
@@ -1515,8 +1532,8 @@ BACK_CASES = r"""
 """
 DOCKER_BACK_STUB = DOCKER_WAL_STUB.replace('case "$args" in\n', 'case "$args" in' + BACK_CASES, 1)
 BACK_PYTHON_STUB = 'case " $* " in *" volume-name "*) exec "$STUB_REAL_PYTHON" "$@" ;; esac\n' + PYTHON_STUB.lstrip("\n")
-BACK_RIGHT_CHANGE_LOG = (f"volume: {OLD_VOLUME}\nDatabase system identifier: 1111\n"
-                         f"volume: {BACK_NEW}\nDatabase system identifier: 2222\n")
+BACK_RIGHT_CHANGE_LOG = (OLD_ENTRY.replace(JOB_TAG, BACK_OLD_TAG)
+                         + f"volume: {BACK_NEW}\ntag: {JOB_TAG}\nDatabase system identifier: 2222\n")
 
 
 class SwitchBackBehaviorTests(StubbedSubcommandTests):
@@ -1591,12 +1608,53 @@ class SwitchBackBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(files["change.log"], BACK_RIGHT_CHANGE_LOG)
         self.assertEqual(files["active.volume"], OLD_VOLUME + "\n")
 
+    def test_the_right_run_sets_the_tag_of_the_old_volume_before_it_starts_db(self):
+        done, log, files = self.run_back()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["env.log"].count("VER="), 1)
+        self.assertIn(f"VER={BACK_OLD_TAG}\n", files["env.log"])
+        image = r"-v {}:/var/lib/postgresql/data:ro .*recipe-pgtools:{}\b"
+        self.assertInOrder(log, [
+            image.format(BACK_NEW, JOB_TAG),
+            image.format(OLD_VOLUME, BACK_OLD_TAG),
+            r" up -d --no-deps --wait --wait-timeout 180 db\n",
+        ])
+        self.assertNotRegex(log, image.format(OLD_VOLUME, JOB_TAG))
+
+    def test_the_tag_of_the_old_volume_comes_from_the_first_entry(self):
+        later = BACK_STATE["change.log"] + f"volume: {BACK_NEW}\ntag: other-tag\nDatabase system identifier: 2222\n"
+        done, _, files = self.run_back(state={**BACK_STATE, "change.log": later})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(f"VER={BACK_OLD_TAG}\n", files["env.log"])
+
+    def test_a_bad_tag_in_the_change_log_stops_the_run_before_any_container(self):
+        first = f"volume: {OLD_VOLUME}\n{{}}Database system identifier: 1111\n"
+        later_only = first.format("") + f"volume: {BACK_NEW}\ntag: {BACK_OLD_TAG}\nDatabase system identifier: 2222\n"
+        missing = "CI: switch-back: the change log holds no tag line for the old volume."
+        illegal = "CI: switch-back: the tag in the change log is not a legal tag."
+        cases = {
+            "no tag line": (first.format(""), missing),
+            "empty tag": (first.format("tag: \n"), missing),
+            "tag only in a later entry": (later_only, missing),
+            "space in the tag": (first.format("tag: bad tag\n"), illegal),
+            "slash in the tag": (first.format("tag: a/b\n"), illegal),
+            "leading dash": (first.format("tag: -x\n"), illegal),
+            "tag too long": (first.format("tag: " + "a" * 129 + "\n"), illegal),
+        }
+        for name, (log_text, message) in cases.items():
+            with self.subTest(name=name):
+                done, log, files = self.run_back(state={**BACK_STATE, "change.log": log_text})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn(message, done.stderr)
+                self.assertEqual(log, "")
+                self.assertEqual(files["change.log"], log_text)
+
     def test_the_wrong_run_leaves_the_real_change_log_alone(self):
         done, _, files = self.run_back({"STUB_OLD_ID": "9999"})
         self.assertEqual(done.returncode, 1)
-        self.assertEqual(files["change.log.wrong"].splitlines()[:2],
-                         [f"volume: {OLD_VOLUME}", "Database system identifier: 1"])
-        self.assertTrue(files["change.log"].startswith(f"volume: {OLD_VOLUME}\nDatabase system identifier: 1111\n"))
+        self.assertEqual(files["change.log.wrong"].splitlines()[:3],
+                         [f"volume: {OLD_VOLUME}", f"tag: {BACK_OLD_TAG}", "Database system identifier: 1"])
+        self.assertTrue(files["change.log"].startswith(OLD_ENTRY.replace(JOB_TAG, BACK_OLD_TAG)))
 
     def test_the_new_line_gets_a_second_target_directory(self):
         done, _, files = self.run_back(read=(

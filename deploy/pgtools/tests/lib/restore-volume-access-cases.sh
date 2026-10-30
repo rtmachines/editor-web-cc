@@ -81,6 +81,90 @@ case_volume_access_hba_fails() {
   expect_eq "hba write fails: no roles query ran" "$(event_count 'roles')" 0
 }
 
+# write_hba_conf publishes the file only after a complete write (ADR-0105 (u)).
+# Case 1: the name of the temporary file is a directory, so the write fails at once.
+# Case 2: the name of the temporary file is a link to /dev/full, so a printf fails after the open.
+# In both cases the call returns non-zero and the old pg_hba.conf keeps its bytes.
+# The reads are bounded, because a link to /dev/full would give an endless stream of zero bytes.
+case_volume_hba_publish_after_write() {
+  new_volume_case hba-publish
+  local target=$CASE/hba-target old_text="# old pg_hba.conf" rc
+  mkdir -- "$target"
+  printf '%s\n' "$old_text" >"$target/pg_hba.conf"
+  mkdir -- "$target/pg_hba.conf.new"
+  (
+    # shellcheck source=/dev/null
+    source "$ROOT/etc/cluster-access.sh"
+    write_hba_conf 172.28.0.0/16 "$target/pg_hba.conf"
+  ) 2>/dev/null
+  rc=$?
+  expect_no "hba publish: a directory as temporary name gives exit code 0" test "$rc" -eq 0
+  expect_eq "hba publish: a directory as temporary name keeps the old file" \
+    "$(head -c 64 -- "$target/pg_hba.conf" | tr -d '\000')" "$old_text"
+  expect_ok "hba publish: the directory stays a directory" test -d "$target/pg_hba.conf.new"
+  rmdir -- "$target/pg_hba.conf.new"
+  ln -s /dev/full "$target/pg_hba.conf.new"
+  (
+    # shellcheck source=/dev/null
+    source "$ROOT/etc/cluster-access.sh"
+    write_hba_conf 172.28.0.0/16 "$target/pg_hba.conf"
+  ) 2>/dev/null
+  rc=$?
+  expect_no "hba publish: a write that fails midway gives exit code 0" test "$rc" -eq 0
+  expect_eq "hba publish: a write that fails midway keeps the old file" \
+    "$(head -c 64 -- "$target/pg_hba.conf" | tr -d '\000')" "$old_text"
+  expect_no "hba publish: the old file is not a link" test -L "$target/pg_hba.conf"
+}
+
+# write_hba_conf fails when any single write fails, not only the last one (ADR-0105 (u)).
+# A shell function named printf replaces the builtin and fails on its Nth call. The file has nine
+# writes. A failure of any write must give a non-zero code and no publish.
+# The last step has no failing call and compares the bytes of the file with the expected text.
+case_volume_hba_publish_each_write() {
+  new_volume_case hba-each-write
+  local target=$CASE/hba-each old_text="# old pg_hba.conf" rc nth subnet=172.28.0.0/16 want_file
+  mkdir -- "$target"
+  want_file=$target/want
+  {
+    printf '# Written by 01-roles.sh (data-model.md section 5.1, ADR-0069).\n'
+    printf '# TYPE  DATABASE     USER               ADDRESS          METHOD\n'
+    printf 'local   all          postgres                            peer\n'
+    printf 'host    recipe       recipe_migrator    %-16s scram-sha-256\n' "$subnet"
+    printf 'host    recipe       recipe_app         %-16s scram-sha-256\n' "$subnet"
+    printf 'host    recipe       recipe_backup      %-16s scram-sha-256\n' "$subnet"
+    printf 'host    replication  recipe_replicator  %-16s scram-sha-256\n' "$subnet"
+    printf 'host    recipe       pg_isready         127.0.0.1/32     scram-sha-256\n'
+    printf 'host    all          all                all              reject\n'
+  } >"$want_file"
+  for nth in 1 2 3 4 5 6 7 8 9; do
+    printf '%s\n' "$old_text" >"$target/pg_hba.conf"
+    (
+      # shellcheck source=/dev/null
+      source "$ROOT/etc/cluster-access.sh"
+      calls=0
+      printf() {
+        calls=$((calls + 1))
+        if [[ $calls -eq $nth ]]; then return 1; fi
+        builtin printf "$@"
+      }
+      write_hba_conf "$subnet" "$target/pg_hba.conf"
+    ) 2>/dev/null
+    rc=$?
+    expect_no "hba each write $nth: a failed write gives exit code 0" test "$rc" -eq 0
+    expect_eq "hba each write $nth: the old file keeps its bytes" \
+      "$(head -c 64 -- "$target/pg_hba.conf")" "$old_text"
+  done
+  printf '%s\n' "$old_text" >"$target/pg_hba.conf"
+  (
+    # shellcheck source=/dev/null
+    source "$ROOT/etc/cluster-access.sh"
+    write_hba_conf "$subnet" "$target/pg_hba.conf"
+  )
+  rc=$?
+  expect_eq "hba each write: no failure gives exit code 0" "$rc" 0
+  expect_ok "hba each write: the file equals the expected bytes" cmp -- "$want_file" "$target/pg_hba.conf"
+}
+
 # Step 8: the query runs restore-roles.sql of the code directory in the database of the dump, over
 # the private socket. The file restore-roles.expected holds the placeholder only in HBA lines.
 case_volume_access_query() {
@@ -200,6 +284,40 @@ case_volume_access_top_level() {
   expect_no "server files: the stop deleted postmaster.pid" test -e "$CASE/pgdata/postmaster.pid"
   expect_ok "server files: postmaster.opts exists" test -f "$CASE/pgdata/postmaster.opts"
   expect_eq "server files: no ERROR line" "$(error_count "$CASE/out")" 0
+}
+
+# Step 8: the baselines of the checks live in shell variables (ADR-0105 (q)). A process of uid 999
+# can write below /run/pgpass during step 6. It changes a file and the copies of the baseline,
+# and step 8 must still end the run. No baseline file exists below /run/pgpass at the start of step 6.
+case_volume_access_forged_baseline() {
+  local kind file message
+  for kind in config toplevel; do
+    new_volume_case "access-forged-$kind"
+    case $kind in
+      config) message="a configuration file of the new cluster changed after initdb" ;;
+      toplevel) message="the top-level names of the target differ from the names after initdb" ;;
+    esac
+    volume_step_fails "forged $kind" "$VOLUME_SEQ_ACCESS" "$message" "STUB_FORGE_BASELINE=$kind"
+    expect_eq "forged $kind: no baseline file at the start of step 6" \
+      "$(find "$CASE/stub/work" -name '*.initdb' | wc -l)" 0
+  done
+  new_volume_case access-forged-names
+  volume_run
+  expect_eq "baseline: exit code" "$RC" 0
+  for file in postgresql.conf postgresql.auto.conf pg_ident.conf top-level; do
+    expect_no "baseline: no $file.initdb in the work directory" test -e "$CASE/stub/work/$file.initdb"
+  done
+}
+
+# Step 8: check_top_level keeps its lists in shell variables (ADR-0105 (q)). The stub of comm lists
+# the work directory at each call. A process of uid 999 could change a top-level file between two commands.
+case_volume_access_no_work_files() {
+  new_volume_case access-no-work-files
+  volume_step_fails "work files" "$VOLUME_SEQ_ACCESS" \
+    "the top-level names of the target differ from the names after initdb" STUB_TOPLEVEL_ADD=server.log STUB_COMM_SNAPSHOT=1
+  expect_ok "work files: the stub of comm ran" test -s "$CASE/stub/log.snapshot"
+  expect_no "work files: no file top-level.* in the work directory" grep -q '^FILE top-level\.' "$CASE/stub/log.snapshot"
+  expect_ok "work files: the ERROR line counts the added name" error_has '"added":1,"removed":0'
 }
 
 # Steps 7 and 8 use the shared file of the client rules, and the script holds no second copy of its text.

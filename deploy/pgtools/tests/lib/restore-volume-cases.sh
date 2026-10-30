@@ -176,6 +176,29 @@ case_volume_target_not_empty() {
   done
 }
 
+# Step 1: the run needs uid 999 and the user name postgres (ADR-0105 (r)). Else the script writes one
+# ERROR line before any PostgreSQL tool runs. The stub of id answers 999 and postgres by default.
+case_volume_identity() {
+  local i=0 row uid name text before target
+  for row in "1000|appuser|uid 999" "0|root|uid 999" "999|appuser|user postgres" "1000|postgres|uid 999" "x|postgres|user id"; do
+    IFS='|' read -r uid name text <<<"$row"
+    i=$((i + 1))
+    new_volume_case "identity-$i"
+    before=$(set_listing)
+    target=$(target_listing)
+    volume_run "STUB_ID_UID=$uid" "STUB_ID_NAME=$name"
+    volume_failed_checks "identity ($uid $name)" "$before" "$target"
+    expect_ok "identity ($uid $name): the ERROR line holds [$text]" error_has "$text"
+    expect_eq "identity ($uid $name): the script took no lock" "$(wc -c <"$CASE/stub/flock.log")" 0
+  done
+  new_volume_case identity-id-fails
+  before=$(set_listing)
+  target=$(target_listing)
+  volume_run STUB_ID_FAIL=1
+  volume_failed_checks "identity (id fails)" "$before" "$target"
+  expect_ok "identity (id fails): the ERROR line holds [user id]" error_has "user id"
+}
+
 # Step 1: a target that is no directory stops the run. The script never creates it.
 case_volume_target_missing() {
   new_volume_case target-missing
