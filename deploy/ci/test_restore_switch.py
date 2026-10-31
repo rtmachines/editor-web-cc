@@ -16,6 +16,7 @@ from unittest.mock import Mock
 CI = pathlib.Path(__file__).resolve().parent
 ROOT = CI.parent.parent
 SCRIPT = CI / "restore-switch.sh"
+SWITCH_STEPS = CI / "switch-steps.sh"
 PROJECT = "recipe-ci-1-1"
 FIXTURE_HASH = "ab" * 32
 
@@ -42,9 +43,16 @@ def script_text():
     return SCRIPT.read_text(encoding="utf-8")
 
 
+def switch_steps_text():
+    return SWITCH_STEPS.read_text(encoding="utf-8") if SWITCH_STEPS.is_file() else ""
+
+
 def shell_function(name):
-    """Return the body of one function of restore-switch.sh."""
-    return script_text().split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
+    """Return the body of one function of restore-switch.sh or of switch-steps.sh."""
+    for text in (script_text(), switch_steps_text()):
+        if f"\n{name}() {{\n" in text:
+            return text.split(f"\n{name}() {{\n", 1)[1].split("\n}\n", 1)[0]
+    raise KeyError(name)
 
 
 class WorkflowTests(unittest.TestCase):
@@ -301,6 +309,16 @@ class RestoreSwitchTextTests(unittest.TestCase):
         self.assertIn('docker kill "$(container db)"', body)
         self.assertIn("rm -f proxy app backup walarchive db", body)
 
+    def test_stop_services_accepts_a_failed_kill_only_when_db_does_not_run(self):
+        # The recovery switch follows the step crash, so db is dead and docker kill fails. The restore path kills a running db as before.
+        body = shell_function("stop_services")
+        kill_lines = [line.strip() for line in body.splitlines() if line.strip()]
+        start = kill_lines.index('docker kill "$(container db)" >/dev/null \\')
+        self.assertEqual(kill_lines[start + 1:start + 3], [
+            "|| [[ $(docker inspect --format '{{.State.Running}}' \"$(container db)\") == false ]] \\",
+            '|| fail "switch: cannot kill db."',
+        ])
+
     def test_wait_backup_minute_has_one_definition_in_common_sh(self):
         # A second copy of the helper can lose a suffix. The copy in restore-switch.sh lost _now.
         found = {path.name: path.read_text(encoding="utf-8").count("\nwait_backup_minute() {\n")
@@ -331,7 +349,7 @@ class AccessTextTests(unittest.TestCase):
         self.assertNotRegex(text, r"docker volume (rm|prune|create)")
 
     def test_passwords_never_reach_a_command_line(self):
-        text = script_text()
+        text = script_text() + switch_steps_text()
         self.assertNotRegex(text, r"PGPASSWORD|--password|password=|\s-W\b")
         for name in ("postgres", "migrator", "app", "backup", "replicator"):
             self.assertIn(f"\\set {name}_password `cat /run/secrets/{name}_password`", text)
@@ -353,14 +371,18 @@ class AccessTextTests(unittest.TestCase):
 STUB_SET = "recipe_20260101_0000_now"
 OLD_VOLUME = f"{PROJECT}_pgdata"
 JOB_TAG = "ci-restore-switch"
-# The three lines that switch writes for the old volume: the name, the tag, and the system identifier.
-OLD_ENTRY = f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\nDatabase system identifier: 1111\n"
+# The lines that switch writes for the old volume: the name, the tag, the system identifier, and the timeline (ADR-0106 (l)).
+TIMELINE_LABEL = "Latest checkpoint's TimeLineID"
+OLD_ENTRY = f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\nDatabase system identifier: 1111\n{TIMELINE_LABEL}: 1\n"
 
 DOCKER_SWITCH_STUB = r"""
 echo "$*" >>"$STUB_LOG"
 echo "VOL=${RECIPE_PGDATA_VOLUME:-}" >>"$STUB_LOG.env"
 args=" $* "
 case "$args" in
+  *" --entrypoint test "*)
+    exit "${STUB_DRILL_STATUS:-1}"
+    ;;
   *" compose "*" run "*" restore-volume "*)
     echo '{"level":"INFO","message":"restore volume start"}'
     if [[ -n ${STUB_RESTORE_LAST+x} ]]; then
@@ -393,14 +415,16 @@ case "$args" in
     for arg in "$@"; do
       if [[ $arg == *:/var/lib/postgresql/data:ro ]]; then volume=${arg%%:*}; fi
     done
+    if [[ $volume == "$STUB_OLD" && -n ${STUB_OLD_FAIL:-} ]]; then exit 1; fi
     if [[ $volume == "$STUB_OLD" ]]; then
-      state=$(cat "$STUB_DIR/old.state"); id=1111
+      state=$(cat "$STUB_DIR/old.state"); id=1111; timeline=${STUB_OLD_TL-1}
     else
-      state=${STUB_NEW_STATE:-shut down}; id=${STUB_NEW_ID:-2222}
+      state=${STUB_NEW_STATE:-shut down}; id=${STUB_NEW_ID:-2222}; timeline=${STUB_NEW_TL-1}
     fi
     echo "pg_control version number:            1700"
     echo "Database system identifier:           $id"
     echo "Database cluster state:               $state"
+    if [[ -n $timeline ]]; then echo "Latest checkpoint's TimeLineID:       $timeline"; fi
     ;;
   " inspect "*) echo "${STUB_INSPECT_VOLUME:-$(cat "$STUB_DIR/db.volume")}" ;;
 esac
@@ -416,7 +440,7 @@ class StubbedSubcommandTests(unittest.TestCase):
 
     def run_subcommand(self, name, state=None, stub_env=None, docker_stub=DOCKER_SWITCH_STUB, tree=None,
                        sudo_stub=SUDO_STUB, stub_python=False, read=(), stub_files=None, python_stub=None,
-                       extra_stubs=None):
+                       extra_stubs=None, driver=None):
         """Run one subcommand with stubs. Return the process, the call log, and the files of CI_STATE."""
         with tempfile.TemporaryDirectory() as temp:
             directory = pathlib.Path(temp)
@@ -467,7 +491,12 @@ class StubbedSubcommandTests(unittest.TestCase):
                 "STUB_OLD": OLD_VOLUME,
             })
             env.update({key: value.replace("@RUN@", run_dir.as_posix()) for key, value in (stub_env or {}).items()})
-            done = subprocess.run([self.bash, str(SCRIPT), name], capture_output=True, text=True, check=False, env=env)
+            command = [self.bash, str(SCRIPT), name]
+            if driver is not None:
+                # The driver sources the shared steps and runs one shell command, for example a call of switch with an argument.
+                shared = CI.as_posix()
+                command = [self.bash, "-c", f'source "{shared}/common.sh"; source "{shared}/switch-steps.sh"; {driver}']
+            done = subprocess.run(command, capture_output=True, text=True, check=False, env=env)
             files = {path.name: path.read_text(encoding="utf-8") for path in ci_state.iterdir()}
             text = log.read_text(encoding="utf-8") if log.exists() else ""
             env_log = pathlib.Path(str(log) + ".env")
@@ -555,6 +584,20 @@ class SwitchBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(files["active.volume"], self.NEW + "\n")
         self.assertIn("CI: switch: the first stop left the state 'in production'. db starts again.", done.stdout)
 
+    def test_switch_writes_the_timeline_of_the_old_volume_into_the_change_log(self):
+        # ADR-0106 (l). The line has the label of pg_controldata and follows the identifier line.
+        done, _, files = self.run_subcommand("switch", self.STATE, {"STUB_OLD_TL": "3"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["change.log"], OLD_ENTRY.replace(f"{TIMELINE_LABEL}: 1", f"{TIMELINE_LABEL}: 3"))
+        self.assertTrue(files["change.log"].endswith("Database system identifier: 1111\nLatest checkpoint's TimeLineID: 3\n"))
+
+    def test_switch_stops_when_pg_controldata_shows_no_timeline_of_the_old_volume(self):
+        done, _, files = self.run_subcommand("switch", self.STATE, {"STUB_OLD_TL": ""})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the timeline of the old volume is invalid.", done.stderr)
+        self.assertNotIn("change.log", files)
+        self.assertNotIn("active.volume", files)
+
     def test_switch_fails_when_the_kill_leaves_a_clean_state(self):
         done, log, files = self.run_subcommand("switch", self.STATE, {"STUB_KILL_STATE": "shut down"})
         self.assertEqual(done.returncode, 1)
@@ -597,6 +640,233 @@ class SwitchBehaviorTests(StubbedSubcommandTests):
         _, _, files = self.run_subcommand("cleanup", {"active.volume": self.NEW + "\n"})
         self.assertIn(f"VOL={self.NEW}", files["env.log"])
         self.assertNotIn(f"VOL={OLD_VOLUME}", files["env.log"])
+
+
+RESTORE_SOURCE = "restore volume completed"
+PITR_SOURCE = "pitr volume completed"
+SOURCE_ERROR = "CI: switch: the source line must be 'restore volume completed' or 'pitr volume completed'."
+
+
+def pitr_line(identifier="2222", timeline="2", drill="false", message=PITR_SOURCE):
+    """Return a JSON line as pitr-volume writes it (ADR-0106 (d), (f) step 12)."""
+    return (f'{{"level":"INFO","message":"{message}","base":"base_20260101_000000",'
+            f'"system_identifier":"{identifier}","timeline":{timeline},"chain_seq":7,"drill":{drill}}}')
+
+
+def pitr_state(line=None):
+    """Return the state files of a recovery. The log holds a start line and the last line."""
+    log = '{"level":"INFO","message":"pitr volume start"}\n' + (pitr_line() if line is None else line) + "\n"
+    return {"new.volume": SwitchBehaviorTests.NEW + "\n", "pitr-volume.log": log}
+
+
+class SwitchSourceLineTests(StubbedSubcommandTests):
+    """Task 6.4 of pitr-recovery (design.md D7, ADR-0106 (j)). The switch takes the source line as its parameter."""
+
+    NEW = SwitchBehaviorTests.NEW
+    RESTORE_STATE = SwitchBehaviorTests.STATE
+    PITR_ENV = {"STUB_NEW_TL": "2"}
+
+    def run_switch(self, source, state, env=None):
+        return self.run_subcommand("driver", state, env, driver=f'switch "{source}"')
+
+    def run_pitr(self, state=None, env=None):
+        return self.run_switch(PITR_SOURCE, pitr_state() if state is None else state, {**self.PITR_ENV, **(env or {})})
+
+    def test_the_script_passes_the_restore_source_to_switch(self):
+        self.assertRegex(script_text(), r'(?m)^  switch\) switch "restore volume completed" ;;$')
+        self.assertNotRegex(script_text(), r"(?m)^\s*switch\) switch ;;")
+
+    def test_an_unknown_source_stops_the_run_before_any_command(self):
+        for source in ("", "restore volume start", "Pitr volume completed", "pitr volume completed ", "restore"):
+            with self.subTest(source=source):
+                done, log, files = self.run_switch(source, self.RESTORE_STATE)
+                self.assertEqual(done.returncode, 1)
+                self.assertIn(SOURCE_ERROR, done.stderr)
+                self.assertEqual(log, "")
+                self.assertNotIn("change.log", files)
+
+    def test_a_missing_source_stops_the_run(self):
+        done, log, _ = self.run_subcommand("driver", self.RESTORE_STATE, driver="switch")
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(SOURCE_ERROR, done.stderr)
+        self.assertEqual(log, "")
+
+    def test_the_restore_source_keeps_the_behavior(self):
+        done, log, files = self.run_switch(RESTORE_SOURCE, self.RESTORE_STATE)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["change.log"], OLD_ENTRY)
+        self.assertEqual(files["switch.unclean-state"], "in production\n")
+        self.assertEqual(files["active.volume"], self.NEW + "\n")
+        self.assertEqual(log.count("kill "), 1)
+        self.assertEqual(log.count(" up -d"), 2)
+        self.assertNotIn("--entrypoint test", log)
+
+    def test_the_restore_source_still_stops_on_a_missing_timeline_of_the_old_volume(self):
+        done, _, files = self.run_switch(RESTORE_SOURCE, self.RESTORE_STATE, {"STUB_OLD_TL": ""})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the timeline of the old volume is invalid.", done.stderr)
+        self.assertNotIn("change.log", files)
+
+    def test_the_restore_source_compares_the_identifier_only(self):
+        # The new volume has the timeline 5. The restore line has no timeline, so the run passes.
+        done, _, _ = self.run_switch(RESTORE_SOURCE, self.RESTORE_STATE, {"STUB_NEW_TL": "5"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_the_restore_source_ignores_a_file_pitr_drill(self):
+        done, log, _ = self.run_switch(RESTORE_SOURCE, self.RESTORE_STATE, {"STUB_DRILL_STATUS": "0"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("--entrypoint test", log)
+
+    def test_the_pitr_source_runs_the_steps_without_a_start_of_db_on_the_old_volume(self):
+        done, log, files = self.run_pitr()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        run = r"run --rm --network none .*-v {}:/var/lib/postgresql/data:ro .*pg_controldata.*\n"
+        self.assertInOrder(log, [
+            r" stop proxy app backup walarchive\n",
+            r"kill abc123def\n",
+            r" rm -f proxy app backup walarchive db\n",
+            run.format(OLD_VOLUME),
+            r" config --format json\n",
+            run.format(self.NEW),
+            r"--entrypoint test .*/var/lib/postgresql/data/pitr-drill\n",
+            r" up -d --no-deps --wait --wait-timeout 180 db\n",
+            r"inspect .*abc123def\n",
+        ])
+        self.assertEqual(log.count(" up -d"), 1)
+        self.assertNotRegex(log, r" stop proxy app backup walarchive db\n")
+        self.assertNotIn("switch.unclean-state", files)
+        self.assertEqual(files["active.volume"], self.NEW + "\n")
+        self.assertEqual(files["old.volume"], OLD_VOLUME + "\n")
+
+    def test_the_pitr_source_needs_no_unclean_state_of_the_old_volume(self):
+        done, _, files = self.run_pitr(env={"STUB_KILL_STATE": "shut down"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("switch.unclean-state", files)
+
+    def test_the_pitr_source_writes_the_identifier_and_the_timeline_of_the_old_volume(self):
+        done, _, files = self.run_pitr(env={"STUB_OLD_TL": "3"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["change.log"], OLD_ENTRY.replace(f"{TIMELINE_LABEL}: 1", f"{TIMELINE_LABEL}: 3"))
+
+    def test_the_pitr_source_writes_unreadable_when_pg_controldata_fails(self):
+        done, log, files = self.run_pitr(env={"STUB_OLD_FAIL": "1"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["change.log"], (f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\n"
+                                               f"Database system identifier: unreadable\n{TIMELINE_LABEL}: unreadable\n"))
+        self.assertEqual(files["active.volume"], self.NEW + "\n")
+        self.assertEqual(log.count(" up -d"), 1)
+
+    def test_the_pitr_source_writes_unreadable_for_a_missing_timeline_only(self):
+        done, _, files = self.run_pitr(env={"STUB_OLD_TL": ""})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["change.log"], (f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\n"
+                                               f"Database system identifier: 1111\n{TIMELINE_LABEL}: unreadable\n"))
+
+    def test_the_pitr_source_accepts_a_timeline_in_quotes(self):
+        line = pitr_line().replace('"timeline":2', '"timeline":"2"')
+        done, _, _ = self.run_pitr(pitr_state(line))
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_the_pitr_source_stops_when_the_timeline_of_the_new_volume_differs(self):
+        done, log, files = self.run_pitr(env={"STUB_NEW_TL": "3"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the timeline of the new volume differs from the line of pitr-volume.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+        self.assertNotIn("volume rm", log)
+        self.assertNotIn("active.volume", files)
+
+    def test_the_pitr_source_stops_when_the_new_volume_has_no_timeline(self):
+        done, log, _ = self.run_pitr(env={"STUB_NEW_TL": ""})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the timeline of the new volume differs from the line of pitr-volume.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+
+    def test_the_pitr_source_stops_when_the_identifier_of_the_new_volume_differs(self):
+        done, log, files = self.run_pitr(env={"STUB_NEW_ID": "9999"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the system identifier of the new volume differs from the line of pitr-volume.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+        self.assertNotIn("active.volume", files)
+
+    def test_the_pitr_source_stops_when_the_new_volume_is_not_shut_down(self):
+        done, log, _ = self.run_pitr(env={"STUB_NEW_STATE": "in production"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the new volume is not in the state 'shut down'.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+
+    def test_the_pitr_source_refuses_a_volume_with_the_file_pitr_drill(self):
+        done, log, files = self.run_pitr(env={"STUB_DRILL_STATUS": "0"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the new volume holds the file pitr-drill. A drill volume never becomes production.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+        self.assertNotIn("volume rm", log)
+        self.assertNotIn("active.volume", files)
+
+    def test_the_pitr_source_stops_when_the_test_for_the_file_pitr_drill_fails(self):
+        done, log, files = self.run_pitr(env={"STUB_DRILL_STATUS": "125"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: cannot test the new volume for the file pitr-drill.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+        self.assertNotIn("active.volume", files)
+
+    def test_the_drill_test_runs_in_a_container_without_network_and_with_a_read_only_mount(self):
+        body = shell_function("refuse_drill_volume")
+        self.assertIn(':/var/lib/postgresql/data:ro"', body)
+        self.assertIn("--network none", body)
+        self.assertIn("--entrypoint test", body)
+
+    def test_the_pitr_source_refuses_a_line_with_drill_true(self):
+        done, log, files = self.run_pitr(pitr_state(pitr_line(drill="true")))
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: the line of pitr-volume comes from a drill. A drill volume never becomes production.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+        self.assertNotIn("active.volume", files)
+
+    def test_the_pitr_source_rejects_each_bad_last_line(self):
+        cases = {
+            "restore line": pitr_line(message=RESTORE_SOURCE),
+            "other message": pitr_line(message="pitr volume start"),
+            "bad identifier": pitr_line(identifier="12x"),
+            "bad timeline": pitr_line(timeline='"x"'),
+            "no timeline": pitr_line().replace('"timeline":2,', ""),
+            "no drill": pitr_line().replace(',"drill":false', ""),
+            "bad drill": pitr_line(drill='"no"'),
+            "not json": "pitr volume completed",
+            "empty": "",
+        }
+        for name, line in cases.items():
+            with self.subTest(name=name):
+                done, log, files = self.run_pitr(pitr_state(line))
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("CI: switch: the last line of pitr-volume is wrong.", done.stderr)
+                self.assertEqual(log, "")
+                self.assertNotIn("change.log", files)
+
+    def test_the_pitr_source_needs_the_files_of_pitr_volume(self):
+        for state in ({}, {"new.volume": self.NEW + "\n"}, {"pitr-volume.log": pitr_line() + "\n"}):
+            with self.subTest(files=sorted(state)):
+                done, log, _ = self.run_switch(PITR_SOURCE, state, self.PITR_ENV)
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("CI: switch: run pitr-volume first.", done.stderr)
+                self.assertEqual(log, "")
+
+    def test_the_pitr_source_stops_when_compose_shows_another_volume(self):
+        done, log, _ = self.run_pitr(env={"STUB_CONFIG_VOLUME": "other"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: Compose does not show the new volume for pgdata.", done.stderr)
+        self.assertEqual(log.count(" up -d"), 0)
+
+    def test_the_pitr_source_stops_when_db_mounts_another_volume(self):
+        done, _, _ = self.run_pitr(env={"STUB_INSPECT_VOLUME": "other"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch: db does not use the new volume.", done.stderr)
+
+    def test_the_text_of_switch_names_both_sources_and_checks_the_old_state_once(self):
+        body = shell_function("switch")
+        self.assertIn('"$SOURCE_PITR"', body)
+        self.assertIn('"$SOURCE_RESTORE"', body)
+        self.assertEqual(body.count("check_unclean_state"), 1)
+        self.assertEqual(body.count("restart_old_db"), 1)
 
 
 DOCKER_ACCESS_STUB = r"""
@@ -841,7 +1111,7 @@ CHECK_TREE = {
     "walarchive-disk/walarchive/.system-identifier": ARCHIVE_ID + "\n",
     f"walarchive-disk/walarchive/base/{NEW_BASE}/backup_manifest": "{}",
     "walarchive-disk/walarchive/000000010000000000000007.partial": "partial",
-    f"{MOVED}/old-system-identifier": "Database system identifier: 1111\n",
+    f"{MOVED}/old-system-identifier": f"Database system identifier: 1111\n{TIMELINE_LABEL}: 1\n",
     f"{MOVED}/{SEGMENT_ONE}": "segment one",
     f"{MOVED}/base/{OLD_BASE}/backup_manifest": "{}",
     "secrets/app_password": SECRET_VALUE + "\n",
@@ -861,6 +1131,66 @@ CHECK_STATE = {
     "export.sha256": EXPORT_HASH + "\n",
 }
 WAL_ENV = {"STUB_ARCHIVE": "@RUN@/walarchive-disk/walarchive", "STUB_NEW_ID": ARCHIVE_ID, "STUB_EXPORT_HASH": EXPORT_HASH, "STUB_COUNTS": COUNTS}
+
+
+class SwitchStepsFileTests(unittest.TestCase):
+    """Task 6.1 of pitr-recovery (design.md D7). The shared file holds the role passwords and the new WAL line."""
+
+    MOVED = ("set_role_passwords", "start_wal_line")
+    SHARED_BY_BOTH = ("load_active_volume", "require_no_labelled_volume", "cleanup")
+
+    def test_shared_file_exists_with_valid_syntax_and_lf(self):
+        self.assertTrue(SWITCH_STEPS.is_file(), "deploy/ci/switch-steps.sh is missing")
+        self.assertNotIn(b"\r", SWITCH_STEPS.read_bytes())
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("bash is not available")
+        done = subprocess.run([bash, "-n", str(SWITCH_STEPS)], capture_output=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_restore_switch_sources_the_shared_file_from_its_own_directory(self):
+        self.assertRegex(script_text(), r'(?m)^source "\$\(dirname "\$\{BASH_SOURCE\[0\]\}"\)/switch-steps\.sh"$')
+
+    def test_the_shared_file_defines_the_two_functions(self):
+        text = switch_steps_text()
+        for name in self.MOVED:
+            self.assertIn(f"\n{name}() {{\n", text, f"{name} is not in switch-steps.sh")
+
+    def test_restore_switch_no_longer_defines_the_moved_functions(self):
+        for name in self.MOVED:
+            self.assertNotIn(f"\n{name}() {{\n", script_text(), f"{name} stays in restore-switch.sh")
+
+    def test_the_functions_of_both_job_scripts_have_one_definition_in_the_shared_file(self):
+        # Task 6.2 of pitr-recovery (design.md D7). restore-switch.sh and pitr-recovery.sh must not copy these functions.
+        pitr = (CI / "pitr-recovery.sh").read_text(encoding="utf-8")
+        for name in self.SHARED_BY_BOTH:
+            marker = f"\n{name}() {{\n"
+            with self.subTest(name=name):
+                self.assertEqual(switch_steps_text().count(marker), 1, f"{name} is not defined once in switch-steps.sh")
+                self.assertNotIn(marker, script_text(), f"{name} stays in restore-switch.sh")
+                self.assertNotIn(marker, pitr, f"{name} stays in pitr-recovery.sh")
+
+    def test_the_shared_file_defines_switch_and_restore_switch_does_not(self):
+        # Task 6.2 of pitr-recovery (design.md D7). Both job scripts get the switch from the shared file.
+        self.assertIn("\nswitch() {\n", switch_steps_text(), "switch is not in switch-steps.sh")
+        self.assertNotIn("\nswitch() {\n", script_text(), "switch stays in restore-switch.sh")
+
+    def test_the_shared_file_calls_only_functions_that_it_or_common_sh_defines(self):
+        # A function that only restore-switch.sh defines would break every other job script that sources the file.
+        pattern = r"(?m)^([a-z_][a-z0-9_]*)\(\) \{$"
+        own = set(re.findall(pattern, switch_steps_text()))
+        common = set(re.findall(pattern, (CI / "common.sh").read_text(encoding="utf-8")))
+        foreign = set(re.findall(pattern, script_text())) - own - common
+        code = "\n".join(line for line in switch_steps_text().splitlines() if not line.lstrip().startswith("#"))
+        position = r"(?:^|[;&|(!{]|\$\(|\b(?:if|then|do|else|elif|while|until|retry)\b)\s*"
+        called = {name for name in foreign if re.search(position + name + r"\b", code, re.MULTILINE)}
+        self.assertEqual(called, set(), "switch-steps.sh calls functions of restore-switch.sh")
+
+    def test_the_globals_of_the_moved_functions_have_defaults_in_the_shared_file(self):
+        text = switch_steps_text()
+        for name in ("WAL_SUFFIX", "WAL_LABEL", "WAIT_ATTEMPTS", "IDENTIFIER_PATTERN", "SEGMENT_REGEX"):
+            self.assertRegex(text, rf"(?m)^{name}=", f"{name} has no default in switch-steps.sh")
+            self.assertNotRegex(script_text(), rf"(?m)^{name}=", f"{name} stays in restore-switch.sh")
 
 
 class WalLineTextTests(unittest.TestCase):
@@ -941,6 +1271,59 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(files["read:walarchive-disk/walarchive/.system-identifier"], ARCHIVE_ID + "\n")
         self.assertEqual(files["read:walarchive-disk/walarchive.moved-*/.system-identifier"], "1111\n")
 
+    HISTORY_TREE = {
+        **WAL_TREE,
+        "walarchive-disk/walarchive/00000002.history": "1\t0/3000000\tno recovery target specified\n",
+        "walarchive-disk/walarchive/0000000A.history": "history ten",
+        "walarchive-disk/walarchive/foo.history.tmp": "stray one",
+        "walarchive-disk/walarchive/00000002.history.bak": "stray two",
+        "walarchive-disk/walarchive/0000000b.history": "lower case",
+        "walarchive-disk/walarchive/0002.history": "short",
+        "walarchive-disk/walarchive/.00000003.history": "hidden",
+        "walarchive-disk/walarchive/000000010000000000000003.history": "long",
+    }
+    HISTORY_MOVED = ("00000002.history", "0000000A.history")
+    HISTORY_STAYS = ("foo.history.tmp", "00000002.history.bak", "0000000b.history", "0002.history",
+                     ".00000003.history", "000000010000000000000003.history")
+
+    def test_wal_line_moves_each_history_file_and_no_other_new_name(self):
+        # ADR-0106 (k) and design.md D6. The grammar is ^[0-9A-F]{8}\.history$ at the top of /wal.
+        done, _, files = self.run_wal_line(tree=self.HISTORY_TREE)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        _, moved = self.moved_entries(files["tree.list"])
+        listing = files["tree.list"].splitlines()
+        for name in self.HISTORY_MOVED:
+            self.assertIn(name, moved)
+            self.assertNotIn(f"walarchive-disk/walarchive/{name}", listing)
+        for name in self.HISTORY_STAYS:
+            self.assertNotIn(name, moved)
+            self.assertIn(f"walarchive-disk/walarchive/{name}", listing)
+        manifest = files["wal-target.manifest"].splitlines()
+        self.assertTrue(any(line.endswith("/00000002.history") for line in manifest))
+        self.assertFalse(any(line.endswith("/00000002.history.bak") for line in manifest))
+
+    def test_wal_line_moves_the_history_file_in_the_same_move_as_the_segments(self):
+        done, log, _ = self.run_wal_line(tree=self.HISTORY_TREE)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        moves = re.findall(r"^sudo mv -t \S+walarchive\.moved-\d{8}_\d{6} -- .+$", log, re.M)
+        self.assertEqual(len(moves), 1, log)
+        self.assertIn("/00000002.history", moves[0])
+        self.assertIn(SEGMENT_ONE, moves[0])
+        self.assertNotIn("foo.history.tmp", moves[0])
+
+    def test_wal_line_stops_when_a_history_file_stays_in_the_archive_directory(self):
+        # A move that leaves a file of the old line must stop the run before walarchive starts.
+        body = shell_function("move_segments")
+        self.assertIn("archive_history", body)
+        self.assertIn("a history file stays in the archive directory", body)
+
+    def test_the_history_expression_is_pinned(self):
+        # design.md D6. The runbook, restore-switch.sh, and this file use the same expression.
+        self.assertIn(r"HISTORY_REGEX='.*/[0-9A-F]{8}\.history'", switch_steps_text())
+        body = shell_function("archive_history")
+        self.assertIn("-regextype posix-extended -regex \"$HISTORY_REGEX\"", body)
+        self.assertIn("-maxdepth 1 -type f", body)
+
     def test_wal_line_writes_the_state_files(self):
         done, _, files = self.run_wal_line()
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -964,10 +1347,101 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertIn("base", moved)
         self.assertFalse(any(name.startswith("base/") for name in moved))
 
-    def test_wal_line_copies_the_identifier_line_of_the_change_log(self):
+    OLD_IDENTIFIER_READ = "read:walarchive-disk/walarchive.moved-*/old-system-identifier"
+
+    def test_wal_line_copies_the_identifier_and_timeline_lines_of_the_change_log(self):
+        # ADR-0106 (k). The file holds the identifier line, then the timeline line, in the form of the change log.
         done, _, files = self.run_wal_line(read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(files["read:walarchive-disk/walarchive.moved-*/old-system-identifier"], "Database system identifier: 1111\n")
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ],
+                         f"Database system identifier: 1111\n{TIMELINE_LABEL}: 1\n")
+
+    def test_wal_line_copies_the_identifier_line_only_for_a_legacy_entry(self):
+        # ADR-0106 (l). An entry from before the ADR holds no timeline line.
+        done, _, files = self.run_wal_line(state={**WAL_STATE, "change.log": LEGACY_CHANGE_LOG},
+                                           read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ], "Database system identifier: 1111\n")
+
+    def test_wal_line_copies_the_timeline_of_the_last_entry(self):
+        # A switch back appends an entry. The cluster that the switch leaves is the last entry.
+        log_text = LEGACY_CHANGE_LOG + f"volume: {BACK_NEW}\ntag: {JOB_TAG}\nDatabase system identifier: 1111\n{TIMELINE_LABEL}: 7\n"
+        done, _, files = self.run_wal_line(state={**WAL_STATE, "change.log": log_text},
+                                           read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ],
+                         f"Database system identifier: 1111\n{TIMELINE_LABEL}: 7\n")
+
+    def test_wal_line_stops_when_the_timeline_of_the_change_log_is_malformed(self):
+        for value in ("", "abc", "12345678901", "-1", "1 2"):
+            with self.subTest(value=value):
+                log_text = OLD_ENTRY.replace(f"{TIMELINE_LABEL}: 1", f"{TIMELINE_LABEL}: {value}")
+                done, _, files = self.run_wal_line(state={**WAL_STATE, "change.log": log_text})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("CI: wal-line: the timeline in the change log is not valid.", done.stderr)
+                self.assertNotIn("old-system-identifier", files["tree.list"])
+
+    def test_wal_line_keeps_the_old_behavior_for_an_unreadable_timeline(self):
+        # ADR-0106 (j). The switch writes the word unreadable. The file then holds the identifier line only.
+        log_text = OLD_ENTRY.replace(f"{TIMELINE_LABEL}: 1", f"{TIMELINE_LABEL}: unreadable")
+        done, _, files = self.run_wal_line(state={**WAL_STATE, "change.log": log_text},
+                                           read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ], "Database system identifier: 1111\n")
+
+    def test_wal_line_writes_the_readable_timeline_of_the_change_log_and_not_the_timeline_of_pitr_volume(self):
+        # ADR-0106 (k). A readable entry gives both lines from the change log. The line of pitr-volume has timeline 2.
+        state = {**WAL_STATE, **pitr_state()}
+        done, _, files = self.run_wal_line(state=state,
+                                           read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ],
+                         f"Database system identifier: 1111\n{TIMELINE_LABEL}: 1\n")
+
+    UNREADABLE_ENTRY = (f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\n"
+                        f"Database system identifier: unreadable\n{TIMELINE_LABEL}: unreadable\n")
+
+    def test_wal_line_uses_the_new_volume_when_the_last_entry_is_unreadable(self):
+        # ADR-0106 (j), (k), (l), and (p). A recovery keeps the identifier. The line of pitr-volume gives the identifier only.
+        # Its timeline belongs to the new cluster, so the file holds no timeline line.
+        state = {**WAL_STATE, **pitr_state(), "change.log": self.UNREADABLE_ENTRY}
+        tree = {**WAL_TREE, "walarchive-disk/walarchive/.system-identifier": "2222\n"}
+        done, _, files = self.run_wal_line(state=state, tree=tree,
+                                           read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ], "Database system identifier: 2222\n")
+
+    def test_wal_line_does_not_mix_entries_when_the_last_entry_is_unreadable(self):
+        # An earlier entry holds an identifier line and a timeline line. The last entry decides, so the file holds no timeline line.
+        state = {**WAL_STATE, **pitr_state(pitr_line(identifier="3333", timeline="4")),
+                 "change.log": OLD_ENTRY + self.UNREADABLE_ENTRY}
+        tree = {**WAL_TREE, "walarchive-disk/walarchive/.system-identifier": "3333\n"}
+        done, _, files = self.run_wal_line(state=state, tree=tree,
+                                           read=("walarchive-disk/walarchive.moved-*/old-system-identifier",))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files[self.OLD_IDENTIFIER_READ], "Database system identifier: 3333\n")
+
+    def test_wal_line_does_not_take_the_identifier_of_an_earlier_entry(self):
+        # The last entry has no identifier line at all. The identifier line of the first entry must not serve.
+        log_text = OLD_ENTRY + f"volume: {BACK_NEW}\ntag: {JOB_TAG}\n"
+        done, _, files = self.run_wal_line(state={**WAL_STATE, "change.log": log_text})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: wal-line: the change log holds no identifier line.", done.stderr)
+        self.assertNotIn("old-system-identifier", files["tree.list"])
+
+    def test_wal_line_stops_when_the_last_entry_is_unreadable_and_the_line_of_pitr_volume_is_missing(self):
+        state = {**WAL_STATE, "change.log": self.UNREADABLE_ENTRY}
+        done, _, files = self.run_wal_line(state=state)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: wal-line: the last line of pitr-volume is wrong.", done.stderr)
+        self.assertNotIn("old-system-identifier", files["tree.list"])
+
+    def test_wal_line_moves_the_files_when_the_archive_names_the_new_identifier_of_an_unreadable_entry(self):
+        # require_old_identity_file compares .system-identifier with the same identifier as the file old-system-identifier.
+        tree = {**WAL_TREE, "walarchive-disk/walarchive/.system-identifier": "2222\n"}
+        state = {**WAL_STATE, **pitr_state(), "change.log": self.UNREADABLE_ENTRY}
+        done, _, _ = self.run_wal_line(state=state, tree=tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_wal_line_runs_the_steps_in_order_and_deletes_nothing(self):
         done, log, _ = self.run_wal_line()
@@ -981,7 +1455,7 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
             r" exec -T walarchive basebackup-once\n",
             r"SELECT pg_switch_wal\(\)\n",
             r"SELECT EXISTS \(SELECT 1 FROM pg_stat_replication WHERE application_name = 'walarchive' AND usename = 'recipe_replicator' AND flush_lsn >= '0/6000000'::pg_lsn\)\n",
-            rf" exec -T walarchive pg_verifybackup --quiet --skip-checksums --wal-directory=/wal /wal/base/{NEW_BASE}\n",
+            rf" exec -T walarchive pg_verifybackup --quiet --skip-checksums --ignore=backup_end_time --wal-directory=/wal /wal/base/{NEW_BASE}\n",
         ])
         self.assertNotRegex(log, r"sudo rm|volume rm|\bdown\b|\bkill\b| compose .* (stop|rm) ")
         for line in ("CI: wal-line: step 1,", "CI: wal-line: step 2,", "CI: wal-line: step 3,", "CI: wal-line: step 4,",
@@ -1009,7 +1483,7 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertIn("export RECIPE_WALARCHIVE_DIR=$CI_ROOT/walarchive-disk/walarchive", common)
         self.assertIn("for disk in backups walarchive-disk", prepare)
         self.assertIn('sudo install -d -o 999 -g 999 -m 0700 "$RECIPE_WALARCHIVE_DIR"', prepare)
-        for name in ("cleanup.sh", "upgrade.sh", "restore-switch.sh"):
+        for name in ("cleanup.sh", "upgrade.sh", "switch-steps.sh"):
             self.assertIn("for disk in backups walarchive-disk", (CI / name).read_text(encoding="utf-8"), name)
 
     def test_wal_line_needs_the_files_of_switch(self):
@@ -1112,7 +1586,7 @@ class CheckBehaviorTests(StubbedSubcommandTests):
             r"SELECT pg_current_wal_lsn\(\)\n",
             r"flush_lsn >= '0/7000060'::pg_lsn\)\n",
             r"SELECT pg_walfile_name\('0/7000060'::pg_lsn - 1\)\n",
-            rf" exec -T walarchive pg_verifybackup --quiet --skip-checksums --wal-directory=/wal /wal/base/{NEW_BASE}\n",
+            rf" exec -T walarchive pg_verifybackup --quiet --skip-checksums --ignore=backup_end_time --wal-directory=/wal /wal/base/{NEW_BASE}\n",
             r" run --rm --no-deps -T -e PITR_CI=1 -e PITR_MARKER_SEQ -e PITR_MARKER_HASH pitr-check\n",
             r" logs --no-color --no-log-prefix db\n",
             r" exec -T walarchive basebackup-once\n",
@@ -1224,6 +1698,37 @@ class CheckBehaviorTests(StubbedSubcommandTests):
         done, log, _ = self.run_check(tree=tree)
         self.assertEqual(done.returncode, 1)
         self.assertIn("CI: check: a file of the target directory is missing.", done.stderr)
+
+    LEGACY_OLD_LOG = f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\nDatabase system identifier: 1111\n"
+    IDENTIFIER_CHANGED = "CI: check: the file old-system-identifier of the target directory changed."
+
+    def test_check_accepts_a_legacy_identifier_file_for_a_legacy_change_log(self):
+        # A change log entry from before ADR-0106 has no timeline line. The file then holds the identifier line only.
+        tree = {**CHECK_TREE, f"{MOVED}/old-system-identifier": "Database system identifier: 1111\n"}
+        done, _, _ = self.run_check(state={**CHECK_STATE, "change.log": self.LEGACY_OLD_LOG}, tree=tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_check_stops_when_the_timeline_line_of_old_system_identifier_differs(self):
+        for content in (f"Database system identifier: 1111\n{TIMELINE_LABEL}: 2\n", "Database system identifier: 1111\n"):
+            with self.subTest(content=content):
+                tree = {**CHECK_TREE, f"{MOVED}/old-system-identifier": content}
+                done, _, _ = self.run_check(tree=tree)
+                self.assertEqual(done.returncode, 1)
+                self.assertIn(self.IDENTIFIER_CHANGED, done.stderr)
+
+    def test_check_stops_when_a_legacy_change_log_meets_a_file_with_a_timeline_line(self):
+        done, _, _ = self.run_check(state={**CHECK_STATE, "change.log": self.LEGACY_OLD_LOG})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn(self.IDENTIFIER_CHANGED, done.stderr)
+
+    def test_check_accepts_the_identifier_file_of_an_unreadable_last_entry(self):
+        # ADR-0106 (j), (k), (l). The file holds the identifier line only. The line of pitr-volume gives the identifier.
+        content = "Database system identifier: 2222\n"
+        tree = {**CHECK_TREE, f"{MOVED}/old-system-identifier": content}
+        log_text = (OLD_ENTRY + f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\n"
+                    f"Database system identifier: unreadable\n{TIMELINE_LABEL}: unreadable\n")
+        done, _, _ = self.run_check(state={**CHECK_STATE, **pitr_state(), "change.log": log_text}, tree=tree)
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_check_stops_when_the_old_volume_is_gone(self):
         done, _, _ = self.run_check({"STUB_VOLUME_MISSING": "1"})
@@ -1556,19 +2061,22 @@ BACK_CASES = r"""
       if [[ $arg == *:/var/lib/postgresql/data:ro ]]; then volume=${arg%%:*}; fi
     done
     if [[ $volume == "$STUB_OLD" ]]; then
-      state=${STUB_OLD_STATE:-shut down}; id=${STUB_OLD_ID:-1111}
+      state=${STUB_OLD_STATE:-shut down}; id=${STUB_OLD_ID:-1111}; timeline=${STUB_OLD_TL-1}
     else
       if [[ -n ${STUB_NEW_CONTROL_FAIL:-} ]]; then exit 1; fi
-      state=${STUB_NEW_STATE:-shut down}; id=2222
+      state=${STUB_NEW_STATE:-shut down}; id=2222; timeline=${STUB_NEW_TL-2}
     fi
     echo "Database system identifier:           $id"
     echo "Database cluster state:               $state"
+    if [[ -n $timeline ]]; then echo "Latest checkpoint's TimeLineID:       $timeline"; fi
     ;;
 """
 DOCKER_BACK_STUB = DOCKER_WAL_STUB.replace('case "$args" in\n', 'case "$args" in' + BACK_CASES, 1)
 BACK_PYTHON_STUB = 'case " $* " in *" volume-name "*) exec "$STUB_REAL_PYTHON" "$@" ;; esac\n' + PYTHON_STUB.lstrip("\n")
 BACK_RIGHT_CHANGE_LOG = (OLD_ENTRY.replace(JOB_TAG, BACK_OLD_TAG)
-                         + f"volume: {BACK_NEW}\ntag: {JOB_TAG}\nDatabase system identifier: 2222\n")
+                         + f"volume: {BACK_NEW}\ntag: {JOB_TAG}\nDatabase system identifier: 2222\n{TIMELINE_LABEL}: 2\n")
+# A change log entry from before ADR-0106 has no timeline line.
+LEGACY_CHANGE_LOG = f"volume: {OLD_VOLUME}\ntag: {BACK_OLD_TAG}\nDatabase system identifier: 1111\n"
 
 
 class SwitchBackBehaviorTests(StubbedSubcommandTests):
@@ -1643,6 +2151,65 @@ class SwitchBackBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(files["change.log"], BACK_RIGHT_CHANGE_LOG)
         self.assertEqual(files["active.volume"], OLD_VOLUME + "\n")
 
+    def test_the_right_run_writes_the_timeline_of_the_leaving_volume(self):
+        done, _, files = self.run_back({"STUB_NEW_TL": "5"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["change.log"], BACK_RIGHT_CHANGE_LOG.replace(f"{TIMELINE_LABEL}: 2", f"{TIMELINE_LABEL}: 5"))
+
+    def test_the_run_stops_when_pg_controldata_shows_no_timeline_of_the_leaving_volume(self):
+        done, log, files = self.run_back({"STUB_NEW_TL": ""})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("CI: switch-back: pg_controldata shows no timeline of the volume that the run leaves.", done.stdout)
+        self.assertNotIn(" up ", log)
+        self.assertEqual(files["active.volume"], BACK_NEW + "\n")
+
+    def test_the_identifier_matches_but_the_timeline_differs_stops_the_run_before_db(self):
+        # ADR-0106 (l). A recovery keeps the identifier and raises the timeline.
+        for name, value in (("another timeline", "3"), ("no timeline on the volume", "")):
+            with self.subTest(name=name):
+                done, log, files = self.run_back({"STUB_OLD_TL": value})
+                self.assertEqual(done.returncode, 1)
+                self.assertTrue(done.stderr.strip().endswith(
+                    "CI: switch-back: the timeline of the new volume differs from the change log."), done.stderr)
+                self.assertNotIn(" up ", log)
+                self.assertNotIn("volume rm", log)
+                self.assertEqual(files["active.volume"], BACK_NEW + "\n")
+
+    def test_an_entry_without_a_timeline_compares_the_identifier_only(self):
+        # ADR-0106 (l). An entry from before ADR-0106 holds no timeline. Any timeline of the volume passes.
+        for timeline in ("1", "7"):
+            with self.subTest(timeline=timeline):
+                done, _, files = self.run_back({"STUB_OLD_TL": timeline}, state={**BACK_STATE, "change.log": LEGACY_CHANGE_LOG})
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual(files["active.volume"], OLD_VOLUME + "\n")
+                self.assertTrue(files["change.log"].startswith(LEGACY_CHANGE_LOG))
+
+    def test_an_entry_without_a_timeline_still_compares_the_identifier(self):
+        done, log, _ = self.run_back({"STUB_OLD_ID": "9999"}, state={**BACK_STATE, "change.log": LEGACY_CHANGE_LOG})
+        self.assertEqual(done.returncode, 1)
+        self.assertTrue(done.stderr.strip().endswith(
+            "CI: switch-back: the system identifier of the new volume differs from the change log."))
+        self.assertNotIn(" up ", log)
+
+    def test_the_timeline_comes_from_the_first_entry_only(self):
+        # The first entry is legacy. A later entry with a timeline must not decide the check.
+        later = LEGACY_CHANGE_LOG + f"volume: {BACK_NEW}\ntag: other-tag\nDatabase system identifier: 2222\n{TIMELINE_LABEL}: 9\n"
+        done, _, files = self.run_back({"STUB_OLD_TL": "7"}, state={**BACK_STATE, "change.log": later})
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(files["active.volume"], OLD_VOLUME + "\n")
+
+    def test_a_malformed_timeline_in_the_change_log_stops_the_run_before_any_container(self):
+        base = f"volume: {OLD_VOLUME}\ntag: {BACK_OLD_TAG}\nDatabase system identifier: 1111\n"
+        for name, line in (("empty value", f"{TIMELINE_LABEL}: \n"), ("letters", f"{TIMELINE_LABEL}: x1\n"),
+                           ("no space", f"{TIMELINE_LABEL}:1\n"), ("too long", f"{TIMELINE_LABEL}: 12345678901\n")):
+            with self.subTest(name=name):
+                text = base + line
+                done, log, files = self.run_back(state={**BACK_STATE, "change.log": text})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("CI: switch-back: the timeline in the change log is not valid.", done.stderr)
+                self.assertEqual(log, "")
+                self.assertEqual(files["change.log"], text)
+
     def test_the_right_run_sets_the_tag_of_the_old_volume_before_it_starts_db(self):
         done, log, files = self.run_back()
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1703,7 +2270,7 @@ class SwitchBackBehaviorTests(StubbedSubcommandTests):
         self.assertIn(f"{BACK_MOVED}/{SEGMENT_ONE}", listing)
         self.assertEqual(files["read:walarchive-disk/walarchive/.system-identifier"], "1111\n")
         self.assertEqual(files["read:walarchive-disk/walarchive.moved-20*/old-system-identifier"],
-                         "Database system identifier: 2222\n")
+                         f"Database system identifier: 2222\n{TIMELINE_LABEL}: 2\n")
         self.assertIn(f"walarchive-disk/walarchive/base/{BACK_BASE}", listing)
         self.assertNotIn(f"walarchive-disk/walarchive/base/{NEW_BASE}", listing)
         self.assertEqual(files["wal-new-back.base"], BACK_BASE + "\n")
@@ -1942,6 +2509,102 @@ class KeepBehaviorTests(StubbedSubcommandTests):
                 self.assertEqual(done.returncode, 1)
                 self.assertIn("CI: keep: run switch-back first.", done.stderr)
                 self.assertEqual(log, "")
+
+
+def runbook_section(title):
+    """Return the text of one level-3 section of the runbook, from its heading to the next level-3 heading."""
+    text = (ROOT / "docs" / "ops" / "runbook.md").read_text(encoding="utf-8")
+    parts = re.split(r"(?m)^(?=### )", text)
+    for part in parts:
+        if part.startswith(f"### {title}\n"):
+            return part
+    raise KeyError(title)
+
+
+def script_assignment(name):
+    """Return the quoted value of one assignment of switch-steps.sh, such as SEGMENT_REGEX='...' or NAME="..."."""
+    found = re.search(rf"(?m)^{name}=(?:'([^']*)'|\"([^\"]*)\")$", switch_steps_text())
+    if found is None:
+        raise KeyError(name)
+    return found.group(1) or found.group(2)
+
+
+class RunbookWalLineTests(unittest.TestCase):
+    """Check that the runbook and switch-steps.sh describe the same move and the same timeline rule (ADR-0106 (k), (l))."""
+
+    def runbook_move_command(self):
+        """Return the command of sub-step 4 of step 7 of "Restore into production"."""
+        section = runbook_section("Restore into production")
+        step = re.search(r"(?m)^7\. Start the new WAL line.*$", section)
+        self.assertIsNotNone(step, "the step 7 is missing")
+        found = re.search(
+            r"(?ms)^   4\. Move the segment files[^\n]*\n\n```bash\n(.*?)\n```",
+            section[step.start():],
+        )
+        self.assertIsNotNone(found, "sub-step 4 of step 7 has no command")
+        return found.group(1)
+
+    def script_move_command(self):
+        """Build the expected command from the two find calls of switch-steps.sh.
+
+        The substitution has four parts. The prefix `sudo ` and the tail `-printf ... | sort` of the find calls go away.
+        The variable $SEGMENT_REGEX and the variable $HISTORY_REGEX become their quoted values from the script.
+        The two tests join with -o and the test for the file .system-identifier joins as the third. The tail is the move.
+        """
+        calls = {}
+        for name, variable in (("archive_segments", "SEGMENT_REGEX"), ("archive_history", "HISTORY_REGEX")):
+            found = re.search(
+                rf'sudo (find "\$RECIPE_WALARCHIVE_DIR" .*?) -regex "\${variable}" -printf',
+                shell_function(name),
+            )
+            self.assertIsNotNone(found, name)
+            calls[variable] = found.group(1)
+        self.assertEqual(calls["SEGMENT_REGEX"], calls["HISTORY_REGEX"], "the two find calls differ in their options")
+        segment = script_assignment("SEGMENT_REGEX")
+        history = script_assignment("HISTORY_REGEX")
+        return (
+            f"{calls['SEGMENT_REGEX']} \\( -regex '{segment}' -o -regex '{history}' -o -name '.system-identifier' \\)"
+            ' -exec mv -t "$target" -- {} +'
+        )
+
+    def test_the_move_command_equals_the_expression_of_switch_steps(self):
+        self.assertEqual(self.runbook_move_command(), self.script_move_command())
+
+    def test_the_move_command_has_no_glob_for_the_segments(self):
+        # The old expression matched a segment by the glob [0-9A-F]???... and missed every history file.
+        self.assertNotIn("-name '[0-9A-F]", self.runbook_move_command())
+
+    def test_switch_back_names_the_timeline_of_the_left_volume(self):
+        section = runbook_section("Switch back")
+        label = script_assignment("TIMELINE_LABEL")
+        self.assertIn("`<left timeline>`", section)
+        self.assertIn("`<old timeline>`", section)
+        self.assertIn(label, section)
+
+    def test_switch_back_gives_the_rule_for_an_entry_without_a_timeline(self):
+        section = runbook_section("Switch back")
+        step = re.search(r"(?ms)^7\. Start `walarchive` before `app`.*?(?=^8\. )", section)
+        self.assertIsNotNone(step, "step 7 of Switch back is missing")
+        text = step.group(0)
+        self.assertIn("`<left timeline>` in place of `<old timeline>`", text)
+        self.assertIn("holds no timeline", text)
+        self.assertIn("`unreadable`", text)
+        self.assertIn("first line only", text)
+        self.assertIn("ADR-0106 (l)", text)
+
+    def test_switch_back_compares_the_timeline_of_the_old_volume(self):
+        section = runbook_section("Switch back")
+        step = re.search(r"(?ms)^4\. Run the command of sub-step 2.*?(?=^5\. )", section)
+        self.assertIsNotNone(step, "step 4 of Switch back is missing")
+        self.assertIn("The timeline must equal `<old timeline>`", step.group(0))
+        self.assertIn("holds no timeline", step.group(0))
+
+    def test_switch_back_writes_the_timeline_of_the_left_volume_into_the_change_log(self):
+        section = runbook_section("Switch back")
+        step = re.search(r"(?ms)^2\. Read the identifier.*?(?=^3\. )", section)
+        self.assertIsNotNone(step, "step 2 of Switch back is missing")
+        self.assertIn("Latest checkpoint's TimeLineID", step.group(0))
+        self.assertIn("`<left timeline>`", step.group(0))
 
 
 class ExportProbeTests(unittest.TestCase):

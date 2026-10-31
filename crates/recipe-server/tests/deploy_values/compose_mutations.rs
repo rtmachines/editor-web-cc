@@ -45,7 +45,7 @@ const HEALTHCHECK: [Mutation; 6] = [
 ];
 
 const HEALTH_SERVICES: [&str; 5] = ["proxy", "app", "db", "backup", "walarchive"];
-const ALL_SERVICES: [&str; 9] = [
+const ALL_SERVICES: [&str; 10] = [
     "proxy",
     "backup-premigrate",
     "migrate",
@@ -55,6 +55,7 @@ const ALL_SERVICES: [&str; 9] = [
     "walarchive",
     "pitr-check",
     "restore-volume",
+    "pitr-volume",
 ];
 
 /// One mutation changes the same text in several services. Each of them must report its own fault,
@@ -88,6 +89,7 @@ fn a_changed_limit_is_a_fault_in_each_service() {
         "walarchive",
         "pitr-check",
         "restore-volume",
+        "pitr-volume",
     ];
     let cases: [(&str, &str, &str, &[&str]); 6] = [
         ("cpus: 0.5", "cpus: 0.6", "cpus", &small),
@@ -107,13 +109,25 @@ fn a_changed_limit_is_a_fault_in_each_service() {
             "mem_limit: 512m",
             "mem_limit: 640m",
             "mem_limit",
-            &["app", "backup", "pitr-check", "restore-volume"],
+            &[
+                "app",
+                "backup",
+                "pitr-check",
+                "restore-volume",
+                "pitr-volume",
+            ],
         ),
         (
             "memswap_limit: 512m",
             "swap_limit: 512m",
             "memswap_limit",
-            &["app", "backup", "pitr-check", "restore-volume"],
+            &[
+                "app",
+                "backup",
+                "pitr-check",
+                "restore-volume",
+                "pitr-volume",
+            ],
         ),
         (
             "memswap_limit: 256m",
@@ -134,6 +148,7 @@ fn a_changed_security_option_or_logging_anchor_is_a_fault_in_each_service() {
         "backup",
         "backup-premigrate",
         "restore-volume",
+        "pitr-volume",
         "walarchive",
     ];
     let cases: [(&str, &str, &str, &[&str]); 5] = [

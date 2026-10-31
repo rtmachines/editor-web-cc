@@ -71,7 +71,7 @@ Alternative: a file next to the base backup directory. Rejected, because the ret
 - `pg_walfile_name()` of the switch LSN gives the segment. The 16 hex characters after the timeline must be at or above the newest segment of `/wal` on the base timeline. A `.partial` file counts as its segment.
 - With `PITR_EXPECTED_LSN`, the switch LSN must also be at or above that value. `pg_lsn` in SQL compares the two values. A value outside the grammar `^[0-9A-F]{1,8}/[0-9A-F]{1,8}$` stops the run before the copy.
 - Roles: the checks of ADR-0103 (m) reuse the functions of `restore-volume` through `lib/restore-steps.sh`. `COMPOSE_SUBNET` fills the placeholder.
-- Output: the values of ADR-0106 (d) come from one `psql` query each. Text values pass the `clean` function of `restore-steps.sh` before they enter the JSON line. The line also holds `"drill":true` or `"drill":false`.
+- Output: the values of ADR-0106 (d) come from one `psql` query each. Text values pass the function `clean_json_text` of `pitr-volume` before they enter the JSON line. It deletes each unsafe character, so a value of only unsafe characters becomes empty and stops the run. The line also holds `"drill":true` or `"drill":false`.
 - Drill: with `--drill`, the script writes the empty file `pitr-drill` at the top of the target after the clean stop and before `sync`.
 - Constants: `pitr_volume.start_timeout`, `pitr_volume.stop_timeout`, and `disk.warn_percent` are named constants with a comment that names their row of 7.11. The test `deploy_values` compares them with the row.
 

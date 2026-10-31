@@ -277,6 +277,104 @@ jobs:
         timeout-minutes: 5
         run: bash deploy/ci/restore-switch.sh cleanup
 
+  pitr-recovery:
+    name: Recover from the WAL archive
+    # ADR-0094: Run the stack test on manual dispatch and pushes to main. Dispatch this job on a branch.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    # The step limits sum to 140 minutes, with 3 for diagnostics and 5 for cleanup. This leaves 10 minutes below the job limit.
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    env:
+      RECIPE_VERSION: ci-pitr-recovery
+      COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_SUBNET: 172.28.0.0/16
+      COMPOSE_IP_RANGE: 172.28.1.0/24
+      PROXY_ADDRESS: 172.28.0.2
+      SITE_ADDRESS: localhost
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the CI scripts
+        run: bash deploy/ci/check.sh
+      - name: Prepare the disks and secrets
+        run: bash deploy/ci/prepare.sh
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build recipe-server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: recipe-server:ci-pitr-recovery
+          cache-from: type=gha,scope=recipe-server
+      - name: Build recipe-pgtools
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/pgtools
+          file: deploy/pgtools/Dockerfile
+          build-contexts: db=deploy/db
+          load: true
+          push: false
+          tags: recipe-pgtools:ci-pitr-recovery
+          cache-from: type=gha,scope=recipe-pgtools
+      # Keep the sum of the step limits below the job limit so diagnostics can run after a timeout.
+      # Allow 25 minutes to start the stack, change the password, and take the first base backup.
+      - name: Start the stack and take the first base backup (D8 prepare)
+        timeout-minutes: 25
+        run: bash deploy/ci/pitr-recovery.sh prepare
+      # Allow 5 minutes for the two marker commits and the flush wait. The wait ends at a full second.
+      - name: Commit the two markers and record the target time (D8 markers)
+        timeout-minutes: 12
+        run: bash deploy/ci/pitr-recovery.sh markers
+      # Allow 15 minutes for the drill into a drill volume and the refused switch.
+      - name: Run the drill and refuse its volume (D8 drill)
+        timeout-minutes: 15
+        run: bash deploy/ci/pitr-recovery.sh drill
+      # Allow 10 minutes for the target after the newest commit and for the gap in the WAL.
+      - name: Refuse a late target and a gap in the WAL (D8 refusals)
+        timeout-minutes: 10
+        run: bash deploy/ci/pitr-recovery.sh refusals
+      # Allow 8 minutes to stop app and backup, kill db, stop walarchive, and delete pg_control.
+      - name: Crash the database and lose pg_control (D8 crash)
+        timeout-minutes: 8
+        run: bash deploy/ci/pitr-recovery.sh crash
+      # Allow 20 minutes to run pitr-volume to the end of the archive.
+      - name: Recover into a new volume (D8 recover)
+        timeout-minutes: 20
+        run: bash deploy/ci/pitr-recovery.sh recover
+      # Allow 8 minutes for the switch. It starts db and waits for the crash recovery.
+      - name: Switch db to the recovered volume (D8 switch)
+        timeout-minutes: 8
+        run: bash deploy/ci/pitr-recovery.sh switch
+      # Allow 8 minutes to set the passwords, move the old WAL files, and start the new WAL line.
+      - name: Start the new WAL line (D8 wal-line)
+        timeout-minutes: 8
+        run: bash deploy/ci/pitr-recovery.sh wal-line
+      # Allow 20 minutes to start app, prove the recovery point, run the backups, and check the recovery time.
+      - name: Check the recovery point and the new WAL line (D8 check)
+        timeout-minutes: 20
+        run: bash deploy/ci/pitr-recovery.sh check
+      # Allow 6 minutes for the refusal of a segment of the old timeline.
+      - name: Refuse a segment of the old timeline (D8 refuse)
+        timeout-minutes: 6
+        run: bash deploy/ci/pitr-recovery.sh refuse
+      # Allow 3 minutes for diagnostics and 5 minutes for cleanup.
+      - name: Show pitr-recovery failure diagnostics
+        if: failure()
+        timeout-minutes: 3
+        run: bash deploy/ci/diagnostics.sh
+      - name: Release the pitr-recovery project and volumes
+        if: always()
+        timeout-minutes: 5
+        run: bash deploy/ci/pitr-recovery.sh cleanup
+
   musl-unwind:
     name: Panic unwind on musl
     runs-on: ubuntu-24.04

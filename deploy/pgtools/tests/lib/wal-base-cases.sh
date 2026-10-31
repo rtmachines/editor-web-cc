@@ -63,6 +63,38 @@ case_wal_base_happy() {
   expect_ok "base: no password in output" no_secret
 }
 
+# ADR-0106 (c), design D2: a passed run writes backup_end_time into the temp directory, so the rename
+# publishes it with the base backup. The file holds one line of the grammar of ADR-0106 (a), the time
+# after pg_verifybackup rounded up to the next full second, and one newline.
+case_wal_base_end_time() {
+  local file=$W/base/base_$WTS/backup_end_time line verify_epoch end_epoch grammar format
+  wal_new_case base-end-time
+  wal_run STUB_START_SEG=14 -- basebackup-once
+  expect_eq "end time: exit code" "$RC" "0"
+  expect_ok "end time: the script writes into the temp directory" \
+    grep -qF -- '"$tmp_dir/backup_end_time"' "$BIN/basebackup-once"
+  expect_ok "end time: file is a regular file" test -f "$file" -a ! -L "$file"
+  expect_eq "end time: file mode" "$(stat -c %a "$file" 2>/dev/null)" "600"
+  expect_eq "end time: 20 characters and one newline" "$(wc -c <"$file" 2>/dev/null | tr -d ' ')" "21"
+  expect_eq "end time: one line" "$(wc -l <"$file" 2>/dev/null | tr -d ' ')" "1"
+  line=$(head -n 1 -- "$file" 2>/dev/null || true)
+  # The reader pitr-volume owns the grammar. The case takes both values from that script.
+  grammar=$(sed -n "s/^TIME_GRAMMAR='\(.*\)'\$/\1/p" "$BIN/pitr-volume")
+  format=$(sed -n "s/^TIME_FORMAT='\(.*\)'\$/\1/p" "$BIN/pitr-volume")
+  expect_ok "end time: the grammar of the reader was found" test -n "$grammar" -a -n "$format"
+  expect_ok "end time: the line matches the grammar of the reader" \
+    bash -c '[[ $1 =~ $2 ]]' _ "$line" "$grammar"
+  expect_eq "end time: the line is a real date" "$("$REAL_DATE" -u -d "$line" "+$format" 2>/dev/null)" "$line"
+  verify_epoch=$(cat "$CASE/stub/verify.epoch" 2>/dev/null || echo 0)
+  end_epoch=$("$REAL_DATE" -u -d "$line" +%s 2>/dev/null || echo 0)
+  expect_ok "end time: the time is at or after the run of pg_verifybackup" \
+    test "$verify_epoch" -gt 0 -a "$end_epoch" -ge "$verify_epoch"
+  expect_ok "end time: the time is at most 5 seconds after the run of pg_verifybackup" \
+    test "$end_epoch" -le $((verify_epoch + 5))
+  expect_eq "end time: no other file of that name" \
+    "$(find "$W" -name 'backup_end_time*' | wc -l | tr -d ' ')" "1"
+}
+
 # Six old base backups and a new one. The newest 4 stay. The cleanup gets the lowest start segment of the kept set.
 case_wal_base_retention() {
   new_base_case base-retention 6
@@ -188,6 +220,7 @@ case_wal_base_verify_fails() {
   expect_eq "failed pg_verifybackup: pg_verifybackup ran" "$(count_events 'pg_verifybackup')" "1"
   expect_eq "failed pg_verifybackup: no temp name" "$(find "$W/base" -name '.tmp-*' | wc -l | tr -d ' ')" "0"
   expect_no "failed pg_verifybackup: new base backup not published" base_exists "base_$WTS"
+  expect_eq "failed pg_verifybackup: no backup_end_time under the base directory"     "$(find "$W/base" -name 'backup_end_time*' | wc -l | tr -d ' ')" "0"
 }
 
 case_wal_base_basebackup_fails() {
@@ -386,6 +419,43 @@ case_wal_base_guard_first_start() {
   expect_eq "base guard, first start: file mode" "$(stat -c %a "$W/$ID_FILE_NAME" 2>/dev/null)" "600"
   expect_ok "base guard, first start: base backup published" base_exists "base_$WTS"
   expect_ok "base guard, first start: the pgpass line matches the connection" grep -qF 'CALL psql pgpass match' "$CASE/stub/log"
+}
+
+# base_timeline_refused_case <label> <file name>: the archive holds six old base backups, the
+# segments 1 to 30, and one more file of another timeline. The run stops at the guard (ADR-0106 (m)).
+# It writes no base backup and no temp name, and it deletes no base backup and no WAL file.
+base_timeline_refused_case() {
+  new_base_case "base-guard-timeline-$1" 6
+  printf 'wal
+' >"$W/$2"
+  guard_snapshot
+  wal_run -- basebackup-once
+  expect_base_guard_refused "base guard, timeline ($1)" "$MSG_TIMELINE"
+  expect_eq "base guard, timeline ($1): no temp name" "$(find "$W/base" -name '.tmp-*' | wc -l | tr -d ' ')" "0"
+  expect_eq "base guard, timeline ($1): six base backups stay" "$(base_dirs | wc -w | tr -d ' ')" "6"
+  expect_eq "base guard, timeline ($1): file kept" "$(id_file_content)" "$WAL_SYSID"
+  expect_ok "base guard, timeline ($1): the other file stays" test -f "$W/$2"
+}
+
+# Scenarios "Segment of another timeline" and "Partial file of another timeline".
+# The stub of psql answers the timeline 1, so the segments of new_base_case match it.
+case_wal_base_guard_timeline_refused() {
+  base_timeline_refused_case segment "$(tl_seg 00000002 31)"
+  base_timeline_refused_case partial "$(tl_seg 00000002 32).partial"
+  base_timeline_refused_case older "$(tl_seg 00000000 5)"
+}
+
+# Every segment has the timeline of the server, and a history file of another timeline is no segment.
+# The run goes on and publishes the base backup.
+case_wal_base_guard_timeline_passed() {
+  new_base_case base-guard-timeline-match 2
+  printf 'history
+' >"$W/00000002.history"
+  wal_run STUB_START_SEG=14 -- basebackup-once
+  expect_eq "base guard, timeline match: exit code" "$RC" "0"
+  expect_eq "base guard, timeline match: no ERROR line" "$(error_count "$CASE/out")" "0"
+  expect_ok "base guard, timeline match: base backup published" base_exists "base_$WTS"
+  expect_ok "base guard, timeline match: history file stays" test -f "$W/00000002.history"
 }
 
 case_wal_base_parallel() {

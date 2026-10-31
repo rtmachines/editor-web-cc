@@ -4,6 +4,26 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- The one-shot service `pitr-volume` fills a new volume from a base backup and `/wal`. It mounts `/wal` read-only and no secret (ADR-0106 (e), (f)).
+- The default target is the end of the archive with the `.partial` file. An optional `--target-time` undoes a logical fault (ADR-0106 (a), (b)).
+- A gate checks the end of the replay, the audit chain, a marker entry, the configuration files, and the roles (ADR-0106 (g)).
+- New rows `pitr_volume.start_timeout` and `pitr_volume.stop_timeout` (ADR-0106 (n)).
+- A CI job `pitr-recovery` proves the recovery point, the target time, and the recovery time (ADR-0106 (p)).
+- The runbook sections for the recovery and the drill (ADR-0106 (o)). The section "Known gaps" loses two bullets.
+
+### Changed
+
+- `basebackup-once` writes `backup_end_time`. A target time never selects a base backup that ended after it (ADR-0106 (c)).
+- The switch refuses a drill volume with the file `pitr-drill` (ADR-0106 (j), (o)).
+- `pitr-check` and `pitr-volume` share one library (ADR-0106 (h)).
+- The switch of a recovery compares the timeline too. The change log holds the timeline (ADR-0106 (j), (l)).
+- The move of a new WAL line also takes the history files (ADR-0106 (k)).
+- **BREAKING** The guard refuses a segment of another timeline in `/wal` (ADR-0106 (m)).
+- The WAL check of ADR-0099 (a3) ignores the file `backup_end_time` of a base backup (ADR-0107).
+- After this release, run `basebackup-once` once.
+
 ## [0.2.0] - 2026-10-30
 
 ### Added

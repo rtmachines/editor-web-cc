@@ -12,8 +12,9 @@ use crate::defaults::{check_dockerfile_ports, check_script_defaults, check_secre
 use crate::fault::Report;
 use crate::files::{
     DB_CONTEXT_LIST, PGTOOLS_CONTEXT_LIST, PGTOOLS_DOCKERFILE, check_caddyfile,
-    check_context_lists, check_crontab, check_env_example, check_line_endings,
-    check_scratch_settings, check_script_assignments, parse_env,
+    check_context_lists, check_crontab, check_env_example, check_library_copies,
+    check_line_endings, check_no_fsync, check_scratch_settings, check_script_assignments,
+    parse_env,
 };
 use crate::lines::Compose;
 use crate::overrides::{BUILD, DEV, check_override};
@@ -53,21 +54,22 @@ const CRONTABS: [(&str, &[(&str, &str)]); 2] = [
     ),
 ];
 /// Every script of `deploy/pgtools/bin/`. A script holds a constant or a default of 7.11, or none.
-const SCRIPTS: [&str; 10] = [
+const SCRIPTS: [&str; 11] = [
     "backup-entry",
     "backup-health",
     "backup-now",
     "backup-once",
     "basebackup-once",
     "pitr-check",
+    "pitr-volume",
     "restore-test",
     "restore-volume",
     "walarchive-entry",
     "walarchive-health",
 ];
 const SCRIPT_DIRECTORY: &str = "deploy/pgtools/bin/";
-/// The libraries of `deploy/pgtools/lib/` that hold a constant of 7.11. A library has no default.
-const LIBRARY_SCRIPTS: [&str; 1] = ["wal-identity.sh"];
+/// The libraries of `deploy/pgtools/lib/` that hold a constant or a setting of 7.11. A library has no default.
+const LIBRARY_SCRIPTS: [&str; 2] = ["recovery-steps.sh", "wal-identity.sh"];
 const LIBRARY_DIRECTORY: &str = "deploy/pgtools/lib/";
 
 /// A file under test: the path from the repository root and its text.
@@ -197,13 +199,20 @@ fn check_scripts(inputs: &Inputs, settings: &Table) -> Report {
         let text = inputs.text(&format!("{SCRIPT_DIRECTORY}{name}"));
         report.absorb(check_script_assignments(name, text, settings));
         report.absorb(check_script_defaults(name, text, settings));
-        if matches!(name, "restore-test" | "pitr-check" | "restore-volume") {
+        if matches!(name, "restore-test" | "restore-volume") {
             report.absorb(check_scratch_settings(name, text, settings));
+        }
+        // The start options of the scratch cluster of `pitr-check` live in `recovery-steps.sh`.
+        if name == "pitr-check" {
+            report.absorb(check_no_fsync(&format!("{SCRIPT_DIRECTORY}{name}"), text));
         }
     }
     for name in LIBRARY_SCRIPTS {
         let text = inputs.text(&format!("{LIBRARY_DIRECTORY}{name}"));
         report.absorb(check_script_assignments(name, text, settings));
+        if name == "recovery-steps.sh" {
+            report.absorb(check_scratch_settings(name, text, settings));
+        }
     }
     report
 }
@@ -286,6 +295,11 @@ pub fn check_all(inputs: &Inputs) -> Report {
         inputs.text(PGTOOLS_DOCKERFILE),
         inputs.text(DB_CONTEXT_LIST),
         inputs.text(PGTOOLS_CONTEXT_LIST),
+    ));
+    report.absorb(check_library_copies(
+        inputs.text(PGTOOLS_DOCKERFILE),
+        inputs.text(PGTOOLS_CONTEXT_LIST),
+        inputs.listing(),
     ));
     report.absorb(check_line_endings(
         inputs.text(PGTOOLS_DOCKERFILE),

@@ -21,3 +21,4 @@
 !lib/globals-grammar.sh
 !lib/restore-steps.sh
 !lib/wal-identity.sh
+!lib/recovery-steps.sh

@@ -5,7 +5,7 @@ umask 077
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 bash "$GITHUB_WORKSPACE/deploy/ci/check.sh"
-for suite in backup-test restore-test-test restore-volume-test walarchive-test
+for suite in backup-test restore-test-test restore-volume-test walarchive-test pitr-volume-test
 do
   docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges:true \
     --memory 512m --memory-swap 512m --cpus 0.5 \

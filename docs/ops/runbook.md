@@ -32,6 +32,7 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
   - [Statement outside the role grammar](#statement-outside-the-role-grammar)
   - [Copy the backups off site](#copy-the-backups-off-site)
   - [Delete orphan temp files](#delete-orphan-temp-files)
+  - [Change log of the site](#change-log-of-the-site)
   - [Restore into production](#restore-into-production)
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
@@ -487,7 +488,7 @@ The grammar accepts a role setting for `log_error_verbosity` and `log_parameter_
 1. Read the line number in the `ERROR` line of the output.
 2. Open the globals file `globals_<YYYYMMDD_HHMM><suffix>.sql` of the set that the test checked.
 3. Read the line with that line number.
-4. Run the command below in the directory `deploy/`. Use the role and the setting name of that line:
+4. Write the start time into the change log ([rule](#change-log-of-the-site)). Run the command below in the directory `deploy/`. Use the role and the setting name of that line:
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "ALTER ROLE <role> RESET <setting>"
@@ -585,6 +586,26 @@ The marker files, the lock files, and every complete set stay.
 A live run writes under a temp name (`reliability.md` 7.7, ADR-0077 (h)).
 The check of step 3 shows one instant, so the time of step 1 keeps a scheduled run away from steps 5 and 6.
 
+### Change log of the site
+
+The change log of the site is the written record of the operator.
+The sections "Restore into production" and "Upgrade" name the entries that it keeps.
+
+A manual statement as a superuser writes no audit entry (ADR-0106 (b)). The statement runs through `docker compose exec -u postgres db`.
+A recovery to a target time before such a statement needs the start time of the statement.
+
+Before each manual statement as a superuser that can change data, roles, or settings, write the start time in UTC into the change log.
+Read the time with this command:
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+- Write the time before you run the statement, and not after it.
+- A step that runs another step by number follows the same rule.
+- A statement that only reads, such as `SELECT`, needs no entry.
+- The section "Recover from the WAL archive" uses this time, cut to the full second, as the target time.
+
 ### Restore into production
 
 The restore writes into a new volume and never into the volume of the running `db` (ADR-0103 (a)).
@@ -596,15 +617,17 @@ Use these placeholders:
 - `<stamp>` is the part of the dump file name between `recipe_` and `.dump`, for example `<YYYYMMDD_HHMM>_now`.
 - `<new volume>` is the name that step 3 prints. `<old volume>` is the value of `RECIPE_PGDATA_VOLUME` in `.env` before step 5.
 - `<identifier>` is the field `system_identifier` that step 4 prints. `<old identifier>` is the number that step 5 writes into the change log.
+- `<old timeline>` is the number after `Latest checkpoint's TimeLineID` that step 5 writes into the change log (ADR-0106 (l)).
 - `<tag>` is the tag of the image of the old cluster. Normally it is the value of `RECIPE_VERSION` in `.env`.
 
 Each start of `db` or `app` on a volume uses the `compose.yaml` and the tag that fit that volume (ADR-0105 (a)).
-The change log of the site keeps the name, the tag, and the identifier of each volume that a switch leaves.
+The change log of the site keeps the name, the tag, the identifier, and the timeline of each volume that a switch leaves.
+It also keeps one entry for each upgrade. That entry holds the previous tag, the new tag, the start time of `migrate`, the identifier, and the timeline (step 10 of "Upgrade").
 
 Warning: a restore of a dump loses every change and audit entry after the dump time. The loss is up to 24 hours.
 Delete no volume and no file of the WAL archive during the procedure. ADR-0103 (t) gives the delete rule.
 A recovery from the WAL archive gives a recovery point of minutes (`reliability.md` 7.7, ADR-0068 (l), R31).
-This page gives no steps for that recovery. See "Known gaps".
+The section [Recover from the WAL archive](#recover-from-the-wal-archive) gives the steps for that recovery.
 
 If the set is not the newest set, steps 1 to 8 of `restore-volume` are the test of that set (ADR-0103 (b)).
 The login check of step 8 of `restore-test` then has no equal before the switch.
@@ -652,7 +675,7 @@ docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C
    3. If the state differs, keep the old name in `.env` and run `docker compose up -d --no-deps db`. Then run sub-step 1 and sub-step 2 again.
       In a major upgrade, run that `up` command in the directory of `<old tag>`. Its `compose.yaml` has the old major version (ADR-0105 (f)).
       After that `up` command, change back into the directory of the new release. Then run sub-step 1 and sub-step 2 again there.
-   4. Write the old name, `<tag>`, and the line `Database system identifier` of that output into the change log of the site (ADR-0105 (b)).
+   4. Write the old name, `<tag>`, and the lines `Database system identifier` and `Latest checkpoint's TimeLineID` of that output into the change log of the site (ADR-0105 (b), ADR-0106 (l)).
    5. Write `<new volume>` as the value of `RECIPE_PGDATA_VOLUME` in `.env`. Load the values into the shell again. Do not export them:
 
 ```bash
@@ -674,7 +697,7 @@ docker compose up -d --no-deps db
 docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$(docker ps -q --filter label=com.docker.compose.project=recipe-editor --filter label=com.docker.compose.service=db)"
 ```
 
-6. Set the password of each login role from its secret file (ADR-0033). Never type a password on a command line:
+6. Write the start time into the change log ([rule](#change-log-of-the-site)). Set the password of each login role from its secret file (ADR-0033). Never type a password on a command line:
 
 ```bash
 docker compose exec -T -u postgres db psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc --dbname postgres <<'SQL'
@@ -719,17 +742,25 @@ mkdir -m 0700 -- "$target"
 stat -c %d "$RECIPE_WALARCHIVE_DIR" "$target"
 ```
 
-   3. Write the line `Database system identifier` of the old cluster into the file `old-system-identifier`:
+   3. Write the lines `Database system identifier` and `Latest checkpoint's TimeLineID` of the old cluster into the file `old-system-identifier` (ADR-0106 (k)):
+
+```bash
+printf '%s\n%s\n' 'Database system identifier: <old identifier>' "Latest checkpoint's TimeLineID: <old timeline>" > "$target/old-system-identifier"
+```
+
+      If the change log entry of the old cluster holds no timeline, or holds the word `unreadable`, write the first line only (ADR-0106 (l)):
 
 ```bash
 printf '%s\n' 'Database system identifier: <old identifier>' > "$target/old-system-identifier"
 ```
 
-   4. Move the segment files, the `.partial` file, and the file `.system-identifier`:
+   4. Move the segment files, the `.partial` file, each timeline history file, and the file `.system-identifier` (ADR-0106 (k)):
 
 ```bash
-find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]???????????????????????' -o -name '[0-9A-F]???????????????????????.partial' -o -name '.system-identifier' \) -exec mv -t "$target" -- {} +
+find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f -regextype posix-extended \( -regex '.*/[0-9A-F]{24}(\.partial)?' -o -regex '.*/[0-9A-F]{8}\.history' -o -name '.system-identifier' \) -exec mv -t "$target" -- {} +
 ```
+
+      A history file has 8 uppercase hexadecimal digits and the suffix `.history`. The command moves no other name.
 
    5. Move each base backup of the old cluster into the directory `base` of the target:
 
@@ -751,7 +782,7 @@ ls -A "$RECIPE_WALARCHIVE_DIR" "$RECIPE_WALARCHIVE_DIR/base"
    Do not delete the target directory. ADR-0103 (t) gives the delete rule.
 
 8. Truncate the tables `session` and `login_attempt`. Then re-apply the user changes:
-   1. Truncate the tables:
+   1. Write the start time into the change log ([rule](#change-log-of-the-site)). Then truncate the tables:
 
 ```bash
 docker compose exec -u postgres db psql -d recipe -c "TRUNCATE session, login_attempt"
@@ -826,6 +857,206 @@ Read that code in the `ERROR` line. Then follow its row in `reliability.md` 1.2.
 
 The alert `audit_check_age` becomes active when `audit.last_check_at` is older than `audit.max_check_age`.
 
+### Recover from the WAL archive
+
+This recovery fills a new volume from a base backup and the WAL archive (ADR-0106).
+It gives a recovery point of minutes (R31). It also works after the loss of the `pgdata` disk, if the WAL archive disk is intact.
+Use it also to undo a logical fault, for example a wrong manual statement, up to a chosen time.
+The recovery uses the switch of "Restore into production". The old volume stays unchanged.
+
+Warning: the recovery loses each write after the recovery point.
+Delete no volume and no file of the WAL archive during the procedure (ADR-0103 (t)).
+The downtime includes the copy, the replay, the new WAL line, and its first base backup.
+The section [Recovery drill](#recovery-drill) measures the recovery time on the data of the site.
+
+Use these placeholders in addition to the placeholders of "Restore into production":
+
+- `<new volume>` is the name that step 5 prints.
+- `<time>` is the target time. It has the form `YYYY-MM-DDTHH:MM:SSZ` in UTC.
+- `<seq>`, `<hash>`, and `<lsn>` are the values that steps 2 and 3 print.
+- `<recovery tag>` is the tag of the schema at the recovery point. Normally it equals `<tag>`.
+- `<timeline>` is the field `timeline` of the last output line of step 6.
+
+A target time before the `migrate` of an upgrade needs the previous tag as `<recovery tag>`. The change log of the upgrade gives the time of `migrate`.
+If `<recovery tag>` differs from `<tag>`, run steps 6 to 12 in the directory `deploy/` of that release, with its `.env` and images.
+Each start of `db` or `app` on the new volume uses that tag (ADR-0105 (a)).
+
+Choose the target before step 1:
+
+- Without `--target-time`, the recovery ends at the end of the archive. It replays the `.partial` file.
+- With `--target-time <time>`, the recovery ends before the first commit at or after that time. Use it for a logical fault.
+- Read the time in the audit log of the old cluster, if `db` runs. Else read it in the off-site audit copy.
+- Take `occurred_at` of the first unwanted audit entry. Cut it to the full second.
+- A commit in the same second before that entry is also lost.
+- A manual statement as a superuser writes no audit entry. Use its start time from the [change log of the site](#change-log-of-the-site), cut to the full second.
+- Without such a record, the target is an estimate of the operator. The values of step 7 then matter most.
+
+1. Stop `app` and `backup`. After this point, `app` writes no audit entry:
+
+```bash
+docker compose stop app backup
+```
+
+2. If `db` runs, read the newest audit entry. Note `chain_seq` and the hash:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT chain_seq, encode(entry_hash, 'hex') FROM public.audit_log ORDER BY chain_seq DESC LIMIT 1"
+```
+
+   Only a recovery to the end of the archive uses `<seq>` and `<hash>`. With a target time, step 6 does not pass them, because the newest entry can lie after the target.
+
+3. If `db` runs, read the WAL position. Note it as `<lsn>`:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT pg_current_wal_lsn()"
+```
+
+   Run the flush check of step 12 of "A gap in the WAL stream" with `<lsn>` in place of `<position>`. Run it until it returns `t`.
+   Only a recovery to the end of the archive uses `<lsn>` as `PITR_EXPECTED_LSN`. With a target time, step 6 does not pass it.
+
+4. Stop `walarchive`. The `.partial` file then stays stable:
+
+```bash
+docker compose stop walarchive
+```
+
+5. Create the new volume. Run step 3 of "Restore into production". The command prints the name of the volume.
+6. Fill the new volume. The container has no network and no secret. `db` keeps running on the old volume, if it runs:
+
+```bash
+docker compose run --rm --no-deps -T -e PITR_EXPECTED_LSN=<lsn> -e PITR_MARKER_SEQ=<seq> -e PITR_MARKER_HASH=<hash> -v "<new volume>:/var/lib/postgresql/data" pitr-volume
+```
+
+   - With a target time, omit the three options `-e` and add `--target-time <time>` after `pitr-volume`.
+   - If `db` does not run, omit the three options `-e`. The script then checks the end of the archive without them.
+   - The last output line is `pitr volume completed`. Note its fields `base_backup`, `system_identifier`, `timeline`, and `drill`.
+   - If the command exits with a code other than 0, read its `ERROR` line. The new volume holds no production data.
+   - The line `the recovery ended before the end of the WAL archive` shows a gap in the archive. Do not switch to this volume.
+   - A base backup from before this release has no file `backup_end_time`. A target inside its run stops the recovery with `FATAL`. Never select a later target, because it can replay the fault.
+   - The line `cannot read heartbeat.last_at of the recovered cluster` shows that the recovered cluster has no row `heartbeat.last_at`.
+     No migration creates the row. The job `heartbeat` writes it first, one `heartbeat.interval` after the start of `app`.
+     A target time before that first write, on a new site, can give this line. Select a later target time or recover to the end of the archive.
+   - After a failed run, delete the new volume with `docker volume rm <new volume>`. Then end the attempt as in step 7.
+
+7. Compare the values of the last line with your expectation. A value that does not fit ends the attempt:
+   1. The field `base_backup` names the base backup that you expect.
+   2. The field `system_identifier` equals the identifier of the old cluster.
+   3. The fields `chain_seq`, `occurred_at`, and `action` show the newest audit entry that you expect to keep.
+   4. The field `heartbeat_last_at` shows a time that fits the recovery point.
+   5. The field `drill` is `false`.
+
+   To end the attempt, delete the new volume. Start `walarchive`, if you stopped it in step 4.
+   Then end the attempt as in step 4 of "Restore into production". Do not switch.
+8. Run the switch. Run step 5 of "Restore into production" with `<new volume>`, `<identifier>`, and `<timeline>`. Make these changes (ADR-0106 (j)):
+   1. In sub-step 2, use the rule of step 2 of [Switch back](#switch-back). The old volume needs no state. Never start `db` on it.
+   2. Skip sub-step 3.
+   3. In sub-step 4, write the identifier and the timeline that `pg_controldata` reads into the change log. If it reads none, write the word `unreadable`.
+   4. In sub-step 7, the timeline of the new volume must also equal `<timeline>`.
+   5. Refuse a drill volume. A volume that you filled with `--drill` never becomes production. Before sub-step 1, check the file `pitr-drill` at the root of the new volume:
+
+```bash
+docker run --rm --network none --security-opt no-new-privileges:true -v "<new volume>:/var/lib/postgresql/data:ro" --entrypoint find "recipe-pgtools:<recovery tag>" /var/lib/postgresql/data -maxdepth 1 -name pitr-drill
+```
+
+      When the command prints a path, the file exists. Stop. This volume is a drill volume.
+      Also stop when the field `drill` of step 7 is `true`.
+
+   If sub-step 7 fails, run [Switch back](#switch-back) at once. If the old volume was unreadable, no switch back exists. The new volume is then the only cluster.
+9. Set the role passwords. Run step 6 of "Restore into production". The cluster already holds the passwords of production, and the secret files stay the one source.
+10. Start the new WAL line. Run step 7 of "Restore into production". In a recovery, `<old identifier>` equals `<identifier>`.
+11. Truncate `session` and `login_attempt`. Run sub-step 1 of step 8 of "Restore into production".
+    1. Re-apply each user change recorded after the recovery point. Use the audit log of the old cluster, or the off-site audit copy.
+    2. Run step 9 of "Restore into production". It records the audit values, starts `app`, then `proxy` and `backup`, and waits for the alert `replication`.
+12. Wait for the audit chain check. Run step 10 of "Restore into production". Then prove the first set of the new cluster:
+
+```bash
+docker compose exec backup backup-now
+docker compose exec backup restore-test
+```
+
+The truncate of step 11 matters. A session that the old cluster revoked after the recovery point comes back with the recovery.
+
+### Recovery drill
+
+The drill measures the recovery time on the data of the site (ADR-0106 (o)).
+The recovery time objective is 1 hour (R31, `reliability.md` 7.7).
+The drill runs steps 5 and 6 of "Recover from the WAL archive" on a drill volume while the stack runs.
+It never switches the drill volume into production. The file `pitr-drill` and the switch keep that volume out of production (ADR-0106 (j)).
+The script checks the free space first, so the drill never puts `app` into read-only mode.
+Run the drill after each upgrade of `reliability.md` 7.10. The last step of "Upgrade" links this section.
+
+Use these placeholders:
+
+- `<drill volume>` is the name that step 4 prints.
+- `<time>` is the target time of step 3. It has the form `YYYY-MM-DDTHH:MM:SSZ` in UTC.
+- `<fill time>` is the time that step 5 prints. `<run time>` is the time of the last run of `basebackup-once` from step 6.
+
+1. Check that no process `basebackup-once` runs. The drill runs outside that run. If one runs, wait until it ends:
+
+```bash
+docker compose top walarchive
+```
+
+2. Read the end of the newest base backup. The target time must lie at or after it:
+
+```bash
+newest=$(ls -1 "$RECIPE_WALARCHIVE_DIR/base" | grep -E '^base_[0-9]{8}_[0-9]{6}$' | sort | tail -n 1)
+cat "$RECIPE_WALARCHIVE_DIR/base/$newest/backup_end_time"
+```
+
+   A base backup from before this release has no file `backup_end_time`. Its line `START TIME` in `backup_label` counts (ADR-0106 (c)).
+3. Print the target time. The command uses 10 minutes. That is two times `heartbeat.interval` of 5 min (`reliability.md` 7.11):
+
+```bash
+date -u -d '10 minutes ago' +%Y-%m-%dT%H:%M:%SZ
+```
+
+   If the result lies before the time of step 2, wait and run this step again.
+   The job `heartbeat` then gives a commit after the target.
+4. Create the drill volume. Run step 3 of "Restore into production". The command prints the name of the volume.
+5. Fill the drill volume. `app`, `backup`, and `walarchive` keep running. The container has no network and no secret:
+
+```bash
+time docker compose run --rm --no-deps -T -v "<drill volume>:/var/lib/postgresql/data" pitr-volume --target-time <time> --drill
+```
+
+   - Omit the three options `-e`, as step 6 of "Recover from the WAL archive" says for a target time.
+   - The last output line is `pitr volume completed`. Check that its field `drill` is `true`.
+   - The line `real` of `time` is the fill time. Note it as `<fill time>`.
+   - If the command exits with a code other than 0, read its `ERROR` line. Delete the drill volume as in step 8. The drill then gives no recovery time.
+   - The line `another run holds the lock of the WAL archive` shows that `basebackup-once` runs. Delete the drill volume. Start again at step 1.
+6. Read the time of the last run of `basebackup-once`. The weekly run starts at `basebackup.time`:
+
+```bash
+docker compose logs --timestamps walarchive | grep -F -e 'base backup started' -e 'base backup completed'
+```
+
+   Take the last pair of lines. Subtract the time of the line `base backup started` from the time of the line `base backup completed`.
+   Note the result as `<run time>`.
+   If the command prints no such pair, use the newest base backup directory. Subtract the stamp of its name from `backup_end_time`:
+
+```bash
+newest=$(ls -1 "$RECIPE_WALARCHIVE_DIR/base" | grep -E '^base_[0-9]{8}_[0-9]{6}$' | sort | tail -n 1)
+stamp=${newest#base_}
+end=$(cat "$RECIPE_WALARCHIVE_DIR/base/$newest/backup_end_time")
+echo $(( $(date -u -d "$end" +%s) - $(date -u -d "${stamp:0:4}-${stamp:4:2}-${stamp:6:2}T${stamp:9:2}:${stamp:11:2}:${stamp:13:2}Z" +%s) ))
+```
+
+   - The command prints `<run time>` in seconds.
+   - The result is at most 2 seconds too long. The file holds the next full second after the end, and the stamp cuts the start to the full second.
+   - A base backup from before this release has no file `backup_end_time`. Then the fallback gives no result.
+7. Add `<fill time>` and `<run time>`. Write both times and their sum into the change log of the site.
+   - The sum must stay below the recovery time objective of 1 hour.
+   - A larger sum is a finding of the drill.
+8. Delete the drill volume. Never switch it:
+
+```bash
+docker volume rm <drill volume>
+```
+
+9. If the drill held the lock at `basebackup.time`, the weekly run refused to start. Its log holds the line `another base backup run holds the lock`.
+   Then run `docker compose exec walarchive basebackup-once` at once.
+
 ## Upgrade and rollback
 
 The steps follow `reliability.md` 7.10 (ADR-0082, ADR-0083).
@@ -845,10 +1076,24 @@ A rollback needs the images of the previous release. See the section "Keep the i
    - In the first release with the mount of ADR-0103 (l), this command replaces `db` once on the same volume.
    - `app` loses its connections for the start time of `db` (ADR-0105 (k)).
 9. Wait for exit code 0 of `backup-premigrate` with `docker compose ps -a backup-premigrate`.
-10. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
+10. Write the change log entry of the upgrade, then run `migrate`. A recovery to a target time reads this entry (ADR-0106 (e)).
+   1. Read the identifier and the timeline of the cluster from `db`. Write both lines into the entry:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT 'Database system identifier: ' || system_identifier FROM pg_control_system() UNION ALL SELECT 'Latest checkpoint''s TimeLineID: ' || timeline_id FROM pg_control_checkpoint()"
+```
+
+   2. Write the previous tag and the new tag into the entry. The previous tag is the value of `RECIPE_VERSION` before step 5.
+   3. Read the time and write it into the entry as the start time of `migrate`. Do this before sub-step 4:
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+   4. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
 11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
 12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6).
-13. Start the guard step. Run `docker compose exec -u postgres db psql -d recipe`.
+13. Start the guard step. Write the start time into the change log ([rule](#change-log-of-the-site)). Run `docker compose exec -u postgres db psql -d recipe`.
 14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
 
 ```bash
@@ -877,6 +1122,7 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 21. Run the check of the section "Check client_ip of the first login".
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
 23. Run the three commands of the list below, while the new `app` serves.
+24. Run the [Recovery drill](#recovery-drill) after the three commands pass (ADR-0106 (o)).
 
 Installation of step 2 (ADR-0105 (e), (i)):
 Each release has its own directory `deploy/`. Keep the directory of the running release unchanged. A major upgrade needs it.
@@ -1104,7 +1350,9 @@ Delete no volume. After a major upgrade, run the switch back in the directory `d
 Use these placeholders in addition to the placeholders of "Restore into production":
 
 - `<old volume>` and `<old identifier>` are the name and the identifier that the first switch wrote into the change log.
+- `<old timeline>` is the number after `Latest checkpoint's TimeLineID` in the same entry. An entry from before ADR-0106 holds no timeline (ADR-0106 (l)).
 - `<left volume>` is the volume that `db` mounts before step 1. It is the value of `RECIPE_PGDATA_VOLUME` in the `.env` of the release that runs now. `<left identifier>` is its `system_identifier`.
+- `<left timeline>` is the number after `Latest checkpoint's TimeLineID` in the output of step 2. If the output holds none, it is the word `unreadable`.
 - `<tag>` is the tag of the image of the cluster in `<old volume>`. The change log holds it next to `<old volume>` (ADR-0105 (b)). Use the `recipe-pgtools` image of that tag.
 - `<left tag>` is the tag of the cluster in `<left volume>`. It is the value of `RECIPE_VERSION` in `.env` before step 3. After a major upgrade, it is `<new tag>`.
 
@@ -1115,12 +1363,15 @@ Use these placeholders in addition to the placeholders of "Restore into producti
 docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C -v "<left volume>:/var/lib/postgresql/data:ro" --entrypoint pg_controldata "recipe-pgtools:<left tag>" /var/lib/postgresql/data
 ```
 
-   Write `<left volume>` and `<left tag>` into the change log. Write the line `Database system identifier` too, if the output holds it.
+   Write `<left volume>` and `<left tag>` into the change log. Write the lines `Database system identifier` and `Latest checkpoint's TimeLineID` too, if the output holds them.
+   Their values are `<left identifier>` and `<left timeline>`.
+   If the output holds no timeline, write the word `unreadable` in place of the timeline (ADR-0106 (j)).
 3. Write `<old volume>` as `RECIPE_PGDATA_VOLUME` and `<tag>` as `RECIPE_VERSION` in `.env` (ADR-0105 (d)).
    Then run sub-steps 5 and 6 of step 5 of "Restore into production".
    The name that sub-step 6 prints must equal `<old volume>`.
 4. Run the command of sub-step 2 of step 5 of "Restore into production" with `<old volume>`.
    The state must be `shut down`. The identifier must equal `<old identifier>`.
+   The timeline must equal `<old timeline>`. If the entry holds no timeline, compare the identifier only (ADR-0106 (l)).
 5. If the check of step 4 fails, stop. Start no `db` and delete no volume. Keep both volumes and the entry of the change log.
    The site stays down until you find the cause.
 6. Start `db`. Run sub-step 8 of step 5 of "Restore into production" with `<old volume>`.
@@ -1131,7 +1382,9 @@ docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C
 docker compose up -d --no-deps walarchive
 ```
 
-   2. If that sub-step ran, start the new WAL line again. Run step 7 of "Restore into production" with `<left identifier>` in place of `<old identifier>`.
+   2. If that sub-step ran, start the new WAL line again. Run step 7 of "Restore into production".
+      Use `<left identifier>` in place of `<old identifier>`, and `<left timeline>` in place of `<old timeline>`.
+      If the change log holds no timeline for `<left volume>`, or holds the word `unreadable`, write the first line only in sub-step 3 (ADR-0106 (l)).
 8. Start `app`, and then `proxy` and `backup` (ADR-0103 (g)):
 
 ```bash
@@ -1222,7 +1475,7 @@ Use the placeholders of [Restore into production](#restore-into-production) and 
 
 If a step before step 8 fails, change into the directory of `<old tag>`. Then run `docker compose start app`, so that `app` serves again on the old volume.
 
-5. Write `<old tag>` into the change log of the site. Keep the directory `deploy/` of `<old tag>` and the images of `<old tag>` (ADR-0105 (e)).
+5. Write `<old tag>` into the change log of the site. Step 5 of "Restore into production" adds the lines `Database system identifier` and `Latest checkpoint's TimeLineID` of the old cluster to that entry. Keep the directory `deploy/` of `<old tag>` and the images of `<old tag>` (ADR-0105 (e)).
    The restart of sub-step 3 of step 5 of "Restore into production" and the switch back run in that directory.
 6. Do the installation and the name check of step 2 of "Upgrade" (ADR-0105 (i), (j)). A refusal stops the procedure.
 7. Load the new images as in "Load the images". Do not stop `db`. Step 6 of that section writes `<new tag>` into `.env`.
@@ -1376,7 +1629,7 @@ mv "$RECIPE_SECRETS_DIR/<name>.new" "$RECIPE_SECRETS_DIR/<name>"
 
 6. Run `docker compose up -d --force-recreate --no-deps db`.
 7. Run `docker compose ps db` until `db` shows `healthy`.
-8. Set the new password. Psql reads the file inside `db`, so no password reaches a command line:
+8. Write the start time into the change log ([rule](#change-log-of-the-site)). Set the new password. Psql reads the file inside `db`, so no password reaches a command line:
 
 ```bash
 docker compose exec -T -u postgres db psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc --dbname postgres <<'SQL'
@@ -1671,7 +1924,7 @@ The value `t` shows that the archive holds the end segment of the base backup as
 13. Check the WAL of the base backup in the archive. Replace `<base>` with the field `base` of step 10:
 
 ```bash
-docker compose exec walarchive pg_verifybackup --quiet --skip-checksums --wal-directory=/wal /wal/base/<base>
+docker compose exec walarchive pg_verifybackup --quiet --skip-checksums --ignore=backup_end_time --wal-directory=/wal /wal/base/<base>
 ```
 
 The check passes on the exit code 0.
@@ -1722,7 +1975,7 @@ The guard step of the section "Upgrade" replaces the guard function after `migra
 The `REVOKE` cancels the grant of the previous script (ADR-0069 (f)).
 
 1. Run `docker compose exec -u postgres db psql -d recipe`.
-2. Run the `GRANT` of the script and the `REVOKE`:
+2. Write the start time into the change log ([rule](#change-log-of-the-site)). Run the `GRANT` of the script and the `REVOKE`:
 
 ```sql
 GRANT pg_read_all_stats TO audit_owner WITH INHERIT TRUE;
@@ -2064,13 +2317,11 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - The networks `edge` and `egress` have no fixed subnet. Docker can give them new subnets after `docker compose down` and `docker compose up` (section [Stop and start, or down and up](#stop-and-start-or-down-and-up)). Read the subnets again and write the firewall rules again (section "Check the host firewall").
 - A restore of a set with the schema of 0.1.0 has no procedure, also the rollback restore of a `_premigrate` set. The image of 0.1.0 has no `restore-volume` (ADR-0103 (h), (q)). The `backup-now` of the upgrade makes the first set that `restore-volume` can restore. No workaround.
 - The code of a dump runs as the superuser of the cluster that `restore-volume` fills, and that cluster becomes production. The checks of ADR-0103 (m) and (o) cannot find each change inside the catalog. The user accepts this residual risk (ADR-0103 (o)). A later ADR may restore `pre-data` as a role that is not a superuser (ADR-0084). No workaround.
-- No document gives the steps to recover production from the WAL archive. The recovery point of minutes (ADR-0020, `reliability.md` 7.7) has no procedure yet. The workaround is a restore of a dump, with a loss of up to 24 hours.
 - No document gives the transfer of the external images `caddy` and `postgres`, or the digest check after `docker load`. The section "Load the images" names only `recipe-server` and `recipe-pgtools`. No workaround.
 - The trusted-proxy entries in `Caddyfile` and `compose.yaml` do not survive a release. A new release replaces both files. After each upgrade, write the entries again (sections "Upgrade" and "A plant device in front of Caddy").
 - The soak test of `reliability.md` section 6 is not implemented. The repository holds no soak script and no nightly CI job for it. The 2 h local run with an RSS chart did not run, so no file `docs/ops/soak-<date>.md` exists. The limits of that test stay unproven. They are `soak.memory_ceiling` of `reliability.md` 7.11, zero restarts, and the p99 latency bound of section 6. No workaround.
 - The section "Check the host firewall" gives no rule that limits the network `egress` to the webhook host (ADR-0063 (p)). No workaround.
 - The file `compose.yaml` sets no `RECIPE_ALERTS__WEBHOOK_CA_FILE` and mounts no CA file. The key `alerts.webhook_ca_file` therefore stays empty, and the webhook client trusts the webpki roots only (ADR-0063 (j)). No workaround.
-- No test measures the recovery time objective of `reliability.md` 7.7 (ADR-0020).
 - No procedure recovers access when the only administrator cannot log in. The command `create-admin` does nothing when an active administrator exists. Only a user with `UserManage` resets a password (`api.md` section 3). No workaround.
 - A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
 - No document gives a procedure for the cases below. Each item links the section where the case appears. That section gives the part of the procedure that exists.
@@ -2135,3 +2386,4 @@ A later change will close these gaps with its own ADR.
 - [ADR-0100](../adr/0100-wait-for-the-audit-chain-job-after-a-restore.md): Wait for the scheduled audit chain check after a restore
 - [ADR-0102](../adr/0102-end-the-restore-after-the-audit-chain-result.md): End the restore after the result of the audit chain check
 - [ADR-0103](../adr/0103-volume-switch-restore-target-and-wal-line.md): Volume switch, restore target, and WAL line after a switch
+- [ADR-0106](../adr/0106-recovery-of-production-from-the-wal-archive.md): Recovery of production from the WAL archive

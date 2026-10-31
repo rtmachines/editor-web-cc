@@ -33,6 +33,8 @@ pub enum Kind {
 }
 
 const DURATION_KEYS: &[&str] = &[
+    "pitr_volume.start_timeout",
+    "pitr_volume.stop_timeout",
     "session.idle_timeout",
     "session.absolute_timeout",
     "session.cleanup_interval",
@@ -95,6 +97,8 @@ const DURATION_KEYS: &[&str] = &[
     "scratch.pitr_start_timeout",
     "restore_volume.start_timeout",
     "restore_volume.stop_timeout",
+    "pitr_volume.start_timeout",
+    "pitr_volume.stop_timeout",
     "volume_switch.keep_min_age",
     "shutdown.drain",
     "app.stop_grace_period",

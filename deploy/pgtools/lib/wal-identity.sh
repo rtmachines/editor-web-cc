@@ -18,11 +18,15 @@ IDENTITY_NAME=.system-identifier
 # of 8 upper-case hex characters: the timeline, the log number, and the segment number.
 SEGMENT_GRAMMAR='^[0-9A-F]{24}(\.partial)?$'
 IDENTIFIER_GRAMMAR='^[0-9]+$'
+# The timeline in field 2 of IDENTIFY_SYSTEM is a decimal number of at most 10 digits.
+TIMELINE_GRAMMAR='^[0-9]{1,10}$'
 IDENTITY_MSG_MALFORMED="the file $IDENTITY_NAME is malformed"
 IDENTITY_MSG_UNREADABLE="cannot read the file $IDENTITY_NAME"
+IDENTITY_MSG_TIMELINE="segments of another timeline are in the WAL archive"
 
 guard_server_id=""
 guard_file_id=""
+guard_server_timeline=""
 
 # identify_detail <file>: the cleaned first line of the file, from tool_detail of restore-steps.sh.
 # The file sits next to this file. A subshell loads it, so its log and fail do not replace the
@@ -35,15 +39,16 @@ identify_detail() {
   ) || true
 }
 
-# read_server_identifier <pgpass file>: sets guard_server_id from IDENTIFY_SYSTEM.
-# The answer line is systemid|timeline|xlogpos|dbname. Only the first field counts.
+# read_server_identifier <pgpass file>: sets guard_server_id and guard_server_timeline from IDENTIFY_SYSTEM.
+# The answer line is systemid|timeline|xlogpos|dbname. Only the first two fields count.
+# guard_server_timeline is the timeline as 8 upper-case hex characters, like the start of a segment name.
 # libpq matches the database field of the pgpass line against dbname. Without dbname, it uses the
 # user name. So the connection names dbname=replication, as pg_receivewal and pg_basebackup do.
 # The error of psql goes to a file next to the pgpass file, in the private work directory of the
 # run. The ERROR line gets its first line as the field detail (ADR-0105 (s)). The error holds no
 # password. The file is gone before this function returns.
 read_server_identifier() {
-  local answer first err_file=${1%/*}/identify.err detail
+  local answer first rest timeline err_file=${1%/*}/identify.err detail
   if ! answer=$(PGPASSFILE=$1 psql --no-psqlrc --quiet --no-align --tuples-only --no-password \
     --dbname="host=$PGHOST port=$PGPORT user=$PGUSER dbname=replication replication=true application_name=walarchive_identity" \
     --command=IDENTIFY_SYSTEM 2>"$err_file"); then
@@ -54,7 +59,11 @@ read_server_identifier() {
   rm -f -- "${err_file:?}"
   first=${answer%%|*}
   [[ $first =~ $IDENTIFIER_GRAMMAR ]] || fail "cannot read the system identifier of the server"
+  rest=${answer#*|}
+  timeline=${rest%%|*}
+  [[ $answer == *'|'* && $timeline =~ $TIMELINE_GRAMMAR ]]     || fail "cannot read the system identifier of the server"
   guard_server_id=$first
+  printf -v guard_server_timeline '%08X' "$((10#$timeline))"
 }
 
 # has_segment: one name at the top of the WAL archive matches the segment grammar.
@@ -66,6 +75,18 @@ has_segment() {
     fi
   done
   return 1
+}
+
+# check_segment_timelines: no segment at the top of the WAL archive has another timeline than the server.
+# A .partial file counts. A history file is not a segment and never counts (ADR-0106 (m)).
+check_segment_timelines() {
+  local path name
+  for path in "$WAL_DIR"/*; do
+    name=${path##*/}
+    if [[ $name =~ $SEGMENT_GRAMMAR && ${name:0:8} != "$guard_server_timeline" ]]; then
+      fail "$IDENTITY_MSG_TIMELINE"
+    fi
+  done
 }
 
 # read_identifier_file: sets guard_file_id. The file is one line of ASCII digits.
@@ -120,11 +141,13 @@ publish_identifier() {
 # wal_identity_guard <pgpass file>: stop with one ERROR line unless the WAL archive belongs to the
 # cluster of the server. A missing file next to a segment is a stop, because the segments may
 # come from another cluster. Without a segment, the guard writes the file.
+# After the identifier check, a segment of another timeline is a stop, because a recovery keeps the identifier.
 wal_identity_guard() {
   read_server_identifier "$1"
   if [ -e "$WAL_DIR/$IDENTITY_NAME" ] || [ -L "$WAL_DIR/$IDENTITY_NAME" ]; then
     read_identifier_file
     compare_identifiers
+    check_segment_timelines
     return 0
   fi
   if has_segment; then

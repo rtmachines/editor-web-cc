@@ -12,9 +12,11 @@
 #   1. The gates: the environment, the path, the marker file, the lock, and a base backup.
 #      The lock /wal/.lock is held to the exit, so basebackup-once cannot change the files.
 #   2. The newest base backup (the last name of the grammar) is copied into a private scratch
-#      directory below /wal/.pitr-scratch. pg_verifybackup checks the copy.
+#      directory below /wal/.pitr-scratch. The check of lib/recovery-steps.sh runs pg_verifybackup on the copy
+#      and deletes the file backup_end_time from the copy (ADR-0106 (c)).
 #   3. A scratch cluster starts from the copy. It recovers from the archive with the restore_command
-#      of ADR-0068 (l) and the scratch.* settings of reliability.md 7.11.
+#      of ADR-0068 (l) and the scratch.* settings of reliability.md 7.11. The steps of lib/recovery-steps.sh
+#      pass these settings with pg_ctl -o (ADR-0106 (h)).
 #   4. The checks of ADR-0068 (n) after the end of the recovery: the recovery is complete, exactly one
 #      audit_log row has the chain_seq and the entry_hash of the marker, and the audit chain check
 #      of data-model.md 4.9 passes.
@@ -26,6 +28,7 @@
 #   PITR_MARKER_SEQ    the chain_seq of the marker row, ^[1-9][0-9]{0,18}$
 #   PITR_MARKER_HASH   the entry_hash of the marker row as lower-case hex, ^[0-9a-f]{64}$
 #   WAL_DIR            the WAL archive volume, default /wal, a plain absolute path
+#   WALARCHIVE_LIB_DIR the directory of recovery-steps.sh and restore-steps.sh, default /etc/pgtools
 set -euo pipefail
 umask 077
 
@@ -51,6 +54,7 @@ READY_POLL_SECONDS=1 # pitr_check.ready_poll in reliability.md section 7.11
 LOG_TAIL_LINES=20 # pitr_check.log_tail in reliability.md section 7.11
 
 WAL_DIR=${WAL_DIR:-/wal}
+LIB_DIR=${WALARCHIVE_LIB_DIR:-/etc/pgtools}
 PITR_MARKER_SEQ=${PITR_MARKER_SEQ:-}
 PITR_MARKER_HASH=${PITR_MARKER_HASH:-}
 
@@ -59,7 +63,12 @@ newest=""
 scratch=""
 data_dir=""
 socket_dir=""
-RESTORE_COMMAND=""
+
+# restore-steps.sh defines CHAIN_SQL, the one copy of the audit chain check. The load comes before the
+# definitions below on purpose. The file also defines log, fail, and scratch_psql, and this script replaces them.
+# The load failure uses echo, because fail does not exist yet.
+# shellcheck source=../lib/restore-steps.sh
+source "$LIB_DIR/restore-steps.sh" || { echo "pitr-check: cannot load restore-steps.sh" >&2; exit 1; }
 
 # log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked value.
 log() {
@@ -106,32 +115,6 @@ scratch_psql() {
     --dbname="$DB_NAME" --command="$1"
 }
 
-# The audit chain check of data-model.md 4.9 over the whole table: breaks, head, and last row.
-CHAIN_SQL=""
-IFS= read -r -d '' CHAIN_SQL <<'SQL' || true
-WITH batch AS (
-    SELECT a.chain_seq, a.prev_hash, a.entry_hash,
-           pg_catalog.sha256(COALESCE(a.prev_hash, '\x'::bytea)
-               || pg_catalog.convert_to(public.audit_canonical(a), 'UTF8')) AS recomputed
-    FROM public.audit_log AS a
-), chain AS (
-    SELECT b.*,
-           lag(b.chain_seq, 1, 0::bigint) OVER w AS previous_seq,
-           lag(b.entry_hash, 1, NULL::bytea) OVER w AS previous_hash
-    FROM batch AS b
-    WINDOW w AS (ORDER BY b.chain_seq)
-)
-SELECT (SELECT count(*) FROM chain
-        WHERE chain_seq IS DISTINCT FROM previous_seq + 1
-           OR prev_hash IS DISTINCT FROM previous_hash
-           OR entry_hash IS DISTINCT FROM recomputed) AS breaks,
-       h.last_seq = COALESCE((SELECT max(chain_seq) FROM public.audit_log), 0) AS head_matches,
-       h.last_hash IS NOT DISTINCT FROM
-           (SELECT entry_hash FROM public.audit_log ORDER BY chain_seq DESC LIMIT 1) AS hash_matches
-FROM public.audit_chain_head AS h
-WHERE h.singleton
-SQL
-
 # select_base: the newest base backup is the last real directory of the grammar in byte order.
 # A link, a file, or a name outside the grammar is no base backup (ADR-0077 (d)).
 select_base() {
@@ -144,52 +127,26 @@ select_base() {
   [ -n "$newest" ] || fail "no base backup in the WAL archive"
 }
 
-# write_scratch_config: the settings of the scratch cluster (scratch.* of reliability.md 7.11).
-# hot_standby=off: the lower max_connections cannot stop the recovery (ADR-0068 (o)).
-# The cluster sets no fsync option, because only restore-test may do so (ADR-0067 (f)).
+# write_scratch_config: the private socket directory, the access rule, and the signal file.
+# The settings of the scratch cluster go to the server with pg_ctl -o (ADR-0106 (h)).
 write_scratch_config() {
-  {
-    printf '%s\n' 'shared_buffers=64MB' 'maintenance_work_mem=64MB' 'max_connections=10' \
-      'max_parallel_workers_per_gather=0' 'max_parallel_maintenance_workers=0' \
-      'hot_standby=off' "listen_addresses=''" "port=$SCRATCH_PORT" \
-      "unix_socket_directories='$socket_dir'" "hba_file='$scratch/pg_hba.conf'" \
-      'archive_mode=off'
-    printf "restore_command='%s'\n" "$RESTORE_COMMAND"
-  } >>"$data_dir/postgresql.auto.conf"
   # The socket directory is private, so a local connection needs no password.
   printf 'local all all trust\n' >"$scratch/pg_hba.conf"
   : >"$data_dir/recovery.signal"
 }
 
-# pg_ctl can report standby before hot_standby=off permits connections.
-# Use the remaining Step 3 budget and stop when the postmaster exits.
-wait_for_connections() {
-  while [ "$SECONDS" -lt "$start_deadline" ]; do
-    [ -f "$data_dir/postmaster.pid" ] || return 1
-    pg_ctl --pgdata="$data_dir" status >/dev/null 2>&1 || return 1
-    if pg_isready --quiet --host="$socket_dir" --port="$SCRATCH_PORT" \
-      --username="$SCRATCH_SUPERUSER" --dbname="$DB_NAME" --timeout="$READY_POLL_SECONDS"; then
-      [ "$SECONDS" -lt "$start_deadline" ]
-      return
-    fi
-    sleep "$READY_POLL_SECONDS"
-  done
-  return 1
-}
-
 # check_recovered: the checks of ADR-0068 (n) and ADR-0077 (e) on the recovered cluster.
 check_recovered() {
-  local state found chain
+  local state
   state=$(scratch_psql 'SELECT NOT pg_catalog.pg_is_in_recovery()') \
     || fail "cannot read the recovery state of the scratch cluster"
   [ "$state" = "t" ] || fail "the scratch cluster is still in recovery"
-  found=$(scratch_psql "SELECT count(*) FROM public.audit_log WHERE chain_seq = $PITR_MARKER_SEQ AND entry_hash = pg_catalog.decode('$PITR_MARKER_HASH', 'hex')") \
-    || fail "cannot read the marker entry in the recovered cluster"
-  [ "$found" = "1" ] || fail "the marker entry is missing in the recovered cluster"
-  chain=$(scratch_psql "$CHAIN_SQL") || fail "cannot run the audit chain check on the recovered cluster"
-  [ "$chain" = "0|t|t" ] \
-    || fail "the audit chain check failed on the recovered cluster" "\"result\":\"$chain\""
+  recovery_check_marker "$PITR_MARKER_SEQ" "$PITR_MARKER_HASH"
+  recovery_check_chain
 }
+
+# shellcheck source=../lib/recovery-steps.sh
+source "$LIB_DIR/recovery-steps.sh" || fail "cannot load recovery-steps.sh"
 
 # --- run ----------------------------------------------------------------------------------
 
@@ -203,8 +160,6 @@ check_recovered() {
 case $WAL_DIR in
   */. | */./* | */.. | */../*) fail "WAL_DIR is not a plain absolute path" ;;
 esac
-# ADR-0068 (l). The fallback replays the transactions of the partial last segment.
-RESTORE_COMMAND="cp $WAL_DIR/%f %p || cp $WAL_DIR/%f.partial %p"
 if [ ! -f "$WAL_DIR/$MARKER_NAME" ] || [ -L "$WAL_DIR/$MARKER_NAME" ]; then
   fail "the marker file of the WAL archive disk is missing"
 fi
@@ -221,17 +176,15 @@ socket_dir=$scratch/sock
 mkdir -- "$socket_dir"
 cp -a -- "$WAL_DIR/base/$newest" "$data_dir" || fail "cannot copy the base backup"
 chmod 0700 -- "$data_dir"
-pg_verifybackup --quiet "$data_dir" >&2 || fail "pg_verifybackup failed"
+recovery_verify_copy "$data_dir" || fail "pg_verifybackup failed"
 log INFO "base backup copied and checked" "\"base\":\"$newest\""
 
 # Step 3: the scratch cluster recovers from the copy and the archive. The lock stays with this script.
 start_deadline=$((SECONDS + START_TIMEOUT_SECONDS))
 write_scratch_config
-if [ "$SECONDS" -ge "$start_deadline" ] || ! pg_ctl --pgdata="$data_dir" --log="$scratch/server.log" --wait \
-  --timeout="$((start_deadline - SECONDS))" start 9>&- >&2 || ! wait_for_connections; then
-  tail -n "$LOG_TAIL_LINES" -- "$scratch/server.log" >&2 || true
-  fail "the scratch cluster did not finish the recovery"
-fi
+start_options="$(recovery_start_options "$WAL_DIR" "$socket_dir") -c hba_file=$scratch/pg_hba.conf"
+recovery_start_server "$data_dir" "$scratch/server.log" "$socket_dir" "$start_options" "$start_deadline" \
+  || fail "the scratch cluster did not finish the recovery"
 
 # Step 4: the checks, after the end of the recovery.
 check_recovered

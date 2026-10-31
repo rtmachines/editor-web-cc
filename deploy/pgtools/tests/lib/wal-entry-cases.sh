@@ -506,6 +506,100 @@ case_guard_two_first_starts() {
   expect_eq "guard race: no temp file" "$(top_listing)" "$ID_LISTING"
 }
 
+# --- timeline check (ADR-0106 (m), design D5 of the change pitr-recovery) ---------------------
+
+MSG_TIMELINE='segments of another timeline are in the WAL archive'
+
+# tl_seg <timeline> <number>: the name of a segment with the given 8-digit timeline.
+tl_seg() { printf '%s%s%08X' "$1" "$WAL_LOG_ID" "$2"; }
+
+# timeline_refused_case <label> <file name ...>: the stub answers timeline 2, the identifier file
+# matches, and the archive holds the files. The run stops with the message and changes nothing.
+timeline_refused_case() {
+  local label=$1 before name
+  shift
+  wal_new_case "guard-timeline-$label"
+  printf '%s
+' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  for name in "$@"; do printf 'wal
+' >"$W/$name"; done
+  before=$(wal_snapshot)
+  guard_run STUB_TIMELINE=2
+  expect_guard_refused "guard timeline ($label)" "$MSG_TIMELINE" "$before"
+}
+
+# timeline_passed_case <label> <file name ...>: the same setup, and the guard passes.
+timeline_passed_case() {
+  local label=$1 before name
+  shift
+  wal_new_case "guard-timeline-$label"
+  printf '%s
+' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  for name in "$@"; do printf 'wal
+' >"$W/$name"; done
+  before=$(wal_snapshot)
+  guard_run STUB_TIMELINE=2
+  expect_guard_passed "guard timeline ($label)"
+  expect_eq "guard timeline ($label): archive unchanged" "$(wal_snapshot)" "$before"
+}
+
+# Scenarios "Segment of another timeline" and "Partial file of another timeline".
+case_guard_timeline_refused() {
+  timeline_refused_case segment "$(tl_seg 00000001 5)"
+  timeline_refused_case partial "$(tl_seg 00000001 6).partial"
+  timeline_refused_case mixed "$(tl_seg 00000002 4)" "$(tl_seg 00000002 5)" "$(tl_seg 00000001 6)"
+  timeline_refused_case newer "$(tl_seg 00000003 4)"
+}
+
+# A history file is no segment. A segment of the timeline of the server passes.
+case_guard_timeline_passed() {
+  timeline_passed_case history "00000002.history" "00000001.history"
+  timeline_passed_case history-with-segments "00000001.history" "$(tl_seg 00000002 4)"
+  timeline_passed_case segments "$(tl_seg 00000002 4)" "$(tl_seg 00000002 5)" "$(tl_seg 00000002 6).partial"
+}
+
+# The decimal timeline of the server is compared as 8-digit upper-case hex.
+case_guard_timeline_hex() {
+  local before
+  wal_new_case guard-timeline-hex
+  printf '%s
+' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf 'wal
+' >"$W/$(tl_seg 0000000A 4)"
+  guard_run STUB_TIMELINE=10
+  expect_guard_passed "guard timeline hex"
+  wal_new_case guard-timeline-hex-other
+  printf '%s
+' "$WAL_SYSID" >"$W/$ID_FILE_NAME"
+  printf 'wal
+' >"$W/$(tl_seg 00000010 4)"
+  before=$(wal_snapshot)
+  guard_run STUB_TIMELINE=10
+  expect_guard_refused "guard timeline hex, decimal text" "$MSG_TIMELINE" "$before"
+}
+
+# The identifier check comes first. A file of another system gives its own message.
+case_guard_timeline_after_identifier() {
+  local before
+  wal_new_case guard-timeline-order
+  printf '%s
+' "$OTHER_SYSID" >"$W/$ID_FILE_NAME"
+  printf 'wal
+' >"$W/$(tl_seg 00000001 5)"
+  before=$(wal_snapshot)
+  guard_run STUB_TIMELINE=2
+  expect_guard_refused "guard timeline after identifier" "$MSG_OTHER" "$before"
+  expect_eq "guard timeline after identifier: no timeline message" "$(grep -cF -- "$MSG_TIMELINE" "$CASE/out" || true)" "0"
+}
+
+# A first start with no segment passes. The file is written and no timeline matters.
+case_guard_timeline_first_start() {
+  wal_new_case guard-timeline-first
+  guard_run STUB_TIMELINE=2
+  expect_guard_passed "guard timeline first start"
+  expect_eq "guard timeline first start: file content" "$(id_file_content)" "$WAL_SYSID"
+}
+
 case_wal_guard() {
   local label
   case_guard_static
@@ -525,6 +619,11 @@ case_wal_guard() {
   case_guard_sync_calls
   case_guard_sync_fail
   case_guard_two_first_starts
+  case_guard_timeline_refused
+  case_guard_timeline_passed
+  case_guard_timeline_hex
+  case_guard_timeline_after_identifier
+  case_guard_timeline_first_start
 }
 
 # --- walarchive-health ------------------------------------------------------------------------

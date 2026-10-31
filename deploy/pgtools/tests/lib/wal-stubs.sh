@@ -50,21 +50,39 @@ EOF
 }
 
 #   STUB_VERIFY_FAIL=1  pg_verifybackup fails
+# It writes the epoch seconds of its run into $STUB_DIR/verify.epoch.
 # Like the real tool, it prints "backup successfully verified" to stdout on success unless --quiet is set.
 make_wal_stub_verify() {
   cat >"$ROOT/stubs/pg_verifybackup" <<'EOF'
 #!/usr/bin/env bash
 dir=${!#}
 quiet=""
+ignored=" "
 for a in "$@"; do
-  case $a in --quiet | -q) quiet=1 ;; esac
+  case $a in
+    --quiet | -q) quiet=1 ;;
+    --ignore=*) ignored+="${a#--ignore=} " ;;
+  esac
 done
 echo "EVENT pg_verifybackup $(basename "$dir")" >>"$STUB_LOG"
 echo "ARGV pg_verifybackup $*" >>"$STUB_LOG"
+"${REAL_DATE:-date}" -u +%s >"$STUB_DIR/verify.epoch"
 if [ ! -f "$dir/backup_manifest" ]; then
   echo "no manifest" >&2
   exit 2
 fi
+# A top-level entry that the manifest does not list is an error, unless --ignore names it.
+# The files that the stub of a base backup writes count as listed.
+# A line "Path": "NAME" in the manifest lists one more name.
+for f in "$dir"/* "$dir"/.[!.]*; do
+  [ -e "$f" ] || continue
+  n=${f##*/}
+  case $n in PG_VERSION | backup_label | backup_manifest | pg_wal | partial) continue ;; esac
+  [[ $ignored == *" $n "* ]] && continue
+  grep -qF "\"Path\": \"$n\"" "$dir/backup_manifest" && continue
+  echo "pg_verifybackup: error: \"$n\" is present on disk but not in the manifest" >&2
+  exit 1
+done
 if [ -n "${STUB_VERIFY_FAIL:-}" ]; then
   echo "pg_verifybackup: error: checksum mismatch" >&2
   exit 1
@@ -127,12 +145,14 @@ EOF
 #     STUB_SYSID=n          the system identifier, default 7354987216845319027
 #     STUB_IDENTIFY_FAIL=1  the connection fails
 #     STUB_IDENTIFY_ERR=t   with STUB_IDENTIFY_FAIL, the text t is the error message on stderr
+#     STUB_TIMELINE=n       the timeline in field 2 of the answer, default 1
 #     STUB_IDENTIFY_OUT=t   the whole answer line
 #   psql: without STUB_PSQL_OK=1 every other command fails. With it, it answers the three checks of the script.
 #     STUB_PSQL_RECOVERY=f  the cluster is still in recovery
 #     STUB_PSQL_COUNT=n     the number of rows with the marker identity
 #     STUB_PSQL_CHAIN=text  the result of the chain check
-#   pg_ctl: start writes postmaster.pid and keeps the settings and the label for the test.
+#   pg_ctl: start writes postmaster.pid and keeps the -o argument, the label, and the file list for the test.
+#     stop keeps a copy of postgresql.auto.conf in auto.conf.stop.
 #     STUB_CTL_FAIL=1       start fails after it writes a line to the server log
 make_wal_stub_scratch() {
   cat >"$ROOT/stubs/psql" <<'EOF'
@@ -182,7 +202,7 @@ case $cmd in
       exit 2
     fi
     echo "CALL psql pgpass match" >>"$STUB_LOG"
-    echo "${STUB_IDENTIFY_OUT:-${STUB_SYSID:-7354987216845319027}|1|0/3000060|}"
+    echo "${STUB_IDENTIFY_OUT:-${STUB_SYSID:-7354987216845319027}|${STUB_TIMELINE:-1}|0/3000060|}"
     exit 0
     ;;
 esac
@@ -202,8 +222,12 @@ EOF
 action=${!#}
 pgdata=""
 log=""
+options=""
+prev=""
 for a in "$@"; do
   case $a in --pgdata=*) pgdata=${a#--pgdata=} ;; --log=*) log=${a#--log=} ;; esac
+  [ "$prev" != -o ] || options=$a
+  prev=$a
 done
 if [ "$action" = status ]; then
   [ -f "$pgdata/postmaster.pid" ]
@@ -212,14 +236,21 @@ fi
 echo "EVENT pg_ctl $action" >>"$STUB_LOG"
 echo "ARGV pg_ctl $*" >>"$STUB_LOG"
 if [ "$action" = start ]; then
-  cp "$pgdata/postgresql.auto.conf" "$STUB_DIR/auto.conf"
+  printf '%s\n' "$options" >"$STUB_DIR/pg_ctl.options"
   cp "$pgdata/backup_label" "$STUB_DIR/label.seen"
   [ -f "$pgdata/recovery.signal" ] && echo "recovery.signal present" >>"$STUB_LOG"
   stat -c %a "$pgdata" >"$STUB_DIR/data.mode"
+  ls -A "$pgdata" >"$STUB_DIR/data.files"
   echo "server log line of the recovery" >"$log"
   [ -z "${STUB_CTL_FAIL:-}" ] || exit 1
   echo 1 >"$pgdata/postmaster.pid"
 else
+  # The copy of postgresql.auto.conf at the stop call. A missing file gives an empty copy.
+  if [ -f "$pgdata/postgresql.auto.conf" ]; then
+    cp "$pgdata/postgresql.auto.conf" "$STUB_DIR/auto.conf.stop"
+  else
+    : >"$STUB_DIR/auto.conf.stop"
+  fi
   rm -f -- "$pgdata/postmaster.pid"
 fi
 EOF

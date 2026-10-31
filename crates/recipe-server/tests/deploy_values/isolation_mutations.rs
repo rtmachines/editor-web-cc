@@ -1,16 +1,19 @@
-//! Proof that the checks on the isolation of `pitr-check` and `restore-volume` can fail.
+//! Proof that the checks on the isolation of `pitr-check`, `pitr-volume`, and `restore-volume` can fail.
 //!
-//! The two services join no network and mount no secret (design D6 and D10, `compose.yaml`).
-//! The service `restore-volume` also has a profile, one read-only mount, and one variable.
+//! The three services join no network and mount no secret (design D6 and D10, `compose.yaml`).
+//! The services `restore-volume` and `pitr-volume` also have a profile, one read-only mount, and one variable.
 //! Each case changes one copy of `compose.yaml` and asserts a fault that names the service.
 
 use crate::inputs::{Inputs, check_all};
 
 const NETWORK_NONE: &str = "    network_mode: none\n";
-const ISOLATED: [&str; 2] = ["pitr-check", "restore-volume"];
+const ISOLATED: [&str; 3] = ["pitr-check", "pitr-volume", "restore-volume"];
 /// The lines of `restore-volume` after `network_mode` in `compose.yaml`. They are unique in the file.
 const RESTORE_MOUNTS: &str = "    environment:\n      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}\n    volumes:\n      - backups:/backups:ro\n";
 const RESTORE_ENTRYPOINT: &str = "    entrypoint: [\"restore-volume\"]\n";
+/// The lines of `pitr-volume` after `network_mode` in `compose.yaml`. They are unique in the file.
+const PITR_MOUNTS: &str = "    environment:\n      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}\n    volumes:\n      - walarchive:/wal:ro\n";
+const PITR_ENTRYPOINT: &str = "    entrypoint: [\"/usr/local/bin/pitr-volume\"]\n";
 const RESTORE_PROFILE: &str = "    profiles:\n      - restore\n";
 const OTHER_SERVICES: [&str; 7] = [
     "app",
@@ -124,4 +127,47 @@ fn a_restore_volume_entrypoint_is_the_script_and_it_has_no_command() {
     let command = format!("{RESTORE_ENTRYPOINT}    command: [\"restore-volume\"]\n");
     let with_command = Inputs::load().with_replaced("compose.yaml", RESTORE_ENTRYPOINT, &command);
     assert_fault(&with_command, "restore-volume.command");
+}
+
+#[test]
+fn a_pitr_volume_without_the_profile_restore_is_a_fault() {
+    let removed = Inputs::load().with_replaced("compose.yaml", RESTORE_PROFILE, "");
+    assert_fault(&removed, "pitr-volume.profiles");
+}
+
+#[test]
+fn a_pitr_volume_wal_mount_must_be_read_only() {
+    let writable = PITR_MOUNTS.replace("walarchive:/wal:ro", "walarchive:/wal");
+    let changed = Inputs::load().with_replaced("compose.yaml", PITR_MOUNTS, &writable);
+    assert_fault(&changed, "pitr-volume.volumes");
+}
+
+#[test]
+fn a_pitr_volume_mounts_no_other_volume() {
+    for extra in [
+        "      - pgdata:/var/lib/postgresql/data\n",
+        "      - backups:/backups:ro\n",
+        "      - ./db/cluster-access.sh:/etc/pgtools/cluster-access.sh:ro\n",
+    ] {
+        let more = format!("{PITR_MOUNTS}{extra}");
+        let changed = Inputs::load().with_replaced("compose.yaml", PITR_MOUNTS, &more);
+        assert_fault(&changed, "pitr-volume.volumes");
+    }
+}
+
+#[test]
+fn a_pitr_volume_needs_the_compose_subnet_variable() {
+    let variable = "    environment:\n      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}\n";
+    let without = PITR_MOUNTS.replace(variable, "");
+    let removed = Inputs::load().with_replaced("compose.yaml", PITR_MOUNTS, &without);
+    assert_fault(&removed, "pitr-volume.environment.COMPOSE_SUBNET");
+}
+
+#[test]
+fn a_pitr_volume_entrypoint_is_the_script_and_it_has_no_command() {
+    let removed = Inputs::load().with_replaced("compose.yaml", PITR_ENTRYPOINT, "");
+    assert_fault(&removed, "pitr-volume.entrypoint");
+    let command = format!("{PITR_ENTRYPOINT}    command: [\"2026-10-30 12:00:00+00\"]\n");
+    let with_command = Inputs::load().with_replaced("compose.yaml", PITR_ENTRYPOINT, &command);
+    assert_fault(&with_command, "pitr-volume.command");
 }

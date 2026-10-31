@@ -30,20 +30,30 @@ create_pgdata_volume() {
   docker volume create --label "recipe.ci=$COMPOSE_PROJECT_NAME" "$RECIPE_PGDATA_VOLUME" >/dev/null
 }
 
+has_job_label() {
+  # True when the volume in the first argument carries the label of this job.
+  [[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$1") == "$COMPOSE_PROJECT_NAME" ]]
+}
+
+# The status of delete_labelled_volume when the volume has no label of this job.
+VOLUME_LABEL_MISMATCH=3
+
+delete_labelled_volume() {
+  # The only deletion point of a Docker volume in the CI scripts. The first argument is the volume name.
+  # It deletes the volume only after the label check. The label and the run-scoped name restrict it to a throwaway CI runner.
+  # It returns VOLUME_LABEL_MISMATCH without a label match and the status of Docker when the delete fails. It never calls fail.
+  # The operator rule in docs/ops/runbook.md still applies: never delete the pgdata volume of a production host.
+  has_job_label "$1" || return "$VOLUME_LABEL_MISMATCH"
+  docker volume rm "$1" >/dev/null
+}
+
 delete_ci_volumes() {
   # Delete only volumes with the label of this job. Never delete by name.
   local ids status=0 volume
   ids=$(docker volume ls -q --filter "label=recipe.ci=$COMPOSE_PROJECT_NAME") || return 1
   for volume in $ids
   do
-    # The label check and run-scoped name restrict deletion to the volumes of this job on a throwaway CI runner.
-    # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata.
-    if [[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]
-    then
-      docker volume rm "$volume" >/dev/null || status=$?
-    else
-      status=1
-    fi
+    delete_labelled_volume "$volume" || status=$?
   done
   return "$status"
 }

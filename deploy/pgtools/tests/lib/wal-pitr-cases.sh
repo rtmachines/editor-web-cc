@@ -6,19 +6,25 @@ PITR_SEQ=4711
 PITR_HASH=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 static_pitr_rules() {
-  local f=$BIN/pitr-check o
-  for o in 'cp $WAL_DIR/%f %p || cp $WAL_DIR/%f.partial %p' 'hot_standby=off' 'recovery.signal' \
-    'shared_buffers=64MB' 'maintenance_work_mem=64MB' 'max_connections=10' \
-    'max_parallel_workers_per_gather=0' 'max_parallel_maintenance_workers=0' 'listen_addresses=' \
-    'WAL_DIR=${WAL_DIR:-/wal}' 'trap cleanup EXIT' 'pg_verifybackup --quiet' 'cp -a' 'flock -n' 'pg_ctl' 'PITR_CI' '.pitr-scratch' \
-    'PITR_MARKER_SEQ' 'PITR_MARKER_HASH' "decode('" 'audit_canonical' 'pg_is_in_recovery'; do
+  local f=$BIN/pitr-check lib=$HERE/../lib/recovery-steps.sh o
+  for o in 'recovery.signal' 'WAL_DIR=${WAL_DIR:-/wal}' 'trap cleanup EXIT' 'recovery_verify_copy' 'cp -a' \
+    'flock -n' 'pg_ctl' 'PITR_CI' '.pitr-scratch' 'PITR_MARKER_SEQ' 'PITR_MARKER_HASH' 'pg_is_in_recovery' \
+    'recovery-steps.sh' 'restore-steps.sh' 'recovery_start_server'; do
     expect_ok "static pitr-check: $o" grep -qF -- "$o" "$f"
   done
+  # The shared steps live in the library (ADR-0106 (h)). pitr-check passes them with pg_ctl -o.
+  for o in "cp %s/%%f %%p || cp %s/%%f.partial %%p" 'hot_standby=off' 'shared_buffers=64MB' \
+    'maintenance_work_mem=64MB' 'max_connections=10' 'max_parallel_workers_per_gather=0' \
+    'max_parallel_maintenance_workers=0' 'listen_addresses=' '-o "$options" start' \
+    "decode('" 'recovery_check_chain' 'pg_verifybackup --quiet --ignore=backup_end_time'; do
+    expect_ok "static recovery-steps: $o" grep -qF -- "$o" "$lib"
+  done
+  expect_no "static pitr-check: no setting in postgresql.auto.conf" grep -qF 'postgresql.auto.conf' "$f" "$lib"
   expect_no "static pitr-check: no restore_command with a slot or a target" \
-    grep -qE 'recovery_target|primary_slot_name' "$f"
-  expect_no "static pitr-check: no fsync setting (ADR-0068 (o))" grep -qF 'fsync=' "$f"
+    grep -qE 'recovery_target|primary_slot_name' "$f" "$lib"
+  expect_no "static pitr-check: no fsync setting (ADR-0068 (o))" grep -qF 'fsync=' "$f" "$lib"
   expect_no "static pitr-check: no connection to db, no secret, no write to the database" \
-    grep -qE 'pg_basebackup|PGPASSFILE=|pgpass|INSERT INTO|app_password|replicator_password|--host="\$PGHOST"' "$f"
+    grep -qE 'pg_basebackup|PGPASSFILE=|pgpass|INSERT INTO|app_password|replicator_password|--host="\$PGHOST"' "$f" "$lib"
 }
 
 # pitr_run [VAR=value ...]: run pitr-check with PITR_CI=1 and a good marker. A later VAR wins.
@@ -127,6 +133,8 @@ pitr_run_case() {
   mkdir "$W/base/base_29990101_000000.bak"
   : >"$W/base/base_29990102_000000"
   pitr_make_link
+  # PITR_EXTRA_FILE names one more file in the newest base backup. The manifest does not list it.
+  [ -z "${PITR_EXTRA_FILE:-}" ] || printf 'extra\n' >"$W/base/$LAST_BASE/$PITR_EXTRA_FILE"
   PITR_BASE_BEFORE=$(base_tree)
   PITR_TOP_BEFORE=$(wal_listing)
   pitr_run STUB_PSQL_OK=1 PGHOST=evil PGPASSWORD=zzz PGPASSFILE=/nowhere "$@"
@@ -186,7 +194,8 @@ case_wal_pitr_passes() {
   expect_no "pitr run: the result line holds no request_id" grep -q request_id "$CASE/out"
   expect_eq "pitr run: order of the tools" "$(event_sequence)" \
     "EVENT pg_verifybackup data,EVENT pg_ctl start,EVENT psql,EVENT psql,EVENT psql,EVENT pg_ctl stop,"
-  expect_ok "pitr run: pg_verifybackup is quiet" grep -qF 'ARGV pg_verifybackup --quiet ' "$log"
+  expect_ok "pitr run: pg_verifybackup is quiet and ignores backup_end_time" \
+    grep -qF 'ARGV pg_verifybackup --quiet --ignore=backup_end_time ' "$log"
   expect_ok "pitr run: recovery.signal" grep -qF 'recovery.signal present' "$log"
   expect_ok "pitr run: the copy of the newest base backup (10 days, segment 7)" \
     grep -qF "(file $(seg_name 7))" "$CASE/stub/label.seen"
@@ -198,14 +207,19 @@ case_wal_pitr_passes() {
 }
 
 # The settings of the scratch cluster: the restore command of ADR-0068 (l) and no fsync.
+# pg_ctl -o passes them (ADR-0106 (h)). The copy of postgresql.auto.conf at the stop call holds none.
 pitr_expect_settings() {
-  local conf=$CASE/stub/auto.conf
-  expect_ok "pitr run: restore_command with the archive path" \
-    grep -qxF "restore_command='cp $W/%f %p || cp $W/%f.partial %p'" "$conf"
-  expect_ok "pitr run: hot_standby=off" grep -qxF 'hot_standby=off' "$conf"
-  expect_ok "pitr run: scratch port" grep -qxF 'port=5433' "$conf"
-  expect_ok "pitr run: no network" grep -qxF "listen_addresses=''" "$conf"
-  expect_no "pitr run: no fsync setting" grep -q 'fsync' "$conf"
+  local options=$CASE/stub/pg_ctl.options stop_copy=$CASE/stub/auto.conf.stop o
+  expect_ok "pitr run: restore_command with the archive path in the -o argument" \
+    grep -qF -- "-c \"restore_command=cp $W/%f %p || cp $W/%f.partial %p\"" "$options"
+  for o in 'hot_standby=off' 'port=5433' "listen_addresses=''" 'archive_mode=off' 'shared_buffers=64MB' \
+    'max_connections=10' "unix_socket_directories=$W/.pitr-scratch/run."; do
+    expect_ok "pitr run: the -o argument holds $o" grep -qF -- "-c $o" "$options"
+  done
+  expect_no "pitr run: no fsync setting" grep -q 'fsync' "$options"
+  expect_ok "pitr run: postgresql.auto.conf is copied at the stop call" test -f "$stop_copy"
+  expect_no "pitr run: the copy holds no restore_command, hot_standby, or port" \
+    grep -qE 'restore_command|hot_standby|port' "$stop_copy"
 }
 
 # The checks of the recovered cluster: the private socket, the marker identity, no libpq variable.
@@ -242,6 +256,35 @@ pitr_fault_case() {
   pitr_expect_clean "pitr fault $name"
 }
 
+# The newest base backup holds the file backup_end_time (ADR-0106 (c)). The manifest does not list it.
+# The check of the copy ignores it and deletes it, so the scratch cluster starts without it.
+# The base backup in the archive keeps the file.
+case_wal_pitr_end_time_file() {
+  PITR_EXTRA_FILE=backup_end_time pitr_run_case end-time
+  expect_eq "pitr end time: exit code" "$RC" "0"
+  expect_eq "pitr end time: no ERROR line" "$(error_count "$CASE/out")" "0"
+  expect_message "pitr end time" "pitr check passed"
+  expect_ok "pitr end time: the base backup in the archive keeps the file" \
+    test -f "$W/base/$LAST_BASE/backup_end_time"
+  expect_ok "pitr end time: the scratch cluster started" test -f "$CASE/stub/data.files"
+  expect_no "pitr end time: the copy holds no backup_end_time" grep -qx backup_end_time "$CASE/stub/data.files"
+  expect_ok "pitr end time: the copy holds the label" grep -qx backup_label "$CASE/stub/data.files"
+  pitr_expect_clean "pitr end time"
+}
+
+# Another file outside the manifest still fails the check, and no scratch cluster starts.
+case_wal_pitr_stray_file() {
+  PITR_EXTRA_FILE=stray.conf pitr_run_case stray-file
+  expect_eq "pitr stray file: exit code" "$RC" "1"
+  expect_eq "pitr stray file: one ERROR line" "$(error_count "$CASE/out")" "1"
+  expect_message "pitr stray file" "pg_verifybackup failed"
+  expect_ok "pitr stray file: the tool ignored only backup_end_time" \
+    grep -qF 'ARGV pg_verifybackup --quiet --ignore=backup_end_time ' "$CASE/stub/log"
+  expect_ok "pitr stray file: the tool named the file" grep -qF '"stray.conf" is present' "$CASE/err"
+  expect_eq "pitr stray file: no scratch cluster started" "$(count_events 'pg_ctl start')" "0"
+  pitr_expect_clean "pitr stray file"
+}
+
 case_wal_pitr_gates() {
   pitr_env_cases
   pitr_archive_cases
@@ -250,5 +293,7 @@ case_wal_pitr_gates() {
 
 case_wal_pitr_runs() {
   case_wal_pitr_passes
+  case_wal_pitr_end_time_file
+  case_wal_pitr_stray_file
   case_wal_pitr_faults
 }
