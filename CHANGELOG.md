@@ -4,6 +4,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-31
+
 ### Added
 
 - The one-shot service `pitr-volume` fills a new volume from a base backup and `/wal`. It mounts `/wal` read-only and no secret (ADR-0106 (e), (f)).
@@ -23,6 +25,19 @@ This file records the notable changes of the recipe editor. The format follows [
 - **BREAKING** The guard refuses a segment of another timeline in `/wal` (ADR-0106 (m)).
 - The WAL check of ADR-0099 (a3) ignores the file `backup_end_time` of a base backup (ADR-0107).
 - After this release, run `basebackup-once` once.
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- Seven tests with `#[cfg(unix)]` passed only in CI on Linux, not on the Windows development host. Two of them are in `crates/recipe-server/tests`: `sigterm_stops_a_started_server_with_code_0_and_the_stopped_line` and `temporary_directories_and_files_are_private_to_the_owner`.
+- The other five are in `crates/recipe-server/src`: `a_link_with_the_name_of_a_manifest_is_not_a_set`, `a_directory_without_the_read_right_is_a_fault`, `free_space_of_the_temporary_directory_is_consistent`, `a_missing_path_is_unreadable`, and `the_text_of_an_unreadable_fault_names_no_path`.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The project owner accepted the other low-severity items as they are.
+- The save toast of a parameter does not show the new row version. The new row version appears only in the hidden field `row_version` of the form.
+- The version page has no picker for two free version numbers. It links only to the diff with the approved version and with the base version. Another pair needs a typed address of the diff route.
+- The version page does not show the content hash. The export file holds the hash as `content_sha256`. The audit entry of an approval shows it in the state after.
+- The type page does not show the S7 layout of a type.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.2.0] - 2026-10-30
 
@@ -347,6 +362,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.2.0
 [0.1.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.1.0
