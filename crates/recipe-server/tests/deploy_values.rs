@@ -94,7 +94,7 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
     for instruction in [
         "COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/",
         "COPY --chmod=0644 restore-code.sql restore-code.expected restore-roles.sql restore-roles.expected /etc/pgtools/",
-        "COPY --chmod=0644 lib/globals-grammar.sh lib/restore-steps.sh lib/wal-identity.sh /etc/pgtools/",
+        "COPY --chmod=0644 lib/globals-grammar.sh lib/recovery-steps.sh lib/restore-steps.sh lib/wal-identity.sh /etc/pgtools/",
         "COPY --chmod=0644 --from=db cluster-access.sh /etc/pgtools/cluster-access.sh",
     ] {
         let copy = position(instruction);
@@ -252,13 +252,22 @@ fn volume_deletions(script: &str) -> Vec<String> {
         .collect()
 }
 
-fn delete_ci_volumes_body(common: &str) -> Vec<&str> {
+fn function_body<'a>(common: &'a str, name: &str) -> Vec<&'a str> {
+    let header = format!("{name}() {{");
     lines::code_lines(common)
         .into_iter()
         .map(str::trim)
-        .skip_while(|line| *line != "delete_ci_volumes() {")
+        .skip_while(|line| *line != header)
         .take_while(|line| *line != "}")
         .collect()
+}
+
+fn delete_ci_volumes_body(common: &str) -> Vec<&str> {
+    function_body(common, "delete_ci_volumes")
+}
+
+fn delete_labelled_volume_body(common: &str) -> Vec<&str> {
+    function_body(common, "delete_labelled_volume")
 }
 
 #[test]
@@ -281,8 +290,13 @@ fn deploy_values_ci_cleanup_continues_after_failures() {
     let common = include_str!("../../../deploy/ci/common.sh");
     let delete = delete_ci_volumes_body(common);
     assert!(!delete.iter().any(|line| line.contains("|| exit")));
-    assert!(delete.contains(&r#"docker volume rm "$volume" >/dev/null || status=$?"#));
+    assert!(delete.contains(&r#"delete_labelled_volume "$volume" || status=$?"#));
     assert!(delete.ends_with(&[r#"return "$status""#]));
+    assert!(
+        !delete_labelled_volume_body(common)
+            .iter()
+            .any(|line| line.contains("|| exit"))
+    );
     assert!(code.ends_with(&[
         "for disk in backups walarchive-disk",
         "do",
@@ -317,7 +331,7 @@ fn deploy_values_ci_volume_deletions_stay_in_throwaway_scripts() {
         ),
         (
             "ci/common.sh".into(),
-            r#"docker volume rm "$volume" >/dev/null || status=$?"#.into(),
+            r#"docker volume rm "$1" >/dev/null"#.into(),
         ),
         (
             "ci/restore-switch.sh".into(),
@@ -354,20 +368,27 @@ fn deploy_values_ci_volume_removal_keeps_label_and_name_guards() {
     ]));
     let common = include_str!("../../../deploy/ci/common.sh");
     assert!(common.contains(
-        "# The label check and run-scoped name restrict deletion to the volumes of this job on a throwaway CI runner.\n    # The operator rule in docs/ops/runbook.md still applies: never run docker volume rm on pgdata."
+        "# The operator rule in docs/ops/runbook.md still applies: never delete the pgdata volume of a production host."
     ));
+    assert!(lines::code_lines(common).contains(&"VOLUME_LABEL_MISMATCH=3"));
+    assert!(function_body(common, "has_job_label").contains(
+        &r#"[[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$1") == "$COMPOSE_PROJECT_NAME" ]]"#
+    ));
+    assert_eq!(
+        delete_labelled_volume_body(common),
+        [
+            "delete_labelled_volume() {",
+            r#"has_job_label "$1" || return "$VOLUME_LABEL_MISMATCH""#,
+            r#"docker volume rm "$1" >/dev/null"#,
+        ]
+    );
     assert!(delete_ci_volumes_body(common).starts_with(&[
         "delete_ci_volumes() {",
         "local ids status=0 volume",
         r#"ids=$(docker volume ls -q --filter "label=recipe.ci=$COMPOSE_PROJECT_NAME") || return 1"#,
         "for volume in $ids",
         "do",
-        r#"if [[ $(docker volume inspect --format '{{index .Labels "recipe.ci"}}' "$volume") == "$COMPOSE_PROJECT_NAME" ]]"#,
-        "then",
-        r#"docker volume rm "$volume" >/dev/null || status=$?"#,
-        "else",
-        "status=1",
-        "fi",
+        r#"delete_labelled_volume "$volume" || status=$?"#,
         "done",
         r#"return "$status""#,
     ]));

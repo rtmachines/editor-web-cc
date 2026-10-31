@@ -10,6 +10,7 @@ done
 python3 -I -B deploy/ci/test_http_probe.py
 python3 -I -B deploy/ci/test_upgrade_checks.py
 python3 -I -B deploy/ci/test_restore_switch.py
+python3 -I -B deploy/ci/test_pitr_recovery.py
 python3 -I -B deploy/ci/test_migration_freeze.py
 python3 -I -B - <<'PY'
 from pathlib import Path

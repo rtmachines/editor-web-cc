@@ -10,8 +10,9 @@
 # whole name, with LC_ALL=C (ADR-0077 (d)). A name that does not match is never deleted.
 #
 # Steps: marker, lock, pgpass file, identifier guard, pg_basebackup into the temp name,
-# pg_verifybackup, rename to the final name. The guard stops the run when the WAL archive belongs to
-# another cluster than the server (ADR-0103 (s), design D7). Only after a passed check the retention runs: it keeps the newest basebackup.retention
+# pg_verifybackup, backup_end_time, rename to the final name. The guard stops the run when the WAL
+# archive belongs to another cluster than the server (ADR-0103 (s), design D7). Only after a passed
+# check the retention runs: it keeps the newest basebackup.retention
 # base backups and pg_archivecleanup deletes the WAL segments before the lowest start segment of all
 # kept base backups (ADR-0077 (f)). A failed pg_basebackup or pg_verifybackup deletes no base backup
 # and no WAL segment.
@@ -242,11 +243,19 @@ pg_basebackup --pgdata="$tmp_dir" --wal-method=fetch -Fp --checkpoint=fast \
 chmod 0700 -- "$tmp_dir"
 pg_verifybackup --quiet "$tmp_dir" >&2 || fail "pg_verifybackup failed"
 
-# Step 5: sync, then the rename publishes the checked base backup.
+# Step 5: the end time of the base backup (ADR-0106 (c), design D2). The file holds the UTC time after
+# pg_verifybackup, rounded up to the next full second, in the grammar of ADR-0106 (a). The end of the
+# base backup lies before that time. The manifest does not list the file, and the rename below
+# publishes it with the base backup. A failed check never reaches this step.
+end_epoch=$(date -u +%s) || fail "cannot read the clock"
+printf '%s\n' "$(date -u -d "@$((end_epoch + 1))" +%Y-%m-%dT%H:%M:%SZ)" >"$tmp_dir/backup_end_time" \
+  || fail "cannot write backup_end_time"
+
+# Step 6: sync, then the rename publishes the checked base backup.
 sync
 mv -T -- "$tmp_dir" "$final_dir"
 sync
 log INFO "base backup completed" "\"base\":\"$final_name\""
 
-# Step 6: the retention runs only after a passed check.
+# Step 7: the retention runs only after a passed check.
 retention

@@ -3,13 +3,10 @@
 set -euo pipefail
 umask 077
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/switch-steps.sh"
 
 # These tables hold the data of the fixture. The later check compares their counts.
 COUNT_TABLES=(app_user machine unit recipe recipe_version parameter parameter_limit audit_log)
-
-log() {
-  printf 'CI: %s\n' "$1"
-}
 
 record_counts() {
   local table count file=$1
@@ -43,38 +40,6 @@ prepare() {
   log "restore-switch prepare: done"
 }
 
-load_active_volume() {
-  # A step that follows switch uses the volume that switch made active. Every step is a new process.
-  local name
-  [[ -s $CI_STATE/active.volume ]] || return 0
-  name=$(<"$CI_STATE/active.volume")
-  [[ $name =~ ^[A-Za-z0-9_.-]+$ ]] || fail "the active volume name is invalid"
-  export RECIPE_PGDATA_VOLUME=$name
-}
-
-db_volume() {
-  local name
-  name=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' "$(container db)")
-  [[ -n $name ]] || fail "the database container has no data volume"
-  printf '%s\n' "$name"
-}
-
-controldata() {
-  # Read pg_controldata of a volume. The container has no network and mounts the volume read-only (ADR-0103 (f)).
-  docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C \
-    -v "$1:/var/lib/postgresql/data:ro" --entrypoint pg_controldata \
-    "recipe-pgtools:${RECIPE_VERSION:?}" /var/lib/postgresql/data
-}
-
-controldata_field() {
-  # Print the value of one line of pg_controldata. The first argument is the volume. The second is the label.
-  local output
-  output=$(controldata "$1") || fail "cannot read pg_controldata of the volume $1"
-  sed -En "s/^$2: +//p" <<<"$output"
-}
-
-# The line of restore-volume and the id of the system are numbers of at most 20 digits.
-IDENTIFIER_PATTERN='^[0-9]{1,20}$'
 # A legal image tag has 1 to 128 characters and starts with a letter, a digit, or an underscore.
 TAG_PATTERN='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
 
@@ -101,156 +66,8 @@ restore() {
   log "restore: the volume $volume holds the system identifier ${BASH_REMATCH[1]}"
 }
 
-stop_services() {
-  # ADR-0103 (f) step 1. Delete containers only. The mode kill ends db with SIGKILL and leaves an unclean cluster.
-  if [[ $1 == kill ]]
-  then
-    compose stop proxy app backup walarchive
-    docker kill "$(container db)" >/dev/null
-  else
-    compose stop proxy app backup walarchive db
-  fi
-  compose rm -f proxy app backup walarchive db
-}
-
-check_unclean_state() {
-  # The CI proof that the else branch of ADR-0103 (f) step 2 runs. The first stop must leave a state other than shut down.
-  local state
-  state=$(controldata_field "$1" 'Database cluster state')
-  if [[ $state == "shut down" ]]
-  then
-    fail "switch: the first stop left the state 'shut down'. The restart branch did not run."
-  fi
-  [[ -n $state ]] || fail "switch: pg_controldata shows no state of the old volume."
-  printf '%s\n' "$state" >"$CI_STATE/switch.unclean-state"
-  log "switch: the first stop left the state '$state'. db starts again."
-}
-
-restart_old_db() {
-  # The old name stays in RECIPE_PGDATA_VOLUME. db replays its WAL and then runs.
-  compose up -d --no-deps --wait --wait-timeout 180 db
-}
-
-check_new_volume() {
-  # ADR-0103 (f) step 4. Stop without a deletion when the volume is not the one that the identifier names.
-  # The optional arguments name the step and the source of the identifier. A switch back uses the change log.
-  local state identifier who=${3:-switch} source=${4:-the line of restore-volume}
-  state=$(controldata_field "$1" 'Database cluster state')
-  [[ $state == "shut down" ]] || fail "$who: the new volume is not in the state 'shut down'."
-  identifier=$(controldata_field "$1" 'Database system identifier')
-  [[ $identifier =~ $IDENTIFIER_PATTERN && $identifier == "$2" ]] \
-    || fail "$who: the system identifier of the new volume differs from $source."
-}
-
-require_compose_volume() {
-  # ADR-0103 (f) step 3. The first argument is the step name. The second is the volume that Compose must show for pgdata.
-  compose config --format json >"$CI_STATE/$1-config.json" || fail "$1: cannot read the Compose configuration."
-  [[ $(python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/upgrade_checks.py" volume-name "$CI_STATE/$1-config.json") == "$2" ]] \
-    || fail "$1: Compose does not show the new volume for pgdata."
-}
-
-start_db() {
-  # ADR-0103 (f) step 5. The first argument is the step name. The second is the volume that db must mount.
-  compose up -d --no-deps --wait --wait-timeout 180 db
-  [[ $(db_volume) == "$2" ]] || fail "$1: db does not use the new volume."
-}
-
-switch() {
-  # ADR-0103 (f) steps 1 to 5. The change log gets the old name, its tag, and its identifier for the switch back.
-  # The tag is the image tag of the job (ADR-0105 (b)).
-  local old new expected state identifier
-  [[ -s $CI_STATE/new.volume && -s $CI_STATE/new.system-identifier ]] || fail "switch: run restore first."
-  new=$(<"$CI_STATE/new.volume")
-  expected=$(<"$CI_STATE/new.system-identifier")
-  old=$RECIPE_PGDATA_VOLUME
-  log "switch: step 1, stop the services and kill db"
-  stop_services kill
-  log "switch: step 2, read the state of the old volume $old"
-  check_unclean_state "$old"
-  restart_old_db
-  stop_services stop
-  state=$(controldata_field "$old" 'Database cluster state')
-  [[ $state == "shut down" ]] || fail "switch: the old volume is not in the state 'shut down'."
-  identifier=$(controldata_field "$old" 'Database system identifier')
-  [[ $identifier =~ $IDENTIFIER_PATTERN ]] || fail "switch: the system identifier of the old volume is invalid."
-  printf '%s\n' "$old" >"$CI_STATE/old.volume"
-  printf 'volume: %s\ntag: %s\nDatabase system identifier: %s\n' "$old" "${RECIPE_VERSION:?}" "$identifier" >"$CI_STATE/change.log"
-  export RECIPE_PGDATA_VOLUME=$new
-  log "switch: step 3, Compose shows the volume $new"
-  require_compose_volume switch "$new"
-  log "switch: step 4, read the state of the new volume"
-  check_new_volume "$new" "$expected"
-  log "switch: step 5, start db on the new volume"
-  start_db switch "$new"
-  printf '%s\n' "$new" >"$CI_STATE/active.volume"
-  log "switch: done"
-}
-
-# The login roles of 01-roles.sh. The superuser postgres has its own check.
-LOGIN_ROLES=(recipe_migrator recipe_app recipe_backup recipe_replicator)
-
 # These patterns match the lines that 01-roles.sh and the image entrypoint write on the first start.
 INIT_LOG_PATTERN='01-roles\.sh|docker-entrypoint-initdb\.d|init process complete|CREATE (ROLE|DATABASE|SCHEMA|FUNCTION|EVENT TRIGGER)|^(GRANT|REVOKE)$'
-
-# This script runs in a one-shot pgtools container on the network backend. The secret files are mounted in
-# /ci-secrets. For each role it writes a pgpass file in the tmpfs, so no password reaches an argument.
-# It prints one line "role|result" for each role. The result is ok, password, reject, or other.
-read -r -d '' PROBE_SCRIPT <<'PROBE' || true
-set -u
-export PGCONNECT_TIMEOUT=5 PGSSLMODE=disable
-dir=$(mktemp -d /run/pgpass/probe.XXXXXX)
-trap 'rm -rf -- "$dir"' EXIT
-for role
-do
-  file=/ci-secrets/${role#recipe_}_password
-  ( umask 077; { printf '*:*:*:%s:' "$role"; sed -e 's/[\\:]/\\&/g' -- "$file"; } >"$dir/pgpass" )
-  target="host=db port=5432 user=$role dbname=recipe"
-  query='SELECT 1'
-  if [[ $role == recipe_replicator ]]
-  then
-    target="host=db port=5432 user=$role dbname=replication replication=true"
-    query=IDENTIFY_SYSTEM
-  fi
-  if error=$(PGPASSFILE=$dir/pgpass psql -X -w -At "$target" -c "$query" 2>&1 >/dev/null)
-  then
-    result=ok
-  elif grep -Fq 'password authentication failed' <<<"$error"
-  then
-    result=password
-  elif grep -Fq 'pg_hba.conf rejects connection' <<<"$error"
-  then
-    result=reject
-  else
-    result=other
-  fi
-  printf '%s|%s\n' "$role" "$result"
-done
-PROBE
-
-probe_roles() {
-  # Run the probe in a one-shot container of a pgtools service. The client has an address in the subnet of backend.
-  local name args=(run --rm --no-deps -T)
-  for name in postgres migrator app backup replicator
-  do
-    args+=(-v "$RECIPE_SECRETS_DIR/${name}_password:/ci-secrets/${name}_password:ro")
-  done
-  compose "${args[@]}" --entrypoint bash backup-premigrate -c "$PROBE_SCRIPT" probe "$@"
-}
-
-expect_probe() {
-  # The first argument is the result that every role must get. The other arguments are the roles.
-  local expected=$1 output role result seen=0 count
-  shift
-  count=$#
-  output=$(probe_roles "$@") || fail "access: the probe container failed."
-  while IFS='|' read -r role result
-  do
-    [[ $role =~ ^(postgres|recipe_[a-z]+)$ ]] || continue
-    [[ $result == "$expected" ]] || fail "access: the login of $role gave '$result'. Expected '$expected'."
-    seen=$((seen + 1))
-  done <<<"$output"
-  (( seen == count )) || fail "access: the probe reported $seen of $count roles."
-}
 
 check_db_log() {
   # The restored cluster skips the init of the image, so its log holds no line of 01-roles.sh.
@@ -260,25 +77,6 @@ check_db_log() {
     || fail "access: the log of db has no start line."
   count=$(grep -c -E "$INIT_LOG_PATTERN" "$CI_STATE/db-before-passwords.log" || true)
   [[ $count == 0 ]] || fail "access: the log of db holds $count lines of 01-roles.sh."
-}
-
-set_role_passwords() {
-  # ADR-0103 (b) step 6 and ADR-0033. Psql reads each secret file inside db, so no password reaches an argument or a log.
-  compose exec -T -u postgres db psql -v ON_ERROR_STOP=1 --no-password --no-psqlrc --dbname postgres <<'SQL'
-\set postgres_password `cat /run/secrets/postgres_password`
-\set migrator_password `cat /run/secrets/migrator_password`
-\set app_password `cat /run/secrets/app_password`
-\set backup_password `cat /run/secrets/backup_password`
-\set replicator_password `cat /run/secrets/replicator_password`
-SET log_statement = 'none';
-SET log_min_error_statement = 'panic';
-SET log_min_duration_statement = -1;
-ALTER ROLE postgres PASSWORD :'postgres_password';
-ALTER ROLE recipe_migrator PASSWORD :'migrator_password';
-ALTER ROLE recipe_app PASSWORD :'app_password';
-ALTER ROLE recipe_backup PASSWORD :'backup_password';
-ALTER ROLE recipe_replicator PASSWORD :'replicator_password';
-SQL
 }
 
 access() {
@@ -297,188 +95,6 @@ access() {
   log "access: done"
 }
 
-# The grammar of a segment file (ADR-0099 (d)), a base backup directory (ADR-0077 (d)), and a WAL position.
-SEGMENT_REGEX='.*/[0-9A-F]{24}(\.partial)?'
-BASE_REGEX='.*/base_[0-9]{8}_[0-9]{6}'
-BASE_NAME_PATTERN='^base_[0-9]{8}_[0-9]{6}$'
-LSN_PATTERN='^[0-9A-F]+/[0-9A-F]+$'
-STREAM_ROW_PATTERN='^streaming\|[0-9A-F]+/[0-9A-F]+$'
-# The state files of a WAL line end in this suffix. The first line has none. A switch back uses -back.
-WAL_SUFFIX=""
-# The step label of the log lines of a WAL line.
-WAL_LABEL=wal-line
-# A wait runs this many attempts with one second between them. The tests lower the number.
-WAIT_ATTEMPTS=${CI_WAIT_ATTEMPTS:-60}
-
-retry() {
-  # Run a command until it succeeds or the attempts end.
-  local attempt
-  for ((attempt = 0; attempt < WAIT_ATTEMPTS; attempt++))
-  do
-    "$@" && return 0
-    sleep 1
-  done
-  return 1
-}
-
-archive_segments() {
-  # Print the names of the segment files and the .partial file at the top of the archive directory.
-  sudo find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f -regextype posix-extended -regex "$SEGMENT_REGEX" -printf '%f\n' | sort
-}
-
-archive_bases() {
-  # Print the names of the base backup directories in /wal/base. A .tmp-base directory has another name.
-  # basebackup-once creates /wal/base at its first run. Before that run, the list is empty.
-  if ! sudo test -e "$RECIPE_WALARCHIVE_DIR/base" && ! sudo test -L "$RECIPE_WALARCHIVE_DIR/base"
-  then
-    return 0
-  fi
-  sudo find "$RECIPE_WALARCHIVE_DIR/base" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex "$BASE_REGEX" -printf '%f\n' | sort
-}
-
-target_name_free() {
-  # The stamp is the time in seconds. A second line in the same second would reuse the name of the first target.
-  WAL_TARGET="${RECIPE_WALARCHIVE_DIR%/}.moved-$(date -u +%Y%m%d_%H%M%S)"
-  ! sudo test -e "$WAL_TARGET"
-}
-
-make_target() {
-  # ADR-0103 (s) step 2 and ADR-0099 (c). The target is a sibling of the archive directory. mkdir fails on an existing name.
-  # A target directory of an earlier line stays, so the stamp must be new.
-  retry target_name_free || fail "wal-line: cannot find an unused name for the target directory."
-  sudo mkdir -m 0700 -- "$WAL_TARGET" || fail "wal-line: cannot create the target directory."
-  # ADR-0099 (a) step 4. The CI WAL disk holds the archive directory, so the sibling target is on the same disk.
-  [[ $(sudo stat -c %d "$RECIPE_WALARCHIVE_DIR") == "$(sudo stat -c %d "$WAL_TARGET")" ]] \
-    || fail "wal-line: the target directory is on another filesystem than the archive directory."
-}
-
-write_old_identifier() {
-  # ADR-0103 (s) step 3. Copy the line of the old cluster from the change log.
-  local line
-  line=$(grep -E '^Database system identifier: [0-9]{1,20}$' "$CI_STATE/change.log" | tail -n 1) \
-    || fail "wal-line: the change log holds no identifier line."
-  printf '%s\n' "$line" | sudo tee -- "$WAL_TARGET/old-system-identifier" >/dev/null
-}
-
-require_old_identity_file() {
-  # The file in the archive names the old cluster. A difference stops the run before any move.
-  local old_id file_id
-  old_id=$(sed -En 's/^Database system identifier: ([0-9]{1,20})$/\1/p' "$CI_STATE/change.log" | tail -n 1)
-  file_id=$(sudo cat "$RECIPE_WALARCHIVE_DIR/.system-identifier") \
-    || fail "wal-line: the archive has no file .system-identifier."
-  [[ $file_id == "$old_id" ]] \
-    || fail "wal-line: the file .system-identifier does not hold the identifier of the old cluster."
-}
-
-move_segments() {
-  # ADR-0103 (s) step 4 and ADR-0099 (a) steps 5 to 7. Move the segments, the .partial file, and .system-identifier.
-  local listing name paths=()
-  listing=$(archive_segments) || fail "wal-line: cannot list the segment files."
-  while IFS= read -r name
-  do
-    [[ -z $name ]] || paths+=("$RECIPE_WALARCHIVE_DIR/$name")
-  done <<<"$listing"
-  paths+=("$RECIPE_WALARCHIVE_DIR/.system-identifier")
-  sudo mv -t "$WAL_TARGET" -- "${paths[@]}" || fail "wal-line: cannot move the segment files."
-  [[ -z $(archive_segments) ]] || fail "wal-line: a segment file stays in the archive directory."
-  if sudo test -e "$RECIPE_WALARCHIVE_DIR/.system-identifier"
-  then
-    fail "wal-line: the file .system-identifier stays in the archive directory."
-  fi
-}
-
-move_bases() {
-  # ADR-0103 (s) step 5. Move each base backup of the old line into the directory base of the target.
-  local listing name paths=()
-  listing=$(archive_bases) || fail "wal-line: cannot list /wal/base."
-  { [[ -z $listing ]] || printf '%s\n' "$listing"; } >"$CI_STATE/wal-old$WAL_SUFFIX.bases"
-  sudo mkdir -m 0700 -- "$WAL_TARGET/base" || fail "wal-line: cannot create the directory base in the target."
-  while IFS= read -r name
-  do
-    [[ -z $name ]] || paths+=("$RECIPE_WALARCHIVE_DIR/base/$name")
-  done <<<"$listing"
-  if (( ${#paths[@]} > 0 ))
-  then
-    sudo mv -t "$WAL_TARGET/base" -- "${paths[@]}" || fail "wal-line: cannot move the base backups."
-  fi
-  [[ -z $(archive_bases) ]] || fail "wal-line: a base backup of the old line stays in /wal/base."
-}
-
-record_target() {
-  # The step check proves later that the old volume and every moved file stay.
-  printf '%s\n' "$WAL_TARGET" >"$CI_STATE/wal-target$WAL_SUFFIX.dir"
-  sudo find "$WAL_TARGET" -mindepth 1 | sort >"$CI_STATE/wal-target$WAL_SUFFIX.manifest"
-}
-
-stream_ready() {
-  # ADR-0099 (a1). The result is exactly one row with the state streaming.
-  local row
-  row=$(sql -c "SELECT state, flush_lsn FROM pg_stat_replication WHERE usename = 'recipe_replicator' AND application_name = 'walarchive'") \
-    || return 1
-  [[ $row =~ $STREAM_ROW_PATTERN ]]
-}
-
-flush_reached() {
-  # ADR-0099 (a2) and ADR-0077 (c). The first argument is the WAL position.
-  local reached
-  reached=$(sql -c "SELECT EXISTS (SELECT 1 FROM pg_stat_replication WHERE application_name = 'walarchive' AND usename = 'recipe_replicator' AND flush_lsn >= '$1'::pg_lsn)") \
-    || return 1
-  [[ $reached == t ]]
-}
-
-take_base_backup() {
-  # The first argument is the log file. The second is the step name. The function sets LAST_BASE.
-  compose exec -T walarchive basebackup-once | tee "$CI_STATE/$1" || fail "$2: basebackup-once failed."
-  LAST_BASE=$(sed -En 's/.*"message":"base backup completed".*"base":"(base_[0-9]{8}_[0-9]{6})".*/\1/p' "$CI_STATE/$1" | tail -n 1)
-  [[ $LAST_BASE =~ $BASE_NAME_PATTERN ]] || fail "$2: basebackup-once did not report a base backup."
-}
-
-wal_check() {
-  # ADR-0099 (a3). The first argument is the base backup. The second is the step name.
-  compose exec -T walarchive pg_verifybackup --quiet --skip-checksums --wal-directory=/wal "/wal/base/$1" \
-    || fail "$2: the WAL check failed."
-}
-
-require_new_identity_file() {
-  # The first argument is the identifier of the cluster that the new line streams.
-  local file_id
-  file_id=$(sudo cat "$RECIPE_WALARCHIVE_DIR/.system-identifier" 2>/dev/null) || file_id=""
-  [[ $file_id == "$1" ]] \
-    || fail "wal-line: the file .system-identifier of the new line is missing or wrong."
-}
-
-new_line_checks() {
-  # ADR-0103 (s) step 7 and ADR-0099 (a) steps 9 to 13. The first argument is the identifier of the new line.
-  local position
-  retry stream_ready || fail "wal-line: the stream check did not find one streaming row."
-  take_base_backup "wal-line-base$WAL_SUFFIX.log" wal-line
-  position=$(sql -c 'SELECT pg_switch_wal()')
-  [[ $position =~ $LSN_PATTERN ]] || fail "wal-line: the segment switch returned no position."
-  retry flush_reached "$position" || fail "wal-line: the flush check did not return t."
-  wal_check "$LAST_BASE" wal-line
-  require_new_identity_file "$1"
-  printf '%s\n' "$LAST_BASE" >"$CI_STATE/wal-new$WAL_SUFFIX.base"
-}
-
-start_wal_line() {
-  # ADR-0103 (s) steps 1 to 7. The first argument is the identifier of the cluster that the new line streams.
-  [[ -z $(compose ps -aq walarchive) ]] || fail "$WAL_LABEL: the walarchive container exists. The switch must delete it."
-  log "$WAL_LABEL: step 2, create the target directory"
-  make_target
-  log "$WAL_LABEL: step 3, copy the old system identifier into the target directory"
-  write_old_identifier
-  log "$WAL_LABEL: step 4, move the segment files, the .partial file, and the file .system-identifier"
-  require_old_identity_file
-  move_segments
-  log "$WAL_LABEL: step 5, move the base backups of the old line"
-  move_bases
-  record_target
-  log "$WAL_LABEL: step 6, start walarchive on the new line"
-  compose up -d --no-deps walarchive
-  log "$WAL_LABEL: step 7, stream check, base backup, segment switch, flush check, and WAL check"
-  new_line_checks "$1"
-}
-
 wal_line() {
   # ADR-0103 (s). The new WAL line starts after the passwords and before app. Nothing is deleted.
   local name
@@ -489,14 +105,6 @@ wal_line() {
   log "wal-line: step 1, the switch deleted the walarchive container"
   start_wal_line "$(<"$CI_STATE/new.system-identifier")"
   log "wal-line: done"
-}
-
-readyz_ok() {
-  [[ $(compose exec -T proxy wget -q -T 3 -O - http://app:9000/readyz) == ok ]]
-}
-
-check_readyz() {
-  retry readyz_ok || fail "${1:-check}: /readyz did not answer ok."
 }
 
 compare_counts() {
@@ -556,12 +164,6 @@ check_flush() {
   export PITR_MARKER_SEQ PITR_MARKER_HASH
 }
 
-check_pitr() {
-  # pitr-check keeps its gate PITR_CI=1 (ADR-0077). It recovers from the newest base backup of the new line.
-  compose run --rm --no-deps -T -e PITR_CI=1 -e PITR_MARKER_SEQ -e PITR_MARKER_HASH pitr-check \
-    || fail "check: pitr-check failed."
-}
-
 check_db_log_passwords() {
   # Count the log lines that hold the value of a secret. The grep reads the patterns from the secret files.
   local name count files=()
@@ -593,13 +195,16 @@ check_base_directory() {
 
 check_kept_files() {
   # ADR-0103 (t). The old volume and every moved file stay until the operator deletes them.
-  local path
+  # The file old-system-identifier holds what write_old_identifier wrote (ADR-0106 (k)).
+  local path expected
   docker volume inspect "$(<"$CI_STATE/old.volume")" >/dev/null || fail "check: the old volume is gone."
   while IFS= read -r path
   do
     sudo test -e "$path" || fail "check: a file of the target directory is missing."
   done <"$CI_STATE/wal-target.manifest"
-  [[ $(sudo cat "$(<"$CI_STATE/wal-target.dir")/old-system-identifier") == "$(grep -E '^Database system identifier: ' "$CI_STATE/change.log")" ]] \
+  # expected_old_identifier writes the error line. The exit keeps its status.
+  expected=$(expected_old_identifier check) || exit "$?"
+  [[ $(sudo cat "$(<"$CI_STATE/wal-target.dir")/old-system-identifier") == "$expected" ]] \
     || fail "check: the file old-system-identifier of the target directory changed."
   require_new_identity_file "$(<"$CI_STATE/new.system-identifier")"
 }
@@ -767,6 +372,17 @@ first_identifier() {
   sed -En 's/^Database system identifier: ([0-9]{1,20})$/\1/;T;p;q' "$1"
 }
 
+first_timeline() {
+  # Print the timeline of the first entry of a change log (ADR-0106 (l)). An entry from before ADR-0106 has none, so nothing prints.
+  # A line with the label and a bad value stops the run. A later entry never decides the check.
+  local line value
+  line=$(awk -v label="$TIMELINE_LABEL:" '/^volume: / { entries++ } entries == 1 && index($0, label) == 1 { print; exit }' "$1")
+  [[ -n $line ]] || return 0
+  value=${line#"$TIMELINE_LABEL: "}
+  [[ $value =~ $TIMELINE_PATTERN ]] || fail "switch-back: the timeline in the change log is not valid."
+  printf '%s\n' "$value"
+}
+
 old_tag() {
   # Print the tag of the first entry of a change log. A missing or illegal tag stops the run (ADR-0105 (d)).
   local tag
@@ -779,12 +395,13 @@ old_tag() {
 switch_back_core() {
   # ADR-0103 (g). These are the steps of (f) with the old name. The first argument is the change log.
   # The second argument is capture or plain. Only capture saves the two configuration files of each cluster.
-  local change_log=$1 old leaving leaving_tag expected output state="" identifier="" old_image_tag
+  local change_log=$1 old leaving leaving_tag expected expected_timeline output state="" identifier="" timeline="" old_image_tag
   old=$(<"$CI_STATE/old.volume")
   leaving=$RECIPE_PGDATA_VOLUME
   leaving_tag=${RECIPE_VERSION:?}
   expected=$(first_identifier "$change_log")
   [[ $expected =~ $IDENTIFIER_PATTERN ]] || fail "switch-back: the change log holds no identifier line."
+  expected_timeline=$(first_timeline "$change_log")
   old_image_tag=$(old_tag "$change_log")
   log "switch-back: step 1, stop the services and delete the containers"
   stop_services stop
@@ -794,10 +411,13 @@ switch_back_core() {
   then
     state=$(sed -En 's/^Database cluster state: +//p' <<<"$output")
     identifier=$(sed -En 's/^Database system identifier: +//p' <<<"$output")
+    timeline=$(sed -En "s/^$TIMELINE_LABEL: +//p" <<<"$output")
   fi
   [[ $identifier =~ $IDENTIFIER_PATTERN ]] \
     || fail "switch-back: pg_controldata shows no system identifier of the volume that the run leaves."
-  printf 'volume: %s\ntag: %s\nDatabase system identifier: %s\n' "$leaving" "$leaving_tag" "$identifier" >>"$change_log"
+  [[ $timeline =~ $TIMELINE_PATTERN ]] \
+    || fail "switch-back: pg_controldata shows no timeline of the volume that the run leaves."
+  change_log_entry "$leaving" "$leaving_tag" "$identifier" "$timeline" >>"$change_log"
   if [[ $2 == capture ]]
   then
     printf '%s\n' "$state" >"$CI_STATE/state.new"
@@ -807,8 +427,8 @@ switch_back_core() {
   export RECIPE_VERSION=$old_image_tag
   log "switch-back: step 3, Compose shows the volume $old"
   require_compose_volume switch-back "$old"
-  log "switch-back: step 4, read the state of the volume $old and compare its identifier with the change log"
-  check_new_volume "$old" "$expected" switch-back "the change log"
+  log "switch-back: step 4, read the state of the volume $old and compare its identifier and timeline with the change log"
+  check_new_volume "$old" "$expected" switch-back "the change log" "$expected_timeline"
   if [[ $2 == capture ]]
   then
     controldata_field "$old" 'Database cluster state' >"$CI_STATE/state.old"
@@ -894,6 +514,7 @@ switch_back() {
     || fail "switch-back: the active volume is the old volume."
   expected=$(first_identifier "$CI_STATE/change.log")
   old_tag "$CI_STATE/change.log" >/dev/null
+  first_timeline "$CI_STATE/change.log" >/dev/null
   log "switch-back: part 1, read the roles of the new cluster while it runs"
   capture_roles new
   run_wrong_switch_back
@@ -950,37 +571,11 @@ keep() {
   log "keep: done"
 }
 
-require_no_labelled_volume() {
-  # Run this after delete_ci_volumes. No volume with the label of this job may stay. That includes both data volumes.
-  local left
-  left=$(docker volume ls -q --filter "label=recipe.ci=$COMPOSE_PROJECT_NAME") || return 1
-  [[ -z $left ]] && return 0
-  printf 'CI: cleanup: a volume with the label recipe.ci=%s stays: %s\n' "$COMPOSE_PROJECT_NAME" "${left//$'\n'/ }" >&2
-  return 1
-}
-
-cleanup() {
-  # Delete only this job's project and volumes. Compose never deletes the external pgdata volume.
-  # delete_ci_volumes removes only the volumes that carry the label of this job.
-  local status=0 disk
-  compose --profile restore --profile pitr down --remove-orphans || status=$?
-  delete_ci_volumes || status=$?
-  require_no_labelled_volume || status=$?
-  for disk in backups walarchive-disk
-  do
-    if mountpoint -q "$CI_ROOT/$disk"
-    then
-      sudo umount "$CI_ROOT/$disk" || status=$?
-    fi
-  done
-  return "$status"
-}
-
 load_active_volume
 case ${1:-} in
   prepare) prepare ;;
   restore) restore ;;
-  switch) switch ;;
+  switch) switch "restore volume completed" ;;
   access) access ;;
   wal-line) wal_line ;;
   check) check ;;

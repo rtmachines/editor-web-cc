@@ -1,6 +1,6 @@
 # ADR-0077: Marker entry of the recovery check, WAL cutoff, and scratch constants
 
-Status: Accepted. Amended by a note on (g). The row `pitr_check.ready_poll` is the connection check of the scratch cluster, not the archive poll that goes away (`reliability.md` 7.11). Amended by ADR-0103 (item (f): after a switch, the old base backups move with the old WAL line)
+Status: Accepted. Amended by a note on (g). The row `pitr_check.ready_poll` is the connection check of the scratch cluster, not the archive poll that goes away (`reliability.md` 7.11). Amended by ADR-0103 (item (f): after a switch, the old base backups move with the old WAL line). Amended by ADR-0106 (item (d): the copy of `pitr-check` ignores and deletes the file `backup_end_time`)
 Date: 2026-10-24
 Deciders: project owner
 

@@ -14,27 +14,29 @@ const FILE: &str = "deploy/compose.yaml";
 const LOG_DRIVER: &str = "json-file";
 
 /// The seven services of `reliability.md` 7.1, the CI check `pitr-check` (design D9), and the
-/// restore service `restore-volume` (ADR-0103 (h)).
-const SERVICES: [&str; 9] = [
+/// restore services `restore-volume` (ADR-0103 (h)) and `pitr-volume` (ADR-0106 (e)).
+const SERVICES: [&str; 10] = [
     "app",
     "backup",
     "backup-premigrate",
     "db",
     "migrate",
     "pitr-check",
+    "pitr-volume",
     "proxy",
     "restore-volume",
     "walarchive",
 ];
 /// The services that mount a tmpfs on `/run/pgpass` (`reliability.md` 7.1, "Networks and capabilities").
-const PGPASS_SERVICES: [&str; 4] = [
+const PGPASS_SERVICES: [&str; 5] = [
     "backup",
     "backup-premigrate",
+    "pitr-volume",
     "restore-volume",
     "walarchive",
 ];
 /// The one-shot services outside the seven. Each has `network_mode: none`, no secret, and no network.
-const ISOLATED_SERVICES: [&str; 2] = ["pitr-check", "restore-volume"];
+const ISOLATED_SERVICES: [&str; 3] = ["pitr-check", "pitr-volume", "restore-volume"];
 /// The service that fills a new volume (ADR-0103 (h), design D6) and its mounts and variable.
 const RESTORE_SERVICE: &str = "restore-volume";
 const RESTORE_PROFILE: &str = "restore";
@@ -43,6 +45,11 @@ const RESTORE_BACKUPS_MOUNT: &str = "backups:/backups:ro";
 const RESTORE_SUBNET_VARIABLE: &str = "${COMPOSE_SUBNET:?}";
 /// The stamp of the set is the argument of the run, so the entrypoint is the script itself.
 const RESTORE_ENTRYPOINT: &str = "restore-volume";
+/// The service that recovers a new volume to a point in time (ADR-0106 (e), design D4).
+/// It mounts the WAL archive read-only. The target time is the argument of the run.
+const PITR_SERVICE: &str = "pitr-volume";
+const PITR_WAL_MOUNT: &str = "walarchive:/wal:ro";
+const PITR_ENTRYPOINT: &str = "/usr/local/bin/pitr-volume";
 /// The services with `read_only: true` (`reliability.md` 7.1).
 const READ_ONLY_SERVICES: [&str; 2] = ["app", "proxy"];
 /// The Docker secrets of `reliability.md` 7.1 and design D9, one host file for each.
@@ -146,6 +153,7 @@ fn check_special_options(report: &mut Report, compose: &Compose) {
     }
     check_cluster_access_mount(report, compose);
     check_restore_service(report, compose);
+    check_pitr_service(report, compose);
     if let Some(proxy) = compose.service("proxy")
         && !proxy
             .list("volumes")
@@ -183,7 +191,7 @@ fn check_service_networks(report: &mut Report, compose: &Compose) {
         let want: &[&str] = match service.name {
             "proxy" => &["backend", "edge"],
             "app" => &["backend", "egress"],
-            "pitr-check" | RESTORE_SERVICE => &[],
+            "pitr-check" | PITR_SERVICE | RESTORE_SERVICE => &[],
             _ => &["backend"],
         };
         let want: Vec<String> = want.iter().map(|name| (*name).to_owned()).collect();
@@ -197,7 +205,7 @@ fn check_service_networks(report: &mut Report, compose: &Compose) {
     }
 }
 
-/// `pitr-check` and `restore-volume` have `network_mode: none` and mount no secret.
+/// `pitr-check`, `pitr-volume`, and `restore-volume` have `network_mode: none` and mount no secret.
 /// No other service has a `network_mode`. Design D10 and the comments in `compose.yaml`.
 fn check_isolation(report: &mut Report, service: &Service) {
     let mode = service.scalar("network_mode");
@@ -230,9 +238,21 @@ fn check_isolation(report: &mut Report, service: &Service) {
 /// The entrypoint is the script, so the stamp of `docker compose run` is its argument.
 /// ADR-0103 (h), (l), design D4 and D6.
 fn check_restore_service(report: &mut Report, compose: &Compose) {
-    let Some(service) = compose.service(RESTORE_SERVICE) else {
-        return;
-    };
+    if let Some(service) = compose.service(RESTORE_SERVICE) {
+        check_volume_service(report, service, RESTORE_BACKUPS_MOUNT, RESTORE_ENTRYPOINT);
+    }
+}
+
+/// `pitr-volume` has the same shape as `restore-volume`, with two differences.
+/// It mounts the WAL archive read-only and not the backup disk. Its entrypoint is a full path.
+/// ADR-0106 (e), design D4.
+fn check_pitr_service(report: &mut Report, compose: &Compose) {
+    if let Some(service) = compose.service(PITR_SERVICE) {
+        check_volume_service(report, service, PITR_WAL_MOUNT, PITR_ENTRYPOINT);
+    }
+}
+
+fn check_volume_service(report: &mut Report, service: &Service, mount: &str, entrypoint: &str) {
     let name = service.name;
     let profile = [RESTORE_PROFILE.to_owned()];
     report.compare_list(
@@ -241,14 +261,14 @@ fn check_restore_service(report: &mut Report, compose: &Compose) {
         &profile,
         Some(service.list("profiles")),
     );
-    let mounts = [RESTORE_BACKUPS_MOUNT.to_owned()];
+    let mounts = [mount.to_owned()];
     report.compare_list(
         FILE,
         &format!("{name}.volumes"),
         &mounts,
         Some(service.list("volumes")),
     );
-    let entrypoint = [RESTORE_ENTRYPOINT.to_owned()];
+    let entrypoint = [entrypoint.to_owned()];
     report.compare_list(
         FILE,
         &format!("{name}.entrypoint"),

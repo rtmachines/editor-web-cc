@@ -727,14 +727,41 @@ WAL line after a switch (ADR-0103 (r) to (v)):
 
 - Every switch starts a new WAL line before `app` starts. The rule also covers a switch back after the move of the old segments (ADR-0103 (g)).
 - The operator moves the old segments, the `.partial` file, and every base backup of `/wal/base` into a target directory of ADR-0099 (c). It also moves `/wal/.system-identifier`. The file `old-system-identifier` there keeps the system identifier of the old cluster.
+- The move also takes each timeline history file `^[0-9A-F]{8}\.history$` at the top of `/wal`. The file `old-system-identifier` also keeps the timeline of the old cluster (ADR-0106 (k)).
 - `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier (ADR-0103 (s)).
-- In a gap of the WAL stream (ADR-0099 (a)), `/wal/.system-identifier` stays in `/wal`. The cluster does not change in a gap, so its identifier stays the same (ADR-0105 (o)).
+- They also refuse to start when a segment at the top of `/wal` has a timeline other than the timeline of `IDENTIFY_SYSTEM` (ADR-0106 (m)).
+- In a gap of the WAL stream (ADR-0099 (a)), `/wal/.system-identifier` and the history files stay in `/wal`. The cluster does not change in a gap, so its identifier stays the same (ADR-0105 (o), ADR-0106 (k)).
 - An existing installation has segments and no file. It writes the file once, before `walarchive` first starts with the image of the first release with the guard. Step 2 of 7.10 gives this step. It runs before the replacement of `db` (ADR-0104 (a), ADR-0105 (n)).
 - Then the operator starts `walarchive`. The operator runs the stream check, the base backup, the segment switch, the flush check, and the WAL check of ADR-0099 (a).
 - The operator deletes the old `pgdata` volume and that target directory only after three conditions. A `restore-test` passed on a set of the new cluster. The flush check and the WAL check of ADR-0099 (a) passed on the new WAL line.
 - The third condition is an age of the switch above `volume_switch.keep_min_age`. No script and no retention deletes them (ADR-0103 (t)).
 - `restore_command` reads `/wal` only. The moved files are therefore no recovery source for the running stack (ADR-0103 (v)).
 - A recovery of the old cluster needs a procedure that reads the target directory in a separate container. Never move the files back into `/wal` while `walarchive` writes there.
+
+Recovery from the WAL archive (ADR-0106):
+
+- A recovery of production from the WAL archive fills a new volume and uses the switch of 7.8. The old volume stays unchanged.
+- The default target is the end of the archive with the `.partial` file. The operator can give one target time in UTC (ADR-0106 (a), (b)).
+- The source of a target time is the audit log. For a manual statement as a superuser, the source is the start time in the change log of the site (ADR-0106 (b)).
+- The one-shot service `pitr-volume` runs in a temporary container of `recipe-pgtools` with `network_mode: none`. It mounts `/wal` read-only and no secret (ADR-0106 (e)).
+- Its image has the tag of the schema at the recovery point (ADR-0083 (a), ADR-0105 (a)).
+- `basebackup-once` writes the file `backup_end_time` into each base backup. With a target time, the newest base backup that ended at or before the target wins (ADR-0106 (c)).
+- The script copies the selected base backup into the new volume and checks the copy with `pg_verifybackup`. The system identifier of the copy must equal `/wal/.system-identifier` (ADR-0106 (c), (f)).
+- After the copy, the free space of the target disk must stay at or above `disk.warn_percent` (ADR-0106 (f)).
+- It holds the lock `/wal/.lock` to its exit. It passes each recovery setting with `pg_ctl -o` and writes none into a configuration file.
+- It waits `pitr_volume.start_timeout` for the recovery and `pitr_volume.stop_timeout` for the clean stop of 7.11.
+- After the promotion, the checks of ADR-0106 (g) are a gate. Without a target time, the recovery must end in the newest segment of `/wal`. A recovery that stops at a gap ends the run.
+- When the operator gives `PITR_EXPECTED_LSN`, the end of the recovery must also lie at or after that position (ADR-0106 (g)).
+- The other checks are the audit chain check of `data-model.md` 4.9, the optional marker entry, the configuration files, and the values of ADR-0103 (m).
+- The last line holds the base backup, the system identifier, the new timeline, the newest audit entry, and `heartbeat.last_at`. The operator compares them before the switch (ADR-0106 (d)).
+- The order of ADR-0106 (i) applies. The operator stops `app` and `backup` and reads the marker entry when `db` runs.
+- Then the operator runs the flush check of ADR-0099 (a2) when `db` runs, and stops `walarchive`. Then `pitr-volume` fills the new volume.
+- After the switch, the operator sets the role passwords and starts the new WAL line.
+- Then the operator truncates `session` and `login_attempt` and re-applies the user changes after the recovery point.
+- Then the operator starts `app`. The wait of ADR-0102, `backup-now`, and `restore-test` end the recovery.
+- The recovery drill runs `pitr-volume --drill` on a drill volume while the stack runs. The file `pitr-drill` stops a switch to that volume (ADR-0106 (j), (o)).
+- After each upgrade of 7.10, the operator records the time of the fill and of the last base backup, and deletes the drill volume.
+- The CI job `pitr-recovery` kills `db` after the flush of a marker commit. A login with the password of that commit after the recovery proves the recovery point (ADR-0106 (p)).
 
 ### 7.8 Volumes, resources, disk full
 
@@ -761,14 +788,18 @@ Volume switch (ADR-0103 (e) to (g)):
 - A switch back uses the same steps with the old name. It needs no state of the volume that it leaves and never starts `db` on that volume. Its system identifier must equal the identifier that the first switch wrote into the change log (ADR-0103 (f), (g)).
 - Before `db` starts, a switch back sets the tag of the volume that it returns to. The operator reads that tag from the change log (ADR-0105 (d)).
 - After `db` starts, a switch back starts `walarchive` before `app`. After the move of the old segments, the new WAL line of 7.7 starts first (ADR-0103 (g)). Then the operator starts `app`, then `proxy` and `backup`.
+- The change log also holds the timeline of each volume that a switch leaves. A switch back compares the system identifier and the timeline (ADR-0106 (l)).
+- A switch after a recovery from the WAL archive needs no state of the old volume and never starts `db` on it (ADR-0106 (j)).
+- It compares the identifier and the timeline of the new volume with the line `pitr volume completed`. It refuses a drill volume.
+- A change log entry from before ADR-0106 holds no timeline. A switch back to that volume compares the identifier only (ADR-0106 (l)).
 - When the identifier check of a switch back fails, the operator starts no `db` and deletes no volume. The site stays down until the operator finds the cause. The switch back loses each write after the switch. After a major upgrade, it runs in the directory `deploy/` of the old release and needs the old images (ADR-0105 (e)).
 
 Resource limits per container are the keys `container.*` of 7.11 (ADR-0070 (f) to (m), ADR-0081):
 
 - Each service gets `mem_limit` equal to `memswap_limit`, so the limit is hard and has no swap. Each service gets `cpus`.
 - `app` has `container.app_memory` and `container.app_cpus`. `db` has `container.db_memory` and `container.db_cpus`.
-- `backup` and the temporary containers of `pitr-check` and `restore-volume` have `container.backup_memory`. `proxy` and `walarchive` have `container.small_memory`. `migrate` and `backup-premigrate` have `container.oneshot_memory`.
-- `proxy`, `backup`, `walarchive`, `migrate`, and `backup-premigrate` have `container.small_cpus`. The temporary containers of `pitr-check` and `restore-volume` also have `container.small_cpus` (ADR-0081 (a), ADR-0103 (h)).
+- `backup` and the temporary containers of `pitr-check`, `restore-volume`, and `pitr-volume` have `container.backup_memory`. `proxy` and `walarchive` have `container.small_memory`. `migrate` and `backup-premigrate` have `container.oneshot_memory`.
+- `proxy`, `backup`, `walarchive`, `migrate`, and `backup-premigrate` have `container.small_cpus`. The temporary containers of `pitr-check`, `restore-volume`, and `pitr-volume` also have `container.small_cpus` (ADR-0081 (a), ADR-0103 (h), ADR-0106 (e)).
 - `app` runs `runtime.worker_threads` Tokio workers, so a long render does not stop `/healthz` on one CPU (ADR-0061 (h)).
 - ADR-0070 (m) gives the minimum host and the versions of Docker Engine and Compose.
 
@@ -963,16 +994,17 @@ This table is the single source for every numeric setting. A key of the first co
 | `backup.max_age_alert` | 26 h | 3.7, 7.1, 7.7 |
 | `restore_test.time` | Sunday 05:00 UTC (ADR-0067 (a)) | 7.7 |
 | `basebackup.time` / `basebackup.retention` | Sunday 03:30 UTC / 4 base backups (ADR-0068 (f), (i)) | 7.7 |
-| `scratch.shared_buffers` / `scratch.maintenance_work_mem` / `scratch.max_connections` | 64 MB / 64 MB / 10. The scratch clusters of `restore-test` and `pitr-check`, and the temporary server of `restore-volume` (ADR-0067 (e), ADR-0103 (j)) | 7.7 |
-| `scratch.max_parallel_workers_per_gather` / `scratch.max_parallel_maintenance_workers` | 0 / 0. The scratch clusters of `restore-test` and `pitr-check`, and the temporary server of `restore-volume` (ADR-0067 (e), ADR-0103 (j)) | 7.7 |
+| `scratch.shared_buffers` / `scratch.maintenance_work_mem` / `scratch.max_connections` | 64 MB / 64 MB / 10. The scratch clusters of `restore-test` and `pitr-check`, and the temporary servers of `restore-volume` and `pitr-volume` (ADR-0067 (e), ADR-0103 (j), ADR-0106 (f)) | 7.7 |
+| `scratch.max_parallel_workers_per_gather` / `scratch.max_parallel_maintenance_workers` | 0 / 0. The scratch clusters of `restore-test` and `pitr-check`, and the temporary servers of `restore-volume` and `pitr-volume` (ADR-0067 (e), ADR-0103 (j), ADR-0106 (f)) | 7.7 |
 | `scratch.restore_fsync` / `scratch.restore_wal_level` / `scratch.restore_max_wal_senders` | `off` / `minimal` / 0, for the cluster of `restore-test` only (ADR-0067 (f)) | 7.7 |
-| `scratch.pitr_hot_standby` | `off`, for the cluster of `pitr-check` only. The lower `scratch.max_connections` then does not stop the recovery (ADR-0068 (o)) | 7.7 |
-| `scratch.port` / `scratch.stop_timeout` | 5433 / 60 s. The port and the `pg_ctl stop` timeout of the scratch servers of `restore-test` and `pitr-check` (ADR-0077 (g)) | 7.7 |
+| `scratch.pitr_hot_standby` | `off`, for the cluster of `pitr-check` and the temporary server of `pitr-volume` only. The lower `scratch.max_connections` then does not stop the recovery (ADR-0068 (o), ADR-0106 (f)) | 7.7 |
+| `scratch.port` / `scratch.stop_timeout` | 5433 / 60 s. The port of the scratch servers of `restore-test`, `pitr-check`, and `pitr-volume`. The `pg_ctl stop` timeout of `restore-test` and `pitr-check` (ADR-0077 (g), ADR-0106 (f)) | 7.7 |
 | `scratch.restore_start_timeout` / `scratch.pitr_start_timeout` | 60 s / 600 s. The `pg_ctl start` timeout of the cluster of `restore-test`, and of the cluster of `pitr-check` with its recovery, inside the recovery time objective of 1 h (ADR-0077 (g)) | 7.7 |
-| `restore_test.detail_length` | 160 characters of a tool message in an `ERROR` line of `restore-test` (ADR-0077 (g)) | 7.7 |
-| `pitr_check.log_tail` | 20 lines of the server log on stderr after a failed start of the scratch cluster of `pitr-check` (ADR-0077 (g)) | 7.7 |
-| `pitr_check.ready_poll` | 1 s. The interval of the connection check while the scratch cluster of `pitr-check` finishes its recovery. The checks stay inside `scratch.pitr_start_timeout` | 7.7 |
+| `restore_test.detail_length` | 160 characters of a tool message in an `ERROR` line of `restore-test`, `restore-volume`, `wal-identity.sh`, and `pitr-volume` (ADR-0077 (g), ADR-0106 (f)) | 7.7 |
+| `pitr_check.log_tail` | 20 lines of the server log on stderr after a failed start. The scratch cluster of `pitr-check` and the temporary server of `pitr-volume` use it (ADR-0077 (g), ADR-0106 (n)) | 7.7 |
+| `pitr_check.ready_poll` | 1 s. The interval of the connection check while the scratch cluster of `pitr-check` or the temporary server of `pitr-volume` finishes its recovery. The checks stay inside `scratch.pitr_start_timeout` or `pitr_volume.start_timeout` (ADR-0106 (n)) | 7.7 |
 | `restore_volume.start_timeout` / `restore_volume.stop_timeout` | 60 s / 600 s. The `pg_ctl start` and the `pg_ctl stop` timeout of the temporary server of `restore-volume`. The fast stop writes the shutdown checkpoint with `fsync` on. The wait stays inside the recovery time objective of 1 h (ADR-0103 (y)) | 7.7 |
+| `pitr_volume.start_timeout` / `pitr_volume.stop_timeout` | 1800 s / 600 s. The `pg_ctl start` timeout of the temporary server of `pitr-volume` with its recovery, and its `pg_ctl stop` timeout. The start waits for the replay of up to one week of WAL. The stop equals `restore_volume.stop_timeout`. Both waits use 2400 s of the recovery time objective of 1 h (ADR-0106 (n)) | 7.7 |
 | `volume_switch.keep_min_age` | 30 days, equal to `backup.retention`. The minimum age of a switch before the operator deletes the old `pgdata` volume and the moved WAL files (ADR-0103 (t), (y)) | 7.7 |
 | `wal.max_lag_bytes` | 16 MiB. Replication lag `pg_current_wal_lsn() - sent_lsn` of `recipe_replicator` | 3.7, 7.1, 7.7 |
 | `security_event.retention` | 400 days. A constant in `security_event_purge()`. A change needs a migration | 3.6, data-model.md 4.12 |
@@ -984,8 +1016,8 @@ This table is the single source for every numeric setting. A key of the first co
 | `container.app_memory` / `container.app_cpus` | 512 MiB / 1 | 7.8 |
 | `container.db_memory` / `container.db_cpus` | 2 GiB / 2 | 7.8 |
 | `container.small_memory` | 128 MiB each for `proxy` and `walarchive` (ADR-0070 (i)) | 7.8 |
-| `container.small_cpus` | 0.5 each for `proxy`, `backup`, `walarchive`, `migrate`, `backup-premigrate`, and the temporary containers of `pitr-check` and `restore-volume` (ADR-0070 (j), ADR-0081 (a), ADR-0103 (h)) | 7.7, 7.8 |
-| `container.backup_memory` | 512 MiB for `backup` and for the temporary containers of `pitr-check` and `restore-volume` (ADR-0067 (b), ADR-0103 (h)) | 7.7, 7.8 |
+| `container.small_cpus` | 0.5 each for `proxy`, `backup`, `walarchive`, `migrate`, `backup-premigrate`, and the temporary containers of `pitr-check`, `restore-volume`, and `pitr-volume` (ADR-0070 (j), ADR-0081 (a), ADR-0103 (h), ADR-0106 (e)) | 7.7, 7.8 |
+| `container.backup_memory` | 512 MiB for `backup` and for the temporary containers of `pitr-check`, `restore-volume`, and `pitr-volume` (ADR-0067 (b), ADR-0103 (h), ADR-0106 (e)) | 7.7, 7.8 |
 | `container.oneshot_memory` | 256 MiB each for `migrate` and `backup-premigrate` (ADR-0070 (h)) | 7.8 |
 | `pg.max_wal_senders` | 3 | 7.6 |
 | `pg.wal_keep_size` | 1 GB | 7.6 |

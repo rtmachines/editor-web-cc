@@ -328,6 +328,6 @@ case_volume_access_static() {
   expect_no "access static: no copy of the REVOKE statements" grep -Eq 'REVOKE[[:space:]]+(CONNECT|ALL)' "$script"
   expect_no "access static: no password column" grep -Eqi 'rolpassword' "$script"
   expect_no "access static: no forbidden word" grep -Eq 'fsync|SCRATCH_PORT|--port|port=|ALTER ROLE' "$script"
-  expect_ok "access static: the files of the roles come from the code directory" \
-    grep -Eq 'CODE_DIR/restore-roles\.(sql|expected)' "$script"
+  expect_ok "access static: the files of the roles come from the code directory, in the shared compare_roles" \
+    grep -Eq 'CODE_DIR/restore-roles\.(sql|expected)' "$HERE/../lib/restore-steps.sh"
 }

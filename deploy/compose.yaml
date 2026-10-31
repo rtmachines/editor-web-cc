@@ -373,6 +373,33 @@ services:
     memswap_limit: 512m
     cpus: 0.5
 
+  # Point-in-time recovery of a base backup and the WAL archive into a new, empty volume (ADR-0106 (e)).
+  # It is not one of the seven services. The profile restore keeps it out of "up".
+  # The operator mounts the target volume with -v and passes the target time as the argument:
+  # "docker compose run --rm -v <new volume>:/var/lib/postgresql/data pitr-volume <target time>".
+  # It mounts the WAL archive read-only and no other volume. It mounts no secret and joins no network.
+  # COMPOSE_SUBNET feeds the client rules. container.backup_memory 512 MiB, container.small_cpus 0.5.
+  pitr-volume:
+    image: recipe-pgtools:${RECIPE_VERSION:?}
+    entrypoint: ["/usr/local/bin/pitr-volume"]
+    profiles:
+      - restore
+    restart: "no"
+    network_mode: none
+    environment:
+      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}
+    volumes:
+      - walarchive:/wal:ro
+    tmpfs:
+      - /run/pgpass
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+
 # The network backend holds the seven services. It has no route to a host outside Compose.
 # The network edge holds proxy and the published ports. The network egress holds app only.
 # A change of the subnet edits COMPOSE_SUBNET, COMPOSE_IP_RANGE, and PROXY_ADDRESS together.

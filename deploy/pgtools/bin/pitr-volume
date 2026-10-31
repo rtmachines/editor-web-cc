@@ -1,0 +1,722 @@
+#!/usr/bin/env bash
+# pitr-volume: fill a new, empty volume from a base backup and the WAL archive (ADR-0106 (e), (f), design D3).
+# The operator runs it in a temporary container of the image recipe-pgtools while db runs on the old volume:
+#   docker compose run --rm --no-deps -T -v <new volume>:/var/lib/postgresql/data pitr-volume [--target-time <time>] [--drill]
+#
+# Steps (the numbers are the steps of ADR-0106 (f)). This file holds steps 1 to 12 (the checks 1 to 6 of step 9).
+#   1. Refuse an argument outside the grammar, a PITR_EXPECTED_LSN outside its grammar, a run as a user
+#      other than uid 999 with the name postgres (ADR-0105 (r)), and a target that is not empty.
+#      The arguments are none, --target-time <time>, and --drill. The option --drill needs --target-time.
+#      Also refuse a PITR_MARKER_SEQ or PITR_MARKER_HASH outside its grammar of ADR-0077 (b), one of the two
+#      without the other, a COMPOSE_SUBNET that is no IPv4 subnet, and a missing restore-roles.* file.
+#   2. Check the marker file of /wal. Open /wal/.lock read-only on descriptor 9 and take flock -n.
+#      The lock stays to the exit, so basebackup-once cannot delete a file.
+#   3. Read /wal/.system-identifier with the checks of lib/wal-identity.sh. A missing or malformed file
+#      stops the run.
+#   4. Select the base backup of ADR-0106 (c) and check the free space of the target disk. The free space
+#      after the copy must stay at or above disk.warn_percent. This step copies nothing.
+#   5. Copy the base backup into the target with cp -a, set the mode 0700, and check the copy with
+#      recovery_verify_copy. That function deletes backup_end_time from the copy.
+#   6. The system identifier of the copy in pg_controldata must equal /wal/.system-identifier.
+#   7. Keep the SHA-256 values of the four configuration files of the copy in shell variables
+#      (ADR-0105 (q)). The script writes no baseline file. The INFO line "configuration files of the
+#      copy hashed" shows the values to the test script.
+#   8. Write recovery.signal and start the server with listen_addresses='' on a private socket in a
+#      mktemp -d directory under the tmpfs. pg_ctl -o passes every setting, so the script writes no
+#      configuration file. The start waits pitr_volume.start_timeout. A failed start prints the tail of the
+#      server log. Descriptor 9 stays open in this script, so this script keeps the lock of the WAL archive.
+#   9. Check the promoted server (ADR-0106 (g)). Check 1: the server is out of recovery, and its timeline is
+#      above the timeline of the base backup. Check 2, without --target-time only: the switch LSN of the
+#      history file lies in or after the newest segment of the WAL archive on the base timeline, and at or
+#      after PITR_EXPECTED_LSN when the operator gives it. A .partial file counts as its segment.
+#      Check 3: the audit chain check of data-model.md 4.9 gives no break, and the head matches the last row.
+#      Check 4, with PITR_MARKER_SEQ and PITR_MARKER_HASH only: exactly one audit_log row has these values.
+#      Check 5: the four configuration files keep the SHA-256 values of step 7, and no recovery.signal or
+#      standby.signal stays. Check 6: the role values equal restore-roles.expected (ADR-0103 (m)).
+#  10. Read the values of ADR-0106 (d) with one psql query each: chain_seq, occurred_at, and action of the newest
+#      audit entry, and heartbeat.last_at of app_setting. A text value passes the function clean_json_text.
+#  11. Stop the server with --mode=fast within pitr_volume.stop_timeout. pg_controldata must show the state
+#      shut down. With --drill, write the empty file pitr-drill at the top of the target. Then run sync.
+#  12. Write the last line "pitr volume completed". It holds the name of the base backup, the system
+#      identifier and the timeline of the stopped cluster, the four values of step 10, and the field drill.
+# A failed step writes one ERROR line and ends the script with a code other than 0.
+# The operator then deletes the new volume. Every output line is one JSON object.
+#
+# Environment. The defaults are the production values. The test script sets the others.
+#   PGDATA               the target data directory, default /var/lib/postgresql/data (the image sets it)
+#   WAL_DIR              the WAL archive volume, default /wal, a plain absolute path
+#   WALARCHIVE_LIB_DIR   the directory of restore-steps.sh, recovery-steps.sh, wal-identity.sh, cluster-access.sh, and
+#                        restore-roles.sql and restore-roles.expected, default /etc/pgtools
+#   COMPOSE_SUBNET       the Compose subnet of the client rules, mandatory, for example 172.28.0.0/16
+#   BACKUP_PGPASS_DIR    the tmpfs for the work directory of the server, default /run/pgpass
+#   PITR_EXPECTED_LSN    optional, the position of the check in step 2 of ADR-0106 (g), upper-case hex
+#   PITR_MARKER_SEQ      optional, the chain_seq of the marker row, ^[1-9][0-9]{0,18}$ (ADR-0077 (b))
+#   PITR_MARKER_HASH     optional, the entry_hash of the marker row, ^[0-9a-f]{64}$. It comes with the
+#                        sequence or not at all.
+set -euo pipefail
+umask 077
+
+export LC_ALL=C
+# No variable of libpq may point a tool to another cluster.
+unset PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE \
+  PGDATABASE PGOPTIONS PGSSLMODE PGSSLROOTCERT PGSSLCERT PGSSLKEY PGCONNECT_TIMEOUT
+
+JOB=pitr-volume
+MARKER_NAME=.walarchive-marker
+LOCK_NAME=.lock
+RUN_UID=999
+RUN_USER=postgres
+USAGE="usage: pitr-volume [--target-time <time>] [--drill]"
+# The grammar of ADR-0106 (a). The date check of check_target_time follows it.
+TIME_GRAMMAR='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+TIME_FORMAT='%Y-%m-%dT%H:%M:%SZ'
+# An LSN is two hex numbers of at most 8 digits, as pg_lsn prints it (ADR-0106 (g) step 2).
+LSN_GRAMMAR='^[0-9A-F]{1,8}/[0-9A-F]{1,8}$'
+WAL_DIR_RE='^(/[A-Za-z0-9_.-]+)+$'
+# The grammars of the marker identity (ADR-0077 (b)). pitr-check uses the same two.
+SEQ_RE='^[1-9][0-9]{0,18}$'
+HASH_RE='^[0-9a-f]{64}$'
+BASE_RE='^base_[0-9]{8}_[0-9]{6}$'
+# A segment file and its partial file (ADR-0099 (d)). It is the grammar of wal-identity.sh.
+SEGMENT_RE='^[0-9A-F]{24}(\.partial)?$'
+# The line START TIME of backup_label. Only the zone UTC counts (ADR-0106 (c)).
+# The line START WAL LOCATION of backup_label. The first 8 digits of the file name are the timeline.
+LOCATION_RE='^START WAL LOCATION: [0-9A-F]+/[0-9A-F]+ \(file ([0-9A-F]{8})[0-9A-F]{16}\)$'
+# A timeline as the file names of PostgreSQL write it. The last line of a history file is
+# "<parent timeline><TAB><switch LSN><TAB><reason>". The reason can hold spaces.
+TIMELINE_RE='^[0-9A-F]{8}$'
+HISTORY_LINE_RE='^[0-9]+[[:space:]]+([0-9A-F]{1,8}/[0-9A-F]{1,8})([[:space:]].*)?$'
+# The fixed text of check 2 of ADR-0106 (g). The check of the segment and the check of PITR_EXPECTED_LSN share it.
+RECOVERY_END_ERROR="the recovery ended before the end of the WAL archive"
+START_TIME_RE='^START TIME: ([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2}) UTC$'
+END_TIME_NAME=backup_end_time
+LABEL_NAME=backup_label
+DIGITS_RE='^[0-9]+$'
+CLEAN_LENGTH=160 # restore_test.detail_length of reliability.md section 7.11
+DETAIL_LENGTH=160 # restore_test.detail_length of reliability.md section 7.11, read by the library clean
+DISK_WARN_PERCENT=15 # disk.warn_percent in reliability.md section 7.11
+# The configuration files of ADR-0105 (q). A copy of a base backup holds all four.
+CONFIG_FILES=(postgresql.conf postgresql.auto.conf pg_hba.conf pg_ident.conf)
+# The files that start a recovery or a standby. A promoted server deletes them (ADR-0106 (g) step 5).
+SIGNAL_FILES=(recovery.signal standby.signal)
+ROLES_SQL=restore-roles.sql
+ROLES_EXPECTED=restore-roles.expected
+# The settings of the temporary server (reliability.md section 7.11).
+START_TIMEOUT_SECONDS=1800 # pitr_volume.start_timeout of reliability.md section 7.11: the start with its recovery
+STOP_TIMEOUT_SECONDS=600 # pitr_volume.stop_timeout of reliability.md section 7.11: the stop of the cleanup
+READY_POLL_SECONDS=1 # pitr_check.ready_poll of reliability.md section 7.11
+LOG_TAIL_LINES=20 # pitr_check.log_tail of reliability.md section 7.11
+SCRATCH_PORT=5433 # scratch.port of reliability.md section 7.11
+SCRATCH_SUPERUSER=postgres
+DB_NAME=recipe
+DRILL_NAME=pitr-drill # the file of ADR-0106 (f) step 11. The switch refuses a volume that holds it.
+TIMELINE_MISMATCH_ERROR="the timeline of the stopped cluster differs from the recovered cluster"
+
+TARGET_DIR=${PGDATA:-/var/lib/postgresql/data}
+WAL_DIR=${WAL_DIR:-/wal}
+PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
+LIB_DIR=${WALARCHIVE_LIB_DIR:-/etc/pgtools}
+PITR_EXPECTED_LSN=${PITR_EXPECTED_LSN:-}
+PITR_MARKER_SEQ=${PITR_MARKER_SEQ:-}
+PITR_MARKER_HASH=${PITR_MARKER_HASH:-}
+COMPOSE_SUBNET=${COMPOSE_SUBNET-}
+# restore-steps.sh reads the roles files from CODE_DIR. They sit in the library directory.
+CODE_DIR=$LIB_DIR
+
+# The role comparison of restore-volume (ADR-0103 (m), design D3 of the change pitr-recovery).
+# This load comes before the definitions below on purpose. The file restore-steps.sh also defines log,
+# fail, clean, and scratch_psql. The definitions of this script replace log, fail, and scratch_psql.
+# The script keeps its own clean_json_text, because the empty check of read_text_value needs deletion.
+# The functions of the library keep the library clean, which replaces each character with a question mark.
+# The load failure uses echo, because fail does not exist yet.
+# shellcheck source=../lib/restore-steps.sh
+source "$LIB_DIR/restore-steps.sh" || { echo "pitr-volume: cannot load restore-steps.sh" >&2; exit 1; }
+
+error_logged=0
+target_time=""
+selected_base=""
+base_tli=""
+new_tli=""
+have_target_time=0
+drill=0
+work_dir=""
+server_may_run=0
+# The SHA-256 values of the configuration files of the copy. Step 7 sets them. They stay in the memory of
+# the script, because a process of uid 999 can write below /run/pgpass during the recovery (ADR-0105 (q)).
+declare -A config_sha256_kept=()
+
+# log <level> <message> [<extra JSON fields>]. Every value is a fixed text or a checked value.
+log() {
+  printf '{"timestamp":"%s","level":"%s","job":"%s","message":"%s"%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
+}
+
+# fail <message> [<extra JSON fields>]: write the one ERROR line and stop.
+fail() {
+  error_logged=1
+  log ERROR "$@"
+  exit 1
+}
+
+# clean_json_text <text>: keep the characters that need no JSON escape, at most CLEAN_LENGTH of them.
+# The colon stays, because a time value holds it.
+clean_json_text() {
+  printf '%s' "$1" | tr -cd 'A-Za-z0-9_.: -' | cut -c "1-$CLEAN_LENGTH"
+}
+
+# remove_work_dir: delete the work directory of this run. The path must be a run.* directory below
+# the private directory, and it must not be a symbolic link.
+remove_work_dir() {
+  case $work_dir in
+    "$PGPASS_DIR"/run.*) ;;
+    *) return 1 ;;
+  esac
+  if [ -d "$work_dir" ] && [ ! -L "$work_dir" ]; then
+    rm -r -- "${work_dir:?}"
+  fi
+}
+
+# cleanup runs on each exit. It stops the server only when this run started it, and it deletes the
+# work directory. It never deletes a file of the target. The stop is immediate, because the operator
+# deletes the new volume after a failed run. A fault of the cleanup is a WARN line, so the ERROR line
+# of the failed step stays the only one.
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ "$server_may_run" -eq 1 ] && [ -f "$TARGET_DIR/postmaster.pid" ]; then
+    if ! pg_ctl --pgdata="$TARGET_DIR" --mode=immediate --wait --timeout="$STOP_TIMEOUT_SECONDS" stop       >/dev/null 2>&1 9>&-; then
+      log WARN "cannot stop the temporary server of this run"
+      status=1
+    fi
+  fi
+  if [ -n "$work_dir" ] && ! remove_work_dir; then
+    log WARN "cannot delete the work directory of this run"
+    status=1
+  fi
+  if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
+    log ERROR "pitr volume failed unexpectedly" "\"exit_code\":$status"
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+# A signal must run the trap, so the exit code is not lost.
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
+
+# shellcheck source=../lib/recovery-steps.sh
+source "$LIB_DIR/recovery-steps.sh" || fail "cannot load recovery-steps.sh"
+# shellcheck source=../lib/wal-identity.sh
+source "$LIB_DIR/wal-identity.sh" || fail "cannot load wal-identity.sh"
+# shellcheck source=../../db/cluster-access.sh
+source "$LIB_DIR/cluster-access.sh" || fail "cannot load cluster-access.sh"
+
+# parse_arguments: step 1. Each option can appear once. A value of --target-time is checked later.
+parse_arguments() {
+  while [ "$#" -gt 0 ]; do
+    case $1 in
+      --target-time)
+        [ "$#" -ge 2 ] && [ "$have_target_time" -eq 0 ] || fail "$USAGE"
+        target_time=$2
+        have_target_time=1
+        shift 2
+        ;;
+      --drill)
+        [ "$drill" -eq 0 ] || fail "$USAGE"
+        drill=1
+        shift
+        ;;
+      *) fail "$USAGE" ;;
+    esac
+  done
+  if [ "$drill" -eq 1 ] && [ "$have_target_time" -eq 0 ]; then
+    fail "--drill needs --target-time"
+  fi
+}
+
+# time_epoch <text>: print the epoch seconds of a UTC time of the grammar of ADR-0106 (a). The text
+# must be a real date, because date must print the same text back. So 2026-02-30 and 24:00:00 fail.
+time_epoch() {
+  local text=$1 round
+  [[ $text =~ $TIME_GRAMMAR ]] || return 1
+  round=$(date -u -d "$text" "+$TIME_FORMAT" 2>/dev/null) && [ "$round" = "$text" ] || return 1
+  date -u -d "$text" +%s
+}
+
+# check_target_time: step 1. The text has the grammar of ADR-0106 (a) and names a real date.
+check_target_time() {
+  [ "$have_target_time" -eq 1 ] || return 0
+  [[ $target_time =~ $TIME_GRAMMAR ]] || fail "the target time is outside the grammar of ADR-0106 (a)"
+  time_epoch "$target_time" >/dev/null || fail "the target time is not a real date"
+}
+
+# check_expected_lsn: step 1. An empty value means that the operator gave no position.
+check_expected_lsn() {
+  [ -z "$PITR_EXPECTED_LSN" ] || [[ $PITR_EXPECTED_LSN =~ $LSN_GRAMMAR ]] \
+    || fail "PITR_EXPECTED_LSN is outside the grammar of an LSN"
+}
+
+# check_marker_values: step 1. The marker identity comes as a pair or not at all. Each value has its
+# grammar of ADR-0077 (b). A value never enters a log line.
+check_marker_values() {
+  [ -n "$PITR_MARKER_SEQ$PITR_MARKER_HASH" ] || return 0
+  [ -n "$PITR_MARKER_SEQ" ] && [ -n "$PITR_MARKER_HASH" ] \
+    || fail "PITR_MARKER_SEQ and PITR_MARKER_HASH must come together"
+  [[ $PITR_MARKER_SEQ =~ $SEQ_RE ]] || fail "PITR_MARKER_SEQ is outside the grammar of ADR-0077 (b)"
+  [[ $PITR_MARKER_HASH =~ $HASH_RE ]] || fail "PITR_MARKER_HASH is outside the grammar of ADR-0077 (b)"
+}
+
+# check_role_inputs: step 1. COMPOSE_SUBNET fills the placeholder of restore-roles.expected (ADR-0103 (m)).
+# The two files of the role check must exist before the copy starts.
+check_role_inputs() {
+  check_compose_subnet "$COMPOSE_SUBNET" || fail "COMPOSE_SUBNET is not an IPv4 subnet with a prefix length"
+  [ -f "$LIB_DIR/$ROLES_SQL" ] && [ -f "$LIB_DIR/$ROLES_EXPECTED" ] \
+    || fail "restore-roles.sql or restore-roles.expected is missing"
+}
+
+# check_run_user: step 1. The run needs uid 999 and the user name postgres (ADR-0105 (r)).
+# The files of the target must belong to the postgres user of the database image.
+check_run_user() {
+  local uid user
+  uid=$(id -u) && user=$(id -un) && [[ $uid =~ ^[0-9]+$ ]] || fail "cannot read the user id of this run"
+  [ "$uid" = "$RUN_UID" ] || fail "pitr-volume must run as uid $RUN_UID" "\"uid\":$uid"
+  [ "$user" = "$RUN_USER" ] || fail "pitr-volume must run as the user $RUN_USER" "\"user\":\"$(clean_json_text "$user")\""
+}
+
+# check_wal_dir: step 1. WAL_DIR is a plain absolute path.
+check_wal_dir() {
+  [[ $WAL_DIR =~ $WAL_DIR_RE ]] || fail "WAL_DIR is not a plain absolute path"
+  case $WAL_DIR in
+    */. | */./* | */.. | */../*) fail "WAL_DIR is not a plain absolute path" ;;
+  esac
+}
+
+# check_target_empty: step 1. A live data directory is never empty, so the script cannot write over a cluster.
+check_target_empty() {
+  local first
+  [ -d "$TARGET_DIR" ] || fail "the target directory is missing"
+  first=$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -print -quit) \
+    || fail "cannot read the target directory"
+  [ -z "$first" ] || fail "the target directory is not empty"
+}
+
+# check_marker_and_lock: step 2. The marker file proves the WAL archive disk. The lock file must exist.
+# The script opens it for reading only, so it cannot create or change it. Descriptor 9 holds the lock
+# to the exit. recovery_start_server closes descriptor 9 for the server, so the server never holds it.
+check_marker_and_lock() {
+  local lock=$WAL_DIR/$LOCK_NAME
+  if [ ! -f "$WAL_DIR/$MARKER_NAME" ] || [ -L "$WAL_DIR/$MARKER_NAME" ]; then
+    fail "the marker file of the WAL archive disk is missing"
+  fi
+  if [ ! -f "$lock" ] || [ -L "$lock" ]; then
+    fail "the lock file of the WAL archive is missing"
+  fi
+  exec 9<"$lock" || fail "cannot open the lock file of the WAL archive"
+  flock -n 9 || fail "another run holds the lock of the WAL archive"
+}
+
+# end_time_epoch <base backup directory>: print the epoch seconds of the file backup_end_time. The file
+# must be a regular file with one line of the grammar of ADR-0106 (a) and one newline. A malformed
+# file gives no time, and the start time never replaces it (ADR-0106 (c)).
+end_time_epoch() {
+  local file=$1/$END_TIME_NAME raw line
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  raw=$(head -c 64 -- "$file"; printf x) || return 1
+  raw=${raw%x}
+  line=${raw%$'\n'}
+  [ "$raw" = "$line"$'\n' ] || return 1
+  time_epoch "$line"
+}
+
+# label_start_epoch <base backup directory>: print the epoch seconds of the one line START TIME of
+# backup_label. A zone other than UTC and a second line START TIME give no time.
+label_start_epoch() {
+  local file=$1/$LABEL_NAME count line
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  count=$(grep -c '^START TIME: ' -- "$file" || true)
+  [ "$count" = 1 ] || return 1
+  line=$(grep '^START TIME: ' -- "$file") || return 1
+  [[ $line =~ $START_TIME_RE ]] || return 1
+  time_epoch "${BASH_REMATCH[1]}T${BASH_REMATCH[2]}Z"
+}
+
+# base_time_epoch <base backup directory>: the time of a base backup. A base backup without the file
+# backup_end_time is older than ADR-0106. Its START TIME counts instead.
+base_time_epoch() {
+  local dir=$1
+  if [ -e "$dir/$END_TIME_NAME" ] || [ -L "$dir/$END_TIME_NAME" ]; then
+    end_time_epoch "$dir"
+  else
+    label_start_epoch "$dir"
+  fi
+}
+
+# select_base_backup: step 4. A base backup is a real directory of the grammar of ADR-0077 (d).
+# A link, a file, a .tmp-base_* directory, and any other name never win. The names sort by time,
+# so the last winner in byte order is the newest. Without a target time, every such directory wins.
+# With a target time, only a base backup whose time is known and at or before the target wins.
+select_base_backup() {
+  local path name target_epoch="" epoch
+  if [ "$have_target_time" -eq 1 ]; then
+    target_epoch=$(time_epoch "$target_time") || fail "the target time is not a real date"
+  fi
+  for path in "$WAL_DIR"/base/base_*; do
+    name=${path##*/}
+    [[ $name =~ $BASE_RE ]] && [ -d "$path" ] && [ ! -L "$path" ] || continue
+    if [ -n "$target_epoch" ]; then
+      epoch=$(base_time_epoch "$path") || continue
+      [ "$epoch" -le "$target_epoch" ] || continue
+    fi
+    selected_base=$name
+  done
+  [ -n "$selected_base" ] || fail "no base backup in the WAL archive fits the selection rule"
+}
+
+# wal_segment_bytes: the size of the segment files and the partial files at the top of the WAL archive.
+wal_segment_bytes() {
+  local path size total=0
+  for path in "$WAL_DIR"/*; do
+    [[ ${path##*/} =~ $SEGMENT_RE ]] && [ -f "$path" ] && [ ! -L "$path" ] || continue
+    size=$(stat -c %s -- "$path") && [[ $size =~ $DIGITS_RE ]] || fail "cannot read the size of a WAL segment"
+    total=$((total + size))
+  done
+  printf '%s\n' "$total"
+}
+
+# check_free_space <base backup bytes> <segment bytes>: step 4. After the copy of the base backup and
+# of the segments, the target disk keeps at least DISK_WARN_PERCENT of its size free. The test
+# multiplies and does not divide, so no rounding moves the limit.
+check_free_space() {
+  local need=$(($1 + $2)) line free disk rest
+  line=$(df --output=avail,size -B1 -- "$TARGET_DIR" | tail -n 1) || fail "cannot read the free space of the target disk"
+  read -r free disk rest <<<"$line"
+  [[ $free =~ $DIGITS_RE && $disk =~ $DIGITS_RE && -z $rest && $((10#$disk)) -gt 0 ]] \
+    || fail "cannot read the free space of the target disk"
+  free=$((10#$free))
+  disk=$((10#$disk))
+  if [ "$free" -lt "$need" ] || [ $(((free - need) * 100)) -lt $((DISK_WARN_PERCENT * disk)) ]; then
+    fail "the free space of the target disk falls below disk.warn_percent after the copy" \
+      "\"free_bytes\":$free,\"needed_bytes\":$need,\"disk_bytes\":$disk"
+  fi
+}
+
+# copy_base_backup: step 5, first part. The contents of the base backup go into the empty target.
+# A failure leaves a part of the copy. The operator deletes the new volume.
+copy_base_backup() {
+  cp -a -- "$WAL_DIR/base/$selected_base/." "$TARGET_DIR/" || fail "cannot copy the base backup"
+  chmod 0700 -- "$TARGET_DIR" || fail "cannot set the mode of the target directory"
+}
+
+# check_copy: step 5, second part. The check ignores backup_end_time and then deletes that file.
+# The check of the tool writes to standard error, so it adds no second line to the output.
+check_copy() {
+  recovery_verify_copy "$TARGET_DIR" || fail "the check of the copy of the base backup failed"
+}
+
+# check_copy_identifier: step 6. The copy and the WAL archive name the same system.
+# LC_ALL=C makes the field names of pg_controldata English.
+check_copy_identifier() {
+  local output copy_id
+  output=$(pg_controldata --pgdata="$TARGET_DIR") || fail "cannot read the system identifier of the copy"
+  copy_id=$(printf '%s
+' "$output" | sed -n 's/^Database system identifier: *//p' | sed -n '1p')
+  [[ $copy_id =~ $IDENTIFIER_GRAMMAR ]] || fail "cannot read the system identifier of the copy"
+  [ "$copy_id" = "$guard_file_id" ]     || fail "the system identifier of the copy differs from the WAL archive"
+}
+
+# keep_config_hashes: step 7. The SHA-256 value of each configuration file goes into a shell variable.
+# A file that is missing or is not a regular file stops the run.
+keep_config_hashes() {
+  local file line
+  for file in "${CONFIG_FILES[@]}"; do
+    [ -f "$TARGET_DIR/$file" ] && [ ! -L "$TARGET_DIR/$file" ]       || fail "a configuration file of the copy is missing" "\"file\":\"$file\""
+    line=$(sha256sum -- "$TARGET_DIR/$file")       || fail "cannot hash a configuration file of the copy" "\"file\":\"$file\""
+    config_sha256_kept[$file]=${line%% *}
+  done
+}
+
+# log_config_hashes: the INFO line that shows the SHA-256 values. A value is 64 hex digits.
+log_config_hashes() {
+  local file key fields=""
+  for file in "${CONFIG_FILES[@]}"; do
+    key=${file//./_}
+    fields+="${fields:+,}\"$key\":\"${config_sha256_kept[$file]}\""
+  done
+  log INFO "configuration files of the copy hashed" "$fields"
+}
+
+# start_recovery_server: step 8. The work directory is private (mode 0700) and holds the socket and
+# the server log. A new name in the target would change the copy. Every setting goes through pg_ctl -o.
+# The target settings of ADR-0106 (a) come only with --target-time. The deadline starts here and
+# covers the start and the connection wait. Descriptor 9 closes only for pg_ctl, not for this script.
+# The server checks a -c option before it reads its configuration file. Then it does not know the zone
+# abbreviation Z and refuses the value. So the script replaces the Z of the grammar with the offset +00.
+start_recovery_server() {
+  local options
+  [ -d "$PGPASS_DIR" ] || fail "the directory of the secret files is missing"
+  work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX") || fail "cannot create the work directory"
+  : >"$TARGET_DIR/recovery.signal" || fail "cannot write recovery.signal"
+  options=$(recovery_start_options "$WAL_DIR" "$work_dir") || fail "cannot build the options of the server"
+  if [ "$have_target_time" -eq 1 ]; then
+    options+=" -c recovery_target_time=${target_time%Z}+00 -c recovery_target_inclusive=off"
+    options+=" -c recovery_target_action=promote"
+  fi
+  server_may_run=1
+  recovery_start_server "$TARGET_DIR" "$work_dir/server.log" "$work_dir" "$options"     "$((SECONDS + START_TIMEOUT_SECONDS))"     || fail "the temporary server did not finish the recovery"
+}
+
+# scratch_psql_run <psql argument>...: psql on the recovered cluster, over its private socket.
+scratch_psql_run() {
+  psql --no-psqlrc --quiet --no-align --tuples-only --no-password -v ON_ERROR_STOP=1 \
+    --host="$work_dir" --port="$SCRATCH_PORT" --username="$SCRATCH_SUPERUSER" \
+    --dbname="$DB_NAME" "$@"
+}
+
+# scratch_psql <sql>: one statement on the recovered cluster. It prints one value.
+# recovery-steps.sh needs this name.
+scratch_psql() {
+  scratch_psql_run --command="$1"
+}
+
+# base_timeline: print the timeline of the selected base backup, 8 upper-case hex digits. The line
+# START WAL LOCATION of backup_label names the first segment, and its first 8 digits are the timeline.
+# The label of the base backup in /wal is the source, because the recovery renames the label of the target.
+base_timeline() {
+  local file=$WAL_DIR/base/$selected_base/$LABEL_NAME line
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  line=$(grep -m 1 '^START WAL LOCATION: ' -- "$file") || return 1
+  [[ $line =~ $LOCATION_RE ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+# check_promoted: ADR-0106 (g) check 1. The server is out of recovery, and its timeline is above the
+# timeline of the base backup. The timelines are 8 upper-case hex digits, so a string compare orders them.
+# The function sets base_tli and new_tli for check 2.
+check_promoted() {
+  local state
+  base_tli=$(base_timeline) || fail "cannot read the timeline of the base backup"
+  state=$(scratch_psql 'SELECT NOT pg_catalog.pg_is_in_recovery()') \
+    || fail "cannot read the recovery state of the recovered cluster"
+  [ "$state" = "t" ] || fail "the recovered cluster is still in recovery"
+  new_tli=$(scratch_psql 'SELECT pg_catalog.substr(pg_catalog.pg_walfile_name(pg_catalog.pg_current_wal_lsn()), 1, 8)') \
+    || fail "cannot read the timeline of the recovered cluster"
+  [[ $new_tli =~ $TIMELINE_RE ]] || fail "cannot read the timeline of the recovered cluster"
+  [[ $new_tli > $base_tli ]] \
+    || fail "the timeline of the recovered cluster is not above the timeline of the base backup" \
+      "\"timeline\":\"$new_tli\",\"base_timeline\":\"$base_tli\""
+}
+
+# newest_base_segment <timeline>: print the 16 hex digits after the timeline of the newest segment of /wal
+# on that timeline. A .partial file counts as its segment. The digits are upper-case and of fixed width,
+# so a string compare orders them. No segment gives no output and the status 1.
+newest_base_segment() {
+  local path name newest=""
+  for path in "$WAL_DIR"/"$1"*; do
+    name=${path##*/}
+    [[ $name =~ $SEGMENT_RE ]] && [ -f "$path" ] && [ ! -L "$path" ] || continue
+    name=${name:8:16}
+    if [[ -z $newest || $name > $newest ]]; then
+      newest=$name
+    fi
+  done
+  [ -n "$newest" ] || return 1
+  printf '%s\n' "$newest"
+}
+
+# switch_lsn: print the switch LSN of the new timeline. It is field 2 of the last line of the history
+# file in the target. A missing file, a link, or a line outside the grammar gives the status 1.
+switch_lsn() {
+  local file=$TARGET_DIR/pg_wal/$new_tli.history line
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  line=$(tail -n 1 -- "$file") || return 1
+  [[ $line =~ $HISTORY_LINE_RE ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+# check_recovery_end: ADR-0106 (g) check 2, only without a target time. The recovery ends in the newest
+# segment of /wal on the base timeline or later. Else it stopped at a gap. PITR_EXPECTED_LSN also bounds
+# the end. PostgreSQL compares the positions, because an LSN is a 64-bit number.
+check_recovery_end() {
+  local lsn segment newest ok
+  lsn=$(switch_lsn) || fail "the history file of the new timeline is missing or malformed"
+  newest=$(newest_base_segment "$base_tli") || fail "the WAL archive holds no segment of the base timeline"
+  segment=$(scratch_psql "SELECT pg_catalog.pg_walfile_name('$lsn'::pg_catalog.pg_lsn)") \
+    || fail "cannot read the segment of the end of the recovery"
+  [[ $segment =~ ^[0-9A-F]{24}$ ]] || fail "cannot read the segment of the end of the recovery"
+  [[ ${segment:8:16} > $newest || ${segment:8:16} == "$newest" ]] || fail "$RECOVERY_END_ERROR"
+  [ -n "$PITR_EXPECTED_LSN" ] || return 0
+  ok=$(scratch_psql "SELECT '$lsn'::pg_catalog.pg_lsn >= '$PITR_EXPECTED_LSN'::pg_catalog.pg_lsn") \
+    || fail "cannot compare the end of the recovery with PITR_EXPECTED_LSN"
+  [ "$ok" = "t" ] || fail "$RECOVERY_END_ERROR"
+}
+
+# check_config_files: ADR-0106 (g) check 5, first part. Each configuration file of the copy keeps the
+# SHA-256 value of step 7. A server must not write a recovery setting into a file of the copy.
+check_config_files() {
+  local file line
+  for file in "${CONFIG_FILES[@]}"; do
+    [ -f "$TARGET_DIR/$file" ] && [ ! -L "$TARGET_DIR/$file" ] && line=$(sha256sum -- "$TARGET_DIR/$file") \
+      && [ "${line%% *}" = "${config_sha256_kept[$file]}" ] \
+      || fail "a configuration file of the recovered cluster changed" "\"file\":\"$file\""
+  done
+}
+
+# check_signal_files: ADR-0106 (g) check 5, second part. The promotion deletes recovery.signal.
+# A signal file that stays would start a recovery or a standby in the next start of the cluster.
+check_signal_files() {
+  local file
+  for file in "${SIGNAL_FILES[@]}"; do
+    if [ -e "$TARGET_DIR/$file" ] || [ -L "$TARGET_DIR/$file" ]; then
+      fail "a signal file stays in the recovered cluster" "\"file\":\"$file\""
+    fi
+  done
+}
+
+# roles_query <file>: ADR-0106 (g) check 6. The file restore-roles.sql runs on the recovered cluster.
+roles_query() {
+  scratch_psql_run --file="$1"
+}
+
+# The queries of step 10. Each query gives one value of ADR-0106 (d). The server has no other client,
+# so the three queries of the newest audit entry see the same row.
+SQL_LAST_SEQ='SELECT chain_seq FROM public.audit_log ORDER BY chain_seq DESC LIMIT 1'
+SQL_LAST_AT='SELECT pg_catalog.to_char(occurred_at AT TIME ZONE '\''UTC'\'', '\''YYYY-MM-DD"T"HH24:MI:SS.US"Z"'\'') FROM public.audit_log ORDER BY chain_seq DESC LIMIT 1'
+SQL_LAST_ACTION='SELECT action FROM public.audit_log ORDER BY chain_seq DESC LIMIT 1'
+SQL_HEARTBEAT='SELECT value FROM public.app_setting WHERE key = '\''heartbeat.last_at'\'''
+
+last_chain_seq=""
+last_occurred_at=""
+last_action=""
+heartbeat_last_at=""
+system_identifier=""
+stopped_timeline=""
+
+# read_text_value <variable> <description> <sql>: step 10. The value passes clean_json_text and must not be empty.
+read_text_value() {
+  local raw
+  raw=$(scratch_psql "$3") || fail "cannot read $2"
+  printf -v "$1" '%s' "$(clean_json_text "$raw")"
+  [ -n "${!1}" ] || fail "cannot read $2"
+}
+
+# read_values: step 10. The chain_seq has the grammar of ADR-0077 (b), so it needs no clean_json_text.
+read_values() {
+  local raw
+  raw=$(scratch_psql "$SQL_LAST_SEQ") || fail "cannot read chain_seq of the newest audit entry"
+  [ -n "$raw" ] || fail "cannot read chain_seq of the newest audit entry"
+  [[ $raw =~ $SEQ_RE ]] || fail "chain_seq of the newest audit entry is outside its grammar"
+  last_chain_seq=$raw
+  read_text_value last_occurred_at "occurred_at of the newest audit entry" "$SQL_LAST_AT"
+  read_text_value last_action "action of the newest audit entry" "$SQL_LAST_ACTION"
+  read_text_value heartbeat_last_at "heartbeat.last_at of the recovered cluster" "$SQL_HEARTBEAT"
+}
+
+# stop_server: step 11, first part. The fast stop waits up to pitr_volume.stop_timeout. A failed stop leaves
+# server_may_run at 1, so the cleanup stops the server with --mode=immediate. Descriptor 9 closes for pg_ctl.
+stop_server() {
+  pg_ctl --pgdata="$TARGET_DIR" --mode=fast --wait --timeout="$STOP_TIMEOUT_SECONDS" stop >/dev/null 9>&- \
+    || fail "the temporary server did not stop"
+  server_may_run=0
+}
+
+# check_shutdown: step 11, second part. pg_controldata must show the state shut down. The script keeps the
+# system identifier and the timeline of the last checkpoint for the last line. That timeline must equal the
+# timeline of check 1. LC_ALL=C makes the field names English.
+check_shutdown() {
+  local output state checkpoint_timeline
+  output=$(pg_controldata --pgdata="$TARGET_DIR") || fail "pg_controldata failed"
+  state=$(printf '%s\n' "$output" | sed -n 's/^Database cluster state: *//p' | sed -n '1p')
+  system_identifier=$(printf '%s\n' "$output" | sed -n 's/^Database system identifier: *//p' | sed -n '1p')
+  checkpoint_timeline=$(printf '%s\n' "$output" | sed -n "s/^Latest checkpoint's TimeLineID: *//p" | sed -n '1p')
+  [ "$state" = "shut down" ] || fail "the cluster did not shut down cleanly" "\"state\":\"$(clean_json_text "$state")\""
+  [[ $system_identifier =~ $IDENTIFIER_GRAMMAR ]] || fail "pg_controldata gave no system identifier"
+  [[ $checkpoint_timeline =~ $DIGITS_RE ]] || fail "pg_controldata gave no timeline"
+  [ "$((10#$checkpoint_timeline))" -eq "$((16#$new_tli))" ] \
+    || fail "$TIMELINE_MISMATCH_ERROR" "\"timeline\":\"$new_tli\""
+  stopped_timeline=$((10#$checkpoint_timeline))
+}
+
+# mark_drill: step 11, third part. With --drill the empty file pitr-drill marks the volume. The switch refuses it.
+mark_drill() {
+  [ "$drill" -eq 1 ] || return 0
+  : >"$TARGET_DIR/$DRILL_NAME" || fail "cannot write the file pitr-drill"
+}
+
+# flush_disks: step 11, last part. The data of the new volume reaches the disk before the last line.
+flush_disks() {
+  sync || fail "sync failed"
+}
+
+# log_completed: step 12. The last line. Every text value is a checked name or passed clean_json_text.
+log_completed() {
+  local drill_text=false
+  [ "$drill" -eq 0 ] || drill_text=true
+  log INFO "pitr volume completed" "\"base_backup\":\"$selected_base\",\"system_identifier\":\"$system_identifier\",\"timeline\":$stopped_timeline,\"chain_seq\":$last_chain_seq,\"occurred_at\":\"$last_occurred_at\",\"action\":\"$last_action\",\"heartbeat_last_at\":\"$heartbeat_last_at\",\"drill\":$drill_text"
+}
+
+# --- run ----------------------------------------------------------------------------------
+
+# Step 1: the inputs and the target. A refused run starts no tool and writes no file.
+parse_arguments "$@"
+check_target_time
+check_expected_lsn
+check_marker_values
+check_role_inputs
+check_run_user
+check_wal_dir
+check_target_empty
+
+# Step 2: the marker file and the lock.
+check_marker_and_lock
+
+# Step 3: the system identifier of the WAL archive.
+read_identifier_file
+started_fields="\"drill\":false"
+[ "$drill" -eq 0 ] || started_fields="\"drill\":true"
+[ "$have_target_time" -eq 0 ] || started_fields="\"target_time\":\"$target_time\",$started_fields"
+log INFO "pitr volume started" "$started_fields"
+
+# Step 4: the base backup and the free space. The INFO line "base backup selected" names the choice.
+select_base_backup
+base_bytes=$(du -sb -- "$WAL_DIR/base/$selected_base" | cut -f1)
+[[ $base_bytes =~ $DIGITS_RE ]] || fail "cannot read the size of the base backup"
+segment_bytes=$(wal_segment_bytes)
+log INFO "base backup selected" "\"base_backup\":\"$selected_base\",\"base_bytes\":$base_bytes,\"segment_bytes\":$segment_bytes"
+check_free_space "$base_bytes" "$segment_bytes"
+
+# Step 5: the copy and its check. recovery_verify_copy deletes backup_end_time from the copy.
+copy_base_backup
+check_copy
+
+# Step 6: the system identifier of the copy.
+check_copy_identifier
+
+# Step 7: the SHA-256 values of the four configuration files.
+keep_config_hashes
+log_config_hashes
+
+# Step 8: recovery.signal and the start of the server.
+start_recovery_server
+
+# Step 9: the checks of ADR-0106 (g) after the promotion. Check 1 always runs. Check 2 runs without a
+# target time only, because a recovery to a target time ends before the end of the WAL archive.
+check_promoted
+[ "$have_target_time" -eq 1 ] || check_recovery_end
+# Checks 3 to 6 of ADR-0106 (g). The marker check runs only when the operator gave the marker identity.
+recovery_check_chain
+[ -z "$PITR_MARKER_SEQ" ] || recovery_check_marker "$PITR_MARKER_SEQ" "$PITR_MARKER_HASH"
+check_config_files
+check_signal_files
+compare_roles roles_query recovered "restore-roles.sql failed on the recovered cluster" counts
+
+# Step 10: the values of ADR-0106 (d).
+read_values
+
+# Step 11: the fast stop, the state shut down, the file pitr-drill, and sync.
+stop_server
+check_shutdown
+mark_drill
+flush_disks
+
+# Step 12: the last line.
+log_completed

@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Test script of pitr-volume in the recipe-pgtools image (ADR-0106 (f), design D3 of the change pitr-recovery).
+#
+# The cases test the script with stubs of the PostgreSQL tools and of flock and id on PATH. The stubs
+# write each call to a log. This suite holds the gates of steps 1 to 3, the selection and the free space of step 4,
+# the copy and its checks of steps 5 to 7, the start of the server in step 8, and the checks 1 to 6 of step 9,
+# and the value queries, the stop, and the last line of steps 10 to 12.
+# It needs flock and GNU coreutils. The image recipe-pgtools has them.
+#
+# Run in CI inside a container of the image, with the directory deploy/pgtools mounted read-only at /pgtools:
+#   docker run --rm --entrypoint bash -v "$PWD/deploy/pgtools:/pgtools:ro" \
+#     recipe-pgtools /pgtools/tests/pitr-volume-test
+#
+# When the variable CI is set, each SKIP counts as a failure.
+set -uo pipefail
+umask 077
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BIN=${PGTOOLS_BIN:-$HERE/../bin}
+REAL_FLOCK=$(command -v flock || true)
+REAL_ID=$(command -v id)
+export REAL_FLOCK REAL_ID
+PASSED=0
+FAILED=0
+SKIPPED=0
+SHM_DIRS=()
+CASE=""
+RC=0
+ROOT=""
+
+# A missing case function must fail the run. Bash runs this handler in a subshell.
+# So the handler cannot raise FAILED. It prints a FAIL line and writes a marker file instead.
+# The last line of this script reads the marker file.
+command_not_found_handle() {
+  bad "command not found: $1"
+  : >"${ROOT:?}/command-not-found"
+  return 127
+}
+
+# The functions live in tests/lib. Each file sets only functions and constants.
+# A file that cannot be read stops the run.
+# shellcheck source=lib/helpers.sh
+source "$HERE/lib/helpers.sh" || exit 1
+# shellcheck source=lib/pitr-volume-stubs.sh
+source "$HERE/lib/pitr-volume-stubs.sh" || exit 1
+# shellcheck source=lib/pitr-volume-gate-cases.sh
+source "$HERE/lib/pitr-volume-gate-cases.sh" || exit 1
+# shellcheck source=lib/pitr-volume-select-cases.sh
+source "$HERE/lib/pitr-volume-select-cases.sh" || exit 1
+# shellcheck source=lib/pitr-volume-copy-cases.sh
+source "$HERE/lib/pitr-volume-copy-cases.sh" || exit 1
+# shellcheck source=lib/pitr-volume-start-cases.sh
+source "$HERE/lib/pitr-volume-start-cases.sh" || exit 1
+# shellcheck source=lib/pitr-volume-check-cases.sh
+source "$HERE/lib/pitr-volume-check-cases.sh" || exit 1
+# shellcheck source=lib/pitr-volume-stop-cases.sh
+source "$HERE/lib/pitr-volume-stop-cases.sh" || exit 1
+
+ROOT=$(mktemp -d)
+trap cleanup EXIT
+
+# The directory of the libraries of the script. It holds the files that the image installs in /etc/pgtools,
+# copied from their sources. wal-identity.sh loads restore-steps.sh from its own directory.
+mkdir "$ROOT/etc"
+DB_DIR=${PGTOOLS_DB_DIR:-$HERE/../../db}
+cp -- "$HERE/../lib/recovery-steps.sh" "$HERE/../lib/wal-identity.sh" "$HERE/../lib/restore-steps.sh" "$ROOT/etc/"
+# The image installs the files of the role check and cluster-access.sh next to the libraries (the Dockerfile).
+cp -- "$HERE/../restore-roles.sql" "$HERE/../restore-roles.expected" "$DB_DIR/cluster-access.sh" "$ROOT/etc/"
+
+if [ -z "$REAL_FLOCK" ]; then
+  skip "flock is missing, so the cases of the script cannot run"
+else
+  make_pitr_stubs
+  case_pitr_static_rules
+  case_pitr_arguments
+  case_pitr_target_time
+  case_pitr_expected_lsn
+  case_pitr_target_not_empty
+  case_pitr_user
+  case_pitr_wal_dir
+  case_pitr_marker
+  case_pitr_lock
+  case_pitr_identifier
+  case_pitr_library
+  case_pitr_gates_pass
+  case_pitr_select_newest
+  case_pitr_select_target
+  case_pitr_select_start_time
+  case_pitr_select_never_wins
+  case_pitr_select_none
+  case_pitr_free_space
+  case_pitr_copy_pass
+  case_pitr_copy_hash_values
+  case_pitr_copy_verify_fails
+  case_pitr_copy_identifier
+  case_pitr_copy_config_missing
+  case_pitr_copy_selected_only
+  case_pitr_start_options
+  case_pitr_start_target
+  case_pitr_start_target_server
+  case_pitr_start_files
+  case_pitr_start_timeout
+  case_pitr_start_lock
+  case_pitr_start_fails
+  case_pitr_start_cleanup
+  case_pitr_start_no_private_directory
+  case_pitr_check_static_rules
+  case_pitr_check_pass
+  case_pitr_check_in_recovery
+  case_pitr_check_timeline
+  case_pitr_check_segment
+  case_pitr_check_second_timeline
+  case_pitr_check_partial
+  case_pitr_check_expected_lsn
+  case_pitr_check_target_time
+  case_pitr_check_history
+  case_pitr_check_psql_fails
+  case_pitr_check_chain
+  case_pitr_check_marker
+  case_pitr_check_marker_input
+  case_pitr_check_subnet
+  case_pitr_check_files
+  case_pitr_check_roles
+  case_pitr_check_library
+  case_pitr_stop_pass
+  case_pitr_stop_line_patterns
+  case_pitr_stop_drill
+  case_pitr_stop_clean
+  case_pitr_stop_fails
+  case_pitr_stop_values
+  case_pitr_no_stop_hook
+fi
+
+[ "$SKIPPED" -eq 0 ] || printf 'pitr-volume-test: %d skipped\n' "$SKIPPED"
+printf 'pitr-volume-test: %d passed, %d failed\n' "$PASSED" "$FAILED"
+[ "$FAILED" -eq 0 ] && [ "$PASSED" -gt 0 ] && [ ! -e "$ROOT/command-not-found" ]

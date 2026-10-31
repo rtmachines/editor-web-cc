@@ -265,34 +265,9 @@ set_access() {
   write_hba_conf "$COMPOSE_SUBNET" "$TARGET_DIR/pg_hba.conf" || fail "cannot write pg_hba.conf"
 }
 
-# first_difference <want> <have>: the first line of the second file that differs from the line at the
-# same place in the first file. The caller uses it when both files hold the same lines in another order.
-first_difference() {
-  awk 'FILENAME == ARGV[1] { want[FNR] = $0; next } want[FNR] != $0 { print; exit }' "$1" "$2"
-}
-
-# compare_roles: ADR-0103 (m). The query of restore-roles.sql runs as the superuser in the new
-# database. Its lines equal restore-roles.expected with the subnet in the placeholder, in the same order.
-# The ERROR line names the first line by its kind and its name. No line holds an OID or a password hash.
-compare_roles() {
-  local missing extra first
-  sed "s|@COMPOSE_SUBNET@|$COMPOSE_SUBNET|g" "$CODE_DIR/restore-roles.expected" >"$work_dir/roles.want" \
-    || fail "cannot read restore-roles.expected"
-  scratch_psql --dbname="$DB_NAME" --file="$CODE_DIR/restore-roles.sql" >"$work_dir/roles.have" \
-    2>"$work_dir/roles.err" \
-    || fail "restore-roles.sql failed" "\"detail\":\"$(tool_detail "$work_dir/roles.err")\""
-  cmp -s -- "$work_dir/roles.want" "$work_dir/roles.have" && return 0
-  sort -- "$work_dir/roles.want" >"$work_dir/roles.want.sorted"
-  sort -- "$work_dir/roles.have" >"$work_dir/roles.have.sorted"
-  comm -23 "$work_dir/roles.want.sorted" "$work_dir/roles.have.sorted" >"$work_dir/roles.missing"
-  comm -13 "$work_dir/roles.want.sorted" "$work_dir/roles.have.sorted" >"$work_dir/roles.extra"
-  missing=$(($(wc -l <"$work_dir/roles.missing")))
-  extra=$(($(wc -l <"$work_dir/roles.extra")))
-  first=$(cat -- "$work_dir/roles.missing" "$work_dir/roles.extra" | sed -n '1p')
-  [ -n "$first" ] || first=$(first_difference "$work_dir/roles.want" "$work_dir/roles.have")
-  first=$(printf '%s\n' "$first" | cut -d'|' -f1,2)
-  fail "the roles and the access of the new cluster differ from restore-roles.expected" \
-    "\"missing\":$missing,\"extra\":$extra,\"first\":\"$(clean "$first")\""
+# roles_query <file>: step 8. The file restore-roles.sql runs as the superuser in the new database.
+roles_query() {
+  scratch_psql --dbname="$DB_NAME" --file="$1"
 }
 
 # config_sha256 <file>: print the SHA-256 value of a configuration file of the target.
@@ -335,7 +310,7 @@ check_top_level() {
 
 # check_access: step 8. The roles and the access, the configuration files, and the top-level names.
 check_access() {
-  compare_roles
+  compare_roles roles_query new "restore-roles.sql failed" names
   check_config_files
   check_top_level
 }

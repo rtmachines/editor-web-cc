@@ -35,7 +35,7 @@ type Assignment = (&'static str, &'static str, &'static str, Bare);
 
 /// The constants of the pgtools scripts. Each one has a comment with its key in the script.
 /// The file is a name in `deploy/pgtools/bin/`, or a name that ends in `.sh` in `deploy/pgtools/lib/`.
-pub const SCRIPT_ASSIGNMENTS: [Assignment; 16] = [
+pub const SCRIPT_ASSIGNMENTS: [Assignment; 24] = [
     (
         "backup-health",
         "MAX_AGE_SECONDS",
@@ -122,6 +122,49 @@ pub const SCRIPT_ASSIGNMENTS: [Assignment; 16] = [
         "pitr_check.ready_poll",
         Bare::Seconds,
     ),
+    (
+        "pitr-volume",
+        "START_TIMEOUT_SECONDS",
+        "pitr_volume.start_timeout",
+        Bare::Seconds,
+    ),
+    (
+        "pitr-volume",
+        "STOP_TIMEOUT_SECONDS",
+        "pitr_volume.stop_timeout",
+        Bare::Seconds,
+    ),
+    (
+        "pitr-volume",
+        "READY_POLL_SECONDS",
+        "pitr_check.ready_poll",
+        Bare::Seconds,
+    ),
+    (
+        "pitr-volume",
+        "LOG_TAIL_LINES",
+        "pitr_check.log_tail",
+        Bare::Plain,
+    ),
+    (
+        "pitr-volume",
+        "DISK_WARN_PERCENT",
+        "disk.warn_percent",
+        Bare::Percent,
+    ),
+    ("pitr-volume", "SCRATCH_PORT", "scratch.port", Bare::Plain),
+    (
+        "pitr-volume",
+        "CLEAN_LENGTH",
+        "restore_test.detail_length",
+        Bare::Plain,
+    ),
+    (
+        "pitr-volume",
+        "DETAIL_LENGTH",
+        "restore_test.detail_length",
+        Bare::Plain,
+    ),
 ];
 /// The settings of the scratch clusters that the three scripts set (`reliability.md` 7.11 rows `scratch.*`).
 const SCRATCH_COMMON: [(&str, &str); 5] = [
@@ -143,7 +186,7 @@ const SCRATCH_RESTORE: [(&str, &str); 3] = [
     ("wal_level", "scratch.restore_wal_level"),
     ("max_wal_senders", "scratch.restore_max_wal_senders"),
 ];
-/// The setting of the cluster of `pitr-check` only (ADR-0068 (o)).
+/// The setting of the cluster of `pitr-check` only (ADR-0068 (o)). Its start options live in `recovery-steps.sh`.
 const SCRATCH_PITR: [(&str, &str); 1] = [("hot_standby", "scratch.pitr_hot_standby")];
 
 /// The `NAME=value` lines of an env file.
@@ -488,15 +531,21 @@ pub fn check_script_assignments(script: &str, text: &str, table: &Table) -> Repo
     report
 }
 
-/// A script sets the settings of its scratch cluster to the values of 7.11.
-/// `pitr-check` and `restore-volume` set no `fsync` option (ADR-0067 (f), ADR-0103 (j)).
+/// A script or a library sets the settings of its scratch cluster to the values of 7.11.
+/// `recovery-steps.sh` holds the settings of `pitr-check` (ADR-0106 (h)).
+/// Only `restore-test` sets a `fsync` option (ADR-0067 (f), ADR-0103 (j)).
 pub fn check_scratch_settings(script: &str, text: &str, table: &Table) -> Report {
     let mut report = Report::default();
     let lines = code_lines(text);
-    let file = format!("deploy/pgtools/bin/{script}");
+    let directory = if script.ends_with(".sh") {
+        "lib"
+    } else {
+        "bin"
+    };
+    let file = format!("deploy/pgtools/{directory}/{script}");
     let own: &[(&str, &str)] = match script {
         "restore-test" => &SCRATCH_RESTORE,
-        "pitr-check" => &SCRATCH_PITR,
+        "recovery-steps.sh" => &SCRATCH_PITR,
         _ => &[],
     };
     for (name, key) in SCRATCH_COMMON.iter().chain(own) {
@@ -515,8 +564,17 @@ pub fn check_scratch_settings(script: &str, text: &str, table: &Table) -> Report
             Bare::Plain,
         );
     }
-    if script != "restore-test" && !setting_words(&lines, "fsync").is_empty() {
-        report.fail(&file, "fsync", "no fsync setting", "a fsync setting");
+    if script != "restore-test" {
+        report.absorb(check_no_fsync(&file, text));
+    }
+    report
+}
+
+/// A script or a library that starts no cluster of `restore-test` sets no `fsync` option.
+pub fn check_no_fsync(file: &str, text: &str) -> Report {
+    let mut report = Report::default();
+    if !setting_words(&code_lines(text), "fsync").is_empty() {
+        report.fail(file, "fsync", "no fsync setting", "a fsync setting");
     }
     report
 }
@@ -632,6 +690,79 @@ pub fn check_context_lists(dockerfile: &str, db_list: &str, pgtools_list: &str) 
         let admitted = admitted_names(&mut report, file, list);
         let want: Vec<String> = sources.into_iter().collect();
         report.compare_list(file, "the names that !name admits", &want, Some(admitted));
+    }
+    report
+}
+
+/// The directory of the library files in the repository, and the directory that holds them in the image.
+const LIBRARY_PREFIX: &str = "deploy/pgtools/lib/";
+const LIBRARY_DESTINATION: &str = "/etc/pgtools/";
+
+/// The pairs `(source, destination)` of the `COPY` lines that read the pgtools context.
+/// A `COPY` with `--from` reads another context or a stage, so it is not in the answer.
+fn pgtools_copies(dockerfile: &str) -> Vec<(String, String)> {
+    let joined = dockerfile.replace("\\\r\n", " ").replace("\\\n", " ");
+    let mut copies = Vec::new();
+    for line in code_lines(&joined) {
+        let mut words = line.split_whitespace();
+        if !words
+            .next()
+            .is_some_and(|word| word.eq_ignore_ascii_case("COPY"))
+        {
+            continue;
+        }
+        let (flags, mut paths): (Vec<&str>, Vec<&str>) =
+            words.partition(|word| word.starts_with("--"));
+        if flags.iter().any(|flag| flag.starts_with("--from=")) {
+            continue;
+        }
+        let Some(destination) = paths.pop() else {
+            continue;
+        };
+        copies.extend(
+            paths
+                .into_iter()
+                .map(|path| (context_name(path).to_owned(), destination.to_owned())),
+        );
+    }
+    copies
+}
+
+/// Each file of `deploy/pgtools/lib/` reaches the image `recipe-pgtools`. The Dockerfile copies it to
+/// `/etc/pgtools/` with a `COPY` line, and the allow list of the pgtools context admits its own path.
+/// A script of `bin/` sources the file from there, so a missing copy breaks the script in the image.
+pub fn check_library_copies(dockerfile: &str, pgtools_list: &str, listing: &[String]) -> Report {
+    let mut report = Report::default();
+    let copies = pgtools_copies(dockerfile);
+    let admitted = admitted_names(&mut Report::default(), PGTOOLS_CONTEXT_LIST, pgtools_list);
+    for path in listing
+        .iter()
+        .filter(|path| path.starts_with(LIBRARY_PREFIX))
+    {
+        let source = path.strip_prefix("deploy/pgtools/").unwrap_or(path);
+        match copies.iter().find(|(name, _)| name == source) {
+            None => report.fail(
+                PGTOOLS_DOCKERFILE,
+                source,
+                "a COPY line from the pgtools context",
+                "no COPY line",
+            ),
+            Some((_, destination)) if destination != LIBRARY_DESTINATION => report.fail(
+                PGTOOLS_DOCKERFILE,
+                source,
+                format!("the destination {LIBRARY_DESTINATION}"),
+                destination.as_str(),
+            ),
+            Some(_) => {}
+        }
+        if !admitted.iter().any(|name| name == source) {
+            report.fail(
+                PGTOOLS_CONTEXT_LIST,
+                source,
+                "an entry !name with its own path",
+                "no entry",
+            );
+        }
     }
     report
 }

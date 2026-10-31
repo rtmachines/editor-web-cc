@@ -4,7 +4,7 @@
 
 use crate::files::{
     DB_CONTEXT_LIST, PGTOOLS_CONTEXT_LIST, PGTOOLS_DOCKERFILE, check_context_lists,
-    check_line_endings,
+    check_library_copies, check_line_endings,
 };
 use crate::inputs::{GITATTRIBUTES_FILE, Inputs, Mutation, assert_mutations_fail, check_all};
 
@@ -249,7 +249,7 @@ fn a_changed_constant_of_a_pgtools_script_is_a_fault() {
     assert_mutations_fail(&SCRIPT_CONSTANTS);
 }
 
-const SCRATCH_SETTINGS: [Mutation; 8] = [
+const SCRATCH_SETTINGS: [Mutation; 9] = [
     // A word in a comment is no setting.
     (
         "restore-test",
@@ -258,9 +258,9 @@ const SCRATCH_SETTINGS: [Mutation; 8] = [
         "scratch.max_connections",
     ),
     (
-        "pitr-check",
-        "'shared_buffers=64MB'",
-        "'shared_buffers=64MB' 'shared_buffers=128MB'",
+        "recovery-steps.sh",
+        "shared_buffers=64MB",
+        "shared_buffers=64MB -c shared_buffers=128MB",
         "scratch.shared_buffers",
     ),
     (
@@ -282,21 +282,28 @@ const SCRATCH_SETTINGS: [Mutation; 8] = [
         "scratch.restore_wal_level",
     ),
     (
-        "pitr-check",
-        "'hot_standby=off'",
-        "'hot_standby=on'",
+        "recovery-steps.sh",
+        "hot_standby=off",
+        "hot_standby=on",
         "scratch.pitr_hot_standby",
     ),
     (
-        "pitr-check",
-        "'max_connections=10'",
-        "'max_connections=20'",
+        "recovery-steps.sh",
+        "max_connections=10",
+        "max_connections=20",
         "scratch.max_connections",
     ),
     (
+        "recovery-steps.sh",
+        "hot_standby=off",
+        "hot_standby=off -c fsync=off",
+        "fsync",
+    ),
+    // The start options of `pitr-check` come from the library, so a copy in the script is a fault.
+    (
         "pitr-check",
-        "'hot_standby=off'",
-        "'hot_standby=off' 'fsync=off'",
+        "SCRATCH_PORT=5433",
+        "SCRATCH_PORT=5433\nstart_options=\"-c fsync=off\"",
         "fsync",
     ),
 ];
@@ -359,9 +366,9 @@ const ONE_ASSIGNMENT: [Mutation; 9] = [
         "scratch.max_connections",
     ),
     (
-        "pitr-check",
-        "'max_connections=10'",
-        "'max_connections=20'\necho max_connections=10",
+        "recovery-steps.sh",
+        "max_connections=10",
+        "max_connections=20\necho max_connections=10",
         "scratch.max_connections",
     ),
 ];
@@ -514,6 +521,80 @@ fn a_copy_from_a_build_stage_needs_no_entry() {
     assert!(report.faults.is_empty(), "{}", report.message());
 }
 
+/// One change of the Dockerfile or of the allow list of the pgtools context, and the fault that follows.
+/// The fault must name the library file.
+const LIBRARY_COPIES: [ContextCase; 4] = [
+    // The Dockerfile drops the library, and the allow list drops it too. Only this check sees it.
+    (
+        PGTOOLS_DOCKERFILE,
+        " lib/recovery-steps.sh",
+        "",
+        "lib/recovery-steps.sh",
+    ),
+    // The Dockerfile copies the library, and the allow list does not admit it.
+    (
+        PGTOOLS_CONTEXT_LIST,
+        "!lib/recovery-steps.sh\n",
+        "",
+        "lib/recovery-steps.sh",
+    ),
+    // The library lands outside the directory of the other library files.
+    (
+        PGTOOLS_DOCKERFILE,
+        "lib/wal-identity.sh /etc/pgtools/",
+        "lib/wal-identity.sh /usr/local/lib/",
+        "lib/wal-identity.sh",
+    ),
+    // A COPY from a stage does not count as a copy of the library.
+    (
+        PGTOOLS_DOCKERFILE,
+        "COPY --chmod=0644 lib/globals-grammar.sh lib/recovery-steps.sh",
+        "COPY --chmod=0644 --from=db lib/recovery-steps.sh /x/\nCOPY --chmod=0644 lib/globals-grammar.sh",
+        "lib/recovery-steps.sh",
+    ),
+];
+
+#[test]
+fn a_library_file_that_the_pgtools_image_does_not_copy_or_admit_is_a_fault() {
+    let base = Inputs::load();
+    for (file, from, to, named) in LIBRARY_COPIES {
+        let (mut dockerfile, mut list) = (
+            base.text(PGTOOLS_DOCKERFILE).to_owned(),
+            base.text(PGTOOLS_CONTEXT_LIST).to_owned(),
+        );
+        let target = if file == PGTOOLS_DOCKERFILE {
+            &mut dockerfile
+        } else {
+            &mut list
+        };
+        assert!(target.contains(from), "{file} does not hold {from:?}");
+        *target = target.replace(from, to);
+        // The first case drops the library from the allow list too, so no other check sees it.
+        if file == PGTOOLS_DOCKERFILE && from == " lib/recovery-steps.sh" {
+            list = list.replace("!lib/recovery-steps.sh\n", "");
+        }
+        let report = check_library_copies(&dockerfile, &list, base.listing());
+        assert!(
+            report.has_fault_for(named),
+            "no fault for {named:?} after {file}: {from:?} -> {to:?}
+faults:
+{}",
+            report.message()
+        );
+    }
+}
+
+#[test]
+fn the_pgtools_image_copies_and_admits_every_library_file() {
+    let base = Inputs::load();
+    let report = check_library_copies(
+        base.text(PGTOOLS_DOCKERFILE),
+        base.text(PGTOOLS_CONTEXT_LIST),
+        base.listing(),
+    );
+    assert!(report.faults.is_empty(), "{}", report.message());
+}
+
 const LINE_ENDINGS: [Mutation; 8] = [
     // A file that a COPY line names needs its own rule.
     (
@@ -621,6 +702,114 @@ const RESTORE_VOLUME_WAITS: [Mutation; 4] = [
 #[test]
 fn a_changed_wait_of_restore_volume_is_a_fault() {
     assert_mutations_fail(&RESTORE_VOLUME_WAITS);
+}
+
+const PITR_VOLUME_CONSTANTS: [Mutation; 16] = [
+    (
+        "pitr-volume",
+        "SCRATCH_PORT=5433",
+        "SCRATCH_PORT=5434",
+        "scratch.port",
+    ),
+    // A later assignment wins in the shell, so a second assignment is a fault.
+    (
+        "pitr-volume",
+        "SCRATCH_PORT=5433",
+        "SCRATCH_PORT=5433\nSCRATCH_PORT=5434",
+        "scratch.port",
+    ),
+    (
+        "pitr-volume",
+        "CLEAN_LENGTH=160",
+        "CLEAN_LENGTH=80",
+        "restore_test.detail_length",
+    ),
+    (
+        "pitr-volume",
+        "CLEAN_LENGTH=160",
+        "CLEAN_LENGTH=0160",
+        "restore_test.detail_length",
+    ),
+    (
+        "pitr-volume",
+        "CLEAN_LENGTH=160",
+        "CLEAN_LENGTH=160\nCLEAN_LENGTH=161",
+        "restore_test.detail_length",
+    ),
+    (
+        "pitr-volume",
+        "DETAIL_LENGTH=160",
+        "DETAIL_LENGTH=80",
+        "restore_test.detail_length",
+    ),
+    (
+        "pitr-volume",
+        "DETAIL_LENGTH=160",
+        "DETAIL_LENGTH=0160",
+        "restore_test.detail_length",
+    ),
+    (
+        "pitr-volume",
+        "DETAIL_LENGTH=160",
+        "DETAIL_LENGTH=160\nDETAIL_LENGTH=161",
+        "restore_test.detail_length",
+    ),
+    (
+        "pitr-volume",
+        "START_TIMEOUT_SECONDS=1800",
+        "START_TIMEOUT_SECONDS=900",
+        "pitr_volume.start_timeout",
+    ),
+    (
+        "pitr-volume",
+        "STOP_TIMEOUT_SECONDS=600",
+        "STOP_TIMEOUT_SECONDS=300",
+        "pitr_volume.stop_timeout",
+    ),
+    // A later assignment wins in the shell, so a second assignment is a fault.
+    (
+        "pitr-volume",
+        "STOP_TIMEOUT_SECONDS=600",
+        "STOP_TIMEOUT_SECONDS=600
+STOP_TIMEOUT_SECONDS=1",
+        "pitr_volume.stop_timeout",
+    ),
+    // The wait of the scratch server of `pitr-check` is another row of 7.11.
+    (
+        "pitr-volume",
+        "START_TIMEOUT_SECONDS=1800",
+        "START_TIMEOUT_SECONDS=600",
+        "pitr_volume.start_timeout",
+    ),
+    (
+        "pitr-volume",
+        "READY_POLL_SECONDS=1",
+        "READY_POLL_SECONDS=2",
+        "pitr_check.ready_poll",
+    ),
+    (
+        "pitr-volume",
+        "LOG_TAIL_LINES=20",
+        "LOG_TAIL_LINES=10",
+        "pitr_check.log_tail",
+    ),
+    (
+        "pitr-volume",
+        "DISK_WARN_PERCENT=15",
+        "DISK_WARN_PERCENT=10",
+        "disk.warn_percent",
+    ),
+    (
+        "pitr-volume",
+        "DISK_WARN_PERCENT=15",
+        "DISK_WARN_PERCENT=015",
+        "disk.warn_percent",
+    ),
+];
+
+#[test]
+fn a_changed_constant_of_pitr_volume_is_a_fault() {
+    assert_mutations_fail(&PITR_VOLUME_CONSTANTS);
 }
 
 const RESTORE_VOLUME_SIZES: [Mutation; 6] = [

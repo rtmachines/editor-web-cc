@@ -360,9 +360,16 @@ class UpgradeScriptTests(unittest.TestCase):
         common = pathlib.Path(__file__).with_name("common.sh").read_text(encoding="utf-8")
         delete = common.split("delete_ci_volumes() {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn('docker volume ls -q --filter "label=recipe.ci=$COMPOSE_PROJECT_NAME"', delete)
-        self.assertEqual(common.count('rm "$volume"'), 1)
-        self.assertIn("docker volume inspect --format", delete)
-        self.assertIn("recipe.ci", delete.split("docker volume inspect", 1)[1])
+        self.assertIn('delete_labelled_volume "$volume"', delete)
+        self.assertNotIn("docker volume rm", delete)
+        shared = common.split("delete_labelled_volume() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertEqual(common.count("docker volume rm"), 1)
+        self.assertEqual(common.count('rm "$volume"'), 0)
+        label = common.split("has_job_label() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("docker volume inspect --format", label)
+        self.assertIn("recipe.ci", label.split("docker volume inspect", 1)[1])
+        self.assertLess(shared.index("has_job_label"), shared.index("docker volume rm"))
+        self.assertNotIn("fail ", shared)
         cleanup = pathlib.Path(__file__).with_name("cleanup.sh").read_text(encoding="utf-8")
         self.assertIn("delete_ci_volumes", cleanup)
         self.assertNotIn("docker volume rm", cleanup)

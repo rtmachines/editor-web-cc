@@ -1,6 +1,6 @@
 # ADR-0099: Stream before the replacement base backup after a WAL gap
 
-Status: Accepted. Amended by ADR-0103 (item (c): the delete rule after a switch, moved files are a recovery source only for a separate procedure). Amended by ADR-0105 (item (a) step 7: `/wal/.system-identifier` stays in `/wal` in a gap)
+Status: Accepted. Amended by ADR-0103 (item (c): the delete rule after a switch, moved files are a recovery source only for a separate procedure). Amended by ADR-0105 (item (a) step 7: `/wal/.system-identifier` stays in `/wal` in a gap). Amended by ADR-0107 (item (a3): the WAL check ignores `backup_end_time`)
 Date: 2026-10-26
 Deciders: project owner
 

@@ -7,6 +7,7 @@
 # The sourcing script sets these names:
 #   JOB, DETAIL_LENGTH                  the job name of the log line and the length of a tool message
 #   BACKUP_DIR, CODE_DIR, DB_NAME       the backup disk, the code files, and the restored database
+#   COMPOSE_SUBNET                      the subnet that fills the placeholder of restore-roles.expected
 #   work_dir, socket_dir, superuser     the private work directory and the temporary server
 #   error_logged                        the flag that fail and log ERROR set
 # The sourcing script may set SCRATCH_PORT. An empty or unset value gives the default port of the
@@ -274,7 +275,7 @@ compare_counts() {
 }
 
 # The audit chain check of data-model.md section 4.9 over the whole table: breaks, head, last row.
-# The text equals the text of pitr-check.
+# This is the only copy. check_chain, pitr-check, and pitr-volume (through recovery_check_chain) use it.
 CHAIN_SQL=""
 IFS= read -r -d '' CHAIN_SQL <<'SQL' || true
 WITH batch AS (
@@ -313,4 +314,48 @@ check_chain() {
   result=$(scratch_psql --dbname="$DB_NAME" --command="$CHAIN_SQL") \
     || fail "the audit chain check could not run"
   [ "$result" = "0|t|t" ] || fail "the audit chain check failed" "\"result\":\"$(clean "$result")\""
+}
+
+# first_difference <want> <have>: the first line of the second file that differs from the line at the
+# same place in the first file. compare_roles uses it when both files hold the same lines in another order.
+first_difference() {
+  awk 'FILENAME == ARGV[1] { want[FNR] = $0; next } want[FNR] != $0 { print; exit }' "$1" "$2"
+}
+
+# compare_roles <runner> <cluster> <run failure> <report>: ADR-0103 (m). The runner is the name of a
+# function. It runs the file restore-roles.sql of CODE_DIR on the cluster and prints the lines. The
+# lines must equal restore-roles.expected of CODE_DIR with COMPOSE_SUBNET in the placeholder, in the same
+# order. The cluster is "new" or "recovered" and names the cluster in the ERROR line. The run failure is
+# the text of the ERROR line when the runner fails. The report is "names" or "counts".
+#   names   The ERROR lines hold the first line by its kind and its name, and the first line of the message of the runner.
+#   counts  The ERROR line counts the missing and the extra lines and names none. The message of the runner goes to stderr.
+# No line holds an OID or a password hash. The caller sets COMPOSE_SUBNET, CODE_DIR, and work_dir.
+compare_roles() {
+  local runner=$1 cluster=$2 run_failure=$3 report=$4
+  local want=$work_dir/roles.want have=$work_dir/roles.have err=$work_dir/roles.err
+  local missing extra first="" fields
+  sed "s|@COMPOSE_SUBNET@|$COMPOSE_SUBNET|g" "$CODE_DIR/restore-roles.expected" >"$want"     || fail "cannot read restore-roles.expected"
+  if ! "$runner" "$CODE_DIR/restore-roles.sql" >"$have" 2>"$err"; then
+    if [ "$report" = names ]; then
+      fail "$run_failure" "\"detail\":\"$(tool_detail "$err")\""
+    fi
+    cat -- "$err" >&2
+    fail "$run_failure"
+  fi
+  cmp -s -- "$want" "$have" && return 0
+  sort -- "$want" >"$want.sorted"
+  sort -- "$have" >"$have.sorted"
+  comm -23 "$want.sorted" "$have.sorted" >"$work_dir/roles.missing"
+  comm -13 "$want.sorted" "$have.sorted" >"$work_dir/roles.extra"
+  missing=$(($(wc -l <"$work_dir/roles.missing")))
+  extra=$(($(wc -l <"$work_dir/roles.extra")))
+  fields="\"missing\":$missing,\"extra\":$extra"
+  if [ "$report" = names ]; then
+    first=$(cat -- "$work_dir/roles.missing" "$work_dir/roles.extra" | sed -n '1p')
+    [ -n "$first" ] || first=$(first_difference "$want" "$have")
+    first=$(printf '%s
+' "$first" | cut -d'|' -f1,2)
+    fields="$fields,\"first\":\"$(clean "$first")\""
+  fi
+  fail "the roles and the access of the $cluster cluster differ from restore-roles.expected" "$fields"
 }

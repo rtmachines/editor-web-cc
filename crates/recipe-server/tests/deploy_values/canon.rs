@@ -20,6 +20,7 @@ pub enum Bare {
     Millis,
     Seconds,
     Days,
+    Percent,
 }
 
 const MILLI: u128 = 1000;
@@ -86,6 +87,7 @@ fn apply_bare(milli: u128, bare: Bare) -> Option<Canon> {
         Bare::Plain => Some(Canon::Number(milli)),
         Bare::Millis => Some(Canon::Millis(milli.checked_div(MILLI)?)),
         Bare::Seconds => Some(Canon::Millis(milli)),
+        Bare::Percent => Some(Canon::Percent(milli)),
         Bare::Days => Some(Canon::Millis(
             milli.checked_mul(MS_PER_DAY)?.checked_div(MILLI)?,
         )),
