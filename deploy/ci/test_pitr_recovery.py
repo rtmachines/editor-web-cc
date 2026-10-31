@@ -438,6 +438,10 @@ NEW_VOLUME = r"recipe-editor_pgdata_[0-9]{8}_[0-9]{6}"
 NEW_VOLUME_NAME = "recipe-editor_pgdata_20261030_120100"
 
 
+# The values of the secret files that the check of the log of db reads. No stub output holds one of them.
+SECRET_VALUES = {name: f"secret-value-of-{name}" for name in ("postgres", "migrator", "app", "backup", "replicator")}
+
+
 def password(number):
     """Return the nth password that the stub of openssl prints."""
     return f"{number:064d}"
@@ -468,6 +472,11 @@ class StepTests(unittest.TestCase):
             write_stub(stubs / "date", DATE_STUB)
             state_dir = directory / "runner" / PROJECT / "state"
             state_dir.mkdir(parents=True)
+            # The check of the log of db reads the values of the secret files.
+            secrets_dir = directory / "runner" / PROJECT / "secrets"
+            secrets_dir.mkdir()
+            for secret_name, secret_value in SECRET_VALUES.items():
+                (secrets_dir / f"{secret_name}_password").write_text(secret_value + "\n", encoding="utf-8", newline="\n")
             env = os.environ.copy()
             for key in [key for key in env if key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_", "STUB_"))]:
                 del env[key]
@@ -1455,7 +1464,7 @@ class StepTests(unittest.TestCase):
 
     def test_the_probe_has_one_definition_in_the_shared_file(self):
         shared = STEPS_FILE.read_text(encoding="utf-8")
-        for name in ("probe_roles", "expect_probe"):
+        for name in ("probe_roles", "expect_probe", "check_db_log_passwords"):
             self.assertEqual(shared.count(f"\n{name}() {{\n"), 1, name)
             self.assertNotIn(f"\n{name}() {{\n", script_text())
             self.assertNotIn(f"\n{name}() {{\n", (CI / "restore-switch.sh").read_text(encoding="utf-8"))
@@ -1636,6 +1645,8 @@ class StepTests(unittest.TestCase):
             r"flush_lsn >=",
             r"^sudo test -f .*000000010000000000000003\.partial$",
             r"^compose --project-name recipe-ci-1-1 .* run --rm --no-deps -T -e PITR_CI=1 -e PITR_MARKER_SEQ -e PITR_MARKER_HASH pitr-check$",
+            r" logs --no-color --no-log-prefix db$",
+            r"^sudo grep -c -F -f \S+/secrets/postgres_password .*/secrets/replicator_password \S+/db-after-check\.log$",
         ])
 
     def test_check_puts_the_password_of_marker_2_back_after_the_login_with_marker_1(self):
@@ -1665,6 +1676,18 @@ class StepTests(unittest.TestCase):
         self.assertEqual(done.stderr.strip(), "CI: check: the login with the password of marker 2 failed.")
         self.assertNotIn("backup-now", log)
 
+    def test_check_stops_when_the_log_of_db_holds_a_password(self):
+        # The stub of docker prints the value of the secret app_password in the log of db.
+        done, log, _ = self.run_check({"STUB_DB_LOG": f"LOG:  statement with {SECRET_VALUES['app']}"})
+        self.assertEqual(done.returncode, 1, done.stderr + log)
+        self.assertEqual(done.stderr.strip(), "CI: check: the log of db holds 1 lines with a password.")
+        self.assertNotIn("check: done", done.stdout)
+
+    def test_check_stops_when_the_log_of_db_is_empty(self):
+        done, log, _ = self.run_check({"STUB_DB_LOG": ""})
+        self.assertEqual(done.returncode, 1, done.stderr + log)
+        self.assertEqual(done.stderr.strip(), "CI: check: the log of db is empty.")
+
     def test_check_stops_when_readyz_does_not_answer_ok(self):
         done, log, _ = self.run_check({"STUB_READYZ": "fail"})
         self.assertEqual(done.returncode, 1, done.stderr + log)
@@ -1693,7 +1716,7 @@ class StepTests(unittest.TestCase):
         done, log, _ = self.run_check()
         self.assertEqual(done.returncode, 0, done.stderr + log)
         self.assertIn("CI: check: the recovery time is 1200 s. The limit is 3600 s.\n", done.stdout)
-        for number in (1, 2, 3, 4):
+        for number in (1, 2, 3, 4, 5):
             with self.subTest(step=number):
                 self.assertRegex(done.stdout, rf"(?m)^CI: check: step {number} took [0-9]+ s$")
 
@@ -1742,7 +1765,7 @@ class StepTests(unittest.TestCase):
         markers = ["run wal-line first", "TRUNCATE public.session, public.login_attempt", "wait-timeout 180 app",
                    "check_recovery_time", "proxy backup", "check_readyz", "refuse_marker_1_password",
                    "http_probe relogin", "backup-now", "restore-test", "take_base_backup", "commit_marker 3",
-                   "wait_marker_flush", "check_pitr"]
+                   "wait_marker_flush", "check_pitr", "check_db_log_passwords"]
         found = [body.find(marker) for marker in markers]
         self.assertNotIn(-1, found, dict(zip(markers, found)))
         self.assertEqual(found, sorted(found), dict(zip(markers, found)))
@@ -1966,6 +1989,7 @@ case "$*" in
 000000010000000000000003.partial
 }"; fi ;;
   "tee "*) cat >"$CI_STATE/stub.old-system-identifier" ;;
+  "grep "*) shift; exec grep "$@" ;;
   "cat "*)
     if [[ -n ${STUB_NEW_ARCHIVE_ID:-} ]] && grep -q 'up -d --no-deps walarchive' "$STUB_LOG"; then echo "$STUB_NEW_ARCHIVE_ID"
     else echo "${STUB_ARCHIVE_ID:-7234567890123456789}"; fi ;;
@@ -2021,6 +2045,11 @@ case "$*" in
     printf '%s\\n' '{"timestamp":"2026-10-30T12:02:00Z","level":"INFO","job":"basebackup-once","message":"base backup completed","base":"base_20261030_120200"}'
     exit "${STUB_BASEBACKUP_STATUS:-0}" ;;
   *"exec -T proxy wget"*) printf '%s\n' "${STUB_READYZ-ok}" ;;
+  *" logs --no-color --no-log-prefix db")
+    # The log of db. STUB_DB_LOG replaces the clean line. An empty STUB_DB_LOG gives an empty log.
+    if [[ -n ${STUB_DB_LOG-LOG:  database system is ready to accept connections} ]]; then
+      printf '%s\n' "${STUB_DB_LOG-LOG:  database system is ready to accept connections}"
+    fi ;;
   *"exec -T backup backup-now") exit "${STUB_BACKUP_NOW_STATUS:-0}" ;;
   *"exec -T backup restore-test")
     printf '%s\n' "${STUB_RESTORE_TEST_OUTPUT-$RESTORE_TEST_LINE}"

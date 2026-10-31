@@ -605,7 +605,7 @@ prove_now_set() {
 }
 
 check() {
-  # ADR-0106 (i) steps 11 and 12 and (p) steps 6 to 8. The step starts app, so the recovery time ends here.
+  # ADR-0106 (i) steps 9, 11, and 12 and (p) steps 6 to 8. The step starts app, so the recovery time ends here.
   # The log holds the time of each step.
   local name start
   for name in wal-new.base active.volume
@@ -644,6 +644,9 @@ check() {
   export PITR_MARKER_SEQ PITR_MARKER_HASH
   check_pitr
   lap_end 4
+  log "check: step 5, the log of db holds no password"
+  check_db_log_passwords
+  lap_end 5
   log "check: done"
 }
 

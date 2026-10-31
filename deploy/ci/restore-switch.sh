@@ -164,19 +164,6 @@ check_flush() {
   export PITR_MARKER_SEQ PITR_MARKER_HASH
 }
 
-check_db_log_passwords() {
-  # Count the log lines that hold the value of a secret. The grep reads the patterns from the secret files.
-  local name count files=()
-  for name in postgres migrator app backup replicator
-  do
-    files+=(-f "$RECIPE_SECRETS_DIR/${name}_password")
-  done
-  compose logs --no-color --no-log-prefix db >"$CI_STATE/db-after-check.log"
-  [[ -s $CI_STATE/db-after-check.log ]] || fail "check: the log of db is empty."
-  count=$(sudo grep -c -F "${files[@]}" "$CI_STATE/db-after-check.log" || true)
-  [[ $count == 0 ]] || fail "check: the log of db holds $count lines with a password."
-}
-
 check_base_directory() {
   # ADR-0103 (u). The first argument is the base backup of this check. wal-line made the other one.
   local listing name
