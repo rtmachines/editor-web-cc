@@ -196,6 +196,54 @@ class ScriptTests(unittest.TestCase):
         for forbidden in ("upgrade_smoke.py", "pitr-volume", "pg_switch_wal", "docker kill"):
             self.assertNotIn(forbidden, body)
 
+    def test_prepare_ends_the_gap_segments_after_the_base_backup(self):
+        # The gap run of refusals needs complete segments after the base backup (ADR-0106 (p) step 4).
+        # Marker 2 must stay in the .partial file until crash (step 3 and step 5), so the switches come before marker 1.
+        body = shell_function("prepare")
+        self.assertEqual(body.count("switch_wal_segments"), 1, body)
+        self.assertLess(body.index("take_base_backup"), body.index("switch_wal_segments"))
+
+    def run_switch_wal_segments(self, sql_status=0):
+        """Run the function switch_wal_segments alone with a stub of sql. Return the process and the SQL texts."""
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("bash is not available")
+        with tempfile.TemporaryDirectory() as name:
+            log = pathlib.Path(name) / "sql.log"
+            program = (
+                "set -euo pipefail\n"
+                "fail() { printf 'CI: %s\\n' \"$1\" >&2; exit 1; }\n"
+                f"sql() {{ printf '%s\\n' \"$*\" >>\"$SQL_LOG\"; return {sql_status}; }}\n"
+                "GAP_SEGMENT_COUNT=2\n"
+                "switch_wal_segments() {\n" + shell_function("switch_wal_segments") + "\n}\n"
+                "switch_wal_segments\n"
+            )
+            env = dict(os.environ, SQL_LOG=str(log))
+            done = subprocess.run([bash, "-c", program], capture_output=True, text=True, check=False, env=env)
+            return done, log.read_text(encoding="utf-8") if log.exists() else ""
+
+    def test_switch_wal_segments_writes_before_each_switch(self):
+        # A switch with no new WAL does nothing, so a write comes before each switch.
+        done, log = self.run_switch_wal_segments()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        kinds = ["write" if "pg_logical_emit_message" in line else "switch" if "SELECT pg_switch_wal()" in line else line
+                 for line in log.splitlines()]
+        self.assertEqual(kinds, ["write", "switch", "write", "switch"], log)
+
+    def test_switch_wal_segments_names_the_step_prepare_on_a_failure(self):
+        done, _ = self.run_switch_wal_segments(sql_status=1)
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stderr.strip(), "CI: pitr-recovery prepare: cannot write WAL before a segment switch.")
+
+    def test_no_segment_switch_runs_after_marker_2(self):
+        # ADR-0106 (p) steps 3 and 5. A switch after marker 2 ends its segment, so crash finds no .partial file.
+        # It can also put the WAL position of crash on a segment boundary.
+        for step in ("markers", "drill", "refusals", "crash"):
+            with self.subTest(step=step):
+                body = shell_function(step)
+                self.assertNotIn("switch_wal_segments", body)
+                self.assertNotIn("pg_switch_wal", body)
+
     def test_cleanup_deletes_volumes_only_through_the_helper(self):
         body = shell_function("cleanup")
         self.assertIn("delete_ci_volumes || status=$?", body)
@@ -769,10 +817,6 @@ class StepTests(unittest.TestCase):
             rf"pitr-volume --target-time {TARGET_TIME}$",
             rf"^volume inspect --format .* {volume}$",
             rf"^volume rm {volume}$",
-            r"pg_logical_emit_message",
-            r"SELECT pg_switch_wal\(\)",
-            r"pg_logical_emit_message",
-            r"SELECT pg_switch_wal\(\)",
             rf"^sudo find {real}/base ",
             rf"^sudo sed {real}/base/base_20261030_115900/backup_label$",
             rf"^sudo find {real} -maxdepth 1 -type f ",
@@ -793,18 +837,12 @@ class StepTests(unittest.TestCase):
             r"^volume ls -q --filter label=recipe\.ci=recipe-ci-1-1$",
         ])
 
-    def test_refusals_write_and_switch_twice_before_the_copy(self):
+    def test_refusals_write_no_wal_and_switch_no_segment(self):
+        # Marker 2 must stay in the .partial file until crash. The step prepare ended the gap segments.
         done, log, _ = self.run_refusals()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(log.count("SELECT pg_switch_wal()"), 2)
-        self.assertEqual(log.count("pg_logical_emit_message"), 2)
-        self.assertLess(log.rindex("SELECT pg_switch_wal()"), log.index("sudo cp "))
-        # A switch with no new WAL does nothing, so a write comes before each switch.
-        writes = [match.start() for match in re.finditer("pg_logical_emit_message", log)]
-        switches = [match.start() for match in re.finditer(r"SELECT pg_switch_wal\(\)", log)]
-        self.assertLess(writes[0], switches[0])
-        self.assertLess(switches[0], writes[1])
-        self.assertLess(writes[1], switches[1])
+        self.assertNotIn("pg_switch_wal", log)
+        self.assertNotIn("pg_logical_emit_message", log)
 
     def test_refusals_delete_only_a_middle_complete_segment(self):
         done, log, _ = self.run_refusals()
@@ -962,7 +1000,7 @@ class StepTests(unittest.TestCase):
         self.assertIn("delete_drill_volume", body)
         self.assertNotRegex(body, r"volume prune|down\b.*(-v\b|--volumes)")
         self.assertNotIn("pg_switch_wal", body)
-        self.assertIn("switch_wal_segments", body)
+        self.assertNotIn("switch_wal_segments", body)
         self.assertIn("wait_gap_segments", body)
         self.assertEqual(script_text().count("docker volume rm"), 0)
 

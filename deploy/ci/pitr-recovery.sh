@@ -8,6 +8,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/switch-steps.sh"
 
 prepare() {
   # ADR-0106 (p) step 1. The login step creates the administrator. The probe password changes the password once.
+  # The gap run of step 4 needs complete segments after the base backup. The switches come here, before marker 1.
+  # A switch after marker 2 ends the segment of marker 2, so crash finds no .partial file (steps 3 and 5).
   log "pitr-recovery prepare: start the stack"
   bash "$GITHUB_WORKSPACE/deploy/ci/start.sh"
   log "pitr-recovery prepare: log in and change the password"
@@ -15,6 +17,8 @@ prepare() {
   http_probe password
   log "pitr-recovery prepare: take the first base backup"
   take_base_backup prepare-base.log "pitr-recovery prepare"
+  log "pitr-recovery prepare: end $GAP_SEGMENT_COUNT segments, so /wal gets complete segments after the base backup"
+  switch_wal_segments
   log "pitr-recovery prepare: done"
 }
 
@@ -252,7 +256,7 @@ REFUSAL_TARGET_SQL="SELECT to_char(date_trunc('second', clock_timestamp() AT TIM
 WAL_COPY_DIR=$CI_STATE/wal-copy
 WAL_COPY_STATE=$CI_STATE/refusals.wal-copy
 # The gap run needs this many complete segments after the start segment: one to delete and the newest one to keep.
-# The step switches the segment this many times. The message of wait_gap_segments names the number as a word.
+# The step prepare switches the segment this many times. The message of wait_gap_segments names the number as a word.
 GAP_SEGMENT_COUNT=2
 
 production_facts() {
@@ -326,12 +330,13 @@ complete_segments_after() {
 
 switch_wal_segments() {
   # Each switch ends one segment. A switch with no new WAL does nothing, so a write comes before each switch.
+  # Only prepare calls this function. No step after marker 2 switches a segment (ADR-0106 (p) steps 3 and 5).
   local switch
   for ((switch = 0; switch < GAP_SEGMENT_COUNT; switch++))
   do
-    sql -c "SELECT pg_logical_emit_message(true, 'ci-refusals', 'wal-gap')" >/dev/null \
-      || fail "refusals: cannot write WAL before a segment switch."
-    sql -c 'SELECT pg_switch_wal()' >/dev/null || fail "refusals: cannot switch the WAL segment."
+    sql -c "SELECT pg_logical_emit_message(true, 'ci-prepare', 'wal-gap')" >/dev/null \
+      || fail "pitr-recovery prepare: cannot write WAL before a segment switch."
+    sql -c 'SELECT pg_switch_wal()' >/dev/null || fail "pitr-recovery prepare: cannot switch the WAL segment."
   done
 }
 
@@ -379,8 +384,7 @@ refusals() {
   expect_pitr_error "the target time after the newest commit" "$TARGET_ERROR" \
     -v "$SCRATCH_VOLUME:/var/lib/postgresql/data" pitr-volume --target-time "$target"
   delete_drill_volume
-  log "refusals: end $GAP_SEGMENT_COUNT segments, so /wal holds complete segments after the base backup"
-  switch_wal_segments
+  # The step prepare ended the segments. This step switches no segment, so marker 2 stays in the .partial file.
   wait_gap_segments
   log "refusals: copy /wal and delete one complete segment between the base backup and the newest segment"
   make_wal_gap_copy
