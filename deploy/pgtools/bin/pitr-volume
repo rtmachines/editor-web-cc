@@ -449,6 +449,8 @@ log_config_hashes() {
 # the server log. A new name in the target would change the copy. Every setting goes through pg_ctl -o.
 # The target settings of ADR-0106 (a) come only with --target-time. The deadline starts here and
 # covers the start and the connection wait. Descriptor 9 closes only for pg_ctl, not for this script.
+# The server checks a -c option before it reads its configuration file. Then it does not know the zone
+# abbreviation Z and refuses the value. So the script replaces the Z of the grammar with the offset +00.
 start_recovery_server() {
   local options
   [ -d "$PGPASS_DIR" ] || fail "the directory of the secret files is missing"
@@ -456,7 +458,7 @@ start_recovery_server() {
   : >"$TARGET_DIR/recovery.signal" || fail "cannot write recovery.signal"
   options=$(recovery_start_options "$WAL_DIR" "$work_dir") || fail "cannot build the options of the server"
   if [ "$have_target_time" -eq 1 ]; then
-    options+=" -c recovery_target_time=$target_time -c recovery_target_inclusive=off"
+    options+=" -c recovery_target_time=${target_time%Z}+00 -c recovery_target_inclusive=off"
     options+=" -c recovery_target_action=promote"
   fi
   server_may_run=1

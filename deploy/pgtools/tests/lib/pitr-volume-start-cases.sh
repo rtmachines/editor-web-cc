@@ -9,6 +9,9 @@
 # pitr_hashed, pitr_tool_calls, COPY_CONFIG_FILES).
 
 START_TARGET_TIME=2026-01-01T00:20:00Z
+# The same instant with the numeric offset +00. The server reads its -c options before its configuration file,
+# so the zone abbreviation Z is unknown then. The server refuses the form with Z.
+START_TARGET_SETTING=2026-01-01T00:20:00+00
 START_LOG_TAIL=20
 
 # pitr_start_run [VAR=value ...] -- [argument ...]: run the script with the stubs.
@@ -57,15 +60,44 @@ case_pitr_start_target() {
   new_pitr_copy_case start-target
   pitr_start_run -- --target-time "$START_TARGET_TIME"
   expect_eq "target start: exit code" "$RC" 0
-  for setting in "recovery_target_time=$START_TARGET_TIME" recovery_target_inclusive=off recovery_target_action=promote; do
+  for setting in "recovery_target_time=$START_TARGET_SETTING " recovery_target_inclusive=off recovery_target_action=promote; do
     expect_ok "target start: the options hold -c $setting" pitr_options_have "-c $setting"
   done
+  expect_no "target start: no target time with the zone Z" pitr_options_have "recovery_target_time=$START_TARGET_TIME"
   expect_eq "target start: three target settings only" "$(pitr_stub_value PGCTL_O | grep -o 'recovery_target' | wc -l)" 3
   expect_ok "target start: the restore_command stays" pitr_options_have "-c \"restore_command=cp $CASE/wal/%f %p"
+  expect_ok "target start: the started line keeps the operator text" \
+    grep -qF "\"target_time\":\"$START_TARGET_TIME\"" "$CASE/out"
   new_pitr_copy_case start-drill
   pitr_start_run -- --target-time "$START_TARGET_TIME" --drill
   expect_eq "drill start: exit code" "$RC" 0
-  expect_ok "drill start: the target time is set" pitr_options_have "-c recovery_target_time=$START_TARGET_TIME"
+  expect_ok "drill start: the target time is set" pitr_options_have "-c recovery_target_time=$START_TARGET_SETTING "
+}
+
+# pitr_target_setting: the value of recovery_target_time in the argument of -o of the start.
+pitr_target_setting() { pitr_stub_value PGCTL_O | sed -n 's/.*-c recovery_target_time=\([^ ]*\).*/\1/p'; }
+
+# The real server of the image accepts the value of recovery_target_time that the script gives.
+# The server checks a -c option before it reads its configuration file. The stubs cannot show that order.
+# postgres -C prints the value and stops before it reads the data directory.
+case_pitr_start_target_server() {
+  local server value printed
+  server=$(command -v postgres || true)
+  if [ -z "$server" ]; then
+    skip "postgres is missing, so the real server cannot check the target time"
+    return
+  fi
+  new_pitr_copy_case start-target-server
+  pitr_start_run -- --target-time "$START_TARGET_TIME"
+  expect_eq "target server: exit code" "$RC" 0
+  value=$(pitr_target_setting)
+  expect_ok "target server: the options hold a target time" test -n "$value"
+  mkdir "$CASE/server"
+  : >"$CASE/server/postgresql.conf"
+  printed=$("$server" -D "$CASE/server" -C recovery_target_time -c "recovery_target_time=$value" 2>"$CASE/server.err")
+  expect_eq "target server: postgres accepts the target time" "$?" 0
+  expect_eq "target server: postgres reads the same value" "$printed" "$value"
+  expect_no "target server: no invalid value" grep -q 'invalid value' "$CASE/server.err"
 }
 
 # No configuration file of the target changes. At the start of the server the target holds recovery.signal

@@ -97,6 +97,7 @@ else
   case_pitr_copy_selected_only
   case_pitr_start_options
   case_pitr_start_target
+  case_pitr_start_target_server
   case_pitr_start_files
   case_pitr_start_timeout
   case_pitr_start_lock
