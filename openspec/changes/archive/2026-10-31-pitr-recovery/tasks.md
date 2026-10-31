@@ -168,7 +168,7 @@ A pgtools suite runs inside the `recipe-pgtools` image, as `deploy/ci/pgtools.sh
 - [x] 10.4 (deploy/pgtools) [sonnet high] Build the image and run every suite of `deploy/ci/pgtools.sh` with `CI=true`. Check: every suite passes with 0 skipped cases.
 - [x] 10.5 (openspec) [sonnet high] Run `openspec validate --all --strict`. Check: every item is valid.
 - [x] 10.6 (docs) [sonnet high] Run `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'`. Check: 0 hard violations.
-- [ ] 10.7 (.github/workflows) [sonnet high] Start `ci.yml` with `workflow_dispatch` on the branch. This run is the gate of the change, because the job `compose` and its pgtools suites do not run on a pull request (ADR-0094). Check: the jobs `compose`, `upgrade`, `restore-switch`, `pitr-recovery`, and `migration-freeze` pass. The pull request description links the run.
+- [x] 10.7 (.github/workflows) [sonnet high] Start `ci.yml` with `workflow_dispatch` on the branch. This run is the gate of the change, because the job `compose` and its pgtools suites do not run on a pull request (ADR-0094). Check: the jobs `compose`, `upgrade`, `restore-switch`, `pitr-recovery`, and `migration-freeze` pass. The pull request description links the run.
 
 ## Workflow follow-up
 
