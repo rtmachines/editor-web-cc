@@ -174,6 +174,7 @@ const EXPLAINED: &[(&str, &str)] = &[
     ("page.audit", "rows"),
     ("page.history", "rows"),
     ("page.security_events", "rows"),
+    ("table.value_chars", "characters"),
     ("form.array_chunk", "elements"),
     ("form.rebind_leaves", "new"),
     ("audit.check_batch", "rows"),

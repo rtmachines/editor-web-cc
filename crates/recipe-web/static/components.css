@@ -10,6 +10,8 @@
  * State: .badge .badge-draft .badge-approved .badge-retired .badge-active .badge-inactive .badge-large .badge-deleted .badge-outdated
  * Feedback: .alert .alert-error .alert-warning .alert-info .alert-success .alert-code .alert-ref .alert-head .field-lines .field-error .field-error-code
  * Leaf grid: .leaf-grid .row-all .grid-note .grid-toggle
+ * Parameter table: .value-note
+ * Description list: .hash
  * Diff: .badge-diff-limit .badge-diff-changed .badge-diff-added .badge-diff-removed .diff-summary .diff-section .diff-limits .diff-value .diff-none
  * Formatted JSON and cursor pager: .json .pager-end
  */
@@ -589,12 +591,21 @@ form:has(.leaf-grid) > :not(.tree) {
   font-size: var(--text-sm);
 }
 
+.value-note {
+  color: var(--color-text-muted);
+}
+
 .grid-toggle {
   padding: var(--space-1);
 }
 
 .grid-toggle .tree-node {
   margin-left: 0;
+}
+
+/* Description list (design-system.md 10.11). `.data` in app.css sets the mono font. */
+.hash {
+  overflow-wrap: anywhere;
 }
 
 /*

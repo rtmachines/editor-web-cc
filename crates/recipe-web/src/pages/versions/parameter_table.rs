@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use askama::Template;
 use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_app::recipe::ParameterList;
-use recipe_domain::plant::PlcPlatform;
+use recipe_domain::plant::{BaseExpr, PlcPlatform, Primitive, TypeExpr};
 use recipe_domain::recipe::ParameterKey;
 
 use crate::pages::path_values::Page;
@@ -17,7 +17,7 @@ use crate::pages::recipes::pager_links;
 use crate::pages::render::page_url;
 use crate::pages::texts::Texts;
 
-/// One row of the parameter table. The table shows no value (design D5).
+/// One row of the parameter table.
 pub(crate) struct ParameterRowView {
     /// The address of the parameter page.
     pub(crate) href: String,
@@ -27,12 +27,76 @@ pub(crate) struct ParameterRowView {
     pub(crate) name: String,
     /// The type text, for example `ARRAY[1..8] OF INT`.
     pub(crate) type_text: String,
+    /// The cell of the column Value (ADR-0108 (a)).
+    pub(crate) value: ValueView,
     /// The path of the unit that holds the parameter.
     pub(crate) unit: String,
     /// The S7 address, or an empty text on a platform without addresses.
     pub(crate) address: String,
     /// True when the type of the parameter uses an older struct revision (ADR-0043 (j)).
     pub(crate) outdated: bool,
+}
+
+/// The cell of the column Value: the text of the value or a fixed word.
+pub(crate) struct ValueView {
+    /// The text of the leaf cut to [`VALUE_CHARS`], or the word of an empty text or a composite.
+    pub(crate) text: String,
+    /// True when `text` is a fixed word and not a value. The cell then has the muted class.
+    pub(crate) is_word: bool,
+}
+
+impl ValueView {
+    /// Build the cell from the leaf text of a primitive parameter, or `None` for an array or a
+    /// struct (ADR-0108 (a)).
+    ///
+    /// An empty text shows `parameters-value-empty`. `None` shows `parameters-value-composite`.
+    /// A BOOL value shows the word of `grid-true` or `grid-false`, as the leaf grid does
+    /// (ADR-0039). `type_text` is the type text of the parameter, for example `BOOL`.
+    pub(crate) fn new(t: Texts<'_>, type_text: &str, leaf_text: Option<&str>) -> Self {
+        match leaf_text {
+            None => Self {
+                text: t.get("parameters-value-composite"),
+                is_word: true,
+            },
+            Some("") => Self {
+                text: t.get("parameters-value-empty"),
+                is_word: true,
+            },
+            Some(text) => Self {
+                text: bool_word(t, type_text, text).unwrap_or_else(|| cut_value(text)),
+                is_word: false,
+            },
+        }
+    }
+}
+
+/// Return the word of the leaf grid for a BOOL value, or `None` for any other type or text.
+///
+/// The grid shows `TRUE` and `FALSE` for a BOOL leaf. A STRING with the text `true` keeps its text.
+fn bool_word(t: Texts<'_>, type_text: &str, leaf_text: &str) -> Option<String> {
+    let is_bool = TypeExpr::parse(type_text).is_ok_and(|expr| {
+        expr.arrays().is_empty() && matches!(expr.base(), BaseExpr::Primitive(Primitive::Bool))
+    });
+    if !is_bool {
+        return None;
+    }
+    match leaf_text {
+        "true" => Some(t.get("grid-true")),
+        "false" => Some(t.get("grid-false")),
+        _ => None,
+    }
+}
+
+/// Cut `text` to [`VALUE_CHARS`] characters and end a longer text with `…`.
+///
+/// The cut counts `char` values and never splits a multi-byte character. It uses no string slice.
+pub(crate) fn cut_value(text: &str) -> String {
+    let mut chars = text.chars();
+    let mut kept: String = chars.by_ref().take(VALUE_CHARS).collect();
+    if chars.next().is_some() {
+        kept.push('…');
+    }
+    kept
 }
 
 /// One link to the parameters of one unit (ADR-0043 (j)).
@@ -75,8 +139,16 @@ pub(crate) const fn has_address(platform: PlcPlatform) -> bool {
     )
 }
 
-/// The columns without the address: tag, name, type, unit, and state.
-const BASE_COLUMNS: usize = 5;
+/// The columns without the address: tag, name, type, value, unit, and state.
+const BASE_COLUMNS: usize = 6;
+
+/// The setting `table.value_chars` of `reliability.md` section 7.11, in characters.
+pub(crate) const VALUE_CHARS: usize = 64;
+
+/// Return the count of the columns of the table: the base columns and the address column.
+pub(crate) fn column_count(has_address: bool) -> usize {
+    BASE_COLUMNS.saturating_add(usize::from(has_address))
+}
 
 impl ParameterTable {
     /// Build the table from one page of `ListParameters` and the keys of the outdated parameters.
@@ -98,10 +170,10 @@ impl ParameterTable {
             rows: list
                 .rows
                 .iter()
-                .map(|row| row_view(base, list, row, outdated))
+                .map(|row| row_view(t, base, list, row, outdated))
                 .collect(),
             has_address,
-            columns: BASE_COLUMNS.saturating_add(usize::from(has_address)),
+            columns: column_count(has_address),
             units: unit
                 .as_deref()
                 .map(|shown| unit_links(t, base, &list.units, shown))
@@ -117,20 +189,24 @@ impl ParameterTable {
 
 /// Build the view of one row.
 fn row_view(
+    t: Texts<'_>,
     base: &str,
     list: &ParameterList,
     row: &ParameterRow,
     outdated: &BTreeSet<ParameterKey>,
 ) -> ParameterRowView {
+    let type_text = list
+        .type_texts
+        .get(&row.plc_type)
+        .cloned()
+        .unwrap_or_default();
+    let leaf_text = list.value_texts.get(&row.key).map(String::as_str);
     ParameterRowView {
         href: format!("{base}/parameters/{}", row.key),
         tag: row.tag.to_string(),
         name: row.name_en.to_string(),
-        type_text: list
-            .type_texts
-            .get(&row.plc_type)
-            .cloned()
-            .unwrap_or_default(),
+        value: ValueView::new(t, &type_text, leaf_text),
+        type_text,
         unit: row.unit_path.to_string(),
         address: row
             .s7_address

@@ -402,6 +402,14 @@ Answers to HTMX (ADR-0037):
 - A cell with data uses `--font-mono`. A cell with a number aligns its content to the right.
 - A table with no rows shows the empty state (section 10.10) in place of the table body.
 
+The parameter table of the version page (ADR-0108 (a)):
+
+- The column Value stands after the column Type. The cell of a parameter of a primitive type shows the text of its leaf in `--font-mono`.
+- The cell shows at most `table.value_chars` characters (`reliability.md` section 7.11). A longer text ends with `…`.
+- An empty text shows the word of the key `parameters-value-empty` in `--color-text-muted`.
+- An array or a struct shows the word of the key `parameters-value-composite` in `--color-text-muted`.
+- The word, not the color, tells the state of the cell (section 2).
+
 The leaf grid (ADR-0039):
 
 - The leaf grid is a table of section 10.4 inside a form. It has one row per leaf of a parameter and the columns path, value, minimum, maximum, maximum length, and type (ADR-0039 (j)).
@@ -437,6 +445,13 @@ Repeated rows (ADR-0037):
 - A field error of a row names the row number and the field, for example "Name of member 3". The line links to the input of that row.
 - A field error of the whole list names the list. The line links to the first input of the list.
 - A form that adds a row gives the first input of the new row the attribute `autofocus`.
+
+Compare form (ADR-0108 (d)):
+
+- The compare form of the version page stands after the row of links, outside the element `<p class="actions">`.
+- It has two lists, `n` and `m`, with the rules of the `select` above. Each list has a `label`.
+- It has `method="get"` and sends no `csrf_token`. Its `hx-*` attributes are literals (`api.md` section 9).
+- Its controls keep the target size `--target` and the gap `--target-gap` (section 7).
 
 Field errors (ADR-0036):
 
@@ -559,6 +574,7 @@ The unit tree (ADR-0037):
 - A `dl` shows the fields of one entity, for example a user.
 - A `dt` uses the weight 700 and `--color-text-muted` at `--text-sm`. A `dd` has no indent and follows its `dt`.
 - A `dd` with data uses the class `.data`. A date uses the format of section 5.
+- The content hash of a version is a `dd` with the classes `.data` and `.hash`. It uses `--font-mono`. The rule of `.hash` sets `overflow-wrap: anywhere`. The 64 characters then break at any character, and the page has no horizontal scroll at 320 CSS px (ADR-0108 (c)).
 
 ### 10.12 Pagers
 

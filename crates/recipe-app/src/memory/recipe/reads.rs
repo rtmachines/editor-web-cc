@@ -3,14 +3,14 @@
 //! The statements of `recipe-db` are the model. The text filter folds case with `to_lowercase` on
 //! both sides. The rows come in the same order as the `ORDER BY` of those statements.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use async_trait::async_trait;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, UserId};
 use recipe_domain::plant::{UnitId, UnitPath};
 use recipe_domain::recipe::{
-    ParameterKey, RecipeId, RecipeVersionId, StoredParameter, VersionState,
+    ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue, VersionState,
 };
 use recipe_domain::timestamp::Timestamp;
 
@@ -169,6 +169,7 @@ fn detail(state: &MemoryState, row: &VersionRow) -> Result<VersionDetail, Storag
         number: row.number,
         state: row.state().map_err(|reason| corrupt_rows(&reason))?,
         change_note: row.change_note.clone(),
+        content_sha256: row.content_sha256,
         based_on: row
             .based_on
             .map(|base| number_of(state, base))
@@ -319,6 +320,21 @@ impl RecipeReads for MemoryTransaction {
         let rows = table_rows(self.state(), version, unit)?;
         Ok(window(rows.into_iter(), (offset, limit))
             .map(|(row, unit_row)| table_row(row, unit_row))
+            .collect())
+    }
+
+    async fn parameter_values(
+        &mut self,
+        version: RecipeVersionId,
+        keys: &[ParameterKey],
+    ) -> Result<BTreeMap<ParameterKey, StoredValue>, StorageError> {
+        let wanted: BTreeSet<ParameterKey> = keys.iter().copied().collect();
+        Ok(self
+            .state()
+            .parameters
+            .values()
+            .filter(|row| row.version == version && wanted.contains(&row.key))
+            .map(|row| (row.key, row.value.clone()))
             .collect())
     }
 

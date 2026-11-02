@@ -54,7 +54,22 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
         ),
         retire_row(),
         discard_row(),
+        compare_row(),
     ]
+}
+
+/// Return the matrix row of the compare route (task 4.3).
+///
+/// The matrix sends no query, so every principal with a session gets `422 E-WEB-008`. The route
+/// reads no data, so it needs no permission and the Operator gets the same answer
+/// (ADR-0108 (e)). `compare_route_tests` covers the redirect.
+fn compare_row() -> (Endpoint, [Want; 6]) {
+    use Want::{Login, Password, Status};
+    let bad = Status(StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    (
+        endpoint(Method::GET, "/recipes/{ref}/compare", ""),
+        [Login, bad, bad, bad, Password, Login],
+    )
 }
 
 /// Return the matrix row of the retire of version 3 of `R-100`.

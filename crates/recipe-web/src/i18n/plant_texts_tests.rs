@@ -104,6 +104,8 @@ const PLANT_TEXTS: &[(&str, &str, &str)] = &[
     ("column-version", "Version", "Wersja"),
     ("column-tag", "Tag", "Tag"),
     ("column-type", "Type", "Typ"),
+    ("column-path", "Path", "Ścieżka"),
+    ("column-offset", "Offset", "Przesunięcie"),
     ("pager-label", "Pages", "Strony"),
     ("pager-previous", "Previous page", "Poprzednia strona"),
     ("pager-next", "Next page", "Następna strona"),
@@ -329,6 +331,17 @@ const PLANT_TEXTS: &[(&str, &str, &str)] = &[
     ),
     ("type-revisions-title", "Revisions", "Rewizje"),
     ("type-tree-title", "Type tree", "Drzewo typu"),
+    ("type-s7-caption", "S7 layout", "Układ S7"),
+    (
+        "type-s7-size",
+        "The type has a size of { $bytes } bytes.",
+        "Rozmiar typu w bajtach: { $bytes }.",
+    ),
+    (
+        "type-s7-standard-access",
+        "The offsets apply to a data block with standard access.",
+        "Przesunięcia dotyczą bloku danych z dostępem standardowym.",
+    ),
     ("type-supersedes", "Supersedes", "Zastępuje"),
     (
         "type-usage-link",

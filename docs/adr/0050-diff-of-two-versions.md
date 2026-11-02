@@ -1,6 +1,6 @@
 # ADR-0050: Diff of two versions
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0108 (item (l): the compare links of the version page)
 Date: 2026-10-16
 Deciders: project owner
 

@@ -405,3 +405,27 @@ async fn an_operator_is_forbidden_and_opens_no_transaction() {
     assert!(fixture.store.journal().is_empty());
     assert_nothing_added(&fixture);
 }
+
+#[tokio::test]
+async fn add_parameter_gives_the_canonical_leaf_text_of_a_primitive_value() {
+    let fixture = Fixture::new();
+    seed_speed_draft(&fixture);
+
+    let output = run(&fixture, input("REAL", "85.50", Vec::new()))
+        .await
+        .unwrap();
+
+    assert_eq!(output.value_text.as_deref(), Some("85.5"));
+}
+
+#[tokio::test]
+async fn add_parameter_gives_no_leaf_text_for_an_array_value() {
+    let fixture = Fixture::new();
+    seed_speed_draft(&fixture);
+
+    let output = run(&fixture, input("ARRAY[1..2] OF INT", "[1, 2]", Vec::new()))
+        .await
+        .unwrap();
+
+    assert_eq!(output.value_text, None);
+}

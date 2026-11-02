@@ -1,0 +1,43 @@
+# Tasks
+
+Each task is for one agent. The mark after the scope names the agent: `[sonnet]` (effort high) or `[mechanical]` (Haiku). `design.md` D7 gives the run order. A `[mechanical]` agent runs no `ste-lint.py`. Task 6.2 runs the STE checks.
+
+## 1. Decision records and normative documents
+
+- [x] 1.1 (docs/adr) [mechanical] Set the Status of ADR-0108 to "Accepted". Add its row to the index of `docs/adr/README.md`. Add ADR-0108 to the decision map rows "Design system, accessibility, UI layout" and "Diff of two versions". Add an "Amended by ADR-0108" note and the matching Status line to ADR-0043 and ADR-0050. Check: `git diff --stat docs/adr` names only ADR-0043, ADR-0050, ADR-0108, and `README.md`.
+- [x] 1.2 (docs/architecture) [sonnet] Apply the rows of `design.md` D6 to `api.md` sections 2.3, 2.5, and 2.6, to `reliability.md` section 7.11, and to `design-system.md`. The value of `table.value_chars` is 64 characters. Check: `ste-lint.py` on the three files reports 0 hard violations, and `grep -n "table.value_chars"` finds the same value in every hit.
+
+## 2. Domain
+
+- [x] 2.1 (recipe-domain) [sonnet] First extract the shared placement step `place(cursor, &S7Layout)` from `struct_layout` in `plant/s7_layout.rs`. Make `S7Layout::of` use it. The existing tests still pass. Then write the golden unit test of `s7_members`. Use the trees `ST_Zone@2` and `ST_Line@1` of the spec scenarios "Struct with two BOOL members" and "Nested struct and array". Add a struct of 16 `BOOL` with the size 2 bytes as a golden case. Add the property test of the oracle of ADR-0108 (g) to `plant/s7_layout/prop.rs`. Run them and see them fail. Then add `S7Member` and `s7_members` (`design.md` D5). `S7Member` holds `Vec<MemberName>` and not a `LeafPath`. `s7_members` also uses `place`. Check: `cargo test -p recipe-domain s7_` passes.
+
+## 3. Application and storage
+
+- [x] 3.1 (recipe-app) [sonnet] Write a test of `GetVersion` with the memory adapter: an approved version returns its `content_sha256`, and a draft returns `None`. Run it and see it fail. Then add `content_sha256: Option<Sha256>` to `VersionDetail` and fill it in the memory adapter (`design.md` D2). Update the `recipe-db` constructor of `VersionDetail`, so the workspace compiles. Check: `cargo test -p recipe-app get_version` passes.
+- [x] 3.2 (recipe-db) [sonnet] Write a storage test: the read of `VersionDetail` returns the stored `content_sha256` of an approved version and `None` for a draft. Run it and see it fail. Then add the column to the statement in `transaction/version_reads.rs` and to its record. Check: `cargo test -p recipe-db version_reads` passes. The test needs Docker.
+- [x] 3.3 (recipe-app) [sonnet] Write a test of `ListParameters` with the memory adapter. The page holds an `INT`, a `REAL`, a `TIME`, an empty `STRING`, and a struct parameter. The test asserts that `value_texts` holds the leaf text of each primitive and no entry for the struct. Write a test of `AddParameter` that sends `85.50` for a `REAL` and expects `value_text` equal to `85.5`. Run them and see them fail. Then add the free function `value_text(tree, value) -> Result<Option<String>, ValueFault>` next to `ListParameters`. Add the port method `parameter_values(version, keys)` with its memory adapter. Add `value_texts` to `ParameterList` and `value_text: Option<String>` to `AddParameterOutput` (`design.md` D1 steps 1 to 3 and 5). `ListParameters` and `AddParameter` both call `value_text`. Add a body of the new method to the `recipe-db` adapter, so the workspace compiles. Task 3.4 replaces that body. Check: `cargo test -p recipe-app list_parameters` and `cargo test -p recipe-app add_parameter` pass.
+- [x] 3.4 (recipe-db) [sonnet] Write a storage test. `parameter_values` returns the value of each requested key of a primitive parameter and no row for an unrequested key. Add a test that `parameter_page` still returns no value. Run them and see them fail. Then write the statement of `parameter_values` in `transaction/parameter_reads.rs` (`design.md` D1 step 1). `SELECT_PAGE` does not change. Check: `cargo test -p recipe-db parameter_reads` passes. The test needs Docker.
+
+## 4. Web
+
+- [x] 4.1 (recipe-web) [sonnet] Write the tests of the spec requirement "Value column of the parameter table" for its five scenarios. Use a text of 200 characters that holds a character of more than one byte. Add a `TIME` row and a `BOOL` row. Add a test that a stored value that does not match its type tree gives `E-DB-008`. Add a regression test that the `colspan` of the empty state equals the count of the header cells (`templates/parameter-table.html`). Run them and see them fail. Then add the column and the one cut function of `design.md` D1 step 4. Add the keys `parameters-col-value`, `parameters-value-empty`, and `parameters-value-composite` to `pl.ftl` and `en.ftl`. Check: `cargo test -p recipe-web parameter_table` passes.
+- [x] 4.2 (recipe-web) [sonnet] Write the tests of the spec requirement "Content hash of a version" for its three scenarios. Run them and see them fail. Then add the row to `version.html`, the key `version-content-hash` to both bundles, and the class `hash` to `static/components.css` (`design.md` D2). Check: `cargo test -p recipe-web versions::page` passes.
+- [x] 4.3 (recipe-web) [sonnet] Write the tests of the spec requirement "Compare route" for its four scenarios. The request `n=1&m=3` must redirect to `/recipes/R-100/versions/3/diff/1`. Add a test for a request without a session. Run them and see them fail. Then add `pages/versions/compare.rs` and its route (`design.md` D3). Check: `cargo test -p recipe-web compare` passes.
+- [x] 4.4 (recipe-web) [sonnet] Write the tests of the spec requirement "Compare form of the version page" for its three scenarios. The third scenario covers the Administrator on a deleted recipe. Add a test for a version without a base version. Assert that the form stands outside `<p class="actions">` and has the literals `hx-boost="true" hx-target="#content" hx-push-url="true"`. Assert that no `hx-*` attribute holds the reference number. Run them and see them fail. Then add the form to `actions.rs` and `version.html` and its keys to both bundles. Check: `cargo test -p recipe-web compare` passes.
+- [x] 4.5 (recipe-web) [sonnet] Write eight tests, one per draft toast of `design.md` D4. Each test compares the change number of the toast with `rowVersion` of `HX-Trigger`. Run them and see them fail. Then add the keys `toast-change-number`, `value-saved`, and `limits-saved` to both bundles. Add the shared function of D4 in `pages/draft_reply.rs`. It takes `&DraftOutput`. `SetParameterValue` and `ReplaceLimits` call it. Rebind passes the same `row_version` as its `HX-Trigger`. Check: `cargo test -p recipe-web toast` passes.
+- [x] 4.6 (recipe-web) [sonnet] Write the tests of the spec requirement "S7 layout of a type page" for its three scenarios. Add one test per platform: `S7_1200` and `S7_1500` show the table, and `TwinCat3` shows no table. Run them and see them fail. Then add the table to `type.html`, its keys to both bundles, and the call of `s7_members` for an S7 platform (`design.md` D5). Check: `cargo test -p recipe-web types` passes.
+
+## 5. Release notes
+
+- [x] 5.1 (CHANGELOG.md) [mechanical] Add the five additions of `proposal.md`, section "What Changes", to the section "Unreleased" under "Added". Do not change the section of release 0.3.0. Check: `git diff --stat` names only `CHANGELOG.md`.
+
+## 6. End-to-end and checks
+
+- [x] 6.1 (e2e) [sonnet] Add two pages to the 320 px sweep of `tests/page-sweep.spec.ts`. The pages are the version page of an approved version with a long `STRING` value and the type page of an S7 struct. Add one test of the compare form: the boosted request ends on the diff page, and the address bar holds the diff address. Check: `cd e2e && npm test` passes against `examples/dev_server.rs`.
+- [x] 6.2 (docs) [sonnet] Run `ste-lint.py` on the scope of ADR-0023 and on the files of this change. Fix each hard violation without a change of meaning. Check: `ste-lint.py` reports 0 hard violations, and `openspec validate web-ui-gaps-round-1 --strict` passes.
+- [x] 6.3 (workspace) [sonnet] Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, and `cargo doc --no-deps` with `-D warnings`. Check: the four commands pass, and the output is in the report.
+
+## Workflow follow-up
+
+- Code review with the skill `code-review` (Opus). Fix every CRITICAL and HIGH finding.
+- `superpowers:verification-before-completion`, then `openspec-archive-change` after `cargo test` and `openspec validate` pass.

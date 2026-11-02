@@ -5,6 +5,7 @@
 
 use recipe_app::error::StorageError;
 use recipe_app::ports::{VersionDetail, VersionSummary};
+use recipe_domain::export::Sha256;
 use recipe_domain::identity::Login;
 use recipe_domain::recipe::{RecipeId, RecipeVersionId, VersionState, VersionStatus};
 use recipe_domain::text::LongText;
@@ -26,7 +27,7 @@ FROM recipe_version WHERE recipe_id = $1 ORDER BY number DESC OFFSET $2 LIMIT $3
 /// of the `b` join. The join keys of `b` are the target of `recipe_version_based_on_same_recipe`.
 const SELECT_DETAIL: &str = "\
 SELECT v.id, v.recipe_id, v.number, v.status, v.deleted_at, v.change_note, \
-    b.number AS based_on, c.login AS created_by, a.login AS approved_by, \
+    b.number AS based_on, v.content_sha256, c.login AS created_by, a.login AS approved_by, \
     v.created_at, v.approved_at, v.updated_at, v.row_version \
 FROM recipe_version v \
 JOIN app_user c ON c.id = v.created_by \
@@ -62,6 +63,7 @@ struct DetailRecord {
     deleted_at: Option<OffsetDateTime>,
     change_note: String,
     based_on: Option<i32>,
+    content_sha256: Option<String>,
     created_by: String,
     approved_by: Option<String>,
     created_at: OffsetDateTime,
@@ -107,6 +109,12 @@ fn detail(record: DetailRecord) -> Result<VersionDetail, StorageError> {
         number: number(record.number)?,
         state: state(&record.status, record.deleted_at)?,
         change_note: LongText::parse(&record.change_note)
+            .map_err(|error| corrupt("recipe_version", error))?,
+        content_sha256: record
+            .content_sha256
+            .as_deref()
+            .map(Sha256::parse)
+            .transpose()
             .map_err(|error| corrupt("recipe_version", error))?,
         based_on: record.based_on.map(number).transpose()?,
         created_by: login(&record.created_by)?,

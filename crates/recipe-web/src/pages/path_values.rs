@@ -139,6 +139,26 @@ pub(crate) fn version_number(text: &str) -> Result<u32, WebError> {
         .ok_or_else(|| not_found(Missing::MalformedVersion))
 }
 
+/// Read the query value `n` or `m` of the compare route: a version number, as [`version_number`]
+/// reads it.
+///
+/// A missing key and a bad text give the same answer, because the query is a form of the user and
+/// not a resource address.
+///
+/// # Errors
+///
+/// Returns `422 E-WEB-008` with the field `field` and `FieldReason::BasedOn` when the key is
+/// missing or the text is not a version number. The reason tells the user to choose a version
+/// from the list.
+pub(crate) fn version_query(field: &'static str, text: Option<&str>) -> Result<u32, WebError> {
+    text.and_then(whole_number)
+        .filter(|number| *number > 0)
+        .ok_or(WebError::BadRequest {
+            field,
+            reason: FieldReason::BasedOn,
+        })
+}
+
 /// Read the path value `{key}`: a parameter key in the hyphenated form of a UUID.
 ///
 /// # Errors

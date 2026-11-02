@@ -90,7 +90,7 @@ async fn parameters_delete_errors_keep_the_url() {
 /// The toast of the removal of `SPEED`, with the icon element of `components/toast.html`.
 const REMOVED_TOAST: &str = "<div class=\"toast\"><svg class=\"icon\"";
 /// The sentence of the toast of the removal of `SPEED` in English.
-const REMOVED_TEXT: &str = "<span>Parameter SPEED is deleted.</span></div>";
+const REMOVED_TEXT: &str = "<span>Parameter SPEED is deleted. Change number: 2.</span></div>";
 
 /// K10: the content answer of a removal shows the toast in the status region of the new page.
 #[tokio::test]

@@ -32,3 +32,10 @@ pub use database::{CloseOutcome, Database};
 pub use migrator::migrate;
 #[cfg(feature = "test-support")]
 pub use migrator::migrate_from_directory;
+
+/// SQL texts that a storage test needs to inspect. The feature `test-support` enables it.
+#[cfg(feature = "test-support")]
+pub mod statements {
+    /// The statement of `RecipeReads::parameter_page`.
+    pub const PARAMETER_PAGE: &str = crate::transaction::parameter_reads::SELECT_PAGE;
+}

@@ -101,21 +101,33 @@ fn unit_id(number: u128) -> UnitId {
 ///
 /// `number` is the number of the code, for example 3 for `M3`.
 pub(super) fn seed_empty_machine(fixture: &Fixture, number: u32) -> MachineCode {
+    seed_machine_on(fixture, number, PlcPlatform::S7_300).0
+}
+
+/// Seed a live machine on `platform` without a struct and return its code and identifier.
+///
+/// `number` is the number of the code, for example 3 for `M3`.
+pub(super) fn seed_machine_on(
+    fixture: &Fixture,
+    number: u32,
+    platform: PlcPlatform,
+) -> (MachineCode, MachineId) {
     let code = MachineCode::parse(&format!("M{number}")).unwrap();
+    let id = MachineId::from(Uuid::from_u128(
+        0x7357_0f00_0000_0000_0000_0000_0000_0000 | u128::from(number),
+    ));
     let machine = Machine::create(
-        MachineId::from(Uuid::from_u128(
-            0x7357_0f00_0000_0000_0000_0000_0000_0000 | u128::from(number),
-        )),
+        id,
         code,
         Text::parse("Empty line").unwrap(),
-        PlcPlatform::S7_300,
+        platform,
         (
             unit_id(0x7357_0f01_0000_0000_0000_0000_0000_0000 | u128::from(number)),
             Text::parse("Infeed").unwrap(),
         ),
     );
     fixture.store.seed_machine(&machine);
-    code
+    (code, id)
 }
 
 /// The identifier of the struct row that a test seeds with the number `number`.
@@ -124,6 +136,9 @@ pub(super) fn struct_id(number: u128) -> PlcTypeId {
         0x7357_0e00_0000_0000_0000_0000_0000_0000 | number,
     ))
 }
+
+/// The machine that owns a seeded row, and the platform of that machine.
+pub(super) type RowOwner = (MachineId, PlcPlatform);
 
 /// Seed the struct `name@1` of `M7` with the members `members` and return its identifier.
 ///
@@ -135,14 +150,26 @@ pub(super) fn seed_struct(
     name: &str,
     members: &[(&str, PlcTypeId)],
 ) -> PlcTypeId {
+    let owner = (world.ids.m7, PlcPlatform::S7_300);
+    seed_struct_for(world, owner, number, (name, 1), members)
+}
+
+/// Seed the struct `name@revision` of `owner` with the members `members` and return its identifier.
+pub(super) fn seed_struct_for(
+    world: &World,
+    owner: RowOwner,
+    number: u128,
+    (name, revision): (&str, u32),
+    members: &[(&str, PlcTypeId)],
+) -> PlcTypeId {
     let id = struct_id(number);
     let row = PlcType::try_from(PlcTypeRecord {
         id,
-        machine: Some(world.ids.m7),
-        platforms: BTreeSet::from([PlcPlatform::S7_300]),
+        machine: Some(owner.0),
+        platforms: BTreeSet::from([owner.1]),
         shape: RecordShape::Struct {
             name: TypeName::parse(name).unwrap(),
-            revision: 1,
+            revision,
             supersedes: None,
             members: members
                 .iter()
@@ -167,6 +194,18 @@ pub(super) fn seed_array(
     element: PlcTypeId,
     dimensions: &[(i32, i32)],
 ) -> PlcTypeId {
+    let owner = (world.ids.m7, PlcPlatform::S7_300);
+    seed_array_for(world, owner, number, element, dimensions)
+}
+
+/// Seed an array row of `owner` and return its identifier.
+pub(super) fn seed_array_for(
+    world: &World,
+    owner: RowOwner,
+    number: u128,
+    element: PlcTypeId,
+    dimensions: &[(i32, i32)],
+) -> PlcTypeId {
     let id = struct_id(number);
     let parsed: Vec<ArrayDimension> = dimensions
         .iter()
@@ -174,8 +213,8 @@ pub(super) fn seed_array(
         .collect();
     let row = PlcType::try_from(PlcTypeRecord {
         id,
-        machine: Some(world.ids.m7),
-        platforms: BTreeSet::from([PlcPlatform::S7_300]),
+        machine: Some(owner.0),
+        platforms: BTreeSet::from([owner.1]),
         shape: RecordShape::Array {
             element,
             dimensions: ArrayDimensions::parse(parsed).unwrap(),

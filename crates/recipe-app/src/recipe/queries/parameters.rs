@@ -7,11 +7,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use recipe_domain::plant::{
-    Machine, MachineCode, PlatformTypes, PlcType, PlcTypeId, TypeTree, UnitId, UnitPath,
+    Machine, MachineCode, PlatformTypes, PlcTypeId, RecordShape, TypeNode, TypeTree, UnitId,
+    UnitPath,
 };
 use recipe_domain::recipe::{
-    ParameterKey, ParameterTag, Recipe, ReferenceNumber, StoredLimit, StoredParameter, Translation,
-    VersionState,
+    ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeVersionId, ReferenceNumber,
+    StoredLimit, StoredParameter, StoredValue, Translation, ValueFault, VersionState,
 };
 use recipe_domain::text::{LongText, Text};
 
@@ -95,6 +96,9 @@ pub struct ParameterList {
     pub rows: Vec<ParameterRow>,
     /// The type text of each type that a row of the page uses, for example `ARRAY[1..4] OF INT`.
     pub type_texts: BTreeMap<PlcTypeId, String>,
+    /// The leaf text of the value of each primitive parameter of the page, as the leaf grid
+    /// writes it (A43). An array parameter and a struct parameter have no entry.
+    pub value_texts: BTreeMap<ParameterKey, String>,
     /// The page number. The first page is page 0.
     pub page: u32,
     /// Whether a page after this page holds a row.
@@ -144,25 +148,119 @@ pub(super) fn text_of(types: &PlatformTypes, id: PlcTypeId) -> Result<String, Ap
         .ok_or_else(|| StorageError::invariant("a parameter type has no type text").into())
 }
 
-/// Write the type text of each type that `rows` use, over the type rows of `machine`.
+/// Write the type text of each type that `rows` use, over the type rows of `types`.
 fn texts_of(
-    machine: &Machine,
-    type_rows: Vec<PlcType>,
+    types: &PlatformTypes,
     rows: &[ParameterRow],
 ) -> Result<BTreeMap<PlcTypeId, String>, AppError> {
-    let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
     let used: BTreeSet<PlcTypeId> = rows.iter().map(|row| row.plc_type).collect();
     used.into_iter()
-        .map(|id| Ok((id, text_of(&types, id)?)))
+        .map(|id| Ok((id, text_of(types, id)?)))
         .collect()
+}
+
+/// Write the leaf text of a stored value, as the leaf grid writes it (A43, ADR-0039).
+///
+/// The function solves one problem: the parameter table and the answer of `AddParameter` show
+/// the value of a primitive parameter, and they must show the text of the leaf grid. It uses the
+/// domain check `ParameterValue::try_from` and the domain writer `ParameterValue::texts`, so no
+/// second formatter exists. A `TIME` value shows its IEC literal, and a `REAL` value shows its
+/// canonical decimal text.
+///
+/// Returns `Some(text)` when the root of `tree` is a primitive leaf. Returns `None` for an array
+/// and for a struct, because they have more than one leaf.
+///
+/// # Errors
+///
+/// Returns the `ValueFault` of a stored value that does not match `tree`, a defect of the storage.
+pub(crate) fn value_text(
+    tree: &TypeTree,
+    value: &StoredValue,
+) -> Result<Option<String>, ValueFault> {
+    if !matches!(tree.root(), TypeNode::Leaf { .. }) {
+        return Ok(None);
+    }
+    leaf_text(tree, value).map(Some)
+}
+
+/// Write the leaf text of a stored value whose `tree` has a primitive leaf as its root.
+///
+/// The caller guarantees the leaf root. A tree with more than one leaf gives `WrongTree`.
+fn leaf_text(tree: &TypeTree, value: &StoredValue) -> Result<String, ValueFault> {
+    let checked = ParameterValue::try_from((value, tree))?;
+    let mut leaves = checked.texts(tree)?.into_iter();
+    match (leaves.next(), leaves.next()) {
+        (Some(leaf), None) => Ok(leaf.text),
+        _ => Err(ValueFault::WrongTree),
+    }
+}
+
+/// Resolve the tree of each primitive type that `rows` use.
+///
+/// A type row with another shape than `Primitive` has no entry, so its parameters have no value text.
+fn primitive_trees(
+    types: &PlatformTypes,
+    rows: &[ParameterRow],
+) -> Result<BTreeMap<PlcTypeId, TypeTree>, AppError> {
+    let used: BTreeSet<PlcTypeId> = rows.iter().map(|row| row.plc_type).collect();
+    types
+        .rows()
+        .filter(|row| {
+            used.contains(&row.id()) && matches!(row.shape(), RecordShape::Primitive { .. })
+        })
+        .map(|row| Ok((row.id(), TypeTree::resolve(row.id(), types)?)))
+        .collect()
+}
+
+/// Write the value text of each row that has a tree in `trees`, over the stored `values`.
+///
+/// # Errors
+///
+/// Returns `StorageError` (`E-DB-008`) when a primitive row has no value or a value does not
+/// match its tree. Both cases are defects of the storage. The second case names the parameter key.
+fn value_texts_of(
+    rows: &[ParameterRow],
+    trees: &BTreeMap<PlcTypeId, TypeTree>,
+    values: &BTreeMap<ParameterKey, StoredValue>,
+) -> Result<BTreeMap<ParameterKey, String>, AppError> {
+    let mut texts = BTreeMap::new();
+    for row in rows {
+        let Some(tree) = trees.get(&row.plc_type) else {
+            continue;
+        };
+        let value = values
+            .get(&row.key)
+            .ok_or_else(|| StorageError::invariant("a primitive parameter has no stored value"))?;
+        let text =
+            leaf_text(tree, value).map_err(|fault| StorageError::broken_value(row.key, fault))?;
+        texts.insert(row.key, text);
+    }
+    Ok(texts)
+}
+
+/// Read the stored values of the primitive rows of the page in the open transaction.
+///
+/// A row whose type has no tree in `trees` is a composite row and has no entry.
+async fn read_primitive_values(
+    tx: &mut dyn Transaction,
+    version: RecipeVersionId,
+    (rows, trees): (&[ParameterRow], &BTreeMap<PlcTypeId, TypeTree>),
+) -> Result<BTreeMap<ParameterKey, StoredValue>, AppError> {
+    let keys: Vec<ParameterKey> = rows
+        .iter()
+        .filter(|row| trees.contains_key(&row.plc_type))
+        .map(|row| row.key)
+        .collect();
+    Ok(tx.recipe_reads().parameter_values(version, &keys).await?)
 }
 
 /// Lists the parameters of one version, one page at a time.
 ///
 /// The query solves one problem: a version can hold 4 000 parameters. The table must show at
 /// most `page.parameters` rows from a fixed number of statements. The query reads the counts of
-/// the units, one page of rows, and the type rows in one `RepeatableRead` transaction. So the
-/// `row_version` and the type texts of the result belong to the rows (ADR-0042).
+/// the units, one page of rows, and the type rows in one `RepeatableRead` transaction. It also
+/// reads the values of the primitive rows of the page in that transaction (ADR-0108 (b)). So the
+/// `row_version`, the type texts, and the values of the result belong to the rows (ADR-0042).
 #[derive(Clone)]
 pub struct ListParameters {
     ctx: AppContext,
@@ -210,9 +308,14 @@ impl ListParameters {
             .parameter_page(scope.detail.id, filter, offset, limit)
             .await?;
         let type_rows = tx.types().type_rows(scope.machine.id()).await?;
-        drop(tx);
         let (rows, has_next) = cut_page(rows, size);
-        let type_texts = texts_of(&scope.machine, type_rows, &rows)?;
+        let machine = &scope.machine;
+        let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
+        let trees = primitive_trees(&types, &rows)?;
+        let values = read_primitive_values(tx.as_mut(), scope.detail.id, (&rows, &trees)).await?;
+        drop(tx);
+        let type_texts = texts_of(&types, &rows)?;
+        let value_texts = value_texts_of(&rows, &trees, &values)?;
         Ok(ParameterList {
             recipe: scope.recipe,
             machine: scope.machine,
@@ -221,6 +324,7 @@ impl ListParameters {
             unit: shown.map(|count| count.path),
             rows,
             type_texts,
+            value_texts,
             page: input.page,
             has_next,
         })

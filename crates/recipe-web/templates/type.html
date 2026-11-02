@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "components/heading.html" as headings %}
 {% import "components/icons.html" as icons %}
+{% import "components/table.html" as tables %}
 {% import "components/tree.html" as trees %}
 {% block content %}
 {{ headings::h1(layout, title) }}
@@ -10,6 +11,10 @@
 {% endif %}<section aria-labelledby="type-tree-title"><h2 id="type-tree-title">{{ t.get("type-tree-title") }}</h2>
 {#- The tree is one flat list. A macro cannot call itself, so a group opens here with the markup of trees::type_node and closes after its last member. -#}
 <ul class="tree">{% for item in items %}{% if item.group %}<li><div class="tree-row"><button type="button" class="tree-node" aria-expanded="{% if item.expanded %}true{% else %}false{% endif %}" aria-controls="tree-group-{{ item.id }}-{{ item.index }}">{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span class="data">{{ item.name }}</span>{% if !item.type_text.is_empty() %}<span class="data tree-type">{{ item.type_text }}</span>{% endif %}</button></div><ul class="tree-group" id="tree-group-{{ item.id }}-{{ item.index }}"{% if !item.expanded %} hidden{% endif %}>{% else %}{{ trees::type_leaf(item.name, item.type_text) }}{% endif %}{% for _close in 0..item.closes %}</ul></li>{% endfor %}{% endfor %}</ul></section>
-<p class="actions"><a class="target-link" href="{{ usage_href }}">{{ t.get("type-usage-link") }}</a>{% if let Some(href) = new_revision_href %}<a class="target-link" href="{{ href }}">{{ t.get("type-new-revision-link") }}</a>{% endif %}</p>
+{% if let Some(s7) = s7 %}<p>{{ t.get("type-s7-standard-access") }}</p>
+{% call tables::frame("type-s7-caption", t.get("type-s7-caption")) %}<thead><tr>{{ tables::head(t.get("column-path")) }}{{ tables::head(t.get("column-type")) }}{{ tables::head(t.get("column-offset")) }}</tr></thead>
+<tbody>{% for row in s7.rows %}<tr><td class="data">{{ row.path }}</td><td class="data">{{ row.type_text }}</td><td class="num">{{ row.offset }}</td></tr>
+{% endfor %}</tbody>{% endcall %}<p>{{ t.with_arg("type-s7-size", "bytes", s7.size_bytes) }}</p>
+{% endif %}<p class="actions"><a class="target-link" href="{{ usage_href }}">{{ t.get("type-usage-link") }}</a>{% if let Some(href) = new_revision_href %}<a class="target-link" href="{{ href }}">{{ t.get("type-new-revision-link") }}</a>{% endif %}</p>
 <p><a class="target-link" href="{{ list_href }}">{{ list_text }}</a></p>
 {% endblock %}

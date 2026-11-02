@@ -6,26 +6,35 @@
 //! draft with 40 parameters equals the count for a draft with 4 000 parameters. The count for
 //! 4 units equals the count for 40 units.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, Role};
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Unit, UnitId,
     UnitPath, UnitUsage,
 };
-use recipe_domain::recipe::{ParameterKey, RecipeId, RecipeVersionId};
+use recipe_domain::recipe::{
+    Ordinal, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
+};
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
 
 use super::parameters::{ListParameters, ListParametersInput, ParameterList};
+use super::parameters_tests::typed_world;
 use super::test_world::seed_users;
+use super::versions::{GetVersion, GetVersionInput};
+use crate::blocking::{AppSettings, PageSizes};
 use crate::context::AppContext;
 use crate::error::StorageError;
 use crate::memory::MemoryStore;
-use crate::memory::fixtures::{Fixture, actor, meta, mid, parameter_on, reference, text, uid, vid};
+use crate::memory::fixtures::{
+    Fixture, actor, meta, mid, parameter_on, pkey, reference, scenarios, text, uid, vid,
+};
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DerivedTypeLock, DiffReads, DraftRepository,
     Ensured, InsertedMachine, Isolation, Locked, MachineFilter, MachineSummary, NonEmpty,
@@ -39,13 +48,21 @@ const PLATFORM: PlcPlatform = PlcPlatform::TwinCat3;
 /// The number of main units of the large machine.
 const UNITS: u128 = 40;
 /// The port calls of `ListParameters`: the recipe, the machine, the version detail, the unit
-/// counts, the page of rows, and the type rows.
-const READS: usize = 6;
+/// counts, the page of rows, the type rows, and the values of the primitive rows.
+const READS: usize = 7;
+
+/// What the counting transactions record: the count of port calls and the `keys` argument of
+/// each `parameter_values` call.
+#[derive(Default)]
+struct Probe {
+    calls: AtomicUsize,
+    value_keys: Mutex<Vec<Vec<ParameterKey>>>,
+}
 
 /// A unit of work that counts the port calls of every transaction that it opens.
 struct CountingStore {
     inner: MemoryStore,
-    calls: Arc<AtomicUsize>,
+    probe: Arc<Probe>,
 }
 
 #[async_trait]
@@ -54,7 +71,7 @@ impl UnitOfWork for CountingStore {
         let inner = self.inner.begin(isolation).await?;
         Ok(Box::new(CountingTransaction {
             inner,
-            calls: Arc::clone(&self.calls),
+            probe: Arc::clone(&self.probe),
         }))
     }
 }
@@ -62,12 +79,12 @@ impl UnitOfWork for CountingStore {
 /// A transaction that counts each `RecipeReads` call and each accessor call of another port.
 struct CountingTransaction {
     inner: Box<dyn Transaction>,
-    calls: Arc<AtomicUsize>,
+    probe: Arc<Probe>,
 }
 
 impl CountingTransaction {
     fn count(&self) {
-        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.probe.calls.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -196,6 +213,19 @@ impl RecipeReads for CountingTransaction {
         self.inner
             .recipe_reads()
             .parameter_page(version, unit, offset, limit)
+            .await
+    }
+
+    async fn parameter_values(
+        &mut self,
+        version: RecipeVersionId,
+        keys: &[ParameterKey],
+    ) -> Result<BTreeMap<ParameterKey, StoredValue>, StorageError> {
+        self.count();
+        self.probe.value_keys.lock().push(keys.to_vec());
+        self.inner
+            .recipe_reads()
+            .parameter_values(version, keys)
             .await
     }
 
@@ -436,19 +466,25 @@ fn draft_on_units(units: u128, per_unit: u128) -> Fixture {
     fixture
 }
 
-/// Run `ListParameters` without a unit on `fixture` and return the result and the port calls.
-async fn counted_list(fixture: &Fixture) -> (ParameterList, usize) {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let base = fixture.context();
+/// The context of `fixture` over a counting unit of work, and the probe that the unit of work fills.
+fn counting_context(fixture: &Fixture, settings: AppSettings) -> (AppContext, Arc<Probe>) {
+    let probe = Arc::new(Probe::default());
+    let base = fixture.context_with(settings);
     let ctx = AppContext::new(
         Arc::new(CountingStore {
             inner: fixture.store.clone(),
-            calls: Arc::clone(&calls),
+            probe: Arc::clone(&probe),
         }),
         base.security,
         base.clock,
         base.settings,
     );
+    (ctx, probe)
+}
+
+/// Run `ListParameters` of `R-1` without a unit and return the result and the probe.
+async fn probed_list(fixture: &Fixture, settings: AppSettings) -> (ParameterList, Arc<Probe>) {
+    let (ctx, probe) = counting_context(fixture, settings);
     let result = ListParameters::new(ctx)
         .execute(
             &actor(Role::Operator),
@@ -462,7 +498,13 @@ async fn counted_list(fixture: &Fixture) -> (ParameterList, usize) {
         )
         .await
         .unwrap();
-    (result, calls.load(Ordering::Relaxed))
+    (result, probe)
+}
+
+/// Run `ListParameters` without a unit on `fixture` and return the result and the port calls.
+async fn counted_list(fixture: &Fixture) -> (ParameterList, usize) {
+    let (result, probe) = probed_list(fixture, AppSettings::default()).await;
+    (result, probe.calls.load(Ordering::Relaxed))
 }
 
 #[tokio::test]
@@ -503,4 +545,82 @@ async fn the_count_of_port_calls_does_not_grow_with_the_count_of_units() {
         few_calls, many_calls,
         "4 units: {few_calls} calls, 40 units: {many_calls}"
     );
+}
+
+/// The settings with `size` rows on a page of the parameter table.
+fn pages_of(size: u32) -> AppSettings {
+    AppSettings {
+        pages: PageSizes {
+            parameters: size,
+            ..PageSizes::default()
+        },
+        ..AppSettings::default()
+    }
+}
+
+/// `typed_world` with the `INT` parameter `RATE` (key 4) after the four rows of the page.
+///
+/// The row uses a type that the page uses too. So only the page cut keeps its key out.
+///
+/// The rows of `U1` in table order are `ZONE1` (struct, key 11), `SPEED` (`INT`, key 1),
+/// `VALUES` (array, key 2), `LABEL` (`STRING(20)`, key 3), and `RATE` (`INT`, key 4).
+fn world_with_a_row_past_the_page() -> Fixture {
+    let fixture = typed_world();
+    let parameter = StoredParameter {
+        ordinal: Ordinal::parse(4).unwrap(),
+        ..parameter_on(PLATFORM, 4, "RATE", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(101), &parameter);
+    fixture
+}
+
+#[tokio::test]
+async fn list_parameters_reads_the_values_of_the_primitive_rows_of_the_page_only() {
+    let fixture = world_with_a_row_past_the_page();
+
+    let (list, probe) = probed_list(&fixture, pages_of(4)).await;
+
+    let shown: Vec<ParameterKey> = list.rows.iter().map(|row| row.key).collect();
+    assert_eq!(
+        shown,
+        [pkey(11), pkey(1), pkey(2), pkey(3)],
+        "the page holds a struct, an INT, an array, and a STRING"
+    );
+    assert!(list.has_next, "the INT row 4 lies past the page");
+    let mut calls = probe.value_keys.lock().clone();
+    assert_eq!(calls.len(), 1, "one call of parameter_values");
+    let mut keys = calls.remove(0);
+    keys.sort();
+    assert_eq!(
+        keys,
+        [pkey(1), pkey(3)],
+        "only the primitive rows of the cut page"
+    );
+}
+
+#[tokio::test]
+async fn get_version_does_not_read_parameter_values() {
+    let fixture = scenarios::approved_and_draft();
+    seed_users(&fixture);
+    for number in [1, 2] {
+        let (ctx, probe) = counting_context(&fixture, AppSettings::default());
+
+        GetVersion::new(ctx)
+            .execute(
+                &actor(Role::Operator),
+                &meta(),
+                GetVersionInput {
+                    reference: reference("R-1"),
+                    number,
+                    rebind_bound: 16_384,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            probe.value_keys.lock().is_empty(),
+            "version {number}: GetVersion calls parameter_values"
+        );
+    }
 }

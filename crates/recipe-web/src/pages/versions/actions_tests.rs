@@ -32,6 +32,29 @@ const RETIRED_EXPORT_HREF: &str = "href=\"/export/v1/recipes/R-100/versions/1\""
 /// The opening tag of a danger action.
 pub(super) const DANGER: &str = "<details class=\"danger\">";
 
+/// Assert that `main` holds no form of a mutating action.
+///
+/// The page may hold one form: the compare form, which uses `GET`. It must not hold an HTMX
+/// attribute that sends a mutating request. The check also catches a form without `method`.
+pub(super) fn assert_no_action_form(main: &str) {
+    assert!(main.matches("<form").count() <= 1, "{main}");
+    if let Some((_before, rest)) = main.split_once("<form") {
+        let tag = rest.split('>').next().unwrap();
+        assert!(
+            format!("<form{tag}").starts_with("<form method=\"get\" action=\"/recipes/"),
+            "{main}"
+        );
+        let action = tag.split_once(" action=\"").unwrap().1;
+        assert!(
+            action.split('"').next().unwrap().ends_with("/compare"),
+            "{main}"
+        );
+    }
+    for attribute in ["hx-post", "hx-put", "hx-patch", "hx-delete"] {
+        assert!(!main.contains(attribute), "{attribute}: {main}");
+    }
+}
+
 /// Return the markup of the form that starts with `tag`, up to `</form>`.
 fn form_of<'a>(main: &'a str, tag: &str) -> &'a str {
     let (_before, rest) = main.split_once(tag).unwrap();
@@ -165,7 +188,7 @@ async fn actions_approved_version_shows_the_retire_form_only_to_the_administrato
         .await;
     let main = main_of(&engineer.body);
     assert_action_area(main);
-    assert!(!main.contains("<form"), "{main}");
+    assert_no_action_form(main);
     assert!(!main.contains(DANGER), "{main}");
     assert!(main.contains(APPROVED_EXPORT_HREF), "{main}");
 }
@@ -197,7 +220,7 @@ async fn actions_retired_version_and_operator_draft_show_only_the_history_link()
         assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
         let main = main_of(&reply.body);
         assert_action_area(main);
-        assert!(!main.contains("<form"), "{main}");
+        assert_no_action_form(main);
         assert!(!main.contains(DANGER), "{main}");
         assert!(!main.contains("/approve\""), "{main}");
     }
@@ -219,7 +242,7 @@ async fn actions_deleted_recipe_shows_no_form_to_the_administrator_and_e_rcp_012
     let main = main_of(&admin.body);
     assert!(main.contains("Deleted"), "{main}");
     assert!(main.contains("href=\"/recipes/R-300/history\""), "{main}");
-    assert!(!main.contains("<form"), "{main}");
+    assert_no_action_form(main);
     assert!(!main.contains(DANGER), "{main}");
     for session in [&world.engineer, &world.operator] {
         let reply = world.get_en(session, path).await;

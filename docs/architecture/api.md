@@ -43,7 +43,7 @@ Request fields. `E-WEB-005` is for URL values only. A request field that names a
 
 Mutating requests use `POST`. No route uses `PUT` or `DELETE`, because a form sends only `GET` and `POST` (ADR-0040). Every mutating request carries the CSRF token (section 7). Every mutating request on a `Draft` carries `row_version` (section 4).
 
-The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016, and the queries of `domain-model.md` 5.5. A query is also a use case. It checks its permission first, in the same way as a command (R28). Every `GET` row of the tables of section 2 names its query use case, except the two export rows, which run the command `ExportVersion`. A form or preview query has the permission of the command that it prepares.
+The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016, and the queries of `domain-model.md` 5.5. A query is also a use case. It checks its permission first, in the same way as a command (R28). Every `GET` row of the tables of section 2 names its query use case, except the two export rows, which run the command `ExportVersion`. The row `GET /recipes/{ref}/compare` names no use case, because it only redirects to the diff route, which runs `DiffVersions` (ADR-0108 (e)). A form or preview query has the permission of the command that it prepares.
 
 ## 2. Endpoints
 
@@ -105,7 +105,7 @@ A malformed `parent_path` of `GetUnitForm` gives the code of `UnitPath` (section
 | GET | `/machines/{code}/types` | `ListTypes` | `RecipeView` | - | `200` list of UDTs, one row per revision. Inside one name the latest revision comes first | `404 E-WEB-005` |
 | GET | `/machines/{code}/types/new` | `GetUdtForm` | `UdtManage` | optional `from` (ADR-0037) | `200` form. With `from`, the form of a new revision of `from` with the members of its latest revision | `404 E-WEB-005` |
 | POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type` (a `TypeExpr`), optional `add` (ADR-0037) | `303` to the new type. With `add=1`, the query `GetUdtForm` runs in place of `DefineUdt`. Then `200` with the form, the sent rows, and one more empty row | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016`, `422 E-PLT-018`, `422 E-PLT-021` |
-| GET | `/machines/{code}/types/{name}` | `GetTypeTree` | `RecipeView` | optional `rev` | `200` type tree of the latest revision, or of `rev` | `404 E-WEB-005` |
+| GET | `/machines/{code}/types/{name}` | `GetTypeTree` | `RecipeView` | optional `rev` | `200` type tree of the latest revision, or of `rev`. A machine on `S7_300`, `S7_1200`, or `S7_1500` also gets the S7 layout (ADR-0108 (h)) | `404 E-WEB-005` |
 | POST | `/machines/{code}/types/{name}/revisions` | `DefineUdt` | `UdtManage` | same as `POST /types`. The server sets `supersedes` | `303` to the new revision | same as `POST /types` |
 | GET | `/machines/{code}/types/{name}/usage` | `GetTypeUsage` | `RecipeView` | optional `rev`, `page` | `200` list of recipes and parameters that use the revision, directly or through another type. `page.type_usage` rows per page | `404 E-WEB-005` |
 
@@ -114,6 +114,8 @@ A malformed `from` gives `404 E-WEB-005`, as a malformed `{name}` does. A `rev` 
 The struct name `new` gives `422 E-WEB-008`, because the route `/types/new` would hide the page of the struct (ADR-0037).
 
 A UDT is immutable. A second `POST` creates a new revision (ADR-0006). The usage query is the "where used" view that the rebind workflow needs (ADR-0018).
+
+The type page of a machine on `S7_300`, `S7_1200`, or `S7_1500` shows the table S7 layout after the type tree (ADR-0108 (h)). The table has one row per struct member in the order of the tree. An array is one row. Each row has the path, the type, and the offset as `<byte>.<bit>`. A sentence before the table says that the offsets apply to a data block with standard access. A sentence after the table gives the size in bytes. A machine on `CodesysIec` or `TwinCat3` gets no S7 layout. The placement rules are in ADR-0017 and ADR-0108 (g).
 
 The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `TypeExpr` (`domain-model.md` 2.1). Examples: `INT`, `STRING(20)`, `ST_Zone@3`, `ARRAY[1..8] OF REAL`, `ARRAY[0..1,1..2] OF ST_Zone@3`. The internal operation `EnsureDerivedType` resolves the expression and creates a missing `STRING(n)`, `WSTRING(n)`, or array type (`domain-model.md` 5.1). A bad expression returns `422 E-PLT-013`. The exception is a member of `DefineUdt` whose type is not on the platform, which returns `422 E-PLT-006`. A type above a size limit returns `422 E-PLT-018` (`domain-model.md` 2.1).
 
@@ -135,7 +137,7 @@ The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `T
 
 A deleted recipe. An Administrator reads its recipe page and its version pages with the state "Deleted" and no form. Every other `GET` route with `{ref}` of sections 2.4 to 2.6 answers `409 E-RCP-012` to every other role. A form route, such as `.../versions/new` or `.../parameters/new`, answers `409 E-RCP-012` to every role with the permission of its command (ADR-0043, ADR-0046). The approval preview is a form route. The diff route of section 2.5 and the history route of section 2.9 follow the rule of the other `GET` routes. An Administrator reads them, and every other role gets `409 E-RCP-012` (ADR-0050, ADR-0051).
 
-The recipe page holds the delete form in a danger disclosure for a role with `RecipeDelete`. The list with `show_deleted=1` holds a restore form in each deleted row. The pages of a deleted recipe keep no form (ADR-0049).
+The recipe page holds the delete form in a danger disclosure for a role with `RecipeDelete`. The list with `show_deleted=1` holds a restore form in each deleted row. The pages of a deleted recipe keep no form that writes (ADR-0049, ADR-0108 (d)). The version page keeps the compare form, because it sends a `GET` request.
 
 ### 2.5 Versions
 
@@ -144,13 +146,14 @@ The recipe page holds the delete form in a danger disclosure for a role with `Re
 | GET | `/recipes/{ref}/versions` | `ListVersions` | `RecipeView` | `page` | `200` version list fragment, `page.versions` rows per page | `404 E-WEB-005`, `409 E-RCP-012` |
 | GET | `/recipes/{ref}/versions/new` | `GetVersionForm` | `VersionCreate` | - | `200` form with `based_on` and `change_note` | `404 E-WEB-005`, `409 E-RCP-012` |
 | POST | `/recipes/{ref}/versions` | `CreateVersion` | `VersionCreate` | `based_on` (version number, optional), `change_note` | `303` to the new `Draft`. The draft page lists only the outdated parameters, which need a rebind. A base version can reference an archived unit, an archived machine, or a type that is not on the platform. Then the server returns `422 E-RCP-020` with the items and creates no draft | `404 E-WEB-005`, `409 E-RCP-011`, `409 E-RCP-012`, `409 E-PLT-010`, `422 E-RCP-020`, `422 E-RCP-021`, `422 E-WEB-008` (`based_on`) |
-| GET | `/recipes/{ref}/versions/{n}` | `GetVersion` | `RecipeView` | `page` and `unit` for the parameter table (ADR-0043 (j)) | `200` version page. Editable forms only for a `Draft` and a user with `ParameterEdit` | `404 E-WEB-005`, `409 E-RCP-012` |
+| GET | `/recipes/{ref}/versions/{n}` | `GetVersion` | `RecipeView` | `page` and `unit` for the parameter table (ADR-0043 (j)) | `200` version page. Editable forms only for a `Draft` and a user with `ParameterEdit`. The header of an `Approved` or a `Retired` version shows `content_sha256`. The page shows the compare form when the recipe has two or more versions (ADR-0108 (c), (d)) | `404 E-WEB-005`, `409 E-RCP-012` |
 | GET | `/recipes/{ref}/versions/{n}/approve` | `GetApprovalPreview` | `VersionApprove` | `kind`, `page`, `rv` (ADR-0050) | `200` approve page. Shows the diff against the current `Approved` version. Limit changes are highlighted. Lists the outdated parameters and offers the flag `allow_outdated`. Shows the blockers of the approval (ADR-0049) | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012` |
 | POST | `/recipes/{ref}/versions/{n}/approve` | `ApproveVersion` | `VersionApprove` | `row_version`, `allow_outdated` (default `false`), CSRF token | `200` version page. Shows the retired version number when one exists. An already approved version with `row_version == expected + 1` returns the same page without a change | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-RCP-015`, `409 E-WEB-001`, `422 E-RCP-008`, `422 E-RCP-016`, `422 E-RCP-020`, `422 E-RCP-022`, `422 E-RCP-023`, `422 E-RCP-024`, `500 E-EXP-004` |
 | POST | `/recipes/{ref}/versions/{n}/retire` | `RetireVersion` | `VersionRetire` | `row_version`, CSRF token | `200` version page | `404 E-WEB-005`, `409 E-RCP-009`, `409 E-RCP-012`, `409 E-WEB-001` |
 | POST | `/recipes/{ref}/versions/{n}/discard` | `DiscardDraft` | `VersionDiscard` | `row_version`, CSRF token | `303` to `/recipes/{ref}` | `404 E-WEB-005`, `409 E-RCP-007`, `409 E-RCP-012`, `409 E-WEB-001` |
 | POST | `/recipes/{ref}/versions/{n}/rebind` | `RebindTypeRevision` | `ParameterEdit` | `row_version`, `from_type_id`, `to_type_id`, one field `new_member_values[<key>]<leaf path>` per new member leaf (ADR-0039) | `200` parameter table fragment | `404 E-WEB-005`, `409 E-RCP-002`, `409 E-RCP-012`, `409 E-WEB-001`, `422 E-RCP-005`, `422 E-RCP-021`, `422 E-RCP-022`, `422 E-RCP-028`, `422 E-RCP-029`, `422 E-RCP-052`, `422 E-PLT-018` |
 | GET | `/recipes/{ref}/versions/{n}/diff/{m}` | `DiffVersions` | `RecipeView` | `kind`, `page` (ADR-0050) | `200` parameter diff between versions `n` and `m` | `404 E-WEB-005`, `409 E-RCP-012` |
+| GET | `/recipes/{ref}/compare` | - (redirect only) | authenticated | `n`, `m` (version numbers, ADR-0108 (e)) | `303` to `/recipes/{ref}/versions/{max(n,m)}/diff/{min(n,m)}` | `404 E-WEB-005` (malformed `{ref}`), `422 E-WEB-008` |
 
 A version with `based_on` empty starts with no parameters. The approve `POST` is idempotent (section 4). It returns `422 E-RCP-024` for an outdated parameter unless `allow_outdated` is `true`. The audit entry `VersionApproved` records the flag (A29, ADR-0018).
 
@@ -163,6 +166,10 @@ Only a user with `ParameterEdit` on a live `Draft` gets the rebind forms, with a
 The approve page is the review step of the approval (ADR-0049). It runs the checks of the approval without a write and shows each blocker. With a blocker, it shows no approve form. The retire and the discard forms stand in danger disclosures on the version page. An HTMX success of the approval and of the retirement sets `HX-Push-Url` to the path of the version page.
 
 The diff compares the definition, the value per leaf, the limit rows, and the translations of each parameter, matched by `key`. In `.../diff/{m}`, `m` is the old side. The page groups the changes by kind. `kind` names one section, and `page` counts the pages of that section, with `page.diff` parameters per page (ADR-0050). The preview carries the `row_version` of its first page in `rv`.
+
+The compare form of the version page has the lists `n` and `m`, which hold each version number of the recipe. It sends `GET /recipes/{ref}/compare` and no CSRF token (ADR-0037, ADR-0108 (d)). The compare route runs no use case, reads no data, and writes nothing. A missing key, an unknown key, or a value that is not a version number gives `422 E-WEB-008`. The diff route then checks the permission and the versions.
+
+The header of an `Approved` or a `Retired` version shows the field `content_sha256` of section 6. A `Draft` shows no content hash (ADR-0108 (c)).
 
 ### 2.6 Parameters
 
@@ -193,6 +200,8 @@ Rules:
 - A `duration` or `instant` leaf in a value field, `limits[i].min`, `limits[i].max`, and `new_member_values` is an IEC literal, for example `T#1s` (`domain-model.md` 2.1). The server stores the count of the base unit.
 - `AddParameter` always carries the value fields, and `limits[]` can be empty. `UpdateParameterDefinition` carries the value fields and `limits[]` when the type changes. Then both replace the old value and the old limits. Without a type change, a request with both also replaces them (ADR-0029). A request without them keeps the value and the limits unchanged. `SetParameterValue` and `ReplaceLimits` change one of them without a type change.
 - The parameter table is paginated. A `Draft` with more than 100 parameters shows one unit per page by default.
+- The parameter table of the version page has the column Value after the column Type (ADR-0108 (a), (b)). A parameter of a primitive type shows the text of its leaf. The cell holds at most `table.value_chars` characters (`reliability.md` section 7.11). A longer text ends with `…`. An array or a struct shows a fixed word. The table read loads the values of one page only, through the port method `parameter_values`. A stored value that does not match its type gives `500 E-DB-008`. The row fragment of `AddParameter` shows the canonical text of the new value.
+- A save toast of a command after which the draft stays a live draft names the new `row_version`. The number equals `rowVersion` in `HX-Trigger` (section 4, ADR-0108 (f)).
 
 ### 2.7 Export
 

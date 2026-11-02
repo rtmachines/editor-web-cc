@@ -58,9 +58,9 @@ const RECIPE_ID: Uuid = Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_010
 /// The identifier of the version 1 of `R-100`, a retired version.
 const RETIRED_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0001);
 /// The identifier of the version 2 of `R-100`, an approved version.
-const APPROVED_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0002);
+pub(crate) const APPROVED_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0002);
 /// The identifier of the version 3 of `R-100`, the live draft.
-const DRAFT_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0003);
+pub(crate) const DRAFT_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0003);
 /// The identifier of the parameter `line`.
 const PARAMETER_ID: Uuid = Uuid::from_u128(0x7357_0006_0000_0000_0000_0000_0000_0001);
 /// The key of the parameter `line`.

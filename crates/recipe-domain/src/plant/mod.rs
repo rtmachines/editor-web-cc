@@ -40,7 +40,7 @@ pub use platform::{PlcPlatform, PlcPlatformReason};
 pub use plc_type::{PlcType, PlcTypeRecord, RecordShape, TypeKind, TypeMember};
 pub use primitive::{LeafClass, LeafClassReason, Primitive, PrimitiveReason};
 pub use s7_address::{S7Address, S7AddressReason, S7Width};
-pub use s7_layout::{S7Layout, S7Start};
+pub use s7_layout::{S7Layout, S7Member, S7Start, s7_members};
 pub use string_length::{StringKind, StringLength, StringLengthReason};
 pub use type_expr::{BaseExpr, TypeExpr};
 pub use type_name::{MemberName, MemberNameReason, TypeName, TypeNameReason};

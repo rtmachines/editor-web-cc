@@ -7,7 +7,7 @@
 
 use axum::http::StatusCode;
 
-use super::actions_tests::{LINKS_TAG, links_area};
+use super::actions_tests::{LINKS_TAG, assert_no_action_form, links_area};
 use crate::pages::audit::test_world::{AuditWorld, audit_world};
 use crate::pages::test_helpers::assert_clean_html;
 use crate::test_support::plant::{ENGLISH, HTMX, TARGET_CONTENT, main_of};
@@ -162,7 +162,7 @@ async fn compare_links_use_the_polish_texts() {
 }
 
 #[tokio::test]
-async fn compare_deleted_recipe_keeps_the_links_and_shows_no_form() {
+async fn compare_deleted_recipe_keeps_the_links_and_shows_no_post_form() {
     let world = audit_world().await;
     approve_v2(&world).await;
     let row_version = world.row_version_of("R-500", 2).await;
@@ -174,7 +174,7 @@ async fn compare_deleted_recipe_keeps_the_links_and_shows_no_form() {
     let reply = page(&world, "en", V2).await;
     let main = main_of(&reply.body);
     assert!(main.contains("Deleted"), "{main}");
-    assert!(!main.contains("<form"), "{main}");
+    assert_no_action_form(main);
     let base = link(2, 1, "Compare with the base version 1");
     assert!(row_of(main).contains(&base), "{main}");
     assert!(main.contains("href=\"/recipes/R-500/history\""), "{main}");

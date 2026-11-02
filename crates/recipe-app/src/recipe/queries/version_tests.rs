@@ -1,6 +1,7 @@
 //! Tests of `GetVersion` (design D4, ADR-0042, ADR-0043 (m)).
 
 use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::export::Sha256;
 use recipe_domain::identity::{Login, Role};
 use recipe_domain::plant::PlcPlatform;
 use recipe_domain::recipe::VersionState;
@@ -64,6 +65,23 @@ async fn get_version_returns_the_header_the_logins_and_the_machine() {
     assert_eq!(view.machine.platform(), PlcPlatform::TwinCat3);
     assert_eq!(view.last_change, None);
     assert!(view.outdated.is_empty());
+}
+
+#[tokio::test]
+async fn get_version_returns_the_content_hash_of_an_approved_version_and_none_for_a_draft() {
+    let fixture = scenarios::approved_and_draft();
+    seed_users(&fixture);
+
+    let approved = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap();
+    let draft = get(&fixture, Role::Operator, ("R-1", 2)).await.unwrap();
+
+    assert_eq!(approved.detail.state, VersionState::Approved);
+    assert_eq!(
+        approved.detail.content_sha256,
+        Some(Sha256::from([0_u8; 32]))
+    );
+    assert_eq!(draft.detail.state, VersionState::LiveDraft);
+    assert_eq!(draft.detail.content_sha256, None);
 }
 
 #[tokio::test]

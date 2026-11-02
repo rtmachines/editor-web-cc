@@ -4,6 +4,14 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- The parameter table of the version page gets the column Value. An elementary parameter shows its value, and a composite parameter shows a word from the bundles. A long text ends after a fixed count of characters (ADR-0108 (a)).
+- The header of an Approved or a Retired version shows `content_sha256` (ADR-0108 (c)).
+- The version page gets a compare form with two lists of version numbers. The form leads to the diff of the two versions. The new route `GET /recipes/{ref}/compare` answers `303` to the diff route of ADR-0050 (ADR-0108 (d), (e)).
+- The success toast of each command that keeps the draft live names the new `row_version`. `SetParameterValue` and `ReplaceLimits` get a success toast (ADR-0108 (f)).
+- The type page of a machine on an S7 platform shows the S7 layout of the type. The layout lists the offset of each member and the size of the type (ADR-0108 (g), (h)).
+
 ## [0.3.0] - 2026-10-31
 
 ### Added

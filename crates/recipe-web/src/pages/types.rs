@@ -117,6 +117,8 @@ mod list_tests;
 #[cfg(test)]
 pub(crate) mod route_tests;
 #[cfg(test)]
+mod s7_layout_tests;
+#[cfg(test)]
 mod test_kit;
 #[cfg(test)]
 mod tree_tests;

@@ -8,7 +8,7 @@ use recipe_domain::text::LongText;
 use super::fixtures::{
     approve_as, begin_read, create_named, discard, far_past, second_user, touch_by,
 };
-use crate::contract::harness::{FIXTURE_NOTE, Harness};
+use crate::contract::harness::{FIXTURE_NOTE, Harness, fixture_hash};
 use crate::contract::recipe_seed::{approve, create_version, plant, retire, version_id};
 
 /// The login of the user of every harness.
@@ -182,6 +182,39 @@ async fn version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_d
     assert_eq!(fourth.based_on, Some(2));
 }
 
+async fn version_detail_gives_the_content_hash_of_an_approved_version_and_none_of_a_draft(
+    h: &dyn Harness,
+) {
+    let plant = plant(h, 28, "M28").await;
+    let recipe = create_named(h, &plant, 28, "REF-28", "Recipe").await;
+    let first = recipe.versions()[0].id();
+    approve(h, first).await;
+    create_version(h, (recipe.id(), version_id(128)), 2, None).await;
+
+    let approved = detail(h, first).await.unwrap();
+    let draft = detail(h, version_id(128)).await.unwrap();
+
+    assert_eq!(approved.content_sha256, Some(fixture_hash()));
+    assert_eq!(draft.content_sha256, None);
+}
+
+// The retired version keeps the hash that its approval stored, so the page can show it.
+async fn version_detail_gives_the_stored_content_hash_of_a_retired_version(h: &dyn Harness) {
+    let plant = plant(h, 29, "M29").await;
+    let recipe = create_named(h, &plant, 29, "REF-29", "Recipe").await;
+    let first = recipe.versions()[0].id();
+    approve(h, first).await;
+    let approved = detail(h, first).await.unwrap();
+    retire(h, first).await;
+
+    let retired = detail(h, first).await.unwrap();
+
+    assert_eq!(approved.state, VersionState::Approved);
+    assert_eq!(retired.state, VersionState::Retired);
+    assert_eq!(retired.content_sha256, approved.content_sha256);
+    assert_eq!(retired.content_sha256, Some(fixture_hash()));
+}
+
 // The recipe numbers differ from the machine numbers. `machine_id(n)` and `recipe_id(n)` share
 // one UUID, and the seed of a machine names the machine as the aggregate of its entry.
 async fn last_change_gives_the_last_actor_at_the_exact_time_only(h: &dyn Harness) {
@@ -238,6 +271,16 @@ contract_case!(
     version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft,
     version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft_memory,
     version_detail_gives_the_number_of_a_base_version_that_is_a_discarded_draft_postgres
+);
+contract_case!(
+    version_detail_gives_the_content_hash_of_an_approved_version_and_none_of_a_draft,
+    version_detail_gives_the_content_hash_of_an_approved_version_and_none_of_a_draft_memory,
+    version_detail_gives_the_content_hash_of_an_approved_version_and_none_of_a_draft_postgres
+);
+contract_case!(
+    version_detail_gives_the_stored_content_hash_of_a_retired_version,
+    version_detail_gives_the_stored_content_hash_of_a_retired_version_memory,
+    version_detail_gives_the_stored_content_hash_of_a_retired_version_postgres
 );
 contract_case!(
     last_change_gives_the_last_actor_at_the_exact_time_only,

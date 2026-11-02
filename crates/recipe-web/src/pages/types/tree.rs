@@ -7,8 +7,13 @@ use askama::Template;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
+use recipe_app::error::AppError;
 use recipe_app::plant::{GetTypeTree, TypeRef, TypeView};
-use recipe_domain::plant::{MachineCode, MemberName, PlcTypeId, TypeName, TypeNode};
+use recipe_domain::audit::RequestId;
+use recipe_domain::plant::{
+    MachineCode, MemberName, PlcPlatform, PlcTypeId, S7Layout, S7Member, TypeName, TypeNode,
+    s7_members,
+};
 use serde::Deserialize;
 
 use super::{can_define, current_nav, named_revision, query_values, revision_href, type_href};
@@ -55,6 +60,22 @@ struct TreeItem {
     closes: usize,
 }
 
+/// One row of the S7 layout table: a member, its type, and its offset.
+struct S7Row {
+    /// The path from the root, for example `.zone.active`.
+    path: String,
+    type_text: String,
+    /// The offset as `<byte>.<bit>`.
+    offset: String,
+}
+
+/// The S7 layout table and the size of the type (ADR-0108 g and h).
+struct S7Table {
+    rows: Vec<S7Row>,
+    /// The size of the type in bytes.
+    size_bytes: u32,
+}
+
 /// The page `type.html`.
 #[derive(Template)]
 #[template(path = "type.html")]
@@ -65,6 +86,8 @@ struct TypePage<'a> {
     revisions: Vec<RevisionLink>,
     supersedes: Option<RevisionLink>,
     items: Vec<TreeItem>,
+    /// The S7 layout. It is `None` on a platform without S7 layout.
+    s7: Option<S7Table>,
     usage_href: String,
     new_revision_href: Option<String>,
     list_href: String,
@@ -167,6 +190,42 @@ fn tree_items(view: &TypeView) -> Result<Vec<TreeItem>, MissingText> {
     Ok(items)
 }
 
+/// Return true when the platform is a Siemens S7 controller.
+const fn has_s7_layout(platform: PlcPlatform) -> bool {
+    matches!(
+        platform,
+        PlcPlatform::S7_300 | PlcPlatform::S7_1200 | PlcPlatform::S7_1500
+    )
+}
+
+/// Build the row of one member of the S7 layout.
+fn s7_row(member: &S7Member, texts: &MemberTypes) -> Result<S7Row, MissingText> {
+    let type_text = texts.get(&member.type_id()).ok_or(MissingText)?.clone();
+    Ok(S7Row {
+        path: member.path_text(),
+        type_text,
+        offset: format!("{}.{}", member.byte(), member.bit()),
+    })
+}
+
+/// Build the S7 layout table of a revision, or `None` for a platform without S7 layout.
+///
+/// The table reuses the tree and the type texts of `GetTypeTree`, so it needs no second read.
+fn s7_table(view: &TypeView, request_id: RequestId) -> Result<Option<S7Table>, WebError> {
+    if !has_s7_layout(view.machine.platform()) {
+        return Ok(None);
+    }
+    let plant = |error| WebError::App(AppError::Plant(error));
+    let members = s7_members(&view.tree).map_err(plant)?;
+    let size_bytes = S7Layout::of(&view.tree).map_err(plant)?.size_bytes();
+    let rows = members
+        .iter()
+        .map(|member| s7_row(member, &view.member_types))
+        .collect::<Result<Vec<_>, MissingText>>()
+        .map_err(|_missing| WebError::Internal { request_id })?;
+    Ok(Some(S7Table { rows, size_bytes }))
+}
+
 /// Build the link to revision `number` of the struct.
 fn revision_link(code: MachineCode, name: &TypeName, number: u32, current: u32) -> RevisionLink {
     RevisionLink {
@@ -183,7 +242,7 @@ fn revision_link(code: MachineCode, name: &TypeName, number: u32, current: u32) 
 fn page_of<'a>(
     (t, layout): (Texts<'a>, Layout<'a>),
     view: &TypeView,
-    items: Vec<TreeItem>,
+    (items, s7): (Vec<TreeItem>, Option<S7Table>),
     may_define: bool,
 ) -> TypePage<'a> {
     let code = view.machine.code();
@@ -202,6 +261,7 @@ fn page_of<'a>(
             .supersedes
             .map(|number| revision_link(code, name, number, shown)),
         items,
+        s7,
         usage_href: format!("{}/usage?rev={shown}", type_href(code, name)),
         new_revision_href: may_define.then(|| format!("/machines/{code}/types/new?from={name}")),
         list_href: format!("/machines/{code}/types"),
@@ -233,9 +293,10 @@ pub(super) async fn show(
     let items = tree_items(&view).map_err(|_missing| WebError::Internal {
         request_id: request.request_id(),
     })?;
+    let s7 = s7_table(&view, request.request_id())?;
     let t = Texts::new(state.bundles(), request.lang());
     let title = named_revision(t, "type-title", &view.name, view.revision);
     let layout = Layout::for_session(t, &request, title, current_nav())?;
-    let page = page_of((t, layout), &view, items, can_define(&request)?);
+    let page = page_of((t, layout), &view, (items, s7), can_define(&request)?);
     Ok(render(&page, request.request_id())?.into_response())
 }
