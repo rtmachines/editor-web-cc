@@ -31,7 +31,7 @@ async fn insert_parameter_gives_the_image_with_the_limits_and_no_translations(h:
         .unwrap();
     commit_draft(h, &d, tx).await;
 
-    assert_shape(&image, &parameter_shape(Kind::String));
+    assert_shape(&image, &parameter_shape(Kind::Number));
     assert_eq!(text(&image, "tag"), "FULL");
     assert_eq!(text(&image, "recipe_version_id"), d.version.to_string());
     assert_eq!(text(&image, "plc_platform"), "TwinCat3");
@@ -65,6 +65,9 @@ async fn insert_parameter_gives_the_image_with_the_limits_and_no_translations(h:
 async fn insert_parameter_keeps_the_canonical_decimal_text(h: &dyn Harness) {
     let d = live_draft(h, 11).await;
     let digits28 = "1234567890123456789012345678";
+    // The case tests the precision of the JSONB number.
+    // Storage does not check the value against the type.
+    // The `DINT` type only holds the values.
     let mut stored = Vec::new();
     for (n, tag, value) in [
         (1, "INT_150", "150"),
@@ -73,7 +76,7 @@ async fn insert_parameter_keeps_the_canonical_decimal_text(h: &dyn Harness) {
         (4, "DECIMAL_28", "0.1234567890123456789012345678"),
     ] {
         let mut p = parameter(&d.plant, n, tag);
-        p.value = StoredValue::from(json!(value));
+        p.value = StoredValue::from(number(value));
         p.limits = vec![range("", "-0.1234567890123456789012345678", digits28)];
         stored.push(p);
     }
@@ -92,7 +95,7 @@ async fn insert_parameter_keeps_the_canonical_decimal_text(h: &dyn Harness) {
     stored.sort_by(|a, b| a.tag.cmp(&b.tag));
     assert_eq!(describe(&draft.parameters), describe(&stored));
     let values: Vec<&Value> = draft.parameters.iter().map(|p| p.value.as_json()).collect();
-    assert!(values.iter().all(|value| value.is_string()), "{values:?}");
+    assert!(values.iter().all(|value| value.is_number()), "{values:?}");
 }
 
 async fn a_known_tag_gives_duplicate_with_the_tag_constraint(h: &dyn Harness) {
@@ -169,7 +172,7 @@ async fn update_definition_keeps_the_value_the_limits_and_the_translations(h: &d
     changed.description_en = LongText::parse("Other").unwrap();
     changed.plc_type = int;
     changed.ordinal = Ordinal::parse(7).unwrap();
-    changed.value = StoredValue::from(json!("999"));
+    changed.value = StoredValue::from(json!(999));
     changed.limits = Vec::new();
     changed.translations = Vec::new();
     let mut tx = begin(h).await;

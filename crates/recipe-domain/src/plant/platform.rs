@@ -54,6 +54,15 @@ impl PlcPlatform {
             .ok_or(PlcPlatformReason::Unknown)
     }
 
+    /// Return true when the platform is a Siemens S7 controller.
+    #[must_use]
+    pub const fn is_s7(self) -> bool {
+        match self {
+            Self::S7_300 | Self::S7_1200 | Self::S7_1500 => true,
+            Self::CodesysIec | Self::TwinCat3 => false,
+        }
+    }
+
     /// Return the SQL value of this platform.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -121,6 +130,17 @@ mod tests {
     #[test]
     fn empty_text_is_rejected() {
         assert_eq!(PlcPlatform::parse(""), Err(PlcPlatformReason::Unknown));
+    }
+
+    #[test]
+    fn is_s7_is_true_for_exactly_the_three_siemens_platforms() {
+        // A new variant fails this count until a case for it exists below.
+        assert_eq!(PlcPlatform::ALL.len(), 5);
+        assert!(!PlcPlatform::CodesysIec.is_s7());
+        assert!(!PlcPlatform::TwinCat3.is_s7());
+        assert!(PlcPlatform::S7_300.is_s7());
+        assert!(PlcPlatform::S7_1200.is_s7());
+        assert!(PlcPlatform::S7_1500.is_s7());
     }
 
     fn assert_round_trip(platform: PlcPlatform, text: &str) {

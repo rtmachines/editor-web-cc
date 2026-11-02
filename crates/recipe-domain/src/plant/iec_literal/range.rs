@@ -43,8 +43,8 @@ const DTL: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
 
 /// Return the range of the count of a type, or `None` when the type is not on the platform.
 pub(super) fn range(ty: TimeType) -> Option<RangeInclusive<i128>> {
-    use PlcPlatform::{CodesysIec, S7_300, S7_1200, S7_1500, TwinCat3};
-    let iec = matches!(ty.platform(), CodesysIec | TwinCat3);
+    use PlcPlatform::{S7_300, S7_1200, S7_1500};
+    let iec = !ty.platform().is_s7();
     match (ty.primitive(), ty.platform()) {
         (Primitive::Time, _) if iec => Some(TIME_UNSIGNED),
         (Primitive::Time, _) => Some(TIME_SIGNED),

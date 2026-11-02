@@ -6,7 +6,7 @@ use recipe_app::error::StorageError;
 use recipe_domain::recipe::StoredValue;
 use serde_json::json;
 
-use super::fixtures::{commit_draft, full_parameter, live_draft, read_back};
+use super::fixtures::{commit_draft, full_parameter, live_draft, number, read_back};
 use crate::contract::harness::{Harness, begin};
 use crate::contract::recipe_seed::{describe, length, range, seed, translation};
 
@@ -19,13 +19,13 @@ async fn set_value_changes_only_the_value(h: &dyn Harness) {
     tx.drafts().touch_draft(d.version, h.user()).await.unwrap();
 
     tx.drafts()
-        .set_value(d.version, original.key, &StoredValue::from(json!("42")))
+        .set_value(d.version, original.key, &StoredValue::from(json!(42)))
         .await
         .unwrap();
     commit_draft(h, &d, tx).await;
 
     let mut expected = original;
-    expected.value = StoredValue::from(json!("42"));
+    expected.value = StoredValue::from(json!(42));
     let draft = read_back(h, d.version).await;
     assert_eq!(describe(&draft.parameters), describe(&[expected]));
 }
@@ -38,14 +38,14 @@ async fn set_value_keeps_the_canonical_decimal_text(h: &dyn Harness) {
         let mut tx = begin(h).await;
         tx.drafts().lock_draft(d.version).await.unwrap().unwrap();
         tx.drafts()
-            .set_value(d.version, original.key, &StoredValue::from(json!(text)))
+            .set_value(d.version, original.key, &StoredValue::from(number(text)))
             .await
             .unwrap();
         commit_draft(h, &d, tx).await;
 
         let draft = read_back(h, d.version).await;
 
-        assert_eq!(draft.parameters[0].value.as_json(), &json!(text));
+        assert_eq!(draft.parameters[0].value.as_json(), &number(text));
     }
 }
 
