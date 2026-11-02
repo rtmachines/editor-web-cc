@@ -48,7 +48,7 @@ INSERT INTO recipe_version (recipe_id, plc_platform, number, change_note, create
 SELECT id, plc_platform, 1, 'CI upgrade fixture', created_by FROM recipe WHERE reference_number = 'CI-UPGRADE';
 INSERT INTO parameter (parameter_key, recipe_version_id, plc_platform, unit_id, tag,
     name_en, description_en, plc_type_id, value)
-SELECT '{PARAMETER_KEY}', v.id, v.plc_platform, u.id, 'SPEED', 'Speed', 'CI speed setting', t.id, '"7"'::jsonb
+SELECT '{PARAMETER_KEY}', v.id, v.plc_platform, u.id, 'SPEED', 'Speed', 'CI speed setting', t.id, '7'::jsonb
 FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id
 JOIN unit u ON u.machine_id = r.machine_id CROSS JOIN plc_type t
 WHERE r.reference_number = 'CI-UPGRADE' AND u.path = 'U1' AND t.name = 'INT' AND t.machine_id IS NULL;
