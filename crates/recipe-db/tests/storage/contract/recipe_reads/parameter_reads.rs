@@ -2,7 +2,7 @@
 
 use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_db::statements;
-use recipe_domain::plant::UnitId;
+use recipe_domain::plant::{Primitive, UnitId};
 use recipe_domain::recipe::StoredValue;
 use recipe_domain::recipe::{ParameterKey, RecipeVersionId};
 use serde_json::json;
@@ -14,7 +14,7 @@ use crate::contract::harness::Harness;
 use crate::contract::recipe_seed::{
     describe, length, parameter, plant, range, seed, translation, version_id,
 };
-use crate::contract::seed::{U1_1, U1_1_2, U1_2, U1_10, U2, path, tree_unit_id};
+use crate::contract::seed::{U1_1, U1_1_2, U1_2, U1_10, U2, path, seed_type, tree_unit_id};
 use crate::support::{Role, TestDatabase};
 
 /// Read one page of the parameters in a transaction that nothing commits.
@@ -197,11 +197,12 @@ async fn parameter_values_give_the_stored_value_of_each_requested_key_only(h: &d
     let recipe = create_named(h, &plant, 34, "REF-34", "Recipe").await;
     let version = recipe.versions()[0].id();
     let mut first = parameter(&plant, 1, "FIRST");
-    first.value = StoredValue::from(json!("12.5"));
+    first.plc_type = seed_type(h, plant.machine, Primitive::Real).await;
+    first.value = StoredValue::from(json!(12.5));
     let mut second = parameter(&plant, 2, "SECOND");
-    second.value = StoredValue::from(json!("-3"));
+    second.value = StoredValue::from(json!(-3));
     let mut third = parameter(&plant, 3, "THIRD");
-    third.value = StoredValue::from(json!("99"));
+    third.value = StoredValue::from(json!(99));
     for stored in [&first, &second, &third] {
         seed(h, version, stored).await;
     }

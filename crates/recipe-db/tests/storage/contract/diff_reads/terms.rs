@@ -29,10 +29,10 @@ async fn string_type(h: &dyn Harness, n: u128, code_text: &str) -> PlcTypeId {
 /// (description of a translation), and `L` (a language that the new side removes).
 fn old_side(plant: &DiffPlant, string: PlcTypeId) -> Vec<StoredParameter> {
     vec![
-        typed(plant, (51, "T"), plant.int, json!("5")),
+        typed(plant, (51, "T"), plant.int, json!(5)),
         StoredParameter {
             limits: vec![range("", "0", "10")],
-            ..typed(plant, (52, "N"), plant.int, json!("5"))
+            ..typed(plant, (52, "N"), plant.int, json!(5))
         },
         StoredParameter {
             limits: vec![length("", 10)],
@@ -40,14 +40,14 @@ fn old_side(plant: &DiffPlant, string: PlcTypeId) -> Vec<StoredParameter> {
         },
         StoredParameter {
             translations: vec![translation("pl", "Nazwa", Some("Opis"))],
-            ..typed(plant, (54, "D"), plant.int, json!("5"))
+            ..typed(plant, (54, "D"), plant.int, json!(5))
         },
         StoredParameter {
             translations: vec![
                 translation("de", "Name", None),
                 translation("pl", "Nazwa", None),
             ],
-            ..typed(plant, (55, "L"), plant.int, json!("5"))
+            ..typed(plant, (55, "L"), plant.int, json!(5))
         },
     ]
 }

@@ -45,8 +45,8 @@ const TOAST_REGION: &str = "id=\"toast\"";
 
 /// The toast of a draft command on a parameter (`design-system.md` section 10.7).
 #[derive(Template)]
-#[template(path = "parameter-removed-toast.html")]
-struct RemovedToast {
+#[template(path = "parameter-toast.html")]
+struct ParameterToast {
     /// The sentence of the toast, for example `parameter-deleted` with the tag.
     text: String,
     /// True for the table answer: the toast and the empty error panel go out of band.
@@ -172,7 +172,7 @@ pub(super) fn toast_html(
     oob: bool,
     request_id: RequestId,
 ) -> Result<String, WebError> {
-    Ok(render(&RemovedToast { text, oob }, request_id)?.0)
+    Ok(render(&ParameterToast { text, oob }, request_id)?.0)
 }
 
 /// Return the sentence of the toast of the removal: `parameter-deleted` with the tag.

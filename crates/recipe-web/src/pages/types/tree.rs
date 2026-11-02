@@ -11,8 +11,7 @@ use recipe_app::error::AppError;
 use recipe_app::plant::{GetTypeTree, TypeRef, TypeView};
 use recipe_domain::audit::RequestId;
 use recipe_domain::plant::{
-    MachineCode, MemberName, PlcPlatform, PlcTypeId, S7Layout, S7Member, TypeName, TypeNode,
-    s7_members,
+    MachineCode, MemberName, PlcTypeId, S7Layout, S7Member, TypeName, TypeNode, s7_members,
 };
 use serde::Deserialize;
 
@@ -190,14 +189,6 @@ fn tree_items(view: &TypeView) -> Result<Vec<TreeItem>, MissingText> {
     Ok(items)
 }
 
-/// Return true when the platform is a Siemens S7 controller.
-const fn has_s7_layout(platform: PlcPlatform) -> bool {
-    matches!(
-        platform,
-        PlcPlatform::S7_300 | PlcPlatform::S7_1200 | PlcPlatform::S7_1500
-    )
-}
-
 /// Build the row of one member of the S7 layout.
 fn s7_row(member: &S7Member, texts: &MemberTypes) -> Result<S7Row, MissingText> {
     let type_text = texts.get(&member.type_id()).ok_or(MissingText)?.clone();
@@ -212,7 +203,7 @@ fn s7_row(member: &S7Member, texts: &MemberTypes) -> Result<S7Row, MissingText> 
 ///
 /// The table reuses the tree and the type texts of `GetTypeTree`, so it needs no second read.
 fn s7_table(view: &TypeView, request_id: RequestId) -> Result<Option<S7Table>, WebError> {
-    if !has_s7_layout(view.machine.platform()) {
+    if !view.machine.platform().is_s7() {
         return Ok(None);
     }
     let plant = |error| WebError::App(AppError::Plant(error));

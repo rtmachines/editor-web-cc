@@ -27,21 +27,21 @@ fn old_side(plant: &DiffPlant) -> Vec<StoredParameter> {
                 plant,
                 (12, "I"),
                 plant.line,
-                json!({"zone": {"setpoint": "1.5"}}),
+                json!({"zone": {"setpoint": 1.5}}),
             )
         },
         StoredParameter {
             limits: vec![range("", "0", "1000")],
-            ..typed(plant, (13, "J"), plant.int, json!("500"))
+            ..typed(plant, (13, "J"), plant.int, json!(500))
         },
         StoredParameter {
             limits: vec![range("[1]", "0", "10"), range("[2]", "0", "10")],
-            ..typed(plant, (14, "K"), plant.table, json!(["1", "2", "3"]))
+            ..typed(plant, (14, "K"), plant.table, json!([1, 2, 3]))
         },
-        typed(plant, (15, "L"), plant.int, json!("5")),
+        typed(plant, (15, "L"), plant.int, json!(5)),
         StoredParameter {
             limits: vec![range("", "0", "10")],
-            ..typed(plant, (16, "M"), plant.int, json!("5"))
+            ..typed(plant, (16, "M"), plant.int, json!(5))
         },
     ]
 }
@@ -52,7 +52,7 @@ fn new_side(plant: &DiffPlant, old: &[StoredParameter]) -> Vec<StoredParameter> 
     vec![
         StoredParameter {
             limits: vec![range("", "0", "10")],
-            ..typed(plant, (11, "H"), plant.int, json!("5"))
+            ..typed(plant, (11, "H"), plant.int, json!(5))
         },
         StoredParameter {
             plc_type: plant.plant.dint,
@@ -100,7 +100,7 @@ async fn a_change_from_time_to_ltime_sets_the_value_and_the_limit_flags(h: &dyn 
     let ltime = seed_type(h, machine, Primitive::Ltime).await;
     let held = |tag, n, plc_type| StoredParameter {
         limits: vec![range("", "0", "10000")],
-        ..typed(&plant, (n, tag), plc_type, json!("5000"))
+        ..typed(&plant, (n, tag), plc_type, json!(5000))
     };
     let old = vec![held("V", 71, time), held("W", 72, time)];
     let new = vec![

@@ -184,7 +184,7 @@ pub fn parameter(plant: &Plant, n: u128, tag: &str) -> StoredParameter {
         plc_type: plant.dint,
         s7_address: None,
         limits: Vec::new(),
-        value: StoredValue::from(json!("5")),
+        value: StoredValue::from(json!(5)),
         ordinal: Ordinal::parse(0).unwrap(),
     }
 }

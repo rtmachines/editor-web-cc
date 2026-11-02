@@ -133,10 +133,7 @@ pub(crate) struct ParameterTable {
 
 /// Return true for a platform whose parameters have an S7 address (A31).
 pub(crate) const fn has_address(platform: PlcPlatform) -> bool {
-    matches!(
-        platform,
-        PlcPlatform::S7_300 | PlcPlatform::S7_1200 | PlcPlatform::S7_1500
-    )
+    platform.is_s7()
 }
 
 /// The columns without the address: tag, name, type, value, unit, and state.

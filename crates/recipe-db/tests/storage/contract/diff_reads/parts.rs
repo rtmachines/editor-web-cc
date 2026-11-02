@@ -24,21 +24,21 @@ fn element_rows() -> Vec<StoredLimit> {
 /// The old side: `A` (unchanged), `B` (definition), `C` (value in a struct in a struct),
 /// `D` (limit `[*]`), `E` (limit of one element), `F` (limit mode), `G` (translations).
 fn old_side(plant: &DiffPlant) -> Vec<StoredParameter> {
-    let table = json!(["1", "2", "3"]);
+    let table = json!([1, 2, 3]);
     let all = vec![range("[*]", "0", "10")];
     vec![
         StoredParameter {
             limits: vec![range("", "0", "10")],
-            ..typed(plant, (1, "A"), plant.int, json!("5"))
+            ..typed(plant, (1, "A"), plant.int, json!(5))
         },
-        typed(plant, (2, "B"), plant.int, json!("5")),
+        typed(plant, (2, "B"), plant.int, json!(5)),
         StoredParameter {
             limits: vec![range(".zone.setpoint", "0", "100")],
             ..typed(
                 plant,
                 (3, "C"),
                 plant.line,
-                json!({"zone": {"setpoint": "1.5"}}),
+                json!({"zone": {"setpoint": 1.5}}),
             )
         },
         StoredParameter {
@@ -55,7 +55,7 @@ fn old_side(plant: &DiffPlant) -> Vec<StoredParameter> {
         },
         StoredParameter {
             translations: vec![translation("pl", "Nazwa", None)],
-            ..typed(plant, (7, "G"), plant.int, json!("5"))
+            ..typed(plant, (7, "G"), plant.int, json!(5))
         },
     ]
 }
@@ -81,7 +81,7 @@ fn new_side(old: &[StoredParameter]) -> Vec<StoredParameter> {
             ..copy(1)
         },
         StoredParameter {
-            value: json!({"zone": {"setpoint": "2.5"}}).into(),
+            value: json!({"zone": {"setpoint": 2.5}}).into(),
             ..copy(2)
         },
         StoredParameter {

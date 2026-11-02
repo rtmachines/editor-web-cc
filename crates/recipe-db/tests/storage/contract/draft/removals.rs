@@ -94,7 +94,7 @@ async fn delete_parameter_gives_the_image_with_limits_and_translations(h: &dyn H
         .unwrap();
     commit_draft(h, &d, tx).await;
 
-    assert_shape(&image, &parameter_shape(Kind::String));
+    assert_shape(&image, &parameter_shape(Kind::Number));
     assert_eq!(text(&image, "tag"), "GONE");
     assert_eq!(text(&image, "id"), original.id.to_string());
     let limits = field(&image, "limits").as_array().unwrap();
@@ -149,7 +149,7 @@ async fn every_write_in_an_approved_version_gives_e_rcp_031(h: &dyn Harness) {
     let mut tx = locked(h, &d).await;
     let set_value = tx
         .drafts()
-        .set_value(d.version, key, &StoredValue::from(json!("7")))
+        .set_value(d.version, key, &StoredValue::from(json!(7)))
         .await
         .unwrap_err();
     drop(tx);

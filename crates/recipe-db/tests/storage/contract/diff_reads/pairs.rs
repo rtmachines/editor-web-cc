@@ -19,7 +19,7 @@ fn old_side(plant: &DiffPlant) -> Vec<StoredParameter> {
         StoredParameter {
             limits: vec![range("", "0", "10")],
             translations: vec![translation("pl", "Nazwa", Some("Opis"))],
-            ..typed(plant, (31, "P"), plant.int, json!("5"))
+            ..typed(plant, (31, "P"), plant.int, json!(5))
         },
         StoredParameter {
             limits: vec![range("[1]", "0", "10"), range("[3]", "1", "9")],
@@ -27,9 +27,9 @@ fn old_side(plant: &DiffPlant) -> Vec<StoredParameter> {
                 translation("pl", "Tabela", None),
                 translation("de", "Tabelle", None),
             ],
-            ..typed(plant, (32, "Q"), plant.table, json!(["1", "2", "3"]))
+            ..typed(plant, (32, "Q"), plant.table, json!([1, 2, 3]))
         },
-        typed(plant, (33, "R"), plant.int, json!("7")),
+        typed(plant, (33, "R"), plant.int, json!(7)),
     ]
 }
 

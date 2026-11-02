@@ -33,7 +33,7 @@ async fn commit_a_value_change(
         .touch_draft(version, h.user())
         .await
         .unwrap();
-    let value = StoredValue::from(json!("9"));
+    let value = StoredValue::from(json!(9));
     writer
         .drafts()
         .set_value(version, key, &value)
@@ -48,7 +48,7 @@ async fn commit_a_value_change(
 async fn postgres_only_the_flags_and_the_pairs_keep_the_snapshot_across_a_commit() {
     let h = PgHarness::create().await;
     let plant = diff_plant(&h, 84, "M84").await;
-    let old = vec![typed(&plant, (41, "S"), plant.int, json!("5"))];
+    let old = vec![typed(&plant, (41, "S"), plant.int, json!(5))];
     let new: Vec<StoredParameter> = old.iter().map(on_new_side).collect();
     let versions = seed_versions(&h, &plant.plant, 84, (&old, &new)).await;
     let key = old[0].key;
@@ -79,10 +79,10 @@ async fn postgres_only_the_flags_and_the_pairs_keep_the_snapshot_across_a_commit
         compact(&flags),
         vec![("S".to_string(), UNCHANGED, (0, 0, 0))]
     );
-    assert_eq!(sides.new[0].value, StoredValue::from(json!("5")));
+    assert_eq!(sides.new[0].value, StoredValue::from(json!(5)));
     assert_eq!(
         compact(&committed),
         vec![("S".to_string(), VALUE, (0, 0, 0))]
     );
-    assert_eq!(committed_sides.new[0].value, StoredValue::from(json!("9")));
+    assert_eq!(committed_sides.new[0].value, StoredValue::from(json!(9)));
 }
