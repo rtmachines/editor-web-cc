@@ -12,7 +12,7 @@ use crate::memory::{FaultPoint, LockMode, MemoryTransaction};
 use crate::ports::{Locked, NewUser, RowImage, UserRepository, UserRow, UserSummary};
 
 /// The table name of the journal for a user lock.
-const USER_TABLE: &str = "app_user";
+pub(super) const USER_TABLE: &str = "app_user";
 /// The name of the primary key of `app_user`.
 const USER_PKEY: &str = "app_user_pkey";
 /// The lock class of the journal line for the guard lock of the last Administrator.
@@ -158,10 +158,11 @@ impl UserRepository for MemoryTransaction {
         &mut self,
         id: UserId,
         hash: &PasswordHash,
+        must_change: bool,
     ) -> Result<RowImage, StorageError> {
         self.change_user(id, |row, _now| {
             row.password_hash = hash.clone();
-            row.must_change_password = true;
+            row.must_change_password = must_change;
             bump_epoch(row)
         })
     }

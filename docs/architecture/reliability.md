@@ -123,7 +123,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-054` | `RecipeError::S7AddressWidthMismatch { tag, address, width }` | 422 | Address {address} of {tag} does not match the type of {tag}. Use the width {width}. |
 | `E-IDN-001` | `IdentityError::DuplicateLogin { login }` | 409 | Login {login} is already in use. |
 | `E-IDN-002` | `IdentityError::LastAdministrator { login }` | 409 | {login} is the last active administrator. Add another administrator first. |
-| `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42.) |
+| `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42. The Basic check of an export route and the refusal of an `ExportClient` account at `Login` return it too.) |
 | `E-IDN-004` | `IdentityError::UserInactive` | 401, as `E-IDN-003` | Not shown to the user. `Login` returns `E-IDN-003` with the same body and timing (A42). `UserInactive` is recorded as the `security_event` kind `login_rejected_inactive` and in the event log. |
 | `E-IDN-005` | `IdentityError::LoginThrottled { retry_after }` | 429 | Too many failed logins from this address. Try again in {retry_after} seconds. |
 | `E-IDN-006` | `IdentityError::PasswordPolicy { reason }` | 422 | The password is not accepted: {reason}. Use 12 to 128 characters that are not in the breached-password list. |
@@ -131,6 +131,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-IDN-008` | `IdentityError::InvalidCurrentPassword` | 422 | The current password is not correct. |
 | `E-IDN-009` | `IdentityError::UserAlreadyActive { login }` | 409 | User {login} is already active. |
 | `E-IDN-010` | `IdentityError::UserAlreadyInactive { login }` | 409 | User {login} is already inactive. |
+| `E-IDN-011` | `IdentityError::TechnicalRoleChange { login }` | 409 | The role of {login} cannot change to or from ExportClient. Create a new user. |
 | `E-AUD-001` | `AppError::AuditWriteFailed` | 500 | The change was not saved. The system could not record the audit entry. Contact the administrator. Reference: {request_id}. |
 | `E-AUD-002` | `AuditError::ChainBroken { chain_seq }`, check of data-model.md 4.9 | 500 | Audit entry {chain_seq} does not match the hash chain. Contact the administrator. The job `audit_chain_check` returns this code after a nightly run or a catch-up run. The supervisor writes it to the event log (ADR-0089 (a)). The job `alerts` raises the alert. No user request returns it. |
 | `E-AUD-003` | `StorageError::Constraint { code: "E-AUD-003", .. }`, trigger `security_event_guard` of data-model.md 5.4 | 500 | A security event cannot change. Contact the administrator. Reference: {request_id}. |
@@ -138,6 +139,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-EXP-002` | `ExportError::ContentHashMismatch { reference, number }` | 500 | Version {number} of recipe {reference} does not match its stored hash. The export is refused. Contact the administrator. Reference: {request_id}. |
 | `E-EXP-003` | `ExportError::VersionNotExportable { reference, number }` | 409 | Version {number} of recipe {reference} is a draft or was discarded. Only approved and retired versions can be exported. |
 | `E-EXP-004` | `ExportError::Serialize` | 500 | The server cannot create the export document. Contact the administrator. Reference: {request_id}. |
+| `E-EXP-005` | `ExportError::EmptyScope { reference, number, path }` | 404 | Version {number} of recipe {reference} has no parameter in unit {path} or below it. |
 | `E-DB-001` | `StorageError::Deadlock` | 503 | Another operation holds a lock on the same data. Try again. Reference: {request_id}. |
 | `E-DB-002` | `StorageError::StatementTimeout` | 503 | The operation took too long and was stopped. Try again. Reference: {request_id}. |
 | `E-DB-003` | `StorageError::Constraint { code: "E-DB-003", .. }` | 409 | The change violates a database rule. Reference: {request_id}. |
@@ -157,6 +159,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-WEB-009` | `AppError::Timeout { stage }` | 503 | The request took too long and was stopped. Try again. Reference: {request_id}. |
 | `E-WEB-010` | `WebError::Internal { request_id }` | 500 | An internal error occurred. Contact the administrator. Reference: {request_id}. |
 | `E-WEB-011` | `AppError::TaskFailed { stage }` | 500 | The operation {stage} did not complete. Try again. Reference: {request_id}. |
+| `E-WEB-012` | `WebError::MissingBasicCredentials` | 401 | The request has no valid Basic credentials. Send the login and the password of a transfer account. |
 
 A trigger code (`E-PLT-030..038`, `E-RCP-030..036`, `E-AUD-003`) reaches the user only when a domain check did not fire first. No command of the application changes a security event, so `E-AUD-003` always marks a defect. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
 
@@ -953,6 +956,8 @@ This table is the single source for every numeric setting. A key of the first co
 | `diff.leaf_rows` | 1 000 rows of one parameter in one section of a diff (ADR-0050) | api.md 2.5 |
 | `diff.permits` | 2 diffs that run at the same time in `spawn_blocking` (ADR-0050) | 7.4 |
 | `export.permits` | 2 exports that run the read, the rebuild, the hash compare, and the writer at the same time (ADR-0056) | 7.4 |
+| `export.basic_permits` | 1. The Basic checks that wait for or hold an Argon2 permit at the same time. The UI logins keep the other 3 of `argon2.permits` (ADR-0109 (n)) | 7.4, api.md 7.7 |
+| `export.basic_header_max` | 1 024 bytes. The longest `Authorization` header of a Basic route. The parser checks it before it decodes (ADR-0109 (ma)) | api.md 7.7 |
 | `page.audit` | 100 rows of `ListAuditEntries` (ADR-0051) | api.md 2.9 |
 | `page.history` | 100 rows of `GetRecipeHistory` (ADR-0051) | api.md 2.9 |
 | `page.security_events` | 100 rows of `ListSecurityEvents` (ADR-0051) | api.md 2.9 |

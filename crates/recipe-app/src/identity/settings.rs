@@ -11,6 +11,8 @@ use crate::ports::SessionLimits;
 const DEFAULT_ARGON2_PERMITS: usize = 4;
 /// Default of `argon2.acquire_timeout` in seconds.
 const DEFAULT_ACQUIRE_TIMEOUT_SECONDS: u64 = 2;
+/// Default of `export.basic_permits`.
+const DEFAULT_EXPORT_BASIC_PERMITS: usize = 1;
 /// Default of `session.idle_timeout` in seconds: 30 minutes.
 const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 30 * 60;
 /// Default of `session.absolute_timeout` in seconds: 12 hours.
@@ -33,6 +35,9 @@ pub struct IdentitySettings {
     pub argon2_permits: usize,
     /// The longest wait for a permit (`argon2.acquire_timeout`).
     pub argon2_acquire_timeout: Duration,
+    /// The Basic checks that wait for or hold an Argon2 permit at one time
+    /// (`export.basic_permits`, ADR-0109 (n)).
+    pub export_basic_permits: usize,
     /// The login throttle.
     pub throttle: ThrottlePolicy,
     /// The idle time after which a session ends (`session.idle_timeout`).
@@ -63,6 +68,7 @@ impl Default for IdentitySettings {
             argon2: Argon2Params::default(),
             argon2_permits: DEFAULT_ARGON2_PERMITS,
             argon2_acquire_timeout: Duration::from_secs(DEFAULT_ACQUIRE_TIMEOUT_SECONDS),
+            export_basic_permits: DEFAULT_EXPORT_BASIC_PERMITS,
             throttle: ThrottlePolicy::default(),
             session_idle_timeout: Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS),
             session_absolute_timeout: Duration::from_secs(DEFAULT_ABSOLUTE_TIMEOUT_SECONDS),

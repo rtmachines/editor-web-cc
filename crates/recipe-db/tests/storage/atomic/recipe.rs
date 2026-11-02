@@ -7,7 +7,8 @@
 use std::sync::Arc;
 
 use recipe_app::export::{
-    ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportVersionByNumber,
+    ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportScope,
+    ExportVersionByNumber,
 };
 use recipe_app::memory::BodyWriter;
 use recipe_app::recipe::{
@@ -505,6 +506,8 @@ pub(super) async fn approved_by_use_case(app: &mut App) -> World {
 pub(super) fn export_input(world: &World) -> ExportApprovedInput {
     ExportApprovedInput {
         reference: world.reference.clone(),
+        machine: None,
+        scope: ExportScope::Version,
     }
 }
 

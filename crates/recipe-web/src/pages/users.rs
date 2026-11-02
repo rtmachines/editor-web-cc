@@ -198,6 +198,7 @@ pub(crate) async fn create(
         texts,
         message(texts, "user-created", &login),
         Some(issued.password().as_str().to_owned()),
+        !issued.role().is_person(),
         login.to_string(),
     );
     result_page(&request, texts, "user-created-title", fragment)
@@ -243,7 +244,7 @@ pub(crate) async fn set_role(
     args.set("login", login.to_string());
     args.set("role", texts.role(role));
     let text = texts.with("user-role-changed", &args);
-    let fragment = ResultFragment::new(texts, text, None, login.to_string());
+    let fragment = ResultFragment::new(texts, text, None, false, login.to_string());
     command_result(&request, texts, fragment)
 }
 
@@ -264,7 +265,7 @@ pub(crate) async fn deactivate(
     command_result(
         &request,
         texts,
-        ResultFragment::new(texts, text, None, login.to_string()),
+        ResultFragment::new(texts, text, None, false, login.to_string()),
     )
 }
 
@@ -285,7 +286,7 @@ pub(crate) async fn activate(
     command_result(
         &request,
         texts,
-        ResultFragment::new(texts, text, None, login.to_string()),
+        ResultFragment::new(texts, text, None, false, login.to_string()),
     )
 }
 
@@ -306,6 +307,7 @@ pub(crate) async fn reset_password(
         texts,
         message(texts, "user-password-reset", &login),
         Some(issued.password().as_str().to_owned()),
+        !issued.role().is_person(),
         login.to_string(),
     );
     command_result(&request, texts, fragment)
@@ -328,9 +330,11 @@ pub(crate) async fn unlock(
     command_result(
         &request,
         texts,
-        ResultFragment::new(texts, text, None, login.to_string()),
+        ResultFragment::new(texts, text, None, false, login.to_string()),
     )
 }
 
+#[cfg(test)]
+mod technical_tests;
 #[cfg(test)]
 mod tests;

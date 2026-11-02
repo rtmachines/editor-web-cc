@@ -16,11 +16,10 @@ const TRIGGER_LAST: u32 = 49;
 pub(crate) fn status_of(code: ErrorCode) -> StatusCode {
     match code.as_str() {
         "E-IDN-007" => StatusCode::SEE_OTHER,
-        "E-IDN-003" | "E-IDN-004" | "E-WEB-004" => StatusCode::UNAUTHORIZED,
+        "E-IDN-003" | "E-IDN-004" | "E-WEB-004" | "E-WEB-012" => StatusCode::UNAUTHORIZED,
         "E-WEB-002" | "E-WEB-007" => StatusCode::FORBIDDEN,
-        "E-PLT-019" | "E-PLT-020" | "E-RCP-050" | "E-RCP-051" | "E-EXP-001" | "E-WEB-005" => {
-            StatusCode::NOT_FOUND
-        }
+        "E-PLT-019" | "E-PLT-020" | "E-RCP-050" | "E-RCP-051" | "E-EXP-001" | "E-EXP-005"
+        | "E-WEB-005" => StatusCode::NOT_FOUND,
         "E-WEB-003" => StatusCode::PAYLOAD_TOO_LARGE,
         "E-IDN-005" => StatusCode::TOO_MANY_REQUESTS,
         "E-DB-001" | "E-DB-002" | "E-DB-004" | "E-DB-005" | "E-WEB-006" | "E-WEB-009" => {
@@ -31,8 +30,8 @@ pub(crate) fn status_of(code: ErrorCode) -> StatusCode {
         | "E-PLT-037" | "E-PLT-038" | "E-RCP-001" | "E-RCP-002" | "E-RCP-007" | "E-RCP-009"
         | "E-RCP-010" | "E-RCP-011" | "E-RCP-012" | "E-RCP-014" | "E-RCP-015" | "E-RCP-025"
         | "E-RCP-026" | "E-RCP-030" | "E-RCP-031" | "E-RCP-033" | "E-RCP-034" | "E-IDN-001"
-        | "E-IDN-002" | "E-IDN-009" | "E-IDN-010" | "E-EXP-003" | "E-DB-003" | "E-DB-006"
-        | "E-DB-007" | "E-WEB-001" => StatusCode::CONFLICT,
+        | "E-IDN-002" | "E-IDN-009" | "E-IDN-010" | "E-IDN-011" | "E-EXP-003" | "E-DB-003"
+        | "E-DB-006" | "E-DB-007" | "E-WEB-001" => StatusCode::CONFLICT,
         "E-PLT-002" | "E-PLT-003" | "E-PLT-005" | "E-PLT-006" | "E-PLT-013" | "E-PLT-016"
         | "E-PLT-017" | "E-PLT-018" | "E-PLT-021" | "E-PLT-031" | "E-PLT-032" | "E-PLT-035"
         | "E-PLT-036" | "E-RCP-003" | "E-RCP-004" | "E-RCP-005" | "E-RCP-006" | "E-RCP-008"

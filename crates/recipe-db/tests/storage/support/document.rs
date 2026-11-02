@@ -84,6 +84,86 @@ pub fn document_sql(sections: &[&str], skip: &[(&str, usize)]) -> String {
     normalize(&sql.join("\n"))
 }
 
+/// One piece that ADR-0109 added to the `app_user` block of `data-model.md` section 3.5.
+///
+/// Migration 0001 shipped before ADR-0109 and never changes. Migration 0009 adds the pieces as
+/// `NOT VALID` constraints. The document shows the current schema, so the comparison with
+/// 0001 must undo each piece first. `current` and `shipped` are normalized text. `current`
+/// must occur exactly once in the document text.
+pub struct Adr0109Piece {
+    /// What the piece is, for the failure message.
+    pub name: &'static str,
+    /// The normalized text in the current document.
+    pub current: &'static str,
+    /// The normalized text in migration 0001. An empty text removes the piece.
+    pub shipped: &'static str,
+}
+
+/// The pieces of ADR-0109 (e) in `app_user`, applied by migration 0009.
+pub const ADR_0109_PIECES: [Adr0109Piece; 2] = [
+    Adr0109Piece {
+        name: "role list of app_user_role_value",
+        current: "'operator', 'export_client')",
+        shipped: "'operator')",
+    },
+    Adr0109Piece {
+        name: "constraint app_user_export_client_password",
+        current: " CONSTRAINT app_user_export_client_password CHECK ( role <> 'export_client' OR NOT must_change_password ),",
+        shipped: "",
+    },
+];
+
+/// Turn the normalized text of section 3 into the text of migration 0001.
+///
+/// Each piece of [`ADR_0109_PIECES`] must match exactly once. The call fails with the name of
+/// the piece otherwise.
+pub fn as_shipped_in_0001(normalized: &str) -> String {
+    ADR_0109_PIECES
+        .iter()
+        .fold(normalized.to_owned(), |text, piece| {
+            let count = text.matches(piece.current).count();
+            assert_eq!(
+                count, 1,
+                "ADR-0109 piece '{}' must match once in the document, found {count} times",
+                piece.name
+            );
+            text.replacen(piece.current, piece.shipped, 1)
+        })
+}
+
+/// The text `CONSTRAINT <name> CHECK ( ... )` of a constraint in normalized SQL, up to the
+/// matching closing parenthesis. The call fails when the constraint is missing.
+pub fn check_constraint(normalized: &str, name: &str) -> String {
+    let head = format!("CONSTRAINT {name} CHECK (");
+    let found = normalized.find(&head);
+    assert!(found.is_some(), "no constraint {name} in the SQL text");
+    let start = found.expect("presence asserted above");
+    let tail = &normalized[start..];
+    let mut depth = 0_u32;
+    let mut closing = None;
+    for (offset, character) in tail.char_indices() {
+        match character {
+            '(' => depth = depth.checked_add(1).expect("parenthesis depth overflow"),
+            ')' => {
+                depth = depth
+                    .checked_sub(1)
+                    .expect("unbalanced closing parenthesis");
+                if depth == 0 {
+                    closing = Some(offset);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        closing.is_some(),
+        "constraint {name} has no closing parenthesis"
+    );
+    let offset = closing.expect("presence asserted above");
+    tail[..=offset].to_owned()
+}
+
 /// The path of a migration file.
 fn migration_path(file: &str) -> PathBuf {
     PathBuf::from(MIGRATIONS).join(file)

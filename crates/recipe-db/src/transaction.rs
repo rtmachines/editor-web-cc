@@ -2,13 +2,15 @@
 //!
 //! One struct implements the sub-ports of `recipe-app`. Each accessor returns `self`, and each
 //! port has its own module with its `impl`. The read port `RecipeReads` of the recipe pages has
-//! its `impl` here, and its SQL lives in `recipe_list`, `version_reads`, and `parameter_reads`.
+//! its `impl` here, and its SQL lives in `recipe_list`, `version_reads`, `parameter_reads`, and
+//! `exportable`.
 
 mod audit_reads;
 mod diff_reads;
 mod draft_rows;
 mod draft_writes;
 mod drafts;
+mod exportable;
 mod identity;
 mod machine_list;
 mod machines;
@@ -38,14 +40,14 @@ use recipe_app::error::StorageError;
 use recipe_app::ports::{
     AggregateId, AttemptRepository, AuditEntryId, AuditFilter, AuditReads, AuditRecord, AuditRow,
     AuditScope, AuditWritten, ChangeFlags, CursorPage, DiffReads, DiffSides, DraftRepository,
-    EntityLabel, NonEmpty, ParameterRow, PlantRepository, RecipeFilter, RecipeReads,
-    RecipeRepository, RecipeSummary, SecurityEventFilter, SecurityEventId, SecurityEventRow,
-    SessionRepository, SettingRepository, Transaction, TypeCatalog, UnitCount, UnitLookup,
-    UserRepository, VersionDetail, VersionSummary,
+    EntityLabel, ExportableRecipes, NonEmpty, ParameterRow, PlantRepository, RecipeFilter,
+    RecipeReads, RecipeRepository, RecipeSummary, SecurityEventFilter, SecurityEventId,
+    SecurityEventRow, SessionRepository, SettingRepository, Transaction, TypeCatalog, UnitCount,
+    UnitLookup, UserRepository, VersionDetail, VersionSummary,
 };
 use recipe_domain::audit::{AggregateType, AuditEntry};
 use recipe_domain::identity::Login;
-use recipe_domain::plant::UnitId;
+use recipe_domain::plant::{MachineCode, UnitId};
 use recipe_domain::recipe::{
     ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
 };
@@ -215,6 +217,13 @@ impl RecipeReads for PgTransaction {
         key: ParameterKey,
     ) -> Result<Option<StoredParameter>, StorageError> {
         parameter_reads::by_key(&mut self.tx, version, key).await
+    }
+
+    async fn exportable_recipes(
+        &mut self,
+        machine: MachineCode,
+    ) -> Result<Option<ExportableRecipes>, StorageError> {
+        exportable::by_machine_code(&mut self.tx, machine).await
     }
 }
 

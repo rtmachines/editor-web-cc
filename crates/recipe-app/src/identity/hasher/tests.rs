@@ -253,6 +253,12 @@ fn the_default_settings_equal_the_table() {
         number_at(settings_cell("audit.unlock_rows"), 0)
     );
     assert_eq!(settings.argon2, Argon2Params::default());
+
+    let basic = settings_cell("export.basic_permits");
+    assert_eq!(
+        u64::try_from(settings.export_basic_permits).unwrap(),
+        number_at(basic, 0)
+    );
 }
 
 #[test]

@@ -23,22 +23,22 @@ pub struct ExportHeader {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct MachineBody {
+pub(super) struct MachineBody {
     #[serde(serialize_with = "super::display_text")]
-    code: MachineCode,
+    pub(super) code: MachineCode,
     #[serde(serialize_with = "super::display_text")]
-    plc_platform: PlcPlatform,
+    pub(super) plc_platform: PlcPlatform,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct RecipeBody {
+pub(super) struct RecipeBody {
     #[serde(serialize_with = "super::display_text")]
-    reference_number: ReferenceNumber,
+    pub(super) reference_number: ReferenceNumber,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-struct VersionBody {
-    number: u32,
+pub(super) struct VersionBody {
+    pub(super) number: u32,
 }
 
 /// The JSON object that `content_sha256` covers.
@@ -47,9 +47,9 @@ struct VersionBody {
 /// section 6.1 and nothing else. A name, a status, or an export time cannot enter it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct HashedBody {
-    machine: MachineBody,
-    recipe: RecipeBody,
-    version: VersionBody,
+    pub(super) machine: MachineBody,
+    pub(super) recipe: RecipeBody,
+    pub(super) version: VersionBody,
     types: Vec<TypeEntry>,
     parameters: Vec<ParameterEntry>,
 }

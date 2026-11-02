@@ -367,3 +367,77 @@ async fn an_actor_who_loses_the_permission_before_the_guard_lock_gets_e_web_002_
         );
     }
 }
+
+fn seed_export_client(fixture: &IdentityFixture) -> Login {
+    let login = Login::parse("plc-m12").unwrap();
+    fixture.store.seed_user(&NewUser {
+        id: UserId::from(Uuid::from_u128(13)),
+        login: login.clone(),
+        password_hash: fake_hash("secret-phrase-three"),
+        role: Role::ExportClient,
+        must_change_password: false,
+    });
+    login
+}
+
+fn user_of(fixture: &IdentityFixture, login: &Login) -> UserRow {
+    fixture
+        .store
+        .state()
+        .users
+        .values()
+        .find(|row| &row.login == login)
+        .unwrap()
+        .clone()
+}
+
+#[tokio::test]
+async fn a_change_to_export_client_gives_e_idn_011_and_writes_nothing() {
+    let fixture = fixture();
+    let session = fixture.seed_anna_session(1);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let error = SetUserRole::new(fixture.context.clone())
+        .execute(&auth, &meta, input(anna(), Role::ExportClient))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            AppError::Identity(IdentityError::TechnicalRoleChange { login }) if login == &anna()
+        ),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::IDN_011);
+    assert_eq!(anna_row(&fixture).role, Role::Operator);
+    assert_eq!(anna_row(&fixture).session_epoch, 0);
+    assert!(fixture.store.audit_entries().is_empty());
+    assert!(
+        authenticate(&fixture.context, &session)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn a_change_from_export_client_gives_e_idn_011_and_writes_nothing() {
+    let fixture = fixture();
+    let client = seed_export_client(&fixture);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let error = SetUserRole::new(fixture.context.clone())
+        .execute(&auth, &meta, input(client.clone(), Role::Operator))
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            AppError::Identity(IdentityError::TechnicalRoleChange { login }) if login == &client
+        ),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::IDN_011);
+    let row = user_of(&fixture, &client);
+    assert_eq!(row.role, Role::ExportClient);
+    assert_eq!(row.session_epoch, 0);
+    assert!(fixture.store.audit_entries().is_empty());
+}

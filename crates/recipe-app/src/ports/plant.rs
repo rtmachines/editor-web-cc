@@ -74,6 +74,16 @@ pub trait PlantRepository: Send {
         code: MachineCode,
     ) -> Result<Option<Machine>, StorageError>;
 
+    /// Read the machine that `code` names on the transfer routes without a lock (ADR-0109 (j)).
+    ///
+    /// The live machine with the code wins. Without one, the machine with that code and the
+    /// latest `archived_at` wins, and the higher `id` breaks a tie. A code that names no machine
+    /// gives `None`.
+    async fn export_machine_by_code(
+        &mut self,
+        code: MachineCode,
+    ) -> Result<Option<Machine>, StorageError>;
+
     /// Read a machine, live or archived, without a lock (`/machines/by-id/{uuid}`).
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError>;
 

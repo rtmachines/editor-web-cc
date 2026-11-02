@@ -1,6 +1,6 @@
 # ADR-0065: TLS of the proxy and the default trusted proxy
 
-Status: Accepted. Amended by a note on the risk of `PROXY_ADDRESS`. The check reads the event `login_failed` of a login with a wrong password in the security events. A successful login is an audit entry (A33).
+Status: Accepted. Amended by a note on the risk of `PROXY_ADDRESS`. The check reads the event `login_failed` of a login with a wrong password in the security events. A successful login is an audit entry (A33). Amended by ADR-0109 (item (d): the HTTP site answers each path under `/export/` with `403` and no redirect)
 Date: 2026-10-23
 Deciders: project owner
 

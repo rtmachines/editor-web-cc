@@ -17,10 +17,11 @@ impl Access {
     /// Return true when a user who must change the password may open the route.
     ///
     /// The routes are `GET /me/password`, `POST /me/password`, `POST /logout`, `POST /lang`, and
-    /// the static files (`api.md` section 7.4).
+    /// the static files (`api.md` section 7.4). A Basic row counts as open, because it has no
+    /// session and so no flag (ADR-0109 (l)).
     fn open_while_password_change(self) -> bool {
         match self {
-            Self::Static | Self::Lang => true,
+            Self::Static | Self::Lang | Self::Basic(_) => true,
             Self::Authenticated => false,
             Self::Operation(operation) => matches!(
                 operation,
@@ -33,7 +34,7 @@ impl Access {
     fn runs_in_read_only(self) -> bool {
         match self {
             Self::Static | Self::Lang | Self::Authenticated => true,
-            Self::Operation(operation) => operation.runs_in_read_only(),
+            Self::Operation(operation) | Self::Basic(operation) => operation.runs_in_read_only(),
         }
     }
 }

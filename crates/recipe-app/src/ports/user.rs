@@ -153,11 +153,15 @@ pub trait UserRepository: Send {
     /// Set `is_active` and clear `deactivated_at`. The epoch stays (`ActivateUser`).
     async fn activate(&mut self, id: UserId) -> Result<RowImage, StorageError>;
 
-    /// Replace the hash, set `must_change_password`, and raise the epoch by 1 (`ResetPassword`).
+    /// Replace the hash, set `must_change_password` to `must_change`, and raise the epoch by 1
+    /// (`ResetPassword`).
+    ///
+    /// The caller passes `false` for an `ExportClient` and `true` for every other role (design D6).
     async fn reset_password(
         &mut self,
         id: UserId,
         hash: &PasswordHash,
+        must_change: bool,
     ) -> Result<RowImage, StorageError>;
 
     /// Replace the hash, clear `must_change_password`, and raise the epoch by 1

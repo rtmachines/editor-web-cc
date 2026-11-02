@@ -30,7 +30,7 @@ impl Access {
     fn session_need(self) -> SessionNeed {
         match self {
             Self::Authenticated => SessionNeed::Required,
-            Self::Static => SessionNeed::Ignore,
+            Self::Static | Self::Basic(_) => SessionNeed::Ignore,
             Self::Lang => SessionNeed::Optional,
             Self::Operation(operation) => match operation.requirement() {
                 Requirement::NoSession => SessionNeed::Ignore,

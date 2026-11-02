@@ -171,6 +171,7 @@ const EXPLAINED: &[(&str, &str)] = &[
     ("diff.leaf_rows", "rows"),
     ("diff.permits", "diffs"),
     ("export.permits", "exports"),
+    ("export.basic_header_max", "bytes"),
     ("page.audit", "rows"),
     ("page.history", "rows"),
     ("page.security_events", "rows"),

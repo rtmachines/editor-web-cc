@@ -7,7 +7,9 @@ mod body;
 mod error;
 mod facts;
 mod hash;
+mod listing;
 mod parameters;
+mod scope;
 mod sha256;
 #[cfg(test)]
 mod test_rows;
@@ -18,8 +20,12 @@ mod types;
 
 pub use body::{ExportHeader, HashedBody};
 pub use error::ExportError;
-pub use facts::{DocumentFacts, ExportStatus, SCHEMA_VERSION, utc_text};
+pub use facts::{
+    DocumentFacts, ExportStatus, SCHEMA_VERSION, SCOPE_SCHEMA_VERSION, ScopeFacts, utc_text,
+};
+pub use listing::{ExportableRecipe, ExportableRecipes};
 pub use parameters::{LimitEntry, OrderedValue, ParameterEntry};
+pub use scope::ScopeBody;
 pub use sha256::{Sha256, Sha256Reason};
 pub use type_reference::TypeReference;
 pub use types::TypeEntry;

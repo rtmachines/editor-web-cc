@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 use recipe_domain::identity::{KeyRing, breached_password_count};
 
-use super::{HashGate, IdentitySettings};
+use super::basic_permit::BasicGate;
+use super::{HashGate, HashPermit, IdentitySettings};
 use crate::context::AppContext;
+use crate::error::AppError;
 use crate::ports::{LoginAttemptStore, SessionStore};
 
 /// The ports and settings that the identity use cases need.
@@ -23,6 +25,8 @@ pub struct IdentityContext {
     pub(crate) sessions: Arc<dyn SessionStore>,
     /// The gate in front of every Argon2 call.
     pub(crate) gate: HashGate,
+    /// The gate in front of the Basic checks of the export routes (`export.basic_permits`).
+    pub(crate) basic_gate: BasicGate,
     /// The key ring of the login HMAC in security events.
     pub(crate) login_keys: KeyRing,
     /// The settings of `reliability.md` section 7.11 for the identity use cases.
@@ -44,11 +48,16 @@ impl IdentityContext {
         settings: IdentitySettings,
     ) -> Self {
         let _loaded = breached_password_count();
+        let basic_gate = BasicGate::new(
+            settings.export_basic_permits,
+            settings.argon2_acquire_timeout,
+        );
         Self {
             app,
             attempts,
             sessions,
             gate,
+            basic_gate,
             login_keys,
             settings,
         }
@@ -70,6 +79,23 @@ impl IdentityContext {
     #[must_use]
     pub const fn gate(&self) -> &HashGate {
         &self.gate
+    }
+
+    /// Take the Basic permit, then the Argon2 permit (design D2 step 1).
+    ///
+    /// At most `export.basic_permits` Basic checks wait for or hold an Argon2 permit at one time,
+    /// so the UI logins keep the other permits of `argon2.permits` (ADR-0109 (n)). Each wait is at
+    /// most `argon2.acquire_timeout`. The returned permit owns the Basic permit too. Both go back
+    /// together when the hash ends, also when the caller drops its future first.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Timeout` with the stage `Argon2Permit` (`E-WEB-009`) when a wait
+    /// exceeds the limit. The call then holds no permit.
+    pub async fn acquire_basic(&self) -> Result<HashPermit, AppError> {
+        let basic = self.basic_gate.acquire().await?;
+        let hash = self.gate.acquire().await?;
+        Ok(hash.holding(basic))
     }
 
     /// Return the key ring of the login HMAC.

@@ -38,6 +38,7 @@ use tracing::subscriber::{DefaultGuard, NoSubscriber};
 use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
+use crate::basic_auth::BasicUser;
 use crate::client::ClientAddr;
 use crate::csrf::issue_pre_session;
 use crate::i18n::{Bundles, Lang};
@@ -228,6 +229,21 @@ async fn client(Extension(address): Extension<ClientAddr>) -> String {
     address.ip().to_string()
 }
 
+/// Answer a Basic route with the login, the session extension, and the session reference.
+async fn basic_who(
+    user: BasicUser,
+    Extension(session): Extension<Option<Authenticated>>,
+) -> String {
+    format!(
+        "login={};session={};session_ref={}",
+        user.user().login().as_str(),
+        session.map_or("none", |_session| "some"),
+        user.meta()
+            .session_ref()
+            .map_or("none", |_reference| "some"),
+    )
+}
+
 async fn who(Extension(session): Extension<Option<Authenticated>>) -> String {
     session.map_or_else(
         || "none".to_owned(),
@@ -247,6 +263,19 @@ fn test_rows() -> Vec<RouteEntry> {
         handler,
     };
     vec![
+        RouteEntry {
+            method: Method::GET,
+            path: "/test/basic",
+            access: Access::Basic(Operation::ExportApprovedVersion),
+            handler: get(basic_who),
+        },
+        // A Basic row under the export prefix, so the navigation guard wraps it (ADR-0109 (p)).
+        RouteEntry {
+            method: Method::GET,
+            path: "/export/test/basic",
+            access: Access::Basic(Operation::ExportApprovedVersion),
+            handler: get(basic_who),
+        },
         row(
             Method::GET,
             "/test/login-form",

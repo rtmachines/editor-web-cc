@@ -80,12 +80,26 @@ pub(super) async fn reject_throttled<T>(
     login: &TypedLogin,
     retry_after: u64,
 ) -> Result<T, AppError> {
+    reject_throttled_marked(ctx, requester, login, retry_after, |event| event).await
+}
+
+/// Write the event `login_throttled` after `mark` changed it, and return `E-IDN-005`.
+///
+/// The Basic check uses `mark` to put the scheme into the event. Errors are those of
+/// [`reject_throttled`].
+pub(super) async fn reject_throttled_marked<T>(
+    ctx: &IdentityContext,
+    requester: &Requester,
+    login: &TypedLogin,
+    retry_after: u64,
+    mark: impl FnOnce(SecurityEvent) -> SecurityEvent,
+) -> Result<T, AppError> {
     let event = SecurityEvent::login_throttled(
         LoginHmac::compute(&ctx.login_keys, login),
         requester.request_id,
         requester.client_ip,
         requester.user_agent.clone(),
     );
-    ctx.app.security.record(event).await?;
+    ctx.app.security.record(mark(event)).await?;
     Err(IdentityError::LoginThrottled { retry_after }.into())
 }

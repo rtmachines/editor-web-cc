@@ -15,6 +15,7 @@ use axum::routing::{MethodRouter, get, post};
 use recipe_app::auth::Operation;
 use tracing::Span;
 
+use crate::basic_auth::basic_layer;
 use crate::client::client_address;
 use crate::csrf::csrf_layer;
 use crate::error::{WebError, render_errors};
@@ -40,6 +41,10 @@ pub enum Access {
     /// The route has no use case and no permission. It needs a valid session and works in
     /// read-only mode, like the compare route (ADR-0108 (e)).
     Authenticated,
+    /// The route runs this operation for an `ExportClient` account with HTTP Basic (ADR-0109 (l)).
+    /// It ignores the session cookie and has no CSRF token. The layer `basic_layer` checks the
+    /// header, and the handler reads the account through the extractor `BasicUser`.
+    Basic(Operation),
     /// The route serves a static file. It has no operation and needs no session.
     Static,
     /// `POST /lang`. The route has no use case. It works without a session and in read-only mode.
@@ -73,6 +78,21 @@ pub(crate) fn operation_row(
     }
 }
 
+/// Build one row of the table for a Basic route with a use case (ADR-0109 (l)).
+pub(crate) fn basic_row(
+    method: Method,
+    path: &'static str,
+    operation: Operation,
+    handler: MethodRouter<WebState>,
+) -> RouteEntry {
+    RouteEntry {
+        method,
+        path,
+        access: Access::Basic(operation),
+        handler,
+    }
+}
+
 /// Return the route table.
 ///
 /// The table holds the static files and the rows of step P3.1. It also holds the rows of ten
@@ -96,6 +116,7 @@ pub(crate) fn table() -> Vec<RouteEntry> {
     rows.extend(pages::audit::rows());
     rows.extend(pages::security_events::rows());
     rows.extend(pages::export::rows());
+    rows.extend(pages::export_api::rows());
     rows
 }
 
@@ -325,13 +346,19 @@ pub(crate) fn assemble(
     let mut routes = Router::new();
     for entry in entries {
         access.insert(entry.path, entry.method, entry.access);
-        // The guard of ADR-0055 wraps the handler only. The router layers below wrap the guard.
-        let handler = if is_export_path(entry.path) {
+        // The Basic check wraps the handler, and the guard of ADR-0055 wraps the check, so the
+        // order is guard, Basic check, handler (ADR-0109 (p)). The router layers below wrap both.
+        let handler = if matches!(entry.access, Access::Basic(_)) {
             entry
                 .handler
-                .layer(from_fn_with_state(state.clone(), export_guard))
+                .layer(from_fn_with_state(state.clone(), basic_layer))
         } else {
             entry.handler
+        };
+        let handler = if is_export_path(entry.path) {
+            handler.layer(from_fn_with_state(state.clone(), export_guard))
+        } else {
+            handler
         };
         routes = routes.route(entry.path, handler);
     }

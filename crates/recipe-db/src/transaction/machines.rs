@@ -28,6 +28,13 @@ const SELECT_ARCHIVED_BY_CODE: &str = "\
 SELECT id, code, name, plc_platform, archived_at FROM machine \
 WHERE code = $1 AND archived_at IS NOT NULL ORDER BY id LIMIT 1";
 
+/// The machine that the transfer routes pick for a code (ADR-0109 (j)).
+///
+/// The live machine comes first because `archived_at DESC NULLS FIRST` puts null first. Then comes
+/// the latest archiving. `id DESC` breaks a tie. The `resolved` CTE of `SELECT_EXPORTABLE` in
+/// `exportable.rs` uses the same order, and the memory adapter does too.
+const SELECT_EXPORT_BY_CODE: &str = "SELECT id, code, name, plc_platform, archived_at FROM machine WHERE code = $1 ORDER BY archived_at DESC NULLS FIRST, id DESC LIMIT 1";
+
 const SELECT_BY_ID: &str = "\
 SELECT id, code, name, plc_platform, archived_at FROM machine WHERE id = $1";
 
@@ -150,6 +157,14 @@ pub(super) async fn archived_by_code(
     code: MachineCode,
 ) -> Result<Option<Machine>, StorageError> {
     let query = sqlx::query_as(SELECT_ARCHIVED_BY_CODE).bind(code.to_string());
+    read_one(connection, query).await
+}
+
+pub(super) async fn export_by_code(
+    connection: &mut PgConnection,
+    code: MachineCode,
+) -> Result<Option<Machine>, StorageError> {
+    let query = sqlx::query_as(SELECT_EXPORT_BY_CODE).bind(code.to_string());
     read_one(connection, query).await
 }
 

@@ -21,7 +21,7 @@ The section "Known gaps" of the [changelog](CHANGELOG.md) is the authority for t
 | Reader | Document |
 |---|---|
 | Users | [User guide](docs/user/README.md) |
-| Operators | [Runbook](docs/ops/runbook.md) |
+| Operators | [Runbook](docs/ops/runbook.md), [Transfer client guide](docs/ops/transfer-client.md) |
 | Developers and reviewers | [Architecture overview](docs/architecture/overview.md), [Architecture Decision Records](docs/adr/README.md), [Reliability rules](docs/architecture/reliability.md) |
 | Contributors | [Contribution rules](CONTRIBUTING.md) |
 

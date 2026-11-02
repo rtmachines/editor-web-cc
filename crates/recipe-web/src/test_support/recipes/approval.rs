@@ -41,6 +41,8 @@ use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+mod units;
+
 use super::{CELL_ID, PAIR_ID, RecipeIds, m7_row, member, parameters, text};
 use crate::test_support::plant::PlantIds;
 use crate::test_support::{Fixture, TestSession};
@@ -307,14 +309,25 @@ impl Runner<'_> {
         (out.recipe, out.version)
     }
 
-    /// Add the parameter `spec` to `draft`. Return its key.
+    /// Add the parameter `spec` to `draft` on the unit `U1`. Return its key.
     async fn add(&mut self, user: &CurrentUser, draft: &mut Draft, spec: &Spec) -> ParameterKey {
+        self.add_on(user, draft, "U1", spec).await
+    }
+
+    /// Add the parameter `spec` to `draft` on the unit `unit`. Return its key.
+    async fn add_on(
+        &mut self,
+        user: &CurrentUser,
+        draft: &mut Draft,
+        unit: &str,
+        spec: &Spec,
+    ) -> ParameterKey {
         let meta = self.meta();
         let input = AddParameterInput {
             reference: draft.reference.clone(),
             number: draft.number,
             expected_row_version: draft.row_version,
-            unit_path: UnitPath::parse("U1").unwrap(),
+            unit_path: UnitPath::parse(unit).unwrap(),
             tag: ParameterTag::parse(spec.tag).unwrap(),
             name_en: text(spec.tag),
             description_en: LongText::parse("A parameter of the approval data").unwrap(),

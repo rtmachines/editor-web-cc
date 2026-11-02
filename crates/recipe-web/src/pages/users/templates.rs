@@ -34,6 +34,18 @@ pub(super) fn role_options(
         .collect()
 }
 
+/// Return the roles of the user form: the roles of the use case, then `ExportClient`.
+///
+/// The set-role form of a user never offers `ExportClient`. Only the form of a new user does
+/// (`web-ui` spec, ADR-0109 (a)).
+fn offered_on_create(roles: &[Role]) -> Vec<Role> {
+    let mut offered = roles.to_vec();
+    if !offered.contains(&Role::ExportClient) {
+        offered.push(Role::ExportClient);
+    }
+    offered
+}
+
 /// One row of the user list.
 pub(super) struct UserRow {
     login: String,
@@ -122,7 +134,7 @@ impl<'a> NewUserPage<'a> {
         Ok(Self {
             layout: Layout::for_session(t, request, t.get("user-new-title"), None)?,
             t,
-            roles: role_options(t, roles, Some(Role::Operator)),
+            roles: role_options(t, &offered_on_create(roles), Some(Role::Operator)),
         })
     }
 }
@@ -142,6 +154,7 @@ pub(crate) struct UserPage<'a> {
     deactivated: Option<String>,
     failures: u32,
     last_failure: Option<String>,
+    can_set_role: bool,
     roles: Vec<RoleOption>,
 }
 
@@ -169,6 +182,7 @@ impl<'a> UserPage<'a> {
             deactivated: user.deactivated_at.as_ref().map(instant),
             failures: detail.throttle.failures,
             last_failure: detail.throttle.last_failure.as_ref().map(instant),
+            can_set_role: user.role.is_person(),
             roles: role_options(t, &Role::ALL, Some(user.role)),
         })
     }
@@ -184,21 +198,27 @@ pub(crate) struct ResultFragment<'a> {
     t: Texts<'a>,
     message: String,
     password: Option<String>,
+    technical: bool,
     login: String,
 }
 
 impl<'a> ResultFragment<'a> {
     /// Build the fragment. `password` is the one-time password of the command, or `None`.
+    ///
+    /// `technical` is true for an `ExportClient` account. Its password is a permanent
+    /// credential, so the page shows another notice (ADR-0109 (a)).
     pub(super) const fn new(
         t: Texts<'a>,
         message: String,
         password: Option<String>,
+        technical: bool,
         login: String,
     ) -> Self {
         Self {
             t,
             message,
             password,
+            technical,
             login,
         }
     }
@@ -211,6 +231,7 @@ pub(crate) struct ResultPage<'a> {
     layout: Layout<'a>,
     t: Texts<'a>,
     password: Option<String>,
+    technical: bool,
     login: String,
 }
 
@@ -233,6 +254,7 @@ impl<'a> ResultPage<'a> {
             layout,
             t,
             password: fragment.password,
+            technical: fragment.technical,
             login: fragment.login,
         })
     }

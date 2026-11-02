@@ -3,15 +3,18 @@
 use std::net::IpAddr;
 
 use async_trait::async_trait;
-use recipe_domain::identity::{AttemptCount, SessionId, ThrottlePolicy};
+use recipe_domain::identity::{
+    AttemptCount, PasswordHash, Role, SessionId, ThrottlePolicy, UserId,
+};
 use recipe_domain::timestamp::Timestamp;
 
+use super::users::USER_TABLE;
 use super::{LOGIN_LOCK_TABLE, StoredSession, after, before};
 use crate::error::StorageError;
 use crate::memory::{JournalEntry, Lock, LockMode, MemoryState, MemoryStore};
 use crate::ports::{
-    AttemptId, AttemptKey, AttemptOutcome, AttemptRow, Isolation, LoginAttemptStore, SessionLimits,
-    SessionRow, SessionStore,
+    AttemptId, AttemptKey, AttemptOutcome, AttemptRow, BasicChange, BasicConfirmation, Isolation,
+    LoginAttemptStore, SessionLimits, SessionRow, SessionStore,
 };
 
 /// Run the statements of T1 on the committed state.
@@ -96,6 +99,36 @@ fn insert_failed_attempt(
     Ok(id)
 }
 
+/// Run the statements of T2 of the Basic check on the committed state.
+fn confirm(
+    state: &mut MemoryState,
+    journal: &mut Vec<JournalEntry>,
+    attempt: AttemptId,
+    user: UserId,
+    expected_hash: &PasswordHash,
+) -> BasicConfirmation {
+    journal.push(JournalEntry::Lock(Lock {
+        table: USER_TABLE,
+        mode: LockMode::ForNoKeyUpdate,
+        key: user.to_string(),
+    }));
+    let reason = match state.users.get(&user) {
+        None => Some(BasicChange::Missing),
+        Some(row) if !row.is_active => Some(BasicChange::Inactive),
+        Some(row) if row.role != Role::ExportClient => Some(BasicChange::NotExportClient),
+        Some(row) if row.password_hash != *expected_hash => Some(BasicChange::PasswordChanged),
+        Some(_) => None,
+    };
+    if let Some(reason) = reason {
+        return BasicConfirmation::Changed { reason };
+    }
+    // An attempt that `UnlockLogin` deleted changes no row (ADR-0035).
+    if let Some(row) = state.attempts.get_mut(&attempt) {
+        row.succeeded = true;
+    }
+    BasicConfirmation::Confirmed
+}
+
 /// Run the statement of `SessionStore::authenticate` on the committed state (design D10).
 fn touch(
     state: &mut MemoryState,
@@ -149,6 +182,17 @@ impl LoginAttemptStore for MemoryStore {
         self.pool_transaction(Isolation::ReadCommitted, |state, now, journal| {
             begin(state, now, journal, key, policy)
         })?
+    }
+
+    async fn confirm_basic(
+        &self,
+        attempt: AttemptId,
+        user: UserId,
+        expected_hash: &PasswordHash,
+    ) -> Result<BasicConfirmation, StorageError> {
+        self.pool_transaction(Isolation::ReadCommitted, |state, _now, journal| {
+            confirm(state, journal, attempt, user, expected_hash)
+        })
     }
 }
 

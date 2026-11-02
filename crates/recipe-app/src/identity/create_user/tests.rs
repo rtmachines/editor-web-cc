@@ -71,6 +71,33 @@ async fn a_success_creates_an_active_user_with_the_hash_of_the_one_time_password
 }
 
 #[tokio::test]
+async fn an_export_client_keeps_the_flag_must_change_password_false() {
+    let fixture = IdentityFixture::new();
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    CreateUser::new(fixture.context.clone())
+        .execute(&auth, &meta, input("transfer", Role::ExportClient))
+        .await
+        .unwrap();
+    let row = stored_user(&fixture, "transfer").unwrap();
+    assert_eq!(row.role, Role::ExportClient);
+    assert!(!row.must_change_password);
+}
+
+#[tokio::test]
+async fn every_person_role_gets_the_flag_must_change_password_true() {
+    for role in [Role::Operator, Role::ProcessEngineer, Role::Administrator] {
+        let fixture = IdentityFixture::new();
+        let (auth, meta) = fixture.actor(Role::Administrator).await;
+        CreateUser::new(fixture.context.clone())
+            .execute(&auth, &meta, input("berta", role))
+            .await
+            .unwrap();
+        let row = stored_user(&fixture, "berta").unwrap();
+        assert!(row.must_change_password, "{role:?}");
+    }
+}
+
+#[tokio::test]
 async fn the_id_of_a_created_user_is_a_version_4_uuid() {
     let fixture = IdentityFixture::new();
     let (auth, meta) = fixture.actor(Role::Administrator).await;

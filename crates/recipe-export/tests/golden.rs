@@ -11,7 +11,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use jsonschema::Validator;
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::export::{DocumentFacts, ExportError, ExportHeader, ExportStatus, HashedBody};
+use recipe_domain::export::{
+    DocumentFacts, ExportError, ExportHeader, ExportStatus, HashedBody, ScopeBody, ScopeFacts,
+};
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafPath, LiveUnits, Machine, MachineCode, MachineId,
@@ -25,7 +27,7 @@ use recipe_domain::recipe::{
 };
 use recipe_domain::text::{LongText, Text};
 use recipe_domain::timestamp::Timestamp;
-use recipe_export::write_document;
+use recipe_export::{write_document, write_scoped};
 use rust_decimal::Decimal;
 use serde_json::Value;
 use time::{Date, Month, OffsetDateTime, UtcOffset};
@@ -35,6 +37,10 @@ use uuid::Uuid;
 const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/");
 /// Path of the schema file.
 const SCHEMA_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/schema/export-v1.schema.json");
+/// Path of the schema file of the document v2 (the unit scope).
+const SCHEMA_V2_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/schema/export-v2.schema.json");
+/// The golden file of the unit `U1.2` of the example of `api.md` section 6.2.
+const SCOPE_FILE: &str = "recipe_R-100_v3_U1.2.json";
 /// Path of `api.md`. Section 6.2 holds the example document.
 const API_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -477,4 +483,247 @@ fn parameter_key_without_a_name_gives_e_exp_004() {
     let error = write_document(&body, &facts).unwrap_err();
     assert!(matches!(error, ExportError::Serialize(_)), "{error:?}");
     assert_eq!(error.code(), ErrorCode::EXP_004);
+}
+
+/// Compile a schema file as draft 2020-12 with the format checks on (design D4).
+fn validator_of(path: &str) -> Validator {
+    let text = std::fs::read_to_string(path).unwrap();
+    let schema: Value = serde_json::from_str(&text).unwrap();
+    jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .unwrap()
+}
+
+/// The scope body and the facts of the unit `U1.2` of the example of `api.md` section 6.2.
+fn scope_example() -> (ScopeBody, ScopeFacts) {
+    scope_example_of("U1.2")
+}
+
+/// The scope body and the facts of one unit of the example of `api.md` section 6.2.
+fn scope_example_of(unit_path: &str) -> (ScopeBody, ScopeFacts) {
+    let (whole, document) = example();
+    let scope = ScopeBody::build(&whole, &UnitPath::parse(unit_path).unwrap());
+    let scope_sha256 = scope.sha256().unwrap();
+    let facts = ScopeFacts {
+        document,
+        scope_sha256,
+    };
+    (scope, facts)
+}
+
+fn written_scoped((body, facts): (ScopeBody, ScopeFacts)) -> String {
+    String::from_utf8(write_scoped(&body, &facts).unwrap()).unwrap()
+}
+
+#[test]
+fn v2_golden_file_passes_the_v2_schema() {
+    let doc: Value = serde_json::from_str(&golden(SCOPE_FILE)).unwrap();
+    assert_passes_schema(&validator_of(SCHEMA_V2_PATH), &doc, SCOPE_FILE);
+}
+
+#[test]
+fn v2_golden_file_fails_the_v1_schema() {
+    let doc: Value = serde_json::from_str(&golden(SCOPE_FILE)).unwrap();
+    let validator = validator_of(SCHEMA_PATH);
+    assert!(!validator.is_valid(&doc));
+    let paths: Vec<String> = validator
+        .iter_errors(&doc)
+        .map(|error| error.instance_path().as_str().to_owned())
+        .collect();
+    assert!(paths.iter().any(String::is_empty), "{paths:?}");
+    assert!(
+        paths.iter().any(|path| path == "/schema_version"),
+        "{paths:?}"
+    );
+}
+
+#[test]
+fn v1_golden_file_fails_the_v2_schema() {
+    let doc: Value = serde_json::from_str(&golden(APPROVED_FILE)).unwrap();
+    assert!(!validator_of(SCHEMA_V2_PATH).is_valid(&doc));
+}
+
+#[test]
+fn v2_writer_output_equals_its_golden_file() {
+    assert_eq!(written_scoped(scope_example()), golden(SCOPE_FILE));
+}
+
+#[test]
+fn v2_golden_file_holds_the_scope_hash_and_the_whole_version_hash() {
+    let (scope, _) = scope_example();
+    let doc: Value = serde_json::from_str(&golden(SCOPE_FILE)).unwrap();
+    assert_eq!(doc["scope_sha256"], scope.sha256().unwrap().to_string());
+    assert_eq!(doc["content_sha256"], EXAMPLE_HASH);
+    assert_ne!(doc["scope_sha256"], doc["content_sha256"]);
+}
+
+/// The names of the top-level fields in the order of the text. `serde_json::Value` sorts keys.
+fn top_level_keys(text: &str) -> Vec<&str> {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("  \""))
+        .filter_map(|rest| rest.split_once('"'))
+        .map(|(key, _)| key)
+        .collect()
+}
+
+#[test]
+fn v2_writer_emits_the_fields_in_the_documented_order() {
+    let text = written_scoped(scope_example());
+    assert_eq!(
+        top_level_keys(&text),
+        [
+            "schema_version",
+            "exported_at",
+            "exported_by",
+            "loadable",
+            "content_sha256",
+            "scope_sha256",
+            "machine",
+            "recipe",
+            "version",
+            "scope",
+            "types",
+            "parameters",
+        ]
+    );
+}
+
+#[test]
+fn v2_parameter_without_a_name_gives_e_exp_004() {
+    let (body, mut facts) = scope_example();
+    facts.document.names.clear();
+    let error = write_scoped(&body, &facts).unwrap_err();
+    assert!(matches!(error, ExportError::Serialize(_)), "{error:?}");
+    assert_eq!(error.code(), ErrorCode::EXP_004);
+}
+
+/// Return the lower-case hex SHA-256 of the RFC 8785 (JCS) canonical form of a JSON value.
+///
+/// The consumer tests use this function and not the hash function of `recipe-domain`. A transfer
+/// client has only the document and a JCS library.
+fn jcs_sha256_hex(value: &Value) -> String {
+    use sha2::{Digest, Sha256};
+    let text = serde_json_canonicalizer::to_string(value).unwrap();
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// The sort key of a `unit_path`: the segments as integers, the first one without its `U`.
+fn unit_path_key(path: &str) -> Vec<u64> {
+    path.trim_start_matches('U')
+        .split('.')
+        .map(|segment| segment.parse().unwrap())
+        .collect()
+}
+
+/// Return the text of a string member of a JSON object.
+fn text_member<'a>(object: &'a Value, key: &str) -> &'a str {
+    object[key].as_str().unwrap()
+}
+
+/// Rebuild the scope hashed body from a parsed v2 document by the rule of `api.md` section 6.4.
+///
+/// The function sorts the arrays by the keys of section 6.3 and drops `name_en`.
+fn consumer_scope_body(doc: &Value) -> Value {
+    let mut types = doc["types"].as_array().unwrap().clone();
+    types.sort_by(|a, b| text_member(a, "id").cmp(text_member(b, "id")));
+    let mut parameters = doc["parameters"].as_array().unwrap().clone();
+    parameters.sort_by_key(|parameter| {
+        (
+            unit_path_key(text_member(parameter, "unit_path")),
+            text_member(parameter, "tag").to_owned(),
+        )
+    });
+    for parameter in &mut parameters {
+        let object = parameter.as_object_mut().unwrap();
+        object.remove("name_en");
+        let limits = object.get_mut("limits").unwrap().as_array_mut().unwrap();
+        limits.sort_by(|a, b| text_member(a, "leaf_path").cmp(text_member(b, "leaf_path")));
+    }
+    serde_json::json!({
+        "machine": {
+            "code": doc["machine"]["code"],
+            "plc_platform": doc["machine"]["plc_platform"],
+        },
+        "recipe": { "reference_number": doc["recipe"]["reference_number"] },
+        "version": { "number": doc["version"]["number"] },
+        "scope": doc["scope"],
+        "types": types,
+        "parameters": parameters,
+    })
+}
+
+/// The `scope_sha256` that a consumer computes from a parsed v2 document.
+fn consumer_scope_sha256(doc: &Value) -> String {
+    jcs_sha256_hex(&consumer_scope_body(doc))
+}
+
+/// Parse the writer output of the example for one unit.
+fn parsed_scoped(unit_path: &str) -> Value {
+    serde_json::from_str(&written_scoped(scope_example_of(unit_path))).unwrap()
+}
+
+#[test]
+fn consumer_v2_rebuilds_scope_sha256_of_the_golden_file() {
+    let doc: Value = serde_json::from_str(&golden(SCOPE_FILE)).unwrap();
+    assert_eq!(doc["loadable"], true);
+    assert_eq!(
+        consumer_scope_sha256(&doc),
+        text_member(&doc, "scope_sha256")
+    );
+}
+
+#[test]
+fn consumer_v2_rebuilds_scope_sha256_when_the_arrays_arrive_in_reverse_order() {
+    let mut doc = parsed_scoped("U1");
+    assert_eq!(doc["parameters"].as_array().unwrap().len(), 2);
+    let expected = text_member(&doc, "scope_sha256").to_owned();
+    doc["types"].as_array_mut().unwrap().reverse();
+    doc["parameters"].as_array_mut().unwrap().reverse();
+    for parameter in doc["parameters"].as_array_mut().unwrap() {
+        parameter["limits"].as_array_mut().unwrap().reverse();
+    }
+    assert_eq!(consumer_scope_sha256(&doc), expected);
+}
+
+#[test]
+fn consumer_v2_gets_two_scope_hashes_for_two_units_of_one_version() {
+    let whole = parsed_scoped("U1");
+    let part = parsed_scoped("U1.2");
+    assert_eq!(whole["content_sha256"], part["content_sha256"]);
+    assert_ne!(whole["scope_sha256"], part["scope_sha256"]);
+    assert_eq!(
+        consumer_scope_sha256(&whole),
+        text_member(&whole, "scope_sha256")
+    );
+    assert_eq!(
+        consumer_scope_sha256(&part),
+        text_member(&part, "scope_sha256")
+    );
+    assert_ne!(
+        consumer_scope_sha256(&whole),
+        text_member(&part, "scope_sha256")
+    );
+}
+
+#[test]
+fn consumer_v2_scope_sha256_ignores_the_names_and_the_export_data() {
+    let mut doc = parsed_scoped("U1.2");
+    let expected = text_member(&doc, "scope_sha256").to_owned();
+    doc["exported_by"] = Value::from("someone-else");
+    doc["machine"]["name"] = Value::from("Filler 3");
+    doc["recipe"]["name"] = Value::from("Other name");
+    doc["parameters"][0]["name_en"] = Value::from("Other parameter name");
+    assert_eq!(consumer_scope_sha256(&doc), expected);
+}
+
+#[test]
+fn consumer_v2_scope_sha256_changes_when_a_value_changes() {
+    let mut doc = parsed_scoped("U1.2");
+    let expected = text_member(&doc, "scope_sha256").to_owned();
+    doc["parameters"][0]["value"]["setpoint"] = Value::from("73.5");
+    assert_ne!(consumer_scope_sha256(&doc), expected);
 }

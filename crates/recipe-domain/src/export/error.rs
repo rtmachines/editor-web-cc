@@ -1,11 +1,12 @@
 //! The error type of the Export context.
 
 use crate::error_codes::ErrorCode;
+use crate::plant::UnitPath;
 use crate::recipe::ReferenceNumber;
 
 /// Error of the Export context (`reliability.md` section 1.1).
 ///
-/// The enum has one variant for each code in the range `E-EXP-001` to `E-EXP-004`.
+/// The enum has one variant for each code in the range `E-EXP-001` to `E-EXP-005`.
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
     /// The recipe has no approved version (`E-EXP-001`).
@@ -34,6 +35,16 @@ pub enum ExportError {
         /// The number of the version.
         number: u32,
     },
+    /// The unit filter of a scoped export selects no parameter (`E-EXP-005`).
+    #[error("Version {number} of recipe {reference} has no parameter in unit {path} or below it.")]
+    EmptyScope {
+        /// The reference number of the recipe.
+        reference: ReferenceNumber,
+        /// The number of the version.
+        number: u32,
+        /// The unit of the filter.
+        path: UnitPath,
+    },
     /// The serializer cannot write the export document (`E-EXP-004`).
     #[error("The server cannot create the export document. Contact the administrator.")]
     Serialize(#[from] serde_json::Error),
@@ -47,6 +58,7 @@ impl ExportError {
             Self::NoApprovedVersion { .. } => ErrorCode::EXP_001,
             Self::ContentHashMismatch { .. } => ErrorCode::EXP_002,
             Self::VersionNotExportable { .. } => ErrorCode::EXP_003,
+            Self::EmptyScope { .. } => ErrorCode::EXP_005,
             Self::Serialize(_) => ErrorCode::EXP_004,
         }
     }
@@ -56,6 +68,7 @@ impl ExportError {
 mod tests {
     use super::*;
     use crate::error_codes::REGISTRY;
+    use crate::plant::UnitPath;
     use crate::recipe::ReferenceNumber;
 
     fn reference() -> ReferenceNumber {
@@ -167,5 +180,31 @@ mod tests {
     fn serde_json_error_converts_into_serialize_variant() {
         let error = ExportError::from(serde_error());
         assert!(matches!(error, ExportError::Serialize(_)));
+    }
+
+    fn empty_scope() -> ExportError {
+        ExportError::EmptyScope {
+            reference: reference(),
+            number: 3,
+            path: UnitPath::parse("U1.2").unwrap(),
+        }
+    }
+
+    #[test]
+    fn empty_scope_has_code_exp_005() {
+        assert_eq!(empty_scope().code(), ErrorCode::EXP_005);
+    }
+
+    #[test]
+    fn empty_scope_is_in_registry() {
+        assert!(REGISTRY.contains(&ErrorCode::EXP_005));
+    }
+
+    #[test]
+    fn empty_scope_message_names_the_version_and_the_unit() {
+        assert_eq!(
+            empty_scope().to_string(),
+            "Version 3 of recipe R-100 has no parameter in unit U1.2 or below it."
+        );
     }
 }

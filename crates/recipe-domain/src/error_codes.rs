@@ -151,6 +151,8 @@ impl ErrorCode {
     pub const IDN_009: Self = Self::new("E-IDN-009");
     /// E-IDN-010, `IdentityError::UserAlreadyInactive`.
     pub const IDN_010: Self = Self::new("E-IDN-010");
+    /// E-IDN-011, `IdentityError::TechnicalRoleChange`.
+    pub const IDN_011: Self = Self::new("E-IDN-011");
 
     /// E-DB-001, `StorageError::Deadlock`.
     pub const DB_001: Self = Self::new("E-DB-001");
@@ -177,6 +179,8 @@ impl ErrorCode {
     pub const EXP_003: Self = Self::new("E-EXP-003");
     /// E-EXP-004, `ExportError::Serialize`.
     pub const EXP_004: Self = Self::new("E-EXP-004");
+    /// E-EXP-005, `ExportError::EmptyScope`.
+    pub const EXP_005: Self = Self::new("E-EXP-005");
 
     /// E-PLT-030, `StorageError::Constraint`, trigger `machine_platform_frozen`.
     pub const PLT_030: Self = Self::new("E-PLT-030");
@@ -234,6 +238,8 @@ impl ErrorCode {
     pub const WEB_010: Self = Self::new("E-WEB-010");
     /// E-WEB-011, `AppError::TaskFailed`.
     pub const WEB_011: Self = Self::new("E-WEB-011");
+    /// E-WEB-012, `WebError::MissingBasicCredentials`.
+    pub const WEB_012: Self = Self::new("E-WEB-012");
 
     const fn new(text: &'static str) -> Self {
         Self(text)
@@ -275,6 +281,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::EXP_002,
     ErrorCode::EXP_003,
     ErrorCode::EXP_004,
+    ErrorCode::EXP_005,
     ErrorCode::IDN_001,
     ErrorCode::IDN_002,
     ErrorCode::IDN_003,
@@ -285,6 +292,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::IDN_008,
     ErrorCode::IDN_009,
     ErrorCode::IDN_010,
+    ErrorCode::IDN_011,
     ErrorCode::PLT_001,
     ErrorCode::PLT_002,
     ErrorCode::PLT_003,
@@ -366,6 +374,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::WEB_009,
     ErrorCode::WEB_010,
     ErrorCode::WEB_011,
+    ErrorCode::WEB_012,
 ];
 
 /// Return true when `code` has the format and a number range of section 1.2.
@@ -511,6 +520,15 @@ mod tests {
             assert_eq!(code.as_str(), text);
             assert_eq!(ErrorCode::find(text), Some(code));
         }
+    }
+
+    /// `E-WEB-012` is the code of `WebError::MissingBasicCredentials` (`reliability.md` section 1.2).
+    #[test]
+    fn web_012_is_in_registry() {
+        assert!(
+            ErrorCode::find("E-WEB-012").is_some(),
+            "E-WEB-012 is missing from the registry"
+        );
     }
 
     #[test]

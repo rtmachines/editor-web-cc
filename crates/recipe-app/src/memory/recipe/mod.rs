@@ -28,6 +28,7 @@ use uuid::Uuid;
 pub(crate) use build::{limit_rows, parameter_row, translation_row};
 use images::{recipe_image, version_image};
 pub(crate) use parameter_image::{parameter_image, translation_row_image};
+pub(super) use reads::resolve_machine;
 pub(crate) use rows::{ParameterRow, RecipeRow, VersionRow};
 
 use super::rows::{

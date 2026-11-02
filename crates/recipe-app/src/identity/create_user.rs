@@ -73,10 +73,10 @@ impl CreateUser {
             login: login.clone(),
             password_hash: hash,
             role,
-            must_change_password: true,
+            must_change_password: role.is_person(),
         };
         self.insert(auth, meta, &user).await?;
-        Ok(IssuedPassword::new(login, password))
+        Ok(IssuedPassword::new(login, role, password))
     }
 
     /// Read the login in a read-only transaction. This saves the hash in the usual duplicate case.

@@ -5,6 +5,7 @@
 //! need PostgreSQL carry the prefix `postgres_only`. The attempts with a fixed age come from
 //! `Harness::seed_attempts`.
 
+mod confirm_basic;
 mod postgres;
 mod repository;
 

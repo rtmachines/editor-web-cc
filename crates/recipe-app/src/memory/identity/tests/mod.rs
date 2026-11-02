@@ -2,6 +2,7 @@
 
 mod attempts;
 mod begin_attempt;
+mod confirm_basic;
 mod session_store;
 mod sessions;
 mod users;

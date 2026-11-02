@@ -83,6 +83,7 @@ fn more_error_for(case: &str) -> WebError {
             limit: ByteLimit::from(256 * 1024),
         },
         "throttled" => app(IdentityError::LoginThrottled { retry_after: 12 }),
+        "technical-role" => app(IdentityError::TechnicalRoleChange { login: login() }),
         "read-only" => WebError::ReadOnlyMode,
         "timeout" => app(AppError::Timeout {
             stage: TimeoutStage::Request,
@@ -570,6 +571,33 @@ async fn error_mapping_text_follows_the_language_cookie() {
         polish.body.replace(&polish.request_id(), "<id>"),
         default.body.replace(&default.request_id(), "<id>")
     );
+}
+
+#[tokio::test]
+async fn error_mapping_technical_role_change_shows_the_sentence_with_the_login() {
+    let english = ask_htmx_in("technical-role", "en").await;
+    assert_eq!(english.status(), StatusCode::CONFLICT);
+    assert!(english.body.contains("E-IDN-011"), "{}", english.body);
+    assert!(
+        english
+            .body
+            .contains("The role of anna cannot change to or from ExportClient. Create a new user."),
+        "{}",
+        english.body
+    );
+    let polish = ask_htmx_in("technical-role", "pl").await;
+    assert!(
+        polish.body.contains(
+            "Rola użytkownika anna nie może się zmienić na ExportClient ani z niej. Utwórz nowego użytkownika."
+        ),
+        "{}",
+        polish.body
+    );
+}
+
+async fn ask_htmx_in(case: &str, lang: &str) -> Answer {
+    let cookie = format!("recipe_lang={lang}");
+    ask(case, &[("hx-request", "true"), ("cookie", cookie.as_str())]).await
 }
 
 #[tokio::test]

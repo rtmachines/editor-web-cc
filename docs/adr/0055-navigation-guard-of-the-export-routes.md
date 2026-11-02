@@ -1,6 +1,6 @@
 # ADR-0055: Navigation guard of the export routes
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0109 (items (a) and (e): the prefix `/export/`, the guard runs before the Basic check)
 Date: 2026-10-22
 Deciders: project owner
 

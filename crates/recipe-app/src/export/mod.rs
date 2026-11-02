@@ -5,14 +5,19 @@
 
 mod document;
 mod flow;
+mod list_exportable_recipes;
 mod output;
+mod scope;
 
 use std::sync::Arc;
 
+use recipe_domain::plant::MachineCode;
 use recipe_domain::recipe::ReferenceNumber;
 
 use self::flow::{Target, export_version};
+pub use self::list_exportable_recipes::{ExportableRecipesInput, ListExportableRecipes};
 pub use self::output::ExportedVersion;
+pub use self::scope::ExportScope;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase};
 use crate::error::AppError;
@@ -23,6 +28,11 @@ use crate::ports::DocumentWriter;
 pub struct ExportApprovedInput {
     /// The reference number of the recipe in the URL.
     pub reference: ReferenceNumber,
+    /// The code of the machine in the URL of the Basic route (ADR-0109 (h)), or `None` for the
+    /// session route. A recipe of another machine gives `NotFound`.
+    pub machine: Option<MachineCode>,
+    /// The part of the version to export. [`ExportScope::Version`] exports the whole version.
+    pub scope: ExportScope,
 }
 
 /// The parsed request of `ExportVersionByNumber`.
@@ -62,7 +72,10 @@ impl ExportApprovedVersion {
     /// # Errors
     ///
     /// Returns `Forbidden` when the role lacks `VersionExport`.
-    /// Returns `NotFound` (`E-WEB-005`) when the recipe does not exist.
+    /// Returns `NotFound` (`E-WEB-005`) when the recipe does not exist or belongs to another
+    /// machine than `input.machine`, and when the unit of `input.scope` names no unit of the
+    /// machine (ADR-0109 (ja)).
+    /// Returns `ExportError::EmptyScope` (`E-EXP-005`) when the unit has no parameter in its scope.
     /// Returns `ExportError::NoApprovedVersion` (`E-EXP-001`) when the recipe has no approved
     /// version, also when it is deleted.
     /// Returns `ExportError::ContentHashMismatch` (`E-EXP-002`) when the hash differs or the
@@ -80,7 +93,13 @@ impl ExportApprovedVersion {
     ) -> Result<ExportedVersion, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let target = Target::Approved(&input.reference);
-        export_version(&self.ctx, &self.writer, (user, meta), target).await
+        export_version(
+            &self.ctx,
+            &self.writer,
+            (user, meta),
+            (target, input.machine, &input.scope),
+        )
+        .await
     }
 }
 
@@ -129,10 +148,22 @@ impl ExportVersionByNumber {
     ) -> Result<ExportedVersion, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let target = Target::Number(&input.reference, input.number);
-        export_version(&self.ctx, &self.writer, (user, meta), target).await
+        export_version(
+            &self.ctx,
+            &self.writer,
+            (user, meta),
+            (target, None, &ExportScope::Version),
+        )
+        .await
     }
 }
 
+#[cfg(test)]
+mod list_exportable_recipes_tests;
+#[cfg(test)]
+mod machine_filter_tests;
+#[cfg(test)]
+mod scope_tests;
 #[cfg(test)]
 mod test_doubles;
 #[cfg(test)]

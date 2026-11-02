@@ -15,12 +15,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use recipe_app::auth::Operation;
 use recipe_app::export::{
-    ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportVersionByNumber,
-    ExportedVersion,
+    ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportScope,
+    ExportVersionByNumber, ExportedVersion,
 };
 use recipe_app::ports::DocumentWriter;
 use recipe_domain::audit::RequestId;
-use recipe_domain::export::{DocumentFacts, ExportError, HashedBody};
+use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
 
 use super::recipes::path_reference;
 use super::request::PageRequest;
@@ -61,10 +61,14 @@ impl DocumentWriter for ExportWriter {
     fn write(&self, body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
         recipe_export::write_document(body, facts)
     }
+
+    fn write_scoped(&self, body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        recipe_export::write_scoped(body, facts)
+    }
 }
 
 /// Return the writer that the export use cases get for one request.
-fn writer() -> Arc<dyn DocumentWriter> {
+pub(super) fn writer() -> Arc<dyn DocumentWriter> {
     Arc::new(ExportWriter)
 }
 
@@ -75,7 +79,11 @@ async fn approved(
     request: PageRequest,
 ) -> Result<Response, WebError> {
     let reference = path_reference(path)?;
-    let input = ExportApprovedInput { reference };
+    let input = ExportApprovedInput {
+        reference,
+        machine: None,
+        scope: ExportScope::Version,
+    };
     let exported = ExportApprovedVersion::new(state.identity().app().clone(), writer())
         .execute(request.auth()?.user(), &request.meta(), input)
         .await?;
@@ -110,11 +118,26 @@ fn content_disposition(file_name: &str, request_id: RequestId) -> Result<HeaderV
 /// Answer `200` with the document of `exported` and the headers of `api.md` section 6.3.
 ///
 /// The layer of `api.md` section 9 adds `X-Content-Type-Options` and the CSP.
-fn file_answer(exported: ExportedVersion, request_id: RequestId) -> Result<Response, WebError> {
+pub(super) fn file_answer(
+    exported: ExportedVersion,
+    request_id: RequestId,
+) -> Result<Response, WebError> {
     let name = recipe_export::file_name(&exported.reference, exported.number, exported.status);
+    named_file_answer(exported, &name, request_id)
+}
+
+/// Answer `200` with the document of `exported` as the file `name`.
+///
+/// The headers are the headers of [`file_answer`]. The unit scope route gives the name of
+/// `api.md` section 6.4.
+pub(super) fn named_file_answer(
+    exported: ExportedVersion,
+    name: &str,
+    request_id: RequestId,
+) -> Result<Response, WebError> {
     let headers = [
         (CONTENT_TYPE, HeaderValue::from_static("application/json")),
-        (CONTENT_DISPOSITION, content_disposition(&name, request_id)?),
+        (CONTENT_DISPOSITION, content_disposition(name, request_id)?),
         (CACHE_CONTROL, HeaderValue::from_static("no-store")),
     ];
     Ok((StatusCode::OK, headers, exported.document).into_response())

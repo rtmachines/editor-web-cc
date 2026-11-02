@@ -110,6 +110,13 @@ impl PlantRepository for ShortRowsTransaction {
         self.inner.plant().archived_machine_by_code(code).await
     }
 
+    async fn export_machine_by_code(
+        &mut self,
+        code: MachineCode,
+    ) -> Result<Option<Machine>, StorageError> {
+        self.inner.plant().export_machine_by_code(code).await
+    }
+
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError> {
         self.inner.plant().machine_by_id(id).await
     }

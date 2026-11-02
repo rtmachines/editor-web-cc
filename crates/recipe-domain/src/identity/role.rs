@@ -127,6 +127,9 @@ const PROCESS_ENGINEER_PERMISSIONS: [Permission; 14] = [
 /// Permissions of the `Operator` (`api.md` section 3.3).
 const OPERATOR_PERMISSIONS: [Permission; 2] = [Permission::RecipeView, Permission::VersionExport];
 
+/// Permissions of the `ExportClient` (ADR-0109 (a), (b)).
+const EXPORT_CLIENT_PERMISSIONS: [Permission; 1] = [Permission::VersionExport];
+
 /// Role of a user. A role maps to a fixed set of permissions (ADR-0013).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Role {
@@ -136,6 +139,9 @@ pub enum Role {
     ProcessEngineer,
     /// Views and exports the approved recipes.
     Operator,
+    /// Technical account of a transfer client. It exports the approved version
+    /// and has no person behind it (ADR-0109 (a)).
+    ExportClient,
 }
 
 /// Reason why a text is not a role.
@@ -148,13 +154,16 @@ pub enum RoleReason {
 impl fmt::Display for RoleReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unknown => f.write_str("a role is administrator, process_engineer, or operator"),
+            Self::Unknown => {
+                f.write_str("a role is administrator, process_engineer, operator, or export_client")
+            }
         }
     }
 }
 
 impl Role {
-    /// Every role.
+    /// Every person role. It leaves out [`Role::ExportClient`], so a role list of
+    /// the UI offers no technical account (ADR-0109, `design.md` D1).
     pub const ALL: [Self; 3] = [Self::Administrator, Self::ProcessEngineer, Self::Operator];
 
     /// Parse the SQL value of a role (`data-model.md` section 1.2).
@@ -167,6 +176,7 @@ impl Role {
             "administrator" => Ok(Self::Administrator),
             "process_engineer" => Ok(Self::ProcessEngineer),
             "operator" => Ok(Self::Operator),
+            "export_client" => Ok(Self::ExportClient),
             _ => Err(RoleReason::Unknown),
         }
     }
@@ -178,6 +188,7 @@ impl Role {
             Self::Administrator => "administrator",
             Self::ProcessEngineer => "process_engineer",
             Self::Operator => "operator",
+            Self::ExportClient => "export_client",
         }
     }
 
@@ -188,7 +199,15 @@ impl Role {
             Self::Administrator => &Permission::ALL,
             Self::ProcessEngineer => &PROCESS_ENGINEER_PERMISSIONS,
             Self::Operator => &OPERATOR_PERMISSIONS,
+            Self::ExportClient => &EXPORT_CLIENT_PERMISSIONS,
         }
+    }
+
+    /// Return true when a person holds the role. An `ExportClient` is a
+    /// technical account and never signs in with a session (ADR-0109 (a)).
+    #[must_use]
+    pub const fn is_person(self) -> bool {
+        !matches!(self, Self::ExportClient)
     }
 
     /// Return true when the role holds the permission.
@@ -204,6 +223,7 @@ impl fmt::Display for Role {
             Self::Administrator => "Administrator",
             Self::ProcessEngineer => "ProcessEngineer",
             Self::Operator => "Operator",
+            Self::ExportClient => "ExportClient",
         })
     }
 }
@@ -213,8 +233,34 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
+    /// Every role, person or technical. `Role::ALL` holds the person roles only.
+    const EVERY_ROLE: [Role; 4] = [
+        Role::Administrator,
+        Role::ProcessEngineer,
+        Role::Operator,
+        Role::ExportClient,
+    ];
+
+    /// Return the place of a role in `EVERY_ROLE`. The `match` has no wildcard arm.
+    /// A new variant breaks the build here, so the author adds it to the list.
+    const fn position(role: Role) -> usize {
+        match role {
+            Role::Administrator => 0,
+            Role::ProcessEngineer => 1,
+            Role::Operator => 2,
+            Role::ExportClient => 3,
+        }
+    }
+
     fn set(items: &[Permission]) -> BTreeSet<Permission> {
         items.iter().copied().collect()
+    }
+
+    #[test]
+    fn every_role_lists_each_variant_once_in_order() {
+        for (index, role) in EVERY_ROLE.iter().enumerate() {
+            assert_eq!(position(*role), index, "{role}");
+        }
     }
 
     #[test]
@@ -261,7 +307,7 @@ mod tests {
 
     #[test]
     fn has_agrees_with_permissions_for_every_pair() {
-        for role in Role::ALL {
+        for role in EVERY_ROLE {
             for permission in Permission::ALL {
                 assert_eq!(
                     role.has(permission),
@@ -306,12 +352,36 @@ mod tests {
 
     #[test]
     fn as_sql_and_parse_round_trip() {
-        for role in Role::ALL {
+        for role in EVERY_ROLE {
             assert_eq!(Role::parse(role.as_sql()), Ok(role));
         }
         assert_eq!(Role::Administrator.as_sql(), "administrator");
         assert_eq!(Role::ProcessEngineer.as_sql(), "process_engineer");
         assert_eq!(Role::Operator.as_sql(), "operator");
+    }
+
+    #[test]
+    fn export_client_holds_version_export_only() {
+        assert_eq!(
+            set(Role::ExportClient.permissions()),
+            set(&[Permission::VersionExport])
+        );
+        assert_eq!(Role::ExportClient.permissions().len(), 1);
+    }
+
+    #[test]
+    fn export_client_text_parses_and_round_trips() {
+        assert_eq!(Role::parse("export_client"), Ok(Role::ExportClient));
+        assert_eq!(Role::ExportClient.as_sql(), "export_client");
+        assert_eq!(Role::ExportClient.to_string(), "ExportClient");
+    }
+
+    #[test]
+    fn only_export_client_is_not_a_person() {
+        assert!(!Role::ExportClient.is_person());
+        assert!(Role::Administrator.is_person());
+        assert!(Role::ProcessEngineer.is_person());
+        assert!(Role::Operator.is_person());
     }
 
     #[test]

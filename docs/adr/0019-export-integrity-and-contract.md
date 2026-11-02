@@ -1,6 +1,6 @@
 # ADR-0019: Export integrity and the export format
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0109 (HTTP Basic in place of the planned tokens, export document v2 for the unit scope)
 Date: 2026-10-12
 Deciders: project owner
 

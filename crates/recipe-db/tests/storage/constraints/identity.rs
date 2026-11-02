@@ -17,6 +17,7 @@ pub const COVERED: &[&str] = &[
     "app_user_pkey",
     "app_user_login_format",
     "app_user_role_value",
+    "app_user_export_client_password",
     "app_user_hash_format",
     "app_user_active_consistent",
     "app_user_epoch_nonnegative",
@@ -123,6 +124,38 @@ async fn app_user_role_value_rejects_an_unknown_role() {
     let result = insert_user(&mut conn, "role.test", "root", HASH, 0).await;
 
     assert_constraint(result, CHECK_VIOLATION, "app_user_role_value");
+}
+
+#[tokio::test]
+async fn app_user_role_value_accepts_the_export_client_role() {
+    let mut conn = migrator().await;
+
+    insert_user(&mut conn, "transfer.client", "export_client", HASH, 0)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn app_user_role_value_rejects_the_role_robot() {
+    let mut conn = migrator().await;
+
+    let result = insert_user(&mut conn, "robot.test", "robot", HASH, 0).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "app_user_role_value");
+}
+
+#[tokio::test]
+async fn app_user_export_client_password_rejects_a_one_time_password() {
+    let mut conn = migrator().await;
+
+    let result = sqlx::query(
+        "INSERT INTO app_user (login, password_hash, role, must_change_password)          VALUES ('transfer.once', $1, 'export_client', true)",
+    )
+    .bind(HASH)
+    .execute(&mut conn)
+    .await;
+
+    assert_constraint(result, CHECK_VIOLATION, "app_user_export_client_password");
 }
 
 #[tokio::test]

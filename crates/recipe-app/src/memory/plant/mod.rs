@@ -25,6 +25,7 @@ use recipe_domain::recipe::VersionState;
 use recipe_domain::text::Text;
 
 use super::images::{machine_image, unit_image};
+use super::recipe::resolve_machine;
 use super::rows::{
     MachineRow, UnitRow, corrupt, corrupt_rows, duplicate, missing_reference, missing_row,
 };
@@ -155,6 +156,17 @@ impl PlantRepository for MemoryTransaction {
             .values()
             .find(|row| row.code == code && row.archived_at.is_some())
             .map(|row| row.id);
+        match found {
+            Some(id) => self.state().try_machine(id).map_err(corrupt),
+            None => Ok(None),
+        }
+    }
+
+    async fn export_machine_by_code(
+        &mut self,
+        code: MachineCode,
+    ) -> Result<Option<Machine>, StorageError> {
+        let found = resolve_machine(self.state(), code).map(|row| row.id);
         match found {
             Some(id) => self.state().try_machine(id).map_err(corrupt),
             None => Ok(None),

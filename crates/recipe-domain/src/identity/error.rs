@@ -28,7 +28,7 @@ impl CredentialFailure {
 
 /// Error of the Identity and Access context (`reliability.md` section 1.1).
 ///
-/// The enum has one variant for each code in the range `E-IDN-001` to `E-IDN-010`.
+/// The enum has one variant for each code in the range `E-IDN-001` to `E-IDN-011`.
 /// No variant carries a password, a hash, a token, or a cookie value.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum IdentityError {
@@ -85,6 +85,12 @@ pub enum IdentityError {
         /// The login of the user.
         login: Login,
     },
+    /// The role change would move a user to or from the `ExportClient` role (`E-IDN-011`).
+    #[error("The role of {login} cannot change to or from ExportClient. Create a new user.")]
+    TechnicalRoleChange {
+        /// The login of the user.
+        login: Login,
+    },
 }
 
 impl From<PasswordReason> for IdentityError {
@@ -108,6 +114,7 @@ impl IdentityError {
             Self::InvalidCurrentPassword => ErrorCode::IDN_008,
             Self::UserAlreadyActive { .. } => ErrorCode::IDN_009,
             Self::UserAlreadyInactive { .. } => ErrorCode::IDN_010,
+            Self::TechnicalRoleChange { .. } => ErrorCode::IDN_011,
         }
     }
 }

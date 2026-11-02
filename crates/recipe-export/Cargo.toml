@@ -20,6 +20,10 @@ serde_json = { workspace = true }
 jsonschema = { workspace = true }
 rust_decimal = { workspace = true }
 serde_json = { workspace = true }
+# The consumer tests of the document v2 rebuild the scope hash like an external transfer client
+# (`api.md` section 6.4). They use `sha2` and a JCS library and not the hash of `recipe-domain`.
+serde_json_canonicalizer = { workspace = true }
+sha2 = { workspace = true }
 time = { workspace = true }
 uuid = { workspace = true }
 

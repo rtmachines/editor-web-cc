@@ -2,7 +2,7 @@
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::identity::{
-    AdminChange, IdentityError, Login, UserStanding, last_administrator_guard,
+    AdminChange, IdentityError, Login, Role, UserStanding, last_administrator_guard,
 };
 
 use super::{Authenticated, IdentityContext};
@@ -33,6 +33,7 @@ use crate::ports::{Isolation, Locked, NonEmpty};
 /// the command waited for the guard lock. The command then writes nothing.
 /// Returns `NotFound` (`E-WEB-005`) when the login is unknown.
 /// Returns `UserAlreadyInactive` (`E-IDN-010`) for a deactivation of an inactive user.
+/// Returns `TechnicalRoleChange` (`E-IDN-011`) when a role change moves to or from `ExportClient`.
 /// Returns `LastAdministrator` (`E-IDN-002`) when the change removes the last one.
 /// Returns `AppError::Storage` with `E-DB-001` after a serialization failure, a deadlock, or a
 /// lock timeout at the guard lock. Returns the other storage errors unchanged.
@@ -65,6 +66,14 @@ pub(super) async fn run_admin_change(
         })?;
     if matches!(change, AdminChange::Deactivate) && !locked.is_active {
         return Err(IdentityError::UserAlreadyInactive {
+            login: login.clone(),
+        }
+        .into());
+    }
+    if let AdminChange::SetRole(role) = change
+        && (role == Role::ExportClient || locked.role == Role::ExportClient)
+    {
+        return Err(IdentityError::TechnicalRoleChange {
             login: login.clone(),
         }
         .into());

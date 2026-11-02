@@ -1,7 +1,8 @@
 //! Tests of the migration `0001_schema.sql` (design D11, `data-model.md` section 3).
 
 use crate::support::{
-    Role, TestDatabase, created_names, document_sql, migration_sql, missing_names,
+    Role, TestDatabase, as_shipped_in_0001, check_constraint, created_names, document_sql,
+    migration_sql, missing_names,
 };
 
 const SECTIONS: [&str; 18] = [
@@ -9,16 +10,34 @@ const SECTIONS: [&str; 18] = [
     "3.13", "3.14", "3.15", "3.16", "3.17",
 ];
 const MIGRATION: &str = "0001_schema.sql";
+const EXPORT_CLIENT_MIGRATION: &str = "0009_export_client_role.sql";
 const TABLE_COUNT: usize = 17;
 
 #[test]
 fn migration_0001_equals_the_sql_blocks_of_sections_3_0_to_3_17() {
-    let document = document_sql(&SECTIONS, &[]);
+    // Migration 0001 shipped before ADR-0109. The document shows the current schema.
+    let document = as_shipped_in_0001(&document_sql(&SECTIONS, &[]));
     let file = migration_sql(MIGRATION);
 
     assert!(document.starts_with("CREATE FUNCTION set_updated_at()"));
     assert!(document.ends_with("EXECUTE FUNCTION set_updated_at();"));
     assert_eq!(file, document);
+}
+
+#[test]
+fn migration_0009_adds_the_export_client_constraints_of_section_3_5() {
+    let document = document_sql(&["3.5"], &[]);
+    let file = migration_sql(EXPORT_CLIENT_MIGRATION);
+
+    for name in ["app_user_role_value", "app_user_export_client_password"] {
+        let in_document = check_constraint(&document, name);
+        let in_file = check_constraint(&file, name);
+        assert_eq!(in_file, in_document, "constraint {name}");
+        assert!(
+            file.contains(&format!("{in_document} NOT VALID")),
+            "constraint {name} must be NOT VALID in 0009"
+        );
+    }
 }
 
 #[test]

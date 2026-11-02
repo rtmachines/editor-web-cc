@@ -1,6 +1,6 @@
 //! Write port of the export document (design D6 (a) of the change `export-v1`).
 
-use recipe_domain::export::{DocumentFacts, ExportError, HashedBody};
+use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
 
 /// Writes the bytes of the export document from the hashed body and the facts outside the hash.
 ///
@@ -15,4 +15,14 @@ pub trait DocumentWriter: Send + Sync {
     ///
     /// Returns `ExportError::Serialize` (`E-EXP-004`) when the writer cannot write the document.
     fn write(&self, body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8>, ExportError>;
+
+    /// Write the export document v2 of a unit scope (`api.md` section 6.4).
+    ///
+    /// The flow calls this method after the hash check of the whole version and after the check
+    /// that the scope holds a parameter (design D5).
+    ///
+    /// # Errors
+    ///
+    /// Returns `ExportError::Serialize` (`E-EXP-004`) when the writer cannot write the document.
+    fn write_scoped(&self, body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, ExportError>;
 }

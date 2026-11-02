@@ -27,6 +27,13 @@ impl PlantRepository for PgTransaction {
         machines::archived_by_code(&mut self.tx, code).await
     }
 
+    async fn export_machine_by_code(
+        &mut self,
+        code: MachineCode,
+    ) -> Result<Option<Machine>, StorageError> {
+        machines::export_by_code(&mut self.tx, code).await
+    }
+
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError> {
         machines::by_id(&mut self.tx, id).await
     }

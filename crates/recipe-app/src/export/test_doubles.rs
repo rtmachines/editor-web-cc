@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use recipe_domain::export::{DocumentFacts, ExportError, HashedBody};
+use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
 
 use crate::ports::DocumentWriter;
 
@@ -16,6 +16,7 @@ pub(super) const DOCUMENT: &[u8] = b"{\"recorded\":true}";
 #[derive(Debug, Default)]
 pub(super) struct RecordingWriter {
     calls: Mutex<Vec<(HashedBody, DocumentFacts)>>,
+    scoped_calls: Mutex<Vec<(ScopeBody, ScopeFacts)>>,
 }
 
 impl RecordingWriter {
@@ -29,6 +30,11 @@ impl RecordingWriter {
         self.calls.lock().clone()
     }
 
+    /// Return every recorded call of `write_scoped`, the first call first.
+    pub(super) fn scoped_calls(&self) -> Vec<(ScopeBody, ScopeFacts)> {
+        self.scoped_calls.lock().clone()
+    }
+
     /// Return the last recorded call.
     pub(super) fn last(&self) -> (HashedBody, DocumentFacts) {
         self.calls().last().cloned().unwrap()
@@ -38,6 +44,11 @@ impl RecordingWriter {
 impl DocumentWriter for RecordingWriter {
     fn write(&self, body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
         self.calls.lock().push((body.clone(), facts.clone()));
+        Ok(DOCUMENT.to_vec())
+    }
+
+    fn write_scoped(&self, body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        self.scoped_calls.lock().push((body.clone(), facts.clone()));
         Ok(DOCUMENT.to_vec())
     }
 }
@@ -51,10 +62,19 @@ pub(super) fn port(writer: &Arc<RecordingWriter>) -> Arc<dyn DocumentWriter> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FailingWriter;
 
+/// Return the `E-EXP-004` error that the failing writer gives.
+fn serialize_error() -> ExportError {
+    let error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+    ExportError::Serialize(error)
+}
+
 impl DocumentWriter for FailingWriter {
     fn write(&self, _body: &HashedBody, _facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
-        let error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
-        Err(ExportError::Serialize(error))
+        Err(serialize_error())
+    }
+
+    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        Err(serialize_error())
     }
 }
 
@@ -71,6 +91,10 @@ pub(super) struct PanickingWriter;
 
 impl DocumentWriter for PanickingWriter {
     fn write(&self, _body: &HashedBody, _facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
+        std::panic::resume_unwind(Box::new(WriterPanic))
+    }
+
+    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
         std::panic::resume_unwind(Box::new(WriterPanic))
     }
 }

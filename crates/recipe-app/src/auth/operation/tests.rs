@@ -42,7 +42,7 @@ const COMMAND_NAMES: [&str; 33] = [
 ];
 
 /// The 33 queries of `domain-model.md` section 5.5.
-const QUERY_NAMES: [&str; 33] = [
+const QUERY_NAMES: [&str; 34] = [
     "ListMachines",
     "GetMachine",
     "GetUnitTree",
@@ -51,6 +51,7 @@ const QUERY_NAMES: [&str; 33] = [
     "GetTypeTree",
     "GetTypeUsage",
     "ListRecipes",
+    "ListExportableRecipes",
     "GetRecipe",
     "ListVersions",
     "GetVersion",
@@ -79,17 +80,17 @@ const QUERY_NAMES: [&str; 33] = [
 ];
 
 #[test]
-fn catalog_has_68_distinct_operations() {
+fn catalog_has_69_distinct_operations() {
     let distinct: BTreeSet<Operation> = Operation::ALL.iter().copied().collect();
-    assert_eq!(Operation::ALL.len(), 68);
-    assert_eq!(distinct.len(), 68);
+    assert_eq!(Operation::ALL.len(), 69);
+    assert_eq!(distinct.len(), 69);
 }
 
 #[test]
 fn names_equal_the_commands_and_queries_of_the_domain_model() {
     let expected: BTreeSet<&str> = COMMAND_NAMES.iter().chain(&QUERY_NAMES).copied().collect();
     let actual: BTreeSet<&str> = Operation::ALL.iter().map(|op| op.name()).collect();
-    assert_eq!(expected.len(), 66);
+    assert_eq!(expected.len(), 67);
     assert_eq!(actual, expected);
 }
 
@@ -189,7 +190,7 @@ fn read_only_mode_runs_every_query_and_four_commands() {
         Operation::ExportVersionByNumber,
     ];
     let expected: BTreeSet<Operation> = queries.chain(commands).collect();
-    assert_eq!(allowed.len(), 38);
+    assert_eq!(allowed.len(), 39);
     assert_eq!(allowed, expected);
 }
 
@@ -206,4 +207,6 @@ fn requirement_allows_follows_the_role() {
         assert!(Requirement::Authenticated.allows(role));
         assert!(Requirement::NoSession.allows(role));
     }
+    assert!(!Requirement::Authenticated.allows(Role::ExportClient));
+    assert!(!Requirement::NoSession.allows(Role::ExportClient));
 }

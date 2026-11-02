@@ -262,3 +262,29 @@ async fn a_new_test_database_repeats_the_connect_grants_of_the_init_script() {
             .unwrap();
     assert!(!public_temporary);
 }
+
+/// Migration 0009 adds the two checks of the role `export_client` as `NOT VALID`. Migration 0010
+/// validates them (`data-model.md` section 3.5).
+#[tokio::test]
+async fn the_export_client_checks_of_app_user_are_validated_after_migrate() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+
+    let rows: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT conname::text, convalidated FROM pg_constraint \
+         WHERE conrelid = 'public.app_user'::regclass \
+           AND conname IN ('app_user_role_value', 'app_user_export_client_password') \
+         ORDER BY conname",
+    )
+    .fetch_all(&mut conn)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        rows,
+        vec![
+            ("app_user_export_client_password".to_owned(), true),
+            ("app_user_role_value".to_owned(), true),
+        ]
+    );
+}

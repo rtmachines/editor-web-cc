@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use async_trait::async_trait;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, UserId};
-use recipe_domain::plant::{UnitId, UnitPath};
+use recipe_domain::plant::{MachineCode, UnitId, UnitPath};
 use recipe_domain::recipe::{
     ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue, VersionState,
 };
@@ -17,11 +17,11 @@ use recipe_domain::timestamp::Timestamp;
 use super::rows::{ParameterRow as StoredRow, RecipeRow, VersionRow};
 use crate::error::StorageError;
 use crate::memory::plant::check_offset;
-use crate::memory::rows::{UnitRow, corrupt_rows};
+use crate::memory::rows::{MachineRow, UnitRow, corrupt_rows};
 use crate::memory::{MemoryState, MemoryTransaction};
 use crate::ports::{
-    ParameterRow, RecipeFilter, RecipeReads, RecipeSummary, UnitCount, VersionDetail,
-    VersionSummary,
+    ExportableRecipe, ExportableRecipes, ParameterRow, RecipeFilter, RecipeReads, RecipeSummary,
+    UnitCount, VersionDetail, VersionSummary,
 };
 
 /// Skip `offset` rows and keep at most `limit` rows.
@@ -267,6 +267,72 @@ fn counts_of(
         .collect()
 }
 
+/// Return the machine row that `code` names for the transfer routes (ADR-0109 (j)).
+///
+/// The live machine wins. Without one, the machine with the latest `archived_at` wins, and the
+/// higher id breaks a tie, as `ORDER BY archived_at DESC, id DESC` does.
+pub(in crate::memory) fn resolve_machine(
+    state: &MemoryState,
+    code: MachineCode,
+) -> Option<&MachineRow> {
+    let same_code = state.machines.values().filter(|row| row.code == code);
+    let live = same_code.clone().find(|row| row.archived_at.is_none());
+    live.or_else(|| same_code.max_by_key(|row| (row.archived_at, row.id)))
+}
+
+/// Build the row of a recipe for the list of exportable recipes, or `None` for a recipe without
+/// an `Approved` version.
+fn exportable_row(
+    state: &MemoryState,
+    recipe: &RecipeRow,
+) -> Result<Option<ExportableRecipe>, StorageError> {
+    let approved = state.versions.values().find(|version| {
+        version.recipe == recipe.id && version.state() == Ok(VersionState::Approved)
+    });
+    approved
+        .map(|version| {
+            let (Some(approved_at), Some(content_sha256)) =
+                (version.approved_at, version.content_sha256)
+            else {
+                return Err(corrupt_rows(&"an approved version has no approval or hash"));
+            };
+            Ok(ExportableRecipe {
+                reference: recipe.reference.clone(),
+                name: recipe.name.clone(),
+                version_number: version.number,
+                approved_at,
+                content_sha256,
+            })
+        })
+        .transpose()
+}
+
+/// Read the list of exportable recipes of the machine that `code` names.
+fn exportable_of(
+    state: &MemoryState,
+    code: MachineCode,
+) -> Result<Option<ExportableRecipes>, StorageError> {
+    let Some(machine) = resolve_machine(state, code) else {
+        return Ok(None);
+    };
+    let mut recipes: Vec<&RecipeRow> = state
+        .recipes
+        .values()
+        .filter(|row| row.machine == machine.id && row.deleted_at.is_none())
+        .collect();
+    recipes.sort_by(|left, right| left.reference.cmp(&right.reference));
+    let recipes = recipes
+        .into_iter()
+        .filter_map(|row| exportable_row(state, row).transpose())
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(ExportableRecipes {
+        code: machine.code,
+        platform: machine.platform,
+        archived: machine.archived_at.is_some(),
+        recipes,
+    }))
+}
+
 #[async_trait]
 impl RecipeReads for MemoryTransaction {
     async fn list_recipes(
@@ -356,5 +422,12 @@ impl RecipeReads for MemoryTransaction {
             .values()
             .find(|row| row.version == version && row.key == key)
             .map(StoredRow::stored))
+    }
+
+    async fn exportable_recipes(
+        &mut self,
+        machine: MachineCode,
+    ) -> Result<Option<ExportableRecipes>, StorageError> {
+        exportable_of(self.state(), machine)
     }
 }

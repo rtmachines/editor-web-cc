@@ -202,6 +202,14 @@ pub enum WebError {
          Contact the administrator."
     )]
     ReadOnlyMode,
+    /// The `Authorization` header of a Basic route is missing or not valid (`E-WEB-012`).
+    ///
+    /// The variant solves one problem: the header holds a password, so the error must not carry
+    /// any part of it. Every fault of the parser gives this one unit variant (ADR-0109 (ma)).
+    #[error(
+        "The request has no valid Basic credentials. Send the login and the password of a transfer account."
+    )]
+    MissingBasicCredentials,
     /// A defect of the server, for example a route without an operation (`E-WEB-010`).
     #[error("An internal error occurred. Contact the administrator.")]
     Internal {
@@ -224,6 +232,7 @@ impl WebError {
             Self::Conflict { error, .. } => error.code(),
             Self::CsrfRejected => ErrorCode::WEB_007,
             Self::ReadOnlyMode => ErrorCode::WEB_006,
+            Self::MissingBasicCredentials => ErrorCode::WEB_012,
             Self::Internal { .. } => ErrorCode::WEB_010,
         }
     }

@@ -41,7 +41,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 
 ## Locks and transactions (data-model §1.4, §6)
 
-- One transaction per command, except `Login` and `ChangeOwnPassword` (T1 and T2, ADR-0035 (b)). Lock order: `machine` → `recipe` → `recipe_version` → `unit` → children.
+- One transaction per command, except `Login` and `ChangeOwnPassword` (T1 and T2, ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2 (ADR-0109 (m)). Lock order: `machine` → `recipe` → `recipe_version` → `unit` → children.
 - A command takes only the locks that it needs, always in this order.
 - An identity command locks in the order class-4 lock → `app_user` → `session` → `audit_chain_head`. Only `SetUserRole` and `DeactivateUser` take the class-4 lock (ADR-0096 (e)).
 - A draft command locks `recipe_version` `FOR UPDATE`, requires a live draft, and compares `row_version`.

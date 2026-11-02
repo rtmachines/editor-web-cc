@@ -3,6 +3,8 @@
 mod activate_user;
 mod admin_change;
 mod authenticate;
+mod authenticate_basic;
+mod basic_permit;
 mod bootstrap;
 mod change_own_password;
 mod context;
@@ -31,6 +33,8 @@ mod unlock_login;
 
 pub use activate_user::ActivateUser;
 pub use authenticate::{Authenticated, authenticate};
+pub use authenticate_basic::{BasicCredentials, BasicPrincipal, authenticate_basic};
+pub use basic_permit::BasicPermit;
 pub use bootstrap::{BootstrapOutcome, bootstrap_administrator};
 pub use change_own_password::{ChangeOwnPassword, ChangeOwnPasswordInput};
 pub use context::IdentityContext;

@@ -219,7 +219,7 @@ async fn reset_password_replaces_the_hash_demands_a_change_and_raises_the_epoch(
     let mut tx = begin(&store);
     let image = tx
         .users()
-        .reset_password(user_id(1), &hash_b())
+        .reset_password(user_id(1), &hash_b(), true)
         .await
         .unwrap();
     let value = image.as_value();
@@ -233,6 +233,26 @@ async fn reset_password_replaces_the_hash_demands_a_change_and_raises_the_epoch(
         .unwrap()
         .unwrap();
     assert_eq!(found.password_hash, hash_b());
+}
+
+#[tokio::test]
+async fn reset_password_writes_the_flag_that_the_caller_passes() {
+    let store = store();
+    store.seed_user(&new_user(1, "transfer", Role::ExportClient));
+    let mut tx = begin(&store);
+    let demanded = tx
+        .users()
+        .reset_password(user_id(1), &hash_b(), true)
+        .await
+        .unwrap();
+    assert_eq!(demanded.as_value()["must_change_password"], true);
+    let kept = tx
+        .users()
+        .reset_password(user_id(1), &hash_b(), false)
+        .await
+        .unwrap();
+    assert_eq!(kept.as_value()["must_change_password"], false);
+    assert_eq!(kept.as_value()["session_epoch"], 2);
 }
 
 #[tokio::test]

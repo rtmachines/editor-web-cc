@@ -3,9 +3,11 @@
 use std::sync::Arc;
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, StateAction};
-use recipe_domain::export::{ExportError, ExportStatus, SCHEMA_VERSION, Sha256};
+use recipe_domain::export::{
+    ExportError, ExportStatus, SCHEMA_VERSION, SCOPE_SCHEMA_VERSION, Sha256,
+};
 use recipe_domain::identity::Login;
-use recipe_domain::plant::Machine;
+use recipe_domain::plant::{Machine, MachineCode};
 use recipe_domain::recipe::{
     Recipe, RecipeError, RecipeId, RecipeVersionId, ReferenceNumber, VersionState,
 };
@@ -14,6 +16,7 @@ use serde_json::json;
 
 use super::document::{KnownFacts, Written, read_rows, write_document};
 use super::output::ExportedVersion;
+use super::scope::{ExportScope, ScopeAudit};
 use crate::auth::{CurrentUser, RequestMeta};
 use crate::blocking::ExportPermit;
 use crate::context::{AppContext, audit_context};
@@ -92,8 +95,32 @@ fn check_exportable(
     }
 }
 
+/// Check that the recipe belongs to the machine that the route names (ADR-0109 (h) and (j)).
+///
+/// The function solves one problem: the Basic route names a machine, and a recipe of another
+/// machine must look like an unknown recipe. Both give the same `NotFound`, so a client cannot
+/// probe for the references of other machines. The machine column of a recipe never changes, so
+/// one check before the lock is enough.
+async fn check_machine(
+    tx: &mut dyn Transaction,
+    recipe: &Recipe,
+    code: MachineCode,
+) -> Result<(), AppError> {
+    let machine = tx.plant().export_machine_by_code(code).await?;
+    if machine.is_some_and(|machine| machine.id() == recipe.machine()) {
+        return Ok(());
+    }
+    Err(AppError::NotFound {
+        entity: Missing::Recipe(recipe.reference().clone()),
+    })
+}
+
 /// Read the recipe in a `ReadOnly` transaction and choose the version (step 2).
-async fn find(ctx: &AppContext, target: Target<'_>) -> Result<Found, AppError> {
+async fn find(
+    ctx: &AppContext,
+    target: Target<'_>,
+    machine: Option<MachineCode>,
+) -> Result<Found, AppError> {
     let reference = match target {
         Target::Approved(reference) | Target::Number(reference, _) => reference,
     };
@@ -105,23 +132,39 @@ async fn find(ctx: &AppContext, target: Target<'_>) -> Result<Found, AppError> {
         .ok_or_else(|| AppError::NotFound {
             entity: Missing::Recipe(reference.clone()),
         })?;
+    if let Some(code) = machine {
+        check_machine(tx.as_mut(), &recipe, code).await?;
+    }
     pick(recipe, target)
 }
 
 /// Build the entry `VersionExported` (`data-model.md` section 10).
+///
+/// A unit export sets the schema version `"2"` and adds `scope_unit_path` and `scope_sha256`
+/// (ADR-0109 (ab)). An export of the whole version has neither key.
 fn exported_entry(
     (recipe, version): (RecipeId, RecipeVersionId),
-    hash: Sha256,
+    (hash, scope): (Sha256, Option<&ScopeAudit>),
     (user, meta): (&CurrentUser, &RequestMeta),
 ) -> AuditEntry {
-    AuditEntry::state(
-        StateAction::VersionExported,
-        AuditTarget::recipe_version(recipe, version),
-        json!({
+    let after = match scope {
+        None => json!({
             "version_id": version.to_string(),
             "schema_version": SCHEMA_VERSION,
             "content_sha256": hash.to_string(),
         }),
+        Some(scope) => json!({
+            "version_id": version.to_string(),
+            "schema_version": SCOPE_SCHEMA_VERSION,
+            "content_sha256": hash.to_string(),
+            "scope_unit_path": scope.unit_path.to_string(),
+            "scope_sha256": scope.sha256.to_string(),
+        }),
+    };
+    AuditEntry::state(
+        StateAction::VersionExported,
+        AuditTarget::recipe_version(recipe, version),
+        after,
         audit_context(user, meta),
     )
 }
@@ -235,7 +278,7 @@ struct Prepared {
 async fn lock_and_write(
     ctx: &AppContext,
     (writer, user): (&Arc<dyn DocumentWriter>, &CurrentUser),
-    (target, found): (Target<'_>, Found),
+    (target, found, scope): (Target<'_>, Found, &ExportScope),
     permit: ExportPermit,
 ) -> Result<Prepared, AppError> {
     let mut tx = ctx.uow.begin(Isolation::ReadCommitted).await?;
@@ -244,6 +287,9 @@ async fn lock_and_write(
     let reference = checked.found.recipe.reference().clone();
     let (approved_at, approved_by) = read_approval(tx.as_mut(), version).await?;
     let rows = read_rows(tx.as_mut(), &checked.machine, (&reference, version, number)).await?;
+    if let ExportScope::Unit(path) = scope {
+        rows.require_unit(path)?;
+    }
     let facts = KnownFacts {
         exported_at: ctx.clock.now(),
         exported_by: user.login().clone(),
@@ -255,7 +301,13 @@ async fn lock_and_write(
     };
     let task = (ctx.settings.blocking, permit);
     let stored = checked.shared.content_sha256;
-    let written = write_document(task, Arc::clone(writer), (rows, facts), stored).await?;
+    let written = write_document(
+        task,
+        Arc::clone(writer),
+        (rows, facts),
+        (stored, scope.clone()),
+    )
+    .await?;
     Ok(Prepared {
         tx,
         recipe: checked.shared.recipe,
@@ -280,9 +332,13 @@ async fn commit_export(
         reference,
         number,
         status,
-        written: Written { document, hash },
+        written: Written {
+            document,
+            hash,
+            scope,
+        },
     } = prepared;
-    let entry = exported_entry((recipe, version), hash, (user, meta));
+    let entry = exported_entry((recipe, version), (hash, scope.as_ref()), (user, meta));
     ctx.uow.commit(tx, NonEmpty::new(entry)).await?;
     Ok(ExportedVersion {
         document,
@@ -303,23 +359,26 @@ async fn commit_export(
 ///
 /// # Errors
 ///
-/// Returns `NotFound` (`E-WEB-005`) for an unknown recipe or version number.
-/// Returns `ExportError` (`E-EXP-001` to `E-EXP-004`) and `RecipeError::RecipeDeleted`
+/// Returns `NotFound` (`E-WEB-005`) for an unknown recipe or version number, and for a recipe
+/// that does not belong to `machine` (ADR-0109 (h)). `machine` is `None` on the session routes.
+/// Returns `NotFound` also when the unit of `scope` names no usable unit (ADR-0109 (ja)). The
+/// check runs before the blocking task.
+/// Returns `ExportError` (`E-EXP-001` to `E-EXP-005`) and `RecipeError::RecipeDeleted`
 /// (`E-RCP-012`). Returns `Timeout` (`E-WEB-009`), `TaskFailed` (`E-WEB-011`), and `Storage`
 /// errors.
 pub(super) async fn export_version(
     ctx: &AppContext,
     writer: &Arc<dyn DocumentWriter>,
     who: (&CurrentUser, &RequestMeta),
-    target: Target<'_>,
+    (target, machine, scope): (Target<'_>, Option<MachineCode>, &ExportScope),
 ) -> Result<ExportedVersion, AppError> {
     let prepared = ctx
         .settings
         .blocking
         .export(async {
             let permit = ctx.export_gate.acquire().await?;
-            let found = find(ctx, target).await?;
-            lock_and_write(ctx, (writer, who.0), (target, found), permit).await
+            let found = find(ctx, target, machine).await?;
+            lock_and_write(ctx, (writer, who.0), (target, found, scope), permit).await
         })
         .await
         .inspect_err(|error| count_hash_mismatch(ctx, error))?;
