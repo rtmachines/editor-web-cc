@@ -4,7 +4,7 @@
 
 use askama::Template;
 
-use super::parameter_table::{ParameterRowFragment, ParameterRowView};
+use super::parameter_table::{ParameterRowFragment, ParameterRowView, ValueView};
 use crate::i18n::{Bundles, Lang};
 use crate::pages::Texts;
 use crate::pages::recipes::test_world::recipe_world;
@@ -19,6 +19,10 @@ fn row() -> ParameterRowView {
         tag: "SPEED".to_owned(),
         name: "<b>Speed</b>".to_owned(),
         type_text: "INT".to_owned(),
+        value: ValueView {
+            text: "1200".to_owned(),
+            is_word: false,
+        },
         unit: "U1".to_owned(),
         address: "DB2.DBW0".to_owned(),
         outdated: false,

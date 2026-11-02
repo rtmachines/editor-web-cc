@@ -24,7 +24,7 @@ use super::reply::{Ctx, Target, load, missing_key};
 use super::table::table_body;
 use super::translation_routes::{RowFields, sent_row_version};
 use crate::error::WebError;
-use crate::pages::draft_reply::{conflict, success, with_push_url};
+use crate::pages::draft_reply::{conflict, success, with_change_number, with_push_url};
 use crate::pages::path_values::Page;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
@@ -43,11 +43,11 @@ const FIRST_PAGE: Page = Page {
 /// The attribute of the status region of the layout (`base.html`, `design-system.md` 10.7).
 const TOAST_REGION: &str = "id=\"toast\"";
 
-/// The toast of the removal of a parameter (`design-system.md` section 10.7).
+/// The toast of a draft command on a parameter (`design-system.md` section 10.7).
 #[derive(Template)]
 #[template(path = "parameter-removed-toast.html")]
 struct RemovedToast {
-    /// The sentence `parameter-deleted` with the tag.
+    /// The sentence of the toast, for example `parameter-deleted` with the tag.
     text: String,
     /// True for the table answer: the toast and the empty error panel go out of band.
     oob: bool,
@@ -155,6 +155,7 @@ pub(crate) async fn remove(
     if !request.is_htmx() {
         return see_other_path(&target.version_href(), request_id, []);
     }
+    let toast = with_change_number(ctx.texts(), &toast, &output);
     if request.hx_target() == Some(CONTENT) {
         return version_content(state.clone(), request, (&target, output, toast)).await;
     }
@@ -164,7 +165,13 @@ pub(crate) async fn remove(
 }
 
 /// Render the toast `text`, out of band after the table with `oob`, or for the status region.
-fn toast_html(text: String, oob: bool, request_id: RequestId) -> Result<String, WebError> {
+///
+/// The fragment routes of a value and of limits use it too, with `oob` set (design D4).
+pub(super) fn toast_html(
+    text: String,
+    oob: bool,
+    request_id: RequestId,
+) -> Result<String, WebError> {
     Ok(render(&RemovedToast { text, oob }, request_id)?.0)
 }
 

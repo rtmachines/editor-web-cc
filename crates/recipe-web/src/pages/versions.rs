@@ -16,9 +16,10 @@ use recipe_domain::recipe::ReferenceNumber;
 
 use super::path_values::{reference, version_number};
 use crate::error::WebError;
-use crate::routes::{RouteEntry, operation_row};
+use crate::routes::{Access, RouteEntry, operation_row};
 
 mod actions;
+mod compare;
 mod form;
 mod list;
 mod outdated;
@@ -86,7 +87,18 @@ pub(crate) fn rows() -> Vec<RouteEntry> {
         ),
     ];
     rows.extend(lifecycle_rows());
+    rows.push(compare_row());
     rows
+}
+
+/// Return the route row of the compare route (ADR-0108 (e)). It has no operation.
+fn compare_row() -> RouteEntry {
+    RouteEntry {
+        method: Method::GET,
+        path: "/recipes/{ref}/compare",
+        access: Access::Authenticated,
+        handler: get(compare::compare),
+    }
 }
 
 /// Return the route rows of the approval preview, the diff page, the approval, the retire, and
@@ -129,6 +141,12 @@ fn lifecycle_rows() -> Vec<RouteEntry> {
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]
+mod compare_form_tests;
+#[cfg(test)]
+mod compare_read_only_tests;
+#[cfg(test)]
+mod compare_route_tests;
+#[cfg(test)]
 mod compare_tests;
 #[cfg(test)]
 mod export_link_tests;
@@ -145,15 +163,21 @@ mod list_tests;
 #[cfg(test)]
 mod outdated_tests;
 #[cfg(test)]
+mod page_hash_tests;
+#[cfg(test)]
 mod page_tests;
 #[cfg(test)]
 mod parameter_table_tests;
+#[cfg(test)]
+mod parameter_table_value_tests;
 #[cfg(test)]
 mod rebind_error_tests;
 #[cfg(test)]
 mod rebind_form_tests;
 #[cfg(test)]
 mod rebind_tests;
+#[cfg(test)]
+mod rebind_toast_tests;
 #[cfg(test)]
 mod rebind_world;
 #[cfg(test)]

@@ -4,6 +4,7 @@
 //! It ends before the sentence "Reference: {request_id}.", because only the request knows the reference (design D4).
 
 use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::recipe::{ParameterKey, ValueFault};
 
 /// The kind of failure behind `StorageError::Deadlock` (design D16, ADR-0035 c).
 ///
@@ -76,6 +77,25 @@ pub enum StorageError {
 #[error("{0}")]
 struct BrokenContract(&'static str);
 
+/// The cause of a stored value that does not match its type.
+///
+/// The type solves one problem: the one log line must name the broken parameter. It holds the key
+/// and the fault, and it never holds the value text.
+#[derive(Debug, thiserror::Error)]
+#[error("the stored value of the parameter {key} does not match its type")]
+struct BrokenValue {
+    key: ParameterKey,
+    #[source]
+    fault: FaultSource,
+}
+
+/// The `Display` text of a `ValueFault`, as an error source.
+///
+/// `ValueFault` is not an `Error`, so the chain of the log needs this wrapper.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+struct FaultSource(ValueFault);
+
 impl StorageError {
     /// Build the error of a broken port contract, for example a result list that is too short.
     ///
@@ -86,6 +106,22 @@ impl StorageError {
         Self::Other {
             sqlstate: None,
             source: Box::new(BrokenContract(message)),
+        }
+    }
+
+    /// Build the error of a stored value that does not match its type, a defect of the storage.
+    ///
+    /// The function solves one problem: the one log line must find the broken row. The source
+    /// chain names the parameter key and the fault. The code is `E-DB-008`, and `Display` hides
+    /// the details. The message never holds the value text.
+    #[must_use]
+    pub(crate) fn broken_value(key: ParameterKey, fault: ValueFault) -> Self {
+        Self::Other {
+            sqlstate: None,
+            source: Box::new(BrokenValue {
+                key,
+                fault: FaultSource(fault),
+            }),
         }
     }
 

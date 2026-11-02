@@ -24,7 +24,7 @@ use super::prepare::{Prepared, Ready, prepare};
 use super::reply::{Ctx, Target, failed, load};
 use super::summary::{SummaryFragment, SummaryView};
 use crate::error::{FormErrors, WebError};
-use crate::pages::draft_reply::{success, with_form};
+use crate::pages::draft_reply::{success, with_change_number, with_form};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::state::WebState;
@@ -71,7 +71,8 @@ async fn saved(
         return see_other_path(&page, request_id, []);
     }
     let t = ctx.texts();
-    let toast = t.with_arg("parameter-saved", "tag", &definition.tag);
+    let sentence = t.with_arg("parameter-saved", "tag", &definition.tag);
+    let toast = with_change_number(t, &sentence, &output);
     let summary = SummaryView::saved(key, definition, toast);
     let body = render(&SummaryFragment { t, summary }, request_id)?;
     let mut clean = stored_shown(ctx, &read_parameter(ctx).await?)?;

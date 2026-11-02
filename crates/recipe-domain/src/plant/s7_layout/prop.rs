@@ -53,7 +53,70 @@ fn storage_lower_bound(tree: &TypeTree) -> u64 {
     bytes.checked_add(bools.div_ceil(BITS_PER_BYTE)).unwrap()
 }
 
+/// Bits in two bytes, the unit of the size rounding.
+const BITS_PER_EVEN_BYTES: u64 = 16;
+
+/// Width of the last top-level member in bits: 1 for `BOOL`, else the bytes times 8.
+fn member_width(member: &S7Member) -> u64 {
+    match member.layout().start() {
+        S7Start::Bit => 1,
+        S7Start::Byte | S7Start::Even => u64::from(member.layout().size_bytes())
+            .checked_mul(BITS_PER_BYTE)
+            .unwrap(),
+    }
+}
+
+/// Start of a member in bits from the start of the root.
+fn start_bit(member: &S7Member) -> u64 {
+    u64::from(member.byte())
+        .checked_mul(BITS_PER_BYTE)
+        .and_then(|bits| bits.checked_add(u64::from(member.bit())))
+        .unwrap()
+}
+
 proptest! {
+    #[test]
+    fn last_top_level_member_end_rounded_up_is_the_size(generated in type_trees()) {
+        let tree = resolved(&generated)?;
+        if matches!(tree.root(), TypeNode::Struct { .. }) {
+            let members = s7_members(&tree)
+                .map_err(|error| TestCaseError::fail(error.to_string()))?;
+            let last = members.iter().rfind(|member| member.names().len() == 1);
+            let end = match last {
+                Some(member) => {
+                    let start = u64::from(member.byte())
+                        .checked_mul(BITS_PER_BYTE)
+                        .and_then(|bits| bits.checked_add(u64::from(member.bit())))
+                        .unwrap();
+                    start.checked_add(member_width(member)).unwrap()
+                }
+                None => 0,
+            };
+            let rounded = end.checked_next_multiple_of(BITS_PER_EVEN_BYTES).unwrap();
+            prop_assert_eq!(rounded, u64::from(layout(&tree)?.size_bytes()) * BITS_PER_BYTE);
+        }
+    }
+
+    #[test]
+    fn every_row_of_a_struct_child_lies_inside_its_parent(generated in type_trees()) {
+        let tree = resolved(&generated)?;
+        let members = s7_members(&tree).map_err(|error| TestCaseError::fail(error.to_string()))?;
+        for (index, parent) in members.iter().enumerate() {
+            let parent_start = start_bit(parent);
+            let parent_end = parent_start.checked_add(member_width(parent)).unwrap();
+            let children = members
+                .iter()
+                .skip(index.checked_add(1).unwrap())
+                .take_while(|member| member.names().starts_with(parent.names()));
+            for child in children {
+                let child_start = start_bit(child);
+                let child_end = child_start.checked_add(member_width(child)).unwrap();
+                prop_assert!(child_start >= parent_start);
+                prop_assert!(child_end <= parent_end);
+            }
+        }
+    }
+
     #[test]
     fn layout_of_a_generated_tree_is_ok(generated in type_trees()) {
         let tree = resolved(&generated)?;

@@ -24,6 +24,7 @@ use super::path_version;
 use crate::error::WebError;
 use crate::pages::draft_reply::{conflict, with_push_url, with_row_version};
 use crate::pages::path_values::page as read_page;
+use crate::pages::recipes::Choice;
 use crate::pages::render::see_other_path;
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
@@ -40,6 +41,21 @@ pub(crate) struct ActionLink {
     pub(crate) href: String,
     /// The text of the link from the bundles.
     pub(crate) text: String,
+}
+
+/// The compare form of the version page (ADR-0108 (d), design D3).
+///
+/// The type solves one problem: the user must pick any two versions of the recipe. The two links
+/// of ADR-0050 (l) cover only the Approved version and the base version.
+pub(crate) struct CompareForm {
+    /// The address of the compare route, for example `/recipes/R-100/compare`.
+    pub(crate) action: String,
+    /// Each version number of the recipe as an option, the highest first. Both lists use it.
+    pub(crate) numbers: Vec<Choice>,
+    /// The number that the list `n` selects: the shown version.
+    pub(crate) shown: String,
+    /// The number that the list `m` selects: the base version or the highest other version.
+    pub(crate) base: String,
 }
 
 /// The export link of an Approved or a Retired version (ADR-0052 (b), (c), and (e)).
@@ -79,6 +95,8 @@ pub(crate) struct VersionActions {
     /// The Approved link stands first. A link shows only when its version exists and has another
     /// number than the shown version. One version gets one link (design D7).
     pub(crate) compare: Vec<ActionLink>,
+    /// The compare form, or `None` for a recipe with one version.
+    pub(crate) compare_form: Option<CompareForm>,
     /// The export link of an Approved or a Retired version of a live recipe, for a role that the
     /// matrix row of the export allows. It stays in read-only mode (A24).
     pub(crate) export: Option<ExportLink>,
@@ -130,6 +148,37 @@ fn compare_links(t: Texts<'_>, view: &VersionView) -> Vec<ActionLink> {
         text: t.with_arg(key, "number", other),
     })
     .collect()
+}
+
+/// Build the compare form of `view`, or `None` when the recipe has fewer than two versions.
+///
+/// The function solves one problem: the lists must offer each version and must start with a useful
+/// pair. The list `m` selects the base version when it exists and differs from the shown version,
+/// else the highest other version. A deleted recipe keeps the form, because it only reads.
+fn compare_form(view: &VersionView) -> Option<CompareForm> {
+    let number = view.detail.number;
+    let mut numbers: Vec<u32> = view
+        .recipe
+        .versions()
+        .iter()
+        .map(VersionHeader::number)
+        .collect();
+    numbers.sort_unstable_by(|a, b| b.cmp(a));
+    let highest_other = numbers.iter().copied().find(|other| *other != number)?;
+    let base = view
+        .detail
+        .based_on
+        .filter(|base| *base != number && numbers.contains(base))
+        .unwrap_or(highest_other);
+    Some(CompareForm {
+        action: format!("/recipes/{}/compare", view.recipe.reference()),
+        numbers: numbers
+            .iter()
+            .map(|n| Choice::new(&n.to_string(), n.to_string()))
+            .collect(),
+        shown: number.to_string(),
+        base: base.to_string(),
+    })
 }
 
 /// Build the export link of `view` for `role`, or `None` when the page shows none.
@@ -192,6 +241,7 @@ pub(crate) fn version_actions(t: Texts<'_>, role: Role, view: &VersionView) -> V
     VersionActions {
         approve,
         compare: compare_links(t, view),
+        compare_form: compare_form(view),
         export: export_link(t, role, view),
         danger,
         history_href: format!("/recipes/{reference}/history"),

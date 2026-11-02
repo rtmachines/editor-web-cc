@@ -5,6 +5,7 @@
 
 use axum::http::StatusCode;
 
+use super::actions_tests::assert_no_action_form;
 use crate::i18n::Lang;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_clean_html, assert_error};
@@ -53,7 +54,7 @@ async fn versions_page_of_an_operator_shows_the_header_and_the_table_and_no_form
         main.contains("<a class=\"target-link\" href=\"/recipes/R-100\">Recipe R-100</a>"),
         "{main}"
     );
-    assert!(!main.contains("<form"), "{main}");
+    assert_no_action_form(main);
     assert!(!main.contains("/parameters/new"), "{main}");
     assert_clean_html(&reply.body);
 }

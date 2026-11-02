@@ -1,11 +1,14 @@
 //! Read port of the recipe pages (design D5, ADR-0042, ADR-0043).
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
+use recipe_domain::export::Sha256;
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{MachineCode, PlcTypeId, S7Address, UnitId, UnitPath};
 use recipe_domain::recipe::{
     Ordinal, ParameterKey, ParameterTag, RecipeId, RecipeVersionId, ReferenceNumber,
-    StoredParameter, VersionState,
+    StoredParameter, StoredValue, VersionState,
 };
 use recipe_domain::text::{LongText, Text};
 use recipe_domain::timestamp::Timestamp;
@@ -83,6 +86,9 @@ pub struct VersionDetail {
     pub state: VersionState,
     /// The change note of the version.
     pub change_note: LongText,
+    /// The hash that approval stored for an approved or retired version, or `None` for a draft
+    /// (`api.md` §6).
+    pub content_sha256: Option<Sha256>,
     /// The number of the base version of this version, or `None` for a version without a base.
     pub based_on: Option<u32>,
     /// The login of the user who created the version.
@@ -101,8 +107,9 @@ pub struct VersionDetail {
 
 /// One row of the parameter table of a version.
 ///
-/// The type solves one problem: the table shows the columns of a parameter and not its value, its
-/// limit rows, and its translation rows. A value can have 1 MiB. `parameter_by_key` loads them.
+/// The page read loads no value, its limit rows, or its translation rows. A value can have 1 MiB.
+/// `parameter_by_key` loads one parameter in full. `parameter_values` loads the values of the
+/// primitive rows of one page (ADR-0108 (b)).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterRow {
     /// The key of the parameter in a URL.
@@ -211,6 +218,19 @@ pub trait RecipeReads: Send {
         offset: u64,
         limit: u32,
     ) -> Result<Vec<ParameterRow>, StorageError>;
+
+    /// Read the stored value of each parameter of `version` whose key is in `keys`.
+    ///
+    /// The caller passes the keys of the primitive parameters of one page. A key that `version`
+    /// does not hold gives no entry. The bound of ADR-0108 (b) applies: `keys` holds at most
+    /// `page.parameters` keys, and a primitive value has at most 16 382 UTF-16 units of up to 3
+    /// bytes each, so one page stays below 5 MiB. The method reads no limit row and no
+    /// translation row.
+    async fn parameter_values(
+        &mut self,
+        version: RecipeVersionId,
+        keys: &[ParameterKey],
+    ) -> Result<BTreeMap<ParameterKey, StoredValue>, StorageError>;
 
     /// Count the parameters of `version` in each unit that holds one.
     ///

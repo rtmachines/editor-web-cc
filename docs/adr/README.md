@@ -52,14 +52,14 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0040](0040-post-routes-for-translations-and-removal.md) | POST routes for translations and for the removal of a parameter | Accepted | 2026-10-15 |
 | [0041](0041-error-lists-of-a-form.md) | Error lists of a form | Accepted. Amended by ADR-0046 (form query before the fields) and ADR-0050 (a line with no link for a query value without an input) | 2026-10-15 |
 | [0042](0042-snapshot-reads-of-draft-queries.md) | Snapshot reads of draft queries | Accepted. Amended by ADR-0050 (approval preview and diff in one snapshot, draft read of the in-memory adapter) | 2026-10-15 |
-| [0043](0043-recipe-editor-pages.md) | Pages of the recipe editor | Accepted. Amended by ADR-0044 (bound of the rebind forms) | 2026-10-15 |
+| [0043](0043-recipe-editor-pages.md) | Pages of the recipe editor | Accepted. Amended by ADR-0044 (bound of the rebind forms). Amended by ADR-0108 (item (j): the columns of the parameter table) | 2026-10-15 |
 | [0044](0044-bound-of-the-rebind-forms.md) | Bound of the rebind forms | Accepted | 2026-10-15 |
 | [0045](0045-nested-arrays-inside-a-group.md) | Nested arrays inside a group | Accepted | 2026-10-15 |
 | [0046](0046-permission-check-of-a-form-route.md) | Permission check of a form route | Accepted. Amended by ADR-0049 (the five action routes read the body first) | 2026-10-15 |
 | [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted. Amended by ADR-0049 (m) (scroll padding of a toast of several lines). Amended by ADR-0057 (no empty `#toast` on the answer of the backstop panic layer) | 2026-10-15 |
 | [0048](0048-browser-regression-suite-with-playwright.md) | Browser regression suite with Playwright | Accepted | 2026-10-16 |
 | [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer) | 2026-10-16 |
-| [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted | 2026-10-16 |
+| [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted. Amended by ADR-0108 (item (l): the compare links of the version page) | 2026-10-16 |
 | [0051](0051-audit-history-and-security-event-views.md) | Audit, history, and security event views | Accepted | 2026-10-16 |
 | [0052](0052-export-link-on-the-version-page.md) | Export link on the version page | Accepted | 2026-10-22 |
 | [0053](0053-error-answers-of-the-export-routes.md) | Error answers of the export routes | Accepted. Amended by ADR-0057 (text answer of the backstop panic layer) | 2026-10-22 |
@@ -117,19 +117,20 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0105](0105-volume-tag-and-upgrade-checks.md) | Tag of a data volume and the checks of the upgrade | Accepted. Amended by ADR-0106 (item (b): the change log also holds the timeline of each volume) | 2026-10-30 |
 | [0106](0106-recovery-of-production-from-the-wal-archive.md) | Recovery of production from the WAL archive | Accepted | 2026-10-30 |
 | [0107](0107-wal-check-ignores-backup-end-time.md) | The WAL check ignores the file backup_end_time | Accepted | 2026-10-31 |
+| [0108](0108-version-page-and-type-page-additions.md) | Additions to the version page and the type page | Accepted | 2026-11-01 |
 
 ## Decision map
 
 | Topic | Current ADR |
 |---|---|
 | Frontend | 0001 + 0015 (`row-version.js`) + 0036 (design system) + 0037 (`hx-boost` forms, style sheets) + 0039 (value form) + 0040 (POST routes) |
-| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) + 0039 (leaf grid) + 0043 (deleted state) + 0045 (nested arrays inside a group). Diff: 0050 (states and icons). Audit: 0051 (pagers, navigation link) |
+| Design system, accessibility, UI layout | 0036 + 0037 (whole unit tree, archived state, navigation link) + 0039 (leaf grid) + 0043 (deleted state) + 0045 (nested arrays inside a group). Diff: 0050 (states and icons). Audit: 0051 (pagers, navigation link). Also 0108 (value column of the parameter table, version and type page additions) |
 | Error page, page of a refused form, toast | 0036 + 0047 (refused form page in the session layout, empty toast after an error, sticky toast) + 0049 (m) (scroll padding below 48rem) |
 | Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) + 0041 (error lists) |
 | Permission check and fields of a form route | 0013 + 0041 + 0046 (form query with a purpose, check before the fields) + 0049 (l) (the five action routes read the body first) |
 | Pages of recipes, versions, and parameters | 0039 (value form, leaf grid) + 0040 (POST routes) + 0041 (error lists) + 0043 (lists, deleted recipe, translations, rebind, conflict) + 0044 (rebind bound) |
 | Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) + 0052 (export link in the action area) |
-| Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags) |
+| Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags). Also 0108 (compare form and links of the version page) |
 | Audit, history, and security event pages | 0051 (read port, cursor, filters, scope of A20, formatted JSON) |
 | Isolation of queries | 0042 + 0050 (approval preview and diff in one snapshot) |
 | Export | 0019 + 0052 (link on the version page) + 0053 (JSON errors, session redirects) + 0054 (only `GET`) + 0055 (guard) + 0056 (permits). Also 0072 (no request timeout) |

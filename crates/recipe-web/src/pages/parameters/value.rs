@@ -23,9 +23,10 @@ use super::form_view::{GridTexts, grid_of};
 use super::grid::{GridLimitsFragment, GridValuesFragment, LimitTexts};
 use super::page::{NoQuery, no_query, parameter_page, read_parameter};
 use super::path_parameter;
+use super::remove::toast_html;
 use super::reply::{Ctx, Target, command_lines, load, missing_key};
 use crate::error::{FieldError, WebError};
-use crate::pages::draft_reply::{conflict, success};
+use crate::pages::draft_reply::{conflict, success, with_change_number};
 use crate::pages::render::render;
 use crate::pages::request::PageRequest;
 use crate::state::WebState;
@@ -70,14 +71,17 @@ async fn values_answer(ctx: Ctx<'_>, output: DraftOutput) -> Result<Response, We
     let t = ctx.texts();
     let tag = view.parameter.tag.to_string();
     let grid = grid_of(t, texts, ctx.state.settings().form_array_chunk, &tag);
-    let body = render(&GridValuesFragment { t, view: &grid }, request_id)?;
+    let mut body = render(&GridValuesFragment { t, view: &grid }, request_id)?;
+    let sentence = with_change_number(t, &t.with_arg("value-saved", "tag", &tag), &output);
+    body.0.push_str(&toast_html(sentence, true, request_id)?);
     success(&output, body, request_id)
 }
 
 /// Read the limits with `GetLimits` and render the rows. A time bound shows as an IEC literal (A43).
 ///
-/// `api.md` section 2.6 and ADR-0046 (d) give the query `GetLimits` to the limits fragment.
-async fn limits_body(ctx: Ctx<'_>) -> Result<axum::response::Html<String>, WebError> {
+/// `api.md` section 2.6 and ADR-0046 (d) give the query `GetLimits` to the limits fragment. The
+/// result holds the rows and the tag of the parameter.
+async fn limits_body(ctx: Ctx<'_>) -> Result<(axum::response::Html<String>, String), WebError> {
     let input = ParameterRef {
         reference: ctx.target.reference.clone(),
         number: ctx.target.number,
@@ -87,12 +91,13 @@ async fn limits_body(ctx: Ctx<'_>) -> Result<axum::response::Html<String>, WebEr
         .execute(ctx.request.auth()?.user(), &ctx.request.meta(), input)
         .await?;
     let rows = LimitTexts::from_stored(&view.tree, &view.limits);
+    let tag = view.tag.to_string();
     let fragment = GridLimitsFragment {
         t: ctx.texts(),
         rows: &rows,
-        root_label: view.tag.to_string(),
+        root_label: tag.clone(),
     };
-    render(&fragment, ctx.request.request_id())
+    Ok((render(&fragment, ctx.request.request_id())?, tag))
 }
 
 /// Build the context of a fragment route.
@@ -151,7 +156,8 @@ pub(crate) async fn limits(
     if !request.is_htmx() {
         return parameter_page(ctx).await;
     }
-    Ok(limits_body(ctx).await?.into_response())
+    let (body, _tag) = limits_body(ctx).await?;
+    Ok(body.into_response())
 }
 
 /// `POST .../{key}/limits`: replace the limit rows of the parameter (`ReplaceLimits`).
@@ -187,8 +193,12 @@ pub(crate) async fn replace_limits(
         .await;
     match result {
         Ok(output) => {
-            let body = limits_body(ctx).await?;
-            success(&output, body, request.request_id())
+            let (mut body, tag) = limits_body(ctx).await?;
+            let t = ctx.texts();
+            let sentence = with_change_number(t, &t.with_arg("limits-saved", "tag", tag), &output);
+            let request_id = request.request_id();
+            body.0.push_str(&toast_html(sentence, true, request_id)?);
+            success(&output, body, request_id)
         }
         Err(error) => Err(command_failed(ctx, error).await),
     }

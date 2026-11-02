@@ -124,6 +124,15 @@ pub(crate) fn success(
     with_row_version(body.into_response(), output.row_version, request_id)
 }
 
+/// Join the toast sentence `sentence` and the change number of `output` (design D4, ADR-0108 (f)).
+///
+/// A toast of a command after which the draft stays live names the new `row_version`. The number is
+/// the value that [`success`] sends in `HX-Trigger`, so the toast and the header agree.
+pub(crate) fn with_change_number(t: Texts<'_>, sentence: &str, output: &DraftOutput) -> String {
+    let number = t.with_arg("toast-change-number", "row_version", output.row_version);
+    format!("{sentence} {number}")
+}
+
 /// Add `HX-Trigger: {"rowVersion": <n>}` with `row_version` to `response` (`api.md` 4).
 ///
 /// # Errors
@@ -204,5 +213,7 @@ mod conflict_tests;
 pub(crate) mod refusal_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) mod toast_number_tests;
 #[cfg(test)]
 mod toast_tests;

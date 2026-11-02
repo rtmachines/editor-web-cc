@@ -12,7 +12,7 @@ mod drafts;
 mod identity;
 mod machine_list;
 mod machines;
-mod parameter_reads;
+pub(crate) mod parameter_reads;
 mod parameter_rows;
 mod plant;
 mod recipe_list;
@@ -46,7 +46,9 @@ use recipe_app::ports::{
 use recipe_domain::audit::{AggregateType, AuditEntry};
 use recipe_domain::identity::Login;
 use recipe_domain::plant::UnitId;
-use recipe_domain::recipe::{ParameterKey, RecipeId, RecipeVersionId, StoredParameter};
+use recipe_domain::recipe::{
+    ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
+};
 use recipe_domain::timestamp::Timestamp;
 use sqlx::Postgres;
 
@@ -190,6 +192,14 @@ impl RecipeReads for PgTransaction {
         limit: u32,
     ) -> Result<Vec<ParameterRow>, StorageError> {
         parameter_reads::page(&mut self.tx, version, unit, offset, limit).await
+    }
+
+    async fn parameter_values(
+        &mut self,
+        version: RecipeVersionId,
+        keys: &[ParameterKey],
+    ) -> Result<BTreeMap<ParameterKey, StoredValue>, StorageError> {
+        parameter_reads::values(&mut self.tx, version, keys).await
     }
 
     async fn unit_counts(

@@ -33,6 +33,8 @@ mod parameter_form;
 mod parameter_form_tests;
 #[cfg(test)]
 mod parameter_reads_tests;
+#[cfg(test)]
+mod parameter_value_tests;
 mod parameters;
 #[cfg(test)]
 mod parameters_tests;
@@ -58,6 +60,7 @@ pub use diff::{
 };
 pub use outdated::{OutdatedParameter, StructRevision};
 pub use parameter_form::{GetParameterForm, GetParameterFormInput, ParameterForm};
+pub(crate) use parameters::value_text;
 pub use parameters::{
     GetLimits, GetParameter, GetTranslations, LimitsView, ListParameters, ListParametersInput,
     ParameterList, ParameterRef, ParameterView, TranslationsView,

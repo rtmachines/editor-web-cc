@@ -9,8 +9,8 @@ use recipe_app::auth::{Operation, ParameterFormPurpose};
 use recipe_app::error::{AppError, Missing};
 use recipe_app::ports::NonEmpty;
 use recipe_app::recipe::{
-    GetTranslations, ParameterRef, RemoveTranslation, RemoveTranslationInput, TranslationsView,
-    UpsertTranslation, UpsertTranslationInput,
+    DraftOutput, GetTranslations, ParameterRef, RemoveTranslation, RemoveTranslationInput,
+    TranslationsView, UpsertTranslation, UpsertTranslationInput,
 };
 use recipe_domain::recipe::{LangCode, Translation, VersionState};
 use recipe_domain::text::{LongText, Text};
@@ -24,7 +24,7 @@ use super::translations::{
     translation_rows,
 };
 use crate::error::{FieldError, FieldReason, WebError};
-use crate::pages::draft_reply::{conflict, refusal_lines, refused, success};
+use crate::pages::draft_reply::{conflict, refusal_lines, refused, success, with_change_number};
 use crate::pages::path_values::{lang as read_lang, parameter_key, reference, version_number};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
@@ -295,7 +295,7 @@ fn refuse_row(
 fn saved(
     ctx: Ctx<'_>,
     translation: &Translation,
-    row_version: i64,
+    output: &DraftOutput,
 ) -> Result<axum::response::Html<String>, WebError> {
     let request_id = ctx.request.request_id();
     let href = parameter_href(ctx.target);
@@ -303,11 +303,15 @@ fn saved(
     let source = RowSource {
         parameter_href: href,
         csrf_token: ctx.request.csrf_token(),
-        row_version: row_version.to_string(),
+        row_version: output.row_version.to_string(),
         editable: true,
     };
     let row = TranslationRow {
-        toast: t.with_arg("translation-saved", "lang", &translation.lang),
+        toast: with_change_number(
+            t,
+            &t.with_arg("translation-saved", "lang", &translation.lang),
+            output,
+        ),
         ..TranslationRow::new(&source, &translation.lang, Some(translation))
     };
     let fragment = TranslationRowFragment {
@@ -372,7 +376,7 @@ pub(crate) async fn upsert(
     if !request.is_htmx() {
         return see_other_path(&parameter_href(&target), request.request_id(), []);
     }
-    let body = saved(ctx, &translation, output.row_version)?;
+    let body = saved(ctx, &translation, &output)?;
     success(&output, body, request.request_id())
 }
 
@@ -408,6 +412,11 @@ pub(crate) async fn remove(
     if !request.is_htmx() {
         return see_other_path(&parameter_href(&target), request.request_id(), []);
     }
-    let toast = ctx.texts().with_arg("translation-deleted", "lang", &lang);
+    let t = ctx.texts();
+    let toast = with_change_number(
+        t,
+        &t.with_arg("translation-deleted", "lang", &lang),
+        &output,
+    );
     success(&output, rows_body(ctx, toast).await?, request.request_id())
 }

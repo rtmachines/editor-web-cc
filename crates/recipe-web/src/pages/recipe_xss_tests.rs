@@ -6,7 +6,19 @@
 //! error code. No answer holds the raw payload, no `hx-*` attribute holds it, and each `<svg` of an
 //! answer is the fixed tag of its icon. The routes come from `route_rows()` and `sweep_pages()`.
 
+use std::collections::BTreeSet;
+
 use axum::http::StatusCode;
+use recipe_domain::plant::{
+    MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
+    RecordShape, StringKind, StringLength, TypeTree, UnitPath,
+};
+use recipe_domain::recipe::{
+    Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, RecipeVersionId,
+    StoredParameter,
+};
+use recipe_domain::text::{LongText, Text};
+use uuid::Uuid;
 
 use super::recipe_sweep_tests::{TOKEN_ONLY_ROUTES, attribute_values, post_endpoints, sweep_pages};
 use super::recipes::test_world::recipe_world;
@@ -14,13 +26,13 @@ use super::xss_kit::{assert_error_panel, assert_refused, assert_safe, has_contro
 use super::xss_tests::with_query;
 use crate::pages::test_helpers::{askama_escape, encode, field_value, payloads};
 use crate::routes::matrix::{Endpoint, fill};
-use crate::test_support::plant::{HTMX, World};
+use crate::test_support::plant::{DRAFT_ID, HTMX, M7_ID, World, main_of};
 use crate::test_support::{Reply, post_pre_session};
 
 /// The path of the draft 3 of `R-100`.
 const DRAFT: &str = "/recipes/R-100/versions/3";
 /// The query values that no payload can satisfy: a template with `{}` and the code of the answer.
-const REFUSED_QUERIES: [(&str, &str); 15] = [
+const REFUSED_QUERIES: [(&str, &str); 17] = [
     ("/recipes?machine={}", "E-WEB-005"),
     ("/recipes?status={}", "E-WEB-008"),
     ("/recipes?page={}", "E-WEB-008"),
@@ -29,6 +41,8 @@ const REFUSED_QUERIES: [(&str, &str); 15] = [
     ("/recipes/{ref}?page={}", "E-WEB-008"),
     ("/recipes/{ref}/versions?page={}", "E-WEB-008"),
     ("/recipes/{ref}/versions/{n}?page={}", "E-WEB-008"),
+    ("/recipes/{ref}/compare?n={}&m=1", "E-WEB-008"),
+    ("/recipes/{ref}/compare?n=2&m={}", "E-WEB-008"),
     ("/recipes/{ref}/versions/{n}?unit={}", "E-PLT-017"),
     (
         "/recipes/{ref}/versions/{n}/parameters?page={}",
@@ -55,6 +69,8 @@ const REFUSED_QUERIES: [(&str, &str); 15] = [
         "E-WEB-008",
     ),
 ];
+/// The compare route with a good query. Its `{ref}` hole is the only path value.
+const COMPARE: &str = "/recipes/{ref}/compare?n=2&m=1";
 /// The path values and the code of the answer for a payload in each of them.
 const HOLES: [(&str, &str); 4] = [
     ("{ref}", "E-WEB-005"),
@@ -643,4 +659,101 @@ async fn recipe_xss_translation_texts_are_stored_and_shown_escaped() {
         assert!(rows.body.contains(&askama_escape(payload)), "{}", rows.body);
         assert_safe(&rows, payload, "GET translations");
     }
+}
+
+#[tokio::test]
+async fn recipe_xss_reference_of_the_compare_route_gives_404_e_web_005() {
+    // The sweep of pages leaves the compare route out, because it only redirects.
+    let world = recipe_world();
+    for payload in payloads() {
+        let path = with_payload(COMPARE, "{ref}", &payload);
+        let reply = world.get(&world.admin, &path, &[]).await;
+        assert_refused(&reply, "E-WEB-005", &payload, &format!("GET {path}"));
+    }
+}
+
+// --- Stored text value of the version page ----------------------------------------------------------------
+
+/// The identifier of the type `STRING(254)` of `M7`.
+const STRING_254_ID: Uuid = Uuid::from_u128(0x7357_0013_0000_0000_0000_0000_0000_0f01);
+/// The identifier and the key of the parameter that holds the payload.
+const PAYLOAD_PARAMETER: Uuid = Uuid::from_u128(0x7357_0006_0000_0000_0000_0000_0f00_0001);
+/// The tag of the parameter that holds the payload.
+const PAYLOAD_TAG: &str = "PAYLOAD";
+
+/// Seed the type `STRING(254)` on `M7` and return its tree.
+fn seed_string_254(world: &World) -> TypeTree {
+    let length = StringLength::parse(StringKind::String, PlcPlatform::S7_300, 254).unwrap();
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: PlcTypeId::from(STRING_254_ID),
+        machine: Some(MachineId::from(M7_ID)),
+        platforms: BTreeSet::from([PlcPlatform::S7_300]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::String,
+            leaf_class: Primitive::String.leaf_class(),
+            size_bytes: length.size_bytes(StringKind::String).unwrap(),
+            string_length: Some(length.value()),
+        },
+    })
+    .unwrap();
+    world.fixture.store.seed_type(&row);
+    let types =
+        PlatformTypes::collect(MachineId::from(M7_ID), PlcPlatform::S7_300, vec![row]).unwrap();
+    TypeTree::resolve(PlcTypeId::from(STRING_254_ID), &types).unwrap()
+}
+
+/// Return the JSON text of the string `text`.
+fn json_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Seed the `STRING(254)` parameter `PAYLOAD` of the draft 3 with the stored value `payload`.
+///
+/// Return `false` when the S7 `STRING` charset refuses the payload.
+fn seed_payload(world: &World, tree: &TypeTree, payload: &str) -> bool {
+    let Ok(value) = ParameterValue::parse(&json_string(payload), tree) else {
+        return false;
+    };
+    let state = world.fixture.store.state();
+    let machine = state.machine(MachineId::from(M7_ID)).unwrap();
+    let unit = machine.unit(&UnitPath::parse("U1").unwrap()).unwrap().id();
+    drop(state);
+    let parameter = StoredParameter {
+        id: ParameterId::from(PAYLOAD_PARAMETER),
+        key: ParameterKey::from(PAYLOAD_PARAMETER),
+        unit,
+        tag: ParameterTag::parse(PAYLOAD_TAG).unwrap(),
+        name_en: Text::parse(PAYLOAD_TAG).unwrap(),
+        description_en: LongText::parse("A seeded parameter").unwrap(),
+        translations: Vec::new(),
+        plc_type: PlcTypeId::from(STRING_254_ID),
+        s7_address: None,
+        limits: Vec::new(),
+        value: value.to_stored(),
+        ordinal: Ordinal::parse(101).unwrap(),
+    };
+    world
+        .fixture
+        .store
+        .seed_parameter(RecipeVersionId::from(DRAFT_ID), &parameter);
+    true
+}
+
+#[tokio::test]
+async fn recipe_xss_stored_text_value_is_shown_escaped_in_the_value_column() {
+    let mut shown = 0_usize;
+    for payload in payloads() {
+        let world = recipe_world();
+        let tree = seed_string_254(&world);
+        // The S7 `STRING` charset may refuse a payload. A refused payload cannot be stored.
+        if !seed_payload(&world, &tree, &payload) {
+            continue;
+        }
+        let reply = world.get(&world.admin, DRAFT, &[]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{DRAFT}: {}", reply.body);
+        assert!(main_of(&reply.body).contains(PAYLOAD_TAG), "{DRAFT}");
+        assert_safe(&reply, &payload, DRAFT);
+        shown = shown.checked_add(1).unwrap();
+    }
+    assert!(shown > 0, "no payload fits a STRING value");
 }

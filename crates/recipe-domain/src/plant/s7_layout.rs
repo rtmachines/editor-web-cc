@@ -1,6 +1,6 @@
 //! S7 layout of a type tree (`domain-model.md` section 2.1, ADR-0017).
 
-use super::{PlantError, PlcTypeId, Primitive, TypeLimit, TypeNode, TypeTree};
+use super::{MemberName, PlantError, PlcTypeId, Primitive, TypeLimit, TypeNode, TypeTree};
 
 /// Where a value of a type starts inside an S7 data block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,20 +36,7 @@ impl S7Layout {
     /// resolved tree make this impossible.
     pub fn of(tree: &TypeTree) -> Result<Self, PlantError> {
         let root = tree.root();
-        let mut stack = vec![Frame::new(root)];
-        while let Some(frame) = stack.last_mut() {
-            if let Some(child) = frame.children.next() {
-                stack.push(Frame::new(child));
-                continue;
-            }
-            let Some(finished) = stack.pop() else { break };
-            let layout = finished.finish().ok_or_else(|| too_large(root))?;
-            match stack.last_mut() {
-                Some(parent) => parent.done.push(layout),
-                None => return Ok(layout),
-            }
-        }
-        Err(too_large(root))
+        layout_of_node(root).ok_or_else(|| too_large(root))
     }
 
     /// Return the size of the value in bytes.
@@ -63,6 +50,139 @@ impl S7Layout {
     pub const fn start(&self) -> S7Start {
         self.start
     }
+}
+
+/// One struct member of a type tree with its place in an S7 data block.
+///
+/// The type solves one problem. The type page shows the offset of every
+/// member, and the offset comes from the same rules as the size of the type.
+/// The member holds its names from the root and not a `LeafPath`, because a
+/// `LeafPath` names one scalar and a member can be a struct or an array.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct S7Member {
+    names: Vec<MemberName>,
+    type_id: PlcTypeId,
+    layout: S7Layout,
+    byte: u32,
+    bit: u8,
+}
+
+impl S7Member {
+    /// Return the member names from the root to this member.
+    #[must_use]
+    pub fn names(&self) -> &[MemberName] {
+        &self.names
+    }
+
+    /// Return the path as text, for example `.zone.active`.
+    #[must_use]
+    pub fn path_text(&self) -> String {
+        self.names.iter().map(|name| format!(".{name}")).collect()
+    }
+
+    /// Return the row of the type of the member.
+    #[must_use]
+    pub const fn type_id(&self) -> PlcTypeId {
+        self.type_id
+    }
+
+    /// Return the size and the start class of the member.
+    #[must_use]
+    pub const fn layout(&self) -> S7Layout {
+        self.layout
+    }
+
+    /// Return the byte of the offset.
+    #[must_use]
+    pub const fn byte(&self) -> u32 {
+        self.byte
+    }
+
+    /// Return the bit of the offset, from 0 to 7.
+    #[must_use]
+    pub const fn bit(&self) -> u8 {
+        self.bit
+    }
+}
+
+/// Return one row per struct member of the tree, in the order of the tree.
+///
+/// A nested struct has a row and then the rows of its members. An array is
+/// one row, and its elements have no row. A root that is not a struct has no
+/// member and gives an empty list.
+///
+/// # Errors
+///
+/// Returns `E-PLT-018` when an arithmetic step overflows. The limits of a
+/// resolved tree make this impossible.
+pub fn s7_members(tree: &TypeTree) -> Result<Vec<S7Member>, PlantError> {
+    let root = tree.root();
+    members_of_root(root).ok_or_else(|| too_large(root))
+}
+
+/// One struct on the current path of the member walk.
+struct MemberFrame<'t> {
+    members: std::slice::Iter<'t, (MemberName, TypeNode)>,
+    /// Bit where the next member of this struct starts to look for a place.
+    cursor: u64,
+}
+
+fn members_of_root(root: &TypeNode) -> Option<Vec<S7Member>> {
+    let TypeNode::Struct { members, .. } = root else {
+        return Some(Vec::new());
+    };
+    let mut rows = Vec::new();
+    let mut path: Vec<MemberName> = Vec::new();
+    let mut stack = vec![MemberFrame {
+        members: members.iter(),
+        cursor: 0,
+    }];
+    while let Some(frame) = stack.last_mut() {
+        let Some((name, node)) = frame.members.next() else {
+            stack.pop();
+            path.pop();
+            continue;
+        };
+        let layout = layout_of_node(node)?;
+        let placed = place(frame.cursor, &layout)?;
+        frame.cursor = placed.end;
+        path.push(name.clone());
+        rows.push(S7Member {
+            names: path.clone(),
+            type_id: node_type_id(node),
+            layout,
+            byte: u32::try_from(placed.start.checked_div(BITS_PER_BYTE)?).ok()?,
+            bit: u8::try_from(placed.start.checked_rem(BITS_PER_BYTE)?).ok()?,
+        });
+        if let TypeNode::Struct { members, .. } = node {
+            stack.push(MemberFrame {
+                members: members.iter(),
+                cursor: placed.start,
+            });
+        } else {
+            path.pop();
+        }
+    }
+    Some(rows)
+}
+
+/// Compute the layout of a node and of every node below it.
+///
+/// Returns `None` when an arithmetic step overflows.
+fn layout_of_node(root: &TypeNode) -> Option<S7Layout> {
+    let mut stack = vec![Frame::new(root)];
+    while let Some(frame) = stack.last_mut() {
+        if let Some(child) = frame.children.next() {
+            stack.push(Frame::new(child));
+            continue;
+        }
+        let layout = stack.pop()?.finish()?;
+        match stack.last_mut() {
+            Some(parent) => parent.done.push(layout),
+            None => return Some(layout),
+        }
+    }
+    None
 }
 
 /// One node on the current path of the walk and the layouts of its children.
@@ -122,17 +242,7 @@ fn leaf_start(primitive: Primitive, size_bytes: u32) -> S7Start {
 fn struct_layout(members: &[S7Layout]) -> Option<S7Layout> {
     let mut cursor = 0_u64;
     for member in members {
-        cursor = match member.start {
-            S7Start::Bit => cursor,
-            S7Start::Byte => cursor.checked_next_multiple_of(BITS_PER_BYTE)?,
-            S7Start::Even => cursor.checked_next_multiple_of(BITS_PER_EVEN_BYTES)?,
-        };
-        let bits = u64::from(member.size_bytes).checked_mul(BITS_PER_BYTE)?;
-        let width = match member.start {
-            S7Start::Bit => 1,
-            S7Start::Byte | S7Start::Even => bits,
-        };
-        cursor = cursor.checked_add(width)?;
+        cursor = place(cursor, member)?.end;
     }
     let bytes = cursor
         .checked_next_multiple_of(BITS_PER_EVEN_BYTES)?
@@ -140,6 +250,35 @@ fn struct_layout(members: &[S7Layout]) -> Option<S7Layout> {
     Some(S7Layout {
         size_bytes: u32::try_from(bytes).ok()?,
         start: S7Start::Even,
+    })
+}
+
+/// The bit range that one member takes inside a data block.
+struct Placement {
+    /// First bit of the member, after the alignment of its start class.
+    start: u64,
+    /// First bit after the member.
+    end: u64,
+}
+
+/// Place one member at the cursor. The cursor counts bits.
+///
+/// The step solves one problem. `struct_layout` and `s7_members` share it, so
+/// the alignment rules of S7 exist once. Returns `None` on overflow.
+fn place(cursor: u64, member: &S7Layout) -> Option<Placement> {
+    let start = match member.start {
+        S7Start::Bit => cursor,
+        S7Start::Byte => cursor.checked_next_multiple_of(BITS_PER_BYTE)?,
+        S7Start::Even => cursor.checked_next_multiple_of(BITS_PER_EVEN_BYTES)?,
+    };
+    let bits = u64::from(member.size_bytes).checked_mul(BITS_PER_BYTE)?;
+    let width = match member.start {
+        S7Start::Bit => 1,
+        S7Start::Byte | S7Start::Even => bits,
+    };
+    Some(Placement {
+        start,
+        end: start.checked_add(width)?,
     })
 }
 
@@ -368,5 +507,170 @@ mod tests {
             assert_eq!(layout.size_bytes(), case.size_bytes, "{}", case.name);
             assert_eq!(layout.start(), case.start, "{}", case.name);
         }
+    }
+
+    const ST_ZONE: u128 = 20;
+    const INT_RAMPS: u128 = 21;
+    const SIXTEEN_BOOLS: u128 = 22;
+
+    /// Resolve `root` over the primitives and the rows of the two spec structs.
+    fn members_of(root: u128, extra: Vec<PlcType>) -> Vec<S7Member> {
+        let mut all = vec![
+            primitive_row(INT, Primitive::Int),
+            primitive_row(REAL, Primitive::Real),
+            primitive_row(BOOL, Primitive::Bool),
+            struct_row(
+                ST_ZONE,
+                "ST_Zone",
+                &[
+                    ("active", BOOL),
+                    ("ready", BOOL),
+                    ("setpoint", REAL),
+                    ("count", INT),
+                ],
+            ),
+            array_row(INT_RAMPS, INT, &[(1, 3)]),
+        ];
+        all.extend(extra);
+        let tree = TypeTree::resolve(id(root), &types(all)).expect("fixture tree resolves");
+        s7_members(&tree).expect("members of the fixture")
+    }
+
+    fn rows(members: &[S7Member]) -> Vec<(String, u32, u8)> {
+        members
+            .iter()
+            .map(|member| (member.path_text(), member.byte(), member.bit()))
+            .collect()
+    }
+
+    fn row(path: &str, byte: u32, bit: u8) -> (String, u32, u8) {
+        (path.to_owned(), byte, bit)
+    }
+
+    #[test]
+    fn s7_members_golden_struct_with_two_bools() {
+        let members = members_of(ST_ZONE, Vec::new());
+        assert_eq!(
+            rows(&members),
+            vec![
+                row(".active", 0, 0),
+                row(".ready", 0, 1),
+                row(".setpoint", 2, 0),
+                row(".count", 6, 0),
+            ]
+        );
+        let tree = TypeTree::resolve(
+            id(ST_ZONE),
+            &types(vec![
+                primitive_row(INT, Primitive::Int),
+                primitive_row(REAL, Primitive::Real),
+                primitive_row(BOOL, Primitive::Bool),
+                struct_row(
+                    ST_ZONE,
+                    "ST_Zone",
+                    &[
+                        ("active", BOOL),
+                        ("ready", BOOL),
+                        ("setpoint", REAL),
+                        ("count", INT),
+                    ],
+                ),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(S7Layout::of(&tree).unwrap().size_bytes(), 8);
+    }
+
+    #[test]
+    fn s7_members_golden_nested_struct_and_array() {
+        let line = struct_row(ROOT, "ST_Line", &[("zone", ST_ZONE), ("ramps", INT_RAMPS)]);
+        let members = members_of(ROOT, vec![line]);
+        assert_eq!(
+            rows(&members),
+            vec![
+                row(".zone", 0, 0),
+                row(".zone.active", 0, 0),
+                row(".zone.ready", 0, 1),
+                row(".zone.setpoint", 2, 0),
+                row(".zone.count", 6, 0),
+                row(".ramps", 8, 0),
+            ]
+        );
+        let names: Vec<&str> = members
+            .iter()
+            .filter_map(|member| member.names().last().map(MemberName::as_str))
+            .collect();
+        assert_eq!(
+            names,
+            ["zone", "active", "ready", "setpoint", "count", "ramps"]
+        );
+    }
+
+    #[test]
+    fn s7_members_golden_nested_struct_after_a_bool_starts_at_the_even_byte() {
+        // `flag` takes bit 0.0. `zone` is a struct, so it starts at the even byte 2.0.
+        // The members of `ST_Zone` keep their offsets inside the struct:
+        // `active` +0.0, `ready` +0.1, `setpoint` +2.0, `count` +6.0.
+        // The child frame starts at the start of `zone`, so each row adds 2 bytes.
+        let pad = struct_row(ROOT, "ST_Pad", &[("flag", BOOL), ("zone", ST_ZONE)]);
+        let members = members_of(ROOT, vec![pad]);
+        assert_eq!(
+            rows(&members),
+            vec![
+                row(".flag", 0, 0),
+                row(".zone", 2, 0),
+                row(".zone.active", 2, 0),
+                row(".zone.ready", 2, 1),
+                row(".zone.setpoint", 4, 0),
+                row(".zone.count", 8, 0),
+            ]
+        );
+    }
+
+    #[test]
+    fn s7_members_golden_nested_struct_after_an_int_keeps_its_children_inside_it() {
+        // Case of a shrunk property test failure. `m0` is an INT at +0.0 with 2 bytes.
+        // `m1` is a struct, so it starts at the even byte 2.0 and takes 2 bytes.
+        // Its only member `m0` is an INT at the start of `m1`, so byte 2.
+        // The child lies in the bytes 2 to 3 of its parent. The root has 4 bytes.
+        const ST_INNER: u128 = 30;
+        let inner = struct_row(ST_INNER, "ST_Inner", &[("m0", INT)]);
+        let outer = struct_row(ROOT, "ST_Outer", &[("m0", INT), ("m1", ST_INNER)]);
+        let members = members_of(ROOT, vec![inner, outer]);
+        assert_eq!(
+            rows(&members),
+            vec![row(".m0", 0, 0), row(".m1", 2, 0), row(".m1.m0", 2, 0)]
+        );
+        let sizes: Vec<(u32, S7Start)> = members
+            .iter()
+            .map(|member| (member.layout().size_bytes(), member.layout().start()))
+            .collect();
+        assert_eq!(
+            sizes,
+            vec![(2, S7Start::Even), (2, S7Start::Even), (2, S7Start::Even)]
+        );
+    }
+
+    #[test]
+    fn s7_members_golden_sixteen_bools_take_two_bytes() {
+        let names: Vec<String> = (0..16).map(|n| format!("b{n}")).collect();
+        let pairs: Vec<(&str, u128)> = names.iter().map(|name| (name.as_str(), BOOL)).collect();
+        let sixteen = struct_row(SIXTEEN_BOOLS, "ST_Sixteen", &pairs);
+        let members = members_of(SIXTEEN_BOOLS, vec![sixteen.clone()]);
+        assert_eq!(members.len(), 16);
+        assert_eq!(rows(&members).last(), Some(&row(".b15", 1, 7)));
+        let tree = TypeTree::resolve(
+            id(SIXTEEN_BOOLS),
+            &types(vec![primitive_row(BOOL, Primitive::Bool), sixteen]),
+        )
+        .unwrap();
+        assert_eq!(S7Layout::of(&tree).unwrap().size_bytes(), 2);
+    }
+
+    #[test]
+    fn s7_members_of_a_non_struct_root_is_empty() {
+        let tree =
+            TypeTree::resolve(id(INT), &types(vec![primitive_row(INT, Primitive::Int)])).unwrap();
+        assert!(s7_members(&tree).unwrap().is_empty());
     }
 }

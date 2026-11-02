@@ -27,7 +27,7 @@ use super::parameter_table::ParameterTable;
 use super::path_version;
 use super::rebind_form::{RebindForm, posted_form, shows_forms};
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
-use crate::pages::draft_reply::{conflict, domain_line, refused, success};
+use crate::pages::draft_reply::{conflict, domain_line, refused, success, with_change_number};
 use crate::pages::parameters::fields::{FieldSet, SentFields, read_form};
 use crate::pages::path_values::page as read_page;
 use crate::pages::render::{render, see_other_path};
@@ -279,7 +279,7 @@ async fn rebound(
         t,
         form: None,
         outdated: version_list(request, &view, t)?.out_of_band(),
-        toast: t.with_arg("rebind-done", "to", to_text),
+        toast: with_change_number(t, &t.with_arg("rebind-done", "to", to_text), output),
     };
     let Html(mut body) = render(&TableFragment { t, table }, request.request_id())?;
     body.push_str(&render(&fragment, request.request_id())?.0);

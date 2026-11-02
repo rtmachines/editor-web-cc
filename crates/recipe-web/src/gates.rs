@@ -21,6 +21,7 @@ impl Access {
     fn open_while_password_change(self) -> bool {
         match self {
             Self::Static | Self::Lang => true,
+            Self::Authenticated => false,
             Self::Operation(operation) => matches!(
                 operation,
                 Operation::GetOwnPasswordForm | Operation::ChangeOwnPassword | Operation::Logout
@@ -31,7 +32,7 @@ impl Access {
     /// Return true when the route still runs in read-only mode (Assumption A24).
     fn runs_in_read_only(self) -> bool {
         match self {
-            Self::Static | Self::Lang => true,
+            Self::Static | Self::Lang | Self::Authenticated => true,
             Self::Operation(operation) => operation.runs_in_read_only(),
         }
     }
@@ -69,3 +70,6 @@ pub(crate) async fn gates(
     }
     Ok(next.run(request).await)
 }
+
+#[cfg(test)]
+mod tests;

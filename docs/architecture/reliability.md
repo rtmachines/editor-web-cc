@@ -956,6 +956,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `page.audit` | 100 rows of `ListAuditEntries` (ADR-0051) | api.md 2.9 |
 | `page.history` | 100 rows of `GetRecipeHistory` (ADR-0051) | api.md 2.9 |
 | `page.security_events` | 100 rows of `ListSecurityEvents` (ADR-0051) | api.md 2.9 |
+| `table.value_chars` | 64 characters of the text of one value in a cell of the parameter table. A longer text ends with `…` (ADR-0108) | api.md 2.5, api.md 2.6, design-system.md 10.4 |
 | `form.array_chunk` | 100 elements per group of an array in the leaf grid (ADR-0039) | design-system.md 10.8 |
 | `form.rebind_leaves` | 16 384 new member leaves in the rebind forms of one version page (ADR-0044) | api.md 2.5 |
 | `i18n.translation_langs` | `pl`. The list of language tags of the translation rows (ADR-0012, ADR-0043) | 7.12, api.md 2.6 |

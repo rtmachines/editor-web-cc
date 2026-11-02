@@ -37,6 +37,9 @@ use crate::{lang, panic, pipeline, timeout};
 pub enum Access {
     /// The route runs this operation. The use case checks the permission first.
     Operation(Operation),
+    /// The route has no use case and no permission. It needs a valid session and works in
+    /// read-only mode, like the compare route (ADR-0108 (e)).
+    Authenticated,
     /// The route serves a static file. It has no operation and needs no session.
     Static,
     /// `POST /lang`. The route has no use case. It works without a session and in read-only mode.

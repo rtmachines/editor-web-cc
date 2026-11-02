@@ -29,6 +29,7 @@ impl Access {
     /// Return what the route needs from the session cookie.
     fn session_need(self) -> SessionNeed {
         match self {
+            Self::Authenticated => SessionNeed::Required,
             Self::Static => SessionNeed::Ignore,
             Self::Lang => SessionNeed::Optional,
             Self::Operation(operation) => match operation.requirement() {

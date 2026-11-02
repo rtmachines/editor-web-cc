@@ -20,12 +20,12 @@ use super::form_view::{DefinitionTexts, Shown};
 use super::prepare::{Prepared, Ready, prepare};
 use super::reply::{Ctx, Target, failed, form_fragment, form_page, load};
 use crate::error::WebError;
-use crate::pages::draft_reply::success;
+use crate::pages::draft_reply::{success, with_change_number};
 use crate::pages::path_values::{query_values, unit_path};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::versions::parameter_table::{
-    ParameterRowFragment, ParameterRowView, has_address,
+    ParameterRowFragment, ParameterRowView, ValueView, has_address,
 };
 use crate::pages::versions::path_version;
 use crate::state::WebState;
@@ -94,11 +94,13 @@ fn added(
         return see_other_path(&base, request.request_id(), []);
     }
     let t = ctx.texts();
+    let type_text = definition.type_expr.to_string();
     let row = ParameterRowView {
         href: format!("{base}/parameters/{}", output.key),
         tag: definition.tag.to_string(),
         name: definition.name_en.to_string(),
-        type_text: definition.type_expr.to_string(),
+        value: ValueView::new(t, &type_text, output.value_text.as_deref()),
+        type_text,
         unit: definition.unit_path.to_string(),
         address: definition
             .s7_address
@@ -111,7 +113,11 @@ fn added(
         t,
         row,
         has_address: has_address(form.machine.platform()),
-        message: t.with_arg("parameter-added", "tag", &definition.tag),
+        message: with_change_number(
+            t,
+            &t.with_arg("parameter-added", "tag", &definition.tag),
+            &output.draft,
+        ),
     };
     let body = render(&fragment, request.request_id())?;
     success(&output.draft, body, request.request_id())

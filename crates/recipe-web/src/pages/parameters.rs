@@ -186,7 +186,7 @@ mod remove_tests;
 #[cfg(test)]
 pub(crate) mod route_tests;
 #[cfg(test)]
-mod test_kit;
+pub(crate) mod test_kit;
 #[cfg(test)]
 mod translation_tests;
 #[cfg(test)]

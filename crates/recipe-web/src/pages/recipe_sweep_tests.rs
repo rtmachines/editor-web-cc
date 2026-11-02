@@ -431,6 +431,10 @@ async fn admin_token() -> String {
     session.csrf
 }
 
+/// The compare route answers `303` and shows no page, so the sweep of pages leaves it out
+/// (`compare_route_tests` covers it).
+const REDIRECT_ONLY_ROUTE: &str = "/recipes/{ref}/compare";
+
 #[test]
 fn recipe_sweep_the_pages_are_every_get_page_of_the_three_areas() {
     let mut rows = recipes::rows();
@@ -438,7 +442,7 @@ fn recipe_sweep_the_pages_are_every_get_page_of_the_three_areas() {
     rows.extend(parameters::rows());
     let routes: BTreeSet<&str> = rows
         .iter()
-        .filter(|row| row.method == Method::GET)
+        .filter(|row| row.method == Method::GET && row.path != REDIRECT_ONLY_ROUTE)
         .map(|row| row.path)
         .collect();
     let listed: BTreeSet<&str> = sweep_pages()

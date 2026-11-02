@@ -1,18 +1,21 @@
-//! SQL of `parameter_page`, `unit_counts`, and `parameter_by_key` of `RecipeReads` (design D5,
-//! `data-model.md` sections 3.2, 3.12 to 3.14).
+//! SQL of `parameter_page`, `parameter_values`, `unit_counts`, and `parameter_by_key` of
+//! `RecipeReads` (design D5, `data-model.md` sections 3.2, 3.12 to 3.14).
 //!
-//! The page and the counts run one statement each. The read by key runs three set statements,
+//! The page, the values, and the counts run one statement each. The read by key runs three set statements,
 //! as `parameter_rows::of_version` does, and reuses its row mapping. The unit path orders by its
 //! numbers, as `UnitPath::cmp` does, so `U1.2` comes before `U1.10`. `COLLATE "C"` orders the
 //! tag by bytes, whatever the collation of the database is.
+
+use std::collections::BTreeMap;
 
 use recipe_app::error::StorageError;
 use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_domain::plant::{PlcTypeId, S7Address, UnitId, UnitPath};
 use recipe_domain::recipe::{
-    Ordinal, ParameterKey, ParameterTag, RecipeVersionId, StoredParameter,
+    Ordinal, ParameterKey, ParameterTag, RecipeVersionId, StoredParameter, StoredValue,
 };
 use recipe_domain::text::Text;
+use serde_json::Value;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -25,13 +28,17 @@ use crate::error::{corrupt, map_error};
 
 /// One page of the parameters of the version `$1`. The unit `$2` is optional. The order is the
 /// numbers of the unit path, the ordinal, and the tag.
-const SELECT_PAGE: &str = "\
+pub(crate) const SELECT_PAGE: &str = "\
 SELECT p.parameter_key, p.unit_id, u.path, p.tag, p.name_en, p.ordinal, p.plc_type_id, \
     p.s7_address \
 FROM parameter p JOIN unit u ON u.id = p.unit_id \
 WHERE p.recipe_version_id = $1 AND ($2::uuid IS NULL OR p.unit_id = $2) \
 ORDER BY string_to_array(substr(u.path, 2), '.')::integer[], p.ordinal, p.tag COLLATE \"C\" \
 OFFSET $3 LIMIT $4";
+
+/// The key and the stored value of the parameters of the version `$1` whose key is in the list
+/// `$2`. The statement reads no other column, no limit row, and no translation row.
+const SELECT_VALUES: &str = "SELECT parameter_key, value FROM parameter WHERE recipe_version_id = $1 AND parameter_key = ANY($2) ORDER BY parameter_key";
 
 /// The count of the parameters of the version `$1` in each unit, in the order of the path.
 const SELECT_COUNTS: &str = "\
@@ -63,6 +70,12 @@ struct PageRecord {
     ordinal: i32,
     plc_type_id: Uuid,
     s7_address: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ValueRecord {
+    parameter_key: Uuid,
+    value: Value,
 }
 
 #[derive(sqlx::FromRow)]
@@ -128,6 +141,33 @@ pub(super) async fn page(
     records.into_iter().map(table_row).collect()
 }
 
+/// Read the stored value of each parameter of `version` whose key is in `keys`.
+///
+/// A key that the version does not hold gives no entry. The read has no row limit of its own.
+/// The caller bounds `keys` (ADR-0108 (b)).
+pub(super) async fn values(
+    connection: &mut PgConnection,
+    version: RecipeVersionId,
+    keys: &[ParameterKey],
+) -> Result<BTreeMap<ParameterKey, StoredValue>, StorageError> {
+    let keys: Vec<Uuid> = keys.iter().map(|key| *key.as_uuid()).collect();
+    let records = sqlx::query_as::<_, ValueRecord>(SELECT_VALUES)
+        .bind(*version.as_uuid())
+        .bind(keys)
+        .fetch_all(connection)
+        .await
+        .map_err(map_error)?;
+    Ok(records
+        .into_iter()
+        .map(|record| {
+            (
+                ParameterKey::from(record.parameter_key),
+                StoredValue::from(record.value),
+            )
+        })
+        .collect())
+}
+
 /// Count the parameters of `version` in each unit that holds one.
 pub(super) async fn counts(
     connection: &mut PgConnection,
@@ -188,3 +228,6 @@ pub(super) async fn by_key(
         None => Ok(None),
     }
 }
+
+#[cfg(test)]
+mod tests;

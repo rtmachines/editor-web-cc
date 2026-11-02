@@ -1,8 +1,12 @@
 //! Contract cases of `parameter_page`, `unit_counts`, and `parameter_by_key` (design D5).
 
 use recipe_app::ports::{ParameterRow, UnitCount};
+use recipe_db::statements;
 use recipe_domain::plant::UnitId;
+use recipe_domain::recipe::StoredValue;
 use recipe_domain::recipe::{ParameterKey, RecipeVersionId};
+use serde_json::json;
+use sqlx::{Column as _, Executor as _};
 use uuid::Uuid;
 
 use super::fixtures::{WHOLE, begin_read, create_named, in_unit, tree_plant};
@@ -11,6 +15,7 @@ use crate::contract::recipe_seed::{
     describe, length, parameter, plant, range, seed, translation, version_id,
 };
 use crate::contract::seed::{U1_1, U1_1_2, U1_2, U1_10, U2, path, tree_unit_id};
+use crate::support::{Role, TestDatabase};
 
 /// Read one page of the parameters in a transaction that nothing commits.
 async fn page(
@@ -187,6 +192,81 @@ async fn parameter_by_key_gives_the_parameter_with_its_limits_and_translations(h
     assert!(other_version.is_none());
 }
 
+async fn parameter_values_give_the_stored_value_of_each_requested_key_only(h: &dyn Harness) {
+    let plant = plant(h, 34, "M34").await;
+    let recipe = create_named(h, &plant, 34, "REF-34", "Recipe").await;
+    let version = recipe.versions()[0].id();
+    let mut first = parameter(&plant, 1, "FIRST");
+    first.value = StoredValue::from(json!("12.5"));
+    let mut second = parameter(&plant, 2, "SECOND");
+    second.value = StoredValue::from(json!("-3"));
+    let mut third = parameter(&plant, 3, "THIRD");
+    third.value = StoredValue::from(json!("99"));
+    for stored in [&first, &second, &third] {
+        seed(h, version, stored).await;
+    }
+    let missing = ParameterKey::from(Uuid::from_u128(0xDEAD));
+    let mut tx = begin_read(h).await;
+
+    let read = tx
+        .recipe_reads()
+        .parameter_values(version, &[second.key, first.key, missing])
+        .await
+        .unwrap();
+    let none = tx
+        .recipe_reads()
+        .parameter_values(version, &[])
+        .await
+        .unwrap();
+    let other_version = tx
+        .recipe_reads()
+        .parameter_values(version_id(99), &[first.key])
+        .await
+        .unwrap();
+
+    assert_eq!(read.len(), 2, "{read:?}");
+    assert_eq!(read.get(&first.key), Some(&first.value));
+    assert_eq!(read.get(&second.key), Some(&second.value));
+    assert!(!read.contains_key(&third.key), "{read:?}");
+    assert!(!read.contains_key(&missing), "{read:?}");
+    assert!(none.is_empty(), "{none:?}");
+    assert!(other_version.is_empty(), "{other_version:?}");
+}
+
+/// The output columns of the page statement. `ParameterRow` has no value field.
+const PAGE_COLUMNS: [&str; 8] = [
+    "parameter_key",
+    "unit_id",
+    "path",
+    "tag",
+    "name_en",
+    "ordinal",
+    "plc_type_id",
+    "s7_address",
+];
+
+/// `GetVersion` reads the page of a draft with no row limit (design D1 step 1). A column that
+/// `ParameterRow` ignores, such as `value`, still travels from the database and can weigh 1 MiB
+/// for each row. `FromRow` ignores extra columns, so only the real column list shows the fault.
+/// A `SELECT p.*` gives the column `value` and fails this case.
+#[tokio::test]
+async fn postgres_only_the_page_statement_returns_exactly_the_row_columns() {
+    let database = TestDatabase::create().await;
+    let mut connection = database.connect(Role::App).await;
+
+    let described = (&mut connection)
+        .describe(statements::PARAMETER_PAGE)
+        .await
+        .unwrap();
+
+    let columns: Vec<&str> = described
+        .columns()
+        .iter()
+        .map(|column| column.name())
+        .collect();
+    assert_eq!(columns, PAGE_COLUMNS, "{}", statements::PARAMETER_PAGE);
+}
+
 contract_case!(
     parameter_rows_come_in_the_order_of_unit_numbers_ordinal_and_tag,
     parameter_rows_come_in_the_order_of_unit_numbers_ordinal_and_tag_memory,
@@ -206,4 +286,9 @@ contract_case!(
     parameter_by_key_gives_the_parameter_with_its_limits_and_translations,
     parameter_by_key_gives_the_parameter_with_its_limits_and_translations_memory,
     parameter_by_key_gives_the_parameter_with_its_limits_and_translations_postgres
+);
+contract_case!(
+    parameter_values_give_the_stored_value_of_each_requested_key_only,
+    parameter_values_give_the_stored_value_of_each_requested_key_only_memory,
+    parameter_values_give_the_stored_value_of_each_requested_key_only_postgres
 );

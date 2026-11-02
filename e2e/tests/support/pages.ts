@@ -19,6 +19,12 @@ export interface SweepPage {
 const MACHINE = 'M7';
 const RECIPE = 'R-500';
 const UDT = 'ST_Zone';
+/** The S7 struct with BOOL, REAL, INT, and nested members. Its type page shows the S7 layout. */
+const S7_STRUCT = 'ST_Panel';
+/** The recipe with one approved version that holds a long `STRING` value. */
+const NOTE_RECIPE = 'R-501';
+/** The value of 200 characters is longer than the cut of the Value column (`table.value_chars`). */
+const LONG_NOTE = 'long-note-'.repeat(20);
 
 /** The values that the seed step finds at run time. */
 interface Found {
@@ -63,12 +69,14 @@ export const LOGGED_IN_PAGES: readonly SweepPage[] = [
   page('machines', 'type form', `/machines/${MACHINE}/types/new`),
   page('machines', 'type page', `/machines/${MACHINE}/types/${UDT}`),
   page('machines', 'type usage page', `/machines/${MACHINE}/types/${UDT}/usage`),
+  page('machines', 'type page with S7 layout', `/machines/${MACHINE}/types/${S7_STRUCT}`),
   page('recipes', 'recipe list', '/recipes'),
   page('recipes', 'recipe form', '/recipes/new'),
   page('recipes', 'recipe page', `/recipes/${RECIPE}`),
   page('recipes', 'version list', `/recipes/${RECIPE}/versions`),
   page('recipes', 'version form', `/recipes/${RECIPE}/versions/new`),
   page('recipes', 'approved version page', `/recipes/${RECIPE}/versions/1`),
+  page('recipes', 'approved version page with a long value', `/recipes/${NOTE_RECIPE}/versions/1`),
   page('recipes', 'draft version page', `/recipes/${RECIPE}/versions/2`, true),
   page('recipes', 'approval preview', `/recipes/${RECIPE}/versions/2/approve`),
   page('recipes', 'version diff', `/recipes/${RECIPE}/versions/2/diff/1`),
@@ -168,7 +176,19 @@ export async function seedSweepData(browser: Browser, baseURL: string, password:
       'members[0].name': 'hold',
       'members[0].type': 'INT',
     });
+    await post(admin, `/machines/${MACHINE}/types`, {
+      name: S7_STRUCT,
+      'members[0].name': 'active',
+      'members[0].type': 'BOOL',
+      'members[1].name': 'ready',
+      'members[1].type': 'BOOL',
+      'members[2].name': 'setpoint',
+      'members[2].type': 'REAL',
+      'members[3].name': 'zone',
+      'members[3].type': `${UDT}@1`,
+    });
     await seedRecipe(admin, engineer);
+    await seedNoteRecipe(admin, engineer);
     found = {
       parameterPath: await findParameterPath(engineer),
       adminCookies: (await adminContext.storageState()).cookies,
@@ -211,6 +231,33 @@ async function seedRecipe(admin: Poster, engineer: Poster): Promise<void> {
   await post(engineer, `${path}/value`, {
     row_version: await rowVersionOf(engineer, `${versions}/2/parameters/new`),
     value: '1300',
+  });
+}
+
+/** Seeds a recipe whose only version is approved and holds a `STRING` value of 200 characters. */
+async function seedNoteRecipe(admin: Poster, engineer: Poster): Promise<void> {
+  const versions = `/recipes/${NOTE_RECIPE}/versions`;
+  await post(engineer, '/recipes', {
+    machine_code: MACHINE,
+    reference_number: NOTE_RECIPE,
+    name: 'Long value recipe',
+    change_note: 'First version',
+  });
+  await post(engineer, `${versions}/1/parameters`, {
+    row_version: await rowVersionOf(engineer, `${versions}/1/parameters/new`),
+    unit_path: 'U1',
+    tag: 'NOTE',
+    name_en: 'Note',
+    description_en: 'Long text',
+    type: 'STRING(254)',
+    value_type: 'STRING(254)',
+    s7_address: 'DB3.DBB0',
+    ordinal: '0',
+    value: LONG_NOTE,
+  });
+  await post(admin, `${versions}/1/approve`, {
+    row_version: await rowVersionOf(admin, `${versions}/1/approve`),
+    allow_outdated: 'false',
   });
 }
 
