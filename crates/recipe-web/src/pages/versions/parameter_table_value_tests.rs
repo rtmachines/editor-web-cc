@@ -342,11 +342,15 @@ async fn parameter_table_answer_row_of_a_new_parameter_shows_the_canonical_text(
 async fn parameter_table_with_a_stored_value_that_does_not_match_its_type_gives_db_008() {
     let world = recipe_world();
     // The stored text of a `STRING` is a JSON string. It does not fit the type `INT`.
+    // The request id is a hex UUID. The marker has letters outside hex, so the id never matches it.
+    const LEAK_MARKER: &str = "zqx-leak-marker";
     seed_string_254(&world);
     let tree = tree_of(&world, PlcTypeId::from(STRING_254_ID));
     let seed = Seed {
         type_id: seed_type_id(Primitive::Int, None).unwrap(),
-        value: ParameterValue::parse("\"abc\"", &tree).unwrap().to_stored(),
+        value: ParameterValue::parse(&format!("\"{LEAK_MARKER}\""), &tree)
+            .unwrap()
+            .to_stored(),
     };
     seed_with(
         &world,
@@ -361,7 +365,7 @@ async fn parameter_table_with_a_stored_value_that_does_not_match_its_type_gives_
         "E-DB-008",
         "version page",
     );
-    assert!(!reply.body.contains("abc"), "{}", reply.body);
+    assert!(!reply.body.contains(LEAK_MARKER), "{}", reply.body);
 }
 
 #[tokio::test]
