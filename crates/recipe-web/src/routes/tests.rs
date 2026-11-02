@@ -251,11 +251,14 @@ async fn endpoint_role_each_route_answers_each_principal() {
 
 // --- Route coverage (task 6.9, design D19) -------------------------------------------------------
 
-/// The two export routes of `api.md` section 2.7. Task 7.4 writes their rows of the six principals
+/// The export routes of `api.md` section 2.7. Task 7.4 writes their rows of the six principals
 /// in its own file, so the matrix does not hold them (design D12).
-const EXPORT_ROUTES: [&str; 2] = [
+const EXPORT_ROUTES: [&str; 5] = [
     "/export/v1/recipes/{ref}/approved",
     "/export/v1/recipes/{ref}/versions/{n}",
+    "/export/v1/machines/{code}/recipes",
+    "/export/v1/machines/{code}/recipes/{ref}/approved",
+    "/export/v2/machines/{code}/recipes/{ref}/approved/units/{path}",
 ];
 
 /// The routes of the matrix, the export routes, and the static file, as sorted pairs of method
@@ -330,6 +333,7 @@ fn routes_table_collects_the_rows_of_each_area() {
         ("audit", pages::audit::rows()),
         ("security_events", pages::security_events::rows()),
         ("export", pages::export::rows()),
+        ("export_api", pages::export_api::rows()),
     ];
     for (area, rows) in &areas {
         for key in keys_of(rows) {

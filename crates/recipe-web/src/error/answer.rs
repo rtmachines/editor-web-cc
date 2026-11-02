@@ -94,7 +94,8 @@ fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError, ctx: &Er
         IdentityError::DuplicateLogin { login }
         | IdentityError::LastAdministrator { login }
         | IdentityError::UserAlreadyActive { login }
-        | IdentityError::UserAlreadyInactive { login } => args.set("login", login.to_string()),
+        | IdentityError::UserAlreadyInactive { login }
+        | IdentityError::TechnicalRoleChange { login } => args.set("login", login.to_string()),
         IdentityError::PasswordPolicy { reason } => args.set(
             "reason",
             password_reason_text(ctx.state.bundles(), ctx.lang, *reason),
@@ -103,11 +104,20 @@ fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError, ctx: &Er
     }
 }
 
-/// Add the arguments of the export errors: `reference` and `number` (design D7 (d)).
+/// Add the arguments of the export errors: `reference`, `number`, and `path` (design D7 (d)).
 fn export_args(args: &mut FluentArgs<'static>, error: &ExportError) {
     match error {
         ExportError::NoApprovedVersion { reference } => {
             args.set("reference", reference.to_string());
+        }
+        ExportError::EmptyScope {
+            reference,
+            number,
+            path,
+        } => {
+            args.set("reference", reference.to_string());
+            args.set("number", number.to_string());
+            args.set("path", path.to_string());
         }
         ExportError::ContentHashMismatch { reference, number }
         | ExportError::VersionNotExportable { reference, number } => {

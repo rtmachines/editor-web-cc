@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use recipe_domain::identity::{Login, ONE_TIME_BYTES, OneTimePassword, PasswordHash};
+use recipe_domain::identity::{Login, ONE_TIME_BYTES, OneTimePassword, PasswordHash, Role};
 
 use super::IdentityContext;
 use super::issue::random_bytes;
@@ -18,6 +18,7 @@ const REDACTED: &str = "[redacted]";
 #[derive(Clone)]
 pub struct IssuedPassword {
     login: Login,
+    role: Role,
     password: OneTimePassword,
 }
 
@@ -28,15 +29,27 @@ impl IssuedPassword {
         &self.login
     }
 
+    /// Return the role of the user that the password belongs to.
+    ///
+    /// The page needs it to tell a person from a technical account (ADR-0109 (a)).
+    #[must_use]
+    pub const fn role(&self) -> Role {
+        self.role
+    }
+
     /// Return the one-time password. The caller shows it once.
     #[must_use]
     pub const fn password(&self) -> &OneTimePassword {
         &self.password
     }
 
-    /// Pair a login with the password that the use case hashed.
-    pub(super) const fn new(login: Login, password: OneTimePassword) -> Self {
-        Self { login, password }
+    /// Pair a login and its role with the password that the use case hashed.
+    pub(super) const fn new(login: Login, role: Role, password: OneTimePassword) -> Self {
+        Self {
+            login,
+            role,
+            password,
+        }
     }
 }
 
@@ -44,6 +57,7 @@ impl fmt::Debug for IssuedPassword {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IssuedPassword")
             .field("login", &self.login)
+            .field("role", &self.role)
             .field("password", &REDACTED)
             .finish()
     }

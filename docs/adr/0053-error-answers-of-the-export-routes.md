@@ -1,6 +1,6 @@
 # ADR-0053: Error answers of the export routes
 
-Status: Accepted. Amended by ADR-0057 (the text answer of the backstop panic layer is the one exception to (a))
+Status: Accepted. Amended by ADR-0057 (the text answer of the backstop panic layer is the one exception to (a)). Amended by ADR-0109 (items (a) and (d): the prefix `/export/`, a `401` answer without a redirect on the Basic routes)
 Date: 2026-10-22
 Deciders: project owner
 

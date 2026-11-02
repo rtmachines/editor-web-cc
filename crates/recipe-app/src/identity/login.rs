@@ -11,10 +11,10 @@ use recipe_domain::identity::{
 };
 use serde_json::json;
 
-use super::IdentityContext;
 use super::issue::IssuedSession;
 use super::no_session::require_no_session;
 use super::throttle::{Gate, Requester, begin_attempt, reject_throttled};
+use super::{HashPermit, IdentityContext};
 use crate::auth::{CurrentUser, Operation, RequestMeta};
 use crate::context::{UseCase, audit_context};
 use crate::error::AppError;
@@ -135,27 +135,11 @@ impl Login {
                 return reject_throttled(&self.ctx, &requester, &login, retry_after).await;
             }
         };
-        let stored = self.read_user(&login).await?;
-        let hash = stored
-            .as_ref()
-            .filter(|row| row.is_active)
-            .map(|row| row.password_hash.clone());
-        let (matched, permit) = permit.verify(password, hash).await?;
+        let (stored, matched, permit) = check_password(&self.ctx, permit, &login, password).await?;
         drop(permit);
         let user = self.judge(&requester, &login, stored, matched).await?;
         self.grant(meta, &requester, user, attempt, old_session)
             .await
-    }
-
-    /// Read the user in a read-only transaction and end that transaction.
-    ///
-    /// A typed login outside the grammar of `Login` counts as unknown (design D6).
-    async fn read_user(&self, typed: &TypedLogin) -> Result<Option<UserRow>, AppError> {
-        let Ok(login) = UserLogin::parse(typed.as_str()) else {
-            return Ok(None);
-        };
-        let mut tx = self.ctx.app.uow.begin(Isolation::ReadOnly).await?;
-        Ok(tx.users().find_by_login(&login).await?)
     }
 
     /// Return the active user whose password matched. Else write the event and return the error.
@@ -189,6 +173,16 @@ impl Login {
         }
         if !matched {
             let event = login_failed(requester, LoginSubject::User(row.id));
+            return self.refuse(event, changed_user()).await;
+        }
+        if !row.role.is_person() {
+            // The hash check ran in full, so the time does not show the role (ADR-0109 (c)).
+            let event = SecurityEvent::login_failed_technical_account(
+                row.id,
+                requester.request_id,
+                requester.client_ip,
+                requester.user_agent.clone(),
+            );
             return self.refuse(event, changed_user()).await;
         }
         Ok(row)
@@ -267,8 +261,45 @@ impl Login {
     }
 }
 
+/// Read the user in a read-only transaction and end that transaction.
+///
+/// A typed login outside the grammar of `Login` counts as unknown (design D6).
+async fn read_user(ctx: &IdentityContext, typed: &TypedLogin) -> Result<Option<UserRow>, AppError> {
+    let Ok(login) = UserLogin::parse(typed.as_str()) else {
+        return Ok(None);
+    };
+    let mut tx = ctx.app.uow.begin(Isolation::ReadOnly).await?;
+    Ok(tx.users().find_by_login(&login).await?)
+}
+
+/// Read the user and check the password in `spawn_blocking`, with no transaction open.
+///
+/// The function solves one problem: `Login` and the Basic check must do the same hash work for
+/// every outcome (A42). An unknown or inactive user gets the dummy hash, so the verifier runs
+/// once with the same parameters in every case. The function returns the row, the answer of the
+/// check, and the permit.
+///
+/// # Errors
+///
+/// Returns the storage error when the read fails. Returns `TaskFailed` (`E-WEB-011`) when the
+/// blocking task fails.
+pub(super) async fn check_password(
+    ctx: &IdentityContext,
+    permit: HashPermit,
+    typed: &TypedLogin,
+    password: Password,
+) -> Result<(Option<UserRow>, bool, HashPermit), AppError> {
+    let stored = read_user(ctx, typed).await?;
+    let hash = stored
+        .as_ref()
+        .filter(|row| row.is_active)
+        .map(|row| row.password_hash.clone());
+    let (matched, permit) = permit.verify(password, hash).await?;
+    Ok((stored, matched, permit))
+}
+
 /// Build the event `login_failed` of a request.
-fn login_failed(requester: &Requester, subject: LoginSubject) -> SecurityEvent {
+pub(super) fn login_failed(requester: &Requester, subject: LoginSubject) -> SecurityEvent {
     SecurityEvent::login_failed(
         subject,
         requester.request_id,

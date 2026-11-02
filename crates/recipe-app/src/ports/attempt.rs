@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use recipe_domain::identity::{AttemptCount, ThrottlePolicy, TypedLogin};
+use recipe_domain::identity::{AttemptCount, PasswordHash, ThrottlePolicy, TypedLogin, UserId};
 use recipe_domain::timestamp::Timestamp;
 
 use crate::error::StorageError;
@@ -84,6 +84,34 @@ pub struct LoginThrottleState {
     pub last_failure: Option<Timestamp>,
 }
 
+/// Why T2 of the Basic check found that the account changed during the hash check.
+///
+/// The type solves one problem: the client always gets `E-IDN-003` (A42), but the security event
+/// must tell the operator which change made the check fail (ADR-0109 (m)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BasicChange {
+    /// The account row is gone.
+    Missing,
+    /// The account is inactive.
+    Inactive,
+    /// The account no longer has the role `ExportClient`.
+    NotExportClient,
+    /// The stored hash differs from the hash that the check used.
+    PasswordChanged,
+}
+
+/// The answer of T2 of the Basic check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BasicConfirmation {
+    /// The account is unchanged. T2 marked the attempt as succeeded.
+    Confirmed,
+    /// The account changed after the read of step 3. T2 marked nothing.
+    Changed {
+        /// What changed. The first failed check of T2 gives the reason.
+        reason: BasicChange,
+    },
+}
+
 /// Port of the `login_attempt` rows in one transaction.
 ///
 /// The port solves one problem: T2 of `Login`, `ChangeOwnPassword`, `UnlockLogin`, and `GetUser`
@@ -127,4 +155,17 @@ pub trait LoginAttemptStore: Send + Sync {
         key: &AttemptKey,
         policy: &ThrottlePolicy,
     ) -> Result<AttemptOutcome, StorageError>;
+
+    /// Run T2 of the Basic check (design D2 step 6, ADR-0109 (m)).
+    ///
+    /// T2 locks the `app_user` row `FOR NO KEY UPDATE` and checks `is_active`, the role
+    /// `export_client`, and `password_hash = expected_hash`. If all hold, it sets `succeeded` on
+    /// the attempt and commits. It writes no audit entry. An attempt that `UnlockLogin` deleted
+    /// changes no row and does not fail the check.
+    async fn confirm_basic(
+        &self,
+        attempt: AttemptId,
+        user: UserId,
+        expected_hash: &PasswordHash,
+    ) -> Result<BasicConfirmation, StorageError>;
 }

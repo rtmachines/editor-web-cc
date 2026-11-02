@@ -1,7 +1,8 @@
 //! The JSON answer of an error on an export path (ADR-0053, `api.md` section 5.3).
 
 use axum::http::HeaderValue;
-use axum::http::header::{CONTENT_TYPE, RETRY_AFTER};
+use axum::http::StatusCode;
+use axum::http::header::{CONTENT_TYPE, RETRY_AFTER, WWW_AUTHENTICATE};
 use axum::response::{IntoResponse, Response};
 use recipe_export::error_body;
 
@@ -10,13 +11,20 @@ use super::answer::{ErrorContext, args_of, logged, retry_after_of, sentence_of, 
 
 /// The media type of the JSON error body (ADR-0053 (a)).
 const JSON: &str = "application/json";
+/// The challenge of a `401` answer (ADR-0109 (o)).
+///
+/// The scheme `RecipeExport` is unknown to a browser, so the browser shows no password dialog and
+/// keeps no credentials. RFC 7235 section 3.1 requires a challenge on a `401`. The value never has
+/// the scheme `Basic`.
+const CHALLENGE: &str = "RecipeExport realm=\"export\"";
 
 /// Map an error on an export path to its answer and write its one log line.
 ///
 /// The body is the JSON object of ADR-0053 (a) that `recipe-export` writes. The status is the
 /// status of the HTML answer. `message` is the sentence of the code in the UI language without
 /// the reference. `E-WEB-004` and `E-IDN-007` keep their `303` redirects, also for an HTMX request
-/// (ADR-0053 (d)). The answer has no `HX-*` header. `Retry-After` stays on `503` and `429`.
+/// (ADR-0053 (d)). The answer has no `HX-*` header. `Retry-After` stays on `503` and `429`. A `401`
+/// answer carries `WWW-Authenticate: RecipeExport realm="export"` (ADR-0109 (o)).
 pub(crate) fn json_answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     let (shown, status) = logged(error, ctx);
     if let Some(response) = session_redirect(shown, false) {
@@ -34,6 +42,11 @@ pub(crate) fn json_answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response 
         response
             .headers_mut()
             .insert(RETRY_AFTER, HeaderValue::from(seconds));
+    }
+    if status == StatusCode::UNAUTHORIZED {
+        response
+            .headers_mut()
+            .insert(WWW_AUTHENTICATE, HeaderValue::from_static(CHALLENGE));
     }
     response
 }

@@ -71,6 +71,8 @@ getrandom = "0.4.3"
 fluent = "0.17.0"
 subtle = "2.6.1"
 cookie = "0.18.2"
+# The Basic header of the export routes (api.md section 7.7). Standard alphabet with padding.
+base64 = { version = "0.22.1", default-features = false, features = ["std"] }
 
 # Support crates of reliability.md section 2.2.
 parking_lot = "0.12.5"

@@ -82,7 +82,9 @@ fn token_kind(access: Access) -> TokenKind {
     match access {
         Access::Lang => TokenKind::Either,
         Access::Operation(Operation::Login) => TokenKind::PreSession,
-        Access::Operation(_) | Access::Static | Access::Authenticated => TokenKind::Session,
+        Access::Operation(_) | Access::Basic(_) | Access::Static | Access::Authenticated => {
+            TokenKind::Session
+        }
     }
 }
 

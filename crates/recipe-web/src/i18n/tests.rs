@@ -144,21 +144,63 @@ fn i18n_messages_every_english_key_exists_in_polish_and_back() {
 /// The registry table of `reliability.md` section 1.2 (task 6.4, design D13).
 const REGISTRY: &str = include_str!("../../../../docs/architecture/reliability.md");
 
+/// The prefixes whose registry rows a route can show as a message (`api.md` section 5).
+///
+/// The registry rows of these prefixes give the list. A new row needs a `fluent` key.
+const MESSAGE_PREFIXES: [&str; 4] = ["E-IDN-", "E-WEB-", "E-DB-", "E-EXP-"];
+
+/// Return every code of the registry in `reliability.md` section 1.2, in file order.
+fn registry_codes() -> Vec<&'static str> {
+    REGISTRY
+        .lines()
+        .filter(|line| line.starts_with("| `E-"))
+        .filter_map(|line| line.split('|').nth(1))
+        .map(|cell| cell.trim().trim_matches('`'))
+        .collect()
+}
+
 /// The codes whose message a route of this change can return (`api.md` section 5).
 ///
+/// The list holds each registry code of `MESSAGE_PREFIXES` and `E-AUD-001`.
 /// `E-IDN-007` is left out, because it gives a redirect and no message.
 fn codes_with_a_message() -> Vec<String> {
-    let idn = (1..=10)
-        .filter(|n| *n != 7)
-        .map(|n| format!("E-IDN-{n:03}"));
-    let web = (1..=11).map(|n| format!("E-WEB-{n:03}"));
-    let db = (1..=8).map(|n| format!("E-DB-{n:03}"));
-    let export = (1..=3).map(|n| format!("E-EXP-{n:03}"));
-    idn.chain(web)
-        .chain(db)
-        .chain(export)
-        .chain(std::iter::once("E-AUD-001".to_owned()))
+    registry_codes()
+        .into_iter()
+        .filter(|code| {
+            MESSAGE_PREFIXES
+                .iter()
+                .any(|prefix| code.starts_with(prefix))
+        })
+        .filter(|code| *code != "E-IDN-007")
+        .chain(std::iter::once("E-AUD-001"))
+        .map(str::to_owned)
         .collect()
+}
+
+/// Return the `en` source text: the base file and the approval file.
+fn en_sources() -> String {
+    format!("{EN_SOURCE}\n{EN_APPROVAL_SOURCE}")
+}
+
+/// Return the `pl` source text: the base file and the approval file.
+fn pl_sources() -> String {
+    format!("{PL_SOURCE}\n{PL_APPROVAL_SOURCE}")
+}
+
+#[test]
+fn i18n_messages_list_covers_the_known_codes_of_the_registry() {
+    let codes = codes_with_a_message();
+    for known in [
+        "E-IDN-011",
+        "E-WEB-012",
+        "E-EXP-004",
+        "E-EXP-005",
+        "E-AUD-001",
+    ] {
+        assert!(codes.iter().any(|code| code == known), "{known}");
+    }
+    assert!(!codes.iter().any(|code| code == "E-IDN-007"));
+    assert!(codes.len() >= 30, "{}", codes.len());
 }
 
 /// Return the user message of a code from its row of the registry, without the reference.
@@ -210,22 +252,24 @@ pub(super) fn ftl_message<'a>(source: &'a str, key: &str) -> Option<&'a str> {
 
 #[test]
 fn i18n_messages_english_text_equals_its_registry_row() {
+    let en = en_sources();
     let codes = codes_with_a_message()
         .into_iter()
         .filter(|code| code.as_str() != "E-IDN-004");
     for code in codes {
         let expected = fluent_text(registry_message(&code).unwrap_or("<no registry row>"));
-        let actual = ftl_message(EN_SOURCE, &format!("error-{code}"));
+        let actual = ftl_message(&en, &format!("error-{code}"));
         assert_eq!(actual, Some(expected.as_str()), "{code}");
     }
 }
 
 #[test]
 fn i18n_messages_polish_has_a_text_for_each_code() {
+    let (pl, en) = (pl_sources(), en_sources());
     for code in codes_with_a_message() {
         let key = format!("error-{code}");
-        assert!(ftl_message(PL_SOURCE, &key).is_some(), "{key} in pl.ftl");
-        assert!(ftl_message(EN_SOURCE, &key).is_some(), "{key} in en.ftl");
+        assert!(ftl_message(&pl, &key).is_some(), "{key} in the pl files");
+        assert!(ftl_message(&en, &key).is_some(), "{key} in the en files");
     }
 }
 

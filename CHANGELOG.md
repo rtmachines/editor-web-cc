@@ -4,6 +4,20 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- The role `ExportClient` is a technical account. It holds `VersionExport` only and cannot log in to the UI (ADR-0109).
+- The new export routes accept only HTTP Basic authentication of an active `ExportClient` account (ADR-0109).
+- The route `GET /export/v1/machines/{code}/recipes` lists the recipes of a machine with an Approved version and their `content_sha256` (ADR-0109).
+- The route `GET /export/v1/machines/{code}/recipes/{ref}/approved` returns the v1 export document (ADR-0109).
+- The route `GET /export/v2/machines/{code}/recipes/{ref}/approved/units/{path}` returns the v2 export document of one unit and its descendants, with `scope_sha256` (ADR-0109).
+- An archived machine stays exportable on the new export routes (ADR-0109).
+- The error codes `E-EXP-005`, `E-IDN-011`, and `E-WEB-012` are new (ADR-0109).
+
+### Changed
+
+- **BREAKING** for a v2 consumer only: the export document v2 adds `scope` and `scope_sha256`. The v1 document and the v1 routes do not change (ADR-0109).
+
 ## [0.4.0] - 2026-11-02
 
 ### Added

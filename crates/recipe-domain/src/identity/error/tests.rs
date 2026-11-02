@@ -4,8 +4,8 @@
 use super::*;
 use crate::error_codes::REGISTRY;
 
-/// The number of `E-IDN` rows: `E-IDN-001..010`.
-const DOC_ROW_COUNT: usize = 10;
+/// The number of `E-IDN` rows: `E-IDN-001..011`.
+const DOC_ROW_COUNT: usize = 11;
 
 /// One `E-IDN` row of `reliability.md` section 1.2 that an owner `IdentityError::` names.
 struct DocRow {
@@ -116,6 +116,11 @@ fn samples() -> Vec<Sample> {
             "E-IDN-010",
             vec![("login", "anna".to_owned())],
         ),
+        (
+            IdentityError::TechnicalRoleChange { login: anna() },
+            "E-IDN-011",
+            vec![("login", "anna".to_owned())],
+        ),
     ]
 }
 
@@ -159,6 +164,7 @@ fn every_idn_row_and_the_guard_row_are_in_the_registry() {
     }
     assert_eq!(ErrorCode::find("E-AUD-003"), Some(ErrorCode::AUD_003));
     assert_eq!(ErrorCode::find("E-IDN-010"), Some(ErrorCode::IDN_010));
+    assert_eq!(ErrorCode::find("E-IDN-011"), Some(ErrorCode::IDN_011));
 }
 
 #[test]

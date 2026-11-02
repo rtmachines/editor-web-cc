@@ -2,15 +2,18 @@
 
 use recipe_domain::audit::{AuditAction, AuditTarget, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::identity::{Login, Role};
+use recipe_domain::identity::{Login, Role, UserId};
+use uuid::Uuid;
 
 use super::ResetPassword;
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing, TimeoutStage};
 use crate::identity::authenticate;
-use crate::identity::fixtures::{IdentityFixture, actor_id, anna_id, assert_one_time_password};
-use crate::ports::UserRow;
+use crate::identity::fixtures::{
+    IdentityFixture, actor_id, anna_id, assert_one_time_password, fake_hash,
+};
+use crate::ports::{NewUser, UserRow};
 
 fn anna() -> Login {
     Login::parse("anna").unwrap()
@@ -53,6 +56,53 @@ async fn a_success_replaces_the_hash_sets_the_flag_and_raises_the_epoch() {
     );
     assert_eq!(fixture.hasher.hash_calls(), 1);
     assert_eq!(fixture.context.gate().available_permits(), 4);
+}
+
+#[tokio::test]
+async fn an_export_client_keeps_the_flag_must_change_password_false() {
+    let fixture = fixture();
+    let transfer_id = UserId::from(Uuid::from_u128(12));
+    fixture.store.seed_user(&NewUser {
+        id: transfer_id,
+        login: Login::parse("transfer").unwrap(),
+        password_hash: fake_hash("old-secret-phrase"),
+        role: Role::ExportClient,
+        must_change_password: false,
+    });
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    ResetPassword::new(fixture.context.clone())
+        .execute(&auth, &meta, &Login::parse("transfer").unwrap())
+        .await
+        .unwrap();
+    let row = fixture
+        .store
+        .state()
+        .users
+        .get(&transfer_id)
+        .unwrap()
+        .clone();
+    assert!(!row.must_change_password);
+    assert_eq!(row.session_epoch, 1);
+}
+
+#[tokio::test]
+async fn every_person_role_gets_the_flag_must_change_password_true() {
+    for role in [Role::Operator, Role::ProcessEngineer, Role::Administrator] {
+        let fixture = IdentityFixture::new();
+        fixture.store.seed_user(&NewUser {
+            id: anna_id(),
+            login: anna(),
+            password_hash: fake_hash("old-secret-phrase"),
+            role,
+            must_change_password: false,
+        });
+        let (auth, meta) = fixture.actor(Role::Administrator).await;
+        ResetPassword::new(fixture.context.clone())
+            .execute(&auth, &meta, &anna())
+            .await
+            .unwrap();
+        assert!(anna_row(&fixture).must_change_password, "{role:?}");
+    }
 }
 
 #[tokio::test]

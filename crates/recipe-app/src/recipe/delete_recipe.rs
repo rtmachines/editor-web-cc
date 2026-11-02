@@ -47,7 +47,7 @@ fn deleter_of(role: Role) -> Result<RecipeDeleter, AppError> {
     match role {
         Role::Administrator => Ok(RecipeDeleter::Administrator),
         Role::ProcessEngineer => Ok(RecipeDeleter::ProcessEngineer),
-        Role::Operator => Err(AppError::Forbidden {
+        Role::Operator | Role::ExportClient => Err(AppError::Forbidden {
             operation: DeleteRecipe::OPERATION,
         }),
     }

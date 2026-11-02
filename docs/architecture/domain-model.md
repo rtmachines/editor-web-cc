@@ -376,10 +376,10 @@ A draft command is one of the eight parameter commands of section 5.2: `AddParam
 | `id` | `UserId` (UUID) | |
 | `login` | `Login` | Unique, case-insensitive, `[a-z0-9._-]{3,64}` |
 | `password_hash` | `PasswordHash` | Argon2id PHC string. Never logged. `Debug` redacts it |
-| `role` | `Role` | `Administrator`, `ProcessEngineer`, `Operator` |
+| `role` | `Role` | `Administrator`, `ProcessEngineer`, `Operator`, `ExportClient`. `ExportClient` is the role of a technical account and holds only `VersionExport` (A45, ADR-0109 (a), (b)) |
 | `is_active` | `bool` | Inactive users cannot log in |
 | `session_epoch` | `i64` | Starts at 0. Every increment ends all sessions of the user |
-| `must_change_password` | `bool` | `true` after `create-admin`, `CreateUser`, and `ResetPassword`. Until the user changes the password, the session reaches only the routes listed in `api.md` 7.4 |
+| `must_change_password` | `bool` | `true` after `create-admin`, `CreateUser`, and `ResetPassword`. It stays `false` for an `ExportClient` account (ADR-0109 (d), (e)). Until the user changes the password, the session reaches only the routes listed in `api.md` 7.4 |
 
 **Session** (entity, aggregate root, owned by the application)
 
@@ -439,7 +439,7 @@ State rule for `before` and `after` (the same rule as ADR-0005 and `data-model.m
 - Five actions store a diff object of the changed fields: `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, and `TypeRevisionRebound`.
 - Every other action stores the full row of the changed entity as JSON, without `password_hash`. This includes `ParameterAdded` and `ParameterRemoved`. A create stores the row in `after`, a delete stores it in `before`, and an update stores it in both.
 - The full row of a parameter holds its limit rows and its translation rows. The full row of a struct holds its member rows (ADR-0029).
-- Three actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`.
+- Three actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`. The actor of `VersionExported` can be an `ExportClient` account (ADR-0109 (ab)).
 - `VersionApproved` adds `allow_outdated` to the full row.
 
 Migrations. Schema migrations and the seed migration `0004_seed_plc_types.sql` write no audit row. `_sqlx_migrations` is the record of schema and seed changes. A later data migration that changes catalog rows writes one audit row per changed row under `SET ROLE audit_owner`. The row has `actor = None` and `request_id` = the UUID of the migration version (`data-model.md` 5.1 and 10).
@@ -557,8 +557,8 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 | Port | Operations |
 |---|---|
 | `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). The startup settings comparison `CompareSettings` (`SettingChanged`, `actor = None`). It writes the rows of `app_setting` through `SettingRepository` of the transaction, also in read-only mode (ADR-0061 (e)). The subcommand `create-admin` (`UserCreated`, `actor = None`) |
-| `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. The row `audit_chain_broken` of that job holds the `request_id` of the run (ADR-0060 (s)). An aggregated kind increments `count` (section 2.4). A failed or throttled `Login` writes its row also in read-only mode |
-| `LoginAttemptStore` | `Login` T1 counts the failures and inserts the attempt under the advisory lock, below the per-IP budget, also in read-only mode. `Login` T2 on success marks the attempt inside the `UnitOfWork` transaction. A wrong current password in `ChangeOwnPassword` also inserts an attempt |
+| `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. A failed or throttled Basic check also writes its row (ADR-0109 (m)). The row `audit_chain_broken` of that job holds the `request_id` of the run (ADR-0060 (s)). An aggregated kind increments `count` (section 2.4). A failed or throttled `Login` writes its row also in read-only mode |
+| `LoginAttemptStore` | `Login` T1 counts the failures and inserts the attempt under the advisory lock, below the per-IP budget, also in read-only mode. `Login` T2 on success marks the attempt inside the `UnitOfWork` transaction. T2 of the Basic check (`confirm_basic`) marks the attempt without a `UnitOfWork`. It writes no audit entry, creates no session, and runs also in read-only mode (ADR-0109 (m)). A wrong current password in `ChangeOwnPassword` also inserts an attempt |
 | `MaintenanceStore` | The job `cleanup`. It deletes expired sessions and old `login_attempt` rows in batches of `login_attempt.purge_batch`, and it calls `security_event_purge()` once per batch. `reliability.md` 2.4 gives the interval of each delete (ADR-0060 (l)). The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `heartbeat` records `heartbeat.last_at` in `app_setting`. No audit entry |
 
 The jobs and the health router also use ports that write nothing to the database (ADR-0060 (a) to (f)):
@@ -627,13 +627,13 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 
 | Command | Aggregate | Result | Errors |
 |---|---|---|---|
-| `Login` | User, Session | New session, new CSRF token. Argon2 permit, then the transactions T1 and T2 (section 2.3, `data-model.md` 6). T1 holds `pg_advisory_xact_lock(1, hashtext(login))`, class 1 of `data-model.md` 1.4. T2 checks under the lock of the user row that the active state, the epoch, and the hash did not change after the check (ADR-0035) | `E-IDN-003 InvalidCredentials` (also unknown and inactive users, A42), `E-IDN-004 UserInactive` (only in the event log and `security_event`), `E-IDN-005 LoginThrottled`, `E-IDN-007 MustChangePassword` (session limited to the routes of `api.md` 7.4), `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
+| `Login` | User, Session | New session, new CSRF token. Argon2 permit, then the transactions T1 and T2 (section 2.3, `data-model.md` 6). T1 holds `pg_advisory_xact_lock(1, hashtext(login))`, class 1 of `data-model.md` 1.4. T2 checks under the lock of the user row that the active state, the epoch, and the hash did not change after the check (ADR-0035). It refuses an `ExportClient` account with the same code (ADR-0109 (c)) | `E-IDN-003 InvalidCredentials` (also unknown and inactive users, A42), `E-IDN-004 UserInactive` (only in the event log and `security_event`), `E-IDN-005 LoginThrottled`, `E-IDN-007 MustChangePassword` (session limited to the routes of `api.md` 7.4), `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `Logout` | Session | Session deleted | - |
-| `CreateUser` | User | New user. The request has no password. The server generates a one-time password, shows it once, and sets `must_change_password = true` | `E-IDN-001 DuplicateLogin`, `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
-| `SetUserRole` | User | New role. `session_epoch` incremented | `E-IDN-002 LastAdministrator` |
+| `CreateUser` | User | New user. The request has no password. The server generates a one-time password, shows it once, and sets `must_change_password = true`. For the role `ExportClient`, it keeps `must_change_password = false` (ADR-0109 (d)) | `E-IDN-001 DuplicateLogin`, `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
+| `SetUserRole` | User | New role. `session_epoch` incremented | `E-IDN-002 LastAdministrator`, `E-IDN-011 TechnicalRoleChange` (a change to or from `ExportClient`, ADR-0109 (f)) |
 | `DeactivateUser` | User | `is_active = false`. `session_epoch` incremented | `E-IDN-002 LastAdministrator`, `E-IDN-010 UserAlreadyInactive` (ADR-0035) |
 | `ActivateUser` | User | `is_active = true` | `E-IDN-009 UserAlreadyActive` |
-| `ResetPassword` | User | One-time password, generated by the server and shown once. `must_change_password = true`. `session_epoch` incremented | `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
+| `ResetPassword` | User | One-time password, generated by the server and shown once. `must_change_password = true`, except for the role `ExportClient` (ADR-0109 (e)). `session_epoch` incremented | `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `ChangeOwnPassword` | User, Session | New hash. `session_epoch` incremented. New session for the current request. The login throttle applies to the own login and the client address (ADR-0035) | `E-IDN-008 InvalidCurrentPassword`, `E-IDN-006 PasswordPolicy`, `E-IDN-005 LoginThrottled`, `E-WEB-004 Unauthenticated` (the epoch, the hash, or the active state changed after the check), `E-WEB-009 Timeout` (Argon2 permit), `E-WEB-011 TaskFailed` (password hash) |
 | `UnlockLogin` | User | Throttle counters of one login cleared | - |
 
@@ -643,7 +643,7 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 
 | Command | Aggregate | Result | Errors |
 |---|---|---|---|
-| `ExportVersion` | read model | Export document. Audit entry `VersionExported` | `E-EXP-001 NoApprovedVersion`, `E-EXP-002 ContentHashMismatch`, `E-EXP-003 VersionNotExportable` (draft or discarded), `E-EXP-004 Serialize`, `E-RCP-012 RecipeDeleted` (`/versions/{n}` of a deleted recipe), `E-WEB-009 Timeout` (export) |
+| `ExportVersion` | read model | Export document. Audit entry `VersionExported` | `E-EXP-001 NoApprovedVersion`, `E-EXP-002 ContentHashMismatch`, `E-EXP-003 VersionNotExportable` (draft or discarded), `E-EXP-004 Serialize`, `E-EXP-005 EmptyScope` (unit scope, ADR-0109 (x)), `E-RCP-012 RecipeDeleted` (`/versions/{n}` of a deleted recipe), `E-WEB-009 Timeout` (export) |
 
 ### 5.5 Queries
 
@@ -655,6 +655,7 @@ A query is a use case. It checks its permission first and writes no audit entry.
 | `ListRecipes`, `GetRecipe`, `ListVersions`, `GetVersion`, `DiffVersions`, `GetRecipeHistory` | `RecipeView` |
 | `ListDeletedRecipes` (`ListRecipes` with `show_deleted`, ADR-0043) | `RecipeRestore` |
 | `ListParameters`, `GetParameter`, `GetLimits`, `GetTranslations` | `RecipeView` |
+| `ListExportableRecipes` (ADR-0109 (g)) | `VersionExport` |
 | `ListUsers`, `GetUser` | `UserManage` |
 | `ListAuditEntries`, `GetAuditEntry` | `AuditView` (Administrator) or `AuditViewRecipes` (ProcessEngineer, only entries with `aggregate_type = 'recipe'`) |
 | `ListSecurityEvents` | `AuditView` |
@@ -763,5 +764,6 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A38 | An array has at most 3 dimensions on every platform |
 | A39 | IEC derived types (ENUM, subrange, alias) are not supported. A parameter uses a primitive, an array, or a UDT |
 | A40 | The server generates the parameter `key`. It is unique inside a version and stable across the versions of one recipe |
-| A42 | Authentication failures (unknown login, wrong password, inactive user) return one client message and code `E-IDN-003`. The event log and `security_event` carry the exact reason |
+| A42 | Authentication failures (unknown login, wrong password, inactive user) return one client message and code `E-IDN-003`. A Basic check of a person account also returns it. The event log and `security_event` carry the exact reason |
 | A43 | A time value is an integer count of a base unit. TIME, S5TIME and TIME_OF_DAY count milliseconds. LTIME, LDATE, LTOD, LDT and DTL count nanoseconds. DATE counts days, and DATE_AND_TIME counts seconds. DATE, LDATE, DATE_AND_TIME, LDT and DTL count from 1970-01-01. TIME_OF_DAY and LTOD count from midnight. The UI shows IEC literals |
+| A45 | A technical account with the role `ExportClient` exports `Approved` versions for a transfer client with HTTP Basic. It holds only `VersionExport`. It cannot log in to the UI, and no person uses it. The three roles of R22 stay the roles of persons |

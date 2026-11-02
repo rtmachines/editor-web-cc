@@ -46,6 +46,7 @@ impl SetUserRole {
     ///
     /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
     /// Returns `NotFound` (`E-WEB-005`) when the login is unknown.
+    /// Returns `TechnicalRoleChange` (`E-IDN-011`) when the old or the new role is `ExportClient`.
     /// Returns `LastAdministrator` (`E-IDN-002`) when the change removes the last Administrator.
     /// Returns `AppError::Storage` with `E-DB-001` after a deadlock or a lock timeout.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` for another database failure.

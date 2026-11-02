@@ -21,13 +21,13 @@
 <dd id="last-failure">{% if let Some(when) = last_failure %}<span class="data">{{ when }}</span>{% else %}{{ t.get("user-never") }}{% endif %}</dd>
 </dl>
 <div id="user-result"></div>
-<form method="post" action="/users/{{ login }}/role" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+{% if can_set_role %}<form method="post" action="/users/{{ login }}/role" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
 <input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
 <div class="field"><label for="role">{{ t.get("user-role-label") }}</label>
 <select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
 <p class="actions"><button type="submit">{{ t.get("user-role-submit") }}</button></p>
 </form>
-<div class="actions">
+{% endif %}<div class="actions">
 <form method="post" action="/users/{{ login }}/deactivate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
 <input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
 <button type="submit" class="btn-danger">{{ t.get("user-deactivate-submit") }}</button>

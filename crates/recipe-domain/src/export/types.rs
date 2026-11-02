@@ -48,6 +48,21 @@ pub struct TypeEntry {
     members: Option<Vec<Member>>,
 }
 
+impl TypeEntry {
+    /// Return the identifier of the type row, the value of `id`.
+    pub(super) const fn id(&self) -> PlcTypeId {
+        self.id
+    }
+
+    /// Return the type references that this entry holds: the element type or the member types.
+    ///
+    /// The scope body follows these references to build the type closure of a parameter subset.
+    pub(super) fn references(&self) -> impl Iterator<Item = TypeReference> + '_ {
+        let members = self.members.iter().flatten().map(|member| member.type_id);
+        self.element_type_id.into_iter().chain(members)
+    }
+}
+
 /// Return the type reference of a node.
 ///
 /// The reference is the primitive for a primitive without a length. For every other type it is

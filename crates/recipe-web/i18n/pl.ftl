@@ -20,11 +20,13 @@ error-E-IDN-006 = Hasło nie zostało przyjęte: { $reason }. Użyj od 12 do 128
 error-E-IDN-008 = Obecne hasło jest niepoprawne.
 error-E-IDN-009 = Użytkownik { $login } jest już aktywny.
 error-E-IDN-010 = Użytkownik { $login } jest już nieaktywny.
+error-E-IDN-011 = Rola użytkownika { $login } nie może się zmienić na ExportClient ani z niej. Utwórz nowego użytkownika.
 error-E-WEB-005 = Zasób nie istnieje: { $entity }.
 error-E-WEB-006 = System działa w trybie tylko do odczytu, bo brakuje miejsca na dysku lub nie można go zmierzyć. Skontaktuj się z administratorem.
 error-E-WEB-009 = Żądanie trwało zbyt długo i zostało przerwane. Spróbuj ponownie.
 error-E-WEB-010 = Wystąpił błąd wewnętrzny. Skontaktuj się z administratorem.
 error-E-WEB-011 = Operacja { $stage } nie zakończyła się. Spróbuj ponownie.
+error-E-WEB-012 = Żądanie nie ma poprawnych danych Basic. Wyślij login i hasło konta transferowego.
 error-E-WEB-001 = Inny użytkownik zmienił wersję { $number } receptury { $reference }. Odśwież stronę i zastosuj zmianę ponownie.
 error-E-DB-001 = Inna operacja blokuje te same dane. Spróbuj ponownie.
 error-E-DB-002 = Operacja trwała zbyt długo i została przerwana. Spróbuj ponownie.
@@ -37,12 +39,14 @@ error-E-DB-008 = Wystąpił nieoczekiwany błąd bazy danych. Skontaktuj się z 
 error-E-EXP-001 = Receptura { $reference } nie ma wersji zatwierdzonej.
 error-E-EXP-002 = Wersja { $number } receptury { $reference } nie zgadza się z zapisanym skrótem. Eksport jest odrzucony. Skontaktuj się z administratorem.
 error-E-EXP-003 = Wersja { $number } receptury { $reference } jest szkicem albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.
+error-E-EXP-005 = Wersja { $number } receptury { $reference } nie ma parametru w jednostce { $path } ani poniżej niej.
 error-E-AUD-001 = Zmiana nie została zapisana. System nie mógł zapisać wpisu audytu. Skontaktuj się z administratorem.
 
 # Role
 role-administrator = Administrator
 role-process-engineer = Inżynier procesu
 role-operator = Operator
+role-export-client = Klient eksportu
 
 # Strona logowania
 login-title = Logowanie
@@ -112,7 +116,9 @@ user-back-link = Wróć do użytkownika
 
 # Wynik polecenia
 user-password-label = Hasło jednorazowe
+user-password-label-technical = Hasło
 user-password-once = Zapisz hasło teraz. System pokazuje je tylko raz. Użytkownik musi zmienić je przy pierwszym logowaniu.
+user-password-technical = Zapisz hasło teraz. System pokazuje je tylko raz. To hasło jest stałym poświadczeniem klienta.
 user-role-changed = Rola użytkownika { $login } to teraz { $role }. Wszystkie sesje użytkownika zakończyły się.
 user-deactivated = Użytkownik { $login } został dezaktywowany. Wszystkie sesje użytkownika zakończyły się.
 user-activated = Użytkownik { $login } jest aktywny.
@@ -227,6 +233,7 @@ operation-reset-password = Reset hasła
 operation-change-own-password = Zmiana własnego hasła
 operation-unlock-login = Odblokowanie logowania
 operation-export-version = Eksport wersji
+operation-list-exportable-recipes = Lista receptur do eksportu
 operation-list-machines = Lista maszyn
 operation-get-machine = Podgląd maszyny
 operation-get-unit-tree = Podgląd drzewa jednostek

@@ -106,6 +106,8 @@ pub enum Operation {
     ListRecipes,
     /// Query `ListRecipes` with `show_deleted`.
     ListDeletedRecipes,
+    /// Query `ListExportableRecipes`.
+    ListExportableRecipes,
     /// Query `GetRecipe`.
     GetRecipe,
     /// Query `ListVersions`.
@@ -159,8 +161,8 @@ pub enum Operation {
 }
 
 impl Operation {
-    /// Every operation: 34 commands and 34 queries.
-    pub const ALL: [Self; 68] = [
+    /// Every operation: 34 commands and 35 queries.
+    pub const ALL: [Self; 69] = [
         Self::CreateMachine,
         Self::RenameMachine,
         Self::ArchiveMachine,
@@ -204,6 +206,7 @@ impl Operation {
         Self::GetTypeUsage,
         Self::ListRecipes,
         Self::ListDeletedRecipes,
+        Self::ListExportableRecipes,
         Self::GetRecipe,
         Self::ListVersions,
         Self::GetVersion,
@@ -278,6 +281,7 @@ impl Operation {
             Self::GetTypeTree => "GetTypeTree",
             Self::GetTypeUsage => "GetTypeUsage",
             Self::ListRecipes | Self::ListDeletedRecipes => "ListRecipes",
+            Self::ListExportableRecipes => "ListExportableRecipes",
             Self::GetRecipe => "GetRecipe",
             Self::ListVersions => "ListVersions",
             Self::GetVersion => "GetVersion",
@@ -353,6 +357,7 @@ impl Operation {
             | Self::GetTypeUsage
             | Self::ListRecipes
             | Self::ListDeletedRecipes
+            | Self::ListExportableRecipes
             | Self::GetRecipe
             | Self::ListVersions
             | Self::GetVersion

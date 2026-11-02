@@ -20,11 +20,13 @@ error-E-IDN-006 = The password is not accepted: { $reason }. Use 12 to 128 chara
 error-E-IDN-008 = The current password is not correct.
 error-E-IDN-009 = User { $login } is already active.
 error-E-IDN-010 = User { $login } is already inactive.
+error-E-IDN-011 = The role of { $login } cannot change to or from ExportClient. Create a new user.
 error-E-WEB-005 = { $entity } does not exist.
 error-E-WEB-006 = The system is in read-only mode because the free disk space is low or unknown. Contact the administrator.
 error-E-WEB-009 = The request took too long and was stopped. Try again.
 error-E-WEB-010 = An internal error occurred. Contact the administrator.
 error-E-WEB-011 = The operation { $stage } did not complete. Try again.
+error-E-WEB-012 = The request has no valid Basic credentials. Send the login and the password of a transfer account.
 error-E-WEB-001 = Another user changed version { $number } of recipe { $reference }. Reload the page and apply your change again.
 error-E-DB-001 = Another operation holds a lock on the same data. Try again.
 error-E-DB-002 = The operation took too long and was stopped. Try again.
@@ -37,12 +39,14 @@ error-E-DB-008 = An unexpected database error occurred. Contact the administrato
 error-E-EXP-001 = Recipe { $reference } has no approved version.
 error-E-EXP-002 = Version { $number } of recipe { $reference } does not match its stored hash. The export is refused. Contact the administrator.
 error-E-EXP-003 = Version { $number } of recipe { $reference } is a draft or was discarded. Only approved and retired versions can be exported.
+error-E-EXP-005 = Version { $number } of recipe { $reference } has no parameter in unit { $path } or below it.
 error-E-AUD-001 = The change was not saved. The system could not record the audit entry. Contact the administrator.
 
 # Roles
 role-administrator = Administrator
 role-process-engineer = Process engineer
 role-operator = Operator
+role-export-client = Export client
 
 # The login page
 login-title = Log in
@@ -112,7 +116,9 @@ user-back-link = Back to the user
 
 # The result of a command
 user-password-label = One-time password
+user-password-label-technical = Password
 user-password-once = Write the password down now. The system shows it only once. The user must change it at the first login.
+user-password-technical = Write the password down now. The system shows it only once. This password is the permanent credential of the client.
 user-role-changed = The role of { $login } is now { $role }. All sessions of the user ended.
 user-deactivated = User { $login } is deactivated. All sessions of the user ended.
 user-activated = User { $login } is active.
@@ -227,6 +233,7 @@ operation-reset-password = Reset password
 operation-change-own-password = Change own password
 operation-unlock-login = Unlock login
 operation-export-version = Export version
+operation-list-exportable-recipes = List exportable recipes
 operation-list-machines = List machines
 operation-get-machine = Show machine
 operation-get-unit-tree = Show unit tree

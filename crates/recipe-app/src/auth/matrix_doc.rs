@@ -22,10 +22,11 @@ const API_DOC: &str = include_str!("../../../../docs/architecture/api.md");
 const NOT_OPERATIONS: [&str; 4] = ["Approved", "Retired", "Draft", "show_deleted"];
 
 /// The role columns of the table: the header text and the role.
-const ROLE_COLUMNS: [(&str, Role); 3] = [
+const ROLE_COLUMNS: [(&str, Role); 4] = [
     ("Administrator", Role::Administrator),
     ("ProcessEngineer", Role::ProcessEngineer),
     ("Operator", Role::Operator),
+    ("ExportClient", Role::ExportClient),
 ];
 
 /// Return the text of section 3.3, from its heading to the next heading.
@@ -263,9 +264,9 @@ fn every_row_of_a_form_query_names_a_purpose_with_the_permission_of_the_row() {
 }
 
 const PURPOSE_TABLE: &str = "\
-| Operation | Permission | Administrator | ProcessEngineer | Operator | Condition |
-|---|---|---|---|---|---|
-| Rename (`RenameRecipe`). Form query `GetRecipeForm` with the purpose `RenameRecipe` | `RecipeEdit` | ✓ | ✓ | ✗ | R25 |
+| Operation | Permission | Administrator | ProcessEngineer | Operator | ExportClient | Condition |
+|---|---|---|---|---|---|---|
+| Rename (`RenameRecipe`). Form query `GetRecipeForm` with the purpose `RenameRecipe` | `RecipeEdit` | ✓ | ✓ | ✗ | ✗ | R25 |
 ";
 
 #[test]
@@ -284,10 +285,10 @@ fn a_form_query_under_the_permission_of_another_purpose_is_a_difference() {
 }
 
 const SMALL_TABLE: &str = "\
-| Operation | Permission | Administrator | ProcessEngineer | Operator | Condition |
-|---|---|---|---|---|---|
-| Rename recipe (`RenameRecipe`) | `RecipeEdit` | ✓ | ✓ | ✗ | R25 |
-| Delete recipe (`DeleteRecipe`) | `RecipeDelete` | (c) | (c) | ✗ | A13 |
+| Operation | Permission | Administrator | ProcessEngineer | Operator | ExportClient | Condition |
+|---|---|---|---|---|---|---|
+| Rename recipe (`RenameRecipe`) | `RecipeEdit` | ✓ | ✓ | ✗ | ✗ | R25 |
+| Delete recipe (`DeleteRecipe`) | `RecipeDelete` | (c) | (c) | ✗ | ✗ | A13 |
 ";
 
 #[test]
@@ -302,7 +303,8 @@ fn the_parser_reads_the_header_the_names_and_the_marks() {
         vec![
             (Role::Administrator, true),
             (Role::ProcessEngineer, true),
-            (Role::Operator, false)
+            (Role::Operator, false),
+            (Role::ExportClient, false)
         ]
     );
     let conditional = rows.get(1).unwrap();
@@ -319,7 +321,7 @@ fn the_parser_reads_the_header_the_names_and_the_marks() {
 fn a_correct_small_table_has_no_difference() {
     let rows = parse_table(SMALL_TABLE);
     let comparison = compare(&rows, &[Operation::RenameRecipe, Operation::DeleteRecipe]);
-    assert_eq!(comparison.cells, 6);
+    assert_eq!(comparison.cells, 8);
     assert!(
         comparison.differences.is_empty(),
         "{:?}",
@@ -330,13 +332,13 @@ fn a_correct_small_table_has_no_difference() {
 #[test]
 fn one_wrong_cell_gives_exactly_one_difference() {
     let wrong = SMALL_TABLE.replace(
-        "| `RecipeEdit` | ✓ | ✓ | ✗ |",
-        "| `RecipeEdit` | ✓ | ✓ | ✓ |",
+        "| `RecipeEdit` | ✓ | ✓ | ✗ | ✗ |",
+        "| `RecipeEdit` | ✓ | ✓ | ✓ | ✗ |",
     );
     assert_ne!(wrong, SMALL_TABLE);
     let rows = parse_table(&wrong);
     let comparison = compare(&rows, &[Operation::RenameRecipe, Operation::DeleteRecipe]);
-    assert_eq!(comparison.cells, 6);
+    assert_eq!(comparison.cells, 8);
     assert_eq!(
         comparison.differences,
         vec!["RenameRecipe for Operator: api.md says true, the catalog says false".to_owned()]
@@ -346,8 +348,8 @@ fn one_wrong_cell_gives_exactly_one_difference() {
 #[test]
 fn a_flipped_denied_mark_and_a_missing_row_are_differences() {
     let flipped = SMALL_TABLE.replace(
-        "| `RecipeEdit` | ✓ | ✓ | ✗ |",
-        "| `RecipeEdit` | ✓ | ✗ | ✗ |",
+        "| `RecipeEdit` | ✓ | ✓ | ✗ | ✗ |",
+        "| `RecipeEdit` | ✓ | ✗ | ✗ | ✗ |",
     );
     let rows = parse_table(&flipped);
     let comparison = compare(&rows, &[Operation::RenameRecipe, Operation::CreateRecipe]);

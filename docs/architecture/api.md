@@ -2,7 +2,7 @@
 
 Status: Accepted (design stage, revised 2026-10-12 after review)
 Source of requirements: `general-draft.txt`
-Related: `domain-model.md`, `data-model.md`, `reliability.md`, ADR-0001, ADR-0008, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0018, ADR-0019, ADR-0021, ADR-0022
+Related: `domain-model.md`, `data-model.md`, `reliability.md`, ADR-0001, ADR-0008, ADR-0013, ADR-0014, ADR-0015, ADR-0016, ADR-0018, ADR-0019, ADR-0021, ADR-0022, ADR-0109
 
 ## 1. Scope
 
@@ -11,12 +11,14 @@ This document defines the HTTP surface of `recipe-web`. It is a hypermedia API (
 - A full page request returns `text/html`.
 - An HTMX request (`HX-Request: true`) returns an HTML fragment.
 - The export endpoints return `application/json`. No other public endpoint returns JSON.
+- The five export endpoints use two schemes. Two use the session cookie. Three use HTTP Basic (section 2.7).
 - The health endpoints live on a separate internal listener (section 2.10). They are not part of the public surface.
 
 URL policy:
 
 - HTML routes have no version prefix. Example: `/recipes/R-100/versions/3`.
-- The JSON export lives under `/export/v1/`. A breaking change of the export document creates `/export/v2/` (ADR-0019).
+- The JSON export lives under `/export/v1/` and `/export/v2/`. A breaking change of the export document creates the next prefix (ADR-0019).
+- The unit scope document breaks v1, so it lives under `/export/v2/` (section 6.4, ADR-0109 (aa)).
 
 Path values are the human identifiers from `domain-model.md`. The table gives the value object for each path value and the error for a bad value. The rule is in `reliability.md` 4.2. A path value that is a domain value object with its own error code returns that code with 422. A path value that names a resource returns `404 E-WEB-005` when the resource does not exist, also when the text cannot name one. The exemption to this rule follows the table.
 
@@ -43,19 +45,19 @@ Request fields. `E-WEB-005` is for URL values only. A request field that names a
 
 Mutating requests use `POST`. No route uses `PUT` or `DELETE`, because a form sends only `GET` and `POST` (ADR-0040). Every mutating request carries the CSRF token (section 7). Every mutating request on a `Draft` carries `row_version` (section 4).
 
-The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016, and the queries of `domain-model.md` 5.5. A query is also a use case. It checks its permission first, in the same way as a command (R28). Every `GET` row of the tables of section 2 names its query use case, except the two export rows, which run the command `ExportVersion`. The row `GET /recipes/{ref}/compare` names no use case, because it only redirects to the diff route, which runs `DiffVersions` (ADR-0108 (e)). A form or preview query has the permission of the command that it prepares.
+The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016, and the queries of `domain-model.md` 5.5. A query is also a use case. It checks its permission first, in the same way as a command (R28). Every `GET` row of the tables of section 2 names its query use case, except the export rows. Four of them run the command `ExportVersion`, and one runs the query `ListExportableRecipes`. The row `GET /recipes/{ref}/compare` names no use case, because it only redirects to the diff route, which runs `DiffVersions` (ADR-0108 (e)). A form or preview query has the permission of the command that it prepares.
 
 ## 2. Endpoints
 
 Columns: Method, Path, Use case, Permission, Request, Success, Errors. The error column lists the HTTP status and the error code from `reliability.md` section 1.2. Every endpoint can also return these codes:
 
-- `401 E-WEB-004` (no session), `403 E-WEB-002` (no permission), `403 E-WEB-007` (CSRF).
+- `401 E-WEB-004` (no session), `403 E-WEB-002` (no permission), `403 E-WEB-007` (CSRF). The three transfer routes of section 2.7 return `401 E-WEB-012` or `401 E-IDN-003` in place of `E-WEB-004`.
 - `413 E-WEB-003` (request too large), `422 E-WEB-008` (malformed field).
 - `503 E-WEB-006` (read-only mode), `503 E-WEB-009` (timeout), `500 E-WEB-010` (internal error), `500 E-WEB-011` (a `spawn_blocking` task failed).
 - The storage codes `503 E-DB-001`, `503 E-DB-002`, `409 E-DB-003`, `503 E-DB-004`, `503 E-DB-005`, `409 E-DB-006`, `409 E-DB-007`, `500 E-DB-008`.
 - The code of a bad path value (section 1).
 
-The tables do not repeat these codes. In read-only mode every command route returns `E-WEB-006`, except `POST /login`, `POST /logout`, and the two export routes of section 2.7 (section 5.1).
+The tables do not repeat these codes. In read-only mode every command route returns `E-WEB-006`, except `POST /login`, `POST /logout`, and the five export routes of section 2.7 (section 5.1).
 
 ### 2.1 Auth and language
 
@@ -209,8 +211,23 @@ Rules:
 |---|---|---|---|---|---|---|
 | GET | `/export/v1/recipes/{ref}/approved` | `ExportVersion` | `VersionExport` | - | `200 application/json`. The `Approved` version. `loadable` is `true` | `404 E-WEB-005` no such recipe, `404 E-EXP-001` no approved version (a deleted recipe has none, I14), `500 E-EXP-002` content hash mismatch, `500 E-EXP-004` serializer error |
 | GET | `/export/v1/recipes/{ref}/versions/{n}` | `ExportVersion` | `VersionExportHistory` | - | `200 application/json`. An `Approved` or `Retired` version. `loadable` is `true` only for `Approved` | `404 E-WEB-005` no such recipe or version, `409 E-EXP-003` version is a `Draft` or discarded, `409 E-RCP-012` recipe deleted, `500 E-EXP-002`, `500 E-EXP-004` |
+| GET | `/export/v1/machines/{code}/recipes` | `ListExportableRecipes` | `VersionExport` | - | `200 application/json`. The machine and its recipes with an `Approved` version (below) | `404 E-WEB-005` no such machine, `503 E-WEB-009` the read passes `timeout.export` |
+| GET | `/export/v1/machines/{code}/recipes/{ref}/approved` | `ExportVersion` | `VersionExport` | - | `200 application/json`. The v1 document of the `Approved` version (section 6.1). `loadable` is `true` | `404 E-WEB-005` no such machine, no such recipe, or a recipe of another machine, `404 E-EXP-001`, `500 E-EXP-002`, `500 E-EXP-004` |
+| GET | `/export/v2/machines/{code}/recipes/{ref}/approved/units/{path}` | `ExportVersion` with a unit scope | `VersionExport` | - | `200 application/json`. The v2 document of one unit and its descendant units (section 6.4) | `404 E-WEB-005` as the row above, or no such unit, `404 E-EXP-001`, `404 E-EXP-005` no parameter in the scope, `422 E-PLT-017`, `422 E-PLT-002`, `500 E-EXP-002`, `500 E-EXP-004` |
 
-The export endpoints use the session cookie (ADR-0014). A `Draft` is never exportable. Each successful export writes one audit entry (A8). Section 6 defines the document. The second route exists for rollback and audit use. Operators do not have `VersionExportHistory` (section 3).
+Two schemes. The first two routes use the session cookie (ADR-0014) and never read `Authorization`. The last three routes use HTTP Basic of an `ExportClient` account and never read the session cookie. A request with both credentials uses the scheme of its route (ADR-0109 (l)). Section 7.7 defines the Basic check. The last three routes also return the codes of section 7.7.
+
+A `Draft` is never exportable. Each successful export writes one audit entry (A8). The list route writes none. Section 6 defines the documents. The second route exists for rollback and audit use. Operators do not have `VersionExportHistory` (section 3).
+
+Machine and unit values of the three transfer routes:
+
+- `{code}` names the live machine with that code. When no live machine has the code, it names the archived machine with that code that the system archived last. Recipes of an archived machine stay exportable (ADR-0109 (j)).
+- A reused code hides the older archived machine from these routes. The session routes still export its recipes.
+- `{path}` follows the rule of `UnitPath` in section 1. A path that names no unit of the machine gives `404 E-WEB-005`. On a live machine, an archived unit counts as no unit. On an archived machine, every unit counts (ADR-0109 (ja)).
+
+List body. The object `machine` holds `code`, `plc_platform`, and `archived`. The array `recipes[]` holds one row for each recipe of the machine with an `Approved` version. A row holds `reference_number`, `name`, `version_number`, `approved_at`, and `content_sha256`. The rows follow the byte order of the reference number. The list has no pages, because A19 limits the count of recipes. The query runs inside `timeout.export`. This limit is the time bound of the list (ADR-0109 (g)).
+
+Polling rule. The client reads the list and compares `content_sha256` with its last value. It runs an export only after a change (ADR-0109 (ag)). An approval can occur between the list and the export. The client therefore trusts `version.number` and `content_sha256` of the document, not the values of the list row (ADR-0109 (ah)).
 
 The export routes accept only `GET`. A `HEAD` request gets the answer of a method that the route table does not list. The use case does not run, and the audit log gets no entry (ADR-0054). The version page links to the export of its version (ADR-0052). A navigation guard refuses a cross-site or same-site request and an HTMX request before the use case (section 7.3, ADR-0055).
 
@@ -220,18 +237,18 @@ The export routes accept only `GET`. A `HEAD` request gets the answer of a metho
 |---|---|---|---|---|---|---|
 | GET | `/users` | `ListUsers` | `UserManage` | `q`, `page` | `200` list | - |
 | GET | `/users/new` | `GetUserForm` | `UserManage` | - | `200` form | - |
-| POST | `/users` | `CreateUser` | `UserManage` | `login`, `role` | `200` page of the new user with a one-time password, shown once. `must_change_password` is set | `409 E-IDN-001` |
+| POST | `/users` | `CreateUser` | `UserManage` | `login`, `role` | `200` page of the new user with a one-time password, shown once. `must_change_password` is set, except for the role `ExportClient`, which keeps the flag false (ADR-0109 (d)) | `409 E-IDN-001` |
 | GET | `/users/{login}` | `GetUser` | `UserManage` | - | `200` user page with lock state | `404 E-WEB-005` |
-| POST | `/users/{login}/role` | `SetUserRole` | `UserManage` | `role` | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002` |
+| POST | `/users/{login}/role` | `SetUserRole` | `UserManage` | `role` | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002`, `409 E-IDN-011` a change to or from `ExportClient` (ADR-0109 (f)) |
 | POST | `/users/{login}/deactivate` | `DeactivateUser` | `UserManage` | CSRF token | `200` fragment. All sessions of the user are deleted | `404 E-WEB-005`, `409 E-IDN-002`, `409 E-IDN-010` (ADR-0035) |
 | POST | `/users/{login}/activate` | `ActivateUser` | `UserManage` | CSRF token | `200` fragment | `404 E-WEB-005`, `409 E-IDN-009` |
-| POST | `/users/{login}/reset-password` | `ResetPassword` | `UserManage` | CSRF token | `200` fragment with a one-time password, shown once. `must_change_password` is set. All sessions of the user are deleted | `404 E-WEB-005` |
+| POST | `/users/{login}/reset-password` | `ResetPassword` | `UserManage` | CSRF token | `200` fragment with a one-time password, shown once. `must_change_password` is set, except for an `ExportClient` account, which keeps the flag false. All sessions of the user are deleted (ADR-0109 (e)) | `404 E-WEB-005` |
 | POST | `/users/{login}/unlock` | `UnlockLogin` | `LoginUnlock` | CSRF token | `200` fragment. The login delay counters of the user are cleared | `404 E-WEB-005` |
 | GET | `/me` | `GetOwnProfile` | authenticated | - | `200` own profile | - |
 | GET | `/me/password` | `GetOwnPasswordForm` | authenticated | - | `200` password form. The only page a session with `must_change_password` can open | - |
 | POST | `/me/password` | `ChangeOwnPassword` | authenticated | `current_password`, `password` | `200` fragment with the header `HX-Refresh: true`. Every session of the user is deleted, and a new session replaces the current one. `must_change_password` is cleared. The browser loads the page again and gets the new CSRF token (section 7.3). A request without `HX-Request` gets `303` to `/recipes` with the new session cookie (ADR-0035) | `422 E-IDN-006`, `422 E-IDN-008`, `429 E-IDN-005` (ADR-0035) |
 
-The administrator never chooses a password for another user. `CreateUser` and `ResetPassword` generate the password (ADR-0014). Deactivate is a soft delete (ADR-0021). A deactivated user keeps the audit history and cannot log in.
+The administrator never chooses a password for another user. `CreateUser` and `ResetPassword` generate the password (ADR-0014). The generated password of an `ExportClient` account is the credential of a transfer client, so the account has no forced change. Deactivate is a soft delete (ADR-0021). A deactivated user keeps the audit history and cannot log in.
 
 ### 2.9 Audit and security events
 
@@ -284,6 +301,7 @@ pub enum Permission {
 - A form or preview route is a query use case with the permission of the command that it prepares (`domain-model.md` 5.5). The matrix row of that command names the query.
 - The input of a form query names the command that it serves, the purpose. The query checks the permission of that command, and a `forbidden` event names that command. A write route of a form runs its form query before it reads its fields (ADR-0046). The five action routes of ADR-0049 have no form query and read their body first (ADR-0049 (l)).
 - A role maps to a fixed set of permissions. There are no per-user overrides (ADR-0013).
+- `ExportClient` is the role of a technical account. It holds only `VersionExport` (ADR-0109 (a), (b)). The three roles of R22 stay the roles of persons (A45). The three transfer routes accept only an `ExportClient` account, and `Login` refuses it.
 - A generated integration test checks every (operation, role) pair of the matrix below, for commands and for queries (`reliability.md` section 6).
 - Last administrator rule: `SetUserRole` and `DeactivateUser` return `Err(LastAdministrator)` when the target is the last active user with role `Administrator`. The use case takes the class-4 guard lock, then counts active administrators in a `READ COMMITTED` transaction with no retry (`data-model.md` section 6, ADR-0096). There is no database trigger for this rule.
 - Separation of duties: `ApproveVersion` returns `Err(ApproverEditedDraft)` when the approver is `created_by` of the draft or has a row in `draft_editor` for it. The configuration value `approval.separation_of_duties` is `true` by default (A34). The server stores it in `app_setting`. A change of the value writes the audit entry `SettingChanged` at the next start (`reliability.md` 7.12).
@@ -295,31 +313,32 @@ pub enum Permission {
 
 Legend: ✓ allowed, ✗ denied, (c) allowed with the condition in the last column.
 
-| Operation | Permission | Administrator | ProcessEngineer | Operator | Condition |
-|---|---|---|---|---|---|
-| View recipes, versions, parameters, machines, units, UDTs, type usage. Queries `ListMachines`, `GetMachine`, `GetUnitTree`, `GetUnit`, `ListTypes`, `GetTypeTree`, `GetTypeUsage`, `ListRecipes`, `GetRecipe`, `ListVersions`, `GetVersion`, `DiffVersions`, `ListParameters`, `GetParameter`, `GetLimits`, `GetTranslations` | `RecipeView` | ✓ | ✓ | ✓ | - |
-| View recipe history (`/recipes/{ref}/history`). Query `GetRecipeHistory` | `RecipeView` | ✓ | ✓ | ✓ | - |
-| Export the `Approved` version (`ExportVersion`) | `VersionExport` | ✓ | ✓ | ✓ | A4 |
-| Export a `Retired` version by number (`ExportVersion`) | `VersionExportHistory` | ✓ | ✓ | ✗ | ADR-0019 |
-| Create recipe (`CreateRecipe`). Form query `GetRecipeForm` with the purpose `CreateRecipe` | `RecipeCreate` | ✓ | ✓ | ✗ | R25 |
-| Rename recipe (`RenameRecipe`). Form query `GetRecipeForm` with the purpose `RenameRecipe` | `RecipeEdit` | ✓ | ✓ | ✗ | R25, ADR-0046 |
-| Delete recipe, soft (`DeleteRecipe`) | `RecipeDelete` | (c) | (c) | ✗ | ProcessEngineer: only when the recipe has no `Approved` and no `Retired` version (`E-RCP-026`). Administrator: only when the recipe has no `Approved` version (`E-RCP-010`, I14). R23, A13 |
-| Restore recipe (`RestoreRecipe`). List deleted recipes (`ListRecipes` with `show_deleted`) | `RecipeRestore` | ✓ | ✗ | ✗ | ADR-0021 |
-| Create version, a new `Draft` (`CreateVersion`). Form query `GetVersionForm` with the purpose `CreateVersion` | `VersionCreate` | ✓ | ✓ | ✗ | R25, A7 |
-| Add, edit, delete parameters, limits, translations of a `Draft`. Rebind a type revision (`AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `UpsertTranslation`, `RemoveTranslation`, `RemoveParameter`, `RebindTypeRevision`). Form query `GetParameterForm` with the purpose of each command of this row | `ParameterEdit` | ✓ | ✓ | ✗ | R09, R25 |
-| Approve version (`ApproveVersion`). Preview query `GetApprovalPreview` | `VersionApprove` | (c) | (c) | ✗ | A5, A34. Not the creator or an editor of the draft (`E-RCP-015`). The approval retires the previous `Approved` version (R27) |
-| Retire version without replacement (`RetireVersion`) | `VersionRetire` | ✓ | ✗ | ✗ | A28 |
-| Discard `Draft` (`DiscardDraft`) | `VersionDiscard` | ✓ | ✓ | ✗ | - |
-| Create, rename, archive machine (`CreateMachine`, `RenameMachine`, `ArchiveMachine`). Form query `GetMachineForm` with the purpose `CreateMachine` or `RenameMachine` | `MachineManage` | ✓ | ✓ | ✗ | A9 |
-| Add, rename, archive unit (`AddUnit`, `RenameUnit`, `ArchiveUnit`). Form query `GetUnitForm` with the purpose `AddUnit` or `RenameUnit` | `UnitManage` | ✓ | ✓ | ✗ | A9 |
-| Define UDT revision (`DefineUdt`). Form query `GetUdtForm` with the purpose `DefineUdt` | `UdtManage` | ✓ | ✓ | ✗ | A9 |
-| Create user, set role, activate, deactivate, reset password (`CreateUser`, `SetUserRole`, `ActivateUser`, `DeactivateUser`, `ResetPassword`). Form query `GetUserForm`. Queries `ListUsers`, `GetUser` | `UserManage` | ✓ | ✗ | ✗ | A9. Last administrator rule |
-| Unlock a login (`UnlockLogin`) | `LoginUnlock` | ✓ | ✗ | ✗ | ADR-0014 |
-| Log in (`Login`). Form query `GetLoginForm` | none | ✓ | ✓ | ✓ | No session needed |
-| Log out (`Logout`) | authenticated | ✓ | ✓ | ✓ | - |
-| Change own password (`ChangeOwnPassword`). Form query `GetOwnPasswordForm`. Own profile query `GetOwnProfile` | authenticated | ✓ | ✓ | ✓ | - |
-| View full audit log and security events. Queries `ListAuditEntries`, `GetAuditEntry`, `ListSecurityEvents` | `AuditView` | ✓ | ✗ | ✗ | A20 |
-| View audit entries of recipes, versions, parameters. Queries `ListAuditEntries`, `GetAuditEntry` | `AuditViewRecipes` | ✓ | ✓ | ✗ | A20 |
+| Operation | Permission | Administrator | ProcessEngineer | Operator | ExportClient | Condition |
+|---|---|---|---|---|---|---|
+| View recipes, versions, parameters, machines, units, UDTs, type usage. Queries `ListMachines`, `GetMachine`, `GetUnitTree`, `GetUnit`, `ListTypes`, `GetTypeTree`, `GetTypeUsage`, `ListRecipes`, `GetRecipe`, `ListVersions`, `GetVersion`, `DiffVersions`, `ListParameters`, `GetParameter`, `GetLimits`, `GetTranslations` | `RecipeView` | ✓ | ✓ | ✓ | ✗ | - |
+| View recipe history (`/recipes/{ref}/history`). Query `GetRecipeHistory` | `RecipeView` | ✓ | ✓ | ✓ | ✗ | - |
+| Export the `Approved` version (`ExportVersion`) | `VersionExport` | ✓ | ✓ | ✓ | ✓ | A4. ADR-0109 (b). Over HTTP, only an `ExportClient` account reaches the three transfer routes (section 7.7) |
+| List the recipes of a machine with an `Approved` version (`ListExportableRecipes`) | `VersionExport` | ✓ | ✓ | ✓ | ✓ | R18, A4. ADR-0109 (g) |
+| Export a `Retired` version by number (`ExportVersion`) | `VersionExportHistory` | ✓ | ✓ | ✗ | ✗ | ADR-0019 |
+| Create recipe (`CreateRecipe`). Form query `GetRecipeForm` with the purpose `CreateRecipe` | `RecipeCreate` | ✓ | ✓ | ✗ | ✗ | R25 |
+| Rename recipe (`RenameRecipe`). Form query `GetRecipeForm` with the purpose `RenameRecipe` | `RecipeEdit` | ✓ | ✓ | ✗ | ✗ | R25, ADR-0046 |
+| Delete recipe, soft (`DeleteRecipe`) | `RecipeDelete` | (c) | (c) | ✗ | ✗ | ProcessEngineer: only when the recipe has no `Approved` and no `Retired` version (`E-RCP-026`). Administrator: only when the recipe has no `Approved` version (`E-RCP-010`, I14). R23, A13 |
+| Restore recipe (`RestoreRecipe`). List deleted recipes (`ListRecipes` with `show_deleted`) | `RecipeRestore` | ✓ | ✗ | ✗ | ✗ | ADR-0021 |
+| Create version, a new `Draft` (`CreateVersion`). Form query `GetVersionForm` with the purpose `CreateVersion` | `VersionCreate` | ✓ | ✓ | ✗ | ✗ | R25, A7 |
+| Add, edit, delete parameters, limits, translations of a `Draft`. Rebind a type revision (`AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `UpsertTranslation`, `RemoveTranslation`, `RemoveParameter`, `RebindTypeRevision`). Form query `GetParameterForm` with the purpose of each command of this row | `ParameterEdit` | ✓ | ✓ | ✗ | ✗ | R09, R25 |
+| Approve version (`ApproveVersion`). Preview query `GetApprovalPreview` | `VersionApprove` | (c) | (c) | ✗ | ✗ | A5, A34. Not the creator or an editor of the draft (`E-RCP-015`). The approval retires the previous `Approved` version (R27) |
+| Retire version without replacement (`RetireVersion`) | `VersionRetire` | ✓ | ✗ | ✗ | ✗ | A28 |
+| Discard `Draft` (`DiscardDraft`) | `VersionDiscard` | ✓ | ✓ | ✗ | ✗ | - |
+| Create, rename, archive machine (`CreateMachine`, `RenameMachine`, `ArchiveMachine`). Form query `GetMachineForm` with the purpose `CreateMachine` or `RenameMachine` | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9 |
+| Add, rename, archive unit (`AddUnit`, `RenameUnit`, `ArchiveUnit`). Form query `GetUnitForm` with the purpose `AddUnit` or `RenameUnit` | `UnitManage` | ✓ | ✓ | ✗ | ✗ | A9 |
+| Define UDT revision (`DefineUdt`). Form query `GetUdtForm` with the purpose `DefineUdt` | `UdtManage` | ✓ | ✓ | ✗ | ✗ | A9 |
+| Create user, set role, activate, deactivate, reset password (`CreateUser`, `SetUserRole`, `ActivateUser`, `DeactivateUser`, `ResetPassword`). Form query `GetUserForm`. Queries `ListUsers`, `GetUser` | `UserManage` | ✓ | ✗ | ✗ | ✗ | A9. Last administrator rule |
+| Unlock a login (`UnlockLogin`) | `LoginUnlock` | ✓ | ✗ | ✗ | ✗ | ADR-0014 |
+| Log in (`Login`). Form query `GetLoginForm` | none | ✓ | ✓ | ✓ | ✗ | No session needed. `ExportClient` gets `E-IDN-003` after the password check (ADR-0109 (c)) |
+| Log out (`Logout`) | authenticated | ✓ | ✓ | ✓ | ✗ | `ExportClient` has no session |
+| Change own password (`ChangeOwnPassword`). Form query `GetOwnPasswordForm`. Own profile query `GetOwnProfile` | authenticated | ✓ | ✓ | ✓ | ✗ | `ExportClient` has no session |
+| View full audit log and security events. Queries `ListAuditEntries`, `GetAuditEntry`, `ListSecurityEvents` | `AuditView` | ✓ | ✗ | ✗ | ✗ | A20 |
+| View audit entries of recipes, versions, parameters. Queries `ListAuditEntries`, `GetAuditEntry` | `AuditViewRecipes` | ✓ | ✓ | ✗ | ✗ | A20 |
 
 Role to permission mapping:
 
@@ -328,6 +347,7 @@ Role to permission mapping:
 | Administrator | every permission |
 | ProcessEngineer | `RecipeView`, `VersionExport`, `VersionExportHistory`, `RecipeCreate`, `RecipeEdit`, `RecipeDelete` (c), `VersionCreate`, `ParameterEdit`, `VersionApprove` (c), `VersionDiscard`, `MachineManage`, `UnitManage`, `UdtManage`, `AuditViewRecipes` |
 | Operator | `RecipeView`, `VersionExport` |
+| ExportClient | `VersionExport` |
 
 ## 4. Concurrency protocol
 
@@ -363,23 +383,24 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | No permission (`E-WEB-002`) | `403` | `error.html` with the operation name |
 | CSRF token missing or wrong (`E-WEB-007`) | `403` | `error.html` |
 | No session, expired session (`E-WEB-004`) | `401` | `HX-Redirect: /login` for HTMX, `303` to `/login` otherwise. `E-WEB-004` is the only code with `HX-Redirect` |
-| Wrong credentials (`E-IDN-003`) | `401` | `field-errors.html` on the login form. No redirect |
+| Basic credentials missing or malformed (`E-WEB-012`) | `401` | JSON body of section 5.3 with the header `WWW-Authenticate` (section 7.7). Only the three transfer routes return it |
+| Wrong credentials (`E-IDN-003`) | `401` | `field-errors.html` on the login form. No redirect. On a transfer route: the JSON body of section 5.3 with the header `WWW-Authenticate` |
 | Wrong current password (`E-IDN-008`) | `422` | `field-errors.html` on the password form |
-| Missing resource in the URL (`E-WEB-005`, `E-EXP-001`, `E-RCP-050`, `E-RCP-051`) or in a request field (`E-PLT-019`, `E-PLT-020`) | `404` | `error.html` |
+| Missing resource in the URL (`E-WEB-005`, `E-EXP-001`, `E-EXP-005`, `E-RCP-050`, `E-RCP-051`) or in a request field (`E-PLT-019`, `E-PLT-020`) | `404` | `error.html` |
 | Request too large (`E-WEB-003`) | `413` | `error.html` |
 | Login throttled (`E-IDN-005`) | `429` | `error.html` with `Retry-After` |
-| Read-only mode (`E-WEB-006`). Every command except `Login`, `Logout`, and `ExportVersion` gets it. Queries, the two export routes, `POST /login`, `POST /logout`, and `POST /lang` stay available (`reliability.md` 7.8) | `503` | `error.html` with the banner text |
+| Read-only mode (`E-WEB-006`). Every command except `Login`, `Logout`, and `ExportVersion` gets it. Queries, the five export routes, `POST /login`, `POST /logout`, and `POST /lang` stay available (`reliability.md` 7.8) | `503` | `error.html` with the banner text |
 | Timeout, deadlock, pool exhausted, database unavailable (`E-WEB-009`, and the `StorageError` codes `E-DB-001`, `E-DB-002`, `E-DB-004`, `E-DB-005`) | `503` | `error.html` with `Retry-After` set to `http.retry_after` (`reliability.md` 7.11) |
 | Export failure: content hash mismatch or serializer error (`E-EXP-002`, `E-EXP-004`) | `500` | JSON error body on the export routes. `ApproveVersion` returns `E-EXP-004` with `error.html` |
 | Unexpected, caught panic, failed `spawn_blocking` task, unexpected database error (`E-WEB-010`, `E-WEB-011`, `E-AUD-001`, `E-DB-008`) | `500` | `error.html` with `request_id` and code only. Never the error chain, never SQL, never a path |
 
-On a path under `/export/v1/`, every family with a status of 400 or more gets the JSON body of section 5.3. That body replaces the fragment. `E-WEB-004` and `E-IDN-007` keep their redirects (ADR-0053).
+On a path under `/export/`, every family with a status of 400 or more gets the JSON body of section 5.3. That body replaces the fragment. On the two session routes, `E-WEB-004` and `E-IDN-007` keep their redirects (ADR-0053). A transfer route never answers `303` (ADR-0109 (r)).
 
-A caught panic gives `500 E-WEB-010` with the answer of sections 5.2 and 5.3 (ADR-0057 (a), (b)). That answer is the page, the HTMX fragment, or the JSON body on `/export/v1/`. The answer of the backstop is the one exception to sections 5.1 to 5.3 (ADR-0057 (c) to (e)):
+A caught panic gives `500 E-WEB-010` with the answer of sections 5.2 and 5.3 (ADR-0057 (a), (b)). That answer is the page, the HTMX fragment, or the JSON body on `/export/`. The answer of the backstop is the one exception to sections 5.1 to 5.3 (ADR-0057 (c) to (e)):
 
 - The backstop is the second `CatchPanicLayer` directly inside the layer `request_id`. It catches a panic of `TraceLayer`, the header layers, and `render_errors`.
 - Its answer is a plain `500` with `Content-Type: text/plain`. The body holds the code `E-WEB-010` and the English text of its row in `reliability.md` section 1.2 without the reference.
-- The layer `request_id` adds `X-Request-Id`. The answer has no `HX-*` header and no JSON body, also on `/export/v1/`.
+- The layer `request_id` adds `X-Request-Id`. The answer has no `HX-*` header and no JSON body, also on `/export/`.
 
 ### 5.2 Error fragment content
 
@@ -396,20 +417,20 @@ The same code appears in the structured log of the request. A user can report th
 - An HTMX request gets the fragment. The response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036) for every status `>= 400`, except `E-WEB-004`, which sets `HX-Redirect`. HTMX swaps a 4xx or 5xx fragment only because of the `responseHandling` value of section 9.
 - The same HTMX error response also sets `HX-Push-Url: false`. A refused form with `hx-push-url="true"` then keeps the URL of its page (ADR-0037 (z)).
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
-- The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`. `message` is the sentence of the code in the UI language, without the reference. The answer has no `HX-*` header, also for an HTMX request. A request without a valid session gets `303` to `/login`, and a session with `must_change_password` gets `303` to `/me/password` (ADR-0053).
+- The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`. `message` is the sentence of the code in the UI language, without the reference. The answer has no `HX-*` header, also for an HTMX request. On the two session routes, a request without a valid session gets `303` to `/login`, and a session with `must_change_password` gets `303` to `/me/password` (ADR-0053). On a transfer route, `message` uses the UI language of the request, and the default is `pl` (ADR-0109 (r)).
 - The answer of the backstop of section 5.1 is the one exception to these rules (ADR-0057 (e)).
 
-## 6. Export document (v1)
+## 6. Export document (v1 and v2)
 
-The export document is the only machine-readable output of the system (ADR-0019). It is the interface to the recipe transfer system, which is out of scope.
+The export document is the only machine-readable output of the system (ADR-0019). It is the interface to the transfer client. The client pulls the document with HTTP Basic (section 2.7, ADR-0109). The transfer client is out of scope.
 
-The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the source of truth. Golden-file tests compare the serializer output with the schema and with stored examples. This section describes the schema. When the two differ, the schema file wins. The module `export` of `recipe-domain` builds the hashed body and computes the hash. `recipe-export` writes the HTTP response (ADR-0019).
+The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the source of truth. Golden-file tests compare the serializer output with the schema and with stored examples. This section describes the schema. When the two differ, the schema file wins. The module `export` of `recipe-domain` builds the hashed body and computes the hash. `recipe-export` writes the HTTP response (ADR-0019). Sections 6.1 to 6.3 describe v1. Section 6.4 describes v2.
 
 ### 6.1 Fields
 
 | Field | Type | In hash | Rule |
 |---|---|---|---|
-| `schema_version` | string | no | `"1"`. A breaking change creates `"2"` and `/export/v2/` |
+| `schema_version` | string | no | `"1"`. A breaking change creates `"2"` and `/export/v2/`. Section 6.4 describes `"2"` |
 | `exported_at` | string, RFC 3339 UTC | no | Time of this export |
 | `exported_by` | string | no | `Login` of the user |
 | `loadable` | boolean | no | `true` only when `version.status` is `Approved` at export time |
@@ -543,7 +564,53 @@ The hash value in the example is a placeholder.
   - `parameters[]`: by `unit_path`, then `tag`. `unit_path` is compared segment by segment as integers, the first segment without its `U` prefix. A path comes before a longer path with the same first segments. `tag` is compared byte by byte. `parameter.ordinal` sorts the UI only. It is not in the document.
   - `parameters[].limits[]`: by `leaf_path`, compared byte by byte. In the example of 6.2, `.label` comes before `.setpoint`.
   - `types[].members[]`: by the member `ordinal` of `plc_type_member`, which the document gives as the array order.
-- Before the transfer system loads a recipe into a PLC, it MUST check `loadable`. It MUST also build the hashed body from the document with the array order above, compute its SHA-256, and compare the result with `content_sha256`. Every sort key of the hashed arrays is in the document: `id`, `unit_path`, `tag`, `leaf_path`, and the order of `members[]`.
+- Before the transfer system loads a v1 document into a PLC, it MUST check `loadable`. It MUST also build the hashed body from the document with the array order above, compute its SHA-256, and compare the result with `content_sha256`. Every sort key of the hashed arrays is in the document: `id`, `unit_path`, `tag`, `leaf_path`, and the order of `members[]`.
+
+### 6.4 Unit scope document (v2)
+
+The v2 document holds the parameters of one unit and of its descendant units. A subset of the parameters fails the v1 check of section 6.3, and the v1 schema file refuses an extra top-level field. The unit document therefore is a new version (ADR-0109 (z), (aa)).
+
+The schema file is `crates/recipe-export/schema/export-v2.schema.json`. As for v1, the file wins when it differs from this section. The v1 routes, the v1 document, and the v1 schema file do not change.
+
+The v2 document holds every field of section 6.1 and two more fields. These fields differ from v1:
+
+| Field | Type | In scope hash | Rule |
+|---|---|---|---|
+| `schema_version` | string | no | `"2"` |
+| `scope` | object | yes | `{"unit_path": <path>}`. The path is the `{path}` of the route |
+| `scope_sha256` | string, 64 hex chars | no | Hash of the scope hashed body (below). The system computes it at each export and does not store it |
+| `content_sha256` | string, 64 hex chars | no | The stored hash of the whole version. It does not describe the parameters of this document |
+| `parameters[]` | array | yes | Each parameter of the version whose `unit_path` equals `{path}` or starts with `{path}` and a `.`. The comparison uses whole segments, so `U1` does not match `U12`. The array order of section 6.3 applies |
+| `types[]` | array | yes | The types that these parameters use, by the rule of section 6.1. The array order of section 6.3 applies |
+
+Every other field has the type and the rule of section 6.1.
+
+The v2 document uses the field order of section 6.1 with two insertions. `scope_sha256` comes directly after `content_sha256`. `scope` comes directly after `version`. The top-level order therefore is `schema_version`, `exported_at`, `exported_by`, `loadable`, `content_sha256`, `scope_sha256`, `machine`, `recipe`, `version`, `scope`, `types`, `parameters`.
+
+Scope hashed body: a JSON object with `machine.code`, `machine.plc_platform`, `recipe.reference_number`, `version.number`, `scope`, `types[]`, and `parameters[]` without `name_en`.
+
+```json
+{
+  "machine": { "code": "M12", "plc_platform": "S7_300" },
+  "recipe": { "reference_number": "R-100" },
+  "version": { "number": 3 },
+  "scope": { "unit_path": "U1.2" },
+  "types": [ "... only the types of the scope parameters ..." ],
+  "parameters": [ "... only the parameters of the scope, without name_en ..." ]
+}
+```
+
+`scope_sha256` is the lower-case hex SHA-256 of the RFC 8785 (JCS) canonical form of the scope hashed body (ADR-0109 (u), (v)). The rules of section 6.1 about names, status, and export data apply. Two units of one version give the same `content_sha256` and two different values of `scope_sha256`.
+
+Server rules:
+
+- The system checks the whole version first. It rebuilds the hashed body of section 6.3 and compares its hash with the stored `content_sha256`. A difference gives `500 E-EXP-002`, and the system writes no audit entry (ADR-0109 (w)).
+- Then the system filters the parameters, builds `types[]` of the filtered parameters, and computes `scope_sha256`.
+- A unit without a parameter in the scope gives `404 E-EXP-005`. The client never gets an empty load (ADR-0109 (x)).
+- The response sets `Content-Disposition: attachment; filename="recipe_{ref}_v{n}_{path}.json"` and `Cache-Control: no-store` (ADR-0109 (y)).
+- Each export writes one `VersionExported` entry (A8). It holds the schema version `"2"`, `content_sha256`, `scope_unit_path`, and `scope_sha256` (ADR-0109 (ab)).
+
+Consumer rule of v2. Before the transfer client loads a v2 document into a PLC, it MUST check `loadable`. It MUST also build the scope hashed body from the document with the array order of section 6.3. It MUST compute the SHA-256 of the canonical form and compare the result with `scope_sha256`. The client cannot rebuild `content_sha256` from a v2 document. It uses `content_sha256` only to find a change in any part of the version.
 
 ## 7. Session and CSRF
 
@@ -586,7 +653,7 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 - Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. An `Origin` matches the site when it equals `https://` followed by the `Host` header (ADR-0035). A request without either is rejected.
 - A mutating request without a valid token or without a valid origin gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8). When the event cannot be written, the request gets the storage error (ADR-0035).
 - The export endpoints are `GET` and need no token.
-- A guard runs before the use case on the two export routes, after the session layer and the gates. A request with a `Sec-Fetch-Site` header other than `same-origin` or `none` gets `403 E-WEB-007`. A request with `HX-Request: true` gets the same answer. The answer is the JSON body of section 5.3, and the guard writes one `csrf_rejected` event. A request without `Sec-Fetch-Site` passes (ADR-0055).
+- A guard runs before the use case on every export route. On the two session routes, it runs after the session layer and the gates. On the three transfer routes, it runs before the Basic check, so a rejected cross-site request runs no hash (ADR-0109 (p)). A request with a `Sec-Fetch-Site` header other than `same-origin` or `none` gets `403 E-WEB-007`. A request with `HX-Request: true` gets the same answer. The answer is the JSON body of section 5.3, and the guard writes one `csrf_rejected` event. The event kind aggregates per client address and minute. A request without `Sec-Fetch-Site` passes (ADR-0055).
 - Session fixation: `Login` always creates a new session row and a new token. When the login request carries a session cookie, `Login` deletes that session row.
 
 ### 7.4 Login protection
@@ -605,7 +672,7 @@ The values of this section are in `reliability.md` section 7.11.
 - Every Argon2id call runs under a global semaphore with 4 permits and an acquire timeout of 2 seconds. A timeout returns `503 E-WEB-009` with `Retry-After`.
 - Hash: Argon2id, `m = 19 MiB`, `t = 2`, `p = 1`. The hash is never logged.
 - Password policy: 12 to 128 characters, no composition rule, and not present in the local breached-password list shipped with the image. Assumption A23.
-- One-time password: `CreateUser` and `ResetPassword` generate a random password that meets the policy. The page shows it once. The command sets `must_change_password`. No request field carries a password for another user.
+- One-time password: `CreateUser` and `ResetPassword` generate a random password that meets the policy. The page shows it once. The command sets `must_change_password`, except for an `ExportClient` account (section 7.7). No request field carries a password for another user.
 - `must_change_password`: a session of a user with the flag can open only `GET /me/password`, `POST /me/password`, `POST /logout`, and `POST /lang`. Every other route returns `303` to `/me/password`. `GET /static/*` is outside this gate, because it needs no session (section 2.1).
 
 ### 7.5 Account state
@@ -621,6 +688,38 @@ A deactivated user gets the same `401 E-IDN-003` response as a wrong password (A
 | `POST .../translations/{lang}` | 64 KiB |
 
 The values are in `reliability.md` section 7.11. A request above the limit gets `413 E-WEB-003`. Each route has its own limit, also the buffer of the CSRF check (ADR-0039).
+
+### 7.7 HTTP Basic of a technical account
+
+The three transfer routes of section 2.7 use HTTP Basic (ADR-0109). The session cookie, the CSRF token, and the session store play no part. A `GET` request needs no token.
+
+Parser of the header. The parser runs before any hash. It never logs the header. It gives `401 E-WEB-012` for each of these cases:
+
+- More than one `Authorization` header, or a header longer than `export.basic_header_max`. The parser checks the length before it decodes.
+- A scheme other than `Basic`. The parser ignores the case of the scheme.
+- Text that is not standard Base64 with padding, or decoded bytes that are not UTF-8.
+- Decoded text without `:`. The parser splits the text at the first `:`, so the password can hold `:`.
+- A login outside `TypedLogin` (1 to 64 characters), a password outside 1 to 128 characters, or a control character in either part.
+
+The Basic check is a use case of the identity module, not a command. It runs these steps:
+
+1. It takes the Basic permit (`export.basic_permits`), then the Argon2 permit. Both use the acquire timeout of section 7.4.
+2. It runs T1 of `Login` (section 7.4). A throttled check gives `429 E-IDN-005` with `Retry-After`. A permit timeout gives `503 E-WEB-009` with `Retry-After`.
+3. It hashes the password in `spawn_blocking`. An unknown login, an inactive account, or a login outside `Login` gets the dummy hash (A42).
+4. It refuses an account of a person after the hash check.
+5. T2 locks the `app_user` row `FOR NO KEY UPDATE`. It checks again that the account is active, has the role `ExportClient`, and has the same password hash.
+6. When T2 finds no change, it sets `succeeded = true`. T2 writes no audit entry and creates no session.
+
+An unknown login, an inactive account, an account of a person, a changed state, and a wrong password give the same answer: `401 E-IDN-003`. The status, the body, and the hash work are the same (A42, ADR-0109 (m)). Each failure writes a `security_event` through `SecurityEventSink`. Its `detail` holds the reason and the scheme `basic`. T1 and T2 are an exception to the rule of one transaction per command, as T1 and T2 of `Login` are (ADR-0035 (b)).
+
+The result is a `BasicPrincipal` with the `CurrentUser` of the account. It holds no session id, no session reference, no epoch, and no CSRF token (ADR-0109 (mb)). The audit entry of the export therefore has no session reference.
+
+Answers:
+
+- Every `401` of a transfer route has the header `WWW-Authenticate: RecipeExport realm="export"`. A browser does not know the scheme, so it shows no password dialog and keeps no credentials. The client sends `Authorization: Basic` on its first request (ADR-0109 (o)).
+- `Login` refuses an `ExportClient` account after the password check with `401 E-IDN-003`. The `security_event` row has the reason `technical_account` (ADR-0109 (c)).
+- In read-only mode, the three routes stay available. The Basic check keeps its `login_attempt` rows (ADR-0109 (ac)).
+- Caddy handles TLS. The HTTP site of Caddy answers each path under `/export/` with `403` and no redirect (ADR-0109 (ad), (ae)).
 
 ## 8. Internationalization
 

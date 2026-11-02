@@ -17,6 +17,7 @@ use recipe_domain::audit::RequestId;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
 use recipe_domain::identity::{IdentityError, Role};
+use recipe_domain::plant::UnitPath;
 use recipe_domain::recipe::{RecipeError, ReferenceNumber};
 use tokio::time::Instant;
 use uuid::Uuid;
@@ -61,6 +62,11 @@ fn export_error_for(case: &str) -> WebError {
         "exp-003" => app(ExportError::VersionNotExportable {
             reference: reference(),
             number: 2,
+        }),
+        "exp-005" => app(ExportError::EmptyScope {
+            reference: reference(),
+            number: 2,
+            path: UnitPath::parse("U1.2").unwrap(),
         }),
         "exp-004" => app(ExportError::Serialize(serde::ser::Error::custom(
             "the serializer failed",
@@ -146,9 +152,10 @@ fn row(path: &'static str, access: Access, handler: MethodRouter<WebState>) -> R
     }
 }
 
-/// Build the router with the five test routes and a client at `PEER`.
+/// Build the router with the test routes and a client at `PEER`.
 ///
-/// `/export/v10/{case}` is outside the prefix `/export/v1/`. It proves that the prefix ends with `/`.
+/// The routes under `/export/v2/` have no real handler yet (ADR-0109 (q)). `/exports/{case}` and
+/// `/export-x/{case}` are outside the prefix `/export/`. They prove that the prefix ends with `/`.
 fn router(fixture: &Fixture) -> Router {
     let rows = vec![
         row("/export/v1/test/{case}", Access::Static, get(raise)),
@@ -159,7 +166,11 @@ fn router(fixture: &Fixture) -> Router {
             Access::Operation(Operation::ExportApprovedVersion),
             get(reached),
         ),
-        row("/export/v10/{case}", Access::Static, get(raise)),
+        row("/export/v2/test/{case}", Access::Static, get(raise)),
+        row("/export/v2/guarded", Access::Static, get(reached)),
+        row("/export/v2/slow", Access::Static, get(outlast_the_timeout)),
+        row("/exports/{case}", Access::Static, get(raise)),
+        row("/export-x/{case}", Access::Static, get(raise)),
     ];
     assemble(fixture.state.clone(), rows, Router::new()).layer(MockConnectInfo(PEER))
 }
@@ -223,11 +234,12 @@ fn assert_json(reply: &Reply, status: StatusCode, code: &str, case: &str) -> Bod
 }
 
 /// The cases of the families: the case, the status, and the code of the body.
-const FAMILIES: [(&str, StatusCode, &str); 19] = [
+const FAMILIES: [(&str, StatusCode, &str); 20] = [
     ("exp-001", StatusCode::NOT_FOUND, "E-EXP-001"),
     ("exp-002", StatusCode::INTERNAL_SERVER_ERROR, "E-EXP-002"),
     ("exp-003", StatusCode::CONFLICT, "E-EXP-003"),
     ("exp-004", StatusCode::INTERNAL_SERVER_ERROR, "E-EXP-004"),
+    ("exp-005", StatusCode::NOT_FOUND, "E-EXP-005"),
     ("deleted", StatusCode::CONFLICT, "E-RCP-012"),
     ("forbidden", StatusCode::FORBIDDEN, "E-WEB-002"),
     ("not-found", StatusCode::NOT_FOUND, "E-WEB-005"),
@@ -312,7 +324,7 @@ async fn export_json_an_htmx_request_gets_the_guard_answer_as_json_and_no_htmx_h
 }
 
 /// The sentences of the codes with arguments, in `pl` and `en` (design D9, `i18n/*.ftl`).
-const SENTENCES: [(&str, &str, &str); 5] = [
+const SENTENCES: [(&str, &str, &str); 6] = [
     (
         "exp-001",
         "Receptura R-100 nie ma wersji zatwierdzonej.",
@@ -327,6 +339,11 @@ const SENTENCES: [(&str, &str, &str); 5] = [
         "exp-003",
         "Wersja 2 receptury R-100 jest szkicem albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.",
         "Version 2 of recipe R-100 is a draft or was discarded. Only approved and retired versions can be exported.",
+    ),
+    (
+        "exp-005",
+        "Wersja 2 receptury R-100 nie ma parametru w jednostce U1.2 ani poniżej niej.",
+        "Version 2 of recipe R-100 has no parameter in unit U1.2 or below it.",
     ),
     (
         "deleted",
@@ -435,14 +452,79 @@ async fn export_json_the_router_404_text_stays_for_an_unknown_path_and_an_unlist
 #[tokio::test]
 async fn export_json_a_path_outside_the_prefix_keeps_the_html_answer() {
     let fixture = Fixture::new();
-    let reply = ask(&fixture, "/export/v10/exp-001", &[]).await;
+    for path in ["/exports/exp-001", "/export-x/exp-001"] {
+        let reply = ask(&fixture, path, &[]).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path}");
+        assert!(
+            reply.header("content-type").starts_with("text/html"),
+            "{path}: {}",
+            reply.header("content-type")
+        );
+        assert!(reply.body.contains("E-EXP-001"), "{path}: {}", reply.body);
+    }
+}
+
+/// A path under `/export/v2/` gets the JSON error body (ADR-0109 (q), ADR-0053 (a)).
+#[tokio::test]
+async fn export_json_a_v2_path_gets_the_json_error_body() {
+    let fixture = Fixture::new();
+    let reply = ask(&fixture, "/export/v2/test/exp-001", &[]).await;
+    assert_json(&reply, StatusCode::NOT_FOUND, "E-EXP-001", "v2");
+}
+
+/// The router 404 text stays for an unrouted path under `/export/v2/`, as under `/export/v1/`.
+#[tokio::test]
+async fn export_json_the_router_404_text_stays_for_an_unrouted_v2_path() {
+    let fixture = Fixture::new();
+    let path = "/export/v2/machines/M1/recipes/R-1/approved/units/U1";
+    let reply = ask(&fixture, path, &[]).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
-    assert!(
-        reply.header("content-type").starts_with("text/html"),
-        "{}",
-        reply.header("content-type")
-    );
-    assert!(reply.body.contains("E-EXP-001"), "{}", reply.body);
+    assert_eq!(reply.body, "Not found");
+}
+
+/// The guard of ADR-0055 runs on a route under `/export/v2/` (ADR-0109 (q)).
+#[tokio::test]
+async fn export_json_the_guard_rejects_a_v2_request_with_a_foreign_site_or_htmx() {
+    let fixture = Fixture::new();
+    let cases: [Vec<(&str, &str)>; 3] = [
+        vec![("sec-fetch-site", "cross-site")],
+        vec![("sec-fetch-site", "same-site")],
+        vec![HTMX],
+    ];
+    for (count, headers) in cases.iter().enumerate() {
+        let reply = ask(&fixture, "/export/v2/guarded", headers).await;
+        assert_json(&reply, StatusCode::FORBIDDEN, "E-WEB-007", "v2 guard");
+        let events = count.checked_add(1).unwrap();
+        assert_eq!(fixture.sink.events().len(), events, "{headers:?}");
+    }
+    for site in ["none", "same-origin"] {
+        let reply = ask(&fixture, "/export/v2/guarded", &[("sec-fetch-site", site)]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{site}");
+        assert_eq!(reply.body, REACHED, "{site}");
+    }
+}
+
+/// `HEAD` on a route under `/export/v2/` gets the answer of an unlisted method (ADR-0054).
+#[tokio::test]
+async fn export_json_head_on_a_v2_route_gets_the_answer_of_an_unlisted_method() {
+    let fixture = Fixture::new();
+    let request = request(Method::HEAD, "/export/v2/guarded")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let reply = call(&router(&fixture), request).await;
+    assert_eq!(reply.status, StatusCode::NOT_FOUND);
+}
+
+/// A slow handler under `/export/v2/` has no request timeout (ADR-0072 (a), ADR-0109 (q)).
+#[tokio::test(start_paused = true)]
+async fn export_json_a_slow_v2_handler_outlasts_the_request_timeout() {
+    let fixture = Fixture::new();
+    let limit = fixture.state.settings().request_timeout;
+    let started = Instant::now();
+    let reply = ask(&fixture, "/export/v2/slow", &[ENGLISH]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.body, REACHED);
+    assert!(started.elapsed() >= limit.saturating_mul(2));
 }
 
 #[tokio::test]

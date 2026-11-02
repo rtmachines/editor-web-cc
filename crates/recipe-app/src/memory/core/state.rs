@@ -125,6 +125,24 @@ impl MemoryState {
         self.types.get(&id).map(|row| &row.plc_type)
     }
 
+    /// Return the number of rows in the table `login_attempt`.
+    ///
+    /// The method solves one problem: a web test must prove that a refused request wrote no
+    /// attempt row, and the table is private to the crate.
+    #[must_use]
+    pub fn login_attempt_count(&self) -> usize {
+        self.attempts.len()
+    }
+
+    /// Return the number of rows of the table `login_attempt` with `succeeded = true`.
+    ///
+    /// The method solves one problem: a web test must prove that a Basic check confirmed its
+    /// attempt row in read-only mode, and the table is private to the crate.
+    #[must_use]
+    pub fn succeeded_login_attempt_count(&self) -> usize {
+        self.attempts.values().filter(|row| row.succeeded).count()
+    }
+
     /// Take the next identifier of an `app_setting` row.
     ///
     /// The method solves one problem: the identifier rule must live in one place. The

@@ -14,7 +14,7 @@ pub enum Requirement {
     Permission(Permission),
     /// The role must hold at least one of the two permissions.
     AnyOf(Permission, Permission),
-    /// Any logged-in user passes.
+    /// Any logged-in person passes.
     Authenticated,
     /// The operation needs no session.
     NoSession,
@@ -27,7 +27,8 @@ impl Requirement {
         match self {
             Self::Permission(permission) => role.has(permission),
             Self::AnyOf(first, second) => role.has(first) || role.has(second),
-            Self::Authenticated | Self::NoSession => true,
+            // An `ExportClient` has no session and no login (ADR-0109 (a), `api.md` section 3.3).
+            Self::Authenticated | Self::NoSession => role.is_person(),
         }
     }
 }
@@ -75,7 +76,9 @@ impl Operation {
             }
             Self::RetireVersion => Requirement::Permission(Permission::VersionRetire),
             Self::DiscardDraft => Requirement::Permission(Permission::VersionDiscard),
-            Self::ExportApprovedVersion => Requirement::Permission(Permission::VersionExport),
+            Self::ExportApprovedVersion | Self::ListExportableRecipes => {
+                Requirement::Permission(Permission::VersionExport)
+            }
             Self::ExportVersionByNumber => {
                 Requirement::Permission(Permission::VersionExportHistory)
             }

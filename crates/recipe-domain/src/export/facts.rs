@@ -15,6 +15,9 @@ use crate::timestamp::Timestamp;
 /// The value of `schema_version` in every export document of this format.
 pub const SCHEMA_VERSION: &str = "1";
 
+/// The value of `schema_version` in the export document of a unit scope (ADR-0109 (aa)).
+pub const SCOPE_SCHEMA_VERSION: &str = "2";
+
 /// The last year that the time text can write with four digits.
 const MAX_YEAR: i32 = 9999;
 
@@ -69,6 +72,19 @@ impl DocumentFacts {
     pub const fn loadable(&self) -> bool {
         self.status.loadable()
     }
+}
+
+/// The fields of the export document v2 that the hash of the scope body does not cover.
+///
+/// The type solves one problem: the document v2 holds every field of the document v1 and the hash
+/// `scope_sha256` (ADR-0109 (s)). The writer of a unit scope gets both in one value, next to the
+/// scope body. `document.content_sha256` is the stored hash of the whole version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScopeFacts {
+    /// The facts that the document v1 holds.
+    pub document: DocumentFacts,
+    /// The hash of the scope body, the value of `scope_sha256`.
+    pub scope_sha256: Sha256,
 }
 
 /// Write an instant as UTC text `YYYY-MM-DDTHH:MM:SSZ` with whole seconds (`api.md` section 6.2).

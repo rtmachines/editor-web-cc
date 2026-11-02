@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use recipe_app::ports::DocumentWriter;
-use recipe_domain::export::{DocumentFacts, ExportError, HashedBody};
+use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
 
 /// The bytes that [`RecordingWriter`] returns as the document.
 const DOCUMENT: &[u8] = b"{\"recorded\":true}";
@@ -37,6 +37,10 @@ impl DocumentWriter for RecordingWriter {
             .expect("the test keeps the receiver");
         Ok(DOCUMENT.to_vec())
     }
+
+    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        Ok(DOCUMENT.to_vec())
+    }
 }
 
 /// A writer whose every call returns `ExportError::Serialize` (`E-EXP-004`).
@@ -50,9 +54,18 @@ impl FailingWriter {
     }
 }
 
+/// Return the `E-EXP-004` error that the failing writer gives.
+fn serialize_error() -> ExportError {
+    let error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+    ExportError::Serialize(error)
+}
+
 impl DocumentWriter for FailingWriter {
     fn write(&self, _body: &HashedBody, _facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
-        let error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
-        Err(ExportError::Serialize(error))
+        Err(serialize_error())
+    }
+
+    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        Err(serialize_error())
     }
 }

@@ -37,10 +37,10 @@ use crate::memory::fixtures::{
 };
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DerivedTypeLock, DiffReads, DraftRepository,
-    Ensured, InsertedMachine, Isolation, Locked, MachineFilter, MachineSummary, NonEmpty,
-    ParameterRow, PlantRepository, RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary,
-    RowImage, SessionRepository, SettingRepository, Transaction, TypeCatalog, TypeUsageRow,
-    UnitCount, UnitLookup, UnitOfWork, UserRepository, VersionDetail, VersionSummary,
+    Ensured, ExportableRecipes, InsertedMachine, Isolation, Locked, MachineFilter, MachineSummary,
+    NonEmpty, ParameterRow, PlantRepository, RecipeFilter, RecipeReads, RecipeRepository,
+    RecipeSummary, RowImage, SessionRepository, SettingRepository, Transaction, TypeCatalog,
+    TypeUsageRow, UnitCount, UnitLookup, UnitOfWork, UserRepository, VersionDetail, VersionSummary,
 };
 
 /// The platform of the test machine.
@@ -248,6 +248,14 @@ impl RecipeReads for CountingTransaction {
             .parameter_by_key(version, key)
             .await
     }
+
+    async fn exportable_recipes(
+        &mut self,
+        machine: MachineCode,
+    ) -> Result<Option<ExportableRecipes>, StorageError> {
+        self.count();
+        self.inner.recipe_reads().exportable_recipes(machine).await
+    }
 }
 
 /// The stored parameter type, named here so the forwarding signature stays on one line.
@@ -269,6 +277,14 @@ impl PlantRepository for CountingTransaction {
     ) -> Result<Option<Machine>, StorageError> {
         self.count();
         self.inner.plant().archived_machine_by_code(code).await
+    }
+
+    async fn export_machine_by_code(
+        &mut self,
+        code: MachineCode,
+    ) -> Result<Option<Machine>, StorageError> {
+        self.count();
+        self.inner.plant().export_machine_by_code(code).await
     }
 
     async fn machine_by_id(&mut self, id: MachineId) -> Result<Option<Machine>, StorageError> {

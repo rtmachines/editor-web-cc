@@ -20,7 +20,7 @@ use super::{
     Fixture, lang, long_text, meta, mid, parameter_on, pkey, reference, second_engineer, text, tid,
     timestamp, uid, user, vid,
 };
-use crate::export::{ExportApprovedInput, ExportByNumberInput};
+use crate::export::{ExportApprovedInput, ExportByNumberInput, ExportScope};
 use crate::memory::{BodyWriter, seed_type_id};
 use crate::plant::{
     AddUnitInput, ArchiveMachineInput, ArchiveUnitInput, CreateMachineInput, DefineUdtInput,
@@ -414,6 +414,8 @@ pub(crate) fn rebind_input() -> RebindTypeRevisionInput {
 pub(crate) fn export_approved_input() -> ExportApprovedInput {
     ExportApprovedInput {
         reference: reference("R-1"),
+        machine: None,
+        scope: ExportScope::Version,
     }
 }
 

@@ -262,6 +262,93 @@ async fn a_wrong_password_gives_e_idn_003_and_a_login_failed_event_of_the_user()
     assert_eq!(fixture.context.gate().available_permits(), 4);
 }
 
+/// A fixture with an active `ExportClient` account that has the login `anna`.
+fn technical_fixture() -> IdentityFixture {
+    let fixture = IdentityFixture::new();
+    seed_user(&fixture.store, Role::ExportClient, false);
+    fixture
+}
+
+#[tokio::test]
+async fn a_technical_account_with_the_right_password_gets_the_answer_of_a_wrong_password() {
+    let technical = technical_fixture();
+    let technical_error = Login::new(technical.context.clone())
+        .execute(&meta(), input("anna", PASSWORD))
+        .await
+        .unwrap_err();
+    let person = fixture();
+    let person_error = Login::new(person.context.clone())
+        .execute(&meta(), input("anna", "not-the-password"))
+        .await
+        .unwrap_err();
+    assert!(wrong_password()(&technical_error), "{technical_error:?}");
+    assert_eq!(technical_error.code(), ErrorCode::IDN_003);
+    assert_eq!(
+        format!("{technical_error:?}"),
+        format!("{person_error:?}"),
+        "the refusal looks like a wrong password"
+    );
+    assert_eq!(
+        technical.hasher.verify_calls(),
+        person.hasher.verify_calls(),
+        "the same hash work as a wrong password"
+    );
+    assert_eq!(technical.hasher.verify_calls(), 1);
+    assert_eq!(technical.hasher.hash_calls(), 0);
+    assert_eq!(technical.context.gate().available_permits(), 4);
+}
+
+#[tokio::test]
+async fn a_technical_account_gets_no_session_and_a_failed_attempt() {
+    let fixture = technical_fixture();
+    Login::new(fixture.context.clone())
+        .execute(&meta(), input("anna", PASSWORD))
+        .await
+        .unwrap_err();
+    let state = fixture.store.state();
+    assert!(state.sessions.is_empty());
+    assert!(fixture.store.audit_entries().is_empty());
+    assert_eq!(state.attempts.len(), 1);
+    assert!(state.attempts.values().all(|row| !row.succeeded));
+}
+
+#[tokio::test]
+async fn a_technical_account_writes_login_failed_with_the_reason_technical_account() {
+    let fixture = technical_fixture();
+    Login::new(fixture.context.clone())
+        .execute(&meta(), input("anna", PASSWORD))
+        .await
+        .unwrap_err();
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    let event = events.first().unwrap();
+    assert_eq!(event.kind(), SecurityEventKind::LoginFailed);
+    assert_eq!(event.user(), Some(user_id()));
+    assert_eq!(event.login_hmac(), None);
+    assert_eq!(event.client_ip(), Some(ip()));
+    assert_eq!(event.request_id(), request_id());
+    assert_eq!(
+        event.detail(),
+        Some(&json!({"reason": "technical_account"}))
+    );
+    let shown = format!("{events:?}");
+    assert!(!shown.contains(PASSWORD), "{shown}");
+}
+
+#[tokio::test]
+async fn a_technical_account_with_a_wrong_password_writes_no_reason() {
+    let fixture = technical_fixture();
+    let error = Login::new(fixture.context.clone())
+        .execute(&meta(), input("anna", "not-the-password"))
+        .await
+        .unwrap_err();
+    assert!(wrong_password()(&error), "{error:?}");
+    let events = fixture.sink.events();
+    let event = events.first().unwrap();
+    assert_eq!(event.kind(), SecurityEventKind::LoginFailed);
+    assert_eq!(event.detail(), None);
+}
+
 #[tokio::test]
 async fn an_unknown_login_gets_one_dummy_check_and_an_event_with_the_hmac() {
     let fixture = fixture();

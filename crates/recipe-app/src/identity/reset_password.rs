@@ -1,7 +1,7 @@
 //! The use case `ResetPassword` (design D8, `data-model.md` section 6).
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
-use recipe_domain::identity::{Login, PasswordHash};
+use recipe_domain::identity::{Login, PasswordHash, Role};
 
 use super::one_time::hashed_one_time_password;
 use super::{Authenticated, IdentityContext, IssuedPassword};
@@ -56,8 +56,8 @@ impl ResetPassword {
         .await?;
         self.require_known(login).await?;
         let (password, hash) = hashed_one_time_password(&self.ctx).await?;
-        self.replace(auth, meta, login, &hash).await?;
-        Ok(IssuedPassword::new(login.clone(), password))
+        let role = self.replace(auth, meta, login, &hash).await?;
+        Ok(IssuedPassword::new(login.clone(), role, password))
     }
 
     /// Read the login in a read-only transaction, so an unknown login costs no hash.
@@ -71,13 +71,14 @@ impl ResetPassword {
     }
 
     /// Lock the user, replace the hash, end every session, and write `PasswordReset`.
+    /// Return the role of the user.
     async fn replace(
         &self,
         auth: &Authenticated,
         meta: &RequestMeta,
         login: &Login,
         hash: &PasswordHash,
-    ) -> Result<(), AppError> {
+    ) -> Result<Role, AppError> {
         let mut tx = self.ctx.app.uow.begin(Isolation::ReadCommitted).await?;
         let Locked {
             state: locked,
@@ -87,7 +88,10 @@ impl ResetPassword {
             .lock_by_login(login)
             .await?
             .ok_or_else(|| not_found(login))?;
-        let after = tx.users().reset_password(locked.id, hash).await?;
+        let after = tx
+            .users()
+            .reset_password(locked.id, hash, locked.role.is_person())
+            .await?;
         tx.sessions().delete_all_of_user(locked.id).await?;
         let entry = AuditEntry::row(
             RowAction::PasswordReset,
@@ -99,7 +103,7 @@ impl ResetPassword {
             audit_context(auth.user(), meta),
         );
         self.ctx.app.uow.commit(tx, NonEmpty::new(entry)).await?;
-        Ok(())
+        Ok(locked.role)
     }
 }
 

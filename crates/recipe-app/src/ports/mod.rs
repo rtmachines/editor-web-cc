@@ -37,8 +37,8 @@ mod webhook;
 mod webhook_tests;
 
 pub use attempt::{
-    AttemptId, AttemptKey, AttemptOutcome, AttemptRepository, AttemptRow, DeletedAttempts,
-    LoginAttemptStore, LoginThrottleState,
+    AttemptId, AttemptKey, AttemptOutcome, AttemptRepository, AttemptRow, BasicChange,
+    BasicConfirmation, DeletedAttempts, LoginAttemptStore, LoginThrottleState,
 };
 pub use audit_chain::{
     AuditChainReads, BatchOutcome, ChainBounds, ChainHead, ChainPosition, ChainSeq,
@@ -67,8 +67,8 @@ pub use read_only::ReadOnlySwitch;
 pub use readiness::{NotReadyCause, Readiness, ReadinessProbe};
 pub use recipe::{InsertedRecipe, NewVersion, RecipeRepository, SharedVersion};
 pub use recipe_reads::{
-    ParameterRow, RecipeFilter, RecipeReads, RecipeSummary, UnitCount, VersionDetail,
-    VersionSummary,
+    ExportableRecipe, ExportableRecipes, ParameterRow, RecipeFilter, RecipeReads, RecipeSummary,
+    UnitCount, VersionDetail, VersionSummary,
 };
 pub use row_image::{Locked, RowImage};
 pub use security::SecurityEventSink;

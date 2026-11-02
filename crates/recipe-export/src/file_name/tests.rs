@@ -1,7 +1,9 @@
 use recipe_domain::export::ExportStatus;
 use recipe_domain::recipe::ReferenceNumber;
 
-use super::file_name;
+use recipe_domain::plant::UnitPath;
+
+use super::{file_name, unit_file_name};
 
 fn reference(text: &str) -> ReferenceNumber {
     ReferenceNumber::parse(text).unwrap()
@@ -39,6 +41,34 @@ fn largest_version_number_is_written_in_full() {
 fn name_of_the_longest_reference_has_only_header_safe_characters() {
     let text = format!("A{}", "_-9Z".repeat(12));
     let name = file_name(&reference(&text), 1, ExportStatus::Retired);
+
+    assert!(
+        name.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.')
+    );
+}
+
+fn unit(text: &str) -> UnitPath {
+    UnitPath::parse(text).unwrap()
+}
+
+#[test]
+fn unit_name_has_the_reference_the_version_and_the_unit_path() {
+    let name = unit_file_name(&reference("R-100"), 3, &unit("U1.2"));
+
+    assert_eq!(name, "recipe_R-100_v3_U1.2.json");
+}
+
+#[test]
+fn unit_name_of_a_unit_with_five_segments_is_kept_in_full() {
+    let name = unit_file_name(&reference("R1"), 1, &unit("U64.2.3.4.5"));
+
+    assert_eq!(name, "recipe_R1_v1_U64.2.3.4.5.json");
+}
+
+#[test]
+fn unit_name_has_only_header_safe_characters() {
+    let name = unit_file_name(&reference("R1"), u32::MAX, &unit("U64.64.64.64.64"));
 
     assert!(
         name.chars()

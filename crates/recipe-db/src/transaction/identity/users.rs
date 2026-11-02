@@ -61,7 +61,7 @@ UPDATE app_user SET is_active = true, deactivated_at = NULL WHERE id = $1 \
 RETURNING to_jsonb(app_user) - 'password_hash'";
 
 const RESET_PASSWORD: &str = "\
-UPDATE app_user SET password_hash = $2, must_change_password = true, \
+UPDATE app_user SET password_hash = $2, must_change_password = $3, \
     session_epoch = session_epoch + 1 \
 WHERE id = $1 RETURNING to_jsonb(app_user) - 'password_hash'";
 
@@ -248,10 +248,12 @@ impl UserRepository for PgTransaction {
         &mut self,
         id: UserId,
         hash: &PasswordHash,
+        must_change: bool,
     ) -> Result<RowImage, StorageError> {
         let query = image_query(RESET_PASSWORD)
             .bind(*id.as_uuid())
-            .bind(hash.as_str());
+            .bind(hash.as_str())
+            .bind(must_change);
         change(&mut self.tx, query).await
     }
 

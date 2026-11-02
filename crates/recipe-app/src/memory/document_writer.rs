@@ -1,6 +1,6 @@
 //! In-memory adapter of the port `DocumentWriter` (design D2 of the change `export-v1`).
 
-use recipe_domain::export::{DocumentFacts, ExportError, HashedBody};
+use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
 
 use crate::ports::DocumentWriter;
 
@@ -13,6 +13,10 @@ pub struct BodyWriter;
 
 impl DocumentWriter for BodyWriter {
     fn write(&self, body: &HashedBody, _facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
+        Ok(serde_json::to_vec(body)?)
+    }
+
+    fn write_scoped(&self, body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
         Ok(serde_json::to_vec(body)?)
     }
 }

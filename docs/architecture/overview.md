@@ -211,7 +211,7 @@ Every principle from the draft is listed. A principle is applied only for a name
 | SOLID | Applied: S, D | Single responsibility per crate and per use case. Dependency inversion through ports. O, L, I have no named problem and are not applied as rules |
 | KISS | Applied | One process, one database, no broker, no cache. READ COMMITTED with explicit locks instead of SERIALIZABLE with retries (ADR-0015). Exception: only `create-admin` runs SERIALIZABLE and retries once. `SetUserRole` and `DeactivateUser` use the class-4 guard lock (ADR-0096) |
 | DRY | Applied | One table for settings, one table for error codes, one JSON Schema for the export. Each rule lives in one document |
-| YAGNI | Applied | No API tokens until a transfer system exists. No `ReplaceController` until a plant needs it (A32). No event sourcing |
+| YAGNI | Applied | No API tokens. A transfer client uses a technical account with HTTP Basic (A45). No `ReplaceController` until a plant needs it (A32). No event sourcing |
 | GRASP | Applied: Information Expert, Creator | The `Draft` knows its parameters and checks them. `Recipe` creates versions |
 | Separation of concerns | Applied | HTTP parsing, permission checks, domain rules, and SQL live in four crates |
 | Composition over inheritance | Applied | `TypeTree` composes primitives, arrays, and structs. No type hierarchy in Rust |
@@ -278,6 +278,7 @@ Requirements that are not in the draft. Each one is a decision from the analysis
 | A39 | IEC derived types (ENUM, subrange, alias) are not supported. A parameter uses a primitive, an array, or a UDT | ADR-0006 |
 | A40 | The server generates the parameter `key`. It is unique inside a version and stable across the versions of one recipe | domain-model.md 2.2 |
 | A41 | A panic is contained per request and the process restarts when it hangs. The draft words "must not crash" are read as "contain and restart". `overflow-checks` stays on | reliability.md 2, ADR-0020 |
-| A42 | Authentication failures (unknown login, wrong password, inactive user) return one client message and code `E-IDN-003`. The event log and `security_event` carry the exact reason | api.md 7.4, ADR-0014 |
+| A42 | Authentication failures (unknown login, wrong password, inactive user) return one client message and code `E-IDN-003`. A Basic check of a person account also returns it. The event log and `security_event` carry the exact reason | api.md 7.4, ADR-0014 |
 | A43 | A time value is an integer count of a base unit. TIME, S5TIME and TIME_OF_DAY count milliseconds. LTIME, LDATE, LTOD, LDT and DTL count nanoseconds. DATE counts days, and DATE_AND_TIME counts seconds. DATE, LDATE, DATE_AND_TIME, LDT and DTL count from 1970-01-01. TIME_OF_DAY and LTOD count from midnight. The UI shows IEC literals | domain-model.md 2.1, ADR-0022 |
 | A44 | The UI meets WCAG 2.2 level AA. Every interactive target outside a sentence of text is at least 44 by 44 CSS px, and one light theme supports forced colors. The users work at a machine with gloves and glare, often at a touch panel | ADR-0036, design-system.md |
+| A45 | A technical account with the role `ExportClient` exports `Approved` versions for a transfer client with HTTP Basic. It holds only `VersionExport`. It cannot log in to the UI, and no person uses it. The three roles of R22 stay the roles of persons | ADR-0109 |

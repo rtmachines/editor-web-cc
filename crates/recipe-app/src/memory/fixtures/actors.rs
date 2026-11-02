@@ -13,7 +13,7 @@ fn login_of(text: &str) -> Login {
     Login::parse(text).unwrap()
 }
 
-/// Return the fixed user of `role`: `admin`, `jkowalski`, or `mhoffman`.
+/// Return the fixed user of `role`: `admin`, `jkowalski`, `mhoffman`, or `exporter`.
 ///
 /// `anowak` has the role `ProcessEngineer` too. Use [`second_engineer`] for that user.
 pub(crate) fn actor(role: Role) -> CurrentUser {
@@ -21,6 +21,7 @@ pub(crate) fn actor(role: Role) -> CurrentUser {
         Role::Administrator => CurrentUser::new(user(1), login_of("admin"), role),
         Role::ProcessEngineer => CurrentUser::new(user(2), login_of("jkowalski"), role),
         Role::Operator => CurrentUser::new(user(4), login_of("mhoffman"), role),
+        Role::ExportClient => CurrentUser::new(user(5), login_of("exporter"), role),
     }
 }
 

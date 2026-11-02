@@ -10,6 +10,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+mod basic_auth;
+mod basic_header;
 mod client;
 #[cfg(test)]
 mod components_tests;

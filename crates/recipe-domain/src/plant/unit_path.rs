@@ -112,6 +112,16 @@ impl UnitPath {
     pub fn is_ancestor_of(&self, other: &UnitPath) -> bool {
         other.segments.len() > self.segments.len() && other.segments.starts_with(&self.segments)
     }
+
+    /// Return true when this path equals `ancestor` or lies below it.
+    ///
+    /// The function compares whole segments and not text. This stops `U12` from
+    /// matching the scope `U1`. It solves the prefix error of a text comparison
+    /// in the unit filter of a scoped export (ADR-0109).
+    #[must_use]
+    pub fn is_self_or_descendant_of(&self, ancestor: &UnitPath) -> bool {
+        self.segments.starts_with(&ancestor.segments)
+    }
 }
 
 impl fmt::Display for UnitPath {
@@ -214,6 +224,15 @@ mod tests {
     }
 
     #[test]
+    fn self_or_descendant_covers_below_itself_and_sibling_cases() {
+        let u12 = parse_ok("U1.2");
+        assert!(parse_ok("U1.2.4").is_self_or_descendant_of(&u12));
+        assert!(u12.is_self_or_descendant_of(&u12));
+        assert!(!parse_ok("U12").is_self_or_descendant_of(&parse_ok("U1")));
+        assert!(!parse_ok("U1").is_self_or_descendant_of(&u12));
+    }
+
+    #[test]
     fn order_is_numeric_per_segment() {
         let mut paths = [
             parse_ok("U10"),
@@ -242,7 +261,43 @@ mod tests {
         format!("U{}", joined.join("."))
     }
 
+    /// Segment-wise oracle: every segment of `ancestor` equals the segment at the same place.
+    fn oracle_self_or_descendant(candidate: &[u8], ancestor: &[u8]) -> bool {
+        candidate.len() >= ancestor.len()
+            && ancestor
+                .iter()
+                .zip(candidate.iter())
+                .all(|(expected, actual)| expected == actual)
+    }
+
     proptest! {
+        #[test]
+        fn self_or_descendant_matches_the_segment_wise_oracle(
+            candidate in valid_segments(1..=5),
+            ancestor in valid_segments(1..=5),
+        ) {
+            let candidate_path = UnitPath::parse(&join_text(&candidate))
+                .map_err(|e| TestCaseError::fail(e.to_string()))?;
+            let ancestor_path = UnitPath::parse(&join_text(&ancestor))
+                .map_err(|e| TestCaseError::fail(e.to_string()))?;
+            prop_assert_eq!(
+                candidate_path.is_self_or_descendant_of(&ancestor_path),
+                oracle_self_or_descendant(&candidate, &ancestor)
+            );
+        }
+
+        #[test]
+        fn every_path_is_self_or_descendant_of_its_prefixes(segments in valid_segments(1..=5)) {
+            let path = UnitPath::parse(&join_text(&segments))
+                .map_err(|e| TestCaseError::fail(e.to_string()))?;
+            for length in 1..=segments.len() {
+                let prefix_segments = segments.iter().take(length).copied().collect::<Vec<u8>>();
+                let prefix = UnitPath::parse(&join_text(&prefix_segments))
+                    .map_err(|e| TestCaseError::fail(e.to_string()))?;
+                prop_assert!(path.is_self_or_descendant_of(&prefix));
+            }
+        }
+
         #[test]
         fn valid_text_round_trips(segments in valid_segments(1..=5)) {
             let text = join_text(&segments);

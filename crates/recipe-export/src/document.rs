@@ -1,15 +1,16 @@
-//! Writer of the export document v1 (`api.md` sections 6.1 to 6.3, design D5 (a)).
+//! Writer of the export documents v1 and v2 (`api.md` sections 6.1 to 6.4, design D5 (a)).
 //!
 //! The structs of this module solve one problem: the document writes its fields in the fixed
 //! order of `api.md` section 6.1. A `serde_json::Value` map would sort the keys, so the module
-//! never builds one.
+//! never builds one. The document v2 of a unit scope uses the same parts.
 
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
 use recipe_domain::export::{
     DocumentFacts, ExportError, ExportStatus, HashedBody, LimitEntry, OrderedValue, ParameterEntry,
-    SCHEMA_VERSION, Sha256, TypeEntry, TypeReference, utc_text,
+    SCHEMA_VERSION, SCOPE_SCHEMA_VERSION, ScopeBody, ScopeFacts, Sha256, TypeEntry, TypeReference,
+    utc_text,
 };
 use recipe_domain::plant::{MachineCode, UnitPath};
 use recipe_domain::recipe::ParameterKey;
@@ -31,6 +32,36 @@ struct Document<'a> {
     version: VersionFields<'a>,
     types: &'a [TypeEntry],
     parameters: Vec<ParameterFields<'a>>,
+}
+
+/// The export document v2 of a unit scope. The fields come in the order of `api.md` section 6.4.
+///
+/// The struct solves one problem: the document v2 has the fields of the document v1 and two more
+/// fields, `scope_sha256` and `scope`. `scope_sha256` follows `content_sha256` and `scope` follows
+/// `version`, like the scope hashed body.
+#[derive(Serialize)]
+struct ScopeDocument<'a> {
+    schema_version: &'static str,
+    exported_at: String,
+    exported_by: &'a str,
+    loadable: bool,
+    #[serde(serialize_with = "display_text")]
+    content_sha256: &'a Sha256,
+    #[serde(serialize_with = "display_text")]
+    scope_sha256: &'a Sha256,
+    machine: MachineFields<'a>,
+    recipe: RecipeFields<'a>,
+    version: VersionFields<'a>,
+    scope: ScopeFields<'a>,
+    types: &'a [TypeEntry],
+    parameters: Vec<ParameterFields<'a>>,
+}
+
+/// The object `scope`.
+#[derive(Serialize)]
+struct ScopeFields<'a> {
+    #[serde(serialize_with = "display_text")]
+    unit_path: &'a UnitPath,
 }
 
 /// The object `machine`.
@@ -123,6 +154,55 @@ pub fn write_document(body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8
         parameters,
     };
     Ok(serde_json::to_vec_pretty(&document)?)
+}
+
+/// Write the export document v2 of a unit scope as pretty JSON.
+///
+/// The document has the fields of `api.md` section 6.4 in their fixed order. The indent is two
+/// spaces, and the text has no newline at the end. The scope body gives the fields "In scope
+/// hash". The facts give the other fields, and `facts.scope_sha256` gives `scope_sha256`.
+/// `facts.document.content_sha256` is the stored hash of the whole version.
+///
+/// # Errors
+///
+/// Returns `E-EXP-004` (`ExportError::Serialize`) when `facts.document.names` has no name for the
+/// key of a parameter, when a time has a UTC year outside 0000 to 9999, or when `serde_json` fails.
+pub fn write_scoped(body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+    let document = &facts.document;
+    let parameters = body
+        .parameters()
+        .iter()
+        .map(|entry| parameter_fields(entry, &document.names))
+        .collect::<Result<Vec<_>, _>>()?;
+    let scope_document = ScopeDocument {
+        schema_version: SCOPE_SCHEMA_VERSION,
+        exported_at: utc_text(document.exported_at)?,
+        exported_by: document.exported_by.as_str(),
+        loadable: document.loadable(),
+        content_sha256: &document.content_sha256,
+        scope_sha256: &facts.scope_sha256,
+        machine: MachineFields {
+            code: body.machine_code(),
+            name: document.machine_name.as_str(),
+            plc_platform: body.platform().as_str(),
+        },
+        recipe: RecipeFields {
+            reference_number: body.reference_number().as_str(),
+            name: document.recipe_name.as_str(),
+        },
+        version: VersionFields {
+            number: body.version_number(),
+            status: document.status,
+            approved_at: utc_text(document.approved_at)?,
+            approved_by: document.approved_by.as_str(),
+        },
+        scope: ScopeFields {
+            unit_path: body.unit_path(),
+        },
+        types: body.types(),
+        parameters,
+    };
+    Ok(serde_json::to_vec_pretty(&scope_document)?)
 }
 
 /// Build the fields of one parameter with its `name_en`.

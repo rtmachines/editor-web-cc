@@ -341,20 +341,49 @@ fn is_invalid_utf8_in(rejection: &PathRejection, name: &str) -> bool {
 pub(crate) fn path_code_unit(
     path: Result<Path<(String, String)>, PathRejection>,
 ) -> Result<(MachineCode, UnitPath), WebError> {
-    if path
-        .as_ref()
-        .err()
-        .is_some_and(|rejection| is_invalid_utf8_in(rejection, UNIT_PATH_VALUE))
-    {
-        return Err(WebError::App(
-            PlantError::InvalidUnitPath {
-                text: UNDECODABLE_TEXT.to_owned(),
-            }
-            .into(),
-        ));
+    if let Some(error) = undecodable_unit_path(&path) {
+        return Err(error);
     }
     let (code, unit) = path_values(path)?;
     Ok((machine_code(&code)?, unit_path(&unit)?))
+}
+
+/// Return `E-PLT-017` when the rejection says that the path value `{path}` is not UTF-8.
+///
+/// The function solves one problem: two routes read a unit path, and both give the same code for
+/// a `{path}` that is not UTF-8. The rejection holds the key and not the bytes, so the error shows
+/// the replacement character as its text.
+fn undecodable_unit_path<T>(path: &Result<Path<T>, PathRejection>) -> Option<WebError> {
+    path.as_ref()
+        .err()
+        .is_some_and(|rejection| is_invalid_utf8_in(rejection, UNIT_PATH_VALUE))
+        .then(|| {
+            WebError::App(
+                PlantError::InvalidUnitPath {
+                    text: UNDECODABLE_TEXT.to_owned(),
+                }
+                .into(),
+            )
+        })
+}
+
+/// Read the route `/export/v2/machines/{code}/recipes/{ref}/approved/units/{path}`.
+///
+/// The code comes first, then the reference number, then the unit path. A `{path}` that is not
+/// UTF-8 gives `E-PLT-017`, as in [`path_code_unit`].
+///
+/// # Errors
+///
+/// Returns `404 E-WEB-005` for a bad code, a bad reference number, or another rejection, else the
+/// error of `unit_path`.
+pub(crate) fn path_code_reference_unit(
+    path: Result<Path<(String, String, String)>, PathRejection>,
+) -> Result<(MachineCode, ReferenceNumber, UnitPath), WebError> {
+    if let Some(error) = undecodable_unit_path(&path) {
+        return Err(error);
+    }
+    let (code, text, unit) = path_values(path)?;
+    Ok((machine_code(&code)?, reference(&text)?, unit_path(&unit)?))
 }
 
 /// Read the route `/machines/{code}/types/{name}`. The code comes first.

@@ -7,6 +7,41 @@ use serde_json::{Value, json};
 use super::request::{RequestId, UserAgent};
 use crate::identity::{KeyRing, TypedLogin, UserId};
 
+/// The value of `detail.reason` for a login of a technical account (ADR-0109 (c)).
+const TECHNICAL_ACCOUNT_REASON: &str = "technical_account";
+
+/// The value of `detail.scheme` for an event of the Basic check (ADR-0109 (m)).
+const BASIC_SCHEME: &str = "basic";
+
+/// Why a Basic check of the export routes refused an account.
+///
+/// The client always gets the answer of `E-IDN-003` (A42). The type solves one problem: only
+/// the `security_event` row tells the operator the exact reason (ADR-0109 (m)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BasicRefusal {
+    /// No account has the typed login, or the typed login is outside the grammar of a login.
+    UnknownLogin,
+    /// The account is inactive.
+    Inactive,
+    /// The password does not match the hash of the account.
+    WrongPassword,
+    /// The password matches, but the account belongs to a person.
+    PersonAccount,
+}
+
+impl BasicRefusal {
+    /// Return the value of `detail.reason`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownLogin => "unknown_login",
+            Self::Inactive => "inactive",
+            Self::WrongPassword => "wrong_password",
+            Self::PersonAccount => "person_account",
+        }
+    }
+}
+
 /// The kind of a security event. Each kind has one SQL value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SecurityEventKind {
@@ -144,6 +179,46 @@ impl SecurityEvent {
                 client_ip,
                 user_agent,
             )
+        }
+    }
+
+    /// Build a `LoginFailed` event for a technical account that used the login form.
+    ///
+    /// The event holds the user and the reason `technical_account` in `detail`. It solves one
+    /// problem: the answer to the client is the answer of a wrong password (A42), so only this
+    /// event tells the operator the exact reason (ADR-0109 (c)).
+    #[must_use]
+    pub fn login_failed_technical_account(
+        user: UserId,
+        request_id: RequestId,
+        client_ip: IpAddr,
+        user_agent: Option<UserAgent>,
+    ) -> Self {
+        Self {
+            detail: Some(json!({ "reason": TECHNICAL_ACCOUNT_REASON })),
+            ..Self::login_failed(LoginSubject::User(user), request_id, client_ip, user_agent)
+        }
+    }
+
+    /// Mark the event as a refusal of the Basic check. `detail` gets the reason and the scheme.
+    ///
+    /// The method replaces `detail`. The events of `Login` hold no `detail` of this kind.
+    #[must_use]
+    pub fn with_basic_refusal(self, reason: BasicRefusal) -> Self {
+        Self {
+            detail: Some(json!({ "reason": reason.as_str(), "scheme": BASIC_SCHEME })),
+            ..self
+        }
+    }
+
+    /// Mark the event as an event of the Basic check without a reason. `detail` gets the scheme.
+    ///
+    /// The throttle event uses it, because its kind already names the reason.
+    #[must_use]
+    pub fn with_basic_scheme(self) -> Self {
+        Self {
+            detail: Some(json!({ "scheme": BASIC_SCHEME })),
+            ..self
         }
     }
 
@@ -373,6 +448,46 @@ mod tests {
         assert_eq!(event.client_ip(), Some(ip));
         assert_eq!(event.user_agent(), agent.as_ref());
         assert_eq!(event.count(), 1);
+    }
+
+    #[test]
+    fn login_failed_of_a_technical_account_holds_the_user_and_the_reason() {
+        let user = UserId::from(Uuid::from_u128(5));
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let event = SecurityEvent::login_failed_technical_account(
+            user,
+            RequestId::from(Uuid::from_u128(9)),
+            ip,
+            None,
+        );
+        assert_eq!(event.kind(), SecurityEventKind::LoginFailed);
+        assert_eq!(event.user(), Some(user));
+        assert_eq!(event.login_hmac(), None);
+        assert_eq!(
+            event.detail(),
+            Some(&json!({"reason": "technical_account"}))
+        );
+    }
+
+    #[test]
+    fn a_basic_refusal_puts_the_reason_and_the_scheme_in_the_detail() {
+        let user = UserId::from(Uuid::from_u128(5));
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
+        let request = RequestId::from(Uuid::from_u128(9));
+        let event = SecurityEvent::login_failed(LoginSubject::User(user), request, ip, None);
+        let marked = event
+            .clone()
+            .with_basic_refusal(BasicRefusal::PersonAccount);
+        assert_eq!(
+            marked.detail(),
+            Some(&json!({"reason": "person_account", "scheme": "basic"}))
+        );
+        assert_eq!(marked.kind(), event.kind());
+        assert_eq!(marked.user(), event.user());
+        assert_eq!(
+            event.with_basic_scheme().detail(),
+            Some(&json!({"scheme": "basic"}))
+        );
     }
 
     #[test]

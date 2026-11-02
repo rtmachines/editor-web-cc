@@ -1,6 +1,7 @@
 //! File name of an export download (`api.md` section 6.3).
 
 use recipe_domain::export::ExportStatus;
+use recipe_domain::plant::UnitPath;
 use recipe_domain::recipe::ReferenceNumber;
 
 /// The prefix of the file name of a retired version.
@@ -19,6 +20,18 @@ pub fn file_name(reference: &ReferenceNumber, number: u32, status: ExportStatus)
         ExportStatus::Retired => RETIRED_PREFIX,
     };
     format!("{prefix}recipe_{reference}_v{number}.json")
+}
+
+/// Return the file name of the export of the unit scope of one approved version.
+///
+/// The name is `recipe_{ref}_v{n}_{path}.json` (`api.md` section 6.4). The grammar of
+/// `UnitPath` permits only `U`, the digits `0-9`, and `.`. The grammar of `ReferenceNumber`
+/// permits only `A-Z`, `0-9`, `_`, and `-`. The name therefore needs no escape and is safe in a
+/// `Content-Disposition` header. The scope document is always approved, so the name has no
+/// `RETIRED_` prefix.
+#[must_use]
+pub fn unit_file_name(reference: &ReferenceNumber, number: u32, path: &UnitPath) -> String {
+    format!("recipe_{reference}_v{number}_{path}.json")
 }
 
 #[cfg(test)]

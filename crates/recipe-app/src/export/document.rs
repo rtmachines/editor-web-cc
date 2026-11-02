@@ -5,14 +5,16 @@
 use std::sync::Arc;
 
 use recipe_domain::export::{
-    DocumentFacts, ExportError, ExportHeader, ExportStatus, HashedBody, Sha256,
+    DocumentFacts, ExportError, ExportHeader, ExportStatus, HashedBody, ScopeBody, ScopeFacts,
+    Sha256,
 };
 use recipe_domain::identity::Login;
-use recipe_domain::plant::{LiveUnits, Machine, PlatformTypes, TypeTrees};
+use recipe_domain::plant::{LiveUnits, Machine, PlantError, PlatformTypes, TypeTrees, UnitPath};
 use recipe_domain::recipe::{Parameter, RecipeVersionId, ReferenceNumber};
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
 
+use super::scope::{ExportScope, ScopeAudit};
 use crate::blocking::{Blocking, ExportPermit};
 use crate::error::{AppError, Missing};
 use crate::ports::{DocumentWriter, Transaction};
@@ -23,6 +25,34 @@ pub(super) struct BodyRows {
     parameters: Vec<Parameter>,
     units: LiveUnits,
     trees: TypeTrees,
+}
+
+impl BodyRows {
+    /// Check that `path` names a unit that the export can use (ADR-0109 (ja)).
+    ///
+    /// On a live machine, an archived unit counts as no unit. On an archived machine, every
+    /// unit counts. The check reads the units of step 4, so it runs before the blocking task.
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotFound` (`E-WEB-005`) when no unit has `path` or the unit is archived on a live
+    /// machine.
+    pub(super) fn require_unit(&self, path: &UnitPath) -> Result<(), AppError> {
+        let usable = match self.units.require(path) {
+            Ok(_live) => true,
+            Err(PlantError::UnitArchived { .. }) => self.units.is_machine_archived(),
+            Err(_missing) => false,
+        };
+        if usable {
+            return Ok(());
+        }
+        Err(AppError::NotFound {
+            entity: Missing::Unit {
+                code: self.units.machine_code(),
+                path: path.clone(),
+            },
+        })
+    }
 }
 
 /// The facts of the document that the flow knows before the blocking task.
@@ -73,6 +103,8 @@ pub(super) struct Written {
     pub(super) document: Vec<u8>,
     /// The hash of the body. It equals the stored hash.
     pub(super) hash: Sha256,
+    /// The unit and the hash of the scope body, or `None` for an export of the whole version.
+    pub(super) scope: Option<ScopeAudit>,
 }
 
 /// Read the parameters, the units, and the types of the version (step 4).
@@ -117,21 +149,62 @@ pub(super) async fn read_rows(
     })
 }
 
+/// Write the document of `scope` from the checked whole body (step 5, after the hash check).
+///
+/// The function solves one problem: the scope filter must run after the hash check of the whole
+/// version (ADR-0109 (w)). The caller has compared the hash already.
+///
+/// # Errors
+///
+/// Returns `E-EXP-005` when the scope holds no parameter, and `E-EXP-004` when the writer fails.
+fn write_scope(
+    writer: &dyn DocumentWriter,
+    (body, facts): (&HashedBody, DocumentFacts),
+    (scope, header): (&ExportScope, &ExportHeader),
+) -> Result<(Vec<u8>, Option<ScopeAudit>), ExportError> {
+    let ExportScope::Unit(path) = scope else {
+        return Ok((writer.write(body, &facts)?, None));
+    };
+    let scoped = ScopeBody::build(body, path);
+    if scoped.is_empty() {
+        return Err(ExportError::EmptyScope {
+            reference: header.reference.clone(),
+            number: header.version,
+            path: path.clone(),
+        });
+    }
+    let sha256 = scoped.sha256()?;
+    let document = writer.write_scoped(
+        &scoped,
+        &ScopeFacts {
+            document: facts,
+            scope_sha256: sha256,
+        },
+    )?;
+    let audit = ScopeAudit {
+        unit_path: path.clone(),
+        sha256,
+    };
+    Ok((document, Some(audit)))
+}
+
 /// Build the body, compare its hash with `stored`, and write the document in one blocking task.
 ///
 /// The function solves one problem: the build, the hash, and the writer use the CPU, so they
 /// run in `spawn_blocking`, and the limit `timeout.export` can stop the wait (step 5). The task
-/// holds `permit` of the export gate until it ends (ADR-0056 (c)).
+/// holds `permit` of the export gate until it ends (ADR-0056 (c)). The task compares the hash of
+/// the whole version before it filters the scope (ADR-0109 (w)).
 ///
 /// # Errors
 ///
 /// Returns `E-EXP-002` when the body cannot be built or its hash differs from `stored`.
+/// Returns `E-EXP-005` when `scope` holds no parameter.
 /// Returns `E-EXP-004` when the writer fails, and `E-WEB-011` when the task panics.
 pub(super) async fn write_document(
     (blocking, permit): (Blocking, ExportPermit),
     writer: Arc<dyn DocumentWriter>,
     (rows, facts): (BodyRows, KnownFacts),
-    stored: Option<Sha256>,
+    (stored, scope): (Option<Sha256>, ExportScope),
 ) -> Result<Written, AppError> {
     blocking
         .rebuild_export(permit, move || -> Result<Written, AppError> {
@@ -146,8 +219,13 @@ pub(super) async fn write_document(
                 return Err(mismatch().into());
             }
             let facts = facts.complete(&rows, hash);
-            let document = writer.write(&body, &facts)?;
-            Ok(Written { document, hash })
+            let (document, scope) =
+                write_scope(writer.as_ref(), (&body, facts), (&scope, &rows.header))?;
+            Ok(Written {
+                document,
+                hash,
+                scope,
+            })
         })
         .await?
 }

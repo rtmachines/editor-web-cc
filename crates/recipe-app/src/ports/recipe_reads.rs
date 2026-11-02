@@ -15,6 +15,10 @@ use recipe_domain::timestamp::Timestamp;
 
 use crate::error::StorageError;
 
+/// The list of exportable recipes lives in `recipe-domain`, so `recipe-export` can write it
+/// without a dependency on `recipe-app`.
+pub use recipe_domain::export::{ExportableRecipe, ExportableRecipes};
+
 /// The filter of `RecipeReads::list_recipes`.
 ///
 /// The type solves one problem: the recipe list has four independent choices, and a struct names
@@ -248,4 +252,15 @@ pub trait RecipeReads: Send {
         version: RecipeVersionId,
         key: ParameterKey,
     ) -> Result<Option<StoredParameter>, StorageError>;
+
+    /// Read the recipes of the machine `machine` that have an `Approved` version.
+    ///
+    /// The method resolves the machine by ADR-0109 (j): the live machine with the code, else the
+    /// machine with that code that has the latest `archived_at`. A deleted recipe does not
+    /// appear. The rows come in the byte order of the reference number, each with the hash that
+    /// approval stored. A code that names no machine gives `None`.
+    async fn exportable_recipes(
+        &mut self,
+        machine: MachineCode,
+    ) -> Result<Option<ExportableRecipes>, StorageError>;
 }

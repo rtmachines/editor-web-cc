@@ -1,6 +1,6 @@
 # ADR-0072: Export routes outside the request timeout
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0109 (item (a): the prefix `/export/`)
 Date: 2026-10-23
 Deciders: project owner
 

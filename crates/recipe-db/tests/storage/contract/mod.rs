@@ -32,6 +32,7 @@ mod harness;
 mod images;
 mod locks;
 mod machine;
+mod machine_export;
 mod machine_list;
 mod memory_harness;
 mod postgres_harness;

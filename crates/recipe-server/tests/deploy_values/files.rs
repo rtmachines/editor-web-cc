@@ -9,6 +9,47 @@ use crate::table::Table;
 
 const ENV_FILE: &str = "deploy/.env.example";
 
+#[test]
+fn caddy_http_export_paths_return_403_without_a_redirect() {
+    let inputs = crate::inputs::Inputs::load();
+    for file in ["deploy/Caddyfile", "deploy/Caddyfile.dev"] {
+        let lines = code_lines(inputs.text(file));
+        let site: Vec<_> = lines
+            .iter()
+            .skip_while(|line| line.trim() != "http://{$SITE_ADDRESS} {")
+            .skip(1)
+            .take_while(|line| **line != "}")
+            .map(|line| line.trim())
+            .collect();
+        // Exclusive handles prevent Caddy from sorting the redirect before the refusal.
+        assert_eq!(
+            site,
+            [
+                "import default_headers",
+                "@export path /export/*",
+                "handle @export {",
+                "respond 403",
+                "}",
+                "handle {",
+                "redir https://{host}{uri} 308",
+                "}",
+            ],
+            "{file}: HTTP must refuse every /export/ path before the fallback redirect"
+        );
+    }
+}
+
+#[test]
+fn caddyfiles_never_enable_credential_logging() {
+    let inputs = crate::inputs::Inputs::load();
+    for file in ["deploy/Caddyfile", "deploy/Caddyfile.dev"] {
+        assert!(
+            !inputs.text(file).contains("log_credentials"),
+            "{file}: credential logging must stay disabled"
+        );
+    }
+}
+
 /// The nine values of the Compose interpolation (`reliability.md` 7.1, "Secrets", ADR-0103 (d), and design D9).
 /// The file holds no password, key, or token.
 const ENV_KEYS: [&str; 9] = [

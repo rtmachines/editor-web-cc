@@ -2,8 +2,10 @@
 
 use async_trait::async_trait;
 use recipe_app::error::StorageError;
-use recipe_app::ports::{AttemptId, AttemptKey, AttemptOutcome, LoginAttemptStore};
-use recipe_domain::identity::{AttemptCount, ThrottlePolicy};
+use recipe_app::ports::{
+    AttemptId, AttemptKey, AttemptOutcome, BasicChange, BasicConfirmation, LoginAttemptStore,
+};
+use recipe_domain::identity::{AttemptCount, PasswordHash, Role, ThrottlePolicy, UserId};
 use recipe_domain::timestamp::Timestamp;
 use sqlx::PgPool;
 use time::OffsetDateTime;
@@ -38,6 +40,40 @@ WHERE client_ip = $2::inet AND NOT succeeded \
 /// Statement 3: the attempt row. The database sets `attempted_at`.
 const INSERT_ATTEMPT: &str = "\
 INSERT INTO login_attempt (login, client_ip, succeeded) VALUES ($1, $2::inet, false) RETURNING id";
+
+/// T2 statement 1: lock the user row and compare the stored hash with the hash of T1.
+///
+/// The lock is `FOR NO KEY UPDATE`, as in every identity command (ADR-0015). A password reset or
+/// a deactivation that holds the row makes the statement wait. The comparison runs in the
+/// database, so the stored hash never leaves it.
+const LOCK_USER: &str = "SELECT is_active, role, password_hash = $2 AS same_hash FROM app_user WHERE id = $1 FOR NO KEY UPDATE";
+
+/// T2 statement 2: mark the attempt. No row changes when `UnlockLogin` deleted it (ADR-0035).
+const MARK_SUCCEEDED: &str = "UPDATE login_attempt SET succeeded = true WHERE id = $1";
+
+/// The columns of the T2 statement 1.
+#[derive(sqlx::FromRow)]
+struct UserState {
+    is_active: bool,
+    role: String,
+    same_hash: bool,
+}
+
+impl UserState {
+    /// Return the first change that the Basic check rejects, or `None` for an unchanged account.
+    fn change(&self) -> Result<Option<BasicChange>, StorageError> {
+        let role = Role::parse(&self.role).map_err(|error| corrupt("app_user", error))?;
+        Ok(if !self.is_active {
+            Some(BasicChange::Inactive)
+        } else if role != Role::ExportClient {
+            Some(BasicChange::NotExportClient)
+        } else if !self.same_hash {
+            Some(BasicChange::PasswordChanged)
+        } else {
+            None
+        })
+    }
+}
 
 /// The columns of statement 2.
 #[derive(sqlx::FromRow)]
@@ -120,5 +156,39 @@ impl LoginAttemptStore for PgLoginAttemptStore {
         };
         tx.commit().await.map_err(map_error)?;
         Ok(AttemptOutcome { count, attempt })
+    }
+
+    async fn confirm_basic(
+        &self,
+        attempt: AttemptId,
+        user: UserId,
+        expected_hash: &PasswordHash,
+    ) -> Result<BasicConfirmation, StorageError> {
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN ISOLATION LEVEL READ COMMITTED")
+            .await
+            .map_err(map_error)?;
+        let state = sqlx::query_as::<_, UserState>(LOCK_USER)
+            .bind(*user.as_uuid())
+            .bind(expected_hash.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_error)?;
+        let reason = match state {
+            None => Some(BasicChange::Missing),
+            Some(state) => state.change()?,
+        };
+        if let Some(reason) = reason {
+            tx.rollback().await.map_err(map_error)?;
+            return Ok(BasicConfirmation::Changed { reason });
+        }
+        sqlx::query(MARK_SUCCEEDED)
+            .bind(attempt.get())
+            .execute(&mut *tx)
+            .await
+            .map_err(map_error)?;
+        tx.commit().await.map_err(map_error)?;
+        Ok(BasicConfirmation::Confirmed)
     }
 }

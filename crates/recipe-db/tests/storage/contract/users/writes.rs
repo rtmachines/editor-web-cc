@@ -96,7 +96,7 @@ async fn reset_password_replaces_the_hash_and_demands_a_change(h: &dyn Harness) 
 
     let after = tx
         .users()
-        .reset_password(id, &hash("$argon2id$reset"))
+        .reset_password(id, &hash("$argon2id$reset"), true)
         .await
         .unwrap();
 
@@ -146,7 +146,7 @@ async fn a_write_on_a_missing_user_is_an_error(h: &dyn Harness) {
         tx.users().deactivate(id).await.is_err(),
         tx.users().activate(id).await.is_err(),
         tx.users()
-            .reset_password(id, &hash("$argon2id$x"))
+            .reset_password(id, &hash("$argon2id$x"), true)
             .await
             .is_err(),
         tx.users()

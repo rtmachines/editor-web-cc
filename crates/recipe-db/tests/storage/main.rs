@@ -18,6 +18,7 @@ mod operations;
 mod operations_schema;
 mod pool;
 mod race;
+mod reset_password;
 mod restore_code;
 mod restore_roles;
 mod roles;

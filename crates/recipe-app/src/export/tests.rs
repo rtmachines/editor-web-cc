@@ -6,7 +6,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use recipe_domain::audit::{AuditAction, AuditEntry, AuditTarget, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::export::{DocumentFacts, ExportError, ExportStatus, HashedBody};
+use recipe_domain::export::{
+    DocumentFacts, ExportError, ExportStatus, HashedBody, ScopeBody, ScopeFacts,
+};
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{Machine, PlcPlatform};
 use recipe_domain::recipe::{RecipeDeleter, VersionState};
@@ -14,8 +16,8 @@ use serde_json::json;
 
 use super::test_doubles::{RecordingWriter, port};
 use super::{
-    ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportVersionByNumber,
-    ExportedVersion,
+    ExportApprovedInput, ExportApprovedVersion, ExportByNumberInput, ExportScope,
+    ExportVersionByNumber, ExportedVersion,
 };
 use crate::auth::Operation;
 use crate::blocking::{AppSettings, Blocking, ExportSettings};
@@ -41,6 +43,8 @@ const PLATFORM: PlcPlatform = PlcPlatform::TwinCat3;
 fn approved_input(reference_text: &str) -> ExportApprovedInput {
     ExportApprovedInput {
         reference: reference(reference_text),
+        machine: None,
+        scope: ExportScope::Version,
     }
 }
 
@@ -94,7 +98,7 @@ async fn export_number_to(
 /// Store the machine `M1`, the draft 101 of `R-1`, and the parameter `T1`. Then approve it.
 ///
 /// The fixture holds the user rows of the fixed actors, so `version_detail` finds each login.
-async fn approved_fixture() -> (Fixture, Machine) {
+pub(super) async fn approved_fixture() -> (Fixture, Machine) {
     let fixture = Fixture::new();
     fixture.seed_actors();
     let machine = fixture.seed_machine_on(PLATFORM, 1, "M1");
@@ -698,6 +702,10 @@ impl DocumentWriter for GatedWriter {
             .lock()
             .recv_timeout(Duration::from_secs(5))
             .unwrap();
+        Ok(b"{}".to_vec())
+    }
+
+    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
         Ok(b"{}".to_vec())
     }
 }

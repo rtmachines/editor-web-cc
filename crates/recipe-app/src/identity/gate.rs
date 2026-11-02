@@ -7,6 +7,7 @@ use recipe_domain::identity::{NewPassword, Password, PasswordHash};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::PasswordHasher;
+use super::basic_permit::BasicPermit;
 use crate::error::{AppError, TaskStage, TimeoutStage};
 
 /// The error for a blocking task that did not complete (`E-WEB-011`).
@@ -57,6 +58,7 @@ impl HashGate {
             .map_err(|_closed| hash_task_failed())?;
         Ok(HashPermit {
             permit,
+            basic: None,
             hasher: Arc::clone(&self.hasher),
         })
     }
@@ -76,12 +78,25 @@ impl HashGate {
 /// the result. A hash that keeps running after the caller is gone therefore still holds its
 /// permit. One permit serves several calls in a row, such as the check and the hash of
 /// `ChangeOwnPassword`.
+///
+/// A Basic check also hands its [`BasicPermit`] to this permit. The Basic permit then travels with
+/// the Argon2 permit into the blocking task. A Basic check that the client abandons therefore
+/// cannot free its Basic permit while its hash still holds an Argon2 permit (ADR-0109 (n)).
 pub struct HashPermit {
     permit: OwnedSemaphorePermit,
+    basic: Option<BasicPermit>,
     hasher: Arc<dyn PasswordHasher>,
 }
 
 impl HashPermit {
+    /// Add a Basic permit that lives exactly as long as this permit.
+    pub(super) fn holding(self, basic: BasicPermit) -> Self {
+        Self {
+            basic: Some(basic),
+            ..self
+        }
+    }
+
     /// Check a typed password in `spawn_blocking`. Return the answer and the permit.
     ///
     /// With `None`, the check runs against the dummy hash and answers `false`.
@@ -94,14 +109,25 @@ impl HashPermit {
         password: Password,
         hash: Option<PasswordHash>,
     ) -> Result<(bool, Self), AppError> {
-        let Self { permit, hasher } = self;
+        let Self {
+            permit,
+            basic,
+            hasher,
+        } = self;
         let joined = tokio::task::spawn_blocking(move || {
             let matched = hasher.verify(&password, hash.as_ref());
-            (matched, permit, hasher)
+            (matched, permit, basic, hasher)
         })
         .await;
-        let (matched, permit, hasher) = joined.map_err(|_join| hash_task_failed())?;
-        Ok((matched, Self { permit, hasher }))
+        let (matched, permit, basic, hasher) = joined.map_err(|_join| hash_task_failed())?;
+        Ok((
+            matched,
+            Self {
+                permit,
+                basic,
+                hasher,
+            },
+        ))
     }
 
     /// Hash a new password in `spawn_blocking`. Return the hash and the permit.
@@ -111,14 +137,25 @@ impl HashPermit {
     /// Returns `AppError::TaskFailed` (`E-WEB-011`) when the blocking task panics or when the
     /// hasher reports a `HashFailure`. The permit returns to the gate in both cases.
     pub async fn hash(self, password: NewPassword) -> Result<(PasswordHash, Self), AppError> {
-        let Self { permit, hasher } = self;
+        let Self {
+            permit,
+            basic,
+            hasher,
+        } = self;
         let joined = tokio::task::spawn_blocking(move || {
             let hashed = hasher.hash(&password);
-            (hashed, permit, hasher)
+            (hashed, permit, basic, hasher)
         })
         .await;
-        let (hashed, permit, hasher) = joined.map_err(|_join| hash_task_failed())?;
-        Ok((hashed?, Self { permit, hasher }))
+        let (hashed, permit, basic, hasher) = joined.map_err(|_join| hash_task_failed())?;
+        Ok((
+            hashed?,
+            Self {
+                permit,
+                basic,
+                hasher,
+            },
+        ))
     }
 }
 

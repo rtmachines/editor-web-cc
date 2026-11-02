@@ -44,13 +44,21 @@
 	header ?Strict-Transport-Security "max-age=31536000; includeSubDomains"
 }
 
-# ADR-0065 (d): a plain HTTP request gets a permanent redirect to the same path.
+# ADR-0109 (ae): Caddy refuses export requests over plain HTTP without a redirect.
+# ADR-0065 (d): Caddy redirects other HTTP requests to the same path over HTTPS.
 # The code 308 is the code of the automatic redirect of Caddy. It keeps the method.
 # RFC 6797 section 7.2: an answer over plain HTTP has no HSTS (ADR-0065 (f)).
 http://{$SITE_ADDRESS} {
 	import default_headers
 
-	redir https://{host}{uri} 308
+	@export path /export/*
+	handle @export {
+		respond 403
+	}
+
+	handle {
+		redir https://{host}{uri} 308
+	}
 }
 
 {$SITE_ADDRESS} {
