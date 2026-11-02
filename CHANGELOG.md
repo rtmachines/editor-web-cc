@@ -4,6 +4,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
 ### Added
 
 - The parameter table of the version page gets the column Value. An elementary parameter shows its value, and a composite parameter shows a word from the bundles. A long text ends after a fixed count of characters (ADR-0108 (a)).
@@ -11,6 +13,14 @@ This file records the notable changes of the recipe editor. The format follows [
 - The version page gets a compare form with two lists of version numbers. The form leads to the diff of the two versions. The new route `GET /recipes/{ref}/compare` answers `303` to the diff route of ADR-0050 (ADR-0108 (d), (e)).
 - The success toast of each command that keeps the draft live names the new `row_version`. `SetParameterValue` and `ReplaceLimits` get a success toast (ADR-0108 (f)).
 - The type page of a machine on an S7 platform shows the S7 layout of the type. The layout lists the offset of each member and the size of the type (ADR-0108 (g), (h)).
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- Seven tests with `#[cfg(unix)]` passed only in CI on Linux, not on the Windows development host. The section "Known gaps" of release 0.3.0 names them.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.3.0] - 2026-10-31
 
@@ -370,7 +380,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.2.0
 [0.1.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.1.0
