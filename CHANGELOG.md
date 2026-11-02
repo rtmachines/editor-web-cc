@@ -4,6 +4,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-02
+
 ### Added
 
 - The role `ExportClient` is a technical account. It holds `VersionExport` only and cannot log in to the UI (ADR-0109).
@@ -17,6 +19,15 @@ This file records the notable changes of the recipe editor. The format follows [
 ### Changed
 
 - **BREAKING** for a v2 consumer only: the export document v2 adds `scope` and `scope_sha256`. The v1 document and the v1 routes do not change (ADR-0109).
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- Seven tests with `#[cfg(unix)]` passed only in CI on Linux, not on the Windows development host. The section "Known gaps" of release 0.3.0 names them.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
+- No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.4.0] - 2026-11-02
 
@@ -394,7 +405,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.3.0
 [0.2.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.2.0
