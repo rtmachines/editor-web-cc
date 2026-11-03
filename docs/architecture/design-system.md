@@ -361,10 +361,20 @@ Every full page uses one layout (ADR-0036). The regions come in this order:
 - The `main` of the full error page holds the error in `#error-panel` and the `h1` of section 10.6. Then it shows one link to `/recipes` with a text from the bundles.
 - A form can get field errors on a request with a session and without HTMX. The answer is then the page of the refused form (ADR-0047 (a)). That page has the layout of the session with no language switch, the summary, one `h1`, and the form.
 
+Pages in read-only mode (ADR-0113):
+
+- A page shows no control of a command that the mode blocks. It shows the view of a reader without the permission of that command.
+- A control is a form that sends the command, or a link or button whose only target is the form of the command.
+- The login form, the logout form, the language switch, the export link, every form with `method="get"`, every pager, and every navigation link stay.
+- A form route of a blocked command shows its heading and the notice `readonly-form-unavailable` in place of the form. The notice is `alert::notice("warning", text)` of section 10.6.
+- No disabled control stands in for a hidden control, so no element names the banner in `aria-describedby`.
+
 Answers to HTMX (ADR-0037):
 
 - An HTMX request with `HX-Target: content` gets the content of `main` and the `title` element. The answer also updates the field `next` of the language switch out of band.
 - The `h1` of that answer has `tabindex="-1"` and `autofocus`, so the focus moves to the new heading. A full page has no `autofocus` on its `h1`.
+- The deletion of one translation swaps only its own row. The `h3` of the answer row has `tabindex="-1"` and `autofocus`, because the delete button goes away (ADR-0111).
+- A save of the definition of a parameter also replaces the English base text `#translations-base` out of band. It replaces no translation row (ADR-0111 (i)).
 - Another HTMX request gets the fragment of its target. A request without `HX-Request` gets the full page.
 
 ### 10.2 Navigation
@@ -436,6 +446,16 @@ Form field:
 - A checkbox stands inside its `label`. The `label` is the target of `--target` and keeps the gap `--target-gap` to the next target.
 - A text input with a list of proposals uses a `datalist` and `autocomplete="off"`. The `list` attribute names a fixed `id`. The proposals are data. Typing stays the main way to enter a value, because the browser draws the list rows.
 - Two forms of one page can have a field with one name. Then the `id` of each input and the name of each field error use a name of the form, for example `machine_name` and `unit_name` (ADR-0037).
+
+Multi-line text field (ADR-0112):
+
+- A text that can hold line ends uses the macro `lines` of `components/field.html`. The fields are `description_en`, the `description` of a translation row, and `change_note`.
+- The macro renders a `textarea` with `rows="4"` and the label, hint, error, and `maxlength` rules of the input above.
+- The template writes one LF directly after the start tag of the `textarea`. The HTML parser ignores that LF and keeps a leading line end of the value.
+- A limit line with the id `<id>-limit` shows the key `field-lines-limit` with the maximum count. `aria-describedby` names the hint, the limit line, and the error line, in this order.
+- The `textarea` uses the text font and `resize: vertical`. It keeps the target size of section 7.
+- Enter in a `textarea` adds a line end. It does not send the form.
+- A page shows a multi-line text outside a form in an element with the class `text-lines`. The class sets `white-space: pre-wrap` and `overflow-wrap: anywhere`.
 
 Repeated rows (ADR-0037):
 

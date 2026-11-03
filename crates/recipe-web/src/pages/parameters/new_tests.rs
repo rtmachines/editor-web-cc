@@ -6,9 +6,11 @@
 use axum::http::StatusCode;
 
 use super::test_kit::{FORM_TARGET, NEW_FORM, get_form_fragment, position};
+use crate::i18n::Lang;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_clean_html, assert_error, field_value};
-use crate::test_support::plant::{ENGLISH, HTMX, main_of};
+use crate::test_support::plant::{ENGLISH, HTMX, POLISH, main_of};
+use crate::test_support::text;
 
 /// The opening tag of the boosted form of a new parameter of the draft 3 of `R-100`.
 pub(super) const FORM_TAG: &str = "<form id=\"parameter-new-form\" method=\"post\" action=\"/recipes/R-100/versions/3/parameters\" hx-boost=\"true\" hx-target=\"#parameter-rows\" hx-swap=\"beforeend show:none focus-scroll:true\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">";
@@ -115,10 +117,62 @@ async fn parameters_new_form_refuses_an_operator_and_a_version_that_is_not_a_dra
     assert_error(&approved, StatusCode::CONFLICT, "E-RCP-002", "approved");
 }
 
+/// Spec "Read-only pages", ADR-0113 (d): in read-only mode the form route answers `200` with the
+/// notice in place of the form, as a page, as `HX-Target: content`, and as `HX-Target:
+/// parameter-form`.
 #[tokio::test]
-async fn parameters_new_form_works_in_read_only_mode() {
+async fn parameters_new_form_in_read_only_mode_shows_the_notice_in_place_of_the_form() {
     let world = recipe_world();
     world.fixture.state.read_only().set(true);
-    let reply = get_form_fragment(&world, NEW_FORM).await;
-    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    for (lang, header) in [(Lang::En, ENGLISH), (Lang::Pl, POLISH)] {
+        let notice = text(lang, "readonly-form-unavailable");
+        let page = world.get(&world.engineer, NEW_FORM, &[header]).await;
+        let content = world
+            .get(
+                &world.engineer,
+                NEW_FORM,
+                &[header, HTMX, ("hx-target", "content")],
+            )
+            .await;
+        let fragment = world
+            .get(&world.engineer, NEW_FORM, &[header, HTMX, FORM_TARGET])
+            .await;
+        for (kind, reply) in [
+            ("page", &page),
+            ("content", &content),
+            ("fragment", &fragment),
+        ] {
+            let body = &reply.body;
+            assert_eq!(reply.status, StatusCode::OK, "{lang} {kind}: {body}");
+            assert!(body.contains(&notice), "{lang} {kind}: {body}");
+            for forbidden in [
+                "id=\"parameter-new-form\"",
+                "id=\"parameter-add-submit\"",
+                "action=\"/recipes/R-100/versions/3/parameters\"",
+            ] {
+                assert!(
+                    !body.contains(forbidden),
+                    "{lang} {kind} {forbidden}: {body}"
+                );
+            }
+        }
+        assert!(page.body.contains("<main"), "{lang}: {}", page.body);
+        assert!(
+            !fragment.body.contains("<main"),
+            "{lang}: {}",
+            fragment.body
+        );
+    }
+}
+
+/// Regression, ADR-0113 (d): the permission check runs before the notice, so an Operator gets
+/// `403` in read-only mode.
+#[tokio::test]
+async fn parameters_new_form_in_read_only_mode_still_refuses_an_operator() {
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    let reply = world
+        .get(&world.operator, NEW_FORM, &[ENGLISH, HTMX, FORM_TARGET])
+        .await;
+    assert_error(&reply, StatusCode::FORBIDDEN, "E-WEB-002", "operator");
 }

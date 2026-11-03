@@ -453,3 +453,57 @@ async fn units_form_content_answer_has_the_title_the_heading_with_focus_and_the_
         "only the heading takes the focus"
     );
 }
+
+// --- Read-only mode (ADR-0113 (d)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (d): in read-only mode the form route answers `200` with the
+/// heading and the notice in place of the form, in the fragment and in the page.
+#[tokio::test]
+async fn units_form_in_read_only_mode_shows_the_notice_in_place_of_the_form() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for lang in [Lang::En, Lang::Pl] {
+        let notice = text(lang, "readonly-form-unavailable");
+        let heading = text_with(lang, "unit-new-under", "path", "U1.2");
+        let path = "/machines/M7/units/new?parent_path=U1.2";
+        let fragment = world
+            .get(
+                &world.engineer,
+                path,
+                &[cookie_of(lang), HTMX, ("hx-target", "unit-form")],
+            )
+            .await;
+        let page = world.get(&world.engineer, path, &[cookie_of(lang)]).await;
+        for (kind, reply) in [("fragment", &fragment), ("page", &page)] {
+            let body = &reply.body;
+            assert_eq!(reply.status, StatusCode::OK, "{lang} {kind}: {body}");
+            assert!(body.contains(&notice), "{lang} {kind}: {body}");
+            assert!(
+                body.contains(&format!("<h2>{heading}</h2>")),
+                "{lang} {kind}: {body}"
+            );
+            for forbidden in [
+                "id=\"unit-add-form\"",
+                "id=\"unit-create-submit\"",
+                "id=\"segment\"",
+            ] {
+                assert!(
+                    !body.contains(forbidden),
+                    "{lang} {kind} {forbidden}: {body}"
+                );
+            }
+        }
+    }
+}
+
+/// Regression, ADR-0113 (d): the permission check runs before the notice, so an Operator gets
+/// `403` in read-only mode.
+#[tokio::test]
+async fn units_form_in_read_only_mode_still_refuses_an_operator() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    let reply = world
+        .get_form(&world.operator, "/machines/M7/units/new")
+        .await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+}

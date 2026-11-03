@@ -15,6 +15,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - A filtered recipe list without a match shows a link that clears the filter.
 - A translated text carries its `lang` attribute.
 - The login page puts the focus on the login field.
+- Long text fields use a multi-line text field (ADR-0112).
+- In read-only mode, a form page shows a notice that names the blocked change (ADR-0113).
 
 ### Changed
 
@@ -24,6 +26,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type list shows "Superseded" for an older revision.
 - The user forms use the shared select field for the role.
 - The project deletes unused CSS rules.
+- Deleting one translation keeps the other translation rows (ADR-0111).
+- Read-only pages hide the controls of blocked changes (ADR-0113).
+
+### Fixed
+
+- Saving the definition shows the new English base text above the translations (ADR-0111).
 
 ## [0.5.0] - 2026-11-02
 

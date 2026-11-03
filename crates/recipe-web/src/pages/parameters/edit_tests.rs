@@ -226,6 +226,62 @@ async fn parameters_edit_of_an_operator_with_a_bad_field_gives_e_web_002() {
 }
 
 #[tokio::test]
+async fn parameters_edit_stores_the_description_with_lf_line_ends() {
+    let world = recipe_world();
+    let pairs = changed(
+        &SPEED_FIELDS,
+        &[("description_en", Some("Line 1\r\nLine 2"))],
+    );
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let page = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert!(
+        page.body
+            .contains("<dd lang=\"en\" class=\"text-lines\">Line 1\nLine 2</dd>"),
+        "{}",
+        page.body
+    );
+    assert!(!page.body.contains('\r'), "{}", page.body);
+}
+
+/// Regression: a lone CR is a control character, so the parse refuses it (ADR-0028).
+#[tokio::test]
+async fn parameters_edit_of_a_description_with_a_lone_cr_names_the_field() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = changed(&SPEED_FIELDS, &[("description_en", Some("Line 1\rLine 2"))]);
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert!(
+        reply.body.contains("id=\"description_en-error\""),
+        "{}",
+        reply.body
+    );
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
+/// Regression: a lone CR before a CRLF pair is still a lone CR, so the parse refuses it (ADR-0112 (g)).
+#[tokio::test]
+async fn parameters_edit_of_a_description_with_a_cr_before_a_crlf_names_the_field() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = changed(&SPEED_FIELDS, &[("description_en", Some("a\r\r\nb"))]);
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert!(
+        reply.body.contains("id=\"description_en-error\""),
+        "{}",
+        reply.body
+    );
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
+#[tokio::test]
 async fn parameters_edit_without_htmx_goes_to_the_parameter_page() {
     let world = recipe_world();
     let path = parameter_path(SPEED_KEY, "/definition");
@@ -234,4 +290,45 @@ async fn parameters_edit_without_htmx_goes_to_the_parameter_page() {
         .await;
     assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
     assert_eq!(reply.header("location"), parameter_path(SPEED_KEY, ""));
+}
+
+#[tokio::test]
+async fn parameters_edit_swaps_the_english_base_text_out_of_band_and_no_translation_row() {
+    // ADR-0111 (i), design D9: the save of the definition replaces only the base block.
+    let world = recipe_world();
+    let pairs = changed(
+        &SPEED_FIELDS,
+        &[
+            ("name_en", Some("Speed renamed")),
+            ("description_en", Some("New description")),
+        ],
+    );
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let base = reply
+        .body
+        .split("<dl id=\"translations-base\" hx-swap-oob=\"true\">")
+        .nth(1)
+        .expect("the answer holds the base block");
+    let base = base.split("</dl>").next().unwrap();
+    assert!(base.contains("Speed renamed"), "{base}");
+    assert!(
+        base.contains("<dd lang=\"en\" class=\"text-lines\">New description</dd>"),
+        "{base}"
+    );
+    assert!(
+        !reply.body.contains("translation-row"),
+        "an answer with a translation row: {}",
+        reply.body
+    );
+    let page = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert!(
+        page.body.contains("<dl id=\"translations-base\">"),
+        "{}",
+        page.body
+    );
+    assert!(!page.body.contains("translations-base\" hx-swap-oob"));
 }

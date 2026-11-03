@@ -339,3 +339,27 @@ async fn recipes_list_show_deleted_with_no_deleted_recipe_counts_as_filtered() {
     assert!(main.contains(EMPTY_FILTERED), "{main}");
     assert!(main.contains(CLEAR_LINK), "{main}");
 }
+
+// --- Read-only mode (ADR-0113 (b)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (b): in read-only mode the list has no link to a new recipe and
+/// no restore form, also for a role that holds the permissions. The deleted row and its state stay.
+#[tokio::test]
+async fn recipes_list_in_read_only_mode_has_no_new_recipe_link_and_no_restore_form() {
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    let admin = world.get_en(&world.admin, "/recipes?show_deleted=1").await;
+    assert_eq!(admin.status, StatusCode::OK, "{}", admin.body);
+    let main = main_of(&admin.body);
+    assert!(main.contains(R300_LINK), "{main}");
+    assert!(main.contains("<span>Deleted</span>"), "{main}");
+    let engineer = world.get_en(&world.engineer, "/recipes").await;
+    assert_eq!(engineer.status, StatusCode::OK, "{}", engineer.body);
+    assert!(main_of(&engineer.body).contains(R100_LINK));
+    for body in [&admin.body, &engineer.body] {
+        let main = main_of(body);
+        for forbidden in ["/recipes/new", "/restore", "method=\"post\""] {
+            assert!(!main.contains(forbidden), "{forbidden}: {main}");
+        }
+    }
+}

@@ -5,14 +5,71 @@
 
 use axum::http::StatusCode;
 
-use super::test_kit::{parameter_path, position, seed_translation};
+use super::test_kit::{
+    SPEED_FIELDS, changed, parameter_path, position, post_htmx, seed_translation,
+};
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{
     assert_clean_html, assert_error, assert_ids_unique_and_references_resolve, attribute_values,
     field_value,
 };
-use crate::test_support::plant::{ENGLISH, POLISH, main_of};
+use crate::test_support::plant::{ENGLISH, HTMX, POLISH, main_of};
 use crate::test_support::recipes::{HOLD_KEY, LINE_A_KEY, SPEED_KEY};
+
+// --- Read-only mode (ADR-0113 (b), (d)) ---------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113: in read-only mode the page of a draft parameter shows the
+/// read-only grid and the translation texts, and no form of the command.
+#[tokio::test]
+async fn parameters_page_of_a_draft_in_read_only_mode_shows_the_grid_and_the_translations() {
+    let world = recipe_world();
+    seed_translation(&world, SPEED_KEY, ("de", 1)).await;
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer] {
+        let reply = world.get_en(session, &parameter_path(SPEED_KEY, "")).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let main = main_of(&reply.body);
+        assert!(main.contains("<td class=\"data\">1200</td>"), "{main}");
+        assert!(main.contains("id=\"translation-de\""), "{main}");
+        assert!(!main.contains("parameter-edit-form"), "{main}");
+        assert!(!main.contains("parameter-delete-submit"), "{main}");
+        assert!(!main.contains("translation-de-delete"), "{main}");
+        assert_clean_html(&reply.body);
+    }
+}
+
+/// ADR-0113 (b): the page holds the forms of the layout only, the logout and the language switch.
+#[tokio::test]
+async fn parameters_page_in_read_only_mode_holds_only_the_logout_and_language_forms() {
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    let reply = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.body.as_str();
+    assert_eq!(body.matches("<form").count(), 2, "{body}");
+    assert_eq!(body.matches("method=\"post\"").count(), 2, "{body}");
+    assert!(body.contains("action=\"/logout\""), "{body}");
+    assert!(body.contains("action=\"/lang\""), "{body}");
+}
+
+/// ADR-0113 (b): `GET .../translations` holds no form in read-only mode.
+#[tokio::test]
+async fn parameters_translations_in_read_only_mode_hold_no_form() {
+    let world = recipe_world();
+    seed_translation(&world, SPEED_KEY, ("de", 1)).await;
+    world.fixture.state.read_only().set(true);
+    let path = parameter_path(SPEED_KEY, "/translations");
+    let reply = world.get(&world.engineer, &path, &[ENGLISH, HTMX]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        reply.body.contains("id=\"translation-de\""),
+        "{}",
+        reply.body
+    );
+    assert!(!reply.body.contains("<form"), "{}", reply.body);
+}
 
 #[tokio::test]
 async fn parameters_page_of_a_draft_holds_one_edit_form_with_the_stored_value() {
@@ -104,10 +161,56 @@ async fn parameters_page_marks_the_english_definition_texts_with_lang_en_in_both
                 "{ui_lang} {id}: {block}"
             );
             assert!(
-                block.contains("<dd lang=\"en\">A parameter of the press line</dd>"),
+                block.contains(
+                    "<dd lang=\"en\" class=\"text-lines\">A parameter of the press line</dd>"
+                ),
                 "{ui_lang} {id}: {block}"
             );
         }
+    }
+}
+
+/// Store the description `Line 1`, a line end, and `Line 2` for `SPEED` and return the page of it.
+async fn page_with_two_line_description(world: &crate::test_support::plant::World) -> String {
+    let pairs = changed(
+        &SPEED_FIELDS,
+        &[("description_en", Some("Line 1\r\nLine 2"))],
+    );
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let saved = post_htmx(world, &path, &pairs).await;
+    assert_eq!(saved.status, StatusCode::OK, "{}", saved.body);
+    let page = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    page.body
+}
+
+/// ADR-0112 (a), (d): the edit form holds a `textarea` with the stored line end.
+#[tokio::test]
+async fn parameters_page_edit_form_holds_a_textarea_description_with_the_stored_line_end() {
+    let world = recipe_world();
+    let body = page_with_two_line_description(&world).await;
+    let form = main_of(&body)
+        .split("<form id=\"parameter-edit-form\"")
+        .nth(1)
+        .unwrap();
+    let start =
+        "<textarea id=\"description_en\" name=\"description_en\" rows=\"4\" maxlength=\"4000\"";
+    assert!(form.contains(start), "{form}");
+    assert!(form.contains(">\nLine 1\nLine 2</textarea>"), "{form}");
+    assert!(!form.contains("<input id=\"description_en\""), "{form}");
+}
+
+/// ADR-0112 (h): the summary and the English base text keep the line end and use `text-lines`.
+#[tokio::test]
+async fn parameters_page_shows_the_description_in_text_lines_elements() {
+    let world = recipe_world();
+    let body = page_with_two_line_description(&world).await;
+    let shown = "<dd lang=\"en\" class=\"text-lines\">Line 1\nLine 2</dd>";
+    for id in ["parameter-summary", "translations"] {
+        let block = block_of(&body, id);
+        assert!(block.contains(shown), "{id}: {block}");
     }
 }
 

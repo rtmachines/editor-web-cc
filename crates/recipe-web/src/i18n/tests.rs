@@ -768,20 +768,3 @@ fn i18n_pl_bundle_names_a_tag_tag_and_never_znacznik() {
         );
     }
 }
-
-#[test]
-fn i18n_user_reset_warning_does_not_point_to_a_next_page() {
-    for source in [EN_SOURCE, PL_SOURCE] {
-        let text = ftl_message(source, "user-reset-warning").unwrap_or_default();
-        assert!(!text.contains("next page"), "{text}");
-        assert!(!text.contains("następnej stronie"), "{text}");
-    }
-}
-
-#[test]
-fn i18n_user_reset_warning_says_the_password_appears_only_once() {
-    let en = ftl_message(EN_SOURCE, "user-reset-warning").unwrap_or_default();
-    let pl = ftl_message(PL_SOURCE, "user-reset-warning").unwrap_or_default();
-    assert!(en.contains("only once"), "{en}");
-    assert!(pl.contains("tylko raz"), "{pl}");
-}

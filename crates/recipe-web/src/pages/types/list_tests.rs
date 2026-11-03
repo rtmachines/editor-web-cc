@@ -156,3 +156,22 @@ async fn types_list_content_answer_holds_the_title_and_the_focused_heading() {
     let reply = get_as(&world, &world.engineer, LIST, &HTMX_CONTENT).await;
     assert_content_answer(&reply, "UDT types of machine M7", LIST);
 }
+
+/// ADR-0113 (b): in read-only mode no role gets the link to a new UDT type.
+#[tokio::test]
+async fn types_list_in_read_only_mode_holds_no_link_to_a_new_type_for_any_role() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer, &world.operator] {
+        let reply = get_as(&world, session, LIST, &[]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(!reply.body.contains("/types/new"), "{}", reply.body);
+        assert!(
+            reply
+                .body
+                .contains("href=\"/machines/M7/types/ST_Zone?rev=2\""),
+            "{}",
+            reply.body
+        );
+    }
+}

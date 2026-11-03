@@ -178,7 +178,7 @@ async fn approve_preview_translation_row_shows_the_name_and_the_description_of_o
     );
     assert!(
         pl.contains(
-            "<dl><dt>Name</dt><dd lang=\"pl\">Linia A</dd><dt>Description</dt><dd lang=\"pl\">Opis linii A</dd></dl>"
+            "<dl><dt>Name</dt><dd lang=\"pl\">Linia A</dd><dt>Description</dt><dd class=\"text-lines\" lang=\"pl\">Opis linii A</dd></dl>"
         ),
         "{pl}"
     );

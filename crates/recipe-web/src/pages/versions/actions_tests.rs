@@ -419,3 +419,38 @@ async fn actions_stale_discard_shows_the_conflict_with_the_link_to_the_version_p
     let reply = post_content(&world, &world.engineer, path, "row_version=8").await;
     assert_conflict(&reply, 3, 1);
 }
+
+#[tokio::test]
+async fn actions_draft_in_read_only_mode_shows_no_approve_link_and_no_danger_disclosure() {
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer] {
+        let reply = world.get_en(session, "/recipes/R-100/versions/3").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let main = main_of(&reply.body);
+        assert_action_area(main);
+        assert_no_action_form(main);
+        assert!(main.contains("/recipes/R-100/compare"), "{main}");
+        assert!(!main.contains("/approve\""), "{main}");
+        assert!(!main.contains(DANGER), "{main}");
+        assert!(!main.contains("/discard\""), "{main}");
+        assert!(!main.contains("Approve version 3"), "{main}");
+    }
+}
+
+#[tokio::test]
+async fn actions_approved_version_in_read_only_mode_keeps_the_export_link_and_drops_retire() {
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    let reply = world
+        .get_en(&world.admin, "/recipes/R-100/versions/2")
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert_action_area(main);
+    assert_no_action_form(main);
+    assert!(main.contains(APPROVED_EXPORT_HREF), "{main}");
+    assert!(main.contains("/recipes/R-100/compare"), "{main}");
+    assert!(!main.contains(DANGER), "{main}");
+    assert!(!main.contains("/retire\""), "{main}");
+}

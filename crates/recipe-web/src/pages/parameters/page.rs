@@ -63,12 +63,9 @@ pub(crate) async fn read_parameter(ctx: Ctx<'_>) -> Result<ParameterView, WebErr
 
 /// Return true when the reader gets the edit form: a live draft of a live recipe and `ParameterEdit`.
 fn is_editable(request: &PageRequest, view: &ParameterView) -> Result<bool, WebError> {
-    let role = request.auth()?.user().role();
     Ok(view.detail.state == VersionState::LiveDraft
         && !view.recipe.is_deleted()
-        && Operation::UpdateParameterDefinition
-            .requirement()
-            .allows(role))
+        && request.may_run(Operation::UpdateParameterDefinition)?)
 }
 
 /// Build the grid of the stored value and the stored limits of `view` (A43).
@@ -152,6 +149,7 @@ pub(crate) async fn parameter_page(ctx: Ctx<'_>) -> Result<Response, WebError> {
         t,
         summary: Some(SummaryView::stored(&view)),
         form,
+        notice: None,
         values,
         translations: Some(translations_of(ctx, &view, editable)),
         remove: editable.then(|| remove_of(ctx, &view)),
@@ -183,7 +181,6 @@ fn translations_of(ctx: Ctx<'_>, view: &ParameterView, editable: bool) -> Transl
         name_en: view.parameter.name_en.to_string(),
         description_en: view.parameter.description_en.to_string(),
         rows: translation_rows(&source, langs, &view.parameter.translations),
-        toast: String::new(),
     }
 }
 

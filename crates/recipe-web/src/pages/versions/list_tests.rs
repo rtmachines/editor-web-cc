@@ -153,4 +153,5 @@ async fn versions_list_row_shows_the_state_the_note_and_the_times() {
     );
     assert!(row.contains("<span>Approved</span>"), "{row}");
     assert!(row.contains(" UTC</td>"), "{row}");
+    assert!(row.contains("<td class=\"text-lines\">"), "{row}");
 }

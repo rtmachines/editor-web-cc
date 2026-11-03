@@ -154,16 +154,30 @@ fn text_cell(text: &str) -> String {
     format!("<td lang=\"en\">{}</td>", askama_escape(text))
 }
 
+/// Return the cell of an English description. It carries `lang="en"` and the class `text-lines`
+/// (ADR-0112 (h)).
+fn description_cell(text: &str) -> String {
+    format!(
+        "<td class=\"text-lines\" lang=\"en\">{}</td>",
+        askama_escape(text)
+    )
+}
+
 /// Return the cell of a value.
 fn value_cell(text: &str) -> String {
     format!("<td class=\"diff-value\">{}</td>", askama_escape(text))
 }
 
 /// Return the labeled text of the Polish translation. The text carries `lang="pl"`, the label
-/// does not (finding CX-DR-1).
+/// does not (finding CX-DR-1). The description also carries the class `text-lines` (ADR-0112 (h)).
 fn pair_cell(label: &str, text: &str) -> String {
+    let class = if label == "Description" {
+        " class=\"text-lines\""
+    } else {
+        ""
+    };
     format!(
-        "<dt>{label}</dt><dd lang=\"pl\">{}</dd>",
+        "<dt>{label}</dt><dd{class} lang=\"pl\">{}</dd>",
         askama_escape(text)
     )
 }
@@ -195,7 +209,7 @@ async fn approval_text_xss_description_en_is_escaped_in_the_definition_row() {
         let world = audit_world().await;
         edit_speed(&world, 2, ("SPEED", &payload)).await;
         let replies = read_pages(&world, &DRAFT_PAGES, &payload).await;
-        assert_cells(&replies, &text_cell(&payload), 1);
+        assert_cells(&replies, &description_cell(&payload), 1);
     }
 }
 
@@ -233,7 +247,8 @@ async fn approval_text_xss_changed_texts_are_escaped_on_both_sides_of_the_diff_a
         edit_speed(&world, 3, plain).await;
         translate_speed(&world, 3, plain).await;
         let replies = read_pages(&world, &VERSION_3_PAGES, &payload).await;
-        assert_cells(&replies, &text_cell(&payload), 4);
+        assert_cells(&replies, &text_cell(&payload), 2);
+        assert_cells(&replies, &description_cell(&payload), 2);
         assert_cells(&replies, &value_cell(&payload), 1);
         assert_cells(&replies, &pair_cell("Name", &payload), 1);
         assert_cells(&replies, &pair_cell("Description", &payload), 1);

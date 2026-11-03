@@ -498,7 +498,7 @@ label {
   font-weight: 400;
 }
 
-input, select {
+input, select, textarea {
   min-height: var(--target);
   max-width: 100%;
   padding: 0 var(--space-3);
@@ -510,12 +510,12 @@ input, select {
   font-size: var(--text-base);
 }
 
-input:disabled, select:disabled {
+input:disabled, select:disabled, textarea:disabled {
   background: var(--color-sunken);
   color: var(--color-text-muted);
 }
 
-input[aria-invalid="true"], select[aria-invalid="true"] {
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] {
   border-color: var(--color-error-edge);
 }
 
@@ -558,7 +558,7 @@ input[aria-invalid="true"], select[aria-invalid="true"] {
     border-bottom-color: Highlight;
   }
 
-  .topbar, main form, .btn, input, select {
+  .topbar, main form, .btn, input, select, textarea {
     border-color: ButtonBorder;
   }
 }

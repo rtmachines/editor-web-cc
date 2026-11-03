@@ -11,7 +11,7 @@ use askama::Template;
 use axum::extract::rejection::{FormRejection, PathRejection};
 use axum::extract::{Form, Path, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::VersionFormPurpose;
+use recipe_app::auth::{Operation, VersionFormPurpose};
 use recipe_app::error::{AppError, Missing};
 use recipe_app::ports::NonEmpty;
 use recipe_app::recipe::{
@@ -22,6 +22,7 @@ use recipe_domain::text::LongText;
 use serde::Deserialize;
 
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
+use crate::form_text::crlf_to_lf;
 use crate::layout::{Layout, NavTarget};
 use crate::pages::draft_reply::{refusal_lines, refused};
 use crate::pages::recipes::fields::FieldLines;
@@ -74,7 +75,7 @@ impl CreateFields {
             FieldReason::BasedOn,
         );
         let change_note = lines.field(
-            LongText::parse(&self.change_note),
+            LongText::parse(&crlf_to_lf(&self.change_note)),
             "change_note",
             FieldReason::ChangeNote,
         );
@@ -99,6 +100,8 @@ struct NewVersionForm {
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
     errors: FormErrors,
+    /// True when read-only mode blocks the form, so the notice stands in its place (ADR-0113 (d)).
+    blocked: bool,
 }
 
 impl NewVersionForm {
@@ -131,7 +134,13 @@ impl NewVersionForm {
             note: String::new(),
             oob: false,
             errors: FormErrors::default(),
+            blocked: false,
         }
+    }
+
+    /// Put the notice of read-only mode in place of the form when `blocked` is true.
+    fn blocked(self, blocked: bool) -> Self {
+        Self { blocked, ..self }
     }
 
     /// Return the form with the sent texts and the error lines, swapped out of band.
@@ -194,8 +203,9 @@ pub(crate) async fn new_form(
     let t = Texts::new(state.bundles(), request.lang());
     let title = t.with_arg("version-new-title", "reference", &reference);
     let layout = Layout::for_session(t, &request, title, Some(NavTarget::Recipes))?;
+    let blocked = !request.may_run(Operation::CreateVersion)?;
     let page = NewVersionPage {
-        form: NewVersionForm::new(t, &form, layout.csrf_token.clone()),
+        form: NewVersionForm::new(t, &form, layout.csrf_token.clone()).blocked(blocked),
         recipe_href: format!("/recipes/{reference}"),
         recipe_text: t.with_arg("recipe-title", "reference", &reference),
         layout,

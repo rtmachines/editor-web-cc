@@ -6,10 +6,10 @@
 {% include "user-facts.html" %}
 <div id="user-result"></div>
 {% include "user-actions.html" %}
-<details class="danger"><summary>{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span>{{ t.get("user-reset-summary") }}</span></summary><form method="post" action="/users/{{ v.login }}/reset-password" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+{% if v.can_reset %}<details class="danger"><summary>{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span>{{ t.get("user-reset-summary") }}</span></summary><form method="post" action="/users/{{ v.login }}/reset-password" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
 <input type="hidden" name="csrf_token" value="{{ v.csrf_token }}">
 <div id="danger-notice-reset">{{ alerts::notice("warning", t.get("user-reset-warning")) }}</div>
 <button type="submit" class="btn-danger" aria-describedby="danger-notice-reset">{{ t.with_arg("user-reset-submit", "login", v.login) }}</button>
 </form></details>
-<p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
+{% endif %}<p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
 {% endblock %}

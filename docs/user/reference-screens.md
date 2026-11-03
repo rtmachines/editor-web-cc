@@ -27,6 +27,22 @@ Every full page uses one layout (`design-system.md` section 10.1). From top to b
 - Page heading: one `h1` with the title of the page. The browser tab shows the page title, then **Recipe editor**.
 - Error page: when a full page fails, the page shows the heading **The request failed** and the link **Open the recipe list**. It has no navigation and no language switch. A form that the server refuses without HTMX shows the same heading with the list of bad fields (`api.md` section 5.3).
 
+## Pages in read-only mode
+
+In read-only mode the banner shows and the editor blocks every change. A page then shows only what you can still use.
+
+- A page hides each control of a blocked change. A control is a form that sends the change, or a link that only opens that form.
+- A parameter page shows the values, the limits, and the translations as read-only text.
+- A version page of a draft has no link **Add a parameter** and no link **Approve version { $number }**. It has no rebind form and no disclosure **Discard this draft**.
+- A version page of an approved version has no disclosure **Retire this version**.
+- A recipe page has no link **New version**. A type page has no link **New revision**. A list page has no link to a new item.
+- A form page answers with its heading and the notice "Read-only mode blocks this form." The page has no form. The permission check still runs first.
+- The pages **New recipe**, **New machine**, **New unit**, **New UDT type**, **New version**, **New parameter**, **New user**, **Change password**, and **Approval** show this notice.
+- A session that must change its password sees the notice and the button **Log out** on the page **Change password**.
+- The login form, **Log out**, the language switch, and the export link stay. Search forms, pagers, and navigation links stay too.
+
+If the mode starts after you open a page, the page keeps its forms. A save then shows `E-WEB-006` in the error panel and keeps your input.
+
 ## Status badges
 
 The editor shows three version states. A badge shows a color, an icon, and a word together. Color alone never shows a state (`design-system.md` section 9).
@@ -106,13 +122,40 @@ The form of a new parameter has these fields from top to bottom. The edit form o
 
 - **Unit**: a list of the live units of the machine. The form marks it as required.
 - **Tag**: a text field with a hint. The form marks it as required.
-- **English name** and **English description**: text fields. The form marks both as required.
+- **English name**: a text field. The form marks it as required.
+- **English description**: a multi-line field. The form marks it as required. See [Multi-line text fields](#multi-line-text-fields).
 - **Type**: a text field with a list of suggested types. The form marks it as required.
 - **PLC address**: a text field with a hint. It shows only for a Siemens platform. The form marks it as required only for **Siemens S7-300**.
 - **Order in the unit**: a text field with a hint. The form marks it as required.
 - The value grid with the caption **Values and process limits**. Until you enter a type and select **Show value fields**, the form shows the text "Enter the type and then show the value fields."
 
 The button **Show value fields** shows the grid for the type that you entered. The first button of the form is **Add parameter**, or **Save parameter** in the edit form. The key Enter in a field saves the form.
+
+## Translations on the parameter page
+
+The parameter page shows the section **Translations** under the summary. The section has the block **English base text** and one row for each language. Each row has the heading of its language code.
+
+- The block **English base text** shows the English name and the English description. It shows each line end of the description as a new line.
+- After you save the definition, the block shows the new English texts. The rows below keep your unsaved input.
+- On a draft with `ParameterEdit`, a language of the list has a form. The form has the fields **Name ({ $lang })** and **Description ({ $lang })** and the button **Save translation { $lang }**.
+- **Description ({ $lang })** is a multi-line field. See [Multi-line text fields](#multi-line-text-fields).
+- A stored translation also has the disclosure **Delete the translation { $lang }**. It holds the warning "The system deletes the name and the description in this language." and the button **Delete translation { $lang }**.
+- A deletion changes only the row of its language. The other rows keep their unsaved input.
+- After a deletion, the focus is on the heading of the row. The toast is "The translation { $lang } is deleted."
+- The row of a deleted language shows an empty form. A language that is not in the list shows the text "No translation" and no form.
+- Without the permission, a row shows the stored name and description as read-only text.
+
+## Multi-line text fields
+
+Three fields hold more than one line: **English description**, **Description ({ $lang })** of a translation, and **Change note**. **Change note** is on the pages **New recipe** and **New version**. Every other text field has one line.
+
+- Each field is a text area of four rows. Its size can change in height.
+- Each field holds at most 4000 characters.
+- Under each field, the limit line shows "At most { $max } characters." The value of `{ $max }` is 4000. The page has no live counter.
+- The key Enter adds a new line in the field. It does not save the form.
+- The editor keeps each line end of a stored text. A save of a value alone keeps the line ends of the description.
+- A page that shows such a text outside a form shows each line end as a new line. This applies to the parameter summary, the change note of a version, and the diff.
+- A lone carriage return in the text gives a field error.
 
 ## Export (`api.md` section 2.7)
 

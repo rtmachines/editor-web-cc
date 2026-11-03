@@ -10,6 +10,7 @@ use recipe_domain::text::{LongText, Text};
 
 use super::fields::SentFields;
 use crate::error::{FieldError, FieldReason};
+use crate::form_text::crlf_to_lf;
 
 /// The definition fields of a parameter form after their check.
 #[derive(Clone, Debug)]
@@ -132,7 +133,7 @@ pub(crate) fn check(sent: &SentFields) -> Checked {
         FieldReason::Name,
     );
     let description_en = lines.field(
-        LongText::parse(sent.text("description_en").unwrap_or_default()),
+        LongText::parse(&crlf_to_lf(sent.text("description_en").unwrap_or_default())),
         "description_en",
         FieldReason::Description,
     );

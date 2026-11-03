@@ -183,7 +183,6 @@ impl<'a> MachinesPage<'a> {
         checked: &Checked,
         list: MachineList,
     ) -> Result<Self, WebError> {
-        let role = request.auth()?.user().role();
         let mut layout = Layout::for_session(
             t,
             request,
@@ -201,7 +200,7 @@ impl<'a> MachinesPage<'a> {
             t,
             q: checked.q.clone(),
             show_archived: checked.filter.include_archived,
-            can_create: Operation::CreateMachine.requirement().allows(role),
+            can_create: request.may_run(Operation::CreateMachine)?,
             rows: list
                 .rows
                 .iter()

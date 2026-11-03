@@ -216,3 +216,23 @@ async fn rebind_forms_over_the_bound_are_not_shown_to_an_operator() {
     assert!(!list.contains("<form"), "{list}");
     assert!(!list.contains("One page shows at most"), "{list}");
 }
+
+#[tokio::test]
+async fn rebind_form_is_absent_in_read_only_mode_and_the_outdated_list_stays() {
+    let world = recipe_world();
+    let normal = world.get_en(&world.engineer, DRAFT_PAGE).await;
+    assert!(
+        outdated_of(&normal.body).contains("<form"),
+        "{}",
+        normal.body
+    );
+    world.fixture.state.read_only().set(true);
+
+    let reply = world.get_en(&world.engineer, DRAFT_PAGE).await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let list = outdated_of(&reply.body);
+    assert!(!list.contains("<form"), "{list}");
+    assert!(!list.contains("Rebind parameters"), "{list}");
+    assert!(list.contains("ZONES"), "{list}");
+}

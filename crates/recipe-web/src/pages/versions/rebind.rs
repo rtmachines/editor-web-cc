@@ -158,8 +158,7 @@ async fn sent_form(
     (reference, number): (&ReferenceNumber, u32),
     hidden: &Hidden,
 ) -> Result<Option<RebindForm>, WebError> {
-    let role = request.auth()?.user().role();
-    if !Operation::RebindTypeRevision.requirement().allows(role) {
+    if !request.may_run(Operation::RebindTypeRevision)? {
         return Ok(None);
     }
     let input = GetVersionInput {

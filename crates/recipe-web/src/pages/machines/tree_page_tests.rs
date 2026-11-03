@@ -196,6 +196,28 @@ async fn machines_tree_of_an_operator_holds_no_add_link() {
     assert!(!main_of(&page.body).contains("/machines/M7/units/new"));
 }
 
+/// Spec "Read-only pages", ADR-0113 (b): in read-only mode no add link stands in the tree of an
+/// Administrator, in the full page and in the HTMX answer.
+#[tokio::test]
+async fn machines_tree_in_read_only_mode_holds_no_add_link_for_an_administrator() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    let page = world.get_en(&world.admin, "/machines/M7/units").await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(!main_of(&page.body).contains("/units/new"), "{}", page.body);
+    let headers = [ENGLISH, HTMX];
+    let fragment = world
+        .get(&world.admin, "/machines/M7/units", &headers)
+        .await;
+    assert_eq!(fragment.status, StatusCode::OK, "{}", fragment.body);
+    assert!(!fragment.body.contains("/units/new"), "{}", fragment.body);
+    assert!(
+        fragment.body.contains("href=\"/machines/M7/units/U"),
+        "{}",
+        fragment.body
+    );
+}
+
 // --- GET /machines/{code}/units: the page -------------------------------------------------------
 
 #[tokio::test]

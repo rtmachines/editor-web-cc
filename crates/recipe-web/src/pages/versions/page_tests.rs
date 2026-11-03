@@ -48,6 +48,10 @@ async fn versions_page_of_an_operator_shows_the_header_and_the_table_and_no_form
         "{main}"
     );
     assert!(main.contains("<dd class=\"data\">user1</dd>"), "{main}");
+    assert!(
+        main.contains("<dt>Change note</dt>\n<dd class=\"text-lines\">"),
+        "{main}"
+    );
     let platform = format!("<dd>{}</dd>", text(Lang::En, "platform-s7-300"));
     assert!(main.contains(&platform), "{main}");
     assert!(
@@ -228,4 +232,26 @@ async fn versions_page_repeats_the_recipe_link_right_after_the_state_badge_row()
         badge_row.starts_with(&format!("{link}\n<dl>")),
         "{badge_row}"
     );
+}
+
+#[tokio::test]
+async fn versions_page_of_a_draft_in_read_only_mode_has_no_link_to_add_a_parameter() {
+    let world = recipe_world();
+    let before = world
+        .get_en(&world.engineer, "/recipes/R-100/versions/3")
+        .await;
+    assert!(main_of(&before.body).contains(ADD_LINK), "{}", before.body);
+    world.fixture.state.read_only().set(true);
+
+    let reply = world
+        .get_en(&world.engineer, "/recipes/R-100/versions/3")
+        .await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(!main.contains("/parameters/new"), "{main}");
+    assert!(!main.contains("Add a parameter"), "{main}");
+    assert_no_action_form(main);
+    assert!(main.contains("<tbody id=\"parameter-rows\">"), "{main}");
+    assert_clean_html(&reply.body);
 }

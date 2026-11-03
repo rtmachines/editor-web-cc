@@ -8,8 +8,13 @@
 //!
 //! 1. Set the variable `RECIPE_DEV_PASSWORD`. The password has 12 to 128 characters.
 //! 2. Set the variable `RECIPE_DEV_PORT` to change the port. The default port is 8080.
-//! 3. Run `cargo run -p recipe-web --example dev_server`.
-//! 4. Open `http://127.0.0.1:8080/login` in Chromium.
+//! 3. Optional: set the variable `RECIPE_DEV_READ_ONLY_FILE` to a file path.
+//! 4. Run `cargo run -p recipe-web --example dev_server`.
+//! 5. Open `http://127.0.0.1:8080/login` in Chromium.
+//!
+//! With `RECIPE_DEV_READ_ONLY_FILE` set, the server checks that file every 250 ms. The read-only
+//! mode is on while the file exists and off while the file is missing. The e2e suite creates and
+//! deletes the file to switch the mode. Without the variable, the mode stays off.
 //!
 //! The server listens on `127.0.0.1` only. It seeds the primitive types and no machine.
 //! It seeds the users `admin` (Administrator), `engineer` (Process engineer), and `operator`
@@ -23,6 +28,7 @@
 use std::fmt;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::num::NonZeroU16;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,7 +40,7 @@ use recipe_app::identity::{
     NONCE_BYTES, PasswordHasher as _, random_nonce,
 };
 use recipe_app::memory::{MemoryClock, MemoryStore};
-use recipe_app::ports::NewUser;
+use recipe_app::ports::{NewUser, ReadOnlySwitch};
 use recipe_domain::identity::{
     KeyRing, KeyRingReason, Login, LoginReason, NewPassword, PasswordReason, Role, UserId,
 };
@@ -52,6 +58,10 @@ const PASSWORD_VARIABLE: &str = "RECIPE_DEV_PASSWORD";
 const DEFAULT_PORT: u16 = 8080;
 /// The time between two moves of the clock to the wall time.
 const CLOCK_STEP: Duration = Duration::from_secs(1);
+/// The variable that holds the path of the read-only switch file.
+const READ_ONLY_FILE_VARIABLE: &str = "RECIPE_DEV_READ_ONLY_FILE";
+/// The time between two checks of the read-only switch file.
+const READ_ONLY_POLL: Duration = Duration::from_millis(250);
 /// The translation languages of the dev server (design D11): the default `pl` and `de`.
 const TRANSLATION_LANGS: [&str; 2] = ["pl", "de"];
 /// The logins, the roles, and the identifiers of the seeded users.
@@ -289,9 +299,44 @@ fn build_state(
         .map_err(|reason| DevServerError::Web { reason })
 }
 
+/// Return true when the switch file exists.
+///
+/// The function solves one problem: the poll task must not block the async runtime, so it uses
+/// `tokio::fs`. A file that the process cannot inspect counts as missing. The function logs it once
+/// per poll at `WARN`.
+async fn read_only_file_exists(path: &Path) -> bool {
+    match tokio::fs::try_exists(path).await {
+        Ok(exists) => exists,
+        Err(error) => {
+            tracing::warn!(%error, "the read-only switch file cannot be checked");
+            false
+        }
+    }
+}
+
+/// Copy the state of the switch file to the read-only switch. The task never ends.
+async fn follow_read_only_file(path: PathBuf, switch: Arc<dyn ReadOnlySwitch>) {
+    let mut ticker = tokio::time::interval(READ_ONLY_POLL);
+    loop {
+        ticker.tick().await;
+        switch.set(read_only_file_exists(&path).await);
+    }
+}
+
 /// Listen on `address` and serve `app` until the process stops.
-async fn run(address: SocketAddr, app: Router, clock: MemoryClock) -> Result<(), DevServerError> {
+///
+/// With `read_only_file` set, a task follows that file and turns the read-only mode on while the
+/// file exists.
+async fn run(
+    address: SocketAddr,
+    app: Router,
+    clock: MemoryClock,
+    read_only: Option<(PathBuf, Arc<dyn ReadOnlySwitch>)>,
+) -> Result<(), DevServerError> {
     tokio::spawn(follow_wall_clock(clock));
+    if let Some((path, switch)) = read_only {
+        tokio::spawn(follow_read_only_file(path, switch));
+    }
     let listener = tokio::net::TcpListener::bind(address)
         .await
         .map_err(|source| DevServerError::Bind { address, source })?;
@@ -317,7 +362,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .enable_all()
         .build()
         .map_err(DevServerError::Runtime)?;
-    runtime.block_on(run(address, router(state), clock))?;
+    let read_only = lookup(READ_ONLY_FILE_VARIABLE).map(|path| {
+        let switch: Arc<dyn ReadOnlySwitch> = Arc::new(state.read_only().clone());
+        (PathBuf::from(path), switch)
+    });
+    runtime.block_on(run(address, router(state), clock, read_only))?;
     Ok(())
 }
 
@@ -491,6 +540,20 @@ mod tests {
         sync_clock(&clock);
         let moved = clock.now().as_offset_date_time().unix_timestamp();
         assert!(moved.abs_diff(OffsetDateTime::now_utc().unix_timestamp()) <= 5);
+    }
+
+    // --- Read-only switch ------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn read_only_file_exists_is_true_for_an_existing_file_and_false_for_a_missing_file() {
+        let path = std::env::temp_dir().join(format!(
+            "recipe-dev-server-read-only-{}",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"").unwrap();
+        assert!(read_only_file_exists(&path).await);
+        std::fs::remove_file(&path).unwrap();
+        assert!(!read_only_file_exists(&path).await);
     }
 
     // --- Seed ------------------------------------------------------------------------------------

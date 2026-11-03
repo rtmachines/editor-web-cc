@@ -10,7 +10,6 @@ use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use recipe_app::auth::Operation;
 use recipe_app::plant::{GetUnit, UnitRef, UnitView};
-use recipe_domain::identity::Role;
 use recipe_domain::plant::{MachineCode, Unit};
 
 use super::commands::RenameForm;
@@ -44,7 +43,7 @@ impl UnitLink {
 ///
 /// The type solves one problem: one template shows a live unit with its forms and an archived unit
 /// without them. The flags `form.shown` and `can_archive` are true only for a live unit and a role
-/// that holds the permission of the command (`Operation::requirement`).
+/// that may run the command in the current mode (`PageRequest::may_run`, ADR-0113).
 #[derive(Template)]
 #[template(path = "unit.html")]
 struct UnitPage<'a> {
@@ -75,14 +74,13 @@ impl<'a> UnitPage<'a> {
         let code = view.machine.code();
         let path = view.unit.path();
         let live = view.unit.is_live();
-        let role: Role = request.auth()?.user().role();
-        let allows = |operation: Operation| live && operation.requirement().allows(role);
+        let may = |operation: Operation| Ok::<bool, WebError>(live && request.may_run(operation)?);
         let title = t.with_arg("unit-title", "path", path);
         let layout = Layout::for_session(t, request, title, Some(NavTarget::Machines))?;
         let count = t.with_arg("unit-archive-count", "count", view.descendants);
         let name = view.unit.name().to_string();
         let form = RenameForm::new((code, path), name.clone(), request.csrf_token())
-            .shown(allows(Operation::RenameUnit));
+            .shown(may(Operation::RenameUnit)?);
         Ok(Self {
             layout,
             t,
@@ -97,7 +95,7 @@ impl<'a> UnitPage<'a> {
                 .iter()
                 .map(|unit| UnitLink::of(code, unit))
                 .collect(),
-            can_archive: allows(Operation::ArchiveUnit),
+            can_archive: may(Operation::ArchiveUnit)?,
             archive_action: format!("/machines/{code}/units/{path}/archive"),
             warning: format!("{} {count}", t.get("unit-archive-warning")),
             archive_button: t.with_arg("unit-archive-submit", "path", path),

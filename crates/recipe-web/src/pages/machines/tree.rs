@@ -9,8 +9,6 @@
 
 use std::collections::BTreeMap;
 
-use recipe_app::auth::Operation;
-use recipe_domain::identity::Role;
 use recipe_domain::plant::{Machine, MachineCode, Unit, UnitId, UnitPath};
 
 /// The deepest level of a unit path (A30). A node of this depth has no child.
@@ -84,8 +82,9 @@ impl UnitTree {
     /// Build the tree of `machine`.
     ///
     /// - `scope` chooses the live units or every unit.
-    /// - `role` decides the add links: a node of depth 1 to 4 gets one when the role holds
-    ///   `AddUnit`. An archived node never gets one.
+    /// - `can_add` decides the add links: a node of depth 1 to 4 gets one when it is true. An
+    ///   archived node never gets one. A page passes `PageRequest::may_run(Operation::AddUnit)`,
+    ///   so the role and the read-only mode both count (ADR-0113 (b)).
     /// - `focus` is the unit that an `AddUnit` request made. Its link gets the focus and its
     ///   ancestors are expanded. A full page passes `None`.
     /// - `links` is false for the page of an archived machine. The tree then has no address, no
@@ -97,14 +96,14 @@ impl UnitTree {
     pub(crate) fn build(
         machine: &Machine,
         scope: Scope,
-        role: Role,
+        can_add: bool,
         focus: Option<&UnitPath>,
         links: bool,
     ) -> Self {
         let context = Context {
             code: machine.code(),
             links,
-            can_add: links && Operation::AddUnit.requirement().allows(role),
+            can_add: links && can_add,
             focus,
         };
         let mut by_parent: ByParent<'_> = BTreeMap::new();

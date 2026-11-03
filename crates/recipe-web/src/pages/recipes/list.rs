@@ -234,7 +234,6 @@ impl<'a> RecipesPage<'a> {
         checked: Checked,
         (machines, list): (Vec<Choice>, RecipeList),
     ) -> Result<Self, WebError> {
-        let role = request.auth()?.user().role();
         let layout =
             Layout::for_session(t, request, t.get("recipes-title"), Some(NavTarget::Recipes))?;
         let pairs = kept_pairs(&checked);
@@ -243,10 +242,10 @@ impl<'a> RecipesPage<'a> {
             pager_links(LIST_PATH, (checked.page, list.has_next, after_end), &pairs);
         let first_url = page_url(LIST_PATH, &pairs, 1);
         let filtered = !pairs.is_empty();
-        let can_show_deleted = Operation::ListDeletedRecipes.requirement().allows(role);
+        let can_show_deleted = request.may_run(Operation::ListDeletedRecipes)?;
         let can_restore = checked.show_deleted
             && can_show_deleted
-            && Operation::RestoreRecipe.requirement().allows(role);
+            && request.may_run(Operation::RestoreRecipe)?;
         Ok(Self {
             layout,
             t,
@@ -259,7 +258,7 @@ impl<'a> RecipesPage<'a> {
             } else {
                 COLUMNS
             },
-            can_create: Operation::CreateRecipe.requirement().allows(role),
+            can_create: request.may_run(Operation::CreateRecipe)?,
             rows: list.rows.iter().map(RecipeRow::from).collect(),
             previous_url,
             next_url,

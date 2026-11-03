@@ -69,3 +69,59 @@ pub(crate) fn sweep_pages() -> Vec<(&'static str, String)> {
         ("/recipes/{ref}", "/recipes/R-100".to_owned()),
     ]
 }
+
+// --- Read-only mode (ADR-0113 (d)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (d): in read-only mode `GET /recipes/new` answers `200` with
+/// the heading and the notice, and no form that sends `POST /recipes`.
+#[cfg(test)]
+#[tokio::test]
+async fn recipes_new_form_in_read_only_mode_shows_the_notice_in_place_of_the_form() {
+    use axum::http::StatusCode;
+
+    use super::test_world::recipe_world;
+    use crate::i18n::Lang;
+    use crate::test_support::plant::{cookie_of, main_of};
+    use crate::test_support::text;
+
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    for lang in [Lang::En, Lang::Pl] {
+        let notice = text(lang, "readonly-form-unavailable");
+        let heading = text(lang, "recipe-new-title");
+        let reply = world
+            .get(&world.engineer, "/recipes/new", &[cookie_of(lang)])
+            .await;
+        let body = main_of(&reply.body);
+        assert_eq!(reply.status, StatusCode::OK, "{lang}: {body}");
+        assert!(body.contains(&notice), "{lang}: {body}");
+        assert!(
+            body.contains(&format!("<h1>{heading}</h1>")),
+            "{lang}: {body}"
+        );
+        for forbidden in [
+            "id=\"recipe-new-form\"",
+            "id=\"recipe-create-submit\"",
+            "action=\"/recipes\"",
+            "<input",
+        ] {
+            assert!(!body.contains(forbidden), "{lang} {forbidden}: {body}");
+        }
+    }
+}
+
+/// Regression, ADR-0113 (d): the permission check runs before the notice, so an Operator gets
+/// `403 E-WEB-002` in read-only mode.
+#[cfg(test)]
+#[tokio::test]
+async fn recipes_new_form_in_read_only_mode_still_refuses_an_operator() {
+    use axum::http::StatusCode;
+
+    use super::test_world::recipe_world;
+
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    let reply = world.get_en(&world.operator, "/recipes/new").await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+    assert!(reply.body.contains("E-WEB-002"), "{}", reply.body);
+}

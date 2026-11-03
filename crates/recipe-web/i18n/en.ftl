@@ -138,6 +138,7 @@ lang-switch-pl = Polski
 lang-switch-en = English
 user-signed-in = Signed in as
 readonly-banner = Read-only mode: the free disk space is low or unknown. Changes are blocked. You can view, export, log in, and log out.
+readonly-form-unavailable = Read-only mode blocks this form.
 
 # Recipe list
 recipes-title = Recipes
@@ -167,6 +168,7 @@ field-role = Role
 field-query = Search
 field-q = Login contains
 field-page = Page
+field-lines-limit = At most { $max } characters.
 field-X-Forwarded-For = Header X-Forwarded-For
 
 # Field reasons

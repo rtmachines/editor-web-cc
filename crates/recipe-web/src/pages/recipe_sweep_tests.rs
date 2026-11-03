@@ -55,7 +55,6 @@ const HX_LITERALS: [(&str, &[&str]); 7] = [
             "#parameter-summary",
             "#parameter-table",
             "#recipe-name",
-            "#translations",
             "#versions-table",
             "closest .translation-row",
         ],

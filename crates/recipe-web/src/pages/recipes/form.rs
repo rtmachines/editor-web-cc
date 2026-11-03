@@ -10,7 +10,7 @@ use askama::Template;
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::RecipeFormPurpose;
+use recipe_app::auth::{Operation, RecipeFormPurpose};
 use recipe_app::error::AppError;
 use recipe_app::recipe::{
     CreateRecipe, CreateRecipeInput, GetRecipeForm, RecipeForm, RecipeFormInput,
@@ -23,6 +23,7 @@ use serde::Deserialize;
 use super::Choice;
 use super::fields::FieldLines;
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
+use crate::form_text::crlf_to_lf;
 use crate::layout::{Layout, NavTarget};
 use crate::pages::draft_reply::{refusal_lines, refused};
 use crate::pages::render::{render, see_other_path};
@@ -64,7 +65,7 @@ impl CreateFields {
         );
         let name = lines.field(Text::parse(&self.name), "recipe_name", FieldReason::Name);
         let change_note = lines.field(
-            LongText::parse(&self.change_note),
+            LongText::parse(&crlf_to_lf(&self.change_note)),
             "change_note",
             FieldReason::ChangeNote,
         );
@@ -91,6 +92,8 @@ struct NewRecipeForm {
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
     errors: FormErrors,
+    /// True when read-only mode blocks the form, so the notice stands in its place (ADR-0113 (d)).
+    blocked: bool,
 }
 
 impl NewRecipeForm {
@@ -112,7 +115,13 @@ impl NewRecipeForm {
             note: String::new(),
             oob: false,
             errors: FormErrors::default(),
+            blocked: false,
         }
+    }
+
+    /// Put the notice of read-only mode in place of the form when `blocked` is true.
+    fn blocked(self, blocked: bool) -> Self {
+        Self { blocked, ..self }
     }
 
     /// Return the form with the sent texts and the error lines, swapped out of band.
@@ -190,7 +199,8 @@ pub(crate) async fn new_form(
         Some(NavTarget::Recipes),
     )?;
     let page = NewRecipePage {
-        form: NewRecipeForm::new(t, &form, layout.csrf_token.clone()),
+        form: NewRecipeForm::new(t, &form, layout.csrf_token.clone())
+            .blocked(!request.may_run(Operation::CreateRecipe)?),
         layout,
         t,
     };

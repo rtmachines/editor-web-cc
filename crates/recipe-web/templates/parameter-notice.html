@@ -1,0 +1,4 @@
+{% import "components/alert.html" as alerts -%}
+{#- The region #parameter-form in read-only mode: the heading and the notice, and no form (ADR-0113 (d)). The struct that renders this file has the fields heading and notice. -#}
+{% if !heading.is_empty() %}<h2>{{ heading }}</h2>
+{% endif %}{{ alerts::notice("warning", notice) }}
