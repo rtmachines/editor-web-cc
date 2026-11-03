@@ -8,6 +8,7 @@ use askama::Template;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
+use recipe_app::auth::Operation;
 use recipe_app::plant::{GetUnitTree, UnitTreeInput};
 
 use super::tree::{Scope, UnitTree};
@@ -50,7 +51,13 @@ pub(crate) async fn show(
         .execute(auth.user(), &request.meta(), UnitTreeInput { code })
         .await?;
     let t = Texts::new(state.bundles(), request.lang());
-    let tree = UnitTree::build(&machine, Scope::Live, auth.user().role(), None, true);
+    let tree = UnitTree::build(
+        &machine,
+        Scope::Live,
+        request.may_run(Operation::AddUnit)?,
+        None,
+        true,
+    );
     let title = t.with_arg("unit-tree-title", "code", code);
     let layout = Layout::for_session(t, &request, title, Some(NavTarget::Machines))?;
     if request.is_htmx() && !layout.is_content() {

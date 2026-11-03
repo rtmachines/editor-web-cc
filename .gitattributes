@@ -14,3 +14,6 @@ deploy/pgtools/restore-roles.expected text eol=lf
 # The allow lists of the build contexts of the image recipe-pgtools (ADR-0064 (f)).
 deploy/db/.dockerignore text eol=lf
 deploy/pgtools/.dockerignore text eol=lf
+# Tests of recipe-web compare template and style text with LF line ends (ADR-0112).
+crates/recipe-web/templates/** text eol=lf
+crates/recipe-web/static/*.css text eol=lf

@@ -7,7 +7,7 @@
 
 use axum::http::{HeaderName, HeaderValue};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::ParameterFormPurpose;
+use recipe_app::auth::{Operation, ParameterFormPurpose};
 use recipe_app::error::{AppError, Missing};
 use recipe_app::ports::NonEmpty;
 use recipe_app::recipe::{GetParameterForm, GetParameterFormInput, ParameterForm};
@@ -19,7 +19,7 @@ use super::form_view::{
     DefinitionTexts, GridTexts, ParameterFormFragment, ParameterFormView, Place, Shown, grid_of,
 };
 use super::grid::GridView;
-use super::summary::ParameterPage;
+use super::summary::{ParameterNoticeFragment, ParameterPage};
 use crate::error::{FieldError, FormErrors, WebError, leaf_of};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::draft_reply::{conflict, domain_line, refused};
@@ -260,7 +260,21 @@ pub(crate) fn parameter_title(ctx: Ctx<'_>, tag: impl std::fmt::Display) -> Stri
     ctx.texts().with("parameter-title", &args)
 }
 
+/// Return true when read-only mode blocks the command of the form of `ctx` (ADR-0113 (d)).
+///
+/// The form of a new parameter sends `AddParameter`. The edit form sends
+/// `UpdateParameterDefinition`.
+fn is_blocked(ctx: Ctx<'_>) -> Result<bool, WebError> {
+    let operation = match ctx.target.key {
+        None => Operation::AddParameter,
+        Some(_key) => Operation::UpdateParameterDefinition,
+    };
+    Ok(!ctx.request.may_run(operation)?)
+}
+
 /// Render the boosted form alone (design D7).
+///
+/// In read-only mode the fragment holds the heading and the notice and no form (ADR-0113 (d)).
 ///
 /// # Errors
 ///
@@ -272,6 +286,17 @@ pub(crate) fn form_fragment(
 ) -> Result<Response, WebError> {
     let t = ctx.texts();
     let request = ctx.request;
+    if is_blocked(ctx)? {
+        let heading = match form.parameter.as_ref() {
+            None => t.get("parameter-new-title"),
+            Some(_parameter) => String::new(),
+        };
+        let fragment = ParameterNoticeFragment {
+            heading,
+            notice: t.get("readonly-form-unavailable"),
+        };
+        return Ok(render(&fragment, request.request_id())?.into_response());
+    }
     let csrf = request.csrf_token();
     let view = ParameterFormView::new(
         t,
@@ -285,6 +310,8 @@ pub(crate) fn form_fragment(
 }
 
 /// Render the page of the form: the full page, or the content of `main` (ADR-0037 (w)).
+///
+/// In read-only mode the page holds the notice in place of the form (ADR-0113 (d)).
 ///
 /// # Errors
 ///
@@ -302,10 +329,12 @@ pub(crate) fn form_page(
     };
     let layout = Layout::for_session(t, request, title, Some(NavTarget::Recipes))?;
     let csrf = layout.csrf_token.clone();
+    let blocked = is_blocked(ctx)?;
     let view = ParameterFormView::new(t, form, (shown, Place::Page), csrf, FormErrors::default());
     let page = ParameterPage {
         summary: None,
-        form: Some(view),
+        form: (!blocked).then_some(view),
+        notice: blocked.then(|| t.get("readonly-form-unavailable")),
         values: None,
         translations: None,
         remove: None,

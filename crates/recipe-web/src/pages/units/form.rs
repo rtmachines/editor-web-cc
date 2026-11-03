@@ -9,7 +9,7 @@ use askama::Template;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::UnitFormPurpose;
+use recipe_app::auth::{Operation, UnitFormPurpose};
 use recipe_app::plant::{GetUnitForm, UnitForm, UnitFormInput};
 use serde::Deserialize;
 
@@ -91,6 +91,8 @@ pub(super) struct FormView {
     pub(super) oob: bool,
     /// The error lines under the inputs.
     pub(super) errors: FormErrors,
+    /// True when read-only mode blocks the form, so the notice stands in its place (ADR-0113 (d)).
+    pub(super) blocked: bool,
 }
 
 impl FormView {
@@ -131,7 +133,13 @@ impl FormView {
             csrf_token,
             oob: place == Place::Refused,
             errors: FormErrors::default(),
+            blocked: false,
         }
+    }
+
+    /// Put the notice of read-only mode in place of the form when `blocked` is true.
+    pub(super) fn blocked(self, blocked: bool) -> Self {
+        Self { blocked, ..self }
     }
 }
 
@@ -184,10 +192,11 @@ pub(super) async fn new_form(
     wanted?;
     let t = Texts::new(state.bundles(), request.lang());
     let csrf = request.csrf_token();
+    let blocked = !request.may_run(Operation::AddUnit)?;
     if request.is_htmx() && request.hx_target() == Some(FORM_REGION) {
         let fragment = UnitFormFragment {
             t,
-            form: FormView::new(t, &form, csrf, Place::Fragment),
+            form: FormView::new(t, &form, csrf, Place::Fragment).blocked(blocked),
         };
         return Ok(render(&fragment, request.request_id())?.into_response());
     }
@@ -199,7 +208,7 @@ pub(super) async fn new_form(
     let page = UnitFormPage {
         layout,
         t,
-        form: FormView::new(t, &form, csrf, place),
+        form: FormView::new(t, &form, csrf, place).blocked(blocked),
         code: code.to_string(),
         machine_href: format!("/machines/{code}"),
     };

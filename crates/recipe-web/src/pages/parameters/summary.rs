@@ -91,6 +91,19 @@ pub(crate) struct SummaryFragment<'a> {
     pub(crate) summary: SummaryView,
 }
 
+/// The fragment `parameter-notice.html`: the heading and the notice of read-only mode (ADR-0113 (d)).
+///
+/// The type solves one problem: the region `#parameter-form` shows the notice and no form when
+/// read-only mode blocks the command.
+#[derive(Template)]
+#[template(path = "parameter-notice.html")]
+pub(crate) struct ParameterNoticeFragment {
+    /// The text of the `h2`. Empty for no heading.
+    pub(crate) heading: String,
+    /// The text of the notice.
+    pub(crate) notice: String,
+}
+
 /// The page `parameter.html`: a parameter, or the form of a new parameter.
 ///
 /// The type solves one problem: one template shows a parameter with its edit form, a parameter with
@@ -106,6 +119,8 @@ pub(crate) struct ParameterPage<'a> {
     pub(crate) summary: Option<SummaryView>,
     /// The form, or `None` for a reader without `ParameterEdit` or a version that is not a draft.
     pub(crate) form: Option<ParameterFormView>,
+    /// The notice of read-only mode in place of the form of a new parameter, or `None`.
+    pub(crate) notice: Option<String>,
     /// The read-only grid of the value and the limits when the page has no form.
     pub(crate) values: Option<GridView>,
     /// The translation rows of a stored parameter.

@@ -20,6 +20,7 @@ mod csrf;
 mod error;
 mod export_guard;
 mod export_path;
+mod form_text;
 mod gates;
 mod health;
 mod hex;

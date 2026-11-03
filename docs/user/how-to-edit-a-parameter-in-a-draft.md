@@ -73,6 +73,16 @@ The save sends the values and the limits together (ADR-0039). You can change a v
 
 If you change the field **Type**, the editor does not save. It shows the value fields of the new type and the notice "The type changed. Enter the values of the new type." Enter the values and save again.
 
+### Change the description
+
+1. Find the field **English description** in the edit form.
+2. Write the new text. Press Enter to start a new line.
+3. Read the line under the field: "At most { $max } characters." The value of `{ $max }` is 4000.
+
+The field is a text area of four rows. Drag its lower edge to make it taller. The key Enter adds a line and does not save the form.
+
+The editor keeps each line end of the description. A save of a value alone does not change the line ends. A lone carriage return in the text gives a field error.
+
 ### Save
 
 1. Select **Save parameter**. Or press Enter in an input field of the form.
@@ -86,12 +96,26 @@ After a successful save, the page shows these items:
 
 - A toast with the text "Parameter `T_HOLD` is saved." The text names the tag of your parameter.
 - The updated definition at the top of the page.
+- The new English name and description in the block **English base text** above the translations. The translation rows keep your unsaved input.
 - The form with the stored texts. The editor writes a number in its canonical form, so `1.50` becomes `1.5`.
 - An empty error panel.
 
 The editor also sets a new change number in the hidden fields of all forms on the page (`api.md` section 4, ADR-0008). You do not see this number. The next save uses it.
 
 Every save changes the change number of the whole draft. A save of a different parameter by another user also changes it.
+
+## Delete one translation
+
+Use this procedure when a translation of the parameter is wrong or not needed.
+
+1. Find the section **Translations** on the parameter page.
+2. Find the row of the language. A stored translation shows the disclosure **Delete the translation { $lang }**.
+3. Open the disclosure. Read the warning "The system deletes the name and the description in this language."
+4. Select **Delete translation { $lang }**.
+
+After the deletion, the page shows the toast "The translation { $lang } is deleted." The focus moves to the heading of the row.
+
+Only the row of that language changes. It shows an empty form again. The other rows keep the text that you typed and did not save. A language that is not in the list shows "No translation" and no form.
 
 ## Errors on this path
 
@@ -149,6 +173,12 @@ The conflict also happens when the other user changed a different parameter. A d
 The code `503 E-WEB-006` means that the free disk space of the server is low or unknown. The page shows the banner "Read-only mode" on every page.
 
 The editor saves nothing in this mode. You can still view and export. Do not try again. Contact the administrator and give the reference of the error.
+
+A page that you open in this mode hides the controls of changes. The parameter page shows the values, the limits, and the translations as read-only text. The version page has no link **Add a parameter**.
+
+A route to a form shows the notice "Read-only mode blocks this form." in place of the form. You can still log in, log out, change the language, and export.
+
+If the mode starts after you open the page, the page keeps its forms. A save then gives `E-WEB-006` and keeps your input.
 
 ## Outdated parameter
 

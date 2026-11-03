@@ -16,7 +16,7 @@ const MAX_SHEET_LINES: usize = 800;
 
 /// The class names of the components that the templates use. `components.css` lists them in its
 /// first comment and holds at least one rule for each.
-const COMPONENT_CLASSES: [&str; 33] = [
+const COMPONENT_CLASSES: [&str; 34] = [
     "table-wrap",
     "num",
     "badge",
@@ -50,6 +50,7 @@ const COMPONENT_CLASSES: [&str; 33] = [
     "member-fields",
     "link-list",
     "tree-type",
+    "text-lines",
 ];
 
 /// The selectors that the forced-colors block of `components.css` gives a `ButtonBorder` border.
@@ -65,10 +66,17 @@ const COMPONENT_FORCED: [&str; 8] = [
 ];
 
 /// The selectors that the forced-colors block of `app.css` gives a `ButtonBorder` border.
-const APP_FORCED: [&str; 5] = [".topbar", "main form", ".btn", "input", "select"];
+const APP_FORCED: [&str; 6] = [
+    ".topbar",
+    "main form",
+    ".btn",
+    "input",
+    "select",
+    "textarea",
+];
 
 /// The selectors that only `components.css` names at the top level.
-const COMPONENT_ONLY: [&str; 19] = [
+const COMPONENT_ONLY: [&str; 20] = [
     ".table-wrap",
     "table",
     "caption",
@@ -79,6 +87,7 @@ const COMPONENT_ONLY: [&str; 19] = [
     ".badge",
     ".alert",
     ".field-lines",
+    ".text-lines",
     ".toast",
     ".tree",
     ".tree-leaf",
@@ -158,6 +167,12 @@ const COMPONENT_EXPECTED: &[(&str, &str, &str)] = &[
     (".field-lines", "display", "flex"),
     (".field-lines", "flex-direction", "column"),
     (".field-lines", "gap", "var(--target-gap)"),
+    // The multi-line text field and the text that it shows (ADR-0112, section 10.5).
+    ("textarea", "resize", "vertical"),
+    // The shared field rule sets a vertical padding of 0. The first line must not touch the border.
+    ("textarea", "padding-block", "var(--space-2)"),
+    (".text-lines", "white-space", "pre-wrap"),
+    (".text-lines", "overflow-wrap", "anywhere"),
     (".toast", "background", "var(--color-topbar)"),
     (".toast", "color", "var(--color-on-action)"),
     (".toast .icon", "color", "var(--color-success-bg)"),
@@ -408,11 +423,11 @@ fn components_no_rule_of_either_sheet_names_the_panel_class() {
 }
 
 #[test]
-fn components_app_css_has_one_rule_for_input_and_select() {
+fn components_app_css_has_one_rule_for_input_select_and_textarea() {
     let app = app_sheet();
     let pairs = app
         .iter()
-        .filter(|rule| rule.selectors == ["input", "select"])
+        .filter(|rule| rule.selectors == ["input", "select", "textarea"])
         .count();
-    assert_eq!(pairs, 1, "app.css needs one `input, select` rule");
+    assert_eq!(pairs, 1, "app.css needs one `input, select, textarea` rule");
 }

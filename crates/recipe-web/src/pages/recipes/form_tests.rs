@@ -48,7 +48,9 @@ async fn recipes_new_form_offers_the_live_machines_and_the_four_fields() {
         "{main}"
     );
     assert!(
-        main.contains("<input id=\"change_note\" name=\"change_note\" type=\"text\""),
+        main.contains(
+            "<textarea id=\"change_note\" name=\"change_note\" rows=\"4\" maxlength=\"4000\""
+        ),
         "{main}"
     );
     let token = format!(
@@ -124,7 +126,7 @@ fn assert_one_line_under(body: &str, id: &str, code: &str) {
     assert!(body.contains("Errors: 1."), "{code}: {body}");
     assert!(body.contains(&format!("href=\"#{id}\"")), "{code}: {body}");
     let form = body.split(OOB_FORM_TAG).nth(1).unwrap();
-    assert!(form.contains("value=\"Note\""), "{form}");
+    assert!(form.contains(">\nNote</textarea>"), "{form}");
     assert_eq!(form.matches("aria-invalid=\"true\"").count(), 1, "{form}");
     assert_eq!(form.matches("class=\"field-error\"").count(), 1, "{form}");
     let line = format!("<div class=\"field-error\" id=\"{id}-error\">");
@@ -162,4 +164,62 @@ async fn recipes_create_of_an_operator_gives_e_web_002() {
     let body = "machine_code=M7&reference_number=R-502&name=New&change_note=Note";
     let reply = world.post(&world.operator, "/recipes", body, true).await;
     assert_htmx_error(&reply, StatusCode::FORBIDDEN, "E-WEB-002");
+}
+
+/// The longest change note in characters (`LongText`).
+const NOTE_MAX: usize = 4_000;
+/// One percent-encoded character outside the basic plane (U+1D11E).
+const CLEF: &str = "%F0%9D%84%9E";
+
+/// Build the body of `POST /recipes` with the percent-encoded change note `note`.
+fn create_body(reference: &str, note: &str) -> String {
+    format!("machine_code=M7&reference_number={reference}&name=Long&change_note={note}")
+}
+
+/// Return the change note that the page of version 1 of `reference` shows.
+async fn stored_note(world: &crate::test_support::plant::World, reference: &str) -> String {
+    let path = format!("/recipes/{reference}/versions/1");
+    let reply = world.get_en(&world.engineer, &path).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let (_head, after) = reply
+        .body
+        .split_once("<dt>Change note</dt>\n<dd class=\"text-lines\">")
+        .unwrap();
+    after.split_once("</dd>").unwrap().0.to_owned()
+}
+
+/// D3: the browser sends CRLF, and the server counts one character for each line end.
+#[tokio::test]
+async fn recipes_create_counts_a_crlf_line_end_as_one_character() {
+    let world = recipe_world();
+    let note = format!("{}{}", "a".repeat(3_990), "%0D%0A".repeat(10));
+    let body = create_body("R-503", &note);
+    let reply = world.post(&world.engineer, "/recipes", &body, false).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    let stored = stored_note(&world, "R-503").await;
+    assert_eq!(stored.chars().count(), NOTE_MAX, "{stored}");
+    assert!(!stored.contains('\r'), "{stored}");
+}
+
+/// Regression: the limit counts characters and not bytes.
+#[tokio::test]
+async fn recipes_create_accepts_a_note_of_the_limit_in_four_byte_characters() {
+    let world = recipe_world();
+    let body = create_body("R-504", &CLEF.repeat(NOTE_MAX));
+    let reply = world.post(&world.engineer, "/recipes", &body, false).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    assert_eq!(stored_note(&world, "R-504").await.chars().count(), NOTE_MAX);
+}
+
+/// Regression: one character over the limit gives a field error of `change_note`.
+#[tokio::test]
+async fn recipes_create_refuses_a_note_over_the_limit_in_four_byte_characters() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let body = create_body("R-505", &CLEF.repeat(NOTE_MAX + 1));
+    let reply = world.post(&world.engineer, "/recipes", &body, true).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    let line = "<div class=\"field-error\" id=\"change_note-error\">";
+    assert!(reply.body.contains(line), "{}", reply.body);
+    assert_eq!(world.fixture.snapshot(), before);
 }

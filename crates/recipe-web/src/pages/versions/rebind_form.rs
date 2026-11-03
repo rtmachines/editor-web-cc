@@ -163,12 +163,12 @@ impl RebindForm {
 
 /// Return true when the page shows the rebind forms.
 ///
-/// The version must be a live draft of a live recipe, and the role must hold `ParameterEdit`.
+/// The version must be a live draft of a live recipe, and `PageRequest::may_run` must permit the
+/// rebind: the role holds `ParameterEdit` and the mode is not read-only (ADR-0113).
 pub(crate) fn shows_forms(request: &PageRequest, view: &VersionView) -> Result<bool, WebError> {
-    let role = request.auth()?.user().role();
     Ok(view.detail.state == VersionState::LiveDraft
         && !view.recipe.is_deleted()
-        && Operation::RebindTypeRevision.requirement().allows(role))
+        && request.may_run(Operation::RebindTypeRevision)?)
 }
 
 /// One moved parameter of the list with its number `k` and its new leaves.

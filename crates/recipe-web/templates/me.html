@@ -7,5 +7,6 @@
 <dt>{{ t.get("me-label-role") }}</dt>
 <dd>{{ role }}</dd>
 </dl>
-<p><a class="target-link" href="/me/password">{{ t.get("me-link-password") }}</a></p>
+{% if can_change_password %}<p><a class="target-link" href="/me/password">{{ t.get("me-link-password") }}</a></p>
+{% endif %}
 {% endblock %}

@@ -343,8 +343,13 @@ async function seedWorld(baseURL: string, password: string): Promise<World> {
 
 /** The failed logins that the user helper records. The login delay starts after 3 (api.md 7.4). */
 const SEEDED_FAILURES = 4;
-/** The login delay after 3 failures is 1 second. This pause keeps each attempt out of the delay. */
-const FAILURE_PAUSE_MS = 1_300;
+/** The first attempt that the login delay can reject. Attempts before it have a delay of 0. */
+const FIRST_DELAYED_ATTEMPT = 3;
+/**
+ * The login delay after 3 failures is 1 second. The clock of the dev server moves in steps of
+ * 1 second, so the measured gap can be 1 second short. The pause therefore covers two steps.
+ */
+const FAILURE_PAUSE_MS = 2_500;
 /** The status of a login with bad credentials (api.md 5). */
 const BAD_CREDENTIALS_STATUS = 401;
 /** The Operator role of the form `POST /users`. */
@@ -389,8 +394,10 @@ export async function seedUserWithFailedLogins(baseURL: string): Promise<string>
       await admin.dispose();
     }
     for (let attempt = 0; attempt < SEEDED_FAILURES; attempt += 1) {
+      if (attempt >= FIRST_DELAYED_ATTEMPT) {
+        await new Promise((resolve) => setTimeout(resolve, FAILURE_PAUSE_MS));
+      }
       await failLoginOnce(baseURL, login);
-      await new Promise((resolve) => setTimeout(resolve, FAILURE_PAUSE_MS));
     }
     await assertFailuresRecorded(baseURL, login);
     return login;

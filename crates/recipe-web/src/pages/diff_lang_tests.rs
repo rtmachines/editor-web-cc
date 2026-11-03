@@ -82,7 +82,7 @@ fn assert_translations_carry_their_language(main: &str, ui: &str) {
     for text in [
         "<dd lang=\"de\">Alte Linie</dd>",
         "<dd lang=\"de\">Neue Linie</dd>",
-        "<dd lang=\"de\">Neue Beschreibung</dd>",
+        "<dd class=\"text-lines\" lang=\"de\">Neue Beschreibung</dd>",
     ] {
         assert!(translations.contains(text), "{ui}: {text}: {translations}");
     }
@@ -111,8 +111,8 @@ fn assert_definitions_carry_english(main: &str, ui: &str) {
     for text in [
         "<td lang=\"en\">Line A old</td>",
         "<td lang=\"en\">Line A new</td>",
-        "<td lang=\"en\">Old description</td>",
-        "<td lang=\"en\">New description</td>",
+        "<td class=\"text-lines\" lang=\"en\">Old description</td>",
+        "<td class=\"text-lines\" lang=\"en\">New description</td>",
     ] {
         assert!(definitions.contains(text), "{ui}: {text}: {definitions}");
     }

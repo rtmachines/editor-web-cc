@@ -72,11 +72,22 @@ fn at(body: &str, needle: &str) -> usize {
 ///
 /// The banner has no role, no button, and no link.
 fn assert_banner(body: &str, message: &str, what: &str) {
+    // A read-only form route also shows the notice `readonly-form-unavailable` with the same
+    // opening markup (ADR-0113). The banner is the one notice that holds its own message, so the
+    // message span marks it and the nearest opening before that span starts it.
     let (open, close) = (banner_open(), banner_close(message));
-    assert_eq!(body.matches(&open).count(), 1, "{what}: {body}");
     assert_eq!(body.matches(&close).count(), 1, "{what}: {body}");
-    let (start, end) = (at(body, &open), at(body, &close));
-    assert!(start < end, "{what}: the text stands before the icon");
+    let end = at(body, &close);
+    let found = body.get(..end).and_then(|before| before.rfind(&open));
+    assert!(
+        found.is_some(),
+        "{what}: no banner opening before the message: {body}"
+    );
+    let start = found.unwrap();
+    assert!(
+        !body.get(start..end).unwrap().contains("</div>"),
+        "{what}: the nearest opening belongs to another notice: {body}"
+    );
     assert!(
         end < at(body, ERROR_PANEL),
         "{what}: banner after the error panel"

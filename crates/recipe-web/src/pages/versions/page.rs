@@ -91,10 +91,9 @@ fn add_href(
     base: &str,
     list: &ParameterList,
 ) -> Result<Option<String>, WebError> {
-    let role = request.auth()?.user().role();
     let editable = view.detail.state == VersionState::LiveDraft
         && !view.recipe.is_deleted()
-        && Operation::AddParameter.requirement().allows(role);
+        && request.may_run(Operation::AddParameter)?;
     let unit = list
         .unit
         .as_ref()
@@ -182,7 +181,7 @@ impl<'a> VersionPage<'a> {
             outdated,
             table: ParameterTable::new(t, &base, list, &keys, page),
             add_href: add_href(request, view, &base, list)?,
-            actions: version_actions(t, request.auth()?.user().role(), view),
+            actions: version_actions(t, request, view)?,
             layout,
         })
     }

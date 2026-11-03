@@ -548,3 +548,18 @@ async fn audit_list_words_come_from_the_polish_bundle() {
     assert!(main.contains("<optgroup label=\"Receptury\">"), "{main}");
     assert!(!main.contains("Version approved"), "{main}");
 }
+
+#[tokio::test]
+async fn audit_list_in_read_only_mode_keeps_the_entry_links_and_the_security_link() {
+    let world = audit_world().await;
+    world.fixture.state.read_only().set(true);
+    let reply = world.get_en(&world.data.admin, "/audit").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(body_rows(main) >= 10, "{main}");
+    assert!(main.contains("href=\"/audit/"), "{main}");
+    assert!(
+        main.contains("href=\"/security-events\">Security events</a>"),
+        "{main}"
+    );
+}

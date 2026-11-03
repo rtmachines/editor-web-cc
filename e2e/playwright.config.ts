@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import path from 'node:path';
+import { READ_ONLY_FILE } from './tests/support/read-only';
 
 // ADR-0048: the regression suite runs against examples/dev_server.rs with its in-memory store.
 
@@ -11,6 +12,9 @@ const MIN_PASSWORD_LENGTH = 12;
 const SERVER_START_TIMEOUT_MS = 600_000;
 
 const port = process.env.RECIPE_DEV_PORT ?? DEFAULT_PORT;
+/** The second instance runs the read-only test (ADR-0113 (h)). It uses the next port. */
+const readOnlyPort = String(Number(port) + 1);
+const readOnlySpec = /read-only\.spec\.ts/;
 const password = process.env.E2E_PASSWORD ?? '';
 
 if (password.length < MIN_PASSWORD_LENGTH) {
@@ -38,18 +42,38 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: readOnlySpec,
       use: { ...devices['Desktop Chrome'] },
     },
-  ],
-  webServer: {
-    command: 'cargo run -p recipe-web --example dev_server',
-    cwd: repoRoot,
-    url: `http://127.0.0.1:${port}/login`,
-    reuseExistingServer: !process.env.CI,
-    timeout: SERVER_START_TIMEOUT_MS,
-    env: {
-      RECIPE_DEV_PASSWORD: password,
-      RECIPE_DEV_PORT: port,
+    {
+      name: 'read-only',
+      testMatch: readOnlySpec,
+      use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${readOnlyPort}` },
     },
-  },
+  ],
+  webServer: [
+    {
+      command: 'cargo run -p recipe-web --example dev_server',
+      cwd: repoRoot,
+      url: `http://127.0.0.1:${port}/login`,
+      reuseExistingServer: !process.env.CI,
+      timeout: SERVER_START_TIMEOUT_MS,
+      env: {
+        RECIPE_DEV_PASSWORD: password,
+        RECIPE_DEV_PORT: port,
+      },
+    },
+    {
+      command: 'cargo run -p recipe-web --example dev_server',
+      cwd: repoRoot,
+      url: `http://127.0.0.1:${readOnlyPort}/login`,
+      reuseExistingServer: !process.env.CI,
+      timeout: SERVER_START_TIMEOUT_MS,
+      env: {
+        RECIPE_DEV_PASSWORD: password,
+        RECIPE_DEV_PORT: readOnlyPort,
+        RECIPE_DEV_READ_ONLY_FILE: READ_ONLY_FILE,
+      },
+    },
+  ],
 });

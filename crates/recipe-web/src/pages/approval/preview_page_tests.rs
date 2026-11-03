@@ -13,6 +13,9 @@ use crate::test_support::{Fixture, Reply, get_page};
 /// The preview of the draft version 2 of `R-500`.
 const R500_PREVIEW: &str = "/recipes/R-500/versions/2/approve";
 
+/// The English text of `readonly-form-unavailable`.
+const NOTICE: &str = "Read-only mode blocks this form.";
+
 /// The count of diff parameters on each page of these tests.
 const ONE_PER_PAGE: u32 = 1;
 
@@ -140,4 +143,64 @@ async fn approve_preview_answers_the_failures_of_the_diff_stage() {
         let reply = get_page(&fixture, Some(&engineer), "en", path).await;
         assert_error(&reply, status, code, code);
     }
+}
+
+/// The preview of the draft version 3 of `R-100`, which has blockers.
+const R100_PREVIEW: &str = "/recipes/R-100/versions/3/approve";
+
+/// ADR-0113 (b), (d): in read-only mode the preview keeps the diff and shows the notice in place
+/// of the approve form. In normal mode the same request shows the form.
+#[tokio::test]
+async fn approve_preview_in_read_only_mode_shows_the_diff_and_the_notice_in_place_of_the_form() {
+    let (fixture, data) = small_pages(ONE_PER_PAGE, normal()).await;
+    let normal_reply = get_page(&fixture, Some(&data.jsmith), "en", R500_PREVIEW).await;
+    let normal_main = main_of(&normal_reply.body);
+    assert!(
+        normal_main.contains("id=\"approve-fields\""),
+        "{normal_main}"
+    );
+    assert!(!normal_main.contains(NOTICE), "{normal_main}");
+    fixture.state.read_only().set(true);
+    let reply = get_page(&fixture, Some(&data.jsmith), "en", R500_PREVIEW).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_clean_html(&reply.body);
+    let main = main_of(&reply.body);
+    assert!(main.contains("<ul class=\"diff-summary\">"), "{main}");
+    assert!(main.contains(NOTICE), "{main}");
+    for absent in [
+        "id=\"approve-fields\"",
+        "id=\"approve-submit\"",
+        "href=\"#approve-form\"",
+        "name=\"row_version\"",
+        "name=\"csrf_token\"",
+    ] {
+        assert!(!main.contains(absent), "{absent}: {main}");
+    }
+}
+
+/// ADR-0113 (b): in read-only mode the blockers of the preview stay visible.
+#[tokio::test]
+async fn approve_preview_in_read_only_mode_keeps_the_blockers_and_the_diff() {
+    let (fixture, data) = small_pages(ONE_PER_PAGE, normal()).await;
+    fixture.state.read_only().set(true);
+    let reply = get_page(&fixture, Some(&data.jsmith), "en", R100_PREVIEW).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(main.contains("<h2 id=\"approve-blockers\">"), "{main}");
+    assert!(main.contains("<ul class=\"diff-summary\">"), "{main}");
+    assert!(!main.contains("id=\"approve-fields\""), "{main}");
+}
+
+/// ADR-0113 (d): the notice shows only when a form would be offered. A preview with a blocker
+/// offers no form, so read-only mode adds neither the form heading nor the notice.
+#[tokio::test]
+async fn approve_preview_in_read_only_mode_with_a_blocker_shows_no_read_only_notice() {
+    let (fixture, data) = small_pages(ONE_PER_PAGE, normal()).await;
+    fixture.state.read_only().set(true);
+    let reply = get_page(&fixture, Some(&data.jsmith), "en", R100_PREVIEW).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(main.contains("<h2 id=\"approve-blockers\">"), "{main}");
+    assert!(!main.contains(NOTICE), "{main}");
+    assert!(!main.contains("id=\"approve-form\""), "{main}");
 }

@@ -72,7 +72,8 @@ pub(crate) struct OutdatedList {
     pub(crate) oob: bool,
     /// One row per outdated parameter, in the order unit path, ordinal, and tag.
     pub(crate) rows: Vec<OutdatedRow>,
-    /// The rebind forms. Only a live draft and a role with `ParameterEdit` get them.
+    /// The rebind forms. Only a live draft gets them, and only when `PageRequest::may_run`
+    /// permits the rebind (ADR-0113).
     pub(crate) forms: Vec<RebindForm>,
 }
 

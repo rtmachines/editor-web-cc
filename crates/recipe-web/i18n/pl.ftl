@@ -138,6 +138,7 @@ lang-switch-pl = Polski
 lang-switch-en = English
 user-signed-in = Zalogowano jako
 readonly-banner = Tryb tylko do odczytu: brakuje miejsca na dysku lub nie można go zmierzyć. Zmiany są zablokowane. Możesz przeglądać, eksportować, logować się i wylogować.
+readonly-form-unavailable = Tryb tylko do odczytu blokuje ten formularz.
 
 # Recipe list
 recipes-title = Receptury
@@ -167,6 +168,7 @@ field-role = Rola
 field-query = Wyszukiwanie
 field-q = Login zawiera
 field-page = Strona
+field-lines-limit = Najwyżej { $max } znaków.
 field-X-Forwarded-For = Nagłówek X-Forwarded-For
 
 # Field reasons

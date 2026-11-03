@@ -14,6 +14,7 @@
  * Description list: .hash
  * Diff: .badge-diff-limit .badge-diff-changed .badge-diff-added .badge-diff-removed .diff-summary .diff-section .diff-limits .diff-value .diff-none
  * Formatted JSON and cursor pager: .json .pager-end
+ * Multi-line text: .text-lines
  */
 
 /* Table, empty state */
@@ -250,6 +251,18 @@ tbody tr:hover {
   min-width: 0;
   flex: 1 1 calc(var(--target) * 3);
   overflow-wrap: break-word;
+}
+
+/* The multi-line text field and the text that it shows (design-system.md 10.5, ADR-0112) */
+
+textarea {
+  padding-block: var(--space-2);
+  resize: vertical;
+}
+
+.text-lines {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* The error line under an input: one `p` for each line (design-system.md 10.5) */

@@ -2,9 +2,11 @@
 //! empty state, the fragment, and the languages (task 12.1, ADR-0050 (d), spec "Diff page").
 
 use axum::http::StatusCode;
+use recipe_domain::recipe::{LangCode, RecipeVersionId, StoredParameter, Translation};
+use recipe_domain::text::{LongText, Text};
 
 use super::test_world::{R500_DIFF, section_count};
-use crate::pages::audit::test_world::audit_world;
+use crate::pages::audit::test_world::{AuditWorld, audit_world};
 use crate::pages::test_helpers::{
     assert_before, assert_clean_html, part_of, section, seed_unedited_version_3,
 };
@@ -204,4 +206,48 @@ async fn diff_page_of_a_deleted_recipe_shows_the_state_and_no_form_to_an_adminis
     assert!(main.contains("badge-deleted"), "{main}");
     assert!(main.contains("Deleted"), "{main}");
     assert!(!main.contains("<form"), "{main}");
+}
+
+/// Give `LINE_A` of `version` the English description and one `de` translation description.
+async fn describe_line_a(
+    world: &AuditWorld,
+    version: RecipeVersionId,
+    description: &str,
+    translation_description: &str,
+) {
+    let stored = world.stored_of(version, "LINE_A").await;
+    let described = StoredParameter {
+        description_en: LongText::parse(description).unwrap(),
+        translations: vec![Translation {
+            lang: LangCode::parse("de").unwrap(),
+            name: Text::parse("Linie A").unwrap(),
+            description: Some(LongText::parse(translation_description).unwrap()),
+        }],
+        ..stored
+    };
+    world.fixture.store.seed_parameter(version, &described);
+}
+
+/// The description cells keep the line ends of the text (ADR-0112 (h)). The name cell does not.
+#[tokio::test]
+async fn diff_page_description_cells_use_the_class_text_lines() {
+    let world = audit_world().await;
+    describe_line_a(&world, world.data.r500_v1, "Old\nline", "Alt\nZeile").await;
+    describe_line_a(&world, world.data.r500_v2, "New\nline", "Neu\nZeile").await;
+    let reply = world.get_en(&world.data.admin, R500_DIFF).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_clean_html(&reply.body);
+    let main = main_of(&reply.body);
+    let definitions = section(main, "definitions");
+    for text in ["Old\nline", "New\nline"] {
+        let cell = format!("<td class=\"text-lines\" lang=\"en\">{text}</td>");
+        assert!(definitions.contains(&cell), "{cell}: {definitions}");
+    }
+    let translations = section(main, "translations");
+    for text in ["Alt\nZeile", "Neu\nZeile"] {
+        let cell = format!("<dd class=\"text-lines\" lang=\"de\">{text}</dd>");
+        assert!(translations.contains(&cell), "{cell}: {translations}");
+    }
+    // Only the two description cells and the two description pairs use the class.
+    assert_eq!(main.matches("class=\"text-lines\"").count(), 4, "{main}");
 }

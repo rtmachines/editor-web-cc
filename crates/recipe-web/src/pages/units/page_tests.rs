@@ -451,3 +451,32 @@ async fn units_page_repeats_the_machine_link_right_after_the_state_badge_row() {
         "{badge_row}"
     );
 }
+
+// --- Read-only mode (ADR-0113 (b)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (b): in read-only mode the unit page of an Administrator has
+/// no rename form, no archive form, and no input. The facts of the unit stay.
+#[tokio::test]
+async fn units_page_in_read_only_mode_has_no_rename_archive_or_add_control() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer] {
+        let reply = world.get_en(session, "/machines/M7/units/U1.2").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let main = main_of(&reply.body);
+        for forbidden in [
+            "<form",
+            "<details",
+            "<input",
+            "<button",
+            "hx-",
+            "/units/new",
+        ] {
+            assert!(!main.contains(forbidden), "{forbidden}: {main}");
+        }
+        assert!(
+            main.contains("<span id=\"unit-name\">Unit U1.2</span>"),
+            "{main}"
+        );
+    }
+}

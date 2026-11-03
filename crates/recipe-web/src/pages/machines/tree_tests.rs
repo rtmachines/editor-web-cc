@@ -1,6 +1,5 @@
 //! Tests of the view model of the unit tree (task 7.4, design D7).
 
-use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, PlcPlatform, UnitId, UnitPath, UnitUsage,
 };
@@ -90,7 +89,7 @@ fn node<'a>(tree: &'a UnitTree, text: &str) -> &'a UnitNode {
 
 /// Build the tree of `M5` for a ProcessEngineer with links and no focus unit.
 fn tree_of(scope: Scope) -> UnitTree {
-    UnitTree::build(&machine(), scope, Role::ProcessEngineer, None, true)
+    UnitTree::build(&machine(), scope, true, None, true)
 }
 
 // --- Shape --------------------------------------------------------------------------------------
@@ -184,13 +183,7 @@ fn machines_tree_model_expands_depth_1_and_2_and_collapses_the_deeper_nodes() {
 #[test]
 fn machines_tree_model_expands_the_ancestors_of_the_focus_unit_only() {
     let focus = path("U1.1.1.1");
-    let tree = UnitTree::build(
-        &machine(),
-        Scope::Live,
-        Role::ProcessEngineer,
-        Some(&focus),
-        true,
-    );
+    let tree = UnitTree::build(&machine(), Scope::Live, true, Some(&focus), true);
     for text in ["U1", "U1.1", "U1.1.1"] {
         assert!(node(&tree, text).expanded, "{text}");
     }
@@ -205,7 +198,7 @@ fn machines_tree_model_expands_the_ancestors_of_the_focus_unit_only() {
 #[test]
 fn machines_tree_model_marks_only_the_focus_unit() {
     let focus = path("U1.1.1");
-    let tree = UnitTree::build(&machine(), Scope::Live, Role::Operator, Some(&focus), true);
+    let tree = UnitTree::build(&machine(), Scope::Live, false, Some(&focus), true);
     let marked: Vec<&str> = flatten(&tree.roots)
         .into_iter()
         .filter(|unit| unit.focus)
@@ -231,22 +224,20 @@ fn machines_tree_model_links_each_unit_to_its_page() {
 
 #[test]
 fn machines_tree_model_gives_an_add_link_to_live_nodes_of_depth_1_to_4() {
-    for role in [Role::ProcessEngineer, Role::Administrator] {
-        let tree = UnitTree::build(&machine(), Scope::All, role, None, true);
-        for unit in flatten(&tree.roots) {
-            let expected = !unit.archived && unit.depth < 5;
-            assert_eq!(!unit.add_href.is_empty(), expected, "{role} {}", unit.path);
-            if expected {
-                let href = format!("/machines/M5/units/new?parent_path={}", unit.path);
-                assert_eq!(unit.add_href, href);
-            }
+    let tree = UnitTree::build(&machine(), Scope::All, true, None, true);
+    for unit in flatten(&tree.roots) {
+        let expected = !unit.archived && unit.depth < 5;
+        assert_eq!(!unit.add_href.is_empty(), expected, "{}", unit.path);
+        if expected {
+            let href = format!("/machines/M5/units/new?parent_path={}", unit.path);
+            assert_eq!(unit.add_href, href);
         }
     }
 }
 
 #[test]
 fn machines_tree_model_gives_an_operator_no_add_link() {
-    let tree = UnitTree::build(&machine(), Scope::Live, Role::Operator, None, true);
+    let tree = UnitTree::build(&machine(), Scope::Live, false, None, true);
     assert!(
         flatten(&tree.roots)
             .iter()
@@ -262,13 +253,7 @@ fn machines_tree_model_gives_an_operator_no_add_link() {
 #[test]
 fn machines_tree_model_without_links_has_no_address_and_no_focus() {
     let focus = path("U1.2");
-    let tree = UnitTree::build(
-        &machine(),
-        Scope::All,
-        Role::Administrator,
-        Some(&focus),
-        false,
-    );
+    let tree = UnitTree::build(&machine(), Scope::All, true, Some(&focus), false);
     for unit in flatten(&tree.roots) {
         assert!(unit.href.is_empty(), "{}", unit.path);
         assert!(unit.add_href.is_empty(), "{}", unit.path);

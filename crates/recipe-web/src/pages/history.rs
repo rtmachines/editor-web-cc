@@ -70,8 +70,7 @@ impl<'a> HistoryPage<'a> {
     ///
     /// Returns `E-WEB-004` when the request has no session.
     fn new(t: Texts<'a>, request: &PageRequest, history: &RecipeHistory) -> Result<Self, WebError> {
-        let role = request.auth()?.user().role();
-        let linked = Operation::ListAuditEntries.requirement().allows(role);
+        let linked = request.may_run(Operation::ListAuditEntries)?;
         let recipe = &history.recipe;
         let reference = recipe.reference();
         let recipe_text = t.with_arg("recipe-title", "reference", reference);

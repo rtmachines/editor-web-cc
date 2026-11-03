@@ -7,7 +7,7 @@
 
 use axum::extract::rejection::{PathRejection, RawFormRejection};
 use axum::extract::{Path, RawForm, State};
-use axum::response::Response;
+use axum::response::{Html, Response};
 use recipe_app::auth::ParameterFormPurpose;
 use recipe_app::recipe::{
     DraftOutput, ParameterForm, RetypeInput, UpdateParameterDefinition,
@@ -23,6 +23,7 @@ use super::path_parameter;
 use super::prepare::{Prepared, Ready, prepare};
 use super::reply::{Ctx, Target, failed, load};
 use super::summary::{SummaryFragment, SummaryView};
+use super::translations::{TranslationsBase, TranslationsBaseFragment};
 use crate::error::{FormErrors, WebError};
 use crate::pages::draft_reply::{success, with_change_number, with_form};
 use crate::pages::render::{render, see_other_path};
@@ -82,6 +83,14 @@ async fn saved(
     let place = (clean, Place::OutOfBand);
     let view = ParameterFormView::new(t, form, place, csrf, FormErrors::default());
     let body = with_form(body, &ParameterFormFragment { t, form: view }, request_id)?;
+    // The base block of the translations follows the new English texts (ADR-0111 (i)). No row.
+    let base = TranslationsBase {
+        name_en: definition.name_en.to_string(),
+        description_en: definition.description_en.to_string(),
+    };
+    let Html(mut text) = body;
+    text.push_str(&render(&TranslationsBaseFragment { t, base }, request_id)?.0);
+    let body = Html(text);
     success(&output, body, request_id)
 }
 

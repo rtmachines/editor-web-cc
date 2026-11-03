@@ -15,7 +15,6 @@ use recipe_app::auth::Operation;
 use recipe_app::recipe::{
     DiscardDraft, DiscardDraftInput, RetireVersion, RetireVersionInput, VersionView,
 };
-use recipe_domain::identity::Role;
 use recipe_domain::recipe::{VersionHeader, VersionState};
 use serde::Deserialize;
 
@@ -181,12 +180,17 @@ fn compare_form(view: &VersionView) -> Option<CompareForm> {
     })
 }
 
-/// Build the export link of `view` for `role`, or `None` when the page shows none.
+/// Build the export link of `view`, or `None` when the page shows none.
 ///
 /// The function solves one problem: the page must not show an export that the route refuses. A
-/// Draft, a discarded draft, and each version of a deleted recipe get no link. The role needs the
-/// operation of the route that the link opens, as the matrix of `api.md` section 3.3 says.
-fn export_link(t: Texts<'_>, role: Role, view: &VersionView) -> Option<ExportLink> {
+/// Draft, a discarded draft, and each version of a deleted recipe get no link. The request needs
+/// the operation of the route that the link opens, as the matrix of `api.md` section 3.3 says.
+/// An export stays open in read-only mode (A24, ADR-0113).
+fn export_link(
+    t: Texts<'_>,
+    request: &PageRequest,
+    view: &VersionView,
+) -> Result<Option<ExportLink>, WebError> {
     let number = view.detail.number;
     let reference = view.recipe.reference();
     let (operation, href, retired) = match view.detail.state {
@@ -200,53 +204,63 @@ fn export_link(t: Texts<'_>, role: Role, view: &VersionView) -> Option<ExportLin
             format!("/export/v1/recipes/{reference}/versions/{number}"),
             true,
         ),
-        VersionState::LiveDraft | VersionState::Discarded => return None,
+        VersionState::LiveDraft | VersionState::Discarded => return Ok(None),
     };
-    let shown = !view.recipe.is_deleted() && operation.requirement().allows(role);
-    shown.then(|| ExportLink {
+    let shown = !view.recipe.is_deleted() && request.may_run(operation)?;
+    Ok(shown.then(|| ExportLink {
         href,
         text: t.with_arg("version-export-link", "number", number),
         retired,
-    })
+    }))
 }
 
-/// Build the action area of `view` for `role`.
+/// Build the action area of `view` for the session of `request`.
 ///
 /// A deleted recipe gets no action, only the compare links and the history link (ADR-0043 (e)).
-pub(crate) fn version_actions(t: Texts<'_>, role: Role, view: &VersionView) -> VersionActions {
+/// An action shows only when `PageRequest::may_run` permits its command, so read-only mode hides
+/// the approve link and the danger forms (ADR-0113).
+///
+/// # Errors
+///
+/// Returns `E-WEB-004` when the request has no session.
+pub(crate) fn version_actions(
+    t: Texts<'_>,
+    request: &PageRequest,
+    view: &VersionView,
+) -> Result<VersionActions, WebError> {
     let detail = &view.detail;
     let reference = view.recipe.reference();
     let base = format!("/recipes/{reference}/versions/{}", detail.number);
     let live = !view.recipe.is_deleted();
-    let allows = |operation: Operation| live && operation.requirement().allows(role);
+    let allows = |operation: Operation| Ok::<bool, WebError>(live && request.may_run(operation)?);
     let draft = detail.state == VersionState::LiveDraft;
-    let approve = (draft && allows(Operation::ApproveVersion)).then(|| ActionLink {
+    let approve = (draft && allows(Operation::ApproveVersion)?).then(|| ActionLink {
         href: format!("{base}/approve"),
         text: t.with_arg("version-approve-link", "number", detail.number),
     });
     let number = detail.number;
     let danger = match detail.state {
-        VersionState::LiveDraft if allows(Operation::DiscardDraft) => Some(danger_form(
+        VersionState::LiveDraft if allows(Operation::DiscardDraft)? => Some(danger_form(
             t,
             DISCARD_KEYS,
             (format!("{base}/discard"), number),
         )),
-        VersionState::Approved if allows(Operation::RetireVersion) => Some(danger_form(
+        VersionState::Approved if allows(Operation::RetireVersion)? => Some(danger_form(
             t,
             RETIRE_KEYS,
             (format!("{base}/retire"), number),
         )),
         _other => None,
     };
-    VersionActions {
+    Ok(VersionActions {
         approve,
         compare: compare_links(t, view),
         compare_form: compare_form(view),
-        export: export_link(t, role, view),
+        export: export_link(t, request, view)?,
         danger,
         history_href: format!("/recipes/{reference}/history"),
         row_version: detail.row_version,
-    }
+    })
 }
 
 /// The fields of the retire form and the discard form. An unknown field gives `422 E-WEB-008`.
