@@ -4,6 +4,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
 ### Added
 
 - The user page updates its facts and its actions after each command. The password reset sits in a danger disclosure with a warning (ADR-0110).
@@ -32,6 +34,15 @@ This file records the notable changes of the recipe editor. The format follows [
 ### Fixed
 
 - Saving the definition shows the new English base text above the translations (ADR-0111).
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- Seven tests with `#[cfg(unix)]` passed only in CI on Linux, not on the Windows development host. The section "Known gaps" of release 0.3.0 names them.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
+- No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.5.0] - 2026-11-02
 
@@ -434,7 +445,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.4.0
 [0.3.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.3.0
