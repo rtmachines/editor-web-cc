@@ -21,6 +21,7 @@ mod draft_reply;
 pub(crate) mod export;
 pub(crate) mod export_api;
 pub(crate) mod history;
+mod hrefs;
 #[cfg(test)]
 mod lifecycle_body_tests;
 pub(crate) mod machines;

@@ -6,7 +6,7 @@
 use recipe_app::error::StorageError;
 use recipe_app::ports::TypeUsageRow;
 use recipe_domain::plant::{MachineId, PlcTypeId};
-use recipe_domain::recipe::{ParameterTag, ReferenceNumber, VersionStatus};
+use recipe_domain::recipe::{ParameterKey, ParameterTag, ReferenceNumber, VersionStatus};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ WITH RECURSIVE edges AS ( \
     UNION \
     SELECT edges.outer_id FROM edges JOIN holders ON edges.inner_id = holders.type_id \
 ) \
-SELECT r.reference_number, v.number, v.status, p.tag, p.plc_type_id \
+SELECT r.reference_number, v.number, v.status, p.tag, p.parameter_key, p.plc_type_id \
 FROM parameter p \
 JOIN recipe_version v ON v.id = p.recipe_version_id \
 JOIN recipe r ON r.id = v.recipe_id \
@@ -49,6 +49,7 @@ struct UsageRecord {
     number: i32,
     status: String,
     tag: String,
+    parameter_key: Uuid,
     plc_type_id: Uuid,
 }
 
@@ -61,6 +62,7 @@ fn usage_row(record: UsageRecord) -> Result<TypeUsageRow, StorageError> {
         status: VersionStatus::parse(&record.status)
             .map_err(|error| corrupt("recipe_version", error))?,
         tag: ParameterTag::parse(&record.tag).map_err(|error| corrupt("parameter", error))?,
+        key: ParameterKey::from(record.parameter_key),
         parameter_type: PlcTypeId::from(record.plc_type_id),
     })
 }

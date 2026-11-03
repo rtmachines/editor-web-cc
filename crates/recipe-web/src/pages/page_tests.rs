@@ -551,7 +551,7 @@ async fn page_user_new_form_uses_the_field_macro_for_the_login() {
         assert!(reply.body.contains(&head), "{}", reply.body);
         assert!(reply.body.contains("<input id=\"login\" name=\"login\" type=\"text\" class=\"data\" autocapitalize=\"none\" spellcheck=\"false\" maxlength=\"64\" autocomplete=\"off\" aria-required=\"true\" aria-describedby=\"login-hint\">"));
         let select = format!(
-            "<div class=\"field\"><label for=\"role\">{}</label><select id=\"role\" name=\"role\">",
+            "<div class=\"field\"><label for=\"role\">{} <span class=\"field-required\">{word}</span></label><select id=\"role\" name=\"role\" aria-required=\"true\">",
             text(lang, "user-new-label-role")
         );
         assert!(reply.body.contains(&select), "{}", reply.body);
@@ -585,7 +585,8 @@ async fn page_user_command_success_with_htmx_puts_the_sentence_into_the_toast() 
                 .body
                 .contains("<div id=\"error-panel\" hx-swap-oob=\"innerHTML\"></div>")
         );
-        assert_eq!(reply.body.matches("hx-swap-oob").count(), 2);
+        // The toast, the error panel, and the facts and actions of the user (design D1).
+        assert_eq!(reply.body.matches("hx-swap-oob").count(), 4);
         assert!(!reply.body.contains("role="), "{}", reply.body);
         assert!(!reply.body.contains("<html"));
         // The sentence appears once: the content for #user-result holds only the back link.

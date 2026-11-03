@@ -17,5 +17,5 @@
 {% if form.has_s7 %}{{ fields::named(t, "s7_address", "s7_address", t.get("field-s7-address"), t.get("parameter-s7-hint"), "text", form.s7_required, true, 24, "off", form.shown.texts.s7_address, form.errors.lines("s7_address")) }}
 {% endif %}{{ fields::named(t, "ordinal", "ordinal", t.get("field-ordinal"), t.get("parameter-ordinal-hint"), "text", true, true, 6, "off", form.shown.texts.ordinal, form.errors.lines("ordinal")) }}
 {% if let Some(view) = form.shown.grid.as_ref() %}{% if !form.shown.notice.is_empty() %}{{ alerts::notice("info", form.shown.notice) }}
-{% endif %}{{ grids::grid(t, view, form.errors) }}{% else %}<p class="field-hint">{{ t.get("parameter-fields-first") }}</p>{% endif %}
+{% endif %}{{ grids::grid(t, view, form.errors) }}<p><a class="target-link" href="#{{ form.save_id }}">{{ t.get("parameter-jump-to-submit") }}</a></p>{% else %}<p class="field-hint">{{ t.get("parameter-fields-first") }}</p>{% endif %}
 </form>

@@ -53,7 +53,7 @@ The grey color and the archive box also show these states: **Deleted** (a recipe
 |---|---|---|---|---|
 | Machines | `GET /machines` | The machines of the line. Filters: **Code or name contains** and **Show the archived machines**. Columns: **Code**, **Name**, **PLC platform**, **State**. Each row opens its machine. | **Search**, **New machine** | `RecipeView` |
 | New machine | `GET /machines/new` | Fields **Machine code**, **Machine name**, **PLC platform**, and **Name of the main unit**. | **Create machine** | `MachineManage` |
-| Machine { $code } | `GET /machines/{code}`. An archived machine uses `GET /machines/by-id/{uuid}`. | The code, **Machine name**, **PLC platform**, and the unit tree under the heading **Unit tree**. An archived machine shows **Archived on** and a read-only notice. | **Rename machine**, **Add a main unit**, **Open the UDT types**, and **Archive machine { $code }** in the disclosure **Archive the machine** | `RecipeView` |
+| Machine { $code } | `GET /machines/{code}`. An archived machine uses `GET /machines/by-id/{uuid}`. | A link **Machines** above the fields and at the end of the page. The code, **Machine name**, **PLC platform**, and the unit tree under the heading **Unit tree**. A live machine has the link **Recipes of this machine** to `GET /recipes?machine={code}`. An archived machine shows **Archived on** and a read-only notice. | **Rename machine**, **Add a main unit**, **Open the UDT types**, and **Archive machine { $code }** in the disclosure **Archive the machine** | `RecipeView` |
 | Unit tree of machine { $code } | `GET /machines/{code}/units` | The unit tree of the machine. Each node opens its unit. | **Add a main unit**, **Add a sub-unit** | `RecipeView` |
 | New unit of machine { $code } | `GET /machines/{code}/units/new` | The list **Parent unit**, the segment field, and the field **Unit name**. | **Add unit** | `UnitManage` |
 | Unit { $path } | `GET /machines/{code}/units/{path}` | The unit path, the parent unit, the list **Sub-units**, and the field **Unit name**. An archived unit shows the state **Archived**. | **Rename unit**, and **Archive unit { $path }** in the disclosure **Archive the unit** | `RecipeView` |
@@ -62,10 +62,10 @@ The grey color and the archive box also show these states: **Deleted** (a recipe
 
 | Screen | Route | What it shows | Main actions | Permission to open |
 |---|---|---|---|---|
-| UDT types of machine { $code } | `GET /machines/{code}/types` | One row for each revision. Columns: **Name**, **Revision**, **Members**, **State**. The latest revision of each name shows **latest**. | **New UDT type** | `RecipeView` |
+| UDT types of machine { $code } | `GET /machines/{code}/types` | One row for each revision. Columns: **Name**, **Revision**, **Members**, **State**. The latest revision of each name shows **Latest**. An older revision shows **Superseded**. | **New UDT type** | `RecipeView` |
 | New UDT type (or New revision of { $name }) | `GET /machines/{code}/types/new`. With `from`, the form of a new revision. | The field **Type name** and the member table. Each row holds a member name and a type expression. | **Create type** (new type), **Create revision** (new revision), **Add a member** | `UdtManage` |
 | Type { $name }@{ $revision } | `GET /machines/{code}/types/{name}`. An older revision uses `?rev=`. | The type tree of the revision and the list **Revisions**. | **New revision**, **Show the use of this revision** | `RecipeView` |
-| Use of { $name }@{ $revision } | `GET /machines/{code}/types/{name}/usage` | The recipes and parameters that use the revision, directly or through another type. Columns: **Recipe**, **Version**, **State**, **Tag**, **Type**. | A link back to the type page | `RecipeView` |
+| Use of { $name }@{ $revision } | `GET /machines/{code}/types/{name}/usage` | The recipes and parameters that use the revision, directly or through another type. Columns: **Recipe**, **Version**, **State**, **Tag**, **Type**. | Links in each row to the recipe, the version, and the parameter (**Tag**). A link back to the type page. | `RecipeView` |
 
 ## Recipes (`api.md` section 2.4)
 
@@ -100,7 +100,7 @@ A version page shows these items from top to bottom. Each item appears only for 
 | Screen | Route | What it shows | Main actions | Permission to open |
 |---|---|---|---|---|
 | New parameter | `GET /recipes/{ref}/versions/{n}/parameters/new` | The form of a new parameter. See the list below this table. | **Add parameter**, **Show value fields** | `ParameterEdit` |
-| Parameter { $tag } | `GET /recipes/{ref}/versions/{n}/parameters/{key}` | The parameter summary, the value grid, and the translations. On a draft with `ParameterEdit`, the edit form, the translation forms, and the removal. The edit form has the same fields as the form of a new parameter. | **Save parameter**, **Show value fields**, **Delete parameter { $tag }** in the disclosure **Delete the parameter** (draft), and a link back to the version page | `RecipeView` |
+| Parameter { $tag }, version { $number } of recipe { $reference } | `GET /recipes/{ref}/versions/{n}/parameters/{key}` | The parameter summary, the value grid, and the translations. On a draft with `ParameterEdit`, the edit form, the translation forms, and the removal. The edit form has the same fields as the form of a new parameter. | **Save parameter**, **Show value fields**, **Delete parameter { $tag }** in the disclosure **Delete the parameter** (draft), and a link back to the version page | `RecipeView` |
 
 The form of a new parameter has these fields from top to bottom. The edit form of a parameter has the same fields.
 
@@ -124,10 +124,10 @@ The export routes return JSON. They have no page. The version page holds the exp
 |---|---|---|---|---|
 | My account | `GET /me` | The **Login** and the **Role** of the signed-in user. | **Change password** (link) | `authenticated` |
 | Change password | `GET /me/password` | Fields **Current password** and **New password**, with the password rules. The only page that a session with a required password change can open. | **Change password** | `authenticated` |
-| Users | `GET /users` | Filter **Login contains**. Columns: **Login**, **Role**, **Status**, **Password change**. Each row opens its user. | **Search**, **New user**, **Next page** (link) | `UserManage` |
+| Users | `GET /users` | Filter **Login contains**. Columns: **Login**, **Role**, **Status**, **Password change**. Each row opens its user. The pager shows the current page, **Page { $page }**. A page after the last page shows a notice and the link **Go to the first page**. | **Search**, **New user**, **Previous page** and **Next page** (links). | `UserManage` |
 | New user | `GET /users/new` | Fields **Login** and **Role**. | **Create user** | `UserManage` |
 | User created | Answer of `POST /users`. It is not a `GET` route. | The login and the one-time password. The page shows the password once. | **Back to the user** (link) | `UserManage` |
-| User | `GET /users/{login}` | The fields **Login**, **Role**, **Status**, and **Password change** describe the account. **Status** shows **Active** or **Inactive**. The fields **Created**, **Deactivated**, **Failed logins in the window**, and **Last failed login** show its history. | **Set role** (field **New role**), **Deactivate**, **Activate**, **Reset password**, and **Unlock login** (`LoginUnlock`) | `UserManage` |
+| User | `GET /users/{login}` | The fields **Login**, **Role**, **Status**, and **Password change** describe the account. **Status** shows **Active** or **Inactive**. The fields **Created**, **Deactivated**, **Failed logins in the window**, and **Last failed login** show its history. After a command, the facts and the actions update on the page. | **Set role** (field **New role**). An active user shows **Deactivate**. An inactive user shows **Activate**. **Unlock login** (`LoginUnlock`) shows only when the user has failed logins. **Reset password for { $login }** is in the disclosure **Reset the password**, with a warning. | `UserManage` |
 
 ## Audit and security events (`api.md` section 2.9)
 

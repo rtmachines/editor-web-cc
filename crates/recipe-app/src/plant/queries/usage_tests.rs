@@ -16,7 +16,7 @@ use super::usage::{GetTypeUsage, TypeUsage, TypeUsageInput, TypeUsageLine};
 use crate::blocking::{AppSettings, PageSizes};
 use crate::error::{AppError, Missing};
 use crate::memory::fixtures::{
-    Fixture, actor, meta, mid, parameter_on, recipe_with, tid, timestamp, uid, user, vid,
+    Fixture, actor, meta, mid, parameter_on, pkey, recipe_with, tid, timestamp, uid, user, vid,
 };
 use crate::memory::seed_type_id;
 use crate::ports::TypeUsageRow;
@@ -154,10 +154,10 @@ fn pages_of(size: u32) -> AppSettings {
     }
 }
 
-/// The line that a test expects.
+/// The line that a test expects. The pair `(n, tag)` is the one that `seed_parameter` gets.
 fn line(
     (reference, number, status): (&str, u32, VersionStatus),
-    tag: &str,
+    (n, tag): (u128, &str),
     plc_type: u128,
     type_text: &str,
 ) -> TypeUsageLine {
@@ -167,6 +167,7 @@ fn line(
             number,
             status,
             tag: ParameterTag::parse(tag).unwrap(),
+            key: pkey(n),
             parameter_type: tid(plc_type),
         },
         type_text: type_text.to_owned(),
@@ -205,8 +206,8 @@ async fn a_use_through_another_struct_gives_the_row_with_the_text_of_its_type() 
     assert_eq!(
         usage.rows,
         [
-            line(draft, "LINE", LINE, "ST_Line@1"),
-            line(draft, "ZONES", ZONES, "ARRAY[1..4] OF ST_Zone@2"),
+            line(draft, (1, "LINE"), LINE, "ST_Line@1"),
+            line(draft, (2, "ZONES"), ZONES, "ARRAY[1..4] OF ST_Zone@2"),
         ]
     );
     assert_eq!(usage.name.as_str(), "ST_Zone");
@@ -253,7 +254,7 @@ async fn two_members_of_one_struct_give_one_row() {
     .unwrap();
 
     let draft = ("R-400", 1, VersionStatus::Draft);
-    assert_eq!(usage.rows, [line(draft, "PAIR", PAIR, "ST_Pair@1")]);
+    assert_eq!(usage.rows, [line(draft, (1, "PAIR"), PAIR, "ST_Pair@1")]);
 }
 
 #[tokio::test]
@@ -275,7 +276,7 @@ async fn a_deleted_recipe_and_a_discarded_draft_give_no_row() {
     .unwrap();
 
     let draft = ("R-400", 1, VersionStatus::Draft);
-    assert_eq!(usage.rows, [line(draft, "LIVE", ZONE_2, "ST_Zone@2")]);
+    assert_eq!(usage.rows, [line(draft, (3, "LIVE"), ZONE_2, "ST_Zone@2")]);
 }
 
 #[tokio::test]

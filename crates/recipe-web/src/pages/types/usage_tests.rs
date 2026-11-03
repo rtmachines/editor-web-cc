@@ -7,7 +7,7 @@ use super::test_kit::{assert_content_answer, get_as, get_in, row_of};
 use super::usage_kit::seed_zone_parameters;
 use crate::pages::test_helpers::{assert_clean_html, assert_no_user_text_in_hx_attributes};
 use crate::test_support::icon_tag;
-use crate::test_support::plant::{HTMX_CONTENT, POLISH, world};
+use crate::test_support::plant::{HTMX_CONTENT, PARAMETER_KEY, POLISH, world};
 
 const USAGE: &str = "/machines/M7/types/ST_Zone/usage";
 const USAGE_2: &str = "/machines/M7/types/ST_Zone/usage?rev=2";
@@ -21,24 +21,45 @@ async fn types_usage_shows_the_recipe_the_version_with_its_badge_the_tag_and_the
     let world = world();
     let reply = get_as(&world, &world.operator, USAGE_2, &[]).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    let row = row_of(&reply.body, "<td class=\"data\">R-100</td>");
+    let row = row_of(
+        &reply.body,
+        "<td class=\"data\"><a href=\"/recipes/R-100\">R-100</a></td>",
+    );
     assert!(
         row.starts_with(
-            "<tr><td class=\"data\">R-100</td><td class=\"num\">3</td><td><span class=\"badge badge-draft\">"
+            "<tr><td class=\"data\"><a href=\"/recipes/R-100\">R-100</a></td><td class=\"num\"><a href=\"/recipes/R-100/versions/3\">3</a></td><td><span class=\"badge badge-draft\">"
         ),
         "{row}"
     );
     assert!(row.contains(&icon_tag("status-draft")), "{row}");
     assert!(
         row.ends_with(
-            "<span>Draft</span></span></td><td class=\"data\">LINE</td><td class=\"data\">ST_Line@1</td>"
+            "<span>Draft</span></span></td><td class=\"data\"><a href=\"/recipes/R-100/versions/3/parameters/73570007-0000-0000-0000-000000000001\">LINE</a></td><td class=\"data\">ST_Line@1</td>"
         ),
         "{row}"
     );
     assert_eq!(
-        reply.body.matches("<td class=\"data\">R-100</td>").count(),
+        reply
+            .body
+            .matches("<td class=\"data\"><a href=\"/recipes/R-100\">R-100</a></td>")
+            .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn types_usage_row_links_the_recipe_the_version_and_the_parameter() {
+    let world = world();
+    let reply = get_as(&world, &world.operator, USAGE_2, &[]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let row = row_of(&reply.body, "<a href=\"/recipes/R-100\">R-100</a>");
+    let version = "<td class=\"num\"><a href=\"/recipes/R-100/versions/3\">3</a></td>";
+    assert!(row.contains(version), "{row}");
+    let parameter = format!(
+        "<td class=\"data\"><a href=\"/recipes/R-100/versions/3/parameters/{PARAMETER_KEY}\">LINE</a></td>"
+    );
+    assert!(row.contains(&parameter), "{row}");
+    assert!(!row.contains("hx-"), "{row}");
 }
 
 #[tokio::test]
@@ -78,7 +99,9 @@ async fn types_usage_without_a_revision_shows_the_latest_revision() {
         reply.body
     );
     assert!(
-        reply.body.contains("<td class=\"data\">R-100</td>"),
+        reply
+            .body
+            .contains("<td class=\"data\"><a href=\"/recipes/R-100\">R-100</a></td>"),
         "{}",
         reply.body
     );
@@ -124,7 +147,8 @@ async fn types_usage_pager_links_the_next_page_of_a_full_page() {
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let body = &reply.body;
     assert_eq!(
-        body.matches("<tr><td class=\"data\">R-100</td>").count(),
+        body.matches("<tr><td class=\"data\"><a href=\"/recipes/R-100\">R-100</a></td>")
+            .count(),
         100,
         "100 rows"
     );
@@ -136,12 +160,9 @@ async fn types_usage_pager_links_the_next_page_of_a_full_page() {
     let next = format!("<a class=\"target-link\" href=\"{PAGE_LINK}2\">Next page</a>");
     assert!(body.contains(&next), "{body}");
     assert!(!body.contains("Previous page"), "{body}");
-    assert!(
-        body.contains("<td class=\"data\">LINE</td>"),
-        "the tag LINE comes first"
-    );
-    assert!(body.contains("<td class=\"data\">P0099</td>"));
-    assert!(!body.contains("<td class=\"data\">P0100</td>"));
+    assert!(body.contains(">LINE</a></td>"), "the tag LINE comes first");
+    assert!(body.contains(">P0099</a></td>"));
+    assert!(!body.contains(">P0100</a></td>"));
 }
 
 #[tokio::test]
@@ -151,8 +172,12 @@ async fn types_usage_pager_links_back_from_the_last_page() {
     let reply = get_as(&world, &world.operator, &format!("{USAGE_2}&page=2"), &[]).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let body = &reply.body;
-    assert_eq!(body.matches("<tr><td class=\"data\">R-100</td>").count(), 1);
-    assert!(body.contains("<td class=\"data\">P0100</td>"), "{body}");
+    assert_eq!(
+        body.matches("<tr><td class=\"data\"><a href=\"/recipes/R-100\">R-100</a></td>")
+            .count(),
+        1
+    );
+    assert!(body.contains(">P0100</a></td>"), "{body}");
     assert!(body.contains("<span class=\"pager-current\" aria-current=\"page\">Page 2</span>"));
     let previous = format!("<a class=\"target-link\" href=\"{PAGE_LINK}1\">Previous page</a>");
     assert!(body.contains(&previous), "{body}");
@@ -299,7 +324,7 @@ async fn types_usage_in_polish_uses_the_polish_words() {
     let reply = get_in(&world, &world.operator, USAGE_2, POLISH).await;
     let body = &reply.body;
     assert!(body.contains("<h1>Użycie ST_Zone@2</h1>"), "{body}");
-    assert!(body.contains("<span>Szkic</span>"), "{body}");
+    assert!(body.contains("<span>Wersja robocza</span>"), "{body}");
     assert!(body.contains("<th scope=\"col\">Receptura</th>"), "{body}");
     assert!(body.contains("Parametry, które używają rewizji"), "{body}");
 }

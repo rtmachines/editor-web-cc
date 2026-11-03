@@ -18,10 +18,11 @@
 {% endif %}
 {% if after_end %}{{ pagers::after_end(t, current, first_url) }}
 {% else %}{% call tables::frame("recipes-caption", t.get("recipes-caption")) %}<thead><tr>{{ tables::head(t.get("recipes-col-reference")) }}{{ tables::head(t.get("recipes-col-name")) }}{{ tables::head(t.get("recipes-col-machine")) }}{{ tables::head(t.get("recipes-col-approved")) }}{{ tables::head(t.get("recipes-col-draft")) }}{% if can_restore %}{{ tables::head(t.get("version-actions-heading")) }}{% endif %}</tr></thead>
-{% if rows.is_empty() %}{{ tables::empty_row(columns, t.get("recipes-empty")) }}{% else %}<tbody>
+{% if rows.is_empty() %}{{ tables::empty_row(columns, t.get(empty_key)) }}{% else %}<tbody>
 {% for row in rows %}<tr><td class="data"><a href="{{ row.href }}">{{ row.reference }}</a>{% if row.deleted %} {{ badges::deleted(t.get("status-deleted")) }}{% endif %}</td><td>{{ row.name }}</td><td class="data">{{ row.machine }}</td><td>{% if let Some(link) = row.approved %}<a href="{{ link.href }}">{{ link.number }}</a> {{ badges::status("approved", t.get("status-approved")) }}{% else %}{{ t.get("recipes-none") }}{% endif %}</td><td>{% if let Some(link) = row.draft %}<a href="{{ link.href }}">{{ link.number }}</a> {{ badges::status("draft", t.get("status-draft")) }}{% else %}{{ t.get("recipes-none") }}{% endif %}</td>{% if can_restore %}<td>{% if row.deleted %}<div class="actions"><form method="post" action="/recipes/{{ row.reference }}/restore" hx-boost="true" hx-target="#content" hx-push-url="true" hx-sync="closest form:drop"><input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}"><button type="submit" class="btn btn-secondary">{{ t.with_arg("restore-recipe-button", "reference", row.reference) }}</button><span class="htmx-indicator">{{ t.get("form-in-progress") }}</span></form></div>{% endif %}</td>{% endif %}</tr>
 {% endfor %}</tbody>
-{% endif %}{% endcall %}{% endif %}
+{% endif %}{% endcall %}{% if rows.is_empty() && filtered %}<p class="actions"><a class="target-link" href="/recipes">{{ t.get("recipes-clear-filter") }}</a></p>
+{% endif %}{% endif %}
 {% if !previous_url.is_empty() || !next_url.is_empty() %}{{ pagers::pager(t, previous_url, next_url, current) }}
 {% endif %}
 {% endblock %}

@@ -141,8 +141,7 @@ async fn parameter_table_value_column_follows_the_type_column_with_the_header() 
     let world = recipe_world();
     let reply = world.get_en(&world.operator, DRAFT_PAGE).await;
     let main = main_of(&reply.body);
-    let type_then_value =
-        "<th scope=\"col\">Type</th><th scope=\"col\">Value</th><th scope=\"col\">Unit</th>";
+    let type_then_value = "<th scope=\"col\">Type</th><th scope=\"col\">Value</th><th scope=\"col\">Machine unit</th>";
     assert!(main.contains(type_then_value), "{main}");
 }
 
@@ -236,6 +235,38 @@ async fn parameter_table_shows_the_empty_word_for_an_empty_text() {
     let row = row_of(main_of(&reply.body), "BLANK");
     let word = text(Lang::En, "parameters-value-empty");
     assert!(row.contains(&note_cell(&word)), "{row}");
+}
+
+#[tokio::test]
+async fn parameter_table_shows_empty_text_for_an_empty_text_in_english() {
+    let world = recipe_world();
+    seed_string_254(&world);
+    let tree = tree_of(&world, PlcTypeId::from(STRING_254_ID));
+    let value = ParameterValue::parse("\"\"", &tree).unwrap().to_stored();
+    let seed = Seed {
+        type_id: PlcTypeId::from(STRING_254_ID),
+        value,
+    };
+    seed_with(&world, draft_id(), (4, "BLANK"), seed);
+    let reply = world.get_en(&world.engineer, DRAFT_PAGE).await;
+    let row = row_of(main_of(&reply.body), "BLANK");
+    assert!(row.contains(&note_cell("Empty text")), "{row}");
+}
+
+#[tokio::test]
+async fn parameter_table_shows_pusty_tekst_for_an_empty_text_in_polish() {
+    let world = recipe_world();
+    seed_string_254(&world);
+    let tree = tree_of(&world, PlcTypeId::from(STRING_254_ID));
+    let value = ParameterValue::parse("\"\"", &tree).unwrap().to_stored();
+    let seed = Seed {
+        type_id: PlcTypeId::from(STRING_254_ID),
+        value,
+    };
+    seed_with(&world, draft_id(), (4, "BLANK"), seed);
+    let reply = world.get(&world.engineer, DRAFT_PAGE, &[POLISH]).await;
+    let row = row_of(main_of(&reply.body), "BLANK");
+    assert!(row.contains(&note_cell("Pusty tekst")), "{row}");
 }
 
 #[tokio::test]

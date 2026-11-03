@@ -3,33 +3,29 @@
 use askama::Template;
 use recipe_app::identity::UserDetail;
 use recipe_app::ports::UserSummary;
-use recipe_domain::identity::Role;
+use recipe_domain::identity::{Login, Role};
 
-use crate::error::WebError;
+use crate::error::{FormErrors, WebError};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::render::instant;
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 
-/// One option of a role list.
+/// One option of a role list: the value that the form sends and the text that the user reads.
+///
+/// The field names `value` and `text` are the ones that the macro `fields::select` reads.
 pub(super) struct RoleOption {
     value: &'static str,
-    label: String,
-    selected: bool,
+    text: String,
 }
 
-/// Build the options for all roles. `selected` marks the role that the form shows first.
-pub(super) fn role_options(
-    t: Texts<'_>,
-    roles: &[Role],
-    selected: Option<Role>,
-) -> Vec<RoleOption> {
+/// Build the options for the roles. The form passes its selected value to `fields::select`.
+pub(super) fn role_options(t: Texts<'_>, roles: &[Role]) -> Vec<RoleOption> {
     roles
         .iter()
         .map(|role| RoleOption {
             value: role.as_sql(),
-            label: t.role(*role),
-            selected: selected == Some(*role),
+            text: t.role(*role),
         })
         .collect()
 }
@@ -83,12 +79,36 @@ pub(crate) struct UsersPage<'a> {
     t: Texts<'a>,
     q: &'a str,
     rows: Vec<UserRow>,
-    prev_url: Option<String>,
-    next_url: Option<String>,
+    /// The address of the previous page. Empty when the page has no previous link.
+    previous_url: String,
+    /// The address of the next page. Empty when the page has no next link.
+    next_url: String,
+    /// The number of the current page, counted from 1.
+    current: u32,
+    /// True for a page after the last page: no row, and the page number is above 1.
+    after_end: bool,
+    /// The address of the first page. The page `after_end` links to it.
+    first_url: String,
+}
+
+/// The links and the position of one page of the user list.
+///
+/// The type solves one problem: the handler computes the pager once, and the page only shows it.
+pub(super) struct UsersPager {
+    /// The address of the previous page, or `None` for the first page and for a page after the end.
+    pub(super) previous: Option<String>,
+    /// The address of the next page, or `None` when the page is not full.
+    pub(super) next: Option<String>,
+    /// The number of the current page, counted from 1.
+    pub(super) current: u32,
+    /// True for a page after the last page.
+    pub(super) after_end: bool,
+    /// The address of the first page.
+    pub(super) first: String,
 }
 
 impl<'a> UsersPage<'a> {
-    /// Build the page from one page of users and the links to the pages around it.
+    /// Build the page from one page of users and the pager around it.
     ///
     /// # Errors
     ///
@@ -98,16 +118,61 @@ impl<'a> UsersPage<'a> {
         request: &PageRequest,
         q: &'a str,
         users: &[UserSummary],
-        links: (Option<String>, Option<String>),
+        pager: UsersPager,
     ) -> Result<Self, WebError> {
         Ok(Self {
             layout: Layout::for_session(t, request, t.get("users-title"), Some(NavTarget::Users))?,
             t,
             q,
             rows: users.iter().map(|user| UserRow::of(t, user)).collect(),
-            prev_url: links.0,
-            next_url: links.1,
+            previous_url: pager.previous.unwrap_or_default(),
+            next_url: pager.next.unwrap_or_default(),
+            current: pager.current,
+            after_end: pager.after_end,
+            first_url: pager.first,
         })
+    }
+}
+
+/// The data of the form of a new user: the roles, the sent texts, and the error lines.
+pub(super) struct NewUserForm {
+    csrf_token: String,
+    roles: Vec<RoleOption>,
+    /// The value of the role that the form shows first.
+    selected_role: &'static str,
+    login: String,
+    /// True when the answer swaps the form out of band (ADR-0041 (e)).
+    oob: bool,
+    errors: FormErrors,
+}
+
+impl NewUserForm {
+    /// Build an empty form from the roles that the use case offers.
+    pub(super) fn new(t: Texts<'_>, roles: &[Role], csrf_token: String) -> Self {
+        Self {
+            csrf_token,
+            roles: role_options(t, &offered_on_create(roles)),
+            selected_role: Role::Operator.as_sql(),
+            login: String::new(),
+            oob: false,
+            errors: FormErrors::default(),
+        }
+    }
+
+    /// Return the form with the sent login and role and the error lines, swapped out of band.
+    ///
+    /// A sent role outside the list keeps the first choice. A sent text that is not a login is
+    /// not shown again, so the answer never echoes a payload.
+    pub(super) fn sent(self, login: &str, role: &str, errors: FormErrors) -> Self {
+        let selected_role = Role::parse(role).map_or(self.selected_role, Role::as_sql);
+        let login = Login::parse(login).map_or_else(|_reason| String::new(), |ok| ok.to_string());
+        Self {
+            selected_role,
+            login,
+            oob: true,
+            errors,
+            ..self
+        }
     }
 }
 
@@ -117,7 +182,7 @@ impl<'a> UsersPage<'a> {
 pub(crate) struct NewUserPage<'a> {
     layout: Layout<'a>,
     t: Texts<'a>,
-    roles: Vec<RoleOption>,
+    form: NewUserForm,
 }
 
 impl<'a> NewUserPage<'a> {
@@ -134,17 +199,47 @@ impl<'a> NewUserPage<'a> {
         Ok(Self {
             layout: Layout::for_session(t, request, t.get("user-new-title"), None)?,
             t,
-            roles: role_options(t, &offered_on_create(roles), Some(Role::Operator)),
+            form: NewUserForm::new(t, roles, request.csrf_token()),
         })
     }
 }
 
-/// The page `user.html`.
+/// The block `form` of `user-new.html` alone: the form that an error answer swaps out of band.
 #[derive(Template)]
-#[template(path = "user.html")]
-pub(crate) struct UserPage<'a> {
-    layout: Layout<'a>,
+#[template(path = "user-new.html", block = "form")]
+pub(super) struct NewUserFormBlock<'a> {
     t: Texts<'a>,
+    form: NewUserForm,
+}
+
+impl<'a> NewUserFormBlock<'a> {
+    /// Wrap the form with the texts of the language.
+    pub(super) const fn new(t: Texts<'a>, form: NewUserForm) -> Self {
+        Self { t, form }
+    }
+}
+
+/// The form `user-role-form.html` alone: the set-role form that an error answer swaps out of band.
+#[derive(Template)]
+#[template(path = "user-role-form.html")]
+pub(super) struct RoleFormBlock<'a> {
+    t: Texts<'a>,
+    v: UserView,
+}
+
+impl<'a> RoleFormBlock<'a> {
+    /// Wrap the view with the texts of the language.
+    pub(super) const fn new(t: Texts<'a>, v: UserView) -> Self {
+        Self { t, v }
+    }
+}
+
+/// The data of the facts and of the action forms of one user.
+///
+/// The type solves one problem: the page `user.html` and the out-of-band answer of a command
+/// must render the same markup. Both include `user-facts.html` and `user-actions.html` with
+/// this value, so the markup lives in one place (design D1).
+pub(crate) struct UserView {
     login: String,
     role: String,
     active: bool,
@@ -156,6 +251,71 @@ pub(crate) struct UserPage<'a> {
     last_failure: Option<String>,
     can_set_role: bool,
     roles: Vec<RoleOption>,
+    /// The value of the current role of the user.
+    selected_role: &'static str,
+    csrf_token: String,
+    /// True when the markup goes out of band into a page that already shows the user.
+    oob: bool,
+    /// The error lines under the inputs of the set-role form.
+    role_errors: FormErrors,
+    /// True when the set-role form alone goes out of band (ADR-0041 (e)).
+    role_oob: bool,
+}
+
+impl UserView {
+    /// Return the view with the error lines of the set-role form, which swaps out of band.
+    pub(super) fn with_role_errors(self, role_errors: FormErrors) -> Self {
+        Self {
+            role_errors,
+            role_oob: true,
+            ..self
+        }
+    }
+
+    /// Set the forced password change that the facts show.
+    ///
+    /// The method solves one problem: the reset of a password sets the flag in the same
+    /// transaction, after the read that made the view. The role decides the flag.
+    pub(super) fn with_must_change(self, must_change: bool) -> Self {
+        Self {
+            must_change,
+            ..self
+        }
+    }
+
+    /// Build the view from the user and the throttle state of the login.
+    ///
+    /// `oob` is true for the answer of a command and false for the page of the user.
+    pub(super) fn new(t: Texts<'_>, request: &PageRequest, detail: &UserDetail, oob: bool) -> Self {
+        let user = &detail.user;
+        Self {
+            login: user.login.to_string(),
+            role: t.role(user.role),
+            active: user.is_active,
+            status: status_label(t, user.is_active),
+            must_change: user.must_change_password,
+            created: instant(&user.created_at),
+            deactivated: user.deactivated_at.as_ref().map(instant),
+            failures: detail.throttle.failures,
+            last_failure: detail.throttle.last_failure.as_ref().map(instant),
+            can_set_role: user.role.is_person(),
+            roles: role_options(t, &Role::ALL),
+            selected_role: user.role.as_sql(),
+            csrf_token: request.csrf_token(),
+            oob,
+            role_errors: FormErrors::default(),
+            role_oob: false,
+        }
+    }
+}
+
+/// The page `user.html`.
+#[derive(Template)]
+#[template(path = "user.html")]
+pub(crate) struct UserPage<'a> {
+    layout: Layout<'a>,
+    t: Texts<'a>,
+    v: UserView,
 }
 
 impl<'a> UserPage<'a> {
@@ -169,21 +329,10 @@ impl<'a> UserPage<'a> {
         request: &PageRequest,
         detail: &UserDetail,
     ) -> Result<Self, WebError> {
-        let user = &detail.user;
         Ok(Self {
             layout: Layout::for_session(t, request, t.get("user-title"), None)?,
             t,
-            login: user.login.to_string(),
-            role: t.role(user.role),
-            active: user.is_active,
-            status: status_label(t, user.is_active),
-            must_change: user.must_change_password,
-            created: instant(&user.created_at),
-            deactivated: user.deactivated_at.as_ref().map(instant),
-            failures: detail.throttle.failures,
-            last_failure: detail.throttle.last_failure.as_ref().map(instant),
-            can_set_role: user.role.is_person(),
-            roles: role_options(t, &Role::ALL, Some(user.role)),
+            v: UserView::new(t, request, detail, false),
         })
     }
 }
@@ -200,6 +349,8 @@ pub(crate) struct ResultFragment<'a> {
     password: Option<String>,
     technical: bool,
     login: String,
+    refresh: Option<UserView>,
+    facts: Option<UserView>,
 }
 
 impl<'a> ResultFragment<'a> {
@@ -220,7 +371,22 @@ impl<'a> ResultFragment<'a> {
             password,
             technical,
             login,
+            refresh: None,
+            facts: None,
         }
+    }
+
+    /// Add the facts and the action forms of the user, sent out of band after the commit.
+    pub(super) fn with_refresh(self, refresh: Option<UserView>) -> Self {
+        Self { refresh, ..self }
+    }
+
+    /// Add only the facts of the user, sent out of band.
+    ///
+    /// The method solves one problem: the answer of `ResetPassword` must not replace the action
+    /// forms, so the focus stays on the reset button (design D1, D2).
+    pub(super) fn with_facts(self, facts: Option<UserView>) -> Self {
+        Self { facts, ..self }
     }
 }
 

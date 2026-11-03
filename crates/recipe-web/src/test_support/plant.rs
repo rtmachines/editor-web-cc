@@ -64,7 +64,7 @@ pub(crate) const DRAFT_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_000
 /// The identifier of the parameter `line`.
 const PARAMETER_ID: Uuid = Uuid::from_u128(0x7357_0006_0000_0000_0000_0000_0000_0001);
 /// The key of the parameter `line`.
-const PARAMETER_KEY: Uuid = Uuid::from_u128(0x7357_0007_0000_0000_0000_0000_0000_0001);
+pub(crate) const PARAMETER_KEY: Uuid = Uuid::from_u128(0x7357_0007_0000_0000_0000_0000_0000_0001);
 
 /// The first field of the identifier of a unit. The next field holds the number of the machine.
 const UNIT_TAG: u32 = 0x7357_0002;

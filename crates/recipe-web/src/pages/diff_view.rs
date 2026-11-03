@@ -11,11 +11,13 @@ use std::collections::BTreeMap;
 use recipe_app::recipe::{DiffPage, DiffSection};
 use recipe_domain::plant::{PlcTypeId, UnitId, UnitPath};
 use recipe_domain::recipe::{
-    DefinitionChange, DiffBounds, DiffKind, DiffPart, DiffRow, ParameterKey, Translation,
+    DefinitionChange, DiffBounds, DiffKind, DiffPart, DiffRow, ParameterKey, ReferenceNumber,
+    Translation,
 };
 
 use crate::error::{FieldReason, WebError};
 use crate::i18n::Lang;
+use crate::pages::hrefs::parameter_href;
 use crate::pages::render::{page_url, query_url};
 use crate::pages::texts::Texts;
 
@@ -41,8 +43,8 @@ pub(crate) struct DiffLinks<'a> {
     pub(crate) path: &'a str,
     /// The query pairs that each link to another page of the diff keeps, for example `rv`.
     pub(crate) keep: &'a [(&'a str, &'a str)],
-    /// The address of the versions of the recipe, for example `/recipes/R-500/versions`.
-    pub(crate) versions: &'a str,
+    /// The reference number of the recipe. The links to parameter pages name it.
+    pub(crate) reference: &'a ReferenceNumber,
     /// The number of the old side, or `None` when the diff has no old side.
     pub(crate) old: Option<u32>,
     /// The number of the new side.
@@ -74,7 +76,7 @@ impl<'a> DiffLinks<'a> {
 
     /// Return the address of the page of the parameter `key` in the version `number`.
     fn parameter_url(&self, number: u32, key: ParameterKey) -> String {
-        format!("{}/{number}/parameters/{key}", self.versions)
+        parameter_href(self.reference, number, &key)
     }
 }
 

@@ -205,7 +205,7 @@ async fn parameters_translation_row_outside_the_list_is_read_only_with_the_remov
         .split("<div class=\"translation-row\" id=\"translation-de\">")
         .nth(1)
         .unwrap();
-    assert!(row.contains("<dd>Linie</dd>"), "{row}");
+    assert!(row.contains("<dd lang=\"de\">Linie</dd>"), "{row}");
     assert!(row.contains("id=\"translation-de-delete\""), "{row}");
     for mark in [
         "translation-de-form",
@@ -218,12 +218,62 @@ async fn parameters_translation_row_outside_the_list_is_read_only_with_the_remov
         .get_en(&world.operator, &parameter_path(LINE_KEY, ""))
         .await;
     assert!(
-        operator.body.contains("<dd>Linie</dd>"),
+        operator.body.contains("<dd lang=\"de\">Linie</dd>"),
         "{}",
         operator.body
     );
     assert!(
         !operator.body.contains("translation-de-delete"),
+        "{}",
+        operator.body
+    );
+}
+
+/// Design D6, WCAG 3.1.2: the inputs and the stored texts of a row carry the `lang` of the row.
+/// The labels and the terms are texts of the UI language and carry none.
+#[tokio::test]
+async fn parameters_translation_row_marks_its_texts_with_the_language_of_the_row() {
+    let world = recipe_world();
+    seed_translation(&world, LINE_KEY, ("de", 1)).await;
+    let page = world
+        .get_en(&world.engineer, &parameter_path(LINE_KEY, ""))
+        .await;
+    let pl_row = page
+        .body
+        .split("<div class=\"translation-row\" id=\"translation-pl\">")
+        .nth(1)
+        .and_then(|rest| rest.split("<div class=\"translation-row\"").next())
+        .unwrap();
+    assert!(
+        pl_row.contains("<input id=\"translation-pl-name\" name=\"name\" type=\"text\" maxlength=\"200\" autocomplete=\"off\" value=\"Linia\" lang=\"pl\""),
+        "{pl_row}"
+    );
+    assert!(
+        pl_row.contains("<input id=\"translation-pl-description\" name=\"description\" type=\"text\" maxlength=\"4000\" autocomplete=\"off\" value=\"Strefy linii prasy\" lang=\"pl\""),
+        "{pl_row}"
+    );
+    assert!(
+        pl_row.contains("<label for=\"translation-pl-name\">"),
+        "{pl_row}"
+    );
+    assert!(
+        pl_row.contains("<label for=\"translation-pl-description\">"),
+        "{pl_row}"
+    );
+    let de_row = page
+        .body
+        .split("<div class=\"translation-row\" id=\"translation-de\">")
+        .nth(1)
+        .and_then(|rest| rest.split("<details").next())
+        .unwrap();
+    assert!(de_row.contains("<dd lang=\"de\">Linie</dd>"), "{de_row}");
+    assert_eq!(de_row.matches("<dd lang=\"de\">").count(), 2, "{de_row}");
+    assert!(!de_row.contains("<dt lang"), "{de_row}");
+    let operator = world
+        .get_en(&world.operator, &parameter_path(LINE_KEY, ""))
+        .await;
+    assert!(
+        operator.body.contains("<dd lang=\"pl\">Linia</dd>"),
         "{}",
         operator.body
     );
@@ -252,7 +302,10 @@ async fn parameters_translations_answer_the_rows_or_the_page() {
     let page = world.get_en(&world.operator, &path).await;
     assert_eq!(page.status, StatusCode::OK, "{}", page.body);
     let main = main_of(&page.body);
-    assert!(main.contains("Parameter LINE</h1>"), "{main}");
+    assert!(
+        main.contains("Parameter LINE, version 3 of recipe R-100</h1>"),
+        "{main}"
+    );
     assert!(!main.contains("<form"), "{main}");
     assert!(main.contains("Linia"), "{main}");
 }

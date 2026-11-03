@@ -95,6 +95,26 @@ async fn machines_page_title_and_labels_come_from_the_bundles() {
     );
 }
 
+/// Task 3.4: the live machine links to the recipe list filtered by its code.
+#[tokio::test]
+async fn machines_page_of_a_live_machine_links_to_its_recipes() {
+    let world = world();
+    let reply = world.get_en(&world.operator, "/machines/M7").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let link = "<a class=\"target-link\" href=\"/recipes?machine=M7\">Recipes of this machine</a>";
+    assert!(main.contains(link), "{main}");
+}
+
+/// Task 3.4: an archived machine has no link to its recipes.
+#[tokio::test]
+async fn machines_page_of_an_archived_machine_has_no_link_to_its_recipes() {
+    let world = world();
+    let reply = world.get_en(&world.engineer, &archived_path()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(!reply.body.contains("/recipes?machine="), "{}", reply.body);
+}
+
 #[tokio::test]
 async fn machines_page_of_an_engineer_has_the_rename_form_with_literal_hx_attributes() {
     let world = world();
@@ -412,4 +432,21 @@ async fn machines_page_by_identifier_has_the_content_answer_too() {
         archived_path()
     );
     assert!(reply.body.contains(&next), "{}", reply.body);
+}
+
+#[tokio::test]
+async fn machines_page_repeats_the_machines_link_right_after_the_state_badge_row() {
+    let world = world();
+    let reply = world.get_en(&world.engineer, &archived_path()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let link = "<p><a class=\"target-link\" href=\"/machines\">Machines</a></p>";
+    let badge_row = main
+        .split_once("<div class=\"actions\">")
+        .unwrap()
+        .1
+        .split_once("</div>\n")
+        .unwrap()
+        .1;
+    assert!(badge_row.starts_with(&format!("{link}\n")), "{badge_row}");
 }

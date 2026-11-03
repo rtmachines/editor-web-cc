@@ -580,3 +580,31 @@ fn fields_new_member_values_are_trimmed_by_the_class_of_their_leaf() {
         Some(&MemberValue::Text("7".to_owned()))
     );
 }
+
+#[tokio::test]
+async fn fields_form_page_heading_and_title_name_the_tag_the_recipe_and_the_version() {
+    use super::test_kit::{SPEED_FIELDS, changed, form, parameter_path};
+    use crate::pages::recipes::test_world::recipe_world;
+    use crate::test_support::plant::{ENGLISH, POLISH};
+    use crate::test_support::post_fields;
+    use crate::test_support::recipes::SPEED_KEY;
+
+    let world = recipe_world();
+    let body = form(&changed(&SPEED_FIELDS, &[("fields", Some("1"))]));
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let expected = [
+        (POLISH, "Parametr SPEED, wersja 3 receptury R-100"),
+        (ENGLISH, "Parameter SPEED, version 3 of recipe R-100"),
+    ];
+    for (header, heading) in expected {
+        let router = world.fixture.router();
+        let reply = post_fields(&router, &path, Some(&world.engineer), &[header], &body).await;
+        assert_eq!(reply.status, axum::http::StatusCode::OK, "{}", reply.body);
+        let h1 = reply.body.split("<h1").nth(1).unwrap();
+        let h1 = h1.split_once('>').unwrap().1.split("</h1>").next().unwrap();
+        assert_eq!(h1, heading, "{}", reply.body);
+        let title = reply.body.split("<title>").nth(1).unwrap();
+        assert!(title.starts_with(heading), "{}", reply.body);
+        assert!(!reply.body.contains("parameter-title"), "{}", reply.body);
+    }
+}

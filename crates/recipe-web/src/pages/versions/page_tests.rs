@@ -207,3 +207,25 @@ async fn versions_page_content_answer_holds_the_title_and_the_focused_heading() 
     );
     assert!(!reply.body.contains("class=\"topbar\""), "{}", reply.body);
 }
+
+#[tokio::test]
+async fn versions_page_repeats_the_recipe_link_right_after_the_state_badge_row() {
+    let world = recipe_world();
+    let reply = world
+        .get_en(&world.operator, "/recipes/R-100/versions/3")
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let link = "<p><a class=\"target-link\" href=\"/recipes/R-100\">Recipe R-100</a></p>";
+    let badge_row = main
+        .split_once("<div class=\"actions\">")
+        .unwrap()
+        .1
+        .split_once("</div>\n")
+        .unwrap()
+        .1;
+    assert!(
+        badge_row.starts_with(&format!("{link}\n<dl>")),
+        "{badge_row}"
+    );
+}

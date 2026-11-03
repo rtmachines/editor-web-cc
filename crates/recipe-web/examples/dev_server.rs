@@ -38,6 +38,7 @@ use recipe_app::ports::NewUser;
 use recipe_domain::identity::{
     KeyRing, KeyRingReason, Login, LoginReason, NewPassword, PasswordReason, Role, UserId,
 };
+use recipe_domain::recipe::{LangCode, RecipeError};
 use recipe_domain::timestamp::Timestamp;
 use recipe_web::{BundleReason, WebSettings, WebState, router};
 use time::OffsetDateTime;
@@ -51,6 +52,8 @@ const PASSWORD_VARIABLE: &str = "RECIPE_DEV_PASSWORD";
 const DEFAULT_PORT: u16 = 8080;
 /// The time between two moves of the clock to the wall time.
 const CLOCK_STEP: Duration = Duration::from_secs(1);
+/// The translation languages of the dev server (design D11): the default `pl` and `de`.
+const TRANSLATION_LANGS: [&str; 2] = ["pl", "de"];
 /// The logins, the roles, and the identifiers of the seeded users.
 const SEEDED_USERS: [(&str, Role, u128); 3] = [
     ("admin", Role::Administrator, 1),
@@ -99,6 +102,12 @@ enum DevServerError {
     KeyRing {
         /// The reason of the key file grammar.
         reason: KeyRingReason,
+    },
+    /// A translation language of the dev server is not a valid language code.
+    #[error("a translation language is not valid: {reason}")]
+    Lang {
+        /// The reason of the language code grammar.
+        reason: RecipeError,
     },
     /// The text bundles do not load.
     #[error("the text bundles do not load: {reason}")]
@@ -157,6 +166,22 @@ fn dev_password(lookup: &impl Fn(&str) -> Option<String>) -> Result<NewPassword,
         name: PASSWORD_VARIABLE,
     })?;
     NewPassword::parse(&text).map_err(|reason| DevServerError::PasswordPolicy { reason })
+}
+
+/// Make the web settings of the dev server.
+///
+/// The function solves one problem: the e2e suite saves a German translation, and a row for a
+/// language outside `translation_langs` has no edit form. Only this example adds `de`. The
+/// production default stays as `reliability.md` section 7.11 gives it.
+fn dev_web_settings() -> Result<WebSettings, DevServerError> {
+    let translation_langs = TRANSLATION_LANGS
+        .into_iter()
+        .map(|tag| LangCode::parse(tag).map_err(|reason| DevServerError::Lang { reason }))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(WebSettings {
+        translation_langs,
+        ..WebSettings::default()
+    })
 }
 
 /// Read a nonce of 128 bits from the system.
@@ -260,7 +285,7 @@ fn build_state(
         fresh_key_ring()?,
         settings,
     );
-    WebState::new(identity, WebSettings::default(), fresh_key_ring()?)
+    WebState::new(identity, dev_web_settings()?, fresh_key_ring()?)
         .map_err(|reason| DevServerError::Web { reason })
 }
 
@@ -405,6 +430,21 @@ mod tests {
             }
         ));
         assert!(!format!("{error} {error:?}").contains(secret));
+    }
+
+    // --- Web settings ----------------------------------------------------------------------------
+
+    #[test]
+    fn dev_web_settings_list_pl_and_de_while_the_default_lists_only_pl() {
+        let langs = |settings: &WebSettings| -> Vec<String> {
+            settings
+                .translation_langs
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        };
+        assert_eq!(langs(&dev_web_settings().unwrap()), ["pl", "de"]);
+        assert_eq!(langs(&WebSettings::default()), ["pl"]);
     }
 
     // --- Signing key -----------------------------------------------------------------------------

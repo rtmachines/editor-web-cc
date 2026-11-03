@@ -176,6 +176,10 @@ struct RecipesPage<'a> {
     machine: String,
     status: String,
     show_deleted: bool,
+    /// True when a filter field holds a value or `show_deleted` is on. The empty state then names the filter.
+    filtered: bool,
+    /// The key of the sentence of an empty list: the filtered sentence or the plain one.
+    empty_key: &'static str,
     machines: Vec<Choice>,
     states: Vec<Choice>,
     can_show_deleted: bool,
@@ -238,6 +242,7 @@ impl<'a> RecipesPage<'a> {
         let (previous_url, next_url) =
             pager_links(LIST_PATH, (checked.page, list.has_next, after_end), &pairs);
         let first_url = page_url(LIST_PATH, &pairs, 1);
+        let filtered = !pairs.is_empty();
         let can_show_deleted = Operation::ListDeletedRecipes.requirement().allows(role);
         let can_restore = checked.show_deleted
             && can_show_deleted
@@ -261,6 +266,12 @@ impl<'a> RecipesPage<'a> {
             current: checked.page.number,
             after_end,
             first_url,
+            filtered,
+            empty_key: if filtered {
+                "recipes-empty-filtered"
+            } else {
+                "recipes-empty"
+            },
             q: checked.q,
             machine: checked.machine,
             status: checked.status,

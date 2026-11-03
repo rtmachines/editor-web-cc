@@ -8,7 +8,8 @@
 {% block content %}
 {{ headings::h1(layout, layout.title) }}
 {% if !live %}<div class="actions">{{ badges::archived_large(t.get("status-archived")) }}</div>
-{{ alerts::notice("info", t.get("machine-archived-notice")) }}
+{% endif %}<p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>
+{% if !live %}{{ alerts::notice("info", t.get("machine-archived-notice")) }}
 {% endif %}<dl>
 <dt>{{ t.get("field-code") }}</dt>
 <dd class="data">{{ code }}</dd>
@@ -20,6 +21,7 @@
 <dd class="data">{{ when }}</dd>
 {% endif %}</dl>
 {% if live %}<p><a class="target-link" href="{{ types_href }}">{{ t.get("machine-types-link") }}</a></p>
+<p><a class="target-link" href="{{ recipes_href }}">{{ t.get("machine-recipes-link") }}</a></p>
 {% endif %}<h2>{{ t.get("machine-units-title") }}</h2>
 <div id="unit-tree">{% include "unit-tree.html" %}</div>
 {% if live %}{% if can_add %}<p class="actions"><a class="target-link" href="{{ add_href }}" hx-boost="true" hx-target="#unit-form" hx-swap="innerHTML" hx-push-url="false">{{ t.get("tree-add-main-unit") }}</a></p>

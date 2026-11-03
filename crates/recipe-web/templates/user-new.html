@@ -2,11 +2,11 @@
 {% import "components/field.html" as fields %}
 {% block content %}
 <h1>{{ t.get("user-new-title") }}</h1>
-<form method="post" action="/users">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-{{ fields::field(t, "login", t.get("user-new-label-login"), t.get("user-new-hint"), "text", true, true, 64, "off") }}
-<div class="field"><label for="role">{{ t.get("user-new-label-role") }}</label><select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
+{% block form %}<form id="user-new-form" method="post" action="/users"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+{{ fields::named(t, "login", "login", t.get("user-new-label-login"), t.get("user-new-hint"), "text", true, true, 64, "off", form.login, form.errors.lines("login")) }}
+{{ fields::select(t, "role", t.get("user-new-label-role"), String::new(), form.roles.as_slice(), form.selected_role, true, form.errors.lines("role")) }}
 <p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("user-new-submit") }}</button></p>
-</form>
+</form>{% endblock %}
 <p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
 {% endblock %}

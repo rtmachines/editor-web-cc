@@ -4,6 +4,27 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- The user page updates its facts and its actions after each command. The password reset sits in a danger disclosure with a warning (ADR-0110).
+- A page header repeats the link to its parent page. The heading of a parameter page names the version and the recipe.
+- The type usage page links each row to the recipe, the version, and the parameter.
+- A live machine page links to the recipes of the machine.
+- A link after the leaf grid goes to the save button or the add button.
+- The user list has a pager with the previous page, the next page, and the page number.
+- A filtered recipe list without a match shows a link that clears the filter.
+- A translated text carries its `lang` attribute.
+- The login page puts the focus on the login field.
+
+### Changed
+
+- Each danger notice on one page has its own id (ADR-0110).
+- The Polish UI uses "Wersja robocza" for a draft and "Tag" for a tag.
+- The parameter table names its unit column "Machine unit". An empty text value shows "Empty text".
+- The type list shows "Superseded" for an older revision.
+- The user forms use the shared select field for the role.
+- The project deletes unused CSS rules.
+
 ## [0.5.0] - 2026-11-02
 
 ### Added

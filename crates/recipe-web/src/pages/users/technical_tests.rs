@@ -166,6 +166,24 @@ async fn pages_users_reset_of_a_person_keeps_the_first_login_notice() {
     assert!(!reply.body.contains(TECHNICAL_NOTICE_EN), "{}", reply.body);
 }
 
+#[tokio::test]
+async fn pages_users_reset_of_a_technical_account_refreshes_facts_without_a_forced_change() {
+    let (fixture, admin) = world();
+    // The flag of a technical account is false by rule. The answer takes it from the role.
+    fixture.seed_account(4, Role::ExportClient, "correct horse battery", true);
+    for login in ["user3", "user4"] {
+        let path = format!("/users/{login}/reset-password");
+        let reply = post_as(&fixture, &admin, &path, "", &[HTMX, ENGLISH]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(reply.body.contains("id=\"one-time-password\""));
+        let (_before, after) = reply.body.split_once("id=\"user-facts\"").unwrap();
+        let facts = after.split("</dl>").next().unwrap();
+        assert!(facts.contains(login), "{login}: {facts}");
+        assert!(!facts.contains("Password change"), "{login}: {facts}");
+        assert!(!reply.body.contains("id=\"user-actions\""), "{login}");
+    }
+}
+
 // --- Role form of a technical account -----------------------------------------------------------
 
 #[tokio::test]
@@ -191,4 +209,41 @@ async fn pages_users_detail_of_a_technical_account_shows_no_role_form() {
     assert!(!reply.body.contains("Set role"));
     // The other commands stay: a technical account has a rotating password.
     assert!(reply.body.contains("/users/user3/reset-password"));
+}
+
+#[tokio::test]
+async fn pages_users_one_time_password_label_ends_with_a_colon_for_a_technical_account() {
+    let (fixture, admin) = world();
+    let created = post_as(
+        &fixture,
+        &admin,
+        "/users",
+        "login=plc-m12&role=export_client",
+        &[],
+    )
+    .await;
+    assert_eq!(created.status, StatusCode::OK, "{}", created.body);
+    assert!(
+        created
+            .body
+            .contains("<p>Hasło: <code class=\"data\" id=\"one-time-password\">"),
+        "{}",
+        created.body
+    );
+    let reset = post_as(
+        &fixture,
+        &admin,
+        "/users/user3/reset-password",
+        "",
+        &[HTMX, ENGLISH],
+    )
+    .await;
+    assert_eq!(reset.status, StatusCode::OK, "{}", reset.body);
+    assert!(
+        reset
+            .body
+            .contains("<p>Password: <code class=\"data\" id=\"one-time-password\">"),
+        "{}",
+        reset.body
+    );
 }

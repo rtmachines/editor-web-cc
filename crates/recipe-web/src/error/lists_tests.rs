@@ -132,7 +132,7 @@ fn lists_a_bad_request_line_names_the_field_and_the_reason_and_links_to_its_inpu
     );
     assert_eq!(
         message(&line, Lang::Pl),
-        "Pole Znacznik jest niepoprawne: znacznik ma od 1 do 64 znak\u{f3}w z zakresu A do Z, 0 do 9 i podkre\u{15b}lenie. Zaczyna si\u{119} liter\u{105}."
+        "Pole Tag jest niepoprawne: tag ma od 1 do 64 znak\u{f3}w z zakresu A do Z, 0 do 9 i podkre\u{15b}lenie. Zaczyna si\u{119} liter\u{105}."
     );
 }
 

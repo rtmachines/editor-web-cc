@@ -2,6 +2,7 @@ import {
   expect,
   expectSwapSettled,
   GRID_CONTROLS,
+  seedUserWithFailedLogins,
   selectLanguage,
   test,
   type Language,
@@ -336,6 +337,93 @@ test.describe('a long word in the error summary', () => {
       expect(widths.linkRight, 'the summary link ends inside the view').toBeLessThanOrEqual(
         widths.client,
       );
+    });
+  }
+});
+
+test.describe('focus after a command on the user page', () => {
+  for (const language of ['pl', 'en'] as const satisfies readonly Language[]) {
+    test(`the focus follows deactivate, unlock, and reset in ${language}`, async ({
+      page,
+      context,
+      baseURL,
+    }) => {
+      // Design D1 and D2: the answer swaps the facts and the action forms out of band.
+      // The test posts only the forms of the product, on a dedicated user with 4 failed logins.
+      if (!baseURL) {
+        throw new Error('The project needs a baseURL.');
+      }
+      const login = await seedUserWithFailedLogins(baseURL);
+      await selectLanguage(context, baseURL, language);
+      await page.goto(`/users/${login}`);
+
+      // A deactivation keeps the focus on the status button, which has a fixed id.
+      const deactivate = page.locator(`form[action="/users/${login}/deactivate"] button`);
+      await deactivate.focus();
+      let status = await submitAndSettle(page, () => deactivate.press('Enter'));
+      expect(status).toBe(200);
+      await expect(page.locator('#user-status-submit')).toBeFocused();
+
+      // An unlock deletes its button. The next Tab reaches the first link of the new answer in #user-result.
+      const unlock = page.locator(`form[action="/users/${login}/unlock"] button`);
+      await unlock.focus();
+      status = await submitAndSettle(page, () => unlock.press('Enter'));
+      expect(status).toBe(200);
+      await page.keyboard.press('Tab');
+      await expect(page.locator('#user-result a').first()).toBeFocused();
+
+      // A reset shows the one-time password when the swap ends, and the button keeps the focus.
+      const summary = page.locator(
+        `details:has(form[action="/users/${login}/reset-password"]) > summary`,
+      );
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      const reset = page.locator(`form[action="/users/${login}/reset-password"] button`);
+      await expect(reset).toBeVisible();
+      await reset.focus();
+      status = await submitAndSettle(page, () => reset.press('Enter'));
+      expect(status).toBe(200);
+      await expect(page.locator('#one-time-password')).toBeVisible();
+      await expect(reset).toBeFocused();
+
+      // The last step activates the user again.
+      status = await submitAndSettle(page, () => page.locator('#user-status-submit').click());
+      expect(status).toBe(200);
+      await expect(page.locator(`form[action="/users/${login}/deactivate"]`)).toHaveCount(1);
+    });
+
+    test(`the focus stays on the role button after a role change in ${language}`, async ({
+      page,
+      context,
+      baseURL,
+    }) => {
+      // ADR-0041 (e): the answer swaps #user-actions out of band, and the fixed id keeps the focus.
+      if (!baseURL) {
+        throw new Error('The project needs a baseURL.');
+      }
+      const login = await seedUserWithFailedLogins(baseURL);
+      await selectLanguage(context, baseURL, language);
+      await page.goto(`/users/${login}`);
+
+      // Pick a role that differs from the selected one. The test uses only ids and values.
+      const select = page.locator('#user-role-form #role');
+      const current = await select.inputValue();
+      const values = await select
+        .locator('option')
+        .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value));
+      const next = values.find((value) => value !== current);
+      if (!next) {
+        throw new Error('The role list needs a second role.');
+      }
+      await select.selectOption(next);
+
+      // The button is found by its type, so a missing id fails at the focus check and not here.
+      const submit = page.locator('#user-role-form button[type="submit"]');
+      await submit.focus();
+      const status = await submitAndSettle(page, () => submit.press('Enter'));
+      expect(status).toBe(200);
+      await expect(page.locator('#role')).toHaveValue(next);
+      await expect(page.locator('#user-role-submit')).toBeFocused();
     });
   }
 });

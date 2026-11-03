@@ -9,7 +9,7 @@ use crate::i18n::{Bundles, Lang};
 use crate::pages::Texts;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_clean_html, hx_pairs};
-use crate::test_support::plant::main_of;
+use crate::test_support::plant::{POLISH, main_of};
 
 /// Build the row of a parameter whose name holds markup.
 fn row() -> ParameterRowView {
@@ -118,4 +118,30 @@ fn parameter_row_fragment_without_addresses_has_no_address_cell() {
     };
     let html = fragment.render().unwrap();
     assert!(!html.contains("DB2.DBW0"), "{html}");
+}
+
+#[tokio::test]
+async fn parameter_table_header_names_the_machine_unit_in_english() {
+    let world = recipe_world();
+    let reply = world
+        .get_en(&world.engineer, "/recipes/R-100/versions/3")
+        .await;
+    let main = main_of(&reply.body);
+    assert!(
+        main.contains("<th scope=\"col\">Machine unit</th>"),
+        "{main}"
+    );
+}
+
+#[tokio::test]
+async fn parameter_table_header_names_the_machine_unit_in_polish() {
+    let world = recipe_world();
+    let reply = world
+        .get(&world.engineer, "/recipes/R-100/versions/3", &[POLISH])
+        .await;
+    let main = main_of(&reply.body);
+    assert!(
+        main.contains("<th scope=\"col\">Jednostka maszyny</th>"),
+        "{main}"
+    );
 }

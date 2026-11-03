@@ -147,6 +147,11 @@ const PLANT_TEXTS: &[(&str, &str, &str)] = &[
         "Open the UDT types",
         "Otwórz typy UDT",
     ),
+    (
+        "machine-recipes-link",
+        "Recipes of this machine",
+        "Receptury tej maszyny",
+    ),
     ("machine-units-title", "Unit tree", "Drzewo jednostek"),
     (
         "machine-rename-submit",
@@ -279,7 +284,8 @@ const PLANT_TEXTS: &[(&str, &str, &str)] = &[
         "Maszyna nie ma typów UDT.",
     ),
     ("types-new-link", "New UDT type", "Nowy typ UDT"),
-    ("type-latest", "latest", "najnowsza"),
+    ("type-latest", "Latest", "Najnowsza"),
+    ("type-superseded", "Superseded", "Zastąpiona"),
     ("udt-new-title", "New UDT type", "Nowy typ UDT"),
     (
         "udt-revision-title",

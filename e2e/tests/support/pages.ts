@@ -1,4 +1,5 @@
 import type { APIRequestContext, APIResponse, Browser, BrowserContext, Cookie } from '@playwright/test';
+import { seedUserWithFailedLogins } from './seed';
 
 /** The widths of ADR-0048 (d), in CSS px. */
 export const WIDTHS = [320, 768, 1280] as const;
@@ -29,6 +30,8 @@ const LONG_NOTE = 'long-note-'.repeat(20);
 /** The values that the seed step finds at run time. */
 interface Found {
   parameterPath: string;
+  /** The path of the page of the user with failed login attempts. */
+  failedUserPath: string;
   adminCookies: Cookie[];
 }
 
@@ -71,6 +74,7 @@ export const LOGGED_IN_PAGES: readonly SweepPage[] = [
   page('machines', 'type usage page', `/machines/${MACHINE}/types/${UDT}/usage`),
   page('machines', 'type page with S7 layout', `/machines/${MACHINE}/types/${S7_STRUCT}`),
   page('recipes', 'recipe list', '/recipes'),
+  page('recipes', 'filtered recipe list without a match', '/recipes?q=ZZZ'),
   page('recipes', 'recipe form', '/recipes/new'),
   page('recipes', 'recipe page', `/recipes/${RECIPE}`),
   page('recipes', 'version list', `/recipes/${RECIPE}/versions`),
@@ -87,6 +91,7 @@ export const LOGGED_IN_PAGES: readonly SweepPage[] = [
   page('users', 'user list', '/users'),
   page('users', 'user form', '/users/new'),
   page('users', 'user page', '/users/engineer', true),
+  page('users', 'user page with failed attempts', () => resolved().failedUserPath),
   page('audit', 'audit log', '/audit', true),
   page('audit', 'audit entry', '/audit/1'),
   page('audit', 'security events', '/security-events'),
@@ -191,6 +196,7 @@ export async function seedSweepData(browser: Browser, baseURL: string, password:
     await seedNoteRecipe(admin, engineer);
     found = {
       parameterPath: await findParameterPath(engineer),
+      failedUserPath: `/users/${await seedUserWithFailedLogins(baseURL)}`,
       adminCookies: (await adminContext.storageState()).cookies,
     };
   } finally {
@@ -232,6 +238,47 @@ async function seedRecipe(admin: Poster, engineer: Poster): Promise<void> {
     row_version: await rowVersionOf(engineer, `${versions}/2/parameters/new`),
     value: '1300',
   });
+  await seedStructParameter(engineer, `${versions}/2`);
+}
+
+/**
+ * Adds the parameter ZONE of the type `ST_Zone` to a draft, so the type usage table holds a row.
+ * The form has two steps: show the value fields, then save. A refusal means the row exists already.
+ * The step then reads the usage page and throws when it holds no row for the tag, so a refusal cannot hide.
+ */
+async function seedStructParameter(engineer: Poster, draftPath: string): Promise<void> {
+  const definition = {
+    row_version: await rowVersionOf(engineer, `${draftPath}/parameters/new`),
+    unit_path: 'U1',
+    tag: 'ZONE',
+    s7_address: 'DB4.DBB0',
+    name_en: 'Zone',
+    description_en: 'Zone settings',
+    type: `${UDT}@1`,
+    ordinal: '1',
+  };
+  const shown = await (await post(engineer, `${draftPath}/parameters`, { ...definition, fields: '1' })).text();
+  const values: Record<string, string> = {};
+  for (const match of shown.matchAll(/<(?:input|select)[^>]*\bname="(value[^"]*)"/g)) {
+    if (match[1]) {
+      values[match[1]] = '1';
+    }
+  }
+  await post(engineer, `${draftPath}/parameters`, { ...definition, ...values, value_type: `${UDT}@1` });
+  await assertUsageRow(engineer, definition.tag);
+}
+
+/** Throws when the usage table of the seeded struct holds no row whose parameter link shows the tag. */
+async function assertUsageRow(poster: Poster, tag: string): Promise<void> {
+  const usagePath = `/machines/${MACHINE}/types/${UDT}/usage?rev=1`;
+  const reply = await poster.context.request.get(usagePath);
+  const html = await reply.text();
+  const rowLink = new RegExp(`<a href="/recipes/[^"]+/parameters/[0-9a-f-]{36}">${tag}</a>`);
+  if (!reply.ok() || !rowLink.test(html)) {
+    throw new Error(
+      `The seed step found no usage row for the parameter ${tag} at ${usagePath} (status ${reply.status()}). The save form may have been refused.`,
+    );
+  }
 }
 
 /** Seeds a recipe whose only version is approved and holds a `STRING` value of 200 characters. */

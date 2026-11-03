@@ -140,6 +140,26 @@ async fn units_page_of_a_leaf_shows_the_empty_sentence() {
     assert!(main.contains("The unit has no sub-unit."), "{main}");
 }
 
+/// Task 4.3: a unit without sub-units shows the empty sentence in the `empty` element, and a unit
+/// with sub-units shows no such element.
+#[tokio::test]
+async fn units_page_of_a_leaf_shows_the_empty_sentence_in_the_empty_element() {
+    let world = world();
+    let leaf = world
+        .get_en(&world.operator, "/machines/M7/units/U1.2.1")
+        .await;
+    let leaf_main = main_of(&leaf.body);
+    assert!(
+        leaf_main.contains("<p class=\"empty\">The unit has no sub-unit.</p>"),
+        "{leaf_main}"
+    );
+    let parent = world
+        .get_en(&world.operator, "/machines/M7/units/U1.2")
+        .await;
+    let parent_main = main_of(&parent.body);
+    assert!(!parent_main.contains("class=\"empty\""), "{parent_main}");
+}
+
 #[tokio::test]
 async fn units_page_escapes_the_name_of_the_unit() {
     let world = world();
@@ -407,5 +427,27 @@ async fn units_page_content_answer_has_the_title_the_heading_with_focus_and_the_
     assert!(
         reply.body.contains(RENAME_TAG),
         "the forms are part of the content"
+    );
+}
+
+#[tokio::test]
+async fn units_page_repeats_the_machine_link_right_after_the_state_badge_row() {
+    let world = world();
+    let reply = world
+        .get_en(&world.engineer, "/machines/M31/units/U2")
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let link = "<p><a class=\"target-link\" href=\"/machines/M31\">Machine M31</a></p>";
+    let badge_row = main
+        .split_once("<div class=\"actions\">")
+        .unwrap()
+        .1
+        .split_once("</div>\n")
+        .unwrap()
+        .1;
+    assert!(
+        badge_row.starts_with(&format!("{link}\n<dl>")),
+        "{badge_row}"
     );
 }

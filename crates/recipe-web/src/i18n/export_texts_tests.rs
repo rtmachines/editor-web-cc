@@ -28,7 +28,7 @@ const D9_SAMPLES: &[Sample] = &[
         "error-E-EXP-003",
         &[("number", "2"), ("reference", "R-500")],
         "Version 2 of recipe R-500 is a draft or was discarded. Only approved and retired versions can be exported.",
-        "Wersja 2 receptury R-500 jest szkicem albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.",
+        "Wersja 2 receptury R-500 jest wersją roboczą albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.",
     ),
 ];
 

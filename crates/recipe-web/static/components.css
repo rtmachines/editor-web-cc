@@ -5,7 +5,7 @@
  * The format is a flat list of rules. Tests read it with a strict reader.
  *
  * Class names that the templates use:
- * Blocks: .panel .table-wrap .num .time .empty .toast .tree .tree-node .tree-path .tree-type .tree-leaf .tree-group .tree-row .danger .link-list
+ * Blocks: .table-wrap .num .time .empty .toast .tree .tree-node .tree-path .tree-type .tree-leaf .tree-group .tree-row .danger .link-list
  * Forms: .pager .pager-current .check .member-row .member-fields
  * State: .badge .badge-draft .badge-approved .badge-retired .badge-active .badge-inactive .badge-large .badge-deleted .badge-outdated
  * Feedback: .alert .alert-error .alert-warning .alert-info .alert-success .alert-code .alert-ref .alert-head .field-lines .field-error .field-error-code
@@ -16,15 +16,7 @@
  * Formatted JSON and cursor pager: .json .pager-end
  */
 
-/* Panel, table, empty state */
-
-.panel {
-  margin-bottom: var(--space-5);
-  padding: var(--space-4);
-  background: var(--color-surface);
-  border: var(--edge) solid var(--color-border);
-  border-radius: var(--radius);
-}
+/* Table, empty state */
 
 .table-wrap {
   overflow-x: auto;
@@ -544,10 +536,6 @@ legend {
  * sticky either.
  */
 
-.leaf-grid tbody[hidden] {
-  display: none;
-}
-
 /*
  * The leaf grid is a table inside a form (design-system.md 10.4). A table uses the full width of
  * `main` and a form uses at most `--width-form` (design-system.md 6). So the form box has no
@@ -711,7 +699,7 @@ pre.json {
 /* Forced colors */
 
 @media (forced-colors: active) {
-  th, .badge, .alert, .toast, .panel, .empty, .table-wrap, .tree-node, fieldset {
+  th, .badge, .alert, .toast, .empty, .table-wrap, .tree-node, fieldset {
     border-color: ButtonBorder;
   }
 
