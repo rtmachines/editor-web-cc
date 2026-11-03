@@ -50,6 +50,8 @@ export interface SeededParameter {
 export interface SeededData {
   readonly machineCode: string;
   readonly recipeReference: string;
+  /** The name of the struct type that the parameter `ZONE_A` uses (revision 1). */
+  readonly structName: string;
   /** The path of the draft page, for example `/recipes/R-123/versions/1`. */
   readonly draftPath: string;
   /** The path of the form of a new parameter, for the main unit. */
@@ -260,6 +262,7 @@ async function seedWithClient(client: SeedClient): Promise<SeededData> {
   return {
     machineCode,
     recipeReference,
+    structName,
     draftPath,
     newParameterPath: `${draftPath}/parameters/new?unit=${MAIN_UNIT_PATH}`,
     struct,
@@ -336,6 +339,83 @@ async function seedWorld(baseURL: string, password: string): Promise<World> {
     }
     throw lastError;
   });
+}
+
+/** The failed logins that the user helper records. The login delay starts after 3 (api.md 7.4). */
+const SEEDED_FAILURES = 4;
+/** The login delay after 3 failures is 1 second. This pause keeps each attempt out of the delay. */
+const FAILURE_PAUSE_MS = 1_300;
+/** The status of a login with bad credentials (api.md 5). */
+const BAD_CREDENTIALS_STATUS = 401;
+/** The Operator role of the form `POST /users`. */
+const SEEDED_USER_ROLE = 'operator';
+
+/** Sends one failed login from a client without a session, as a person with a wrong password. */
+async function failLoginOnce(baseURL: string, login: string): Promise<void> {
+  const anonymous = await request.newContext({ baseURL, extraHTTPHeaders: SAME_ORIGIN_HEADERS });
+  try {
+    const page = await anonymous.get('/login');
+    const pre = /name="csrf_pre" value="([^"]*)"/.exec(await page.text())?.[1];
+    if (!pre) {
+      throw new Error('Seed step "failed login" found no csrf_pre field.');
+    }
+    const done = await anonymous.post('/login', {
+      form: { login, password: 'wrong-password-of-the-seed', csrf_pre: pre },
+      maxRedirects: 0,
+    });
+    // Only bad credentials count. A 403 (CSRF) or a 429 (throttle) records no failure.
+    if (done.status() !== BAD_CREDENTIALS_STATUS) {
+      throw failure('failed login', done, await done.text());
+    }
+  } finally {
+    await anonymous.dispose();
+  }
+}
+
+/**
+ * Makes a dedicated user with `POST /users` and records {@link SEEDED_FAILURES} failed logins.
+ *
+ * The function solves one problem: the focus checks of the user page change the state of the user.
+ * A test therefore never uses a shared account. The login is unique per call, and the function
+ * returns it. The seed lock keeps the logins of other seeds out of the throttle of this address.
+ */
+export async function seedUserWithFailedLogins(baseURL: string): Promise<string> {
+  const login = `focus${Date.now()}${Math.floor(Math.random() * 1_000)}`;
+  return withSeedLock(baseURL, async () => {
+    const admin = await SeedClient.login(baseURL, 'admin', passwordOfTests());
+    try {
+      await admin.post('/users', { login, role: SEEDED_USER_ROLE });
+    } finally {
+      await admin.dispose();
+    }
+    for (let attempt = 0; attempt < SEEDED_FAILURES; attempt += 1) {
+      await failLoginOnce(baseURL, login);
+      await new Promise((resolve) => setTimeout(resolve, FAILURE_PAUSE_MS));
+    }
+    await assertFailuresRecorded(baseURL, login);
+    return login;
+  });
+}
+
+/**
+ * Reads the user page as an Administrator and throws unless it shows {@link SEEDED_FAILURES}
+ * failures and the unlock form. The match uses the id `failures` and the form action, not texts.
+ */
+async function assertFailuresRecorded(baseURL: string, login: string): Promise<void> {
+  const admin = await SeedClient.login(baseURL, 'admin', passwordOfTests());
+  try {
+    const html = await admin.get(`/users/${login}`);
+    const count = /id="failures">\s*(\d+)\s*</.exec(html)?.[1];
+    const hasUnlockForm = html.includes(`action="/users/${login}/unlock"`);
+    if (count !== String(SEEDED_FAILURES) || !hasUnlockForm) {
+      throw new Error(
+        `Seed step "failed logins" expected ${SEEDED_FAILURES} failures and the unlock form, ` +
+          `found failures=${count ?? 'none'} unlockForm=${hasUnlockForm}.`,
+      );
+    }
+  } finally {
+    await admin.dispose();
+  }
 }
 
 /** The password of the test users. The config checks that it is set. */

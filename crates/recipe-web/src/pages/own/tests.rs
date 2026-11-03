@@ -61,6 +61,15 @@ fn session_cookie_pair(reply: &Reply) -> String {
     cookie_pair(&set_cookie_of(reply, SESSION_COOKIE).unwrap())
 }
 
+/// Return the text of the `input` tag whose id is `id`, up to its closing `>`.
+fn input_tag<'a>(body: &'a str, id: &str) -> &'a str {
+    let marker = format!("<input id=\"{id}\"");
+    let start = body.find(&marker).expect("the input of the field");
+    let rest = &body[start..];
+    let end = rest.find('>').expect("the end of the input tag");
+    &rest[..end]
+}
+
 // --- GET /login ---------------------------------------------------------------------------------
 
 #[tokio::test]
@@ -83,6 +92,20 @@ async fn pages_own_login_form_has_the_three_fields_and_sets_the_pre_session_cook
     assert!(reply.body.contains("\"allowEval\":false"));
     assert!(!reply.body.contains("hx-headers"), "no session, no token");
     assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_own_login_form_autofocuses_the_login_input_only() {
+    let fixture = Fixture::new();
+    let reply = get_with(&fixture.router(), "/login", &[]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        input_tag(&reply.body, "login").contains(" autofocus"),
+        "{}",
+        reply.body
+    );
+    assert!(!input_tag(&reply.body, "password").contains("autofocus"));
+    assert_eq!(reply.body.matches("autofocus").count(), 1);
 }
 
 #[tokio::test]
@@ -201,6 +224,15 @@ async fn pages_own_wrong_password_unknown_login_and_inactive_user_give_one_answe
             SecurityEventKind::LoginRejectedInactive
         ]
     );
+}
+
+#[tokio::test]
+async fn pages_own_failed_login_form_has_no_autofocus() {
+    let fixture = Fixture::new();
+    let reply = login(&fixture, "nobody", WRONG_FIELD).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
+    assert!(reply.body.contains("name=\"login\""), "the form again");
+    assert!(!reply.body.contains("autofocus"), "{}", reply.body);
 }
 
 #[tokio::test]

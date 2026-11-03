@@ -471,6 +471,7 @@ Buttons:
 - A danger button has the ground `--color-surface`, the text `--color-error-fg`, and the border `--color-error-edge`.
 - A form has at most one primary button.
 - A danger action that the system cannot undo, for example an archive, stands inside a `details` element. Its `summary` names the action and is a target of `--target`. The `summary` shows the icon `tree-collapsed` or `tree-expanded` for the closed or the open state. The danger button inside names the object, for example the machine code.
+- A page can hold more than one danger disclosure. The notice of each disclosure has an id that is unique in the page, and its danger button names that id in `aria-describedby`. ADR-0110 gives the form of the id.
 - A disabled button has the attribute `disabled`, the ground `--color-sunken`, the text `--color-text-muted`, and the border `--color-border`.
 - Every button shows a word. An icon in a button stands next to the word.
 

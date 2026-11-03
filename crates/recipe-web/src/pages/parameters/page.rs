@@ -15,11 +15,12 @@ use serde::Deserialize;
 use super::form_view::{DefinitionTexts, GridTexts, ParameterFormView, Place, Shown, grid_of};
 use super::grid::GridView;
 use super::path_parameter;
-use super::reply::{Ctx, Target, load, version_text};
+use super::reply::{Ctx, Target, load, parameter_title, version_text};
 use super::summary::{ParameterPage, RemoveView, SummaryView};
 use super::translations::{RowSource, TranslationsBlock, translation_rows};
 use crate::error::{FormErrors, WebError};
 use crate::layout::{Layout, NavTarget};
+use crate::pages::hrefs::parameter_href;
 use crate::pages::path_values::query_values;
 use crate::pages::render::render;
 use crate::pages::request::PageRequest;
@@ -144,7 +145,7 @@ pub(crate) async fn parameter_page(ctx: Ctx<'_>) -> Result<Response, WebError> {
     let (form, values) = form_or_grid(ctx, &view).await?;
     let editable = form.is_some();
     let t = ctx.texts();
-    let title = t.with_arg("parameter-title", "tag", &view.parameter.tag);
+    let title = parameter_title(ctx, &view.parameter.tag);
     let layout = Layout::for_session(t, ctx.request, title, Some(NavTarget::Recipes))?;
     let page = ParameterPage {
         layout,
@@ -161,18 +162,18 @@ pub(crate) async fn parameter_page(ctx: Ctx<'_>) -> Result<Response, WebError> {
 }
 
 /// Return the address of the parameter page of `ctx`.
-fn parameter_href(ctx: Ctx<'_>, view: &ParameterView) -> String {
-    format!(
-        "{}/parameters/{}",
-        ctx.target.version_href(),
-        view.parameter.key
+fn page_href(ctx: Ctx<'_>, view: &ParameterView) -> String {
+    parameter_href(
+        &ctx.target.reference,
+        ctx.target.number,
+        &view.parameter.key,
     )
 }
 
 /// Build the translation rows of the stored parameter (ADR-0043 (f)).
 fn translations_of(ctx: Ctx<'_>, view: &ParameterView, editable: bool) -> TranslationsBlock {
     let source = RowSource {
-        parameter_href: parameter_href(ctx, view),
+        parameter_href: page_href(ctx, view),
         csrf_token: ctx.request.csrf_token(),
         row_version: view.detail.row_version.to_string(),
         editable,
@@ -189,7 +190,7 @@ fn translations_of(ctx: Ctx<'_>, view: &ParameterView, editable: bool) -> Transl
 /// Build the form of the removal of the stored parameter (ADR-0040 (c) and (f)).
 fn remove_of(ctx: Ctx<'_>, view: &ParameterView) -> RemoveView {
     RemoveView {
-        action: format!("{}/delete", parameter_href(ctx, view)),
+        action: format!("{}/delete", page_href(ctx, view)),
         tag: view.parameter.tag.to_string(),
         csrf_token: ctx.request.csrf_token(),
         row_version: view.detail.row_version.to_string(),

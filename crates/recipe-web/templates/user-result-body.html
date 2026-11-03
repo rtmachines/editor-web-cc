@@ -1,4 +1,4 @@
 {% import "components/alert.html" as alerts -%}
-{% if let Some(password) = password %}<p>{% if technical %}{{ t.get("user-password-label-technical") }}{% else %}{{ t.get("user-password-label") }}{% endif %}: <code class="data" id="one-time-password">{{ password }}</code></p>
+{% if let Some(password) = password %}<p>{% if technical %}{{ t.get("user-password-label-technical") }}{% else %}{{ t.get("user-password-label") }}{% endif %} <code class="data" id="one-time-password">{{ password }}</code></p>
 {% if technical %}{{ alerts::notice("info", t.get("user-password-technical")) }}{% else %}{{ alerts::notice("info", t.get("user-password-once")) }}{% endif %}
 {% endif %}<p><a class="target-link" href="/users/{{ login }}">{{ t.get("user-back-link") }}</a></p>

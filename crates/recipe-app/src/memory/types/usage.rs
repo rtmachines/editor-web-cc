@@ -87,6 +87,7 @@ fn row_of(
         number: version.number,
         status: version.status,
         tag: parameter.tag.clone(),
+        key: parameter.key,
         parameter_type: parameter.plc_type,
     })
 }

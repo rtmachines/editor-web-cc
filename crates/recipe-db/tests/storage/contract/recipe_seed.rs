@@ -169,13 +169,18 @@ pub async fn read_recipe(h: &dyn Harness, id: RecipeId) -> Option<Recipe> {
     tx.recipes().recipe_by_id(id).await.unwrap()
 }
 
+/// The key of the parameter number `n` (`parameter` gives a parameter this key).
+pub fn parameter_key(n: u128) -> ParameterKey {
+    ParameterKey::from(Uuid::from_u128(
+        PARAMETER_KEY_OFFSET.checked_add(n).unwrap(),
+    ))
+}
+
 /// A parameter of the type `DINT` in the unit `U1`. The number `n` sets the identifiers.
 pub fn parameter(plant: &Plant, n: u128, tag: &str) -> StoredParameter {
     StoredParameter {
         id: ParameterId::from(Uuid::from_u128(PARAMETER_ID_OFFSET.checked_add(n).unwrap())),
-        key: ParameterKey::from(Uuid::from_u128(
-            PARAMETER_KEY_OFFSET.checked_add(n).unwrap(),
-        )),
+        key: parameter_key(n),
         unit: plant.unit,
         tag: ParameterTag::parse(tag).unwrap(),
         name_en: Text::parse("Name").unwrap(),

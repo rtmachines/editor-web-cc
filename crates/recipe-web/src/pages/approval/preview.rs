@@ -20,6 +20,7 @@ use crate::error::{FieldReason, FormErrors, WebError};
 use crate::i18n::Bundles;
 use crate::layout::{Layout, NavTarget};
 use crate::pages::diff_view::{DiffLinks, DiffView, kind as read_kind};
+use crate::pages::hrefs::version_href;
 use crate::pages::path_values::{Page, page as read_page, positive_number, query_values};
 use crate::pages::render::render;
 use crate::pages::request::PageRequest;
@@ -194,8 +195,6 @@ struct ApprovePage<'a> {
 struct Addresses {
     /// The address of the version, for example `/recipes/R-500/versions/2`.
     base: String,
-    /// The address of the versions of the recipe.
-    versions: String,
     /// The address of the preview without a query.
     path: String,
 }
@@ -203,12 +202,10 @@ struct Addresses {
 impl Addresses {
     /// Build the addresses of the draft of `preview`.
     fn of(preview: &ApprovalPreview) -> Self {
-        let versions = format!("/recipes/{}/versions", preview.recipe.reference());
-        let base = format!("{versions}/{}", preview.number);
+        let base = version_href(preview.recipe.reference(), preview.number);
         Self {
             path: format!("{base}/approve"),
             base,
-            versions,
         }
     }
 }
@@ -299,7 +296,7 @@ impl<'a> ApprovePage<'a> {
         let links = DiffLinks {
             path: &addresses.path,
             keep: &keep,
-            versions: &addresses.versions,
+            reference: preview.recipe.reference(),
             old: preview.retired,
             new: preview.number,
         };

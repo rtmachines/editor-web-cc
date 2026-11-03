@@ -5,8 +5,8 @@
 //! and the fonts, and each sheet has its own block for the forced-colors mode.
 
 use super::css::Rule;
-use super::rules::{assert_classes_listed_and_used, rules_of, value_of};
-use super::{APP_CSS, COMPONENTS_CSS, app_sheet, components_sheet};
+use super::rules::{assert_classes_listed_and_used, classes_in, rules_of, value_of};
+use super::{APP_CSS, COMPONENTS_CSS, app_sheet, components_sheet, sheet};
 
 /// The media condition of the forced-colors blocks.
 const FORCED_COLORS: &str = "(forced-colors: active)";
@@ -16,8 +16,7 @@ const MAX_SHEET_LINES: usize = 800;
 
 /// The class names of the components that the templates use. `components.css` lists them in its
 /// first comment and holds at least one rule for each.
-const COMPONENT_CLASSES: [&str; 34] = [
-    "panel",
+const COMPONENT_CLASSES: [&str; 33] = [
     "table-wrap",
     "num",
     "badge",
@@ -54,12 +53,11 @@ const COMPONENT_CLASSES: [&str; 34] = [
 ];
 
 /// The selectors that the forced-colors block of `components.css` gives a `ButtonBorder` border.
-const COMPONENT_FORCED: [&str; 9] = [
+const COMPONENT_FORCED: [&str; 8] = [
     "th",
     ".badge",
     ".alert",
     ".toast",
-    ".panel",
     ".empty",
     ".table-wrap",
     ".tree-node",
@@ -70,8 +68,7 @@ const COMPONENT_FORCED: [&str; 9] = [
 const APP_FORCED: [&str; 5] = [".topbar", "main form", ".btn", "input", "select"];
 
 /// The selectors that only `components.css` names at the top level.
-const COMPONENT_ONLY: [&str; 20] = [
-    ".panel",
+const COMPONENT_ONLY: [&str; 19] = [
     ".table-wrap",
     "table",
     "caption",
@@ -164,7 +161,7 @@ const COMPONENT_EXPECTED: &[(&str, &str, &str)] = &[
     (".toast", "background", "var(--color-topbar)"),
     (".toast", "color", "var(--color-on-action)"),
     (".toast .icon", "color", "var(--color-success-bg)"),
-    // The tree, the empty state, and the panel (sections 10.8, 10.10, 6).
+    // The tree and the empty state (sections 10.8 and 10.10).
     (".tree-group[hidden]", "display", "none"),
     (
         ".tree-node[aria-expanded=\"true\"] [data-icon=\"tree-collapsed\"]",
@@ -184,7 +181,6 @@ const COMPONENT_EXPECTED: &[(&str, &str, &str)] = &[
     ),
     (".empty", "padding", "var(--space-7)"),
     (".empty", "background", "var(--color-surface)"),
-    (".panel", "border", "var(--edge) solid var(--color-border)"),
     (".empty", "border", "var(--edge) solid var(--color-border)"),
     // The tree row, the group, and the path of a unit (design D9, ADR-0037 c).
     (".tree-row", "display", "flex"),
@@ -398,4 +394,25 @@ fn components_a_summary_is_a_target_that_shows_one_of_the_two_chevrons() {
 #[test]
 fn components_the_first_comment_lists_every_class_and_each_class_has_a_rule() {
     assert_classes_listed_and_used(COMPONENTS_CSS, &components_sheet(), &COMPONENT_CLASSES);
+}
+
+#[test]
+fn components_no_rule_of_either_sheet_names_the_panel_class() {
+    // No template uses `.panel`, so no rule of either sheet may name it (design D8).
+    for rule in sheet() {
+        for selector in &rule.selectors {
+            let classes = classes_in(selector);
+            assert!(!classes.iter().any(|class| class == "panel"), "{selector}");
+        }
+    }
+}
+
+#[test]
+fn components_app_css_has_one_rule_for_input_and_select() {
+    let app = app_sheet();
+    let pairs = app
+        .iter()
+        .filter(|rule| rule.selectors == ["input", "select"])
+        .count();
+    assert_eq!(pairs, 1, "app.css needs one `input, select` rule");
 }

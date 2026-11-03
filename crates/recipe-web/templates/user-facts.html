@@ -1,0 +1,19 @@
+{% import "components/badge.html" as badges -%}
+<dl id="user-facts"{% if v.oob %} hx-swap-oob="true"{% endif %}>
+<dt>{{ t.get("user-label-login") }}</dt>
+<dd class="data">{{ v.login }}</dd>
+<dt>{{ t.get("user-label-role") }}</dt>
+<dd>{{ v.role }}</dd>
+<dt>{{ t.get("user-label-status") }}</dt>
+<dd>{{ badges::user(v.active, v.status) }}</dd>
+{% if v.must_change %}<dt>{{ t.get("user-label-password") }}</dt>
+<dd>{{ t.get("users-must-change-yes") }}</dd>
+{% endif %}<dt>{{ t.get("user-label-created") }}</dt>
+<dd class="data">{{ v.created }}</dd>
+{% if let Some(when) = v.deactivated %}<dt>{{ t.get("user-label-deactivated") }}</dt>
+<dd class="data">{{ when }}</dd>
+{% endif %}<dt>{{ t.get("user-label-failures") }}</dt>
+<dd id="failures">{{ v.failures }}</dd>
+<dt>{{ t.get("user-label-last-failure") }}</dt>
+<dd id="last-failure">{% if let Some(when) = v.last_failure %}<span class="data">{{ when }}</span>{% else %}{{ t.get("user-never") }}{% endif %}</dd>
+</dl>

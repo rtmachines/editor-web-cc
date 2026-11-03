@@ -33,7 +33,7 @@ async fn types_define_creates_the_struct_and_redirects_to_its_page() {
     let list = get_as(&world, &world.operator, NEW, &[]).await;
     let row = row_of(&list.body, "href=\"/machines/M7/types/ST_Press?rev=1\"");
     assert!(
-        row.ends_with("<td class=\"num\">1</td><td class=\"num\">2</td><td>latest</td>"),
+        row.ends_with("<td class=\"num\">1</td><td class=\"num\">2</td><td>Latest</td>"),
         "{row}"
     );
 }
@@ -63,7 +63,7 @@ async fn types_define_skips_a_row_with_an_empty_name_and_an_empty_type() {
     let list = get_as(&world, &world.engineer, "/machines/M3/types", &[]).await;
     let row = row_of(&list.body, "href=\"/machines/M3/types/ST_Zone?rev=1\"");
     assert!(
-        row.ends_with("<td class=\"num\">1</td><td class=\"num\">1</td><td>latest</td>"),
+        row.ends_with("<td class=\"num\">1</td><td class=\"num\">1</td><td>Latest</td>"),
         "ST_Zone@1 has one member: {row}"
     );
 }
@@ -91,12 +91,12 @@ async fn types_define_a_revision_redirects_to_the_new_revision() {
     let list = get_as(&world, &world.operator, NEW, &[]).await;
     let third = row_of(&list.body, "href=\"/machines/M7/types/ST_Zone?rev=3\"");
     assert!(
-        third.ends_with("<td class=\"num\">3</td><td class=\"num\">3</td><td>latest</td>"),
+        third.ends_with("<td class=\"num\">3</td><td class=\"num\">3</td><td>Latest</td>"),
         "{third}"
     );
     let second = row_of(&list.body, "href=\"/machines/M7/types/ST_Zone?rev=2\"");
     assert!(
-        second.ends_with("<td></td>"),
+        second.ends_with("<td>Superseded</td>"),
         "no longer the latest: {second}"
     );
 }
@@ -268,7 +268,7 @@ async fn types_define_a_revision_with_a_member_of_its_own_struct_gives_422_e_plt
     assert_eq!(world.fixture.snapshot(), before, "no revision is created");
     let list = get_as(&world, &world.operator, NEW, &[]).await;
     let latest = row_of(&list.body, "href=\"/machines/M7/types/ST_Zone?rev=2\"");
-    assert!(latest.ends_with("<td>latest</td>"), "{latest}");
+    assert!(latest.ends_with("<td>Latest</td>"), "{latest}");
     assert!(!list.body.contains("ST_Zone?rev=3"), "{}", list.body);
 }
 

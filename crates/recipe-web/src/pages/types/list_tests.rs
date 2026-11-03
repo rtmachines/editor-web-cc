@@ -9,26 +9,27 @@ use crate::test_support::plant::{HTMX_CONTENT, POLISH, world};
 const LIST: &str = "/machines/M7/types";
 
 #[tokio::test]
-async fn types_list_shows_one_row_for_each_struct_revision_with_the_latest_word() {
+async fn types_list_shows_one_row_for_each_struct_revision_with_the_latest_or_superseded_word() {
     let world = world();
     let reply = get_as(&world, &world.operator, LIST, &[]).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let latest = row_of(&reply.body, "href=\"/machines/M7/types/ST_Zone?rev=2\"");
     assert_eq!(
         latest,
-        "<tr><td class=\"data\"><a href=\"/machines/M7/types/ST_Zone?rev=2\">ST_Zone</a></td><td class=\"num\">2</td><td class=\"num\">2</td><td>latest</td>"
+        "<tr><td class=\"data\"><a href=\"/machines/M7/types/ST_Zone?rev=2\">ST_Zone</a></td><td class=\"num\">2</td><td class=\"num\">2</td><td>Latest</td>"
     );
     let first = row_of(&reply.body, "href=\"/machines/M7/types/ST_Zone?rev=1\"");
     assert_eq!(
         first,
-        "<tr><td class=\"data\"><a href=\"/machines/M7/types/ST_Zone?rev=1\">ST_Zone</a></td><td class=\"num\">1</td><td class=\"num\">1</td><td></td>"
+        "<tr><td class=\"data\"><a href=\"/machines/M7/types/ST_Zone?rev=1\">ST_Zone</a></td><td class=\"num\">1</td><td class=\"num\">1</td><td>Superseded</td>"
     );
     let line = row_of(&reply.body, "href=\"/machines/M7/types/ST_Line?rev=1\"");
     assert!(
-        line.ends_with("<td class=\"num\">1</td><td>latest</td>"),
+        line.ends_with("<td class=\"num\">1</td><td>Latest</td>"),
         "{line}"
     );
-    assert_eq!(reply.body.matches("<td>latest</td>").count(), 2);
+    assert_eq!(reply.body.matches("<td>Latest</td>").count(), 2);
+    assert_eq!(reply.body.matches("<td>Superseded</td>").count(), 1);
 }
 
 #[tokio::test]
@@ -132,7 +133,8 @@ async fn types_list_in_polish_uses_the_polish_words() {
     let reply = get_in(&world, &world.engineer, LIST, POLISH).await;
     let body = &reply.body;
     assert!(body.contains("<h1>Typy UDT maszyny M7</h1>"), "{body}");
-    assert!(body.contains("<td>najnowsza</td>"), "{body}");
+    assert!(body.contains("<td>Najnowsza</td>"), "{body}");
+    assert!(body.contains("<td>Zastąpiona</td>"), "{body}");
     assert!(body.contains(">Nowy typ UDT</a>"), "{body}");
     assert!(body.contains("<th scope=\"col\">Rewizja</th>"), "{body}");
 }

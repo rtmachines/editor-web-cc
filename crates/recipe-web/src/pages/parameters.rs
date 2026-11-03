@@ -59,6 +59,8 @@ fn path_parameter(
 #[cfg(test)]
 mod fields_tests;
 #[cfg(test)]
+mod grid_jump_tests;
+#[cfg(test)]
 mod grid_tests;
 #[cfg(test)]
 mod nested_group_tests;

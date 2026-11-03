@@ -1,49 +1,15 @@
 {% extends "base.html" %}
-{% import "components/badge.html" as badges %}
+{% import "components/icons.html" as icons %}
+{% import "components/alert.html" as alerts %}
 {% block content %}
-<h1>{{ t.get("user-title") }}: <span class="data">{{ login }}</span></h1>
-<dl>
-<dt>{{ t.get("user-label-login") }}</dt>
-<dd class="data">{{ login }}</dd>
-<dt>{{ t.get("user-label-role") }}</dt>
-<dd>{{ role }}</dd>
-<dt>{{ t.get("user-label-status") }}</dt>
-<dd>{{ badges::user(active, status) }}</dd>
-{% if must_change %}<dt>{{ t.get("user-label-password") }}</dt>
-<dd>{{ t.get("users-must-change-yes") }}</dd>
-{% endif %}<dt>{{ t.get("user-label-created") }}</dt>
-<dd class="data">{{ created }}</dd>
-{% if let Some(when) = deactivated %}<dt>{{ t.get("user-label-deactivated") }}</dt>
-<dd class="data">{{ when }}</dd>
-{% endif %}<dt>{{ t.get("user-label-failures") }}</dt>
-<dd id="failures">{{ failures }}</dd>
-<dt>{{ t.get("user-label-last-failure") }}</dt>
-<dd id="last-failure">{% if let Some(when) = last_failure %}<span class="data">{{ when }}</span>{% else %}{{ t.get("user-never") }}{% endif %}</dd>
-</dl>
+<h1>{{ t.get("user-heading-label") }} <span class="data">{{ v.login }}</span></h1>
+{% include "user-facts.html" %}
 <div id="user-result"></div>
-{% if can_set_role %}<form method="post" action="/users/{{ login }}/role" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-<div class="field"><label for="role">{{ t.get("user-role-label") }}</label>
-<select id="role" name="role">{% for option in roles %}<option value="{{ option.value }}"{% if option.selected %} selected{% endif %}>{{ option.label }}</option>{% endfor %}</select></div>
-<p class="actions"><button type="submit">{{ t.get("user-role-submit") }}</button></p>
-</form>
-{% endif %}<div class="actions">
-<form method="post" action="/users/{{ login }}/deactivate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-<button type="submit" class="btn-danger">{{ t.get("user-deactivate-submit") }}</button>
-</form>
-<form method="post" action="/users/{{ login }}/activate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-<button type="submit">{{ t.get("user-activate-submit") }}</button>
-</form>
-<form method="post" action="/users/{{ login }}/reset-password" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-<button type="submit">{{ t.get("user-reset-submit") }}</button>
-</form>
-<form method="post" action="/users/{{ login }}/unlock" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
-<input type="hidden" name="csrf_token" value="{{ layout.csrf_token }}">
-<button type="submit">{{ t.get("user-unlock-submit") }}</button>
-</form>
-</div>
+{% include "user-actions.html" %}
+<details class="danger"><summary>{{ icons::tree_collapsed() }}{{ icons::tree_expanded() }}<span>{{ t.get("user-reset-summary") }}</span></summary><form method="post" action="/users/{{ v.login }}/reset-password" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+<input type="hidden" name="csrf_token" value="{{ v.csrf_token }}">
+<div id="danger-notice-reset">{{ alerts::notice("warning", t.get("user-reset-warning")) }}</div>
+<button type="submit" class="btn-danger" aria-describedby="danger-notice-reset">{{ t.with_arg("user-reset-submit", "login", v.login) }}</button>
+</form></details>
 <p><a class="target-link" href="/users">{{ t.get("users-title") }}</a></p>
 {% endblock %}

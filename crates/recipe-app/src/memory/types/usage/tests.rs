@@ -11,7 +11,7 @@ use recipe_domain::plant::{
 use recipe_domain::recipe::{ParameterTag, StoredParameter, VersionStatus};
 
 use crate::error::StorageError;
-use crate::memory::fixtures::{Fixture, mid, parameter_on, reference, tid, uid, vid};
+use crate::memory::fixtures::{Fixture, mid, parameter_on, pkey, reference, tid, uid, vid};
 use crate::ports::{Isolation, TypeCatalog, TypeUsageRow};
 
 /// The platform of the machine of the fixture.
@@ -76,6 +76,7 @@ async fn a_cycle_of_two_structs_ends_and_lists_the_parameter_once() {
         number: 1,
         status: VersionStatus::Draft,
         tag: ParameterTag::parse("CYCLE").unwrap(),
+        key: pkey(1),
         parameter_type: tid(902),
     };
     assert_eq!(rows, [expected]);

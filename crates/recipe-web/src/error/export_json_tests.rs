@@ -337,7 +337,7 @@ const SENTENCES: [(&str, &str, &str); 6] = [
     ),
     (
         "exp-003",
-        "Wersja 2 receptury R-100 jest szkicem albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.",
+        "Wersja 2 receptury R-100 jest wersją roboczą albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.",
         "Version 2 of recipe R-100 is a draft or was discarded. Only approved and retired versions can be exported.",
     ),
     (

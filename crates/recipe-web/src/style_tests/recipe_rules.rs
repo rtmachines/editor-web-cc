@@ -31,7 +31,6 @@ const STATE_CLASSES: [(&str, &str); 2] = [
 /// The expected declarations: selector, property, value.
 const EXPECTED: &[(&str, &str, &str)] = &[
     // The grid is a table that scrolls sideways in its frame at a narrow width (section 10.4).
-    (".leaf-grid tbody[hidden]", "display", "none"),
     (
         ".leaf-grid th[scope=\"row\"]",
         "background",
@@ -222,6 +221,16 @@ fn recipe_rules_the_outdated_and_the_deleted_badge_differ_so_the_color_is_not_th
             .map(|row| row[3].clone())
     };
     assert_ne!(icon(STATE_CLASSES[0].0), icon(STATE_CLASSES[1].0));
+}
+
+#[test]
+fn recipe_rules_no_leaf_grid_rule_names_a_hidden_tbody() {
+    // The global `[hidden]` rule of app.css hides a hidden tbody of the grid (design D8).
+    assert!(rules_of(&components_sheet(), ".leaf-grid tbody[hidden]", None).is_empty());
+    assert_eq!(
+        value_of(&app_sheet(), "[hidden]", "display").as_deref(),
+        Some("none")
+    );
 }
 
 #[test]

@@ -384,6 +384,33 @@ pub(crate) fn assert_no_user_text_in_hx_attributes(body: &str, needle: &str) {
     }
 }
 
+/// Return every value of the attribute `name` in the markup, in document order.
+pub(crate) fn attribute_values<'a>(body: &'a str, name: &str) -> Vec<&'a str> {
+    let needle = format!(" {name}=\"");
+    body.split(needle.as_str())
+        .skip(1)
+        .filter_map(|part| part.split('"').next())
+        .collect()
+}
+
+/// Assert design D10 and ADR-0110 (g): each `id` of the page occurs once, and each token of each
+/// `aria-describedby` names an `id` of the page.
+pub(crate) fn assert_ids_unique_and_references_resolve(body: &str) {
+    let ids = attribute_values(body, "id");
+    let mut seen = std::collections::HashSet::new();
+    for id in &ids {
+        assert!(seen.insert(*id), "id {id} occurs twice: {body}");
+    }
+    for value in attribute_values(body, "aria-describedby") {
+        for token in value.split_whitespace() {
+            assert!(
+                seen.contains(token),
+                "aria-describedby names {token}, which is no id of the page: {body}"
+            );
+        }
+    }
+}
+
 /// A tag of a page: its lower case name, whether it closes, and its attributes in source order.
 ///
 /// The type solves one problem: `StartTag` drops an attribute with no value, such as `required`,

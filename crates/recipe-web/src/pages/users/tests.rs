@@ -5,29 +5,31 @@ use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::identity::Role;
 
 use crate::pages::test_helpers::{
-    assert_clean_html, assert_no_user_text_in_hx_attributes, set_cookie_of,
+    assert_clean_html, assert_ids_unique_and_references_resolve,
+    assert_no_user_text_in_hx_attributes, attribute_values, set_cookie_of, tags,
 };
 use crate::test_support::{
-    Fixture, Reply, TestSession, capture_logs, get_with, post_fields, post_pre_session,
+    Fixture, Reply, TestSession, capture_logs, deactivate_user, get_with, post_fields,
+    post_pre_session,
 };
 
-const PASSWORD: &str = "correct horse battery";
-const WRONG_FIELD: &str = "wrong+password+here";
-const HTMX: (&str, &str) = ("hx-request", "true");
-const ENGLISH: (&str, &str) = ("cookie", "recipe_lang=en");
-const ONE_TIME_ALPHABET: &str = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+pub(super) const PASSWORD: &str = "correct horse battery";
+pub(super) const WRONG_FIELD: &str = "wrong+password+here";
+pub(super) const HTMX: (&str, &str) = ("hx-request", "true");
+pub(super) const ENGLISH: (&str, &str) = ("cookie", "recipe_lang=en");
+pub(super) const ONE_TIME_ALPHABET: &str = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
 // --- Helpers ------------------------------------------------------------------------------------
 
 /// A fixture with the Administrator `user1` and the Operator `user2` with a password.
-fn world() -> (Fixture, TestSession) {
+pub(super) fn world() -> (Fixture, TestSession) {
     let fixture = Fixture::new();
     let admin = fixture.seed_session(1, Role::Administrator, false);
     fixture.seed_account(2, Role::Operator, PASSWORD, false);
     (fixture, admin)
 }
 
-async fn get_as(fixture: &Fixture, session: &TestSession, path: &str) -> Reply {
+pub(super) async fn get_as(fixture: &Fixture, session: &TestSession, path: &str) -> Reply {
     get_with(
         &fixture.router(),
         path,
@@ -36,7 +38,7 @@ async fn get_as(fixture: &Fixture, session: &TestSession, path: &str) -> Reply {
     .await
 }
 
-async fn post_as(
+pub(super) async fn post_as(
     fixture: &Fixture,
     session: &TestSession,
     path: &str,
@@ -48,24 +50,24 @@ async fn post_as(
 }
 
 /// Return the status of `GET /me` with the cookie. `200` means that the session lives.
-async fn me_status(fixture: &Fixture, cookie: &str) -> StatusCode {
+pub(super) async fn me_status(fixture: &Fixture, cookie: &str) -> StatusCode {
     get_with(&fixture.router(), "/me", &[("cookie", cookie)])
         .await
         .status
 }
 
 /// Return the one-time password that a page shows.
-fn one_time_password(body: &str) -> String {
+pub(super) fn one_time_password(body: &str) -> String {
     let (_before, rest) = body.split_once("id=\"one-time-password\">").unwrap();
     rest.split('<').next().unwrap().to_owned()
 }
 
-fn assert_one_time_password_shape(password: &str) {
+pub(super) fn assert_one_time_password_shape(password: &str) {
     assert_eq!(password.len(), 20, "{password}");
     assert!(password.chars().all(|c| ONE_TIME_ALPHABET.contains(c)));
 }
 
-async fn login(fixture: &Fixture, login: &str, password_field: &str) -> Reply {
+pub(super) async fn login(fixture: &Fixture, login: &str, password_field: &str) -> Reply {
     let fields = format!("login={login}&password={password_field}");
     post_pre_session(fixture, "/login", &fields, &[]).await
 }
@@ -117,12 +119,86 @@ async fn pages_users_list_maps_the_one_based_page_to_the_page_of_the_use_case() 
     let second = get_as(&fixture, &admin, "/users?page=2").await;
     assert_eq!(second.status, StatusCode::OK, "{}", second.body);
     assert!(!second.body.contains("href=\"/users/user1\""));
-    assert!(second.body.contains("No user found."), "{}", second.body);
+    assert!(
+        second.body.contains("Page 2 is after the last page."),
+        "{}",
+        second.body
+    );
     assert!(
         second.body.contains("href=\"/users?page=1\""),
         "{}",
         second.body
     );
+}
+
+/// The Administrator `user1` and 100 more users: one more than the page size of the list.
+fn world_with_two_pages() -> (Fixture, TestSession) {
+    let (fixture, admin) = world();
+    for n in 3..=101 {
+        fixture.seed_session(n, Role::Operator, false);
+    }
+    (fixture, admin)
+}
+
+/// Spec "Pager of the user list", scenario "Second page of users".
+#[tokio::test]
+async fn pages_users_list_second_page_holds_the_pager_with_the_current_page() {
+    let (fixture, admin) = world_with_two_pages();
+    let first = get_as(&fixture, &admin, "/users").await;
+    assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+    assert!(
+        first
+            .body
+            .contains("<nav class=\"pager\" aria-label=\"Pages\">")
+    );
+    assert!(first.body.contains("href=\"/users?page=2\">Next page</a>"));
+    assert!(!first.body.contains("Previous page"), "{}", first.body);
+    let second = get_as(&fixture, &admin, "/users?page=2").await;
+    assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+    assert!(
+        second
+            .body
+            .contains("<nav class=\"pager\" aria-label=\"Pages\">")
+    );
+    assert!(
+        second
+            .body
+            .contains("<span class=\"pager-current\" aria-current=\"page\">Page 2</span>"),
+        "{}",
+        second.body
+    );
+    assert!(
+        second
+            .body
+            .contains("href=\"/users?page=1\">Previous page</a>"),
+        "{}",
+        second.body
+    );
+    assert!(!second.body.contains("Next page"), "{}", second.body);
+    assert_clean_html(&second.body);
+}
+
+/// Spec "Pager of the user list", scenario "Page after the last page".
+#[tokio::test]
+async fn pages_users_list_after_the_last_page_shows_the_notice_and_the_first_page_link() {
+    let (fixture, admin) = world_with_two_pages();
+    let reply = get_as(&fixture, &admin, "/users?page=99").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        reply.body.contains("Page 99 is after the last page."),
+        "{}",
+        reply.body
+    );
+    assert!(
+        reply
+            .body
+            .contains("<a class=\"target-link\" href=\"/users?page=1\">Go to the first page</a>"),
+        "{}",
+        reply.body
+    );
+    assert!(!reply.body.contains("class=\"pager\""), "{}", reply.body);
+    assert!(!reply.body.contains("No user found."), "{}", reply.body);
+    assert_clean_html(&reply.body);
 }
 
 #[tokio::test]
@@ -189,6 +265,50 @@ async fn pages_users_new_form_has_login_role_and_the_token() {
     let hidden = format!("name=\"csrf_token\" value=\"{}\"", admin.csrf);
     assert!(reply.body.contains(&hidden));
     assert_clean_html(&reply.body);
+}
+
+/// Assert that the page has the select `role` with a label and `aria-required="true"`.
+///
+/// Return the values of the options that carry the attribute `selected`.
+pub(super) fn role_select_selected_values(body: &str) -> Vec<String> {
+    assert!(body.contains("<label for=\"role\">"), "label of role");
+    let found = tags(body);
+    let is_role_select = |tag: &crate::pages::test_helpers::Tag| {
+        tag.name == "select" && tag.attribute("name") == Some("role")
+    };
+    let start = found
+        .iter()
+        .position(|tag| is_role_select(tag) && !tag.closing)
+        .expect("the page holds the select role");
+    let select = &found[start];
+    assert_eq!(select.attribute("id"), Some("role"));
+    assert_eq!(select.attribute("aria-required"), Some("true"));
+    found
+        .iter()
+        .skip(start)
+        .take_while(|tag| !(tag.name == "select" && tag.closing))
+        .filter(|tag| tag.name == "option" && tag.attributes.iter().any(|(n, _v)| n == "selected"))
+        .filter_map(|tag| tag.attribute("value").map(str::to_owned))
+        .collect()
+}
+
+#[tokio::test]
+async fn pages_users_new_form_role_select_has_a_label_and_aria_required() {
+    let (fixture, admin) = world();
+    let reply = get_as(&fixture, &admin, "/users/new").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(role_select_selected_values(&reply.body), ["operator"]);
+}
+
+#[tokio::test]
+async fn pages_users_detail_role_select_has_a_label_and_selects_the_current_role() {
+    let (fixture, admin) = world();
+    let reply = get_as(&fixture, &admin, "/users/user2").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(role_select_selected_values(&reply.body), ["operator"]);
+    let own = get_as(&fixture, &admin, "/users/user1").await;
+    assert_eq!(own.status, StatusCode::OK, "{}", own.body);
+    assert_eq!(role_select_selected_values(&own.body), ["administrator"]);
 }
 
 #[tokio::test]
@@ -295,7 +415,7 @@ async fn pages_users_create_is_forbidden_for_an_operator() {
 // --- GET /users/{login} -------------------------------------------------------------------------
 
 #[tokio::test]
-async fn pages_users_detail_shows_the_user_the_throttle_state_and_five_forms() {
+async fn pages_users_detail_of_an_active_user_shows_the_throttle_state_and_its_forms() {
     let (fixture, admin) = world();
     for _attempt in 0..2 {
         let failed = login(&fixture, "user2", WRONG_FIELD).await;
@@ -315,12 +435,92 @@ async fn pages_users_detail_shows_the_user_the_throttle_state_and_five_forms() {
     );
     assert!(reply.body.contains("Operator"));
     assert!(reply.body.contains("Active"));
-    for action in ["role", "deactivate", "activate", "reset-password", "unlock"] {
+    for action in ["role", "deactivate", "reset-password", "unlock"] {
         let form = format!("action=\"/users/user2/{action}\"");
         assert!(reply.body.contains(&form), "{action}");
     }
+    assert!(!reply.body.contains("action=\"/users/user2/activate\""));
     assert!(reply.body.contains("hx-sync=\"closest form:drop\""));
     assert_no_user_text_in_hx_attributes(&reply.body, "user2");
+    assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_users_detail_of_an_active_user_without_failures_has_no_activate_and_no_unlock() {
+    let (fixture, admin) = world();
+    let reply = get_as(&fixture, &admin, "/users/user2").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("action=\"/users/user2/deactivate\""));
+    assert!(!reply.body.contains("action=\"/users/user2/activate\""));
+    assert!(!reply.body.contains("action=\"/users/user2/unlock\""));
+    assert_eq!(reply.body.matches("id=\"user-status-submit\"").count(), 1);
+    assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_users_detail_of_an_inactive_user_with_failures_has_activate_and_unlock_only() {
+    let (fixture, admin) = world();
+    for _attempt in 0..2 {
+        let failed = login(&fixture, "user2", WRONG_FIELD).await;
+        assert_eq!(failed.status, StatusCode::UNAUTHORIZED);
+    }
+    deactivate_user(&fixture, "user2").await;
+    let reply = get_as(&fixture, &admin, "/users/user2").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("<dd id=\"failures\">2</dd>"));
+    assert!(reply.body.contains("action=\"/users/user2/activate\""));
+    assert!(reply.body.contains("action=\"/users/user2/unlock\""));
+    assert!(!reply.body.contains("action=\"/users/user2/deactivate\""));
+    assert_eq!(reply.body.matches("id=\"user-status-submit\"").count(), 1);
+    assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_users_detail_has_unique_ids_and_resolved_aria_describedby_references() {
+    let (fixture, admin) = world();
+    for _attempt in 0..2 {
+        let failed = login(&fixture, "user2", WRONG_FIELD).await;
+        assert_eq!(failed.status, StatusCode::UNAUTHORIZED);
+    }
+    let reply = get_as(&fixture, &admin, "/users/user2").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    for action in ["role", "deactivate", "reset-password", "unlock"] {
+        let form = format!("action=\"/users/user2/{action}\"");
+        assert!(reply.body.contains(&form), "{action}");
+    }
+    assert_eq!(reply.body.matches("id=\"danger-notice-reset\"").count(), 1);
+    assert!(!attribute_values(&reply.body, "aria-describedby").is_empty());
+    assert_ids_unique_and_references_resolve(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_users_detail_of_an_inactive_user_has_unique_ids_and_resolved_references() {
+    let (fixture, admin) = world();
+    deactivate_user(&fixture, "user2").await;
+    let reply = get_as(&fixture, &admin, "/users/user2").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_ids_unique_and_references_resolve(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_users_detail_puts_the_reset_form_in_a_closed_danger_disclosure() {
+    let (fixture, admin) = world();
+    let reply = get_as(&fixture, &admin, "/users/user2").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let action = "action=\"/users/user2/reset-password\"";
+    let form_at = reply.body.find(action).unwrap();
+    let before = &reply.body[..form_at];
+    let details_at = before.rfind("<details").unwrap();
+    assert!(reply.body[details_at..].starts_with("<details class=\"danger\">"));
+    assert!(reply.body[form_at..].contains("</form></details>"));
+    assert_eq!(reply.body.matches("id=\"danger-notice-reset\"").count(), 1);
+    let button_at = reply
+        .body
+        .find("aria-describedby=\"danger-notice-reset\"")
+        .unwrap();
+    let button = &reply.body[button_at..];
+    let label = button.split_once('>').unwrap().1.split('<').next().unwrap();
+    assert!(label.contains("user2"), "{label}");
     assert_clean_html(&reply.body);
 }
 
@@ -561,60 +761,11 @@ async fn pages_users_unlock_clears_the_login_delay_with_the_client_address() {
     assert_eq!(free.status, StatusCode::SEE_OTHER, "{}", free.body);
 }
 
-#[tokio::test]
-async fn pages_users_commands_are_forbidden_for_an_operator() {
-    let (fixture, _admin) = world();
-    fixture.seed_account(3, Role::Operator, PASSWORD, false);
-    let operator = fixture.session_of(3);
-    for (action, body) in [
-        ("role", "role=operator"),
-        ("deactivate", ""),
-        ("activate", ""),
-        ("reset-password", ""),
-        ("unlock", ""),
-    ] {
-        let path = format!("/users/user2/{action}");
-        let reply = post_as(&fixture, &operator, &path, body, true).await;
-        assert_eq!(
-            reply.status,
-            StatusCode::FORBIDDEN,
-            "{path}: {}",
-            reply.body
-        );
-        assert!(reply.body.contains("E-WEB-002"), "{path}");
+/// Assert that every `id` of the answer occurs once.
+pub(super) fn assert_unique_ids(body: &str) {
+    let mut seen = std::collections::HashSet::new();
+    for part in body.split(" id=\"").skip(1) {
+        let id = part.split('"').next().unwrap();
+        assert!(seen.insert(id.to_owned()), "id {id} occurs twice: {body}");
     }
-    assert_eq!(
-        me_status(&fixture, &fixture.session_of(2).cookie).await,
-        StatusCode::OK
-    );
-}
-
-#[tokio::test]
-async fn pages_users_a_command_without_the_csrf_token_changes_nothing() {
-    let (fixture, admin) = world();
-    let request = crate::test_support::request(axum::http::Method::POST, "/users/user2/deactivate")
-        .header("cookie", admin.cookie.as_str())
-        .header("sec-fetch-site", "same-origin")
-        .header("content-type", "application/x-www-form-urlencoded")
-        .body(axum::body::Body::empty())
-        .unwrap();
-    let reply = crate::test_support::call(&fixture.router(), request).await;
-    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
-    assert!(reply.body.contains("E-WEB-007"));
-    let login = login(&fixture, "user2", "correct+horse+battery").await;
-    assert_eq!(login.status, StatusCode::SEE_OTHER, "user2 is still active");
-}
-
-#[tokio::test]
-async fn pages_users_pages_follow_the_language_cookie() {
-    let (fixture, admin) = world();
-    let polish = get_with(&fixture.router(), "/users", &[("cookie", &admin.cookie)]).await;
-    assert!(
-        polish
-            .body
-            .contains("<title>Użytkownicy · Edytor receptur</title>"),
-        "{}",
-        polish.body
-    );
-    assert!(polish.body.contains("<html lang=\"pl\">"));
 }

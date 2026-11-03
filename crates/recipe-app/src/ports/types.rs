@@ -2,14 +2,14 @@
 
 use async_trait::async_trait;
 use recipe_domain::plant::{MachineId, PlcType, PlcTypeId, PlcTypeRecord, TypeName};
-use recipe_domain::recipe::{ParameterTag, ReferenceNumber, VersionStatus};
+use recipe_domain::recipe::{ParameterKey, ParameterTag, ReferenceNumber, VersionStatus};
 
 use super::RowImage;
 use crate::error::StorageError;
 
 /// One parameter that uses a type revision (`TypeCatalog::type_usage`).
 ///
-/// The type solves one problem: both adapters must return the same five columns of a row.
+/// The type solves one problem: both adapters must return the same six columns of a row.
 /// A struct names them, so the adapters agree on their order and their meaning.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeUsageRow {
@@ -21,6 +21,8 @@ pub struct TypeUsageRow {
     pub status: VersionStatus,
     /// The tag of the parameter.
     pub tag: ParameterTag,
+    /// The key of the parameter. The key names the parameter in the URL of its page.
+    pub key: ParameterKey,
     /// The type of the parameter. It holds the revision that the request names.
     pub parameter_type: PlcTypeId,
 }

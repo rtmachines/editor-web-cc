@@ -5,9 +5,12 @@
 
 use axum::http::StatusCode;
 
-use super::test_kit::{parameter_path, position};
+use super::test_kit::{parameter_path, position, seed_translation};
 use crate::pages::recipes::test_world::recipe_world;
-use crate::pages::test_helpers::{assert_clean_html, assert_error, field_value};
+use crate::pages::test_helpers::{
+    assert_clean_html, assert_error, assert_ids_unique_and_references_resolve, attribute_values,
+    field_value,
+};
 use crate::test_support::plant::{ENGLISH, POLISH, main_of};
 use crate::test_support::recipes::{HOLD_KEY, LINE_A_KEY, SPEED_KEY};
 
@@ -19,7 +22,10 @@ async fn parameters_page_of_a_draft_holds_one_edit_form_with_the_stored_value() 
         .await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let main = main_of(&reply.body);
-    assert!(main.contains("Parameter SPEED</h1>"), "{main}");
+    assert!(
+        main.contains("Parameter SPEED, version 3 of recipe R-100</h1>"),
+        "{main}"
+    );
     assert!(main.contains("<div id=\"parameter-summary\">"), "{main}");
     let tag = format!(
         "<form id=\"parameter-edit-form\" method=\"post\" action=\"{}\" hx-boost=\"true\" hx-target=\"#parameter-summary\" hx-swap=\"innerHTML show:none focus-scroll:true\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">",
@@ -103,4 +109,105 @@ async fn parameters_page_marks_the_english_definition_texts_with_lang_en_in_both
             );
         }
     }
+}
+
+/// Return the text between `<h1 ...>` and `</h1>`.
+fn h1_of(body: &str) -> &str {
+    let start = body.split("<h1").nth(1).unwrap();
+    let text = start.split_once('>').unwrap().1;
+    text.split("</h1>").next().unwrap()
+}
+
+/// Return the text of the `<title>` element.
+fn title_of(body: &str) -> &str {
+    body.split("<title>")
+        .nth(1)
+        .unwrap()
+        .split("</title>")
+        .next()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn parameters_page_heading_and_title_name_the_tag_the_recipe_and_the_version() {
+    let world = recipe_world();
+    let expected = [
+        (POLISH, "Parametr SPEED, wersja 3 receptury R-100"),
+        (ENGLISH, "Parameter SPEED, version 3 of recipe R-100"),
+    ];
+    for (header, heading) in expected {
+        let reply = world
+            .get(&world.engineer, &parameter_path(SPEED_KEY, ""), &[header])
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert_eq!(h1_of(&reply.body), heading, "{}", reply.body);
+        assert!(title_of(&reply.body).starts_with(heading), "{}", reply.body);
+        assert!(!reply.body.contains("parameter-title"), "{}", reply.body);
+    }
+}
+
+#[tokio::test]
+async fn parameters_page_names_each_danger_notice_in_its_delete_button() {
+    let world = recipe_world();
+    seed_translation(&world, SPEED_KEY, ("de", 1)).await;
+    seed_translation(&world, SPEED_KEY, ("fr", 2)).await;
+    let reply = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.body.as_str();
+    let pairs = [
+        (
+            "<button type=\"submit\" id=\"parameter-delete-submit\" class=\"btn-danger\" aria-describedby=\"danger-notice-parameter\">",
+            "<div id=\"danger-notice-parameter\">",
+        ),
+        (
+            "<button type=\"submit\" id=\"translation-de-delete\" class=\"btn-danger\" aria-describedby=\"danger-notice-translation-de\">",
+            "<div id=\"danger-notice-translation-de\">",
+        ),
+        (
+            "<button type=\"submit\" id=\"translation-fr-delete\" class=\"btn-danger\" aria-describedby=\"danger-notice-translation-fr\">",
+            "<div id=\"danger-notice-translation-fr\">",
+        ),
+    ];
+    for (button, notice) in pairs {
+        assert!(body.contains(button), "{button}: {body}");
+        assert!(body.contains(notice), "{notice}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn parameters_page_has_unique_ids_and_resolved_aria_describedby_references() {
+    let world = recipe_world();
+    seed_translation(&world, SPEED_KEY, ("de", 1)).await;
+    seed_translation(&world, SPEED_KEY, ("fr", 2)).await;
+    let reply = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.body.as_str();
+    for id in [
+        "danger-notice-translation-de",
+        "danger-notice-translation-fr",
+    ] {
+        let attribute = format!(" id=\"{id}\"");
+        assert_eq!(body.matches(attribute.as_str()).count(), 1, "{id}: {body}");
+    }
+    assert!(!attribute_values(body, "aria-describedby").is_empty());
+    assert_ids_unique_and_references_resolve(body);
+}
+
+#[tokio::test]
+async fn parameters_page_repeats_the_version_link_right_after_the_heading() {
+    let world = recipe_world();
+    let reply = world
+        .get(&world.engineer, &parameter_path(SPEED_KEY, ""), &[ENGLISH])
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let link = "<p><a class=\"target-link\" href=\"/recipes/R-100/versions/3\">Version 3 of recipe R-100</a></p>";
+    let after_heading = reply.body.split_once("</h1>").unwrap().1;
+    assert!(
+        after_heading.starts_with(&format!("\n{link}\n")),
+        "{after_heading}"
+    );
 }

@@ -263,7 +263,7 @@ const D8_SAMPLES: &[Sample] = &[
         "discard-button",
         &[("number", "2")],
         "Discard draft 2",
-        "Odrzuć szkic 2",
+        "Odrzuć wersję roboczą 2",
     ),
     (
         "toast-version-approved-retired",

@@ -209,7 +209,7 @@ fn components_status_badge_words_are_the_bundle_words() {
         .iter()
         .map(|kind| text(Lang::En, &format!("status-{kind}")))
         .collect();
-    assert_eq!(pl, ["Szkic", "Zatwierdzona", "Wycofana"]);
+    assert_eq!(pl, ["Wersja robocza", "Zatwierdzona", "Wycofana"]);
     assert_eq!(en, ["Draft", "Approved", "Retired"]);
 }
 

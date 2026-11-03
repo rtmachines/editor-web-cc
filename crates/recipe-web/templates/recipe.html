@@ -7,7 +7,8 @@
 {% block content %}
 {{ headings::h1(layout, layout.title) }}
 {% if deleted %}<div class="actions">{{ badges::deleted_large(t.get("status-deleted")) }}</div>
-{% endif %}<dl>
+{% endif %}<p><a class="target-link" href="/recipes">{{ t.get("recipes-title") }}</a></p>
+<dl>
 <dt>{{ t.get("recipe-machine") }}</dt>
 <dd><a class="target-link" href="{{ machine_href }}">{{ machine }}</a></dd>
 <dt>{{ t.get("recipe-name") }}</dt>

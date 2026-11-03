@@ -125,3 +125,36 @@ test.describe('Enter in a value input saves the value', () => {
     });
   }
 });
+
+// Design D7: a plain link after the grid brings the save button back into view at 320 px.
+test.describe('jump link after the leaf grid', () => {
+  /** How long the page may take to start a request after the click, in ms. */
+  const NO_REQUEST_WINDOW_MS = 500;
+  /** Waits for the link only briefly, so a missing link fails fast. */
+  const LINK_TIMEOUT_MS = 2000;
+
+  for (const subject of ['struct', 'array'] as const) {
+    test(`the link after the ${subject} grid shows the save button at 320px without a request`, async ({
+      page,
+      seed,
+    }) => {
+      await page.setViewportSize({ width: 320, height: VIEWPORT_HEIGHT });
+      await page.goto(seed[subject].path);
+
+      const link = page.locator('a[href="#parameter-save-submit"]');
+      await expect(link, 'the page has the jump link after the grid').toHaveCount(1, {
+        timeout: LINK_TIMEOUT_MS,
+      });
+      await link.scrollIntoViewIfNeeded();
+      const save = page.locator('#parameter-save-submit');
+      await expect(save, 'the save button is above the grid, out of view').not.toBeInViewport();
+
+      const requests: string[] = [];
+      page.on('request', (request) => requests.push(`${request.method()} ${request.url()}`));
+      await link.click();
+      await expect(save, 'the link brings the save button into view').toBeInViewport();
+      await page.waitForTimeout(NO_REQUEST_WINDOW_MS);
+      expect(requests, 'the link sends no request').toEqual([]);
+    });
+  }
+});

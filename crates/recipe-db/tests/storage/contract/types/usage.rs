@@ -12,7 +12,8 @@ use recipe_domain::recipe::{
 
 use crate::contract::harness::{Harness, begin, commit};
 use crate::contract::recipe_seed::{
-    Plant, approve, create_recipe, create_version, parameter, recipe_id, retire, seed, version_id,
+    Plant, approve, create_recipe, create_version, parameter, parameter_key, recipe_id, retire,
+    seed, version_id,
 };
 use crate::contract::seed::{
     array_record, ensure, insert, machine, machine_id, seed_type, struct_record, type_id,
@@ -120,9 +121,11 @@ async fn usage(
 }
 
 /// The row that a case expects.
+///
+/// The pair `(n, tag)` names the seeded parameter. The number `n` sets its key.
 fn row(
     (reference, number, status): (&str, u32, VersionStatus),
-    tag: &str,
+    (n, tag): (u128, &str),
     parameter_type: PlcTypeId,
 ) -> TypeUsageRow {
     TypeUsageRow {
@@ -130,6 +133,7 @@ fn row(
         number,
         status,
         tag: ParameterTag::parse(tag).unwrap(),
+        key: parameter_key(n),
         parameter_type,
     }
 }
@@ -148,9 +152,12 @@ async fn a_member_and_the_type_itself_are_uses(h: &dyn Harness) {
 
     assert_eq!(
         of_zone,
-        [row(draft, "HOLDER", holder), row(draft, "ZONE", zone)]
+        [
+            row(draft, (100, "HOLDER"), holder),
+            row(draft, (101, "ZONE"), zone)
+        ]
     );
-    assert_eq!(of_holder, [row(draft, "HOLDER", holder)]);
+    assert_eq!(of_holder, [row(draft, (100, "HOLDER"), holder)]);
     assert!(of_another_machine.is_empty(), "{of_another_machine:?}");
 }
 
@@ -168,7 +175,10 @@ async fn an_array_element_is_a_use_and_an_unused_revision_has_none(h: &dyn Harne
 
     assert_eq!(
         used,
-        [row(draft, "LINE", line), row(draft, "ZONES", zones_array)]
+        [
+            row(draft, (100, "LINE"), line),
+            row(draft, (101, "ZONES"), zones_array)
+        ]
     );
     assert!(unused.is_empty(), "{unused:?}");
 }
@@ -185,8 +195,8 @@ async fn the_use_goes_through_two_levels(h: &dyn Harness) {
     let of_zone = usage(h, w.machine.id(), zone, WHOLE).await;
     let of_line = usage(h, w.machine.id(), line, WHOLE).await;
 
-    assert_eq!(of_zone, [row(draft, "SITE", site)]);
-    assert_eq!(of_line, [row(draft, "SITE", site)]);
+    assert_eq!(of_zone, [row(draft, (100, "SITE"), site)]);
+    assert_eq!(of_line, [row(draft, (100, "SITE"), site)]);
 }
 
 async fn a_parameter_that_holds_the_revision_twice_gives_one_row(h: &dyn Harness) {
@@ -205,7 +215,10 @@ async fn a_parameter_that_holds_the_revision_twice_gives_one_row(h: &dyn Harness
 
     assert_eq!(
         rows,
-        [row(draft, "DIAMOND", diamond), row(draft, "PAIR", pair)]
+        [
+            row(draft, (401, "DIAMOND"), diamond),
+            row(draft, (400, "PAIR"), pair)
+        ]
     );
 }
 
@@ -237,7 +250,7 @@ async fn a_deleted_recipe_and_a_discarded_draft_give_no_row(h: &dyn Harness) {
 
     assert_eq!(
         rows,
-        [row(("R-400", 1, VersionStatus::Draft), "LIVE", zone)]
+        [row(("R-400", 1, VersionStatus::Draft), (400, "LIVE"), zone)]
     );
 }
 
@@ -257,9 +270,9 @@ async fn the_three_states_are_listed_with_the_newest_version_first(h: &dyn Harne
     assert_eq!(
         rows,
         [
-            row(("R-500", 3, VersionStatus::Draft), "KEEP", zone),
-            row(("R-500", 2, VersionStatus::Approved), "KEEP", zone),
-            row(("R-500", 1, VersionStatus::Retired), "KEEP", zone),
+            row(("R-500", 3, VersionStatus::Draft), (500, "KEEP"), zone),
+            row(("R-500", 2, VersionStatus::Approved), (500, "KEEP"), zone),
+            row(("R-500", 1, VersionStatus::Retired), (500, "KEEP"), zone),
         ]
     );
 }
@@ -279,11 +292,11 @@ async fn rows_come_in_the_byte_order_of_the_reference_and_the_tag(h: &dyn Harnes
     assert_eq!(
         rows,
         [
-            row(draft("R-10"), "A1", zone),
-            row(draft("R-10"), "A_1", zone),
-            row(draft("R-10"), "B", zone),
-            row(draft("R-9"), "B", zone),
-            row(draft("R_1"), "A", zone),
+            row(draft("R-10"), (604, "A1"), zone),
+            row(draft("R-10"), (603, "A_1"), zone),
+            row(draft("R-10"), (602, "B"), zone),
+            row(draft("R-9"), (601, "B"), zone),
+            row(draft("R_1"), (605, "A"), zone),
         ]
     );
 }

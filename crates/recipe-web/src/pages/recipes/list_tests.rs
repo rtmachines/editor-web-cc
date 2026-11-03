@@ -5,11 +5,12 @@
 
 use axum::http::StatusCode;
 use recipe_domain::audit::SecurityEventKind;
+use recipe_domain::identity::Role;
 
 use super::test_world::{recipe_world, seed_many_recipes};
 use crate::pages::test_helpers::{assert_clean_html, assert_error};
-use crate::test_support::icon_tag;
 use crate::test_support::plant::main_of;
+use crate::test_support::{Fixture, get_page, icon_tag};
 
 /// The row of `R-100`: the link, the name, the machine, the approved version, and the draft.
 const R100_LINK: &str = "<a href=\"/recipes/R-100\">R-100</a>";
@@ -279,4 +280,62 @@ async fn recipes_list_bad_page_gives_e_web_008() {
         "E-WEB-008",
         "page",
     );
+}
+
+/// The sentence of an empty list that a filter caused.
+const EMPTY_FILTERED: &str = "<p class=\"empty\">No recipe matches the filter.</p>";
+/// The sentence of an empty list that no filter caused.
+const EMPTY_PLAIN: &str = "<p class=\"empty\">No recipe to show.</p>";
+/// The link that clears the filter.
+const CLEAR_LINK: &str = "<a class=\"target-link\" href=\"/recipes\">Clear the filter</a>";
+
+#[tokio::test]
+async fn recipes_list_with_a_filter_and_no_match_shows_the_filtered_sentence_and_a_clear_link() {
+    let world = recipe_world();
+    let reply = world.get_en(&world.operator, "/recipes?q=ZZZ").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(main.contains(EMPTY_FILTERED), "{main}");
+    assert!(!main.contains(EMPTY_PLAIN), "{main}");
+    let link = main.find(CLEAR_LINK).unwrap();
+    let table_end = main.find("</table>").unwrap();
+    assert!(
+        table_end < link,
+        "the link stands outside the table: {main}"
+    );
+}
+
+/// Send `GET path` in English as a user of `role` in a store with no recipe.
+async fn get_without_recipe(role: Role, path: &str) -> String {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(2, role, false);
+    let reply = get_page(&fixture, Some(&session), "en", path).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    reply.body
+}
+
+#[tokio::test]
+async fn recipes_list_with_empty_filter_values_and_no_recipe_shows_the_plain_sentence() {
+    let body = get_without_recipe(Role::Operator, "/recipes?q=&machine=&status=").await;
+    let main = main_of(&body);
+    assert!(main.contains(EMPTY_PLAIN), "{main}");
+    assert!(!main.contains("Clear the filter"), "{main}");
+    assert!(!main.contains(EMPTY_FILTERED), "{main}");
+}
+
+#[tokio::test]
+async fn recipes_list_with_no_filter_and_no_recipe_shows_the_plain_sentence() {
+    let body = get_without_recipe(Role::Operator, "/recipes").await;
+    let main = main_of(&body);
+    assert!(main.contains(EMPTY_PLAIN), "{main}");
+    assert!(!main.contains("Clear the filter"), "{main}");
+    assert!(!main.contains(EMPTY_FILTERED), "{main}");
+}
+
+#[tokio::test]
+async fn recipes_list_show_deleted_with_no_deleted_recipe_counts_as_filtered() {
+    let body = get_without_recipe(Role::Administrator, "/recipes?show_deleted=1").await;
+    let main = main_of(&body);
+    assert!(main.contains(EMPTY_FILTERED), "{main}");
+    assert!(main.contains(CLEAR_LINK), "{main}");
 }

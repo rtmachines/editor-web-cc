@@ -9,6 +9,7 @@
 {% block content %}
 {{ headings::h1_toast(layout, layout.title) }}
 <div class="actions">{{ badges::status_large(kind, word) }}{% if deleted %}{{ badges::deleted_large(t.get("status-deleted")) }}{% endif %}</div>
+<p><a class="target-link" href="{{ recipe_href }}">{{ recipe_text }}</a></p>
 <dl>
 <dt>{{ t.get("version-change-note") }}</dt>
 <dd>{{ note }}</dd>

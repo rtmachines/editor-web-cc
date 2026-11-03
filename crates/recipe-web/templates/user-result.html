@@ -1,2 +1,2 @@
 {% import "components/toast.html" as toasts -%}
-{% include "user-result-body.html" %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(message) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>
+{% include "user-result-body.html" %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(message) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% if let Some(v) = refresh %}{% include "user-facts.html" %}{% include "user-actions.html" %}{% endif %}{% if let Some(v) = facts %}{% include "user-facts.html" %}{% endif %}

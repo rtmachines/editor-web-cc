@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "components/table.html" as tables %}
 {% import "components/badge.html" as badges %}
+{% import "components/pager.html" as pagers %}
 {% block content %}
 <h1>{{ t.get("users-title") }}</h1>
 <form method="get" action="/users" class="actions">
@@ -9,13 +10,13 @@
 <button type="submit">{{ t.get("users-search-submit") }}</button>
 </form>
 <p class="actions"><a class="target-link" href="/users/new">{{ t.get("users-new-link") }}</a></p>
-{% call tables::frame("users-caption", t.get("users-title")) %}<thead><tr>{{ tables::head(t.get("users-col-login")) }}{{ tables::head(t.get("users-col-role")) }}{{ tables::head(t.get("users-col-status")) }}{{ tables::head(t.get("users-col-password")) }}</tr></thead>
+{% if after_end %}{{ pagers::after_end(t, current, first_url) }}
+{% else %}{% call tables::frame("users-caption", t.get("users-title")) %}<thead><tr>{{ tables::head(t.get("users-col-login")) }}{{ tables::head(t.get("users-col-role")) }}{{ tables::head(t.get("users-col-status")) }}{{ tables::head(t.get("users-col-password")) }}</tr></thead>
 {% if rows.is_empty() %}{{ tables::empty_row(4, t.get("users-empty")) }}{% else %}<tbody>
 {% for row in rows %}<tr><td class="data"><a href="/users/{{ row.login }}">{{ row.login }}</a></td><td>{{ row.role }}</td><td>{{ badges::user(row.active, row.status) }}</td><td>{% if row.must_change %}{{ t.get("users-must-change-yes") }}{% endif %}</td></tr>
 {% endfor %}</tbody>
-{% endif %}{% endcall %}
-{% if prev_url.is_some() || next_url.is_some() %}<p class="actions">{% if let Some(url) = prev_url %}<a class="target-link" href="{{ url }}">{{ t.get("users-prev") }}</a>{% endif %}
-{% if let Some(url) = next_url %}<a class="target-link" href="{{ url }}">{{ t.get("users-next") }}</a>{% endif %}</p>
+{% endif %}{% endcall %}{% endif %}
+{% if !previous_url.is_empty() || !next_url.is_empty() %}{{ pagers::pager(t, previous_url, next_url, current) }}
 {% endif %}
 <p><a class="target-link" href="/me">{{ t.get("me-title") }}</a></p>
 {% endblock %}

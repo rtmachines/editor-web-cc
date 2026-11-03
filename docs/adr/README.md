@@ -58,7 +58,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0046](0046-permission-check-of-a-form-route.md) | Permission check of a form route | Accepted. Amended by ADR-0049 (the five action routes read the body first) | 2026-10-15 |
 | [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted. Amended by ADR-0049 (m) (scroll padding of a toast of several lines). Amended by ADR-0057 (no empty `#toast` on the answer of the backstop panic layer) | 2026-10-15 |
 | [0048](0048-browser-regression-suite-with-playwright.md) | Browser regression suite with Playwright | Accepted | 2026-10-16 |
-| [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer) | 2026-10-16 |
+| [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer). Amended by ADR-0110 (item (f): several danger actions on one page, a unique notice id for each) | 2026-10-16 |
 | [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted. Amended by ADR-0108 (item (l): the compare links of the version page) | 2026-10-16 |
 | [0051](0051-audit-history-and-security-event-views.md) | Audit, history, and security event views | Accepted | 2026-10-16 |
 | [0052](0052-export-link-on-the-version-page.md) | Export link on the version page | Accepted | 2026-10-22 |
@@ -119,6 +119,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0107](0107-wal-check-ignores-backup-end-time.md) | The WAL check ignores the file backup_end_time | Accepted | 2026-10-31 |
 | [0108](0108-version-page-and-type-page-additions.md) | Additions to the version page and the type page | Accepted | 2026-11-01 |
 | [0109](0109-export-api-for-transfer-clients.md) | Export API for transfer clients with HTTP Basic | Accepted | 2026-11-02 |
+| [0110](0110-several-danger-actions-on-one-page.md) | Several danger actions on one page | Accepted | 2026-11-02 |
 
 ## Decision map
 
@@ -130,7 +131,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Pages of machines, units, and UDT types | 0037 + 0038 (datalist of a new revision) + 0041 (error lists) |
 | Permission check and fields of a form route | 0013 + 0041 + 0046 (form query with a purpose, check before the fields) + 0049 (l) (the five action routes read the body first) |
 | Pages of recipes, versions, and parameters | 0039 (value form, leaf grid) + 0040 (POST routes) + 0041 (error lists) + 0043 (lists, deleted recipe, translations, rebind, conflict) + 0044 (rebind bound) |
-| Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) + 0052 (export link in the action area) |
+| Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) + 0052 (export link in the action area) + 0110 (several danger actions) |
 | Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags). Also 0108 (compare form and links of the version page) |
 | Audit, history, and security event pages | 0051 (read port, cursor, filters, scope of A20, formatted JSON) |
 | Isolation of queries | 0042 + 0050 (approval preview and diff in one snapshot) |

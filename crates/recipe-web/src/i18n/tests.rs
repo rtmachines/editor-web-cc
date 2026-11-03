@@ -305,7 +305,7 @@ const DESIGN_TEXTS: &[(&str, &str, &str)] = &[
         "No recipe to show.",
         "Brak receptur do pokazania.",
     ),
-    ("status-draft", "Draft", "Szkic"),
+    ("status-draft", "Draft", "Wersja robocza"),
     ("status-approved", "Approved", "Zatwierdzona"),
     ("status-retired", "Retired", "Wycofana"),
     ("form-required", "required", "wymagane"),
@@ -511,7 +511,7 @@ const ERROR_VALUE_TEXTS: [(&str, &str, &str); 92] = [
     (
         "operation-discard-draft",
         "Discard draft",
-        "Odrzucenie szkicu",
+        "Odrzucenie wersji roboczej",
     ),
     (
         "operation-approve-version",
@@ -739,4 +739,49 @@ fn i18n_texts_of_the_error_value_tables_exist_in_both_bundles() {
             "{key} in pl"
         );
     }
+}
+
+#[test]
+fn i18n_pl_bundle_names_a_draft_wersja_robocza_and_never_szkic() {
+    let source = pl_sources().to_lowercase();
+    assert!(!source.contains("szkic"), "a pl value still holds szkic");
+    let bundles = Bundles::load().unwrap();
+    assert_eq!(
+        bundles.message(Lang::Pl, "status-draft", None).as_deref(),
+        Some("Wersja robocza")
+    );
+}
+
+#[test]
+fn i18n_pl_bundle_names_a_tag_tag_and_never_znacznik() {
+    let source = pl_sources().to_lowercase();
+    assert!(
+        !source.contains("znacznik"),
+        "a pl value still holds znacznik"
+    );
+    let bundles = Bundles::load().unwrap();
+    for id in ["field-tag", "parameters-col-tag", "diff-field-tag"] {
+        assert_eq!(
+            bundles.message(Lang::Pl, id, None).as_deref(),
+            Some("Tag"),
+            "{id}"
+        );
+    }
+}
+
+#[test]
+fn i18n_user_reset_warning_does_not_point_to_a_next_page() {
+    for source in [EN_SOURCE, PL_SOURCE] {
+        let text = ftl_message(source, "user-reset-warning").unwrap_or_default();
+        assert!(!text.contains("next page"), "{text}");
+        assert!(!text.contains("następnej stronie"), "{text}");
+    }
+}
+
+#[test]
+fn i18n_user_reset_warning_says_the_password_appears_only_once() {
+    let en = ftl_message(EN_SOURCE, "user-reset-warning").unwrap_or_default();
+    let pl = ftl_message(PL_SOURCE, "user-reset-warning").unwrap_or_default();
+    assert!(en.contains("only once"), "{en}");
+    assert!(pl.contains("tylko raz"), "{pl}");
 }

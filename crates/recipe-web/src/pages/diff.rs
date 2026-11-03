@@ -111,7 +111,7 @@ impl<'a> DiffPage<'a> {
         let links = DiffLinks {
             path: &path,
             keep: &[],
-            versions: &base,
+            reference: recipe.reference(),
             old: Some(old),
             new,
         };

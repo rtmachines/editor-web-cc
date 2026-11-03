@@ -81,8 +81,6 @@ users-col-role = Role
 users-col-status = Status
 users-col-password = Password change
 users-must-change-yes = Required
-users-prev = Previous page
-users-next = Next page
 user-status-active = Active
 user-status-inactive = Inactive
 
@@ -97,6 +95,7 @@ user-created = User { $login } is created.
 
 # The user page
 user-title = User
+user-heading-label = User:
 user-label-login = Login
 user-label-role = Role
 user-label-status = Status
@@ -110,13 +109,15 @@ user-role-label = New role
 user-role-submit = Set role
 user-deactivate-submit = Deactivate
 user-activate-submit = Activate
-user-reset-submit = Reset password
+user-reset-summary = Reset the password
+user-reset-warning = The system replaces the password of this user. The new password appears only once.
+user-reset-submit = Reset password for { $login }
 user-unlock-submit = Unlock login
 user-back-link = Back to the user
 
 # The result of a command
-user-password-label = One-time password
-user-password-label-technical = Password
+user-password-label = One-time password:
+user-password-label-technical = Password:
 user-password-once = Write the password down now. The system shows it only once. The user must change it at the first login.
 user-password-technical = Write the password down now. The system shows it only once. This password is the permanent credential of the client.
 user-role-changed = The role of { $login } is now { $role }. All sessions of the user ended.
@@ -141,6 +142,8 @@ readonly-banner = Read-only mode: the free disk space is low or unknown. Changes
 # Recipe list
 recipes-title = Recipes
 recipes-empty = No recipe to show.
+recipes-empty-filtered = No recipe matches the filter.
+recipes-clear-filter = Clear the filter
 
 # States
 status-draft = Draft
@@ -330,6 +333,7 @@ machine-main-unit-hint = The system creates the main unit U1 with this name.
 machine-create-submit = Create machine
 machine-title = Machine { $code }
 machine-types-link = Open the UDT types
+machine-recipes-link = Recipes of this machine
 machine-units-title = Unit tree
 machine-rename-submit = Rename machine
 machine-renamed = Machine { $code } has the new name.
@@ -398,7 +402,8 @@ field-platform-choose = Choose a PLC platform
 list-page-after-end = Page { $page } is after the last page.
 list-first-page = Go to the first page
 
-type-latest = latest
+type-latest = Latest
+type-superseded = Superseded
 udt-new-title = New UDT type
 udt-revision-title = New revision of { $name }
 udt-name-hint = A letter or an underscore first, then letters, digits, and underscores. At most 64 characters.
@@ -612,11 +617,11 @@ parameters-col-tag = Tag
 parameters-col-name = Name
 parameters-col-type = Type
 parameters-col-value = Value
-parameters-col-unit = Unit
+parameters-col-unit = Machine unit
 parameters-col-address = PLC address
 parameters-col-state = State
 parameters-empty = The version has no parameters.
-parameters-value-empty = No value
+parameters-value-empty = Empty text
 parameters-value-composite = Array or struct
 parameters-units-label = Units of the version
 parameters-unit-link = { $path } (parameters: { $count })
@@ -630,9 +635,10 @@ parameter-fields-first = Enter the type and then show the value fields.
 value-type-notice = The type changed. Enter the values of the new type.
 parameter-add-submit = Add parameter
 parameter-added = Parameter { $tag } is added.
-parameter-title = Parameter { $tag }
+parameter-title = Parameter { $tag }, version { $number } of recipe { $reference }
 parameter-key = Key
 parameter-save-submit = Save parameter
+parameter-jump-to-submit = Go to the save or add button
 parameter-saved = Parameter { $tag } is saved.
 parameter-delete-summary = Delete the parameter
 parameter-delete-warning = The system deletes the parameter with its value, its limits, and its translations from this draft.

@@ -10,6 +10,7 @@ use serde::Deserialize;
 use super::{current_nav, named_revision, query_values, revision_href, type_href};
 use crate::error::WebError;
 use crate::layout::Layout;
+use crate::pages::hrefs::{parameter_href, recipe_href, version_href};
 use crate::pages::path_values::{Page, page, path_code_type, revision};
 use crate::pages::render::{page_url, render};
 use crate::pages::{PageRequest, Texts};
@@ -27,15 +28,21 @@ pub(super) struct UsageQuery {
 
 /// One row of the table: a parameter that uses the revision.
 struct UsageRow {
-    /// The reference number of the recipe, as data text. The recipe pages come in step P3.3.
+    /// The reference number of the recipe, as data text.
     reference: String,
+    /// The path of the recipe page.
+    recipe_href: String,
     /// The number of the version.
     number: u32,
+    /// The path of the version page.
+    version_href: String,
     /// The state of the version: `draft`, `approved`, or `retired`. It comes from code.
     kind: &'static str,
     /// The word of the state in the language of the page.
     word: String,
     tag: String,
+    /// The path of the parameter page.
+    parameter_href: String,
     /// The type expression of the type of the parameter.
     type_text: String,
 }
@@ -65,12 +72,16 @@ struct UsagePage<'a> {
 /// Turn a usage line into a row of the table.
 fn usage_row(t: Texts<'_>, line: &TypeUsageLine) -> UsageRow {
     let kind = line.row.status.as_sql();
+    let (reference, number) = (&line.row.reference, line.row.number);
     UsageRow {
-        reference: line.row.reference.to_string(),
-        number: line.row.number,
+        reference: reference.to_string(),
+        recipe_href: recipe_href(reference),
+        number,
+        version_href: version_href(reference, number),
         kind,
         word: t.get(&format!("status-{kind}")),
         tag: line.row.tag.to_string(),
+        parameter_href: parameter_href(reference, number, &line.row.key),
         type_text: line.type_text.clone(),
     }
 }

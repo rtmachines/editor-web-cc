@@ -302,3 +302,23 @@ async fn recipes_rename_of_an_operator_with_a_bad_field_gives_e_web_002_and_no_f
         assert_operator_refused(&world, "/recipes/R-100/rename", body).await;
     }
 }
+
+#[tokio::test]
+async fn recipes_page_repeats_the_recipes_link_right_after_the_state_badge_row() {
+    let world = recipe_world();
+    let reply = world.get_en(&world.admin, "/recipes/R-300").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let link = "<p><a class=\"target-link\" href=\"/recipes\">Recipes</a></p>";
+    let badge_row = main
+        .split_once("<div class=\"actions\">")
+        .unwrap()
+        .1
+        .split_once("</div>\n")
+        .unwrap()
+        .1;
+    assert!(
+        badge_row.starts_with(&format!("{link}\n<dl>")),
+        "{badge_row}"
+    );
+}

@@ -23,6 +23,7 @@ use super::summary::ParameterPage;
 use crate::error::{FieldError, FormErrors, WebError, leaf_of};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::draft_reply::{conflict, domain_line, refused};
+use crate::pages::hrefs::version_href;
 use crate::pages::render::render;
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
@@ -50,7 +51,7 @@ pub(crate) struct Target {
 impl Target {
     /// Return the address of the version page, for example `/recipes/R-100/versions/3`.
     pub(crate) fn version_href(&self) -> String {
-        format!("/recipes/{}/versions/{}", self.reference, self.number)
+        version_href(&self.reference, self.number)
     }
 
     /// Return the command of the definition form of the target (ADR-0046 (b)).
@@ -249,6 +250,16 @@ pub(crate) fn version_text(ctx: Ctx<'_>) -> String {
     ctx.texts().with("version-title", &args)
 }
 
+/// Return the heading and the title of the page of the parameter `tag`, for example
+/// "Parameter SPEED, version 3 of recipe R-100" (design D4).
+pub(crate) fn parameter_title(ctx: Ctx<'_>, tag: impl std::fmt::Display) -> String {
+    let mut args = fluent::FluentArgs::new();
+    args.set("tag", tag.to_string());
+    args.set("number", ctx.target.number);
+    args.set("reference", ctx.target.reference.to_string());
+    ctx.texts().with("parameter-title", &args)
+}
+
 /// Render the boosted form alone (design D7).
 ///
 /// # Errors
@@ -286,7 +297,7 @@ pub(crate) fn form_page(
     let t = ctx.texts();
     let request = ctx.request;
     let title = match form.parameter.as_ref() {
-        Some(parameter) => t.with_arg("parameter-title", "tag", &parameter.tag),
+        Some(parameter) => parameter_title(ctx, &parameter.tag),
         None => t.get("parameter-new-title"),
     };
     let layout = Layout::for_session(t, request, title, Some(NavTarget::Recipes))?;

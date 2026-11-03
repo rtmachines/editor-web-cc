@@ -50,6 +50,7 @@ struct MachinePage<'a> {
     can_archive: bool,
     can_add: bool,
     types_href: String,
+    recipes_href: String,
     add_href: String,
     archive_action: String,
     /// The rename form. It is shown only for a live machine and a role with the permission.
@@ -89,6 +90,7 @@ impl<'a> MachinePage<'a> {
             can_archive: allows(Operation::ArchiveMachine),
             can_add: allows(Operation::AddUnit),
             types_href: format!("/machines/{code}/types"),
+            recipes_href: format!("/recipes?machine={code}"),
             add_href: format!("/machines/{code}/units/new"),
             archive_action: format!("/machines/{code}/archive"),
             form,

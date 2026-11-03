@@ -4,7 +4,7 @@
 {% block content %}
 <h1>{{ t.get("login-title") }}</h1>
 <form method="post" action="/login">
-{{ fields::plain(t, "login", t.get("login-label-login"), "text", true, true, 64, "username") }}
+{{ fields::plain(t, "login", t.get("login-label-login"), "text", true, true, 64, "username", view.is_none()) }}
 {{ fields::plain(t, "password", t.get("login-label-password"), "password", true, false, 128, "current-password") }}
 <input type="hidden" name="csrf_pre" value="{{ nonce }}">
 <p class="actions"><button type="submit" class="btn btn-primary">{{ t.get("login-submit") }}</button></p>
