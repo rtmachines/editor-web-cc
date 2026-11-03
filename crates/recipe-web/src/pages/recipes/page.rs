@@ -46,8 +46,8 @@ impl PageQuery {
 /// The page `recipe.html`.
 ///
 /// The type solves one problem: one template shows a live recipe with its forms and a deleted
-/// recipe without them. The flags are true only for a live recipe and a role that holds the
-/// permission of the command (`Operation::requirement`).
+/// recipe without them. The flags are true only for a live recipe and only when
+/// `PageRequest::may_run` permits the command (role and read-only mode, ADR-0113).
 #[derive(Template)]
 #[template(path = "recipe.html")]
 struct RecipePage<'a> {
@@ -84,11 +84,11 @@ impl<'a> RecipePage<'a> {
         view: &RecipeView,
         page: Page,
     ) -> Result<Self, WebError> {
-        let role = request.auth()?.user().role();
         let recipe = &view.recipe;
         let reference = recipe.reference();
         let live = !recipe.is_deleted();
-        let allows = |operation: Operation| live && operation.requirement().allows(role);
+        let allows =
+            |operation: Operation| Ok::<bool, WebError>(live && request.may_run(operation)?);
         let title = t.with_arg("recipe-title", "reference", reference);
         let layout = Layout::for_session(t, request, title, Some(NavTarget::Recipes))?;
         let machine = &view.machine;
@@ -109,11 +109,11 @@ impl<'a> RecipePage<'a> {
                 layout.csrf_token.clone(),
                 FormErrors::default(),
             )
-            .shown(allows(Operation::RenameRecipe)),
-            new_version_href: allows(Operation::CreateVersion)
+            .shown(allows(Operation::RenameRecipe)?),
+            new_version_href: allows(Operation::CreateVersion)?
                 .then(|| format!("/recipes/{reference}/versions/new")),
             history_href: format!("/recipes/{reference}/history"),
-            delete: allows(Operation::DeleteRecipe).then(|| DeleteAction {
+            delete: allows(Operation::DeleteRecipe)?.then(|| DeleteAction {
                 action: format!("/recipes/{reference}/delete"),
                 button: t.with_arg("delete-recipe-button", "reference", reference),
             }),

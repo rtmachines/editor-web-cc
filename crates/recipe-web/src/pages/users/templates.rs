@@ -1,6 +1,7 @@
 //! The templates of the user administration.
 
 use askama::Template;
+use recipe_app::auth::Operation;
 use recipe_app::identity::UserDetail;
 use recipe_app::ports::UserSummary;
 use recipe_domain::identity::{Login, Role};
@@ -89,6 +90,8 @@ pub(crate) struct UsersPage<'a> {
     after_end: bool,
     /// The address of the first page. The page `after_end` links to it.
     first_url: String,
+    /// True when the user may create a user in the current mode (ADR-0113 (b)).
+    can_create: bool,
 }
 
 /// The links and the position of one page of the user list.
@@ -130,6 +133,7 @@ impl<'a> UsersPage<'a> {
             current: pager.current,
             after_end: pager.after_end,
             first_url: pager.first,
+            can_create: request.may_run(Operation::CreateUser)?,
         })
     }
 }
@@ -144,6 +148,8 @@ pub(super) struct NewUserForm {
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
     errors: FormErrors,
+    /// True when the mode blocks the command. The page then shows a notice (ADR-0113 (d)).
+    blocked: bool,
 }
 
 impl NewUserForm {
@@ -156,6 +162,7 @@ impl NewUserForm {
             login: String::new(),
             oob: false,
             errors: FormErrors::default(),
+            blocked: false,
         }
     }
 
@@ -196,10 +203,14 @@ impl<'a> NewUserPage<'a> {
         request: &PageRequest,
         roles: &[Role],
     ) -> Result<Self, WebError> {
+        let form = NewUserForm {
+            blocked: !request.may_run(Operation::CreateUser)?,
+            ..NewUserForm::new(t, roles, request.csrf_token())
+        };
         Ok(Self {
             layout: Layout::for_session(t, request, t.get("user-new-title"), None)?,
             t,
-            form: NewUserForm::new(t, roles, request.csrf_token()),
+            form,
         })
     }
 }
@@ -250,6 +261,12 @@ pub(crate) struct UserView {
     failures: u32,
     last_failure: Option<String>,
     can_set_role: bool,
+    /// True when the user may activate or deactivate this user in the current mode.
+    can_change_status: bool,
+    /// True when the user may unlock the login in the current mode.
+    can_unlock: bool,
+    /// True when the user may reset the password in the current mode.
+    can_reset: bool,
     roles: Vec<RoleOption>,
     /// The value of the current role of the user.
     selected_role: &'static str,
@@ -286,9 +303,31 @@ impl UserView {
     /// Build the view from the user and the throttle state of the login.
     ///
     /// `oob` is true for the answer of a command and false for the page of the user.
-    pub(super) fn new(t: Texts<'_>, request: &PageRequest, detail: &UserDetail, oob: bool) -> Self {
+    ///
+    /// Each action form needs `PageRequest::may_run` for its command, so the view shows no form
+    /// in read-only mode (ADR-0113 (b)). The page and the answer of a command run the use case
+    /// first, so a session exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-WEB-004` when the request has no session.
+    pub(super) fn new(
+        t: Texts<'_>,
+        request: &PageRequest,
+        detail: &UserDetail,
+        oob: bool,
+    ) -> Result<Self, WebError> {
         let user = &detail.user;
-        Self {
+        let status_operation = if user.is_active {
+            Operation::DeactivateUser
+        } else {
+            Operation::ActivateUser
+        };
+        let can_set_role = user.role.is_person() && request.may_run(Operation::SetUserRole)?;
+        let can_change_status = request.may_run(status_operation)?;
+        let can_unlock = detail.throttle.failures > 0 && request.may_run(Operation::UnlockLogin)?;
+        let can_reset = request.may_run(Operation::ResetPassword)?;
+        Ok(Self {
             login: user.login.to_string(),
             role: t.role(user.role),
             active: user.is_active,
@@ -298,14 +337,17 @@ impl UserView {
             deactivated: user.deactivated_at.as_ref().map(instant),
             failures: detail.throttle.failures,
             last_failure: detail.throttle.last_failure.as_ref().map(instant),
-            can_set_role: user.role.is_person(),
+            can_set_role,
+            can_change_status,
+            can_unlock,
+            can_reset,
             roles: role_options(t, &Role::ALL),
             selected_role: user.role.as_sql(),
             csrf_token: request.csrf_token(),
             oob,
             role_errors: FormErrors::default(),
             role_oob: false,
-        }
+        })
     }
 }
 
@@ -332,7 +374,7 @@ impl<'a> UserPage<'a> {
         Ok(Self {
             layout: Layout::for_session(t, request, t.get("user-title"), None)?,
             t,
-            v: UserView::new(t, request, detail, false),
+            v: UserView::new(t, request, detail, false)?,
         })
     }
 }

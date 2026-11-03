@@ -617,3 +617,59 @@ async fn pages_own_password_change_logs_hold_no_password() {
         assert!(!text.contains(secret), "{secret} in the log");
     }
 }
+
+// --- read-only mode (ADR-0113 (g)) --------------------------------------------------------------
+
+const BLOCKED_NOTICE: &str = "Read-only mode blocks this form.";
+
+#[tokio::test]
+async fn pages_own_password_page_in_read_only_mode_shows_the_notice_and_the_logout_button() {
+    for must_change in [false, true] {
+        let fixture = Fixture::new();
+        let session = fixture.seed_session(1, Role::Operator, must_change);
+        fixture.state.read_only().set(true);
+        let reply = get_with(
+            &fixture.router(),
+            "/me/password",
+            &[("cookie", &session.cookie), ENGLISH],
+        )
+        .await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(reply.body.contains(BLOCKED_NOTICE), "{}", reply.body);
+        assert!(!reply.body.contains("name=\"current_password\""));
+        assert!(!reply.body.contains("action=\"/me/password\""));
+        assert!(reply.body.contains("action=\"/logout\""), "{}", reply.body);
+        assert_clean_html(&reply.body);
+    }
+}
+
+#[tokio::test]
+async fn pages_own_profile_page_in_read_only_mode_has_no_link_to_the_password_form() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Operator, false);
+    let normal = me_with(&fixture, &session.cookie).await;
+    assert!(
+        normal.body.contains("href=\"/me/password\""),
+        "{}",
+        normal.body
+    );
+    fixture.state.read_only().set(true);
+    let reply = me_with(&fixture, &session.cookie).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        !reply.body.contains("href=\"/me/password\""),
+        "{}",
+        reply.body
+    );
+    assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_own_login_form_stays_in_read_only_mode() {
+    let fixture = Fixture::new();
+    fixture.state.read_only().set(true);
+    let reply = get_with(&fixture.router(), "/login", &[ENGLISH]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("name=\"login\""));
+    assert!(reply.body.contains("name=\"password\""));
+}

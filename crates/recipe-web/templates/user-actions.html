@@ -1,6 +1,6 @@
 <div id="user-actions"{% if v.oob %} hx-swap-oob="true"{% endif %}>
-{% if v.can_set_role %}{% include "user-role-form.html" %}{% endif %}<div class="actions">
-{% if v.active %}<form method="post" action="/users/{{ v.login }}/deactivate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+{% if v.can_set_role %}{% include "user-role-form.html" %}{% endif %}{% if v.can_change_status || v.can_unlock %}<div class="actions">
+{% if !v.can_change_status %}{% else if v.active %}<form method="post" action="/users/{{ v.login }}/deactivate" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
 <input type="hidden" name="csrf_token" value="{{ v.csrf_token }}">
 <button type="submit" class="btn-danger" id="user-status-submit">{{ t.get("user-deactivate-submit") }}</button>
 </form>
@@ -8,9 +8,9 @@
 <input type="hidden" name="csrf_token" value="{{ v.csrf_token }}">
 <button type="submit" id="user-status-submit">{{ t.get("user-activate-submit") }}</button>
 </form>
-{% endif %}{% if v.failures > 0 %}<form method="post" action="/users/{{ v.login }}/unlock" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
+{% endif %}{% if v.can_unlock %}<form method="post" action="/users/{{ v.login }}/unlock" hx-boost="true" hx-target="#user-result" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop">
 <input type="hidden" name="csrf_token" value="{{ v.csrf_token }}">
 <button type="submit">{{ t.get("user-unlock-submit") }}</button>
 </form>
-{% endif %}</div>
+{% endif %}</div>{% endif %}
 </div>

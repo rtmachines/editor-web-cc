@@ -75,13 +75,13 @@ const fn current_nav() -> Option<NavTarget> {
     Some(NavTarget::Machines)
 }
 
-/// Return true when the role of the session may define a UDT type.
+/// Return true when the session may define a UDT type in the current mode.
 ///
-/// The pages show a link to the form only then. The use case of the form still checks the
-/// permission (ADR-0013).
+/// The pages show a link to the form only then. In read-only mode `DefineUdt` is blocked, so no
+/// link stands on the page (ADR-0113 (b)). The use case of the form still checks the permission
+/// (ADR-0013).
 fn can_define(request: &PageRequest) -> Result<bool, WebError> {
-    let role = request.auth()?.user().role();
-    Ok(Operation::DefineUdt.requirement().allows(role))
+    request.may_run(Operation::DefineUdt)
 }
 
 /// Return the address of the page of a struct: `/machines/{code}/types/{name}`.

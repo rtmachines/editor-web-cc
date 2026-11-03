@@ -322,3 +322,38 @@ async fn recipes_page_repeats_the_recipes_link_right_after_the_state_badge_row()
         "{badge_row}"
     );
 }
+
+// --- Read-only mode (ADR-0113 (b)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (b): in read-only mode the recipe page has no rename form, no
+/// delete disclosure, and no link to the form of a new version, also for a role that holds the
+/// permissions. The name, the version table, and the history link stay.
+#[tokio::test]
+async fn recipes_page_in_read_only_mode_has_no_rename_delete_or_new_version_control() {
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer] {
+        let reply = world.get_en(session, "/recipes/R-100").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let main = main_of(&reply.body);
+        for forbidden in [
+            "<form",
+            "<details",
+            "<input",
+            "/versions/new",
+            "/rename",
+            "/delete",
+        ] {
+            assert!(!main.contains(forbidden), "{forbidden}: {main}");
+        }
+        assert!(
+            main.contains("<span id=\"recipe-name\">Press recipe</span>"),
+            "{main}"
+        );
+        assert!(main.contains("/recipes/R-100/history"), "{main}");
+        assert!(
+            main.contains("<a href=\"/recipes/R-100/versions/3\">3</a>"),
+            "{main}"
+        );
+    }
+}

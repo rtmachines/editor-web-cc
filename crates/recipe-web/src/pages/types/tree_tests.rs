@@ -424,3 +424,22 @@ async fn types_tree_page_content_answer_holds_the_title_and_the_focused_heading(
     let reply = get_as(&world, &world.operator, path, &HTMX_CONTENT).await;
     assert_content_answer(&reply, "Type ST_Zone@1", path);
 }
+
+/// ADR-0113 (b): in read-only mode no role gets the link to a new revision.
+#[tokio::test]
+async fn types_tree_page_in_read_only_mode_holds_no_link_to_a_new_revision() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer, &world.operator] {
+        let reply = get_as(&world, session, ZONE, &[]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(!reply.body.contains("/types/new"), "{}", reply.body);
+        assert!(
+            reply
+                .body
+                .contains("/machines/M7/types/ST_Zone/usage?rev=2"),
+            "{}",
+            reply.body
+        );
+    }
+}

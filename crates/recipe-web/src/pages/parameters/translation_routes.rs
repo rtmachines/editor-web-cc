@@ -24,6 +24,7 @@ use super::translations::{
     translation_rows,
 };
 use crate::error::{FieldError, FieldReason, WebError};
+use crate::form_text::crlf_to_lf;
 use crate::pages::draft_reply::{conflict, refusal_lines, refused, success, with_change_number};
 use crate::pages::path_values::{lang as read_lang, parameter_key, reference, version_number};
 use crate::pages::render::{render, see_other_path};
@@ -110,15 +111,10 @@ fn parameter_ref(ctx: Ctx<'_>) -> Result<ParameterRef, WebError> {
     })
 }
 
-/// Build the rows of a parameter from `GetTranslations`, with the toast `toast`.
-fn block_of(
-    ctx: Ctx<'_>,
-    view: &TranslationsView,
-    toast: String,
-) -> Result<TranslationsBlock, WebError> {
-    let role = ctx.request.auth()?.user().role();
+/// Build the rows of a parameter from `GetTranslations`.
+fn block_of(ctx: Ctx<'_>, view: &TranslationsView) -> Result<TranslationsBlock, WebError> {
     let editable = view.detail.state == VersionState::LiveDraft
-        && Operation::UpsertTranslation.requirement().allows(role);
+        && ctx.request.may_run(Operation::UpsertTranslation)?;
     let source = RowSource {
         parameter_href: parameter_href(ctx.target),
         csrf_token: ctx.request.csrf_token(),
@@ -130,12 +126,11 @@ fn block_of(
         name_en: view.name_en.to_string(),
         description_en: view.description_en.to_string(),
         rows: translation_rows(&source, langs, &view.translations),
-        toast,
     })
 }
 
-/// Read the rows with `GetTranslations` and render them with the toast `toast`.
-async fn rows_body(ctx: Ctx<'_>, toast: String) -> Result<axum::response::Html<String>, WebError> {
+/// Read the rows with `GetTranslations` and render them.
+async fn rows_body(ctx: Ctx<'_>) -> Result<axum::response::Html<String>, WebError> {
     let view = GetTranslations::new(ctx.state.identity().app().clone())
         .execute(
             ctx.request.auth()?.user(),
@@ -143,7 +138,7 @@ async fn rows_body(ctx: Ctx<'_>, toast: String) -> Result<axum::response::Html<S
             parameter_ref(ctx)?,
         )
         .await?;
-    let block = block_of(ctx, &view, toast)?;
+    let block = block_of(ctx, &view)?;
     render(
         &TranslationsFragment {
             t: ctx.texts(),
@@ -170,7 +165,7 @@ pub(crate) async fn translations(
     if !request.is_htmx() {
         return parameter_page(ctx).await;
     }
-    Ok(rows_body(ctx, String::new()).await?.into_response())
+    Ok(rows_body(ctx).await?.into_response())
 }
 
 /// The language and the sent fields of the row form that an error answer swaps.
@@ -235,9 +230,10 @@ fn check_row(
             ));
         })
         .ok();
-    let description = match fields.description.is_empty() {
+    let sent_description = crlf_to_lf(&fields.description);
+    let description = match sent_description.is_empty() {
         true => Some(None),
-        false => LongText::parse(&fields.description)
+        false => LongText::parse(&sent_description)
             .map(Some)
             .map_err(|_reason| {
                 lines.push(label(
@@ -380,7 +376,39 @@ pub(crate) async fn upsert(
     success(&output, body, request.request_id())
 }
 
+/// Render the row of the removed tag `lang` with the toast and the focus (ADR-0111 (b) to (d)).
+///
+/// A tag of the list gets the empty form. Another tag gets its heading and `translation-none`.
+fn removed(
+    ctx: Ctx<'_>,
+    lang: &LangCode,
+    output: &DraftOutput,
+) -> Result<axum::response::Html<String>, WebError> {
+    let t = ctx.texts();
+    let source = RowSource {
+        parameter_href: parameter_href(ctx.target),
+        csrf_token: ctx.request.csrf_token(),
+        row_version: output.row_version.to_string(),
+        editable: true,
+    };
+    let row = TranslationRow {
+        listed: ctx.state.settings().translation_langs.contains(lang),
+        focus: true,
+        toast: with_change_number(t, &t.with_arg("translation-deleted", "lang", lang), output),
+        ..TranslationRow::new(&source, lang, None)
+    };
+    let fragment = TranslationRowFragment {
+        t,
+        row,
+        form_only: false,
+    };
+    render(&fragment, ctx.request.request_id())
+}
+
 /// `POST .../translations/{lang}/delete`: remove the translation of any tag of the parameter.
+///
+/// An HTMX answer holds only the row of that tag, so the unsaved input of the other rows stays
+/// (ADR-0111).
 pub(crate) async fn remove(
     State(state): State<WebState>,
     path: Result<Path<(String, String, String, String)>, PathRejection>,
@@ -412,11 +440,5 @@ pub(crate) async fn remove(
     if !request.is_htmx() {
         return see_other_path(&parameter_href(&target), request.request_id(), []);
     }
-    let t = ctx.texts();
-    let toast = with_change_number(
-        t,
-        &t.with_arg("translation-deleted", "lang", &lang),
-        &output,
-    );
-    success(&output, rows_body(ctx, toast).await?, request.request_id())
+    success(&output, removed(ctx, &lang, &output)?, request.request_id())
 }

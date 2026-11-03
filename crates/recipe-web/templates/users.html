@@ -9,8 +9,8 @@
 <input id="q" type="search" name="q" class="data" autocapitalize="none" spellcheck="false" maxlength="64" value="{{ q }}"></div>
 <button type="submit">{{ t.get("users-search-submit") }}</button>
 </form>
-<p class="actions"><a class="target-link" href="/users/new">{{ t.get("users-new-link") }}</a></p>
-{% if after_end %}{{ pagers::after_end(t, current, first_url) }}
+{% if can_create %}<p class="actions"><a class="target-link" href="/users/new">{{ t.get("users-new-link") }}</a></p>
+{% endif %}{% if after_end %}{{ pagers::after_end(t, current, first_url) }}
 {% else %}{% call tables::frame("users-caption", t.get("users-title")) %}<thead><tr>{{ tables::head(t.get("users-col-login")) }}{{ tables::head(t.get("users-col-role")) }}{{ tables::head(t.get("users-col-status")) }}{{ tables::head(t.get("users-col-password")) }}</tr></thead>
 {% if rows.is_empty() %}{{ tables::empty_row(4, t.get("users-empty")) }}{% else %}<tbody>
 {% for row in rows %}<tr><td class="data"><a href="/users/{{ row.login }}">{{ row.login }}</a></td><td>{{ row.role }}</td><td>{{ badges::user(row.active, row.status) }}</td><td>{% if row.must_change %}{{ t.get("users-must-change-yes") }}{% endif %}</td></tr>

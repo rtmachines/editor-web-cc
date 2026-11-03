@@ -35,7 +35,7 @@ pub(crate) struct CodeQuery {
 ///
 /// The type solves one problem: one template shows a live machine with its forms and an archived
 /// machine without them. The flags `can_archive`, `can_add`, and `form.shown` are true only for a
-/// live machine and a role that holds the permission of the command (`Operation::requirement`).
+/// live machine and only when `PageRequest::may_run` permits the command (ADR-0113).
 #[derive(Template)]
 #[template(path = "machine.html")]
 struct MachinePage<'a> {
@@ -53,7 +53,8 @@ struct MachinePage<'a> {
     recipes_href: String,
     add_href: String,
     archive_action: String,
-    /// The rename form. It is shown only for a live machine and a role with the permission.
+    /// The rename form. It is shown only for a live machine and when
+    /// `PageRequest::may_run` permits the rename (ADR-0113).
     form: RenameForm,
 }
 
@@ -64,7 +65,6 @@ impl<'a> MachinePage<'a> {
     ///
     /// Returns `E-WEB-004` when the request has no session.
     fn new(t: Texts<'a>, request: &PageRequest, view: &MachineView) -> Result<Self, WebError> {
-        let role = request.auth()?.user().role();
         let machine = &view.machine;
         let code = machine.code();
         let live = machine.is_live();
@@ -73,11 +73,12 @@ impl<'a> MachinePage<'a> {
         if let Some(path) = &view.archived {
             layout = layout.with_toast(t.with_arg("unit-archived-toast", "path", path));
         }
-        let allows = |operation: Operation| live && operation.requirement().allows(role);
+        let allows =
+            |operation: Operation| Ok::<bool, WebError>(live && request.may_run(operation)?);
         // The tree of an archived machine shows every unit and has no link (ADR-0037 d).
         let scope = if live { Scope::Live } else { Scope::All };
         let form = RenameForm::new(code, machine.name().to_string(), request.csrf_token())
-            .shown(allows(Operation::RenameMachine));
+            .shown(allows(Operation::RenameMachine)?);
         Ok(Self {
             layout,
             t,
@@ -85,10 +86,16 @@ impl<'a> MachinePage<'a> {
             name: machine.name().to_string(),
             platform: platform_text(t, machine.platform()),
             archived_at: machine.archived_at().as_ref().map(instant),
-            tree: UnitTree::build(machine, scope, role, None, live),
+            tree: UnitTree::build(
+                machine,
+                scope,
+                request.may_run(Operation::AddUnit)?,
+                None,
+                live,
+            ),
             live,
-            can_archive: allows(Operation::ArchiveMachine),
-            can_add: allows(Operation::AddUnit),
+            can_archive: allows(Operation::ArchiveMachine)?,
+            can_add: allows(Operation::AddUnit)?,
             types_href: format!("/machines/{code}/types"),
             recipes_href: format!("/recipes?machine={code}"),
             add_href: format!("/machines/{code}/units/new"),

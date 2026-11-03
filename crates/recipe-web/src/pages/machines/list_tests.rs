@@ -473,3 +473,27 @@ async fn machines_list_content_answer_has_the_title_the_heading_and_the_field_ne
     let other = world.get(&world.engineer, "/machines", &target).await;
     assert!(other.body.contains("class=\"topbar\""));
 }
+
+// --- Read-only mode (ADR-0113 (b)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (b): in read-only mode the list has no link to a new machine,
+/// also for a role that holds the permission. The table stays.
+#[tokio::test]
+async fn machines_list_in_read_only_mode_has_no_new_machine_link() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.engineer, &world.admin] {
+        let reply = world.get_en(session, "/machines").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(
+            !reply.body.contains("href=\"/machines/new\""),
+            "{}",
+            reply.body
+        );
+        assert!(
+            reply.body.contains("<a href=\"/machines/M7\">M7</a>"),
+            "{}",
+            reply.body
+        );
+    }
+}

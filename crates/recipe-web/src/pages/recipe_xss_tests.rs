@@ -100,6 +100,21 @@ fn assert_input_value(reply: &Reply, id: &str, payload: &str, what: &str) {
     assert!(tag_of(&reply.body, id).contains(&value), "{what} {id}");
 }
 
+/// Assert that the `textarea` `id` of the form shows the escaped payload as its text.
+///
+/// The template writes one LF after the start tag. The HTML parser removes it (ADR-0112 (d)).
+/// The element has no `value` attribute.
+fn assert_textarea_text(reply: &Reply, id: &str, payload: &str, what: &str) {
+    let tag = tag_of(&reply.body, id);
+    assert!(!tag.contains("value="), "{what} {id}: {tag}");
+    let marker = format!("id=\"{id}\"");
+    let (_before, rest) = reply.body.split_once(&marker).unwrap();
+    let (_attributes, content) = rest.split_once('>').unwrap();
+    let text = content.split_once("</textarea>").unwrap().0;
+    let text = text.strip_prefix('\n').unwrap_or(text);
+    assert_eq!(text, askama_escape(payload), "{what} {id}");
+}
+
 /// Send the form `body` to `path` as an HTMX request of the Administrator.
 async fn post(world: &World, path: &str, body: &str) -> Reply {
     world.post_with(&world.admin, path, body, &[HTMX]).await
@@ -524,9 +539,10 @@ async fn recipe_xss_sent_texts_of_a_refused_recipe_form_are_echoed_escaped() {
             format!("machine_code=M7&reference_number={text}&name={text}&change_note={text}");
         let reply = post(&world, "/recipes", &body).await;
         assert_refused(&reply, "E-WEB-008", &payload, "POST /recipes");
-        for id in ["reference_number", "recipe_name", "change_note"] {
+        for id in ["reference_number", "recipe_name"] {
             assert_input_value(&reply, id, &payload, "POST /recipes");
         }
+        assert_textarea_text(&reply, "change_note", &payload, "POST /recipes");
     }
 }
 
@@ -549,14 +565,18 @@ async fn recipe_xss_sent_texts_of_the_version_and_translation_forms_are_echoed_e
         let version = format!("based_on=x&change_note={}", encode(&payload));
         let reply = post(&world, &fill(VERSIONS), &version).await;
         assert_refused(&reply, "E-WEB-008", &payload, "POST versions");
-        assert_input_value(&reply, "change_note", &payload, "POST versions");
+        assert_textarea_text(&reply, "change_note", &payload, "POST versions");
         let text = encode(&payload);
         let body = format!("row_version=x&name={text}&description={text}");
         let reply = post(&world, &fill(TRANSLATION), &body).await;
         assert_refused(&reply, "E-WEB-008", &payload, "POST translation");
-        for id in ["translation-pl-name", "translation-pl-description"] {
-            assert_input_value(&reply, id, &payload, "POST translation");
-        }
+        assert_input_value(&reply, "translation-pl-name", &payload, "POST translation");
+        assert_textarea_text(
+            &reply,
+            "translation-pl-description",
+            &payload,
+            "POST translation",
+        );
     }
 }
 
@@ -581,7 +601,11 @@ async fn recipe_xss_sent_texts_of_a_refused_parameter_form_are_echoed_escaped() 
             let what = format!("POST {route} all fields");
             assert_refused(&reply, "E-WEB-008", &payload, &what);
             for id in fields {
-                assert_input_value(&reply, id, &payload, &what);
+                if id == "description_en" {
+                    assert_textarea_text(&reply, id, &payload, &what);
+                } else {
+                    assert_input_value(&reply, id, &payload, &what);
+                }
             }
         }
     }

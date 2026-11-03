@@ -52,7 +52,9 @@ async fn versions_new_form_offers_each_version_and_the_empty_draft_with_the_appr
         .unwrap();
     assert!(third < second && second < first && first < empty, "{form}");
     assert!(
-        form.contains("<input id=\"change_note\" name=\"change_note\" type=\"text\""),
+        form.contains(
+            "<textarea id=\"change_note\" name=\"change_note\" rows=\"4\" maxlength=\"4000\""
+        ),
         "{form}"
     );
     assert!(
@@ -85,6 +87,26 @@ async fn versions_create_copies_the_base_and_goes_to_the_new_draft() {
         .await;
     assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
     assert_eq!(reply.header("location"), "/recipes/R-600/versions/2");
+}
+
+#[tokio::test]
+async fn versions_create_stores_the_change_note_with_lf_line_ends() {
+    let world = recipe_world();
+    seed_approved_recipe(&world);
+    let body = "based_on=1&change_note=Step+1%0D%0AStep+2";
+    let reply = world
+        .post(&world.engineer, "/recipes/R-600/versions", body, false)
+        .await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    let page = world
+        .get_en(&world.engineer, "/recipes/R-600/versions/2")
+        .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(
+        main_of(&page.body).contains("<dd class=\"text-lines\">Step 1\nStep 2</dd>"),
+        "{}",
+        page.body
+    );
 }
 
 #[tokio::test]
@@ -121,7 +143,7 @@ async fn versions_create_with_a_base_that_names_no_version_gives_e_web_008_for_b
         form.contains("<div class=\"field-error\" id=\"based_on-error\">"),
         "{form}"
     );
-    assert!(form.contains("value=\"Kept note\""), "{form}");
+    assert!(form.contains(">\nKept note</textarea>"), "{form}");
     assert_eq!(world.fixture.snapshot(), before);
 }
 
@@ -155,7 +177,7 @@ async fn versions_create_on_a_recipe_with_a_draft_gives_e_rcp_011() {
         .unwrap();
     let (tag, form) = rest.split_once('>').unwrap();
     assert!(tag.contains("hx-swap-oob=\"true\""), "{tag}");
-    assert!(form.contains("value=\"Again\""), "{form}");
+    assert!(form.contains(">\nAgain</textarea>"), "{form}");
     for mark in ["aria-invalid", "field-error"] {
         assert!(!form.contains(mark), "{mark}: {form}");
     }

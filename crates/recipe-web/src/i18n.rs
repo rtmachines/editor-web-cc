@@ -220,3 +220,6 @@ mod approval_usage_tests;
 
 #[cfg(test)]
 mod export_texts_tests;
+
+#[cfg(test)]
+mod data_safety_texts_tests;

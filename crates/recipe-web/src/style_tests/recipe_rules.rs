@@ -255,6 +255,7 @@ fn recipe_rules_an_input_with_an_error_has_the_error_edge_in_both_sheets_togethe
     for selector in [
         "input[aria-invalid=\"true\"]",
         "select[aria-invalid=\"true\"]",
+        "textarea[aria-invalid=\"true\"]",
     ] {
         assert_eq!(
             value_of(&app, selector, "border-color").as_deref(),
@@ -262,6 +263,32 @@ fn recipe_rules_an_input_with_an_error_has_the_error_edge_in_both_sheets_togethe
             "{selector}"
         );
     }
+}
+
+#[test]
+fn recipe_rules_a_textarea_follows_the_base_field_rules_and_keeps_the_text_font() {
+    let app = app_sheet();
+    let expected = [
+        ("textarea", "font-family", "var(--font-sans)"),
+        ("textarea", "min-height", "var(--target)"),
+        ("textarea", "background", "var(--color-surface)"),
+        ("textarea:disabled", "background", "var(--color-sunken)"),
+        ("textarea:disabled", "color", "var(--color-text-muted)"),
+    ];
+    for (selector, property, value) in expected {
+        assert_eq!(
+            value_of(&app, selector, property).as_deref(),
+            Some(value),
+            "{selector} {property}"
+        );
+    }
+    let forced = rules_of(&app, "textarea", Some("(forced-colors: active)"));
+    assert!(
+        forced
+            .iter()
+            .any(|rule| rule.value("border-color") == Some("ButtonBorder")),
+        "textarea keeps no border in forced-colors mode"
+    );
 }
 
 #[test]

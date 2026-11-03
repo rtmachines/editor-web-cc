@@ -10,7 +10,7 @@ use askama::Template;
 use axum::extract::rejection::FormRejection;
 use axum::extract::{Form, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::MachineFormPurpose;
+use recipe_app::auth::{MachineFormPurpose, Operation};
 use recipe_app::error::AppError;
 use recipe_app::plant::{
     CreateMachine, CreateMachineInput, GetMachineForm, MachineForm, MachineFormInput,
@@ -99,6 +99,8 @@ struct NewMachineForm {
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
     errors: FormErrors,
+    /// True when read-only mode blocks the form, so the notice stands in its place (ADR-0113 (d)).
+    blocked: bool,
 }
 
 impl NewMachineForm {
@@ -124,7 +126,13 @@ impl NewMachineForm {
             main_unit: String::new(),
             oob: false,
             errors: FormErrors::default(),
+            blocked: false,
         }
+    }
+
+    /// Put the notice of read-only mode in place of the form when `blocked` is true.
+    fn blocked(self, blocked: bool) -> Self {
+        Self { blocked, ..self }
     }
 
     /// Return the form with the sent texts and the error lines, swapped out of band.
@@ -190,7 +198,8 @@ pub(crate) async fn new_form(
         Some(NavTarget::Machines),
     )?;
     let page = NewMachinePage {
-        form: NewMachineForm::new(t, &form, layout.csrf_token.clone()),
+        form: NewMachineForm::new(t, &form, layout.csrf_token.clone())
+            .blocked(!request.may_run(Operation::CreateMachine)?),
         layout,
         t,
     };

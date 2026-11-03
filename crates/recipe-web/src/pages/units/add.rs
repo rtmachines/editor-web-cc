@@ -11,7 +11,7 @@ use askama::Template;
 use axum::extract::rejection::{FormRejection, PathRejection};
 use axum::extract::{Form, Path, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::UnitFormPurpose;
+use recipe_app::auth::{Operation, UnitFormPurpose};
 use recipe_app::error::AppError;
 use recipe_app::plant::{
     AddUnit, AddUnitInput, GetUnitForm, GetUnitTree, UnitForm, UnitFormInput, UnitTreeInput,
@@ -255,7 +255,13 @@ async fn tree_answer(
         )
         .await?;
     let t = Texts::new(state.bundles(), request.lang());
-    let tree = UnitTree::build(&machine, Scope::Live, auth.user().role(), Some(path), true);
+    let tree = UnitTree::build(
+        &machine,
+        Scope::Live,
+        request.may_run(Operation::AddUnit)?,
+        Some(path),
+        true,
+    );
     let fragment = UnitAddedFragment {
         t,
         tree,

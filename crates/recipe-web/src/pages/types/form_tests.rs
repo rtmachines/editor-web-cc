@@ -324,3 +324,48 @@ async fn types_form_content_answer_holds_the_title_and_the_focused_heading() {
     let reply = get_as(&world, &world.engineer, NEW, &HTMX_CONTENT).await;
     assert_content_answer(&reply, "New UDT type", NEW);
 }
+
+/// ADR-0113 (d): in read-only mode both form routes answer `200` with the notice and no form.
+#[tokio::test]
+async fn types_form_in_read_only_mode_shows_the_notice_in_place_of_the_form() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for (path, heading) in [
+        (NEW, "<h1>New UDT type</h1>"),
+        (REVISION, "<h1>New revision of ST_Zone</h1>"),
+    ] {
+        let reply = get_as(&world, &world.engineer, path, &[]).await;
+        assert_eq!(reply.status, StatusCode::OK, "{path}: {}", reply.body);
+        let main = main_of(&reply.body);
+        assert!(main.contains(heading), "{path}: {main}");
+        assert!(
+            main.contains("<div class=\"alert alert-warning\">"),
+            "{path}: {main}"
+        );
+        assert!(
+            main.contains("<span>Read-only mode blocks this form.</span>"),
+            "{path}: {main}"
+        );
+        for gone in [
+            "udt-form",
+            "udt-define-submit",
+            "udt-add-member",
+            "csrf_token",
+        ] {
+            assert!(!main.contains(gone), "{path} {gone}: {main}");
+        }
+        assert!(
+            main.contains("href=\"/machines/M7/types\""),
+            "{path}: {main}"
+        );
+    }
+}
+
+/// The permission check stays first: an Operator gets `403` in read-only mode, not the notice.
+#[tokio::test]
+async fn types_form_in_read_only_mode_still_refuses_an_operator() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    let reply = get_as(&world, &world.operator, NEW, &[]).await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+}

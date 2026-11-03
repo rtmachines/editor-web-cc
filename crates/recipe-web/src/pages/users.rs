@@ -131,9 +131,12 @@ async fn refuse_role(state: &WebState, request: &PageRequest, login: &Login) -> 
     };
     let texts = Texts::new(state.bundles(), request.lang());
     let lines = NonEmpty::new(FieldError::bad_request("role", FieldReason::Role));
+    let view = match UserView::new(texts, request, &detail, false) {
+        Ok(view) => view,
+        Err(error) => return error,
+    };
     refused(state, request, lines, |errors| {
-        let view = UserView::new(texts, request, &detail, false).with_role_errors(errors);
-        RoleFormBlock::new(texts, view)
+        RoleFormBlock::new(texts, view.with_role_errors(errors))
     })
 }
 
@@ -243,7 +246,7 @@ async fn refreshed(
     let detail = GetUser::new(state.identity().clone())
         .execute(request.auth()?, &request.meta(), login)
         .await?;
-    Ok(Some(UserView::new(texts, request, &detail, true)))
+    Ok(Some(UserView::new(texts, request, &detail, true)?))
 }
 
 /// Format a message that names a login.
@@ -438,6 +441,8 @@ pub(crate) async fn unlock(
 mod actions_tests;
 #[cfg(test)]
 mod form_error_tests;
+#[cfg(test)]
+mod read_only_tests;
 #[cfg(test)]
 mod technical_tests;
 #[cfg(test)]

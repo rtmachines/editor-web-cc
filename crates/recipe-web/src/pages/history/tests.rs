@@ -293,3 +293,18 @@ async fn history_error_by_htmx_retargets_the_error_panel() {
     assert_htmx_error(&reply, StatusCode::CONFLICT, "E-RCP-012");
     assert_eq!(reply.header("hx-push-url"), "false");
 }
+
+#[tokio::test]
+async fn history_in_read_only_mode_keeps_the_links_to_the_entries_and_the_audit_list() {
+    let world = audit_world().await;
+    world.fixture.state.read_only().set(true);
+    for session in [&world.data.anowak, &world.data.admin] {
+        let reply = world.get_en(session, "/recipes/R-500/history").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let main = main_of(&reply.body);
+        let rows = body_rows(main);
+        assert!(rows >= 5, "{main}");
+        assert_eq!(main.matches("href=\"/audit/").count(), rows, "{main}");
+        assert!(main.contains("href=\"/audit?aggregate="), "{main}");
+    }
+}

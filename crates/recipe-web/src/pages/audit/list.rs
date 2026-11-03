@@ -291,12 +291,10 @@ impl<'a> AuditPage<'a> {
         let pairs = &checked.pairs;
         let borrowed: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let hidden_entity = object_filter(filter);
+        let security_linked = request.may_run(Operation::ListSecurityEvents)?;
         Ok(Self {
             t,
-            security_href: Operation::ListSecurityEvents
-                .requirement()
-                .allows(role)
-                .then(|| "/security-events".to_owned()),
+            security_href: security_linked.then(|| "/security-events".to_owned()),
             entity_types: entity_choices(t, all),
             entity_type: value_of(pairs, "entity_type"),
             actions: action_groups(t, all),

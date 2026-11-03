@@ -10,6 +10,7 @@ use askama::Template;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
+use recipe_app::auth::Operation;
 use recipe_app::error::AppError;
 use recipe_app::recipe::{ApprovalPreview, ApprovalPreviewInput, DiffChoice, GetApprovalPreview};
 use recipe_domain::recipe::DiffKind;
@@ -187,6 +188,9 @@ struct ApprovePage<'a> {
     diff: Option<DiffView>,
     jump: &'static str,
     form: Option<ApproveForm>,
+    /// True when the read-only mode blocks the form: the page shows the notice in its place
+    /// (ADR-0113 (b), (d)).
+    blocked: bool,
     back_href: String,
     back_text: String,
 }
@@ -300,7 +304,11 @@ impl<'a> ApprovePage<'a> {
             old: preview.retired,
             new: preview.number,
         };
-        let form = ApproveForm::offered(t, preview, rv, request.csrf_token());
+        let may_run = request.may_run(Operation::ApproveVersion)?;
+        let offered = ApproveForm::offered(t, preview, rv, request.csrf_token());
+        // The read-only notice stands in place of a form. It shows only when a form would be offered.
+        let blocked = offered.is_some() && !may_run;
+        let form = if blocked { None } else { offered };
         let mut args = fluent::FluentArgs::new();
         args.set("number", preview.number.to_string());
         args.set("reference", preview.recipe.reference().to_string());
@@ -318,6 +326,7 @@ impl<'a> ApprovePage<'a> {
                 .map(|page| DiffView::new(t, page, &links)),
             jump: if form.is_some() { "#approve-form" } else { "" },
             form,
+            blocked,
             back_text: t.with_arg("approve-back", "number", preview.number),
             back_href: addresses.base,
         })

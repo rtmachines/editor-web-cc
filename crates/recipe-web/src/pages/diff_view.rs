@@ -197,6 +197,8 @@ pub(crate) struct Pair {
     pub(crate) text: String,
     /// The language tag of the text. Empty for the word `diff-none`, which is in the UI language.
     pub(crate) lang: String,
+    /// `true` when the text keeps its line ends and so gets the class `text-lines` (ADR-0112 (h)).
+    pub(crate) lines: bool,
     /// `true` when the field is empty and the text is the word `diff-none`.
     pub(crate) none: bool,
 }
@@ -703,7 +705,7 @@ fn definition_cells(ctx: &RowContext<'_, '_>, change: &DefinitionChange) -> Vec<
         }
         DefinitionChange::DescriptionEn { old, new } => (
             "diff-field-description-en",
-            "",
+            "text-lines",
             old.to_string(),
             new.to_string(),
         ),
@@ -744,10 +746,12 @@ fn translation_cell(t: Texts<'_>, side: Option<&Translation>) -> Cell {
             label: t.get("diff-field-tr-name"),
             text: translation.name.to_string(),
             lang: lang.to_owned(),
+            lines: false,
             none: false,
         },
         Pair {
             label: t.get("diff-field-tr-description"),
+            lines: description.is_some(),
             none: description.is_none(),
             lang: description
                 .as_ref()

@@ -5,7 +5,7 @@ use askama::Template;
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::auth::UdtFormPurpose;
+use recipe_app::auth::{Operation, UdtFormPurpose};
 use recipe_app::plant::{GetUdtForm, UdtForm, UdtFormInput};
 use recipe_app::ports::NonEmpty;
 use recipe_domain::plant::limits::MAX_MEMBERS;
@@ -73,6 +73,8 @@ struct UdtFormView {
     choices: Vec<String>,
     /// True when the form holds `type.max_members` rows and cannot add one.
     at_max: bool,
+    /// True when read-only mode blocks `DefineUdt`: the view shows the notice and no form.
+    blocked: bool,
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
     errors: FormErrors,
@@ -97,6 +99,7 @@ impl UdtFormView {
             at_max: shown.rows.len() >= MAX_MEMBERS,
             rows: member_rows(shown.rows, shown.focus_last),
             choices: form.choices,
+            blocked: false,
             oob: false,
             errors: FormErrors::default(),
         }
@@ -165,8 +168,12 @@ pub(super) fn respond(
     let title = title_of(t, &form);
     let layout = Layout::for_session(t, request, title.clone(), current_nav())?;
     let row_focus = shown.focus_last;
+    let blocked = !request.may_run(Operation::DefineUdt)?;
     let page = UdtFormPage {
-        form: UdtFormView::new(form, shown, layout.csrf_token.clone()),
+        form: UdtFormView {
+            blocked,
+            ..UdtFormView::new(form, shown, layout.csrf_token.clone())
+        },
         layout,
         t,
         title,

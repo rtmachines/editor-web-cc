@@ -156,3 +156,54 @@ pub(crate) fn sweep_pages() -> Vec<(&'static str, String)> {
         ),
     ]
 }
+
+/// ADR-0113 (d): in read-only mode the new-version route answers `200` with the notice and no form.
+#[tokio::test]
+async fn versions_new_in_read_only_mode_shows_the_notice_in_place_of_the_form() {
+    use crate::pages::recipes::test_world::recipe_world;
+    use crate::test_support::plant::main_of;
+
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    for session in [&world.admin, &world.engineer] {
+        let reply = world.get_en(session, "/recipes/R-100/versions/new").await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let main = main_of(&reply.body);
+        assert!(
+            main.contains("<h1>New version of recipe R-100</h1>"),
+            "{main}"
+        );
+        assert!(
+            main.contains("<div class=\"alert alert-warning\">"),
+            "{main}"
+        );
+        assert!(
+            main.contains("<span>Read-only mode blocks this form.</span>"),
+            "{main}"
+        );
+        for gone in [
+            "<form",
+            "version-new-form",
+            "version-create-submit",
+            "csrf_token",
+            "method=\"post\"",
+        ] {
+            assert!(!main.contains(gone), "{gone}: {main}");
+        }
+        assert!(main.contains("href=\"/recipes/R-100\""), "{main}");
+    }
+}
+
+/// The permission check stays first: an Operator gets `403` in read-only mode, not the notice.
+#[tokio::test]
+async fn versions_new_in_read_only_mode_still_refuses_an_operator() {
+    use crate::pages::recipes::test_world::recipe_world;
+
+    let world = recipe_world();
+    world.fixture.state.read_only().set(true);
+    let reply = world
+        .get_en(&world.operator, "/recipes/R-100/versions/new")
+        .await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+    assert!(reply.body.contains("E-WEB-002"), "{}", reply.body);
+}

@@ -1,11 +1,11 @@
 {% import "translation-row.html" as rows -%}
-{% import "components/toast.html" as toasts -%}
-{#- The translation rows of a parameter (ADR-0043 (f)). The struct that renders or includes this file has the fields t and block. The English base text stands once above the rows. The answer of a removal also clears #error-panel and shows the toast out of band. The hx-swap-oob values are literals. -#}
-<h2>{{ t.get("translations-caption") }}</h2>
-<dl>
+{#- The translation rows of a parameter (ADR-0043 (f)). The struct that renders or includes this file has the fields t and block. The English base text stands once above the rows, in the macro base_block with the literal id translations-base (ADR-0111 (i)). The answer of a save of the definition renders the macro with oob true, so the rows and their unsaved input stay. The hx-swap-oob value is a literal. -#}
+{%- macro base_block(t, base, oob) -%}<dl id="translations-base"{% if oob %} hx-swap-oob="true"{% endif %}>
 <dt>{{ t.get("translations-col-base") }}</dt>
-<dd lang="en">{{ block.name_en }}</dd>
-<dd lang="en">{{ block.description_en }}</dd>
-</dl>
+<dd lang="en">{{ base.name_en }}</dd>
+<dd lang="en" class="text-lines">{{ base.description_en }}</dd>
+</dl>{%- endmacro -%}
+<h2>{{ t.get("translations-caption") }}</h2>
+{{ base_block(t, block, false) }}
 {% for row in block.rows %}{{ rows::translation_row(t, row) }}
-{% endfor %}{% if !block.toast.is_empty() %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(block.toast) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% endif %}
+{% endfor %}

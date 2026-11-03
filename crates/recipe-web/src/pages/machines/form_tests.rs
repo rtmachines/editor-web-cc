@@ -7,7 +7,7 @@ use crate::i18n::Lang;
 use crate::pages::test_helpers::{
     assert_clean_html, assert_htmx_error, assert_no_user_text_in_hx_attributes,
 };
-use crate::test_support::plant::{cookie_of, world};
+use crate::test_support::plant::{cookie_of, main_of, world};
 use crate::test_support::text;
 
 /// A valid body of the form.
@@ -419,4 +419,45 @@ async fn machines_create_stores_a_name_with_markup_and_the_list_shows_it_escaped
         list.body
     );
     assert!(!list.body.contains("<b>x</b>"));
+}
+
+// --- Read-only mode (ADR-0113 (d)) --------------------------------------------------------------
+
+/// Spec "Read-only pages", ADR-0113 (d): in read-only mode `GET /machines/new` answers `200` with
+/// the heading and the notice in place of the form.
+#[tokio::test]
+async fn machines_new_form_in_read_only_mode_shows_the_notice_in_place_of_the_form() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    for lang in [Lang::En, Lang::Pl] {
+        let notice = text(lang, "readonly-form-unavailable");
+        let heading = text(lang, "machine-new-title");
+        let reply = world
+            .get(&world.admin, "/machines/new", &[cookie_of(lang)])
+            .await;
+        let body = main_of(&reply.body);
+        assert_eq!(reply.status, StatusCode::OK, "{lang}: {body}");
+        assert!(body.contains(&notice), "{lang}: {body}");
+        assert!(
+            body.contains(&format!("<h1>{heading}</h1>")),
+            "{lang}: {body}"
+        );
+        for forbidden in [
+            "id=\"machine-new-form\"",
+            "id=\"machine-create-submit\"",
+            "<input",
+        ] {
+            assert!(!body.contains(forbidden), "{lang} {forbidden}: {body}");
+        }
+    }
+}
+
+/// Regression, ADR-0113 (d): the permission check runs before the notice, so an Operator gets
+/// `403` in read-only mode.
+#[tokio::test]
+async fn machines_new_form_in_read_only_mode_still_refuses_an_operator() {
+    let world = world();
+    world.fixture.state.read_only().set(true);
+    let reply = world.get_en(&world.operator, "/machines/new").await;
+    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
 }

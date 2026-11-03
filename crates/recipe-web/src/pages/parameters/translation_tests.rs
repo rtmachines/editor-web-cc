@@ -118,7 +118,7 @@ async fn parameters_translation_with_an_empty_name_shows_the_line_under_the_inpu
     let form = reply.body.split(&pl_form_tag(SPEED_KEY)).nth(1).unwrap();
     assert!(form.starts_with(" hx-swap-oob=\"true\">"), "{form}");
     assert!(form.contains("id=\"translation-pl-name-error\""), "{form}");
-    assert!(form.contains("value=\"Opis\""), "{form}");
+    assert!(form.contains(">\nOpis</textarea>"), "{form}");
 }
 
 /// K12, ADR-0041 (e): a refusal of valid fields swaps the row with the sent texts and no stale line.
@@ -154,26 +154,90 @@ async fn parameters_translation_of_an_operator_with_a_bad_field_gives_e_web_002(
     }
 }
 
+/// The opening tag of the boosted delete form of the translation `lang` of `key` (ADR-0111 (a)).
+fn delete_form_tag(key: uuid::Uuid, lang: &str) -> String {
+    format!(
+        "<form method=\"post\" action=\"{}\" hx-boost=\"true\" hx-target=\"closest .translation-row\" hx-swap=\"outerHTML\" hx-push-url=\"false\" hx-sync=\"closest form:drop\">",
+        parameter_path(key, &format!("/translations/{lang}/delete"))
+    )
+}
+
+/// ADR-0111 (a): the delete form swaps only its own row.
 #[tokio::test]
-async fn parameters_translation_delete_answers_the_rows_without_the_translation() {
+async fn parameters_translation_delete_form_targets_its_own_row() {
     let world = recipe_world();
-    let path = parameter_path(LINE_KEY, "/translations/pl/delete");
-    let reply = post_htmx(&world, &path, &[("row_version", "1")]).await;
-    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    let reply = world
+        .get_en(&world.engineer, &parameter_path(LINE_KEY, ""))
+        .await;
+    let tag = delete_form_tag(LINE_KEY, "pl");
+    assert!(reply.body.contains(&tag), "{tag}: {}", reply.body);
     assert!(
-        reply.body.contains("The translation pl is deleted."),
-        "{}",
-        reply.body
-    );
-    assert!(!reply.body.contains("value=\"Linia\""), "{}", reply.body);
-    assert!(
-        !reply.body.contains("Delete translation pl"),
+        !reply.body.contains("hx-target=\"#translations\""),
         "{}",
         reply.body
     );
 }
 
+/// ADR-0111 (b), (c), (d), (e): the answer is the row of the deleted tag with an empty form.
+#[tokio::test]
+async fn parameters_translation_delete_answers_one_row_with_an_empty_form() {
+    let world = recipe_world();
+    let path = parameter_path(LINE_KEY, "/translations/pl/delete");
+    let reply = post_htmx(&world, &path, &[("row_version", "1")]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    let body = reply.body.trim_start();
+    assert!(
+        body.starts_with("<div class=\"translation-row\" id=\"translation-pl\">"),
+        "{body}"
+    );
+    assert_eq!(
+        body.matches("class=\"translation-row\"").count(),
+        1,
+        "{body}"
+    );
+    assert!(
+        body.contains("<h3 tabindex=\"-1\" autofocus>pl</h3>"),
+        "{body}"
+    );
+    assert!(body.contains(&pl_form_tag(LINE_KEY)), "{body}");
+    assert!(!body.contains("value=\"Linia\""), "{body}");
+    assert_eq!(field_value(body, "row_version"), "2");
+    // The last stored translation is gone, so the row holds no delete disclosure.
+    for mark in ["<details", "translation-pl-delete"] {
+        assert!(!body.contains(mark), "{mark}: {body}");
+    }
+    assert!(
+        body.contains("<div id=\"toast\" hx-swap-oob=\"innerHTML\">"),
+        "{body}"
+    );
+    assert!(body.contains("The translation pl is deleted."), "{body}");
+    assert!(
+        body.contains("<div id=\"error-panel\" hx-swap-oob=\"innerHTML\"></div>"),
+        "{body}"
+    );
+}
+
+/// ADR-0111 (b): the other rows stay out of the answer, so their unsaved input stays.
+#[tokio::test]
+async fn parameters_translation_delete_leaves_the_other_rows_out_of_the_answer() {
+    let world = recipe_world();
+    seed_translation(&world, LINE_KEY, ("de", 1)).await;
+    let path = parameter_path(LINE_KEY, "/translations/de/delete");
+    let reply = post_htmx(&world, &path, &[("row_version", "2")]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 3}");
+    let body = reply.body.trim_start();
+    assert!(!body.contains("id=\"translation-pl\""), "{body}");
+    assert!(!body.contains("Linia"), "{body}");
+    assert_eq!(
+        body.matches("class=\"translation-row\"").count(),
+        1,
+        "{body}"
+    );
+}
+
+/// ADR-0111 (b): a tag outside the list gets its row with `translation-none` and no form.
 #[tokio::test]
 async fn parameters_translation_delete_takes_a_tag_outside_the_list() {
     let world = recipe_world();
@@ -185,11 +249,32 @@ async fn parameters_translation_delete_takes_a_tag_outside_the_list() {
     let path = parameter_path(LINE_KEY, "/translations/de/delete");
     let reply = post_htmx(&world, &path, &[("row_version", "2")]).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.body.trim_start();
     assert!(
-        !reply.body.contains("id=\"translation-de\""),
-        "{}",
-        reply.body
+        body.starts_with("<div class=\"translation-row\" id=\"translation-de\">"),
+        "{body}"
     );
+    assert!(
+        body.contains("<h3 tabindex=\"-1\" autofocus>de</h3>"),
+        "{body}"
+    );
+    assert!(body.contains("<p>No translation</p>"), "{body}");
+    for mark in ["<form id=", "<details", "translation-de-delete"] {
+        assert!(!body.contains(mark), "{mark}: {body}");
+    }
+    assert!(body.contains("The translation de is deleted."), "{body}");
+}
+
+/// ADR-0111 (f): a `409` shows the conflict fragment and swaps no row.
+#[tokio::test]
+async fn parameters_translation_delete_with_a_stale_row_version_swaps_no_row() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let path = parameter_path(LINE_KEY, "/translations/pl/delete");
+    let reply = post_htmx(&world, &path, &[("row_version", "7")]).await;
+    assert_panel_error(&reply, StatusCode::CONFLICT, "E-WEB-001");
+    assert!(!reply.body.contains("translation-row"), "{}", reply.body);
+    assert_eq!(world.fixture.snapshot(), before);
 }
 
 /// K8, ADR-0043 (f): a row of a tag outside the list shows its texts and only the removal form.
@@ -248,8 +333,17 @@ async fn parameters_translation_row_marks_its_texts_with_the_language_of_the_row
         pl_row.contains("<input id=\"translation-pl-name\" name=\"name\" type=\"text\" maxlength=\"200\" autocomplete=\"off\" value=\"Linia\" lang=\"pl\""),
         "{pl_row}"
     );
+    // ADR-0112: the description is a textarea. One LF follows the start tag.
     assert!(
-        pl_row.contains("<input id=\"translation-pl-description\" name=\"description\" type=\"text\" maxlength=\"4000\" autocomplete=\"off\" value=\"Strefy linii prasy\" lang=\"pl\""),
+        pl_row.contains("<textarea id=\"translation-pl-description\" name=\"description\" rows=\"4\" maxlength=\"4000\" lang=\"pl\""),
+        "{pl_row}"
+    );
+    assert!(
+        pl_row.contains(">\nStrefy linii prasy</textarea>"),
+        "{pl_row}"
+    );
+    assert!(
+        !pl_row.contains("<input id=\"translation-pl-description\""),
         "{pl_row}"
     );
     assert!(
@@ -267,7 +361,15 @@ async fn parameters_translation_row_marks_its_texts_with_the_language_of_the_row
         .and_then(|rest| rest.split("<details").next())
         .unwrap();
     assert!(de_row.contains("<dd lang=\"de\">Linie</dd>"), "{de_row}");
-    assert_eq!(de_row.matches("<dd lang=\"de\">").count(), 2, "{de_row}");
+    assert_eq!(de_row.matches("<dd lang=\"de\">").count(), 1, "{de_row}");
+    // ADR-0112 (h): the description keeps its line ends on a read-only row.
+    assert_eq!(
+        de_row
+            .matches("<dd lang=\"de\" class=\"text-lines\">")
+            .count(),
+        1,
+        "{de_row}"
+    );
     assert!(!de_row.contains("<dt lang"), "{de_row}");
     let operator = world
         .get_en(&world.operator, &parameter_path(LINE_KEY, ""))
@@ -308,4 +410,30 @@ async fn parameters_translations_answer_the_rows_or_the_page() {
     );
     assert!(!main.contains("<form"), "{main}");
     assert!(main.contains("Linia"), "{main}");
+}
+
+/// ADR-0112 (g): a save with CRLF stores LF, and the row shows the stored text in a `textarea`.
+#[tokio::test]
+async fn parameters_translation_save_with_crlf_stores_lf() {
+    let world = recipe_world();
+    let pairs = [
+        ("row_version", "1"),
+        ("name", "Prędkość"),
+        ("description", "Linia 1\r\nLinia 2"),
+    ];
+    let path = parameter_path(SPEED_KEY, "/translations/pl");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.body.trim_start();
+    assert!(body.contains(">\nLinia 1\nLinia 2</textarea>"), "{body}");
+    assert!(!body.contains('\r'), "{body}");
+    let page = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert!(
+        page.body.contains(">\nLinia 1\nLinia 2</textarea>"),
+        "{}",
+        page.body
+    );
+    assert!(!page.body.contains("Linia 1\r"), "{}", page.body);
 }

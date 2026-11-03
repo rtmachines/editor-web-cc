@@ -2,10 +2,10 @@
 //! (f), ADR-0043 (f)).
 //!
 //! The page shows one row per tag of `i18n.translation_langs` and one row per other tag of the
-//! parameter. Each listed row of a draft is one form whose `action` holds the tag. A save answers
-//! the new row. A removal answers every row. A tag outside the list gives `422 E-WEB-008` on the
-//! route that writes, so its row shows the texts and only the removal. The removal accepts every
-//! tag that the parameter holds.
+//! parameter. Each listed row of a draft is one form whose `action` holds the tag. A save and a
+//! removal each answer only the row of their tag (ADR-0111). A tag outside the list gives
+//! `422 E-WEB-008` on the route that writes, so its row shows the texts and only the removal.
+//! The removal accepts every tag that the parameter holds.
 
 use askama::Template;
 use recipe_domain::recipe::{LangCode, Translation};
@@ -27,7 +27,8 @@ pub(crate) struct TranslationRow {
     pub(crate) description: String,
     /// True when the parameter holds a translation of this tag. Only then a removal exists.
     pub(crate) stored: bool,
-    /// True when the row may hold a form: a live draft and a role with `ParameterEdit`.
+    /// True when the row may hold a form: a live draft and `PageRequest::may_run` permits
+    /// `UpsertTranslation` (ADR-0113).
     pub(crate) editable: bool,
     /// True when `i18n.translation_langs` holds the tag. Only then the row is a form to save.
     /// A row of another tag shows its texts and only the removal (ADR-0043 (f)).
@@ -42,7 +43,9 @@ pub(crate) struct TranslationRow {
     pub(crate) row_version: String,
     /// True when an error answer swaps the form out of band (ADR-0041 (e)).
     pub(crate) oob: bool,
-    /// The success sentence of a save for `#toast`. Empty in a list.
+    /// True when the heading takes the focus: the answer of a removal (ADR-0111 (c)).
+    pub(crate) focus: bool,
+    /// The success sentence of a save or a removal for `#toast`. Empty in a list.
     pub(crate) toast: String,
     /// The error lines under the inputs.
     pub(crate) errors: FormErrors,
@@ -82,6 +85,7 @@ impl TranslationRow {
             csrf_token: source.csrf_token.clone(),
             row_version: source.row_version.clone(),
             oob: false,
+            focus: false,
             toast: String::new(),
             errors: FormErrors::default(),
             lang,
@@ -117,11 +121,9 @@ pub(crate) struct TranslationsBlock {
     pub(crate) description_en: String,
     /// One row per tag.
     pub(crate) rows: Vec<TranslationRow>,
-    /// The success sentence of a removal for `#toast`. Empty on the page.
-    pub(crate) toast: String,
 }
 
-/// The fragment `translations.html`: the rows of `GET .../translations` and of a removal.
+/// The fragment `translations.html`: the rows of the parameter page and of `GET .../translations`.
 #[derive(Template)]
 #[template(path = "translations.html")]
 pub(crate) struct TranslationsFragment<'a> {
@@ -129,6 +131,27 @@ pub(crate) struct TranslationsFragment<'a> {
     pub(crate) t: Texts<'a>,
     /// The rows.
     pub(crate) block: TranslationsBlock,
+}
+
+/// The English base text of a parameter, the content of the block `#translations-base`.
+pub(crate) struct TranslationsBase {
+    /// The English name.
+    pub(crate) name_en: String,
+    /// The English description.
+    pub(crate) description_en: String,
+}
+
+/// The base block alone with `hx-swap-oob="true"`: the answer of a save of the definition.
+///
+/// It replaces only `#translations-base`, so the unsaved input of the translation rows stays
+/// (ADR-0111 (i)).
+#[derive(Template)]
+#[template(path = "translations-base.html")]
+pub(crate) struct TranslationsBaseFragment<'a> {
+    /// The texts of the UI language.
+    pub(crate) t: Texts<'a>,
+    /// The base text.
+    pub(crate) base: TranslationsBase,
 }
 
 /// The fragment `translation-row.html`: one row with its toast, or its form alone.

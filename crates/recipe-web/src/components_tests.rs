@@ -13,7 +13,7 @@ mod structure;
 
 use askama::Template;
 
-use crate::error::FieldLine;
+use crate::error::{FieldLine, LineView};
 use crate::i18n::{Bundles, Lang};
 use crate::pages::Texts;
 use crate::test_support::{icon_tag, text};
@@ -410,4 +410,142 @@ fn components_every_svg_of_every_component_is_a_fixed_tag() {
         .unwrap(),
     );
     assert_fixed_svg_tags(&all);
+}
+
+// --- The macro `lines` of `components/field.html` (ADR-0112 (a) to (f)) ------------------------
+
+/// The multi-line field of a test. Every text comes from a struct field.
+#[derive(Template)]
+#[template(path = "test/lines.html")]
+struct LinesPage<'a> {
+    t: Texts<'a>,
+    label: String,
+    hint: String,
+    required: bool,
+    lang: String,
+    value: String,
+    lines: Vec<LineView>,
+}
+
+/// Render the field `description_en` in `lang` with the given hint, value, and error lines.
+fn render_lines(
+    lang: Lang,
+    hint: &str,
+    required: bool,
+    value: &str,
+    lines: Vec<LineView>,
+) -> String {
+    let bundles = Bundles::load().unwrap();
+    LinesPage {
+        t: Texts::new(&bundles, lang),
+        label: text(lang, "field-lines-limit"),
+        hint: hint.to_owned(),
+        required,
+        lang: "en".to_owned(),
+        value: value.to_owned(),
+        lines,
+    }
+    .render()
+    .unwrap()
+}
+
+/// Return the value that an HTML parser reads from the first `textarea` of `html`.
+///
+/// The parser drops one LF directly after the start tag and decodes the five entities of askama.
+fn textarea_value(html: &str) -> String {
+    let (_, after_name) = html.split_once("<textarea").unwrap();
+    let (_, after_tag) = after_name.split_once('>').unwrap();
+    let (raw, _) = after_tag.split_once("</textarea>").unwrap();
+    let raw = raw.strip_prefix('\n').unwrap_or(raw);
+    raw.replace("&#60;", "<")
+        .replace("&#62;", ">")
+        .replace("&#34;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#38;", "&")
+}
+
+#[test]
+fn components_lines_has_the_id_the_name_the_rows_the_limit_the_lang_and_the_required_mark() {
+    for lang in [Lang::Pl, Lang::En] {
+        let label = text(lang, "field-lines-limit");
+        let word = text(lang, "form-required");
+        let bundles = Bundles::load().unwrap();
+        let limit = Texts::new(&bundles, lang).with_arg("field-lines-limit", "max", 4000);
+        let expected = format!(
+            "<div class=\"field\"><label for=\"description_en\">{label} <span class=\"field-required\">{word}</span></label><textarea id=\"description_en\" name=\"description_en\" rows=\"4\" maxlength=\"4000\" lang=\"en\" aria-required=\"true\" aria-describedby=\"description_en-limit\">\nText</textarea><span class=\"field-hint\" id=\"description_en-limit\">{limit}</span></div>"
+        );
+        let html = render_lines(lang, "", true, "Text", Vec::new());
+        assert_eq!(html.trim(), expected, "{lang}");
+    }
+}
+
+#[test]
+fn components_lines_without_the_required_flag_has_no_required_mark() {
+    let html = render_lines(Lang::En, "", false, "Text", Vec::new());
+    for omitted in ["field-required", "aria-required", "aria-invalid", "-error"] {
+        assert!(!html.contains(omitted), "found {omitted}: {html}");
+    }
+    for forbidden in ["placeholder", " required", "pattern", "minlength"] {
+        assert!(!html.contains(forbidden), "found {forbidden}: {html}");
+    }
+}
+
+#[test]
+fn components_lines_limit_line_has_the_id_and_the_bundle_text_with_the_maximum() {
+    let html = render_lines(Lang::En, "", false, "", Vec::new());
+    assert!(
+        html.contains(
+            "<span class=\"field-hint\" id=\"description_en-limit\">At most 4000 characters.</span>"
+        ),
+        "{html}"
+    );
+    let html = render_lines(Lang::Pl, "", false, "", Vec::new());
+    assert!(
+        html.contains("id=\"description_en-limit\">Najwyżej 4000 znaków.</span>"),
+        "{html}"
+    );
+}
+
+#[test]
+fn components_lines_describes_the_hint_then_the_limit_then_the_error_line() {
+    let line = LineView {
+        code: "E-WEB-008",
+        subject: String::new(),
+        message: "Field is not valid.".to_owned(),
+        target: "description_en".to_owned(),
+    };
+    let html = render_lines(Lang::En, "Hint text", false, "x", vec![line]);
+    assert!(
+        html.contains(
+            "aria-invalid=\"true\" aria-describedby=\"description_en-hint description_en-limit description_en-error\">"
+        ),
+        "{html}"
+    );
+    assert!(
+        html.contains("<span class=\"field-hint\" id=\"description_en-hint\">Hint text</span>"),
+        "{html}"
+    );
+    assert!(
+        html.contains("<div class=\"field-error\" id=\"description_en-error\">"),
+        "{html}"
+    );
+    let hint = html.find("id=\"description_en-hint\"").unwrap();
+    let area = html.find("<textarea").unwrap();
+    let limit = html.find("id=\"description_en-limit\"").unwrap();
+    let error = html.find("id=\"description_en-error\"").unwrap();
+    assert!(hint < area && area < limit && limit < error, "{html}");
+}
+
+#[test]
+fn components_lines_keeps_a_leading_lf_a_trailing_lf_and_markup_through_the_html_parser() {
+    let value = "\nLine 1\n<b>bold</b> & \"q\" 'a'\n";
+    let html = render_lines(Lang::En, "", false, value, Vec::new());
+    assert!(!html.contains("<b>"), "{html}");
+    assert_eq!(textarea_value(&html), value, "{html}");
+}
+
+#[test]
+fn components_lines_with_an_empty_value_parses_back_as_empty() {
+    let html = render_lines(Lang::En, "", false, "", Vec::new());
+    assert_eq!(textarea_value(&html), "", "{html}");
 }

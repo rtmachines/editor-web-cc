@@ -1,6 +1,7 @@
 //! The templates of the own-account pages.
 
 use askama::Template;
+use recipe_app::auth::Operation;
 use recipe_app::identity::{OwnPasswordForm, OwnProfile};
 
 use crate::error::{ErrorView, WebError};
@@ -53,6 +54,9 @@ pub(crate) fn login_page_with_error<'a>(
 }
 
 /// The page `me.html`.
+///
+/// The flag `can_change_password` is false in read-only mode, so the page hides the link to the
+/// password form (`PageRequest::may_run`, ADR-0113 (g)).
 #[derive(Template)]
 #[template(path = "me.html")]
 pub(crate) struct ProfilePage<'a> {
@@ -60,6 +64,7 @@ pub(crate) struct ProfilePage<'a> {
     t: Texts<'a>,
     login: &'a str,
     role: String,
+    can_change_password: bool,
 }
 
 impl<'a> ProfilePage<'a> {
@@ -78,17 +83,22 @@ impl<'a> ProfilePage<'a> {
             t,
             login: profile.login.as_str(),
             role: t.role(profile.role),
+            can_change_password: request.may_run(Operation::ChangeOwnPassword)?,
         })
     }
 }
 
 /// The page `password.html`.
+///
+/// The flag `blocked` is true in read-only mode. The page then shows the notice in place of the form
+/// and keeps the logout button of the layout (ADR-0113 (g)).
 #[derive(Template)]
 #[template(path = "password.html")]
 pub(crate) struct PasswordPage<'a> {
     layout: Layout<'a>,
     t: Texts<'a>,
     must_change: bool,
+    blocked: bool,
 }
 
 impl<'a> PasswordPage<'a> {
@@ -106,6 +116,7 @@ impl<'a> PasswordPage<'a> {
             layout: Layout::for_session(t, request, t.get("password-title"), Some(NavTarget::Me))?,
             t,
             must_change: form.must_change_password,
+            blocked: !request.may_run(Operation::ChangeOwnPassword)?,
         })
     }
 }

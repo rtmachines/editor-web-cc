@@ -37,6 +37,8 @@ mod plant_sweep_tests;
 #[cfg(test)]
 mod plant_xss_tests;
 #[cfg(test)]
+mod read_only_guard_tests;
+#[cfg(test)]
 mod recipe_security_tests;
 #[cfg(test)]
 mod recipe_sweep_tests;
