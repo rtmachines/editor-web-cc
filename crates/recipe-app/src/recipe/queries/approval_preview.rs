@@ -319,6 +319,7 @@ fn rows_of(draft: &Draft, machine: &Machine) -> Result<Vec<ParameterRow>, AppErr
                 unit_path: unit.path().clone(),
                 tag: parameter.tag().clone(),
                 name_en: parameter.name_en().clone(),
+                translated_name: None,
                 ordinal: parameter.ordinal(),
                 plc_type: parameter.plc_type(),
                 s7_address: parameter.s7_address(),

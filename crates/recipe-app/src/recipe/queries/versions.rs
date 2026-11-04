@@ -484,7 +484,7 @@ impl GetVersion {
         let is_draft = detail.state == VersionState::LiveDraft;
         let parameters = if is_draft {
             tx.recipe_reads()
-                .parameter_page(detail.id, None, 0, u32::MAX)
+                .parameter_page(detail.id, None, None, 0, u32::MAX)
                 .await?
         } else {
             Vec::new()

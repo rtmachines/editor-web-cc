@@ -23,7 +23,7 @@ async fn header_and_rows(
         .unwrap();
     let rows = tx
         .recipe_reads()
-        .parameter_page(version, None, WHOLE.0, WHOLE.1)
+        .parameter_page(version, None, None, WHOLE.0, WHOLE.1)
         .await
         .unwrap();
     (header, rows)

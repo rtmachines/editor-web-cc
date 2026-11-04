@@ -10,7 +10,7 @@ use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, UserId};
 use recipe_domain::plant::{MachineCode, UnitId, UnitPath};
 use recipe_domain::recipe::{
-    ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue, VersionState,
+    LangCode, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue, VersionState,
 };
 use recipe_domain::timestamp::Timestamp;
 
@@ -230,13 +230,18 @@ fn table_rows(
 }
 
 /// Build the table row of a parameter.
-fn table_row(row: &StoredRow, unit: &UnitRow) -> ParameterRow {
+///
+/// `lang` selects the stored translation whose tag equals it. `None` reads no translation.
+fn table_row(row: &StoredRow, unit: &UnitRow, lang: Option<&LangCode>) -> ParameterRow {
     ParameterRow {
         key: row.key,
         unit: row.unit,
         unit_path: unit.path.clone(),
         tag: row.tag.clone(),
         name_en: row.name_en.clone(),
+        translated_name: lang
+            .and_then(|lang| row.translations.get(lang))
+            .map(|stored| stored.translation.name.clone()),
         ordinal: row.ordinal,
         plc_type: row.plc_type,
         s7_address: row.s7_address,
@@ -379,13 +384,14 @@ impl RecipeReads for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
         unit: Option<UnitId>,
+        lang: Option<&LangCode>,
         offset: u64,
         limit: u32,
     ) -> Result<Vec<ParameterRow>, StorageError> {
         check_offset(offset)?;
         let rows = table_rows(self.state(), version, unit)?;
         Ok(window(rows.into_iter(), (offset, limit))
-            .map(|(row, unit_row)| table_row(row, unit_row))
+            .map(|(row, unit_row)| table_row(row, unit_row, lang))
             .collect())
     }
 

@@ -25,7 +25,7 @@ use crate::pages::path_values::{query_values, unit_path};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::versions::parameter_table::{
-    ParameterRowFragment, ParameterRowView, ValueView, has_address,
+    ParameterRowFragment, ParameterRowView, ValueView, has_address, shown_name,
 };
 use crate::pages::versions::path_version;
 use crate::state::WebState;
@@ -98,7 +98,7 @@ fn added(
     let row = ParameterRowView {
         href: format!("{base}/parameters/{}", output.key),
         tag: definition.tag.to_string(),
-        name: definition.name_en.to_string(),
+        name: shown_name(t, None, &definition.name_en),
         value: ValueView::new(t, &type_text, output.value_text.as_deref()),
         type_text,
         unit: definition.unit_path.to_string(),

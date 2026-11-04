@@ -19,7 +19,7 @@ use recipe_domain::plant::{
     UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
-    Ordinal, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
+    LangCode, Ordinal, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -206,13 +206,14 @@ impl RecipeReads for CountingTransaction {
         &mut self,
         version: RecipeVersionId,
         unit: Option<UnitId>,
+        lang: Option<&LangCode>,
         offset: u64,
         limit: u32,
     ) -> Result<Vec<ParameterRow>, StorageError> {
         self.count();
         self.inner
             .recipe_reads()
-            .parameter_page(version, unit, offset, limit)
+            .parameter_page(version, unit, lang, offset, limit)
             .await
     }
 
@@ -510,6 +511,7 @@ async fn probed_list(fixture: &Fixture, settings: AppSettings) -> (ParameterList
                 number: 1,
                 unit: None,
                 page: 0,
+                lang: None,
             },
         )
         .await

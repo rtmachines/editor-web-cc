@@ -1,6 +1,6 @@
 # ADR-0012: Parameter translations in a table and UI text with Fluent
 
-Status: Accepted. Amended by ADR-0019 (translations are not exported) and ADR-0022 (description_en required)
+Status: Accepted. Amended by ADR-0019 (translations are not exported) and ADR-0022 (description_en required). Amended by ADR-0126 (marker of the English base text)
 Date: 2026-10-12
 Deciders: project owner
 

@@ -12,7 +12,7 @@ use recipe_app::error::StorageError;
 use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_domain::plant::{PlcTypeId, S7Address, UnitId, UnitPath};
 use recipe_domain::recipe::{
-    Ordinal, ParameterKey, ParameterTag, RecipeVersionId, StoredParameter, StoredValue,
+    LangCode, Ordinal, ParameterKey, ParameterTag, RecipeVersionId, StoredParameter, StoredValue,
 };
 use recipe_domain::text::Text;
 use serde_json::Value;
@@ -28,10 +28,15 @@ use crate::error::{corrupt, map_error};
 
 /// One page of the parameters of the version `$1`. The unit `$2` is optional. The order is the
 /// numbers of the unit path, the ordinal, and the tag.
+///
+/// The language `$5` selects the translation name. The primary key `(parameter_id, lang)` of
+/// `parameter_translation` gives at most one row for each parameter, so `OFFSET` and `LIMIT` still
+/// count parameters. A `NULL` for `$5` matches no row (design D2).
 pub(crate) const SELECT_PAGE: &str = "\
-SELECT p.parameter_key, p.unit_id, u.path, p.tag, p.name_en, p.ordinal, p.plc_type_id, \
-    p.s7_address \
+SELECT p.parameter_key, p.unit_id, u.path, p.tag, p.name_en, t.name AS translated_name, \
+    p.ordinal, p.plc_type_id, p.s7_address \
 FROM parameter p JOIN unit u ON u.id = p.unit_id \
+LEFT JOIN parameter_translation t ON t.parameter_id = p.id AND t.lang = $5 \
 WHERE p.recipe_version_id = $1 AND ($2::uuid IS NULL OR p.unit_id = $2) \
 ORDER BY string_to_array(substr(u.path, 2), '.')::integer[], p.ordinal, p.tag COLLATE \"C\" \
 OFFSET $3 LIMIT $4";
@@ -67,6 +72,7 @@ struct PageRecord {
     path: String,
     tag: String,
     name_en: String,
+    translated_name: Option<String>,
     ordinal: i32,
     plc_type_id: Uuid,
     s7_address: Option<String>,
@@ -98,6 +104,12 @@ fn table_row(record: PageRecord) -> Result<ParameterRow, StorageError> {
         unit_path: unit_path(&record.path)?,
         tag: ParameterTag::parse(&record.tag).map_err(|error| corrupt("parameter", error))?,
         name_en: Text::parse(&record.name_en).map_err(|error| corrupt("parameter", error))?,
+        translated_name: record
+            .translated_name
+            .as_deref()
+            .map(Text::parse)
+            .transpose()
+            .map_err(|error| corrupt("parameter_translation", error))?,
         ordinal: Ordinal::parse(
             u32::try_from(record.ordinal).map_err(|error| corrupt("parameter", error))?,
         )
@@ -122,10 +134,13 @@ fn unit_count(record: CountRecord) -> Result<UnitCount, StorageError> {
 }
 
 /// Read one page of the parameters of `version`, in the order of the table.
+///
+/// `lang` selects the translation name of each row. `None` reads no translation.
 pub(super) async fn page(
     connection: &mut PgConnection,
     version: RecipeVersionId,
     unit: Option<UnitId>,
+    lang: Option<&LangCode>,
     offset: u64,
     limit: u32,
 ) -> Result<Vec<ParameterRow>, StorageError> {
@@ -135,6 +150,7 @@ pub(super) async fn page(
         .bind(unit.map(|unit| *unit.as_uuid()))
         .bind(offset)
         .bind(limit)
+        .bind(lang.map(LangCode::as_str))
         .fetch_all(connection)
         .await
         .map_err(map_error)?;

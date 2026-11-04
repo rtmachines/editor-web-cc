@@ -183,6 +183,7 @@ async fn list_with(
                 number: 1,
                 unit: unit.map(path),
                 page,
+                lang: None,
             },
         )
         .await
@@ -362,6 +363,36 @@ async fn list_parameters_reads_in_one_repeatable_read_transaction_and_writes_not
 }
 
 #[tokio::test]
+async fn list_parameters_gives_the_translated_name_of_the_requested_language() {
+    let fixture = world();
+    let pl = crate::memory::fixtures::lang("pl");
+
+    let with_pl = ListParameters::new(fixture.context())
+        .execute(
+            &actor(Role::Operator),
+            &meta(),
+            ListParametersInput {
+                reference: reference("R-1"),
+                number: 1,
+                unit: None,
+                page: 0,
+                lang: Some(pl),
+            },
+        )
+        .await
+        .unwrap();
+    let without = list(&fixture, None, 0).await;
+
+    assert!(!with_pl.rows.is_empty());
+    assert!(with_pl.rows.iter().all(|row| {
+        row.translated_name
+            .as_ref()
+            .is_some_and(|name| name.as_str() == "Nazwa")
+    }));
+    assert!(without.rows.iter().all(|row| row.translated_name.is_none()));
+}
+
+#[tokio::test]
 async fn an_unknown_recipe_or_version_is_not_found() {
     let fixture = world();
     let query = ListParameters::new(fixture.context());
@@ -370,6 +401,7 @@ async fn an_unknown_recipe_or_version_is_not_found() {
         number: 1,
         unit: None,
         page: 0,
+        lang: None,
     };
     let unknown_version = ListParametersInput {
         number: 7,

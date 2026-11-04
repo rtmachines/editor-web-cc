@@ -620,6 +620,7 @@ version-compare-m = Compare with version
 version-compare-submit = Compare
 parameters-caption = Parameters
 parameters-col-tag = Tag
+parameter-name-base-marker = (en)
 parameters-col-name = Name
 parameters-col-type = Type
 parameters-col-value = Value

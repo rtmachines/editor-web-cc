@@ -7,7 +7,7 @@ use axum::http::StatusCode;
 
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::assert_clean_html;
-use crate::test_support::plant::main_of;
+use crate::test_support::plant::{POLISH, main_of};
 
 /// The largest body of the page of the large draft, in bytes.
 ///
@@ -86,4 +86,27 @@ async fn versions_large_draft_shows_the_unit_of_the_link() {
     assert!(main.contains(&unit_link("U1", false)), "{main}");
     let add = "href=\"/recipes/R-400/versions/1/parameters/new?unit=U2\"";
     assert!(main.contains(add), "{main}");
+}
+
+/// The page of the large draft in Polish reads the `pl` names of 100 rows. The page keeps the
+/// byte bound. Each row without a `pl` name carries the marker `(en)`.
+///
+/// The `pl` page with 100 rows and 40 unit links measured 34 089 bytes. The marker and the
+/// Polish texts add about 6.8 KB to the English page of 27 276 bytes.
+#[tokio::test]
+async fn versions_large_draft_in_polish_keeps_the_byte_bound() {
+    let world = recipe_world();
+    world.fixture.seed_large_draft();
+    let reply = world
+        .get(&world.engineer, "/recipes/R-400/versions/1", &[POLISH])
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert_eq!(main.matches(ROW_LINK).count(), 100, "{main}");
+    assert!(
+        reply.body.len() < BYTE_BOUND,
+        "the page has {} bytes",
+        reply.body.len()
+    );
+    assert_clean_html(&reply.body);
 }

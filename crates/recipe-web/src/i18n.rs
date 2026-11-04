@@ -8,8 +8,11 @@ use std::fmt;
 use axum::http::HeaderMap;
 use fluent::concurrent::FluentBundle;
 use fluent::{FluentArgs, FluentResource};
+use recipe_domain::audit::RequestId;
+use recipe_domain::recipe::{LangCode, RecipeError};
 
 use crate::cookies::request_cookie;
+use crate::error::WebError;
 
 /// The name of the cookie that stores the UI language.
 pub(crate) const LANG_COOKIE: &str = "recipe_lang";
@@ -70,6 +73,38 @@ impl Lang {
             Self::Pl => "pl",
             Self::En => "en",
         }
+    }
+
+    /// Return the language tag of the stored translation that a page in this language shows.
+    ///
+    /// `Pl` gives `pl`. `En` gives `None`, because the English base text is not a translation and
+    /// `LangCode::parse` refuses `en` (ADR-0012, ADR-0126 (a)).
+    ///
+    /// # Errors
+    ///
+    /// Returns the `RecipeError` of `LangCode::parse` when the literal is not a language tag. That
+    /// is a program fault, and the caller maps it to `E-WEB-010`.
+    pub fn translation_lang(self) -> Result<Option<LangCode>, RecipeError> {
+        match self {
+            Self::Pl => LangCode::parse("pl").map(Some),
+            Self::En => Ok(None),
+        }
+    }
+
+    /// Return [`Self::translation_lang`] for a page handler, with the fault as `E-WEB-010`.
+    ///
+    /// The three handlers that list parameters share this mapping. It solves one problem: a
+    /// program fault of the literal tag must not become a `RecipeError` answer of the user.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WebError::Internal`] with the id of the request when the tag does not parse.
+    pub fn translation_lang_or_internal(
+        self,
+        request_id: RequestId,
+    ) -> Result<Option<LangCode>, WebError> {
+        self.translation_lang()
+            .map_err(|_fault| WebError::Internal { request_id })
     }
 
     /// Read the language from the `Cookie` headers of a request.

@@ -25,6 +25,11 @@ impl<'a> Texts<'a> {
         Self { bundles, lang }
     }
 
+    /// Return the UI language of these texts.
+    pub(crate) const fn lang(&self) -> Lang {
+        self.lang
+    }
+
     /// Return the text of the message `key`.
     pub(crate) fn get(&self, key: &str) -> String {
         self.bundles

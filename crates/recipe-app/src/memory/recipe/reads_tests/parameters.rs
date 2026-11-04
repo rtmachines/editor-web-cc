@@ -1,12 +1,12 @@
 //! Tests of `RecipeReads::parameter_page`, `unit_counts`, and `parameter_by_key` in memory (design D5).
 
 use recipe_domain::plant::UnitPath;
-use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter, VersionState};
+use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter, Translation, VersionState};
 
 use super::support::{begin, seed_live};
 use crate::error::StorageError;
 use crate::memory::MemoryStore;
-use crate::memory::fixtures::{machine, param, pkey, store, text, uid, vid};
+use crate::memory::fixtures::{lang, machine, param, pkey, store, text, uid, vid};
 use crate::ports::{Isolation, ParameterRow, Transaction};
 
 const TWO_VERSIONS: &[(u128, VersionState)] =
@@ -64,7 +64,7 @@ async fn parameter_page_orders_by_the_numeric_unit_path_then_ordinal_then_tag() 
 
     let rows = tx
         .recipe_reads()
-        .parameter_page(vid(12), None, 0, 10)
+        .parameter_page(vid(12), None, None, 0, 10)
         .await
         .unwrap();
 
@@ -79,7 +79,7 @@ async fn parameter_page_returns_the_columns_of_the_table_row() {
 
     let rows = tx
         .recipe_reads()
-        .parameter_page(vid(12), None, 0, 10)
+        .parameter_page(vid(12), None, None, 0, 10)
         .await
         .unwrap();
 
@@ -92,6 +92,50 @@ async fn parameter_page_returns_the_columns_of_the_table_row() {
     assert_eq!(row.ordinal, Ordinal::parse(3).unwrap());
     assert_eq!(row.plc_type, param(1, 102, "B").plc_type);
     assert_eq!(row.s7_address, None);
+}
+
+/// A parameter on the unit 102 with the stored translations `translations`.
+fn translated(n: u128, translations: Vec<Translation>) -> StoredParameter {
+    StoredParameter {
+        translations,
+        ..placed(n, 102, ("B", u32::try_from(n).unwrap()))
+    }
+}
+
+#[tokio::test]
+async fn parameter_page_gives_the_translated_name_of_the_requested_language() {
+    let store = store_with_units();
+    let polish = Translation {
+        lang: lang("pl"),
+        name: text("Nazwa"),
+        description: None,
+    };
+    seed_all(
+        &store,
+        12,
+        &[translated(1, vec![polish]), translated(2, vec![])],
+    );
+    let mut tx = begin(&store, Isolation::ReadOnly);
+
+    let pl = lang("pl");
+    let with_pl = tx
+        .recipe_reads()
+        .parameter_page(vid(12), None, Some(&pl), 0, 10)
+        .await
+        .unwrap();
+    let without = tx
+        .recipe_reads()
+        .parameter_page(vid(12), None, None, 0, 10)
+        .await
+        .unwrap();
+
+    let names = |rows: &[ParameterRow]| {
+        rows.iter()
+            .map(|row| row.translated_name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&with_pl), [Some(text("Nazwa")), None]);
+    assert_eq!(names(&without), [None, None]);
 }
 
 #[tokio::test]
@@ -107,17 +151,17 @@ async fn parameter_page_keeps_only_the_unit_and_the_version_that_it_names() {
 
     let in_unit = tx
         .recipe_reads()
-        .parameter_page(vid(12), Some(uid(101)), 0, 10)
+        .parameter_page(vid(12), Some(uid(101)), None, 0, 10)
         .await
         .unwrap();
     let empty_unit = tx
         .recipe_reads()
-        .parameter_page(vid(12), Some(uid(103)), 0, 10)
+        .parameter_page(vid(12), Some(uid(103)), None, 0, 10)
         .await
         .unwrap();
     let unknown_version = tx
         .recipe_reads()
-        .parameter_page(vid(99), None, 0, 10)
+        .parameter_page(vid(99), None, None, 0, 10)
         .await
         .unwrap();
 
@@ -142,13 +186,13 @@ async fn parameter_page_returns_the_page_that_offset_and_limit_name() {
 
     let page = tx
         .recipe_reads()
-        .parameter_page(vid(12), None, 1, 1)
+        .parameter_page(vid(12), None, None, 1, 1)
         .await
         .unwrap();
     let beyond = u64::try_from(i64::MAX).unwrap().checked_add(1).unwrap();
     let error = tx
         .recipe_reads()
-        .parameter_page(vid(12), None, beyond, 1)
+        .parameter_page(vid(12), None, None, beyond, 1)
         .await;
 
     assert_eq!(keys(&page), [pkey(2)]);

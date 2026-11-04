@@ -49,7 +49,7 @@ use recipe_domain::audit::{AggregateType, AuditEntry};
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{MachineCode, UnitId};
 use recipe_domain::recipe::{
-    ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
+    LangCode, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
 };
 use recipe_domain::timestamp::Timestamp;
 use sqlx::Postgres;
@@ -190,10 +190,11 @@ impl RecipeReads for PgTransaction {
         &mut self,
         version: RecipeVersionId,
         unit: Option<UnitId>,
+        lang: Option<&LangCode>,
         offset: u64,
         limit: u32,
     ) -> Result<Vec<ParameterRow>, StorageError> {
-        parameter_reads::page(&mut self.tx, version, unit, offset, limit).await
+        parameter_reads::page(&mut self.tx, version, unit, lang, offset, limit).await
     }
 
     async fn parameter_values(
