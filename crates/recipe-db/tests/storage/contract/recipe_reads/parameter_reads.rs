@@ -234,6 +234,52 @@ async fn parameter_values_give_the_stored_value_of_each_requested_key_only(h: &d
     assert!(other_version.is_empty(), "{other_version:?}");
 }
 
+/// The three distinct 64-bit extreme texts of design D5, with the tag of the parameter that holds each.
+/// Storage does not check a value against its type, so each parameter keeps the `DINT` type of the fixtures.
+const EXTREME_TEXTS: [(&str, &str); 3] = [
+    ("ULINT_MAX", "18446744073709551615"),
+    ("LINT_MIN", "-9223372036854775808"),
+    ("LDT_MAX", "9223372036854775807"),
+];
+
+/// The texts that the read must return. They repeat `EXTREME_TEXTS` on purpose, so that the
+/// written value and the expected text cannot change together.
+const EXPECTED_TEXTS: [&str; 3] = [
+    "18446744073709551615",
+    "-9223372036854775808",
+    "9223372036854775807",
+];
+
+async fn parameter_values_keep_the_64_bit_extremes(h: &dyn Harness) {
+    let plant = plant(h, 35, "M35").await;
+    let recipe = create_named(h, &plant, 35, "REF-35", "Recipe").await;
+    let version = recipe.versions()[0].id();
+    let mut stored = Vec::new();
+    for (n, (tag, text)) in (1u128..).zip(EXTREME_TEXTS) {
+        let mut extreme = parameter(&plant, n, tag);
+        extreme.value = StoredValue::from(serde_json::from_str::<serde_json::Value>(text).unwrap());
+        seed(h, version, &extreme).await;
+        stored.push(extreme);
+    }
+    let keys: Vec<ParameterKey> = stored.iter().map(|extreme| extreme.key).collect();
+    let mut tx = begin_read(h).await;
+
+    let read = tx
+        .recipe_reads()
+        .parameter_values(version, &keys)
+        .await
+        .unwrap();
+
+    assert_eq!(read.len(), EXTREME_TEXTS.len(), "{read:?}");
+    for (extreme, ((tag, _), expected)) in
+        stored.iter().zip(EXTREME_TEXTS.iter().zip(EXPECTED_TEXTS))
+    {
+        let value = read.get(&extreme.key).expect(tag);
+        assert_eq!(value, &extreme.value, "{tag}");
+        assert_eq!(value.as_json().to_string(), expected, "{tag}");
+    }
+}
+
 /// The output columns of the page statement. `ParameterRow` has no value field.
 const PAGE_COLUMNS: [&str; 8] = [
     "parameter_key",
@@ -292,4 +338,9 @@ contract_case!(
     parameter_values_give_the_stored_value_of_each_requested_key_only,
     parameter_values_give_the_stored_value_of_each_requested_key_only_memory,
     parameter_values_give_the_stored_value_of_each_requested_key_only_postgres
+);
+contract_case!(
+    parameter_values_keep_the_64_bit_extremes,
+    parameter_values_keep_the_64_bit_extremes_memory,
+    parameter_values_keep_the_64_bit_extremes_postgres
 );

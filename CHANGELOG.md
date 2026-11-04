@@ -4,6 +4,13 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- Tests compare `S7Layout` with a reference table. The composite rows of the table stay unverified until a TIA Portal export is available (ADR-0017, Q10).
+- More layout tests cover `WSTRING(n)`, an `ARRAY OF BOOL` with more than one dimension, an array of an array, and an odd `STRING(n)` before a `BYTE`.
+- Golden export tests cover each primitive type and its limit on `S7_300`, `S7_1200`, and `S7_1500`.
+- Storage tests write the 64-bit extremes and read them back through both value decoders and the limit columns.
+
 ## [0.6.0] - 2026-11-03
 
 ### Added

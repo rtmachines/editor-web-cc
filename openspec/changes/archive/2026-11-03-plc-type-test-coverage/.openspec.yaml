@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-03
+# The change adds tests only. No requirement of a spec changes.
+skip_specs: true

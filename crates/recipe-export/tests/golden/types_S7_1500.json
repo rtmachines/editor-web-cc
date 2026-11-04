@@ -1,0 +1,495 @@
+{
+  "schema_version": "1",
+  "exported_at": "2026-10-12T09:30:00Z",
+  "exported_by": "jkowalski",
+  "loadable": true,
+  "content_sha256": "90a64891f3cde63e595002797eaca5b82590caccaf8cd8954a7eb04ec2bf40e8",
+  "machine": {
+    "code": "M12",
+    "name": "Filler 2",
+    "plc_platform": "S7_1500"
+  },
+  "recipe": {
+    "reference_number": "R-200",
+    "name": "Types of the platform"
+  },
+  "version": {
+    "number": 1,
+    "status": "Approved",
+    "approved_at": "2026-10-12T09:30:00Z",
+    "approved_by": "anowak"
+  },
+  "types": [
+    {
+      "id": "00000000-0000-4000-8000-000000000016",
+      "name": "STRING",
+      "revision": 1,
+      "kind": "Primitive",
+      "string_length": 16
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000116",
+      "name": "WSTRING",
+      "revision": 1,
+      "kind": "Primitive",
+      "string_length": 16
+    }
+  ],
+  "parameters": [
+    {
+      "unit_path": "U1",
+      "tag": "BOOL",
+      "key": "00000000-0000-4000-8000-200000000000",
+      "name_en": "BOOL",
+      "type_id": "BOOL",
+      "s7_address": null,
+      "limits": [],
+      "value": true
+    },
+    {
+      "unit_path": "U1",
+      "tag": "BYTE",
+      "key": "00000000-0000-4000-8000-200000000001",
+      "name_en": "BYTE",
+      "type_id": "BYTE",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "255",
+          "max_length": null
+        }
+      ],
+      "value": "255"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "CHAR",
+      "key": "00000000-0000-4000-8000-20000000000f",
+      "name_en": "CHAR",
+      "type_id": "CHAR",
+      "s7_address": null,
+      "limits": [],
+      "value": "é"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "DATE",
+      "key": "00000000-0000-4000-8000-200000000016",
+      "name_en": "DATE",
+      "type_id": "DATE",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "20454",
+          "max": "20818",
+          "max_length": null
+        }
+      ],
+      "value": "20738"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "DATE_AND_TIME",
+      "key": "00000000-0000-4000-8000-200000000019",
+      "name_en": "DATE_AND_TIME",
+      "type_id": "DATE_AND_TIME",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "1767225600",
+          "max": "1798761599",
+          "max_length": null
+        }
+      ],
+      "value": "1791808200"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "DINT",
+      "key": "00000000-0000-4000-8000-200000000009",
+      "name_en": "DINT",
+      "type_id": "DINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-2147483648",
+          "max": "2147483647",
+          "max_length": null
+        }
+      ],
+      "value": "-2147483648"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "DTL",
+      "key": "00000000-0000-4000-8000-20000000001b",
+      "name_en": "DTL",
+      "type_id": "DTL",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "9223372036854775807",
+          "max_length": null
+        }
+      ],
+      "value": "1791808200500000000"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "DWORD",
+      "key": "00000000-0000-4000-8000-200000000003",
+      "name_en": "DWORD",
+      "type_id": "DWORD",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "4294967295",
+          "max_length": null
+        }
+      ],
+      "value": "4294967295"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "INT",
+      "key": "00000000-0000-4000-8000-200000000007",
+      "name_en": "INT",
+      "type_id": "INT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-32768",
+          "max": "32767",
+          "max_length": null
+        }
+      ],
+      "value": "-32768"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LDT",
+      "key": "00000000-0000-4000-8000-20000000001a",
+      "name_en": "LDT",
+      "type_id": "LDT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "9223372036854775807",
+          "max_length": null
+        }
+      ],
+      "value": "1791808200000000001"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LINT",
+      "key": "00000000-0000-4000-8000-20000000000b",
+      "name_en": "LINT",
+      "type_id": "LINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-9223372036854775808",
+          "max": "9223372036854775807",
+          "max_length": null
+        }
+      ],
+      "value": "-9223372036854775808"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LREAL",
+      "key": "00000000-0000-4000-8000-20000000000e",
+      "name_en": "LREAL",
+      "type_id": "LREAL",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-1",
+          "max": "1",
+          "max_length": null
+        }
+      ],
+      "value": "-0.125"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LTIME",
+      "key": "00000000-0000-4000-8000-200000000015",
+      "name_en": "LTIME",
+      "type_id": "LTIME",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-9223372036854775808",
+          "max": "9223372036854775807",
+          "max_length": null
+        }
+      ],
+      "value": "90000000000"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LTOD",
+      "key": "00000000-0000-4000-8000-200000000018",
+      "name_en": "LTOD",
+      "type_id": "LTOD",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "86399999999999",
+          "max_length": null
+        }
+      ],
+      "value": "45000000000001"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LWORD",
+      "key": "00000000-0000-4000-8000-200000000004",
+      "name_en": "LWORD",
+      "type_id": "LWORD",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "18446744073709551615",
+          "max_length": null
+        }
+      ],
+      "value": "18446744073709551615"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "REAL",
+      "key": "00000000-0000-4000-8000-20000000000d",
+      "name_en": "REAL",
+      "type_id": "REAL",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "200",
+          "max_length": null
+        }
+      ],
+      "value": "150"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "S5TIME",
+      "key": "00000000-0000-4000-8000-200000000013",
+      "name_en": "S5TIME",
+      "type_id": "S5TIME",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "9990000",
+          "max_length": null
+        }
+      ],
+      "value": "1000"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "SINT",
+      "key": "00000000-0000-4000-8000-200000000005",
+      "name_en": "SINT",
+      "type_id": "SINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-128",
+          "max": "127",
+          "max_length": null
+        }
+      ],
+      "value": "-128"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "STRING",
+      "key": "00000000-0000-4000-8000-200000000011",
+      "name_en": "STRING",
+      "type_id": "00000000-0000-4000-8000-000000000016",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": null,
+          "max": null,
+          "max_length": "16"
+        }
+      ],
+      "value": "Zone é"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "TIME",
+      "key": "00000000-0000-4000-8000-200000000014",
+      "name_en": "TIME",
+      "type_id": "TIME",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "-2147483648",
+          "max": "2147483647",
+          "max_length": null
+        }
+      ],
+      "value": "-5000"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "TIME_OF_DAY",
+      "key": "00000000-0000-4000-8000-200000000017",
+      "name_en": "TIME_OF_DAY",
+      "type_id": "TIME_OF_DAY",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "86399999",
+          "max_length": null
+        }
+      ],
+      "value": "45000500"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "UDINT",
+      "key": "00000000-0000-4000-8000-20000000000a",
+      "name_en": "UDINT",
+      "type_id": "UDINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "4294967295",
+          "max_length": null
+        }
+      ],
+      "value": "4294967295"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "UINT",
+      "key": "00000000-0000-4000-8000-200000000008",
+      "name_en": "UINT",
+      "type_id": "UINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "65535",
+          "max_length": null
+        }
+      ],
+      "value": "65535"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "ULINT",
+      "key": "00000000-0000-4000-8000-20000000000c",
+      "name_en": "ULINT",
+      "type_id": "ULINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "18446744073709551615",
+          "max_length": null
+        }
+      ],
+      "value": "18446744073709551615"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "USINT",
+      "key": "00000000-0000-4000-8000-200000000006",
+      "name_en": "USINT",
+      "type_id": "USINT",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "255",
+          "max_length": null
+        }
+      ],
+      "value": "255"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "WCHAR",
+      "key": "00000000-0000-4000-8000-200000000010",
+      "name_en": "WCHAR",
+      "type_id": "WCHAR",
+      "s7_address": null,
+      "limits": [],
+      "value": "Ω"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "WORD",
+      "key": "00000000-0000-4000-8000-200000000002",
+      "name_en": "WORD",
+      "type_id": "WORD",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": "0",
+          "max": "65535",
+          "max_length": null
+        }
+      ],
+      "value": "65535"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "WSTRING",
+      "key": "00000000-0000-4000-8000-200000000012",
+      "name_en": "WSTRING",
+      "type_id": "00000000-0000-4000-8000-000000000116",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": null,
+          "max": null,
+          "max_length": "16"
+        }
+      ],
+      "value": "Z𝄞"
+    }
+  ]
+}

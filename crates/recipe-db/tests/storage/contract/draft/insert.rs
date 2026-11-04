@@ -4,7 +4,7 @@ use recipe_app::error::{PARAMETER_TAG_UNIQUE, StorageError};
 use recipe_domain::plant::Primitive;
 use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter, StoredValue};
 use recipe_domain::text::{LongText, Text};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::fixtures::{
     assert_missing_row, assert_not_live_draft, commit_draft, domain, full_parameter, keys,
@@ -96,6 +96,44 @@ async fn insert_parameter_keeps_the_canonical_decimal_text(h: &dyn Harness) {
     assert_eq!(describe(&draft.parameters), describe(&stored));
     let values: Vec<&Value> = draft.parameters.iter().map(|p| p.value.as_json()).collect();
     assert!(values.iter().all(|value| value.is_number()), "{values:?}");
+}
+
+/// The five 64-bit extreme leaves of a value, each with the canonical text that the image must keep.
+const EXTREMES: [(&str, &str); 5] = [
+    ("ulint", "18446744073709551615"),
+    ("lword", "18446744073709551615"),
+    ("lint", "-9223372036854775808"),
+    ("ltime", "-9223372036854775808"),
+    ("ldt", "9223372036854775807"),
+];
+
+async fn insert_parameter_keeps_the_64_bit_extremes_in_the_image(h: &dyn Harness) {
+    let d = live_draft(h, 19).await;
+    // Storage does not check the value against the type, so the `DINT` fixture holds the object.
+    let written: Map<String, Value> = EXTREMES
+        .iter()
+        .map(|(key, text)| ((*key).to_owned(), number(text)))
+        .collect();
+    let mut stored = parameter(&d.plant, 1, "EXTREME");
+    stored.value = StoredValue::from(Value::Object(written.clone()));
+    let mut tx = begin(h).await;
+    tx.drafts().lock_draft(d.version).await.unwrap().unwrap();
+    tx.drafts().touch_draft(d.version, h.user()).await.unwrap();
+
+    let image = tx
+        .drafts()
+        .insert_parameter(d.version, &domain(&stored))
+        .await
+        .unwrap();
+    commit_draft(h, &d, tx).await;
+
+    let read = field(&image, "value");
+    assert_eq!(read, &Value::Object(written.clone()));
+    assert_eq!(read.to_string(), Value::Object(written).to_string());
+    for (key, text) in EXTREMES {
+        let leaf = read.get(key).unwrap();
+        assert_eq!(leaf.to_string(), text, "{key}");
+    }
 }
 
 async fn a_known_tag_gives_duplicate_with_the_tag_constraint(h: &dyn Harness) {
@@ -256,6 +294,11 @@ contract_case!(
     insert_parameter_keeps_the_canonical_decimal_text,
     insert_parameter_keeps_the_canonical_decimal_text_memory,
     insert_parameter_keeps_the_canonical_decimal_text_postgres
+);
+contract_case!(
+    insert_parameter_keeps_the_64_bit_extremes_in_the_image,
+    insert_parameter_keeps_the_64_bit_extremes_in_the_image_memory,
+    insert_parameter_keeps_the_64_bit_extremes_in_the_image_postgres
 );
 contract_case!(
     a_known_tag_gives_duplicate_with_the_tag_constraint,
