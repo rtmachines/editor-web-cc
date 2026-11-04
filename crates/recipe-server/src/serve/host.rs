@@ -22,8 +22,10 @@ use recipe_db::settings::PoolSettings;
 use recipe_db::{CloseOutcome, Database};
 use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
+use tokio::task::JoinHandle;
 
 use crate::config::webhook::WebhookUrl;
+use crate::listener::DrainOutcome;
 use crate::watchdog::{Watchdog, WatchdogSettings};
 
 /// The future that ends at the first stop signal (`SIGTERM` or Ctrl-C).
@@ -32,6 +34,13 @@ use crate::watchdog::{Watchdog, WatchdogSettings};
 /// The operating system cannot deliver a signal at that point.
 /// Step 4 builds the future inside the runtime.
 pub type Signal = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// The future of one accept loop. It ends with the drain result after the stop of the loop.
+///
+/// The type solves one problem: a test must end one loop at an exact point, and the stop token of
+/// the loop is private to the start. The host receives the loop as a value and spawns it, so a
+/// stub can race the loop against its own slot.
+pub type AcceptTask = Pin<Box<dyn Future<Output = DrainOutcome> + Send>>;
 
 /// The work that builds the Argon2id hasher (step 6).
 ///
@@ -236,4 +245,13 @@ pub trait Host: Send + Sync {
     ///
     /// Returns the error of the operating system, for example when the port is in use.
     async fn bind(&self, kind: ListenerKind, port: u16) -> io::Result<TcpListener>;
+
+    /// Steps 8 and 10: spawn the accept loop of the listener `kind` on the current runtime.
+    ///
+    /// The caller runs inside the runtime of step 3.
+    fn spawn_accept_loop(
+        &self,
+        kind: ListenerKind,
+        accept_loop: AcceptTask,
+    ) -> JoinHandle<DrainOutcome>;
 }

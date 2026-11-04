@@ -9,7 +9,7 @@ use std::sync::Arc;
 use recipe_db::CloseOutcome;
 use recipe_web::{HealthState, ReadOnlyMode};
 use tokio::runtime::Runtime;
-use tokio::task::JoinHandle;
+use tokio::task::{JoinError, JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use super::host::{ListenerKind, PoolClose, Signal, WatchdogControl};
@@ -26,6 +26,8 @@ pub struct ListenerHandle {
     kind: ListenerKind,
     stop: CancellationToken,
     task: JoinHandle<DrainOutcome>,
+    /// The join result of a loop that ended before the stop. `None` until [`Self::ended`] ends.
+    ended: Option<Result<DrainOutcome, JoinError>>,
 }
 
 impl ListenerHandle {
@@ -36,7 +38,12 @@ impl ListenerHandle {
         stop: CancellationToken,
         task: JoinHandle<DrainOutcome>,
     ) -> Self {
-        Self { kind, stop, task }
+        Self {
+            kind,
+            stop,
+            task,
+            ended: None,
+        }
     }
 
     /// The listener that this handle belongs to.
@@ -50,10 +57,64 @@ impl ListenerHandle {
         self.stop.cancel();
     }
 
-    /// Take the task of the accept loop. Await it for the drain result.
-    #[must_use]
-    pub fn into_task(self) -> JoinHandle<DrainOutcome> {
-        self.task
+    /// Wait until the accept loop ends and keep its join result.
+    ///
+    /// A second poll of a finished [`JoinHandle`] panics in Tokio. The handle therefore keeps the
+    /// result, and [`Self::join`] reads it later. The method stays pending while the loop runs
+    /// and is safe to drop at any point.
+    async fn ended(&mut self) -> bool {
+        let result = (&mut self.task).await;
+        let panicked = result.as_ref().is_err_and(JoinError::is_panic);
+        self.ended = Some(result);
+        panicked
+    }
+
+    /// Whether [`Self::ended`] has kept a join result.
+    pub(super) const fn has_ended(&self) -> bool {
+        self.ended.is_some()
+    }
+
+    /// Give the join result of the accept loop. It awaits the task only when no result is kept.
+    pub(super) async fn join(self) -> Result<DrainOutcome, JoinError> {
+        match self.ended {
+            Some(result) => result,
+            None => self.task.await,
+        }
+    }
+}
+
+/// Why the wait of the server ended (ADR-0125).
+///
+/// The value holds no join result. The [`ListenerHandle`] keeps it, because a [`JoinError`] is not
+/// `Clone`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StopCause {
+    /// The stop signal fired.
+    Signal,
+    /// An accept loop ended before the signal.
+    LoopEnded {
+        /// The listener of the loop that ended.
+        kind: ListenerKind,
+        /// Whether the loop ended with a panic.
+        panicked: bool,
+    },
+}
+
+/// Wait for the stop signal or for the end of an accept loop. The first one wins.
+///
+/// The function solves one problem: a loop that ends early leaves a server that cannot serve. The
+/// race starts the stop at once and does not wait for a signal that may never come. The `biased`
+/// order polls the signal first, so a signal and a loop end at the same time give a normal stop.
+pub(super) async fn race_stop(
+    signal: Signal,
+    public: &mut ListenerHandle,
+    internal: &mut ListenerHandle,
+) -> StopCause {
+    tokio::select! {
+        biased;
+        () = signal => StopCause::Signal,
+        panicked = public.ended() => StopCause::LoopEnded { kind: public.kind, panicked },
+        panicked = internal.ended() => StopCause::LoopEnded { kind: internal.kind, panicked },
     }
 }
 
@@ -134,13 +195,14 @@ pub(super) struct ServerParts {
 /// [`Server::stop`] closes the server.
 pub struct Server {
     parts: ServerParts,
+    cause: Option<StopCause>,
 }
 
 impl Server {
     /// Wrap the parts of a finished start.
     #[must_use]
     pub(super) const fn new(parts: ServerParts) -> Self {
-        Self { parts }
+        Self { parts, cause: None }
     }
 
     /// The runtime of the server.
@@ -164,13 +226,25 @@ impl Server {
         &self.parts.read_only
     }
 
-    /// Wait on the runtime until the stop signal fires.
+    /// Wait on the runtime until the stop signal fires or an accept loop ends.
     ///
-    /// The signal fires once. A call after the signal returns at once.
+    /// The wait ends once. A call after it returns at once. `Server::stop_cause` tells the cause.
     pub fn wait_for_signal(&mut self) {
         if let Some(signal) = self.parts.signal.take() {
-            self.parts.runtime.block_on(signal);
+            let ServerParts {
+                runtime,
+                public,
+                internal,
+                ..
+            } = &mut self.parts;
+            self.cause = Some(runtime.block_on(race_stop(signal, public, internal)));
         }
+    }
+
+    /// The cause that ended the wait. `None` before a wait has ended.
+    #[must_use]
+    pub(super) const fn stop_cause(&self) -> Option<StopCause> {
+        self.cause
     }
 
     /// Close everything in the stop order of ADR-0087 and ADR-0090.
@@ -195,3 +269,6 @@ impl Server {
         report
     }
 }
+
+#[cfg(test)]
+mod race_tests;

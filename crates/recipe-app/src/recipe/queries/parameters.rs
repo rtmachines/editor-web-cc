@@ -11,9 +11,9 @@ use recipe_domain::plant::{
     Machine, MachineCode, PlatformTypes, PlcTypeId, TypeNode, TypeTree, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
-    Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeVersionId,
-    ReferenceNumber, RuleFault, StoredLimit, StoredParameter, StoredValue, Translation, ValueFault,
-    VersionState, check_stored_parameter,
+    LangCode, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe,
+    RecipeVersionId, ReferenceNumber, RuleFault, StoredLimit, StoredParameter, StoredValue,
+    Translation, ValueFault, VersionState, check_stored_parameter,
 };
 use recipe_domain::text::{LongText, Text};
 
@@ -78,6 +78,8 @@ pub struct ListParametersInput {
     pub unit: Option<UnitPath>,
     /// The page number. The first page is page 0.
     pub page: u32,
+    /// The language of the translated names of the rows, or `None` for no translation.
+    pub lang: Option<LangCode>,
 }
 
 /// The result of `ListParameters`.
@@ -358,7 +360,7 @@ impl ListParameters {
         let filter = shown.as_ref().map(|count| count.unit);
         let rows = tx
             .recipe_reads()
-            .parameter_page(scope.detail.id, filter, offset, limit)
+            .parameter_page(scope.detail.id, filter, input.lang.as_ref(), offset, limit)
             .await?;
         let type_rows = tx.types().type_rows(scope.machine.id()).await?;
         let (rows, has_next) = cut_page(rows, size);

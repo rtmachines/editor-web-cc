@@ -768,3 +768,24 @@ fn i18n_pl_bundle_names_a_tag_tag_and_never_znacznik() {
         );
     }
 }
+
+#[test]
+fn i18n_translation_lang_of_polish_is_the_pl_tag_and_of_english_is_none() {
+    let pl = recipe_domain::recipe::LangCode::parse("pl").unwrap();
+    assert_eq!(Lang::Pl.translation_lang().unwrap(), Some(pl));
+    assert_eq!(Lang::En.translation_lang().unwrap(), None);
+}
+
+#[test]
+fn i18n_translation_lang_or_internal_gives_the_same_tags_as_translation_lang() {
+    let request_id = recipe_domain::audit::RequestId::from(uuid::Uuid::nil());
+    let pl = recipe_domain::recipe::LangCode::parse("pl").unwrap();
+    assert_eq!(
+        Lang::Pl.translation_lang_or_internal(request_id).unwrap(),
+        Some(pl)
+    );
+    assert_eq!(
+        Lang::En.translation_lang_or_internal(request_id).unwrap(),
+        None
+    );
+}

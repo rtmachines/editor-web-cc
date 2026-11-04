@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use axum::Router;
 use recipe_app::error::StorageError;
 use recipe_app::identity::{Argon2Params, BlockingHasher, PasswordHasher};
 use recipe_app::memory::{
@@ -31,12 +32,16 @@ use recipe_domain::timestamp::Timestamp;
 use tokio::net::TcpListener;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::{Notify, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use super::watch::Watch;
 use super::{START_TEXT, TokioClock};
 use crate::config::webhook::WebhookUrl;
+use crate::listener::{AcceptLoop, DrainOutcome, ListenerSettings};
 use crate::serve::host::{
-    HasherBuild, HealthPool, Host, ListenerKind, MainPool, PoolClose, Signal, WatchdogControl,
+    AcceptTask, HasherBuild, HealthPool, Host, ListenerKind, MainPool, PoolClose, Signal,
+    WatchdogControl,
 };
 use crate::serve::plan::ServeSettings;
 use crate::watchdog::WatchdogSettings;
@@ -190,6 +195,80 @@ impl Fire {
             }
         }
     }
+}
+
+/// How the stub ends an accept loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::serve) enum LoopWay {
+    /// The task drops the loop and returns a drain result with no cut connection.
+    Return,
+    /// The task panics, so the join gives a `JoinError`.
+    Panic,
+}
+
+/// The slot that ends the accept loop of one listener (ADR-0125).
+///
+/// A test chooses one listener and one [`LoopWay`] before the start. [`LoopEnd::now`] then ends
+/// that loop with no stop signal. A call before the loop waits is not lost. A clone shares the slot.
+#[derive(Clone, Default)]
+pub(in crate::serve) struct LoopEnd {
+    choice: Arc<Mutex<Option<(ListenerKind, LoopWay)>>>,
+    fired: Arc<Notify>,
+}
+
+impl LoopEnd {
+    /// Make the loop of `kind` end the way `way`, when [`LoopEnd::now`] fires.
+    pub(in crate::serve) fn at(&self, kind: ListenerKind, way: LoopWay) {
+        *self.choice.lock().unwrap() = Some((kind, way));
+    }
+
+    /// End the chosen loop now.
+    pub(in crate::serve) fn now(&self) {
+        self.fired.notify_one();
+    }
+
+    /// The way that the loop of `kind` ends, or `None` when the test chose another listener.
+    fn way_for(&self, kind: ListenerKind) -> Option<LoopWay> {
+        match *self.choice.lock().unwrap() {
+            Some((chosen, way)) if chosen == kind => Some(way),
+            _ => None,
+        }
+    }
+
+    /// Spawn `accept_loop`. It races the slot and ends the chosen way when the slot fires.
+    fn spawn(&self, way: LoopWay, mut accept_loop: AcceptTask) -> JoinHandle<DrainOutcome> {
+        let fired = Arc::clone(&self.fired);
+        tokio::spawn(async move {
+            let finished = tokio::select! {
+                outcome = &mut accept_loop => Some(outcome),
+                () = fired.notified() => None,
+            };
+            if let Some(outcome) = finished {
+                return outcome;
+            }
+            // The drop closes the socket of the listener, as the end of a real loop does.
+            drop(accept_loop);
+            match way {
+                LoopWay::Return => no_cut_outcome().await,
+                LoopWay::Panic => std::hint::black_box(None::<DrainOutcome>).unwrap(),
+            }
+        })
+    }
+}
+
+/// A drain result with no cut connection. A real loop with a stop that fired gives it.
+async fn no_cut_outcome() -> DrainOutcome {
+    let settings = ListenerSettings {
+        header_read_timeout: Duration::from_secs(1),
+        drain_deadline: Duration::from_secs(1),
+        accept_error_pause: Duration::from_millis(1),
+    };
+    let stop = CancellationToken::new();
+    stop.cancel();
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    AcceptLoop::new(Router::new(), settings, stop)
+        .run(listener)
+        .await
 }
 
 /// The ports that the stub listeners got from the system. A clone shares the list.
@@ -418,6 +497,8 @@ pub(in crate::serve) struct StubHost {
     pub webhook: MemoryWebhook,
     pub readiness: MemoryReadiness,
     pub fire: Fire,
+    /// The slot that ends one accept loop with no signal.
+    pub loop_end: LoopEnd,
     /// The wait in the first read of the state of step 9.
     pub hold: Hold,
     /// The ports of the listeners that the stub bound.
@@ -467,6 +548,7 @@ impl StubHost {
             webhook: MemoryWebhook::default(),
             readiness: MemoryReadiness::default(),
             fire: Fire::default(),
+            loop_end: LoopEnd::default(),
             hold: Hold::default(),
             ports,
             fail: None,
@@ -668,5 +750,16 @@ impl Host for StubHost {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
         self.ports.record(kind, listener.local_addr()?.port());
         Ok(listener)
+    }
+
+    fn spawn_accept_loop(
+        &self,
+        kind: ListenerKind,
+        accept_loop: AcceptTask,
+    ) -> JoinHandle<DrainOutcome> {
+        match self.loop_end.way_for(kind) {
+            Some(way) => self.loop_end.spawn(way, accept_loop),
+            None => tokio::spawn(accept_loop),
+        }
     }
 }

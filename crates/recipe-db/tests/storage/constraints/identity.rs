@@ -44,14 +44,18 @@ const HASH: &str = "$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA";
 
 /// Return a migrated database connection as the owner of the tables.
 async fn migrator() -> PgConnection {
-    let database = TestDatabase::create().await;
-    database.connect(Role::Migrator).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Migrator)
+        .await
 }
 
 /// Return a migrated database connection as the superuser of the harness.
 async fn superuser() -> PgConnection {
-    let database = TestDatabase::create().await;
-    database.connect(Role::Superuser).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Superuser)
+        .await
 }
 
 /// A 64-character string of one digit, which satisfies the hex format of `session`.

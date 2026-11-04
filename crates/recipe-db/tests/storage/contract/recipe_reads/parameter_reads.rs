@@ -4,7 +4,7 @@ use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_db::statements;
 use recipe_domain::plant::{Primitive, UnitId};
 use recipe_domain::recipe::StoredValue;
-use recipe_domain::recipe::{ParameterKey, RecipeVersionId};
+use recipe_domain::recipe::{LangCode, ParameterKey, RecipeVersionId};
 use serde_json::json;
 use sqlx::{Column as _, Executor as _};
 use uuid::Uuid;
@@ -26,9 +26,30 @@ async fn page(
 ) -> Vec<ParameterRow> {
     let mut tx = begin_read(h).await;
     tx.recipe_reads()
-        .parameter_page(version, unit, offset, limit)
+        .parameter_page(version, unit, None, offset, limit)
         .await
         .unwrap()
+}
+
+/// Read one page of the parameters with the requested translation language.
+async fn page_in(
+    h: &dyn Harness,
+    version: RecipeVersionId,
+    lang: Option<&LangCode>,
+    (offset, limit): (u64, u32),
+) -> Vec<ParameterRow> {
+    let mut tx = begin_read(h).await;
+    tx.recipe_reads()
+        .parameter_page(version, None, lang, offset, limit)
+        .await
+        .unwrap()
+}
+
+/// Return the translated names of the rows as text, in the order of the rows.
+fn translated_names(rows: &[ParameterRow]) -> Vec<Option<&str>> {
+    rows.iter()
+        .map(|row| row.translated_name.as_ref().map(|name| name.as_str()))
+        .collect()
 }
 
 /// Return the tags of the rows as text, in the order of the rows.
@@ -80,6 +101,7 @@ async fn parameter_rows_come_in_the_order_of_unit_numbers_ordinal_and_tag(h: &dy
             unit_path: path("U1.2"),
             tag: expected.tag,
             name_en: expected.name_en,
+            translated_name: None,
             ordinal: expected.ordinal,
             plc_type: plant.dint,
             s7_address: None,
@@ -280,13 +302,41 @@ async fn parameter_values_keep_the_64_bit_extremes(h: &dyn Harness) {
     }
 }
 
+async fn parameter_page_gives_the_translated_name_of_the_requested_language(h: &dyn Harness) {
+    let plant = plant(h, 36, "M36").await;
+    let recipe = create_named(h, &plant, 36, "REF-36", "Recipe").await;
+    let version = recipe.versions()[0].id();
+    let mut translated = parameter(&plant, 1, "A_TAG");
+    translated.translations = vec![
+        translation("de-AT", "Name de-AT", Some("Beschreibung")),
+        translation("pl", "Nazwa", None),
+    ];
+    let plain = parameter(&plant, 2, "B_TAG");
+    seed(h, version, &translated).await;
+    seed(h, version, &plain).await;
+    let lang = |tag| LangCode::parse(tag).unwrap();
+
+    let polish = page_in(h, version, Some(&lang("pl")), WHOLE).await;
+    let austrian = page_in(h, version, Some(&lang("de-AT")), WHOLE).await;
+    let without = page_in(h, version, Some(&lang("cs")), WHOLE).await;
+    let none = page_in(h, version, None, (0, 2)).await;
+
+    assert_eq!(tags(&polish), ["A_TAG", "B_TAG"]);
+    assert_eq!(translated_names(&polish), [Some("Nazwa"), None]);
+    assert_eq!(translated_names(&austrian), [Some("Name de-AT"), None]);
+    assert_eq!(translated_names(&without), [None, None]);
+    assert_eq!(tags(&none), ["A_TAG", "B_TAG"]);
+    assert_eq!(translated_names(&none), [None, None]);
+}
+
 /// The output columns of the page statement. `ParameterRow` has no value field.
-const PAGE_COLUMNS: [&str; 8] = [
+const PAGE_COLUMNS: [&str; 9] = [
     "parameter_key",
     "unit_id",
     "path",
     "tag",
     "name_en",
+    "translated_name",
     "ordinal",
     "plc_type_id",
     "s7_address",
@@ -323,6 +373,11 @@ contract_case!(
     the_unit_filter_and_the_page_cut_the_parameter_rows,
     the_unit_filter_and_the_page_cut_the_parameter_rows_memory,
     the_unit_filter_and_the_page_cut_the_parameter_rows_postgres
+);
+contract_case!(
+    parameter_page_gives_the_translated_name_of_the_requested_language,
+    parameter_page_gives_the_translated_name_of_the_requested_language_memory,
+    parameter_page_gives_the_translated_name_of_the_requested_language_postgres
 );
 contract_case!(
     unit_counts_count_the_parameters_of_each_unit_in_the_order_of_the_path,

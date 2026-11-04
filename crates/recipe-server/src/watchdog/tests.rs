@@ -12,8 +12,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use super::{
-    FailureVerdict, FailureWindow, Message, STALLED_EXIT_CODE, TripReport, Watchdog,
-    WatchdogSettings,
+    FailureVerdict, FailureWindow, Message, RESTART_EXIT_CODE, STALLED_EXIT_CODE, TripReport,
+    Watchdog, WatchdogSettings,
 };
 use crate::probe::{DEFAULT_INTERNAL_PORT, PROBE_BUDGET, ProbeFault};
 
@@ -104,6 +104,11 @@ fn the_probe_budget_is_above_the_readiness_check_timeout() {
 #[test]
 fn the_exit_code_of_a_stalled_process_is_70() {
     assert_eq!(STALLED_EXIT_CODE, 70);
+}
+
+#[test]
+fn the_restart_exit_code_equals_the_stalled_exit_code() {
+    assert_eq!(i32::from(RESTART_EXIT_CODE), STALLED_EXIT_CODE);
 }
 
 #[test]

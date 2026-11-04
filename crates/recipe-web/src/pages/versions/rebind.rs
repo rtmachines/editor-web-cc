@@ -261,11 +261,15 @@ async fn rebound(
     let view = GetVersion::new(ctx.clone())
         .execute(user, &request.meta(), target)
         .await?;
+    let lang = request
+        .lang()
+        .translation_lang_or_internal(request.request_id())?;
     let input = ListParametersInput {
         reference: reference.clone(),
         number,
         unit: None,
         page: 0,
+        lang,
     };
     let list = ListParameters::new(ctx)
         .execute(user, &request.meta(), input)

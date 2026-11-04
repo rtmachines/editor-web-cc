@@ -56,8 +56,10 @@ const EXEMPT: &[&str] = &[
 
 /// Return a migrated database connection as the owner of the tables.
 async fn migrator() -> PgConnection {
-    let database = TestDatabase::create().await;
-    database.connect(Role::Migrator).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Migrator)
+        .await
 }
 
 /// Return true when the catalog holds a constraint or an index of this name.

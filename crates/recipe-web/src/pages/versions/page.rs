@@ -236,11 +236,15 @@ pub(crate) async fn version_answer(
     let view = GetVersion::new(ctx.clone())
         .execute(user, &request.meta(), target)
         .await?;
+    let lang = request
+        .lang()
+        .translation_lang_or_internal(request.request_id())?;
     let input = ListParametersInput {
         reference,
         number,
         unit,
         page: page.index,
+        lang,
     };
     let list = ListParameters::new(ctx)
         .execute(user, &request.meta(), input)

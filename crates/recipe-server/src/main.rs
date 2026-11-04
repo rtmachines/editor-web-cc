@@ -8,6 +8,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::process::ExitCode;
+
 use anyhow::Result;
 use recipe_app::operations::AlertCounters;
 use recipe_server::config::args::{self, Command};
@@ -17,13 +19,15 @@ use recipe_server::{create_admin, logging, migrate, panic_hook, pg_env, probe, s
 ///
 /// The function starts the JSON logger once. When `RUST_LOG` is not valid, it writes exactly one
 /// `ERROR` event through the fallback logger. When the subcommand fails, it writes exactly one
-/// `ERROR` event with the chain of causes. In both cases it returns the error, so the process
-/// exits with code 1. The chain never holds a secret.
+/// `ERROR` event with the chain of causes. A failed start returns the error, so the process
+/// exits with code 1. An accept loop that ended early returns the exit code 70 (ADR-0125 (d)),
+/// so Docker restarts the container. The chain never holds a secret.
 ///
 /// # Errors
 ///
-/// Returns the error of the logger, of the argument parser, or of the subcommand.
-fn main() -> Result<()> {
+/// Returns the error of the logger, of the argument parser, or of the subcommand. An accept loop
+/// that ended early is no error here. It gives `Ok` with the exit code 70.
+fn main() -> Result<ExitCode> {
     if let Err(error) = logging::init_logging() {
         logging::fallback_error(std::io::stdout, &format!("{error:#}"));
         return Err(error);
@@ -35,7 +39,10 @@ fn main() -> Result<()> {
         let chain = format!("{error:#}");
         tracing::error!(error = chain.as_str(), "the command failed");
     }
-    result
+    match result {
+        Ok(()) => Ok(ExitCode::SUCCESS),
+        Err(error) => serve::exit_code(&error).ok_or(error),
+    }
 }
 
 /// Parse the arguments and run the subcommand.

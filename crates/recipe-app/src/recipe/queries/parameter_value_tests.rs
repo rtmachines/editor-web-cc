@@ -78,6 +78,7 @@ async fn list(fixture: &Fixture) -> ParameterList {
                 number: 1,
                 unit: None,
                 page: 0,
+                lang: None,
             },
         )
         .await
@@ -189,6 +190,7 @@ async fn list_parameters_gives_a_storage_defect_for_a_stored_value_that_does_not
                 number: 1,
                 unit: None,
                 page: 0,
+                lang: None,
             },
         )
         .await

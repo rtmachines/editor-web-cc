@@ -17,22 +17,23 @@ Source: `docs/architecture/reliability.md` §1, §2, §8. Load the skills `idiom
 - A unit test compiles every regex pattern, so a bad pattern fails the build.
 - `parking_lot::Mutex` replaces `std::sync::Mutex`. Never call `block_on` inside async code.
 - Argon2id hashing and snapshot checks run in `spawn_blocking`. Map the `JoinError` to `AppError::TaskFailed { stage }`.
-- Application code never calls `catch_unwind`. §2.4 rule 6 names the six places that catch a panic (ADR-0057 (h), ADR-0058 (f), ADR-0092).
-- The places are the inner `CatchPanicLayer`, the backstop `CatchPanicLayer`, and the supervisor of the jobs.
+- Application code never calls `catch_unwind`. §2.4 rule 6 names the eight places that catch a panic (ADR-0057 (h), ADR-0058 (f), ADR-0092, ADR-0125 (f)).
+- The places are the inner `CatchPanicLayer`, the backstop `CatchPanicLayer`, and the supervisor of the jobs. The supervisor also covers the `JoinSet` of the job loops.
 - The next two places are the join of a `spawn_blocking` task and the `JoinSet` of the connection tasks.
 - The sixth place is the `JoinSet` of the webhook calls of one run of `alerts`.
+- The seventh place is the join of the task of an accept loop. The eighth place is the join of the watchdog thread.
 
 Permitted exceptions (reliability §2.3):
 
 - Test code (`#[cfg(test)]`, `tests/`) may use `unwrap`, `expect`, and indexing.
 - The watchdog function of §2.4 is the only item with `#[allow(clippy::exit)]`. A comment on the attribute names §2.3.
-- No `expect` in `main`. `main` returns `anyhow::Result<()>`. A failed startup check writes one `ERROR` line and exits with code 1.
+- No `expect` in `main`. `main` returns `anyhow::Result<std::process::ExitCode>`. A failed startup check writes one `ERROR` line and exits with code 1. An accept loop that ends early writes one `ERROR` line and exits with code 70 (ADR-0125 (d)).
 - A review rejects every other `#[allow]` of these lints outside tests.
 
 ## Errors (reliability §1)
 
 - `recipe-domain` has one `thiserror` enum per bounded context: `PlantError`, `RecipeError`, `IdentityError`, `ExportError`.
-- Every error type has `fn code(&self) -> ErrorCode`. The code is stable. The message template can change.
+- Every error type has `fn code(&self) -> ErrorCode`. The code is stable. The message template can change. One exception: the marker `AcceptLoopEnded` of `recipe-server` owns no code (`reliability.md` §1.1, ADR-0125 (c)).
 - Add the row to `reliability.md` §1.2 first. Then add the variant and its row in `crates/recipe-domain/src/error_codes.rs`.
 - A variant carries the values that identify the failure, such as `reference`, `number`, `tag`, and `leaf`. It never carries a secret.
 - `?` converts between layers through `From`. Use `map_err` only when it adds context.

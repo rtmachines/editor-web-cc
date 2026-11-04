@@ -1,6 +1,6 @@
 # ADR-0031: Configuration of the migrator and the secret files of the roles
 
-Status: Accepted. Amended by a note: the sentence of this ADR that `serve` uses the same file format does not apply. The note in ADR-0062 drops the TOML file for `serve`
+Status: Accepted. Amended by a note: the sentence of this ADR that `serve` uses the same file format does not apply. The note in ADR-0062 drops the TOML file for `serve`. Amended by ADR-0123 (the init script sets `log_min_duration_statement = -1`)
 Date: 2026-10-13
 Deciders: project owner
 

@@ -32,6 +32,16 @@ const SESSION_SETTINGS_SQL: &str = "SELECT \
      set_config('idle_in_transaction_session_timeout', $3, false), \
      set_config('TimeZone', 'UTC', false)";
 
+/// The statement of the `after_release` hook. It is `true` inside an open transaction.
+///
+/// `sqlx::raw_sql` must send it with the simple query protocol (ADR-0124 (a)). Outside a
+/// transaction, the implicit transaction starts with this statement, so the two timestamps are
+/// equal. `sqlx::query_scalar` uses the extended protocol. Bind then starts the implicit
+/// transaction and Execute sets a later statement time, so the statement is `true` on each
+/// release and the hook closes every connection. The probe uses `<>` and not `<`, so a clock that
+/// steps back inside the transaction does not hide the open transaction.
+const OPEN_TRANSACTION_SQL: &str = "SELECT transaction_timestamp() <> statement_timestamp()";
+
 /// The three timeouts as text for `set_config`.
 struct SessionTimeouts {
     statement: String,
@@ -165,6 +175,77 @@ impl Database {
     }
 }
 
+/// The SQL of [`Database::session_facts`]. It reads four facts of the session that runs it.
+///
+/// `sqlx::raw_sql` sends it with the simple query protocol, as the release hook must send its
+/// statement (ADR-0124 (a)). The extended protocol would start the implicit transaction at Bind.
+#[cfg(feature = "test-support")]
+const SESSION_FACTS_SQL: &str = "SELECT pg_backend_pid(),      current_setting('transaction_read_only'),      current_setting('transaction_isolation'),      transaction_timestamp() <> statement_timestamp()";
+
+/// Four facts of one pooled session. The feature `test-support` enables the type.
+///
+/// The type solves one problem: a storage test must see the state that a released connection
+/// carries, and no `sqlx` type may leave the crate (design D2 item 4).
+#[cfg(feature = "test-support")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionFacts {
+    /// The process id of the server backend. A new connection has a new id.
+    pub backend_pid: i32,
+    /// The value of `transaction_read_only`: `on` or `off`.
+    pub transaction_read_only: String,
+    /// The value of `transaction_isolation`, for example `read committed`.
+    pub transaction_isolation: String,
+    /// Whether the session is inside an open transaction.
+    pub in_transaction: bool,
+}
+
+#[cfg(feature = "test-support")]
+impl Database {
+    /// Acquire one connection, send `sql` with `sqlx::raw_sql`, and release the connection.
+    ///
+    /// The feature `test-support` enables the method. A statement list may leave a transaction
+    /// open on the released connection (ADR-0124).
+    ///
+    /// # Errors
+    ///
+    /// Returns the `StorageError` of the acquire or of the statement. The connection is released
+    /// in both cases.
+    pub async fn send_raw_statement(&self, sql: &str) -> Result<(), StorageError> {
+        let mut connection = self.pool.acquire().await.map_err(map_error)?;
+        let result = sqlx::raw_sql(sql)
+            .execute(&mut *connection)
+            .await
+            .map(|_| ())
+            .map_err(map_error);
+        drop(connection);
+        result
+    }
+
+    /// Acquire one connection, read its [`SessionFacts`] with `sqlx::raw_sql`, and release it.
+    ///
+    /// The feature `test-support` enables the method.
+    ///
+    /// # Errors
+    ///
+    /// Returns the `StorageError` of the acquire or of the read.
+    pub async fn session_facts(&self) -> Result<SessionFacts, StorageError> {
+        use sqlx::Row as _;
+
+        let mut connection = self.pool.acquire().await.map_err(map_error)?;
+        let row = sqlx::raw_sql(SESSION_FACTS_SQL)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(map_error)?;
+        drop(connection);
+        Ok(SessionFacts {
+            backend_pid: row.try_get(0).map_err(map_error)?,
+            transaction_read_only: row.try_get(1).map_err(map_error)?,
+            transaction_isolation: row.try_get(2).map_err(map_error)?,
+            in_transaction: row.try_get(3).map_err(map_error)?,
+        })
+    }
+}
+
 /// How [`Database::close`] ended.
 ///
 /// The type solves one problem: the stop sequence must know whether a connection of an aborted
@@ -205,6 +286,39 @@ fn pool_options(settings: &PoolSettings) -> PgPoolOptions {
                     .map(|_| ())
             })
         })
+        .after_release(|connection, _metadata| {
+            Box::pin(async move {
+                let result = open_transaction(&mut *connection).await;
+                release_verdict(result)
+            })
+        })
+}
+
+/// Ask the server whether the released connection has an open transaction (ADR-0124 (a)).
+///
+/// The function reads the server state, because `Connection::is_in_transaction()` reads only
+/// the depth of sqlx, which is 0 inside the window of `Transaction::begin`.
+async fn open_transaction(connection: &mut sqlx::PgConnection) -> Result<bool, sqlx::Error> {
+    use sqlx::Row as _;
+
+    use sqlx::Executor as _;
+
+    connection
+        .fetch_one(sqlx::raw_sql(OPEN_TRANSACTION_SQL))
+        .await?
+        .try_get(0)
+}
+
+/// Map the probe result to the answer that the `after_release` hook gives to sqlx (ADR-0124 (a), (b)).
+///
+/// The argument is the result of the release statement. `Ok(false)` means no open transaction, so
+/// the hook answers `Ok(true)` and the connection stays in the pool. `Ok(true)` means an open
+/// transaction, so the hook answers `Ok(false)` and sqlx closes the connection with `close()`.
+/// `Err(_)` means a broken or aborted connection. The hook then returns the error, so sqlx calls
+/// `close_hard()` and a half-alive socket cannot block in `close()`. sqlx writes one `WARN` line
+/// for that error, and the project accepts it.
+fn release_verdict(result: Result<bool, sqlx::Error>) -> Result<bool, sqlx::Error> {
+    result.map(|in_transaction| !in_transaction)
 }
 
 /// Map the failure of the first connection.
@@ -219,11 +333,53 @@ fn connect_error(error: sqlx::Error) -> StorageError {
 }
 
 #[cfg(test)]
+mod probe_text_tests {
+    use super::OPEN_TRANSACTION_SQL;
+
+    const PROBE: &str = "transaction_timestamp() <> statement_timestamp()";
+
+    #[test]
+    fn the_release_probe_compares_the_two_timestamps_with_not_equal() {
+        assert!(
+            OPEN_TRANSACTION_SQL.contains(PROBE),
+            "probe text: {OPEN_TRANSACTION_SQL}"
+        );
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn the_session_facts_probe_compares_the_two_timestamps_with_not_equal() {
+        assert!(
+            super::SESSION_FACTS_SQL.contains(PROBE),
+            "probe text: {}",
+            super::SESSION_FACTS_SQL
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::time::Duration;
 
-    use super::pool_options;
+    use super::{pool_options, release_verdict};
     use crate::settings::PoolSettings;
+
+    #[test]
+    fn a_connection_without_an_open_transaction_is_kept() {
+        assert!(matches!(release_verdict(Ok(false)), Ok(true)));
+    }
+
+    #[test]
+    fn a_connection_with_an_open_transaction_is_closed_gracefully() {
+        assert!(matches!(release_verdict(Ok(true)), Ok(false)));
+    }
+
+    #[test]
+    fn a_connection_whose_release_statement_fails_is_closed_hard() {
+        let verdict = release_verdict(Err(sqlx::Error::PoolClosed));
+
+        assert!(matches!(verdict, Err(sqlx::Error::PoolClosed)));
+    }
 
     #[test]
     fn the_pool_takes_wait_warn_as_the_slow_acquire_threshold() {

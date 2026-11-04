@@ -186,3 +186,5 @@ mod rebind_toast_tests;
 mod rebind_world;
 #[cfg(test)]
 pub(crate) mod route_tests;
+#[cfg(test)]
+mod translation_fallback_tests;

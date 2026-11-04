@@ -7,7 +7,7 @@ use recipe_domain::export::Sha256;
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{MachineCode, PlcTypeId, S7Address, UnitId, UnitPath};
 use recipe_domain::recipe::{
-    Ordinal, ParameterKey, ParameterTag, RecipeId, RecipeVersionId, ReferenceNumber,
+    LangCode, Ordinal, ParameterKey, ParameterTag, RecipeId, RecipeVersionId, ReferenceNumber,
     StoredParameter, StoredValue, VersionState,
 };
 use recipe_domain::text::{LongText, Text};
@@ -111,7 +111,8 @@ pub struct VersionDetail {
 
 /// One row of the parameter table of a version.
 ///
-/// The page read loads no value, its limit rows, or its translation rows. A value can have 1 MiB.
+/// The page read loads no value and no limit row. It loads at most one translation name for each
+/// row, the name of the requested language (ADR-0012). A value can have 1 MiB.
 /// `parameter_by_key` loads one parameter in full. `parameter_values` loads the values of the
 /// every row of one page (ADR-0121).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +127,9 @@ pub struct ParameterRow {
     pub tag: ParameterTag,
     /// The English name of the parameter.
     pub name_en: Text,
+    /// The name in the requested language, or `None` when the parameter has no translation in it
+    /// or the page read asked for no language.
+    pub translated_name: Option<Text>,
     /// The position of the parameter among the parameters of its unit.
     pub ordinal: Ordinal,
     /// The type of the parameter.
@@ -208,7 +212,9 @@ pub trait RecipeReads: Send {
 
     /// Read one page of the parameters of `version`.
     ///
-    /// `unit` keeps the parameters of one unit. The rows come in the order of the unit path by
+    /// `unit` keeps the parameters of one unit. `lang` names the language of the translated name
+    /// of each row. The tag must equal the stored tag (ADR-0126 (a)). `None` reads no translation.
+    /// The rows come in the order of the unit path by
     /// its numbers (`U1.2` before `U1.10`), the ordinal, and the tag. The page starts after `offset` rows and holds at most
     /// `limit` rows.
     ///
@@ -219,6 +225,7 @@ pub trait RecipeReads: Send {
         &mut self,
         version: RecipeVersionId,
         unit: Option<UnitId>,
+        lang: Option<&LangCode>,
         offset: u64,
         limit: u32,
     ) -> Result<Vec<ParameterRow>, StorageError>;

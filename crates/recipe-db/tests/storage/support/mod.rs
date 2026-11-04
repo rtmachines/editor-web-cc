@@ -13,6 +13,7 @@ pub mod fixtures;
 pub mod gate;
 pub mod hold;
 pub mod identity;
+pub mod init_log;
 pub mod probe;
 mod session;
 mod temp_files;

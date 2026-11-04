@@ -1,6 +1,6 @@
 # ADR-0090: A `NULL` `sent_lsn` and a pool close that reaches its limit
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0125 (item (g) amends (b)). Item (g) gives exit code 70 for a stop after the end of an accept loop, also after a pool close that reaches its limit.
 Date: 2026-10-24
 Deciders: project owner
 

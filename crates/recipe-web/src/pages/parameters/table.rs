@@ -68,11 +68,16 @@ pub(crate) async fn table_body(
     let view = GetVersion::new(app.clone())
         .execute(user, &ctx.request.meta(), input)
         .await?;
+    let lang = ctx
+        .request
+        .lang()
+        .translation_lang_or_internal(ctx.request.request_id())?;
     let input = ListParametersInput {
         reference: target.reference.clone(),
         number: target.number,
         unit,
         page: page.index,
+        lang,
     };
     let list = ListParameters::new(app)
         .execute(user, &ctx.request.meta(), input)

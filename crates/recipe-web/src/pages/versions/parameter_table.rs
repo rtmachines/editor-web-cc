@@ -11,8 +11,10 @@ use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_app::recipe::ParameterList;
 use recipe_domain::plant::{BaseExpr, PlcPlatform, Primitive, TypeExpr};
 use recipe_domain::recipe::{ParameterKey, RuleFault, RuleField};
+use recipe_domain::text::Text;
 
 use crate::error::{FieldError, LineView};
+use crate::i18n::Lang;
 use crate::pages::path_values::Page;
 use crate::pages::recipes::pager_links;
 use crate::pages::render::page_url;
@@ -24,8 +26,8 @@ pub(crate) struct ParameterRowView {
     pub(crate) href: String,
     /// The tag of the parameter.
     pub(crate) tag: String,
-    /// The English name of the parameter.
-    pub(crate) name: String,
+    /// The name of the parameter in the UI language, built by [`shown_name`].
+    pub(crate) name: ShownName,
     /// The type text, for example `ARRAY[1..8] OF INT`.
     pub(crate) type_text: String,
     /// The cell of the column Value (ADR-0108 (a)).
@@ -40,6 +42,38 @@ pub(crate) struct ParameterRowView {
     pub(crate) address_lines: Vec<LineView>,
     /// True when the type of the parameter uses an older struct revision (ADR-0043 (j)).
     pub(crate) outdated: bool,
+}
+
+/// The name of a parameter as the table shows it (ADR-0012, ADR-0126).
+pub(crate) struct ShownName {
+    /// The translation, or the English base text `name_en`.
+    pub(crate) text: String,
+    /// The text of the marker of the English base text. `None` when no marker applies.
+    pub(crate) marker: Option<String>,
+}
+
+/// Return the name that a table shows for a parameter.
+///
+/// The function solves one problem: every table row must follow the same rule of the shown name,
+/// so no page builds the name by hand (ADR-0126 (f)). A translation of the UI language shows
+/// without a marker. Without a translation, the UI language `pl` shows `name_en` with the marker
+/// of `parameter-name-base-marker`. The UI language `en` shows `name_en` without a marker,
+/// because a translation of `en` never exists (ADR-0126 (e)).
+pub(crate) fn shown_name(t: Texts<'_>, translated: Option<&Text>, name_en: &Text) -> ShownName {
+    if let Some(translation) = translated {
+        return ShownName {
+            text: translation.to_string(),
+            marker: None,
+        };
+    }
+    let marker = match t.lang() {
+        Lang::En => None,
+        Lang::Pl => Some(t.get("parameter-name-base-marker")),
+    };
+    ShownName {
+        text: name_en.to_string(),
+        marker,
+    }
 }
 
 /// The cell of the column Value: the text of the value or a fixed word.
@@ -279,7 +313,7 @@ fn row_view(
     ParameterRowView {
         href: format!("{base}/parameters/{}", row.key),
         tag: row.tag.to_string(),
-        name: row.name_en.to_string(),
+        name: shown_name(t, row.translated_name.as_ref(), &row.name_en),
         value: ValueView::new(t, &type_text, leaf_text)
             .with_lines(format!("value-{}", row.key), value_lines),
         type_text,

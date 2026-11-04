@@ -4,6 +4,7 @@
 //! stop signals. The function [`run`] joins the configuration, the start, the wait for the stop
 //! signal, and the stop.
 
+use std::fmt;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,9 +18,13 @@ use recipe_db::Database;
 use recipe_db::settings::{Connection, PoolSettings};
 use tokio::net::TcpListener;
 use tokio::runtime::{Builder, Runtime};
+use tokio::task::JoinHandle;
 
-use super::host::{HasherBuild, HealthPool, Host, ListenerKind, MainPool, Signal, WatchdogControl};
+use super::host::{
+    AcceptTask, HasherBuild, HealthPool, Host, ListenerKind, MainPool, Signal, WatchdogControl,
+};
 use super::plan::Plan;
+use super::server::StopCause;
 use super::start::{Outcome, start};
 use super::webhook_client::build_webhook;
 use crate::backups::FileBackupDirectory;
@@ -28,7 +33,8 @@ use crate::coded::coded;
 use crate::config::serve::load;
 use crate::config::webhook::WebhookUrl;
 use crate::disk::SystemDiskSpace;
-use crate::watchdog::{Watchdog, WatchdogSettings};
+use crate::listener::DrainOutcome;
+use crate::watchdog::{RESTART_EXIT_CODE, Watchdog, WatchdogSettings};
 
 /// The prefix of the names of the worker threads of the runtime.
 const WORKER_THREAD_NAME: &str = "recipe-worker";
@@ -118,6 +124,14 @@ impl Host for ProcessHost {
     async fn bind(&self, _kind: ListenerKind, port: u16) -> io::Result<TcpListener> {
         TcpListener::bind((BIND_ADDRESS, port)).await
     }
+
+    fn spawn_accept_loop(
+        &self,
+        _kind: ListenerKind,
+        accept_loop: AcceptTask,
+    ) -> JoinHandle<DrainOutcome> {
+        tokio::spawn(accept_loop)
+    }
 }
 
 /// Register `SIGTERM` and `SIGINT`. The future ends at the first of them.
@@ -161,14 +175,70 @@ pub fn run(counters: AlertCounters) -> Result<()> {
     serve_with(&host, plan, counters)
 }
 
+/// An accept loop ended before the stop signal (ADR-0125).
+///
+/// The type solves one problem: a server without a loop cannot serve, so the process must stop and
+/// tell the supervisor why. `main` writes the one `ERROR` line from the chain of this error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcceptLoopEnded {
+    /// The listener of the loop that ended.
+    pub kind: ListenerKind,
+    /// Whether the loop ended with a panic.
+    pub panicked: bool,
+}
+
+impl fmt::Display for AcceptLoopEnded {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let listener = match self.kind {
+            ListenerKind::Public => "public",
+            ListenerKind::Internal => "internal",
+        };
+        let how = if self.panicked {
+            "with a panic"
+        } else {
+            "without a panic"
+        };
+        write!(
+            formatter,
+            "the accept loop of the {listener} listener ended before the stop signal {how}"
+        )
+    }
+}
+
+impl std::error::Error for AcceptLoopEnded {}
+
+/// The exit code that a failed `serve` earns (ADR-0125 (d)).
+///
+/// The function solves one problem: `main` must tell a failed start (exit code 1) from an accept
+/// loop that ended early (exit code 70, so Docker restarts the container). It looks for
+/// [`AcceptLoopEnded`] in the whole chain of causes, also under a context.
+#[must_use]
+pub fn exit_code(error: &anyhow::Error) -> Option<std::process::ExitCode> {
+    error
+        .chain()
+        .any(|cause| cause.is::<AcceptLoopEnded>())
+        .then(|| std::process::ExitCode::from(RESTART_EXIT_CODE))
+}
+
 /// Start on `host`, wait for the stop signal, and stop. [`run`] calls it with the real host.
+///
+/// # Errors
+///
+/// Returns the error of the first failed step of the start. Returns [`AcceptLoopEnded`] after the
+/// stop, when an accept loop ended before the signal.
 pub(super) fn serve_with(host: &dyn Host, plan: Plan, counters: AlertCounters) -> Result<()> {
     match start(host, plan, counters)? {
         Outcome::Interrupted => Ok(()),
         Outcome::Running(mut server) => {
             server.wait_for_signal();
+            let cause = server.stop_cause();
             let _report = server.stop();
-            Ok(())
+            match cause {
+                Some(StopCause::LoopEnded { kind, panicked }) => {
+                    Err(AcceptLoopEnded { kind, panicked }.into())
+                }
+                Some(StopCause::Signal) | None => Ok(()),
+            }
         }
     }
 }

@@ -43,8 +43,10 @@ pub const COVERED: &[&str] = &[
 
 /// Return a migrated database connection as the owner of the tables.
 async fn connection() -> PgConnection {
-    let database = TestDatabase::create().await;
-    database.connect(Role::Migrator).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Migrator)
+        .await
 }
 
 /// The rows that most tests of this module start from.
