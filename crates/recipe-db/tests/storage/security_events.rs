@@ -60,6 +60,7 @@ impl Fixture {
                 .await
                 .unwrap();
         let admin = test_database.connect(Role::Superuser).await;
+        test_database.keep_until_thread_ends();
         Self {
             user,
             unit_of_work: database.unit_of_work(),

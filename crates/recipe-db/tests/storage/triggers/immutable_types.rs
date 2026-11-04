@@ -10,8 +10,10 @@ use crate::support::fixtures::{self, Draft, TWIN_CAT};
 use crate::support::{Role, TestDatabase, assert_trigger};
 
 async fn plant() -> (PgConnection, Draft) {
-    let database = TestDatabase::create().await;
-    let mut conn = database.connect(Role::Migrator).await;
+    let mut conn = TestDatabase::create()
+        .await
+        .into_session(Role::Migrator)
+        .await;
     let draft = Draft::create(&mut conn).await;
     (conn, draft)
 }

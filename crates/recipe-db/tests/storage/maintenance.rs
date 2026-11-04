@@ -47,9 +47,11 @@ impl Fixture {
         let app = Database::connect(&database.target(Role::App), &PoolSettings::default())
             .await
             .unwrap();
+        let admin = database.connect(Role::Superuser).await;
+        database.keep_until_thread_ends();
         Self {
             store: app.maintenance(),
-            admin: database.connect(Role::Superuser).await,
+            admin,
         }
     }
 

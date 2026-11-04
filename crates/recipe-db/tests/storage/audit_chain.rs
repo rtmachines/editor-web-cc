@@ -38,9 +38,11 @@ impl Fixture {
         let app = Database::connect(&database.target(Role::App), &PoolSettings::default())
             .await
             .unwrap();
+        let admin = database.connect(Role::Superuser).await;
+        database.keep_until_thread_ends();
         let mut f = Self {
             chain: app.audit_chain(),
-            admin: database.connect(Role::Superuser).await,
+            admin,
         };
         f.append(rows).await;
         f

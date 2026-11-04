@@ -37,14 +37,18 @@ pub const COVERED: &[&str] = &[
 
 /// Return a migrated database connection as the superuser of the harness.
 async fn superuser() -> PgConnection {
-    let database = TestDatabase::create().await;
-    database.connect(Role::Superuser).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Superuser)
+        .await
 }
 
 /// Return a migrated database connection as the owner of `app_setting`.
 async fn migrator() -> PgConnection {
-    let database = TestDatabase::create().await;
-    database.connect(Role::Migrator).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Migrator)
+        .await
 }
 
 // ---- audit_log ----

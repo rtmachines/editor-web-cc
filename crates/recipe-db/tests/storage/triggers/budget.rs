@@ -16,8 +16,10 @@ const MAX_PARAMETERS: i32 = 4000;
 const PURGE_BATCH: i64 = 5000;
 
 async fn plant() -> (PgConnection, Draft) {
-    let database = TestDatabase::create().await;
-    let mut conn = database.connect(Role::Migrator).await;
+    let mut conn = TestDatabase::create()
+        .await
+        .into_session(Role::Migrator)
+        .await;
     let draft = Draft::create(&mut conn).await;
     (conn, draft)
 }

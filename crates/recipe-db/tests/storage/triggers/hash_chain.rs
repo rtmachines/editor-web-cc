@@ -57,7 +57,10 @@ pub type CheckResult = (Option<i64>, i64, Option<i64>, Option<Vec<u8>>);
 async fn connection() -> PgConnection {
     // After 0003, `audit_owner` owns the audit tables and `recipe_migrator` holds no privilege on
     // them. The superuser of the harness writes the audit rows (design D12).
-    TestDatabase::create().await.connect(Role::Superuser).await
+    TestDatabase::create()
+        .await
+        .into_session(Role::Superuser)
+        .await
 }
 
 /// Insert one valid entry with NULL chain columns and return its `chain_seq`.
