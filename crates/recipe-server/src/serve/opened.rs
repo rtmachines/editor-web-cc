@@ -175,15 +175,19 @@ async fn close_resources(
 }
 
 /// Wait for the accept loop to drain and return the number of cut connections.
+///
+/// A loop that ended before the stop has its join result in the handle. A kept `JoinError` gives
+/// no line, because the `ERROR` line of `main` covers that fault.
 async fn join_listener(handle: Option<ListenerHandle>) -> usize {
     let Some(handle) = handle else {
         return 0;
     };
     let kind = handle.kind();
-    match handle.into_task().await {
+    let kept = handle.has_ended();
+    match handle.join().await {
         Ok(outcome) => outcome.cut(),
+        Err(_) if kept => 0,
         Err(error) => {
-            // The panic hook has written the `ERROR` line of a panic. The join adds one `WARN` line.
             tracing::warn!(
                 listener = ?kind,
                 panicked = error.is_panic(),

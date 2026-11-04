@@ -1,6 +1,6 @@
 # ADR-0057: Panic containment layers
 
-Status: Accepted. Amended by ADR-0092 (item (h): a sixth place, the `JoinSet` of the webhook calls)
+Status: Accepted. Amended by ADR-0092 (item (h): a sixth place, the `JoinSet` of the webhook calls). Amended by ADR-0125 (item (f): two more places, the join of an accept loop and the join of the watchdog thread)
 Date: 2026-10-23
 Deciders: project owner
 

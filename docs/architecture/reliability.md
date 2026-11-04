@@ -19,7 +19,7 @@ Each library crate owns its error types, with two exceptions. `recipe-export` re
 | `recipe-db` | none public | Maps `sqlx::Error` into `StorageError` of `recipe-app` with the rule below. `recipe-db` depends on `recipe-app`, and `recipe-app` does not depend on `recipe-db` (`overview.md` 5) |
 | `recipe-export` | none | No error type of its own. The JSON writer of the HTTP response returns `ExportError` of `recipe-domain` |
 | `recipe-web` | `WebError` | `#[from] AppError`, plus `PayloadTooLarge { limit }`, `BadRequest { field, reason }`, `BadRow { row, field, reason }` (ADR-0037), `BadQuery { field, reason }` (a query value with no input on the page, ADR-0050 (e)), `CsrfRejected`, `ReadOnlyMode`, `Internal { request_id }`. Two carriers own no code. `Fields { lines, form }` holds a non-empty list of field errors, and `code()` returns the code of the first line (ADR-0041). `Conflict { error, view }` holds `AppError::ConcurrentEdit` and the data of the last change, and `code()` returns `E-WEB-001` of the inner error (ADR-0043). `WebError` has no `#[from] ExportError`. An `ExportError` of the JSON writer becomes `AppError` first and reaches `WebError` only through `AppError` |
-| `recipe-server` | `anyhow::Error` | Everything, only in `main()`, configuration loading, subcommands, and wiring |
+| `recipe-server` | `anyhow::Error` | Everything, only in `main()`, configuration loading, subcommands, and wiring. One exception owns no code: `AcceptLoopEnded`, a marker in the `anyhow` chain that `exit_code` reads to give exit code 70 (ADR-0125 (c), (d)) |
 
 Rules:
 
@@ -238,7 +238,7 @@ The `[profile.release]` section sets `overflow-checks = true`. An overflow in re
 
 - Test code (`#[cfg(test)]` and `tests/`) may use `unwrap`, `expect`, and indexing. The lint is set to `allow` for test targets.
 - The watchdog function of 2.4 has the attribute `#[allow(clippy::exit)]`, because it must end a stalled process with `std::process::exit(70)`. It is the only function with this attribute. A comment on the attribute names this section.
-- No other exception. `recipe-server::main` returns `anyhow::Result<()>`. A startup precondition that fails returns an error with context, and the process exits with code 1 after one `ERROR` line from `main`. A panic hook line is not counted (ADR-0061 (j)). A pull request that adds `#[allow(clippy::unwrap_used)]` outside tests is rejected in review.
+- No other exception. `recipe-server::main` returns `anyhow::Result<std::process::ExitCode>`. A startup precondition that fails returns an error with context, and the process exits with code 1 after one `ERROR` line from `main`. An accept loop that ends before the stop exits with code 70 after one `ERROR` line (ADR-0125 (d)). A panic hook line is not counted (ADR-0061 (j)). A pull request that adds `#[allow(clippy::unwrap_used)]` outside tests is rejected in review.
 
 ### 2.4 Panic containment
 
@@ -251,13 +251,15 @@ A panic in application code is a bug, not an error. The system contains it and k
    - The backstop sits directly inside the layer `request_id` and catches a panic of the outer layers. `api.md` 5.1 gives its plain text answer, the one exception to `api.md` 5.1 to 5.3 and 9 (ADR-0057 (d), (e), (j)).
    - The open transaction of the request is dropped and PostgreSQL rolls it back. No partial write survives (R29).
 4. Every background job of the table below runs inside a supervisor loop. A panic in one iteration is caught by the task join, logged with the `job` field, and the job restarts after `job.restart_delay`.
-5. Watchdog: an OS thread, started before the Tokio runtime, probes `/healthz` on the internal listener every `watchdog.probe_interval`. The probe is the probe of the subcommand `healthcheck` with the budget `watchdog.probe_timeout` (ADR-0059 (d), (e)). After `watchdog.failures` failed probes in `watchdog.window`, the thread writes one `ERROR` line and calls `std::process::exit(70)` (the exception of 2.3). Docker restarts the container. This covers a stalled runtime, which `restart: always` alone does not detect. The watchdog counts no failed probe before the internal listener opens, and it stops at the signal (ADR-0061 (g), ADR-0058 (l)).
-6. Application code never calls `std::panic::catch_unwind` itself. Six places catch a panic:
+5. Watchdog: an OS thread, started before the Tokio runtime, probes `/healthz` on the internal listener every `watchdog.probe_interval`. The probe is the probe of the subcommand `healthcheck` with the budget `watchdog.probe_timeout` (ADR-0059 (d), (e)). After `watchdog.failures` failed probes in `watchdog.window`, the thread writes one `ERROR` line and calls `std::process::exit(70)` (the exception of 2.3). Docker restarts the container. This covers a stalled runtime, which `restart: always` alone does not detect. The watchdog counts no failed probe before the internal listener opens. It stops at the signal or at the end of an accept loop (ADR-0061 (g), ADR-0058 (l), ADR-0125 (i)).
+6. Application code never calls `std::panic::catch_unwind` itself. Eight places catch a panic:
    - the inner layer and the backstop of rule 3,
-   - the supervisor in rule 4,
+   - the supervisor in rule 4, with the `JoinSet` of the job loops in `Supervisor::drain`,
    - the join of a `spawn_blocking` task,
    - the `JoinSet` of the connection tasks of the accept loop (ADR-0058 (f)). That panic ends only its connection.
    - the `JoinSet` of the webhook calls of one run of the job `alerts` (ADR-0092). That panic gives `WebhookFault::Connection` for its own call only. The other calls keep their results, and the job does not restart.
+   - the join of the task of an accept loop. A panic there ends the loop, and the server stops (ADR-0125 (a), (f)).
+   - the join of the watchdog thread in `Watchdog::stop`. A panic there sets `watchdog_panicked`, and the stop continues (ADR-0125 (f)).
 7. A panic inside a `spawn_blocking` task (Argon2id hashing, snapshot validation, export rebuild, diff of two versions) reaches the use case as a `JoinError`. The use case maps it to `AppError::TaskFailed { stage }`, which returns `500 E-WEB-011`. The panic hook of rule 2 logs the panic.
 
 A panic is a visible signal. The job `alerts` raises an alert when more than `alerts.panic_count` panic events occur in `alerts.panic_window` (section 3.7).
@@ -574,14 +576,14 @@ Both endpoints live on the internal listener on `http.internal_port`. They need 
 
 ### 7.3 Graceful shutdown
 
-ADR-0058 (l) to (p) holds the stop. ADR-0087 amends the drain of the internal listener and the abort. ADR-0088 (e) adds the cut count of the jobs to the `WARN` line of step 6. ADR-0089 (c) writes that line only for a cut. ADR-0090 (b) holds a pool close that reaches its limit. ADR-0061 (f) holds a signal during the start.
+ADR-0058 (l) to (p) holds the stop. ADR-0087 amends the drain of the internal listener and the abort. ADR-0088 (e) adds the cut count of the jobs to the `WARN` line of step 6. ADR-0089 (c) writes that line only for a cut. ADR-0090 (b) holds a pool close that reaches its limit. ADR-0061 (f) holds a signal during the start. ADR-0125 (b), (g), and (i) hold the stop after an end of an accept loop.
 
-1. The process receives `SIGTERM` from Docker.
+1. The process receives `SIGTERM` from Docker, or an accept loop ends (ADR-0125 (i)). Both events start the stop.
 2. Readiness turns off, and the watchdog stops. The public listener stops accepting new connections. The supervised jobs get the cancel.
 3. Requests in flight and open job iterations continue together under `shutdown.drain`. Open transactions commit or roll back as their use case finishes. The internal listener still serves `/healthz` with `ok` and `/readyz` with `not ready`.
 4. After `shutdown.drain`, the server aborts the open connections and does not wait for them. Their transactions roll back (ADR-0087 (d)). The supervisor aborts the open job iterations in the same way (ADR-0060 (j)).
 5. Both pools close within `shutdown.pool_close`. The pool close waits for the connections of the aborted tasks. A pool whose close reaches the limit gets one `WARN` line that names the pool, and the stop continues (ADR-0090 (b), 1.1). Then the internal listener stops with the drain `shutdown.internal_drain` of 0 s. It cuts its connections at once (ADR-0087 (a)).
-6. The runtime stops within `shutdown.runtime_stop`. The process exits with code 0, also after a cut drain or a pool close that reached its limit. When at least one count is above 0, one `WARN` line gives three counts (ADR-0088 (e), ADR-0089 (c)):
+6. The runtime stops within `shutdown.runtime_stop`. The process exits with code 0, also after a cut drain or a pool close that reached its limit. After an end of an accept loop, it exits with code 70 instead, so Docker restarts it (ADR-0125 (g)). When at least one count is above 0, one `WARN` line gives three counts (ADR-0088 (e), ADR-0089 (c)):
    - `cut_public`: the cut connections of the public listener,
    - `cut_internal`: the cut connections of the internal listener,
    - `cut_jobs`: the cut job iterations.
@@ -618,7 +620,7 @@ The values are in section 7.11. This table gives the key and the mechanism.
 
 ### 7.5 Connection pool
 
-Pool size is `db.pool_size` connections for the application and `db.health_pool_size` for health checks. PostgreSQL `max_connections` is `db.max_connections` (section 7.11). The pool tests a connection before use with `test_before_acquire = true`. A pool exhaustion wait above `db.pool_wait_warn` produces a `WARN` event. The `Login` use case acquires its connection only after the Argon2 semaphore permit, so a login flood cannot hold the pool.
+Pool size is `db.pool_size` connections for the application and `db.health_pool_size` for health checks. PostgreSQL `max_connections` is `db.max_connections` (section 7.11). The pool tests a connection before use with `test_before_acquire = true`. The `after_release` hook of the pool closes a released connection that holds an open transaction (ADR-0124). A pool exhaustion wait above `db.pool_wait_warn` produces a `WARN` event. The `Login` use case acquires its connection only after the Argon2 semaphore permit, so a login flood cannot hold the pool.
 
 ### 7.6 PostgreSQL settings for data safety
 

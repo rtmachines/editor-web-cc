@@ -28,6 +28,8 @@ mod transaction;
 mod trigger_messages;
 mod unit_of_work;
 
+#[cfg(feature = "test-support")]
+pub use database::SessionFacts;
 pub use database::{CloseOutcome, Database};
 pub use migrator::migrate;
 #[cfg(feature = "test-support")]

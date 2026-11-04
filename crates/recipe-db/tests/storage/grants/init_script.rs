@@ -1,12 +1,12 @@
 //! Script tests of `deploy/db/initdb/01-roles.sh` (ADR-0031, design D17).
 //!
-//! Each test runs the script inside the harness container with `docker exec`. The script reads
+//! Runtime tests run the script inside the harness container with `docker exec`. The script reads
 //! its secrets from `SECRET_DIR` and checks every input before it starts `psql`. `PGHOST` points
 //! to a directory without a server, so a script that skips a check ends with another exit code.
 
 use std::process::Command;
 
-use crate::support::server;
+use crate::support::{document_sql, server};
 
 const SCRIPT: &str = "/docker-entrypoint-initdb.d/01-roles.sh";
 const VALID_SUBNET: &str = "172.28.0.0/16";
@@ -150,4 +150,67 @@ fn the_script_takes_the_client_rules_from_the_shared_file() {
             && (line.contains("postgres") || line.contains("template1"))),
         "the script holds no REVOKE on a default database"
     );
+}
+
+/// The five `SET` statements that keep a password out of the server log (ADR-0031, ADR-0123).
+const LOG_GUARDS: [&str; 5] = [
+    "SET log_statement = 'none';",
+    "SET log_min_error_statement = 'panic';",
+    "SET log_min_duration_statement = -1;",
+    "SET log_transaction_sample_rate = 0;",
+    "SET log_min_duration_sample = -1;",
+];
+/// The token that starts the password of a `CREATE ROLE` statement. The match uses case, so the
+/// `\set ..._password` lines and the comments do not match.
+const PASSWORD_TOKEN: &str = "PASSWORD :'";
+
+/// The 1-based line numbers of the lines for which `matches` is true.
+fn line_numbers(text: &str, matches: impl Fn(&str) -> bool) -> Vec<usize> {
+    text.lines()
+        .enumerate()
+        .filter(|(_, line)| matches(line))
+        .map(|(index, _)| index.saturating_add(1))
+        .collect()
+}
+
+#[test]
+fn every_password_line_comes_after_the_five_log_guards_and_before_the_first_connect() {
+    // ADR-0123 (a): a password literal reaches the log through a slow statement, unless the
+    // session turns duration and sampling logs off before the first `CREATE ROLE`.
+    let text = script_text();
+
+    let guard_lines: Vec<usize> = LOG_GUARDS
+        .iter()
+        .map(|guard| {
+            let found = line_numbers(&text, |line| line.trim() == *guard);
+            assert_eq!(found.len(), 1, "01-roles.sh holds exactly one `{guard}`");
+            found[0]
+        })
+        .collect();
+    let last_guard = guard_lines.iter().copied().max().unwrap_or_default();
+    let connect_lines = line_numbers(&text, |line| line.starts_with(r"\connect"));
+    let first_connect = *connect_lines
+        .first()
+        .expect("01-roles.sh has a connect line");
+    let password_lines = line_numbers(&text, |line| line.contains(PASSWORD_TOKEN));
+
+    assert!(!password_lines.is_empty(), "01-roles.sh has password lines");
+    for line in password_lines {
+        assert!(
+            last_guard < line && line < first_connect,
+            "password line {line} must come after line {last_guard} and before line {first_connect}"
+        );
+    }
+}
+
+#[test]
+fn the_document_block_of_the_roles_holds_the_five_log_guards() {
+    let block = document_sql(&["5.1"], &[]);
+
+    for guard in LOG_GUARDS {
+        assert!(
+            block.contains(guard),
+            "data-model.md section 5.1 holds `{guard}`"
+        );
+    }
 }

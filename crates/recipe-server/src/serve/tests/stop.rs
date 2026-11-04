@@ -3,6 +3,7 @@
 //! The tests run the stop on a stub host. They read the order of the steps from the event log. The
 //! observer of the stub adds the events that no port shows: readiness off and a closed listener.
 
+use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
@@ -14,9 +15,9 @@ use recipe_db::CloseOutcome;
 use super::expect_running;
 use super::ready::{get, status};
 use crate::serve::host::ListenerKind;
-use crate::serve::process::serve_with;
+use crate::serve::process::{AcceptLoopEnded, exit_code, serve_with};
 use crate::serve::server::CloseReport;
-use crate::serve::test_support::stub::{Event, Fire, Pool, StubHost};
+use crate::serve::test_support::stub::{Event, Fire, LoopWay, Pool, StubHost};
 use crate::serve::test_support::{self, LogCapture};
 
 /// The time that a signal thread waits before it fires. It lets the main thread reach its wait.
@@ -42,12 +43,42 @@ impl Drop for FireOnDrop {
     }
 }
 
+/// A thread that acts after the server is ready and then waits for the end of the test run.
+struct ActionThread {
+    handle: thread::JoinHandle<()>,
+    done: mpsc::Sender<()>,
+}
+
+impl ActionThread {
+    /// Tell the thread that `serve_with` returned, so it ends at once, and wait for it.
+    ///
+    /// The thread has a long wait as a safety net. Without this call, a passing test would wait for
+    /// the full delay.
+    fn finish(self) {
+        // The send fails only when the thread already ended. Then the join gives the result.
+        let _ended = self.done.send(());
+        self.handle.join().unwrap();
+    }
+}
+
 /// Fire the signal of `host` after the server is ready. The start must have ended before.
-fn fire_when_ready(host: &StubHost) -> thread::JoinHandle<()> {
+fn fire_when_ready(host: &StubHost) -> ActionThread {
+    act_when_ready(host, || {}, FIRE_DELAY)
+}
+
+/// Run `action` after the server is ready. Fire the signal `delay` later or at `finish`.
+///
+/// The thread fires the signal also after a panic, so a failed run does not hang.
+fn act_when_ready(
+    host: &StubHost,
+    action: impl FnOnce() + Send + 'static,
+    delay: Duration,
+) -> ActionThread {
+    let (done, finished) = mpsc::channel();
     let log = host.log.clone();
     let ports = host.ports.clone();
     let fire = FireOnDrop(host.fire.clone());
-    thread::spawn(move || {
+    let handle = thread::spawn(move || {
         let _fire = fire;
         let begin = Instant::now();
         let ready = loop {
@@ -59,8 +90,11 @@ fn fire_when_ready(host: &StubHost) -> thread::JoinHandle<()> {
             thread::sleep(Duration::from_millis(5));
         };
         assert!(ready, "the server never became ready: {:?}", log.events());
-        thread::sleep(FIRE_DELAY);
-    })
+        action();
+        // A message or a closed channel ends the wait. Only a timeout means that nobody finished.
+        let _finished = finished.recv_timeout(delay);
+    });
+    ActionThread { handle, done }
 }
 
 #[test]
@@ -176,7 +210,7 @@ fn serve_stops_after_the_signal_and_ends_with_exit_code_zero_also_after_a_pool_t
     host.pool_outcome = CloseOutcome::TimedOut;
     let sender = fire_when_ready(&host);
     let result = serve_with(&host, test_support::plan(), AlertCounters::default());
-    sender.join().unwrap();
+    sender.finish();
     assert!(result.is_ok(), "{result:?}");
     let events = host.log.events();
     assert_eq!(events.last(), Some(&Event::WatchdogStop), "{events:?}");
@@ -190,4 +224,154 @@ fn serve_stops_after_the_signal_and_ends_with_exit_code_zero_also_after_a_pool_t
         .filter(|line| line.contains("\"level\":\"ERROR\""))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// The text of the `WARN` line that the join of a loop without a result writes today.
+const NO_DRAIN_RESULT: &str = "an accept loop ended without a drain result";
+
+#[test]
+fn a_public_loop_that_returns_ends_the_wait_and_the_stop_keeps_its_order() {
+    let host = StubHost::new();
+    host.loop_end.at(ListenerKind::Public, LoopWay::Return);
+    let mut server = expect_running(&host);
+    host.watch.enable(server.health().clone());
+    let before = host.log.events().len();
+    // The guard fires the signal late, so a wait that sees only the signal fails and does not hang.
+    let guard = FireOnDrop(host.fire.clone());
+    thread::spawn(move || {
+        let _guard = guard;
+        thread::sleep(2 * SECOND_WAIT_LIMIT);
+    });
+    host.loop_end.now();
+    let begin = Instant::now();
+    server.wait_for_signal();
+    let waited = begin.elapsed();
+    assert!(
+        waited < SECOND_WAIT_LIMIT,
+        "the wait ignored the end of the public loop and took {waited:?}"
+    );
+    let _report = server.close();
+    let events: Vec<_> = host
+        .log
+        .events()
+        .into_iter()
+        .skip(before)
+        .filter(|event| *event != Event::ListenerStopped(ListenerKind::Public))
+        .collect();
+    assert_eq!(
+        events,
+        [
+            Event::ReadinessOff,
+            Event::Disarm,
+            Event::PoolClosed(Pool::Main),
+            Event::PoolClosed(Pool::Health),
+            Event::ListenerStopped(ListenerKind::Internal),
+            Event::WatchdogStop,
+        ]
+    );
+}
+
+#[test]
+fn serve_with_returns_an_error_that_names_the_public_listener_when_its_loop_returns() {
+    let logs = LogCapture::start();
+    let mut host = StubHost::new();
+    host.realtime = true;
+    host.loop_end.at(ListenerKind::Public, LoopWay::Return);
+    let end = host.loop_end.clone();
+    let sender = act_when_ready(&host, move || end.now(), SECOND_WAIT_LIMIT);
+    let result = serve_with(&host, test_support::plan(), AlertCounters::default());
+    sender.finish();
+    let error = result.expect_err("the end of the public loop must give an error");
+    assert_eq!(
+        error.downcast_ref::<AcceptLoopEnded>(),
+        Some(&AcceptLoopEnded {
+            kind: ListenerKind::Public,
+            panicked: false,
+        })
+    );
+    assert_eq!(
+        error.to_string(),
+        "the accept loop of the public listener ended before the stop signal without a panic"
+    );
+    assert_eq!(exit_code(&error), Some(ExitCode::from(70)));
+    let lines = logs.lines();
+    assert!(
+        lines.iter().all(|line| !line.contains(NO_DRAIN_RESULT)),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn an_internal_loop_that_panics_ends_the_wait_and_the_stop_keeps_its_order() {
+    let host = StubHost::new();
+    host.loop_end.at(ListenerKind::Internal, LoopWay::Panic);
+    let mut server = expect_running(&host);
+    host.watch.enable(server.health().clone());
+    let before = host.log.events().len();
+    // The guard fires the signal late, so a wait that sees only the signal fails and does not hang.
+    let guard = FireOnDrop(host.fire.clone());
+    thread::spawn(move || {
+        let _guard = guard;
+        thread::sleep(2 * SECOND_WAIT_LIMIT);
+    });
+    host.loop_end.now();
+    let begin = Instant::now();
+    server.wait_for_signal();
+    let waited = begin.elapsed();
+    assert!(
+        waited < SECOND_WAIT_LIMIT,
+        "the wait ignored the panic of the internal loop and took {waited:?}"
+    );
+    // The close ends only if the stop takes the `JoinError` once. A second await of the finished
+    // task panics in Tokio.
+    let _report = server.close();
+    let events: Vec<_> = host
+        .log
+        .events()
+        .into_iter()
+        .skip(before)
+        .filter(|event| *event != Event::ListenerStopped(ListenerKind::Internal))
+        .collect();
+    assert_eq!(
+        events,
+        [
+            Event::ReadinessOff,
+            Event::Disarm,
+            Event::ListenerStopped(ListenerKind::Public),
+            Event::PoolClosed(Pool::Main),
+            Event::PoolClosed(Pool::Health),
+            Event::WatchdogStop,
+        ]
+    );
+}
+
+#[test]
+fn serve_with_returns_an_error_that_names_the_internal_listener_and_a_panic_and_writes_no_line() {
+    let logs = LogCapture::start();
+    let mut host = StubHost::new();
+    host.realtime = true;
+    host.loop_end.at(ListenerKind::Internal, LoopWay::Panic);
+    let end = host.loop_end.clone();
+    let sender = act_when_ready(&host, move || end.now(), SECOND_WAIT_LIMIT);
+    let result = serve_with(&host, test_support::plan(), AlertCounters::default());
+    sender.finish();
+    let error = result.expect_err("the panic of the internal loop must give an error");
+    assert_eq!(
+        error.downcast_ref::<AcceptLoopEnded>(),
+        Some(&AcceptLoopEnded {
+            kind: ListenerKind::Internal,
+            panicked: true,
+        })
+    );
+    assert_eq!(
+        error.to_string(),
+        "the accept loop of the internal listener ended before the stop signal with a panic"
+    );
+    assert_eq!(exit_code(&error), Some(ExitCode::from(70)));
+    let lines = logs.lines();
+    let faults: Vec<_> = lines
+        .iter()
+        .filter(|line| line.contains("\"level\":\"WARN\"") || line.contains("\"level\":\"ERROR\""))
+        .collect();
+    assert!(faults.is_empty(), "{faults:?}");
 }

@@ -16,7 +16,7 @@ mod wiring;
 
 pub use host::{HealthPool, Host, ListenerKind, MainPool, PoolClose, Signal, WatchdogControl};
 pub use plan::{Plan, ServeSettings, ShutdownSettings};
-pub use process::{ProcessHost, run};
+pub use process::{AcceptLoopEnded, ProcessHost, exit_code, run};
 pub use server::{CloseReport, Server};
 pub use start::{Outcome, start};
 pub use webhook_client::build_webhook;

@@ -55,7 +55,7 @@ Dependency rule:
 ## Hard rules
 
 - No panic paths. Outside tests the lints deny `unwrap`, `expect`, `panic!`, indexing, lossy casts, and unchecked arithmetic (`reliability.md` §2).
-- Library crates use `thiserror`. Only `recipe-server` uses `anyhow`, and `main` returns `anyhow::Result<()>` (`reliability.md` §1.1, A37).
+- Library crates use `thiserror`. Only `recipe-server` uses `anyhow`, and `main` returns `anyhow::Result<std::process::ExitCode>` (`reliability.md` §1.1, §2.3, A37, ADR-0125 (d)).
 - A command runs in one transaction. `Login` and `ChangeOwnPassword` use the two transactions T1 and T2 (ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2 (ADR-0109 (m)). A command locks rows in the order `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015).
 - Inside a transaction, no use case waits for I/O or for a lock that it does not hold. Validation runs before it (`reliability.md` §7.4).
 - A command writes its audit entries through `UnitOfWork::commit(NonEmpty<AuditEntry>)`. `domain-model.md` §5 gives each commit path and the two cases without an entry.
@@ -63,7 +63,7 @@ Dependency rule:
 - The permission check is the first statement of every command use case and every query use case. HTTP only authenticates (ADR-0013).
 - In read-only mode, every command except `Login`, `Logout`, and `ExportVersion` returns `503 E-WEB-006` and writes nothing (A24).
 - Every error code has exactly one row in `reliability.md` §1.2. Add the row before the variant that returns the code. Never reuse a code.
-- Every error type has `code()`. An error variant never carries a password, a hash, a session token, or a cookie value (`reliability.md` §1.1).
+- Every error type has `code()`, except the marker `AcceptLoopEnded` of `recipe-server` (`reliability.md` §1.1, ADR-0125 (c)). An error variant never carries a password, a hash, a session token, or a cookie value (`reliability.md` §1.1).
 - Log each error once: in the `WebError` to HTTP mapping, in the backstop panic layer, or in the supervisor of a background job. A job logs a handled fault once at `WARN` (`reliability.md` §1.1).
 - Every numeric setting comes from `reliability.md` §7.11. A value repeated elsewhere must equal that table.
 - A value object has one `parse` constructor and no public `new`. Code does not check it again after construction (`reliability.md` §4.3).

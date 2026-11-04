@@ -28,6 +28,10 @@ pub const TEMPLATE_DATABASE: &str = "recipe";
 /// The label that marks the containers of this test binary. The next run removes them.
 const LABEL_KEY: &str = "org.recipe-editor.storage-tests";
 const LABEL_VALUE: &str = "recipe-db";
+/// The label value of the container of the init log test. The harness cleanup never removes it.
+pub(super) const LOG_LABEL_VALUE: &str = "recipe-db-init-log";
+/// The server options that make PostgreSQL log the text and the duration of every statement.
+pub(super) const LOG_EVERY_STATEMENT: [&str; 2] = ["-c", "log_min_duration_statement=0"];
 /// The subnet that `01-roles.sh` writes into the lines of `pg_hba.conf`.
 const COMPOSE_SUBNET: &str = "172.28.0.0/16";
 const INITDB_ARGS: &str = "--data-checksums --lc-collate=C --lc-ctype=C.UTF-8";
@@ -206,8 +210,24 @@ fn run_container_thread(sender: &Sender<Outcome>) {
 }
 
 async fn boot() -> Result<(Server, ContainerAsync<GenericImage>), String> {
-    remove_old_containers();
-    let request = container_request()?;
+    remove_old_containers(LABEL_VALUE);
+    let (server, container) = start_container(LABEL_VALUE, &[]).await?;
+    if let Err(message) = wait_for_login(&server, &container).await {
+        let log = container.stderr_to_vec().await.unwrap_or_default();
+        return Err(format!("{message}\n{}", tail(&log)));
+    }
+    prepare_template(&server).await?;
+    Ok((server, container))
+}
+
+/// Start a container with the given label value and extra server options.
+///
+/// The call returns at once. The caller waits with `wait_for_login`.
+pub(super) async fn start_container(
+    label_value: &str,
+    server_options: &[&str],
+) -> Result<(Server, ContainerAsync<GenericImage>), String> {
+    let request = container_request(label_value, server_options)?;
     let container = request.start().await.map_err(|error| {
         format!(
             "The storage tests need Docker. Cannot start {IMAGE}:{IMAGE_TAG}: {error}. \
@@ -234,11 +254,6 @@ async fn boot() -> Result<(Server, ContainerAsync<GenericImage>), String> {
         port,
         container_id: container.id().to_owned(),
     };
-    if let Err(message) = wait_for_login(&server, &container).await {
-        let log = container.stderr_to_vec().await.unwrap_or_default();
-        return Err(format!("{message}\n{}", tail(&log)));
-    }
-    prepare_template(&server).await?;
     Ok((server, container))
 }
 
@@ -275,18 +290,29 @@ async fn prepare_template(server: &Server) -> Result<(), String> {
     }
 }
 
-fn container_request() -> Result<testcontainers::ContainerRequest<GenericImage>, String> {
+/// Build the request of a test container.
+///
+/// `label_value` marks the container for `remove_old_containers`. `server_options` are extra
+/// arguments after `postgres -c max_connections=200`.
+fn container_request(
+    label_value: &str,
+    server_options: &[&str],
+) -> Result<testcontainers::ContainerRequest<GenericImage>, String> {
     let script = read_script(INIT_SCRIPT_SOURCE)?;
     let test_hosts = read_script(TEST_HOSTS_SOURCE)?;
     let cluster_access = read_script(CLUSTER_ACCESS_SOURCE)?;
     let mut request = GenericImage::new(IMAGE, IMAGE_TAG)
         .with_exposed_port(POSTGRES_PORT.tcp())
         .with_wait_for(WaitFor::millis(START_GRACE_MILLIS))
-        .with_label(LABEL_KEY, LABEL_VALUE)
+        .with_label(LABEL_KEY, label_value)
         .with_env_var("POSTGRES_PASSWORD", Role::Superuser.password())
         .with_env_var("POSTGRES_INITDB_ARGS", INITDB_ARGS)
         .with_env_var("COMPOSE_SUBNET", COMPOSE_SUBNET)
-        .with_cmd(["postgres", "-c", MAX_CONNECTIONS])
+        .with_cmd(
+            ["postgres", "-c", MAX_CONNECTIONS]
+                .into_iter()
+                .chain(server_options.iter().copied()),
+        )
         .with_startup_timeout(START_TIMEOUT)
         .with_host_config_modifier(bind_to_loopback)
         .with_copy_to(
@@ -336,7 +362,7 @@ fn read_script(path: &str) -> Result<String, String> {
 /// Wait until the server accepts a TCP login of the superuser.
 ///
 /// A failed init script stops the container, so the loop ends at once in that case.
-async fn wait_for_login(
+pub(super) async fn wait_for_login(
     server: &Server,
     container: &ContainerAsync<GenericImage>,
 ) -> Result<(), String> {
@@ -358,11 +384,11 @@ async fn wait_for_login(
     ))
 }
 
-/// Remove the containers that earlier runs of this binary left behind.
+/// Remove the containers with this label value that earlier runs of this binary left behind.
 ///
 /// A failure here is not an error. The start of the new container reports a missing Docker.
-fn remove_old_containers() {
-    let filter = format!("label={LABEL_KEY}={LABEL_VALUE}");
+pub(super) fn remove_old_containers(label_value: &str) {
+    let filter = format!("label={LABEL_KEY}={label_value}");
     let Ok(listing) = Command::new("docker")
         .args(["ps", "-aq", "--filter", &filter])
         .output()

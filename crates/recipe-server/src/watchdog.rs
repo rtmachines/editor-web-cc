@@ -22,6 +22,11 @@ use crate::probe::{ProbeFault, ProbePath, probe_local};
 /// The exit code of a process that the watchdog ends (`reliability.md` section 2.4 rule 5).
 pub const STALLED_EXIT_CODE: i32 = 70;
 
+/// The exit code of `serve` after an accept loop ended early (ADR-0125 (d)).
+///
+/// The value equals [`STALLED_EXIT_CODE`], so Docker restarts the container in both cases.
+pub const RESTART_EXIT_CODE: u8 = 70;
+
 /// The time between two probes (`watchdog.probe_interval`).
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 

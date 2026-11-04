@@ -1,6 +1,6 @@
 # ADR-0058: HTTP serving loop and request timeouts
 
-Status: Accepted. Amended by ADR-0072 (export routes outside the request timeout). Amended by ADR-0085 (the pause `http.accept_error_pause` after an accept fault). Amended by ADR-0087 (the drain of 0 s of the internal listener, the abort without a wait). Amended by ADR-0088 (the three numbers of the stop `WARN` line). Amended by ADR-0089 (c) (item (o): the stop `WARN` line only when a count is above 0)
+Status: Accepted. Amended by ADR-0072 (export routes outside the request timeout). Amended by ADR-0085 (the pause `http.accept_error_pause` after an accept fault). Amended by ADR-0087 (the drain of 0 s of the internal listener, the abort without a wait). Amended by ADR-0088 (the three numbers of the stop `WARN` line). Amended by ADR-0089 (c) (item (o): the stop `WARN` line only when a count is above 0). Amended by ADR-0124 (item (a): an `after_release` hook closes a connection with an open transaction, and it amends (m)). Amended by ADR-0125 (the end of an accept loop stops the server, and it amends (l) and (o))
 Date: 2026-10-23
 Deciders: project owner
 

@@ -9,6 +9,7 @@ mod checks;
 mod file;
 mod five_steps;
 mod init_script;
+mod init_script_log;
 mod migration;
 mod operator_scan;
 mod sql_tokens;

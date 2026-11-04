@@ -69,6 +69,9 @@ cat <<'SQL'
 -- ADR-0031: a failed statement writes no password into the server log.
 SET log_statement = 'none';
 SET log_min_error_statement = 'panic';
+SET log_min_duration_statement = -1;
+SET log_transaction_sample_rate = 0;
+SET log_min_duration_sample = -1;
 CREATE ROLE recipe_migrator   LOGIN PASSWORD :'migrator_password';     -- owner of the schema
 CREATE ROLE recipe_app        LOGIN PASSWORD :'app_password';          -- runtime, least privilege
 CREATE ROLE recipe_backup     LOGIN PASSWORD :'backup_password';       -- pg_dump only

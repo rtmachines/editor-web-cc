@@ -13,6 +13,7 @@ use recipe_app::ports::{Isolation, UnitOfWork};
 use recipe_db::Database;
 use recipe_db::settings::PoolSettings;
 use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::identity::Login;
 use sqlx::Connection as _;
 use uuid::Uuid;
 
@@ -213,4 +214,72 @@ async fn a_pool_without_a_free_connection_gives_pool_timeout() {
 
     assert!(matches!(error, StorageError::PoolTimeout), "{error:?}");
     assert_eq!(error.code(), ErrorCode::DB_004);
+}
+
+/// The statement of the leak test: it opens a read-only transaction and leaves it open.
+const LEAKED_BEGIN: &str = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
+/// The statement of the failed transaction test: `BEGIN` and then a statement that fails.
+const ABORTED_TRANSACTION: &str = "BEGIN; SELECT 1 / 0";
+
+/// A pool of size 1, so each acquire waits for the release of the one connection.
+async fn single_connection_pool(database: &TestDatabase) -> Database {
+    let settings = PoolSettings {
+        size: 1,
+        ..PoolSettings::default()
+    };
+    Database::connect(&database.target(Role::App), &settings)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_released_connection_with_an_open_transaction_is_not_reused() {
+    let database = TestDatabase::create().await;
+    let pool = single_connection_pool(&database).await;
+    let before = pool.session_facts().await.unwrap();
+    pool.send_raw_statement(LEAKED_BEGIN).await.unwrap();
+
+    let after = pool.session_facts().await.unwrap();
+
+    assert_ne!(after.backend_pid, before.backend_pid, "the pid stayed");
+    assert_eq!(after.transaction_read_only, "off");
+    assert_eq!(after.transaction_isolation, "read committed");
+    assert!(!after.in_transaction);
+}
+
+#[tokio::test]
+async fn a_released_connection_with_a_failed_transaction_is_not_reused() {
+    let database = TestDatabase::create().await;
+    let pool = single_connection_pool(&database).await;
+    let before = pool.session_facts().await.unwrap();
+    let failure = pool.send_raw_statement(ABORTED_TRANSACTION).await;
+    assert!(failure.is_err(), "the statement must fail");
+
+    let after = pool
+        .session_facts()
+        .await
+        .expect("the next acquire must get a new connection, not the aborted one");
+
+    assert_ne!(after.backend_pid, before.backend_pid, "the pid stayed");
+}
+
+#[tokio::test]
+async fn a_connection_stays_open_over_a_command_and_a_query() {
+    let database = TestDatabase::create().await;
+    let mut migrator = database.connect(Role::Migrator).await;
+    let user = fixtures::user(&mut migrator).await;
+    let pool = single_connection_pool(&database).await;
+    let unit_of_work = pool.unit_of_work();
+    let first = pool.session_facts().await.unwrap();
+
+    let (list, _) = entries(Some(user), 1);
+    let command = unit_of_work.begin(Isolation::ReadCommitted).await.unwrap();
+    unit_of_work.commit(command, list).await.unwrap();
+    let mut query = unit_of_work.begin(Isolation::RepeatableRead).await.unwrap();
+    let login = Login::parse("nobody").unwrap();
+    assert!(query.users().find_by_login(&login).await.unwrap().is_none());
+    drop(query);
+    let last = pool.session_facts().await.unwrap();
+
+    assert_eq!(first.backend_pid, last.backend_pid);
 }

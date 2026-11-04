@@ -6,6 +6,7 @@
 mod catchup;
 mod close;
 mod counters;
+mod exit_code;
 mod intervals;
 mod order;
 mod ready;

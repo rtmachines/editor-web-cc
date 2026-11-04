@@ -311,6 +311,7 @@ impl Steps<'_> {
         );
         let settings = self.plan.settings.listener(ListenerKind::Internal);
         self.resources.internal = Some(spawn_listener(
+            self.host,
             ListenerKind::Internal,
             router,
             settings,
@@ -352,6 +353,7 @@ impl Steps<'_> {
         let router = recipe_web::router(web);
         let settings = self.plan.settings.listener(ListenerKind::Public);
         self.resources.public = Some(spawn_listener(
+            self.host,
             ListenerKind::Public,
             router,
             settings,
@@ -377,12 +379,14 @@ async fn check_role(main: &MainPool) -> Result<()> {
 
 /// Start the accept loop of one listener on the runtime.
 fn spawn_listener(
+    host: &dyn Host,
     kind: ListenerKind,
     router: Router,
     settings: ListenerSettings,
     listener: TcpListener,
 ) -> ListenerHandle {
     let stop = CancellationToken::new();
-    let task = tokio::spawn(AcceptLoop::new(router, settings, stop.clone()).run(listener));
+    let accept_loop = Box::pin(AcceptLoop::new(router, settings, stop.clone()).run(listener));
+    let task = host.spawn_accept_loop(kind, accept_loop);
     ListenerHandle::new(kind, stop, task)
 }

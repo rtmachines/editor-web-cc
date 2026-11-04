@@ -44,6 +44,7 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
 - [Key rotation](#key-rotation)
 - [Certificate rotation](#certificate-rotation)
 - [Change a database password](#change-a-database-password)
+  - [Check the log of db for a password](#check-the-log-of-db-for-a-password)
 - [Change a setting](#change-a-setting)
 - [Alert webhook](#alert-webhook)
   - [Rules of the URL](#rules-of-the-url)
@@ -1663,6 +1664,16 @@ Read the notes of the section "Restart one service". A long stop of `db` can lea
 
 For `recipe_migrator`, no service uses the new password before the next run of `migrate` in the section "Upgrade". No document gives an earlier test.
 For `postgres`, no service of the stack uses the password after the init of `db`.
+
+### Check the log of db for a password
+
+The command prints the role names and no password:
+
+```bash
+docker compose logs --no-log-prefix db | grep -B1 -E "PASSWORD +E?'" | grep -o -E 'ROLE (postgres|recipe_[a-z]+)' | sort -u
+```
+
+`-B1` covers the statement of `recipe_replicator`, which spans two lines. psql writes `E'...'` for a value with a backslash, so the pattern also finds that form. An empty output means that the log holds no password. The operator rotates each named role with the steps of that section. The operator also checks the copy of the log collector, when the site forwards the log.
 
 ## Change a setting
 
