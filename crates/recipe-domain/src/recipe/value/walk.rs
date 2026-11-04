@@ -13,7 +13,8 @@ use super::fault::ValueFault;
 use super::leaf::{LeafType, Mode, convert};
 use crate::plant::limits::MAX_DEPTH;
 use crate::plant::{
-    ArrayDimension, ArrayDimensions, LeafSegment, MemberName, TypeNode, TypeTree, extended,
+    ArrayDimension, ArrayDimensions, LeafPath, LeafSegment, MemberName, RuleSet, TypeNode,
+    TypeTree, extended,
 };
 
 /// One part of the value that the walk has not checked yet.
@@ -28,11 +29,11 @@ struct Task<'a> {
     level: usize,
 }
 
-/// Check `json` against `tree` and return the canonical value.
+/// Check `json` against `tree` under `rules` and return the canonical value.
 pub(super) fn canonicalize(
     mut json: Value,
     tree: &TypeTree,
-    mode: Mode,
+    (mode, rules): (Mode, RuleSet),
 ) -> Result<ParameterValue, ValueFault> {
     if exceeds_depth(&json) {
         return Err(ValueFault::mismatch(
@@ -59,9 +60,11 @@ pub(super) fn canonicalize(
                     string_length: *string_length,
                     platform: tree.platform(),
                     mode,
+                    rules,
                 };
-                let stored = convert(task.slot, leaf)
-                    .map_err(|expected| ValueFault::mismatch(task.path, expected))?;
+                let stored = convert(task.slot, leaf).map_err(|fault| {
+                    ValueFault::from_leaf(LeafPath::from_segments(task.path), fault)
+                })?;
                 *task.slot = stored;
             }
             TypeNode::Struct { members, .. } => {

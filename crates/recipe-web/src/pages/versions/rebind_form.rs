@@ -128,7 +128,8 @@ impl RebindForm {
         let (tag, leaf) = match error {
             RecipeError::RebindNeedsValue { tag, leaf }
             | RecipeError::RebindDropsLimit { tag, leaf }
-            | RecipeError::ValueShapeMismatch { tag, leaf, .. } => (tag, leaf),
+            | RecipeError::ValueShapeMismatch { tag, leaf, .. }
+            | RecipeError::PrecisionExceeded { tag, leaf, .. } => (tag, leaf),
             _other => return None,
         };
         let parameter = self

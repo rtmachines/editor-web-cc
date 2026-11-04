@@ -1,6 +1,6 @@
 # ADR-0050: Diff of two versions
 
-Status: Accepted. Amended by ADR-0108 (item (l): the compare links of the version page)
+Status: Accepted. Amended by ADR-0108 (item (l): the compare links of the version page). Amended by ADR-0118 (item (c): a stored row that breaks a newer rule shows with a field line)
 Date: 2026-10-16
 Deciders: project owner
 

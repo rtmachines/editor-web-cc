@@ -101,6 +101,7 @@ fn address_cases() -> Vec<Case> {
         ("DB2.DBW0", "E-RCP-022"),
         ("DB9.DBW1", "E-RCP-023"),
         ("DB9.DBB0", "E-RCP-054"),
+        ("DB16001.DBW0", "E-RCP-057"),
     ]
     .into_iter()
     .map(|(address, code)| {
@@ -195,6 +196,67 @@ async fn parameters_add_a_limit_on_a_bool_leaf_gives_e_rcp_019() {
     ];
     let case = (changes, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-019", None);
     assert_case(&world, ADD, case).await;
+}
+
+/// The fields of a new `REAL` parameter with the limit row `min` and `max` on the whole value.
+fn real_limit_fields<'a>(min: Option<&'a str>, max: Option<&'a str>) -> Vec<(&'a str, &'a str)> {
+    let changes = [
+        ("type", Some("REAL")),
+        ("value_type", Some("REAL")),
+        ("s7_address", Some("DB9.DBD0")),
+        ("value", Some("1")),
+        ("limits[0].leaf_path", Some("")),
+        ("limits[0].min", min),
+        ("limits[0].max", max),
+    ];
+    changed(&INT_FIELDS, &changes)
+}
+
+/// Assert that the input `id` has one line of `E-RCP-055` and an invalid mark.
+fn assert_precision_line(body: &str, id: &str) {
+    let marker = "<span class=\"field-error-code\">E-RCP-055</span>";
+    let start = format!("<div class=\"field-error\" id=\"{id}-error\">");
+    let (_before, rest) = body.split_once(&start).unwrap_or(("", ""));
+    let line = rest.split("</div>").next().unwrap_or_default();
+    assert_eq!(line.matches(marker).count(), 1, "{id}: {body}");
+    let link = format!("href=\"#{id}\"");
+    assert!(body.contains(&link), "{id}: {body}");
+}
+
+#[tokio::test]
+async fn parameters_add_a_real_row_with_8_digits_in_both_bounds_gives_a_line_under_each_bound() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = real_limit_fields(Some("-100.00001"), Some("100.00001"));
+    let reply = post_htmx(&world, ADD, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-055");
+    assert!(reply.body.contains("Errors: 2."), "{}", reply.body);
+    assert_precision_line(&reply.body, "limits-0-min");
+    assert_precision_line(&reply.body, "limits-0-max");
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
+#[tokio::test]
+async fn parameters_add_a_real_row_with_one_bad_bound_gives_one_line() {
+    let world = recipe_world();
+    let pairs = real_limit_fields(Some("-100.00001"), Some("100.0001"));
+    let reply = post_htmx(&world, ADD, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-055");
+    assert!(!reply.body.contains("Errors: 2."), "{}", reply.body);
+    assert_precision_line(&reply.body, "limits-0-min");
+    assert!(
+        !reply.body.contains("id=\"limits-0-max-error\""),
+        "{}",
+        reply.body
+    );
+    let pairs = real_limit_fields(Some("-100.0001"), Some("100.00001"));
+    let reply = post_htmx(&world, ADD, &pairs).await;
+    assert_precision_line(&reply.body, "limits-0-max");
+    assert!(
+        !reply.body.contains("id=\"limits-0-min-error\""),
+        "{}",
+        reply.body
+    );
 }
 
 #[tokio::test]

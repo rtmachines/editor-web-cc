@@ -14,7 +14,9 @@ use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use super::tests::{audit_count, client, client_get, exported_actors, field, seeded};
+use super::tests::{
+    affected_world, audit_count, client, client_get, exported_actors, field, seeded,
+};
 use crate::test_support::recipes::approval::ApprovalData;
 use crate::test_support::{Fixture, call, request};
 
@@ -69,6 +71,27 @@ fn archive_spare_unit(fixture: &Fixture, data: &ApprovalData) {
         .archive_unit(&spare, at, &UnitUsage::default())
         .unwrap();
     fixture.store.seed_machine(&machine);
+}
+
+#[tokio::test]
+async fn export_unit_of_a_version_with_a_rule_fault_sends_loadable_false() {
+    let world = affected_world().await;
+
+    let reply = client_get(
+        &world.fixture,
+        "/export/v2/machines/M30/recipes/R-400/approved/units/U1",
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    // The version stays `Approved`, so the file name has no `RETIRED_` prefix.
+    assert_eq!(
+        reply.header("content-disposition"),
+        "attachment; filename=\"recipe_R-400_v1_U1.json\""
+    );
+    assert_eq!(field(&reply.body, "loadable"), "false");
+    assert_eq!(field(&reply.body, "status"), "\"Approved\"");
+    assert_eq!(exported_actors(&world.fixture), vec![Some(client())]);
 }
 
 #[tokio::test]

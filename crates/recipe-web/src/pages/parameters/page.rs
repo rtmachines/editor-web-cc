@@ -12,13 +12,16 @@ use recipe_app::recipe::{GetParameter, ParameterRef, ParameterView};
 use recipe_domain::recipe::VersionState;
 use serde::Deserialize;
 
-use super::form_view::{DefinitionTexts, GridTexts, ParameterFormView, Place, Shown, grid_of};
+use super::form_view::{
+    DefinitionTexts, GridTexts, ParameterFormView, Place, Shown, address_lines, fault_errors,
+    grid_of,
+};
 use super::grid::GridView;
 use super::path_parameter;
 use super::reply::{Ctx, Target, load, parameter_title, version_text};
 use super::summary::{ParameterPage, RemoveView, SummaryView};
 use super::translations::{RowSource, TranslationsBlock, translation_rows};
-use crate::error::{FormErrors, WebError};
+use crate::error::{FormErrors, LineView, WebError};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::hrefs::parameter_href;
 use crate::pages::path_values::query_values;
@@ -99,20 +102,54 @@ pub(crate) fn stored_shown(ctx: Ctx<'_>, view: &ParameterView) -> Result<Shown, 
     })
 }
 
+/// What the page shows below the definition: the edit form, or the read-only grid with its lines.
+struct Body {
+    /// The edit form, for a live draft and a role with `ParameterEdit`.
+    form: Option<ParameterFormView>,
+    /// The read-only grid of every other reader.
+    values: Option<GridView>,
+    /// The field lines of the rule faults under the cells of the read-only grid.
+    faults: FormErrors,
+    /// The field lines of the faults of the S7 address under the read-only definition.
+    address: Vec<LineView>,
+}
+
 /// Build the edit form of the stored parameter, or the read-only grid for a reader without it.
-async fn form_or_grid(
-    ctx: Ctx<'_>,
-    view: &ParameterView,
-) -> Result<(Option<ParameterFormView>, Option<GridView>), WebError> {
+///
+/// A stored part that breaks only the current rule set keeps its stored text and gets a field line
+/// with its code. The edit form and the read-only grid show the same lines (ADR-0118, design D7).
+async fn form_or_grid(ctx: Ctx<'_>, view: &ParameterView) -> Result<Body, WebError> {
+    let t = ctx.texts();
     if !is_editable(ctx.request, view)? {
-        return Ok((None, Some(stored_grid(ctx, view)?)));
+        let grid = stored_grid(ctx, view)?;
+        let faults = fault_errors(t, &view.rule_faults, &grid);
+        let address = address_lines(t, &view.rule_faults, &grid);
+        return Ok(Body {
+            form: None,
+            values: Some(grid.with_errors(&faults)),
+            faults,
+            address,
+        });
     }
     let form = load(ctx, ctx.target.form_purpose(), None, None).await?;
     let shown = stored_shown(ctx, view)?;
+    let errors = shown
+        .grid
+        .as_ref()
+        .map(|grid| fault_errors(t, &view.rule_faults, grid))
+        .unwrap_or_default();
+    let shown = Shown {
+        grid: shown.grid.map(|grid| grid.with_errors(&errors)),
+        ..shown
+    };
     let csrf = ctx.request.csrf_token();
-    let place = (shown, Place::Fragment);
-    let edit = ParameterFormView::new(ctx.texts(), &form, place, csrf, FormErrors::default());
-    Ok((Some(edit), None))
+    let edit = ParameterFormView::new(t, &form, (shown, Place::Fragment), csrf, errors);
+    Ok(Body {
+        form: Some(edit),
+        values: None,
+        faults: FormErrors::default(),
+        address: Vec::new(),
+    })
 }
 
 /// `GET .../parameters/{key}`: show the definition, the leaf grid, and the edit form of a draft.
@@ -139,18 +176,19 @@ pub(crate) async fn parameter(
 /// Returns the error of the queries, or `E-WEB-010` when the template cannot render.
 pub(crate) async fn parameter_page(ctx: Ctx<'_>) -> Result<Response, WebError> {
     let view = read_parameter(ctx).await?;
-    let (form, values) = form_or_grid(ctx, &view).await?;
-    let editable = form.is_some();
+    let body = form_or_grid(ctx, &view).await?;
+    let editable = body.form.is_some();
     let t = ctx.texts();
     let title = parameter_title(ctx, &view.parameter.tag);
     let layout = Layout::for_session(t, ctx.request, title, Some(NavTarget::Recipes))?;
     let page = ParameterPage {
         layout,
         t,
-        summary: Some(SummaryView::stored(&view)),
-        form,
+        summary: Some(SummaryView::stored(&view).with_address_lines(body.address)),
+        form: body.form,
         notice: None,
-        values,
+        values: body.values,
+        faults: body.faults,
         translations: Some(translations_of(ctx, &view, editable)),
         remove: editable.then(|| remove_of(ctx, &view)),
         version_href: ctx.target.version_href(),

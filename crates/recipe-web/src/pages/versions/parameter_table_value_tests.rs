@@ -9,15 +9,19 @@ use std::collections::BTreeSet;
 use askama::Template;
 use axum::http::StatusCode;
 use recipe_app::memory::seed_type_id;
+use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
-    MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, StringKind, StringLength, TypeTree, UnitPath,
+    ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, MemberName, PlatformTypes,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringKind,
+    StringLength, TypeMember, TypeName, TypeTree, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
-    Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, RecipeVersionId,
-    StoredParameter, StoredValue,
+    Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeId,
+    RecipeVersionId, ReferenceNumber, StoredParameter, StoredRecipe, StoredValue,
+    StoredVersionHeader, VersionState,
 };
 use recipe_domain::text::{LongText, Text};
+use serde_json::json;
 use uuid::Uuid;
 
 use super::parameter_table::{ParameterTable, VALUE_CHARS, column_count, cut_value};
@@ -134,6 +138,239 @@ fn primitive_seed(world: &World, primitive: Primitive, json: &str) -> Seed {
 /// Return the identifier of the draft version 3 of `R-100`.
 fn draft_id() -> RecipeVersionId {
     RecipeVersionId::from(DRAFT_ID)
+}
+
+pub(super) use crate::test_support::recipes::date_world::{
+    DATE_PAGE, EARLIER_DATE_COUNT, seed_date_world,
+};
+
+/// The version page of the draft of `R-410` on the `S7_1500` machine `M31`.
+const COMPOSITE_PAGE: &str = "/recipes/R-410/versions/1";
+/// The identifier of the machine `M31`.
+const COMPOSITE_MACHINE: Uuid = Uuid::from_u128(0x7357_0001_0000_0000_0000_0000_0000_001f);
+/// The identifier of the version 1 of `R-410`.
+const COMPOSITE_VERSION: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0411);
+/// The first field of the identifier of a type of `M31`.
+const COMPOSITE_TYPE_BASE: u128 = 0x7357_0013_0000_0000_0000_0000_0000_0f10;
+/// The `DATE` count of `D#2169-01-17`. Only the earlier rule set allows it.
+const EARLIER_ONLY_DAY: i64 = 72_700;
+/// A `REAL` number with 8 significant digits. IEEE 754 single precision cannot hold it.
+const LONG_REAL: i64 = 16_777_217;
+/// The class of the code span of one field line.
+const CODE_SPAN: &str = "class=\"field-error-code\"";
+
+/// The type rows of `M31`: `DATE`, `REAL`, `ARRAY[1..3] OF DATE`, and a struct with a `DATE` and a `REAL`.
+///
+/// The offset is the number that is added to `COMPOSITE_TYPE_BASE`.
+#[derive(Clone, Copy)]
+enum CompositeType {
+    Date = 0,
+    Real = 1,
+    DateArray = 2,
+    Mixed = 3,
+}
+
+impl CompositeType {
+    fn id(self) -> PlcTypeId {
+        PlcTypeId::from(Uuid::from_u128(COMPOSITE_TYPE_BASE | self as u128))
+    }
+}
+
+/// Build the type row `kind` with the shape `shape`.
+///
+/// A primitive row belongs to the global catalog. An array row and a struct row belong to `M31`.
+fn composite_row(kind: CompositeType, shape: RecordShape) -> PlcType {
+    let machine = match shape {
+        RecordShape::Primitive { .. } => None,
+        _ => Some(MachineId::from(COMPOSITE_MACHINE)),
+    };
+    PlcType::try_from(PlcTypeRecord {
+        id: kind.id(),
+        machine,
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape,
+    })
+    .unwrap()
+}
+
+/// Build the shape of the primitive `primitive`.
+fn primitive_shape(primitive: Primitive) -> RecordShape {
+    RecordShape::Primitive {
+        primitive,
+        leaf_class: primitive.leaf_class(),
+        size_bytes: primitive.fixed_size_bytes().unwrap(),
+        string_length: None,
+    }
+}
+
+/// Build the member `name` of a struct.
+fn mixed_member(name: &str, kind: CompositeType) -> TypeMember {
+    TypeMember {
+        name: MemberName::parse(name).unwrap(),
+        type_id: kind.id(),
+    }
+}
+
+/// Seed `R-410` on `M31` with its types and the stored parameters `parameters`.
+///
+/// Each entry is the tag, the type, and the stored JSON value. The stored values break the current
+/// rule set and pass the earlier one. The `n` of an entry is its place in the list from 1.
+fn seed_composite_world(world: &World, parameters: &[(&str, CompositeType, serde_json::Value)]) {
+    let machine_id = MachineId::from(COMPOSITE_MACHINE);
+    let unit_id = UnitId::from(Uuid::from_u128(0x7357_0012_0000_0000_0000_0000_001f_0001));
+    let machine = Machine::create(
+        machine_id,
+        MachineCode::parse("M31").unwrap(),
+        Text::parse("Composite line").unwrap(),
+        PlcPlatform::S7_1500,
+        (unit_id, Text::parse("Infeed").unwrap()),
+    );
+    world.fixture.store.seed_machine(&machine);
+    let dimensions = ArrayDimensions::parse(vec![ArrayDimension::parse(1, 3).unwrap()]).unwrap();
+    let rows = [
+        composite_row(CompositeType::Date, primitive_shape(Primitive::Date)),
+        composite_row(CompositeType::Real, primitive_shape(Primitive::Real)),
+        composite_row(
+            CompositeType::DateArray,
+            RecordShape::Array {
+                element: CompositeType::Date.id(),
+                dimensions,
+            },
+        ),
+        composite_row(
+            CompositeType::Mixed,
+            RecordShape::Struct {
+                name: TypeName::parse("ST_Mixed").unwrap(),
+                revision: 1,
+                supersedes: None,
+                members: vec![
+                    mixed_member("day", CompositeType::Date),
+                    mixed_member("ratio", CompositeType::Real),
+                ],
+            },
+        ),
+    ];
+    for row in &rows {
+        world.fixture.store.seed_type(row);
+    }
+    let recipe = Recipe::try_from(StoredRecipe {
+        id: RecipeId::from(Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_0410)),
+        machine: machine_id,
+        reference: ReferenceNumber::parse("R-410").unwrap(),
+        name: Text::parse("Composite recipe").unwrap(),
+        deleted_at: None,
+        versions: vec![StoredVersionHeader {
+            id: RecipeVersionId::from(COMPOSITE_VERSION),
+            number: 1,
+            state: VersionState::LiveDraft,
+            row_version: 1,
+        }],
+    })
+    .unwrap();
+    let creator = UserId::from(Uuid::from_u128(1));
+    world
+        .fixture
+        .store
+        .seed_recipe(&recipe, PlcPlatform::S7_1500, creator);
+    for (n, (tag, kind, value)) in (1_u32..).zip(parameters) {
+        let id = Uuid::from_u128(EXTRA_BASE | u128::from(n));
+        let parameter = StoredParameter {
+            id: ParameterId::from(id),
+            key: ParameterKey::from(id),
+            unit: unit_id,
+            tag: ParameterTag::parse(tag).unwrap(),
+            name_en: Text::parse(tag).unwrap(),
+            description_en: LongText::parse("A seeded parameter").unwrap(),
+            translations: Vec::new(),
+            plc_type: kind.id(),
+            s7_address: None,
+            limits: Vec::new(),
+            value: StoredValue::from(value.clone()),
+            ordinal: Ordinal::parse(n).unwrap(),
+        };
+        world
+            .fixture
+            .store
+            .seed_parameter(RecipeVersionId::from(COMPOSITE_VERSION), &parameter);
+    }
+}
+
+/// Return the codes of the field lines of `row`, in their order.
+fn line_codes(row: &str) -> Vec<&str> {
+    row.split(CODE_SPAN)
+        .skip(1)
+        .filter_map(|part| part.strip_prefix('>')?.split('<').next())
+        .collect()
+}
+
+#[tokio::test]
+async fn parameter_table_shows_one_line_for_an_array_row_with_three_leaves_that_break_one_rule() {
+    let world = recipe_world();
+    let days = json!([EARLIER_ONLY_DAY, EARLIER_ONLY_DAY + 1, EARLIER_ONLY_DAY + 2]);
+    seed_composite_world(&world, &[("DAYS", CompositeType::DateArray, days)]);
+    let reply = world.get_en(&world.engineer, COMPOSITE_PAGE).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let row = row_of(main_of(&reply.body), "DAYS");
+    assert_eq!(line_codes(row), ["E-RCP-005"], "{row}");
+    // The cell keeps the composite word, and its line block belongs to the cell.
+    let block = format!("value-{}-error", Uuid::from_u128(EXTRA_BASE | 1));
+    let word = text(Lang::En, "parameters-value-composite");
+    let cell = format!(
+        "<td class=\"value-note\" aria-describedby=\"{block}\">{word}<div class=\"field-error\" id=\"{block}\""
+    );
+    assert!(row.contains(&cell), "{row}");
+    assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn parameter_table_shows_one_line_for_each_code_of_a_struct_row_in_the_order_of_the_first_fault()
+ {
+    let world = recipe_world();
+    let mixed = json!({"day": EARLIER_ONLY_DAY, "ratio": LONG_REAL});
+    seed_composite_world(&world, &[("MIX", CompositeType::Mixed, mixed)]);
+    let reply = world.get_en(&world.engineer, COMPOSITE_PAGE).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let row = row_of(main_of(&reply.body), "MIX");
+    assert_eq!(line_codes(row), ["E-RCP-005", "E-RCP-055"], "{row}");
+}
+
+#[tokio::test]
+async fn parameter_table_keeps_the_line_of_a_primitive_row_under_its_value() {
+    let world = recipe_world();
+    seed_composite_world(&world, &[("RATIO", CompositeType::Real, json!(LONG_REAL))]);
+    let reply = world.get_en(&world.engineer, COMPOSITE_PAGE).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let row = row_of(main_of(&reply.body), "RATIO");
+    assert_eq!(line_codes(row), ["E-RCP-055"], "{row}");
+    assert!(row.contains("16777217<div class=\"field-error\""), "{row}");
+}
+
+#[tokio::test]
+async fn parameter_table_shows_the_stored_date_and_the_rule_fault_under_it() {
+    let world = recipe_world();
+    seed_date_world(&world, EARLIER_DATE_COUNT, VersionState::LiveDraft);
+    let reply = world.get_en(&world.engineer, DATE_PAGE).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let row = row_of(main_of(&reply.body), "DUE");
+    // The value cell holds the text of the stored count, and the field line follows the text.
+    let block = "value-73570006-0000-0000-0000-00000f000040-error";
+    let value_then_line = format!(
+        "<td class=\"data\" aria-describedby=\"{block}\">D#2169-01-17<div class=\"field-error\" id=\"{block}\""
+    );
+    assert!(row.contains(&value_then_line), "{row}");
+    assert!(row.contains("E-RCP-005"), "{row}");
+    assert_clean_html(&reply.body);
+}
+
+#[tokio::test]
+async fn parameter_table_shows_no_field_line_for_a_date_of_the_current_range() {
+    let world = recipe_world();
+    seed_date_world(&world, 72_683, VersionState::LiveDraft);
+    let reply = world.get_en(&world.engineer, DATE_PAGE).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let row = row_of(main_of(&reply.body), "DUE");
+    assert!(row.contains(&data_cell("D#2168-12-31")), "{row}");
+    assert!(!row.contains("field-error"), "{row}");
 }
 
 #[tokio::test]

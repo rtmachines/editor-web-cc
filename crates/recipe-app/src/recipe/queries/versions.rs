@@ -3,10 +3,16 @@
 //! The specs are "Version list", "Version form", and "Version page" (ADR-0042, ADR-0043).
 
 use std::cmp::Reverse;
+use std::collections::BTreeSet;
 
+use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::export::check_version_parameters;
 use recipe_domain::identity::{Login, Permission};
-use recipe_domain::plant::{Machine, PlcType};
-use recipe_domain::recipe::{Recipe, RecipeId, ReferenceNumber, VersionHeader, VersionState};
+use recipe_domain::plant::{Machine, MachineId, PlatformTypes, PlcType, TypeTrees};
+use recipe_domain::recipe::{
+    Parameter, Recipe, RecipeId, RecipeVersionId, ReferenceNumber, RuleFault, VersionHeader,
+    VersionState,
+};
 use recipe_domain::timestamp::Timestamp;
 
 use super::outdated::{OutdatedParameter, RebindBudget, outdated_parameters};
@@ -15,7 +21,7 @@ use crate::auth::{
     CurrentUser, FormPurpose, Operation, RequestMeta, VersionFormPurpose, authorize,
 };
 use crate::context::{AppContext, UseCase};
-use crate::error::{AppError, Missing};
+use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{Isolation, ParameterRow, Transaction, VersionDetail, VersionSummary};
 
 /// One page of the versions of a recipe.
@@ -264,6 +270,10 @@ pub struct VersionView {
     pub rebind_over_bound: bool,
     /// The bound of the input. The notice `rebind-too-large` shows it.
     pub rebind_bound: usize,
+    /// The distinct codes of the rule faults of an `Approved` version, in code order (ADR-0119 (l)).
+    ///
+    /// The list is empty for a `Draft`, a `Retired` version, and a version without a rule fault.
+    pub rule_codes: Vec<ErrorCode>,
 }
 
 /// What `GetVersion` reads in its transaction.
@@ -274,6 +284,53 @@ struct Snapshot {
     last_change: Option<LastChange>,
     parameters: Vec<ParameterRow>,
     types: Vec<PlcType>,
+    /// The id of the version, set only for an `Approved` version. The rule check reads its rows.
+    approved: Option<RecipeVersionId>,
+}
+
+/// The rows that the rule check of an `Approved` version needs (ADR-0119 (l), design D9).
+struct ApprovedRows {
+    parameters: Vec<Parameter>,
+    types: Vec<PlcType>,
+}
+
+/// Read the parameters and the type rows of an `Approved` version in the transaction `tx`.
+async fn read_approved_rows(
+    tx: &mut dyn Transaction,
+    version: RecipeVersionId,
+    machine: MachineId,
+) -> Result<ApprovedRows, AppError> {
+    let parameters = tx
+        .recipes()
+        .version_parameters(version)
+        .await?
+        .into_iter()
+        .map(Parameter::from)
+        .collect();
+    let types = tx.types().type_rows(machine).await?;
+    Ok(ApprovedRows { parameters, types })
+}
+
+/// Return the distinct codes of the rule faults of `approved`, in code order, and the machine.
+///
+/// The function runs on a blocking thread. A structure fault is a storage defect and gives
+/// `E-DB-008` (ADR-0119 (k)).
+fn check_rule_codes(
+    machine: Machine,
+    approved: ApprovedRows,
+) -> Result<(Machine, Vec<ErrorCode>), AppError> {
+    let ApprovedRows { parameters, types } = approved;
+    let types = PlatformTypes::collect(machine.id(), machine.platform(), types)?;
+    let trees = TypeTrees::resolve(parameters.iter().map(Parameter::plc_type), &types);
+    let found = check_version_parameters(&parameters, &trees).map_err(|broken| {
+        let (key, fault) = broken.into_parts();
+        StorageError::broken_stored_parameter(key, fault)
+    })?;
+    let codes: BTreeSet<ErrorCode> = found
+        .iter()
+        .flat_map(|(_, faults)| faults.iter().map(RuleFault::code))
+        .collect();
+    Ok((machine, codes.into_iter().collect()))
 }
 
 /// Shows the header of one version.
@@ -281,7 +338,8 @@ struct Snapshot {
 /// The query solves one problem: the version page must show the header, the last editor, and the
 /// `row_version` of one moment, so a save from the page cannot overwrite a change that the user
 /// never saw (ADR-0042). It reads in one `RepeatableRead` transaction and ends it before it
-/// resolves the type trees of the outdated check.
+/// resolves the type trees of the outdated check. An `Approved` version reads its rows for the
+/// rule check in a second transaction, after the query holds an export permit.
 #[derive(Clone)]
 pub struct GetVersion {
     ctx: AppContext,
@@ -305,6 +363,8 @@ impl GetVersion {
     /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
     /// Returns `NotFound` (`E-WEB-005`) when the recipe or the version does not exist.
     /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted and the role cannot restore it.
+    /// Returns `AppError::Timeout` (`E-WEB-009`) when the rule check of an `Approved` version passes `timeout.export`.
+    /// Returns `AppError::TaskFailed` (`E-WEB-011`) with the stage `Export` when the rule check task fails.
     /// Returns `AppError::Storage` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
@@ -328,16 +388,70 @@ impl GetVersion {
             snapshot.types,
             budget,
         )?;
+        let (machine, rule_codes) = self
+            .rule_codes_of(snapshot.machine, snapshot.approved)
+            .await?;
         Ok(VersionView {
             recipe: snapshot.recipe,
-            machine: snapshot.machine,
+            machine,
             detail: snapshot.detail,
             last_change: snapshot.last_change,
             outdated: outdated.parameters,
             rebind_sum: outdated.sum,
             rebind_over_bound: outdated.over_bound,
             rebind_bound: input.rebind_bound,
+            rule_codes,
         })
+    }
+
+    /// Return the distinct codes of the rule faults of an `Approved` version, in code order.
+    ///
+    /// `approved` is `None` for a draft and a retired version, so they get no code and take no
+    /// permit. For an `Approved` version the function takes a permit of `export.permits` first,
+    /// outside any transaction, as `ExportVersion` does (ADR-0056 (b)). Then it reads the rows in
+    /// a new transaction and runs the check in `spawn_blocking`. The permit bounds the copies of
+    /// the rows in memory. The wait, the read, and the task share `timeout.export` and not
+    /// `timeout.validation`, because ADR-0119 (k) names `timeout.export` for this check.
+    /// The function gives the machine back.
+    ///
+    /// # Errors
+    ///
+    /// Returns `AppError::Timeout` (`E-WEB-009`) with the stage `Export` when the wait, the read,
+    /// and the task pass `timeout.export`.
+    /// Returns `AppError::TaskFailed` (`E-WEB-011`) with the stage `Export` when the task fails.
+    /// Returns `AppError::Storage` (`E-DB-008`) when a stored value or limit does not fit its type.
+    async fn rule_codes_of(
+        &self,
+        machine: Machine,
+        approved: Option<RecipeVersionId>,
+    ) -> Result<(Machine, Vec<ErrorCode>), AppError> {
+        let Some(version) = approved else {
+            return Ok((machine, Vec::new()));
+        };
+        let blocking = self.ctx.settings.blocking;
+        let gate = &self.ctx.export_gate;
+        blocking
+            .export(async {
+                let permit = gate.acquire().await?;
+                let rows = self.read_approved(version, machine.id()).await?;
+                blocking
+                    .rebuild_export(permit, move || check_rule_codes(machine, rows))
+                    .await?
+            })
+            .await
+    }
+
+    /// Read the rows of an `Approved` version in one `RepeatableRead` transaction.
+    ///
+    /// The function ends the transaction before it returns, so the blocking check holds no
+    /// connection. The rows of an `Approved` version do not change.
+    async fn read_approved(
+        &self,
+        version: RecipeVersionId,
+        machine: MachineId,
+    ) -> Result<ApprovedRows, AppError> {
+        let mut tx = self.ctx.uow.begin(Isolation::RepeatableRead).await?;
+        read_approved_rows(tx.as_mut(), version, machine).await
     }
 
     /// Read everything of the version page in one `RepeatableRead` transaction.
@@ -380,6 +494,7 @@ impl GetVersion {
         } else {
             Vec::new()
         };
+        let approved = (detail.state == VersionState::Approved).then(|| header.id());
         Ok(Snapshot {
             recipe,
             machine,
@@ -387,6 +502,7 @@ impl GetVersion {
             last_change,
             parameters,
             types,
+            approved,
         })
     }
 }

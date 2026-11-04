@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use recipe_domain::plant::{Machine, PlatformTypes, PlcTypeId, TypeTrees, UnitId, UnitPath};
 use recipe_domain::recipe::{
-    DiffKind, DiffPair, DiffRow, Parameter, ParameterKey, RecipeVersionId, diff_pairs,
+    DiffKind, DiffPair, DiffRow, Parameter, ParameterKey, RecipeVersionId, RuleFault,
+    check_stored_parameter, diff_pairs,
 };
 
 use super::parameters::text_of;
@@ -75,8 +76,29 @@ pub struct DiffSection {
     pub rows: Vec<DiffRow>,
 }
 
+/// The rule faults of the two sides of one parameter in a diff (ADR-0118, design D7).
+///
+/// The type solves one problem: the page shows the stored text of a part that breaks only the
+/// current rules, and it puts the field line of the fault beside that text. A side that is not in
+/// the diff has no fault.
+#[derive(Debug, Default)]
+pub struct DiffFaults {
+    /// The faults of the parameter in the old version, in the order of the read check.
+    pub old: Vec<RuleFault>,
+    /// The faults of the parameter in the new version, in the order of the read check.
+    pub new: Vec<RuleFault>,
+}
+
+impl DiffFaults {
+    /// Return `true` when neither side has a fault.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.old.is_empty() && self.new.is_empty()
+    }
+}
+
 /// One page of the diff of two versions (ADR-0050 (d), (e)).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct DiffPage {
     /// The counts of every key of both versions, not only of this page.
     pub summary: DiffSummary,
@@ -98,6 +120,18 @@ pub struct DiffPage {
     /// its own pages with `kind` (ADR-0050 (e), design D4). With `kind`, only that section can
     /// show here. On a page with `kind`, the web layer shows no cut link (design D4).
     pub cut: Vec<DiffKind>,
+    /// The rule faults of each parameter of the page that has one, for every row of its key.
+    ///
+    /// A parameter without a rule fault has no entry. Use [`DiffPage::faults_of`] to read it.
+    pub faults: BTreeMap<ParameterKey, DiffFaults>,
+}
+
+impl DiffPage {
+    /// Return the rule faults of the parameter `key`, or `None` when it has none.
+    #[must_use]
+    pub fn faults_of(&self, key: ParameterKey) -> Option<&DiffFaults> {
+        self.faults.get(&key)
+    }
 }
 
 /// The entries of one page, picked from the change flags.
@@ -298,6 +332,36 @@ fn unit_paths_of(
         .collect()
 }
 
+/// Run the read check on both sides of each pair and collect the rule faults by key (ADR-0118).
+///
+/// A structure fault is a stored part that breaks the earlier rule set. It stops the diff.
+fn faults_of_pairs(
+    pairs: &[DiffPair<'_>],
+    trees: &TypeTrees,
+) -> Result<BTreeMap<ParameterKey, DiffFaults>, AppError> {
+    let side = |parameter: Option<&Parameter>| -> Result<Vec<RuleFault>, AppError> {
+        let Some(parameter) = parameter else {
+            return Ok(Vec::new());
+        };
+        let Some(tree) = trees.tree(parameter.plc_type()) else {
+            return Ok(Vec::new());
+        };
+        check_stored_parameter(parameter, tree)
+            .map_err(|fault| StorageError::broken_stored_parameter(parameter.key(), fault).into())
+    };
+    let mut faults = BTreeMap::new();
+    for pair in pairs {
+        let found = DiffFaults {
+            old: side(pair.old_side())?,
+            new: side(pair.new_side())?,
+        };
+        if !found.is_empty() {
+            faults.insert(pair.key(), found);
+        }
+    }
+    Ok(faults)
+}
+
 /// Run the domain diff on the pairs of the plan and keep the rows of its entries (ADR-0050 (e)).
 ///
 /// `trees` holds the resolved tree of each type of both sides, and it can hold more. The caller
@@ -307,8 +371,9 @@ fn unit_paths_of(
 ///
 /// Returns `AppError::Plant` when a type of a pair does not resolve. Returns `AppError::Storage`
 /// when a unit, a tree, or a type text is missing. Returns `AppError::Storage` (`E-DB-008`) when
-/// a stored value or a stored limit row does not fit its tree (ADR-0050 (c)). That error keeps
-/// the `RecipeError` of the domain as its source.
+/// a stored value or a stored limit row breaks the earlier rule set (ADR-0050 (c), ADR-0118 (d)).
+/// The source chain of that error names the parameter key, the fault code, and the domain error. A part that breaks only the
+/// current rule set is a rule fault, and the page holds it in `faults`.
 pub(super) fn build_page(
     plan: PagePlan,
     summary: DiffSummary,
@@ -320,15 +385,9 @@ pub(super) fn build_page(
     let ids: BTreeSet<PlcTypeId> = both().map(Parameter::plc_type).collect();
     require_trees(&ids, trees)?;
     let pairs = DiffPair::match_by_key(&plan.keys, old, new);
-    // A stored row that does not fit is corrupt data. It stops the diff, and only the log shows
-    // the domain fault (A43, ADR-0050 (c)).
-    pairs
-        .iter()
-        .try_for_each(|pair| pair.check_stored(trees))
-        .map_err(|fault| StorageError::Other {
-            sqlstate: None,
-            source: Box::new(fault),
-        })?;
+    // A stored part that breaks the earlier rule set is corrupt data. It stops the diff, and only
+    // the log shows the domain fault (A43, ADR-0050 (c), ADR-0118 (d)).
+    let faults = faults_of_pairs(&pairs, trees)?;
     let rows = diff_pairs(&pairs, trees, leaf_rows);
     let sections = plan
         .sections
@@ -356,5 +415,6 @@ pub(super) fn build_page(
         page: plan.choice.page,
         has_next: plan.has_next,
         cut: plan.cut,
+        faults,
     })
 }

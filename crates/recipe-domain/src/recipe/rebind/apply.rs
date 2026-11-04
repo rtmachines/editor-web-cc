@@ -3,8 +3,10 @@
 use std::collections::BTreeMap;
 
 use super::{RebindPlan, RebindTargetReason};
-use crate::plant::{MemberName, PlcTypeId, TypeNode, TypeTree, TypeTrees};
-use crate::recipe::draft::{check_value, stored_limits, stored_value};
+use crate::plant::{MemberName, PlcPlatform, PlcTypeId, RuleSet, TypeNode, TypeTree, TypeTrees};
+use crate::recipe::draft::{
+    check_data_block_rule, check_end_rule, check_faults, stored_limits_under, stored_value,
+};
 use crate::recipe::{
     Draft, DraftError, Parameter, ParameterChange, ParameterKey, ProcessLimit, RecipeError,
 };
@@ -94,6 +96,7 @@ fn paired_members<'a>(
 
 /// Everything that `apply_rebind` needs to check one affected parameter.
 struct Candidate<'a> {
+    platform: PlcPlatform,
     key: ParameterKey,
     planned: &'a TypeTree,
     plan: &'a RebindPlan,
@@ -107,8 +110,9 @@ impl Draft {
     /// new type of a struct parameter is the target of the plan. The new type of an array
     /// parameter comes from `new_types`. The tree of each new type must have the shape of the
     /// planned tree. The method reads the planned value and the planned limits again against
-    /// that tree. Then it checks the size budgets and the S7 rules of the changed draft. The
-    /// draft changes only after every check passes. The translations stay.
+    /// that tree. The method runs the data block rule and the end rule of ADR-0116 (e) for each
+    /// rebound parameter. Then it checks the size budgets and the S7 rules of the changed draft.
+    /// The draft changes only after every check passes. The translations stay.
     ///
     /// The result holds one change for each parameter, in tag order.
     ///
@@ -117,7 +121,9 @@ impl Draft {
     /// Returns `E-PLT-013` when the trees belong to another machine or platform. Returns
     /// `E-RCP-052` with the reason `PlanMismatch` when the draft or a new tree does not match
     /// the plan. Returns `E-RCP-005`, `E-RCP-004`, or a limit error when the planned value or a
-    /// planned limit fails against the new tree. Returns `E-RCP-021` when the changed draft is
+    /// planned limit fails against the new tree. Returns `E-RCP-057` when a rebound parameter
+    /// has a data block number that is too high. Returns `E-RCP-056` when a rebound parameter
+    /// ends after byte 65535 of its data block. Returns `E-RCP-021` when the changed draft is
     /// above a size budget.
     pub fn apply_rebind(
         &mut self,
@@ -145,6 +151,7 @@ impl Draft {
         let mut pairs = Vec::with_capacity(plan.parameters.len());
         for (key, planned) in &plan.parameters {
             let candidate = Candidate {
+                platform: self.platform(),
                 key: *key,
                 planned,
                 plan,
@@ -193,8 +200,16 @@ fn rebound_parameter(
     let stored = plan.values.get(&candidate.key).ok_or_else(mismatch)?;
     let rows = plan.limits.get(&candidate.key).ok_or_else(mismatch)?;
     let value = stored_value(old.tag(), stored, real)?;
-    let limits: Vec<ProcessLimit> = stored_limits(old.tag(), rows, real)?;
-    check_value(old.tag(), &value, &limits, real)?;
+    let limits: Vec<ProcessLimit> = stored_limits_under(old.tag(), rows, real, RuleSet::Earlier)?;
+    let earlier = (real, RuleSet::Earlier);
+    if let Some(fault) = check_faults(old.tag(), &value, &limits, earlier)
+        .into_iter()
+        .next()
+    {
+        return Err(DraftError::from(fault));
+    }
+    check_data_block_rule(candidate.platform, old.tag(), old.s7_address())?;
+    check_end_rule(old.tag(), old.s7_address(), real)?;
     let rows = limits.iter().map(ProcessLimit::to_stored).collect();
     Ok(old.rebound(new_type, value.to_stored(), rows))
 }

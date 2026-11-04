@@ -59,15 +59,26 @@ pub(crate) struct CompareForm {
 
 /// The export link of an Approved or a Retired version (ADR-0052 (b), (c), and (e)).
 ///
-/// The link is a plain download link and not a boosted one. The page shows the notice of a
-/// Retired version before it.
+/// The link is a plain download link and not a boosted one. The page shows the notice, when the
+/// link has one, before it.
 pub(crate) struct ExportLink {
     /// The address of the export route, for example `/export/v1/recipes/R-100/approved`.
     pub(crate) href: String,
     /// The text of the link, which names the version and the file type.
     pub(crate) text: String,
-    /// True for a Retired version. The page then shows the notice and names it in the link.
-    pub(crate) retired: bool,
+    /// The notice before the link, or `None`. The link then names the notice in `aria-describedby`.
+    pub(crate) notice: Option<ExportNotice>,
+}
+
+/// The notice in the export area of a version that the file marks as not loadable (ADR-0119 (l)).
+///
+/// The type solves one problem: a Retired version and an Approved version with a rule fault show
+/// the same markup with another severity and another sentence. The severity comes from code.
+pub(crate) struct ExportNotice {
+    /// The severity of the alert: `info` for a Retired version, `warning` for a rule fault.
+    pub(crate) severity: &'static str,
+    /// The sentence of the notice, in the language of the page.
+    pub(crate) text: String,
 }
 
 /// The danger action of a version: the retire form or the discard form (ADR-0049 (f)).
@@ -193,16 +204,19 @@ fn export_link(
 ) -> Result<Option<ExportLink>, WebError> {
     let number = view.detail.number;
     let reference = view.recipe.reference();
-    let (operation, href, retired) = match view.detail.state {
+    let (operation, href, notice) = match view.detail.state {
         VersionState::Approved => (
             Operation::ExportApprovedVersion,
             format!("/export/v1/recipes/{reference}/approved"),
-            false,
+            rule_notice(t, view),
         ),
         VersionState::Retired => (
             Operation::ExportVersionByNumber,
             format!("/export/v1/recipes/{reference}/versions/{number}"),
-            true,
+            Some(ExportNotice {
+                severity: "info",
+                text: t.get("version-export-retired-notice"),
+            }),
         ),
         VersionState::LiveDraft | VersionState::Discarded => return Ok(None),
     };
@@ -210,8 +224,23 @@ fn export_link(
     Ok(shown.then(|| ExportLink {
         href,
         text: t.with_arg("version-export-link", "number", number),
-        retired,
+        notice,
     }))
+}
+
+/// Build the notice of the rule faults of `view`, or `None` when it has none (ADR-0119 (l)).
+///
+/// The function solves one problem: the export of an affected Approved version sets `loadable` to
+/// `false`, so the page must tell the reader why before the link.
+fn rule_notice(t: Texts<'_>, view: &VersionView) -> Option<ExportNotice> {
+    if view.rule_codes.is_empty() {
+        return None;
+    }
+    let codes: Vec<&str> = view.rule_codes.iter().map(|code| code.as_str()).collect();
+    Some(ExportNotice {
+        severity: "warning",
+        text: t.with_arg("version-export-rule-notice", "codes", codes.join(", ")),
+    })
 }
 
 /// Build the action area of `view` for the session of `request`.

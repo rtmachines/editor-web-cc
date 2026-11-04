@@ -4,7 +4,7 @@
 //! It ends before the sentence "Reference: {request_id}.", because only the request knows the reference (design D4).
 
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::recipe::{ParameterKey, ValueFault};
+use recipe_domain::recipe::{DraftError, ParameterKey, StructureFault, ValueFault};
 
 /// The kind of failure behind `StorageError::Deadlock` (design D16, ADR-0035 c).
 ///
@@ -96,6 +96,19 @@ struct BrokenValue {
 #[error("{0}")]
 struct FaultSource(ValueFault);
 
+/// The cause of a stored parameter that breaks the earlier rule set (ADR-0118 (d)).
+///
+/// The type solves one problem: the one log line must name the broken parameter and the code of
+/// the fault. It holds the key, the code, and the first error of the domain as its source.
+#[derive(Debug, thiserror::Error)]
+#[error("the stored parameter {key} breaks the earlier rule set with {code}")]
+struct BrokenStoredParameter {
+    key: ParameterKey,
+    code: ErrorCode,
+    #[source]
+    error: DraftError,
+}
+
 impl StorageError {
     /// Build the error of a broken port contract, for example a result list that is too short.
     ///
@@ -121,6 +134,23 @@ impl StorageError {
             source: Box::new(BrokenValue {
                 key,
                 fault: FaultSource(fault),
+            }),
+        }
+    }
+
+    /// Build the error of a stored parameter that breaks the earlier rule set, a defect of the storage.
+    ///
+    /// The function solves one problem: the one log line must find the broken parameter. The
+    /// source chain names the parameter key, the code of the fault, and the first error of the
+    /// domain. The code is `E-DB-008`, and `Display` hides the details.
+    #[must_use]
+    pub(crate) fn broken_stored_parameter(key: ParameterKey, fault: StructureFault) -> Self {
+        Self::Other {
+            sqlstate: None,
+            source: Box::new(BrokenStoredParameter {
+                key,
+                code: fault.code(),
+                error: fault.into_error(),
             }),
         }
     }
@@ -170,6 +200,7 @@ mod tests {
     use std::io;
 
     use recipe_domain::error_codes::ErrorCode;
+    use recipe_domain::recipe::{RecipeError, ReferenceNumber};
 
     use super::*;
 
@@ -296,6 +327,29 @@ mod tests {
         assert!(matches!(&error, StorageError::Other { sqlstate: None, .. }));
         let inner = error.source().unwrap();
         assert_eq!(inner.to_string(), "an adapter returned too few rows");
+    }
+
+    #[test]
+    fn broken_stored_parameter_names_the_key_and_the_code_in_the_chain() {
+        let key = ParameterKey::from(uuid::Uuid::nil());
+        let fault = StructureFault::from(RecipeError::RecipeDeleted {
+            reference: ReferenceNumber::parse("R-7").unwrap(),
+        });
+
+        let error = StorageError::broken_stored_parameter(key, fault);
+
+        assert_eq!(error.code(), ErrorCode::DB_008);
+        assert_eq!(
+            error.to_string(),
+            "An unexpected database error occurred. Contact the administrator."
+        );
+        let chain: Vec<String> = std::iter::successors(error.source(), |&cause| cause.source())
+            .map(ToString::to_string)
+            .collect();
+        let first = chain.first().unwrap();
+        assert!(first.contains(&key.to_string()), "{chain:?}");
+        assert!(first.contains(ErrorCode::RCP_012.as_str()), "{chain:?}");
+        assert!(chain.iter().any(|text| text.contains("R-7")), "{chain:?}");
     }
 
     #[test]

@@ -163,8 +163,14 @@ mod list_exportable_recipes_tests;
 #[cfg(test)]
 mod machine_filter_tests;
 #[cfg(test)]
+mod missing_tree_tests;
+#[cfg(test)]
+mod rule_check_tests;
+#[cfg(test)]
 mod scope_tests;
 #[cfg(test)]
 mod test_doubles;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod timeout_tests;

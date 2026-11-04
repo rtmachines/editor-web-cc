@@ -16,7 +16,8 @@ use recipe_domain::recipe::{ParameterKey, RecipeError, ReferenceNumber};
 
 use super::fields::SentFields;
 use super::form_view::{
-    DefinitionTexts, GridTexts, ParameterFormFragment, ParameterFormView, Place, Shown, grid_of,
+    DefinitionTexts, GridTexts, ParameterFormFragment, ParameterFormView, Place, SentEcho, Shown,
+    StoredParts, echoed_fault_errors, fault_errors, grid_of,
 };
 use super::grid::GridView;
 use super::summary::{ParameterNoticeFragment, ParameterPage};
@@ -28,6 +29,9 @@ use crate::pages::render::render;
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
+
+#[cfg(test)]
+mod tests;
 
 /// The HTMX header that names the element that takes the answer.
 const HX_RETARGET: HeaderName = HeaderName::from_static("hx-retarget");
@@ -272,6 +276,37 @@ fn is_blocked(ctx: Ctx<'_>) -> Result<bool, WebError> {
     Ok(!ctx.request.may_run(operation)?)
 }
 
+/// Return the field lines of the rule faults of the stored parameter of `form` for the grid of `shown`.
+///
+/// The faults belong to the stored type. A grid of another type, for example after `fields=1` with
+/// a new type, gets no line, because its leaves are not the stored leaves (ADR-0118 (c), (i)).
+///
+/// The grid shows the sent texts. A line stays only under an input that still shows the stored
+/// text of its part, because a changed part is not at fault any more.
+///
+/// # Errors
+///
+/// Returns `E-WEB-010` when the stored value does not match its tree, a defect of the storage.
+fn stored_fault_errors(
+    ctx: Ctx<'_>,
+    form: &ParameterForm,
+    shown: &Shown,
+) -> Result<FormErrors, WebError> {
+    let is_stored_type = form.type_text.as_deref() == Some(shown.value_type.as_str());
+    let (Some(grid), true) = (&shown.grid, is_stored_type) else {
+        return Ok(FormErrors::default());
+    };
+    let request_id = ctx.request.request_id();
+    let stored = StoredParts::of(form).map_err(|_fault| WebError::Internal { request_id })?;
+    Ok(match stored {
+        Some(stored) => {
+            let echo = SentEcho::new(&stored, grid, &shown.texts.s7_address);
+            echoed_fault_errors(ctx.texts(), &form.rule_faults, grid, &echo)
+        }
+        None => fault_errors(ctx.texts(), &form.rule_faults, grid),
+    })
+}
+
 /// Render the boosted form alone (design D7).
 ///
 /// In read-only mode the fragment holds the heading and the notice and no form (ADR-0113 (d)).
@@ -298,13 +333,12 @@ pub(crate) fn form_fragment(
         return Ok(render(&fragment, request.request_id())?.into_response());
     }
     let csrf = request.csrf_token();
-    let view = ParameterFormView::new(
-        t,
-        form,
-        (shown, Place::Fragment),
-        csrf,
-        FormErrors::default(),
-    );
+    let errors = stored_fault_errors(ctx, form, &shown)?;
+    let shown = Shown {
+        grid: shown.grid.map(|grid| grid.with_errors(&errors)),
+        ..shown
+    };
+    let view = ParameterFormView::new(t, form, (shown, Place::Fragment), csrf, errors);
     let fragment = ParameterFormFragment { t, form: view };
     Ok(render(&fragment, request.request_id())?.into_response())
 }
@@ -336,6 +370,7 @@ pub(crate) fn form_page(
         form: (!blocked).then_some(view),
         notice: blocked.then(|| t.get("readonly-form-unavailable")),
         values: None,
+        faults: FormErrors::default(),
         translations: None,
         remove: None,
         layout,
@@ -419,7 +454,9 @@ fn field_of(error: &RecipeError) -> Option<&'static str> {
         | RecipeError::S7AddressOverlap { .. }
         | RecipeError::S7AddressMisaligned { .. }
         | RecipeError::S7AddressNotAllowed { .. }
-        | RecipeError::S7AddressWidthMismatch { .. } => Some("s7_address"),
+        | RecipeError::S7AddressWidthMismatch { .. }
+        | RecipeError::S7AddressPastBlockEnd { .. }
+        | RecipeError::S7DataBlockOutOfRange { .. } => Some("s7_address"),
         _other => None,
     }
 }

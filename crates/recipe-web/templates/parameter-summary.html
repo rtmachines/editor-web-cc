@@ -1,5 +1,6 @@
+{% import "components/field.html" as fields -%}
 {% import "components/toast.html" as toasts -%}
-{#- The definition of a parameter in #parameter-summary (design D7). The struct that renders or includes this file has the fields t and summary. The answer of a save also clears #error-panel and shows the toast out of band. The hx-swap-oob values are literals. -#}
+{#- The definition of a parameter in #parameter-summary (design D7). The struct that renders or includes this file has the fields t and summary. The answer of a save also clears #error-panel and shows the toast out of band. The hx-swap-oob values are literals. A stored address that breaks a newer rule gets its field line inside the address cell (ADR-0118). Only the read-only page passes the line, because the edit form has its own input s7_address. -#}
 <dl>
 <dt>{{ t.get("parameter-key") }}</dt>
 <dd class="data">{{ summary.key }}</dd>
@@ -14,7 +15,7 @@
 <dt>{{ t.get("field-type") }}</dt>
 <dd class="data">{{ summary.type_text }}</dd>
 {% if let Some(address) = summary.s7_address.as_ref() %}<dt>{{ t.get("field-s7-address") }}</dt>
-<dd class="data">{{ address }}</dd>
+<dd><span class="data">{{ address }}</span>{{ fields::error_line("s7_address", summary.address_lines.as_slice()) }}</dd>
 {% endif %}<dt>{{ t.get("field-ordinal") }}</dt>
 <dd class="data">{{ summary.ordinal }}</dd>
 </dl>{% if !summary.toast.is_empty() %}<div id="toast" hx-swap-oob="innerHTML">{{ toasts::success(summary.toast) }}</div><div id="error-panel" hx-swap-oob="innerHTML"></div>{% endif %}

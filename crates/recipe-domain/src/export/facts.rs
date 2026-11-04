@@ -64,13 +64,15 @@ pub struct DocumentFacts {
     pub content_sha256: Sha256,
     /// The English name (`name_en`) of each parameter, by its key.
     pub names: BTreeMap<ParameterKey, Text>,
+    /// `true` when the read check finds a rule fault in a parameter of the version (ADR-0119).
+    pub has_rule_fault: bool,
 }
 
 impl DocumentFacts {
-    /// Return the value of `loadable`. Only an approved version is loadable.
+    /// Return the value of `loadable`. Only an approved version without a rule fault is loadable.
     #[must_use]
     pub const fn loadable(&self) -> bool {
-        self.status.loadable()
+        self.status.loadable() && !self.has_rule_fault
     }
 }
 

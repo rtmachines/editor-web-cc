@@ -10,8 +10,9 @@ use askama::Template;
 use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_app::recipe::ParameterList;
 use recipe_domain::plant::{BaseExpr, PlcPlatform, Primitive, TypeExpr};
-use recipe_domain::recipe::ParameterKey;
+use recipe_domain::recipe::{ParameterKey, RuleFault, RuleField};
 
+use crate::error::{FieldError, LineView};
 use crate::pages::path_values::Page;
 use crate::pages::recipes::pager_links;
 use crate::pages::render::page_url;
@@ -33,6 +34,10 @@ pub(crate) struct ParameterRowView {
     pub(crate) unit: String,
     /// The S7 address, or an empty text on a platform without addresses.
     pub(crate) address: String,
+    /// The `id` that the lines of the address are about. The block of the lines gets `<id>-error`.
+    pub(crate) address_id: String,
+    /// The lines of the rule faults of the address (ADR-0118), in the UI language. Mostly empty.
+    pub(crate) address_lines: Vec<LineView>,
     /// True when the type of the parameter uses an older struct revision (ADR-0043 (j)).
     pub(crate) outdated: bool,
 }
@@ -43,9 +48,20 @@ pub(crate) struct ValueView {
     pub(crate) text: String,
     /// True when `text` is a fixed word and not a value. The cell then has the muted class.
     pub(crate) is_word: bool,
+    /// The `id` of the input that the lines are about. The block of the lines gets `<id>-error`.
+    pub(crate) id: String,
+    /// The lines of the rule faults of the value (ADR-0118), in the UI language. Mostly empty.
+    pub(crate) lines: Vec<LineView>,
 }
 
 impl ValueView {
+    /// Return the cell with the field lines `lines` under the value (ADR-0118).
+    ///
+    /// `id` names the block of the lines. A cell without a rule fault passes no line.
+    pub(crate) fn with_lines(self, id: String, lines: Vec<LineView>) -> Self {
+        Self { id, lines, ..self }
+    }
+
     /// Build the cell from the leaf text of a primitive parameter, or `None` for an array or a
     /// struct (ADR-0108 (a)).
     ///
@@ -53,21 +69,77 @@ impl ValueView {
     /// A BOOL value shows the word of `grid-true` or `grid-false`, as the leaf grid does
     /// (ADR-0039). `type_text` is the type text of the parameter, for example `BOOL`.
     pub(crate) fn new(t: Texts<'_>, type_text: &str, leaf_text: Option<&str>) -> Self {
-        match leaf_text {
-            None => Self {
-                text: t.get("parameters-value-composite"),
-                is_word: true,
-            },
-            Some("") => Self {
-                text: t.get("parameters-value-empty"),
-                is_word: true,
-            },
-            Some(text) => Self {
-                text: bool_word(t, type_text, text).unwrap_or_else(|| cut_value(text)),
-                is_word: false,
-            },
+        let (text, is_word) = match leaf_text {
+            None => (t.get("parameters-value-composite"), true),
+            Some("") => (t.get("parameters-value-empty"), true),
+            Some(text) => (
+                bool_word(t, type_text, text).unwrap_or_else(|| cut_value(text)),
+                false,
+            ),
+        };
+        Self {
+            text,
+            is_word,
+            id: String::new(),
+            lines: Vec::new(),
         }
     }
+}
+
+/// Return the lines of the rule faults of the parameter `key` whose part `keep` accepts (ADR-0118).
+///
+/// A fault of a limit stands on the parameter page and not in the table. The table builds each
+/// line with the mapping of the form errors, so the sentence is the same.
+fn fault_lines(
+    t: Texts<'_>,
+    list: &ParameterList,
+    key: &ParameterKey,
+    keep: fn(&RuleField) -> bool,
+) -> Vec<LineView> {
+    faults_of(list, key, keep)
+        .map(|fault| line_of(t, fault))
+        .collect()
+}
+
+/// Return the lines of the value faults of an array row or a struct row (ADR-0121 (d)).
+///
+/// Such a row shows only a word, so it has no leaf field. A large array may break one rule in
+/// thousands of leaves. The cell would then grow without a bound. The function gives one line
+/// for each distinct code, in the order of the first fault with that code.
+fn composite_value_lines(t: Texts<'_>, list: &ParameterList, key: &ParameterKey) -> Vec<LineView> {
+    let mut seen = BTreeSet::new();
+    faults_of(list, key, is_value)
+        .filter(|fault| seen.insert(fault.code()))
+        .map(|fault| line_of(t, fault))
+        .collect()
+}
+
+/// Return the faults of the parameter `key` whose part `keep` accepts, in their stored order.
+fn faults_of<'a>(
+    list: &'a ParameterList,
+    key: &ParameterKey,
+    keep: fn(&RuleField) -> bool,
+) -> impl Iterator<Item = &'a RuleFault> + use<'a> {
+    list.rule_faults
+        .get(key)
+        .into_iter()
+        .flatten()
+        .filter(move |fault| keep(fault.field()))
+}
+
+/// Build the line of one rule fault with the mapping of the form errors.
+fn line_of(t: Texts<'_>, fault: &RuleFault) -> LineView {
+    t.line(&FieldError::recipe(fault.error(), None))
+}
+
+/// Return true for the part of a value, under the column Value.
+const fn is_value(field: &RuleField) -> bool {
+    matches!(field, RuleField::Value(_))
+}
+
+/// Return true for the S7 address, under the column Address.
+const fn is_address(field: &RuleField) -> bool {
+    matches!(field, RuleField::Address)
 }
 
 /// Return the word of the leaf grid for a BOOL value, or `None` for any other type or text.
@@ -198,11 +270,18 @@ fn row_view(
         .cloned()
         .unwrap_or_default();
     let leaf_text = list.value_texts.get(&row.key).map(String::as_str);
+    // An array row or a struct row has no leaf text (ADR-0108 (a)).
+    let value_lines = if leaf_text.is_some() {
+        fault_lines(t, list, &row.key, is_value)
+    } else {
+        composite_value_lines(t, list, &row.key)
+    };
     ParameterRowView {
         href: format!("{base}/parameters/{}", row.key),
         tag: row.tag.to_string(),
         name: row.name_en.to_string(),
-        value: ValueView::new(t, &type_text, leaf_text),
+        value: ValueView::new(t, &type_text, leaf_text)
+            .with_lines(format!("value-{}", row.key), value_lines),
         type_text,
         unit: row.unit_path.to_string(),
         address: row
@@ -210,6 +289,8 @@ fn row_view(
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_default(),
+        address_id: format!("address-{}", row.key),
+        address_lines: fault_lines(t, list, &row.key, is_address),
         outdated: outdated.contains(&row.key),
     }
 }

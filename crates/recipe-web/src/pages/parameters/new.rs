@@ -107,6 +107,8 @@ fn added(
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_default(),
+        address_id: String::new(),
+        address_lines: Vec::new(),
         outdated: false,
     };
     let fragment = ParameterRowFragment {

@@ -10,7 +10,7 @@ mod tests;
 pub(in crate::recipe) use check::check_snapshot;
 pub use item::{SnapshotError, SnapshotItem};
 
-use crate::plant::{LiveUnits, TypeTrees};
+use crate::plant::{LiveUnits, RuleSet, TypeTrees};
 use crate::recipe::{Parameter, ParameterTag, Recipe, RecipeError, StoredParameter};
 
 /// The parameters of any version, as storage returns them.
@@ -43,7 +43,8 @@ impl VersionSnapshot {
     /// Check the snapshot against the recipe, the units, and the type trees (I6, I19).
     ///
     /// The check collects every problem. The parameter items come first, in tag order. The items
-    /// of the machine and of the recipe follow.
+    /// of the machine and of the recipe follow. The check reads the values and the limits with
+    /// the earlier rule set, because `CreateVersion` copies them (ADR-0120 (g)).
     ///
     /// # Errors
     ///
@@ -57,6 +58,12 @@ impl VersionSnapshot {
         units: &LiveUnits,
         trees: &TypeTrees,
     ) -> Result<Vec<ParameterTag>, RecipeError> {
-        check_snapshot(&self.parameters, Some(recipe), units, trees)
+        check_snapshot(
+            &self.parameters,
+            Some(recipe),
+            units,
+            trees,
+            RuleSet::Earlier,
+        )
     }
 }

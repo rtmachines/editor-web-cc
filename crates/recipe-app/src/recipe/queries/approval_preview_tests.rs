@@ -1,13 +1,16 @@
 //! Tests of `GetApprovalPreview` (task 6.3, ADR-0049 (c), (d), ADR-0050 (f), (h), design D3).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{LeafPath, PlcPlatform, Primitive};
+use recipe_domain::plant::{
+    LeafPath, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address,
+};
 use recipe_domain::recipe::{
-    DiffKind, DiffPart, ParameterKey, ParameterTag, Recipe, StoredLimit, StoredParameter,
-    StoredRecipe, StoredValue, StoredVersionHeader, VersionState,
+    DiffKind, DiffPart, Ordinal, ParameterKey, ParameterTag, Recipe, RecipeError, RuleFault,
+    SnapshotItem, StoredLimit, StoredParameter, StoredRecipe, StoredValue, StoredVersionHeader,
+    VersionState,
 };
 use serde_json::json;
 
@@ -18,7 +21,8 @@ use crate::auth::CurrentUser;
 use crate::blocking::{AppSettings, DiffSettings};
 use crate::error::AppError;
 use crate::memory::fixtures::{
-    Fixture, actor, meta, mid, param, pkey, reference, rid, second_engineer, text, tid, user, vid,
+    Fixture, actor, meta, mid, param, parameter_on, pkey, reference, rid, second_engineer, text,
+    tid, uid, user, vid,
 };
 use crate::memory::{JournalEntry, seed_type_id};
 use crate::ports::Isolation;
@@ -479,4 +483,147 @@ async fn the_preview_holds_the_permit_until_its_holder_drops_it() {
     assert_eq!(context.diff_gate.available(), 0);
     drop(preview);
     assert_eq!(context.diff_gate.available(), 1);
+}
+
+/// The identifier of the `DATE` row of the earlier rule set tests.
+pub(super) const DATE_TYPE: u128 = 950;
+/// The first `DATE` count of `S7_1500`: `D#1990-01-01`.
+const DATE_START: i64 = 7_305;
+/// The last `DATE` count of the current rule set on `S7_1500`: `D#2168-12-31`.
+pub(super) const CURRENT_DATE_END: i64 = 72_683;
+/// A `DATE` count that only the earlier rule set permits: `D#2169-01-17`.
+pub(super) const EARLIER_DATE: i64 = 72_700;
+
+/// Store a `DATE` row for `S7_1500`, because the seed has no `DATE` row.
+pub(super) fn seed_date_type(fixture: &Fixture) -> PlcTypeId {
+    let primitive = Primitive::Date;
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(DATE_TYPE),
+        machine: None,
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape: RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    tid(DATE_TYPE)
+}
+
+/// A parameter `DUE` of type `DATE` with the count `count` on the `S7_1500` machine.
+///
+/// `S7_1500` is the platform, because `S7_300` keeps the end 72683 in both rule sets.
+///
+/// With `bounded` set, the limit row of the parameter runs from the first count up to `count`.
+pub(super) fn date_parameter(plc_type: PlcTypeId, count: i64, bounded: bool) -> StoredParameter {
+    let limits = if bounded {
+        vec![StoredLimit {
+            min: Some(DATE_START.into()),
+            max: Some(count.into()),
+            ..crate::memory::fixtures::limit()
+        }]
+    } else {
+        Vec::new()
+    };
+    StoredParameter {
+        plc_type,
+        value: StoredValue::from(json!(count)),
+        limits,
+        s7_address: Some(S7Address::parse("DB1.DBW0").unwrap()),
+        ordinal: Ordinal::parse(1).unwrap(),
+        ..parameter_on(PlcPlatform::S7_1500, 1, "DUE", uid(102), 0)
+    }
+}
+
+/// An `S7_1500` machine with the approved base `DUE` = `base` and the draft `DUE` = `draft`.
+///
+/// Neither side has a limit row, so the draft has the blocker `E-RCP-016`.
+pub(super) fn date_world(base: i64, draft: i64) -> Fixture {
+    date_world_with((base, draft), false)
+}
+
+/// Like [`date_world`]. With `bounded` set, each side has a limit row up to its own count.
+fn date_world_with((base, draft): (i64, i64), bounded: bool) -> Fixture {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_approved_and_draft(&machine, 1, "R-1");
+    let date_type = seed_date_type(&fixture);
+    let old = date_parameter(date_type, base, bounded);
+    let new = StoredParameter {
+        id: copy(&old).id,
+        ..date_parameter(date_type, draft, bounded)
+    };
+    seed(&fixture, &[old], &[new]);
+    fixture
+}
+
+/// Return the codes of the items of a snapshot failure, or an empty list for any other error.
+fn item_codes(error: &AppError) -> Vec<ErrorCode> {
+    match error {
+        AppError::Recipe(RecipeError::ValidationFailed { items }) => {
+            items.iter().map(SnapshotItem::code).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn a_base_date_past_the_current_end_gives_the_line_rcp_005_on_the_base_side() {
+    let fixture = date_world(EARLIER_DATE, CURRENT_DATE_END);
+
+    let preview = preview_as(&fixture, &admin(), 2).await.unwrap();
+
+    let diff = preview.diff.as_ref().unwrap();
+    let old_codes: Vec<ErrorCode> = diff
+        .faults
+        .values()
+        .flat_map(|found| found.old.iter().map(RuleFault::code))
+        .collect();
+    assert_eq!(old_codes, vec![ErrorCode::RCP_005]);
+    assert!(diff.faults.values().all(|found| found.new.is_empty()));
+    let blocker_codes = preview.draft_blocker.as_ref().map(item_codes);
+    assert!(
+        !blocker_codes
+            .unwrap_or_default()
+            .contains(&ErrorCode::RCP_005)
+    );
+}
+
+#[tokio::test]
+async fn a_base_without_a_rule_fault_has_no_faults_in_the_diff() {
+    let fixture = date_world(CURRENT_DATE_END, CURRENT_DATE_END);
+
+    let preview = preview_as(&fixture, &admin(), 2).await.unwrap();
+
+    let diff = preview.diff.as_ref().unwrap();
+    assert!(diff.faults.is_empty(), "{:?}", diff.faults);
+}
+
+#[tokio::test]
+async fn a_base_date_past_the_earlier_end_still_gives_db_008() {
+    let fixture = date_world_with((72_900, CURRENT_DATE_END), true);
+
+    let result = preview_as(&fixture, &admin(), 2).await;
+
+    assert_eq!(
+        result.as_ref().err().map(AppError::code),
+        Some(ErrorCode::DB_008),
+        "{result:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_draft_date_past_the_current_end_gives_the_blocker_rcp_005() {
+    let fixture = date_world(CURRENT_DATE_END, EARLIER_DATE);
+
+    let preview = preview_as(&fixture, &admin(), 2).await.unwrap();
+
+    let blocker = preview.draft_blocker.as_ref().unwrap();
+    assert_eq!(item_codes(blocker), vec![ErrorCode::RCP_005], "{blocker:?}");
+    assert!(!preview.may_approve);
+    let error = approve_error(&fixture, &admin()).await;
+    assert_eq!(blocker.to_string(), error.to_string());
 }

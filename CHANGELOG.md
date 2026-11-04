@@ -4,6 +4,19 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- `DATE` on `S7_1200` and `S7_1500` ends at 2168-12-31 (ADR-0114).
+- A parameter range can be narrower than the vendor range (ADR-0115).
+- An S7 address has an end byte, and an S7-300 has a limit for the data block number (ADR-0116).
+- `REAL` allows at most 7 significant digits, and `LREAL` allows at most 15 (ADR-0117).
+- A stored value that breaks a newer rule shows a field line (ADR-0118).
+- The `loadable` flag is `false` when a value, a limit, or an S7 address breaks a current rule (ADR-0119).
+- The snapshot check of `CreateVersion` uses the earlier rule set for stored data that a command does not write (ADR-0120).
+- `E-RCP-055` reports a number with too many significant digits for its type.
+- `E-RCP-056` reports an S7 address whose data ends after byte 65535 of the data block.
+- `E-RCP-057` reports a data block above 16000, which an S7-300 controller does not have.
+
 ## [0.6.0] - 2026-11-03
 
 ### Added

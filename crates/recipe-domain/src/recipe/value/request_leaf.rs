@@ -3,9 +3,9 @@
 use serde_json::Value;
 
 use super::expected::Expected;
-use super::leaf::{LeafType, Mode, convert};
+use super::leaf::{LeafFault, LeafType, Mode, convert};
 use super::texts::leaf_json;
-use crate::plant::{PlcPlatform, TypeNode};
+use crate::plant::{PlcPlatform, RuleSet, TypeNode};
 
 /// Convert the form text of one leaf to its canonical stored form (ADR-0039 (c)).
 ///
@@ -15,9 +15,9 @@ pub(in crate::recipe) fn request_text(
     text: &str,
     node: &TypeNode,
     platform: PlcPlatform,
-) -> Result<Value, Expected> {
+) -> Result<Value, LeafFault> {
     let TypeNode::Leaf { primitive, .. } = node else {
-        return Err(Expected::Scalar);
+        return Err(Expected::Scalar.into());
     };
     let value = leaf_json(text, *primitive)?;
     request_leaf(&value, node, platform)
@@ -26,20 +26,20 @@ pub(in crate::recipe) fn request_text(
 /// Convert the value of one new leaf of a rebind to its canonical stored form.
 ///
 /// The value has the form of a request. A time leaf is an IEC literal and the result is a count.
-/// The function returns the expected form when the value does not match, or when `node` is not
-/// a scalar leaf.
+/// The function returns the fault of the leaf when the value does not match, or when `node` is not
+/// a scalar leaf. A request always uses the current rule set (ADR-0120 (c)).
 pub(in crate::recipe) fn request_leaf(
     value: &Value,
     node: &TypeNode,
     platform: PlcPlatform,
-) -> Result<Value, Expected> {
+) -> Result<Value, LeafFault> {
     let TypeNode::Leaf {
         primitive,
         string_length,
         ..
     } = node
     else {
-        return Err(Expected::Scalar);
+        return Err(Expected::Scalar.into());
     };
     convert(
         value,
@@ -48,6 +48,7 @@ pub(in crate::recipe) fn request_leaf(
             string_length: *string_length,
             platform,
             mode: Mode::Request,
+            rules: RuleSet::Current,
         },
     )
 }

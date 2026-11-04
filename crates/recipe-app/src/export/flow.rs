@@ -332,11 +332,13 @@ async fn commit_export(
         reference,
         number,
         status,
-        written: Written {
-            document,
-            hash,
-            scope,
-        },
+        written:
+            Written {
+                document,
+                hash,
+                scope,
+                has_rule_fault,
+            },
     } = prepared;
     let entry = exported_entry((recipe, version), (hash, scope.as_ref()), (user, meta));
     ctx.uow.commit(tx, NonEmpty::new(entry)).await?;
@@ -346,6 +348,7 @@ async fn commit_export(
         number,
         status,
         content_sha256: hash,
+        has_rule_fault,
     })
 }
 

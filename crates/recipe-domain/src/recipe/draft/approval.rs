@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use super::{Draft, stored_limits};
 use crate::identity::UserId;
-use crate::plant::{LeafClass, LeafPath, LiveUnits, TypeTrees};
+use crate::plant::{LeafClass, LeafPath, LiveUnits, RuleSet, TypeTrees};
 use crate::recipe::snapshot::check_snapshot;
 use crate::recipe::{
     ApprovalPolicy, Approver, DraftError, RecipeError, RecipeErrors, RecipeVersionId,
@@ -161,7 +161,7 @@ impl Draft {
         allow_outdated: bool,
     ) -> Result<ApprovalReady, DraftError> {
         self.check_draft_trees(trees)?;
-        check_snapshot(self.parameters(), None, units, trees)?;
+        check_snapshot(self.parameters(), None, units, trees, RuleSet::Current)?;
         if self.parameters.is_empty() {
             return Err(RecipeError::DraftHasNoParameters {
                 reference: self.reference.clone(),
@@ -170,7 +170,7 @@ impl Draft {
             .into());
         }
         self.check_limits(trees)?;
-        self.check_s7_layout(trees)?;
+        self.check_s7_layout_for_approval(trees)?;
         self.check_outdated(trees, allow_outdated)?;
         Ok(ApprovalReady {
             draft: self,

@@ -62,8 +62,27 @@ impl TryFrom<(TimeType, i128)> for IecLiteral {
     type Error = IecLiteralReason;
 
     fn try_from((ty, count): (TimeType, i128)) -> Result<Self, Self::Error> {
+        Self::from_count(ty, count, super::RuleSet::Current)
+    }
+}
+
+impl IecLiteral {
+    /// Build a literal from a stored count under the rule set `rules`.
+    ///
+    /// A caller that reads a count that it does not write passes
+    /// [`RuleSet::Earlier`](crate::plant::RuleSet::Earlier)
+    /// (ADR-0120 (d)).
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`IecLiteralReason`] of the first rule that the count breaks.
+    pub fn from_count(
+        ty: TimeType,
+        count: i128,
+        rules: super::RuleSet,
+    ) -> Result<Self, IecLiteralReason> {
         check_count(ty, count)?;
-        super::range::check(ty, count)?;
+        super::range::check(ty, count, rules)?;
         Ok(IecLiteral { ty, count })
     }
 }

@@ -13,14 +13,14 @@ use super::check::ordered_faults;
 use super::decimal::is_json_number;
 use super::expected::Expected;
 use super::fault::{ValueFault, ValueFaults};
-use super::leaf::Mode;
+use super::leaf::{LeafFault, Mode};
 use super::leaves::{ValueLeaf, value_leaves};
 use super::numeric::is_integer;
 use super::request_leaf::request_text;
 use super::walk::canonicalize;
 use crate::plant::{
-    IecLiteral, LeafClass, LeafPath, LeafSegment, PlcPlatform, Primitive, TimeType, TypeNode,
-    TypeTree,
+    IecLiteral, LeafClass, LeafPath, LeafSegment, PlcPlatform, Primitive, RuleSet, TimeType,
+    TypeNode, TypeTree,
 };
 use crate::recipe::limit::ProcessLimit;
 use crate::recipe::rebind::build_value;
@@ -184,7 +184,7 @@ impl ParameterValue {
         if let Some(faults) = ValueFaults::from_vec(faults) {
             return Err(faults);
         }
-        canonicalize(built.json, tree, Mode::Stored).map_err(ValueFaults::from)
+        canonicalize(built.json, tree, (Mode::Stored, RuleSet::Current)).map_err(ValueFaults::from)
     }
 
     /// Build the value of `tree` from the texts of its leaves and check it against `limits`.
@@ -204,7 +204,7 @@ impl ParameterValue {
     ) -> Result<Self, ValueFaults> {
         let built = texts_json(tree, texts);
         if built.bad_leaves.is_empty() && built.unknown.is_empty() {
-            let value = canonicalize(built.json, tree, Mode::Stored)?;
+            let value = canonicalize(built.json, tree, (Mode::Stored, RuleSet::Current))?;
             value.check_all(tree, limits)?;
             return Ok(value);
         }
@@ -253,11 +253,8 @@ fn texts_json(tree: &TypeTree, texts: &LeafTexts) -> BuiltJson {
         let path = LeafPath::from_segments(segments.to_vec());
         match leaf_from_text(texts, &mut used, &path, node, tree.platform()) {
             Ok(value) => value,
-            Err(expected) => {
-                let fault = ValueFault::Mismatch {
-                    leaf: path.clone(),
-                    expected,
-                };
+            Err(fault) => {
+                let fault = ValueFault::from_leaf(path.clone(), fault);
                 bad_leaves.push((path, fault));
                 Value::Null
             }
@@ -278,9 +275,9 @@ fn leaf_from_text(
     path: &LeafPath,
     node: &TypeNode,
     platform: PlcPlatform,
-) -> Result<Value, Expected> {
+) -> Result<Value, LeafFault> {
     let Some((position, text)) = texts.text_at(path) else {
-        return Err(Expected::Leaf);
+        return Err(Expected::Leaf.into());
     };
     if let Some(flag) = used.get_mut(position) {
         *flag = true;
@@ -323,11 +320,13 @@ fn leaf_text(leaf: ValueLeaf<'_>, platform: PlcPlatform) -> Result<LeafText, Val
     })
 }
 
-/// Write the canonical IEC literal of a stored count.
+/// Write the canonical IEC literal of a stored count under the earlier rule set.
+///
+/// The function reads a count that it does not write (ADR-0120 (d)).
 fn literal_text(primitive: Primitive, platform: PlcPlatform, count: &Number) -> Option<String> {
     let time_type = TimeType::of(primitive, platform)?;
     let count: i128 = count.to_string().parse().ok()?;
-    IecLiteral::try_from((time_type, count))
+    IecLiteral::from_count(time_type, count, RuleSet::Earlier)
         .ok()
         .map(|literal| literal.to_string())
 }

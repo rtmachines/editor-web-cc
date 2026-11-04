@@ -53,7 +53,7 @@ In the name, `{ref}` is the reference number of the recipe and `{n}` is the vers
 
 The content hash is the key `content_sha256` in the file. It has 64 characters, 0 to 9 and a to f. The version page does not show the hash.
 
-Open the file in a text editor to read the hash. The hash stays the same for one version, also after a rename or a retirement (`api.md` section 6.1). The file also holds the key `loadable`. It is `true` only for an `Approved` version.
+Open the file in a text editor to read the hash. The hash stays the same for one version, also after a rename or a retirement (`api.md` section 6.1). The file also holds the key `loadable`. It is `true` only when the version is `Approved` and no value, limit, or address breaks a current rule.
 
 Do not edit the file. The hash covers only the fields with "In hash: yes" in [`api.md`](../architecture/api.md) section 6.1. A changed value in one of these fields does not match the hash.
 

@@ -10,6 +10,7 @@ mod lang_code;
 mod limit;
 mod optimistic;
 mod ordinal;
+mod read_check;
 mod rebind;
 mod reference_number;
 mod root;
@@ -28,13 +29,14 @@ pub use draft::{
     LIMIT_ROWS_PER_VERSION, NewParameter, PARAMETERS_PER_VERSION, Parameter, ParameterChange,
     Retype, StoredDraft, StoredParameter, check_budgets,
 };
-pub use error::{Budget, DraftError, RecipeError, RecipeErrors};
+pub use error::{Budget, DraftError, PrecisionField, RecipeError, RecipeErrors};
 pub use ids::{ParameterId, ParameterKey, ParameterKeyReason, RecipeId, RecipeVersionId};
 pub use lang_code::{LangCode, Translation};
 pub use limit::{LimitFault, LimitInput, LimitList, LimitListReason, ProcessLimit, StoredLimit};
 
 pub use optimistic::Optimistic;
 pub use ordinal::{Ordinal, OrdinalReason};
+pub use read_check::{RuleFault, RuleField, StructureFault, check_stored_parameter};
 pub use rebind::{
     ArrayShape, MemberValue, RebindLeaves, RebindPlan, RebindRequest, RebindTargetReason,
     rebind_new_leaves,

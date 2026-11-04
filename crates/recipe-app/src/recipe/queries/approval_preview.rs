@@ -263,6 +263,8 @@ fn tags_of(error: &RecipeError) -> Vec<&ParameterTag> {
         | RecipeError::S7AddressRequired { tag, .. }
         | RecipeError::S7AddressNotAllowed { tag, .. }
         | RecipeError::S7AddressWidthMismatch { tag, .. }
+        | RecipeError::S7AddressPastBlockEnd { tag, .. }
+        | RecipeError::S7DataBlockOutOfRange { tag, .. }
         | RecipeError::TypeRevisionOutdated { tag, .. } => vec![tag],
         _ => Vec::new(),
     }
@@ -350,21 +352,23 @@ impl From<PageRead> for LoadedPage {
 /// Run the diff of the page with the new side from the loaded draft (design D3).
 fn diff_of(
     draft: &Draft,
-    page: LoadedPage,
+    (plan, summary, old): (PagePlan, DiffSummary, &[Parameter]),
     context: (&Machine, &PlatformTypes, &TypeTrees),
     leaf_rows: u32,
 ) -> Result<DiffPage, AppError> {
-    let LoadedPage { plan, summary, old } = page;
     let new: Vec<Parameter> = draft
         .parameters()
         .into_iter()
         .filter(|parameter| plan.keys().contains(&parameter.key()))
         .cloned()
         .collect();
-    build_page(plan, summary, (&old, &new), context, leaf_rows)
+    build_page(plan, summary, (old, &new), context, leaf_rows)
 }
 
 /// The parts of the preview that come from the diff: the rows of the page and the outdated list.
+///
+/// The diff checks both sides of each pair. A structure fault of the base side gives `E-DB-008`
+/// there, and a rule fault of the base side stays in `DiffPage::faults` (ADR-0118, design D7).
 struct Review {
     diff: DiffPage,
     outdated: Vec<OutdatedParameter>,
@@ -386,7 +390,8 @@ fn review(
     let (machine, types, trees) = context;
     let rows = rows_of(draft, machine)?;
     let outdated = outdated_with_trees(&rows, (types, trees), budget)?.parameters;
-    let diff = diff_of(draft, page, context, leaf_rows)?;
+    let LoadedPage { plan, summary, old } = page;
+    let diff = diff_of(draft, (plan, summary, &old), context, leaf_rows)?;
     Ok(Review { diff, outdated })
 }
 

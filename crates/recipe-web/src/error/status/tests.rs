@@ -50,6 +50,15 @@ fn error_mapping_every_registry_code_has_a_documented_row() {
 }
 
 #[test]
+fn error_mapping_range_and_address_codes_give_status_422() {
+    for text in ["E-RCP-055", "E-RCP-056", "E-RCP-057"] {
+        let code = ErrorCode::find(text).unwrap();
+        assert_eq!(status_of(code), StatusCode::UNPROCESSABLE_ENTITY, "{text}");
+        assert!(!is_database_rule(code), "{text}");
+    }
+}
+
+#[test]
 fn error_mapping_database_rule_codes_are_defects() {
     for text in [
         "E-DB-003",

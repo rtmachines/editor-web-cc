@@ -1,6 +1,6 @@
 # ADR-0028: Version header, approval token, and draft clarifications
 
-Status: Accepted. Amended by ADR-0029 (the approval token owns the draft)
+Status: Accepted. Amended by ADR-0029 (the approval token owns the draft). Amended by ADR-0117 (at most 7 significant digits for `REAL` and 15 for `LREAL`). Amended by ADR-0120 (the snapshot check of `CreateVersion` and a stored part that a command does not write use the earlier rule set)
 Date: 2026-10-13
 Deciders: project owner
 

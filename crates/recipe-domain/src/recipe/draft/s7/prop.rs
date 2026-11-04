@@ -18,6 +18,13 @@ const MIN_PARAMETERS: usize = 1;
 const MAX_PARAMETERS: usize = 12;
 /// Largest number of unused bytes before a parameter.
 const MAX_GAP: u32 = 4;
+/// Size of a data block in bytes (ADR-0116). A generated address plus its size stays within it.
+const DATA_BLOCK_SIZE: u32 = 65_536;
+/// Largest data block number on an S7-300 (ADR-0116). The generators use data block 1 only.
+const S7_300_MAX_DATA_BLOCK: u32 = 16_000;
+/// The data block of every generated address.
+const GENERATED_DATA_BLOCK: u32 = 1;
+const _: () = assert!(GENERATED_DATA_BLOCK >= 1 && GENERATED_DATA_BLOCK <= S7_300_MAX_DATA_BLOCK);
 
 /// The kinds of parameter in a generated set. Each kind has its own S7 size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,13 +103,14 @@ struct Placement {
 impl Placement {
     /// The address of the placement in data block 1.
     fn address(self) -> S7Address {
+        let db = GENERATED_DATA_BLOCK;
         let text = match self.kind {
-            Kind::Bool => format!("DB1.DBX{}.{}", self.offset, self.bit),
+            Kind::Bool => format!("DB{db}.DBX{}.{}", self.offset, self.bit),
             Kind::Byte | Kind::Lreal | Kind::String3 | Kind::String10 => {
-                format!("DB1.DBB{}", self.offset)
+                format!("DB{db}.DBB{}", self.offset)
             }
-            Kind::Int => format!("DB1.DBW{}", self.offset),
-            Kind::Dint | Kind::Real => format!("DB1.DBD{}", self.offset),
+            Kind::Int => format!("DB{db}.DBW{}", self.offset),
+            Kind::Dint | Kind::Real => format!("DB{db}.DBD{}", self.offset),
         };
         S7Address::parse(&text).unwrap()
     }
@@ -188,6 +196,16 @@ fn trees() -> TypeTrees {
 
 /// Check a set of placements on an S7-300 draft. The tags are `P00`, `P01`, and so on.
 fn check(placements: &[Placement]) -> Result<(), DraftError> {
+    draft_of(placements).check_s7_layout(&trees())
+}
+
+/// Check a set of placements with the layout rules and the address rules of ADR-0116.
+fn check_for_approval(placements: &[Placement]) -> Result<(), DraftError> {
+    draft_of(placements).check_s7_layout_for_approval(&trees())
+}
+
+/// A live S7-300 draft that holds one parameter for each placement.
+fn draft_of(placements: &[Placement]) -> Draft {
     let parameters: Vec<StoredParameter> = placements
         .iter()
         .enumerate()
@@ -203,7 +221,7 @@ fn check(placements: &[Placement]) -> Result<(), DraftError> {
         })
         .collect();
     let stored = stored_draft_with(VersionState::LiveDraft, PlcPlatform::S7_300, parameters);
-    Draft::load(stored).unwrap().check_s7_layout(&trees())
+    Draft::load(stored).unwrap()
 }
 
 /// Return the code of the error, or `None` when the check passed.
@@ -238,8 +256,10 @@ proptest! {
 
     #[test]
     fn a_set_without_overlap_and_with_aligned_starts_passes(items in items()) {
-        let (placed, _) = place(&items);
+        let (placed, end) = place(&items);
+        prop_assert!(end <= DATA_BLOCK_SIZE, "the layout must fit the data block");
         prop_assert_eq!(code_of(check(&placed)), None);
+        prop_assert_eq!(code_of(check_for_approval(&placed)), None);
     }
 
     #[test]

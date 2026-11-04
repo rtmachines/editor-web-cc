@@ -27,8 +27,9 @@ use rows::PairParts;
 /// sides without a difference gives no row and counts in [`DiffRows::unchanged`].
 /// A `leaf_rows` value above the range of `usize` cuts no part, because no list can be longer.
 ///
-/// The caller requires a tree in `trees` for each type and checks each pair with
-/// [`DiffPair::check_stored`] first. Then each value and each bound shows as canonical text (A43).
+/// The caller requires a tree in `trees` for each type and checks each side with
+/// [`check_stored_parameter`](crate::recipe::check_stored_parameter) first (ADR-0118). Then each
+/// value and each bound shows as canonical text (A43).
 #[must_use]
 pub fn diff_pairs(pairs: &[DiffPair<'_>], trees: &TypeTrees, leaf_rows: u32) -> DiffRows {
     let leaf_rows = usize::try_from(leaf_rows).unwrap_or(usize::MAX);
@@ -75,6 +76,8 @@ fn pair_parts(sides: Sides<'_>, trees: &TypeTrees) -> PairParts {
     }
 }
 
+#[cfg(test)]
+mod date_range_tests;
 #[cfg(test)]
 mod fixtures;
 #[cfg(test)]

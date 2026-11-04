@@ -151,6 +151,8 @@ mod compare_tests;
 #[cfg(test)]
 mod export_link_tests;
 #[cfg(test)]
+mod export_notice_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
 mod lang_next_tests;
@@ -166,6 +168,8 @@ mod outdated_tests;
 mod page_hash_tests;
 #[cfg(test)]
 mod page_tests;
+#[cfg(test)]
+mod parameter_table_address_tests;
 #[cfg(test)]
 mod parameter_table_tests;
 #[cfg(test)]

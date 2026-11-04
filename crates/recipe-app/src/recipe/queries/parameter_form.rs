@@ -5,13 +5,15 @@
 //! `preview.rs` and writes nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use recipe_domain::plant::{
     Machine, PlatformTypes, PlcType, Primitive, RecordShape, StringKind, StringLength, TypeExpr,
     TypeName, TypeTree, Unit, UnitPath,
 };
 use recipe_domain::recipe::{
-    ParameterKey, Recipe, RecipeError, ReferenceNumber, StoredParameter, VersionState,
+    Parameter, ParameterKey, Recipe, RecipeError, ReferenceNumber, RuleFault, StoredParameter,
+    VersionState, check_stored_parameter,
 };
 
 use super::parameters::{VersionScope, read_scope, text_of};
@@ -20,7 +22,7 @@ use crate::auth::{
     CurrentUser, FormPurpose, Operation, ParameterFormPurpose, RequestMeta, authorize,
 };
 use crate::context::{AppContext, UseCase};
-use crate::error::{AppError, Missing};
+use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{Isolation, VersionDetail};
 
 /// The parsed request of `GetParameterForm`.
@@ -64,6 +66,10 @@ pub struct ParameterForm {
     pub type_text: Option<String>,
     /// The resolved tree of `type_expr`, or `None` without a type.
     pub preview: Option<TypeTree>,
+    /// The rule faults of the stored parameter, each with its field (ADR-0118, design D7).
+    ///
+    /// The list is empty for a new parameter and for a parameter that meets the current rules.
+    pub rule_faults: Arc<[RuleFault]>,
 }
 
 /// What `GetParameterForm` reads in its transaction.
@@ -143,6 +149,28 @@ async fn read_form(ctx: &AppContext, input: &GetParameterFormInput) -> Result<Fo
     })
 }
 
+/// Check the stored `parameter` against the rules in force now and list its rule faults.
+///
+/// The function runs `check_stored_parameter` on the type tree of the parameter. A new parameter
+/// has no faults.
+///
+/// # Errors
+///
+/// Returns `StorageError` (`E-DB-008`) when the parameter breaks the earlier rule set, because that
+/// is a defect of the storage. Returns the error of the type when the tree does not resolve.
+fn rule_faults_of(
+    parameter: Option<&StoredParameter>,
+    types: &PlatformTypes,
+) -> Result<Arc<[RuleFault]>, AppError> {
+    let Some(stored) = parameter else {
+        return Ok(Arc::from(Vec::new()));
+    };
+    let tree = TypeTree::resolve(stored.plc_type, types)?;
+    let faults = check_stored_parameter(&Parameter::from(stored.clone()), &tree)
+        .map_err(|fault| StorageError::broken_stored_parameter(stored.key, fault))?;
+    Ok(faults.into())
+}
+
 /// Return the proposals of the type input, as `GetUdtForm` writes them (`plant/queries/types.rs`).
 ///
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
@@ -217,6 +245,8 @@ impl GetParameterForm {
     /// Returns `RecipeError::VersionNotEditable` (`E-RCP-002`) when the version is not a live draft.
     /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) or `TypeTooLarge` (`E-PLT-018`) for the type.
     /// Returns `AppError::Storage` when the database fails.
+    /// Returns `StorageError` (`E-DB-008`) when the stored parameter breaks the earlier rule set.
+    /// A part that breaks only the current rule set gives a rule fault in `rule_faults`.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
@@ -244,6 +274,7 @@ impl GetParameterForm {
             .as_ref()
             .map(|parameter| text_of(&types, parameter.plc_type))
             .transpose()?;
+        let rule_faults = rule_faults_of(reads.parameter.as_ref(), &types)?;
         let preview = input
             .type_expr
             .as_ref()
@@ -264,6 +295,7 @@ impl GetParameterForm {
             parameter: reads.parameter,
             type_text,
             preview,
+            rule_faults,
         })
     }
 }

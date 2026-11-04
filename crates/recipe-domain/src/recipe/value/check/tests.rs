@@ -249,6 +249,7 @@ fn texts_with_a_bad_leaf_keep_the_conflict_first_and_the_leaves_in_tree_order() 
             ValueFault::LimitConflict { leaf } => format!("conflict {leaf}"),
             ValueFault::OutOfLimit { leaf, .. } => format!("range {leaf}"),
             ValueFault::Mismatch { leaf, .. } => format!("shape {leaf}"),
+            ValueFault::Precision { leaf, .. } => format!("precision {leaf}"),
             ValueFault::WrongTree => "wrong tree".to_owned(),
         })
         .collect();

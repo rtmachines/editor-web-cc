@@ -20,10 +20,12 @@ const LTIME_SIGNED: RangeInclusive<i128> = -9_223_372_036_854_775_808..=9_223_37
 const S5TIME: RangeInclusive<i128> = 0..=9_990_000;
 /// `DATE` on CODESYS and TwinCAT 3: 1970-01-01 to 2106-02-07, in days (ADR-0026).
 const DATE_UNSIGNED: RangeInclusive<i128> = 0..=49_710;
-/// `DATE` on S7-1200 and S7-1500: 1990-01-01 to 2169-06-06, in days (ADR-0026).
-const DATE_S7: RangeInclusive<i128> = 7_305..=72_840;
-/// `DATE` on S7-300: 1990-01-01 to 2168-12-31, in days (ADR-0026).
-const DATE_S7_300: RangeInclusive<i128> = 7_305..=72_683;
+/// `DATE` on every S7 platform: 1990-01-01 to 2168-12-31, in days (ADR-0114).
+const DATE_S7: RangeInclusive<i128> = 7_305..=72_683;
+/// `DATE` on S7-1200 and S7-1500 in the earlier rule set: 1990-01-01 to 2169-06-06, in days.
+///
+/// ADR-0120 (a) keeps this end for the stored data that a user wrote before ADR-0114.
+const DATE_S7_EARLIER: RangeInclusive<i128> = 7_305..=72_840;
 /// `LDATE` on CODESYS and TwinCAT 3: unsigned 64 bit, in nanoseconds.
 const LDATE: RangeInclusive<i128> = 0..=18_446_744_073_709_551_615;
 /// `TIME_OF_DAY` on every platform: below one day, in milliseconds.
@@ -41,8 +43,22 @@ const LDT_S7: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
 /// `DTL` on S7-1200 and S7-1500: 1970-01-01 to 2262-04-11, never negative, in nanoseconds.
 const DTL: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
 
+/// The set of value rules that a check applies (ADR-0120).
+///
+/// A command checks the data that it writes with `Current`. It checks a stored part that it
+/// only reads with `Earlier`. This solves the lock of a draft by a rule change (ADR-0028).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RuleSet {
+    /// Every rule in force now.
+    Current,
+    /// The rules before ADR-0114 and ADR-0117 (ADR-0120 (a)).
+    Earlier,
+}
+
 /// Return the range of the count of a type, or `None` when the type is not on the platform.
-pub(super) fn range(ty: TimeType) -> Option<RangeInclusive<i128>> {
+///
+/// Only `DATE` on `S7_1200` and `S7_1500` differs between the two rule sets.
+pub(super) fn range(ty: TimeType, rules: RuleSet) -> Option<RangeInclusive<i128>> {
     use PlcPlatform::{S7_300, S7_1200, S7_1500};
     let iec = !ty.platform().is_s7();
     match (ty.primitive(), ty.platform()) {
@@ -52,7 +68,7 @@ pub(super) fn range(ty: TimeType) -> Option<RangeInclusive<i128>> {
         (Primitive::Ltime, S7_1500) => Some(LTIME_SIGNED),
         (Primitive::S5Time, S7_1500 | S7_300) => Some(S5TIME),
         (Primitive::Date, _) if iec => Some(DATE_UNSIGNED),
-        (Primitive::Date, S7_300) => Some(DATE_S7_300),
+        (Primitive::Date, S7_1200 | S7_1500) if rules == RuleSet::Earlier => Some(DATE_S7_EARLIER),
         (Primitive::Date, _) => Some(DATE_S7),
         (Primitive::Ldate, _) if iec => Some(LDATE),
         (Primitive::TimeOfDay, _) => Some(TIME_OF_DAY),
@@ -73,8 +89,8 @@ pub(super) fn range(ty: TimeType) -> Option<RangeInclusive<i128>> {
 ///
 /// Returns [`IecLiteralReason::NotOnPlatform`] when the type does not exist on the platform.
 /// Returns [`IecLiteralReason::OutOfRange`] when the count is outside the range.
-pub(super) fn check(ty: TimeType, count: i128) -> Result<(), IecLiteralReason> {
-    let allowed = range(ty).ok_or(IecLiteralReason::NotOnPlatform)?;
+pub(super) fn check(ty: TimeType, count: i128, rules: RuleSet) -> Result<(), IecLiteralReason> {
+    let allowed = range(ty, rules).ok_or(IecLiteralReason::NotOnPlatform)?;
     if allowed.contains(&count) {
         Ok(())
     } else {
@@ -216,14 +232,7 @@ mod tests {
     #[test]
     fn date_range_per_platform() {
         assert_range(Primitive::Date, &IEC, 0, 49_710, 1);
-        assert_range(
-            Primitive::Date,
-            &[PlcPlatform::S7_1200, PlcPlatform::S7_1500],
-            7_305,
-            72_840,
-            1,
-        );
-        assert_range(Primitive::Date, &[PlcPlatform::S7_300], 7_305, 72_683, 1);
+        assert_range(Primitive::Date, &S7, 7_305, 72_683, 1);
     }
 
     #[test]
@@ -233,6 +242,93 @@ mod tests {
         assert_eq!(days_from_civil(1990, 1, 1), Some(7_305));
         assert_eq!(days_from_civil(2169, 6, 6), Some(72_840));
         assert_eq!(days_from_civil(2168, 12, 31), Some(72_683));
+    }
+
+    fn check_date(
+        platform: PlcPlatform,
+        count: i128,
+        rules: RuleSet,
+    ) -> Result<(), IecLiteralReason> {
+        check(ty(Primitive::Date, platform), count, rules)
+    }
+
+    #[test]
+    fn adr_0114_current_set_ends_date_at_72_683_on_s7_1200_and_s7_1500() {
+        for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+            assert_eq!(check_date(platform, 72_683, RuleSet::Current), Ok(()));
+            assert_eq!(
+                check_date(platform, 72_684, RuleSet::Current),
+                Err(IecLiteralReason::OutOfRange)
+            );
+        }
+    }
+
+    #[test]
+    fn adr_0120_earlier_set_ends_date_at_72_840_on_s7_1200_and_s7_1500() {
+        for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+            assert_eq!(check_date(platform, 72_840, RuleSet::Earlier), Ok(()));
+            assert_eq!(
+                check_date(platform, 72_841, RuleSet::Earlier),
+                Err(IecLiteralReason::OutOfRange)
+            );
+            assert_eq!(check_date(platform, 7_305, RuleSet::Earlier), Ok(()));
+            assert_eq!(
+                check_date(platform, 7_304, RuleSet::Earlier),
+                Err(IecLiteralReason::OutOfRange)
+            );
+        }
+    }
+
+    #[test]
+    fn adr_0120_s7_300_date_ends_at_72_683_in_both_sets() {
+        for rules in [RuleSet::Current, RuleSet::Earlier] {
+            assert_eq!(check_date(PlcPlatform::S7_300, 72_683, rules), Ok(()));
+            assert_eq!(
+                check_date(PlcPlatform::S7_300, 72_684, rules),
+                Err(IecLiteralReason::OutOfRange)
+            );
+        }
+    }
+
+    #[test]
+    fn adr_0120_the_sets_differ_only_for_date_on_s7_1200_and_s7_1500() {
+        let primitives = [
+            Primitive::Time,
+            Primitive::Ltime,
+            Primitive::S5Time,
+            Primitive::Date,
+            Primitive::Ldate,
+            Primitive::TimeOfDay,
+            Primitive::Ltod,
+            Primitive::DateAndTime,
+            Primitive::Ldt,
+            Primitive::Dtl,
+        ];
+        for primitive in primitives {
+            for platform in ALL {
+                let Some(t) = TimeType::of(primitive, platform) else {
+                    continue;
+                };
+                let differs = range(t, RuleSet::Current) != range(t, RuleSet::Earlier);
+                let is_date_on_s7 = primitive == Primitive::Date
+                    && matches!(platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500);
+                assert_eq!(differs, is_date_on_s7, "{primitive:?} {platform:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn adr_0114_the_public_range_and_the_literal_use_the_current_set() {
+        let t = ty(Primitive::Date, PlcPlatform::S7_1500);
+        assert_eq!(t.range(), Some((7_305, 72_683)));
+        assert_eq!(
+            parse(Primitive::Date, PlcPlatform::S7_1500, "D#2168-12-31"),
+            Ok(72_683)
+        );
+        assert_eq!(
+            parse(Primitive::Date, PlcPlatform::S7_1500, "D#2169-01-01"),
+            Err(IecLiteralReason::OutOfRange)
+        );
     }
 
     #[test]
@@ -384,6 +480,59 @@ mod tests {
             parse(p, PlcPlatform::S7_300, "DT#2090-01-01-00:00:00"),
             Err(IecLiteralReason::OutOfRange)
         );
+    }
+
+    #[test]
+    fn adr_0115_date_and_time_with_milliseconds_is_refused() {
+        for platform in [PlcPlatform::S7_1500, PlcPlatform::S7_300] {
+            assert_eq!(
+                parse(
+                    Primitive::DateAndTime,
+                    platform,
+                    "DT#2026-10-12-12:30:00.500"
+                ),
+                Err(IecLiteralReason::Fraction),
+                "{platform:?}"
+            );
+        }
+        assert_eq!(
+            parse(
+                Primitive::DateAndTime,
+                PlcPlatform::S7_1500,
+                "DT#2026-10-12-12:30:00"
+            ),
+            Ok(1_791_808_200)
+        );
+    }
+
+    #[test]
+    fn adr_0115_last_dtl_instant_is_accepted() {
+        for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+            assert_eq!(
+                parse(
+                    Primitive::Dtl,
+                    platform,
+                    "DTL#2262-04-11-23:47:16.854775807"
+                ),
+                Ok(9_223_372_036_854_775_807),
+                "{platform:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn adr_0115_dtl_next_nanosecond_after_the_last_instant_is_refused() {
+        for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+            assert_eq!(
+                parse(
+                    Primitive::Dtl,
+                    platform,
+                    "DTL#2262-04-11-23:47:16.854775808"
+                ),
+                Err(IecLiteralReason::OutOfRange),
+                "{platform:?}"
+            );
+        }
     }
 
     #[test]

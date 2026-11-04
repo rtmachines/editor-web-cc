@@ -13,8 +13,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use askama::Template;
-use recipe_domain::plant::{LeafPath, TypeTree};
-use recipe_domain::recipe::RecipeError;
+use recipe_domain::plant::{LeafPath, LeafSegment, TypeTree};
+use recipe_domain::recipe::{PrecisionField, RecipeError, RuleField};
 
 use crate::error::{FormErrors, leaf_of};
 use crate::pages::Texts;
@@ -64,13 +64,16 @@ pub(crate) enum LeafInput {
     Value,
     /// The first limit input of the limit row of the leaf: the minimum or the maximum length.
     Limit,
+    /// The `max` input of the limit row of the leaf. A row without it has none.
+    LimitMax,
 }
 
-/// The `id` of the value input and of the first limit input of one leaf path.
+/// The `id` of the value input, of the first limit input, and of the `max` input of one leaf path.
 #[derive(Default)]
 struct LeafIds {
     value: Option<String>,
     limit: Option<String>,
+    limit_max: Option<String>,
 }
 
 /// One hint above the grid. Each input of its class names it in `aria-describedby`.
@@ -246,6 +249,7 @@ impl GridView {
         match input {
             LeafInput::Value => ids.value.clone(),
             LeafInput::Limit => ids.limit.clone(),
+            LeafInput::LimitMax => ids.limit_max.clone(),
         }
     }
 
@@ -253,8 +257,23 @@ impl GridView {
     ///
     /// A fault of the value (`E-RCP-004`, `E-RCP-005`, `E-RCP-028`) names the value input. Any
     /// other fault of a leaf names the first limit input of its limit row.
+    ///
+    /// `E-RCP-055` names its part in `field`. The value gives the value input of the leaf. A leaf
+    /// without a value input, such as the row `[*]`, gives its first limit input. The limit `min`
+    /// gives the first limit input. The limit `max` gives the `max` input of the limit row.
     pub(crate) fn input_of(&self, error: &RecipeError) -> Option<String> {
         let path = leaf_of(error)?;
+        if let RecipeError::PrecisionExceeded { field, .. } = error {
+            return match field {
+                PrecisionField::Value => self
+                    .input_id(path, LeafInput::Value)
+                    .or_else(|| self.input_id(path, LeafInput::Limit)),
+                PrecisionField::LimitMin => self.input_id(path, LeafInput::Limit),
+                PrecisionField::LimitMax => self
+                    .input_id(path, LeafInput::LimitMax)
+                    .or_else(|| self.input_id(path, LeafInput::Limit)),
+            };
+        }
         let input = match error {
             RecipeError::ValueOutOfLimit { .. }
             | RecipeError::ValueShapeMismatch { .. }
@@ -262,6 +281,59 @@ impl GridView {
             _limit => LeafInput::Limit,
         };
         self.input_id(path, input)
+    }
+
+    /// Return the `id` of the input of a rule fault of a stored part, or `None` (ADR-0118, design D7).
+    ///
+    /// A value fault names the value input of its leaf. The limit `min` names the first limit
+    /// input. The limit `max` names the `max` input. A leaf without that input gives its first
+    /// limit input. The address has no leaf and no input in the grid.
+    pub(crate) fn input_of_field(&self, field: &RuleField) -> Option<String> {
+        let path = field_path(field)?;
+        field_input(field, self.ids.get(&path.to_string())?)
+    }
+
+    /// Return the `id` of each input that shows the part of a rule fault, in grid order (ADR-0118).
+    ///
+    /// A fault of a shared bound names the path `[*]`. The grid shows that bound in one row `[*]`,
+    /// or in one limit row per element after the mode "one limit per element". In the second case
+    /// the result holds the input of each element that the path covers.
+    pub(crate) fn inputs_of_field(&self, field: &RuleField) -> Vec<String> {
+        if let Some(id) = self.input_of_field(field) {
+            return vec![id];
+        }
+        let Some(path) = field_path(field) else {
+            return Vec::new();
+        };
+        let found: BTreeSet<(usize, String)> = self
+            .ids
+            .iter()
+            .filter(|(key, _ids)| {
+                LeafPath::parse(key).is_ok_and(|shown| covers(path.segments(), shown.segments()))
+            })
+            .filter_map(|(_key, ids)| field_input(field, ids))
+            .map(|id| (id.len(), id))
+            .collect();
+        found.into_iter().map(|(_len, id)| id).collect()
+    }
+
+    /// Return the text of each input of the grid by the `id` of the input.
+    ///
+    /// A closed group is part of the result, because its inputs still submit.
+    pub(crate) fn input_texts(&self) -> BTreeMap<&str, &str> {
+        self.bodies
+            .iter()
+            .flat_map(|body| body.rows.iter())
+            .filter_map(GridRow::leaf)
+            .flat_map(|row| {
+                let value = row.value.as_ref().map(|cell| (&cell.id, &cell.text));
+                let limits = [&row.min, &row.max, &row.max_length]
+                    .into_iter()
+                    .filter_map(|cell| cell.as_ref().map(|cell| (&cell.id, &cell.text)));
+                value.into_iter().chain(limits)
+            })
+            .map(|(id, text)| (id.as_str(), text.as_str()))
+            .collect()
     }
 
     /// Open each group that holds an input with an error line (ADR-0039 (l), ADR-0041 (e)).
@@ -317,6 +389,37 @@ pub(crate) struct GridLimitsFragment<'a> {
     pub(crate) rows: &'a [LimitTexts],
     /// The text of the row with the empty leaf path: the tag of the parameter.
     pub(crate) root_label: String,
+}
+
+/// Return the leaf path of a rule field, or `None` for the address.
+const fn field_path(field: &RuleField) -> Option<&LeafPath> {
+    match field {
+        RuleField::Value(path) | RuleField::LimitMin(path) | RuleField::LimitMax(path) => {
+            Some(path)
+        }
+        RuleField::Address => None,
+    }
+}
+
+/// Return the input of `ids` that shows the part `field`. A missing input gives the first limit input.
+fn field_input(field: &RuleField, ids: &LeafIds) -> Option<String> {
+    match field {
+        RuleField::Value(_path) => ids.value.clone().or_else(|| ids.limit.clone()),
+        RuleField::LimitMin(_path) => ids.limit.clone(),
+        RuleField::LimitMax(_path) => ids.limit_max.clone().or_else(|| ids.limit.clone()),
+        RuleField::Address => None,
+    }
+}
+
+/// Return true when the fault path `fault` covers the shown path `shown`.
+///
+/// Both paths have the same segments. A segment `[*]` of the fault covers any index segment.
+fn covers(fault: &[LeafSegment], shown: &[LeafSegment]) -> bool {
+    fault.len() == shown.len()
+        && fault.iter().zip(shown).all(|(wanted, found)| {
+            wanted == found
+                || (matches!(wanted, LeafSegment::All) && matches!(found, LeafSegment::Index(_)))
+        })
 }
 
 /// Return the row with its toggle expanded when its group is in `open`.

@@ -28,6 +28,8 @@ thiserror = { workspace = true }
 [dev-dependencies]
 recipe-app = { workspace = true, features = ["memory"] }
 tower = { workspace = true, features = ["util"] }
+# The stored count of a `DATE` that a test seeds without the current rule set (ADR-0118).
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread", "test-util"] }
 # The channel body of the test of the body deadline (design D14 row T10).
 http-body-util = { workspace = true, features = ["channel"] }

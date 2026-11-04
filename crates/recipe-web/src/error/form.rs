@@ -147,9 +147,16 @@ impl FormErrors {
         bundles: &Bundles,
         lang: Lang,
     ) -> Self {
+        Self::from_views(lines.into_iter().map(|line| line_view(line, bundles, lang)))
+    }
+
+    /// Group built lines by their input, in the order of the list.
+    ///
+    /// A page that reads stored data builds its lines with `Texts::line`. This constructor puts
+    /// them under their inputs like the lines of a refused form. A line without an input drops.
+    pub(crate) fn from_views(views: impl IntoIterator<Item = LineView>) -> Self {
         let mut inputs: BTreeMap<String, Vec<LineView>> = BTreeMap::new();
-        for line in lines {
-            let view = line_view(line, bundles, lang);
+        for view in views {
             if !view.target.is_empty() {
                 inputs.entry(view.target.clone()).or_default().push(view);
             }

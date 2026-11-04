@@ -4,12 +4,12 @@ use serde_json::json;
 
 use super::super::test_support::{
     BIG_1, BIG_2, BIG_ARRAY, BIG_ARRAY_NEW, DINT, FILL, INT, ZONE_2, ZONE_3, ZONES_2, ZONES_2_NEW,
-    ZONES_4, ZONES_4_NEW, draft_with, key, limit, number, param, plan_of, request_with, trees,
-    trees_with_zone_3,
+    ZONES_4, ZONES_4_NEW, draft_on, draft_with, key, limit, number, param, plan_of, request_with,
+    trees, trees_on, trees_with_zone_3,
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{dimensions, id};
-use crate::plant::{PlcTypeId, TypeTrees};
+use crate::plant::{PlcPlatform, PlcTypeId, S7Address, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
 use crate::recipe::{
     ArrayShape, Budget, Draft, DraftError, LangCode, ParameterKey, RebindPlan, RebindTargetReason,
@@ -380,6 +380,56 @@ fn array_shapes_are_ordered_and_differ_by_dimensions() {
     let shapes = plan.array_shapes();
     assert_eq!(shapes.len(), 2);
     assert!(shapes[0] < shapes[1]);
+}
+
+/// A draft on `platform` with `SPEED` of `ST_Zone@2` (two bytes) at the given S7 address.
+fn s7_zone_draft(platform: PlcPlatform, address: &str) -> Draft {
+    let mut speed = param(1, "SPEED", ZONE_2, json!({"setpoint": 5}), Vec::new());
+    speed.s7_address = Some(S7Address::parse(address).unwrap());
+    draft_on(platform, vec![speed])
+}
+
+/// Rebind `SPEED` from `ST_Zone@2` to `ST_Zone@3`, which has four bytes.
+fn rebind_s7_zone(platform: PlcPlatform, address: &str) -> (Draft, Result<(), DraftError>) {
+    let mut draft = s7_zone_draft(platform, address);
+    let zone_trees = trees_on(platform, &[("setpoint", INT), ("temp_max", INT)]);
+    let request = request_with(ZONE_2, ZONE_3, &[(1, ".temp_max", number(70))]);
+    let plan = draft.plan_rebind(&request, &zone_trees).unwrap();
+    let result = draft
+        .apply_rebind(plan, &BTreeMap::new(), &zone_trees)
+        .map(|_| ());
+    (draft, result)
+}
+
+#[test]
+fn rebind_to_a_larger_struct_that_ends_after_byte_65535_gives_e_rcp_056_and_no_change() {
+    let before = s7_zone_draft(PlcPlatform::S7_1500, "DB1.DBB65534");
+
+    let (draft, result) = rebind_s7_zone(PlcPlatform::S7_1500, "DB1.DBB65534");
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_056);
+    assert!(matches!(
+        error,
+        DraftError::Recipe(RecipeError::S7AddressPastBlockEnd { size: 4, .. })
+    ));
+    assert_eq!(draft.parameters(), before.parameters());
+}
+
+#[test]
+fn rebind_to_a_larger_struct_that_ends_at_byte_65535_applies() {
+    let (draft, result) = rebind_s7_zone(PlcPlatform::S7_1500, "DB1.DBB65532");
+
+    assert!(result.is_ok());
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_3));
+}
+
+#[test]
+fn rebind_of_a_parameter_in_a_data_block_above_16000_on_s7_300_gives_e_rcp_057() {
+    let (draft, result) = rebind_s7_zone(PlcPlatform::S7_300, "DB16001.DBB0");
+
+    assert_eq!(result.unwrap_err().code(), ErrorCode::RCP_057);
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_2));
 }
 
 #[test]

@@ -1,6 +1,6 @@
 # ADR-0109: Export API for transfer clients with HTTP Basic
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0119 (an `Approved` version is loadable only when it breaks no current rule)
 Date: 2026-11-02
 Deciders: project owner
 

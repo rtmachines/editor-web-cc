@@ -18,6 +18,8 @@ mod blockers_tests;
 #[cfg(test)]
 mod preview_blocker_tests;
 #[cfg(test)]
+mod preview_fault_tests;
+#[cfg(test)]
 mod preview_outdated_tests;
 #[cfg(test)]
 mod preview_page_tests;

@@ -104,6 +104,9 @@ impl Blocking {
 
     /// Run the export `work` on a blocking thread and wait for it without a limit of its own.
     ///
+    /// `ExportVersion` and the rule check of `GetVersion` use this function (ADR-0119 (j), (l)).
+    /// The test double `Blocking::panicked` reports a panicked task and skips `work`.
+    ///
     /// The future of `export` limits the wait, because `timeout.export` covers the rebuild.
     /// The blocking task holds `permit` and gives it back when it ends (ADR-0056 (c)). A caller
     /// that drops the future aborts the task. A task that has not started then never starts, and
@@ -123,6 +126,12 @@ impl Blocking {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
+        #[cfg(any(test, feature = "memory"))]
+        if self.mode == Mode::Panicked {
+            return Err(AppError::TaskFailed {
+                stage: TaskStage::Export,
+            });
+        }
         let (handle, _abort_on_drop) = spawn_aborting(move || {
             let value = work();
             drop(permit);
