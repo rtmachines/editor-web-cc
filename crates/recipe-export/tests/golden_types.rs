@@ -13,7 +13,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use jsonschema::Validator;
-use recipe_domain::export::{DocumentFacts, ExportHeader, ExportStatus, HashedBody};
+use recipe_domain::export::{
+    DocumentFacts, ExportHeader, ExportStatus, HashedBody, check_version_parameters,
+};
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{
     LeafPath, LiveUnits, Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, PlcType,
@@ -432,9 +434,13 @@ fn exported_at() -> Timestamp {
     Timestamp::from(date.with_hms(9, 30, 0).unwrap().assume_utc())
 }
 
-/// The approved version 1 of the recipe `R-200` on the machine `M12`, with one parameter for each
-/// tag. `addresses` gives the address of a tag. A tag without an entry has no address.
-fn document_text(platform: PlcPlatform, tags: &[&str], addresses: &[(&str, &str)]) -> String {
+/// The type trees and the parameters of a version with one parameter for each tag. `addresses`
+/// gives the address of a tag. A tag without an entry has no address.
+fn version_parameters(
+    platform: PlcPlatform,
+    tags: &[&str],
+    addresses: &[(&str, &str)],
+) -> (TypeTrees, Vec<Parameter>) {
     let trees = trees(platform, tags);
     let parameters: Vec<Parameter> = tags
         .iter()
@@ -447,6 +453,13 @@ fn document_text(platform: PlcPlatform, tags: &[&str], addresses: &[(&str, &str)
             parameter(index, tag, address, &trees)
         })
         .collect();
+    (trees, parameters)
+}
+
+/// The approved version 1 of the recipe `R-200` on the machine `M12`, with one parameter for each
+/// tag. `addresses` gives the address of a tag. A tag without an entry has no address.
+fn document_text(platform: PlcPlatform, tags: &[&str], addresses: &[(&str, &str)]) -> String {
+    let (trees, parameters) = version_parameters(platform, tags, addresses);
     let header = ExportHeader {
         machine: MachineCode::parse("M12").unwrap(),
         platform,
@@ -458,6 +471,10 @@ fn document_text(platform: PlcPlatform, tags: &[&str], addresses: &[(&str, &str)
         .iter()
         .map(|parameter| (parameter.key(), parameter.name_en().clone()))
         .collect();
+    // `ExportVersion` sets the flag from the read check of every parameter (ADR-0119 (a) to (c)).
+    let has_rule_fault = !check_version_parameters(&parameters, &trees)
+        .unwrap()
+        .is_empty();
     let facts = DocumentFacts {
         exported_at: exported_at(),
         exported_by: Login::parse("jkowalski").unwrap(),
@@ -468,6 +485,7 @@ fn document_text(platform: PlcPlatform, tags: &[&str], addresses: &[(&str, &str)
         recipe_name: Text::parse("Types of the platform").unwrap(),
         content_sha256: body.sha256().unwrap(),
         names,
+        has_rule_fault,
     };
     String::from_utf8(write_document(&body, &facts).unwrap()).unwrap()
 }
@@ -640,6 +658,20 @@ fn writer_output_of_each_s7_type_document_equals_its_golden_file() {
     for case in platform_cases() {
         let written = document_text(case.platform, case.tags, case.addresses);
         assert_eq!(written, golden(case.golden_file), "{}", case.golden_file);
+    }
+}
+
+/// No value, limit, or address of the type table breaks a current rule (ADR-0114 to ADR-0117), so
+/// each document is `loadable` (ADR-0119 (c)).
+#[test]
+fn each_s7_type_document_has_no_rule_fault_and_is_loadable() {
+    for case in platform_cases() {
+        let platform = case.platform;
+        let (trees, parameters) = version_parameters(platform, case.tags, case.addresses);
+        let faults = check_version_parameters(&parameters, &trees).unwrap();
+        assert!(faults.is_empty(), "{platform:?}: rule faults {faults:?}");
+        let doc = platform_document(&case);
+        assert_eq!(doc["loadable"], json!(true), "{platform:?}: loadable");
     }
 }
 
