@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 
 use crate::plant::fixtures::{
-    array_row, id, machine, primitive_row, string_row, struct_row_revision, types_for,
+    array_row, id, machine, on_platform, primitive_row, string_row, struct_row_revision, types_for,
 };
 use crate::plant::{LeafPath, PlcPlatform, Primitive, TypeTrees};
 use crate::recipe::draft::support::{stored_draft_with, stored_parameter};
@@ -82,6 +82,11 @@ pub(super) fn trees() -> TypeTrees {
 
 /// The trees of the fixture catalog, with the given members for `ST_Zone@3`.
 pub(super) fn trees_with_zone_3(zone_3: &[(&str, u128)]) -> TypeTrees {
+    trees_on(PlcPlatform::TwinCat3, zone_3)
+}
+
+/// The trees of the fixture catalog on a platform, with the given members for `ST_Zone@3`.
+pub(super) fn trees_on(platform: PlcPlatform, zone_3: &[(&str, u128)]) -> TypeTrees {
     let rows = vec![
         primitive_row(INT, Primitive::Int),
         primitive_row(DINT, Primitive::Dint),
@@ -115,7 +120,7 @@ pub(super) fn trees_with_zone_3(zone_3: &[(&str, u128)]) -> TypeTrees {
     ];
     TypeTrees::resolve(
         ALL_TYPES.map(id),
-        &types_for(machine(), PlcPlatform::TwinCat3, rows),
+        &types_for(machine(), platform, on_platform(platform, rows)),
     )
 }
 
@@ -140,9 +145,14 @@ pub(super) fn param(
 
 /// A live draft with the given parameters.
 pub(super) fn draft_with(parameters: Vec<StoredParameter>) -> Draft {
+    draft_on(PlcPlatform::TwinCat3, parameters)
+}
+
+/// A live draft on a platform with the given parameters.
+pub(super) fn draft_on(platform: PlcPlatform, parameters: Vec<StoredParameter>) -> Draft {
     Draft::load(stored_draft_with(
         VersionState::LiveDraft,
-        PlcPlatform::TwinCat3,
+        platform,
         parameters,
     ))
     .unwrap()

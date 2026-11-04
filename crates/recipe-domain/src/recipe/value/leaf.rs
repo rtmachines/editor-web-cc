@@ -2,16 +2,59 @@
 
 use serde_json::{Number, Value};
 
-use super::decimal::{MAX_SIGNIFICANT_DIGITS, canonical, parse_decimal};
+use super::decimal::{MAX_SIGNIFICANT_DIGITS, canonical, parse_decimal, significant_digits};
 use super::expected::Expected;
 use super::numeric::{is_integer, numeric_range};
-use crate::plant::{IecLiteral, LeafClass, PlcPlatform, Primitive, TimeType};
+use crate::plant::{IecLiteral, LeafClass, PlcPlatform, Primitive, RuleSet, TimeType};
 
 /// Highest scalar of a `CHAR` and of a `STRING` character (Latin-1, ADR-0028).
 const LATIN_1_MAX: u32 = 0xFF;
 
 /// Highest scalar of a `WCHAR` (`domain-model.md` section 2.1).
 const WCHAR_MAX: u32 = 0xFFFF;
+
+/// Largest count of significant digits of a `REAL` number or bound (ADR-0117 (a)).
+const REAL_MAX_DIGITS: u8 = 7;
+
+/// Largest count of significant digits of an `LREAL` number or bound (ADR-0117 (a)).
+const LREAL_MAX_DIGITS: u8 = 15;
+
+/// Why one leaf does not convert.
+///
+/// The type solves one problem: the conversion of a leaf reports a wrong form and a number with
+/// too many digits apart. The second one gives `E-RCP-055` and not `E-RCP-005` (ADR-0117 (d)).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::recipe) enum LeafFault {
+    /// The value has not the form that the leaf needs.
+    Expected(Expected),
+    /// A `REAL` or `LREAL` number has more significant digits than its type holds.
+    Precision {
+        /// The type of the leaf.
+        type_name: Primitive,
+        /// The largest permitted count of significant digits.
+        max_digits: u8,
+    },
+}
+
+impl From<Expected> for LeafFault {
+    fn from(expected: Expected) -> Self {
+        Self::Expected(expected)
+    }
+}
+
+/// Return the largest count of significant digits of a type, or `None` when the type has no
+/// such rule.
+///
+/// The function is the one source of the digit limits of ADR-0117 (a). The value check and the
+/// bound check of a limit both call it, so the two checks cannot differ.
+/// `domain-model.md` section 2.1 states the rule.
+pub(in crate::recipe) const fn max_significant_digits(primitive: Primitive) -> Option<u8> {
+    match primitive {
+        Primitive::Real => Some(REAL_MAX_DIGITS),
+        Primitive::Lreal => Some(LREAL_MAX_DIGITS),
+        _ => None,
+    }
+}
 
 /// The form in which a leaf arrives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,21 +72,23 @@ pub(super) struct LeafType {
     pub(super) string_length: Option<u16>,
     pub(super) platform: PlcPlatform,
     pub(super) mode: Mode,
+    /// The rule set of the check. A request uses [`RuleSet::Current`] (ADR-0120).
+    pub(super) rules: RuleSet,
 }
 
 /// Convert a leaf to its canonical stored form.
 ///
-/// The function returns the expected form when the value does not match.
-pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
+/// The function returns the fault of the leaf when the value does not match.
+pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, LeafFault> {
     match leaf.primitive.leaf_class() {
-        LeafClass::Numeric => numeric(value, leaf.primitive),
+        LeafClass::Numeric => numeric(value, leaf.primitive, leaf.rules),
         LeafClass::Bool => match value {
             Value::Bool(_) => Ok(value.clone()),
-            _ => Err(Expected::Bool),
+            _ => Err(Expected::Bool.into()),
         },
-        LeafClass::String => string(value, leaf),
-        LeafClass::Char => character(value, leaf.primitive),
-        LeafClass::Duration | LeafClass::Instant => time(value, leaf),
+        LeafClass::String => string(value, leaf).map_err(LeafFault::from),
+        LeafClass::Char => character(value, leaf.primitive).map_err(LeafFault::from),
+        LeafClass::Duration | LeafClass::Instant => time(value, leaf).map_err(LeafFault::from),
     }
 }
 
@@ -112,7 +157,7 @@ fn time(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
             .to_string()
             .parse::<i128>()
             .ok()
-            .and_then(|count| IecLiteral::try_from((time_type, count)).ok()),
+            .and_then(|count| IecLiteral::from_count(time_type, count, leaf.rules).ok()),
         _ => None,
     };
     literal
@@ -126,27 +171,41 @@ fn count_value(count: i128) -> Option<Value> {
 }
 
 /// Convert a numeric leaf. The result is a JSON number with canonical decimal text.
-fn numeric(value: &Value, primitive: Primitive) -> Result<Value, Expected> {
+///
+/// The check of the significant digits of a `REAL` or `LREAL` number runs after the range check
+/// and only in the current rule set (ADR-0117, ADR-0120 (a)).
+fn numeric(value: &Value, primitive: Primitive, rules: RuleSet) -> Result<Value, LeafFault> {
+    let expected = || LeafFault::from(numeric_expected(primitive));
     let Value::Number(number) = value else {
-        return Err(numeric_expected(primitive));
+        return Err(expected());
     };
     let decimal = parse_decimal(&number.to_string())
         .and_then(canonical)
-        .ok_or_else(|| numeric_expected(primitive))?;
+        .ok_or_else(expected)?;
     if is_integer(primitive) && decimal.scale() != 0 {
         return Err(Expected::Integer {
             type_name: primitive,
-        });
+        }
+        .into());
     }
-    let (low, high) = numeric_range(primitive).ok_or_else(|| numeric_expected(primitive))?;
+    let (low, high) = numeric_range(primitive).ok_or_else(expected)?;
     if decimal < low || decimal > high {
-        return Err(numeric_expected(primitive));
+        return Err(expected());
+    }
+    if rules == RuleSet::Current
+        && let Some(max) = max_significant_digits(primitive)
+        && significant_digits(decimal) > u32::from(max)
+    {
+        return Err(LeafFault::Precision {
+            type_name: primitive,
+            max_digits: max,
+        });
     }
     decimal
         .to_string()
         .parse::<Number>()
         .map(Value::Number)
-        .map_err(|_| numeric_expected(primitive))
+        .map_err(|_| expected())
 }
 
 /// Return the expected form of a numeric leaf.

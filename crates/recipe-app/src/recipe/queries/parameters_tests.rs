@@ -5,18 +5,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    ArrayDimensions, MachineCode, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
-    StringKind, StringLength, TypeExpr, UnitPath,
+    ArrayDimensions, LeafPath, MachineCode, PlcPlatform, PlcType, PlcTypeRecord, Primitive,
+    RecordShape, S7Address, StringKind, StringLength, TypeExpr, UnitPath,
 };
-use recipe_domain::recipe::{Ordinal, ParameterKey, StoredParameter, StoredValue};
+use recipe_domain::recipe::{
+    Ordinal, ParameterKey, RuleFault, RuleField, StoredParameter, StoredValue,
+};
 use serde_json::json;
 
 use super::parameters::{ListParameters, ListParametersInput, ParameterList};
 use super::test_world::seed_users;
 use crate::auth::Operation;
-use crate::blocking::{AppSettings, PageSizes};
+use crate::blocking::{AppSettings, Blocking, PageSizes};
 use crate::context::UseCase;
-use crate::error::{AppError, Missing};
+use crate::error::{AppError, Missing, TaskStage, TimeoutStage};
 use crate::memory::JournalEntry;
 use crate::memory::fixtures::{
     Fixture, actor, meta, mid, parameter_on, pkey, reference, scenarios, tid, uid, vid,
@@ -430,4 +432,149 @@ async fn a_version_of_a_deleted_recipe_is_refused_except_for_the_role_that_resto
     assert_eq!(engineer.code(), ErrorCode::RCP_012);
     assert!(administrator.recipe.is_deleted());
     assert!(administrator.rows.is_empty());
+}
+
+/// The type row of the `DATE` parameters on `S7_1500`, because the seed has no `DATE` row.
+const DATE_TYPE: u128 = 960;
+
+/// The draft `R-1` on an `S7_1500` machine with the parameter `DUE` (key 1) of the type `DATE`.
+///
+/// `S7_1500` is the platform, because `S7_300` keeps the `DATE` end 72683 in both rule sets
+/// (ADR-0120). `count` is the stored `DATE` count.
+fn date_world(count: i64) -> Fixture {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let primitive = Primitive::Date;
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(DATE_TYPE),
+        machine: None,
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape: RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    let parameter = StoredParameter {
+        plc_type: tid(DATE_TYPE),
+        value: StoredValue::from(json!(count)),
+        limits: Vec::new(),
+        s7_address: Some(S7Address::parse("DB1.DBW0").unwrap()),
+        ..parameter_on(PlcPlatform::S7_1500, 1, "DUE", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(101), &parameter);
+    fixture
+}
+
+#[tokio::test]
+async fn a_stored_date_of_the_earlier_rule_set_gives_its_text_and_the_rule_fault() {
+    // ADR-0118: the count 72700 passes the earlier set and breaks the current set.
+    let fixture = date_world(72_700);
+
+    let result = list(&fixture, None, 0).await;
+
+    assert_eq!(
+        result.value_texts.get(&pkey(1)).map(String::as_str),
+        Some("D#2169-01-17")
+    );
+    let faults = result.rule_faults.get(&pkey(1)).unwrap();
+    let codes: Vec<ErrorCode> = faults.iter().map(RuleFault::code).collect();
+    assert_eq!(codes, [ErrorCode::RCP_005]);
+    let leaf = LeafPath::parse("").unwrap();
+    assert_eq!(
+        faults.first().map(RuleFault::field),
+        Some(&RuleField::Value(leaf))
+    );
+}
+
+#[tokio::test]
+async fn a_stored_date_in_the_current_range_gives_no_rule_fault() {
+    let fixture = date_world(72_683);
+
+    let result = list(&fixture, None, 0).await;
+
+    assert_eq!(
+        result.value_texts.get(&pkey(1)).map(String::as_str),
+        Some("D#2168-12-31")
+    );
+    assert!(
+        result.rule_faults.values().all(Vec::is_empty),
+        "{:?}",
+        result.rule_faults
+    );
+}
+
+/// The default settings with the blocking runner `blocking`.
+fn blocking_of(blocking: Blocking) -> AppSettings {
+    AppSettings {
+        blocking,
+        ..AppSettings::default()
+    }
+}
+
+#[tokio::test]
+async fn a_failed_table_check_task_gives_web_011_with_the_validation_stage() {
+    let fixture = world();
+
+    let error = list_with(
+        &fixture,
+        blocking_of(Blocking::panicked()),
+        Role::Operator,
+        (None, 0),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            AppError::TaskFailed {
+                stage: TaskStage::Validation
+            }
+        ),
+        "got {error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::WEB_011);
+}
+
+#[tokio::test]
+async fn an_elapsed_table_check_gives_web_009_with_the_validation_stage() {
+    let fixture = world();
+
+    let error = list_with(
+        &fixture,
+        blocking_of(Blocking::elapsed()),
+        Role::Operator,
+        (None, 0),
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        matches!(
+            error,
+            AppError::Timeout {
+                stage: TimeoutStage::Validation
+            }
+        ),
+        "got {error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::WEB_009);
+}
+
+#[tokio::test]
+async fn a_stored_date_beyond_the_earlier_rule_set_is_still_a_storage_defect() {
+    let fixture = date_world(72_900);
+
+    let error = list_with(&fixture, AppSettings::default(), Role::Operator, (None, 0))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert!(matches!(error, AppError::Storage(_)), "got {error:?}");
 }

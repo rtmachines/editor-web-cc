@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use recipe_domain::export::{
     DocumentFacts, ExportError, ExportHeader, ExportStatus, HashedBody, ScopeBody, ScopeFacts,
-    Sha256,
+    Sha256, check_version_parameters,
 };
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{LiveUnits, Machine, PlantError, PlatformTypes, TypeTrees, UnitPath};
@@ -16,7 +16,7 @@ use recipe_domain::timestamp::Timestamp;
 
 use super::scope::{ExportScope, ScopeAudit};
 use crate::blocking::{Blocking, ExportPermit};
-use crate::error::{AppError, Missing};
+use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{DocumentWriter, Transaction};
 
 /// The rows of the locked version that the hashed body needs (step 4).
@@ -77,8 +77,15 @@ pub(super) struct KnownFacts {
 }
 
 impl KnownFacts {
-    /// Add the checked hash and the English names of the parameters of `rows`.
-    fn complete(self, rows: &BodyRows, content_sha256: Sha256) -> DocumentFacts {
+    /// Add the checked hash, the result of the rule check, and the English names of the parameters.
+    ///
+    /// `has_rule_fault` is `true` when a stored part breaks the current rules (ADR-0119).
+    fn complete(
+        self,
+        rows: &BodyRows,
+        content_sha256: Sha256,
+        has_rule_fault: bool,
+    ) -> DocumentFacts {
         DocumentFacts {
             exported_at: self.exported_at,
             exported_by: self.exported_by,
@@ -93,6 +100,7 @@ impl KnownFacts {
                 .iter()
                 .map(|parameter| (parameter.key(), parameter.name_en().clone()))
                 .collect(),
+            has_rule_fault,
         }
     }
 }
@@ -105,6 +113,8 @@ pub(super) struct Written {
     pub(super) hash: Sha256,
     /// The unit and the hash of the scope body, or `None` for an export of the whole version.
     pub(super) scope: Option<ScopeAudit>,
+    /// `true` when the rule check found a fault in the whole version.
+    pub(super) has_rule_fault: bool,
 }
 
 /// Read the parameters, the units, and the types of the version (step 4).
@@ -193,11 +203,13 @@ fn write_scope(
 /// The function solves one problem: the build, the hash, and the writer use the CPU, so they
 /// run in `spawn_blocking`, and the limit `timeout.export` can stop the wait (step 5). The task
 /// holds `permit` of the export gate until it ends (ADR-0056 (c)). The task compares the hash of
-/// the whole version before it filters the scope (ADR-0109 (w)).
+/// the whole version before it filters the scope (ADR-0109 (w)). Then it checks the whole version
+/// against the current rule set, also for a unit export (ADR-0119 (f)).
 ///
 /// # Errors
 ///
 /// Returns `E-EXP-002` when the body cannot be built or its hash differs from `stored`.
+/// Returns `E-DB-008` when a stored part breaks the earlier rule set (ADR-0119 (k)).
 /// Returns `E-EXP-005` when `scope` holds no parameter.
 /// Returns `E-EXP-004` when the writer fails, and `E-WEB-011` when the task panics.
 pub(super) async fn write_document(
@@ -218,13 +230,20 @@ pub(super) async fn write_document(
             if stored != Some(hash) {
                 return Err(mismatch().into());
             }
-            let facts = facts.complete(&rows, hash);
+            let found =
+                check_version_parameters(&rows.parameters, &rows.trees).map_err(|broken| {
+                    let (key, fault) = broken.into_parts();
+                    StorageError::broken_stored_parameter(key, fault)
+                })?;
+            let has_rule_fault = !found.is_empty();
+            let facts = facts.complete(&rows, hash, has_rule_fault);
             let (document, scope) =
                 write_scope(writer.as_ref(), (&body, facts), (&scope, &rows.header))?;
             Ok(Written {
                 document,
                 hash,
                 scope,
+                has_rule_fault,
             })
         })
         .await?

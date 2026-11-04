@@ -411,9 +411,16 @@ impl<'a> Walk<'a> {
         }
         if let Some(path) = spot.value.filter(|path| *path != spot.limit) {
             row.from_all = self.limit_of_all(spot.limit, is_string);
-            let all = self.ids.get(spot.limit).and_then(|ids| ids.limit.clone());
-            if let Some(all) = all {
-                self.note(path, LeafInput::Limit, &all);
+            let all = self.ids.get(spot.limit);
+            let (first, max) = (
+                all.and_then(|ids| ids.limit.clone()),
+                all.and_then(|ids| ids.limit_max.clone()),
+            );
+            if let Some(first) = first {
+                self.note(path, LeafInput::Limit, &first);
+            }
+            if let Some(max) = max {
+                self.note(path, LeafInput::LimitMax, &max);
             }
             return;
         }
@@ -439,6 +446,9 @@ impl<'a> Walk<'a> {
         let first = row.min.as_ref().or(row.max_length.as_ref());
         if let Some(first) = first {
             self.note(spot.limit, LeafInput::Limit, &first.id);
+        }
+        if let Some(max) = &row.max {
+            self.note(spot.limit, LeafInput::LimitMax, &max.id);
         }
         row.limit_path = Some(HiddenField {
             name: format!("limits[{index}].leaf_path"),
@@ -475,6 +485,7 @@ impl<'a> Walk<'a> {
         let slot = match input {
             LeafInput::Value => &mut ids.value,
             LeafInput::Limit => &mut ids.limit,
+            LeafInput::LimitMax => &mut ids.limit_max,
         };
         slot.get_or_insert_with(|| id.to_owned());
     }

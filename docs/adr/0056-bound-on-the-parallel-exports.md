@@ -1,6 +1,6 @@
 # ADR-0056: Bound on the parallel exports
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0122 (item (a): the check of the version page of an `Approved` version also takes a permit)
 Date: 2026-10-23
 Deciders: project owner
 

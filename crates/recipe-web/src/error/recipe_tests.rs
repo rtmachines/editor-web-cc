@@ -11,8 +11,8 @@ use recipe_domain::plant::{
     LeafPath, MemberName, PlcPlatform, Primitive, S7Address, S7Width, TypeName,
 };
 use recipe_domain::recipe::{
-    Budget, Expected, LangCode, ParameterKey, ParameterTag, RebindTargetReason, RecipeError,
-    RecipeErrors, ReferenceNumber, SnapshotError, SnapshotItem, VersionStatus,
+    Budget, Expected, LangCode, ParameterKey, ParameterTag, PrecisionField, RebindTargetReason,
+    RecipeError, RecipeErrors, ReferenceNumber, SnapshotError, SnapshotItem, VersionStatus,
 };
 use uuid::Uuid;
 
@@ -342,6 +342,37 @@ fn platform_errors() -> Vec<Case> {
     ]
 }
 
+/// The errors of the digits of a number and of the range of an S7 address (`plc-type-ranges`).
+fn range_errors() -> Vec<Case> {
+    vec![
+        (
+            RecipeError::PrecisionExceeded {
+                tag: tag("SPEED"),
+                leaf: leaf(".zones[2]"),
+                field: PrecisionField::Value,
+                type_name: "REAL".to_owned(),
+                max_digits: 7,
+            },
+            None,
+        ),
+        (
+            RecipeError::S7AddressPastBlockEnd {
+                tag: tag("SPEED"),
+                address: address("DB1.DBD65534"),
+                size: 4,
+            },
+            None,
+        ),
+        (
+            RecipeError::S7DataBlockOutOfRange {
+                tag: tag("SPEED"),
+                address: address("DB16001.DBW0"),
+            },
+            None,
+        ),
+    ]
+}
+
 /// Three items of two parameters and one item of the version.
 fn items() -> Vec<SnapshotItem> {
     let missing = |name: &str| SnapshotItem::Parameter {
@@ -373,6 +404,7 @@ fn every_case() -> Vec<Case> {
     cases.extend(type_errors());
     cases.extend(address_errors());
     cases.extend(platform_errors());
+    cases.extend(range_errors());
     cases
 }
 
@@ -395,8 +427,8 @@ fn messages(bundles: &Bundles, index: usize) -> (String, String, String, Option<
 #[test]
 fn recipe_the_cases_cover_each_code_of_recipe_error() {
     let codes: BTreeSet<ErrorCode> = every_case().iter().map(|(error, _)| error.code()).collect();
-    assert_eq!(codes.len(), 34);
-    assert_eq!(every_case().len(), 34);
+    assert_eq!(codes.len(), 37);
+    assert_eq!(every_case().len(), 37);
 }
 
 #[test]

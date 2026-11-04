@@ -8,7 +8,7 @@ use super::build::{build_value, visit_elements};
 use super::level::{StructLevel, kept_members, struct_level};
 use super::{MemberValue, RebindRequest};
 use crate::plant::{LeafPath, LeafSegment, MemberName, TypeNode, TypeTree, extended};
-use crate::recipe::draft::stored_value;
+use crate::recipe::draft::{leaf_error, stored_value};
 use crate::recipe::value::{request_leaf, request_text};
 use crate::recipe::{Expected, ParameterKey, ParameterTag, RecipeError, StoredValue};
 
@@ -25,14 +25,16 @@ pub(super) struct ValueMapping<'a> {
 /// Map the stored value of a parameter to the planned tree.
 ///
 /// A kept member copies its subtree. A new member is a skeleton of its type. Each new scalar leaf
-/// takes its value from the request. A removed member disappears. The new value must pass the
-/// check against the planned tree.
+/// takes its value from the request and passes the current rule set. A removed member disappears.
+/// The new value must pass the check against the planned tree. That check reads the kept members
+/// under the earlier rule set, because the rebind does not write them (ADR-0120 (d)).
 ///
 /// # Errors
 ///
 /// Returns every entry of the parameter in leaf order, then one entry per sent path that is no
 /// new leaf. A missing value is `E-RCP-028`. A bad value, a value of a path that is no new leaf,
-/// and a stored value of the wrong shape are `E-RCP-005`.
+/// and a stored value of the wrong shape are `E-RCP-005`. A new number with too many significant
+/// digits is `E-RCP-055`.
 pub(super) fn map_value(input: &ValueMapping<'_>) -> Result<StoredValue, Vec<RecipeError>> {
     let tag = input.tag;
     let old = stored_value(tag, input.old_value, input.old_tree).map_err(|error| vec![error])?;
@@ -152,12 +154,8 @@ fn new_leaf(
     };
     match converted {
         Ok(value) => value,
-        Err(expected) => {
-            entries.push(RecipeError::ValueShapeMismatch {
-                tag,
-                leaf,
-                expected,
-            });
+        Err(fault) => {
+            entries.push(leaf_error(&tag, leaf, fault));
             Value::Null
         }
     }

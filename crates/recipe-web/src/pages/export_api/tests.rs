@@ -18,7 +18,9 @@ use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::test_support::plant::World;
 use crate::test_support::recipes::approval::ApprovalData;
+use crate::test_support::recipes::date_world::affected_approved_world;
 use crate::test_support::{Fixture, Reply, call, get_with, request};
 
 /// The password of the seeded `ExportClient` account `user1`.
@@ -261,6 +263,39 @@ async fn export_approved_route_sends_the_v1_document_and_writes_one_entry_of_the
     let after = exported_actors(&fixture);
     assert_eq!(after.len(), before.len() + 1);
     assert_eq!(after.last(), Some(&Some(client())));
+}
+
+/// Build the world of an approved version that breaks the current rules, with the account `user1`.
+///
+/// The version is `R-400` on `M30`. Its stored `DATE` 72700 passes the earlier rule set
+/// (ADR-0119 (f), (g)).
+pub(super) async fn affected_world() -> World {
+    let world = affected_approved_world().await;
+    world
+        .fixture
+        .seed_account(CLIENT_NUMBER, Role::ExportClient, PASSWORD, false);
+    world
+}
+
+#[tokio::test]
+async fn export_approved_route_of_a_version_with_a_rule_fault_sends_loadable_false() {
+    let world = affected_world().await;
+
+    let reply = client_get(
+        &world.fixture,
+        "/export/v1/machines/M30/recipes/R-400/approved",
+    )
+    .await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    // The version stays `Approved`, so the file name has no `RETIRED_` prefix.
+    assert_eq!(
+        reply.header("content-disposition"),
+        "attachment; filename=\"recipe_R-400_v1.json\""
+    );
+    assert_eq!(field(&reply.body, "loadable"), "false");
+    assert_eq!(field(&reply.body, "status"), "\"Approved\"");
+    assert_eq!(exported_actors(&world.fixture), vec![Some(client())]);
 }
 
 #[tokio::test]

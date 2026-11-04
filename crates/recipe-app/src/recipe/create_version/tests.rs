@@ -4,12 +4,12 @@ use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    Machine, MemberName, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape, TypeMember,
-    TypeName, UnitPath, UnitUsage,
+    LeafPath, Machine, MemberName, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
+    RecordShape, S7Address, TypeMember, TypeName, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
-    Budget, ParameterTag, RecipeDeleter, RecipeError, SnapshotItem, StoredParameter, StoredValue,
-    VersionState,
+    Budget, Ordinal, ParameterTag, RecipeDeleter, RecipeError, SnapshotItem, StoredLimit,
+    StoredParameter, StoredValue, VersionState,
 };
 use serde_json::{Value, json};
 
@@ -614,4 +614,174 @@ async fn the_result_lists_the_parameters_of_an_outdated_type_revision() {
         .unwrap();
     assert_eq!(output.outdated, vec![ParameterTag::parse("Z1").unwrap()]);
     assert_eq!(parameters_of(&fixture, output.version).await.len(), 2);
+}
+
+/// The identifier of the `DATE` row that the tests of the earlier rule set add.
+const DATE_TYPE: u128 = 950;
+
+/// Store a `DATE` row for `S7_1500`, because the seed has no `DATE` row.
+fn seed_date_type(fixture: &Fixture) -> PlcTypeId {
+    let primitive = Primitive::Date;
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(DATE_TYPE),
+        machine: None,
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape: RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    tid(DATE_TYPE)
+}
+
+/// A parameter on `U1.2` of the `S7_1500` machine with the type, value, limits, and address given.
+fn s7_parameter(
+    n: u128,
+    tag: &str,
+    (plc_type, value): (PlcTypeId, StoredValue),
+    (limits, address): (Vec<StoredLimit>, &str),
+) -> StoredParameter {
+    StoredParameter {
+        plc_type,
+        value,
+        limits,
+        s7_address: Some(S7Address::parse(address).unwrap()),
+        ordinal: Ordinal::parse(u32::try_from(n).unwrap()).unwrap(),
+        ..parameter_on(PlcPlatform::S7_1500, n, tag, uid(102), 0)
+    }
+}
+
+/// A limit row of the whole parameter with the upper bound `max`.
+fn max_limit(max: &str) -> StoredLimit {
+    StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: Some(max.parse().unwrap()),
+        max_length: None,
+    }
+}
+
+/// Store recipe 1 on an `S7_1500` machine, and give its approved version 2 the parameters
+/// that the earlier rule set permits and the current rule set refuses (ADR-0120 (g), (h)).
+/// `S7_1500` is the platform, because `S7_300` keeps the `DATE` end 72683 in both rule sets.
+///
+/// `date` is the stored `DATE` count. The other parameters are a `REAL` with 8 significant
+/// digits, a `REAL` limit `max` with 7 decimals, and a `DINT` that ends after its data block.
+fn seed_earlier_rule_base(fixture: &Fixture, date: i64) -> Vec<StoredParameter> {
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    let date_type = seed_date_type(fixture);
+    let real = seed_type_id(Primitive::Real, None).unwrap();
+    let dint = seed_type_id(Primitive::Dint, None).unwrap();
+    let parameters = vec![
+        s7_parameter(
+            1,
+            "DUE",
+            (date_type, StoredValue::from(json!(date))),
+            (Vec::new(), "DB1.DBW0"),
+        ),
+        s7_parameter(
+            2,
+            "BIG",
+            (real, StoredValue::from(json!(16_777_217))),
+            (Vec::new(), "DB1.DBD4"),
+        ),
+        s7_parameter(
+            3,
+            "CAP",
+            (real, StoredValue::from(json!(50))),
+            (vec![max_limit("100.00001")], "DB1.DBD8"),
+        ),
+        s7_parameter(
+            4,
+            "TAIL",
+            (dint, StoredValue::from(json!(7))),
+            (Vec::new(), "DB1.DBD65534"),
+        ),
+    ];
+    let (_, _, approved) = fixture.seed_retired(&machine, 1, "R-1");
+    for parameter in &parameters {
+        fixture.store.seed_parameter(approved, parameter);
+    }
+    parameters
+}
+
+#[tokio::test]
+async fn an_approved_base_with_the_earlier_rule_set_parts_is_copied_unchanged() {
+    // ADR-0120 (g), (h): the base holds the DATE count 72700, the REAL 16777217, the REAL
+    // limit max 100.00001, and the DINT at DB1.DBD65534. The current rules refuse each part.
+    let fixture = Fixture::new();
+    let base = seed_earlier_rule_base(&fixture, 72_700);
+    let output = CreateVersion::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            input("R-1", Some(2)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.number, 3);
+    assert_eq!(fixture.store.journal(), write_journal(&[102]));
+    let copy = parameters_of(&fixture, output.version).await;
+    assert_eq!(copy.len(), base.len());
+    for original in &base {
+        // The copy lists the parameters by tag, so the test finds each one by its key.
+        let copied = copy.iter().find(|p| p.key == original.key).unwrap();
+        assert_eq!(copied.plc_type, original.plc_type);
+        assert_eq!(copied.value, original.value);
+        assert_eq!(copied.limits, original.limits);
+        assert_eq!(copied.s7_address, original.s7_address);
+        assert_ne!(copied.id, original.id);
+    }
+    assert_eq!(fixture.store.audit_entries().len(), 1);
+}
+
+#[tokio::test]
+async fn a_base_with_a_limit_without_max_is_checked_against_the_earlier_date_end() {
+    // ADR-0120 (e), (g): the limit has a min only, so the earlier end 72840 bounds the count.
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    let limits = vec![StoredLimit {
+        min: Some(70_000.into()),
+        max: None,
+        ..max_limit("0")
+    }];
+    let date = (seed_date_type(&fixture), StoredValue::from(json!(72_700)));
+    let parameter = s7_parameter(1, "DUE", date, (limits, "DB1.DBW0"));
+    let (_, _, approved) = fixture.seed_retired(&machine, 1, "R-1");
+    fixture.store.seed_parameter(approved, &parameter);
+    let output = CreateVersion::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            input("R-1", Some(2)),
+        )
+        .await
+        .unwrap();
+    assert_eq!(output.number, 3);
+    assert_eq!(parameters_of(&fixture, output.version).await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_date_count_above_the_earlier_end_gives_rcp_020_and_no_draft() {
+    // ADR-0120 risk: the earlier rule set ends at the count 72840, so 72900 still fails.
+    let fixture = Fixture::new();
+    seed_earlier_rule_base(&fixture, 72_900);
+    let error = CreateVersion::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            input("R-1", Some(2)),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_020);
+    assert_eq!(item_codes(&error), vec![ErrorCode::RCP_005]);
+    assert_eq!(fixture.store.journal(), only_the_read());
+    assert!(fixture.store.audit_entries().is_empty());
+    let state = fixture.store.state();
+    assert!(state.recipe(rid(1)).unwrap().version(3).is_none());
 }

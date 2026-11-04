@@ -22,9 +22,13 @@ fn row() -> ParameterRowView {
         value: ValueView {
             text: "1200".to_owned(),
             is_word: false,
+            id: String::new(),
+            lines: Vec::new(),
         },
         unit: "U1".to_owned(),
         address: "DB2.DBW0".to_owned(),
+        address_id: String::new(),
+        address_lines: Vec::new(),
         outdated: false,
     }
 }

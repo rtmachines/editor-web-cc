@@ -38,7 +38,8 @@ pub(crate) fn status_of(code: ErrorCode) -> StatusCode {
         | "E-RCP-013" | "E-RCP-016" | "E-RCP-017" | "E-RCP-018" | "E-RCP-019" | "E-RCP-020"
         | "E-RCP-021" | "E-RCP-022" | "E-RCP-023" | "E-RCP-024" | "E-RCP-027" | "E-RCP-028"
         | "E-RCP-029" | "E-RCP-032" | "E-RCP-035" | "E-RCP-036" | "E-RCP-052" | "E-RCP-053"
-        | "E-RCP-054" | "E-IDN-006" | "E-IDN-008" | "E-WEB-008" => StatusCode::UNPROCESSABLE_ENTITY,
+        | "E-RCP-054" | "E-RCP-055" | "E-RCP-056" | "E-RCP-057" | "E-IDN-006" | "E-IDN-008"
+        | "E-WEB-008" => StatusCode::UNPROCESSABLE_ENTITY,
         _unlisted => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

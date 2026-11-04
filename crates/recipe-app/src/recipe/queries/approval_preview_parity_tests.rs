@@ -1,7 +1,7 @@
 //! The blockers of `GetApprovalPreview` against the errors of `ApproveVersion` (ADR-0049 (c), design D3).
 
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::plant::{PlcPlatform, UnitPath, UnitUsage};
+use recipe_domain::plant::{PlcPlatform, PlcTypeId, Primitive, S7Address, UnitPath, UnitUsage};
 use recipe_domain::recipe::StoredParameter;
 
 use super::approval_preview::ApprovalPreview;
@@ -10,6 +10,7 @@ use crate::error::AppError;
 use crate::memory::fixtures::{
     Fixture, meta, param, parameter_on, reference, tid, timestamp, uid, vid,
 };
+use crate::memory::seed_type_id;
 use crate::recipe::{ApproveVersion, ApproveVersionInput};
 
 /// The approved version 1 of `R-1` in [`valid_world`].
@@ -141,6 +142,35 @@ async fn the_blocker_keys_hold_the_key_of_each_tag_that_the_draft_blocker_names(
     for (fixture, code, expected) in cases {
         let preview = assert_same_fault(&fixture, 1, code).await;
         assert_eq!(preview.blocker_keys, expected, "{code:?}");
+    }
+}
+
+/// The parameter `T1` on `S7_300` with the type `plc_type` at the address `address`.
+fn s7_parameter_at(plc_type: PlcTypeId, address: &str) -> StoredParameter {
+    StoredParameter {
+        plc_type,
+        s7_address: Some(S7Address::parse(address).unwrap()),
+        ..parameter_on(PlcPlatform::S7_300, 1, "T1", uid(102), 0)
+    }
+}
+
+#[tokio::test]
+async fn the_blocker_keys_hold_the_key_of_the_tag_of_an_address_rule_fault() {
+    let dint = seed_type_id(Primitive::Dint, None).unwrap();
+    let cases = [
+        (s7_parameter_at(dint, "DB1.DBD65534"), ErrorCode::RCP_056),
+        (
+            s7_parameter_at(seed_type_id(Primitive::Int, None).unwrap(), "DB16001.DBW0"),
+            ErrorCode::RCP_057,
+        ),
+    ];
+
+    for (parameter, code) in cases {
+        let fixture = first_draft(PlcPlatform::S7_300, &[parameter]);
+
+        let preview = assert_same_fault(&fixture, 1, code).await;
+
+        assert_eq!(preview.blocker_keys, keys(&[("T1", 1)]), "{code:?}");
     }
 }
 

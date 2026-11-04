@@ -6,8 +6,8 @@ use recipe_app::error::{AppError, StorageError};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{LeafPath, MachineCode, PlantError, S7Address, UnitId};
 use recipe_domain::recipe::{
-    ParameterKey, ParameterTag, RecipeError, RecipeErrors, ReferenceNumber, SnapshotError,
-    SnapshotItem,
+    ParameterKey, ParameterTag, PrecisionField, RecipeError, RecipeErrors, ReferenceNumber,
+    SnapshotError, SnapshotItem,
 };
 use uuid::Uuid;
 
@@ -163,6 +163,78 @@ fn approve_preview_blocker_of_the_plant_model_is_a_line_with_its_code_and_no_lin
     assert_eq!(view.code, "E-PLT-010");
     assert_eq!(view.href, "");
     assert!(!view.message.is_empty());
+}
+
+/// Return the three errors of the range rules (ADR-0116, ADR-0117) for the tag `ZONE_A`.
+fn range_errors() -> [(RecipeError, ErrorCode); 3] {
+    [
+        (
+            RecipeError::PrecisionExceeded {
+                tag: tag("ZONE_A"),
+                leaf: LeafPath::parse("").unwrap(),
+                field: PrecisionField::Value,
+                type_name: "REAL".to_owned(),
+                max_digits: 7,
+            },
+            ErrorCode::RCP_055,
+        ),
+        (
+            RecipeError::S7AddressPastBlockEnd {
+                tag: tag("ZONE_A"),
+                address: S7Address::parse("DB1.DBD65534").unwrap(),
+                size: 4,
+            },
+            ErrorCode::RCP_056,
+        ),
+        (
+            RecipeError::S7DataBlockOutOfRange {
+                tag: tag("ZONE_A"),
+                address: S7Address::parse("DB16001.DBW0").unwrap(),
+            },
+            ErrorCode::RCP_057,
+        ),
+    ]
+}
+
+#[test]
+fn approve_preview_blocker_lines_of_the_range_rules_show_their_code_text_and_link() {
+    let bundles = Bundles::load().unwrap();
+    let codes = ["E-RCP-055", "E-RCP-056", "E-RCP-057"];
+    for (index, text) in codes.into_iter().enumerate() {
+        let line_of = || {
+            let (error, _) = range_errors().into_iter().nth(index).unwrap();
+            blocker_lines(AppError::Recipe(error), &keys(), BASE).unwrap()
+        };
+        let code = range_errors().into_iter().nth(index).unwrap().1;
+        assert_eq!(codes_and_links(&line_of()), vec![(code, href(1))]);
+        for lang in [Lang::En, Lang::Pl] {
+            let list = line_of().into_list(&bundles, lang);
+            let view = list.views.first().unwrap();
+            assert_eq!(view.code, text);
+            assert_eq!(Some(view.href.clone()), href(1));
+            assert!(!view.message.is_empty(), "{text}");
+            assert!(
+                !view.message.starts_with("error-"),
+                "{text}: {}",
+                view.message
+            );
+        }
+    }
+}
+
+#[test]
+fn approve_preview_blocker_list_of_the_range_rules_gives_one_linked_line_for_each_error() {
+    let errors = range_errors().into_iter().map(|(error, _)| error).collect();
+    let errors = RecipeErrors::from_vec(errors).unwrap();
+    let lines = blocker_lines(AppError::Recipes(errors), &keys(), BASE).unwrap();
+    assert_eq!(
+        codes_and_links(&lines),
+        vec![
+            (ErrorCode::RCP_055, href(1)),
+            (ErrorCode::RCP_056, href(1)),
+            (ErrorCode::RCP_057, href(1)),
+        ]
+    );
 }
 
 /// Return a failed snapshot check with `count` items.

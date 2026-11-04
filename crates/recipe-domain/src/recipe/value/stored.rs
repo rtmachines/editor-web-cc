@@ -6,7 +6,7 @@ use super::ParameterValue;
 use super::fault::ValueFault;
 use super::leaf::Mode;
 use super::walk::canonicalize;
-use crate::plant::TypeTree;
+use crate::plant::{RuleSet, TypeTree};
 
 /// The JSONB value as storage returns it.
 ///
@@ -40,15 +40,34 @@ impl ParameterValue {
     }
 }
 
+impl ParameterValue {
+    /// Check a stored value against `tree` under the rule set `rules` (ADR-0120).
+    ///
+    /// The walk is the walk of [`ParameterValue::parse`]. A time leaf is a JSON number with the
+    /// count and not an IEC literal. The rule set [`RuleSet::Earlier`] skips the check of the
+    /// significant digits of ADR-0117.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`ValueFault`] of the first part that does not match the tree.
+    pub fn from_stored(
+        stored: &StoredValue,
+        tree: &TypeTree,
+        rules: RuleSet,
+    ) -> Result<Self, ValueFault> {
+        canonicalize(stored.0.clone(), tree, (Mode::Stored, rules))
+    }
+}
+
 impl TryFrom<(&StoredValue, &TypeTree)> for ParameterValue {
     type Error = ValueFault;
 
-    /// Check a stored value against `tree`.
+    /// Check a stored value against `tree` under the earlier rule set.
     ///
-    /// The walk is the walk of [`ParameterValue::parse`]. A time leaf is a JSON number with the
-    /// count and not an IEC literal.
+    /// The conversion is the read of a stored part that nobody writes. A check under another rule
+    /// set uses [`ParameterValue::from_stored`].
     fn try_from((stored, tree): (&StoredValue, &TypeTree)) -> Result<Self, Self::Error> {
-        canonicalize(stored.0.clone(), tree, Mode::Stored)
+        Self::from_stored(stored, tree, RuleSet::Earlier)
     }
 }
 

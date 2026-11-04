@@ -23,6 +23,8 @@ pub(in crate::recipe) use build::build_value;
 pub use leaves::{RebindLeaves, rebind_new_leaves};
 pub use shape::ArrayShape;
 #[cfg(test)]
+mod earlier_tests;
+#[cfg(test)]
 mod test_support;
 mod value;
 

@@ -1,16 +1,19 @@
 //! Tests of the snapshot check (design D12, invariants I6 and I19, ADR-0028).
 
+use rust_decimal::Decimal;
 use serde_json::json;
 use uuid::Uuid;
 
 use super::fixtures::{
-    ARCHIVED_UNIT, INT, UNKNOWN, WSTRING_10, ZONE_2, limited, on_unit, param, parameter_tag, range,
-    recipe, trees, trees_on, units,
+    ARCHIVED_UNIT, DATE, DINT, INT, REAL, UNKNOWN, WSTRING_10, ZONE_2, limited, on_unit, param,
+    parameter_tag, range, recipe, trees, trees_on, units,
 };
 use crate::error_codes::{ErrorCode, REGISTRY};
-use crate::plant::{PlantError, PlcPlatform, UnitId};
+use crate::plant::{LeafPath, PlantError, PlcPlatform, S7Address, UnitId};
+use crate::recipe::draft::support::stored_draft_with;
 use crate::recipe::{
-    ParameterTag, RecipeError, SnapshotError, SnapshotItem, StoredParameter, VersionSnapshot,
+    Draft, DraftError, ParameterTag, RecipeError, SnapshotError, SnapshotItem, StoredLimit,
+    StoredParameter, VersionSnapshot, VersionState,
 };
 
 fn check(
@@ -298,4 +301,116 @@ fn the_count_of_e_rcp_020_skips_version_items_and_counts_an_unknown_unit() {
     ];
     let two = check(parameters, true, false).unwrap_err();
     assert_eq!(two.to_string(), "2 parameters are not valid. See the list.");
+}
+
+/// The `REAL` limit `max` of ADR-0117: 8 significant digits.
+fn real_max_limit() -> StoredLimit {
+    StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: Some(Decimal::ZERO),
+        max: Some("100.00001".parse().unwrap()),
+        max_length: None,
+    }
+}
+
+/// The base version of ADR-0120: each part is valid only under the earlier rule set.
+fn earlier_rules_base(date: i64) -> Vec<StoredParameter> {
+    let mut addressed = param(4, "ADDRESSED", DINT, json!(0));
+    addressed.s7_address = Some(S7Address::parse("DB1.DBD65534").unwrap());
+    vec![
+        limited(
+            param(1, "DUE", DATE, json!(date)),
+            vec![range("", 7_305, 72_700)],
+        ),
+        param(2, "PRECISE", REAL, json!(16_777_217)),
+        limited(param(3, "LIMITED", REAL, json!(50)), vec![real_max_limit()]),
+        addressed,
+    ]
+}
+
+fn snapshot_check_on_s7_1500(
+    parameters: Vec<StoredParameter>,
+) -> Result<Vec<ParameterTag>, RecipeError> {
+    VersionSnapshot::from(parameters).check(
+        &recipe(false),
+        &units(false),
+        &trees_on(PlcPlatform::S7_1500),
+    )
+}
+
+#[test]
+fn adr_0120_the_snapshot_check_passes_a_base_that_is_valid_under_the_earlier_rules() {
+    let result = snapshot_check_on_s7_1500(earlier_rules_base(72_700));
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn adr_0120_the_snapshot_check_refuses_a_date_above_the_earlier_range() {
+    let items = items_of(snapshot_check_on_s7_1500(earlier_rules_base(72_900)));
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_005]);
+}
+
+/// A numeric limit row with a `min` and no `max`.
+fn min_only_limit(min: i64) -> StoredLimit {
+    StoredLimit {
+        max: None,
+        ..range("", min, 0)
+    }
+}
+
+/// A `DATE` parameter with the count 72700 and a limit row that has a `min` and no `max`.
+fn date_above_current_end_with_min_only_limit() -> Vec<StoredParameter> {
+    vec![limited(
+        param(1, "DUE", DATE, json!(72_700)),
+        vec![min_only_limit(70_000)],
+    )]
+}
+
+#[test]
+fn adr_0120_the_snapshot_check_bounds_a_limit_without_max_by_the_earlier_range() {
+    let result = snapshot_check_on_s7_1500(date_above_current_end_with_min_only_limit());
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn adr_0120_the_approval_still_refuses_the_date_72700_when_the_limit_has_no_max() {
+    let items = approval_items_on_s7_1500(date_above_current_end_with_min_only_limit());
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_005]);
+}
+
+fn approval_items_on_s7_1500(parameters: Vec<StoredParameter>) -> Vec<SnapshotItem> {
+    let draft = Draft::load(stored_draft_with(
+        VersionState::LiveDraft,
+        PlcPlatform::S7_1500,
+        parameters,
+    ))
+    .unwrap();
+    let error = draft
+        .check_for_approval(&units(false), &trees_on(PlcPlatform::S7_1500), false)
+        .expect_err("the approval must fail");
+    match error {
+        DraftError::Recipe(RecipeError::ValidationFailed { items }) => items,
+        other => {
+            assert_eq!(other.code(), ErrorCode::RCP_020, "{other}");
+            Vec::new()
+        }
+    }
+}
+
+#[test]
+fn adr_0120_the_approval_gives_e_rcp_005_for_the_date_value_72700() {
+    let items = approval_items_on_s7_1500(vec![limited(
+        param(1, "DUE", DATE, json!(72_700)),
+        vec![range("", 7_305, 72_683)],
+    )]);
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_005]);
+}
+
+#[test]
+fn adr_0120_the_approval_gives_e_rcp_006_for_the_date_limit_max_72700() {
+    let items = approval_items_on_s7_1500(vec![limited(
+        param(1, "DUE", DATE, json!(8_000)),
+        vec![range("", 7_305, 72_700)],
+    )]);
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_006]);
 }

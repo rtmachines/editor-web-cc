@@ -1,16 +1,24 @@
 //! Tests of the shared page core of `DiffVersions` and `GetApprovalPreview` (task 6.2, design D4).
 
-use async_trait::async_trait;
-use recipe_domain::plant::{PlatformTypes, PlcPlatform, TypeTrees, UnitPath};
-use recipe_domain::recipe::{
-    DiffKind, Ordinal, Parameter, ParameterKey, ParameterTag, RecipeVersionId,
-};
+use std::collections::BTreeSet;
 
-use super::diff::DiffChoice;
+use async_trait::async_trait;
+use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::plant::{
+    LeafPath, PlatformTypes, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
+    TypeTrees, UnitPath,
+};
+use recipe_domain::recipe::{
+    DiffKind, Ordinal, Parameter, ParameterKey, ParameterTag, RecipeVersionId, RuleField,
+    StoredLimit, StoredParameter, StoredValue,
+};
+use serde_json::json;
+
+use super::diff::{DiffChoice, DiffPage};
 use super::diff_page::{build_page, read_page};
-use super::diff_tests::{kinds, section_keys, seed};
-use crate::error::StorageError;
-use crate::memory::fixtures::{Fixture, param, pkey, vid};
+use super::diff_tests::{copy, kinds, section_keys, seed};
+use crate::error::{AppError, StorageError};
+use crate::memory::fixtures::{Fixture, limit, param, pkey, tid, vid};
 use crate::ports::{ChangeFlags, DiffReads, DiffSides, Isolation, Transaction};
 
 /// The live draft version 2 of `R-1`.
@@ -127,4 +135,125 @@ async fn only_the_distinct_keys_of_the_page_go_to_pairs() {
         .unwrap();
 
     assert_eq!(reads.asked, vec![vec![pkey(1), pkey(2)]]);
+}
+
+/// The type identifier of the `DATE` row of the rule fault tests.
+const DATE_TYPE: u128 = 910;
+
+/// The stored `DATE` count of `D#2169-01-17`. Only the earlier rule set allows it on `S7_1500`.
+const EARLIER_ONLY_DAY: i64 = 72_700;
+
+/// A stored `DATE` count that fits every rule set.
+const FIRST_DAY: i64 = 10_000;
+
+/// A stored `DATE` count above the end of the earlier rule set. It is a storage defect.
+const BEYOND_EARLIER: i64 = 72_900;
+
+/// The `DATE` row on the S7 platforms. `S7_300` keeps the end 72 683 in both rule sets.
+fn date_type() -> PlcType {
+    PlcType::try_from(PlcTypeRecord {
+        id: tid(DATE_TYPE),
+        machine: None,
+        platforms: BTreeSet::from([
+            PlcPlatform::S7_300,
+            PlcPlatform::S7_1200,
+            PlcPlatform::S7_1500,
+        ]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::Date,
+            leaf_class: Primitive::Date.leaf_class(),
+            size_bytes: Primitive::Date.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap()
+}
+
+/// A `DATE` parameter with the stored count `count` and the upper bound `max`, if any.
+fn day(count: i64, max: Option<i64>) -> StoredParameter {
+    let limits = max.map(|bound| StoredLimit {
+        min: None,
+        max: Some(bound.into()),
+        ..limit()
+    });
+    StoredParameter {
+        plc_type: tid(DATE_TYPE),
+        value: StoredValue::from(json!(count)),
+        limits: limits.into_iter().collect(),
+        ..param(1, 101, "DAY")
+    }
+}
+
+/// Build the diff page of version 1 with `old` and version 2 with `new` on an `S7_1500` machine.
+async fn s7_1500_page(old: &StoredParameter, new: &StoredParameter) -> Result<DiffPage, AppError> {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_approved_and_draft(&machine, 1, "R-1");
+    fixture.store.seed_type(&date_type());
+    seed(
+        &fixture,
+        std::slice::from_ref(old),
+        std::slice::from_ref(new),
+    );
+    let mut tx = fixture
+        .store
+        .begin_memory(Isolation::RepeatableRead)
+        .unwrap();
+    let choice = DiffChoice {
+        kind: None,
+        page: 0,
+    };
+    let read = read_page(
+        tx.diff_reads(),
+        (Some(vid(101)), vid(NEW)),
+        true,
+        (choice, 50),
+    )
+    .await?;
+    let rows = tx.types().type_rows(machine.id()).await?;
+    drop(tx);
+    let types = PlatformTypes::collect(machine.id(), PlcPlatform::S7_1500, rows).unwrap();
+    let old: Vec<Parameter> = read.sides.old.into_iter().map(Parameter::from).collect();
+    let new: Vec<Parameter> = read.sides.new.into_iter().map(Parameter::from).collect();
+    let trees = TypeTrees::resolve(old.iter().chain(&new).map(Parameter::plc_type), &types);
+    build_page(
+        read.plan,
+        read.summary,
+        (&old, &new),
+        (&machine, &types, &trees),
+        1_000,
+    )
+}
+
+#[tokio::test]
+async fn a_stored_limit_of_the_earlier_set_only_gives_the_row_the_rule_fault_e_rcp_006() {
+    let old = day(FIRST_DAY, Some(20_000));
+    let new = copy(&day(FIRST_DAY, Some(EARLIER_ONLY_DAY)));
+
+    let page = s7_1500_page(&old, &new).await.unwrap();
+
+    assert_eq!(section_keys(&page, DiffKind::Limits), vec![pkey(1)]);
+    let faults = page.faults_of(pkey(1)).unwrap();
+    assert!(faults.old.is_empty(), "{faults:?}");
+    let found: Vec<(ErrorCode, RuleField)> = faults
+        .new
+        .iter()
+        .map(|fault| (fault.code(), fault.field().clone()))
+        .collect();
+    let whole = LeafPath::parse("").unwrap();
+    assert_eq!(found, [(ErrorCode::RCP_006, RuleField::LimitMax(whole))]);
+}
+
+#[tokio::test]
+async fn a_stored_count_above_the_earlier_set_still_gives_db_008() {
+    let old = day(FIRST_DAY, None);
+    let new = copy(&day(BEYOND_EARLIER, None));
+
+    let result = s7_1500_page(&old, &new).await;
+
+    assert_eq!(
+        result.as_ref().err().map(AppError::code),
+        Some(ErrorCode::DB_008),
+        "{result:?}"
+    );
 }

@@ -1,10 +1,10 @@
 //! Changing the value or the limits of a parameter in a draft (design D6).
 
 use super::add::step_content::{
-    check_faults, checked_value, parse_limits, stored_limits, stored_value,
+    check_faults, checked_value, parse_limits, stored_limits_under, stored_value_under,
 };
 use super::{Draft, Parameter, ParameterChange};
-use crate::plant::TypeTrees;
+use crate::plant::{RuleSet, TypeTrees};
 use crate::recipe::{DraftError, LimitList, ParameterKey, ProcessLimit, RecipeErrors, ValueInput};
 
 impl Draft {
@@ -29,7 +29,8 @@ impl Draft {
     ) -> Result<ParameterChange, DraftError> {
         let old = self.parameter(key)?.clone();
         let tree = self.resolved_tree(trees, old.plc_type())?;
-        let limits = stored_limits(old.tag(), old.limits(), tree)?;
+        // The command reads the stored limits and does not write them (ADR-0120 (d)).
+        let limits = stored_limits_under(old.tag(), old.limits(), tree, RuleSet::Earlier)?;
         let value = checked_value(old.tag(), value, &limits, tree)?;
         let new = old.with_value(value.to_stored());
         self.replace_checked(old, new, trees)
@@ -58,8 +59,9 @@ impl Draft {
         let old = self.parameter(key)?.clone();
         let tree = self.resolved_tree(trees, old.plc_type())?;
         let (parsed, row_errors) = parse_limits(old.tag(), limits, tree);
-        let value = stored_value(old.tag(), old.value(), tree)?;
-        let mut errors = check_faults(old.tag(), &value, &parsed, tree);
+        // The command reads the stored value and does not write it (ADR-0120 (d)).
+        let value = stored_value_under(old.tag(), old.value(), tree, RuleSet::Earlier)?;
+        let mut errors = check_faults(old.tag(), &value, &parsed, (tree, RuleSet::Earlier));
         errors.extend(row_errors);
         if let Some(errors) = RecipeErrors::from_vec(errors) {
             return Err(errors.into());

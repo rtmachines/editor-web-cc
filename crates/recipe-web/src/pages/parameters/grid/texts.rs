@@ -1,7 +1,7 @@
 //! The words of a grid: the hints, the type of a leaf, and the text of a time bound (design D8).
 
 use fluent::FluentArgs;
-use recipe_domain::plant::{IecLiteral, LeafClass, PlcPlatform, Primitive, TimeType};
+use recipe_domain::plant::{IecLiteral, LeafClass, PlcPlatform, Primitive, RuleSet, TimeType};
 
 use crate::pages::Texts;
 
@@ -78,10 +78,14 @@ pub(super) fn type_text(primitive: Primitive, string_length: Option<u16>) -> Str
 ///
 /// A time bound is a count of the base unit. It shows as its canonical IEC literal. Any other
 /// bound keeps its canonical decimal text.
+///
+/// The page reads a bound that it does not write, so the literal uses the earlier rule set. A
+/// stored `DATE` count that only the current rule set refuses still shows as a literal
+/// (ADR-0118 (g)).
 pub(super) fn bound_text(primitive: Primitive, platform: PlcPlatform, bound: String) -> String {
     let literal = TimeType::of(primitive, platform).and_then(|time_type| {
         let count: i128 = bound.parse().ok()?;
-        IecLiteral::try_from((time_type, count)).ok()
+        IecLiteral::from_count(time_type, count, RuleSet::Earlier).ok()
     });
     literal.map_or(bound, |literal| literal.to_string())
 }

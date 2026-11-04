@@ -8,7 +8,9 @@ use crate::recipe::value::test_support::{
     BOOL, CHAR, INT, REAL, TIME, WCHAR, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
 };
-use crate::recipe::value::{Expected, ParameterValue, StoredValue, ValueFault, request_leaf};
+use crate::recipe::value::{
+    Expected, LeafFault, ParameterValue, StoredValue, ValueFault, request_leaf,
+};
 
 fn member(name: &str) -> MemberName {
     MemberName::parse(name).unwrap()
@@ -223,7 +225,7 @@ fn a_stored_literal_for_a_time_leaf_expects_the_count_of_its_type() {
 fn a_request_leaf_at_a_struct_node_expects_a_scalar() {
     let tree = zone_tree();
     let result = request_leaf(&json!(1), tree.root(), PlcPlatform::TwinCat3);
-    assert_eq!(result, Err(Expected::Scalar));
+    assert_eq!(result, Err(LeafFault::from(Expected::Scalar)));
 }
 
 #[test]

@@ -7,7 +7,7 @@ use super::expected::Expected;
 use super::fault::ValueFault;
 use super::leaf::Mode;
 use super::walk::canonicalize;
-use crate::plant::TypeTree;
+use crate::plant::{RuleSet, TypeTree};
 
 impl ParameterValue {
     /// Parse the JSON text of a request and check it against `tree`.
@@ -22,7 +22,7 @@ impl ParameterValue {
     pub fn parse(json: &str, tree: &TypeTree) -> Result<Self, ValueFault> {
         let parsed = serde_json::from_str::<Value>(json)
             .map_err(|_| ValueFault::mismatch(Vec::new(), Expected::Json))?;
-        canonicalize(parsed, tree, Mode::Request)
+        canonicalize(parsed, tree, (Mode::Request, RuleSet::Current))
     }
 }
 

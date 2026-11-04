@@ -2,15 +2,18 @@
 
 use serde_json::json;
 
+use super::super::add::support::{REAL, draft_with, trees_on as real_trees_on};
 use super::super::support::{address, stored_draft_with, user};
 use crate::error_codes::{ErrorCode, REGISTRY};
-use crate::plant::{PlcPlatform, PlcTypeId};
+use crate::plant::{LeafPath, PlcPlatform, PlcTypeId};
 use crate::recipe::VersionState;
 use crate::recipe::snapshot::fixtures::{
     ARCHIVED_UNIT, BOOL, INT, RAMPS, ST_RECIPE, STRING_20, ZONE_2, length, limited, on_unit, param,
     parameter_tag, range, trees, trees_on, units,
 };
-use crate::recipe::{Draft, DraftError, RecipeError, RecipeVersionId, StoredParameter};
+use crate::recipe::{
+    Draft, DraftError, RecipeError, RecipeVersionId, SnapshotItem, StoredLimit, StoredParameter,
+};
 
 fn draft_on(platform: PlcPlatform, parameters: Vec<StoredParameter>) -> Draft {
     Draft::load(stored_draft_with(
@@ -407,6 +410,29 @@ fn units_of_another_machine_give_e_plt_020_items() {
         _ => Vec::new(),
     };
     assert_eq!(codes, vec![ErrorCode::PLT_020]);
+}
+
+#[test]
+fn adr_0117_the_approval_of_a_stored_real_limit_with_8_digits_gives_the_item_e_rcp_055() {
+    let row = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: Some("100.00001".parse().unwrap()),
+        max_length: None,
+    };
+    let parameter = limited(param(1, "SPEED", REAL, json!(5)), vec![row]);
+    let draft = draft_with(PlcPlatform::TwinCat3, vec![parameter]);
+    let error = draft
+        .check_for_approval(&units(false), &real_trees_on(PlcPlatform::TwinCat3), false)
+        .expect_err("the approval must fail");
+    assert_eq!(plain_code(&error), ErrorCode::RCP_020);
+    let items = match &error {
+        DraftError::Recipe(RecipeError::ValidationFailed { items }) => Some(items),
+        _ => None,
+    }
+    .expect("a snapshot error");
+    let codes: Vec<ErrorCode> = items.iter().map(SnapshotItem::code).collect();
+    assert_eq!(codes, vec![ErrorCode::RCP_055]);
 }
 
 /// The approver with the user number `n`. The login names the number.

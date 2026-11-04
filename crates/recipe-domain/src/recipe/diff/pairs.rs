@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use crate::plant::TypeTrees;
-use crate::recipe::draft::{stored_limits, stored_value};
+use crate::plant::{RuleSet, TypeTrees};
+use crate::recipe::draft::{stored_limits_under, stored_value};
 use crate::recipe::{Parameter, ParameterKey, RecipeError};
 
 /// The sides of one pair. At least one side holds a parameter.
@@ -87,6 +87,8 @@ impl<'a> DiffPair<'a> {
 
     /// Check the stored limit rows and the stored value of each side against its tree (A43).
     ///
+    /// The check uses the earlier rule set for the rows and the value (ADR-0120 (d)).
+    ///
     /// The method solves one problem: a row that does not fit its tree has no canonical text.
     /// The caller checks each pair before [`diff_pairs`](crate::recipe::diff_pairs). Then no
     /// value shows as its stored JSON, and no time bound shows as a count. The method does not
@@ -105,7 +107,7 @@ impl<'a> DiffPair<'a> {
                 let Some(tree) = trees.tree(parameter.plc_type()) else {
                     return Ok(());
                 };
-                stored_limits(parameter.tag(), parameter.limits(), tree)?;
+                stored_limits_under(parameter.tag(), parameter.limits(), tree, RuleSet::Earlier)?;
                 stored_value(parameter.tag(), parameter.value(), tree).map(drop)
             })
     }

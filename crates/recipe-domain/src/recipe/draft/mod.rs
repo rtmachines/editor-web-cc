@@ -11,6 +11,8 @@ mod approval;
 mod budget;
 mod definition;
 #[cfg(test)]
+mod earlier_tests;
+#[cfg(test)]
 mod edit_support;
 mod guard;
 mod load;
@@ -23,7 +25,9 @@ mod translation;
 mod value;
 
 pub use add::NewParameter;
-pub(in crate::recipe) use add::step_content::{check_value, stored_limits, stored_value};
+pub(in crate::recipe) use add::step_content::{
+    check_faults, leaf_error, stored_limits, stored_limits_under, stored_value, stored_value_under,
+};
 pub use approval::ApprovalReady;
 pub use budget::{
     BudgetCounts, LEAVES_PER_VERSION, LIMIT_ROWS_PER_VERSION, PARAMETERS_PER_VERSION, check_budgets,
@@ -31,6 +35,7 @@ pub use budget::{
 pub use definition::{DefinitionUpdate, Retype};
 pub(crate) use guard::not_on_platform;
 pub use parameter::{Parameter, StoredParameter};
+pub(in crate::recipe) use s7::{check_data_block_rule, check_end_rule};
 
 /// The live draft of a version as storage returns it, with its parameters.
 ///

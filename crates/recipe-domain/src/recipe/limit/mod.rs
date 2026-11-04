@@ -12,4 +12,4 @@ mod render;
 pub use fault::LimitFault;
 pub use list::{LimitInput, LimitList, LimitListReason};
 pub use process::{ProcessLimit, StoredLimit};
-pub(in crate::recipe) use render::bound_text;
+pub(in crate::recipe) use render::{bound_text, bound_text_under};

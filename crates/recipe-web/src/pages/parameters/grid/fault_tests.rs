@@ -5,7 +5,7 @@
 //! this input.
 
 use recipe_domain::plant::{LeafPath, Primitive, TypeTree};
-use recipe_domain::recipe::{ParameterTag, RecipeError};
+use recipe_domain::recipe::{ParameterTag, PrecisionField, RecipeError};
 
 use super::limits::LimitTexts;
 use super::{GridSource, GridView, LeafInput, ValueTexts};
@@ -86,6 +86,7 @@ fn grid_fault_of_a_value_names_the_value_input_and_of_a_limit_its_limit_input() 
         let want = match kind {
             LeafInput::Value => "value-0",
             LeafInput::Limit => "limits-0-min",
+            LeafInput::LimitMax => "limits-0-max",
         };
         assert_eq!(view.input_of(&fault), Some(want.to_owned()), "{fault}");
     }
@@ -114,6 +115,72 @@ fn grid_fault_of_a_string_limit_names_the_maximum_length() {
         view.input_of(&fault),
         Some("limits-0-max_length".to_owned())
     );
+}
+
+/// Return `E-RCP-055` for the field `field` of the leaf `text` of a `REAL`.
+fn precision(text: &str, field: PrecisionField) -> RecipeError {
+    let (tag, leaf) = spot(text);
+    RecipeError::PrecisionExceeded {
+        tag,
+        leaf,
+        field,
+        type_name: "REAL".to_owned(),
+        max_digits: 7,
+    }
+}
+
+#[test]
+fn grid_fault_of_too_many_digits_in_a_value_names_the_value_input_of_its_leaf() {
+    let view = grid(&primitive_tree(Primitive::Real), &[("", "0", "10")]);
+    let fault = precision("", PrecisionField::Value);
+    assert_eq!(view.input_of(&fault), Some("value-0".to_owned()));
+    let view = grid(
+        &array_tree(Primitive::Real, &[(1, 8)]),
+        &[("[*]", "0", "1")],
+    );
+    let fault = precision("[3]", PrecisionField::Value);
+    assert_eq!(view.input_of(&fault), Some("value-2".to_owned()));
+}
+
+#[test]
+fn grid_fault_of_too_many_digits_in_a_limit_names_the_input_of_that_bound() {
+    let view = grid(&primitive_tree(Primitive::Real), &[("", "0", "10")]);
+    let max = precision("", PrecisionField::LimitMax);
+    assert_eq!(view.input_of(&max), Some("limits-0-max".to_owned()));
+    let min = precision("", PrecisionField::LimitMin);
+    assert_eq!(view.input_of(&min), Some("limits-0-min".to_owned()));
+}
+
+#[test]
+fn grid_fault_of_too_many_digits_in_a_limit_of_all_elements_names_the_input_of_the_row_all() {
+    let view = grid(
+        &array_tree(Primitive::Real, &[(1, 8)]),
+        &[("[*]", "0", "1")],
+    );
+    for leaf in ["[*]", "[3]"] {
+        let max = precision(leaf, PrecisionField::LimitMax);
+        assert_eq!(
+            view.input_of(&max),
+            Some("limits-0-max".to_owned()),
+            "{leaf}"
+        );
+        let min = precision(leaf, PrecisionField::LimitMin);
+        assert_eq!(
+            view.input_of(&min),
+            Some("limits-0-min".to_owned()),
+            "{leaf}"
+        );
+    }
+}
+
+#[test]
+fn grid_fault_of_too_many_digits_in_a_value_on_a_row_all_names_its_limit_input() {
+    let view = grid(
+        &array_tree(Primitive::Real, &[(1, 8)]),
+        &[("[*]", "0", "1")],
+    );
+    let fault = precision("[*]", PrecisionField::Value);
+    assert_eq!(view.input_of(&fault), Some("limits-0-min".to_owned()));
 }
 
 #[test]

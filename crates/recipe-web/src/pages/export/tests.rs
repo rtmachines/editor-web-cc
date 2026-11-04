@@ -12,6 +12,7 @@ use super::{content_disposition, rows};
 use crate::error::WebError;
 use crate::export_path::is_export_path;
 use crate::pages::test_helpers::CSP;
+use crate::test_support::recipes::date_world::affected_approved_world;
 use crate::test_support::{Fixture, Reply, TestSession, call, get_with, request};
 
 /// The export of the approved version of `R-500`.
@@ -20,6 +21,9 @@ const R500_APPROVED: &str = "/export/v1/recipes/R-500/approved";
 const R500_V1: &str = "/export/v1/recipes/R-500/versions/1";
 /// The export of the retired version 1 of `R-600` by its number.
 const R600_V1: &str = "/export/v1/recipes/R-600/versions/1";
+
+/// The export of the approved version 1 of `R-400` by its number.
+const R400_V1: &str = "/export/v1/recipes/R-400/versions/1";
 
 /// Send `GET path` with the session cookie of `session`.
 pub(super) async fn export(fixture: &Fixture, session: &TestSession, path: &str) -> Reply {
@@ -118,6 +122,28 @@ async fn export_version_route_names_the_file_of_a_retired_version_with_retired_f
     assert_eq!(field(&reply.body, "reference_number"), "\"R-600\"");
     assert_eq!(field(&reply.body, "status"), "\"Retired\"");
     assert_one_new_entry(&fixture, &before, &reply.body);
+}
+
+/// Both session routes of an approved version that breaks the current rules (ADR-0119 (f), (g)).
+///
+/// The stored `DATE` 72700 on `S7_1500` passes the earlier rule set. The document is not loadable,
+/// but the version stays `Approved`, so the file name has no `RETIRED_` prefix.
+#[tokio::test]
+async fn export_routes_of_an_approved_version_with_a_rule_fault_send_loadable_false() {
+    let world = affected_approved_world().await;
+    for path in ["/export/v1/recipes/R-400/approved", R400_V1] {
+        let reply = export(&world.fixture, &world.admin, path).await;
+        assert_file(&reply, "recipe_R-400_v1.json");
+        assert!(!reply.header("content-disposition").contains("RETIRED_"));
+        assert_eq!(field(&reply.body, "loadable"), "false", "{path}");
+        assert_eq!(field(&reply.body, "status"), "\"Approved\"", "{path}");
+        assert_eq!(
+            field(&reply.body, "reference_number"),
+            "\"R-400\"",
+            "{path}"
+        );
+    }
+    assert_eq!(exports(&world.fixture).len(), 2);
 }
 
 #[tokio::test]

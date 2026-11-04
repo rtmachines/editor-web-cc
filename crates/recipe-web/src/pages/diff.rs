@@ -163,6 +163,8 @@ pub(crate) async fn diff(
 }
 
 #[cfg(test)]
+mod added_removed_fault_tests;
+#[cfg(test)]
 mod bounds_tests;
 #[cfg(test)]
 mod error_tests;
@@ -173,6 +175,6 @@ mod link_tests;
 #[cfg(test)]
 mod page_tests;
 #[cfg(test)]
-mod stored_tests;
+pub(crate) mod stored_tests;
 #[cfg(test)]
 mod test_world;

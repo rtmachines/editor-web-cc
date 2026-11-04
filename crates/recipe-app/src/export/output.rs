@@ -20,12 +20,14 @@ pub struct ExportedVersion {
     pub status: ExportStatus,
     /// The hash of the hashed body. It equals the stored hash of the version.
     pub content_sha256: Sha256,
+    /// `true` when a stored part of the version breaks the current rules (ADR-0119).
+    pub has_rule_fault: bool,
 }
 
 impl ExportedVersion {
-    /// Return true only when the version is approved at the time of the export (`api.md` section 6).
+    /// Return true only when the version is approved and has no rule fault (`api.md` section 6).
     #[must_use]
     pub const fn loadable(&self) -> bool {
-        self.status.loadable()
+        self.status.loadable() && !self.has_rule_fault
     }
 }

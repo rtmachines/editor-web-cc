@@ -358,10 +358,24 @@ fn stored_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
     }
 }
 
+/// Largest mantissa of a `REAL` number: 7 significant digits (ADR-0117).
+const REAL_MANTISSA: i64 = 9_999_999;
+
+/// Largest mantissa of an `LREAL` number: 15 significant digits (ADR-0117).
+const LREAL_MANTISSA: i64 = 999_999_999_999_999;
+
 /// Draw a numeric leaf: an integer with both ends of its range, or a decimal with a scale.
+///
+/// A decimal has no more significant digits than its type holds.
 fn numeric_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
     if matches!(primitive, Primitive::Real | Primitive::Lreal) {
-        return (any::<i64>(), 0..=12_u32)
+        let largest = if primitive == Primitive::Real {
+            REAL_MANTISSA
+        } else {
+            LREAL_MANTISSA
+        };
+        let smallest = largest.checked_neg().unwrap();
+        return (smallest..=largest, 0..=12_u32)
             .prop_map(|(mantissa, scale)| number_value(&Decimal::new(mantissa, scale).to_string()))
             .boxed();
     }

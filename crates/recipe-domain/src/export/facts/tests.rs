@@ -21,7 +21,7 @@ fn instant(
     Timestamp::from(PrimitiveDateTime::new(date, time).assume_offset(offset))
 }
 
-fn facts(status: ExportStatus) -> DocumentFacts {
+fn facts(status: ExportStatus, has_rule_fault: bool) -> DocumentFacts {
     let at = instant((2026, Month::October, 11), (14, 2, 10), 0, 0);
     DocumentFacts {
         exported_at: at,
@@ -33,6 +33,7 @@ fn facts(status: ExportStatus) -> DocumentFacts {
         recipe_name: Text::parse("Standard bottle").unwrap(),
         content_sha256: Sha256::from([0_u8; 32]),
         names: BTreeMap::new(),
+        has_rule_fault,
     }
 }
 
@@ -90,9 +91,19 @@ fn export_status_serializes_as_its_name() {
 }
 
 #[test]
-fn only_an_approved_document_is_loadable() {
-    assert!(facts(ExportStatus::Approved).loadable());
-    assert!(!facts(ExportStatus::Retired).loadable());
+fn an_approved_document_without_a_rule_fault_is_loadable() {
+    assert!(facts(ExportStatus::Approved, false).loadable());
+}
+
+#[test]
+fn an_approved_document_with_a_rule_fault_is_not_loadable() {
+    assert!(!facts(ExportStatus::Approved, true).loadable());
+}
+
+#[test]
+fn a_retired_document_is_not_loadable() {
+    assert!(!facts(ExportStatus::Retired, false).loadable());
+    assert!(!facts(ExportStatus::Retired, true).loadable());
 }
 
 #[test]

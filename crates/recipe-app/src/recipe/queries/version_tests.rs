@@ -1,25 +1,36 @@
 //! Tests of `GetVersion` (design D4, ADR-0042, ADR-0043 (m)).
 
+use std::time::Duration as StdDuration;
+
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::Sha256;
 use recipe_domain::identity::{Login, Role};
 use recipe_domain::plant::PlcPlatform;
-use recipe_domain::recipe::VersionState;
+use recipe_domain::plant::S7Address;
+use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter, VersionState};
 use time::Duration;
 
+use super::approval_preview_tests::{
+    CURRENT_DATE_END, DATE_TYPE, EARLIER_DATE, date_parameter, date_world, seed_date_type,
+};
 use super::outdated::OutdatedParameter;
 use super::test_world::seed_users;
 use super::versions::{GetVersion, GetVersionInput, LastChange, VersionView};
 use crate::auth::Operation;
-use crate::context::UseCase;
-use crate::error::{AppError, Missing};
+use crate::blocking::{AppSettings, Blocking, ExportSettings};
+use crate::context::{AppContext, UseCase};
+use crate::error::{AppError, Missing, TaskStage, TimeoutStage};
 use crate::memory::JournalEntry;
+use crate::memory::fixtures::pid;
 use crate::memory::fixtures::{
     Fixture, actor, meta, pkey, recipe_with, reference, rid, scenarios, second_engineer, tid, user,
     vid,
 };
 use crate::ports::Isolation;
 use crate::recipe::AddParameter;
+
+/// A type identifier that no type row of the tests holds.
+const UNRESOLVABLE_TYPE: u128 = 9_999;
 
 async fn get(
     fixture: &Fixture,
@@ -160,6 +171,197 @@ async fn a_version_that_is_not_a_live_draft_lists_no_outdated_parameter() {
 
     assert_eq!(view.detail.state, VersionState::Approved);
     assert!(view.outdated.is_empty());
+}
+
+#[tokio::test]
+async fn an_approved_version_with_the_stored_date_72700_gives_the_code_e_rcp_005() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+
+    let view = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap();
+
+    assert_eq!(view.detail.state, VersionState::Approved);
+    assert_eq!(view.rule_codes, vec![ErrorCode::RCP_005]);
+    assert_eq!(
+        fixture.store.journal(),
+        [
+            JournalEntry::Begin(Isolation::RepeatableRead),
+            JournalEntry::Begin(Isolation::RepeatableRead)
+        ]
+    );
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn an_approved_version_without_a_rule_fault_gives_no_code() {
+    let fixture = date_world(CURRENT_DATE_END, CURRENT_DATE_END);
+    seed_users(&fixture);
+
+    let view = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap();
+
+    assert_eq!(view.detail.state, VersionState::Approved);
+    assert!(view.rule_codes.is_empty(), "{:?}", view.rule_codes);
+}
+
+#[tokio::test]
+async fn a_draft_with_the_stored_date_72700_gives_no_code() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+
+    let view = get(&fixture, Role::ProcessEngineer, ("R-1", 2))
+        .await
+        .unwrap();
+
+    assert_eq!(view.detail.state, VersionState::LiveDraft);
+    assert!(view.rule_codes.is_empty(), "{:?}", view.rule_codes);
+}
+
+#[tokio::test]
+async fn a_retired_version_with_the_stored_date_72700_gives_no_code() {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_retired(&machine, 1, "R-1");
+    let date_type = seed_date_type(&fixture);
+    fixture
+        .store
+        .seed_parameter(vid(101), &date_parameter(date_type, EARLIER_DATE, false));
+    seed_users(&fixture);
+
+    let view = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap();
+
+    assert_eq!(view.detail.state, VersionState::Retired);
+    assert!(view.rule_codes.is_empty(), "{:?}", view.rule_codes);
+}
+
+#[tokio::test]
+async fn an_approved_version_lists_each_code_once_in_a_stable_order() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+    let date_type = tid(DATE_TYPE);
+    let twin = StoredParameter {
+        id: pid(2),
+        key: pkey(2),
+        tag: ParameterTag::parse("DUE2").unwrap(),
+        ordinal: Ordinal::parse(2).unwrap(),
+        s7_address: Some(S7Address::parse("DB1.DBW2").unwrap()),
+        ..date_parameter(date_type, EARLIER_DATE, false)
+    };
+    fixture.store.seed_parameter(vid(101), &twin);
+
+    let view = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap();
+
+    assert_eq!(view.rule_codes, vec![ErrorCode::RCP_005]);
+}
+
+#[tokio::test]
+async fn an_approved_version_with_an_unresolvable_type_gives_db_008() {
+    let fixture = date_world(CURRENT_DATE_END, CURRENT_DATE_END);
+    seed_users(&fixture);
+    let lost = StoredParameter {
+        id: pid(2),
+        key: pkey(2),
+        tag: ParameterTag::parse("LOST").unwrap(),
+        ordinal: Ordinal::parse(2).unwrap(),
+        s7_address: Some(S7Address::parse("DB1.DBW2").unwrap()),
+        ..date_parameter(tid(UNRESOLVABLE_TYPE), CURRENT_DATE_END, false)
+    };
+    fixture.store.seed_parameter(vid(101), &lost);
+
+    let error = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+}
+
+/// Return the settings with `blocking` and an export gate of one permit.
+fn one_export_permit(blocking: Blocking) -> AppSettings {
+    AppSettings {
+        blocking,
+        export: ExportSettings { permits: 1 },
+        ..AppSettings::default()
+    }
+}
+
+/// Return a runner with a `timeout.export` of 50 milliseconds.
+fn short_export() -> Blocking {
+    Blocking::new(StdDuration::from_secs(10), StdDuration::from_millis(50))
+}
+
+async fn get_in(context: AppContext, role: Role, number: u32) -> Result<VersionView, AppError> {
+    GetVersion::new(context)
+        .execute(
+            &actor(role),
+            &meta(),
+            GetVersionInput {
+                reference: reference("R-1"),
+                number,
+                rebind_bound: 16_384,
+            },
+        )
+        .await
+}
+
+#[tokio::test]
+async fn the_rule_check_of_an_approved_version_waits_for_an_export_permit_and_returns_it() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+    let context = fixture.context_with(one_export_permit(Blocking::default()));
+
+    let view = get_in(context.clone(), Role::Operator, 1).await.unwrap();
+
+    assert_eq!(view.rule_codes, vec![ErrorCode::RCP_005]);
+    assert_eq!(context.export_gate.available(), 1);
+}
+
+#[tokio::test]
+async fn a_busy_export_gate_beyond_timeout_export_gives_web_009_and_no_codes() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+    let context = fixture.context_with(one_export_permit(short_export()));
+    let held = context.export_gate.acquire().await.unwrap();
+
+    let error = get_in(context, Role::Operator, 1).await.unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::WEB_009);
+    assert!(matches!(
+        error,
+        AppError::Timeout {
+            stage: TimeoutStage::Export
+        }
+    ));
+    drop(held);
+}
+
+#[tokio::test]
+async fn a_failed_rule_check_task_gives_web_011_with_the_export_stage_and_no_codes() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+    let context = fixture.context_with(one_export_permit(Blocking::panicked()));
+
+    let error = get_in(context.clone(), Role::Operator, 1)
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::WEB_011);
+    assert!(matches!(
+        error,
+        AppError::TaskFailed {
+            stage: TaskStage::Export
+        }
+    ));
+    assert_eq!(context.export_gate.available(), 1);
+}
+
+#[tokio::test]
+async fn a_draft_page_takes_no_export_permit() {
+    let fixture = date_world(EARLIER_DATE, EARLIER_DATE);
+    seed_users(&fixture);
+    let context = fixture.context_with(one_export_permit(short_export()));
+    let held = context.export_gate.acquire().await.unwrap();
+
+    let view = get_in(context, Role::ProcessEngineer, 2).await.unwrap();
+
+    assert_eq!(view.detail.state, VersionState::LiveDraft);
+    drop(held);
 }
 
 #[tokio::test]

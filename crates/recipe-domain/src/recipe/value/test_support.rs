@@ -17,6 +17,7 @@ pub(crate) const LTIME: u128 = 9;
 pub(crate) const STRING_16: u128 = 10;
 pub(crate) const RAMPS: u128 = 11;
 pub(crate) const ST_ZONE: u128 = 12;
+pub(crate) const LREAL: u128 = 13;
 
 /// Resolve the tree of `root` over the shared primitives and the given extra rows.
 pub(crate) fn tree(extra: Vec<PlcType>, root: u128) -> TypeTree {
@@ -30,6 +31,7 @@ pub(crate) fn tree(extra: Vec<PlcType>, root: u128) -> TypeTree {
         primitive_row(TIME, Primitive::Time),
         primitive_row(DATE, Primitive::Date),
         primitive_row(LTIME, Primitive::Ltime),
+        primitive_row(LREAL, Primitive::Lreal),
     ];
     rows.extend(extra);
     TypeTree::resolve(id(root), &types(rows)).unwrap()

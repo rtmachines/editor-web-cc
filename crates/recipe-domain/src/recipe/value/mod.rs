@@ -23,9 +23,10 @@ mod texts;
 mod texts_tests;
 mod walk;
 
-pub(in crate::recipe) use decimal::{canonical, parse_decimal};
+pub(in crate::recipe) use decimal::{canonical, parse_decimal, significant_digits};
 pub use expected::Expected;
 pub use fault::{ValueFault, ValueFaults};
+pub(in crate::recipe) use leaf::{LeafFault, max_significant_digits};
 pub(crate) use numeric::{is_integer, numeric_range};
 pub(in crate::recipe) use request_leaf::{request_leaf, request_text};
 pub use stored::StoredValue;

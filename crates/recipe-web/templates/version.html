@@ -30,8 +30,8 @@
 <dt>{{ t.get("recipe-machine") }}</dt>
 <dd><a class="target-link" href="{{ machine_href }}">{{ machine }}</a></dd>
 </dl>
-{% if let Some(link) = actions.export %}{% if link.retired %}<div id="export-notice">{{ alerts::notice("info", t.get("version-export-retired-notice")) }}</div>
-{% endif %}<p class="actions"><a class="btn btn-secondary" href="{{ link.href }}" hx-boost="false"{% if link.retired %} aria-describedby="export-notice"{% endif %}>{{ link.text }}</a></p>
+{% if let Some(link) = actions.export %}{% if let Some(notice) = link.notice %}<div id="export-notice">{{ alerts::notice(notice.severity, notice.text) }}</div>
+{% endif %}<p class="actions"><a class="btn btn-secondary" href="{{ link.href }}" hx-boost="false"{% if link.notice.is_some() %} aria-describedby="export-notice"{% endif %}>{{ link.text }}</a></p>
 {% endif %}<p class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">{% if let Some(link) = actions.approve %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endif %}{% for link in actions.compare %}<a class="target-link" href="{{ link.href }}">{{ link.text }}</a>{% endfor %}<a class="target-link" href="{{ actions.history_href }}">{{ t.get("recipe-history-link") }}</a></p>
 {% if let Some(form) = actions.compare_form %}<form method="get" action="{{ form.action }}" class="actions" hx-boost="true" hx-target="#content" hx-push-url="true">
 {{ fields::select(t, "n", t.get("version-compare-n"), String::new(), &form.numbers, form.shown.clone(), false) }}
