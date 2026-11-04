@@ -27,6 +27,13 @@ This file records the notable changes of the recipe editor. The format follows [
 - The read check of the parameter table runs under `timeout.validation` and can give `503 E-WEB-009` (ADR-0122).
 - The check of an `Approved` version on the version page shares `export.permits` with the export and runs under `timeout.export` (ADR-0122).
 
+### Fixed
+
+- The init script does not log a statement that carries a role password (ADR-0123).
+- A connection returns to the pool with no open transaction (ADR-0124).
+- An accept loop that ends early stops the server with exit code 70 (ADR-0125).
+- The parameter table and the row of a new parameter show the translation for the UI language (ADR-0012). Without it, they show the English name with the marker `(en)` and `lang="en"` (ADR-0126).
+
 ## [0.6.0] - 2026-11-03
 
 ### Added
