@@ -25,7 +25,8 @@ pub(crate) const fn leaf_of(error: &RecipeError) -> Option<&LeafPath> {
         | RecipeError::LimitNotApplicable { leaf, .. }
         | RecipeError::LimitMissing { leaf, .. }
         | RecipeError::RebindNeedsValue { leaf, .. }
-        | RecipeError::RebindDropsLimit { leaf, .. } => Some(leaf),
+        | RecipeError::RebindDropsLimit { leaf, .. }
+        | RecipeError::PrecisionExceeded { leaf, .. } => Some(leaf),
         _other => None,
     }
 }
@@ -120,6 +121,18 @@ fn parameter_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
             ("min", min.clone()),
             ("max", max.clone()),
         ],
+        RecipeError::PrecisionExceeded {
+            tag,
+            leaf,
+            type_name,
+            max_digits,
+            ..
+        } => vec![
+            ("tag", tag.to_string()),
+            ("leaf", leaf.to_string()),
+            ("type_name", type_name.clone()),
+            ("max_digits", max_digits.to_string()),
+        ],
         RecipeError::ValueShapeMismatch { tag, leaf, .. }
         | RecipeError::LimitOutsideTypeRange { tag, leaf }
         | RecipeError::LeafPathNotFound { tag, leaf }
@@ -183,9 +196,15 @@ fn address_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
             ("other_tag", other_tag.to_string()),
             ("address", address.to_string()),
         ],
-        RecipeError::S7AddressMisaligned { tag, address } => {
+        RecipeError::S7AddressMisaligned { tag, address }
+        | RecipeError::S7DataBlockOutOfRange { tag, address } => {
             vec![("tag", tag.to_string()), ("address", address.to_string())]
         }
+        RecipeError::S7AddressPastBlockEnd { tag, address, size } => vec![
+            ("tag", tag.to_string()),
+            ("address", address.to_string()),
+            ("size", size.to_string()),
+        ],
         RecipeError::S7AddressWidthMismatch {
             tag,
             address,

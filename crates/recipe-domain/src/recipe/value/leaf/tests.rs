@@ -1,8 +1,11 @@
-use crate::plant::{Primitive, TypeTree};
+use serde_json::json;
+
+use crate::plant::{LeafPath, Primitive, RuleSet, TypeTree};
 use crate::recipe::value::test_support::{
-    BOOL, CHAR, DATE, LTIME, REAL, TIME, WCHAR, primitive_tree, string_tree, wstring_tree,
+    BOOL, CHAR, DATE, LREAL, LTIME, REAL, TIME, WCHAR, primitive_tree, string_tree, wstring_tree,
+    zone_tree,
 };
-use crate::recipe::value::{Expected, ParameterValue, ValueFault};
+use crate::recipe::value::{Expected, ParameterValue, StoredValue, ValueFault};
 
 /// Parse `json` and return the stored JSON text.
 fn stored_text(json: &str, tree: &TypeTree) -> String {
@@ -167,6 +170,91 @@ fn real_with_29_significant_digits_gives_a_fault() {
 fn real_with_29_significant_digits_in_scientific_form_gives_a_fault() {
     let tree = primitive_tree(REAL);
     assert!(ParameterValue::parse("1.00000000000000000000000000001e0", &tree).is_err());
+}
+
+/// The fault of a number with too many significant digits (ADR-0117).
+fn precision(type_name: Primitive, max_digits: u8) -> ValueFault {
+    ValueFault::Precision {
+        leaf: LeafPath::whole(),
+        type_name,
+        max_digits,
+    }
+}
+
+/// Read a stored number under `rules`.
+fn stored_under(
+    json: serde_json::Value,
+    tree: &TypeTree,
+    rules: RuleSet,
+) -> Result<ParameterValue, ValueFault> {
+    ParameterValue::from_stored(&StoredValue::from(json), tree, rules)
+}
+
+#[test]
+fn adr_0117_real_16777217_gives_a_precision_fault_in_a_request() {
+    let fault = fault("16777217", &primitive_tree(REAL));
+    assert_eq!(fault, precision(Primitive::Real, 7));
+}
+
+#[test]
+fn adr_0117_lreal_with_16_digits_gives_a_precision_fault_in_a_request() {
+    let fault = fault("0.1234567890123456", &primitive_tree(LREAL));
+    assert_eq!(fault, precision(Primitive::Lreal, 15));
+}
+
+#[test]
+fn adr_0117_max_significant_digits_is_7_for_real_15_for_lreal_and_none_for_dint() {
+    assert_eq!(super::max_significant_digits(Primitive::Real), Some(7));
+    assert_eq!(super::max_significant_digits(Primitive::Lreal), Some(15));
+    assert_eq!(super::max_significant_digits(Primitive::Dint), None);
+}
+
+#[test]
+fn adr_0117_real_1234_567_and_lreal_with_15_digits_pass() {
+    assert_eq!(stored_text("1234.567", &primitive_tree(REAL)), "1234.567");
+    assert_eq!(
+        stored_text("0.123456789012345", &primitive_tree(LREAL)),
+        "0.123456789012345"
+    );
+}
+
+#[test]
+fn adr_0117_trailing_zeros_are_not_significant_digits() {
+    assert_eq!(
+        stored_text("1000000000", &primitive_tree(REAL)),
+        "1000000000"
+    );
+}
+
+#[test]
+fn adr_0117_the_current_set_rejects_a_stored_real_16777217() {
+    let result = stored_under(json!(16_777_217), &primitive_tree(REAL), RuleSet::Current);
+    assert_eq!(result.unwrap_err(), precision(Primitive::Real, 7));
+}
+
+#[test]
+fn adr_0117_the_earlier_set_accepts_a_stored_real_16777217() {
+    let value = stored_under(json!(16_777_217), &primitive_tree(REAL), RuleSet::Earlier).unwrap();
+    assert_eq!(value.as_json().to_string(), "16777217");
+}
+
+#[test]
+fn adr_0117_the_earlier_set_accepts_a_stored_lreal_with_16_digits() {
+    let tree = primitive_tree(LREAL);
+    let json: serde_json::Value = "0.1234567890123456".parse().unwrap();
+    assert!(stored_under(json.clone(), &tree, RuleSet::Earlier).is_ok());
+    assert_eq!(
+        stored_under(json, &tree, RuleSet::Current).unwrap_err(),
+        precision(Primitive::Lreal, 15)
+    );
+}
+
+#[test]
+fn adr_0117_a_precision_fault_names_the_leaf_of_a_struct() {
+    let json = r#"{"temp_sp": 16777217, "active": true, "ramps": [10, 20, 30], "label": "Zone A"}"#;
+    let fault = fault(json, &zone_tree());
+    assert_eq!(fault.leaf().to_string(), ".temp_sp");
+    assert!(matches!(fault, ValueFault::Precision { .. }));
 }
 
 #[test]

@@ -10,7 +10,7 @@ use crate::recipe::{Parameter, ParameterValue};
 /// The text of each leaf of a value, in the preorder of the leaves.
 ///
 /// The texts are the texts of [`ParameterValue::texts`]. The use cases require each tree and
-/// check each pair with [`DiffPair::check_stored`](super::DiffPair::check_stored) first. A
+/// check each side with `check_stored_parameter` first (ADR-0118). A
 /// value without a tree gives one leaf at the empty path with its stored JSON text. An
 /// unchecked value that does not fit its tree gives the same leaf. The use cases never get this
 /// leaf. The diff of unchecked input therefore never hides a change.

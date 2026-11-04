@@ -6,8 +6,8 @@ use std::collections::{HashMap, HashSet};
 use rust_decimal::Decimal;
 
 use super::rows::{DiffBounds, DiffPart};
-use crate::plant::{LeafPath, TypeTree, TypeTrees};
-use crate::recipe::limit::bound_text;
+use crate::plant::{LeafPath, RuleSet, TypeTree, TypeTrees};
+use crate::recipe::limit::bound_text_under;
 use crate::recipe::{Parameter, StoredLimit};
 
 /// The limit rows of one side with the tree that sets the form of a time bound.
@@ -35,14 +35,17 @@ impl<'a> LimitSide<'a> {
 /// Write the bounds of a stored limit row as text.
 ///
 /// The leaf of the row in `tree` sets the form of a time bound. Without a tree, or when the
-/// tree has no such leaf, every bound is canonical decimal text.
+/// tree has no such leaf, every bound is canonical decimal text. The text uses the earlier rule
+/// set, because the diff reads bounds that it does not write (ADR-0120 (d)).
 pub(super) fn bounds(limit: &StoredLimit, tree: Option<&TypeTree>) -> DiffBounds {
     let primitive = tree.and_then(|tree| {
         let target = limit.leaf_path.resolve(tree)?;
         Some((target.primitive(), tree.platform()))
     });
     let text = |bound: Decimal| match primitive {
-        Some((primitive, platform)) => bound_text(primitive, platform, bound.normalize()),
+        Some((primitive, platform)) => {
+            bound_text_under(primitive, platform, bound.normalize(), RuleSet::Earlier)
+        }
         None => bound.normalize().to_string(),
     };
     DiffBounds {

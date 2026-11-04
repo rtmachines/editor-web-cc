@@ -591,7 +591,7 @@ fn world_with_a_row_past_the_page() -> Fixture {
 }
 
 #[tokio::test]
-async fn list_parameters_reads_the_values_of_the_primitive_rows_of_the_page_only() {
+async fn list_parameters_reads_the_values_of_every_row_of_the_cut_page_only() {
     let fixture = world_with_a_row_past_the_page();
 
     let (list, probe) = probed_list(&fixture, pages_of(4)).await;
@@ -609,8 +609,8 @@ async fn list_parameters_reads_the_values_of_the_primitive_rows_of_the_page_only
     keys.sort();
     assert_eq!(
         keys,
-        [pkey(1), pkey(3)],
-        "only the primitive rows of the cut page"
+        [pkey(1), pkey(2), pkey(3), pkey(11)],
+        "every row of the cut page, because the address rules need the composite rows too"
     );
 }
 

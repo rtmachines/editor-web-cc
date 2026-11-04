@@ -1,10 +1,12 @@
 //! The limits, the value, and the budgets of a new parameter (design D6, steps 2 and 3).
 
-use crate::plant::{LeafPath, PlantError, TypeTree, TypeTrees};
+use crate::plant::{LeafPath, PlantError, RuleSet, TypeTree, TypeTrees};
 use crate::recipe::draft::{BudgetCounts, Draft, check_budgets};
+use crate::recipe::value::LeafFault;
 use crate::recipe::{
-    DraftError, Expected, LimitFault, LimitList, ParameterTag, ParameterValue, ProcessLimit,
-    RecipeError, RecipeErrors, StoredLimit, StoredValue, ValueFault, ValueFaults, ValueInput,
+    DraftError, Expected, LimitFault, LimitList, ParameterTag, ParameterValue, PrecisionField,
+    ProcessLimit, RecipeError, RecipeErrors, StoredLimit, StoredValue, ValueFault, ValueFaults,
+    ValueInput,
 };
 
 /// Parse the limits and the value of a parameter and check the value against the limits.
@@ -34,7 +36,8 @@ pub(in crate::recipe::draft) fn parse_content(
 
 /// Parse the limit rows of a request against the type tree, in the order of the request.
 ///
-/// The function returns the rows that parsed and the error of each row that did not.
+/// The function returns the rows that parsed and the errors of each row that did not. A row with
+/// too many digits in both bounds gives two errors, one for each bound (ADR-0041).
 pub(in crate::recipe::draft) fn parse_limits(
     tag: &ParameterTag,
     rows: &LimitList,
@@ -43,9 +46,14 @@ pub(in crate::recipe::draft) fn parse_limits(
     let mut limits = Vec::with_capacity(rows.rows().len());
     let mut errors = Vec::new();
     for row in rows.rows() {
-        match ProcessLimit::parse(row, tree) {
+        match ProcessLimit::parse_all(row, tree) {
             Ok(limit) => limits.push(limit),
-            Err(fault) => errors.push(limit_error(tag, fault)),
+            Err(faults) => errors.extend(
+                faults
+                    .into_vec()
+                    .into_iter()
+                    .map(|fault| limit_error(tag, fault)),
+            ),
         }
     }
     (limits, errors)
@@ -70,55 +78,82 @@ pub(in crate::recipe::draft) fn checked_value(
     .map_err(|faults| value_errors(tag, faults))
 }
 
-/// Check a parsed value against the limits and return every fault.
-pub(in crate::recipe::draft) fn check_faults(
+/// Check a parsed value against the limits under the rule set `rules` and return every fault.
+///
+/// The rule set bounds a leaf whose limit has no `min` or no `max` (ADR-0120 (e)).
+pub(in crate::recipe) fn check_faults(
     tag: &ParameterTag,
     value: &ParameterValue,
     limits: &[ProcessLimit],
-    tree: &TypeTree,
+    (tree, rules): (&TypeTree, RuleSet),
 ) -> Vec<RecipeError> {
     value
-        .check_all(tree, limits)
+        .check_all_under(tree, limits, rules)
         .err()
         .map(|faults| value_errors(tag, faults).into_vec())
         .unwrap_or_default()
 }
 
-/// Check a parsed value against the limits and return the first fault.
-pub(in crate::recipe) fn check_value(
-    tag: &ParameterTag,
-    value: &ParameterValue,
-    limits: &[ProcessLimit],
-    tree: &TypeTree,
-) -> Result<(), RecipeError> {
-    value
-        .check(tree, limits)
-        .map_err(|fault| value_error(tag, fault))
-}
-
 /// Check the stored limit rows of a parameter against its type tree.
 ///
-/// A row that the tree does not accept maps as in a request.
+/// A row that the tree does not accept maps as in a request. A bound with too many significant
+/// digits gives `E-RCP-055`, because the check runs in the current rule set (ADR-0117 (e)).
 pub(in crate::recipe) fn stored_limits(
     tag: &ParameterTag,
     rows: &[StoredLimit],
     tree: &TypeTree,
 ) -> Result<Vec<ProcessLimit>, RecipeError> {
+    stored_limits_under(tag, rows, tree, RuleSet::Current)
+}
+
+/// Check the stored limit rows of a parameter against its type tree under the rule set `rules`.
+///
+/// The snapshot check of `CreateVersion` uses `Earlier` (ADR-0120 (g)). A bound with too many
+/// significant digits gives `E-RCP-055` in the current set only.
+pub(in crate::recipe) fn stored_limits_under(
+    tag: &ParameterTag,
+    rows: &[StoredLimit],
+    tree: &TypeTree,
+    rules: RuleSet,
+) -> Result<Vec<ProcessLimit>, RecipeError> {
     rows.iter()
-        .map(|row| ProcessLimit::try_from((row, tree)))
+        .map(|row| ProcessLimit::from_stored(row, tree, rules))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|fault| limit_error(tag, fault))
 }
 
-/// Check the stored value of a parameter against its type tree.
+/// Check the stored value of a parameter against its type tree under the earlier rule set.
 ///
-/// A fault of the stored form gives `E-RCP-005`.
+/// The caller reads a value that it does not write (ADR-0120 (d)). A fault of the stored form
+/// gives `E-RCP-005`.
 pub(in crate::recipe) fn stored_value(
     tag: &ParameterTag,
     value: &StoredValue,
     tree: &TypeTree,
 ) -> Result<ParameterValue, RecipeError> {
-    ParameterValue::try_from((value, tree)).map_err(|fault| value_error(tag, fault))
+    stored_value_under(tag, value, tree, RuleSet::Earlier)
+}
+
+/// Check the stored value of a parameter against its type tree under the rule set `rules`.
+///
+/// A fault of the stored form gives `E-RCP-005`. A number with too many significant digits gives
+/// `E-RCP-055` in the current set (ADR-0117 (e)).
+pub(in crate::recipe) fn stored_value_under(
+    tag: &ParameterTag,
+    value: &StoredValue,
+    tree: &TypeTree,
+    rules: RuleSet,
+) -> Result<ParameterValue, RecipeError> {
+    ParameterValue::from_stored(value, tree, rules).map_err(|fault| value_error(tag, fault))
+}
+
+/// Wrap the fault of one leaf with the tag of the parameter and the path of the leaf.
+pub(in crate::recipe) fn leaf_error(
+    tag: &ParameterTag,
+    leaf: LeafPath,
+    fault: LeafFault,
+) -> RecipeError {
+    value_error(tag, ValueFault::from_leaf(leaf, fault))
 }
 
 /// Wrap the fault of a limit row with the tag of the parameter.
@@ -133,6 +168,18 @@ fn limit_error(tag: &ParameterTag, fault: LimitFault) -> RecipeError {
             leaf,
             min,
             max,
+        },
+        LimitFault::PrecisionExceeded {
+            leaf,
+            field,
+            type_name,
+            max_digits,
+        } => RecipeError::PrecisionExceeded {
+            tag,
+            leaf,
+            field,
+            type_name: type_name.to_string(),
+            max_digits,
         },
     }
 }
@@ -176,6 +223,17 @@ fn value_error(tag: &ParameterTag, fault: ValueFault) -> RecipeError {
             value,
             min,
             max,
+        },
+        ValueFault::Precision {
+            leaf,
+            type_name,
+            max_digits,
+        } => RecipeError::PrecisionExceeded {
+            tag,
+            leaf,
+            field: PrecisionField::Value,
+            type_name: type_name.to_string(),
+            max_digits,
         },
     }
 }

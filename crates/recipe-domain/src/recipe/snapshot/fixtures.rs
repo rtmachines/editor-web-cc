@@ -32,6 +32,12 @@ pub(in crate::recipe) const WSTRING_10: u128 = 4;
 pub(in crate::recipe) const RAMPS: u128 = 5;
 /// A struct with `temp_sp`, `ramps`, `label`, and `active`.
 pub(in crate::recipe) const ST_RECIPE: u128 = 6;
+/// The `DATE` primitive.
+pub(in crate::recipe) const DATE: u128 = 7;
+/// The `REAL` primitive.
+pub(in crate::recipe) const REAL: u128 = 8;
+/// The `DINT` primitive.
+pub(in crate::recipe) const DINT: u128 = 9;
 /// Revision 2 of `ST_Zone` with the member `temp`.
 pub(in crate::recipe) const ZONE_2: u128 = 20;
 /// Revision 3 of `ST_Zone`.
@@ -66,6 +72,9 @@ fn rows() -> Vec<PlcType> {
     vec![
         primitive_row(INT, Primitive::Int),
         primitive_row(BOOL, Primitive::Bool),
+        primitive_row(DATE, Primitive::Date),
+        primitive_row(REAL, Primitive::Real),
+        primitive_row(DINT, Primitive::Dint),
         string_row(STRING_20, 20),
         wstring_row(WSTRING_10, 10),
         array_row(RAMPS, INT, &[(1, 3)]),
@@ -92,7 +101,8 @@ pub(in crate::recipe) fn trees_on(platform: PlcPlatform) -> TypeTrees {
 /// The trees of every test type for `owner` on `platform`.
 pub(in crate::recipe) fn trees_of(owner: MachineId, platform: PlcPlatform) -> TypeTrees {
     let ids = [
-        INT, BOOL, STRING_20, WSTRING_10, RAMPS, ST_RECIPE, ZONE_2, ZONE_3, UNKNOWN,
+        INT, BOOL, DATE, REAL, DINT, STRING_20, WSTRING_10, RAMPS, ST_RECIPE, ZONE_2, ZONE_3,
+        UNKNOWN,
     ]
     .map(id);
     TypeTrees::resolve(ids, &types_for(owner, platform, rows()))

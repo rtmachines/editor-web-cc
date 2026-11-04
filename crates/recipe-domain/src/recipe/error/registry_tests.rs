@@ -11,8 +11,8 @@ use crate::recipe::{
 };
 use std::collections::BTreeSet;
 
-/// The number of `E-RCP` domain rows: `E-RCP-001..029` and `E-RCP-050..054`.
-const DOC_ROW_COUNT: usize = 34;
+/// The number of `E-RCP` domain rows: `E-RCP-001..029` and `E-RCP-050..057`.
+const DOC_ROW_COUNT: usize = 37;
 
 /// One domain row of `reliability.md` section 1.2 that an owner `RecipeError::` names.
 struct DocRow {
@@ -326,6 +326,43 @@ fn parameter_samples() -> Vec<Sample> {
                 ("tag", tag().to_string()),
                 ("address", address().to_string()),
                 ("width", S7Width::W.to_string()),
+            ],
+        ),
+        (
+            RecipeError::PrecisionExceeded {
+                tag: tag(),
+                leaf: leaf(),
+                field: PrecisionField::Value,
+                type_name: "REAL".to_owned(),
+                max_digits: 7,
+            },
+            vec![
+                ("tag", tag().to_string()),
+                ("leaf", leaf().to_string()),
+                ("type_name", "REAL".to_owned()),
+                ("max_digits", "7".to_owned()),
+            ],
+        ),
+        (
+            RecipeError::S7AddressPastBlockEnd {
+                tag: tag(),
+                address: address(),
+                size: 8,
+            },
+            vec![
+                ("tag", tag().to_string()),
+                ("address", address().to_string()),
+                ("size", "8".to_owned()),
+            ],
+        ),
+        (
+            RecipeError::S7DataBlockOutOfRange {
+                tag: tag(),
+                address: address(),
+            },
+            vec![
+                ("tag", tag().to_string()),
+                ("address", address().to_string()),
             ],
         ),
         (

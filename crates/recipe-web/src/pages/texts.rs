@@ -5,6 +5,7 @@ use std::fmt;
 use fluent::FluentArgs;
 use recipe_domain::identity::Role;
 
+use crate::error::{FieldError, LineView, line_view};
 use crate::i18n::{Bundles, Lang};
 
 /// The texts of one language.
@@ -48,6 +49,14 @@ impl<'a> Texts<'a> {
         let mut args = FluentArgs::new();
         args.set(name.to_owned(), value.to_string());
         self.with(key, &args)
+    }
+
+    /// Return the view of an error line in the language of the page.
+    ///
+    /// The method solves one problem: a view of a table row shows the field line of a rule fault
+    /// with the code and the sentence of the form errors (ADR-0041), and it holds no bundles.
+    pub(crate) fn line(&self, line: &FieldError) -> LineView {
+        line_view(line, self.bundles, self.lang)
     }
 
     /// Return the name of a role in the language of the page.

@@ -2,9 +2,10 @@
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{PlcPlatform, UnitPath};
-use recipe_domain::recipe::ParameterKey;
+use recipe_domain::plant::{LeafPath, PlcPlatform, UnitPath};
+use recipe_domain::recipe::{ParameterKey, RuleField};
 
+use super::parameter_form_tests::{DUE_KEY, LATE_KEY, OFFSET_KEY, RATE_KEY, rule_fault_world};
 use super::parameters::{
     GetLimits, GetParameter, GetTranslations, LimitsView, ParameterRef, ParameterView,
     TranslationsView,
@@ -110,6 +111,54 @@ async fn get_parameter_gives_the_type_text_of_each_kind_of_type() {
 
         assert_eq!(view.type_text, text, "key {key}");
     }
+}
+
+#[tokio::test]
+async fn get_parameter_gives_the_rule_faults_of_the_stored_parameter_with_their_fields() {
+    // ADR-0118 (c): the page reads `GetParameter.rule_faults`. Each part has one fault.
+    let fixture = rule_fault_world();
+    let mut found = Vec::new();
+
+    for key in [RATE_KEY, DUE_KEY, OFFSET_KEY] {
+        let view = parameter(&fixture, Role::Operator, key).await.unwrap();
+        for fault in view.rule_faults.iter() {
+            found.push((key, fault.code(), fault.field().clone()));
+        }
+    }
+
+    let whole = LeafPath::parse("").unwrap();
+    assert_eq!(
+        found,
+        [
+            (
+                RATE_KEY,
+                ErrorCode::RCP_055,
+                RuleField::Value(whole.clone())
+            ),
+            (DUE_KEY, ErrorCode::RCP_006, RuleField::LimitMax(whole)),
+            (OFFSET_KEY, ErrorCode::RCP_056, RuleField::Address),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn get_parameter_keeps_db_008_for_a_stored_value_of_the_earlier_rules() {
+    let fixture = rule_fault_world();
+
+    let error = parameter(&fixture, Role::Operator, LATE_KEY)
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+}
+
+#[tokio::test]
+async fn get_parameter_of_a_clean_parameter_gives_no_rule_fault() {
+    let fixture = world();
+
+    let view = parameter(&fixture, Role::Operator, 1).await.unwrap();
+
+    assert!(view.rule_faults.is_empty());
 }
 
 #[tokio::test]

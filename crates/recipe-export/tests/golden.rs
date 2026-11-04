@@ -270,6 +270,7 @@ fn facts(
         recipe_name: Text::parse("Bottle 0.5 l").unwrap(),
         content_sha256: body.sha256().unwrap(),
         names: names_of(parameters),
+        has_rule_fault: false,
     }
 }
 

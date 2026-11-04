@@ -1,17 +1,26 @@
 //! The one check of the stored parameters of a version (design D12).
 //!
 //! `VersionSnapshot::check` and `Draft::check_for_approval` call this function, so the two
-//! checks cannot differ.
+//! checks differ only in the rule set that they pass (ADR-0120).
+//!
+//! - `VersionSnapshot::check` is the check of `CreateVersion`. It passes `RuleSet::Earlier`,
+//!   because the command copies a base that it does not write (ADR-0120 (g)).
+//! - `Draft::check_for_approval` passes `RuleSet::Current`, because an approval fixes the data
+//!   for good (ADR-0120 (f)).
+//!
+//! The check does not run the S7 address rules. `CreateVersion` therefore copies an address that
+//! the current rules refuse (ADR-0120 (h)).
 
 use super::{SnapshotError, SnapshotItem};
-use crate::plant::{DerivedTypeReason, LiveUnits, PlantError, TypeTree, TypeTrees};
-use crate::recipe::draft::{check_value, stored_limits, stored_value};
+use crate::plant::{DerivedTypeReason, LiveUnits, PlantError, RuleSet, TypeTree, TypeTrees};
+use crate::recipe::draft::{check_faults, stored_limits_under, stored_value_under};
 use crate::recipe::{Parameter, ParameterTag, Recipe, RecipeError};
 
 /// Check the parameters, the machine, and the recipe of a version.
 ///
 /// `parameters` must come in tag order. The function collects every problem. It returns the
-/// tags of the outdated parameters in the same order when it finds none.
+/// tags of the outdated parameters in the same order when it finds none. `rules` is the rule set
+/// of the stored values and limits.
 ///
 /// # Errors
 ///
@@ -21,6 +30,7 @@ pub(in crate::recipe) fn check_snapshot<'a>(
     recipe: Option<&Recipe>,
     units: &LiveUnits,
     trees: &TypeTrees,
+    rules: RuleSet,
 ) -> Result<Vec<ParameterTag>, RecipeError> {
     let parameters: Vec<&Parameter> = parameters.into_iter().collect();
     if let (Some(recipe), Some(first)) = (recipe, parameters.first())
@@ -39,7 +49,7 @@ pub(in crate::recipe) fn check_snapshot<'a>(
     let mut items = Vec::new();
     let mut outdated = Vec::new();
     for parameter in parameters {
-        check_parameter(parameter, units, trees, &mut items);
+        check_parameter(parameter, units, trees, rules, &mut items);
         if trees.outdated(parameter.plc_type()).is_some() {
             outdated.push(parameter.tag().clone());
         }
@@ -77,6 +87,7 @@ fn check_parameter(
     parameter: &Parameter,
     units: &LiveUnits,
     trees: &TypeTrees,
+    rules: RuleSet,
     items: &mut Vec<SnapshotItem>,
 ) {
     let tag = parameter.tag();
@@ -86,7 +97,7 @@ fn check_parameter(
     };
     items.extend(unit_item(parameter, units));
     match trees.get(parameter.plc_type()) {
-        Some(Ok(tree)) => items.extend(content_errors(parameter, tree).map(in_parameter)),
+        Some(Ok(tree)) => items.extend(content_errors(parameter, tree, rules).map(in_parameter)),
         Some(Err(PlantError::DerivedTypeInvalid {
             reason: DerivedTypeReason::NotOnPlatform,
             ..
@@ -121,16 +132,22 @@ fn type_not_on_platform_item(parameter: &Parameter, trees: &TypeTrees) -> Recipe
     }
 }
 
-/// Parse the stored limits and the stored value. Check the value against the limits.
+/// Parse the stored limits and the stored value under `rules`. Check the value against the limits.
 ///
 /// The limits and the value are independent, so both can give an error. The check against the
-/// limits needs both.
-fn content_errors(parameter: &Parameter, tree: &TypeTree) -> impl Iterator<Item = SnapshotError> {
+/// limits needs both. It runs under `rules` too and reports the first fault only (ADR-0120 (e)).
+fn content_errors(
+    parameter: &Parameter,
+    tree: &TypeTree,
+    rules: RuleSet,
+) -> impl Iterator<Item = SnapshotError> {
     let tag = parameter.tag();
-    let limits = stored_limits(tag, parameter.limits(), tree);
-    let value = stored_value(tag, parameter.value(), tree);
+    let limits = stored_limits_under(tag, parameter.limits(), tree, rules);
+    let value = stored_value_under(tag, parameter.value(), tree, rules);
     let fits = match (&limits, &value) {
-        (Ok(limits), Ok(value)) => check_value(tag, value, limits, tree).err(),
+        (Ok(limits), Ok(value)) => check_faults(tag, value, limits, (tree, rules))
+            .into_iter()
+            .next(),
         _ => None,
     };
     limits

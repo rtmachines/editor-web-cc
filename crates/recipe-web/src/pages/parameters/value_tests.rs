@@ -11,7 +11,7 @@ use super::test_kit::{assert_panel_error, parameter_path, post_htmx};
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::assert_htmx_error;
 use crate::test_support::plant::{ENGLISH, HTMX, World};
-use crate::test_support::recipes::{HOLD_KEY, SPEED_KEY};
+use crate::test_support::recipes::{GRID_KEY, HOLD_KEY, SPEED_KEY};
 
 #[tokio::test]
 async fn parameters_value_saves_the_value_and_answers_the_read_only_grid() {
@@ -164,6 +164,44 @@ async fn parameters_limits_replaces_the_limits_and_shows_a_time_bound_as_a_liter
         "{}",
         reply.body
     );
+}
+
+/// Count the lines of `E-RCP-055` in the list of the summary. The header holds the code once more.
+fn count_lines(body: &str) -> usize {
+    body.matches("<li><span class=\"alert-code\">E-RCP-055</span>")
+        .count()
+}
+
+#[tokio::test]
+async fn parameters_limits_with_8_digits_in_both_bounds_gives_a_line_for_each_bound() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = [
+        ("row_version", "1"),
+        ("limits[0].leaf_path", "[*]"),
+        ("limits[0].min", "-100.00001"),
+        ("limits[0].max", "100.00001"),
+    ];
+    let reply = post_htmx(&world, &parameter_path(GRID_KEY, "/limits"), &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-055");
+    assert!(reply.body.contains("Errors: 2."), "{}", reply.body);
+    assert_eq!(count_lines(&reply.body), 2, "{}", reply.body);
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
+#[tokio::test]
+async fn parameters_limits_with_8_digits_in_one_bound_gives_one_line() {
+    let world = recipe_world();
+    let pairs = [
+        ("row_version", "1"),
+        ("limits[0].leaf_path", "[*]"),
+        ("limits[0].min", "-100.00001"),
+        ("limits[0].max", "100.0001"),
+    ];
+    let reply = post_htmx(&world, &parameter_path(GRID_KEY, "/limits"), &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-055");
+    assert!(!reply.body.contains("Errors: 2."), "{}", reply.body);
+    assert_eq!(count_lines(&reply.body), 1, "{}", reply.body);
 }
 
 #[tokio::test]

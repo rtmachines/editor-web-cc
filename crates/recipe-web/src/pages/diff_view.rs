@@ -15,11 +15,14 @@ use recipe_domain::recipe::{
     Translation,
 };
 
-use crate::error::{FieldReason, WebError};
+use self::faults::fault_cell;
+use crate::error::{FieldReason, LineView, WebError};
 use crate::i18n::Lang;
 use crate::pages::hrefs::parameter_href;
 use crate::pages::render::{page_url, query_url};
 use crate::pages::texts::Texts;
+
+mod faults;
 
 /// Read the query value `kind`: the section of a diff page (ADR-0050 (e)).
 ///
@@ -187,6 +190,10 @@ pub(crate) struct Cell {
     /// The labeled texts of a side with more than one field, such as a translation. The template
     /// shows them as a description list in place of `text`.
     pub(crate) pairs: Vec<Pair>,
+    /// The field lines of the rule faults that name this side of the row (ADR-0118). Mostly empty.
+    pub(crate) lines: Vec<LineView>,
+    /// The `id` that names the block of the lines. The block gets `<lines_id>-error`.
+    pub(crate) lines_id: String,
 }
 
 /// One labeled text of a cell, for example the name of a translation.
@@ -488,7 +495,8 @@ fn section_rows(ctx: &RowContext<'_, '_>, section: &DiffSection) -> Vec<RowView>
     section
         .rows
         .iter()
-        .map(|row| match row.part() {
+        .enumerate()
+        .map(|(index, row)| match row.part() {
             DiffPart::Omitted { count } => more_row(ctx, row, *count),
             part => {
                 let first = linked.replace(row.key()) != Some(row.key());
@@ -502,8 +510,13 @@ fn section_rows(ctx: &RowContext<'_, '_>, section: &DiffSection) -> Vec<RowView>
                     href,
                     ..text_cell("data", row.tag())
                 };
+                let row_id = format!("diff-{}-{index}", section.kind.as_str());
                 RowView {
-                    cells: std::iter::once(tag).chain(part_cells(ctx, part)).collect(),
+                    cells: std::iter::once(tag)
+                        .chain(part_cells(ctx, part))
+                        .enumerate()
+                        .map(|(column, cell)| fault_cell(ctx, (row, part), (column, &row_id), cell))
+                        .collect(),
                     more: None,
                 }
             }
@@ -554,6 +567,8 @@ fn text_cell(class: &'static str, text: impl ToString) -> Cell {
         href: String::new(),
         none: false,
         pairs: Vec::new(),
+        lines: Vec::new(),
+        lines_id: String::new(),
     }
 }
 

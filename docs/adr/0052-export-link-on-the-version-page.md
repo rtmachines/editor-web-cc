@@ -1,6 +1,6 @@
 # ADR-0052: Export link on the version page
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0119 (item (e): a notice for an `Approved` version that is not loadable)
 Date: 2026-10-22
 Deciders: project owner
 

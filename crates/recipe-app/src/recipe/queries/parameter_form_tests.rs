@@ -2,8 +2,17 @@
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{MachineCode, PlcPlatform, TypeExpr, UnitPath};
-use recipe_domain::recipe::{RecipeError, VersionState, VersionStatus};
+use std::collections::BTreeSet;
+
+use recipe_domain::plant::{
+    LeafPath, MachineCode, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape,
+    S7Address, TypeExpr, UnitPath,
+};
+use recipe_domain::recipe::{
+    Ordinal, RecipeError, RuleField, StoredLimit, StoredParameter, StoredValue, VersionState,
+    VersionStatus,
+};
+use serde_json::json;
 
 use super::parameter_form::{GetParameterForm, GetParameterFormInput, ParameterForm};
 use super::parameters_tests::{TYPE_TEXTS, typed_world};
@@ -11,10 +20,11 @@ use super::test_world::seed_users;
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing};
-use crate::memory::JournalEntry;
 use crate::memory::fixtures::{
-    Fixture, actor, meta, pkey, recipe_with, reference, scenarios, user,
+    Fixture, actor, meta, parameter_on, pkey, recipe_with, reference, scenarios, tid, uid, user,
+    vid,
 };
+use crate::memory::{JournalEntry, seed_type_id};
 use crate::plant::{GetUdtForm, UdtFormInput};
 use crate::ports::Isolation;
 
@@ -325,4 +335,150 @@ async fn an_operator_is_refused_and_the_store_stays_unread() {
     assert_eq!(error.code(), ErrorCode::WEB_002);
     assert!(fixture.store.journal().is_empty());
     assert_eq!(fixture.sink.events().len(), 1);
+}
+
+/// The key of the `REAL` parameter `RATE` of `rule_fault_world`.
+pub(super) const RATE_KEY: u128 = 1;
+
+/// The key of the `DATE` parameter `DUE` of `rule_fault_world`.
+pub(super) const DUE_KEY: u128 = 2;
+
+/// The key of the `DINT` parameter `OFFSET` of `rule_fault_world`.
+pub(super) const OFFSET_KEY: u128 = 3;
+
+/// The key of the `DATE` parameter `LATE` of `rule_fault_world`. Its stored value is a defect.
+pub(super) const LATE_KEY: u128 = 4;
+
+/// A stored limit on the whole value of a parameter.
+fn whole_limit(max: i64) -> StoredLimit {
+    StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: Some(max.to_string().parse().unwrap()),
+        max_length: None,
+    }
+}
+
+/// The identifier of a seeded primitive type.
+fn seeded(primitive: Primitive) -> PlcTypeId {
+    seed_type_id(primitive, None).unwrap()
+}
+
+/// The global `DATE` type on `S7_1500`. The in-memory seed has no `DATE` row.
+fn date_type() -> PlcType {
+    let shape = RecordShape::Primitive {
+        primitive: Primitive::Date,
+        leaf_class: Primitive::Date.leaf_class(),
+        size_bytes: Primitive::Date.fixed_size_bytes().unwrap(),
+        string_length: None,
+    };
+    PlcType::try_from(PlcTypeRecord {
+        id: tid(960),
+        machine: None,
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape,
+    })
+    .unwrap()
+}
+
+/// A parameter `tag` of `plc_type` on `U1` with the stored `value`, `limits`, and `address`.
+fn stored_primitive(
+    (key, tag, plc_type): (u128, &str, PlcTypeId),
+    (value, limits, address): (serde_json::Value, Vec<StoredLimit>, Option<&str>),
+) -> StoredParameter {
+    StoredParameter {
+        plc_type,
+        s7_address: address.map(|text| S7Address::parse(text).unwrap()),
+        limits,
+        value: StoredValue::from(value),
+        ordinal: Ordinal::parse(u32::try_from(key).unwrap()).unwrap(),
+        ..parameter_on(PlcPlatform::S7_1500, key, tag, uid(101), 0)
+    }
+}
+
+/// The draft `R-1` on an `S7_1500` machine with parameters that break the current rules only.
+///
+/// One parameter has one type, so one parameter cannot hold the three faults. A `REAL` value
+/// gives `E-RCP-055`. Only a `DATE` limit gives `E-RCP-006`, because the `DATE` range is the one
+/// that the rule set changes. An address gives `E-RCP-056`. So the world has one parameter for
+/// each fault. `LATE` breaks the earlier rules too, so it is a structure fault.
+pub(super) fn rule_fault_world() -> Fixture {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    fixture.store.seed_type(&date_type());
+    let date = date_type().id();
+    let parameters = [
+        stored_primitive(
+            (RATE_KEY, "RATE", seeded(Primitive::Real)),
+            (json!(16_777_217), Vec::new(), None),
+        ),
+        stored_primitive(
+            (DUE_KEY, "DUE", date),
+            (json!(72_683), vec![whole_limit(72_700)], None),
+        ),
+        stored_primitive(
+            (OFFSET_KEY, "OFFSET", seeded(Primitive::Dint)),
+            (json!(0), Vec::new(), Some("DB1.DBD65534")),
+        ),
+        stored_primitive((LATE_KEY, "LATE", date), (json!(72_900), Vec::new(), None)),
+    ];
+    for parameter in &parameters {
+        fixture.store.seed_parameter(vid(101), parameter);
+    }
+    fixture
+}
+
+#[tokio::test]
+async fn a_stored_parameter_gives_its_value_limit_and_address_rule_faults_with_their_fields() {
+    let fixture = rule_fault_world();
+    let mut found = Vec::new();
+
+    for key in [RATE_KEY, DUE_KEY, OFFSET_KEY] {
+        let result = form(&fixture, input(Some(key), None, None)).await.unwrap();
+        for fault in result.rule_faults.iter() {
+            found.push((key, fault.code(), fault.field().clone()));
+        }
+    }
+
+    assert_eq!(
+        found,
+        [
+            (
+                RATE_KEY,
+                ErrorCode::RCP_055,
+                RuleField::Value(LeafPath::parse("").unwrap())
+            ),
+            (
+                DUE_KEY,
+                ErrorCode::RCP_006,
+                RuleField::LimitMax(LeafPath::parse("").unwrap())
+            ),
+            (OFFSET_KEY, ErrorCode::RCP_056, RuleField::Address),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_stored_parameter_that_breaks_the_earlier_rules_keeps_db_008() {
+    let fixture = rule_fault_world();
+
+    let error = form(&fixture, input(Some(LATE_KEY), None, None))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn a_form_without_a_key_and_a_clean_parameter_give_no_rule_fault() {
+    let fixture = world();
+
+    let new = form(&fixture, input(None, None, None)).await.unwrap();
+    let edit = form(&fixture, input(Some(11), None, None)).await.unwrap();
+
+    assert!(new.rule_faults.is_empty());
+    assert!(edit.rule_faults.is_empty());
 }

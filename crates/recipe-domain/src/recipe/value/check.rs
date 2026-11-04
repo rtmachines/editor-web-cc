@@ -8,10 +8,11 @@ use serde_json::Value;
 
 use super::ParameterValue;
 use super::fault::{ValueFault, ValueFaults};
+use super::leaf::{LeafFault, LeafType, Mode, convert};
 use super::leaves::{ValueLeaf, value_leaves};
 use super::numeric::numeric_range;
 use super::{canonical, parse_decimal};
-use crate::plant::{LeafPath, PlcPlatform, Primitive, TimeType, TypeTree};
+use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TimeType, TypeTree};
 use crate::recipe::limit::{ProcessLimit, bound_text};
 
 impl ParameterValue {
@@ -40,11 +41,66 @@ impl ParameterValue {
     /// Returns [`ValueFault::LimitConflict`] for each leaf that two limits cover.
     /// Returns [`ValueFault::OutOfLimit`] for each leaf outside its limits.
     pub fn check_all(&self, tree: &TypeTree, limits: &[ProcessLimit]) -> Result<(), ValueFaults> {
+        self.check_all_under(tree, limits, RuleSet::Current)
+    }
+
+    /// Check the value against `limits` under the rule set `rules` and return every fault.
+    ///
+    /// The rule set selects the range that bounds a leaf whose limit has no `min` or no `max`.
+    /// A caller that reads a stored value that it does not write passes [`RuleSet::Earlier`]
+    /// (ADR-0120 (d), (e)). The faults and their order are those of [`ParameterValue::check_all`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the faults of [`ParameterValue::check_all`].
+    pub fn check_all_under(
+        &self,
+        tree: &TypeTree,
+        limits: &[ProcessLimit],
+        rules: RuleSet,
+    ) -> Result<(), ValueFaults> {
         if tree.root_type() != self.root || tree.platform() != self.platform {
             return Err(ValueFault::WrongTree.into());
         }
-        let faults = ordered_faults(&self.json, tree, limits, BTreeMap::new())?;
+        let faults = ordered_faults_under(&self.json, tree, limits, BTreeMap::new(), rules)?;
         ValueFaults::from_vec(faults).map_or(Ok(()), Err)
+    }
+}
+
+impl ParameterValue {
+    /// Convert every leaf of the stored value under `rules` and return the fault of each bad leaf.
+    ///
+    /// The walk lists the leaves in tree order. Each leaf keeps its own fault, as the walk of
+    /// [`ParameterValue::check_all`] does (ADR-0118 (b), (c)). A caller reads a value that already
+    /// passed [`ParameterValue::from_stored`] under the earlier rule set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ValueFault::WrongTree`] when `tree` is not the tree of the value.
+    pub(in crate::recipe) fn leaf_faults_under(
+        &self,
+        tree: &TypeTree,
+        rules: RuleSet,
+    ) -> Result<Vec<(LeafPath, LeafFault)>, ValueFault> {
+        if tree.root_type() != self.root || tree.platform() != self.platform {
+            return Err(ValueFault::WrongTree);
+        }
+        let leaves = value_leaves(&self.json, tree).ok_or(ValueFault::WrongTree)?;
+        Ok(leaves
+            .into_iter()
+            .filter_map(|leaf| {
+                let kind = LeafType {
+                    primitive: leaf.primitive,
+                    string_length: leaf.string_length,
+                    platform: tree.platform(),
+                    mode: Mode::Stored,
+                    rules,
+                };
+                convert(leaf.value, kind)
+                    .err()
+                    .map(|fault| (leaf.path, fault))
+            })
+            .collect())
     }
 }
 
@@ -63,7 +119,24 @@ pub(super) fn ordered_faults(
     json: &Value,
     tree: &TypeTree,
     limits: &[ProcessLimit],
+    shape: BTreeMap<LeafPath, ValueFault>,
+) -> Result<Vec<ValueFault>, ValueFault> {
+    ordered_faults_under(json, tree, limits, shape, RuleSet::Current)
+}
+
+/// Check the leaves as [`ordered_faults`] does under the rule set `rules`.
+///
+/// The rule set selects the range that bounds a leaf whose limit has no `min` or no `max`.
+///
+/// # Errors
+///
+/// Returns the errors of [`ordered_faults`].
+fn ordered_faults_under(
+    json: &Value,
+    tree: &TypeTree,
+    limits: &[ProcessLimit],
     mut shape: BTreeMap<LeafPath, ValueFault>,
+    rules: RuleSet,
 ) -> Result<Vec<ValueFault>, ValueFault> {
     let is_other_tree = |limit: &ProcessLimit| {
         limit.root_type() != tree.root_type() || limit.platform() != tree.platform()
@@ -77,7 +150,7 @@ pub(super) fn ordered_faults(
         if let Some(fault) = shape.remove(&leaf.path) {
             faults.push(fault);
         } else if let Some(limit) = cover.get(&leaf.path) {
-            faults.extend(check_leaf(leaf, limit, tree.platform()).err());
+            faults.extend(check_leaf(leaf, limit, (tree.platform(), rules)).err());
         }
     }
     faults.extend(shape.into_values());
@@ -115,7 +188,7 @@ fn covered_leaves<'a>(
 fn check_leaf(
     leaf: &ValueLeaf<'_>,
     limit: &ProcessLimit,
-    platform: PlcPlatform,
+    (platform, rules): (PlcPlatform, RuleSet),
 ) -> Result<(), ValueFault> {
     let fault = |value: String, min: String, max: String| ValueFault::OutOfLimit {
         leaf: leaf.path.clone(),
@@ -148,7 +221,7 @@ fn check_leaf(
     let found = parse_decimal(&number.to_string())
         .and_then(canonical)
         .ok_or(ValueFault::WrongTree)?;
-    let (low, high) = type_range(leaf.primitive, platform).ok_or(ValueFault::WrongTree)?;
+    let (low, high) = type_range(leaf.primitive, platform, rules).ok_or(ValueFault::WrongTree)?;
     let min = limit.min().unwrap_or(low);
     let max = limit.max().unwrap_or(high);
     if found >= min && found <= max {
@@ -159,11 +232,15 @@ fn check_leaf(
 }
 
 /// Return the lowest and the highest value of a numeric, duration, or instant type.
-fn type_range(primitive: Primitive, platform: PlcPlatform) -> Option<(Decimal, Decimal)> {
+fn type_range(
+    primitive: Primitive,
+    platform: PlcPlatform,
+    rules: RuleSet,
+) -> Option<(Decimal, Decimal)> {
     if let Some(range) = numeric_range(primitive) {
         return Some(range);
     }
-    let (low, high) = TimeType::of(primitive, platform)?.range()?;
+    let (low, high) = TimeType::of(primitive, platform)?.range_under(rules)?;
     Some((
         Decimal::try_from_i128_with_scale(low, 0).ok()?,
         Decimal::try_from_i128_with_scale(high, 0).ok()?,

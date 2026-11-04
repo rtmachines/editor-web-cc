@@ -3,7 +3,8 @@
 use std::fmt;
 
 use super::expected::Expected;
-use crate::plant::{LeafPath, LeafSegment};
+use super::leaf::LeafFault;
+use crate::plant::{LeafPath, LeafSegment, Primitive};
 
 /// The path of a fault that concerns the whole value.
 static WHOLE_VALUE: LeafPath = LeafPath::whole();
@@ -15,7 +16,7 @@ static PARAMETER_TYPE: Expected = Expected::ParameterType;
 ///
 /// The enum has no `code()`. The draft adds the tag and wraps the fault (ADR-0025).
 /// `Mismatch` becomes `E-RCP-005`. `OutOfLimit` becomes `E-RCP-004`. `LimitConflict` becomes
-/// `E-RCP-019`. `WrongTree` becomes `E-RCP-005`. The enum can get more variants, so a caller
+/// `E-RCP-019`. `WrongTree` becomes `E-RCP-005`. `Precision` becomes `E-RCP-055`. The enum can get more variants, so a caller
 /// must not match it exhaustively.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -45,9 +46,33 @@ pub enum ValueFault {
         /// The upper bound as message text. A missing bound shows the bound of the type.
         max: String,
     },
+    /// A `REAL` or `LREAL` number has more significant digits than its type holds.
+    Precision {
+        /// Concrete path of the leaf.
+        leaf: LeafPath,
+        /// The type of the leaf.
+        type_name: Primitive,
+        /// The largest permitted count of significant digits.
+        max_digits: u8,
+    },
 }
 
 impl ValueFault {
+    /// Build the fault of one leaf at the given path.
+    pub(in crate::recipe) fn from_leaf(leaf: LeafPath, fault: LeafFault) -> Self {
+        match fault {
+            LeafFault::Expected(expected) => Self::Mismatch { leaf, expected },
+            LeafFault::Precision {
+                type_name,
+                max_digits,
+            } => Self::Precision {
+                leaf,
+                type_name,
+                max_digits,
+            },
+        }
+    }
+
     /// Build a mismatch at the given path segments.
     pub(super) fn mismatch(segments: Vec<LeafSegment>, expected: Expected) -> Self {
         Self::Mismatch {
@@ -64,7 +89,8 @@ impl ValueFault {
         match self {
             Self::Mismatch { leaf, .. }
             | Self::LimitConflict { leaf }
-            | Self::OutOfLimit { leaf, .. } => leaf,
+            | Self::OutOfLimit { leaf, .. }
+            | Self::Precision { leaf, .. } => leaf,
             Self::WrongTree => &WHOLE_VALUE,
         }
     }
@@ -77,7 +103,7 @@ impl ValueFault {
         match self {
             Self::Mismatch { expected, .. } => Some(expected),
             Self::WrongTree => Some(&PARAMETER_TYPE),
-            Self::LimitConflict { .. } | Self::OutOfLimit { .. } => None,
+            Self::LimitConflict { .. } | Self::OutOfLimit { .. } | Self::Precision { .. } => None,
         }
     }
 }
@@ -176,6 +202,14 @@ impl fmt::Display for ValueFault {
             } => write!(
                 f,
                 "Value {value} at leaf path \"{leaf}\" is outside the limits {min} to {max}."
+            ),
+            Self::Precision {
+                leaf,
+                type_name,
+                max_digits,
+            } => write!(
+                f,
+                "Number at leaf path \"{leaf}\" has too many significant digits for {type_name}. Use at most {max_digits} digits."
             ),
         }
     }

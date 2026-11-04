@@ -5,14 +5,15 @@
 //! `RepeatableRead` transaction and returns the `row_version` of the version with its data.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use recipe_domain::plant::{
-    Machine, MachineCode, PlatformTypes, PlcTypeId, RecordShape, TypeNode, TypeTree, UnitId,
-    UnitPath,
+    Machine, MachineCode, PlatformTypes, PlcTypeId, TypeNode, TypeTree, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
-    ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeVersionId, ReferenceNumber,
-    StoredLimit, StoredParameter, StoredValue, Translation, ValueFault, VersionState,
+    Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeVersionId,
+    ReferenceNumber, RuleFault, StoredLimit, StoredParameter, StoredValue, Translation, ValueFault,
+    VersionState, check_stored_parameter,
 };
 use recipe_domain::text::{LongText, Text};
 
@@ -80,7 +81,9 @@ pub struct ListParametersInput {
 }
 
 /// The result of `ListParameters`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The type derives no `Clone` and no `PartialEq`, because `RuleFault` has none.
+#[derive(Debug)]
 pub struct ParameterList {
     /// The recipe with the headers of all its versions. It can be deleted.
     pub recipe: Recipe,
@@ -99,6 +102,9 @@ pub struct ParameterList {
     /// The leaf text of the value of each primitive parameter of the page, as the leaf grid
     /// writes it (A43). An array parameter and a struct parameter have no entry.
     pub value_texts: BTreeMap<ParameterKey, String>,
+    /// The rule faults of the stored parts of each parameter of the page, whatever its type
+    /// (ADR-0118). A parameter without a fault has no entry.
+    pub rule_faults: BTreeMap<ParameterKey, Vec<RuleFault>>,
     /// The page number. The first page is page 0.
     pub page: u32,
     /// Whether a page after this page holds a row.
@@ -195,62 +201,104 @@ fn leaf_text(tree: &TypeTree, value: &StoredValue) -> Result<String, ValueFault>
     }
 }
 
-/// Resolve the tree of each primitive type that `rows` use.
+/// Resolve the tree of each type that `rows` use.
 ///
-/// A type row with another shape than `Primitive` has no entry, so its parameters have no value text.
-fn primitive_trees(
+/// Every row needs its tree, because the read check also runs the address rules (ADR-0118). So an
+/// array, a struct, and a primitive type each get an entry.
+fn row_trees(
     types: &PlatformTypes,
     rows: &[ParameterRow],
 ) -> Result<BTreeMap<PlcTypeId, TypeTree>, AppError> {
     let used: BTreeSet<PlcTypeId> = rows.iter().map(|row| row.plc_type).collect();
-    types
-        .rows()
-        .filter(|row| {
-            used.contains(&row.id()) && matches!(row.shape(), RecordShape::Primitive { .. })
-        })
-        .map(|row| Ok((row.id(), TypeTree::resolve(row.id(), types)?)))
+    used.into_iter()
+        .map(|id| Ok((id, TypeTree::resolve(id, types)?)))
         .collect()
 }
 
-/// Write the value text of each row that has a tree in `trees`, over the stored `values`.
+/// The value texts and the rule faults of the rows of one page.
+#[derive(Debug, Default)]
+struct ValueReads {
+    /// The leaf text of the stored value of each primitive row. A composite row has no entry.
+    texts: BTreeMap<ParameterKey, String>,
+    /// The rule faults of each row that has one. A row without a fault has no entry.
+    faults: BTreeMap<ParameterKey, Vec<RuleFault>>,
+}
+
+/// Build the parameter that the read check needs from a row of the page and its stored value.
+///
+/// The page reads no limit row, no translation, and no description. So the parameter holds none
+/// of them, and the read check reports no limit fault.
 ///
 /// # Errors
 ///
-/// Returns `StorageError` (`E-DB-008`) when a primitive row has no value or a value does not
-/// match its tree. Both cases are defects of the storage. The second case names the parameter key.
-fn value_texts_of(
+/// Returns `StorageError` (`E-DB-008`) when the name of the row is not a valid description.
+fn checked_parameter(row: &ParameterRow, value: &StoredValue) -> Result<Parameter, StorageError> {
+    let description = LongText::parse(row.name_en.as_str())
+        .map_err(|_| StorageError::invariant("the name of a parameter is not a description"))?;
+    Ok(Parameter::from(StoredParameter {
+        id: ParameterId::from(*row.key.as_uuid()),
+        key: row.key,
+        unit: row.unit,
+        tag: row.tag.clone(),
+        name_en: row.name_en.clone(),
+        description_en: description,
+        translations: Vec::new(),
+        plc_type: row.plc_type,
+        s7_address: row.s7_address,
+        limits: Vec::new(),
+        value: value.clone(),
+        ordinal: row.ordinal,
+    }))
+}
+
+/// Write the value text and find the rule faults of each row of the page.
+///
+/// The text comes from `value_text` and exists for a primitive row only. The faults come from the
+/// read check `check_stored_parameter` (ADR-0118), so no second rule exists here. The check runs
+/// for every row, because the address rules apply to an array and to a struct too.
+///
+/// # Errors
+///
+/// Returns `StorageError` (`E-DB-008`) when a row has no value or no tree, when a value does not
+/// match its tree, or when a part breaks the earlier rule set. All three cases are defects of
+/// the storage. The second and third case name the parameter key.
+fn value_reads_of(
     rows: &[ParameterRow],
     trees: &BTreeMap<PlcTypeId, TypeTree>,
     values: &BTreeMap<ParameterKey, StoredValue>,
-) -> Result<BTreeMap<ParameterKey, String>, AppError> {
-    let mut texts = BTreeMap::new();
+) -> Result<ValueReads, AppError> {
+    let mut reads = ValueReads::default();
     for row in rows {
-        let Some(tree) = trees.get(&row.plc_type) else {
-            continue;
-        };
+        let tree = trees
+            .get(&row.plc_type)
+            .ok_or_else(|| StorageError::invariant("a parameter type has no type tree"))?;
         let value = values
             .get(&row.key)
-            .ok_or_else(|| StorageError::invariant("a primitive parameter has no stored value"))?;
+            .ok_or_else(|| StorageError::invariant("a parameter has no stored value"))?;
         let text =
-            leaf_text(tree, value).map_err(|fault| StorageError::broken_value(row.key, fault))?;
-        texts.insert(row.key, text);
+            value_text(tree, value).map_err(|fault| StorageError::broken_value(row.key, fault))?;
+        let parameter = checked_parameter(row, value)?;
+        let faults = check_stored_parameter(&parameter, tree)
+            .map_err(|fault| StorageError::broken_stored_parameter(row.key, fault))?;
+        if let Some(text) = text {
+            reads.texts.insert(row.key, text);
+        }
+        if !faults.is_empty() {
+            reads.faults.insert(row.key, faults);
+        }
     }
-    Ok(texts)
+    Ok(reads)
 }
 
-/// Read the stored values of the primitive rows of the page in the open transaction.
+/// Read the stored values of the rows of the page in the open transaction.
 ///
-/// A row whose type has no tree in `trees` is a composite row and has no entry.
-async fn read_primitive_values(
+/// A composite row is included, because the address rules need its value and its tree.
+async fn read_row_values(
     tx: &mut dyn Transaction,
     version: RecipeVersionId,
-    (rows, trees): (&[ParameterRow], &BTreeMap<PlcTypeId, TypeTree>),
+    rows: &[ParameterRow],
 ) -> Result<BTreeMap<ParameterKey, StoredValue>, AppError> {
-    let keys: Vec<ParameterKey> = rows
-        .iter()
-        .filter(|row| trees.contains_key(&row.plc_type))
-        .map(|row| row.key)
-        .collect();
+    let keys: Vec<ParameterKey> = rows.iter().map(|row| row.key).collect();
     Ok(tx.recipe_reads().parameter_values(version, &keys).await?)
 }
 
@@ -259,8 +307,10 @@ async fn read_primitive_values(
 /// The query solves one problem: a version can hold 4 000 parameters. The table must show at
 /// most `page.parameters` rows from a fixed number of statements. The query reads the counts of
 /// the units, one page of rows, and the type rows in one `RepeatableRead` transaction. It also
-/// reads the values of the primitive rows of the page in that transaction (ADR-0108 (b)). So the
+/// reads the values of the rows of the page in that transaction (ADR-0108 (b), ADR-0118). So the
 /// `row_version`, the type texts, and the values of the result belong to the rows (ADR-0042).
+/// After the transaction ends, the value texts and the read check run in `Blocking::validate`,
+/// because one page can hold `page.parameters` values of `budget.value_bytes` each (ADR-0121 (f)).
 #[derive(Clone)]
 pub struct ListParameters {
     ctx: AppContext,
@@ -285,6 +335,9 @@ impl ListParameters {
     /// Returns `NotFound` (`E-WEB-005`) when the recipe, the version, or the unit does not exist.
     /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted and the role cannot restore it.
     /// Returns `AppError::Storage` when the database fails.
+    /// Returns `AppError::Timeout` (`E-WEB-009`) with the stage `Validation` when the value check
+    /// passes `timeout.validation`.
+    /// Returns `AppError::TaskFailed` (`E-WEB-011`) with the stage `Validation` when it fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
@@ -311,11 +364,20 @@ impl ListParameters {
         let (rows, has_next) = cut_page(rows, size);
         let machine = &scope.machine;
         let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
-        let trees = primitive_trees(&types, &rows)?;
-        let values = read_primitive_values(tx.as_mut(), scope.detail.id, (&rows, &trees)).await?;
+        let trees = row_trees(&types, &rows)?;
+        let values = read_row_values(tx.as_mut(), scope.detail.id, &rows).await?;
         drop(tx);
         let type_texts = texts_of(&types, &rows)?;
-        let value_texts = value_texts_of(&rows, &trees, &values)?;
+        let (rows, reads) = self
+            .ctx
+            .settings
+            .blocking
+            .validate(move || {
+                let reads = value_reads_of(&rows, &trees, &values);
+                (rows, reads)
+            })
+            .await?;
+        let reads = reads?;
         Ok(ParameterList {
             recipe: scope.recipe,
             machine: scope.machine,
@@ -324,7 +386,8 @@ impl ListParameters {
             unit: shown.map(|count| count.path),
             rows,
             type_texts,
-            value_texts,
+            value_texts: reads.texts,
+            rule_faults: reads.faults,
             page: input.page,
             has_next,
         })
@@ -412,6 +475,10 @@ pub struct ParameterView {
     pub tree: TypeTree,
     /// The type text of the parameter type, for example `ST_Zone@2` or `STRING(20)`.
     pub type_text: String,
+    /// The rule faults of the stored parameter, each with its field (ADR-0118, design D7).
+    ///
+    /// The list is empty for a parameter that meets the current rules.
+    pub rule_faults: Arc<[RuleFault]>,
 }
 
 /// Shows one parameter with its value, its limits, its translations, and its type tree.
@@ -461,6 +528,9 @@ impl GetParameter {
         let tree = TypeTree::resolve(found.parameter.plc_type, &types)?;
         let type_text = text_of(&types, found.parameter.plc_type)?;
         let unit_path = unit_path_of(&machine, found.parameter.unit)?;
+        let key = found.parameter.key;
+        let rule_faults = check_stored_parameter(&Parameter::from(found.parameter.clone()), &tree)
+            .map_err(|fault| StorageError::broken_stored_parameter(key, fault))?;
         Ok(ParameterView {
             recipe: found.scope.recipe,
             machine,
@@ -469,6 +539,7 @@ impl GetParameter {
             parameter: found.parameter,
             tree,
             type_text,
+            rule_faults: rule_faults.into(),
         })
     }
 }

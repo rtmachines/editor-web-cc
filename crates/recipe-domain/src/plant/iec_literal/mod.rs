@@ -12,6 +12,8 @@ mod duration;
 mod instant;
 mod range;
 
+pub use range::RuleSet;
+
 #[cfg(test)]
 mod prop;
 
@@ -54,7 +56,16 @@ impl TimeType {
     /// Returns `None` when the type does not exist on the platform.
     #[must_use]
     pub fn range(self) -> Option<(i128, i128)> {
-        range::range(self).map(|allowed| (*allowed.start(), *allowed.end()))
+        self.range_under(RuleSet::Current)
+    }
+
+    /// Return the lowest and the highest count of this type under the rule set `rules`.
+    ///
+    /// Only `DATE` on `S7_1200` and `S7_1500` differs between the two sets (ADR-0120 (a)).
+    /// Returns `None` when the type does not exist on the platform.
+    #[must_use]
+    pub fn range_under(self, rules: RuleSet) -> Option<(i128, i128)> {
+        range::range(self, rules).map(|allowed| (*allowed.start(), *allowed.end()))
     }
 }
 
@@ -106,7 +117,7 @@ impl IecLiteral {
                     LeafClass::Duration => duration::parse(ty, body),
                     _ => instant::parse(ty, body),
                 }?;
-                range::check(ty, literal.count)?;
+                range::check(ty, literal.count, RuleSet::Current)?;
                 Ok(literal)
             }
             Some(_) => Err(IecLiteralReason::Prefix),

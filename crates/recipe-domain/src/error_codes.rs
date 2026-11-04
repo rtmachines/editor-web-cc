@@ -123,6 +123,12 @@ impl ErrorCode {
     pub const RCP_053: Self = Self::new("E-RCP-053");
     /// E-RCP-054, `RecipeError::S7AddressWidthMismatch`.
     pub const RCP_054: Self = Self::new("E-RCP-054");
+    /// E-RCP-055, `RecipeError::PrecisionExceeded`.
+    pub const RCP_055: Self = Self::new("E-RCP-055");
+    /// E-RCP-056, `RecipeError::S7AddressPastBlockEnd`.
+    pub const RCP_056: Self = Self::new("E-RCP-056");
+    /// E-RCP-057, `RecipeError::S7DataBlockOutOfRange`.
+    pub const RCP_057: Self = Self::new("E-RCP-057");
 
     /// E-AUD-001, `AppError::AuditWriteFailed`.
     pub const AUD_001: Self = Self::new("E-AUD-001");
@@ -363,6 +369,9 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::RCP_052,
     ErrorCode::RCP_053,
     ErrorCode::RCP_054,
+    ErrorCode::RCP_055,
+    ErrorCode::RCP_056,
+    ErrorCode::RCP_057,
     ErrorCode::WEB_001,
     ErrorCode::WEB_002,
     ErrorCode::WEB_003,

@@ -1,6 +1,6 @@
 # ADR-0042: Snapshot reads of draft queries
 
-Status: Accepted. Amended by ADR-0050 (approval preview and diff in one snapshot, draft read of the in-memory adapter)
+Status: Accepted. Amended by ADR-0050 (approval preview and diff in one snapshot, draft read of the in-memory adapter). Amended by ADR-0122 (item (b): `GetVersion` reads the check rows of an `Approved` version in a second transaction)
 Date: 2026-10-15
 Deciders: project owner
 

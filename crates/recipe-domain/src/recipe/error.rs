@@ -36,6 +36,20 @@ impl fmt::Display for Budget {
     }
 }
 
+/// The part of a request with too many significant digits (`E-RCP-055`, ADR-0117).
+///
+/// The type solves one problem: the web layer puts the line of `E-RCP-055` under the input
+/// that holds the number. The message text does not name the part.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrecisionField {
+    /// The value of a leaf.
+    Value,
+    /// The lower bound of a process limit.
+    LimitMin,
+    /// The upper bound of a process limit.
+    LimitMax,
+}
+
 /// Error of the Recipe Management context (`reliability.md` section 1.1).
 ///
 /// The enum has one variant for each code in the range `E-RCP-001` to
@@ -187,6 +201,45 @@ pub enum RecipeError {
         address: S7Address,
         /// The width that the type needs.
         width: S7Width,
+    },
+    /// A number has more significant digits than its type holds (E-RCP-055, ADR-0117).
+    #[error(
+        "A number of {tag}{leaf} has too many significant digits for {type_name}. Use at most {max_digits} digits."
+    )]
+    PrecisionExceeded {
+        /// The tag of the parameter.
+        tag: ParameterTag,
+        /// The path of the leaf. The empty path names the whole value.
+        leaf: LeafPath,
+        /// The part with too many digits: the value, the limit `min`, or the limit `max`.
+        field: PrecisionField,
+        /// The label of the type, for example REAL.
+        type_name: String,
+        /// The count of significant digits that the type holds.
+        max_digits: u8,
+    },
+    /// A value ends after byte 65535 of its data block (E-RCP-056, ADR-0116).
+    #[error(
+        "Parameter {tag} at {address} needs {size} bytes. It ends after byte 65535 of the data block."
+    )]
+    S7AddressPastBlockEnd {
+        /// The tag of the parameter.
+        tag: ParameterTag,
+        /// The address of the parameter.
+        address: S7Address,
+        /// The size of the value in bytes.
+        size: u32,
+    },
+    /// The data block number of an address is above 16000 on an S7-300 controller
+    /// (`E-RCP-057`, ADR-0116).
+    #[error(
+        "Address {address} of {tag} uses a data block above 16000. An S7-300 controller has no such data block."
+    )]
+    S7DataBlockOutOfRange {
+        /// The tag of the parameter.
+        tag: ParameterTag,
+        /// The address of the parameter.
+        address: S7Address,
     },
     /// A value is outside the process limit of its leaf (`E-RCP-004`).
     #[error("Value {value} of {tag}{leaf} is outside the process limit {min} to {max}.")]
@@ -408,6 +461,9 @@ impl RecipeError {
             Self::S7AddressMisaligned { .. } => ErrorCode::RCP_023,
             Self::S7AddressNotAllowed { .. } => ErrorCode::RCP_053,
             Self::S7AddressWidthMismatch { .. } => ErrorCode::RCP_054,
+            Self::PrecisionExceeded { .. } => ErrorCode::RCP_055,
+            Self::S7AddressPastBlockEnd { .. } => ErrorCode::RCP_056,
+            Self::S7DataBlockOutOfRange { .. } => ErrorCode::RCP_057,
         }
     }
 }

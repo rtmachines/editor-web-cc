@@ -121,6 +121,9 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-052` | `RecipeError::RebindTargetInvalid { type_name, reason }` | 422 | The rebind of {type_name} is not possible: {reason}. |
 | `E-RCP-053` | `RecipeError::S7AddressNotAllowed { tag, platform }` | 422 | Parameter {tag} cannot have a PLC address on platform {platform}. Delete the address. |
 | `E-RCP-054` | `RecipeError::S7AddressWidthMismatch { tag, address, width }` | 422 | Address {address} of {tag} does not match the type of {tag}. Use the width {width}. |
+| `E-RCP-055` | `RecipeError::PrecisionExceeded { tag, leaf, field, type_name, max_digits }` | 422 | A number of {tag}{leaf} has too many significant digits for {type_name}. Use at most {max_digits} digits. |
+| `E-RCP-056` | `RecipeError::S7AddressPastBlockEnd { tag, address, size }` | 422 | Parameter {tag} at {address} needs {size} bytes. It ends after byte 65535 of the data block. |
+| `E-RCP-057` | `RecipeError::S7DataBlockOutOfRange { tag, address }` | 422 | Address {address} of {tag} uses a data block above 16000. An S7-300 controller has no such data block. |
 | `E-IDN-001` | `IdentityError::DuplicateLogin { login }` | 409 | Login {login} is already in use. |
 | `E-IDN-002` | `IdentityError::LastAdministrator { login }` | 409 | {login} is the last active administrator. Add another administrator first. |
 | `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42. The Basic check of an export route and the refusal of an `ExportClient` account at `Login` return it too.) |
@@ -437,7 +440,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 | `Text` (description, change note) | Not empty after trim, at most 4 000 characters, no control characters except a line end. A line end is LF or CRLF (ADR-0028). `description_en` is required (A36) |
 | `Text` (translation name, description) | Name: not empty, at most 200 characters. Description: 0 to 4 000 characters, may be empty. No control characters except a line end (LF or CRLF) in the description |
 | `LangCode` | `^[a-z]{2,3}(-[A-Z]{2})?$`, not `en` (English is the base text, A17) |
-| `S7Address` | Grammar, width rule, alignment rule, and overlap rule: `domain-model.md` 2.1. Platform rule: required on `S7_300`, optional on `S7_1200` and `S7_1500`, not allowed on `CodesysIec` and `TwinCat3` (A31) |
+| `S7Address` | Grammar, width rule, alignment rule, overlap rule, and the end and data block rules of ADR-0116: `domain-model.md` 2.1. Platform rule: required on `S7_300`, optional on `S7_1200` and `S7_1500`, not allowed on `CodesysIec` and `TwinCat3` (A31) |
 | `S7Layout` | `domain-model.md` 2.1: `BOOL` packing, even-byte alignment, struct and array size |
 | `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved primitive name |
 | `StringLength` | Range per platform: the `StringLength` table of `domain-model.md` 2.1 |
@@ -454,7 +457,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 - The JSON is parsed by `serde_json` with the `arbitrary_precision` feature. A number stays a decimal string inside `serde_json::Number`. There is no `f64` round trip.
 - The domain converts each numeric, duration, or instant leaf to `rust_decimal::Decimal` for range and limit checks. A number that does not fit in `Decimal` (more than 28 significant digits) is rejected with `E-RCP-005`.
 - Canonical form: before storage the domain rewrites every numeric, duration, and instant leaf to the canonical decimal text of `Decimal`. This text has no exponent and no trailing zeros, and `-0` becomes `0`. `1.5e2` is stored as `150`. `JSONB` keeps this canonical form. The export writes each of these leaves and each limit as a JSON string that holds this canonical text (`api.md` 6.1). The content hash therefore does not depend on a JSON number format. Equality of two values is equality of canonical forms.
-- `REAL` and `LREAL` leaves are additionally checked to fit the IEEE 754 single or double range. The range of `Decimal` lies inside both ranges, and a unit test proves it (ADR-0028).
+- `REAL` and `LREAL` leaves are additionally checked to fit the IEEE 754 single or double range. The range of `Decimal` lies inside both ranges, and a unit test proves it (ADR-0028). The significant digit rule of ADR-0117 is in `domain-model.md` 2.1.
 - A number with a fraction is outside the range of an integer type and gives `E-RCP-005` (ADR-0028).
 - The JSON parser enforces the depth limit `json.max_depth` (section 7.11). `DefineUdt` and `EnsureDerivedType` reject a `TypeTree` deeper than this limit with `E-PLT-018`, so a valid value never reaches it.
 - Size budgets (Assumption A26, section 7.11): at most 16 384 scalar leaves per parameter. Per version: at most 262 144 leaves, 32 768 limit rows, and 4 000 parameters. `TypeTree` resolution counts leaves. `DefineUdt` and `EnsureDerivedType` reject a type above the per-parameter budget or above `type.max_members` with `E-PLT-018`. `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `RebindTypeRevision`, and `CreateVersion` check the per-version budgets with `E-RCP-021`. Statement-level triggers on `parameter` and `parameter_limit` are the last line (`E-RCP-035`, `E-RCP-036`).
@@ -610,6 +613,8 @@ The values are in section 7.11. This table gives the key and the mechanism.
 | Export generation | `timeout.export` | Timeout around the wait for an `export.permits` permit, the read, the locks, the rebuild in `spawn_blocking`, the hash compare, and the writer. Returns `503 E-WEB-009`. The use case takes the permit before its transaction. The blocking task holds the permit to its end (ADR-0056). The commit runs after this limit, so a timeout never hides a committed `VersionExported` entry (ADR-0029) |
 | Snapshot validation | `timeout.validation` | Timeout around the `spawn_blocking` call. Returns `503 E-WEB-009` |
 | Diff of two versions | `timeout.validation` | Timeout around the wait for a `diff.permits` permit and the `spawn_blocking` call. Returns `503 E-WEB-009`. The query takes the permit before its `REPEATABLE READ` transaction and holds it to the end of the render (ADR-0050) |
+| Read check of the parameter table | `timeout.validation` | Timeout around the `spawn_blocking` call of `ListParameters` that builds the value texts and runs the read check. The call starts after the read transaction ends. No permit. Returns `503 E-WEB-009` (ADR-0121, ADR-0122) |
+| Check of the version page of an `Approved` version | `timeout.export` | Timeout around the wait for an `export.permits` permit, the second `REPEATABLE READ` read, and the check in `spawn_blocking`. Returns `503 E-WEB-009`. The query takes the permit outside any transaction. The blocking task holds the permit to its end (ADR-0119, ADR-0122) |
 
 ### 7.5 Connection pool
 
@@ -955,7 +960,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `page.diff` | 50 parameters of one page of `DiffVersions` and `GetApprovalPreview`, over all its sections (ADR-0050) | api.md 2.5 |
 | `diff.leaf_rows` | 1 000 rows of one parameter in one section of a diff (ADR-0050) | api.md 2.5 |
 | `diff.permits` | 2 diffs that run at the same time in `spawn_blocking` (ADR-0050) | 7.4 |
-| `export.permits` | 2 exports that run the read, the rebuild, the hash compare, and the writer at the same time (ADR-0056) | 7.4 |
+| `export.permits` | 2 exports that run the read, the rebuild, the hash compare, and the writer at the same time (ADR-0056). The check of the version page of an `Approved` version takes a permit of the same gate (ADR-0122) | 7.4 |
 | `export.basic_permits` | 1. The Basic checks that wait for or hold an Argon2 permit at the same time. The UI logins keep the other 3 of `argon2.permits` (ADR-0109 (n)) | 7.4, api.md 7.7 |
 | `export.basic_header_max` | 1 024 bytes. The longest `Authorization` header of a Basic route. The parser checks it before it decodes (ADR-0109 (ma)) | api.md 7.7 |
 | `page.audit` | 100 rows of `ListAuditEntries` (ADR-0051) | api.md 2.9 |

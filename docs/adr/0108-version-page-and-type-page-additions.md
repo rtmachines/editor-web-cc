@@ -1,6 +1,6 @@
 # ADR-0108: Additions to the version page and the type page
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0118 (item (a): a stored value that breaks a newer rule shows with a field line). Amended by ADR-0119 (item (b): the version page of an `Approved` version reads every value). Amended by ADR-0121 (items (a) and (b): the parameter table reads the value of every row of one page, including an array or a struct)
 Date: 2026-11-01
 Deciders: project owner
 

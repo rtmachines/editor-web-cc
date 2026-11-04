@@ -13,6 +13,8 @@ pub(super) struct ValueLeaf<'a> {
     pub(super) path: LeafPath,
     /// The primitive of the leaf type.
     pub(super) primitive: Primitive,
+    /// The length of a `STRING` or `WSTRING` leaf. Other leaves have none.
+    pub(super) string_length: Option<u16>,
     /// The canonical JSON of the leaf.
     pub(super) value: &'a Value,
 }
@@ -42,9 +44,14 @@ pub(super) fn value_leaves<'a>(json: &'a Value, tree: &'a TypeTree) -> Option<Ve
     }];
     while let Some(task) = stack.pop() {
         match task.node {
-            TypeNode::Leaf { primitive, .. } => found.push(ValueLeaf {
+            TypeNode::Leaf {
+                primitive,
+                string_length,
+                ..
+            } => found.push(ValueLeaf {
                 path: LeafPath::from_segments(task.path),
                 primitive: *primitive,
+                string_length: *string_length,
                 value: task.value,
             }),
             TypeNode::Struct { members, .. } => {

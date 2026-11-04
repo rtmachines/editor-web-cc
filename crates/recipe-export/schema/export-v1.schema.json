@@ -43,7 +43,7 @@
   },
   "allOf": [
     {
-      "description": "loadable is true only for an Approved version.",
+      "description": "A Retired version has loadable false. An Approved version can have either value (ADR-0119 (g)).",
       "if": {
         "required": ["version"],
         "properties": {
@@ -53,8 +53,7 @@
           }
         }
       },
-      "then": { "properties": { "loadable": { "const": false } } },
-      "else": { "properties": { "loadable": { "const": true } } }
+      "then": { "properties": { "loadable": { "const": false } } }
     },
     {
       "description": "An S7 address is required on S7_300 (A31).",

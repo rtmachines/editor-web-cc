@@ -1,8 +1,8 @@
 //! The limits of a parameter after a rebind (design D13, step 6, ADR-0018).
 
 use super::level::{kept_members, struct_level};
-use crate::plant::{LeafSegment, TypeTree};
-use crate::recipe::draft::stored_limits;
+use crate::plant::{LeafSegment, RuleSet, TypeTree};
+use crate::recipe::draft::stored_limits_under;
 use crate::recipe::{ParameterTag, RecipeError, StoredLimit};
 
 /// The inputs that map the limits of one parameter.
@@ -18,7 +18,8 @@ pub(super) struct LimitMapping<'a> {
 /// The member segment of a limit path follows the index segments of the array chain. A limit in
 /// a kept member stays as it is. A limit in a removed member or in a member with a changed type
 /// is an entry. A limit never disappears without a decision (ADR-0018). The kept limits
-/// must pass the check against the planned tree.
+/// must pass the check against the planned tree. The rows are stored data that the rebind does
+/// not change, so the check uses the earlier rule set (ADR-0120 (d)).
 ///
 /// # Errors
 ///
@@ -45,7 +46,7 @@ pub(super) fn map_limits(input: &LimitMapping<'_>) -> Result<Vec<StoredLimit>, V
         }
         _ => kept_rows.extend_from_slice(input.rows),
     }
-    match stored_limits(input.tag, &kept_rows, input.new_tree) {
+    match stored_limits_under(input.tag, &kept_rows, input.new_tree, RuleSet::Earlier) {
         Ok(_) if entries.is_empty() => Ok(kept_rows),
         Ok(_) => Err(entries),
         Err(error) => {

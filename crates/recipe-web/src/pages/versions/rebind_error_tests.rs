@@ -28,6 +28,25 @@ async fn rebind_with_a_bad_text_for_a_real_leaf_gives_an_e_rcp_005_line_under_it
     assert!(form.contains("value=\"abc\""), "{form}");
 }
 
+/// Task 6.3 of `plc-type-ranges`: a `REAL` with 8 significant digits gives `E-RCP-055`.
+///
+/// The line stands under the input of the new leaf, as the line of `E-RCP-005` does.
+#[tokio::test]
+async fn rebind_with_too_many_digits_for_a_real_leaf_gives_an_e_rcp_055_line_under_its_input() {
+    let world = recipe_world();
+    let mut body = body_v3(&world, "1", &[2, 3, 4], "1");
+    body.push_str(&format!(
+        "&new_member_values[{}][1].temp_min=1.2345678",
+        crate::test_support::recipes::ZONES_KEY
+    ));
+    let reply = world.post(&world.engineer, REBIND, &body, true).await;
+    assert_htmx_answer(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-055");
+    let form = oob_form(&reply.body, &form_id(world.ids.zone_v2));
+    let line = "<div class=\"field-error\" id=\"new-0-0-error\">";
+    assert!(form.contains(line), "{form}");
+    assert!(form.contains("value=\"1.2345678\""), "{form}");
+}
+
 /// RR1-1, ADR-0047 (a): the page of a refused rebind without HTMX holds a plain form.
 ///
 /// The page has no `#parameter-table`, so the form has no `hx-*` attribute, and a second save

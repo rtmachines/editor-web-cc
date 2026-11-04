@@ -9,6 +9,7 @@ mod facts;
 mod hash;
 mod listing;
 mod parameters;
+mod rule_check;
 mod scope;
 mod sha256;
 #[cfg(test)]
@@ -25,6 +26,7 @@ pub use facts::{
 };
 pub use listing::{ExportableRecipe, ExportableRecipes};
 pub use parameters::{LimitEntry, OrderedValue, ParameterEntry};
+pub use rule_check::{BrokenParameter, VersionRuleFaults, check_version_parameters};
 pub use scope::ScopeBody;
 pub use sha256::{Sha256, Sha256Reason};
 pub use type_reference::TypeReference;

@@ -4,14 +4,16 @@
 //! out-of-band form of an error answer show the same form. One view gives them the same fields,
 //! the same grid, and the same `row_version`, so they cannot disagree (ADR-0039 (h), ADR-0041 (e)).
 
+use std::collections::BTreeMap;
+
 use askama::Template;
 use recipe_app::recipe::{ParameterForm, ParameterView};
 use recipe_domain::plant::{LeafPath, PlcPlatform, TypeTree};
-use recipe_domain::recipe::{ParameterValue, ValueFault};
+use recipe_domain::recipe::{ParameterValue, RuleFault, RuleField, ValueFault};
 
 use super::fields::SentFields;
 use super::grid::{GridSource, GridView, LimitTexts, ValueTexts};
-use crate::error::FormErrors;
+use crate::error::{FieldError, FormErrors, LineView};
 use crate::pages::recipes::Choice;
 use crate::pages::texts::Texts;
 
@@ -148,6 +150,157 @@ pub(crate) fn grid_of(t: Texts<'_>, texts: GridTexts<'_>, chunk: usize, tag: &st
         root_label,
     };
     GridView::build(source, t)
+}
+
+/// The `id` of the input of the S7 address.
+const ADDRESS_INPUT: &str = "s7_address";
+
+/// Return the field line of one rule fault, with the `id` of the input of its part (ADR-0118).
+///
+/// The line uses `FieldError::recipe`, as the field lines of the parameter table do, so the code
+/// and the sentence are the same everywhere. A part without an input gives a line without a target.
+/// A shared bound that the grid splits into element fields gives one line per field.
+///
+/// With `echo`, a line stays only under an input whose text is still the stored text of the part.
+fn fault_lines(
+    t: Texts<'_>,
+    fault: &RuleFault,
+    grid: &GridView,
+    echo: Option<&SentEcho<'_>>,
+) -> Vec<LineView> {
+    let targets = match fault.field() {
+        RuleField::Address => vec![ADDRESS_INPUT.to_owned()],
+        field => grid.inputs_of_field(field),
+    };
+    if targets.is_empty() {
+        return vec![t.line(&FieldError::recipe(fault.error(), None))];
+    }
+    targets
+        .into_iter()
+        .filter(|target| echo.is_none_or(|echo| echo.keeps(fault.field(), target)))
+        .map(|target| t.line(&FieldError::recipe(fault.error(), Some(target))))
+        .collect()
+}
+
+/// The stored texts of the parts that a rule fault names: the value, the limit bounds, and the address.
+///
+/// The type solves one problem: an answer without a write shows the sent texts, and the fault
+/// lines come from the stored parameter. A line is stale when the user changed its part, so the
+/// answer compares the sent text with the stored text of the part (ADR-0118, design D7).
+pub(crate) struct StoredParts {
+    values: BTreeMap<String, String>,
+    limits: Vec<LimitTexts>,
+    address: String,
+}
+
+impl StoredParts {
+    /// Take the stored texts of the parameter of `form`, or `None` for a new parameter or a form
+    /// without a tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns the fault of a stored value that does not match its tree, a defect of the storage.
+    pub(crate) fn of(form: &ParameterForm) -> Result<Option<Self>, ValueFault> {
+        let (Some(parameter), Some(tree)) = (form.parameter.as_ref(), form.preview.as_ref()) else {
+            return Ok(None);
+        };
+        let value = ParameterValue::try_from((&parameter.value, tree))?;
+        let values = value
+            .texts(tree)?
+            .into_iter()
+            .map(|leaf| (leaf.path.to_string(), leaf.text))
+            .collect();
+        Ok(Some(Self {
+            values,
+            limits: LimitTexts::from_stored(tree, &parameter.limits),
+            address: parameter
+                .s7_address
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+        }))
+    }
+
+    /// Return the stored text of a rule field. The address text is `address`.
+    fn text_of(&self, field: &RuleField) -> Option<&str> {
+        let limit = |path: &LeafPath| self.limits.iter().find(|row| row.path == *path);
+        match field {
+            RuleField::Value(path) => self.values.get(&path.to_string()).map(String::as_str),
+            RuleField::LimitMin(path) => limit(path).map(|row| row.min.as_str()),
+            RuleField::LimitMax(path) => limit(path).map(|row| row.max.as_str()),
+            RuleField::Address => Some(self.address.as_str()),
+        }
+    }
+}
+
+/// The check of a sent form against the stored parts: does an input still show the stored text?
+pub(crate) struct SentEcho<'a> {
+    stored: &'a StoredParts,
+    inputs: BTreeMap<&'a str, &'a str>,
+    address: &'a str,
+}
+
+impl<'a> SentEcho<'a> {
+    /// Compare the stored parts with the inputs of the sent `grid` and the sent `address`.
+    pub(crate) fn new(stored: &'a StoredParts, grid: &'a GridView, address: &'a str) -> Self {
+        Self {
+            stored,
+            inputs: grid.input_texts(),
+            address,
+        }
+    }
+
+    /// Return false when the user changed the part of `field` in the input `input`.
+    ///
+    /// An unknown text on either side keeps the line, because the check has no proof of a change.
+    fn keeps(&self, field: &RuleField, input: &str) -> bool {
+        let sent = match field {
+            RuleField::Address => Some(self.address),
+            _part => self.inputs.get(input).copied(),
+        };
+        match (self.stored.text_of(field), sent) {
+            (Some(stored), Some(sent)) => stored.trim() == sent.trim(),
+            _unknown => true,
+        }
+    }
+}
+
+/// Return the field lines of the rule faults of a stored parameter, by the input of their part.
+///
+/// The edit form puts each line under its input. The read-only grid puts each line under its
+/// cell, which has the same `id` (ADR-0118, design D7).
+pub(crate) fn fault_errors(t: Texts<'_>, faults: &[RuleFault], grid: &GridView) -> FormErrors {
+    FormErrors::from_views(
+        faults
+            .iter()
+            .flat_map(|fault| fault_lines(t, fault, grid, None)),
+    )
+}
+
+/// Return the stored field lines that the sent texts of `echo` still match (finding N3).
+///
+/// The answer of `fields=1` and `limit_mode` shows the sent texts. A line of a part that the user
+/// changed would be stale, so the answer drops it.
+pub(crate) fn echoed_fault_errors(
+    t: Texts<'_>,
+    faults: &[RuleFault],
+    grid: &GridView,
+    echo: &SentEcho<'_>,
+) -> FormErrors {
+    FormErrors::from_views(
+        faults
+            .iter()
+            .flat_map(|fault| fault_lines(t, fault, grid, Some(echo))),
+    )
+}
+
+/// Return the field lines of the faults of the S7 address, for the definition of a read-only page.
+pub(crate) fn address_lines(t: Texts<'_>, faults: &[RuleFault], grid: &GridView) -> Vec<LineView> {
+    faults
+        .iter()
+        .filter(|fault| matches!(fault.field(), RuleField::Address))
+        .flat_map(|fault| fault_lines(t, fault, grid, None))
+        .collect()
 }
 
 /// Where a form stands (design D7).
@@ -300,5 +453,7 @@ pub(crate) struct ParameterFormFragment<'a> {
     pub(crate) form: ParameterFormView,
 }
 
+#[cfg(test)]
+mod fault_tests;
 #[cfg(test)]
 mod swap_tests;

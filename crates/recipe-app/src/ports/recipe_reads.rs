@@ -113,7 +113,7 @@ pub struct VersionDetail {
 ///
 /// The page read loads no value, its limit rows, or its translation rows. A value can have 1 MiB.
 /// `parameter_by_key` loads one parameter in full. `parameter_values` loads the values of the
-/// primitive rows of one page (ADR-0108 (b)).
+/// every row of one page (ADR-0121).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterRow {
     /// The key of the parameter in a URL.
@@ -225,10 +225,11 @@ pub trait RecipeReads: Send {
 
     /// Read the stored value of each parameter of `version` whose key is in `keys`.
     ///
-    /// The caller passes the keys of the primitive parameters of one page. A key that `version`
-    /// does not hold gives no entry. The bound of ADR-0108 (b) applies: `keys` holds at most
-    /// `page.parameters` keys, and a primitive value has at most 16 382 UTF-16 units of up to 3
-    /// bytes each, so one page stays below 5 MiB. The method reads no limit row and no
+    /// The caller passes the keys of every row of one page, also the array and the struct rows.
+    /// The read check runs the address rules for every row (ADR-0118, ADR-0121 (a)). A key that
+    /// `version` does not hold gives no entry. `keys` holds at most `page.parameters` keys.
+    /// One call reads at most `page.parameters` rows times `budget.value_bytes` bytes of values
+    /// (ADR-0121 (f), `reliability.md` section 7.11). The method reads no limit row and no
     /// translation row.
     async fn parameter_values(
         &mut self,

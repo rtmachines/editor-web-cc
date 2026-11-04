@@ -41,6 +41,9 @@ const fn tag_of(error: &RecipeError) -> Option<&ParameterTag> {
         | RecipeError::S7AddressRequired { tag, .. }
         | RecipeError::S7AddressNotAllowed { tag, .. }
         | RecipeError::S7AddressWidthMismatch { tag, .. }
+        | RecipeError::PrecisionExceeded { tag, .. }
+        | RecipeError::S7AddressPastBlockEnd { tag, .. }
+        | RecipeError::S7DataBlockOutOfRange { tag, .. }
         | RecipeError::TypeRevisionOutdated { tag, .. } => Some(tag),
         _ => None,
     }

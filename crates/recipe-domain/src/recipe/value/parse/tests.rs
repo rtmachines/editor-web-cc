@@ -1,11 +1,11 @@
 use rust_decimal::Decimal;
 
 use crate::plant::fixtures::id;
-use crate::plant::{MemberName, Primitive, TypeTree};
+use crate::plant::{MemberName, Primitive, RuleSet, TypeTree};
 use crate::recipe::value::test_support::{
     INT, REAL, USINT, ZONE_JSON, int_array_tree, primitive_tree, zone_tree,
 };
-use crate::recipe::value::{Expected, ParameterValue, ValueFault};
+use crate::recipe::value::{Expected, ParameterValue, StoredValue, ValueFault};
 
 /// The members of `ST_Zone` as the expectation of an object fault names them.
 fn zone_members() -> Expected {
@@ -119,9 +119,35 @@ fn number_with_29_significant_digits_gives_a_fault() {
 }
 
 #[test]
-fn number_with_28_significant_digits_passes() {
+fn number_with_28_significant_digits_passes_in_the_earlier_set() {
     let digits = "1.234567890123456789012345678";
-    assert_eq!(stored_text(digits, &primitive_tree(REAL)), digits);
+    let json: serde_json::Value = digits.parse().unwrap();
+    let value = ParameterValue::from_stored(
+        &StoredValue::from(json),
+        &primitive_tree(REAL),
+        RuleSet::Earlier,
+    )
+    .unwrap();
+    assert_eq!(value.as_json().to_string(), digits);
+}
+
+#[test]
+fn number_with_28_significant_digits_gives_a_precision_fault_in_a_request() {
+    let digits = "1.234567890123456789012345678";
+    assert!(matches!(
+        fault(digits, &primitive_tree(REAL)),
+        ValueFault::Precision { max_digits: 7, .. }
+    ));
+}
+
+#[test]
+fn adr_0115_real_above_the_decimal_range_gives_a_mismatch_fault() {
+    let tree = primitive_tree(REAL);
+    assert!(matches!(
+        fault("1e29", &tree),
+        ValueFault::Mismatch { ref leaf, .. } if leaf.is_empty()
+    ));
+    assert_eq!(stored_text("1e28", &tree), "10000000000000000000000000000");
 }
 
 #[test]

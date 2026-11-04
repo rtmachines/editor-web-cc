@@ -1,6 +1,6 @@
 # ADR-0026: Platform ranges of DATE and DATE_AND_TIME
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0114 (`DATE` on `S7_1200` and `S7_1500` ends at 2168-12-31)
 Date: 2026-10-13
 Deciders: project owner
 

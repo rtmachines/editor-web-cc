@@ -11,6 +11,7 @@ use super::definition::Definition;
 use super::form_view::ParameterFormView;
 use super::grid::GridView;
 use super::translations::TranslationsBlock;
+use crate::error::{FormErrors, LineView};
 use crate::layout::Layout;
 use crate::pages::texts::Texts;
 
@@ -34,9 +35,22 @@ pub(crate) struct SummaryView {
     pub(crate) ordinal: String,
     /// The success sentence of a save for `#toast`. Empty on the page.
     pub(crate) toast: String,
+    /// The field lines of a stored address that breaks a newer rule (ADR-0118). Mostly empty.
+    ///
+    /// Only the read-only page sets them. The edit form shows the lines under its own input.
+    pub(crate) address_lines: Vec<LineView>,
 }
 
 impl SummaryView {
+    /// Return the summary with the field lines `lines` under the S7 address.
+    #[must_use]
+    pub(crate) fn with_address_lines(self, lines: Vec<LineView>) -> Self {
+        Self {
+            address_lines: lines,
+            ..self
+        }
+    }
+
     /// Build the summary of a stored parameter.
     pub(crate) fn stored(view: &ParameterView) -> Self {
         let parameter = &view.parameter;
@@ -50,6 +64,7 @@ impl SummaryView {
             s7_address: parameter.s7_address.as_ref().map(ToString::to_string),
             ordinal: parameter.ordinal.value().to_string(),
             toast: String::new(),
+            address_lines: Vec::new(),
         }
     }
 
@@ -65,6 +80,7 @@ impl SummaryView {
             s7_address: definition.s7_address.as_ref().map(ToString::to_string),
             ordinal: definition.ordinal.value().to_string(),
             toast,
+            address_lines: Vec::new(),
         }
     }
 }
@@ -123,6 +139,8 @@ pub(crate) struct ParameterPage<'a> {
     pub(crate) notice: Option<String>,
     /// The read-only grid of the value and the limits when the page has no form.
     pub(crate) values: Option<GridView>,
+    /// The field lines of the rule faults under the cells of the read-only grid (ADR-0118).
+    pub(crate) faults: FormErrors,
     /// The translation rows of a stored parameter.
     pub(crate) translations: Option<TranslationsBlock>,
     /// The danger disclosure of the removal, for a reader with the edit form.

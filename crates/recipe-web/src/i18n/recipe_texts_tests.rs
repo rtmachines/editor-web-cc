@@ -43,6 +43,9 @@ const RCP_ERROR_KEYS: &[&str] = &[
     "error-E-RCP-052",
     "error-E-RCP-053",
     "error-E-RCP-054",
+    "error-E-RCP-055",
+    "error-E-RCP-056",
+    "error-E-RCP-057",
 ];
 
 /// The error codes `E-PLT` that the recipe pages add to D13.
