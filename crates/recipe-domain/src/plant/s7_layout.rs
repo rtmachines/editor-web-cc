@@ -27,8 +27,8 @@ impl S7Layout {
     /// Compute the layout of a tree.
     ///
     /// The golden test holds the values of the rules of `domain-model.md`.
-    /// The reference table of the Siemens manual (ADR-0017) is not in the
-    /// repository yet.
+    /// The composite rows of the reference table in `s7_layout/reference.rs`
+    /// stay unverified until the TIA Portal check (Q10).
     ///
     /// # Errors
     ///
@@ -321,6 +321,9 @@ const BITS_PER_EVEN_BYTES: u64 = 16;
 
 #[cfg(test)]
 mod prop;
+
+#[cfg(test)]
+mod reference;
 
 #[cfg(test)]
 mod tests {

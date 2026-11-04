@@ -2,8 +2,10 @@
 
 use proptest::prelude::*;
 
+use super::super::type_tree::fixtures::{id, machine, on_platform, struct_row, types_for};
 use super::super::type_tree::strategy::type_trees;
-use super::super::{Primitive, TypeNode, TypeTree};
+use super::super::{PlatformTypes, PlcPlatform, PlcType, Primitive, TypeNode, TypeTree};
+use super::reference::{Row, catalog, rows};
 use super::*;
 
 /// Bits in one byte.
@@ -74,7 +76,89 @@ fn start_bit(member: &S7Member) -> u64 {
         .unwrap()
 }
 
+/// Number of the struct row that holds the drawn members. The shared catalog has no such number.
+const HOLDER_ROOT: u128 = 900;
+
+/// Smallest number of drawn members.
+const MIN_DRAWN: usize = 1;
+
+/// Largest number of drawn members, the members `m01` to `m16`.
+const MAX_DRAWN: usize = 16;
+
+/// Width in bits of a member of the reference table: 1 for `Bit`, else the bytes times 8.
+fn reference_width(row: &Row) -> u64 {
+    match row.start {
+        S7Start::Bit => 1,
+        S7Start::Byte | S7Start::Even => u64::from(row.size_bytes)
+            .checked_mul(BITS_PER_BYTE)
+            .unwrap(),
+    }
+}
+
+/// First position in bits at or after `cursor` that the start class of the row allows.
+///
+/// The function states the placement rule of `domain-model.md` section 2.1 once,
+/// because that rule is the subject of the property (design D3).
+fn first_fit(cursor: u64, row: &Row) -> u64 {
+    let unit = match row.start {
+        S7Start::Bit => 1,
+        S7Start::Byte => BITS_PER_BYTE,
+        S7Start::Even => BITS_PER_EVEN_BYTES,
+    };
+    cursor.checked_next_multiple_of(unit).unwrap()
+}
+
+/// The shared catalog and one struct row whose members are the drawn rows, in order.
+fn catalog_with_holder(drawn: &[&Row]) -> PlatformTypes {
+    let names: Vec<String> = (1..=drawn.len()).map(|n| format!("m{n:02}")).collect();
+    let members: Vec<(&str, u128)> = names
+        .iter()
+        .map(String::as_str)
+        .zip(drawn.iter().map(|row| row.root))
+        .collect();
+    let holder = on_platform(
+        PlcPlatform::S7_1500,
+        vec![struct_row(HOLDER_ROOT, "ST_Random", &members)],
+    );
+    let all: Vec<PlcType> = catalog().rows().cloned().chain(holder).collect();
+    types_for(machine(), PlcPlatform::S7_1500, all)
+}
+
 proptest! {
+    #[test]
+    fn members_keep_their_reference_layout_in_a_random_struct(
+        picks in proptest::collection::vec(
+            proptest::sample::select((0..rows().len()).collect::<Vec<_>>()),
+            MIN_DRAWN..=MAX_DRAWN,
+        )
+    ) {
+        let table = rows();
+        let drawn: Vec<&Row> = picks.iter().map(|index| table.get(*index).unwrap()).collect();
+        let tree = TypeTree::resolve(id(HOLDER_ROOT), &catalog_with_holder(&drawn))
+            .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let members = s7_members(&tree)
+            .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        let top_level: Vec<&S7Member> = members
+            .iter()
+            .filter(|member| member.names().len() == 1)
+            .collect();
+        prop_assert_eq!(top_level.len(), drawn.len());
+        let mut cursor = 0_u64;
+        for (member, row) in top_level.iter().zip(&drawn) {
+            prop_assert_eq!(member.layout().size_bytes(), row.size_bytes, "size of {}", row.name);
+            prop_assert_eq!(member.layout().start(), row.start, "start class of {}", row.name);
+            let expected_start = first_fit(cursor, row);
+            prop_assert_eq!(start_bit(member), expected_start, "start of {}", row.name);
+            cursor = expected_start.checked_add(reference_width(row)).unwrap();
+        }
+        let expected_size = cursor
+            .checked_next_multiple_of(BITS_PER_EVEN_BYTES)
+            .unwrap()
+            .checked_div(BITS_PER_BYTE)
+            .unwrap();
+        prop_assert_eq!(u64::from(layout(&tree)?.size_bytes()), expected_size);
+    }
+
     #[test]
     fn last_top_level_member_end_rounded_up_is_the_size(generated in type_trees()) {
         let tree = resolved(&generated)?;

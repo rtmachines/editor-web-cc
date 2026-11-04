@@ -13,9 +13,19 @@ This file records the notable changes of the recipe editor. The format follows [
 - A stored value that breaks a newer rule shows a field line (ADR-0118).
 - The `loadable` flag is `false` when a value, a limit, or an S7 address breaks a current rule (ADR-0119).
 - The snapshot check of `CreateVersion` uses the earlier rule set for stored data that a command does not write (ADR-0120).
+- The parameter table reads the value of each row, also of an array row and a struct row, and shows its field lines (ADR-0121).
 - `E-RCP-055` reports a number with too many significant digits for its type.
 - `E-RCP-056` reports an S7 address whose data ends after byte 65535 of the data block.
 - `E-RCP-057` reports a data block above 16000, which an S7-300 controller does not have.
+- Tests compare `S7Layout` with a reference table. The composite rows of the table stay unverified until a TIA Portal export is available (ADR-0017, Q10).
+- More layout tests cover `WSTRING(n)`, an `ARRAY OF BOOL` with more than one dimension, an array of an array, and an odd `STRING(n)` before a `BYTE`.
+- Golden export tests cover each primitive type and its limit on `S7_300`, `S7_1200`, and `S7_1500`.
+- Storage tests write the 64-bit extremes and read them back through both value decoders and the limit columns.
+
+### Changed
+
+- The read check of the parameter table runs under `timeout.validation` and can give `503 E-WEB-009` (ADR-0122).
+- The check of an `Approved` version on the version page shares `export.permits` with the export and runs under `timeout.export` (ADR-0122).
 
 ## [0.6.0] - 2026-11-03
 
