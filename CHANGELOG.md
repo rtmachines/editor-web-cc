@@ -17,6 +17,10 @@ This file records the notable changes of the recipe editor. The format follows [
 - `E-RCP-055` reports a number with too many significant digits for its type.
 - `E-RCP-056` reports an S7 address whose data ends after byte 65535 of the data block.
 - `E-RCP-057` reports a data block above 16000, which an S7-300 controller does not have.
+- Tests compare `S7Layout` with a reference table. The composite rows of the table stay unverified until a TIA Portal export is available (ADR-0017, Q10).
+- More layout tests cover `WSTRING(n)`, an `ARRAY OF BOOL` with more than one dimension, an array of an array, and an odd `STRING(n)` before a `BYTE`.
+- Golden export tests cover each primitive type and its limit on `S7_300`, `S7_1200`, and `S7_1500`.
+- Storage tests write the 64-bit extremes and read them back through both value decoders and the limit columns.
 
 ### Changed
 
