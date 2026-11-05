@@ -9,7 +9,7 @@ use super::{Authenticated, IdentityContext};
 use crate::auth::{Operation, RequestMeta, refuse};
 use crate::context::audit_context;
 use crate::error::{AppError, Missing};
-use crate::ports::{Isolation, Locked, NonEmpty};
+use crate::ports::{Isolation, Locked, NonEmpty, UserRepository, UserRow};
 
 /// Run an administrative change of one user in a `READ COMMITTED` transaction.
 ///
@@ -64,27 +64,7 @@ pub(super) async fn run_admin_change(
         .ok_or_else(|| AppError::NotFound {
             entity: Missing::User(login.clone()),
         })?;
-    if matches!(change, AdminChange::Deactivate) && !locked.is_active {
-        return Err(IdentityError::UserAlreadyInactive {
-            login: login.clone(),
-        }
-        .into());
-    }
-    if let AdminChange::SetRole(role) = change
-        && (role == Role::ExportClient || locked.role == Role::ExportClient)
-    {
-        return Err(IdentityError::TechnicalRoleChange {
-            login: login.clone(),
-        }
-        .into());
-    }
-    let active_administrators = tx.users().count_active_administrators().await?;
-    let standing = UserStanding {
-        login: login.clone(),
-        role: locked.role,
-        is_active: locked.is_active,
-    };
-    last_administrator_guard(&standing, change, active_administrators)?;
+    check_target(tx.users(), login, &locked, change).await?;
     let after = match change {
         AdminChange::SetRole(role) => tx.users().set_role(locked.id, role).await?,
         AdminChange::Deactivate => tx.users().deactivate(locked.id).await?,
@@ -100,5 +80,48 @@ pub(super) async fn run_admin_change(
         audit_context(auth.user(), meta),
     );
     ctx.app.uow.commit(tx, NonEmpty::new(entry)).await?;
+    Ok(())
+}
+
+/// Refuse a change that the locked target cannot take.
+///
+/// The function solves one problem: the three target checks of the shared body must stay in one
+/// place, in a fixed order. The order is the inactive check, the technical-role check, and the
+/// last-administrator rule. The count of active Administrators is correct only while the caller
+/// holds the guard lock and the lock of the target (ADR-0096 (e)). The function takes no lock.
+///
+/// # Errors
+///
+/// Returns `UserAlreadyInactive` (`E-IDN-010`) for a deactivation of an inactive user.
+/// Returns `TechnicalRoleChange` (`E-IDN-011`) when a role change moves to or from `ExportClient`.
+/// Returns `LastAdministrator` (`E-IDN-002`) when the change removes the last one.
+/// Returns the storage error of the count unchanged.
+async fn check_target(
+    users: &mut dyn UserRepository,
+    login: &Login,
+    locked: &UserRow,
+    change: AdminChange,
+) -> Result<(), AppError> {
+    if matches!(change, AdminChange::Deactivate) && !locked.is_active {
+        return Err(IdentityError::UserAlreadyInactive {
+            login: login.clone(),
+        }
+        .into());
+    }
+    if let AdminChange::SetRole(role) = change
+        && (role == Role::ExportClient || locked.role == Role::ExportClient)
+    {
+        return Err(IdentityError::TechnicalRoleChange {
+            login: login.clone(),
+        }
+        .into());
+    }
+    let active_administrators = users.count_active_administrators().await?;
+    let standing = UserStanding {
+        login: login.clone(),
+        role: locked.role,
+        is_active: locked.is_active,
+    };
+    last_administrator_guard(&standing, change, active_administrators)?;
     Ok(())
 }
