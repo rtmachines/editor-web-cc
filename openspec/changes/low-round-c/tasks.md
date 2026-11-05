@@ -48,7 +48,7 @@ A pinning test shows its red step on a temporary mutation of the code under test
 
 ## 7. Checks
 
-- [ ] 7.1 (docs) [sonnet] Run `ste-lint.py` on the scope of ADR-0023 and on the files of this change, also the four new ADRs. Fix each hard violation without a change of meaning. Check: `ste-lint.py` reports 0 hard violations, and `openspec validate low-round-c --strict` passes.
+- [x] 7.1 (docs) [sonnet] Run `ste-lint.py` on the scope of ADR-0023 and on the files of this change, also the four new ADRs. Fix each hard violation without a change of meaning. Check: `ste-lint.py` reports 0 hard violations, and `openspec validate low-round-c --strict` passes.
 - [ ] 7.2 (workspace) [sonnet] Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, and `cargo doc --no-deps` with `-D warnings`. Check: the four commands pass, and the output is in the report.
 
 ## Workflow follow-up
