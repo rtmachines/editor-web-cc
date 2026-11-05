@@ -37,6 +37,8 @@ serde = { workspace = true, features = ["derive"] }
 time = { workspace = true }
 # The adapters of the ports `DiskSpace` and `BackupDirectory` implement `#[async_trait]` traits.
 async-trait = { workspace = true }
+# ADR-0133 (f): the set of stalled paths of the disk adapter is a `parking_lot::Mutex`.
+parking_lot = { workspace = true }
 
 # ADR-0060 (c): `statvfs` of `rustix` builds on Unix only. Windows gets `DiskFault::Unsupported`.
 [target.'cfg(unix)'.dependencies]

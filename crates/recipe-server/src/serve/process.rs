@@ -8,6 +8,7 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -45,13 +46,20 @@ const BIND_ADDRESS: &str = "0.0.0.0";
 /// The host of the real process.
 pub struct ProcessHost {
     connection: Connection,
+    /// The one disk adapter of the jobs `disk_check` and `alerts` (ADR-0133).
+    disk: SystemDiskSpace,
 }
 
 impl ProcessHost {
     /// Build the host for the connection of the application role.
+    ///
+    /// `disk_limit` is `health.disk_check_interval`. The host builds one disk adapter with it.
     #[must_use]
-    pub const fn new(connection: Connection) -> Self {
-        Self { connection }
+    pub fn new(connection: Connection, disk_limit: Duration) -> Self {
+        Self {
+            connection,
+            disk: SystemDiskSpace::new(disk_limit),
+        }
     }
 
     async fn connect(&self, settings: &PoolSettings) -> Result<Database> {
@@ -114,7 +122,7 @@ impl Host for ProcessHost {
     }
 
     fn disk(&self) -> Arc<dyn DiskSpace> {
-        Arc::new(SystemDiskSpace)
+        Arc::new(self.disk.clone())
     }
 
     fn backups(&self, directory: &Path) -> Arc<dyn BackupDirectory> {
@@ -171,7 +179,7 @@ pub fn run(counters: AlertCounters) -> Result<()> {
     let config = load()?;
     let connection = config.app_connection()?;
     let plan = Plan::from_config(&config);
-    let host = ProcessHost::new(connection);
+    let host = ProcessHost::new(connection, plan.settings.disk_check_interval);
     serve_with(&host, plan, counters)
 }
 

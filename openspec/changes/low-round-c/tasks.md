@@ -25,7 +25,7 @@ A pinning test shows its red step on a temporary mutation of the code under test
 
 ## 4. recipe-server
 
-- [ ] 4.1 (recipe-server) [hard] D2-2. Write the unit tests of `design.md` D2 item 6:
+- [x] 4.1 (recipe-server) [hard] D2-2. Write the unit tests of `design.md` D2 item 6:
   1. A reader that blocks gives `Unreadable` after the limit.
   2. A second call while the first call blocks past the limit gives `Unreadable` at once and starts no second reader.
   3. A call after the end of the first reader runs a new reader.
