@@ -1,6 +1,6 @@
 # ADR-0132: Field answer of the own password form
 
-Status: Proposed
+Status: Accepted
 Date: 2026-11-05
 Deciders: project owner
 

@@ -1,6 +1,6 @@
 # ADR-0131: Token of the language switch with a session
 
-Status: Proposed
+Status: Accepted
 Date: 2026-11-05
 Deciders: project owner
 

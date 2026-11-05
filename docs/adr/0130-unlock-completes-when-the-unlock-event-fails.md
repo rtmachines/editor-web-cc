@@ -1,6 +1,6 @@
 # ADR-0130: Unlock completes when the unlock event fails
 
-Status: Proposed
+Status: Accepted
 Date: 2026-11-05
 Deciders: project owner
 

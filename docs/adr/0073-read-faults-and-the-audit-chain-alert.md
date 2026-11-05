@@ -1,6 +1,6 @@
 # ADR-0073: Read faults of the jobs and the audit chain alert
 
-Status: Accepted. Amended by ADR-0075 (field `volume` of the `low_disk` line). Amended by ADR-0086 (an empty chain table keeps the anchor `A`)
+Status: Accepted. Amended by ADR-0075 (field `volume` of the `low_disk` line). Amended by ADR-0086 (an empty chain table keeps the anchor `A`). Amended by ADR-0133 (item (d): the time limit of the disk measurement)
 Date: 2026-10-23
 Deciders: project owner
 
