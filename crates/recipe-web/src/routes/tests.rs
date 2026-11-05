@@ -244,7 +244,7 @@ async fn endpoint_role_each_route_answers_each_principal() {
         for (principal, want) in PRINCIPALS.into_iter().zip(wants) {
             let reply = answer(&endpoint, principal).await;
             let what = format!("{} {} as {principal:?}", endpoint.method, endpoint.path);
-            assert_want(&reply, want, &what);
+            assert_want(&reply, &fill(endpoint.path), want, &what);
         }
     }
 }

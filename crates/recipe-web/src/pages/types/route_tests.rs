@@ -7,7 +7,7 @@
 use axum::http::Method;
 
 use super::test_kit::get_as;
-use crate::routes::matrix::{Endpoint, PRINCIPALS, Want, answer, assert_want, endpoint};
+use crate::routes::matrix::{Endpoint, PRINCIPALS, Want, answer, assert_want, endpoint, fill};
 use crate::test_support::plant::world;
 
 /// Return the matrix rows of the type routes.
@@ -95,7 +95,7 @@ async fn types_matrix_each_row_of_the_type_area_answers_each_principal() {
         for (principal, want) in PRINCIPALS.into_iter().zip(wants) {
             let reply = answer(&endpoint, principal).await;
             let what = format!("{} {} as {principal:?}", endpoint.method, endpoint.path);
-            assert_want(&reply, want, &what);
+            assert_want(&reply, &fill(endpoint.path), want, &what);
         }
     }
 }

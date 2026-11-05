@@ -9,6 +9,7 @@ use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::identity::Role;
 
 use super::tests::exports;
+use crate::pages::test_helpers::assert_common_headers;
 use crate::routes::matrix::{PRINCIPALS, Principal, Want, assert_want};
 use crate::test_support::{Fixture, Reply, TestSession, deactivate_user, get_with};
 
@@ -114,6 +115,7 @@ async fn check_cell(path: &str, principal: Principal, cell: Cell) {
     let entries_before = exports(&fixture).len();
     let events_before = fixture.sink.events().len();
     let reply = get_with(&fixture.router(), path, &cookies).await;
+    assert_common_headers(&reply, path, &what);
     let new_entries = match cell {
         Cell::File(file_name) => {
             assert_file(&reply, file_name, &what);
@@ -125,7 +127,7 @@ async fn check_cell(path: &str, principal: Principal, cell: Cell) {
             0
         }
         Cell::Redirect(want) => {
-            assert_want(&reply, want, &what);
+            assert_want(&reply, path, want, &what);
             0
         }
     };
