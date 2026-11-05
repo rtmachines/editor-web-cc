@@ -16,6 +16,50 @@ from pathlib import Path
 import re
 
 
+def cc_debian13_matches(source, candidate):
+    # ADR-0128 (h) permits only these substitutions.
+    substitutions = (
+        ('    RECIPE_TARGET=x86_64-unknown-linux-musl \\\n',
+         '    RECIPE_TARGET=x86_64-unknown-linux-gnu \\\n'),
+        ('    CC_x86_64_unknown_linux_musl=musl-gcc\n',
+         '    CC_x86_64_unknown_linux_gnu=gcc\n'),
+        ('    && apt-get install --no-install-recommends --yes musl-tools \\\n',
+         '    && apt-get install --no-install-recommends --yes gcc \\\n'),
+        ('FROM gcr.io/distroless/static-debian13:nonroot@sha256:'
+         'd62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88 AS runtime\n',
+         'FROM gcr.io/distroless/cc-debian13:nonroot@sha256:'
+         'b7e81cb1af38d9345680e68bcf564d388f96304e25222030fc8c051faf8565b3 AS runtime\n'),
+        ('    /build/target/x86_64-unknown-linux-musl/release/recipe-server /usr/local/bin/recipe-server\n',
+         '    /build/target/x86_64-unknown-linux-gnu/release/recipe-server /usr/local/bin/recipe-server\n'),
+    )
+    for old, new in substitutions:
+        if source.count(old) != 1:
+            raise SystemExit('deploy/Dockerfile does not match the fixed cc-debian13 substitutions')
+        source = source.replace(old, new, 1)
+    return source == candidate
+
+
+def test_cc_debian13_dockerfile():
+    source = Path('deploy/Dockerfile').read_bytes().decode('utf-8')
+    path = Path('deploy/ci/Dockerfile.cc-debian13')
+    if not path.is_file():
+        raise SystemExit('deploy/ci/Dockerfile.cc-debian13 is missing')
+    candidate = path.read_bytes().decode('utf-8')
+    if not cc_debian13_matches(source, candidate):
+        raise SystemExit('Dockerfile.cc-debian13 differs outside the fixed substitutions')
+    original = 'RUN cargo chef prepare --recipe-path recipe.json\n'
+    changed = 'RUN cargo chef prepare --recipe-path other.json\n'
+    if candidate.count(original) != 1:
+        raise SystemExit('Dockerfile.cc-debian13 has no unique RUN line for the fixture')
+    fixture = candidate.replace(original, changed, 1)
+    if cc_debian13_matches(source, fixture):
+        raise SystemExit('Dockerfile.cc-debian13 check accepted a changed RUN line')
+    print('CI cc-debian13 Dockerfile check and changed RUN fixture passed.')
+
+
+test_cc_debian13_dockerfile()
+
+
 def shell_tracing(data):
     # Match command boundaries and shebangs. Skip quoted text and comments.
     boundary = rb'(?:^|[;&|()]|\b(?:run|shell):)[ \t]*'
