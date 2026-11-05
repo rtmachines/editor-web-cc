@@ -27,7 +27,7 @@ The build order is in [docs/plan/implementation-prompts.md](docs/plan/implementa
 - A new design decision is a new ADR. Change `docs/architecture/` only in the same change as that ADR.
 - An accepted ADR changes only by its Status line and an "Amended by" note. A full replacement is a new ADR.
 - The decision map of `docs/adr/README.md` names the current ADR of each topic. Do not apply a superseded ADR.
-- `general-draft.txt` holds the requirements. `overview.md` §7 maps them to R01 to R45. §9 lists the Assumptions A1 to A44.
+- `general-draft.txt` holds the requirements. `overview.md` §7 maps them to R01 to R45. §9 lists the Assumptions, starting at A1.
 - `docs/plan/review/` holds the review history. It is not normative.
 - When two documents disagree, or a request disagrees with a document, stop and ask the user.
 

@@ -188,7 +188,7 @@ Without the second disk, the recovery point objective SHALL be 24 hours (A35).
 - **THEN** the most recent recoverable state is up to 24 hours old
 
 ### Requirement: Restore test
-The service `backup` SHALL run the restore test every Sunday at 05:00 UTC, on demand before each release, and on demand in steps 5 and 6 of the upgrade procedure. The test SHALL check the manifest and restore the newest set into a private scratch cluster and SHALL write one result line to the event log (R31, A16).
+The service `backup` SHALL run the restore test every Sunday at 05:00 UTC. It SHALL also run the test on demand before each release and in steps 5 and 6 of the upgrade procedure. The test SHALL check the manifest. It SHALL restore the newest set into a private scratch cluster and SHALL write one result line to the event log (R31, A16).
 
 #### Scenario: Restore test before a release
 - **GIVEN** a complete set in the `backups` volume

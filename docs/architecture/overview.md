@@ -153,6 +153,8 @@ The workspace sets `#![forbid(unsafe_code)]` in every crate and the lints `clipp
 
 Each row is one requirement sentence from `general-draft.txt`. "Mechanism" names the design element that satisfies it. "Where" names the document that specifies the element. A row marked "partial" names what is still open.
 
+R32, R33, R41 to R45, and A37 have no requirement in `openspec/specs/`. Lints, CI gates, review, and the build process enforce them, as the rows below state.
+
 | # | Requirement (draft) | Mechanism | Where |
 |---|---|---|---|
 | R01 | Web based application in Rust | axum server-side rendering with askama and HTMX. No JavaScript build chain | ADR-0001 |

@@ -129,7 +129,7 @@ The variable `RECIPE_DEV_PORT` changes the port of the development server. The d
 
 ### Jobs outside pull requests
 
-The jobs `compose` and `upgrade` of `.github/workflows/ci.yml` run only on a push to `main` and on a manual dispatch (ADR-0094). A pull request does not start them. The input `upgrade_from` of a dispatch names the previous release ref of the upgrade test. Without the input, `deploy/ci/upgrade.sh` selects the previous commit. The upgrade test runs only on a Linux CI runner.
+The jobs `compose`, `upgrade`, `restore-switch`, and `pitr-recovery` of `.github/workflows/ci.yml` run only on a push to `main` and on a manual dispatch (ADR-0094). A pull request does not start them. The input `upgrade_from` of a dispatch names the previous release ref of the upgrade test. Without the input, `deploy/ci/upgrade.sh` selects the previous commit. The upgrade test runs only on a Linux CI runner.
 
 The job `load` of `.github/workflows/ci.yml` runs only on a push to `main` and on a manual dispatch (ADR-0128 (a)). A pull request does not start it. A red `load` job on `main` blocks the next release (ADR-0128 (d)).
 
