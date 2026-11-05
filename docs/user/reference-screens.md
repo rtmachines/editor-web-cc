@@ -159,7 +159,7 @@ Three fields hold more than one line: **English description**, **Description ({ 
 
 ## Export (`api.md` section 2.7)
 
-The export routes return JSON. They have no page. The version page holds the export link of each approved or retired version. See [export-format.md](export-format.md) for the document.
+The export routes return JSON. They have no page. The version page holds the export link of each approved or retired version. See [reference-export-format.md](reference-export-format.md) for the document.
 
 ## Users (`api.md` section 2.8)
 

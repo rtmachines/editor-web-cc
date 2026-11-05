@@ -5,7 +5,7 @@
 //!
 //! The tests build two hashed bodies through the public constructors of `recipe-domain`. The
 //! writer output must equal the golden file byte for byte. The golden files are the test vector
-//! of the how-to guide `docs/user/check-export-document.md`.
+//! of the how-to guide `docs/user/how-to-check-an-export-document.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 

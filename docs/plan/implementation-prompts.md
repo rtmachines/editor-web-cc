@@ -395,7 +395,7 @@ flaga loadable, Content-Disposition (prefiks RETIRED_), audyt eksportu (A8), 404
 przycisk w UI dla Approved; Retired tylko Admin/PE. Testy: walidacja schematem (crate jsonschema),
 golden file dla przykładu z api.md §6, test że hash jest stabilny między eksportami i zmienia się
 po zmianie statusu, test że mismatch daje E-EXP-002.
-Dodatkowo: docs/user/export-format.md (Diátaxis reference, STE) dla autorów systemu transferu.
+Dodatkowo: docs/user/reference-export-format.md (Diátaxis reference, STE) dla autorów systemu transferu.
 Subagent Haiku: golden files i docs reference z tabeli pól. Review: api-design-principles (Opus).
 ```
 

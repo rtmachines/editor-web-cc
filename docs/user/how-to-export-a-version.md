@@ -4,7 +4,7 @@
 
 This guide shows how to save the JSON file of a version of a recipe. The transfer system or an engineer then uses the file.
 
-The reader is an operator at the machine or a process engineer. The guide does not show how to read the file. [Check an export document before a PLC load](check-export-document.md) does that.
+The reader is an operator at the machine or a process engineer. The guide does not show how to read the file. [Check an export document before a PLC load](how-to-check-an-export-document.md) does that.
 
 The editor shows Polish by default. The buttons **Polski** and **English** in the top bar change the language. This guide uses the English texts.
 
@@ -51,13 +51,7 @@ In the name, `{ref}` is the reference number of the recipe and `{n}` is the vers
 
 ## The content hash
 
-The content hash is the key `content_sha256` in the file. It has 64 characters, 0 to 9 and a to f. The version page does not show the hash.
-
-Open the file in a text editor to read the hash. The hash stays the same for one version, also after a rename or a retirement (`api.md` section 6.1). The file also holds the key `loadable`. It is `true` only when the version is `Approved` and no value, limit, or address breaks a current rule.
-
-Do not edit the file. The hash covers only the fields with "In hash: yes" in [`api.md`](../architecture/api.md) section 6.1. A changed value in one of these fields does not match the hash.
-
-The hash does not cover `loadable`, `version.status`, `version.approved_by`, `exported_at`, `machine.name`, `recipe.name`, and `parameters[].name_en`. A change in one of these fields does not change the hash. [Export document format](export-format.md) lists the keys. [Check an export document before a PLC load](check-export-document.md) shows the check.
+The key `content_sha256` in the file lets you check that a file matches its version, because it is a hash of the version content. The version page does not show it. Open the file in a text editor to read it. See [Export document format](reference-export-format.md) for the fields that the hash covers.
 
 ## Read-only mode
 
@@ -91,5 +85,5 @@ The browser goes to the login page and shows no JSON (ADR-0053). Log in. Then op
 
 ## Related pages
 
-- [Export document format](export-format.md) lists the keys of the file.
-- [Check an export document before a PLC load](check-export-document.md) shows how to check a file.
+- [Export document format](reference-export-format.md) lists the keys of the file.
+- [Check an export document before a PLC load](how-to-check-an-export-document.md) shows how to check a file.
