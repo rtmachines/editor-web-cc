@@ -16,7 +16,9 @@ This document defines the domain vocabulary. Rust code uses these names. SQL nam
 | Audit | Append-only record of every mutating operation and every security event | `AuditEntry`, `SecurityEvent` (write-only from other contexts) |
 | Export | Read model that serializes an `Approved` or `Retired` version to the export document. The module `export` builds the hashed body and computes `content_sha256` (ADR-0019) | none |
 
-The application is one deployable unit (modular monolith). A context is a Rust module in `recipe-domain`. A context does not import entities from another context. It uses only identifier types (`MachineId`, `UserId`) of the other context. An error variant can carry a value object of another context, for example `reference` (`ReferenceNumber`) in `PlantError` or `login` (`Login`) in `RecipeError`. These fields are value types, not entities. The module layout follows `overview.md` sections 4 and 5.
+The application is one deployable unit (modular monolith). A context is a Rust module in `recipe-domain`. A context does not import entities from another context. It uses only identifier types (`MachineId`, `UserId`) of the other context.
+
+An error variant can carry a value object of another context, for example `reference` (`ReferenceNumber`) in `PlantError` or `login` (`Login`) in `RecipeError`. These fields are value types, not entities. The module layout follows `overview.md` sections 4 and 5.
 
 Recipe Management reads the Plant Model through read-only ports (`TypeCatalog`, `UnitLookup`). A parameter request names its type with a `TypeExpr` (section 2.1). The use case passes it to `EnsureDerivedType` through a port. `EnsureDerivedType` returns the type and creates a missing `STRING(n)`, `WSTRING(n)`, or array type. It is an internal operation of the Plant Model, not a use case (section 5.1). Recipe Management never writes `plc_type` itself.
 
@@ -162,7 +164,9 @@ member    := [A-Za-z_][A-Za-z0-9_]{0,63}
 index     := -?[0-9]{1,10}
 ```
 
-The empty path is the parameter itself when the type is a primitive. An index segment has one index per array dimension, at most 3 (Assumption A38). An index value is inside the INTEGER range `-2147483648..=2147483647`. `[*]` means every element of the array at that position. `[*]` never shares a segment with an index. Examples: `.setpoint`, `[3]`, `[1,2]`, `.zones[2].temp_max`, `.zones[*].temp_max`. This grammar is the only definition. `data-model.md` 3.13 and `reliability.md` 4.3 cite it.
+The empty path is the parameter itself when the type is a primitive. An index segment has one index per array dimension, at most 3 (Assumption A38). An index value is inside the INTEGER range `-2147483648..=2147483647`. `[*]` means every element of the array at that position. `[*]` never shares a segment with an index.
+
+Examples: `.setpoint`, `[3]`, `[1,2]`, `.zones[2].temp_max`, `.zones[*].temp_max`. This grammar is the only definition. `data-model.md` 3.13 and `reliability.md` 4.3 cite it.
 
 **S7Address** (value object)
 
@@ -478,7 +482,9 @@ The use case writes the `AuditEntry` in the same transaction as the change (ADR-
 | `detail` | `Option<Json>` |
 | `count` | `u32` (number of events in the row, at least 1) |
 
-A `SecurityEvent` is written in its own short transaction. It is kept when the request fails. Events of the kinds `LoginFailed`, `LoginThrottled`, and `CsrfRejected` aggregate per `(client_ip, kind, minute)`. The first event of a minute inserts the row. Each later event of that minute increments `count` (`data-model.md` 3.8). The table is append-only for `recipe_app`, except this increment. Rows are kept 400 days. Then the function `security_event_purge()` deletes them in batches (ADR-0022, `data-model.md` 4.12).
+A `SecurityEvent` is written in its own short transaction. It is kept when the request fails.
+
+Events of the kinds `LoginFailed`, `LoginThrottled`, and `CsrfRejected` aggregate per `(client_ip, kind, minute)`. The first event of a minute inserts the row. Each later event of that minute increments `count` (`data-model.md` 3.8). The table is append-only for `recipe_app`, except this increment. Rows are kept 400 days. Then the function `security_event_purge()` deletes them in batches (ADR-0022, `data-model.md` 4.12).
 
 A change of a configuration value, for example `approval.separation_of_duties`, is not a security event. The startup settings comparison writes it as the audit action `SettingChanged` (`reliability.md` 7.12).
 
@@ -546,7 +552,11 @@ Rules:
 
 ## 5. Domain operations
 
-Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060). Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing. Each command runs in one READ COMMITTED transaction, except `Login` and `ChangeOwnPassword`. `Login` and `ChangeOwnPassword` use two transactions, T1 and T2 (ADR-0035 (b)). The bootstrap of `create-admin` is the one SERIALIZABLE command (ADR-0096 (h)).
+Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060).
+
+Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing.
+
+Each command runs in one READ COMMITTED transaction, except `Login` and `ChangeOwnPassword`. `Login` and `ChangeOwnPassword` use two transactions, T1 and T2 (ADR-0035 (b)). The bootstrap of `create-admin` is the one SERIALIZABLE command (ADR-0096 (h)).
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
@@ -595,9 +605,17 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 | `ArchiveUnit` | Machine | `archived_at` on the unit and its descendants. Locks: `machine FOR NO KEY UPDATE`, then the unit rows `FOR UPDATE` in `id` order. Two archives on one machine therefore run one after the other | `E-PLT-008 LastMainUnit`, `E-PLT-009 UnitArchived` (the unit is already archived, ADR-0029), `E-PLT-012 UnitReferencedByDraft`, `E-PLT-014 UnitReferencedByApproved` |
 | `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory locks of class 2 in the fixed order below | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge`, `E-PLT-021 DuplicateMemberName` |
 
-`EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row. `AddParameter`, `UpdateParameterDefinition`, and `DefineUdt` call it with the `TypeExpr` of the request. `RebindTypeRevision` calls it with the array shape of each moved parameter. Each caller calls it inside its own transaction. It has no permission of its own, because the calling use case checks its permission first. Its errors are `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge`. An array shape of `RebindTypeRevision` comes from a valid tree, so it gives only `E-PLT-018` (ADR-0029). `DefineUdt` reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform` instead (section 2.1). It writes the audit action `DerivedTypeCreated` only when it creates a row. A new row has only the platform of its machine in `platforms`.
+`EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row.
 
-Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The key is `pg_advisory_xact_lock(2, hashtext(machine_id::text || ':' || name))`. `name` is the struct name, `STRING`, or `WSTRING`. An array row has no name, so its key uses the text `ARRAY`. A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the array shapes instead. The command sorts the keys in the fixed order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before the first `plc_type` insert. `EnsureDerivedType` then takes no lock of its own. No command takes a row lock on `plc_type`. The unique indexes of `plc_type` stay as the second line.
+`AddParameter`, `UpdateParameterDefinition`, and `DefineUdt` call it with the `TypeExpr` of the request. `RebindTypeRevision` calls it with the array shape of each moved parameter. Each caller calls it inside its own transaction. It has no permission of its own, because the calling use case checks its permission first. Its errors are `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge`.
+
+An array shape of `RebindTypeRevision` comes from a valid tree, so it gives only `E-PLT-018` (ADR-0029). `DefineUdt` reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform` instead (section 2.1). It writes the audit action `DerivedTypeCreated` only when it creates a row. A new row has only the platform of its machine in `platforms`.
+
+Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The key is `pg_advisory_xact_lock(2, hashtext(machine_id::text || ':' || name))`. `name` is the struct name, `STRING`, or `WSTRING`. An array row has no name, so its key uses the text `ARRAY`.
+
+A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the array shapes instead. The command sorts the keys in the fixed order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before the first `plc_type` insert.
+
+`EnsureDerivedType` then takes no lock of its own. No command takes a row lock on `plc_type`. The unique indexes of `plc_type` stay as the second line.
 
 ### 5.2 Recipe Management
 
@@ -629,7 +647,9 @@ Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The
 
 `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, and `ReplaceLimits` check every leaf of the value and every limit row. They return every fault of one parameter in one `RecipeErrors` (ADR-0027, ADR-0041). The faults of the leaves come first in preorder, and the faults of the limit rows follow in their order. A check of the unit, the type, the tag, the S7 address, or a budget keeps its single error.
 
-`ValidationFailed { items }` lists the problems of the snapshot check. A parameter item names an archived unit, a value out of limit, or a type that is no longer on the platform (the item `E-RCP-013 TypeNotOnPlatform`). It can also name a stored value that no longer fits its type (`E-RCP-005`, ADR-0028). A version item names a deleted recipe or an archived machine. `CreateVersion` returns `ValidationFailed` when the base version references an archived unit, an archived machine, or a type that is not on the platform. Then it creates no draft. The `303` of a successful `CreateVersion` lists only the outdated parameters.
+`ValidationFailed { items }` lists the problems of the snapshot check. A parameter item names an archived unit, a value out of limit, or a type that is no longer on the platform (the item `E-RCP-013 TypeNotOnPlatform`). It can also name a stored value that no longer fits its type (`E-RCP-005`, ADR-0028). A version item names a deleted recipe or an archived machine.
+
+`CreateVersion` returns `ValidationFailed` when the base version references an archived unit, an archived machine, or a type that is not on the platform. Then it creates no draft. The `303` of a successful `CreateVersion` lists only the outdated parameters.
 
 ### 5.3 Identity and Access
 

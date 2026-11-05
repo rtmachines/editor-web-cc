@@ -17,7 +17,7 @@ Read a how-to guide when you need to complete one task.
 - [Compare two versions of a recipe](how-to-compare-two-versions.md): Read the changes between two versions.
 - [Add a UDT type to a machine](how-to-add-a-udt.md): Define a new type or a new revision on a machine.
 - [How to export a version](how-to-export-a-version.md): Save an approved version as a JSON file.
-- [Check an export document before a PLC load](check-export-document.md): For the author of a transfer system. Check a file before a PLC loads it.
+- [Check an export document before a PLC load](how-to-check-an-export-document.md): For the author of a transfer system. Check a file before a PLC loads it.
 
 ## Reference
 
@@ -25,7 +25,7 @@ Read a reference page to look up a page, a permission, or a file format.
 
 - [Screens reference](reference-screens.md): Each page, its route, its actions, and its permission.
 - [Permissions by role](reference-permissions.md): The roles and the actions that each role may perform.
-- [Export document format](export-format.md): The parts of an export file and their source documents.
+- [Export document format](reference-export-format.md): The parts of an export file and their source documents.
 
 ## Explanation
 

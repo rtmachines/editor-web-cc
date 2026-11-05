@@ -350,7 +350,9 @@ Parameter values and process limits are not secret. The use case span may includ
 
 ### 3.5 Retention
 
-Docker uses the `json-file` log driver with `max-size` and `max-file` from `log.max_size` and `log.max_file` (section 7.11). This keeps about 1 GB of logs per container. Older lines are discarded. One logging anchor of `compose.yaml` serves the seven services. It sets `mode` to `log.mode` and `max-buffer-size` to `log.max_buffer_size`, so a slow log driver cannot block `app`. A full buffer drops lines, which agrees with the best effort of the event log in 3.6 (ADR-0070 (s), (t)). A site that needs longer retention forwards stdout to its own collector. The application does not write log files.
+Docker uses the `json-file` log driver with `max-size` and `max-file` from `log.max_size` and `log.max_file` (section 7.11). This keeps about 1 GB of logs per container. Older lines are discarded.
+
+One logging anchor of `compose.yaml` serves the seven services. It sets `mode` to `log.mode` and `max-buffer-size` to `log.max_buffer_size`, so a slow log driver cannot block `app`. A full buffer drops lines, which agrees with the best effort of the event log in 3.6 (ADR-0070 (s), (t)). A site that needs longer retention forwards stdout to its own collector. The application does not write log files.
 
 ### 3.6 Audit log, security events, event log
 
@@ -367,7 +369,9 @@ A business question ("who approved version 7?") is answered by the audit log. A 
 
 ### 3.7 Alerts
 
-The supervised job `alerts` runs inside `app` every `alerts.interval` (section 7.11). It evaluates the conditions below. It reads the database values of one run in one `READ ONLY` transaction (ADR-0060 (e)). When that read fails, the run returns the error and evaluates no condition. The supervisor logs the error once with the level of 1.1, and the next run follows after `alerts.interval` (ADR-0089 (d)). For each active condition it writes one `WARN` line to the event log. The field `alert` of the line holds the name of the condition (ADR-0075 (c)). The exception is `low_disk`: it writes one line for each low or unreadable volume, with the field `volume` (ADR-0075 (e)). There is no alert cron in the `backup` container (ADR-0020).
+The supervised job `alerts` runs inside `app` every `alerts.interval` (section 7.11). It evaluates the conditions below. It reads the database values of one run in one `READ ONLY` transaction (ADR-0060 (e)). When that read fails, the run returns the error and evaluates no condition. The supervisor logs the error once with the level of 1.1, and the next run follows after `alerts.interval` (ADR-0089 (d)).
+
+For each active condition it writes one `WARN` line to the event log. The field `alert` of the line holds the name of the condition (ADR-0075 (c)). The exception is `low_disk`: it writes one line for each low or unreadable volume, with the field `volume` (ADR-0075 (e)). There is no alert cron in the `backup` container (ADR-0020).
 
 | Name | Condition | Source |
 |---|---|---|
@@ -473,7 +477,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 
 ## 5. Migrations and schema evolution
 
-- Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`, `0005_security_event_guard.sql`, and `0006_operations.sql` (`data-model.md` 8). The release of ADR-0098 adds `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`.
+- Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`, `0005_security_event_guard.sql`, and `0006_operations.sql` (`data-model.md` 8). The release of ADR-0098 adds `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`. The release of ADR-0109 adds `0009_export_client_role.sql` and `0010_validate_export_client_checks.sql`.
 - Migrations are forward-only. There is no `down` file. A rollback is a new forward migration or a restore from backup.
 - A migration that shipped is never edited. `sqlx` stores a checksum of each applied migration in `_sqlx_migrations`. A changed checksum stops the migrator with an error.
 - Roles and the database are not created by a migration. The script `deploy/db/initdb/01-roles.sh` runs once as the PostgreSQL superuser when the `db` volume is empty. It reads the Docker secrets and creates `recipe_migrator`, `recipe_app`, `audit_owner`, `recipe_backup`, `recipe_replicator`, and the database. It grants `pg_read_all_stats` to `audit_owner` and not to `recipe_app` (ADR-0069 (f)).
@@ -528,7 +532,7 @@ The gate counts production code only. It finds test code from the source. It fai
 
 Seven services. Start order through `depends_on`: `db` (healthy) → `backup-premigrate` (completed successfully) → `migrate` (completed successfully) → `app` → `proxy`. `walarchive` and `backup` depend only on `db`.
 
-Two one-shot services are not part of the seven. `pitr-check` has the profile `pitr`, and `restore-volume` has the profile `restore` (7.7, ADR-0103 (h)). `docker compose up` starts neither of them.
+Three one-shot services are not part of the seven. `pitr-check` has the profile `pitr`, `restore-volume` has the profile `restore` (7.7, ADR-0103 (h)), and `pitr-volume` has the profile `restore` (ADR-0106 (e)). `docker compose up` starts none of them.
 
 Images (ADR-0064):
 
@@ -561,7 +565,11 @@ Secret files on the host (ADR-0062 (l) to (o), ADR-0065 (b)):
 - The secret `alerts_webhook_url` holds the URL of the webhook (3.7, ADR-0063).
 - A secret file holds one line (ADR-0031).
 
-Two more Docker secrets hold keys of 32 bytes. `login_hmac_key` is the HMAC-SHA256 key of `security_event.login_hmac`. `csrf_signing_key` signs the pre-session CSRF cookie (`api.md` 7.3). The keys `security.login_hmac_key_file` and `security.csrf_signing_key_file` of 7.11 name the files. A key file holds one key per line, the newest key first. Each line holds the 32 bytes of a key as 64 lower-case hex characters (ADR-0035). The server writes and signs with the first key and accepts every key in the file. Rotation: the operator adds the new key as the first line. Both keys are accepted for `security.key_rotation_overlap`. Then the operator deletes the old line.
+Two more Docker secrets hold keys of 32 bytes. `login_hmac_key` is the HMAC-SHA256 key of `security_event.login_hmac`. `csrf_signing_key` signs the pre-session CSRF cookie (`api.md` 7.3). The keys `security.login_hmac_key_file` and `security.csrf_signing_key_file` of 7.11 name the files.
+
+A key file holds one key per line, the newest key first. Each line holds the 32 bytes of a key as 64 lower-case hex characters (ADR-0035). The server writes and signs with the first key and accepts every key in the file.
+
+Rotation: the operator adds the new key as the first line. Both keys are accepted for `security.key_rotation_overlap`. Then the operator deletes the old line.
 
 ### 7.2 Health endpoints
 
@@ -579,7 +587,9 @@ Both endpoints live on the internal listener on `http.internal_port`. They need 
 
 ### 7.3 Graceful shutdown
 
-ADR-0058 (l) to (p) holds the stop. ADR-0087 amends the drain of the internal listener and the abort. ADR-0088 (e) adds the cut count of the jobs to the `WARN` line of step 6. ADR-0089 (c) writes that line only for a cut. ADR-0090 (b) holds a pool close that reaches its limit. ADR-0061 (f) holds a signal during the start. ADR-0125 (b), (g), and (i) hold the stop after an end of an accept loop.
+ADR-0058 (l) to (p) holds the stop. ADR-0087 amends the drain of the internal listener and the abort. ADR-0088 (e) adds the cut count of the jobs to the `WARN` line of step 6. ADR-0089 (c) writes that line only for a cut.
+
+ADR-0090 (b) holds a pool close that reaches its limit. ADR-0061 (f) holds a signal during the start. ADR-0125 (b), (g), and (i) hold the stop after an end of an accept loop.
 
 1. The process receives `SIGTERM` from Docker, or an accept loop ends (ADR-0125 (i)). Both events start the stop.
 2. Readiness turns off, and the watchdog stops. The public listener stops accepting new connections. The supervised jobs get the cancel.
@@ -1045,7 +1055,11 @@ This table is the single source for every numeric setting. A key of the first co
 | `clock.skew_warn` | 5 s | 7.9 |
 | `clock.check_interval` | 1 h | 2.4, 7.9 |
 
-Transaction isolation and retry are rules in the code, not settings. `SetUserRole` and `DeactivateUser` run in `READ COMMITTED` with no retry. They take the class-4 guard lock of the last Administrator first (ADR-0096). Only the first-administrator operation of `create-admin` runs in `SERIALIZABLE`. It retries once on `40001`, then returns `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1). A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 and the queries `GetApprovalPreview` and `DiffVersions` of ADR-0050 run in `REPEATABLE READ READ ONLY`. A query never retries.
+Transaction isolation and retry are rules in the code, not settings. `SetUserRole` and `DeactivateUser` run in `READ COMMITTED` with no retry. They take the class-4 guard lock of the last Administrator first (ADR-0096).
+
+Only the first-administrator operation of `create-admin` runs in `SERIALIZABLE`. It retries once on `40001`, then returns `E-DB-001`. Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR` (section 1.1).
+
+A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 and the queries `GetApprovalPreview` and `DiffVersions` of ADR-0050 run in `REPEATABLE READ READ ONLY`. A query never retries.
 
 ### 7.12 Stored settings
 

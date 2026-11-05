@@ -47,7 +47,9 @@ Mutating requests use `POST`. No route uses `PUT` or `DELETE`, because a form se
 
 Line ends. A browser sends each line end of a `textarea` as CRLF. `recipe-web` converts each CRLF of the fields `description_en`, `description`, and `change_note` to LF before the parse (ADR-0112). A lone CR stays, and the parse refuses it.
 
-The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016, and the queries of `domain-model.md` 5.5. A query is also a use case. It checks its permission first, in the same way as a command (R28). Every `GET` row of the tables of section 2 names its query use case, except the export rows. Four of them run the command `ExportVersion`, and one runs the query `ListExportableRecipes`. The row `GET /recipes/{ref}/compare` names no use case, because it only redirects to the diff route, which runs `DiffVersions` (ADR-0108 (e)). A form or preview query has the permission of the command that it prepares.
+The use case names in the tables are the commands from `domain-model.md` section 5 and ADR-0016, and the queries of `domain-model.md` 5.5. A query is also a use case. It checks its permission first, in the same way as a command (R28).
+
+Every `GET` row of the tables of section 2 names its query use case, except the export rows. Four of them run the command `ExportVersion`, and one runs the query `ListExportableRecipes`. The row `GET /recipes/{ref}/compare` names no use case, because it only redirects to the diff route, which runs `DiffVersions` (ADR-0108 (e)). A form or preview query has the permission of the command that it prepares.
 
 ## 2. Endpoints
 
@@ -119,7 +121,9 @@ The struct name `new` gives `422 E-WEB-008`, because the route `/types/new` woul
 
 A UDT is immutable. A second `POST` creates a new revision (ADR-0006). The usage query is the "where used" view that the rebind workflow needs (ADR-0018).
 
-The type page of a machine on `S7_300`, `S7_1200`, or `S7_1500` shows the table S7 layout after the type tree (ADR-0108 (h)). The table has one row per struct member in the order of the tree. An array is one row. Each row has the path, the type, and the offset as `<byte>.<bit>`. A sentence before the table says that the offsets apply to a data block with standard access. A sentence after the table gives the size in bytes. A machine on `CodesysIec` or `TwinCat3` gets no S7 layout. The placement rules are in ADR-0017 and ADR-0108 (g).
+The type page of a machine on `S7_300`, `S7_1200`, or `S7_1500` shows the table S7 layout after the type tree (ADR-0108 (h)). The table has one row per struct member in the order of the tree. An array is one row. Each row has the path, the type, and the offset as `<byte>.<bit>`. A sentence before the table says that the offsets apply to a data block with standard access. A sentence after the table gives the size in bytes.
+
+A machine on `CodesysIec` or `TwinCat3` gets no S7 layout. The placement rules are in ADR-0017 and ADR-0108 (g).
 
 The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `TypeExpr` (`domain-model.md` 2.1). Examples: `INT`, `STRING(20)`, `ST_Zone@3`, `ARRAY[1..8] OF REAL`, `ARRAY[0..1,1..2] OF ST_Zone@3`. The internal operation `EnsureDerivedType` resolves the expression and creates a missing `STRING(n)`, `WSTRING(n)`, or array type (`domain-model.md` 5.1). A bad expression returns `422 E-PLT-013`. The exception is a member of `DefineUdt` whose type is not on the platform, which returns `422 E-PLT-006`. A type above a size limit returns `422 E-PLT-018` (`domain-model.md` 2.1).
 
@@ -139,7 +143,9 @@ The fields `members[i].type` of `DefineUdt` and `type` of section 2.6 carry a `T
 
 `q` is a `Text`. It matches a part of the reference number or of the name, with no difference between upper and lower case. `machine` follows the rule of the path value `{code}` (section 1). `status` is `draft`, `approved`, or `retired` and keeps a recipe with a version in that state. The rows come in the byte order of the reference number (ADR-0043).
 
-A deleted recipe. An Administrator reads its recipe page and its version pages with the state "Deleted" and no form. Every other `GET` route with `{ref}` of sections 2.4 to 2.6 answers `409 E-RCP-012` to every other role. A form route, such as `.../versions/new` or `.../parameters/new`, answers `409 E-RCP-012` to every role with the permission of its command (ADR-0043, ADR-0046). The approval preview is a form route. The diff route of section 2.5 and the history route of section 2.9 follow the rule of the other `GET` routes. An Administrator reads them, and every other role gets `409 E-RCP-012` (ADR-0050, ADR-0051).
+A deleted recipe. An Administrator reads its recipe page and its version pages with the state "Deleted" and no form.
+
+Every other `GET` route with `{ref}` of sections 2.4 to 2.6 answers `409 E-RCP-012` to every other role. A form route, such as `.../versions/new` or `.../parameters/new`, answers `409 E-RCP-012` to every role with the permission of its command (ADR-0043, ADR-0046). The approval preview is a form route. The diff route of section 2.5 and the history route of section 2.9 follow the rule of the other `GET` routes. An Administrator reads them, and every other role gets `409 E-RCP-012` (ADR-0050, ADR-0051).
 
 The recipe page holds the delete form in a danger disclosure for a role with `RecipeDelete`. The list with `show_deleted=1` holds a restore form in each deleted row. The pages of a deleted recipe keep no form that writes (ADR-0049, ADR-0108 (d)). The version page keeps the compare form, because it sends a `GET` request.
 
@@ -161,7 +167,9 @@ The recipe page holds the delete form in a danger disclosure for a role with `Re
 
 A version with `based_on` empty starts with no parameters. The approve `POST` is idempotent (section 4). It returns `422 E-RCP-024` for an outdated parameter unless `allow_outdated` is `true`. The audit entry `VersionApproved` records the flag (A29, ADR-0018).
 
-`RebindTypeRevision` moves every parameter of the draft whose type uses `from_type_id` to `to_type_id` (`domain-model.md` 5.2). A failed rebind returns one `E-RCP-028` or `E-RCP-029` line per failing parameter and changes nothing. The request holds one field per new member leaf. The field name is `new_member_values[<key>]` followed by the leaf path, where `<key>` is the `ParameterKey`. The field holds the text of the leaf (ADR-0039). A duration or instant leaf is an IEC literal. A new member leaf without a field gives `E-RCP-028`.
+`RebindTypeRevision` moves every parameter of the draft whose type uses `from_type_id` to `to_type_id` (`domain-model.md` 5.2). A failed rebind returns one `E-RCP-028` or `E-RCP-029` line per failing parameter and changes nothing.
+
+The request holds one field per new member leaf. The field name is `new_member_values[<key>]` followed by the leaf path, where `<key>` is the `ParameterKey`. The field holds the text of the leaf (ADR-0039). A duration or instant leaf is an IEC literal. A new member leaf without a field gives `E-RCP-028`.
 
 Only a user with `ParameterEdit` on a live `Draft` gets the rebind forms, with at most `form.rebind_leaves` new member fields on one page (ADR-0044).
 
@@ -179,7 +187,9 @@ The version page of an `Approved` version shows a notice when a value, a limit, 
 
 ### 2.6 Parameters
 
-All routes in this group are under `/recipes/{ref}/versions/{n}`. A mutating route works only when version `n` is a live `Draft` (I3). Otherwise the server returns `409 E-RCP-002`. Every mutating route in this group can also return `409 E-WEB-001`. Every route of this group returns `409 E-RCP-012` when the recipe is deleted. The exception is a `GET` route that shows data, for a user with `RecipeRestore` (ADR-0043). Every mutating route with `{key}` can also return `404 E-RCP-051` when the draft does not hold the key (section 1). The tables do not repeat these codes, except in the two removal rows.
+All routes in this group are under `/recipes/{ref}/versions/{n}`. A mutating route works only when version `n` is a live `Draft` (I3). Otherwise the server returns `409 E-RCP-002`.
+
+Every mutating route in this group can also return `409 E-WEB-001`. Every route of this group returns `409 E-RCP-012` when the recipe is deleted. The exception is a `GET` route that shows data, for a user with `RecipeRestore` (ADR-0043). Every mutating route with `{key}` can also return `404 E-RCP-051` when the draft does not hold the key (section 1). The tables do not repeat these codes, except in the two removal rows.
 
 | Method | Path | Use case | Permission | Request | Success | Errors |
 |---|---|---|---|---|---|---|
@@ -229,7 +239,9 @@ Machine and unit values of the three transfer routes:
 - A reused code hides the older archived machine from these routes. The session routes still export its recipes.
 - `{path}` follows the rule of `UnitPath` in section 1. A path that names no unit of the machine gives `404 E-WEB-005`. On a live machine, an archived unit counts as no unit. On an archived machine, every unit counts (ADR-0109 (ja)).
 
-List body. The object `machine` holds `code`, `plc_platform`, and `archived`. The array `recipes[]` holds one row for each recipe of the machine with an `Approved` version. A row holds `reference_number`, `name`, `version_number`, `approved_at`, and `content_sha256`. The rows follow the byte order of the reference number. The list has no pages, because A19 limits the count of recipes. The query runs inside `timeout.export`. This limit is the time bound of the list (ADR-0109 (g)).
+List body. The object `machine` holds `code`, `plc_platform`, and `archived`. The array `recipes[]` holds one row for each recipe of the machine with an `Approved` version. A row holds `reference_number`, `name`, `version_number`, `approved_at`, and `content_sha256`. The rows follow the byte order of the reference number. The list has no pages, because A19 limits the count of recipes.
+
+The query runs inside `timeout.export`. This limit is the time bound of the list (ADR-0109 (g)).
 
 Polling rule. The client reads the list and compares `content_sha256` with its last value. It runs an export only after a change (ADR-0109 (ag)). An approval can occur between the list and the export. The client therefore trusts `version.number` and `content_sha256` of the document, not the values of the list row (ADR-0109 (ah)).
 
@@ -428,7 +440,9 @@ The same code appears in the structured log of the request. A user can report th
 
 The export document is the only machine-readable output of the system (ADR-0019). It is the interface to the transfer client. The client pulls the document with HTTP Basic (section 2.7, ADR-0109). The transfer client is out of scope.
 
-The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the source of truth. Golden-file tests compare the serializer output with the schema and with stored examples. This section describes the schema. When the two differ, the schema file wins. The module `export` of `recipe-domain` builds the hashed body and computes the hash. `recipe-export` writes the HTTP response (ADR-0019). Sections 6.1 to 6.3 describe v1. Section 6.4 describes v2.
+The JSON Schema file `crates/recipe-export/schema/export-v1.schema.json` is the source of truth. Golden-file tests compare the serializer output with the schema and with stored examples. This section describes the schema. When the two differ, the schema file wins.
+
+The module `export` of `recipe-domain` builds the hashed body and computes the hash. `recipe-export` writes the HTTP response (ADR-0019). Sections 6.1 to 6.3 describe v1. Section 6.4 describes v2.
 
 ### 6.1 Fields
 
@@ -497,7 +511,9 @@ Hashed body: a JSON object with the fields marked "yes" and nothing else.
 }
 ```
 
-`content_sha256` is the lower-case hex SHA-256 of the RFC 8785 (JCS) canonical form of the hashed body. Identifiers and values are in the hash. Names are informational and are not in the hash: `machine.name`, `recipe.name`, and `parameters[].name_en`. Status, approval data, and export data are not in the hash either. A rename of the recipe or of the machine does not change the hash. The retirement of the version does not change it either. Every number in the hashed body is an integer below 2^53 or a JSON string, so the canonical form is exact (ADR-0019).
+`content_sha256` is the lower-case hex SHA-256 of the RFC 8785 (JCS) canonical form of the hashed body. Identifiers and values are in the hash.
+
+Names are informational and are not in the hash: `machine.name`, `recipe.name`, and `parameters[].name_en`. Status, approval data, and export data are not in the hash either. A rename of the recipe or of the machine does not change the hash. The retirement of the version does not change it either. Every number in the hashed body is an integer below 2^53 or a JSON string, so the canonical form is exact (ADR-0019).
 
 ### 6.2 Example
 
@@ -632,7 +648,11 @@ Sessions follow ADR-0014. The session store is the `session` table in PostgreSQL
 | `Domain` | not set, as the `__Host-` prefix requires |
 | Content | a random 128-bit token only. The database stores `SHA-256(token)` as `session.id`. No user data in the cookie |
 
-The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035). The answer of the backstop of section 5.1 gets HSTS only from the defaults of Caddy (section 9, ADR-0057 (j)).
+The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11).
+
+The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035).
+
+The answer of the backstop of section 5.1 gets HSTS only from the defaults of Caddy (section 9, ADR-0057 (j)).
 
 The default of the trusted-proxy list `http.trusted_proxies` is `172.28.0.2/32`, the address of `proxy` (ADR-0065 (j)). A request from another container of the Compose network therefore uses its socket address as `client_ip`. When a plant device stands in front of Caddy, its CIDR goes into the `trusted_proxies` of Caddy and into `http.trusted_proxies`. The runbook advises one `/32` for each device (ADR-0065 (m)).
 
@@ -755,7 +775,13 @@ The answer of the backstop of section 5.1 is the one exception. It gets only `X-
 
 Caddy sets HSTS, CSP, `nosniff`, and `Referrer-Policy` only as defaults. A default applies only when the answer has no value. The answers of `app` therefore keep their own values, and the answers of Caddy get the same headers. Caddy deletes the header `Server` (ADR-0065 (f), (g)).
 
-HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`, `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`. By default HTMX 2 does not swap a 4xx or 5xx response, and `HX-Retarget` does not change that. The value of `responseHandling` swaps it, so `conflict.html`, `field-errors.html`, and `error.html` reach the page (sections 4 and 5.3). The value of `methodsThatUseUrlParams` keeps the parameters of every method other than `GET` in the body. No route uses `DELETE` (ADR-0040). By default HTMX inserts an inline `<style>` element for its request indicator, and `style-src 'self'` blocks it. `includeIndicatorStyles: false` stops this. The rules for `.htmx-indicator` are in the static style sheet `static/app.css`. The `<body>` tag has `hx-history="false"`. No page snapshot is stored in `localStorage` on a shared workstation.
+HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`, `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`. By default HTMX 2 does not swap a 4xx or 5xx response, and `HX-Retarget` does not change that. The value of `responseHandling` swaps it, so `conflict.html`, `field-errors.html`, and `error.html` reach the page (sections 4 and 5.3).
+
+The value of `methodsThatUseUrlParams` keeps the parameters of every method other than `GET` in the body. No route uses `DELETE` (ADR-0040).
+
+By default HTMX inserts an inline `<style>` element for its request indicator, and `style-src 'self'` blocks it. `includeIndicatorStyles: false` stops this. The rules for `.htmx-indicator` are in the static style sheet `static/app.css`.
+
+The `<body>` tag has `hx-history="false"`. No page snapshot is stored in `localStorage` on a shared workstation.
 
 Permitted client-side scripts. No other script exists in the application:
 
