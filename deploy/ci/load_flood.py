@@ -146,9 +146,23 @@ def check_flood(document, permit_count):
 
 
 def permit_log_count(log_window):
-    """Count matching lines only in the app log window supplied by load.sh."""
-    return sum(bool(re.search(r"\bE-WEB-009\b", line)) and "password hash permit" in line
-               for line in log_window.splitlines())
+    """Count JSON E-WEB-009 entries whose chain ends with the password hash permit stage in the supplied app log window."""
+    count = 0
+    for line in log_window.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        fields = entry.get("fields")
+        if not isinstance(fields, dict):
+            continue
+        chain = fields.get("chain")
+        if (fields.get("error_code") == "E-WEB-009" and isinstance(chain, str)
+                and chain.endswith(": stage password hash permit")):
+            count += 1
+    return count
 
 
 def runner(meminfo, cgroup_root):

@@ -41,6 +41,7 @@ The waves run in this order. Tasks of one wave touch different files and can run
 ## 5. CI job `load`
 
 - [ ] 5.1 (deploy/ci, .github/workflows) Add a structure check of the job `load` to `deploy/ci/check.sh`, in the pattern of `test_migration_freeze_job`. It requires the `if:`, the runner, the job timeout, the matrix with `fail-fast: false`, and the steps of ADR-0128 (j). It also requires the cache scopes of ADR-0128 (f) and (g), the seed step timeout, and `continue-on-error` only on the bound steps of the leg `cc-debian13`. The check fails, because the job does not exist. Then add the job `load` to `ci.yml` to D1 and ADR-0128 (a) to (d), (f), (g), (i), (j), and (ab). Each leg uploads its JSON values as an artifact. Check: the check passes, and the workflow file parses as YAML. A `workflow_dispatch` run on the branch passes the leg `musl`, and the leg `cc-debian13` builds, starts, and writes its values. Agent: Codex.
+- [ ] 5.2 (recipe-web) Write the failing unit test of `log_error` first. It covers each of the five values of `TimeoutStage`. It requires that the field `chain` of the log line of `AppError::Timeout` ends with `: stage ` and the `Display` text of the stage. It also requires that the user message, the status `503`, and the level stay unchanged. Then change `log_error` in `crates/recipe-web/src/error/log.rs` to ADR-0129 (a) to (c). Check: the test fails before the change and passes after it in `cargo test -p recipe-web`. Agent: Sonnet.
 
 ## 6. End-to-end smoke
 

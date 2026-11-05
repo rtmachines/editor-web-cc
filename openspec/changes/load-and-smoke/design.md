@@ -24,7 +24,7 @@ Facts from the repository that shape the design:
 - `oha -Z` picks a random body line for each request, with replacement. `--output-format json` gives the slowest time, the p99 latency, the status counts, and the error list.
 - The pre-session token is a signed nonce with no server store. One token of `GET /login` is valid for every body line (`api.md` §7.3).
 - The Argon2 permit comes before T1 of `Login` (`api.md` §7.4). The per-IP budget of 100 failures blocks the runner address for 15 minutes after the flood.
-- `TimeoutStage::Argon2Permit` writes the cause "password hash permit" in the log line of `E-WEB-009`.
+- The log line of `E-WEB-009` names its stage, for example "password hash permit" of `TimeoutStage::Argon2Permit` (ADR-0129, task 5.2).
 
 ## Goals / Non-Goals
 
@@ -37,7 +37,7 @@ Facts from the repository that shape the design:
 
 **Non-Goals:**
 
-- No change of production code, of `deploy/Dockerfile`, or of `deploy/compose*.yaml`.
+- No change of production code except the log line of `E-WEB-009` (ADR-0129, task 5.2). No change of `deploy/Dockerfile` or of `deploy/compose*.yaml`.
 - No new Cargo dependency and no new npm package.
 - No soak (decision Q-B (3) of the fix plan).
 - No change of a row of `reliability.md` §6 or of a value of §7.11.

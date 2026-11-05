@@ -84,11 +84,18 @@ pub(crate) fn level_of(error: &WebError, code: ErrorCode, status: StatusCode) ->
 ///
 /// An error with a failed read, for example of the version of a conflict, adds the chain of that
 /// failure to the same line. A list of recipe errors writes its count and its first 20 entries.
+///
+/// A timeout adds its stage to the chain, so an operator can tell the stages apart. The user
+/// message of the timeout does not name the stage.
 pub(crate) fn log_error(error: &WebError, code: ErrorCode, level: Level, request_id: RequestId) {
     let mut chain = match error {
         WebError::App(AppError::Recipes(errors)) => errors_text(errors),
         _other => display_chain(error),
     };
+    if let WebError::App(AppError::Timeout { stage }) = error {
+        chain.push_str(": stage ");
+        chain.push_str(&stage.to_string());
+    }
     if let Some((read, failure)) = read_failure(error) {
         chain.push_str(": the read of the ");
         chain.push_str(read);

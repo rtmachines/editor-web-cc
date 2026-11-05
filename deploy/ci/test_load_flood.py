@@ -185,11 +185,33 @@ class FloodTests(unittest.TestCase):
         for value in (0, -1):
             self.reject(fixture("summary", total=value), "total time must be positive")
 
-    def test_log_count_requires_both_code_and_cause_on_one_line(self):
-        lines = 'E-WEB-009 cause="password hash permit"\n' * 100
-        lines += 'E-WEB-009 cause="database pool"\nE-WEB-001 password hash permit\n'
-        lines += 'E-WEB-009\npassword hash permit\n'
-        self.assertEqual(self.flood.permit_log_count(lines), 100)
+    def test_log_count_requires_json_code_and_permit_stage(self):
+        chain = "The request took too long and was stopped. Try again.: stage password hash permit"
+        entry = {
+            "timestamp": "2026-11-05T13:50:01.123Z", "level": "ERROR",
+            "fields": {"message": "request failed", "error_code": "E-WEB-009",
+                       "request_id": "0b6c...", "chain": chain},
+            "target": "recipe_web::error::log",
+            "span": {"route": "/login", "name": "request"},
+        }
+        matching = json.dumps(entry)
+        self.assertEqual(self.flood.permit_log_count((matching + "\n") * 100), 100)
+        rejected = [
+            {**entry, "fields": {**entry["fields"], "chain": chain.replace("password hash permit", "request")}},
+            {**entry, "fields": {**entry["fields"], "error_code": "E-WEB-001"}},
+            {**entry, "fields": {**entry["fields"], "chain": chain + " extra"}},
+            {**entry, "fields": {**entry["fields"], "chain": None}},
+            {**entry, "fields": {"error_code": "E-WEB-009"}},
+            {**entry, "fields": [entry["fields"]]},
+            {**entry, "fields": None},
+            {}, [entry], 9,
+        ]
+        lines = [json.dumps(value) for value in rejected]
+        lines += ['E-WEB-009 cause="password hash permit"', "startup text", ""]
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertEqual(self.flood.permit_log_count(line), 0)
+        self.assertEqual(self.flood.permit_log_count("\n".join([matching] + lines)), 1)
 
     def invoke(self, *args):
         output = io.StringIO()
@@ -277,7 +299,9 @@ class FloodTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             source, logs, report, summary = [root / name for name in ("oha.json", "app.log", "report.json", "summary")]
-            logs.write_text('E-WEB-009 cause="password hash permit"\n' * 100, encoding="ascii")
+            line = json.dumps({"fields": {"error_code": "E-WEB-009", "chain":
+                "The request took too long and was stopped. Try again.: stage password hash permit"}})
+            logs.write_text((line + "\n") * 100, encoding="ascii")
             for document, status, message in (
                 (fixture(), 0, ""),
                 (fixture("errorDistribution", **{"private-response": 1}), 1, "oha reported errors"),

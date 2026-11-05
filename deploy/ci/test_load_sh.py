@@ -96,7 +96,9 @@ elif name == "docker":
     elif args[0] == "logs":
         assert args[-1] == "b" * 64
         count = 100 if "--since" in args and "--until" in args else 101
-        print("E-WEB-009 password hash permit\n" * count, end="")
+        line = json.dumps({"fields": {"error_code": "E-WEB-009", "chain":
+            "The request took too long and was stopped. Try again.: stage password hash permit"}})
+        print((line + "\n") * count, end="")
     else:
         raise AssertionError("unexpected Docker command")
 else:

@@ -269,6 +269,8 @@ mod fragment_tests;
 #[cfg(test)]
 mod lists_tests;
 #[cfg(test)]
+mod log_tests;
+#[cfg(test)]
 mod plant_args_tests;
 #[cfg(test)]
 mod push_url_tests;
