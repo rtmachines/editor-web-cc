@@ -34,7 +34,7 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ### Fixed
 
-- The init script does not log a statement that carries a role password (ADR-0123).
+- The init script does not log a statement that carries a role password (ADR-0123). A data volume created before this release can hold a role password in the log of db: run the check in `docs/ops/runbook.md` once after the upgrade.
 - A connection returns to the pool with no open transaction (ADR-0124).
 - An accept loop that ends early stops the server with exit code 70 (ADR-0125).
 - The parameter table and the row of a new parameter show the translation for the UI language (ADR-0012). Without it, they show the English name with the marker `(en)` and `lang="en"` (ADR-0126).

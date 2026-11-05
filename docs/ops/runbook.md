@@ -1277,6 +1277,9 @@ Command 1 can stop a job that runs at `backup.time` or `basebackup.time`. Step 2
 If the restore test of command 3 fails, a rollback does not start by itself (ADR-0083 (f)).
 Keep the new `app`. Keep every set. Read the `ERROR` line in the output of `restore-test`.
 
+After the first upgrade to a release with ADR-0123, run the check of the section [Check the log of db for a password](#check-the-log-of-db-for-a-password) once.
+A data volume created before ADR-0123 can hold a role password in the log of db.
+
 ### Rollback
 
 Check first that the images of the previous tag exist (section "Keep the images for a rollback").
