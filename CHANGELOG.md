@@ -38,6 +38,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - A connection returns to the pool with no open transaction (ADR-0124).
 - An accept loop that ends early stops the server with exit code 70 (ADR-0125).
 - The parameter table and the row of a new parameter show the translation for the UI language (ADR-0012). Without it, they show the English name with the marker `(en)` and `lang="en"` (ADR-0126).
+- A committed unlock stays a success when the write of the security event `unlock` fails. The handler writes one `WARN` line (ADR-0130).
+- The own password form (`/me/password`) shows a line under each bad field. The login form keeps one line per answer (ADR-0132).
+- One disk measurement waits at most `health.disk_check_interval`. A stalled path gives `Unreadable` and starts no second reader (ADR-0133).
+- The deletes of many rows lock their rows in `id` order. These deletes cover expired sessions, old login attempts, the attempts of one login, and all sessions of one user.
+- `POST /logout` reads its form before it ends the session. A JSON body gives `422 E-WEB-008`.
+- The `pl` and `en` bundles hold the text of `E-AUD-003`.
 
 ## [0.6.0] - 2026-11-03
 

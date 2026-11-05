@@ -44,7 +44,7 @@ A pinning test shows its red step on a temporary mutation of the code under test
 
 ## 6. Release notes
 
-- [ ] 6.1 (CHANGELOG.md) [mechanical] Add lines to the section "Unreleased" for ADR-0130, ADR-0132, and ADR-0133. Add lines for the ordered deletes, the logout form, and the text of `E-AUD-003`. Do not change the sections of earlier releases. Check: `git diff -U0 -- CHANGELOG.md | grep -c "^-[^-]"` gives 0.
+- [x] 6.1 (CHANGELOG.md) [mechanical] Add lines to the section "Unreleased" for ADR-0130, ADR-0132, and ADR-0133. Add lines for the ordered deletes, the logout form, and the text of `E-AUD-003`. Do not change the sections of earlier releases. Check: `git diff -U0 -- CHANGELOG.md | grep -c "^-[^-]"` gives 0.
 
 ## 7. Checks
 
