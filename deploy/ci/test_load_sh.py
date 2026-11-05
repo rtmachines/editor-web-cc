@@ -49,7 +49,10 @@ elif name == "date":
     count = sum(json.loads(line)[0] == "date" for line in event_path.read_text().splitlines())
     print(f"2026-11-05T12:00:0{count}.000000000Z")
 elif name == "find":
-    print(os.environ["STUB_CGROUP"])
+    full_id = "b" * 64 if (state / "recreated").exists() else "a" * 64
+    names = [args[index + 1] for index, arg in enumerate(args) if arg == "-name"]
+    if full_id in names or f"docker-{full_id}.scope" in names:
+        print(os.environ["STUB_CGROUP"])
 elif name == "oha":
     assert (state / "recreated").is_file()
     assert (state / "ready").is_file()
@@ -68,7 +71,8 @@ elif name == "docker":
             (state / "recreated").touch()
             (pathlib.Path(os.environ["STUB_CGROUP"]) / "memory.peak").write_text("120000000\n")
         elif "ps" in args:
-            print("b" * 64 if (state / "recreated").exists() else "a" * 64)
+            full_id = "b" * 64 if (state / "recreated").exists() else "a" * 64
+            print(full_id[:12] if os.environ.get("STUB_SHORT_ID") == "1" else full_id)
         elif "exec" in args and "proxy" in args:
             assert (state / "recreated").is_file()
             assert "http://app:9000/readyz" in args
@@ -83,7 +87,9 @@ elif name == "docker":
             raise AssertionError("unexpected Compose command")
     elif args[0] == "inspect":
         template = option("--format")
-        values = {"{{.Id}}": args[-1], "{{.HostConfig.Memory}}": "536870912",
+        full_id = "b" * 64 if (state / "recreated").exists() else "a" * 64
+        values = {"{{.Id}}": os.environ.get("STUB_INSPECT_ID", full_id),
+                  "{{.HostConfig.Memory}}": "536870912",
                   "{{.State.OOMKilled}}": "false", "{{.RestartCount}}": "0"}
         assert template in values
         print(values[template])
@@ -192,6 +198,7 @@ class LoadScriptTests(unittest.TestCase):
         calls = self.events("oha")
         self.assertEqual(len(calls), 1)
         args = calls[0]
+        self.assertIn("--ipv4", args)
         for flag, value in (("-n", "200"), ("-c", "200"), ("-m", "POST"),
                             ("--output-format", "json")):
             self.assertEqual(args[args.index(flag) + 1], value)
@@ -266,6 +273,26 @@ class LoadScriptTests(unittest.TestCase):
         result = self.run_load()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("oom: above 0", result.stderr)
+
+    def test_short_container_id_uses_full_id_for_memory(self):
+        result = self.run_load("memory-timings", STUB_SHORT_ID="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reading = json.loads((self.state / "load-memory-timings.json").read_text())
+        self.assertEqual(reading["peak"], "100000000")
+        self.assertIn(["inspect", "--format", "{{.Id}}", "a" * 12], self.events("docker"))
+        self.assertIn(["inspect", "--format", "{{.State.OOMKilled}}", "a" * 64],
+                      self.events("docker"))
+
+    def test_invalid_inspected_container_id_fails_without_secrets(self):
+        for value in ("a" * 12, "a" * 63, "a" * 65, "A" * 64, "g" * 64,
+                      "fixture-private-password"):
+            with self.subTest(value=value):
+                result = self.run_load("memory-timings", STUB_SHORT_ID="1", STUB_INSPECT_ID=value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("CI: expected a 64-character lowercase hexadecimal app container ID",
+                              result.stderr.splitlines())
+                self.assertNotIn("fixture-private-password", result.stdout + result.stderr)
+                self.assertEqual(self.events("find"), [])
 
     def test_separate_steps_keep_both_memory_readings(self):
         result = self.run_load("memory-timings")

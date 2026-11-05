@@ -23,6 +23,9 @@ install_oha() {
 
 locate_app() {
   APP_ID=$(container app)
+  APP_ID=$(docker inspect --format '{{.Id}}' "$APP_ID" 2>/dev/null) || APP_ID=
+  [[ $APP_ID =~ ^[0-9a-f]{64}$ ]] \
+    || fail "expected a 64-character lowercase hexadecimal app container ID"
   APP_CGROUP=$(sudo -n find /sys/fs/cgroup -type d \
     \( -name "$APP_ID" -o -name "docker-$APP_ID.scope" \) -print -quit 2>/dev/null) || APP_CGROUP=
   APP_CGROUP=${APP_CGROUP:-/sys/fs/cgroup/unavailable}
@@ -86,7 +89,8 @@ try:
     state = pathlib.Path(sys.argv[2])
     token = form_token((state / "load-login.html").read_text(), "/login", "csrf_pre")
     jar = http.cookiejar.MozillaCookieJar(str(state / "load-cookies"))
-    jar.load(ignore_discard=True)
+    # curl writes the expiry 0 for a session cookie. Python before 3.15 reads 0 as expired.
+    jar.load(ignore_discard=True, ignore_expires=True)
     cookie, = [item for item in jar if item.name == "__Host-recipe_csrf"]
     (state / "load-csrf-pre").write_text(token, encoding="ascii")
     (state / "load-cookie-header").write_text(f"{cookie.name}={cookie.value}", encoding="ascii")
@@ -107,7 +111,7 @@ flood() {
   flood_body
   cookie=$(cat "$CI_STATE/load-cookie-header")
   started=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
-  oha -n 200 -c 200 -m POST -Z "$CI_STATE/load-bodies" --cacert "$CI_STATE/root.crt" \
+  oha --ipv4 -n 200 -c 200 -m POST -Z "$CI_STATE/load-bodies" --cacert "$CI_STATE/root.crt" \
     -H 'Origin: https://localhost:8443' -H "Cookie: $cookie" \
     -H 'Content-Type: application/x-www-form-urlencoded' --no-tui --output-format json \
     https://localhost:8443/login >"$CI_STATE/load-oha.json" 2>"$CI_STATE/load-oha.stderr" || oha_status=$?
