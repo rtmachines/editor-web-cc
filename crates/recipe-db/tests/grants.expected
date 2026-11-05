@@ -1,3 +1,16 @@
+PUBLIC:audit_canonical(audit_log)|EXECUTE
+PUBLIC:bump_row_version()|EXECUTE
+PUBLIC:dims_valid(integer[],integer[])|EXECUTE
+PUBLIC:enforce_type_platform()|EXECUTE
+PUBLIC:enforce_unit_machine()|EXECUTE
+PUBLIC:enforce_version_mutable()|EXECUTE
+PUBLIC:freeze_identifiers()|EXECUTE
+PUBLIC:machine_platform_frozen()|EXECUTE
+PUBLIC:plc_type_immutable()|EXECUTE
+PUBLIC:plc_type_struct_has_member()|EXECUTE
+PUBLIC:recipe_version_transition()|EXECUTE
+PUBLIC:set_updated_at()|EXECUTE
+PUBLIC:version_size_budget()|EXECUTE
 _sqlx_migrations|SELECT
 app_setting.updated_at|UPDATE
 app_setting.updated_by|UPDATE
