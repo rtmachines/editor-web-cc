@@ -64,7 +64,7 @@ Dependency rule:
 - In read-only mode, every command except `Login`, `Logout`, and `ExportVersion` returns `503 E-WEB-006` and writes nothing (A24).
 - Every error code has exactly one row in `reliability.md` §1.2. Add the row before the variant that returns the code. Never reuse a code.
 - Every error type has `code()`, except the marker `AcceptLoopEnded` of `recipe-server` (`reliability.md` §1.1, ADR-0125 (c)). An error variant never carries a password, a hash, a session token, or a cookie value (`reliability.md` §1.1).
-- Log each error once: in the `WebError` to HTTP mapping, in the backstop panic layer, or in the supervisor of a background job. A job logs a handled fault once at `WARN` (`reliability.md` §1.1).
+- Log each error once: in the `WebError` to HTTP mapping, in the backstop panic layer, or in the supervisor of a background job. A job logs a handled fault once at `WARN` (`reliability.md` §1.1). The handler of `POST /users/{login}/unlock` also logs a lost event `unlock` once at `WARN` (ADR-0130).
 - Every numeric setting comes from `reliability.md` §7.11. A value repeated elsewhere must equal that table.
 - A value object has one `parse` constructor and no public `new`. Code does not check it again after construction (`reliability.md` §4.3).
 - This applies to `UnitPath`, `S7Address`, `TypeExpr`, `IecLiteral`, `LeafPath`, and every other value object.
