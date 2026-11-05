@@ -80,3 +80,29 @@ fn log_an_error_that_is_not_a_timeout_has_no_stage_field() {
     assert!(!line.contains(": stage "), "{line}");
     assert!(line.ends_with(&error.to_string()), "{line}");
 }
+
+#[test]
+fn log_a_timeout_writes_its_stage_at_the_warn_and_info_levels() {
+    for level in [Level::WARN, Level::INFO] {
+        let line = logged_line(
+            &timeout(TimeoutStage::Argon2Permit),
+            ErrorCode::WEB_009,
+            level,
+        );
+        assert!(
+            line.contains("stage=password hash permit"),
+            "{level}: {line}"
+        );
+    }
+}
+
+#[test]
+fn log_an_error_that_is_not_a_timeout_has_no_stage_field_at_the_warn_and_info_levels() {
+    let error = WebError::App(AppError::TaskFailed {
+        stage: TaskStage::PasswordHash,
+    });
+    for level in [Level::WARN, Level::INFO] {
+        let line = logged_line(&error, ErrorCode::WEB_011, level);
+        assert!(!line.contains("stage="), "{level}: {line}");
+    }
+}
