@@ -11,21 +11,26 @@ use recipe_app::identity::{
     ChangeOwnPassword, ChangeOwnPasswordInput, GetLoginForm, GetOwnPasswordForm, GetOwnProfile,
     Login, LoginInput, Logout,
 };
-use recipe_domain::identity::{IdentityError, Password, TypedLogin, TypedLoginReason};
+use recipe_app::ports::NonEmpty;
+use recipe_domain::identity::{IdentityError, NewPassword, Password, TypedLogin, TypedLoginReason};
 use serde::Deserialize;
 
+use super::draft_reply::refused;
+use super::recipes::fields::FieldLines;
 use super::render::{render, see_other};
 use super::request::PageRequest;
 use super::texts::Texts;
 use super::users::TokenFields;
 use crate::cookies::{clear_session_cookie, session_cookie};
 use crate::csrf::issue_pre_session;
-use crate::error::{FieldReason, Retry, WebError};
+use crate::error::{FieldError, FieldReason, Retry, WebError};
 use crate::state::WebState;
 
 mod templates;
 
-use templates::{LoginPage, PasswordChanged, PasswordPage, ProfilePage};
+use templates::{
+    LoginPage, PasswordChanged, PasswordForm, PasswordFormBlock, PasswordPage, ProfilePage,
+};
 
 pub(crate) use templates::login_page_with_error;
 
@@ -200,6 +205,24 @@ pub(crate) async fn password_form(
     Ok(render(&page, request.request_id())?.into_response())
 }
 
+/// Build the error of a refused password form: every line and the form with both inputs empty.
+///
+/// The function solves one problem: the answer must show a line under each bad input and must
+/// never send a typed password back (ADR-0132, ADR-0041 (e)).
+fn refuse_password(
+    state: &WebState,
+    request: &PageRequest,
+    lines: NonEmpty<FieldError>,
+) -> WebError {
+    let texts = Texts::new(state.bundles(), request.lang());
+    refused(state, request, lines, |errors| {
+        PasswordFormBlock::new(
+            texts,
+            PasswordForm::new(request.csrf_token(), false).refused(errors),
+        )
+    })
+}
+
 /// `POST /me/password`: change the password and replace the session.
 ///
 /// An HTMX request gets `200` with `HX-Refresh: true`, so the browser loads the page again with
@@ -211,21 +234,43 @@ pub(crate) async fn change_password(
 ) -> Result<Response, WebError> {
     let auth = request.auth()?;
     let Form(form) = form?;
-    let current_password =
-        Password::parse(&form.current_password).map_err(|_reason| WebError::BadRequest {
-            field: "current_password",
-            reason: FieldReason::PasswordLength,
-        })?;
-    let new_password = Password::parse(&form.password)
-        .map_err(|reason| WebError::App(AppError::Identity(IdentityError::from(reason))))?;
+    let mut lines = FieldLines::default();
+    let current_password = lines.field(
+        Password::parse(&form.current_password),
+        "current_password",
+        FieldReason::PasswordLength,
+    );
+    let new_password = NewPassword::parse(&form.password)
+        .map_err(|reason| {
+            lines.push_line(FieldError::identity(
+                &IdentityError::from(reason),
+                Some("password".to_owned()),
+            ));
+        })
+        .ok();
+    let (current_password, new_password) = match lines.finish(current_password.zip(new_password)) {
+        Ok(checked) => checked,
+        Err(lines) => return Err(refuse_password(&state, &request, lines)),
+    };
     let input = ChangeOwnPasswordInput {
         client_ip: request.client(),
         current_password,
         new_password,
     };
-    let issued = ChangeOwnPassword::new(state.identity().clone())
+    let issued = match ChangeOwnPassword::new(state.identity().clone())
         .execute(auth, &request.meta(), input)
-        .await?;
+        .await
+    {
+        Ok(issued) => issued,
+        Err(AppError::Identity(IdentityError::InvalidCurrentPassword)) => {
+            let line = FieldError::identity(
+                &IdentityError::InvalidCurrentPassword,
+                Some("current_password".to_owned()),
+            );
+            return Err(refuse_password(&state, &request, NonEmpty::new(line)));
+        }
+        Err(error) => return Err(error.into()),
+    };
     let cookie = session_header(&request, issued.token())?;
     if !request.is_htmx() {
         return Ok(see_other(AFTER_LOGIN, [cookie]));

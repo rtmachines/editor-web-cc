@@ -22,8 +22,8 @@ pub struct ChangeOwnPasswordInput {
     pub client_ip: IpAddr,
     /// The current password of the form field.
     pub current_password: Password,
-    /// The new password of the form field. The use case checks the policy of A23.
-    pub new_password: Password,
+    /// The new password of the form field. The caller parsed it with the policy of A23.
+    pub new_password: NewPassword,
 }
 
 /// Changes the password of the current user.
@@ -52,8 +52,6 @@ impl ChangeOwnPassword {
     ///
     /// # Errors
     ///
-    /// Returns `PasswordPolicy` (`E-IDN-006`) when the new password breaks the policy. No attempt
-    /// row and no Argon2 work exist then.
     /// Returns `Timeout` (`E-WEB-009`) when no Argon2 permit is free in time.
     /// Returns `LoginThrottled` (`E-IDN-005`) inside a delay or when the address budget is used up.
     /// Returns `InvalidCurrentPassword` (`E-IDN-008`) when the current password is wrong.
@@ -81,8 +79,6 @@ impl ChangeOwnPassword {
             current_password,
             new_password,
         } = input;
-        let new_password =
-            NewPassword::parse(new_password.as_str()).map_err(IdentityError::from)?;
         let login = TypedLogin::parse(user.login().as_str())
             .map_err(|_unreachable| AppError::Unauthenticated)?;
         let requester = Requester::of(meta, client_ip);

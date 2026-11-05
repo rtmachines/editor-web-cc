@@ -41,6 +41,11 @@ impl FieldLines {
         self.0.push(FieldError::bad_request(field, reason));
     }
 
+    /// Add a line that the caller built, for example the line `E-IDN-006` of a password.
+    pub(crate) fn push_line(&mut self, line: FieldError) {
+        self.0.push(line);
+    }
+
     /// Return the value of a parser, or `None` after the line `E-WEB-008` of `field`.
     ///
     /// The parser error holds the typed text, so the line keeps only the field and the reason.

@@ -6,7 +6,7 @@ use recipe_domain::audit::{
     AuditAction, AuditTarget, LoginHmac, RequestId, SecurityEventKind, SessionRef,
 };
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::identity::{IdentityError, Password, PasswordReason, SessionId, TypedLogin};
+use recipe_domain::identity::{IdentityError, NewPassword, Password, SessionId, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -46,7 +46,7 @@ fn input(current: &str, new: &str) -> ChangeOwnPasswordInput {
     ChangeOwnPasswordInput {
         client_ip: ip(),
         current_password: Password::parse(current).unwrap(),
-        new_password: Password::parse(new).unwrap(),
+        new_password: NewPassword::parse(new).unwrap(),
     }
 }
 
@@ -190,61 +190,6 @@ async fn a_success_marks_the_attempt_of_t1_as_a_success() {
     assert_eq!(attempts.len(), 1);
     assert!(attempts.values().all(|row| row.succeeded));
     assert!(attempts.values().all(|row| row.login.as_str() == "anna"));
-}
-
-#[tokio::test]
-async fn a_new_password_outside_the_policy_gives_e_idn_006_with_no_attempt_and_no_hash() {
-    let fixture = fixture();
-    let token = fixture.seed_anna_session(1);
-    let auth = fixture.authenticated(&token).await;
-    let journal_before = fixture.store.journal().len();
-    let error = ChangeOwnPassword::new(fixture.context.clone())
-        .execute(
-            &auth,
-            &meta(auth.session_id()),
-            input(PASSWORD, "short-pw-11"),
-        )
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(
-            error,
-            AppError::Identity(IdentityError::PasswordPolicy {
-                reason: PasswordReason::TooShort
-            })
-        ),
-        "{error:?}"
-    );
-    assert_eq!(error.code(), ErrorCode::IDN_006);
-    assert!(fixture.store.state().attempts.is_empty());
-    assert_eq!(fixture.hasher.verify_calls(), 0);
-    assert_eq!(fixture.hasher.hash_calls(), 0);
-    assert_eq!(
-        fixture.store.journal().len(),
-        journal_before,
-        "no transaction"
-    );
-}
-
-#[tokio::test(start_paused = true)]
-async fn the_policy_error_comes_before_the_wait_for_a_permit() {
-    let fixture = fixture();
-    let token = fixture.seed_anna_session(1);
-    let auth = fixture.authenticated(&token).await;
-    let mut held = Vec::new();
-    for _ in 0..4 {
-        held.push(fixture.context.gate().acquire().await.unwrap());
-    }
-    let error = ChangeOwnPassword::new(fixture.context.clone())
-        .execute(
-            &auth,
-            &meta(auth.session_id()),
-            input(PASSWORD, "short-pw-11"),
-        )
-        .await
-        .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::IDN_006);
-    drop(held);
 }
 
 #[tokio::test(start_paused = true)]
