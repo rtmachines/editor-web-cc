@@ -24,6 +24,18 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  ci-scripts:
+    name: CI scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the CI scripts
+        run: bash deploy/ci/check.sh
+
   compose:
     name: Compose stack
     # ADR-0094: Run the stack test on manual dispatch and pushes to main.

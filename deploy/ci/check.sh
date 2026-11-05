@@ -7,11 +7,10 @@ for script in deploy/ci/*.sh
 do
   bash -n "$script"
 done
-python3 -I -B deploy/ci/test_http_probe.py
-python3 -I -B deploy/ci/test_upgrade_checks.py
-python3 -I -B deploy/ci/test_restore_switch.py
-python3 -I -B deploy/ci/test_pitr_recovery.py
-python3 -I -B deploy/ci/test_migration_freeze.py
+for test in deploy/ci/test_*.py
+do
+  python3 -I -B "$test"
+done
 python3 -I -B - <<'PY'
 from pathlib import Path
 import re
@@ -82,6 +81,38 @@ def test_migration_freeze_job():
 
 
 test_migration_freeze_job()
+
+
+def test_ci_scripts_job():
+    lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
+    if '  pull_request:' not in lines:
+        raise SystemExit('ci.yml has no pull_request trigger')
+    header = '  ci-scripts:'
+    if header not in lines:
+        raise SystemExit('ci.yml has no job ci-scripts')
+    start = lines.index(header) + 1
+    end = start
+    while end < len(lines) and (lines[end].startswith('    ') or not lines[end].strip()):
+        end += 1
+    body = '\n'.join(lines[start:end])
+    if not re.search(r'^    runs-on: ubuntu-24\.04$', body, re.M):
+        raise SystemExit('ci-scripts does not use ubuntu-24.04')
+    if not re.search(r'^    timeout-minutes: [1-9][0-9]*$', body, re.M):
+        raise SystemExit('ci-scripts has no positive job timeout')
+    if re.search(r'^    (?:if|needs):', body, re.M):
+        raise SystemExit('ci-scripts must run on each pull request')
+    if not re.search(r'^        uses: actions/checkout@[0-9a-f]{40}(?: #.*)?$', body, re.M):
+        raise SystemExit('ci-scripts does not check out the repository with a pinned action')
+    if not re.search(r'^        run: bash deploy/ci/check\.sh$', body, re.M):
+        raise SystemExit('ci-scripts does not run check.sh')
+    if re.search(r'^        (?:if|continue-on-error):', body, re.M):
+        raise SystemExit('ci-scripts must run its checks and report failures')
+    if re.search(r'^    (?:container|services):|\bdocker\b', body, re.M | re.I):
+        raise SystemExit('ci-scripts must run without Docker')
+    print('CI ci-scripts job check passed.')
+
+
+test_ci_scripts_job()
 paths = list(Path('.github/workflows').rglob('*'))
 paths.extend(Path('deploy').rglob('*'))
 for path in paths:

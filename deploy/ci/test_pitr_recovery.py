@@ -141,7 +141,12 @@ class WorkflowTests(unittest.TestCase):
 
 class CheckScriptTests(unittest.TestCase):
     def test_check_sh_runs_this_test(self):
-        self.assertIn("python3 -I -B deploy/ci/test_pitr_recovery.py\n", CHECK.read_text(encoding="utf-8"))
+        pattern = "deploy/ci/test_*.py"
+        self.assertTrue(pathlib.Path(__file__).resolve().relative_to(ROOT).match(pattern))
+        self.assertIn(
+            f'\nfor test in {pattern}\ndo\n  python3 -I -B "$test"\ndone\n',
+            CHECK.read_text(encoding="utf-8"),
+        )
 
 
 class ScriptTests(unittest.TestCase):
