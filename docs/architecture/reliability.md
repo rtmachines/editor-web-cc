@@ -473,7 +473,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 
 ## 5. Migrations and schema evolution
 
-- Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`, `0005_security_event_guard.sql`, and `0006_operations.sql` (`data-model.md` 8). The release of ADR-0098 adds `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`.
+- Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`, `0005_security_event_guard.sql`, and `0006_operations.sql` (`data-model.md` 8). The release of ADR-0098 adds `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`. The release of ADR-0109 adds `0009_export_client_role.sql` and `0010_validate_export_client_checks.sql`.
 - Migrations are forward-only. There is no `down` file. A rollback is a new forward migration or a restore from backup.
 - A migration that shipped is never edited. `sqlx` stores a checksum of each applied migration in `_sqlx_migrations`. A changed checksum stops the migrator with an error.
 - Roles and the database are not created by a migration. The script `deploy/db/initdb/01-roles.sh` runs once as the PostgreSQL superuser when the `db` volume is empty. It reads the Docker secrets and creates `recipe_migrator`, `recipe_app`, `audit_owner`, `recipe_backup`, `recipe_replicator`, and the database. It grants `pg_read_all_stats` to `audit_owner` and not to `recipe_app` (ADR-0069 (f)).
@@ -528,7 +528,7 @@ The gate counts production code only. It finds test code from the source. It fai
 
 Seven services. Start order through `depends_on`: `db` (healthy) → `backup-premigrate` (completed successfully) → `migrate` (completed successfully) → `app` → `proxy`. `walarchive` and `backup` depend only on `db`.
 
-Two one-shot services are not part of the seven. `pitr-check` has the profile `pitr`, and `restore-volume` has the profile `restore` (7.7, ADR-0103 (h)). `docker compose up` starts neither of them.
+Three one-shot services are not part of the seven. `pitr-check` has the profile `pitr`, `restore-volume` has the profile `restore` (7.7, ADR-0103 (h)), and `pitr-volume` has the profile `restore` (ADR-0106 (e)). `docker compose up` starts none of them.
 
 Images (ADR-0064):
 

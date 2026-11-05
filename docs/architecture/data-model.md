@@ -59,7 +59,7 @@ Exceptions to the rules above:
 | `AuditEntry.aggregate_type / aggregate_id` | `audit_log.aggregate_type / aggregate_id` |
 | `AuditEntry.chain_seq` | `audit_log.chain_seq` |
 | `User.login` | `app_user.login` |
-| `User.role` (`Administrator`, `ProcessEngineer`, `Operator`) | `app_user.role` (`administrator`, `process_engineer`, `operator`) |
+| `User.role` (`Administrator`, `ProcessEngineer`, `Operator`, `ExportClient`) | `app_user.role` (`administrator`, `process_engineer`, `operator`, `export_client`) |
 | `VersionStatus` (`Draft`, `Approved`, `Retired`) | `recipe_version.status` (`draft`, `approved`, `retired`) |
 | `SecurityEventKind` variants | `security_event.kind` values in snake_case |
 | `u32` fields: `RecipeVersion.number`, `PlcType.revision`, `PlcType.size_bytes`, `Parameter.ordinal` | `INTEGER` (`i32`). The adapter converts with `i32::try_from` and `u32::try_from` and returns an error for a value outside the `INTEGER` range. It never uses `as` |
@@ -2053,7 +2053,7 @@ Notes:
 
 - Tool: `sqlx migrate`. Files live in `migrations/` at the repository root. The crate `recipe-db` embeds them with `sqlx::migrate!("../../migrations")`.
 - Name: `NNNN_description.sql`, four digits, forward-only. There is no down migration. A mistake is corrected by a new migration. A shipped migration is never edited. `sqlx` verifies the checksum of every applied migration at start and refuses to run when a file changed.
-- Files of the first release and of ADR-0098:
+- Files of the first release, of ADR-0098, and of ADR-0109:
   - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`.
   - `0002_triggers.sql`: functions and triggers of section 4.
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
@@ -2062,6 +2062,8 @@ Notes:
   - `0006_operations.sql`: the index on `security_event.occurred_at`, the function `replication_state()`, and its grant of section 5.5 (ADR-0069).
   - `0007_audit_definer_operators.sql`: the qualified operators and types of `audit_hash_chain()`, `security_event_purge()`, and `security_event_guard()` (ADR-0098 (a)).
   - `0008_audit_log_insert_columns.sql`: the column `INSERT` grants on `audit_log` of section 5.2 (ADR-0098 (b)).
+  - `0009_export_client_role.sql`: the value `export_client` of `app_user.role` and its two constraints, added as `NOT VALID` (ADR-0109).
+  - `0010_validate_export_client_checks.sql`: `VALIDATE CONSTRAINT` on the two constraints of `0009` (ADR-0109).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.
