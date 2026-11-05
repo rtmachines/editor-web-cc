@@ -146,7 +146,7 @@ def check_flood(document, permit_count):
 
 
 def permit_log_count(log_window):
-    """Count JSON E-WEB-009 entries whose chain ends with the password hash permit stage in the supplied app log window."""
+    """Count JSON E-WEB-009 entries whose structured stage equals "password hash permit" in the supplied app log window."""
     count = 0
     for line in log_window.splitlines():
         try:
@@ -158,9 +158,8 @@ def permit_log_count(log_window):
         fields = entry.get("fields")
         if not isinstance(fields, dict):
             continue
-        chain = fields.get("chain")
-        if (fields.get("error_code") == "E-WEB-009" and isinstance(chain, str)
-                and chain.endswith(": stage password hash permit")):
+        if (fields.get("error_code") == "E-WEB-009"
+                and fields.get("stage") == "password hash permit"):
             count += 1
     return count
 

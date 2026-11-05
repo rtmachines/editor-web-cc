@@ -32,32 +32,22 @@ fn timeout(stage: TimeoutStage) -> WebError {
 }
 
 #[test]
-fn log_a_timeout_names_each_of_its_five_stages() {
+fn log_a_timeout_writes_its_stage_as_a_field() {
     let cases = [
-        (
-            TimeoutStage::Argon2Permit,
-            "The request took too long and was stopped. Try again.: stage password hash permit",
-        ),
-        (
-            TimeoutStage::Validation,
-            "The request took too long and was stopped. Try again.: stage validation",
-        ),
-        (
-            TimeoutStage::Export,
-            "The request took too long and was stopped. Try again.: stage export",
-        ),
-        (
-            TimeoutStage::Request,
-            "The request took too long and was stopped. Try again.: stage request",
-        ),
-        (
-            TimeoutStage::Diff,
-            "The request took too long and was stopped. Try again.: stage diff",
-        ),
+        (TimeoutStage::Argon2Permit, "password hash permit"),
+        (TimeoutStage::Validation, "validation"),
+        (TimeoutStage::Export, "export"),
+        (TimeoutStage::Request, "request"),
+        (TimeoutStage::Diff, "diff"),
     ];
     for (stage, expected) in cases {
         let line = logged_line(&timeout(stage), ErrorCode::WEB_009, Level::ERROR);
-        assert!(line.ends_with(&format!("chain={expected}")), "{line}");
+        assert!(line.ends_with(&format!(" stage={expected}")), "{line}");
+        assert!(
+            line.contains(&format!("chain={TIMEOUT_MESSAGE} stage=")),
+            "{line}"
+        );
+        assert!(!line.contains(": stage "), "{line}");
     }
 }
 
@@ -81,11 +71,12 @@ fn log_a_timeout_keeps_its_user_message_status_and_level() {
 }
 
 #[test]
-fn log_an_error_that_is_not_a_timeout_has_no_stage_suffix() {
+fn log_an_error_that_is_not_a_timeout_has_no_stage_field() {
     let error = WebError::App(AppError::TaskFailed {
         stage: TaskStage::PasswordHash,
     });
     let line = logged_line(&error, ErrorCode::WEB_011, Level::ERROR);
+    assert!(!line.contains("stage="), "{line}");
     assert!(!line.contains(": stage "), "{line}");
     assert!(line.ends_with(&error.to_string()), "{line}");
 }

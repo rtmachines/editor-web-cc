@@ -24,7 +24,7 @@ Facts from the repository that shape the design:
 - `oha -Z` picks a random body line for each request, with replacement. `--output-format json` gives the slowest time, the p99 latency, the status counts, and the error list.
 - The pre-session token is a signed nonce with no server store. One token of `GET /login` is valid for every body line (`api.md` §7.3).
 - The Argon2 permit comes before T1 of `Login` (`api.md` §7.4). The per-IP budget of 100 failures blocks the runner address for 15 minutes after the flood.
-- The log line of `E-WEB-009` names its stage, for example "password hash permit" of `TimeoutStage::Argon2Permit` (ADR-0129, task 5.2).
+- The log line of `E-WEB-009` has the field `stage`, for example "password hash permit" of `TimeoutStage::Argon2Permit` (ADR-0129, task 5.2).
 
 ## Goals / Non-Goals
 

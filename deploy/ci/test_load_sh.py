@@ -96,8 +96,15 @@ elif name == "docker":
     elif args[0] == "logs":
         assert args[-1] == "b" * 64
         count = 100 if "--since" in args and "--until" in args else 101
-        line = json.dumps({"fields": {"error_code": "E-WEB-009", "chain":
-            "The request took too long and was stopped. Try again.: stage password hash permit"}})
+        line = json.dumps({
+            "timestamp": "2026-11-05T13:50:01.123Z", "level": "ERROR",
+            "fields": {"message": "request failed", "error_code": "E-WEB-009",
+                       "request_id": "0b6c...",
+                       "chain": "The request took too long and was stopped. Try again.",
+                       "stage": "password hash permit"},
+            "target": "recipe_web::error::log",
+            "span": {"route": "/login", "name": "request"},
+        })
         print((line + "\n") * count, end="")
     else:
         raise AssertionError("unexpected Docker command")

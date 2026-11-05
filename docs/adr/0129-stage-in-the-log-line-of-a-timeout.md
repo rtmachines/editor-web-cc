@@ -14,7 +14,7 @@ Deciders: project owner
 - The `Display` text of `AppError::Timeout` is the message template of the row `E-WEB-009` of `reliability.md` §1.2. It holds no stage.
 - ADR-0128 (w) counts the `E-WEB-009` lines with the cause "password hash permit". It compares that count with the count of `503` answers of the login flood.
 
-The CI run 42037298871 showed the real log line. The leg `musl` got 110 answers `503`, and the gate found 0 lines with the cause. Thus the gate of ADR-0128 (w) cannot pass.
+The log of the CI run 42037298871 holds the real line. The leg `musl` got 110 answers `503`, and the gate found 0 lines with the cause. Thus the gate of ADR-0128 (w) cannot pass.
 
 An operator has the same problem. A line of `E-WEB-009` does not tell which limit of §7.11 the request reached.
 
@@ -22,6 +22,7 @@ An operator has the same problem. A line of `E-WEB-009` does not tell which limi
 
 - The gate of ADR-0128 (w) reads the cause of each `503` answer from the log.
 - An operator finds the stage of a timeout in one log line.
+- The operator and the gate read the stage in the same way.
 - The user message, the status, and the level of `E-WEB-009` stay unchanged.
 - The server logs an error exactly once (`reliability.md` §1.1).
 - The log line holds no secret (`reliability.md` §3.4).
@@ -30,13 +31,13 @@ An operator has the same problem. A line of `E-WEB-009` does not tell which limi
 
 ### Option A: Append the stage to the field `chain`
 
-- Pros: the gate and an operator read one field. The change stays in `log_error`.
-- Cons: a reader parses the stage from the text of the field.
+- Pros: the change stays in `log_error`. Every error line keeps the same set of fields.
+- Cons: a reader finds the stage only with a text search in `chain`. The field `chain` then mixes the display chain with a text that only the log has.
 
 ### Option B: A new structured field `stage` in the log line
 
-- Pros: a reader gets the stage without a text search.
-- Cons: the log line of `E-WEB-009` gets a field that no other error has. The gate of ADR-0128 (w) reads `chain` and needs a change.
+- Pros: a reader filters the log by the field `stage` without a text search. The operator and the gate read the same field. The field `chain` keeps only the display chain.
+- Cons: the log line of `E-WEB-009` gets a field that no other error has. `log_error` writes this field only for `AppError::Timeout`.
 
 ### Option C: Add the stage to the `Display` text of `AppError::Timeout`
 
@@ -45,26 +46,27 @@ An operator has the same problem. A line of `E-WEB-009` does not tell which limi
 
 ## Decision
 
-The project uses **Option A**.
+The project uses **Option B**. A reader filters the log by a field without a text search. The operator and the gate of ADR-0128 (w) read the same field.
 
-- (a) The one log line of an `AppError::Timeout` names its stage.
-- (b) `log_error` of `recipe-web` appends `: stage ` and the `Display` text of `TimeoutStage` to the field `chain`.
+- (a) The one log line of an `AppError::Timeout` carries the field `stage`. Its value is the `Display` text of `TimeoutStage`.
+- (b) The log line of another error has no field `stage`. The field `chain` holds only the display chain and no stage text.
 - (c) The user message, the status `503`, the level, and the row `E-WEB-009` of `reliability.md` §1.2 do not change.
-- (d) ADR-0128 (w) reads the stage of item (b) as the cause of a `503` answer.
-- (e) A unit test of `recipe-web` checks the field `chain` for each of the five stages.
+- (d) The gate of ADR-0128 (w) counts the JSON lines with `fields.error_code` = `E-WEB-009` and `fields.stage` = `password hash permit`.
+- (e) A unit test of `recipe-web` checks the field `stage` for each of the five stages. It also checks that the line of another error has no field `stage`.
 
 ## Consequences
 
 ### Positive
 
 - The gate of ADR-0128 (w) can count the `503` answers that come from the Argon2 semaphore.
-- An operator can tell the five stages apart in the log.
+- An operator can filter the log by the field `stage` and tell the five stages apart.
+- The field `chain` keeps the same content as before.
 - The user sees the same message as before.
 
 ### Negative
 
-- A reader parses the stage from the text of `chain`.
-- A new stage changes the text that a log search reads.
+- The log line of `E-WEB-009` has a field that no other error line has.
+- A log reader must accept the field `stage` as optional on an error line.
 
 ### Risks and mitigations
 

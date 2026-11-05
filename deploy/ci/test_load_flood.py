@@ -186,26 +186,31 @@ class FloodTests(unittest.TestCase):
             self.reject(fixture("summary", total=value), "total time must be positive")
 
     def test_log_count_requires_json_code_and_permit_stage(self):
-        chain = "The request took too long and was stopped. Try again.: stage password hash permit"
+        chain = "The request took too long and was stopped. Try again."
         entry = {
             "timestamp": "2026-11-05T13:50:01.123Z", "level": "ERROR",
             "fields": {"message": "request failed", "error_code": "E-WEB-009",
-                       "request_id": "0b6c...", "chain": chain},
+                       "request_id": "0b6c...", "chain": chain,
+                       "stage": "password hash permit"},
             "target": "recipe_web::error::log",
             "span": {"route": "/login", "name": "request"},
         }
         matching = json.dumps(entry)
         self.assertEqual(self.flood.permit_log_count((matching + "\n") * 100), 100)
         rejected = [
-            {**entry, "fields": {**entry["fields"], "chain": chain.replace("password hash permit", "request")}},
+            {**entry, "fields": {**entry["fields"], "stage": "request"}},
             {**entry, "fields": {**entry["fields"], "error_code": "E-WEB-001"}},
-            {**entry, "fields": {**entry["fields"], "chain": chain + " extra"}},
-            {**entry, "fields": {**entry["fields"], "chain": None}},
+            {**entry, "fields": {**entry["fields"], "stage": "password hash permit extra"}},
+            {**entry, "fields": {**entry["fields"], "stage": " password hash permit"}},
+            {**entry, "fields": {"error_code": "E-WEB-009",
+                                "chain": chain + ": stage password hash permit"}},
             {**entry, "fields": {"error_code": "E-WEB-009"}},
             {**entry, "fields": [entry["fields"]]},
             {**entry, "fields": None},
             {}, [entry], 9,
         ]
+        rejected += [{**entry, "fields": {**entry["fields"], "stage": stage}}
+                     for stage in (None, 9, True, ["password hash permit"], {})]
         lines = [json.dumps(value) for value in rejected]
         lines += ['E-WEB-009 cause="password hash permit"', "startup text", ""]
         for line in lines:
@@ -299,8 +304,15 @@ class FloodTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             source, logs, report, summary = [root / name for name in ("oha.json", "app.log", "report.json", "summary")]
-            line = json.dumps({"fields": {"error_code": "E-WEB-009", "chain":
-                "The request took too long and was stopped. Try again.: stage password hash permit"}})
+            line = json.dumps({
+                "timestamp": "2026-11-05T13:50:01.123Z", "level": "ERROR",
+                "fields": {"message": "request failed", "error_code": "E-WEB-009",
+                           "request_id": "0b6c...",
+                           "chain": "The request took too long and was stopped. Try again.",
+                           "stage": "password hash permit"},
+                "target": "recipe_web::error::log",
+                "span": {"route": "/login", "name": "request"},
+            })
             logs.write_text((line + "\n") * 100, encoding="ascii")
             for document, status, message in (
                 (fixture(), 0, ""),
