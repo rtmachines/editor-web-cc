@@ -601,17 +601,17 @@ async fn ask_htmx_in(case: &str, lang: &str) -> Answer {
 }
 
 #[tokio::test]
-async fn error_mapping_code_without_a_bundle_key_falls_back_to_english() {
-    // The bundles hold the keys of the codes that the pages return. `E-AUD-003` has no key.
+async fn error_mapping_audit_trigger_code_shows_the_polish_sentence() {
     let answer = ask(
         "trigger-audit",
         &[("hx-request", "true"), ("cookie", "recipe_lang=pl")],
     )
     .await;
+    assert!(answer.body.contains("E-AUD-003"), "{}", answer.body);
     assert!(
-        answer
-            .body
-            .contains("The rule of the database stopped the change."),
+        answer.body.contains(
+            "Zdarzenie bezpieczeństwa nie może się zmienić. Skontaktuj się z administratorem."
+        ),
         "{}",
         answer.body
     );

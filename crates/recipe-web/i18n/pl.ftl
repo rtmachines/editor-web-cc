@@ -41,6 +41,7 @@ error-E-EXP-002 = Wersja { $number } receptury { $reference } nie zgadza się z 
 error-E-EXP-003 = Wersja { $number } receptury { $reference } jest wersją roboczą albo została odrzucona. Eksportować można tylko wersje zatwierdzone i wycofane.
 error-E-EXP-005 = Wersja { $number } receptury { $reference } nie ma parametru w jednostce { $path } ani poniżej niej.
 error-E-AUD-001 = Zmiana nie została zapisana. System nie mógł zapisać wpisu audytu. Skontaktuj się z administratorem.
+error-E-AUD-003 = Zdarzenie bezpieczeństwa nie może się zmienić. Skontaktuj się z administratorem.
 
 # Role
 role-administrator = Administrator
