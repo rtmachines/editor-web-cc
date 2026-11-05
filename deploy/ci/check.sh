@@ -290,6 +290,103 @@ def test_load_job():
 
 
 test_load_job()
+
+
+def compose_smoke_steps():
+    workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+    match = re.search(r'^  compose:\n((?:    .*\n|\n)*)', workflow, re.M)
+    if not match:
+        raise SystemExit('ci.yml has no job compose')
+    body = match.group(1)
+    steps = re.split(r'^      - name: ', body, flags=re.M)[1:]
+    return body, steps
+
+
+def smoke_command_step(steps, command):
+    matches = [index for index, block in enumerate(steps)
+               if re.search(r'^        run: ' + re.escape(command) + r'$', block, re.M)]
+    if len(matches) != 1:
+        raise SystemExit('compose needs one step that runs ' + command)
+    return matches[0]
+
+
+def require_smoke(block, pattern, message):
+    if not re.search(pattern, block, re.M):
+        raise SystemExit('compose smoke: ' + message)
+
+
+def check_smoke_upload(steps, smoke_index):
+    uploads = [index for index, block in enumerate(steps)
+               if re.search(r'^        uses: actions/upload-artifact@', block, re.M)]
+    if len(uploads) != 1 or uploads[0] <= smoke_index:
+        raise SystemExit('compose smoke needs one upload after its scan')
+    upload = steps[uploads[0]]
+    require_smoke(upload, r'^        uses: actions/upload-artifact@[0-9a-f]{40}(?: #.*)?$',
+                  'pin the upload action')
+    condition = "${{ !cancelled() && (steps.smoke.outcome == 'success' || steps.smoke.outcome == 'failure') }}"
+    require_smoke(upload, '^        if: ' + re.escape(condition) + '$',
+                  'upload scanned artifacts after a passed or failed suite')
+    require_smoke(upload, r'^          retention-days: 1$', 'keep artifacts for one day')
+    script = Path('deploy/ci/smoke.sh').read_text(encoding='utf-8')
+    directory = re.search(r'^upload=\$CI_STATE/([a-z-]+)$', script, re.M)
+    if not directory:
+        raise SystemExit('smoke.sh has no upload directory')
+    expected = '${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/' + directory.group(1)
+    paths = re.findall(r'^          path: (.+)$', upload, re.M)
+    if paths != [expected] or re.search(r'^            \S', upload, re.M):
+        raise SystemExit('compose smoke must upload only the scanned upload directory')
+
+
+def check_smoke_setup(steps, smoke_index):
+    patterns = (
+        (r'^        uses: actions/setup-node@[0-9a-f]{40}(?: #.*)?$',
+         (r'^          node-version-file: e2e/\.nvmrc$', r'^          cache: npm$',
+          r'^          cache-dependency-path: e2e/package-lock\.json$')),
+        (r'^        run: npm ci$', (r'^        working-directory: e2e$',)),
+        (r'^        uses: actions/cache@[0-9a-f]{40}(?: #.*)?$',
+         (r'^          path: ~/\.cache/ms-playwright$',
+          r"^          key: .*\$\{\{ runner.os \}\}.*\$\{\{ hashFiles\('e2e/package-lock.json'\) \}\}.*$")),
+        (r'^        run: npx playwright install --with-deps chromium$',
+         (r'^        working-directory: e2e$',)),
+    )
+    previous = -1
+    for pattern, settings in patterns:
+        matches = [index for index, block in enumerate(steps) if re.search(pattern, block, re.M)]
+        if len(matches) != 1 or not previous < matches[0] < smoke_index:
+            raise SystemExit('compose smoke setup is missing or out of order')
+        previous = matches[0]
+        block = steps[previous]
+        if re.search(r'^        (?:if|continue-on-error):', block, re.M):
+            raise SystemExit('compose smoke setup must run and report failures')
+        for setting in settings:
+            require_smoke(block, setting, 'wrong Node, npm, or Chromium cache setting')
+
+
+def check_compose_smoke(body, steps):
+    smoke_index = smoke_command_step(steps, 'bash deploy/ci/smoke.sh')
+    before = smoke_command_step(steps, 'bash deploy/ci/pgtools.sh')
+    after = smoke_command_step(steps, 'bash deploy/ci/stop.sh')
+    if not before < smoke_index < after:
+        raise SystemExit('compose smoke must run after pgtools.sh and before stop.sh')
+    require_smoke(body, r'^    timeout-minutes: 45$', 'keep the job timeout at 45 minutes')
+    smoke = steps[smoke_index]
+    require_smoke(smoke, r'^        id: smoke$', 'give the smoke step its id')
+    require_smoke(smoke, r'^        timeout-minutes: 10$', 'set the smoke timeout to 10 minutes')
+    if 'GITHUB_ENV' in smoke:
+        raise SystemExit('compose smoke must not write to GITHUB_ENV')
+    if re.search(r'^        (?:if|continue-on-error|env):', smoke, re.M):
+        raise SystemExit('compose smoke must run without workflow password variables and report failures')
+    check_smoke_setup(steps, smoke_index)
+    check_smoke_upload(steps, smoke_index)
+
+
+def test_compose_smoke_step():
+    body, steps = compose_smoke_steps()
+    check_compose_smoke(body, steps)
+    print('CI compose smoke step check passed.')
+
+
+test_compose_smoke_step()
 paths = list(Path('.github/workflows').rglob('*'))
 paths.extend(Path('deploy').rglob('*'))
 for path in paths:
