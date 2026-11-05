@@ -9,7 +9,7 @@ use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::UnlockLogin;
+use super::{UnlockLogin, UnlockOutcome};
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing, StorageError};
@@ -254,22 +254,26 @@ async fn the_permission_check_comes_first_for_an_operator_and_a_process_engineer
 }
 
 #[tokio::test]
-async fn a_failed_unlock_event_gives_the_storage_error_and_the_unlock_stays_committed() {
+async fn a_failed_unlock_event_completes_the_unlock_and_reports_the_lost_event() {
     let fixture = fixture();
     seed_failures(&fixture, "anna", 4);
     let (auth, meta) = fixture.actor(Role::Administrator).await;
     fixture.sink.fail_with(Fault::Unavailable);
-    let error = UnlockLogin::new(fixture.context.clone())
+    let outcome = UnlockLogin::new(fixture.context.clone())
         .execute(&auth, &meta, &anna(), admin_ip())
         .await
-        .unwrap_err();
+        .unwrap();
     assert!(
-        matches!(error, AppError::Storage(StorageError::Unavailable)),
-        "{error:?}"
+        matches!(outcome, UnlockOutcome::EventLost(StorageError::Unavailable)),
+        "{outcome:?}"
     );
-    assert_eq!(error.code(), ErrorCode::DB_005);
     assert_eq!(attempts_of(&fixture, "anna"), 0);
-    assert_eq!(fixture.store.audit_entries().len(), 1);
+    let entries = fixture.store.audit_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries.first().unwrap().action(),
+        AuditAction::LoginUnlocked
+    );
     assert!(fixture.sink.events().is_empty());
 }
 

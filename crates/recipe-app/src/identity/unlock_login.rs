@@ -13,6 +13,18 @@ use crate::context::{UseCase, audit_context};
 use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{AttemptRow, Isolation, Locked, NonEmpty};
 
+/// The result of an unlock that committed.
+///
+/// The type solves one problem: the write of the security event `unlock` follows the commit, so
+/// its fault must not hide a completed unlock (ADR-0130). The caller logs a lost event once.
+#[derive(Debug)]
+pub enum UnlockOutcome {
+    /// The unlock committed and the security event `unlock` is in the table.
+    Recorded,
+    /// The unlock committed and the write of the security event `unlock` failed.
+    EventLost(StorageError),
+}
+
 /// Removes the failed attempts of a login.
 ///
 /// The use case solves one problem: an Administrator must end the delay of a user who is locked
@@ -44,9 +56,11 @@ impl UnlockLogin {
     ///
     /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
     /// Returns `NotFound` (`E-WEB-005`) when the login is unknown.
-    /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
-    /// A failed write of the event `unlock` also returns the storage error. The unlock stays
-    /// committed then, and a repeated request deletes nothing more (ADR-0035 j).
+    /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails
+    /// before the commit or at the commit.
+    ///
+    /// A failed write of the event `unlock` after the commit is no error. The method returns
+    /// `UnlockOutcome::EventLost` with the storage error, and the caller logs it (ADR-0130).
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
@@ -54,7 +68,7 @@ impl UnlockLogin {
         meta: &RequestMeta,
         login: &Login,
         client_ip: IpAddr,
-    ) -> Result<(), AppError> {
+    ) -> Result<UnlockOutcome, AppError> {
         authorize(
             Self::OPERATION,
             auth.user(),
@@ -70,8 +84,10 @@ impl UnlockLogin {
             client_ip,
             meta.user_agent().cloned(),
         );
-        self.ctx.app.security.record(event).await?;
-        Ok(())
+        Ok(match self.ctx.app.security.record(event).await {
+            Ok(()) => UnlockOutcome::Recorded,
+            Err(lost) => UnlockOutcome::EventLost(lost),
+        })
     }
 
     /// Delete the attempts and commit `LoginUnlocked`. Return the user that was unlocked.
