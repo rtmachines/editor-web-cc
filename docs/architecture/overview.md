@@ -52,7 +52,11 @@ C4Container
     Rel(wal, db, "replication protocol as recipe_replicator")
 ```
 
-There is one application process. There is no message broker, no cache, and no second database. `walarchive` connects as `recipe_replicator`, a login role with the `REPLICATION` attribute (`data-model.md` 5.1). Compose runs seven services. Start order: `db` healthy, `backup-premigrate` exit 0, `migrate` exit 0, `app`, `proxy`. `backup` and `walarchive` depend only on `db`. Every long-running service has a healthcheck and `restart: always`. `backup-premigrate` and `migrate` have `restart: no` (ADR-0020). The service `backup` also runs the weekly restore test (ADR-0067). `reliability.md` section 7.1 gives the networks and the healthchecks of the services, and section 7.8 gives their limits (ADR-0065, ADR-0070).
+There is one application process. There is no message broker, no cache, and no second database. `walarchive` connects as `recipe_replicator`, a login role with the `REPLICATION` attribute (`data-model.md` 5.1).
+
+Compose runs seven services. Start order: `db` healthy, `backup-premigrate` exit 0, `migrate` exit 0, `app`, `proxy`. `backup` and `walarchive` depend only on `db`. Every long-running service has a healthcheck and `restart: always`. `backup-premigrate` and `migrate` have `restart: no` (ADR-0020).
+
+The service `backup` also runs the weekly restore test (ADR-0067). `reliability.md` section 7.1 gives the networks and the healthchecks of the services, and section 7.8 gives their limits (ADR-0065, ADR-0070).
 
 ## 4. Bounded contexts
 

@@ -88,7 +88,9 @@ Every advisory lock of the application uses the two-key form `pg_advisory_xact_l
 | 3 | Reserved for the audit head. No code takes it now | - |
 | 4 | `SetUserRole` and `DeactivateUser` (section 6), the guard lock of the last Administrator (ADR-0096) | `0` |
 
-Order of the class-2 keys. A command that can insert `plc_type` rows first parses every `TypeExpr` that it carries. `RebindTypeRevision` computes the array shape of every moved parameter instead. The command collects the class-2 keys that the resolution needs and sorts them in this order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before its first `plc_type` insert. Two commands therefore never take two class-2 keys in opposite orders. The commands are `DefineUdt`, `AddParameter`, `UpdateParameterDefinition`, and `RebindTypeRevision` (section 6).
+Order of the class-2 keys. A command that can insert `plc_type` rows first parses every `TypeExpr` that it carries. `RebindTypeRevision` computes the array shape of every moved parameter instead.
+
+The command collects the class-2 keys that the resolution needs and sorts them in this order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before its first `plc_type` insert. Two commands therefore never take two class-2 keys in opposite orders. The commands are `DefineUdt`, `AddParameter`, `UpdateParameterDefinition`, and `RebindTypeRevision` (section 6).
 
 The one-key form `pg_advisory_lock(bigint)` is a different key space. Only the `sqlx` migrator uses it (`reliability.md` 5).
 
@@ -467,7 +469,9 @@ CREATE INDEX plc_type_machine_id_idx ON plc_type (machine_id);
 CREATE INDEX plc_type_supersedes_type_id_idx ON plc_type (supersedes_type_id);
 ```
 
-`EnsureDerivedType` (internal operation, `domain-model.md` 5.1) resolves a `TypeExpr` of `domain-model.md` 2.1, the innermost element first. It creates a missing `STRING(n)`, `WSTRING(n)`, or array row with `INSERT ... ON CONFLICT DO NOTHING` on the matching unique index, then re-selects the row. Two concurrent calls get the same row. A new `STRING(n)` or `WSTRING(n)` row has `leaf_class = 'string'`. A new struct, array, `STRING(n)`, or `WSTRING(n)` row has `platforms = ARRAY[machine.plc_platform]`, the one platform of its machine. Before the first insert, the calling command takes every class-2 advisory lock that it needs, in the order of section 1.4. `DefineUdt` also takes the key of its struct name. No command takes a row lock on `plc_type`, because `recipe_app` has no `UPDATE` grant on it.
+`EnsureDerivedType` (internal operation, `domain-model.md` 5.1) resolves a `TypeExpr` of `domain-model.md` 2.1, the innermost element first. It creates a missing `STRING(n)`, `WSTRING(n)`, or array row with `INSERT ... ON CONFLICT DO NOTHING` on the matching unique index, then re-selects the row. Two concurrent calls get the same row. A new `STRING(n)` or `WSTRING(n)` row has `leaf_class = 'string'`. A new struct, array, `STRING(n)`, or `WSTRING(n)` row has `platforms = ARRAY[machine.plc_platform]`, the one platform of its machine.
+
+Before the first insert, the calling command takes every class-2 advisory lock that it needs, in the order of section 1.4. `DefineUdt` also takes the key of its struct name. No command takes a row lock on `plc_type`, because `recipe_app` has no `UPDATE` grant on it.
 
 The domain checks the absence of cycles (I8), the platform of all members, and the string length per platform (the `StringLength` table of `domain-model.md` 2.1). The database does not check these rules.
 
@@ -555,7 +559,11 @@ CREATE INDEX session_user_id_idx ON session (user_id);
 CREATE INDEX session_expires_at_idx ON session (expires_at);
 ```
 
-On every request the application runs one statement: `UPDATE session s SET last_seen_at = now(), expires_at = now() + $idle_timeout FROM app_user u WHERE s.id = $1 AND u.id = s.user_id AND s.expires_at > now() AND s.created_at > now() - $absolute_timeout AND u.is_active AND s.epoch = u.session_epoch RETURNING ...`. `$idle_timeout` is `session.idle_timeout`, and `$absolute_timeout` is `session.absolute_timeout`. The statement returns the user, the role, `must_change_password`, and the CSRF token. The request is unauthenticated when no row returns: the session is missing or expired, the user is inactive, or the epoch differs. A concurrent `DELETE` of the session therefore also gives no row (ADR-0035). The supervised job `cleanup` deletes rows with `expires_at < now()` or `created_at < now() - session.absolute_timeout` through the port `MaintenanceStore`. It runs every `session.cleanup_interval` (`reliability.md` 7.11).
+On every request the application runs one statement: `UPDATE session s SET last_seen_at = now(), expires_at = now() + $idle_timeout FROM app_user u WHERE s.id = $1 AND u.id = s.user_id AND s.expires_at > now() AND s.created_at > now() - $absolute_timeout AND u.is_active AND s.epoch = u.session_epoch RETURNING ...`. `$idle_timeout` is `session.idle_timeout`, and `$absolute_timeout` is `session.absolute_timeout`. The statement returns the user, the role, `must_change_password`, and the CSRF token.
+
+The request is unauthenticated when no row returns: the session is missing or expired, the user is inactive, or the epoch differs. A concurrent `DELETE` of the session therefore also gives no row (ADR-0035).
+
+The supervised job `cleanup` deletes rows with `expires_at < now()` or `created_at < now() - session.absolute_timeout` through the port `MaintenanceStore`. It runs every `session.cleanup_interval` (`reliability.md` 7.11).
 
 ### 3.7 `login_attempt`
 
@@ -577,7 +585,11 @@ CREATE INDEX login_attempt_ip_idx ON login_attempt (client_ip, attempted_at);
 CREATE INDEX login_attempt_attempted_at_idx ON login_attempt (attempted_at);
 ```
 
-The `Login` use case counts the failures and inserts its attempt row with `succeeded = false` in T1. T1 runs under `SELECT pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) and commits before the password check. T1 inserts no row when the per-IP budget is already reached. The 429 response then comes from the count alone, so a flood from one address adds no rows. The class-1 lock covers one login, not one address. Parallel attempts with other logins from one address can therefore add at most `argon2.permits − 1` rows above the budget (ADR-0035). T2 sets `succeeded = true` after a correct password (section 6). In read-only mode (Assumption A24), T1 and T2 run in the same way. The port `LoginAttemptStore` runs T1 and the attempt statement of T2. `recipe_app` can update the column `succeeded` only (section 5.2). The supervised job `cleanup` deletes rows older than `login.attempt_retention` every `login.attempt_cleanup_interval` through the port `MaintenanceStore` (`reliability.md` 7.11). It deletes at most `login_attempt.purge_batch` rows per statement, the oldest first, and repeats the statement while it deletes a full batch (section 6). `UnlockLogin` deletes the rows of one login.
+The `Login` use case counts the failures and inserts its attempt row with `succeeded = false` in T1. T1 runs under `SELECT pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) and commits before the password check. T1 inserts no row when the per-IP budget is already reached. The 429 response then comes from the count alone, so a flood from one address adds no rows. The class-1 lock covers one login, not one address. Parallel attempts with other logins from one address can therefore add at most `argon2.permits − 1` rows above the budget (ADR-0035).
+
+T2 sets `succeeded = true` after a correct password (section 6). In read-only mode (Assumption A24), T1 and T2 run in the same way. The port `LoginAttemptStore` runs T1 and the attempt statement of T2. `recipe_app` can update the column `succeeded` only (section 5.2).
+
+The supervised job `cleanup` deletes rows older than `login.attempt_retention` every `login.attempt_cleanup_interval` through the port `MaintenanceStore` (`reliability.md` 7.11). It deletes at most `login_attempt.purge_batch` rows per statement, the oldest first, and repeats the statement while it deletes a full batch (section 6). `UnlockLogin` deletes the rows of one login.
 
 ### 3.8 `security_event`
 
@@ -626,7 +638,11 @@ CREATE UNIQUE INDEX security_event_aggregate_unique
     WHERE kind IN ('login_failed', 'login_throttled', 'csrf_rejected');
 ```
 
-`audit_owner` owns this table. `recipe_app` has SELECT, the column grant `UPDATE (count)`, and `INSERT` on every column except `id`, `occurred_at`, and `count` (section 5.4, ADR-0035). The database therefore sets the time and the first count of each row. The trigger `security_event_guard` of section 5.4 allows an update only when `count` grows by 1 and no other column changes. Rows of the kinds `login_failed`, `login_throttled`, and `csrf_rejected` aggregate per `(client_ip, kind, minute)`. The port `SecurityEventSink` writes them with `INSERT ... ON CONFLICT ... DO UPDATE SET count = security_event.count + 1` on `security_event_aggregate_unique`. The row keeps the `login_hmac`, `user_id`, `user_agent`, and `request_id` of the first event of the minute. A flood from one address therefore adds at most one row per kind and minute. Apart from `count`, the table is append-only for `recipe_app`. Rows are kept 400 days (ADR-0022). The function `security_event_purge()` (section 4.12), owned by `audit_owner`, deletes older rows in batches. The supervised job `cleanup` calls it (`reliability.md` 2.4).
+`audit_owner` owns this table. `recipe_app` has SELECT, the column grant `UPDATE (count)`, and `INSERT` on every column except `id`, `occurred_at`, and `count` (section 5.4, ADR-0035). The database therefore sets the time and the first count of each row. The trigger `security_event_guard` of section 5.4 allows an update only when `count` grows by 1 and no other column changes.
+
+Rows of the kinds `login_failed`, `login_throttled`, and `csrf_rejected` aggregate per `(client_ip, kind, minute)`. The port `SecurityEventSink` writes them with `INSERT ... ON CONFLICT ... DO UPDATE SET count = security_event.count + 1` on `security_event_aggregate_unique`. The row keeps the `login_hmac`, `user_id`, `user_agent`, and `request_id` of the first event of the minute. A flood from one address therefore adds at most one row per kind and minute. Apart from `count`, the table is append-only for `recipe_app`.
+
+Rows are kept 400 days (ADR-0022). The function `security_event_purge()` (section 4.12), owned by `audit_owner`, deletes older rows in batches. The supervised job `cleanup` calls it (`reliability.md` 2.4).
 
 The migration `0006_operations.sql` adds the index `security_event_occurred_at_idx` on `occurred_at` (section 5.5, ADR-0069 (k)). The index serves `security_event_purge()` and the two alert sums of `reliability.md` 3.7. A row of the kind `audit_chain_broken` holds the `request_id` of the run of the job `audit_chain_check` (ADR-0060 (s)).
 
@@ -1275,7 +1291,9 @@ CREATE TRIGGER recipe_freeze_identifiers
 
 ### 4.9 `audit_hash_chain` (ADR-0022)
 
-Every `audit_log` row carries `chain_seq`, `prev_hash`, and `entry_hash`. The trigger function locks the single row of `audit_chain_head` (3.16) with `FOR UPDATE`. This row lock serializes every insert into `audit_log`. A second writer waits for the commit of the first writer and then reads the committed head. The function sets `chain_seq = last_seq + 1` and `entry_hash = sha256(prev_hash || canonical)`. Then it moves the head to the new row. A rollback also rolls back the head, so `chain_seq` has no gaps.
+Every `audit_log` row carries `chain_seq`, `prev_hash`, and `entry_hash`. The trigger function locks the single row of `audit_chain_head` (3.16) with `FOR UPDATE`. This row lock serializes every insert into `audit_log`. A second writer waits for the commit of the first writer and then reads the committed head.
+
+The function sets `chain_seq = last_seq + 1` and `entry_hash = sha256(prev_hash || canonical)`. Then it moves the head to the new row. A rollback also rolls back the head, so `chain_seq` has no gaps.
 
 `canonical` is the text of a JSON object with a constant list of columns. Timestamps are epoch microseconds, so the text does not depend on the session `TimeZone`. The function `audit_canonical` builds the text. The trigger and the nightly check both call it.
 
@@ -1336,7 +1354,11 @@ CREATE TRIGGER audit_log_hash_chain
     FOR EACH ROW EXECUTE FUNCTION audit_hash_chain();
 ```
 
-The application sends `chain_seq`, `prev_hash`, and `entry_hash` as NULL. The trigger sets all three. No login role holds `UPDATE` or `DELETE` on `audit_log` (section 5). After `0003_grants.sql`, `recipe_migrator` holds no privilege on the audit objects. It can get them only through `SET ROLE audit_owner` (section 5.1). The chain can therefore break only through the superuser or through a migration. The nightly check finds such a break. ADR-0086 names the changes that it cannot find.
+The application sends `chain_seq`, `prev_hash`, and `entry_hash` as NULL. The trigger sets all three.
+
+No login role holds `UPDATE` or `DELETE` on `audit_log` (section 5). After `0003_grants.sql`, `recipe_migrator` holds no privilege on the audit objects. It can get them only through `SET ROLE audit_owner` (section 5.1). The chain can therefore break only through the superuser or through a migration.
+
+The nightly check finds such a break. ADR-0086 names the changes that it cannot find.
 
 The supervised job `audit_chain_check` runs the check every night at `audit.check_time` (`reliability.md` 7.11). It also runs one catch-up check after a start (ADR-0060 (v), (w)):
 
@@ -1631,7 +1653,11 @@ No role `pg_isready` exists, and `01-roles.sh` never creates one. The probe ends
 
 A cluster that `restore-volume` fills never runs `01-roles.sh` (ADR-0103 (h) to (n)). The roles, the database `recipe`, and the schema `audit_guard` with its event trigger come from the backup set. The roles are the roles of the set, not of the current script. `reliability.md` 7.7, "Restore into production", gives the `pg_hba.conf`, the `REVOKE` statements, and the passwords of such a cluster.
 
-`recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. The membership exists because PostgreSQL 16 allows `ALTER ... OWNER TO audit_owner` only to a member of `audit_owner`. The migrator does not inherit the privileges of `audit_owner`. `0003_grants.sql` runs every grant on the audit objects first, while `recipe_migrator` still owns them. Then it transfers the ownership. The implicit privileges of the old owner move to the new owner, and `audit_owner` becomes the grantor of the earlier grants. After the transfer, `recipe_migrator` holds no privilege on the audit objects. `0003_grants.sql` does not use `SET ROLE`. A later migration runs `SET ROLE audit_owner` for three purposes only. It creates an object that `audit_owner` owns, or it changes an audit object (section 5.5, ADR-0069 (m)). It can also write the audit rows of a data migration that changes catalog rows (sections 8 and 10). Only a migration file runs `SET ROLE`, and the same file runs `RESET ROLE`.
+`recipe_migrator` is a member of `audit_owner` with `INHERIT FALSE`. The membership exists because PostgreSQL 16 allows `ALTER ... OWNER TO audit_owner` only to a member of `audit_owner`. The migrator does not inherit the privileges of `audit_owner`.
+
+`0003_grants.sql` runs every grant on the audit objects first, while `recipe_migrator` still owns them. Then it transfers the ownership. The implicit privileges of the old owner move to the new owner, and `audit_owner` becomes the grantor of the earlier grants. After the transfer, `recipe_migrator` holds no privilege on the audit objects. `0003_grants.sql` does not use `SET ROLE`.
+
+A later migration runs `SET ROLE audit_owner` for three purposes only. It creates an object that `audit_owner` owns, or it changes an audit object (section 5.5, ADR-0069 (m)). It can also write the audit rows of a data migration that changes catalog rows (sections 8 and 10). Only a migration file runs `SET ROLE`, and the same file runs `RESET ROLE`.
 
 `audit_owner` holds no `CREATE` on `public` after `0003`. A statement such as `CREATE INDEX` or `CREATE OR REPLACE FUNCTION` on an audit object needs it. A new object of `audit_owner` needs it too (section 5.5). A migration with such a change runs five steps in one file:
 
@@ -1643,7 +1669,13 @@ A cluster that `restore-volume` fills never runs `01-roles.sh` (ADR-0103 (h) to 
 
 A concurrent index on an audit object is a runbook procedure, not a migration. A migration with `CREATE INDEX CONCURRENTLY` holds that one statement only (section 8), so it cannot run the five steps. The operator connects as `recipe_migrator` and runs the five steps in one `psql` session, with `CREATE INDEX CONCURRENTLY` as step 3 (`reliability.md` 7.10). The next migration records the index with `CREATE INDEX IF NOT EXISTS` as step 3 of the five steps.
 
-Residual risk: the migrator credential can still run `SET ROLE audit_owner`. With that role it also gets the read rights of `pg_read_all_stats` (ADR-0069). The credential exists only inside the one-shot `migrate` container (ADR-0020). The hash chain of 4.9 and the nightly check expose a changed row when the later hashes and the head stay unchanged. They do not expose every rewrite, and ADR-0022 and ADR-0086 name the limits. A full rewrite with recomputed hashes and a new head stays undetectable without an off-host copy. A restore from backup also re-creates the roles from the globals dump of `reliability.md` section 7.7. That dump holds no password, so the restore sets the passwords from the secret files (ADR-0033). The event trigger `audit_objects_dropped` stops a drop of an audit object by every role except `audit_owner`. It compares the object type and the bare name, so a rename of `public` no longer bypasses it (ADR-0034, ADR-0097).
+Residual risk: the migrator credential can still run `SET ROLE audit_owner`. With that role it also gets the read rights of `pg_read_all_stats` (ADR-0069). The credential exists only inside the one-shot `migrate` container (ADR-0020).
+
+The hash chain of 4.9 and the nightly check expose a changed row when the later hashes and the head stay unchanged. They do not expose every rewrite, and ADR-0022 and ADR-0086 name the limits. A full rewrite with recomputed hashes and a new head stays undetectable without an off-host copy.
+
+A restore from backup also re-creates the roles from the globals dump of `reliability.md` section 7.7. That dump holds no password, so the restore sets the passwords from the secret files (ADR-0033).
+
+The event trigger `audit_objects_dropped` stops a drop of an audit object by every role except `audit_owner`. It compares the object type and the bare name, so a rename of `public` no longer bypasses it (ADR-0034, ADR-0097).
 
 A rename of `public` stays possible for `recipe_migrator`. After the rename, the migrator can create a new schema `public` with a look-alike `audit_log` that has no trigger. The application then writes new entries to that table, and the nightly check reads it. The real history stays in the renamed schema. This path adds no authority beyond `SET ROLE audit_owner`, which the migrator already has (ADR-0097).
 
@@ -1738,7 +1770,13 @@ GRANT DELETE ON session, login_attempt, draft_editor, parameter, parameter_limit
 
 ### 5.3 Grant test
 
-CI starts a fresh cluster, runs `01-roles.sh`, and applies every migration of `migrations/` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app`. It compares `information_schema.role_table_grants`, `information_schema.role_column_grants`, and `information_schema.role_routine_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`. The list holds every grant of 5.2, 5.4, and 5.5. It also holds the column grants `UPDATE (succeeded)` on `login_attempt`, `UPDATE (count)` on `security_event`, and the column `INSERT` grants of 5.4 on `security_event`. It holds the column `INSERT` grants of `audit_log` from 5.2 and no table-level `INSERT` on `audit_log` (ADR-0098 (d)). It holds the routine rows of `security_event_purge()` and `replication_state()` (ADR-0069 (q)). It holds no sequence grant. The test checks with `has_function_privilege` that `PUBLIC`, `recipe_backup`, and `recipe_migrator` cannot run `replication_state()` (ADR-0069 (i)). It checks that `recipe_app` holds no `pg_read_all_stats` and that `audit_owner` holds it. A difference fails the test. The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role. It checks that `audit_owner` holds no `CREATE` on `public`. It checks that the guard list of the event trigger `audit_objects_dropped` names every table and function that `audit_owner` owns, and that a drop by `recipe_migrator` fails (ADR-0034). CI applies a test migration with the five steps of 5.1 and then runs the same check again.
+CI starts a fresh cluster, runs `01-roles.sh`, and applies every migration of `migrations/` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app`. It compares `information_schema.role_table_grants`, `information_schema.role_column_grants`, and `information_schema.role_routine_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`.
+
+The list holds every grant of 5.2, 5.4, and 5.5. It also holds the column grants `UPDATE (succeeded)` on `login_attempt`, `UPDATE (count)` on `security_event`, and the column `INSERT` grants of 5.4 on `security_event`. It holds the column `INSERT` grants of `audit_log` from 5.2 and no table-level `INSERT` on `audit_log` (ADR-0098 (d)). It holds the routine rows of `security_event_purge()` and `replication_state()` (ADR-0069 (q)). It holds no sequence grant.
+
+The test checks with `has_function_privilege` that `PUBLIC`, `recipe_backup`, and `recipe_migrator` cannot run `replication_state()` (ADR-0069 (i)). It checks that `recipe_app` holds no `pg_read_all_stats` and that `audit_owner` holds it. A difference fails the test.
+
+The test also reads `pg_auth_members` and checks that `recipe_migrator` is a member of `audit_owner` with `inherit_option = false`. It checks that `audit_owner` owns the audit objects and that `recipe_migrator` holds no privilege on them. It checks that `recipe_app` is not a superuser, owns no table, and cannot `SET ROLE` to any other role. It checks that `audit_owner` holds no `CREATE` on `public`. It checks that the guard list of the event trigger `audit_objects_dropped` names every table and function that `audit_owner` owns, and that a drop by `recipe_migrator` fails (ADR-0034). CI applies a test migration with the five steps of 5.1 and then runs the same check again.
 
 The test also compares the rights of `PUBLIC` in the schema `public`. It reads four sources: the schema, the tables and sequences, the columns, and the functions and procedures. A default right counts as a right of `PUBLIC` unless a `REVOKE` changes it. Each `PUBLIC` line of `grants.expected` starts with `PUBLIC:`, for example `PUBLIC:set_updated_at()|EXECUTE`. The queries follow ADR-0127 (j) to (m).
 
@@ -1938,7 +1976,9 @@ REVOKE CREATE ON SCHEMA public FROM audit_owner;
 
 ## 6. Transactional operations
 
-Every command runs in exactly one transaction, except `Login` and `ChangeOwnPassword`, which use the two short transactions T1 and T2 (see the rows, ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2. It is not a command (ADR-0109 (m)). A `security_event` row has its own short transaction through the port `SecurityEventSink`. The commit path of each operation is in `domain-model.md` section 5. `EnsureDerivedType` is an internal operation and runs inside the transaction of its caller. The use case opens the transaction through `UnitOfWork`. The audit `INSERT` is part of the same transaction. The `COMMIT` either persists everything or nothing (R29).
+Every command runs in exactly one transaction, except `Login` and `ChangeOwnPassword`, which use the two short transactions T1 and T2 (see the rows, ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2. It is not a command (ADR-0109 (m)).
+
+A `security_event` row has its own short transaction through the port `SecurityEventSink`. The commit path of each operation is in `domain-model.md` section 5. `EnsureDerivedType` is an internal operation and runs inside the transaction of its caller. The use case opens the transaction through `UnitOfWork`. The audit `INSERT` is part of the same transaction. The `COMMIT` either persists everything or nothing (R29).
 
 Rules:
 
@@ -2003,7 +2043,9 @@ Rules:
 
 ## 7. PLC primitive type matrix (Assumption A3)
 
-The draft says "required" types without a list. This matrix is the seed content of `plc_type` for `kind = 'primitive'`. A migration can add a row. To delete a row, a migration disables the trigger `plc_type_immutable` of 4.6, deletes the row, and enables the trigger again. The application can do neither. A migration after `0004` that adds or deletes a row writes one audit row per changed row (sections 8 and 10). "S7 size" is the size of the type on S7 in bytes. It sets the width letter of an address on every platform with an address: `X` for `BOOL`, `B` for 1 byte, `W` for 2 bytes, `D` for 4 bytes. A larger type uses `B` and the address of its first byte. "Class" is the value of `plc_type.leaf_class` (`LeafClass` of `domain-model.md` 2.1). "Unit" is the base unit of a `duration` or `instant` leaf (Assumption A43). The base-unit table of `domain-model.md` 2.1 gives the range of each count.
+The draft says "required" types without a list. This matrix is the seed content of `plc_type` for `kind = 'primitive'`. A migration can add a row. To delete a row, a migration disables the trigger `plc_type_immutable` of 4.6, deletes the row, and enables the trigger again. The application can do neither. A migration after `0004` that adds or deletes a row writes one audit row per changed row (sections 8 and 10).
+
+"S7 size" is the size of the type on S7 in bytes. It sets the width letter of an address on every platform with an address: `X` for `BOOL`, `B` for 1 byte, `W` for 2 bytes, `D` for 4 bytes. A larger type uses `B` and the address of its first byte. "Class" is the value of `plc_type.leaf_class` (`LeafClass` of `domain-model.md` 2.1). "Unit" is the base unit of a `duration` or `instant` leaf (Assumption A43). The base-unit table of `domain-model.md` 2.1 gives the range of each count.
 
 | Type | Class | Unit | S7 size | S7 width | CodesysIec | TwinCat3 | S7_1200 | S7_1500 | S7_300 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -2163,4 +2205,6 @@ State rule for `before_state` and `after_state` (the same rule as ADR-0005 and `
 | `app_user` | `app_user` | user id |
 | `app_setting` | `app_setting` | setting id |
 
-`entity_type` is the table name of the changed row, with one exception. A change of a `parameter_limit` row or a `parameter_translation` row writes `entity_type = 'parameter'` and `entity_id` = the parameter id. The diff names the leaf path of the limit or the language of the translation. `draft_editor` rows are not audited. `UserLoggedIn` and `UserLoggedOut` write `entity_type = 'app_user'` and `entity_id` = the user id, because `session.id` is text and `entity_id` is a UUID. Their state object holds `session_ref`, the first 16 hex characters of the session id. The audit filter of `AuditViewRecipes` (`api.md` 2.9) selects `aggregate_type = 'recipe'`.
+`entity_type` is the table name of the changed row, with one exception. A change of a `parameter_limit` row or a `parameter_translation` row writes `entity_type = 'parameter'` and `entity_id` = the parameter id. The diff names the leaf path of the limit or the language of the translation. `draft_editor` rows are not audited.
+
+`UserLoggedIn` and `UserLoggedOut` write `entity_type = 'app_user'` and `entity_id` = the user id, because `session.id` is text and `entity_id` is a UUID. Their state object holds `session_ref`, the first 16 hex characters of the session id. The audit filter of `AuditViewRecipes` (`api.md` 2.9) selects `aggregate_type = 'recipe'`.

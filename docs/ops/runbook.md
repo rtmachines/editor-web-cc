@@ -806,7 +806,9 @@ The section "Copy the backups off site" describes the off-site audit copy of ste
 The next completed run is the applicable run that completes first (ADR-0100, `data-model.md` 4.9).
 The catch-up run starts after `audit.catchup_delay`. It applies when the restored `audit.last_check_at` is missing or older than `audit.catchup_age` at the start of `app`.
 The nightly run at `audit.check_time` stays active in all cases. A newer completed nightly check suppresses the catch-up run.
-`reliability.md` 7.11 gives the values of these settings. The wait is the delay to the start of the run plus the time of the check (ADR-0100).
+`reliability.md` 7.11 gives the values of these settings.
+
+The wait is the delay to the start of the run plus the time of the check (ADR-0100).
 No setting limits the time of the whole check. `audit.check_statement_timeout` limits the head read and each batch. `audit.max_check_age` only raises an alert. The wait therefore has no fixed upper limit.
 Read the result in three places.
 
@@ -984,6 +986,7 @@ The recovery time objective is 1 hour (R31, `reliability.md` 7.7).
 The drill runs steps 5 and 6 of "Recover from the WAL archive" on a drill volume while the stack runs.
 It never switches the drill volume into production. The file `pitr-drill` and the switch keep that volume out of production (ADR-0106 (j)).
 The script checks the free space first, so the drill never puts `app` into read-only mode.
+
 Run the drill after each upgrade of `reliability.md` 7.10. The last step of "Upgrade" links this section.
 
 Use these placeholders:
@@ -1166,9 +1169,13 @@ Case 1 shows the files of 0.1.0 or another `compose.yaml` without an external `p
 
 Segment check of step 2 (ADR-0104, ADR-0105 (h), (n)):
 The new `walarchive` refuses to start when `/wal` holds a segment and the file `/wal/.system-identifier` is missing.
-An installation of 0.1.0 is in this state. Run the check once in step 2, after the name check.
+An installation of 0.1.0 is in this state.
+
+Run the check once in step 2, after the name check.
 The check must run before step 8 replaces `db`. In step 2, `.env` still holds the previous tag.
-The check runs in a new container of the previous image. Never use `docker compose exec` into the old `walarchive` container.
+The check runs in a new container of the previous image.
+
+Never use `docker compose exec` into the old `walarchive` container.
 The old `walarchive` of 0.1.0 can restart in a loop after a restart of `db` or of the host. The check does not need that container.
 The check runs only when the file is missing.
 Run all steps in one shell, because step 2 uses the variable `step`.
@@ -1238,6 +1245,7 @@ The step compares the identifier of `db` with `xlp_sysid` of the newest complete
 The step therefore checks the value and does not trust the volume name.
 Without a complete segment, the step reads the first page of the newest `.partial` file (ADR-0105 (h)).
 That page has the long page header, because `pg_receivewal` writes each segment from its start.
+
 If the step finds no complete segment and no `.partial` file, run `SELECT pg_switch_wal()` in `db` as `postgres`.
 Wait for a complete segment in `RECIPE_WALARCHIVE_DIR`. Then run step 2 again.
 A new complete segment arrives only while the old `walarchive` streams.
@@ -2090,6 +2098,7 @@ The `request_id` is also present in the audit log and in the security events (`r
 
 The supervisor writes a line for a failed run and for a panic of a job only. The supervisor writes no line for a run that ends well (ADR-0100, `crates/recipe-server/src/supervisor.rs`).
 So a missing line does not show that no fault occurred. It also does not show that a run happened.
+
 A failed run writes an `ERROR` line with the field `error_code`. The job `alerts` writes a `WARN` line instead (ADR-0089 (d)).
 A panic writes an `ERROR` line with the value `panic` in the field `outcome` of the span (ADR-0088 (a)).
 
