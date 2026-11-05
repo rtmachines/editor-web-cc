@@ -29,6 +29,7 @@ use tracing_subscriber::fmt::MakeWriter;
 use uuid::Uuid;
 
 use super::{HealthSettings, HealthState, health_router};
+use crate::pages::test_helpers::{SECURITY_HEADERS, assert_common_headers};
 use crate::settings::WebSettings;
 use crate::test_support::{Fixture, PEER, Reply, call, capture_logs, get_with, install, request};
 
@@ -46,15 +47,6 @@ const TEST_BOUND: Duration = Duration::from_secs(7200);
 const OK_BODY: &str = "ok";
 /// The body of a not ready answer (ADR-0059 (g)).
 const NOT_READY_BODY: &str = "not ready";
-/// The headers of `api.md` section 9 that every health answer carries.
-const SECURITY_HEADERS: [&str; 5] = [
-    "content-security-policy",
-    "x-content-type-options",
-    "referrer-policy",
-    "strict-transport-security",
-    "cache-control",
-];
-
 /// The gate of a probe that waits until the test lets it go.
 #[derive(Default)]
 struct Gate {
@@ -507,14 +499,10 @@ async fn every_answer_has_the_request_id_and_the_security_headers() {
     let mut seen = Vec::new();
     for path in ["/healthz", "/readyz", "/missing"] {
         let reply = harness.get(path).await;
+        assert_common_headers(&reply, path, path);
         let id = reply.header("x-request-id");
-        let parsed = Uuid::parse_str(&id).unwrap();
-        assert_eq!(parsed.get_version_num(), 7, "{path}: {id}");
         assert!(!seen.contains(&id), "{path}: the id repeats");
         seen.push(id);
-        for name in SECURITY_HEADERS {
-            assert!(!reply.header(name).is_empty(), "{path}: {name}");
-        }
     }
 }
 
@@ -538,7 +526,7 @@ async fn the_security_headers_equal_those_of_the_public_router() {
     let public = crate::router(fixture.state.clone()).layer(MockConnectInfo(PEER));
     let reference = bounded(get_with(&public, "/missing", &[])).await;
     let health = harness.get("/healthz").await;
-    for name in SECURITY_HEADERS {
+    for (name, _value) in SECURITY_HEADERS {
         assert!(!reference.header(name).is_empty(), "{name}");
         assert_eq!(health.header(name), reference.header(name), "{name}");
     }

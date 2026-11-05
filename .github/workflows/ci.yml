@@ -506,13 +506,15 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
-          tool: cargo-llvm-cov@0.6
+          tool: cargo-llvm-cov@0.6.24
+      - name: Test the coverage gate
+        run: python3 -I -B tools/test_coverage_gate.py
       - name: Measure the line coverage
         run: cargo llvm-cov --workspace --all-features --locked --json --summary-only --output-path target/llvm-cov-summary.json
       # reliability.md section 6: 80 % line coverage per crate.
-      # A crate with no executable line passes the gate.
+      # A crate with production files and no reported lines fails the gate.
       - name: Coverage gate (80 % lines per crate)
-        run: python3 -I tools/coverage-gate.py target/llvm-cov-summary.json
+        run: python3 -I -B tools/coverage-gate.py target/llvm-cov-summary.json
 
   # Scope: ADR-0023. docs/plan/ is not normative and is out of scope.
   ste-lint:
@@ -545,3 +547,19 @@ jobs:
           persist-credentials: false
       - name: Check the frozen migrations
         run: python3 -I -B deploy/ci/migration_freeze.py
+
+  migration-rewrite:
+    name: Migration rewrite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the migration rewrite check
+        run: python3 -I -B deploy/ci/test_migration_rewrite.py
+      - name: Check the migrations for rewrites
+        run: python3 -I -B deploy/ci/migration_rewrite.py migrations

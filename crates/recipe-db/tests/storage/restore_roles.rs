@@ -22,6 +22,10 @@ const EXPECTED_PATH: &str = concat!(
     "/../../deploy/pgtools/restore-roles.expected"
 );
 const GRANTS: &str = include_str!("../grants.expected");
+/// The start of a line of `grants.expected` for a right of `PUBLIC`. The restore query compares the
+/// rights of `recipe_app`, and the grant test of `grants/checks.rs` covers the rights of `PUBLIC`
+/// (ADR-0127).
+const PUBLIC_PREFIX: &str = "PUBLIC:";
 const PLACEHOLDER: &str = "@COMPOSE_SUBNET@";
 /// The subnet of the harness (`support/container.rs`). `01-roles.sh` writes it into the file.
 const HARNESS_SUBNET: &str = "172.28.0.0/16";
@@ -317,7 +321,7 @@ async fn the_grant_lines_equal_the_grant_file() {
         .collect();
     let expected: BTreeSet<String> = GRANTS
         .lines()
-        .filter(|line| !line.is_empty())
+        .filter(|line| !line.is_empty() && !line.starts_with(PUBLIC_PREFIX))
         .map(str::to_owned)
         .collect();
     let missing: Vec<&String> = expected.difference(&actual).collect();

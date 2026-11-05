@@ -8,6 +8,7 @@
 use axum::http::{Method, StatusCode};
 use recipe_domain::identity::Role;
 
+use crate::pages::test_helpers::assert_common_headers;
 pub(crate) use crate::pages::test_helpers::assert_error;
 use crate::test_support::plant::M12_ID;
 use crate::test_support::recipes::LINE_KEY;
@@ -208,7 +209,10 @@ pub(crate) fn assert_redirect(reply: &Reply, location: &str, what: &str) {
 }
 
 /// Assert that `reply` is the answer that `want` names.
-pub(crate) fn assert_want(reply: &Reply, want: Want, what: &str) {
+///
+/// The answer to the request for `path` must also carry the common headers (design D4).
+pub(crate) fn assert_want(reply: &Reply, path: &str, want: Want, what: &str) {
+    assert_common_headers(reply, path, what);
     match want {
         Want::Page => assert_eq!(reply.status, StatusCode::OK, "{what}: {}", reply.body),
         Want::Login => assert_redirect(reply, "/login", what),

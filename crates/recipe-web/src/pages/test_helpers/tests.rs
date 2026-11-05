@@ -1,11 +1,13 @@
-//! Tests of `assert_clean_html` with literal inputs (task 7.1, design D10).
+//! Tests of the page helpers: `assert_clean_html` (task 7.1, design D10) and `assert_common_headers` (design D4).
 
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
+use uuid::Uuid;
 
 use super::{
-    askama_escape, assert_clean_html, assert_error, assert_no_user_text_in_hx_attributes, encode,
-    hx_attributes, payloads,
+    SECURITY_HEADERS, askama_escape, assert_clean_html, assert_common_headers, assert_error,
+    assert_no_user_text_in_hx_attributes, encode, hx_attributes, payloads,
 };
+use crate::WebSettings;
 use crate::test_support::Reply;
 
 #[test]
@@ -192,7 +194,7 @@ fn assert_error_accepts_the_status_with_the_code_in_the_body() {
 }
 
 #[test]
-#[should_panic(expected = "wrong code")]
+#[should_panic(expected = "wrong code: the code E-PLT-011 is missing")]
 fn assert_error_rejects_another_code() {
     let reply = Reply {
         status: StatusCode::CONFLICT,
@@ -210,4 +212,184 @@ fn clean_html_accepts_text_that_only_looks_like_a_handler() {
     assert_clean_html("<p>a onerror=b /onbegin=c</p>");
     assert_clean_html("<a href=\"/x\">one=1</a>");
     assert_clean_html("<script src=\"/static/htmx.min.js\"></script>");
+}
+
+/// A path of a page. Its answer must have `Cache-Control: no-store`.
+const PAGE_PATH: &str = "/recipes";
+/// A path of a static file. Its answer must have the cache rule of `static.cache_max_age`.
+const STATIC_PATH: &str = "/static/app.css";
+/// A well formed UUID of version 4. The check of the request id accepts version 7 only.
+const VERSION_4_ID: &str = "11111111-1111-4111-8111-111111111111";
+
+/// Build a reply that has every header of `SECURITY_HEADERS` and a version 7 request id.
+///
+/// The cache rule is the one that `api.md` section 9 gives for `path`.
+fn complete_reply(path: &str) -> Reply {
+    let settings = WebSettings::default();
+    let cache = if path.starts_with("/static/") {
+        format!(
+            "public, max-age={}",
+            settings.static_cache_max_age.as_secs()
+        )
+    } else {
+        "no-store".to_owned()
+    };
+    let hsts = format!(
+        "max-age={}; includeSubDomains",
+        settings.hsts_max_age.as_secs()
+    );
+    let mut headers = HeaderMap::new();
+    headers.insert("x-request-id", Uuid::now_v7().to_string().parse().unwrap());
+    for (name, value) in SECURITY_HEADERS {
+        let text = match name {
+            "cache-control" => cache.as_str(),
+            "strict-transport-security" => hsts.as_str(),
+            _ => value.unwrap(),
+        };
+        headers.insert(name, text.parse().unwrap());
+    }
+    Reply {
+        status: StatusCode::OK,
+        headers,
+        body: String::new(),
+    }
+}
+
+/// Return `reply` without the header `name`.
+fn without(mut reply: Reply, name: &str) -> Reply {
+    reply.headers.remove(name);
+    reply
+}
+
+/// Return `reply` with the header `name` set to `value`.
+fn with(mut reply: Reply, name: &'static str, value: &str) -> Reply {
+    reply.headers.insert(name, value.parse().unwrap());
+    reply
+}
+
+#[test]
+fn common_headers_accept_a_complete_reply_to_a_page_path() {
+    assert_common_headers(&complete_reply(PAGE_PATH), PAGE_PATH, "page");
+}
+
+#[test]
+fn common_headers_accept_the_static_cache_rule_on_a_static_path() {
+    assert_common_headers(&complete_reply(STATIC_PATH), STATIC_PATH, "static");
+}
+
+#[test]
+fn security_headers_name_the_five_headers_of_api_section_9() {
+    let names: Vec<&str> = SECURITY_HEADERS.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        names,
+        [
+            "content-security-policy",
+            "x-content-type-options",
+            "referrer-policy",
+            "strict-transport-security",
+            "cache-control",
+        ]
+    );
+}
+
+#[test]
+#[should_panic(expected = "the request id is missing")]
+fn common_headers_reject_a_reply_without_a_request_id() {
+    let reply = without(complete_reply(PAGE_PATH), "x-request-id");
+    assert_common_headers(&reply, PAGE_PATH, "no id");
+}
+
+#[test]
+#[should_panic(expected = "the request id is not a UUID")]
+fn common_headers_reject_a_request_id_that_is_not_a_uuid() {
+    let reply = with(complete_reply(PAGE_PATH), "x-request-id", "not-a-uuid");
+    assert_common_headers(&reply, PAGE_PATH, "bad id");
+}
+
+#[test]
+#[should_panic(expected = "the request id is not version 7")]
+fn common_headers_reject_a_version_4_request_id() {
+    let id = VERSION_4_ID.to_owned();
+    let reply = with(complete_reply(PAGE_PATH), "x-request-id", &id);
+    assert_common_headers(&reply, PAGE_PATH, "v4 id");
+}
+
+/// Define a test that removes the header `$name` and expects the panic of the presence check.
+///
+/// The macro takes the whole `expected` text as a literal, because `should_panic` accepts no macro.
+macro_rules! missing_header_test {
+    ($test:ident, $name:literal, $expected:literal) => {
+        #[test]
+        #[should_panic(expected = $expected)]
+        fn $test() {
+            let reply = without(complete_reply(PAGE_PATH), $name);
+            assert_common_headers(&reply, PAGE_PATH, "missing");
+        }
+    };
+}
+
+missing_header_test!(
+    common_headers_reject_a_reply_without_the_csp,
+    "content-security-policy",
+    "the header content-security-policy is missing"
+);
+missing_header_test!(
+    common_headers_reject_a_reply_without_nosniff,
+    "x-content-type-options",
+    "the header x-content-type-options is missing"
+);
+missing_header_test!(
+    common_headers_reject_a_reply_without_the_referrer_policy,
+    "referrer-policy",
+    "the header referrer-policy is missing"
+);
+missing_header_test!(
+    common_headers_reject_a_reply_without_hsts,
+    "strict-transport-security",
+    "the header strict-transport-security is missing"
+);
+missing_header_test!(
+    common_headers_reject_a_reply_without_cache_control,
+    "cache-control",
+    "the header cache-control is missing"
+);
+
+#[test]
+#[should_panic(expected = "the value of content-security-policy is wrong")]
+fn common_headers_reject_a_changed_csp() {
+    let reply = with(
+        complete_reply(PAGE_PATH),
+        "content-security-policy",
+        "default-src *",
+    );
+    assert_common_headers(&reply, PAGE_PATH, "csp");
+}
+
+#[test]
+#[should_panic(expected = "the value of strict-transport-security is wrong")]
+fn common_headers_reject_a_changed_hsts_value() {
+    let reply = with(
+        complete_reply(PAGE_PATH),
+        "strict-transport-security",
+        "max-age=1",
+    );
+    assert_common_headers(&reply, PAGE_PATH, "hsts");
+}
+
+#[test]
+#[should_panic(expected = "the value of cache-control is wrong")]
+fn common_headers_reject_a_public_cache_rule_on_a_page_path() {
+    let reply = with(
+        complete_reply(PAGE_PATH),
+        "cache-control",
+        "public, max-age=86400",
+    );
+    assert_common_headers(&reply, PAGE_PATH, "page cache");
+}
+
+#[test]
+#[should_panic(expected = "the value of cache-control is wrong")]
+fn common_headers_reject_no_store_on_a_static_path() {
+    let reply = with(complete_reply(STATIC_PATH), "cache-control", "no-store");
+    assert_common_headers(&reply, STATIC_PATH, "static cache");
 }

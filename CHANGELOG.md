@@ -21,11 +21,15 @@ This file records the notable changes of the recipe editor. The format follows [
 - More layout tests cover `WSTRING(n)`, an `ARRAY OF BOOL` with more than one dimension, an array of an array, and an odd `STRING(n)` before a `BYTE`.
 - Golden export tests cover each primitive type and its limit on `S7_300`, `S7_1200`, and `S7_1500`.
 - Storage tests write the 64-bit extremes and read them back through both value decoders and the limit columns.
+- CI rejects a migration that rewrites a table or scans it under an exclusive lock (ADR-0127).
+- The grant test compares the rights of `PUBLIC` with `grants.expected` (ADR-0127).
 
 ### Changed
 
 - The read check of the parameter table runs under `timeout.validation` and can give `503 E-WEB-009` (ADR-0122).
 - The check of an `Approved` version on the version page shares `export.permits` with the export and runs under `timeout.export` (ADR-0122).
+- The coverage gate counts production lines only. It fails on an inline test module in `src/` (ADR-0127).
+- The route matrix tests assert the common headers of each cell (ADR-0127).
 
 ### Fixed
 

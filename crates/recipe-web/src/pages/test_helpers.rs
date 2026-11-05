@@ -10,7 +10,9 @@ use recipe_app::identity::new_request_id;
 use recipe_app::recipe::{ApproveVersion, ApproveVersionInput, CreateVersion, CreateVersionInput};
 use recipe_domain::recipe::ReferenceNumber;
 use recipe_domain::text::LongText;
+use uuid::Uuid;
 
+use crate::WebSettings;
 use crate::test_support::recipes::approval::ApprovalData;
 use crate::test_support::{Fixture, Reply};
 
@@ -29,6 +31,69 @@ const NUL_PAYLOAD: &str = "\u{0}<script>alert(1)</script>";
 
 /// The `Content-Security-Policy` of every response (`api.md` section 9).
 pub(crate) const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
+/// The headers of `api.md` section 9 that every answer carries, with their fixed values.
+///
+/// A value of `None` depends on the settings: `Strict-Transport-Security` and `Cache-Control`.
+pub(crate) const SECURITY_HEADERS: [(&str, Option<&str>); 5] = [
+    ("content-security-policy", Some(CSP)),
+    ("x-content-type-options", Some("nosniff")),
+    ("referrer-policy", Some("same-origin")),
+    ("strict-transport-security", None),
+    ("cache-control", None),
+];
+
+/// Return the value that `api.md` section 9 gives for the header `name` on `path`.
+///
+/// The settings of the fixture give `Strict-Transport-Security` and the static `Cache-Control`.
+/// Every other path gets `Cache-Control: no-store`. A header with a fixed value uses `fixed`.
+fn expected_header_value(name: &str, fixed: Option<&str>, path: &str) -> String {
+    let settings = WebSettings::default();
+    match name {
+        "strict-transport-security" => format!(
+            "max-age={}; includeSubDomains",
+            settings.hsts_max_age.as_secs()
+        ),
+        "cache-control" if path.starts_with("/static/") => format!(
+            "public, max-age={}",
+            settings.static_cache_max_age.as_secs()
+        ),
+        "cache-control" => "no-store".to_owned(),
+        _fixed => fixed.unwrap().to_owned(),
+    }
+}
+
+/// Assert that an answer carries a version 7 `X-Request-Id` and every header of `SECURITY_HEADERS`.
+///
+/// The check holds for each answer, also a redirect or an error (`api.md` section 9). `path` picks
+/// the `Cache-Control` rule. `what` names the cell in each failure message.
+pub(crate) fn assert_common_headers(reply: &Reply, path: &str, what: &str) {
+    let id = reply.header("x-request-id");
+    assert!(
+        reply.headers.contains_key("x-request-id"),
+        "{what}: the request id is missing"
+    );
+    let parsed = Uuid::parse_str(&id);
+    assert!(parsed.is_ok(), "{what}: the request id is not a UUID: {id}");
+    assert_eq!(
+        parsed.unwrap().get_version_num(),
+        7,
+        "{what}: the request id is not version 7: {id}"
+    );
+    for (name, fixed) in SECURITY_HEADERS {
+        assert!(
+            reply.headers.contains_key(name),
+            "{what}: the header {name} is missing: {:?}",
+            reply.headers
+        );
+        let expected = expected_header_value(name, fixed, path);
+        let actual = reply.header(name);
+        assert_eq!(
+            actual, expected,
+            "{what}: the value of {name} is wrong for {path}"
+        );
+    }
+}
 
 /// Return the payloads of the corpus file and the NUL payload.
 pub(crate) fn payloads() -> Vec<String> {
@@ -70,9 +135,19 @@ pub(crate) fn askama_escape(text: &str) -> String {
 }
 
 /// Assert this status with the code in the body.
+///
+/// The two checks print distinct texts, so a `should_panic` test can tell which check failed.
 pub(crate) fn assert_error(reply: &Reply, status: StatusCode, code: &str, what: &str) {
-    assert_eq!(reply.status, status, "{what}: {}", reply.body);
-    assert!(reply.body.contains(code), "{what}: {}", reply.body);
+    assert_eq!(
+        reply.status, status,
+        "{what}: the status is wrong, body: {}",
+        reply.body
+    );
+    assert!(
+        reply.body.contains(code),
+        "{what}: the code {code} is missing, body: {}",
+        reply.body
+    );
 }
 
 /// Assert the HTMX headers of an error answer (`api.md` section 5.3, ADR-0036, ADR-0037 (z)).

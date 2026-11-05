@@ -4,6 +4,9 @@
 //! A routine grant is the line `function()|EXECUTE` (ADR-0069 (q)). The table names come from the
 //! `CREATE TABLE` blocks of `data-model.md` section 3. The function names come from the
 //! `CREATE FUNCTION` blocks of sections 4.12 and 5.5.
+//!
+//! A line that starts with `PUBLIC:` names a right of `PUBLIC` (D5 of `test-gates-round-1`). The
+//! tests of `recipe_app` lines skip it. Its own test checks the form `PUBLIC:function(args)|EXECUTE`.
 
 use crate::support::{created_names, document_sql};
 
@@ -14,6 +17,8 @@ const SECTIONS: [&str; 18] = [
 ];
 /// The sections that create the functions that `recipe_app` can execute.
 const ROUTINE_SECTIONS: [&str; 2] = ["4.12", "5.5"];
+/// The start of a line that names a right of `PUBLIC` and not of `recipe_app`.
+const PUBLIC_PREFIX: &str = "PUBLIC:";
 const MIGRATION_TABLE: &str = "_sqlx_migrations";
 const PRIVILEGES: [&str; 5] = ["SELECT", "INSERT", "UPDATE", "DELETE", ROUTINE_PRIVILEGE];
 const ROUTINE_PRIVILEGE: &str = "EXECUTE";
@@ -42,6 +47,14 @@ fn grant_lines() -> Vec<String> {
     text.lines()
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
+        .collect()
+}
+
+/// The grant lines of `recipe_app`: the lines of the file without the `PUBLIC:` lines.
+fn app_lines() -> Vec<String> {
+    grant_lines()
+        .into_iter()
+        .filter(|line| !line.starts_with(PUBLIC_PREFIX))
         .collect()
 }
 
@@ -133,7 +146,7 @@ fn table_columns(normalized: &str) -> Vec<(String, Vec<String>)> {
 
 #[test]
 fn every_line_has_the_form_object_bar_privilege() {
-    let lines = grant_lines();
+    let lines = app_lines();
 
     assert!(!lines.is_empty(), "grants.expected has no grant line");
     for line in &lines {
@@ -158,7 +171,7 @@ fn the_object_check_rejects_a_routine_with_a_table_privilege_and_a_table_with_ex
 
 #[test]
 fn the_file_holds_the_routine_lines_of_section_5_3() {
-    let lines = grant_lines();
+    let lines = app_lines();
 
     let routines: Vec<&str> = lines
         .iter()
@@ -172,7 +185,7 @@ fn the_file_holds_the_routine_lines_of_section_5_3() {
 #[test]
 fn every_routine_line_names_a_function_of_section_4_12_or_5_5() {
     let functions = created_names(&document_sql(&ROUTINE_SECTIONS, &[])).functions;
-    let lines = grant_lines();
+    let lines = app_lines();
     let mut checked = 0_usize;
 
     for line in &lines {
@@ -205,7 +218,7 @@ fn lines_are_sorted_in_byte_order_without_duplicates() {
 #[test]
 fn every_table_is_a_table_of_section_3_or_sqlx_migrations() {
     let tables = created_names(&document_sql(&SECTIONS, &[])).tables;
-    let lines = grant_lines();
+    let lines = app_lines();
 
     for line in &lines {
         let (object, _) = split_line(line).unwrap();
@@ -221,7 +234,7 @@ fn every_table_is_a_table_of_section_3_or_sqlx_migrations() {
 #[test]
 fn every_column_line_names_a_column_of_its_table() {
     let columns = table_columns(&document_sql(&SECTIONS, &[]));
-    let lines = grant_lines();
+    let lines = app_lines();
 
     assert_eq!(columns.len(), 17, "section 3 must give 17 tables");
     for (table, names) in &columns {
@@ -238,4 +251,47 @@ fn every_column_line_names_a_column_of_its_table() {
             .is_some_and(|(_, names)| names.iter().any(|name| name == column));
         assert!(known, "{column} is not a column of {table} in section 3");
     }
+}
+
+/// Check the form of each `PUBLIC:` line of the given lines. A file without such a line is valid.
+fn check_public_lines(lines: &[String]) {
+    let public: Vec<&str> = lines
+        .iter()
+        .filter_map(|line| line.strip_prefix(PUBLIC_PREFIX))
+        .collect();
+
+    for line in public {
+        let (object, privilege) = line.split_once('|').unwrap();
+        let (name, _) = object.split_once('(').unwrap();
+        assert_eq!(privilege, ROUTINE_PRIVILEGE, "PUBLIC right in {line}");
+        assert!(is_identifier(name), "PUBLIC object is no function: {line}");
+        assert!(
+            object.ends_with(')'),
+            "PUBLIC object has no signature: {line}"
+        );
+        assert!(
+            !object.starts_with("replication_state("),
+            "PUBLIC holds a right on {line}"
+        );
+    }
+}
+
+#[test]
+fn every_public_line_is_an_execute_right_on_a_function() {
+    check_public_lines(&grant_lines());
+}
+
+#[test]
+fn a_file_without_public_lines_passes_the_public_line_check() {
+    let lines = ["replication_state()|EXECUTE", "recipe|SELECT"].map(str::to_owned);
+
+    check_public_lines(&lines);
+}
+
+#[test]
+#[should_panic(expected = "PUBLIC holds a right on replication_state()|EXECUTE")]
+fn a_bad_public_line_fails_the_public_line_check() {
+    let lines = ["PUBLIC:replication_state()|EXECUTE"].map(str::to_owned);
+
+    check_public_lines(&lines);
 }
