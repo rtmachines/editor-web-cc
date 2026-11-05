@@ -102,7 +102,17 @@ python3 -I tools/coverage-gate.py target/llvm-cov-summary.json
 bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'
 ```
 
-The coverage target is 80 % line coverage per crate (`reliability.md` section 6). `tools/coverage-gate.py` applies it to each crate. A crate with no executable line passes.
+The coverage target is 80 % line coverage per crate (`reliability.md` section 6). `tools/coverage-gate.py` applies it to each crate. The gate counts production lines only. It finds test modules from their `#[cfg(test)]` declarations (ADR-0127).
+
+The gate fails on an inline test module in `src/`. Move such a module to its own file, for example `foo/tests.rs`.
+
+The gate fails on a production file with a test file name: `tests.rs`, `*_tests.rs`, or `*-tests.rs`. It also fails on a production file in a `tests/`, `examples/`, or `benches/` directory under `src/`.
+
+The gate fails on a crate with production files and no line in the report. A crate without a production file shows "no code".
+
+Run `python3 -I tools/coverage-gate.py --source-only` to scan the source without a report.
+
+Run `python3 -I -B tools/test_coverage_gate.py` to run the tests of the gate.
 
 ### Browser regression suite
 

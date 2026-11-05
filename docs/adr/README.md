@@ -136,6 +136,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0124](0124-no-open-transaction-in-a-released-connection.md) | No open transaction in a released connection | Accepted. Amends ADR-0058 (m) | 2026-11-04 |
 | [0125](0125-end-of-an-accept-loop-stops-the-server.md) | The end of an accept loop stops the server | Accepted. Amends ADR-0057 (h), ADR-0058 (l) and (o), and ADR-0090 (b) | 2026-11-04 |
 | [0126](0126-marker-of-the-english-base-text.md) | Marker of the English base text in each UI language | Accepted. Amends ADR-0012 and the translation sentence of `api.md` section 8 | 2026-11-04 |
+| [0127](0127-test-gates.md) | Test gates on production code, PUBLIC rights, and rewrite forms | Accepted. Adds the rights of `PUBLIC` to the grant test of ADR-0069 (q) and does not change that item | 2026-11-04 |
 
 ## Decision map
 
@@ -176,6 +177,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Audit log insert and definer functions | 0098 (insert columns of `audit_log`, qualified operators of two definer functions) |
 | STE lint scope and script location in CI | 0023 |
 | Browser tests | 0048 (Playwright regression suite on the dev server, smoke suite on the Compose stack) |
+| Test gates | 0127 (the coverage gate finds test code from the source, a crate without a reported line fails). Also 0127 (the grant test reads the rights of `PUBLIC`, a script rejects the rewrite forms and `DO` blocks). Also 0127 (the exact pin of `cargo-llvm-cov`, the branch protection of `main`) |
 
 ## How to add an ADR
 
