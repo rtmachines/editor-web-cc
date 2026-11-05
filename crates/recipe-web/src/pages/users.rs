@@ -7,12 +7,13 @@
 use axum::extract::rejection::{FormRejection, PathRejection, QueryRejection};
 use axum::extract::{Form, Path, Query, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::error::{AppError, Missing};
+use recipe_app::error::{AppError, Missing, StorageError};
 use recipe_app::identity::{
     ActivateUser, CreateUser, CreateUserInput, DeactivateUser, GetUser, GetUserForm, ListUsers,
-    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin,
+    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin, UnlockOutcome,
 };
 use recipe_app::ports::NonEmpty;
+use recipe_domain::audit::RequestId;
 use recipe_domain::identity::{Login, Role};
 use serde::Deserialize;
 
@@ -415,6 +416,19 @@ pub(crate) async fn reset_password(
     command_result(&request, texts, fragment)
 }
 
+/// Write the one `WARN` line of an unlock whose security event is lost (ADR-0130).
+///
+/// The function solves one problem: the unlock is committed and the answer is a success, so no
+/// error mapping logs the lost event. This line is the one log place of that fault.
+fn log_lost_unlock_event(lost: &StorageError, request_id: RequestId) {
+    tracing::warn!(
+        error_code = %lost.code(),
+        request_id = %request_id,
+        event = "unlock",
+        "security event lost after a committed unlock"
+    );
+}
+
 /// `POST /users/{login}/unlock`: clear the login delay of the user.
 pub(crate) async fn unlock(
     State(state): State<WebState>,
@@ -424,9 +438,12 @@ pub(crate) async fn unlock(
 ) -> Result<Response, WebError> {
     let login = path_login(path)?;
     let Form(_fields) = form?;
-    UnlockLogin::new(state.identity().clone())
+    let outcome = UnlockLogin::new(state.identity().clone())
         .execute(request.auth()?, &request.meta(), &login, request.client())
         .await?;
+    if let UnlockOutcome::EventLost(lost) = &outcome {
+        log_lost_unlock_event(lost, request.request_id());
+    }
     let texts = Texts::new(state.bundles(), request.lang());
     let text = message(texts, "user-unlocked", &login);
     let refresh = refreshed(&state, &request, texts, &login).await?;
