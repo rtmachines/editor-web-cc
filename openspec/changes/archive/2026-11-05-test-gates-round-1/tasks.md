@@ -55,7 +55,7 @@ Each task moves the modules as D3 states. A failing test exists before each task
 
 - [x] 7.1 (workspace) Run `cargo llvm-cov --workspace --all-features --locked --json --summary-only --output-path target/llvm-cov-summary.json` and then `python3 -I tools/coverage-gate.py target/llvm-cov-summary.json`. Record the percent of each crate in the PR body. A crate below 80 % stops the apply for a decision of the owner. Agent: Sonnet.
 - [x] 7.2 (workspace) Run `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`, `cargo test --workspace --all-features --locked`, `cargo fmt --all --check`, `openspec validate test-gates-round-1 --strict`, and the `ste-lint.py` command of `CLAUDE.md`. Check: each command passes. Agent: orchestrator.
-- [ ] 7.3 (GitHub settings) After the merge, prepare the `gh api` call that protects `main` (D7). It requires each job of `ci.yml` and `playwright.yml` that runs on a pull request. Show the exact list to the owner. Run the call only after the owner approves. Check: `gh api repos/{owner}/{repo}/branches/main/protection` returns the list. Agent: Codex prepares, the orchestrator runs.
+- [x] 7.3 (GitHub settings) After the merge, prepare the `gh api` call that protects `main` (D7). It requires each job of `ci.yml` and `playwright.yml` that runs on a pull request. Show the exact list to the owner. Run the call only after the owner approves. Check: `gh api repos/{owner}/{repo}/branches/main/protection` returns the list. Agent: Codex prepares, the orchestrator runs.
 
 ## Workflow follow-up
 
