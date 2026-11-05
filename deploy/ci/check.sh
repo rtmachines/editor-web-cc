@@ -157,6 +157,139 @@ def test_ci_scripts_job():
 
 
 test_ci_scripts_job()
+
+
+def load_job_body():
+    lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
+    header = '  load:'
+    if header not in lines:
+        raise SystemExit('ci.yml has no job load')
+    start = lines.index(header) + 1
+    end = start
+    while end < len(lines) and (lines[end].startswith('    ') or not lines[end].strip()):
+        end += 1
+    return '\n'.join(lines[start:end])
+
+
+def require_load(text, pattern, message):
+    if not re.search(pattern, text, re.M):
+        raise SystemExit('load: ' + message)
+
+
+def load_job_steps(body):
+    steps = {}
+    for block in re.split(r'^      - name: ', body, flags=re.M)[1:]:
+        match = re.search(r'^        id: ([a-z_][a-z_0-9]*)$', block, re.M)
+        if match:
+            identifier = match.group(1)
+            if identifier in steps:
+                raise SystemExit('load has a duplicate step id')
+            steps[identifier] = block
+    return steps
+
+
+def check_load_policy(body, steps):
+    required = (
+        (r"^    if: github.event_name != 'pull_request'$", 'wrong event condition'),
+        (r'^    runs-on: ubuntu-24\.04$', 'wrong runner'),
+        (r'^    timeout-minutes: 60$', 'wrong job timeout'),
+        (r'^      fail-fast: false$', 'matrix must keep both legs'),
+        (r'^        image: \[musl, cc-debian13\]$', 'wrong image matrix'),
+    )
+    for pattern, message in required:
+        require_load(body, pattern, message)
+    if re.search(r'^    continue-on-error:', body, re.M):
+        raise SystemExit('load must not ignore job failures')
+    order = ('runner', 'prepare', 'build_musl', 'build_cc_debian13', 'build_pgtools',
+             'start', 'login', 'password', 'approver', 'seed', 'timings',
+             'memory_timings', 'flood', 'memory_check', 'values', 'upload',
+             'diagnostics', 'cleanup')
+    if tuple(steps) != order:
+        raise SystemExit('load steps do not follow ADR-0128 (j)')
+    bounds = {'timings', 'flood', 'memory_check'}
+    conditional = "        continue-on-error: ${{ matrix.image == 'cc-debian13' }}"
+    if len(re.findall(r'^ *continue-on-error:', body, re.M)) != len(bounds):
+        raise SystemExit('load ignores failures outside its bound steps')
+    for identifier, block in steps.items():
+        lines = [line for line in block.splitlines() if 'continue-on-error:' in line]
+        if lines != ([conditional] if identifier in bounds else []):
+            raise SystemExit('load ignores a failure outside the cc-debian13 bounds')
+
+
+def check_load_builds(steps):
+    for leg, dockerfile, scope in (
+        ('musl', 'deploy/Dockerfile', 'recipe-server'),
+        ('cc_debian13', 'deploy/ci/Dockerfile.cc-debian13', 'recipe-server-cc-debian13'),
+    ):
+        block = steps['build_' + leg]
+        image = leg.replace('_', '-')
+        require_load(block, rf"^        if: matrix.image == '{image}'$", 'wrong build condition')
+        require_load(block, rf'^          file: {re.escape(dockerfile)}$', 'wrong Dockerfile')
+        require_load(block, rf'^          cache-from: type=gha,scope={scope}$', 'wrong cache scope')
+        for setting in ('load: true', 'push: false', 'tags: recipe-server:ci-load-${{ matrix.image }}'):
+            require_load(block, '^          ' + re.escape(setting) + '$', 'wrong server image setting')
+        if leg == 'musl' and 'cache-to:' in block:
+            raise SystemExit('load musl must not write the build cache')
+        if leg == 'cc_debian13':
+            require_load(block, r'^          cache-to: type=gha,mode=max,scope=recipe-server-cc-debian13$',
+                         'cc-debian13 must use its own writable cache')
+    require_load(steps['build_pgtools'], r'^          tags: recipe-pgtools:ci-load-\$\{\{ matrix.image \}\}$',
+                 'pgtools tag does not match the stack')
+
+
+def check_load_commands(steps):
+    commands = {
+        'runner': 'python3 -I -B deploy/ci/load_flood.py runner',
+        'prepare': 'bash deploy/ci/prepare.sh', 'start': 'bash deploy/ci/start.sh',
+        'login': 'bash deploy/ci/login.sh', 'password': 'http_probe password',
+        'approver': 'admin.create_user("load-approver")',
+        'seed': 'python3 -I -B deploy/ci/load_seed.py',
+        'timings': 'load_timing.py', 'memory_timings': 'bash deploy/ci/load.sh memory-timings',
+        'flood': 'bash deploy/ci/load.sh flood', 'memory_check': 'bash deploy/ci/load.sh memory-check',
+        'diagnostics': 'bash deploy/ci/diagnostics.sh', 'cleanup': 'bash deploy/ci/cleanup.sh',
+    }
+    for identifier, command in commands.items():
+        if command not in steps[identifier]:
+            raise SystemExit('load is missing the command of step ' + identifier)
+    require_load(steps['seed'], r'^        timeout-minutes: 30$', 'wrong seed timeout')
+    for identifier in ('memory_timings', 'flood', 'memory_check', 'values'):
+        require_load(steps[identifier],
+                     r"^        if: \$\{\{ !cancelled\(\) && steps.seed.outcome == 'success' \}\}$",
+                     'missing result collection after a bound failure')
+    require_load(steps['diagnostics'], r'^        if: failure\(\)$', 'missing failure diagnostics')
+    require_load(steps['cleanup'], r'^        if: always\(\)$', 'missing unconditional cleanup')
+    require_load(steps['flood'], r'^        timeout-minutes: [1-9][0-9]*$', 'flood needs a step timeout')
+
+
+def check_load_artifacts(steps):
+    upload = steps['upload']
+    require_load(upload, r'^        uses: actions/upload-artifact@[0-9a-f]{40}(?: #.*)?$',
+                 'upload action must use a pinned revision')
+    require_load(upload, r'^          name: load-\$\{\{ matrix.image \}\}$', 'artifact must name its leg')
+    require_load(upload, r'^          if-no-files-found: error$', 'missing values must fail the upload')
+    require_load(upload, r"^        if: \$\{\{ !cancelled\(\) && steps.values.outcome == 'success' \}\}$",
+                 'upload must require the values check')
+    paths = re.findall(r'^            (.+)$', upload, re.M)
+    prefix = '${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/'
+    expected = [prefix + f'load-{name}.json' for name in ('seed', 'timings', 'flood', 'memory')]
+    if paths != expected:
+        raise SystemExit('load must upload only its four JSON value reports')
+    for field in ('seed_seconds', 'timings_seconds', 'logins_per_second', 'p99_seconds', 'peak'):
+        if field not in steps['values']:
+            raise SystemExit('load does not require all measured values')
+
+
+def test_load_job():
+    body = load_job_body()
+    steps = load_job_steps(body)
+    check_load_policy(body, steps)
+    check_load_builds(steps)
+    check_load_commands(steps)
+    check_load_artifacts(steps)
+    print('CI load job check passed.')
+
+
+test_load_job()
 paths = list(Path('.github/workflows').rglob('*'))
 paths.extend(Path('deploy').rglob('*'))
 for path in paths:

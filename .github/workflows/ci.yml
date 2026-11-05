@@ -126,6 +126,228 @@ jobs:
         timeout-minutes: 5
         run: bash deploy/ci/cleanup.sh
 
+  load:
+    name: Load (${{ matrix.image }})
+    # ADR-0128: A red load job on main blocks the next release.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [musl, cc-debian13]
+    env:
+      RECIPE_VERSION: ci-load-${{ matrix.image }}
+      COMPOSE_PROJECT_NAME: recipe-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      COMPOSE_SUBNET: 172.28.0.0/16
+      COMPOSE_IP_RANGE: 172.28.1.0/24
+      PROXY_ADDRESS: 172.28.0.2
+      SITE_ADDRESS: localhost
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the runner before the stack
+        id: runner
+        run: python3 -I -B deploy/ci/load_flood.py runner
+      - name: Check the CI scripts
+        run: bash deploy/ci/check.sh
+      - name: Prepare the disks and secrets
+        id: prepare
+        run: bash deploy/ci/prepare.sh
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the shipped musl image
+        id: build_musl
+        if: matrix.image == 'musl'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          push: false
+          tags: recipe-server:ci-load-${{ matrix.image }}
+          cache-from: type=gha,scope=recipe-server
+      - name: Build the comparison cc-debian13 image
+        id: build_cc_debian13
+        if: matrix.image == 'cc-debian13'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/ci/Dockerfile.cc-debian13
+          load: true
+          push: false
+          tags: recipe-server:ci-load-${{ matrix.image }}
+          cache-from: type=gha,scope=recipe-server-cc-debian13
+          cache-to: type=gha,mode=max,scope=recipe-server-cc-debian13
+      - name: Build recipe-pgtools
+        id: build_pgtools
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/pgtools
+          file: deploy/pgtools/Dockerfile
+          build-contexts: db=deploy/db
+          load: true
+          push: false
+          tags: recipe-pgtools:ci-load-${{ matrix.image }}
+          cache-from: type=gha,scope=recipe-pgtools
+      - name: Start from zero
+        id: start
+        timeout-minutes: 10
+        run: bash deploy/ci/start.sh
+      - name: Create the first administrator and check login
+        id: login
+        timeout-minutes: 10
+        run: bash deploy/ci/login.sh
+      - name: Change the administrator password
+        id: password
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          source deploy/ci/common.sh
+          http_probe password
+      - name: Create the ProcessEngineer and replace its password
+        id: approver
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -euo pipefail
+          source deploy/ci/common.sh
+          openssl rand -hex 16 >"$CI_STATE/approver_password"
+          python3 -I -B - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd() / "deploy/ci"))
+          from load_client import Client, HttpCheckError
+
+          try:
+              admin = Client(os.environ["CI_STATE"])
+              admin.login("ci-admin", "new_password")
+              admin.create_user("load-approver")
+          except HttpCheckError as error:
+              print(str(error), file=sys.stderr)
+              sys.exit(1)
+          except Exception:
+              print("CI load could not create the approver.", file=sys.stderr)
+              sys.exit(1)
+          PY
+      - name: Seed the draft and check its counts
+        id: seed
+        timeout-minutes: 30
+        shell: bash
+        run: |
+          set -euo pipefail
+          source deploy/ci/common.sh
+          python3 -I -B deploy/ci/load_seed.py
+      - name: Measure the three requests and check their bounds
+        id: timings
+        timeout-minutes: 10
+        continue-on-error: ${{ matrix.image == 'cc-debian13' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source deploy/ci/common.sh
+          python3 -I -B - <<'PY'
+          import json
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          try:
+              state = Path(os.environ["CI_STATE"])
+              seed = json.loads((state / "load-seed.json").read_text(encoding="utf-8"))
+              command = [sys.executable, "-I", "-B", "deploy/ci/load_timing.py",
+                         "--reference", seed["reference"], "--version", "1",
+                         "--approver", "load-approver", "--seed-seconds", str(seed["seed_seconds"]),
+                         "--output", str(state / "load-timings.json")]
+              status = subprocess.run(command, check=False).returncode
+          except Exception:
+              print("CI load could not start the timings.", file=sys.stderr)
+              sys.exit(1)
+          sys.exit(status)
+          PY
+      - name: Read memory after the timings
+        id: memory_timings
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        timeout-minutes: 5
+        run: bash deploy/ci/load.sh memory-timings
+      - name: Recreate app and run the login flood
+        id: flood
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        timeout-minutes: 10
+        continue-on-error: ${{ matrix.image == 'cc-debian13' }}
+        run: bash deploy/ci/load.sh flood
+      - name: Check both memory readings and report the memory condition
+        id: memory_check
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        timeout-minutes: 5
+        continue-on-error: ${{ matrix.image == 'cc-debian13' }}
+        run: bash deploy/ci/load.sh memory-check
+      - name: Require the values from each leg
+        id: values
+        if: ${{ !cancelled() && steps.seed.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source deploy/ci/common.sh
+          python3 -I -B - <<'PY'
+          import json
+          import math
+          import os
+          import sys
+          from pathlib import Path
+
+          try:
+              state = Path(os.environ["CI_STATE"])
+              reports = {name: json.loads((state / f"load-{name}.json").read_text(encoding="utf-8"))
+                         for name in ("seed", "timings", "flood", "memory")}
+              timings = reports["timings"]["timings_seconds"]
+              flood, memory = reports["flood"], reports["memory"]
+              values = [reports["seed"]["seed_seconds"], reports["timings"]["seed_seconds"],
+                        *(timings[name] for name in ("ApproveVersion", "CreateVersion", "GetVersion")),
+                        flood["logins_per_second"], flood["p99_seconds"],
+                        memory["timings"]["peak"], memory["flood"]["peak"], memory["peak"]]
+              if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0
+                     for value in values):
+                  raise ValueError("invalid measurement")
+              if memory["adr_0064_o_memory_condition"] not in ("met", "not met"):
+                  raise ValueError("missing memory condition")
+          except Exception:
+              print("CI load did not write all required JSON values.", file=sys.stderr)
+              sys.exit(1)
+          print("CI load wrote all required JSON values.")
+          PY
+      - name: Upload the JSON values of this leg
+        id: upload
+        if: ${{ !cancelled() && steps.values.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: load-${{ matrix.image }}
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-seed.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-timings.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-flood.json
+            ${{ runner.temp }}/${{ env.COMPOSE_PROJECT_NAME }}/state/load-memory.json
+      - name: Show load failure diagnostics
+        id: diagnostics
+        if: failure()
+        timeout-minutes: 3
+        run: bash deploy/ci/diagnostics.sh
+      - name: Release the load project and volumes
+        id: cleanup
+        if: always()
+        timeout-minutes: 5
+        run: bash deploy/ci/cleanup.sh
+
   upgrade:
     name: Upgrade an older volume
     # Match the Compose stack policy of ADR-0094. Dispatch this job on a branch.
