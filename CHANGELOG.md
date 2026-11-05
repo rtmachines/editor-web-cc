@@ -23,6 +23,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Storage tests write the 64-bit extremes and read them back through both value decoders and the limit columns.
 - CI rejects a migration that rewrites a table or scans it under an exclusive lock (ADR-0127).
 - The grant test compares the rights of `PUBLIC` with `grants.expected` (ADR-0127).
+- CI adds the job `load`, the pull-request job `ci-scripts`, and a smoke suite on the Compose stack (ADR-0128).
 
 ### Changed
 
