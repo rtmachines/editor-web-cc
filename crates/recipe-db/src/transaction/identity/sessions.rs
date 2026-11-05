@@ -20,7 +20,13 @@ VALUES ($1, $2, $3, $4, now(), now(), now() + $5 * interval '1 microsecond')";
 
 const DELETE: &str = "DELETE FROM session WHERE id = $1";
 
-const DELETE_ALL_OF_USER: &str = "DELETE FROM session WHERE user_id = $1";
+/// The CTE `locked` locks the rows in `id` order, so two concurrent deletes cannot wait for each
+/// other in a cycle.
+const DELETE_ALL_OF_USER: &str = "\
+WITH locked AS ( \
+    SELECT id FROM session WHERE user_id = $1 ORDER BY id FOR UPDATE \
+) \
+DELETE FROM session WHERE id IN (SELECT id FROM locked)";
 
 #[async_trait]
 impl SessionRepository for PgTransaction {
@@ -53,5 +59,17 @@ impl SessionRepository for PgTransaction {
             .await
             .map_err(map_error)?;
         Ok(result.rows_affected())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DELETE_ALL_OF_USER;
+
+    /// The lock step of D4 of `low-round-c`: the delete locks its rows in `id` order.
+    #[test]
+    fn delete_all_of_user_locks_its_rows_in_id_order() {
+        assert!(DELETE_ALL_OF_USER.contains("ORDER BY id FOR UPDATE"));
+        assert!(DELETE_ALL_OF_USER.contains("WHERE id IN (SELECT id FROM locked)"));
     }
 }

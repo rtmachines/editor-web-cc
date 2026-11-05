@@ -22,10 +22,13 @@ const TABLE: &str = "login_attempt";
 const MARK_SUCCEEDED: &str = "UPDATE login_attempt SET succeeded = true WHERE id = $1";
 
 /// The delete of `UnlockLogin`. The data-modifying CTE runs once, so the count and the newest rows
-/// come from the rows that the delete removed. The join keeps one row when `keep` is 0.
+/// come from the rows that the delete removed. The join keeps one row when `keep` is 0. The CTE
+/// `locked` locks the rows in `id` order.
 const DELETE_FOR_LOGIN: &str = "\
-WITH gone AS ( \
-    DELETE FROM login_attempt WHERE login = $1 \
+WITH locked AS ( \
+    SELECT id FROM login_attempt WHERE login = $1 ORDER BY id FOR UPDATE \
+), gone AS ( \
+    DELETE FROM login_attempt WHERE id IN (SELECT id FROM locked) \
     RETURNING id, client_ip, attempted_at, succeeded \
 ), newest AS ( \
     SELECT id, client_ip, attempted_at, succeeded FROM gone \
@@ -129,5 +132,17 @@ impl AttemptRepository for PgTransaction {
             failures: u32::try_from(record.failures).map_err(|error| corrupt(TABLE, error))?,
             last_failure: record.last_failure.map(Timestamp::from),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DELETE_FOR_LOGIN;
+
+    /// The lock step of D4 of `low-round-c`: the delete locks its rows in `id` order.
+    #[test]
+    fn delete_for_login_locks_its_rows_in_id_order() {
+        assert!(DELETE_FOR_LOGIN.contains("ORDER BY id FOR UPDATE"));
+        assert!(DELETE_FOR_LOGIN.contains("WHERE id IN (SELECT id FROM locked)"));
     }
 }

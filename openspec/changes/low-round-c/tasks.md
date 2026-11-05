@@ -20,7 +20,7 @@ A pinning test shows its red step on a temporary mutation of the code under test
 
 ## 3. recipe-db
 
-- [ ] 3.1 (recipe-db) [sonnet] D4-3. Write a unit test that asserts `ORDER BY id FOR UPDATE` in the four statements of `design.md` D4. Run it and see it fail. Then apply D4 items 1 to 4. Run the behavior tests that `design.md` names under "What already exists" by name before and after the change. Check: `cargo test -p recipe-db` passes in full, the five behavior tests pass, and `grants.expected` does not change. The test needs Docker.
+- [x] 3.1 (recipe-db) [sonnet] D4-3. Write a unit test that asserts `ORDER BY id FOR UPDATE` in the four statements of `design.md` D4. Run it and see it fail. Then apply D4 items 1 to 4. Run the behavior tests that `design.md` names under "What already exists" by name before and after the change. Check: `cargo test -p recipe-db` passes in full, the five behavior tests pass, and `grants.expected` does not change. The test needs Docker.
 - [x] 3.2 (recipe-db) [sonnet] D6-8. In `tests/storage/reset_password.rs`, assert the code `E-IDN-003` of the failed Basic check of the old password. For the red step, break the SQL of the Basic check so it gives a storage error. See the new assertion fail where `is_err()` passed, and revert. Check: `cargo test -p recipe-db reset_password` passes. The test needs Docker.
 
 ## 4. recipe-server
