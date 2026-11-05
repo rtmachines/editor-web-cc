@@ -367,6 +367,69 @@ async fn pages_own_logout_needs_the_csrf_token() {
     assert!(reply.body.contains("E-WEB-007"));
 }
 
+/// Send `POST /logout` with the content type and body. The flag adds the token header.
+async fn post_logout_body(
+    fixture: &Fixture,
+    session: &TestSession,
+    content_type: &str,
+    token_header: bool,
+    body: String,
+) -> Reply {
+    let mut builder = crate::test_support::request(axum::http::Method::POST, "/logout")
+        .header("content-type", content_type)
+        .header("sec-fetch-site", "same-origin")
+        .header("cookie", session.cookie.as_str());
+    if token_header {
+        builder = builder.header("x-csrf-token", session.csrf.as_str());
+    }
+    let request = builder.body(axum::body::Body::from(body)).unwrap();
+    crate::test_support::call(&fixture.router(), request).await
+}
+
+#[tokio::test]
+async fn pages_own_logout_with_a_json_body_gives_422_and_keeps_the_session() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Operator, false);
+    let reply = post_logout_body(
+        &fixture,
+        &session,
+        "application/json",
+        true,
+        "{}".to_owned(),
+    )
+    .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    assert!(reply.body.contains("E-WEB-008"), "{}", reply.body);
+    assert!(set_cookie_of(&reply, SESSION_COOKIE).is_none());
+    let after = me_with(&fixture, &session.cookie).await;
+    assert_eq!(after.status, StatusCode::OK, "{}", after.body);
+}
+
+#[tokio::test]
+async fn pages_own_logout_form_with_the_token_field_ends_the_session() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Operator, false);
+    let body = format!("csrf_token={}", session.csrf);
+    let reply = post_logout_body(
+        &fixture,
+        &session,
+        "application/x-www-form-urlencoded",
+        false,
+        body,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    assert_eq!(reply.header("location"), "/login");
+    let after = me_with(&fixture, &session.cookie).await;
+    assert_eq!(after.status, StatusCode::SEE_OTHER);
+    assert_eq!(after.header("location"), "/login");
+}
+
 // --- GET /me ------------------------------------------------------------------------------------
 
 #[tokio::test]

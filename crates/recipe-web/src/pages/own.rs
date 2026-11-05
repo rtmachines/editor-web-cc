@@ -17,6 +17,7 @@ use serde::Deserialize;
 use super::render::{render, see_other};
 use super::request::PageRequest;
 use super::texts::Texts;
+use super::users::TokenFields;
 use crate::cookies::{clear_session_cookie, session_cookie};
 use crate::csrf::issue_pre_session;
 use crate::error::{FieldReason, Retry, WebError};
@@ -161,7 +162,9 @@ fn retry_login(state: &WebState, error: WebError) -> Response {
 pub(crate) async fn logout(
     State(state): State<WebState>,
     request: PageRequest,
+    form: Result<Form<TokenFields>, FormRejection>,
 ) -> Result<Response, WebError> {
+    let Form(_fields) = form?;
     let auth = request.auth()?;
     Logout::new(state.identity().clone())
         .execute(auth, &request.meta())
