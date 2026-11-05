@@ -23,12 +23,16 @@ upload=$CI_STATE/smoke-upload
 mkdir -- "$upload"
 artifacts=$(mktemp -d "$CI_STATE/smoke-artifacts.XXXXXX")
 sessions=$(mktemp -d "$CI_STATE/smoke-sessions.XXXXXX")
+one_time_file=$(mktemp "$CI_STATE/smoke-one-time.XXXXXX")
+trap 'rm -f -- "$one_time_file"' EXIT
 mkdir -- "$artifacts/test-results" "$artifacts/playwright-report"
 
 cd "$GITHUB_WORKSPACE/e2e"
 status=0
+E2E_ADMIN_LOGIN=ci-admin \
 E2E_ADMIN_PASSWORD=$admin_password \
 E2E_APPROVER_PASSWORD=$approver_password \
+E2E_ONE_TIME_FILE=$one_time_file \
 E2E_BASE_URL=https://localhost:8443 \
 E2E_STATE_DIR=$sessions \
 PLAYWRIGHT_HTML_OUTPUT_DIR=$artifacts/playwright-report \
@@ -36,8 +40,11 @@ PLAYWRIGHT_HTML_OUTPUT_DIR=$artifacts/playwright-report \
   >"$artifacts/playwright.log" 2>&1 || status=$?
 
 # Child output can contain a password in a failure message. Scan it too.
+E2E_ONE_TIME_FILE=$one_time_file \
 E2E_ADMIN_PASSWORD=$admin_password E2E_APPROVER_PASSWORD=$approver_password \
   python3 -I -B "$GITHUB_WORKSPACE/deploy/ci/secret_scan.py" "$artifacts"
+rm -f -- "$one_time_file"
+trap - EXIT
 unset admin_password approver_password
 
 mv -- "$artifacts/test-results" "$artifacts/playwright-report" "$artifacts/playwright.log" "$upload/"

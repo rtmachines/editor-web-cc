@@ -184,9 +184,8 @@ test('the second user approves the draft', async ({ approverPage: page }) => {
   await expect(page.locator('#error-panel .alert-error')).toHaveCount(0);
 });
 
-test('the export has the status 200, is loadable, and carries the content hash', async ({
-  approverPage: page,
-}) => {
+test('the Administrator exports the approved version, and the hash matches', async ({ page }) => {
+  // The page fixture is the Administrator session (ADR-0128 (ah)). The second user only approves.
   await page.goto(versionPath);
   const exportLink = page.locator('a[href*="/export/"]');
   await expect(exportLink).toHaveCount(1);

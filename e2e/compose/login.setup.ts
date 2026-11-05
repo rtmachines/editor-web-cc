@@ -1,9 +1,9 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
 // ADR-0128 (ae): the project `smoke-login` types every password. It runs with trace, screenshot,
-// and video off. This file never prints a password and never puts one into a title or a label.
+// and video off. This file never prints a password and never puts one into a title, a label, or a step.
 
 /** The file of the session of the Administrator. The flow project loads it. */
 const ADMIN_STATE_FILE = 'admin.json';
@@ -11,8 +11,13 @@ const ADMIN_STATE_FILE = 'admin.json';
 const APPROVER_STATE_FILE = 'approver.json';
 /** The role value of the form `POST /users`. The new user is a ProcessEngineer. */
 const PROCESS_ENGINEER_ROLE = 'process_engineer';
-/** The login of the seeded Administrator in the dev server and in the Compose stack. */
-const ADMIN_LOGIN = 'admin';
+/**
+ * The default login of the Administrator. The dev server seeds `admin`.
+ * The Compose stack creates `ci-admin`, so its run sets `E2E_ADMIN_LOGIN`.
+ */
+const DEFAULT_ADMIN_LOGIN = 'admin';
+/** The login of the Administrator. An unset or empty `E2E_ADMIN_LOGIN` gives the default. */
+const ADMIN_LOGIN = process.env.E2E_ADMIN_LOGIN || DEFAULT_ADMIN_LOGIN;
 
 /** Reads a password from the environment. The config already checked its length. */
 function passwordFrom(name: 'E2E_ADMIN_PASSWORD' | 'E2E_APPROVER_PASSWORD'): string {
@@ -31,6 +36,31 @@ function stateDir(): string {
   }
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** Owner-only file mode. The one-time password file holds a secret. */
+const SECRET_FILE_MODE = 0o600;
+
+/** Writes the one-time password to `E2E_ONE_TIME_FILE`. It does nothing when the variable is unset. */
+function saveOneTimePassword(value: string): void {
+  const file = process.env.E2E_ONE_TIME_FILE;
+  if (!file) {
+    return;
+  }
+  fs.writeFileSync(file, value, { mode: SECRET_FILE_MODE });
+  fs.chmodSync(file, SECRET_FILE_MODE);
+}
+
+/**
+ * Sets a secret into a field. The step `locator.fill` shows its value in the title of the step.
+ * The HTML reporter stores that title. The step `locator.evaluate` shows no argument.
+ */
+async function setSecret(field: Locator, value: string): Promise<void> {
+  await field.evaluate((element, secret) => {
+    const input = element as HTMLInputElement;
+    input.value = secret;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
 }
 
 /** Returns a login that is unique for each run, so a second run finds no clash. */
@@ -53,7 +83,7 @@ test('log in as the administrator and create the approver', async ({
   // Step 1: the Administrator logs in. A redirect away from /login shows a session.
   await page.goto('/login');
   await page.locator('#login').fill(ADMIN_LOGIN);
-  await page.locator('#password').fill(passwordFrom('E2E_ADMIN_PASSWORD'));
+  await setSecret(page.locator('#password'), passwordFrom('E2E_ADMIN_PASSWORD'));
   await page.locator('form[action="/login"] button[type="submit"]').click();
   await page.waitForURL((url) => url.pathname !== '/login');
   await page.context().storageState({ path: path.join(dir, ADMIN_STATE_FILE) });
@@ -67,6 +97,7 @@ test('log in as the administrator and create the approver', async ({
   await expect(shown).toBeVisible();
   const oneTimePassword = (await shown.textContent())?.trim() ?? '';
   expect(oneTimePassword.length).toBeGreaterThan(0);
+  saveOneTimePassword(oneTimePassword);
 
   // Step 3: the new user logs in with the one-time password. The app forces the change.
   const userContext = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
@@ -74,13 +105,13 @@ test('log in as the administrator and create the approver', async ({
     const userPage = await userContext.newPage();
     await userPage.goto('/login');
     await userPage.locator('#login').fill(login);
-    await userPage.locator('#password').fill(oneTimePassword);
+    await setSecret(userPage.locator('#password'), oneTimePassword);
     await userPage.locator('form[action="/login"] button[type="submit"]').click();
     await userPage.waitForURL((url) => url.pathname === '/me/password');
 
     // Step 4: the new user replaces the one-time password at once. The session cookie rotates.
-    await userPage.locator('#current_password').fill(oneTimePassword);
-    await userPage.locator('#password').fill(passwordFrom('E2E_APPROVER_PASSWORD'));
+    await setSecret(userPage.locator('#current_password'), oneTimePassword);
+    await setSecret(userPage.locator('#password'), passwordFrom('E2E_APPROVER_PASSWORD'));
     const answer = userPage.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === '/me/password' &&
