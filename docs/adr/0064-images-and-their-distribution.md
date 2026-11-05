@@ -1,6 +1,6 @@
 # ADR-0064: Images and their distribution
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0128 (for the login flood, item (o) applies only the memory bounds of the container limit)
 Date: 2026-10-23
 Deciders: project owner
 

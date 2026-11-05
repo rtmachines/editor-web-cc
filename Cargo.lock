@@ -2532,6 +2532,7 @@ dependencies = [
  "rustix",
  "rustls",
  "serde",
+ "serde_json",
  "testcontainers",
  "time",
  "tokio",

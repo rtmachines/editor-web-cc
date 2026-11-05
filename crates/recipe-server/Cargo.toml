@@ -53,6 +53,8 @@ recipe-app = { workspace = true, features = ["memory"] }
 testcontainers = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tower-http = { workspace = true, features = ["catch-panic"] }
+# The test of the JSON shape of an error line parses the line (tests/log_error_json.rs).
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

@@ -84,7 +84,15 @@ pub(crate) fn level_of(error: &WebError, code: ErrorCode, status: StatusCode) ->
 ///
 /// An error with a failed read, for example of the version of a conflict, adds the chain of that
 /// failure to the same line. A list of recipe errors writes its count and its first 20 entries.
+///
+/// A timeout writes its stage in the separate field `stage`, so an operator can tell the stages
+/// apart. Every other error writes no `stage` field. The user message of the timeout does not
+/// name the stage.
 pub(crate) fn log_error(error: &WebError, code: ErrorCode, level: Level, request_id: RequestId) {
+    let stage = match error {
+        WebError::App(AppError::Timeout { stage }) => Some(tracing::field::display(stage)),
+        _other => None,
+    };
     let mut chain = match error {
         WebError::App(AppError::Recipes(errors)) => errors_text(errors),
         _other => display_chain(error),
@@ -96,10 +104,10 @@ pub(crate) fn log_error(error: &WebError, code: ErrorCode, level: Level, request
         chain.push_str(&display_chain(failure));
     }
     if level == Level::ERROR {
-        tracing::error!(error_code = %code, request_id = %request_id, chain = %chain, "request failed");
+        tracing::error!(error_code = %code, request_id = %request_id, chain = %chain, stage, "request failed");
     } else if level == Level::WARN {
-        tracing::warn!(error_code = %code, request_id = %request_id, chain = %chain, "request failed");
+        tracing::warn!(error_code = %code, request_id = %request_id, chain = %chain, stage, "request failed");
     } else {
-        tracing::info!(error_code = %code, request_id = %request_id, chain = %chain, "request failed");
+        tracing::info!(error_code = %code, request_id = %request_id, chain = %chain, stage, "request failed");
     }
 }
