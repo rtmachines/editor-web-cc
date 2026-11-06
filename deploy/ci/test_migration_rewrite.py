@@ -610,6 +610,22 @@ class MigrationRewriteTests(unittest.TestCase):
             "END$$;\n"
         )
 
+    def test_function_body_with_constraint_begin_do_nothing_passes(self):
+        self.assert_change(
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "INSERT INTO item (id) VALUES (1)\n"
+            "ON CONFLICT ON CONSTRAINT begin DO NOTHING;\n"
+            "END$$;\n"
+        )
+
+    def test_function_body_with_constraint_loop_do_update_passes(self):
+        self.assert_change(
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "INSERT INTO item (id, note) VALUES (1, 'x')\n"
+            "ON CONFLICT ON CONSTRAINT loop DO UPDATE SET note = EXCLUDED.note;\n"
+            "END$$;\n"
+        )
+
     def test_function_body_with_executed_do_fails(self):
         self.assert_change(
             "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
