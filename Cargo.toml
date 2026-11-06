@@ -89,6 +89,8 @@ jsonschema = { version = "0.60.0", default-features = false, features = ["arbitr
 
 # reliability.md section 2.1. Every member sets `[lints] workspace = true`.
 [workspace.lints.rust]
+# A build script compiles as its own crate. This level also covers it (section 2.1).
+unsafe_code = "forbid"
 unused_must_use = "deny"
 
 [workspace.lints.clippy]
