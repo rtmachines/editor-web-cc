@@ -592,6 +592,31 @@ class MigrationRewriteTests(unittest.TestCase):
             "END$$;\n", TYPE,
         )
 
+    def test_function_body_with_on_conflict_do_nothing_passes(self):
+        for prefix in ("BEGIN\n", "BEGIN\nNULL;\n"):
+            with self.subTest(prefix=prefix):
+                self.assert_change(
+                    "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$\n"
+                    + prefix
+                    + "INSERT INTO recipe (note) VALUES ('x') ON CONFLICT DO NOTHING;\n"
+                    "END$$;\n"
+                )
+
+    def test_function_body_with_on_conflict_do_update_passes(self):
+        self.assert_change(
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "INSERT INTO item (id, note) VALUES (1, 'x')\n"
+            "ON CONFLICT (id) DO UPDATE SET note = EXCLUDED.note;\n"
+            "END$$;\n"
+        )
+
+    def test_function_body_with_executed_do_fails(self):
+        self.assert_change(
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "EXECUTE 'DO $block$ BEGIN NULL; END $block$';\n"
+            "END$$;\n", "DO block",
+        )
+
     def test_function_create_does_not_exempt_existing_table(self):
         self.assert_change(
             "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
