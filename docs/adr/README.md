@@ -136,7 +136,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0124](0124-no-open-transaction-in-a-released-connection.md) | No open transaction in a released connection | Accepted. Amends ADR-0058 (m) | 2026-11-04 |
 | [0125](0125-end-of-an-accept-loop-stops-the-server.md) | The end of an accept loop stops the server | Accepted. Amends ADR-0057 (h), ADR-0058 (l) and (o), and ADR-0090 (b) | 2026-11-04 |
 | [0126](0126-marker-of-the-english-base-text.md) | Marker of the English base text in each UI language | Accepted. Amends ADR-0012 and the translation sentence of `api.md` section 8 | 2026-11-04 |
-| [0127](0127-test-gates.md) | Test gates on production code, PUBLIC rights, and rewrite forms | Accepted. Adds the rights of `PUBLIC` to the grant test of ADR-0069 (q) and does not change that item | 2026-11-04 |
+| [0127](0127-test-gates.md) | Test gates on production code, PUBLIC rights, and rewrite forms | Accepted. Adds the rights of `PUBLIC` to the grant test of ADR-0069 (q) and does not change that item. Amended by ADR-0136 (rewrite forms) | 2026-11-04 |
 | [0128](0128-ci-jobs-of-the-load-level-and-the-end-to-end-smoke.md) | CI jobs of the Load level and the End-to-end smoke | Accepted. Amended by ADR-0129 (item (w) counts the field `stage` of the log line) | 2026-11-05 |
 | [0129](0129-stage-in-the-log-line-of-a-timeout.md) | Stage in the log line of a timeout | Accepted | 2026-11-05 |
 | [0130](0130-unlock-completes-when-the-unlock-event-fails.md) | Unlock completes when the unlock event fails | Accepted. Amends ADR-0035 (j) | 2026-11-05 |
@@ -145,6 +145,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0133](0133-time-limit-of-the-disk-measurement.md) | Time limit of the disk measurement | Accepted. Amends ADR-0073 (d) | 2026-11-05 |
 | [0134](0134-login-routes-outside-the-password-gate.md) | Login routes outside the password gate | Accepted | 2026-11-06 |
 | [0135](0135-ste-lint-scope-includes-the-openspec-specs.md) | The STE lint scope includes the OpenSpec specs | Accepted. Amends ADR-0023 (scope) | 2026-11-06 |
+| [0136](0136-more-rewrite-forms-of-the-migration-check.md) | More rewrite forms of the migration check | Accepted. Amends ADR-0127 (p) | 2026-11-06 |
 
 ## Decision map
 
@@ -185,7 +186,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Audit log insert and definer functions | 0098 (insert columns of `audit_log`, qualified operators of two definer functions) |
 | STE lint scope and script location in CI | 0023 + 0135 (OpenSpec specs in the scope) |
 | Browser tests | 0048 (Playwright regression suite on the dev server, smoke suite on the Compose stack). Also 0128 (the files `e2e/compose/` and `playwright.compose.config.ts`, the setup project `smoke-login` without a trace, the project `smoke-compose` in the job `compose`). Also 0128 (passwords only in the environment of `smoke.sh`, a scan of the artifacts for passwords, own RFC 8785 hash check) |
-| Test gates | 0127 (the coverage gate finds test code from the source, a crate without a reported line fails). Also 0127 (the grant test reads the rights of `PUBLIC`, a script rejects the rewrite forms and `DO` blocks). Also 0127 (the exact pin of `cargo-llvm-cov`, the branch protection of `main`). Load level: 0128 (the job `load` on `workflow_dispatch` and a push to `main`, a musl leg and a `cc-debian13` leg, seed through HTTP, flood with `oha`, memory check). Also 0128 (a red `load` on `main` blocks the next release, the pull-request job `ci-scripts` runs the tests of `deploy/ci/`) |
+| Test gates | 0127 (the coverage gate finds test code from the source, a crate without a reported line fails). Also 0127 (the grant test reads the rights of `PUBLIC`, a script rejects the rewrite forms and `DO` blocks). Also 0127 (the exact pin of `cargo-llvm-cov`, the branch protection of `main`). Also 0136 (14 more rewrite forms of the migration check). Load level: 0128 (the job `load` on `workflow_dispatch` and a push to `main`, a musl leg and a `cc-debian13` leg, seed through HTTP, flood with `oha`, memory check). Also 0128 (a red `load` on `main` blocks the next release, the pull-request job `ci-scripts` runs the tests of `deploy/ci/`) |
 
 ## How to add an ADR
 

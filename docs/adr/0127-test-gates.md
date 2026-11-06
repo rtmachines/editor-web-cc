@@ -1,6 +1,6 @@
 # ADR-0127: Test gates on production code, PUBLIC rights, and rewrite forms
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0136 (rewrite forms)
 Date: 2026-11-04
 Deciders: project owner
 

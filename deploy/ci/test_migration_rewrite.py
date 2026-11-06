@@ -14,14 +14,15 @@ from unittest import mock
 SCRIPT = pathlib.Path(__file__).with_name("migration_rewrite.py")
 MIGRATIONS = pathlib.Path(__file__).resolve().parents[2] / "migrations"
 BASE = "CREATE TABLE recipe (note TEXT, other TEXT);\n"
-CHECK = "ALTER TABLE recipe ADD CONSTRAINT note_nn CHECK (note IS NOT NULL)"
+CHECK = "ALTER TABLE recipe ADD CONSTRAINT note_nn CHECK (note IS NOT NULL) NOT VALID"
+VALIDATED_CHECK = CHECK + ";\nALTER TABLE recipe VALIDATE CONSTRAINT note_nn;\n"
 SET_NOT_NULL = "ALTER TABLE recipe ALTER COLUMN note SET NOT NULL;\n"
 TYPE = "column type change"
 DEFAULT = "volatile default"
 NOT_NULL = "set not null without valid check"
 
 
-class MigrationRewriteTests(unittest.TestCase):
+class MigrationRewriteTestCase(unittest.TestCase):
     def setUp(self):
         self.assertTrue(SCRIPT.is_file(), "Task 6.2 must add migration_rewrite.py")
         spec = importlib.util.spec_from_file_location("migration_rewrite", SCRIPT)
@@ -62,7 +63,7 @@ class MigrationRewriteTests(unittest.TestCase):
 
     def assert_files(self, files, expected=(), exit_code=None):
         self.write_files(files)
-        result = self.run_cli()
+        result = self.run_with_exempt({})
         wanted = exit_code if exit_code is not None else int(bool(expected))
         self.assertEqual(result.returncode, wanted, result.stdout + result.stderr)
         if wanted == 1:
@@ -75,7 +76,7 @@ class MigrationRewriteTests(unittest.TestCase):
             {"0001_base.sql": BASE, "0002_change.sql": sql}, expected
         )
 
-    def assert_check_change(self, change, form=None, check=CHECK + ";\n"):
+    def assert_check_change(self, change, form=None, check=VALIDATED_CHECK):
         expected = [("0003_change.sql", 1, form)] if form else []
         return self.assert_files(
             {"0001_base.sql": BASE, "0002_check.sql": check, "0003_change.sql": change},
@@ -97,14 +98,13 @@ class MigrationRewriteTests(unittest.TestCase):
                 code = error.code
         return subprocess.CompletedProcess([], code or 0, stdout.getvalue(), stderr.getvalue())
 
+
+class MigrationRewriteTests(MigrationRewriteTestCase):
     def test_column_type_change_fails(self):
-        self.assert_files(
-            {
-                "0001_base.sql": "CREATE TABLE audit_log (action INTEGER);\n",
-                "0002_change.sql": "ALTER TABLE audit_log ALTER COLUMN action TYPE TEXT;\n",
-            },
-            [("0002_change.sql", 1, TYPE)],
-        )
+        self.assert_files({
+            "0001_base.sql": "CREATE TABLE audit_log (action INTEGER);\n",
+            "0002_change.sql": "ALTER TABLE audit_log ALTER COLUMN action TYPE TEXT;\n",
+        }, [("0002_change.sql", 1, TYPE)])
 
     def test_column_type_change_without_column_keyword_fails(self):
         self.assert_change("ALTER TABLE recipe ALTER note TYPE TEXT;\n", TYPE)
@@ -200,14 +200,11 @@ class MigrationRewriteTests(unittest.TestCase):
         )
 
     def test_nextval_default_fails(self):
-        self.assert_files(
-            {
-                "0001_base.sql": BASE + "CREATE SEQUENCE recipe_seq;\n",
-                "0002_change.sql":
-                    "ALTER TABLE recipe ADD COLUMN seq BIGINT DEFAULT nextval('recipe_seq');\n",
-            },
-            [("0002_change.sql", 1, DEFAULT)],
-        )
+        self.assert_files({
+            "0001_base.sql": BASE + "CREATE SEQUENCE recipe_seq;\n",
+            "0002_change.sql":
+                "ALTER TABLE recipe ADD COLUMN seq BIGINT DEFAULT nextval('recipe_seq');\n",
+        }, [("0002_change.sql", 1, DEFAULT)])
 
     def test_serial_types_fail(self):
         for type_name in ("serial", "smallserial", "bigserial", "serial2", "serial4", "serial8"):
@@ -235,17 +232,6 @@ class MigrationRewriteTests(unittest.TestCase):
                 self.assert_files({"0001_base.sql": BASE +
                     f"ALTER TABLE recipe ADD COLUMN s {definition};\n"
                 })
-
-    def test_stored_generated_column_stays_out_of_scope(self):
-        self.assert_change(
-            "ALTER TABLE recipe ADD COLUMN s integer GENERATED ALWAYS AS (length(note)) STORED;\n"
-        )
-
-    def test_serial_in_column_or_constraint_name_is_not_a_type(self):
-        self.assert_change(
-            "ALTER TABLE recipe ADD COLUMN serial integer,\n"
-            " ADD COLUMN s integer CONSTRAINT bigserial CHECK (s > 0);\n"
-        )
 
     def test_unknown_default_function_fails(self):
         self.assert_change(
@@ -354,10 +340,8 @@ class MigrationRewriteTests(unittest.TestCase):
         )})
 
     def test_new_table_does_not_exempt_do(self):
-        self.assert_files(
-            {"0001_base.sql": BASE + "DO $$ BEGIN NULL; END $$;\n"},
-            [("0001_base.sql", 2, "DO block")],
-        )
+        self.assert_files({"0001_base.sql": BASE + "DO $$ BEGIN NULL; END $$;\n"},
+                          [("0001_base.sql", 2, "DO block")])
 
     def test_conditional_create_does_not_exempt_old_table(self):
         self.assert_change(
@@ -368,34 +352,24 @@ class MigrationRewriteTests(unittest.TestCase):
         )
 
     def test_validated_check_in_earlier_file_passes(self):
-        self.assert_check_change(
-            SET_NOT_NULL,
-            check=CHECK + " NOT VALID;\nALTER TABLE recipe VALIDATE CONSTRAINT note_nn;\n",
-        )
+        self.assert_check_change(SET_NOT_NULL)
 
     def test_validation_in_separate_file_passes_in_name_order(self):
         self.assert_files({
             "0004_change.sql": SET_NOT_NULL,
             "0003_validate.sql": "ALTER TABLE recipe VALIDATE CONSTRAINT note_nn;\n",
-            "0002_check.sql": CHECK + " NOT VALID;\n",
+            "0002_check.sql": CHECK + ";\n",
             "0001_base.sql": BASE,
         })
 
-    def test_check_without_not_valid_passes(self):
-        self.assert_check_change(SET_NOT_NULL)
-
     def test_dropped_unnamed_check_after_name_collision_fails(self):
-        self.assert_files(
-            {
-                "0001_base.sql":
-                    "CREATE TABLE recipe (note TEXT CHECK (length(note) < 10));\n"
-                    "ALTER TABLE recipe ADD CHECK (note IS NOT NULL);\n",
-                "0002_change.sql":
-                    "ALTER TABLE recipe DROP CONSTRAINT recipe_note_check1;\n"
-                    + SET_NOT_NULL,
-            },
-            [("0002_change.sql", 2, NOT_NULL)],
-        )
+        self.assert_files({
+            "0001_base.sql":
+                "CREATE TABLE recipe (note TEXT CHECK (length(note) < 10));\n"
+                "ALTER TABLE recipe ADD CHECK (note IS NOT NULL);\n",
+            "0002_change.sql":
+                "ALTER TABLE recipe DROP CONSTRAINT recipe_note_check1;\n" + SET_NOT_NULL,
+        }, [("0002_change.sql", 2, NOT_NULL)])
 
     def test_unnamed_check_does_not_prove_not_null(self):
         for declaration in (
@@ -411,36 +385,29 @@ class MigrationRewriteTests(unittest.TestCase):
 
     def test_long_unnamed_check_name_does_not_prove_not_null(self):
         table = "recipe_" + "x" * 50
-        self.assert_files(
-            {
-                "0001_base.sql": f"CREATE TABLE {table} (note TEXT);\n"
-                    f"ALTER TABLE {table} ADD CHECK (note IS NOT NULL);\n",
-                "0002_change.sql":
-                    f"ALTER TABLE {table} ALTER COLUMN note SET NOT NULL;\n",
-            },
-            [("0002_change.sql", 1, NOT_NULL)],
-        )
+        self.assert_files({
+            "0001_base.sql": f"CREATE TABLE {table} (note TEXT);\n"
+                f"ALTER TABLE {table} ADD CHECK (note IS NOT NULL);\n",
+            "0002_change.sql": f"ALTER TABLE {table} ALTER COLUMN note SET NOT NULL;\n",
+        }, [("0002_change.sql", 1, NOT_NULL)])
 
     def test_named_check_after_unnamed_check_passes(self):
         self.assert_files({
             "0001_base.sql":
                 "CREATE TABLE recipe (note TEXT CHECK (length(note) < 10));\n"
-                + CHECK + ";\n",
+                + VALIDATED_CHECK,
             "0002_change.sql": SET_NOT_NULL,
         })
 
     def test_unvalidated_check_fails(self):
-        self.assert_check_change(SET_NOT_NULL, NOT_NULL, check=CHECK + " NOT VALID;\n")
+        self.assert_check_change(SET_NOT_NULL, NOT_NULL, check=CHECK + ";\n")
 
     def test_dropped_check_in_later_file_fails(self):
-        self.assert_files(
-            {
-                "0001_base.sql": BASE + CHECK + ";\n",
-                "0002_drop.sql": "ALTER TABLE recipe DROP CONSTRAINT note_nn;\n",
-                "0003_change.sql": SET_NOT_NULL,
-            },
-            [("0003_change.sql", 1, NOT_NULL)],
-        )
+        self.assert_files({
+            "0001_base.sql": BASE + VALIDATED_CHECK,
+            "0002_drop.sql": "ALTER TABLE recipe DROP CONSTRAINT note_nn;\n",
+            "0003_change.sql": SET_NOT_NULL,
+        }, [("0003_change.sql", 1, NOT_NULL)])
 
     def test_drop_check_in_same_statement_fails(self):
         self.assert_check_change(
@@ -457,13 +424,13 @@ class MigrationRewriteTests(unittest.TestCase):
         self.assert_check_change(
             "ALTER TABLE recipe RENAME CONSTRAINT note_nn TO note_present;\n"
             "ALTER TABLE recipe VALIDATE CONSTRAINT note_present;\n" + SET_NOT_NULL,
-            check=CHECK + " NOT VALID;\n",
+            check=CHECK + ";\n",
         )
 
     def test_check_on_other_column_fails(self):
         self.assert_check_change(
             SET_NOT_NULL, NOT_NULL,
-            check="ALTER TABLE recipe ADD CONSTRAINT other_nn CHECK (other IS NOT NULL);\n",
+            check=VALIDATED_CHECK.replace("note", "other"),
         )
 
     def test_check_on_other_table_fails(self):
@@ -473,7 +440,7 @@ class MigrationRewriteTests(unittest.TestCase):
         )
 
     def test_schema_qualified_check_matches_unqualified_table(self):
-        self.assert_check_change(SET_NOT_NULL, check=CHECK.replace("recipe", "public.recipe") + ";\n")
+        self.assert_check_change(SET_NOT_NULL, check=VALIDATED_CHECK.replace("recipe", "public.recipe"))
 
     def test_renamed_column_keeps_valid_check(self):
         self.assert_check_change(
@@ -488,25 +455,19 @@ class MigrationRewriteTests(unittest.TestCase):
         )
 
     def test_dropped_column_removes_check_state(self):
-        self.assert_files(
-            {
-                "0001_base.sql": BASE + CHECK + ";\n",
-                "0002_replace.sql":
-                    "ALTER TABLE recipe DROP COLUMN note;\nALTER TABLE recipe ADD COLUMN note TEXT;\n",
-                "0003_change.sql": SET_NOT_NULL,
-            },
-            [("0003_change.sql", 1, NOT_NULL)],
-        )
+        self.assert_files({
+            "0001_base.sql": BASE + VALIDATED_CHECK,
+            "0002_replace.sql":
+                "ALTER TABLE recipe DROP COLUMN note;\nALTER TABLE recipe ADD COLUMN note TEXT;\n",
+            "0003_change.sql": SET_NOT_NULL,
+        }, [("0003_change.sql", 1, NOT_NULL)])
 
     def test_dropped_table_removes_check_state(self):
-        self.assert_files(
-            {
-                "0001_base.sql": BASE + CHECK + ";\n",
-                "0002_replace.sql": "DROP TABLE recipe;\n" + BASE,
-                "0003_change.sql": SET_NOT_NULL,
-            },
-            [("0003_change.sql", 1, NOT_NULL)],
-        )
+        self.assert_files({
+            "0001_base.sql": BASE + VALIDATED_CHECK,
+            "0002_replace.sql": "DROP TABLE recipe;\n" + BASE,
+            "0003_change.sql": SET_NOT_NULL,
+        }, [("0003_change.sql", 1, NOT_NULL)])
 
     def test_multiple_actions_report_each_form_at_statement_start(self):
         self.assert_files(
@@ -568,7 +529,7 @@ class MigrationRewriteTests(unittest.TestCase):
     def test_function_body_does_not_establish_check_proof(self):
         self.assert_change(
             "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
-            + CHECK + ";\nEND$$;\n" + SET_NOT_NULL, NOT_NULL, line=4,
+            + VALIDATED_CHECK + "END$$;\n" + SET_NOT_NULL, NOT_NULL, line=5,
         )
 
     def test_function_body_preserves_new_table_exemption(self):
@@ -677,14 +638,11 @@ class MigrationRewriteTests(unittest.TestCase):
         self.assert_files({"0001_base.sql": BASE, "notes.txt": "SELECT 'unterminated;\n"})
 
     def test_violations_from_all_files_follow_name_order(self):
-        self.assert_files(
-            {
-                "0003_change.sql": SET_NOT_NULL,
-                "0002_change.sql": "ALTER TABLE recipe ALTER COLUMN note TYPE TEXT;\n",
-                "0001_base.sql": BASE,
-            },
-            [("0002_change.sql", 1, TYPE), ("0003_change.sql", 1, NOT_NULL)],
-        )
+        self.assert_files({
+            "0003_change.sql": SET_NOT_NULL,
+            "0002_change.sql": "ALTER TABLE recipe ALTER COLUMN note TYPE TEXT;\n",
+            "0001_base.sql": BASE,
+        }, [("0002_change.sql", 1, TYPE), ("0003_change.sql", 1, NOT_NULL)])
 
     def test_matching_exemption_passes(self):
         self.write_files({"0001_do.sql": "DO $$ BEGIN NULL; END $$;\n"})
@@ -712,11 +670,11 @@ class MigrationRewriteTests(unittest.TestCase):
 
     def test_shipped_migrations_pass(self):
         self.assertTrue(MIGRATIONS.is_dir(), str(MIGRATIONS))
-        prefixes = {path.name[:4] for path in MIGRATIONS.glob("*.sql")}
-        self.assertTrue({f"{number:04d}" for number in range(1, 11)} <= prefixes)
+        files = {path.name: path.read_text(encoding="utf-8") for path in MIGRATIONS.glob("*.sql")
+                 if path.name[:4] in {f"{number:04d}" for number in range(1, 11)}}
+        self.assertEqual({name[:4] for name in files}, {f"{number:04d}" for number in range(1, 11)})
         result = self.run_cli(MIGRATIONS)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

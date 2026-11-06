@@ -8,6 +8,7 @@ This file records the notable changes of the recipe editor. The format follows [
 
 - CI checks the OpenSpec specs with the STE lint (job `ste-lint`, ADR-0135).
 - The documents record that `GET /login` and `POST /login` do not authenticate the session and stay outside the password gate (ADR-0134). The behavior does not change.
+- The CI check of the migrations rejects 14 more forms that rewrite, scan, or lock an existing table (ADR-0136).
 
 ## [0.7.0] - 2026-11-06
 

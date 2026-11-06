@@ -1667,7 +1667,7 @@ A later migration runs `SET ROLE audit_owner` for three purposes only. It create
 4. `RESET ROLE`.
 5. `REVOKE CREATE ON SCHEMA public FROM audit_owner`.
 
-A concurrent index on an audit object is a runbook procedure, not a migration. A migration with `CREATE INDEX CONCURRENTLY` holds that one statement only (section 8), so it cannot run the five steps. The operator connects as `recipe_migrator` and runs the five steps in one `psql` session, with `CREATE INDEX CONCURRENTLY` as step 3 (`reliability.md` 7.10). The next migration records the index with `CREATE INDEX IF NOT EXISTS` as step 3 of the five steps.
+A concurrent index on an audit object is a runbook procedure, not a migration. A migration with `CREATE INDEX CONCURRENTLY` holds that one statement only (section 8), so it cannot run the five steps. The operator connects as `recipe_migrator` and runs the five steps in one `psql` session, with `CREATE INDEX CONCURRENTLY` as step 3 (`reliability.md` 7.10). The next migration records the index with `CREATE INDEX IF NOT EXISTS` as step 3 of the five steps. That migration needs an entry in the list `EXEMPT` of `deploy/ci/migration_rewrite.py` with the ADR that adds the index (ADR-0136).
 
 Residual risk: the migrator credential can still run `SET ROLE audit_owner`. With that role it also gets the read rights of `pg_read_all_stats` (ADR-0069). The credential exists only inside the one-shot `migrate` container (ADR-0020).
 
@@ -2109,7 +2109,26 @@ Notes:
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.
-- CI rejects a migration that rewrites a table or scans it under an exclusive lock (`ALTER TABLE ... TYPE`, `ADD COLUMN ... DEFAULT` with a volatile default, `SET NOT NULL` without a valid `CHECK (... IS NOT NULL)` first). The rule applies to every table (`reliability.md` 5). The script `deploy/ci/migration_rewrite.py` runs this check on every file of `migrations/`. A `DO` block also fails the check. An entry of the list `EXEMPT` permits one (file, form) pair when it cites an ADR (ADR-0127 (n) to (u)). Breaking changes use expand and contract.
+- CI rejects a migration that rewrites a table, scans it under an exclusive lock, or holds a lock that blocks writes. The rule applies to every table (`reliability.md` 5). The script `deploy/ci/migration_rewrite.py` runs this check on every file of `migrations/`. The script rejects these forms (ADR-0127 (n) to (u), ADR-0136):
+  - `ALTER TABLE ... TYPE`.
+  - `ADD COLUMN ... DEFAULT` with a volatile default.
+  - `SET NOT NULL` without a valid `CHECK (... IS NOT NULL)` first.
+  - `ADD COLUMN ... GENERATED ALWAYS AS (...) STORED`.
+  - `ADD CHECK` or `ADD FOREIGN KEY` without `NOT VALID`. An inline `CHECK` or `REFERENCES` in `ADD COLUMN` also counts.
+  - `CREATE INDEX` without `CONCURRENTLY`, also with `IF NOT EXISTS`.
+  - `ADD UNIQUE` without `USING INDEX`. An inline `UNIQUE` in `ADD COLUMN` also counts.
+  - `ADD PRIMARY KEY`, also with `USING INDEX`. An inline `PRIMARY KEY` in `ADD COLUMN` also counts.
+  - `ADD EXCLUDE`.
+  - `VACUUM FULL`, also in the form `VACUUM (FULL, ...)`.
+  - `CLUSTER`.
+  - `ALTER TABLE ... SET TABLESPACE`.
+  - `ALTER TABLE ... SET LOGGED` or `SET UNLOGGED`.
+  - `ALTER TABLE ... SET ACCESS METHOD`.
+  - `ALTER DOMAIN ... ADD CHECK` without `NOT VALID`, and `ALTER DOMAIN ... SET NOT NULL`.
+  - `ALTER DOMAIN ... VALIDATE CONSTRAINT`. It takes a `SHARE` lock on each table that uses the domain and scans that table.
+  - `LOCK TABLE`.
+
+  A table that an unconditional `CREATE TABLE` in the same file creates is exempt, except for `VACUUM FULL` and `CLUSTER` without a table name. A domain that an unconditional `CREATE DOMAIN` in the same file creates is exempt in the same way, also for `ALTER DOMAIN ... VALIDATE CONSTRAINT`. A `DO` block also fails the check. An entry of the list `EXEMPT` permits one (file, form) pair when it cites an ADR. Breaking changes use expand and contract. ADR-0136 (Risks) lists the forms that the check does not read.
 - A migration never rewrites `audit_log` rows and never drops a column that an older audit row references in `before_state` or `after_state`.
 - Schema changes and the seed of `0004` write no audit row. `_sqlx_migrations` is their record. A later data migration that changes catalog rows writes one audit row per changed row under `SET ROLE audit_owner` (section 5.1). The row has `actor_user_id = NULL`, and `request_id` is the UUID of the migration version, a constant in the file. The state rule of section 10 applies.
 - The one-shot service `backup-premigrate` writes a `_premigrate` dump before `migrate` starts (`reliability.md` sections 7.1 and 7.7).
