@@ -846,6 +846,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Test the migration rewrite check
-        run: python3 -I -B deploy/ci/test_migration_rewrite.py
+        run: |
+          python3 -I -B deploy/ci/test_migration_rewrite.py
+          python3 -I -B deploy/ci/test_migration_rewrite_forms.py
       - name: Check the migrations for rewrites
         run: python3 -I -B deploy/ci/migration_rewrite.py migrations

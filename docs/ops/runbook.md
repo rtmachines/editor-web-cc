@@ -1463,7 +1463,7 @@ REVOKE CREATE ON SCHEMA public FROM audit_owner;
 3. Run all five statements, also when the index statement fails. The role `audit_owner` must not keep `CREATE` on `public`.
 4. Leave `psql` with `\q`.
 
-The next migration records the same index with `CREATE INDEX IF NOT EXISTS` (`data-model.md` 5.1).
+The next migration records the same index with `CREATE INDEX IF NOT EXISTS` (`data-model.md` 5.1). That migration needs an entry in the list `EXEMPT` of `deploy/ci/migration_rewrite.py` with the ADR that adds the index (ADR-0136).
 
 ## Major upgrade
 
