@@ -193,6 +193,51 @@ async fn pages_own_login_deletes_the_session_of_the_request_cookie() {
     assert_eq!(with_old.header("location"), "/login");
 }
 
+/// The password gate does not stop a session with `must_change_password` on `GET /login`.
+///
+/// The login routes do not authenticate the session cookie (requirement `NoSession`), so the gate
+/// sees no session (ADR-0134 (a)).
+#[tokio::test]
+async fn pages_own_login_form_stays_open_to_a_session_with_the_one_time_password_flag() {
+    let fixture = Fixture::new();
+    let flagged = fixture.seed_session(1, Role::Operator, true);
+    let gated = me_with(&fixture, &flagged.cookie).await;
+    assert_eq!(gated.status, StatusCode::SEE_OTHER, "the gate is active");
+    assert_eq!(gated.header("location"), "/me/password");
+    let reply = get_with(&fixture.router(), "/login", &[("cookie", &flagged.cookie)]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("name=\"login\""), "{}", reply.body);
+    assert!(reply.body.contains("name=\"password\""));
+}
+
+/// The password gate does not stop a session with `must_change_password` on `POST /login`.
+///
+/// The request logs in as another user without the flag. A success deletes the old session row.
+/// A failure keeps it (ADR-0134 (a), (b)).
+#[tokio::test]
+async fn pages_own_login_post_stays_open_to_a_session_with_the_one_time_password_flag() {
+    let fixture = Fixture::new();
+    let flagged = fixture.seed_session(1, Role::Operator, true);
+    fixture.seed_account(2, Role::Operator, PASSWORD, false);
+    let headers = [("cookie", flagged.cookie.as_str())];
+    let wrong = format!("login=user2&password={WRONG_FIELD}");
+    let failed = post_pre_session(&fixture, "/login", &wrong, &headers).await;
+    assert_eq!(failed.status, StatusCode::UNAUTHORIZED, "{}", failed.body);
+    assert!(failed.body.contains("E-IDN-003"), "{}", failed.body);
+    assert!(failed.body.contains("name=\"login\""), "the form again");
+    let kept = me_with(&fixture, &flagged.cookie).await;
+    assert_eq!(kept.status, StatusCode::SEE_OTHER);
+    assert_eq!(kept.header("location"), "/me/password", "the row stays");
+    let right = format!("login=user2&password={PASSWORD_FIELD}");
+    let reply = post_pre_session(&fixture, "/login", &right, &headers).await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    assert_eq!(reply.header("location"), "/recipes");
+    assert!(set_cookie_of(&reply, SESSION_COOKIE).is_some());
+    let gone = me_with(&fixture, &flagged.cookie).await;
+    assert_eq!(gone.status, StatusCode::SEE_OTHER);
+    assert_eq!(gone.header("location"), "/login", "the old row is deleted");
+}
+
 #[tokio::test]
 async fn pages_own_wrong_password_unknown_login_and_inactive_user_give_one_answer() {
     let fixture = Fixture::new();

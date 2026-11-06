@@ -4,6 +4,10 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- A test checks that the login routes stay outside the password gate of `must_change_password` (ADR-0134).
+
 ### Changed
 
 - CI checks the OpenSpec specs with the STE lint (job `ste-lint`, ADR-0135).
