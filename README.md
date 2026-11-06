@@ -6,15 +6,16 @@ The application runs 24/7 on one on-premises Docker host. Caddy handles TLS. The
 
 ## Status
 
-This repository holds release 0.6.0. It has the route groups of `docs/architecture/api.md` section 2 and the Compose stack of `docs/architecture/reliability.md` section 7. It has the backup, the restore, the volume switch of ADR-0103, and the recovery from the WAL archive of ADR-0106.
+This repository holds release 0.7.0. It has the route groups of `docs/architecture/api.md` section 2 and the Compose stack of `docs/architecture/reliability.md` section 7. It has the backup, the restore, the volume switch of ADR-0103, and the recovery from the WAL archive of ADR-0106.
 
-The version page and the type page have the additions of ADR-0108. The export routes of ADR-0109 serve a transfer client with HTTP Basic authentication. The UI changes of ADR-0110 to ADR-0113 protect the data of a draft and show the read-only mode on each page. The [changelog](CHANGELOG.md) lists every change.
+The version page and the type page have the additions of ADR-0108. The export routes of ADR-0109 serve a transfer client with HTTP Basic authentication. The UI changes of ADR-0110 to ADR-0113 protect the data of a draft and show the read-only mode on each page. Release 0.7.0 adds the S7 range and address rules of ADR-0114 to ADR-0121. It also adds the runtime fixes and the test gates of ADR-0122 to ADR-0133. The [changelog](CHANGELOG.md) lists every change.
 
-## Known gaps of 0.6.0
+## Known gaps of 0.7.0
 
 - The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
-- Seven tests with `#[cfg(unix)]` ran only in CI on Linux.
+- The tests with `#[cfg(unix)]` and the shell-based tests of `deploy/ci` ran only in CI on Linux.
 - No test with a real transfer client over HTTPS ran.
+- The migration check passes some rewrite forms (ADR-0127).
 - The operations gaps are in the section [Known gaps](docs/ops/runbook.md#known-gaps) of the runbook.
 
 The section "Known gaps" of the [changelog](CHANGELOG.md) is the authority for this list.
