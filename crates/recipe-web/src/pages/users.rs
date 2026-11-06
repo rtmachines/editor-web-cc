@@ -466,4 +466,6 @@ mod read_only_tests;
 #[cfg(test)]
 mod technical_tests;
 #[cfg(test)]
+mod unlock_tests;
+#[cfg(test)]
 mod tests;
