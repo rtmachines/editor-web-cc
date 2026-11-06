@@ -22,7 +22,7 @@ use super::recipes::fields::FieldLines;
 use super::render::render;
 use super::request::PageRequest;
 use super::texts::Texts;
-use crate::error::{FieldError, FieldReason, WebError};
+use crate::error::{FieldError, FieldReason, WebError, display_chain};
 use crate::state::WebState;
 use fluent::FluentArgs;
 use query::ListQuery;
@@ -420,10 +420,13 @@ pub(crate) async fn reset_password(
 ///
 /// The function solves one problem: the unlock is committed and the answer is a success, so no
 /// error mapping logs the lost event. This line is the one log place of that fault.
+///
+/// The field `chain` holds the `Display` chain of the fault, as the line of `log_error` does.
 fn log_lost_unlock_event(lost: &StorageError, request_id: RequestId) {
     tracing::warn!(
         error_code = %lost.code(),
         request_id = %request_id,
+        chain = %display_chain(lost),
         event = "unlock",
         "security event lost after a committed unlock"
     );

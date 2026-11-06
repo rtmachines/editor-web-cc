@@ -791,6 +791,10 @@ async fn pages_users_unlock_with_a_lost_event_is_a_success_with_one_warn_line() 
         line.contains(&format!("request_id={}", reply.header("x-request-id"))),
         "{line}"
     );
+    assert!(
+        line.contains("chain=The database does not answer. Try again."),
+        "{line}"
+    );
 }
 
 #[tokio::test]
