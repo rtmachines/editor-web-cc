@@ -13,7 +13,7 @@ use std::time::Duration;
 use parking_lot::{Condvar, Mutex};
 use recipe_app::ports::{DiskFault, DiskSpace, FreeSpace};
 
-use super::{Call, SystemDiskSpace};
+use super::{Call, Reader, SystemDiskSpace};
 
 /// A limit that no test call reaches.
 const LONG_LIMIT: Duration = Duration::from_secs(30);
@@ -182,6 +182,87 @@ async fn a_running_call_that_reaches_the_limit_leaves_a_mark_until_it_ends() {
 
     call.finish();
     assert!(!space.is_stalled(&data_path()));
+}
+
+/// Release every probe when the test ends, also after a failed assertion.
+struct ReleaseOnDrop(Vec<Arc<Probe>>);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        for probe in &self.0 {
+            probe.release();
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_call_that_did_not_mark_the_path_leaves_the_mark_of_a_running_call() {
+    // The first call reads from `first_gate`, the second from `second_gate`, every later call
+    // from `later_gate`. Only `later_gate` is open.
+    let first_gate = Probe::blocked();
+    let second_gate = Probe::blocked();
+    let later_gate = Probe::blocked();
+    later_gate.release();
+    let _release = ReleaseOnDrop(vec![
+        Arc::clone(&first_gate),
+        Arc::clone(&second_gate),
+        Arc::clone(&later_gate),
+    ]);
+    let gates = [
+        Arc::clone(&first_gate),
+        Arc::clone(&second_gate),
+        Arc::clone(&later_gate),
+    ];
+    let next_call = Arc::new(AtomicUsize::new(0));
+    let reader: Reader = Arc::new(move |_path| {
+        let number = next_call.fetch_add(1, Ordering::SeqCst);
+        gates.get(number).or_else(|| gates.last()).unwrap().read()
+    });
+    // The first adapter reaches the limit soon. The second one shares its set and never does.
+    let marking = SystemDiskSpace::with_reader(Duration::from_millis(150), reader);
+    let waiting = SystemDiskSpace {
+        limit: LONG_LIMIT,
+        ..marking.clone()
+    };
+    let path = data_path();
+
+    let first = tokio::spawn({
+        let (space, path) = (marking.clone(), path.clone());
+        async move { space.free_space(&path).await }
+    });
+    wait_until("the first reader started", || first_gate.starts() == 1).await;
+    let second = tokio::spawn({
+        let (space, path) = (waiting, path.clone());
+        async move { space.free_space(&path).await }
+    });
+    wait_until("the second reader started", || second_gate.starts() == 1).await;
+    let first = first.await.unwrap();
+    assert!(
+        is_timed_out(&first.unwrap_err()),
+        "the first call must mark"
+    );
+    assert!(marking.is_stalled(&path), "the first call left no mark");
+
+    // The second call ends while the first reader still blocks.
+    second_gate.release();
+    let second = second.await.unwrap();
+    assert!(second.is_ok(), "got {second:?}");
+    let third = marking.free_space(&path).await;
+
+    assert!(
+        matches!(third, Err(DiskFault::Unreadable(_))),
+        "the end of the second call took away the mark of the first: {third:?}"
+    );
+    assert_eq!(later_gate.starts(), 0, "the third call started a reader");
+
+    first_gate.release();
+    wait_until("the mark of the ended reader clears", || {
+        !marking.is_stalled(&path)
+    })
+    .await;
+    let fourth = marking.free_space(&path).await;
+    assert!(fourth.is_ok(), "got {fourth:?}");
+    assert_eq!(later_gate.starts(), 1);
 }
 
 #[cfg(unix)]

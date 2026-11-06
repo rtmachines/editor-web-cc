@@ -44,11 +44,11 @@ Non-Goals:
 
 ### D2. Time limit of the disk measurement (ADR-0133)
 
-1. `SystemDiskSpace` gets the limit and a set of stalled paths: `Arc<parking_lot::Mutex<HashSet<PathBuf>>>`. It stops being `Copy`. `serve/process.rs` builds one adapter for the jobs `disk_check` and `alerts` and passes `health.disk_check_interval`. `recipe-server` adds `parking_lot = { workspace = true }`. The set is a new place of interior mutability in `reliability.md` §8.
-2. A path enters the set only when its call reaches the limit. Calls that have not reached the limit run side by side, so two jobs that measure `pgdata` at the same time both get a reading.
+1. `SystemDiskSpace` gets the limit and a map of stalled paths: `Arc<parking_lot::Mutex<HashMap<PathBuf, usize>>>`. The value is the number of marks on the path. It stops being `Copy`. `serve/process.rs` builds one adapter for the jobs `disk_check` and `alerts` and passes `health.disk_check_interval`. `recipe-server` adds `parking_lot = { workspace = true }`. The map is a new place of interior mutability in `reliability.md` §8.
+2. A path enters the map only when its call reaches the limit. Calls that have not reached the limit run side by side, so two jobs that measure `pgdata` at the same time both get a reading.
 3. `free_space` returns `DiskFault::Unreadable` at once when the path is in the set. Otherwise it spawns the call.
 4. `tokio::time::timeout` wraps the await of the join handle. An elapsed wait gives `DiskFault::Unreadable` with `io::ErrorKind::TimedOut`.
-5. Each call has a state `Running` or `Done` that the blocking closure and the timeout branch share. Both sides change the state and the set under the one mutex. The timeout branch adds the path only while the state is `Running`. The closure sets `Done` and takes the path out of the set. Thus a call that ends at the limit leaves no mark.
+5. Each call has a state `Running` or `Done` and a flag `marked`. The blocking closure and the timeout branch share them. Both sides change the state, the flag, and the map under the one mutex. The timeout branch adds one mark on the path only while the state is `Running`. It sets `marked`. The closure sets `Done`. It takes away one mark only when its call set `marked`, and it takes the path out of the map at 0 marks. Thus a call that ends at the limit leaves no mark, and a call takes away only its own mark.
 6. The reader function is a parameter of a private constructor, so a unit test can give a reader that blocks on a channel. The tests use a real limit of some milliseconds and no paused clock.
 
 ### D3. Own password form (ADR-0132)
