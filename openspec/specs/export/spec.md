@@ -322,7 +322,7 @@ The system SHALL reject an export that takes longer than 10 seconds with `E-WEB-
 - **AND** the audit log holds one `VersionExported` entry for the version 3
 
 ### Requirement: Schema file of the export document
-The system SHALL keep a JSON Schema 2020-12 file of the export document v1 as the source of truth of the document. Every export document SHALL pass a check against the file. Each object with fixed fields SHALL reject a field that the file does not name (R03, A2).
+The system SHALL keep a JSON Schema 2020-12 file of the export document v1 as the source of truth of the document. Every export document SHALL pass a check against the file. Each object whose field names the file lists SHALL reject a field that the file does not name (R03, A2).
 
 #### Scenario: Document of an approved version
 - **GIVEN** the approved version 3 of the recipe `R-100`

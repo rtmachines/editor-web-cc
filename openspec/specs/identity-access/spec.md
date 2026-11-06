@@ -384,7 +384,7 @@ On a successful `ChangeOwnPassword`, the system SHALL delete every session of th
 - **AND** the audit log holds the action `OwnPasswordChanged`
 
 ### Requirement: Password change gate
-A user with `must_change_password` set to true SHALL reach only `GET /me/password`, `POST /me/password`, `POST /logout`, and `POST /lang`. Every other route SHALL redirect with `303` to `/me/password` with the code `E-IDN-007` (R21).
+A user with `must_change_password` set to true SHALL reach only `GET /me/password`, `POST /me/password`, `POST /logout`, and `POST /lang`. Every other route SHALL redirect with `303` to `/me/password` with the code `E-IDN-007`. The routes `GET /static/*`, `GET /login`, and `POST /login` SHALL stay outside this gate, because they do not authenticate the session (R21, ADR-0134).
 
 #### Scenario: Recipe list before password change
 - **GIVEN** the Operator `mhoffman` with `must_change_password` set to true
@@ -644,7 +644,7 @@ No audit entry, error message, or error page SHALL hold a secret. The secrets ar
 - **AND** the user page shows the time of the last failure
 
 ### Requirement: Default trusted proxy
-The default trusted-proxy list SHALL hold only the address of the service `proxy` in the Compose network. A request from another address of that network SHALL use its socket address as the client address. The Compose file SHALL set the list and the fixed address of `proxy` from one variable (R38, A22).
+The default trusted-proxy list SHALL hold only the address of the service `proxy` in the Compose network. A request from another address of that network SHALL use its socket address as the client address. The Compose file SHALL set the list and the static address of `proxy` from one variable (R38, A22).
 
 #### Scenario: Forwarded header from a neighbor container
 - **GIVEN** the default trusted-proxy list and a request from a container of the Compose network that is not `proxy`

@@ -18,7 +18,7 @@ The build order is in [docs/plan/implementation-prompts.md](docs/plan/implementa
 - The UI has a Polish `pl` bundle (default) and an English `en` bundle (ADR-0012).
 - All English text follows the ASD-STE100 structural rules (R40). Load the skill `asd-ste100` before you write prose.
 - A sentence has at most 25 words. Use the active voice. Do not use semicolons. Use one verb for one action in one file.
-- `tools/ste-lint/ste-lint.py` must report 0 hard violations on the scope of ADR-0023. Passive voice and compound tenses are advisory.
+- `tools/ste-lint/ste-lint.py` must report 0 hard violations on the scope of ADR-0023 and ADR-0135. Passive voice and compound tenses are advisory.
 - Exception: `docs/plan/implementation-prompts.md` is an operator file in Polish.
 
 ## Source of truth and change rule
@@ -100,7 +100,7 @@ docker compose -f deploy/compose.yaml -f deploy/compose.build.yaml -f deploy/com
 openspec validate --all
 openspec list
 cd e2e && npm ci && E2E_PASSWORD=<12 to 128 characters> npm test  # browser regression suite (ADR-0048), Node 22
-bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'  # scope of ADR-0023
+bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'  # scope of ADR-0023 and ADR-0135
 ```
 
 - The `recipe-db` tests need Docker. They start their own PostgreSQL container with `testcontainers` (`reliability.md` §6, ADR-0101).

@@ -816,7 +816,7 @@ jobs:
         shell: bash
         run: |
           shopt -s globstar nullglob
-          files=(docs/architecture/**/*.md docs/adr/**/*.md docs/ops/**/*.md docs/user/**/*.md README.md CONTRIBUTING.md CHANGELOG.md)
+          files=(docs/architecture/**/*.md docs/adr/**/*.md docs/ops/**/*.md docs/user/**/*.md openspec/specs/**/*.md README.md CONTRIBUTING.md CHANGELOG.md)
           python3 -I tools/ste-lint/ste-lint.py "${files[@]}"
 
   migration-freeze:

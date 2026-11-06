@@ -1700,7 +1700,7 @@ The coverage gate SHALL count a file as test code only when every declaration th
 - **THEN** the lines of the file of `fixtures` count for the crate
 
 ### Requirement: Grant test covers PUBLIC
-The grant test SHALL compare the rights of `PUBLIC` on the schema `public` and on its tables, sequences, columns, and functions with a checked-in list. A default right that no `REVOKE` removed SHALL count. A difference SHALL fail the test (R31, R38).
+The grant test SHALL compare the rights of `PUBLIC` on the schema `public` and on its tables, sequences, columns, and functions with a checked-in list. A default right that no `REVOKE` revoked SHALL count. A difference SHALL fail the test (R31, R38).
 
 #### Scenario: New function without a revoke
 - **GIVEN** a migration that creates a function and does not revoke `EXECUTE` from `PUBLIC`

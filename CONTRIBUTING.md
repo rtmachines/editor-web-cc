@@ -6,7 +6,7 @@ This file repeats the rules of sections 2 and 8 of [`docs/architecture/reliabili
 
 - Code comments, identifiers, commit messages, documentation, and specifications are English (R42).
 - English text follows the ASD-STE100 structural rules (R40).
-- `tools/ste-lint/ste-lint.py` checks these rules. CI runs it on the files that ADR-0023 names. One hard violation fails the job.
+- `tools/ste-lint/ste-lint.py` checks these rules. CI runs it on the files that ADR-0023 and ADR-0135 name. One hard violation fails the job.
 - Hard violations are a semicolon in prose, a sentence of more than 25 words, and two verbs from one synonym group in one file.
 - A soft phrasal verb, a marketing adjective, a nominalization, and a list item that ends with "and" or "or" are also hard violations.
 - Passive voice and compound tenses are advisory. They do not fail the job.
@@ -99,7 +99,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --lock
 cargo deny --locked check
 cargo llvm-cov --workspace --all-features --locked --json --summary-only --output-path target/llvm-cov-summary.json
 python3 -I tools/coverage-gate.py target/llvm-cov-summary.json
-bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'
+bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'
 ```
 
 The `openspec` job checks the specifications with the local command `openspec validate --all --strict`.
