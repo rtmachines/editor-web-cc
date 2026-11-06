@@ -1,6 +1,6 @@
 # ADR-0023: Scope and location of the STE lint in CI
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0135 (scope)
 Date: 2026-10-12
 Deciders: project owner
 
@@ -47,7 +47,7 @@ For the location of the script, the owner compared three options:
 
 The project uses **Option A** and a copy of the script in the repository.
 
-Scope. CI lints these files with baseline 0:
+Scope. CI lints these files with baseline 0 (amended by ADR-0135, which adds `openspec/specs/`):
 
 - every Markdown file in `docs/architecture/`, `docs/adr/`, `docs/ops/`, and `docs/user/`, nested directories included,
 - `README.md`, `CONTRIBUTING.md`, and `CHANGELOG.md` in the repository root.

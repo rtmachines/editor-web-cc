@@ -697,7 +697,7 @@ The values of this section are in `reliability.md` section 7.11.
 - Hash: Argon2id, `m = 19 MiB`, `t = 2`, `p = 1`. The hash is never logged.
 - Password policy: 12 to 128 characters, no composition rule, and not present in the local breached-password list shipped with the image. Assumption A23.
 - One-time password: `CreateUser` and `ResetPassword` generate a random password that meets the policy. The page shows it once. The command sets `must_change_password`, except for an `ExportClient` account (section 7.7). No request field carries a password for another user.
-- `must_change_password`: a session of a user with the flag can open only `GET /me/password`, `POST /me/password`, `POST /logout`, and `POST /lang`. Every other route returns `303` to `/me/password`. `GET /static/*` is outside this gate, because it needs no session (section 2.1).
+- `must_change_password`: a session of a user with the flag can open only `GET /me/password`, `POST /me/password`, `POST /logout`, and `POST /lang`. Every other route returns `303` to `/me/password`. `GET /static/*` is outside this gate, because it needs no session (section 2.1). `GET /login` and `POST /login` are also outside this gate, because they do not authenticate the session cookie (requirement `NoSession`), so the gate sees no session. `POST /login` reads the cookie only to delete that session row (section 7.3). A user with the flag can log in again, for example as a different user (ADR-0134).
 
 ### 7.5 Account state
 

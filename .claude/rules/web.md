@@ -58,6 +58,6 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 - The backstop `CatchPanicLayer` is the one exception to the two rules above and to the JSON answer of `/export/`. It answers a plain `text/plain` `500` with `X-Request-Id`. The body holds the code `E-WEB-010` and the English text of its row in `reliability.md` section 1.2 without the reference. It sets no `HX-*` header (ADR-0057 (d), (e), api.md §5.1). Its other security headers come only from the defaults of Caddy (ADR-0057 (j)).
 - Tokens, components, icons, and touch targets come from `docs/architecture/design-system.md`. No page shows a state by color alone.
 - Only `E-WEB-004` (no session or expired session) uses `HX-Redirect: /login` (api.md §5.1).
-- A session with `must_change_password` gets `303` to `/me/password` on every other route (`E-IDN-007`, api.md §7.4).
+- A session with `must_change_password` gets `303` to `/me/password` on every other route (`E-IDN-007`, api.md §7.4). `GET /static/*`, `GET /login`, and `POST /login` are outside this gate (ADR-0134).
 - A response never shows `Debug` output, a stack trace, an SQL fragment, or a file path.
 - The HTTP test suite sends an XSS payload corpus through every text field.
