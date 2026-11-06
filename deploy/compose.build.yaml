@@ -31,5 +31,7 @@ services:
     build: *pgtools-build
   pitr-check:
     build: *pgtools-build
+  pitr-volume:
+    build: *pgtools-build
   restore-volume:
     build: *pgtools-build

@@ -5,7 +5,8 @@
 //! (limits, ports, timeouts, log options, healthcheck values, networks, secrets) and gives a fault.
 
 use crate::fault::Report;
-use crate::lines::{code_lines, indent_of, without_comment};
+use crate::inputs::{COMPOSE, COMPOSE_BUILD, Inputs};
+use crate::lines::{Compose, code_lines, indent_of, without_comment};
 
 const SERVICES_KEY: &str = "services";
 const SERVICE_INDENT: usize = 2;
@@ -102,4 +103,29 @@ pub fn check_override(path: &str, text: &str, allowed: &Allowed) -> Report {
         }
     }
     report
+}
+
+#[test]
+fn every_project_image_service_has_a_build_section() {
+    let inputs = Inputs::load();
+    let compose = Compose::parse(inputs.text(COMPOSE));
+    let build = Compose::parse(inputs.text(COMPOSE_BUILD));
+    for service in compose.services {
+        let Some(image) = service.scalar("image") else {
+            continue;
+        };
+        if ["recipe-server:", "recipe-pgtools:"]
+            .iter()
+            .any(|prefix| image.starts_with(prefix))
+        {
+            assert!(
+                build
+                    .service(service.name)
+                    .and_then(|service| service.scalar("build"))
+                    .is_some(),
+                "{COMPOSE_BUILD} must add build for {} ({image})",
+                service.name
+            );
+        }
+    }
 }
