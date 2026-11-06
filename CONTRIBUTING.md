@@ -102,6 +102,8 @@ python3 -I tools/coverage-gate.py target/llvm-cov-summary.json
 bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'
 ```
 
+The `openspec` job checks the specifications with the local command `openspec validate --all --strict`.
+
 The coverage target is 80 % line coverage per crate (`reliability.md` section 6). `tools/coverage-gate.py` applies it to each crate. The gate counts production lines only. It finds test modules from their `#[cfg(test)]` declarations (ADR-0127).
 
 The gate fails on an inline test module in `src/`. Move such a module to its own file, for example `foo/tests.rs`.
