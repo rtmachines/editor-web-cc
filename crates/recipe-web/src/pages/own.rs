@@ -223,6 +223,25 @@ fn refuse_password(
     })
 }
 
+/// Parse the two password inputs and keep a line for each bad input.
+///
+/// The function solves one problem: the answer must list the bad current password and the bad
+/// new password at once (ADR-0041 (a)).
+fn parse_password_fields(
+    form: &PasswordFields,
+) -> Result<(Password, NewPassword), NonEmpty<FieldError>> {
+    let mut lines = FieldLines::default();
+    let current_password = lines.field(
+        Password::parse(&form.current_password),
+        "current_password",
+        FieldReason::PasswordLength,
+    );
+    let new_password = lines.field_with(NewPassword::parse(&form.password), |reason| {
+        FieldError::identity(&IdentityError::from(reason), Some("password".to_owned()))
+    });
+    lines.finish(current_password.zip(new_password))
+}
+
 /// `POST /me/password`: change the password and replace the session.
 ///
 /// An HTMX request gets `200` with `HX-Refresh: true`, so the browser loads the page again with
@@ -234,21 +253,7 @@ pub(crate) async fn change_password(
 ) -> Result<Response, WebError> {
     let auth = request.auth()?;
     let Form(form) = form?;
-    let mut lines = FieldLines::default();
-    let current_password = lines.field(
-        Password::parse(&form.current_password),
-        "current_password",
-        FieldReason::PasswordLength,
-    );
-    let new_password = NewPassword::parse(&form.password)
-        .map_err(|reason| {
-            lines.push_line(FieldError::identity(
-                &IdentityError::from(reason),
-                Some("password".to_owned()),
-            ));
-        })
-        .ok();
-    let (current_password, new_password) = match lines.finish(current_password.zip(new_password)) {
+    let (current_password, new_password) = match parse_password_fields(&form) {
         Ok(checked) => checked,
         Err(lines) => return Err(refuse_password(&state, &request, lines)),
     };
@@ -283,5 +288,7 @@ pub(crate) async fn change_password(
     Ok(response)
 }
 
+#[cfg(test)]
+mod password_tests;
 #[cfg(test)]
 mod tests;
