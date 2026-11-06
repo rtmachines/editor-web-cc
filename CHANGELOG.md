@@ -4,6 +4,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-06
+
 ### Added
 
 - A test checks that the login routes stay outside the password gate of `must_change_password` (ADR-0134).
@@ -13,6 +15,17 @@ This file records the notable changes of the recipe editor. The format follows [
 - CI checks the OpenSpec specs with the STE lint (job `ste-lint`, ADR-0135).
 - The documents record that `GET /login` and `POST /login` do not authenticate the session and stay outside the password gate (ADR-0134). The behavior does not change.
 - The CI check of the migrations rejects 14 more forms that rewrite, scan, or lock an existing table (ADR-0136).
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- The tests with `#[cfg(unix)]` and the shell-based tests of `deploy/ci` ran only in CI on Linux, not on the Windows development host.
+- The composite rows of the S7 layout reference table stay unverified until a TIA Portal export is available (ADR-0017, Q10).
+- The migration check passes some statements, for example `REINDEX`, `ALTER TABLE ... ATTACH PARTITION`, and `EXECUTE format(...)`. ADR-0136 lists these residual risks. The review of a migration checks them.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
+- No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.7.0] - 2026-11-06
 
@@ -515,7 +528,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.7.1
 [0.7.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.7.0
 [0.6.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.5.0
