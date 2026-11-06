@@ -4,6 +4,8 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-06
+
 ### Added
 
 - `DATE` on `S7_1200` and `S7_1500` ends at 2168-12-31 (ADR-0114).
@@ -24,6 +26,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - CI rejects a migration that rewrites a table or scans it under an exclusive lock (ADR-0127).
 - The grant test compares the rights of `PUBLIC` with `grants.expected` (ADR-0127).
 - CI adds the job `load`, the pull-request job `ci-scripts`, and a smoke suite on the Compose stack (ADR-0128).
+- CI checks the OpenSpec specs with `openspec validate --all --strict` in the job `openspec`.
+- CI fails on a dependency that the column "Forbidden" of `overview.md` section 5 names. The job `deny` runs `deploy/ci/dependency_rule.py`.
 
 ### Changed
 
@@ -31,6 +35,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The check of an `Approved` version on the version page shares `export.permits` with the export and runs under `timeout.export` (ADR-0122).
 - The coverage gate counts production lines only. It fails on an inline test module in `src/` (ADR-0127).
 - The route matrix tests assert the common headers of each cell (ADR-0127).
+- The log line of `E-WEB-009` has the field `stage`, for example `validation` or `export` (ADR-0129).
+- The workspace lint `unsafe_code = "forbid"` also covers the build script of `recipe-db`.
 
 ### Fixed
 
@@ -44,6 +50,19 @@ This file records the notable changes of the recipe editor. The format follows [
 - The deletes of many rows lock their rows in `id` order. These deletes cover expired sessions, old login attempts, the attempts of one login, and all sessions of one user.
 - `POST /logout` reads its form before it ends the session. A JSON body gives `422 E-WEB-008`.
 - The `pl` and `en` bundles hold the text of `E-AUD-003`.
+- `compose.build.yaml` gives the service `pitr-volume` its build section.
+- The migration check accepts `ON CONFLICT ... DO NOTHING` and `DO UPDATE` in a function body.
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- The tests with `#[cfg(unix)]` and the shell-based tests of `deploy/ci` ran only in CI on Linux, not on the Windows development host.
+- The composite rows of the S7 layout reference table stay unverified until a TIA Portal export is available (ADR-0017, Q10).
+- The migration check passes some rewrite forms, for example `ADD COLUMN ... GENERATED ALWAYS AS ... STORED` and `ADD CONSTRAINT` without `NOT VALID` (ADR-0127).
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
+- No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.6.0] - 2026-11-03
 
@@ -486,7 +505,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.7.0
 [0.6.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.6.0
 [0.5.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.5.0
 [0.4.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.4.0
