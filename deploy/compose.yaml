@@ -375,8 +375,8 @@ services:
 
   # Point-in-time recovery of a base backup and the WAL archive into a new, empty volume (ADR-0106 (e)).
   # It is not one of the seven services. The profile restore keeps it out of "up".
-  # The operator mounts the target volume with -v and passes the target time as the argument:
-  # "docker compose run --rm -v <new volume>:/var/lib/postgresql/data pitr-volume <target time>".
+  # The operator mounts the target volume with -v and passes the target time with the option --target-time:
+  # "docker compose run --rm -v <new volume>:/var/lib/postgresql/data pitr-volume --target-time <time>".
   # It mounts the WAL archive read-only and no other volume. It mounts no secret and joins no network.
   # COMPOSE_SUBNET feeds the client rules. container.backup_memory 512 MiB, container.small_cpus 0.5.
   pitr-volume:

@@ -2,7 +2,7 @@
 # CI runs `cargo deny --locked check`. A denied license, a yanked crate,
 # a security advisory, or a banned crate under a crate that is not its wrapper fails the job.
 # The bans enforce a part of the dependency rule of overview.md section 5.
-# Review checks the other forbidden dependencies, for example `axum` and `tokio`.
+# deploy/ci/dependency_rule.py checks the other forbidden dependencies by crate name.
 
 [graph]
 all-features = true

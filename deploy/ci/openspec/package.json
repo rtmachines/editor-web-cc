@@ -1,0 +1,8 @@
+{
+  "name": "recipe-ci-openspec",
+  "private": true,
+  "description": "Pinned OpenSpec CLI for the CI job openspec.",
+  "dependencies": {
+    "@fission-ai/openspec": "1.14.1"
+  }
+}

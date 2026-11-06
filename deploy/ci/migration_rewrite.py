@@ -365,7 +365,9 @@ def body_forms(sql: str, tables: Tables, created: set[Table]) -> list[str]:
                 local_tables = {table: checks.copy() for table, checks in tables.items()}
                 forms.extend(alter_table(tokens[index + 2:], local_tables, created.copy()))
                 break
-            if token == "do":
+            if token == "do" and (
+                tokens[index + 1:index + 2] not in (["nothing"], ["update"])
+            ):
                 forms.append("DO block")
                 break
             if token == "execute" and index + 1 < len(tokens):

@@ -318,7 +318,9 @@ check_access() {
 # stop_server: step 9, first part. The fast stop writes the shutdown checkpoint. The wait is
 # restore_volume.stop_timeout. After a clean stop, the trap has no server to stop.
 stop_server() {
-  pg_ctl --pgdata="$TARGET_DIR" --mode=fast -w -t "$STOP_TIMEOUT_SECONDS" stop >/dev/null     2>"$work_dir/pg_ctl.err"     || fail "the temporary server did not stop" "\"detail\":\"$(tool_detail "$work_dir/pg_ctl.err")\""
+  pg_ctl --pgdata="$TARGET_DIR" --mode=fast -w -t "$STOP_TIMEOUT_SECONDS" stop >/dev/null \
+    2>"$work_dir/pg_ctl.err" \
+    || fail "the temporary server did not stop" "\"detail\":\"$(tool_detail "$work_dir/pg_ctl.err")\""
   server_may_run=0
 }
 
@@ -326,10 +328,12 @@ stop_server() {
 # the system identifier for the last line. LC_ALL=C makes the field names English.
 check_shutdown() {
   local state
-  pg_controldata --pgdata="$TARGET_DIR" >"$work_dir/controldata.out" 2>"$work_dir/controldata.err"     || fail "pg_controldata failed" "\"detail\":\"$(tool_detail "$work_dir/controldata.err")\""
+  pg_controldata --pgdata="$TARGET_DIR" >"$work_dir/controldata.out" 2>"$work_dir/controldata.err" \
+    || fail "pg_controldata failed" "\"detail\":\"$(tool_detail "$work_dir/controldata.err")\""
   state=$(sed -n 's/^Database cluster state: *//p' "$work_dir/controldata.out" | sed -n '1p')
   system_identifier=$(sed -n 's/^Database system identifier: *//p' "$work_dir/controldata.out" | sed -n '1p')
-  [ "$state" = "shut down" ]     || fail "the cluster did not shut down cleanly" "\"state\":\"$(clean "$state")\""
+  [ "$state" = "shut down" ] \
+    || fail "the cluster did not shut down cleanly" "\"state\":\"$(clean "$state")\""
   [[ $system_identifier =~ $IDENTIFIER_GRAMMAR ]] || fail "pg_controldata gave no system identifier"
 }
 

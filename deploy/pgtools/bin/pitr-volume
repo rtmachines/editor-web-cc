@@ -184,7 +184,8 @@ cleanup() {
   local status=$?
   trap - EXIT
   if [ "$server_may_run" -eq 1 ] && [ -f "$TARGET_DIR/postmaster.pid" ]; then
-    if ! pg_ctl --pgdata="$TARGET_DIR" --mode=immediate --wait --timeout="$STOP_TIMEOUT_SECONDS" stop       >/dev/null 2>&1 9>&-; then
+    if ! pg_ctl --pgdata="$TARGET_DIR" --mode=immediate --wait --timeout="$STOP_TIMEOUT_SECONDS" stop \
+      >/dev/null 2>&1 9>&-; then
       log WARN "cannot stop the temporary server of this run"
       status=1
     fi
@@ -421,7 +422,8 @@ check_copy_identifier() {
   copy_id=$(printf '%s
 ' "$output" | sed -n 's/^Database system identifier: *//p' | sed -n '1p')
   [[ $copy_id =~ $IDENTIFIER_GRAMMAR ]] || fail "cannot read the system identifier of the copy"
-  [ "$copy_id" = "$guard_file_id" ]     || fail "the system identifier of the copy differs from the WAL archive"
+  [ "$copy_id" = "$guard_file_id" ] \
+    || fail "the system identifier of the copy differs from the WAL archive"
 }
 
 # keep_config_hashes: step 7. The SHA-256 value of each configuration file goes into a shell variable.
@@ -429,8 +431,10 @@ check_copy_identifier() {
 keep_config_hashes() {
   local file line
   for file in "${CONFIG_FILES[@]}"; do
-    [ -f "$TARGET_DIR/$file" ] && [ ! -L "$TARGET_DIR/$file" ]       || fail "a configuration file of the copy is missing" "\"file\":\"$file\""
-    line=$(sha256sum -- "$TARGET_DIR/$file")       || fail "cannot hash a configuration file of the copy" "\"file\":\"$file\""
+    [ -f "$TARGET_DIR/$file" ] && [ ! -L "$TARGET_DIR/$file" ] \
+      || fail "a configuration file of the copy is missing" "\"file\":\"$file\""
+    line=$(sha256sum -- "$TARGET_DIR/$file") \
+      || fail "cannot hash a configuration file of the copy" "\"file\":\"$file\""
     config_sha256_kept[$file]=${line%% *}
   done
 }
@@ -462,7 +466,9 @@ start_recovery_server() {
     options+=" -c recovery_target_action=promote"
   fi
   server_may_run=1
-  recovery_start_server "$TARGET_DIR" "$work_dir/server.log" "$work_dir" "$options"     "$((SECONDS + START_TIMEOUT_SECONDS))"     || fail "the temporary server did not finish the recovery"
+  recovery_start_server "$TARGET_DIR" "$work_dir/server.log" "$work_dir" "$options" \
+    "$((SECONDS + START_TIMEOUT_SECONDS))" \
+    || fail "the temporary server did not finish the recovery"
 }
 
 # scratch_psql_run <psql argument>...: psql on the recovered cluster, over its private socket.
