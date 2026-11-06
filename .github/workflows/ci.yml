@@ -742,6 +742,8 @@ jobs:
           tool: cargo-deny@0.19
       - name: Run cargo deny
         run: cargo deny --locked check
+      - name: Check the workspace dependency rule
+        run: python3 -I -B deploy/ci/dependency_rule.py
 
   coverage:
     name: Coverage
