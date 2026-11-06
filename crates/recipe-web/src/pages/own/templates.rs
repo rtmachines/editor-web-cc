@@ -4,7 +4,7 @@ use askama::Template;
 use recipe_app::auth::Operation;
 use recipe_app::identity::{OwnPasswordForm, OwnProfile};
 
-use crate::error::{ErrorView, WebError};
+use crate::error::{ErrorView, FormErrors, WebError};
 use crate::i18n::Lang;
 use crate::layout::{Layout, NavTarget, ReadOnlyFlag};
 use crate::pages::request::PageRequest;
@@ -88,6 +88,40 @@ impl<'a> ProfilePage<'a> {
     }
 }
 
+/// The form of `password.html`: the token of the session and the error lines of its inputs.
+///
+/// The type solves one problem: the page and the error answer must render the same form. The form
+/// never holds a password, so a refused answer shows both inputs empty (ADR-0132).
+pub(crate) struct PasswordForm {
+    csrf_token: String,
+    /// True in read-only mode. The page then shows a notice in place of the form.
+    blocked: bool,
+    /// True when the form goes out of band into a page that already shows it.
+    oob: bool,
+    errors: FormErrors,
+}
+
+impl PasswordForm {
+    /// Build the clean form with the token of the session.
+    pub(crate) fn new(csrf_token: String, blocked: bool) -> Self {
+        Self {
+            csrf_token,
+            blocked,
+            oob: false,
+            errors: FormErrors::default(),
+        }
+    }
+
+    /// Return the form with the error lines under its inputs, swapped out of band.
+    pub(crate) fn refused(self, errors: FormErrors) -> Self {
+        Self {
+            oob: true,
+            errors,
+            ..self
+        }
+    }
+}
+
 /// The page `password.html`.
 ///
 /// The flag `blocked` is true in read-only mode. The page then shows the notice in place of the form
@@ -98,7 +132,7 @@ pub(crate) struct PasswordPage<'a> {
     layout: Layout<'a>,
     t: Texts<'a>,
     must_change: bool,
-    blocked: bool,
+    form: PasswordForm,
 }
 
 impl<'a> PasswordPage<'a> {
@@ -116,8 +150,26 @@ impl<'a> PasswordPage<'a> {
             layout: Layout::for_session(t, request, t.get("password-title"), Some(NavTarget::Me))?,
             t,
             must_change: form.must_change_password,
-            blocked: !request.may_run(Operation::ChangeOwnPassword)?,
+            form: PasswordForm::new(
+                request.csrf_token(),
+                !request.may_run(Operation::ChangeOwnPassword)?,
+            ),
         })
+    }
+}
+
+/// The block `form` of `password.html` alone: the form that an error answer swaps out of band.
+#[derive(Template)]
+#[template(path = "password.html", block = "form")]
+pub(crate) struct PasswordFormBlock<'a> {
+    t: Texts<'a>,
+    form: PasswordForm,
+}
+
+impl<'a> PasswordFormBlock<'a> {
+    /// Wrap the form with the texts of the language.
+    pub(crate) const fn new(t: Texts<'a>, form: PasswordForm) -> Self {
+        Self { t, form }
     }
 }
 

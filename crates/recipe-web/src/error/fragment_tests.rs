@@ -69,8 +69,9 @@ async fn fragment_too_long_current_password_links_the_label_in_english() {
         reply.body
     );
     assert!(reply.body.contains("E-WEB-008"));
-    let lines = "<ul class=\"field-lines\"><li><a class=\"target-link\" href=\"#current_password\">Current password</a></li></ul>";
-    assert!(reply.body.contains(lines), "{}", reply.body);
+    // The own password form lists each bad field with its own line (ADR-0132).
+    let link = "<a class=\"target-link\" href=\"#current_password\"><span class=\"alert-code\">E-WEB-008</span> <span>Field Current password is not valid";
+    assert!(reply.body.contains(link), "{}", reply.body);
     assert!(!reply.body.contains("<span class=\"field\">"));
 }
 
@@ -84,15 +85,33 @@ async fn fragment_too_long_current_password_links_the_label_in_polish() {
         "{}",
         reply.body
     );
-    assert!(
-        reply
-            .body
-            .contains("<a class=\"target-link\" href=\"#current_password\">Obecne hasło</a>")
-    );
+    let link = "<a class=\"target-link\" href=\"#current_password\"><span class=\"alert-code\">E-WEB-008</span> <span>";
+    assert!(reply.body.contains(link), "{}", reply.body);
+    assert!(reply.body.contains("Obecne hasło"), "{}", reply.body);
 }
 
 #[tokio::test]
-async fn fragment_full_error_page_shows_the_label_without_a_link() {
+async fn fragment_full_error_page_of_a_page_without_the_input_shows_the_label_without_a_link() {
+    let fixture = Fixture::new();
+    let admin = fixture.seed_session(1, Role::Administrator, false);
+    let reply = get_with(
+        &fixture.router(),
+        "/users?q=BAD!",
+        &[("cookie", admin.cookie.as_str())],
+    )
+    .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    assert!(reply.body.contains("field-lines"), "{}", reply.body);
+    assert!(!reply.body.contains("href=\"#q\""), "{}", reply.body);
+}
+
+#[tokio::test]
+async fn fragment_full_error_page_of_the_own_password_form_links_to_its_inputs() {
     let (fixture, session) = operator();
     let reply = too_long_password(&fixture, &session, "en", false).await;
     assert_eq!(
@@ -101,14 +120,15 @@ async fn fragment_full_error_page_shows_the_label_without_a_link() {
         "{}",
         reply.body
     );
+    // A refused form of the own password has its inputs on the page, so its lines link to them
+    // (ADR-0132). The plain page has no `hx-*` attribute.
     assert!(
-        reply
-            .body
-            .contains("<ul class=\"field-lines\"><li>Current password</li></ul>"),
+        reply.body.contains("href=\"#current_password\""),
         "{}",
         reply.body
     );
-    assert!(!reply.body.contains("href=\"#current_password\""));
+    assert!(reply.body.contains("id=\"current_password\""));
+    assert!(!reply.body.contains("hx-post"), "{}", reply.body);
 }
 
 #[tokio::test]
@@ -368,21 +388,14 @@ fn fragment_every_bad_request_field_has_a_label_in_both_bundles() {
         .collect();
     names.sort();
     names.dedup();
-    for known in [
-        "lang",
-        "login",
-        "password",
-        "current_password",
-        "q",
-        "page",
-        "form",
-        "kind",
-    ] {
+    for known in ["lang", "login", "password", "q", "page", "form", "kind"] {
         assert!(
             names.iter().any(|name| name == known),
             "scan lost {known}: {names:?}"
         );
     }
+    // The own password form names `current_password` through `FieldLines::field` (ADR-0132).
+    names.push("current_password".to_owned());
     let bundles = Bundles::load().unwrap();
     for name in &names {
         for lang in [Lang::Pl, Lang::En] {

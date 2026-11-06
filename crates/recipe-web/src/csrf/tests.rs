@@ -627,6 +627,49 @@ async fn csrf_lang_with_a_session_also_accepts_the_pre_session_token() {
     assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
 }
 
+/// Scenario "Language switch with a session and the pre-session token" (ADR-0131).
+#[tokio::test]
+async fn csrf_lang_with_a_session_and_csrf_pre_only_sets_the_language_cookie() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Operator, false);
+    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let cookies = format!(
+        "{}; {}",
+        session.cookie,
+        cookie_pair(token.set_cookie().to_str().unwrap())
+    );
+    // The body has `csrf_pre` and no `csrf_token`, and the request has no `X-CSRF-Token`.
+    let body = format!("lang=en&csrf_pre={}", token.nonce());
+    let reply = post(
+        &fixture.router(),
+        "/lang",
+        &[SAME_ORIGIN, ("cookie", &cookies)],
+        &body,
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    assert!(
+        reply.header("set-cookie").starts_with("recipe_lang=en"),
+        "{}",
+        reply.header("set-cookie")
+    );
+    assert!(fixture.sink.events().is_empty());
+}
+
+/// Scenario "Language switch with a session and a wrong token" (ADR-0131).
+#[tokio::test]
+async fn csrf_lang_with_a_session_and_a_wrong_csrf_token_gives_e_web_007() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Operator, false);
+    let wrong = "cd".repeat(32);
+    assert_ne!(wrong, session.csrf);
+    let headers = session_headers(&session, &[SAME_ORIGIN]);
+    let body = format!("lang=en&csrf_token={wrong}");
+    let reply = post(&fixture.router(), "/lang", &headers, &body).await;
+    assert_rejected(&fixture, &reply, "wrong session token");
+    assert_eq!(reply.header("set-cookie"), "");
+}
+
 #[tokio::test]
 async fn csrf_lang_without_a_token_or_with_a_foreign_token_is_rejected() {
     let fixture = Fixture::new();

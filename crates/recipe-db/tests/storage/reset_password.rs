@@ -5,8 +5,10 @@
 //! The reset keeps the flag false, replaces the hash, and writes one `PasswordReset` entry.
 //! The new password passes the Basic check and the old password fails it.
 
+use recipe_app::error::AppError;
 use recipe_app::identity::{BasicCredentials, ResetPassword, authenticate_basic};
-use recipe_domain::identity::{Login, Password, Role, TypedLogin};
+use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::identity::{IdentityError, Login, Password, Role, TypedLogin};
 
 use crate::support::app::App;
 use crate::support::identity::PASSWORD;
@@ -55,6 +57,14 @@ impl App {
 
         let principal = new.unwrap();
         assert_eq!(principal.user.role(), Role::ExportClient);
-        assert!(old.is_err(), "the old password must fail the Basic check");
+        let refusal = old.expect_err("the old password must fail the Basic check");
+        assert!(
+            matches!(
+                refusal,
+                AppError::Identity(IdentityError::InvalidCredentials { .. })
+            ),
+            "the old password must give InvalidCredentials, got {refusal:?}"
+        );
+        assert_eq!(refusal.code(), ErrorCode::IDN_003);
     }
 }

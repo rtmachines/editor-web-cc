@@ -6,6 +6,7 @@
 use fluent::FluentArgs;
 use recipe_app::ports::NonEmpty;
 use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::identity::IdentityError;
 use recipe_domain::plant::{LeafPath, PlantError};
 use recipe_domain::recipe::{
     DraftError, ParameterTag, RecipeError, RecipeErrors, SnapshotError, SnapshotItem,
@@ -14,7 +15,7 @@ use recipe_domain::recipe::{
 use super::leaf_of;
 use super::plant::plant_line_args;
 use super::recipe::recipe_line_args;
-use super::values::text_or;
+use super::values::{password_reason_key, text_or};
 use super::view::{field_key, has_input, input_id};
 use super::{FieldReason, LineView, ListView, RowField, WebError};
 use crate::i18n::{Bundles, Lang};
@@ -197,6 +198,20 @@ impl FieldError {
         })
     }
 
+    /// Build the line of one error of the Identity and Access context.
+    ///
+    /// The caller names the input of the line, for example `password` for `E-IDN-006` or
+    /// `current_password` for `E-IDN-008`, or `None` for an error without an input.
+    pub(crate) fn identity(error: &IdentityError, target: Option<String>) -> Self {
+        Self::from(Line {
+            code: error.code(),
+            args: identity_line_args(error),
+            subject: None,
+            target,
+            fallback: error.to_string(),
+        })
+    }
+
     /// Return the line with `subject`, for example the label of the input that the line names.
     ///
     /// The summary shows the subject next to the sentence, so a reader sees the input of a domain
@@ -229,6 +244,31 @@ impl FieldError {
                 Self::plant_line(inner, tag.map(ToString::to_string), target)
             }
         }
+    }
+}
+
+/// Return the arguments of the message of an identity error: its data, and then its words.
+///
+/// The reason of a password policy fault is a word of the UI, so a Polish line shows Polish text.
+fn identity_line_args(error: &IdentityError) -> Vec<(&'static str, LineArg)> {
+    match error {
+        IdentityError::LoginThrottled { retry_after } => {
+            vec![("retry_after", LineArg::Data(retry_after.to_string()))]
+        }
+        IdentityError::DuplicateLogin { login }
+        | IdentityError::LastAdministrator { login }
+        | IdentityError::UserAlreadyActive { login }
+        | IdentityError::UserAlreadyInactive { login }
+        | IdentityError::TechnicalRoleChange { login } => {
+            vec![("login", LineArg::Data(login.to_string()))]
+        }
+        IdentityError::PasswordPolicy { reason } => {
+            vec![(
+                "reason",
+                LineArg::word(password_reason_key(*reason), reason),
+            )]
+        }
+        _other => Vec::new(),
     }
 }
 

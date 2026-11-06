@@ -12,7 +12,9 @@ use recipe_app::identity::{
     DeactivateUser, Login, LoginInput, Logout, ResetPassword, SetUserRole, SetUserRoleInput,
     UnlockLogin,
 };
-use recipe_domain::identity::{Login as UserLogin, Password, Role, SessionId, TypedLogin};
+use recipe_domain::identity::{
+    Login as UserLogin, NewPassword, Password, Role, SessionId, TypedLogin,
+};
 
 use crate::support::app::App;
 use crate::support::fault::{FAULT, assert_audit_fault, assert_statement_fault};
@@ -211,7 +213,7 @@ async fn change_own_password_fails_in_the_new_session_and_keeps_hash_and_old_ses
     let input = ChangeOwnPasswordInput {
         client_ip: CLIENT,
         current_password: Password::parse(PASSWORD).unwrap(),
-        new_password: Password::parse(NEW_PASSWORD).unwrap(),
+        new_password: NewPassword::parse(NEW_PASSWORD).unwrap(),
     };
 
     let error = ChangeOwnPassword::new(ctx)

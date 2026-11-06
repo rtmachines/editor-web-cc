@@ -29,19 +29,29 @@ const BEGIN: &str = "BEGIN ISOLATION LEVEL READ COMMITTED";
 /// Delete the sessions that are idle-expired or older than the absolute timeout.
 ///
 /// The number `$1` is whole microseconds. The product with one microsecond is exact, as in the
-/// other statements of this crate.
+/// other statements of this crate. The CTE `locked` locks the rows in `id` order, so two
+/// concurrent deletes cannot wait for each other in a cycle.
 const DELETE_SESSIONS: &str = "\
-DELETE FROM session \
-WHERE expires_at < now() OR created_at < now() - $1 * interval '1 microsecond'";
+WITH locked AS ( \
+    SELECT id FROM session \
+    WHERE expires_at < now() OR created_at < now() - $1 * interval '1 microsecond' \
+    ORDER BY id FOR UPDATE \
+) \
+DELETE FROM session WHERE id IN (SELECT id FROM locked)";
 
 /// Delete one batch of old attempts, the oldest first. The index `login_attempt_attempted_at_idx`
-/// serves the inner query. The job calls the method again while the batch is full.
+/// serves the batch query. The CTE `locked` locks that batch in `id` order. The job calls the
+/// method again while the batch is full.
 const PURGE_ATTEMPTS: &str = "\
-DELETE FROM login_attempt WHERE id IN ( \
-    SELECT id FROM login_attempt \
-    WHERE attempted_at < now() - $1 * interval '1 microsecond' \
-    ORDER BY attempted_at \
-    LIMIT $2)";
+WITH locked AS ( \
+    SELECT id FROM login_attempt WHERE id IN ( \
+        SELECT id FROM login_attempt \
+        WHERE attempted_at < now() - $1 * interval '1 microsecond' \
+        ORDER BY attempted_at \
+        LIMIT $2) \
+    ORDER BY id FOR UPDATE \
+) \
+DELETE FROM login_attempt WHERE id IN (SELECT id FROM locked)";
 
 /// Delete one batch of old security events. The retention and the batch size are constants of
 /// the function (`data-model.md` section 4.12).
@@ -138,3 +148,6 @@ impl MaintenanceStore for PgMaintenanceStore {
             .map(|_rows| ())
     }
 }
+
+#[cfg(test)]
+mod tests;

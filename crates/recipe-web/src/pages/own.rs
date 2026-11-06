@@ -11,20 +11,26 @@ use recipe_app::identity::{
     ChangeOwnPassword, ChangeOwnPasswordInput, GetLoginForm, GetOwnPasswordForm, GetOwnProfile,
     Login, LoginInput, Logout,
 };
-use recipe_domain::identity::{IdentityError, Password, TypedLogin, TypedLoginReason};
+use recipe_app::ports::NonEmpty;
+use recipe_domain::identity::{IdentityError, NewPassword, Password, TypedLogin, TypedLoginReason};
 use serde::Deserialize;
 
+use super::draft_reply::refused;
+use super::recipes::fields::FieldLines;
 use super::render::{render, see_other};
 use super::request::PageRequest;
 use super::texts::Texts;
+use super::users::TokenFields;
 use crate::cookies::{clear_session_cookie, session_cookie};
 use crate::csrf::issue_pre_session;
-use crate::error::{FieldReason, Retry, WebError};
+use crate::error::{FieldError, FieldReason, Retry, WebError};
 use crate::state::WebState;
 
 mod templates;
 
-use templates::{LoginPage, PasswordChanged, PasswordPage, ProfilePage};
+use templates::{
+    LoginPage, PasswordChanged, PasswordForm, PasswordFormBlock, PasswordPage, ProfilePage,
+};
 
 pub(crate) use templates::login_page_with_error;
 
@@ -161,7 +167,9 @@ fn retry_login(state: &WebState, error: WebError) -> Response {
 pub(crate) async fn logout(
     State(state): State<WebState>,
     request: PageRequest,
+    form: Result<Form<TokenFields>, FormRejection>,
 ) -> Result<Response, WebError> {
+    let Form(_fields) = form?;
     let auth = request.auth()?;
     Logout::new(state.identity().clone())
         .execute(auth, &request.meta())
@@ -197,6 +205,43 @@ pub(crate) async fn password_form(
     Ok(render(&page, request.request_id())?.into_response())
 }
 
+/// Build the error of a refused password form: every line and the form with both inputs empty.
+///
+/// The function solves one problem: the answer must show a line under each bad input and must
+/// never send a typed password back (ADR-0132, ADR-0041 (e)).
+fn refuse_password(
+    state: &WebState,
+    request: &PageRequest,
+    lines: NonEmpty<FieldError>,
+) -> WebError {
+    let texts = Texts::new(state.bundles(), request.lang());
+    refused(state, request, lines, |errors| {
+        PasswordFormBlock::new(
+            texts,
+            PasswordForm::new(request.csrf_token(), false).refused(errors),
+        )
+    })
+}
+
+/// Parse the two password inputs and keep a line for each bad input.
+///
+/// The function solves one problem: the answer must list the bad current password and the bad
+/// new password at once (ADR-0041 (a)).
+fn parse_password_fields(
+    form: &PasswordFields,
+) -> Result<(Password, NewPassword), NonEmpty<FieldError>> {
+    let mut lines = FieldLines::default();
+    let current_password = lines.field(
+        Password::parse(&form.current_password),
+        "current_password",
+        FieldReason::PasswordLength,
+    );
+    let new_password = lines.field_with(NewPassword::parse(&form.password), |reason| {
+        FieldError::identity(&IdentityError::from(reason), Some("password".to_owned()))
+    });
+    lines.finish(current_password.zip(new_password))
+}
+
 /// `POST /me/password`: change the password and replace the session.
 ///
 /// An HTMX request gets `200` with `HX-Refresh: true`, so the browser loads the page again with
@@ -208,21 +253,29 @@ pub(crate) async fn change_password(
 ) -> Result<Response, WebError> {
     let auth = request.auth()?;
     let Form(form) = form?;
-    let current_password =
-        Password::parse(&form.current_password).map_err(|_reason| WebError::BadRequest {
-            field: "current_password",
-            reason: FieldReason::PasswordLength,
-        })?;
-    let new_password = Password::parse(&form.password)
-        .map_err(|reason| WebError::App(AppError::Identity(IdentityError::from(reason))))?;
+    let (current_password, new_password) = match parse_password_fields(&form) {
+        Ok(checked) => checked,
+        Err(lines) => return Err(refuse_password(&state, &request, lines)),
+    };
     let input = ChangeOwnPasswordInput {
         client_ip: request.client(),
         current_password,
         new_password,
     };
-    let issued = ChangeOwnPassword::new(state.identity().clone())
+    let issued = match ChangeOwnPassword::new(state.identity().clone())
         .execute(auth, &request.meta(), input)
-        .await?;
+        .await
+    {
+        Ok(issued) => issued,
+        Err(AppError::Identity(IdentityError::InvalidCurrentPassword)) => {
+            let line = FieldError::identity(
+                &IdentityError::InvalidCurrentPassword,
+                Some("current_password".to_owned()),
+            );
+            return Err(refuse_password(&state, &request, NonEmpty::new(line)));
+        }
+        Err(error) => return Err(error.into()),
+    };
     let cookie = session_header(&request, issued.token())?;
     if !request.is_htmx() {
         return Ok(see_other(AFTER_LOGIN, [cookie]));
@@ -235,5 +288,7 @@ pub(crate) async fn change_password(
     Ok(response)
 }
 
+#[cfg(test)]
+mod password_tests;
 #[cfg(test)]
 mod tests;

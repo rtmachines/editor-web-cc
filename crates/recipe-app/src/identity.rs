@@ -58,4 +58,4 @@ pub use reset_password::ResetPassword;
 pub use retry::serializable_once_more;
 pub use set_user_role::{SetUserRole, SetUserRoleInput};
 pub use settings::IdentitySettings;
-pub use unlock_login::UnlockLogin;
+pub use unlock_login::{UnlockLogin, UnlockOutcome};

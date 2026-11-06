@@ -18,7 +18,7 @@ use super::status::{is_database_rule, status_of};
 ///
 /// The text never comes from `Debug`. The `Debug` of a database error holds the row values of
 /// the detail, for example a password hash (ADR-0035).
-fn display_chain(error: &dyn Error) -> String {
+pub(crate) fn display_chain(error: &dyn Error) -> String {
     let mut text = error.to_string();
     let mut source = error.source();
     while let Some(inner) = source {

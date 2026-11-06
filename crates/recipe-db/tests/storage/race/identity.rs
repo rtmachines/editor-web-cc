@@ -489,7 +489,7 @@ async fn change_own_password_after_a_reset_that_commits_in_between_keeps_the_res
     let input = ChangeOwnPasswordInput {
         client_ip: CLIENT,
         current_password: Password::parse(PASSWORD).unwrap(),
-        new_password: Password::parse(NEW_PASSWORD).unwrap(),
+        new_password: NewPassword::parse(NEW_PASSWORD).unwrap(),
     };
     let attempt = tokio::spawn(async move {
         ChangeOwnPassword::new(ctx)

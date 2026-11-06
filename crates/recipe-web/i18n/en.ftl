@@ -41,6 +41,7 @@ error-E-EXP-002 = Version { $number } of recipe { $reference } does not match it
 error-E-EXP-003 = Version { $number } of recipe { $reference } is a draft or was discarded. Only approved and retired versions can be exported.
 error-E-EXP-005 = Version { $number } of recipe { $reference } has no parameter in unit { $path } or below it.
 error-E-AUD-001 = The change was not saved. The system could not record the audit entry. Contact the administrator.
+error-E-AUD-003 = A security event cannot change. Contact the administrator.
 
 # Roles
 role-administrator = Administrator

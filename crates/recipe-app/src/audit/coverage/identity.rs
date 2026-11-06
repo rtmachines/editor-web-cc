@@ -3,7 +3,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use recipe_domain::audit::{AggregateType, AuditAction, AuditEntry, RequestId};
-use recipe_domain::identity::{Login as UserLogin, Password, Role, TypedLogin};
+use recipe_domain::identity::{Login as UserLogin, NewPassword, Password, Role, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -248,7 +248,7 @@ async fn change_own_password_writes_own_password_changed() {
     let input = ChangeOwnPasswordInput {
         client_ip: client(),
         current_password: Password::parse(PASSWORD).unwrap(),
-        new_password: Password::parse(NEW_PASSWORD).unwrap(),
+        new_password: NewPassword::parse(NEW_PASSWORD).unwrap(),
     };
     ChangeOwnPassword::new(fixture.context.clone())
         .execute(&auth, &request, input)

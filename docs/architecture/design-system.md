@@ -16,7 +16,7 @@ The values live in `crates/recipe-web/static/app.css` as CSS custom properties o
 The style rules live in two style sheets (ADR-0037):
 
 - `static/app.css` holds the tokens, the fonts, the base elements, the targets, and the focus. It also holds the page layout, the top bar, and the base rules of the fields and the buttons. It holds the utilities `.actions`, `.target-link`, `.data`, and `.htmx-indicator` too.
-- `static/components.css` holds the components of sections 10.4 and 10.6 to 10.11. It also holds the parts of section 10.5 that step P3.2 adds. These are the select, the checkbox, the list proposals, the repeated rows, and the danger disclosure.
+- `static/components.css` holds the components of sections 10.4 and 10.6 to 10.11, and of sections 10.12, 10.13, and 10.14. It also holds the parts of section 10.5 that step P3.2 adds. These are the select, the checkbox, the list proposals, the repeated rows, and the danger disclosure. It also holds the multi-line text field of section 10.5 (ADR-0112).
 
 Every full page links `app.css` first and `components.css` second. Only `app.css` holds `:root`.
 

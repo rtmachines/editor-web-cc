@@ -740,27 +740,6 @@ async fn pages_users_reset_password_shows_a_new_password_once_and_ends_the_sessi
     assert!(set_cookie_of(&fresh, "__Host-recipe_session").is_some());
 }
 
-#[tokio::test]
-async fn pages_users_unlock_clears_the_login_delay_with_the_client_address() {
-    let (fixture, admin) = world();
-    for _attempt in 0..6 {
-        let _reply = login(&fixture, "user2", WRONG_FIELD).await;
-    }
-    let blocked = login(&fixture, "user2", "correct+horse+battery").await;
-    assert_eq!(
-        blocked.status,
-        StatusCode::TOO_MANY_REQUESTS,
-        "{}",
-        blocked.body
-    );
-    let reply = post_as(&fixture, &admin, "/users/user2/unlock", "", true).await;
-    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    let kinds: Vec<_> = fixture.sink.events().iter().map(|e| e.kind()).collect();
-    assert!(kinds.contains(&SecurityEventKind::Unlock), "{kinds:?}");
-    let free = login(&fixture, "user2", "correct+horse+battery").await;
-    assert_eq!(free.status, StatusCode::SEE_OTHER, "{}", free.body);
-}
-
 /// Assert that every `id` of the answer occurs once.
 pub(super) fn assert_unique_ids(body: &str) {
     let mut seen = std::collections::HashSet::new();

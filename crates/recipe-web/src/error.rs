@@ -42,6 +42,7 @@ pub(crate) use layer::render_errors;
 pub(crate) use lists::{DraftFault, draft_lines};
 pub use lists::{FieldError, LineArg, item_lines, leaf_lines};
 pub(crate) use lists::{SHOWN_LINES, line_view, more_text};
+pub(crate) use log::display_chain;
 pub use reason::FieldReason;
 pub(crate) use recipe::leaf_of;
 pub(crate) use retry::Retry;
@@ -284,6 +285,8 @@ mod recipe_tests;
 mod refused_page_tests;
 #[cfg(test)]
 mod row_field_tests;
+#[cfg(test)]
+mod sentence_tests;
 #[cfg(test)]
 mod summary_tests;
 #[cfg(test)]
