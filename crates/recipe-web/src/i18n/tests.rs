@@ -161,7 +161,7 @@ fn registry_codes() -> Vec<&'static str> {
 
 /// The codes whose message a route of this change can return (`api.md` section 5).
 ///
-/// The list holds each registry code of `MESSAGE_PREFIXES` and `E-AUD-001`.
+/// The list holds each registry code of `MESSAGE_PREFIXES`, `E-AUD-001`, and `E-AUD-003`.
 /// `E-IDN-007` is left out, because it gives a redirect and no message.
 fn codes_with_a_message() -> Vec<String> {
     registry_codes()
@@ -172,7 +172,7 @@ fn codes_with_a_message() -> Vec<String> {
                 .any(|prefix| code.starts_with(prefix))
         })
         .filter(|code| *code != "E-IDN-007")
-        .chain(std::iter::once("E-AUD-001"))
+        .chain(["E-AUD-001", "E-AUD-003"])
         .map(str::to_owned)
         .collect()
 }
@@ -196,6 +196,7 @@ fn i18n_messages_list_covers_the_known_codes_of_the_registry() {
         "E-EXP-004",
         "E-EXP-005",
         "E-AUD-001",
+        "E-AUD-003",
     ] {
         assert!(codes.iter().any(|code| code == known), "{known}");
     }

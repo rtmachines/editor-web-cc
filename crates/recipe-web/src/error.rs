@@ -286,6 +286,8 @@ mod refused_page_tests;
 #[cfg(test)]
 mod row_field_tests;
 #[cfg(test)]
+mod sentence_tests;
+#[cfg(test)]
 mod summary_tests;
 #[cfg(test)]
 mod tests;
