@@ -2,8 +2,8 @@ use serde_json::json;
 
 use crate::plant::{LeafPath, Primitive, RuleSet, TypeTree};
 use crate::recipe::value::test_support::{
-    BOOL, CHAR, DATE, LREAL, LTIME, REAL, TIME, WCHAR, primitive_tree, string_tree, wstring_tree,
-    zone_tree,
+    BOOL, BOUNDARIES, CHAR, DATE, INT, LREAL, LTIME, REAL, TIME, WCHAR, integer_tree,
+    primitive_tree, string_tree, wstring_tree, zone_tree,
 };
 use crate::recipe::value::{Expected, ParameterValue, StoredValue, ValueFault};
 
@@ -160,6 +160,15 @@ fn real_takes_one_significant_digit_with_a_large_exponent() {
 }
 
 #[test]
+fn real_with_29_fraction_digits_gives_a_mismatch_fault() {
+    let fault = fault("1e-29", &primitive_tree(REAL));
+    assert!(
+        matches!(&fault, ValueFault::Mismatch { leaf, .. } if leaf.is_empty()),
+        "{fault:?}"
+    );
+}
+
+#[test]
 fn real_with_29_significant_digits_gives_a_fault() {
     assert!(
         ParameterValue::parse("1.2345678901234567890123456789", &primitive_tree(REAL)).is_err()
@@ -267,5 +276,53 @@ fn parse_decimal_follows_the_json_number_grammar() {
     }
     for text in ["0", "-0", "10", "-1.5", "1e2", "1E+2", "2.5e-3"] {
         assert!(parse_decimal(text).is_some(), "{text:?}");
+    }
+}
+
+#[test]
+fn exact_decimal_with_trailing_zeros_below_the_scale_limit_is_stored_exact() {
+    let tree = primitive_tree(REAL);
+    assert_eq!(
+        stored_text("150e-29", &tree),
+        "0.0000000000000000000000000015"
+    );
+    assert_eq!(
+        stored_text("100e-30", &tree),
+        "0.0000000000000000000000000001"
+    );
+}
+
+#[test]
+fn fraction_of_29_zeros_is_stored_as_the_whole_number() {
+    let json = format!("1.{}", "0".repeat(29));
+    assert_eq!(stored_text(&json, &primitive_tree(INT)), "1");
+}
+
+#[test]
+fn zero_with_an_exponent_above_the_range_of_i64_is_stored_as_zero() {
+    let tree = primitive_tree(REAL);
+    assert_eq!(stored_text("0e99999999999999999999", &tree), "0");
+    assert_eq!(stored_text("-0e-99999999999999999999", &tree), "0");
+}
+
+#[test]
+fn integer_types_accept_their_ends_and_refuse_the_values_next_to_them() {
+    for row in &BOUNDARIES {
+        let tree = integer_tree(row.primitive);
+        let expected = Expected::NumberRange {
+            type_name: row.primitive,
+            low: row.low.parse().unwrap(),
+            high: row.high.parse().unwrap(),
+        };
+        let name = row.primitive;
+        assert_eq!(stored_text(row.low, &tree), row.low, "{name} min");
+        assert_eq!(stored_text(row.high, &tree), row.high, "{name} max");
+        for text in [row.below_low, row.above_high] {
+            let refused = ValueFault::Mismatch {
+                leaf: LeafPath::whole(),
+                expected: expected.clone(),
+            };
+            assert_eq!(fault(text, &tree), refused, "{name} {text}");
+        }
     }
 }

@@ -621,25 +621,11 @@ const DATE_TYPE: u128 = 950;
 
 /// Store a `DATE` row for `S7_1500`, because the seed has no `DATE` row.
 fn seed_date_type(fixture: &Fixture) -> PlcTypeId {
-    let primitive = Primitive::Date;
-    let row = PlcType::try_from(PlcTypeRecord {
-        id: tid(DATE_TYPE),
-        machine: None,
-        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
-        shape: RecordShape::Primitive {
-            primitive,
-            leaf_class: primitive.leaf_class(),
-            size_bytes: primitive.fixed_size_bytes().unwrap(),
-            string_length: None,
-        },
-    })
-    .unwrap();
-    fixture.store.seed_type(&row);
-    tid(DATE_TYPE)
+    fixture.seed_primitive_type(DATE_TYPE, PlcPlatform::S7_1500, Primitive::Date)
 }
 
 /// A parameter on `U1.2` of the `S7_1500` machine with the type, value, limits, and address given.
-fn s7_parameter(
+pub(super) fn s7_parameter(
     n: u128,
     tag: &str,
     (plc_type, value): (PlcTypeId, StoredValue),
@@ -656,7 +642,7 @@ fn s7_parameter(
 }
 
 /// A limit row of the whole parameter with the upper bound `max`.
-fn max_limit(max: &str) -> StoredLimit {
+pub(super) fn max_limit(max: &str) -> StoredLimit {
     StoredLimit {
         leaf_path: LeafPath::parse("").unwrap(),
         min: None,

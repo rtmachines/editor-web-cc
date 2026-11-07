@@ -155,3 +155,65 @@ fn stored_counts_round_trip_through_display_and_parse() {
         assert_eq!(value.count(), count, "{text}");
     }
 }
+
+/// S5TIME counts in milliseconds on a step at the tier edges, with their canonical text.
+const S5_TIER_ACCEPTED: [(i128, &str); 6] = [
+    (9_990, "S5T#9s990ms"),
+    (10_000, "S5T#10s"),
+    (99_900, "S5T#1m39s900ms"),
+    (100_000, "S5T#1m40s"),
+    (999_000, "S5T#16m39s"),
+    (1_000_000, "S5T#16m40s"),
+];
+
+/// S5TIME counts one step of the lower tier above an edge, between two steps of the upper tier.
+const S5_TIER_REFUSED: [(i128, &str); 3] = [
+    (10_010, "S5T#10s10ms"),
+    (100_100, "S5T#1m40s100ms"),
+    (1_001_000, "S5T#16m41s"),
+];
+
+#[test]
+fn from_count_accepts_the_s5time_counts_at_every_tier_edge() {
+    for (count, text) in S5_TIER_ACCEPTED {
+        let from_count = IecLiteral::from_count(
+            time_type(Primitive::S5Time),
+            count,
+            crate::plant::RuleSet::Current,
+        );
+        let value = from_count.expect("a count on a step");
+        assert_eq!(value.count(), count, "{count}");
+        assert_eq!(value.to_string(), text, "{count}");
+    }
+}
+
+#[test]
+fn from_count_refuses_the_s5time_counts_between_steps_above_an_edge() {
+    for (count, _) in S5_TIER_REFUSED {
+        let from_count = IecLiteral::from_count(
+            time_type(Primitive::S5Time),
+            count,
+            crate::plant::RuleSet::Current,
+        );
+        assert_eq!(from_count, Err(IecLiteralReason::Step), "{count}");
+    }
+}
+
+#[test]
+fn parse_accepts_the_s5time_literals_at_every_tier_edge() {
+    for (count, text) in S5_TIER_ACCEPTED {
+        let value = literal(Primitive::S5Time, text).expect("a literal on a step");
+        assert_eq!(value.count(), count, "{text}");
+    }
+}
+
+#[test]
+fn parse_refuses_the_s5time_literals_between_steps_above_an_edge() {
+    for (_, text) in S5_TIER_REFUSED {
+        assert_eq!(
+            literal(Primitive::S5Time, text),
+            Err(IecLiteralReason::Step),
+            "{text}"
+        );
+    }
+}

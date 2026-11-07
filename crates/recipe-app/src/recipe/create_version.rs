@@ -450,4 +450,7 @@ async fn insert_version_entry(
 }
 
 #[cfg(test)]
+mod stored_limit_tests;
+
+#[cfg(test)]
 mod tests;

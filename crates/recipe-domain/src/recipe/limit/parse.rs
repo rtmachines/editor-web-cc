@@ -229,7 +229,8 @@ fn read_text(target: &LeafTarget, platform: PlcPlatform, text: &str) -> Option<D
 
 /// Return `true` when a bound lies inside the range of the leaf type.
 ///
-/// An integer type and a time type accept no fraction.
+/// An integer type and a time type accept no fraction. A time bound also follows the count
+/// rules of its type, which [`IecLiteral::from_count`] holds (ADR-0120).
 fn is_inside_type(
     primitive: Primitive,
     platform: PlcPlatform,
@@ -240,15 +241,13 @@ fn is_inside_type(
         let is_whole = !is_integer(primitive) || bound.fract().is_zero();
         return is_whole && bound >= low && bound <= high;
     }
-    let Some((low, high)) =
-        TimeType::of(primitive, platform).and_then(|time_type| time_type.range_under(rules))
-    else {
+    let Some(time_type) = TimeType::of(primitive, platform) else {
         return false;
     };
     bound.fract().is_zero()
         && bound
             .to_i128()
-            .is_some_and(|count| count >= low && count <= high)
+            .is_some_and(|count| IecLiteral::from_count(time_type, count, rules).is_ok())
 }
 
 #[cfg(test)]

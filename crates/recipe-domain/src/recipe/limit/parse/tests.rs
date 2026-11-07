@@ -1,12 +1,13 @@
 use rust_decimal::Decimal;
 
 use crate::plant::fixtures::id;
-use crate::plant::{LeafPath, Primitive, RuleSet, TypeTree};
+use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TypeTree};
 use crate::recipe::PrecisionField;
 use crate::recipe::limit::fault::LimitFaults;
 use crate::recipe::limit::{LimitFault, LimitInput, ProcessLimit, StoredLimit};
 use crate::recipe::value::test_support::{
-    BOOL, CHAR, INT, LREAL, REAL, ST_ZONE, TIME, primitive_tree, zone_tree,
+    BOOL, BOUNDARIES, CHAR, INT, LREAL, REAL, ST_ZONE, TIME, integer_tree, primitive_tree,
+    time_tree_on, zone_tree,
 };
 
 fn input(path: &str, min: Option<&str>, max: Option<&str>, max_length: Option<u16>) -> LimitInput {
@@ -101,6 +102,24 @@ fn ends_of_the_int_range_pass() {
     let limit = parse(&range("", Some("-32768"), Some("32767")), &tree).unwrap();
     assert_eq!(limit.min(), dec(-32768));
     assert_eq!(limit.max(), dec(32767));
+}
+
+#[test]
+fn integer_types_accept_their_ends_and_refuse_the_values_next_to_them() {
+    for row in &BOUNDARIES {
+        let tree = integer_tree(row.primitive);
+        let name = row.primitive;
+        let ends = parse(&range("", Some(row.low), Some(row.high)), &tree).unwrap();
+        assert_eq!(ends.min(), row.low.parse().ok(), "{name} min");
+        assert_eq!(ends.max(), row.high.parse().ok(), "{name} max");
+        let below = parse(&range("", Some(row.below_low), None), &tree).unwrap_err();
+        let above = parse(&range("", None, Some(row.above_high)), &tree).unwrap_err();
+        let refused = LimitFault::OutsideTypeRange {
+            leaf: LeafPath::whole(),
+        };
+        assert_eq!(below, refused, "{name} min-1");
+        assert_eq!(above, refused, "{name} max+1");
+    }
 }
 
 #[test]
@@ -525,4 +544,103 @@ fn adr_0117_the_earlier_set_keeps_the_order_check_of_the_bounds() {
     let row = stored_decimal(Some("100.00002"), Some("100.00001"));
     let fault = stored_fault(&row, &tree, RuleSet::Earlier);
     assert!(matches!(fault, Some(LimitFault::MinGreaterThanMax { .. })));
+}
+
+#[test]
+fn real_bound_with_an_exact_decimal_value_gives_the_bound() {
+    let tree = primitive_tree(REAL);
+    let zeros = format!("1.{}", "0".repeat(29));
+    let rows: [(&str, &str); 5] = [
+        ("150e-29", "0.0000000000000000000000000015"),
+        ("10e-29", "0.0000000000000000000000000001"),
+        ("100e-30", "0.0000000000000000000000000001"),
+        (zeros.as_str(), "1"),
+        ("0e99999999999999999999", "0"),
+    ];
+    for (text, expected) in rows {
+        let limit = parse(&range("", None, Some(text)), &tree).unwrap();
+        // `Decimal` equality ignores the scale, so compare the canonical text.
+        let canonical_text = limit.max().map(|bound| bound.to_string());
+        assert_eq!(canonical_text.as_deref(), Some(expected), "bound {text}");
+    }
+}
+
+#[test]
+fn real_bound_beyond_the_scale_or_range_of_a_decimal_is_outside_the_type_range() {
+    let tree = primitive_tree(REAL);
+    for text in ["1e-29", "1e29"] {
+        let refused = LimitFault::OutsideTypeRange {
+            leaf: LeafPath::whole(),
+        };
+        let min = parse(&range("", Some(text), None), &tree).unwrap_err();
+        let max = parse(&range("", None, Some(text)), &tree).unwrap_err();
+        assert_eq!(min, refused, "min {text}");
+        assert_eq!(max, refused, "max {text}");
+    }
+}
+
+const S5TIME_STEP_BREAKER: i64 = 15;
+const LDATE_PART_OF_DAY: i64 = 1;
+const S5TIME_VALID_MAX: i64 = 10_000;
+const LDATE_VALID_MAX: i64 = 86_400_000_000_000;
+
+#[test]
+fn stored_s5time_max_between_two_steps_is_outside_the_type_range_in_both_sets() {
+    let tree = time_tree_on(PlcPlatform::S7_1500, Primitive::S5Time);
+    let row = stored("", None, Some(S5TIME_STEP_BREAKER), None);
+    for rules in [RuleSet::Current, RuleSet::Earlier] {
+        let fault = ProcessLimit::from_stored(&row, &tree, rules).unwrap_err();
+        assert!(
+            matches!(fault, LimitFault::OutsideTypeRange { .. }),
+            "{rules:?}"
+        );
+    }
+}
+
+#[test]
+fn stored_ldate_max_that_is_no_whole_day_is_outside_the_type_range_in_both_sets() {
+    let tree = time_tree_on(PlcPlatform::CodesysIec, Primitive::Ldate);
+    let row = stored("", None, Some(LDATE_PART_OF_DAY), None);
+    for rules in [RuleSet::Current, RuleSet::Earlier] {
+        let fault = ProcessLimit::from_stored(&row, &tree, rules).unwrap_err();
+        assert!(
+            matches!(fault, LimitFault::OutsideTypeRange { .. }),
+            "{rules:?}"
+        );
+    }
+}
+
+#[test]
+fn stored_s5time_max_on_a_step_gives_a_limit_in_both_sets() {
+    let tree = time_tree_on(PlcPlatform::S7_1500, Primitive::S5Time);
+    let row = stored("", None, Some(S5TIME_VALID_MAX), None);
+    for rules in [RuleSet::Current, RuleSet::Earlier] {
+        let limit = ProcessLimit::from_stored(&row, &tree, rules).unwrap();
+        assert_eq!(limit.to_stored(), row, "{rules:?}");
+    }
+}
+
+#[test]
+fn stored_ldate_max_on_a_whole_day_gives_a_limit_in_both_sets() {
+    let tree = time_tree_on(PlcPlatform::CodesysIec, Primitive::Ldate);
+    let row = stored("", None, Some(LDATE_VALID_MAX), None);
+    for rules in [RuleSet::Current, RuleSet::Earlier] {
+        let limit = ProcessLimit::from_stored(&row, &tree, rules).unwrap();
+        assert_eq!(limit.to_stored(), row, "{rules:?}");
+    }
+}
+
+#[test]
+fn stored_date_min_above_max_of_the_earlier_set_writes_literals_in_the_fault() {
+    let tree = time_tree_on(PlcPlatform::S7_1500, Primitive::Date);
+    let row = stored("", Some(72_800), Some(72_700), None);
+    let fault = ProcessLimit::from_stored(&row, &tree, RuleSet::Earlier).unwrap_err();
+    assert_eq!(
+        fault,
+        LimitFault::MinGreaterThanMax {
+            leaf: LeafPath::parse("").unwrap(),
+            min: "D#2169-04-27".to_owned(),
+            max: "D#2169-01-17".to_owned(),
+        }
+    );
 }

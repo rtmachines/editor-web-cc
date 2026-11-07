@@ -8,21 +8,87 @@ pub(super) const MAX_SIGNIFICANT_DIGITS: u32 = 28;
 /// Largest scale of a `Decimal`.
 const MAX_SCALE: u32 = 28;
 
+/// Largest count of digits that a `Decimal` can hold.
+const MAX_DIGITS: usize = 29;
+
 /// Parse the text of a JSON number into an exact decimal.
 ///
-/// The text must match the JSON number grammar. A text with more than 28 significant digits
-/// or a value outside the range of `Decimal` gives `None`. The function never rounds.
+/// The text must match the JSON number grammar. The function gives `None` in three cases:
+/// - The value is outside the range of `Decimal`.
+/// - The text has more than 29 digits after the zeros at both ends.
+/// - The scale of the value is outside -28 to 28.
+///
+/// A zero mantissa gives zero for every exponent. The function never rounds.
 pub(in crate::recipe) fn parse_decimal(text: &str) -> Option<Decimal> {
     if !is_json_number(text) {
         return None;
     }
-    match text.split_once(['e', 'E']) {
-        None => Decimal::from_str_exact(text).ok(),
-        Some((mantissa, exponent)) => {
-            let base = Decimal::from_str_exact(mantissa).ok()?;
-            apply_exponent(base, exponent)
-        }
+    let (mantissa, exponent) = match text.split_once(['e', 'E']) {
+        Some((mantissa, exponent)) => (mantissa, Some(exponent)),
+        None => (text, None),
+    };
+    let (is_negative, unsigned) = match mantissa.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, mantissa),
+    };
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let all_digits = [whole, fraction].concat();
+    let trimmed = all_digits.trim_start_matches('0');
+    if trimmed.is_empty() {
+        return Some(Decimal::ZERO);
     }
+    let significant = trimmed.trim_end_matches('0');
+    let removed_zeros = trimmed.len().checked_sub(significant.len())?;
+    let scale = i64::try_from(fraction.len())
+        .ok()?
+        .checked_sub(i64::try_from(removed_zeros).ok()?)?
+        .checked_sub(read_exponent(exponent)?)?;
+    build_decimal(is_negative, significant, scale)
+}
+
+/// Read the optional exponent text into `i64`. An overflow gives `None`.
+fn read_exponent(exponent: Option<&str>) -> Option<i64> {
+    let Some(text) = exponent else {
+        return Some(0);
+    };
+    let (is_negative, digits) = match text.strip_prefix('-') {
+        Some(digits) => (true, digits),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let magnitude: i64 = digits.parse().ok()?;
+    if is_negative {
+        magnitude.checked_neg()
+    } else {
+        Some(magnitude)
+    }
+}
+
+/// Build the decimal `digits` times ten to the power of minus `scale`.
+///
+/// `digits` holds ASCII digits only. A scale outside -28 to 28 or a value outside the range of
+/// `Decimal` gives `None`.
+fn build_decimal(is_negative: bool, digits: &str, scale: i64) -> Option<Decimal> {
+    if digits.len() > MAX_DIGITS {
+        return None;
+    }
+    let mut value: i128 = digits.parse().ok()?;
+    if is_negative {
+        value = value.checked_neg()?;
+    }
+    let max_scale = i64::from(MAX_SCALE);
+    if scale > max_scale || scale < max_scale.checked_neg()? {
+        return None;
+    }
+    let scale = match u32::try_from(scale) {
+        Ok(scale) => scale,
+        Err(_) => {
+            for _ in 0..scale.unsigned_abs() {
+                value = value.checked_mul(10)?;
+            }
+            0
+        }
+    };
+    Decimal::try_from_i128_with_scale(value, scale).ok()
 }
 
 /// Return `true` when `text` matches `-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?`.
@@ -58,30 +124,6 @@ fn is_digits(text: &str) -> bool {
 /// Return `true` when `text` is digits and the first digit is not zero.
 fn starts_with_nonzero_digit(text: &str) -> bool {
     is_digits(text) && !text.starts_with('0')
-}
-
-/// Multiply `base` by ten to the power of the exponent text. Any overflow gives `None`.
-fn apply_exponent(base: Decimal, exponent: &str) -> Option<Decimal> {
-    let (is_negative, digits) = match exponent.strip_prefix('-') {
-        Some(digits) => (true, digits),
-        None => (false, exponent.strip_prefix('+').unwrap_or(exponent)),
-    };
-    let power: u32 = digits.parse().ok()?;
-    if base.is_zero() {
-        return Some(Decimal::ZERO);
-    }
-    if is_negative {
-        let scale = base.normalize().scale().checked_add(power)?;
-        let mut shifted = base.normalize();
-        (scale <= MAX_SCALE).then_some(())?;
-        shifted.set_scale(scale).ok()?;
-        return Some(shifted);
-    }
-    let mut value = base;
-    for _ in 0..power {
-        value = value.checked_mul(Decimal::TEN)?;
-    }
-    Some(value)
 }
 
 /// Return the number of significant digits of a decimal.

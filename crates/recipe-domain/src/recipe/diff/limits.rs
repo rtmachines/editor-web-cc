@@ -6,8 +6,8 @@ use std::collections::{HashMap, HashSet};
 use rust_decimal::Decimal;
 
 use super::rows::{DiffBounds, DiffPart};
-use crate::plant::{LeafPath, RuleSet, TypeTree, TypeTrees};
-use crate::recipe::limit::bound_text_under;
+use crate::plant::{LeafPath, TypeTree, TypeTrees};
+use crate::recipe::limit::bound_text;
 use crate::recipe::{Parameter, StoredLimit};
 
 /// The limit rows of one side with the tree that sets the form of a time bound.
@@ -43,9 +43,7 @@ pub(super) fn bounds(limit: &StoredLimit, tree: Option<&TypeTree>) -> DiffBounds
         Some((target.primitive(), tree.platform()))
     });
     let text = |bound: Decimal| match primitive {
-        Some((primitive, platform)) => {
-            bound_text_under(primitive, platform, bound.normalize(), RuleSet::Earlier)
-        }
+        Some((primitive, platform)) => bound_text(primitive, platform, bound.normalize()),
         None => bound.normalize().to_string(),
     };
     DiffBounds {

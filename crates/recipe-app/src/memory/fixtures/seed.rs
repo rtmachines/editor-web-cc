@@ -1,11 +1,15 @@
 //! The fixture that bundles a store, a sink, and a clock, and seeds recipes.
 
 use recipe_domain::identity::{PasswordHash, Role};
-use recipe_domain::plant::{Machine, PlcPlatform};
+use std::collections::BTreeSet;
+
+use recipe_domain::plant::{
+    Machine, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape,
+};
 use recipe_domain::recipe::{Recipe, RecipeVersionId, VersionState};
 
 use super::{
-    actor, instant, machine_on, recipe_with, reference, rid, second_engineer, text, user, vid,
+    actor, instant, machine_on, recipe_with, reference, rid, second_engineer, text, tid, user, vid,
 };
 use crate::memory::{MemoryClock, MemorySink, MemoryStore};
 use crate::ports::NewUser;
@@ -71,6 +75,32 @@ impl Fixture {
         let machine = machine_on(platform, n, code);
         self.store.seed_machine(&machine);
         machine
+    }
+
+    /// Store a global primitive row `n` for `platform` and return its identifier.
+    ///
+    /// Use it for a primitive that the seed does not hold, such as `DATE` or `S5TIME`.
+    /// The primitive must have a fixed size.
+    pub(crate) fn seed_primitive_type(
+        &self,
+        n: u128,
+        platform: PlcPlatform,
+        primitive: Primitive,
+    ) -> PlcTypeId {
+        let row = PlcType::try_from(PlcTypeRecord {
+            id: tid(n),
+            machine: None,
+            platforms: BTreeSet::from([platform]),
+            shape: RecordShape::Primitive {
+                primitive,
+                leaf_class: primitive.leaf_class(),
+                size_bytes: primitive.fixed_size_bytes().unwrap(),
+                string_length: None,
+            },
+        })
+        .unwrap();
+        self.store.seed_type(&row);
+        tid(n)
     }
 
     /// Store recipe `n` of `machine` with version 1 as a live draft created by `jkowalski`.

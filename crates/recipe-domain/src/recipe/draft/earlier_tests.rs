@@ -169,3 +169,38 @@ fn remove_parameter_passes_for_a_stored_day_of_the_earlier_set_only() {
     );
     assert!(draft.parameters().is_empty());
 }
+
+#[test]
+fn replace_limits_below_a_stored_day_of_the_earlier_set_writes_literals_in_the_message() {
+    let mut draft = due_draft();
+    let rows = LimitList::parse(vec![limit_row("", None, Some("D#2168-12-31"))]).unwrap();
+    let error = draft
+        .replace_limits(key(1), &rows, &date_trees())
+        .expect_err("the stored value is above the new max");
+    assert_eq!(error.code(), ErrorCode::RCP_004, "{error}");
+    let message = error.to_string();
+    for literal in ["D#2169-01-17", "D#1990-01-01", "D#2168-12-31"] {
+        assert!(message.contains(literal), "{literal} missing in {message}");
+    }
+}
+
+#[test]
+fn set_value_against_a_stored_limit_of_the_earlier_set_writes_literals_in_the_message() {
+    let mut stored = stored_parameter(1, "DUE", id(DATE), None);
+    stored.value = json!(EARLIER_ONLY_DAY).into();
+    stored.limits = vec![StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: Some(Decimal::from(EARLIER_ONLY_DAY)),
+        max: Some(Decimal::from(72_800)),
+        max_length: None,
+    }];
+    let mut draft = draft_with(PlcPlatform::S7_1500, vec![stored]);
+    let error = draft
+        .set_value(key(1), &json_text("D#2168-12-31"), &date_trees())
+        .expect_err("the value is below the stored min");
+    assert_eq!(error.code(), ErrorCode::RCP_004, "{error}");
+    let message = error.to_string();
+    for literal in ["D#2168-12-31", "D#2169-01-17", "D#2169-04-27"] {
+        assert!(message.contains(literal), "{literal} missing in {message}");
+    }
+}

@@ -9,7 +9,8 @@ use super::fixtures::{
     parameter_tag, range, recipe, trees, trees_on, units,
 };
 use crate::error_codes::{ErrorCode, REGISTRY};
-use crate::plant::{LeafPath, PlantError, PlcPlatform, S7Address, UnitId};
+use crate::plant::fixtures::{TIME_TREES_ROOT, time_trees_on};
+use crate::plant::{LeafPath, PlantError, PlcPlatform, Primitive, S7Address, TypeTrees, UnitId};
 use crate::recipe::draft::support::stored_draft_with;
 use crate::recipe::{
     Draft, DraftError, ParameterTag, RecipeError, SnapshotError, SnapshotItem, StoredLimit,
@@ -331,11 +332,14 @@ fn earlier_rules_base(date: i64) -> Vec<StoredParameter> {
 fn snapshot_check_on_s7_1500(
     parameters: Vec<StoredParameter>,
 ) -> Result<Vec<ParameterTag>, RecipeError> {
-    VersionSnapshot::from(parameters).check(
-        &recipe(false),
-        &units(false),
-        &trees_on(PlcPlatform::S7_1500),
-    )
+    snapshot_check_with_trees(parameters, &trees_on(PlcPlatform::S7_1500))
+}
+
+fn snapshot_check_with_trees(
+    parameters: Vec<StoredParameter>,
+    trees: &TypeTrees,
+) -> Result<Vec<ParameterTag>, RecipeError> {
+    VersionSnapshot::from(parameters).check(&recipe(false), &units(false), trees)
 }
 
 #[test]
@@ -379,6 +383,13 @@ fn adr_0120_the_approval_still_refuses_the_date_72700_when_the_limit_has_no_max(
 }
 
 fn approval_items_on_s7_1500(parameters: Vec<StoredParameter>) -> Vec<SnapshotItem> {
+    approval_items_with_trees(parameters, &trees_on(PlcPlatform::S7_1500))
+}
+
+fn approval_items_with_trees(
+    parameters: Vec<StoredParameter>,
+    trees: &TypeTrees,
+) -> Vec<SnapshotItem> {
     let draft = Draft::load(stored_draft_with(
         VersionState::LiveDraft,
         PlcPlatform::S7_1500,
@@ -386,7 +397,7 @@ fn approval_items_on_s7_1500(parameters: Vec<StoredParameter>) -> Vec<SnapshotIt
     ))
     .unwrap();
     let error = draft
-        .check_for_approval(&units(false), &trees_on(PlcPlatform::S7_1500), false)
+        .check_for_approval(&units(false), trees, false)
         .expect_err("the approval must fail");
     match error {
         DraftError::Recipe(RecipeError::ValidationFailed { items }) => items,
@@ -413,4 +424,44 @@ fn adr_0120_the_approval_gives_e_rcp_006_for_the_date_limit_max_72700() {
         vec![range("", 7_305, 72_700)],
     )]);
     assert_eq!(codes(&items), vec![ErrorCode::RCP_006]);
+}
+
+/// The type identifier of the `S5TIME` row of the tests below.
+const S5TIME: u128 = TIME_TREES_ROOT;
+
+/// The trees of one `S5TIME` type on `S7_1500`.
+fn s5time_trees() -> TypeTrees {
+    time_trees_on(PlcPlatform::S7_1500, Primitive::S5Time)
+}
+
+/// An `S5TIME` parameter `DELAY` with the value 0 and the limit `max` 15 ms. 15 is no S5TIME step.
+fn s5time_delay_with_max_15() -> Vec<StoredParameter> {
+    let max_15 = StoredLimit {
+        max: Some(Decimal::from(15)),
+        ..min_only_limit(0)
+    };
+    vec![limited(param(1, "DELAY", S5TIME, json!(0)), vec![max_15])]
+}
+
+/// Assert that the only item of the list belongs to the parameter `DELAY`.
+fn assert_is_item_of_delay(items: &[SnapshotItem]) {
+    assert!(
+        matches!(items, [SnapshotItem::Parameter { tag, .. }] if *tag == parameter_tag("DELAY")),
+        "{items:?}"
+    );
+}
+
+#[test]
+fn a_stored_s5time_limit_max_of_15_ms_gives_an_e_rcp_006_item_in_the_snapshot_check() {
+    let result = snapshot_check_with_trees(s5time_delay_with_max_15(), &s5time_trees());
+    let items = items_of(result);
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_006]);
+    assert_is_item_of_delay(&items);
+}
+
+#[test]
+fn a_stored_s5time_limit_max_of_15_ms_gives_an_e_rcp_006_item_in_the_approval() {
+    let items = approval_items_with_trees(s5time_delay_with_max_15(), &s5time_trees());
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_006]);
+    assert_is_item_of_delay(&items);
 }

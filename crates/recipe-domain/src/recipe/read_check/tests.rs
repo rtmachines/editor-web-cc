@@ -8,7 +8,9 @@ use serde_json::json;
 
 use super::{RuleFault, RuleField, check_stored_parameter};
 use crate::error_codes::ErrorCode;
-use crate::plant::fixtures::{id, machine, on_platform, primitive_row, struct_row, types_for};
+use crate::plant::fixtures::{
+    TIME_TREES_ROOT, id, machine, on_platform, primitive_row, struct_row, time_trees_on, types_for,
+};
 use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTree, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
 use crate::recipe::{Parameter, StoredLimit};
@@ -320,4 +322,17 @@ fn a_parameter_with_several_faults_lists_value_then_limit_then_address() {
             (ErrorCode::RCP_056, RuleField::Address),
         ]
     );
+}
+
+/// The type identifier of the `S5TIME` row of these tests.
+const S5TIME: u128 = TIME_TREES_ROOT;
+
+#[test]
+fn a_stored_s5time_limit_max_of_15_ms_is_a_structure_fault() {
+    let trees = time_trees_on(PlcPlatform::S7_1500, Primitive::S5Time);
+    let limits = vec![bounds(None, Some(Decimal::from(15)))];
+    let parameter = parameter(S5TIME, 0, limits);
+    let fault = check_stored_parameter(&parameter, tree_of(&trees, S5TIME))
+        .expect_err("a count between two S5TIME steps is a storage defect");
+    assert_eq!(fault.code(), ErrorCode::RCP_006);
 }
