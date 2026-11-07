@@ -121,6 +121,19 @@ The system SHALL set `loadable` to true only for a version that is Approved at e
 - **WHEN** an Operator runs `ExportVersion` through `GET /export/v1/recipes/R-100/approved`
 - **THEN** the system returns `500 E-EXP-002`
 
+#### Scenario: Approved version with an LDT after the current range on TwinCat3
+- **GIVEN** the approved version 3 of the recipe `R-100` on the platform `TwinCat3` with the stored `LDT` value `10413792000000000000` in the parameter `STAMP`
+- **WHEN** an Operator runs `ExportVersion` through `GET /export/v1/recipes/R-100/approved`
+- **THEN** the system returns the document with status 200
+- **AND** the document holds `loadable` with the value `false`
+- **AND** `content_sha256` equals the stored hash of version 3
+
+#### Scenario: Data block above 59999 on S7_1500
+- **GIVEN** the approved version 3 of the recipe `R-100` on the platform `S7_1500` with the stored parameter `SPEED` of type `INT` at `DB60000.DBW0`
+- **WHEN** an Operator runs `ExportVersion` through `GET /export/v1/recipes/R-100/approved`
+- **THEN** the system returns the document with status 200
+- **AND** the document holds `loadable` with the value `false`
+
 ### Requirement: Content hash format
 The system SHALL write `content_sha256` as 64 lower-case hex characters. The value SHALL be the SHA-256 of the RFC 8785 canonical form of the hashed body (R03, A2).
 

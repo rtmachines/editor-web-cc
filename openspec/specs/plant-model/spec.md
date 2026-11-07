@@ -300,8 +300,7 @@ The system SHALL NOT change a machine code while a version that is not a draft u
 - **THEN** the database rejects the statement with `E-PLT-038`
 
 ### Requirement: String length per platform
-The length of a `STRING(n)` or a `WSTRING(n)` SHALL be inside the range of the `StringLength` table of `domain-model.md` section 2.1 for the platform of the machine. A `STRING` or a `WSTRING` without a length SHALL mean the seed type of that platform (R11, R12, R13).
-
+The length of a `STRING(n)` or a `WSTRING(n)` SHALL be inside the range of the `StringLength` table of `domain-model.md` section 2.1 for the platform of the machine. On `CodesysIec` and `TwinCat3`, the range SHALL stay 1 to 255, also when the controller accepts a longer string. A `STRING` or a `WSTRING` without a length SHALL mean the seed type of that platform (R11, R12, R13).
 #### Scenario: STRING length above the S7 range
 - **GIVEN** the machine `M12` with the platform `S7_1500`
 - **WHEN** a ProcessEngineer runs `AddParameter` with the type `STRING(255)`
@@ -323,6 +322,17 @@ The length of a `STRING(n)` or a `WSTRING(n)` SHALL be inside the range of the `
 - **WHEN** a ProcessEngineer runs `AddParameter` with the type `STRING`
 - **THEN** the system uses the seed type `STRING(254)` of `S7_300`
 - **AND** the system writes no action `DerivedTypeCreated`
+
+#### Scenario: STRING length above the CodesysIec range
+- **GIVEN** the machine `M12` with the platform `CodesysIec`
+- **WHEN** a ProcessEngineer runs `AddParameter` with the type `STRING(256)`
+- **THEN** the system rejects the command with `E-PLT-013`
+- **AND** the system creates no type
+
+#### Scenario: WSTRING length inside the CodesysIec range
+- **GIVEN** the machine `M12` with the platform `CodesysIec` and no type `WSTRING(255)`
+- **WHEN** a ProcessEngineer runs `AddParameter` with the type `WSTRING(255)`
+- **THEN** the system creates the type `WSTRING(255)` for `M12`
 
 ### Requirement: Unique member names of a struct
 The system SHALL reject a struct with two members of the same name (R13, I22).
