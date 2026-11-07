@@ -336,3 +336,46 @@ fn a_stored_s5time_limit_max_of_15_ms_is_a_structure_fault() {
         .expect_err("a count between two S5TIME steps is a storage defect");
     assert_eq!(fault.code(), ErrorCode::RCP_006);
 }
+
+/// The stored `LDT` count of `LDT#2300-01-01-00:00:00`. Only the earlier rule set allows it
+/// (ADR-0139).
+const LDT_AFTER_CURRENT_END: &str = "10413792000000000000";
+
+/// The first `LDT` count above the earlier end. It does not fit in 64 bits.
+const LDT_BEYOND_EARLIER: &str = "18446744073709551616";
+
+/// An `LDT` parameter on `TwinCat3` that holds the stored count `count`.
+fn ldt_parameter(count: &str) -> (TypeTrees, Parameter) {
+    let trees = time_trees_on(PlcPlatform::TwinCat3, Primitive::Ldt);
+    let value: serde_json::Value = serde_json::from_str(count).unwrap();
+    let parameter = parameter_with(TIME_TREES_ROOT, value, None, Vec::new());
+    (trees, parameter)
+}
+
+#[test]
+fn adr_0139_a_stored_ldt_after_the_current_end_on_twincat3_gives_the_rule_fault_e_rcp_005() {
+    let (trees, parameter) = ldt_parameter(LDT_AFTER_CURRENT_END);
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, TIME_TREES_ROOT))
+        .expect("the earlier set allows the count, so it is no structure fault");
+    assert_eq!(
+        found(&faults),
+        [(ErrorCode::RCP_005, RuleField::Value(LeafPath::whole()))]
+    );
+}
+
+#[test]
+fn adr_0139_a_stored_ldt_beyond_the_earlier_end_on_twincat3_is_a_structure_fault() {
+    let (trees, parameter) = ldt_parameter(LDT_BEYOND_EARLIER);
+    let fault = check_stored_parameter(&parameter, tree_of(&trees, TIME_TREES_ROOT))
+        .expect_err("a count above the earlier end is a storage defect");
+    assert_eq!(fault.code(), ErrorCode::RCP_005);
+}
+
+#[test]
+fn adr_0140_a_stored_data_block_above_59999_on_s7_1500_gives_the_rule_fault_e_rcp_057() {
+    let trees = trees();
+    let parameter = parameter_with(INT, json!(0), Some("DB60000.DBW0"), Vec::new());
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, INT))
+        .expect("the grammar allows the number, so it is no structure fault");
+    assert_eq!(found(&faults), [(ErrorCode::RCP_057, RuleField::Address)]);
+}

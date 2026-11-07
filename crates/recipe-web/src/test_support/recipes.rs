@@ -31,6 +31,7 @@ pub(crate) mod date_world;
 mod invariant_tests;
 pub(crate) mod large;
 mod parameters;
+pub(crate) mod platform_range_world;
 mod settings;
 
 use std::collections::BTreeSet;

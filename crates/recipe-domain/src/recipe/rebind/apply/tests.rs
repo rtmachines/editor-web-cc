@@ -433,6 +433,27 @@ fn rebind_of_a_parameter_in_a_data_block_above_16000_on_s7_300_gives_e_rcp_057()
 }
 
 #[test]
+fn adr_0140_rebind_of_a_parameter_in_a_data_block_above_59999_on_s7_1500_gives_e_rcp_057() {
+    let (draft, result) = rebind_s7_zone(PlcPlatform::S7_1500, "DB60000.DBB0");
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_057);
+    assert!(matches!(
+        error,
+        DraftError::Recipe(RecipeError::S7DataBlockOutOfRange { max: 59_999, .. })
+    ));
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_2));
+}
+
+#[test]
+fn adr_0140_rebind_of_a_parameter_in_the_data_block_59999_on_s7_1500_applies() {
+    let (draft, result) = rebind_s7_zone(PlcPlatform::S7_1500, "DB59999.DBB0");
+
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_3));
+}
+
+#[test]
 fn plan_mismatch_has_its_phrase() {
     assert_eq!(
         RebindTargetReason::PlanMismatch.to_string(),

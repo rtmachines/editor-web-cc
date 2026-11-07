@@ -230,16 +230,18 @@ pub enum RecipeError {
         /// The size of the value in bytes.
         size: u32,
     },
-    /// The data block number of an address is above 16000 on an S7-300 controller
-    /// (`E-RCP-057`, ADR-0116).
+    /// The data block number of an address is above the highest number of the platform
+    /// (`E-RCP-057`, ADR-0116, ADR-0140).
     #[error(
-        "Address {address} of {tag} uses a data block above 16000. An S7-300 controller has no such data block."
+        "Address {address} of {tag} uses a data block above {max}. The controller of the machine has no such data block."
     )]
     S7DataBlockOutOfRange {
         /// The tag of the parameter.
         tag: ParameterTag,
         /// The address of the parameter.
         address: S7Address,
+        /// The highest data block number of the platform.
+        max: u16,
     },
     /// A value is outside the process limit of its leaf (`E-RCP-004`).
     #[error("Value {value} of {tag}{leaf} is outside the process limit {min} to {max}.")]

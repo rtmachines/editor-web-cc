@@ -6,6 +6,10 @@ use crate::plant::{PlcPlatform, Primitive};
 const U64_MAX: i128 = 18_446_744_073_709_551_615;
 const I63_MAX: i128 = 9_223_372_036_854_775_807;
 const DAY_NS: i128 = 86_400_000_000_000;
+/// 2262-04-11 in nanoseconds: the last whole day of `LDATE` (ADR-0139 (b)).
+const LDATE_LAST_DAY_NS: i128 = 106_751 * DAY_NS;
+/// 2262-04-12 in nanoseconds: the first whole day above the current `LDATE` range.
+const LDATE_FIRST_DAY_AFTER_NS: i128 = 106_752 * DAY_NS;
 const ALL: [PlcPlatform; 5] = [
     PlcPlatform::CodesysIec,
     PlcPlatform::TwinCat3,
@@ -30,6 +34,15 @@ fn try_count(
     count: i128,
 ) -> Result<(), IecLiteralReason> {
     IecLiteral::try_from((ty(primitive, platform), count)).map(|_| ())
+}
+
+fn count_under(
+    primitive: Primitive,
+    platform: PlcPlatform,
+    count: i128,
+    rules: RuleSet,
+) -> Result<(), IecLiteralReason> {
+    IecLiteral::from_count(ty(primitive, platform), count, rules).map(|_| ())
 }
 
 /// Assert both ends pass and one step outside each end fails, on each platform.
@@ -185,7 +198,7 @@ fn adr_0120_s7_300_date_ends_at_72_683_in_both_sets() {
 }
 
 #[test]
-fn adr_0120_the_sets_differ_only_for_date_on_s7_1200_and_s7_1500() {
+fn adr_0120_and_adr_0139_the_sets_differ_only_for_date_ldate_and_ldt() {
     let primitives = [
         Primitive::Time,
         Primitive::Ltime,
@@ -206,7 +219,13 @@ fn adr_0120_the_sets_differ_only_for_date_on_s7_1200_and_s7_1500() {
             let differs = range(t, RuleSet::Current) != range(t, RuleSet::Earlier);
             let is_date_on_s7 = primitive == Primitive::Date
                 && matches!(platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500);
-            assert_eq!(differs, is_date_on_s7, "{primitive:?} {platform:?}");
+            let is_ldate_or_ldt_on_iec = matches!(primitive, Primitive::Ldate | Primitive::Ldt)
+                && matches!(platform, PlcPlatform::CodesysIec | PlcPlatform::TwinCat3);
+            assert_eq!(
+                differs,
+                is_date_on_s7 || is_ldate_or_ldt_on_iec,
+                "{primitive:?} {platform:?}"
+            );
         }
     }
 }
@@ -242,13 +261,34 @@ fn dtl_upper_end_is_in_2262_04_11() {
 
 #[test]
 fn ldate_range_per_platform() {
+    let p = Primitive::Ldate;
     for &platform in &IEC {
-        let p = Primitive::Ldate;
-        assert_eq!(ty(p, platform).range(), Some((0, U64_MAX)));
+        let t = ty(p, platform);
+        assert_eq!(t.range(), Some((0, I63_MAX)), "{platform:?}");
+        assert_eq!(
+            t.range_under(RuleSet::Current),
+            Some((0, I63_MAX)),
+            "{platform:?}"
+        );
+        assert_eq!(
+            t.range_under(RuleSet::Earlier),
+            Some((0, U64_MAX)),
+            "{platform:?}"
+        );
         assert_eq!(try_count(p, platform, 0), Ok(()));
         assert_eq!(
             try_count(p, platform, -DAY_NS),
             Err(IecLiteralReason::OutOfRange)
+        );
+        // 2262-04-11 is the last whole day below 2^63 ns (ADR-0139 (b)).
+        assert_eq!(try_count(p, platform, LDATE_LAST_DAY_NS), Ok(()));
+        assert_eq!(
+            try_count(p, platform, LDATE_FIRST_DAY_AFTER_NS),
+            Err(IecLiteralReason::OutOfRange)
+        );
+        assert_eq!(
+            count_under(p, platform, LDATE_FIRST_DAY_AFTER_NS, RuleSet::Earlier),
+            Ok(())
         );
     }
     assert_absent(Primitive::Ldate, &S7);
@@ -305,17 +345,44 @@ fn date_and_time_range_per_platform() {
 #[test]
 fn ldt_range_per_platform() {
     let p = Primitive::Ldt;
-    assert_eq!(ty(p, PlcPlatform::CodesysIec).range(), Some((0, U64_MAX)));
-    assert_eq!(ty(p, PlcPlatform::TwinCat3).range(), Some((0, U64_MAX)));
+    for platform in IEC {
+        let t = ty(p, platform);
+        assert_eq!(t.range(), Some((0, I63_MAX)), "{platform:?}");
+        assert_eq!(
+            t.range_under(RuleSet::Current),
+            Some((0, I63_MAX)),
+            "{platform:?}"
+        );
+        assert_eq!(
+            t.range_under(RuleSet::Earlier),
+            Some((0, U64_MAX)),
+            "{platform:?}"
+        );
+        assert_eq!(try_count(p, platform, 0), Ok(()));
+        assert_eq!(try_count(p, platform, I63_MAX), Ok(()));
+        assert_eq!(
+            try_count(p, platform, I63_MAX + 1),
+            Err(IecLiteralReason::OutOfRange)
+        );
+        assert_eq!(
+            try_count(p, platform, -1),
+            Err(IecLiteralReason::OutOfRange)
+        );
+        assert_eq!(
+            count_under(p, platform, I63_MAX + 1, RuleSet::Earlier),
+            Ok(())
+        );
+        assert_eq!(count_under(p, platform, U64_MAX, RuleSet::Earlier), Ok(()));
+        assert_eq!(
+            count_under(p, platform, U64_MAX + 1, RuleSet::Earlier),
+            Err(IecLiteralReason::OutOfRange)
+        );
+    }
     assert_eq!(ty(p, PlcPlatform::S7_1500).range(), Some((0, I63_MAX)));
     assert_eq!(try_count(p, PlcPlatform::S7_1500, 0), Ok(()));
     assert_eq!(try_count(p, PlcPlatform::S7_1500, I63_MAX), Ok(()));
     assert_eq!(
         try_count(p, PlcPlatform::S7_1500, -1),
-        Err(IecLiteralReason::OutOfRange)
-    );
-    assert_eq!(
-        try_count(p, PlcPlatform::TwinCat3, -1),
         Err(IecLiteralReason::OutOfRange)
     );
     assert_absent(p, &[PlcPlatform::S7_1200, PlcPlatform::S7_300]);
@@ -451,4 +518,92 @@ fn not_on_platform_display_is_a_short_phrase() {
         IecLiteralReason::NotOnPlatform.to_string(),
         "the type does not exist on the platform"
     );
+}
+
+#[test]
+fn adr_0139_the_last_ldt_and_ldate_literals_pass_on_both_sets() {
+    for platform in IEC {
+        assert_eq!(
+            parse(
+                Primitive::Ldt,
+                platform,
+                "LDT#2262-04-11-23:47:16.854775807"
+            ),
+            Ok(I63_MAX),
+            "{platform:?}"
+        );
+        assert_eq!(
+            parse(Primitive::Ldate, platform, "LD#2262-04-11"),
+            Ok(LDATE_LAST_DAY_NS),
+            "{platform:?}"
+        );
+        for rules in [RuleSet::Current, RuleSet::Earlier] {
+            assert_eq!(
+                count_under(Primitive::Ldt, platform, I63_MAX, rules),
+                Ok(()),
+                "{platform:?} {rules:?}"
+            );
+            assert_eq!(
+                count_under(Primitive::Ldate, platform, LDATE_LAST_DAY_NS, rules),
+                Ok(()),
+                "{platform:?} {rules:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn adr_0139_the_literal_after_the_last_ldt_and_ldate_is_out_of_range() {
+    for platform in IEC {
+        assert_eq!(
+            parse(
+                Primitive::Ldt,
+                platform,
+                "LDT#2262-04-11-23:47:16.854775808"
+            ),
+            Err(IecLiteralReason::OutOfRange),
+            "{platform:?}"
+        );
+        assert_eq!(
+            parse(Primitive::Ldate, platform, "LD#2262-04-12"),
+            Err(IecLiteralReason::OutOfRange),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn adr_0139_the_earlier_set_keeps_the_old_end_of_ldt_and_ldate() {
+    for platform in IEC {
+        assert_eq!(
+            count_under(Primitive::Ldt, platform, I63_MAX + 1, RuleSet::Earlier),
+            Ok(()),
+            "{platform:?}"
+        );
+        assert_eq!(
+            count_under(Primitive::Ldt, platform, I63_MAX + 1, RuleSet::Current),
+            Err(IecLiteralReason::OutOfRange),
+            "{platform:?}"
+        );
+        assert_eq!(
+            count_under(
+                Primitive::Ldate,
+                platform,
+                LDATE_FIRST_DAY_AFTER_NS,
+                RuleSet::Earlier
+            ),
+            Ok(()),
+            "{platform:?}"
+        );
+        assert_eq!(
+            count_under(
+                Primitive::Ldate,
+                platform,
+                LDATE_FIRST_DAY_AFTER_NS,
+                RuleSet::Current
+            ),
+            Err(IecLiteralReason::OutOfRange),
+            "{platform:?}"
+        );
+    }
 }

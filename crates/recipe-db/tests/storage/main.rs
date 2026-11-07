@@ -16,6 +16,7 @@ mod maintenance;
 mod migrate;
 mod operations;
 mod operations_schema;
+mod platform_ranges;
 mod pool;
 mod race;
 mod reset_password;

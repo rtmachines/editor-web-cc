@@ -19,6 +19,11 @@ const S7_DATA_BLOCK_BYTES: u32 = 65_536;
 /// The number is a fact of the platform family, not a setting.
 const S7_300_MAX_DATA_BLOCK: u16 = 16_000;
 
+/// The highest data block number of an S7-1200 and an S7-1500 controller (ADR-0140 (a)).
+///
+/// The number is a fact of the platform family, not a setting.
+const S7_1X00_MAX_DATA_BLOCK: u16 = 59_999;
+
 /// Whether a whole-draft check runs the address rules of ADR-0116.
 ///
 /// A check for approval runs them. A check after `replace_parameters` skips them, so a stored
@@ -148,24 +153,34 @@ pub(in crate::recipe) fn check_end_rule(
     .into())
 }
 
-/// Check the data block rule of ADR-0116 (c). The rule needs no type tree.
+/// Check the data block rule of ADR-0116 (c) and ADR-0140 (a). The rule needs no type tree.
 ///
-/// On `S7_300`, the data block number is at most 16000. The other platforms keep `1..=65535`.
+/// The data block number is at most 16000 on `S7_300` and at most 59999 on `S7_1200` and
+/// `S7_1500`. `CodesysIec` and `TwinCat3` have no S7 address, so the rule sets no limit there (I5).
 pub(in crate::recipe) fn check_data_block_rule(
     platform: PlcPlatform,
     tag: &ParameterTag,
     address: Option<S7Address>,
 ) -> Result<(), RecipeError> {
-    match address {
-        Some(address)
-            if platform == PlcPlatform::S7_300 && address.db() > S7_300_MAX_DATA_BLOCK =>
-        {
-            Err(RecipeError::S7DataBlockOutOfRange {
-                tag: tag.clone(),
-                address,
-            })
-        }
-        _ => Ok(()),
+    let (Some(address), Some(max)) = (address, max_data_block(platform)) else {
+        return Ok(());
+    };
+    if address.db() <= max {
+        return Ok(());
+    }
+    Err(RecipeError::S7DataBlockOutOfRange {
+        tag: tag.clone(),
+        address,
+        max,
+    })
+}
+
+/// The highest data block number of a platform, or `None` when the platform keeps the grammar.
+const fn max_data_block(platform: PlcPlatform) -> Option<u16> {
+    match platform {
+        PlcPlatform::S7_300 => Some(S7_300_MAX_DATA_BLOCK),
+        PlcPlatform::S7_1200 | PlcPlatform::S7_1500 => Some(S7_1X00_MAX_DATA_BLOCK),
+        PlcPlatform::CodesysIec | PlcPlatform::TwinCat3 => None,
     }
 }
 

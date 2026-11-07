@@ -90,7 +90,7 @@ Shape identity (one row per shape, `data-model.md` 3.3):
 | Struct | `(machine, name, revision)` |
 | Array | `(machine, element_type, dimensions)` |
 
-`StringLength` (value object): the length of a `STRING(n)` or a `WSTRING(n)`. A `STRING` length counts characters, and each character is one Latin-1 byte. A `WSTRING` length counts UTF-16 code units (ADR-0137). This table is the only definition of the range per platform.
+`StringLength` (value object): the length of a `STRING(n)` or a `WSTRING(n)`. A `STRING` length counts characters, and each character is one Latin-1 byte. A `WSTRING` length counts UTF-16 code units (ADR-0137). This table is the only definition of the range per platform. The range `1..=255` on `CodesysIec` and `TwinCat3` is a deliberate narrowing of the vendor range (ADR-0141).
 
 | Platform | `STRING(n)` | `WSTRING(n)` |
 |---|---|---|
@@ -186,7 +186,7 @@ Alignment rule: every element wider than 1 byte, every `STRING` and `WSTRING`, e
 
 End rule: the offset plus the S7 layout size of the type is at most 65 536 bytes (ADR-0116 (a)). A parameter that ends after byte 65535 of its data block gives `E-RCP-056 S7AddressPastBlockEnd`.
 
-Data block rule: on `S7_300`, the data block number is at most 16 000 (ADR-0116 (c)). A higher number gives `E-RCP-057 S7DataBlockOutOfRange`. On `S7_1200` and `S7_1500`, the number stays `1..=65535`.
+Data block rule: on `S7_300`, the data block number is at most 16 000 (ADR-0116 (c)). On `S7_1200` and `S7_1500`, it is at most 59 999 (ADR-0140). A higher number gives `E-RCP-057 S7DataBlockOutOfRange`. The earlier rule set of ADR-0120 has no data block rule.
 
 The two rules run for each parameter that a command writes or rebinds, and for every parameter at `ApproveVersion` (ADR-0116 (e)).
 
@@ -226,11 +226,11 @@ Base units (Assumption A43). A `Duration` or `Instant` value is an integer count
 | `LTIME` | `Duration` | nanoseconds | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `S7_1500` -2^63 to 2^63-1 (signed 64 bit) |
 | `S5TIME` | `Duration` | milliseconds | 0 ms to 9 990 s. `S5T#0ms` is valid. The step depends on the value. It is 10 ms up to 9 990 ms and 100 ms up to 99 900 ms. It is 1 s up to 999 s and 10 s up to 9 990 s |
 | `DATE` | `Instant` | days since 1970-01-01 | `CodesysIec` and `TwinCat3`: 1970-01-01 to 2106-02-07. `S7_300`, `S7_1200`, and `S7_1500`: 1990-01-01 to 2168-12-31 (ADR-0114) |
-| `LDATE` | `Instant` | nanoseconds since 1970-01-01 | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `LDATE` does not exist on S7 platforms |
+| `LDATE` | `Instant` | nanoseconds since 1970-01-01 | `CodesysIec` and `TwinCat3`: 0 to 2^63-1 in whole days, which is 1970-01-01 to 2262-04-11 (ADR-0139). The earlier rule set of ADR-0120 keeps 0 to 2^64-1. `LDATE` does not exist on S7 platforms |
 | `TIME_OF_DAY` | `Instant` | milliseconds since midnight | `0..=86_399_999` |
-| `LTOD` | `Instant` | nanoseconds since midnight | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `S7_1500` 0 to 2^63-1. The `tod` grammar keeps a literal below one day, `0..=86_399_999_999_999` |
+| `LTOD` | `Instant` | nanoseconds since midnight | `CodesysIec`, `TwinCat3`, and `S7_1500`: below one day, `0..=86_399_999_999_999` (ADR-0139) |
 | `DATE_AND_TIME` | `Instant` | seconds since 1970-01-01 | `S7_1500` and `S7_300`: 1990-01-01-00:00:00 to 2089-12-31-23:59:59. `CodesysIec` and `TwinCat3`: 1970-01-01-00:00:00 to 2106-02-07-06:28:15 (ADR-0026). The count has whole seconds only (ADR-0115) |
-| `LDT` | `Instant` | nanoseconds since 1970-01-01 | Platform range: CODESYS and TwinCAT 0 to 2^64-1 (unsigned 64 bit). `S7_1500` 0 to 2^63-1, which is 1970-01-01 to 2262-04-11 |
+| `LDT` | `Instant` | nanoseconds since 1970-01-01 | `CodesysIec`, `TwinCat3`, and `S7_1500`: 0 to 2^63-1, which is 1970-01-01-00:00:00 to 2262-04-11-23:47:16.854775807 (ADR-0139). The earlier rule set of ADR-0120 keeps 0 to 2^64-1 on `CodesysIec` and `TwinCat3` |
 | `DTL` | `Instant` | nanoseconds since 1970-01-01 | `S7_1200` and `S7_1500`: 1970-01-01 to 2262-04-11-23:47:16.854775807 (ADR-0115). The count is never negative |
 
 The domain holds each range of this table in code, as it does for the `Numeric` types. An `Instant` has no time zone. The domain applies no offset.
@@ -625,7 +625,7 @@ A command first parses every `TypeExpr` that it carries and collects the keys th
 | `RenameRecipe` | Recipe | New `name` | `E-RCP-012 RecipeDeleted` |
 | `DeleteRecipe` | Recipe | `deleted_at` set. The live draft is discarded in the same transaction | `E-RCP-010 RecipeHasApprovedVersion`, `E-RCP-026 RecipeHasRetiredVersion` (ProcessEngineer only), `E-RCP-012 RecipeDeleted` |
 | `RestoreRecipe` | Recipe | `deleted_at` cleared (Administrator) | `E-RCP-025 RecipeNotDeleted`, `E-PLT-010 MachineArchived` (the machine of the recipe) |
-| `CreateVersion` | Recipe, Draft | New `Draft`, a copy of `based_on`. The snapshot check runs first and reads the base with the earlier rule set. A fault only from ADR-0114 or ADR-0117 does not stop the copy (ADR-0120 (g)). A failed check returns `E-RCP-020` with the items and creates no draft. A successful result lists only the outdated parameters | `E-RCP-011 DraftAlreadyExists`, `E-RCP-012 RecipeDeleted`, `E-RCP-020 ValidationFailed`, `E-RCP-021 SizeBudgetExceeded`, `E-PLT-010 MachineArchived`, `E-WEB-009 Timeout` (validation), `E-WEB-011 TaskFailed` (validation) |
+| `CreateVersion` | Recipe, Draft | New `Draft`, a copy of `based_on`. The snapshot check runs first and reads the base with the earlier rule set. ADR-0120 (g) and (h), ADR-0139 (f), and ADR-0140 (e) name the faults that do not stop the copy. A failed check returns `E-RCP-020` with the items and creates no draft. A successful result lists only the outdated parameters | `E-RCP-011 DraftAlreadyExists`, `E-RCP-012 RecipeDeleted`, `E-RCP-020 ValidationFailed`, `E-RCP-021 SizeBudgetExceeded`, `E-PLT-010 MachineArchived`, `E-WEB-009 Timeout` (validation), `E-WEB-011 TaskFailed` (validation) |
 | `DiscardDraft` | Draft | `deleted_at` set | `E-RCP-007 VersionNotDraft`, `E-RCP-012 RecipeDeleted`, `E-WEB-001 ConcurrentEdit` |
 | `ApproveVersion` | Recipe, Draft | `Approved`, previous approved `Retired`, `content_sha256` set. The request carries the flag `allow_outdated` | `E-RCP-007 VersionNotDraft`, `E-RCP-008 DraftHasNoParameters`, `E-RCP-012 RecipeDeleted`, `E-RCP-015 ApproverEditedDraft`, `E-RCP-016 LimitMissing`, `E-RCP-020 ValidationFailed`, `E-RCP-022 S7AddressOverlap`, `E-RCP-023 S7AddressMisaligned`, `E-RCP-024 TypeRevisionOutdated` (only when `allow_outdated` is false), `E-RCP-056 S7AddressPastBlockEnd`, `E-RCP-057 S7DataBlockOutOfRange`, `E-EXP-004 Serialize` (hashed body), `E-WEB-001 ConcurrentEdit`, `E-WEB-009 Timeout` (validation), `E-WEB-011 TaskFailed` (validation) |
 | `RetireVersion` | Recipe | `Retired` without replacement | `E-RCP-009 VersionNotApproved`, `E-RCP-012 RecipeDeleted`, `E-WEB-001 ConcurrentEdit` |
@@ -795,3 +795,4 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A42 | Authentication failures (unknown login, wrong password, inactive user) return one client message and code `E-IDN-003`. A Basic check of a person account also returns it. The event log and `security_event` carry the exact reason |
 | A43 | A time value is an integer count of a base unit. TIME, S5TIME and TIME_OF_DAY count milliseconds. LTIME, LDATE, LTOD, LDT and DTL count nanoseconds. DATE counts days, and DATE_AND_TIME counts whole seconds. DATE, LDATE, DATE_AND_TIME, LDT and DTL count from 1970-01-01. TIME_OF_DAY and LTOD count from midnight. The UI shows IEC literals |
 | A45 | A technical account with the role `ExportClient` exports `Approved` versions for a transfer client with HTTP Basic. It holds only `VersionExport`. It cannot log in to the UI, and no person uses it. The three roles of R22 stay the roles of persons |
+| A46 | Every `TwinCat3` machine runs TwinCAT 3.1.4026.0 or later. `LDATE`, `LTOD`, and `LDT` need this version. The editor does not check the version. The runbook names the check before a plant adds a `TwinCat3` machine |

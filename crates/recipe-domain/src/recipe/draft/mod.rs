@@ -11,6 +11,8 @@ mod approval;
 mod budget;
 mod definition;
 #[cfg(test)]
+mod earlier_ldt_tests;
+#[cfg(test)]
 mod earlier_tests;
 #[cfg(test)]
 mod edit_support;

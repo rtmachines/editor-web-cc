@@ -282,7 +282,7 @@ fn seed_base_and_discarded_draft(fixture: &Fixture) -> Machine {
 }
 
 /// Read the parameters of `version` in a new `ReadOnly` transaction.
-async fn parameters_of(
+pub(super) async fn parameters_of(
     fixture: &Fixture,
     version: recipe_domain::recipe::RecipeVersionId,
 ) -> Vec<StoredParameter> {
@@ -290,7 +290,7 @@ async fn parameters_of(
     tx.recipes().version_parameters(version).await.unwrap()
 }
 
-fn write_journal(unit_locks: &[u128]) -> Vec<JournalEntry> {
+pub(super) fn write_journal(unit_locks: &[u128]) -> Vec<JournalEntry> {
     let mut journal = vec![
         JournalEntry::Begin(Isolation::ReadOnly),
         JournalEntry::Begin(Isolation::ReadCommitted),

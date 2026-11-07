@@ -34,6 +34,8 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
   - [Delete orphan temp files](#delete-orphan-temp-files)
   - [Change log of the site](#change-log-of-the-site)
   - [Restore into production](#restore-into-production)
+- [Check the stored data against the platform ranges](#check-the-stored-data-against-the-platform-ranges)
+- [Check the TwinCAT version before you add a TwinCat3 machine](#check-the-twincat-version-before-you-add-a-twincat3-machine)
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
   - [Rollback](#rollback)
@@ -1061,6 +1063,37 @@ docker volume rm <drill volume>
 9. If the drill held the lock at `basebackup.time`, the weekly run refused to start. Its log holds the line `another base backup run holds the lock`.
    Then run `docker compose exec walarchive basebackup-once` at once.
 
+## Check the stored data against the platform ranges
+
+The query lists the stored rows that the platform ranges reject. It writes nothing.
+The output has the columns `machine_code`, `reference_number`, `version_number`, `version_status`, `tag`, `part`, and `stored_text`.
+The column `part` is `value`, `limit_min`, `limit_max`, or `s7_address`.
+A row can be a false hit when its type tree holds a `ULINT`, `LWORD`, `LTIME`, `REAL`, or `LREAL` leaf.
+The false hit can be a `value` row, a `limit_min` row, or a `limit_max` row of that leaf.
+
+1. Run the query from the directory `deploy/` of the new release:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/check-platform-ranges.sql
+```
+
+2. The owner reads each output row.
+3. Accept each row that needs no change.
+4. Fix a draft row with `SetParameterValue`, `ReplaceLimits`, or `UpdateParameterDefinition`.
+5. Fix an approved row by creating a new version.
+6. Write the result into the [change log of the site](#change-log-of-the-site).
+
+## Check the TwinCAT version before you add a TwinCat3 machine
+
+The editor does not read the TwinCAT version of a controller.
+The operator checks the version before a plant adds a TwinCat3 machine.
+The types `LDATE`, `LTOD`, and `LDT` need TwinCAT 3.1.4026.0 or later.
+Assumption A46 requires this version for each TwinCat3 machine (ADR-0142).
+
+1. Read the TwinCAT version of the controller in the TwinCAT engineering environment.
+2. Compare the version with 3.1.4026.0.
+3. If the version is lower, the machine does not meet A46. Update the controller before you add the machine.
+
 ## Upgrade and rollback
 
 The steps follow `reliability.md` 7.10 (ADR-0082, ADR-0083).
@@ -1071,6 +1104,9 @@ A rollback needs the images of the previous release. See the section "Keep the i
 1. Read the release notes. Note whether the migration follows the expand pattern. Note the line "manual superuser step".
 2. Do the three parts below in this order: the installation, the name check, and the segment check.
    Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
+   1. Run the section "Check the stored data against the platform ranges" from the directory `deploy/` of the new release.
+   Run it after the segment check and before step 3.
+   Continue only when the query returns 0 rows or the owner accepted each row.
 3. Run `docker compose run --rm --no-deps backup restore-test`. `.env` still holds the previous tag. Continue only after the test passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.

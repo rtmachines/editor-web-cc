@@ -450,6 +450,9 @@ async fn insert_version_entry(
 }
 
 #[cfg(test)]
+mod earlier_range_tests;
+
+#[cfg(test)]
 mod stored_limit_tests;
 
 #[cfg(test)]
