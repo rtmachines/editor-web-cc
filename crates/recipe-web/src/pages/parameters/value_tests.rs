@@ -9,7 +9,7 @@ use recipe_domain::audit::SecurityEventKind;
 use super::fields::max_pairs;
 use super::test_kit::{assert_panel_error, parameter_path, post_htmx};
 use crate::pages::recipes::test_world::recipe_world;
-use crate::pages::test_helpers::assert_htmx_error;
+use crate::pages::test_helpers::{assert_htmx_error, summary_lines};
 use crate::test_support::plant::{ENGLISH, HTMX, World};
 use crate::test_support::recipes::{GRID_KEY, HOLD_KEY, SPEED_KEY};
 
@@ -217,4 +217,44 @@ async fn parameters_limits_with_a_minimum_above_the_maximum_gives_e_rcp_018() {
     let reply = post_htmx(&world, &parameter_path(SPEED_KEY, "/limits"), &pairs).await;
     assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-018");
     assert_eq!(world.fixture.snapshot(), before);
+}
+
+/// ADR-0138 (a), (b): a bad key gives one line, also when a typed field is bad as well.
+///
+/// These routes have no form, so no answer holds a line under an input or an out-of-band form.
+async fn assert_one_line_for_a_bad_key(suffix: &str, pairs: &[(&str, &str)]) {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let reply = post_htmx(&world, &parameter_path(SPEED_KEY, suffix), pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
+    assert!(
+        !reply.body.contains("class=\"field-error\""),
+        "{}",
+        reply.body
+    );
+    assert!(
+        !reply.body.contains("hx-swap-oob=\"true\""),
+        "{}",
+        reply.body
+    );
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
+#[tokio::test]
+async fn parameters_value_a_bad_key_with_a_bad_value_gives_one_line() {
+    let pairs = [("row_version", "1"), ("value", "abc"), ("bogus", "1")];
+    assert_one_line_for_a_bad_key("/value", &pairs).await;
+}
+
+#[tokio::test]
+async fn parameters_limits_a_bad_key_with_a_bad_bound_pair_gives_one_line() {
+    let pairs = [
+        ("row_version", "1"),
+        ("limits[0].leaf_path", ""),
+        ("limits[0].min", "10"),
+        ("limits[0].max", "5"),
+        ("bogus", "1"),
+    ];
+    assert_one_line_for_a_bad_key("/limits", &pairs).await;
 }

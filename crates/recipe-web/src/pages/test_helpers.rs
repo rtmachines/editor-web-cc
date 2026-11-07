@@ -178,6 +178,15 @@ pub(crate) fn assert_htmx_error(reply: &Reply, status: StatusCode, code: &str) {
     assert_error_headers(reply, true, code);
 }
 
+/// Return the number of the lines of the summary in `#error-panel`.
+///
+/// The count starts at the first `field-lines` list of the body. It panics when the body has no
+/// such list.
+pub(crate) fn summary_lines(body: &str) -> usize {
+    let (_before, lines) = body.split_once("<ul class=\"field-lines\">").unwrap();
+    lines.split("</ul>").next().unwrap().matches("<li>").count()
+}
+
 /// Assert the headers and the empty toast of a refusal, and that it sends no `HX-Redirect`.
 ///
 /// An HTMX request gets the three headers and one empty toast. A plain request gets neither.

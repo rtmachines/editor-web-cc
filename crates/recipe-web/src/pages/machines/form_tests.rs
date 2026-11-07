@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 
 use crate::i18n::Lang;
 use crate::pages::test_helpers::{
-    assert_clean_html, assert_htmx_error, assert_no_user_text_in_hx_attributes,
+    assert_clean_html, assert_htmx_error, assert_no_user_text_in_hx_attributes, summary_lines,
 };
 use crate::test_support::plant::{cookie_of, main_of, world};
 use crate::test_support::text;
@@ -404,6 +404,37 @@ async fn machines_create_rejects_a_missing_or_an_unknown_field() {
         assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert!(reply.body.contains("E-WEB-008"), "{body}: {}", reply.body);
     }
+}
+
+/// Spec "Unknown key in the machine form" (ADR-0138 (a), (e)): an unknown key gives one line.
+///
+/// The reader refuses the whole body at the unknown key. The empty machine code gets no line under
+/// its input, the answer swaps no form, and no machine is created.
+#[tokio::test]
+async fn machines_create_an_unknown_key_with_an_empty_code_gives_one_line() {
+    let world = world();
+    let before = world.audit_count();
+    let snapshot = world.fixture.snapshot();
+    let body = "code=&name=A&plc_platform=S7_300&main_unit_name=B&bogus=1";
+    let reply = world.post(&world.engineer, "/machines", body, true).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
+    assert!(!reply.body.contains("field-error"), "{}", reply.body);
+    assert!(
+        !reply.body.contains("hx-swap-oob=\"true\""),
+        "{}",
+        reply.body
+    );
+    assert_eq!(
+        world.audit_count(),
+        before,
+        "a rejected form creates nothing"
+    );
+    assert_eq!(
+        world.fixture.snapshot(),
+        snapshot,
+        "a rejected form writes no row"
+    );
 }
 
 #[tokio::test]

@@ -48,9 +48,9 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0036](0036-design-system-and-ui-foundation.md) | Design system and UI foundation | Accepted. Amended by ADR-0037 (style sheets, navigation link, whole unit tree) and ADR-0039 (inputs and groups in the leaf grid). Amended by ADR-0041 (alert of `field-errors.html`) and ADR-0047 (refused form page, empty toast). Amended by ADR-0051 (query list of the navigation). Amended by ADR-0057 (no `HX-Reswap` on the answer of the backstop panic layer) and ADR-0071 (read-only banner before `#error-panel`) | 2026-10-14 |
 | [0037](0037-plant-model-pages.md) | Pages of the plant model | Accepted. Amended by ADR-0038 (datalist of a new revision, browser test of `E-PLT-005`) and ADR-0051 (navigation link "Audit"). Amended by ADR-0057 (no `HX-Push-Url` on the answer of the backstop panic layer) | 2026-10-14 |
 | [0038](0038-struct-cycle-across-revisions.md) | Struct cycle across revisions | Accepted | 2026-10-15 |
-| [0039](0039-parameter-value-form.md) | Form of a parameter value | Accepted. Amended by ADR-0045 (groups of a nested array) | 2026-10-15 |
+| [0039](0039-parameter-value-form.md) | Form of a parameter value | Accepted. Amended by ADR-0045 (groups of a nested array). Amended by ADR-0138 (one line for a bad key) | 2026-10-15 |
 | [0040](0040-post-routes-for-translations-and-removal.md) | POST routes for translations and for the removal of a parameter | Accepted | 2026-10-15 |
-| [0041](0041-error-lists-of-a-form.md) | Error lists of a form | Accepted. Amended by ADR-0046 (form query before the fields) and ADR-0050 (a line with no link for a query value without an input). Amended by ADR-0132 (item (g): the own password form and the users forms give a line per bad field) | 2026-10-15 |
+| [0041](0041-error-lists-of-a-form.md) | Error lists of a form | Accepted. Amended by ADR-0046 (form query before the fields) and ADR-0050 (a line with no link for a query value without an input). Amended by ADR-0132 (item (g): the own password form and the users forms give a line per bad field). Amended by ADR-0138 (item (a): a changed form body gives one line) | 2026-10-15 |
 | [0042](0042-snapshot-reads-of-draft-queries.md) | Snapshot reads of draft queries | Accepted. Amended by ADR-0050 (approval preview and diff in one snapshot, draft read of the in-memory adapter). Amended by ADR-0122 (item (b): `GetVersion` reads the check rows of an `Approved` version in a second transaction) | 2026-10-15 |
 | [0043](0043-recipe-editor-pages.md) | Pages of the recipe editor | Accepted. Amended by ADR-0044 (bound of the rebind forms). Amended by ADR-0108 (item (j): the columns of the parameter table) | 2026-10-15 |
 | [0044](0044-bound-of-the-rebind-forms.md) | Bound of the rebind forms | Accepted | 2026-10-15 |
@@ -147,6 +147,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0135](0135-ste-lint-scope-includes-the-openspec-specs.md) | The STE lint scope includes the OpenSpec specs | Accepted. Amends ADR-0023 (scope) | 2026-11-06 |
 | [0136](0136-more-rewrite-forms-of-the-migration-check.md) | More rewrite forms of the migration check | Accepted. Amends ADR-0127 (p) | 2026-11-06 |
 | [0137](0137-no-nul-in-a-text-value-and-the-unit-of-a-string-length.md) | No U+0000 in a text value, and the unit of a string length | Accepted. Amends ADR-0028 (value and text rules) and ADR-0022 (range of a `CHAR` value) | 2026-11-07 |
+| [0138](0138-one-line-for-a-changed-form-body.md) | One line for a changed form body | Accepted. Amends ADR-0041 (a) and ADR-0039 (b) | 2026-11-07 |
 
 ## Decision map
 
@@ -171,7 +172,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Process limits | 0007 + 0018 (rebind) + 0022 (completeness at approval, `[*]`, leaf classes, time values) + 0026 (ranges of `DATE`, `DATE_AND_TIME`). Also 0114 (`DATE` on S7 ends at 2168-12-31) |
 | Ranges and precision of leaf values | 0026 + 0114 (time ranges) + 0028 (range of `REAL` and `LREAL`). Also 0115 (three ranges narrower than the vendor range) + 0117 (significant digits of `REAL` and `LREAL`). Also 0118 (field line on a read of an affected stored part). Also 0120 (earlier rule set for a stored part that a command only reads, and for `CreateVersion`). Also 0137 (no `U+0000` in a text value, the unit of `StringLength`) |
 | Errors of value objects without an own code | 0025 + 0073 (`DiskFault` and `BackupFault` as reasons) |
-| Error lists, errors of draft commands | 0027 + 0041 (every fault of values and limits, form error lists) + 0047 (page of a refused form without HTMX) + 0050 (e). Also 0132 (g) (one line per bad field of the own password and users forms) |
+| Error lists, errors of draft commands | 0027 + 0041 (every fault of values and limits, form error lists) + 0047 (page of a refused form without HTMX) + 0050 (e). Also 0132 (g) (one line per bad field of the own password and users forms). Also 0138 (one line for a changed form body: an unknown, malformed, or repeated key) |
 | Concurrency | 0008 + 0015 + 0028 (row version check of version commands) + 0030 (guard of a version status write) + 0035 (lock failure cause) |
 | Versions and aggregates | 0009 + 0016 + 0028 (version header, approval token, draft load, value and text clarifications) + 0029 (token owns the draft, two command clarifications). Also 0120 (g) (`CreateVersion` copies a base that breaks a newer rule) |
 | Recipe scope | 0010 |
