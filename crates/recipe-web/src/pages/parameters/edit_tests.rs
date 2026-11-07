@@ -5,6 +5,7 @@
 
 use axum::http::StatusCode;
 
+use super::add_error_tests::assert_value_line_holds;
 use super::test_kit::{SPEED_FIELDS, assert_panel_error, changed, form, parameter_path, post_htmx};
 use super::value_tests::assert_operator_refused;
 use crate::pages::recipes::test_world::recipe_world;
@@ -159,6 +160,31 @@ async fn parameters_edit_keeps_the_spaces_of_a_string_leaf() {
         .get_en(&world.engineer, &parameter_path(LABEL_KEY, ""))
         .await;
     assert!(page.body.contains("value=\"  Linia A  \""), "{}", page.body);
+}
+
+/// ADR-0137 (a), design D6: the form text `%00` of a `STRING(20)` value gives `E-RCP-005` under the
+/// value input, and the stored value does not change. The case compares the snapshot.
+#[tokio::test]
+async fn parameters_edit_of_a_string_value_with_a_nul_gives_e_rcp_005_under_the_value() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = [
+        ("row_version", "1"),
+        ("unit_path", "U1"),
+        ("tag", "LABEL"),
+        ("name_en", "LABEL"),
+        ("description_en", "A parameter of the press line"),
+        ("type", "STRING(20)"),
+        ("value_type", "STRING(20)"),
+        ("s7_address", "DB2.DBB2"),
+        ("ordinal", "2"),
+        ("value", "\0"),
+    ];
+    let path = parameter_path(LABEL_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-005");
+    assert_value_line_holds(&reply.body, "E-RCP-005");
+    assert_eq!(world.fixture.snapshot(), before);
 }
 
 #[tokio::test]

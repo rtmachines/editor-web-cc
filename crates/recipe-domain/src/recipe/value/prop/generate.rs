@@ -350,7 +350,7 @@ fn stored_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
             } else {
                 '\u{FF}'
             };
-            prop::char::range('\0', highest)
+            prop::char::range('\u{1}', highest)
                 .prop_map(|c| Value::String(c.to_string()))
                 .boxed()
         }
@@ -386,16 +386,18 @@ fn numeric_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
         .boxed()
 }
 
-/// Draw a `STRING` of Latin-1 characters, or a `WSTRING` of any characters.
+/// Draw a `STRING` of Latin-1 characters, or a `WSTRING` of any characters. No text holds U+0000
+/// (ADR-0137).
 ///
 /// A `WSTRING` holds at most half its length in characters, because a character outside the
 /// BMP takes two UTF-16 units.
 fn string_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
     let length = usize::from(MIXED_STRING_LENGTH);
     let characters = if primitive == Primitive::Wstring {
-        prop::collection::vec(any::<char>(), 0..=length.checked_div(2).unwrap()).boxed()
+        let not_nul = any::<char>().prop_map(|c| if c == '\0' { '\u{1}' } else { c });
+        prop::collection::vec(not_nul, 0..=length.checked_div(2).unwrap()).boxed()
     } else {
-        prop::collection::vec(prop::char::range('\0', '\u{FF}'), 0..=length).boxed()
+        prop::collection::vec(prop::char::range('\u{1}', '\u{FF}'), 0..=length).boxed()
     };
     characters
         .prop_map(|text| Value::String(text.into_iter().collect()))

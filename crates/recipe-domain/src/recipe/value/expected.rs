@@ -108,12 +108,18 @@ impl fmt::Display for Expected {
             Self::Index => f.write_str("an index inside the INTEGER range"),
             Self::Scalar => f.write_str("a scalar value"),
             Self::Wstring { length } => {
-                write!(f, "a string of at most {length} UTF-16 units")
+                write!(
+                    f,
+                    "a string of at most {length} UTF-16 units without U+0000"
+                )
             }
             Self::String { length } => {
-                write!(f, "a string of at most {length} characters from Latin-1")
+                write!(
+                    f,
+                    "a string of at most {length} characters from Latin-1 without U+0000"
+                )
             }
-            Self::Char { max } => write!(f, "one character from U+0000 to U+{max:04X}"),
+            Self::Char { max } => write!(f, "one character from U+0001 to U+{max:04X}"),
             Self::Literal { type_name } => write!(f, "an IEC literal of type {type_name}"),
             Self::Count { type_name } => write!(f, "a count of type {type_name}"),
             Self::Integer { type_name } => write!(f, "an integer of type {type_name}"),

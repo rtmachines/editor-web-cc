@@ -100,6 +100,46 @@ fn wchar_takes_one_scalar_up_to_the_basic_plane() {
 }
 
 #[test]
+fn char_and_wchar_refuse_u0000() {
+    assert_eq!(
+        fault(r#""\u0000""#, &primitive_tree(CHAR)).expected(),
+        Some(&Expected::Char { max: 0xFF })
+    );
+    assert_eq!(
+        fault(r#""\u0000""#, &primitive_tree(WCHAR)).expected(),
+        Some(&Expected::Char { max: 0xFFFF })
+    );
+}
+
+#[test]
+fn string_refuses_u0000_at_any_position() {
+    assert_eq!(
+        fault(r#""AB\u0000""#, &string_tree(10)).expected(),
+        Some(&Expected::String { length: 10 })
+    );
+}
+
+#[test]
+fn wstring_refuses_u0000_at_any_position() {
+    assert_eq!(
+        fault(r#""A\u0000""#, &wstring_tree(10)).expected(),
+        Some(&Expected::Wstring { length: 10 })
+    );
+}
+
+#[test]
+fn u0001_is_the_lowest_text_scalar_that_passes() {
+    assert_eq!(
+        stored_text(r#""\u0001""#, &primitive_tree(CHAR)),
+        r#""\u0001""#
+    );
+    assert_eq!(
+        stored_text(r#""A\u0001B""#, &string_tree(10)),
+        r#""A\u0001B""#
+    );
+}
+
+#[test]
 fn number_for_a_char_gives_a_fault() {
     assert!(ParameterValue::parse("65", &primitive_tree(CHAR)).is_err());
 }

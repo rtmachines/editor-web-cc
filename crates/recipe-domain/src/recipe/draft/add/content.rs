@@ -5,13 +5,15 @@ use serde_json::json;
 
 use super::super::support::{address, stored_parameter};
 use super::support::{
-    BOOL, INT, ST_ZONE, TABLE, assert_rejected, draft_with, draft_with_speed, limit_row,
+    BOOL, INT, ST_ZONE, STRING_10, TABLE, assert_rejected, draft_with, draft_with_speed, limit_row,
     many_parameters, new_parameter, new_parameter_at, snapshot, texts_input, trees_on,
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, PlcPlatform};
-use crate::recipe::{Draft, DraftError, LimitList, NewParameter, StoredLimit};
+use crate::recipe::{
+    Draft, DraftError, Expected, LimitList, NewParameter, RecipeError, StoredLimit,
+};
 
 fn limited(value_json: &str, rows: Vec<crate::recipe::LimitInput>) -> NewParameter {
     NewParameter {
@@ -139,6 +141,33 @@ fn a_json_string_for_an_int_gives_e_rcp_005() {
     assert!(
         message.starts_with("Value of TEMP does not match the type. Expected "),
         "{message}"
+    );
+}
+
+/// ADR-0137: U+0000 is no part of a `STRING`, so `add_parameter` adds nothing.
+#[test]
+fn a_form_text_with_a_nul_for_a_string_gives_e_rcp_005_and_adds_nothing() {
+    let new = NewParameter {
+        value: texts_input(&[("", "A\u{0}")]),
+        ..new_parameter(2, "TITLE", STRING_10, "0")
+    };
+    let mut draft = draft_with_speed();
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let error = assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_005);
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap();
+    assert!(
+        matches!(
+            list.first(),
+            RecipeError::ValueShapeMismatch {
+                expected: Expected::String { length: 10 },
+                ..
+            }
+        ),
+        "{list:?}"
     );
 }
 

@@ -9,4 +9,5 @@ mod export;
 mod identity;
 mod plant;
 mod recipe;
+mod text_nul;
 pub mod world;

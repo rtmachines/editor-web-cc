@@ -4,7 +4,8 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::super::add::support::{
-    INT, NOT_ASKED, REAL, draft_with, draft_with_speed, limit_row, snapshot, texts_input, trees_on,
+    CHAR, INT, NOT_ASKED, REAL, draft_with, draft_with_speed, limit_row, snapshot, texts_input,
+    trees_on,
 };
 use super::super::edit_support::{draft_with_content, draft_with_table, stored_limit_to};
 use super::super::support::{key, stored_parameter};
@@ -14,7 +15,7 @@ use crate::plant::{PlcPlatform, Primitive, TypeTrees};
 use crate::recipe::snapshot::fixtures::{param, units};
 use crate::recipe::{
     Draft, DraftError, Expected, LimitInput, LimitList, Parameter, PrecisionField, RecipeError,
-    SnapshotError, SnapshotItem, ValueInput,
+    SnapshotError, SnapshotItem, StoredParameter, ValueInput,
 };
 
 fn limits(rows: Vec<LimitInput>) -> LimitList {
@@ -114,6 +115,37 @@ fn a_json_string_for_an_int_gives_e_rcp_005() {
         list.first(),
         RecipeError::ValueShapeMismatch { expected, .. } if *expected == range
     ));
+}
+
+/// A live draft with the `CHAR` parameter `INITIAL` that holds `"A"`.
+fn draft_with_char() -> Draft {
+    draft_with(
+        PlcPlatform::TwinCat3,
+        vec![StoredParameter {
+            value: json!("A").into(),
+            ..stored_parameter(1, "INITIAL", id(CHAR), None)
+        }],
+    )
+}
+
+/// ADR-0137: U+0000 is no `CHAR`, so `set_value` keeps the old value.
+#[test]
+fn a_nul_for_a_char_gives_e_rcp_005_and_keeps_the_value() {
+    let mut draft = draft_with_char();
+    let error = set_value_rejected(&mut draft, r#""\u0000""#, ErrorCode::RCP_005);
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap();
+    assert!(matches!(
+        list.first(),
+        RecipeError::ValueShapeMismatch {
+            expected: Expected::Char { .. },
+            ..
+        }
+    ));
+    assert_eq!(speed(&draft).value().as_json(), &json!("A"));
 }
 
 #[test]

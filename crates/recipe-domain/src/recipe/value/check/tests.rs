@@ -130,6 +130,16 @@ fn string_as_long_as_max_length_passes() {
 }
 
 #[test]
+fn string_max_length_counts_characters_and_not_bytes() {
+    let tree = string_tree(4);
+    let limits = [limit(&tree, "", (None, None), Some(2))];
+    assert_eq!(
+        value("\"\u{e9}\u{e9}\"", &tree).check(&tree, &limits),
+        Ok(())
+    );
+}
+
+#[test]
 fn wstring_length_counts_utf16_units() {
     let tree = wstring_tree(10);
     let limits = [limit(&tree, "", (None, None), Some(2))];

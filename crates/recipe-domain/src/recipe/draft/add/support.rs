@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::super::support::{address, stored_draft_with, stored_parameter, tag};
 use crate::plant::fixtures::{
-    array_row, id, machine, other_machine, primitive_row, struct_row, types_for,
+    array_row, id, machine, other_machine, primitive_row, string_row, struct_row, types_for,
 };
 use crate::plant::{
     LeafPath, LiveUnit, Machine, MachineCode, MachineId, PlcPlatform, PlcType, Primitive,
@@ -24,6 +24,10 @@ pub(in crate::recipe::draft) const ST_ZONE: u128 = 4;
 pub(in crate::recipe::draft) const DINT: u128 = 5;
 /// The array `ARRAY[1..8] OF INT`.
 pub(in crate::recipe::draft) const TABLE: u128 = 6;
+/// The type `CHAR`.
+pub(in crate::recipe::draft) const CHAR: u128 = 7;
+/// The type `STRING(10)`. It exists on `TwinCat3` only.
+pub(in crate::recipe::draft) const STRING_10: u128 = 8;
 /// A type identifier that `TypeTrees` was asked for and could not resolve.
 pub(in crate::recipe::draft) const UNRESOLVED: u128 = 99;
 /// A type identifier that `TypeTrees` was never asked for.
@@ -37,12 +41,17 @@ fn rows() -> Vec<PlcType> {
         primitive_row(DINT, Primitive::Dint),
         struct_row(ST_ZONE, "ST_Zone", &[("speed", INT), ("run", BOOL)]),
         array_row(TABLE, INT, &[(1, 8)]),
+        primitive_row(CHAR, Primitive::Char),
+        string_row(STRING_10, 10),
     ]
 }
 
 /// The trees of the test types for `owner` on `platform`.
 pub(in crate::recipe::draft) fn trees_of(owner: MachineId, platform: PlcPlatform) -> TypeTrees {
-    let ids = [INT, REAL, BOOL, DINT, ST_ZONE, TABLE, UNRESOLVED].map(id);
+    let ids = [
+        INT, REAL, BOOL, DINT, ST_ZONE, TABLE, CHAR, STRING_10, UNRESOLVED,
+    ]
+    .map(id);
     TypeTrees::resolve(ids, &types_for(owner, platform, rows()))
 }
 
