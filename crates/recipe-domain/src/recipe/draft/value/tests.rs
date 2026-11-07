@@ -354,6 +354,43 @@ fn a_request_value_with_8_digits_gives_e_rcp_055_for_the_field_value() {
 }
 
 #[test]
+fn a_request_value_with_29_fraction_digits_gives_e_rcp_005() {
+    let mut draft = draft_with(
+        PlcPlatform::TwinCat3,
+        vec![param(1, "SPEED", REAL, json!(1.5))],
+    );
+    let error = set_value_rejected(&mut draft, "1e-29", ErrorCode::RCP_005);
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap();
+    assert!(matches!(
+        list.first(),
+        RecipeError::ValueShapeMismatch { .. }
+    ));
+}
+
+#[test]
+fn a_request_limit_min_with_29_fraction_digits_gives_e_rcp_006() {
+    let mut draft = draft_with(
+        PlcPlatform::TwinCat3,
+        vec![param(1, "SPEED", REAL, json!(1.5))],
+    );
+    let rows = vec![limit_row("", Some("1e-29"), None)];
+    let error = replace_rejected(&mut draft, rows, ErrorCode::RCP_006);
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap();
+    assert!(matches!(
+        list.first(),
+        RecipeError::LimitOutsideTypeRange { .. }
+    ));
+}
+
+#[test]
 fn a_request_limit_max_with_8_digits_gives_e_rcp_055_for_the_field_limit_max() {
     let mut draft = draft_with(
         PlcPlatform::TwinCat3,

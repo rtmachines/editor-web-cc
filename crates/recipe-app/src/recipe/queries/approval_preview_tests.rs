@@ -1,12 +1,10 @@
 //! Tests of `GetApprovalPreview` (task 6.3, ADR-0049 (c), (d), ADR-0050 (f), (h), design D3).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{
-    LeafPath, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address,
-};
+use recipe_domain::plant::{LeafPath, PlcPlatform, PlcTypeId, Primitive, S7Address};
 use recipe_domain::recipe::{
     DiffKind, DiffPart, Ordinal, ParameterKey, ParameterTag, Recipe, RecipeError, RuleFault,
     SnapshotItem, StoredLimit, StoredParameter, StoredRecipe, StoredValue, StoredVersionHeader,
@@ -496,21 +494,7 @@ pub(super) const EARLIER_DATE: i64 = 72_700;
 
 /// Store a `DATE` row for `S7_1500`, because the seed has no `DATE` row.
 pub(super) fn seed_date_type(fixture: &Fixture) -> PlcTypeId {
-    let primitive = Primitive::Date;
-    let row = PlcType::try_from(PlcTypeRecord {
-        id: tid(DATE_TYPE),
-        machine: None,
-        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
-        shape: RecordShape::Primitive {
-            primitive,
-            leaf_class: primitive.leaf_class(),
-            size_bytes: primitive.fixed_size_bytes().unwrap(),
-            string_length: None,
-        },
-    })
-    .unwrap();
-    fixture.store.seed_type(&row);
-    tid(DATE_TYPE)
+    fixture.seed_primitive_type(DATE_TYPE, PlcPlatform::S7_1500, Primitive::Date)
 }
 
 /// A parameter `DUE` of type `DATE` with the count `count` on the `S7_1500` machine.

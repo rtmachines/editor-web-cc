@@ -1,5 +1,5 @@
 use crate::plant::{LeafPath, TypeTree};
-use crate::recipe::limit::{LimitInput, ProcessLimit};
+use crate::recipe::limit::{LimitInput, ProcessLimit, StoredLimit};
 use crate::recipe::value::test_support::{
     INT, REAL, TIME, ZONE_JSON, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
@@ -298,4 +298,28 @@ fn a_tree_of_another_platform_with_the_same_root_id_gives_wrong_tree() {
     assert_eq!(parsed.check(&other, &[]), Err(ValueFault::WrongTree));
     let limits = [range(&other, "", Some("0"), Some("9"))];
     assert_eq!(parsed.check(&home, &limits), Err(ValueFault::WrongTree));
+}
+
+#[test]
+fn out_of_limit_on_a_date_writes_the_bounds_of_the_earlier_set_as_literals() {
+    use crate::plant::{PlcPlatform, Primitive, RuleSet};
+    use crate::recipe::value::StoredValue;
+    use crate::recipe::value::test_support::time_tree_on;
+    let tree = time_tree_on(PlcPlatform::S7_1500, Primitive::Date);
+    let stored_max = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: Some(rust_decimal::Decimal::from(72_690)),
+        max_length: None,
+    };
+    let limits = [ProcessLimit::from_stored(&stored_max, &tree, RuleSet::Earlier).unwrap()];
+    let stored = StoredValue::from(serde_json::json!(72_700));
+    let value = ParameterValue::from_stored(&stored, &tree, RuleSet::Earlier).unwrap();
+    let faults = value
+        .check_all_under(&tree, &limits, RuleSet::Earlier)
+        .unwrap_err();
+    assert_eq!(
+        out_of_limit(faults.first().clone()),
+        texts("", "D#2169-01-17", "D#1990-01-01", "D#2169-01-07")
+    );
 }

@@ -9,11 +9,13 @@ use recipe_domain::plant::{
     RecordShape, S7Address, StringKind, StringLength, TypeExpr, UnitPath,
 };
 use recipe_domain::recipe::{
-    Ordinal, ParameterKey, RuleFault, RuleField, StoredParameter, StoredValue,
+    Ordinal, ParameterKey, RuleFault, RuleField, StoredLimit, StoredParameter, StoredValue,
 };
 use serde_json::json;
 
-use super::parameters::{ListParameters, ListParametersInput, ParameterList};
+use super::parameters::{
+    GetParameter, ListParameters, ListParametersInput, ParameterList, ParameterRef,
+};
 use super::test_world::seed_users;
 use crate::auth::Operation;
 use crate::blocking::{AppSettings, Blocking, PageSizes};
@@ -478,22 +480,9 @@ fn date_world(count: i64) -> Fixture {
     seed_users(&fixture);
     let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
     fixture.seed_draft(&machine, 1, "R-1");
-    let primitive = Primitive::Date;
-    let row = PlcType::try_from(PlcTypeRecord {
-        id: tid(DATE_TYPE),
-        machine: None,
-        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
-        shape: RecordShape::Primitive {
-            primitive,
-            leaf_class: primitive.leaf_class(),
-            size_bytes: primitive.fixed_size_bytes().unwrap(),
-            string_length: None,
-        },
-    })
-    .unwrap();
-    fixture.store.seed_type(&row);
+    let plc_type = fixture.seed_primitive_type(DATE_TYPE, PlcPlatform::S7_1500, Primitive::Date);
     let parameter = StoredParameter {
-        plc_type: tid(DATE_TYPE),
+        plc_type,
         value: StoredValue::from(json!(count)),
         limits: Vec::new(),
         s7_address: Some(S7Address::parse("DB1.DBW0").unwrap()),
@@ -604,6 +593,59 @@ async fn a_stored_date_beyond_the_earlier_rule_set_is_still_a_storage_defect() {
     let fixture = date_world(72_900);
 
     let error = list_with(&fixture, AppSettings::default(), Role::Operator, (None, 0))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert!(matches!(error, AppError::Storage(_)), "got {error:?}");
+}
+
+/// The type row of the time parameters that `time_world` adds.
+const TIME_TYPE: u128 = 961;
+
+/// The draft `R-1` with the parameter `DUE` (key 1) of a time type and the stored count 0.
+///
+/// The seed has no row of this type, so the function stores one for `platform`. Only an
+/// `S7_300` parameter gets an address from `parameter_on`, so the other platforms have none.
+/// `limits` are the stored limit rows of `DUE`.
+fn time_world(platform: PlcPlatform, primitive: Primitive, limits: Vec<StoredLimit>) -> Fixture {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let plc_type = fixture.seed_primitive_type(TIME_TYPE, platform, primitive);
+    let parameter = StoredParameter {
+        plc_type,
+        value: StoredValue::from(json!(0)),
+        limits,
+        ..parameter_on(platform, 1, "DUE", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(101), &parameter);
+    fixture
+}
+
+#[tokio::test]
+async fn a_stored_ldate_limit_that_is_not_a_whole_day_is_a_storage_defect() {
+    // ADR-0120 (b): the count 1 is not a whole day of `LDATE`, so the stored bound fails.
+    // `ListParameters` reads no limit row (`checked_parameter`), so `GetParameter` shows it.
+    let limit = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: Some(1.into()),
+        max_length: None,
+    };
+    let fixture = time_world(PlcPlatform::CodesysIec, Primitive::Ldate, vec![limit]);
+
+    let error = GetParameter::new(fixture.context())
+        .execute(
+            &actor(Role::Operator),
+            &meta(),
+            ParameterRef {
+                reference: reference("R-1"),
+                number: 1,
+                key: pkey(1),
+            },
+        )
         .await
         .unwrap_err();
 

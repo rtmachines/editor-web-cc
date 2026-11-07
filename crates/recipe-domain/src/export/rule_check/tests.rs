@@ -12,7 +12,9 @@ use super::check_version_parameters;
 use crate::error_codes::ErrorCode;
 use crate::export::test_rows::stored_parameter;
 use crate::export::test_support::INT;
-use crate::plant::fixtures::{id, machine, primitive_row, types_for};
+use crate::plant::fixtures::{
+    TIME_TREES_ROOT, id, machine, primitive_row, time_trees_on, types_for,
+};
 use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTrees};
 use crate::recipe::{Parameter, ParameterKey, RuleFault, RuleField, StoredLimit};
 
@@ -290,4 +292,18 @@ fn a_parameter_whose_type_failed_to_resolve_is_a_structure_fault_with_its_key() 
         .expect_err("a type that does not resolve is a storage defect");
     assert_eq!(broken.key(), parameters[1].key());
     assert_eq!(broken.fault().code(), ErrorCode::PLT_013);
+}
+
+/// The type identifier of the `S5TIME` row of the test below.
+const S5TIME: u128 = TIME_TREES_ROOT;
+
+#[test]
+fn a_stored_s5time_limit_max_of_15_ms_is_a_structure_fault_with_its_key() {
+    let trees = time_trees_on(PlcPlatform::S7_1500, Primitive::S5Time);
+    let limits = vec![bounds(None, Some(Decimal::from(15)))];
+    let parameters = vec![parameter(2, S5TIME, 0, limits)];
+    let broken = check_version_parameters(&parameters, &trees)
+        .expect_err("a count between two S5TIME steps is a storage defect");
+    assert_eq!(broken.key(), parameters[0].key());
+    assert_eq!(broken.fault().code(), ErrorCode::RCP_006);
 }
