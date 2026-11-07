@@ -16,7 +16,7 @@ The recommended option is first in each row. A package does not start before the
 | Q-B | #13 | How long can `STRING(n)` and `WSTRING(n)` be on `CodesysIec` and `TwinCat3`? Both vendors set no limit. Their standard string functions stop at 255. | (1) Keep `1..=255`. A new ADR records it as a deliberate narrowing (amends ADR-0115). No code change. (2) Allow `1..=16382`, the limit of `plc_type_string_length_range`. | option (1), 2026-11-06 | WP4 |
 | Q-C | #8 | Which data block numbers are valid on `S7_1200` and `S7_1500`? The CPU 1517 manual of 11/2023 gives 1..59999 for the user and 60000..60999 for SFC 86. The S7-1200 manual gives 1..59999. | (1) `1..=59999` on both. The earlier rule set of ADR-0120 keeps `1..=65535` for stored addresses. (2) `1..=60999` on `S7_1500`. (3) A firmware attribute of the machine selects the range. | option (1), 2026-11-06 | WP4 |
 | Q-D | #9, #6 | Which identifier rules do struct names and member names follow? IEC 61131-3 compares names without case and reserves its keywords. | (1) Compare without case, and reserve the IEC 61131-3 keywords and every primitive name. (2) Reserve only `ARRAY`, `OF`, `STRUCT`, and `END_STRUCT`. Names stay case-sensitive. (3) No change. An ADR records the case-sensitive rule. | option (1), 2026-11-06 | WP3 |
-| Q-E | #1 | What happens to U+0000 in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` value? PostgreSQL `jsonb` cannot store it. | (1) The domain rejects it with `E-RCP-005`. A PLC string ends at its first zero, so U+0000 carries no data. (2) The domain stores an escaped form. | option (1), 2026-11-06 | WP2 |
+| Q-E | #1 | What happens to U+0000 in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` value? PostgreSQL `jsonb` cannot store it. | (1) The domain rejects it with `E-RCP-005`. A PLC string ends at its first zero, so U+0000 carries no data. (2) The domain stores an escaped form. | option (1), 2026-11-06, confirmed 2026-11-07 with the storage reason | WP2 |
 | Q-F | #11 | Does a form answer list an unknown key together with the other bad fields? | (1) No. An ADR amends `api.md` §5: an unknown key means a changed request and gives one line. (2) Yes. The reader collects every bad key and then runs the definition check. | option (1), 2026-11-06 | WP6 |
 | Q-G | #21 | `LDATE`, `LDT`, and `LTOD` need TwinCAT 3.1.4026.0 or later. How does the editor handle an older TwinCAT? | (1) A new Assumption: every `TwinCat3` machine runs 3.1.4026.0 or later. The runbook names the check. (2) A machine attribute holds the runtime version, and the type catalog hides the three types below 4026. | option (1), 2026-11-06 | WP4 |
 | Q-H | #10 | `STRING` and `STRING(80)` on `CodesysIec` are two rows with one shape. Which rule fixes the rebind? | (1) `kept_members` compares the shape, with the default length of the platform resolved. Type identity stays the row (ADR-0017). (2) `EnsureDerivedType` maps `STRING(n)` with the default `n` to the seed row. Existing machine rows stay. | option (1), 2026-11-06 | WP5 |
@@ -217,6 +217,16 @@ These points need TIA Portal or a vendor answer. An agent cannot close them.
 | R2 | open | Can a non-optimized DB on S7-1500 hold `WSTRING`, `LTIME`, `LTOD`, `LDT`, and `DTL`? Siemens entry 67655611 | New ADR if a type is refused |
 | R3 | open | Does S7-1200 support `WCHAR` and `WSTRING`, and from which firmware? The guideline of 12/2018 marks them "only S7-1500" | `data-model.md` §7 by ADR if needed |
 | R4 | #8 | The data block range of S7-1200 by firmware, from the current system manual | ADR of 7.2 |
+
+### 10.1 Follow-ups from the WP2 plan review
+
+The plan review of WP2 on 2026-11-07 found three faults outside the scope of WP2. The owner moved them to later changes.
+
+| Point | What to do | Result goes to |
+|---|---|---|
+| F-1 | `reliability.md` §7.4 says that validation runs before the transaction. Every draft command runs its validation inside the transaction after its row locks. A new ADR states "before the first write of the command". | New ADR and `reliability.md` §7.4, `CLAUDE.md` "Hard rules" |
+| F-2 | The `SetParameterValue` row of `domain-model.md` §5 and `api.md` lacks `E-RCP-006`, `E-RCP-017`, `E-RCP-018`, `E-RCP-019`, and `E-PLT-013`. The `ReplaceLimits` row lacks `E-RCP-005` and `E-PLT-013`. | Small docs change with an ADR |
+| F-3 | The phrases at `en.ftl` and `pl.ftl` lines 498 and 499 have no plural form, for example "at most 1 characters". | Later `web-ui` change with a Fluent plural selector |
 
 ## 11. Done check
 
