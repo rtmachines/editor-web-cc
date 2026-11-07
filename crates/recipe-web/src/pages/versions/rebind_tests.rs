@@ -9,9 +9,10 @@ use recipe_domain::recipe::ParameterKey;
 
 use super::rebind_world::{
     DRAFT_PAGE, GATE_KEY, REBIND, ZONE_ONE_KEY, assert_htmx_answer, body_v3, form_id, oob_form,
-    rebind_body, seed_gate, seed_zone_one, seed_zone_v4, summary_lines, zones_fields,
+    rebind_body, seed_gate, seed_zone_one, seed_zone_v4, zones_fields,
 };
 use crate::pages::recipes::test_world::recipe_world;
+use crate::pages::test_helpers::summary_lines;
 use crate::test_support::plant::World;
 use crate::test_support::recipes::LINE_KEY;
 

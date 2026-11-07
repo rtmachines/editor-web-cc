@@ -2,9 +2,10 @@
 
 use serde_json::json;
 
-use super::super::add::support::{REAL, draft_with, trees_on as real_trees_on};
-use super::super::support::{address, stored_draft_with, user};
+use super::super::add::support::{REAL, draft_with, live_unit, trees_on as real_trees_on};
+use super::super::support::{address, key, stored_draft_with, tag, user};
 use crate::error_codes::{ErrorCode, REGISTRY};
+use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, PlcPlatform, PlcTypeId};
 use crate::recipe::VersionState;
 use crate::recipe::snapshot::fixtures::{
@@ -12,8 +13,10 @@ use crate::recipe::snapshot::fixtures::{
     parameter_tag, range, trees, trees_on, units,
 };
 use crate::recipe::{
-    Draft, DraftError, RecipeError, RecipeVersionId, SnapshotItem, StoredLimit, StoredParameter,
+    DefinitionUpdate, Draft, DraftError, Ordinal, RecipeError, RecipeVersionId, SnapshotItem,
+    StoredLimit, StoredParameter,
 };
+use crate::text::{LongText, Text};
 
 fn draft_on(platform: PlcPlatform, parameters: Vec<StoredParameter>) -> Draft {
     Draft::load(stored_draft_with(
@@ -485,4 +488,47 @@ fn an_empty_draft_accepts_trees_and_units_of_any_machine() {
         .map(|_| ())
         .unwrap_err();
     assert_eq!(error.code(), ErrorCode::RCP_008);
+}
+
+/// `SPEED` as an `INT` with a limit at the S7 address `text`.
+fn speed_at(text: &str) -> StoredParameter {
+    let mut stored = limited_speed(1, "SPEED");
+    stored.s7_address = Some(address(text));
+    stored
+}
+
+#[test]
+fn adr_0140_the_approval_of_a_stored_data_block_above_59999_on_s7_1500_gives_e_rcp_057() {
+    let draft = draft_on(PlcPlatform::S7_1500, vec![speed_at("DB60000.DBW0")]);
+    let error = draft
+        .check_for_approval(&units(false), &trees_on(PlcPlatform::S7_1500), false)
+        .unwrap_err();
+    assert_eq!(plain_code(&error), ErrorCode::RCP_057);
+    assert!(
+        matches!(
+            error,
+            DraftError::Recipe(RecipeError::S7DataBlockOutOfRange { max: 59_999, .. })
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn adr_0140_the_fix_path_moves_speed_to_db59999_and_then_the_approval_gives_a_token() {
+    let trees = trees_on(PlcPlatform::S7_1500);
+    let mut draft = draft_on(PlcPlatform::S7_1500, vec![speed_at("DB60000.DBW0")]);
+    let update = DefinitionUpdate {
+        unit: live_unit(),
+        tag: tag("SPEED"),
+        name_en: Text::parse("Speed").unwrap(),
+        description_en: LongText::parse("Speed of the drive").unwrap(),
+        plc_type: id(INT),
+        s7_address: Some(address("DB59999.DBW0")),
+        ordinal: Ordinal::parse(1).unwrap(),
+    };
+    draft.set_definition(key(1), update, None, &trees).unwrap();
+    let result = draft
+        .check_for_approval(&units(false), &trees, false)
+        .map(|_| ());
+    assert!(result.is_ok(), "{result:?}");
 }

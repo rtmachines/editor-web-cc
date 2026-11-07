@@ -190,6 +190,7 @@ fn range_errors() -> [(RecipeError, ErrorCode); 3] {
             RecipeError::S7DataBlockOutOfRange {
                 tag: tag("ZONE_A"),
                 address: S7Address::parse("DB16001.DBW0").unwrap(),
+                max: 16_000,
             },
             ErrorCode::RCP_057,
         ),

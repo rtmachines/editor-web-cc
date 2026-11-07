@@ -101,12 +101,6 @@ pub(super) fn body_v3(
     rebind_body(row_version, types, &zones_fields(indexes, value))
 }
 
-/// Return the number of the lines of the summary in `#error-panel`.
-pub(super) fn summary_lines(body: &str) -> usize {
-    let lines = body.split("<ul class=\"field-lines\">").nth(1).unwrap();
-    lines.split("</ul>").next().unwrap().matches("<li>").count()
-}
-
 /// Return the markup of the out-of-band form `id` of an answer, after its `id` attribute.
 pub(super) fn oob_form<'a>(body: &'a str, id: &str) -> &'a str {
     let (_before, rest) = body.split_once(&format!("<form id=\"{id}\"")).unwrap();

@@ -17,7 +17,7 @@ The recommended option is first in each row. A package does not start before the
 | Q-C | #8 | Which data block numbers are valid on `S7_1200` and `S7_1500`? The CPU 1517 manual of 11/2023 gives 1..59999 for the user and 60000..60999 for SFC 86. The S7-1200 manual gives 1..59999. | (1) `1..=59999` on both. The earlier rule set of ADR-0120 keeps `1..=65535` for stored addresses. (2) `1..=60999` on `S7_1500`. (3) A firmware attribute of the machine selects the range. | option (1), 2026-11-06 | WP4 |
 | Q-D | #9, #6 | Which identifier rules do struct names and member names follow? IEC 61131-3 compares names without case and reserves its keywords. | (1) Compare without case, and reserve the IEC 61131-3 keywords and every primitive name. (2) Reserve only `ARRAY`, `OF`, `STRUCT`, and `END_STRUCT`. Names stay case-sensitive. (3) No change. An ADR records the case-sensitive rule. | option (1), 2026-11-06 | WP3 |
 | Q-E | #1 | What happens to U+0000 in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` value? PostgreSQL `jsonb` cannot store it. | (1) The domain rejects it with `E-RCP-005`. A PLC string ends at its first zero, so U+0000 carries no data. (2) The domain stores an escaped form. | option (1), 2026-11-06, confirmed 2026-11-07 with the storage reason | WP2 |
-| Q-F | #11 | Does a form answer list an unknown key together with the other bad fields? | (1) No. An ADR amends `api.md` §5: an unknown key means a changed request and gives one line. (2) Yes. The reader collects every bad key and then runs the definition check. | option (1), 2026-11-06 | WP6 |
+| Q-F | #11 | Does a form answer list an unknown key together with the other bad fields? | (1) No. An ADR amends `api.md` §2.6: an unknown key means a changed request and gives one line. (2) Yes. The reader collects every bad key and then runs the definition check. | option (1), 2026-11-06 | WP6 |
 | Q-G | #21 | `LDATE`, `LDT`, and `LTOD` need TwinCAT 3.1.4026.0 or later. How does the editor handle an older TwinCAT? | (1) A new Assumption: every `TwinCat3` machine runs 3.1.4026.0 or later. The runbook names the check. (2) A machine attribute holds the runtime version, and the type catalog hides the three types below 4026. | option (1), 2026-11-06 | WP4 |
 | Q-H | #10 | `STRING` and `STRING(80)` on `CodesysIec` are two rows with one shape. Which rule fixes the rebind? | (1) `kept_members` compares the shape, with the default length of the platform resolved. Type identity stays the row (ADR-0017). (2) `EnsureDerivedType` maps `STRING(n)` with the default `n` to the seed row. Existing machine rows stay. | option (1), 2026-11-06 | WP5 |
 | Q-I | #6 | How do the class-2 locks keep one order when two key texts collide? | (1) A command sorts its keys by the final key value (`hashtext`) and removes duplicates. `data-model.md` §1.4 changes. (2) Only the keyword rule of Q-D prevents the collision. | option (1), 2026-11-06 | WP3 |
@@ -227,6 +227,36 @@ The plan review of WP2 on 2026-11-07 found three faults outside the scope of WP2
 | F-1 | `reliability.md` §7.4 says that validation runs before the transaction. Every draft command runs its validation inside the transaction after its row locks. A new ADR states "before the first write of the command". | New ADR and `reliability.md` §7.4, `CLAUDE.md` "Hard rules" |
 | F-2 | The `SetParameterValue` row of `domain-model.md` §5 and `api.md` lacks `E-RCP-006`, `E-RCP-017`, `E-RCP-018`, `E-RCP-019`, and `E-PLT-013`. The `ReplaceLimits` row lacks `E-RCP-005` and `E-PLT-013`. | Small docs change with an ADR |
 | F-3 | The phrases at `en.ftl` and `pl.ftl` lines 498 and 499 have no plural form, for example "at most 1 characters". | Later `web-ui` change with a Fluent plural selector |
+
+### 10.2 Follow-ups from the WP6 plan review
+
+The plan review of WP6 on 2026-11-07 found two faults outside the scope of WP6. The owner moved them to later changes.
+
+| Point | What to do | Result goes to |
+|---|---|---|
+| F-4 | `reliability.md` §4.2 (line 423) says that a missing required field of a `serde` form gives `E-WEB-008` with the field name. The code gives the field `form` (`crates/recipe-web/src/error.rs:242-249`). Decide which one changes. | Later `web-ui` change: fix the code or the document |
+| F-5 | On the rebind route, a bad hidden field gives a list without an out-of-band form (`crates/recipe-web/src/pages/versions/rebind.rs:301-307`, `form: None`). The `web-ui` requirement "Every field error at once" says the answer swaps the form out of band. | Later `web-ui` change: fix the code or the requirement |
+
+### 10.3 Follow-ups from the WP6 code review
+
+The code review of WP6 on 2026-11-07 found two gaps between the code and the wish of ADR-0138. The owner kept the code and moved them to later changes.
+
+| Point | What to do | Result goes to |
+|---|---|---|
+| F-6 | On the value and limits routes, a bad `row_version` gives one line before the other fields are read (`crates/recipe-web/src/pages/parameters/value.rs:44`, `:126`, `:175`). The add and edit forms put it into the list (`definition.rs:123`). | Later `web-ui` change: put `row_version` into the list of stage 1 |
+| F-7 | The one line of a changed body has the label `Form`. Its text depends on the class of the fault (ADR-0138 (a)). `reason-form` (`crates/recipe-web/i18n/en.ftl:176`) names a missing field, an unknown field, or a wrong content type. The reader also gives it for a plain key twice and too many pairs (`crates/recipe-web/src/pages/parameters/fields.rs:258`, `:316`, `:323`). A value key twice gives `reason-value-key`, and a limit key fault gives `reason-limit-row` (`en.ftl:540`, `:541`). No text names the fault itself. | Later `web-ui` change: a text for each fault of ADR-0138 (b) |
+
+### 10.4 Record of WP4
+
+The change `platform-ranges-round-1` ran on 2026-11-07.
+
+| Point | What happened | Where |
+|---|---|---|
+| D-1 | The data block rule of 7.2 has no rule set (ADR-0140). Under `Earlier`, a stored address above 59999 stays readable in four ways. The read shows a rule fault. The export marks the document not loadable. `CreateVersion` copies it. The Skip path passes it. `ApproveVersion` refuses it with `E-RCP-057`. `RebindTypeRevision` keeps the current rule. The user fixes the address with `UpdateParameterDefinition`. This replaces the words "pass under `Earlier`" of 7.2 task 1. | ADR-0140 |
+| D-2 | The owner decided on 2026-11-07 that the platform range check writes the stored text of each row into the change log of the site. It does not write the text into the pull request. | `docs/ops/runbook.md`, section "Check the stored data against the platform ranges" |
+| D-3 | The owner decided on 2026-11-07 that the platform range check runs at every upgrade. It is a sub-step of step 2 of the subsection "Upgrade", before step 3. | `docs/ops/runbook.md`, subsection "Upgrade" |
+| G-1 | Task 2.3 is open. The owner runs the query on the production database and checks the box in the pull request. The box is a hard gate of the merge. The archive of the change waits for it. | `openspec/changes/platform-ranges-round-1/tasks.md`, task 2.3 |
+| R-1 | The code review found two LOW points and kept both. The name `LDT_UNSIGNED` stays (design D1). The test count `10413792000000000000` stays a literal in five test files. | No change |
 
 ## 11. Done check
 

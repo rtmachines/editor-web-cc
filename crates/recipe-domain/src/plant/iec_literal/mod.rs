@@ -61,7 +61,8 @@ impl TimeType {
 
     /// Return the lowest and the highest count of this type under the rule set `rules`.
     ///
-    /// Only `DATE` on `S7_1200` and `S7_1500` differs between the two sets (ADR-0120 (a)).
+    /// Only `DATE` on `S7_1200` and `S7_1500` (ADR-0120 (a)) and `LDATE` and `LDT` on
+    /// `CodesysIec` and `TwinCat3` (ADR-0139 (e)) differ between the two sets.
     /// Returns `None` when the type does not exist on the platform.
     #[must_use]
     pub fn range_under(self, rules: RuleSet) -> Option<(i128, i128)> {

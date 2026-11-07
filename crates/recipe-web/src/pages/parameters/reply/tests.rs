@@ -41,6 +41,7 @@ fn block_out_of_range() -> RecipeError {
     RecipeError::S7DataBlockOutOfRange {
         tag: tag(),
         address: address("DB16001.DBW0"),
+        max: 16_000,
     }
 }
 

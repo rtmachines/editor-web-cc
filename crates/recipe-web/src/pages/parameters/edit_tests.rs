@@ -9,7 +9,7 @@ use super::add_error_tests::assert_value_line_holds;
 use super::test_kit::{SPEED_FIELDS, assert_panel_error, changed, form, parameter_path, post_htmx};
 use super::value_tests::assert_operator_refused;
 use crate::pages::recipes::test_world::recipe_world;
-use crate::pages::test_helpers::field_value;
+use crate::pages::test_helpers::{field_value, summary_lines};
 use crate::test_support::recipes::{GRID_KEY, HOLD_KEY, LABEL_KEY, SPEED_KEY, SPEED_TABLE_KEY};
 
 /// The opening tag of the edit form of `SPEED` when an answer swaps it out of band.
@@ -357,4 +357,32 @@ async fn parameters_edit_swaps_the_english_base_text_out_of_band_and_no_translat
         page.body
     );
     assert!(!page.body.contains("translations-base\" hx-swap-oob"));
+}
+
+/// ADR-0138 (a), (b): a bad key of the edit form gives one line, also when `tag` is bad as well.
+///
+/// The reader stops at the bad key, so the bad `tag` gets no line and the form is not swapped.
+#[tokio::test]
+async fn parameters_edit_a_bad_key_with_a_bad_tag_gives_one_line_and_no_form() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let mut pairs = changed(&SPEED_FIELDS, &[("tag", Some("bad tag"))]);
+    pairs.extend([("bogus", "1"), ("value[*]", "2")]);
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
+    assert!(!reply.body.contains("id=\"tag-error\""), "{}", reply.body);
+    assert!(!reply.body.contains("href=\"#tag\""), "{}", reply.body);
+    assert!(
+        !reply.body.contains("class=\"field-error\""),
+        "{}",
+        reply.body
+    );
+    assert!(
+        !reply.body.contains("hx-swap-oob=\"true\""),
+        "{}",
+        reply.body
+    );
+    assert_eq!(world.fixture.snapshot(), before);
 }

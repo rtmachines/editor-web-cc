@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Method, StatusCode};
 
 use super::test_kit::{form_body, post_as, post_htmx, seed_cycle};
-use crate::pages::test_helpers::assert_clean_html;
+use crate::pages::test_helpers::{assert_clean_html, summary_lines};
 use crate::test_support::plant::{HTMX, POLISH, World, world};
 use crate::test_support::{Reply, call, post_fields, request};
 
@@ -572,6 +572,38 @@ async fn types_define_error_e_web_008_a_key_that_the_form_does_not_have() {
         )
         .await;
     }
+}
+
+/// Spec "Unknown key in the UDT form" (ADR-0138 (a), (b), (f)): a bad key gives one line.
+///
+/// The reader stops at the bad key, so the two bad member names get no line under their inputs
+/// and the answer swaps no form.
+#[tokio::test]
+async fn types_define_error_e_web_008_an_unknown_key_with_two_bad_member_names_gives_one_line() {
+    let world = world();
+    let body = form_body(
+        Some("ST_Press"),
+        &[("9a", "INT"), ("9b", "INT")],
+        &[("bogus", "1")],
+    );
+    let reply = refused(
+        &world,
+        NEW,
+        &body,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "E-WEB-008",
+    )
+    .await;
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
+    for id in ["members-0-name", "members-1-name"] {
+        assert!(!has_line(&reply.body, id, "Name of member"), "{id}");
+    }
+    assert!(!reply.body.contains("field-error"), "{}", reply.body);
+    assert!(
+        !reply.body.contains("hx-swap-oob=\"true\""),
+        "{}",
+        reply.body
+    );
 }
 
 #[tokio::test]

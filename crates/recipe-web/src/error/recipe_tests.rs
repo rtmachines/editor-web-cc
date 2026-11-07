@@ -367,6 +367,7 @@ fn range_errors() -> Vec<Case> {
             RecipeError::S7DataBlockOutOfRange {
                 tag: tag("SPEED"),
                 address: address("DB16001.DBW0"),
+                max: 16_000,
             },
             None,
         ),
@@ -492,6 +493,34 @@ fn recipe_e_rcp_020_counts_the_parameters_with_a_problem_once_each() {
         message(&bundles, error, Lang::En),
         "2 parameters are not valid. See the list."
     );
+}
+
+#[test]
+fn recipe_e_rcp_057_names_the_highest_data_block_of_the_platform_in_both_languages() {
+    let bundles = Bundles::load().unwrap();
+    let cases = [
+        (
+            16_000,
+            "DB16001.DBW0",
+            "Address DB16001.DBW0 of SPEED uses a data block above 16000. The controller of the machine has no such data block.",
+            "Adres DB16001.DBW0 parametru SPEED u\u{17c}ywa bloku danych powy\u{17c}ej 16000. Sterownik maszyny nie ma takiego bloku danych.",
+        ),
+        (
+            59_999,
+            "DB60000.DBW0",
+            "Address DB60000.DBW0 of SPEED uses a data block above 59999. The controller of the machine has no such data block.",
+            "Adres DB60000.DBW0 parametru SPEED u\u{17c}ywa bloku danych powy\u{17c}ej 59999. Sterownik maszyny nie ma takiego bloku danych.",
+        ),
+    ];
+    for (max, text, english, polish) in cases {
+        let error = || RecipeError::S7DataBlockOutOfRange {
+            tag: tag("SPEED"),
+            address: address(text),
+            max,
+        };
+        assert_eq!(message(&bundles, error(), Lang::En), english, "{max}");
+        assert_eq!(message(&bundles, error(), Lang::Pl), polish, "{max}");
+    }
 }
 
 /// An expected form with its English and its Polish phrase.

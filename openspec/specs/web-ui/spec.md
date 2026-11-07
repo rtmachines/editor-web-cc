@@ -1295,7 +1295,7 @@ The page of a draft with outdated parameters SHALL list them with the state Outd
 - **AND** the page holds no field of a new member and no rebind submit button
 
 ### Requirement: Every field error at once
-A form answer SHALL list every bad field and every fault of the value and the limits at once. The answer SHALL put the summary into `#error-panel` and SHALL swap the form out of band with an error line under each bad input. The summary SHALL show at most 20 lines and the count of the others. This SHALL apply to the recipe forms and the plant forms (R36, R39, A44).
+On the recipe and plant forms, a changed body SHALL give one line `422 E-WEB-008` and no out-of-band form. A changed body has a fault of ADR-0138 (b) to (d), for example an unknown key or a `[*]` segment. For another body, the answer SHALL list every bad field and every fault of the value and the limits in the stages of ADR-0041. `#error-panel` SHALL show at most 20 lines and the count of the others. The out-of-band form SHALL show a line under each bad input (R36, R38, R39, A44).
 
 #### Scenario: Two bad leaves
 - **GIVEN** the parameter `SPEED_TABLE` with the limit 0 to 3000 on `[*]`
@@ -1308,6 +1308,40 @@ A form answer SHALL list every bad field and every fault of the value and the li
 - **WHEN** `anowak` sends an HTMX `POST /machines/M7/types` with the bad member names `9a` and `9b`
 - **THEN** the server returns `422 E-WEB-008` with two lines
 - **AND** each member name input has an error line under it
+
+#### Scenario: Unknown key in the add form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the draft version 3 of `R-100`
+- **WHEN** `anowak` sends an HTMX `POST /recipes/R-100/versions/3/parameters` with the tag `bad tag`, the unknown key `bogus`, and the value key `value[*]`
+- **THEN** the server returns `422 E-WEB-008` with one line in `#error-panel`
+- **AND** the answer holds no error line under an input and no out-of-band form
+- **AND** the draft does not change
+
+#### Scenario: Unknown key in the edit form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the parameter `SPEED` of the draft version 3 of `R-100`
+- **WHEN** `anowak` sends an HTMX `POST /recipes/R-100/versions/3/parameters/{key}/definition` of `SPEED` with the tag `bad tag`, the unknown key `bogus`, and the value key `value[*]`
+- **THEN** the server returns `422 E-WEB-008` with one line in `#error-panel`
+- **AND** the answer holds no error line under an input and no out-of-band form
+- **AND** the parameter keeps its definition, its value, and its limits
+
+#### Scenario: Unknown key in the UDT form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7`
+- **WHEN** `anowak` sends an HTMX `POST /machines/M7/types` with the bad member names `9a` and `9b` and the unknown key `bogus`
+- **THEN** the server returns `422 E-WEB-008` with one line
+- **AND** no member name input has an error line under it
+
+#### Scenario: Unknown key in the value form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the parameter `SPEED` of the draft version 3 of `R-100`
+- **WHEN** `anowak` sends an HTMX `POST /recipes/R-100/versions/3/parameters/{key}/value` of `SPEED` with the value `abc` and the unknown key `bogus`
+- **THEN** the server returns `422 E-WEB-008` with one line in `#error-panel`
+- **AND** the answer holds no error line under an input
+- **AND** the parameter keeps its value
+
+#### Scenario: Unknown key in the machine form
+- **GIVEN** the ProcessEngineer `anowak` with an open session
+- **WHEN** `anowak` sends an HTMX `POST /machines` with an empty machine code and the unknown key `bogus`
+- **THEN** the server returns `422 E-WEB-008` with one line in `#error-panel`
+- **AND** the answer holds no error line under the input `code` and no out-of-band form
+- **AND** the server creates no machine
 
 ### Requirement: Refused form page and toast
 A request without HTMX with field errors of a form and a session SHALL get a full page in the layout of the session. The page SHALL hold the navigation, the CSRF token in `hx-headers`, and the login. It SHALL hold the summary with a link to each input, one `h1`, and the form with the sent texts and the error lines. Every other error and a request without a session SHALL get the full error page. Every HTMX error answer SHALL end with an empty `#toast` out of band (R36, R39, A44).

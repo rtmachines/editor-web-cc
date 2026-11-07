@@ -11,7 +11,7 @@ Source: `docs/architecture/api.md` §1 to §9, ADR-0001, ADR-0008, ADR-0015. Loa
 - Every mutating route accepts only `application/x-www-form-urlencoded`. Request structs use `#[serde(deny_unknown_fields)]`.
 - Every mutating route uses `POST`. No route uses `PUT` or `DELETE` (ADR-0040).
 - A parameter value travels as one field per leaf: `value` and the leaf path. A reader of pairs rejects an unknown key (ADR-0039).
-- A form answer lists every bad field at once. It puts the summary into `#error-panel` and swaps the form out of band with a line under each field (ADR-0041). The login form keeps one line per answer (ADR-0132).
+- A form answer lists every bad field at once. It puts the summary into `#error-panel` and swaps the form out of band with a line under each field (ADR-0041). A changed form body (an unknown, malformed, or repeated key, or a `[*]` segment) gives one `E-WEB-008` line and no out-of-band form (ADR-0138). The login form keeps one line per answer (ADR-0132).
 - UI text comes from the `fluent` bundles `pl` (default) and `en`. The cookie `recipe_lang` holds the choice (api.md §8).
 
 ## HTMX configuration (api.md §9)

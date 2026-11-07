@@ -26,8 +26,14 @@ const DATE_S7: RangeInclusive<i128> = 7_305..=72_683;
 ///
 /// ADR-0120 (a) keeps this end for the stored data that a user wrote before ADR-0114.
 const DATE_S7_EARLIER: RangeInclusive<i128> = 7_305..=72_840;
-/// `LDATE` on CODESYS and TwinCAT 3: unsigned 64 bit, in nanoseconds.
-const LDATE: RangeInclusive<i128> = 0..=18_446_744_073_709_551_615;
+/// `LDATE` on CODESYS and TwinCAT 3: never negative, 63 bit, in nanoseconds (ADR-0139 (b)).
+///
+/// The last `LDATE` is 2262-04-11.
+const LDATE: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
+/// `LDATE` on CODESYS and TwinCAT 3 in the earlier rule set: unsigned 64 bit, in nanoseconds.
+///
+/// ADR-0139 (e) keeps this end for the stored data that a user wrote before ADR-0139.
+const LDATE_EARLIER: RangeInclusive<i128> = 0..=18_446_744_073_709_551_615;
 /// `TIME_OF_DAY` on every platform: below one day, in milliseconds.
 const TIME_OF_DAY: RangeInclusive<i128> = 0..=86_399_999;
 /// `LTOD` where it exists: the `tod` grammar keeps a literal below one day, in nanoseconds.
@@ -36,8 +42,14 @@ const LTOD: RangeInclusive<i128> = 0..=86_399_999_999_999;
 const DATE_AND_TIME_S7: RangeInclusive<i128> = 631_152_000..=3_786_911_999;
 /// `DATE_AND_TIME` on CODESYS and TwinCAT 3: 1970-01-01 to 2106-02-07-06:28:15, in seconds.
 const DATE_AND_TIME_UNSIGNED: RangeInclusive<i128> = 0..=4_294_967_295;
-/// `LDT` on CODESYS and TwinCAT 3: unsigned 64 bit, in nanoseconds.
-const LDT_UNSIGNED: RangeInclusive<i128> = 0..=18_446_744_073_709_551_615;
+/// `LDT` on CODESYS and TwinCAT 3: never negative, 63 bit, in nanoseconds (ADR-0139 (a)).
+///
+/// The last `LDT` is 2262-04-11-23:47:16.854775807.
+const LDT_UNSIGNED: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
+/// `LDT` on CODESYS and TwinCAT 3 in the earlier rule set: unsigned 64 bit, in nanoseconds.
+///
+/// ADR-0139 (e) keeps this end for the stored data that a user wrote before ADR-0139.
+const LDT_UNSIGNED_EARLIER: RangeInclusive<i128> = 0..=18_446_744_073_709_551_615;
 /// `LDT` on S7-1500: never negative, 63 bit, in nanoseconds.
 const LDT_S7: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
 /// `DTL` on S7-1200 and S7-1500: 1970-01-01 to 2262-04-11, never negative, in nanoseconds.
@@ -51,13 +63,14 @@ const DTL: RangeInclusive<i128> = 0..=9_223_372_036_854_775_807;
 pub enum RuleSet {
     /// Every rule in force now.
     Current,
-    /// The rules before ADR-0114 and ADR-0117 (ADR-0120 (a)).
+    /// The rules before ADR-0114, ADR-0117, and ADR-0139 (ADR-0120 (a), ADR-0139 (e)).
     Earlier,
 }
 
 /// Return the range of the count of a type, or `None` when the type is not on the platform.
 ///
-/// Only `DATE` on `S7_1200` and `S7_1500` differs between the two rule sets.
+/// Only `DATE` on `S7_1200` and `S7_1500` (ADR-0120 (a)) and `LDATE` and `LDT` on `CodesysIec`
+/// and `TwinCat3` (ADR-0139 (e)) differ between the two rule sets.
 pub(super) fn range(ty: TimeType, rules: RuleSet) -> Option<RangeInclusive<i128>> {
     use PlcPlatform::{S7_300, S7_1200, S7_1500};
     let iec = !ty.platform().is_s7();
@@ -70,12 +83,14 @@ pub(super) fn range(ty: TimeType, rules: RuleSet) -> Option<RangeInclusive<i128>
         (Primitive::Date, _) if iec => Some(DATE_UNSIGNED),
         (Primitive::Date, S7_1200 | S7_1500) if rules == RuleSet::Earlier => Some(DATE_S7_EARLIER),
         (Primitive::Date, _) => Some(DATE_S7),
+        (Primitive::Ldate, _) if iec && rules == RuleSet::Earlier => Some(LDATE_EARLIER),
         (Primitive::Ldate, _) if iec => Some(LDATE),
         (Primitive::TimeOfDay, _) => Some(TIME_OF_DAY),
         (Primitive::Ltod, _) if iec => Some(LTOD),
         (Primitive::Ltod, S7_1500) => Some(LTOD),
         (Primitive::DateAndTime, _) if iec => Some(DATE_AND_TIME_UNSIGNED),
         (Primitive::DateAndTime, S7_1500 | S7_300) => Some(DATE_AND_TIME_S7),
+        (Primitive::Ldt, _) if iec && rules == RuleSet::Earlier => Some(LDT_UNSIGNED_EARLIER),
         (Primitive::Ldt, _) if iec => Some(LDT_UNSIGNED),
         (Primitive::Ldt, S7_1500) => Some(LDT_S7),
         (Primitive::Dtl, S7_1200 | S7_1500) => Some(DTL),

@@ -8,6 +8,7 @@ use recipe_domain::plant::limits::MAX_DEPTH;
 
 use super::test_kit::{ADD, INT_FIELDS, assert_panel_error, changed, post_htmx};
 use crate::pages::recipes::test_world::recipe_world;
+use crate::pages::test_helpers::summary_lines;
 use crate::test_support::plant::World;
 
 /// One error case: the changed fields, the status, the code, and the input of the line.
@@ -412,4 +413,54 @@ async fn parameters_add_lists_two_bad_fields_at_once() {
         let line = format!("id=\"{input}-error\"");
         assert!(reply.body.contains(&line), "{input}: {}", reply.body);
     }
+}
+
+/// Send the valid body with a bad `tag` and the pairs `extra`. Return the faults of the answer.
+async fn one_line_faults(name: &str, extra: Vec<(&str, &str)>) -> Vec<String> {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let mut pairs = changed(&INT_FIELDS, &[("tag", Some("bad tag"))]);
+    pairs.extend(extra);
+    let reply = post_htmx(&world, ADD, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    let mut faults = Vec::new();
+    let lines = summary_lines(&reply.body);
+    if lines != 1 {
+        faults.push(format!("{name}: {lines} lines"));
+    }
+    if reply.body.contains("id=\"tag-error\"") || reply.body.contains("href=\"#tag\"") {
+        faults.push(format!("{name}: a line under tag"));
+    }
+    if reply.body.contains("class=\"field-error\"") {
+        faults.push(format!("{name}: a line under an input"));
+    }
+    if reply.body.contains("hx-swap-oob=\"true\"") {
+        faults.push(format!("{name}: an out-of-band form"));
+    }
+    if world.fixture.snapshot() != before {
+        faults.push(format!("{name}: the snapshot changed"));
+    }
+    faults
+}
+
+/// ADR-0138 (a), (b): a bad key of the form gives one line, also when `tag` is bad as well.
+///
+/// The reader stops at the bad key, so the bad `tag` gets no line and the form is not swapped. The
+/// test lists the faults of all rows, so a failure shows every row that breaks the rule.
+#[tokio::test]
+async fn parameters_add_a_bad_key_with_a_bad_tag_gives_one_line_and_no_form() {
+    let rows: [(&str, Vec<(&str, &str)>); 4] = [
+        (
+            "unknown and value path",
+            vec![("bogus", "1"), ("value[*]", "2")],
+        ),
+        ("unknown only", vec![("bogus", "1")]),
+        ("value path only", vec![("value[*]", "2")]),
+        ("second ordinal", vec![("ordinal", "6")]),
+    ];
+    let mut faults = Vec::new();
+    for (name, extra) in rows {
+        faults.extend(one_line_faults(name, extra).await);
+    }
+    assert!(faults.is_empty(), "{faults:#?}");
 }

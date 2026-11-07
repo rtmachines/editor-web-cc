@@ -1,6 +1,6 @@
 # ADR-0116: End of an S7 address and the data block number on S7-300
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0140 (item (c): the data block number is at most 59 999 on `S7_1200` and `S7_1500`)
 Date: 2026-11-03
 Deciders: project owner
 

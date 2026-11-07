@@ -7,9 +7,10 @@ use axum::http::StatusCode;
 use recipe_domain::audit::SecurityEventKind;
 
 use super::rebind_world::{
-    REBIND, assert_htmx_answer, body_v3, form_id, oob_form, rebind_body, seed_big, summary_lines,
+    REBIND, assert_htmx_answer, body_v3, form_id, oob_form, rebind_body, seed_big,
 };
 use crate::pages::recipes::test_world::recipe_world;
+use crate::pages::test_helpers::summary_lines;
 use crate::test_support::plant::main_of;
 
 #[tokio::test]
@@ -188,4 +189,29 @@ async fn rebind_refuses_a_type_id_that_is_not_in_the_hyphenated_form() {
     let body = format!("row_version=1&from_type_id={zone}&to_type_id={zone}");
     let reply = world.post(&world.engineer, REBIND, &body, true).await;
     assert_htmx_answer(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+}
+
+/// ADR-0138 (a), (b), (e): a bad key of the rebind form gives one line, also when a leaf text is bad.
+///
+/// The reader stops at the bad key, so the bad text gets no line under its input and no form is
+/// swapped.
+#[tokio::test]
+async fn rebind_a_bad_key_with_a_bad_leaf_text_gives_one_line_and_no_form() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let mut body = body_v3(&world, "1", &[2, 3, 4], "1");
+    body.push_str(&format!(
+        "&new_member_values[{}][1].temp_min=abc&bogus=1",
+        crate::test_support::recipes::ZONES_KEY
+    ));
+    let reply = world.post(&world.engineer, REBIND, &body, true).await;
+    assert_htmx_answer(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
+    assert!(!reply.body.contains("field-error"), "{}", reply.body);
+    assert!(
+        !reply.body.contains("hx-swap-oob=\"true\""),
+        "{}",
+        reply.body
+    );
+    assert_eq!(world.fixture.snapshot(), before);
 }

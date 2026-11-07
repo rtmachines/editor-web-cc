@@ -54,7 +54,7 @@ pub(super) fn exports(fixture: &Fixture) -> Vec<String> {
 /// Return the text of the value of the first field `name` of a pretty JSON document.
 ///
 /// A string keeps its quotes. The text ends before the comma or the line end.
-fn field<'a>(body: &'a str, name: &str) -> &'a str {
+pub(super) fn field<'a>(body: &'a str, name: &str) -> &'a str {
     let key = format!("\"{name}\": ");
     let (_before, rest) = body.split_once(&key).unwrap();
     let end = rest.find([',', '\n']).unwrap_or(rest.len());
@@ -62,7 +62,7 @@ fn field<'a>(body: &'a str, name: &str) -> &'a str {
 }
 
 /// Assert a file answer with the name `file_name` and the headers of `api.md` sections 6.3 and 9.
-fn assert_file(reply: &Reply, file_name: &str) {
+pub(super) fn assert_file(reply: &Reply, file_name: &str) {
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert_eq!(reply.header("content-type"), "application/json");
     let disposition = format!("attachment; filename=\"{file_name}\"");
