@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 
-use crate::plant::{Primitive, TypeTree};
-use crate::recipe::value::test_support::{REAL, TIME, ZONE_JSON, primitive_tree, zone_tree};
+use crate::plant::{Primitive, RuleSet, TypeTree};
+use crate::recipe::value::test_support::{
+    CHAR, REAL, TIME, WCHAR, ZONE_JSON, primitive_tree, string_tree, wstring_tree, zone_tree,
+};
 use crate::recipe::value::{Expected, ParameterValue, StoredValue, ValueFault};
 
 /// Read a stored JSON value against a tree.
@@ -84,6 +86,53 @@ fn stored_numbers_are_canonicalized_again() {
 #[test]
 fn stored_value_of_another_shape_gives_a_fault() {
     assert!(read(json!("x"), &zone_tree()).is_err());
+}
+
+/// A stored text with U+0000 gives the `Expected` of its type under both rule sets (ADR-0137, D2).
+#[test]
+fn stored_text_with_nul_gives_a_fault_under_both_rule_sets() {
+    let rows = [
+        (
+            "CHAR",
+            primitive_tree(CHAR),
+            "\u{0}",
+            Expected::Char { max: 0xFF },
+        ),
+        (
+            "WCHAR",
+            primitive_tree(WCHAR),
+            "\u{0}",
+            Expected::Char { max: 0xFFFF },
+        ),
+        (
+            "STRING(10)",
+            string_tree(10),
+            "A\u{0}",
+            Expected::String { length: 10 },
+        ),
+        (
+            "WSTRING(10)",
+            wstring_tree(10),
+            "A\u{0}",
+            Expected::Wstring { length: 10 },
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (name, tree, text, expected) in &rows {
+        for rules in [RuleSet::Current, RuleSet::Earlier] {
+            let stored = StoredValue::from(json!(text));
+            let result = ParameterValue::from_stored(&stored, tree, rules);
+            let got = result.as_ref().err().and_then(ValueFault::expected);
+            if got != Some(expected) {
+                failures.push(format!("{name} under {rules:?}: got {result:?}"));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "rows that failed:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]

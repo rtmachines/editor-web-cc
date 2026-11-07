@@ -519,6 +519,18 @@ fn texts_of_numeric_leaves_write_the_canonical_decimal_and_round_trip() {
 }
 
 #[test]
+fn form_text_u0000_gives_the_expected_form_of_a_string_and_of_a_char() {
+    assert_eq!(
+        faults(&string_tree(10), &[("", "\u{0}")]),
+        [(String::new(), Expected::String { length: 10 })]
+    );
+    assert_eq!(
+        faults(&primitive_tree(CHAR), &[("", "\u{0}")]),
+        [(String::new(), Expected::Char { max: 0xFF })]
+    );
+}
+
+#[test]
 fn texts_against_another_tree_give_wrong_tree() {
     let value = ParameterValue::parse(ZONE_JSON, &zone_tree()).unwrap();
     assert_eq!(

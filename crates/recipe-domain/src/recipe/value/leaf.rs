@@ -92,7 +92,10 @@ pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, LeafFault>
     }
 }
 
-/// Convert a `STRING` or `WSTRING` leaf. The text must fit the length of the type.
+/// Convert a `STRING` or `WSTRING` leaf.
+///
+/// The text must fit the length of the type and must hold no U+0000, because PostgreSQL refuses
+/// that scalar in JSONB (ADR-0137).
 fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     let is_wide = leaf.primitive == Primitive::Wstring;
     let length = leaf.string_length.unwrap_or_default();
@@ -105,19 +108,30 @@ fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
         return Err(expected);
     };
     let is_narrow = text.chars().all(|c| u32::from(c) <= LATIN_1_MAX);
-    let units = if is_wide {
-        text.encode_utf16().count()
-    } else {
-        text.chars().count()
-    };
-    if (is_wide || is_narrow) && units <= usize::from(length) {
+    let units = string_length_units(text, leaf.primitive);
+    let has_nul = text.contains('\0');
+    if (is_wide || is_narrow) && !has_nul && units <= usize::from(length) {
         Ok(value.clone())
     } else {
         Err(expected)
     }
 }
 
-/// Convert a `CHAR` or `WCHAR` leaf. The text must hold one scalar inside the range of the type.
+/// Count the length units of the text of a string leaf.
+///
+/// A `WSTRING` counts UTF-16 units and a `STRING` counts characters (ADR-0137). The value check
+/// and the limit check both call this function, so the two checks cannot differ.
+pub(super) fn string_length_units(text: &str, primitive: Primitive) -> usize {
+    if primitive == Primitive::Wstring {
+        text.encode_utf16().count()
+    } else {
+        text.chars().count()
+    }
+}
+
+/// Convert a `CHAR` or `WCHAR` leaf.
+///
+/// The text must hold one scalar from U+0001 up to the highest scalar of the type (ADR-0137).
 fn character(value: &Value, primitive: Primitive) -> Result<Value, Expected> {
     let highest = if primitive == Primitive::Wchar {
         WCHAR_MAX
@@ -129,7 +143,7 @@ fn character(value: &Value, primitive: Primitive) -> Result<Value, Expected> {
             let mut scalars = text.chars();
             matches!(
                 (scalars.next(), scalars.next()),
-                (Some(c), None) if u32::from(c) <= highest
+                (Some(c), None) if c != '\0' && u32::from(c) <= highest
             )
         }
         _ => false,

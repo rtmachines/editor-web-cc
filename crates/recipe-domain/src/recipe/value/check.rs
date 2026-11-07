@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use super::ParameterValue;
 use super::fault::{ValueFault, ValueFaults};
-use super::leaf::{LeafFault, LeafType, Mode, convert};
+use super::leaf::{LeafFault, LeafType, Mode, convert, string_length_units};
 use super::leaves::{ValueLeaf, value_leaves};
 use super::numeric::numeric_range;
 use super::{canonical, parse_decimal};
@@ -200,11 +200,7 @@ fn check_leaf(
         let Value::String(text) = leaf.value else {
             return Err(ValueFault::WrongTree);
         };
-        let length = if leaf.primitive == Primitive::Wstring {
-            text.encode_utf16().count()
-        } else {
-            text.chars().count()
-        };
+        let length = string_length_units(text, leaf.primitive);
         return if length > usize::from(max_length) {
             Err(fault(
                 length.to_string(),

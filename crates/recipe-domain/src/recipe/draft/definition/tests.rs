@@ -4,8 +4,8 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::super::add::support::{
-    DINT, INT, TABLE, UNRESOLVED, draft_with, draft_with_speed, limit_row, live_unit, snapshot,
-    texts_input, trees_on,
+    CHAR, DINT, INT, TABLE, UNRESOLVED, draft_with, draft_with_speed, limit_row, live_unit,
+    snapshot, texts_input, trees_on,
 };
 use super::super::edit_support::draft_with_content;
 use super::super::support::{key, stored_parameter, tag};
@@ -122,6 +122,38 @@ fn assert_rejected(
         "a failed command changed the draft"
     );
     error
+}
+
+/// ADR-0137: U+0000 is no `CHAR`, so the retype fails and the type stays `INT`.
+#[test]
+fn a_retype_to_char_with_a_nul_form_text_gives_e_rcp_005_and_keeps_the_type() {
+    let mut draft = draft_with_content();
+    let new = Retype {
+        value: texts_input(&[("", "\u{0}")]),
+        limits: LimitList::parse(Vec::new()).unwrap(),
+    };
+    let error = assert_rejected(
+        &mut draft,
+        update("SPEED", CHAR),
+        Some(new),
+        ErrorCode::RCP_005,
+    );
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .unwrap();
+    assert!(
+        matches!(
+            list.first(),
+            RecipeError::ValueShapeMismatch {
+                expected: Expected::Char { max: 0xFF },
+                ..
+            }
+        ),
+        "{list:?}"
+    );
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(INT));
 }
 
 #[test]

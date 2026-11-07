@@ -12,12 +12,13 @@
 //!   test `recipe_xss_text_fields_accept_a_valid_text_and_refuse_a_control_character` of
 //!   `recipe_xss_tests.rs` covers that refusal.
 //! - The value check of a `STRING` refuses a character outside Latin-1 and a text that is longer
-//!   than the type (`reliability.md` section 4.4, ADR-0028). It does not refuse a control
-//!   character. The corpus holds only ASCII. Its longest payload has 150 characters.
-//!   `STRING` has 254 characters on the S7-300 machine `M7`, so it accepts every payload, also the
-//!   NUL payload.
-//! - The test `approval_text_xss_a_string_value_accepts_every_payload_and_shows_it_escaped` sends
-//!   every payload as the value of a new parameter. No payload gives a refusal code.
+//!   than the type (`reliability.md` section 4.4, ADR-0028). It also refuses the character U+0000
+//!   (ADR-0137). A text value holds no U+0000. The check does not refuse another control character.
+//!   The corpus holds only ASCII. Its longest payload has 150 characters. `STRING` has 254
+//!   characters on the S7-300 machine `M7`, so it accepts every payload without U+0000.
+//! - The test `approval_text_xss_a_string_value_accepts_every_plain_payload_and_shows_it_escaped`
+//!   sends every payload without a control character as the value of a new parameter. No payload
+//!   gives a refusal code.
 //! - The test
 //!   `approval_text_xss_a_changed_string_value_is_escaped_on_the_new_side_of_the_preview` changes
 //!   the value of an approved parameter. The value row of the preview then shows the payload on
@@ -225,13 +226,46 @@ async fn approval_text_xss_translation_texts_are_escaped_in_the_translation_row(
 }
 
 #[tokio::test]
-async fn approval_text_xss_a_string_value_accepts_every_payload_and_shows_it_escaped() {
-    for payload in payloads() {
+async fn approval_text_xss_a_string_value_accepts_every_plain_payload_and_shows_it_escaped() {
+    for payload in plain_payloads() {
         let world = audit_world().await;
         add_host(&world, 2, ("Host", "A host", &payload)).await;
         let replies = read_pages(&world, &DRAFT_PAGES, &payload).await;
         assert_cells(&replies, &value_cell(&payload), 1);
     }
+}
+
+/// ADR-0137 (a), design D5: the NUL payload of the corpus is a `STRING` value that the add form
+/// refuses. The answer is `422` with the line of `E-RCP-005` under the value input. The draft
+/// keeps its `row_version` and holds no parameter `HOST`.
+#[tokio::test]
+async fn approval_text_xss_a_string_value_refuses_the_nul_payload() {
+    let payload = payloads()
+        .into_iter()
+        .find(|payload| payload.contains('\0'))
+        .unwrap();
+    let world = audit_world().await;
+    let row_version = world.row_version_of("R-500", 2).await;
+    let body = host_body(row_version, ("Host", "A host", &payload));
+    let router = world.fixture.router();
+    let path = format!("{DRAFT}/parameters");
+    let headers = [ENGLISH, HTMX, TARGET_CONTENT];
+    let reply = post_fields(&router, &path, Some(&world.data.anowak), &headers, &body).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    assert_safe(&reply, &payload, "the NUL payload");
+    let line = "<div class=\"field-error\" id=\"value-0-error\">";
+    let (_before, rest) = reply.body.split_once(line).unwrap();
+    let text = rest.split("</div>").next().unwrap();
+    assert!(text.contains("E-RCP-005"), "{}", reply.body);
+    assert_eq!(world.row_version_of("R-500", 2).await, row_version);
+    let page = world.get_en(&world.data.admin, &path).await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(!main_of(&page.body).contains(">HOST<"), "{}", page.body);
 }
 
 #[tokio::test]
@@ -257,7 +291,7 @@ async fn approval_text_xss_changed_texts_are_escaped_on_both_sides_of_the_diff_a
 
 #[tokio::test]
 async fn approval_text_xss_a_changed_string_value_is_escaped_on_the_new_side_of_the_preview() {
-    for payload in payloads() {
+    for payload in plain_payloads() {
         let world = audit_world().await;
         add_host(&world, 2, ("Host", "A host", PLAIN)).await;
         approve_version_2_and_start_version_3(&world).await;

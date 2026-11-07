@@ -472,7 +472,7 @@ fn recipe_the_words_of_a_polish_message_come_from_the_polish_bundle() {
     );
     assert_eq!(
         polish(find(ErrorCode::RCP_005)),
-        "Warto\u{15b}\u{107} parametru LABEL[2] nie pasuje do typu. Oczekiwano: jeden znak od U+0000 do U+00FF."
+        "Warto\u{15b}\u{107} parametru LABEL[2] nie pasuje do typu. Oczekiwano: jeden znak od U+0001 do U+00FF."
     );
     assert_eq!(
         polish(find(ErrorCode::RCP_052)),
@@ -541,18 +541,18 @@ fn shape_phrases() -> Vec<Phrase> {
         ),
         (
             Expected::Wstring { length: 10 },
-            "a string of at most 10 UTF-16 units",
-            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16",
+            "a string of at most 10 UTF-16 units without U+0000",
+            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 bez znaku U+0000",
         ),
         (
             Expected::String { length: 20 },
-            "a string of at most 20 characters from Latin-1",
-            "tekst o najwy\u{17c}ej 20 znakach z Latin-1",
+            "a string of at most 20 characters from Latin-1 without U+0000",
+            "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znaku U+0000",
         ),
         (
             Expected::Char { max: 0xFFFF },
-            "one character from U+0000 to U+FFFF",
-            "jeden znak od U+0000 do U+FFFF",
+            "one character from U+0001 to U+FFFF",
+            "jeden znak od U+0001 do U+FFFF",
         ),
     ]
 }

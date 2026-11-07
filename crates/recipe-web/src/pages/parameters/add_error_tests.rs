@@ -198,6 +198,33 @@ async fn parameters_add_a_limit_on_a_bool_leaf_gives_e_rcp_019() {
     assert_case(&world, ADD, case).await;
 }
 
+/// Assert that the error line `value-0-error` of `body` holds the code `code`.
+pub(super) fn assert_value_line_holds(body: &str, code: &str) {
+    let line = "<div class=\"field-error\" id=\"value-0-error\">";
+    let (_before, rest) = body.split_once(line).unwrap();
+    let text = rest.split("</div>").next().unwrap();
+    assert!(text.contains(code), "{body}");
+}
+
+/// ADR-0137 (a), design D6: the form text `%00` of a `STRING(10)` value gives `E-RCP-005` under the
+/// value input, and the draft holds no new parameter. The case compares the snapshot.
+#[tokio::test]
+async fn parameters_add_a_string_value_with_a_nul_gives_e_rcp_005_under_the_value() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let changes = [
+        ("type", Some("STRING(10)")),
+        ("value_type", Some("STRING(10)")),
+        ("s7_address", Some("DB9.DBB0")),
+        ("value", Some("\0")),
+    ];
+    let pairs = changed(&INT_FIELDS, &changes);
+    let reply = post_htmx(&world, ADD, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-005");
+    assert_value_line_holds(&reply.body, "E-RCP-005");
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
 /// The fields of a new `REAL` parameter with the limit row `min` and `max` on the whole value.
 fn real_limit_fields<'a>(min: Option<&'a str>, max: Option<&'a str>) -> Vec<(&'a str, &'a str)> {
     let changes = [

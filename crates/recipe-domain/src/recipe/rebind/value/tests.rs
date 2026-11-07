@@ -211,6 +211,32 @@ fn string_member_takes_a_string_and_rejects_a_long_one() {
     assert_eq!(error.code(), ErrorCode::RCP_005);
 }
 
+/// ADR-0137: U+0000 is no part of a `STRING`, so the plan fails and the draft stays as it is.
+#[test]
+fn string_member_rejects_a_nul_with_e_rcp_005() {
+    let draft = draft_with(vec![param(
+        1,
+        "TITLE",
+        NAME_1,
+        json!({"setpoint": 3}),
+        Vec::new(),
+    )]);
+    let before = draft.clone();
+
+    let bad = request_with(NAME_1, NAME_2, &[(1, ".label", json!("\u{0}"))]);
+    let error = draft.plan_rebind(&bad, &trees()).unwrap_err();
+
+    let list = entries(error);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].code(), ErrorCode::RCP_005);
+    assert!(matches!(
+        &list[0],
+        RecipeError::ValueShapeMismatch { leaf, expected: Expected::String { .. }, .. }
+            if leaf.to_string() == ".label"
+    ));
+    assert_eq!(draft.parameters(), before.parameters());
+}
+
 #[test]
 fn kept_array_member_keeps_its_three_values() {
     let draft = draft_with(vec![param(

@@ -29,7 +29,7 @@ use crate::support::fixtures::{self, TWIN_CAT};
 const EDITORS: &str = "SELECT count(*) FROM draft_editor WHERE recipe_version_id = $1";
 
 /// The row version before a command, for the checks of the touch.
-async fn rv(app: &mut App, world: &World) -> i64 {
+pub(super) async fn rv(app: &mut App, world: &World) -> i64 {
     world.row_version(app).await
 }
 
@@ -40,7 +40,7 @@ async fn assert_touched(app: &mut App, world: &World, before: i64) {
 }
 
 /// Assert that the touch and the editor row vanished.
-async fn assert_untouched(app: &mut App, world: &World, before: i64) {
+pub(super) async fn assert_untouched(app: &mut App, world: &World, before: i64) {
     assert_eq!(rv(app, world).await, before);
     assert_eq!(app.count(EDITORS, world.version).await, 0);
 }
@@ -68,7 +68,7 @@ async fn world_with_speed(app: &mut App) -> (World, Param) {
 
 // AddParameter
 
-fn add_input(world: &World, expected: i64) -> AddParameterInput {
+pub(super) fn add_input(world: &World, expected: i64) -> AddParameterInput {
     AddParameterInput {
         reference: world.reference.clone(),
         number: 1,
@@ -87,7 +87,8 @@ fn add_input(world: &World, expected: i64) -> AddParameterInput {
 
 const STRING_20_ROWS: &str = "SELECT count(*) FROM plc_type WHERE machine_id = $1 \
                               AND name = 'STRING' AND string_length = 20";
-const PARAMETER_ROWS: &str = "SELECT count(*) FROM parameter WHERE recipe_version_id = $1";
+pub(super) const PARAMETER_ROWS: &str =
+    "SELECT count(*) FROM parameter WHERE recipe_version_id = $1";
 
 #[tokio::test]
 async fn add_parameter_commits_the_parameter_the_derived_type_and_the_touch() {
@@ -204,7 +205,11 @@ async fn update_definition_fails_on_the_limit_insert_and_keeps_type_value_and_li
 
 // SetParameterValue
 
-fn set_value_input(world: &World, param: &Param, expected: i64) -> SetParameterValueInput {
+pub(super) fn set_value_input(
+    world: &World,
+    param: &Param,
+    expected: i64,
+) -> SetParameterValueInput {
     SetParameterValueInput {
         reference: world.reference.clone(),
         number: 1,

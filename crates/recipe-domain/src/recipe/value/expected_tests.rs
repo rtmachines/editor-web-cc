@@ -74,19 +74,19 @@ fn display_of_a_text_variant_keeps_the_english_phrase() {
         ),
         (
             Expected::Wstring { length: 2 },
-            "a string of at most 2 UTF-16 units",
+            "a string of at most 2 UTF-16 units without U+0000",
         ),
         (
             Expected::String { length: 10 },
-            "a string of at most 10 characters from Latin-1",
+            "a string of at most 10 characters from Latin-1 without U+0000",
         ),
         (
             Expected::Char { max: 0xFF },
-            "one character from U+0000 to U+00FF",
+            "one character from U+0001 to U+00FF",
         ),
         (
             Expected::Char { max: 0xFFFF },
-            "one character from U+0000 to U+FFFF",
+            "one character from U+0001 to U+FFFF",
         ),
     ];
     for (expected, text) in cases {

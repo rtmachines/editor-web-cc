@@ -90,7 +90,7 @@ Shape identity (one row per shape, `data-model.md` 3.3):
 | Struct | `(machine, name, revision)` |
 | Array | `(machine, element_type, dimensions)` |
 
-`StringLength` (value object): the number of characters of a `STRING(n)` or a `WSTRING(n)`. This table is the only definition of the range per platform.
+`StringLength` (value object): the length of a `STRING(n)` or a `WSTRING(n)`. A `STRING` length counts characters, and each character is one Latin-1 byte. A `WSTRING` length counts UTF-16 code units (ADR-0137). This table is the only definition of the range per platform.
 
 | Platform | `STRING(n)` | `WSTRING(n)` |
 |---|---|---|
@@ -206,9 +206,9 @@ Platform rule: an address is required on `S7_300`, optional on `S7_1200` and `S7
 | Class | Primitives | Value in a request | Stored and hashed text | Process limit |
 |---|---|---|---|---|
 | `Numeric` | `SINT`, `USINT`, `INT`, `UINT`, `DINT`, `UDINT`, `LINT`, `ULINT`, `BYTE`, `WORD`, `DWORD`, `LWORD`, `REAL`, `LREAL` | JSON number | Canonical decimal text | `min`, `max` |
-| `String` | `STRING`, `WSTRING` | JSON string | The string | `max_length` |
+| `String` | `STRING`, `WSTRING` | JSON string without `U+0000` (ADR-0137) | The string | `max_length` |
 | `Bool` | `BOOL` | JSON `true` or `false` | The boolean | none |
-| `Char` | `CHAR`, `WCHAR` | JSON string with one Unicode scalar | The string | none |
+| `Char` | `CHAR`, `WCHAR` | JSON string with one Unicode scalar from `U+0001` (ADR-0137) | The string | none |
 | `Duration` | `TIME`, `LTIME`, `S5TIME` | JSON string with an `IecLiteral` | Canonical decimal text of the count of the base unit | `min`, `max` in the base unit |
 | `Instant` | `DATE`, `LDATE`, `TIME_OF_DAY`, `LTOD`, `DATE_AND_TIME`, `LDT`, `DTL` | JSON string with an `IecLiteral` | Canonical decimal text of the count of the base unit | `min`, `max` in the base unit |
 
@@ -216,7 +216,7 @@ A form carries the text of each leaf (ADR-0039). The text of a `Numeric` leaf is
 
 Significant digits (ADR-0117): a `REAL` number has at most 7 significant digits, and an `LREAL` number has at most 15. The count starts at the first digit that is not zero. A number with more digits gives `E-RCP-055 PrecisionExceeded`, and the domain does not round it. The earlier rule set of ADR-0120 (a) allows 28 significant digits for both types.
 
-SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0000..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0000..=U+FFFF`.
+SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0001..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0001..=U+FFFF` (ADR-0137).
 
 Base units (Assumption A43). A `Duration` or `Instant` value is an integer count of the base unit of its type. The domain stores, hashes, and limits this count. The stored and hashed value is the decimal text of the count, so a signed and an unsigned 64-bit range both fit. The domain holds each platform range in code.
 
