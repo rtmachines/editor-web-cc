@@ -196,10 +196,14 @@ fn address_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
             ("other_tag", other_tag.to_string()),
             ("address", address.to_string()),
         ],
-        RecipeError::S7AddressMisaligned { tag, address }
-        | RecipeError::S7DataBlockOutOfRange { tag, address } => {
+        RecipeError::S7AddressMisaligned { tag, address } => {
             vec![("tag", tag.to_string()), ("address", address.to_string())]
         }
+        RecipeError::S7DataBlockOutOfRange { tag, address, max } => vec![
+            ("tag", tag.to_string()),
+            ("address", address.to_string()),
+            ("max", max.to_string()),
+        ],
         RecipeError::S7AddressPastBlockEnd { tag, address, size } => vec![
             ("tag", tag.to_string()),
             ("address", address.to_string()),

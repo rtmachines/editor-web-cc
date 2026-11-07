@@ -390,9 +390,17 @@ fn approval_items_with_trees(
     parameters: Vec<StoredParameter>,
     trees: &TypeTrees,
 ) -> Vec<SnapshotItem> {
+    approval_items_on_platform(PlcPlatform::S7_1500, parameters, trees)
+}
+
+fn approval_items_on_platform(
+    platform: PlcPlatform,
+    parameters: Vec<StoredParameter>,
+    trees: &TypeTrees,
+) -> Vec<SnapshotItem> {
     let draft = Draft::load(stored_draft_with(
         VersionState::LiveDraft,
-        PlcPlatform::S7_1500,
+        platform,
         parameters,
     ))
     .unwrap();
@@ -464,4 +472,63 @@ fn a_stored_s5time_limit_max_of_15_ms_gives_an_e_rcp_006_item_in_the_approval() 
     let items = approval_items_with_trees(s5time_delay_with_max_15(), &s5time_trees());
     assert_eq!(codes(&items), vec![ErrorCode::RCP_006]);
     assert_is_item_of_delay(&items);
+}
+
+/// The count of `LDT#2300-01-01-00:00:00`. The earlier set of ADR-0139 allows it. The current set
+/// refuses it.
+const LDT_AFTER_CURRENT_END: &str = "10413792000000000000";
+
+/// The last `LDT` count of the current set: `LDT#2262-04-11-23:47:16.854775807`.
+const LDT_CURRENT_END: &str = "9223372036854775807";
+
+/// The trees of one `LDT` type on `TwinCat3`.
+fn ldt_trees_on_twincat3() -> TypeTrees {
+    time_trees_on(PlcPlatform::TwinCat3, Primitive::Ldt)
+}
+
+/// An `LDT` parameter `STAMP` with the stored `value` and the limit `0` to `max`.
+fn ldt_stamp(value: serde_json::Value, max: &str) -> Vec<StoredParameter> {
+    let limit = StoredLimit {
+        max: Some(max.parse().unwrap()),
+        ..min_only_limit(0)
+    };
+    vec![limited(
+        param(1, "STAMP", TIME_TREES_ROOT, value),
+        vec![limit],
+    )]
+}
+
+/// An `LDT` value after the current end, as the JSON number that the database stores.
+fn ldt_value_after_current_end() -> serde_json::Value {
+    json!(10_413_792_000_000_000_000_u64)
+}
+
+#[test]
+fn adr_0139_the_approval_gives_e_rcp_005_for_the_ldt_value_after_the_current_end_on_twincat3() {
+    let parameters = ldt_stamp(ldt_value_after_current_end(), LDT_CURRENT_END);
+    let items =
+        approval_items_on_platform(PlcPlatform::TwinCat3, parameters, &ldt_trees_on_twincat3());
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_005]);
+}
+
+#[test]
+fn adr_0139_the_approval_gives_e_rcp_006_for_the_ldt_limit_max_after_the_current_end_on_twincat3() {
+    let parameters = ldt_stamp(json!(0), LDT_AFTER_CURRENT_END);
+    let items =
+        approval_items_on_platform(PlcPlatform::TwinCat3, parameters, &ldt_trees_on_twincat3());
+    assert_eq!(codes(&items), vec![ErrorCode::RCP_006]);
+}
+
+#[test]
+fn adr_0139_the_snapshot_check_passes_the_ldt_value_after_the_current_end_on_twincat3() {
+    let parameters = ldt_stamp(ldt_value_after_current_end(), LDT_AFTER_CURRENT_END);
+    let result = snapshot_check_with_trees(parameters, &ldt_trees_on_twincat3());
+    assert!(result.is_ok(), "{result:?}");
+}
+
+#[test]
+fn adr_0139_the_snapshot_check_passes_the_ldt_limit_max_after_the_current_end_on_twincat3() {
+    let parameters = ldt_stamp(json!(0), LDT_AFTER_CURRENT_END);
+    let result = snapshot_check_with_trees(parameters, &ldt_trees_on_twincat3());
+    assert!(result.is_ok(), "{result:?}");
 }

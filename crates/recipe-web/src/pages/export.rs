@@ -148,4 +148,6 @@ mod access_tests;
 #[cfg(test)]
 mod error_tests;
 #[cfg(test)]
+mod platform_range_tests;
+#[cfg(test)]
 mod tests;

@@ -359,10 +359,12 @@ fn parameter_samples() -> Vec<Sample> {
             RecipeError::S7DataBlockOutOfRange {
                 tag: tag(),
                 address: address(),
+                max: 16_000,
             },
             vec![
                 ("tag", tag().to_string()),
                 ("address", address().to_string()),
+                ("max", "16000".to_owned()),
             ],
         ),
         (

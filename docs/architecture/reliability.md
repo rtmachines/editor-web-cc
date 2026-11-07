@@ -125,7 +125,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-054` | `RecipeError::S7AddressWidthMismatch { tag, address, width }` | 422 | Address {address} of {tag} does not match the type of {tag}. Use the width {width}. |
 | `E-RCP-055` | `RecipeError::PrecisionExceeded { tag, leaf, field, type_name, max_digits }` | 422 | A number of {tag}{leaf} has too many significant digits for {type_name}. Use at most {max_digits} digits. |
 | `E-RCP-056` | `RecipeError::S7AddressPastBlockEnd { tag, address, size }` | 422 | Parameter {tag} at {address} needs {size} bytes. It ends after byte 65535 of the data block. |
-| `E-RCP-057` | `RecipeError::S7DataBlockOutOfRange { tag, address }` | 422 | Address {address} of {tag} uses a data block above 16000. An S7-300 controller has no such data block. |
+| `E-RCP-057` | `RecipeError::S7DataBlockOutOfRange { tag, address, max }` | 422 | Address {address} of {tag} uses a data block above {max}. The controller of the machine has no such data block. |
 | `E-IDN-001` | `IdentityError::DuplicateLogin { login }` | 409 | Login {login} is already in use. |
 | `E-IDN-002` | `IdentityError::LastAdministrator { login }` | 409 | {login} is the last active administrator. Add another administrator first. |
 | `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42. The Basic check of an export route and the refusal of an `ExportClient` account at `Login` return it too.) |

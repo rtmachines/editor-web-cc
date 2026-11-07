@@ -172,6 +172,8 @@ fn parameter_rows() -> Vec<RouteEntry> {
 #[cfg(test)]
 mod add_error_tests;
 #[cfg(test)]
+mod add_s7_1500_tests;
+#[cfg(test)]
 mod add_tests;
 #[cfg(test)]
 mod conflict_tests;

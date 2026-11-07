@@ -467,7 +467,7 @@ fn the_data_block_16001_gives_e_rcp_057_on_s7_300() {
     assert_eq!(
         error.to_string(),
         "Address DB16001.DBW0 of SPEED uses a data block above 16000. \
-         An S7-300 controller has no such data block."
+         The controller of the machine has no such data block."
     );
 }
 
@@ -478,6 +478,39 @@ fn the_data_block_16001_passes_on_s7_1200_and_s7_1500() {
         let result =
             super::check_definition(platform, &tag("SPEED"), Some(address("DB16001.DBW0")), &int);
         assert!(result.is_ok(), "{platform:?}");
+    }
+}
+
+#[test]
+fn the_data_block_59999_passes_on_s7_1200_and_s7_1500() {
+    let int = tree_of(INT);
+    for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+        let result =
+            super::check_definition(platform, &tag("SPEED"), Some(address("DB59999.DBW0")), &int);
+        assert!(result.is_ok(), "{platform:?}");
+    }
+}
+
+#[test]
+fn a_data_block_above_59999_gives_e_rcp_057_with_max_59999_on_s7_1200_and_s7_1500() {
+    let int = tree_of(INT);
+    for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+        for text in ["DB60000.DBW0", "DB65535.DBW0"] {
+            let error = recipe_error(super::check_definition(
+                platform,
+                &tag("SPEED"),
+                Some(address(text)),
+                &int,
+            ));
+            assert_eq!(error.code(), ErrorCode::RCP_057, "{platform:?} {text}");
+            assert!(
+                matches!(
+                    error,
+                    RecipeError::S7DataBlockOutOfRange { max: 59_999, .. }
+                ),
+                "{platform:?} {text}: {error}"
+            );
+        }
     }
 }
 
@@ -507,7 +540,7 @@ fn the_approval_check_applies_the_data_block_rule_to_every_parameter() {
     assert_eq!(
         error.to_string(),
         "Address DB16001.DBW0 of ZETA uses a data block above 16000. \
-         An S7-300 controller has no such data block."
+         The controller of the machine has no such data block."
     );
     assert!(check_for_approval_rules(PlcPlatform::S7_300, &specs[..1]).is_ok());
     assert!(check_for_approval_rules(PlcPlatform::S7_1500, &specs).is_ok());
@@ -628,4 +661,26 @@ fn a_stored_address_past_the_end_does_not_block_add_parameter_or_set_value() {
 fn e_rcp_057_has_a_registry_row() {
     assert!(REGISTRY.contains(&ErrorCode::RCP_057));
     assert_eq!(ErrorCode::RCP_057.as_str(), "E-RCP-057");
+}
+
+/// ADR-0140 (c), ADR-0116 (e1): a stored data block above 59999 on `S7_1500` does not block a
+/// command on another parameter. A rule change does not lock a draft.
+#[test]
+fn adr_0140_a_stored_data_block_above_59999_does_not_block_add_parameter_on_s7_1500() {
+    let platform = PlcPlatform::S7_1500;
+    let mut draft = draft_with(
+        platform,
+        vec![stored_parameter(
+            1,
+            "SPEED",
+            id(SUPPORT_INT),
+            Some(address("DB60000.DBW0")),
+        )],
+    );
+    let trees = support_trees_on(platform);
+
+    let added = draft.add_parameter(new_parameter_at(2, "FEED", SUPPORT_INT, "DB2.DBW0"), &trees);
+
+    assert!(added.is_ok(), "{added:?}");
+    assert_eq!(draft.parameters().len(), 2);
 }

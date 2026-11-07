@@ -307,3 +307,43 @@ fn a_stored_s5time_limit_max_of_15_ms_is_a_structure_fault_with_its_key() {
     assert_eq!(broken.key(), parameters[0].key());
     assert_eq!(broken.fault().code(), ErrorCode::RCP_006);
 }
+
+/// The stored `LDT` count of `LDT#2300-01-01-00:00:00`. Only the earlier rule set allows it
+/// (ADR-0139).
+const LDT_AFTER_CURRENT_END: &str = "10413792000000000000";
+
+#[test]
+fn adr_0139_a_stored_ldt_after_the_current_end_on_twincat3_makes_the_version_not_loadable() {
+    let trees = time_trees_on(PlcPlatform::TwinCat3, Primitive::Ldt);
+    let count: serde_json::Value = serde_json::from_str(LDT_AFTER_CURRENT_END).unwrap();
+    let mut stored = stored_parameter(2, ("U1", "STAMP"), INT, count);
+    stored.plc_type = id(TIME_TREES_ROOT);
+    let faulty = Parameter::from(stored);
+    let result = check_version_parameters(std::slice::from_ref(&faulty), &trees)
+        .expect("the earlier set allows the count, so it is no structure fault");
+    assert_eq!(
+        found(&result),
+        vec![(
+            faulty.key(),
+            ErrorCode::RCP_005,
+            RuleField::Value(LeafPath::whole())
+        )]
+    );
+    let is_loadable = result.is_empty();
+    assert!(!is_loadable, "a rule fault makes the version not loadable");
+}
+
+#[test]
+fn adr_0140_a_stored_data_block_above_59999_on_s7_1500_makes_the_version_not_loadable() {
+    let trees = trees();
+    let faulty = parameter_at(2, SHORT, "DB60000.DBW0");
+    let parameters = vec![clean_parameter(), faulty.clone()];
+    let result = check_version_parameters(&parameters, &trees)
+        .expect("the grammar allows the number, so it is no structure fault");
+    assert_eq!(
+        found(&result),
+        vec![(faulty.key(), ErrorCode::RCP_057, RuleField::Address)]
+    );
+    let is_loadable = result.is_empty();
+    assert!(!is_loadable, "a rule fault makes the version not loadable");
+}

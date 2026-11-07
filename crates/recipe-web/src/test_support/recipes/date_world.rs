@@ -36,6 +36,8 @@ const DATE_TYPE_ID: Uuid = Uuid::from_u128(0x7357_0013_0000_0000_0000_0000_0000_
 const DUE_ID: Uuid = Uuid::from_u128(0x7357_0006_0000_0000_0000_0000_0f00_0040);
 /// The identifier of the machine `M30`.
 pub(crate) const MACHINE_ID: Uuid = Uuid::from_u128(0x7357_0001_0000_0000_0000_0000_0000_001e);
+/// The identifier of the recipe `R-400`.
+const RECIPE_ID: Uuid = Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_0400);
 /// The identifier of the version 1 of `R-400`.
 pub(crate) const VERSION_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0000_0401);
 
@@ -70,7 +72,7 @@ pub(crate) fn seed_date_world(world: &World, count: i64, state: VersionState) {
     .unwrap();
     world.fixture.store.seed_type(&row);
     let recipe = Recipe::try_from(StoredRecipe {
-        id: RecipeId::from(Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_0400)),
+        id: RecipeId::from(RECIPE_ID),
         machine: machine_id,
         reference: ReferenceNumber::parse("R-400").unwrap(),
         name: Text::parse("Dating recipe").unwrap(),
@@ -120,18 +122,45 @@ pub(crate) async fn affected_approved_world() -> World {
 }
 
 /// Approve the live draft of `seed_date_world` with the real content hash of its rows.
-///
-/// The function solves one problem: the approval use case refuses the count `EARLIER_DATE_COUNT`,
-/// and the memory seed stores a zero hash. An export route checks the stored hash first, so a test
-/// of an approved version with this count needs the real hash. The function builds the hashed
-/// body as step 4 of the export flow does. Then it approves the version through the port.
 pub(crate) async fn approve_with_real_hash(fixture: &Fixture) {
-    let version = RecipeVersionId::from(VERSION_ID);
-    let machine = fixture
-        .store
-        .state()
-        .machine(MachineId::from(MACHINE_ID))
-        .unwrap();
+    approve_version_with_real_hash(
+        fixture,
+        VersionTarget {
+            version: RecipeVersionId::from(VERSION_ID),
+            recipe: RecipeId::from(RECIPE_ID),
+            machine: MachineId::from(MACHINE_ID),
+            reference: ReferenceNumber::parse("R-400").unwrap(),
+        },
+    )
+    .await;
+}
+
+/// The version 1 that `approve_version_with_real_hash` approves, with its recipe and machine.
+pub(crate) struct VersionTarget {
+    /// The version to approve.
+    pub(crate) version: RecipeVersionId,
+    /// The recipe of the version.
+    pub(crate) recipe: RecipeId,
+    /// The machine of the recipe.
+    pub(crate) machine: MachineId,
+    /// The reference number of the recipe.
+    pub(crate) reference: ReferenceNumber,
+}
+
+/// Approve the live draft `target` with the real content hash of its rows.
+///
+/// The function solves one problem: the approval use case refuses a count that the current rules
+/// refuse, and the memory seed stores a zero hash. An export route checks the stored hash first, so
+/// a test of an approved version with such a count needs the real hash. The function builds the
+/// hashed body as step 4 of the export flow does. Then it approves the version through the port.
+pub(crate) async fn approve_version_with_real_hash(fixture: &Fixture, target: VersionTarget) {
+    let VersionTarget {
+        version,
+        recipe,
+        machine,
+        reference,
+    } = target;
+    let machine = fixture.store.state().machine(machine).unwrap();
     let hash = {
         let mut tx = fixture.store.begin(Isolation::ReadOnly).await.unwrap();
         let parameters: Vec<Parameter> = tx
@@ -149,7 +178,7 @@ pub(crate) async fn approve_with_real_hash(fixture: &Fixture) {
         let header = ExportHeader {
             machine: machine.code(),
             platform: machine.platform(),
-            reference: ReferenceNumber::parse("R-400").unwrap(),
+            reference,
             version: 1,
         };
         HashedBody::build(&header, &parameters, &units, &trees)
@@ -171,10 +200,7 @@ pub(crate) async fn approve_with_real_hash(fixture: &Fixture) {
     };
     let entry = AuditEntry::row(
         RowAction::VersionApproved,
-        AuditTarget::recipe_version(
-            RecipeId::from(Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_0400)),
-            version,
-        ),
+        AuditTarget::recipe_version(recipe, version),
         RowChange::Create { after: json!({}) },
         context,
     );

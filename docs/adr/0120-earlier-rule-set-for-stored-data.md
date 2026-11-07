@@ -1,6 +1,6 @@
 # ADR-0120: Earlier rule set for stored data
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0139 (item (a): the earlier set keeps `0..=2^64-1` ns for `LDATE` and `LDT` on `CodesysIec` and `TwinCat3`. Item (g): `CreateVersion` also copies a base with such a stored count). Amended by ADR-0140 (item (a): the earlier set has no data block rule)
 Date: 2026-11-03
 Deciders: project owner
 

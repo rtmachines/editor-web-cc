@@ -246,6 +246,18 @@ The code review of WP6 on 2026-11-07 found two gaps between the code and the wis
 | F-6 | On the value and limits routes, a bad `row_version` gives one line before the other fields are read (`crates/recipe-web/src/pages/parameters/value.rs:44`, `:126`, `:175`). The add and edit forms put it into the list (`definition.rs:123`). | Later `web-ui` change: put `row_version` into the list of stage 1 |
 | F-7 | The one line of a changed body has the label `Form`. Its text depends on the class of the fault (ADR-0138 (a)). `reason-form` (`crates/recipe-web/i18n/en.ftl:176`) names a missing field, an unknown field, or a wrong content type. The reader also gives it for a plain key twice and too many pairs (`crates/recipe-web/src/pages/parameters/fields.rs:258`, `:316`, `:323`). A value key twice gives `reason-value-key`, and a limit key fault gives `reason-limit-row` (`en.ftl:540`, `:541`). No text names the fault itself. | Later `web-ui` change: a text for each fault of ADR-0138 (b) |
 
+### 10.4 Record of WP4
+
+The change `platform-ranges-round-1` ran on 2026-11-07.
+
+| Point | What happened | Where |
+|---|---|---|
+| D-1 | The data block rule of 7.2 has no rule set (ADR-0140). Under `Earlier`, a stored address above 59999 stays readable in four ways. The read shows a rule fault. The export marks the document not loadable. `CreateVersion` copies it. The Skip path passes it. `ApproveVersion` refuses it with `E-RCP-057`. `RebindTypeRevision` keeps the current rule. The user fixes the address with `UpdateParameterDefinition`. This replaces the words "pass under `Earlier`" of 7.2 task 1. | ADR-0140 |
+| D-2 | The owner decided on 2026-11-07 that the platform range check writes the stored text of each row into the change log of the site. It does not write the text into the pull request. | `docs/ops/runbook.md`, section "Check the stored data against the platform ranges" |
+| D-3 | The owner decided on 2026-11-07 that the platform range check runs at every upgrade. It is a sub-step of step 2 of the subsection "Upgrade", before step 3. | `docs/ops/runbook.md`, subsection "Upgrade" |
+| G-1 | Task 2.3 is open. The owner runs the query on the production database and checks the box in the pull request. The box is a hard gate of the merge. The archive of the change waits for it. | `openspec/changes/platform-ranges-round-1/tasks.md`, task 2.3 |
+| R-1 | The code review found two LOW points and kept both. The name `LDT_UNSIGNED` stays (design D1). The test count `10413792000000000000` stays a literal in five test files. | No change |
+
 ## 11. Done check
 
 The plan is done when all of these pass on main:
