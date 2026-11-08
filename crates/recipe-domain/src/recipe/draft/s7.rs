@@ -1,10 +1,12 @@
 //! S7 rules of a draft (design D10, invariants I5 and I20, ADR-0024).
 
+use std::collections::BTreeMap;
+
 use crate::plant::{
     PlantError, PlcPlatform, PlcTypeId, S7Address, S7Layout, S7Start, S7Width, TypeLimit, TypeTree,
     TypeTrees,
 };
-use crate::recipe::{Draft, DraftError, ParameterTag, RecipeError};
+use crate::recipe::{Draft, DraftError, Parameter, ParameterKey, ParameterTag, RecipeError};
 
 /// Number of bits in one byte.
 const BITS_PER_BYTE: u64 = 8;
@@ -34,6 +36,28 @@ enum AddressRules {
     Skip,
 }
 
+/// Which overlaps a whole-draft check reports (ADR-0149).
+///
+/// The type solves one problem: a rule change can leave a stored overlap in a draft. A command
+/// must not lock the draft because of a pair that it does not touch.
+#[derive(Clone, Copy)]
+enum OverlapScope<'a> {
+    /// Every overlap of the draft. Approval uses this scope (ADR-0149 (c)).
+    Every,
+    /// Only an overlap of a pair that holds one of these parameters (ADR-0149 (a), (b)).
+    Written(&'a [ParameterKey]),
+}
+
+impl OverlapScope<'_> {
+    /// Whether an overlap that holds the parameter `key` is reported.
+    fn reports(self, key: ParameterKey) -> bool {
+        match self {
+            Self::Every => true,
+            Self::Written(written) => written.contains(&key),
+        }
+    }
+}
+
 /// The bits that one parameter occupies in its data block. The end is exclusive.
 struct Occupied<'a> {
     db: u16,
@@ -41,24 +65,34 @@ struct Occupied<'a> {
     end: u64,
     tag: &'a ParameterTag,
     address: S7Address,
+    /// Whether an overlap that holds this parameter is reported. [`occupy`] sets `true`.
+    reported: bool,
 }
 
 impl Draft {
-    /// Check the S7 rules for the whole draft (I5, I20, ADR-0024).
+    /// Check the S7 rules for the whole draft after a command wrote the parameters `written`
+    /// (I5, I20, ADR-0024, ADR-0149 (a)).
     ///
     /// The method checks each parameter in tag order for the platform rule, the width, and the
     /// alignment. The platform rule needs no type tree, so it covers every parameter. A parameter
     /// whose type tree failed to resolve skips the other rules, because the snapshot check reports
-    /// it. Then the method looks for the first overlap in each data block.
+    /// it. Then the method finds the first overlap in each data block. It reports only an
+    /// overlap of a pair that holds a parameter of `written`. A stored overlap of two other
+    /// parameters does not refuse the command (ADR-0149 (a), (d)). An empty `written` reports no
+    /// overlap.
     ///
     /// # Errors
     ///
     /// Returns `E-PLT-013` when the trees belong to another machine or platform, or when they
     /// do not hold the type of a parameter. Returns `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or `E-RCP-023` for the first parameter
-    /// that breaks a rule. Otherwise returns `E-RCP-022` for the first overlap.
-    /// Returns a `PlantError` when the layout of a type overflows.
-    pub fn check_s7_layout(&self, trees: &TypeTrees) -> Result<(), DraftError> {
-        self.check_layout(trees, AddressRules::Skip)
+    /// that breaks a rule. Otherwise returns `E-RCP-022` for the first overlap that holds a
+    /// parameter of `written`. Returns a `PlantError` when the layout of a type overflows.
+    pub(super) fn check_s7_layout(
+        &self,
+        trees: &TypeTrees,
+        written: &[ParameterKey],
+    ) -> Result<(), DraftError> {
+        self.check_layout(trees, AddressRules::Skip, OverlapScope::Written(written))
     }
 
     /// Check the S7 rules for approval: the rules of [`Draft::check_s7_layout`] and the data
@@ -66,19 +100,26 @@ impl Draft {
     ///
     /// Each parameter gets its checks in the order of ADR-0116 (f). The method does not run the
     /// rules for a command that keeps a stored address (ADR-0116 (e1)). This keeps a rule change
-    /// from locking a draft.
+    /// from locking a draft. The method reports every overlap of the draft, also a stored overlap
+    /// of two parameters that no command wrote (ADR-0149 (c)).
     ///
     /// # Errors
     ///
-    /// Returns the errors of [`Draft::check_s7_layout`]. Returns `E-RCP-057` for the first
+    /// Returns the errors of [`Draft::check_s7_layout`], with `E-RCP-022` for the first overlap
+    /// of the draft. Returns `E-RCP-057` for the first
     /// parameter whose data block number is too high for the platform. Returns `E-RCP-056` for the
     /// first parameter that ends after byte 65535 of its data block.
     pub(crate) fn check_s7_layout_for_approval(&self, trees: &TypeTrees) -> Result<(), DraftError> {
-        self.check_layout(trees, AddressRules::Run)
+        self.check_layout(trees, AddressRules::Run, OverlapScope::Every)
     }
 
-    /// Check the S7 rules of every parameter and then the overlaps of the whole draft.
-    fn check_layout(&self, trees: &TypeTrees, rules: AddressRules) -> Result<(), DraftError> {
+    /// Check the S7 rules of every parameter and then the overlaps that `scope` reports.
+    fn check_layout(
+        &self,
+        trees: &TypeTrees,
+        rules: AddressRules,
+        scope: OverlapScope<'_>,
+    ) -> Result<(), DraftError> {
         let parameters = self.parameters();
         let mut occupied = Vec::new();
         for parameter in &parameters {
@@ -94,12 +135,10 @@ impl Draft {
                 check_end_rule(parameter.tag(), parameter.s7_address(), tree)?;
             }
             if let Some(address) = parameter.s7_address() {
-                occupied.push(occupy(
-                    parameter.tag(),
-                    parameter.plc_type(),
-                    address,
-                    tree,
-                )?);
+                occupied.push(Occupied {
+                    reported: scope.reports(parameter.key()),
+                    ..occupy(parameter.tag(), parameter.plc_type(), address, tree)?
+                });
             }
         }
         find_overlap(occupied)
@@ -260,19 +299,75 @@ fn occupy<'a>(
         end,
         tag,
         address,
+        reported: true,
     })
 }
 
-/// Find the first overlap with a sweep over the sorted intervals of each data block.
+/// Find every parameter whose bytes overlap the bytes of another parameter of the same data block
+/// (ADR-0149 (e), design D10).
 ///
-/// The later parameter in the sort order is the reported one. The earlier parameter is the one
-/// with the largest end so far.
+/// The function solves one problem: the export check must report each parameter of an overlap and
+/// not only the first pair. It skips a parameter without an S7 address. It reuses [`occupy`] and
+/// the sweep of [`find_overlap`].
+///
+/// The result maps the key of each overlapping parameter to the tag of one parameter that shares
+/// bytes with it.
+///
+/// # Errors
+///
+/// Returns the key of the parameter and the [`PlantError`] when the occupied bits of the
+/// parameter overflow. The error is in a `Box`, because a [`PlantError`] is large.
+pub(crate) fn overlap_partners<'a>(
+    entries: impl IntoIterator<Item = (&'a Parameter, &'a TypeTree)>,
+) -> Result<BTreeMap<ParameterKey, ParameterTag>, (ParameterKey, Box<PlantError>)> {
+    let mut items = Vec::new();
+    for (parameter, tree) in entries {
+        let Some(address) = parameter.s7_address() else {
+            continue;
+        };
+        let occupied = occupy(parameter.tag(), parameter.plc_type(), address, tree)
+            .map_err(|error| (parameter.key(), Box::new(error)))?;
+        items.push((occupied, parameter.key()));
+    }
+    items.sort_by(|(a, _), (b, _)| {
+        (a.db, a.start, a.end, a.tag).cmp(&(b.db, b.start, b.end, b.tag))
+    });
+    let mut partners = BTreeMap::new();
+    let mut reach: Option<&(Occupied<'_>, ParameterKey)> = None;
+    for entry in &items {
+        let (item, key) = entry;
+        let earlier = reach.filter(|(earlier, _)| earlier.db == item.db);
+        if let Some((earlier, earlier_key)) = earlier
+            && item.start < earlier.end
+        {
+            partners.entry(*key).or_insert_with(|| earlier.tag.clone());
+            partners
+                .entry(*earlier_key)
+                .or_insert_with(|| item.tag.clone());
+        }
+        reach = earlier
+            .filter(|(earlier, _)| earlier.end > item.end)
+            .or(Some(entry));
+    }
+    Ok(partners)
+}
+
+/// Find the first overlap of a pair that holds a reported parameter.
+///
+/// A parameter is reported when its flag `reported` is `true`. The method sweeps the sorted
+/// intervals of each data block. The error names the later parameter of the sort order as `tag` and
+/// the earlier parameter as `other_tag`. The earlier parameter is the one with the largest end so
+/// far. The sweep skips a pair without a reported parameter. Then it continues with the item of
+/// the largest end. The sweep therefore finds a pair with a reported parameter whenever one
+/// exists.
 fn find_overlap(mut occupied: Vec<Occupied<'_>>) -> Result<(), DraftError> {
     occupied.sort_by(|a, b| (a.db, a.start, a.end, a.tag).cmp(&(b.db, b.start, b.end, b.tag)));
     let mut reach: Option<&Occupied<'_>> = None;
     for item in &occupied {
-        if let Some(earlier) = reach.filter(|earlier| earlier.db == item.db)
+        let earlier = reach.filter(|earlier| earlier.db == item.db);
+        if let Some(earlier) = earlier
             && item.start < earlier.end
+            && (item.reported || earlier.reported)
         {
             return Err(RecipeError::S7AddressOverlap {
                 tag: item.tag.clone(),
@@ -281,12 +376,18 @@ fn find_overlap(mut occupied: Vec<Occupied<'_>>) -> Result<(), DraftError> {
             }
             .into());
         }
-        reach = Some(item);
+        reach = earlier
+            .filter(|earlier| earlier.end > item.end)
+            .or(Some(item));
     }
     Ok(())
 }
 
 #[cfg(test)]
+mod layout_tests;
+#[cfg(test)]
 mod prop;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod written_overlap_tests;

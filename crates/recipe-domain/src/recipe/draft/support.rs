@@ -3,11 +3,12 @@
 use uuid::Uuid;
 
 use crate::identity::UserId;
+use crate::plant::TypeTrees;
 use crate::plant::fixtures::id;
 use crate::plant::{MachineId, PlcPlatform, PlcTypeId, S7Address, UnitId};
 use crate::recipe::{
-    Ordinal, ParameterId, ParameterKey, ParameterTag, RecipeVersionId, ReferenceNumber,
-    StoredDraft, StoredParameter, VersionState,
+    Draft, DraftError, Ordinal, ParameterId, ParameterKey, ParameterTag, RecipeVersionId,
+    ReferenceNumber, StoredDraft, StoredParameter, VersionState,
 };
 use crate::text::{LongText, Text};
 
@@ -57,6 +58,14 @@ pub(in crate::recipe) fn stored_parameter(
 /// A parameter of the type `n_type` with the tag `tag_text`. The key derives from `n`.
 pub(super) fn parameter(n: u128, tag_text: &str, type_n: u128) -> StoredParameter {
     stored_parameter(n, tag_text, id(type_n), None)
+}
+
+/// Run the S7 layout check as if a command wrote every parameter of the draft.
+///
+/// The check then reports every overlap, as `ApproveVersion` does (ADR-0149 (c)).
+pub(in crate::recipe) fn check_every(draft: &Draft, trees: &TypeTrees) -> Result<(), DraftError> {
+    let keys: Vec<ParameterKey> = draft.parameters().iter().map(|p| p.key()).collect();
+    draft.check_s7_layout(trees, &keys)
 }
 
 /// A stored draft of version 3 with the given state and parameters.

@@ -85,9 +85,24 @@ const MIN_DRAWN: usize = 1;
 /// Largest number of drawn members, the members `m01` to `m16`.
 const MAX_DRAWN: usize = 16;
 
+/// The rows P06 `SINT` and P07 `USINT` of the reference table (ADR-0147 (a)).
+const SINT_ROOT: u128 = 106;
+const USINT_ROOT: u128 = 107;
+
+/// The start class of the row as a struct member.
+///
+/// A `SINT` and a `USINT` member start at an even byte. The layout of the type keeps the class
+/// `Byte` (ADR-0147 (b)). Every other row keeps its class.
+fn member_start(row: &Row) -> S7Start {
+    match row.root {
+        SINT_ROOT | USINT_ROOT => S7Start::Even,
+        _ => row.start,
+    }
+}
+
 /// Width in bits of a member of the reference table: 1 for `Bit`, else the bytes times 8.
 fn reference_width(row: &Row) -> u64 {
-    match row.start {
+    match member_start(row) {
         S7Start::Bit => 1,
         S7Start::Byte | S7Start::Even => u64::from(row.size_bytes)
             .checked_mul(BITS_PER_BYTE)
@@ -100,7 +115,7 @@ fn reference_width(row: &Row) -> u64 {
 /// The function states the placement rule of `domain-model.md` section 2.1 once,
 /// because that rule is the subject of the property (design D3).
 fn first_fit(cursor: u64, row: &Row) -> u64 {
-    let unit = match row.start {
+    let unit = match member_start(row) {
         S7Start::Bit => 1,
         S7Start::Byte => BITS_PER_BYTE,
         S7Start::Even => BITS_PER_EVEN_BYTES,

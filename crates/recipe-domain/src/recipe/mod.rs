@@ -23,12 +23,12 @@ pub use diff::{
     DefinitionChange, DiffBounds, DiffKind, DiffKindReason, DiffPair, DiffPart, DiffRow, DiffRows,
     diff_pairs,
 };
-pub(crate) use draft::not_on_platform;
 pub use draft::{
     ApprovalReady, BudgetCounts, DefinitionUpdate, Draft, LEAVES_PER_VERSION,
     LIMIT_ROWS_PER_VERSION, NewParameter, PARAMETERS_PER_VERSION, Parameter, ParameterChange,
     Retype, StoredDraft, StoredParameter, check_budgets,
 };
+pub(crate) use draft::{not_on_platform, overlap_partners};
 pub use error::{Budget, DraftError, PrecisionField, RecipeError, RecipeErrors};
 pub use ids::{ParameterId, ParameterKey, ParameterKeyReason, RecipeId, RecipeVersionId};
 pub use lang_code::{LangCode, Translation};

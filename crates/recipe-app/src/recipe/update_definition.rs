@@ -165,6 +165,9 @@ async fn stage_definition(
     let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
     if resolved.type_id != open.draft.parameter(input.key)?.plc_type() {
         require_current_type(&input.type_expr)?;
+        input
+            .type_expr
+            .require_no_nested_array(open.draft.platform())?;
     }
     let update = DefinitionUpdate {
         unit,
@@ -215,6 +218,8 @@ async fn write_definition(
 
 #[cfg(test)]
 mod errors;
+#[cfg(test)]
+mod nested_array_tests;
 #[cfg(test)]
 mod requests;
 #[cfg(test)]

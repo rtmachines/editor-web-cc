@@ -3,7 +3,7 @@
 
 use proptest::prelude::*;
 
-use super::super::support::{stored_draft_with, stored_parameter};
+use super::super::support::{check_every, stored_draft_with, stored_parameter};
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{id, machine, on_platform, primitive_row, string_row, types_for};
 use crate::plant::{PlcPlatform, PlcType, Primitive, S7Address, TypeTrees};
@@ -196,7 +196,7 @@ fn trees() -> TypeTrees {
 
 /// Check a set of placements on an S7-300 draft. The tags are `P00`, `P01`, and so on.
 fn check(placements: &[Placement]) -> Result<(), DraftError> {
-    draft_of(placements).check_s7_layout(&trees())
+    check_every(&draft_of(placements), &trees())
 }
 
 /// Check a set of placements with the layout rules and the address rules of ADR-0116.

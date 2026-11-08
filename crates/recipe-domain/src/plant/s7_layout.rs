@@ -1,6 +1,8 @@
 //! S7 layout of a type tree (`domain-model.md` section 2.1, ADR-0017).
 
-use super::{MemberName, PlantError, PlcTypeId, Primitive, TypeLimit, TypeNode, TypeTree};
+use super::{
+    ArrayDimensions, MemberName, PlantError, PlcTypeId, Primitive, TypeLimit, TypeNode, TypeTree,
+};
 
 /// Where a value of a type starts inside an S7 data block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,7 +30,9 @@ impl S7Layout {
     ///
     /// The golden test holds the values of the rules of `domain-model.md`.
     /// The composite rows of the reference table in `s7_layout/reference.rs`
-    /// stay unverified until the TIA Portal check (Q10).
+    /// have the mark `Documented`: their values follow from cited Siemens
+    /// rules (ADR-0147 (h)). The row A03 stays `Unverified` until a TIA Portal
+    /// measurement decides the reading of three dimensions.
     ///
     /// # Errors
     ///
@@ -144,7 +148,7 @@ fn members_of_root(root: &TypeNode) -> Option<Vec<S7Member>> {
             continue;
         };
         let layout = layout_of_node(node)?;
-        let placed = place(frame.cursor, &layout)?;
+        let placed = place(frame.cursor, member_start(node, &layout), layout.size_bytes)?;
         frame.cursor = placed.end;
         path.push(name.clone());
         rows.push(S7Member {
@@ -219,11 +223,8 @@ impl<'t> Frame<'t> {
                 size_bytes: *size_bytes,
                 start: leaf_start(*primitive, *size_bytes),
             }),
-            TypeNode::Array { dimensions, .. } => {
-                let count = dimensions.element_count()?;
-                array_layout(count, self.done.first()?)
-            }
-            TypeNode::Struct { .. } => struct_layout(&self.done),
+            TypeNode::Array { dimensions, .. } => array_layout(dimensions, self.done.first()?),
+            TypeNode::Struct { members, .. } => struct_layout(members, &self.done),
         }
     }
 }
@@ -238,11 +239,28 @@ fn leaf_start(primitive: Primitive, size_bytes: u32) -> S7Start {
     }
 }
 
+/// Return the start class of a struct member (ADR-0147 (a) to (c)).
+///
+/// The function solves one problem. A `SINT` or `USINT` member starts at an even byte, but the
+/// same type as a value, an array element, or a parameter starts at any byte. The layout of the
+/// type keeps the class `Byte`, so only the place of a member uses this function.
+fn member_start(node: &TypeNode, layout: &S7Layout) -> S7Start {
+    match node {
+        TypeNode::Leaf {
+            primitive: Primitive::Sint | Primitive::Usint,
+            ..
+        } => S7Start::Even,
+        TypeNode::Leaf { .. } | TypeNode::Array { .. } | TypeNode::Struct { .. } => layout.start,
+    }
+}
+
 /// Place the members of a struct one after the other. The cursor counts bits.
-fn struct_layout(members: &[S7Layout]) -> Option<S7Layout> {
+///
+/// `layouts` holds the layout of each member, in the order of `members`.
+fn struct_layout(members: &[(MemberName, TypeNode)], layouts: &[S7Layout]) -> Option<S7Layout> {
     let mut cursor = 0_u64;
-    for member in members {
-        cursor = place(cursor, member)?.end;
+    for ((_, node), layout) in members.iter().zip(layouts) {
+        cursor = place(cursor, member_start(node, layout), layout.size_bytes)?.end;
     }
     let bytes = cursor
         .checked_next_multiple_of(BITS_PER_EVEN_BYTES)?
@@ -265,14 +283,14 @@ struct Placement {
 ///
 /// The step solves one problem. `struct_layout` and `s7_members` share it, so
 /// the alignment rules of S7 exist once. Returns `None` on overflow.
-fn place(cursor: u64, member: &S7Layout) -> Option<Placement> {
-    let start = match member.start {
+fn place(cursor: u64, class: S7Start, size_bytes: u32) -> Option<Placement> {
+    let start = match class {
         S7Start::Bit => cursor,
         S7Start::Byte => cursor.checked_next_multiple_of(BITS_PER_BYTE)?,
         S7Start::Even => cursor.checked_next_multiple_of(BITS_PER_EVEN_BYTES)?,
     };
-    let bits = u64::from(member.size_bytes).checked_mul(BITS_PER_BYTE)?;
-    let width = match member.start {
+    let bits = u64::from(size_bytes).checked_mul(BITS_PER_BYTE)?;
+    let width = match class {
         S7Start::Bit => 1,
         S7Start::Byte | S7Start::Even => bits,
     };
@@ -282,10 +300,11 @@ fn place(cursor: u64, member: &S7Layout) -> Option<Placement> {
     })
 }
 
-/// Pack `count` elements of one layout. `BOOL` elements share bytes.
-fn array_layout(count: u64, element: &S7Layout) -> Option<S7Layout> {
+/// Pack the elements of one layout. `BOOL` elements share bytes inside one line.
+fn array_layout(dimensions: &ArrayDimensions, element: &S7Layout) -> Option<S7Layout> {
+    let count = dimensions.element_count()?;
     let bytes = match element.start {
-        S7Start::Bit => count.div_ceil(BITS_PER_BYTE),
+        S7Start::Bit => bool_array_bytes(dimensions)?,
         S7Start::Byte => count.checked_mul(u64::from(element.size_bytes))?,
         S7Start::Even => {
             let stride = u64::from(element.size_bytes).checked_next_multiple_of(2)?;
@@ -296,6 +315,19 @@ fn array_layout(count: u64, element: &S7Layout) -> Option<S7Layout> {
         size_bytes: u32::try_from(bytes.checked_next_multiple_of(2)?).ok()?,
         start: S7Start::Even,
     })
+}
+
+/// Return the bytes of the lines of a `BOOL` array (ADR-0147 (d) to (g)).
+///
+/// The function solves one problem. A line is the run of the last index. Each line starts at the
+/// next byte, so a line takes `last.div_ceil(8)` bytes. A one-dimensional array has one line.
+fn bool_array_bytes(dimensions: &ArrayDimensions) -> Option<u64> {
+    let mut counts = dimensions.iter().rev().map(|dimension| dimension.count());
+    let last = u64::from(counts.next()?);
+    let lines = counts.try_fold(1_u64, |product, count| {
+        product.checked_mul(u64::from(count))
+    })?;
+    lines.checked_mul(last.div_ceil(BITS_PER_BYTE))
 }
 
 /// Build `E-PLT-018` for an overflow of the layout arithmetic.

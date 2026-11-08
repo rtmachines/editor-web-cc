@@ -13,6 +13,8 @@ const DTL: u128 = 6;
 const LREAL: u128 = 7;
 const STRING_3: u128 = 8;
 const ST_FLAGS: u128 = 9;
+const SINT: u128 = 40;
+const USINT: u128 = 41;
 const ROOT: u128 = 100;
 
 struct Case {
@@ -40,6 +42,8 @@ fn layout_of(rows: Vec<PlcType>) -> Result<S7Layout, PlantError> {
         primitive_row(CHAR, Primitive::Char),
         primitive_row(DTL, Primitive::Dtl),
         primitive_row(LREAL, Primitive::Lreal),
+        primitive_row(SINT, Primitive::Sint),
+        primitive_row(USINT, Primitive::Usint),
         string_row(STRING_3, 3),
         struct_row(
             ST_FLAGS,
@@ -117,6 +121,13 @@ fn struct_cases() -> Vec<Case> {
             4,
         ),
         struct_case("bool then byte", &[("a", BOOL), ("b", BYTE)], 2),
+        struct_case(
+            "byte, char, sint, usint",
+            &[("a", BYTE), ("b", CHAR), ("c", SINT), ("d", USINT)],
+            6,
+        ),
+        struct_case("bool then sint", &[("a", BOOL), ("b", SINT)], 4),
+        struct_case("sint then byte", &[("a", SINT), ("b", BYTE)], 2),
         struct_case("byte then ST_Flags", &[("a", BYTE), ("b", ST_FLAGS)], 4),
         case(
             "bool then bool array",
@@ -134,10 +145,35 @@ fn array_cases() -> Vec<Case> {
     vec![
         array_case("4 strings of 3", &[(1, 4)], STRING_3, 24),
         array_case("3 bytes", &[(1, 3)], BYTE, 4),
+        array_case("3 sints", &[(1, 3)], SINT, 4),
         array_case("8 bools", &[(1, 8)], BOOL, 2),
         array_case("10 bools", &[(1, 10)], BOOL, 2),
         array_case("17 bools", &[(1, 17)], BOOL, 4),
         array_case("2 by 2 ints", &[(0, 1), (1, 2)], INT, 8),
+        // ADR-0147 (d) to (g): each line of the last index of a BOOL array starts at a byte.
+        array_case("3 by 3 bools", &[(1, 3), (1, 3)], BOOL, 4),
+        array_case("2 by 9 bools", &[(1, 2), (1, 9)], BOOL, 4),
+        array_case("3 by 3 by 3 bools", &[(1, 3), (1, 3), (1, 3)], BOOL, 10),
+        array_case("2 by 3 bytes", &[(1, 2), (1, 3)], BYTE, 6),
+    ]
+}
+
+/// An array whose element is an array. S7-1200 and S7-1500 refuse the type (ADR-0148). S7-300
+/// keeps the rule of `domain-model.md` §2.1 (ADR-0148 (i)), so the element starts on an even byte
+/// and the layout of the element is not an extra rule. ADR-0148 (j) keeps these two sizes as
+/// golden cases after it removes the rows A09 and A10 from the reference table.
+fn nested_array_cases() -> Vec<Case> {
+    let nested = |name, element, inner: &[(i32, i32)], outer: &[(i32, i32)], size| {
+        case(
+            name,
+            vec![array_row(10, element, inner), array_row(ROOT, 10, outer)],
+            size,
+            S7Start::Even,
+        )
+    };
+    vec![
+        nested("2 arrays of 3 bytes", BYTE, &[(1, 3)], &[(1, 2)], 8),
+        nested("3 arrays of 3 bools", BOOL, &[(1, 3)], &[(1, 3)], 6),
     ]
 }
 
@@ -160,6 +196,25 @@ fn s7_layout_golden_struct_and_array_sizes() {
         assert_eq!(layout.size_bytes(), case.size_bytes, "{}", case.name);
         assert_eq!(layout.start(), case.start, "{}", case.name);
     }
+}
+
+#[test]
+fn s7_layout_golden_array_of_array_sizes_on_s7_300() {
+    let mismatches: Vec<String> = nested_array_cases()
+        .into_iter()
+        .filter_map(|case| {
+            let layout = layout_of(case.rows).expect(case.name);
+            let found = (layout.size_bytes(), layout.start());
+            (found != (case.size_bytes, case.start)).then(|| {
+                format!(
+                    "{}: expected {:?}, found {found:?}",
+                    case.name,
+                    (case.size_bytes, case.start)
+                )
+            })
+        })
+        .collect();
+    assert!(mismatches.is_empty(), "{mismatches:?}");
 }
 
 #[test]
@@ -339,6 +394,76 @@ fn s7_members_golden_sixteen_bools_take_two_bytes() {
     )
     .unwrap();
     assert_eq!(S7Layout::of(&tree).unwrap().size_bytes(), 2);
+}
+
+/// The rows `BYTE`, `CHAR`, `SINT`, and `USINT` for `members_of`.
+fn one_byte_rows() -> Vec<PlcType> {
+    vec![
+        primitive_row(BYTE, Primitive::Byte),
+        primitive_row(CHAR, Primitive::Char),
+        primitive_row(SINT, Primitive::Sint),
+        primitive_row(USINT, Primitive::Usint),
+    ]
+}
+
+#[test]
+fn s7_members_golden_sint_and_usint_members_start_on_an_even_byte() {
+    // ADR-0147 (a): `BYTE` and `CHAR` start at any byte. `SINT` and `USINT` start at an even byte.
+    let mut extra = one_byte_rows();
+    extra.push(struct_row(
+        ROOT,
+        "ST_Bytes",
+        &[("a", BYTE), ("b", CHAR), ("c", SINT), ("d", USINT)],
+    ));
+    let members = members_of(ROOT, extra);
+    assert_eq!(
+        rows(&members),
+        vec![
+            row(".a", 0, 0),
+            row(".b", 1, 0),
+            row(".c", 2, 0),
+            row(".d", 4, 0),
+        ]
+    );
+}
+
+#[test]
+fn s7_members_keep_the_byte_start_class_of_a_sint_member() {
+    // ADR-0147 (b): only the place of the member changes. The layout of the type stays.
+    let mut extra = one_byte_rows();
+    extra.push(struct_row(ROOT, "ST_Pair", &[("a", BOOL), ("b", SINT)]));
+    let members = members_of(ROOT, extra);
+    assert_eq!(rows(&members), vec![row(".a", 0, 0), row(".b", 2, 0)]);
+    let starts: Vec<S7Start> = members
+        .iter()
+        .map(|member| member.layout().start())
+        .collect();
+    assert_eq!(starts, vec![S7Start::Bit, S7Start::Byte]);
+}
+
+#[test]
+fn s7_members_a_byte_after_a_sint_member_starts_at_the_next_byte() {
+    let mut extra = one_byte_rows();
+    extra.push(struct_row(ROOT, "ST_Pair", &[("a", SINT), ("b", BYTE)]));
+    let members = members_of(ROOT, extra);
+    assert_eq!(rows(&members), vec![row(".a", 0, 0), row(".b", 1, 0)]);
+}
+
+#[test]
+fn s7_layout_of_a_sint_and_a_usint_root_keeps_the_byte_start_class() {
+    // ADR-0147 (c): the rule applies to a struct member only.
+    for root in [SINT, USINT] {
+        let primitive = if root == SINT {
+            Primitive::Sint
+        } else {
+            Primitive::Usint
+        };
+        let tree = TypeTree::resolve(id(root), &types(vec![primitive_row(root, primitive)]))
+            .expect("leaf root resolves");
+        let layout = S7Layout::of(&tree).expect("layout of a leaf");
+        assert_eq!(layout.size_bytes(), 1);
+        assert_eq!(layout.start(), S7Start::Byte);
+    }
 }
 
 #[test]

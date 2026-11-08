@@ -1,6 +1,6 @@
 # ADR-0119: Loadable flag and the current rules of values and addresses
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0149 (item (b): the export check and the version page check also run the overlap check of I20)
 Date: 2026-11-03
 Deciders: project owner
 

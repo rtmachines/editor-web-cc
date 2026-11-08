@@ -13,7 +13,8 @@ use crate::error_codes::ErrorCode;
 use crate::export::test_rows::stored_parameter;
 use crate::export::test_support::INT;
 use crate::plant::fixtures::{
-    TIME_TREES_ROOT, id, machine, primitive_row, time_trees_on, types_for,
+    TIME_TREES_ROOT, array_row, id, machine, on_platform, primitive_row, struct_row, time_trees_on,
+    types_for,
 };
 use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTrees};
 use crate::recipe::{Parameter, ParameterKey, RuleFault, RuleField, StoredLimit};
@@ -346,4 +347,226 @@ fn adr_0140_a_stored_data_block_above_59999_on_s7_1500_makes_the_version_not_loa
     );
     let is_loadable = result.is_empty();
     assert!(!is_loadable, "a rule fault makes the version not loadable");
+}
+
+// ADR-0149 (e) to (j), design D10. The two stored overlap pairs are the pairs of the tests of the
+// draft in `recipe/draft/s7/written_overlap_tests.rs`. They overlap under the layout of ADR-0147.
+
+const BYTE: u128 = 21;
+const CHAR: u128 = 22;
+const SINT: u128 = 23;
+const USINT: u128 = 24;
+const BOOL: u128 = 25;
+const ST_BYTES: u128 = 26;
+const GRID: u128 = 27;
+
+/// The trees of the overlap tests on `S7_1500`. `ST_Bytes@1` has 6 bytes and `GRID` has 4 bytes.
+///
+/// `SINT` and `USINT` do not exist on `S7_300`, so the whole world runs on `S7_1500`.
+fn overlap_trees() -> TypeTrees {
+    let rows = vec![
+        primitive_row(SHORT, Primitive::Int),
+        primitive_row(BYTE, Primitive::Byte),
+        primitive_row(CHAR, Primitive::Char),
+        primitive_row(SINT, Primitive::Sint),
+        primitive_row(USINT, Primitive::Usint),
+        primitive_row(BOOL, Primitive::Bool),
+        struct_row(
+            ST_BYTES,
+            "ST_Bytes",
+            &[("a", BYTE), ("b", CHAR), ("c", SINT), ("d", USINT)],
+        ),
+        array_row(GRID, BOOL, &[(1, 3), (1, 3)]),
+    ];
+    let platform = PlcPlatform::S7_1500;
+    let ids = [SHORT, BYTE, CHAR, SINT, USINT, BOOL, ST_BYTES, GRID].map(id);
+    TypeTrees::resolve(
+        ids,
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// The parameter `n` with the tag `tag`, the type `plc_type`, the value `value`, and the address.
+fn valued_at(
+    n: u128,
+    tag: &str,
+    plc_type: u128,
+    value: serde_json::Value,
+    address: &str,
+) -> Parameter {
+    let mut stored = stored_parameter(n, ("U1", tag), INT, value);
+    stored.plc_type = id(plc_type);
+    stored.s7_address = Some(S7Address::parse(address).unwrap());
+    Parameter::from(stored)
+}
+
+/// `BYTES` of the type `ST_Bytes@1` at `DB1.DBB0`. The type has 6 bytes.
+fn bytes() -> Parameter {
+    let value = json!({"a": 0, "b": "A", "c": 0, "d": 0});
+    valued_at(1, "BYTES", ST_BYTES, value, "DB1.DBB0")
+}
+
+/// `MODE` of the type `BYTE` at `DB1.DBB4`. It lies inside `BYTES`.
+fn mode() -> Parameter {
+    valued_at(2, "MODE", BYTE, json!(0), "DB1.DBB4")
+}
+
+/// `GRID` of the type `ARRAY[1..3,1..3] OF BOOL` at `DB2.DBB0`. The type has 4 bytes.
+fn grid() -> Parameter {
+    let value = json!([
+        [false, false, false],
+        [false, false, false],
+        [false, false, false]
+    ]);
+    valued_at(3, "GRID", GRID, value, "DB2.DBB0")
+}
+
+/// `X` of the type `BYTE` at `DB2.DBB2`. It lies inside `GRID`.
+fn x() -> Parameter {
+    valued_at(4, "X", BYTE, json!(0), "DB2.DBB2")
+}
+
+/// `SPEED` of the type `INT` at `DB1.DBW8`. It overlaps nothing.
+fn speed() -> Parameter {
+    valued_at(5, "SPEED", SHORT, json!(0), "DB1.DBW8")
+}
+
+#[test]
+fn adr_0149_a_stored_overlap_pair_gives_a_rule_fault_e_rcp_022_on_the_address_of_both() {
+    let trees = overlap_trees();
+    let parameters = vec![bytes(), mode(), speed()];
+    let result = check_version_parameters(&parameters, &trees)
+        .expect("an overlap is a rule fault and no structure fault");
+    assert_eq!(
+        found(&result),
+        vec![
+            (parameters[0].key(), ErrorCode::RCP_022, RuleField::Address),
+            (parameters[1].key(), ErrorCode::RCP_022, RuleField::Address),
+        ]
+    );
+    let is_loadable = result.is_empty();
+    assert!(!is_loadable, "a rule fault makes the version not loadable");
+}
+
+#[test]
+fn adr_0149_two_stored_overlap_pairs_give_the_fault_for_all_four_parameters_in_parameter_order() {
+    let trees = overlap_trees();
+    let parameters = vec![grid(), speed(), bytes(), x(), mode()];
+    let result = check_version_parameters(&parameters, &trees).unwrap();
+    let keys: Vec<_> = result.iter().map(|(key, _)| *key).collect();
+    assert_eq!(
+        keys,
+        vec![
+            parameters[0].key(),
+            parameters[2].key(),
+            parameters[3].key(),
+            parameters[4].key(),
+        ]
+    );
+    assert_eq!(
+        found(&result)
+            .into_iter()
+            .map(|(_, code, field)| (code, field))
+            .collect::<Vec<_>>(),
+        vec![(ErrorCode::RCP_022, RuleField::Address); 4]
+    );
+}
+
+#[test]
+fn adr_0149_only_the_two_parameters_of_the_pair_get_the_fault_and_parameters_apart_get_none() {
+    let trees = overlap_trees();
+    let low = valued_at(6, "LOW", SHORT, json!(0), "DB1.DBW12");
+    let high = valued_at(7, "HIGH", SHORT, json!(0), "DB1.DBW14");
+    let parameters = vec![bytes(), mode(), low.clone(), high.clone(), speed()];
+    let result = check_version_parameters(&parameters, &trees).unwrap();
+    let keys: Vec<_> = result.iter().map(|(key, _)| *key).collect();
+    assert_eq!(keys, vec![parameters[0].key(), parameters[1].key()]);
+    assert!(!keys.contains(&low.key()) && !keys.contains(&high.key()));
+}
+
+#[test]
+fn adr_0149_a_parameter_after_a_narrow_one_inside_a_wide_one_still_gets_the_fault() {
+    let trees = overlap_trees();
+    let small = valued_at(2, "SMALL", BYTE, json!(0), "DB1.DBB2");
+    let late = valued_at(6, "LATE", BYTE, json!(0), "DB1.DBB4");
+    let parameters = vec![bytes(), small, late];
+    let result = check_version_parameters(&parameters, &trees).unwrap();
+    assert_eq!(
+        found(&result),
+        vec![
+            (parameters[0].key(), ErrorCode::RCP_022, RuleField::Address),
+            (parameters[1].key(), ErrorCode::RCP_022, RuleField::Address),
+            (parameters[2].key(), ErrorCode::RCP_022, RuleField::Address),
+        ]
+    );
+    let (_, faults) = &result[2];
+    let message = faults[0].error().to_string();
+    assert!(message.contains("BYTES"), "{message}");
+}
+
+#[test]
+fn adr_0149_the_fault_names_the_other_parameter_of_the_pair() {
+    let trees = overlap_trees();
+    let parameters = vec![bytes(), mode()];
+    let result = check_version_parameters(&parameters, &trees).unwrap();
+    let message = |position: usize| {
+        let (_, faults) = &result[position];
+        faults[0].error().to_string()
+    };
+    assert!(message(0).contains("MODE"), "{}", message(0));
+    assert!(message(1).contains("BYTES"), "{}", message(1));
+}
+
+#[test]
+fn adr_0149_an_overlap_keeps_the_fault_of_the_end_rule_of_the_same_parameter() {
+    let trees = overlap_trees();
+    let wide = valued_at(
+        1,
+        "BYTES",
+        ST_BYTES,
+        json!({"a": 0, "b": "A", "c": 0, "d": 0}),
+        "DB1.DBB65532",
+    );
+    let inside = valued_at(2, "MODE", BYTE, json!(0), "DB1.DBB65534");
+    let parameters = vec![wide, inside];
+    let result = check_version_parameters(&parameters, &trees).unwrap();
+    assert_eq!(
+        found(&result),
+        vec![
+            (parameters[0].key(), ErrorCode::RCP_056, RuleField::Address),
+            (parameters[0].key(), ErrorCode::RCP_022, RuleField::Address),
+            (parameters[1].key(), ErrorCode::RCP_022, RuleField::Address),
+        ]
+    );
+}
+
+#[test]
+fn adr_0149_a_version_without_an_overlap_gives_no_new_fault() {
+    let trees = overlap_trees();
+    let apart = valued_at(2, "MODE", BYTE, json!(0), "DB1.DBB6");
+    let other_block = valued_at(4, "X", BYTE, json!(0), "DB2.DBB4");
+    let parameters = vec![bytes(), apart, grid(), other_block, speed()];
+    let result = check_version_parameters(&parameters, &trees).unwrap();
+    assert!(result.is_empty(), "{:?}", found(&result));
+}
+
+#[test]
+fn adr_0149_two_bits_of_one_byte_do_not_overlap() {
+    let trees = overlap_trees();
+    let first = valued_at(1, "FLAG1", BOOL, json!(false), "DB1.DBX0.0");
+    let second = valued_at(2, "FLAG2", BOOL, json!(false), "DB1.DBX0.1");
+    let result = check_version_parameters(&[first, second], &trees).unwrap();
+    assert!(result.is_empty(), "{:?}", found(&result));
+}
+
+#[test]
+fn adr_0149_an_overlap_gives_no_broken_parameter() {
+    let trees = overlap_trees();
+    let parameters = vec![bytes(), mode(), grid(), x()];
+    let result = check_version_parameters(&parameters, &trees);
+    assert!(
+        result.is_ok(),
+        "{:?}",
+        result.err().map(|broken| broken.code())
+    );
 }

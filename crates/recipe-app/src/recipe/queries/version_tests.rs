@@ -1,13 +1,16 @@
 //! Tests of `GetVersion` (design D4, ADR-0042, ADR-0043 (m)).
 
+use std::collections::BTreeSet;
 use std::time::Duration as StdDuration;
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::Sha256;
 use recipe_domain::identity::{Login, Role};
-use recipe_domain::plant::PlcPlatform;
-use recipe_domain::plant::S7Address;
-use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter, VersionState};
+use recipe_domain::plant::{
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address,
+};
+use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter, StoredValue, VersionState};
+use serde_json::json;
 use time::Duration;
 
 use super::approval_preview_tests::{
@@ -23,11 +26,12 @@ use crate::error::{AppError, Missing, TaskStage, TimeoutStage};
 use crate::memory::JournalEntry;
 use crate::memory::fixtures::pid;
 use crate::memory::fixtures::{
-    Fixture, actor, meta, pkey, recipe_with, reference, rid, scenarios, second_engineer, tid, user,
-    vid,
+    Fixture, actor, meta, parameter_on, pkey, recipe_with, reference, rid, scenarios,
+    second_engineer, tid, uid, user, vid,
 };
 use crate::ports::Isolation;
 use crate::recipe::AddParameter;
+use crate::recipe::rebind::fixtures::typed_struct_row;
 
 /// A type identifier that no type row of the tests holds.
 const UNRESOLVABLE_TYPE: u128 = 9_999;
@@ -270,6 +274,117 @@ async fn an_approved_version_with_an_unresolvable_type_gives_db_008() {
     let error = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap_err();
 
     assert_eq!(error.code(), ErrorCode::DB_008);
+}
+
+/// The identifier of the struct `ST_Bytes@1` in the test of the overlap.
+const BYTES_STRUCT: u128 = 970;
+/// The first identifier of the global rows `BYTE`, `CHAR`, `SINT`, and `USINT`.
+const BYTE_FAMILY_FIRST: u128 = 971;
+
+/// Return the platforms of the global row of `primitive` (`0004_seed_plc_types.sql`).
+///
+/// `SINT` and `USINT` do not exist on `S7_300`. `CHAR` does not exist on the IEC platforms.
+fn byte_family_platforms(primitive: Primitive) -> BTreeSet<PlcPlatform> {
+    let all = [
+        PlcPlatform::CodesysIec,
+        PlcPlatform::TwinCat3,
+        PlcPlatform::S7_1200,
+        PlcPlatform::S7_1500,
+        PlcPlatform::S7_300,
+    ];
+    all.into_iter()
+        .filter(|platform| match primitive {
+            Primitive::Sint | Primitive::Usint => *platform != PlcPlatform::S7_300,
+            Primitive::Char => matches!(
+                platform,
+                PlcPlatform::S7_1200 | PlcPlatform::S7_1500 | PlcPlatform::S7_300
+            ),
+            _ => true,
+        })
+        .collect()
+}
+
+/// Store the global row `id` of `primitive` with the platforms of the seed migration.
+fn seed_byte_family_row(fixture: &Fixture, id: u128, primitive: Primitive) -> PlcTypeId {
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(id),
+        machine: None,
+        platforms: byte_family_platforms(primitive),
+        shape: RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    tid(id)
+}
+
+/// Return the approved version 1 of `R-1` on `S7_1500` with an overlap of the current layout rules.
+///
+/// `BYTES` of type `ST_Bytes@1` stands at `DB1.DBB0` and `MODE` of type `BYTE` stands at
+/// `DB1.DBB4`. The struct has the members `a` of type `BYTE`, `b` of type `CHAR`, `c` of type
+/// `SINT`, and `d` of type `USINT`. The earlier layout gave it the size 4. The current layout
+/// gives the size 6 (ADR-0147), so the struct shares the byte 4 with `MODE` (ADR-0149).
+fn overlap_world() -> Fixture {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_approved_and_draft(&machine, 1, "R-1");
+    let family = [
+        ("a", Primitive::Byte),
+        ("b", Primitive::Char),
+        ("c", Primitive::Sint),
+        ("d", Primitive::Usint),
+    ];
+    let members: Vec<(&str, PlcTypeId)> = (0_u128..)
+        .zip(family)
+        .map(|(offset, (name, primitive))| {
+            let id = BYTE_FAMILY_FIRST.checked_add(offset).unwrap();
+            (name, seed_byte_family_row(&fixture, id, primitive))
+        })
+        .collect();
+    let byte = members.first().map(|(_, type_id)| *type_id).unwrap();
+    fixture.store.seed_type(&typed_struct_row(
+        PlcPlatform::S7_1500,
+        (BYTES_STRUCT, "ST_Bytes", 1),
+        None,
+        &members,
+    ));
+    let address = |text: &str| Some(S7Address::parse(text).unwrap());
+    let bytes_parameter = StoredParameter {
+        plc_type: tid(BYTES_STRUCT),
+        value: StoredValue::from(json!({"a": 0, "b": "A", "c": 0, "d": 0})),
+        s7_address: address("DB1.DBB0"),
+        limits: Vec::new(),
+        ..parameter_on(PlcPlatform::S7_1500, 1, "BYTES", uid(102), 0)
+    };
+    let mode_parameter = StoredParameter {
+        plc_type: byte,
+        value: StoredValue::from(json!(0)),
+        s7_address: address("DB1.DBB4"),
+        limits: Vec::new(),
+        ordinal: Ordinal::parse(1).unwrap(),
+        ..parameter_on(PlcPlatform::S7_1500, 2, "MODE", uid(102), 0)
+    };
+    fixture.store.seed_parameter(vid(101), &bytes_parameter);
+    fixture.store.seed_parameter(vid(101), &mode_parameter);
+    fixture
+}
+
+#[tokio::test]
+async fn an_approved_version_with_an_overlap_of_the_current_layout_gives_the_code_e_rcp_022_once() {
+    // ADR-0149 (g): the struct of size 6 at DB1.DBB0 covers MODE at DB1.DBB4. The overlap
+    // affects two parameters. The page lists the code once.
+    let fixture = overlap_world();
+    seed_users(&fixture);
+
+    let view = get(&fixture, Role::Operator, ("R-1", 1)).await.unwrap();
+
+    assert_eq!(view.detail.state, VersionState::Approved);
+    assert_eq!(view.rule_codes, vec![ErrorCode::RCP_022]);
+    assert!(fixture.store.audit_entries().is_empty());
 }
 
 /// Return the settings with `blocking` and an export gate of one permit.

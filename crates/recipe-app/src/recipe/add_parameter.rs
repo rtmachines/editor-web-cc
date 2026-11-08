@@ -113,6 +113,9 @@ impl AddParameter {
             expected_row_version: input.expected_row_version,
         };
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::Shared).await?;
+        input
+            .type_expr
+            .require_no_nested_array(open.draft.platform())?;
         let unit = lock_live_unit(&mut open, &input.unit_path).await?;
         let resolved = resolve_type(&mut open, &input.type_expr, audit_context(user, meta)).await?;
         let key = ParameterKey::from(Uuid::new_v4());
