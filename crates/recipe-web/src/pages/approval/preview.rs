@@ -313,6 +313,9 @@ impl<'a> ApprovePage<'a> {
         args.set("number", preview.number.to_string());
         args.set("reference", preview.recipe.reference().to_string());
         let title = t.with("approve-title", &args);
+        let translation = request
+            .lang()
+            .translation_lang_or_internal(request.request_id())?;
         Ok(Self {
             layout: Layout::for_session(t, request, title, Some(NavTarget::Recipes))?,
             t,
@@ -323,7 +326,7 @@ impl<'a> ApprovePage<'a> {
             diff: preview
                 .diff
                 .as_ref()
-                .map(|page| DiffView::new(t, page, &links)),
+                .map(|page| DiffView::new(t, page, &links, translation.as_ref())),
             jump: if form.is_some() { "#approve-form" } else { "" },
             form,
             blocked,

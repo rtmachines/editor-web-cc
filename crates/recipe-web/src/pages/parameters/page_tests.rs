@@ -314,3 +314,56 @@ async fn parameters_page_repeats_the_version_link_right_after_the_heading() {
         "{after_heading}"
     );
 }
+
+// --- Language tag of the English base inputs (ADR-0126 (f), design D4) ---------------------------
+
+/// Return the start tag that begins with `open`, up to and including the first `>`.
+fn start_tag(form: &str, open: &str) -> String {
+    let (_before, rest) = form.split_once(open).unwrap();
+    let (attributes, _after) = rest.split_once('>').unwrap();
+    format!("{open}{attributes}>")
+}
+
+/// Assert that `form` tags the two English base inputs with `lang="en"` and the labels with no `lang`.
+fn assert_english_base_inputs_are_tagged(form: &str, context: &str) {
+    let input = start_tag(form, "<input id=\"name_en\"");
+    assert!(input.contains(" lang=\"en\""), "{context}: {input}");
+    let area = start_tag(form, "<textarea id=\"description_en\"");
+    assert!(area.contains(" lang=\"en\""), "{context}: {area}");
+    for id in ["name_en", "description_en"] {
+        let label = format!("<label for=\"{id}\">");
+        assert!(form.contains(&label), "{context} {id}: {form}");
+    }
+}
+
+/// ADR-0126 (f): in the `pl` UI the edit form of a parameter tags the input `name_en` and the text
+/// area `description_en` with `lang="en"`. The labels stay in the UI language.
+#[tokio::test]
+async fn parameters_page_edit_form_tags_the_english_base_inputs_with_lang_en_in_pl() {
+    let world = recipe_world();
+    let reply = world
+        .get(&world.engineer, &parameter_path(SPEED_KEY, ""), &[POLISH])
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let form = main_of(&reply.body)
+        .split("<form id=\"parameter-edit-form\"")
+        .nth(1)
+        .unwrap();
+    assert_english_base_inputs_are_tagged(form, "edit");
+}
+
+/// ADR-0126 (f): in the `pl` UI the form of a new parameter tags the input `name_en` and the text
+/// area `description_en` with `lang="en"`. The labels stay in the UI language.
+#[tokio::test]
+async fn parameters_new_form_tags_the_english_base_inputs_with_lang_en_in_pl() {
+    let world = recipe_world();
+    let reply = world
+        .get(
+            &world.engineer,
+            super::test_kit::NEW_FORM,
+            &[POLISH, HTMX, super::test_kit::FORM_TARGET],
+        )
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_english_base_inputs_are_tagged(&reply.body, "new");
+}

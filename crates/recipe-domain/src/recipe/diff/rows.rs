@@ -1,5 +1,6 @@
 //! The rows of a diff, grouped by section (ADR-0050 (c), (d), (e)).
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::plant::{LeafPath, PlcTypeId, S7Address, UnitId};
@@ -188,6 +189,10 @@ pub enum DiffPart {
     Parameter {
         /// The English name.
         name_en: Text,
+        /// The translated name of each language of the side that holds the parameter
+        /// (ADR-0152 (b), (d)). The added part takes the new side. The removed part takes the old
+        /// side. The map is empty when the side has no translation.
+        translated_names: BTreeMap<LangCode, Text>,
         /// The unit of the parameter.
         unit: UnitId,
         /// The type. The use case writes its full type text.

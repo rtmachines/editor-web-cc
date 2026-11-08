@@ -6,22 +6,17 @@
 //! Each value and each bound shows as the text of the domain: canonical decimal text or an IEC
 //! literal (A43).
 
-use std::collections::BTreeMap;
-
 use recipe_app::recipe::{DiffPage, DiffSection};
-use recipe_domain::plant::{PlcTypeId, UnitId, UnitPath};
-use recipe_domain::recipe::{
-    DefinitionChange, DiffBounds, DiffKind, DiffPart, DiffRow, ParameterKey, ReferenceNumber,
-    Translation,
-};
+use recipe_domain::recipe::{DiffKind, DiffPart, DiffRow, LangCode, ParameterKey, ReferenceNumber};
 
+use self::cells::{part_cells, text_cell};
 use self::faults::fault_cell;
 use crate::error::{FieldReason, LineView, WebError};
-use crate::i18n::Lang;
 use crate::pages::hrefs::parameter_href;
 use crate::pages::render::{page_url, query_url};
 use crate::pages::texts::Texts;
 
+mod cells;
 mod faults;
 
 /// Read the query value `kind`: the section of a diff page (ADR-0050 (e)).
@@ -183,6 +178,9 @@ pub(crate) struct Cell {
     /// The language tag of a content text: the tag of its translation row, or `en` for `name_en`
     /// and `description_en`. Empty for a UI text and for a text without a language.
     pub(crate) lang: String,
+    /// The marker of the English base text, such as `(en)`. The template shows it after the text,
+    /// outside the `lang="en"` span that holds the text (ADR-0126 (d), ADR-0152 (f)).
+    pub(crate) marker: Option<String>,
     /// The address of the link of the cell. Empty for no link.
     pub(crate) href: String,
     /// `true` when the side is empty and the text is the word `diff-none`.
@@ -329,8 +327,21 @@ fn page_notice(
 
 impl DiffView {
     /// Build the view of one diff page.
-    pub(crate) fn new(t: Texts<'_>, page: &DiffPage, links: &DiffLinks<'_>) -> Self {
-        let rows = RowContext { t, page, links };
+    ///
+    /// `translation` is the translation language of the UI language, or `None` for `en`. The name
+    /// cell of an added or a removed parameter takes its translation (ADR-0152 (e)).
+    pub(crate) fn new(
+        t: Texts<'_>,
+        page: &DiffPage,
+        links: &DiffLinks<'_>,
+        translation: Option<&LangCode>,
+    ) -> Self {
+        let rows = RowContext {
+            t,
+            page,
+            links,
+            translation,
+        };
         let empty = empty_text(t, page, links);
         let notice = page_notice(t, page, links, empty.is_some());
         // A diff without any change shows `diff-empty` and no pager, with or without `kind`
@@ -428,6 +439,8 @@ struct RowContext<'r, 'a> {
     t: Texts<'r>,
     page: &'r DiffPage,
     links: &'r DiffLinks<'a>,
+    /// The translation language of the UI language. `None` for the UI language `en`.
+    translation: Option<&'r LangCode>,
 }
 
 /// Return the header cells of the section `kind`.
@@ -555,227 +568,5 @@ fn more_row(ctx: &RowContext<'_, '_>, row: &DiffRow, count: usize) -> RowView {
             text: t.with_arg("diff-more-rows", "count", count),
             links,
         }),
-    }
-}
-
-/// Return a cell with a text and a class.
-fn text_cell(class: &'static str, text: impl ToString) -> Cell {
-    Cell {
-        class,
-        text: text.to_string(),
-        lang: String::new(),
-        href: String::new(),
-        none: false,
-        pairs: Vec::new(),
-        lines: Vec::new(),
-        lines_id: String::new(),
-    }
-}
-
-/// Return `cell` with the language tag `lang` on its text.
-///
-/// The tag comes from a validated language code or from `Lang::En`, never from free text.
-fn in_language(lang: &str, cell: Cell) -> Cell {
-    Cell {
-        lang: lang.to_owned(),
-        ..cell
-    }
-}
-
-/// Return the cell of one side: its text, or the word `diff-none` for an empty side.
-fn side_cell(t: Texts<'_>, class: &'static str, text: Option<String>) -> Cell {
-    text.map_or_else(
-        || Cell {
-            none: true,
-            ..text_cell(class, t.get("diff-none"))
-        },
-        |text| text_cell(class, text),
-    )
-}
-
-/// Return the cells of the one row of a part, without the tag cell (design D4).
-///
-/// An omitted part has no cells. `section_rows` shows it as the row of the rows that it omits.
-fn part_cells(ctx: &RowContext<'_, '_>, part: &DiffPart) -> Vec<Cell> {
-    let t = ctx.t;
-    match part {
-        DiffPart::Limit { path, old, new } => vec![
-            text_cell("data", path),
-            limit_cell(t, old.as_ref()),
-            limit_cell(t, new.as_ref()),
-        ],
-        DiffPart::Value {
-            path,
-            old,
-            new,
-            limit,
-        } => vec![
-            text_cell("data", path),
-            side_cell(t, "diff-value", old.clone()),
-            side_cell(t, "diff-value", new.clone()),
-            limit_cell(t, limit.as_ref()),
-        ],
-        DiffPart::Definition(change) => definition_cells(ctx, change),
-        DiffPart::Translation { lang, old, new } => vec![
-            text_cell("data", lang),
-            translation_cell(t, old.as_ref()),
-            translation_cell(t, new.as_ref()),
-        ],
-        DiffPart::Parameter {
-            name_en,
-            unit,
-            plc_type,
-            scalar,
-            leaves,
-        } => vec![
-            in_language(Lang::En.as_str(), text_cell("", name_en)),
-            text_cell("data", unit_text(&ctx.page.unit_paths, *unit)),
-            text_cell("data", type_text(&ctx.page.type_texts, *plc_type)),
-            text_cell(
-                "diff-value",
-                scalar
-                    .clone()
-                    .unwrap_or_else(|| t.with_arg("diff-leaf-count", "count", leaves)),
-            ),
-        ],
-        DiffPart::Omitted { .. } => Vec::new(),
-    }
-}
-
-/// Return the cell of one limit as one text: the range, one bound, or the maximum length.
-///
-/// A limit row of the limits section shows each side with this cell, so each bound of both sides
-/// shows, also after a change of the type (ADR-0050 (c), design D4). A value row shows the limit of
-/// the new version that covers its leaf.
-fn limit_cell(t: Texts<'_>, limit: Option<&DiffBounds>) -> Cell {
-    let text = limit.and_then(
-        |bounds| match (&bounds.min, &bounds.max, &bounds.max_length) {
-            (_min, _max, Some(length)) => {
-                Some(t.with_arg("diff-limit-max-length", "max_length", length))
-            }
-            (Some(min), Some(max), None) => {
-                let mut args = fluent::FluentArgs::new();
-                args.set("min", min.clone());
-                args.set("max", max.clone());
-                Some(t.with("diff-limit-range", &args))
-            }
-            (Some(min), None, None) => Some(t.with_arg("diff-limit-min-only", "min", min)),
-            (None, Some(max), None) => Some(t.with_arg("diff-limit-max-only", "max", max)),
-            (None, None, None) => None,
-        },
-    );
-    side_cell(t, "diff-value", text)
-}
-
-/// Return the path of a unit, or its identifier when the page holds no path.
-fn unit_text(paths: &BTreeMap<UnitId, UnitPath>, unit: UnitId) -> String {
-    paths
-        .get(&unit)
-        .map_or_else(|| unit.to_string(), ToString::to_string)
-}
-
-/// Return the text of a type, or its identifier when the page holds no text.
-fn type_text(texts: &BTreeMap<PlcTypeId, String>, plc_type: PlcTypeId) -> String {
-    texts
-        .get(&plc_type)
-        .cloned()
-        .unwrap_or_else(|| plc_type.to_string())
-}
-
-/// Return the cells of one changed field of a definition, without the tag cell.
-fn definition_cells(ctx: &RowContext<'_, '_>, change: &DefinitionChange) -> Vec<Cell> {
-    let page = ctx.page;
-    let (key, class, old, new) = match change {
-        DefinitionChange::Tag { old, new } => {
-            ("diff-field-tag", "data", old.to_string(), new.to_string())
-        }
-        DefinitionChange::Unit { old, new } => (
-            "diff-field-unit",
-            "data",
-            unit_text(&page.unit_paths, *old),
-            unit_text(&page.unit_paths, *new),
-        ),
-        DefinitionChange::Type { old, new } => (
-            "diff-field-type",
-            "data",
-            type_text(&page.type_texts, *old),
-            type_text(&page.type_texts, *new),
-        ),
-        DefinitionChange::S7Address { old, new } => {
-            let t = ctx.t;
-            return vec![
-                text_cell("", t.get("diff-field-s7")),
-                side_cell(t, "data", old.as_ref().map(ToString::to_string)),
-                side_cell(t, "data", new.as_ref().map(ToString::to_string)),
-            ];
-        }
-        DefinitionChange::Ordinal { old, new } => (
-            "diff-field-ordinal",
-            "num",
-            old.value().to_string(),
-            new.value().to_string(),
-        ),
-        DefinitionChange::NameEn { old, new } => {
-            ("diff-field-name-en", "", old.to_string(), new.to_string())
-        }
-        DefinitionChange::DescriptionEn { old, new } => (
-            "diff-field-description-en",
-            "text-lines",
-            old.to_string(),
-            new.to_string(),
-        ),
-    };
-    let lang = text_language(change);
-    vec![
-        text_cell("", ctx.t.get(key)),
-        in_language(lang, text_cell(class, old)),
-        in_language(lang, text_cell(class, new)),
-    ]
-}
-
-/// Return the language tag of the texts of a changed definition field.
-///
-/// Only the English name and the English description are text of a language. Every other field is
-/// a tag, a path, a type, an address, or a number, which has no language.
-fn text_language(change: &DefinitionChange) -> &'static str {
-    match change {
-        DefinitionChange::NameEn { .. } | DefinitionChange::DescriptionEn { .. } => {
-            Lang::En.as_str()
-        }
-        _other => "",
-    }
-}
-
-/// Return the cell of one side of a translation row: the name and the description (design D4).
-///
-/// A side without the translation shows the word `diff-none`. An empty description shows the
-/// same word under its label.
-fn translation_cell(t: Texts<'_>, side: Option<&Translation>) -> Cell {
-    let Some(translation) = side else {
-        return side_cell(t, "", None);
-    };
-    let lang = translation.lang.as_str();
-    let description = translation.description.as_ref().map(ToString::to_string);
-    let pairs = vec![
-        Pair {
-            label: t.get("diff-field-tr-name"),
-            text: translation.name.to_string(),
-            lang: lang.to_owned(),
-            lines: false,
-            none: false,
-        },
-        Pair {
-            label: t.get("diff-field-tr-description"),
-            lines: description.is_some(),
-            none: description.is_none(),
-            lang: description
-                .as_ref()
-                .map_or_else(String::new, |_text| lang.to_owned()),
-            text: description.unwrap_or_else(|| t.get("diff-none")),
-        },
-    ];
-    Cell {
-        pairs,
-        ..text_cell("", "")
     }
 }

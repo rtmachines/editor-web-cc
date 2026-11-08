@@ -1,5 +1,7 @@
 //! Tests of the diff of the parameters, the definitions, and the translations (ADR-0050).
 
+use std::collections::BTreeMap;
+
 use serde_json::json;
 use uuid::Uuid;
 
@@ -8,8 +10,8 @@ use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, UnitId};
 use crate::recipe::snapshot::fixtures::{LIVE_UNIT, limited, param, range};
 use crate::recipe::{
-    DefinitionChange, DiffBounds, DiffKind, DiffPair, DiffPart, DiffRows, Ordinal, Parameter,
-    ParameterKey, StoredParameter,
+    DefinitionChange, DiffBounds, DiffKind, DiffPair, DiffPart, DiffRows, LangCode, Ordinal,
+    Parameter, ParameterKey, StoredParameter,
 };
 use crate::text::Text;
 
@@ -39,6 +41,7 @@ fn speed_bounds() -> DiffBounds {
 fn speed_row() -> DiffPart {
     DiffPart::Parameter {
         name_en: Text::parse("Name").unwrap(),
+        translated_names: BTreeMap::new(),
         unit: UnitId::from(Uuid::from_u128(LIVE_UNIT)),
         plc_type: id(INT),
         scalar: Some("5".to_owned()),
@@ -78,6 +81,70 @@ fn parameter_added_in_the_new_version() {
         assert!(rows.section(kind).is_empty(), "{kind:?}");
     }
     assert_eq!(rows.unchanged(), 1);
+}
+
+/// The translated names of the one row of `kind`.
+fn translated_names_of(rows: &DiffRows, kind: DiffKind) -> BTreeMap<LangCode, Text> {
+    let parts = section(rows, kind);
+    assert_eq!(parts.len(), 1, "{parts:?}");
+    let names = parts.into_iter().find_map(|(_, part)| match part {
+        DiffPart::Parameter {
+            translated_names, ..
+        } => Some(translated_names),
+        _other => None,
+    });
+    names.expect("the section holds one parameter part")
+}
+
+#[test]
+fn an_added_parameter_carries_the_translated_names_of_the_new_side() {
+    let mut added = speed(2, "HOLD");
+    added.translations = vec![translation("pl", "Posuw")];
+    let rows = diff_of(
+        vec![speed(1, "SPEED")],
+        vec![speed(1, "SPEED"), added],
+        ROWS,
+    );
+    let expected = BTreeMap::from([(
+        LangCode::parse("pl").unwrap(),
+        Text::parse("Posuw").unwrap(),
+    )]);
+    assert_eq!(translated_names_of(&rows, DiffKind::Added), expected);
+}
+
+#[test]
+fn a_removed_parameter_carries_the_translated_names_of_the_old_side() {
+    let mut removed = speed(2, "HOLD");
+    removed.translations = vec![
+        translation("pl", "Prędkość linii"),
+        translation("de", "Tempo"),
+    ];
+    let rows = diff_of(
+        vec![speed(1, "SPEED"), removed],
+        vec![speed(1, "SPEED")],
+        ROWS,
+    );
+    let expected = BTreeMap::from([
+        (
+            LangCode::parse("de").unwrap(),
+            Text::parse("Tempo").unwrap(),
+        ),
+        (
+            LangCode::parse("pl").unwrap(),
+            Text::parse("Prędkość linii").unwrap(),
+        ),
+    ]);
+    assert_eq!(translated_names_of(&rows, DiffKind::Removed), expected);
+}
+
+#[test]
+fn a_parameter_without_a_translation_gives_an_empty_map_of_names() {
+    let rows = diff_of(
+        vec![speed(1, "SPEED")],
+        vec![speed(1, "SPEED"), speed(2, "HOLD")],
+        ROWS,
+    );
+    assert!(translated_names_of(&rows, DiffKind::Added).is_empty());
 }
 
 #[test]
