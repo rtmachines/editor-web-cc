@@ -612,13 +612,13 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 
 `EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row.
 
-`AddParameter`, `UpdateParameterDefinition`, and `DefineUdt` call it with the `TypeExpr` of the request. `RebindTypeRevision` calls it with the array shape of each moved parameter. Each caller calls it inside its own transaction. It has no permission of its own, because the calling use case checks its permission first. Its errors are `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge`.
+`AddParameter`, `UpdateParameterDefinition`, and `DefineUdt` call it with the `TypeExpr` of the request. `RebindTypeRevision` calls it with the new array type of each moved parameter. Each caller calls it inside its own transaction. It has no permission of its own, because the calling use case checks its permission first. Its errors are `E-PLT-013 DerivedTypeInvalid` and `E-PLT-018 TypeTooLarge`.
 
-An array shape of `RebindTypeRevision` comes from a valid tree, so it gives only `E-PLT-018` (ADR-0029). `DefineUdt` reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform` instead (section 2.1). It writes the audit action `DerivedTypeCreated` only when it creates a row. A new row has only the platform of its machine in `platforms`.
+A new array type of `RebindTypeRevision` comes from a valid tree, so it gives only `E-PLT-018` (ADR-0029). `DefineUdt` reports a member type that is not on the platform as `E-PLT-006 MemberTypeNotOnPlatform` instead (section 2.1). It writes the audit action `DerivedTypeCreated` only when it creates a row. A new row has only the platform of its machine in `platforms`.
 
 Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The key is `pg_advisory_xact_lock(2, hashtext(machine_id::text || ':' || name))`. `name` is the struct name, `STRING`, or `WSTRING`. An array row has no name, so its key uses the text `ARRAY`.
 
-A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the array shapes instead. The command takes the locks in the ascending order of their key values, each value once (ADR-0144). It takes all these locks before the first `plc_type` insert.
+A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the new array types instead. The command takes the locks in the ascending order of their key values, each value once (ADR-0144). It takes all these locks before the first `plc_type` insert.
 
 `EnsureDerivedType` then takes no lock of its own. No command takes a row lock on `plc_type`. The unique indexes of `plc_type` stay as the second line.
 
@@ -641,13 +641,15 @@ A command first parses every `TypeExpr` that it carries and collects the keys th
 | `UpsertTranslation` | Draft | One translation set | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-027 InvalidLangCode`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
 | `RemoveTranslation` | Draft | One translation deleted | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-050 TranslationNotFound`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
 | `RemoveParameter` | Draft | Parameter, its limits, and its translations deleted | `E-RCP-002 VersionNotEditable`, `E-RCP-012 RecipeDeleted`, `E-RCP-051 ParameterNotFound`, `E-WEB-001 ConcurrentEdit` |
-| `RebindTypeRevision` | Draft | `{ draft, from_type_id, to_type_id, new_member_values }`. `new_member_values` is a map from `(parameter_key, leaf_path)` to the text of the leaf (ADR-0039). The class of the leaf converts the text as for a value (section 2.1). Every parameter of the draft whose type uses `from_type_id` moves to `to_type_id`. Values and limits are mapped by member name. A new member takes its value from `new_member_values`. A missing entry gives `E-RCP-028` | `E-RCP-002 VersionNotEditable`, `E-RCP-005 ValueShapeMismatch` (a sent value of a new member), `E-RCP-012 RecipeDeleted`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap` (a larger revision, ADR-0028), `E-RCP-028 RebindNeedsValue`, `E-RCP-029 RebindDropsLimit`, `E-RCP-052 RebindTargetInvalid`, `E-RCP-055 PrecisionExceeded`, `E-RCP-056 S7AddressPastBlockEnd`, `E-RCP-057 S7DataBlockOutOfRange`, `E-PLT-018 TypeTooLarge` (a new array type), `E-WEB-001 ConcurrentEdit` |
+| `RebindTypeRevision` | Draft | `{ draft, from_type_id, to_type_id, new_member_values }`. `new_member_values` is a map from `(parameter_key, leaf_path)` to the text of the leaf (ADR-0039). The class of the leaf converts the text as for a value (section 2.1). Every parameter of the draft whose type uses `from_type_id` moves to `to_type_id`. Values and limits are mapped by member name and type shape (ADR-0146). A new member takes its value from `new_member_values`. A missing entry gives `E-RCP-028` | `E-RCP-002 VersionNotEditable`, `E-RCP-005 ValueShapeMismatch` (a sent value of a new member), `E-RCP-012 RecipeDeleted`, `E-RCP-021 SizeBudgetExceeded`, `E-RCP-022 S7AddressOverlap` (a larger revision, ADR-0028), `E-RCP-028 RebindNeedsValue`, `E-RCP-029 RebindDropsLimit`, `E-RCP-052 RebindTargetInvalid`, `E-RCP-055 PrecisionExceeded`, `E-RCP-056 S7AddressPastBlockEnd`, `E-RCP-057 S7DataBlockOutOfRange`, `E-PLT-018 TypeTooLarge` (a new array type), `E-WEB-001 ConcurrentEdit` |
 
 `RebindTypeRevision` rules (ADR-0018):
 
 - `to_type_id` is a newer revision of the struct of `from_type_id` on the same machine. Otherwise the command returns `RebindTargetInvalid`. It also returns `RebindTargetInvalid` when no parameter of the draft uses `from_type_id`.
 - A parameter uses `from_type_id` when it is the parameter type, or the element type of an array type at any depth. `EnsureDerivedType` gives each new array type.
 - A struct that has `from_type_id` as a member keeps its revision. The engineer defines a new revision of that struct and rebinds it with a second command.
+- A member keeps its value and its limits under two conditions (ADR-0146). Both revisions have a member of that name, and the two member types have one type shape. The names compare with their exact spelling. Every other member of the target is new.
+- Two leaf types have one type shape with the same primitive and the same string length. The seed rows store the default length, so `STRING` and `STRING(80)` on `CodesysIec` have one shape. Two array types need the same dimensions and element types of one shape. Two struct types need the same row.
 - The command checks every affected parameter first. It returns one `RebindNeedsValue` or `RebindDropsLimit` entry per failing parameter and leaf in one list, and it changes nothing.
 
 `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, and `ReplaceLimits` check every leaf of the value and every limit row. They return every fault of one parameter in one `RecipeErrors` (ADR-0027, ADR-0041). The faults of the leaves come first in preorder, and the faults of the limit rows follow in their order. A check of the unit, the type, the tag, the S7 address, or a budget keeps its single error.
@@ -765,6 +767,7 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | Approve | Make a version the active one. At most one per recipe |
 | Retire | Mark an approved version as no longer active. Terminal |
 | Rebind | Move every parameter of a draft that uses one struct revision to a newer revision of the same struct |
+| Type shape | The part of a type that a rebind compares. A leaf: the primitive and the string length. An array: the dimensions and the element shape. A struct: its row. A rebind keeps a member whose old and new type have one type shape (ADR-0146) |
 | Export | Serialize an approved or retired version to the JSON export document (ADR-0019) |
 | Security event | A record of a failed or rejected security action, kept outside the audit chain |
 | Diff | The list of changes between two versions of one recipe. Parameters match by `key` (ADR-0050) |

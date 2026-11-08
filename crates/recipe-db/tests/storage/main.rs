@@ -21,6 +21,7 @@ mod operations_schema;
 mod platform_ranges;
 mod pool;
 mod race;
+mod rebind_shape;
 mod reset_password;
 mod restore_code;
 mod restore_roles;

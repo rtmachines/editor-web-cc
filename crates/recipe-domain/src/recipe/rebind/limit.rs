@@ -16,7 +16,7 @@ pub(super) struct LimitMapping<'a> {
 /// Map the stored limits of a parameter to the planned tree.
 ///
 /// The member segment of a limit path follows the index segments of the array chain. A limit in
-/// a kept member stays as it is. A limit in a removed member or in a member with a changed type
+/// a kept member stays as it is. A limit in a removed member or in a member of another type shape
 /// is an entry. A limit never disappears without a decision (ADR-0018). The kept limits
 /// must pass the check against the planned tree. The rows are stored data that the rebind does
 /// not change, so the check uses the earlier rule set (ADR-0120 (d)).

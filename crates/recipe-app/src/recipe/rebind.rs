@@ -159,6 +159,8 @@ impl RebindTypeRevision {
 #[cfg(test)]
 pub(super) mod fixtures;
 #[cfg(test)]
+mod kept_member_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod texts_tests;
