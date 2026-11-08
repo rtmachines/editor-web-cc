@@ -1,6 +1,6 @@
 # ADR-0133: Time limit of the disk measurement
 
-Status: Accepted
+Status: Accepted. Amends ADR-0073 (d)
 Date: 2026-11-05
 Deciders: project owner
 

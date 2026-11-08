@@ -1,6 +1,6 @@
 # ADR-0135: The STE lint scope includes the OpenSpec specs
 
-Status: Accepted
+Status: Accepted. Amends ADR-0023 (scope)
 Date: 2026-11-06
 Deciders: project owner
 

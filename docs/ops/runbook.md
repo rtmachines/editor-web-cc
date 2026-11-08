@@ -2434,6 +2434,8 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - The file `compose.yaml` sets no `RECIPE_ALERTS__WEBHOOK_CA_FILE` and mounts no CA file. The key `alerts.webhook_ca_file` therefore stays empty, and the webhook client trusts the webpki roots only (ADR-0063 (j)). No workaround.
 - No procedure recovers access when the only administrator cannot log in. The command `create-admin` does nothing when an active administrator exists. Only a user with `UserManage` resets a password (`api.md` section 3). No workaround.
 - A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
+- The login throttle counts failures per login and address and per address, but not per login over all addresses. A client with many addresses therefore gets many guesses against one login. The alert `failed_logins` reports such a flood, but it does not stop it ([ADR-0150](../adr/0150-no-per-login-limit-over-all-addresses.md)). Follow the row `failed_logins` of the section [Alarms](#alarms).
+- A wrong current password in `ChangeOwnPassword` writes no security event. The alert `failed_logins` therefore does not count it. [ADR-0150](../adr/0150-no-per-login-limit-over-all-addresses.md) records this as a residual risk.
 - No document gives a procedure for the cases below. Each item links the section where the case appears. That section gives the part of the procedure that exists.
   - Alarms: an action for `panics`, `audit_chain_broken`, `export_hash_mismatch`, and `security_events` ([Alarms](#alarms))
   - Alarms: a fix when `not_ready` comes from a migration with another checksum ([Alarms](#alarms))

@@ -1,6 +1,6 @@
 # ADR-0124: No open transaction in a released connection
 
-Status: Accepted
+Status: Accepted. Amends ADR-0058 (m)
 Date: 2026-11-04
 Deciders: project owner
 

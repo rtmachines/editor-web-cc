@@ -10,6 +10,8 @@ This repository holds release 0.7.1. It has the route groups of `docs/architectu
 
 The version page and the type page have the additions of ADR-0108. The export routes of ADR-0109 serve a transfer client with HTTP Basic authentication. The UI changes of ADR-0110 to ADR-0113 protect the data of a draft and show the read-only mode on each page. Release 0.7.0 adds the S7 range and address rules of ADR-0114 to ADR-0121. It also adds the runtime fixes and the test gates of ADR-0122 to ADR-0133. Release 0.7.1 adds the test of ADR-0134, the STE lint of the specs (ADR-0135), and 14 forms of the migration check (ADR-0136). The [changelog](CHANGELOG.md) lists every change.
 
+The branch `main` also holds the unreleased changes of ADR-0137 to ADR-0150. The section `Unreleased` of the [changelog](CHANGELOG.md) lists them and the current known gaps.
+
 ## Known gaps of 0.7.1
 
 - The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
