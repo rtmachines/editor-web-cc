@@ -16,6 +16,7 @@ use crate::audit::{StateDiff, definition_diff};
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::AppError;
+use crate::plant::require_current_type;
 use crate::ports::NonEmpty;
 
 /// A new value and new limits of an `UpdateParameterDefinition` request.
@@ -162,6 +163,9 @@ async fn stage_definition(
     let parameter = open.parameter_id(input.key)?;
     let unit = lock_live_unit(open, &input.unit_path).await?;
     let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
+    if resolved.type_id != open.draft.parameter(input.key)?.plc_type() {
+        require_current_type(&input.type_expr)?;
+    }
     let update = DefinitionUpdate {
         unit,
         tag: input.tag,

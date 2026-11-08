@@ -1,7 +1,9 @@
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{LeafPath, PlcPlatform, TypeExpr, UnitPath};
+use recipe_domain::plant::{
+    DerivedTypeReason, LeafPath, PlantError, PlcPlatform, RuleSet, TypeExpr, UnitPath,
+};
 use recipe_domain::recipe::{
     LimitInput, LimitList, Ordinal, ParameterTag, StoredParameter, ValueInput, VersionState,
 };
@@ -11,6 +13,7 @@ use super::{AddParameter, AddParameterInput, AddParameterOutput};
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, PARAMETER_TAG_UNIQUE, StorageError};
+use crate::memory::fixtures::scenarios::zone_draft;
 use crate::memory::fixtures::{
     Fixture, actor, field, lock_line, meta, mid, recipe_with, reference, rid, text, uid, user, vid,
 };
@@ -19,7 +22,8 @@ use crate::ports::Isolation;
 use crate::recipe::DraftOutput;
 use crate::recipe::definition_steps::map_tag_error;
 use crate::recipe::test_support::{
-    DRAFT_VERSION, archive_unit, seed_deleted, seed_speed_draft, speed_key, stored_parameters,
+    DRAFT_VERSION, archive_unit, seed_deleted, seed_speed_draft, seed_zone_on_int_struct,
+    speed_key, stored_parameters,
 };
 
 fn limit(min: &str, max: &str) -> LimitInput {
@@ -176,7 +180,7 @@ async fn the_entry_is_a_row_create_with_the_limit_rows() {
 }
 
 #[tokio::test]
-async fn an_array_of_sized_strings_takes_the_string_and_array_keys() {
+async fn an_array_of_sized_strings_takes_the_array_and_string_keys_in_the_order_of_the_texts() {
     let fixture = Fixture::new();
     seed_speed_draft(&fixture);
     let request = input(
@@ -186,7 +190,7 @@ async fn an_array_of_sized_strings_takes_the_string_and_array_keys() {
     );
     run(&fixture, request).await.unwrap();
     let mut expected = lock_prefix();
-    expected.extend([advisory("STRING"), advisory("ARRAY")]);
+    expected.extend([advisory("ARRAY"), advisory("STRING")]);
     assert_eq!(fixture.store.journal(), expected);
 }
 
@@ -428,4 +432,47 @@ async fn add_parameter_gives_no_leaf_text_for_an_array_value() {
         .unwrap();
 
     assert_eq!(output.value_text, None);
+}
+
+/// A request with the type text `Int@1`, which only the earlier rule parses.
+fn int_struct_input() -> AddParameterInput {
+    AddParameterInput {
+        type_expr: TypeExpr::from_stored("Int@1", RuleSet::Earlier).unwrap(),
+        ..input("INT", r#"{"x": 1}"#, Vec::new())
+    }
+}
+
+fn reason_of(error: &AppError) -> Option<DerivedTypeReason> {
+    match error {
+        AppError::Plant(PlantError::DerivedTypeInvalid { reason, .. }) => Some(*reason),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn a_type_text_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lock() {
+    let fixture = Fixture::new();
+    seed_speed_draft(&fixture);
+    seed_zone_on_int_struct(&fixture);
+    let error = run(&fixture, int_struct_input()).await.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_013);
+    assert_eq!(reason_of(&error), Some(DerivedTypeReason::ReservedName));
+    assert_eq!(stored_parameters(&fixture).len(), 2);
+    assert!(fixture.store.journal().is_empty());
+    assert_nothing_written(&fixture);
+}
+
+#[tokio::test]
+async fn a_struct_name_in_another_case_gives_plt_013_with_an_unknown_struct() {
+    let fixture = zone_draft();
+    let error = run(
+        &fixture,
+        input("st_zone@1", r#"{"setpoint": 1}"#, Vec::new()),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_013);
+    assert_eq!(reason_of(&error), Some(DerivedTypeReason::UnknownStruct));
+    assert_eq!(stored_parameters(&fixture).len(), 1);
+    assert_nothing_written(&fixture);
 }

@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use axum::extract::RawForm;
 use axum::extract::rejection::RawFormRejection;
 use recipe_domain::plant::limits::{MAX_DEPTH, MAX_LEAVES};
-use recipe_domain::plant::{LeafClass, LeafPath, LeafSegment, TypeExpr, TypeTree};
+use recipe_domain::plant::{LeafClass, LeafPath, LeafSegment, RuleSet, TypeExpr, TypeTree};
 use recipe_domain::recipe::{LeafTexts, LimitInput, LimitList, MemberValue, ParameterKey};
 
 use crate::error::{FieldError, FieldReason, WebError};
@@ -404,7 +404,8 @@ impl Parts {
             .plain
             .get("value_type")
             .map(|text| {
-                TypeExpr::parse(text).map_err(|_error| bad("value_type", FieldReason::Reload))
+                TypeExpr::from_stored(text, RuleSet::Earlier)
+                    .map_err(|_error| bad("value_type", FieldReason::Reload))
             })
             .transpose()?;
         Ok(SentFields {

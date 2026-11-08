@@ -2,19 +2,20 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafClass, Machine, MachineCode, MachineId, MemberName,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName,
-    UnitId,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeMember,
+    TypeName, UnitId,
 };
 use recipe_domain::text::Text;
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::error::{PLC_TYPE_NAMED_UNIQUE, StorageError};
+use crate::error::{PLC_TYPE_NAMED_UNIQUE, PLC_TYPE_STRUCT_NAME_CI_UNIQUE, StorageError};
 use crate::memory::{
     DERIVED_TYPE_LOCK_TABLE, JournalEntry, Lock, LockMode, MemoryClock, MemoryStore,
     MemoryTransaction, seed_type_id,
 };
+use crate::plant::derived_type_locks;
 use crate::ports::{DerivedTypeLock, Isolation, Transaction};
 
 const NOW_SECONDS: i64 = 1_000;
@@ -357,6 +358,24 @@ async fn insert_struct_of_an_existing_name_and_revision_returns_plc_type_named_u
 }
 
 #[tokio::test]
+async fn insert_struct_of_a_name_in_another_case_returns_plc_type_struct_name_ci_unique() {
+    let store = store();
+    let mut tx = begin(&store);
+    let first = struct_record(800, 1, "ST_Zone", 1, &[("a", int())]);
+    tx.types().insert_struct(&first).await.unwrap();
+    let other_case = struct_record(801, 1, "st_zone", 1, &[("a", int())]);
+    let error = tx.types().insert_struct(&other_case).await.unwrap_err();
+    assert!(
+        matches!(&error, StorageError::Duplicate { constraint } if constraint == PLC_TYPE_STRUCT_NAME_CI_UNIQUE),
+        "{error:?}"
+    );
+    let next_revision = struct_record(802, 1, "st_zone", 2, &[("a", int())]);
+    tx.types().insert_struct(&next_revision).await.unwrap();
+    let other_machine = struct_record(803, 2, "ST_ZONE", 1, &[("a", int())]);
+    tx.types().insert_struct(&other_machine).await.unwrap();
+}
+
+#[tokio::test]
 async fn insert_struct_with_an_unknown_member_type_returns_a_missing_reference() {
     let store = store();
     let mut tx = begin(&store);
@@ -383,14 +402,14 @@ async fn a_rolled_back_type_insert_keeps_nothing() {
 }
 
 #[tokio::test]
-async fn lock_derived_types_records_one_advisory_entry_per_key_in_order() {
+async fn lock_derived_types_records_one_advisory_entry_per_key_in_the_order_of_the_texts() {
     let store = store();
     let mut tx = begin(&store);
-    let keys = [
-        DerivedTypeLock::Struct(TypeName::parse("ST_A").unwrap()),
-        DerivedTypeLock::String,
-        DerivedTypeLock::Array,
+    let members = [
+        TypeExpr::parse("STRING(5)").unwrap(),
+        TypeExpr::parse("ARRAY[1..2] OF REAL").unwrap(),
     ];
+    let keys = derived_type_locks(Some(&TypeName::parse("ST_A").unwrap()), &members);
     tx.types().lock_derived_types(mid(1), &keys).await.unwrap();
     let locks: Vec<JournalEntry> = store
         .journal()
@@ -400,9 +419,9 @@ async fn lock_derived_types_records_one_advisory_entry_per_key_in_order() {
     assert_eq!(
         locks,
         vec![
-            lock(format!("{}:ST_A", mid(1))),
-            lock(format!("{}:STRING", mid(1))),
             lock(format!("{}:ARRAY", mid(1))),
+            lock(format!("{}:STRING", mid(1))),
+            lock(format!("{}:ST_A", mid(1))),
         ]
     );
 }

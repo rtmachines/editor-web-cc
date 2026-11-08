@@ -5,7 +5,9 @@ use std::fmt;
 use super::error::{DerivedTypeReason, PlantError, TypeLimit};
 use super::lexical::{IntegerError, is_canonical_digits, parse_integer, split_at_most};
 use super::limits::{MAX_DEPTH, MAX_DIMENSIONS};
-use super::{ArrayDimension, ArrayDimensions, Primitive, StringKind, TypeName, TypeNameReason};
+use super::{
+    ArrayDimension, ArrayDimensions, Primitive, RuleSet, StringKind, TypeName, TypeNameReason,
+};
 
 /// A type as written in a request, such as `ARRAY[1..8] OF REAL`.
 ///
@@ -47,7 +49,22 @@ impl TypeExpr {
     /// Returns [`PlantError::TypeTooLarge`] when the array prefixes have more levels than
     /// `json.max_depth`, because such a value never fits the JSON depth limit.
     pub fn parse(text: &str) -> Result<Self, PlantError> {
-        parse_type(text)
+        Self::from_stored(text, RuleSet::Current)
+    }
+
+    /// Parse the text form of a type under a rule set (ADR-0120, ADR-0143 (i1), (i2)).
+    ///
+    /// [`RuleSet::Current`] applies the rule of [`TypeExpr::parse`]. A struct name that is
+    /// reserved in any case gives [`DerivedTypeReason::ReservedName`]. [`RuleSet::Earlier`]
+    /// refuses only a primitive name in exact case. Thus the text `Int@1` names the stored
+    /// struct `Int@1`. A caller that reads a type text that it does not write passes
+    /// [`RuleSet::Earlier`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`TypeExpr::parse`].
+    pub fn from_stored(text: &str, rules: RuleSet) -> Result<Self, PlantError> {
+        parse_type(text, rules)
     }
 
     /// Return the array prefixes, from the outermost to the innermost.
@@ -107,7 +124,7 @@ fn invalid(text: &str, reason: DerivedTypeReason) -> PlantError {
 ///
 /// Each dimension adds one JSON level. The loop stops at once when the levels of the prefixes
 /// pass `MAX_DEPTH`, so a long text costs a bounded amount of work.
-fn parse_type(text: &str) -> Result<TypeExpr, PlantError> {
+fn parse_type(text: &str, rules: RuleSet) -> Result<TypeExpr, PlantError> {
     let mut arrays = Vec::new();
     let mut levels = 0_usize;
     let mut rest = text;
@@ -130,7 +147,7 @@ fn parse_type(text: &str) -> Result<TypeExpr, PlantError> {
         arrays.push(dimensions);
         rest = tail;
     }
-    let base = parse_base(rest).map_err(|reason| invalid(text, reason))?;
+    let base = parse_base(rest, rules).map_err(|reason| invalid(text, reason))?;
     Ok(TypeExpr { arrays, base })
 }
 
@@ -166,9 +183,9 @@ fn parse_bound(text: &str) -> Result<i32, DerivedTypeReason> {
 }
 
 /// Parse the base of a type, which is not an array.
-fn parse_base(text: &str) -> Result<BaseExpr, DerivedTypeReason> {
+fn parse_base(text: &str, rules: RuleSet) -> Result<BaseExpr, DerivedTypeReason> {
     if let Some((name, revision)) = text.split_once('@') {
-        return parse_udt(name, revision);
+        return parse_udt(name, revision, rules);
     }
     if let Some((kind, tail)) = split_string_keyword(text) {
         return parse_string(kind, tail);
@@ -207,11 +224,17 @@ fn parse_string(kind: StringKind, tail: &str) -> Result<BaseExpr, DerivedTypeRea
     })
 }
 
-/// Parse a struct reference `name@revision`.
-fn parse_udt(name: &str, revision: &str) -> Result<BaseExpr, DerivedTypeReason> {
-    let name = TypeName::parse(name).map_err(|reason| match reason {
+/// Parse a struct reference `name@revision` under a rule set (ADR-0143 (i2)).
+///
+/// A primitive name in exact case is `UnknownStruct` under both rule sets. Under
+/// [`RuleSet::Current`], any other reserved name is `ReservedName`.
+fn parse_udt(name: &str, revision: &str, rules: RuleSet) -> Result<BaseExpr, DerivedTypeReason> {
+    let name = TypeName::from_stored(name, rules).map_err(|reason| match reason {
         TypeNameReason::Format => DerivedTypeReason::Grammar,
-        TypeNameReason::Reserved => DerivedTypeReason::UnknownStruct,
+        TypeNameReason::Reserved if Primitive::parse(name).is_ok() => {
+            DerivedTypeReason::UnknownStruct
+        }
+        TypeNameReason::Reserved => DerivedTypeReason::ReservedName,
     })?;
     if !is_canonical_digits(revision, 10) {
         return Err(DerivedTypeReason::Grammar);

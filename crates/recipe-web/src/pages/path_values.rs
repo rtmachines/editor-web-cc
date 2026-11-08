@@ -15,7 +15,7 @@ use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query};
 use recipe_app::error::{AppError, Missing};
 use recipe_app::ports::AuditEntryId;
-use recipe_domain::plant::{MachineCode, MachineId, PlantError, TypeName, UnitPath};
+use recipe_domain::plant::{MachineCode, MachineId, PlantError, RuleSet, TypeName, UnitPath};
 use recipe_domain::recipe::{LangCode, ParameterKey, ReferenceNumber};
 use uuid::Uuid;
 
@@ -78,8 +78,12 @@ pub(crate) fn machine_id(text: &str) -> Result<MachineId, WebError> {
 /// # Errors
 ///
 /// Returns `404 E-WEB-005` with `Missing::MalformedType` when the text is not a struct name.
+///
+/// The text names a stored struct, so the earlier rule set applies (ADR-0143 (i1)). A stored
+/// struct such as `Int@1` stays readable. The domain refuses a new revision of a reserved name.
 pub(crate) fn type_name(text: &str) -> Result<TypeName, WebError> {
-    TypeName::parse(text).map_err(|_reason| not_found(Missing::MalformedType))
+    TypeName::from_stored(text, RuleSet::Earlier)
+        .map_err(|_reason| not_found(Missing::MalformedType))
 }
 
 /// Read the query value `rev`: a whole number from 1 with no sign and no leading zero.

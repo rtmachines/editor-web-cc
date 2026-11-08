@@ -256,7 +256,22 @@ The change `platform-ranges-round-1` ran on 2026-11-07.
 | D-2 | The owner decided on 2026-11-07 that the platform range check writes the stored text of each row into the change log of the site. It does not write the text into the pull request. | `docs/ops/runbook.md`, section "Check the stored data against the platform ranges" |
 | D-3 | The owner decided on 2026-11-07 that the platform range check runs at every upgrade. It is a sub-step of step 2 of the subsection "Upgrade", before step 3. | `docs/ops/runbook.md`, subsection "Upgrade" |
 | G-1 | PR #36 merged into `fix/form-error-listing` on 2026-11-07. PR #37 merged into `main` on 2026-11-07. The box of task 2.3 stayed empty. No scan result is in either pull request. The owner decided on 2026-11-07 that the platform range check of step 2 of the subsection "Upgrade" is the gate before production. Task 2.3 stays unchecked in the archive of the change. | `openspec/changes/archive/2026-11-07-platform-ranges-round-1/tasks.md` task 2.3, `docs/ops/runbook.md` subsection "Upgrade" |
+| G-2 | The owner decided on 2026-11-08 that task 5.3 of change `plc-identifier-rules` stays unchecked. No production server exists on 2026-11-08, so the scan has no stored data. The identifier rule check of step 2 of the subsection "Upgrade" is the gate before production. Task 5.3 stays unchecked in the archive of the change. | `openspec/changes/plc-identifier-rules/tasks.md` task 5.3, `docs/ops/runbook.md` subsection "Upgrade" |
 | R-1 | The code review found two LOW points and kept both. The name `LDT_UNSIGNED` stays (design D1). The test count `10413792000000000000` stays a literal in five test files. | No change |
+
+### 10.5 Record of WP3
+
+The change `plc-identifier-rules` started on 2026-11-07.
+
+| Point | What happened | Where |
+|---|---|---|
+| D-1 | The owner decided on 2026-11-07 that migration `0011_plc_type_rules.sql` builds both unique indexes on `lower(...)` without `CONCURRENTLY`, in one transaction after the row check. The files `0012` and `0013` of 6.1 task 4 do not exist. A lock timeout rolls back the whole file. | ADR-0143 (k), `deploy/ci/migration_rewrite.py` |
+| D-2 | The owner decided on 2026-11-07 that new type text uses the current rule set. A new parameter cannot reference a stored struct with a reserved name, such as `Int@1`. A stored reference stays readable. | ADR-0143, design D3a |
+| D-3 | The owner decided on 2026-11-07 that the reserved list is the union of the IEC 61131-3 Ed. 3 keyword table and the Beckhoff TwinCAT 3 page "Keywords", plus the 29 primitive names. | ADR-0143 (d), (e) |
+| D-4 | The owner decided on 2026-11-07 that a member name may be a keyword. Member names compare without case only. | ADR-0143 (l) |
+| D-5 | A stored pair of struct names or member names that differ only in case stops the upgrade at the row check of `0011`. The owner runs the identifier check before the upgrade and signs off in the pull request. A fix of such rows needs a new decision. | Task 5.3, `docs/ops/runbook.md` |
+| D-6 | The owner decided on 2026-11-07 that the export keeps the flag `loadable` for a version that references a stored struct with a reserved name. | ADR-0119 |
+| D-7 | The owner accepted on 2026-11-07 the IEC part of the reserved list from a third-party reproduction. Nobody checked it against the licensed text of the standard. | ADR-0143 (d) |
 
 ## 11. Done check
 

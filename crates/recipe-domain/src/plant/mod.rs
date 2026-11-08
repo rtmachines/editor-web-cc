@@ -43,7 +43,9 @@ pub use s7_address::{S7Address, S7AddressReason, S7Width};
 pub use s7_layout::{S7Layout, S7Member, S7Start, s7_members};
 pub use string_length::{StringKind, StringLength, StringLengthReason};
 pub use type_expr::{BaseExpr, TypeExpr};
-pub use type_name::{MemberName, MemberNameReason, TypeName, TypeNameReason};
+pub use type_name::{
+    MemberName, MemberNameReason, RESERVED_KEYWORDS, TypeName, TypeNameReason, is_reserved_name,
+};
 #[cfg(test)]
 pub(crate) use type_tree::fixtures;
 pub(crate) use type_tree::index_tuples;

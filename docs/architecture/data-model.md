@@ -90,7 +90,9 @@ Every advisory lock of the application uses the two-key form `pg_advisory_xact_l
 
 Order of the class-2 keys. A command that can insert `plc_type` rows first parses every `TypeExpr` that it carries. `RebindTypeRevision` computes the array shape of every moved parameter instead.
 
-The command collects the class-2 keys that the resolution needs and sorts them in this order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before its first `plc_type` insert. Two commands therefore never take two class-2 keys in opposite orders. The commands are `DefineUdt`, `AddParameter`, `UpdateParameterDefinition`, and `RebindTypeRevision` (section 6).
+The command collects the key texts that the resolution needs and keeps each text once. The adapter computes the key value of each text in one statement, keeps each value once, and sorts the values in ascending order. Then it takes one lock for each value in that order, before the first `plc_type` insert (ADR-0144).
+
+Two commands therefore never take two class-2 keys in opposite orders. Two texts with one key value take one lock. The commands are `DefineUdt`, `AddParameter`, `UpdateParameterDefinition`, and `RebindTypeRevision` (section 6).
 
 The one-key form `pg_advisory_lock(bigint)` is a different key space. Only the `sqlx` migrator uses it (`reliability.md` 5).
 
@@ -368,6 +370,8 @@ LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, public, pg_temp AS $$
         AND cardinality(lower_b) = cardinality(upper_b)
         -- At most 3 dimensions (Assumption A38).
         AND cardinality(lower_b) BETWEEN 1 AND 3
+        -- Both arrays start at the subscript 1 (ADR-0145).
+        AND array_lower(lower_b, 1) = 1 AND array_lower(upper_b, 1) = 1
         AND array_position(lower_b, NULL) IS NULL
         AND array_position(upper_b, NULL) IS NULL
         AND NOT EXISTS (
@@ -463,6 +467,9 @@ CREATE UNIQUE INDEX plc_type_string_unique
 CREATE UNIQUE INDEX plc_type_array_unique
     ON plc_type (machine_id, element_type_id, dim_lower, dim_upper)
     WHERE kind = 'array';
+-- A struct name compares without case on one machine (ADR-0143). Migration 0011 builds it.
+CREATE UNIQUE INDEX plc_type_struct_name_ci_unique
+    ON plc_type (machine_id, lower(name), revision) WHERE kind = 'struct';
 
 CREATE INDEX plc_type_element_type_id_idx ON plc_type (element_type_id);
 CREATE INDEX plc_type_machine_id_idx ON plc_type (machine_id);
@@ -492,7 +499,12 @@ CREATE TABLE plc_type_member (
     CONSTRAINT plc_type_member_no_self CHECK (struct_type_id <> member_type_id)
 );
 CREATE INDEX plc_type_member_member_type_id_idx ON plc_type_member (member_type_id);
+-- A member name compares without case in one struct (ADR-0143). Migration 0011 builds it.
+CREATE UNIQUE INDEX plc_type_member_name_ci_unique
+    ON plc_type_member (struct_type_id, lower(member_name));
 ```
+
+Migration `0001` creates the two exact-case constraints of the names. Migration `0011` adds the two unique indexes `plc_type_struct_name_ci_unique` and `plc_type_member_name_ci_unique` on `lower` of the name, without `CONCURRENTLY` (section 8, ADR-0143 (j)). The struct index holds `revision`, so it refuses a case pair only within one revision. The domain checks both rules first. For a struct name case pair from a parallel command, the struct index is the only guard. The member index is the second line behind the domain check. `recipe-app` maps `plc_type_struct_name_ci_unique` to `DuplicateTypeName` and `plc_type_member_name_ci_unique` to `DuplicateMemberName`.
 
 ### 3.5 `app_user`
 
@@ -2006,7 +2018,7 @@ Rules:
 | `AddUnit` | RC | `machine FOR SHARE`, then parent `unit FOR SHARE` | `INSERT unit` with the path from `parent_path` and `segment`, and `name` | `UnitAdded` | `unit_path_unique` → `DuplicateUnitPath`. `UnitPath::parse` of `parent_path` and `segment` → `InvalidUnitPath` (`E-PLT-017`, a malformed text or segment) or `UnitDepthExceeded` (`E-PLT-002`, more than 5 segments). `unit_path_format` and `unit_depth_range` are the last line. No unit with `parent_path` on the machine → `ParentNotFound` (`E-PLT-003`). `unit_parent_exists` → `ParentNotFound` (second line). Parent archived → `UnitArchived`. Machine archived → `MachineArchived` |
 | `RenameUnit` | RC | `machine FOR NO KEY UPDATE`, then `unit FOR UPDATE` | `UPDATE unit SET name` | `UnitRenamed` | `UnitArchived` |
 | `ArchiveUnit` | RC | `machine FOR NO KEY UPDATE`, then `unit FOR UPDATE` on the unit and its descendants (`WHERE machine_id = $m AND (path = $p OR path LIKE $p \|\| '.%') ORDER BY id`) | Require no parameter of an approved version or a live draft on these units. `UPDATE unit SET archived_at = now()` for the set | `UnitArchived` (one entry per unit) | Draft reference found → `UnitReferencedByDraft`. Approved reference found → `UnitReferencedByApproved`. Last live main unit → `LastMainUnit` |
-| `DefineUdt` | RC | `machine FOR SHARE`, then the class-2 advisory locks `pg_advisory_xact_lock(2, hashtext(machine_id::text \|\| ':' \|\| name))` in the order of section 1.4. The struct name comes first, then the `STRING`, `WSTRING`, and `ARRAY` keys that the member types need. All before the first insert. No row lock on `plc_type` | Parse every `members[i].type` first. `INSERT plc_type` (struct `name`, `revision = previous + 1`, `supersedes_type_id`, `platforms = ARRAY[machine.plc_platform]`). The server sets `supersedes_type_id` (the domain field `supersedes`) for a new revision. `EnsureDerivedType` resolves the `TypeExpr` of each `members[i].type`. `INSERT plc_type_member` per entry of `members[]`: `members[i].name` into `member_name`, the resolved type into `member_type_id`. Trigger 4.6 checks at commit | `UdtDefined` | `plc_type_named_unique` → `DuplicateTypeName` (second line behind the advisory lock). `plc_type_member_name_unique` → `DuplicateMemberName` (second line). Domain: `TypeCycle`, `MemberTypeNotOnPlatform`, `DerivedTypeInvalid`, `StructHasNoMembers`, `DuplicateMemberName`, `TypeTooLarge` (more than 1024 members, more than 16 384 leaves, or more than `json.max_depth` levels). A member type that is not on the platform is `MemberTypeNotOnPlatform`, not `DerivedTypeInvalid`. Then the domain marks parameters that use the old revision as outdated (`RebindTypeRevision` is a separate draft command) |
+| `DefineUdt` | RC | `machine FOR SHARE`, then the class-2 advisory locks `pg_advisory_xact_lock(2, hashtext(machine_id::text \|\| ':' \|\| name))` in the order of section 1.4. The keys are the struct name and the `STRING`, `WSTRING`, and `ARRAY` keys that the member types need. All before the first insert. No row lock on `plc_type` | Parse every `members[i].type` first. `INSERT plc_type` (struct `name`, `revision = previous + 1`, `supersedes_type_id`, `platforms = ARRAY[machine.plc_platform]`). The server sets `supersedes_type_id` (the domain field `supersedes`) for a new revision. `EnsureDerivedType` resolves the `TypeExpr` of each `members[i].type`. `INSERT plc_type_member` per entry of `members[]`: `members[i].name` into `member_name`, the resolved type into `member_type_id`. Trigger 4.6 checks at commit | `UdtDefined` | `plc_type_named_unique` and `plc_type_struct_name_ci_unique` → `DuplicateTypeName`. The class-2 advisory key holds the exact name. For two names that differ only in case, the index is the only guard (ADR-0143). A parallel command can commit first, so the domain check without case can miss it. `plc_type_member_name_unique` and `plc_type_member_name_ci_unique` → `DuplicateMemberName` (second line). Domain: `TypeCycle`, `MemberTypeNotOnPlatform`, `DerivedTypeInvalid`, `StructHasNoMembers`, `DuplicateMemberName`, `TypeTooLarge` (more than 1024 members, more than 16 384 leaves, or more than `json.max_depth` levels). A member type that is not on the platform is `MemberTypeNotOnPlatform`, not `DerivedTypeInvalid`. Then the domain marks parameters that use the old revision as outdated (`RebindTypeRevision` is a separate draft command) |
 | `EnsureDerivedType` (internal, called inside the transaction of the caller) | of the caller | The locks of the caller, which include `machine FOR SHARE` and every class-2 advisory lock with the name `STRING`, `WSTRING`, or `ARRAY` that the resolution needs. The caller takes them in the order of section 1.4 before the first insert. `EnsureDerivedType` takes no lock of its own. The foreign key `plc_type.machine_id` takes `FOR KEY SHARE` on the machine row that the caller holds | Parse the `TypeExpr` (`domain-model.md` 2.1). Resolve it, the innermost element first. A primitive: `SELECT` by `name` with `machine_id IS NULL`. A struct: `SELECT` by `(machine_id, name, revision)`. A `STRING(n)`, a `WSTRING(n)`, or an array: `INSERT plc_type ... ON CONFLICT DO NOTHING` on `plc_type_string_unique` or `plc_type_array_unique` with `platforms = ARRAY[machine.plc_platform]`, then `SELECT` the row | `DerivedTypeCreated` (one entry per inserted row) | Domain: `DerivedTypeInvalid` (parse error, unknown struct or revision, type not on the platform, more than 3 dimensions). `TypeTooLarge` (more than 16 384 leaves or more than `json.max_depth` levels) |
 | `CreateRecipe` | RC | `machine FOR SHARE` on the machine of `machine_code` | `INSERT recipe` with `reference_number` and `name`. `INSERT recipe_version` (number 1, draft, `change_note` from the user) | `RecipeCreated`, `VersionCreated` | `recipe_reference_unique` → `DuplicateReference`. No machine with `machine_code` → `MachineNotFound` (`E-PLT-019`). Only an archived machine with this code → `MachineArchived` |
 | `RenameRecipe` | RC | `recipe FOR UPDATE` | `UPDATE recipe SET name` | `RecipeRenamed` | `RecipeDeleted` |
@@ -2096,8 +2108,8 @@ Notes:
 
 - Tool: `sqlx migrate`. Files live in `migrations/` at the repository root. The crate `recipe-db` embeds them with `sqlx::migrate!("../../migrations")`.
 - Name: `NNNN_description.sql`, four digits, forward-only. There is no down migration. A mistake is corrected by a new migration. A shipped migration is never edited. `sqlx` verifies the checksum of every applied migration at start and refuses to run when a file changed.
-- Files of the first release, of ADR-0098, and of ADR-0109:
-  - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`.
+- Files of the first release, of ADR-0098, of ADR-0109, and of ADR-0143 to ADR-0145:
+  - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`. It does not hold the parts of section 3 that `0009` and `0011` add.
   - `0002_triggers.sql`: functions and triggers of section 4.
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. Each row carries its `leaf_class`. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration.
@@ -2107,6 +2119,7 @@ Notes:
   - `0008_audit_log_insert_columns.sql`: the column `INSERT` grants on `audit_log` of section 5.2 (ADR-0098 (b)).
   - `0009_export_client_role.sql`: the value `export_client` of `app_user.role` and its two constraints, added as `NOT VALID` (ADR-0109).
   - `0010_validate_export_client_checks.sql`: `VALIDATE CONSTRAINT` on the two constraints of `0009` (ADR-0109).
+  - `0011_plc_type_rules.sql`: one transaction. First the file takes a `SHARE` lock on `plc_type` and `plc_type_member` until it ends (ADR-0143 (k)). A check of the stored rows stops the file when an array row breaks ADR-0145 (a). It also stops the file when two struct names or two member names differ only in case. Then the file runs `CREATE OR REPLACE FUNCTION dims_valid` of section 3.3 (ADR-0145). Then it creates `plc_type_struct_name_ci_unique` of section 3.3 and `plc_type_member_name_ci_unique` of section 3.4 without `CONCURRENTLY` (ADR-0143 (j), (k)). The list `EXEMPT` permits both indexes and the `LOCK TABLE` statement of `0011` (ADR-0143 (k1)).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.

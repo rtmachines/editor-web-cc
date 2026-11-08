@@ -115,6 +115,8 @@ mod form_tests;
 #[cfg(test)]
 mod list_tests;
 #[cfg(test)]
+mod reserved_name_tests;
+#[cfg(test)]
 pub(crate) mod route_tests;
 #[cfg(test)]
 mod s7_layout_tests;

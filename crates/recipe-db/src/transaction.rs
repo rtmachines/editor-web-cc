@@ -23,7 +23,7 @@ mod recipe_writes;
 mod recipes;
 mod security_event_reads;
 mod settings;
-mod type_rows;
+pub(crate) mod type_rows;
 mod type_usage;
 mod types;
 mod unit_rows;

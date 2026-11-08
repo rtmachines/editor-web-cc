@@ -8,7 +8,7 @@
 use axum::response::Response;
 use recipe_app::ports::NonEmpty;
 use recipe_app::recipe::ParameterForm;
-use recipe_domain::plant::TypeExpr;
+use recipe_domain::plant::{RuleSet, TypeExpr};
 use recipe_domain::recipe::{LeafTexts, LimitList};
 
 use super::definition::{Checked, Definition, check};
@@ -80,7 +80,7 @@ async fn fields(ctx: Ctx<'_>, sent: &SentFields) -> Result<Response, WebError> {
     if text.is_empty() {
         return again(ctx, sent, None, "").await;
     }
-    match TypeExpr::parse(text) {
+    match TypeExpr::from_stored(text, RuleSet::Earlier) {
         Ok(expr) => again(ctx, sent, Some(expr), "").await,
         Err(error) => {
             let line = FieldError::plant(&error, Some("type".to_owned()));

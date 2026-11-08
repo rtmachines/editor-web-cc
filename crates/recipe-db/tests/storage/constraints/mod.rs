@@ -12,6 +12,7 @@ mod identity;
 mod parameter;
 mod plant;
 mod recipe;
+mod type_rules;
 mod types;
 
 use sqlx::PgConnection;
@@ -89,6 +90,7 @@ async fn covered_names_exist_in_the_catalog() {
     let names: Vec<&str> = [
         plant::COVERED,
         types::COVERED,
+        type_rules::COVERED,
         identity::COVERED,
         recipe::COVERED,
         parameter::COVERED,
@@ -122,6 +124,7 @@ fn every_named_constraint_and_unique_index_of_section_3_is_covered_or_exempt() {
     let covered: Vec<&str> = [
         plant::COVERED,
         types::COVERED,
+        type_rules::COVERED,
         identity::COVERED,
         recipe::COVERED,
         parameter::COVERED,

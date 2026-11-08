@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 use askama::Template;
 use recipe_app::ports::{ParameterRow, UnitCount};
 use recipe_app::recipe::ParameterList;
-use recipe_domain::plant::{BaseExpr, PlcPlatform, Primitive, TypeExpr};
+use recipe_domain::plant::{BaseExpr, PlcPlatform, Primitive, RuleSet, TypeExpr};
 use recipe_domain::recipe::{ParameterKey, RuleFault, RuleField};
 use recipe_domain::text::Text;
 
@@ -180,7 +180,7 @@ const fn is_address(field: &RuleField) -> bool {
 ///
 /// The grid shows `TRUE` and `FALSE` for a BOOL leaf. A STRING with the text `true` keeps its text.
 fn bool_word(t: Texts<'_>, type_text: &str, leaf_text: &str) -> Option<String> {
-    let is_bool = TypeExpr::parse(type_text).is_ok_and(|expr| {
+    let is_bool = TypeExpr::from_stored(type_text, RuleSet::Earlier).is_ok_and(|expr| {
         expr.arrays().is_empty() && matches!(expr.base(), BaseExpr::Primitive(Primitive::Bool))
     });
     if !is_bool {

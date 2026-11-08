@@ -168,6 +168,83 @@ fn type_expr_primitive_name_with_at_is_unknown_struct() {
     assert_eq!(reason_of("INT@1"), Some(DerivedTypeReason::UnknownStruct));
 }
 
+fn reason_under(text: &str, rules: RuleSet) -> Option<DerivedTypeReason> {
+    match TypeExpr::from_stored(text, rules) {
+        Err(PlantError::DerivedTypeInvalid { type_expr, reason }) => {
+            assert_eq!(type_expr, text);
+            Some(reason)
+        }
+        _ => None,
+    }
+}
+
+#[test]
+fn type_expr_reserved_struct_name_in_any_case_is_reserved_name() {
+    for text in [
+        "Int@1",
+        "int@1",
+        "ARRAY@1",
+        "Array@1",
+        "end_struct@1",
+        "R@1",
+    ] {
+        assert_eq!(
+            reason_of(text),
+            Some(DerivedTypeReason::ReservedName),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn type_expr_primitive_name_in_exact_case_stays_unknown_struct_under_both_rules() {
+    for text in ["INT@1", "STRING@1", "WSTRING@1", "ARRAY[1..2] OF REAL@1"] {
+        for rules in [RuleSet::Current, RuleSet::Earlier] {
+            assert_eq!(
+                reason_under(text, rules),
+                Some(DerivedTypeReason::UnknownStruct),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn type_expr_from_stored_earlier_resolves_a_reserved_struct_name() {
+    let earlier_name = |text| TypeName::from_stored(text, RuleSet::Earlier).unwrap();
+    for (text, name) in [("Int@1", "Int"), ("ARRAY@7", "ARRAY"), ("R@3", "R")] {
+        let parsed = TypeExpr::from_stored(text, RuleSet::Earlier).unwrap();
+        assert!(parsed.arrays().is_empty(), "{text}");
+        assert_eq!(
+            parsed.base(),
+            &BaseExpr::Udt {
+                name: earlier_name(name),
+                revision: text.rsplit('@').next().unwrap().parse().unwrap(),
+            },
+            "{text}"
+        );
+        assert_eq!(parsed.to_string(), text);
+    }
+    let nested = TypeExpr::from_stored("ARRAY[1..2] OF Int@1", RuleSet::Earlier).unwrap();
+    assert_eq!(nested.arrays().len(), 1);
+}
+
+#[test]
+fn type_expr_from_stored_earlier_keeps_the_grammar_checks() {
+    assert_eq!(
+        reason_under("1ST@1", RuleSet::Earlier),
+        Some(DerivedTypeReason::Grammar)
+    );
+    assert_eq!(
+        reason_under("Int@01", RuleSet::Earlier),
+        Some(DerivedTypeReason::Grammar)
+    );
+    assert_eq!(
+        reason_under("Int@2147483648", RuleSet::Earlier),
+        Some(DerivedTypeReason::UnknownStruct)
+    );
+}
+
 #[test]
 fn type_expr_reversed_bounds_with_leading_zeros_is_out_of_range() {
     assert_eq!(
@@ -266,8 +343,8 @@ fn base() -> impl Strategy<Value = String> {
             None => keyword.to_owned(),
         });
     let udt = ("[A-Za-z_][A-Za-z0-9_]{0,10}", 1_u32..=2_147_483_647)
-        .prop_filter("name is not a primitive", |(name, _)| {
-            Primitive::parse(name).is_err()
+        .prop_filter("name is not reserved", |(name, _)| {
+            !crate::plant::type_name::is_reserved_name(name)
         })
         .prop_map(|(name, revision)| format!("{name}@{revision}"));
     prop_oneof![primitive, string, udt]

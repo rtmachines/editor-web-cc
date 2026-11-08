@@ -4,6 +4,7 @@ mod add_unit;
 mod archive_machine;
 mod archive_unit;
 mod create_machine;
+mod current_type;
 mod define_udt;
 mod derived_lock;
 mod ensure_derived;
@@ -12,6 +13,7 @@ mod rename_machine;
 #[cfg(test)]
 mod short_rows;
 
+pub(crate) use current_type::require_current_type;
 pub use define_udt::{DefineUdt, DefineUdtInput, DefineUdtMode, DefineUdtOutput};
 pub(crate) use derived_lock::{derived_type_locks, rebind_locks};
 pub(crate) use ensure_derived::DerivedTypes;

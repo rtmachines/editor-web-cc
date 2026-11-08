@@ -21,6 +21,10 @@ pub const PARAMETER_TAG_UNIQUE: &str = "parameter_tag_unique";
 pub const PLC_TYPE_NAMED_UNIQUE: &str = "plc_type_named_unique";
 /// Unique constraint of the member names of one struct.
 pub const PLC_TYPE_MEMBER_NAME_UNIQUE: &str = "plc_type_member_name_unique";
+/// Unique index of the struct names of one machine, compared without case (ADR-0143 (j)).
+pub const PLC_TYPE_STRUCT_NAME_CI_UNIQUE: &str = "plc_type_struct_name_ci_unique";
+/// Unique index of the member names of one struct, compared without case (ADR-0143 (j)).
+pub const PLC_TYPE_MEMBER_NAME_CI_UNIQUE: &str = "plc_type_member_name_ci_unique";
 /// Unique index of the one live draft of a recipe.
 pub const RECIPE_VERSION_ONE_LIVE_DRAFT: &str = "recipe_version_one_live_draft";
 /// Foreign key from a unit to its parent unit.

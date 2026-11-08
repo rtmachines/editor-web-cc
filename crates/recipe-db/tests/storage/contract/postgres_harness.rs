@@ -40,8 +40,13 @@ ORDER BY a.ordinality RETURNING id";
 impl PgHarness {
     /// Create the test database, the pool, and the user.
     pub async fn create() -> Self {
+        Self::create_with(&PoolSettings::default()).await
+    }
+
+    /// Like `create`, with the settings of the pool. A race case uses a long `lock_timeout`.
+    pub async fn create_with(pool: &PoolSettings) -> Self {
         let database = TestDatabase::create().await;
-        let connected = Database::connect(&database.target(Role::App), &PoolSettings::default())
+        let connected = Database::connect(&database.target(Role::App), pool)
             .await
             .unwrap();
         let unit_of_work = connected.unit_of_work();

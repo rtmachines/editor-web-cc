@@ -391,3 +391,87 @@ fn struct_shape_error_comes_before_the_member_errors() {
     record.machine = None;
     assert_eq!(reason(record), DerivedTypeReason::RowShape);
 }
+
+/// Return a struct record with the name `text`, built under the earlier rule set.
+fn udt_named(text: &str, members: Vec<TypeMember>) -> PlcTypeRecord {
+    let mut record = udt(1, members);
+    if let RecordShape::Struct { name, .. } = &mut record.shape {
+        *name = TypeName::from_stored(text, RuleSet::Earlier).unwrap();
+    }
+    record
+}
+
+#[test]
+fn member_names_that_differ_only_in_case_are_plt_021_under_both_rule_sets() {
+    let members = vec![member("speed", 1), member("Speed", 2)];
+    let outcomes = [
+        PlcType::try_from(udt(1, members.clone())),
+        PlcType::from_stored(udt(1, members.clone()), RuleSet::Current),
+        PlcType::from_stored(udt(1, members), RuleSet::Earlier),
+    ];
+    for outcome in outcomes {
+        let error = outcome.unwrap_err();
+        assert!(
+            matches!(&error, PlantError::DuplicateMemberName { member, .. }
+            if member.as_str() == "Speed"),
+            "{error:?}"
+        );
+        assert_eq!(error.code().as_str(), "E-PLT-021");
+    }
+}
+
+#[test]
+fn member_names_in_two_cases_name_the_second_one_of_the_pair() {
+    let members = vec![member("Speed", 1), member("speed", 2)];
+    let error = PlcType::try_from(udt(1, members)).unwrap_err();
+    assert!(
+        matches!(&error, PlantError::DuplicateMemberName { member, .. }
+        if member.as_str() == "speed"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn reserved_struct_name_is_plt_013_with_reserved_name() {
+    for text in ["Int", "ARRAY", "end_struct"] {
+        let record = udt_named(text, members_of(1));
+        let (expr, why) = parts(record);
+        assert_eq!(expr, format!("{text}@1"));
+        assert_eq!(why, DerivedTypeReason::ReservedName);
+    }
+}
+
+#[test]
+fn reserved_struct_name_is_refused_by_the_current_rule_set_of_from_stored() {
+    let record = udt_named("Int", members_of(1));
+    let error = PlcType::from_stored(record, RuleSet::Current).unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::DerivedTypeInvalid {
+            reason: DerivedTypeReason::ReservedName,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn reserved_struct_name_is_accepted_by_the_earlier_rule_set() {
+    let record = udt_named("Int", members_of(1));
+    let built = PlcType::from_stored(record.clone(), RuleSet::Earlier).unwrap();
+    assert_eq!(built.kind(), TypeKind::Struct);
+    assert_eq!(built.shape(), &record.shape);
+}
+
+#[test]
+fn earlier_rule_set_keeps_the_other_struct_checks() {
+    let record = udt_named("Int", Vec::new());
+    let error = PlcType::from_stored(record, RuleSet::Earlier).unwrap_err();
+    assert!(matches!(error, PlantError::StructHasNoMembers { .. }));
+}
+
+#[test]
+fn primitive_row_keeps_its_name_under_both_rule_sets() {
+    let record = primitive(Primitive::Int, 2, None, None, all());
+    assert!(PlcType::try_from(record.clone()).is_ok());
+    assert!(PlcType::from_stored(record, RuleSet::Earlier).is_ok());
+}

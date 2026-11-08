@@ -52,6 +52,8 @@ pub enum DerivedTypeReason {
     /// Only a corrupt stored row or a bug gives this reason. P2.4 maps it
     /// to a storage error (design D5, D6).
     RowShape,
+    /// The struct name is a reserved IEC 61131-3 word or a primitive name (ADR-0143 (c)).
+    ReservedName,
 }
 
 impl fmt::Display for DerivedTypeReason {
@@ -62,6 +64,9 @@ impl fmt::Display for DerivedTypeReason {
             Self::NotOnPlatform => "the type does not exist on the platform of the machine",
             Self::OutOfRange => "a bound, a dimension, or a length is outside its range",
             Self::RowShape => "the stored type row does not match its kind",
+            Self::ReservedName => {
+                "the struct name is a reserved IEC 61131-3 word or a primitive name"
+            }
         })
     }
 }

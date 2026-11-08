@@ -4,9 +4,10 @@
 use std::collections::BTreeSet;
 
 use super::limits::MAX_MEMBERS;
+use super::type_name::is_reserved_name;
 use super::{
     ArrayDimensions, DerivedTypeReason, LeafClass, MachineId, MemberName, PlantError, PlcPlatform,
-    PlcTypeId, Primitive, StringKind, StringLength, TypeLimit, TypeName,
+    PlcTypeId, Primitive, RuleSet, StringKind, StringLength, TypeLimit, TypeName,
 };
 
 /// Kind of a type row.
@@ -120,6 +121,23 @@ impl TryFrom<PlcTypeRecord> for PlcType {
     type Error = PlantError;
 
     fn try_from(record: PlcTypeRecord) -> Result<Self, Self::Error> {
+        Self::from_stored(record, RuleSet::Current)
+    }
+}
+
+impl PlcType {
+    /// Check a type row under a rule set (ADR-0120, ADR-0143 (b), (i)).
+    ///
+    /// [`RuleSet::Current`] applies the rules of [`PlcType::try_from`]. [`RuleSet::Earlier`] does
+    /// not refuse a struct whose name is a reserved word. A stored struct such as `Int@1` stays
+    /// readable. The member names compare without case under both sets, because the indexes
+    /// of ADR-0143 (j) hold for every stored row.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of the first rule that the row breaks. The error codes are the ones
+    /// of [`PlcType::try_from`].
+    pub fn from_stored(record: PlcTypeRecord, rules: RuleSet) -> Result<Self, PlantError> {
         match &record.shape {
             RecordShape::Primitive {
                 primitive,
@@ -137,7 +155,7 @@ impl TryFrom<PlcTypeRecord> for PlcType {
                 element,
                 dimensions,
             } => check_array(&record, *element, dimensions)?,
-            RecordShape::Struct { .. } => check_struct(&record)?,
+            RecordShape::Struct { .. } => check_struct(&record, rules)?,
         }
         Ok(Self {
             id: record.id,
@@ -208,8 +226,8 @@ fn check_primitive(
 /// Check the rules of a struct row (`plc_type`, `plc_type_member`).
 ///
 /// The checks run in a fixed order. The row shape comes first, then the
-/// member count, the member names, and the self reference.
-fn check_struct(record: &PlcTypeRecord) -> Result<(), PlantError> {
+/// struct name, the member count, the member names, and the self reference.
+fn check_struct(record: &PlcTypeRecord, rules: RuleSet) -> Result<(), PlantError> {
     let RecordShape::Struct {
         name,
         revision,
@@ -231,6 +249,24 @@ fn check_struct(record: &PlcTypeRecord) -> Result<(), PlantError> {
             DerivedTypeReason::RowShape,
         ));
     }
+    if rules == RuleSet::Current && is_reserved_name(name.as_str()) {
+        return Err(invalid(
+            format!("{name}@{revision}"),
+            DerivedTypeReason::ReservedName,
+        ));
+    }
+    check_members(name, members, record.id)
+}
+
+/// Check the members of a struct row.
+///
+/// The checks run in a fixed order: the member count, the upper limit, the
+/// member names, and the self reference.
+fn check_members(
+    name: &TypeName,
+    members: &[TypeMember],
+    own_id: PlcTypeId,
+) -> Result<(), PlantError> {
     if members.is_empty() {
         return Err(PlantError::StructHasNoMembers {
             type_name: name.clone(),
@@ -244,14 +280,14 @@ fn check_struct(record: &PlcTypeRecord) -> Result<(), PlantError> {
     }
     let mut seen = BTreeSet::new();
     for member in members {
-        if !seen.insert(&member.name) {
+        if !seen.insert(member.name.as_str().to_ascii_lowercase()) {
             return Err(PlantError::DuplicateMemberName {
                 type_name: name.clone(),
                 member: member.name.clone(),
             });
         }
     }
-    if members.iter().any(|member| member.type_id == record.id) {
+    if members.iter().any(|member| member.type_id == own_id) {
         return Err(PlantError::TypeCycle {
             type_name: name.clone(),
         });

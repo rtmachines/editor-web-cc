@@ -27,6 +27,7 @@ pub(crate) mod approval;
 #[cfg(test)]
 mod approval_tests;
 pub(crate) mod date_world;
+pub(crate) mod earlier_name_world;
 #[cfg(test)]
 mod invariant_tests;
 pub(crate) mod large;

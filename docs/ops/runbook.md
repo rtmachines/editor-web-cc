@@ -35,6 +35,7 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
   - [Change log of the site](#change-log-of-the-site)
   - [Restore into production](#restore-into-production)
 - [Check the stored data against the platform ranges](#check-the-stored-data-against-the-platform-ranges)
+- [Check the stored type rows against the identifier rules](#check-the-stored-type-rows-against-the-identifier-rules)
 - [Check the TwinCAT version before you add a TwinCat3 machine](#check-the-twincat-version-before-you-add-a-twincat3-machine)
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
@@ -1083,6 +1084,28 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 5. Fix an approved row by creating a new version.
 6. Write the result into the [change log of the site](#change-log-of-the-site).
 
+## Check the stored type rows against the identifier rules
+
+The query lists the stored type rows that the identifier rules of ADR-0143 reject. It writes nothing.
+The output has the columns `machine_code`, `type_name`, `revision`, `part`, and `stored_text`.
+A case pair gives two rows, one for each spelling.
+The column `part` is `struct_name_case`, `member_name_case`, `array_subscript`, or `reserved_struct_name`.
+The parts `struct_name_case`, `member_name_case`, and `array_subscript` must give 0 rows before an upgrade.
+Migration `0011` stops the upgrade otherwise.
+The part `reserved_struct_name` is for information. A struct with a reserved name gets no new revision.
+The owner signs off each row of `reserved_struct_name`.
+
+1. Run the query from the directory `deploy/` of the new release:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/check-identifier-rules.sql
+```
+
+2. The owner reads each output row.
+3. Stop the upgrade when a row of `struct_name_case`, `member_name_case`, or `array_subscript` remains.
+4. Accept or sign off each row of `reserved_struct_name`.
+5. Write the result into the [change log of the site](#change-log-of-the-site).
+
 ## Check the TwinCAT version before you add a TwinCat3 machine
 
 The editor does not read the TwinCAT version of a controller.
@@ -1107,6 +1130,9 @@ A rollback needs the images of the previous release. See the section "Keep the i
    1. Run the section "Check the stored data against the platform ranges" from the directory `deploy/` of the new release.
    Run it after the segment check and before step 3.
    Continue only when the query returns 0 rows or the owner accepted each row.
+   2. Run the section "Check the stored type rows against the identifier rules" from the directory `deploy/` of the new release.
+   Run it after the platform-ranges check and before step 3.
+   Continue only when the parts `struct_name_case`, `member_name_case`, and `array_subscript` give 0 rows.
 3. Run `docker compose run --rm --no-deps backup restore-test`. `.env` still holds the previous tag. Continue only after the test passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.

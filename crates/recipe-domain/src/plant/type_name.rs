@@ -3,15 +3,214 @@
 
 use std::fmt;
 
+use super::RuleSet;
 use super::primitive::Primitive;
 
 /// Longest length of a name in bytes. Names are ASCII, so bytes are characters.
 const MAX_NAME_LENGTH: usize = 64;
 
+/// The IEC 61131-3 and TwinCAT keywords that are not primitive names, in upper case
+/// (ADR-0143 (d)). A struct name is not one of them, in any case.
+pub const RESERVED_KEYWORDS: [&str; 182] = [
+    "ABS",
+    "ABSTRACT",
+    "ACOS",
+    "ACTION",
+    "ADD",
+    "ADR",
+    "AND",
+    "ANDN",
+    "ANY",
+    "ANY_BIT",
+    "ANY_CHAR",
+    "ANY_CHARS",
+    "ANY_DATE",
+    "ANY_DERIVED",
+    "ANY_DURATION",
+    "ANY_ELEMENTARY",
+    "ANY_INT",
+    "ANY_MAGNITUDE",
+    "ANY_NUM",
+    "ANY_REAL",
+    "ANY_SIGNED",
+    "ANY_STRING",
+    "ANY_UNSIGNED",
+    "ARRAY",
+    "ASIN",
+    "AT",
+    "ATAN",
+    "BITADR",
+    "BY",
+    "CAL",
+    "CALC",
+    "CALCN",
+    "CASE",
+    "CLASS",
+    "CONFIGURATION",
+    "CONSTANT",
+    "CONTINUE",
+    "COS",
+    "DIV",
+    "DO",
+    "DT",
+    "ELSE",
+    "ELSIF",
+    "EN",
+    "END_ACTION",
+    "END_CASE",
+    "END_CLASS",
+    "END_CONFIGURATION",
+    "END_FOR",
+    "END_FUNCTION",
+    "END_FUNCTION_BLOCK",
+    "END_GET",
+    "END_IF",
+    "END_INTERFACE",
+    "END_METHOD",
+    "END_NAMESPACE",
+    "END_PROGRAM",
+    "END_PROPERTY",
+    "END_REPEAT",
+    "END_RESOURCE",
+    "END_SET",
+    "END_STEP",
+    "END_STRUCT",
+    "END_TRANSITION",
+    "END_TYPE",
+    "END_VAR",
+    "END_WHILE",
+    "ENO",
+    "EQ",
+    "EXIT",
+    "EXP",
+    "EXPT",
+    "EXTENDS",
+    "FALSE",
+    "FINAL",
+    "FOR",
+    "FROM",
+    "FUNCTION",
+    "FUNCTION_BLOCK",
+    "F_EDGE",
+    "GE",
+    "GET",
+    "GT",
+    "IF",
+    "IMPLEMENTS",
+    "INDEXOF",
+    "INITIAL_STEP",
+    "INTERFACE",
+    "INTERNAL",
+    "JMP",
+    "JMPC",
+    "JMPCN",
+    "LD",
+    "LDATE_AND_TIME",
+    "LDN",
+    "LE",
+    "LN",
+    "LOG",
+    "LT",
+    "LTIME_OF_DAY",
+    "MAX",
+    "METHOD",
+    "MIN",
+    "MOD",
+    "MOVE",
+    "MUL",
+    "MUX",
+    "NAMESPACE",
+    "NE",
+    "NON_RETAIN",
+    "NOT",
+    "NULL",
+    "OF",
+    "ON",
+    "OR",
+    "ORN",
+    "OVERLAP",
+    "OVERRIDE",
+    "PARAMS",
+    "PERSISTENT",
+    "POINTER",
+    "PRIVATE",
+    "PROGRAM",
+    "PROPERTY",
+    "PROTECTED",
+    "PUBLIC",
+    "R",
+    "READ_ONLY",
+    "READ_WRITE",
+    "REF",
+    "REFERENCE",
+    "REF_TO",
+    "REPEAT",
+    "RESOURCE",
+    "RET",
+    "RETAIN",
+    "RETC",
+    "RETCN",
+    "RETURN",
+    "ROL",
+    "ROR",
+    "R_EDGE",
+    "S",
+    "SEL",
+    "SET",
+    "SHL",
+    "SHR",
+    "SIN",
+    "SIZEOF",
+    "SQRT",
+    "ST",
+    "STEP",
+    "STN",
+    "STRUCT",
+    "SUB",
+    "SUPER",
+    "TAN",
+    "TASK",
+    "THEN",
+    "THIS",
+    "TO",
+    "TOD",
+    "TRANSITION",
+    "TRUE",
+    "TRUNC",
+    "TYPE",
+    "UNTIL",
+    "USING",
+    "VAR",
+    "VAR_ACCESS",
+    "VAR_CONFIG",
+    "VAR_EXTERNAL",
+    "VAR_GLOBAL",
+    "VAR_INPUT",
+    "VAR_IN_OUT",
+    "VAR_OUTPUT",
+    "VAR_STAT",
+    "VAR_TEMP",
+    "WHILE",
+    "WITH",
+    "XOR",
+    "XORN",
+];
+
+/// Tell whether a text is an IEC keyword or a primitive name, in any case (ADR-0143 (c)).
+#[must_use]
+pub fn is_reserved_name(text: &str) -> bool {
+    RESERVED_KEYWORDS
+        .iter()
+        .any(|word| word.eq_ignore_ascii_case(text))
+        || Primitive::ALL
+            .iter()
+            .any(|primitive| primitive.name().eq_ignore_ascii_case(text))
+}
+
 /// Name of a struct type, such as `ST_Zone`.
 ///
 /// The grammar is `^[A-Za-z_][A-Za-z0-9_]{0,63}$`. A name is not a primitive
-/// type name. The check is case-sensitive, so `Int` is a valid struct name.
+/// type name and not an IEC keyword, in any case (ADR-0143 (c)).
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeName(String);
 
@@ -27,7 +226,7 @@ pub struct MemberName(String);
 pub enum TypeNameReason {
     /// The text does not match the grammar of a name.
     Format,
-    /// The text is the name of a primitive type.
+    /// The text is an IEC keyword or the name of a primitive type.
     Reserved,
 }
 
@@ -47,7 +246,9 @@ impl fmt::Display for TypeNameReason {
                     "a type name is 1 to {MAX_NAME_LENGTH} ASCII letters, digits, or underscores"
                 )
             }
-            Self::Reserved => f.write_str("a type name cannot be a primitive type name"),
+            Self::Reserved => {
+                f.write_str("a type name cannot be an IEC keyword or a primitive type name")
+            }
         }
     }
 }
@@ -85,12 +286,30 @@ impl TypeName {
     /// # Errors
     ///
     /// Returns [`TypeNameReason::Format`] when the text does not match the grammar.
-    /// Returns [`TypeNameReason::Reserved`] when the text is a primitive name.
+    /// Returns [`TypeNameReason::Reserved`] when the text is an IEC keyword or a primitive name,
+    /// in any case.
     pub fn parse(text: &str) -> Result<Self, TypeNameReason> {
+        Self::from_stored(text, RuleSet::Current)
+    }
+
+    /// Read the name of a struct type under a rule set (ADR-0120, ADR-0143 (i1)).
+    ///
+    /// [`RuleSet::Current`] applies the rule of [`TypeName::parse`]. [`RuleSet::Earlier`]
+    /// refuses only a primitive name in exact case. A stored struct such as `Int` stays readable.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TypeNameReason::Format`] when the text does not match the grammar.
+    /// Returns [`TypeNameReason::Reserved`] when the rule set refuses the text as a reserved name.
+    pub fn from_stored(text: &str, rules: RuleSet) -> Result<Self, TypeNameReason> {
         if !is_name(text) {
             return Err(TypeNameReason::Format);
         }
-        if Primitive::parse(text).is_ok() {
+        let reserved = match rules {
+            RuleSet::Current => is_reserved_name(text),
+            RuleSet::Earlier => Primitive::parse(text).is_ok(),
+        };
+        if reserved {
             return Err(TypeNameReason::Reserved);
         }
         Ok(Self(text.to_owned()))

@@ -49,7 +49,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 - The audit insert runs in the transaction of the command. §10 gives the state rule and the `aggregate_type` of each entity.
 - A statement that locks several rows of one table orders them by `id`. `app_user` rows get `FOR NO KEY UPDATE`.
 - Advisory locks use `pg_advisory_xact_lock(class, key)`. Class 1 is `Login` T1. Class 2 is the class of derived types. No code takes class 3. Class 4 with the key 0 is the guard lock of the last Administrator (ADR-0096).
-- A command sorts its class-2 keys in the order struct name, `STRING`, `WSTRING`, `ARRAY`. It takes them before its first `plc_type` insert.
+- A command takes its class-2 locks in the ascending order of their key values (`hashtext`), each value once (ADR-0144). It takes them before its first `plc_type` insert.
 - Only the `sqlx` migrator uses the one-key form `pg_advisory_lock(bigint)`.
 - Isolation is `READ COMMITTED` with no retry. Only `create-admin` runs `SERIALIZABLE` and runs once more on `40001` (ADR-0035 (h), ADR-0096).
 - A query reads in `READ COMMITTED READ ONLY`. A draft query of ADR-0042 and the preview and diff queries of ADR-0050 read in `REPEATABLE READ READ ONLY`. A query never retries.

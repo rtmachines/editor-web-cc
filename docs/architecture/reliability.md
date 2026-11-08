@@ -450,7 +450,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 | `LangCode` | `^[a-z]{2,3}(-[A-Z]{2})?$`, not `en` (English is the base text, A17) |
 | `S7Address` | Grammar, width rule, alignment rule, overlap rule, and the end and data block rules of ADR-0116: `domain-model.md` 2.1. Platform rule: required on `S7_300`, optional on `S7_1200` and `S7_1500`, not allowed on `CodesysIec` and `TwinCat3` (A31) |
 | `S7Layout` | `domain-model.md` 2.1: `BOOL` packing, even-byte alignment, struct and array size |
-| `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved primitive name |
+| `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved word of ADR-0143 (c) in any case. A stored name passes the earlier rule of ADR-0143 (i) |
 | `StringLength` | Range per platform: the `StringLength` table of `domain-model.md` 2.1 |
 | `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure of the reason table of `domain-model.md` 2.1 is `E-PLT-013`. The exception is a member of `DefineUdt` whose type is not on the platform: `E-PLT-006`. A type above a size limit is `E-PLT-018` |
 | `ArrayDimension` | `lower <= upper`, `upper - lower < 65536`, at most 3 dimensions (A38, `domain-model.md` 2.1) |
@@ -478,7 +478,7 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 
 ## 5. Migrations and schema evolution
 
-- Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`, `0005_security_event_guard.sql`, and `0006_operations.sql` (`data-model.md` 8). The release of ADR-0098 adds `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`. The release of ADR-0109 adds `0009_export_client_role.sql` and `0010_validate_export_client_checks.sql`.
+- Migrations are SQL files in `migrations/` at the repository root, managed by `sqlx::migrate!`. The file name is `NNNN_description.sql`. The first release ships `0001_schema.sql`, `0002_triggers.sql`, `0003_grants.sql`, `0004_seed_plc_types.sql`, `0005_security_event_guard.sql`, and `0006_operations.sql` (`data-model.md` 8). The release of ADR-0098 adds `0007_audit_definer_operators.sql` and `0008_audit_log_insert_columns.sql`. The release of ADR-0109 adds `0009_export_client_role.sql` and `0010_validate_export_client_checks.sql`. The release of ADR-0143 to ADR-0145 adds `0011_plc_type_rules.sql`.
 - Migrations are forward-only. There is no `down` file. A rollback is a new forward migration or a restore from backup.
 - A migration that shipped is never edited. `sqlx` stores a checksum of each applied migration in `_sqlx_migrations`. A changed checksum stops the migrator with an error.
 - Roles and the database are not created by a migration. The script `deploy/db/initdb/01-roles.sh` runs once as the PostgreSQL superuser when the `db` volume is empty. It reads the Docker secrets and creates `recipe_migrator`, `recipe_app`, `audit_owner`, `recipe_backup`, `recipe_replicator`, and the database. It grants `pg_read_all_stats` to `audit_owner` and not to `recipe_app` (ADR-0069 (f)).
