@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 
+use recipe_domain::audit::AuditAction;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, DerivedTypeReason, PlantError, PlcPlatform, PlcType,
@@ -15,7 +16,7 @@ use super::UpdateParameterDefinitionInput;
 use super::requests::{run, speed_request, with_retype, with_type};
 use crate::error::AppError;
 use crate::memory::fixtures::{Fixture, mid, parameter_on, text, tid, uid, vid};
-use crate::memory::seed_type_id;
+use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, seed_type_id};
 use crate::recipe::test_support::{
     DRAFT_VERSION, DraftSnapshot, seed_speed_draft, speed_key, stored_parameters, zone_key,
 };
@@ -175,4 +176,60 @@ async fn a_stored_array_of_an_array_stays_when_only_the_name_changes() {
     assert_eq!(row.name_en.as_str(), "Renamed cells");
     assert_eq!(row.plc_type, tid(STORED_NESTED));
     assert_eq!(fixture.store.state().types.len(), types_before);
+}
+
+#[tokio::test]
+async fn a_stored_array_of_an_array_stays_when_the_name_and_the_value_change() {
+    let fixture = stored_nested_draft();
+    let types_before = fixture.store.state().types.len();
+    let request = with_retype(cells_request(), "[[7,8,9],[10,11,12]]", Vec::new());
+    let output = run(&fixture, request).await.unwrap();
+    assert_eq!(output.row_version, 2);
+    let row = stored_parameters(&fixture)
+        .into_iter()
+        .find(|row| row.key == zone_key())
+        .unwrap();
+    assert_eq!(row.name_en.as_str(), "Renamed cells");
+    assert_eq!(row.plc_type, tid(STORED_NESTED));
+    assert_eq!(row.value.as_json(), &json!([[7, 8, 9], [10, 11, 12]]));
+    assert_eq!(fixture.store.state().types.len(), types_before);
+    let actions: Vec<AuditAction> = fixture
+        .store
+        .audit_entries()
+        .iter()
+        .map(|entry| entry.action())
+        .collect();
+    assert_eq!(actions, vec![AuditAction::ParameterDefinitionUpdated]);
+}
+
+/// The tables that a refused type must not lock: the unit and the class-2 type keys.
+fn locked_tables(fixture: &Fixture) -> Vec<&'static str> {
+    fixture
+        .store
+        .journal()
+        .into_iter()
+        .filter_map(|line| match line {
+            JournalEntry::Lock(lock) => Some(lock.table),
+            JournalEntry::Begin(_) => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_refused_array_of_an_array_takes_no_unit_lock_and_no_type_key() {
+    let fixture = draft_on(PlcPlatform::S7_1500);
+    let before = DraftSnapshot::capture(&fixture);
+    let types_before = fixture.store.state().types.len();
+    let request = with_retype(
+        with_type(speed_request(), NESTED_INT),
+        "[[1,2],[3,4]]",
+        Vec::new(),
+    );
+    let error = run(&fixture, request).await.unwrap_err();
+    assert_refuses_nesting(&error);
+    let tables = locked_tables(&fixture);
+    assert!(!tables.contains(&DERIVED_TYPE_LOCK_TABLE), "{tables:?}");
+    assert!(!tables.contains(&"unit"), "{tables:?}");
+    assert_eq!(fixture.store.state().types.len(), types_before);
+    before.assert_unchanged(&fixture);
 }

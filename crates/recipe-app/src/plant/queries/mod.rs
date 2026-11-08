@@ -37,7 +37,7 @@ pub use machines::{
     GetMachine, GetMachineForm, GetMachineInput, ListMachines, ListMachinesInput, MachineForm,
     MachineFormInput, MachineList, MachineRef, MachineView,
 };
-pub(crate) use type_text::type_text;
+pub(crate) use type_text::{expr_names_row, type_text};
 pub use types::{
     GetTypeTree, GetUdtForm, ListTypes, TypeList, TypeListRow, TypeView, TypesInput, UdtForm,
     UdtFormInput,

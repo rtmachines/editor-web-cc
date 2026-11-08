@@ -17,7 +17,7 @@ pub(crate) use current_type::require_current_type;
 pub use define_udt::{DefineUdt, DefineUdtInput, DefineUdtMode, DefineUdtOutput};
 pub(crate) use derived_lock::{derived_type_locks, rebind_locks};
 pub(crate) use ensure_derived::DerivedTypes;
-pub(crate) use queries::type_text;
+pub(crate) use queries::{expr_names_row, type_text};
 mod rename_unit;
 mod resolve;
 
