@@ -25,6 +25,8 @@ pub use shape::ArrayShape;
 #[cfg(test)]
 mod earlier_tests;
 #[cfg(test)]
+mod kept_member_tests;
+#[cfg(test)]
 mod test_support;
 mod value;
 

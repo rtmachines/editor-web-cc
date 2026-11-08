@@ -256,7 +256,7 @@ The change `platform-ranges-round-1` ran on 2026-11-07.
 | D-2 | The owner decided on 2026-11-07 that the platform range check writes the stored text of each row into the change log of the site. It does not write the text into the pull request. | `docs/ops/runbook.md`, section "Check the stored data against the platform ranges" |
 | D-3 | The owner decided on 2026-11-07 that the platform range check runs at every upgrade. It is a sub-step of step 2 of the subsection "Upgrade", before step 3. | `docs/ops/runbook.md`, subsection "Upgrade" |
 | G-1 | PR #36 merged into `fix/form-error-listing` on 2026-11-07. PR #37 merged into `main` on 2026-11-07. The box of task 2.3 stayed empty. No scan result is in either pull request. The owner decided on 2026-11-07 that the platform range check of step 2 of the subsection "Upgrade" is the gate before production. Task 2.3 stays unchecked in the archive of the change. | `openspec/changes/archive/2026-11-07-platform-ranges-round-1/tasks.md` task 2.3, `docs/ops/runbook.md` subsection "Upgrade" |
-| G-2 | The owner decided on 2026-11-08 that task 5.3 of change `plc-identifier-rules` stays unchecked. No production server exists on 2026-11-08, so the scan has no stored data. The identifier rule check of step 2 of the subsection "Upgrade" is the gate before production. Task 5.3 stays unchecked in the archive of the change. | `openspec/changes/plc-identifier-rules/tasks.md` task 5.3, `docs/ops/runbook.md` subsection "Upgrade" |
+| G-2 | The owner decided on 2026-11-08 that task 5.3 of change `plc-identifier-rules` stays unchecked. No production server exists on 2026-11-08, so the scan has no stored data. The identifier rule check of step 2 of the subsection "Upgrade" is the gate before production. Task 5.3 stays unchecked in the archive of the change. | `openspec/changes/archive/2026-11-08-plc-identifier-rules/tasks.md` task 5.3, `docs/ops/runbook.md` subsection "Upgrade" |
 | R-1 | The code review found two LOW points and kept both. The name `LDT_UNSIGNED` stays (design D1). The test count `10413792000000000000` stays a literal in five test files. | No change |
 
 ### 10.5 Record of WP3
@@ -272,6 +272,17 @@ The change `plc-identifier-rules` started on 2026-11-07.
 | D-5 | A stored pair of struct names or member names that differ only in case stops the upgrade at the row check of `0011`. The owner runs the identifier check before the upgrade and signs off in the pull request. A fix of such rows needs a new decision. | Task 5.3, `docs/ops/runbook.md` |
 | D-6 | The owner decided on 2026-11-07 that the export keeps the flag `loadable` for a version that references a stored struct with a reserved name. | ADR-0119 |
 | D-7 | The owner accepted on 2026-11-07 the IEC part of the reserved list from a third-party reproduction. Nobody checked it against the licensed text of the standard. | ADR-0143 (d) |
+
+### 10.6 Record of WP5
+
+The change `rebind-shape-identity` started on 2026-11-08. The plan review of 2026-11-08 found three points outside the scope of WP5. The owner moved them to later changes. The code review of 2026-11-08 found one more point, F-11.
+
+| Point | What to do | Result goes to |
+|---|---|---|
+| F-8 | A UDT revision that renames a member only by case, such as `speed` to `Speed`, makes the member new at a rebind. The value needs a new entry (`E-RCP-028`), and the limit is refused (`E-RCP-029`). `MemberName` compares with case (`crates/recipe-domain/src/plant/type_name.rs:221`), but ADR-0143 (b) treats both as one name. | Later change with a new ADR that amends ADR-0146 (l) |
+| F-9 | A struct member that moves to a newer revision with equal members stays new at a rebind (ADR-0146 (e)). The cascade from `ST_Line@1` to `ST_Line@2` asks again for each leaf of the embedded struct. | Owner decision, then a later change if needed |
+| F-10 | The text of `E-RCP-029` says that the revision gives the member another type. After ADR-0146, a member with another row of one shape keeps its limit, so the text means another shape. | Later change of the text in `reliability.md` §1.2 and the Fluent bundles |
+| F-11 | No test of `recipe-web` shows a rebind that keeps a member of one type shape. The tests of `recipe-domain`, `recipe-app`, and `recipe-db` show it. | Later change, if a web regression appears |
 
 ## 11. Done check
 
