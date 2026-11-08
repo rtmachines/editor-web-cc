@@ -50,8 +50,8 @@ const PLANT_TEXTS: &[(&str, &str, &str)] = &[
     ),
     (
         "reason-type-name",
-        "a type name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore. It is not new or a primitive name",
-        "nazwa typu ma od 1 do 64 liter, cyfr i podkreśleń i zaczyna się literą lub podkreśleniem. Nie może to być new ani nazwa typu prostego",
+        "a type name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore. It is not new, an IEC keyword, or a primitive name, in any case",
+        "nazwa typu ma od 1 do 64 liter, cyfr i podkreśleń i zaczyna się literą lub podkreśleniem. Nie może to być new, słowo kluczowe IEC ani nazwa typu prostego, bez względu na wielkość liter",
     ),
     (
         "reason-member-name",

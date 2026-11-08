@@ -40,4 +40,6 @@ pub use migrator::migrate_from_directory;
 pub mod statements {
     /// The statement of `RecipeReads::parameter_page`.
     pub const PARAMETER_PAGE: &str = crate::transaction::parameter_reads::SELECT_PAGE;
+    /// The statement of `TypeCatalog::lock_derived_types` that orders the class-2 lock keys.
+    pub const DERIVED_LOCK_KEYS: &str = crate::transaction::type_rows::DERIVED_LOCK_KEYS;
 }

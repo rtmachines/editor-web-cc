@@ -7,5 +7,6 @@ mod advisory;
 mod derived;
 mod lookup;
 mod rows;
+mod stored;
 mod structs;
 mod usage;

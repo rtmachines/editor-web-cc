@@ -14,9 +14,10 @@ use recipe_domain::plant::{
 use recipe_domain::recipe::ReferenceNumber;
 use uuid::Uuid;
 
-use super::WebError;
 use super::answer::{ErrorContext, answer};
-use crate::i18n::Lang;
+use super::plant::plant_line_args;
+use super::{LineArg, WebError};
+use crate::i18n::{Bundles, Lang};
 use crate::test_support::state;
 
 /// The largest body that a test reads.
@@ -250,6 +251,11 @@ async fn plant_error_args_write_each_reason_of_a_type_in_the_ui_language() {
             "the stored type row does not match its kind",
             "zapisany wiersz typu nie pasuje do swojego rodzaju",
         ),
+        (
+            DerivedTypeReason::ReservedName,
+            "the struct name is a reserved IEC 61131-3 word or a primitive name",
+            "nazwa struktury jest zastrzeżonym słowem IEC 61131-3 albo nazwą typu prostego",
+        ),
     ];
     for (reason, english, polish) in cases {
         let error = PlantError::DerivedTypeInvalid {
@@ -267,6 +273,31 @@ async fn plant_error_args_write_each_reason_of_a_type_in_the_ui_language() {
             "{pl}"
         );
     }
+}
+
+#[test]
+fn plant_error_args_name_the_reserved_name_reason_by_its_key() {
+    let reason = DerivedTypeReason::ReservedName;
+    let error = PlantError::DerivedTypeInvalid {
+        type_expr: "Int@1".to_owned(),
+        reason,
+    };
+    let word = plant_line_args(&error)
+        .into_iter()
+        .find_map(|(name, arg)| (name == "reason").then_some(arg));
+    assert_eq!(
+        word,
+        Some(LineArg::Word {
+            key: "type-reason-reserved-name".to_owned(),
+            args: Vec::new(),
+            fallback: reason.to_string(),
+        })
+    );
+    let bundles = Bundles::load().unwrap();
+    assert_eq!(
+        bundles.message(Lang::En, "type-reason-reserved-name", None),
+        Some(reason.to_string())
+    );
 }
 
 #[tokio::test]

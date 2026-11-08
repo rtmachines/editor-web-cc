@@ -15,6 +15,7 @@ use super::queries::value_text;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, StorageError};
+use crate::plant::require_current_type;
 use crate::ports::{NonEmpty, RowImage};
 
 /// The parsed request of `AddParameter`.
@@ -105,6 +106,7 @@ impl AddParameter {
         input: AddParameterInput,
     ) -> Result<AddParameterOutput, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
+        require_current_type(&input.type_expr)?;
         let target = DraftTarget {
             reference: &input.reference,
             number: input.number,

@@ -1,6 +1,6 @@
 # ADR-0024: Error codes for duplicate member names and the S7 address width
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0143 (item (b): member names compare without case in one struct)
 Date: 2026-10-13
 Deciders: project owner
 

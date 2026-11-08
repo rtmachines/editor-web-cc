@@ -1,6 +1,6 @@
 # ADR-0017: Identity of derived PLC types and S7-300 layout
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0144 (a command takes the class-2 locks in the order of their key values, each value once). Amended by ADR-0145 (`dims_valid` requires the subscript 1 at the start of both arrays)
 Date: 2026-10-12
 Deciders: project owner
 

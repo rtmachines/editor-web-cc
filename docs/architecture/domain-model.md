@@ -69,7 +69,7 @@ Rules:
 |---|---|---|
 | `id` | `PlcTypeId` (UUID) | |
 | `kind` | `TypeKind` | `Primitive`, `Array`, `Struct` |
-| `name` | `TypeName` | Primitives: IEC or S7 name (`INT`, `LREAL`, `S5TIME`). Structs: user name `[A-Za-z_][A-Za-z0-9_]{0,63}`. Arrays: `None` |
+| `name` | `TypeName` | Primitives: IEC or S7 name (`INT`, `LREAL`, `S5TIME`). Structs: user name `[A-Za-z_][A-Za-z0-9_]{0,63}`, not a reserved word of ADR-0143 (c) in any case. Arrays: `None` |
 | `revision` | `u32` | Starts at 1. Increases by one with each `supersedes` step of the same struct name |
 | `platforms` | `BTreeSet<PlcPlatform>` | Platforms where this type exists. A global primitive has the platforms of `data-model.md` 7. A struct, an array, or a sized string of a machine has only the platform of its machine (`platforms = ARRAY[machine.plc_platform]` in SQL) |
 | `size_bytes` | `Option<u32>` | Primitives only. S7 size of one element in bytes. `BOOL` is 1, its storage unit. `STRING(n)` is `n + 2`. `WSTRING(n)` is `2n + 4`. `None` for a struct and an array. `S7Layout` computes their size and does not store it |
@@ -105,7 +105,10 @@ Rules:
 - A migration seeds the global primitives. The application creates only derived types through `EnsureDerivedType`. `EnsureDerivedType` returns the existing row when the shape exists.
 - A struct is immutable. An edit of a struct creates a new `PlcType` with `supersedes = Some(old)` and `revision = old.revision + 1`. Parameters that reference the old revision keep it. The domain marks them `outdated_type` (Assumption A29).
 - A struct cannot contain itself, directly or through members (no cycle). Two revisions of one struct are the same type for this rule (ADR-0038).
-- The member names of a struct are unique. A duplicate name is `E-PLT-021 DuplicateMemberName` (ADR-0024).
+- The member names of a struct are unique without case. A duplicate name is `E-PLT-021 DuplicateMemberName`, also for `speed` and `Speed` (ADR-0024, ADR-0143 (b)).
+- The struct names of a machine are unique without case. A new struct `st_zone` next to the stored `ST_Zone` is `E-PLT-015 DuplicateTypeName` (ADR-0143 (a)). A lookup of a struct uses the exact stored spelling.
+- A struct name is not one of the 211 reserved words of ADR-0143 (c) to (e), in any case. The list holds the IEC keywords and the primitive names. A new struct row with such a name is `E-PLT-013 DerivedTypeInvalid` with the reason "reserved name".
+- A stored struct name with a reserved word passes the earlier rule set (ADR-0120, ADR-0143 (i)). The struct stays readable, and a stored parameter type keeps it. A new revision of it follows the current rule.
 - All member types of a struct MUST exist on every platform of the struct.
 - A derived type MUST exist on the platform of its machine.
 - IEC derived types (`ENUM`, subrange, alias) are not supported (Assumption A39).
@@ -132,7 +135,8 @@ Rules:
 - A `length` follows the `StringLength` table for the platform of the machine.
 - `STRING` without a length in a `TypeExpr` means the seed row of the platform of the machine: `STRING(254)` on `S7_300`, `S7_1200` and `S7_1500`, and `STRING(80)` on `CodesysIec` and `TwinCat3` (`data-model.md` 7). `WSTRING` without a length means the seed row of the platform of the machine: `WSTRING(254)` on `S7_1200` and `S7_1500`, `WSTRING(80)` on `CodesysIec` and `TwinCat3`.
 - The element of an array is any `TypeExpr`, also another array.
-- A `udt` names a struct revision of the same machine.
+- A `udt` names a struct revision of the same machine. The lookup uses the exact stored spelling.
+- A type text that a command writes follows the current name rule of ADR-0143 (c). Thus a new parameter, a changed parameter type, or a new member cannot name the stored struct `Int@1`. A stored parameter type uses the earlier rule of ADR-0143 (i) and keeps `Int@1`.
 
 Examples: `INT`, `STRING`, `STRING(20)`, `WSTRING(80)`, `ST_Zone@3`, `ARRAY[1..8] OF REAL`, `ARRAY[0..1,1..2] OF ST_Zone@3`, `ARRAY[1..4] OF STRING(16)`.
 
@@ -146,6 +150,7 @@ Errors. Every failure of this table is `E-PLT-013 DerivedTypeInvalid` with a rea
 | The struct name or the revision does not exist on the machine | `ST_Zone@9` |
 | The type does not exist on the platform of the machine | `WSTRING(10)` on `S7_300` |
 | A bound, a dimension, or a length is outside its range | `ARRAY[5..1] OF INT`, `STRING(300)` on `S7_1500` |
+| Reserved name: a new struct row has a reserved name of ADR-0143 (c), or a type text that a command writes names such a struct | A new revision of the stored struct `Int`. `AddParameter` with the type `Int@1` |
 
 `DefineUdt` is the one exception. A member whose `TypeExpr` resolves to a type that is not on the platform is `E-PLT-006 MemberTypeNotOnPlatform`, because the member name is the useful detail. Every other consumer of a `TypeExpr` reports `E-PLT-013` for a type that is not on the platform.
 
@@ -603,7 +608,7 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 | `AddUnit` | Machine | New unit under a live parent. Locks: `machine FOR SHARE`, then the parent `unit FOR SHARE` | `E-PLT-002 UnitDepthExceeded`, `E-PLT-003 ParentNotFound` (the foreign key `unit_parent_exists`, second line), `E-PLT-004 DuplicateUnitPath`, `E-PLT-009 UnitArchived` (parent), `E-PLT-010 MachineArchived`, `E-PLT-017 InvalidUnitPath` (`parent_path` or `segment`) |
 | `RenameUnit` | Machine | New `name`. Locks: `machine FOR NO KEY UPDATE`, then the unit `FOR UPDATE` | `E-PLT-009 UnitArchived` |
 | `ArchiveUnit` | Machine | `archived_at` on the unit and its descendants. Locks: `machine FOR NO KEY UPDATE`, then the unit rows `FOR UPDATE` in `id` order. Two archives on one machine therefore run one after the other | `E-PLT-008 LastMainUnit`, `E-PLT-009 UnitArchived` (the unit is already archived, ADR-0029), `E-PLT-012 UnitReferencedByDraft`, `E-PLT-014 UnitReferencedByApproved` |
-| `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory locks of class 2 in the fixed order below | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge`, `E-PLT-021 DuplicateMemberName` |
+| `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory locks of class 2 in the order below | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge`, `E-PLT-021 DuplicateMemberName` |
 
 `EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row.
 
@@ -613,7 +618,7 @@ An array shape of `RebindTypeRevision` comes from a valid tree, so it gives only
 
 Advisory locks of class 2, the class of derived types (`data-model.md` 1.4). The key is `pg_advisory_xact_lock(2, hashtext(machine_id::text || ':' || name))`. `name` is the struct name, `STRING`, or `WSTRING`. An array row has no name, so its key uses the text `ARRAY`.
 
-A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the array shapes instead. The command sorts the keys in the fixed order: the struct name, `STRING`, `WSTRING`, `ARRAY`. It takes all these locks in that order before the first `plc_type` insert.
+A command first parses every `TypeExpr` that it carries and collects the keys that it needs. `RebindTypeRevision` computes the array shapes instead. The command takes the locks in the ascending order of their key values, each value once (ADR-0144). It takes all these locks before the first `plc_type` insert.
 
 `EnsureDerivedType` then takes no lock of its own. No command takes a row lock on `plc_type`. The unique indexes of `plc_type` stay as the second line.
 

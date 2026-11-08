@@ -84,13 +84,14 @@ pub fn document_sql(sections: &[&str], skip: &[(&str, usize)]) -> String {
     normalize(&sql.join("\n"))
 }
 
-/// One piece that ADR-0109 added to the `app_user` block of `data-model.md` section 3.5.
+/// One piece of `data-model.md` section 3 that a later migration changed after `0001`.
 ///
-/// Migration 0001 shipped before ADR-0109 and never changes. Migration 0009 adds the pieces as
-/// `NOT VALID` constraints. The document shows the current schema, so the comparison with
-/// 0001 must undo each piece first. `current` and `shipped` are normalized text. `current`
-/// must occur exactly once in the document text.
-pub struct Adr0109Piece {
+/// Migration 0001 shipped before the piece and never changes. A later migration adds the piece:
+/// 0009 adds the pieces of ADR-0109 as `NOT VALID` constraints, and 0011 changes `dims_valid`
+/// (ADR-0145) and adds two unique indexes (ADR-0143). The document shows the current schema, so
+/// the comparison with 0001 must undo each piece first. `current` and `shipped` are normalized
+/// text. `current` must occur exactly once in the document text.
+pub struct ShippedPiece {
     /// What the piece is, for the failure message.
     pub name: &'static str,
     /// The normalized text in the current document.
@@ -99,32 +100,47 @@ pub struct Adr0109Piece {
     pub shipped: &'static str,
 }
 
-/// The pieces of ADR-0109 (e) in `app_user`, applied by migration 0009.
-pub const ADR_0109_PIECES: [Adr0109Piece; 2] = [
-    Adr0109Piece {
+/// The pieces of section 3 that a migration after 0001 changed.
+pub const PIECES_AFTER_0001: [ShippedPiece; 5] = [
+    ShippedPiece {
         name: "role list of app_user_role_value",
         current: "'operator', 'export_client')",
         shipped: "'operator')",
     },
-    Adr0109Piece {
+    ShippedPiece {
         name: "constraint app_user_export_client_password",
         current: " CONSTRAINT app_user_export_client_password CHECK ( role <> 'export_client' OR NOT must_change_password ),",
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "start subscript checks of dims_valid (ADR-0145)",
+        current: " AND array_lower(lower_b, 1) = 1 AND array_lower(upper_b, 1) = 1",
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "index plc_type_struct_name_ci_unique (ADR-0143)",
+        current: " CREATE UNIQUE INDEX plc_type_struct_name_ci_unique ON plc_type (machine_id, lower(name), revision) WHERE kind = 'struct';",
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "index plc_type_member_name_ci_unique (ADR-0143)",
+        current: " CREATE UNIQUE INDEX plc_type_member_name_ci_unique ON plc_type_member (struct_type_id, lower(member_name));",
         shipped: "",
     },
 ];
 
 /// Turn the normalized text of section 3 into the text of migration 0001.
 ///
-/// Each piece of [`ADR_0109_PIECES`] must match exactly once. The call fails with the name of
+/// Each piece of [`PIECES_AFTER_0001`] must match exactly once. The call fails with the name of
 /// the piece otherwise.
 pub fn as_shipped_in_0001(normalized: &str) -> String {
-    ADR_0109_PIECES
+    PIECES_AFTER_0001
         .iter()
         .fold(normalized.to_owned(), |text, piece| {
             let count = text.matches(piece.current).count();
             assert_eq!(
                 count, 1,
-                "ADR-0109 piece '{}' must match once in the document, found {count} times",
+                "piece '{}' must match once in the document, found {count} times",
                 piece.name
             );
             text.replacen(piece.current, piece.shipped, 1)

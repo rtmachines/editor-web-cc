@@ -29,9 +29,11 @@ pub struct TypeUsageRow {
 
 /// One class-2 advisory lock key of a derived type (`data-model.md` section 1.4).
 ///
-/// The type solves one problem: two commands must take the class-2 keys in one order,
-/// or they can deadlock. The derived `Ord` is that order. All struct names come first,
-/// sorted by name. Then come `STRING`, `WSTRING`, and `ARRAY`.
+/// The type solves one problem: two commands must collect the class-2 keys as one set of
+/// texts. The use cases order the keys by `key_text` and remove duplicate texts. This order
+/// is not the order of the locks. The adapter takes the locks in the order of the key
+/// values, so a collision of two texts takes one lock (ADR-0144). The derived `Ord` only
+/// makes the order of two keys with one text total.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DerivedTypeLock {
     /// The key of a struct name.

@@ -4,5 +4,7 @@
 //! second command waits for it. No test depends on a sleep.
 
 mod approve;
+mod derived_locks;
 mod identity;
 mod order;
+mod struct_name_case;

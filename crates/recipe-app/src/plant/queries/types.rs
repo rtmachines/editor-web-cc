@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use recipe_domain::plant::{
     Machine, MachineCode, MemberName, PlatformTypes, PlcType, PlcTypeId, Primitive, RecordShape,
-    StringKind, StringLength, TypeMember, TypeName, TypeNode, TypeTree,
+    StringKind, StringLength, TypeMember, TypeName, TypeNode, TypeTree, is_reserved_name,
 };
 
 use super::type_text::type_text;
@@ -382,7 +382,8 @@ fn copied_revision(
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
 /// `<name>@<revision>`. No revision of the struct `revised` is a proposal, because a struct
-/// cannot hold an earlier revision of itself (ADR-0038).
+/// cannot hold an earlier revision of itself (ADR-0038). A struct with a reserved name is no proposal,
+/// because every command refuses it (ADR-0143 (i2)).
 fn proposals(
     types: &PlatformTypes,
     groups: &BTreeMap<&TypeName, Vec<Revision<'_>>>,
@@ -405,7 +406,7 @@ fn proposals(
         .chain(has_wstring.then_some(Primitive::Wstring));
     let structs = groups
         .iter()
-        .filter(|(name, _)| Some(**name) != revised)
+        .filter(|(name, _)| Some(**name) != revised && !is_reserved_name(name.as_str()))
         .filter_map(|(_, group)| group.first())
         .map(|latest| format!("{}@{}", latest.name, latest.number));
     primitives

@@ -20,6 +20,7 @@ const fn reason_key(reason: DerivedTypeReason) -> &'static str {
         DerivedTypeReason::NotOnPlatform => "type-reason-not-on-platform",
         DerivedTypeReason::OutOfRange => "type-reason-out-of-range",
         DerivedTypeReason::RowShape => "type-reason-row-shape",
+        DerivedTypeReason::ReservedName => "type-reason-reserved-name",
     }
 }
 

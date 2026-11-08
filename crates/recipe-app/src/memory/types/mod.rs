@@ -10,7 +10,7 @@ use super::images::type_image;
 use super::plant::check_offset;
 use super::rows::{TypeRow, check_violation, duplicate, missing_reference};
 use super::{LockMode, MemoryTransaction};
-use crate::error::{PLC_TYPE_NAMED_UNIQUE, StorageError};
+use crate::error::{PLC_TYPE_NAMED_UNIQUE, PLC_TYPE_STRUCT_NAME_CI_UNIQUE, StorageError};
 use crate::ports::{DerivedTypeLock, Ensured, RowImage, TypeCatalog, TypeUsageRow};
 
 pub use seed::seed_type_id;
@@ -156,15 +156,28 @@ impl TypeCatalog for MemoryTransaction {
         let RecordShape::Struct { name, revision, .. } = row.shape() else {
             return Err(check_violation());
         };
-        let name_taken = self.state().types.values().any(|stored| {
-            matches!(
-                stored.plc_type.shape(),
-                RecordShape::Struct { name: other, revision: other_revision, .. }
-                    if other == name && other_revision == revision
-            ) && stored.plc_type.machine() == row.machine()
-        });
-        if name_taken {
+        let same_revision: Vec<_> = self
+            .state()
+            .types
+            .values()
+            .filter(|stored| stored.plc_type.machine() == row.machine())
+            .filter_map(|stored| match stored.plc_type.shape() {
+                RecordShape::Struct {
+                    name: other,
+                    revision: other_revision,
+                    ..
+                } if other_revision == revision => Some(other),
+                _ => None,
+            })
+            .collect();
+        if same_revision.contains(&name) {
             return Err(duplicate(PLC_TYPE_NAMED_UNIQUE));
+        }
+        if same_revision
+            .iter()
+            .any(|other| other.as_str().eq_ignore_ascii_case(name.as_str()))
+        {
+            return Err(duplicate(PLC_TYPE_STRUCT_NAME_CI_UNIQUE));
         }
         if self.state().types.contains_key(&row.id()) {
             return Err(duplicate(TYPE_PKEY));

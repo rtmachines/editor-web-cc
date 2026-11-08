@@ -1,22 +1,25 @@
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::recipe::{ParameterKey, ParameterTag, StoredParameter};
+use recipe_domain::plant::{DerivedTypeReason, PlantError, Primitive, RuleSet, TypeExpr};
+use recipe_domain::recipe::{Ordinal, ParameterKey, ParameterTag, StoredParameter};
 use serde_json::json;
 
-use super::UpdateParameterDefinition;
 use super::requests::{run, speed_request, with_retype, with_type};
+use super::{UpdateParameterDefinition, UpdateParameterDefinitionInput};
 use crate::auth::Operation;
 use crate::context::UseCase;
-use crate::error::{PARAMETER_TAG_UNIQUE, StorageError};
-use crate::memory::fixtures::{Fixture, actor, lock_line, meta, mid, pkey, rid, text, uid, vid};
-use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode, WriteKind};
+use crate::error::{AppError, PARAMETER_TAG_UNIQUE, StorageError};
+use crate::memory::fixtures::{
+    Fixture, actor, lock_line, meta, mid, pkey, rid, text, tid, uid, vid,
+};
+use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode, WriteKind, seed_type_id};
 use crate::ports::Isolation;
 use crate::recipe::DraftOutput;
 use crate::recipe::definition_steps::map_tag_error;
 use crate::recipe::test_support::{
-    DRAFT_VERSION, DraftSnapshot, bounds, seed_speed_draft, speed_key, stored_parameters,
-    twincat_draft,
+    DRAFT_VERSION, DraftSnapshot, bounds, seed_speed_draft, seed_zone_on_int_struct, speed_key,
+    stored_parameters, twincat_draft, zone_key,
 };
 
 fn speed(fixture: &Fixture) -> StoredParameter {
@@ -242,7 +245,8 @@ async fn an_old_row_version_gives_web_001_and_writes_nothing() {
 }
 
 #[tokio::test]
-async fn an_array_of_sized_strings_takes_the_string_and_array_keys_after_the_unit_lock() {
+async fn an_array_of_sized_strings_takes_the_array_and_string_keys_in_the_order_of_the_texts_after_the_unit_lock()
+ {
     let fixture = twincat_draft();
     let request = with_retype(
         with_type(speed_request(), "ARRAY[1..2] OF STRING(16)"),
@@ -251,7 +255,7 @@ async fn an_array_of_sized_strings_takes_the_string_and_array_keys_after_the_uni
     );
     run(&fixture, request).await.unwrap();
     let mut expected = lock_prefix();
-    expected.extend([advisory("STRING"), advisory("ARRAY")]);
+    expected.extend([advisory("ARRAY"), advisory("STRING")]);
     assert_eq!(fixture.store.journal(), expected);
 }
 
@@ -319,4 +323,60 @@ async fn an_operator_is_forbidden_and_opens_no_transaction() {
     assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
     assert!(fixture.store.journal().is_empty());
     assert!(fixture.store.audit_entries().is_empty());
+}
+
+/// The request that keeps `ZONE`, the parameter of the stored struct `Int@1`.
+fn zone_request() -> UpdateParameterDefinitionInput {
+    UpdateParameterDefinitionInput {
+        key: zone_key(),
+        tag: ParameterTag::parse("ZONE").unwrap(),
+        ordinal: Ordinal::parse(1).unwrap(),
+        type_expr: TypeExpr::from_stored("Int@1", RuleSet::Earlier).unwrap(),
+        ..speed_request()
+    }
+}
+
+fn reason_of(error: &AppError) -> Option<DerivedTypeReason> {
+    match error {
+        AppError::Plant(PlantError::DerivedTypeInvalid { reason, .. }) => Some(*reason),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn a_new_type_with_a_reserved_struct_name_gives_plt_013_and_keeps_the_type() {
+    let fixture = twincat_draft();
+    seed_zone_on_int_struct(&fixture);
+    let before = DraftSnapshot::capture(&fixture);
+    let request = UpdateParameterDefinitionInput {
+        type_expr: TypeExpr::from_stored("Int@1", RuleSet::Earlier).unwrap(),
+        ..speed_request()
+    };
+    let error = run(&fixture, request).await.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_013);
+    assert_eq!(reason_of(&error), Some(DerivedTypeReason::ReservedName));
+    assert_eq!(
+        speed(&fixture).plc_type,
+        seed_type_id(Primitive::Int, None).unwrap()
+    );
+    before.assert_unchanged(&fixture);
+}
+
+#[tokio::test]
+async fn the_stored_type_int_struct_stays_when_only_the_name_changes() {
+    let fixture = twincat_draft();
+    seed_zone_on_int_struct(&fixture);
+    let request = UpdateParameterDefinitionInput {
+        name_en: text("Renamed zone"),
+        ..zone_request()
+    };
+    let output = run(&fixture, request).await.unwrap();
+    assert_eq!(output.row_version, 2);
+    let row = stored_parameters(&fixture)
+        .into_iter()
+        .find(|row| row.key == zone_key())
+        .unwrap();
+    assert_eq!(row.name_en.as_str(), "Renamed zone");
+    assert_eq!(row.plc_type, tid(701));
+    assert_eq!(row.value.as_json(), &json!({"x": 1}));
 }

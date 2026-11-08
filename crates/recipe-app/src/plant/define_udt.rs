@@ -9,13 +9,15 @@ use recipe_domain::plant::{
 };
 use uuid::Uuid;
 
+use super::current_type::require_current_type;
 use super::derived_lock::derived_type_locks;
 use super::ensure_derived::DerivedTypes;
 use super::resolve::{live_machine_id, require_live};
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{
-    AppError, Missing, PLC_TYPE_MEMBER_NAME_UNIQUE, PLC_TYPE_NAMED_UNIQUE, map_storage,
+    AppError, Missing, PLC_TYPE_MEMBER_NAME_CI_UNIQUE, PLC_TYPE_MEMBER_NAME_UNIQUE,
+    PLC_TYPE_NAMED_UNIQUE, PLC_TYPE_STRUCT_NAME_CI_UNIQUE, map_storage,
 };
 use crate::ports::{Isolation, NonEmpty, RowImage, TypeCatalog};
 
@@ -81,7 +83,7 @@ impl DefineUdt {
     ///
     /// Returns `Forbidden` when the role lacks `UdtManage`.
     /// Returns `NotFound` (`E-WEB-005`) when no live machine has the code, when the machine is archived under the lock, or when a revision names a struct without revision.
-    /// Returns `PlantError::DuplicateTypeName` (`E-PLT-015`) when a new struct uses a name that exists.
+    /// Returns `PlantError::DuplicateTypeName` (`E-PLT-015`) when a new struct uses a name that exists in any letter case. The error names the stored spelling when the command finds the stored name in its read of the type rows. When a parallel command commits the other spelling first, the unique index refuses the row and the error names the input spelling.
     /// Returns `PlantError::MemberTypeNotOnPlatform` (`E-PLT-006`) for a member type that is not on the platform.
     /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) for any other bad member type.
     /// Returns `PlantError::StructHasNoMembers` (`E-PLT-016`) or `DuplicateMemberName` (`E-PLT-021`).
@@ -95,6 +97,9 @@ impl DefineUdt {
         input: DefineUdtInput,
     ) -> Result<DefineUdtOutput, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
+        for (_, expr) in &input.members {
+            require_current_type(expr)?;
+        }
         let machine_id = live_machine_id(&self.ctx, input.code).await?;
         let keys = derived_type_locks(
             Some(&input.name),
@@ -174,7 +179,9 @@ fn struct_row(
     Ok(row)
 }
 
-/// Insert the struct row and map the two unique constraints to their plant errors.
+/// Insert the struct row and map the four unique constraints to their plant errors.
+///
+/// The error names the spelling of the input, because the adapter does not read the stored row.
 async fn insert_struct_row(
     catalog: &mut dyn TypeCatalog,
     row: &PlcType,
@@ -182,19 +189,21 @@ async fn insert_struct_row(
 ) -> Result<RowImage, AppError> {
     catalog.insert_struct(row).await.map_err(|error| {
         map_storage(error, |constraint| match constraint {
-            PLC_TYPE_NAMED_UNIQUE => Some(
+            PLC_TYPE_NAMED_UNIQUE | PLC_TYPE_STRUCT_NAME_CI_UNIQUE => Some(
                 PlantError::DuplicateTypeName {
                     type_name: input.name.clone(),
                 }
                 .into(),
             ),
-            PLC_TYPE_MEMBER_NAME_UNIQUE => input.members.first().map(|(member, _)| {
-                PlantError::DuplicateMemberName {
-                    type_name: input.name.clone(),
-                    member: member.clone(),
-                }
-                .into()
-            }),
+            PLC_TYPE_MEMBER_NAME_UNIQUE | PLC_TYPE_MEMBER_NAME_CI_UNIQUE => {
+                input.members.first().map(|(member, _)| {
+                    PlantError::DuplicateMemberName {
+                        type_name: input.name.clone(),
+                        member: member.clone(),
+                    }
+                    .into()
+                })
+            }
             _ => None,
         })
     })
@@ -220,27 +229,32 @@ fn udt_defined_entry(
 
 /// Return the revision of the new row and the row that it supersedes.
 ///
-/// A new struct needs an unused name and gets revision 1. A revision needs a used name and gets
-/// the highest revision plus one.
+/// A new struct needs a name that no struct of the machine has in any letter case, and gets
+/// revision 1. The duplicate error names the stored spelling. A revision needs a used name in the
+/// exact case and gets the highest revision plus one (ADR-0143 (g), (j)).
 fn next_revision(
     rows: &[PlcType],
     machine: MachineId,
     input: &DefineUdtInput,
 ) -> Result<(u32, Option<PlcTypeId>), AppError> {
+    let same_name = |name: &TypeName| match input.mode {
+        DefineUdtMode::New => name.as_str().eq_ignore_ascii_case(input.name.as_str()),
+        DefineUdtMode::Revision => *name == input.name,
+    };
     let latest = rows
         .iter()
         .filter(|row| row.machine() == Some(machine))
         .filter_map(|row| match row.shape() {
-            RecordShape::Struct { name, revision, .. } if *name == input.name => {
-                Some((*revision, row.id()))
+            RecordShape::Struct { name, revision, .. } if same_name(name) => {
+                Some((*revision, row.id(), name))
             }
             _ => None,
         })
-        .max_by_key(|(revision, _)| *revision);
+        .max_by_key(|(revision, _, _)| *revision);
     match (input.mode, latest) {
         (DefineUdtMode::New, None) => Ok((1, None)),
-        (DefineUdtMode::New, Some(_)) => Err(PlantError::DuplicateTypeName {
-            type_name: input.name.clone(),
+        (DefineUdtMode::New, Some((_, _, stored))) => Err(PlantError::DuplicateTypeName {
+            type_name: stored.clone(),
         }
         .into()),
         (DefineUdtMode::Revision, None) => Err(AppError::NotFound {
@@ -249,7 +263,7 @@ fn next_revision(
                 name: input.name.clone(),
             },
         }),
-        (DefineUdtMode::Revision, Some((revision, id))) => {
+        (DefineUdtMode::Revision, Some((revision, id, _))) => {
             let next = revision
                 .checked_add(1)
                 .ok_or_else(|| PlantError::DerivedTypeInvalid {
@@ -300,5 +314,7 @@ fn check_tree(
     TypeTree::resolve(row.id(), &types)?.check_struct_names()
 }
 
+#[cfg(test)]
+mod name_tests;
 #[cfg(test)]
 mod tests;

@@ -3,6 +3,7 @@
 //! Wave 5 renders them in the answers of `AddParameter` and `GET .../parameters` (design D7).
 
 use askama::Template;
+use axum::http::StatusCode;
 
 use recipe_domain::text::Text;
 
@@ -14,6 +15,7 @@ use crate::pages::Texts;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_clean_html, hx_pairs};
 use crate::test_support::plant::{POLISH, main_of};
+use crate::test_support::recipes::earlier_name_world::seed_int_named_parameter;
 
 /// Parse a text of a name.
 fn text(value: &str) -> Text {
@@ -128,6 +130,21 @@ async fn parameter_table_of_the_version_page_focuses_no_row() {
     let main = main_of(&reply.body);
     assert!(main.contains("\">SPEED</a></td>"), "{main}");
     assert!(!main.contains("autofocus"), "{main}");
+}
+
+/// ADR-0143 (i1): the table shows a parameter of the stored type `Int@1` and no error.
+#[tokio::test]
+async fn parameter_table_shows_a_parameter_of_the_type_int_at_1_without_an_error() {
+    let world = recipe_world();
+    seed_int_named_parameter(&world.fixture);
+    let reply = world
+        .get_en(&world.engineer, "/recipes/R-100/versions/3")
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(main.contains("\">ZONE</a></td>"), "{main}");
+    assert!(main.contains("<td class=\"data\">Int@1</td>"), "{main}");
+    assert!(!main.contains("E-PLT-013"), "{main}");
 }
 
 #[test]

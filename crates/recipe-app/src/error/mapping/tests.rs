@@ -132,6 +132,14 @@ fn constraint_names_match_the_documents() {
         (PLC_TYPE_NAMED_UNIQUE, "plc_type_named_unique"),
         (PLC_TYPE_MEMBER_NAME_UNIQUE, "plc_type_member_name_unique"),
         (
+            PLC_TYPE_STRUCT_NAME_CI_UNIQUE,
+            "plc_type_struct_name_ci_unique",
+        ),
+        (
+            PLC_TYPE_MEMBER_NAME_CI_UNIQUE,
+            "plc_type_member_name_ci_unique",
+        ),
+        (
             RECIPE_VERSION_ONE_LIVE_DRAFT,
             "recipe_version_one_live_draft",
         ),

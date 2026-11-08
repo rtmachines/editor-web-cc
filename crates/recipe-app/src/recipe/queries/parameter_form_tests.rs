@@ -27,6 +27,7 @@ use crate::memory::fixtures::{
 use crate::memory::{JournalEntry, seed_type_id};
 use crate::plant::{GetUdtForm, UdtFormInput};
 use crate::ports::Isolation;
+use crate::recipe::test_support::seed_zone_on_int_struct;
 
 /// The draft `R-1` with the parameter `ZONE1` (key 11) of `ST_Zone@1`, and `ST_Zone@2`.
 fn world() -> Fixture {
@@ -481,4 +482,23 @@ async fn a_form_without_a_key_and_a_clean_parameter_give_no_rule_fault() {
 
     assert!(new.rule_faults.is_empty());
     assert!(edit.rule_faults.is_empty());
+}
+
+#[tokio::test]
+async fn the_proposals_leave_out_a_stored_struct_with_a_reserved_name() {
+    let fixture = world();
+    seed_zone_on_int_struct(&fixture);
+
+    let result = form(&fixture, input(None, None, None)).await.unwrap();
+
+    assert!(
+        result.choices.iter().any(|choice| choice == "ST_Zone@2"),
+        "{:?}",
+        result.choices
+    );
+    assert!(
+        !result.choices.iter().any(|choice| choice == "Int@1"),
+        "{:?}",
+        result.choices
+    );
 }

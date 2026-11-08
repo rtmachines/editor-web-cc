@@ -15,7 +15,7 @@ use recipe_app::ports::{
 };
 use recipe_domain::audit::{AggregateType, AuditAction, RequestId, SessionRef};
 use recipe_domain::identity::{Login, UserId};
-use recipe_domain::plant::{MachineCode, TypeName, UnitPath};
+use recipe_domain::plant::{MachineCode, RuleSet, TypeName, UnitPath};
 use recipe_domain::recipe::{ParameterTag, RecipeId, ReferenceNumber};
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -171,7 +171,9 @@ fn label(kind: AuditEntityType, columns: LabelRecord) -> Result<EntityLabel, Sto
             parsed("unit", columns.unit_path.as_deref(), UnitPath::parse)?.map(EntityLabel::Unit)
         }
         AuditEntityType::PlcType => {
-            let name = parsed("plc_type", columns.type_name.as_deref(), TypeName::parse)?;
+            let name = parsed("plc_type", columns.type_name.as_deref(), |text| {
+                TypeName::from_stored(text, RuleSet::Earlier)
+            })?;
             let revision = number("plc_type", columns.type_revision)?;
             name.zip(revision)
                 .map(|(name, revision)| EntityLabel::Type { name, revision })

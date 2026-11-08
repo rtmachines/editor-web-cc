@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use recipe_domain::plant::{
     Machine, PlatformTypes, PlcType, Primitive, RecordShape, StringKind, StringLength, TypeExpr,
-    TypeName, TypeTree, Unit, UnitPath,
+    TypeName, TypeTree, Unit, UnitPath, is_reserved_name,
 };
 use recipe_domain::recipe::{
     Parameter, ParameterKey, Recipe, RecipeError, ReferenceNumber, RuleFault, StoredParameter,
@@ -175,7 +175,8 @@ fn rule_faults_of(
 ///
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
-/// `<name>@<revision>` in the byte order of the name.
+/// `<name>@<revision>` in the byte order of the name. A struct with a reserved name is no proposal,
+/// because every command refuses it (ADR-0143 (i2)).
 fn proposals(types: &PlatformTypes) -> Vec<String> {
     let primitives: BTreeSet<Primitive> = types
         .rows()
@@ -194,7 +195,9 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
         .chain(has_wstring.then_some(Primitive::Wstring));
     let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
     for row in types.rows() {
-        if let RecordShape::Struct { name, revision, .. } = row.shape() {
+        if let RecordShape::Struct { name, revision, .. } = row.shape()
+            && !is_reserved_name(name.as_str())
+        {
             let entry = latest.entry(name).or_insert(*revision);
             *entry = (*entry).max(*revision);
         }

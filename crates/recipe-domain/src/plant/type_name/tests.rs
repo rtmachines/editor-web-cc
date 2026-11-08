@@ -70,9 +70,93 @@ fn primitive_names_are_valid_member_names() {
 }
 
 #[test]
-fn reserved_check_is_case_sensitive() {
-    assert!(TypeName::parse("Int").is_ok());
-    assert!(TypeName::parse("int").is_ok());
+fn reserved_words_are_refused_in_any_case() {
+    for text in [
+        "Int",
+        "int",
+        "real",
+        "ARRAY",
+        "OF",
+        "STRUCT",
+        "END_STRUCT",
+        "end_method",
+    ] {
+        assert_eq!(
+            TypeName::parse(text),
+            Err(TypeNameReason::Reserved),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_name_that_is_not_reserved_is_accepted() {
+    assert!(TypeName::parse("ST_Zone").is_ok());
+}
+
+#[test]
+fn stored_name_under_the_earlier_rules_may_be_reserved_in_another_case() {
+    let stored = TypeName::from_stored("Int", RuleSet::Earlier);
+    assert_eq!(stored.map(|n| n.to_string()), Ok("Int".to_owned()));
+    assert_eq!(
+        TypeName::from_stored("Int", RuleSet::Current),
+        Err(TypeNameReason::Reserved)
+    );
+}
+
+#[test]
+fn earlier_rules_refuse_a_primitive_name_in_exact_case_and_a_bad_format() {
+    assert_eq!(
+        TypeName::from_stored("INT", RuleSet::Earlier),
+        Err(TypeNameReason::Reserved)
+    );
+    assert_eq!(
+        TypeName::from_stored("1abc", RuleSet::Earlier),
+        Err(TypeNameReason::Format)
+    );
+}
+
+#[test]
+fn current_rules_of_from_stored_equal_parse() {
+    for text in ["ST_Zone", "INT", "end_method", "1abc"] {
+        assert_eq!(
+            TypeName::from_stored(text, RuleSet::Current),
+            TypeName::parse(text),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn reserved_keywords_are_182_upper_case_words_without_a_primitive_name() {
+    assert_eq!(RESERVED_KEYWORDS.len(), 182);
+    let mut seen = std::collections::HashSet::new();
+    for word in RESERVED_KEYWORDS {
+        assert!(seen.insert(word), "duplicate {word}");
+        assert_eq!(word, word.to_ascii_uppercase(), "{word}");
+        assert!(is_name(word), "{word}");
+        assert!(Primitive::parse(word).is_err(), "primitive {word}");
+    }
+}
+
+#[test]
+fn is_reserved_name_covers_keywords_and_primitives_in_any_case() {
+    for word in RESERVED_KEYWORDS {
+        assert!(is_reserved_name(word), "{word}");
+        assert!(is_reserved_name(&word.to_ascii_lowercase()), "{word}");
+    }
+    for primitive in Primitive::ALL {
+        assert!(is_reserved_name(primitive.name()), "{}", primitive.name());
+        assert!(is_reserved_name(&primitive.name().to_ascii_lowercase()));
+    }
+    assert!(!is_reserved_name("ST_Zone"));
+}
+
+#[test]
+fn member_names_may_be_keywords() {
+    for text in ["END_STRUCT", "Int", "array"] {
+        assert!(MemberName::parse(text).is_ok(), "{text}");
+    }
 }
 
 #[test]

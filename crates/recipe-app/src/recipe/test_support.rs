@@ -1,9 +1,18 @@
 //! Helpers that the tests of several recipe use cases share.
 
-use recipe_domain::plant::{LeafPath, Machine, PlcPlatform, UnitPath, UnitUsage};
-use recipe_domain::recipe::{LimitInput, ParameterKey, Recipe, RecipeDeleter, StoredParameter};
+use std::collections::BTreeSet;
 
-use crate::memory::fixtures::{Fixture, parameter_on, pkey, timestamp, uid, user, vid};
+use recipe_domain::plant::{
+    LeafPath, Machine, MemberName, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
+    RuleSet, TypeMember, TypeName, UnitPath, UnitUsage,
+};
+use recipe_domain::recipe::{
+    LimitInput, ParameterKey, Recipe, RecipeDeleter, StoredParameter, StoredValue,
+};
+use serde_json::json;
+
+use crate::memory::fixtures::{Fixture, mid, parameter_on, pkey, tid, timestamp, uid, user, vid};
+use crate::memory::seed_type_id;
 
 /// The number of the version that [`seed_speed_draft`] stores.
 pub(super) const DRAFT_VERSION: u128 = 101;
@@ -23,6 +32,46 @@ pub(super) fn seed_speed_draft(fixture: &Fixture) -> Machine {
     let speed = parameter_on(PlcPlatform::TwinCat3, 1, "SPEED", uid(101), 0);
     fixture.store.seed_parameter(vid(DRAFT_VERSION), &speed);
     machine
+}
+
+/// The key of the parameter `ZONE` that [`seed_zone_on_int_struct`] stores.
+pub(super) fn zone_key() -> ParameterKey {
+    pkey(2)
+}
+
+/// Add the stored struct `Int@1` and the parameter `ZONE` of that type to the draft of
+/// [`seed_speed_draft`].
+///
+/// `Int@1` has the member `x` of type `INT`. The current rule refuses the name `Int`, because it
+/// is a primitive name in another case (ADR-0143). The struct is a row from before that rule, so
+/// the fixture builds it with the earlier rule. `ZONE` has the value `{"x": 1}`, no limit, and
+/// sits on the unit 101.
+pub(super) fn seed_zone_on_int_struct(fixture: &Fixture) {
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    let record = PlcTypeRecord {
+        id: tid(701),
+        machine: Some(mid(1)),
+        platforms: BTreeSet::from([PlcPlatform::TwinCat3]),
+        shape: RecordShape::Struct {
+            name: TypeName::from_stored("Int", RuleSet::Earlier).unwrap(),
+            revision: 1,
+            supersedes: None,
+            members: vec![TypeMember {
+                name: MemberName::parse("x").unwrap(),
+                type_id: int,
+            }],
+        },
+    };
+    fixture
+        .store
+        .seed_type(&PlcType::from_stored(record, RuleSet::Earlier).unwrap());
+    let zone = StoredParameter {
+        plc_type: tid(701),
+        value: StoredValue::from(json!({"x": 1})),
+        limits: Vec::new(),
+        ..parameter_on(PlcPlatform::TwinCat3, 2, "ZONE", uid(101), 1)
+    };
+    fixture.store.seed_parameter(vid(DRAFT_VERSION), &zone);
 }
 
 /// Return the stored parameters of the draft that [`seed_speed_draft`] stores.

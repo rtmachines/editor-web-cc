@@ -10,6 +10,7 @@ use super::test_kit::{SPEED_FIELDS, assert_panel_error, changed, form, parameter
 use super::value_tests::assert_operator_refused;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{field_value, summary_lines};
+use crate::test_support::recipes::earlier_name_world::{ZONE_KEY, seed_int_named_parameter};
 use crate::test_support::recipes::{GRID_KEY, HOLD_KEY, LABEL_KEY, SPEED_KEY, SPEED_TABLE_KEY};
 
 /// The opening tag of the edit form of `SPEED` when an answer swaps it out of band.
@@ -385,4 +386,71 @@ async fn parameters_edit_a_bad_key_with_a_bad_tag_gives_one_line_and_no_form() {
         reply.body
     );
     assert_eq!(world.fixture.snapshot(), before);
+}
+
+/// The definition fields of the stored parameter `ZONE` (type `Int@1`).
+const ZONE_FIELDS: [(&str, &str); 10] = [
+    ("row_version", "1"),
+    ("unit_path", "U1"),
+    ("tag", "ZONE"),
+    ("name_en", "ZONE"),
+    ("description_en", "A parameter of the press line"),
+    ("type", "Int@1"),
+    ("value_type", "Int@1"),
+    ("s7_address", "DB6.DBB0"),
+    ("ordinal", "20"),
+    ("value.speed", "5"),
+];
+
+/// The tail of the text input `type` when it holds the text `Int@1`.
+const TYPE_INPUT_VALUE: &str =
+    "spellcheck=\"false\" aria-required=\"true\" aria-describedby=\"type-hint\" value=\"Int@1\"";
+
+/// ADR-0143 (i1): the edit form of a stored type with a reserved name shows the grid of that type.
+#[tokio::test]
+async fn parameters_edit_form_of_the_type_int_at_1_shows_the_grid_of_the_struct() {
+    let world = recipe_world();
+    seed_int_named_parameter(&world.fixture);
+    let page = world
+        .get_en(&world.engineer, &parameter_path(ZONE_KEY, ""))
+        .await;
+    assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+    assert!(page.body.contains("name=\"value.speed\""), "{}", page.body);
+    assert!(page.body.contains(TYPE_INPUT_VALUE), "{}", page.body);
+    assert_eq!(field_value(&page.body, "value_type"), "Int@1");
+}
+
+/// ADR-0143 (i1): the edit form sends the stored type text again, so a save with a new name keeps it.
+#[tokio::test]
+async fn parameters_edit_of_the_type_int_at_1_saves_a_new_name_and_keeps_the_type() {
+    let world = recipe_world();
+    seed_int_named_parameter(&world.fixture);
+    let pairs = changed(&ZONE_FIELDS, &[("name_en", Some("Zone speed"))]);
+    let path = parameter_path(ZONE_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    assert!(!reply.body.contains("E-PLT-013"), "{}", reply.body);
+    let page = world
+        .get_en(&world.engineer, &parameter_path(ZONE_KEY, ""))
+        .await;
+    assert!(page.body.contains("Zone speed"), "{}", page.body);
+    assert!(page.body.contains(TYPE_INPUT_VALUE), "{}", page.body);
+}
+
+/// ADR-0143 (i1): the request for the fields of the stored type gives its grid and no error.
+#[tokio::test]
+async fn parameters_edit_fields_request_of_the_type_int_at_1_gives_the_grid() {
+    let world = recipe_world();
+    seed_int_named_parameter(&world.fixture);
+    let pairs = changed(&ZONE_FIELDS, &[("fields", Some("1"))]);
+    let path = parameter_path(ZONE_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        reply.body.contains("name=\"value.speed\""),
+        "{}",
+        reply.body
+    );
+    assert!(!reply.body.contains("E-PLT-013"), "{}", reply.body);
 }

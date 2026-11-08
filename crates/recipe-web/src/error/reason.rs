@@ -268,7 +268,7 @@ impl fmt::Display for FieldReason {
             Self::Name => "a name has 1 to 200 characters and no control character",
             Self::Platform => "choose a PLC platform from the list",
             Self::TypeName => {
-                "a type name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore. It is not new or a primitive name"
+                "a type name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore. It is not new, an IEC keyword, or a primitive name, in any case"
             }
             Self::MemberName => {
                 "a member name has 1 to 64 letters, digits, and underscores and starts with a letter or an underscore"

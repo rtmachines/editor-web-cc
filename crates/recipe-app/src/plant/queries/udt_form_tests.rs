@@ -2,14 +2,19 @@
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{MachineCode, PlcPlatform, PlcTypeId, Primitive, TypeExpr, TypeName};
+use std::collections::BTreeSet;
+
+use recipe_domain::plant::{
+    MachineCode, MemberName, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
+    RecordShape, RuleSet, TypeExpr, TypeMember, TypeName,
+};
 
 use super::types::{GetUdtForm, UdtForm, UdtFormInput};
 use super::world::{array_row, machine_of, string_row, struct_row};
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing};
-use crate::memory::fixtures::{Fixture, actor, meta, tid};
+use crate::memory::fixtures::{Fixture, actor, meta, mid, tid};
 use crate::memory::{JournalEntry, seed_type_id};
 use crate::ports::Isolation;
 
@@ -307,4 +312,39 @@ async fn an_operator_gets_forbidden_and_the_store_stays_unread() {
 
     assert_eq!(error.code(), ErrorCode::WEB_002);
     assert!(fixture.store.journal().is_empty());
+}
+
+#[tokio::test]
+async fn the_proposals_leave_out_a_stored_struct_with_a_reserved_name() {
+    let fixture = world();
+    let record = PlcTypeRecord {
+        id: tid(940),
+        machine: Some(mid(MACHINE)),
+        platforms: BTreeSet::from([PLATFORM]),
+        shape: RecordShape::Struct {
+            name: TypeName::from_stored("Int", RuleSet::Earlier).unwrap(),
+            revision: 1,
+            supersedes: None,
+            members: vec![TypeMember {
+                name: MemberName::parse("x").unwrap(),
+                type_id: primitive(Primitive::Int),
+            }],
+        },
+    };
+    fixture
+        .store
+        .seed_type(&PlcType::from_stored(record, RuleSet::Earlier).unwrap());
+
+    let result = form(&fixture, None).await.unwrap();
+
+    assert!(
+        result.choices.iter().any(|choice| choice == "ST_Zone@2"),
+        "{:?}",
+        result.choices
+    );
+    assert!(
+        !result.choices.iter().any(|choice| choice == "Int@1"),
+        "{:?}",
+        result.choices
+    );
 }

@@ -17,7 +17,7 @@ use crate::memory::fixtures::{Fixture, actor, lock_line, meta, mid, tid, timesta
 use crate::memory::{DERIVED_TYPE_LOCK_TABLE, Fault, JournalEntry, LockMode, seed_type_id};
 use crate::ports::Isolation;
 
-fn input(mode: DefineUdtMode, name: &str, members: &[(&str, &str)]) -> DefineUdtInput {
+pub(super) fn input(mode: DefineUdtMode, name: &str, members: &[(&str, &str)]) -> DefineUdtInput {
     DefineUdtInput {
         code: MachineCode::parse("M1").unwrap(),
         name: TypeName::parse(name).unwrap(),
@@ -38,14 +38,14 @@ fn zone_input(mode: DefineUdtMode) -> DefineUdtInput {
     input(mode, "ST_Zone", &[("setpoint", "REAL")])
 }
 
-fn fixture(platform: PlcPlatform) -> Fixture {
+pub(super) fn fixture(platform: PlcPlatform) -> Fixture {
     let fixture = Fixture::new();
     fixture.seed_machine_on(platform, 1, "M1");
     fixture
 }
 
 /// A stored struct of machine 1 on `TwinCat3`.
-fn stored_struct(
+pub(super) fn stored_struct(
     id: u128,
     (name, revision): (&str, u32),
     supersedes: Option<u128>,
@@ -85,12 +85,12 @@ fn struct_parts(row: &PlcType) -> (String, u32, Option<PlcTypeId>, Vec<TypeMembe
     .unwrap()
 }
 
-fn real() -> PlcTypeId {
+pub(super) fn real() -> PlcTypeId {
     seed_type_id(Primitive::Real, None).unwrap()
 }
 
 /// The rows of machine 1 that the committed state holds.
-fn own_rows(fixture: &Fixture) -> Vec<PlcType> {
+pub(super) fn own_rows(fixture: &Fixture) -> Vec<PlcType> {
     fixture
         .store
         .state()
@@ -101,7 +101,7 @@ fn own_rows(fixture: &Fixture) -> Vec<PlcType> {
         .collect()
 }
 
-async fn run(
+pub(super) async fn run(
     fixture: &Fixture,
     role: Role,
     input: DefineUdtInput,
@@ -175,7 +175,7 @@ async fn a_revision_gets_the_next_number_and_supersedes_the_last_one() {
 }
 
 #[tokio::test]
-async fn the_journal_holds_the_machine_lock_and_then_the_sorted_advisory_keys() {
+async fn the_journal_holds_the_machine_lock_and_then_the_advisory_keys_in_the_order_of_the_texts() {
     let fixture = fixture(PlcPlatform::TwinCat3);
     run(
         &fixture,
@@ -201,9 +201,9 @@ async fn the_journal_holds_the_machine_lock_and_then_the_sorted_advisory_keys() 
             JournalEntry::Begin(Isolation::ReadOnly),
             JournalEntry::Begin(Isolation::ReadCommitted),
             lock_line("machine", LockMode::ForShare, mid(1).to_string()),
-            advisory("ST_Zone"),
-            advisory("STRING"),
             advisory("ARRAY"),
+            advisory("STRING"),
+            advisory("ST_Zone"),
         ]
     );
 }

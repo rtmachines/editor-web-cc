@@ -1,7 +1,8 @@
 //! Failure that a test injects into an in-memory adapter.
 
 use crate::error::{
-    LockFailure, PLC_TYPE_MEMBER_NAME_UNIQUE, PLC_TYPE_NAMED_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT,
+    LockFailure, PLC_TYPE_MEMBER_NAME_CI_UNIQUE, PLC_TYPE_MEMBER_NAME_UNIQUE,
+    PLC_TYPE_NAMED_UNIQUE, PLC_TYPE_STRUCT_NAME_CI_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT,
     StorageError, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE,
 };
 
@@ -35,6 +36,10 @@ pub enum Fault {
     DuplicateLiveDraft,
     /// The failure `StorageError::Duplicate` with the constraint `plc_type_member_name_unique`.
     DuplicateMemberName,
+    /// The failure `StorageError::Duplicate` with the constraint `plc_type_struct_name_ci_unique`.
+    DuplicateTypeNameAnyCase,
+    /// The failure `StorageError::Duplicate` with the constraint `plc_type_member_name_ci_unique`.
+    DuplicateMemberNameAnyCase,
     /// The failure `StorageError::MissingReference` with a constraint that no command knows.
     UnknownMissingReference,
 }
@@ -72,6 +77,12 @@ impl From<Fault> for StorageError {
             },
             Fault::DuplicateMemberName => Self::Duplicate {
                 constraint: PLC_TYPE_MEMBER_NAME_UNIQUE.to_owned(),
+            },
+            Fault::DuplicateTypeNameAnyCase => Self::Duplicate {
+                constraint: PLC_TYPE_STRUCT_NAME_CI_UNIQUE.to_owned(),
+            },
+            Fault::DuplicateMemberNameAnyCase => Self::Duplicate {
+                constraint: PLC_TYPE_MEMBER_NAME_CI_UNIQUE.to_owned(),
             },
             Fault::UnknownMissingReference => Self::MissingReference {
                 constraint: UNKNOWN_CONSTRAINT.to_owned(),

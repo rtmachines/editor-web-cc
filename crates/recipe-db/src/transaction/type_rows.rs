@@ -11,7 +11,7 @@ use recipe_app::error::StorageError;
 use recipe_app::ports::{DerivedTypeLock, Ensured, RowImage};
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafClass, MachineId, MemberName, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, TypeMember, TypeName,
 };
 use serde_json::Value;
 use sqlx::PgConnection;
@@ -38,7 +38,17 @@ SELECT m.struct_type_id, m.member_name, m.member_type_id \
 FROM plc_type_member m JOIN plc_type t ON t.id = m.struct_type_id \
 WHERE t.machine_id = $1 ORDER BY m.struct_type_id, m.ordinal";
 
-const LOCK_DERIVED_TYPE: &str = "SELECT pg_advisory_xact_lock($1, hashtext($2::text || ':' || $3))";
+/// The distinct second keys of the class-2 locks of the given key texts, in ascending order.
+///
+/// `$1` is the machine identifier as text and `$2` is the array of the key texts. The order of
+/// the key values is the one lock order of every command, so two commands never wait for each
+/// other in a circle (ADR-0144 (a) to (c)).
+pub(crate) const DERIVED_LOCK_KEYS: &str = "\
+SELECT DISTINCT hashtext($1::text || ':' || k) AS key \
+FROM unnest($2::text[]) AS k \
+ORDER BY key";
+
+const LOCK_DERIVED_TYPE: &str = "SELECT pg_advisory_xact_lock($1, $2)";
 
 /// A new `STRING(n)`, `WSTRING(n)`, or array row. A conflict on any unique index skips the row.
 const INSERT_DERIVED: &str = "\
@@ -165,7 +175,8 @@ fn shape_of(row: &TypeRecord, members: Vec<TypeMember>) -> Result<RecordShape, S
             })
         }
         "struct" => Ok(RecordShape::Struct {
-            name: TypeName::parse(required(row.name.as_deref(), "name")?).map_err(bad)?,
+            name: TypeName::from_stored(required(row.name.as_deref(), "name")?, RuleSet::Earlier)
+                .map_err(bad)?,
             revision: u32::try_from(row.revision).map_err(bad)?,
             supersedes: row.supersedes_type_id.map(PlcTypeId::from),
             members,
@@ -188,7 +199,7 @@ fn build_type(row: TypeRecord, members: Vec<TypeMember>) -> Result<PlcType, Stor
         platforms,
         shape: shape_of(&row, members)?,
     };
-    PlcType::try_from(record).map_err(bad)
+    PlcType::from_stored(record, RuleSet::Earlier).map_err(bad)
 }
 
 /// Group the member rows by struct. The rows arrive ordered by struct and `ordinal`.
@@ -229,17 +240,30 @@ pub(super) async fn rows(
         .collect()
 }
 
-/// Take the class-2 advisory lock of each key, one statement for each key, in the given order.
+/// Take the class-2 advisory lock of each key, one statement for each lock.
+///
+/// The statement `DERIVED_LOCK_KEYS` gives the distinct key values in ascending order. The
+/// function takes the locks in that order, whatever the order of `keys` is (ADR-0144 (a) to (c)).
+/// An empty `keys` sends no statement.
 pub(super) async fn lock_derived(
     connection: &mut PgConnection,
     machine: MachineId,
     keys: &[DerivedTypeLock],
 ) -> Result<(), StorageError> {
-    for key in keys {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let texts: Vec<&str> = keys.iter().map(DerivedTypeLock::key_text).collect();
+    let values: Vec<i32> = sqlx::query_scalar(DERIVED_LOCK_KEYS)
+        .bind(machine.to_string())
+        .bind(texts)
+        .fetch_all(&mut *connection)
+        .await
+        .map_err(map_error)?;
+    for value in values {
         sqlx::query(LOCK_DERIVED_TYPE)
             .bind(DERIVED_TYPE_LOCK_CLASS)
-            .bind(machine.to_string())
-            .bind(key.key_text())
+            .bind(value)
             .execute(&mut *connection)
             .await
             .map_err(map_error)?;
