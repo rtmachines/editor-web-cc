@@ -4,7 +4,7 @@ use super::super::add::support::{
     DINT as SUPPORT_DINT, INT as SUPPORT_INT, draft_with, new_parameter_at,
     trees_on as support_trees_on,
 };
-use super::super::support::{address, key, stored_draft_with, stored_parameter, tag};
+use super::super::support::{address, check_every, key, stored_draft_with, stored_parameter, tag};
 use crate::error_codes::{ErrorCode, REGISTRY};
 use crate::plant::fixtures::{
     id, machine, on_platform, primitive_row, string_row, struct_row, types, types_for,
@@ -82,7 +82,7 @@ fn draft_of(platform: PlcPlatform, specs: &[Spec]) -> Draft {
 }
 
 fn check(platform: PlcPlatform, specs: &[Spec]) -> Result<(), DraftError> {
-    draft_of(platform, specs).check_s7_layout(&trees_on(platform))
+    check_every(&draft_of(platform, specs), &trees_on(platform))
 }
 
 fn recipe_error(result: Result<(), DraftError>) -> RecipeError {
@@ -424,14 +424,14 @@ fn the_five_new_codes_have_registry_rows_and_texts() {
 fn trees_that_do_not_hold_a_type_of_the_draft_give_e_plt_013() {
     let draft = draft_of(PlcPlatform::TwinCat3, &[("SPEED", INT, None)]);
     let partial = TypeTrees::resolve([id(REAL)], &types(rows()));
-    let error = draft.check_s7_layout(&partial).unwrap_err();
+    let error = check_every(&draft, &partial).unwrap_err();
     assert_eq!(error.code(), ErrorCode::PLT_013, "{error}");
 }
 
 #[test]
 fn a_type_that_failed_to_resolve_stays_out_of_the_layout_check() {
     let draft = draft_of(PlcPlatform::TwinCat3, &[("LOST", UNKNOWN, None)]);
-    assert!(draft.check_s7_layout(&trees()).is_ok());
+    assert!(check_every(&draft, &trees()).is_ok());
 }
 
 /// The approval check: the layout rules and the address rules of ADR-0116.

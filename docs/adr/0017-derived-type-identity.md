@@ -1,6 +1,6 @@
 # ADR-0017: Identity of derived PLC types and S7-300 layout
 
-Status: Accepted. Amended by ADR-0144 (a command takes the class-2 locks in the order of their key values, each value once). Amended by ADR-0145 (`dims_valid` requires the subscript 1 at the start of both arrays)
+Status: Accepted. Amended by ADR-0144 (a command takes the class-2 locks in the order of their key values, each value once). Amended by ADR-0145 (`dims_valid` requires the subscript 1 at the start of both arrays). Amended by ADR-0147 (S7 layout of a `SINT` or `USINT` struct member and of a `BOOL` array with two dimensions, source marks). Amended by ADR-0148 (no array of an array on `S7_1200` and `S7_1500`)
 Date: 2026-10-12
 Deciders: project owner
 

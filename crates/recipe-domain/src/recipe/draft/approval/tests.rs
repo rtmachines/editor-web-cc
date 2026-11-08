@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::super::add::support::{REAL, draft_with, live_unit, trees_on as real_trees_on};
-use super::super::support::{address, key, stored_draft_with, tag, user};
+use super::super::support::{address, check_every, key, stored_draft_with, tag, user};
 use crate::error_codes::{ErrorCode, REGISTRY};
 use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, PlcPlatform, PlcTypeId};
@@ -388,7 +388,7 @@ fn trees_of_another_machine_or_platform_give_e_plt_013_in_every_whole_draft_chec
             ErrorCode::PLT_013
         );
         assert_eq!(
-            draft.check_s7_layout(&wrong).unwrap_err().code(),
+            check_every(&draft, &wrong).unwrap_err().code(),
             ErrorCode::PLT_013
         );
     }

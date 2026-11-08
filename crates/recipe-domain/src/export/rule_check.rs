@@ -8,7 +8,7 @@ use crate::error_codes::ErrorCode;
 use crate::plant::TypeTrees;
 use crate::recipe::{
     DraftError, Parameter, ParameterKey, RuleFault, StructureFault, check_stored_parameter,
-    not_on_platform,
+    not_on_platform, overlap_partners,
 };
 
 /// The parameters of a version that have a rule fault, with their faults, in parameter order.
@@ -71,6 +71,12 @@ impl BrokenParameter {
 /// fault. A parameter without a rule fault does not appear. An empty result means that the
 /// version has no rule fault.
 ///
+/// After the loop over the parameters, the check also looks for stored S7 addresses that share
+/// bytes (I20, ADR-0149 (e) to (j), design D10). It covers every parameter of the version. Each
+/// parameter of an overlapping pair gets a rule fault `E-RCP-022` on its address, after its other
+/// faults. The check runs only when no parameter has a structure fault. The hashed body does not
+/// change (ADR-0149 (j)).
+///
 /// A parameter whose type has no usable tree cannot be checked. The check treats it as a
 /// structure fault, so the version page and the export share one rule (ADR-0118 (d)).
 ///
@@ -78,12 +84,12 @@ impl BrokenParameter {
 ///
 /// Returns the key and the [`StructureFault`] of the first parameter with a structure fault. A
 /// parameter without a tree is one. A structure fault is a storage defect, and the caller gives
-/// `500 E-DB-008` (ADR-0119 (k)).
+/// `500 E-DB-008` (ADR-0119 (k)). An overlap is never a structure fault (ADR-0149 (h)).
 pub fn check_version_parameters(
     parameters: &[Parameter],
     trees: &TypeTrees,
 ) -> Result<VersionRuleFaults, BrokenParameter> {
-    let mut found = Vec::new();
+    let mut checked = Vec::new();
     for parameter in parameters {
         let broken = |fault: StructureFault| BrokenParameter::new(parameter.key(), fault);
         let tree = match trees.get(parameter.plc_type()) {
@@ -95,6 +101,24 @@ pub fn check_version_parameters(
             }
         };
         let faults = check_stored_parameter(parameter, tree).map_err(broken)?;
+        checked.push((parameter, tree, faults));
+    }
+    let partners = overlap_partners(
+        checked
+            .iter()
+            .map(|(parameter, tree, _)| (*parameter, *tree)),
+    )
+    .map_err(|(key, error)| BrokenParameter::new(key, DraftError::from(*error).into()))?;
+    let mut found = Vec::new();
+    for (parameter, _, mut faults) in checked {
+        let overlap = partners.get(&parameter.key()).zip(parameter.s7_address());
+        if let Some((other_tag, address)) = overlap {
+            faults.push(RuleFault::overlap(
+                parameter.tag().clone(),
+                other_tag.clone(),
+                address,
+            ));
+        }
         if !faults.is_empty() {
             found.push((parameter.key(), faults));
         }

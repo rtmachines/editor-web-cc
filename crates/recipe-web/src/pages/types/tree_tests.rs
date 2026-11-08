@@ -1,16 +1,20 @@
 //! Tests of the type tree page `GET /machines/{code}/types/{name}` (task 8.4, spec "Type pages",
 //! design D6 and D10).
 
+use std::collections::BTreeSet;
+
 use axum::http::StatusCode;
-use recipe_domain::plant::Primitive;
+use recipe_domain::plant::{
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape,
+};
 
 use super::test_kit::{
-    assert_content_answer, between, get_as, get_in, primitive_id, seed_array, seed_cycle,
-    seed_struct, string_id, struct_id,
+    assert_content_answer, between, get_as, get_in, primitive_id, seed_array, seed_array_for,
+    seed_cycle, seed_machine_on, seed_struct, seed_struct_for, string_id, struct_id,
 };
 use crate::pages::test_helpers::{assert_clean_html, assert_no_user_text_in_hx_attributes};
 use crate::test_support::icon_tag;
-use crate::test_support::plant::{HTMX_CONTENT, POLISH, world};
+use crate::test_support::plant::{HTMX_CONTENT, POLISH, World, world};
 
 const ZONE: &str = "/machines/M7/types/ST_Zone";
 
@@ -442,4 +446,58 @@ async fn types_tree_page_in_read_only_mode_holds_no_link_to_a_new_revision() {
             reply.body
         );
     }
+}
+
+// --- A stored array of an array on the S7-1500 (ADR-0148 e) --------------------------------------
+
+/// Seed the global primitive row `BYTE`, which the seed of the memory adapter does not hold.
+fn seed_byte(world: &World) -> PlcTypeId {
+    let id = struct_id(29);
+    let row = PlcType::try_from(PlcTypeRecord {
+        id,
+        machine: None,
+        platforms: BTreeSet::from(PlcPlatform::ALL),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::Byte,
+            leaf_class: Primitive::Byte.leaf_class(),
+            size_bytes: 1,
+            string_length: None,
+        },
+    })
+    .unwrap();
+    world.fixture.store.seed_type(&row);
+    id
+}
+
+/// Spec "Type page of a stored array of an array": rows stored before ADR-0148 stay readable.
+///
+/// The test seeds the rows directly, because no command writes this type text on the `S7_1500`
+/// any more. The page shows the tree and the S7 layout, and it does not refuse the type.
+#[tokio::test]
+async fn types_tree_page_shows_a_stored_array_of_an_array_on_the_s7_1500() {
+    let world = world();
+    let (_code, machine) = seed_machine_on(&world.fixture, 5, PlcPlatform::S7_1500);
+    let owner = (machine, PlcPlatform::S7_1500);
+    let inner = seed_array_for(&world, owner, 30, seed_byte(&world), &[(1, 3)]);
+    let cells = seed_array_for(&world, owner, 31, inner, &[(1, 2)]);
+    seed_struct_for(&world, owner, 32, ("ST_Grid", 1), &[("cells", cells)]);
+
+    let reply = get_as(&world, &world.operator, "/machines/M5/types/ST_Grid", &[]).await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = &reply.body;
+    assert!(body.contains("<h1>Type ST_Grid@1</h1>"), "{body}");
+    assert!(
+        tree_of(body).contains(&leaf("cells", "ARRAY[1..2] OF ARRAY[1..3] OF BYTE")),
+        "{body}"
+    );
+    let table = between(body, "id=\"type-s7-caption\"", "</table>");
+    assert!(
+        table.contains(">.cells</td>")
+            && table.contains(">ARRAY[1..2] OF ARRAY[1..3] OF BYTE</td>")
+            && table.contains(">0.0</td>"),
+        "{table}"
+    );
+    assert!(body.contains("The type has a size of "), "{body}");
+    assert!(!body.contains("E-PLT-013"), "{body}");
 }

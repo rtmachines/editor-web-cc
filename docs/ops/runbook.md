@@ -36,6 +36,7 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
   - [Restore into production](#restore-into-production)
 - [Check the stored data against the platform ranges](#check-the-stored-data-against-the-platform-ranges)
 - [Check the stored type rows against the identifier rules](#check-the-stored-type-rows-against-the-identifier-rules)
+- [Check the stored data against the S7 layout rules](#check-the-stored-data-against-the-s7-layout-rules)
 - [Check the TwinCAT version before you add a TwinCat3 machine](#check-the-twincat-version-before-you-add-a-twincat3-machine)
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
@@ -1106,6 +1107,27 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 4. Accept or sign off each row of `reserved_struct_name`.
 5. Write the result into the [change log of the site](#change-log-of-the-site).
 
+## Check the stored data against the S7 layout rules
+
+The query lists the stored rows that the S7 layout rules of ADR-0147 and ADR-0148 affect. It writes nothing.
+The output has the columns `machine_code`, `reference_number`, `version_number`, `tag`, `part`, and `type_text`.
+The column `part` is `nested_array` or `layout_changed`.
+
+A row of `nested_array` is an array of an array on `S7_1200` or `S7_1500`, or a parameter of such a type.
+A type row has no reference, no version, and no tag.
+A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade.
+The owner signs off each row of both parts.
+
+1. Run the query from the directory `deploy/` of the new release:
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/check-s7-layout-rules.sql
+```
+
+2. The owner reads each output row.
+3. Sign off each row of `nested_array` and `layout_changed`.
+4. Write the result into the [change log of the site](#change-log-of-the-site).
+
 ## Check the TwinCAT version before you add a TwinCat3 machine
 
 The editor does not read the TwinCAT version of a controller.
@@ -1133,6 +1155,9 @@ A rollback needs the images of the previous release. See the section "Keep the i
    2. Run the section "Check the stored type rows against the identifier rules" from the directory `deploy/` of the new release.
    Run it after the platform-ranges check and before step 3.
    Continue only when the parts `struct_name_case`, `member_name_case`, and `array_subscript` give 0 rows.
+   3. Run the section "Check the stored data against the S7 layout rules" from the directory `deploy/` of the new release.
+   Run it after the identifier check and before step 3.
+   Continue only when the owner signed off each row.
 3. Run `docker compose run --rm --no-deps backup restore-test`. `.env` still holds the previous tag. Continue only after the test passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.

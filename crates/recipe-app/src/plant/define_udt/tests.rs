@@ -4,8 +4,8 @@ use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    MachineCode, MemberName, PlantError, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, TypeExpr, TypeMember, TypeName,
+    ArrayDimension, ArrayDimensions, MachineCode, MemberName, PlantError, PlcPlatform, PlcType,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeMember, TypeName,
 };
 use serde_json::json;
 
@@ -394,6 +394,152 @@ async fn an_unknown_member_struct_gives_plt_013() {
     .await
     .unwrap_err();
     assert_eq!(error.code(), ErrorCode::PLT_013);
+}
+
+/// The error of a nested array member: `E-PLT-006` with the struct, the member, and the platform.
+fn assert_member_refused(error: &AppError, (name, member): (&str, &str), platform: PlcPlatform) {
+    assert_eq!(error.code(), ErrorCode::PLT_006);
+    assert!(matches!(
+        error,
+        AppError::Plant(PlantError::MemberTypeNotOnPlatform { type_name, member: refused, platform: on })
+            if type_name.as_str() == name && refused.as_str() == member && *on == platform
+    ));
+}
+
+#[tokio::test]
+async fn a_member_array_of_an_array_on_s7_1200_gives_plt_006_with_the_member_and_creates_no_type() {
+    let fixture = fixture(PlcPlatform::S7_1200);
+    let before = fixture.store.state().types.len();
+    let error = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Grid",
+            &[("cells", "ARRAY[1..3] OF ARRAY[1..3] OF INT")],
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_member_refused(&error, ("ST_Grid", "cells"), PlcPlatform::S7_1200);
+    assert_eq!(fixture.store.state().types.len(), before);
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn a_member_array_of_an_array_on_s7_1500_gives_plt_006() {
+    let fixture = fixture(PlcPlatform::S7_1500);
+    let error = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Grid",
+            &[
+                ("mode", "INT"),
+                ("cells", "ARRAY[1..3] OF ARRAY[1..3] OF INT"),
+            ],
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_member_refused(&error, ("ST_Grid", "cells"), PlcPlatform::S7_1500);
+}
+
+#[tokio::test]
+async fn a_member_array_with_two_dimensions_on_s7_1200_succeeds() {
+    let fixture = fixture(PlcPlatform::S7_1200);
+    let output = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Grid",
+            &[("cells", "ARRAY[1..3,1..3] OF BOOL")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.revision, 1);
+}
+
+#[tokio::test]
+async fn a_member_array_of_an_array_on_twincat_3_succeeds() {
+    let fixture = fixture(PlcPlatform::TwinCat3);
+    let output = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Grid",
+            &[("cells", "ARRAY[1..3] OF ARRAY[1..3] OF INT")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.revision, 1);
+}
+
+/// The struct `ST_Grid@1` with the stored member `cells` of type `ARRAY[1..2] OF ARRAY[1..3] OF
+/// INT` on `S7_1500`. The rows come from the memory adapter, as if they were stored before
+/// ADR-0148.
+fn seed_stored_grid(fixture: &Fixture) {
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    let array = |id: u128, element: PlcTypeId, upper: i32| {
+        PlcType::try_from(PlcTypeRecord {
+            id: tid(id),
+            machine: Some(mid(1)),
+            platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+            shape: RecordShape::Array {
+                element,
+                dimensions: ArrayDimensions::parse(vec![ArrayDimension::parse(1, upper).unwrap()])
+                    .unwrap(),
+            },
+        })
+        .unwrap()
+    };
+    fixture.store.seed_type(&array(941, int, 3));
+    fixture.store.seed_type(&array(942, tid(941), 2));
+    let grid = PlcType::try_from(PlcTypeRecord {
+        id: tid(943),
+        machine: Some(mid(1)),
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape: RecordShape::Struct {
+            name: TypeName::parse("ST_Grid").unwrap(),
+            revision: 1,
+            supersedes: None,
+            members: vec![TypeMember {
+                name: MemberName::parse("cells").unwrap(),
+                type_id: tid(942),
+            }],
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&grid);
+}
+
+#[tokio::test]
+async fn a_revision_that_keeps_a_stored_array_of_an_array_gives_plt_006_and_creates_no_revision() {
+    let fixture = fixture(PlcPlatform::S7_1500);
+    seed_stored_grid(&fixture);
+    let before = own_rows(&fixture).len();
+    let error = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::Revision,
+            "ST_Grid",
+            &[
+                ("cells", "ARRAY[1..2] OF ARRAY[1..3] OF INT"),
+                ("mode", "INT"),
+            ],
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert_member_refused(&error, ("ST_Grid", "cells"), PlcPlatform::S7_1500);
+    assert_eq!(own_rows(&fixture).len(), before);
+    assert!(fixture.store.audit_entries().is_empty());
 }
 
 #[tokio::test]

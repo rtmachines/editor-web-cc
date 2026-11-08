@@ -138,6 +138,8 @@ impl DefineUdt {
 /// Resolve the type expression of each member to a type row, in the order of the members.
 ///
 /// A member type that is not on the platform gets the member name (`E-PLT-006`).
+/// An array of an array on `S7_1200` and `S7_1500` is such a type (ADR-0148). The check runs
+/// before the type is created, so a refused member leaves no new type row.
 async fn ensure_members(
     derived: &mut DerivedTypes,
     catalog: &mut dyn TypeCatalog,
@@ -146,6 +148,8 @@ async fn ensure_members(
 ) -> Result<Vec<TypeMember>, AppError> {
     let mut members = Vec::with_capacity(input.members.len());
     for (name, expr) in &input.members {
+        expr.require_no_nested_array(platform)
+            .map_err(|error| member_error(error.into(), &input.name, name, platform))?;
         let type_id = derived
             .ensure_expr(catalog, expr)
             .await

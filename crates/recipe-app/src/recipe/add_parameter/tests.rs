@@ -1,8 +1,11 @@
+use std::collections::BTreeSet;
+
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    DerivedTypeReason, LeafPath, PlantError, PlcPlatform, RuleSet, TypeExpr, UnitPath,
+    ArrayDimension, ArrayDimensions, DerivedTypeReason, LeafPath, PlantError, PlcPlatform, PlcType,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, TypeExpr, UnitPath,
 };
 use recipe_domain::recipe::{
     LimitInput, LimitList, Ordinal, ParameterTag, StoredParameter, ValueInput, VersionState,
@@ -15,12 +18,14 @@ use crate::context::UseCase;
 use crate::error::{AppError, PARAMETER_TAG_UNIQUE, StorageError};
 use crate::memory::fixtures::scenarios::zone_draft;
 use crate::memory::fixtures::{
-    Fixture, actor, field, lock_line, meta, mid, recipe_with, reference, rid, text, uid, user, vid,
+    Fixture, actor, field, lock_line, meta, mid, recipe_with, reference, rid, text, tid, uid, user,
+    vid,
 };
 use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode};
 use crate::ports::Isolation;
 use crate::recipe::DraftOutput;
 use crate::recipe::definition_steps::map_tag_error;
+use crate::recipe::rebind::fixtures::{primitive_id, typed_struct_row};
 use crate::recipe::test_support::{
     DRAFT_VERSION, archive_unit, seed_deleted, seed_speed_draft, seed_zone_on_int_struct,
     speed_key, stored_parameters,
@@ -475,4 +480,145 @@ async fn a_struct_name_in_another_case_gives_plt_013_with_an_unknown_struct() {
     assert_eq!(reason_of(&error), Some(DerivedTypeReason::UnknownStruct));
     assert_eq!(stored_parameters(&fixture).len(), 1);
     assert_nothing_written(&fixture);
+}
+
+/// A draft of a machine on `platform` with the struct `ST_Zone@1` and its member `ramps` of
+/// type `ARRAY[1..3] OF INT`.
+fn zone_with_ramps_draft(platform: PlcPlatform) -> Fixture {
+    let fixture = empty_draft(platform);
+    fixture
+        .store
+        .seed_type(&array_row(platform, 801, primitive_id(Primitive::Int), 3));
+    fixture.store.seed_type(&typed_struct_row(
+        platform,
+        (802, "ST_Zone", 1),
+        None,
+        &[("ramps", tid(801))],
+    ));
+    fixture
+}
+
+/// The identifier of the global BYTE row that [`byte_draft`] stores.
+const BYTE_ROW: u128 = 821;
+
+/// A draft of a machine on `platform` with no parameter and the global `BYTE` row. The seed of
+/// the memory store has no `BYTE`.
+fn byte_draft(platform: PlcPlatform) -> Fixture {
+    let fixture = empty_draft(platform);
+    fixture.seed_primitive_type(BYTE_ROW, platform, Primitive::Byte);
+    fixture
+}
+
+/// An array row of the machine 1 with the bounds `1..=upper`.
+fn array_row(platform: PlcPlatform, id: u128, element: PlcTypeId, upper: i32) -> PlcType {
+    PlcType::try_from(PlcTypeRecord {
+        id: tid(id),
+        machine: Some(mid(1)),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Array {
+            element,
+            dimensions: ArrayDimensions::parse(vec![ArrayDimension::parse(1, upper).unwrap()])
+                .unwrap(),
+        },
+    })
+    .unwrap()
+}
+
+/// The error that `AddParameter` gives to an array of an array: `E-PLT-013`, not on the platform.
+fn assert_refuses_nesting(error: &AppError) {
+    assert_eq!(error.code(), ErrorCode::PLT_013);
+    assert_eq!(reason_of(error), Some(DerivedTypeReason::NotOnPlatform));
+}
+
+const NESTED: &str = "ARRAY[1..2] OF ARRAY[1..3] OF BYTE";
+const NESTED_VALUE: &str = "[[1,2,3],[4,5,6]]";
+
+#[tokio::test]
+async fn an_array_of_an_array_on_s7_1500_gives_plt_013_and_creates_no_type_and_no_parameter() {
+    let fixture = byte_draft(PlcPlatform::S7_1500);
+    let types_before = fixture.store.state().types.len();
+    let error = run(&fixture, input(NESTED, NESTED_VALUE, Vec::new()))
+        .await
+        .unwrap_err();
+    assert_refuses_nesting(&error);
+    assert_eq!(fixture.store.state().types.len(), types_before);
+    assert!(stored_parameters(&fixture).is_empty());
+    assert_nothing_written(&fixture);
+}
+
+#[tokio::test]
+async fn an_array_of_an_array_on_s7_1200_gives_plt_013_and_creates_no_type_and_no_parameter() {
+    let fixture = byte_draft(PlcPlatform::S7_1200);
+    let types_before = fixture.store.state().types.len();
+    let error = run(&fixture, input(NESTED, NESTED_VALUE, Vec::new()))
+        .await
+        .unwrap_err();
+    assert_refuses_nesting(&error);
+    assert_eq!(fixture.store.state().types.len(), types_before);
+    assert!(stored_parameters(&fixture).is_empty());
+    assert_nothing_written(&fixture);
+}
+
+#[tokio::test]
+async fn a_stored_array_of_an_array_does_not_open_the_way_to_a_new_parameter_on_s7_1500() {
+    let fixture = byte_draft(PlcPlatform::S7_1500);
+    let byte = tid(BYTE_ROW);
+    fixture
+        .store
+        .seed_type(&array_row(PlcPlatform::S7_1500, 811, byte, 3));
+    fixture
+        .store
+        .seed_type(&array_row(PlcPlatform::S7_1500, 812, tid(811), 2));
+    let types_before = fixture.store.state().types.len();
+    let error = run(&fixture, input(NESTED, NESTED_VALUE, Vec::new()))
+        .await
+        .unwrap_err();
+    assert_refuses_nesting(&error);
+    assert_eq!(fixture.store.state().types.len(), types_before);
+    assert!(stored_parameters(&fixture).is_empty());
+    assert_nothing_written(&fixture);
+}
+
+#[tokio::test]
+async fn an_array_with_two_dimensions_on_s7_1500_adds_the_parameter() {
+    let fixture = byte_draft(PlcPlatform::S7_1500);
+    run(
+        &fixture,
+        input("ARRAY[1..2,1..3] OF BYTE", NESTED_VALUE, Vec::new()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(stored_parameters(&fixture).len(), 1);
+}
+
+#[tokio::test]
+async fn an_array_of_a_struct_with_an_array_member_on_s7_1500_adds_the_parameter() {
+    let fixture = zone_with_ramps_draft(PlcPlatform::S7_1500);
+    run(
+        &fixture,
+        input(
+            "ARRAY[1..2] OF ST_Zone@1",
+            r#"[{"ramps":[1,2,3]},{"ramps":[4,5,6]}]"#,
+            Vec::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(stored_parameters(&fixture).len(), 1);
+}
+
+#[tokio::test]
+async fn an_array_of_an_array_on_twincat_3_adds_the_parameter() {
+    let fixture = empty_draft(PlcPlatform::TwinCat3);
+    run(
+        &fixture,
+        input(
+            "ARRAY[1..2] OF ARRAY[1..3] OF INT",
+            NESTED_VALUE,
+            Vec::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(stored_parameters(&fixture).len(), 1);
 }

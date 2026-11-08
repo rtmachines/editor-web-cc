@@ -13,7 +13,9 @@ use recipe_domain::plant::{
 use recipe_domain::recipe::StoredLimit;
 use serde_json::json;
 
-use super::fixtures::{error_lines, request, run, seed_parameter, stored, typed_struct_row};
+use super::fixtures::{
+    array_row, error_lines, primitive_id, request, run, seed_parameter, stored, typed_struct_row,
+};
 use crate::memory::fixtures::{Fixture, mid, tid, vid};
 use crate::memory::seed_type_id;
 use crate::recipe::DraftOutput;
@@ -151,6 +153,83 @@ async fn a_rebind_that_keeps_every_member_writes_one_entry_with_the_type_only() 
         assert!(diff.get("value").is_none());
         assert!(diff.get("limits").is_none());
     }
+}
+
+/// `ST_Zone@1` and `ST_Zone@2` come from the fixtures. The member of both is `setpoint`.
+const ZONE_STRUCT_1: u128 = 950;
+const ZONE_STRUCT_2: u128 = 951;
+/// `ARRAY[1..2] OF ST_Zone@1`, the inner level of `ZONES`.
+const INNER_ZONES: u128 = 952;
+/// `ARRAY[1..2] OF ARRAY[1..2] OF ST_Zone@1`, the type of `ZONES`.
+const OUTER_ZONES: u128 = 953;
+/// The parameter number of `ZONES`.
+const ZONES: u128 = 22;
+
+/// An `S7_1500` draft with `ZONES` of the stored type `ARRAY[1..2] OF ARRAY[1..2] OF ST_Zone@1`.
+///
+/// ADR-0148 (f): a stored array of an array stays valid, so the rebind must keep it.
+fn nested_zones_draft() -> Fixture {
+    let platform = PlcPlatform::S7_1500;
+    let int = primitive_id(Primitive::Int);
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let rows = [
+        typed_struct_row(
+            platform,
+            (ZONE_STRUCT_1, "ST_Zone", 1),
+            None,
+            &[("setpoint", int)],
+        ),
+        typed_struct_row(
+            platform,
+            (ZONE_STRUCT_2, "ST_Zone", 2),
+            Some(ZONE_STRUCT_1),
+            &[("setpoint", int)],
+        ),
+        array_row(platform, INNER_ZONES, tid(ZONE_STRUCT_1), 2),
+        array_row(platform, OUTER_ZONES, tid(INNER_ZONES), 2),
+    ];
+    for row in &rows {
+        fixture.store.seed_type(row);
+    }
+    seed_parameter(
+        &fixture,
+        platform,
+        (ZONES, "ZONES"),
+        (
+            OUTER_ZONES,
+            json!([[{"setpoint": 1}, {"setpoint": 2}], [{"setpoint": 3}, {"setpoint": 4}]]),
+        ),
+        Vec::new(),
+    );
+    fixture
+}
+
+/// The element of the array row `id`, or `None` for another row.
+fn array_element(fixture: &Fixture, id: PlcTypeId) -> Option<PlcTypeId> {
+    match fixture.store.state().plc_type(id)?.shape() {
+        RecordShape::Array { element, .. } => Some(*element),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn a_rebind_keeps_a_stored_array_of_an_array_on_s7_1500() {
+    let fixture = nested_zones_draft();
+    let before = stored(&fixture, ZONES);
+
+    let output = run(&fixture, request(ZONE_STRUCT_1, ZONE_STRUCT_2))
+        .await
+        .unwrap();
+
+    assert_eq!(output.row_version, 2);
+    let after = stored(&fixture, ZONES);
+    assert_eq!(after.value, before.value);
+    assert_ne!(after.plc_type, tid(OUTER_ZONES));
+    let inner = array_element(&fixture, after.plc_type).unwrap();
+    assert_ne!(inner, tid(INNER_ZONES));
+    assert_eq!(array_element(&fixture, inner), Some(tid(ZONE_STRUCT_2)));
 }
 
 #[tokio::test]

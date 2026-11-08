@@ -8,13 +8,14 @@
 use std::slice;
 
 use crate::error_codes::ErrorCode;
-use crate::plant::{LeafPath, RuleSet, TypeTree};
+use crate::plant::{LeafPath, RuleSet, S7Address, TypeTree};
 use crate::recipe::draft::{
     check_data_block_rule, check_end_rule, check_faults, leaf_error, stored_limits_under,
     stored_value_under,
 };
 use crate::recipe::{
-    DraftError, Expected, Parameter, ParameterValue, PrecisionField, RecipeError, StoredLimit,
+    DraftError, Expected, Parameter, ParameterTag, ParameterValue, PrecisionField, RecipeError,
+    StoredLimit,
 };
 
 /// The part of a stored parameter that carries a rule fault.
@@ -48,6 +49,10 @@ impl RuleField {
 ///
 /// The error holds the code and the values of the field line. Its code is `E-RCP-005`,
 /// `E-RCP-006`, `E-RCP-055`, `E-RCP-056`, or `E-RCP-057`.
+///
+/// The check of a whole version adds `E-RCP-022` on the address. The version check finds an
+/// overlap of two addresses, so the single-parameter read check never returns that code
+/// (ADR-0149 (e), (g)).
 #[derive(Debug)]
 pub struct RuleFault {
     field: RuleField,
@@ -55,6 +60,25 @@ pub struct RuleFault {
 }
 
 impl RuleFault {
+    /// Make the rule fault of an address that overlaps another address (`E-RCP-022`).
+    ///
+    /// The overlap check of a version needs it, because only that check sees two parameters
+    /// (ADR-0149 (g)).
+    pub(crate) const fn overlap(
+        tag: ParameterTag,
+        other_tag: ParameterTag,
+        address: S7Address,
+    ) -> Self {
+        Self {
+            field: RuleField::Address,
+            error: RecipeError::S7AddressOverlap {
+                tag,
+                other_tag,
+                address,
+            },
+        }
+    }
+
     /// Return the part that carries the fault.
     #[must_use]
     pub const fn field(&self) -> &RuleField {

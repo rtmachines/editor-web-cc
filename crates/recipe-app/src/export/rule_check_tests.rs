@@ -1,11 +1,14 @@
 //! Tests of the rule check and the hash compare of the export flow (ADR-0118, ADR-0119).
 
+use std::collections::BTreeSet;
+
 use recipe_domain::audit::{AuditAction, AuditEntry};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::{ExportHeader, HashedBody, Sha256};
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    LeafPath, Machine, PlatformTypes, PlcPlatform, Primitive, S7Address, TypeTrees, UnitPath,
+    LeafPath, Machine, MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
+    Primitive, RecordShape, S7Address, TypeMember, TypeName, TypeTrees, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{Ordinal, Parameter, StoredLimit, StoredParameter, StoredValue};
 use serde_json::json;
@@ -13,7 +16,7 @@ use serde_json::json;
 use super::test_doubles::{RecordingWriter, port};
 use super::tests::export_approved;
 use super::{ExportApprovedInput, ExportApprovedVersion, ExportScope};
-use crate::memory::fixtures::{Fixture, actor, meta, parameter_on, reference, uid, vid};
+use crate::memory::fixtures::{Fixture, actor, meta, mid, parameter_on, reference, tid, uid, vid};
 use crate::memory::seed_type_id;
 use crate::ports::{Isolation, UnitOfWork};
 
@@ -133,6 +136,166 @@ async fn a_dint_past_the_end_of_the_data_block_on_s7_300_is_not_loadable() {
     assert_eq!(exported.content_sha256, stored);
     assert!(!exported.loadable());
     assert_eq!(fixture.store.audit_entries().len(), 1);
+}
+
+/// The identifier of the struct `ST_Bytes@1` in the tests of the overlap.
+const BYTES_STRUCT: u128 = 970;
+/// The first identifier of the global rows `BYTE`, `CHAR`, `SINT`, and `USINT`.
+const BYTE_FAMILY_FIRST: u128 = 971;
+/// The primitive types of the members `a` to `d` of `ST_Bytes@1`, in order.
+const BYTES_MEMBERS: [(&str, Primitive); 4] = [
+    ("a", Primitive::Byte),
+    ("b", Primitive::Char),
+    ("c", Primitive::Sint),
+    ("d", Primitive::Usint),
+];
+
+/// Return the platforms of the global row of `primitive` (`0004_seed_plc_types.sql`).
+///
+/// `SINT` and `USINT` do not exist on `S7_300`. `CHAR` does not exist on the IEC platforms.
+fn byte_family_platforms(primitive: Primitive) -> BTreeSet<PlcPlatform> {
+    let all = [
+        PlcPlatform::CodesysIec,
+        PlcPlatform::TwinCat3,
+        PlcPlatform::S7_1200,
+        PlcPlatform::S7_1500,
+        PlcPlatform::S7_300,
+    ];
+    all.into_iter()
+        .filter(|platform| match primitive {
+            Primitive::Sint | Primitive::Usint => *platform != PlcPlatform::S7_300,
+            Primitive::Char => matches!(
+                platform,
+                PlcPlatform::S7_1200 | PlcPlatform::S7_1500 | PlcPlatform::S7_300
+            ),
+            _ => true,
+        })
+        .collect()
+}
+
+/// Store the global row `id` of `primitive` with the platforms of the seed migration.
+fn seed_byte_family_row(fixture: &Fixture, id: u128, primitive: Primitive) -> PlcTypeId {
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(id),
+        machine: None,
+        platforms: byte_family_platforms(primitive),
+        shape: RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().unwrap(),
+            string_length: None,
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    tid(id)
+}
+
+/// Seed `ST_Bytes@1` and return the identifiers of the struct and of the `BYTE` row.
+///
+/// The members are `a` of type `BYTE`, `b` of type `CHAR`, `c` of type `SINT`, and `d` of type
+/// `USINT`. The seed of the memory store has none of the four primitive rows.
+fn seed_bytes_struct(fixture: &Fixture) -> (PlcTypeId, PlcTypeId) {
+    let mut members = Vec::new();
+    let mut byte = None;
+    for (offset, (name, primitive)) in (0_u128..).zip(BYTES_MEMBERS) {
+        let id = BYTE_FAMILY_FIRST.checked_add(offset).unwrap();
+        let type_id = seed_byte_family_row(fixture, id, primitive);
+        byte = byte.or((primitive == Primitive::Byte).then_some(type_id));
+        members.push(TypeMember {
+            name: MemberName::parse(name).unwrap(),
+            type_id,
+        });
+    }
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(BYTES_STRUCT),
+        machine: Some(mid(1)),
+        platforms: BTreeSet::from([PlcPlatform::S7_1500]),
+        shape: RecordShape::Struct {
+            name: TypeName::parse("ST_Bytes").unwrap(),
+            revision: 1,
+            supersedes: None,
+            members,
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    (tid(BYTES_STRUCT), byte.unwrap())
+}
+
+/// Seed the approved version 1 of `R-1` on `S7_1500` with the overlap of the current layout rules.
+///
+/// `BYTES` of type `ST_Bytes@1` stands at `DB1.DBB0` in `U1.2`. The earlier layout gave the struct
+/// the size 4. The current layout gives the size 6 (ADR-0147). `MODE` of type `BYTE` stands at
+/// `DB1.DBB4` in the unit `mode_unit`. The struct and `MODE` then share the byte 4 (ADR-0149).
+fn seed_overlap_version(fixture: &Fixture, mode_unit: UnitId) -> Machine {
+    fixture.seed_actors();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_approved_and_draft(&machine, 1, "R-1");
+    let (bytes, byte) = seed_bytes_struct(fixture);
+    let address = |text: &str| Some(S7Address::parse(text).unwrap());
+    let bytes_parameter = StoredParameter {
+        plc_type: bytes,
+        value: StoredValue::from(json!({"a": 0, "b": "A", "c": 0, "d": 0})),
+        s7_address: address("DB1.DBB0"),
+        limits: Vec::new(),
+        ..parameter_on(PlcPlatform::S7_1500, 1, "BYTES", uid(102), 0)
+    };
+    let mode_parameter = StoredParameter {
+        plc_type: byte,
+        value: StoredValue::from(json!(0)),
+        s7_address: address("DB1.DBB4"),
+        limits: Vec::new(),
+        ordinal: Ordinal::parse(1).unwrap(),
+        ..parameter_on(PlcPlatform::S7_1500, 2, "MODE", mode_unit, 0)
+    };
+    fixture.store.seed_parameter(vid(101), &bytes_parameter);
+    fixture.store.seed_parameter(vid(101), &mode_parameter);
+    machine
+}
+
+#[tokio::test]
+async fn an_approved_version_with_an_overlap_of_the_current_layout_is_not_loadable() {
+    // ADR-0149 (e) to (g): the struct of size 6 at DB1.DBB0 covers MODE at DB1.DBB4. The earlier
+    // rules gave the size 4, so the version was clean when it was approved. It exports with the
+    // stored hash. The audit entry stays. The document marks it as not loadable (D10).
+    let fixture = Fixture::new();
+    let machine = seed_overlap_version(&fixture, uid(102));
+    let stored = body_hash_of_version_one(&fixture, &machine).await;
+    store_hash(&fixture, stored);
+
+    let exported = export_approved(&fixture, Role::Operator).await.unwrap();
+
+    assert_eq!(exported.content_sha256, stored);
+    assert!(!exported.loadable());
+    assert_eq!(fixture.store.audit_entries().len(), 1);
+}
+
+#[tokio::test]
+async fn a_unit_document_whose_scope_holds_only_the_struct_of_an_overlap_is_not_loadable() {
+    // ADR-0149 (i): MODE sits in U1, outside the scope U1.2. The scope holds only BYTES. The rule
+    // check still covers the whole version, so the unit document is not loadable.
+    let fixture = Fixture::new();
+    let machine = seed_overlap_version(&fixture, uid(101));
+    let stored = body_hash_of_version_one(&fixture, &machine).await;
+    store_hash(&fixture, stored);
+    let writer = RecordingWriter::shared();
+    let input = ExportApprovedInput {
+        reference: reference("R-1"),
+        machine: None,
+        scope: ExportScope::Unit(UnitPath::parse("U1.2").unwrap()),
+    };
+
+    let exported = ExportApprovedVersion::new(fixture.context(), port(&writer))
+        .execute(&actor(Role::Operator), &meta(), input)
+        .await
+        .unwrap();
+
+    assert!(!exported.loadable());
+    let calls = writer.scoped_calls();
+    let (body, facts) = calls.last().unwrap();
+    assert_eq!(body.parameters().len(), 1);
+    assert!(!facts.document.loadable());
 }
 
 #[tokio::test]

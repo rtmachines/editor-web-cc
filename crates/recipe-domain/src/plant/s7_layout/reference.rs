@@ -18,6 +18,11 @@ pub(super) enum Source {
     Siemens(&'static str),
     /// A rule of this repository. The text names the document and the section.
     Rule(&'static str),
+    /// A derivation from cited Siemens rules. The text names the rule ids of the research record
+    /// `docs/plan/review/2026-11-08-wp7-r1-layout-research.md` (ADR-0147 (h)). The owner accepts
+    /// it in place of a TIA Portal measurement. A rule that rests on an example or on a literal
+    /// reading ends the text with "medium confidence" (ADR-0147 (i)).
+    Documented(&'static str),
     /// No source in reach. The text names the open question of the review.
     Unverified(&'static str),
 }
@@ -26,6 +31,7 @@ impl Source {
     fn describe(self) -> String {
         match self {
             Self::Siemens(text) => format!("Siemens {text}"),
+            Self::Documented(text) => format!("documented {text}"),
             Self::Rule(text) => format!("rule {text}"),
             Self::Unverified(text) => format!("unverified {text}"),
         }
@@ -58,8 +64,7 @@ impl Row {
     }
 }
 
-/// Source of every start class, every offset, and every composite size.
-/// No manual states them.
+/// Source of the start class of a primitive. No manual states it.
 const LAYOUT_UNVERIFIED: Source = Source::Unverified("Q10");
 /// Source of the size of a primitive: the comparison list of the review, S1.
 const S1: Source = Source::Siemens("S1 Comparison list for programming languages 02/2025");
@@ -129,8 +134,6 @@ pub(super) fn catalog() -> PlatformTypes {
     ));
     rows.push(wstring_row(131, 1));
     rows.push(array_row(211, 101, &[(1, 2)]));
-    rows.push(array_row(212, 102, &[(1, 3)]));
-    rows.push(array_row(213, 101, &[(1, 3)]));
     for (root, name, members) in COMPOSITE_STRUCTS {
         rows.push(struct_row(root, name, members));
     }
@@ -225,7 +228,7 @@ const COMPOSITE_STRUCTS: [(u128, &str, MemberTypes); 13] = [
 /// The array roots of the composite rows: the root number, the element number,
 /// and the bounds of each dimension.
 type ArrayBounds = &'static [(i32, i32)];
-const COMPOSITE_ARRAYS: [(u128, u128, ArrayBounds); 11] = [
+const COMPOSITE_ARRAYS: [(u128, u128, ArrayBounds); 9] = [
     (401, 101, &[(1, 17)]),
     (402, 101, &[(1, 3), (1, 3)]),
     (403, 101, &[(1, 3), (1, 3), (1, 3)]),
@@ -234,17 +237,16 @@ const COMPOSITE_ARRAYS: [(u128, u128, ArrayBounds); 11] = [
     (406, 118, &[(1, 4)]),
     (407, 120, &[(1, 2)]),
     (408, 108, &[(0, 1), (1, 2)]),
-    (409, 212, &[(1, 2)]),
-    (410, 213, &[(1, 3)]),
     (411, 201, &[(1, 2)]),
 ];
 
-/// A row of a composite root. Both marks are `Unverified("Q10")`.
+/// A row of a composite root. The size and the layout have the same mark.
 fn composite(
     name: &'static str,
     root: u128,
     size_bytes: u32,
     members: &'static [MemberRow],
+    mark: Source,
 ) -> Row {
     Row {
         name,
@@ -252,15 +254,19 @@ fn composite(
         size_bytes,
         start: S7Start::Even,
         members,
-        size_source: LAYOUT_UNVERIFIED,
-        layout_source: LAYOUT_UNVERIFIED,
+        size_source: mark,
+        layout_source: mark,
     }
 }
 
-/// The composite rows C01 to C13 and A01 to A11, in the order of the table.
+/// The composite rows C01 to C13, A01 to A08, and A11, in the order of the table.
 ///
-/// Every row applies a rule of `domain-model.md` section 2.1.
+/// Every row applies a rule of `domain-model.md` section 2.1. Each row but A03 has the mark
+/// `Documented` with the rule ids of the research record (ADR-0147 (h), (i)). The row A03 keeps
+/// `Unverified("needs a TIA measurement")`. The rows A09 and A10 are not in the table
+/// (ADR-0148 (j)).
 pub(super) fn composite_rows() -> Vec<Row> {
+    use Source::{Documented, Unverified};
     vec![
         // `BOOL` members pack 8 per byte.
         composite(
@@ -278,26 +284,48 @@ pub(super) fn composite_rows() -> Vec<Row> {
                 (".h", 0, 7),
                 (".i", 1, 0),
             ],
+            Documented("WP7-R1 S-ST1 S-ST2 S-ST2a S-BOOL, medium confidence"),
         ),
         // A 1-byte member starts at the next byte.
-        composite("C02 BOOL, BYTE", 302, 2, &[(".a", 0, 0), (".b", 1, 0)]),
+        composite(
+            "C02 BOOL, BYTE",
+            302,
+            2,
+            &[(".a", 0, 0), (".b", 1, 0)],
+            Documented("WP7-R1 S-ST1 S-ST2"),
+        ),
         // A wider member starts at the next even byte.
-        composite("C03 BOOL, INT", 303, 4, &[(".a", 0, 0), (".b", 2, 0)]),
-        // A 1-byte element starts at any byte.
+        composite(
+            "C03 BOOL, INT",
+            303,
+            4,
+            &[(".a", 0, 0), (".b", 2, 0)],
+            Documented("WP7-R1 S-ST1 S-ST2"),
+        ),
+        // A `BYTE` and a `CHAR` member start at any byte. A `SINT` and a `USINT` member start
+        // at an even byte (ADR-0147 (a)).
         composite(
             "C04 BYTE, CHAR, SINT, USINT",
             304,
-            4,
-            &[(".a", 0, 0), (".b", 1, 0), (".c", 2, 0), (".d", 3, 0)],
+            6,
+            &[(".a", 0, 0), (".b", 1, 0), (".c", 2, 0), (".d", 4, 0)],
+            Documented("WP7-R1 S-ST1 S-ST2 S-ST2b, medium confidence"),
         ),
         // A `STRING` starts on an even byte.
-        composite("C05 BYTE, STRING(3)", 305, 8, &[(".a", 0, 0), (".b", 2, 0)]),
+        composite(
+            "C05 BYTE, STRING(3)",
+            305,
+            8,
+            &[(".a", 0, 0), (".b", 2, 0)],
+            Documented("WP7-R1 S-ST2 S-STR1 S-STR2 S-ST1"),
+        ),
         // A `WSTRING` starts on an even byte.
         composite(
             "C06 BYTE, WSTRING(3)",
             306,
             12,
             &[(".a", 0, 0), (".b", 2, 0)],
+            Documented("WP7-R1 S-ST2 S-WSTR S-ST1"),
         ),
         // A 1-byte member after a `WSTRING` starts at the next byte.
         composite(
@@ -305,6 +333,7 @@ pub(super) fn composite_rows() -> Vec<Row> {
             307,
             8,
             &[(".a", 0, 0), (".b", 6, 0)],
+            Documented("WP7-R1 S-WSTR S-ST2 S-ST1"),
         ),
         // A struct starts on an even byte. A nested member counts from the row start.
         composite(
@@ -318,6 +347,7 @@ pub(super) fn composite_rows() -> Vec<Row> {
                 (".b.b", 2, 1),
                 (".b.c", 2, 2),
             ],
+            Documented("WP7-R1 S-ST1 S-ST2 S-ST2a S-PAD, medium confidence"),
         ),
         // An array starts on an even byte.
         composite(
@@ -325,6 +355,7 @@ pub(super) fn composite_rows() -> Vec<Row> {
             309,
             4,
             &[(".a", 0, 0), (".b", 2, 0)],
+            Documented("WP7-R1 S-AR1 S-PAD S-AR3"),
         ),
         // A struct size is even.
         composite(
@@ -332,34 +363,102 @@ pub(super) fn composite_rows() -> Vec<Row> {
             310,
             4,
             &[(".a", 0, 0), (".b", 1, 0), (".c", 2, 0)],
+            Documented("WP7-R1 S-ST2 S-ST1"),
         ),
         // A 1-byte member after an odd `STRING(n)` starts at the next byte.
-        composite("C11 STRING(3), BYTE", 311, 6, &[(".a", 0, 0), (".b", 5, 0)]),
+        composite(
+            "C11 STRING(3), BYTE",
+            311,
+            6,
+            &[(".a", 0, 0), (".b", 5, 0)],
+            Documented("WP7-R1 S-STR1 S-ST2 S-ST1"),
+        ),
         // A wider member after an odd `STRING(n)` starts on an even byte.
-        composite("C12 STRING(3), INT", 312, 8, &[(".a", 0, 0), (".b", 6, 0)]),
+        composite(
+            "C12 STRING(3), INT",
+            312,
+            8,
+            &[(".a", 0, 0), (".b", 6, 0)],
+            Documented("WP7-R1 S-STR1 S-ST2 S-ST1"),
+        ),
         // A wider member starts on an even byte.
-        composite("C13 BYTE, DTL", 313, 14, &[(".a", 0, 0), (".b", 2, 0)]),
+        composite(
+            "C13 BYTE, DTL",
+            313,
+            14,
+            &[(".a", 0, 0), (".b", 2, 0)],
+            Documented("WP7-R1 S-DTL S-ST2 S-ST1"),
+        ),
         // `BOOL` elements pack 8 per byte.
-        composite("A01 ARRAY[1..17] OF BOOL", 401, 4, &[]),
-        // `BOOL` elements pack 8 per byte over all dimensions. A02 and A10 hold
-        // the same 9 bits and differ in size. The TIA Portal check (Q10) decides both.
-        composite("A02 ARRAY[1..3,1..3] OF BOOL", 402, 2, &[]),
-        composite("A03 ARRAY[1..3,1..3,1..3] OF BOOL", 403, 4, &[]),
+        composite(
+            "A01 ARRAY[1..17] OF BOOL",
+            401,
+            4,
+            &[],
+            Documented("WP7-R1 S-AR1 S-AR2 S-AR3"),
+        ),
+        // Each line of the last index of a `BOOL` array starts at the next byte
+        // (ADR-0147 (d), (g)).
+        composite(
+            "A02 ARRAY[1..3,1..3] OF BOOL",
+            402,
+            4,
+            &[],
+            Documented("WP7-R1 S-AR4 S-AR1"),
+        ),
+        // Three dimensions: the reading of "a new dimension" is open (ADR-0147 (g), (i)).
+        composite(
+            "A03 ARRAY[1..3,1..3,1..3] OF BOOL",
+            403,
+            10,
+            &[],
+            Unverified("needs a TIA measurement"),
+        ),
         // 1-byte elements pack one per byte.
-        composite("A04 ARRAY[1..3] OF BYTE", 404, 4, &[]),
-        composite("A05 ARRAY[1..3] OF CHAR", 405, 4, &[]),
+        composite(
+            "A04 ARRAY[1..3] OF BYTE",
+            404,
+            4,
+            &[],
+            Documented("WP7-R1 S-AR1 S-AR2 S-PAD"),
+        ),
+        composite(
+            "A05 ARRAY[1..3] OF CHAR",
+            405,
+            4,
+            &[],
+            Documented("WP7-R1 S-AR1 S-AR2"),
+        ),
         // Wider elements start on even bytes.
-        composite("A06 ARRAY[1..4] OF STRING(3)", 406, 24, &[]),
-        composite("A07 ARRAY[1..2] OF WSTRING(3)", 407, 20, &[]),
-        composite("A08 ARRAY[0..1,1..2] OF INT", 408, 8, &[]),
-        // The element of an array is an array. It starts on an even byte.
-        // This row pins the current behavior of the open question Q09.
-        composite("A09 ARRAY[1..2] OF ARRAY[1..3] OF BYTE", 409, 8, &[]),
-        // A10 and A02 hold the same 9 bits and differ in size. This row also
-        // pins the current behavior of the open question Q09.
-        composite("A10 ARRAY[1..3] OF ARRAY[1..3] OF BOOL", 410, 6, &[]),
+        composite(
+            "A06 ARRAY[1..4] OF STRING(3)",
+            406,
+            24,
+            &[],
+            Documented("WP7-R1 S-STR1 S-STR2 S-AR1"),
+        ),
+        composite(
+            "A07 ARRAY[1..2] OF WSTRING(3)",
+            407,
+            20,
+            &[],
+            Documented("WP7-R1 S-WSTR S-AR1"),
+        ),
+        composite(
+            "A08 ARRAY[0..1,1..2] OF INT",
+            408,
+            8,
+            &[],
+            Documented("WP7-R1 S-AR4 S-AR1"),
+        ),
         // A struct element starts on an even byte.
-        composite("A11 ARRAY[1..2] OF ST_Flags", 411, 4, &[]),
+        composite(
+            "A11 ARRAY[1..2] OF ST_Flags",
+            411,
+            4,
+            &[],
+            Documented("WP7-R1 S-ST1 S-PAD S-ST2a, medium confidence"),
+        ),
     ]
 }
 
@@ -393,19 +492,97 @@ fn s7_layout_matches_the_reference_table() {
     }
 }
 
+/// The mark of each documented composite row, by its id (ADR-0147 (h), (i)).
+///
+/// The texts are literals of the column "Cited rules" in the section "Rows" of the research
+/// record `docs/plan/review/2026-11-08-wp7-r1-layout-research.md`. A rule that rests on an
+/// example or on a literal reading ends with "medium confidence".
+const DOCUMENTED_ROWS: [(&str, &str); 21] = [
+    ("C01", "WP7-R1 S-ST1 S-ST2 S-ST2a S-BOOL, medium confidence"),
+    ("C02", "WP7-R1 S-ST1 S-ST2"),
+    ("C03", "WP7-R1 S-ST1 S-ST2"),
+    ("C04", "WP7-R1 S-ST1 S-ST2 S-ST2b, medium confidence"),
+    ("C05", "WP7-R1 S-ST2 S-STR1 S-STR2 S-ST1"),
+    ("C06", "WP7-R1 S-ST2 S-WSTR S-ST1"),
+    ("C07", "WP7-R1 S-WSTR S-ST2 S-ST1"),
+    ("C08", "WP7-R1 S-ST1 S-ST2 S-ST2a S-PAD, medium confidence"),
+    ("C09", "WP7-R1 S-AR1 S-PAD S-AR3"),
+    ("C10", "WP7-R1 S-ST2 S-ST1"),
+    ("C11", "WP7-R1 S-STR1 S-ST2 S-ST1"),
+    ("C12", "WP7-R1 S-STR1 S-ST2 S-ST1"),
+    ("C13", "WP7-R1 S-DTL S-ST2 S-ST1"),
+    ("A01", "WP7-R1 S-AR1 S-AR2 S-AR3"),
+    ("A02", "WP7-R1 S-AR4 S-AR1"),
+    ("A04", "WP7-R1 S-AR1 S-AR2 S-PAD"),
+    ("A05", "WP7-R1 S-AR1 S-AR2"),
+    ("A06", "WP7-R1 S-STR1 S-STR2 S-AR1"),
+    ("A07", "WP7-R1 S-WSTR S-AR1"),
+    ("A08", "WP7-R1 S-AR4 S-AR1"),
+    ("A11", "WP7-R1 S-ST1 S-PAD S-ST2a, medium confidence"),
+];
+
+/// Return the id of a row, the first word of its name.
+fn row_id(row: &Row) -> &'static str {
+    row.name.split_whitespace().next().unwrap_or_default()
+}
+
 #[test]
-fn reference_table_marks_every_composite_row_unverified() {
+fn reference_table_marks_each_composite_row_by_its_id() {
     let composite = composite_rows();
-    assert!(!composite.is_empty(), "the table has composite rows");
-    for row in composite {
+    for (id, rules) in DOCUMENTED_ROWS {
+        let row = composite.iter().find(|row| row_id(row) == id).expect(id);
         let label = row.describe();
         assert!(
-            matches!(row.size_source, Source::Unverified("Q10")),
+            matches!(row.size_source, Source::Documented(text) if text == rules),
             "size mark of {label}"
         );
         assert!(
-            matches!(row.layout_source, Source::Unverified("Q10")),
+            matches!(row.layout_source, Source::Documented(text) if text == rules),
             "layout mark of {label}"
         );
     }
+}
+
+#[test]
+fn reference_table_keeps_a03_unverified() {
+    let composite = composite_rows();
+    let row = composite
+        .iter()
+        .find(|row| row_id(row) == "A03")
+        .expect("the table has the row A03");
+    let label = row.describe();
+    assert!(
+        matches!(
+            row.size_source,
+            Source::Unverified("needs a TIA measurement")
+        ),
+        "size mark of {label}"
+    );
+    assert!(
+        matches!(
+            row.layout_source,
+            Source::Unverified("needs a TIA measurement")
+        ),
+        "layout mark of {label}"
+    );
+}
+
+#[test]
+fn reference_table_has_no_open_question_mark_and_no_nested_array_row() {
+    let composite = composite_rows();
+    assert_eq!(composite.len(), 22, "13 C rows and 9 A rows");
+    for row in &composite {
+        let label = row.describe();
+        assert!(
+            !matches!(row.size_source, Source::Unverified("Q10")),
+            "size mark of {label}"
+        );
+        assert!(
+            !matches!(row.layout_source, Source::Unverified("Q10")),
+            "layout mark of {label}"
+        );
+    }
+    let ids: Vec<&str> = composite.iter().map(row_id).collect();
+    assert!(!ids.contains(&"A09"), "A09 left the table (ADR-0148 (j))");
+    assert!(!ids.contains(&"A10"), "A10 left the table (ADR-0148 (j))");
 }
