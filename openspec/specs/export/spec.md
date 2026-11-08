@@ -63,7 +63,7 @@ The system SHALL write `schema_version` with the value `"1"` in every export doc
 - **THEN** the document holds `schema_version` with the value `"1"`
 
 ### Requirement: Loadable flag
-The system SHALL set `loadable` to true only for a version that is Approved at export time and has no part that breaks a current rule. A part is a stored value, a limit, or an S7 address. The check SHALL cover every parameter of the version, also for a unit document. A part that fails the earlier rule set of ADR-0120 SHALL give `500 E-DB-008`. The check SHALL not change the hashed body or `content_sha256` (R03, R14, R31, A2).
+The system SHALL set `loadable` to true only for a version that is Approved at export time and has no part that breaks a current rule. A part is a stored value, a limit, or an S7 address. The address check SHALL include the overlap check of I20. The check SHALL cover every parameter of the version, also for a unit document. A part that fails the earlier rule set of ADR-0120 SHALL give `500 E-DB-008`. The check SHALL not change the hashed body or `content_sha256` (R03, R14, R31, A2, ADR-0149).
 
 #### Scenario: Approved version
 - **GIVEN** the approved version 3 of the recipe `R-100`
@@ -133,6 +133,14 @@ The system SHALL set `loadable` to true only for a version that is Approved at e
 - **WHEN** an Operator runs `ExportVersion` through `GET /export/v1/recipes/R-100/approved`
 - **THEN** the system returns the document with status 200
 - **AND** the document holds `loadable` with the value `false`
+
+#### Scenario: Approved version with an overlap after a change of the layout rules
+- **GIVEN** the struct `ST_Bytes@1` of a machine on `S7_1500` with the members `a` of type `BYTE`, `b` of type `CHAR`, `c` of type `SINT`, and `d` of type `USINT`
+- **AND** the approved version 3 of the recipe `R-100` with the stored parameters `BYTES` of type `ST_Bytes@1` at `DB1.DBB0` and `MODE` of type `BYTE` at `DB1.DBB4`, approved before ADR-0147
+- **WHEN** an Operator runs `ExportVersion` through `GET /export/v1/recipes/R-100/approved`
+- **THEN** the system returns the document with status 200
+- **AND** the document holds `loadable` with the value `false`
+- **AND** `content_sha256` equals the stored hash of version 3
 
 ### Requirement: Content hash format
 The system SHALL write `content_sha256` as 64 lower-case hex characters. The value SHALL be the SHA-256 of the RFC 8785 canonical form of the hashed body (R03, A2).
