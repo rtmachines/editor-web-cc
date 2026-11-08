@@ -1,6 +1,6 @@
 # ADR-0132: Field answer of the own password form
 
-Status: Accepted
+Status: Accepted. Amends ADR-0041 (g)
 Date: 2026-11-05
 Deciders: project owner
 

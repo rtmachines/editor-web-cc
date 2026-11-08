@@ -1,6 +1,6 @@
 # ADR-0126: Marker of the English base text in each UI language
 
-Status: Accepted
+Status: Accepted. Amends ADR-0012 and the translation sentence of `api.md` section 8
 Date: 2026-11-04
 Deciders: project owner
 

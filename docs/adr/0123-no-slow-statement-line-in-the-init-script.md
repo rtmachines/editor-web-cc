@@ -1,6 +1,6 @@
 # ADR-0123: No slow-statement line in the init script
 
-Status: Accepted
+Status: Accepted. Amends ADR-0031
 Date: 2026-11-04
 Deciders: project owner
 

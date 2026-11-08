@@ -4,6 +4,63 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- Assumption A46: every `TwinCat3` machine runs TwinCAT 3.1.4026.0 or later. The editor does not check the version. The runbook names the check before a plant adds a `TwinCat3` machine (ADR-0142).
+- Migration `0011_plc_type_rules.sql` adds two unique indexes. They refuse two struct names of one machine and revision, or two member names of one struct, that differ only in case (ADR-0143).
+- Migration `0011_plc_type_rules.sql` also replaces the function `dims_valid`. The PostgreSQL arrays `dim_lower` and `dim_upper` must start at the subscript 1. An IEC bound such as `ARRAY[0..9]` stays valid (ADR-0145).
+- Migration `0011_plc_type_rules.sql` stops when a stored row breaks a new rule. It checks every machine, also an archived one. The rows are two struct names or two member names that differ only in case. They also include an array row whose `dim_lower` or `dim_upper` starts at another subscript. The whole file then rolls back, so the database keeps no index and no history row. A forward correction of such a row needs a new decision (ADR-0143, ADR-0145).
+- Migration `0011_plc_type_rules.sql` takes a `SHARE` lock on `plc_type` and `plc_type_member`. Writes to both tables wait until the file ends (ADR-0143).
+- The runbook has the query `deploy/db/check-identifier-rules.sql`. Run it before the upgrade. The upgrade stops while a row of the part `struct_name_case`, `member_name_case`, or `array_subscript` remains. A row of `reserved_struct_name` is for information only (ADR-0143).
+- The runbook has the query `deploy/db/check-platform-ranges.sql`. It lists the stored values, limits, and S7 addresses that the new ranges of `LDATE`, `LDT`, and the data block number refuse (ADR-0139, ADR-0140).
+- The runbook has the query `deploy/db/check-s7-layout-rules.sql`. It lists the stored arrays of an array on `S7_1200` and `S7_1500`, and the S7 addresses whose layout changes (ADR-0147, ADR-0148).
+- Tests pin the answer of the form readers to a changed form body: one line `E-WEB-008` (ADR-0138).
+
+### Changed
+
+- The export flag `loadable` is `true` only when the version is `Approved` at export time and no value, limit, or address breaks a rule (ADR-0119). The flag is now also `false` in more cases. A stored `LDATE` or `LDT` count is above the new end (ADR-0139). A stored data block number is above 59 999 (ADR-0140). A stored S7 address can end after byte 65535 under the new S7 layout, for example in a struct with a `SINT` member (ADR-0147). Two parameters overlap, and `E-RCP-022` names the fault (ADR-0149). The hashed body and `content_sha256` do not change.
+- The export check and the version page of an `Approved` version also check the overlap of S7 addresses. The check covers every parameter of the version. The notice of the version page names `E-RCP-022` (ADR-0149).
+- A command that writes parameters reports an overlap only for a pair with at least one written parameter. `ApproveVersion` checks every pair and refuses a stored overlap with `E-RCP-022` (ADR-0149).
+- On `CodesysIec` and `TwinCat3`, an `LDATE` or `LDT` count is `0` to `2^63-1` ns. The last `LDT` is 2262-04-11-23:47:16.854775807. A value above the end gives `E-RCP-005`, and a limit gives `E-RCP-006`. The editor refuses the dates before 1970, as before (ADR-0139).
+- A stored `LDATE` or `LDT` count above the new end shows a field line. `ApproveVersion` refuses it with an item of `E-RCP-020` (ADR-0139).
+- On `S7_1200` and `S7_1500`, the data block number is at most 59 999. A higher number gives `E-RCP-057`. `S7_300` keeps the limit 16 000 (ADR-0140).
+- `ApproveVersion` and `RebindTypeRevision` refuse a stored address with a data block above 59 999. Change the address with `UpdateParameterDefinition` first (ADR-0140).
+- The message of `E-RCP-057` names the highest data block number of the platform and no platform name (ADR-0140).
+- A struct name compares without case on one machine, and a member name compares without case in one struct. `st_zone` next to `ST_Zone` gives `E-PLT-015`. The members `speed` and `Speed` give `E-PLT-021` (ADR-0143).
+- A new struct name cannot be a reserved word. The list has 211 words: the keywords of IEC 61131-3 and TwinCAT 3 and the 29 primitive names. The struct form gives `E-WEB-008` with the field `type_name`. A type text with such a struct gives `E-PLT-013` with the reserved-name reason (ADR-0143).
+- A stored struct with a reserved name keeps working but gets no new revision. Define a struct with a new name, then move each parameter with `UpdateParameterDefinition` (ADR-0143).
+- On `S7_1200` and `S7_1500`, an array cannot have an array as element. A type text with two `ARRAY[...] OF` prefixes in a row gives `E-PLT-013`. A member of `DefineUdt` gives `E-PLT-006`. A stored type of this kind stays readable (ADR-0148).
+- `RebindTypeRevision` keeps a member with its value and limits. Both revisions must have a member of that name, and the two member types must have one shape. Two revisions of one struct are two shapes (ADR-0146).
+- The S7 layout of a struct puts a `SINT` or `USINT` member at the next even byte. In a `BOOL` array with two dimensions, each line of the last index starts at the next byte (ADR-0147).
+- A `BOOL` array with three dimensions uses an interim size until a TIA Portal measurement decides. The size can refuse an address but never lets two parameters share a byte (ADR-0147).
+- Each composite row of the S7 layout reference table now has a source mark. The mark `Documented` names the Siemens rules that the row follows. 21 of the 22 rows have it, and the row A03 keeps `Unverified` (ADR-0147).
+- The type proposals of the parameter form and the struct form leave out a stored struct with a reserved name (ADR-0143).
+- The expected form of a text fault changed in the `en` and `pl` bundles. The text for a `CHAR` or `WCHAR` names `U+0001`. The text for a `STRING` or `WSTRING` says "without `U+0000`" (ADR-0137).
+- A form body that the editor HTML cannot send gives `422 E-WEB-008` with one line. Such a body has an unknown key, a repeated key, a malformed key, or a `[*]` segment. The answer lists no other bad field. The code does not change (ADR-0138).
+- The documents give one unit for a string length. A `STRING(n)` counts characters, and a `WSTRING(n)` counts UTF-16 code units. The code already used these units (ADR-0137).
+- The documents record that `STRING(n)` and `WSTRING(n)` on `CodesysIec` and `TwinCat3` stay at the length 1 to 255. They also give `LTOD` the range `0` to `86_399_999_999_999` ns and every `STRING` and `WSTRING` the width `B`. The code does not change (ADR-0141, ADR-0139).
+- The documents record that the login throttle has no per-login limit over all addresses. The alert `failed_logins` is the control (ADR-0150). The behavior does not change.
+
+### Fixed
+
+- A value with `U+0000` in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` leaf gives `422 E-RCP-005` with a field line. Before, the write failed in PostgreSQL and the user got a storage error (ADR-0137).
+- The editor reads a JSON number as its exact decimal value. It no longer rounds. It refuses a value outside the range or the scale of its type (ADR-0120).
+- A stored `S5TIME` or `LDATE` limit bound follows the count rules of a stored value. A message always shows a time bound as an IEC literal (ADR-0120).
+- Two commands that need several derived types take their class-2 locks in the ascending order of the key values. This order closes a path to the deadlock `40P01` (ADR-0144).
+- A database CHECK refuses an array row whose `dim_lower` or `dim_upper` starts at another subscript than 1. This is the PostgreSQL subscript, not the IEC bound. The application never writes such a row. Before, `dims_valid` passed such a row, and one shape could get two rows (ADR-0145).
+
+### Known gaps
+
+- The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
+- The tests with `#[cfg(unix)]` and the shell-based tests of `deploy/ci` ran only in CI on Linux, not on the Windows development host.
+- When a struct holds a `BOOL` array with three dimensions, the type page shows a guess for the offsets of the later members (ADR-0147).
+- The row A03 of the S7 layout reference table stays `Unverified`. It is a `BOOL` array with three dimensions. Rule S-AR4 of the Siemens documentation has two readings, and only a TIA Portal measurement can decide (ADR-0017, ADR-0147, Q10).
+- The migration check passes some statements, for example `REINDEX`, `ALTER TABLE ... ATTACH PARTITION`, and `EXECUTE format(...)`. ADR-0136 lists these residual risks. The review of a migration checks them.
+- Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
+- The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
+- No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
+- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
+
 ## [0.7.1] - 2026-11-06
 
 ### Added
