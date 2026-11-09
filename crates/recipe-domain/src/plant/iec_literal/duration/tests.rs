@@ -199,3 +199,11 @@ fn reason_display_is_a_short_phrase() {
         "a unit is not accepted, repeated, or out of order"
     );
 }
+
+// domain-model.md section 2.1: every later part is less than one unit of the part before it.
+#[test]
+fn part_text_names_the_rule_of_the_part_before() {
+    let reason = count(Primitive::Time, "T#2h70m").expect_err("70 minutes is not below one hour");
+    assert_eq!(reason, IecLiteralReason::Part);
+    assert!(reason.to_string().contains("one unit of"), "{reason}");
+}

@@ -163,7 +163,7 @@ impl fmt::Display for IecLiteralReason {
             Self::Prefix => "the prefix names another type",
             Self::Unit => "a unit is not accepted, repeated, or out of order",
             Self::Sign => "the type takes no sign",
-            Self::Part => "a later part is not less than the part before it",
+            Self::Part => "a later part is not less than one unit of the part before it",
             Self::Fraction => "the fraction has too many digits",
             Self::Calendar => "the date or the time of day does not exist",
             Self::Step => "the value is between two steps",
