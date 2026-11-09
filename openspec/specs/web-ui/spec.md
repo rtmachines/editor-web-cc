@@ -320,11 +320,11 @@ A parameter name or description that a page shows without a label SHALL show the
 - **AND** the element that holds `Feed rate` has the attribute `lang="en"`
 - **AND** the marker `(en)` stands outside that element
 
-#### Scenario: Removed parameter on an English page
+#### Scenario: Old-only parameter on an English page
 - **GIVEN** the retired version 2 of `R-100` with the parameter `SPEED`, the English name `Line speed`, and the stored `pl` translation with the name `Prędkość linii`
 - **AND** the approved version 3 of `R-100` without `SPEED`
 - **WHEN** `mhoffman` sends `GET /recipes/R-100/versions/3/diff/2` with the cookie `recipe_lang` set to `en`
-- **THEN** the row of `SPEED` in the removed section shows `Line speed` without the marker `(en)`
+- **THEN** the row of `SPEED` in the section of the parameters only in the old version shows `Line speed` without the marker `(en)`
 - **AND** the cell of that name has no `lang` attribute
 
 ### Requirement: Language tag of the English base text
@@ -2631,7 +2631,7 @@ The version page of an Approved version SHALL check every value, limit, and S7 a
 - **AND** the answer holds one line
 
 ### Requirement: Language switch after a pushed address
-An HTMX content answer to a `POST` that pushes a path through `HX-Push-Url` SHALL also set the field `next` out of band. The field `next` of the language switch SHALL hold the pushed path. The approval, the retire, and the removal of a parameter SHALL follow this rule (R10, R39, A17, ADR-0049 (e)).
+An HTMX content answer to a `POST` that pushes a path through `HX-Push-Url` SHALL also set the field `next` out of band. The field `next` of the language switch SHALL hold the pushed path. The approval, the retire, and the deletion of a parameter SHALL follow this rule (R10, R39, A17, ADR-0049 (e)).
 
 #### Scenario: Language switch after an HTMX approval
 - **GIVEN** the draft version 2 of `R-500` and the Administrator `admin` with an open session
@@ -2639,9 +2639,9 @@ An HTMX content answer to a `POST` that pushes a path through `HX-Push-Url` SHAL
 - **THEN** the answer sets `HX-Push-Url` to `/recipes/R-500/versions/2`
 - **AND** the answer holds one field `next` with the value `/recipes/R-500/versions/2` and `hx-swap-oob="true"`
 
-#### Scenario: Language switch after an HTMX parameter removal
+#### Scenario: Language switch after an HTMX deletion of a parameter
 - **GIVEN** the live draft version 3 of `R-100` with the parameter `SPEED` and the ProcessEngineer `anowak` with an open session
-- **WHEN** `anowak` removes `SPEED` through an HTMX request with `HX-Target: content`
+- **WHEN** `anowak` deletes `SPEED` through an HTMX request with `HX-Target: content`
 - **THEN** the answer sets `HX-Push-Url` to `/recipes/R-100/versions/3`
 - **AND** the answer holds one field `next` with the value `/recipes/R-100/versions/3` and `hx-swap-oob="true"`
 
