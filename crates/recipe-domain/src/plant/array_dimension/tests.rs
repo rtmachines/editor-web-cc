@@ -128,3 +128,20 @@ fn iter_yields_the_dimensions_in_order() {
         .map_or(Vec::new(), |d| d.iter().copied().collect());
     assert_eq!(yielded, list);
 }
+
+// domain-model.md section 2.1: `upper - lower < 65536` accepts 65536 elements at most.
+#[test]
+fn span_text_names_the_largest_accepted_element_count() {
+    let largest = ArrayDimension::parse(0, 65_535).map(ArrayDimension::count);
+    assert_eq!(largest, Ok(65_536));
+    assert_eq!(
+        ArrayDimension::parse(0, 65_536),
+        Err(ArrayDimensionReason::Span)
+    );
+    let expected = format!("more than {}", largest.unwrap_or_default());
+    assert!(
+        ArrayDimensionReason::Span.to_string().contains(&expected),
+        "{}",
+        ArrayDimensionReason::Span
+    );
+}
