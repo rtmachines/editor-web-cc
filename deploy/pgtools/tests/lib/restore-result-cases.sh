@@ -53,6 +53,35 @@ case_restore_result_term() {
   restore_result_checks "result TERM" failed
   expect_no "result TERM: no temp result stays" test -e "$B/.tmp-restore-test.result"
   case_restore_result_cleanup_term
+  case_restore_result_write_term
+}
+
+# Each signal during the result write must preserve the passed result and exit code 0.
+case_restore_result_write_term() {
+  restore_result_write_signal_case TERM
+  restore_result_write_signal_case INT
+  restore_result_write_signal_case HUP
+}
+
+restore_result_write_signal_case() {
+  local signal=$1 label="result write $1"
+  new_restore_case "result-write-${signal,,}"
+  mkdir "$CASE/mvstub"
+  cat >"$CASE/mvstub/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${*: -1}" = "$BACKUP_DIR/restore-test.result" ]; then
+  kill -"$STUB_SIGNAL" "$PPID"
+  echo "EVENT result write $STUB_SIGNAL" >>"$STUB_LOG"
+fi
+exec "$REAL_MV" "$@"
+EOF
+  chmod 0755 "$CASE/mvstub/mv"
+  restore_run "STUB_SIGNAL=$signal" "REAL_MV=$(command -v mv)" "PATH=$CASE/mvstub:$ROOT/stubs:$PATH"
+  expect_eq "$label: signal sent" "$(event_count "result write $signal")" 1
+  expect_eq "$label: exit code" "$RC" 0
+  restore_result_checks "$label" passed
+  expect_no "$label: no temp result stays" test -e "$B/.tmp-restore-test.result"
 }
 
 # TERM during cleanup must replace an old passed result after the server stops.

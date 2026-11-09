@@ -24,6 +24,7 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ### Changed
 
+- The XSS coverage guard test is a module directory of four files. No test changed.
 - The export flag `loadable` is `true` only when the version is `Approved` at export time and no value, limit, or address breaks a rule (ADR-0119). The flag is now also `false` in more cases. A stored `LDATE` or `LDT` count is above the new end (ADR-0139). A stored data block number is above 59 999 (ADR-0140). A stored S7 address can end after byte 65535 under the new S7 layout, for example in a struct with a `SINT` member (ADR-0147). Two parameters overlap, and `E-RCP-022` names the fault (ADR-0149). The hashed body and `content_sha256` do not change.
 - The export check and the version page of an `Approved` version also check the overlap of S7 addresses. The check covers every parameter of the version. The notice of the version page names `E-RCP-022` (ADR-0149).
 - A command that writes parameters reports an overlap only for a pair with at least one written parameter. `ApproveVersion` checks every pair and refuses a stored overlap with `E-RCP-022` (ADR-0149).
@@ -59,6 +60,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Two commands that need several derived types take their class-2 locks in the ascending order of the key values. This order closes a path to the deadlock `40P01` (ADR-0144).
 - A database CHECK refuses an array row whose `dim_lower` or `dim_upper` starts at another subscript than 1. This is the PostgreSQL subscript, not the IEC bound. The application never writes such a row. Before, `dims_valid` passed such a row, and one shape could get two rows (ADR-0145).
 - `UpdateParameterDefinition` checks a changed type before the unit lock and the first `plc_type` insert.
+- `restore-test` and `basebackup-once` ignore `TERM`, `INT`, and `HUP` after the result decision. A late signal no longer gives a `passed` file with a failed exit code (ADR-0151).
 - The added and the old-only parameters of the diff and the approval preview show the shown name (ADR-0152). The parameter form tags its English inputs with `lang="en"`. The submit buttons of the password form and the new user form get a fixed `id`. Then the focus stays on the button after an out-of-band swap (ADR-0041 (e)).
 
 ### Known gaps

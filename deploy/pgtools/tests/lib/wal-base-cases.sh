@@ -277,6 +277,35 @@ case_wal_base_term() {
   base_signal_case INT 130
   base_signal_case HUP 129
   case_wal_base_cleanup_term
+  case_wal_base_result_write_term
+}
+
+# Each signal during the result write must preserve the passed result and exit code 0.
+case_wal_base_result_write_term() {
+  base_result_write_signal_case TERM
+  base_result_write_signal_case INT
+  base_result_write_signal_case HUP
+}
+
+base_result_write_signal_case() {
+  local signal=$1 label="base result write $1"
+  new_base_case "base-result-write-${signal,,}" 1
+  mkdir "$CASE/mvstub"
+  cat >"$CASE/mvstub/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ "${*: -1}" = "$WAL_DIR/base-backup.result" ]; then
+  kill -"$STUB_SIGNAL" "$PPID"
+  echo "EVENT result write $STUB_SIGNAL" >>"$STUB_LOG"
+fi
+exec "$REAL_MV" "$@"
+EOF
+  chmod 0755 "$CASE/mvstub/mv"
+  wal_run "STUB_SIGNAL=$signal" "REAL_MV=$(command -v mv)" \
+    "PATH=$CASE/mvstub:$ROOT/stubs:$PATH" -- basebackup-once
+  expect_eq "$label: signal sent" "$(count_events "result write $signal")" 1
+  expect_eq "$label: exit code" "$RC" 0
+  base_result_checks "$label" passed
 }
 
 base_signal_case() {

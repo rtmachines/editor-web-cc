@@ -103,6 +103,8 @@ cleanup() {
       status=1
     fi
   fi
+  # Ignore signals before the error log and result decision to keep the result and exit code consistent.
+  trap '' TERM INT HUP
   if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
     log ERROR "base backup run failed unexpectedly" "\"exit_code\":$status"
   fi
