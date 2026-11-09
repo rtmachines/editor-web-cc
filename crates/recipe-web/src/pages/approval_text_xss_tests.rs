@@ -129,9 +129,20 @@ async fn translate_speed(world: &AuditWorld, number: u32, texts: (&str, &str)) {
 
 /// Read each page as the Administrator, in English. Check the status and `assert_safe`.
 async fn read_pages(world: &AuditWorld, paths: &[&str], payload: &str) -> Vec<(String, Reply)> {
+    read_pages_in(world, "en", paths, payload).await
+}
+
+/// Read each page as the Administrator, in the UI language `lang`. Check the status and
+/// `assert_safe`.
+async fn read_pages_in(
+    world: &AuditWorld,
+    lang: &str,
+    paths: &[&str],
+    payload: &str,
+) -> Vec<(String, Reply)> {
     let mut replies = Vec::new();
     for path in paths {
-        let reply = world.get_en(&world.data.admin, path).await;
+        let reply = world.get(&world.data.admin, lang, path).await;
         let what = format!("{path} {payload:?}");
         assert_eq!(reply.status, StatusCode::OK, "{what}: {}", reply.body);
         assert_safe(&reply, payload, &what);
@@ -153,6 +164,21 @@ fn assert_cells(replies: &[(String, Reply)], cell: &str, count: usize) {
 /// (finding CX-DR-1).
 fn text_cell(text: &str) -> String {
     format!("<td lang=\"en\">{}</td>", askama_escape(text))
+}
+
+/// Return the plain cell of the shown name on an English page: no `lang`, no marker (ADR-0152 (g)).
+fn name_cell(text: &str) -> String {
+    format!("<td>{}</td>", askama_escape(text))
+}
+
+/// Return the span of the English base text on a Polish page (ADR-0152 (f)).
+fn name_span(text: &str) -> String {
+    format!("<span lang=\"en\">{}</span>", askama_escape(text))
+}
+
+/// Return the English base text on a Polish page: the span, then the marker outside the span.
+fn marked_name(text: &str) -> String {
+    format!("{} (en)</td>", name_span(text))
 }
 
 /// Return the cell of an English description. It carries `lang="en"` and the class `text-lines`
@@ -199,8 +225,15 @@ async fn approval_text_xss_name_en_is_escaped_in_the_added_row_and_the_definitio
         let world = audit_world().await;
         add_host(&world, 2, (&payload, "A host", PLAIN)).await;
         edit_speed(&world, 2, (&payload, "A parameter of the approval data")).await;
+        // English pages: the definition row keeps `lang="en"`. The added or removed row is plain.
         let replies = read_pages(&world, &DRAFT_PAGES, &payload).await;
-        assert_cells(&replies, &text_cell(&payload), 2);
+        assert_cells(&replies, &text_cell(&payload), 1);
+        assert_cells(&replies, &name_cell(&payload), 1);
+        // Polish pages: the added or removed row shows the span, then the marker outside it.
+        let replies = read_pages_in(&world, "pl", &DRAFT_PAGES, &payload).await;
+        assert_cells(&replies, &text_cell(&payload), 1);
+        assert_cells(&replies, &name_span(&payload), 1);
+        assert_cells(&replies, &marked_name(&payload), 1);
     }
 }
 

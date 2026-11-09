@@ -125,12 +125,18 @@ async fn review_fix_profile_login_is_a_data_value() {
 async fn review_fix_single_action_forms_have_a_primary_button() {
     let (fixture, session) = administrator();
     for (_lang, code) in LANGS {
-        for path in ["/me/password", "/users/new"] {
+        for (path, button) in [
+            (
+                "/me/password",
+                "<button type=\"submit\" id=\"password-submit\" class=\"btn btn-primary\">",
+            ),
+            (
+                "/users/new",
+                "<button type=\"submit\" id=\"user-new-submit\" class=\"btn btn-primary\">",
+            ),
+        ] {
             let body = get_page(&fixture, Some(&session), code, path).await.body;
-            assert!(
-                body.contains("<button type=\"submit\" class=\"btn btn-primary\">"),
-                "{path}: {body}"
-            );
+            assert!(body.contains(button), "{path}: {body}");
         }
         let login = get_page(&fixture, None, code, "/login").await.body;
         assert!(login.contains("<button type=\"submit\" class=\"btn btn-primary\">"));

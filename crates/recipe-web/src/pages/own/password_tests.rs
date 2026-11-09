@@ -8,7 +8,7 @@ use super::tests::{
     ENGLISH, HTMX, NEW_PASSWORD_FIELD, PASSWORD, PASSWORD_FIELD, WRONG_FIELD, change, change_body,
     input_tag,
 };
-use crate::test_support::{Fixture, PEER, Reply, TestSession, capture_logs, post_fields};
+use crate::test_support::{Fixture, PEER, Reply, TestSession, capture_logs, get_with, post_fields};
 
 /// Send an HTMX `POST /me/password` in English with the given fields.
 async fn change_in_english(fixture: &Fixture, session: &TestSession, body: &str) -> Reply {
@@ -31,6 +31,72 @@ fn error_block<'a>(body: &'a str, id: &str) -> &'a str {
             rest.find("</div>").map(|end| &rest[..end])
         })
         .unwrap_or("")
+}
+
+/// Return the start tag of `#password-form` up to its `>`, or an empty text.
+fn form_start_tag(body: &str) -> &str {
+    body.find("<form id=\"password-form\"")
+        .and_then(|from| {
+            let rest = &body[from..];
+            rest.find('>').map(|end| &rest[..=end])
+        })
+        .unwrap_or("")
+}
+
+/// Return the opening tag of the submit button inside `#password-form`, or an empty text.
+fn submit_button_tag(body: &str) -> &str {
+    let Some(start) = body.find("<form id=\"password-form\"") else {
+        return "";
+    };
+    let form = &body[start..];
+    let form = form.find("</form>").map_or(form, |end| &form[..end]);
+    form.find("<button type=\"submit\"")
+        .and_then(|from| {
+            let rest = &form[from..];
+            rest.find('>').map(|end| &rest[..=end])
+        })
+        .unwrap_or("")
+}
+
+/// Assert that the submit button of `#password-form` has the fixed `id`.
+fn assert_submit_button_id(body: &str) {
+    let tag = submit_button_tag(body);
+    assert!(tag.contains(" id=\"password-submit\""), "{tag:?} in {body}");
+}
+
+#[tokio::test]
+async fn pages_own_password_form_submit_button_has_the_fixed_id() {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Operator, false);
+    let reply = get_with(
+        &fixture.router(),
+        "/me/password",
+        &[("cookie", &session.cookie), ENGLISH],
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_submit_button_id(&reply.body);
+}
+
+#[tokio::test]
+async fn pages_own_a_short_new_password_swaps_the_form_with_the_same_button_id() {
+    let fixture = Fixture::new();
+    fixture.seed_account(1, Role::Operator, PASSWORD, false);
+    let session = fixture.session_of(1);
+    let reply = change_in_english(&fixture, &session, &change_body(PASSWORD, "abc")).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    let form_tag = form_start_tag(&reply.body);
+    assert!(
+        form_tag.contains(" hx-swap-oob=\"true\""),
+        "{form_tag:?} in {}",
+        reply.body
+    );
+    assert_submit_button_id(&reply.body);
 }
 
 /// Assert that the answer holds none of the markers and that both password inputs are empty.
