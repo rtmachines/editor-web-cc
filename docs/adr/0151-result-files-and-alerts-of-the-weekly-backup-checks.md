@@ -1,6 +1,6 @@
 # ADR-0151: Result files and alerts of the weekly backup checks
 
-Status: Accepted. Amends ADR-0060 (a) (ports) and (y) (start grace), ADR-0066 (m) (mode of `/wal`), and ADR-0067 (step 9). Also amends ADR-0068 (g), ADR-0083 (b) (step 5), and ADR-0103 (s) (step 4)
+Status: Accepted. Amends ADR-0060 (a) (ports) and (y) (start grace), ADR-0066 (m) (mode of `/wal`), and ADR-0067 (step 9). Also amends ADR-0068 (g), ADR-0083 (b) (step 5), and ADR-0103 (s) (step 4). Amended by a note: after the result decision, the exit trap ignores `TERM`, `INT`, and `HUP`. So the exit code and the result file agree (item (f1)).
 Date: 2026-11-08
 Deciders: project owner
 

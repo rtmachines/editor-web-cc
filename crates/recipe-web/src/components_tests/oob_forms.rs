@@ -182,45 +182,52 @@ fn after_keyword<'a>(body: &'a str, keyword: &str) -> Option<&'a str> {
         .filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
 }
 
-/// Parse the macro definitions, the import lines, and the text outside the macros of `source`.
-/// The opener `{% macro` and the closer `{% endmacro %}` can have any white space control.
-fn parse_template(source: &str) -> Template {
-    let mut macros = BTreeMap::new();
-    let mut outside = String::new();
-    let mut current: Option<(String, String)> = None;
-    let mut rest = source;
-    loop {
-        let (text, tag) = match rest.split_once("{%") {
-            Some((text, after)) => {
-                let (inner, next) = after.split_once("%}").expect("template tag has no end");
-                rest = next;
-                (text, Some(inner))
-            }
-            None => (rest, None),
-        };
-        match current.as_mut() {
-            Some((_, body)) => body.push_str(text),
-            None => outside.push_str(text),
+/// A macro that the parser has opened and not yet closed: its name and its text so far.
+type OpenMacro = (String, String);
+
+/// Split the text before the next `{% %}` tag from the inner text of that tag.
+/// Move `rest` behind the tag. The tag is `None` when no tag is left.
+fn split_next_tag<'a>(rest: &mut &'a str) -> (&'a str, Option<&'a str>) {
+    match rest.split_once("{%") {
+        Some((text, after)) => {
+            let (inner, next) = after.split_once("%}").expect("template tag has no end");
+            *rest = next;
+            (text, Some(inner))
         }
-        let Some(inner) = tag else {
-            break;
-        };
-        let body = tag_body(inner);
-        if let (None, Some(after)) = (&current, after_keyword(body, "macro")) {
-            let name = after.trim_start().split('(').next().unwrap().trim();
-            current = Some((name.to_owned(), String::new()));
-        } else if let (Some(_), Some(_)) = (&current, after_keyword(body, "endmacro")) {
-            let (name, macro_body) = current.take().unwrap();
-            macros.insert(name, macro_body);
-        } else {
-            let raw = format!("{{%{inner}%}}");
-            match current.as_mut() {
-                Some((_, macro_body)) => macro_body.push_str(&raw),
-                None => outside.push_str(&raw),
-            }
-        }
+        None => (rest, None),
     }
-    assert!(current.is_none(), "macro has no endmacro");
+}
+
+/// Add `text` to the open macro, or to `outside` when no macro is open.
+fn push_text(current: &mut Option<OpenMacro>, outside: &mut String, text: &str) {
+    match current.as_mut() {
+        Some((_, body)) => body.push_str(text),
+        None => outside.push_str(text),
+    }
+}
+
+/// Apply one tag to the parser state. A macro opener starts a macro, a macro closer stores it,
+/// and every other tag stays in the text.
+fn apply_tag(
+    inner: &str,
+    current: &mut Option<OpenMacro>,
+    macros: &mut BTreeMap<String, String>,
+    outside: &mut String,
+) {
+    let body = tag_body(inner);
+    if let (None, Some(after)) = (&*current, after_keyword(body, "macro")) {
+        let name = after.trim_start().split('(').next().unwrap().trim();
+        *current = Some((name.to_owned(), String::new()));
+    } else if let (Some(_), Some(_)) = (&*current, after_keyword(body, "endmacro")) {
+        let (name, macro_body) = current.take().unwrap();
+        macros.insert(name, macro_body);
+    } else {
+        push_text(current, outside, &format!("{{%{inner}%}}"));
+    }
+}
+
+/// Return the alias and the template path of each import line in `source`.
+fn parse_imports(source: &str) -> BTreeMap<String, String> {
     let mut imports = BTreeMap::new();
     for part in source.split("import \"").skip(1) {
         let (path, rest) = part.split_once('"').unwrap();
@@ -234,9 +241,28 @@ fn parse_template(source: &str) -> Template {
             .collect();
         imports.insert(alias, path.to_owned());
     }
+    imports
+}
+
+/// Parse the macro definitions, the import lines, and the text outside the macros of `source`.
+/// The opener `{% macro` and the closer `{% endmacro %}` can have any white space control.
+fn parse_template(source: &str) -> Template {
+    let mut macros = BTreeMap::new();
+    let mut outside = String::new();
+    let mut current: Option<OpenMacro> = None;
+    let mut rest = source;
+    loop {
+        let (text, tag) = split_next_tag(&mut rest);
+        push_text(&mut current, &mut outside, text);
+        let Some(inner) = tag else {
+            break;
+        };
+        apply_tag(inner, &mut current, &mut macros, &mut outside);
+    }
+    assert!(current.is_none(), "macro has no endmacro");
     Template {
         macros,
-        imports,
+        imports: parse_imports(source),
         outside,
     }
 }
