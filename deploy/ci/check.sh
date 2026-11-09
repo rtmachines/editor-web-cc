@@ -401,4 +401,31 @@ for path in paths:
     if shell_tracing(data):
         raise SystemExit(f'shell tracing in {path}')
 print('CI syntax and tracing checks passed.')
+
+
+def test_secure_refusal_step():
+    lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
+    command = r'^      (?:  |- )run: bash deploy/ci/rust-tests\.sh secure$'
+    if len(re.findall(command, '\n'.join(lines), re.M)) != 1:
+        raise SystemExit('secure refusal needs exactly one step that runs rust-tests.sh secure')
+    header = '  test:'
+    if header not in lines:
+        raise SystemExit('ci.yml has no job test')
+    start = lines.index(header) + 1
+    end = start
+    while end < len(lines) and (lines[end].startswith('    ') or not lines[end].strip()):
+        end += 1
+    body = '\n'.join(lines[start:end])
+    if re.search(r'^    (?:if|needs|continue-on-error):', body, re.M):
+        raise SystemExit('test must run on each pull request and report failures')
+    steps = re.split(r'(?=^      - )', body, flags=re.M)[1:]
+    matches = [step for step in steps if re.search(command, step, re.M)]
+    if len(matches) != 1:
+        raise SystemExit('secure refusal step must run in the job test')
+    if re.search(r'^      (?:  |- )(?:if|needs|continue-on-error):', matches[0], re.M):
+        raise SystemExit('secure refusal step must run and report failures')
+    print('CI secure refusal step check passed.')
+
+
+test_secure_refusal_step()
 PY

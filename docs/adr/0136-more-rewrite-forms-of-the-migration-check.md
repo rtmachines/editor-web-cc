@@ -1,6 +1,6 @@
 # ADR-0136: More rewrite forms of the migration check
 
-Status: Accepted. Amends ADR-0127 (p)
+Status: Accepted. Amends ADR-0127 (p). Amended by ADR-0153
 Date: 2026-11-06
 Deciders: project owner
 

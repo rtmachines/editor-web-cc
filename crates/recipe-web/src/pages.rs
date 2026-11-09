@@ -66,6 +66,8 @@ pub(crate) mod units;
 mod users;
 pub(crate) mod versions;
 #[cfg(test)]
+mod xss_coverage_tests;
+#[cfg(test)]
 mod xss_kit;
 #[cfg(test)]
 mod xss_tests;

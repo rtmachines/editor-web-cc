@@ -95,12 +95,15 @@ Run these commands before you open a pull request. CI runs the same checks on ea
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
+bash deploy/ci/rust-tests.sh secure
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo deny --locked check
 cargo llvm-cov --workspace --all-features --locked --json --summary-only --output-path target/llvm-cov-summary.json
 python3 -I tools/coverage-gate.py target/llvm-cov-summary.json
 bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'
 ```
+
+The `secure` mode tests the refusal of `session.secure=false` in a build without the `dev` feature (ADR-0062 (b)).
 
 The `openspec` job checks the specifications with the local command `openspec validate --all --strict`.
 

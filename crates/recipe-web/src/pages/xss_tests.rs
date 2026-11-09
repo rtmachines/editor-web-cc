@@ -215,6 +215,67 @@ async fn xss_corpus_login_field_of_post_login_is_escaped() {
 }
 
 #[tokio::test]
+async fn xss_corpus_password_field_of_post_login_is_escaped() {
+    for payload in payloads() {
+        let fixture = Fixture::new();
+        let fields = format!("login=user1&password={}", encode(&payload));
+        let reply = post_pre_session(&fixture, "/login", &fields, &[]).await;
+        assert_escaped(&reply, &payload, &format!("password {payload:?}"));
+    }
+}
+
+/// The password of the seeded account for the tests of `POST /me/password`.
+const OWN_PASSWORD: &str = "correct horse battery";
+/// A valid new password.
+const NEW_OWN_PASSWORD: &str = "another long passphrase";
+
+/// Send an HTMX `POST /me/password` as the user `user1`, who has the password `OWN_PASSWORD`.
+///
+/// The fixture is new for each call, because a successful change ends the session.
+async fn post_own_password(current_password: &str, password: &str) -> Reply {
+    let fixture = Fixture::new();
+    fixture.seed_account(1, Role::Operator, OWN_PASSWORD, false);
+    let session = fixture.session_of(1);
+    let fields = format!(
+        "current_password={}&password={}",
+        encode(current_password),
+        encode(password)
+    );
+    post_fields(
+        &fixture.router(),
+        "/me/password",
+        Some(&session),
+        &[("hx-request", "true")],
+        &fields,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn xss_corpus_current_password_field_of_post_me_password_is_escaped() {
+    for payload in payloads() {
+        let reply = post_own_password(&payload, NEW_OWN_PASSWORD).await;
+        assert_ne!(reply.status, StatusCode::OK, "current_password {payload:?}");
+        assert_escaped(&reply, &payload, &format!("current_password {payload:?}"));
+    }
+}
+
+#[tokio::test]
+async fn xss_corpus_password_field_of_post_me_password_is_escaped() {
+    for payload in payloads() {
+        let reply = post_own_password(OWN_PASSWORD, &payload).await;
+        let known = [StatusCode::OK, StatusCode::UNPROCESSABLE_ENTITY];
+        assert!(
+            known.contains(&reply.status),
+            "password {payload:?}: {} {}",
+            reply.status,
+            reply.body
+        );
+        assert_escaped(&reply, &payload, &format!("password {payload:?}"));
+    }
+}
+
+#[tokio::test]
 async fn xss_corpus_search_field_of_get_users_is_escaped() {
     for payload in payloads() {
         let (fixture, session) = administrator();

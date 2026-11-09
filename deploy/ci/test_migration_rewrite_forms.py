@@ -30,6 +30,7 @@ LOGGED = "set logged"
 ACCESS_METHOD = "set access method"
 DOMAIN_CONSTRAINT = "domain constraint without not valid"
 DOMAIN_VALIDATE = "domain validate"
+CONSTRAINED_DOMAIN = "add column of a constrained domain"
 LOCK = "lock table"
 CONDITION_BODIES = (
     ("BEGIN IF (SELECT CASE WHEN a THEN true END) THEN ", "END IF; END"),
@@ -91,6 +92,242 @@ def new_form_cases():
 
 
 class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
+    def test_add_column_of_constrained_domain_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_constrained_domain_with_default_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int DEFAULT 1;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_constrained_domain_array_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int[];\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_constrained_domain_without_column_keyword_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD weight pos_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_constrained_domain_if_not_exists_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN IF NOT EXISTS weight pos_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_schema_qualified_constrained_domain_fails(self):
+        self.assert_change(
+            "CREATE SCHEMA staging;\n"
+            "CREATE DOMAIN staging.pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN weight staging.pos_int;\n", CONSTRAINED_DOMAIN, line=3,
+        )
+
+    def test_add_column_of_quoted_constrained_domain_fails(self):
+        self.assert_change(
+            'CREATE DOMAIN "PosInt" AS INTEGER CHECK (VALUE > 0);\n'
+            'ALTER TABLE recipe ADD COLUMN weight "PosInt";\n', CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_constrained_domain_in_function_body_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int; END$$;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_constrained_domain_in_execute_string_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "EXECUTE 'ALTER TABLE recipe ADD COLUMN weight pos_int'; END$$;\n",
+            CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_constrained_domain_with_volatile_default_reports_both_forms(self):
+        self.assert_files({"0001_base.sql": BASE, "0002_change.sql":
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int DEFAULT (random() * 10 + 1)::integer;\n"
+        }, [("0002_change.sql", 2, form) for form in (DEFAULT, CONSTRAINED_DOMAIN)])
+
+    def test_body_created_constrained_domain_counts_only_inside_body(self):
+        self.assert_change(
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int; END$$;\n"
+            "ALTER TABLE recipe ADD COLUMN w2 pos_int;\n", CONSTRAINED_DOMAIN,
+        )
+
+    def test_add_column_of_not_null_domain_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN required_int AS INTEGER NOT NULL;\n"
+            "ALTER TABLE recipe ADD COLUMN weight required_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_column_of_domain_over_constrained_domain_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "CREATE DOMAIN weight_type AS pos_int;\n"
+            "ALTER TABLE recipe ADD COLUMN weight weight_type;\n", CONSTRAINED_DOMAIN, line=3,
+        )
+
+    def test_add_column_of_constrained_domain_from_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_add_check_not_valid_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER;\n"
+            "ALTER DOMAIN pos_int ADD CHECK (VALUE > 0) NOT VALID;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_add_named_check_not_valid_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER;\n"
+            "ALTER DOMAIN pos_int ADD CONSTRAINT positive CHECK (VALUE > 0) NOT VALID;\n",
+            "0002_change.sql": "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_set_not_null_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN required_int AS INTEGER;\n"
+            "ALTER DOMAIN required_int SET NOT NULL;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight required_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_alter_domain_rename_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER DOMAIN pos_int RENAME TO weight_type;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight weight_type;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_alter_domain_set_schema_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE SCHEMA staging;\n"
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER DOMAIN pos_int SET SCHEMA staging;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight staging.pos_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_alter_type_rename_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TYPE pos_int RENAME TO weight_type;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight weight_type;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_alter_type_set_schema_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE SCHEMA staging;\n"
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TYPE pos_int SET SCHEMA staging;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight staging.pos_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_drop_constraint_keeps_form(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER CONSTRAINT positive CHECK (VALUE > 0);\n"
+            "ALTER DOMAIN pos_int DROP CONSTRAINT positive;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_of_domain_with_volatile_default_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n"
+            "ALTER TABLE recipe ADD COLUMN token row_key;\n", DEFAULT, line=2,
+        )
+
+    def test_add_column_of_domain_over_volatile_default_domain_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n"
+            "CREATE DOMAIN token_type AS row_key;\n"
+            "ALTER TABLE recipe ADD COLUMN token token_type;\n", DEFAULT, line=3,
+        )
+
+    def test_add_column_after_domain_set_volatile_default_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN row_key AS UUID;\n"
+            "ALTER DOMAIN row_key SET DEFAULT gen_random_uuid();\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN token row_key;\n"
+        }, [("0002_change.sql", 1, DEFAULT)])
+
+    def test_add_column_of_unconstrained_domain_passes(self):
+        self.assert_change(
+            "CREATE DOMAIN weight_type AS INTEGER;\n"
+            "ALTER TABLE recipe ADD COLUMN weight weight_type;\n"
+        )
+
+    def test_add_column_of_domain_with_only_null_passes(self):
+        self.assert_change(
+            "CREATE DOMAIN weight_type AS INTEGER NULL;\n"
+            "ALTER TABLE recipe ADD COLUMN weight weight_type;\n"
+        )
+
+    def test_add_column_of_domain_with_non_volatile_default_passes(self):
+        self.assert_change(
+            "CREATE DOMAIN created_at AS TIMESTAMPTZ DEFAULT now();\n"
+            "ALTER TABLE recipe ADD COLUMN recorded_at created_at;\n"
+        )
+
+    def test_add_column_of_domain_with_only_collate_passes(self):
+        self.assert_change(
+            'CREATE DOMAIN label AS TEXT COLLATE "C";\n'
+            "ALTER TABLE recipe ADD COLUMN label_text label;\n"
+        )
+
+    def test_column_default_overrides_volatile_domain_default(self):
+        self.assert_change(
+            "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n"
+            "ALTER TABLE recipe ADD COLUMN token row_key "
+            "DEFAULT '00000000-0000-0000-0000-000000000001'::uuid;\n"
+        )
+
+    def test_domain_default_overrides_volatile_base_domain_default(self):
+        self.assert_change(
+            "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n"
+            "CREATE DOMAIN token_type AS row_key "
+            "DEFAULT '00000000-0000-0000-0000-000000000001'::uuid;\n"
+            "ALTER TABLE recipe ADD COLUMN token token_type;\n"
+        )
+
+    def test_domain_default_is_not_null_expression_is_not_a_constraint(self):
+        self.assert_change(
+            "CREATE DOMAIN flag AS BOOLEAN DEFAULT 1 IS NOT NULL;\n"
+            "ALTER TABLE recipe ADD COLUMN enabled flag;\n"
+        )
+
+    def test_add_column_of_constrained_domain_on_same_file_table_passes(self):
+        self.assert_files({"0001_new.sql":
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "CREATE TABLE recipe (note TEXT);\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
+        })
+
+    def test_add_column_of_volatile_default_domain_on_same_file_table_passes(self):
+        self.assert_files({"0001_new.sql":
+            "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n"
+            "CREATE TABLE recipe (note TEXT);\n"
+            "ALTER TABLE recipe ADD COLUMN token row_key;\n"
+        })
+
+    def test_drop_and_recreate_domain_without_constraint_passes(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n", "0002_change.sql":
+            "DROP DOMAIN pos_int;\n"
+            "CREATE DOMAIN pos_int AS INTEGER;\n"
+            "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
+        })
+
     def test_stored_generated_column_fails(self):
         self.assert_change(
             "ALTER TABLE recipe ADD COLUMN s integer GENERATED ALWAYS AS (length(note)) STORED;\n", STORED,
