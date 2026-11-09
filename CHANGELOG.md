@@ -48,6 +48,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - A stored `S5TIME` or `LDATE` limit bound follows the count rules of a stored value. A message always shows a time bound as an IEC literal (ADR-0120).
 - Two commands that need several derived types take their class-2 locks in the ascending order of the key values. This order closes a path to the deadlock `40P01` (ADR-0144).
 - A database CHECK refuses an array row whose `dim_lower` or `dim_upper` starts at another subscript than 1. This is the PostgreSQL subscript, not the IEC bound. The application never writes such a row. Before, `dims_valid` passed such a row, and one shape could get two rows (ADR-0145).
+- `UpdateParameterDefinition` checks a changed type before the unit lock and the first `plc_type` insert.
 - The added and the old-only parameters of the diff and the approval preview show the shown name (ADR-0152). The parameter form tags its English inputs with `lang="en"`. The submit buttons of the password form and the new user form get a fixed `id`. Then the focus stays on the button after an out-of-band swap (ADR-0041 (e)).
 
 ### Known gaps

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use recipe_domain::plant::{PlatformTypes, PlcTypeId, RecordShape};
+use recipe_domain::plant::{PlatformTypes, PlcTypeId, RecordShape, TypeExpr};
 
 /// Write the type expression of the row `id`, for example `ARRAY[1..4] OF STRING(16)` or `ST_Zone@2`.
 ///
@@ -46,4 +46,17 @@ pub(crate) fn type_text(types: &PlatformTypes, id: PlcTypeId) -> Option<String> 
             }
         }
     }
+}
+
+/// Tell whether the type expression `expr` names the type row `id`, without a lookup or an insert.
+///
+/// The function solves one problem: `UpdateParameterDefinition` must know before the unit lock
+/// whether a request changes the stored type of a parameter. `DerivedTypes::ensure_expr` answers
+/// that question, but it can lock and insert a row. The function compares the text of the row with
+/// the canonical text of `expr` instead. The result is `true` exactly when `ensure_expr` resolves
+/// `expr` to `id`. Each row has one identity, and `type_text` writes the text that `TypeExpr`
+/// writes (design D2 of the change `type-check-before-insert`). The result is `false`
+/// when `types` lacks the row or an element row. The caller then treats the type as changed.
+pub(crate) fn expr_names_row(types: &PlatformTypes, id: PlcTypeId, expr: &TypeExpr) -> bool {
+    type_text(types, id).is_some_and(|text| text == expr.to_string())
 }
