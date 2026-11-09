@@ -4,7 +4,7 @@
 
 See `proposal.md`, section "Why". ADR-0153 holds the one new decision. ADR-0062 (b), ADR-0094, ADR-0127 (n) to (u), ADR-0136, ADR-0048 (c), ADR-0128 (ai), and `reliability.md` §6 hold the context. This design links to them and does not repeat them.
 
-The state of the code on `main` at `943f5e6`. The author read each place in the source:
+The table shows the state of the code on `main` at `943f5e6`. The author read each place in the source:
 
 | Topic | State | Place |
 |---|---|---|
@@ -14,7 +14,7 @@ The state of the code on `main` at `943f5e6`. The author read each place in the 
 | Feature `dev` | `dev = []`. The feature changes only `recipe-server` | `crates/recipe-server/Cargo.toml` line 53 |
 | Secure step | `rust-tests.sh secure` runs `cargo test -p recipe-server --no-default-features --lib` on one test and expects `1 passed` | `deploy/ci/rust-tests.sh` lines 33 to 45 |
 | Jobs that run the step | Only `compose` (`if: github.event_name != 'pull_request'`). Its three last steps before the diagnostics install the toolchain, restore the cache `compose-config`, and run the step | `.github/workflows/ci.yml` lines 42, 139 to 147 |
-| Job `test` | `cargo test --workspace --all-features --locked`. `--all-features` turns on `dev`, so the build leaves out the refusal test | `ci.yml` lines 715 to 729 |
+| Job `test` | `cargo test --workspace --all-features --locked`. `--all-features` enables `dev`, so the build omits the refusal test | `ci.yml` lines 715 to 729 |
 | Structure checks of `ci.yml` | `check.sh` reads `ci.yml` as lines and checks the jobs `migration-freeze`, `ci-scripts`, `load`, and `compose` | `deploy/ci/check.sh` lines 108 to 320 |
 | Domain state of the rewrite check | `check_files` makes a new set `domains` for each file. `CREATE DOMAIN` adds a name. `DROP DOMAIN` removes it. The set holds no constraints | `deploy/ci/migration_rewrite.py` lines 564 to 570, 585, 586 |
 | Domain forms | `other_forms` reads `ALTER DOMAIN`. It moves a renamed domain and gives the two domain forms of ADR-0136 | `migration_rewrite.py` lines 521 to 537 |
@@ -47,7 +47,7 @@ The state of the code on `main` at `943f5e6`. The author read each place in the 
 - A change of a template, a handler, or a request struct of `recipe-web`.
 - A change of the export document or of `recipe-export`.
 - A run of the job `compose` on a pull request (ADR-0094).
-- The CI step of the ADR index script (plan section 3.1 "Follow-up"). The owner decided Q3: the step stays out of WP4.
+- The CI step of the ADR index script (plan section 3.1 "Follow-up"). The owner decided Q3: the step is not part of WP4.
 
 ## Decisions
 
@@ -174,4 +174,4 @@ No migration and no deploy step. The change is in CI, tests, and documents only.
 
 - Q1 (decided by the owner): a constrained domain that the same file creates gives no exemption. Only a table that the same file creates stays exempt. D3 applies it.
 - Q2 (owner): ADR-0153 stays "Proposed" until the owner approves `tasks.md`. Task 2.5 then sets "Accepted".
-- Q3 (decided by the owner): the CI step of the ADR index script of plan section 3.1 stays out of WP4.
+- Q3 (decided by the owner): the CI step of the ADR index script of plan section 3.1 is not part of WP4.

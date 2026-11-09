@@ -14,7 +14,7 @@ The full repo review of 2026-11-08 found that the script passes `ADD COLUMN` wit
 - `ADD COLUMN` of a domain with a `CHECK` and no `DEFAULT` changed the file node. PostgreSQL thus rewrote the table under an `ACCESS EXCLUSIVE` lock.
 - PostgreSQL 16 tests each domain constraint against the value of the new column in each row. A `NOT NULL` of a domain is a domain constraint, like a `CHECK`.
 - A domain over a domain also has the constraints of its base domain.
-- PostgreSQL 16 uses the default of the domain when the added column has no `DEFAULT` of its own. The function `build_column_default` falls back to the type default.
+- PostgreSQL 16 uses the default of the domain when the added column has no `DEFAULT` of its own. The function `build_column_default` then uses the type default.
 - A volatile domain default thus also rewrites the table. A domain without its own `DEFAULT` copies the default of its base domain.
 - An array of a domain is not a domain. PostgreSQL 16 tests no domain constraint and uses no domain default for an array column.
 - `volatile_default` and `added_forms` never read the type of an added column.
@@ -104,6 +104,7 @@ The project uses **Option A**. The items below are the rules. This ADR amends AD
 - Risk: PostgreSQL resolves an unqualified type name in `pg_catalog` before `public`. A domain with the name of a built-in type thus gives a false alarm. Mitigation: the check fails closed, and the author renames the domain.
 - Risk: an array of a constrained domain, or of a domain with a volatile default, gives a false alarm. PostgreSQL 16 does not rewrite the table for it. Mitigation: the check fails closed. The author uses the base type or an `EXEMPT` entry with an ADR.
 - Risk: the splitter misreads a new type form. Mitigation: one fixture for each condition of items (b) and (i) and each syntax variant of item (a).
+- Risk: a function body can change a domain in three ways. It can make the domain constrained with `CREATE DOMAIN ... CHECK`, `ALTER DOMAIN ... ADD CHECK`, or `ALTER DOMAIN ... SET NOT NULL`. It can add a volatile default with `CREATE DOMAIN ... DEFAULT` or `ALTER DOMAIN ... SET DEFAULT`. It can rename the domain with `ALTER DOMAIN ... RENAME TO`. Item (f) says that a body statement never changes the sets of the file. So a migration that calls such a function, for example `SELECT mk();`, and then adds a column of that domain gives no line. Mitigation: the review checks each function that a migration calls.
 
 ## Related
 

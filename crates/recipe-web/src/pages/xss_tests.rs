@@ -37,6 +37,23 @@ fn assert_escaped(reply: &Reply, payload: &str, what: &str) {
     assert_no_user_text_in_hx_attributes(&reply.body, payload);
 }
 
+/// Assert that an answer holds a password neither raw nor HTML-escaped (`reliability.md` section 1.1).
+///
+/// `assert_escaped` only proves that the page holds no markup. A page that writes the typed
+/// password back as escaped text would pass it, so this check looks for both forms of the text.
+fn assert_no_password_echo(reply: &Reply, password: &str, what: &str) {
+    for (form, text) in [
+        ("raw", password.to_owned()),
+        ("escaped", askama_escape(password)),
+    ] {
+        assert!(
+            !reply.body.contains(&text),
+            "{what}: the answer holds the {form} password in {}",
+            reply.body
+        );
+    }
+}
+
 /// A fixture with the Administrator `user1` and a session of that user.
 fn administrator() -> (Fixture, TestSession) {
     let fixture = Fixture::new();
@@ -221,6 +238,7 @@ async fn xss_corpus_password_field_of_post_login_is_escaped() {
         let fields = format!("login=user1&password={}", encode(&payload));
         let reply = post_pre_session(&fixture, "/login", &fields, &[]).await;
         assert_escaped(&reply, &payload, &format!("password {payload:?}"));
+        assert_no_password_echo(&reply, &payload, &format!("password {payload:?}"));
     }
 }
 
@@ -255,8 +273,15 @@ async fn post_own_password(current_password: &str, password: &str) -> Reply {
 async fn xss_corpus_current_password_field_of_post_me_password_is_escaped() {
     for payload in payloads() {
         let reply = post_own_password(&payload, NEW_OWN_PASSWORD).await;
-        assert_ne!(reply.status, StatusCode::OK, "current_password {payload:?}");
+        // A wrong current password gives `422 E-IDN-008` (`api.md` section 5, ADR-0035).
+        assert_eq!(
+            reply.status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "current_password {payload:?}: {}",
+            reply.body
+        );
         assert_escaped(&reply, &payload, &format!("current_password {payload:?}"));
+        assert_no_password_echo(&reply, &payload, &format!("current_password {payload:?}"));
     }
 }
 
@@ -272,6 +297,7 @@ async fn xss_corpus_password_field_of_post_me_password_is_escaped() {
             reply.body
         );
         assert_escaped(&reply, &payload, &format!("password {payload:?}"));
+        assert_no_password_echo(&reply, &payload, &format!("password {payload:?}"));
     }
 }
 

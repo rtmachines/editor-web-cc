@@ -92,6 +92,13 @@ def new_form_cases():
 
 
 class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
+    def test_multiple_add_clauses_with_constrained_domain_report_one_form(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN a int,\n"
+            " ADD COLUMN w pos_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
     def test_add_column_of_constrained_domain_fails(self):
         self.assert_change(
             "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
@@ -103,6 +110,16 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
             "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
             "ALTER TABLE recipe ADD COLUMN weight pos_int DEFAULT 1;\n", CONSTRAINED_DOMAIN, line=2,
         )
+
+    def test_matching_constrained_domain_exemption_passes(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD COLUMN w pos_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+        result = self.run_with_exempt({("0002_change.sql", CONSTRAINED_DOMAIN): "ADR-0153"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
 
     def test_add_column_of_constrained_domain_array_fails(self):
         self.assert_change(
@@ -120,6 +137,12 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
         self.assert_change(
             "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
             "ALTER TABLE recipe ADD COLUMN IF NOT EXISTS weight pos_int;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def test_add_constrained_domain_if_not_exists_without_column_keyword_fails(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ADD IF NOT EXISTS w pos_int;\n", CONSTRAINED_DOMAIN, line=2,
         )
 
     def test_add_column_of_schema_qualified_constrained_domain_fails(self):
@@ -140,6 +163,57 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
             "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
             "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
             "ALTER TABLE recipe ADD COLUMN weight pos_int; END$$;\n", CONSTRAINED_DOMAIN, line=2,
+        )
+
+    def assert_conditional_body_domain_change(self, definition, change, form):
+        self.assert_change(
+            f"CREATE DOMAIN probe_type AS {definition};\n"
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            f"IF false THEN {change}; END IF;\n"
+            "ALTER TABLE recipe ADD COLUMN probe_value probe_type; END$$;\n", form, line=2,
+        )
+
+    def test_body_conditional_drop_keeps_constrained_domain(self):
+        self.assert_conditional_body_domain_change(
+            "integer CHECK (VALUE > 0)", "DROP DOMAIN probe_type", CONSTRAINED_DOMAIN,
+        )
+
+    def test_body_conditional_rename_keeps_constrained_domain(self):
+        self.assert_conditional_body_domain_change(
+            "integer CHECK (VALUE > 0)", "ALTER DOMAIN probe_type RENAME TO renamed",
+            CONSTRAINED_DOMAIN,
+        )
+
+    def test_body_conditional_set_schema_keeps_constrained_domain(self):
+        self.assert_conditional_body_domain_change(
+            "integer CHECK (VALUE > 0)", "ALTER TYPE probe_type SET SCHEMA staging",
+            CONSTRAINED_DOMAIN,
+        )
+
+    def test_body_conditional_drop_keeps_volatile_domain(self):
+        self.assert_conditional_body_domain_change(
+            "double precision DEFAULT random()", "DROP DOMAIN probe_type", DEFAULT,
+        )
+
+    def test_body_conditional_rename_keeps_volatile_domain(self):
+        self.assert_conditional_body_domain_change(
+            "double precision DEFAULT random()", "ALTER DOMAIN probe_type RENAME TO renamed",
+            DEFAULT,
+        )
+
+    def test_body_conditional_set_schema_keeps_volatile_domain(self):
+        self.assert_conditional_body_domain_change(
+            "double precision DEFAULT random()", "ALTER TYPE probe_type SET SCHEMA staging",
+            DEFAULT,
+        )
+
+    def test_body_renamed_constrained_domain_counts_under_new_name(self):
+        self.assert_change(
+            "CREATE DOMAIN probe_type AS integer CHECK (VALUE > 0);\n"
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "ALTER DOMAIN probe_type RENAME TO renamed;\n"
+            "ALTER TABLE recipe ADD COLUMN probe_value renamed; END$$;\n",
+            CONSTRAINED_DOMAIN, line=2,
         )
 
     def test_add_column_of_constrained_domain_in_execute_string_fails(self):
@@ -170,11 +244,137 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
             "ALTER TABLE recipe ADD COLUMN weight required_int;\n", CONSTRAINED_DOMAIN, line=2,
         )
 
+    def test_alter_column_type_to_constrained_domain_reports_only_type_change(self):
+        self.assert_change(
+            "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
+            "ALTER TABLE recipe ALTER COLUMN note TYPE pos_int;\n", TYPE, line=2,
+        )
+
     def test_add_column_of_domain_over_constrained_domain_fails(self):
         self.assert_change(
             "CREATE DOMAIN pos_int AS INTEGER CHECK (VALUE > 0);\n"
             "CREATE DOMAIN weight_type AS pos_int;\n"
             "ALTER TABLE recipe ADD COLUMN weight weight_type;\n", CONSTRAINED_DOMAIN, line=3,
+        )
+
+    def assert_late_base_constraint(self, change):
+        domains = "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n"
+        column = "ALTER TABLE recipe ADD COLUMN w d2;\n"
+        for later_file in (False, True):
+            with self.subTest(later_file=later_file):
+                files = {"0001_base.sql": BASE, "0002_change.sql": domains + change + column}
+                line = len((domains + change).splitlines()) + 1
+                name = "0002_change.sql"
+                if later_file:
+                    files["0002_change.sql"] = domains + change
+                    files["0003_column.sql"] = column
+                    name, line = "0003_column.sql", 1
+                self.assert_files(files, [(name, line, CONSTRAINED_DOMAIN)])
+
+    def test_child_domain_after_base_add_check_fails(self):
+        self.assert_late_base_constraint("ALTER DOMAIN d1 ADD CHECK (VALUE > 0) NOT VALID;\n")
+
+    def test_child_domain_after_base_set_not_null_fails(self):
+        self.assert_late_base_constraint("ALTER DOMAIN d1 SET NOT NULL;\n")
+
+    def test_child_domain_after_renamed_base_add_check_fails(self):
+        self.assert_late_base_constraint(
+            "ALTER DOMAIN d1 RENAME TO d3;\n"
+            "ALTER DOMAIN d3 ADD CHECK (VALUE > 0) NOT VALID;\n"
+        )
+
+    def test_domain_chain_moves_keep_late_constraints(self):
+        for kind in ("DOMAIN", "TYPE"):
+            for moved in ("d1", "d2", "d3"):
+                for action, target in (("RENAME TO renamed", "renamed"),
+                                       ("SET SCHEMA staging", f"staging.{moved}")):
+                    with self.subTest(kind=kind, moved=moved, action=action):
+                        base = target if moved == "d1" else "d1"
+                        column = target if moved == "d3" else "d3"
+                        self.assert_files({"0001_base.sql": BASE +
+                            "CREATE SCHEMA staging;\nCREATE DOMAIN d1 AS int;\n"
+                            "CREATE DOMAIN d2 AS d1;\nCREATE DOMAIN d3 AS d2;\n",
+                            "0002_change.sql": f"ALTER {kind} {moved} {action};\n"
+                            f"ALTER DOMAIN {base} ADD CHECK (VALUE > 0) NOT VALID;\n",
+                            "0003_column.sql": f"ALTER TABLE recipe ADD COLUMN w {column};\n"
+                        }, [("0003_column.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_drop_domain_removes_base_link(self):
+        self.assert_change(
+            "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n"
+            "DROP DOMAIN d2;\nCREATE TYPE d2 AS ENUM ('a');\n"
+            "ALTER DOMAIN d1 ADD CHECK (VALUE > 0) NOT VALID;\n"
+            "ALTER TABLE recipe ADD COLUMN w d2;\n"
+        )
+
+    def test_body_domain_chain_counts_in_execute_only_inside_body(self):
+        self.assert_change(
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+            "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n"
+            "ALTER DOMAIN d1 ADD CHECK (VALUE > 0) NOT VALID;\n"
+            "EXECUTE 'ALTER TABLE recipe ADD COLUMN w d2'; END$$;\n"
+            "CREATE DOMAIN d1 AS int CHECK (VALUE > 0);\n"
+            "CREATE TYPE d2 AS ENUM ('a');\n"
+            "ALTER TABLE recipe ADD COLUMN w2 d2;\n", CONSTRAINED_DOMAIN,
+        )
+
+    def test_body_domain_move_keeps_file_base_links(self):
+        for moved in ("d1", "d2"):
+            with self.subTest(moved=moved):
+                base = "renamed" if moved == "d1" else "d1"
+                column = "renamed" if moved == "d2" else "d2"
+                self.assert_files({"0001_base.sql": BASE, "0002_change.sql":
+                    "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n"
+                    "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+                    f"ALTER DOMAIN {moved} RENAME TO renamed;\n"
+                    f"ALTER DOMAIN {base} ADD CHECK (VALUE > 0) NOT VALID;\n"
+                    f"ALTER TABLE recipe ADD COLUMN w {column}; END$$;\n"
+                    "ALTER TABLE recipe ADD COLUMN w2 d2;\n"
+                    "ALTER DOMAIN d1 ADD CHECK (VALUE > 0) NOT VALID;\n"
+                    "ALTER TABLE recipe ADD COLUMN w3 d2;\n"
+                }, [("0002_change.sql", line, CONSTRAINED_DOMAIN) for line in (3, 9)])
+
+    def test_body_conditional_domain_rename_keeps_original_base_link(self):
+        self.assert_files({"0001_base.sql":
+            "CREATE TABLE probe (id int);\n"
+            "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n",
+            "0002_change.sql":
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$\n"
+            "BEGIN\nIF false THEN\nALTER DOMAIN d1 RENAME TO d3;\nEND IF;\n"
+            "ALTER DOMAIN d1 ADD CHECK (VALUE > 0) NOT VALID;\n"
+            "ALTER TABLE probe ADD COLUMN w d2;\nEND;\n$$;\nSELECT f();\n"
+            "ALTER TABLE probe ADD COLUMN w2 d2;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_body_conditional_domain_recreate_keeps_original_base_link(self):
+        self.assert_files({"0001_base.sql":
+            "CREATE TABLE probe (id int);\n"
+            "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n",
+            "0002_change.sql":
+            "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$\n"
+            "BEGIN\nIF false THEN\nDROP DOMAIN d2;\nCREATE DOMAIN d2 AS int;\nEND IF;\n"
+            "ALTER DOMAIN d1 ADD CHECK (VALUE > 0) NOT VALID;\n"
+            "ALTER TABLE probe ADD COLUMN w d2;\nEND;\n$$;\nSELECT f();\n"
+            "ALTER TABLE probe ADD COLUMN w2 d2;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_body_domain_base_cycle_checks_all_possible_bases(self):
+        for constraint in ("", "ALTER DOMAIN d3 ADD CHECK (VALUE > 0) NOT VALID;\n"):
+            with self.subTest(constraint=constraint):
+                self.assert_files({"0001_base.sql": BASE +
+                    "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n",
+                    "0002_change.sql":
+                    "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+                    "IF false THEN\nALTER DOMAIN d1 RENAME TO d3;\n"
+                    "CREATE DOMAIN d1 AS d2;\n" + constraint + "END IF;\n"
+                    "ALTER TABLE recipe ADD COLUMN w d1; END$$;\n"
+                }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)] if constraint else [])
+
+    def test_child_domain_does_not_inherit_later_volatile_default(self):
+        self.assert_change(
+            "CREATE DOMAIN d1 AS int;\nCREATE DOMAIN d2 AS d1;\n"
+            "ALTER DOMAIN d1 SET DEFAULT random();\n"
+            "ALTER TABLE recipe ADD COLUMN w d2;\n"
         )
 
     def test_add_column_of_constrained_domain_from_earlier_file_fails(self):
@@ -203,6 +403,39 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
             "ALTER DOMAIN required_int SET NOT NULL;\n", "0002_change.sql":
             "ALTER TABLE recipe ADD COLUMN weight required_int;\n"
         }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_add_not_null_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN required_int AS INTEGER;\n"
+            "ALTER DOMAIN required_int ADD NOT NULL;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight required_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_add_named_not_null_in_earlier_file_fails(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN required_int AS INTEGER;\n"
+            "ALTER DOMAIN required_int ADD CONSTRAINT c NOT NULL;\n", "0002_change.sql":
+            "ALTER TABLE recipe ADD COLUMN weight required_int;\n"
+        }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_body_domain_add_not_null_counts_only_inside_body(self):
+        for name in ("", "CONSTRAINT c "):
+            with self.subTest(name=name):
+                self.assert_files({"0001_base.sql": BASE +
+                    "CREATE DOMAIN required_int AS INTEGER;\n", "0002_change.sql":
+                    "CREATE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$BEGIN\n"
+                    f"ALTER DOMAIN required_int ADD {name}NOT NULL;\n"
+                    "ALTER TABLE recipe ADD COLUMN weight required_int; END$$;\n"
+                    "ALTER TABLE recipe ADD COLUMN w2 required_int;\n"
+                }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_domain_add_not_null_needs_no_not_valid(self):
+        for name in ("", "CONSTRAINT c "):
+            with self.subTest(name=name):
+                self.assert_files({"0001_base.sql": BASE +
+                    "CREATE DOMAIN required_int AS INTEGER;\n", "0002_change.sql":
+                    f"ALTER DOMAIN required_int ADD {name}NOT NULL;\n"
+                })
 
     def test_add_column_after_alter_domain_rename_in_earlier_file_fails(self):
         self.assert_files({"0001_base.sql": BASE +
@@ -241,6 +474,20 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
             "ALTER TABLE recipe ADD COLUMN weight pos_int;\n"
         }, [("0002_change.sql", 1, CONSTRAINED_DOMAIN)])
 
+    def test_add_column_after_domain_drop_not_null_in_earlier_file_keeps_form(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER NOT NULL;\n",
+            "0002_drop.sql": "ALTER DOMAIN pos_int DROP NOT NULL;\n",
+            "0003_column.sql": "ALTER TABLE recipe ADD COLUMN w pos_int;\n"
+        }, [("0003_column.sql", 1, CONSTRAINED_DOMAIN)])
+
+    def test_add_column_after_domain_drop_constraint_in_earlier_file_keeps_form(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN pos_int AS INTEGER CONSTRAINT positive CHECK (VALUE > 0);\n",
+            "0002_drop.sql": "ALTER DOMAIN pos_int DROP CONSTRAINT positive;\n",
+            "0003_column.sql": "ALTER TABLE recipe ADD COLUMN w pos_int;\n"
+        }, [("0003_column.sql", 1, CONSTRAINED_DOMAIN)])
+
     def test_add_column_of_domain_with_volatile_default_fails(self):
         self.assert_change(
             "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n"
@@ -266,6 +513,13 @@ class MigrationRewriteFormsTests(_tests.MigrationRewriteTestCase):
             "CREATE DOMAIN weight_type AS INTEGER;\n"
             "ALTER TABLE recipe ADD COLUMN weight weight_type;\n"
         )
+
+    def test_add_column_after_domain_drop_default_in_earlier_file_keeps_volatile_form(self):
+        self.assert_files({"0001_base.sql": BASE +
+            "CREATE DOMAIN row_key AS UUID DEFAULT gen_random_uuid();\n",
+            "0002_drop.sql": "ALTER DOMAIN row_key DROP DEFAULT;\n",
+            "0003_column.sql": "ALTER TABLE recipe ADD COLUMN token row_key;\n"
+        }, [("0003_column.sql", 1, DEFAULT)])
 
     def test_add_column_of_domain_with_only_null_passes(self):
         self.assert_change(

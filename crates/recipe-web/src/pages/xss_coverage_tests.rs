@@ -464,14 +464,44 @@ fn is_open(text: &str) -> bool {
 }
 
 /// Read an attribute that starts with `first` and can go over several lines.
-fn read_attribute<'a>(first: &str, rest: &mut impl Iterator<Item = &'a str>) -> String {
+fn read_attribute<S: AsRef<str>>(first: &str, rest: &mut impl Iterator<Item = S>) -> String {
     let mut text = first.to_owned();
     while is_open(&text) {
         let Some(next) = rest.next() else { break };
         text.push(' ');
-        text.push_str(next);
+        text.push_str(next.as_ref());
     }
     text
+}
+
+/// Return the text after the `]` that closes the first `[` of the attribute. A `]` inside a string
+/// closes nothing. The result is empty when the attribute ends the text or never closes.
+fn after_attribute(attr: &str) -> &str {
+    let (mut depth, mut end) = (0_usize, 0_usize);
+    for (c, quoted) in mark_quotes(attr) {
+        end = end.saturating_add(c.len_utf8());
+        match c {
+            '[' if !quoted => depth = depth.saturating_add(1),
+            ']' if !quoted => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return attr.get(end..).unwrap_or_default().trim();
+                }
+            }
+            _ => {}
+        }
+    }
+    ""
+}
+
+/// Return a fault when text other than a `//` comment follows the attribute on its line.
+///
+/// Such text can hide a second attribute, for example a `serde` list after a `derive`. The scan
+/// reads one attribute for each line, so it would lose that list.
+fn tail_fault(what: &str, attr: &str) -> Option<String> {
+    let tail = after_attribute(attr);
+    (!tail.is_empty() && !tail.starts_with("//"))
+        .then(|| format!("{what} has text after an attribute on one line: `{attr}`"))
 }
 
 /// Return the identifier words of a text.
@@ -492,6 +522,113 @@ fn count_derives(source: &str) -> usize {
         .filter_map(|(at, _)| source.get(at..)?.split_once(')'))
         .filter(|(list, _)| words(list).any(|word| word == "Deserialize"))
         .count()
+}
+
+/// Return one fault for each `use` that renames `Deserialize` with `as`, also inside a group.
+///
+/// A renamed derive such as `#[derive(Decode)]` hides its struct from the parser and from
+/// `count_derives`. So the guard refuses the rename itself. The check reads no derive.
+fn rename_faults(source: &str) -> Vec<String> {
+    let mut faults = Vec::new();
+    let mut lines = source.lines().enumerate();
+    while let Some((index, line)) = lines.next() {
+        let line = line.trim();
+        if !strip_visibility(line).starts_with("use ") {
+            continue;
+        }
+        let mut statement = line.to_owned();
+        while !statement.contains(';') {
+            let Some((_, next)) = lines.next() else { break };
+            statement.push(' ');
+            statement.push_str(next.trim());
+        }
+        let all: Vec<&str> = words(&statement).collect();
+        if all.windows(2).any(|pair| pair == ["Deserialize", "as"]) {
+            let number = index.saturating_add(1);
+            faults.push(format!(
+                "line {number}: a `use` renames Deserialize with `as`"
+            ));
+        }
+    }
+    faults
+}
+
+/// Return true when the text has a bracket that opens and every bracket closes.
+fn closes_all_brackets(text: &str) -> bool {
+    let (mut depth, mut opened) = (0_usize, false);
+    for (c, quoted) in mark_quotes(text) {
+        match c {
+            '{' | '(' | '[' if !quoted => {
+                depth = depth.saturating_add(1);
+                opened = true;
+            }
+            '}' | ')' | ']' if !quoted => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    opened && depth == 0
+}
+
+/// Return one fault for each `macro_rules!` body that holds a `Deserialize` derive.
+///
+/// A macro can make a struct whose name and fields are `$` fragments. The guard cannot read the
+/// fields of each invocation, so it refuses the body.
+fn macro_faults(source: &str) -> Vec<String> {
+    let mut faults = Vec::new();
+    let mut lines = source.lines().enumerate();
+    while let Some((index, line)) = lines.next() {
+        if !line.trim().starts_with("macro_rules!") {
+            continue;
+        }
+        let mut body = line.to_owned();
+        while !closes_all_brackets(&body) {
+            let Some((_, next)) = lines.next() else { break };
+            body.push('\n');
+            body.push_str(next);
+        }
+        let number = index.saturating_add(1);
+        if body.contains("derive(") && words(&body).any(|word| word == "Deserialize") {
+            faults.push(format!(
+                "line {number}: a macro_rules body holds a Deserialize derive"
+            ));
+        }
+        if derive_lists(&body).any(|list| list.contains('$')) {
+            let name: String = line
+                .trim()
+                .trim_start_matches("macro_rules!")
+                .trim_start()
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            faults.push(format!(
+                "line {number}: macro_rules! {name} builds a derive list from a metavariable, \
+                 and the scan cannot read it"
+            ));
+        }
+    }
+    faults
+}
+
+/// Yield the text inside each `derive(...)` list of `text`, up to the matching bracket.
+///
+/// A list that never closes runs to the end of the text, so the caller still sees its content.
+fn derive_lists(text: &str) -> impl Iterator<Item = &str> {
+    text.match_indices("derive(").map(move |(start, marker)| {
+        let rest = text.get(start.saturating_add(marker.len())..).unwrap_or("");
+        let mut depth = 1_usize;
+        let end = rest
+            .char_indices()
+            .find(|&(_, c)| {
+                match c {
+                    '(' => depth = depth.saturating_add(1),
+                    ')' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+                depth == 0
+            })
+            .map_or(rest.len(), |(offset, _)| offset);
+        rest.get(..end).unwrap_or("")
+    })
 }
 
 /// Remove `pub`, `pub(crate)`, `pub(super)`, or `pub(in path)` from the start of a line.
@@ -576,13 +713,33 @@ fn key_faults(items: &[SerdeItem], what: &str) -> Vec<String> {
         .collect()
 }
 
+/// Return one fault for each `cfg_attr` attribute that wraps `serde(...)`.
+///
+/// `serde_items` reads only a plain `#[serde(...)]`. A `cfg_attr` can hide a key such as
+/// `rename_all`, so the scan refuses it and does not guess the condition.
+fn cfg_attr_faults(attrs: &[String], what: &str) -> Vec<String> {
+    attrs
+        .iter()
+        .map(|attr| attr.trim())
+        .filter(|attr| attr.starts_with("#[cfg_attr(") && attr.contains("serde("))
+        .map(|attr| {
+            format!("{what} wraps serde in a cfg_attr, which the scan does not read: `{attr}`")
+        })
+        .collect()
+}
+
 /// Return the name of a struct and the text after its `{`, or `None` for another item.
+///
+/// An empty name, such as the `$name` of a macro body, gives `None`. The caller then gives a fault.
 fn struct_head(line: &str) -> Option<(String, &str)> {
     let rest = strip_visibility(line).strip_prefix("struct ")?;
     let end = rest
         .find(|c: char| !(c.is_alphanumeric() || c == '_'))
         .unwrap_or(rest.len());
     let (name, tail) = rest.split_at(end);
+    if name.is_empty() {
+        return None;
+    }
     let (before, after) = tail.split_once('{')?;
     (!before.contains([';', '('])).then(|| (name.to_owned(), after))
 }
@@ -595,19 +752,106 @@ fn field_name(line: &str) -> Option<String> {
     (is_name && !tail.starts_with(':')).then(|| name.to_owned())
 }
 
+/// Return the text after the comma that ends the first field of the line, or an empty text.
+///
+/// A comma inside a string, a bracket, or an angle bracket, such as `HashMap<String, String>` or
+/// `(u8, u8)`, ends no field. A `//` comment ends the scan.
+fn after_field(line: &str) -> &str {
+    let (_, ty) = strip_visibility(line).split_once(':').unwrap_or_default();
+    let (mut depth, mut end, mut previous) = (0_usize, 0_usize, ' ');
+    for (c, quoted) in mark_quotes(ty) {
+        end = end.saturating_add(c.len_utf8());
+        match c {
+            '<' | '(' | '[' | '{' if !quoted => depth = depth.saturating_add(1),
+            '>' if !quoted && previous != '-' => depth = depth.saturating_sub(1),
+            ')' | ']' | '}' if !quoted => depth = depth.saturating_sub(1),
+            '/' if !quoted && previous == '/' => return "",
+            ',' if !quoted && depth == 0 => return ty.get(end..).unwrap_or_default().trim(),
+            _ => {}
+        }
+        previous = c;
+    }
+    ""
+}
+
+/// Return a fault when text other than a `//` comment follows the first field on its line.
+///
+/// Such text can hide a second field or an attribute. The scan reads one field for each line, so it
+/// would lose them.
+fn field_tail_fault(name: &str, line: &str) -> Option<String> {
+    let tail = after_field(line);
+    (!tail.is_empty() && !tail.starts_with("//"))
+        .then(|| format!("{name} has text after a field on one line: `{line}`"))
+}
+
+/// Remove the block comments from a line and trim it. `depth` carries the open comments from the
+/// previous line into this one. A `/*` inside a string or after a `//` starts no comment.
+fn strip_block_comments(line: &str, depth: &mut usize) -> String {
+    let mut kept = String::new();
+    let (mut quoted, mut escaped) = (false, false);
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        let at_marker = |next: char, rest: &std::str::Chars<'_>| {
+            !quoted && c == '/' && rest.clone().next() == Some(next)
+        };
+        if *depth > 0 {
+            if c == '*' && chars.clone().next() == Some('/') {
+                chars.next();
+                *depth = depth.saturating_sub(1);
+            } else if c == '/' && chars.clone().next() == Some('*') {
+                chars.next();
+                *depth = depth.saturating_add(1);
+            }
+        } else if at_marker('*', &chars) {
+            chars.next();
+            *depth = depth.saturating_add(1);
+        } else if at_marker('/', &chars) {
+            kept.push(c);
+            kept.extend(chars.by_ref());
+        } else {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' if quoted => escaped = true,
+                '"' => quoted = !quoted,
+                _ => {}
+            }
+            kept.push(c);
+        }
+    }
+    kept.trim().to_owned()
+}
+
 /// Read the fields up to the closing brace. Each field comes with its `serde` items.
-fn read_fields<'a>(lines: &mut impl Iterator<Item = &'a str>) -> Vec<(String, Vec<SerdeItem>)> {
+///
+/// The function fails closed. A line that is no field, attribute, comment, or blank line gives a
+/// fault that names the struct and the line. The caller adds the file.
+fn read_fields<'a>(
+    name: &str,
+    lines: &mut impl Iterator<Item = &'a str>,
+    faults: &mut Vec<String>,
+) -> Vec<(String, Vec<SerdeItem>)> {
     let mut fields = Vec::new();
     let mut attrs: Vec<String> = Vec::new();
+    let mut depth = 0_usize;
+    let mut lines = lines.map(|line| strip_block_comments(line, &mut depth));
     while let Some(line) = lines.next() {
         if line.starts_with('}') {
             break;
         }
+        if line.is_empty() || line.starts_with("//") {
+            continue;
+        }
         if line.starts_with("#[") {
-            attrs.push(read_attribute(line, lines));
-        } else if let Some(name) = field_name(line) {
-            fields.push((name, serde_items(&attrs)));
+            let attr = read_attribute(&line, &mut lines);
+            faults.extend(tail_fault(name, &attr));
+            attrs.push(attr);
+        } else if let Some(field) = field_name(&line) {
+            faults.extend(field_tail_fault(name, &line));
+            faults.extend(cfg_attr_faults(&attrs, &format!("{name}.{field}")));
+            fields.push((field, serde_items(&attrs)));
             attrs.clear();
+        } else {
+            faults.push(format!("{name} has a line that is no field: `{line}`"));
         }
     }
     fields
@@ -644,9 +888,12 @@ fn scan_item<'a>(
             .push(format!("{name} has no deny_unknown_fields"));
     }
     scan.faults.extend(key_faults(&items, &name));
+    scan.faults.extend(cfg_attr_faults(attrs, &name));
+    scan.faults
+        .extend(attrs.iter().filter_map(|attr| tail_fault(&name, attr)));
     let fields = match after.trim() {
         "}" => Vec::new(),
-        "" => read_fields(lines),
+        "" => read_fields(&name, lines, &mut scan.faults),
         other => {
             scan.faults.push(format!(
                 "{name} has fields on the line of the item: `{other}`"
@@ -673,6 +920,8 @@ fn scan_source(source: &str) -> Scan {
         derives: count_derives(source),
         ..Scan::default()
     };
+    scan.faults.extend(rename_faults(source));
+    scan.faults.extend(macro_faults(source));
     let mut lines = source.lines().map(str::trim);
     let mut attrs: Vec<String> = Vec::new();
     while let Some(line) = lines.next() {
@@ -929,6 +1178,109 @@ fn xss_coverage_scan_refuses_each_key_that_changes_a_wire_name() {
 }
 
 #[test]
+fn xss_coverage_scan_refuses_a_cfg_attr_that_wraps_serde() {
+    let head = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\n";
+    let on_struct = format!(
+        "{head}#[cfg_attr(all(), serde(rename_all = \"UPPERCASE\"))]\nstruct F {{\n    name: String,\n}}\n"
+    );
+    let on_field = format!(
+        "{head}struct F {{\n    #[cfg_attr(all(), serde(alias = \"other\"))]\n    name: String,\n}}\n"
+    );
+
+    let struct_scan = scan_source(&on_struct);
+    let field_scan = scan_source(&on_field);
+
+    assert_eq!(
+        struct_scan.faults,
+        [
+            "F wraps serde in a cfg_attr, which the scan does not read: `#[cfg_attr(all(), serde(rename_all = \"UPPERCASE\"))]`"
+        ]
+    );
+    assert_eq!(
+        field_scan.faults,
+        [
+            "F.name wraps serde in a cfg_attr, which the scan does not read: `#[cfg_attr(all(), serde(alias = \"other\"))]`"
+        ]
+    );
+}
+
+#[test]
+fn xss_coverage_scan_accepts_a_cfg_attr_without_serde() {
+    let source = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\n#[cfg_attr(test, derive(Debug))]\nstruct F {\n    #[cfg_attr(test, allow(dead_code))]\n    name: String,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults, Vec::<String>::new());
+}
+
+#[test]
+fn xss_coverage_scan_refuses_text_after_an_attribute_above_a_struct() {
+    // Under `#[rustfmt::skip]` a derive and a serde attribute can share one line.
+    let source = "#[derive(Deserialize)] #[serde(rename_all = \"UPPERCASE\")]\n#[serde(deny_unknown_fields)]\nstruct F {\n    name: String,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(
+        scan.faults,
+        [
+            "F has text after an attribute on one line: `#[derive(Deserialize)] #[serde(rename_all = \"UPPERCASE\")]`"
+        ]
+    );
+}
+
+#[test]
+fn xss_coverage_scan_accepts_a_line_comment_after_an_attribute_above_a_struct() {
+    let source = "#[derive(Deserialize)] // note\n#[serde(deny_unknown_fields)]\nstruct F {\n    name: String,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults, Vec::<String>::new());
+}
+
+#[test]
+fn xss_coverage_scan_refuses_text_after_a_field_on_one_line() {
+    // Under `#[rustfmt::skip]` a field line can hold a second field or an attribute.
+    let head = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct F {\n";
+    let second_field = format!("{head}    a: String, b: String,\n}}\n");
+    let attribute = format!("{head}    a: String, #[serde(rename = \"x\")]\n    b: String,\n}}\n");
+
+    let second_field_scan = scan_source(&second_field);
+    let attribute_scan = scan_source(&attribute);
+
+    assert_eq!(
+        second_field_scan.faults,
+        ["F has text after a field on one line: `a: String, b: String,`"]
+    );
+    assert_eq!(
+        attribute_scan.faults,
+        ["F has text after a field on one line: `a: String, #[serde(rename = \"x\")]`"]
+    );
+}
+
+#[test]
+fn xss_coverage_scan_accepts_commas_inside_a_field_line() {
+    let head = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct F {\n";
+    let fields = [
+        "a: HashMap<String, String>,",
+        "a: (u8, u8),",
+        "a: [u8; 2],",
+        "a: fn(u8, u8) -> u8,",
+        "#[serde(default)] // x, y\n    a: u8,",
+        "a: String, // note",
+        "a: String // x, y",
+        "pub(crate) a: Option<Vec<u8>>,",
+    ];
+    for field in fields {
+        let source = format!("{head}    {field}\n}}\n");
+
+        let scan = scan_source(&source);
+
+        assert_eq!(scan.faults, Vec::<String>::new(), "{field}");
+        assert_eq!(scan.structs.len(), 1, "{field}");
+    }
+}
+
+#[test]
 fn xss_coverage_scan_refuses_a_struct_without_deny_unknown_fields() {
     let source = "#[derive(Deserialize)]\n#[serde(default)]\nstruct A {\n    a: u8,\n}\n";
 
@@ -954,6 +1306,228 @@ fn xss_coverage_scan_refuses_an_item_that_is_no_struct_with_named_fields() {
         assert_eq!(scan.derives, 1, "{item}");
         assert_eq!(scan.structs.len(), 0, "{item}");
     }
+}
+
+#[test]
+fn xss_coverage_scan_refuses_a_renamed_deserialize_derive() {
+    let body = "#[derive(Decode)]\n#[serde(deny_unknown_fields)]\nstruct A {\n    a: u8,\n}\n";
+    let uses = [
+        "use serde::Deserialize as Decode;\n",
+        "use serde::{Serialize, Deserialize as Decode};\n",
+        "pub(crate) use serde::{\n    Serialize,\n    Deserialize\n        as Decode,\n};\n",
+    ];
+    for item in uses {
+        let source = format!("\n{item}{body}");
+
+        let scan = scan_source(&source);
+
+        assert_eq!(scan.faults.len(), 1, "{item}: {:?}", scan.faults);
+        let fault = scan.faults.first().unwrap();
+        assert!(fault.contains("line 2"), "{item}: {fault}");
+        assert!(fault.contains("Deserialize"), "{item}: {fault}");
+    }
+}
+
+#[test]
+fn xss_coverage_comparison_names_the_file_of_a_renamed_deserialize_derive() {
+    let text = "use serde::Deserialize as Decode;\n#[derive(Decode)]\nstruct A {\n    a: u8,\n}\n";
+    let sources = [source("pages/form.rs", text)];
+
+    let faults = coverage_faults(&sources, &[]);
+
+    assert!(
+        faults
+            .iter()
+            .any(|fault| fault.starts_with("pages/form.rs: ") && fault.contains("line 1")),
+        "{faults:?}"
+    );
+}
+
+#[test]
+fn xss_coverage_scan_refuses_a_deserialize_derive_in_a_macro_body() {
+    let source = "use serde::Deserialize;\n\nmacro_rules! request {\n    ($name:ident, $f:ident) => {\n        #[derive(Deserialize)]\n        #[serde(deny_unknown_fields)]\n        struct $name {\n            $f: String,\n        }\n    };\n}\n";
+
+    let scan = scan_source(source);
+
+    let macro_faults: Vec<&String> = scan
+        .faults
+        .iter()
+        .filter(|fault| fault.contains("macro_rules"))
+        .collect();
+    assert_eq!(macro_faults.len(), 1, "{:?}", scan.faults);
+    assert!(
+        macro_faults.iter().all(|fault| fault.contains("line 3")),
+        "{macro_faults:?}"
+    );
+}
+
+#[test]
+fn xss_coverage_scan_refuses_a_struct_with_an_empty_or_macro_name() {
+    for head in ["struct $name {", "pub struct {"] {
+        let source = format!(
+            "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\n{head}\n    a: u8,\n}}\n"
+        );
+
+        let scan = scan_source(&source);
+
+        assert_eq!(scan.structs.len(), 0, "{head}: {:?}", scan.structs);
+        assert!(
+            scan.faults
+                .iter()
+                .any(|fault| fault.contains("no struct with named fields")),
+            "{head}: {:?}",
+            scan.faults
+        );
+    }
+}
+
+#[test]
+fn xss_coverage_scan_refuses_a_macro_derive_list_built_from_a_metavariable() {
+    let source = "macro_rules! req {\n    ($d:ident, $name:ident, $f:ident) => {\n        #[derive($d)]\n        struct $name {\n            $f: String,\n        }\n    };\n}\nreq!(Deserialize, Hidden, text);\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(
+        scan.faults,
+        vec![
+            "line 1: macro_rules! req builds a derive list from a metavariable, \
+             and the scan cannot read it"
+                .to_owned()
+        ]
+    );
+}
+
+#[test]
+fn xss_coverage_scan_accepts_a_macro_body_without_a_derive_list() {
+    let source = "macro_rules! twice {\n    ($e:expr) => {\n        $e + $e\n    };\n}\n";
+
+    assert_eq!(scan_source(source), Scan::default());
+}
+
+#[test]
+fn xss_coverage_scan_accepts_a_plain_use_and_a_macro_without_the_derive() {
+    let source = "use serde::Deserialize;\nuse serde::{Deserialize, Serialize as Ser};\n\nmacro_rules! font {\n    ($name:ident) => {\n        #[derive(Debug)]\n        struct $name {\n            a: u8,\n        }\n    };\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan, Scan::default());
+}
+
+#[test]
+fn xss_coverage_scan_reads_a_field_after_a_leading_block_comment() {
+    let source = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    text: String,\n    /* Submitted note */ note: Option<String>,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults, Vec::<String>::new());
+    let names: Vec<&str> = scan
+        .structs
+        .iter()
+        .flat_map(|item| &item.wire_names)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, ["text", "note"]);
+}
+
+#[test]
+fn xss_coverage_scan_reads_a_block_comment_over_several_lines() {
+    let source = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    text: String,\n    /* The first line\n       the second line */ note: Option<String>,\n    /*\n    old: u8,\n    */\n    /* outer /* nested */ still a comment: u8, */\n    last: String,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults, Vec::<String>::new());
+    let names: Vec<&str> = scan
+        .structs
+        .iter()
+        .flat_map(|item| &item.wire_names)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, ["text", "note", "last"]);
+}
+
+#[test]
+fn xss_coverage_scan_keeps_a_comment_marker_inside_a_string() {
+    let source = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    #[serde(rename = \"a/*b\")]\n    a: String,\n    b: String, // not /* a block\n    c: String,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults, Vec::<String>::new());
+    let names: Vec<&str> = scan
+        .structs
+        .iter()
+        .flat_map(|item| &item.wire_names)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, ["a/*b", "b", "c"]);
+}
+
+#[test]
+fn xss_coverage_scan_refuses_a_line_of_the_body_that_is_no_field() {
+    let source = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    text: String,\n    this is no field\n    note: Option<String>,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults.len(), 1, "{:?}", scan.faults);
+    let fault = scan.faults.first().unwrap();
+    assert!(fault.contains("Form"), "{fault}");
+    assert!(fault.contains("this is no field"), "{fault}");
+}
+
+#[test]
+fn xss_coverage_scan_refuses_a_field_on_the_line_of_its_attribute() {
+    let fields = [
+        "#[serde(default)] a: u8,",
+        "#[serde(rename = \"x]y\")] a: u8,",
+        "#[serde(default)] #[serde(rename = \"x\")] a: u8,",
+    ];
+    for field in fields {
+        let source = format!(
+            "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {{\n    {field}\n}}\n"
+        );
+
+        let scan = scan_source(&source);
+
+        assert_eq!(
+            scan.faults,
+            [format!(
+                "Form has text after an attribute on one line: `{field}`"
+            )],
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn xss_coverage_scan_reads_an_attribute_over_several_lines_and_a_comment_after_it() {
+    let source = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    #[serde(\n        default,\n        rename = \"x]y\"\n    )]\n    a: u8,\n    #[serde(default)] // a note\n    b: u8,\n    #[serde(rename = \"c]\")]\n    c: u8,\n}\n";
+
+    let scan = scan_source(source);
+
+    assert_eq!(scan.faults, Vec::<String>::new());
+    let names: Vec<&str> = scan
+        .structs
+        .iter()
+        .flat_map(|item| &item.wire_names)
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, ["x]y", "b", "c]"]);
+}
+
+#[test]
+fn xss_coverage_comparison_names_the_file_of_a_line_that_is_no_field() {
+    let text = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    text: String,\n    this is no field\n}\n";
+    let sources = [source("pages/form.rs", text)];
+
+    let faults = coverage_faults(&sources, &[]);
+
+    assert!(
+        faults
+            .iter()
+            .any(|fault| fault.starts_with("pages/form.rs: ")
+                && fault.contains("Form")
+                && fault.contains("this is no field")),
+        "{faults:?}"
+    );
 }
 
 /// Build a source file for the comparison tests.
