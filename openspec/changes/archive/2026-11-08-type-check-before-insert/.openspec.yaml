@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-08
+# The change moves two checks before the first type insert. No requirement of a spec changes.
+skip_specs: true

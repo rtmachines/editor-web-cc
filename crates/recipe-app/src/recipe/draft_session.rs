@@ -72,6 +72,11 @@ pub(crate) struct OpenDraft {
     pub(crate) draft: Draft,
     /// The trees of the types of every parameter of the draft, read in the transaction.
     pub(crate) trees: TypeTrees,
+    /// The type rows of the machine, read in the transaction before any class-2 lock.
+    ///
+    /// They are valid for the stored type of each parameter of the draft. A command uses them to
+    /// check a changed type before it locks the unit (design D3 of `type-check-before-insert`).
+    pub(crate) types: PlatformTypes,
 }
 
 /// A locked live draft after the touch statement.
@@ -156,16 +161,20 @@ async fn lock_current_draft(
 }
 
 /// Read the type rows of the machine and resolve the tree of every parameter type.
-async fn resolve_trees(tx: &mut dyn Transaction, draft: &Draft) -> Result<TypeTrees, AppError> {
+async fn resolve_trees(
+    tx: &mut dyn Transaction,
+    draft: &Draft,
+) -> Result<(TypeTrees, PlatformTypes), AppError> {
     let rows = tx.types().type_rows(draft.machine()).await?;
     let types = PlatformTypes::collect(draft.machine(), draft.platform(), rows)?;
-    Ok(TypeTrees::resolve(
+    let trees = TypeTrees::resolve(
         draft
             .parameters()
             .iter()
             .map(|parameter| parameter.plc_type()),
         &types,
-    ))
+    );
+    Ok((trees, types))
 }
 
 impl OpenDraft {
@@ -193,12 +202,13 @@ impl OpenDraft {
         lock_machine(tx.as_mut(), resolved, lock).await?;
         lock_live_recipe(tx.as_mut(), resolved, target).await?;
         let draft = lock_current_draft(tx.as_mut(), resolved, target).await?;
-        let trees = resolve_trees(tx.as_mut(), &draft).await?;
+        let (trees, types) = resolve_trees(tx.as_mut(), &draft).await?;
         Ok(Self {
             tx,
             recipe: resolved.recipe,
             draft,
             trees,
+            types,
         })
     }
 
