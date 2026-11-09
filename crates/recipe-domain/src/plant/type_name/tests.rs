@@ -170,3 +170,17 @@ fn display_writes_the_name() {
         Ok("Limit".to_owned())
     );
 }
+
+// domain-model.md section 2.1: the name grammar is `[A-Za-z_][A-Za-z0-9_]{0,63}`.
+#[test]
+fn format_texts_name_the_rule_for_the_first_character() {
+    assert_eq!(TypeName::parse("1abc"), Err(TypeNameReason::Format));
+    assert_eq!(MemberName::parse("1abc"), Err(MemberNameReason::Format));
+    for text in [
+        TypeNameReason::Format.to_string(),
+        MemberNameReason::Format.to_string(),
+    ] {
+        assert!(text.contains("first character"), "{text}");
+        assert!(text.contains("letter or an underscore"), "{text}");
+    }
+}
