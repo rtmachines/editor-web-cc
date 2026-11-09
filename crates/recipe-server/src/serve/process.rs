@@ -14,7 +14,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use recipe_app::identity::{Argon2Hasher, Argon2Params, PasswordHasher};
 use recipe_app::operations::AlertCounters;
-use recipe_app::ports::{AlertWebhook, BackupDirectory, Clock, DiskSpace};
+use recipe_app::ports::{AlertWebhook, BackupDirectory, CheckResults, Clock, DiskSpace};
 use recipe_db::Database;
 use recipe_db::settings::{Connection, PoolSettings};
 use tokio::net::TcpListener;
@@ -29,6 +29,7 @@ use super::server::StopCause;
 use super::start::{Outcome, start};
 use super::webhook_client::build_webhook;
 use crate::backups::FileBackupDirectory;
+use crate::check_results::FileCheckResults;
 use crate::clock::SystemClock;
 use crate::coded::coded;
 use crate::config::serve::load;
@@ -48,17 +49,21 @@ pub struct ProcessHost {
     connection: Connection,
     /// The one disk adapter of the jobs `disk_check` and `alerts` (ADR-0133).
     disk: SystemDiskSpace,
+    /// The time limit of one blocking read of a volume (ADR-0133, ADR-0151 (o)).
+    read_limit: Duration,
 }
 
 impl ProcessHost {
     /// Build the host for the connection of the application role.
     ///
-    /// `disk_limit` is `health.disk_check_interval`. The host builds one disk adapter with it.
+    /// `disk_limit` is `health.disk_check_interval`. The host builds one disk adapter with it
+    /// and gives the same limit to the backup directory adapter.
     #[must_use]
     pub fn new(connection: Connection, disk_limit: Duration) -> Self {
         Self {
             connection,
             disk: SystemDiskSpace::new(disk_limit),
+            read_limit: disk_limit,
         }
     }
 
@@ -126,7 +131,11 @@ impl Host for ProcessHost {
     }
 
     fn backups(&self, directory: &Path) -> Arc<dyn BackupDirectory> {
-        Arc::new(FileBackupDirectory::new(directory))
+        Arc::new(FileBackupDirectory::new(directory, self.read_limit))
+    }
+
+    fn check_results(&self, backups: &Path, walarchive: &Path) -> Arc<dyn CheckResults> {
+        Arc::new(FileCheckResults::new(backups, walarchive, self.read_limit))
     }
 
     async fn bind(&self, _kind: ListenerKind, port: u16) -> io::Result<TcpListener> {

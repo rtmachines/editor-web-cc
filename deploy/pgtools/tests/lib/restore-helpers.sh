@@ -101,8 +101,8 @@ restore_run() {
     PGDATABASE=recipe "$@" -- restore-test
 }
 
-# set_listing: the listing of the backup directory without the scratch directory.
-set_listing() { listing | grep -v '^\./\.scratch' || true; }
+# set_listing: exclude the scratch directory and the exact path of the result file.
+set_listing() { listing | grep -vE '^\./\.scratch|^\./restore-test\.result ' || true; }
 
 scratch_runs() { find "$B/.scratch" -mindepth 1 -maxdepth 1 -name 'run.*' 2>/dev/null | wc -l; }
 
@@ -115,6 +115,7 @@ restore_failed_checks() {
   expect_no "$name: exit code is not 0" test "$RC" -eq 0
   expect_eq "$name: one ERROR line" "$(error_count "$CASE/out")" 1
   expect_eq "$name: marker, lock, and set files are unchanged" "$(set_listing)" "$2"
+  restore_result_checks "$name result" failed
   expect_eq "$name: no scratch run directory stays" "$(scratch_runs)" 0
   expect_eq "$name: pgpass directory is empty" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
   expect_eq "$name: every started server is stopped" \

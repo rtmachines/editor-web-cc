@@ -18,6 +18,7 @@
 !restore-roles.expected
 
 # Shell libraries.
+!lib/check-result.sh
 !lib/globals-grammar.sh
 !lib/restore-steps.sh
 !lib/wal-identity.sh

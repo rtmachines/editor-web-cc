@@ -26,7 +26,7 @@ Rules:
 - Every error variant carries the values that identify the failure (recipe reference, version number, tag, leaf path). It never carries a password, a password hash, a session token, or a cookie value.
 - Every error type implements `Display` for the user message and for the log line. `Debug` on a type that holds a secret redacts it. The log never uses `Debug`.
 - Every error type has a `code(&self) -> ErrorCode` method. The code is stable. The message template can change. The code cannot.
-- A value object without its own row in section 1.2 returns a reason from `parse`. A reason is a field type, not an error type, and has no `code()`. The caller wraps it into its coded error (ADR-0025). `WebhookFault`, the reason of a failed call of the port `AlertWebhook`, is a reason of the same kind (ADR-0060 (r)). `DiskFault` of the port `DiskSpace` and `BackupFault` of the port `BackupDirectory` are reasons of the same kind too (ADR-0073 (b)).
+- A value object without its own row in section 1.2 returns a reason from `parse`. A reason is a field type, not an error type, and has no `code()`. The caller wraps it into its coded error (ADR-0025). `WebhookFault`, the reason of a failed call of the port `AlertWebhook`, is a reason of the same kind (ADR-0060 (r)). `DiskFault` of the port `DiskSpace` and `BackupFault` of the port `BackupDirectory` are reasons of the same kind too (ADR-0073 (b)). `CheckResultFault` of the port `CheckResults` is a reason of the same kind (ADR-0151 (j3)).
 - `?` converts between layers through `From`. A `map_err` closure appears only when it adds context.
 - `recipe-db` maps `sqlx::Error` to `StorageError` by SQLSTATE in this order: a `RAISE EXCEPTION` whose message starts with a trigger code from section 1.2 becomes `StorageError::Constraint { code, message }` with that code. The trigger codes are `E-PLT-030..049`, `E-RCP-030..049`, and `E-AUD-003`. `23505` becomes `Duplicate`. `23503` becomes `MissingReference`. `23514` without a trigger code becomes `Constraint { code: "E-DB-003", .. }`. `40P01` becomes `Deadlock { cause: Deadlock }`. `40001` becomes `Deadlock { cause: Serialization }`. `57014` becomes `StatementTimeout`. `55P03` becomes `Deadlock { cause: LockTimeout }` (a lock wait that hit `lock_timeout`). A pool acquire timeout becomes `PoolTimeout`. A connection error becomes `Unavailable`. Any other code becomes `Other`.
 - `SetUserRole` and `DeactivateUser` run in `READ COMMITTED` with no retry. They take the class-4 guard lock of the last Administrator first (ADR-0096). Only the first-administrator operation of `create-admin` runs in `SERIALIZABLE`. It runs once more on `Deadlock { cause: Serialization }`, also when it comes from the audit insert or from the commit. A second serialization failure returns `E-DB-001` (ADR-0035). Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
@@ -378,7 +378,9 @@ For each active condition it writes one `WARN` line to the event log. The field 
 |---|---|---|
 | `panics` | More than `alerts.panic_count` panic events in `alerts.panic_window` | In-process counter of the panic hook (2.4) |
 | `not_ready` | `/readyz` not ready for more than `alerts.not_ready_for` | In-process readiness state |
-| `backup_age` | Latest dump older than `backup.max_age_alert` | The newest complete set on the read-only mount of the `backups` volume. A set is complete when its manifest exists (7.7). An unreadable directory is an error, not "no set" (ADR-0060 (f)). It makes the condition active, also during the start grace. The job writes one `WARN` line of the `BackupFault` (ADR-0073 (c)) |
+| `backup_age` | Latest dump older than `backup.max_age_alert` | The newest complete set on the read-only mount of the `backups` volume. A set is complete when its manifest exists (7.7). An unreadable directory is an error, not "no set" (ADR-0060 (f)). It makes the condition active, also during the start grace. The job writes one `WARN` line of the `BackupFault` (ADR-0073 (c)). A scan that waits longer than `health.disk_check_interval` is also `BackupFault::Unreadable` (ADR-0151 (o)) |
+| `restore_test` | The result is `failed`. The result is `passed` and older than `restore_test.max_age_alert`. The file is missing after the start grace. The file cannot be read or parsed (ADR-0151 (i)) | The file `/backups/restore-test.result`, written by `restore-test` (ADR-0151 (a)). A read fault makes the condition active, also during the start grace. The job writes one `WARN` line of the fault (ADR-0151 (j1)) |
+| `base_backup` | The result is `failed`. The result is `passed` and older than `basebackup.max_age_alert`. The file is missing after the start grace. The file cannot be read or parsed (ADR-0151 (i)) | The file `/wal/base-backup.result`, written by `basebackup-once` (ADR-0151 (a)). A read fault makes the condition active, also during the start grace. The job writes one `WARN` line of the fault (ADR-0151 (j1)) |
 | `replication` | `recipe_replicator` not connected, or its lag `pg_current_wal_lsn() - sent_lsn` at or above `wal.max_lag_bytes`. A row without `sent_lsn` gives no lag, and the condition is active too (ADR-0090 (a)) | The row of `recipe_replicator` with `application_name = 'walarchive'` in `pg_stat_replication`. `recipe_app` reads it through the function `replication_state()` of `data-model.md` 5.5 (ADR-0068 (p), ADR-0069 (j)) |
 | `low_disk` | Free disk below `disk.warn_percent` on `pgdata`, `backups`, or `walarchive` | `statvfs` on the read-only mounts. A `DiskFault::Unreadable` on a mount makes the condition active for that volume, and the job writes one `WARN` line of the fault. `DiskFault::Unsupported` keeps the condition inactive (ADR-0073 (e), (f)). A measurement that waits longer than `health.disk_check_interval` is also `DiskFault::Unreadable` (ADR-0133 (a), (b)) |
 | `failed_logins` | More than `alerts.failed_login_count` failed logins in `alerts.failed_login_window` | Sum of `count` of the `login_failed` rows in `security_event` |
@@ -400,7 +402,9 @@ Webhook (ADR-0063):
 
 Start grace (ADR-0060 (x), (y)): the first start of the installation is the oldest `created_at` in `app_setting`. During `backup.max_age_alert` after the first start, a missing dump raises no alert. During `audit.max_check_age` after the first start, a missing `audit.last_check_at` raises no alert. A read fault of the backup directory raises the alert also during the grace (ADR-0073 (c)).
 
-Clock trust (ADR-0093 (a)): a stored time later than `database_now` of the snapshot by more than `alerts.interval` is untrusted, and its condition stays active.
+Start grace of the result files: during `restore_test.max_age_alert` after the first start, a missing `/backups/restore-test.result` raises no alert (ADR-0151 (i), (l)). During `basebackup.max_age_alert` after the first start, a missing `/wal/base-backup.result` raises no alert (ADR-0151 (i), (l)). A read fault of a result file raises its alert also during the grace (ADR-0151 (j1)).
+
+Clock trust (ADR-0093 (a)): a stored time later than `database_now` of the snapshot by more than `alerts.interval` is untrusted, and its condition stays active. For the two result files, the comparison time is `database_now` plus the monotonic time from the snapshot to the end of the read (ADR-0151 (j2)). A result time later than that comparison time by more than `alerts.interval` is untrusted, and its condition stays active (ADR-0151 (j2a)).
 
 A restart loop of `app` also ends this job. Docker marks the container unhealthy. The runbook names `docker compose ps` and the host monitoring as the check for a restart loop.
 
@@ -683,7 +687,16 @@ Dump (ADR-0066 (e) to (l), ADR-0074 (b), (c)):
 
 Rules of every script of `recipe-pgtools` (ADR-0066 (m) to (o)):
 
-- `umask 077` is the first command. Files get `0600`, and directories get `0700`. Only the top directory of `backups` gets `0755`, so uid 65532 in `app` can list the names. The top directory of `walarchive` stays `0700`.
+- `umask 077` is the first command. Files get `0600`, and directories get `0700`. Only the top directory of `backups` gets `0755`, so uid 65532 in `app` can list the names.
+- The result file of a script is the one file with the mode `0644` (ADR-0151 (g)). Its name matches no set grammar, no base backup grammar, and no WAL segment name (ADR-0151 (d)). The retention and `pg_archivecleanup` therefore ignore it.
+- The top directory of `walarchive` gets the mode `0711` (ADR-0151 (k)). Uid 65532 in `app` can open a file by its name, but it cannot list the names. `walarchive-entry` sets this mode at each start, after the check of the marker file (ADR-0151 (k1)).
+- A script writes one result file (ADR-0151 (a), (b)). The file holds one JSON line with the keys `result` and `finished_at`. `result` is `passed` or `failed`.
+- `finished_at` is the end time in UTC, in the form `YYYY-MM-DDTHH:MM:SSZ` (ADR-0151 (b1)). The form has no fraction of a second and no offset.
+- The file holds no path and no secret. It holds at most `check_result.max_bytes` bytes (ADR-0151 (c)).
+- A run writes its result file only while it holds its lock. A run without the marker file or without its lock writes no result file (ADR-0151 (e)).
+- The exit trap writes the result file last, after the cleanup of the run. Exit code 0 gives `passed`. Every other exit code gives `failed`. A run that the kernel kills writes no file (ADR-0151 (f)).
+- Each script sets its own traps for `TERM`, `INT`, and `HUP`. They exit with the codes 143, 130, and 129, so a signal never gives the exit trap the status 0 (ADR-0151 (f1)).
+- A script writes the temp name `.tmp-<final name>` in the same directory and sets the mode `0644`. It then renames the temp file to the final name. The rename replaces the old result file (ADR-0151 (g)).
 - A script writes one JSON object per line to stdout.
 - A script escapes `\` and `:` in the pgpass file. It keeps each password out of the argument list and out of shell variables. No script enables `xtrace`.
 
@@ -695,6 +708,7 @@ WAL archive (ADR-0068, ADR-0077):
 - `basebackup-once` runs at `basebackup.time`. It runs `pg_basebackup --wal-method=fetch -Fp --checkpoint=fast --manifest-checksums=SHA256`, and then `pg_verifybackup` checks the new base backup.
 - After a passed check, the script keeps the newest `basebackup.retention` base backups. Then `pg_archivecleanup` deletes the WAL segments before the lowest start segment of all kept base backups (ADR-0077 (f)).
 - The start segment comes from the line `START WAL LOCATION` of the `backup_label`. The comparison uses the 16 hex characters after the timeline, as `pg_archivecleanup` does. A failed `pg_verifybackup` deletes no base backup and no WAL segment.
+- `basebackup-once` writes its result to `/wal/base-backup.result` (ADR-0151 (a)). The job `alerts` reads that file for the condition `base_backup` (ADR-0151 (h)).
 - Layout of the WAL archive disk (ADR-0077 (d)). The WAL segments lie at the top of `/wal`. Each base backup is the directory `/wal/base/base_<YYYYMMDD_HHMMSS>`.
 - A reader finds a base backup only by the anchored grammar `^base_[0-9]{8}_[0-9]{6}$` of the whole name, with `LC_ALL=C`. A link or a file with this name is not a base backup.
 - A run of `basebackup-once` writes the base backup first under the temp name `.tmp-base_<YYYYMMDD_HHMMSS>` and renames it after the check. The marker file, the lock file `/wal/.lock`, and the directory `/wal/.pitr-scratch` always stay.
@@ -711,6 +725,7 @@ WAL archive (ADR-0068, ADR-0077):
 Copies and restore:
 - The latest dump and the WAL archive are copied to the external backup storage by a site procedure (ADR-0020). The dump contains password hashes and the audit log. The site procedure MUST protect the copies with the same access control as the database.
 - A restore test runs each week at `restore_test.time`, before each release, and in steps 5 and 6 of 7.10 (ADR-0067, ADR-0083). The service `backup` runs `restore-test` through supercronic. Before a release, step 3 of 7.10 runs `restore-test` in a new container of the previous image (ADR-0105 (g)).
+- `restore-test` writes its result to `/backups/restore-test.result` (ADR-0151 (a)). The job `alerts` reads that file for the condition `restore_test` (ADR-0151 (h)).
 - The image `recipe-pgtools` holds the `restore-code.expected` of its release. `backup` and `walarchive` therefore run the image of the release whose migrations the schema of `db` holds (ADR-0083 (a)).
 - After a rollback with the expand pattern, `app` runs the previous image, and `backup` and `walarchive` keep the new image (ADR-0083 (c)).
 - The script uses a private scratch cluster on the backup disk. It runs `initdb` with the arguments of 7.1 and with `--auth-local=peer --auth-host=scram-sha-256`. The scratch server listens on `127.0.0.1` only and uses the `scratch.*` settings of 7.11.
@@ -752,9 +767,10 @@ WAL line after a switch (ADR-0103 (r) to (v)):
 - Every switch starts a new WAL line before `app` starts. The rule also covers a switch back after the move of the old segments (ADR-0103 (g)).
 - The operator moves the old segments, the `.partial` file, and every base backup of `/wal/base` into a target directory of ADR-0099 (c). It also moves `/wal/.system-identifier`. The file `old-system-identifier` there keeps the system identifier of the old cluster.
 - The move also takes each timeline history file `^[0-9A-F]{8}\.history$` at the top of `/wal`. The file `old-system-identifier` also keeps the timeline of the old cluster (ADR-0106 (k)).
+- The move also takes `/wal/base-backup.result`, because the result describes the base backups of the old cluster (ADR-0151 (q)). The move deletes nothing, so a killed first base backup of the new line gives a missing file, not an old `passed` result (ADR-0151 (q1)).
 - `walarchive-entry` and `basebackup-once` read `/wal/.system-identifier`. When the file is missing and no segment exists, they write the identifier of `IDENTIFY_SYSTEM` into it. When the file is missing and a segment exists, they refuse to start. They also refuse to start when the file holds another identifier (ADR-0103 (s)).
 - They also refuse to start when a segment at the top of `/wal` has a timeline other than the timeline of `IDENTIFY_SYSTEM` (ADR-0106 (m)).
-- In a gap of the WAL stream (ADR-0099 (a)), `/wal/.system-identifier` and the history files stay in `/wal`. The cluster does not change in a gap, so its identifier stays the same (ADR-0105 (o), ADR-0106 (k)).
+- In a gap of the WAL stream (ADR-0099 (a)), `/wal/.system-identifier`, the history files, and `/wal/base-backup.result` stay in `/wal` (ADR-0151 (q2)). The cluster does not change in a gap, so its identifier stays the same (ADR-0105 (o), ADR-0106 (k)).
 - An existing installation has segments and no file. It writes the file once, before `walarchive` first starts with the image of the first release with the guard. Step 2 of 7.10 gives this step. It runs before the replacement of `db` (ADR-0104 (a), ADR-0105 (n)).
 - Then the operator starts `walarchive`. The operator runs the stream check, the base backup, the segment switch, the flush check, and the WAL check of ADR-0099 (a).
 - The operator deletes the old `pgdata` volume and that target directory only after three conditions. A `restore-test` passed on a set of the new cluster. The flush check and the WAL check of ADR-0099 (a) passed on the new WAL line.
@@ -880,12 +896,14 @@ Disk space policy (Assumption A24):
    5. A query computes the SHA-256 of `pg_get_functiondef` of the function, with `search_path = pg_catalog`. It must equal field 4 of the line `FUNCTION|audit_guard audit_objects_dropped()` of the new `deploy/pgtools/restore-code.expected`. No `backup-now` runs before the hash matches. The release notes name commands 4 and 5 as a "manual superuser step".
    - A failure of command 4 or 5 leaves the new schema and the old guard. The operator runs commands 4 and 5 again (`docs/ops/runbook.md`, section "Upgrade").
 4. `docker compose up -d --no-deps app`. Docker replaces the container. Compose starts no one-shot service again, because step 3 ran them (ADR-0082 (a)). Downtime is the graceful shutdown window plus startup, under 60 s.
-5. Check `/readyz` on the internal listener, log in, open one recipe, export one version and check its hash. Then run these three commands while the new `app` serves (ADR-0083 (b)):
+5. Check `/readyz` on the internal listener, log in, open one recipe, export one version and check its hash. Then run these four commands while the new `app` serves (ADR-0083 (b), ADR-0151 (m)):
    1. `docker compose up -d --no-deps backup walarchive`. Both services get the new `recipe-pgtools` image.
    2. `docker compose exec backup backup-now`. The new `_now` set holds the new schema.
    3. `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
+   4. `docker compose exec walarchive basebackup-once`. Check that the run writes `passed` to `/wal/base-backup.result`.
    - If the test names a `_premigrate` set of the same UTC minute, run commands 2 and 3 again in a later minute.
    - In the first release with the guard of 7.7, the new `walarchive` of command 1 needs the file of step 2. Without the file, it refuses to start (ADR-0104 (a)).
+   - In the first upgrade to a release with ADR-0151, the alerts `restore_test` and `base_backup` can be active. This holds from step 4 until step 5 ends (ADR-0151 (n)).
 6. Rollback: `RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app`. Without `--no-deps`, the previous `migrate` runs against the newer schema and fails, and `app` does not start (ADR-0082 (b)). `deploy/.env` keeps the new tag, because the schema stays newer (ADR-0083 (c)).
    - If the migration did not follow the expand pattern, restore the `_premigrate` dump into a new volume in the order of 7.7, "Restore into production". Set the previous tag in `deploy/.env` before `restore-volume` runs (ADR-0103 (b), (q)).
    - If `restore-volume` or a check fails before the switch sets the new name, set the new tag in `deploy/.env` again. Then start `app` and `backup`. The old volume holds the newer schema (ADR-0105 (c)).
@@ -1023,7 +1041,10 @@ This table is the single source for every numeric setting. A key of the first co
 | `backup.time` / `backup.retention` | 02:00 UTC / 30 days. The retention covers every set (ADR-0066 (k)) | 7.7 |
 | `backup.max_age_alert` | 26 h | 3.7, 7.1, 7.7 |
 | `restore_test.time` | Sunday 05:00 UTC (ADR-0067 (a)) | 7.7 |
+| `restore_test.max_age_alert` | 8 days. A weekly check needs a limit above 7 days (ADR-0151 (j)) | 3.7, 7.7 |
 | `basebackup.time` / `basebackup.retention` | Sunday 03:30 UTC / 4 base backups (ADR-0068 (f), (i)) | 7.7 |
+| `basebackup.max_age_alert` | 8 days. A weekly check needs a limit above 7 days (ADR-0151 (j)) | 3.7, 7.7 |
+| `check_result.max_bytes` | 256 bytes. The largest size of a result file that the job reads (ADR-0151 (c)) | 3.7, 7.7 |
 | `scratch.shared_buffers` / `scratch.maintenance_work_mem` / `scratch.max_connections` | 64 MB / 64 MB / 10. The scratch clusters of `restore-test` and `pitr-check`, and the temporary servers of `restore-volume` and `pitr-volume` (ADR-0067 (e), ADR-0103 (j), ADR-0106 (f)) | 7.7 |
 | `scratch.max_parallel_workers_per_gather` / `scratch.max_parallel_maintenance_workers` | 0 / 0. The scratch clusters of `restore-test` and `pitr-check`, and the temporary servers of `restore-volume` and `pitr-volume` (ADR-0067 (e), ADR-0103 (j), ADR-0106 (f)) | 7.7 |
 | `scratch.restore_fsync` / `scratch.restore_wal_level` / `scratch.restore_max_wal_senders` | `off` / `minimal` / 0, for the cluster of `restore-test` only (ADR-0067 (f)) | 7.7 |
@@ -1109,7 +1130,7 @@ A change of `approval.separation_of_duties` therefore always has an audit entry 
   - the flag `gate_open` of the health router (`AtomicBool`). The start of `serve` opens it once, after the public listener is bound. No code closes it (ADR-0091 (e)),
   - the cancel tokens of the supervisor of the jobs and the flags of the watchdog handle (`arm`, `disarm`, `stop`),
   - the open-run counter of the supervisor of the jobs (`Arc<AtomicUsize>`, field `open`). A guard in the task of each run adds one when the run starts. It subtracts one when the run ends or panics, or when the drain aborts it. Many tasks write it, so it is atomic. The guard uses `AcqRel`. `drain` reads it once with `Acquire`, before `abort_all`. That value is the number of runs that the drain cut (ADR-0060 (aa)),
-  - the map of stalled paths of the disk adapter in `recipe-server`, as an `Arc<parking_lot::Mutex<HashMap<PathBuf, usize>>>`. The value is the number of marks on the path. The jobs `disk_check` and `alerts` share the adapter. A call that reaches the time limit adds one mark on its path. A call takes away only its own mark when its blocking task ends. The path stays stalled until the last mark goes (ADR-0133 (c), (e), (f)),
+  - the maps of stalled paths in `recipe-server`, one for each of the three adapters that call `read_with_limit`: `SystemDiskSpace`, `FileBackupDirectory`, and `FileCheckResults`. The type `StalledPaths` of `limited_read.rs` is `Arc<parking_lot::Mutex<HashMap<PathBuf, usize>>>`. Each adapter owns one map. The free function `read_with_limit` of that file takes the map and the time limit (ADR-0151 (o), (p)). The value is the number of marks on the path. The jobs `disk_check` and `alerts` share `SystemDiskSpace`. A call that reaches the time limit adds one mark on its path. A call takes away only its own mark when its blocking task ends. The path stays stalled until the last mark goes (ADR-0133 (c), (e), (f)),
   - the run state of a job between runs, as atomics in the job (ADR-0060 (aa)). It holds the start of the last security event purge of `cleanup` and the due times of its two other cadences (ADR-0088 (c)). It also holds the time of the last low-disk `WARN` line of `disk_check`, the time of its last read-fault `WARN` line, and its `Unsupported` flag (ADR-0073 (d)). For `alerts`, it holds the two counter totals of the last run and the times of the newest panics in `alerts.panic_count` + 1 slots (ADR-0073 (g)).
 - Every public type and function in a library crate has a doc comment. `cargo doc --no-deps` runs in CI with `-D warnings` for broken links.
 - A pull request needs: green CI, one review, and an entry in `CHANGELOG.md` when behavior changes.

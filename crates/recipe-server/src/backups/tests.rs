@@ -4,15 +4,18 @@
 //! a set is the modification time of its manifest, so a test sets that time to whole seconds.
 
 use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use parking_lot::{Condvar, Mutex};
 use recipe_app::ports::{BackupDirectory, BackupFault};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 
-use super::{FileBackupDirectory, is_manifest_name};
+use super::{FileBackupDirectory, Reader, is_manifest_name};
 
 static NEXT_NUMBER: AtomicU32 = AtomicU32::new(0);
 
@@ -31,7 +34,7 @@ impl Sandbox {
     }
 
     fn adapter(&self) -> FileBackupDirectory {
-        FileBackupDirectory::new(&self.0)
+        FileBackupDirectory::new(&self.0, LONG_LIMIT)
     }
 
     /// Create an empty file with the modification time `seconds` after the Unix epoch.
@@ -209,7 +212,7 @@ async fn a_missing_directory_is_a_fault_and_not_an_empty_answer() {
     let sandbox = Sandbox::new();
     let missing = sandbox.0.join("absent");
 
-    let fault = FileBackupDirectory::new(&missing)
+    let fault = FileBackupDirectory::new(&missing, LONG_LIMIT)
         .newest_complete_set()
         .await
         .unwrap_err();
@@ -222,7 +225,7 @@ async fn a_file_in_place_of_the_directory_is_a_fault() {
     let sandbox = Sandbox::new();
     sandbox.file_at("not-a-directory", 1_000_000);
 
-    let fault = FileBackupDirectory::new(sandbox.0.join("not-a-directory"))
+    let fault = FileBackupDirectory::new(sandbox.0.join("not-a-directory"), LONG_LIMIT)
         .newest_complete_set()
         .await
         .unwrap_err();
@@ -258,10 +261,11 @@ fn the_fault_text_names_no_path() {
     let missing: &Path = &sandbox.0.join("secret-directory-name");
 
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
         .build()
         .unwrap();
     let fault = runtime
-        .block_on(FileBackupDirectory::new(missing).newest_complete_set())
+        .block_on(FileBackupDirectory::new(missing, LONG_LIMIT).newest_complete_set())
         .unwrap_err();
 
     // The `Display` text is a fixed sentence. The `Debug` text shows the wrapped error.
@@ -321,4 +325,117 @@ fn the_time_of_a_set_keeps_the_nanoseconds_of_the_file_system() {
 
     let expected = OffsetDateTime::from_unix_timestamp_nanos(1_000_000_500_000_000).unwrap();
     assert_eq!(converted, Timestamp::from(expected));
+}
+
+// Tests of the time limit of the scan (ADR-0151 (o), design D10). The hook `with_reader`
+// gives the adapter a reader that blocks, as `SystemDiskSpace::with_reader` does.
+
+/// A limit that no test call reaches.
+const LONG_LIMIT: Duration = Duration::from_secs(30);
+/// A real limit of some milliseconds for the tests of a stalled reader.
+const SHORT_LIMIT: Duration = Duration::from_millis(50);
+/// The time between two checks of a background condition.
+const POLL_STEP: Duration = Duration::from_millis(5);
+/// The number of checks of a background condition: a wait of about ten seconds.
+const POLL_ATTEMPTS: u32 = 2000;
+
+/// A reader that counts its starts and blocks until the test opens the gate.
+struct Probe {
+    starts: AtomicUsize,
+    open: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl Probe {
+    fn blocked() -> Arc<Self> {
+        Arc::new(Self {
+            starts: AtomicUsize::new(0),
+            open: Mutex::new(false),
+            changed: Condvar::new(),
+        })
+    }
+
+    /// Let every blocked and every later reader end.
+    fn release(&self) {
+        *self.open.lock() = true;
+        self.changed.notify_all();
+    }
+
+    fn starts(&self) -> usize {
+        self.starts.load(Ordering::SeqCst)
+    }
+
+    fn read(&self) -> io::Result<Option<Timestamp>> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let mut open = self.open.lock();
+        while !*open {
+            self.changed.wait(&mut open);
+        }
+        Ok(Some(timestamp(1_000_000)))
+    }
+
+    fn adapter(self: &Arc<Self>, limit: Duration) -> FileBackupDirectory {
+        let probe = Arc::clone(self);
+        let reader: Reader = Arc::new(move |_path| probe.read());
+        FileBackupDirectory::with_reader(PathBuf::from("backups"), limit, reader)
+    }
+}
+
+fn is_timed_out(fault: &BackupFault) -> bool {
+    matches!(fault, BackupFault::Unreadable(cause) if cause.kind() == io::ErrorKind::TimedOut)
+}
+
+#[tokio::test]
+async fn a_reader_that_blocks_gives_unreadable_after_the_limit() {
+    let probe = Probe::blocked();
+    let backups = probe.adapter(SHORT_LIMIT);
+
+    let fault = backups.newest_complete_set().await.unwrap_err();
+    probe.release();
+
+    assert!(is_timed_out(&fault), "got {fault:?}");
+    assert_eq!(probe.starts(), 1);
+}
+
+#[tokio::test]
+async fn a_call_while_the_blocked_scan_runs_gives_unreadable_at_once_and_starts_no_reader() {
+    let probe = Probe::blocked();
+    let backups = probe.adapter(SHORT_LIMIT);
+    let first = backups.newest_complete_set().await.unwrap_err();
+    assert!(is_timed_out(&first), "got {first:?}");
+
+    let started = tokio::time::Instant::now();
+    let second = backups.newest_complete_set().await.unwrap_err();
+    let waited = started.elapsed();
+    probe.release();
+
+    assert!(
+        matches!(second, BackupFault::Unreadable(_)),
+        "got {second:?}"
+    );
+    assert!(waited < SHORT_LIMIT, "the second call waited {waited:?}");
+    assert_eq!(probe.starts(), 1, "the second call started a reader");
+}
+
+#[tokio::test]
+async fn a_call_after_the_end_of_the_blocked_scan_runs_the_reader_again() {
+    let probe = Probe::blocked();
+    let backups = probe.adapter(SHORT_LIMIT);
+    let first = backups.newest_complete_set().await.unwrap_err();
+    assert!(is_timed_out(&first), "got {first:?}");
+
+    probe.release();
+    // The mark of the ended reader clears a moment after the reader ends. Until then, a call
+    // gives `Unreadable` and starts no reader. The first call that succeeds is the new run.
+    let mut second = backups.newest_complete_set().await;
+    for _ in 0..POLL_ATTEMPTS {
+        if second.is_ok() {
+            break;
+        }
+        tokio::time::sleep(POLL_STEP).await;
+        second = backups.newest_complete_set().await;
+    }
+
+    assert_eq!(second.unwrap(), Some(timestamp(1_000_000)));
+    assert_eq!(probe.starts(), 2);
 }

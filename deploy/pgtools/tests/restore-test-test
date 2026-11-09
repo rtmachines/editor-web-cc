@@ -62,6 +62,8 @@ source "$HERE/lib/helpers.sh" || exit 1
 source "$HERE/lib/restore-stubs.sh" || exit 1
 # shellcheck source=lib/restore-helpers.sh
 source "$HERE/lib/restore-helpers.sh" || exit 1
+# shellcheck source=lib/restore-result-cases.sh
+source "$HERE/lib/restore-result-cases.sh" || exit 1
 # shellcheck source=lib/restore-set-cases.sh
 source "$HERE/lib/restore-set-cases.sh" || exit 1
 # shellcheck source=lib/restore-code-cases.sh
@@ -129,6 +131,14 @@ case_restore_stale_scratch
 case_restore_stale_pid_of_another_process
 case_restore_stale_pid_not_a_process
 case_restore_signal
+case_restore_result_passed
+case_restore_result_counts_failed
+case_restore_result_term
+case_restore_result_replaces_failed
+case_restore_result_missing_marker
+case_restore_result_lock_held
+case_restore_result_write_fails
+case_restore_result_image_library
 
 [ "$SKIPPED" -eq 0 ] || printf 'restore-test-test: %d skipped\n' "$SKIPPED"
 printf 'restore-test-test: %d passed, %d failed\n' "$PASSED" "$FAILED"

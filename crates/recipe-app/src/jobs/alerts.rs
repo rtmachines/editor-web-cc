@@ -1,4 +1,4 @@
-//! Job `alerts`: test the ten alert conditions and call the webhook (design D6).
+//! Job `alerts`: test the twelve alert conditions and call the webhook (design D6).
 //!
 //! Purpose: tell the operator about a fault that needs action.
 //!
@@ -16,6 +16,10 @@
 //! clock (`reliability.md` section 7.9). A stored time later than that time by at most
 //! `alerts.interval` has the age zero. A stored time later by more than `alerts.interval` is
 //! untrusted, and its condition stays active (ADR-0093 (a)).
+//!
+//! The two conditions `restore_test` and `base_backup` read a result file. Such a read can last
+//! for seconds, and a script can write the file meanwhile. These two tests therefore compare with
+//! the database time plus the time since the snapshot (ADR-0151 (j2), (j2a)).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -25,13 +29,14 @@ use std::time::Duration;
 
 use recipe_domain::audit::RequestId;
 use recipe_domain::timestamp::Timestamp;
+use tokio::time::Instant;
 
 use super::RunKind;
 use crate::error::AppError;
 use crate::operations::{AlertCounters, ReadinessState};
 use crate::ports::{
-    AlertCondition, AlertWebhook, BackupDirectory, DiskFault, DiskSpace, FreeSpace,
-    OperationsReads, OperationsSnapshot, SnapshotWindows,
+    AlertCondition, AlertWebhook, BackupDirectory, CheckOutcome, CheckResults, DiskFault,
+    DiskSpace, FreeSpace, OperationsReads, OperationsSnapshot, ScheduledCheck, SnapshotWindows,
 };
 
 /// Value of a slot before its first panic. No instant has this value.
@@ -54,6 +59,8 @@ const DEFAULT_FAILED_LOGIN_COUNT: u64 = 50;
 const DEFAULT_SECURITY_WINDOW_SECONDS: u64 = 15 * 60;
 /// Default of `backup.max_age_alert` and `audit.max_check_age` in seconds: 26 hours.
 const DEFAULT_MAX_AGE_SECONDS: u64 = 26 * 60 * 60;
+/// Default of `restore_test.max_age_alert` and `basebackup.max_age_alert` in seconds: 8 days.
+const DEFAULT_CHECK_MAX_AGE_SECONDS: u64 = 8 * 24 * 60 * 60;
 /// Default of `wal.max_lag_bytes`: 16 MiB.
 const DEFAULT_WAL_MAX_LAG_BYTES: u64 = 16 * 1024 * 1024;
 /// Default of `disk.warn_percent`.
@@ -86,6 +93,12 @@ pub struct AlertSettings {
     pub backup_max_age_alert: Duration,
     /// The age of the audit check above which `audit_check_age` is active (`audit.max_check_age`).
     pub audit_max_check_age: Duration,
+    /// The age of the restore test result above which `restore_test` is active
+    /// (`restore_test.max_age_alert`). Also the start grace of the condition.
+    pub restore_test_max_age_alert: Duration,
+    /// The age of the base backup result above which `base_backup` is active
+    /// (`basebackup.max_age_alert`). Also the start grace of the condition.
+    pub basebackup_max_age_alert: Duration,
     /// The lag at or above which `replication` is active (`wal.max_lag_bytes`).
     pub wal_max_lag_bytes: u64,
     /// The free percent below which `low_disk` is active (`disk.warn_percent`).
@@ -105,6 +118,8 @@ impl Default for AlertSettings {
             security_window: Duration::from_secs(DEFAULT_SECURITY_WINDOW_SECONDS),
             backup_max_age_alert: Duration::from_secs(DEFAULT_MAX_AGE_SECONDS),
             audit_max_check_age: Duration::from_secs(DEFAULT_MAX_AGE_SECONDS),
+            restore_test_max_age_alert: Duration::from_secs(DEFAULT_CHECK_MAX_AGE_SECONDS),
+            basebackup_max_age_alert: Duration::from_secs(DEFAULT_CHECK_MAX_AGE_SECONDS),
             wal_max_lag_bytes: DEFAULT_WAL_MAX_LAG_BYTES,
             disk_warn_percent: DEFAULT_DISK_WARN_PERCENT,
         }
@@ -114,7 +129,7 @@ impl Default for AlertSettings {
 /// The ports that the job calls.
 ///
 /// The type solves one problem: the constructor of the job would need too many arguments
-/// without a group. The four ports have one owner, the server wiring.
+/// without a group. The five ports have one owner, the server wiring.
 pub struct AlertPorts {
     /// The port that reads the database snapshot of one run.
     pub operations: Arc<dyn OperationsReads>,
@@ -124,6 +139,8 @@ pub struct AlertPorts {
     pub disk: Arc<dyn DiskSpace>,
     /// The port that reads the newest complete backup set.
     pub backups: Arc<dyn BackupDirectory>,
+    /// The port that reads the newest result of each weekly check.
+    pub checks: Arc<dyn CheckResults>,
 }
 
 /// The in-process sources of the job.
@@ -205,6 +222,25 @@ impl Moment {
             return Some(elapsed);
         }
         (elapsed.checked_neg()? <= self.skew_nanos).then_some(0)
+    }
+
+    /// Return the moment `elapsed` later than this one, with the same skew.
+    ///
+    /// A sum beyond the range keeps this moment, so a bad sum never hides a condition.
+    fn after(self, elapsed: Duration) -> Self {
+        let added = duration_nanos(elapsed);
+        let extra_seconds = i64::try_from(elapsed.as_secs()).ok();
+        match (
+            self.now_nanos.checked_add(added),
+            extra_seconds.and_then(|extra| self.now.checked_add(extra)),
+        ) {
+            (Some(now_nanos), Some(now)) => Self {
+                now,
+                now_nanos,
+                ..self
+            },
+            _ => self,
+        }
     }
 
     /// Return true when `then` is older than `window`. An untrusted time counts as older.
@@ -290,7 +326,7 @@ impl Alerts {
         }
     }
 
-    /// Test the ten conditions once and send the active ones to the webhook.
+    /// Test the twelve conditions once and send the active ones to the webhook.
     ///
     /// The run kind has no effect, because the job has one trigger. The run writes no row with the
     /// request id. A fault of the webhook, the disk, or the backup directory is a handled fault:
@@ -303,13 +339,17 @@ impl Alerts {
     pub async fn run_once(&self, _request_id: RequestId, _kind: RunKind) -> Result<(), AppError> {
         let snapshot = self.ports.operations.snapshot(&self.windows()).await?;
         let moment = Moment::new(snapshot.database_now, self.settings.interval);
+        let started = Instant::now();
         let totals = Totals {
             panics: self.sources.counters.panics(),
             export_hash_mismatches: self.sources.counters.export_hash_mismatches(),
         };
         let mut active = Vec::new();
         for condition in AlertCondition::ALL {
-            if self.test(condition, &snapshot, moment, totals).await {
+            if self
+                .test(condition, &snapshot, (moment, started), totals)
+                .await
+            {
                 active.push(condition);
             }
         }
@@ -331,12 +371,25 @@ impl Alerts {
         &self,
         condition: AlertCondition,
         snapshot: &OperationsSnapshot,
-        moment: Moment,
+        (moment, started): (Moment, Instant),
         totals: Totals,
     ) -> bool {
+        let settings = &self.settings;
         let active = match condition {
             AlertCondition::LowDisk => return self.low_disk().await,
             AlertCondition::BackupAge => self.backup_age(snapshot, moment).await,
+            AlertCondition::RestoreTest => {
+                let check = ScheduledCheck::RestoreTest;
+                let limit = settings.restore_test_max_age_alert;
+                self.check_result(check, limit, snapshot, (moment, started))
+                    .await
+            }
+            AlertCondition::BaseBackup => {
+                let check = ScheduledCheck::BaseBackup;
+                let limit = settings.basebackup_max_age_alert;
+                self.check_result(check, limit, snapshot, (moment, started))
+                    .await
+            }
             _ => self.test_snapshot(condition, snapshot, moment, totals),
         };
         if active {
@@ -383,7 +436,10 @@ impl Alerts {
                     &self.state.export_hash_mismatches,
                 ) > 0
             }
-            AlertCondition::BackupAge | AlertCondition::LowDisk => false,
+            AlertCondition::BackupAge
+            | AlertCondition::RestoreTest
+            | AlertCondition::BaseBackup
+            | AlertCondition::LowDisk => false,
         }
     }
 
@@ -446,6 +502,34 @@ impl Alerts {
             }
             Ok(Some(newest)) => moment.older_than(newest, window),
             Ok(None) => !moment.in_grace(snapshot.first_setting_at, window),
+        }
+    }
+
+    /// Read the newest result of `check` and return true when its condition is active.
+    ///
+    /// A read fault makes the condition active also during the start grace (ADR-0151 (j1)). A
+    /// `failed` result is active. A `passed` result is active when it is older than `limit`. A
+    /// missing result is active after the start grace of `limit`. The comparison moment is the
+    /// database time plus the time since `started`, taken after the read (ADR-0151 (j2)).
+    async fn check_result(
+        &self,
+        check: ScheduledCheck,
+        limit: Duration,
+        snapshot: &OperationsSnapshot,
+        (moment, started): (Moment, Instant),
+    ) -> bool {
+        let read = self.ports.checks.newest(check).await;
+        let at = moment.after(started.elapsed());
+        match read {
+            Err(fault) => {
+                tracing::warn!("{fault}");
+                true
+            }
+            Ok(Some(result)) => match result.outcome {
+                CheckOutcome::Failed => true,
+                CheckOutcome::Passed => at.older_than(result.finished_at, limit),
+            },
+            Ok(None) => !at.in_grace(snapshot.first_setting_at, limit),
         }
     }
 

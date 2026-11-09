@@ -1,19 +1,24 @@
-//! Adapter of the port `BackupDirectory` (ADR-0074 (c)).
+//! Adapter of the port `BackupDirectory` (ADR-0074 (c), ADR-0151 (o)).
 //!
 //! The adapter finds a complete set only by its manifest. The anchored grammar of the whole
 //! file name decides which file is a manifest. A temp name such as `.tmp-recipe_...` never
 //! matches. The time of a set is the modification time of its manifest. The script
-//! `backup-health` reads the same time.
+//! `backup-health` reads the same time. The scan of the directory runs under the time limit of
+//! the module `limited_read`.
 
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use recipe_app::ports::{BackupDirectory, BackupFault};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
+
+use crate::limited_read::{StalledPaths, read_with_limit};
 
 /// The start of the name of a manifest.
 const MANIFEST_PREFIX: &str = "recipe_";
@@ -30,36 +35,69 @@ const DATE_DIGITS: usize = 8;
 /// The number of digits of the time `HHMM` in a name.
 const MINUTE_DIGITS: usize = 4;
 
+/// The function that scans one directory. A unit test gives a reader that blocks.
+type Reader = Arc<dyn Fn(&Path) -> io::Result<Option<Timestamp>> + Send + Sync>;
+
 /// The read-only mount of the `backups` volume.
 ///
 /// The type solves one problem: the job `alerts` must tell a directory without a complete set
 /// from a directory that it cannot read. The first case is normal on a new installation. The
-/// second case is a fault (ADR-0073 (c)).
-#[derive(Clone, Debug)]
+/// second case is a fault (ADR-0073 (c)). A stalled mount must not block the job, so the scan
+/// runs in a blocking task and the adapter waits at most `limit` for it (ADR-0151 (o)).
+#[derive(Clone)]
 pub struct FileBackupDirectory {
     /// The directory that holds the files of the sets.
     directory: PathBuf,
+    limit: Duration,
+    stalled: StalledPaths,
+    reader: Reader,
 }
 
 impl FileBackupDirectory {
     /// Build the adapter for `directory`. The call reads nothing.
+    ///
+    /// `limit` is the setting `health.disk_check_interval` (ADR-0151 (o)).
     #[must_use]
-    pub fn new(directory: impl Into<PathBuf>) -> Self {
+    pub fn new(directory: impl Into<PathBuf>, limit: Duration) -> Self {
+        Self::with_reader(directory.into(), limit, Arc::new(newest_manifest_time))
+    }
+
+    /// Build the adapter with another reader. The unit tests use it.
+    fn with_reader(directory: PathBuf, limit: Duration, reader: Reader) -> Self {
         Self {
-            directory: directory.into(),
+            directory,
+            limit,
+            stalled: StalledPaths::default(),
+            reader,
         }
+    }
+}
+
+impl fmt::Debug for FileBackupDirectory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("FileBackupDirectory")
+            .field("directory", &self.directory)
+            .field("limit", &self.limit)
+            .finish_non_exhaustive()
     }
 }
 
 #[async_trait]
 impl BackupDirectory for FileBackupDirectory {
     async fn newest_complete_set(&self) -> Result<Option<Timestamp>, BackupFault> {
-        let directory = self.directory.clone();
-        let scan = tokio::task::spawn_blocking(move || newest_manifest_time(&directory)).await;
+        let reader = Arc::clone(&self.reader);
+        let scan = read_with_limit(
+            self.limit,
+            &self.stalled,
+            self.directory.clone(),
+            move |directory| reader(directory),
+        )
+        .await;
         match scan {
             Ok(Ok(newest)) => Ok(newest),
             Ok(Err(fault)) => Err(BackupFault::Unreadable(fault)),
-            Err(join_fault) => Err(BackupFault::Unreadable(io::Error::other(join_fault))),
+            Err(fault) => Err(BackupFault::Unreadable(fault.into_io_error())),
         }
     }
 }

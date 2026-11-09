@@ -1,6 +1,6 @@
 # ADR-0066: Backup disks, file sets, and schedule
 
-Status: Accepted. Amended by ADR-0074 (names of the files on the backup disks)
+Status: Accepted. Amended by ADR-0074 (names of the files on the backup disks). Amended by ADR-0151 (item (m): the mode `0711` of `/wal`)
 Date: 2026-10-23
 Deciders: project owner
 

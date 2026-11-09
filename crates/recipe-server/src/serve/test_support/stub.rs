@@ -18,11 +18,12 @@ use axum::Router;
 use recipe_app::error::StorageError;
 use recipe_app::identity::{Argon2Params, BlockingHasher, PasswordHasher};
 use recipe_app::memory::{
-    DiskReading, MemoryAuditChain, MemoryBackupDirectory, MemoryClock, MemoryDiskSpace,
-    MemoryMaintenance, MemoryOperations, MemoryReadiness, MemoryStore, MemoryWebhook,
+    DiskReading, MemoryAuditChain, MemoryBackupDirectory, MemoryCheckResults, MemoryClock,
+    MemoryDiskSpace, MemoryMaintenance, MemoryOperations, MemoryReadiness, MemoryStore,
+    MemoryWebhook,
 };
 use recipe_app::ports::{
-    AlertWebhook, BackupDirectory, Clock, DiskFault, DiskSpace, FreeSpace, Isolation,
+    AlertWebhook, BackupDirectory, CheckResults, Clock, DiskFault, DiskSpace, FreeSpace, Isolation,
     MaintenanceStore, OperationsReads, OperationsSnapshot, RoleCheck, SnapshotWindows, StateValue,
     TimeStateKey, Transaction, UnitOfWork,
 };
@@ -494,6 +495,8 @@ pub(in crate::serve) struct StubHost {
     pub audit_chain: MemoryAuditChain,
     pub disk: MemoryDiskSpace,
     pub backups: MemoryBackupDirectory,
+    /// The result of each scheduled backup check. A test sets one with `set_result`.
+    pub check_results: MemoryCheckResults,
     pub webhook: MemoryWebhook,
     pub readiness: MemoryReadiness,
     pub fire: Fire,
@@ -545,6 +548,7 @@ impl StubHost {
             store,
             disk,
             backups: MemoryBackupDirectory::default(),
+            check_results: MemoryCheckResults::default(),
             webhook: MemoryWebhook::default(),
             readiness: MemoryReadiness::default(),
             fire: Fire::default(),
@@ -726,6 +730,10 @@ impl Host for StubHost {
 
     fn backups(&self, _directory: &Path) -> Arc<dyn BackupDirectory> {
         Arc::new(self.backups.clone())
+    }
+
+    fn check_results(&self, _backups: &Path, _walarchive: &Path) -> Arc<dyn CheckResults> {
+        Arc::new(self.check_results.clone())
     }
 
     async fn bind(&self, kind: ListenerKind, port: u16) -> io::Result<TcpListener> {

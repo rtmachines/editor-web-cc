@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # walarchive-entry: the entry of the container walarchive (design D9, D10, ADR-0068 (a) to (c)).
+# It sets mode 0711 on /wal so app can read /wal/base-backup.result (ADR-0151 (k1)).
 #
 # It refuses to start without the marker file of the WAL archive disk (ADR-0074 (a)). Then it
 # writes the pgpass file from the secret of recipe_replicator. The identifier guard checks that
@@ -135,6 +136,7 @@ esac
 if [ ! -f "$WAL_DIR/$MARKER_NAME" ] || [ -L "$WAL_DIR/$MARKER_NAME" ]; then
   fail "the marker file of the WAL archive disk is missing"
 fi
+chmod 0711 -- "$WAL_DIR"
 [ -r "$CRONTAB" ] || fail "the crontab file is missing"
 
 # Step 2: the pgpass file in the tmpfs.

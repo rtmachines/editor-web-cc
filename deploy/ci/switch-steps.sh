@@ -417,6 +417,7 @@ require_old_identity_file() {
 move_segments() {
   # ADR-0103 (s) step 4 and ADR-0099 (a) steps 5 to 7. Move the segments, the .partial file, and .system-identifier.
   # ADR-0106 (k). The move also takes each timeline history file.
+  # ADR-0151 (q). The move also takes the result of the old base backup.
   local listing history name paths=()
   listing=$(archive_segments) || fail "wal-line: cannot list the segment files."
   history=$(archive_history) || fail "wal-line: cannot list the history files."
@@ -425,6 +426,10 @@ move_segments() {
     [[ -z $name ]] || paths+=("$RECIPE_WALARCHIVE_DIR/$name")
   done <<<"$listing"$'\n'"$history"
   paths+=("$RECIPE_WALARCHIVE_DIR/.system-identifier")
+  if sudo test -e "$RECIPE_WALARCHIVE_DIR/base-backup.result"
+  then
+    paths+=("$RECIPE_WALARCHIVE_DIR/base-backup.result")
+  fi
   sudo mv -t "$WAL_TARGET" -- "${paths[@]}" || fail "wal-line: cannot move the segment files."
   [[ -z $(archive_segments) ]] || fail "wal-line: a segment file stays in the archive directory."
   [[ -z $(archive_history) ]] || fail "wal-line: a history file stays in the archive directory."

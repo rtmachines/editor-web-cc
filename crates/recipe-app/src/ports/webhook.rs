@@ -17,6 +17,12 @@ pub enum AlertCondition {
     NotReady,
     /// The newest dump is older than `backup.max_age_alert`.
     BackupAge,
+    /// The newest result of the restore test is `failed`, is missing after the start grace, is
+    /// older than `restore_test.max_age_alert`, or cannot be read (ADR-0151 (h)).
+    RestoreTest,
+    /// The newest result of the base backup is `failed`, is missing after the start grace, is
+    /// older than `basebackup.max_age_alert`, or cannot be read (ADR-0151 (h)).
+    BaseBackup,
     /// The WAL receiver is not connected, has no known lag, or has a lag at or above
     /// `wal.max_lag_bytes` (ADR-0090 (a)).
     Replication,
@@ -37,10 +43,12 @@ pub enum AlertCondition {
 
 impl AlertCondition {
     /// Every condition, in the order of the table in `reliability.md` section 3.7.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Panics,
         Self::NotReady,
         Self::BackupAge,
+        Self::RestoreTest,
+        Self::BaseBackup,
         Self::Replication,
         Self::LowDisk,
         Self::FailedLogins,
@@ -60,6 +68,8 @@ impl AlertCondition {
             Self::Panics => "panics",
             Self::NotReady => "not_ready",
             Self::BackupAge => "backup_age",
+            Self::RestoreTest => "restore_test",
+            Self::BaseBackup => "base_backup",
             Self::Replication => "replication",
             Self::LowDisk => "low_disk",
             Self::FailedLogins => "failed_logins",

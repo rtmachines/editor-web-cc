@@ -3,6 +3,19 @@
 
 BASE_RE='^base_[0-9]{8}_[0-9]{6}$'
 
+# base_result_checks <label> <result>: check the result separately from wal_listing (ADR-0151).
+base_result_checks() {
+  local label=$1 result=$2 file=$W/base-backup.result
+  expect_ok "$label: result file exists" test -f "$file" -a ! -L "$file"
+  expect_no "$label: no temp result stays" test -e "$W/.tmp-base-backup.result"
+  [ -f "$file" ] || return 0
+  expect_eq "$label: result mode is 644" "$(stat -c %a -- "$file")" 644
+  expect_eq "$label: result has one newline" "$(wc -l <"$file")" 1
+  expect_eq "$label: result has one line" "$(grep -c '^' "$file")" 1
+  expect_ok "$label: result and UTC time match the format" \
+    grep -qxE "\{\"result\":\"$result\",\"finished_at\":\"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z\"\}" "$file"
+}
+
 static_base_rules() {
   local f=$BIN/basebackup-once o
   for o in '--wal-method=fetch' '-Fp' '--checkpoint=fast' '--manifest-checksums=SHA256' \
@@ -30,6 +43,7 @@ base_expect_unchanged() {
   expect_eq "$1: one ERROR line" "$(error_count "$CASE/out")" "1"
   expect_ok "$1: JSON lines" json_lines_ok "$CASE/out"
   expect_eq "$1: the archive is unchanged" "$(wal_listing)" "$2"
+  base_result_checks "$1" failed
   expect_eq "$1: the base backups are unchanged" "$(base_tree)" "$3"
   expect_eq "$1: no archivecleanup" "$(count_events 'pg_archivecleanup')" "0"
   expect_eq "$1: pgpass directory removed" "$(find "$CASE/pgpass" -mindepth 1 | wc -l | tr -d ' ')" "0"
@@ -61,6 +75,23 @@ case_wal_base_happy() {
   expect_ok "base: lock file stays" test -f "$W/.lock"
   expect_eq "base: top directory mode" "$(stat -c %a "$W")" "700"
   expect_ok "base: no password in output" no_secret
+  base_result_checks "base" passed
+  case_wal_base_image_library
+}
+
+# Use the installed library without WALARCHIVE_LIB_DIR (ADR-0151 (g), design D3).
+case_wal_base_image_library() {
+  wal_new_case base-image-library
+  expect_ok "base image library: check-result.sh is installed" test -f /etc/pgtools/check-result.sh
+  env -u WALARCHIVE_LIB_DIR PATH="$ROOT/stubs:$PATH" WAL_DIR="$W" \
+    WALARCHIVE_PGPASS_DIR="$CASE/pgpass" WALARCHIVE_SECRET_FILE="$CASE/secret" \
+    STUB_LOG="$CASE/stub/log" STUB_DIR="$CASE/stub" STUB_TS="$WTS" \
+    bash "$BIN/basebackup-once" >"$CASE/out" 2>"$CASE/err"
+  RC=$?
+  expect_eq "base image library: exit code" "$RC" 0
+  expect_eq "base image library: no ERROR line" "$(error_count "$CASE/out")" 0
+  expect_eq "base image library: no stderr" "$(wc -c <"$CASE/err")" 0
+  base_result_checks "base image library" passed
 }
 
 # ADR-0106 (c), design D2: a passed run writes backup_end_time into the temp directory, so the rename
@@ -98,6 +129,7 @@ case_wal_base_end_time() {
 # Six old base backups and a new one. The newest 4 stay. The cleanup gets the lowest start segment of the kept set.
 case_wal_base_retention() {
   new_base_case base-retention 6
+  printf '{"result":"failed","finished_at":"2026-01-01T00:00:00Z"}\n' >"$W/base-backup.result"
   local kept=() deleted=() dir n
   wal_run STUB_START_SEG=14 -- basebackup-once
   expect_eq "retention: exit code" "$RC" "0"
@@ -116,6 +148,9 @@ case_wal_base_retention() {
   # The oldest by name starts at 6. The lowest start segment of the kept set is 2 (ADR-0077 (f)).
   expect_eq "retention: cleanup gets the lowest start segment of the kept set (segment 2)" \
     "$(grep '^EVENT pg_archivecleanup' "$CASE/stub/log")" "EVENT pg_archivecleanup 000000010000000000000002"
+  expect_no "retention: archivecleanup gets no result file argument" \
+    grep -E '^ARGV pg_archivecleanup .*base-backup\.result' "$CASE/stub/log"
+  base_result_checks "retention" passed
   expect_ok "retention: segment 1 deleted" test ! -e "$W/$(seg_name 1)"
   expect_ok "retention: segment 2 stays" seg_exists 2
   expect_ok "retention: segment 6 stays" seg_exists 6
@@ -221,6 +256,7 @@ case_wal_base_verify_fails() {
   expect_eq "failed pg_verifybackup: no temp name" "$(find "$W/base" -name '.tmp-*' | wc -l | tr -d ' ')" "0"
   expect_no "failed pg_verifybackup: new base backup not published" base_exists "base_$WTS"
   expect_eq "failed pg_verifybackup: no backup_end_time under the base directory"     "$(find "$W/base" -name 'backup_end_time*' | wc -l | tr -d ' ')" "0"
+  expect_no "failed pg_verifybackup: no temp result stays" test -e "$W/.tmp-base-backup.result"
 }
 
 case_wal_base_basebackup_fails() {
@@ -232,6 +268,90 @@ case_wal_base_basebackup_fails() {
   base_expect_unchanged "failed pg_basebackup" "$before_top" "$before_base"
   expect_eq "failed pg_basebackup: no pg_verifybackup" "$(count_events 'pg_verifybackup')" "0"
   expect_eq "failed pg_basebackup: no temp name" "$(find "$W/base" -name '.tmp-*' | wc -l | tr -d ' ')" "0"
+  case_wal_base_term
+}
+
+# Each signal during pg_basebackup must run cleanup and record failure (ADR-0151 (f), (f1)).
+case_wal_base_term() {
+  base_signal_case TERM 143
+  base_signal_case INT 130
+  base_signal_case HUP 129
+  case_wal_base_cleanup_term
+}
+
+base_signal_case() {
+  local signal=$1 code=$2 label="base $1" monitor=0
+  new_base_case "base-${signal,,}" 1
+  mkdir "$CASE/termstub"
+  cat >"$CASE/termstub/pg_basebackup" <<'EOF'
+#!/usr/bin/env bash
+for arg in "$@"; do
+  case $arg in --pgdata=*) dir=${arg#--pgdata=} ;; esac
+done
+mkdir -p "$dir/pg_wal"
+printf 'partial\n' >"$dir/partial"
+: >"$STUB_DIR/basebackup.ready"
+sleep 3
+EOF
+  chmod 0755 "$CASE/termstub/pg_basebackup"
+  # Job control lets the background bash process receive INT.
+  case $- in *m*) monitor=1 ;; esac
+  set -m
+  WAL_BG=1 wal_run "PATH=$CASE/termstub:$ROOT/stubs:$PATH" -- basebackup-once
+  [ "$monitor" -eq 1 ] || set +m
+  if wait_for_file "$CASE/stub/basebackup.ready"; then
+    expect_ok "$label: temp base backup exists before signal" test -f "$W/base/.tmp-base_$WTS/partial"
+    kill -"$signal" "$BG_PID"
+    wait_bg
+    expect_eq "$label: exit code" "$RC" "$code"
+    base_result_checks "$label" failed
+    expect_no "$label: temp base backup removed" test -e "$W/base/.tmp-base_$WTS"
+    expect_no "$label: base backup not published" base_exists "base_$WTS"
+    expect_eq "$label: pgpass directory removed" "$(find "$CASE/pgpass" -mindepth 1 | wc -l | tr -d ' ')" 0
+  else
+    kill -TERM "$BG_PID" 2>/dev/null
+    wait_bg
+    bad "$label: pg_basebackup did not start"
+  fi
+}
+
+# TERM during cleanup must replace an old passed result after the temp base backup goes.
+case_wal_base_cleanup_term() {
+  new_base_case base-cleanup-term 1
+  local old='{"result":"passed","finished_at":"2026-01-01T00:00:00Z"}'
+  printf '%s\n' "$old" >"$W/base-backup.result"
+  mkdir "$CASE/termstub"
+  cat >"$CASE/termstub/rm" <<'EOF'
+#!/usr/bin/env bash
+if [ "${*: -1}" = "$WAL_DIR/base/.tmp-base_$STUB_TS" ]; then
+  : >"$STUB_DIR/cleanup.ready"
+  n=100
+  while [ ! -e "$STUB_DIR/cleanup.release" ] && [ "$n" -gt 0 ]; do
+    sleep 0.1
+    n=$((n - 1))
+  done
+fi
+exec "$REAL_RM" "$@"
+EOF
+  chmod 0755 "$CASE/termstub/rm"
+  WAL_BG=1 wal_run "PATH=$CASE/termstub:$ROOT/stubs:$PATH" "REAL_RM=$(command -v rm)" \
+    STUB_VERIFY_FAIL=1 -- basebackup-once
+  if wait_for_file "$CASE/stub/cleanup.ready"; then
+    expect_ok "base cleanup TERM: temp base backup exists before signal" test -d "$W/base/.tmp-base_$WTS"
+    kill -TERM "$BG_PID"
+    : >"$CASE/stub/cleanup.release"
+    wait_bg
+    expect_eq "base cleanup TERM: exit code" "$RC" 143
+    base_result_checks "base cleanup TERM" failed
+    expect_no "base cleanup TERM: old passed result is replaced" test "$(cat "$W/base-backup.result")" = "$old"
+    expect_no "base cleanup TERM: temp base backup removed" test -e "$W/base/.tmp-base_$WTS"
+    expect_no "base cleanup TERM: base backup not published" base_exists "base_$WTS"
+    expect_eq "base cleanup TERM: pgpass directory removed" "$(find "$CASE/pgpass" -mindepth 1 | wc -l | tr -d ' ')" 0
+  else
+    kill -TERM "$BG_PID" 2>/dev/null
+    wait_bg
+    bad "base cleanup TERM: temp base backup removal did not start"
+  fi
 }
 
 # A cleanup that fails keeps every segment. The new base backup passed its check and stays.
@@ -242,12 +362,50 @@ case_wal_base_cleanup_fails() {
   wal_run STUB_CLEANUP_FAIL=1 -- basebackup-once
   expect_eq "failed cleanup: exit code" "$RC" "1"
   expect_eq "failed cleanup: one ERROR line" "$(error_count "$CASE/out")" "1"
+  base_result_checks "failed cleanup" failed
   expect_ok "failed cleanup: new base backup stays" base_exists "base_$WTS"
   expect_ok "failed cleanup: segment 1 stays" seg_exists 1
   expect_ok "failed cleanup: JSON lines" json_lines_ok "$CASE/out"
   # ADR-0068 (k): the retention deleted the old base backups before the cleanup ran. The newest four stay.
   expect_eq "failed cleanup: the newest four base backups stay" "$(base_dirs)" \
     "$(printf '%s ' $(printf '%s\n' $before_names | tail -n 3) "base_$WTS")"
+}
+
+case_wal_base_result_write_fails() {
+  local before_names old='{"result":"passed","finished_at":"2026-01-01T00:00:00Z"}'
+  new_base_case base-result-write-fails 6
+  before_names=$(base_dirs)
+  printf '%s\n' "$old" >"$W/base-backup.result"
+  chmod 0644 "$W/base-backup.result"
+  mkdir -p "$CASE/mvstub"
+  cat >"$CASE/mvstub/mv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+if [ "${*: -1}" = "$WAL_DIR/base-backup.result" ]; then
+  echo 'EVENT result mv refused' >>"$STUB_LOG"
+  exit 1
+fi
+exec "$REAL_MV" "$@"
+EOF
+  chmod 0755 "$CASE/mvstub/mv"
+  wal_run "REAL_MV=$(command -v mv)" "PATH=$CASE/mvstub:$ROOT/stubs:$PATH" -- basebackup-once
+  expect_eq "result write fails: rename was attempted" "$(count_events 'result mv refused')" 1
+  expect_ok "result write fails: exit code is not zero" test "$RC" -ne 0
+  expect_eq "result write fails: one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "result write fails: ERROR message" \
+    grep -q '"level":"ERROR".*"message":"cannot write the base backup result"' "$CASE/out"
+  expect_eq "result write fails: old result stays" "$(cat "$W/base-backup.result")" "$old"
+  base_result_checks "result write fails" passed
+  expect_ok "result write fails: JSON lines" json_lines_ok "$CASE/out"
+  expect_ok "result write fails: new base backup stays" base_exists "base_$WTS"
+  expect_eq "result write fails: the newest four base backups stay" "$(base_dirs)" \
+    "$(printf '%s ' $(printf '%s\n' $before_names | tail -n 3) "base_$WTS")"
+  expect_eq "result write fails: backup completed" "$(count_events 'pg_basebackup done')" 1
+  expect_eq "result write fails: backup verified" "$(count_events 'pg_verifybackup')" 1
+  expect_eq "result write fails: archive cleanup ran" "$(count_events 'pg_archivecleanup')" 1
+  expect_eq "result write fails: pgpass directory removed" \
+    "$(find "$CASE/pgpass" -mindepth 1 | wc -l | tr -d ' ')" 0
 }
 
 # The label of each kept base backup is read before any delete. A bad label of any kept base backup
@@ -272,6 +430,7 @@ bad_label_case() {
   expect_eq "bad label ($1 days): exit code" "$RC" "1"
   expect_eq "bad label ($1 days): one ERROR line" "$(error_count "$CASE/out")" "1"
   expect_eq "bad label ($1 days): the archive is unchanged" "$(wal_listing)" "$before_top"
+  base_result_checks "bad label ($1 days)" failed
   expect_eq "bad label ($1 days): no old base backup deleted" "$(base_dirs | wc -w | tr -d ' ')" "7"
   expect_eq "bad label ($1 days): no archivecleanup" "$(count_events 'pg_archivecleanup')" "0"
   expect_ok "bad label ($1 days): new base backup stays" base_exists "base_$WTS"
@@ -309,6 +468,7 @@ case_wal_base_args_and_secret() {
   before=$(wal_snapshot)
   wal_run -- basebackup-once extra
   wal_expect_refused "extra argument" "$before"
+  expect_no "extra argument: no result file" test -e "$W/base-backup.result"
   for s in empty cr two-lines; do
     wal_new_case "base-secret-$s"
     case $s in
@@ -319,6 +479,7 @@ case_wal_base_args_and_secret() {
     before=$(wal_snapshot)
     wal_run -- basebackup-once
     wal_expect_refused "base secret $s" "$before"
+    base_result_checks "base secret $s" failed
   done
 }
 
@@ -463,6 +624,7 @@ case_wal_base_parallel() {
     skip "flock on this host grants a second lock (fake flock)"
     return 0
   fi
+  case_wal_base_lock_held
   new_base_case base-parallel 1
   WAL_BG=1 wal_run STUB_BASEBACKUP_SLEEP=3 -- basebackup-once
   wait_for_file "$CASE/stub/pgpass.seen" 100
@@ -470,7 +632,30 @@ case_wal_base_parallel() {
   OUTTAG=.second wal_run -- basebackup-once
   expect_eq "parallel: second run exit code" "$RC" "1"
   expect_eq "parallel: second run ERROR line" "$(error_count "$CASE/out.second")" "1"
+  expect_no "parallel: rejected run writes no result" test -e "$W/base-backup.result"
   wait_bg
   expect_eq "parallel: first run exit code" "$RC" "0"
   expect_eq "parallel: one pg_basebackup" "$(count_events 'pg_basebackup start')" "1"
+  base_result_checks "parallel: lock owner" passed
+}
+
+# A rejected lock attempt must neither create nor replace a result (ADR-0151 (e)).
+case_wal_base_lock_held() {
+  local state before
+  for state in missing old; do
+    wal_new_case "base-lock-held-$state"
+    if [ "$state" = old ]; then
+      printf '{"result":"passed","finished_at":"2026-01-01T00:00:00Z"}\n' >"$W/base-backup.result"
+    fi
+    before=$(find "$W" -name '*base-backup.result' -printf '%p %y %s %m %T@\n' -exec sha256sum {} \;)
+    exec 8>>"$W/.lock"
+    flock -n 8
+    wal_run -- basebackup-once
+    flock -u 8
+    exec 8>&-
+    expect_eq "base lock held ($state): exit code" "$RC" 1
+    expect_eq "base lock held ($state): no result changes" \
+      "$(find "$W" -name '*base-backup.result' -printf '%p %y %s %m %T@\n' -exec sha256sum {} \;)" "$before"
+    expect_eq "base lock held ($state): no tool started" "$(count_events '')" 0
+  done
 }

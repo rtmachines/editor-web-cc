@@ -6,6 +6,7 @@ mod audit;
 mod audit_chain;
 mod backups;
 mod call_faults;
+mod check_results;
 mod clock;
 mod core;
 mod disk;
@@ -38,6 +39,7 @@ pub use self::core::{
 };
 pub use audit_chain::{AuditChainMethod, ChainBreak, MemoryAuditChain};
 pub use backups::MemoryBackupDirectory;
+pub use check_results::MemoryCheckResults;
 pub use clock::MemoryClock;
 pub use disk::{DiskFailure, DiskReading, MemoryDiskSpace};
 pub use document_writer::BodyWriter;

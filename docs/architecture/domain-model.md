@@ -593,6 +593,7 @@ The jobs and the health router also use ports that write nothing to the database
 | `ReadinessProbe` | `recipe-db`, on the health pool | `/readyz` runs the readiness check of `reliability.md` 7.2 |
 | `DiskSpace` | `recipe-server` | The job `disk_check` reads the free space of a volume |
 | `BackupDirectory` | `recipe-server` | The job `alerts` reads the time of the newest complete backup set |
+| `CheckResults` | `recipe-server` | The job `alerts` reads the newest result of each weekly check (ADR-0151 (r)) |
 | `AlertWebhook` | `recipe-server` | The job `alerts` sends one `POST` for each active condition (ADR-0063) |
 | `ReadOnlySwitch` | `recipe-web::ReadOnlyMode` | The job `disk_check` turns read-only mode on and off |
 

@@ -15,8 +15,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use recipe_app::identity::{Argon2Params, PasswordHasher};
 use recipe_app::ports::{
-    AlertWebhook, AuditChainReads, BackupDirectory, Clock, DiskSpace, LoginAttemptStore,
-    MaintenanceStore, OperationsReads, ReadinessProbe, SecurityEventSink, SessionStore, UnitOfWork,
+    AlertWebhook, AuditChainReads, BackupDirectory, CheckResults, Clock, DiskSpace,
+    LoginAttemptStore, MaintenanceStore, OperationsReads, ReadinessProbe, SecurityEventSink,
+    SessionStore, UnitOfWork,
 };
 use recipe_db::settings::PoolSettings;
 use recipe_db::{CloseOutcome, Database};
@@ -238,6 +239,11 @@ pub trait Host: Send + Sync {
 
     /// The reader of the backup directory at `directory`.
     fn backups(&self, directory: &Path) -> Arc<dyn BackupDirectory>;
+
+    /// The reader of the result files of the weekly backup checks (ADR-0151 (a)).
+    ///
+    /// `backups` holds the file of the restore test. `walarchive` holds the file of the base backup.
+    fn check_results(&self, backups: &Path, walarchive: &Path) -> Arc<dyn CheckResults>;
 
     /// Steps 8 and 10: bind a listener on `0.0.0.0` and `port`.
     ///

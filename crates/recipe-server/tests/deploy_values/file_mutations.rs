@@ -523,7 +523,7 @@ fn a_copy_from_a_build_stage_needs_no_entry() {
 
 /// One change of the Dockerfile or of the allow list of the pgtools context, and the fault that follows.
 /// The fault must name the library file.
-const LIBRARY_COPIES: [ContextCase; 4] = [
+const LIBRARY_COPIES: [ContextCase; 5] = [
     // The Dockerfile drops the library, and the allow list drops it too. Only this check sees it.
     (
         PGTOOLS_DOCKERFILE,
@@ -541,9 +541,16 @@ const LIBRARY_COPIES: [ContextCase; 4] = [
     // The library lands outside the directory of the other library files.
     (
         PGTOOLS_DOCKERFILE,
-        "lib/wal-identity.sh /etc/pgtools/",
-        "lib/wal-identity.sh /usr/local/lib/",
+        " lib/wal-identity.sh lib/check-result.sh /etc/pgtools/",
+        " lib/check-result.sh /etc/pgtools/\nCOPY --chmod=0644 lib/wal-identity.sh /usr/local/lib/",
         "lib/wal-identity.sh",
+    ),
+    // The new library lands outside that directory too.
+    (
+        PGTOOLS_DOCKERFILE,
+        " lib/check-result.sh /etc/pgtools/",
+        " /etc/pgtools/\nCOPY --chmod=0644 lib/check-result.sh /usr/local/lib/",
+        "lib/check-result.sh",
     ),
     // A COPY from a stage does not count as a copy of the library.
     (

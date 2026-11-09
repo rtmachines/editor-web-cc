@@ -18,7 +18,7 @@ do
   sudo chown 999:999 "$CI_ROOT/$disk"
 done
 sudo chmod 0755 "$RECIPE_BACKUP_DIR"
-sudo install -d -o 999 -g 999 -m 0700 "$RECIPE_WALARCHIVE_DIR"
+sudo install -d -o 999 -g 999 -m 0711 "$RECIPE_WALARCHIVE_DIR"
 sudo install -o 999 -g 999 -m 0600 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"
 sudo install -o 999 -g 999 -m 0600 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"
 sudo install -d -o root -g root -m 0700 "$RECIPE_SECRETS_DIR"

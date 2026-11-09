@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # restore-test: restore the newest backup set into a private scratch cluster and check it.
+# The exit trap writes /backups/restore-test.result after cleanup (ADR-0151).
 #
 # Source: ADR-0067 (c) to (l) as amended by ADR-0076 and ADR-0078, ADR-0066, ADR-0074, ADR-0033,
 # reliability.md sections 7.7 and 7.11, design D10. The service backup runs it every Sunday
@@ -34,7 +35,7 @@
 #   BACKUP_DIR          the backup disk, default /backups
 #   BACKUP_PGPASS_DIR   the tmpfs for the secret files, default /run/pgpass
 #   RESTORE_CODE_DIR    the directory of restore-code.sql and restore-code.expected, default /etc/pgtools
-#   RESTORE_GLOBALS_DIR the directory of globals-grammar.sh and restore-steps.sh, default /etc/pgtools
+#   RESTORE_GLOBALS_DIR the directory of globals-grammar.sh, restore-steps.sh, and check-result.sh, default /etc/pgtools
 #   PGDATABASE          the name of the database in the dump, default recipe
 set -euo pipefail
 umask 077
@@ -68,8 +69,12 @@ unset PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEF
 # shellcheck source=../lib/restore-steps.sh
 source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/restore-steps.sh" \
   || { echo "restore-test: cannot load restore-steps.sh" >&2; exit 1; }
+# shellcheck source=../lib/check-result.sh
+source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/check-result.sh" \
+  || { echo "restore-test: cannot load check-result.sh" >&2; exit 1; }
 
 error_logged=0
+result_armed=0
 work_dir=""
 scratch=""
 data_dir=""
@@ -104,8 +109,12 @@ remove_dir() {
 
 # cleanup runs on each exit. The secret files go first and on a best effort.
 cleanup() {
-  local status=$? stopped=1
+  local status=$? stopped=1 result=failed
   trap - EXIT
+  # Record signals without skipping cleanup or the final result write.
+  trap 'status=143' TERM
+  trap 'status=130' INT
+  trap 'status=129' HUP
   if [ -n "$work_dir" ] && ! remove_dir "$work_dir" "$PGPASS_DIR"; then
     log ERROR "cannot delete the password directory of this run"
     status=1
@@ -122,6 +131,13 @@ cleanup() {
   fi
   if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
     log ERROR "restore test failed unexpectedly" "\"exit_code\":$status"
+  fi
+  if [ "$result_armed" -eq 1 ]; then
+    [ "$status" -ne 0 ] || result=passed
+    if ! write_check_result "$BACKUP_DIR" restore-test.result "$result"; then
+      log ERROR "cannot write the restore test result"
+      status=1
+    fi
   fi
   exit "$status"
 }
@@ -259,12 +275,14 @@ esac
 
 # Step 1: the gates. A refused run starts no tool.
 [ -f "$BACKUP_DIR/$MARKER_NAME" ] || fail "the marker file of the backup disk is missing"
-for file in restore-code.sql restore-code.expected; do
-  [ -f "$CODE_DIR/$file" ] || fail "restore-code.sql or restore-code.expected is missing"
-done
 mkdir -p -- "$BACKUP_DIR/$SCRATCH_NAME"
 exec 9>>"$BACKUP_DIR/$SCRATCH_NAME/$LOCK_NAME"
 flock -n 9 || fail "another restore test holds the lock"
+result_armed=1
+# The code check runs after the lock, so a missing file gives the result failed.
+for file in restore-code.sql restore-code.expected; do
+  [ -f "$CODE_DIR/$file" ] || fail "restore-code.sql or restore-code.expected is missing"
+done
 delete_stale_runs
 [ -d "$PGPASS_DIR" ] || fail "the directory of the secret files is missing"
 work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX") || fail "cannot create the directory of the secret files"

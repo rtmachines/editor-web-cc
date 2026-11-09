@@ -187,6 +187,7 @@ fn alerts_job(
         webhook,
         disk,
         backups: host.backups(&settings.backups_path),
+        checks: host.check_results(&settings.backups_path, &settings.walarchive_path),
     };
     let sources = AlertSources {
         counters,

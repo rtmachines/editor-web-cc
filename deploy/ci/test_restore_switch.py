@@ -1271,6 +1271,22 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(files["read:walarchive-disk/walarchive/.system-identifier"], ARCHIVE_ID + "\n")
         self.assertEqual(files["read:walarchive-disk/walarchive.moved-*/.system-identifier"], "1111\n")
 
+    def test_wal_line_moves_the_base_backup_result_into_the_target(self):
+        result = '{"result":"passed","finished_at":"2026-01-01T00:00:00Z"}\n'
+        source = "walarchive-disk/walarchive/base-backup.result"
+        target = "walarchive-disk/walarchive.moved-*/base-backup.result"
+        done, log, files = self.run_wal_line(tree={**WAL_TREE, source: result}, read=(source, target))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        _, moved = self.moved_entries(files["tree.list"])
+        self.assertIn("base-backup.result", moved)
+        moves = re.findall(r"^sudo mv -t \S+walarchive\.moved-\d{8}_\d{6} -- .+$", log, re.M)
+        self.assertEqual(len(moves), 1, log)
+        self.assertIn("/base-backup.result", moves[0])
+        self.assertIsNone(files["read:" + source])
+        self.assertEqual(files["read:" + target], result)
+        self.assertTrue(any(line.endswith("/base-backup.result")
+                            for line in files["wal-target.manifest"].splitlines()))
+
     HISTORY_TREE = {
         **WAL_TREE,
         "walarchive-disk/walarchive/00000002.history": "1\t0/3000000\tno recovery target specified\n",
@@ -1482,7 +1498,7 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         prepare = (CI / "prepare.sh").read_text(encoding="utf-8")
         self.assertIn("export RECIPE_WALARCHIVE_DIR=$CI_ROOT/walarchive-disk/walarchive", common)
         self.assertIn("for disk in backups walarchive-disk", prepare)
-        self.assertIn('sudo install -d -o 999 -g 999 -m 0700 "$RECIPE_WALARCHIVE_DIR"', prepare)
+        self.assertIn('sudo install -d -o 999 -g 999 -m 0711 "$RECIPE_WALARCHIVE_DIR"', prepare)
         for name in ("cleanup.sh", "upgrade.sh", "switch-steps.sh"):
             self.assertIn("for disk in backups walarchive-disk", (CI / name).read_text(encoding="utf-8"), name)
 
@@ -2550,7 +2566,9 @@ class RunbookWalLineTests(unittest.TestCase):
         The substitution has four parts. The prefix `sudo ` and the tail `-printf ... | sort` of the find calls go away.
         The variable $SEGMENT_REGEX and the variable $HISTORY_REGEX become their quoted values from the script.
         The two tests join with -o and the test for the file .system-identifier joins as the third. The tail is the move.
+        The test for the file base-backup.result joins as the fourth, because move_segments moves it too (ADR-0151 (q)).
         """
+        self.assertIn('"$RECIPE_WALARCHIVE_DIR/base-backup.result"', shell_function("move_segments"))
         calls = {}
         for name, variable in (("archive_segments", "SEGMENT_REGEX"), ("archive_history", "HISTORY_REGEX")):
             found = re.search(
@@ -2563,7 +2581,8 @@ class RunbookWalLineTests(unittest.TestCase):
         segment = script_assignment("SEGMENT_REGEX")
         history = script_assignment("HISTORY_REGEX")
         return (
-            f"{calls['SEGMENT_REGEX']} \\( -regex '{segment}' -o -regex '{history}' -o -name '.system-identifier' \\)"
+            f"{calls['SEGMENT_REGEX']} \\( -regex '{segment}' -o -regex '{history}' -o -name '.system-identifier'"
+            " -o -name 'base-backup.result' \\)"
             ' -exec mv -t "$target" -- {} +'
         )
 

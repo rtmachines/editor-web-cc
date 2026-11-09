@@ -165,7 +165,7 @@ Repeat step 3 in each new shell. The shell gets the name from `.env` only.
 
 ```bash
 install -d -m 0755 -o 999 -g 999 "$RECIPE_BACKUP_DIR"
-install -d -m 0700 -o 999 -g 999 "$RECIPE_WALARCHIVE_DIR"
+install -d -m 0711 -o 999 -g 999 "$RECIPE_WALARCHIVE_DIR"
 install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"
 install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"
 ```
@@ -519,7 +519,8 @@ This section names the files to copy, the host directories, and the check of a c
 `<stamp>` is the part of the dump name between `recipe_` and `.dump`, as in the section "Restore into production".
 Do not copy the names that start with `.tmp-`, the marker files, `.lock`, and the directory `.pitr-scratch`.
 A run in progress or a killed run leaves them (`reliability.md` 7.7).
-The files belong to uid 999 and have the mode `0600`. The top directory of `RECIPE_WALARCHIVE_DIR` has the mode `0700`.
+The files belong to uid 999 and have the mode `0600`. The top directory of `RECIPE_WALARCHIVE_DIR` has the mode `0711`.
+The result files `restore-test.result` and `base-backup.result` are the exceptions. They have the mode `0644` (ADR-0151 (g)).
 The copy therefore runs as `root` or as uid 999.
 
 The `backup` service writes one set each day at `backup.time`. `walarchive` writes WAL all the time.
@@ -759,13 +760,13 @@ printf '%s\n%s\n' 'Database system identifier: <old identifier>' "Latest checkpo
 printf '%s\n' 'Database system identifier: <old identifier>' > "$target/old-system-identifier"
 ```
 
-   4. Move the segment files, the `.partial` file, each timeline history file, and the file `.system-identifier` (ADR-0106 (k)):
+   4. Move the segment files, the `.partial` file, each timeline history file, `.system-identifier`, and `base-backup.result`:
 
 ```bash
-find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f -regextype posix-extended \( -regex '.*/[0-9A-F]{24}(\.partial)?' -o -regex '.*/[0-9A-F]{8}\.history' -o -name '.system-identifier' \) -exec mv -t "$target" -- {} +
+find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f -regextype posix-extended \( -regex '.*/[0-9A-F]{24}(\.partial)?' -o -regex '.*/[0-9A-F]{8}\.history' -o -name '.system-identifier' -o -name 'base-backup.result' \) -exec mv -t "$target" -- {} +
 ```
 
-      A history file has 8 uppercase hexadecimal digits and the suffix `.history`. The command moves no other name.
+      ADR-0106 (k) and ADR-0151 (q) name these files. A history file has 8 uppercase hexadecimal digits and the suffix `.history`. The command moves no other name. The file `base-backup.result` describes the base backups of the old cluster, so it moves too.
 
    5. Move each base backup of the old cluster into the directory `base` of the target:
 
@@ -774,7 +775,7 @@ mkdir -m 0700 -- "$target/base"
 find "$RECIPE_WALARCHIVE_DIR/base" -mindepth 1 -maxdepth 1 -type d -regextype posix-extended -regex '.*/base_[0-9]{8}_[0-9]{6}' -exec mv -t "$target/base" -- {} +
 ```
 
-   6. Check that no segment file, no base backup, and no file `.system-identifier` remain:
+   6. Check that no segment file, no base backup, no file `.system-identifier`, and no file `base-backup.result` remain:
 
 ```bash
 ls -A "$RECIPE_WALARCHIVE_DIR" "$RECIPE_WALARCHIVE_DIR/base"
@@ -1212,8 +1213,8 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 20. If you used step 7, run `docker compose up -d --force-recreate --no-deps proxy`.
 21. Run the check of the section "Check client_ip of the first login".
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
-23. Run the three commands of the list below, while the new `app` serves.
-24. Run the [Recovery drill](#recovery-drill) after the three commands pass (ADR-0106 (o)).
+23. Run the four commands of the list below, while the new `app` serves.
+24. Run the [Recovery drill](#recovery-drill) after the four commands pass (ADR-0106 (o)).
 
 Installation of step 2 (ADR-0105 (e), (i)):
 Each release has its own directory `deploy/`. Keep the directory of the running release unchanged. A major upgrade needs it.
@@ -1361,14 +1362,18 @@ Recovery after a failure between two steps (ADR-0097 (h2)):
 - A step of the segment check fails: nothing changed, and the step wrote no file. Read the `ERROR` line. Stop the upgrade, except for the case without a complete segment and without a `.partial` file. The error `the file .system-identifier exists, but the sync of the directory failed` is the exception. The file exists, so a second run prints `The segment check does not run.` Check the disk of the WAL archive before the next step.
 - A command of the list of step 23 fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
 
-The three commands give the new image of `recipe-pgtools` to `backup` and `walarchive`:
+The four commands give the new image of `recipe-pgtools` to `backup` and `walarchive`:
 
 1. Run `docker compose up -d --no-deps backup walarchive`.
 2. Run `docker compose exec backup backup-now`.
 3. Run `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
    - If the test names a `_premigrate` set of the same UTC minute, rerun commands 2 and 3 later.
+4. Run `docker compose exec walarchive basebackup-once`.
 
 Command 1 can stop a job that runs at `backup.time` or `basebackup.time`. Step 2 avoids these times.
+
+In the first upgrade with ADR-0151, the alerts `restore_test` and `base_backup` can be active from step 18 until step 23 ends (ADR-0151 (n)). The release notes name them.
+
 If the restore test of command 3 fails, a rollback does not start by itself (ADR-0083 (f)).
 Keep the new `app`. Keep every set. Read the `ERROR` line in the output of `restore-test`.
 
@@ -1386,7 +1391,7 @@ RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app
 ```
 
 2. Keep the new tag in `.env`. The schema stays newer.
-3. Run the three commands of the upgrade with the tag of `.env`.
+3. Run the four commands of the upgrade with the tag of `.env`.
 
 Warning: `.env` holds the new tag, so a later `docker compose up -d` gives `app` the new image again (ADR-0083).
 
@@ -1497,7 +1502,7 @@ docker compose up -d --no-deps proxy backup
 
 A plant host can have no registry. A release moves the images as files of `docker save` (ADR-0064 (j)).
 A rollback starts the previous image of `app` (`reliability.md` 7.10 step 6).
-After a restore of the `_premigrate` set, the three commands of the upgrade also start the previous image of `recipe-pgtools` (ADR-0083 (d)).
+After a restore of the `_premigrate` set, the four commands of the upgrade also start the previous image of `recipe-pgtools` (ADR-0083 (d)).
 Without the image, Compose tries to pull it, and the rollback stops.
 Keep these images on the host:
 
@@ -1959,7 +1964,7 @@ An outage of `walarchive` longer than `pg.wal_keep_size` leaves a gap (ADR-0068 
 The alert `replication` is active during the outage.
 
 The procedure moves the WAL segment files and the `.partial` file from the top of `RECIPE_WALARCHIVE_DIR` (ADR-0068 (l)).
-The marker file, `.lock`, the directory `base`, the directory `.pitr-scratch`, and the file `.system-identifier` stay.
+The marker file, `.lock`, the directory `base`, the directory `.pitr-scratch`, the file `.system-identifier`, and the file `base-backup.result` stay.
 The cluster does not change in a gap, so its system identifier stays the same (ADR-0105 (o)).
 
 The names of the segment files have 24 upper-case hex characters (PostgreSQL 16 documentation, section 30.6).
@@ -1995,7 +2000,7 @@ find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]????????????
 find "$RECIPE_WALARCHIVE_DIR" -maxdepth 1 -type f \( -name '[0-9A-F]???????????????????????' -o -name '[0-9A-F]???????????????????????.partial' \) -exec mv -t "$target" -- {} +
 ```
 
-7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains. The marker file, `.lock`, `base`, `.pitr-scratch`, and `.system-identifier` stay.
+7. Run `ls -A "$RECIPE_WALARCHIVE_DIR"`. Check that no segment file remains. The marker file, `.lock`, `base`, `.pitr-scratch`, `.system-identifier`, and `base-backup.result` stay.
 8. Run `docker compose up -d --no-deps walarchive`. The stream starts on a directory without segments.
    - The guard finds the file `.system-identifier` and no segment. It compares the identifier with the identifier of `db` and passes.
 9. Check the stream. Take no base backup before it passes:
@@ -2214,6 +2219,8 @@ Read the lines with the commands of the section "Read the logs".
 | `panics` | Read the panic lines in `docker compose logs app`. Note the field `request_id` or `job`. | No document gives a further action. A panic is a bug, and the server keeps serving (`reliability.md` 2.4). |
 | `not_ready` | Run `docker compose ps`. Read the health of `db` and `app`. Read `docker compose logs db app`. | Run `docker compose exec app /usr/local/bin/recipe-server healthcheck --path /healthz`. Run it again with `--path /readyz`. If `app` restarts, use the section "Restart loop". If only `/readyz` fails and `db` is healthy, a migration of the binary may be missing from `_sqlx_migrations` or may have another checksum (`reliability.md` 7.2). No document gives a fix. |
 | `backup_age` | Run `docker compose logs backup`. Read the last `ERROR` line. Then run `docker compose exec backup backup-now`. | None beyond the first action. |
+| `restore_test` | Run `docker compose exec backup cat /backups/restore-test.result`. Find the case under the table. | Run `docker compose exec backup restore-test`. Use the section "Run the restore test". |
+| `base_backup` | Run `docker compose exec walarchive cat /wal/base-backup.result`. Find the case under the table. | Run `docker compose exec walarchive basebackup-once`. |
 | `replication` | Run `docker compose ps walarchive` and `docker compose logs walarchive`. For a gap, use the section "A gap in the WAL stream". | None beyond the first action. |
 | `low_disk` | Read the field `volume` of the line: `pgdata`, `backups`, or `walarchive`. | Use the section "Low disk space". For `pgdata`, use the section "Read-only mode" too. |
 | `failed_logins` | Open `/security-events`. Filter the kind `login_failed`. Read `login` and `client_ip`. | If a user cannot log in, an Administrator opens `/users/<login>` and uses the unlock form (`LoginUnlock`, `api.md` 2.8). If `client_ip` equals `PROXY_ADDRESS`, use the section "Check client_ip of the first login". |
@@ -2221,6 +2228,18 @@ Read the lines with the commands of the section "Read the logs".
 | `audit_chain_broken` | Read the line `E-AUD-002` in `docker compose logs app`. It names the `chain_seq`. Open the row in `/security-events`. | The condition stays active while the newest row is younger than `audit.max_check_age`. Each nightly check adds a row while the chain stays broken (`reliability.md` 3.7). No document gives a fix. |
 | `audit_check_age` | Run `docker compose ps app`. Read the lines with the field `job` of `audit_chain_check` in `docker compose logs app`. | A run that returns an error code other than `E-AUD-002` is not a completed check. Follow the row of that code in `reliability.md` 1.2 (ADR-0100 (e)). A stored time that is later than the time of `db` by more than `alerts.interval` also keeps the alert active (`reliability.md` 3.7). |
 | `export_hash_mismatch` | Read the line `E-EXP-002` in `docker compose logs app`. It names the recipe and the version. | The server refuses the export of that version (`reliability.md` 1.2). No document gives a fix. |
+
+The alerts `restore_test` and `base_backup` are active in four cases (ADR-0151 (i)). The result file holds the keys `result` and `finished_at`.
+For `base_backup`, replace `backup` with `walarchive` in the commands of this list. Only the first case always writes an `ERROR` line.
+
+1. The key `result` is `failed`. Run `docker compose logs backup` and read the last `ERROR` line.
+2. The key `result` is `passed`, and `finished_at` is older than 8 days. No later run wrote a result, so the log can show no `ERROR` line.
+3. The command `cat` reports that the file does not exist. A killed run writes no file. The log shows no `ERROR` line.
+4. The file exists, but `app` cannot read or parse it. The job `alerts` writes one `WARN` line in `docker compose logs app` (ADR-0151 (j1)).
+
+To find the `WARN` line of the case 4, run `docker compose logs --no-log-prefix --since 1h app | grep -F 'The result file of the'`. The line names the check and ends with `cannot be read.` or `is malformed.`.
+The directory `/wal` needs the mode `0711`, and the file needs the mode `0644` (ADR-0151 (k)). The command `cat` can succeed when `app` cannot read the file.
+Run `docker compose exec walarchive ls -ld /wal /wal/base-backup.result` to read both modes.
 
 ### Low disk space
 

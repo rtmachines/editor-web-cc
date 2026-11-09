@@ -92,6 +92,7 @@ case_wal_base_foreign_names
 case_wal_base_verify_fails
 case_wal_base_basebackup_fails
 case_wal_base_cleanup_fails
+case_wal_base_result_write_fails
 case_wal_base_bad_label
 case_wal_base_name_exists
 case_wal_base_args_and_secret
