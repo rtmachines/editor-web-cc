@@ -401,4 +401,82 @@ for path in paths:
     if shell_tracing(data):
         raise SystemExit(f'shell tracing in {path}')
 print('CI syntax and tracing checks passed.')
+
+
+def check_secure_refusal(lines):
+    command = r'^      (?:  |- )run: bash deploy/ci/rust-tests\.sh secure$'
+    if len(re.findall(command, '\n'.join(lines), re.M)) != 1:
+        raise SystemExit('secure refusal needs exactly one step that runs rust-tests.sh secure')
+    header = '  test:'
+    if header not in lines:
+        raise SystemExit('ci.yml has no job test')
+    start = lines.index(header) + 1
+    end = start
+    while end < len(lines) and (lines[end].startswith('    ') or not lines[end].strip()):
+        end += 1
+    body = '\n'.join(lines[start:end])
+    restricted_key = r"""(['"]?)(?:if|needs|continue-on-error)\1[ \t]*:"""
+    # Reject unsupported YAML keys instead of decoding them.
+    plain_key = r"""(?:[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+')[ \t]*:"""
+    unsupported_key = '(?!' + plain_key + r')[^\s#]'
+    restricted_key = '(?:' + restricted_key + '|' + unsupported_key + ')'
+    if re.search(r'^    ' + restricted_key, body, re.M):
+        raise SystemExit('test must run on each pull request and report failures')
+    steps = re.split(r'(?=^      - )', body, flags=re.M)[1:]
+    matches = [step for step in steps if re.search(command, step, re.M)]
+    if len(matches) != 1:
+        raise SystemExit('secure refusal step must run in the job test')
+    if re.search(r'^      (?:  |- )' + restricted_key, matches[0], re.M):
+        raise SystemExit('secure refusal step must run and report failures')
+
+
+def test_secure_refusal_step():
+    lines = Path('.github/workflows/ci.yml').read_text(encoding='utf-8').splitlines()
+    check_secure_refusal(lines)
+    print('CI secure refusal step check passed.')
+
+
+def test_secure_refusal_mutations():
+    workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+    anchors = (
+        ('  test:\n', '    ', 'test must run on each pull request and report failures'),
+        ('        run: bash deploy/ci/rust-tests.sh secure\n', '        ',
+         'secure refusal step must run and report failures'),
+    )
+    for anchor, indent, message in anchors:
+        if workflow.count(anchor) != 1:
+            raise SystemExit('secure refusal mutation needs a unique anchor')
+        cases = [('if', '${{ false }}'), ('needs', 'compose'),
+                 ('continue-on-error', 'true'), (r'\u0069f', 'false'),
+                 (r'continue-on-erro\u0072', 'true')]
+        if indent == '    ':
+            cases.append((r'ne\u0065ds', 'compose'))
+        fields = []
+        for key, value in cases:
+            quotes = ('"',) if '\\' in key else ('', "'", '"')
+            for quote in quotes:
+                for space in ('', ' '):
+                    field = f'{indent}{quote}{key}{quote}{space}: {value}\n'
+                    fields.append(field)
+        fields.extend((f'{indent}? if\n{indent}: false\n',
+                       f'{indent}&disabled if: false\n'))
+        if indent == '    ':
+            fields.append(f'{indent}<<: *x\n')
+        else:
+            fields.extend((f'{indent}? continue-on-error\n{indent}: true\n',
+                           f'{indent}!!str if: false\n'))
+        for field in fields:
+            fixture = workflow.replace(anchor, anchor + field, 1)
+            try:
+                check_secure_refusal(fixture.splitlines())
+            except SystemExit as error:
+                if str(error) != message:
+                    raise SystemExit(f'wrong secure refusal error: {error}') from error
+            else:
+                raise SystemExit(f'secure refusal check accepted {field.strip()!r} at {indent!r}')
+    print('CI secure refusal mutation checks passed.')
+
+
+test_secure_refusal_step()
+test_secure_refusal_mutations()
 PY

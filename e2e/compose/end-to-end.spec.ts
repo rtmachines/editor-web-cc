@@ -7,6 +7,7 @@ import {
 } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { exportContentFaults } from './support/export-content';
 import { contentSha256, type JsonObject } from './support/jcs';
 
 // ADR-0128 (af) to (ai): the flow of the smoke suite. The project `smoke-compose` runs this file
@@ -21,6 +22,9 @@ const NUMBER_BASE = 1_000_000;
 const NUMBER_SPAN = 8_999_999;
 /** The limits of the parameter. The value lies between them, so the approval finds no violation. */
 const PARAMETER = { tag: 'SPEED', type: 'INT', value: '50', min: '0', max: '100' } as const;
+/** A new recipe opens with its first draft, which holds the main unit `U1`. */
+const VERSION_NUMBER = 1;
+const UNIT_PATH = 'U1';
 /** The code of the refusal when the editor of a draft approves it (reliability.md section 1.2). */
 const EDITOR_REFUSAL_CODE = 'E-RCP-015';
 /** The status code of that refusal (api.md section 4). */
@@ -113,12 +117,12 @@ test('the Administrator creates a machine, a recipe, a parameter, and its limits
   await page.locator('#recipe_name').fill(`Smoke recipe ${run.reference}`);
   await page.locator('#change_note').fill('Created by the smoke suite');
   await page.locator('#recipe-create-submit').click();
-  versionPath = `/recipes/${run.reference}/versions/1`;
+  versionPath = `/recipes/${run.reference}/versions/${VERSION_NUMBER}`;
   await expect(page).toHaveURL(new RegExp(`${versionPath}$`));
   await expect(page.locator('.badge-large').first()).toContainText('Draft');
 
   // Step 3: the parameter. The first submit shows the value fields. The second one saves.
-  await page.goto(`${versionPath}/parameters/new?unit=U1`);
+  await page.goto(`${versionPath}/parameters/new?unit=${UNIT_PATH}`);
   await page.locator('#tag').fill(PARAMETER.tag);
   await page.locator('#name_en').fill('Speed');
   await page.locator('#description_en').fill('Speed of the line');
@@ -204,6 +208,20 @@ test('the Administrator exports the approved version, and the hash matches', asy
   expect(document.content_sha256).toMatch(/^[0-9a-f]{64}$/);
   // The consumer rebuilds the hash from the hashed fields (ADR-0128 (ai)).
   expect(contentSha256(document)).toBe(document.content_sha256);
+  // The body holds the values that the earlier tests entered (design D6 of test-gates-round-2).
+  expect(
+    exportContentFaults(document, {
+      machineCode: run.machineCode,
+      referenceNumber: run.reference,
+      versionNumber: VERSION_NUMBER,
+      unitPath: UNIT_PATH,
+      tag: PARAMETER.tag,
+      type: PARAMETER.type,
+      value: PARAMETER.value,
+      min: PARAMETER.min,
+      max: PARAMETER.max,
+    }),
+  ).toEqual([]);
 });
 
 test('the audit page shows the entry of the approval', async ({ page }) => {

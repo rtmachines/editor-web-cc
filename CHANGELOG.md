@@ -18,6 +18,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - The job `alerts` gets two conditions, `restore_test` and `base_backup`, after `backup_age` (ADR-0151).
 - `restore-test` writes the result file `/backups/restore-test.result` (ADR-0151).
 - `basebackup-once` writes the result file `/wal/base-backup.result` (ADR-0151).
+- The migration check `deploy/ci/migration_rewrite.py` rejects the form `add column of a constrained domain`. The check reports a domain with a volatile `DEFAULT` as the form `volatile default` (ADR-0153 amends ADR-0136 and ADR-0127 (p)).
+- The XSS corpus tests send each payload through the password fields of `POST /login` and `POST /me/password`. A guard test requires a corpus test or a stated reason for each field of each form struct in `recipe-web`.
+- The Compose smoke suite checks the exported content after the hash check. The check uses `exportContentFaults`. It covers the machine, reference, version, unit, and parameter values.
 
 ### Changed
 
@@ -46,6 +49,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The top directory of `/wal` gets the mode `0711` (ADR-0151).
 - Step 5 of the upgrade procedure in `reliability.md` §7.10 gets command 4: `docker compose exec walarchive basebackup-once` (ADR-0151).
 - The scan of the backup directory has a time limit. A scan that waits longer than `health.disk_check_interval` is a read fault (ADR-0151).
+- The CI job `test` runs the step "Check the production refusal of insecure cookies" (`bash deploy/ci/rust-tests.sh secure`) after "Run tests". The job `compose` no longer runs this step (ADR-0062 (b), ADR-0127).
 
 ### Fixed
 

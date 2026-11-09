@@ -2,7 +2,7 @@
 
 Reject column type changes, volatile defaults on added columns, and DO blocks.
 Reject SET NOT NULL without a current valid CHECK on the same table and column.
-ADR-0136 adds these 14 forms:
+ADR-0136 and ADR-0153 add these forms:
 - stored generated column
 - constraint without not valid
 - index without concurrently
@@ -17,6 +17,8 @@ ADR-0136 adds these 14 forms:
 - domain constraint without not valid
 - domain validate
 - lock table
+- add column of a constrained domain, including array types
+Reject volatile domain defaults when an added column has no DEFAULT of its own.
 Only an earlier unconditional CREATE TABLE in the same file exempts table changes.
 An earlier unconditional CREATE DOMAIN in the same file exempts domain changes.
 Check forms inside function and procedure bodies, even without a call.
@@ -41,6 +43,7 @@ DOLLAR = re.compile(r"\$(?:[A-Za-z_][A-Za-z_0-9]*)?\$")
 Checks = dict[str, tuple[str, bool]]
 Table = tuple[str, ...]
 Tables = dict[Table, Checks]
+DomainState = tuple[set[Table], set[Table], dict[Table, set[Table]]]
 
 
 def quoted_end(sql: str, start: int) -> int:
@@ -295,7 +298,12 @@ def volatile_default(action: list[str]) -> bool:
         depth += (token in {"(", "["}) - (token in {")", "]"})
     if "default" not in action:
         return False
-    tokens = default_expression(action[action.index("default") + 1:])
+    return volatile_expression(action[action.index("default") + 1:])
+
+
+def volatile_expression(tokens: list[str]) -> bool:
+    """Apply the same function rule to column and domain defaults."""
+    tokens = default_expression(tokens)
     for index, token in enumerate(tokens[:-1]):
         if tokens[index + 1] != "(" or not (WORD.fullmatch(token) or token.startswith('"')):
             continue
@@ -362,8 +370,41 @@ def added_forms(action: list[str]) -> list[str]:
     return constraint_forms(tail[1:], inline=True)
 
 
-def forbidden_forms(action: list[str], checks: Checks) -> list[str]:
+def domain_column_forms(action: list[str], domain_state: DomainState) -> list[str]:
+    """Resolve an added column type without granting a same-file domain exemption."""
+    if action[:1] != ["add"] or action[1:2] in (
+        ["constraint"], ["check"], ["foreign"], ["unique"], ["primary"], ["exclude"],
+    ):
+        return []
+    column = action[1:]
+    if column[:1] == ["column"]:
+        column = column[1:]
+    if column[:3] == ["if", "not", "exists"]:
+        column = column[3:]
+    if len(column) < 2:
+        return []
+    domain, tail = table_name(column[1:])
+    constrained, volatile_domains, domain_bases = domain_state
+    forms = []
+    if domain in volatile_domains and "default" not in outer_tokens(tail):
+        forms.append("volatile default")
+    visited: set[Table] = set()
+    pending = [domain]
+    while pending:
+        domain = pending.pop()
+        if domain in constrained:
+            forms.append("add column of a constrained domain")
+            break
+        if domain in visited:
+            continue
+        visited.add(domain)
+        pending.extend(domain_bases.get(domain, set()))
+    return forms
+
+
+def forbidden_forms(action: list[str], checks: Checks, domain_state: DomainState) -> list[str]:
     forms = added_forms(action) if action[:1] == ["add"] else []
+    forms.extend(domain_column_forms(action, domain_state))
     if volatile_default(action):
         forms.insert(0, "volatile default")
     if action[:2] == ["set", "tablespace"]:
@@ -388,14 +429,16 @@ def forbidden_forms(action: list[str], checks: Checks) -> list[str]:
     return []
 
 
-def alter_table(tokens: list[str], tables: Tables, created: set[Table]) -> list[str]:
+def alter_table(
+    tokens: list[str], tables: Tables, created: set[Table], domain_state: DomainState,
+) -> list[str]:
     table, tail = table_name(tokens, tables)
     actions = split_actions(tail)
     checks = tables.setdefault(table, {})
     for action in actions:
         update_checks(action, checks)
     forms = [] if table in created else [
-        form for action in actions for form in forbidden_forms(action, checks)
+        form for action in actions for form in forbidden_forms(action, checks, domain_state)
     ]
     for action in actions:
         if action[:2] == ["rename", "to"] and len(action) == 3:
@@ -448,18 +491,43 @@ def body_start(tokens: list[str]) -> Iterator[list[str]]:
 
 def body_forms(
     sql: str, tables: Tables, created: set[Table], domains: set[Table],
+    domain_state: DomainState,
+) -> list[str]:
+    """Share domain state within one body without changing the file state."""
+    constrained, volatile_domains, domain_bases = domain_state
+    return body_statement_forms(
+        sql, tables, created, domains,
+        (constrained.copy(), volatile_domains.copy(),
+         {domain: bases.copy() for domain, bases in domain_bases.items()}),
+    )
+
+
+def body_statement_forms(
+    sql: str, tables: Tables, created: set[Table], domains: set[Table],
+    domain_state: DomainState,
 ) -> list[str]:
     """Check body forms without treating conditional DDL as migration state."""
     forms: list[str] = []
+    constrained, volatile_domains, domain_bases = domain_state
     for _, statement in statements(sql):
         for tokens in body_start(statement):
             if tokens[:1] == ["execute"] and len(tokens) > 1:
                 body = quoted_body(tokens[1])
                 if body is not None:
-                    forms.extend(body_forms(body, tables, created, domains))
+                    forms.extend(body_statement_forms(body, tables, created, domains, domain_state))
             elif tokens[:2] not in (["do", "nothing"], ["do", "update"]):
                 local_tables = {table: checks.copy() for table, checks in tables.items()}
-                forms.extend(check_statement(tokens, local_tables, created.copy(), domains.copy()))
+                local_state = (constrained.copy(), volatile_domains.copy(),
+                               {domain: bases.copy() for domain, bases in domain_bases.items()})
+                forms.extend(check_statement(
+                    tokens, local_tables, created.copy(), domains.copy(), local_state,
+                ))
+                # Conditional DDL can add names and bases but cannot erase earlier body state.
+                local_constrained, local_volatile, local_bases = local_state
+                constrained.update(local_constrained)
+                volatile_domains.update(local_volatile)
+                for domain, bases in local_bases.items():
+                    domain_bases.setdefault(domain, set()).update(bases)
     return forms
 
 
@@ -502,8 +570,76 @@ def table_list_forms(
     return []
 
 
+def create_domain(tokens: list[str], domains: set[Table], domain_state: DomainState) -> None:
+    """Record domain constraints and inherited defaults across migration files."""
+    domain, tail = table_name(tokens)
+    if tail[:1] == ["as"]:
+        tail = tail[1:]
+    base, tail = table_name(tail)
+    domains.add(domain)
+    constrained, volatile_domains, domain_bases = domain_state
+    domain_bases[domain] = {base}
+    outer = outer_tokens(tail)
+    not_null = any(
+        outer[i:i + 2] == ["not", "null"] and outer[i - 1:i] != ["is"]
+        for i in range(len(outer))
+    )
+    if "check" in outer or not_null:
+        constrained.add(domain)
+    if "default" in outer:
+        if volatile_expression(tail[tail.index("default") + 1:]):
+            volatile_domains.add(domain)
+    elif base in volatile_domains:
+        volatile_domains.add(domain)
+
+
+def move_domain(
+    domain: Table, tail: list[str], domain_sets: tuple[set[Table], ...],
+    domain_bases: dict[Table, set[Table]],
+) -> None:
+    """Move tracked names for ALTER DOMAIN and ALTER TYPE."""
+    if len(tail) != 3:
+        return
+    if tail[:2] == ["rename", "to"]:
+        new = (*domain[:-1], identifier(tail[2]))
+    elif tail[:2] == ["set", "schema"]:
+        new = (identifier(tail[2]), domain[-1])
+    else:
+        return
+    for names in domain_sets:
+        if domain in names:
+            names.remove(domain)
+            names.add(new)
+    if domain in domain_bases:
+        domain_bases[new] = domain_bases.pop(domain)
+    for child, bases in list(domain_bases.items()):
+        if domain in bases:
+            domain_bases[child] = (bases - {domain}) | {new}
+
+
+def alter_domain(tokens: list[str], domains: set[Table], domain_state: DomainState) -> list[str]:
+    domain, tail = table_name(tokens)
+    constrained, volatile_domains, domain_bases = domain_state
+    check = tail[1:]
+    if check[:1] == ["constraint"]:
+        check = check[2:]
+    if tail[:3] == ["set", "not", "null"] or (
+        tail[:1] == ["add"] and (check[:1] == ["check"] or check[:2] == ["not", "null"])
+    ):
+        constrained.add(domain)
+    if tail[:2] == ["set", "default"] and volatile_expression(tail[2:]):
+        volatile_domains.add(domain)
+    move_domain(domain, tail, (domains, constrained, volatile_domains), domain_bases)
+    if domain not in domains and tail[:2] == ["validate", "constraint"]:
+        return ["domain validate"]
+    unsafe = tail[:3] == ["set", "not", "null"]
+    unsafe |= "constraint without not valid" in added_forms(tail) if tail[:1] == ["add"] else False
+    return ["domain constraint without not valid"] if domain not in domains and unsafe else []
+
+
 def other_forms(
     tokens: list[str], tables: Tables, created: set[Table], domains: set[Table],
+    domain_state: DomainState,
 ) -> list[str]:
     if tokens[:1] == ["create"]:
         return index_forms(tokens[1:], tables, created)
@@ -519,32 +655,22 @@ def other_forms(
         targets = tokens[2:] if tokens[1:2] == ["table"] else tokens[1:]
         return table_list_forms(targets, "lock table", tables, created)
     if tokens[:2] == ["alter", "domain"]:
+        return alter_domain(tokens[2:], domains, domain_state)
+    if tokens[:2] == ["alter", "type"]:
         domain, tail = table_name(tokens[2:])
-        if domain in domains and len(tail) == 3:
-            if tail[:2] == ["rename", "to"]:
-                new = (*domain[:-1], identifier(tail[2]))
-            elif tail[:2] == ["set", "schema"]:
-                new = (identifier(tail[2]), domain[-1])
-            else:
-                new = domain
-            domains.remove(domain)
-            domains.add(new)
-        if domain not in domains and tail[:2] == ["validate", "constraint"]:
-            return ["domain validate"]
-        unsafe = tail[:3] == ["set", "not", "null"]
-        unsafe |= "constraint without not valid" in added_forms(tail) if tail[:1] == ["add"] else False
-        if domain not in domains and unsafe:
-            return ["domain constraint without not valid"]
+        constrained, volatile_domains, domain_bases = domain_state
+        move_domain(domain, tail, (constrained, volatile_domains), domain_bases)
     return []
 
 
 def check_statement(
     tokens: list[str], tables: Tables, created: set[Table], domains: set[Table],
+    domain_state: DomainState,
 ) -> list[str]:
     if tokens[:1] == ["do"]:
         return ["DO block"]
     if tokens[:2] == ["alter", "table"]:
-        return alter_table(tokens[2:], tables, created)
+        return alter_table(tokens[2:], tables, created, domain_state)
     create = tokens[1:]
     if create[:2] == ["or", "replace"]:
         create = create[2:]
@@ -554,7 +680,7 @@ def check_statement(
             if token == "as":
                 body = quoted_body(create[index + 1])
                 if body is not None:
-                    forms.extend(body_forms(body, tables, created, domains))
+                    forms.extend(body_forms(body, tables, created, domains, domain_state))
         return forms
     temporary = create[:1] in (["temporary"], ["temp"])
     if create[:1] in (["temporary"], ["temp"], ["unlogged"]):
@@ -562,22 +688,27 @@ def check_statement(
     if tokens[:1] == ["create"] and create[:1] == ["table"]:
         create_table(create[1:], tables, created, temporary=temporary)
     elif tokens[:2] == ["create", "domain"]:
-        domain, _ = table_name(tokens[2:])
-        domains.add(domain)
+        create_domain(tokens[2:], domains, domain_state)
     elif tokens[:2] == ["drop", "domain"]:
+        constrained, volatile_domains, domain_bases = domain_state
         for target in split_actions(tokens[2:]):
             domain, _ = table_name(target)
-            domains.discard(domain)
+            for names in (domains, constrained, volatile_domains):
+                names.discard(domain)
+            domain_bases.pop(domain, None)
     elif tokens[:2] == ["drop", "table"]:
         for target in split_actions(tokens[2:]):
             table, _ = table_name(target, tables)
             tables.pop(table, None)
             created.discard(table)
-    return other_forms(tokens, tables, created, domains)
+    return other_forms(tokens, tables, created, domains, domain_state)
 
 
 def check_files(directory: Path) -> int:
     tables: Tables = {}
+    constrained: set[Table] = set()
+    volatile_domains: set[Table] = set()
+    domain_bases: dict[Table, set[Table]] = {}
     matched: set[tuple[str, str]] = set()
     failures = 0
     paths = sorted(path for path in directory.iterdir() if path.suffix == ".sql")
@@ -587,7 +718,9 @@ def check_files(directory: Path) -> int:
         try:
             sql = path.read_text(encoding="utf-8")
             for line, tokens in statements(sql):
-                for form in check_statement(tokens, tables, created, domains):
+                for form in check_statement(
+                    tokens, tables, created, domains, (constrained, volatile_domains, domain_bases),
+                ):
                     key = path.name, form
                     matched.add(key)
                     if key not in EXEMPT:

@@ -136,15 +136,6 @@ jobs:
       - name: Refuse one filesystem (D11 step 10)
         timeout-minutes: 10
         run: bash deploy/ci/same-filesystem.sh
-      - name: Install the toolchain of rust-toolchain.toml
-        run: rustup toolchain install
-      - name: Cache the Rust build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: compose-config
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Check the production refusal of insecure cookies
-        run: bash deploy/ci/rust-tests.sh secure
       # Allow 3 minutes for diagnostics and 5 minutes for cleanup.
       - name: Show failure diagnostics (D11 step 11)
         if: failure()
@@ -727,6 +718,8 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Run tests
         run: cargo test --workspace --all-features --locked
+      - name: Check the production refusal of insecure cookies
+        run: bash deploy/ci/rust-tests.sh secure
 
   doc:
     name: Documentation
