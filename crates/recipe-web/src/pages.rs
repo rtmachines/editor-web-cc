@@ -16,6 +16,8 @@ pub(crate) mod audit;
 mod diff;
 #[cfg(test)]
 mod diff_lang_tests;
+#[cfg(test)]
+mod diff_name_tests;
 mod diff_view;
 mod draft_reply;
 pub(crate) mod export;

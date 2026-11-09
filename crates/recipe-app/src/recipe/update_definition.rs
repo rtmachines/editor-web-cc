@@ -16,7 +16,7 @@ use crate::audit::{StateDiff, definition_diff};
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::AppError;
-use crate::plant::require_current_type;
+use crate::plant::{expr_names_row, require_current_type};
 use crate::ports::NonEmpty;
 
 /// A new value and new limits of an `UpdateParameterDefinition` request.
@@ -73,8 +73,10 @@ pub struct UpdateParameterDefinitionInput {
 ///
 /// The use case solves one problem: a definition change must reference a live unit and a type
 /// row that exist under the locks, and a type change must not keep an old value. It locks
-/// `machine FOR SHARE`, the recipe, the version, and the unit, then the class-2 advisory keys of
-/// the type, and writes the parameter and its limit rows (D17, ADR-0029).
+/// `machine FOR SHARE`, the recipe, and the version. The command checks a changed type against
+/// the current rules and the platform before the unit lock. A type that these checks refuse
+/// takes no unit lock and no class-2 lock. The command then locks the unit and the class-2
+/// advisory keys of the type, and writes the parameter and its limit rows (D17, ADR-0029).
 #[derive(Clone)]
 pub struct UpdateParameterDefinition {
     ctx: AppContext,
@@ -154,21 +156,22 @@ struct StagedDefinition {
     has_retype: bool,
 }
 
-/// Lock the unit, resolve the type, run the domain method, and build the diff.
+/// Check a changed type, lock the unit, resolve the type, run the domain method, and build the diff.
 async fn stage_definition(
     open: &mut OpenDraft,
     (user, meta): (&CurrentUser, &RequestMeta),
     input: UpdateParameterDefinitionInput,
 ) -> Result<StagedDefinition, AppError> {
     let parameter = open.parameter_id(input.key)?;
-    let unit = lock_live_unit(open, &input.unit_path).await?;
-    let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
-    if resolved.type_id != open.draft.parameter(input.key)?.plc_type() {
+    let stored_type = open.draft.parameter(input.key)?.plc_type();
+    if !expr_names_row(&open.types, stored_type, &input.type_expr) {
         require_current_type(&input.type_expr)?;
         input
             .type_expr
             .require_no_nested_array(open.draft.platform())?;
     }
+    let unit = lock_live_unit(open, &input.unit_path).await?;
+    let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
     let update = DefinitionUpdate {
         unit,
         tag: input.tag,

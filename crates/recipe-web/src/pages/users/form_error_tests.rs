@@ -217,3 +217,38 @@ async fn pages_users_new_form_has_the_id_of_the_out_of_band_form() {
     );
     assert!(!reply.body.contains("hx-swap-oob"), "{}", reply.body);
 }
+
+/// Return the opening tag of the submit button inside `#user-new-form`, or an empty text.
+fn submit_button_tag(body: &str) -> &str {
+    let Some(start) = body.find("<form id=\"user-new-form\"") else {
+        return "";
+    };
+    let form = &body[start..];
+    let form = form.find("</form>").map_or(form, |end| &form[..end]);
+    form.find("<button type=\"submit\"")
+        .and_then(|from| {
+            let rest = &form[from..];
+            rest.find('>').map(|end| &rest[..=end])
+        })
+        .unwrap_or("")
+}
+
+#[tokio::test]
+async fn pages_users_new_form_submit_button_has_the_fixed_id_in_the_page_and_the_refusal() {
+    let (fixture, admin) = world();
+    let page = get_as(&fixture, &admin, "/users/new").await;
+    let refusal = post_as(&fixture, &admin, "/users", "login=newuser&role=root", false).await;
+    assert_eq!(
+        refusal.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        refusal.body
+    );
+    for (name, body) in [("page", &page.body), ("refusal", &refusal.body)] {
+        let tag = submit_button_tag(body);
+        assert!(
+            tag.contains(" id=\"user-new-submit\""),
+            "{name}: {tag:?} in {body}"
+        );
+    }
+}

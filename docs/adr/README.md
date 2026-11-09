@@ -59,7 +59,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0047](0047-refused-form-page-and-place-of-the-toast.md) | Refused form page and place of the toast | Accepted. Amended by ADR-0049 (m) (scroll padding of a toast of several lines). Amended by ADR-0057 (no empty `#toast` on the answer of the backstop panic layer) | 2026-10-15 |
 | [0048](0048-browser-regression-suite-with-playwright.md) | Browser regression suite with Playwright | Accepted | 2026-10-16 |
 | [0049](0049-approval-preview-and-lifecycle-actions.md) | Approval preview and lifecycle actions | Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer). Amended by ADR-0110 (item (f): several danger actions on one page, a unique notice id for each) | 2026-10-16 |
-| [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted. Amended by ADR-0108 (item (l): the compare links of the version page). Amended by ADR-0118 (item (c): a stored row that breaks a newer rule shows with a field line) | 2026-10-16 |
+| [0050](0050-diff-of-two-versions.md) | Diff of two versions | Accepted. Amended by ADR-0108 (item (l): the compare links of the version page). Amended by ADR-0118 (item (c): a stored row that breaks a newer rule shows with a field line). Amended by ADR-0152 (item (d): the parameter name of two diff sections) | 2026-10-16 |
 | [0051](0051-audit-history-and-security-event-views.md) | Audit, history, and security event views | Accepted | 2026-10-16 |
 | [0052](0052-export-link-on-the-version-page.md) | Export link on the version page | Accepted. Amended by ADR-0119 (item (e): a notice for an `Approved` version that is not loadable) | 2026-10-22 |
 | [0053](0053-error-answers-of-the-export-routes.md) | Error answers of the export routes | Accepted. Amended by ADR-0057 (text answer of the backstop panic layer). Amended by ADR-0109 (items (a) and (d): the prefix `/export/`, a `401` answer without a redirect on the Basic routes) | 2026-10-22 |
@@ -161,6 +161,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0149](0149-overlap-check-after-a-layout-rule-change.md) | Overlap check after a change of the layout rules | Accepted. Amends ADR-0116 (e1) (overlap check of a command) and ADR-0119 (b) (address check of the export and the version page) | 2026-11-08 |
 | [0150](0150-no-per-login-limit-over-all-addresses.md) | No per-login limit over all addresses | Accepted. Amends ADR-0035 (known limit of code review M9) | 2026-11-08 |
 | [0151](0151-result-files-and-alerts-of-the-weekly-backup-checks.md) | Result files and alerts of the weekly backup checks | Accepted. Amends ADR-0060 (a) (ports) and (y) (start grace), ADR-0066 (m) (mode of `/wal`), and ADR-0067 (step 9). Also amends ADR-0068 (g), ADR-0083 (b) (step 5), and ADR-0103 (s) (step 4) | 2026-11-08 |
+| [0152](0152-shown-name-in-the-diff-sections.md) | Shown name in the diff sections | Accepted. Amends ADR-0050 (d) (the parameter name of two diff sections) | 2026-11-08 |
 
 ## Decision map
 
@@ -173,7 +174,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Permission check and fields of a form route | 0013 + 0041 + 0046 (form query with a purpose, check before the fields) + 0049 (l) (the five action routes read the body first) |
 | Pages of recipes, versions, and parameters | 0039 (value form, leaf grid) + 0040 (POST routes) + 0041 (error lists) + 0043 (lists, deleted recipe, translations, rebind, conflict) + 0044 (rebind bound). Also 0121 (the parameter table reads the value of every row of one page for the read check of 0118). Also 0122 (limits of the table check and of the version page check of an `Approved` version) |
 | Approval preview and lifecycle actions | 0049 (preview with blockers, danger disclosures, restore in the list) + 0052 (export link in the action area) + 0110 (several danger actions) |
-| Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags). Also 0108 (compare form and links of the version page). Also 0118 (field line for a stored row that breaks a newer rule) |
+| Diff of two versions | 0050 (domain diff, sections by kind, pages, SQL change flags). Also 0108 (compare form and links of the version page). Also 0118 (field line for a stored row that breaks a newer rule). Also 0152 (the shown name in the sections of the added and the old-only parameters) |
 | Audit, history, and security event pages | 0051 (read port, cursor, filters, scope of A20, formatted JSON) |
 | Isolation of queries | 0042 + 0050 (approval preview and diff in one snapshot). Also 0122 (e) (second transaction of the version page check of an `Approved` version) |
 | Export | 0019 + 0052 (link on the version page) + 0053 (JSON errors, session redirects) + 0054 (only `GET`) + 0055 (guard) + 0056 (permits). Also 0072 (no request timeout). Transfer clients: 0109 (HTTP Basic of an `ExportClient` account, machine list, unit scope document v2, prefix `/export/`). Also 0119 (`loadable` follows the current rules of values and addresses, notice on the version page). Also 0122 (h) (the version page check of an `Approved` version takes a permit of `export.permits`). Also 0149 (the export check and the version page check also run the overlap check of I20) |
@@ -190,7 +191,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Versions and aggregates | 0009 + 0016 + 0028 (version header, approval token, draft load, value and text clarifications) + 0029 (token owns the draft, two command clarifications). Also 0120 (g) (`CreateVersion` copies a base that breaks a newer rule) |
 | Recipe scope | 0010 |
 | Soft delete and delete rules | 0021 |
-| Translations | 0012 + 0043 (fixed list of language tags) + 0111 (the deletion swaps only its own row, a definition save replaces the English base text). Also 0126 (marker of the English base text in each UI language) |
+| Translations | 0012 + 0043 (fixed list of language tags) + 0111 (the deletion swaps only its own row, a definition save replaces the English base text). Also 0126 (marker of the English base text in each UI language). Also 0152 (the shown name in two diff sections) |
 | Permissions and approval | 0013 + 0109 (role `ExportClient` with `VersionExport` only) + 0022 + 0028 (approval token, `Approver`) + 0029 (failed record of a Forbidden event) + 0046 (form queries) |
 | Separation of duties on the preview | 0049 (one domain function for the preview and the approval) |
 | Dependencies of the application layer | 0029 + 0035 (Argon2, random bytes, semaphore) |

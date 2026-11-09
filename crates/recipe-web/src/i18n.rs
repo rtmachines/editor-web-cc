@@ -93,8 +93,9 @@ impl Lang {
 
     /// Return [`Self::translation_lang`] for a page handler, with the fault as `E-WEB-010`.
     ///
-    /// The three handlers that list parameters share this mapping. It solves one problem: a
-    /// program fault of the literal tag must not become a `RecipeError` answer of the user.
+    /// The three handlers that list parameters, the diff page, and the approval preview share this
+    /// mapping. It solves one problem: a program fault of the literal tag must not become a
+    /// `RecipeError` answer of the user.
     ///
     /// # Errors
     ///

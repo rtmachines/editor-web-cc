@@ -87,6 +87,11 @@ pub(super) fn parameter_row(parameter: &Parameter, trees: &TypeTrees) -> DiffPar
     };
     DiffPart::Parameter {
         name_en: parameter.name_en().clone(),
+        translated_names: parameter
+            .translations()
+            .iter()
+            .map(|(lang, translation)| (lang.clone(), translation.name.clone()))
+            .collect(),
         unit: parameter.unit(),
         plc_type: parameter.plc_type(),
         scalar,

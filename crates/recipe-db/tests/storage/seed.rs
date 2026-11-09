@@ -310,6 +310,47 @@ async fn global_primitive_rows(database: &TestDatabase) -> Vec<DbRow> {
     .unwrap()
 }
 
+/// Count the global rows (no machine) that have this name and list this platform.
+async fn count_global_rows(database: &TestDatabase, name: &str, platform: &str) -> i64 {
+    let mut conn = database.connect(Role::Migrator).await;
+    sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM plc_type \
+         WHERE machine_id IS NULL AND name = $1 AND $2 = ANY(platforms)",
+    )
+    .bind(name)
+    .bind(platform)
+    .fetch_one(&mut conn)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn each_platform_has_exactly_one_global_string_row() {
+    let database = TestDatabase::create().await;
+
+    for platform in ALL {
+        let count = count_global_rows(&database, "STRING", platform).await;
+
+        assert_eq!(count, 1, "global STRING rows of {platform}");
+    }
+}
+
+#[tokio::test]
+async fn each_platform_but_s7_300_has_exactly_one_global_wstring_row() {
+    let database = TestDatabase::create().await;
+
+    for platform in NO_S7_300 {
+        let count = count_global_rows(&database, "WSTRING", platform).await;
+
+        assert_eq!(count, 1, "global WSTRING rows of {platform}");
+    }
+    assert_eq!(
+        count_global_rows(&database, "WSTRING", "S7_300").await,
+        0,
+        "global WSTRING rows of S7_300"
+    );
+}
+
 #[tokio::test]
 async fn there_are_31_global_primitive_rows() {
     let database = TestDatabase::create().await;

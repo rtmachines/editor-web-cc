@@ -120,11 +120,14 @@ impl<'a> DiffPage<'a> {
         args.set("old", old.to_string());
         args.set("reference", recipe.reference().to_string());
         let title = t.with("diff-title", &args);
+        let translation = request
+            .lang()
+            .translation_lang_or_internal(request.request_id())?;
         Ok(Self {
             layout: Layout::for_session(t, request, title, Some(NavTarget::Recipes))?,
             t,
             deleted: recipe.is_deleted(),
-            diff: DiffView::new(t, &result.diff, &links),
+            diff: DiffView::new(t, &result.diff, &links, translation.as_ref()),
             no_jump: "",
             back_text: t.with_arg("diff-back", "number", new),
             back_href: format!("{base}/{new}"),

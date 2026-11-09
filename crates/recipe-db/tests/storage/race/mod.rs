@@ -7,4 +7,5 @@ mod approve;
 mod derived_locks;
 mod identity;
 mod order;
+mod refused_type;
 mod struct_name_case;
