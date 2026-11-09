@@ -2566,7 +2566,9 @@ class RunbookWalLineTests(unittest.TestCase):
         The substitution has four parts. The prefix `sudo ` and the tail `-printf ... | sort` of the find calls go away.
         The variable $SEGMENT_REGEX and the variable $HISTORY_REGEX become their quoted values from the script.
         The two tests join with -o and the test for the file .system-identifier joins as the third. The tail is the move.
+        The test for the file base-backup.result joins as the fourth, because move_segments moves it too (ADR-0151 (q)).
         """
+        self.assertIn('"$RECIPE_WALARCHIVE_DIR/base-backup.result"', shell_function("move_segments"))
         calls = {}
         for name, variable in (("archive_segments", "SEGMENT_REGEX"), ("archive_history", "HISTORY_REGEX")):
             found = re.search(
@@ -2579,7 +2581,8 @@ class RunbookWalLineTests(unittest.TestCase):
         segment = script_assignment("SEGMENT_REGEX")
         history = script_assignment("HISTORY_REGEX")
         return (
-            f"{calls['SEGMENT_REGEX']} \\( -regex '{segment}' -o -regex '{history}' -o -name '.system-identifier' \\)"
+            f"{calls['SEGMENT_REGEX']} \\( -regex '{segment}' -o -regex '{history}' -o -name '.system-identifier'"
+            " -o -name 'base-backup.result' \\)"
             ' -exec mv -t "$target" -- {} +'
         )
 
