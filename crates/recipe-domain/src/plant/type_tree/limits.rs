@@ -1,6 +1,6 @@
 //! Tests of the size limits of `resolve` (`reliability.md` section 7.11).
 
-use super::fixtures::{array_row, id, primitive_row, struct_row, types};
+use super::fixtures::{array_row, id, primitive_row, string_row, struct_row, types};
 use super::*;
 use crate::error_codes::ErrorCode;
 use crate::plant::limits::{MAX_DEPTH, MAX_LEAVES};
@@ -153,4 +153,83 @@ fn nested_array_name_shows_every_array_level() {
             TypeLimit::Leaves
         ))
     );
+}
+
+#[test]
+fn string_array_over_the_leaf_limit_names_the_string_length() {
+    // `E-PLT-018` names the root type in the text form of the `TypeExpr` grammar.
+    let rows = vec![string_row(2, 10), array_row(10, 2, &[(1, 16_385)])];
+    assert_eq!(
+        too_large(resolved(10, rows)),
+        Some((
+            "ARRAY[1..16385] OF STRING(10)".to_owned(),
+            TypeLimit::Leaves
+        ))
+    );
+}
+
+/// Metrics of a finished child row, built by hand to reach the overflow arms.
+fn finished(child: u128, leaves: u64, depth: u32) -> BTreeMap<PlcTypeId, Metrics> {
+    BTreeMap::from([(id(child), Metrics { leaves, depth })])
+}
+
+#[test]
+fn measure_reports_leaves_when_an_array_overflows_u64() {
+    // Fault injection: `check_limits` keeps every real child at 16384 leaves or fewer.
+    let row = array_row(10, 2, &[(1, 2)]);
+    let error = measure(&row, &finished(2, u64::MAX, 0)).unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_018);
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge {
+            limit: TypeLimit::Leaves,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn measure_reports_depth_when_an_array_overflows_u32() {
+    // Fault injection: `check_limits` keeps every real child at depth 32 or less.
+    let row = array_row(10, 2, &[(1, 2)]);
+    let error = measure(&row, &finished(2, 1, u32::MAX)).unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge {
+            limit: TypeLimit::Depth,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn measure_reports_depth_when_a_struct_overflows_u32() {
+    let row = struct_row(10, "ST_A", &[("x", 2)]);
+    let error = measure(&row, &finished(2, 1, u32::MAX)).unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge {
+            limit: TypeLimit::Depth,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn measure_reports_leaves_when_a_struct_overflows_u64() {
+    let row = struct_row(10, "ST_A", &[("x", 2), ("y", 2)]);
+    let error = measure(&row, &finished(2, u64::MAX, 0)).unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge {
+            limit: TypeLimit::Leaves,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn render_root_of_a_missing_row_is_its_identifier() {
+    // Fault injection: `walk` enters every row of the root chain before it renders the root.
+    assert_eq!(render_root(id(99), &types(Vec::new())), id(99).to_string());
 }

@@ -207,3 +207,40 @@ fn part_text_names_the_rule_of_the_part_before() {
     assert_eq!(reason, IecLiteralReason::Part);
     assert!(reason.to_string().contains("one unit of"), "{reason}");
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// domain-model.md section 2.1: each of the ten reasons gives its own fragment.
+#[test]
+fn reason_texts_are_distinct_lower_case_fragments_without_a_final_period() {
+    let reasons = [
+        IecLiteralReason::Grammar,
+        IecLiteralReason::Prefix,
+        IecLiteralReason::Unit,
+        IecLiteralReason::Sign,
+        IecLiteralReason::Part,
+        IecLiteralReason::Fraction,
+        IecLiteralReason::Calendar,
+        IecLiteralReason::Step,
+        IecLiteralReason::OutOfRange,
+        IecLiteralReason::NotOnPlatform,
+    ];
+    let texts: Vec<String> = reasons.iter().map(ToString::to_string).collect();
+    for text in &texts {
+        assert_fragment(text);
+    }
+    let distinct: std::collections::BTreeSet<&String> = texts.iter().collect();
+    assert_eq!(distinct.len(), reasons.len());
+}
+
+// domain-model.md section 2.1: a part has at most 19 digits (`digits := [0-9]{1,19}`).
+#[test]
+fn nineteen_digits_in_one_part_are_accepted() {
+    assert_eq!(count(Primitive::Time, "T#0000000000000000001ms"), Ok(1));
+}

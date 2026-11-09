@@ -184,3 +184,47 @@ fn format_texts_name_the_rule_for_the_first_character() {
         assert!(text.contains("letter or an underscore"), "{text}");
     }
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// domain-model.md section 2.1 and ADR-0143 (c): 1 to 64 characters, no reserved word.
+#[test]
+fn type_name_reason_texts_name_the_length_limit_and_the_reserved_words() {
+    assert_eq!(
+        TypeName::parse(&long_name(64)).map(|n| n.as_str().len()),
+        Ok(64)
+    );
+    assert_eq!(TypeName::parse(&long_name(65)), Err(TypeNameReason::Format));
+    assert_eq!(TypeName::parse("INT"), Err(TypeNameReason::Reserved));
+    let format = TypeNameReason::Format.to_string();
+    let reserved = TypeNameReason::Reserved.to_string();
+    assert_fragment(&format);
+    assert_fragment(&reserved);
+    assert!(format.contains("1 to 64"), "{format}");
+    assert!(reserved.contains("keyword"), "{reserved}");
+    assert_ne!(format, reserved);
+}
+
+// domain-model.md section 2.1 (LeafPath member): 1 to 64 characters.
+#[test]
+fn member_name_reason_text_names_the_length_limit() {
+    assert_eq!(
+        MemberName::parse(&long_name(64)).map(|n| n.as_str().len()),
+        Ok(64)
+    );
+    assert_eq!(
+        MemberName::parse(&long_name(65)),
+        Err(MemberNameReason::Format)
+    );
+    let member = MemberNameReason::Format.to_string();
+    assert_fragment(&member);
+    assert!(member.contains("1 to 64"), "{member}");
+    assert!(member.contains("member"), "{member}");
+    assert_ne!(member, TypeNameReason::Format.to_string());
+}

@@ -62,3 +62,19 @@ fn assert_round_trip(platform: PlcPlatform, text: &str) {
     assert_eq!(platform.to_string(), text);
     assert_eq!(platform.as_str(), text);
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// domain-model.md section 2.1 (PlcPlatform): the reason names the platform.
+#[test]
+fn unknown_reason_text_names_the_platform_as_a_lower_case_fragment() {
+    let text = PlcPlatformReason::Unknown.to_string();
+    assert_fragment(&text);
+    assert!(text.contains("platform"), "{text}");
+}

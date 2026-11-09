@@ -217,3 +217,60 @@ fn parse_refuses_the_s5time_literals_between_steps_above_an_edge() {
         );
     }
 }
+
+/// DATE counts days since 1970-01-01 (A43). Count 2 932 897 is 10000-01-01.
+const FIRST_DAY_OF_YEAR_10000: i128 = 2_932_897;
+
+#[test]
+fn time_type_of_a_literal_keeps_the_type_of_its_prefix() {
+    // domain-model.md section 2.1 IecLiteral: the prefix `LT#` names `LTIME`.
+    let ty = time_type(Primitive::Ltime);
+    assert_eq!(
+        literal(Primitive::Ltime, "LT#5ns").map(|value| value.time_type()),
+        Ok(ty)
+    );
+}
+
+#[test]
+fn stored_date_in_year_10000_is_out_of_range() {
+    // A43: a DATE count beyond year 9999 is outside the range of the type.
+    assert_eq!(
+        stored(Primitive::Date, FIRST_DAY_OF_YEAR_10000),
+        Err(IecLiteralReason::OutOfRange)
+    );
+}
+
+#[test]
+fn display_of_an_impossible_date_in_year_10000_writes_the_count() {
+    // Fault injection: no constructor builds this literal (`Display` fallback, `canonical.rs`).
+    let value = impossible(Primitive::Date, FIRST_DAY_OF_YEAR_10000);
+    assert_eq!(value.to_string(), FIRST_DAY_OF_YEAR_10000.to_string());
+}
+
+/// Build a literal of a type that is not a time type, to reach the arms that no constructor
+/// reaches.
+fn not_a_time_type(primitive: Primitive) -> TimeType {
+    TimeType {
+        primitive,
+        platform: PlcPlatform::S7_1500,
+    }
+}
+
+#[test]
+fn display_of_a_literal_of_a_non_time_primitive_writes_the_count() {
+    // Fault injection: `TimeType::of` never builds this type (`instant.rs` `spec_of`).
+    let value = IecLiteral {
+        ty: not_a_time_type(Primitive::Int),
+        count: 42,
+    };
+    assert_eq!(value.to_string(), "42");
+}
+
+#[test]
+fn a_stored_count_of_a_non_time_primitive_is_out_of_range() {
+    // Fault injection: `TimeType::of` never builds this type (`instant.rs` `split_count`).
+    assert_eq!(
+        IecLiteral::try_from((not_a_time_type(Primitive::Int), 0)),
+        Err(IecLiteralReason::OutOfRange)
+    );
+}

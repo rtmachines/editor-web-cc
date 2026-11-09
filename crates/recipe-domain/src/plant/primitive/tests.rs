@@ -116,3 +116,23 @@ fn bad_leaf_class_value_fails() {
     assert_eq!(LeafClass::parse("Numeric"), Err(LeafClassReason::Unknown));
     assert_eq!(LeafClass::parse(""), Err(LeafClassReason::Unknown));
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// domain-model.md section 2.1: a reason names the rule of its own type, so the two texts differ.
+#[test]
+fn unknown_reason_texts_name_their_type_as_lower_case_fragments() {
+    let primitive = PrimitiveReason::Unknown.to_string();
+    let class = LeafClassReason::Unknown.to_string();
+    assert_fragment(&primitive);
+    assert_fragment(&class);
+    assert!(primitive.contains("primitive"), "{primitive}");
+    assert!(class.contains("leaf class"), "{class}");
+    assert_ne!(primitive, class);
+}
