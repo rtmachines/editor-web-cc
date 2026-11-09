@@ -20,11 +20,13 @@ use uuid::Uuid;
 use crate::error::{AppError, StorageError};
 use crate::jobs::RunKind;
 use crate::jobs::alerts::{AlertPorts, AlertSettings, AlertSources, AlertVolumes, Alerts};
-use crate::memory::{DiskReading, MemoryBackupDirectory, MemoryDiskSpace, MemoryWebhook};
+use crate::memory::{
+    DiskReading, MemoryBackupDirectory, MemoryCheckResults, MemoryDiskSpace, MemoryWebhook,
+};
 use crate::operations::{AlertCounters, ReadinessState};
 use crate::ports::{
-    AlertCondition, AlertWebhook, OperationsReads, OperationsSnapshot, ReplicationState, RoleCheck,
-    SnapshotWindows, TimeStateKey, WebhookFault,
+    AlertCondition, AlertWebhook, CheckOutcome, CheckResult, OperationsReads, OperationsSnapshot,
+    ReplicationState, RoleCheck, ScheduledCheck, SnapshotWindows, TimeStateKey, WebhookFault,
 };
 
 /// The time of the database at the start of a test, in Unix seconds.
@@ -186,6 +188,8 @@ pub(super) struct Rig {
     pub disk: MemoryDiskSpace,
     /// The adapter that holds the newest set of the backup directory.
     pub backups: MemoryBackupDirectory,
+    /// The adapter that holds the newest result of each weekly check.
+    pub checks: MemoryCheckResults,
     /// The counters that the job reads.
     pub counters: AlertCounters,
     /// The readiness state that the job reads.
@@ -243,10 +247,14 @@ pub(super) fn rig_on(
     let operations = StubOperations::healthy();
     let disk = MemoryDiskSpace::default();
     let backups = MemoryBackupDirectory::default();
+    let checks = MemoryCheckResults::default();
     let counters = AlertCounters::default();
     let readiness = ReadinessState::new(at(-DAY));
     readiness.mark_ready();
     backups.set_newest(Some(at(-HOUR)));
+    for check in [ScheduledCheck::RestoreTest, ScheduledCheck::BaseBackup] {
+        checks.set_result(check, Some(check_result(CheckOutcome::Passed, at(-HOUR))));
+    }
     for (_, path) in volumes() {
         disk.set(&path, space(TOTAL / 2));
     }
@@ -256,6 +264,7 @@ pub(super) fn rig_on(
             webhook: port,
             disk: Arc::new(disk.clone()),
             backups: Arc::new(backups.clone()),
+            checks: Arc::new(checks.clone()),
         },
         AlertSources {
             counters: counters.clone(),
@@ -273,9 +282,18 @@ pub(super) fn rig_on(
         webhook,
         disk,
         backups,
+        checks,
         counters,
         readiness,
         job,
+    }
+}
+
+/// The result of a weekly check that ended with `outcome` at `finished_at`.
+pub(super) fn check_result(outcome: CheckOutcome, finished_at: Timestamp) -> CheckResult {
+    CheckResult {
+        outcome,
+        finished_at,
     }
 }
 

@@ -195,6 +195,7 @@ async fn a_panic_of_the_webhook_adapter_loses_no_export_alert() {
             }),
             disk: Arc::new(rig.disk.clone()),
             backups: Arc::new(rig.backups.clone()),
+            checks: Arc::new(rig.checks.clone()),
         },
         AlertSources {
             counters: rig.counters.clone(),

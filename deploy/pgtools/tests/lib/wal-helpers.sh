@@ -84,8 +84,10 @@ pid_alive() {
 
 # wal_listing prints name, type, size, mode, and mtime of every entry below the WAL directory.
 # The directory base itself is left out, because its mtime changes with every temp name.
+# The result file has separate checks. A temp result remains in the listing (ADR-0151, design D13).
 wal_listing() {
-  (cd "$W" && find . -mindepth 1 ! -path ./base ! -path './base/*' -printf '%p %y %s %m %T@\n' | LC_ALL=C sort)
+  (cd "$W" && find . -mindepth 1 ! -path ./base ! -path './base/*' \
+    ! -path ./base-backup.result -printf '%p %y %s %m %T@\n' | LC_ALL=C sort)
 }
 
 # json_lines_ok <file>: every line is one JSON object, and the file has a line.

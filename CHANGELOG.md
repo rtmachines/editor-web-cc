@@ -15,6 +15,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - The runbook has the query `deploy/db/check-platform-ranges.sql`. It lists the stored values, limits, and S7 addresses that the new ranges of `LDATE`, `LDT`, and the data block number refuse (ADR-0139, ADR-0140).
 - The runbook has the query `deploy/db/check-s7-layout-rules.sql`. It lists the stored arrays of an array on `S7_1200` and `S7_1500`, and the S7 addresses whose layout changes (ADR-0147, ADR-0148).
 - Tests pin the answer of the form readers to a changed form body: one line `E-WEB-008` (ADR-0138).
+- The job `alerts` gets two conditions, `restore_test` and `base_backup`, after `backup_age` (ADR-0151).
+- `restore-test` writes the result file `/backups/restore-test.result` (ADR-0151).
+- `basebackup-once` writes the result file `/wal/base-backup.result` (ADR-0151).
 
 ### Changed
 
@@ -40,6 +43,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - The documents give one unit for a string length. A `STRING(n)` counts characters, and a `WSTRING(n)` counts UTF-16 code units. The code already used these units (ADR-0137).
 - The documents record that `STRING(n)` and `WSTRING(n)` on `CodesysIec` and `TwinCat3` stay at the length 1 to 255. They also give `LTOD` the range `0` to `86_399_999_999_999` ns and every `STRING` and `WSTRING` the width `B`. The code does not change (ADR-0141, ADR-0139).
 - The documents record that the login throttle has no per-login limit over all addresses. The alert `failed_logins` is the control (ADR-0150). The behavior does not change.
+- The top directory of `/wal` gets the mode `0711` (ADR-0151).
+- Step 5 of the upgrade procedure in `reliability.md` §7.10 gets command 4: `docker compose exec walarchive basebackup-once` (ADR-0151).
+- The scan of the backup directory has a time limit. A scan that waits longer than `health.disk_check_interval` is a read fault (ADR-0151).
 
 ### Fixed
 

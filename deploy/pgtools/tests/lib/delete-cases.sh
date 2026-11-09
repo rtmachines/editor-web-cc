@@ -1,5 +1,32 @@
 # Sourced by backup-test. It holds the cases of backup-once in which a delete of cleanup fails.
 
+# Retention ignores both result names, even when they are older than its limit (ADR-0151 (d)).
+case_retention_keeps_restore_results() {
+  new_case retention-restore-results
+  local file before old_daily old_now
+  make_set "" 45
+  old_daily=$LAST_BASE
+  make_set "" 40
+  make_set _now 45
+  old_now=$LAST_BASE
+  for file in restore-test.result .tmp-restore-test.result; do
+    printf '{"result":"failed","finished_at":"2026-01-01T00:00:00Z"}\n' >"$B/$file"
+    touch -d '45 days ago' "$B/$file"
+  done
+  before=$(listing | grep -E '^\./(restore-test\.result|\.tmp-restore-test\.result) ')
+  run_script -- backup-once ""
+  expect_eq "retention (restore results): exit code" "$RC" 0
+  expect_ok "retention (restore results): new set exists" set_exists "recipe_$TS"
+  expect_ok "retention (restore results): older daily set goes" set_absent "$old_daily"
+  expect_ok "retention (restore results): old now set goes" set_absent "$old_now"
+  expect_eq "retention (restore results): both files are unchanged" \
+    "$(listing | grep -E '^\./(restore-test\.result|\.tmp-restore-test\.result) ')" "$before"
+  for file in restore-test.result .tmp-restore-test.result; do
+    expect_eq "retention (restore results): $file content stays" "$(cat "$B/$file" 2>/dev/null)" \
+      '{"result":"failed","finished_at":"2026-01-01T00:00:00Z"}'
+  done
+}
+
 # delete_fails_checks <label> <temp files that stay>: the rm stub refuses each temp file.
 delete_fails_checks() {
   local left refused

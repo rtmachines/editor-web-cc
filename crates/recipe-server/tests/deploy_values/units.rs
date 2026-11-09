@@ -33,6 +33,8 @@ pub enum Kind {
 }
 
 const DURATION_KEYS: &[&str] = &[
+    "restore_test.max_age_alert",
+    "basebackup.max_age_alert",
     "pitr_volume.start_timeout",
     "pitr_volume.stop_timeout",
     "session.idle_timeout",
@@ -154,6 +156,7 @@ const LABEL_KEYS: &[&str] = &["login.delay_formula", "audit.check_time", "backup
 /// The word counts only for its own key. Any other word after the number is a fault.
 const EXPLAINED: &[(&str, &str)] = &[
     ("container.small_cpus", "each"),
+    ("check_result.max_bytes", "bytes"),
     ("login.delay_after_failures", "failures"),
     ("login.ip_budget", "failures"),
     ("login_attempt.purge_batch", "rows"),

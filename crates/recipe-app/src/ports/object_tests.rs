@@ -15,9 +15,10 @@ use time::OffsetDateTime;
 
 use super::{
     AlertCondition, AlertWebhook, AuditChainReads, BackupDirectory, BackupFault, BatchOutcome,
-    ChainHead, ChainPosition, ChainSeq, DiskFault, DiskSpace, FreeSpace, MaintenanceStore,
-    NotReadyCause, OperationsReads, OperationsSnapshot, ReadOnlySwitch, Readiness, ReadinessProbe,
-    ReplicationState, RoleCheck, SnapshotWindows, StateValue, TimeStateKey, WebhookFault,
+    ChainHead, ChainPosition, ChainSeq, CheckResultFault, CheckResults, DiskFault, DiskSpace,
+    FreeSpace, MaintenanceStore, NotReadyCause, OperationsReads, OperationsSnapshot,
+    ReadOnlySwitch, Readiness, ReadinessProbe, ReplicationState, RoleCheck, ScheduledCheck,
+    SnapshotWindows, StateValue, TimeStateKey, WebhookFault,
 };
 use crate::error::StorageError;
 
@@ -35,6 +36,7 @@ fn every_port_is_send_and_sync() {
     assert_send_sync::<dyn ReadinessProbe>();
     assert_send_sync::<dyn DiskSpace>();
     assert_send_sync::<dyn BackupDirectory>();
+    assert_send_sync::<dyn CheckResults>();
     assert_send_sync::<dyn AlertWebhook>();
     assert_send_sync::<dyn ReadOnlySwitch>();
 }
@@ -312,6 +314,33 @@ fn each_disk_fault_has_its_display_text() {
         unreadable.to_string(),
         "The free disk space cannot be read."
     );
+}
+
+#[test]
+fn the_check_result_fault_has_its_display_text_without_a_path() {
+    let cases = [
+        (ScheduledCheck::RestoreTest, "restore test"),
+        (ScheduledCheck::BaseBackup, "base backup"),
+    ];
+    for (check, name) in cases {
+        let unreadable = CheckResultFault::Unreadable {
+            check,
+            source: io::Error::new(io::ErrorKind::NotFound, "/backups/restore-test-result.json"),
+        };
+        let malformed = CheckResultFault::Malformed { check };
+        assert_eq!(
+            unreadable.to_string(),
+            format!("The result file of the {name} cannot be read.")
+        );
+        assert_eq!(
+            malformed.to_string(),
+            format!("The result file of the {name} is malformed.")
+        );
+        for text in [unreadable.to_string(), malformed.to_string()] {
+            assert!(!text.contains('/') && !text.contains('\\'));
+            assert!(!text.contains("json"));
+        }
+    }
 }
 
 #[test]

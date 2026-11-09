@@ -74,6 +74,9 @@ case_wal_missing_marker() {
     wal_run -- "$s"
     wal_expect_refused "$s without marker" "$before"
     expect_eq "$s without marker: message" "$(grep -c 'marker file' "$CASE/out" || true)" "1"
+    expect_eq "$s without marker: directory mode stays 700" "$(stat -c %a "$W")" 700
+    expect_no "$s without marker: no result file" test -e "$W/base-backup.result"
+    expect_no "$s without marker: no temp result" test -e "$W/.tmp-base-backup.result"
   done
   wal_new_case marker-dir
   rm -f -- "$W/.walarchive-marker"
@@ -99,6 +102,7 @@ case_wal_entry_args() {
   wal_run STUB_SUPERCRONIC_SLEEP=2 -- walarchive-entry
   local log=$CASE/stub/log
   expect_eq "entry: exit code when supercronic ends" "$RC" "1"
+  expect_eq "entry: directory mode after marker check" "$(stat -c %a "$W")" 711
   expect_eq "entry: one ERROR line" "$(error_count "$CASE/out")" "1"
   expect_ok "entry: JSON lines" json_lines_ok "$CASE/out"
   expect_eq "entry: pg_receivewal started once" "$(count_events 'pg_receivewal start')" "1"
@@ -156,6 +160,7 @@ case_wal_entry_crontab_missing() {
   before=$(wal_snapshot)
   wal_run -- walarchive-entry
   wal_expect_refused "entry without crontab" "$before"
+  expect_eq "entry without crontab: mode changes after marker check" "$(stat -c %a "$W")" 711
 }
 
 case_wal_entry_secret_escape() {

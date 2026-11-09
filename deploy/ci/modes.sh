@@ -5,7 +5,7 @@ umask 077
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 [[ $(sudo stat -c %a "$RECIPE_BACKUP_DIR") == 755 ]] || fail "the backup directory mode is not 755"
-[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 700 ]] || fail "the WAL archive directory mode is not 700"
+[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 711 ]] || fail "the WAL archive directory mode is not 711"
 found=false
 for manifest in "$RECIPE_BACKUP_DIR"/recipe_*_now.dump.sha256
 do

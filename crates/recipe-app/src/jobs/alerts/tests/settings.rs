@@ -22,6 +22,14 @@ fn the_defaults_equal_the_rows_of_the_settings_table() {
         settings.audit_max_check_age,
         Duration::from_secs(26 * 60 * 60)
     );
+    assert_eq!(
+        settings.restore_test_max_age_alert,
+        Duration::from_secs(8 * 24 * 60 * 60)
+    );
+    assert_eq!(
+        settings.basebackup_max_age_alert,
+        Duration::from_secs(8 * 24 * 60 * 60)
+    );
     assert_eq!(settings.wal_max_lag_bytes, 16 * 1024 * 1024);
     assert_eq!(settings.disk_warn_percent, 15);
 }

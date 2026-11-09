@@ -5,6 +5,7 @@
 //! real wait.
 
 mod borders;
+mod checks;
 mod conditions;
 mod disks;
 mod during;

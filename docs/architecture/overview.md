@@ -122,7 +122,7 @@ The supervised jobs follow the same rule (ADR-0060):
 
 - `recipe-app` holds the ports of the jobs and one iteration of each job (`run_once`). It has no loop and no schedule.
 - `recipe-db` implements the ports that read or write the database. `recipe-web::ReadOnlyMode` implements `ReadOnlySwitch`.
-- `recipe-server` implements `DiskSpace`, `BackupDirectory`, and `AlertWebhook`. It holds the supervisor, the schedules, the watchdog thread, the panic hook, and the wiring.
+- `recipe-server` implements `DiskSpace`, `BackupDirectory`, `CheckResults`, and `AlertWebhook`. It holds the supervisor, the schedules, the watchdog thread, the panic hook, and the wiring.
 - `recipe-server` has a library target with every module and a thin `main.rs`. The tests of the crate import the modules from the library.
 
 Internal operations have no permission and no row of the matrix: `EnsureDerivedType`, the six supervised jobs, and the startup settings comparison `CompareSettings`. `api.md` section 3.2 lists them.

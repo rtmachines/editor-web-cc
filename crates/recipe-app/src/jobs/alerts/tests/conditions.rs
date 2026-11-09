@@ -1,13 +1,13 @@
-//! Tests of the ten conditions of `reliability.md` section 3.7 and their borders.
+//! Tests of the twelve conditions of `reliability.md` section 3.7 and their borders.
 
 use tracing::Level;
 
 use super::support::{
-    DAY, HOUR, LogCapture, MINUTE, WINDOW_26H, at, earlier, rig, run, sent_by_one_run, set_time,
-    space, times,
+    DAY, HOUR, LogCapture, MINUTE, WINDOW_26H, at, check_result, earlier, rig, run,
+    sent_by_one_run, set_time, space, times,
 };
 use crate::jobs::RunKind;
-use crate::ports::{AlertCondition, ReplicationState};
+use crate::ports::{AlertCondition, CheckOutcome, ReplicationState, ScheduledCheck};
 
 /// The default `wal.max_lag_bytes`: 16 MiB.
 const MAX_LAG: u64 = 16 * 1024 * 1024;
@@ -201,7 +201,7 @@ async fn each_condition_writes_one_warn_line_with_its_name_in_the_field_alert() 
 }
 
 #[tokio::test]
-async fn all_ten_conditions_keep_the_names_of_adr_0075_in_the_log_and_in_the_call() {
+async fn all_twelve_conditions_keep_the_names_of_adr_0075_in_the_log_and_in_the_call() {
     let (logs, _guard) = LogCapture::install();
     let rig = rig();
     make_every_condition_active(&rig);
@@ -210,6 +210,8 @@ async fn all_ten_conditions_keep_the_names_of_adr_0075_in_the_log_and_in_the_cal
         "panics",
         "not_ready",
         "backup_age",
+        "restore_test",
+        "base_backup",
         "replication",
         "low_disk",
         "failed_logins",
@@ -237,7 +239,7 @@ async fn the_run_kind_has_no_effect() {
     assert_eq!(rig.webhook.calls().len(), 2);
 }
 
-/// Put the system into a state in which each of the ten conditions is active.
+/// Put the system into a state in which each of the twelve conditions is active.
 fn make_every_condition_active(rig: &super::support::Rig) {
     rig.operations.edit(|snapshot| {
         snapshot.replication = ReplicationState {
@@ -250,6 +252,10 @@ fn make_every_condition_active(rig: &super::support::Rig) {
         snapshot.audit_last_check_at = Some(earlier(times(3, DAY)));
     });
     rig.backups.set_newest(Some(earlier(times(3, DAY))));
+    for check in [ScheduledCheck::RestoreTest, ScheduledCheck::BaseBackup] {
+        rig.checks
+            .set_result(check, Some(check_result(CheckOutcome::Failed, at(-HOUR))));
+    }
     rig.readiness.mark_not_ready(at(-HOUR));
     rig.disk.set(&super::support::backups_path(), space(100));
     rig.counters.record_export_hash_mismatch();

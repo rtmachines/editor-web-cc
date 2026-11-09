@@ -21,6 +21,7 @@ case_restore_happy_path() {
   expect_eq "happy: order of events" "$(event_sequence)" \
     "${SEQ_TO_POST_DATA}EVENT counts,EVENT chain,EVENT login recipe_app,EVENT login recipe_app,EVENT login recipe_backup,EVENT login recipe_backup,EVENT login recipe_migrator,EVENT login recipe_migrator,EVENT login recipe_replicator,EVENT login recipe_replicator,EVENT pg_ctl stop,"
   expect_eq "happy: marker, lock, and set files are unchanged" "$(set_listing)" "$before"
+  restore_result_checks "happy result" passed
   expect_ok "happy: the scratch directory root stays" test -d "$B/.scratch"
   expect_eq "happy: no scratch run directory stays" "$(scratch_runs)" 0
   expect_eq "happy: pgpass directory is empty" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
@@ -141,6 +142,7 @@ case_restore_cleanup_fails() {
   expect_ok "cleanup fails: the ERROR line names the scratch directory" \
     error_has "cannot delete the scratch directory"
   expect_eq "cleanup fails: marker, lock, and set files are unchanged" "$(set_listing)" "$before"
+  restore_result_checks "cleanup fails result" failed
   expect_eq "cleanup fails: the server is stopped" "$(event_count 'pg_ctl stop')" 1
 }
 

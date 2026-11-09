@@ -12,10 +12,23 @@ fn faults() -> [WebhookFault; 4] {
 }
 
 #[test]
-fn there_are_ten_distinct_alert_conditions() {
+fn there_are_twelve_distinct_alert_conditions() {
     let names: HashSet<&str> = AlertCondition::ALL.iter().map(|c| c.name()).collect();
-    assert_eq!(AlertCondition::ALL.len(), 10);
-    assert_eq!(names.len(), 10);
+    assert_eq!(AlertCondition::ALL.len(), 12);
+    assert_eq!(names.len(), 12);
+}
+
+#[test]
+fn the_two_check_conditions_follow_backup_age_in_the_order_of_the_table() {
+    let position = |condition: AlertCondition| {
+        AlertCondition::ALL
+            .iter()
+            .position(|c| *c == condition)
+            .unwrap()
+    };
+    let backup_age = position(AlertCondition::BackupAge);
+    assert_eq!(position(AlertCondition::RestoreTest), backup_age + 1);
+    assert_eq!(position(AlertCondition::BaseBackup), backup_age + 2);
 }
 
 #[test]
@@ -36,6 +49,8 @@ fn literal_name(condition: AlertCondition) -> &'static str {
         AlertCondition::Panics => "panics",
         AlertCondition::NotReady => "not_ready",
         AlertCondition::BackupAge => "backup_age",
+        AlertCondition::RestoreTest => "restore_test",
+        AlertCondition::BaseBackup => "base_backup",
         AlertCondition::Replication => "replication",
         AlertCondition::LowDisk => "low_disk",
         AlertCondition::FailedLogins => "failed_logins",

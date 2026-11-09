@@ -4,6 +4,7 @@
 //! the event log of the stub. They never open a database, a real signal, or a port of the plan.
 
 mod catchup;
+mod check_results;
 mod close;
 mod counters;
 mod exit_code;

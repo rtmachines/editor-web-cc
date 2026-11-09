@@ -76,6 +76,7 @@ case_suffixes
 case_retention_all_old
 case_retention_mixed
 case_retention_keeps_temp_and_foreign
+case_retention_keeps_restore_results
 failed_run_case dump-fails STUB_PG_DUMP_FAIL=1
 failed_run_case dumpall-fails STUB_DUMPALL_FAIL=1
 case_psql_not_usable

@@ -249,13 +249,20 @@ async fn webhook_ten_slow_calls_end_within_about_one_timeout_and_run_at_the_same
 
     let results = send(&server, Some(pki::CA_A), timeout, &AlertCondition::ALL).await;
 
-    assert_eq!(results, vec![Err(WebhookFault::Timeout); 10]);
+    assert_eq!(
+        results,
+        vec![Err(WebhookFault::Timeout); AlertCondition::ALL.len()]
+    );
     assert!(started.elapsed() >= timeout);
     assert!(
         started.elapsed() < Duration::from_secs(6),
-        "ten calls in sequence would take 10 s"
+        "the calls in sequence would take one timeout each"
     );
-    assert_eq!(server.peak(), 10, "all ten requests were open together");
+    assert_eq!(
+        server.peak(),
+        AlertCondition::ALL.len(),
+        "all requests were open together"
+    );
 }
 
 #[tokio::test]
@@ -386,7 +393,7 @@ fn webhook_accepts_a_ca_file_with_a_certificate_among_other_sections() {
 async fn webhook_no_webhook_adapter_answers_ok_for_every_condition() {
     let results = NoWebhook.send_all(&AlertCondition::ALL).await;
 
-    assert_eq!(results, vec![Ok(()); 10]);
+    assert_eq!(results, vec![Ok(()); AlertCondition::ALL.len()]);
     assert!(NoWebhook.send_all(&[]).await.is_empty());
 }
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # basebackup-once: take one checked base backup into the WAL archive disk (ADR-0068 (f) to (k)).
+# The exit trap writes /wal/base-backup.result after cleanup (ADR-0151).
 #
 # Layout of the disk (design D10):
 #   $WAL_DIR/<segment>                WAL segments of pg_receivewal, at the top
@@ -21,7 +22,7 @@
 #   WAL_DIR                  the WAL archive disk, default /wal
 #   WALARCHIVE_PGPASS_DIR    the tmpfs for the pgpass file, default /run/pgpass
 #   WALARCHIVE_SECRET_FILE   the password file of recipe_replicator, default /run/secrets/replicator_password
-#   WALARCHIVE_LIB_DIR       the directory of wal-identity.sh, default /etc/pgtools
+#   WALARCHIVE_LIB_DIR       the directory of wal-identity.sh and check-result.sh, default /etc/pgtools
 #   PGHOST PGPORT PGUSER     the connection, default db, 5432, recipe_replicator
 set -euo pipefail
 umask 077
@@ -44,6 +45,7 @@ export PGPORT=${PGPORT:-5432}
 export PGUSER=${PGUSER:-recipe_replicator}
 
 error_logged=0
+result_armed=0
 work_dir=""
 tmp_dir=""
 BASE_DIR=$WAL_DIR/base
@@ -61,6 +63,9 @@ fail() {
   exit 1
 }
 
+# shellcheck source=../lib/check-result.sh
+source "$LIB_DIR/check-result.sh" || fail "cannot load check-result.sh"
+
 # remove_tree <path>: delete one base backup directory after a check of the prefix and the grammar.
 # The temp name of this run and a final name of the grammar are the only names that pass.
 remove_tree() {
@@ -77,10 +82,14 @@ remove_tree() {
   fi
 }
 
-# cleanup removes the pgpass file and the temp base backup of this run. It never touches another name.
+# cleanup removes the pgpass file and the temp base backup of this run. It writes the result last.
 cleanup() {
-  local status=$?
+  local status=$? result=failed
   trap - EXIT
+  # Record signals without skipping cleanup or the final result write.
+  trap 'status=143' TERM
+  trap 'status=130' INT
+  trap 'status=129' HUP
   case $work_dir in
     "$PGPASS_DIR"/run.*)
       rm -f -- "${work_dir:?}/pgpass" || true
@@ -88,7 +97,8 @@ cleanup() {
       ;;
   esac
   if [ -n "$tmp_dir" ] && [ -d "$tmp_dir" ]; then
-    if ! remove_tree "$tmp_dir"; then
+    # A path check can call fail, so keep its exit inside a subshell.
+    if ! ( remove_tree "$tmp_dir" ); then
       log ERROR "cannot delete the temp base backup of this run" "\"base\":\"${tmp_dir##*/}\""
       status=1
     fi
@@ -96,9 +106,19 @@ cleanup() {
   if [ "$status" -ne 0 ] && [ "$error_logged" -eq 0 ]; then
     log ERROR "base backup run failed unexpectedly" "\"exit_code\":$status"
   fi
+  if [ "$result_armed" -eq 1 ]; then
+    [ "$status" -ne 0 ] || result=passed
+    if ! write_check_result "$WAL_DIR" base-backup.result "$result"; then
+      log ERROR "cannot write the base backup result"
+      status=1
+    fi
+  fi
   exit "$status"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
+trap 'exit 129' HUP
 
 # check_secret_file <path>: one line, no carriage return, not empty (ADR-0031).
 # The checks use counts only, so the password never enters a shell variable.
@@ -210,6 +230,7 @@ if [ ! -f "$WAL_DIR/$MARKER_NAME" ] || [ -L "$WAL_DIR/$MARKER_NAME" ]; then
 fi
 exec 9>>"$WAL_DIR/$LOCK_NAME"
 flock -n 9 || fail "another base backup run holds the lock"
+result_armed=1
 if [ ! -e "$BASE_DIR" ] && [ ! -L "$BASE_DIR" ]; then
   mkdir -- "$BASE_DIR"
 fi

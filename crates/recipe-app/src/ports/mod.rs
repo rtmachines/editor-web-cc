@@ -7,6 +7,7 @@ mod attempt;
 mod audit_chain;
 mod audit_reads;
 mod backup_directory;
+mod check_results;
 mod clock;
 mod diff_reads;
 mod disk;
@@ -49,6 +50,9 @@ pub use audit_reads::{
     SecurityEventId, SecurityEventRow, TimeRange,
 };
 pub use backup_directory::{BackupDirectory, BackupFault};
+pub use check_results::{
+    CheckOutcome, CheckResult, CheckResultFault, CheckResults, ScheduledCheck,
+};
 pub use clock::Clock;
 pub use diff_reads::{ChangeFlags, DiffReads, DiffSides};
 pub use disk::{DiskFault, DiskSpace, FreeSpace};

@@ -11,11 +11,13 @@
 #![forbid(unsafe_code)]
 
 pub mod backups;
+pub mod check_results;
 pub mod clock;
 pub mod coded;
 pub mod config;
 pub mod create_admin;
 pub mod disk;
+mod limited_read;
 pub mod listener;
 pub mod logging;
 pub mod migrate;

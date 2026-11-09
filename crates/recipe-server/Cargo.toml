@@ -34,9 +34,12 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 serde = { workspace = true, features = ["derive"] }
 # The system clock and the manifest times are `OffsetDateTime` values (design D3).
-time = { workspace = true }
+time = { workspace = true, features = ["parsing", "macros"] }
 # The adapters of the ports `DiskSpace` and `BackupDirectory` implement `#[async_trait]` traits.
 async-trait = { workspace = true }
+# ADR-0151 (b): the reader of a result file parses one JSON line. The test of the JSON shape of an
+# error line (tests/log_error_json.rs) also uses it.
+serde_json = { workspace = true }
 # ADR-0133 (f): the set of stalled paths of the disk adapter is a `parking_lot::Mutex`.
 parking_lot = { workspace = true }
 
@@ -55,8 +58,6 @@ recipe-app = { workspace = true, features = ["memory"] }
 testcontainers = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tower-http = { workspace = true, features = ["catch-panic"] }
-# The test of the JSON shape of an error line parses the line (tests/log_error_json.rs).
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

@@ -94,7 +94,7 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
     for instruction in [
         "COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/",
         "COPY --chmod=0644 restore-code.sql restore-code.expected restore-roles.sql restore-roles.expected /etc/pgtools/",
-        "COPY --chmod=0644 lib/globals-grammar.sh lib/recovery-steps.sh lib/restore-steps.sh lib/wal-identity.sh /etc/pgtools/",
+        "COPY --chmod=0644 lib/globals-grammar.sh lib/recovery-steps.sh lib/restore-steps.sh lib/wal-identity.sh lib/check-result.sh /etc/pgtools/",
         "COPY --chmod=0644 --from=db cluster-access.sh /etc/pgtools/cluster-access.sh",
     ] {
         let copy = position(instruction);
@@ -468,7 +468,7 @@ fn deploy_values_ci_diagnostics_name_mode_failures() {
     let script = script.replace("\\\n", " ");
     for check in [
         r#"[[ $(sudo stat -c %a "$RECIPE_BACKUP_DIR") == 755 ]]"#,
-        r#"[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 700 ]]"#,
+        r#"[[ $(sudo stat -c %a "$RECIPE_WALARCHIVE_DIR") == 711 ]]"#,
         r#"test "$(stat -c %a "$path")" = 700"#,
         r#""$found""#,
     ] {
