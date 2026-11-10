@@ -156,3 +156,37 @@ fn only_export_client_is_not_a_person() {
 fn role_reason_displays_a_sentence() {
     assert!(!RoleReason::Unknown.to_string().is_empty());
 }
+
+#[test]
+fn api_3_1_permission_names_equal_the_enum_of_the_document_in_order() {
+    // Oracle: the enum of `api.md` section 3.1, typed by hand.
+    let documented = [
+        "RecipeView",
+        "RecipeCreate",
+        "RecipeEdit",
+        "RecipeDelete",
+        "RecipeRestore",
+        "VersionCreate",
+        "VersionApprove",
+        "VersionRetire",
+        "VersionDiscard",
+        "VersionExport",
+        "VersionExportHistory",
+        "ParameterEdit",
+        "MachineManage",
+        "UnitManage",
+        "UdtManage",
+        "UserManage",
+        "LoginUnlock",
+        "AuditView",
+        "AuditViewRecipes",
+    ];
+    let names: Vec<String> = Permission::ALL.iter().map(ToString::to_string).collect();
+    assert_eq!(names, documented);
+}
+
+#[test]
+fn api_3_1_permission_names_are_distinct() {
+    let names: BTreeSet<String> = Permission::ALL.iter().map(ToString::to_string).collect();
+    assert_eq!(names.len(), Permission::ALL.len());
+}

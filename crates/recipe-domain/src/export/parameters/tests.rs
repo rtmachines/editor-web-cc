@@ -405,3 +405,71 @@ fn a_type_that_the_trees_do_not_hold_gives_e_rcp_020_with_an_e_plt_013_item() {
     let error = build(PlcPlatform::S7_300, &parameters).unwrap_err();
     assert_eq!(item_codes(error), [ErrorCode::PLT_013]);
 }
+
+#[test]
+fn api_6_3_a_stored_null_stays_a_json_null_in_member_order() {
+    // A damaged stored value reaches the walk before the structure check (ADR-0119 (k)).
+    let text = entry_text(&pair(), json!({ "zeta": null, "alpha": true }));
+    assert!(
+        text.ends_with(r#""value":{"zeta":null,"alpha":true}}"#),
+        "{text}"
+    );
+}
+
+#[test]
+fn api_6_3_a_stored_null_at_a_leaf_stays_a_json_null() {
+    let text = entry_text(&leaf(INT, Primitive::Int), json!(null));
+    assert!(text.ends_with(r#""value":null}"#), "{text}");
+}
+
+#[test]
+fn api_6_1_an_array_value_at_a_leaf_type_keeps_its_order_and_becomes_decimal_text() {
+    let text = entry_text(&leaf(INT, Primitive::Int), json!([2, 1]));
+    assert!(text.ends_with(r#""value":["2","1"]}"#), "{text}");
+}
+
+#[test]
+fn api_6_1_an_array_below_a_key_outside_the_members_keeps_its_order() {
+    let value = json!({ "zeta": 1, "alpha": true, "extra": [3, 1] });
+    let text = entry_text(&pair(), value);
+    let expected = r#""value":{"zeta":"1","alpha":true,"extra":["3","1"]}}"#;
+    assert!(text.ends_with(expected), "{text}");
+}
+
+#[test]
+fn api_6_3_an_object_value_at_a_leaf_type_comes_in_byte_order() {
+    let text = entry_text(&leaf(INT, Primitive::Int), json!({ "b": 1, "a": 2 }));
+    assert!(text.ends_with(r#""value":{"a":"2","b":"1"}}"#), "{text}");
+}
+
+#[test]
+fn reliability_7_11_element_node_gives_no_node_when_the_level_cannot_grow() {
+    // `type.max_dimensions` = 3 keeps the level at 2 or less, so `checked_add` never fails in
+    // production. The test forces the overflow and expects the fallback of a value without a node.
+    let root = array_of(pair(), &[(1, 2)]);
+    let value = json!([]);
+    let (node, level) = super::element_node(super::Typed {
+        value: &value,
+        node: Some(&root),
+        level: usize::MAX,
+    });
+    assert!(node.is_none(), "a node was returned");
+    assert_eq!(level, 0);
+}
+
+#[test]
+fn api_6_2_element_node_moves_one_dimension_down_then_reaches_the_element() {
+    let root = array_of(pair(), &[(1, 2), (0, 1)]);
+    let value = json!([]);
+    let typed = |level| super::Typed {
+        value: &value,
+        node: Some(&root),
+        level,
+    };
+    let (first_node, first_level) = super::element_node(typed(0));
+    assert!(matches!(first_node, Some(TypeNode::Array { .. })));
+    assert_eq!(first_level, 1);
+    let (last_node, last_level) = super::element_node(typed(1));
+    assert!(matches!(last_node, Some(TypeNode::Struct { .. })));
+    assert_eq!(last_level, 0);
+}

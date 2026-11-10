@@ -61,3 +61,23 @@ proptest! {
         prop_assert_eq!(Sha256::parse(&text), Ok(hash));
     }
 }
+
+#[test]
+fn api_6_1_sha256_length_reason_names_64_characters() {
+    // `content_sha256` is a string of 64 hex characters.
+    let text = Sha256Reason::Length.to_string();
+    assert!(text.contains("64"), "{text:?}");
+}
+
+#[test]
+fn adr_0025_sha256_reasons_are_distinct_lower_case_clauses() {
+    let texts = [Sha256Reason::Length, Sha256Reason::NotLowerHex].map(|reason| reason.to_string());
+    assert_ne!(texts[0], texts[1]);
+    for text in &texts {
+        assert!(!text.ends_with('.'), "final period: {text:?}");
+        assert!(
+            text.chars().next().is_some_and(char::is_lowercase),
+            "not a lower-case fragment: {text:?}"
+        );
+    }
+}

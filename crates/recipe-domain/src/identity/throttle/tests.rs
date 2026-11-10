@@ -319,3 +319,29 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn reliability_7_11_default_throttle_holds_the_login_rows() {
+    // `login.delay_after_failures` 3 in 15 min, `login.delay_formula` cap 60 s,
+    // `login.ip_budget` 100 in 15 min. The values are typed from the document.
+    let throttle = LoginThrottle::default();
+    let expected = ThrottlePolicy {
+        free_failures: 3,
+        delay_cap: Duration::from_secs(60),
+        window: Duration::from_secs(15 * 60),
+        address_budget: 100,
+    };
+    assert_eq!(throttle.policy(), &expected);
+}
+
+#[test]
+fn a_throttle_built_with_a_policy_returns_that_policy() {
+    let custom = ThrottlePolicy {
+        free_failures: 5,
+        delay_cap: Duration::from_secs(10),
+        window: Duration::from_secs(60),
+        address_budget: 7,
+    };
+    assert_ne!(custom, ThrottlePolicy::default());
+    assert_eq!(LoginThrottle::new(custom).policy(), &custom);
+}
