@@ -86,3 +86,24 @@ fn valid_list_keeps_its_rows_in_order() {
     assert_eq!(list.rows(), rows.as_slice());
     assert_eq!(list.into_rows(), rows);
 }
+
+// ADR-0025: a reason has no code. The three reasons give three distinct lower-case fragments
+// without a final period.
+#[test]
+fn adr_0025_the_reason_texts_are_distinct_lower_case_fragments_without_a_final_period() {
+    let reasons = [
+        LimitListReason::DuplicatePath,
+        LimitListReason::StarAndIndex,
+        LimitListReason::EmptyRow,
+    ];
+    let texts: Vec<String> = reasons.iter().map(ToString::to_string).collect();
+    for text in &texts {
+        assert!(
+            text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+            "{text}"
+        );
+        assert!(!text.ends_with('.'), "{text}");
+    }
+    let distinct: std::collections::BTreeSet<&String> = texts.iter().collect();
+    assert_eq!(distinct.len(), reasons.len());
+}

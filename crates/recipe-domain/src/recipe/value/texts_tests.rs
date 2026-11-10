@@ -538,3 +538,55 @@ fn texts_against_another_tree_give_wrong_tree() {
         Err(ValueFault::WrongTree)
     );
 }
+
+/// Return `true` when `text` is a lower-case fragment without a final period.
+fn is_fragment(text: &str) -> bool {
+    text.chars().next().is_some_and(|c| c.is_ascii_lowercase()) && !text.ends_with('.')
+}
+
+// ADR-0039: the form can send no pair at all, and one pair makes the list not empty.
+#[test]
+fn adr_0039_a_list_without_a_pair_is_empty_and_a_list_with_one_pair_is_not() {
+    let none = LeafTexts::parse(Vec::new()).unwrap();
+    assert!(none.is_empty());
+    assert_eq!(none.len(), 0);
+    let one = texts(&[("", "5")]);
+    assert!(!one.is_empty());
+    assert_eq!(one.len(), 1);
+}
+
+// ADR-0025: a reason has no code. Each reason text names its path and differs from the other.
+#[test]
+fn adr_0025_the_text_of_a_leaf_texts_error_names_its_path_and_differs_per_variant() {
+    let duplicate = LeafTexts::parse(pairs(&[("[1]", "1"), ("[1]", "2")])).unwrap_err();
+    let all = LeafTexts::parse(pairs(&[("[*]", "1")])).unwrap_err();
+    let (first, second) = (duplicate.to_string(), all.to_string());
+    assert!(first.contains("[1]"), "{first}");
+    assert!(second.contains("[*]"), "{second}");
+    assert!(
+        is_fragment(&first) && is_fragment(&second),
+        "{first} | {second}"
+    );
+    assert_ne!(first.replace("[1]", ""), second.replace("[*]", ""));
+}
+
+// ADR-0118: a value of another root type or of another platform has no texts in that tree.
+#[test]
+fn adr_0118_the_texts_of_a_tree_of_another_platform_give_wrong_tree() {
+    use crate::recipe::value::test_support::primitive_tree_on;
+    let home = primitive_tree_on(PlcPlatform::TwinCat3, INT);
+    let other = primitive_tree_on(PlcPlatform::S7_1500, INT);
+    let value = ParameterValue::parse("5", &home).unwrap();
+    assert_eq!(value.texts(&home).unwrap().len(), 1);
+    assert_eq!(value.texts(&other), Err(ValueFault::WrongTree));
+}
+
+// ADR-0118: the same check for another root type on the same platform.
+#[test]
+fn adr_0118_the_texts_of_a_tree_of_another_root_type_give_wrong_tree() {
+    let value = ParameterValue::parse("5", &primitive_tree(INT)).unwrap();
+    assert_eq!(
+        value.texts(&primitive_tree(REAL)),
+        Err(ValueFault::WrongTree)
+    );
+}

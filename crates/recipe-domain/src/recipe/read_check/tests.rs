@@ -13,7 +13,7 @@ use crate::plant::fixtures::{
 };
 use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTree, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
-use crate::recipe::{Parameter, StoredLimit};
+use crate::recipe::{DraftError, Parameter, ParameterTag, RecipeError, StoredLimit};
 
 /// The type identifier of the `DATE` row of these tests.
 const DATE: u128 = 7;
@@ -378,4 +378,121 @@ fn adr_0140_a_stored_data_block_above_59999_on_s7_1500_gives_the_rule_fault_e_rc
     let faults = check_stored_parameter(&parameter, tree_of(&trees, INT))
         .expect("the grammar allows the number, so it is no structure fault");
     assert_eq!(found(&faults), [(ErrorCode::RCP_057, RuleField::Address)]);
+}
+
+// ADR-0118 (c): the value, a limit bound, and the address are the parts of a rule fault. Only
+// the address has no leaf.
+#[test]
+fn adr_0118_a_rule_field_names_its_leaf_and_the_address_has_none() {
+    let path = leaf(".a.due");
+    assert_eq!(RuleField::Value(path.clone()).leaf(), Some(&path));
+    assert_eq!(RuleField::LimitMin(path.clone()).leaf(), Some(&path));
+    assert_eq!(RuleField::LimitMax(path.clone()).leaf(), Some(&path));
+    assert_eq!(RuleField::Address.leaf(), None);
+}
+
+// ADR-0118 (c): the faults of a stored parameter give the leaf of the value, the leaf of the
+// limit row, and no leaf for the address.
+#[test]
+fn adr_0118_the_fields_of_the_faults_of_a_stored_parameter_give_their_leaves() {
+    let trees = trees();
+    let value = parameter(DATE, EARLIER_ONLY_DAY, Vec::new());
+    let faults = check_stored_parameter(&value, tree_of(&trees, DATE)).unwrap();
+    assert_eq!(faults[0].field().leaf(), Some(&LeafPath::whole()));
+    let limits = vec![bounds(None, Some(Decimal::from(EARLIER_ONLY_DAY)))];
+    let limit = parameter(DATE, LAST_DAY, limits);
+    let faults = check_stored_parameter(&limit, tree_of(&trees, DATE)).unwrap();
+    assert_eq!(faults[0].field().leaf(), Some(&LeafPath::whole()));
+    let address = parameter_with(DINT, json!(0), Some("DB1.DBD65534"), Vec::new());
+    let faults = check_stored_parameter(&address, tree_of(&trees, DINT)).unwrap();
+    assert_eq!(faults[0].field().leaf(), None);
+}
+
+// ADR-0118 (c), E-RCP-005: `into_error` returns the error of the broken rule at its leaf.
+#[test]
+fn adr_0118_into_error_returns_the_shape_error_of_the_tag_at_the_whole_leaf() {
+    let trees = trees();
+    let parameter = parameter(DATE, EARLIER_ONLY_DAY, Vec::new());
+    let mut faults = check_stored_parameter(&parameter, tree_of(&trees, DATE)).unwrap();
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    let error = faults.remove(0).into_error();
+    assert_eq!(error.code(), ErrorCode::RCP_005);
+    let tag = ParameterTag::parse("PARAM").unwrap();
+    assert!(matches!(
+        &error,
+        RecipeError::ValueShapeMismatch { tag: found, leaf, .. }
+            if *found == tag && *leaf == LeafPath::whole()
+    ));
+}
+
+// ADR-0118 (d), I7, E-RCP-004: a stored value outside its stored limit breaks the earlier set.
+// That is a structure fault.
+#[test]
+fn adr_0118_a_stored_value_outside_its_stored_limit_is_a_structure_fault_e_rcp_004() {
+    let trees = trees();
+    let limits = vec![bounds(None, Some(Decimal::from(100)))];
+    let parameter = parameter(DINT, 500, limits);
+    let fault = check_stored_parameter(&parameter, tree_of(&trees, DINT))
+        .expect_err("a value above its limit is a storage defect");
+    assert_eq!(fault.code(), ErrorCode::RCP_004);
+    assert!(matches!(
+        fault.error(),
+        DraftError::Recipe(RecipeError::ValueOutOfLimit { value, max, .. })
+            if value == "500" && max == "100"
+    ));
+}
+
+// ADR-0118 (c): a row with one bad bound gives one fault on that bound. The good max does not
+// make a fault on the min.
+#[test]
+fn adr_0118_a_stored_real_row_with_a_bad_min_and_a_good_max_gives_one_fault_on_the_min() {
+    let trees = trees();
+    let limits = vec![bounds(
+        Some(Decimal::new(-10_000_001, 5)),
+        Some(Decimal::from(5)),
+    )];
+    let parameter = parameter(REAL, 0, limits);
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, REAL)).unwrap();
+    assert_eq!(
+        found(&faults),
+        [(ErrorCode::RCP_055, RuleField::LimitMin(LeafPath::whole()))]
+    );
+}
+
+// ADR-0118 (c): a row with one bad bound gives one fault on that bound. The good min does not
+// make a fault on the max.
+#[test]
+fn adr_0118_a_stored_real_row_with_a_good_min_and_a_bad_max_gives_one_fault_on_the_max() {
+    let trees = trees();
+    let limits = vec![bounds(
+        Some(Decimal::from(-1)),
+        Some(Decimal::new(10_000_001, 5)),
+    )];
+    let parameter = parameter(REAL, 0, limits);
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, REAL)).unwrap();
+    assert_eq!(
+        found(&faults),
+        [(ErrorCode::RCP_055, RuleField::LimitMax(LeafPath::whole()))]
+    );
+}
+
+// ADR-0118 (d), E-RCP-019. Decision D4 of the coverage plan: a leaf that two stored rows cover
+// gives `E-RCP-019` today. OPEN QUESTION (coverage plan section 5, item 3): the template of
+// `E-RCP-019` in `reliability.md` section 1.2 names another cause, a leaf class that has no
+// such limit. This test pins the current code and does not decide the question.
+#[test]
+fn adr_0118_two_stored_rows_for_one_leaf_are_a_structure_fault_with_the_current_code_e_rcp_019() {
+    let trees = trees();
+    let limits = vec![
+        bounds(None, Some(Decimal::from(5))),
+        bounds(Some(Decimal::from(1)), None),
+    ];
+    let parameter = parameter(DINT, 0, limits);
+    let fault = check_stored_parameter(&parameter, tree_of(&trees, DINT))
+        .expect_err("two rows for one leaf are a storage defect");
+    assert_eq!(fault.code(), ErrorCode::RCP_019);
+    assert!(matches!(
+        fault.error(),
+        DraftError::Recipe(RecipeError::LimitNotApplicable { leaf, .. }) if *leaf == LeafPath::whole()
+    ));
 }

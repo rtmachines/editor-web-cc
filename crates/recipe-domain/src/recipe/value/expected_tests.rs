@@ -241,3 +241,12 @@ fn a_limit_fault_has_no_expectation() {
     let leaf = crate::plant::LeafPath::whole();
     assert_eq!(ValueFault::LimitConflict { leaf }.expected(), None);
 }
+
+// ADR-0039 (c): a form text belongs to a scalar leaf. A struct node gives the form `Scalar`.
+#[test]
+fn adr_0039_a_request_text_at_a_struct_node_expects_a_scalar() {
+    use crate::recipe::value::request_text;
+    let tree = zone_tree();
+    let result = request_text("1", tree.root(), PlcPlatform::TwinCat3);
+    assert_eq!(result, Err(LeafFault::from(Expected::Scalar)));
+}
