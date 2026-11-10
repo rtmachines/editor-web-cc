@@ -287,5 +287,5 @@ fn adr_0117_the_text_of_a_precision_fault_names_the_leaf_the_type_and_the_digit_
     let text = fault.to_string();
     assert!(text.contains(".temp_sp"), "{text}");
     assert!(text.contains(&Primitive::Real.to_string()), "{text}");
-    assert!(text.contains('7'), "{text}");
+    assert!(text.contains("at most 7 digits"), "{text}");
 }

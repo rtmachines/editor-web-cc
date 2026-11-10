@@ -416,7 +416,7 @@ fn a_budget_error_wins_over_an_overlap() {
 
 // value/fault.rs doc: `WrongTree` becomes `E-RCP-005` with the whole value as leaf and the
 // parameter type as expectation. A caller never gives a tree of another root type, so the test
-// injects that fault (PLAN.md decision D2).
+// injects that fault.
 #[test]
 fn check_faults_with_a_tree_of_another_root_type_gives_one_e_rcp_005_for_the_whole_value() {
     let trees = trees_on(PlcPlatform::TwinCat3);

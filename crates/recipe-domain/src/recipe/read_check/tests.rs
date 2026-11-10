@@ -476,10 +476,9 @@ fn adr_0118_a_stored_real_row_with_a_good_min_and_a_bad_max_gives_one_fault_on_t
     );
 }
 
-// ADR-0118 (d), E-RCP-019. Decision D4 of the coverage plan: a leaf that two stored rows cover
-// gives `E-RCP-019` today. OPEN QUESTION (coverage plan section 5, item 3): the template of
-// `E-RCP-019` in `reliability.md` section 1.2 names another cause, a leaf class that has no
-// such limit. This test pins the current code and does not decide the question.
+// ADR-0118 (d), E-RCP-019: a leaf that two stored rows cover gives `E-RCP-019` today. The
+// template of `E-RCP-019` in `reliability.md` section 1.2 names another cause, a leaf class that
+// has no such limit. This test pins the current code and does not decide that open question.
 #[test]
 fn adr_0118_two_stored_rows_for_one_leaf_are_a_structure_fault_with_the_current_code_e_rcp_019() {
     let trees = trees();

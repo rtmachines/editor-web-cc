@@ -105,8 +105,8 @@ fn limit_of_an_array_root_on_a_kept_member_stays() {
 
 // limit.rs doc: a kept limit that the planned tree rejects is an entry. `Draft::load` trusts
 // stored rows, so a stored row with a minimum above its maximum reaches the rebind.
-// PLAN.md section 5 item 4 (open question): domain-model.md section 5.2 does not list
-// `E-RCP-018` for `RebindTypeRevision`. The test pins the current code.
+// Open question: domain-model.md section 5.2 does not list `E-RCP-018` for
+// `RebindTypeRevision`. The test pins the current code.
 #[test]
 fn kept_limit_that_the_planned_tree_rejects_gives_e_rcp_018() {
     let draft = draft_with(vec![param(

@@ -477,9 +477,9 @@ fn visited(
     (result, calls)
 }
 
-// build.rs doc: `visit_elements` returns `None` and visits nothing when the value does not have
-// the shape of the chain. The map of a value checks the shape first, so the function guards its
-// own contract here (PLAN.md decision D2, fault injection).
+// build.rs doc: `visit_elements` returns `None` when the value does not have the shape of the
+// chain. A value that fails at the outermost array gets no visit. The map of a value checks the
+// shape first, so the test injects that fault.
 #[test]
 fn visit_elements_of_a_value_that_is_no_array_gives_none_and_no_visit() {
     let (result, calls) = visited(&mut json!({"setpoint": 1}), &[(1, 2)]);
@@ -522,7 +522,10 @@ fn visit_elements_walks_two_dimensions_in_row_major_order_with_plc_indexes() {
 
 #[test]
 fn visit_elements_of_a_row_with_the_wrong_element_count_gives_none() {
-    let (result, _calls) = visited(&mut json!([[1, 2], [3]]), &[(1, 2), (1, 2)]);
+    let (result, calls) = visited(&mut json!([[1, 2], [3]]), &[(1, 2), (1, 2)]);
 
     assert_eq!(result, None);
+    // The walk is depth first. It visits the elements of the full first row before it finds the
+    // short second row.
+    assert_eq!(calls.len(), 2);
 }

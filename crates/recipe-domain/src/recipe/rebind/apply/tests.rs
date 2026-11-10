@@ -227,8 +227,8 @@ fn new_tree_with_fewer_members_than_the_plan_gives_plan_mismatch_and_no_change()
 // apply.rs doc: the method reads the planned value again against the new tree and the stored
 // limits. `Draft::load` trusts stored data, so `plan_rebind` does not find a stored value that
 // breaks its stored limit and `apply_rebind` finds it.
-// PLAN.md section 5 item 4 (open question): domain-model.md section 5.2 does not list
-// `E-RCP-004` for `RebindTypeRevision`. The test pins the current code.
+// Open question: domain-model.md section 5.2 does not list `E-RCP-004` for
+// `RebindTypeRevision`. The test pins the current code.
 #[test]
 fn stored_value_above_its_stored_limit_gives_e_rcp_004_and_no_change() {
     let mut draft = draft_with(vec![param(
