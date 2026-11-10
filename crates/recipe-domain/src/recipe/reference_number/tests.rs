@@ -49,3 +49,20 @@ proptest! {
         prop_assert_eq!(reference.as_str(), text.as_str());
     }
 }
+
+// reliability.md section 4.3 (row `ReferenceNumber`): the text names the 1 to 50 length range.
+#[test]
+fn format_text_names_the_length_limit_as_a_lower_case_fragment() {
+    assert!(ReferenceNumber::parse(&"A".repeat(50)).is_ok());
+    assert_eq!(
+        ReferenceNumber::parse(&"A".repeat(51)),
+        Err(ReferenceNumberReason::Format)
+    );
+    let text = ReferenceNumberReason::Format.to_string();
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+    assert!(text.contains("1 to 50"), "{text}");
+}

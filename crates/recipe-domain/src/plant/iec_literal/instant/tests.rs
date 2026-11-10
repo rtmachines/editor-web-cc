@@ -209,3 +209,76 @@ fn stored_date_round_trips_through_display_and_parse() {
     assert_eq!(value.to_string(), "D#2026-10-12");
     assert_eq!(literal(Primitive::Date, "D#2026-10-12"), Ok(value));
 }
+
+#[test]
+fn time_of_day_without_seconds_is_grammar_error() {
+    // domain-model.md section 2.1: `tod := [0-9]{2} ":" [0-9]{2} ":" [0-9]{2} [fraction]`.
+    for text in ["TOD#12:30", "TOD#12:30:00:00"] {
+        assert_eq!(
+            count(Primitive::TimeOfDay, text),
+            Err(IecLiteralReason::Grammar),
+            "{text}"
+        );
+    }
+}
+
+// domain-model.md section 2.1: a date has no fraction. The reason is `Fraction`, not `Grammar`.
+#[test]
+fn fraction_on_date_is_a_fraction_error() {
+    assert_eq!(
+        count(Primitive::Date, "D#2026-10-12.5"),
+        Err(IecLiteralReason::Fraction)
+    );
+}
+
+// domain-model.md section 2.1: April has 30 days.
+#[test]
+fn april_thirty_first_is_a_calendar_error() {
+    assert_eq!(
+        count(Primitive::Date, "D#2024-04-31"),
+        Err(IecLiteralReason::Calendar)
+    );
+}
+
+// domain-model.md section 2.1: the date grammar is `YYYY-MM-DD` with two digits each.
+#[test]
+fn one_digit_month_is_a_grammar_error() {
+    assert_eq!(
+        count(Primitive::Date, "D#2026-1-12"),
+        Err(IecLiteralReason::Grammar)
+    );
+}
+
+#[test]
+fn one_digit_day_is_a_grammar_error() {
+    assert_eq!(
+        count(Primitive::Date, "D#2026-10-1"),
+        Err(IecLiteralReason::Grammar)
+    );
+}
+
+// domain-model.md section 2.1: the time grammar is `HH:MM:SS` with two digits each.
+#[test]
+fn one_digit_minute_is_a_grammar_error() {
+    assert_eq!(
+        count(Primitive::TimeOfDay, "TOD#12:3:00"),
+        Err(IecLiteralReason::Grammar)
+    );
+}
+
+#[test]
+fn one_digit_second_is_a_grammar_error() {
+    assert_eq!(
+        count(Primitive::TimeOfDay, "TOD#12:30:0"),
+        Err(IecLiteralReason::Grammar)
+    );
+}
+
+// domain-model.md section 2.1: a fraction holds digits only. A plus sign is not a digit.
+#[test]
+fn signed_fraction_is_a_grammar_error() {
+    assert_eq!(
+        count(Primitive::TimeOfDay, "TOD#12:30:00.+5"),
+        Err(IecLiteralReason::Grammar)
+    );
+}

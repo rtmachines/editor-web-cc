@@ -103,6 +103,56 @@ fn limit_of_an_array_root_on_a_kept_member_stays() {
     assert_eq!(plan.limits(key(1)), Some(&[second][..]));
 }
 
+// limit.rs doc: a kept limit that the planned tree rejects is an entry. `Draft::load` trusts
+// stored rows, so a stored row with a minimum above its maximum reaches the rebind.
+// Open question: domain-model.md section 5.2 does not list `E-RCP-018` for
+// `RebindTypeRevision`. The test pins the current code.
+#[test]
+fn kept_limit_that_the_planned_tree_rejects_gives_e_rcp_018() {
+    let draft = draft_with(vec![param(
+        1,
+        "SPEED",
+        ZONE_2,
+        json!({"setpoint": 5}),
+        vec![limit(".setpoint", -5)],
+    )]);
+    let request = request_with(ZONE_2, ZONE_3, &[(1, ".temp_max", number(70))]);
+
+    let error = draft.plan_rebind(&request, &trees()).unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::RCP_018);
+    let list = entries(error);
+    assert_eq!(list.len(), 1);
+    assert!(matches!(
+        &list[0],
+        RecipeError::MinGreaterThanMax { tag, leaf, min, max }
+            if tag.as_str() == "SPEED"
+                && leaf.to_string() == ".setpoint"
+                && min == "0"
+                && max == "-5"
+    ));
+}
+
+// limit.rs doc: the entries of dropped limits come first, in the order of the rows. The error
+// of the first rejected kept limit comes last.
+#[test]
+fn dropped_limit_comes_before_the_error_of_a_rejected_kept_limit() {
+    let draft = draft_with(vec![param(
+        1,
+        "OLD",
+        OLD_1,
+        json!({"setpoint": 1, "old_max": 9}),
+        vec![limit(".old_max", 10), limit(".setpoint", -5)],
+    )]);
+
+    let error = draft
+        .plan_rebind(&request(OLD_1, OLD_2), &trees())
+        .unwrap_err();
+
+    let codes: Vec<ErrorCode> = entries(error).iter().map(RecipeError::code).collect();
+    assert_eq!(codes, [ErrorCode::RCP_029, ErrorCode::RCP_018]);
+}
+
 #[test]
 fn limit_on_a_removed_member_gives_e_rcp_029() {
     let draft = draft_with(vec![param(

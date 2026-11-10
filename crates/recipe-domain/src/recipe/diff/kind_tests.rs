@@ -33,3 +33,16 @@ fn diff_kind_rejects_any_other_text() {
         );
     }
 }
+
+// ADR-0050 (e): the reason names a section of a diff, and the enum has no code.
+#[test]
+fn unknown_kind_text_names_a_section_as_a_lower_case_fragment() {
+    assert_eq!(DiffKind::ALL.len(), 6);
+    let text = DiffKindReason::Unknown.to_string();
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+    assert!(text.contains("section"), "{text}");
+}

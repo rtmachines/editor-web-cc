@@ -133,3 +133,36 @@ proptest! {
         }
     }
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// domain-model.md section 2.1 (S7Address): db is 1 to 65535 and offset is 0 to 65535.
+#[test]
+fn reason_texts_name_the_ranges_of_the_grammar() {
+    assert!(S7Address::parse("DB1.DBW0").is_ok());
+    assert!(S7Address::parse("DB65535.DBW65535").is_ok());
+    assert_eq!(
+        reason_of("DB65536.DBW0"),
+        Some(S7AddressReason::DbOutOfRange)
+    );
+    assert_eq!(
+        reason_of("DB1.DBW65536"),
+        Some(S7AddressReason::OffsetOutOfRange)
+    );
+    let db = S7AddressReason::DbOutOfRange.to_string();
+    let offset = S7AddressReason::OffsetOutOfRange.to_string();
+    let grammar = S7AddressReason::Grammar.to_string();
+    assert!(db.contains("1 to 65535"), "{db}");
+    assert!(offset.contains("0 to 65535"), "{offset}");
+    for text in [&db, &offset, &grammar] {
+        assert_fragment(text);
+    }
+    let distinct: std::collections::BTreeSet<&String> = [&db, &offset, &grammar].into();
+    assert_eq!(distinct.len(), 3);
+}

@@ -139,3 +139,32 @@ proptest! {
         }
     }
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// A38 and domain-model.md section 2.1 (LeafPath): at most 3 indexes per index segment.
+#[test]
+fn reason_texts_name_the_limits_of_the_grammar() {
+    assert!(LeafPath::parse("[1,2,3]").is_ok());
+    assert_eq!(reason_of("[1,2,3,4]"), Some(LeafPathReason::TooManyIndexes));
+    assert_eq!(
+        reason_of("[2147483648]"),
+        Some(LeafPathReason::IndexOutOfRange)
+    );
+    let many = LeafPathReason::TooManyIndexes.to_string();
+    let range = LeafPathReason::IndexOutOfRange.to_string();
+    let grammar = LeafPathReason::Grammar.to_string();
+    assert!(many.contains("more than 3"), "{many}");
+    assert!(range.contains("INTEGER"), "{range}");
+    for text in [&many, &range, &grammar] {
+        assert_fragment(text);
+    }
+    let distinct: std::collections::BTreeSet<&String> = [&many, &range, &grammar].into();
+    assert_eq!(distinct.len(), 3);
+}

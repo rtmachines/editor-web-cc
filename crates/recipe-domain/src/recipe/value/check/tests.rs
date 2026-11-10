@@ -4,7 +4,7 @@ use crate::recipe::value::test_support::{
     INT, REAL, TIME, ZONE_JSON, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
 };
-use crate::recipe::value::{LeafTexts, ParameterValue, ValueFault};
+use crate::recipe::value::{LeafTexts, ParameterValue, ValueFault, ValueFaults};
 
 fn limit(
     tree: &TypeTree,
@@ -331,5 +331,166 @@ fn out_of_limit_on_a_date_writes_the_bounds_of_the_earlier_set_as_literals() {
     assert_eq!(
         out_of_limit(faults.first().clone()),
         texts("", "D#2169-01-17", "D#1990-01-01", "D#2169-01-07")
+    );
+}
+
+/// The zone value of `data-model.md` section 9.1 with two faults: `.temp_sp` and `.ramps[2]`.
+fn two_fault_list() -> ValueFaults {
+    let tree = zone_tree();
+    let json = r#"{"temp_sp": 500, "active": true, "ramps": [10, 150, 30], "label": "Zone A"}"#;
+    value(json, &tree)
+        .check_all(&tree, &zone_limits(&tree))
+        .unwrap_err()
+}
+
+// ADR-0041: a draft command reports every fault of a value at once.
+#[test]
+fn adr_0041_a_list_of_two_faults_has_the_length_2_and_is_not_empty() {
+    let faults = two_fault_list();
+    assert_eq!(faults.len(), 2);
+    assert!(!faults.is_empty());
+    assert_eq!(faults.iter().count(), 2);
+}
+
+// ADR-0041: the list holds at least one fault, so a list from one fault has the length 1.
+#[test]
+fn adr_0041_a_list_from_one_fault_has_the_length_1_and_is_not_empty() {
+    let faults = ValueFaults::from(ValueFault::WrongTree);
+    assert_eq!(faults.len(), 1);
+    assert!(!faults.is_empty());
+}
+
+// ADR-0041 (b): the faults come in the order of the leaves, and the text lists each of them once.
+#[test]
+fn adr_0041_the_text_of_two_faults_lists_each_fault_once_with_a_separator_between() {
+    let faults = two_fault_list();
+    let each: Vec<String> = faults.iter().map(ToString::to_string).collect();
+    let text = faults.to_string();
+    assert!(
+        each.iter()
+            .all(|fault| text.matches(fault.as_str()).count() == 1)
+    );
+    assert!(text.starts_with(each[0].as_str()), "{text}");
+    assert!(text.ends_with(each[1].as_str()), "{text}");
+    assert!(each[0].contains(".temp_sp") && each[1].contains(".ramps[2]"));
+    let separator = &text[each[0].len()..text.len() - each[1].len()];
+    assert!(!separator.is_empty(), "{text}");
+}
+
+// ADR-0041: a list of one fault has no separator.
+#[test]
+fn adr_0041_the_text_of_one_fault_is_the_text_of_that_fault() {
+    let fault = ValueFault::LimitConflict {
+        leaf: LeafPath::parse(".temp_sp").unwrap(),
+    };
+    assert_eq!(
+        ValueFaults::from(fault.clone()).to_string(),
+        fault.to_string()
+    );
+}
+
+// Design D9, E-RCP-019: a conflict names the leaf that two limits cover.
+#[test]
+fn a_limit_conflict_names_its_leaf_in_its_path_and_in_its_text() {
+    let tree = zone_tree();
+    let limits = [
+        range(&tree, ".temp_sp", None, Some("5")),
+        range(&tree, ".temp_sp", Some("1"), None),
+    ];
+    let fault = value(ZONE_JSON, &tree).check(&tree, &limits).unwrap_err();
+    assert_eq!(fault.leaf().to_string(), ".temp_sp");
+    assert!(fault.to_string().contains(".temp_sp"), "{fault}");
+    assert_eq!(fault.expected(), None);
+}
+
+// ADR-0118 (b): a fault of a stored value names its tree. A value of another root type or of
+// another platform has no leaf list in that tree.
+#[test]
+fn adr_0118_the_leaf_faults_of_a_tree_of_another_platform_give_wrong_tree() {
+    use crate::plant::{PlcPlatform, RuleSet};
+    use crate::recipe::value::test_support::primitive_tree_on;
+    let home = primitive_tree_on(PlcPlatform::TwinCat3, INT);
+    let other = primitive_tree_on(PlcPlatform::S7_1500, INT);
+    let parsed = value("5", &home);
+    assert_eq!(
+        parsed.leaf_faults_under(&home, RuleSet::Current),
+        Ok(Vec::new())
+    );
+    assert_eq!(
+        parsed.leaf_faults_under(&other, RuleSet::Current),
+        Err(ValueFault::WrongTree)
+    );
+}
+
+// ADR-0118 (b): the same check for another root type on the same platform.
+#[test]
+fn adr_0118_the_leaf_faults_of_a_tree_of_another_root_type_give_wrong_tree() {
+    use crate::plant::RuleSet;
+    let parsed = value("5", &primitive_tree(INT));
+    assert_eq!(
+        parsed.leaf_faults_under(&primitive_tree(REAL), RuleSet::Current),
+        Err(ValueFault::WrongTree)
+    );
+}
+
+/// The tree of the root type 50 with the one leaf `primitive`.
+fn root_50_tree(primitive: crate::plant::Primitive) -> TypeTree {
+    use crate::plant::fixtures::primitive_row;
+    crate::recipe::value::test_support::tree(vec![primitive_row(50, primitive)], 50)
+}
+
+// I7, ADR-0118: a length limit belongs to a string leaf. A limit of another tree with the same
+// root id and platform, but a string leaf, meets a number and gives `WrongTree`.
+#[test]
+fn i7_a_length_limit_on_a_number_leaf_gives_wrong_tree() {
+    use crate::plant::Primitive;
+    let strings = string_tree(8);
+    let numbers = root_50_tree(Primitive::Int);
+    let limits = [limit(&strings, "", (None, None), Some(4))];
+    let result = value("5", &numbers).check(&numbers, &limits);
+    assert_eq!(result, Err(ValueFault::WrongTree));
+}
+
+// I7, ADR-0118: a range limit belongs to a number leaf. A limit of another tree with the same
+// root id and platform, but an INT leaf, meets a string and gives `WrongTree`.
+#[test]
+fn i7_a_range_limit_on_a_string_leaf_gives_wrong_tree() {
+    use crate::plant::Primitive;
+    let numbers = root_50_tree(Primitive::Int);
+    let strings = string_tree(8);
+    let limits = [range(&numbers, "", None, Some("5"))];
+    let result = value(r#""ab""#, &strings).check(&strings, &limits);
+    assert_eq!(result, Err(ValueFault::WrongTree));
+}
+
+// Design D8: a value of another shape than its tree has no leaf list. The walk gives `None`.
+#[test]
+fn design_d8_the_leaves_of_a_value_of_another_shape_give_none() {
+    use crate::recipe::value::leaves::value_leaves;
+    let tree = zone_tree();
+    let no_object = serde_json::json!(5);
+    let no_array = serde_json::json!({"temp_sp": 1, "active": true, "ramps": 5, "label": "A"});
+    let short_array =
+        serde_json::json!({"temp_sp": 1, "active": true, "ramps": [1, 2], "label": "A"});
+    let no_member = serde_json::json!({"temp_sp": 1, "active": true, "label": "A"});
+    for json in [&no_object, &no_array, &short_array, &no_member] {
+        assert!(value_leaves(json, &tree).is_none(), "{json}");
+    }
+    let whole: serde_json::Value = serde_json::from_str(ZONE_JSON).unwrap();
+    let paths: Vec<String> = value_leaves(&whole, &tree)
+        .unwrap()
+        .iter()
+        .map(|leaf| leaf.path.to_string())
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            ".temp_sp",
+            ".active",
+            ".ramps[1]",
+            ".ramps[2]",
+            ".ramps[3]",
+            ".label"
+        ]
     );
 }

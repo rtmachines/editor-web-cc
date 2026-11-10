@@ -63,3 +63,17 @@ fn parameter_key_parse_of_not_a_uuid_gives_format() {
         Err(ParameterKeyReason::Format)
     );
 }
+
+// domain-model.md section 2.2: a parameter key is a UUID, so the text names the UUID.
+#[test]
+fn parameter_key_format_text_names_a_uuid_as_a_lower_case_fragment() {
+    assert!(ParameterKey::parse(&Uuid::from_u128(110).to_string()).is_ok());
+    assert_eq!(ParameterKey::parse(""), Err(ParameterKeyReason::Format));
+    let text = ParameterKeyReason::Format.to_string();
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+    assert!(text.contains("UUID"), "{text}");
+}

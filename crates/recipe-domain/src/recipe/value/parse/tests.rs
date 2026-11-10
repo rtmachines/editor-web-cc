@@ -256,3 +256,36 @@ fn a_stored_value_with_33_levels_gives_the_depth_fault() {
     let fault = ParameterValue::try_from((&stored, &primitive_tree(INT))).unwrap_err();
     assert_eq!(fault.expected(), Some(&DEPTH_EXPECTED));
 }
+
+// I7: a value records the platform of its tree. Two platforms rule out a constant result.
+#[test]
+fn i7_a_value_records_the_platform_of_its_tree() {
+    use crate::plant::PlcPlatform;
+    use crate::recipe::value::test_support::primitive_tree_on;
+    for platform in [PlcPlatform::TwinCat3, PlcPlatform::S7_1500] {
+        let tree = primitive_tree_on(platform, INT);
+        let value = ParameterValue::parse("5", &tree).unwrap();
+        assert_eq!(value.platform(), platform);
+    }
+}
+
+// ADR-0117 and domain-model.md section 2.1: a REAL leaf holds 7 significant digits. The text of
+// the fault names the leaf, the type, and that count.
+#[test]
+fn adr_0117_the_text_of_a_precision_fault_names_the_leaf_the_type_and_the_digit_limit() {
+    let json = r#"{"temp_sp": 85.123456, "active": true, "ramps": [1, 2, 3], "label": "A"}"#;
+    let fault = fault(json, &zone_tree());
+    let leaf = crate::plant::LeafPath::parse(".temp_sp").unwrap();
+    assert_eq!(
+        fault,
+        ValueFault::Precision {
+            leaf,
+            type_name: Primitive::Real,
+            max_digits: 7,
+        }
+    );
+    let text = fault.to_string();
+    assert!(text.contains(".temp_sp"), "{text}");
+    assert!(text.contains(&Primitive::Real.to_string()), "{text}");
+    assert!(text.contains("at most 7 digits"), "{text}");
+}

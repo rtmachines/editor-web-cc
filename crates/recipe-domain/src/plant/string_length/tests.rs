@@ -158,3 +158,23 @@ fn value_and_display_write_the_number() {
     assert_eq!(length.map(StringLength::value), Ok(254));
     assert_eq!(length.map(|l| l.to_string()), Ok("254".to_owned()));
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// domain-model.md section 2.1 (StringLength): the two reasons give two distinct fragments.
+#[test]
+fn reason_texts_are_distinct_lower_case_fragments_without_a_final_period() {
+    let not_on_platform = StringLengthReason::NotOnPlatform.to_string();
+    let out_of_range = StringLengthReason::OutOfRange.to_string();
+    assert_fragment(&not_on_platform);
+    assert_fragment(&out_of_range);
+    assert_ne!(not_on_platform, out_of_range);
+    assert!(not_on_platform.contains("platform"), "{not_on_platform}");
+    assert!(out_of_range.contains("length"), "{out_of_range}");
+}

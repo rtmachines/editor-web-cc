@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::fixtures::{LINE, PAIR, PAIR_C, ROWS, TABLE, TIME, check_of, diff_of};
+use super::fixtures::{INT, LINE, MISSING, PAIR, PAIR_C, ROWS, TABLE, TIME, check_of, diff_of};
 use crate::error_codes::ErrorCode;
 use crate::plant::LeafPath;
 use crate::recipe::snapshot::fixtures::{limited, param, range};
@@ -288,4 +288,48 @@ fn a_part_with_more_rows_than_leaf_rows_gives_the_first_rows_and_the_count() {
         })
         .collect();
     assert_eq!(shown, ["[1]", "[2]", "[3]", "+5"]);
+}
+
+// values.rs doc and A43: a value without a tree is one leaf at the whole path with its stored
+// JSON text. The limit row of that side covers no leaf, because the diff has no tree to expand
+// the row into leaves, so the row shows no limit.
+#[test]
+fn a_changed_value_without_a_tree_gives_one_row_at_the_whole_path_without_a_limit() {
+    let side = |value: i32| {
+        limited(
+            param(1, "HOLD", MISSING, json!(value)),
+            vec![range("", 0, 100)],
+        )
+    };
+
+    let rows = diff_of(vec![side(1)], vec![side(2)], ROWS);
+
+    assert_eq!(
+        parts(&rows, DiffKind::Values),
+        vec![DiffPart::Value {
+            path: LeafPath::whole(),
+            old: text("1"),
+            new: text("2"),
+            limit: None,
+        }]
+    );
+}
+
+// pairs.rs doc and ADR-0050: the check skips a side whose type has no tree and goes on to the
+// next side.
+#[test]
+fn check_stored_skips_a_side_without_a_tree_and_checks_the_other_side() {
+    let untyped = || param(1, "HOLD", MISSING, json!(1));
+
+    let valid = check_of(vec![untyped()], vec![param(1, "HOLD", INT, json!(5))]);
+    assert_eq!(valid.map_err(|error| error.code()), Ok(()));
+    let result = check_of(vec![untyped()], vec![param(1, "HOLD", INT, json!("x"))]);
+    assert_eq!(
+        result.as_ref().err().map(RecipeError::code),
+        Some(ErrorCode::RCP_005)
+    );
+    assert!(
+        matches!(&result, Err(RecipeError::ValueShapeMismatch { tag, .. }) if tag.to_string() == "HOLD"),
+        "{result:?}"
+    );
 }

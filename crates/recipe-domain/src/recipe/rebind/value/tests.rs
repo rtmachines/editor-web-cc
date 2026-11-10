@@ -1,12 +1,14 @@
 use serde_json::{Value, json};
 
+use super::super::build::visit_elements;
 use super::super::test_support::{
-    MODE_1, MODE_2, NAME_1, NAME_2, OLD_1, OLD_2, RAMP_1, RAMP_2, ZONE_2, ZONE_3, ZONES_2,
+    GRID, MODE_1, MODE_2, NAME_1, NAME_2, OLD_1, OLD_2, RAMP_1, RAMP_2, ZONE_2, ZONE_3, ZONES_2,
     draft_with, key, number, param, plan_of, planned_json, request, request_with,
     request_with_texts, trees,
 };
 use crate::error_codes::ErrorCode;
-use crate::plant::{MemberName, Primitive};
+use crate::plant::fixtures::dimensions;
+use crate::plant::{LeafSegment, MemberName, Primitive};
 use crate::recipe::{DraftError, Expected, ParameterTag, RecipeError};
 
 /// The entries of a rejected plan, as text of code and message.
@@ -346,6 +348,72 @@ fn array_of_the_struct_reports_each_missing_element_in_order() {
     );
 }
 
+/// A draft with `GRID`, an array with two dimensions of `ST_Zone@2`.
+fn grid_draft() -> crate::recipe::Draft {
+    draft_with(vec![param(
+        1,
+        "GRID",
+        GRID,
+        json!([[{"setpoint": 1}, {"setpoint": 2}], [{"setpoint": 3}, {"setpoint": 4}]]),
+        Vec::new(),
+    )])
+}
+
+// ADR-0018 and domain-model.md section 2 (leaf path grammar): an array with two dimensions
+// reports each new leaf with the index tuple `[row,column]` in row-major order.
+#[test]
+fn array_with_two_dimensions_reports_each_missing_element_in_row_major_order() {
+    let error = grid_draft()
+        .plan_rebind(&request(ZONE_2, ZONE_3), &trees())
+        .unwrap_err();
+
+    let list = entries(error);
+    let leaves: Vec<String> = list
+        .iter()
+        .filter_map(|entry| match entry {
+            RecipeError::RebindNeedsValue { tag, leaf } if tag.as_str() == "GRID" => {
+                Some(leaf.to_string())
+            }
+            _other => None,
+        })
+        .collect();
+    assert_eq!(leaves.len(), list.len());
+    assert_eq!(
+        leaves,
+        [
+            "[1,1].temp_max",
+            "[1,2].temp_max",
+            "[2,1].temp_max",
+            "[2,2].temp_max"
+        ]
+    );
+    for entry in &list {
+        assert_eq!(entry.code(), ErrorCode::RCP_028);
+    }
+}
+
+// ADR-0018: the value of an array with two dimensions keeps its nested shape, and each new
+// member takes the value that the request gives for its index tuple.
+#[test]
+fn array_with_two_dimensions_keeps_the_nested_shape_and_maps_each_element() {
+    let values = [
+        (1, "[1,1].temp_max", number(1)),
+        (1, "[1,2].temp_max", number(2)),
+        (1, "[2,1].temp_max", number(3)),
+        (1, "[2,2].temp_max", number(4)),
+    ];
+
+    let plan = plan_of(&grid_draft(), &request_with(ZONE_2, ZONE_3, &values));
+
+    assert_eq!(
+        planned_json(&plan, 1),
+        json!([
+            [{"setpoint": 1, "temp_max": 1}, {"setpoint": 2, "temp_max": 2}],
+            [{"setpoint": 3, "temp_max": 3}, {"setpoint": 4, "temp_max": 4}]
+        ])
+    );
+}
+
 #[test]
 fn stored_value_of_the_wrong_shape_gives_e_rcp_005() {
     let draft = draft_with(vec![param(1, "SPEED", ZONE_2, json!(5), Vec::new())]);
@@ -394,4 +462,70 @@ fn needs_value_has_its_code_registry_row_and_message() {
         error.to_string(),
         "SPEED.zones[2].temp_max is a new member. Give it a value."
     );
+}
+
+/// Visit `value` along `bounds` and return the result with the visited elements and prefixes.
+fn visited(
+    value: &mut Value,
+    bounds: &[(i32, i32)],
+) -> (Option<()>, Vec<(Value, Vec<LeafSegment>)>) {
+    let chain = dimensions(bounds);
+    let mut calls = Vec::new();
+    let result = visit_elements(value, &[&chain], &mut |element, prefix| {
+        calls.push((element.clone(), prefix.to_vec()));
+    });
+    (result, calls)
+}
+
+// build.rs doc: `visit_elements` returns `None` when the value does not have the shape of the
+// chain. A value that fails at the outermost array gets no visit. The map of a value checks the
+// shape first, so the test injects that fault.
+#[test]
+fn visit_elements_of_a_value_that_is_no_array_gives_none_and_no_visit() {
+    let (result, calls) = visited(&mut json!({"setpoint": 1}), &[(1, 2)]);
+
+    assert_eq!(result, None);
+    assert_eq!(calls, Vec::new());
+}
+
+#[test]
+fn visit_elements_of_an_array_with_the_wrong_element_count_gives_none_and_no_visit() {
+    let (short, short_calls) = visited(&mut json!([{"setpoint": 1}]), &[(1, 2)]);
+    let (long, long_calls) = visited(&mut json!([1, 2, 3]), &[(1, 2)]);
+
+    assert_eq!(short, None);
+    assert_eq!(short_calls, Vec::new());
+    assert_eq!(long, None);
+    assert_eq!(long_calls, Vec::new());
+}
+
+// domain-model.md section 2 (leaf path grammar): an array with two dimensions has the index
+// tuple `[row,column]` with the PLC indexes. Elements come in row-major order.
+#[test]
+fn visit_elements_walks_two_dimensions_in_row_major_order_with_plc_indexes() {
+    let mut value = json!([[1, 2], [3, 4]]);
+
+    let (result, calls) = visited(&mut value, &[(5, 6), (1, 2)]);
+
+    assert_eq!(result, Some(()));
+    let expected: Vec<(Value, Vec<LeafSegment>)> = [
+        (1, vec![5, 1]),
+        (2, vec![5, 2]),
+        (3, vec![6, 1]),
+        (4, vec![6, 2]),
+    ]
+    .into_iter()
+    .map(|(element, indexes)| (json!(element), vec![LeafSegment::Index(indexes)]))
+    .collect();
+    assert_eq!(calls, expected);
+}
+
+#[test]
+fn visit_elements_of_a_row_with_the_wrong_element_count_gives_none() {
+    let (result, calls) = visited(&mut json!([[1, 2], [3]]), &[(1, 2), (1, 2)]);
+
+    assert_eq!(result, None);
+    // The walk is depth first. It visits the elements of the full first row before it finds the
+    // short second row.
+    assert_eq!(calls.len(), 2);
 }

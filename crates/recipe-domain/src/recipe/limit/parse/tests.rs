@@ -644,3 +644,133 @@ fn stored_date_min_above_max_of_the_earlier_set_writes_literals_in_the_fault() {
         }
     );
 }
+
+/// Return `true` when `text` is a sentence that starts with a capital and ends with a period.
+fn is_sentence(text: &str) -> bool {
+    text.chars().next().is_some_and(|c| c.is_ascii_uppercase()) && text.ends_with('.')
+}
+
+// Design D9, E-RCP-019, E-RCP-006, E-RCP-018: each fault names the path of its row.
+#[test]
+fn design_d9_each_limit_fault_names_the_path_of_its_row() {
+    let tree = zone_tree();
+    let cases = [
+        (range(".active", None, Some("1")), ".active"),
+        (range(".ramps[*]", None, Some("40000")), ".ramps[*]"),
+        (range(".temp_sp", Some("9"), Some("1")), ".temp_sp"),
+    ];
+    let faults: Vec<LimitFault> = cases
+        .iter()
+        .map(|(row, _)| parse(row, &tree).unwrap_err())
+        .collect();
+    assert!(matches!(faults[0], LimitFault::NotApplicable { .. }));
+    assert!(matches!(faults[1], LimitFault::OutsideTypeRange { .. }));
+    assert!(matches!(faults[2], LimitFault::MinGreaterThanMax { .. }));
+    for (fault, (_, path)) in faults.iter().zip(&cases) {
+        assert_eq!(fault.leaf().to_string(), *path);
+        assert!(fault.to_string().contains(path), "{fault}");
+        assert!(is_sentence(&fault.to_string()), "{fault}");
+    }
+}
+
+// Design D9: the texts of the variants differ, also when the path is the same.
+#[test]
+fn design_d9_the_texts_of_the_limit_faults_differ_per_variant() {
+    let leaf = LeafPath::parse(".x").unwrap();
+    let faults = [
+        LimitFault::NoLeaf { leaf: leaf.clone() },
+        LimitFault::NotApplicable { leaf: leaf.clone() },
+        LimitFault::OutsideTypeRange { leaf: leaf.clone() },
+        LimitFault::MinGreaterThanMax {
+            leaf: leaf.clone(),
+            min: "9".into(),
+            max: "1".into(),
+        },
+        precision_fault(leaf),
+    ];
+    let texts: std::collections::BTreeSet<String> =
+        faults.iter().map(ToString::to_string).collect();
+    assert_eq!(texts.len(), faults.len());
+}
+
+fn precision_fault(leaf: LeafPath) -> LimitFault {
+    LimitFault::PrecisionExceeded {
+        leaf,
+        field: PrecisionField::LimitMin,
+        type_name: Primitive::Real,
+        max_digits: 7,
+    }
+}
+
+// ADR-0117 (a), domain-model.md section 2.1: a REAL bound holds 7 significant digits. The text
+// of the fault names the leaf, the type, and that count.
+#[test]
+fn adr_0117_the_text_of_a_precision_fault_names_the_leaf_the_type_and_the_digit_limit() {
+    let fault = parse(&range(".temp_sp", Some("1.2345678"), None), &zone_tree()).unwrap_err();
+    assert_eq!(fault, precision_fault(LeafPath::parse(".temp_sp").unwrap()));
+    let text = fault.to_string();
+    assert!(text.contains(".temp_sp"), "{text}");
+    assert!(text.contains(&Primitive::Real.to_string()), "{text}");
+    assert!(text.contains("at most 7 digits"), "{text}");
+    assert!(is_sentence(&text), "{text}");
+}
+
+// Reliability.md section 4.4: a numeric leaf holds at most 28 significant digits. A stored bound
+// of 29 digits is outside the type range in the earlier set, because `NUMERIC` has no limit.
+#[test]
+fn reliability_4_4_a_stored_bound_of_29_digits_is_outside_the_type_range_in_the_earlier_set() {
+    let row = StoredLimit {
+        leaf_path: LeafPath::whole(),
+        min: Some(Decimal::MAX),
+        max: None,
+        max_length: None,
+    };
+    let tree = primitive_tree(LREAL);
+    let refused = LimitFault::OutsideTypeRange {
+        leaf: LeafPath::whole(),
+    };
+    assert_eq!(
+        stored_fault(&row, &tree, RuleSet::Earlier),
+        Some(refused.clone())
+    );
+    let max_row = StoredLimit {
+        min: None,
+        max: Some(Decimal::MAX),
+        ..row
+    };
+    assert_eq!(
+        stored_fault(&max_row, &tree, RuleSet::Earlier),
+        Some(refused)
+    );
+}
+
+// Design D9: a defensive path. A leaf without a numeric range and without a time type has no
+// bound inside its type.
+#[test]
+fn design_d9_a_bool_leaf_has_no_bound_inside_its_type() {
+    use super::is_inside_type;
+    for rules in [RuleSet::Current, RuleSet::Earlier] {
+        let is_inside = is_inside_type(Primitive::Bool, PlcPlatform::S7_1500, Decimal::ONE, rules);
+        assert!(!is_inside, "{rules:?}");
+    }
+}
+
+// Reliability.md section 4.4: a bound other than a time count is its canonical decimal text. A
+// time type with a fraction has no literal.
+#[test]
+fn reliability_4_4_a_bound_text_of_a_time_type_with_a_fraction_is_its_decimal_text() {
+    use crate::recipe::limit::bound_text;
+    let platform = PlcPlatform::S7_1500;
+    assert_eq!(
+        bound_text(Primitive::Time, platform, Decimal::new(15, 1)),
+        "1.5"
+    );
+    assert_eq!(
+        bound_text(Primitive::Time, platform, Decimal::from(1500)),
+        "T#1s500ms"
+    );
+    assert_eq!(
+        bound_text(Primitive::Int, platform, Decimal::from(1500)),
+        "1500"
+    );
+}

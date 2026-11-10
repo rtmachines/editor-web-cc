@@ -228,3 +228,43 @@ fn kept_members_does_not_list_a_member_that_only_the_target_has() {
         names(&["keep"])
     );
 }
+
+/// The tree of the row `n` on `PLATFORM`, built from the base rows and `rows`.
+fn tree_of(n: u128, rows: Vec<PlcType>) -> crate::plant::TypeTree {
+    let mut all = base_rows();
+    all.extend(on_platform(PLATFORM, rows));
+    TypeTrees::resolve([id(n)], &types_for(machine(), PLATFORM, all))
+        .tree(id(n))
+        .unwrap()
+        .clone()
+}
+
+// level.rs doc: the function returns `None` when the element chain ends in no struct.
+#[test]
+fn struct_level_of_a_tree_that_ends_in_a_leaf_is_none() {
+    let int = tree_of(INT, Vec::new());
+    let ints = tree_of(ARRAY_INT, vec![array_row(ARRAY_INT, INT, &[(1, 3)])]);
+
+    assert!(struct_level(&int).is_none());
+    assert!(struct_level(&ints).is_none());
+}
+
+// level.rs doc: the chain holds one entry for each array node, outermost first.
+#[test]
+fn struct_level_of_an_array_of_structs_has_one_chain_entry_and_the_members() {
+    let zone = struct_row_revision(ZONE_2, "ST_Zone", 2, &[("temp", INT), ("flow", DINT)]);
+    let zones = tree_of(
+        ARRAY_INT,
+        vec![zone, array_row(ARRAY_INT, ZONE_2, &[(1, 3)])],
+    );
+
+    let level = struct_level(&zones).unwrap();
+
+    assert_eq!(level.chain.len(), 1);
+    let members: Vec<&str> = level
+        .members
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(members, ["temp", "flow"]);
+}

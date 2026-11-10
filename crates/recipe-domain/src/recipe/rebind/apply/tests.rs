@@ -4,8 +4,8 @@ use serde_json::json;
 
 use super::super::test_support::{
     BIG_1, BIG_2, BIG_ARRAY, BIG_ARRAY_NEW, DINT, FILL, INT, ZONE_2, ZONE_3, ZONES_2, ZONES_2_NEW,
-    ZONES_4, ZONES_4_NEW, draft_on, draft_with, key, limit, number, param, plan_of, request_with,
-    trees, trees_on, trees_with_zone_3,
+    ZONES_4, ZONES_4_NEW, draft_on, draft_with, key, limit, number, param, plan_of, request,
+    request_with, trees, trees_on, trees_with_zone_3,
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{dimensions, id};
@@ -132,6 +132,135 @@ fn new_tree_with_another_member_name_gives_plan_mismatch() {
     let error = draft.apply_rebind(plan, &new_types(), &other).unwrap_err();
 
     assert!(mismatch(error));
+}
+
+// apply.rs doc and E-RCP-052: a plan made on one platform does not match a draft of another one.
+#[test]
+fn plan_made_on_another_platform_gives_plan_mismatch_and_no_change() {
+    let speed = || param(1, "SPEED", ZONE_2, json!({"setpoint": 5}), Vec::new());
+    let request = request_with(ZONE_2, ZONE_3, &[(1, ".temp_max", number(70))]);
+    let twin_cat = draft_on(PlcPlatform::TwinCat3, vec![speed()]);
+    let plan = twin_cat.plan_rebind(&request, &trees()).unwrap();
+    let mut s7 = draft_on(PlcPlatform::S7_1500, vec![speed()]);
+    let before = s7.clone();
+    let s7_trees = trees_on(
+        PlcPlatform::S7_1500,
+        &[("setpoint", INT), ("temp_max", INT)],
+    );
+
+    let error = s7
+        .apply_rebind(plan, &BTreeMap::new(), &s7_trees)
+        .unwrap_err();
+
+    assert!(mismatch(error));
+    assert_eq!(s7.parameters(), before.parameters());
+}
+
+/// The trees where `ST_Zone@3` has the one member of `ST_Zone@2`.
+fn trees_with_equal_zones() -> TypeTrees {
+    trees_with_zone_3(&[("setpoint", INT)])
+}
+
+// apply.rs doc: the struct revisions of the planned and the real tree must be equal, even when
+// the members are equal. `ZONES_2` is an array of `ST_Zone@2` and the plan holds `ST_Zone@3`.
+#[test]
+fn new_array_type_of_another_struct_revision_with_equal_members_gives_plan_mismatch() {
+    let mut draft = zone_draft();
+    let before = draft.clone();
+    let zone_trees = trees_with_equal_zones();
+    let plan = draft
+        .plan_rebind(&request(ZONE_2, ZONE_3), &zone_trees)
+        .unwrap();
+    let old_revision = BTreeMap::from([(key(2), id(ZONES_2))]);
+
+    let error = draft
+        .apply_rebind(plan, &old_revision, &zone_trees)
+        .unwrap_err();
+
+    assert!(mismatch(error));
+    assert_eq!(draft.parameters(), before.parameters());
+}
+
+#[test]
+fn new_array_type_of_the_planned_revision_applies_when_the_members_are_equal() {
+    let mut draft = zone_draft();
+    let zone_trees = trees_with_equal_zones();
+    let plan = draft
+        .plan_rebind(&request(ZONE_2, ZONE_3), &zone_trees)
+        .unwrap();
+
+    draft.apply_rebind(plan, &new_types(), &zone_trees).unwrap();
+
+    assert_eq!(draft.parameter(key(2)).unwrap().plc_type(), id(ZONES_2_NEW));
+}
+
+// E-RCP-052: an array parameter needs an array type. A struct type has another node kind.
+#[test]
+fn new_type_of_another_node_kind_gives_plan_mismatch_and_no_change() {
+    let mut draft = zone_draft();
+    let before = draft.clone();
+    let plan = zone_plan(&draft);
+    let not_an_array = BTreeMap::from([(key(2), id(ZONE_3))]);
+
+    let error = draft
+        .apply_rebind(plan, &not_an_array, &trees())
+        .unwrap_err();
+
+    assert!(mismatch(error));
+    assert_eq!(draft.parameters(), before.parameters());
+}
+
+// E-RCP-052: the planned struct has two members, and the real struct has one.
+#[test]
+fn new_tree_with_fewer_members_than_the_plan_gives_plan_mismatch_and_no_change() {
+    let mut draft = zone_draft();
+    let before = draft.clone();
+    let plan = zone_plan(&draft);
+    let other = trees_with_zone_3(&[("setpoint", INT)]);
+
+    let error = draft.apply_rebind(plan, &new_types(), &other).unwrap_err();
+
+    assert!(mismatch(error));
+    assert_eq!(draft.parameters(), before.parameters());
+}
+
+// apply.rs doc: the method reads the planned value again against the new tree and the stored
+// limits. `Draft::load` trusts stored data, so `plan_rebind` does not find a stored value that
+// breaks its stored limit and `apply_rebind` finds it.
+// Open question: domain-model.md section 5.2 does not list `E-RCP-004` for
+// `RebindTypeRevision`. The test pins the current code.
+#[test]
+fn stored_value_above_its_stored_limit_gives_e_rcp_004_and_no_change() {
+    let mut draft = draft_with(vec![param(
+        1,
+        "SPEED",
+        ZONE_2,
+        json!({"setpoint": 500}),
+        vec![limit(".setpoint", 100)],
+    )]);
+    let before = draft.clone();
+    let plan = draft
+        .plan_rebind(
+            &request_with(ZONE_2, ZONE_3, &[(1, ".temp_max", number(70))]),
+            &trees(),
+        )
+        .unwrap();
+
+    let error = draft
+        .apply_rebind(plan, &BTreeMap::new(), &trees())
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::RCP_004);
+    assert!(matches!(
+        &error,
+        DraftError::Recipe(RecipeError::ValueOutOfLimit { tag, leaf, value, min, max, .. })
+            if tag.as_str() == "SPEED"
+                && leaf.to_string() == ".setpoint"
+                && value == "500"
+                && min == "0"
+                && max == "100"
+    ));
+    assert_eq!(draft.parameters(), before.parameters());
 }
 
 #[test]

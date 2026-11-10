@@ -233,3 +233,16 @@ fn duplicate_identifier_is_a_row_shape_error() {
         }
     ));
 }
+
+// `PlatformTypes::label` doc: a row of another machine has no label, even on another platform.
+#[test]
+fn row_of_another_machine_off_the_platform_has_no_label() {
+    let rows = vec![
+        struct_row_of(other_machine(), 50, "ST_Other", &[("x", INT)]),
+        struct_row(10, "ST_Own", &[("x", INT)]),
+        primitive_row(INT, Primitive::Int),
+    ];
+    let collected = PlatformTypes::collect(machine(), PlcPlatform::S7_300, rows).unwrap();
+    assert_eq!(collected.label(id(50)), None);
+    assert_eq!(collected.label(id(10)), Some("ST_Own@1".to_owned()));
+}

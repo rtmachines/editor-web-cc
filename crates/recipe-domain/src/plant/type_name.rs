@@ -243,7 +243,7 @@ impl fmt::Display for TypeNameReason {
             Self::Format => {
                 write!(
                     f,
-                    "a type name is 1 to {MAX_NAME_LENGTH} ASCII letters, digits, or underscores"
+                    "a type name is 1 to {MAX_NAME_LENGTH} ASCII letters, digits, or underscores, and the first character is a letter or an underscore"
                 )
             }
             Self::Reserved => {
@@ -259,7 +259,7 @@ impl fmt::Display for MemberNameReason {
             Self::Format => {
                 write!(
                     f,
-                    "a member name is 1 to {MAX_NAME_LENGTH} ASCII letters, digits, or underscores"
+                    "a member name is 1 to {MAX_NAME_LENGTH} ASCII letters, digits, or underscores, and the first character is a letter or an underscore"
                 )
             }
         }

@@ -22,7 +22,7 @@ pub struct ArrayDimension {
 pub enum ArrayDimensionReason {
     /// The lower bound is greater than the upper bound.
     Order,
-    /// The dimension has 65536 or more elements.
+    /// The dimension has more than 65536 elements.
     Span,
     /// The list has no dimension or more than three dimensions.
     Count,
@@ -32,7 +32,7 @@ impl fmt::Display for ArrayDimensionReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Order => f.write_str("the lower bound is greater than the upper bound"),
-            Self::Span => write!(f, "a dimension has {MAX_SPAN} or more elements"),
+            Self::Span => write!(f, "a dimension has more than {MAX_SPAN} elements"),
             Self::Count => write!(f, "an array has 1 to {MAX_DIMENSIONS} dimensions"),
         }
     }
@@ -44,7 +44,7 @@ impl ArrayDimension {
     /// # Errors
     ///
     /// Returns [`ArrayDimensionReason::Order`] when `lower > upper`.
-    /// Returns [`ArrayDimensionReason::Span`] when the dimension has 65536 or more elements.
+    /// Returns [`ArrayDimensionReason::Span`] when the dimension has more than 65536 elements.
     pub fn parse(lower: i32, upper: i32) -> Result<Self, ArrayDimensionReason> {
         let span = i64::from(upper)
             .checked_sub(i64::from(lower))

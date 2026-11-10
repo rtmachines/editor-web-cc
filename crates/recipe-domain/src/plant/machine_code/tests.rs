@@ -74,3 +74,24 @@ proptest! {
         prop_assert_eq!(code.number(), n);
     }
 }
+
+fn assert_fragment(text: &str) {
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+}
+
+// A32 and domain-model.md section 2.1: the code is M and a number from 1 to 9999999.
+#[test]
+fn format_text_names_the_range_of_the_number() {
+    assert_eq!(MachineCode::parse("M1").map(MachineCode::number), Ok(1));
+    assert_eq!(
+        MachineCode::parse("M9999999").map(MachineCode::number),
+        Ok(9_999_999)
+    );
+    let text = MachineCodeReason::Format.to_string();
+    assert_fragment(&text);
+    assert!(text.contains("1 to 9999999"), "{text}");
+}

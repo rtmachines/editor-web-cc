@@ -35,6 +35,9 @@ fn range_check_rejects_codes_outside_the_ranges() {
         "E-PLT-1",
         "E-XYZ-001",
         "E-PLT-0010",
+        "X-PLT-001",
+        "PLT-001",
+        "E-PLT001",
     ] {
         assert!(!in_registry_range(code), "{code}");
     }

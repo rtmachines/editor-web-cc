@@ -34,6 +34,10 @@ pub(super) const BIG_2: u128 = 51;
 pub(super) const BIG_ARRAY: u128 = 52;
 pub(super) const FILL: u128 = 53;
 pub(super) const OLDS_1: u128 = 54;
+/// `ARRAY[1..2, 1..2] OF ST_Zone@2`, an array with two dimensions.
+pub(super) const GRID: u128 = 56;
+/// `ARRAY[1..2, 1..2] OF ST_Zone@3`, the new type of `GRID`.
+pub(super) const GRID_NEW: u128 = 57;
 /// `ARRAY[1..2] OF ST_Zone@3`, the new type of `ZONES_2`.
 pub(super) const ZONES_2_NEW: u128 = 34;
 /// `ARRAY[1..4] OF ST_Zone@3`, the new type of `ZONES_4`.
@@ -41,7 +45,7 @@ pub(super) const ZONES_4_NEW: u128 = 35;
 /// `ARRAY[1..8192] OF ST_Big@2`, the new type of `BIG_ARRAY`.
 pub(super) const BIG_ARRAY_NEW: u128 = 55;
 
-const ALL_TYPES: [u128; 28] = [
+const ALL_TYPES: [u128; 30] = [
     INT,
     DINT,
     STR,
@@ -66,6 +70,8 @@ const ALL_TYPES: [u128; 28] = [
     BIG_ARRAY_NEW,
     FILL,
     OLDS_1,
+    GRID,
+    GRID_NEW,
     99,
     98,
     97,
@@ -117,6 +123,8 @@ pub(super) fn trees_on(platform: PlcPlatform, zone_3: &[(&str, u128)]) -> TypeTr
         array_row(BIG_ARRAY_NEW, BIG_2, &[(1, 8_192)]),
         array_row(FILL, INT, &[(1, 16_384)]),
         array_row(OLDS_1, OLD_1, &[(1, 2)]),
+        array_row(GRID, ZONE_2, &[(1, 2), (1, 2)]),
+        array_row(GRID_NEW, ZONE_3, &[(1, 2), (1, 2)]),
     ];
     TypeTrees::resolve(
         ALL_TYPES.map(id),

@@ -81,3 +81,20 @@ fn round_trip_holds_for_every_day_from_1900_to_2300() {
         }
     }
 }
+
+// domain-model.md section 2.1: the Gregorian calendar gives April, June, September,
+// and November 30 days. Day 31 does not exist in them.
+#[test]
+fn day_thirty_one_does_not_exist_in_thirty_day_months() {
+    for month in [4_u8, 6, 9, 11] {
+        assert_eq!(days_from_civil(2026, month, 31), None, "month {month}");
+    }
+}
+
+#[test]
+fn day_thirty_exists_in_thirty_day_months() {
+    assert_eq!(days_from_civil(2026, 4, 30), Some(20_573));
+    assert_eq!(days_from_civil(2026, 6, 30), Some(20_634));
+    assert_eq!(days_from_civil(2026, 9, 30), Some(20_726));
+    assert_eq!(days_from_civil(2026, 11, 30), Some(20_787));
+}
