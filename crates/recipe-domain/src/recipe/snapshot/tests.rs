@@ -9,7 +9,9 @@ use super::fixtures::{
     parameter_tag, range, recipe, trees, trees_on, units,
 };
 use crate::error_codes::{ErrorCode, REGISTRY};
-use crate::plant::fixtures::{TIME_TREES_ROOT, time_trees_on};
+use crate::plant::fixtures::{
+    PLATFORM, TIME_TREES_ROOT, id, machine, primitive_row, struct_row, time_trees_on, types_for,
+};
 use crate::plant::{LeafPath, PlantError, PlcPlatform, Primitive, S7Address, TypeTrees, UnitId};
 use crate::recipe::draft::support::stored_draft_with;
 use crate::recipe::{
@@ -531,4 +533,35 @@ fn adr_0139_the_snapshot_check_passes_the_ldt_limit_max_after_the_current_end_on
     let parameters = ldt_stamp(json!(0), LDT_AFTER_CURRENT_END);
     let result = snapshot_check_with_trees(parameters, &ldt_trees_on_twincat3());
     assert!(result.is_ok(), "{result:?}");
+}
+
+/// The trees of a struct `ST_A` with a member `b` of the struct `ST_B`, which has a member `a`
+/// of `ST_A`. The two structs form a cycle, so the tree of the type 10 does not resolve.
+fn cycle_trees() -> TypeTrees {
+    let rows = vec![
+        primitive_row(INT, Primitive::Int),
+        struct_row(10, "ST_A", &[("b", 11)]),
+        struct_row(11, "ST_B", &[("a", 10)]),
+    ];
+    TypeTrees::resolve([id(10)], &types_for(machine(), PLATFORM, rows))
+}
+
+// ADR-0028 and ADR-0120 (g): a type that does not resolve for another reason than the platform
+// is one parameter item with the plant error of the resolution (`E-PLT-005` for a cycle).
+#[test]
+fn a_parameter_of_a_type_that_does_not_resolve_gives_one_item_with_the_plant_error() {
+    let parameters = vec![param(1, "LOOP", 10, json!({}))];
+
+    let result =
+        VersionSnapshot::from(parameters).check(&recipe(false), &units(false), &cycle_trees());
+
+    let items = items_of(result);
+    assert_eq!(codes(&items), vec![ErrorCode::PLT_005]);
+    assert!(matches!(
+        items.as_slice(),
+        [SnapshotItem::Parameter {
+            tag,
+            error: SnapshotError::Plant(PlantError::TypeCycle { type_name }),
+        }] if tag.as_str() == "LOOP" && type_name.as_str() == "ST_A"
+    ));
 }

@@ -81,6 +81,8 @@ fn parameter_added_in_the_new_version() {
         assert!(rows.section(kind).is_empty(), "{kind:?}");
     }
     assert_eq!(rows.unchanged(), 1);
+    // ADR-0050 (e): a diff with at least one row in a section is not empty.
+    assert!(!rows.is_empty());
 }
 
 /// The translated names of the one row of `kind`.

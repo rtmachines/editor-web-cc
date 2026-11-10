@@ -39,3 +39,20 @@ proptest! {
         prop_assert_eq!(tag.to_string(), text);
     }
 }
+
+// reliability.md section 7.11 (`text.tag_max`) and 4.3 (row `ParameterTag`): the text names the 1 to 64 length range.
+#[test]
+fn format_text_names_the_length_limit_as_a_lower_case_fragment() {
+    assert!(ParameterTag::parse(&"A".repeat(64)).is_ok());
+    assert_eq!(
+        ParameterTag::parse(&"A".repeat(65)),
+        Err(ParameterTagReason::Format)
+    );
+    let text = ParameterTagReason::Format.to_string();
+    assert!(
+        text.chars().next().is_some_and(|c| c.is_ascii_lowercase()),
+        "{text}"
+    );
+    assert!(!text.ends_with('.'), "{text}");
+    assert!(text.contains("1 to 64"), "{text}");
+}

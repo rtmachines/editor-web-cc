@@ -127,6 +127,54 @@ fn forbidden_transition_display_uses_words_not_debug() {
     );
 }
 
+// domain-model.md section 3: the four allowed pairs have no error, so the other twelve pairs
+// give twelve texts. Each text names the step and the state in words, not in Rust names.
+#[test]
+fn forbidden_transition_display_names_each_step_and_state_in_words() {
+    let steps = [
+        (Approve, "approve"),
+        (Retire, "retire"),
+        (Discard, "discard"),
+        (Edit, "edit"),
+    ];
+    let states = [
+        (LiveDraft, "a live draft"),
+        (Discarded, "discarded"),
+        (Approved, "approved"),
+        (Retired, "retired"),
+    ];
+    let mut texts = Vec::new();
+    for (state, state_words) in states {
+        for (step, step_word) in steps {
+            let Err(forbidden) = state.apply(step) else {
+                continue;
+            };
+            let text = forbidden.to_string();
+            assert!(
+                text.starts_with(&format!("Cannot {step_word} ")),
+                "{state:?} with {step:?}: {text}"
+            );
+            assert!(
+                text.ends_with(&format!(" is {state_words}.")),
+                "{state:?} with {step:?}: {text}"
+            );
+            for rust_name in [
+                "LiveDraft",
+                "Discarded",
+                "Approved",
+                "Retired",
+                "Transition",
+            ] {
+                assert!(!text.contains(rust_name), "{text}");
+            }
+            texts.push(text);
+        }
+    }
+    let distinct: std::collections::BTreeSet<&String> = texts.iter().collect();
+    assert_eq!(texts.len(), 12);
+    assert_eq!(distinct.len(), 12);
+}
+
 #[test]
 fn status_of_each_state() {
     assert_eq!(LiveDraft.status(), VersionStatus::Draft);

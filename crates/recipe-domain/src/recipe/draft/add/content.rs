@@ -10,9 +10,11 @@ use super::support::{
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::id;
-use crate::plant::{LeafPath, PlcPlatform};
+use crate::plant::{LeafPath, PlcPlatform, RuleSet};
+use crate::recipe::draft::check_faults;
 use crate::recipe::{
-    Draft, DraftError, Expected, LimitList, NewParameter, RecipeError, StoredLimit,
+    Draft, DraftError, Expected, LimitList, NewParameter, ParameterTag, ParameterValue,
+    RecipeError, StoredLimit,
 };
 
 fn limited(value_json: &str, rows: Vec<crate::recipe::LimitInput>) -> NewParameter {
@@ -410,4 +412,36 @@ fn a_budget_error_wins_over_an_overlap() {
     assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_021);
     let before = snapshot(&draft);
     assert_eq!(before.0.len(), 4_000);
+}
+
+// value/fault.rs doc: `WrongTree` becomes `E-RCP-005` with the whole value as leaf and the
+// parameter type as expectation. A caller never gives a tree of another root type, so the test
+// injects that fault (PLAN.md decision D2).
+#[test]
+fn check_faults_with_a_tree_of_another_root_type_gives_one_e_rcp_005_for_the_whole_value() {
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let int_tree = trees.tree(id(INT)).unwrap();
+    let bool_tree = trees.tree(id(BOOL)).unwrap();
+    let value = ParameterValue::parse("5", int_tree).unwrap();
+    let tag = ParameterTag::parse("TEMP").unwrap();
+
+    let errors = check_faults(&tag, &value, &[], (bool_tree, RuleSet::Earlier));
+
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].code(), ErrorCode::RCP_005);
+    assert!(matches!(
+        &errors[0],
+        RecipeError::ValueShapeMismatch { tag, leaf, expected: Expected::ParameterType }
+            if tag.as_str() == "TEMP" && *leaf == LeafPath::whole()
+    ));
+}
+
+#[test]
+fn check_faults_with_the_tree_of_the_value_gives_no_error() {
+    let trees = trees_on(PlcPlatform::TwinCat3);
+    let int_tree = trees.tree(id(INT)).unwrap();
+    let value = ParameterValue::parse("5", int_tree).unwrap();
+    let tag = ParameterTag::parse("TEMP").unwrap();
+
+    assert!(check_faults(&tag, &value, &[], (int_tree, RuleSet::Earlier)).is_empty());
 }

@@ -135,6 +135,32 @@ fn valid_rebind_lists_the_struct_and_the_array_parameter_only() {
     assert_eq!(plan.to(), id(ZONE_3));
 }
 
+// target.rs doc and ADR-0018: a parameter whose type has no tree in `trees` does not use the
+// source. The plan holds the struct parameter only, and the unresolved parameter stays out.
+#[test]
+fn parameter_of_an_unresolved_type_is_not_planned() {
+    let mut zone = stored_parameter(1, "ZONE", id(ZONE_2), None);
+    zone.value = serde_json::json!({"temp": 1}).into();
+    let mut other = stored_parameter(2, "OTHER", id(99), None);
+    other.value = serde_json::json!(5).into();
+    let draft = Draft::load(stored_draft_with(
+        VersionState::LiveDraft,
+        PlcPlatform::TwinCat3,
+        vec![zone, other],
+    ))
+    .unwrap();
+    let all = trees();
+    assert!(all.tree(id(99)).is_none());
+
+    let plan = draft.plan_rebind(&valued_request(), &all).unwrap();
+
+    let keys: Vec<ParameterKey> = plan.parameters().keys().copied().collect();
+    assert_eq!(keys, vec![key(1)]);
+    assert!(plan.value(key(1)).is_some());
+    assert!(plan.value(key(2)).is_none());
+    assert!(plan.limits(key(2)).is_none());
+}
+
 #[test]
 fn planned_trees_come_from_type_tree_rebind() {
     let draft = mixed_draft();

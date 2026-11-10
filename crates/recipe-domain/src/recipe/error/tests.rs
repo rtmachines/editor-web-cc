@@ -130,6 +130,8 @@ fn list_of_one_error_has_length_one_and_its_code() {
     let errors = RecipeErrors::from(lang("xx-"));
     assert_eq!(errors.len(), 1);
     assert_eq!(errors.code(), ErrorCode::RCP_027);
+    // reliability.md section 1.1: the list holds one or more entries, so it is never empty.
+    assert!(!errors.is_empty());
 }
 
 #[test]
@@ -139,6 +141,7 @@ fn push_keeps_insertion_order_and_the_first_code() {
         lang: "second-".to_owned(),
     });
     assert_eq!(errors.len(), 2);
+    assert!(!errors.is_empty());
     let texts: Vec<String> = errors.iter().map(ToString::to_string).collect();
     assert_eq!(
         texts,
