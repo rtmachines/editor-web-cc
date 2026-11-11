@@ -9,4 +9,10 @@ ignore = [
     # prints nothing. `cargo deny` checks the real graph and keeps no
     # exception for this advisory, so it fails if `rsa` enters the graph.
     "RUSTSEC-2023-0071",
+    # RUSTSEC-2026-0459: `libsqlite3-sys` (C SQLite CVE-2026-119375).
+    # `libsqlite3-sys` enters Cargo.lock only through `sqlx-sqlite`. The workspace never
+    # builds `sqlx-sqlite`: `cargo tree -i libsqlite3-sys --all-features --target all`
+    # prints nothing. `cargo deny` checks the real graph and keeps no
+    # exception for this advisory, so it fails if `libsqlite3-sys` enters the graph.
+    "RUSTSEC-2026-0459",
 ]
