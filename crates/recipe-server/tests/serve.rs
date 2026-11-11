@@ -43,9 +43,9 @@ const STOP_LIMIT: Duration = Duration::from_secs(40);
 /// A port that no server listens on. The cases that fail before the database use it.
 const CLOSED_PORT: u16 = 1;
 /// The number of keys that `CompareSettings` records (ADR-0062 (a)).
-const SETTING_COUNT: u32 = 18;
+const SETTING_COUNT: u32 = 19;
 /// The count after a third start changed one setting.
-const SETTING_COUNT_AFTER_CHANGE: u32 = 19;
+const SETTING_COUNT_AFTER_CHANGE: u32 = 20;
 const SETTING_CHANGED: &str = "SELECT count(*) FROM audit_log WHERE action = 'SettingChanged'";
 const AUDIT_ENTRIES: &str = "SELECT count(*) FROM audit_log";
 const STARTED: &str = "the server started";
@@ -322,7 +322,7 @@ async fn the_first_start_writes_the_setting_entries_and_an_equal_start_writes_no
     let database = Database::start(&setup).await;
     assert_eq!(database.count(SETTING_CHANGED).await, 0);
 
-    // The first start records all 18 keys.
+    // The first start records all 19 keys.
     let mut first = start_server(&setup.environment(database.port));
     wait_until_ready_answer(&mut first);
     assert_eq!(database.count(SETTING_CHANGED).await, SETTING_COUNT);

@@ -35,7 +35,7 @@ pub(super) const INTERNAL_PORT: u16 = 18_081;
 /// The first instant of the test clock.
 pub(super) const START_TEXT: &str = "2026-10-24T12:00:00.000000Z";
 
-/// The 18 checked values of a test start. The webhook and its CA file are not set.
+/// The 19 checked values of a test start. The webhook and its CA file are not set.
 pub(super) fn configured() -> ConfiguredSettings {
     ConfiguredSettings {
         db_host: "db".to_owned(),
@@ -45,6 +45,7 @@ pub(super) fn configured() -> ConfiguredSettings {
         app_password_file: "/run/secrets/app_password".to_owned(),
         login_hmac_key_file: "/run/secrets/login_hmac_key".to_owned(),
         csrf_signing_key_file: "/run/secrets/csrf_signing_key".to_owned(),
+        plc_credential_key_file: "/run/secrets/plc_credential_key".to_owned(),
         trusted_proxies: vec!["172.28.0.2/32".to_owned()],
         public_port: PUBLIC_PORT,
         internal_port: INTERNAL_PORT,

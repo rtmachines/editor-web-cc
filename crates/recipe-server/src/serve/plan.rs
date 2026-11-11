@@ -223,7 +223,7 @@ impl ServeSettings {
 /// binary builds it with [`Plan::from_config`].
 #[derive(Debug, Clone)]
 pub struct Plan {
-    /// The 18 values that `CompareSettings` records.
+    /// The 19 values that `CompareSettings` records.
     pub configured: ConfiguredSettings,
     /// The keys of the login HMAC.
     pub login_keys: KeyRing,

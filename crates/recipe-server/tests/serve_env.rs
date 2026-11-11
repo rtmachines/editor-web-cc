@@ -258,7 +258,7 @@ fn child_command(test: &str, output: &Path, variables: &[(&str, String)]) -> Com
     command
 }
 
-/// The 18 pairs that the child must write, in the table order of design D7.
+/// The 19 pairs that the child must write, in the table order of design D7.
 fn expected_lines(files: &[(&str, &Path)]) -> Vec<String> {
     let path = |name: &str| path_of(files, name);
     let fingerprint = recipe_domain::setting::SettingValue::fingerprint(WEBHOOK);
@@ -270,6 +270,7 @@ fn expected_lines(files: &[(&str, &Path)]) -> Vec<String> {
         "secrets.app_password_file=/s/app".to_owned(),
         format!("security.login_hmac_key_file={}", path("login")),
         format!("security.csrf_signing_key_file={}", path("csrf")),
+        format!("security.plc_credential_key_file={}", path("plc")),
         "http.trusted_proxies=10.0.0.0/8,172.28.0.2/32".to_owned(),
         "http.public_port=8081".to_owned(),
         "http.internal_port=9001".to_owned(),

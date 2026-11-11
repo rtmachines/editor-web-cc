@@ -1,4 +1,4 @@
-//! Tests of the 18 operator keys of `serve` (design D7, D14 row T17).
+//! Tests of the 19 recorded keys and 18 operator keys of `serve` (design D7, D14 row T17).
 //!
 //! The environment of the process is global, so no test sets an environment value. A test
 //! passes a figment provider in its place, as the tests of `migrate` do.
@@ -29,7 +29,7 @@ const RELIABILITY: &str = concat!(
 );
 
 /// The keys of design D7 in table order. `alerts.webhook_url` is the derived key.
-const KEYS: [&str; 18] = [
+const KEYS: [&str; 19] = [
     "db.host",
     "db.port",
     "db.name",
@@ -37,6 +37,7 @@ const KEYS: [&str; 18] = [
     "secrets.app_password_file",
     "security.login_hmac_key_file",
     "security.csrf_signing_key_file",
+    "security.plc_credential_key_file",
     "http.trusted_proxies",
     "http.public_port",
     "http.internal_port",
@@ -52,8 +53,8 @@ const KEYS: [&str; 18] = [
 
 /// The environment names of design D7 and of the PLC credential key. The derived key has none.
 ///
-/// The key `security.plc_credential_key_file` is read by `serve`, but `app_setting` does not
-/// record it (ADR-0062 (a) lists 18 keys), so it is not in `KEYS`.
+/// The key `security.plc_credential_key_file` is in `KEYS` too, because ADR-0155 adds it to the
+/// 19 keys that `app_setting` records.
 const ENV_NAMES: [&str; 18] = [
     "RECIPE_DB__HOST",
     "RECIPE_DB__PORT",
@@ -101,7 +102,7 @@ pub(super) fn refusal(figment: Figment) -> String {
     format!("{:#}", load(figment).unwrap_err())
 }
 
-/// The 18 pairs of key and canonical text of a configuration.
+/// The 19 pairs of key and canonical text of a configuration.
 pub(super) fn canonical(config: &ServeConfig) -> Vec<(String, String)> {
     let pairs = config.configured().canonical().unwrap();
     pairs
@@ -127,7 +128,7 @@ fn assert_row(prefix: &str, needle: &str) {
 }
 
 #[test]
-fn serve_keys_are_the_18_keys_of_design_d7_in_table_order() {
+fn serve_keys_are_the_19_recorded_keys_in_table_order() {
     let dir = Sandbox::new();
     let config = load(base(&dir)).unwrap();
 
@@ -138,6 +139,18 @@ fn serve_keys_are_the_18_keys_of_design_d7_in_table_order() {
 }
 
 #[test]
+fn serve_records_the_path_of_the_plc_key_file_and_not_its_content() {
+    let dir = Sandbox::new();
+    let config = load(base(&dir)).unwrap();
+
+    let pairs = canonical(&config);
+
+    let recorded = value_of(&pairs, "security.plc_credential_key_file");
+    assert_eq!(recorded, text(&dir.path("plc_key")));
+    assert!(!recorded.contains(KEY_A), "{recorded}");
+}
+
+#[test]
 fn serve_environment_names_are_those_of_design_d7() {
     let expected: Vec<String> = ENV_NAMES
         .iter()
@@ -145,12 +158,11 @@ fn serve_environment_names_are_those_of_design_d7() {
         .collect();
 
     assert_eq!(SERVE_ENV_KEYS.to_vec(), expected);
-    let mut read_keys: Vec<&str> = KEYS
+    let read_keys: Vec<&str> = KEYS
         .iter()
         .copied()
         .filter(|key| *key != "alerts.webhook_url")
         .collect();
-    read_keys.insert(7, "security.plc_credential_key_file");
     assert_eq!(read_keys.len(), ENV_NAMES.len());
     for (name, key) in ENV_NAMES.iter().zip(read_keys) {
         assert_eq!(
@@ -288,7 +300,7 @@ fn set_every_key(figment: Figment, hook: &Path, ca: &Path) -> Figment {
     set(figment, "session.absolute_timeout", 7200_u64)
 }
 
-/// The 18 canonical pairs that `set_every_key` must give, in the table order of design D7.
+/// The 19 canonical pairs that `set_every_key` must give, in the table order of design D7.
 fn expected_pairs(dir: &Sandbox, hook: &Path, ca: &Path) -> Vec<(String, String)> {
     let fingerprint = SettingValue::fingerprint(URL);
     [
@@ -301,6 +313,10 @@ fn expected_pairs(dir: &Sandbox, hook: &Path, ca: &Path) -> Vec<(String, String)
         (
             "security.csrf_signing_key_file",
             text(&dir.path("csrf_key")),
+        ),
+        (
+            "security.plc_credential_key_file",
+            text(&dir.path("plc_key")),
         ),
         (
             "http.trusted_proxies",
@@ -333,7 +349,7 @@ fn serve_canonical_text_of_every_set_value() {
     let pairs = canonical(&load_with(figment, true).unwrap());
 
     let expected = expected_pairs(&dir, &hook, &ca);
-    assert_eq!(expected.len(), 18);
+    assert_eq!(expected.len(), 19);
     assert_eq!(pairs, expected);
     // `base` already moves the two key files into the sandbox, so `defaults` cannot show them.
     for (key, value) in &expected {

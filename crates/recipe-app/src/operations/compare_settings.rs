@@ -1,7 +1,7 @@
 //! The internal operation `CompareSettings` (`reliability.md` section 7.12, ADR-0079).
 //!
 //! The server calls the operation in step 7 of the start order (ADR-0061). The operation
-//! compares the 18 configuration values with the rows of `app_setting`. It writes one
+//! compares the 19 configuration values with the rows of `app_setting`. It writes one
 //! `SettingChanged` entry for each difference. It has no permission check and no row of the
 //! matrix (ADR-0060). It also runs in read-only mode (ADR-0061 (e)).
 
@@ -36,7 +36,7 @@ impl fmt::Debug for WebhookUrlText {
     }
 }
 
-/// The 18 values that `serve` records in `app_setting` (ADR-0062 (a), design D7).
+/// The 19 values that `serve` records in `app_setting` (ADR-0062 (a), ADR-0155, design D7).
 ///
 /// The type solves one problem: the canonical text of each value must have one definition.
 /// `recipe-server` fills the fields from its checked configuration. [`ConfiguredSettings::canonical`]
@@ -58,6 +58,8 @@ pub struct ConfiguredSettings {
     pub login_hmac_key_file: String,
     /// `security.csrf_signing_key_file`.
     pub csrf_signing_key_file: String,
+    /// `security.plc_credential_key_file`. The path of the file, never the key (ADR-0155 (c)).
+    pub plc_credential_key_file: String,
     /// `http.trusted_proxies`. The CIDR texts in the given order.
     pub trusted_proxies: Vec<String>,
     /// `http.public_port`.
@@ -84,7 +86,7 @@ pub struct ConfiguredSettings {
 }
 
 impl ConfiguredSettings {
-    /// Return the 18 pairs of key and canonical text, in the order of design D7.
+    /// Return the 19 pairs of key and canonical text, in the order of design D7.
     ///
     /// A number is decimal text. A flag is `true` or `false`. A timeout is whole seconds and `s`.
     /// A list is its items joined by `,`. An absent file is the empty text. The webhook row is the
@@ -103,7 +105,7 @@ impl ConfiguredSettings {
             .map_or_else(String::new, |url| {
                 SettingValue::fingerprint(&url.0).to_string()
             });
-        let texts: [(&'static str, String); 18] = [
+        let texts: [(&'static str, String); 19] = [
             ("db.host", self.db_host.clone()),
             ("db.port", self.db_port.to_string()),
             ("db.name", self.db_name.clone()),
@@ -116,6 +118,10 @@ impl ConfiguredSettings {
             (
                 "security.csrf_signing_key_file",
                 self.csrf_signing_key_file.clone(),
+            ),
+            (
+                "security.plc_credential_key_file",
+                self.plc_credential_key_file.clone(),
             ),
             ("http.trusted_proxies", self.trusted_proxies.join(",")),
             ("http.public_port", self.public_port.to_string()),

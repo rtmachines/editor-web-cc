@@ -946,7 +946,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `password.min` / `password.max` | 12 / 128 characters, breached-password list | api.md 7.4 |
 | `security.login_hmac_key_file` | `/run/secrets/login_hmac_key`. 32 bytes. HMAC-SHA256 key of `security_event.login_hmac` | 7.1, 7.12, data-model.md 3.8 |
 | `security.csrf_signing_key_file` | `/run/secrets/csrf_signing_key`. 32 bytes. Signing key of the pre-session CSRF cookie | 7.1, 7.12, api.md 7.3 |
-| `security.plc_credential_key_file` | `/run/secrets/plc_credential_key`. 32 bytes. AES-256-GCM key of the PLC password of the connection settings. The server does not start without a key of 32 bytes (ADR-0154) | 1.1, 7.4 |
+| `security.plc_credential_key_file` | `/run/secrets/plc_credential_key`. 32 bytes. AES-256-GCM key of the PLC password of the connection settings. The server does not start without a key of 32 bytes (ADR-0154). `app_setting` records the path (ADR-0155) | 1.1, 7.4, 7.12 |
 | `security.key_rotation_overlap` | 24 h. The old and the new key are both accepted | 7.1 |
 | `secrets.replicator_password_file` | `/run/secrets/replicator_password`. Password of `recipe_replicator`, read by the initdb script and by `walarchive` | 7.1, 7.7, data-model.md 5.1 |
 | `secrets.migrator_password_file` | `/run/secrets/migrator_password`. Password of `recipe_migrator`, read by the initdb script and by `recipe-server migrate` (ADR-0031) | 5, 7.1, data-model.md 5.1 |
@@ -1099,7 +1099,7 @@ A query runs in `READ COMMITTED READ ONLY`. The draft queries of ADR-0042 and th
 
 ### 7.12 Stored settings
 
-`app_setting` (`data-model.md` 3.17) stores the effective value of each of the 18 keys that `serve` reads and records (ADR-0022, ADR-0062 (a)). The keys of `migrate` and `create-admin` stay out of `app_setting` (ADR-0062 (c)). For the derived key `alerts.webhook_url`, the stored value is the fingerprint of the URL and not the effective value (ADR-0063 (c), (d)).
+`app_setting` (`data-model.md` 3.17) stores the effective value of each of the 19 keys that `serve` reads and records (ADR-0022, ADR-0062 (a), ADR-0155). For a key file, the stored value is the path and never the key. The keys of `migrate` and `create-admin` stay out of `app_setting` (ADR-0062 (c)). For the derived key `alerts.webhook_url`, the stored value is the fingerprint of the URL and not the effective value (ADR-0063 (c), (d)).
 
 The internal operation `CompareSettings` compares the values at startup, before the listeners open. It runs in step 7 of the start order of ADR-0061, also in read-only mode (ADR-0061 (e)):
 

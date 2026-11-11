@@ -246,7 +246,7 @@ fn serve_plc_key_is_in_the_config_and_never_printed() {
     let shown = format!("{config:?} {:?}", config.configured());
     assert!(!shown.contains("0123456789"), "{shown}");
     assert!(shown.contains("PlcCredentialKey(<redacted>)"), "{shown}");
-    let names: Vec<String> = canonical(&config).into_iter().map(|(key, _)| key).collect();
-    assert!(!names.iter().any(|name| name == PLC), "{names:?}");
+    let recorded = value_of(&canonical(&config), PLC);
+    assert_eq!(recorded, text(&dir.path("plc_key")));
     let _key = config.into_plc_credential_key();
 }
