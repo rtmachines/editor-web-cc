@@ -135,11 +135,11 @@ pub(super) async fn save(
         },
         request.request_id(),
     )?;
-    let form = saved_form(&state, &request, code, output.row_version).await?;
+    let form = saved_form(&state, &request, &output)?;
     let body = Html(format!("{}{form}", toast.0));
     with_row_version(
         body.into_response(),
-        output.row_version,
+        output.form.row_version,
         request.request_id(),
     )
 }

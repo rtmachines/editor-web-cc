@@ -9,7 +9,9 @@ use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
 use axum::response::{IntoResponse, Response};
 use recipe_app::auth::Operation;
-use recipe_app::plant::{GetPlcConnectionForm, PlcConnectionForm, PlcConnectionFormInput};
+use recipe_app::plant::{
+    GetPlcConnectionForm, PlcConnectionForm, PlcConnectionFormInput, SetPlcConnectionOutput,
+};
 use recipe_app::ports::NonEmpty;
 use recipe_domain::plant::{CommMode, MachineCode, PlcConnection, PlcPlatform};
 
@@ -196,13 +198,13 @@ impl ConnectionFormView {
         }
     }
 
-    /// Return the form of a saved request: the saved record, the new `row_version`, and no error
-    /// line, swapped out of band (ADR-0041 (h)). The password input stays empty.
-    fn saved(self, row_version: i64) -> Self {
+    /// Build the form of a saved request from the output of the command: the saved record, the new
+    /// `row_version`, and no error line, swapped out of band (ADR-0041 (h)). The password input
+    /// stays empty.
+    fn saved(t: Texts<'_>, output: &SetPlcConnectionOutput, csrf_token: String) -> Self {
         Self {
-            row_version,
             oob: true,
-            ..self
+            ..Self::new(t, &output.form, csrf_token, false)
         }
     }
 }
@@ -290,20 +292,19 @@ pub(super) async fn refuse(
 
 /// Return the form of a saved request as markup that swaps out of band (ADR-0041 (h)).
 ///
-/// The form holds the saved record, the new `row_version`, an empty password input with the
-/// current password state, and no error line. So a line of an earlier refusal does not stay, and
-/// a typed password does not stay in the input.
-pub(super) async fn saved_form(
+/// The form comes from the output of `SetPlcConnection`, so it needs no second read after the
+/// commit and it shows the state that the command saved. It holds the saved record, the new
+/// `row_version`, an empty password input with the current password state, and no error line. So a
+/// line of an earlier refusal does not stay, and a typed password does not stay in the input.
+pub(super) fn saved_form(
     state: &WebState,
     request: &PageRequest,
-    code: MachineCode,
-    row_version: i64,
+    output: &SetPlcConnectionOutput,
 ) -> Result<String, WebError> {
-    let form = connection_form(state, request, code).await?;
     let t = Texts::new(state.bundles(), request.lang());
     let block = ConnectionFormBlock {
         t,
-        form: ConnectionFormView::new(t, &form, request.csrf_token(), false).saved(row_version),
+        form: ConnectionFormView::saved(t, output, request.csrf_token()),
     };
     block.render().map_err(|_failed| WebError::Internal {
         request_id: request.request_id(),

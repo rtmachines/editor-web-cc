@@ -130,7 +130,7 @@ async fn set_plc_connection_commits_the_first_record_and_one_entry() {
         .await
         .unwrap();
 
-    assert_eq!(output.row_version, 1);
+    assert_eq!(output.form.row_version, 1);
     assert_eq!(
         record_state(&mut app, setup.seed.id).await,
         "1 plc-first.plant.local"
