@@ -3,13 +3,14 @@
 //! (7.5), and the refusals (7.6) come in their own tasks.
 
 use axum::http::StatusCode;
-use recipe_app::memory::CipherCall;
+use recipe_app::memory::{CipherCall, JournalEntry};
+use recipe_app::ports::Isolation;
 use recipe_domain::plant::PlcPlatform;
 
 use super::connection_tests::seed;
 use crate::i18n::Lang;
 use crate::pages::test_helpers::{assert_clean_html, assert_error, field_value};
-use crate::test_support::plant::{HTMX, cookie_of, main_of, text_with, world};
+use crate::test_support::plant::{HTMX, World, cookie_of, main_of, text_with, world};
 use crate::test_support::text;
 
 /// A valid body for the S7 machine `M7` without a record.
@@ -439,4 +440,34 @@ async fn a_valid_save_after_a_refusal_with_a_password_shows_no_reenter_hint() {
         "{}",
         saved.body
     );
+}
+
+/// Return the transactions that the use cases of a request open to read without a write.
+fn read_only_begins_since(world: &World, before: usize) -> usize {
+    world
+        .fixture
+        .store
+        .journal()
+        .into_iter()
+        .skip(before)
+        .filter(|entry| matches!(entry, JournalEntry::Begin(Isolation::ReadOnly)))
+        .count()
+}
+
+#[tokio::test]
+async fn connection_save_builds_the_form_from_the_command_output_and_reads_nothing_after_the_commit()
+ {
+    let world = world();
+    let before = world.fixture.store.journal().len();
+    let reply = world
+        .post(&world.engineer, "/machines/M7/connection", S7_BODY, true)
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    // The only read is the unlocked read of `SetPlcConnection`. The form needs no second query.
+    assert_eq!(read_only_begins_since(&world, before), 1);
+    let form = oob_form(&reply.body);
+    assert!(form.contains("name=\"row_version\" value=\"1\""), "{form}");
+    for value in ["10.0.0.5", "0", "2", "1"] {
+        assert!(form.contains(&format!(" value=\"{value}\"")), "{value}");
+    }
 }

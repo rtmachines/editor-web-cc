@@ -19,7 +19,7 @@ const URL_KEY: &str = "alerts.webhook_url";
 const SEPARATION: &str = "approval.separation_of_duties";
 
 /// The table of design D7 for `sample()`, written by hand. The webhook row is checked apart.
-const EXPECTED: [(&str, &str); 17] = [
+const EXPECTED: [(&str, &str); 18] = [
     ("db.host", "db"),
     ("db.port", "5432"),
     ("db.name", "recipe"),
@@ -32,6 +32,10 @@ const EXPECTED: [(&str, &str); 17] = [
     (
         "security.csrf_signing_key_file",
         "/run/secrets/csrf_signing_key",
+    ),
+    (
+        "security.plc_credential_key_file",
+        "/run/secrets/plc_credential_key",
     ),
     ("http.trusted_proxies", "172.28.0.2/32,10.0.0.0/8"),
     ("http.public_port", "8080"),
@@ -54,6 +58,7 @@ fn sample() -> ConfiguredSettings {
         app_password_file: "/run/secrets/app_password".to_owned(),
         login_hmac_key_file: "/run/secrets/login_hmac_key".to_owned(),
         csrf_signing_key_file: "/run/secrets/csrf_signing_key".to_owned(),
+        plc_credential_key_file: "/run/secrets/plc_credential_key".to_owned(),
         trusted_proxies: vec!["172.28.0.2/32".to_owned(), "10.0.0.0/8".to_owned()],
         public_port: 8080,
         internal_port: 8081,
@@ -117,11 +122,11 @@ fn text_of<'a>(image: &'a Value, field: &str) -> &'a str {
 
 /// Run `sample()` once, so that every key has a row.
 async fn started(store: &MemoryStore) {
-    assert_eq!(run(store, &sample()).await.unwrap(), 18);
+    assert_eq!(run(store, &sample()).await.unwrap(), 19);
 }
 
 #[test]
-fn the_canonical_text_of_the_18_keys_equals_the_table_of_d7() {
+fn the_canonical_text_of_the_19_keys_equals_the_table_of_d7() {
     let fingerprint = SettingValue::fingerprint(URL);
     assert!(fingerprint.as_str().starts_with("sha256:"));
     assert_eq!(fingerprint.as_str().len(), 71);
@@ -129,7 +134,7 @@ fn the_canonical_text_of_the_18_keys_equals_the_table_of_d7() {
         .iter()
         .map(|(name, text)| ((*name).to_owned(), (*text).to_owned()))
         .collect();
-    expected.insert(13, (URL_KEY.to_owned(), fingerprint.to_string()));
+    expected.insert(14, (URL_KEY.to_owned(), fingerprint.to_string()));
     let pairs: Vec<(String, String)> = sample()
         .canonical()
         .unwrap()
@@ -186,9 +191,9 @@ async fn a_value_over_the_limit_is_refused_before_a_transaction_opens() {
 async fn on_an_empty_table_every_key_gets_a_row_and_an_entry_without_old_state() {
     let store = MemoryStore::default();
     started(&store).await;
-    assert_eq!(stored(&store).len(), 18);
+    assert_eq!(stored(&store).len(), 19);
     let entries = setting_entries(&store);
-    assert_eq!(entries.len(), 18);
+    assert_eq!(entries.len(), 19);
     for entry in &entries {
         assert!(entry.before().is_none());
         assert!(entry.actor().is_none());
@@ -222,7 +227,7 @@ async fn one_changed_value_writes_one_row_and_one_entry_with_both_full_rows() {
     assert_eq!(run(&store, &configured).await.unwrap(), 1);
     assert_eq!(stored_value(&store, SEPARATION).as_deref(), Some("false"));
     let entries = setting_entries(&store);
-    assert_eq!(entries.len(), 19);
+    assert_eq!(entries.len(), 20);
     let entry = entries.last().unwrap();
     let (before, after) = (entry.before().unwrap(), entry.after().unwrap());
     assert_eq!(text_of(before, "key"), SEPARATION);
@@ -245,16 +250,36 @@ async fn one_changed_value_writes_one_row_and_one_entry_with_both_full_rows() {
 }
 
 #[tokio::test]
+async fn a_changed_plc_key_path_gives_one_entry_with_the_old_and_the_new_path() {
+    let store = MemoryStore::default();
+    started(&store).await;
+    let configured = ConfiguredSettings {
+        plc_credential_key_file: "/run/secrets/plc_credential_key_next".to_owned(),
+        ..sample()
+    };
+    assert_eq!(run(&store, &configured).await.unwrap(), 1);
+    let entries = setting_entries(&store);
+    let entry = entries.last().unwrap();
+    let (before, after) = (entry.before().unwrap(), entry.after().unwrap());
+    assert_eq!(text_of(before, "key"), "security.plc_credential_key_file");
+    assert_eq!(text_of(before, "value"), "/run/secrets/plc_credential_key");
+    assert_eq!(
+        text_of(after, "value"),
+        "/run/secrets/plc_credential_key_next"
+    );
+}
+
+#[tokio::test]
 async fn a_missing_row_gives_an_entry_without_old_state_and_the_row_returns() {
     let store = MemoryStore::default();
     started(&store).await;
     store.update_state(|state, _| state.settings.remove(&key("db.name")));
-    assert_eq!(stored(&store).len(), 17);
+    assert_eq!(stored(&store).len(), 18);
     assert_eq!(run(&store, &sample()).await.unwrap(), 1);
     assert_eq!(stored_value(&store, "db.name").as_deref(), Some("recipe"));
     let entries = setting_entries(&store);
     let entry = entries.last().unwrap();
-    assert_eq!(entries.len(), 19);
+    assert_eq!(entries.len(), 20);
     assert!(entry.before().is_none());
     assert_eq!(text_of(entry.after().unwrap(), "key"), "db.name");
     assert_eq!(text_of(entry.after().unwrap(), "value"), "recipe");
@@ -276,7 +301,7 @@ async fn the_comparison_takes_no_read_only_input_and_commits_a_writable_transact
         stored_value(&store, "http.public_port").as_deref(),
         Some("9090")
     );
-    assert_eq!(setting_entries(&store).len(), 19);
+    assert_eq!(setting_entries(&store).len(), 20);
     let journal = store.journal();
     let begins: Vec<_> = journal
         .get(journal_before..)
@@ -373,7 +398,7 @@ async fn a_url_text_of_only_spaces_keeps_its_fingerprint() {
         webhook_url: Some(WebhookUrlText::from("  ".to_owned())),
         ..sample()
     };
-    assert_eq!(run(&store, &configured).await.unwrap(), 18);
+    assert_eq!(run(&store, &configured).await.unwrap(), 19);
     let fingerprint = SettingValue::fingerprint("  ");
     assert_eq!(
         stored_value(&store, URL_KEY).as_deref(),
@@ -432,7 +457,7 @@ async fn the_state_keys_stay_unchanged_and_get_no_entry() {
         stored_value(&store, state_key.as_str()).as_deref(),
         Some("42")
     );
-    assert_eq!(stored(&store).len(), 19);
+    assert_eq!(stored(&store).len(), 20);
     assert!(
         setting_entries(&store)
             .iter()
@@ -463,11 +488,11 @@ async fn one_read_committed_transaction_locks_the_rows_before_any_write() {
             JournalEntry::Begin(_) => None,
         })
         .collect();
-    assert_eq!(locks.len(), 18);
+    assert_eq!(locks.len(), 19);
     assert!(
         locks
             .iter()
             .all(|lock| lock.table == "app_setting" && lock.mode == LockMode::ForNoKeyUpdate)
     );
-    assert_eq!(this_run.len(), 19);
+    assert_eq!(this_run.len(), 20);
 }

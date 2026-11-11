@@ -1,6 +1,6 @@
 # ADR-0062: Configuration keys of serve, their delivery, and the secret files
 
-Status: Accepted. Amended by a note: item (k) does not apply to `serve`. Item (o) has an exception for the key files of `security.login_hmac_key_file` and `security.csrf_signing_key_file`. Each of these two files holds a key ring (ADR-0035). Amended by ADR-0103 (item (i): nine values, the ninth is `RECIPE_PGDATA_VOLUME`)
+Status: Accepted. Amended by a note: item (k) does not apply to `serve`. Item (o) has an exception for the key files of `security.login_hmac_key_file` and `security.csrf_signing_key_file`. Each of these two files holds a key ring (ADR-0035). Amended by ADR-0103 (item (i): nine values, the ninth is `RECIPE_PGDATA_VOLUME`). Amended by ADR-0155 (items (a) and (c): 19 keys, the 19th is `security.plc_credential_key_file`)
 Date: 2026-10-23
 Deciders: project owner
 

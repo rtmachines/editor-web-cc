@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, Missing, StorageError};
+use crate::plant::PlcConnectionForm;
 use crate::ports::{
     CredentialCipher, Isolation, Locked, NonEmpty, PasswordWrite, RowImage, SealedSecret,
     StoredConnection, Transaction, seal_password,
@@ -32,12 +33,15 @@ pub struct SetPlcConnectionInput {
 }
 
 /// The result of `SetPlcConnection`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// The type solves one problem: after the commit the web layer needs the saved record, and a
+/// second read could fail or show another state. The use case builds the form from the values that
+/// it saved, so the caller needs no extra read. The type has no password and no ciphertext.
+/// The type has no `Clone` and no `PartialEq`, because [`PlcConnectionForm`] has none.
+#[derive(Debug)]
 pub struct SetPlcConnectionOutput {
-    /// The identifier of the machine that owns the record.
-    pub machine: MachineId,
-    /// The `row_version` of the record after the save. The first save gives 1.
-    pub row_version: i64,
+    /// The saved record. Its `row_version` is the one after the save. The first save gives 1.
+    pub form: PlcConnectionForm,
 }
 
 /// Creates or changes the PLC connection record of a machine.
@@ -142,7 +146,7 @@ impl SetPlcConnection {
                 actual,
             });
         }
-        let (connection_id, row_version, change) = write_record(
+        let written = write_record(
             tx.as_mut(),
             unlocked.machine,
             &plan.connection,
@@ -152,14 +156,20 @@ impl SetPlcConnection {
         .await?;
         let entries = NonEmpty::new(AuditEntry::row(
             RowAction::PlcConnectionSet,
-            AuditTarget::plc_connection(connection_id, unlocked.machine),
-            change,
+            AuditTarget::plc_connection(written.connection_id, unlocked.machine),
+            written.change,
             audit_context(user, meta),
         ));
         self.ctx.uow.commit(tx, entries).await?;
         Ok(SetPlcConnectionOutput {
-            machine: unlocked.machine,
-            row_version,
+            form: PlcConnectionForm {
+                machine: unlocked.machine,
+                code: unlocked.code,
+                platform: unlocked.platform,
+                connection: Some(plan.connection),
+                row_version: written.row_version,
+                password_set: written.password_set,
+            },
         })
     }
 
@@ -267,9 +277,19 @@ fn with_password_flags(image: RowImage, set: bool, changed: Option<bool>) -> Val
     value
 }
 
+/// What step 6 of design D6 wrote: the row, its new `row_version`, the password state after the
+/// write, and the change for the audit entry.
+struct Written {
+    connection_id: PlcConnectionId,
+    row_version: i64,
+    password_set: bool,
+    change: RowChange,
+}
+
 /// Step 6 of design D6: insert the first record or update the existing one.
 ///
-/// The function returns the id of the row, the new `row_version`, and the change for the audit entry. An insert
+/// The function returns the id of the row, the new `row_version`, the state `password_set` after
+/// the write, and the change for the audit entry. An insert
 /// stores a sealed password only for `PasswordWrite::Set`. An update applies `password` to the
 /// column `password_sealed`. The change holds the row images and the flags `password_set` and
 /// `password_changed` (design D7). A create holds only the image after the change.
@@ -279,7 +299,7 @@ async fn write_record(
     connection: &PlcConnection,
     password: &PasswordWrite,
     locked: Option<Locked<StoredConnection>>,
-) -> Result<(PlcConnectionId, i64, RowChange), AppError> {
+) -> Result<Written, AppError> {
     match locked {
         None => {
             let after = tx
@@ -292,7 +312,12 @@ async fn write_record(
             let change = RowChange::Create {
                 after: with_password_flags(after, flags.set, Some(flags.changed)),
             };
-            Ok((connection_id, row_version, change))
+            Ok(Written {
+                connection_id,
+                row_version,
+                password_set: flags.set,
+                change,
+            })
         }
         Some(held) => {
             let after = tx
@@ -307,10 +332,17 @@ async fn write_record(
                 before: with_password_flags(held.before, was_set, None),
                 after: with_password_flags(after, flags.set, Some(flags.changed)),
             };
-            Ok((connection_id, row_version, change))
+            Ok(Written {
+                connection_id,
+                row_version,
+                password_set: flags.set,
+                change,
+            })
         }
     }
 }
 
+#[cfg(test)]
+mod output_tests;
 #[cfg(test)]
 mod tests;

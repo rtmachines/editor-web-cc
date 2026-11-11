@@ -1,11 +1,12 @@
 //! The operator keys of `serve` (ADR-0062, design D7).
 //!
 //! `serve` reads 18 keys from the environment. The key `alerts.webhook_url` is derived from the
-//! webhook file (ADR-0063). `CompareSettings` records 18 values (ADR-0062 (a)). They are the 17
-//! environment keys of ADR-0062 and the derived key. The key `security.plc_credential_key_file`
-//! is not among them (ADR-0154 (g)). The function [`load`] reads and checks every key, the three
-//! key files, and the webhook file. It does this before the server opens a port. A refusal
-//! for a key file or the webhook file names the key only. It never shows a secret value,
+//! webhook file (ADR-0063). `CompareSettings` records 19 values (ADR-0062 (a), ADR-0155). They are
+//! the 18 environment keys and the derived key. The key `security.plc_credential_key_file`
+//! records the path of its file and never the key (ADR-0155 (c)). The function [`load`] reads
+//! and checks every key, the three key files, and the webhook file. It does this before the
+//! server opens a port. A refusal for a key file or the webhook file names the key only.
+//! It never shows a secret value,
 //! a file content, a path, or the webhook URL.
 
 use std::path::{Path, PathBuf};
@@ -241,7 +242,7 @@ pub struct ServeConfig {
 }
 
 impl ServeConfig {
-    /// Return the 18 values that `CompareSettings` records in `app_setting`.
+    /// Return the 19 values that `CompareSettings` records in `app_setting`.
     #[must_use]
     pub const fn configured(&self) -> &ConfiguredSettings {
         &self.configured
@@ -357,6 +358,7 @@ fn load_with(overrides: impl Provider, dev_build: bool) -> Result<ServeConfig> {
         app_password_file: raw.secrets.app_password_file,
         login_hmac_key_file: raw.security.login_hmac_key_file,
         csrf_signing_key_file: raw.security.csrf_signing_key_file,
+        plc_credential_key_file: raw.security.plc_credential_key_file,
         trusted_proxies: proxy_texts,
         public_port: raw.http.public_port,
         internal_port: raw.http.internal_port,

@@ -1,6 +1,6 @@
 # ADR-0154: PLC connection settings of a machine
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0155 (`app_setting` records `security.plc_credential_key_file`)
 Date: 2026-11-10
 Deciders: project owner
 

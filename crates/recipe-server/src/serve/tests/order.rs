@@ -9,7 +9,7 @@ use crate::serve::host::ListenerKind;
 use crate::serve::test_support::stub::{Event, StubHost};
 use crate::serve::test_support::{self, INTERNAL_PORT, PUBLIC_PORT};
 
-const SETTING_ROWS: usize = 18;
+const SETTING_ROWS: usize = 19;
 
 fn setting_changes(host: &StubHost) -> usize {
     host.store

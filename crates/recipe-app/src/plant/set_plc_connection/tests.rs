@@ -150,8 +150,8 @@ async fn a_first_save_creates_the_record_at_row_version_1_and_writes_one_entry()
         )
         .await
         .unwrap();
-    assert_eq!(output.machine, mid(1));
-    assert_eq!(output.row_version, 1);
+    assert_eq!(output.form.machine, mid(1));
+    assert_eq!(output.form.row_version, 1);
     let mut tx = fixture.store.begin_memory(Isolation::ReadOnly).unwrap();
     let stored = tx
         .plc_connections()
@@ -210,7 +210,7 @@ async fn an_update_locks_the_machine_before_the_record_and_adds_1_to_the_row_ver
         )
         .await
         .unwrap();
-    assert_eq!(output.row_version, 2);
+    assert_eq!(output.form.row_version, 2);
     assert_eq!(
         fixture.store.journal(),
         vec![
@@ -245,8 +245,8 @@ async fn an_iec_first_save_without_credentials_passes() {
         )
         .await
         .unwrap();
-    assert_eq!(output.machine, mid(2));
-    assert_eq!(output.row_version, 1);
+    assert_eq!(output.form.machine, mid(2));
+    assert_eq!(output.form.row_version, 1);
 }
 
 #[tokio::test]
@@ -448,7 +448,7 @@ async fn keep_leaves_the_stored_ciphertext_and_does_not_seal() {
         )
         .await
         .unwrap();
-    assert_eq!(output.row_version, 2);
+    assert_eq!(output.form.row_version, 2);
     let (sealed, state) = stored_password(&fixture, mid(2)).await;
     assert_eq!(sealed, Some(before));
     assert_eq!(state, PasswordState::Stored);
@@ -500,7 +500,7 @@ async fn a_first_save_with_a_password_stores_it_sealed() {
         )
         .await
         .unwrap();
-    assert_eq!(output.row_version, 1);
+    assert_eq!(output.form.row_version, 1);
     let (sealed, state) = stored_password(&fixture, mid(2)).await;
     assert_eq!(state, PasswordState::Stored);
     let opened = cipher.open(mid(2), &sealed.unwrap()).unwrap();
@@ -525,7 +525,7 @@ async fn clear_removes_the_stored_ciphertext_when_the_mode_has_no_credentials() 
         )
         .await
         .unwrap();
-    assert_eq!(output.row_version, 2);
+    assert_eq!(output.form.row_version, 2);
     let (sealed, state) = stored_password(&fixture, mid(2)).await;
     assert!(sealed.is_none());
     assert_eq!(state, PasswordState::Absent);

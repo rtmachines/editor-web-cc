@@ -982,7 +982,7 @@ INSERT INTO audit_chain_head (singleton, last_seq, last_hash) VALUES (true, 0, N
 
 ### 3.17 `app_setting`
 
-The effective value of each configuration key of `serve` (`reliability.md` 7.12). Of the configuration keys, the table holds only the 18 keys of `serve` of ADR-0062 (a). The keys of `migrate` and `create-admin` stay out of it (ADR-0062 (c)). The three state keys below are also rows of the table. At startup the server compares its configuration with these rows. For each difference it writes the audit action `SettingChanged` and updates the row (ADR-0022).
+The effective value of each configuration key of `serve` (`reliability.md` 7.12). Of the configuration keys, the table holds only the 19 keys of `serve` of ADR-0062 (a) and ADR-0155. For a key file, the table holds the path and never the key. The keys of `migrate` and `create-admin` stay out of it (ADR-0062 (c)). The three state keys below are also rows of the table. At startup the server compares its configuration with these rows. For each difference it writes the audit action `SettingChanged` and updates the row (ADR-0022).
 
 For the derived key `alerts.webhook_url`, the stored value is the fingerprint and not the effective value. The fingerprint is `sha256:` and 64 lower-case hex characters of the URL in the secret file. With no webhook, the row holds the empty text (ADR-0063 (c), (d)).
 

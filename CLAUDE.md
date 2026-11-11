@@ -61,7 +61,7 @@ Dependency rule:
 - A command writes its audit entries through `UnitOfWork::commit(NonEmpty<AuditEntry>)`. `domain-model.md` §5 gives each commit path and the two cases without an entry.
 - Security events go through `SecurityEventSink` in their own short transaction (ADR-0015, ADR-0022).
 - The permission check is the first statement of every command use case and every query use case. HTTP only authenticates (ADR-0013).
-- In read-only mode, every command except `Login`, `Logout`, and `ExportVersion` returns `503 E-WEB-006` and writes nothing (A24).
+- In read-only mode, every command except `Login`, `Logout`, `ExportVersion`, and `ExportPlcConnection` returns `503 E-WEB-006` and writes nothing (A24, ADR-0154).
 - Every error code has exactly one row in `reliability.md` §1.2. Add the row before the variant that returns the code. Never reuse a code.
 - Every error type has `code()`, except the marker `AcceptLoopEnded` of `recipe-server` (`reliability.md` §1.1, ADR-0125 (c)). An error variant never carries a password, a hash, a session token, or a cookie value (`reliability.md` §1.1).
 - Log each error once: in the `WebError` to HTTP mapping, in the backstop panic layer, or in the supervisor of a background job. A job logs a handled fault once at `WARN` (`reliability.md` §1.1). The handler of `POST /users/{login}/unlock` also logs a lost event `unlock` once at `WARN` (ADR-0130).

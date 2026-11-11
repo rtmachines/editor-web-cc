@@ -116,7 +116,7 @@ async fn two_first_saves_give_one_record_and_one_e_web_013() {
 
     assert_no_deadlock(&winner);
     assert_no_deadlock(&loser);
-    assert_eq!(winner.unwrap().row_version, 1);
+    assert_eq!(winner.unwrap().form.row_version, 1);
     assert_eq!(error_code(&loser), ErrorCode::WEB_013);
     assert_eq!(app.count(RECORD_ROWS, machine.id).await, 1);
     assert_eq!(app.count(RECORD_VERSION, machine.id).await, 1);
@@ -136,7 +136,7 @@ async fn two_saves_with_one_row_version_give_one_e_web_013() {
 
     assert_no_deadlock(&winner);
     assert_no_deadlock(&loser);
-    assert_eq!(winner.unwrap().row_version, 2);
+    assert_eq!(winner.unwrap().form.row_version, 2);
     assert_eq!(error_code(&loser), ErrorCode::WEB_013);
     assert_eq!(app.count(RECORD_VERSION, machine.id).await, 2);
     assert_eq!(count_all(&mut app, SAVE_ENTRIES).await, 1);
@@ -181,7 +181,7 @@ async fn save_against_archive_machine_commits_before_the_archive_when_the_save_g
 
     assert_no_deadlock(&save);
     assert_no_deadlock(&archive);
-    assert_eq!(save.unwrap().row_version, 1);
+    assert_eq!(save.unwrap().form.row_version, 1);
     archive.unwrap();
     assert_eq!(app.count(RECORD_ROWS, machine.id).await, 1);
     assert_eq!(app.count(ARCHIVED_ROWS, machine.id).await, 1);

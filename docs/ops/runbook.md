@@ -1228,6 +1228,7 @@ Key file of step 6 (ADR-0154):
 The new `app` refuses to start when the file `plc_credential_key` is missing or has a wrong form.
 A release before this change has no such file. Run the steps before step 8, so `docker compose up` finds the file.
 Never replace an existing file. A new key makes every stored PLC password unreadable.
+The first start of the new `app` finds no row of `security.plc_credential_key_file` in `app_setting`. It writes one entry `SettingChanged` with the old value `null` and the path as the new value (ADR-0155).
 
 1. Create the file when it does not exist:
 
@@ -1827,7 +1828,7 @@ docker compose logs --no-log-prefix db | grep -B1 -E "PASSWORD +E?'" | grep -o -
 
 ## Change a setting
 
-The server `app` reads 18 configuration keys from its environment and derives `alerts.webhook_url` from the webhook file (ADR-0062 (a), ADR-0063 (c)). The table `app_setting` records 18 keys, and `security.plc_credential_key_file` is not one of them (ADR-0154).
+The server `app` reads 18 configuration keys from its environment and derives `alerts.webhook_url` from the webhook file (ADR-0062 (a), ADR-0063 (c), ADR-0154). The table `app_setting` records these 19 keys (ADR-0155). For a key file, the table records the path and never the key.
 The file `compose.yaml` holds the environment entries of `app`. An entry has the form `RECIPE_<SECTION>__<NAME>`, with a double underscore between the parts.
 For example, the key `approval.separation_of_duties` is the entry `RECIPE_APPROVAL__SEPARATION_OF_DUTIES`.
 
