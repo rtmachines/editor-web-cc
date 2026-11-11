@@ -187,7 +187,7 @@ fn signal_stream() -> io::Result<Signal> {
 pub fn run(counters: AlertCounters) -> Result<()> {
     let config = load()?;
     let connection = config.app_connection()?;
-    let plan = Plan::from_config(&config);
+    let plan = Plan::from_config(config);
     let host = ProcessHost::new(connection, plan.settings.disk_check_interval);
     serve_with(&host, plan, counters)
 }

@@ -19,6 +19,8 @@ pub enum AuditAction {
     UdtDefined,
     /// A derived type was created by the internal operation.
     DerivedTypeCreated,
+    /// The PLC connection record of a machine was created or changed.
+    PlcConnectionSet,
     /// A recipe was created.
     RecipeCreated,
     /// A recipe was renamed.
@@ -71,13 +73,15 @@ pub enum AuditAction {
     LoginUnlocked,
     /// A version was exported.
     VersionExported,
+    /// The PLC connection document of a machine was exported.
+    PlcConnectionExported,
     /// A startup setting was changed.
     SettingChanged,
 }
 
 impl AuditAction {
     /// Every audit action, in the order of `data-model.md` section 10.
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 37] = [
         Self::MachineCreated,
         Self::MachineRenamed,
         Self::MachineArchived,
@@ -86,6 +90,7 @@ impl AuditAction {
         Self::UnitArchived,
         Self::UdtDefined,
         Self::DerivedTypeCreated,
+        Self::PlcConnectionSet,
         Self::RecipeCreated,
         Self::RecipeRenamed,
         Self::RecipeDeleted,
@@ -112,6 +117,7 @@ impl AuditAction {
         Self::OwnPasswordChanged,
         Self::LoginUnlocked,
         Self::VersionExported,
+        Self::PlcConnectionExported,
         Self::SettingChanged,
     ];
 
@@ -127,6 +133,7 @@ impl AuditAction {
             Self::UnitArchived => "UnitArchived",
             Self::UdtDefined => "UdtDefined",
             Self::DerivedTypeCreated => "DerivedTypeCreated",
+            Self::PlcConnectionSet => "PlcConnectionSet",
             Self::RecipeCreated => "RecipeCreated",
             Self::RecipeRenamed => "RecipeRenamed",
             Self::RecipeDeleted => "RecipeDeleted",
@@ -153,6 +160,7 @@ impl AuditAction {
             Self::OwnPasswordChanged => "OwnPasswordChanged",
             Self::LoginUnlocked => "LoginUnlocked",
             Self::VersionExported => "VersionExported",
+            Self::PlcConnectionExported => "PlcConnectionExported",
             Self::SettingChanged => "SettingChanged",
         }
     }

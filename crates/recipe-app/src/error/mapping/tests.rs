@@ -144,6 +144,14 @@ fn constraint_names_match_the_documents() {
             "recipe_version_one_live_draft",
         ),
         (UNIT_PARENT_EXISTS, "unit_parent_exists"),
+        (
+            PLC_CONNECTION_MACHINE_UNIQUE,
+            "plc_connection_machine_unique",
+        ),
+        (
+            PLC_CONNECTION_MACHINE_PLATFORM,
+            "plc_connection_machine_platform",
+        ),
     ];
     for (constant, text) in names {
         assert_eq!(constant, text);

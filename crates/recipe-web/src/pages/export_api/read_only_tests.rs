@@ -1,6 +1,6 @@
 //! Tests of the spec requirement "Transfer routes in read-only mode" (A24, ADR-0109 (ac)).
 //!
-//! The three machine routes stay available in read-only mode. The Basic check keeps its
+//! The three machine routes and the connection route stay available in read-only mode. The Basic check keeps its
 //! `login_attempt` row, and an export writes its `VersionExported` entry. A wrong password still
 //! gives `401 E-IDN-003` and keeps its failed attempt row.
 
@@ -8,7 +8,10 @@ use axum::http::StatusCode;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 
-use super::tests::{audit_count, client_get, exported_actors, seeded};
+use super::connection_tests::{
+    M8_ROUTE, PLC_PASSWORD, connection_entries, seeded as seeded_with_connection,
+};
+use super::tests::{audit_count, client, client_get, exported_actors, seeded};
 use crate::test_support::{Fixture, get_with};
 
 /// The list route of the live machine `M7`.
@@ -102,4 +105,23 @@ async fn export_wrong_password_in_read_only_mode_gives_401_and_keeps_the_failed_
     }
     assert_eq!(attempts(&fixture), (3, 0));
     assert_eq!(audit_count(&fixture), entries);
+}
+
+#[tokio::test]
+async fn connection_route_in_read_only_mode_gives_200_and_writes_the_connection_entry() {
+    let fixture = seeded_with_connection();
+    fixture.state.read_only().set(true);
+    let before = connection_entries(&fixture).len();
+    let entries = audit_count(&fixture);
+
+    let reply = client_get(&fixture, M8_ROUTE).await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("cache-control"), "no-store");
+    assert!(reply.body.contains(PLC_PASSWORD), "{}", reply.body);
+    let after = connection_entries(&fixture);
+    assert_eq!(after.len(), before + 1);
+    assert_eq!(after.last(), Some(&Some(client())));
+    assert_eq!(audit_count(&fixture), entries + 1);
+    assert_eq!(attempts(&fixture), (1, 1));
 }

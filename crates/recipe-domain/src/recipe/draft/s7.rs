@@ -16,16 +16,6 @@ const BITS_PER_BYTE: u64 = 8;
 /// The number is a fact of the platform family, not a setting.
 const S7_DATA_BLOCK_BYTES: u32 = 65_536;
 
-/// The highest data block number of an S7-300 controller (ADR-0116 (c)).
-///
-/// The number is a fact of the platform family, not a setting.
-const S7_300_MAX_DATA_BLOCK: u16 = 16_000;
-
-/// The highest data block number of an S7-1200 and an S7-1500 controller (ADR-0140 (a)).
-///
-/// The number is a fact of the platform family, not a setting.
-const S7_1X00_MAX_DATA_BLOCK: u16 = 59_999;
-
 /// Whether a whole-draft check runs the address rules of ADR-0116.
 ///
 /// A check for approval runs them. A check after `replace_parameters` skips them, so a stored
@@ -201,7 +191,7 @@ pub(in crate::recipe) fn check_data_block_rule(
     tag: &ParameterTag,
     address: Option<S7Address>,
 ) -> Result<(), RecipeError> {
-    let (Some(address), Some(max)) = (address, max_data_block(platform)) else {
+    let (Some(address), Some(max)) = (address, platform.max_data_block()) else {
         return Ok(());
     };
     if address.db() <= max {
@@ -212,15 +202,6 @@ pub(in crate::recipe) fn check_data_block_rule(
         address,
         max,
     })
-}
-
-/// The highest data block number of a platform, or `None` when the platform keeps the grammar.
-const fn max_data_block(platform: PlcPlatform) -> Option<u16> {
-    match platform {
-        PlcPlatform::S7_300 => Some(S7_300_MAX_DATA_BLOCK),
-        PlcPlatform::S7_1200 | PlcPlatform::S7_1500 => Some(S7_1X00_MAX_DATA_BLOCK),
-        PlcPlatform::CodesysIec | PlcPlatform::TwinCat3 => None,
-    }
 }
 
 /// Check the platform rule I5. The rule needs no type tree.

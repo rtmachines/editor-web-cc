@@ -262,6 +262,8 @@ impl IntoResponse for WebError {
 #[cfg(test)]
 pub(crate) use view::FieldLine;
 #[cfg(test)]
+mod connection_tests;
+#[cfg(test)]
 mod draft_lines_tests;
 #[cfg(test)]
 mod export_json_tests;

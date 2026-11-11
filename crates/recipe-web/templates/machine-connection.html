@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% import "components/field.html" as fields %}
+{% import "components/heading.html" as headings %}
+{% import "components/alert.html" as alerts %}
+{#- The form of the PLC connection of a machine (ADR-0154, design D8). The form shows only the fields of the platform. The password input never has a value. Each hx attribute is a literal. -#}
+{% block content %}
+{{ headings::h1(layout, layout.title) }}
+<p><a class="target-link" href="{{ machine_href }}">{{ machine_link }}</a></p>
+{% block form %}{% if form.blocked %}{{ alerts::notice("warning", t.get("readonly-form-unavailable")) }}
+{% else %}<form id="connection-form" method="post" action="{{ form.action }}" hx-boost="true" hx-target="#connection-status" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
+<input type="hidden" name="row_version" value="{{ form.row_version }}">
+{{ fields::named(t, "host", "host", t.get("field-plc-host"), t.get("connection-host-hint"), "text", true, true, 253, "off", form.host, form.errors.lines("host")) }}
+{% if form.is_s7 %}{{ fields::named(t, "rack", "rack", t.get("field-plc-rack"), t.get("connection-rack-hint"), "text", true, true, 1, "off", form.rack, form.errors.lines("rack")) }}
+{{ fields::named(t, "slot", "slot", t.get("field-plc-slot"), t.get("connection-slot-hint"), "text", true, true, 2, "off", form.slot, form.errors.lines("slot")) }}
+{{ fields::named(t, "db_number", "db_number", t.get("field-plc-db-number"), t.get("connection-db-number-hint"), "text", true, true, 5, "off", form.db_number, form.errors.lines("db_number")) }}
+{% else %}{{ fields::named(t, "port", "port", t.get("field-plc-port"), t.get("connection-port-hint"), "text", true, true, 5, "off", form.port, form.errors.lines("port")) }}
+{{ fields::named(t, "address", "address", t.get("field-plc-address"), t.get("connection-address-hint"), "text", true, true, 200, "off", form.address, form.errors.lines("address")) }}
+{{ fields::select(t, "comm_mode", t.get("field-plc-comm-mode"), t.get("connection-mode-hint"), form.modes, form.mode, true, form.errors.lines("comm_mode")) }}
+{{ fields::named(t, "login", "login", t.get("field-plc-login"), t.get("connection-login-hint"), "text", false, true, 64, "off", form.login, form.errors.lines("login")) }}
+{#- The password field has its own markup, because a refusal adds the re-enter hint (design D8). The hint is no error line. The input never has a value. -#}
+<div class="field"><label for="password">{{ t.get("field-plc-password") }}</label><span class="field-hint" id="password-hint">{{ form.password_hint }}</span><input id="password" name="password" type="password" class="data" autocapitalize="none" spellcheck="false" maxlength="128" autocomplete="new-password"{% if !form.errors.lines("password").is_empty() %} aria-invalid="true"{% endif %} aria-describedby="password-hint{% if form.password_reenter %} password-reenter{% endif %}{% if !form.errors.lines("password").is_empty() %} password-error{% endif %}">{% if form.password_reenter %}<span class="field-hint" id="password-reenter">{{ t.get("connection-password-reenter") }}</span>{% endif %}{{ fields::error_line("password", form.errors.lines("password")) }}</div>
+{% endif %}<p class="actions"><button type="submit" id="connection-submit" class="btn btn-primary">{{ t.get("connection-submit") }}</button></p>
+</form>{% endif %}{% endblock %}
+<div id="connection-status" role="status"></div>
+<p><a class="target-link" href="{{ machine_href }}">{{ machine_link }}</a></p>
+{% endblock %}

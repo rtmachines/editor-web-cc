@@ -1,5 +1,6 @@
 //! Tests of the 14 field reasons of the recipe forms (task 7.1, design D6 and D13).
 //! Tests of the 7 field reasons of the filter inputs (step-7 item S7-3, design D6 and D8).
+//! Tests of the 8 field reasons of the connection form (task 7.4 of `plc-connection-config`).
 
 use super::reason::FieldReason;
 use crate::i18n::{Bundles, Lang};
@@ -87,8 +88,8 @@ fn reason_each_recipe_reason_has_its_key_in_both_bundles_and_the_english_log_tex
 }
 
 #[test]
-fn reason_all_ends_with_the_7_filter_reasons_in_the_order_of_design_d6() {
-    let tail = FieldReason::ALL.get(34..).unwrap();
+fn reason_all_holds_the_7_filter_reasons_at_34_to_40_in_the_order_of_design_d6() {
+    let tail = FieldReason::ALL.get(34..41).unwrap();
     let expected: Vec<FieldReason> = FILTER_REASONS
         .iter()
         .map(|(reason, _, _)| *reason)
@@ -100,6 +101,72 @@ fn reason_all_ends_with_the_7_filter_reasons_in_the_order_of_design_d6() {
 fn reason_each_filter_reason_has_its_key_in_both_bundles_and_the_english_text_of_design_d8() {
     let bundles = Bundles::load().unwrap();
     for (reason, key, english) in FILTER_REASONS {
+        assert_eq!(reason.key(), key);
+        assert!(bundles.has_message(Lang::Pl, key), "{key} in pl");
+        assert_eq!(reason.to_string(), english, "{key} log text");
+        let message = bundles.message(Lang::En, key, None);
+        assert_eq!(message.as_deref(), Some(english), "{key} in en");
+    }
+}
+
+/// The reasons of the connection form, with their keys and English texts, in the order of `ALL`.
+const CONNECTION_REASONS: [(FieldReason, &str, &str); 8] = [
+    (
+        FieldReason::ConnectionHost,
+        "reason-connection-host",
+        "a host is an IPv4 address or a host name of at most 253 characters",
+    ),
+    (
+        FieldReason::ConnectionRack,
+        "reason-connection-rack",
+        "the rack is a whole number from 0 to 7",
+    ),
+    (
+        FieldReason::ConnectionSlot,
+        "reason-connection-slot",
+        "the slot is a whole number from 0 to 31",
+    ),
+    (
+        FieldReason::ConnectionDataBlock,
+        "reason-connection-data-block",
+        "the data block is a whole number from 1 to 65535",
+    ),
+    (
+        FieldReason::ConnectionPort,
+        "reason-connection-port",
+        "the port is a whole number from 1 to 65535",
+    ),
+    (
+        FieldReason::ConnectionAddress,
+        "reason-connection-address",
+        "an address has 1 to 200 characters and no control character",
+    ),
+    (
+        FieldReason::ConnectionMode,
+        "reason-connection-mode",
+        "choose a communication mode from the list",
+    ),
+    (
+        FieldReason::ConnectionLogin,
+        "reason-connection-login",
+        "a login has 1 to 64 characters and no control character",
+    ),
+];
+
+#[test]
+fn reason_all_ends_with_the_8_connection_reasons_in_the_order_of_the_table() {
+    let tail = FieldReason::ALL.get(41..).unwrap();
+    let expected: Vec<FieldReason> = CONNECTION_REASONS
+        .iter()
+        .map(|(reason, _, _)| *reason)
+        .collect();
+    assert_eq!(tail, expected.as_slice());
+}
+
+#[test]
+fn reason_each_connection_reason_has_its_key_in_both_bundles_and_its_english_text() {
+    let bundles = Bundles::load().unwrap();
+    for (reason, key, english) in CONNECTION_REASONS {
         assert_eq!(reason.key(), key);
         assert!(bundles.has_message(Lang::Pl, key), "{key} in pl");
         assert_eq!(reason.to_string(), english, "{key} log text");

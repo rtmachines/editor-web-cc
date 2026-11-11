@@ -17,6 +17,7 @@ mod machines;
 pub(crate) mod parameter_reads;
 mod parameter_rows;
 mod plant;
+mod plc_connection;
 mod recipe_list;
 mod recipe_rows;
 mod recipe_writes;
@@ -40,10 +41,10 @@ use recipe_app::error::StorageError;
 use recipe_app::ports::{
     AggregateId, AttemptRepository, AuditEntryId, AuditFilter, AuditReads, AuditRecord, AuditRow,
     AuditScope, AuditWritten, ChangeFlags, CursorPage, DiffReads, DiffSides, DraftRepository,
-    EntityLabel, ExportableRecipes, NonEmpty, ParameterRow, PlantRepository, RecipeFilter,
-    RecipeReads, RecipeRepository, RecipeSummary, SecurityEventFilter, SecurityEventId,
-    SecurityEventRow, SessionRepository, SettingRepository, Transaction, TypeCatalog, UnitCount,
-    UnitLookup, UserRepository, VersionDetail, VersionSummary,
+    EntityLabel, ExportableRecipes, NonEmpty, ParameterRow, PlantRepository, PlcConnections,
+    RecipeFilter, RecipeReads, RecipeRepository, RecipeSummary, SecurityEventFilter,
+    SecurityEventId, SecurityEventRow, SessionRepository, SettingRepository, Transaction,
+    TypeCatalog, UnitCount, UnitLookup, UserRepository, VersionDetail, VersionSummary,
 };
 use recipe_domain::audit::{AggregateType, AuditEntry};
 use recipe_domain::identity::Login;
@@ -111,6 +112,10 @@ impl Transaction for PgTransaction {
     }
 
     fn plant(&mut self) -> &mut dyn PlantRepository {
+        self
+    }
+
+    fn plc_connections(&mut self) -> &mut dyn PlcConnections {
         self
     }
 

@@ -54,6 +54,22 @@ impl ErrorCode {
 
     /// E-PLT-021, `PlantError::DuplicateMemberName`.
     pub const PLT_021: Self = Self::new("E-PLT-021");
+    /// E-PLT-022, `PlantError::ConnectionFieldNotOnPlatform`.
+    pub const PLT_022: Self = Self::new("E-PLT-022");
+    /// E-PLT-023, `PlantError::ConnectionFieldMissing`.
+    pub const PLT_023: Self = Self::new("E-PLT-023");
+    /// E-PLT-024, `PlantError::ConnectionDataBlockOutOfRange`.
+    pub const PLT_024: Self = Self::new("E-PLT-024");
+    /// E-PLT-025, `PlantError::CommModeNotOnPlatform`.
+    pub const PLT_025: Self = Self::new("E-PLT-025");
+    /// E-PLT-026, `PlantError::AddressNotAmsNetId`.
+    pub const PLT_026: Self = Self::new("E-PLT-026");
+    /// E-PLT-027, `PlantError::ConnectionNotConfigured`.
+    pub const PLT_027: Self = Self::new("E-PLT-027");
+    /// E-PLT-028, `PlantError::ConnectionFieldNotInMode`.
+    pub const PLT_028: Self = Self::new("E-PLT-028");
+    /// E-PLT-029, `PlantError::ConnectionRecipeMismatch`.
+    pub const PLT_029: Self = Self::new("E-PLT-029");
 
     /// E-RCP-001, `RecipeError::DuplicateReference`.
     pub const RCP_001: Self = Self::new("E-RCP-001");
@@ -246,6 +262,10 @@ impl ErrorCode {
     pub const WEB_011: Self = Self::new("E-WEB-011");
     /// E-WEB-012, `WebError::MissingBasicCredentials`.
     pub const WEB_012: Self = Self::new("E-WEB-012");
+    /// E-WEB-013, `AppError::ConnectionConcurrentEdit`.
+    pub const WEB_013: Self = Self::new("E-WEB-013");
+    /// E-WEB-014, `AppError::SecretUnreadable`.
+    pub const WEB_014: Self = Self::new("E-WEB-014");
 
     const fn new(text: &'static str) -> Self {
         Self(text)
@@ -319,6 +339,14 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::PLT_019,
     ErrorCode::PLT_020,
     ErrorCode::PLT_021,
+    ErrorCode::PLT_022,
+    ErrorCode::PLT_023,
+    ErrorCode::PLT_024,
+    ErrorCode::PLT_025,
+    ErrorCode::PLT_026,
+    ErrorCode::PLT_027,
+    ErrorCode::PLT_028,
+    ErrorCode::PLT_029,
     ErrorCode::PLT_030,
     ErrorCode::PLT_031,
     ErrorCode::PLT_032,
@@ -384,6 +412,8 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::WEB_010,
     ErrorCode::WEB_011,
     ErrorCode::WEB_012,
+    ErrorCode::WEB_013,
+    ErrorCode::WEB_014,
 ];
 
 /// Return true when `code` has the format and a number range of section 1.2.

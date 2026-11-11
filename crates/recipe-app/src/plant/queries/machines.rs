@@ -2,7 +2,9 @@
 //!
 //! The specs are "Machine list", "Archive message", and "Unit tree of a machine".
 
-use recipe_domain::plant::{Machine, MachineCode, MachineId, PlcPlatform, UnitPath};
+use recipe_domain::plant::{
+    Machine, MachineCode, MachineId, PasswordState, PlcConnection, PlcPlatform, UnitPath,
+};
 
 use super::{live_machine, page_window};
 use crate::auth::{
@@ -137,14 +139,31 @@ pub struct GetMachineInput {
     pub archived: Option<UnitPath>,
 }
 
+/// The stored connection of a machine, as the machine page shows it (ADR-0154, design D8).
+///
+/// The type has no password and no ciphertext, so a template cannot show either one.
+/// The type has no `Clone` and no `PartialEq`, because [`PlcConnection`] has none.
+#[derive(Debug)]
+pub struct MachineConnection {
+    /// The stored settings.
+    pub connection: PlcConnection,
+    /// Whether the record holds a sealed password. The page shows this state and never the password.
+    pub password_set: bool,
+}
+
 /// The result of `GetMachine`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The type has no `Clone` and no `PartialEq`, because [`MachineConnection`] has none.
+#[derive(Debug)]
 pub struct MachineView {
     /// The machine with every unit as the port returns it, live or archived.
     /// The web layer chooses the live units or every unit.
     pub machine: Machine,
     /// The archive message. It holds the path only when the machine holds that unit archived.
     pub archived: Option<UnitPath>,
+    /// The stored connection, or `None` when the machine has no record. A role with `RecipeView`
+    /// reads it, because it holds no password (R31, A47).
+    pub connection: Option<MachineConnection>,
 }
 
 /// Shows one machine with its unit tree.
@@ -152,6 +171,7 @@ pub struct MachineView {
 /// The query solves one problem: the machine page needs a live machine by its code, and the
 /// history page needs a live or an archived machine by its identifier. A code can belong to a
 /// new machine after an archive (A32), so only the identifier names an archived machine.
+/// The query also reads the connection record without the password (ADR-0154, design D8).
 #[derive(Clone)]
 pub struct GetMachine {
     ctx: AppContext,
@@ -183,19 +203,37 @@ impl GetMachine {
         input: GetMachineInput,
     ) -> Result<MachineView, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
-        let machine = self.read(input.machine).await?;
+        let (machine, connection) = self.read(input.machine).await?;
         let archived = input.archived.filter(|path| {
             machine
                 .unit(path)
                 .is_some_and(|unit| unit.archived_at().is_some())
         });
-        Ok(MachineView { machine, archived })
+        Ok(MachineView {
+            machine,
+            archived,
+            connection,
+        })
     }
 
-    /// Read the machine in one transaction. The transaction ends when the function returns.
-    async fn read(&self, reference: MachineRef) -> Result<Machine, AppError> {
+    /// Read the machine and its connection record in one transaction.
+    ///
+    /// The transaction ends when the function returns.
+    async fn read(
+        &self,
+        reference: MachineRef,
+    ) -> Result<(Machine, Option<MachineConnection>), AppError> {
         let mut tx = self.ctx.uow.begin(Isolation::ReadOnly).await?;
-        find_machine(tx.plant(), reference).await
+        let machine = find_machine(tx.plant(), reference).await?;
+        let stored = tx
+            .plc_connections()
+            .connection_by_machine(machine.id())
+            .await?;
+        let connection = stored.map(|record| MachineConnection {
+            password_set: record.password == PasswordState::Stored,
+            connection: record.connection,
+        });
+        Ok((machine, connection))
     }
 }
 

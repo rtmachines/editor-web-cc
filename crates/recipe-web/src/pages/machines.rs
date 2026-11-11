@@ -14,6 +14,9 @@ use super::texts::Texts;
 use crate::routes::{RouteEntry, operation_row};
 
 mod commands;
+mod connection;
+mod connection_request;
+mod connection_save;
 mod form;
 mod list;
 mod page;
@@ -23,7 +26,8 @@ mod tree_page;
 /// Return the route rows of the machine pages.
 ///
 /// The rows are `/machines`, `/machines/new`, `/machines/{code}`, `/machines/by-id/{uuid}`,
-/// `/machines/{code}/units`, and the commands to create, rename, and archive a machine.
+/// `/machines/{code}/units`, `/machines/{code}/connection/edit`, and the commands to create,
+/// rename, and archive a machine and to save its connection.
 pub(crate) fn rows() -> Vec<RouteEntry> {
     let mut rows = page_rows();
     rows.extend(command_rows());
@@ -63,6 +67,12 @@ fn page_rows() -> Vec<RouteEntry> {
             Operation::GetUnitTree,
             get(tree_page::show),
         ),
+        operation_row(
+            Method::GET,
+            "/machines/{code}/connection/edit",
+            Operation::GetPlcConnectionForm,
+            get(connection::edit_form),
+        ),
     ]
 }
 
@@ -87,6 +97,12 @@ fn command_rows() -> Vec<RouteEntry> {
             Operation::ArchiveMachine,
             post(commands::archive),
         ),
+        operation_row(
+            Method::POST,
+            "/machines/{code}/connection",
+            Operation::SetPlcConnection,
+            post(connection_save::save),
+        ),
     ]
 }
 
@@ -109,9 +125,25 @@ pub(crate) fn platform_text(t: Texts<'_>, platform: PlcPlatform) -> String {
 #[cfg(test)]
 mod commands_tests;
 #[cfg(test)]
+mod connection_leak_tests;
+#[cfg(test)]
+mod connection_lines_tests;
+#[cfg(test)]
+mod connection_refusal_tests;
+#[cfg(test)]
+mod connection_request_tests;
+#[cfg(test)]
+mod connection_save_tests;
+#[cfg(test)]
+mod connection_tests;
+#[cfg(test)]
+mod connection_xss_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
 mod list_tests;
+#[cfg(test)]
+mod machine_connection_tests;
 #[cfg(test)]
 mod machine_tests;
 #[cfg(test)]

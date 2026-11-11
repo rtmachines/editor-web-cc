@@ -10,7 +10,7 @@ use crate::i18n::{Bundles, Lang};
 use crate::pages::texts::Texts;
 
 #[test]
-fn choices_the_groups_hold_each_of_the_35_actions_once() {
+fn choices_the_groups_hold_each_of_the_37_actions_once() {
     let bundles = Bundles::load().unwrap();
     let t = Texts::new(&bundles, Lang::En);
     let values: Vec<String> = action_groups(t, true)
@@ -18,7 +18,7 @@ fn choices_the_groups_hold_each_of_the_35_actions_once() {
         .flat_map(|group| group.options)
         .map(|choice| choice.value)
         .collect();
-    assert_eq!(values.len(), 35);
+    assert_eq!(values.len(), 37);
     let distinct: BTreeSet<&str> = values.iter().map(String::as_str).collect();
     let expected: BTreeSet<&str> = AuditAction::ALL
         .iter()
@@ -51,7 +51,7 @@ fn choices_the_entity_select_starts_with_every_type_and_the_scope_cuts_it() {
     for lang in [Lang::En, Lang::Pl] {
         let t = Texts::new(&bundles, lang);
         let all = entity_choices(t, true);
-        assert_eq!(all.len(), 9);
+        assert_eq!(all.len(), 10);
         assert_eq!(all.first().map(|choice| choice.value.as_str()), Some(""));
         let recipes: Vec<String> = entity_choices(t, false)
             .into_iter()

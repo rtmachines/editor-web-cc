@@ -48,9 +48,11 @@ SELECT l.id, l.occurred_at, actor.login AS actor, l.action, l.entity_type, l.ent
 ///
 /// Each join matches only its entity type. A row that no longer exists gives null columns.
 /// Only a struct type has a name and a revision for a label, as in the memory adapter.
+/// The join of `machine` also serves the entity type `plc_connection`. The record has no label of
+/// its own, so its label is the code of its machine, which is the aggregate (ADR-0154).
 const LABEL_JOINS: &str = " \
 LEFT JOIN app_user actor ON actor.id = l.actor_user_id \
-LEFT JOIN machine m ON l.entity_type = 'machine' AND m.id = l.entity_id \
+LEFT JOIN machine m ON m.id = CASE l.entity_type WHEN 'machine' THEN l.entity_id WHEN 'plc_connection' THEN l.aggregate_id END \
 LEFT JOIN unit u ON l.entity_type = 'unit' AND u.id = l.entity_id \
 LEFT JOIN plc_type t ON l.entity_type = 'plc_type' AND t.id = l.entity_id AND t.kind = 'struct' \
 LEFT JOIN recipe r ON l.entity_type = 'recipe' AND r.id = l.entity_id \
@@ -161,7 +163,7 @@ fn number(table: &'static str, value: Option<i32>) -> Result<Option<u32>, Storag
 /// Build the label of an entity of `kind` from the label columns of its row.
 fn label(kind: AuditEntityType, columns: LabelRecord) -> Result<EntityLabel, StorageError> {
     let found = match kind {
-        AuditEntityType::Machine => parsed(
+        AuditEntityType::Machine | AuditEntityType::PlcConnection => parsed(
             "machine",
             columns.machine_code.as_deref(),
             MachineCode::parse,

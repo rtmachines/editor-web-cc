@@ -91,12 +91,28 @@ pub enum FieldReason {
     Address,
     /// The cursor `before` of a list page is not a positive whole number.
     Cursor,
+    /// A PLC host is not an IPv4 address or a host name.
+    ConnectionHost,
+    /// A rack is not a whole number from 0 to 7.
+    ConnectionRack,
+    /// A slot is not a whole number from 0 to 31.
+    ConnectionSlot,
+    /// A data block is not a whole number from 1 to 65535.
+    ConnectionDataBlock,
+    /// A TCP port is not a whole number from 1 to 65535.
+    ConnectionPort,
+    /// A PLC address is empty, too long, or holds a control character.
+    ConnectionAddress,
+    /// A communication mode is not a mode of the list.
+    ConnectionMode,
+    /// A PLC login is empty, too long, or holds a control character.
+    ConnectionLogin,
 }
 
 impl FieldReason {
     /// Every reason, in the order of the table in design D13. The reasons of the filter inputs
     /// of design D6 come last.
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 49] = [
         Self::Form,
         Self::Lang,
         Self::LoginLength,
@@ -138,6 +154,14 @@ impl FieldReason {
         Self::EntityWithoutType,
         Self::Address,
         Self::Cursor,
+        Self::ConnectionHost,
+        Self::ConnectionRack,
+        Self::ConnectionSlot,
+        Self::ConnectionDataBlock,
+        Self::ConnectionPort,
+        Self::ConnectionAddress,
+        Self::ConnectionMode,
+        Self::ConnectionLogin,
     ];
 
     /// Return the key of the message of the reason in the bundles.
@@ -185,6 +209,14 @@ impl FieldReason {
             Self::EntityWithoutType => "reason-entity-without-type",
             Self::Address => "reason-address",
             Self::Cursor => "reason-cursor",
+            Self::ConnectionHost => "reason-connection-host",
+            Self::ConnectionRack => "reason-connection-rack",
+            Self::ConnectionSlot => "reason-connection-slot",
+            Self::ConnectionDataBlock => "reason-connection-data-block",
+            Self::ConnectionPort => "reason-connection-port",
+            Self::ConnectionAddress => "reason-connection-address",
+            Self::ConnectionMode => "reason-connection-mode",
+            Self::ConnectionLogin => "reason-connection-login",
         }
     }
 }
@@ -228,6 +260,27 @@ const fn recipe_text(reason: FieldReason) -> &'static str {
     }
 }
 
+/// Return the English text of a reason of the connection form (task 7.4 of `plc-connection-config`).
+///
+/// Any other reason gives the text of `recipe_text`.
+const fn connection_text(reason: FieldReason) -> &'static str {
+    match reason {
+        FieldReason::ConnectionHost => {
+            "a host is an IPv4 address or a host name of at most 253 characters"
+        }
+        FieldReason::ConnectionRack => "the rack is a whole number from 0 to 7",
+        FieldReason::ConnectionSlot => "the slot is a whole number from 0 to 31",
+        FieldReason::ConnectionDataBlock => "the data block is a whole number from 1 to 65535",
+        FieldReason::ConnectionPort => "the port is a whole number from 1 to 65535",
+        FieldReason::ConnectionAddress => {
+            "an address has 1 to 200 characters and no control character"
+        }
+        FieldReason::ConnectionMode => "choose a communication mode from the list",
+        FieldReason::ConnectionLogin => "a login has 1 to 64 characters and no control character",
+        other => recipe_text(other),
+    }
+}
+
 /// Return the English text of a reason of the filter inputs (design D6 and D8).
 ///
 /// Any other reason gives the text of `recipe_text`.
@@ -242,7 +295,7 @@ const fn filter_text(reason: FieldReason) -> &'static str {
         FieldReason::EntityWithoutType => "choose an object type for the object",
         FieldReason::Address => "an address is an IPv4 or an IPv6 address, for example 192.0.2.10",
         FieldReason::Cursor => "the link of the page is not valid. Open the first page of the list",
-        other => recipe_text(other),
+        other => connection_text(other),
     }
 }
 

@@ -8,7 +8,7 @@ use std::fmt;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
 use recipe_domain::identity::IdentityError;
-use recipe_domain::plant::PlantError;
+use recipe_domain::plant::{MachineCode, PlantError, PlantErrors};
 use recipe_domain::recipe::{DraftError, RecipeError, RecipeErrors, ReferenceNumber};
 
 use super::missing::Missing;
@@ -80,6 +80,9 @@ pub enum AppError {
     /// An error of the Plant Model context.
     #[error(transparent)]
     Plant(#[from] PlantError),
+    /// A list of errors of the Plant Model context.
+    #[error(transparent)]
+    Plants(#[from] PlantErrors),
     /// An error of the Recipe Management context.
     #[error(transparent)]
     Recipe(#[from] RecipeError),
@@ -121,6 +124,28 @@ pub enum AppError {
         /// The row version that the version holds.
         actual: i64,
     },
+    /// Another user changed the connection settings of a machine first (`E-WEB-013`).
+    #[error(
+        "Another user changed the connection settings of machine {code}. Reload the page and apply your change again."
+    )]
+    ConnectionConcurrentEdit {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The row version that the caller sent. A machine without a record counts as 0.
+        expected: i64,
+        /// The row version that the record holds. A machine without a record counts as 0.
+        actual: i64,
+    },
+    /// The server cannot read the stored PLC password of a machine (`E-WEB-014`).
+    ///
+    /// The variant holds no fault text, so it cannot hold a key, a password, or a sealed byte.
+    #[error(
+        "The server cannot read the stored PLC password of machine {code}. Enter the password again or contact the administrator."
+    )]
+    SecretUnreadable {
+        /// The code of the machine.
+        code: MachineCode,
+    },
     /// A stage ran out of time (`E-WEB-009`).
     #[error("The request took too long and was stopped. Try again.")]
     Timeout {
@@ -160,6 +185,7 @@ impl AppError {
     pub fn code(&self) -> ErrorCode {
         match self {
             Self::Plant(error) => error.code(),
+            Self::Plants(errors) => errors.first().code(),
             Self::Recipe(error) => error.code(),
             Self::Recipes(errors) => errors.code(),
             Self::Export(error) => error.code(),
@@ -168,6 +194,8 @@ impl AppError {
             Self::Unauthenticated => ErrorCode::WEB_004,
             Self::NotFound { .. } => ErrorCode::WEB_005,
             Self::ConcurrentEdit { .. } => ErrorCode::WEB_001,
+            Self::ConnectionConcurrentEdit { .. } => ErrorCode::WEB_013,
+            Self::SecretUnreadable { .. } => ErrorCode::WEB_014,
             Self::Timeout { .. } => ErrorCode::WEB_009,
             Self::TaskFailed { .. } => ErrorCode::WEB_011,
             Self::AuditWriteFailed { .. } => ErrorCode::AUD_001,

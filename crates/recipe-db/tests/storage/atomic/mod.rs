@@ -8,6 +8,7 @@ mod draft;
 mod export;
 mod identity;
 mod plant;
+mod plc_connection;
 mod recipe;
 mod text_nul;
 pub mod world;

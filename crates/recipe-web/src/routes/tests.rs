@@ -253,12 +253,13 @@ async fn endpoint_role_each_route_answers_each_principal() {
 
 /// The export routes of `api.md` section 2.7. Task 7.4 writes their rows of the six principals
 /// in its own file, so the matrix does not hold them (design D12).
-const EXPORT_ROUTES: [&str; 5] = [
+const EXPORT_ROUTES: [&str; 6] = [
     "/export/v1/recipes/{ref}/approved",
     "/export/v1/recipes/{ref}/versions/{n}",
     "/export/v1/machines/{code}/recipes",
     "/export/v1/machines/{code}/recipes/{ref}/approved",
     "/export/v2/machines/{code}/recipes/{ref}/approved/units/{path}",
+    "/export/v1/machines/{code}/connection",
 ];
 
 /// The routes of the matrix, the export routes, and the static file, as sorted pairs of method

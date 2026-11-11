@@ -7,7 +7,10 @@ use crate::recipe::ReferenceNumber;
 use std::fmt;
 
 use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_MEMBERS};
-use super::{MachineCode, MemberName, PlcPlatform, StringLengthReason, TypeName, UnitPath};
+use super::{
+    CommMode, MachineCode, MemberName, PlcAddress, PlcPlatform, StringLengthReason, TypeName,
+    UnitPath,
+};
 
 /// The size limit that a type breaks (`E-PLT-018`).
 ///
@@ -238,6 +241,90 @@ pub enum PlantError {
         /// The path that names no unit.
         path: UnitPath,
     },
+    /// A connection request has a field that the platform does not have (`E-PLT-022`).
+    #[error(
+        "The connection of machine {code} has no field {field} on platform {platform}. Delete the value of {field}."
+    )]
+    ConnectionFieldNotOnPlatform {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The name of the form field.
+        field: &'static str,
+        /// The platform of the machine.
+        platform: PlcPlatform,
+    },
+    /// A connection request has no value for a required field (`E-PLT-023`).
+    ///
+    /// The variant names no platform, because a mode can also require a field.
+    #[error("The connection of machine {code} needs a value in field {field}. Enter a value.")]
+    ConnectionFieldMissing {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The name of the form field.
+        field: &'static str,
+    },
+    /// A data block number is above the limit of the platform (`E-PLT-024`).
+    #[error(
+        "Data block {number} of machine {code} is above {max}. The controller of the machine has no such data block."
+    )]
+    ConnectionDataBlockOutOfRange {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The rejected data block number.
+        number: u16,
+        /// The highest data block number of the platform.
+        max: u16,
+    },
+    /// A communication mode does not exist on the platform (`E-PLT-025`).
+    #[error(
+        "Platform {platform} of machine {code} does not support the mode {mode}. Select a mode of this platform."
+    )]
+    CommModeNotOnPlatform {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The rejected mode.
+        mode: CommMode,
+        /// The platform of the machine.
+        platform: PlcPlatform,
+    },
+    /// The mode Ads has an address that is not an AMS Net ID (`E-PLT-026`).
+    #[error(
+        "Address {address} of machine {code} is not an AMS Net ID. The mode Ads needs an AMS Net ID."
+    )]
+    AddressNotAmsNetId {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The rejected address.
+        address: PlcAddress,
+    },
+    /// A machine has no connection settings (`E-PLT-027`).
+    #[error(
+        "Machine {code} has no connection settings. Enter the settings on the page of the machine first."
+    )]
+    ConnectionNotConfigured {
+        /// The code of the machine.
+        code: MachineCode,
+    },
+    /// A connection request has a field that the mode does not use (`E-PLT-028`).
+    #[error(
+        "The mode {mode} of machine {code} does not use field {field}. Delete the value of {field}."
+    )]
+    ConnectionFieldNotInMode {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The name of the form field.
+        field: &'static str,
+        /// The mode of the request.
+        mode: CommMode,
+    },
+    /// A recipe does not belong to the machine of the connection (`E-PLT-029`).
+    #[error("Recipe {reference} does not belong to machine {code}. Use a recipe of this machine.")]
+    ConnectionRecipeMismatch {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The reference number of the recipe.
+        reference: ReferenceNumber,
+    },
 }
 
 impl PlantError {
@@ -266,6 +353,14 @@ impl PlantError {
             Self::InvalidUnitPath { .. } => ErrorCode::PLT_017,
             Self::MachineNotFound { .. } => ErrorCode::PLT_019,
             Self::UnitNotFound { .. } => ErrorCode::PLT_020,
+            Self::ConnectionFieldNotOnPlatform { .. } => ErrorCode::PLT_022,
+            Self::ConnectionFieldMissing { .. } => ErrorCode::PLT_023,
+            Self::ConnectionDataBlockOutOfRange { .. } => ErrorCode::PLT_024,
+            Self::CommModeNotOnPlatform { .. } => ErrorCode::PLT_025,
+            Self::AddressNotAmsNetId { .. } => ErrorCode::PLT_026,
+            Self::ConnectionNotConfigured { .. } => ErrorCode::PLT_027,
+            Self::ConnectionFieldNotInMode { .. } => ErrorCode::PLT_028,
+            Self::ConnectionRecipeMismatch { .. } => ErrorCode::PLT_029,
         }
     }
 }

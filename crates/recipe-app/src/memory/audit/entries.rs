@@ -105,6 +105,7 @@ pub(super) fn row(state: &MemoryState, numbered: &Numbered) -> Result<AuditRow, 
     let entity_type = AuditEntityType::from_sql(target.entity_type())
         .ok_or_else(|| StorageError::invariant("an audit entry has an unknown entity type"))?;
     let entity_id = EntityId::from(*target.entity_id());
+    let aggregate_id = AggregateId::from(*target.aggregate_id());
     Ok(AuditRow {
         id: numbered.id,
         occurred_at: numbered.at,
@@ -116,8 +117,8 @@ pub(super) fn row(state: &MemoryState, numbered: &Numbered) -> Result<AuditRow, 
         entity_type,
         entity_id,
         aggregate_type: target.aggregate_type(),
-        aggregate_id: AggregateId::from(*target.aggregate_id()),
-        label: label(state, entity_type, entity_id),
+        aggregate_id,
+        label: label(state, entity_type, entity_id, aggregate_id),
     })
 }
 

@@ -1,10 +1,12 @@
 //! Contract cases of `AuditReads::entries`: cursor, filters, range, and scope (task 5.1).
 
 use recipe_app::ports::{
-    AggregateId, AuditEntityType, AuditFilter, AuditScope, EntityFilter, EntityLabel, TimeRange,
+    AggregateId, AuditEntityType, AuditFilter, AuditScope, EntityFilter, EntityId, EntityLabel,
+    TimeRange,
 };
 use recipe_domain::audit::{AggregateType, AuditAction, AuditTarget, RowAction};
 use recipe_domain::identity::Login;
+use recipe_domain::plant::PlcConnectionId;
 use recipe_domain::recipe::ReferenceNumber;
 use recipe_domain::timestamp::Timestamp;
 
@@ -257,4 +259,48 @@ contract_case!(
     the_recipe_scope_keeps_only_recipe_entries_also_of_a_deleted_recipe,
     memory_the_recipe_scope_keeps_only_recipe_entries_also_of_a_deleted_recipe,
     postgres_the_recipe_scope_keeps_only_recipe_entries_also_of_a_deleted_recipe
+);
+
+async fn the_list_returns_a_row_for_a_plc_connection_set_entry(h: &dyn Harness) {
+    let machine = machine_id(41);
+    let connection = PlcConnectionId::from(free_id(0x41));
+    let target = AuditTarget::plc_connection(connection, machine);
+    write(
+        h,
+        vec![entry(
+            RowAction::PlcConnectionSet,
+            target,
+            Some(h.user()),
+            1,
+        )],
+    )
+    .await;
+    let filter = AuditFilter {
+        entity: Some(EntityFilter {
+            entity_type: AuditEntityType::PlcConnection,
+            entity_id: Some(EntityId::from(*connection.as_uuid())),
+        }),
+        ..AuditFilter::default()
+    };
+
+    let all = list(h, &filter, AuditScope::All, None, WHOLE).await;
+    let recipes = list(h, &filter, AuditScope::Recipes, None, WHOLE).await;
+
+    assert_eq!(all.rows.len(), 1, "{all:?}");
+    let row = all.rows.first().unwrap();
+    assert_eq!(row.action, AuditAction::PlcConnectionSet);
+    assert_eq!(row.entity_type, AuditEntityType::PlcConnection);
+    assert_eq!(row.entity_type.as_sql(), "plc_connection");
+    assert_eq!(row.aggregate_type, AggregateType::Machine);
+    assert_eq!(row.aggregate_id, AggregateId::from(*machine.as_uuid()));
+    assert!(
+        recipes.rows.is_empty(),
+        "the recipe scope drops a machine entry"
+    );
+}
+
+contract_case!(
+    the_list_returns_a_row_for_a_plc_connection_set_entry,
+    memory_the_list_returns_a_row_for_a_plc_connection_set_entry,
+    postgres_the_list_returns_a_row_for_a_plc_connection_set_entry
 );

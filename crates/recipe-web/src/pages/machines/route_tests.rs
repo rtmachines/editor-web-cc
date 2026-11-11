@@ -22,6 +22,7 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
     let view = [Login, Page, Page, Page, Password, Login];
     let manage = [Login, Page, Page, Forbidden, Password, Login];
     let created = Redirect("/machines/M99");
+    let connected = Redirect("/machines/M7");
     vec![
         (endpoint(Method::GET, "/machines", ""), view),
         (endpoint(Method::GET, "/machines/new", ""), manage),
@@ -37,12 +38,24 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
         (endpoint(Method::GET, "/machines/by-id/{uuid}", ""), view),
         (endpoint(Method::GET, "/machines/{code}/units", ""), view),
         (
+            endpoint(Method::GET, "/machines/{code}/connection/edit", ""),
+            manage,
+        ),
+        (
             endpoint(Method::POST, "/machines/{code}/rename", "name=Renamed"),
             [Login, renamed, renamed, Forbidden, Password, Login],
         ),
         (
             endpoint(Method::POST, "/machines/{code}/archive", ""),
             [Login, blocked, blocked, Forbidden, Password, Login],
+        ),
+        (
+            endpoint(
+                Method::POST,
+                "/machines/{code}/connection",
+                "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
+            ),
+            [Login, connected, connected, Forbidden, Password, Login],
         ),
     ]
 }
@@ -60,5 +73,9 @@ pub(crate) fn sweep_pages() -> Vec<(&'static str, String)> {
             format!("/machines/by-id/{M12_ID}"),
         ),
         ("/machines/{code}/units", "/machines/M7/units".to_owned()),
+        (
+            "/machines/{code}/connection/edit",
+            "/machines/M7/connection/edit".to_owned(),
+        ),
     ]
 }

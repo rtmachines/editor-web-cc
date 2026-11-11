@@ -24,6 +24,10 @@ subtle = { workspace = true }
 base64 = { workspace = true }
 cookie = { workspace = true }
 thiserror = { workspace = true }
+# The writer of the connection document of `api.md` section 6.5 (ADR-0154 (j)).
+serde_json = { workspace = true }
+# Clears the password text of the connection form on drop (ADR-0154 (g), design D12).
+zeroize = { workspace = true }
 
 [dev-dependencies]
 recipe-app = { workspace = true, features = ["memory"] }

@@ -103,11 +103,12 @@ fn child_loads_the_ports() {
     std::fs::write(output, line).unwrap();
 }
 
-/// A scratch directory with the two key files that `serve::load` reads.
+/// A scratch directory with the three key files that `serve::load` reads.
 struct PortRun {
     dir: TempDir,
     login: PathBuf,
     csrf: PathBuf,
+    plc: PathBuf,
 }
 
 impl PortRun {
@@ -115,7 +116,13 @@ impl PortRun {
         let dir = TempDir::new();
         let login = dir.write("login_key", &format!("{KEY_A}\n"));
         let csrf = dir.write("csrf_key", &format!("{KEY_B}\n"));
-        Self { dir, login, csrf }
+        let plc = dir.write("plc_key", &format!("{KEY_A}\n"));
+        Self {
+            dir,
+            login,
+            csrf,
+            plc,
+        }
     }
 
     /// Run the child with the one variable `variable` set to `value`. Return its line.
@@ -132,6 +139,10 @@ impl PortRun {
             (
                 "RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE",
                 self.csrf.to_str().unwrap().to_owned(),
+            ),
+            (
+                "RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE",
+                self.plc.to_str().unwrap().to_owned(),
             ),
             (variable, value.to_owned()),
         ];
@@ -207,7 +218,7 @@ fn path_of(files: &[(&str, &Path)], name: &str) -> String {
     path.to_str().unwrap().to_owned()
 }
 
-/// The 17 environment variables, each with a value that differs from its default.
+/// The 18 environment variables, each with a value that differs from its default.
 fn environment(files: &[(&str, &Path)]) -> Vec<(&'static str, String)> {
     let path = |name: &str| path_of(files, name);
     vec![
@@ -218,6 +229,7 @@ fn environment(files: &[(&str, &Path)]) -> Vec<(&'static str, String)> {
         ("RECIPE_SECRETS__APP_PASSWORD_FILE", "/s/app".to_owned()),
         ("RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE", path("login")),
         ("RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE", path("csrf")),
+        ("RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE", path("plc")),
         (
             "RECIPE_HTTP__TRUSTED_PROXIES",
             "10.0.0.0/8,172.28.0.2/32".to_owned(),
@@ -273,16 +285,18 @@ fn expected_lines(files: &[(&str, &Path)]) -> Vec<String> {
 }
 
 #[test]
-fn serve_load_reads_all_17_names_with_the_prefix_and_the_double_underscore() {
+fn serve_load_reads_all_18_names_with_the_prefix_and_the_double_underscore() {
     let dir = TempDir::new();
     let login = dir.write("login_key", &format!("{KEY_A}\n"));
     let csrf = dir.write("csrf_key", &format!("{KEY_B}\n"));
+    let plc = dir.write("plc_key", &format!("{KEY_A}\n"));
     let hook = dir.write("hook", &format!("{WEBHOOK}\n"));
     let ca = dir.write("ca", "certificate text");
     let output = dir.0.join("loaded.txt");
-    let files: [(&str, &Path); 4] = [
+    let files: [(&str, &Path); 5] = [
         ("login", &login),
         ("csrf", &csrf),
+        ("plc", &plc),
         ("hook", &hook),
         ("ca", &ca),
     ];

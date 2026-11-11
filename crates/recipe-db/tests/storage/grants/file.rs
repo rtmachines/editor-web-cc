@@ -11,9 +11,9 @@
 use crate::support::{created_names, document_sql};
 
 const GRANTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/grants.expected");
-const SECTIONS: [&str; 18] = [
+const SECTIONS: [&str; 19] = [
     "3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12",
-    "3.13", "3.14", "3.15", "3.16", "3.17",
+    "3.13", "3.14", "3.15", "3.16", "3.17", "3.18",
 ];
 /// The sections that create the functions that `recipe_app` can execute.
 const ROUTINE_SECTIONS: [&str; 2] = ["4.12", "5.5"];
@@ -236,7 +236,7 @@ fn every_column_line_names_a_column_of_its_table() {
     let columns = table_columns(&document_sql(&SECTIONS, &[]));
     let lines = app_lines();
 
-    assert_eq!(columns.len(), 17, "section 3 must give 17 tables");
+    assert_eq!(columns.len(), 18, "section 3 must give 18 tables");
     for (table, names) in &columns {
         assert!(!names.is_empty(), "no columns parsed for {table}");
     }

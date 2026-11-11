@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use recipe_app::identity::IdentityContext;
-use recipe_app::ports::{ReadOnlySwitch, SecurityEventSink};
+use recipe_app::ports::{CredentialCipher, ReadOnlySwitch, SecurityEventSink};
 use recipe_domain::identity::KeyRing;
 
 use crate::i18n::{BundleReason, Bundles};
@@ -55,6 +55,7 @@ pub struct WebState {
     bundles: Arc<Bundles>,
     csrf_keys: Arc<KeyRing>,
     security: Arc<dyn SecurityEventSink>,
+    credential_cipher: Option<Arc<dyn CredentialCipher>>,
 }
 
 impl WebState {
@@ -80,7 +81,27 @@ impl WebState {
             bundles: Arc::new(Bundles::load()?),
             csrf_keys: Arc::new(csrf_keys),
             security,
+            credential_cipher: None,
         })
+    }
+
+    /// Return the state with the cipher that seals and opens the PLC passwords (ADR-0154 (g)).
+    ///
+    /// The method solves one problem: the adapter `AesGcmCipher` needs a key file that only
+    /// `recipe-server` loads, so the server hands it over after `new`. A state without a cipher
+    /// refuses every route that seals or opens a password with `E-WEB-010` and writes nothing.
+    #[must_use]
+    pub fn with_credential_cipher(self, cipher: Arc<dyn CredentialCipher>) -> Self {
+        Self {
+            credential_cipher: Some(cipher),
+            ..self
+        }
+    }
+
+    /// Return the cipher of the PLC passwords, or `None` when the server did not hand one over.
+    #[must_use]
+    pub fn credential_cipher(&self) -> Option<Arc<dyn CredentialCipher>> {
+        self.credential_cipher.clone()
     }
 
     /// Return the keys that sign the pre-session CSRF cookie.

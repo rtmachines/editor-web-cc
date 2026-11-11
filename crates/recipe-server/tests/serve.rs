@@ -65,6 +65,7 @@ struct Setup {
     app_secret: PathBuf,
     login_key: PathBuf,
     csrf_key: PathBuf,
+    plc_key: PathBuf,
 }
 
 impl Setup {
@@ -74,12 +75,14 @@ impl Setup {
         let app_secret = dir.write("app_secret", &format!("{APP_PASSWORD}\n"));
         let login_key = dir.write("login_key", &format!("{}\n", random_secret()));
         let csrf_key = dir.write("csrf_key", &format!("{}\n", random_secret()));
+        let plc_key = dir.write("plc_key", &format!("{}\n", random_secret()));
         Self {
             dir,
             migrator_secret,
             app_secret,
             login_key,
             csrf_key,
+            plc_key,
         }
     }
 
@@ -98,6 +101,10 @@ impl Setup {
             (
                 "RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE",
                 text(&self.csrf_key),
+            ),
+            (
+                "RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE",
+                text(&self.plc_key),
             ),
         ]
     }
@@ -348,6 +355,10 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
     let missing = setup.dir.join("absent_key");
     // The file exists and has text, but the text is not a hex key.
     let malformed_key_file = setup.dir.write("bad_key", &format!("{KEY_MARKER}\n"));
+    let two_line_plc_key_file = setup.dir.write(
+        "two_line_key",
+        &format!("{}\n{}\n", "ab".repeat(32), "cd".repeat(32)),
+    );
     let cases = [
         (
             "RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE",
@@ -358,6 +369,16 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
             "RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE",
             malformed_key_file,
             "security.csrf_signing_key_file",
+        ),
+        (
+            "RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE",
+            setup.dir.join("absent_plc_key"),
+            "security.plc_credential_key_file",
+        ),
+        (
+            "RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE",
+            two_line_plc_key_file,
+            "security.plc_credential_key_file",
         ),
     ];
 
@@ -374,6 +395,8 @@ fn a_key_file_fault_ends_the_start_with_code_1_and_one_error_line_that_holds_no_
         assert!(text.contains(COMMAND_FAILED), "{key}: {text}");
         assert!(text.contains(key), "{key}: {text}");
         assert!(!text.contains(KEY_MARKER), "{key}: {text}");
+        assert!(!text.contains("abababab"), "{key}: {text}");
+        assert!(!text.contains("cdcdcdcd"), "{key}: {text}");
     }
 }
 

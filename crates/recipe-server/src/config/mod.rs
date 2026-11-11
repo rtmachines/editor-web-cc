@@ -9,6 +9,7 @@
 
 pub mod args;
 pub mod key_file;
+pub mod plc_key_file;
 pub mod serve;
 #[cfg(test)]
 mod test_support;

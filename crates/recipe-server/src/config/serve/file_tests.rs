@@ -8,6 +8,7 @@ use recipe_domain::setting::SettingValue;
 
 const LOGIN: &str = "security.login_hmac_key_file";
 const CSRF: &str = "security.csrf_signing_key_file";
+const PLC: &str = "security.plc_credential_key_file";
 const HOOK: &str = "alerts.webhook_url_file";
 const CA: &str = "alerts.webhook_ca_file";
 
@@ -180,4 +181,72 @@ fn serve_app_connection_reads_the_password_file_and_names_the_key_on_a_fault() {
     let error = format!("{:#}", faulty.app_connection().unwrap_err());
     assert!(error.contains("secrets.app_password_file"), "{error}");
     assert!(!error.contains("topsecretvalue"), "{error}");
+}
+
+#[test]
+fn serve_plc_key_file_faults_name_the_key_and_not_the_content() {
+    let dir = Sandbox::new();
+    let zzzz = "z".repeat(64);
+    let cases = [
+        (format!("{KEY_A}\r\n"), "carriage return"),
+        (String::new(), "no key"),
+        (KEY_A[..62].to_owned(), "64 characters"),
+        (format!("{KEY_A}ab\n"), "64 characters"),
+        (format!("{zzzz}\n"), "outside 0-9 and a-f"),
+        (KEY_A.to_uppercase(), "outside 0-9 and a-f"),
+        (format!("{KEY_A}\n{KEY_B}\n"), "more than one line"),
+    ];
+    for (content, words) in cases {
+        let file = dir.write("faulty_plc_key", &content);
+
+        let message = refusal(set(base(&dir), PLC, text(&file)));
+
+        assert!(message.contains(PLC), "{message}");
+        assert!(message.contains(words), "{message}");
+        assert_clean(&message);
+    }
+}
+
+#[test]
+fn serve_missing_or_unreadable_plc_key_file_names_the_key() {
+    let dir = Sandbox::new();
+    let folder = dir.path("folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    for path in [dir.path("absent_file"), folder] {
+        let message = refusal(set(base(&dir), PLC, text(&path)));
+
+        assert!(message.contains(PLC), "{message}");
+        assert!(message.contains("cannot be read"), "{message}");
+        assert_clean(&message);
+    }
+}
+
+#[test]
+fn serve_default_plc_key_file_path_is_read_and_a_missing_file_stops_the_start() {
+    // No test host has the default file. The two other key files come from the sandbox.
+    let dir = Sandbox::new();
+    let login = dir.write("login_key", &format!("{KEY_A}\n"));
+    let csrf = dir.write("csrf_key", &format!("{KEY_B}\n"));
+    let figment = set(figment::Figment::new(), LOGIN, text(&login));
+    let figment = set(figment, CSRF, text(&csrf));
+
+    let message = refusal(figment);
+
+    assert!(message.contains(PLC), "{message}");
+    assert!(message.contains("cannot be read"), "{message}");
+    assert_clean(&message);
+}
+
+#[test]
+fn serve_plc_key_is_in_the_config_and_never_printed() {
+    let dir = Sandbox::new();
+
+    let config = load(base(&dir)).unwrap();
+
+    let shown = format!("{config:?} {:?}", config.configured());
+    assert!(!shown.contains("0123456789"), "{shown}");
+    assert!(shown.contains("PlcCredentialKey(<redacted>)"), "{shown}");
+    let names: Vec<String> = canonical(&config).into_iter().map(|(key, _)| key).collect();
+    assert!(!names.iter().any(|name| name == PLC), "{names:?}");
+    let _key = config.into_plc_credential_key();
 }

@@ -55,6 +55,15 @@ fn a_type_row_of_the_application_belongs_to_a_machine() {
 }
 
 #[test]
+fn a_connection_record_belongs_to_the_machine_aggregate() {
+    let target = AuditTarget::plc_connection(PlcConnectionId::from(id(9)), MachineId::from(id(1)));
+    assert_eq!(target.entity_type(), "plc_connection");
+    assert_eq!(target.aggregate_type(), AggregateType::Machine);
+    assert_eq!(target.entity_id(), &id(9));
+    assert_eq!(target.aggregate_id(), &id(1));
+}
+
+#[test]
 fn a_recipe_is_its_own_aggregate() {
     let target = AuditTarget::recipe(RecipeId::from(id(4)));
     assert_eq!(target.entity_type(), "recipe");
@@ -106,6 +115,7 @@ fn every_entity_type_text_matches_the_format_constraint() {
         AuditTarget::machine(MachineId::from(id(1))),
         AuditTarget::unit(MachineId::from(id(1)), UnitId::from(id(2))),
         AuditTarget::plc_type(MachineId::from(id(1)), PlcTypeId::from(id(3))),
+        AuditTarget::plc_connection(PlcConnectionId::from(id(9)), MachineId::from(id(1))),
         AuditTarget::recipe(RecipeId::from(id(4))),
         AuditTarget::recipe_version(RecipeId::from(id(4)), RecipeVersionId::from(id(5))),
         AuditTarget::parameter(RecipeId::from(id(4)), ParameterId::from(id(6))),

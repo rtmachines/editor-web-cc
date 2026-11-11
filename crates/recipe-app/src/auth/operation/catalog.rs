@@ -11,7 +11,7 @@ use super::Requirement;
 
 /// Define the enum `Operation` and its accessors from one table.
 ///
-/// The macro solves one problem: three exhaustive matches of 69 arms must not drift apart.
+/// The macro solves one problem: three exhaustive matches of 72 arms must not drift apart.
 macro_rules! operation_catalog {
     (
         count: $count:literal;
@@ -37,7 +37,7 @@ macro_rules! operation_catalog {
         }
 
         impl Operation {
-            /// Every operation: 34 commands and 35 queries.
+            /// Every operation: 36 commands and 36 queries.
             pub const ALL: [Self; $count] = [$(Self::$variant),+];
 
             /// Return the name of the use case.
@@ -72,7 +72,7 @@ macro_rules! operation_catalog {
 }
 
 operation_catalog! {
-    count: 69;
+    count: 72;
     /// Command `CreateMachine`.
     CreateMachine => { name: "CreateMachine", command: true, requires: Requirement::Permission(Permission::MachineManage) },
     /// Command `RenameMachine`.
@@ -87,6 +87,8 @@ operation_catalog! {
     ArchiveUnit => { name: "ArchiveUnit", command: true, requires: Requirement::Permission(Permission::UnitManage) },
     /// Command `DefineUdt`.
     DefineUdt => { name: "DefineUdt", command: true, requires: Requirement::Permission(Permission::UdtManage) },
+    /// Command `SetPlcConnection`.
+    SetPlcConnection => { name: "SetPlcConnection", command: true, requires: Requirement::Permission(Permission::MachineManage) },
     /// Command `CreateRecipe`.
     CreateRecipe => { name: "CreateRecipe", command: true, requires: Requirement::Permission(Permission::RecipeCreate) },
     /// Command `RenameRecipe`.
@@ -141,6 +143,8 @@ operation_catalog! {
     ExportApprovedVersion => { name: "ExportVersion", command: true, requires: Requirement::Permission(Permission::VersionExport) },
     /// Command `ExportVersion` on the route `/versions/{n}`.
     ExportVersionByNumber => { name: "ExportVersion", command: true, requires: Requirement::Permission(Permission::VersionExportHistory) },
+    /// Command `ExportPlcConnection` on the route `/export/v1/machines/{code}/connection`.
+    ExportPlcConnection => { name: "ExportPlcConnection", command: true, requires: Requirement::Permission(Permission::VersionExport) },
     /// Query `ListMachines`.
     ListMachines => { name: "ListMachines", command: false, requires: Requirement::Permission(Permission::RecipeView) },
     /// Query `GetMachine`.
@@ -211,4 +215,6 @@ operation_catalog! {
     GetLoginForm => { name: "GetLoginForm", command: false, requires: Requirement::NoSession },
     /// Form query `GetOwnPasswordForm`.
     GetOwnPasswordForm => { name: "GetOwnPasswordForm", command: false, requires: Requirement::Authenticated },
+    /// Form query `GetPlcConnectionForm`.
+    GetPlcConnectionForm => { name: "GetPlcConnectionForm", command: false, requires: Requirement::Permission(Permission::MachineManage) },
 }

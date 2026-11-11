@@ -35,6 +35,7 @@ mod machine;
 mod machine_export;
 mod machine_list;
 mod memory_harness;
+mod plc_connection;
 pub(crate) mod postgres_harness;
 mod recipe_read;
 mod recipe_reads;

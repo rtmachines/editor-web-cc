@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::error::StorageError;
 use crate::memory::audit_chain::ChainRow;
 use crate::memory::identity::StoredSession;
+use crate::memory::plc_connection::ConnectionRow;
 use crate::memory::recipe::{ParameterRow, RecipeRow, VersionRow};
 use crate::memory::rows::{MachineRow, TypeRow, UnitRow};
 use crate::ports::{AttemptId, AttemptRow, ChainPosition, UserRow};
@@ -33,6 +34,10 @@ pub struct MemoryState {
     pub(super) markers: BTreeSet<String>,
     /// The rows of the table `machine`.
     pub(crate) machines: BTreeMap<MachineId, MachineRow>,
+    /// The rows of the table `plc_connection`, keyed by the machine (`UNIQUE (machine_id)`).
+    pub(crate) connections: BTreeMap<MachineId, ConnectionRow>,
+    /// The number of the last identifier that an insert into `plc_connection` took.
+    pub(crate) last_connection_serial: u128,
     /// The rows of the table `unit`.
     pub(crate) units: BTreeMap<UnitId, UnitRow>,
     /// The rows of the table `plc_type` with their member rows.
@@ -141,6 +146,20 @@ impl MemoryState {
     #[must_use]
     pub fn succeeded_login_attempt_count(&self) -> usize {
         self.attempts.values().filter(|row| row.succeeded).count()
+    }
+
+    /// Take the next identifier of a `plc_connection` row.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `StorageError` when the identifier serial overflows. The serial stays unchanged.
+    pub(crate) fn next_connection_serial(&mut self) -> Result<u128, StorageError> {
+        let serial = self
+            .last_connection_serial
+            .checked_add(1)
+            .ok_or_else(|| StorageError::invariant("the connection serial overflows"))?;
+        self.last_connection_serial = serial;
+        Ok(serial)
     }
 
     /// Take the next identifier of an `app_setting` row.

@@ -1,6 +1,6 @@
 # ADR-0154: PLC connection settings of a machine
 
-Status: Proposed
+Status: Accepted
 Date: 2026-11-10
 Deciders: project owner
 

@@ -170,6 +170,10 @@ const D8_KEYS: &[&str] = &[
     "audit-entity-parameter",
     "audit-entity-app-user",
     "audit-entity-app-setting",
+    // ADR-0154 adds the entity word and the two action words of the PLC connection record.
+    "audit-entity-plc-connection",
+    "audit-action-plc-connection-set",
+    "audit-action-plc-connection-exported",
     "audit-action-machine-created",
     "audit-action-machine-renamed",
     "audit-action-machine-archived",

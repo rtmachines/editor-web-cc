@@ -266,7 +266,7 @@ The system SHALL accept as the login a text of 1 to 64 characters without a cont
 - **THEN** the system rejects the command with `422 E-PLT-022` for the field `login`
 
 ### Requirement: Connection password
-The system SHALL accept as the password a text of 1 to 128 characters on `CodesysIec` and `TwinCat3`. A record with a login MUST have a password, and a record without a login MUST NOT have one. An empty password field SHALL keep the stored password. A mode without credentials SHALL remove the stored password (R38, A47).
+The system SHALL accept as the password a text of 1 to 128 characters on `CodesysIec` and `TwinCat3`. A record with a login MUST have a password, and a record without a login MUST NOT have one. An empty password field SHALL keep the stored password. A mode without credentials SHALL delete the stored password (R38, A47).
 
 #### Scenario: ADS with a password and no login
 - **GIVEN** the machine `M8` with the platform `TwinCat3`
@@ -314,7 +314,7 @@ The system SHALL accept as the password a text of 1 to 128 characters on `Codesy
 - **THEN** the system rejects the command with `422 E-PLT-022` for the field `password`
 
 ### Requirement: Encrypted connection password
-The system SHALL store the PLC password only as AES-256-GCM ciphertext. The key MUST come from the Docker secret `plc_credential_key`. The server SHALL refuse to start without a key of 32 bytes (R31, A47).
+The system SHALL store the PLC password only as AES-256-GCM ciphertext. The key MUST come from the Docker secret `plc_credential_key`. The file MUST hold exactly one line with the 32 bytes of the key as 64 lower-case hex characters. The server SHALL refuse to start without such a key (R31, A47).
 
 #### Scenario: Stored password
 - **GIVEN** a stored record with the password `S3cret-PLC`
@@ -322,7 +322,8 @@ The system SHALL store the PLC password only as AES-256-GCM ciphertext. The key 
 - **THEN** no column holds the text `S3cret-PLC`
 
 #### Scenario: Missing key file
-- **GIVEN** the file of the secret `plc_credential_key` is missing or holds 31 bytes
+- **GIVEN** the file of the secret `plc_credential_key` is in one of four bad states
+- **AND** the bad states are a missing file, 62 or 66 hex characters, a character other than lower-case hex, and a second line
 - **WHEN** the operator runs `recipe-server serve`
 - **THEN** the server writes one `ERROR` line and exits with code 1
 
@@ -434,9 +435,9 @@ Each successful `SetPlcConnection` SHALL write one audit entry `PlcConnectionSet
 - **THEN** the system answers `409 E-PLT-010` without a field of the record
 
 #### Scenario: Save on an archived machine
-- **GIVEN** the archived machine `M3` with a record
-- **WHEN** a ProcessEngineer runs `SetPlcConnection` on `M3`
-- **THEN** the system rejects the command with `409 E-PLT-010`
+- **GIVEN** the archived machine `M3` with a record and no live machine with the code `M3`
+- **WHEN** a ProcessEngineer sends a save of the connection of `M3`
+- **THEN** the system answers `404 E-WEB-005`
 - **AND** the record does not change
 
 ### Requirement: Transfer route of the connection

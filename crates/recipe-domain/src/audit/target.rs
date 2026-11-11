@@ -3,7 +3,7 @@
 use uuid::Uuid;
 
 use crate::identity::UserId;
-use crate::plant::{MachineId, PlcTypeId, UnitId};
+use crate::plant::{MachineId, PlcConnectionId, PlcTypeId, UnitId};
 use crate::recipe::{ParameterId, RecipeId, RecipeVersionId};
 use crate::setting::SettingId;
 
@@ -51,6 +51,7 @@ enum EntityType {
     Machine,
     Unit,
     PlcType,
+    PlcConnection,
     Recipe,
     RecipeVersion,
     Parameter,
@@ -64,6 +65,7 @@ impl EntityType {
             Self::Machine => "machine",
             Self::Unit => "unit",
             Self::PlcType => "plc_type",
+            Self::PlcConnection => "plc_connection",
             Self::Recipe => "recipe",
             Self::RecipeVersion => "recipe_version",
             Self::Parameter => "parameter",
@@ -127,6 +129,20 @@ impl AuditTarget {
         Self::new(
             EntityType::PlcType,
             *plc_type.as_uuid(),
+            AggregateType::Machine,
+            *machine.as_uuid(),
+        )
+    }
+
+    /// Target the connection record of a machine. The aggregate is the machine.
+    ///
+    /// `entity_id` is the id of the record row. `aggregate_id` is the id of the machine
+    /// (`data-model.md` section 10, ADR-0154).
+    #[must_use]
+    pub fn plc_connection(connection: PlcConnectionId, machine: MachineId) -> Self {
+        Self::new(
+            EntityType::PlcConnection,
+            *connection.as_uuid(),
             AggregateType::Machine,
             *machine.as_uuid(),
         )

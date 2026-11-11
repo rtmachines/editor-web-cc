@@ -4,7 +4,9 @@
 //! units, and PLC types.
 
 mod array_dimension;
+mod connection;
 mod error;
+mod errors;
 mod ids;
 mod iec_literal;
 mod leaf_path;
@@ -28,8 +30,14 @@ mod unit_path;
 mod unit_usage;
 
 pub use array_dimension::{ArrayDimension, ArrayDimensionReason, ArrayDimensions};
+pub use connection::{
+    AmsNetId, AmsNetIdReason, CommMode, ConnectionFields, ConnectionPlan, ConnectionTextReason,
+    DataBlockNumber, HostReason, ModeReason, PasswordPlan, PasswordState, PlcAddress,
+    PlcConnection, PlcHost, PlcLogin, PlcPassword, Rack, RangeReason, Slot, TcpPort,
+};
 pub use error::{DerivedTypeReason, PlantError, TypeLimit};
-pub use ids::{MachineId, PlcTypeId, UnitId};
+pub use errors::PlantErrors;
+pub use ids::{MachineId, PlcConnectionId, PlcTypeId, UnitId};
 pub use iec_literal::{IecLiteral, IecLiteralReason, RuleSet, TimeType};
 pub(crate) use leaf_path::extended;
 pub use leaf_path::{LeafPath, LeafPathReason, LeafSegment, LeafTarget};

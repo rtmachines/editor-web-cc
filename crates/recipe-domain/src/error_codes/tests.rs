@@ -145,3 +145,24 @@ fn find_returns_every_registry_entry_for_its_text() {
         assert_eq!(ErrorCode::find(code.as_str()), Some(*code));
     }
 }
+
+/// The codes of the change `plc-connection-config` (`reliability.md` section 1.2).
+#[test]
+fn plc_connection_codes_are_in_registry() {
+    let added = [
+        ("E-PLT-022", ErrorCode::PLT_022),
+        ("E-PLT-023", ErrorCode::PLT_023),
+        ("E-PLT-024", ErrorCode::PLT_024),
+        ("E-PLT-025", ErrorCode::PLT_025),
+        ("E-PLT-026", ErrorCode::PLT_026),
+        ("E-PLT-027", ErrorCode::PLT_027),
+        ("E-PLT-028", ErrorCode::PLT_028),
+        ("E-PLT-029", ErrorCode::PLT_029),
+        ("E-WEB-013", ErrorCode::WEB_013),
+        ("E-WEB-014", ErrorCode::WEB_014),
+    ];
+    for (text, code) in added {
+        assert_eq!(code.as_str(), text);
+        assert_eq!(ErrorCode::find(text), Some(code), "{text}");
+    }
+}

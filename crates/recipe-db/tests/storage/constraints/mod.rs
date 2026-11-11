@@ -1,4 +1,4 @@
-//! Tests of the constraints and unique indexes of `data-model.md` sections 3.1 to 3.17.
+//! Tests of the constraints and unique indexes of `data-model.md` sections 3.1 to 3.18.
 //!
 //! Each module exports `COVERED`, the names of the constraints and indexes that its tests violate.
 //! The meta-test of this module compares all lists with the named constraints and the unique
@@ -11,6 +11,7 @@ mod default_names;
 mod identity;
 mod parameter;
 mod plant;
+mod plc_connection;
 mod recipe;
 mod type_rules;
 mod types;
@@ -26,7 +27,7 @@ use crate::support::{
 /// The sections of `data-model.md` that define tables, constraints, and indexes.
 const SECTION_3: &[&str] = &[
     "3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7", "3.8", "3.9", "3.10", "3.11", "3.12",
-    "3.13", "3.14", "3.15", "3.16", "3.17",
+    "3.13", "3.14", "3.15", "3.16", "3.17", "3.18",
 ];
 
 /// Composite unique constraints that no test violates on their own.
@@ -95,6 +96,7 @@ async fn covered_names_exist_in_the_catalog() {
         recipe::COVERED,
         parameter::COVERED,
         audit::COVERED,
+        plc_connection::COVERED,
     ]
     .concat();
 
@@ -129,6 +131,7 @@ fn every_named_constraint_and_unique_index_of_section_3_is_covered_or_exempt() {
         recipe::COVERED,
         parameter::COVERED,
         audit::COVERED,
+        plc_connection::COVERED,
     ]
     .concat();
     let missing: Vec<&str> = named

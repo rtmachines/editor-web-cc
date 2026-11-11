@@ -17,8 +17,8 @@ use crate::memory::sink::RecordedEvent;
 use crate::memory::{Fault, FaultPoint};
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DiffReads, DraftRepository, Isolation, NonEmpty,
-    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, SettingRepository,
-    Transaction, TypeCatalog, UnitLookup, UserRepository,
+    PlantRepository, PlcConnections, RecipeReads, RecipeRepository, SessionRepository,
+    SettingRepository, Transaction, TypeCatalog, UnitLookup, UserRepository,
 };
 
 /// The length of the audit log and of the event list of the sink at the `begin` of a transaction.
@@ -171,6 +171,10 @@ impl MemoryTransaction {
 #[async_trait]
 impl Transaction for MemoryTransaction {
     fn plant(&mut self) -> &mut dyn PlantRepository {
+        self
+    }
+
+    fn plc_connections(&mut self) -> &mut dyn PlcConnections {
         self
     }
 

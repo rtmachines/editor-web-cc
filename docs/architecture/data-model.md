@@ -64,6 +64,9 @@ Exceptions to the rules above:
 | `SecurityEventKind` variants | `security_event.kind` values in snake_case |
 | `u32` fields: `RecipeVersion.number`, `PlcType.revision`, `PlcType.size_bytes`, `Parameter.ordinal` | `INTEGER` (`i32`). The adapter converts with `i32::try_from` and `u32::try_from` and returns an error for a value outside the `INTEGER` range. It never uses `as` |
 | `u16` fields: `PlcType.string_length`, `ProcessLimit.max_length` | `SMALLINT` (`i16`). The adapter converts with `i16::try_from` and `u16::try_from` and returns an error for a value outside the `SMALLINT` range. It never uses `as` |
+| `Rack`, `Slot`, `DataBlockNumber`, `TcpPort` of `PlcConnection` | `plc_connection.rack` and `slot` as `SMALLINT`. `plc_connection.db_number` and `port` as `INTEGER`, because 65 535 is outside the `SMALLINT` range. The adapter converts with `try_from` and never uses `as` |
+| `PlcConnection::Iec.mode` (`CommMode`) | `plc_connection.comm_mode` (`Ads`, `OpcUa`, `CodesysV3`, `ModbusTcp`) |
+| `SealedSecret` of the PLC password | `plc_connection.password_sealed` |
 
 ### 1.3 Text limits
 
@@ -75,6 +78,10 @@ Exceptions to the rules above:
 | `app_user.login`, `login_attempt.login` | 3 to 64 for a valid login. `login_attempt.login` accepts 1 to 64 with no control character (ADR-0035) |
 | `parameter.value` | `pg_column_size` at most 1 048 576 bytes |
 | `security_event.user_agent` | at most 256 characters (`http.user_agent_max`, `reliability.md` 7.11) |
+| `plc_connection.host` | 1 to 253 characters. An IPv4 address or an RFC 1123 host name (ADR-0154 (f), section 3.18) |
+| `plc_connection.address` | 1 to 200 characters. The value object also refuses a control character |
+| `plc_connection.login` | 1 to 64 characters. The value object also refuses a control character |
+| `plc_connection.password_sealed` | `BYTEA` with no text limit. The password has 1 to 128 characters before `CredentialCipher::seal` (`domain-model.md` 2) |
 | `audit_log.session_ref` | 16 hex characters (`log.session_ref_length`, `reliability.md` 7.11) |
 
 ### 1.4 Advisory locks
@@ -122,6 +129,7 @@ erDiagram
     app_user ||--o{ session : "owns"
     app_user |o--o{ security_event : "user (nullable)"
     app_user |o--o{ app_setting : "updated_by (nullable)"
+    machine ||--o| plc_connection : "connection settings"
 
     machine {
         uuid id PK
@@ -277,6 +285,21 @@ erDiagram
         text key UK
         text value
         uuid updated_by FK
+    }
+    plc_connection {
+        uuid id PK
+        uuid machine_id FK "unique"
+        text plc_platform
+        text host
+        smallint rack
+        smallint slot
+        integer db_number
+        integer port
+        text address
+        text comm_mode
+        text login
+        bytea password_sealed
+        bigint row_version
     }
 ```
 
@@ -991,6 +1014,104 @@ Three keys are state, not configuration: `audit.last_check_seq`, `audit.last_che
 `audit.last_check_seq` holds the decimal text of the `chain_seq`, with no sign and no leading zero. `audit.last_check_at` and `heartbeat.last_at` hold an instant in RFC 3339 form in UTC, with the suffix `Z` and six fraction digits, for example `2026-10-23T02:00:00.000000Z`. A reader that finds another form returns a `StorageError`, not "no value" (ADR-0073 (i)).
 
 The oldest `created_at` of the table is the first start of the installation. The job `alerts` reads it for the start grace of `reliability.md` 3.7 (ADR-0060 (x), (y)).
+
+### 3.18 `plc_connection`
+
+The PLC connection record of a machine (ADR-0154). An external adapter reads it through the transfer route of `api.md` 2.7. The block belongs to `0012_plc_connection.sql`, not to `0001_schema.sql` (section 8).
+
+```sql
+CREATE TABLE plc_connection (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    machine_id       UUID NOT NULL,
+    -- Copy of machine.plc_platform. Kept correct by the composite FK.
+    plc_platform     TEXT NOT NULL,
+    host             TEXT NOT NULL,
+    -- S7 columns. NULL on CodesysIec and TwinCat3.
+    rack             SMALLINT,
+    slot             SMALLINT,
+    -- Default data block for a parameter without s7_address (ADR-0154 (d)).
+    db_number        INTEGER,
+    -- IEC columns. NULL on S7_300, S7_1200, and S7_1500.
+    port             INTEGER,
+    address          TEXT,
+    comm_mode        TEXT,
+    login            TEXT,
+    -- Sealed form of ADR-0154 (g): version byte 0x01, nonce, ciphertext, and tag.
+    password_sealed  BYTEA,
+    -- Optimistic lock token (ADR-0008). Bumped by trigger plc_connection_a_bump on every UPDATE.
+    row_version      BIGINT NOT NULL DEFAULT 1,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- One record per machine. The constraint also serves as the index of the FK.
+    CONSTRAINT plc_connection_machine_unique UNIQUE (machine_id),
+    CONSTRAINT plc_connection_machine_platform
+        FOREIGN KEY (machine_id, plc_platform) REFERENCES machine (id, plc_platform),
+    -- An S7 row has the S7 columns and no IEC column. An IEC row has the reverse.
+    CONSTRAINT plc_connection_shape CHECK (
+        (plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
+            AND rack IS NOT NULL AND slot IS NOT NULL AND db_number IS NOT NULL
+            AND port IS NULL AND address IS NULL AND comm_mode IS NULL)
+        OR (plc_platform IN ('CodesysIec', 'TwinCat3')
+            AND port IS NOT NULL AND address IS NOT NULL AND comm_mode IS NOT NULL
+            AND rack IS NULL AND slot IS NULL AND db_number IS NULL)
+    ),
+    -- Login and ciphertext come as a pair. The mode decides the pair (ADR-0154 (ea)).
+    -- OpcUa and CodesysV3 need it. Ads permits it. ModbusTcp and an S7 row refuse it.
+    CONSTRAINT plc_connection_credentials CHECK (
+        (login IS NULL) = (password_sealed IS NULL)
+        AND CASE
+            WHEN comm_mode IN ('OpcUa', 'CodesysV3') THEN login IS NOT NULL
+            WHEN comm_mode = 'Ads' THEN true
+            ELSE login IS NULL
+        END
+    ),
+    CONSTRAINT plc_connection_rack_range CHECK (rack BETWEEN 0 AND 7),
+    CONSTRAINT plc_connection_slot_range CHECK (slot BETWEEN 0 AND 31),
+    -- The limit of the platform (ADR-0116 (c), ADR-0140 (a)).
+    CONSTRAINT plc_connection_db_number_range CHECK (
+        db_number IS NULL
+        OR (plc_platform = 'S7_300' AND db_number BETWEEN 1 AND 16000)
+        OR (plc_platform IN ('S7_1200', 'S7_1500') AND db_number BETWEEN 1 AND 59999)
+    ),
+    CONSTRAINT plc_connection_port_range CHECK (port BETWEEN 1 AND 65535),
+    -- The modes of the platform (ADR-0154 (e)).
+    CONSTRAINT plc_connection_mode_value CHECK (
+        comm_mode IS NULL
+        OR (plc_platform = 'CodesysIec' AND comm_mode IN ('OpcUa', 'CodesysV3', 'ModbusTcp'))
+        OR (plc_platform = 'TwinCat3' AND comm_mode IN ('Ads', 'OpcUa', 'ModbusTcp'))
+    ),
+    CONSTRAINT plc_connection_host_length CHECK (length(host) BETWEEN 1 AND 253),
+    -- IPv4 without a leading zero, or an RFC 1123 host name without a trailing dot.
+    -- A text of digits and dots only must be IPv4 (ADR-0154 (f)).
+    CONSTRAINT plc_connection_host_format CHECK (
+        host ~ '^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
+        OR (host !~ '^[0-9.]+$'
+            AND host ~ '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
+    ),
+    CONSTRAINT plc_connection_address_length CHECK (length(address) BETWEEN 1 AND 200),
+    CONSTRAINT plc_connection_login_length CHECK (length(login) BETWEEN 1 AND 64),
+    -- No control character in address and login. The value objects of domain-model.md 2 refuse the same.
+    CONSTRAINT plc_connection_text_no_control CHECK (
+        address !~ '[[:cntrl:]]' AND login !~ '[[:cntrl:]]'
+    ),
+    -- The mode Ads takes an AMS Net ID: six numbers 0 to 255 with five dots.
+    CONSTRAINT plc_connection_ams_net_id CHECK (
+        comm_mode IS DISTINCT FROM 'Ads'
+        OR address ~ '^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){5}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$'
+    ),
+    CONSTRAINT plc_connection_row_version_positive CHECK (row_version >= 1)
+);
+CREATE TRIGGER plc_connection_a_bump
+    BEFORE UPDATE ON plc_connection
+    FOR EACH ROW EXECUTE FUNCTION bump_row_version();
+```
+
+- The composite foreign key copies the platform of the machine, as in `recipe` (3.9). A record therefore cannot hold the fields of another platform. No command changes `machine.plc_platform` (ADR-0154 (m)).
+- The range checks and the host checks mirror the value objects of `domain-model.md` 2. A storage test sends each boundary value through both. The value object `AmsNetId` checks the address of the mode `Ads`. The table checks it too, in `plc_connection_ams_net_id`.
+- The domain refuses a bad value first. A check therefore fires only when the domain check was bypassed. `recipe-db` maps a check violation to `E-DB-003` (`reliability.md` 1.2). The table adds no trigger code.
+- `plc_connection_a_bump` runs `bump_row_version` of 4.4, which also sets `updated_at`. The application never sets `row_version`. A machine without a record counts as `row_version` 0 for `SetPlcConnection` (section 6).
+- A page query and `SetPlcConnection` read only `password_sealed IS NOT NULL`. Only `ExportPlcConnection` reads the ciphertext (section 6).
+- The record is not part of the export documents v1 and v2 or of `content_sha256` (ADR-0154 (k)).
 
 ## 4. Triggers and functions
 
@@ -1780,6 +1901,20 @@ GRANT DELETE ON session, login_attempt, draft_editor, parameter, parameter_limit
 
 `0003_grants.sql` shipped, so the SQL block above stays as it is. Section 5.4 narrows the `INSERT` grant of `recipe_app` on `security_event` to columns and adds a guard trigger (ADR-0035). `0008_audit_log_insert_columns.sql` revokes the table-level `INSERT` on `audit_log` from `recipe_app`. It then grants `INSERT` on eleven columns only (ADR-0098 (b), (c)).
 
+`0012_plc_connection.sql` grants the rights of `recipe_app` on `plc_connection` (section 3.18, ADR-0154). The default privilege of step 1 already gives `SELECT`, and the file states it again.
+
+```sql
+GRANT SELECT, INSERT ON plc_connection TO recipe_app;
+-- Updates: the value columns and updated_at. id, machine_id, plc_platform, row_version,
+-- and created_at get no UPDATE grant. Trigger plc_connection_a_bump sets row_version.
+GRANT UPDATE (host, rack, slot, db_number, port, address, comm_mode, login,
+              password_sealed, updated_at) ON plc_connection TO recipe_app;
+-- No grant means denied:
+--   plc_connection : no DELETE, no TRUNCATE
+```
+
+The `UPDATE` grant lets `recipe_app` lock a record `FOR UPDATE` and `FOR SHARE` (section 6).
+
 ### 5.3 Grant test
 
 CI starts a fresh cluster, runs `01-roles.sh`, and applies every migration of `migrations/` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app`. It compares `information_schema.role_table_grants`, `information_schema.role_column_grants`, and `information_schema.role_routine_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`.
@@ -1996,7 +2131,7 @@ Rules:
 
 - Isolation is `READ COMMITTED` for every command. `SetUserRole` and `DeactivateUser` take the guard lock of the last Administrator first. They have no retry (ADR-0096 (a), (b)).
 - Lock order: `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015). A command takes only the locks that it needs, always in this order. The identity commands use this order: the class-4 guard lock, then `app_user`, then `session`, then `audit_chain_head` (ADR-0096 (e)).
-- `RenameMachine`, `ArchiveMachine`, `RenameUnit`, and `ArchiveUnit` start with `SELECT archived_at FROM machine WHERE id = $m FOR NO KEY UPDATE`.
+- `RenameMachine`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` start with `SELECT archived_at FROM machine WHERE id = $m FOR NO KEY UPDATE`.
 - `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` start with `SELECT archived_at FROM machine WHERE id = $m FOR SHARE`. A recipe command reads `recipe.machine_id` without a lock before this statement. The column never changes.
 - Every recipe command then runs `SELECT deleted_at, machine_id FROM recipe WHERE id = $r FOR UPDATE` and requires `deleted_at IS NULL` (`RecipeDeleted`, `E-RCP-012`). A recipe command without a machine lock starts with this statement. There are two exceptions. `CreateRecipe` has no recipe row yet. `RestoreRecipe` takes the same lock and requires `deleted_at IS NOT NULL`.
 - An insert into `plc_type` checks the foreign key `machine_id` with `FOR KEY SHARE` on the machine row. Every caller of `EnsureDerivedType` and `DefineUdt` already holds `FOR SHARE` on that row. The insert therefore waits for no other transaction.
@@ -2018,6 +2153,7 @@ Rules:
 | `AddUnit` | RC | `machine FOR SHARE`, then parent `unit FOR SHARE` | `INSERT unit` with the path from `parent_path` and `segment`, and `name` | `UnitAdded` | `unit_path_unique` → `DuplicateUnitPath`. `UnitPath::parse` of `parent_path` and `segment` → `InvalidUnitPath` (`E-PLT-017`, a malformed text or segment) or `UnitDepthExceeded` (`E-PLT-002`, more than 5 segments). `unit_path_format` and `unit_depth_range` are the last line. No unit with `parent_path` on the machine → `ParentNotFound` (`E-PLT-003`). `unit_parent_exists` → `ParentNotFound` (second line). Parent archived → `UnitArchived`. Machine archived → `MachineArchived` |
 | `RenameUnit` | RC | `machine FOR NO KEY UPDATE`, then `unit FOR UPDATE` | `UPDATE unit SET name` | `UnitRenamed` | `UnitArchived` |
 | `ArchiveUnit` | RC | `machine FOR NO KEY UPDATE`, then `unit FOR UPDATE` on the unit and its descendants (`WHERE machine_id = $m AND (path = $p OR path LIKE $p \|\| '.%') ORDER BY id`) | Require no parameter of an approved version or a live draft on these units. `UPDATE unit SET archived_at = now()` for the set | `UnitArchived` (one entry per unit) | Draft reference found → `UnitReferencedByDraft`. Approved reference found → `UnitReferencedByApproved`. Last live main unit → `LastMainUnit` |
+| `SetPlcConnection` | RC | `machine FOR NO KEY UPDATE`, then `plc_connection FOR UPDATE` | Before the transaction: read `machine.plc_platform` without a lock. The platform never changes. On an IEC platform, also read `password_sealed IS NOT NULL` of the record. Run `PlcConnection::for_platform` and seal a new password (`reliability.md` 7.4). In the transaction: `SELECT ... FROM plc_connection WHERE machine_id = $m FOR UPDATE`. Compare `row_version` with the expected value. No row counts as 0. No row: `INSERT plc_connection`, which starts at `row_version` 1. Else `UPDATE plc_connection SET` the value columns. The `PasswordPlan` keeps `password_sealed`, writes the new ciphertext, or sets it to `NULL`. An S7 record never reads or writes `password_sealed`. The machine lock serializes two first saves and a save with `ArchiveMachine` (ADR-0154 (i)) | `PlcConnectionSet` | `archived_at IS NOT NULL` → `MachineArchived` (`E-PLT-010`). `row_version` mismatch → `ConnectionConcurrentEdit` (`E-WEB-013`). A second first save reads the new row and gets `E-WEB-013`. A field fault → `PlantErrors` (`E-PLT-022` to `E-PLT-026`, `E-PLT-028`) before the transaction. A failed `seal` → `TaskFailed` (`E-WEB-011`) |
 | `DefineUdt` | RC | `machine FOR SHARE`, then the class-2 advisory locks `pg_advisory_xact_lock(2, hashtext(machine_id::text \|\| ':' \|\| name))` in the order of section 1.4. The keys are the struct name and the `STRING`, `WSTRING`, and `ARRAY` keys that the member types need. All before the first insert. No row lock on `plc_type` | Parse every `members[i].type` first. `INSERT plc_type` (struct `name`, `revision = previous + 1`, `supersedes_type_id`, `platforms = ARRAY[machine.plc_platform]`). The server sets `supersedes_type_id` (the domain field `supersedes`) for a new revision. `EnsureDerivedType` resolves the `TypeExpr` of each `members[i].type`. `INSERT plc_type_member` per entry of `members[]`: `members[i].name` into `member_name`, the resolved type into `member_type_id`. Trigger 4.6 checks at commit | `UdtDefined` | `plc_type_named_unique` and `plc_type_struct_name_ci_unique` → `DuplicateTypeName`. The class-2 advisory key holds the exact name. For two names that differ only in case, the index is the only guard (ADR-0143). A parallel command can commit first, so the domain check without case can miss it. `plc_type_member_name_unique` and `plc_type_member_name_ci_unique` → `DuplicateMemberName` (second line). Domain: `TypeCycle`, `MemberTypeNotOnPlatform`, `DerivedTypeInvalid`, `StructHasNoMembers`, `DuplicateMemberName`, `TypeTooLarge` (more than 1024 members, more than 16 384 leaves, or more than `json.max_depth` levels). A member type that is not on the platform is `MemberTypeNotOnPlatform`, not `DerivedTypeInvalid`. Then the domain marks parameters that use the old revision as outdated (`RebindTypeRevision` is a separate draft command) |
 | `EnsureDerivedType` (internal, called inside the transaction of the caller) | of the caller | The locks of the caller, which include `machine FOR SHARE` and every class-2 advisory lock with the name `STRING`, `WSTRING`, or `ARRAY` that the resolution needs. The caller takes them in the order of section 1.4 before the first insert. `EnsureDerivedType` takes no lock of its own. The foreign key `plc_type.machine_id` takes `FOR KEY SHARE` on the machine row that the caller holds | Parse the `TypeExpr` (`domain-model.md` 2.1). Resolve it, the innermost element first. A primitive: `SELECT` by `name` with `machine_id IS NULL`. A struct: `SELECT` by `(machine_id, name, revision)`. A `STRING(n)`, a `WSTRING(n)`, or an array: `INSERT plc_type ... ON CONFLICT DO NOTHING` on `plc_type_string_unique` or `plc_type_array_unique` with `platforms = ARRAY[machine.plc_platform]`, then `SELECT` the row | `DerivedTypeCreated` (one entry per inserted row) | Domain: `DerivedTypeInvalid` (parse error, unknown struct or revision, type not on the platform, more than 3 dimensions). `TypeTooLarge` (more than 16 384 leaves or more than `json.max_depth` levels) |
 | `CreateRecipe` | RC | `machine FOR SHARE` on the machine of `machine_code` | `INSERT recipe` with `reference_number` and `name`. `INSERT recipe_version` (number 1, draft, `change_note` from the user) | `RecipeCreated`, `VersionCreated` | `recipe_reference_unique` → `DuplicateReference`. No machine with `machine_code` → `MachineNotFound` (`E-PLT-019`). Only an archived machine with this code → `MachineArchived` |
@@ -2046,6 +2182,7 @@ Rules:
 | `Login` | RC, two transactions T1 and T2 (ADR-0014) | Before T1: one Argon2 permit (`argon2.acquire_timeout`, else `E-WEB-009`). T1: `pg_advisory_xact_lock(1, hashtext($login))` (section 1.4) as its own statement, so the count that follows sees every committed attempt of the login. T2: `app_user FOR NO KEY UPDATE` (ADR-0035) | T1 through `LoginAttemptStore`: count the failures for `(login, client_ip)` and for `client_ip` in the throttle window → `n`. When the per-IP budget is already reached, T1 inserts nothing. Otherwise `INSERT login_attempt (succeeded = false) RETURNING id`, also in read-only mode. Commit. When `now() < last_failure + delay(n)` or the per-IP budget is exhausted, the attempt is throttled. `SecurityEventSink` writes `security_event (login_throttled)` with the `login_hmac` of the typed login, aggregated per minute (section 3.8). The use case releases the permit and returns 429 with `Retry-After`. Otherwise, outside a transaction: `SELECT app_user WHERE login`, Argon2 check of `password` (a dummy hash when the login is unknown or inactive), release the permit. T2 on success, through `UnitOfWork`: lock the user row and require `is_active` and the `session_epoch` and `password_hash` that the check read. A difference rolls back and returns `InvalidCredentials` (ADR-0035). `UPDATE login_attempt SET succeeded = true WHERE id = $attempt` (`LoginAttemptStore`). This statement can change no row, because `UnlockLogin` can delete the attempt after T1. T2 then continues (ADR-0035). `DELETE session WHERE id = $old` when the request carries a session cookie. `INSERT session (id = sha256(token), epoch = app_user.session_epoch, csrf_token)`. Commit with `UserLoggedIn`. The use case returns the token, and `recipe-web` sets the cookie. T2 on failure: `SecurityEventSink` writes `security_event (login_failed` or `login_rejected_inactive)`. `login_failed` is aggregated per minute (section 3.8). In read-only mode (Assumption A24) every step of this row runs as in normal mode. A failed or throttled login therefore still writes its `login_attempt` and `security_event` rows. These writes are small and stay inside the reserved margin of `reliability.md` 7.8. The use case returns 401 with the same body and timing | `UserLoggedIn` (T2 on success). `entity_type = 'app_user'`, `entity_id` = user id, `after_state = {"session_ref": ...}` | `InvalidCredentials`, `UserInactive` (same response to the client), `LoginThrottled` (429), Argon2 permit timeout → `Timeout` (`E-WEB-009`) |
 | `Logout` | RC | none | Through `UnitOfWork`: `DELETE session WHERE id = $current`. Commit with `UserLoggedOut`. `recipe-web` clears the cookie | `UserLoggedOut`. `entity_type = 'app_user'`, `entity_id` = user id, `before_state = {"session_ref": ...}` | — |
 | `ExportVersion` | RC | `recipe_version FOR SHARE` | `SELECT` version, parameters, limits, types. The machine filter of ADR-0109 (h) and (j) applies to the routes with `{code}`. `/approved` requires status approved. `/versions/{n}` accepts approved or retired. Rebuild the hashed body with the module `export` of `recipe-domain` and the array orders of `api.md` 6.3. `parameters[]` is ordered by `unit_path`, segment by segment as integers (the first segment without its `U` prefix), then by `tag` in byte order. `parameter.ordinal` is not exported and not hashed. Compare the SHA-256 of the hashed body with the stored `content_sha256`. The comparison is the same for an approved and a retired version. After the compare, the blocking task checks every value, limit, and S7 address of the version with the current rule set. A broken rule sets `loadable` to `false` and does not change the hash (ADR-0119 (a) to (d), (j)). A unit scope (v2) reads the unit check of ADR-0109 (ja) before the blocking task. Then the blocking task filters `parameters[]`, builds `types[]`, and computes `scope_sha256` (ADR-0109 (w)). The database does not store `scope_sha256` | `VersionExported` (`after_state` holds version id, schema version, `content_sha256`. A unit export adds `scope_unit_path` and `scope_sha256`, section 10) | No approved version → `NoApprovedVersion` (404). Draft or discarded → `VersionNotExportable` (409). Recipe deleted → `RecipeDeleted` (409, `/versions/{n}` only). Hash mismatch → `ContentHashMismatch` (`E-EXP-002`, 500). Unit without a parameter in the scope → `EmptyScope` (`E-EXP-005`, 404). No such machine, recipe, or unit → `NotFound` (`E-WEB-005`). The alert condition `export_hash_mismatch` of `reliability.md` 3.7 raises the alert. Serializer error → `Serialize` (`E-EXP-004`, 500). Export timeout → `Timeout` (`E-WEB-009`). The rebuild runs in `spawn_blocking`, and a failed task → `TaskFailed` (`E-WEB-011`, ADR-0029) |
+| `ExportPlcConnection` | RC | `machine FOR SHARE`, then `plc_connection FOR SHARE` | Before the transaction: take an `export.permits` permit. `timeout.export` covers the steps up to the `open`. The audit insert and the commit run after the limit (`reliability.md` 7.4). Resolve the machine by the `{code}` rule of `api.md` 2.7: the live machine with the code, else the machine with that code and the latest `archived_at`. In the transaction: `SELECT archived_at FROM machine WHERE id = $m FOR SHARE`. Read the recipe of the query value `recipe` by `reference_number` without a lock. `SELECT ... FROM plc_connection WHERE machine_id = $m FOR SHARE`. Then check the archive state, `recipe.machine_id = $m`, and the record, in this order. When the record holds `password_sealed`, run `CredentialCipher::open`. Insert the audit entry and commit. Build the JSON body of `api.md` 6 only after the commit (ADR-0154 (jb)). In read-only mode, every step runs as in normal mode (ADR-0154 (l)) | `PlcConnectionExported` (`after_state` holds `machine_id`, `row_version`, the schema version, and the reference number of the recipe, section 10) | Missing, malformed, or unknown `recipe` → `NotFound` (`E-WEB-005`). No such machine → `NotFound` (`E-WEB-005`). Archived machine → `MachineArchived` (`E-PLT-010`, 409). Recipe of another machine → `ConnectionRecipeMismatch` (`E-PLT-029`, 404). No record → `ConnectionNotConfigured` (`E-PLT-027`, 404). Failed `open` → `SecretUnreadable` (`E-WEB-014`, 500). The transaction then rolls back and writes no entry. Export timeout → `Timeout` (`E-WEB-009`). A failed audit insert and a timeout give an error answer without the password |
 | `ListExportableRecipes` (query, not a command) | RC, `READ ONLY` | none | Resolve the machine by ADR-0109 (j): the live machine with the code, else the machine with that code and the latest `archived_at`. Join `recipe` and `recipe_version` with `status = 'approved'` and `deleted_at IS NULL`. Select `reference_number`, `name`, `version_number`, `approved_at`, and `content_sha256`. Order by `reference_number` with `COLLATE "C"`. The read runs inside `timeout.export`. The statement takes no row lock | none (ADR-0109 (ab)) | No machine → `NotFound` (`E-WEB-005`). Export timeout → `Timeout` (`E-WEB-009`) |
 | `authenticate_basic` (Basic check of the export routes, not a command) | RC, two transactions T1 and T2 (ADR-0109 (m)) | Before T1: the Basic permit (`export.basic_permits`), then one Argon2 permit (`argon2.acquire_timeout`, else `E-WEB-009`). T1: `pg_advisory_xact_lock(1, hashtext($login))` as in `Login`. T2: `app_user FOR NO KEY UPDATE` | T1 through `LoginAttemptStore`, as in `Login`. Outside a transaction: `SELECT app_user WHERE login`. Run the Argon2 check of the password in `spawn_blocking`. An unknown login, an inactive user, and a `TypedLogin` outside `Login` get the dummy hash. Refuse an account of a person after the hash check. T2 through `LoginAttemptStore::confirm_basic(attempt, user, expected_hash)`: lock the user row. Require `is_active`, the role `export_client`, and `password_hash = $expected_hash`. `UPDATE login_attempt SET succeeded = true WHERE id = $attempt`, which can change no row after an `UnlockLogin`. T2 then continues. Commit. T2 inserts no `session` row and writes no audit entry. On a failure, `SecurityEventSink` writes the `security_event` of `Login` with the scheme `basic` in `detail`. In read-only mode, every step runs as in normal mode | none. The check writes no audit entry and does not use `UnitOfWork::commit` | `InvalidCredentials` (`E-IDN-003`, 401) for an unknown, inactive, person, wrong-password, or changed account. `LoginThrottled` (`E-IDN-005`, 429). Argon2 or Basic permit timeout → `Timeout` (`E-WEB-009`) |
 | `cleanup` (supervised job, not a command) | RC, one short transaction per statement | The rows of each delete `FOR UPDATE` in `id` order: the expired `session` rows, and the batch of `login_attempt` rows | Through `MaintenanceStore`: `WITH locked AS (SELECT id FROM session WHERE expires_at < now() OR created_at < now() - $absolute_timeout ORDER BY id FOR UPDATE) DELETE FROM session WHERE id IN (SELECT id FROM locked)`. `WITH locked AS (SELECT id FROM login_attempt WHERE id IN (SELECT id FROM login_attempt WHERE attempted_at < now() - $retention ORDER BY attempted_at LIMIT 5000) ORDER BY id FOR UPDATE) DELETE FROM login_attempt WHERE id IN (SELECT id FROM locked)`, each statement in its own transaction, repeated while it deletes 5 000 rows (`login_attempt.purge_batch`). The index `login_attempt_attempted_at_idx` serves it. `SELECT security_event_purge()` once per batch, each call in its own transaction, while the call returns 5 000 (`security_event.purge_batch`, section 4.12) | none | The supervisor logs an error of the job once (`reliability.md` 1.1, 2.4) |
@@ -2108,8 +2245,8 @@ Notes:
 
 - Tool: `sqlx migrate`. Files live in `migrations/` at the repository root. The crate `recipe-db` embeds them with `sqlx::migrate!("../../migrations")`.
 - Name: `NNNN_description.sql`, four digits, forward-only. There is no down migration. A mistake is corrected by a new migration. A shipped migration is never edited. `sqlx` verifies the checksum of every applied migration at start and refuses to run when a file changed.
-- Files of the first release, of ADR-0098, of ADR-0109, and of ADR-0143 to ADR-0145:
-  - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`. It does not hold the parts of section 3 that `0009` and `0011` add.
+- Files of the first release, of ADR-0098, of ADR-0109, of ADR-0143 to ADR-0145, and of ADR-0154:
+  - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`. It does not hold the parts of section 3 that `0009`, `0011`, and `0012` add.
   - `0002_triggers.sql`: functions and triggers of section 4.
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. Each row carries its `leaf_class`. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration.
@@ -2120,6 +2257,7 @@ Notes:
   - `0009_export_client_role.sql`: the value `export_client` of `app_user.role` and its two constraints, added as `NOT VALID` (ADR-0109).
   - `0010_validate_export_client_checks.sql`: `VALIDATE CONSTRAINT` on the two constraints of `0009` (ADR-0109).
   - `0011_plc_type_rules.sql`: one transaction. First the file takes a `SHARE` lock on `plc_type` and `plc_type_member` until it ends (ADR-0143 (k)). A check of the stored rows stops the file when an array row breaks ADR-0145 (a). It also stops the file when two struct names or two member names differ only in case. Then the file runs `CREATE OR REPLACE FUNCTION dims_valid` of section 3.3 (ADR-0145). Then it creates `plc_type_struct_name_ci_unique` of section 3.3 and `plc_type_member_name_ci_unique` of section 3.4 without `CONCURRENTLY` (ADR-0143 (j), (k)). The list `EXEMPT` permits both indexes and the `LOCK TABLE` statement of `0011` (ADR-0143 (k1)).
+  - `0012_plc_connection.sql`: the table `plc_connection` of section 3.18, its trigger `plc_connection_a_bump`, and its grants of section 5.2 (ADR-0154). The table is new, so the file rewrites and locks no table that exists.
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.
@@ -2212,10 +2350,10 @@ Keys of the diff are leaf paths. `ParameterDefinitionUpdated` uses column names 
 
 | Context | Actions |
 |---|---|
-| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated` |
+| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated`, `PlcConnectionSet` |
 | Recipe Management | `RecipeCreated`, `RecipeRenamed`, `RecipeDeleted`, `RecipeRestored`, `VersionCreated`, `DraftDiscarded`, `VersionApproved`, `VersionRetired`, `ParameterAdded`, `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, `TranslationRemoved`, `ParameterRemoved`, `TypeRevisionRebound` |
 | Identity and Access | `UserLoggedIn`, `UserLoggedOut`, `UserCreated`, `UserRoleSet`, `UserDeactivated`, `UserActivated`, `PasswordReset`, `OwnPasswordChanged`, `LoginUnlocked` |
-| Export | `VersionExported` |
+| Export | `VersionExported`, `PlcConnectionExported` |
 | Configuration | `SettingChanged` |
 
 State rule for `before_state` and `after_state` (the same rule as ADR-0005 and `domain-model.md` 2.4):
@@ -2224,9 +2362,12 @@ State rule for `before_state` and `after_state` (the same rule as ADR-0005 and `
 - Every other action stores the full row of the changed entity as JSON, without `password_hash`. This includes `ParameterAdded` and `ParameterRemoved`. A create stores the row in `after_state`, a delete stores it in `before_state`, and an update stores it in both.
 - The full row of a parameter holds its limit rows and its translation rows. The full row of a struct holds its member rows. The lock statement gives the row before the change, and the write statement gives the row after it (ADR-0029).
 - The full row of `LoginUnlocked` is the `app_user` row without `password_hash`, with the child array `login_attempts`. The before-state holds the newest `audit.unlock_rows` deleted attempts and the field `login_attempt_count` with the number of all deleted attempts. The after-state holds an empty array (ADR-0035).
-- Three actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`.
+- Four actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`.
+- `PlcConnectionExported` stores `machine_id`, `row_version`, the schema version, and the reference number of the recipe (ADR-0154 (j)).
+- `PlcConnectionSet` stores the full `plc_connection` row without `password_sealed`. It adds `password_set` and `password_changed` to the full row (ADR-0154 (h)).
+- `password_set` tells whether the row holds a ciphertext. `password_changed` tells whether the command wrote a new ciphertext or set the column to `NULL`.
 - A unit export (document v2) adds two keys to the `after_state` of `VersionExported`. `scope_unit_path` holds the `UnitPath` of the request. `scope_sha256` holds the hash of the scope hashed body. The key for the schema version holds `"2"` (ADR-0109 (ab)). An export of the whole version has neither key.
-- An export with HTTP Basic has the `ExportClient` account as actor. `exported_by` holds its login. The entry holds no session reference, because the request has no session (ADR-0109 (mb)).
+- An export with HTTP Basic has the `ExportClient` account as actor. `exported_by` holds its login. The entry holds no session reference, because the request has no session (ADR-0109 (mb)). `PlcConnectionExported` follows the same actor rule and holds no session reference (ADR-0154 (j)).
 - `VersionApproved` adds `allow_outdated` to the full row.
 
 `aggregate_type` and `aggregate_id` per entity type:
@@ -2238,6 +2379,7 @@ State rule for `before_state` and `after_state` (the same rule as ADR-0005 and `
 | `recipe`, `recipe_version`, `parameter` | `recipe` | recipe id |
 | `app_user` | `app_user` | user id |
 | `app_setting` | `app_setting` | setting id |
+| `plc_connection` | `machine` | machine id |
 
 `entity_type` is the table name of the changed row, with one exception. A change of a `parameter_limit` row or a `parameter_translation` row writes `entity_type = 'parameter'` and `entity_id` = the parameter id. The diff names the leaf path of the limit or the language of the translation. `draft_editor` rows are not audited.
 

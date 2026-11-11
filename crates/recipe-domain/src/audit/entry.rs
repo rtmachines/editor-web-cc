@@ -115,7 +115,7 @@ impl AuditEntry {
 
     /// Build the entry of an action that stores a specific state object.
     ///
-    /// `UserLoggedOut` puts the state in `before`. The other two put it in `after`.
+    /// `UserLoggedOut` puts the state in `before`. The other actions put it in `after`.
     #[must_use]
     pub fn state(
         action: StateAction,
@@ -125,7 +125,9 @@ impl AuditEntry {
     ) -> Self {
         let (before, after) = match action {
             StateAction::UserLoggedOut => (Some(state), None),
-            StateAction::UserLoggedIn | StateAction::VersionExported => (None, Some(state)),
+            StateAction::UserLoggedIn
+            | StateAction::VersionExported
+            | StateAction::PlcConnectionExported => (None, Some(state)),
         };
         Self::build(action.into(), target, before, after, context)
     }

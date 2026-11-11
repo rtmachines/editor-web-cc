@@ -4,7 +4,8 @@ use recipe_app::ports::{AuditEntityType, AuditFilter, AuditScope, EntityFilter, 
 use recipe_domain::audit::{AuditTarget, RowAction};
 use recipe_domain::identity::{Login, UserId};
 use recipe_domain::plant::{
-    MachineCode, MachineId, PlcType, PlcTypeId, StringKind, TypeName, UnitId, UnitPath,
+    MachineCode, MachineId, PlcConnectionId, PlcType, PlcTypeId, StringKind, TypeName, UnitId,
+    UnitPath,
 };
 use recipe_domain::recipe::{
     ParameterId, ParameterTag, RecipeId, RecipeVersionId, ReferenceNumber,
@@ -61,6 +62,10 @@ async fn each_label_comes_from_the_current_row(h: &dyn Harness) {
             AuditTarget::unit(machine, plant.unit),
         ),
         (RowAction::UdtDefined, AuditTarget::plc_type(machine, pump)),
+        (
+            RowAction::PlcConnectionSet,
+            AuditTarget::plc_connection(PlcConnectionId::from(free_id(0x5000)), machine),
+        ),
         (RowAction::RecipeRenamed, AuditTarget::recipe(recipe_id)),
         (
             RowAction::VersionCreated,
@@ -80,7 +85,7 @@ async fn each_label_comes_from_the_current_row(h: &dyn Harness) {
 }
 
 /// The label of each entity type that `each_label_comes_from_the_current_row` seeds.
-fn expected_labels() -> [(AuditEntityType, EntityLabel); 7] {
+fn expected_labels() -> [(AuditEntityType, EntityLabel); 8] {
     [
         (
             AuditEntityType::Machine,
@@ -96,6 +101,10 @@ fn expected_labels() -> [(AuditEntityType, EntityLabel); 7] {
                 name: TypeName::parse("Pump").unwrap(),
                 revision: 1,
             },
+        ),
+        (
+            AuditEntityType::PlcConnection,
+            EntityLabel::Machine(MachineCode::parse("M50").unwrap()),
         ),
         (
             AuditEntityType::Recipe,
@@ -177,7 +186,7 @@ fn gone_targets(
     machine: MachineId,
     array: PlcTypeId,
     string: PlcTypeId,
-) -> [(RowAction, AuditTarget); 8] {
+) -> [(RowAction, AuditTarget); 9] {
     let (recipe, machine_gone) = (RecipeId::from(gone(4)), MachineId::from(gone(1)));
     [
         (
@@ -195,6 +204,10 @@ fn gone_targets(
         (
             RowAction::DerivedTypeCreated,
             AuditTarget::plc_type(machine, string),
+        ),
+        (
+            RowAction::PlcConnectionSet,
+            AuditTarget::plc_connection(PlcConnectionId::from(gone(8)), machine_gone),
         ),
         (RowAction::RecipeRenamed, AuditTarget::recipe(recipe)),
         (

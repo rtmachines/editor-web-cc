@@ -30,7 +30,7 @@ const ROLES: [Role; 4] = [
 /// One row per operation of `api.md` section 3.3, in the order of `Operation::ALL`.
 ///
 /// The columns are Administrator, ProcessEngineer, Operator, and ExportClient.
-const MATRIX: [(Operation, [Access; 4]); 69] = [
+const MATRIX: [(Operation, [Access; 4]); 72] = [
     (Operation::CreateMachine, [Allowed, Allowed, Denied, Denied]),
     (Operation::RenameMachine, [Allowed, Allowed, Denied, Denied]),
     (
@@ -41,6 +41,10 @@ const MATRIX: [(Operation, [Access; 4]); 69] = [
     (Operation::RenameUnit, [Allowed, Allowed, Denied, Denied]),
     (Operation::ArchiveUnit, [Allowed, Allowed, Denied, Denied]),
     (Operation::DefineUdt, [Allowed, Allowed, Denied, Denied]),
+    (
+        Operation::SetPlcConnection,
+        [Allowed, Allowed, Denied, Denied],
+    ),
     (Operation::CreateRecipe, [Allowed, Allowed, Denied, Denied]),
     (Operation::RenameRecipe, [Allowed, Allowed, Denied, Denied]),
     (Operation::DeleteRecipe, [Allowed, Allowed, Denied, Denied]),
@@ -97,6 +101,10 @@ const MATRIX: [(Operation, [Access; 4]); 69] = [
     (
         Operation::ExportVersionByNumber,
         [Allowed, Allowed, Denied, Denied],
+    ),
+    (
+        Operation::ExportPlcConnection,
+        [Allowed, Allowed, Allowed, Allowed],
     ),
     (Operation::ListMachines, [Allowed, Allowed, Allowed, Denied]),
     (Operation::GetMachine, [Allowed, Allowed, Allowed, Denied]),
@@ -171,6 +179,10 @@ const MATRIX: [(Operation, [Access; 4]); 69] = [
     (
         Operation::GetOwnPasswordForm,
         [Allowed, Allowed, Allowed, Denied],
+    ),
+    (
+        Operation::GetPlcConnectionForm,
+        [Allowed, Allowed, Denied, Denied],
     ),
 ];
 
@@ -258,8 +270,8 @@ const PURPOSES: [(Operation, Operation, Permission); 16] = [
     ),
 ];
 
-/// The 30 commands that stop in read-only mode (Assumption A24, design D7).
-const STOPPED_IN_READ_ONLY: [Operation; 30] = [
+/// The 31 commands that stop in read-only mode (Assumption A24, design D7).
+const STOPPED_IN_READ_ONLY: [Operation; 31] = [
     Operation::CreateMachine,
     Operation::RenameMachine,
     Operation::ArchiveMachine,
@@ -267,6 +279,7 @@ const STOPPED_IN_READ_ONLY: [Operation; 30] = [
     Operation::RenameUnit,
     Operation::ArchiveUnit,
     Operation::DefineUdt,
+    Operation::SetPlcConnection,
     Operation::CreateRecipe,
     Operation::RenameRecipe,
     Operation::DeleteRecipe,
@@ -293,11 +306,12 @@ const STOPPED_IN_READ_ONLY: [Operation; 30] = [
 ];
 
 /// The commands that still run in read-only mode.
-const RUNS_IN_READ_ONLY: [Operation; 4] = [
+const RUNS_IN_READ_ONLY: [Operation; 5] = [
     Operation::Login,
     Operation::Logout,
     Operation::ExportApprovedVersion,
     Operation::ExportVersionByNumber,
+    Operation::ExportPlcConnection,
 ];
 
 /// Return true when `result` and the number of events match the expected access.

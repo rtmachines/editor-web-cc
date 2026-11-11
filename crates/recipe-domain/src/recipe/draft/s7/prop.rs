@@ -20,11 +20,12 @@ const MAX_PARAMETERS: usize = 12;
 const MAX_GAP: u32 = 4;
 /// Size of a data block in bytes (ADR-0116). A generated address plus its size stays within it.
 const DATA_BLOCK_SIZE: u32 = 65_536;
-/// Largest data block number on an S7-300 (ADR-0116). The generators use data block 1 only.
-const S7_300_MAX_DATA_BLOCK: u32 = 16_000;
-/// The data block of every generated address.
-const GENERATED_DATA_BLOCK: u32 = 1;
-const _: () = assert!(GENERATED_DATA_BLOCK >= 1 && GENERATED_DATA_BLOCK <= S7_300_MAX_DATA_BLOCK);
+/// The data block of every generated address. It stays within the limit of an S7-300 (ADR-0116).
+const GENERATED_DATA_BLOCK: u16 = 1;
+const _: () = assert!(match PlcPlatform::S7_300.max_data_block() {
+    Some(max) => GENERATED_DATA_BLOCK >= 1 && GENERATED_DATA_BLOCK <= max,
+    None => false,
+});
 
 /// The kinds of parameter in a generated set. Each kind has its own S7 size.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

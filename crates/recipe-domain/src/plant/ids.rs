@@ -76,5 +76,29 @@ impl fmt::Display for PlcTypeId {
     }
 }
 
+/// Stable identity of a PLC connection record (data-model.md section 3.18).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PlcConnectionId(Uuid);
+
+impl From<Uuid> for PlcConnectionId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl PlcConnectionId {
+    /// Return the UUID of this identifier.
+    #[must_use]
+    pub const fn as_uuid(&self) -> &Uuid {
+        &self.0
+    }
+}
+
+impl fmt::Display for PlcConnectionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -52,14 +52,17 @@ pub enum StateAction {
     UserLoggedOut,
     /// A version was exported. The state goes in `after`.
     VersionExported,
+    /// A PLC connection document was exported. The state goes in `after`.
+    PlcConnectionExported,
 }
 
 impl StateAction {
     /// Every state action.
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self::UserLoggedIn,
         Self::UserLoggedOut,
         Self::VersionExported,
+        Self::PlcConnectionExported,
     ];
 }
 
@@ -69,6 +72,7 @@ impl From<StateAction> for AuditAction {
             StateAction::UserLoggedIn => Self::UserLoggedIn,
             StateAction::UserLoggedOut => Self::UserLoggedOut,
             StateAction::VersionExported => Self::VersionExported,
+            StateAction::PlcConnectionExported => Self::PlcConnectionExported,
         }
     }
 }
@@ -92,6 +96,8 @@ pub enum RowAction {
     UdtDefined,
     /// A derived type was created by the internal operation.
     DerivedTypeCreated,
+    /// The PLC connection record of a machine was created or changed.
+    PlcConnectionSet,
     /// A recipe was created.
     RecipeCreated,
     /// A recipe was renamed.
@@ -134,7 +140,7 @@ pub enum RowAction {
 
 impl RowAction {
     /// Every row action.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::MachineCreated,
         Self::MachineRenamed,
         Self::MachineArchived,
@@ -143,6 +149,7 @@ impl RowAction {
         Self::UnitArchived,
         Self::UdtDefined,
         Self::DerivedTypeCreated,
+        Self::PlcConnectionSet,
         Self::RecipeCreated,
         Self::RecipeRenamed,
         Self::RecipeDeleted,
@@ -176,6 +183,7 @@ impl From<RowAction> for AuditAction {
             RowAction::UnitArchived => Self::UnitArchived,
             RowAction::UdtDefined => Self::UdtDefined,
             RowAction::DerivedTypeCreated => Self::DerivedTypeCreated,
+            RowAction::PlcConnectionSet => Self::PlcConnectionSet,
             RowAction::RecipeCreated => Self::RecipeCreated,
             RowAction::RecipeRenamed => Self::RecipeRenamed,
             RowAction::RecipeDeleted => Self::RecipeDeleted,

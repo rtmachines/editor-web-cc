@@ -272,6 +272,77 @@ Rules:
 
 Examples: `T#1d2h3m4s5ms` is the count `93784005`. `TOD#12:30:00.500` is `45000500`. `D#2026-10-12` is `20738`. `DT#2026-10-12-12:30:00` is `1791808200`.
 
+**PLC connection record** (entity inside `Machine`, ADR-0154)
+
+A machine has at most one PLC connection record. The record holds the settings that an external adapter needs for the controller of the machine. The editor never opens a connection to a PLC (Assumption A47).
+
+| Field | Type | Rule |
+|---|---|---|
+| `machine` | `MachineId` | One record per machine. The platform of the record is the platform of the machine |
+| `connection` | `PlcConnection` | The fields of the platform (below) |
+| `password` | sealed `PlcPassword` or none | AES-256-GCM ciphertext, with the machine id as the associated data (ADR-0154 (g)). Only a record with credentials holds it |
+| `row_version` | `i64` | Starts at 1. A machine without a record has `row_version` 0 (ADR-0154 (i)) |
+
+Value objects of the record. Each one has one `parse`. A reason type owns no code. `recipe-web` wraps a reason into `E-WEB-008` with a line under the field (`reliability.md` 1.1).
+
+| Value object | Grammar | Reason type |
+|---|---|---|
+| `PlcHost` | An IPv4 address in dotted decimal form, or an RFC 1123 host name of at most 253 characters. A text of digits and dots only must be an IPv4 address | `HostReason` |
+| `Rack` | `0..=7` | `RangeReason` |
+| `Slot` | `0..=31` | `RangeReason` |
+| `DataBlockNumber` | `1..=65535`. The platform rule below narrows the range | `RangeReason` |
+| `TcpPort` | `1..=65535` | `RangeReason` |
+| `PlcAddress` | 1 to 200 characters, no control character | `ConnectionTextReason` |
+| `AmsNetId` | Six numbers `0..=255` with a dot between two numbers. A number has no leading zero | `AmsNetIdReason` |
+| `CommMode` | `Ads`, `OpcUa`, `CodesysV3`, `ModbusTcp` | `ModeReason` |
+| `PlcLogin` | 1 to 64 characters, no control character | `ConnectionTextReason` |
+| `PlcPassword` | 1 to 128 characters | `ConnectionTextReason` |
+
+Rules of the value objects:
+
+- `PlcHost` refuses an IPv6 address and an IPv4 number with a leading zero (`010.0.0.1`). It also refuses fewer than four numbers (`1.2.3`) and a trailing dot (`plc.local.`).
+- A label of a host name has at most 63 characters. It does not start or end with a hyphen.
+- `PlcLogin` is not a secret. The page and the audit entry show it.
+- `PlcPassword` has a hand-written `Debug` that prints `PlcPassword(<redacted>)`. It has no `Display`, no `Serialize`, and no `Clone`. It clears its buffer on drop.
+- The password never appears in HTML, a form value, an audit entry, a log line, an error, or `Debug` output (ADR-0154 (h)). Only the connection document of `api.md` 6.5 holds it.
+
+`PlcConnection` (value object, enum) has one shape for each platform family (ADR-0154 (c)):
+
+| Shape | Platforms | Fields |
+|---|---|---|
+| `S7` | `S7_300`, `S7_1200`, `S7_1500` | `host`, `rack`, `slot`, `db_number` |
+| `Iec` | `CodesysIec`, `TwinCat3` | `host`, `port`, `address`, `mode`, optional `login`, and the password |
+
+`PlcConnection::for_platform(machine, platform, fields, stored)` is the one constructor. `machine` names the machine in each error. `fields` holds an optional parsed value of each field. `stored` tells whether the record holds a password. The result holds the `PlcConnection` and a `PasswordPlan`.
+
+The constructor checks in this order and lists every fault in one `PlantErrors` (ADR-0041):
+
+1. A field with a value that the platform does not use is `E-PLT-022 ConnectionFieldNotOnPlatform`.
+2. A required field without a value is `E-PLT-023 ConnectionFieldMissing`. A data block number above the limit of the platform is `E-PLT-024 ConnectionDataBlockOutOfRange`.
+3. A mode that the platform does not permit is `E-PLT-025 CommModeNotOnPlatform`. The mode `Ads` with an address that is not an `AmsNetId` is `E-PLT-026 AddressNotAmsNetId`.
+4. A login or a password that the mode does not permit is `E-PLT-028 ConnectionFieldNotInMode`.
+
+Rules of the platform shape:
+
+- An empty field text is no value. `recipe-web` turns it into no value before `parse`. An empty field of the other shape has no effect.
+- The data block limit is the data block rule of `S7Address`. `PlcPlatform::max_data_block` holds the two limits and gives none on `CodesysIec` and `TwinCat3` (ADR-0154 (d)).
+- `db_number` is the default data block for a parameter without `s7_address`. It never changes the address of a parameter.
+- Modes of the platform (ADR-0154 (e)). `CodesysIec` permits `OpcUa`, `CodesysV3`, and `ModbusTcp`. `TwinCat3` permits `Ads`, `OpcUa`, and `ModbusTcp`.
+
+Credentials of the mode (ADR-0154 (ea)):
+
+| Platform and mode | Login | Password |
+|---|---|---|
+| `S7_300`, `S7_1200`, `S7_1500` | Refused, `E-PLT-022` | Refused, `E-PLT-022` |
+| `OpcUa`, `CodesysV3` | Required, `E-PLT-023` | Required: a new password or a stored one, `E-PLT-023` |
+| `Ads` | Optional | With a login: as `OpcUa`. Without a login: refused, `E-PLT-023` for `login` |
+| `ModbusTcp` | Refused, `E-PLT-028` | Refused, `E-PLT-028` |
+
+`PasswordPlan` (value object, enum) is `Keep`, `Replace(PlcPassword)`, or `Clear`:
+
+- An empty password field with a stored password gives `Keep`. A new password gives `Replace`.
+- A mode without credentials gives `Clear`. The command then deletes the stored ciphertext. An S7 record never holds a password.
+
 ### 2.2 Recipe Management
 
 **Recipe** (entity, aggregate root)
@@ -557,15 +628,16 @@ Rules:
 
 ## 5. Domain operations
 
-Each command is one use case in `recipe-app`. There are 33 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060).
+Each command is one use case in `recipe-app`. There are 35 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060).
 
-Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, and `ExportVersion` returns `E-WEB-006` and writes nothing.
+Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, `ExportVersion`, and `ExportPlcConnection` returns `E-WEB-006` and writes nothing (ADR-0154 (l)).
 
 Each command runs in one READ COMMITTED transaction, except `Login` and `ChangeOwnPassword`. `Login` and `ChangeOwnPassword` use two transactions, T1 and T2 (ADR-0035 (b)). The bootstrap of `create-admin` is the one SERIALIZABLE command (ADR-0096 (h)).
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
-- `RenameMachine`, `ArchiveMachine`, `RenameUnit`, and `ArchiveUnit` take `machine FOR NO KEY UPDATE` first.
+- `RenameMachine`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` take `machine FOR NO KEY UPDATE` first.
+- `SetPlcConnection` then takes `plc_connection FOR UPDATE`. `ExportPlcConnection` takes `machine FOR SHARE` and then `plc_connection FOR SHARE` (ADR-0154).
 - `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` take `machine FOR SHARE` first. `DefineUdt` then takes the advisory locks of section 5.1.
 - A recipe command reads `recipe.machine_id` without a lock before it locks the machine. The column never changes.
 - Every recipe command except `CreateRecipe` then takes `recipe FOR UPDATE` and requires `deleted_at IS NULL`. `RestoreRecipe` requires `deleted_at IS NOT NULL`. A draft command then takes `recipe_version FOR UPDATE`.
@@ -579,7 +651,7 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 
 | Port | Operations |
 |---|---|
-| `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). The startup settings comparison `CompareSettings` (`SettingChanged`, `actor = None`). It writes the rows of `app_setting` through `SettingRepository` of the transaction, also in read-only mode (ADR-0061 (e)). The subcommand `create-admin` (`UserCreated`, `actor = None`) |
+| `UnitOfWork::commit(NonEmpty<AuditEntry>)` | Every command of sections 5.1 to 5.4, except the `Login` steps and the `UnlockLogin` step below. `Login` T2 on success (`UserLoggedIn`). `Logout` (`UserLoggedOut`). `ExportVersion` (`VersionExported`). `ExportPlcConnection` (`PlcConnectionExported`). The startup settings comparison `CompareSettings` (`SettingChanged`, `actor = None`). It writes the rows of `app_setting` through `SettingRepository` of the transaction, also in read-only mode (ADR-0061 (e)). The subcommand `create-admin` (`UserCreated`, `actor = None`) |
 | `SecurityEventSink::record(SecurityEvent)` | Its own short transaction, with no audit entry. `Login` T2 on failure, a throttled `Login`, a `Forbidden` result, a CSRF rejection, the `unlock` event after the commit of `UnlockLogin`, and the job `audit_chain_check`. A failed or throttled Basic check also writes its row (ADR-0109 (m)). The row `audit_chain_broken` of that job holds the `request_id` of the run (ADR-0060 (s)). An aggregated kind increments `count` (section 2.4). A failed or throttled `Login` writes its row also in read-only mode. A lost `unlock` event does not fail `UnlockLogin` (ADR-0130). |
 | `LoginAttemptStore` | `Login` T1 counts the failures and inserts the attempt under the advisory lock, below the per-IP budget, also in read-only mode. `Login` T2 on success marks the attempt inside the `UnitOfWork` transaction. T2 of the Basic check (`confirm_basic`) marks the attempt without a `UnitOfWork`. It writes no audit entry, creates no session, and runs also in read-only mode (ADR-0109 (m)). A wrong current password in `ChangeOwnPassword` also inserts an attempt |
 | `MaintenanceStore` | The job `cleanup`. It deletes expired sessions and old `login_attempt` rows in batches of `login_attempt.purge_batch`, and it calls `security_event_purge()` once per batch. `reliability.md` 2.4 gives the interval of each delete (ADR-0060 (l)). The job `audit_chain_check` records `audit.last_check_seq` and `audit.last_check_at` in `app_setting`. The job `heartbeat` records `heartbeat.last_at` in `app_setting`. No audit entry |
@@ -610,6 +682,9 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 | `RenameUnit` | Machine | New `name`. Locks: `machine FOR NO KEY UPDATE`, then the unit `FOR UPDATE` | `E-PLT-009 UnitArchived` |
 | `ArchiveUnit` | Machine | `archived_at` on the unit and its descendants. Locks: `machine FOR NO KEY UPDATE`, then the unit rows `FOR UPDATE` in `id` order. Two archives on one machine therefore run one after the other | `E-PLT-008 LastMainUnit`, `E-PLT-009 UnitArchived` (the unit is already archived, ADR-0029), `E-PLT-012 UnitReferencedByDraft`, `E-PLT-014 UnitReferencedByApproved` |
 | `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory locks of class 2 in the order below | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge`, `E-PLT-021 DuplicateMemberName` |
+| `SetPlcConnection` | Machine | New or changed PLC connection record (section 2.1). The `row_version` compare treats no record as 0. Locks: `machine FOR NO KEY UPDATE`, then `plc_connection FOR UPDATE`. Audit entry `PlcConnectionSet` without the password and the ciphertext | `E-PLT-010 MachineArchived`, `E-PLT-022 ConnectionFieldNotOnPlatform`, `E-PLT-023 ConnectionFieldMissing`, `E-PLT-024 ConnectionDataBlockOutOfRange`, `E-PLT-025 CommModeNotOnPlatform`, `E-PLT-026 AddressNotAmsNetId`, `E-PLT-028 ConnectionFieldNotInMode`, `E-WEB-011 TaskFailed` (seal of the password), `E-WEB-013 ConnectionConcurrentEdit` |
+
+`SetPlcConnection` runs `PlcConnection::for_platform` and seals a new password before its transaction (`reliability.md` 7.4). It reads the platform and the password state without a lock, because the platform of a machine never changes. The `row_version` compare inside the transaction proves that the password state did not change (ADR-0154 (i)).
 
 `EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row.
 
@@ -680,6 +755,7 @@ A command first parses every `TypeExpr` that it carries and collects the keys th
 | Command | Aggregate | Result | Errors |
 |---|---|---|---|
 | `ExportVersion` | read model | Export document. `loadable` is `true` only when the version is `Approved` and no value, limit, or address breaks a current rule (ADR-0119 (c)). Audit entry `VersionExported` | `E-EXP-001 NoApprovedVersion`, `E-EXP-002 ContentHashMismatch`, `E-EXP-003 VersionNotExportable` (draft or discarded), `E-EXP-004 Serialize`, `E-EXP-005 EmptyScope` (unit scope, ADR-0109 (x)), `E-RCP-012 RecipeDeleted` (`/versions/{n}` of a deleted recipe), `E-WEB-009 Timeout` (export) |
+| `ExportPlcConnection` | read model | Connection document with the password (`api.md` 6.5). The recipe must belong to the machine. The audit entry `PlcConnectionExported` commits before the answer and holds no password (ADR-0154 (j) to (jb)) | `E-PLT-010 MachineArchived`, `E-PLT-027 ConnectionNotConfigured`, `E-PLT-029 ConnectionRecipeMismatch`, `E-WEB-009 Timeout` (export), `E-WEB-014 SecretUnreadable` |
 
 ### 5.5 Queries
 
@@ -697,6 +773,7 @@ A query is a use case. It checks its permission first and writes no audit entry.
 | `ListSecurityEvents` | `AuditView` |
 | `GetOwnProfile` (`/me`) | authenticated |
 | `GetMachineForm` | `MachineManage` |
+| `GetPlcConnectionForm` (ADR-0154) | `MachineManage` |
 | `GetUnitForm` | `UnitManage` |
 | `GetUdtForm` | `UdtManage` |
 | `GetRecipeForm` | `RecipeCreate` for the purpose `CreateRecipe`, `RecipeEdit` for the purpose `RenameRecipe` (ADR-0046) |
@@ -707,7 +784,7 @@ A query is a use case. It checks its permission first and writes no audit entry.
 | `GetLoginForm` (`/login`) | none. It needs no session, like `Login` |
 | `GetOwnPasswordForm` (`/me/password`) | authenticated, like `ChangeOwnPassword` |
 
-Every form and preview route is a query with the permission of the command that it prepares. The last ten rows are these queries. The HTTP layer still only authenticates (`api.md` 3.2).
+Every form and preview route is a query with the permission of the command that it prepares. The last eleven rows are these queries. The HTTP layer still only authenticates (`api.md` 3.2).
 
 The input of a form query names the command that it serves, the purpose. The query checks the permission of that command (ADR-0046).
 
@@ -757,6 +834,7 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | Machine | One production machine with one PLC controller |
 | Unit | A part of a machine. Units form a tree of at most 5 levels |
 | PLC platform | The controller family that defines which data types exist |
+| PLC connection record | The settings that an external adapter needs for the controller of one machine. At most one per machine. The editor stores them and never connects to a PLC (ADR-0154) |
 | Struct (UDT) | User-defined type. Immutable per revision |
 | Derived type | A sized string or an array type created on demand for one machine |
 | Revision | One immutable version of a struct. A new revision supersedes the old one |
@@ -786,7 +864,7 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A7 | A recipe has at most one `Draft` at a time |
 | A17 | The UI supports `pl` and `en`. The plain cookie `recipe_lang` stores the UI language. The session does not store it. `POST /lang` sets the cookie, also before login. Parameter translations accept language codes `^[a-z]{2,3}(-[A-Z]{2})?$` |
 | A22 | Login throttling is a progressive delay per (login, client IP) and a per-IP budget. There is no permanent lockout. An Administrator can unlock a login |
-| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. A failed measurement of the free space also turns the mode on. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, `VersionExported`, and the `SettingChanged` entries of the startup settings comparison. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 %. Only a measurement that succeeds can end the mode |
+| A24 | When free space on the data volume is below 5 %, the application enters read-only mode. A failed measurement of the free space also turns the mode on. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, `VersionExported`, `PlcConnectionExported`, and the `SettingChanged` entries of the startup settings comparison. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 %. Only a measurement that succeeds can end the mode |
 | A25 | One installation serves one production line. The draft's "production line" has no entity |
 | A26 | Size budgets: 16 384 leaves per parameter, 262 144 leaves and 32 768 limit rows per version, 4 000 parameters per version |
 | A27 | A reference number matches `[A-Z0-9][A-Z0-9_-]{0,49}`. Input is folded to upper case |
@@ -805,3 +883,4 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A43 | A time value is an integer count of a base unit. TIME, S5TIME and TIME_OF_DAY count milliseconds. LTIME, LDATE, LTOD, LDT and DTL count nanoseconds. DATE counts days, and DATE_AND_TIME counts whole seconds. DATE, LDATE, DATE_AND_TIME, LDT and DTL count from 1970-01-01. TIME_OF_DAY and LTOD count from midnight. The UI shows IEC literals |
 | A45 | A technical account with the role `ExportClient` exports `Approved` versions for a transfer client with HTTP Basic. It holds only `VersionExport`. It cannot log in to the UI, and no person uses it. The three roles of R22 stay the roles of persons |
 | A46 | Every `TwinCat3` machine runs TwinCAT 3.1.4026.0 or later. `LDATE`, `LTOD`, and `LDT` need this version. The editor does not check the version. The runbook names the check before a plant adds a `TwinCat3` machine |
+| A47 | The editor stores the PLC connection settings of each machine for an external adapter. It never opens a connection to a PLC. No crate holds a PLC protocol client. AES-256-GCM encrypts the password at rest |

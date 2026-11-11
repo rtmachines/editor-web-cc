@@ -172,6 +172,9 @@ fn app_args(args: &mut FluentArgs<'static>, error: &AppError, ctx: &ErrorContext
             args.set("reference", reference.to_string());
             args.set("number", number.to_string());
         }
+        AppError::ConnectionConcurrentEdit { code, .. } | AppError::SecretUnreadable { code } => {
+            args.set("code", code.to_string());
+        }
         AppError::Recipe(recipe) => {
             for (name, arg) in recipe_line_args(recipe) {
                 args.set(name, arg.text(bundles, ctx.lang));

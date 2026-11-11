@@ -63,6 +63,20 @@ impl PlcPlatform {
         }
     }
 
+    /// Return the highest data block number of this platform, or `None` when the platform has
+    /// no S7 data blocks.
+    ///
+    /// The number is 16000 on `S7_300` (ADR-0116 (c)) and 59999 on `S7_1200` and `S7_1500`
+    /// (ADR-0140 (a)). The number is a fact of the platform family, not a setting.
+    #[must_use]
+    pub const fn max_data_block(self) -> Option<u16> {
+        match self {
+            Self::S7_300 => Some(16_000),
+            Self::S7_1200 | Self::S7_1500 => Some(59_999),
+            Self::CodesysIec | Self::TwinCat3 => None,
+        }
+    }
+
     /// Return the SQL value of this platform.
     #[must_use]
     pub const fn as_str(self) -> &'static str {

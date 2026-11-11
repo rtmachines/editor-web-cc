@@ -24,8 +24,8 @@ pub(crate) struct FieldLine {
 /// use one name, so the `id` of an input is the name of its form, for example `machine_name`.
 /// The recipe pages add the field ids of design D6. The audit list and the security events add the
 /// visible filter inputs of ADR-0051. A hidden field has no entry. A line of `WebError::BadQuery`
-/// never links (ADR-0050 (e)).
-const INPUT_FIELDS: [&str; 38] = [
+/// never links (ADR-0050 (e)). The connection form adds its inputs (ADR-0154).
+const INPUT_FIELDS: [&str; 45] = [
     "login",
     "password",
     "current_password",
@@ -64,6 +64,13 @@ const INPUT_FIELDS: [&str; 38] = [
     "to",
     "kind",
     "client_ip",
+    "host",
+    "rack",
+    "slot",
+    "db_number",
+    "port",
+    "address",
+    "comm_mode",
 ];
 
 /// The name of the list of member rows. The list is a `fieldset`, so it has no input of its own.

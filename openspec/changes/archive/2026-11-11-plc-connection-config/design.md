@@ -36,9 +36,10 @@ Columns: `id`, `machine_id`, `plc_platform`, `host`, `rack`, `slot`, `db_number`
 - `CHECK plc_connection_shape`: an S7 row has `rack`, `slot`, `db_number` and no IEC column. An IEC row has `port`, `address`, `comm_mode` and no S7 column.
 - `CHECK plc_connection_credentials`: `login` and `password_sealed` are both null or both set. `OpcUa` and `CodesysV3` need both. `ModbusTcp` permits neither. An S7 row has neither.
 - Range checks mirror the value objects: rack `0..7`, slot `0..31`, `db_number` by platform, port `1..65535`, `comm_mode` by platform, text lengths of `data-model.md` §1.3.
+- The database also mirrors the text grammars. A `CHECK` on `host` enforces the host format of `PlcHost`. A `CHECK` on `address` and on `login` refuses a control character. A `CHECK` on `address` enforces the AMS Net ID format when `comm_mode` is `Ads`.
 - `BEFORE UPDATE` trigger `plc_connection_a_bump` runs `bump_row_version`.
 - No trigger code is new. A check violation maps to `E-DB-003`, because the domain refuses the value first.
-- Grants: `SELECT`, `INSERT`, and column `UPDATE` on the eleven value columns for `recipe_app`. No `DELETE`. No `UPDATE` on `row_version`. The `UPDATE` grant permits `FOR UPDATE` and `FOR SHARE`.
+- Grants: `SELECT`, `INSERT`, and column `UPDATE` on the ten value columns for `recipe_app`. The ten columns are `host`, `rack`, `slot`, `db_number`, `port`, `address`, `comm_mode`, `login`, `password_sealed`, and `updated_at`. No `DELETE`. No `UPDATE` on `row_version`. The `UPDATE` grant permits `FOR UPDATE` and `FOR SHARE`.
 - The restore check compares each function, trigger, and grant with `deploy/pgtools/restore-code.expected` and `restore-roles.expected` (`reliability.md` §7.7). The migration therefore updates both files in the same change.
 - Alternative: columns on `machine`. Rejected: nine nullable columns on a hot table, and `machine` has no `row_version`.
 
@@ -51,11 +52,11 @@ Columns: `id`, `machine_id`, `plc_platform`, `host`, `rack`, `slot`, `db_number`
 | `Slot` | `0..=31` | `RangeReason` |
 | `DataBlockNumber` | `1..=65535`. The platform rule of D3 narrows it | `RangeReason` |
 | `TcpPort` | `1..=65535` | `RangeReason` |
-| `PlcAddress` | 1 to 200 characters, no control character | `TextReason` |
+| `PlcAddress` | 1 to 200 characters, no control character | `ConnectionTextReason` |
 | `AmsNetId` | six numbers `0..=255` with five dots | `AmsNetIdReason` |
 | `CommMode` | `Ads`, `OpcUa`, `CodesysV3`, `ModbusTcp` | `ModeReason` |
-| `PlcLogin` | 1 to 64 characters, no control character | `TextReason` |
-| `PlcPassword` | 1 to 128 characters | `TextReason` |
+| `PlcLogin` | 1 to 64 characters, no control character | `ConnectionTextReason` |
+| `PlcPassword` | 1 to 128 characters | `ConnectionTextReason` |
 
 - `PlcHost` refuses an IPv4 number with a leading zero (`010.0.0.1`) and fewer than four numbers (`1.2.3`). It also refuses a trailing dot (`plc.local.`), a label of more than 63 characters, and a hyphen at the start or end of a label.
 - A reason owns no code. `recipe-web` wraps it into `WebError::BadRequest`, which gives `E-WEB-008` with a line under the field (`reliability.md` §1.1).
@@ -73,7 +74,7 @@ pub enum PlcConnection {
 }
 ```
 
-- `PlcConnection::for_platform(platform, ConnectionFields, stored: PasswordState) -> Result<ConnectionPlan, PlantErrors>` is the one constructor. `ConnectionFields` holds an `Option` of each parsed value, the password included. `ConnectionPlan` holds the `PlcConnection` and a `PasswordPlan`.
+- `PlcConnection::for_platform(machine: MachineCode, platform, ConnectionFields, stored: PasswordState) -> Result<ConnectionPlan, PlantErrors>` is the one constructor. `machine` names the machine in each error. `ConnectionFields` holds an `Option` of each parsed value, the password included. `ConnectionPlan` holds the `PlcConnection` and a `PasswordPlan`.
 - The function checks in this order. First, a field not on the platform (`E-PLT-022`). Then a missing field (`E-PLT-023`) and the data block limit (`E-PLT-024`). Then the mode on the platform (`E-PLT-025`), the AMS Net ID for `Ads` (`E-PLT-026`), and the credentials of the mode (`E-PLT-028`). It collects every fault.
 - The data block limit is 16 000 on `S7_300` and 59 999 on `S7_1200` and `S7_1500` (ADR-0116 (c), ADR-0140 (a)). The two values are facts of the platform, not settings (ADR-0116 (h)).
 - `PlcPlatform::max_data_block() -> Option<u16>` holds the two limits. It gives `None` on `CodesysIec` and `TwinCat3`. The S7 address checks of `recipe/draft/s7.rs` and `s7/prop.rs` use it in place of their private constants.
@@ -120,7 +121,8 @@ The rows go into `reliability.md` §1.2 before the variants.
 - `CipherFault` is a reason without a code, as `WebhookFault`. The use case maps a failed `open` to `AppError::SecretUnreadable` and a failed `seal` to `AppError::TaskFailed { stage: Token }`.
 - The adapter `AesGcmCipher` lives in `recipe-server`, which loads the key. It uses the crate `aes-gcm` with a random nonce of 12 bytes for each `seal`.
 - Sealed form: one version byte `0x01`, the nonce, the ciphertext, and the tag. The associated data is the machine id, so a copied ciphertext does not open on another machine.
-- New setting `security.plc_credential_key_file` with the value `/run/secrets/plc_credential_key` and 32 bytes (`reliability.md` §7.11). The startup check refuses a missing file or a file of another size.
+- New setting `security.plc_credential_key_file` (`reliability.md` §7.11). Its value is `/run/secrets/plc_credential_key`. The file holds exactly one line. That line holds the 32 bytes of the key as 64 lower-case hex characters, as the other key files (`reliability.md` §7.1, ADR-0031, ADR-0035). A line feed at the end is permitted. There is no key ring.
+- The startup check refuses a missing file and a file with a second line. It also refuses a file with 62 or 66 hex characters or with a character that is not lower-case hex.
 - The startup check stays hard. The upgrade section of the runbook creates the key file before the new release. A check command of that section tests the file before `docker compose up`. `deploy/ci/prepare.sh` creates the file for CI.
 - Alternative: `pgcrypto` in the database. Rejected: the key would travel in SQL text and could reach the database log.
 
@@ -152,11 +154,13 @@ The rows go into `reliability.md` §1.2 before the variants.
 | POST | `/machines/{code}/connection` | `SetPlcConnection` | `MachineManage` |
 | GET | `/export/v1/machines/{code}/connection?recipe={ref}` | `ExportPlcConnection` | `VersionExport` |
 
+- A `409 E-WEB-013` answer uses the error fragment `error.html` in `#error-panel`. It shows the code, the sentence "Another user changed the connection. Reload the page.", and the `request_id`. It does not use `conflict.html`, because that fragment names a recipe version.
 - The machine page shows the record without the password, with a text "password stored" or "no password". `GetMachine` reads it with `RecipeView`.
 - The form shows only the fields of the platform. It has the hidden field `row_version` and `hx-sync="closest form:drop"`. The password input has `type="password"`, `autocomplete="new-password"`, and never a `value`.
 - A success answers `200` with the fragment and `HX-Trigger: {"rowVersion": <new>}`. A request without `HX-Request` gets `303` to `/machines/{code}`.
 - The request struct uses `#[serde(deny_unknown_fields)]` and holds every field of both shapes as an `Option<String>`. Thus a field of another platform with a value reaches the domain and gives `E-PLT-022`.
 - New `fluent` keys in the bundles `pl` and `en` for the labels, the ten messages, and the password state.
+- When the refused request held a password, the form shows a hint under the password input. The hint asks the user to type the password again.
 
 ### D9. Transfer route of the connection
 
@@ -170,10 +174,10 @@ The rows go into `reliability.md` §1.2 before the variants.
 Flow of `ExportPlcConnection` (`data-model.md` §6, as `ExportVersion`):
 
 1. Check `VersionExport`. Parse `{code}` and `recipe`.
-2. Take an `export.permits` permit. `timeout.export` covers the wait, the reads, the `open`, and the audit insert (`reliability.md` §7.4).
+2. Take an `export.permits` permit. `timeout.export` covers the wait, the reads, the locks, and the `open` (`reliability.md` §7.4).
 3. Transaction `READ COMMITTED`: `machine FOR SHARE`, read the recipe, then `plc_connection FOR SHARE`. Check the archive state, the recipe machine, and the record.
 4. Run `open`. A failure gives `500 E-WEB-014`, rolls back, and writes no entry.
-5. Insert `PlcConnectionExported` and commit. The commit runs after the limit, so a timeout never hides a committed entry.
+5. Insert `PlcConnectionExported` and commit. The audit insert and the commit run after the limit, so a timeout never hides a committed entry.
 6. Build the JSON body only after the commit. A failed audit insert or a timeout gives an error answer without the password.
 
 Change of the record. The connection document has no change marker, and a record change does not change `content_sha256`. The transfer client reads the document directly before each load and keeps no copy. `docs/ops/transfer-client.md` states this rule.

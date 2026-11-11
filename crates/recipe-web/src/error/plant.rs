@@ -87,6 +87,31 @@ fn data_fields(error: &PlantError) -> Vec<(&'static str, String)> {
         PlantError::TypeTooLarge { type_name, .. } => vec![("type_name", type_name.clone())],
         PlantError::DerivedTypeInvalid { type_expr, .. } => vec![("type_expr", type_expr.clone())],
         PlantError::InvalidUnitPath { text } => vec![("text", text.clone())],
+        PlantError::ConnectionFieldNotOnPlatform { code, field, .. }
+        | PlantError::ConnectionFieldMissing { code, field } => {
+            vec![("code", code.to_string()), ("field", (*field).to_owned())]
+        }
+        PlantError::ConnectionDataBlockOutOfRange { code, number, max } => vec![
+            ("code", code.to_string()),
+            ("number", number.to_string()),
+            ("max", max.to_string()),
+        ],
+        PlantError::CommModeNotOnPlatform { code, mode, .. } => {
+            vec![("code", code.to_string()), ("mode", mode.to_string())]
+        }
+        PlantError::AddressNotAmsNetId { code, address } => {
+            vec![("code", code.to_string()), ("address", address.to_string())]
+        }
+        PlantError::ConnectionNotConfigured { code } => vec![("code", code.to_string())],
+        PlantError::ConnectionFieldNotInMode { code, field, mode } => vec![
+            ("code", code.to_string()),
+            ("field", (*field).to_owned()),
+            ("mode", mode.to_string()),
+        ],
+        PlantError::ConnectionRecipeMismatch { code, reference } => vec![
+            ("code", code.to_string()),
+            ("reference", reference.to_string()),
+        ],
     }
 }
 
@@ -97,7 +122,9 @@ pub(super) fn plant_line_args(error: &PlantError) -> Vec<(&'static str, LineArg)
         .map(|(name, value)| (name, LineArg::Data(value)))
         .collect();
     match error {
-        PlantError::MemberTypeNotOnPlatform { platform, .. } => {
+        PlantError::MemberTypeNotOnPlatform { platform, .. }
+        | PlantError::ConnectionFieldNotOnPlatform { platform, .. }
+        | PlantError::CommModeNotOnPlatform { platform, .. } => {
             args.push(("platform", LineArg::word(platform_key(*platform), platform)));
         }
         PlantError::TypeTooLarge { limit, .. } => args.push(("limit", limit_word(*limit))),

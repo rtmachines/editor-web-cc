@@ -139,6 +139,7 @@ services:
       RECIPE_DB__APP_USER: recipe_app
       RECIPE_SECRETS__APP_PASSWORD_FILE: /run/secrets/app_password
       RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE: /run/secrets/login_hmac_key
+      RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE: /run/secrets/plc_credential_key
       RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE: /run/secrets/csrf_signing_key
       RECIPE_HTTP__TRUSTED_PROXIES: ${PROXY_ADDRESS:?}/32
       RECIPE_HTTP__PUBLIC_PORT: "8080"
@@ -162,6 +163,7 @@ services:
     secrets:
       - app_password
       - login_hmac_key
+      - plc_credential_key
       - csrf_signing_key
       - alerts_webhook_url
     read_only: true
@@ -449,6 +451,8 @@ secrets:
     file: ${RECIPE_SECRETS_DIR:?}/replicator_password
   login_hmac_key:
     file: ${RECIPE_SECRETS_DIR:?}/login_hmac_key
+  plc_credential_key:
+    file: ${RECIPE_SECRETS_DIR:?}/plc_credential_key
   csrf_signing_key:
     file: ${RECIPE_SECRETS_DIR:?}/csrf_signing_key
   alerts_webhook_url:
