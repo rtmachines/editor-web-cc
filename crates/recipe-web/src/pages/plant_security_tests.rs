@@ -27,13 +27,17 @@ const REVISION_BODY: &str = "members[0].name=a&members[0].type=INT";
 /// The same body with the button "Add a member".
 const REVISION_ADD_BODY: &str = "members[0].name=a&members[0].type=INT&add=1";
 /// Every `POST` route of the plant pages with a valid body, also the two routes with `add=1`.
-const COMMANDS: [(&str, &str); 10] = [
+const COMMANDS: [(&str, &str); 11] = [
     (
         "/machines",
         "code=M99&name=C&plc_platform=S7_300&main_unit_name=I",
     ),
     ("/machines/{code}/rename", "name=Renamed"),
     ("/machines/{code}/archive", ""),
+    (
+        "/machines/{code}/connection",
+        "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
+    ),
     (
         "/machines/{code}/units",
         "parent_path={path}&segment=5&name=Added",

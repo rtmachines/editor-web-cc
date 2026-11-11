@@ -4,8 +4,8 @@ use recipe_domain::identity::{Permission, Role};
 
 use super::*;
 
-/// The 33 commands of `domain-model.md` sections 5.1 to 5.4.
-const COMMAND_NAMES: [&str; 33] = [
+/// The 35 commands of `domain-model.md` sections 5.1 to 5.4.
+const COMMAND_NAMES: [&str; 35] = [
     "CreateMachine",
     "RenameMachine",
     "ArchiveMachine",
@@ -13,6 +13,7 @@ const COMMAND_NAMES: [&str; 33] = [
     "RenameUnit",
     "ArchiveUnit",
     "DefineUdt",
+    "SetPlcConnection",
     "CreateRecipe",
     "RenameRecipe",
     "DeleteRecipe",
@@ -39,10 +40,11 @@ const COMMAND_NAMES: [&str; 33] = [
     "ChangeOwnPassword",
     "UnlockLogin",
     "ExportVersion",
+    "ExportPlcConnection",
 ];
 
-/// The 33 queries of `domain-model.md` section 5.5.
-const QUERY_NAMES: [&str; 34] = [
+/// The 35 queries of `domain-model.md` section 5.5.
+const QUERY_NAMES: [&str; 35] = [
     "ListMachines",
     "GetMachine",
     "GetUnitTree",
@@ -77,13 +79,14 @@ const QUERY_NAMES: [&str; 34] = [
     "GetUserForm",
     "GetLoginForm",
     "GetOwnPasswordForm",
+    "GetPlcConnectionForm",
 ];
 
 /// One row per variant: variant, requirement, use case name, command flag.
 type Row = (Operation, Requirement, &'static str, bool);
 
 /// The pinned facts of every operation, in the order of `Operation::ALL`.
-const TABLE: [Row; 69] = [
+const TABLE: [Row; 72] = [
     (
         Operation::CreateMachine,
         Requirement::Permission(Permission::MachineManage),
@@ -124,6 +127,12 @@ const TABLE: [Row; 69] = [
         Operation::DefineUdt,
         Requirement::Permission(Permission::UdtManage),
         "DefineUdt",
+        true,
+    ),
+    (
+        Operation::SetPlcConnection,
+        Requirement::Permission(Permission::MachineManage),
+        "SetPlcConnection",
         true,
     ),
     (
@@ -281,6 +290,12 @@ const TABLE: [Row; 69] = [
         Operation::ExportVersionByNumber,
         Requirement::Permission(Permission::VersionExportHistory),
         "ExportVersion",
+        true,
+    ),
+    (
+        Operation::ExportPlcConnection,
+        Requirement::Permission(Permission::VersionExport),
+        "ExportPlcConnection",
         true,
     ),
     (
@@ -493,6 +508,12 @@ const TABLE: [Row; 69] = [
         "GetOwnPasswordForm",
         false,
     ),
+    (
+        Operation::GetPlcConnectionForm,
+        Requirement::Permission(Permission::MachineManage),
+        "GetPlcConnectionForm",
+        false,
+    ),
 ];
 
 #[test]
@@ -516,17 +537,17 @@ fn table_pins_requirement_name_and_command_flag_of_every_operation() {
 }
 
 #[test]
-fn catalog_has_69_distinct_operations() {
+fn catalog_has_72_distinct_operations() {
     let distinct: BTreeSet<Operation> = Operation::ALL.iter().copied().collect();
-    assert_eq!(Operation::ALL.len(), 69);
-    assert_eq!(distinct.len(), 69);
+    assert_eq!(Operation::ALL.len(), 72);
+    assert_eq!(distinct.len(), 72);
 }
 
 #[test]
 fn names_equal_the_commands_and_queries_of_the_domain_model() {
     let expected: BTreeSet<&str> = COMMAND_NAMES.iter().chain(&QUERY_NAMES).copied().collect();
     let actual: BTreeSet<&str> = Operation::ALL.iter().map(|op| op.name()).collect();
-    assert_eq!(expected.len(), 67);
+    assert_eq!(expected.len(), 70);
     assert_eq!(actual, expected);
 }
 
@@ -548,9 +569,9 @@ fn display_gives_the_use_case_name() {
 }
 
 #[test]
-fn exactly_34_variants_are_commands() {
+fn exactly_36_variants_are_commands() {
     let commands = Operation::ALL.iter().filter(|op| op.is_command()).count();
-    assert_eq!(commands, 34);
+    assert_eq!(commands, 36);
     let command_names: BTreeSet<&str> = Operation::ALL
         .iter()
         .filter(|op| op.is_command())
@@ -592,6 +613,10 @@ fn requirement_of_a_sample_matches_the_matrix() {
             Requirement::Permission(Permission::VersionExportHistory),
         ),
         (
+            Operation::ExportPlcConnection,
+            Requirement::Permission(Permission::VersionExport),
+        ),
+        (
             Operation::GetAuditEntry,
             Requirement::AnyOf(Permission::AuditView, Permission::AuditViewRecipes),
         ),
@@ -612,7 +637,7 @@ fn requirement_of_a_sample_matches_the_matrix() {
 }
 
 #[test]
-fn read_only_mode_runs_every_query_and_four_commands() {
+fn read_only_mode_runs_every_query_and_five_commands() {
     let allowed: BTreeSet<Operation> = Operation::ALL
         .iter()
         .copied()
@@ -624,9 +649,10 @@ fn read_only_mode_runs_every_query_and_four_commands() {
         Operation::Logout,
         Operation::ExportApprovedVersion,
         Operation::ExportVersionByNumber,
+        Operation::ExportPlcConnection,
     ];
     let expected: BTreeSet<Operation> = queries.chain(commands).collect();
-    assert_eq!(allowed.len(), 39);
+    assert_eq!(allowed.len(), 41);
     assert_eq!(allowed, expected);
 }
 

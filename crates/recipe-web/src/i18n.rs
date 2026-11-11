@@ -259,3 +259,6 @@ mod export_texts_tests;
 
 #[cfg(test)]
 mod data_safety_texts_tests;
+
+#[cfg(test)]
+mod connection_texts_tests;

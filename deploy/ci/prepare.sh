@@ -22,12 +22,12 @@ sudo install -d -o 999 -g 999 -m 0711 "$RECIPE_WALARCHIVE_DIR"
 sudo install -o 999 -g 999 -m 0600 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"
 sudo install -o 999 -g 999 -m 0600 /dev/null "$RECIPE_WALARCHIVE_DIR/.walarchive-marker"
 sudo install -d -o root -g root -m 0700 "$RECIPE_SECRETS_DIR"
-for name in postgres_password migrator_password app_password backup_password replicator_password login_hmac_key csrf_signing_key
+for name in postgres_password migrator_password app_password backup_password replicator_password login_hmac_key plc_credential_key csrf_signing_key
 do
   openssl rand -hex 32 | sudo tee "$RECIPE_SECRETS_DIR/$name" >/dev/null
   sudo chmod 0400 "$RECIPE_SECRETS_DIR/$name"
   case $name in
-    login_hmac_key|csrf_signing_key) sudo chown 65532:65532 "$RECIPE_SECRETS_DIR/$name" ;;
+    login_hmac_key|plc_credential_key|csrf_signing_key) sudo chown 65532:65532 "$RECIPE_SECRETS_DIR/$name" ;;
     *) sudo chown 999:999 "$RECIPE_SECRETS_DIR/$name" ;;
   esac
 done

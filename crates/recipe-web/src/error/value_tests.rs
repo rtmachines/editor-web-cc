@@ -123,8 +123,8 @@ fn values_every_field_reason_has_its_key_and_a_log_text() {
 }
 
 #[test]
-fn values_field_reason_all_lists_41_reasons_with_the_plant_reasons_at_11_to_19() {
-    assert_eq!(FieldReason::ALL.len(), 41);
+fn values_field_reason_all_lists_49_reasons_with_the_plant_reasons_at_11_to_19() {
+    assert_eq!(FieldReason::ALL.len(), 49);
     let tail = FieldReason::ALL.get(11..20).unwrap();
     let expected: Vec<FieldReason> = PLANT_REASON_KEYS
         .iter()

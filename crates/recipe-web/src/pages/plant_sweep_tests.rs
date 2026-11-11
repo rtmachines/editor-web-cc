@@ -30,6 +30,7 @@ const HX_LITERALS: [(&str, &[&str]); 7] = [
             "#unit-tree",
             "#machine-name",
             "#unit-name",
+            "#connection-status",
         ],
     ),
     ("hx-swap", &["innerHTML"]),
@@ -39,7 +40,7 @@ const HX_LITERALS: [(&str, &[&str]); 7] = [
     ("hx-history", &["false"]),
 ];
 /// The commands of the success answers: path, body, and the target of the HTMX request.
-const COMMANDS: [(&str, &str, &str); 5] = [
+const COMMANDS: [(&str, &str, &str); 6] = [
     ("/machines/M7/rename", "name=Renamed", "machine-name"),
     (
         "/machines/M7/units/U1.2/rename",
@@ -60,6 +61,11 @@ const COMMANDS: [(&str, &str, &str); 5] = [
         "/machines/M7/types/ST_Zone/revisions",
         "members[0].name=a&members[0].type=INT&add=1",
         "content",
+    ),
+    (
+        "/machines/M7/connection",
+        "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
+        "connection-status",
     ),
 ];
 
@@ -318,6 +324,10 @@ async fn plant_sweep_redirects_hold_no_token_and_send_the_csp() {
         (
             "/machines/M7/types",
             "name=ST_P&members[0].name=a&members[0].type=INT",
+        ),
+        (
+            "/machines/M7/connection",
+            "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
         ),
     ];
     for (path, body) in commands {

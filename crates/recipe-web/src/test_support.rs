@@ -25,7 +25,7 @@ use recipe_app::identity::{
     Argon2Hasher, Argon2Params, Authenticated, DeactivateUser, HashGate, IdentityContext,
     IdentitySettings, PasswordHasher as _, authenticate,
 };
-use recipe_app::memory::{MemoryClock, MemorySink, MemoryStore};
+use recipe_app::memory::{MemoryClock, MemoryCredentialCipher, MemorySink, MemoryStore};
 use recipe_app::ports::{NewSession, NewUser};
 use recipe_domain::audit::RequestId;
 use recipe_domain::identity::{
@@ -91,6 +91,8 @@ pub(crate) struct Fixture {
     pub(crate) store: MemoryStore,
     /// The sink that records the security events.
     pub(crate) sink: MemorySink,
+    /// The cipher of the PLC passwords. The state holds a clone, so a test sees each call.
+    pub(crate) cipher: MemoryCredentialCipher,
 }
 
 impl Fixture {
@@ -136,8 +138,16 @@ impl Fixture {
             KeyRing::parse(LOGIN_KEY).unwrap(),
             settings,
         );
-        let state = WebState::new(identity, web, KeyRing::parse(csrf_keys).unwrap()).unwrap();
-        Self { state, store, sink }
+        let cipher = MemoryCredentialCipher::default();
+        let state = WebState::new(identity, web, KeyRing::parse(csrf_keys).unwrap())
+            .unwrap()
+            .with_credential_cipher(Arc::new(cipher.clone()));
+        Self {
+            state,
+            store,
+            sink,
+            cipher,
+        }
     }
 
     /// Insert the user number `n` and one session of that user. Return the session.

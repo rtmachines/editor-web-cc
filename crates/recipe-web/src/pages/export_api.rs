@@ -1,4 +1,4 @@
-//! The three machine routes of the transfer client (`api.md` section 2.7, ADR-0109 (g), (h), (j),
+//! The four machine routes of the transfer client (`api.md` section 2.7, ADR-0109 (g), (h), (j),
 //! (w) to (ab)).
 //!
 //! All rows use HTTP Basic of an `ExportClient` account (`Access::Basic`). The layer
@@ -29,9 +29,9 @@ use crate::error::WebError;
 use crate::routes::{RouteEntry, basic_row};
 use crate::state::WebState;
 
-/// Return the route rows of the three machine routes.
+/// Return the route rows of the four machine routes.
 ///
-/// Both rows accept only `GET`. The access table gives a `HEAD` request on these paths the answer
+/// Each row accepts only `GET`. The access table gives a `HEAD` request on these paths the answer
 /// of an unlisted method (ADR-0054).
 pub(crate) fn rows() -> Vec<RouteEntry> {
     vec![
@@ -52,6 +52,12 @@ pub(crate) fn rows() -> Vec<RouteEntry> {
             "/export/v2/machines/{code}/recipes/{ref}/approved/units/{path}",
             Operation::ExportApprovedVersion,
             get(approved_unit),
+        ),
+        basic_row(
+            Method::GET,
+            "/export/v1/machines/{code}/connection",
+            Operation::ExportPlcConnection,
+            get(connection::connection),
         ),
     ]
 }
@@ -137,6 +143,11 @@ async fn approved_unit(
     named_file_answer(exported, &name, account.meta().request_id())
 }
 
+mod connection;
+#[cfg(test)]
+mod connection_tests;
+#[cfg(test)]
+mod document_leak_tests;
 #[cfg(test)]
 mod read_only_tests;
 #[cfg(test)]

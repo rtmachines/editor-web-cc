@@ -1,14 +1,20 @@
 //! Tests of the numbers and the overlay of the plan.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use recipe_domain::recipe::LangCode;
 use recipe_web::CidrList;
 
 use super::{Plan, ServeSettings, ShutdownSettings};
+use crate::credential_cipher::AesGcmCipher;
 use crate::serve::host::ListenerKind;
-use crate::serve::test_support::{configured, key_ring};
+use crate::serve::test_support::{configured, key_ring, test_cipher_key};
+
+fn cipher() -> Arc<AesGcmCipher> {
+    Arc::new(AesGcmCipher::new(&test_cipher_key()))
+}
 
 const fn seconds(count: u64) -> Duration {
     Duration::from_secs(count)
@@ -95,6 +101,7 @@ fn the_plan_takes_five_numbers_from_the_checked_configuration() {
         key_ring(),
         key_ring(),
         None,
+        cipher(),
         CidrList::default(),
         langs.clone(),
     );
@@ -112,6 +119,7 @@ fn the_plan_keeps_the_other_numbers_at_their_default() {
         key_ring(),
         key_ring(),
         None,
+        cipher(),
         CidrList::default(),
         Vec::new(),
     );

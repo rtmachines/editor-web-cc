@@ -9,6 +9,9 @@ mod audit_reads;
 mod backup_directory;
 mod check_results;
 mod clock;
+mod credential_cipher;
+#[cfg(test)]
+mod credential_cipher_tests;
 mod diff_reads;
 mod disk;
 mod document_writer;
@@ -20,6 +23,7 @@ mod nonempty;
 mod object_tests;
 mod operations_reads;
 mod plant;
+mod plc_connection;
 mod read_only;
 mod readiness;
 mod recipe;
@@ -54,6 +58,7 @@ pub use check_results::{
     CheckOutcome, CheckResult, CheckResultFault, CheckResults, ScheduledCheck,
 };
 pub use clock::Clock;
+pub use credential_cipher::{CipherFault, CredentialCipher, SealedSecret, seal_password};
 pub use diff_reads::{ChangeFlags, DiffReads, DiffSides};
 pub use disk::{DiskFault, DiskSpace, FreeSpace};
 pub use document_writer::DocumentWriter;
@@ -67,6 +72,7 @@ pub use operations_reads::{
     OperationsReads, OperationsSnapshot, ReplicationState, RoleCheck, SnapshotWindows,
 };
 pub use plant::{InsertedMachine, MachineFilter, MachineSummary, PlantRepository};
+pub use plc_connection::{PasswordWrite, PlcConnections, SharedConnection, StoredConnection};
 pub use read_only::ReadOnlySwitch;
 pub use readiness::{NotReadyCause, Readiness, ReadinessProbe};
 pub use recipe::{InsertedRecipe, NewVersion, RecipeRepository, SharedVersion};

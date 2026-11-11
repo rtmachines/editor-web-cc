@@ -8,8 +8,8 @@ use axum::body::to_bytes;
 use recipe_app::error::AppError;
 use recipe_domain::audit::RequestId;
 use recipe_domain::plant::{
-    DerivedTypeReason, MachineCode, MemberName, PlantError, PlcPlatform, TypeLimit, TypeName,
-    UnitPath,
+    CommMode, DerivedTypeReason, MachineCode, MemberName, PlantError, PlcAddress, PlcPlatform,
+    TypeLimit, TypeName, UnitPath,
 };
 use recipe_domain::recipe::ReferenceNumber;
 use uuid::Uuid;
@@ -345,5 +345,99 @@ async fn plant_error_args_write_each_platform_with_its_name_from_the_bundle() {
             let body = body_of(error.clone(), lang).await;
             assert!(body.contains(&format!("{text}.")), "{lang}: {body}");
         }
+    }
+}
+
+/// Return the arguments of `error` as the pairs of a name and a data text.
+///
+/// A word of the UI shows as the key of its bundle message.
+fn data_args(error: &PlantError) -> Vec<(&'static str, String)> {
+    plant_line_args(error)
+        .into_iter()
+        .map(|(name, arg)| match arg {
+            LineArg::Data(text) => (name, text),
+            LineArg::Word { key, .. } => (name, format!("word:{key}")),
+        })
+        .collect()
+}
+
+fn pairs(list: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
+    list.iter()
+        .map(|(name, text)| (*name, (*text).to_owned()))
+        .collect()
+}
+
+#[test]
+fn plant_error_args_give_each_connection_error_its_data() {
+    let address = PlcAddress::parse("plc-7").unwrap();
+    let cases = [
+        (
+            PlantError::ConnectionFieldNotOnPlatform {
+                code: code(),
+                field: "rack",
+                platform: PlcPlatform::TwinCat3,
+            },
+            pairs(&[
+                ("code", "M7"),
+                ("field", "rack"),
+                ("platform", "word:platform-twincat3"),
+            ]),
+        ),
+        (
+            PlantError::ConnectionFieldMissing {
+                code: code(),
+                field: "host",
+            },
+            pairs(&[("code", "M7"), ("field", "host")]),
+        ),
+        (
+            PlantError::ConnectionDataBlockOutOfRange {
+                code: code(),
+                number: 6_000,
+                max: 4_095,
+            },
+            pairs(&[("code", "M7"), ("number", "6000"), ("max", "4095")]),
+        ),
+        (
+            PlantError::CommModeNotOnPlatform {
+                code: code(),
+                mode: CommMode::Ads,
+                platform: PlcPlatform::S7_1500,
+            },
+            pairs(&[
+                ("code", "M7"),
+                ("mode", "Ads"),
+                ("platform", "word:platform-s7-1500"),
+            ]),
+        ),
+        (
+            PlantError::AddressNotAmsNetId {
+                code: code(),
+                address: address.clone(),
+            },
+            pairs(&[("code", "M7"), ("address", &address.to_string())]),
+        ),
+        (
+            PlantError::ConnectionNotConfigured { code: code() },
+            pairs(&[("code", "M7")]),
+        ),
+        (
+            PlantError::ConnectionFieldNotInMode {
+                code: code(),
+                field: "login",
+                mode: CommMode::ModbusTcp,
+            },
+            pairs(&[("code", "M7"), ("field", "login"), ("mode", "ModbusTcp")]),
+        ),
+        (
+            PlantError::ConnectionRecipeMismatch {
+                code: code(),
+                reference: reference(),
+            },
+            pairs(&[("code", "M7"), ("reference", "R-100")]),
+        ),
+    ];
+    for (error, expected) in cases {
+        assert_eq!(data_args(&error), expected, "{error:?}");
     }
 }

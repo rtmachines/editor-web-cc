@@ -64,3 +64,17 @@ fn state_holds_the_default_settings() {
         WebSettings::default().body_limit_form
     );
 }
+
+#[test]
+fn state_holds_no_cipher_until_the_server_hands_one_over() {
+    let fixture = crate::test_support::Fixture::new();
+    assert!(fixture.state.credential_cipher().is_some());
+    let identity = fixture.state.identity().clone();
+    let bare = WebState::new(
+        identity,
+        crate::WebSettings::default(),
+        recipe_domain::identity::KeyRing::parse(crate::test_support::CSRF_KEY_NEW).unwrap(),
+    )
+    .unwrap();
+    assert!(bare.credential_cipher().is_none());
+}

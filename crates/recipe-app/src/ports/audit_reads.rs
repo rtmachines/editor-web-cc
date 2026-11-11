@@ -126,7 +126,7 @@ impl EntityId {
     }
 }
 
-/// The entity type of an audit entry: one of the eight values of `data-model.md` section 10.
+/// The entity type of an audit entry: one of the nine values of `data-model.md` section 10.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AuditEntityType {
     /// A machine row.
@@ -135,6 +135,8 @@ pub enum AuditEntityType {
     Unit,
     /// A type row.
     PlcType,
+    /// The connection record of a machine (ADR-0154). Its entries have `aggregate_type = 'machine'`.
+    PlcConnection,
     /// A recipe row.
     Recipe,
     /// A version row.
@@ -149,10 +151,11 @@ pub enum AuditEntityType {
 
 impl AuditEntityType {
     /// Every entity type, in the order of `data-model.md` section 10.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Machine,
         Self::Unit,
         Self::PlcType,
+        Self::PlcConnection,
         Self::Recipe,
         Self::RecipeVersion,
         Self::Parameter,
@@ -167,6 +170,7 @@ impl AuditEntityType {
             Self::Machine => "machine",
             Self::Unit => "unit",
             Self::PlcType => "plc_type",
+            Self::PlcConnection => "plc_connection",
             Self::Recipe => "recipe",
             Self::RecipeVersion => "recipe_version",
             Self::Parameter => "parameter",

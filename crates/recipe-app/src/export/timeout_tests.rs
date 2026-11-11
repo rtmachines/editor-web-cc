@@ -9,17 +9,20 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
 use recipe_domain::identity::Role;
 
+use super::plc_connection_tests::{PASSWORD, iec_fixture, input};
 use super::tests::{PLATFORM, approved_fixture, approved_input, number_input, writer};
-use super::{ExportApprovedVersion, ExportVersionByNumber};
+use super::{ExportApprovedVersion, ExportPlcConnection, ExportVersionByNumber};
 use crate::blocking::{AppSettings, Blocking, ExportSettings};
 use crate::context::AppContext;
 use crate::error::{AppError, StorageError, TimeoutStage};
+use crate::memory::MemoryCredentialCipher;
 use crate::memory::MemoryStore;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DiffReads, DocumentWriter, DraftRepository,
-    Isolation, NonEmpty, PlantRepository, RecipeReads, RecipeRepository, SessionRepository,
-    SettingRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
+    Isolation, NonEmpty, PlantRepository, PlcConnections, RecipeReads, RecipeRepository,
+    SessionRepository, SettingRepository, Transaction, TypeCatalog, UnitLookup, UnitOfWork,
+    UserRepository,
 };
 
 /// A unit of work whose transactions wait much longer than any limit of the tests in `finish`.
@@ -64,6 +67,10 @@ impl Transaction for SlowCommitTransaction {
 
     fn plant(&mut self) -> &mut dyn PlantRepository {
         self.inner.plant()
+    }
+
+    fn plc_connections(&mut self) -> &mut dyn PlcConnections {
+        self.inner.plc_connections()
     }
 
     fn units(&mut self) -> &mut dyn UnitLookup {
@@ -322,4 +329,105 @@ async fn an_export_beyond_the_limit_keeps_its_permit_until_the_writer_ends() {
     drop(returned.unwrap());
     assert_eq!(context.export_gate.available(), 1);
     assert_eq!(fixture.store.audit_entries().len(), before);
+}
+
+/// Build the connection use case over `context` with the cipher of the fixture.
+fn plc_export(context: AppContext, cipher: &MemoryCredentialCipher) -> ExportPlcConnection {
+    ExportPlcConnection::new(context, Arc::new(cipher.clone()))
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_connection_read_gives_web_009_without_the_password_and_no_entry() {
+    let cipher = MemoryCredentialCipher::default();
+    let fixture = iec_fixture(&cipher);
+    let error = plc_export(slow_context(&fixture), &cipher)
+        .execute(&actor(Role::ExportClient), &meta(), input("M1", "R-1"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::WEB_009);
+    assert!(matches!(
+        error,
+        AppError::Timeout {
+            stage: TimeoutStage::Export
+        }
+    ));
+    let texts = [error.to_string(), format!("{error:?}")];
+    assert!(texts.iter().all(|text| !text.contains(PASSWORD)));
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_busy_gate_beyond_the_limit_stops_the_connection_read_before_any_transaction() {
+    let cipher = MemoryCredentialCipher::default();
+    let fixture = iec_fixture(&cipher);
+    let own_lines = fixture.store.journal().len();
+    let calls = cipher.calls().len();
+    let context = fixture.context_with(one_export_permit(Duration::from_secs(1)));
+    let held = context.export_gate.acquire().await.unwrap();
+    let export = plc_export(context, &cipher);
+    let (user, request) = (actor(Role::ExportClient), meta());
+    let error = tokio::time::timeout(
+        PERMIT_WAIT_BOUND,
+        export.execute(&user, &request, input("M1", "R-1")),
+    )
+    .await
+    .expect("the wait for the permit did not end inside timeout.export")
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::WEB_009);
+    assert_eq!(fixture.store.journal().len(), own_lines);
+    assert_eq!(cipher.calls().len(), calls);
+    assert!(fixture.store.audit_entries().is_empty());
+    drop(held);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_second_connection_read_waits_for_the_permit_and_then_writes_its_entry() {
+    let cipher = MemoryCredentialCipher::default();
+    let fixture = iec_fixture(&cipher);
+    let own_lines = fixture.store.journal().len();
+    let context = fixture.context_with(one_export_permit(Duration::from_secs(10)));
+    let held = context.export_gate.acquire().await.unwrap();
+    let export = plc_export(context.clone(), &cipher);
+    let (user, request) = (actor(Role::ExportClient), meta());
+    let free_the_permit = async {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let lines_while_waiting = fixture.store.journal().len();
+        drop(held);
+        lines_while_waiting
+    };
+    let (exported, lines_while_waiting) = tokio::join!(
+        export.execute(&user, &request, input("M1", "R-1")),
+        free_the_permit
+    );
+    assert!(exported.unwrap().password.is_some());
+    assert_eq!(lines_while_waiting, own_lines);
+    assert_eq!(fixture.store.audit_entries().len(), 1);
+    assert_eq!(context.export_gate.available(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_slow_commit_runs_after_the_limit_of_the_connection_read_and_keeps_the_entry() {
+    let cipher = MemoryCredentialCipher::default();
+    let fixture = iec_fixture(&cipher);
+    let settings = AppSettings {
+        blocking: Blocking::new(Duration::from_secs(10), Duration::from_secs(1)),
+        ..AppSettings::default()
+    };
+    let context = AppContext {
+        uow: Arc::new(SlowCommitStore {
+            inner: fixture.store.clone(),
+        }),
+        ..fixture.context_with(settings)
+    };
+    let exported = plc_export(context, &cipher)
+        .execute(&actor(Role::ExportClient), &meta(), input("M1", "R-1"))
+        .await
+        .unwrap();
+    assert!(exported.password.is_some());
+    let entries = fixture.store.audit_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries.first().unwrap().action(),
+        AuditAction::PlcConnectionExported
+    );
 }

@@ -39,7 +39,7 @@ use recipe_app::identity::{
     Argon2Hasher, Argon2Params, HashFailure, HashGate, IdentityContext, IdentitySettings,
     NONCE_BYTES, PasswordHasher as _, random_nonce,
 };
-use recipe_app::memory::{MemoryClock, MemoryStore};
+use recipe_app::memory::{MemoryClock, MemoryCredentialCipher, MemoryStore};
 use recipe_app::ports::{NewUser, ReadOnlySwitch};
 use recipe_domain::identity::{
     KeyRing, KeyRingReason, Login, LoginReason, NewPassword, PasswordReason, Role, UserId,
@@ -295,7 +295,9 @@ fn build_state(
         fresh_key_ring()?,
         settings,
     );
+    // The fake cipher keeps the PLC passwords in memory, so a save of a connection works (ADR-0154).
     WebState::new(identity, dev_web_settings()?, fresh_key_ring()?)
+        .map(|state| state.with_credential_cipher(Arc::new(MemoryCredentialCipher::default())))
         .map_err(|reason| DevServerError::Web { reason })
 }
 

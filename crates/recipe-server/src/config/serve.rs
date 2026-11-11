@@ -1,8 +1,10 @@
 //! The operator keys of `serve` (ADR-0062, design D7).
 //!
-//! `serve` reads 17 keys from the environment. The 18th key, `alerts.webhook_url`, is derived
-//! from the webhook file (ADR-0063). The function [`load`] reads and checks every key, both key
-//! files, and the webhook file. It does this before the server opens a port. A refusal
+//! `serve` reads 18 keys from the environment. The key `alerts.webhook_url` is derived from the
+//! webhook file (ADR-0063). `CompareSettings` records 18 values (ADR-0062 (a)). They are the 17
+//! environment keys of ADR-0062 and the derived key. The key `security.plc_credential_key_file`
+//! is not among them (ADR-0154 (g)). The function [`load`] reads and checks every key, the three
+//! key files, and the webhook file. It does this before the server opens a port. A refusal
 //! for a key file or the webhook file names the key only. It never shows a secret value,
 //! a file content, a path, or the webhook URL.
 
@@ -21,6 +23,7 @@ use recipe_web::CidrList;
 use serde::Deserialize;
 
 use super::key_file::read_key_file;
+use super::plc_key_file::{PlcCredentialKey, read_plc_key_file};
 use super::webhook::{WebhookSource, WebhookUrl, read_webhook_file};
 use super::{DbSettings, ENV_PREFIX, ENV_SEPARATOR, SecretSettings, Settings, app_connection};
 use crate::port::{DEFAULT_INTERNAL_PORT, deserialize_port};
@@ -29,6 +32,7 @@ use crate::port::{DEFAULT_INTERNAL_PORT, deserialize_port};
 const PORT_KEYS: [&str; 2] = ["http.public_port", "http.internal_port"];
 const KEY_LOGIN_HMAC: &str = "security.login_hmac_key_file";
 const KEY_CSRF_SIGNING: &str = "security.csrf_signing_key_file";
+const KEY_PLC_CREDENTIAL: &str = "security.plc_credential_key_file";
 const KEY_WEBHOOK_URL_FILE: &str = "alerts.webhook_url_file";
 const KEY_WEBHOOK_CA_FILE: &str = "alerts.webhook_ca_file";
 const KEY_TRUSTED_PROXIES: &str = "http.trusted_proxies";
@@ -38,6 +42,7 @@ const KEY_ABSOLUTE_TIMEOUT: &str = "session.absolute_timeout";
 
 const DEFAULT_LOGIN_HMAC_KEY_FILE: &str = "/run/secrets/login_hmac_key";
 const DEFAULT_CSRF_SIGNING_KEY_FILE: &str = "/run/secrets/csrf_signing_key";
+const DEFAULT_PLC_CREDENTIAL_KEY_FILE: &str = "/run/secrets/plc_credential_key";
 const DEFAULT_WEBHOOK_URL_FILE: &str = "/run/secrets/alerts_webhook_url";
 const DEFAULT_TRUSTED_PROXIES: &str = "172.28.0.2/32";
 const DEFAULT_PUBLIC_PORT: u16 = 8080;
@@ -54,7 +59,7 @@ const DEV_BUILD: bool = cfg!(feature = "dev");
 /// The environment names without the prefix, one for each key that an operator can set.
 ///
 /// The key `alerts.webhook_url` has no name, because ADR-0063 derives it from the file.
-pub const SERVE_ENV_KEYS: [&str; 17] = [
+pub const SERVE_ENV_KEYS: [&str; 18] = [
     "db__host",
     "db__port",
     "db__name",
@@ -62,6 +67,7 @@ pub const SERVE_ENV_KEYS: [&str; 17] = [
     "secrets__app_password_file",
     "security__login_hmac_key_file",
     "security__csrf_signing_key_file",
+    "security__plc_credential_key_file",
     "http__trusted_proxies",
     "http__public_port",
     "http__internal_port",
@@ -129,6 +135,7 @@ impl Default for RawSecrets {
 struct RawSecurity {
     login_hmac_key_file: String,
     csrf_signing_key_file: String,
+    plc_credential_key_file: String,
 }
 
 impl Default for RawSecurity {
@@ -136,6 +143,7 @@ impl Default for RawSecurity {
         Self {
             login_hmac_key_file: DEFAULT_LOGIN_HMAC_KEY_FILE.to_owned(),
             csrf_signing_key_file: DEFAULT_CSRF_SIGNING_KEY_FILE.to_owned(),
+            plc_credential_key_file: DEFAULT_PLC_CREDENTIAL_KEY_FILE.to_owned(),
         }
     }
 }
@@ -219,13 +227,15 @@ impl Default for RawI18n {
 /// The type solves one problem: `serve` must hold only values that passed every check, so the
 /// later steps of the start order need no second check. `Debug` shows paths and numbers. It
 /// shows no key, no password, and no webhook URL, because each of those types redacts itself.
-#[derive(Debug, Clone)]
+/// The configuration has no `Clone`, because the PLC credential key has none.
+#[derive(Debug)]
 pub struct ServeConfig {
     configured: ConfiguredSettings,
     trusted_proxies: CidrList,
     translation_langs: Vec<LangCode>,
     login_keys: KeyRing,
     csrf_keys: KeyRing,
+    plc_credential_key: PlcCredentialKey,
     webhook: Option<WebhookUrl>,
     connection_settings: Settings,
 }
@@ -259,6 +269,14 @@ impl ServeConfig {
     #[must_use]
     pub const fn csrf_keys(&self) -> &KeyRing {
         &self.csrf_keys
+    }
+
+    /// Give up the key of the PLC password cipher (`security.plc_credential_key_file`).
+    ///
+    /// The configuration holds the key once. The wiring takes it and builds the cipher.
+    #[must_use]
+    pub fn into_plc_credential_key(self) -> PlcCredentialKey {
+        self.plc_credential_key
     }
 
     /// Return the webhook URL, or `None` when the operator configured no webhook.
@@ -324,6 +342,10 @@ fn load_with(overrides: impl Provider, dev_build: bool) -> Result<ServeConfig> {
         KEY_CSRF_SIGNING,
         Path::new(&raw.security.csrf_signing_key_file),
     )?;
+    let plc_credential_key = read_plc_key_file(
+        KEY_PLC_CREDENTIAL,
+        Path::new(&raw.security.plc_credential_key_file),
+    )?;
     let (webhook_file, webhook) = load_webhook(&raw.alerts)?;
     check_ca_file(&raw.alerts)?;
     let connection_settings = connection_settings(&raw);
@@ -353,6 +375,7 @@ fn load_with(overrides: impl Provider, dev_build: bool) -> Result<ServeConfig> {
         translation_langs,
         login_keys,
         csrf_keys,
+        plc_credential_key,
         webhook,
         connection_settings,
     })
@@ -386,6 +409,10 @@ fn check_texts(raw: &RawServe) -> Result<()> {
         ),
         (KEY_LOGIN_HMAC, raw.security.login_hmac_key_file.clone()),
         (KEY_CSRF_SIGNING, raw.security.csrf_signing_key_file.clone()),
+        (
+            KEY_PLC_CREDENTIAL,
+            raw.security.plc_credential_key_file.clone(),
+        ),
         (KEY_TRUSTED_PROXIES, raw.http.trusted_proxies.clone()),
         (KEY_WEBHOOK_URL_FILE, optional(&raw.alerts.webhook_url_file)),
         (KEY_WEBHOOK_CA_FILE, optional(&raw.alerts.webhook_ca_file)),

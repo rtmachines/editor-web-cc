@@ -36,3 +36,15 @@ fn plc_type_id_display_is_the_hyphenated_uuid() {
     let raw = Uuid::from_u128(6);
     assert_eq!(PlcTypeId::from(raw).to_string(), raw.to_string());
 }
+
+#[test]
+fn plc_connection_id_from_uuid_keeps_the_uuid() {
+    let raw = Uuid::from_u128(7);
+    assert_eq!(PlcConnectionId::from(raw).as_uuid(), &raw);
+}
+
+#[test]
+fn plc_connection_id_display_is_the_hyphenated_uuid() {
+    let raw = Uuid::from_u128(8);
+    assert_eq!(PlcConnectionId::from(raw).to_string(), raw.to_string());
+}

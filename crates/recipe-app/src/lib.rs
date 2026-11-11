@@ -4,7 +4,7 @@
 //! The permission check is the first statement of every use case. The supervised jobs are
 //! internal operations without a permission (ADR-0060 (t)).
 //! The error types are `AppError`, `AuditError`, and `StorageError`. `WebhookFault`,
-//! `DiskFault`, and `BackupFault` are reason types without a code (ADR-0073 (b)).
+//! `DiskFault`, `BackupFault`, and `CipherFault` are reason types without a code (ADR-0073 (b)).
 //! This crate does not use `sqlx` or `axum`.
 //!
 //! See `docs/architecture/overview.md` section 5 and `docs/architecture/domain-model.md` section 5.

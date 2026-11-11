@@ -5,6 +5,7 @@
 //! the start function reads no file and no environment variable.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use recipe_app::blocking::AppSettings;
@@ -23,6 +24,7 @@ use recipe_web::{CidrList, HealthSettings, WebSettings};
 use super::host::ListenerKind;
 use crate::config::serve::ServeConfig;
 use crate::config::webhook::WebhookUrl;
+use crate::credential_cipher::AesGcmCipher;
 use crate::listener::ListenerSettings;
 use crate::watchdog::WatchdogSettings;
 
@@ -229,6 +231,8 @@ pub struct Plan {
     pub csrf_keys: KeyRing,
     /// The webhook URL, or `None` for no webhook.
     pub webhook_url: Option<WebhookUrl>,
+    /// The cipher of the PLC password. It holds the key of `security.plc_credential_key_file`.
+    pub credential_cipher: Arc<AesGcmCipher>,
     /// The numbers.
     pub settings: ServeSettings,
 }
@@ -244,6 +248,7 @@ impl Plan {
         login_keys: KeyRing,
         csrf_keys: KeyRing,
         webhook_url: Option<WebhookUrl>,
+        credential_cipher: Arc<AesGcmCipher>,
         trusted_proxies: CidrList,
         translation_langs: Vec<LangCode>,
     ) -> Self {
@@ -258,20 +263,32 @@ impl Plan {
             login_keys,
             csrf_keys,
             webhook_url,
+            credential_cipher,
             settings,
         }
     }
 
-    /// Build the plan of a checked configuration.
+    /// Build the plan of a checked configuration and build the cipher of the PLC password.
+    ///
+    /// The function takes the configuration, because the PLC credential key has no `Clone`. The
+    /// cipher is the only holder of the key after this call.
     #[must_use]
-    pub fn from_config(config: &ServeConfig) -> Self {
+    pub fn from_config(config: ServeConfig) -> Self {
+        let configured = config.configured().clone();
+        let login_keys = config.login_keys().clone();
+        let csrf_keys = config.csrf_keys().clone();
+        let webhook_url = config.webhook_url().cloned();
+        let trusted_proxies = config.trusted_proxies().clone();
+        let translation_langs = config.translation_langs().to_vec();
+        let key = config.into_plc_credential_key().into_cipher_key();
         Self::new(
-            config.configured().clone(),
-            config.login_keys().clone(),
-            config.csrf_keys().clone(),
-            config.webhook_url().cloned(),
-            config.trusted_proxies().clone(),
-            config.translation_langs().to_vec(),
+            configured,
+            login_keys,
+            csrf_keys,
+            webhook_url,
+            Arc::new(AesGcmCipher::new(&key)),
+            trusted_proxies,
+            translation_langs,
         )
     }
 }

@@ -11,9 +11,14 @@ use crate::context::AppContext;
 use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{Isolation, PlantRepository};
 
+#[cfg(test)]
+mod machine_connection_tests;
 mod machines;
 #[cfg(test)]
 mod machines_tests;
+mod plc_connection;
+#[cfg(test)]
+mod plc_connection_tests;
 #[cfg(test)]
 mod source_tests;
 mod type_text;
@@ -34,9 +39,10 @@ mod usage_tests;
 mod world;
 
 pub use machines::{
-    GetMachine, GetMachineForm, GetMachineInput, ListMachines, ListMachinesInput, MachineForm,
-    MachineFormInput, MachineList, MachineRef, MachineView,
+    GetMachine, GetMachineForm, GetMachineInput, ListMachines, ListMachinesInput,
+    MachineConnection, MachineForm, MachineFormInput, MachineList, MachineRef, MachineView,
 };
+pub use plc_connection::{GetPlcConnectionForm, PlcConnectionForm, PlcConnectionFormInput};
 pub(crate) use type_text::{expr_names_row, type_text};
 pub use types::{
     GetTypeTree, GetUdtForm, ListTypes, TypeList, TypeListRow, TypeView, TypesInput, UdtForm,

@@ -38,9 +38,10 @@ use crate::memory::fixtures::{
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DerivedTypeLock, DiffReads, DraftRepository,
     Ensured, ExportableRecipes, InsertedMachine, Isolation, Locked, MachineFilter, MachineSummary,
-    NonEmpty, ParameterRow, PlantRepository, RecipeFilter, RecipeReads, RecipeRepository,
-    RecipeSummary, RowImage, SessionRepository, SettingRepository, Transaction, TypeCatalog,
-    TypeUsageRow, UnitCount, UnitLookup, UnitOfWork, UserRepository, VersionDetail, VersionSummary,
+    NonEmpty, ParameterRow, PlantRepository, PlcConnections, RecipeFilter, RecipeReads,
+    RecipeRepository, RecipeSummary, RowImage, SessionRepository, SettingRepository, Transaction,
+    TypeCatalog, TypeUsageRow, UnitCount, UnitLookup, UnitOfWork, UserRepository, VersionDetail,
+    VersionSummary,
 };
 
 /// The platform of the test machine.
@@ -116,6 +117,11 @@ impl Transaction for CountingTransaction {
 
     fn plant(&mut self) -> &mut dyn PlantRepository {
         self
+    }
+
+    fn plc_connections(&mut self) -> &mut dyn PlcConnections {
+        self.count();
+        self.inner.plc_connections()
     }
 
     fn units(&mut self) -> &mut dyn UnitLookup {

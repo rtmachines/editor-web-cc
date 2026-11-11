@@ -5,12 +5,19 @@ use recipe_domain::plant::{MachineId, PlcType, PlcTypeId, RecordShape, UnitId};
 use recipe_domain::recipe::{ParameterId, RecipeId, RecipeVersionId};
 
 use crate::memory::MemoryState;
-use crate::ports::{AuditEntityType, EntityId, EntityLabel};
+use crate::ports::{AggregateId, AuditEntityType, EntityId, EntityLabel};
 
 /// Return the label of the entity `id` of `kind` from its current row.
 ///
+/// `aggregate` is the root of the aggregate of the entry. The connection record has no label of its
+/// own, so its label is the code of its machine, which is the aggregate (ADR-0154).
 /// A row that no longer exists gives `EntityLabel::Missing`. No label comes from a stored state.
-pub(super) fn label(state: &MemoryState, kind: AuditEntityType, id: EntityId) -> EntityLabel {
+pub(super) fn label(
+    state: &MemoryState,
+    kind: AuditEntityType,
+    id: EntityId,
+    aggregate: AggregateId,
+) -> EntityLabel {
     let uuid = *id.as_uuid();
     let found = match kind {
         AuditEntityType::Machine => state
@@ -25,6 +32,10 @@ pub(super) fn label(state: &MemoryState, kind: AuditEntityType, id: EntityId) ->
             .types
             .get(&PlcTypeId::from(uuid))
             .and_then(|row| type_label(&row.plc_type)),
+        AuditEntityType::PlcConnection => state
+            .machines
+            .get(&MachineId::from(*aggregate.as_uuid()))
+            .map(|row| EntityLabel::Machine(row.code)),
         AuditEntityType::Recipe => state
             .recipes
             .get(&RecipeId::from(uuid))

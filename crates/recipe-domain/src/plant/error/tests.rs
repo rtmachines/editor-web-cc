@@ -455,17 +455,103 @@ fn plant_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
             vec![("path", path("U1.2").to_string())],
         ),
     ]
+    .into_iter()
+    .chain(connection_samples())
+    .collect()
+}
+
+/// One sample of each connection variant, with the display text of each field.
+fn connection_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
+    let code = ("code", machine_code().to_string());
+    let address = PlcAddress::parse("plc-1").unwrap();
+    vec![
+        (
+            PlantError::ConnectionFieldNotOnPlatform {
+                code: machine_code(),
+                field: "rack",
+                platform: PlcPlatform::TwinCat3,
+            },
+            vec![
+                code.clone(),
+                ("field", "rack".to_owned()),
+                ("platform", PlcPlatform::TwinCat3.to_string()),
+            ],
+        ),
+        (
+            PlantError::ConnectionFieldMissing {
+                code: machine_code(),
+                field: "slot",
+            },
+            vec![code.clone(), ("field", "slot".to_owned())],
+        ),
+        (
+            PlantError::ConnectionDataBlockOutOfRange {
+                code: machine_code(),
+                number: 16001,
+                max: 16000,
+            },
+            vec![
+                code.clone(),
+                ("number", "16001".to_owned()),
+                ("max", "16000".to_owned()),
+            ],
+        ),
+        (
+            PlantError::CommModeNotOnPlatform {
+                code: machine_code(),
+                mode: CommMode::Ads,
+                platform: PlcPlatform::CodesysIec,
+            },
+            vec![
+                code.clone(),
+                ("mode", CommMode::Ads.to_string()),
+                ("platform", PlcPlatform::CodesysIec.to_string()),
+            ],
+        ),
+        (
+            PlantError::AddressNotAmsNetId {
+                code: machine_code(),
+                address: address.clone(),
+            },
+            vec![code.clone(), ("address", address.to_string())],
+        ),
+        (
+            PlantError::ConnectionNotConfigured {
+                code: machine_code(),
+            },
+            vec![code.clone()],
+        ),
+        (
+            PlantError::ConnectionFieldNotInMode {
+                code: machine_code(),
+                field: "login",
+                mode: CommMode::ModbusTcp,
+            },
+            vec![
+                code.clone(),
+                ("field", "login".to_owned()),
+                ("mode", CommMode::ModbusTcp.to_string()),
+            ],
+        ),
+        (
+            PlantError::ConnectionRecipeMismatch {
+                code: machine_code(),
+                reference: reference(),
+            },
+            vec![code, ("reference", reference().to_string())],
+        ),
+    ]
 }
 
 #[test]
 fn registry_matches_reliability() {
     let rows = plant_doc_rows();
     let expected: Vec<String> = (1..=6)
-        .chain(8..=21)
+        .chain(8..=29)
         .map(|number| format!("E-PLT-{number:03}"))
         .collect();
 
-    // Assertion 1: the doc has the 20 domain rows, in order.
+    // Assertion 1: the doc has the 28 domain rows, in order.
     let doc_codes: Vec<String> = rows.iter().map(|row| row.0.clone()).collect();
     assert_eq!(doc_codes, expected);
 
@@ -502,5 +588,87 @@ fn registry_matches_reliability() {
     for code in &expected {
         let count = sample_codes.iter().filter(|c| *c == code).count();
         assert_eq!(count, 1, "{code} has {count} samples");
+    }
+}
+
+#[test]
+fn connection_errors_have_their_code_registry_row_and_text() {
+    let code = MachineCode::parse("M7").unwrap();
+    let reference = ReferenceNumber::parse("r-100").unwrap();
+    let address = PlcAddress::parse("plc-1").unwrap();
+    let cases = [
+        (
+            PlantError::ConnectionFieldNotOnPlatform {
+                code,
+                field: "rack",
+                platform: PlcPlatform::TwinCat3,
+            },
+            ErrorCode::PLT_022,
+            "E-PLT-022",
+            "The connection of machine M7 has no field rack on platform TwinCat3. Delete the value of rack.",
+        ),
+        (
+            PlantError::ConnectionFieldMissing {
+                code,
+                field: "slot",
+            },
+            ErrorCode::PLT_023,
+            "E-PLT-023",
+            "The connection of machine M7 needs a value in field slot. Enter a value.",
+        ),
+        (
+            PlantError::ConnectionDataBlockOutOfRange {
+                code,
+                number: 16001,
+                max: 16000,
+            },
+            ErrorCode::PLT_024,
+            "E-PLT-024",
+            "Data block 16001 of machine M7 is above 16000. The controller of the machine has no such data block.",
+        ),
+        (
+            PlantError::CommModeNotOnPlatform {
+                code,
+                mode: CommMode::Ads,
+                platform: PlcPlatform::CodesysIec,
+            },
+            ErrorCode::PLT_025,
+            "E-PLT-025",
+            "Platform CodesysIec of machine M7 does not support the mode Ads. Select a mode of this platform.",
+        ),
+        (
+            PlantError::AddressNotAmsNetId { code, address },
+            ErrorCode::PLT_026,
+            "E-PLT-026",
+            "Address plc-1 of machine M7 is not an AMS Net ID. The mode Ads needs an AMS Net ID.",
+        ),
+        (
+            PlantError::ConnectionNotConfigured { code },
+            ErrorCode::PLT_027,
+            "E-PLT-027",
+            "Machine M7 has no connection settings. Enter the settings on the page of the machine first.",
+        ),
+        (
+            PlantError::ConnectionFieldNotInMode {
+                code,
+                field: "login",
+                mode: CommMode::ModbusTcp,
+            },
+            ErrorCode::PLT_028,
+            "E-PLT-028",
+            "The mode ModbusTcp of machine M7 does not use field login. Delete the value of login.",
+        ),
+        (
+            PlantError::ConnectionRecipeMismatch { code, reference },
+            ErrorCode::PLT_029,
+            "E-PLT-029",
+            "Recipe R-100 does not belong to machine M7. Use a recipe of this machine.",
+        ),
+    ];
+    for (error, expected, text, message) in cases {
+        assert_eq!(error.code(), expected);
+        assert_eq!(error.code().as_str(), text);
+        assert!(REGISTRY.contains(&expected), "{text}");
+        assert_eq!(error.to_string(), message);
     }
 }

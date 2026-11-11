@@ -34,16 +34,28 @@ fn each_state_action_converts_to_its_audit_action() {
         (StateAction::UserLoggedIn, AuditAction::UserLoggedIn),
         (StateAction::UserLoggedOut, AuditAction::UserLoggedOut),
         (StateAction::VersionExported, AuditAction::VersionExported),
+        (
+            StateAction::PlcConnectionExported,
+            AuditAction::PlcConnectionExported,
+        ),
     ];
     for (state, expected) in pairs {
         assert_eq!(AuditAction::from(state), expected);
     }
-    assert_eq!(StateAction::ALL.len(), 3);
+    assert_eq!(StateAction::ALL.len(), 4);
 }
 
 #[test]
-fn row_actions_are_the_twenty_seven_remaining_actions() {
-    assert_eq!(RowAction::ALL.len(), 27);
+fn row_actions_are_the_twenty_eight_remaining_actions() {
+    assert_eq!(RowAction::ALL.len(), 28);
+}
+
+#[test]
+fn the_plc_connection_set_action_is_a_row_action() {
+    assert_eq!(
+        AuditAction::from(RowAction::PlcConnectionSet),
+        AuditAction::PlcConnectionSet
+    );
 }
 
 #[test]

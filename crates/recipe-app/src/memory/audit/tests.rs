@@ -4,20 +4,22 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::num::NonZeroU64;
 
 use recipe_domain::audit::{
-    AuditAction, AuditContext, AuditEntry, AuditTarget, RequestId, RowAction, RowChange,
-    SecurityEvent, SecurityEventKind,
+    AggregateType, AuditAction, AuditContext, AuditEntry, AuditTarget, RequestId, RowAction,
+    RowChange, SecurityEvent, SecurityEventKind,
 };
 use recipe_domain::identity::UserId;
+use recipe_domain::plant::{MachineCode, MachineId, PlcConnectionId, PlcPlatform};
 use recipe_domain::recipe::RecipeId;
 use recipe_domain::timestamp::Timestamp;
 use serde_json::json;
 use time::{Date, Month, OffsetDateTime, Time};
 use uuid::Uuid;
 
+use crate::memory::fixtures::machine_on;
 use crate::memory::{MemoryClock, MemoryStore};
 use crate::ports::{
-    AuditEntryId, AuditFilter, AuditRow, AuditScope, CursorPage, Isolation, NonEmpty,
-    SecurityEventFilter, SecurityEventRow, UnitOfWork,
+    AuditEntityType, AuditEntryId, AuditFilter, AuditRow, AuditScope, CursorPage, EntityLabel,
+    Isolation, NonEmpty, SecurityEventFilter, SecurityEventRow, UnitOfWork,
 };
 
 /// Return the instant 2026-10-16 at `hour`:`minute`:`second` UTC.
@@ -195,6 +197,79 @@ async fn a_read_does_not_see_an_event_that_the_sink_records_after_its_begin() {
         events(&store).await.rows.len(),
         2,
         "a new read sees both events"
+    );
+}
+
+/// Return the entry `PlcConnectionSet` of the connection record `connection` of machine `machine`.
+fn connection_set(connection: u128, machine: u128) -> AuditEntry {
+    AuditEntry::row(
+        RowAction::PlcConnectionSet,
+        AuditTarget::plc_connection(
+            PlcConnectionId::from(Uuid::from_u128(connection)),
+            MachineId::from(Uuid::from_u128(machine)),
+        ),
+        RowChange::Create {
+            after: json!({"host": "10.0.0.5"}),
+        },
+        context(connection),
+    )
+}
+
+#[test]
+fn the_sql_text_plc_connection_names_an_entity_type() {
+    let found = AuditEntityType::from_sql("plc_connection");
+
+    assert_eq!(found.map(AuditEntityType::as_sql), Some("plc_connection"));
+    assert!(
+        AuditEntityType::ALL
+            .iter()
+            .any(|kind| kind.as_sql() == "plc_connection"),
+        "ALL lists the entity type of the connection record"
+    );
+}
+
+#[tokio::test]
+async fn the_list_returns_a_row_for_a_plc_connection_set_entry() {
+    let store = store();
+    store.seed_machine(&machine_on(PlcPlatform::S7_1500, 1, "M1"));
+    commit_at(&store, at(10, 0, 0), vec![connection_set(9, 1)]).await;
+
+    let page = newest(&store).await;
+
+    assert_eq!(page.rows.len(), 1, "{page:?}");
+    let row = page.rows.first().unwrap();
+    assert_eq!(row.action, AuditAction::PlcConnectionSet);
+    assert_eq!(row.entity_type.as_sql(), "plc_connection");
+    assert_eq!(row.entity_id.as_uuid().as_u128(), 9);
+    assert_eq!(row.aggregate_type, AggregateType::Machine);
+    assert_eq!(row.aggregate_id.as_uuid().as_u128(), 1);
+}
+
+#[tokio::test]
+async fn the_label_of_a_plc_connection_row_is_the_code_of_its_machine() {
+    let store = store();
+    store.seed_machine(&machine_on(PlcPlatform::S7_1500, 1, "M1"));
+    commit_at(&store, at(10, 0, 0), vec![connection_set(9, 1)]).await;
+
+    let page = newest(&store).await;
+
+    let label = page.rows.first().map(|row| row.label.clone());
+    assert_eq!(
+        label,
+        Some(EntityLabel::Machine(MachineCode::parse("M1").unwrap()))
+    );
+}
+
+#[tokio::test]
+async fn the_label_of_a_plc_connection_row_of_a_missing_machine_is_missing() {
+    let store = store();
+    commit_at(&store, at(10, 0, 0), vec![connection_set(9, 1)]).await;
+
+    let page = newest(&store).await;
+
+    assert_eq!(
+        page.rows.first().map(|row| row.label.clone()),
+        Some(EntityLabel::Missing)
     );
 }
 

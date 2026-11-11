@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use recipe_domain::plant::{
-    LeafPath, MachineCode, MemberName, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
-    TypeExpr, TypeMember, TypeName, UnitPath,
+    ConnectionFields, LeafPath, MachineCode, MemberName, PlcPlatform, PlcType, PlcTypeRecord,
+    Primitive, RecordShape, TypeExpr, TypeMember, TypeName, UnitPath,
 };
 use recipe_domain::recipe::{
     LimitInput, LimitList, MemberValue, Ordinal, ParameterTag, RecipeDeleter, StoredParameter,
@@ -24,7 +24,7 @@ use crate::export::{ExportApprovedInput, ExportByNumberInput, ExportScope};
 use crate::memory::{BodyWriter, seed_type_id};
 use crate::plant::{
     AddUnitInput, ArchiveMachineInput, ArchiveUnitInput, CreateMachineInput, DefineUdtInput,
-    DefineUdtMode, RenameMachineInput, RenameUnitInput,
+    DefineUdtMode, RenameMachineInput, RenameUnitInput, SetPlcConnectionInput,
 };
 use crate::ports::DocumentWriter;
 use crate::recipe::{
@@ -189,6 +189,15 @@ pub(crate) fn rename_machine_input() -> RenameMachineInput {
 pub(crate) fn archive_machine_input() -> ArchiveMachineInput {
     ArchiveMachineInput {
         code: MachineCode::parse("M1").unwrap(),
+    }
+}
+
+/// The request of `SetPlcConnection` for `M1` with no field and the expected `row_version` 0.
+pub(crate) fn set_plc_connection_input() -> SetPlcConnectionInput {
+    SetPlcConnectionInput {
+        code: MachineCode::parse("M1").unwrap(),
+        expected_row_version: 0,
+        fields: ConnectionFields::default(),
     }
 }
 

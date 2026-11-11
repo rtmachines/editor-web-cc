@@ -16,6 +16,7 @@ pub mod clock;
 pub mod coded;
 pub mod config;
 pub mod create_admin;
+pub mod credential_cipher;
 pub mod disk;
 mod limited_read;
 pub mod listener;

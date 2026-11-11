@@ -20,7 +20,14 @@
 {% if let Some(when) = archived_at %}<dt>{{ t.get("machine-archived-at") }}</dt>
 <dd class="data">{{ when }}</dd>
 {% endif %}</dl>
-{% if live %}<p><a class="target-link" href="{{ types_href }}">{{ t.get("machine-types-link") }}</a></p>
+<h2>{{ t.get("machine-connection-title") }}</h2>
+{% if let Some(record) = connection %}<dl id="machine-connection">
+{% for (label, value) in record.rows %}<dt>{{ label }}</dt>
+<dd class="data">{{ value }}</dd>
+{% endfor %}</dl>
+{% else %}<p>{{ t.get("machine-connection-none") }}</p>
+{% endif %}{% if can_edit_connection %}<p><a class="target-link" href="{{ connection_href }}">{{ t.get("machine-connection-edit") }}</a></p>
+{% endif %}{% if live %}<p><a class="target-link" href="{{ types_href }}">{{ t.get("machine-types-link") }}</a></p>
 <p><a class="target-link" href="{{ recipes_href }}">{{ t.get("machine-recipes-link") }}</a></p>
 {% endif %}<h2>{{ t.get("machine-units-title") }}</h2>
 <div id="unit-tree">{% include "unit-tree.html" %}</div>

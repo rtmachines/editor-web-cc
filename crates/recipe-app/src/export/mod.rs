@@ -7,6 +7,7 @@ mod document;
 mod flow;
 mod list_exportable_recipes;
 mod output;
+mod plc_connection;
 mod scope;
 
 use std::sync::Arc;
@@ -17,6 +18,9 @@ use recipe_domain::recipe::ReferenceNumber;
 use self::flow::{Target, export_version};
 pub use self::list_exportable_recipes::{ExportableRecipesInput, ListExportableRecipes};
 pub use self::output::ExportedVersion;
+pub use self::plc_connection::{
+    ExportPlcConnection, ExportPlcConnectionInput, ExportedPlcConnection,
+};
 pub use self::scope::ExportScope;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase};
@@ -164,6 +168,8 @@ mod list_exportable_recipes_tests;
 mod machine_filter_tests;
 #[cfg(test)]
 mod missing_tree_tests;
+#[cfg(test)]
+mod plc_connection_tests;
 #[cfg(test)]
 mod rule_check_tests;
 #[cfg(test)]

@@ -118,6 +118,7 @@ impl AuditReads for MemoryTransaction {
             self.state(),
             AuditEntityType::from(aggregate_type),
             root,
+            id,
         ))
     }
 }

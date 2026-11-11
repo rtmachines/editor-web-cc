@@ -19,6 +19,7 @@ mod migration_0011;
 mod operations;
 mod operations_schema;
 mod platform_ranges;
+mod plc_connection;
 mod pool;
 mod race;
 mod rebind_shape;

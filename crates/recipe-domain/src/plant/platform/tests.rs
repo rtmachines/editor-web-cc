@@ -57,6 +57,24 @@ fn is_s7_is_true_for_exactly_the_three_siemens_platforms() {
     assert!(PlcPlatform::S7_1500.is_s7());
 }
 
+// ADR-0116 (c), ADR-0140 (a): the highest data block number of each platform.
+#[test]
+fn max_data_block_is_16000_on_s7_300() {
+    assert_eq!(PlcPlatform::S7_300.max_data_block(), Some(16_000));
+}
+
+#[test]
+fn max_data_block_is_59999_on_s7_1200_and_s7_1500() {
+    assert_eq!(PlcPlatform::S7_1200.max_data_block(), Some(59_999));
+    assert_eq!(PlcPlatform::S7_1500.max_data_block(), Some(59_999));
+}
+
+#[test]
+fn max_data_block_is_none_on_codesys_iec_and_twincat3() {
+    assert_eq!(PlcPlatform::CodesysIec.max_data_block(), None);
+    assert_eq!(PlcPlatform::TwinCat3.max_data_block(), None);
+}
+
 fn assert_round_trip(platform: PlcPlatform, text: &str) {
     assert_eq!(PlcPlatform::parse(text), Ok(platform));
     assert_eq!(platform.to_string(), text);

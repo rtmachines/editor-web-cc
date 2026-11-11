@@ -16,7 +16,8 @@ use super::host::{HasherBuild, Host, MainPool};
 use super::plan::Plan;
 use crate::coded::coded;
 
-/// Build the web state: the Argon2id hasher, the use cases, and the text bundles.
+/// Build the web state: the Argon2id hasher, the use cases, the cipher of the PLC password, and the
+/// text bundles.
 ///
 /// The state starts with the read-only mode off. The job `disk_check` switches it.
 ///
@@ -46,8 +47,9 @@ pub(super) async fn web_state(
         plan.login_keys.clone(),
         *identity,
     );
-    WebState::new(context, settings.web.clone(), plan.csrf_keys.clone())
-        .map_err(|reason| anyhow!("{reason}"))
+    let state = WebState::new(context, settings.web.clone(), plan.csrf_keys.clone())
+        .map_err(|reason| anyhow!("{reason}"))?;
+    Ok(state.with_credential_cipher(plan.credential_cipher.clone()))
 }
 
 /// Build the context of the use cases with the one `AlertCounters` of the process.

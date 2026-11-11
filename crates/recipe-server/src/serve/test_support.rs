@@ -22,8 +22,10 @@ use recipe_web::CidrList;
 use tokio::time::Instant;
 use tracing::subscriber::{DefaultGuard, NoSubscriber};
 use tracing::{Dispatch, Subscriber};
+use zeroize::Zeroizing;
 
 use super::plan::Plan;
+use crate::credential_cipher::{AesGcmCipher, CipherKey, KEY_LENGTH};
 use crate::logging;
 
 /// The public port of the test plan.
@@ -62,6 +64,11 @@ pub(super) fn key_ring() -> KeyRing {
     KeyRing::parse(&"ab".repeat(32)).unwrap()
 }
 
+/// The key of the PLC password cipher of the test plan.
+pub(super) fn test_cipher_key() -> CipherKey {
+    CipherKey::from_bytes(Zeroizing::new([0x5a; KEY_LENGTH]))
+}
+
 /// The plan of a test start with the default numbers.
 pub(super) fn plan() -> Plan {
     Plan::new(
@@ -69,6 +76,7 @@ pub(super) fn plan() -> Plan {
         key_ring(),
         key_ring(),
         None,
+        Arc::new(AesGcmCipher::new(&test_cipher_key())),
         CidrList::default(),
         vec![LangCode::parse("pl").unwrap()],
     )

@@ -40,6 +40,11 @@ async-trait = { workspace = true }
 # ADR-0151 (b): the reader of a result file parses one JSON line. The test of the JSON shape of an
 # error line (tests/log_error_json.rs) also uses it.
 serde_json = { workspace = true }
+# ADR-0154 (g), design D5: the adapter of the port `CredentialCipher` seals the PLC password
+# with AES-256-GCM. It reads the 12 bytes of each nonce with `getrandom` and clears buffers.
+aes-gcm = { workspace = true }
+getrandom = { workspace = true }
+zeroize = { workspace = true }
 # ADR-0133 (f): the set of stalled paths of the disk adapter is a `parking_lot::Mutex`.
 parking_lot = { workspace = true }
 
@@ -57,6 +62,7 @@ dev = []
 recipe-app = { workspace = true, features = ["memory"] }
 testcontainers = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+uuid = { workspace = true }
 tower-http = { workspace = true, features = ["catch-panic"] }
 
 [lints]

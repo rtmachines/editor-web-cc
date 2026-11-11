@@ -197,13 +197,14 @@ The directory `RECIPE_SECRETS_DIR` belongs to `root` and has the mode `0700`. Ea
 install -d -m 0700 -o root -g root "$RECIPE_SECRETS_DIR"
 ```
 
-2. Create the seven random values with the command below.
+2. Create the eight random values with the command below.
 
 ```bash
 ( umask 077 && openssl rand -hex 32 > "$RECIPE_SECRETS_DIR/<name>" )
 ```
 
-Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`.
+Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`, `plc_credential_key`.
+The file `plc_credential_key` holds one line of 64 lower-case hex characters. The key has no rotation (ADR-0154).
 
 3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it.
 4. Leave `alerts_webhook_url` empty when the plant has no webhook:
@@ -218,7 +219,7 @@ install -m 0600 /dev/null "$RECIPE_SECRETS_DIR/alerts_webhook_url"
 | File | Reader | Owner and mode |
 |---|---|---|
 | `postgres_password`, `backup_password`, `replicator_password` | uid 999 | `999`, `0400` |
-| `login_hmac_key`, `csrf_signing_key`, `alerts_webhook_url` | uid 65532 | `65532`, `0400` |
+| `login_hmac_key`, `csrf_signing_key`, `plc_credential_key`, `alerts_webhook_url` | uid 65532 | `65532`, `0400` |
 | `tls_cert`, `tls_key` | uid 0 | `0`, `0400` |
 | `app_password`, `migrator_password` | uid 999 and uid 65532 | `0`, `0400`, then an ACL |
 
@@ -227,8 +228,8 @@ install -m 0600 /dev/null "$RECIPE_SECRETS_DIR/alerts_webhook_url"
 ```bash
 chown 999 "$RECIPE_SECRETS_DIR"/{postgres_password,backup_password,replicator_password}
 chmod 0400 "$RECIPE_SECRETS_DIR"/{postgres_password,backup_password,replicator_password}
-chown 65532 "$RECIPE_SECRETS_DIR"/{login_hmac_key,csrf_signing_key,alerts_webhook_url}
-chmod 0400 "$RECIPE_SECRETS_DIR"/{login_hmac_key,csrf_signing_key,alerts_webhook_url}
+chown 65532 "$RECIPE_SECRETS_DIR"/{login_hmac_key,csrf_signing_key,plc_credential_key,alerts_webhook_url}
+chmod 0400 "$RECIPE_SECRETS_DIR"/{login_hmac_key,csrf_signing_key,plc_credential_key,alerts_webhook_url}
 chown 0 "$RECIPE_SECRETS_DIR"/{tls_cert,tls_key}
 chmod 0400 "$RECIPE_SECRETS_DIR"/{tls_cert,tls_key}
 chown 0 "$RECIPE_SECRETS_DIR"/{app_password,migrator_password}
@@ -557,6 +558,12 @@ Copy these host files too, with the same protection:
 - The image files and the release notes of the running release and of the previous release. A release moves the images as files (ADR-0064 (j), (k)).
 
 Copy the secret files again after the sections "Key rotation", "Certificate rotation", and "Change a database password".
+
+The file `plc_credential_key` is part of the secret backup.
+The database holds the PLC passwords only in encrypted form (ADR-0154).
+Without the key file, a restore cannot read the stored PLC passwords.
+The key has no rotation (ADR-0154). A new key makes every stored PLC password unreadable.
+An operator must then type each PLC password again.
 
 The audit copy of step 8 of "Restore into production" is the off-site copy of a set.
 That set has a later dump time than the set that you restore.
@@ -1163,6 +1170,7 @@ A rollback needs the images of the previous release. See the section "Keep the i
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.
 6. Run steps 6 and 7 of the section "Create the environment file". The image tags show the new tag.
+   Then do the steps of "Key file of step 6".
 7. If the plant has a device, use steps 1 to 3 of "A plant device in front of Caddy" again.
 8. Run `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`.
    - In the first release with the mount of ADR-0103 (l), this command replaces `db` once on the same volume.
@@ -1215,6 +1223,44 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
 23. Run the four commands of the list below, while the new `app` serves.
 24. Run the [Recovery drill](#recovery-drill) after the four commands pass (ADR-0106 (o)).
+
+Key file of step 6 (ADR-0154):
+The new `app` refuses to start when the file `plc_credential_key` is missing or has a wrong form.
+A release before this change has no such file. Run the steps before step 8, so `docker compose up` finds the file.
+Never replace an existing file. A new key makes every stored PLC password unreadable.
+
+1. Create the file when it does not exist:
+
+```bash
+[ -e "$RECIPE_SECRETS_DIR/plc_credential_key" ] || ( umask 077 && openssl rand -hex 32 > "$RECIPE_SECRETS_DIR/plc_credential_key" )
+```
+
+2. Set the owner and the mode of the file:
+
+```bash
+chown 65532 "$RECIPE_SECRETS_DIR/plc_credential_key"
+chmod 0400 "$RECIPE_SECRETS_DIR/plc_credential_key"
+```
+
+3. Read the size of the file. Check that the output is `64` or `65`. The value `65` includes the final line feed:
+
+```bash
+stat -c '%s' "$RECIPE_SECRETS_DIR/plc_credential_key"
+```
+
+4. Count the lines that hold 64 lower-case hex characters. Check that the output is `1`:
+
+```bash
+grep -c -E '^[0-9a-f]{64}$' "$RECIPE_SECRETS_DIR/plc_credential_key"
+```
+
+5. Read the owner and the mode. Check that the output is `400 65532`:
+
+```bash
+stat -c '%a %u' "$RECIPE_SECRETS_DIR/plc_credential_key"
+```
+
+6. Stop the upgrade when a check fails. Do not run `docker compose up` before the file passes.
 
 Installation of step 2 (ADR-0105 (e), (i)):
 Each release has its own directory `deploy/`. Keep the directory of the running release unchanged. A major upgrade needs it.
@@ -1618,6 +1664,7 @@ The old volume stays unchanged.
 ## Key rotation
 
 The files `login_hmac_key` and `csrf_signing_key` hold one key per line, the newest key first (ADR-0035).
+The file `plc_credential_key` is not part of this section. It holds one key and has no rotation (ADR-0154).
 
 1. Run the command below once for each key file. Use `login_hmac_key` and `csrf_signing_key` for `<name>`.
 
@@ -1780,7 +1827,7 @@ docker compose logs --no-log-prefix db | grep -B1 -E "PASSWORD +E?'" | grep -o -
 
 ## Change a setting
 
-The server `app` reads 17 configuration keys from its environment. It derives the 18th key, `alerts.webhook_url`, from the webhook file (ADR-0062 (a), ADR-0063 (c)).
+The server `app` reads 18 configuration keys from its environment and derives `alerts.webhook_url` from the webhook file (ADR-0062 (a), ADR-0063 (c)). The table `app_setting` records 18 keys, and `security.plc_credential_key_file` is not one of them (ADR-0154).
 The file `compose.yaml` holds the environment entries of `app`. An entry has the form `RECIPE_<SECTION>__<NAME>`, with a double underscore between the parts.
 For example, the key `approval.separation_of_duties` is the entry `RECIPE_APPROVAL__SEPARATION_OF_DUTIES`.
 
@@ -1798,6 +1845,7 @@ These keys have a procedure:
 | Add a trusted proxy | `http.trusted_proxies`, a comma list of networks | Section "A plant device in front of Caddy" |
 | Change or disable the webhook | The file named by `alerts.webhook_url_file` | Sections "Change the webhook" and "Disable the webhook" |
 | Change the login or CSRF key | The files named by `security.login_hmac_key_file` and `security.csrf_signing_key_file` | Section "Key rotation" |
+| Keep the PLC credential key | The file named by `security.plc_credential_key_file` | Sections "Create the secret files" and "Upgrade". The key has no rotation (ADR-0154) |
 | Change the password of the role `recipe_app` | The file named by `secrets.app_password_file` | Section "Change a database password" |
 
 No document describes a change of the other keys. These are `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port`.

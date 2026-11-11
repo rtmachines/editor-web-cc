@@ -20,14 +20,15 @@ pub use requirement::Requirement;
 impl Operation {
     /// Return true when the operation still runs in read-only mode (Assumption A24).
     ///
-    /// Every query runs. Of the commands, only `Login`, `Logout`, and the two exports run.
+    /// Every query runs. Of the commands, only `Login`, `Logout`, the two version exports, and `ExportPlcConnection` run.
     #[must_use]
     pub const fn runs_in_read_only(self) -> bool {
         match self {
             Self::Login
             | Self::Logout
             | Self::ExportApprovedVersion
-            | Self::ExportVersionByNumber => true,
+            | Self::ExportVersionByNumber
+            | Self::ExportPlcConnection => true,
             other => !other.is_command(),
         }
     }

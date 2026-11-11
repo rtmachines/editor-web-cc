@@ -59,6 +59,27 @@ fn error_mapping_range_and_address_codes_give_status_422() {
 }
 
 #[test]
+fn error_mapping_connection_codes_give_status_422_or_404() {
+    for text in [
+        "E-PLT-022",
+        "E-PLT-023",
+        "E-PLT-024",
+        "E-PLT-025",
+        "E-PLT-026",
+        "E-PLT-028",
+    ] {
+        let code = ErrorCode::find(text).unwrap();
+        assert_eq!(status_of(code), StatusCode::UNPROCESSABLE_ENTITY, "{text}");
+        assert!(!is_database_rule(code), "{text}");
+    }
+    for text in ["E-PLT-027", "E-PLT-029"] {
+        let code = ErrorCode::find(text).unwrap();
+        assert_eq!(status_of(code), StatusCode::NOT_FOUND, "{text}");
+        assert!(!is_database_rule(code), "{text}");
+    }
+}
+
+#[test]
 fn error_mapping_database_rule_codes_are_defects() {
     for text in [
         "E-DB-003",

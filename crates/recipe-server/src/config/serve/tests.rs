@@ -8,11 +8,16 @@ use std::path::Path;
 use anyhow::Result;
 use figment::Figment;
 use figment::providers::Serialized;
+use recipe_app::ports::CredentialCipher;
+use recipe_domain::plant::{MachineId, PlcPassword};
 use recipe_domain::setting::SettingValue;
 use serde::Serialize;
+use uuid::Uuid;
 
 use super::{DEV_BUILD, RawServe, SERVE_ENV_KEYS, ServeConfig, check_secure, load_with};
+use crate::config::plc_key_file::parse_plc_key_file;
 use crate::config::test_support::Sandbox;
+use crate::credential_cipher::AesGcmCipher;
 use crate::serve::Plan;
 
 pub(super) const KEY_A: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -45,8 +50,11 @@ const KEYS: [&str; 18] = [
     "i18n.translation_langs",
 ];
 
-/// The environment names of design D7. The derived key has none.
-const ENV_NAMES: [&str; 17] = [
+/// The environment names of design D7 and of the PLC credential key. The derived key has none.
+///
+/// The key `security.plc_credential_key_file` is read by `serve`, but `app_setting` does not
+/// record it (ADR-0062 (a) lists 18 keys), so it is not in `KEYS`.
+const ENV_NAMES: [&str; 18] = [
     "RECIPE_DB__HOST",
     "RECIPE_DB__PORT",
     "RECIPE_DB__NAME",
@@ -54,6 +62,7 @@ const ENV_NAMES: [&str; 17] = [
     "RECIPE_SECRETS__APP_PASSWORD_FILE",
     "RECIPE_SECURITY__LOGIN_HMAC_KEY_FILE",
     "RECIPE_SECURITY__CSRF_SIGNING_KEY_FILE",
+    "RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE",
     "RECIPE_HTTP__TRUSTED_PROXIES",
     "RECIPE_HTTP__PUBLIC_PORT",
     "RECIPE_HTTP__INTERNAL_PORT",
@@ -74,12 +83,14 @@ pub(super) fn text(path: &Path) -> String {
     path.to_str().unwrap().to_owned()
 }
 
-/// A provider with the two key files, which the defaults cannot supply on a test host.
+/// A provider with the three key files, which the defaults cannot supply on a test host.
 pub(super) fn base(dir: &Sandbox) -> Figment {
     let login = dir.write("login_key", &format!("{KEY_A}\n"));
     let csrf = dir.write("csrf_key", &format!("{KEY_B}\n"));
+    let plc = dir.write("plc_key", &format!("{KEY_A}\n"));
     let figment = set(Figment::new(), "security.login_hmac_key_file", text(&login));
-    set(figment, "security.csrf_signing_key_file", text(&csrf))
+    let figment = set(figment, "security.csrf_signing_key_file", text(&csrf));
+    set(figment, "security.plc_credential_key_file", text(&plc))
 }
 
 pub(super) fn load(figment: Figment) -> Result<ServeConfig> {
@@ -134,10 +145,14 @@ fn serve_environment_names_are_those_of_design_d7() {
         .collect();
 
     assert_eq!(SERVE_ENV_KEYS.to_vec(), expected);
-    for (name, key) in ENV_NAMES
+    let mut read_keys: Vec<&str> = KEYS
         .iter()
-        .zip(KEYS.iter().filter(|k| **k != "alerts.webhook_url"))
-    {
+        .copied()
+        .filter(|key| *key != "alerts.webhook_url")
+        .collect();
+    read_keys.insert(7, "security.plc_credential_key_file");
+    assert_eq!(read_keys.len(), ENV_NAMES.len());
+    for (name, key) in ENV_NAMES.iter().zip(read_keys) {
         assert_eq!(
             name.strip_prefix("RECIPE_").unwrap().to_lowercase(),
             key.replace('.', "__")
@@ -214,6 +229,10 @@ fn serve_default_texts_are_in_the_rows_of_reliability_7_11() {
         "security.csrf_signing_key_file",
         "`/run/secrets/csrf_signing_key`",
     );
+    assert_row(
+        "security.plc_credential_key_file",
+        "`/run/secrets/plc_credential_key`",
+    );
     assert_row("http.trusted_proxies", "`172.28.0.2/32`");
     assert_row("http.public_port` / `http.internal_port", "8080 / 9000");
     assert_row("approval.separation_of_duties", "`true`");
@@ -234,9 +253,13 @@ fn serve_default_texts_are_in_the_rows_of_reliability_7_11() {
         raw.security.csrf_signing_key_file,
         "/run/secrets/csrf_signing_key"
     );
+    assert_eq!(
+        raw.security.plc_credential_key_file,
+        "/run/secrets/plc_credential_key"
+    );
 }
 
-/// Set the 17 operator keys to values that differ from every default.
+/// Set the operator keys to values that differ from every default.
 ///
 /// The two key files already come from `base`. This function keeps their sandbox paths.
 fn set_every_key(figment: Figment, hook: &Path, ca: &Path) -> Figment {
@@ -367,6 +390,7 @@ fn serve_value_over_1000_characters_names_the_key() {
         "secrets.app_password_file",
         "security.login_hmac_key_file",
         "security.csrf_signing_key_file",
+        "security.plc_credential_key_file",
         "alerts.webhook_url_file",
         "alerts.webhook_ca_file",
     ]
@@ -510,27 +534,47 @@ fn serve_plan_from_config_keeps_each_key_ring_and_the_values_of_the_config() {
     let figment = set(figment, "approval.separation_of_duties", false);
     let config = load(figment).unwrap();
 
-    let plan = Plan::from_config(&config);
+    let login_keys = config.login_keys().clone();
+    let csrf_keys = config.csrf_keys().clone();
+    let configured = config.configured().clone();
+    let langs = config.translation_langs().to_vec();
 
-    let login_tag = config.login_keys().sign(b"m");
-    let csrf_tag = config.csrf_keys().sign(b"m");
+    let plan = Plan::from_config(config);
+
+    let login_tag = login_keys.sign(b"m");
+    let csrf_tag = csrf_keys.sign(b"m");
     assert_ne!(login_tag, csrf_tag, "the two key files must differ");
     assert!(plan.login_keys.verify(b"m", &login_tag));
     assert!(!plan.login_keys.verify(b"m", &csrf_tag));
     assert!(plan.csrf_keys.verify(b"m", &csrf_tag));
     assert!(!plan.csrf_keys.verify(b"m", &login_tag));
     let planned = plan.configured.canonical().unwrap();
-    assert_eq!(planned, config.configured().canonical().unwrap());
+    assert_eq!(planned, configured.canonical().unwrap());
     assert_eq!(plan.configured.public_port, 8081);
     assert_eq!(plan.configured.internal_port, 9001);
     assert!(plan.webhook_url.is_some());
     let proxies = &plan.settings.web.trusted_proxies;
     assert!(proxies.contains("10.1.2.3".parse().unwrap()));
     assert!(!proxies.contains("172.28.0.2".parse().unwrap()));
-    assert_eq!(
-        plan.settings.web.translation_langs,
-        config.translation_langs()
-    );
+    assert_eq!(plan.settings.web.translation_langs, langs);
     assert_eq!(plan.settings.identity.session_idle_timeout.as_secs(), 600);
     assert!(!plan.settings.app.approval_policy.separation_of_duties);
+}
+
+#[test]
+fn serve_plan_from_config_holds_the_cipher_of_the_plc_key_file() {
+    let dir = Sandbox::new();
+    let config = load(base(&dir)).unwrap();
+    let machine = MachineId::from(Uuid::from_u128(1));
+
+    let plan = Plan::from_config(config);
+
+    let sealed = plan
+        .credential_cipher
+        .seal(machine, &PlcPassword::parse("S3cret-PLC").unwrap())
+        .unwrap();
+    let reference = AesGcmCipher::new(&parse_plc_key_file(KEY_A).unwrap().into_cipher_key());
+    let opened = reference.open(machine, &sealed).unwrap();
+    assert_eq!(opened.expose(), "S3cret-PLC");
+    assert!(!format!("{plan:?}").contains("0123456789"));
 }

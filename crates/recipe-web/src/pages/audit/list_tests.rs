@@ -3,7 +3,13 @@
 
 use axum::http::StatusCode;
 use recipe_app::blocking::{AppSettings, PageSizes};
-use recipe_domain::audit::SecurityEventKind;
+use recipe_app::ports::{Isolation, NonEmpty, UnitOfWork};
+use recipe_domain::audit::{
+    AuditContext, AuditEntry, AuditTarget, RequestId, RowAction, RowChange, SecurityEventKind,
+};
+use recipe_domain::plant::{MachineId, PlcConnectionId};
+use serde_json::json;
+use uuid::Uuid;
 
 use super::test_world::{
     AuditWorld, TIME_CELL, admin_main, assert_object_cells_mark_the_label, audit_world,
@@ -103,11 +109,15 @@ async fn audit_list_selects_offer_all_values_to_an_administrator_and_the_recipe_
     let world = audit_world().await;
     let admin = world.get_en(&world.data.admin, "/audit").await;
     let form = filter_form(main_of(&admin.body));
-    // Every type, 8 types, every action, 35 actions.
-    assert_eq!(form.matches("<option value=\"").count(), 45, "{form}");
+    // Every type, 9 types, every action, 37 actions.
+    assert_eq!(form.matches("<option value=\"").count(), 48, "{form}");
     assert_eq!(form.matches("<optgroup label=\"").count(), 5, "{form}");
     assert!(
         form.contains("<option value=\"plc_type\">PLC type</option>"),
+        "{form}"
+    );
+    assert!(
+        form.contains("<option value=\"plc_connection\">PLC connection</option>"),
         "{form}"
     );
     let engineer = world.get_en(&world.data.anowak, "/audit").await;
@@ -124,6 +134,51 @@ async fn audit_list_selects_offer_all_values_to_an_administrator_and_the_recipe_
     assert!(!form.contains("value=\"UserCreated\""), "{form}");
     assert!(!main.contains("/security-events"), "{main}");
     assert!(!main.contains("Machine "), "{main}");
+}
+
+/// Commit one `PlcConnectionSet` entry of a connection record of machine 1 into the store of `world`.
+async fn commit_plc_connection_set(world: &AuditWorld) {
+    let target = AuditTarget::plc_connection(
+        PlcConnectionId::from(Uuid::from_u128(0x9c)),
+        MachineId::from(Uuid::from_u128(0x9d)),
+    );
+    let entry = AuditEntry::row(
+        RowAction::PlcConnectionSet,
+        target,
+        RowChange::Create {
+            after: json!({"host": "10.0.0.5"}),
+        },
+        AuditContext {
+            actor: None,
+            request_id: RequestId::from(Uuid::from_u128(0x9e)),
+            client_ip: None,
+            session_ref: None,
+        },
+    );
+    let uow: &dyn UnitOfWork = &world.fixture.store;
+    let tx = uow.begin(Isolation::ReadCommitted).await.unwrap();
+    uow.commit(tx, NonEmpty::new(entry)).await.unwrap();
+}
+
+#[tokio::test]
+async fn audit_list_shows_a_plc_connection_set_row_with_the_entity_word_in_both_languages() {
+    let world = audit_world().await;
+    commit_plc_connection_set(&world).await;
+
+    for (lang, entity, action) in [
+        ("en", "PLC connection", "PLC connection saved"),
+        ("pl", "Połączenie PLC", "Zapis połączenia PLC"),
+    ] {
+        let reply = world.get(&world.data.admin, lang, "/audit").await;
+
+        assert_eq!(reply.status, StatusCode::OK, "{lang}: {}", reply.body);
+        let main = main_of(&reply.body);
+        let (_head, table) = main.split_once("<tbody>").unwrap();
+        let first = table.split("</tr>").next().unwrap();
+        assert!(first.contains(entity), "{lang}: {first}");
+        assert!(first.contains(action), "{lang}: {first}");
+        assert!(!first.contains("audit-entity-"), "{lang}: {first}");
+    }
 }
 
 #[tokio::test]

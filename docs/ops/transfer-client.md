@@ -13,7 +13,8 @@ The examples use the placeholders `recipe.example`, `M12`, `R-100`, and `U1.2`.
 - [Rotate the password](#rotate-the-password)
 - [Trust the CA and use port 443](#trust-the-ca-and-use-port-443)
 - [Send the header on every request](#send-the-header-on-every-request)
-- [The three routes](#the-three-routes)
+- [The four routes](#the-four-routes)
+- [Read the connection document](#read-the-connection-document)
 - [Poll for a change](#poll-for-a-change)
 - [Check a document before a load](#check-a-document-before-a-load)
 - [Handle the response codes](#handle-the-response-codes)
@@ -28,7 +29,7 @@ The client needs these items:
 - The login and the password of an account with the role `ExportClient`.
 - A route from the client host to TCP port 443 of the editor.
 
-The client uses HTTP Basic on the three routes of this guide.
+The client uses HTTP Basic on the four routes of this guide.
 The client never uses the session cookie and never opens the UI.
 The account of the client holds only the permission `VersionExport`.
 It cannot log in to the UI, and it cannot change data.
@@ -129,10 +130,10 @@ The client sends no `HX-Request` header and no `Sec-Fetch-Site` header other tha
 A navigation guard refuses such a request with `403 E-WEB-007` before the password check.
 A program that is not a browser sends neither header.
 
-## The three routes
+## The four routes
 
-All three routes use `GET` and return `application/json`.
-The scheme of all three routes is HTTP Basic.
+All four routes use `GET` and return `application/json`.
+The scheme of all four routes is HTTP Basic.
 A request with a session cookie but without `Authorization` gets `401 E-WEB-012`.
 
 | Route | Result |
@@ -140,6 +141,7 @@ A request with a session cookie but without `Authorization` gets `401 E-WEB-012`
 | `GET /export/v1/machines/{code}/recipes` | The list of the recipes of the machine that have an `Approved` version. Writes no audit entry |
 | `GET /export/v1/machines/{code}/recipes/{ref}/approved` | The v1 document of the `Approved` version of one recipe |
 | `GET /export/v2/machines/{code}/recipes/{ref}/approved/units/{path}` | The v2 document of one unit and its descendant units |
+| `GET /export/v1/machines/{code}/connection?recipe={ref}` | The PLC connection record of the machine, with the PLC password. Writes the audit entry `PlcConnectionExported` |
 
 The list body has the object `machine` and the array `recipes[]`.
 The object `machine` holds `code`, `plc_platform`, and `archived`.
@@ -160,12 +162,45 @@ curl --fail-with-body --cacert plant-ca.pem --user "$AUTH" \
 
 curl --fail-with-body --cacert plant-ca.pem --user "$AUTH" \
   "$BASE/export/v2/machines/M12/recipes/R-100/approved/units/U1.2"
+
+curl --fail-with-body --cacert plant-ca.pem --user "$AUTH"   "$BASE/export/v1/machines/M12/connection?recipe=R-100"
 ```
 
 The machine code names the live machine with that code.
 When no live machine has the code, it names the archived machine that the system archived last.
 A unit path is `U` and 1 to 5 numbers with a dot between two numbers.
-A recipe of another machine gives `404 E-WEB-005`.
+A recipe of another machine gives `404 E-WEB-005` on the recipe routes.
+The connection route gives `404 E-PLT-029` for such a recipe.
+
+## Read the connection document
+
+The connection route gives the PLC connection record of one machine to the client.
+The body holds the fields `schema_version`, `machine`, `recipe`, `row_version`, and `connection` in this order.
+The object `connection` holds only the fields of the platform of the machine.
+An S7 platform gives `host`, `rack`, `slot`, and `db_number`.
+`CodesysIec` and `TwinCat3` give `host`, `port`, `address`, and `comm_mode`.
+The fields `login` and `password` exist only when the record has credentials.
+
+The route needs the query value `recipe`.
+Its value is the reference number of the recipe that the client loads, for example `R-100`.
+The recipe must belong to the machine of `{code}`.
+A recipe of another machine gives `404 E-PLT-029`.
+A missing, malformed, or unknown `recipe` gives `404 E-WEB-005`.
+A machine without a connection record gives `404 E-PLT-027`.
+An archived machine gives `409 E-PLT-010`.
+
+The field `db_number` is the default data block of the machine.
+The adapter uses `db_number` only for a parameter without `s7_address`.
+A parameter with `s7_address` keeps the data block of its address.
+The connection record never changes an address of an export document.
+
+Read the connection document directly before each load.
+Do not cache it.
+The document has no change marker, and a change of the record does not change `content_sha256`.
+The answer has `Cache-Control: no-store` and holds the PLC password in clear text.
+The client keeps the password only in memory.
+Do not write the password to a file or to a log.
+Each read writes the audit entry `PlcConnectionExported`, without the password.
 
 ## Poll for a change
 
@@ -191,6 +226,7 @@ The operator chooses it. The list route writes no audit entry.
 
 The client must check each document before it loads the document into a PLC.
 The checks differ a little for v1 and v2.
+The connection document has no hash, so these checks do not apply to it.
 
 1. Check that `loadable` is `true`.
 2. Build the hashed body from the document with the array order of `api.md` section 6.3.
@@ -221,19 +257,24 @@ Every error body is JSON with the code `E-<CTX>-<nnn>`.
 | `401` | `E-IDN-003` | Unknown login, inactive account, wrong password, or an account of a person. Ask the Administrator. Do not retry in a loop |
 | `403` | `E-WEB-007` | The navigation guard refused the request. Remove the browser headers |
 | `403` | none | Caddy refused a plain HTTP request. Use `https://` and rotate the password |
-| `404` | `E-WEB-005` | No such machine, recipe, or unit. Check the values of the path |
+| `404` | `E-WEB-005` | No such machine, recipe, or unit, or no query value `recipe` on the connection route. Check the request |
 | `404` | `E-EXP-001` | The recipe has no `Approved` version. Do not load |
 | `404` | `E-EXP-005` | The unit has no parameter in its scope. Do not load |
+| `404` | `E-PLT-027` | The machine has no connection record. Ask a user with `MachineManage` to enter it. Do not load |
+| `404` | `E-PLT-029` | The recipe belongs to another machine. Use a recipe of the machine in the path |
+| `409` | `E-PLT-010` | The system archived the machine, so the connection route gives no record. Do not load |
 | `422` | `E-PLT-017`, `E-PLT-002` | The unit path is not valid. Fix the path |
 | `429` | `E-IDN-005` | Too many failed logins. Wait for the seconds in `Retry-After`, then retry |
 | `500` | `E-EXP-002` | The content hash does not match. Do not load. Tell the Administrator |
 | `500` | `E-EXP-004` | The server cannot create the document. Tell the Administrator |
+| `500` | `E-WEB-014` | The server cannot read the stored PLC password. The answer has no password. Do not load. Tell the Administrator |
+| `500` | `E-AUD-001` | The server cannot write the audit entry. The answer has no password. Do not load. Tell the Administrator |
 | `503` | `E-WEB-009` | The request took too long or no hash permit was free. Wait for `Retry-After`, then retry |
 
 A wrong password counts as a failed login.
 The login delay and the budget per address of the UI login also apply to the Basic check.
 A client with a wrong password therefore gets slower answers. After 100 failed attempts in 15 minutes, the address gets `429 E-IDN-005` for every login.
-In read-only mode, the three routes stay available, so the client gets no `503 E-WEB-006`.
+In read-only mode, the four routes stay available, so the client gets no `503 E-WEB-006`.
 
 Every `401` answer has the header `WWW-Authenticate: RecipeExport realm="export"`.
 The answer language follows the request.
@@ -243,6 +284,7 @@ Do not parse the message. Use the code.
 ## Related
 
 - [ADR-0109](../adr/0109-export-api-for-transfer-clients.md): Export API for transfer clients with HTTP Basic
-- [api.md](../architecture/api.md): sections 2.7, 6, and 7.7
+- [ADR-0154](../adr/0154-plc-connection-settings.md): PLC connection settings of a machine
+- [api.md](../architecture/api.md): sections 2.7, 6, and 7.7. Section 6.5 gives the connection document
 - [reliability.md](../architecture/reliability.md): section 1.2 for the error codes, section 7.11 for the settings
 - [Runbook](runbook.md): certificate rotation and a plant device in front of Caddy

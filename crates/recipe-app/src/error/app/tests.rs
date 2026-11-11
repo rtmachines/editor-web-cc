@@ -1,7 +1,7 @@
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
 use recipe_domain::identity::{IdentityError, Login};
-use recipe_domain::plant::{MachineCode, MachineId, PlantError, TypeName, UnitPath};
+use recipe_domain::plant::{MachineCode, MachineId, PlantError, PlantErrors, TypeName, UnitPath};
 use recipe_domain::recipe::{DraftError, RecipeError, RecipeErrors, ReferenceNumber};
 use uuid::Uuid;
 
@@ -286,4 +286,42 @@ fn missing_entities_display_their_text() {
     for (missing, text) in cases {
         assert_eq!(missing.to_string(), text);
     }
+}
+
+#[test]
+fn the_connection_edit_conflict_gives_web_013_and_names_the_machine() {
+    let error = AppError::ConnectionConcurrentEdit {
+        code: machine_code(),
+        expected: 1,
+        actual: 2,
+    };
+    assert_eq!(error.code(), ErrorCode::WEB_013);
+    assert_eq!(
+        error.to_string(),
+        "Another user changed the connection settings of machine M12. Reload the page and apply your change again."
+    );
+}
+
+#[test]
+fn the_unreadable_secret_gives_web_014_and_names_only_the_machine() {
+    let error = AppError::SecretUnreadable {
+        code: machine_code(),
+    };
+    assert_eq!(error.code(), ErrorCode::WEB_014);
+    assert_eq!(
+        error.to_string(),
+        "The server cannot read the stored PLC password of machine M12. Enter the password again or contact the administrator."
+    );
+}
+
+#[test]
+fn plant_errors_keep_the_code_of_the_first_entry() {
+    let mut list = PlantErrors::from(PlantError::ConnectionFieldMissing {
+        code: machine_code(),
+        field: "host",
+    });
+    list.push(plant_error());
+    let error = AppError::from(list);
+    assert!(matches!(error, AppError::Plants(_)));
+    assert_eq!(error.code(), ErrorCode::PLT_023);
 }

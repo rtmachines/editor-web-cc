@@ -12,9 +12,9 @@ use crate::error::StorageError;
 use crate::memory::fixtures::Fixture;
 use crate::ports::{
     AttemptRepository, AuditReads, AuditWritten, DiffReads, DraftRepository, InsertedMachine,
-    Isolation, Locked, MachineFilter, MachineSummary, NonEmpty, PlantRepository, RecipeReads,
-    RecipeRepository, RowImage, SessionRepository, SettingRepository, Transaction, TypeCatalog,
-    UnitLookup, UnitOfWork, UserRepository,
+    Isolation, Locked, MachineFilter, MachineSummary, NonEmpty, PlantRepository, PlcConnections,
+    RecipeReads, RecipeRepository, RowImage, SessionRepository, SettingRepository, Transaction,
+    TypeCatalog, UnitLookup, UnitOfWork, UserRepository,
 };
 
 /// A unit of work whose transactions drop the last row image of `insert_machine` and `archive_units`.
@@ -59,6 +59,10 @@ impl Transaction for ShortRowsTransaction {
 
     fn plant(&mut self) -> &mut dyn PlantRepository {
         self
+    }
+
+    fn plc_connections(&mut self) -> &mut dyn PlcConnections {
+        self.inner.plc_connections()
     }
 
     fn units(&mut self) -> &mut dyn UnitLookup {

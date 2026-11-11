@@ -41,9 +41,31 @@ const PLANT_RENAME: Cover =
 const PLANT_UNIT_REFUSED: Cover =
     Cover::Corpus("plant_xss_unit_fields_that_the_server_refuses_give_their_error_code");
 
+const PLC_NUMBER: Cover = Cover::NoText(
+    "A number. A bad text gives a form error without the sent text. The form shows a number only.",
+);
+const PLC_GRAMMAR: Cover = Cover::NoText(
+    "A value object with a closed grammar parses it. A bad text gives a form error without the sent text.",
+);
+const PLC_HOST_TEXT: Cover =
+    Cover::Corpus("connection_xss_host_payloads_are_refused_and_shown_escaped_in_the_form");
+const PLC_FREE_TEXT: Cover =
+    Cover::Corpus("connection_xss_address_and_login_are_stored_and_shown_escaped_on_both_pages");
+const PLC_SECRET: Cover = Cover::NoText(
+    "The password is never shown, echoed, or logged. The form input has no value attribute.",
+);
+
 /// Each field of each `Deserialize` struct of `src/`, with the test or the reason that covers it.
 pub(super) const TABLE: &[Entry] = &[
     ("lang.rs", "LangForm", "lang", LANG),
+    (
+        "pages/export_api/connection.rs",
+        "ConnectionQuery",
+        "recipe",
+        Cover::NoText(
+            "A reference number parses it. A bad text gives 404 E-WEB-005 as JSON without the sent text.",
+        ),
+    ),
     (
         "lang.rs",
         "LangForm",
@@ -149,6 +171,72 @@ pub(super) const TABLE: &[Entry] = &[
     (
         "pages/machines/commands.rs",
         "NameFields",
+        "csrf_token",
+        CSRF,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "row_version",
+        PLC_NUMBER,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "host",
+        PLC_HOST_TEXT,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "rack",
+        PLC_NUMBER,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "slot",
+        PLC_NUMBER,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "db_number",
+        PLC_NUMBER,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "port",
+        PLC_NUMBER,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "address",
+        PLC_FREE_TEXT,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "comm_mode",
+        PLC_GRAMMAR,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "login",
+        PLC_FREE_TEXT,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
+        "password",
+        PLC_SECRET,
+    ),
+    (
+        "pages/machines/connection_request.rs",
+        "ConnectionRequest",
         "csrf_token",
         CSRF,
     ),

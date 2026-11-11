@@ -103,6 +103,12 @@ const ENV_ROWS: &[(&str, &str, &str, Bare)] = &[
     ),
     (
         "app",
+        "RECIPE_SECURITY__PLC_CREDENTIAL_KEY_FILE",
+        "security.plc_credential_key_file",
+        Bare::Plain,
+    ),
+    (
+        "app",
         "RECIPE_HTTP__PUBLIC_PORT",
         "http.public_port",
         Bare::Plain,

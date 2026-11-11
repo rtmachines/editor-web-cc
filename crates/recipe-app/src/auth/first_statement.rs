@@ -6,6 +6,7 @@
 //! role holds `VersionExport`. `purpose_tests.rs` holds the tests of the form queries (ADR-0046).
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
@@ -23,10 +24,12 @@ use crate::identity::{
     ActivateUser, CreateUser, CreateUserInput, DeactivateUser, GetUser, GetUserForm, ListUsers,
     ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin,
 };
+use crate::memory::MemoryCredentialCipher;
 use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
     AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
+    SetPlcConnection,
 };
 use crate::ports::{AuditEntryId, AuditFilter, TimeRange};
 use crate::recipe::{
@@ -105,6 +108,23 @@ async fn archive_machine_checks_the_permission_first() {
         result,
         ArchiveMachine::OPERATION,
         "ArchiveMachine",
+    );
+}
+
+#[tokio::test]
+async fn set_plc_connection_checks_the_permission_first() {
+    let fixture = scenarios::plant();
+    let result = SetPlcConnection::new(
+        fixture.context(),
+        Arc::new(MemoryCredentialCipher::default()),
+    )
+    .execute(&operator(), &meta(), scenarios::set_plc_connection_input())
+    .await;
+    assert_refused(
+        &fixture,
+        result,
+        SetPlcConnection::OPERATION,
+        "SetPlcConnection",
     );
 }
 

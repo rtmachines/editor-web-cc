@@ -10,10 +10,12 @@ use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use recipe_app::auth::Operation;
-use recipe_app::plant::{GetMachine, GetMachineInput, MachineRef, MachineView};
+use recipe_app::plant::{GetMachine, GetMachineInput, MachineConnection, MachineRef, MachineView};
+use recipe_domain::plant::PlcConnection;
 use serde::Deserialize;
 
 use super::commands::RenameForm;
+use super::connection::mode_key;
 use super::tree::{Scope, UnitTree};
 use super::{platform_text, query_values};
 use crate::error::WebError;
@@ -31,10 +33,64 @@ pub(crate) struct CodeQuery {
     archived: Option<String>,
 }
 
+/// The record of the PLC connection as the page shows it: the labelled values of the platform shape.
+///
+/// The type solves one problem: the page shows the record and the password state, and a template
+/// cannot show a password. The type holds no password and no sealed text, only the label and the
+/// value of each row (R31, A47).
+struct ConnectionRows {
+    rows: Vec<(String, String)>,
+}
+
+impl ConnectionRows {
+    /// Build the rows of `stored`. The password row of an IEC record shows the state only.
+    fn new(t: Texts<'_>, stored: &MachineConnection) -> Self {
+        let row = |key: &str, value: String| (t.get(key), value);
+        let rows = match &stored.connection {
+            PlcConnection::S7 {
+                host,
+                rack,
+                slot,
+                db_number,
+            } => vec![
+                row("field-plc-host", host.to_string()),
+                row("field-plc-rack", rack.value().to_string()),
+                row("field-plc-slot", slot.value().to_string()),
+                row("field-plc-db-number", db_number.value().to_string()),
+            ],
+            PlcConnection::Iec {
+                host,
+                port,
+                address,
+                mode,
+                login,
+            } => {
+                let state = if stored.password_set {
+                    "machine-connection-password-stored"
+                } else {
+                    "machine-connection-password-none"
+                };
+                let mut rows = vec![
+                    row("field-plc-host", host.to_string()),
+                    row("field-plc-port", port.value().to_string()),
+                    row("field-plc-address", address.to_string()),
+                    row("field-plc-comm-mode", t.get(mode_key(*mode))),
+                ];
+                if let Some(login) = login {
+                    rows.push(row("field-plc-login", login.to_string()));
+                }
+                rows.push(row("field-plc-password", t.get(state)));
+                rows
+            }
+        };
+        Self { rows }
+    }
+}
+
 /// The page `machine.html`.
 ///
 /// The type solves one problem: one template shows a live machine with its forms and an archived
-/// machine without them. The flags `can_archive`, `can_add`, and `form.shown` are true only for a
+/// machine without them. The flags `can_archive`, `can_add`, `can_edit_connection`, and `form.shown` are true only for a
 /// live machine and only when `PageRequest::may_run` permits the command (ADR-0113).
 #[derive(Template)]
 #[template(path = "machine.html")]
@@ -46,10 +102,15 @@ struct MachinePage<'a> {
     platform: String,
     archived_at: Option<String>,
     tree: UnitTree,
+    /// The stored connection, or `None` when the machine has no record.
+    connection: Option<ConnectionRows>,
     live: bool,
     can_archive: bool,
     can_add: bool,
+    /// True for a live machine when `PageRequest::may_run` permits `SetPlcConnection`.
+    can_edit_connection: bool,
     types_href: String,
+    connection_href: String,
     recipes_href: String,
     add_href: String,
     archive_action: String,
@@ -93,10 +154,16 @@ impl<'a> MachinePage<'a> {
                 None,
                 live,
             ),
+            connection: view
+                .connection
+                .as_ref()
+                .map(|stored| ConnectionRows::new(t, stored)),
             live,
             can_archive: allows(Operation::ArchiveMachine)?,
             can_add: allows(Operation::AddUnit)?,
+            can_edit_connection: allows(Operation::SetPlcConnection)?,
             types_href: format!("/machines/{code}/types"),
+            connection_href: format!("/machines/{code}/connection/edit"),
             recipes_href: format!("/recipes?machine={code}"),
             add_href: format!("/machines/{code}/units/new"),
             archive_action: format!("/machines/{code}/archive"),

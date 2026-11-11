@@ -11,11 +11,12 @@ use std::path::Path;
 /// The query files and their text. A new query file needs a row here.
 /// The test `every_file_with_an_execute_function_is_listed` fails without it.
 /// The test files (`*_tests.rs`) are not query files.
-const SOURCES: [(&str, &str); 4] = [
+const SOURCES: [(&str, &str); 5] = [
     ("usage.rs", include_str!("usage.rs")),
     ("machines.rs", include_str!("machines.rs")),
     ("units.rs", include_str!("units.rs")),
     ("types.rs", include_str!("types.rs")),
+    ("plc_connection.rs", include_str!("plc_connection.rs")),
 ];
 
 /// The text that starts the signature of the function that a query exposes.

@@ -20,17 +20,20 @@ pub(crate) use ensure_derived::DerivedTypes;
 pub(crate) use queries::{expr_names_row, type_text};
 mod rename_unit;
 mod resolve;
+mod set_plc_connection;
 
 pub use add_unit::{AddUnit, AddUnitInput, AddUnitOutput};
 pub use archive_machine::{ArchiveMachine, ArchiveMachineInput, ArchiveMachineOutput};
 pub use archive_unit::{ArchiveUnit, ArchiveUnitInput, ArchiveUnitOutput};
 pub use create_machine::{CreateMachine, CreateMachineInput, CreateMachineOutput};
 pub use queries::{
-    GetMachine, GetMachineForm, GetMachineInput, GetTypeTree, GetTypeUsage, GetUdtForm, GetUnit,
-    GetUnitForm, GetUnitTree, ListMachines, ListMachinesInput, ListTypes, MachineForm,
-    MachineFormInput, MachineList, MachineRef, MachineView, TypeList, TypeListRow, TypeRef,
-    TypeUsage, TypeUsageInput, TypeUsageLine, TypeView, TypesInput, UdtForm, UdtFormInput,
-    UnitForm, UnitFormInput, UnitRef, UnitTreeInput, UnitView,
+    GetMachine, GetMachineForm, GetMachineInput, GetPlcConnectionForm, GetTypeTree, GetTypeUsage,
+    GetUdtForm, GetUnit, GetUnitForm, GetUnitTree, ListMachines, ListMachinesInput, ListTypes,
+    MachineConnection, MachineForm, MachineFormInput, MachineList, MachineRef, MachineView,
+    PlcConnectionForm, PlcConnectionFormInput, TypeList, TypeListRow, TypeRef, TypeUsage,
+    TypeUsageInput, TypeUsageLine, TypeView, TypesInput, UdtForm, UdtFormInput, UnitForm,
+    UnitFormInput, UnitRef, UnitTreeInput, UnitView,
 };
 pub use rename_machine::{RenameMachine, RenameMachineInput, RenameMachineOutput};
 pub use rename_unit::{RenameUnit, RenameUnitInput, RenameUnitOutput};
+pub use set_plc_connection::{SetPlcConnection, SetPlcConnectionInput, SetPlcConnectionOutput};

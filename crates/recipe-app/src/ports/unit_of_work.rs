@@ -5,8 +5,8 @@ use recipe_domain::audit::AuditEntry;
 
 use super::{
     AttemptRepository, AuditReads, DiffReads, DraftRepository, Isolation, NonEmpty,
-    PlantRepository, RecipeReads, RecipeRepository, SessionRepository, SettingRepository,
-    TypeCatalog, UnitLookup, UserRepository,
+    PlantRepository, PlcConnections, RecipeReads, RecipeRepository, SessionRepository,
+    SettingRepository, TypeCatalog, UnitLookup, UserRepository,
 };
 use crate::error::{AppError, StorageError};
 
@@ -87,6 +87,8 @@ pub trait Transaction: Send {
     fn drafts(&mut self) -> &mut dyn DraftRepository;
     /// Return the repository of the Machine aggregate in this transaction.
     fn plant(&mut self) -> &mut dyn PlantRepository;
+    /// Return the repository of the PLC connection record in this transaction (ADR-0154).
+    fn plc_connections(&mut self) -> &mut dyn PlcConnections;
 
     /// Return the read port of the units in this transaction.
     fn units(&mut self) -> &mut dyn UnitLookup;

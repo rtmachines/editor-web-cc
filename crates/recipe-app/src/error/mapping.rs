@@ -27,6 +27,10 @@ pub const PLC_TYPE_STRUCT_NAME_CI_UNIQUE: &str = "plc_type_struct_name_ci_unique
 pub const PLC_TYPE_MEMBER_NAME_CI_UNIQUE: &str = "plc_type_member_name_ci_unique";
 /// Unique index of the one live draft of a recipe.
 pub const RECIPE_VERSION_ONE_LIVE_DRAFT: &str = "recipe_version_one_live_draft";
+/// Unique constraint of the PLC connection record of a machine (ADR-0154).
+pub const PLC_CONNECTION_MACHINE_UNIQUE: &str = "plc_connection_machine_unique";
+/// Composite foreign key from a PLC connection record to its machine and platform (ADR-0154).
+pub const PLC_CONNECTION_MACHINE_PLATFORM: &str = "plc_connection_machine_platform";
 /// Foreign key from a unit to its parent unit.
 pub const UNIT_PARENT_EXISTS: &str = "unit_parent_exists";
 
