@@ -81,13 +81,25 @@ pub fn without_times(image: &RowImage) -> Value {
     value
 }
 
-/// The shape of a `machine` image (`data-model.md` section 3.1).
+/// The shape of the `machine` image of an IEC machine (`data-model.md` section 3.1).
+///
+/// The key `db_number` is null.
 pub fn machine_shape(archived: bool) -> Vec<(&'static str, Kind)> {
+    machine_shape_with(archived, Kind::Null)
+}
+
+/// The shape of the `machine` image of an S7 machine. The key `db_number` is a number.
+pub fn s7_machine_shape(archived: bool) -> Vec<(&'static str, Kind)> {
+    machine_shape_with(archived, Kind::Number)
+}
+
+fn machine_shape_with(archived: bool, db_number: Kind) -> Vec<(&'static str, Kind)> {
     vec![
         ("id", Kind::String),
         ("code", Kind::String),
         ("name", Kind::String),
         ("plc_platform", Kind::String),
+        ("db_number", db_number),
         (
             "archived_at",
             if archived { Kind::String } else { Kind::Null },

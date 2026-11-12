@@ -11,7 +11,7 @@ use super::Requirement;
 
 /// Define the enum `Operation` and its accessors from one table.
 ///
-/// The macro solves one problem: three exhaustive matches of 72 arms must not drift apart.
+/// The macro solves one problem: three exhaustive matches of 73 arms must not drift apart.
 macro_rules! operation_catalog {
     (
         count: $count:literal;
@@ -37,7 +37,7 @@ macro_rules! operation_catalog {
         }
 
         impl Operation {
-            /// Every operation: 36 commands and 36 queries.
+            /// Every operation: 37 commands and 36 queries.
             pub const ALL: [Self; $count] = [$(Self::$variant),+];
 
             /// Return the name of the use case.
@@ -72,11 +72,13 @@ macro_rules! operation_catalog {
 }
 
 operation_catalog! {
-    count: 72;
+    count: 73;
     /// Command `CreateMachine`.
     CreateMachine => { name: "CreateMachine", command: true, requires: Requirement::Permission(Permission::MachineManage) },
     /// Command `RenameMachine`.
     RenameMachine => { name: "RenameMachine", command: true, requires: Requirement::Permission(Permission::MachineManage) },
+    /// Command `SetMachineDataBlock`.
+    SetMachineDataBlock => { name: "SetMachineDataBlock", command: true, requires: Requirement::Permission(Permission::MachineManage) },
     /// Command `ArchiveMachine`.
     ArchiveMachine => { name: "ArchiveMachine", command: true, requires: Requirement::Permission(Permission::MachineManage) },
     /// Command `AddUnit`.

@@ -5,7 +5,9 @@ use recipe_app::error::StorageError;
 use recipe_app::ports::{
     InsertedMachine, Locked, MachineFilter, MachineSummary, PlantRepository, RowImage,
 };
-use recipe_domain::plant::{Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage};
+use recipe_domain::plant::{
+    DataBlockNumber, Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage,
+};
 use recipe_domain::text::Text;
 
 use super::PgTransaction;
@@ -71,6 +73,14 @@ impl PlantRepository for PgTransaction {
         name: &Text,
     ) -> Result<RowImage, StorageError> {
         machines::rename(&mut self.tx, id, name).await
+    }
+
+    async fn set_machine_data_block(
+        &mut self,
+        id: MachineId,
+        number: DataBlockNumber,
+    ) -> Result<RowImage, StorageError> {
+        machines::set_data_block(&mut self.tx, id, number).await
     }
 
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {

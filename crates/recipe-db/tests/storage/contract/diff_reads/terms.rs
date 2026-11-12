@@ -112,8 +112,10 @@ async fn s7_plant(h: &dyn Harness, n: u128, code_text: &str) -> Plant {
         code(code_text),
         name("Press"),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit, name("Main unit")),
-    );
+    )
+    .unwrap();
     insert(h, &built).await;
     Plant {
         machine: built.id(),

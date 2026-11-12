@@ -462,8 +462,15 @@ fn plant_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
 
 /// One sample of each connection variant, with the display text of each field.
 fn connection_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
+    let mut samples = connection_samples_settings();
+    samples.extend(connection_samples_mode());
+    samples.extend(connection_samples_machine());
+    samples
+}
+
+/// Samples of the field and range variants.
+fn connection_samples_settings() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
     let code = ("code", machine_code().to_string());
-    let address = PlcAddress::parse("plc-1").unwrap();
     vec![
         (
             PlantError::ConnectionFieldNotOnPlatform {
@@ -485,7 +492,7 @@ fn connection_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
             vec![code.clone(), ("field", "slot".to_owned())],
         ),
         (
-            PlantError::ConnectionDataBlockOutOfRange {
+            PlantError::DataBlockOutOfRange {
                 code: machine_code(),
                 number: 16001,
                 max: 16000,
@@ -496,6 +503,14 @@ fn connection_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
                 ("max", "16000".to_owned()),
             ],
         ),
+    ]
+}
+
+/// Samples of the mode and address variants.
+fn connection_samples_mode() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
+    let code = ("code", machine_code().to_string());
+    let address = PlcAddress::parse("plc-1").unwrap();
+    vec![
         (
             PlantError::CommModeNotOnPlatform {
                 code: machine_code(),
@@ -515,6 +530,13 @@ fn connection_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
             },
             vec![code.clone(), ("address", address.to_string())],
         ),
+    ]
+}
+
+/// Samples of the machine, recipe, and data block variants.
+fn connection_samples_machine() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
+    let code = ("code", machine_code().to_string());
+    vec![
         (
             PlantError::ConnectionNotConfigured {
                 code: machine_code(),
@@ -538,7 +560,21 @@ fn connection_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
                 code: machine_code(),
                 reference: reference(),
             },
-            vec![code, ("reference", reference().to_string())],
+            vec![code.clone(), ("reference", reference().to_string())],
+        ),
+        (
+            PlantError::DataBlockMissing {
+                code: machine_code(),
+                platform: PlcPlatform::S7_1500,
+            },
+            vec![code.clone(), ("platform", PlcPlatform::S7_1500.to_string())],
+        ),
+        (
+            PlantError::DataBlockNotOnPlatform {
+                code: machine_code(),
+                platform: PlcPlatform::TwinCat3,
+            },
+            vec![code, ("platform", PlcPlatform::TwinCat3.to_string())],
         ),
     ]
 }
@@ -548,10 +584,11 @@ fn registry_matches_reliability() {
     let rows = plant_doc_rows();
     let expected: Vec<String> = (1..=6)
         .chain(8..=29)
+        .chain(50..=51)
         .map(|number| format!("E-PLT-{number:03}"))
         .collect();
 
-    // Assertion 1: the doc has the 28 domain rows, in order.
+    // Assertion 1: the doc has the 30 domain rows, in order.
     let doc_codes: Vec<String> = rows.iter().map(|row| row.0.clone()).collect();
     assert_eq!(doc_codes, expected);
 
@@ -562,7 +599,7 @@ fn registry_matches_reliability() {
         .filter(|code| {
             code.strip_prefix("E-PLT-")
                 .and_then(|digits| digits.parse::<u32>().ok())
-                .is_some_and(|number| number < 30)
+                .is_some_and(|number| number < 30 || (50..70).contains(&number))
         })
         .collect();
     assert_eq!(registry, expected);
@@ -591,12 +628,12 @@ fn registry_matches_reliability() {
     }
 }
 
-#[test]
-fn connection_errors_have_their_code_registry_row_and_text() {
-    let code = MachineCode::parse("M7").unwrap();
-    let reference = ReferenceNumber::parse("r-100").unwrap();
+type ConnectionCase = (PlantError, ErrorCode, &'static str, &'static str);
+
+/// Field, mode, and range cases of the connection errors, E-PLT-022 to E-PLT-026.
+fn connection_cases_settings(code: MachineCode) -> Vec<ConnectionCase> {
     let address = PlcAddress::parse("plc-1").unwrap();
-    let cases = [
+    vec![
         (
             PlantError::ConnectionFieldNotOnPlatform {
                 code,
@@ -617,7 +654,7 @@ fn connection_errors_have_their_code_registry_row_and_text() {
             "The connection of machine M7 needs a value in field slot. Enter a value.",
         ),
         (
-            PlantError::ConnectionDataBlockOutOfRange {
+            PlantError::DataBlockOutOfRange {
                 code,
                 number: 16001,
                 max: 16000,
@@ -642,6 +679,13 @@ fn connection_errors_have_their_code_registry_row_and_text() {
             "E-PLT-026",
             "Address plc-1 of machine M7 is not an AMS Net ID. The mode Ads needs an AMS Net ID.",
         ),
+    ]
+}
+
+/// Machine, recipe, and data block cases, E-PLT-027 to E-PLT-051.
+fn connection_cases_machine(code: MachineCode) -> Vec<ConnectionCase> {
+    let reference = ReferenceNumber::parse("r-100").unwrap();
+    vec![
         (
             PlantError::ConnectionNotConfigured { code },
             ErrorCode::PLT_027,
@@ -664,7 +708,33 @@ fn connection_errors_have_their_code_registry_row_and_text() {
             "E-PLT-029",
             "Recipe R-100 does not belong to machine M7. Use a recipe of this machine.",
         ),
-    ];
+        (
+            PlantError::DataBlockMissing {
+                code,
+                platform: PlcPlatform::S7_1500,
+            },
+            ErrorCode::PLT_050,
+            "E-PLT-050",
+            "Machine M7 on platform S7_1500 needs a data block number. Enter a number.",
+        ),
+        (
+            PlantError::DataBlockNotOnPlatform {
+                code,
+                platform: PlcPlatform::TwinCat3,
+            },
+            ErrorCode::PLT_051,
+            "E-PLT-051",
+            "Platform TwinCat3 of machine M7 has no data block number. Delete the number.",
+        ),
+    ]
+}
+
+#[test]
+fn connection_errors_have_their_code_registry_row_and_text() {
+    let code = MachineCode::parse("M7").unwrap();
+    let cases = connection_cases_settings(code)
+        .into_iter()
+        .chain(connection_cases_machine(code));
     for (error, expected, text, message) in cases {
         assert_eq!(error.code(), expected);
         assert_eq!(error.code().as_str(), text);

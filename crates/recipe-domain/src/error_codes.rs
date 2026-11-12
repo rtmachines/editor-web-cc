@@ -58,7 +58,7 @@ impl ErrorCode {
     pub const PLT_022: Self = Self::new("E-PLT-022");
     /// E-PLT-023, `PlantError::ConnectionFieldMissing`.
     pub const PLT_023: Self = Self::new("E-PLT-023");
-    /// E-PLT-024, `PlantError::ConnectionDataBlockOutOfRange`.
+    /// E-PLT-024, `PlantError::DataBlockOutOfRange`.
     pub const PLT_024: Self = Self::new("E-PLT-024");
     /// E-PLT-025, `PlantError::CommModeNotOnPlatform`.
     pub const PLT_025: Self = Self::new("E-PLT-025");
@@ -70,6 +70,10 @@ impl ErrorCode {
     pub const PLT_028: Self = Self::new("E-PLT-028");
     /// E-PLT-029, `PlantError::ConnectionRecipeMismatch`.
     pub const PLT_029: Self = Self::new("E-PLT-029");
+    /// E-PLT-050, `PlantError::DataBlockMissing`.
+    pub const PLT_050: Self = Self::new("E-PLT-050");
+    /// E-PLT-051, `PlantError::DataBlockNotOnPlatform`.
+    pub const PLT_051: Self = Self::new("E-PLT-051");
 
     /// E-RCP-001, `RecipeError::DuplicateReference`.
     pub const RCP_001: Self = Self::new("E-RCP-001");
@@ -356,6 +360,8 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::PLT_036,
     ErrorCode::PLT_037,
     ErrorCode::PLT_038,
+    ErrorCode::PLT_050,
+    ErrorCode::PLT_051,
     ErrorCode::RCP_001,
     ErrorCode::RCP_002,
     ErrorCode::RCP_003,
@@ -432,8 +438,7 @@ fn in_registry_range(code: &str) -> bool {
         return false;
     };
     match context {
-        "PLT" => (1..=49).contains(&number),
-        "RCP" => (1..=69).contains(&number),
+        "PLT" | "RCP" => (1..=69).contains(&number),
         "IDN" | "WEB" => (1..=19).contains(&number),
         "AUD" | "EXP" | "DB" => (1..=9).contains(&number),
         _ => false,

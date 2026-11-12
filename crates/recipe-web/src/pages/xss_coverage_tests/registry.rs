@@ -38,6 +38,9 @@ const PLANT_MACHINE_NAMES: Cover =
     Cover::Corpus("plant_xss_machine_names_are_stored_and_shown_escaped");
 const PLANT_RENAME: Cover =
     Cover::Corpus("plant_xss_rename_name_is_shown_escaped_in_the_answer_and_on_the_page");
+const PLANT_DATA_BLOCK: Cover = Cover::Corpus(
+    "plant_xss_data_block_number_payloads_give_their_error_code_and_show_escaped_in_the_form",
+);
 const PLANT_UNIT_REFUSED: Cover =
     Cover::Corpus("plant_xss_unit_fields_that_the_server_refuses_give_their_error_code");
 
@@ -193,15 +196,21 @@ pub(super) const TABLE: &[Entry] = &[
         PLC_NUMBER,
     ),
     (
-        "pages/machines/connection_request.rs",
-        "ConnectionRequest",
-        "slot",
-        PLC_NUMBER,
+        "pages/machines/data_block_commands.rs",
+        "DataBlockFields",
+        "db_number",
+        PLANT_DATA_BLOCK,
+    ),
+    (
+        "pages/machines/data_block_commands.rs",
+        "DataBlockFields",
+        "csrf_token",
+        CSRF,
     ),
     (
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
-        "db_number",
+        "slot",
         PLC_NUMBER,
     ),
     (
@@ -256,6 +265,12 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/form.rs",
         "CreateFields",
         "plc_platform",
+        PLANT_REFUSED,
+    ),
+    (
+        "pages/machines/form.rs",
+        "CreateFields",
+        "db_number",
         PLANT_REFUSED,
     ),
     (

@@ -12,10 +12,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The forms that hold `hx-swap-oob`, as the template file of each form (design D7, table).
-const EXPECTED_FORM_FILES: [&str; 16] = [
+const EXPECTED_FORM_FILES: [&str; 17] = [
     "approve.html",
     "machine-connection.html",
     "machine-new.html",
+    "machine.html",
     "machine.html",
     "parameter-form.html",
     "password.html",

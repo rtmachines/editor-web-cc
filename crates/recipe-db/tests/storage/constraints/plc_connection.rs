@@ -222,7 +222,6 @@ fn domain_accepts(case: &Case) -> bool {
         host: parsed.field(Some(&case.host), PlcHost::parse),
         rack: parsed.field(rack.as_deref(), Rack::parse),
         slot: parsed.field(slot.as_deref(), Slot::parse),
-        db_number: parsed.field(db_number.as_deref(), DataBlockNumber::parse),
         port: parsed.field(port.as_deref(), TcpPort::parse),
         address: parsed.field(case.address.as_deref(), PlcAddress::parse),
         mode: parsed.field(case.mode.as_deref(), CommMode::parse),
@@ -230,7 +229,21 @@ fn domain_accepts(case: &Case) -> bool {
         password: parsed.field(case.password.as_deref(), PlcPassword::parse),
     };
     parsed.is_valid
+        && db_number_accepted(&mut parsed, platform, db_number.as_deref())
+        && parsed.is_valid
         && PlcConnection::for_platform(code, platform, fields, PasswordState::Absent).is_ok()
+}
+
+/// Tell whether the copy `db_number` of a row suits its platform. The domain connection no longer
+/// holds the number (ADR-0156), so the case checks the number through `DataBlockNumber` and the
+/// limit of the platform. An S7 row needs a number. An IEC row has none.
+fn db_number_accepted(parsed: &mut Parsed, platform: PlcPlatform, text: Option<&str>) -> bool {
+    let number = parsed.field(text, DataBlockNumber::parse);
+    match (platform.max_data_block(), text) {
+        (Some(max), Some(_)) => number.is_some_and(|number| number.value() <= max),
+        (Some(_), None) | (None, Some(_)) => false,
+        (None, None) => true,
+    }
 }
 
 /// Run every case through the table and the value objects. Return one line for each drift or

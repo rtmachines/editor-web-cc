@@ -43,8 +43,10 @@ fn machine() -> Machine {
         MachineCode::parse("M5").unwrap(),
         name("Line"),
         PlcPlatform::TwinCat3,
+        None,
         (unit_id(1_001), name("Infeed")),
-    );
+    )
+    .unwrap();
     for (index, (text, unit_name)) in UNITS.iter().enumerate() {
         let unit_path = path(text);
         let parent = unit_path.parent();

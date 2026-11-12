@@ -6,9 +6,11 @@
 use recipe_app::plant::{
     AddUnit, AddUnitInput, ArchiveMachine, ArchiveMachineInput, ArchiveUnit, ArchiveUnitInput,
     CreateMachine, CreateMachineInput, DefineUdt, DefineUdtInput, DefineUdtMode, RenameMachine,
-    RenameMachineInput, RenameUnit, RenameUnitInput,
+    RenameMachineInput, RenameUnit, RenameUnitInput, SetMachineDataBlock, SetMachineDataBlockInput,
 };
-use recipe_domain::plant::{MachineCode, MemberName, PlcPlatform, TypeExpr, TypeName, UnitPath};
+use recipe_domain::plant::{
+    DataBlockNumber, MachineCode, MemberName, PlcPlatform, TypeExpr, TypeName, UnitPath,
+};
 use recipe_domain::text::Text;
 
 use crate::support::app::{App, Seeded};
@@ -31,6 +33,7 @@ fn create_input(code: &str) -> CreateMachineInput {
         code: MachineCode::parse(code).unwrap(),
         name: text("Press"),
         platform: PlcPlatform::TwinCat3,
+        db_number: None,
         main_unit_name: text("Feeder"),
     }
 }
@@ -115,6 +118,102 @@ async fn rename_machine_fails_in_the_audit_insert_and_keeps_the_old_name() {
 
     assert_audit_fault(&error);
     assert_eq!(app.machine_name(seed.id).await, "machine");
+    app.assert_chain_unchanged(&before).await;
+}
+
+// SetMachineDataBlock
+
+/// The number of the machine and the state of its record, before and after the command.
+const DATA_BLOCK_STATE: &str = "SELECT machine.db_number::text || ' ' || \
+                                plc_connection.db_number::text || ' ' || \
+                                plc_connection.row_version::text \
+                                FROM machine JOIN plc_connection ON plc_connection.machine_id = machine.id \
+                                WHERE machine.id = $1";
+
+/// A live `S7_1500` machine with the number 100 and a record that holds the copy 100.
+async fn s7_machine_with_record(app: &mut App) -> Seeded {
+    let seed = app.seed_machine("S7_1500", &["U1"]).await;
+    sqlx::query("UPDATE machine SET db_number = 100 WHERE id = $1")
+        .bind(seed.id)
+        .execute(app.migrator())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO plc_connection (machine_id, plc_platform, host, rack, slot, db_number) \
+         VALUES ($1, 'S7_1500', 'plc.plant.local', 0, 1, 100)",
+    )
+    .bind(seed.id)
+    .execute(app.migrator())
+    .await
+    .unwrap();
+    seed
+}
+
+fn set_data_block_input(seed: &Seeded) -> SetMachineDataBlockInput {
+    SetMachineDataBlockInput {
+        code: seed.code,
+        db_number: Some(DataBlockNumber::parse("200").unwrap()),
+    }
+}
+
+async fn data_block_state(app: &mut App, machine: uuid::Uuid) -> String {
+    sqlx::query_scalar(DATA_BLOCK_STATE)
+        .bind(machine)
+        .fetch_one(app.admin())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn set_machine_data_block_commits_the_number_the_copy_and_one_entry() {
+    let mut app = App::create().await;
+    let seed = s7_machine_with_record(&mut app).await;
+    let before = app.head().await;
+    assert_eq!(data_block_state(&mut app, seed.id).await, "100 100 1");
+
+    SetMachineDataBlock::new(app.context())
+        .execute(&app.user, &app.meta, set_data_block_input(&seed))
+        .await
+        .unwrap();
+
+    assert_eq!(data_block_state(&mut app, seed.id).await, "200 200 2");
+    app.assert_chain_moved(&before, &["MachineDataBlockSet"])
+        .await;
+}
+
+#[tokio::test]
+async fn set_machine_data_block_fails_in_the_audit_insert_and_changes_neither_table() {
+    let mut app = App::create().await;
+    let seed = s7_machine_with_record(&mut app).await;
+    let before = app.head().await;
+    app.install_probe("audit_log", "BEFORE", "INSERT", FAULT)
+        .await;
+
+    let error = SetMachineDataBlock::new(app.context())
+        .execute(&app.user, &app.meta, set_data_block_input(&seed))
+        .await
+        .unwrap_err();
+
+    assert_audit_fault(&error);
+    assert_eq!(data_block_state(&mut app, seed.id).await, "100 100 1");
+    app.assert_chain_unchanged(&before).await;
+}
+
+#[tokio::test]
+async fn set_machine_data_block_fails_in_the_copy_and_leaves_the_machine_number_unchanged() {
+    let mut app = App::create().await;
+    let seed = s7_machine_with_record(&mut app).await;
+    let before = app.head().await;
+    app.install_probe("plc_connection", "BEFORE", "UPDATE", FAULT)
+        .await;
+
+    let error = SetMachineDataBlock::new(app.context())
+        .execute(&app.user, &app.meta, set_data_block_input(&seed))
+        .await
+        .unwrap_err();
+
+    assert_statement_fault(&error);
+    assert_eq!(data_block_state(&mut app, seed.id).await, "100 100 1");
     app.assert_chain_unchanged(&before).await;
 }
 

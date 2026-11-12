@@ -21,8 +21,12 @@ pub async fn save_machine(
         code(code_text),
         name("Press"),
         platform,
+        platform
+            .max_data_block()
+            .map(|_| DataBlockNumber::parse("1").unwrap()),
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
-    );
+    )
+    .unwrap();
     let mut tx = begin(harness).await;
     tx.plant().insert_machine(&built).await.unwrap();
     commit(harness, tx, built.id()).await;
@@ -30,12 +34,11 @@ pub async fn save_machine(
 }
 
 /// An S7 connection from the text of its fields.
-pub fn s7_connection(host: &str, rack: &str, slot: &str, db_number: &str) -> PlcConnection {
+pub fn s7_connection(host: &str, rack: &str, slot: &str) -> PlcConnection {
     PlcConnection::S7 {
         host: PlcHost::parse(host).unwrap(),
         rack: Rack::parse(rack).unwrap(),
         slot: Slot::parse(slot).unwrap(),
-        db_number: DataBlockNumber::parse(db_number).unwrap(),
     }
 }
 

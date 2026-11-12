@@ -4,9 +4,9 @@ use std::collections::BTreeSet;
 
 use recipe_app::ports::{Ensured, InsertedMachine};
 use recipe_domain::plant::{
-    ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, MemberName, PlcPlatform,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StoredMachine, StoredUnit, StringKind,
-    StringLength, TypeMember, TypeName, UnitId, UnitPath,
+    ArrayDimension, ArrayDimensions, DataBlockNumber, Machine, MachineCode, MachineId, MemberName,
+    PlcPlatform, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StoredMachine, StoredUnit,
+    StringKind, StringLength, TypeMember, TypeName, UnitId, UnitPath,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -50,8 +50,23 @@ pub fn machine(n: u128, code_text: &str) -> Machine {
         code(code_text),
         name("Press"),
         PlcPlatform::TwinCat3,
+        None,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
+    .unwrap()
+}
+
+/// A live `S7_1500` machine with the unit `U1` and the data block number `db_number`.
+pub fn s7_machine(n: u128, code_text: &str, db_number: &str) -> Machine {
+    Machine::create(
+        machine_id(n),
+        code(code_text),
+        name("Press"),
+        PlcPlatform::S7_1500,
+        Some(DataBlockNumber::parse(db_number).unwrap()),
+        (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
+    )
+    .unwrap()
 }
 
 /// A fixed whole-second instant in UTC. The database keeps it without a loss.
@@ -66,6 +81,7 @@ pub fn machine_with_archived_unit(n: u128, code_text: &str) -> Machine {
         code: code(code_text),
         name: name("Press"),
         platform: PlcPlatform::TwinCat3,
+        db_number: None,
         archived_at: None,
         units: vec![
             StoredUnit {

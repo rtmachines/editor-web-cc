@@ -29,6 +29,7 @@ const HX_LITERALS: [(&str, &[&str]); 7] = [
             "#unit-form",
             "#unit-tree",
             "#machine-name",
+            "#machine-db-number",
             "#unit-name",
             "#connection-status",
         ],
@@ -64,7 +65,7 @@ const COMMANDS: [(&str, &str, &str); 6] = [
     ),
     (
         "/machines/M7/connection",
-        "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
+        "row_version=0&host=10.0.0.5&rack=0&slot=2",
         "connection-status",
     ),
 ];
@@ -312,7 +313,7 @@ async fn plant_sweep_redirects_hold_no_token_and_send_the_csp() {
     let commands = [
         (
             "/machines",
-            "code=M99&name=C&plc_platform=S7_300&main_unit_name=I",
+            "code=M99&name=C&plc_platform=S7_300&db_number=1&main_unit_name=I",
         ),
         ("/machines/M7/rename", "name=Renamed"),
         (
@@ -327,7 +328,7 @@ async fn plant_sweep_redirects_hold_no_token_and_send_the_csp() {
         ),
         (
             "/machines/M7/connection",
-            "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
+            "row_version=0&host=10.0.0.5&rack=0&slot=2",
         ),
     ];
     for (path, body) in commands {

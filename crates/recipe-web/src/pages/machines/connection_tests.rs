@@ -34,7 +34,7 @@ const ALLOWED_HX: [(&str, &str); 5] = [
 ];
 
 /// The ids of the inputs of the S7 shape.
-const S7_FIELDS: [&str; 4] = ["host", "rack", "slot", "db_number"];
+const S7_FIELDS: [&str; 3] = ["host", "rack", "slot"];
 /// The ids of the inputs of the IEC shape.
 const IEC_FIELDS: [&str; 6] = ["host", "port", "address", "comm_mode", "login", "password"];
 
@@ -47,8 +47,12 @@ pub(super) fn seed(world: &World, number: u32, platform: PlcPlatform) -> Machine
         MachineCode::parse(&format!("M{number}")).unwrap(),
         Text::parse("Spare line").unwrap(),
         platform,
+        platform
+            .max_data_block()
+            .map(|_| DataBlockNumber::parse("1").unwrap()),
         (unit, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
     id
 }
@@ -288,14 +292,13 @@ async fn connection_form_with_a_record_shows_its_values_and_its_row_version() {
 }
 
 #[tokio::test]
-async fn connection_form_of_an_s7_record_shows_rack_slot_and_data_block() {
+async fn connection_form_of_an_s7_record_shows_host_rack_and_slot() {
     let world = world();
     let id = seed(&world, 103, PlcPlatform::S7_1500);
     let record = PlcConnection::S7 {
         host: PlcHost::parse("plc-1.plant.local").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("2").unwrap(),
-        db_number: DataBlockNumber::parse("100").unwrap(),
     };
     world.fixture.store.seed_connection(id, &record, None);
     let reply = world
@@ -303,14 +306,33 @@ async fn connection_form_of_an_s7_record_shows_rack_slot_and_data_block() {
         .await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let form = form_of(main_of(&reply.body));
-    for (field, value) in [
-        ("host", "plc-1.plant.local"),
-        ("rack", "0"),
-        ("slot", "2"),
-        ("db_number", "100"),
-    ] {
+    for (field, value) in [("host", "plc-1.plant.local"), ("rack", "0"), ("slot", "2")] {
         let input = input_of(form, field).unwrap();
         assert!(input.contains(&format!(" value=\"{value}\"")), "{input}");
+    }
+}
+
+#[tokio::test]
+async fn connection_form_of_an_s7_machine_has_no_data_block_input_with_or_without_a_record() {
+    // The data block number belongs to the machine (ADR-0156, design D8).
+    let world = world();
+    let id = seed(&world, 104, PlcPlatform::S7_1500);
+    let record = PlcConnection::S7 {
+        host: PlcHost::parse("plc-1.plant.local").unwrap(),
+        rack: Rack::parse("0").unwrap(),
+        slot: Slot::parse("2").unwrap(),
+    };
+    for stored in [false, true] {
+        if stored {
+            world.fixture.store.seed_connection(id, &record, None);
+        }
+        let reply = world
+            .get_en(&world.engineer, "/machines/M104/connection/edit")
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let form = form_of(main_of(&reply.body));
+        assert!(input_of(form, "db_number").is_none(), "{stored}: {form}");
+        assert!(!form.contains("name=\"db_number\""), "{stored}: {form}");
     }
 }
 
@@ -333,7 +355,6 @@ async fn connection_form_labels_and_title_come_from_the_bundles_in_both_language
             "field-plc-host",
             "field-plc-rack",
             "field-plc-slot",
-            "field-plc-db-number",
             "connection-submit",
         ] {
             assert!(main.contains(&text(lang, key)), "{key}: {main}");

@@ -11,11 +11,12 @@ use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use recipe_app::auth::Operation;
 use recipe_app::plant::{GetMachine, GetMachineInput, MachineConnection, MachineRef, MachineView};
-use recipe_domain::plant::PlcConnection;
+use recipe_domain::plant::{Machine, PlcConnection};
 use serde::Deserialize;
 
 use super::commands::RenameForm;
 use super::connection::mode_key;
+use super::data_block_form::DataBlockForm;
 use super::tree::{Scope, UnitTree};
 use super::{platform_text, query_values};
 use crate::error::WebError;
@@ -47,16 +48,10 @@ impl ConnectionRows {
     fn new(t: Texts<'_>, stored: &MachineConnection) -> Self {
         let row = |key: &str, value: String| (t.get(key), value);
         let rows = match &stored.connection {
-            PlcConnection::S7 {
-                host,
-                rack,
-                slot,
-                db_number,
-            } => vec![
+            PlcConnection::S7 { host, rack, slot } => vec![
                 row("field-plc-host", host.to_string()),
                 row("field-plc-rack", rack.value().to_string()),
                 row("field-plc-slot", slot.value().to_string()),
-                row("field-plc-db-number", db_number.value().to_string()),
             ],
             PlcConnection::Iec {
                 host,
@@ -101,6 +96,10 @@ struct MachinePage<'a> {
     name: String,
     platform: String,
     archived_at: Option<String>,
+    /// The data block number of the machine, or `None` for an IEC machine or an archived S7 machine.
+    db_number: Option<String>,
+    /// True for the three S7 platforms. An S7 machine without a number shows `machine-db-number-none`.
+    is_s7: bool,
     tree: UnitTree,
     /// The stored connection, or `None` when the machine has no record.
     connection: Option<ConnectionRows>,
@@ -117,6 +116,9 @@ struct MachinePage<'a> {
     /// The rename form. It is shown only for a live machine and when
     /// `PageRequest::may_run` permits the rename (ADR-0113).
     form: RenameForm,
+    /// The data block form. It is shown only for a live S7 machine and when
+    /// `PageRequest::may_run` permits `SetMachineDataBlock` (ADR-0113).
+    data_block_form: DataBlockForm,
 }
 
 impl<'a> MachinePage<'a> {
@@ -140,6 +142,8 @@ impl<'a> MachinePage<'a> {
         let scope = if live { Scope::Live } else { Scope::All };
         let form = RenameForm::new(code, machine.name().to_string(), request.csrf_token())
             .shown(allows(Operation::RenameMachine)?);
+        let number = machine.db_number().map(|number| number.value().to_string());
+        let data_block_form = data_block_form(machine, request, number.as_deref(), live)?;
         Ok(Self {
             layout,
             t,
@@ -147,6 +151,8 @@ impl<'a> MachinePage<'a> {
             name: machine.name().to_string(),
             platform: platform_text(t, machine.platform()),
             archived_at: machine.archived_at().as_ref().map(instant),
+            db_number: number,
+            is_s7: machine.platform().is_s7(),
             tree: UnitTree::build(
                 machine,
                 scope,
@@ -168,8 +174,28 @@ impl<'a> MachinePage<'a> {
             add_href: format!("/machines/{code}/units/new"),
             archive_action: format!("/machines/{code}/archive"),
             form,
+            data_block_form,
         })
     }
+}
+
+/// Build the data block form of `machine`. It is shown only for a live S7 machine and when
+/// `PageRequest::may_run` permits `SetMachineDataBlock` (ADR-0113).
+fn data_block_form(
+    machine: &Machine,
+    request: &PageRequest,
+    number: Option<&str>,
+    live: bool,
+) -> Result<DataBlockForm, WebError> {
+    let shown =
+        machine.platform().is_s7() && live && request.may_run(Operation::SetMachineDataBlock)?;
+    Ok(DataBlockForm::new(
+        machine.code(),
+        number.unwrap_or_default().to_owned(),
+        request.csrf_token(),
+    )
+    .with_max(machine.platform().max_data_block())
+    .shown(shown))
 }
 
 /// Run `GetMachine` for `machine` and render the page.

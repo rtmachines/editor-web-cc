@@ -19,9 +19,10 @@ const ARCHIVE_TAG: &str = "<form method=\"post\" action=\"/machines/M7/archive\"
 const ADD_MAIN_UNIT: &str = "<a class=\"target-link\" href=\"/machines/M7/units/new\" hx-boost=\"true\" hx-target=\"#unit-form\" hx-swap=\"innerHTML\" hx-push-url=\"false\">Add a main unit</a>";
 
 /// The `hx-*` attributes that the machine page may write. Each value is a literal.
-const ALLOWED_HX: [(&str, &str); 8] = [
+const ALLOWED_HX: [(&str, &str); 9] = [
     ("hx-boost", "true"),
     ("hx-target", "#machine-name"),
+    ("hx-target", "#machine-db-number"),
     ("hx-target", "#content"),
     ("hx-target", "#unit-form"),
     ("hx-swap", "innerHTML"),

@@ -33,6 +33,8 @@ fn row_id(serial: u128) -> Uuid {
 ///
 /// The type solves one problem: [`PlcConnection`] has no `Clone`, and the state of the
 /// in-memory store must copy at `begin`. The row keeps the values and builds a connection on demand.
+/// An S7 row also keeps `db_number`, the copy of the number of the machine (design D7). The
+/// connection never holds it.
 #[derive(Clone, Debug)]
 pub(crate) enum ShapeRow {
     /// The columns of an S7 row.
@@ -53,18 +55,22 @@ pub(crate) enum ShapeRow {
 }
 
 impl ShapeRow {
-    fn of(connection: &PlcConnection) -> Self {
-        match connection {
-            PlcConnection::S7 {
-                host,
-                rack,
-                slot,
-                db_number,
-            } => Self::S7 {
+    /// Build the row columns of `connection`. An S7 row takes the copy from `machine_number`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a check violation when an S7 connection meets a machine without a number
+    /// (`plc_connection_shape` needs `db_number` on an S7 row).
+    fn of(
+        connection: &PlcConnection,
+        machine_number: Option<DataBlockNumber>,
+    ) -> Result<Self, StorageError> {
+        Ok(match connection {
+            PlcConnection::S7 { host, rack, slot } => Self::S7 {
                 host: host.clone(),
                 rack: *rack,
                 slot: *slot,
-                db_number: *db_number,
+                db_number: machine_number.ok_or_else(check_violation)?,
             },
             PlcConnection::Iec {
                 host,
@@ -79,21 +85,17 @@ impl ShapeRow {
                 mode: *mode,
                 login: login.clone(),
             },
-        }
+        })
     }
 
     fn to_connection(&self) -> PlcConnection {
         match self {
             Self::S7 {
-                host,
-                rack,
-                slot,
-                db_number,
+                host, rack, slot, ..
             } => PlcConnection::S7 {
                 host: host.clone(),
                 rack: *rack,
                 slot: *slot,
-                db_number: *db_number,
             },
             Self::Iec {
                 host,
@@ -184,6 +186,30 @@ pub(crate) struct ConnectionRow {
 }
 
 impl ConnectionRow {
+    /// Copy the data block number of the machine into an S7 record and add 1 to `row_version` (design D7).
+    ///
+    /// A record of the IEC shape has no data block number, so it stays as it was. A record that
+    /// holds the number already stays as it was, with its `row_version` (ADR-0157 (j)).
+    pub(crate) fn copy_data_block(
+        &mut self,
+        number: DataBlockNumber,
+        now: Timestamp,
+    ) -> Result<(), StorageError> {
+        let ShapeRow::S7 { db_number, .. } = &mut self.shape else {
+            return Ok(());
+        };
+        if *db_number == number {
+            return Ok(());
+        }
+        *db_number = number;
+        self.row_version = self
+            .row_version
+            .checked_add(1)
+            .ok_or_else(|| StorageError::invariant("the row version overflows"))?;
+        self.updated_at = now;
+        Ok(())
+    }
+
     fn stored(&self) -> StoredConnection {
         StoredConnection {
             id: PlcConnectionId::from(self.id),
@@ -226,6 +252,14 @@ fn check_row(
 }
 
 impl MemoryTransaction {
+    /// Return the data block number of a machine (design D7), or `None` when it has none.
+    fn machine_number(&self, machine: MachineId) -> Option<DataBlockNumber> {
+        self.state()
+            .machines
+            .get(&machine)
+            .and_then(|row| row.db_number)
+    }
+
     /// Return the platform of a machine, or a missing reference for the composite foreign key.
     fn platform_of(&self, machine: MachineId) -> Result<PlcPlatform, StorageError> {
         self.state()
@@ -241,6 +275,8 @@ impl MemoryStore {
     ///
     /// A fixture of the tests uses it for a record that exists before a command runs.
     /// The method keeps no record when the machine is missing, so a test names a seeded machine.
+    /// An S7 record takes its `db_number` copy from the machine, so the method also keeps no S7
+    /// record for a machine without a number.
     pub fn seed_connection(
         &self,
         machine: MachineId,
@@ -251,13 +287,17 @@ impl MemoryStore {
             let Some(platform) = state.machines.get(&machine).map(|row| row.platform) else {
                 return;
             };
+            let machine_number = state.machines.get(&machine).and_then(|row| row.db_number);
+            let Ok(shape) = ShapeRow::of(connection, machine_number) else {
+                return;
+            };
             let Ok(serial) = state.next_connection_serial() else {
                 return;
             };
             let row = ConnectionRow {
                 id: row_id(serial),
                 platform,
-                shape: ShapeRow::of(connection),
+                shape,
                 sealed: password,
                 row_version: 1,
                 created_at: now,
@@ -321,7 +361,7 @@ impl PlcConnections for MemoryTransaction {
         if self.state().connections.contains_key(&machine) {
             return Err(duplicate(PLC_CONNECTION_MACHINE_UNIQUE));
         }
-        let shape = ShapeRow::of(connection);
+        let shape = ShapeRow::of(connection, self.machine_number(machine))?;
         check_row(&shape, platform, password.is_some())?;
         let serial = self.state_mut().next_connection_serial()?;
         let now = self.now();
@@ -346,10 +386,11 @@ impl PlcConnections for MemoryTransaction {
         password: &PasswordWrite,
     ) -> Result<RowImage, StorageError> {
         let now = self.now();
+        let machine_number = self.machine_number(machine);
         let Some(existing) = self.state().connections.get(&machine) else {
             return Err(missing_row(TABLE));
         };
-        let shape = ShapeRow::of(connection);
+        let shape = ShapeRow::of(connection, machine_number)?;
         let sealed = match password {
             PasswordWrite::Keep => existing.sealed.clone(),
             PasswordWrite::Set(secret) => Some(secret.clone()),

@@ -63,8 +63,10 @@ fn new_machine() -> Machine {
         MachineCode::parse("M77").unwrap(),
         Text::parse("Press").unwrap(),
         PlcPlatform::TwinCat3,
+        None,
         (UnitId::from(Uuid::new_v4()), Text::parse("Feeder").unwrap()),
     )
+    .unwrap()
 }
 
 /// Install a trigger with `body` on `machine` and return the error of `insert_machine`.

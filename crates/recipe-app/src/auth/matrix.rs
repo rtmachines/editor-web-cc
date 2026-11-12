@@ -30,9 +30,13 @@ const ROLES: [Role; 4] = [
 /// One row per operation of `api.md` section 3.3, in the order of `Operation::ALL`.
 ///
 /// The columns are Administrator, ProcessEngineer, Operator, and ExportClient.
-const MATRIX: [(Operation, [Access; 4]); 72] = [
+const MATRIX: [(Operation, [Access; 4]); 73] = [
     (Operation::CreateMachine, [Allowed, Allowed, Denied, Denied]),
     (Operation::RenameMachine, [Allowed, Allowed, Denied, Denied]),
+    (
+        Operation::SetMachineDataBlock,
+        [Allowed, Allowed, Denied, Denied],
+    ),
     (
         Operation::ArchiveMachine,
         [Allowed, Allowed, Denied, Denied],
@@ -270,10 +274,11 @@ const PURPOSES: [(Operation, Operation, Permission); 16] = [
     ),
 ];
 
-/// The 31 commands that stop in read-only mode (Assumption A24, design D7).
-const STOPPED_IN_READ_ONLY: [Operation; 31] = [
+/// The 32 commands that stop in read-only mode (Assumption A24, design D7, ADR-0156 (e)).
+const STOPPED_IN_READ_ONLY: [Operation; 32] = [
     Operation::CreateMachine,
     Operation::RenameMachine,
+    Operation::SetMachineDataBlock,
     Operation::ArchiveMachine,
     Operation::AddUnit,
     Operation::RenameUnit,

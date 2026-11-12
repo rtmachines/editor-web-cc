@@ -87,8 +87,9 @@ pub fn document_sql(sections: &[&str], skip: &[(&str, usize)]) -> String {
 /// One piece of `data-model.md` section 3 that a later migration changed after `0001`.
 ///
 /// Migration 0001 shipped before the piece and never changes. A later migration adds the piece:
-/// 0009 adds the pieces of ADR-0109 as `NOT VALID` constraints, and 0011 changes `dims_valid`
-/// (ADR-0145) and adds two unique indexes (ADR-0143). The document shows the current schema, so
+/// 0009 adds the pieces of ADR-0109 as `NOT VALID` constraints, 0011 changes `dims_valid`
+/// (ADR-0145) and adds two unique indexes (ADR-0143), and 0013 adds the column and the two
+/// `NOT VALID` constraints of ADR-0156. The document shows the current schema, so
 /// the comparison with 0001 must undo each piece first. `current` and `shipped` are normalized
 /// text. `current` must occur exactly once in the document text.
 pub struct ShippedPiece {
@@ -101,7 +102,7 @@ pub struct ShippedPiece {
 }
 
 /// The pieces of section 3 that a migration after 0001 changed.
-pub const PIECES_AFTER_0001: [ShippedPiece; 5] = [
+pub const PIECES_AFTER_0001: [ShippedPiece; 7] = [
     ShippedPiece {
         name: "role list of app_user_role_value",
         current: "'operator', 'export_client')",
@@ -125,6 +126,25 @@ pub const PIECES_AFTER_0001: [ShippedPiece; 5] = [
     ShippedPiece {
         name: "index plc_type_member_name_ci_unique (ADR-0143)",
         current: " CREATE UNIQUE INDEX plc_type_member_name_ci_unique ON plc_type_member (struct_type_id, lower(member_name));",
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "column machine.db_number (ADR-0156)",
+        current: " db_number INTEGER,",
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "constraints machine_db_number_shape and machine_db_number_range (ADR-0156)",
+        current: concat!(
+            " CONSTRAINT machine_db_number_shape CHECK ( ",
+            "(plc_platform NOT IN ('CodesysIec', 'TwinCat3') OR db_number IS NULL) ",
+            "AND (plc_platform NOT IN ('S7_300', 'S7_1200', 'S7_1500') ",
+            "OR db_number IS NOT NULL OR archived_at IS NOT NULL) ), ",
+            "CONSTRAINT machine_db_number_range CHECK ( db_number IS NULL ",
+            "OR plc_platform NOT IN ('S7_300', 'S7_1200', 'S7_1500') ",
+            "OR (plc_platform = 'S7_300' AND db_number BETWEEN 1 AND 16000) ",
+            "OR (plc_platform IN ('S7_1200', 'S7_1500') AND db_number BETWEEN 1 AND 59999) ),"
+        ),
         shipped: "",
     },
 ];

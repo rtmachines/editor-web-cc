@@ -85,8 +85,9 @@ impl From<StringLengthReason> for DerivedTypeReason {
 
 /// Error of the Plant Model context (`reliability.md` section 1.1).
 ///
-/// The enum has one variant for each code in the range `E-PLT-001` to
-/// `E-PLT-049` that the value objects return. Later tasks add more variants.
+/// The enum has one variant for each code in the ranges `E-PLT-001` to
+/// `E-PLT-029` and `E-PLT-050` to `E-PLT-069`. The range `E-PLT-030` to
+/// `E-PLT-049` belongs to the database triggers.
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum PlantError {
     /// A unit path has more than five segments (`E-PLT-002`).
@@ -267,7 +268,7 @@ pub enum PlantError {
     #[error(
         "Data block {number} of machine {code} is above {max}. The controller of the machine has no such data block."
     )]
-    ConnectionDataBlockOutOfRange {
+    DataBlockOutOfRange {
         /// The code of the machine.
         code: MachineCode,
         /// The rejected data block number.
@@ -325,6 +326,22 @@ pub enum PlantError {
         /// The reference number of the recipe.
         reference: ReferenceNumber,
     },
+    /// A live machine on an S7 platform has no data block number (`E-PLT-050`).
+    #[error("Machine {code} on platform {platform} needs a data block number. Enter a number.")]
+    DataBlockMissing {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The platform of the machine.
+        platform: PlcPlatform,
+    },
+    /// A machine on an IEC platform has a data block number (`E-PLT-051`).
+    #[error("Platform {platform} of machine {code} has no data block number. Delete the number.")]
+    DataBlockNotOnPlatform {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The platform of the machine.
+        platform: PlcPlatform,
+    },
 }
 
 impl PlantError {
@@ -355,12 +372,14 @@ impl PlantError {
             Self::UnitNotFound { .. } => ErrorCode::PLT_020,
             Self::ConnectionFieldNotOnPlatform { .. } => ErrorCode::PLT_022,
             Self::ConnectionFieldMissing { .. } => ErrorCode::PLT_023,
-            Self::ConnectionDataBlockOutOfRange { .. } => ErrorCode::PLT_024,
+            Self::DataBlockOutOfRange { .. } => ErrorCode::PLT_024,
             Self::CommModeNotOnPlatform { .. } => ErrorCode::PLT_025,
             Self::AddressNotAmsNetId { .. } => ErrorCode::PLT_026,
             Self::ConnectionNotConfigured { .. } => ErrorCode::PLT_027,
             Self::ConnectionFieldNotInMode { .. } => ErrorCode::PLT_028,
             Self::ConnectionRecipeMismatch { .. } => ErrorCode::PLT_029,
+            Self::DataBlockMissing { .. } => ErrorCode::PLT_050,
+            Self::DataBlockNotOnPlatform { .. } => ErrorCode::PLT_051,
         }
     }
 }

@@ -17,7 +17,6 @@ fn s7_fields() -> ConnectionFields {
         host: Some(PlcHost::parse("192.168.1.20").unwrap()),
         rack: Some(Rack::parse("0").unwrap()),
         slot: Some(Slot::parse("2").unwrap()),
-        db_number: Some(DataBlockNumber::parse("10").unwrap()),
         ..ConnectionFields::default()
     }
 }
@@ -52,10 +51,9 @@ fn s7_request_with_all_fields_passes_on_every_s7_platform() {
         assert!(
             matches!(
                 &plan.connection,
-                PlcConnection::S7 { rack, slot, db_number, host }
+                PlcConnection::S7 { rack, slot, host }
                     if rack.value() == 0
                         && slot.value() == 2
-                        && db_number.value() == 10
                         && host.as_str() == "192.168.1.20"
             ),
             "{platform}: {plan:?}"
@@ -153,7 +151,6 @@ fn s7_request_without_any_field_lists_every_missing_field_in_order() {
             (ErrorCode::PLT_023, "host"),
             (ErrorCode::PLT_023, "rack"),
             (ErrorCode::PLT_023, "slot"),
-            (ErrorCode::PLT_023, "db_number"),
         ]
     );
 }
@@ -181,73 +178,6 @@ fn stored_password_state_does_not_change_the_s7_result() {
     )
     .unwrap();
     assert!(plan.password.is_none());
-}
-
-fn with_data_block(text: &str) -> ConnectionFields {
-    ConnectionFields {
-        db_number: Some(DataBlockNumber::parse(text).unwrap()),
-        ..s7_fields()
-    }
-}
-
-#[test]
-fn data_block_at_the_limit_passes_on_each_s7_platform() {
-    let cases = [
-        (PlcPlatform::S7_300, "16000"),
-        (PlcPlatform::S7_1200, "59999"),
-        (PlcPlatform::S7_1500, "59999"),
-    ];
-    for (platform, number) in cases {
-        let plan = run(platform, with_data_block(number)).unwrap();
-        assert!(
-            matches!(&plan.connection, PlcConnection::S7 { db_number, .. }
-                if db_number.value().to_string() == number),
-            "{platform}: {plan:?}"
-        );
-    }
-}
-
-#[test]
-fn data_block_above_the_limit_gives_e_plt_024_with_the_limit() {
-    let cases = [
-        (PlcPlatform::S7_300, "16001", 16_001_u16, 16_000_u16),
-        (PlcPlatform::S7_1200, "60000", 60_000, 59_999),
-        (PlcPlatform::S7_1500, "60000", 60_000, 59_999),
-    ];
-    for (platform, text, expected_number, expected_max) in cases {
-        let errors = run(platform, with_data_block(text)).unwrap_err();
-        assert_eq!(errors.iter().count(), 1, "{platform}");
-        assert!(
-            errors.iter().all(|error| matches!(
-                error,
-                PlantError::ConnectionDataBlockOutOfRange { code, number, max }
-                    if *code == machine()
-                        && *number == expected_number
-                        && *max == expected_max
-            )),
-            "{platform}: {errors:?}"
-        );
-        assert!(
-            errors
-                .iter()
-                .all(|error| error.code() == ErrorCode::PLT_024),
-            "{platform}"
-        );
-    }
-}
-
-#[test]
-fn data_block_limit_is_listed_after_a_missing_field() {
-    let fields = ConnectionFields {
-        rack: None,
-        ..with_data_block("16001")
-    };
-    let codes: Vec<ErrorCode> = run(PlcPlatform::S7_300, fields)
-        .unwrap_err()
-        .iter()
-        .map(PlantError::code)
-        .collect();
-    assert_eq!(codes, vec![ErrorCode::PLT_023, ErrorCode::PLT_024]);
 }
 
 const IEC_PLATFORMS: [PlcPlatform; 2] = [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3];
@@ -329,7 +259,7 @@ fn iec_request_with_all_fields_passes_on_both_iec_platforms() {
 
 #[test]
 fn iec_request_with_each_s7_field_gives_e_plt_022_for_that_field() {
-    let cases: [(&str, ConnectionFields); 3] = [
+    let cases: [(&str, ConnectionFields); 2] = [
         (
             "rack",
             ConnectionFields {
@@ -341,13 +271,6 @@ fn iec_request_with_each_s7_field_gives_e_plt_022_for_that_field() {
             "slot",
             ConnectionFields {
                 slot: Some(Slot::parse("2").unwrap()),
-                ..iec_fields()
-            },
-        ),
-        (
-            "db_number",
-            ConnectionFields {
-                db_number: Some(DataBlockNumber::parse("10").unwrap()),
                 ..iec_fields()
             },
         ),

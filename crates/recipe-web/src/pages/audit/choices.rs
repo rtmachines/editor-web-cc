@@ -1,7 +1,7 @@
 //! The choices of the selects of the audit filter form (ADR-0051 (d)).
 //!
 //! The module solves one problem: a role with only `AuditViewRecipes` must see only the entity
-//! types and the actions of the recipe scope (A20), and the select groups the 37 actions by
+//! types and the actions of the recipe scope (A20), and the select groups the 38 actions by
 //! context. The select uses the rule `recipe_app::audit::is_recipe_action`, so the select and the
 //! scope of the query cannot differ. A test below compares the groups with it.
 
@@ -16,13 +16,14 @@ use crate::pages::texts::Texts;
 /// A group of actions: the key of its label and its actions.
 type Group = (&'static str, &'static [AuditAction]);
 
-/// The 37 actions grouped by context, in the order of the select (design D8).
+/// The 38 actions grouped by context, in the order of the select (design D8).
 const GROUPS: [Group; 5] = [
     (
         "audit-group-plant",
         &[
             AuditAction::MachineCreated,
             AuditAction::MachineRenamed,
+            AuditAction::MachineDataBlockSet,
             AuditAction::MachineArchived,
             AuditAction::UnitAdded,
             AuditAction::UnitRenamed,

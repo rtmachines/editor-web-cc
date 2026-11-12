@@ -1,8 +1,6 @@
 //! Parsed fields of a connection request (ADR-0154, design decision D3).
 
-use super::{
-    CommMode, DataBlockNumber, PlcAddress, PlcHost, PlcLogin, PlcPassword, Rack, Slot, TcpPort,
-};
+use super::{CommMode, PlcAddress, PlcHost, PlcLogin, PlcPassword, Rack, Slot, TcpPort};
 
 /// The parsed fields of a connection request.
 ///
@@ -18,8 +16,6 @@ pub struct ConnectionFields {
     pub rack: Option<Rack>,
     /// Slot of an S7 PLC.
     pub slot: Option<Slot>,
-    /// Default data block of an S7 PLC.
-    pub db_number: Option<DataBlockNumber>,
     /// TCP port of an IEC PLC.
     pub port: Option<TcpPort>,
     /// Address of an IEC PLC.

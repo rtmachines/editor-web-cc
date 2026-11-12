@@ -4,9 +4,7 @@
 
 use axum::http::StatusCode;
 use recipe_app::ports::SealedSecret;
-use recipe_domain::plant::{
-    DataBlockNumber, MachineId, PlcConnection, PlcHost, PlcPlatform, Rack, Slot,
-};
+use recipe_domain::plant::{MachineId, PlcConnection, PlcHost, PlcPlatform, Rack, Slot};
 
 use super::connection_tests::{ads_record, seed};
 use crate::i18n::Lang;
@@ -47,7 +45,6 @@ fn s7_record() -> PlcConnection {
         host: PlcHost::parse("10.0.0.5").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("2").unwrap(),
-        db_number: DataBlockNumber::parse("100").unwrap(),
     }
 }
 
@@ -67,7 +64,12 @@ async fn machine_page_shows_the_s7_record_without_a_password_state() {
         assert_eq!(value_of(main, &text(lang, "field-plc-host")), "10.0.0.5");
         assert_eq!(value_of(main, &text(lang, "field-plc-rack")), "0");
         assert_eq!(value_of(main, &text(lang, "field-plc-slot")), "2");
-        assert_eq!(value_of(main, &text(lang, "field-plc-db-number")), "100");
+        // The data block number is a fact of the machine, so it shows once and not in the record
+        // (ADR-0156, design D8).
+        let label = format!("<dt>{}</dt>", text(lang, "field-db-number"));
+        assert_eq!(main.matches(&label).count(), 1, "{main}");
+        assert!(!main.contains("Default data block"), "{main}");
+        assert!(!main.contains("Domyślny blok danych"), "{main}");
         for key in ["field-plc-port", "field-plc-address", "field-plc-password"] {
             assert_no_row(main, lang, key);
         }

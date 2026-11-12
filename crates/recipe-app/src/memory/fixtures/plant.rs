@@ -19,8 +19,12 @@ pub(crate) fn machine_on(platform: PlcPlatform, n: u128, code: &str) -> Machine 
         MachineCode::parse(code).unwrap(),
         text("Press"),
         platform,
+        platform
+            .max_data_block()
+            .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id(n, 1), text("Main")),
-    );
+    )
+    .unwrap();
     let root = UnitPath::parse("U1").unwrap();
     let second = machine
         .add_unit(unit_id(n, 2), Some(&root), "2", text("Two"))

@@ -37,6 +37,7 @@ fn machine(is_archived: bool) -> Machine {
         code: MachineCode::parse("M7").unwrap(),
         name: Text::parse("Press").unwrap(),
         platform: PlcPlatform::TwinCat3,
+        db_number: None,
         archived_at: is_archived
             .then(|| Timestamp::from(OffsetDateTime::from_unix_timestamp(9).unwrap())),
         units: vec![

@@ -74,6 +74,7 @@ pub(in crate::recipe::draft) fn live_unit_of(owner: MachineId) -> LiveUnit {
         code: MachineCode::parse("M7").unwrap(),
         name: Text::parse("Press").unwrap(),
         platform: PlcPlatform::TwinCat3,
+        db_number: None,
         archived_at: None,
         units: vec![StoredUnit {
             id: UnitId::from(Uuid::from_u128(700)),

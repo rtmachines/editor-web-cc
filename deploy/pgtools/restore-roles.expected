@@ -45,6 +45,7 @@ GRANT|login_attempt|DELETE
 GRANT|login_attempt|INSERT
 GRANT|login_attempt|SELECT
 GRANT|machine.archived_at|UPDATE
+GRANT|machine.db_number|UPDATE
 GRANT|machine.name|UPDATE
 GRANT|machine.updated_at|UPDATE
 GRANT|machine|INSERT

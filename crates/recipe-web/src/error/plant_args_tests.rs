@@ -367,10 +367,10 @@ fn pairs(list: &[(&'static str, &str)]) -> Vec<(&'static str, String)> {
         .collect()
 }
 
-#[test]
-fn plant_error_args_give_each_connection_error_its_data() {
-    let address = PlcAddress::parse("plc-7").unwrap();
-    let cases = [
+type Case = (PlantError, Vec<(&'static str, String)>);
+
+fn connection_field_and_mode_cases() -> Vec<Case> {
+    vec![
         (
             PlantError::ConnectionFieldNotOnPlatform {
                 code: code(),
@@ -391,7 +391,7 @@ fn plant_error_args_give_each_connection_error_its_data() {
             pairs(&[("code", "M7"), ("field", "host")]),
         ),
         (
-            PlantError::ConnectionDataBlockOutOfRange {
+            PlantError::DataBlockOutOfRange {
                 code: code(),
                 number: 6_000,
                 max: 4_095,
@@ -410,6 +410,12 @@ fn plant_error_args_give_each_connection_error_its_data() {
                 ("platform", "word:platform-s7-1500"),
             ]),
         ),
+    ]
+}
+
+fn connection_state_and_block_cases() -> Vec<Case> {
+    let address = PlcAddress::parse("plc-7").unwrap();
+    vec![
         (
             PlantError::AddressNotAmsNetId {
                 code: code(),
@@ -436,7 +442,28 @@ fn plant_error_args_give_each_connection_error_its_data() {
             },
             pairs(&[("code", "M7"), ("reference", "R-100")]),
         ),
-    ];
+        (
+            PlantError::DataBlockMissing {
+                code: code(),
+                platform: PlcPlatform::S7_1500,
+            },
+            pairs(&[("code", "M7"), ("platform", "word:platform-s7-1500")]),
+        ),
+        (
+            PlantError::DataBlockNotOnPlatform {
+                code: code(),
+                platform: PlcPlatform::TwinCat3,
+            },
+            pairs(&[("code", "M7"), ("platform", "word:platform-twincat3")]),
+        ),
+    ]
+}
+
+#[test]
+fn plant_error_args_give_each_connection_error_its_data() {
+    let cases = connection_field_and_mode_cases()
+        .into_iter()
+        .chain(connection_state_and_block_cases());
     for (error, expected) in cases {
         assert_eq!(data_args(&error), expected, "{error:?}");
     }

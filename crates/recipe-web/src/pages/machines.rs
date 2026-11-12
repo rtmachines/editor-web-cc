@@ -17,6 +17,8 @@ mod commands;
 mod connection;
 mod connection_request;
 mod connection_save;
+mod data_block_commands;
+mod data_block_form;
 mod form;
 mod list;
 mod page;
@@ -27,7 +29,7 @@ mod tree_page;
 ///
 /// The rows are `/machines`, `/machines/new`, `/machines/{code}`, `/machines/by-id/{uuid}`,
 /// `/machines/{code}/units`, `/machines/{code}/connection/edit`, and the commands to create,
-/// rename, and archive a machine and to save its connection.
+/// rename, and archive a machine and to save its connection or its data block number.
 pub(crate) fn rows() -> Vec<RouteEntry> {
     let mut rows = page_rows();
     rows.extend(command_rows());
@@ -76,7 +78,7 @@ fn page_rows() -> Vec<RouteEntry> {
     ]
 }
 
-/// Return the rows that create, rename, and archive a machine.
+/// Return the rows that create, rename, archive, and change a machine.
 fn command_rows() -> Vec<RouteEntry> {
     vec![
         operation_row(
@@ -96,6 +98,12 @@ fn command_rows() -> Vec<RouteEntry> {
             "/machines/{code}/archive",
             Operation::ArchiveMachine,
             post(commands::archive),
+        ),
+        operation_row(
+            Method::POST,
+            "/machines/{code}/data-block",
+            Operation::SetMachineDataBlock,
+            post(data_block_commands::set),
         ),
         operation_row(
             Method::POST,
@@ -139,11 +147,15 @@ mod connection_tests;
 #[cfg(test)]
 mod connection_xss_tests;
 #[cfg(test)]
+mod data_block_commands_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
 mod list_tests;
 #[cfg(test)]
 mod machine_connection_tests;
+#[cfg(test)]
+mod machine_data_block_tests;
 #[cfg(test)]
 mod machine_tests;
 #[cfg(test)]

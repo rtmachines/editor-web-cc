@@ -170,6 +170,7 @@ audit-entity-app-user = User
 audit-entity-app-setting = Setting
 audit-action-machine-created = Machine created
 audit-action-machine-renamed = Machine renamed
+audit-action-machine-data-block-set = Data block number set
 audit-action-machine-archived = Machine archived
 audit-action-unit-added = Unit added
 audit-action-unit-renamed = Unit renamed

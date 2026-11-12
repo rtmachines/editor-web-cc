@@ -45,7 +45,6 @@ fn s7() -> PlcConnection {
         host: PlcHost::parse("10.0.0.5").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("2").unwrap(),
-        db_number: DataBlockNumber::parse("100").unwrap(),
     }
 }
 
@@ -149,7 +148,8 @@ async fn an_s7_insert_stores_the_s7_columns_and_no_iec_column() {
     let object = image.as_object().unwrap();
     assert_eq!(object.get("rack"), Some(&json!(0)));
     assert_eq!(object.get("slot"), Some(&json!(2)));
-    assert_eq!(object.get("db_number"), Some(&json!(100)));
+    // The copy comes from the machine (design D7), which `machine_on` gives the number 1.
+    assert_eq!(object.get("db_number"), Some(&json!(1)));
     assert_eq!(object.get("port"), Some(&Value::Null));
     assert_eq!(object.get("address"), Some(&Value::Null));
     assert_eq!(object.get("comm_mode"), Some(&Value::Null));
@@ -465,4 +465,92 @@ async fn every_read_of_one_record_gives_the_id_of_its_row_image() {
     assert_eq!(Some(read.id.to_string()), expected);
     assert_eq!(Some(locked.state.id.to_string()), expected);
     assert_eq!(Some(shared.stored.id.to_string()), expected);
+}
+
+fn number(text: &str) -> DataBlockNumber {
+    DataBlockNumber::parse(text).unwrap()
+}
+
+#[tokio::test]
+async fn set_machine_data_block_changes_the_machine_and_the_copy_of_the_record() {
+    let store = seeded();
+    store.seed_connection(mid(1), &s7(), None);
+    let mut tx = begin(&store, Isolation::ReadCommitted);
+    let after = tx
+        .plant()
+        .set_machine_data_block(mid(1), number("42"))
+        .await
+        .unwrap();
+    assert_eq!(after.as_value().get("db_number"), Some(&json!(42)));
+    let machine = tx.plant().machine_by_id(mid(1)).await.unwrap().unwrap();
+    assert_eq!(machine.db_number(), Some(number("42")));
+    let stored = tx
+        .plc_connections()
+        .connection_by_machine(mid(1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.row_version, 2);
+    let locked = tx
+        .plc_connections()
+        .lock_connection_for_update(mid(1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(locked.before.as_value().get("db_number"), Some(&json!(42)));
+}
+
+#[tokio::test]
+async fn set_machine_data_block_without_a_record_changes_only_the_machine() {
+    let store = seeded();
+    let mut tx = begin(&store, Isolation::ReadCommitted);
+    let after = tx
+        .plant()
+        .set_machine_data_block(mid(1), number("42"))
+        .await
+        .unwrap();
+    assert_eq!(after.as_value().get("db_number"), Some(&json!(42)));
+    let machine = tx.plant().machine_by_id(mid(1)).await.unwrap().unwrap();
+    assert_eq!(machine.db_number(), Some(number("42")));
+    assert!(
+        tx.plc_connections()
+            .connection_by_machine(mid(1))
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn set_machine_data_block_of_a_missing_machine_is_a_defect_of_the_caller() {
+    let store = seeded();
+    let mut tx = begin(&store, Isolation::ReadCommitted);
+    let error = tx
+        .plant()
+        .set_machine_data_block(mid(99), number("42"))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, StorageError::Other { .. }));
+}
+
+#[tokio::test]
+async fn a_drop_without_finish_discards_the_data_block_change() {
+    let store = seeded();
+    store.seed_connection(mid(1), &s7(), None);
+    let mut tx = begin(&store, Isolation::ReadCommitted);
+    tx.plant()
+        .set_machine_data_block(mid(1), number("42"))
+        .await
+        .unwrap();
+    drop(tx);
+    let mut next = begin(&store, Isolation::ReadCommitted);
+    let machine = next.plant().machine_by_id(mid(1)).await.unwrap().unwrap();
+    assert_eq!(machine.db_number(), Some(number("1")));
+    let stored = next
+        .plc_connections()
+        .connection_by_machine(mid(1))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.row_version, 1);
 }

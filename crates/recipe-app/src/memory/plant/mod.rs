@@ -20,7 +20,9 @@ pub(super) fn check_offset(offset: u64) -> Result<(), StorageError> {
 }
 
 use async_trait::async_trait;
-use recipe_domain::plant::{Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage};
+use recipe_domain::plant::{
+    DataBlockNumber, Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage,
+};
 use recipe_domain::recipe::VersionState;
 use recipe_domain::text::Text;
 
@@ -219,6 +221,7 @@ impl PlantRepository for MemoryTransaction {
             code: machine.code(),
             name: machine.name().clone(),
             platform: machine.platform(),
+            db_number: machine.db_number(),
             archived_at: machine.archived_at(),
             created_at: now,
             updated_at: now,
@@ -245,6 +248,22 @@ impl PlantRepository for MemoryTransaction {
         row.name = name.clone();
         row.updated_at = now;
         Ok(machine_image(row))
+    }
+
+    async fn set_machine_data_block(
+        &mut self,
+        id: MachineId,
+        number: DataBlockNumber,
+    ) -> Result<RowImage, StorageError> {
+        let now = self.now();
+        let row = self.machine_row_mut(id)?;
+        row.db_number = Some(number);
+        row.updated_at = now;
+        let image = machine_image(row);
+        if let Some(connection) = self.state_mut().connections.get_mut(&id) {
+            connection.copy_data_block(number, now)?;
+        }
+        Ok(image)
     }
 
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {

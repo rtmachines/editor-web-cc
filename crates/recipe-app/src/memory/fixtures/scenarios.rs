@@ -24,7 +24,8 @@ use crate::export::{ExportApprovedInput, ExportByNumberInput, ExportScope};
 use crate::memory::{BodyWriter, seed_type_id};
 use crate::plant::{
     AddUnitInput, ArchiveMachineInput, ArchiveUnitInput, CreateMachineInput, DefineUdtInput,
-    DefineUdtMode, RenameMachineInput, RenameUnitInput, SetPlcConnectionInput,
+    DefineUdtMode, RenameMachineInput, RenameUnitInput, SetMachineDataBlockInput,
+    SetPlcConnectionInput,
 };
 use crate::ports::DocumentWriter;
 use crate::recipe::{
@@ -173,6 +174,7 @@ pub(crate) fn create_machine_input() -> CreateMachineInput {
         code: MachineCode::parse("M7").unwrap(),
         name: text("Press 7"),
         platform: PlcPlatform::S7_300,
+        db_number: Some(recipe_domain::plant::DataBlockNumber::parse("100").unwrap()),
         main_unit_name: text("Feeder"),
     }
 }
@@ -182,6 +184,14 @@ pub(crate) fn rename_machine_input() -> RenameMachineInput {
     RenameMachineInput {
         code: MachineCode::parse("M1").unwrap(),
         name: text("Press 2"),
+    }
+}
+
+/// The request of `SetMachineDataBlock` for `M1` with the number `7`.
+pub(crate) fn set_machine_data_block_input() -> SetMachineDataBlockInput {
+    SetMachineDataBlockInput {
+        code: MachineCode::parse("M1").unwrap(),
+        db_number: Some(recipe_domain::plant::DataBlockNumber::parse("7").unwrap()),
     }
 }
 

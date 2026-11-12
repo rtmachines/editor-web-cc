@@ -38,6 +38,11 @@ pub(super) fn machine_image(row: &MachineRow) -> RowImage {
         ("code", Value::String(row.code.to_string())),
         ("name", Value::String(row.name.to_string())),
         ("plc_platform", Value::String(row.platform.to_string())),
+        (
+            "db_number",
+            row.db_number
+                .map_or(Value::Null, |n| Value::from(n.value())),
+        ),
         ("archived_at", optional_time(row.archived_at)),
         ("created_at", time_value(row.created_at)),
         ("updated_at", time_value(row.updated_at)),

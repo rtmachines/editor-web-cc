@@ -13,7 +13,6 @@
 {{ fields::named(t, "host", "host", t.get("field-plc-host"), t.get("connection-host-hint"), "text", true, true, 253, "off", form.host, form.errors.lines("host")) }}
 {% if form.is_s7 %}{{ fields::named(t, "rack", "rack", t.get("field-plc-rack"), t.get("connection-rack-hint"), "text", true, true, 1, "off", form.rack, form.errors.lines("rack")) }}
 {{ fields::named(t, "slot", "slot", t.get("field-plc-slot"), t.get("connection-slot-hint"), "text", true, true, 2, "off", form.slot, form.errors.lines("slot")) }}
-{{ fields::named(t, "db_number", "db_number", t.get("field-plc-db-number"), t.get("connection-db-number-hint"), "text", true, true, 5, "off", form.db_number, form.errors.lines("db_number")) }}
 {% else %}{{ fields::named(t, "port", "port", t.get("field-plc-port"), t.get("connection-port-hint"), "text", true, true, 5, "off", form.port, form.errors.lines("port")) }}
 {{ fields::named(t, "address", "address", t.get("field-plc-address"), t.get("connection-address-hint"), "text", true, true, 200, "off", form.address, form.errors.lines("address")) }}
 {{ fields::select(t, "comm_mode", t.get("field-plc-comm-mode"), t.get("connection-mode-hint"), form.modes, form.mode, true, form.errors.lines("comm_mode")) }}

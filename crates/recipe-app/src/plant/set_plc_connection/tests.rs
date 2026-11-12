@@ -45,12 +45,11 @@ fn save(code: &str, expected_row_version: i64, fields: ConnectionFields) -> SetP
     }
 }
 
-fn s7_fields(db_number: &str) -> ConnectionFields {
+fn s7_fields() -> ConnectionFields {
     ConnectionFields {
         host: Some(PlcHost::parse("10.0.0.5").unwrap()),
         rack: Some(Rack::parse("0").unwrap()),
         slot: Some(Slot::parse("2").unwrap()),
-        db_number: Some(DataBlockNumber::parse(db_number).unwrap()),
         ..ConnectionFields::default()
     }
 }
@@ -70,8 +69,27 @@ fn s7_record() -> PlcConnection {
         host: PlcHost::parse("10.0.0.9").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("1").unwrap(),
-        db_number: DataBlockNumber::parse("50").unwrap(),
     }
+}
+
+/// Give machine `n` the data block number `text` and leave its record as it is.
+fn set_machine_number(fixture: &Fixture, n: u128, text: &str) {
+    fixture.store.update_state(|state, _now| {
+        let row = state.machines.get_mut(&mid(n)).unwrap();
+        row.db_number = Some(DataBlockNumber::parse(text).unwrap());
+    });
+}
+
+/// Return the `db_number` column of the record of machine 1 as the audit image shows it.
+async fn stored_copy(fixture: &Fixture) -> serde_json::Value {
+    let mut tx = fixture.store.begin_memory(Isolation::ReadOnly).unwrap();
+    let locked = tx
+        .plc_connections()
+        .lock_connection_for_update(mid(1))
+        .await
+        .unwrap()
+        .unwrap();
+    locked.before.as_value().get("db_number").unwrap().clone()
 }
 
 #[test]
@@ -146,7 +164,7 @@ async fn a_first_save_creates_the_record_at_row_version_1_and_writes_one_entry()
         .execute(
             &actor(Role::ProcessEngineer),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap();
@@ -183,7 +201,7 @@ async fn a_first_save_reads_first_and_then_locks_the_machine() {
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap();
@@ -206,7 +224,7 @@ async fn an_update_locks_the_machine_before_the_record_and_adds_1_to_the_row_ver
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 1, s7_fields("100")),
+            save("M1", 1, s7_fields()),
         )
         .await
         .unwrap();
@@ -258,7 +276,7 @@ async fn a_stale_row_version_gives_web_013_with_both_versions_and_writes_nothing
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap_err();
@@ -279,7 +297,7 @@ async fn an_expected_version_above_zero_for_a_machine_without_a_record_gives_web
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 3, s7_fields("100")),
+            save("M1", 3, s7_fields()),
         )
         .await
         .unwrap_err();
@@ -307,7 +325,7 @@ async fn two_first_saves_that_race_give_one_record_and_one_web_013() {
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap_err();
@@ -337,7 +355,7 @@ async fn a_machine_archived_between_the_read_and_the_lock_gives_plt_010_and_writ
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap_err();
@@ -350,15 +368,15 @@ async fn a_machine_archived_between_the_read_and_the_lock_gives_plt_010_and_writ
 async fn a_field_fault_gives_the_plant_errors_before_the_command_transaction() {
     let fixture = Fixture::new();
     fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    let fields = ConnectionFields {
+        port: Some(TcpPort::parse("502").unwrap()),
+        ..s7_fields()
+    };
     let error = use_case(fixture.context())
-        .execute(
-            &actor(Role::Administrator),
-            &meta(),
-            save("M1", 0, s7_fields("60000")),
-        )
+        .execute(&actor(Role::Administrator), &meta(), save("M1", 0, fields))
         .await
         .unwrap_err();
-    assert_eq!(error.code(), ErrorCode::PLT_024);
+    assert_eq!(error.code(), ErrorCode::PLT_022);
     assert!(matches!(error, AppError::Plants(_)));
     assert_eq!(
         fixture.store.journal(),
@@ -375,7 +393,7 @@ async fn a_failed_audit_insert_keeps_no_record() {
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap_err();
@@ -542,7 +560,7 @@ async fn an_s7_first_save_and_update_pass_without_a_password_and_never_seal() {
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap();
@@ -550,7 +568,7 @@ async fn an_s7_first_save_and_update_pass_without_a_password_and_never_seal() {
         .execute(
             &actor(Role::Administrator),
             &meta(),
-            save("M1", 1, s7_fields("101")),
+            save("M1", 1, s7_fields()),
         )
         .await
         .unwrap();
@@ -672,7 +690,7 @@ async fn a_first_save_targets_the_row_id_with_the_machine_as_aggregate() {
         .execute(
             &actor(Role::ProcessEngineer),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap();
@@ -698,7 +716,7 @@ async fn an_update_targets_the_row_id_with_the_machine_as_aggregate() {
         .execute(
             &actor(Role::ProcessEngineer),
             &meta(),
-            save("M1", 1, s7_fields("100")),
+            save("M1", 1, s7_fields()),
         )
         .await
         .unwrap();
@@ -743,7 +761,7 @@ async fn a_first_save_without_a_password_holds_both_flags_false() {
         .execute(
             &actor(Role::ProcessEngineer),
             &meta(),
-            save("M1", 0, s7_fields("100")),
+            save("M1", 0, s7_fields()),
         )
         .await
         .unwrap();
@@ -846,4 +864,31 @@ async fn clear_without_a_stored_password_holds_password_changed_false() {
     let after = only_entry(&fixture).after().cloned().unwrap();
     assert_eq!(after.get("password_set"), Some(&json!(false)));
     assert_eq!(after.get("password_changed"), Some(&json!(false)));
+}
+
+#[tokio::test]
+async fn a_save_on_an_s7_machine_writes_the_copy_from_the_machine_number() {
+    let fixture = Fixture::new();
+    fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    set_machine_number(&fixture, 1, "77");
+    let command = use_case(fixture.context());
+    command
+        .execute(
+            &actor(Role::Administrator),
+            &meta(),
+            save("M1", 0, s7_fields()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored_copy(&fixture).await, json!(77));
+    set_machine_number(&fixture, 1, "78");
+    command
+        .execute(
+            &actor(Role::Administrator),
+            &meta(),
+            save("M1", 1, s7_fields()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored_copy(&fixture).await, json!(78));
 }

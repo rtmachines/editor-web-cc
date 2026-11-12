@@ -46,8 +46,16 @@ fn each_state_action_converts_to_its_audit_action() {
 }
 
 #[test]
-fn row_actions_are_the_twenty_eight_remaining_actions() {
-    assert_eq!(RowAction::ALL.len(), 28);
+fn row_actions_are_the_twenty_nine_remaining_actions() {
+    assert_eq!(RowAction::ALL.len(), 29);
+}
+
+#[test]
+fn the_machine_data_block_set_action_is_a_row_action() {
+    assert_eq!(
+        AuditAction::from(RowAction::MachineDataBlockSet),
+        AuditAction::MachineDataBlockSet
+    );
 }
 
 #[test]

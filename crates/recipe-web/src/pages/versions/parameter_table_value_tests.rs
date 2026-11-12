@@ -216,6 +216,14 @@ fn mixed_member(name: &str, kind: CompositeType) -> TypeMember {
 /// Each entry is the tag, the type, and the stored JSON value. The stored values break the current
 /// rule set and pass the earlier one. The `n` of an entry is its place in the list from 1.
 fn seed_composite_world(world: &World, parameters: &[(&str, CompositeType, serde_json::Value)]) {
+    let unit_id = seed_composite_machine(world);
+    seed_composite_types(world);
+    seed_composite_recipe(world);
+    seed_composite_parameters(world, unit_id, parameters);
+}
+
+/// Seed machine `M31` and return the id of its one unit.
+fn seed_composite_machine(world: &World) -> UnitId {
     let machine_id = MachineId::from(COMPOSITE_MACHINE);
     let unit_id = UnitId::from(Uuid::from_u128(0x7357_0012_0000_0000_0000_0000_001f_0001));
     let machine = Machine::create(
@@ -223,9 +231,16 @@ fn seed_composite_world(world: &World, parameters: &[(&str, CompositeType, serde
         MachineCode::parse("M31").unwrap(),
         Text::parse("Composite line").unwrap(),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
+    unit_id
+}
+
+/// Seed the date, real, date array, and struct types of the composite world.
+fn seed_composite_types(world: &World) {
     let dimensions = ArrayDimensions::parse(vec![ArrayDimension::parse(1, 3).unwrap()]).unwrap();
     let rows = [
         composite_row(CompositeType::Date, primitive_shape(Primitive::Date)),
@@ -253,9 +268,13 @@ fn seed_composite_world(world: &World, parameters: &[(&str, CompositeType, serde
     for row in &rows {
         world.fixture.store.seed_type(row);
     }
+}
+
+/// Seed recipe `R-410` with its one live draft version.
+fn seed_composite_recipe(world: &World) {
     let recipe = Recipe::try_from(StoredRecipe {
         id: RecipeId::from(Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_0410)),
-        machine: machine_id,
+        machine: MachineId::from(COMPOSITE_MACHINE),
         reference: ReferenceNumber::parse("R-410").unwrap(),
         name: Text::parse("Composite recipe").unwrap(),
         deleted_at: None,
@@ -272,6 +291,14 @@ fn seed_composite_world(world: &World, parameters: &[(&str, CompositeType, serde
         .fixture
         .store
         .seed_recipe(&recipe, PlcPlatform::S7_1500, creator);
+}
+
+/// Seed the stored parameters of the draft version, numbered from 1.
+fn seed_composite_parameters(
+    world: &World,
+    unit_id: UnitId,
+    parameters: &[(&str, CompositeType, serde_json::Value)],
+) {
     for (n, (tag, kind, value)) in (1_u32..).zip(parameters) {
         let id = Uuid::from_u128(EXTRA_BASE | u128::from(n));
         let parameter = StoredParameter {

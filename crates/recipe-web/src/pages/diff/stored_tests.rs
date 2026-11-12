@@ -177,8 +177,10 @@ pub(crate) fn seed_two_versions_on_s7_1500(world: &World) {
         MachineCode::parse("M16").unwrap(),
         text("Test line"),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (UnitId::from(RULE_UNIT), text("Infeed")),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
     let header = |id: Uuid, number: u32, state: VersionState| StoredVersionHeader {
         id: RecipeVersionId::from(id),

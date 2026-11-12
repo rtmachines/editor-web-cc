@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Response};
 use recipe_app::error::{AppError, Missing};
 use recipe_app::export::{ExportPlcConnection, ExportPlcConnectionInput, ExportedPlcConnection};
 use recipe_domain::export::ExportError;
-use recipe_domain::plant::PlcConnection;
+use recipe_domain::plant::{DataBlockNumber, PlcConnection};
 use recipe_domain::recipe::ReferenceNumber;
 use serde::{Deserialize, Serialize};
 
@@ -94,16 +94,11 @@ fn connection_body<'a>(
     password: Option<&'a str>,
 ) -> ConnectionBody<'a> {
     match &exported.connection {
-        PlcConnection::S7 {
-            host,
-            rack,
-            slot,
-            db_number,
-        } => ConnectionBody {
+        PlcConnection::S7 { host, rack, slot } => ConnectionBody {
             host: host.as_str(),
             rack: Some(rack.value()),
             slot: Some(slot.value()),
-            db_number: Some(db_number.value()),
+            db_number: exported.db_number.map(DataBlockNumber::value),
             port: None,
             address: None,
             comm_mode: None,

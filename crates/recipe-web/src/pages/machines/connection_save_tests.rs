@@ -14,7 +14,7 @@ use crate::test_support::plant::{HTMX, World, cookie_of, main_of, text_with, wor
 use crate::test_support::text;
 
 /// A valid body for the S7 machine `M7` without a record.
-const S7_BODY: &str = "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1";
+const S7_BODY: &str = "row_version=0&host=10.0.0.5&rack=0&slot=2";
 /// A valid body for a `TwinCat3` machine without a record: mode `Ads` without a login.
 const ADS_BODY: &str = "row_version=0&host=10.0.0.6&port=48898&address=192.168.1.10.1.1&comm_mode=Ads&login=&password=";
 /// A valid body for a `CodesysIec` machine without a record: mode `OpcUa` with a login.
@@ -168,6 +168,36 @@ async fn connection_save_refuses_an_unknown_field_with_e_web_008_and_writes_noth
 }
 
 #[tokio::test]
+async fn connection_save_refuses_the_field_db_number_with_one_e_web_008_line_and_no_oob_form() {
+    // The data block number belongs to the machine (ADR-0156, design D8). The request struct
+    // denies unknown fields, so the changed form body gives one line (ADR-0138).
+    for body in [
+        format!("{S7_BODY}&db_number=1"),
+        format!("{S7_BODY}&db_number="),
+    ] {
+        let world = world();
+        let before = world.fixture.snapshot();
+        let reply = world
+            .post(&world.engineer, "/machines/M7/connection", &body, true)
+            .await;
+        assert_error(
+            &reply,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "E-WEB-008",
+            "db_number field",
+        );
+        assert_eq!(reply.body.matches("E-WEB-008").count(), 1, "{}", reply.body);
+        assert!(!reply.body.contains(OOB), "{}", reply.body);
+        assert!(
+            !reply.body.contains("id=\"connection-form\""),
+            "{}",
+            reply.body
+        );
+        assert_eq!(world.fixture.snapshot(), before);
+    }
+}
+
+#[tokio::test]
 async fn connection_save_refuses_a_row_version_that_is_not_a_number_and_writes_nothing() {
     let world = world();
     let before = world.fixture.snapshot();
@@ -280,7 +310,7 @@ async fn a_valid_htmx_save_without_a_password_shows_the_no_password_state() {
 #[tokio::test]
 async fn a_valid_save_after_a_refused_save_answers_a_form_without_error_lines() {
     let world = world();
-    let refused_body = "row_version=0&host=-bad-&rack=0&slot=2&db_number=1";
+    let refused_body = "row_version=0&host=-bad-&rack=0&slot=2";
     let refused = world
         .post(
             &world.engineer,

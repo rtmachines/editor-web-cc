@@ -6,7 +6,8 @@
 use recipe_app::error::StorageError;
 use recipe_app::ports::{InsertedMachine, Locked, RowImage};
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit, Unit, UnitId, UnitPath,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit, Unit,
+    UnitId, UnitPath,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -20,12 +21,12 @@ use crate::error::{corrupt, map_error};
 
 /// A live machine by code. The partial unique index `machine_code_live_unique` serves it.
 const SELECT_LIVE_BY_CODE: &str = "\
-SELECT id, code, name, plc_platform, archived_at FROM machine \
+SELECT id, code, name, plc_platform, db_number, archived_at FROM machine \
 WHERE code = $1 AND archived_at IS NULL";
 
 /// The first archived machine of a code by `id`, as the port contract demands.
 const SELECT_ARCHIVED_BY_CODE: &str = "\
-SELECT id, code, name, plc_platform, archived_at FROM machine \
+SELECT id, code, name, plc_platform, db_number, archived_at FROM machine \
 WHERE code = $1 AND archived_at IS NOT NULL ORDER BY id LIMIT 1";
 
 /// The machine that the transfer routes pick for a code (ADR-0109 (j)).
@@ -33,27 +34,27 @@ WHERE code = $1 AND archived_at IS NOT NULL ORDER BY id LIMIT 1";
 /// The live machine comes first because `archived_at DESC NULLS FIRST` puts null first. Then comes
 /// the latest archiving. `id DESC` breaks a tie. The `resolved` CTE of `SELECT_EXPORTABLE` in
 /// `exportable.rs` uses the same order, and the memory adapter does too.
-const SELECT_EXPORT_BY_CODE: &str = "SELECT id, code, name, plc_platform, archived_at FROM machine WHERE code = $1 ORDER BY archived_at DESC NULLS FIRST, id DESC LIMIT 1";
+const SELECT_EXPORT_BY_CODE: &str = "SELECT id, code, name, plc_platform, db_number, archived_at FROM machine WHERE code = $1 ORDER BY archived_at DESC NULLS FIRST, id DESC LIMIT 1";
 
 const SELECT_BY_ID: &str = "\
-SELECT id, code, name, plc_platform, archived_at FROM machine WHERE id = $1";
+SELECT id, code, name, plc_platform, db_number, archived_at FROM machine WHERE id = $1";
 
 /// `machine FOR SHARE` (`AddUnit`, `CreateRecipe`). The image comes from the locked row.
 const LOCK_SHARED: &str = "\
-SELECT id, code, name, plc_platform, archived_at, to_jsonb(m) AS image \
+SELECT id, code, name, plc_platform, db_number, archived_at, to_jsonb(m) AS image \
 FROM machine m WHERE id = $1 FOR SHARE";
 
 /// `machine FOR NO KEY UPDATE` (`RenameMachine`, `ArchiveMachine`).
 const LOCK_NO_KEY_UPDATE: &str = "\
-SELECT id, code, name, plc_platform, archived_at, to_jsonb(m) AS image \
+SELECT id, code, name, plc_platform, db_number, archived_at, to_jsonb(m) AS image \
 FROM machine m WHERE id = $1 FOR NO KEY UPDATE";
 
 const SELECT_UNITS: &str = "\
 SELECT id, path, name, archived_at FROM unit WHERE machine_id = $1 ORDER BY id";
 
 const INSERT_MACHINE: &str = "\
-INSERT INTO machine (id, code, name, plc_platform, archived_at) \
-VALUES ($1, $2, $3, $4, $5) RETURNING to_jsonb(machine)";
+INSERT INTO machine (id, code, name, plc_platform, db_number, archived_at) \
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING to_jsonb(machine)";
 
 const INSERT_UNIT: &str = "\
 INSERT INTO unit (id, machine_id, path, name, archived_at) \
@@ -61,6 +62,15 @@ VALUES ($1, $2, $3, $4, $5) RETURNING to_jsonb(unit)";
 
 const RENAME_MACHINE: &str = "\
 UPDATE machine SET name = $2 WHERE id = $1 RETURNING to_jsonb(machine)";
+
+const SET_MACHINE_DATA_BLOCK: &str = "\
+UPDATE machine SET db_number = $2 WHERE id = $1 RETURNING to_jsonb(machine)";
+
+/// The copy of the number into the record of the machine (design D7). The trigger
+/// `plc_connection_a_bump` adds 1 to `row_version`. No row matches a machine without a record
+/// or a record that holds the number already (ADR-0157 (j)).
+const COPY_DATA_BLOCK_TO_CONNECTION: &str = "\
+UPDATE plc_connection SET db_number = $2 WHERE machine_id = $1 AND db_number IS DISTINCT FROM $2";
 
 const ARCHIVE_MACHINE: &str = "\
 UPDATE machine SET archived_at = now() WHERE id = $1 RETURNING to_jsonb(machine)";
@@ -71,6 +81,7 @@ struct MachineRecord {
     code: String,
     name: String,
     plc_platform: String,
+    db_number: Option<i32>,
     archived_at: Option<OffsetDateTime>,
 }
 
@@ -107,6 +118,11 @@ fn build_machine(record: MachineRecord, units: Vec<UnitRecord>) -> Result<Machin
         code: MachineCode::parse(&record.code).map_err(|error| corrupt("machine", error))?,
         name: Text::parse(&record.name).map_err(|error| corrupt("machine", error))?,
         platform: PlcPlatform::parse(&record.plc_platform)
+            .map_err(|error| corrupt("machine", error))?,
+        db_number: record
+            .db_number
+            .map(|number| DataBlockNumber::parse(&number.to_string()))
+            .transpose()
             .map_err(|error| corrupt("machine", error))?,
         archived_at: record.archived_at.map(Timestamp::from),
         units: stored_units,
@@ -226,6 +242,7 @@ pub(super) async fn insert(
         .bind(machine.code().to_string())
         .bind(machine.name().as_str())
         .bind(machine.platform().as_str())
+        .bind(machine.db_number().map(|number| i32::from(number.value())))
         .bind(machine.archived_at().map(|at| *at.as_offset_date_time()))
         .fetch_one(&mut *connection)
         .await
@@ -270,6 +287,30 @@ pub(super) async fn rename(
         .bind(*id.as_uuid())
         .bind(name.as_str())
         .fetch_one(connection)
+        .await
+        .map_err(map_error)?;
+    Ok(RowImage::new(image))
+}
+
+/// Set `machine.db_number` and copy it into the `plc_connection` record, when one exists.
+///
+/// Return the image of the machine after the change (`SetMachineDataBlock`, design D6, D7). The
+/// copy writes no image, because the command writes one entry for the machine only.
+pub(super) async fn set_data_block(
+    connection: &mut PgConnection,
+    id: MachineId,
+    number: DataBlockNumber,
+) -> Result<RowImage, StorageError> {
+    let image: Value = sqlx::query_scalar(SET_MACHINE_DATA_BLOCK)
+        .bind(*id.as_uuid())
+        .bind(i32::from(number.value()))
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(map_error)?;
+    sqlx::query(COPY_DATA_BLOCK_TO_CONNECTION)
+        .bind(*id.as_uuid())
+        .bind(i32::from(number.value()))
+        .execute(connection)
         .await
         .map_err(map_error)?;
     Ok(RowImage::new(image))

@@ -11,13 +11,16 @@ use crate::test_support::plant::{cookie_of, main_of, world};
 use crate::test_support::text;
 
 /// A valid body of the form.
-const GOOD: &str = "code=M99&name=Press+line+2&plc_platform=S7_300&main_unit_name=Infeed";
+const GOOD: &str =
+    "code=M99&name=Press+line+2&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
 /// The opening tag of the create form (design D6). The fixed `id` serves the out-of-band swap.
 const FORM_TAG: &str = "<form id=\"machine-new-form\" method=\"post\" action=\"/machines\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\">";
 /// The opening tag of the same form when an error answer swaps it out of band (ADR-0041 (e)).
 const OOB_FORM_TAG: &str = "<form id=\"machine-new-form\" method=\"post\" action=\"/machines\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\" hx-swap-oob=\"true\">";
 /// The `id` of each input of the form, in the order of the form.
 const INPUT_IDS: [&str; 4] = ["code", "machine_name", "plc_platform", "main_unit_name"];
+/// The `id` of the data block input. It sits after the platform list (design D8).
+const DB_ID: &str = "db_number";
 /// The five platforms: the value of the form and the key of the text.
 const PLATFORMS: [(&str, &str); 5] = [
     ("CodesysIec", "platform-codesys-iec"),
@@ -28,7 +31,7 @@ const PLATFORMS: [(&str, &str); 5] = [
 ];
 
 /// A body with one bad field, the name of the field in the error, and the key of the reason.
-const BAD_FIELDS: [(&str, &str, &str); 8] = [
+const BAD_FIELDS: [(&str, &str, &str); 11] = [
     (
         "code=X7&name=A&plc_platform=S7_300&main_unit_name=B",
         "code",
@@ -69,6 +72,21 @@ const BAD_FIELDS: [(&str, &str, &str); 8] = [
         "main_unit_name",
         "reason-name",
     ),
+    (
+        "code=M99&name=A&plc_platform=S7_300&db_number=0&main_unit_name=B",
+        "db_number",
+        "reason-connection-data-block",
+    ),
+    (
+        "code=M99&name=A&plc_platform=S7_300&db_number=65536&main_unit_name=B",
+        "db_number",
+        "reason-connection-data-block",
+    ),
+    (
+        "code=M99&name=A&plc_platform=S7_300&db_number=abc&main_unit_name=B",
+        "db_number",
+        "reason-connection-data-block",
+    ),
 ];
 
 /// Return the markup of the create form of a page.
@@ -82,17 +100,19 @@ fn form_of(body: &str) -> &str {
 // --- GET /machines/new --------------------------------------------------------------------------
 
 #[tokio::test]
-async fn machines_form_holds_the_four_fields_with_their_ids_names_labels_and_hints() {
+async fn machines_form_holds_the_five_fields_with_their_ids_names_labels_and_hints() {
     let world = world();
     let fields = [
         ("code", "code", "field-code"),
         ("machine_name", "name", "field-machine-name"),
         ("plc_platform", "plc_platform", "field-plc-platform"),
+        ("db_number", "db_number", "field-db-number"),
         ("main_unit_name", "main_unit_name", "field-main-unit-name"),
     ];
     let hints = [
         ("code", "machine-code-hint"),
         ("plc_platform", "machine-platform-hint"),
+        ("db_number", "machine-db-number-hint"),
         ("main_unit_name", "machine-main-unit-hint"),
     ];
     for lang in [Lang::En, Lang::Pl] {
@@ -116,6 +136,36 @@ async fn machines_form_holds_the_four_fields_with_their_ids_names_labels_and_hin
             assert!(form.contains(&hint), "{lang} {id}: {form}");
         }
         assert!(!form.contains("id=\"machine_name-hint\""), "{form}");
+    }
+}
+
+/// Spec "Machine form and creation": the data block field follows the platform list, is always
+/// visible, and its hint names the three S7 platforms (design D8).
+#[tokio::test]
+async fn machines_form_puts_the_data_block_field_after_the_platform_list_with_the_s7_hint() {
+    let world = world();
+    for lang in [Lang::En, Lang::Pl] {
+        let reply = world
+            .get(&world.engineer, "/machines/new", &[cookie_of(lang)])
+            .await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let form = form_of(&reply.body);
+        let platform = form.find("id=\"plc_platform\"").unwrap();
+        let data_block = form
+            .find(&format!("id=\"{DB_ID}\" name=\"{DB_ID}\""))
+            .unwrap();
+        let unit = form.find("id=\"main_unit_name\"").unwrap();
+        assert!(platform < data_block && data_block < unit, "{lang}: {form}");
+        let hint = text(lang, "machine-db-number-hint");
+        for platform in ["S7_300", "S7_1200", "S7_1500"] {
+            assert!(hint.contains(platform), "{lang} {platform}: {hint}");
+        }
+        let input = form.split(&format!("id=\"{DB_ID}\" name")).nth(1).unwrap();
+        let input = input.split('>').next().unwrap();
+        assert!(!input.contains("hidden"), "{lang}: {input}");
+        assert!(!input.contains("aria-required"), "{lang}: {input}");
+        assert!(!form.contains("<script"), "{lang}: {form}");
+        assert!(!form.contains("style="), "{lang}: {form}");
     }
 }
 
@@ -295,7 +345,7 @@ async fn machines_create_is_forbidden_for_an_operator_and_creates_nothing() {
 #[tokio::test]
 async fn machines_create_with_the_code_of_a_live_machine_puts_e_plt_001_under_the_code() {
     let world = world();
-    let body = "code=M7&name=Again&plc_platform=S7_300&main_unit_name=Infeed";
+    let body = "code=M7&name=Again&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
     let before = world.audit_count();
     let reply = world.post(&world.engineer, "/machines", body, true).await;
     assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-001");
@@ -311,6 +361,111 @@ async fn machines_create_with_the_code_of_a_live_machine_puts_e_plt_001_under_th
     assert!(line.contains("E-PLT-001"), "{form}");
     assert_clean_html(&reply.body);
     assert_eq!(world.audit_count(), before);
+}
+
+/// Spec "Machine form and creation": an empty `db_number` is no value, so an IEC machine is created.
+#[tokio::test]
+async fn machines_create_reads_an_empty_data_block_as_no_value_for_an_iec_machine() {
+    let world = world();
+    let bodies = [
+        "code=M96&name=Iec&plc_platform=CodesysIec&db_number=&main_unit_name=Infeed",
+        "code=M95&name=Iec&plc_platform=TwinCat3&main_unit_name=Infeed",
+    ];
+    for body in bodies {
+        let reply = world.post(&world.engineer, "/machines", body, false).await;
+        assert_eq!(
+            reply.status,
+            StatusCode::SEE_OTHER,
+            "{body}: {}",
+            reply.body
+        );
+    }
+}
+
+/// Spec "Machine form and creation": `S7_300` without a number gives `422 E-PLT-050` and the form
+/// with its line under `db_number`.
+#[tokio::test]
+async fn machines_create_s7_300_without_a_number_puts_e_plt_050_under_the_data_block() {
+    let world = world();
+    let before = world.audit_count();
+    let bodies = [
+        "code=M99&name=Press&plc_platform=S7_300&db_number=&main_unit_name=Infeed",
+        "code=M99&name=Press&plc_platform=S7_300&main_unit_name=Infeed",
+    ];
+    for body in bodies {
+        let reply = world.post(&world.engineer, "/machines", body, true).await;
+        assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-050");
+        assert!(reply.body.contains("Errors: 1."), "{body}: {}", reply.body);
+        assert!(reply.body.contains("href=\"#db_number\""), "{}", reply.body);
+        let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+        assert!(form.contains("value=\"Press\""), "{form}");
+        assert_eq!(form.matches("aria-invalid=\"true\"").count(), 1, "{form}");
+        let (_before, line) = form
+            .split_once("<div class=\"field-error\" id=\"db_number-error\">")
+            .unwrap();
+        assert!(line.contains("E-PLT-050"), "{form}");
+        assert_clean_html(&reply.body);
+    }
+    assert_eq!(
+        world.audit_count(),
+        before,
+        "a refused form creates nothing"
+    );
+}
+
+/// An IEC platform with a number gives `E-PLT-051`, and a number above the platform limit gives
+/// `E-PLT-024`. Each line sits under `db_number` and the form keeps the sent number.
+#[tokio::test]
+async fn machines_create_puts_the_other_data_block_refusals_under_the_data_block() {
+    let world = world();
+    let before = world.audit_count();
+    let cases = [
+        (
+            "code=M99&name=Iec&plc_platform=CodesysIec&db_number=5&main_unit_name=Infeed",
+            "E-PLT-051",
+            "5",
+        ),
+        (
+            "code=M99&name=Press&plc_platform=S7_300&db_number=16001&main_unit_name=Infeed",
+            "E-PLT-024",
+            "16001",
+        ),
+    ];
+    for (body, code, sent) in cases {
+        let reply = world.post(&world.engineer, "/machines", body, true).await;
+        assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, code);
+        assert!(
+            reply.body.contains("href=\"#db_number\""),
+            "{code}: {}",
+            reply.body
+        );
+        let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+        assert!(
+            form.contains(&format!("value=\"{sent}\"")),
+            "{code}: {form}"
+        );
+        let (_before, line) = form
+            .split_once("<div class=\"field-error\" id=\"db_number-error\">")
+            .unwrap();
+        assert!(line.contains(code), "{code}: {form}");
+    }
+    assert_eq!(
+        world.audit_count(),
+        before,
+        "a refused form creates nothing"
+    );
+}
+
+/// Design D5: the domain check runs only when every field parses. A bad name with `S7_300` and no
+/// number gives the one `E-WEB-008` line of the name and no `E-PLT-050`.
+#[tokio::test]
+async fn machines_create_checks_the_data_block_only_when_every_field_parses() {
+    let world = world();
+    let body = "code=M99&name=+&plc_platform=S7_300&main_unit_name=Infeed";
+    let reply = world.post(&world.engineer, "/machines", body, true).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
+    assert!(!reply.body.contains("E-PLT-050"), "{}", reply.body);
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
 }
 
 #[tokio::test]
@@ -440,7 +595,8 @@ async fn machines_create_an_unknown_key_with_an_empty_code_gives_one_line() {
 #[tokio::test]
 async fn machines_create_stores_a_name_with_markup_and_the_list_shows_it_escaped() {
     let world = world();
-    let body = "code=M97&name=%3Cb%3Ex%3C%2Fb%3E&plc_platform=S7_300&main_unit_name=Infeed";
+    let body =
+        "code=M97&name=%3Cb%3Ex%3C%2Fb%3E&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
     let reply = world.post(&world.engineer, "/machines", body, false).await;
     assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
     let list = world.get_en(&world.engineer, "/machines?q=M97").await;

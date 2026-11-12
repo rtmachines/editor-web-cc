@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    CommMode, ConnectionFields, DataBlockNumber, MachineCode, MachineId, PlcAddress, PlcConnection,
-    PlcHost, PlcLogin, PlcPassword, PlcPlatform, Rack, Slot, TcpPort,
+    CommMode, ConnectionFields, MachineCode, MachineId, PlcAddress, PlcConnection, PlcHost,
+    PlcLogin, PlcPassword, PlcPlatform, Rack, Slot, TcpPort,
 };
 
 use super::{SetPlcConnection, SetPlcConnectionInput, SetPlcConnectionOutput};
@@ -45,7 +45,6 @@ fn s7_fields() -> ConnectionFields {
         host: Some(PlcHost::parse("10.0.0.5").unwrap()),
         rack: Some(Rack::parse("0").unwrap()),
         slot: Some(Slot::parse("2").unwrap()),
-        db_number: Some(DataBlockNumber::parse("100").unwrap()),
         ..ConnectionFields::default()
     }
 }

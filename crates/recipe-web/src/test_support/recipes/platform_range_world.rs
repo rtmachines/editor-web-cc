@@ -122,16 +122,44 @@ fn ldt_type_row() -> PlcType {
 async fn seed_approved_world(world: &World, spec: WorldSpec) {
     let machine_id = MachineId::from(spec.machine);
     let unit_id = UnitId::from(spec.unit);
+    seed_machine(world, &spec, machine_id, unit_id);
+    let recipe_id = RecipeId::from(spec.recipe);
+    let version_id = RecipeVersionId::from(spec.version);
+    let reference = seed_recipe(world, &spec, machine_id, recipe_id, version_id);
+    seed_parameter(world, spec, unit_id, version_id);
+    let target = VersionTarget {
+        version: version_id,
+        recipe: recipe_id,
+        machine: machine_id,
+        reference,
+    };
+    approve_version_with_real_hash(&world.fixture, target).await;
+}
+
+/// Seed the machine and its one unit.
+fn seed_machine(world: &World, spec: &WorldSpec, machine_id: MachineId, unit_id: UnitId) {
     let machine = Machine::create(
         machine_id,
         MachineCode::parse(spec.machine_code).unwrap(),
         Text::parse("Range line").unwrap(),
         spec.platform,
+        spec.platform
+            .max_data_block()
+            .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
-    let recipe_id = RecipeId::from(spec.recipe);
-    let version_id = RecipeVersionId::from(spec.version);
+}
+
+/// Seed the recipe with its live draft version. Return the reference number.
+fn seed_recipe(
+    world: &World,
+    spec: &WorldSpec,
+    machine_id: MachineId,
+    recipe_id: RecipeId,
+    version_id: RecipeVersionId,
+) -> ReferenceNumber {
     let reference = ReferenceNumber::parse(spec.reference).unwrap();
     let recipe = Recipe::try_from(StoredRecipe {
         id: recipe_id,
@@ -152,6 +180,11 @@ async fn seed_approved_world(world: &World, spec: WorldSpec) {
         .fixture
         .store
         .seed_recipe(&recipe, spec.platform, creator);
+    reference
+}
+
+/// Seed the one parameter of the version.
+fn seed_parameter(world: &World, spec: WorldSpec, unit_id: UnitId, version_id: RecipeVersionId) {
     let parameter = StoredParameter {
         id: ParameterId::from(spec.parameter),
         key: ParameterKey::from(spec.parameter),
@@ -167,11 +200,4 @@ async fn seed_approved_world(world: &World, spec: WorldSpec) {
         ordinal: Ordinal::parse(0).unwrap(),
     };
     world.fixture.store.seed_parameter(version_id, &parameter);
-    let target = VersionTarget {
-        version: version_id,
-        recipe: recipe_id,
-        machine: machine_id,
-        reference,
-    };
-    approve_version_with_real_hash(&world.fixture, target).await;
 }

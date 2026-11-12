@@ -2,12 +2,14 @@
 
 use recipe_domain::audit::{AggregateType, AuditAction};
 use recipe_domain::identity::Role;
+use recipe_domain::plant::PlcPlatform;
 
 use super::assert_trail;
 use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
     AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
+    SetMachineDataBlock,
 };
 
 #[tokio::test]
@@ -51,6 +53,29 @@ async fn rename_machine_writes_one_machine_entry() {
         "RenameMachine",
         &[(
             AuditAction::MachineRenamed,
+            "machine",
+            AggregateType::Machine,
+        )],
+    );
+}
+
+#[tokio::test]
+async fn set_machine_data_block_writes_one_machine_entry() {
+    let fixture = Fixture::new();
+    fixture.seed_machine_on(PlcPlatform::S7_300, 1, "M1");
+    let user = actor(Role::Administrator);
+    let request = meta();
+    SetMachineDataBlock::new(fixture.context())
+        .execute(&user, &request, scenarios::set_machine_data_block_input())
+        .await
+        .unwrap();
+    assert_trail(
+        &fixture.store.audit_entries(),
+        &user,
+        &request,
+        "SetMachineDataBlock",
+        &[(
+            AuditAction::MachineDataBlockSet,
             "machine",
             AggregateType::Machine,
         )],

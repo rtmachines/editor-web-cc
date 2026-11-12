@@ -109,8 +109,8 @@ async fn audit_list_selects_offer_all_values_to_an_administrator_and_the_recipe_
     let world = audit_world().await;
     let admin = world.get_en(&world.data.admin, "/audit").await;
     let form = filter_form(main_of(&admin.body));
-    // Every type, 9 types, every action, 37 actions.
-    assert_eq!(form.matches("<option value=\"").count(), 48, "{form}");
+    // Every type, 9 types, every action, 38 actions.
+    assert_eq!(form.matches("<option value=\"").count(), 49, "{form}");
     assert_eq!(form.matches("<optgroup label=\"").count(), 5, "{form}");
     assert!(
         form.contains("<option value=\"plc_type\">PLC type</option>"),

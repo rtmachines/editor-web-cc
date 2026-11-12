@@ -11,8 +11,7 @@ use std::fmt;
 
 use recipe_app::ports::NonEmpty;
 use recipe_domain::plant::{
-    CommMode, ConnectionFields, DataBlockNumber, PlcAddress, PlcHost, PlcLogin, PlcPassword, Rack,
-    Slot, TcpPort,
+    CommMode, ConnectionFields, PlcAddress, PlcHost, PlcLogin, PlcPassword, Rack, Slot, TcpPort,
 };
 use serde::{Deserialize, Deserializer};
 use zeroize::Zeroizing;
@@ -86,8 +85,6 @@ pub(super) struct ConnectionRequest {
     #[serde(default)]
     slot: Option<String>,
     #[serde(default)]
-    db_number: Option<String>,
-    #[serde(default)]
     port: Option<String>,
     #[serde(default)]
     address: Option<String>,
@@ -159,7 +156,7 @@ impl ConnectionRequest {
         lines.finish(Some(fields))
     }
 
-    /// Parse the host and the three S7 fields: `host`, `rack`, `slot`, and `db_number`.
+    /// Parse the host and the S7 fields: `host`, `rack`, and `slot`.
     fn s7_fields(&self, lines: &mut FieldLines, base: ConnectionFields) -> ConnectionFields {
         ConnectionFields {
             host: read(
@@ -182,13 +179,6 @@ impl ConnectionRequest {
                 Slot::parse,
                 "slot",
                 FieldReason::ConnectionSlot,
-            ),
-            db_number: read(
-                lines,
-                present(&self.db_number),
-                DataBlockNumber::parse,
-                "db_number",
-                FieldReason::ConnectionDataBlock,
             ),
             ..base
         }
@@ -256,7 +246,6 @@ impl ConnectionRequest {
             host: text(&self.host),
             rack: text(&self.rack),
             slot: text(&self.slot),
-            db_number: text(&self.db_number),
             port: text(&self.port),
             address: text(&self.address),
             mode: text(&self.comm_mode),

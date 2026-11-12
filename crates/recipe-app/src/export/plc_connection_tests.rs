@@ -42,7 +42,6 @@ fn s7_record() -> PlcConnection {
         host: PlcHost::parse("10.0.0.9").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("1").unwrap(),
-        db_number: DataBlockNumber::parse("50").unwrap(),
     }
 }
 
@@ -287,6 +286,62 @@ async fn an_s7_record_returns_without_a_password_and_without_an_open() {
     assert!(matches!(exported.connection, PlcConnection::S7 { .. }));
     assert!(exported.password.is_none());
     assert!(cipher.calls().is_empty());
+}
+
+#[tokio::test]
+async fn an_s7_export_gives_the_number_of_the_machine_and_not_the_copy_of_the_record() {
+    let fixture = Fixture::new();
+    let machine = machine_with_recipe(&fixture, PlcPlatform::S7_1500);
+    fixture
+        .store
+        .seed_connection(machine.id(), &s7_record(), None);
+    // Simulate drift: the machine has 200 and the copy in the record has 100 (ADR-0156 (g)).
+    fixture.store.update_state(|state, now| {
+        let row = state.machines.get_mut(&machine.id()).unwrap();
+        row.db_number = Some(DataBlockNumber::parse("200").unwrap());
+        let record = state.connections.get_mut(&machine.id()).unwrap();
+        record
+            .copy_data_block(DataBlockNumber::parse("100").unwrap(), now)
+            .unwrap();
+    });
+    let cipher = MemoryCredentialCipher::default();
+    let exported = export(&fixture, &cipher, Role::ExportClient, input("M1", "R-1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        exported.db_number,
+        Some(DataBlockNumber::parse("200").unwrap())
+    );
+}
+
+#[tokio::test]
+async fn a_live_s7_machine_without_a_number_gives_db_008_and_no_entry() {
+    let fixture = Fixture::new();
+    let machine = machine_with_recipe(&fixture, PlcPlatform::S7_1500);
+    fixture
+        .store
+        .seed_connection(machine.id(), &s7_record(), None);
+    // Simulate a stored row that breaks the rule of ADR-0156 (a).
+    fixture.store.update_state(|state, _now| {
+        let row = state.machines.get_mut(&machine.id()).unwrap();
+        row.db_number = None;
+    });
+    let cipher = MemoryCredentialCipher::default();
+    let error = export(&fixture, &cipher, Role::ExportClient, input("M1", "R-1"))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn an_iec_export_has_no_data_block_number() {
+    let cipher = MemoryCredentialCipher::default();
+    let fixture = iec_fixture(&cipher);
+    let exported = export(&fixture, &cipher, Role::ExportClient, input("M1", "R-1"))
+        .await
+        .unwrap();
+    assert_eq!(exported.db_number, None);
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 # ADR-0154: PLC connection settings of a machine
 
-Status: Accepted. Amended by ADR-0155 (`app_setting` records `security.plc_credential_key_file`)
+Status: Accepted. Amended by ADR-0155 (`app_setting` records `security.plc_credential_key_file`). Amended by ADR-0156 (the data block number moves to the machine)
 Date: 2026-11-10
 Deciders: project owner
 

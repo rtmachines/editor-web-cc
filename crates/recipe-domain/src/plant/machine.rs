@@ -8,7 +8,8 @@ use crate::text::Text;
 use crate::timestamp::Timestamp;
 
 use super::{
-    LiveUnits, MachineCode, MachineId, PlantError, PlcPlatform, UnitId, UnitPath, UnitUsage,
+    DataBlockNumber, LiveUnits, MachineCode, MachineId, PlantError, PlcPlatform, UnitId, UnitPath,
+    UnitUsage, check_data_block,
 };
 
 /// A unit of a machine, such as `U1.2`.
@@ -82,6 +83,8 @@ pub struct StoredMachine {
     pub name: Text,
     /// The PLC platform of the machine.
     pub platform: PlcPlatform,
+    /// The data block number, or `None` for an IEC machine or an archived S7 machine.
+    pub db_number: Option<DataBlockNumber>,
     /// The instant of archiving, or `None` for a live machine.
     pub archived_at: Option<Timestamp>,
     /// The unit rows of the machine, in any order.
@@ -109,6 +112,7 @@ pub struct Machine {
     code: MachineCode,
     name: Text,
     platform: PlcPlatform,
+    db_number: Option<DataBlockNumber>,
     archived_at: Option<Timestamp>,
     units: BTreeMap<UnitPath, Unit>,
 }
@@ -138,6 +142,12 @@ impl Machine {
         self.platform
     }
 
+    /// Return the data block number, or `None` for an IEC machine or an archived S7 machine.
+    #[must_use]
+    pub const fn db_number(&self) -> Option<DataBlockNumber> {
+        self.db_number
+    }
+
     /// Return the instant of archiving, or `None` for a live machine.
     #[must_use]
     pub const fn archived_at(&self) -> Option<Timestamp> {
@@ -152,15 +162,22 @@ impl Machine {
 
     /// Create a live machine with its main unit `U1` (`domain-model.md` section 5.1, `CreateMachine`).
     ///
-    /// The caller supplies the identifiers. The new machine cannot fail.
-    #[must_use]
+    /// The caller supplies the identifiers. A live S7 machine needs a data block number.
+    /// An IEC machine has none (ADR-0156).
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of [`check_data_block`]: [`PlantError::DataBlockMissing`],
+    /// [`PlantError::DataBlockNotOnPlatform`], or [`PlantError::DataBlockOutOfRange`].
     pub fn create(
         id: MachineId,
         code: MachineCode,
         name: Text,
         platform: PlcPlatform,
+        db_number: Option<DataBlockNumber>,
         main: (UnitId, Text),
-    ) -> Self {
+    ) -> Result<Self, PlantError> {
+        check_data_block(code, platform, db_number)?;
         let (main_id, main_name) = main;
         let path = UnitPath::first_main();
         let main_unit = Unit {
@@ -169,14 +186,31 @@ impl Machine {
             name: main_name,
             archived_at: None,
         };
-        Self {
+        Ok(Self {
             id,
             code,
             name,
             platform,
+            db_number,
             archived_at: None,
             units: BTreeMap::from([(path, main_unit)]),
-        }
+        })
+    }
+
+    /// Set the data block number of a live machine (ADR-0156).
+    ///
+    /// On an error the number stays as it was.
+    ///
+    /// # Errors
+    ///
+    /// The checks run in this order.
+    /// Returns [`PlantError::MachineArchived`] for an archived machine.
+    /// Then it returns the error of [`check_data_block`].
+    pub fn set_data_block(&mut self, number: Option<DataBlockNumber>) -> Result<(), PlantError> {
+        self.ensure_live()?;
+        check_data_block(self.code, self.platform, number)?;
+        self.db_number = number;
+        Ok(())
     }
 
     /// Add a live unit (`domain-model.md` section 5.1, `AddUnit`).
@@ -388,8 +422,10 @@ impl TryFrom<StoredMachine> for Machine {
     ///
     /// A failure means corrupt storage, because the commands keep the tree valid.
     /// The checks run in this order: duplicate path, missing parent,
-    /// archived parent of a live unit, and no live main unit.
+    /// archived parent of a live unit, no live main unit, and the data block rule
+    /// (ADR-0156). An archived S7 machine may have no number.
     fn try_from(stored: StoredMachine) -> Result<Self, PlantError> {
+        check_stored_data_block(&stored)?;
         let units = index_units(stored.units)?;
         check_parents(&units)?;
         check_live_main_unit(&units, stored.code)?;
@@ -398,10 +434,20 @@ impl TryFrom<StoredMachine> for Machine {
             code: stored.code,
             name: stored.name,
             platform: stored.platform,
+            db_number: stored.db_number,
             archived_at: stored.archived_at,
             units,
         })
     }
+}
+
+/// Apply the data block rule to a stored machine. Only an archived S7 machine may lack a number.
+fn check_stored_data_block(stored: &StoredMachine) -> Result<(), PlantError> {
+    let is_archived_without_number = stored.archived_at.is_some() && stored.db_number.is_none();
+    if is_archived_without_number && stored.platform.max_data_block().is_some() {
+        return Ok(());
+    }
+    check_data_block(stored.code, stored.platform, stored.db_number)
 }
 
 /// Index the stored units by path. A second unit with a known path or a known id fails.
@@ -471,6 +517,8 @@ fn check_live_main_unit(
 mod add_unit_tests;
 #[cfg(test)]
 mod archive_unit_tests;
+#[cfg(test)]
+mod data_block_tests;
 #[cfg(test)]
 mod edit_tests;
 #[cfg(test)]

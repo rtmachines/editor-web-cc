@@ -1,7 +1,7 @@
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{MachineCode, PlcPlatform, UnitPath};
+use recipe_domain::plant::{DataBlockNumber, MachineCode, PlcPlatform, UnitPath};
 use serde_json::json;
 
 use super::{CreateMachine, CreateMachineInput};
@@ -11,10 +11,15 @@ use crate::memory::fixtures::{Fixture, actor, meta, text};
 use crate::plant::short_rows::short_rows_context;
 
 fn input(code: &str) -> CreateMachineInput {
+    input_on(code, PlcPlatform::S7_300, Some("100"))
+}
+
+fn input_on(code: &str, platform: PlcPlatform, db_number: Option<&str>) -> CreateMachineInput {
     CreateMachineInput {
         code: MachineCode::parse(code).unwrap(),
         name: text("Press 7"),
-        platform: PlcPlatform::S7_300,
+        platform,
+        db_number: db_number.map(|number| DataBlockNumber::parse(number).unwrap()),
         main_unit_name: text("Feeder"),
     }
 }
@@ -121,4 +126,71 @@ async fn an_operator_is_forbidden_with_one_event_and_no_transaction() {
     assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
     assert!(fixture.store.journal().is_empty());
     assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn an_s7_machine_without_a_number_gives_plt_050_and_opens_no_transaction() {
+    let fixture = Fixture::new();
+    let error = CreateMachine::new(fixture.context())
+        .execute(
+            &actor(Role::Administrator),
+            &meta(),
+            input_on("M7", PlcPlatform::S7_300, None),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_050);
+    assert!(fixture.store.journal().is_empty());
+    assert!(fixture.store.audit_entries().is_empty());
+    assert!(fixture.store.state().machines.is_empty());
+}
+
+#[tokio::test]
+async fn an_iec_machine_with_a_number_gives_plt_051_and_opens_no_transaction() {
+    let fixture = Fixture::new();
+    let error = CreateMachine::new(fixture.context())
+        .execute(
+            &actor(Role::Administrator),
+            &meta(),
+            input_on("M7", PlcPlatform::CodesysIec, Some("100")),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_051);
+    assert!(fixture.store.journal().is_empty());
+    assert!(fixture.store.audit_entries().is_empty());
+    assert!(fixture.store.state().machines.is_empty());
+}
+
+#[tokio::test]
+async fn an_s7_machine_with_a_number_stores_it_and_writes_it_in_the_after_image() {
+    let fixture = Fixture::new();
+    let output = CreateMachine::new(fixture.context())
+        .execute(&actor(Role::Administrator), &meta(), input("M7"))
+        .await
+        .unwrap();
+    let state = fixture.store.state();
+    let row = state.machines.get(&output.machine).unwrap();
+    assert_eq!(row.db_number, Some(DataBlockNumber::parse("100").unwrap()));
+    let entries = fixture.store.audit_entries();
+    let after = entries.first().unwrap().after().unwrap();
+    assert_eq!(after.get("db_number"), Some(&json!(100)));
+}
+
+#[tokio::test]
+async fn an_iec_machine_without_a_number_stores_none_and_a_null_image_field() {
+    let fixture = Fixture::new();
+    let output = CreateMachine::new(fixture.context())
+        .execute(
+            &actor(Role::Administrator),
+            &meta(),
+            input_on("M7", PlcPlatform::TwinCat3, None),
+        )
+        .await
+        .unwrap();
+    let state = fixture.store.state();
+    assert_eq!(state.machines.get(&output.machine).unwrap().db_number, None);
+    let entries = fixture.store.audit_entries();
+    let after = entries.first().unwrap().after().unwrap();
+    assert_eq!(after.get("db_number"), Some(&json!(null)));
 }

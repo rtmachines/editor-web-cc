@@ -17,6 +17,7 @@ impl MemoryStore {
                 code: machine.code(),
                 name: machine.name().clone(),
                 platform: machine.platform(),
+                db_number: machine.db_number(),
                 archived_at: machine.archived_at(),
                 created_at: now,
                 updated_at: now,

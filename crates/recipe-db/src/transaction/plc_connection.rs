@@ -14,8 +14,8 @@ use recipe_app::ports::{
     StoredConnection,
 };
 use recipe_domain::plant::{
-    CommMode, DataBlockNumber, MachineId, PasswordState, PlcAddress, PlcConnection,
-    PlcConnectionId, PlcHost, PlcLogin, PlcPlatform, Rack, Slot, TcpPort,
+    CommMode, MachineId, PasswordState, PlcAddress, PlcConnection, PlcConnectionId, PlcHost,
+    PlcLogin, PlcPlatform, Rack, Slot, TcpPort,
 };
 use serde_json::Value;
 use sqlx::PgConnection;
@@ -29,14 +29,14 @@ const TABLE: &str = "plc_connection";
 
 /// The record of a machine without a lock (`GetPlcConnectionForm`, `SetPlcConnection` step 2).
 const SELECT_BY_MACHINE: &str = "\
-SELECT id, plc_platform, host, rack, slot, db_number, port, address, comm_mode, login, row_version, \
+SELECT id, plc_platform, host, rack, slot, port, address, comm_mode, login, row_version, \
        CASE WHEN plc_platform IN ('CodesysIec', 'TwinCat3') \
             THEN password_sealed IS NOT NULL ELSE false END AS has_password \
 FROM plc_connection WHERE machine_id = $1";
 
 /// `plc_connection FOR UPDATE` (`SetPlcConnection`). The image comes from the locked row.
 const LOCK_FOR_UPDATE: &str = "\
-SELECT id, plc_platform, host, rack, slot, db_number, port, address, comm_mode, login, row_version, \
+SELECT id, plc_platform, host, rack, slot, port, address, comm_mode, login, row_version, \
        CASE WHEN plc_platform IN ('CodesysIec', 'TwinCat3') \
             THEN password_sealed IS NOT NULL ELSE false END AS has_password, \
        to_jsonb(c) - 'password_sealed' AS image \
@@ -44,47 +44,50 @@ FROM plc_connection c WHERE machine_id = $1 FOR UPDATE";
 
 /// `plc_connection FOR SHARE` (`ExportPlcConnection`). The only statement that reads the bytes.
 const LOCK_SHARED: &str = "\
-SELECT id, plc_platform, host, rack, slot, db_number, port, address, comm_mode, login, row_version, \
+SELECT id, plc_platform, host, rack, slot, port, address, comm_mode, login, row_version, \
        CASE WHEN plc_platform IN ('CodesysIec', 'TwinCat3') THEN password_sealed END AS sealed \
 FROM plc_connection WHERE machine_id = $1 FOR SHARE";
 
-/// The new row takes the platform of its machine, so the composite key
-/// `plc_connection_machine_platform` holds. A missing machine gives no row, and the adapter maps
-/// that to the key.
+/// The new row takes the platform and the data block number of its machine, so the composite key
+/// `plc_connection_machine_platform` and the shape check hold. A missing machine gives no row,
+/// and the adapter maps that to the key. An IEC machine has no number, so the copy is `NULL`.
 const INSERT: &str = "\
 INSERT INTO plc_connection \
     (machine_id, plc_platform, host, rack, slot, db_number, port, address, comm_mode, login, password_sealed) \
-SELECT m.id, m.plc_platform, $2, $3, $4, $5, $6, $7, $8, $9, $10 \
+SELECT m.id, m.plc_platform, $2, $3, $4, m.db_number, $5, $6, $7, $8, $9 \
 FROM machine m WHERE m.id = $1 \
 RETURNING to_jsonb(plc_connection) - 'password_sealed'";
 
 /// The update that leaves `password_sealed` unchanged. The trigger adds 1 to `row_version`.
+/// The copy `db_number` comes from the machine row that the command already holds (design D7).
 const UPDATE_KEEP: &str = "\
-UPDATE plc_connection SET host = $2, rack = $3, slot = $4, db_number = $5, port = $6, \
-    address = $7, comm_mode = $8, login = $9 \
+UPDATE plc_connection SET host = $2, rack = $3, slot = $4, \
+    db_number = (SELECT m.db_number FROM machine m WHERE m.id = $1), port = $5, \
+    address = $6, comm_mode = $7, login = $8 \
 WHERE machine_id = $1 RETURNING to_jsonb(plc_connection) - 'password_sealed'";
 
 /// The update that stores a new sealed password.
 const UPDATE_SET: &str = "\
-UPDATE plc_connection SET host = $2, rack = $3, slot = $4, db_number = $5, port = $6, \
-    address = $7, comm_mode = $8, login = $9, password_sealed = $10 \
+UPDATE plc_connection SET host = $2, rack = $3, slot = $4, \
+    db_number = (SELECT m.db_number FROM machine m WHERE m.id = $1), port = $5, \
+    address = $6, comm_mode = $7, login = $8, password_sealed = $9 \
 WHERE machine_id = $1 RETURNING to_jsonb(plc_connection) - 'password_sealed'";
 
 /// The update that sets `password_sealed` to `NULL`.
 const UPDATE_CLEAR: &str = "\
-UPDATE plc_connection SET host = $2, rack = $3, slot = $4, db_number = $5, port = $6, \
-    address = $7, comm_mode = $8, login = $9, password_sealed = NULL \
+UPDATE plc_connection SET host = $2, rack = $3, slot = $4, \
+    db_number = (SELECT m.db_number FROM machine m WHERE m.id = $1), port = $5, \
+    address = $6, comm_mode = $7, login = $8, password_sealed = NULL \
 WHERE machine_id = $1 RETURNING to_jsonb(plc_connection) - 'password_sealed'";
 
 /// The value columns of a record, as the statements bind them.
 ///
-/// The type solves one problem: both shapes bind the same eight parameters, and a column of the
+/// The type solves one problem: both shapes bind the same seven parameters, and a column of the
 /// other shape is `NULL`. The `CHECK` `plc_connection_shape` refuses a mix.
 struct Columns<'a> {
     host: &'a str,
     rack: Option<i16>,
     slot: Option<i16>,
-    db_number: Option<i32>,
     port: Option<i32>,
     address: Option<&'a str>,
     comm_mode: Option<&'static str>,
@@ -94,16 +97,10 @@ struct Columns<'a> {
 impl<'a> From<&'a PlcConnection> for Columns<'a> {
     fn from(connection: &'a PlcConnection) -> Self {
         match connection {
-            PlcConnection::S7 {
-                host,
-                rack,
-                slot,
-                db_number,
-            } => Self {
+            PlcConnection::S7 { host, rack, slot } => Self {
                 host: host.as_str(),
                 rack: Some(i16::from(rack.value())),
                 slot: Some(i16::from(slot.value())),
-                db_number: Some(i32::from(db_number.value())),
                 port: None,
                 address: None,
                 comm_mode: None,
@@ -119,7 +116,6 @@ impl<'a> From<&'a PlcConnection> for Columns<'a> {
                 host: host.as_str(),
                 rack: None,
                 slot: None,
-                db_number: None,
                 port: Some(i32::from(port.value())),
                 address: Some(address.as_str()),
                 comm_mode: Some(mode.as_str()),
@@ -133,7 +129,7 @@ impl<'a> From<&'a PlcConnection> for Columns<'a> {
 type QueryScalar<'q, T> =
     sqlx::query::QueryScalar<'q, sqlx::Postgres, T, sqlx::postgres::PgArguments>;
 
-/// Bind the key and the eight value columns of `columns`, in the order of the statements.
+/// Bind the key and the seven value columns of `columns`, in the order of the statements.
 fn bind_columns<'q>(
     query: QueryScalar<'q, Value>,
     machine: MachineId,
@@ -144,7 +140,6 @@ fn bind_columns<'q>(
         .bind(columns.host)
         .bind(columns.rack)
         .bind(columns.slot)
-        .bind(columns.db_number)
         .bind(columns.port)
         .bind(columns.address)
         .bind(columns.comm_mode)
@@ -159,7 +154,6 @@ struct ConnectionRecord {
     host: String,
     rack: Option<i16>,
     slot: Option<i16>,
-    db_number: Option<i32>,
     port: Option<i32>,
     address: Option<String>,
     comm_mode: Option<String>,
@@ -223,7 +217,6 @@ fn build_connection(record: &ConnectionRecord) -> Result<PlcConnection, StorageE
             host,
             rack: parse_number("rack", record.rack, Rack::parse)?,
             slot: parse_number("slot", record.slot, Slot::parse)?,
-            db_number: parse_number("db_number", record.db_number, DataBlockNumber::parse)?,
         })
     } else {
         let login = record
