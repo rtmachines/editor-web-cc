@@ -2,6 +2,7 @@
 
 import importlib.util
 import copy
+import io
 import json
 import os
 import pathlib
@@ -310,6 +311,54 @@ class UpgradeSmokeTests(unittest.TestCase):
             "SELECT id, plc_platform, '192.168.1.20', 0, 2, 100 FROM machine WHERE code = 'M2';",
             sql,
         )
+
+    def test_seed_gives_each_machine_a_live_main_unit(self):
+        # A machine needs a live unit of depth 1 (domain-model.md section 2.1). Else GET /machines/{code} returns E-DB-008.
+        sql = self.smoke.fixture_sql()
+        codes = sorted(set(re.findall(r"INSERT INTO machine \([^)]*\) VALUES \('(M\d+)'", sql)))
+        self.assertEqual(codes, ["M1", "M2"])
+        for code in codes:
+            with self.subTest(code=code):
+                self.assertRegex(
+                    sql,
+                    r"INSERT INTO unit \(machine_id, path, name\) "
+                    rf"SELECT id, 'U\d+', '[^']+' FROM machine WHERE code = '{code}';",
+                )
+
+    def run_main(self, error):
+        stderr = io.StringIO()
+        with mock.patch.object(self.smoke, "smoke", side_effect=error), \
+             mock.patch("sys.stderr", stderr):
+            status = self.smoke.main(["check"])
+        return status, stderr.getvalue()
+
+    def test_main_names_the_failed_smoke_step(self):
+        status, stderr = self.run_main(self.smoke.SmokeCheckError("the recipe page did not show the fixture"))
+        self.assertEqual(status, 1)
+        self.assertEqual(stderr, "CI: the upgrade smoke check failed: the recipe page did not show the fixture\n")
+
+    def test_main_hides_every_other_exception(self):
+        for error in (
+            ValueError("Set-Cookie: recipe_session=secret"),
+            json.JSONDecodeError("Expecting value", "secret body", 0),
+            RuntimeError("secret body"),
+            KeyError("CI_STATE"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                status, stderr = self.run_main(error)
+                self.assertEqual(status, 1)
+                self.assertEqual(stderr, "CI: the upgrade smoke check failed.\n")
+
+    def test_main_names_an_unknown_action(self):
+        stderr = io.StringIO()
+        with mock.patch("sys.stderr", stderr):
+            self.assertEqual(self.smoke.main(["bogus"]), 1)
+        self.assertEqual(stderr.getvalue(), "CI: the upgrade smoke check failed: unknown upgrade smoke action\n")
+
+    def test_main_returns_zero_after_a_passed_check(self):
+        with mock.patch.object(self.smoke, "smoke") as smoke:
+            self.assertEqual(self.smoke.main(["check"]), 0)
+        smoke.assert_called_once_with()
 
     def test_smoke_checks_the_copied_machine_data_block_number(self):
         document = self.smoke.fixture_body()
