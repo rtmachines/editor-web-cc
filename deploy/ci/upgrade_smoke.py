@@ -11,6 +11,10 @@ import socket
 import sys
 
 
+class SmokeCheckError(ValueError):
+    """A failed smoke step. The message is a fixed string and holds no response data."""
+
+
 PARAMETER_KEY = "6e982764-4669-4d97-bc46-fbe01ce5dd1b"
 PARAMETER_FIELDS = ("unit_path", "tag", "key", "type_id", "s7_address", "limits", "value")
 
@@ -57,6 +61,7 @@ $$;
 INSERT INTO plc_connection (machine_id, plc_platform, host, rack, slot, db_number)
 SELECT id, plc_platform, '192.168.1.20', 0, 2, 100 FROM machine WHERE code = 'M2';
 INSERT INTO unit (machine_id, path, name) SELECT id, 'U1', 'CI unit' FROM machine WHERE code = 'M1';
+INSERT INTO unit (machine_id, path, name) SELECT id, 'U1', 'CI S7 unit' FROM machine WHERE code = 'M2';
 INSERT INTO recipe (machine_id, plc_platform, reference_number, name, created_by)
 SELECT m.id, m.plc_platform, 'CI-UPGRADE', 'CI upgrade recipe', u.id
 FROM machine m CROSS JOIN app_user u WHERE m.code = 'M1' AND u.login = 'ci-author';
@@ -101,7 +106,7 @@ def check_export(document):
         "parameters": [{key: row[key] for key in PARAMETER_FIELDS} for row in document["parameters"]],
     }
     if body != fixture_body() or document["content_sha256"] != body_hash(body) or document["loadable"] is not True:
-        raise ValueError("the exported fixture or its content hash differs")
+        raise SmokeCheckError("the exported fixture or its content hash differs")
 
 
 def smoke():
@@ -112,37 +117,46 @@ def smoke():
     fields = {"login": "ci-admin", "password": "CI-wrong-password", "csrf_pre": client.token("/login", "csrf_pre")}
     status, _, body = client.request("/login", fields)
     if status != 401 or "E-IDN-003" not in body:
-        raise ValueError("the wrong password did not return E-IDN-003")
+        raise SmokeCheckError("the wrong password did not return E-IDN-003")
     probe.login(client)
     probe.password(client)
     address = str(ipaddress.ip_address(os.environ["UPGRADE_CLIENT_IP"]))
     status, _, body = client.request("/security-events?kind=login_failed&login=ci-admin")
     if status != 200 or f'<td class="data">{address}</td>' not in body:
-        raise ValueError("the security event does not show the runner address")
+        raise SmokeCheckError("the security event does not show the runner address")
     # Step 22. Open the recipe and its version, then check the exported hash.
     for path in ("/recipes/CI-UPGRADE", "/recipes/CI-UPGRADE/versions/1"):
         status, _, body = client.request(path)
         if status != 200 or "CI-UPGRADE" not in body:
-            raise ValueError("the recipe page did not show the fixture")
+            raise SmokeCheckError("the recipe page did not show the fixture")
     status, _, body = client.request("/export/v1/recipes/CI-UPGRADE/versions/1")
     if status != 200:
-        raise ValueError("the export did not return 200")
+        raise SmokeCheckError("the export did not return 200")
     check_export(json.loads(body))
     status, _, body = client.request("/machines/M2")
     if status != 200 or '<span id="machine-db-number">100</span>' not in body:
-        raise ValueError("the machine data block number differs from the seeded PLC connection")
+        raise SmokeCheckError("the machine data block number differs from the seeded PLC connection")
     print("The login address, recipe pages, export hash, and machine data block number passed.")
 
 
-if __name__ == "__main__":
+def main(arguments):
     try:
-        if sys.argv[1:] == ["seed"]:
+        if arguments == ["seed"]:
             print(fixture_sql())
-        elif sys.argv[1:] == ["check"]:
+        elif arguments == ["check"]:
             smoke()
         else:
-            raise ValueError("unknown upgrade smoke action")
+            raise SmokeCheckError("unknown upgrade smoke action")
+    except SmokeCheckError as error:
+        # The message names the failed step. It is a fixed string of this file.
+        print(f"CI: the upgrade smoke check failed: {error}", file=sys.stderr)
+        return 1
     except Exception:
-        # A response or an exception can contain a cookie. Print neither.
+        # A response or another exception can contain a cookie. Print neither.
         print("CI: the upgrade smoke check failed.", file=sys.stderr)
-        sys.exit(1)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
