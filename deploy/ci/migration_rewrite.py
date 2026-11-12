@@ -36,6 +36,7 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("0006_operations.sql", "index without concurrently"): "ADR-0069",
     ("0011_plc_type_rules.sql", "index without concurrently"): "ADR-0143",
     ("0011_plc_type_rules.sql", "lock table"): "ADR-0143",
+    ("0013_machine_db_number.sql", "lock table"): "ADR-0157",
 }
 NON_VOLATILE = {"now", "pg_catalog.now"}
 WORD = re.compile(r"[A-Za-z_][A-Za-z_0-9$]*")

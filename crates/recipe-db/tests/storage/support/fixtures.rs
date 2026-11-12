@@ -36,13 +36,23 @@ pub async fn user(conn: &mut PgConnection) -> Uuid {
     .unwrap()
 }
 
-/// Insert a live machine on a platform.
+/// The data block number of a live machine of a platform. An S7 machine needs one (ADR-0156).
+fn data_block_number_of(platform: &str) -> Option<i32> {
+    match platform {
+        "S7_300" | "S7_1200" | "S7_1500" => Some(1),
+        _ => None,
+    }
+}
+
+/// Insert a live machine on a platform. An S7 machine gets data block number 1.
 pub async fn machine(conn: &mut PgConnection, platform: &str) -> Uuid {
     sqlx::query_scalar(
-        "INSERT INTO machine (code, name, plc_platform) VALUES ($1, 'machine', $2) RETURNING id",
+        "INSERT INTO machine (code, name, plc_platform, db_number) \
+         VALUES ($1, 'machine', $2, $3) RETURNING id",
     )
     .bind(format!("M{}", next_number()))
     .bind(platform)
+    .bind(data_block_number_of(platform))
     .fetch_one(conn)
     .await
     .unwrap()

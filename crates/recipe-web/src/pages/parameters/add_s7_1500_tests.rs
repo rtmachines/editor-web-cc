@@ -43,8 +43,10 @@ fn s7_1500_world() -> World {
         MachineCode::parse("M15").unwrap(),
         text("Test line"),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (UnitId::from(UNIT_ID), text("Infeed")),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
     let recipe = Recipe::try_from(StoredRecipe {
         id: RecipeId::from(RECIPE_ID),

@@ -20,7 +20,7 @@ Developers can get a practice environment. The server seeds the logins `engineer
 4. Log in as `engineer` with the password of `RECIPE_DEV_PASSWORD`.
 5. Click **Machines**. Then click **New machine**.
 6. Enter `M1` in **Machine code**. Enter a name in **Machine name**.
-7. Select **CODESYS (IEC 61131-3)** in **PLC platform**.
+7. Select **CODESYS (IEC 61131-3)** in **PLC platform**. Leave **Data block** empty.
 8. Enter a name in **Name of the main unit**. Click **Create machine**.
 9. Click **Log out**. Then click **Polski** to set the default language again.
 

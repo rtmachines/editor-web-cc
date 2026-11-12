@@ -28,7 +28,7 @@ impl fmt::Display for RangeReason {
 }
 
 /// Parse a whole number of ASCII digits that lies between `min` and `max`.
-pub(super) fn parse_in_range(text: &str, min: u16, max: u16) -> Result<u16, RangeReason> {
+pub(crate) fn parse_in_range(text: &str, min: u16, max: u16) -> Result<u16, RangeReason> {
     if text.is_empty() || !text.bytes().all(|b| b.is_ascii_digit()) {
         return Err(RangeReason::NotANumber);
     }

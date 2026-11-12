@@ -44,8 +44,10 @@ fn named(n: u128, code_text: &str, machine_name: &str) -> Machine {
         code(code_text),
         name(machine_name),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
+    .unwrap()
 }
 
 /// A whole-second instant, so that the database keeps it without a loss.

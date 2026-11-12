@@ -90,8 +90,12 @@ fn seed_machine(fixture: &Fixture, number: u32, platform: PlcPlatform) -> Machin
         MachineCode::parse(&format!("M{number}")).unwrap(),
         Text::parse("Spare line").unwrap(),
         platform,
+        platform
+            .max_data_block()
+            .map(|_| DataBlockNumber::parse("100").unwrap()),
         (unit, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     fixture.store.seed_machine(&machine);
     id
 }
@@ -120,13 +124,13 @@ fn ads_record() -> PlcConnection {
     }
 }
 
-/// Return the record of `M9`: an S7 record.
+/// Return the record of `M9`: an S7 record. The data block number `100` comes from the machine
+/// (ADR-0156 (g)).
 fn s7_record() -> PlcConnection {
     PlcConnection::S7 {
         host: PlcHost::parse("plc-1.plant.local").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("2").unwrap(),
-        db_number: DataBlockNumber::parse("100").unwrap(),
     }
 }
 
@@ -376,8 +380,10 @@ async fn connection_route_resolves_the_live_machine_of_a_reused_code_and_refuses
         MachineCode::parse("M8").unwrap(),
         Text::parse("Reused code").unwrap(),
         PlcPlatform::TwinCat3,
+        None,
         (unit, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     fixture.store.seed_machine(&new);
     seed_recipe(&fixture, reused, 18, "R-301");
     fixture.store.seed_connection(reused, &ads_record(), None);

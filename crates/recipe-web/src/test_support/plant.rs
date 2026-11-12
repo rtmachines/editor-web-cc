@@ -195,8 +195,10 @@ fn m7_machine() -> Machine {
         MachineCode::parse("M7").unwrap(),
         text("Press line"),
         PlcPlatform::S7_300,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id(M7_NUMBER, &path("U1")), text("Infeed")),
-    );
+    )
+    .unwrap();
     for (parent_text, count) in M7_PLAN {
         let parent = path(parent_text);
         for segment in 1..=count {
@@ -220,8 +222,10 @@ fn m12_machine() -> Machine {
         MachineCode::parse("M12").unwrap(),
         text("Old press line"),
         PlcPlatform::TwinCat3,
+        None,
         (unit_id(M12_NUMBER, &path("U1")), text("Infeed")),
-    );
+    )
+    .unwrap();
     let spare = path("U2");
     machine
         .add_unit(unit_id(M12_NUMBER, &spare), None, "2", text("Spare"))

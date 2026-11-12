@@ -131,6 +131,9 @@ fn names_and_ordinals_are_not_inputs_of_the_hash() {
         code: MachineCode::parse("M12").unwrap(),
         name: Text::parse("Renamed filler").unwrap(),
         platform: PLATFORM,
+        db_number: PLATFORM
+            .max_data_block()
+            .map(|_| crate::plant::DataBlockNumber::parse("1").unwrap()),
         archived_at: None,
         units: ["U1", "U1.2"]
             .map(|path| StoredUnit {

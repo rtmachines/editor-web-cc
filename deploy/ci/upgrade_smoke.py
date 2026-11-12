@@ -40,6 +40,22 @@ def fixture_sql():
 INSERT INTO app_user (login, password_hash, role, must_change_password)
 SELECT 'ci-author', password_hash, 'process_engineer', true FROM app_user WHERE login = 'ci-admin';
 INSERT INTO machine (code, name, plc_platform) VALUES ('M1', 'CI machine', 'CodesysIec');
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'machine'
+            AND column_name = 'db_number'
+    ) THEN
+        INSERT INTO machine (code, name, plc_platform, db_number)
+        VALUES ('M2', 'CI S7 machine', 'S7_300', 100);
+    ELSE
+        INSERT INTO machine (code, name, plc_platform) VALUES ('M2', 'CI S7 machine', 'S7_300');
+    END IF;
+END;
+$$;
+INSERT INTO plc_connection (machine_id, plc_platform, host, rack, slot, db_number)
+SELECT id, plc_platform, '192.168.1.20', 0, 2, 100 FROM machine WHERE code = 'M2';
 INSERT INTO unit (machine_id, path, name) SELECT id, 'U1', 'CI unit' FROM machine WHERE code = 'M1';
 INSERT INTO recipe (machine_id, plc_platform, reference_number, name, created_by)
 SELECT m.id, m.plc_platform, 'CI-UPGRADE', 'CI upgrade recipe', u.id
@@ -112,7 +128,10 @@ def smoke():
     if status != 200:
         raise ValueError("the export did not return 200")
     check_export(json.loads(body))
-    print("The login address, recipe pages, and export hash passed.")
+    status, _, body = client.request("/machines/M2")
+    if status != 200 or '<span id="machine-db-number">100</span>' not in body:
+        raise ValueError("the machine data block number differs from the seeded PLC connection")
+    print("The login address, recipe pages, export hash, and machine data block number passed.")
 
 
 if __name__ == "__main__":

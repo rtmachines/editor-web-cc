@@ -21,6 +21,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The migration check `deploy/ci/migration_rewrite.py` rejects the form `add column of a constrained domain`. The check reports a domain with a volatile `DEFAULT` as the form `volatile default` (ADR-0153 amends ADR-0136 and ADR-0127 (p)).
 - The XSS corpus tests send each payload through the password fields of `POST /login` and `POST /me/password`. A guard test requires a corpus test or a stated reason for each field of each form struct in `recipe-web`.
 - The Compose smoke suite checks the exported content after the hash check. The check uses `exportContentFaults`. It covers the machine, reference, version, unit, and parameter values.
+- Each live S7 machine has a data block number (`machine.db_number`). `CreateMachine` takes `db_number`. A new command `SetMachineDataBlock` and a new route `POST /machines/{code}/data-block` change it. The command needs `MachineManage` (ADR-0156).
+- Migrations `0013` to `0015` add and fill the data block number of a machine. Migration `0013` stops when a live S7 machine has no PLC connection record. The runbook section "Check the live S7 machines for a PLC connection record" names the check (ADR-0156).
 
 ### Changed
 
@@ -51,6 +53,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Step 5 of the upgrade procedure in `reliability.md` §7.10 gets command 4: `docker compose exec walarchive basebackup-once` (ADR-0151).
 - The scan of the backup directory has a time limit. A scan that waits longer than `health.disk_check_interval` is a read fault (ADR-0151).
 - The CI job `test` runs the step "Check the production refusal of insecure cookies" (`bash deploy/ci/rust-tests.sh secure`) after "Run tests". The job `compose` no longer runs this step (ADR-0062 (b), ADR-0127).
+- `SetPlcConnection` no longer takes `db_number`. This is a BREAKING change for a form post that sends the field. The value comes from the machine (ADR-0156).
 
 ### Fixed
 

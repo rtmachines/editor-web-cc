@@ -2,7 +2,8 @@
 
 use async_trait::async_trait;
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, Unit, UnitId, UnitPath, UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, Unit, UnitId, UnitPath,
+    UnitUsage,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -132,6 +133,17 @@ pub trait PlantRepository: Send {
         &mut self,
         id: MachineId,
         name: &Text,
+    ) -> Result<RowImage, StorageError>;
+
+    /// Run `UPDATE machine SET db_number` (`SetMachineDataBlock`, design D6) and return the row after the change.
+    ///
+    /// The adapter also copies the number into the `plc_connection` record of the machine, when
+    /// the record exists, and adds 1 to the `row_version` of that record (design D7). The copy
+    /// writes no row image, because the command writes one entry for the machine only.
+    async fn set_machine_data_block(
+        &mut self,
+        id: MachineId,
+        number: DataBlockNumber,
     ) -> Result<RowImage, StorageError>;
 
     /// Run `UPDATE machine SET archived_at = now()` (`ArchiveMachine`) and return the row after the change.

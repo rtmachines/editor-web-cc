@@ -7,9 +7,7 @@
 
 use axum::http::StatusCode;
 use recipe_app::ports::CredentialCipher;
-use recipe_domain::plant::{
-    DataBlockNumber, MachineId, PlcConnection, PlcHost, PlcPassword, Rack, Slot,
-};
+use recipe_domain::plant::{MachineId, PlcConnection, PlcHost, PlcPassword, Rack, Slot};
 use serde_json::Value;
 
 use super::tests::{client_get, seeded};
@@ -54,7 +52,6 @@ fn s7_record(host: &str, variant: &str) -> PlcConnection {
         host: PlcHost::parse(host).unwrap(),
         rack: Rack::parse(variant).unwrap(),
         slot: Slot::parse("3").unwrap(),
-        db_number: DataBlockNumber::parse("200").unwrap(),
     }
 }
 

@@ -4,8 +4,8 @@ use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    CommMode, DataBlockNumber, MachineCode, PlcAddress, PlcConnection, PlcHost, PlcLogin,
-    PlcPlatform, Rack, Slot, TcpPort,
+    CommMode, MachineCode, PlcAddress, PlcConnection, PlcHost, PlcLogin, PlcPlatform, Rack, Slot,
+    TcpPort,
 };
 
 use super::plc_connection::{GetPlcConnectionForm, PlcConnectionForm, PlcConnectionFormInput};
@@ -30,7 +30,6 @@ fn s7_record() -> PlcConnection {
         host: PlcHost::parse("10.0.0.9").unwrap(),
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("1").unwrap(),
-        db_number: DataBlockNumber::parse("50").unwrap(),
     }
 }
 

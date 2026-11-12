@@ -2,6 +2,7 @@
 
 import importlib.util
 import copy
+import json
 import os
 import pathlib
 import re
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 def wal_header(system_id, info=0x0002):
@@ -284,6 +286,63 @@ class UpgradeSmokeTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("upgrade_smoke", path)
         self.smoke = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.smoke)
+
+    def test_seed_selects_the_machine_insert_for_each_schema(self):
+        sql = self.smoke.fixture_sql()
+        block = re.search(
+            r"DO \$\$\s+BEGIN\s+IF EXISTS \(\s*"
+            r"SELECT 1 FROM information_schema.columns\s+"
+            r"WHERE table_schema = 'public' AND table_name = 'machine'\s+"
+            r"AND column_name = 'db_number'\s*\) THEN\s+"
+            r"(?P<head>.*?)\s+ELSE\s+(?P<previous>.*?)\s+END IF;\s+END;\s+\$\$;",
+            sql, re.S,
+        )
+        self.assertIsNotNone(block, "the seed must select the insert by the machine schema")
+        for schema, columns, values in (
+            ("previous", "code, name, plc_platform", "'M2', 'CI S7 machine', 'S7_300'"),
+            ("head", "code, name, plc_platform, db_number", "'M2', 'CI S7 machine', 'S7_300', 100"),
+        ):
+            with self.subTest(schema=schema):
+                statement = " ".join(block.group(schema).split())
+                self.assertEqual(statement, f"INSERT INTO machine ({columns}) VALUES ({values});")
+        self.assertIn(
+            "INSERT INTO plc_connection (machine_id, plc_platform, host, rack, slot, db_number)\n"
+            "SELECT id, plc_platform, '192.168.1.20', 0, 2, 100 FROM machine WHERE code = 'M2';",
+            sql,
+        )
+
+    def test_smoke_checks_the_copied_machine_data_block_number(self):
+        document = self.smoke.fixture_body()
+        document.update(content_sha256=self.smoke.body_hash(document), loadable=True)
+        for status, page, passes in (
+            (200, '<span id="machine-db-number">100</span>', True),
+            (200, '<span id="machine-db-number">101</span>', False),
+            (200, '<input name="db_number" value="100">', False),
+            (404, '<span id="machine-db-number">100</span>', False),
+        ):
+            with self.subTest(status=status, page=page):
+                client = mock.Mock()
+                responses = {
+                    "/login": (401, {}, "E-IDN-003"),
+                    "/security-events?kind=login_failed&login=ci-admin":
+                        (200, {}, '<td class="data">192.0.2.1</td>'),
+                    "/recipes/CI-UPGRADE": (200, {}, "CI-UPGRADE"),
+                    "/recipes/CI-UPGRADE/versions/1": (200, {}, "CI-UPGRADE"),
+                    "/export/v1/recipes/CI-UPGRADE/versions/1": (200, {}, json.dumps(document)),
+                    "/machines/M2": (status, {}, page),
+                }
+                client.request.side_effect = lambda path, *args: responses[path]
+                probe = mock.Mock()
+                probe.Client.return_value = client
+                with mock.patch.object(self.smoke, "load_probe", return_value=probe), \
+                     mock.patch.dict(os.environ, {"CI_STATE": ".", "UPGRADE_CLIENT_IP": "192.0.2.1"}), \
+                     mock.patch("builtins.print"):
+                    if passes:
+                        self.smoke.smoke()
+                        client.request.assert_any_call("/machines/M2")
+                    else:
+                        with self.assertRaisesRegex(ValueError, "data block number"):
+                            self.smoke.smoke()
 
     def test_export_checks_data_hash_and_loadable_state(self):
         document = self.smoke.fixture_body()

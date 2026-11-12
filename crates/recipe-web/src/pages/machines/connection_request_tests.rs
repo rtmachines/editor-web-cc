@@ -16,7 +16,7 @@ use crate::test_support::plant::world;
 const SECRET: &str = "S3cret-PLC";
 /// A body in which every text field is empty.
 const EMPTY_BODY: &str =
-    "row_version=0&host=&rack=&slot=&db_number=&port=&address=&comm_mode=&login=&password=";
+    "row_version=0&host=&rack=&slot=&port=&address=&comm_mode=&login=&password=";
 
 /// Read the form body of a request into the struct, as the router does.
 async fn read(body: &str) -> ConnectionRequest {
@@ -41,7 +41,6 @@ async fn an_empty_text_of_every_field_gives_no_value() {
     assert!(fields.host.is_none());
     assert!(fields.rack.is_none());
     assert!(fields.slot.is_none());
-    assert!(fields.db_number.is_none());
     assert!(fields.port.is_none());
     assert!(fields.address.is_none());
     assert!(fields.mode.is_none());
@@ -115,7 +114,7 @@ async fn the_debug_of_the_request_hides_the_password_and_every_text() {
 async fn an_empty_host_gives_e_plt_023_and_writes_nothing() {
     let world = world();
     let before = world.fixture.snapshot();
-    let body = "row_version=0&host=&rack=0&slot=2&db_number=1";
+    let body = "row_version=0&host=&rack=0&slot=2";
     let reply = world
         .post(&world.engineer, "/machines/M7/connection", body, true)
         .await;
@@ -132,7 +131,8 @@ async fn an_empty_host_gives_e_plt_023_and_writes_nothing() {
 async fn an_empty_port_on_an_s7_1500_machine_has_no_effect() {
     let world = world();
     seed(&world, 105, PlcPlatform::S7_1500);
-    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&db_number=1&port=&address=&comm_mode=&login=&password=";
+    let body =
+        "row_version=0&host=10.0.0.5&rack=0&slot=1&port=&address=&comm_mode=&login=&password=";
     let reply = world
         .post(&world.engineer, "/machines/M105/connection", body, true)
         .await;
@@ -144,7 +144,7 @@ async fn an_empty_port_on_an_s7_1500_machine_has_no_effect() {
 async fn a_port_with_a_value_on_an_s7_1500_machine_gives_e_plt_022() {
     let world = world();
     seed(&world, 105, PlcPlatform::S7_1500);
-    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&db_number=1&port=4840";
+    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&port=4840";
     let reply = world
         .post(&world.engineer, "/machines/M105/connection", body, true)
         .await;

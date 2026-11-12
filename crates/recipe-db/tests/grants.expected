@@ -6,6 +6,7 @@ PUBLIC:enforce_unit_machine()|EXECUTE
 PUBLIC:enforce_version_mutable()|EXECUTE
 PUBLIC:freeze_identifiers()|EXECUTE
 PUBLIC:machine_platform_frozen()|EXECUTE
+PUBLIC:plc_connection_sync_db_number()|EXECUTE
 PUBLIC:plc_type_immutable()|EXECUTE
 PUBLIC:plc_type_struct_has_member()|EXECUTE
 PUBLIC:recipe_version_transition()|EXECUTE
@@ -47,6 +48,7 @@ login_attempt|DELETE
 login_attempt|INSERT
 login_attempt|SELECT
 machine.archived_at|UPDATE
+machine.db_number|UPDATE
 machine.name|UPDATE
 machine.updated_at|UPDATE
 machine|INSERT

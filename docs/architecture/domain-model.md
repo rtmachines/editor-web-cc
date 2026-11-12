@@ -36,15 +36,28 @@ Domain methods take resolved values only: `&TypeTree`, `&TypeTrees`, `&PlatformT
 | `code` | `MachineCode` | Pattern `M<n>`, `1 <= n <= 9999999`. Unique among live machines (Assumption A32) |
 | `name` | `Text` | Not empty, max 200 chars |
 | `plc_platform` | `PlcPlatform` | Exactly one per machine. Frozen after the first recipe |
+| `db_number` | `Option<DataBlockNumber>` | The data block number of the machine. The data block rule below applies (A48, ADR-0156) |
 | `units` | `Vec<Unit>` | At least one live unit of depth 1 |
 | `archived_at` | `Option<Timestamp>` | Soft delete |
 
 `PlcPlatform` (value object, enum): `CodesysIec`, `TwinCat3`, `S7_1200`, `S7_1500`, `S7_300`.
 
+`DataBlockNumber` (value object, module `plant`): `1..=65535`. Its reason type is `RangeReason`. The data block rule below narrows the range.
+
 Rules:
 
 - `plc_platform` cannot change after the machine has one recipe. A controller change is a new machine. The old machine is archived, and its code becomes free (Assumption A32).
 - `ArchiveMachine` fails with `MachineHasDraft` when a recipe of the machine has a live draft. Recipes of an archived machine stay readable and exportable.
+
+Data block rule (ADR-0156 (a), (b)):
+
+- A live machine on `S7_300`, `S7_1200`, or `S7_1500` has one `db_number`. A machine on `CodesysIec` or `TwinCat3` has none. An archived S7 machine from before ADR-0156 may have none.
+- The data block limit is the data block rule of `S7Address`. `PlcPlatform::max_data_block` holds the two limits and gives none on `CodesysIec` and `TwinCat3`.
+- The free function `check_data_block(code, platform, Option<DataBlockNumber>)` applies this rule. `Machine::create`, `Machine::set_data_block`, and `TryFrom<StoredMachine>` call it.
+- An S7 platform without a number is `E-PLT-050 DataBlockMissing`. A number on an IEC platform is `E-PLT-051 DataBlockNotOnPlatform`.
+- A number above the limit of the platform is `E-PLT-024 DataBlockOutOfRange`.
+- `TryFrom<StoredMachine>` permits no number only for an archived S7 machine.
+- `db_number` is the default data block for a parameter without `s7_address`. It never changes the address of a parameter (ADR-0156 (c)).
 
 **Unit** (entity inside `Machine`)
 
@@ -290,7 +303,6 @@ Value objects of the record. Each one has one `parse`. A reason type owns no cod
 | `PlcHost` | An IPv4 address in dotted decimal form, or an RFC 1123 host name of at most 253 characters. A text of digits and dots only must be an IPv4 address | `HostReason` |
 | `Rack` | `0..=7` | `RangeReason` |
 | `Slot` | `0..=31` | `RangeReason` |
-| `DataBlockNumber` | `1..=65535`. The platform rule below narrows the range | `RangeReason` |
 | `TcpPort` | `1..=65535` | `RangeReason` |
 | `PlcAddress` | 1 to 200 characters, no control character | `ConnectionTextReason` |
 | `AmsNetId` | Six numbers `0..=255` with a dot between two numbers. A number has no leading zero | `AmsNetIdReason` |
@@ -310,7 +322,7 @@ Rules of the value objects:
 
 | Shape | Platforms | Fields |
 |---|---|---|
-| `S7` | `S7_300`, `S7_1200`, `S7_1500` | `host`, `rack`, `slot`, `db_number` |
+| `S7` | `S7_300`, `S7_1200`, `S7_1500` | `host`, `rack`, `slot` |
 | `Iec` | `CodesysIec`, `TwinCat3` | `host`, `port`, `address`, `mode`, optional `login`, and the password |
 
 `PlcConnection::for_platform(machine, platform, fields, stored)` is the one constructor. `machine` names the machine in each error. `fields` holds an optional parsed value of each field. `stored` tells whether the record holds a password. The result holds the `PlcConnection` and a `PasswordPlan`.
@@ -318,15 +330,14 @@ Rules of the value objects:
 The constructor checks in this order and lists every fault in one `PlantErrors` (ADR-0041):
 
 1. A field with a value that the platform does not use is `E-PLT-022 ConnectionFieldNotOnPlatform`.
-2. A required field without a value is `E-PLT-023 ConnectionFieldMissing`. A data block number above the limit of the platform is `E-PLT-024 ConnectionDataBlockOutOfRange`.
+2. A required field without a value is `E-PLT-023 ConnectionFieldMissing`.
 3. A mode that the platform does not permit is `E-PLT-025 CommModeNotOnPlatform`. The mode `Ads` with an address that is not an `AmsNetId` is `E-PLT-026 AddressNotAmsNetId`.
 4. A login or a password that the mode does not permit is `E-PLT-028 ConnectionFieldNotInMode`.
 
 Rules of the platform shape:
 
 - An empty field text is no value. `recipe-web` turns it into no value before `parse`. An empty field of the other shape has no effect.
-- The data block limit is the data block rule of `S7Address`. `PlcPlatform::max_data_block` holds the two limits and gives none on `CodesysIec` and `TwinCat3` (ADR-0154 (d)).
-- `db_number` is the default data block for a parameter without `s7_address`. It never changes the address of a parameter.
+- The record holds no data block number. The machine holds it (ADR-0156 (f)). The data block rule of the machine part applies.
 - Modes of the platform (ADR-0154 (e)). `CodesysIec` permits `OpcUa`, `CodesysV3`, and `ModbusTcp`. `TwinCat3` permits `Ads`, `OpcUa`, and `ModbusTcp`.
 
 Credentials of the mode (ADR-0154 (ea)):
@@ -532,14 +543,14 @@ State rule for `before` and `after` (the same rule as ADR-0005 and `data-model.m
 
 Migrations. Schema migrations and the seed migration `0004_seed_plc_types.sql` write no audit row. `_sqlx_migrations` is the record of schema and seed changes. A later data migration that changes catalog rows writes one audit row per changed row under `SET ROLE audit_owner`. The row has `actor = None` and `request_id` = the UUID of the migration version (`data-model.md` 5.1 and 10).
 
-`AuditAction` (enum): one name per command result, plus `DerivedTypeCreated` for the internal operation and `SettingChanged` for the startup settings comparison. 35 names:
+`AuditAction` (enum): one name per command result, plus `DerivedTypeCreated` for the internal operation and `SettingChanged` for the startup settings comparison. 38 names:
 
 | Context | Actions |
 |---|---|
-| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated` |
+| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineDataBlockSet`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated`, `PlcConnectionSet` |
 | Recipe Management | `RecipeCreated`, `RecipeRenamed`, `RecipeDeleted`, `RecipeRestored`, `VersionCreated`, `DraftDiscarded`, `VersionApproved`, `VersionRetired`, `ParameterAdded`, `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, `TranslationRemoved`, `ParameterRemoved`, `TypeRevisionRebound` |
 | Identity and Access | `UserLoggedIn`, `UserLoggedOut`, `UserCreated`, `UserRoleSet`, `UserDeactivated`, `UserActivated`, `PasswordReset`, `OwnPasswordChanged`, `LoginUnlocked` |
-| Export | `VersionExported` |
+| Export | `VersionExported`, `PlcConnectionExported` |
 | Configuration | `SettingChanged` |
 
 The use case writes the `AuditEntry` in the same transaction as the change (ADR-0005). The `UnitOfWork::commit` method takes a `NonEmpty<AuditEntry>`, so a command without an audit entry does not compile. Section 5 lists the other commit paths. The application role `recipe_app` cannot update or delete audit rows.
@@ -628,7 +639,7 @@ Rules:
 
 ## 5. Domain operations
 
-Each command is one use case in `recipe-app`. There are 35 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060).
+Each command is one use case in `recipe-app`. There are 36 command use cases. `EnsureDerivedType` is an internal operation, not a use case (section 5.1). The six supervised jobs and the startup settings comparison `CompareSettings` are internal operations too (`api.md` 3.2, ADR-0060).
 
 Each command writes one or more `AuditEntry` rows, with two exceptions. An `ApproveVersion` that returns `AlreadyApproved` writes none (section 4). A failed or throttled `Login` writes a `SecurityEvent` and no `AuditEntry`. In read-only mode (Assumption A24), every command except `Login`, `Logout`, `ExportVersion`, and `ExportPlcConnection` returns `E-WEB-006` and writes nothing (ADR-0154 (l)).
 
@@ -636,7 +647,7 @@ Each command runs in one READ COMMITTED transaction, except `Login` and `ChangeO
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
-- `RenameMachine`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` take `machine FOR NO KEY UPDATE` first.
+- `RenameMachine`, `SetMachineDataBlock`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` take `machine FOR NO KEY UPDATE` first.
 - `SetPlcConnection` then takes `plc_connection FOR UPDATE`. `ExportPlcConnection` takes `machine FOR SHARE` and then `plc_connection FOR SHARE` (ADR-0154).
 - `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` take `machine FOR SHARE` first. `DefineUdt` then takes the advisory locks of section 5.1.
 - A recipe command reads `recipe.machine_id` without a lock before it locks the machine. The column never changes.
@@ -675,16 +686,19 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 
 | Command | Aggregate | Result | Errors |
 |---|---|---|---|
-| `CreateMachine` | Machine | New machine with unit `U1` | `E-PLT-001 DuplicateMachineCode` |
+| `CreateMachine` | Machine | New machine with unit `U1` and the `db_number` of the request (section 2.1) | `E-PLT-001 DuplicateMachineCode`, `E-PLT-024 DataBlockOutOfRange`, `E-PLT-050 DataBlockMissing`, `E-PLT-051 DataBlockNotOnPlatform` |
 | `RenameMachine` | Machine | New `name` | `E-PLT-010 MachineArchived` |
+| `SetMachineDataBlock` | Machine | New `db_number` of a live S7 machine. No `row_version` compare, as `RenameMachine`. Locks: `machine FOR NO KEY UPDATE`. Audit entry `MachineDataBlockSet` (ADR-0156 (e)) | `E-PLT-010 MachineArchived`, `E-PLT-024 DataBlockOutOfRange`, `E-PLT-050 DataBlockMissing`, `E-PLT-051 DataBlockNotOnPlatform` |
 | `ArchiveMachine` | Machine | `archived_at` set | `E-PLT-011 MachineHasDraft` |
 | `AddUnit` | Machine | New unit under a live parent. Locks: `machine FOR SHARE`, then the parent `unit FOR SHARE` | `E-PLT-002 UnitDepthExceeded`, `E-PLT-003 ParentNotFound` (the foreign key `unit_parent_exists`, second line), `E-PLT-004 DuplicateUnitPath`, `E-PLT-009 UnitArchived` (parent), `E-PLT-010 MachineArchived`, `E-PLT-017 InvalidUnitPath` (`parent_path` or `segment`) |
 | `RenameUnit` | Machine | New `name`. Locks: `machine FOR NO KEY UPDATE`, then the unit `FOR UPDATE` | `E-PLT-009 UnitArchived` |
 | `ArchiveUnit` | Machine | `archived_at` on the unit and its descendants. Locks: `machine FOR NO KEY UPDATE`, then the unit rows `FOR UPDATE` in `id` order. Two archives on one machine therefore run one after the other | `E-PLT-008 LastMainUnit`, `E-PLT-009 UnitArchived` (the unit is already archived, ADR-0029), `E-PLT-012 UnitReferencedByDraft`, `E-PLT-014 UnitReferencedByApproved` |
 | `DefineUdt` | PlcType | New struct, or new revision with `supersedes`. Each member carries a `TypeExpr` in `members[i].type`. Locks: `machine FOR SHARE`, then the advisory locks of class 2 in the order below | `E-PLT-005 TypeCycle`, `E-PLT-006 MemberTypeNotOnPlatform`, `E-PLT-013 DerivedTypeInvalid`, `E-PLT-015 DuplicateTypeName`, `E-PLT-016 StructHasNoMembers`, `E-PLT-018 TypeTooLarge`, `E-PLT-021 DuplicateMemberName` |
-| `SetPlcConnection` | Machine | New or changed PLC connection record (section 2.1). The `row_version` compare treats no record as 0. Locks: `machine FOR NO KEY UPDATE`, then `plc_connection FOR UPDATE`. Audit entry `PlcConnectionSet` without the password and the ciphertext | `E-PLT-010 MachineArchived`, `E-PLT-022 ConnectionFieldNotOnPlatform`, `E-PLT-023 ConnectionFieldMissing`, `E-PLT-024 ConnectionDataBlockOutOfRange`, `E-PLT-025 CommModeNotOnPlatform`, `E-PLT-026 AddressNotAmsNetId`, `E-PLT-028 ConnectionFieldNotInMode`, `E-WEB-011 TaskFailed` (seal of the password), `E-WEB-013 ConnectionConcurrentEdit` |
+| `SetPlcConnection` | Machine | New or changed PLC connection record (section 2.1). The `row_version` compare treats no record as 0. Locks: `machine FOR NO KEY UPDATE`, then `plc_connection FOR UPDATE`. Audit entry `PlcConnectionSet` without the password and the ciphertext | `E-PLT-010 MachineArchived`, `E-PLT-022 ConnectionFieldNotOnPlatform`, `E-PLT-023 ConnectionFieldMissing`, `E-PLT-025 CommModeNotOnPlatform`, `E-PLT-026 AddressNotAmsNetId`, `E-PLT-028 ConnectionFieldNotInMode`, `E-WEB-011 TaskFailed` (seal of the password), `E-WEB-013 ConnectionConcurrentEdit` |
 
 `SetPlcConnection` runs `PlcConnection::for_platform` and seals a new password before its transaction (`reliability.md` 7.4). It reads the platform and the password state without a lock, because the platform of a machine never changes. The `row_version` compare inside the transaction proves that the password state did not change (ADR-0154 (i)).
+
+`CreateMachine` and `SetMachineDataBlock` call `check_data_block` before their transaction (`reliability.md` 7.4). `SetMachineDataBlock` reads the platform without a lock, because the platform of a machine never changes. Two runs at the same time give the last write, and the audit log holds both entries (ADR-0156).
 
 `EnsureDerivedType` is an internal operation of the Plant Model, not a use case. It resolves a `TypeExpr` (section 2.1) to a `PlcTypeId`, the innermost element first. It finds a primitive by name and a struct by `(machine, name, revision)`. It returns the existing `STRING(n)`, `WSTRING(n)`, or array row of the machine, or it creates the row.
 
@@ -834,6 +848,7 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | Machine | One production machine with one PLC controller |
 | Unit | A part of a machine. Units form a tree of at most 5 levels |
 | PLC platform | The controller family that defines which data types exist |
+| Data block number | The default data block of a machine on `S7_300`, `S7_1200`, or `S7_1500`. The adapter uses it for a parameter without `s7_address` (A48, ADR-0156) |
 | PLC connection record | The settings that an external adapter needs for the controller of one machine. At most one per machine. The editor stores them and never connects to a PLC (ADR-0154) |
 | Struct (UDT) | User-defined type. Immutable per revision |
 | Derived type | A sized string or an array type created on demand for one machine |
@@ -884,3 +899,4 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A45 | A technical account with the role `ExportClient` exports `Approved` versions for a transfer client with HTTP Basic. It holds only `VersionExport`. It cannot log in to the UI, and no person uses it. The three roles of R22 stay the roles of persons |
 | A46 | Every `TwinCat3` machine runs TwinCAT 3.1.4026.0 or later. `LDATE`, `LTOD`, and `LDT` need this version. The editor does not check the version. The runbook names the check before a plant adds a `TwinCat3` machine |
 | A47 | The editor stores the PLC connection settings of each machine for an external adapter. It never opens a connection to a PLC. No crate holds a PLC protocol client. AES-256-GCM encrypts the password at rest |
+| A48 | Each live machine on `S7_300`, `S7_1200`, or `S7_1500` has one data block number. A `CodesysIec` or `TwinCat3` machine has none. The number is the default data block for a parameter without `s7_address`. It never changes the address of a parameter |

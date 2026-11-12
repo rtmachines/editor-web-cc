@@ -30,7 +30,7 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
             endpoint(
                 Method::POST,
                 "/machines",
-                "code=M99&name=Created&plc_platform=S7_300&main_unit_name=Infeed",
+                "code=M99&name=Created&plc_platform=S7_300&db_number=1&main_unit_name=Infeed",
             ),
             [Login, created, created, Forbidden, Password, Login],
         ),
@@ -50,10 +50,14 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
             [Login, blocked, blocked, Forbidden, Password, Login],
         ),
         (
+            endpoint(Method::POST, "/machines/{code}/data-block", "db_number=2"),
+            [Login, connected, connected, Forbidden, Password, Login],
+        ),
+        (
             endpoint(
                 Method::POST,
                 "/machines/{code}/connection",
-                "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1",
+                "row_version=0&host=10.0.0.5&rack=0&slot=2",
             ),
             [Login, connected, connected, Forbidden, Password, Login],
         ),

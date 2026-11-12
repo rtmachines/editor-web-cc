@@ -84,6 +84,8 @@ pub enum RowAction {
     MachineCreated,
     /// A machine was renamed.
     MachineRenamed,
+    /// The data block number of a machine was set.
+    MachineDataBlockSet,
     /// A machine was archived.
     MachineArchived,
     /// A unit was added to a machine.
@@ -140,9 +142,10 @@ pub enum RowAction {
 
 impl RowAction {
     /// Every row action.
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::MachineCreated,
         Self::MachineRenamed,
+        Self::MachineDataBlockSet,
         Self::MachineArchived,
         Self::UnitAdded,
         Self::UnitRenamed,
@@ -177,6 +180,7 @@ impl From<RowAction> for AuditAction {
         match value {
             RowAction::MachineCreated => Self::MachineCreated,
             RowAction::MachineRenamed => Self::MachineRenamed,
+            RowAction::MachineDataBlockSet => Self::MachineDataBlockSet,
             RowAction::MachineArchived => Self::MachineArchived,
             RowAction::UnitAdded => Self::UnitAdded,
             RowAction::UnitRenamed => Self::UnitRenamed,

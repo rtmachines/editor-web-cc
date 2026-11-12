@@ -166,8 +166,10 @@ fn m20_machine() -> Machine {
         MachineCode::parse("M20").unwrap(),
         text("Packing line"),
         PlcPlatform::TwinCat3,
+        None,
         (UnitId::from(M20_U1_ID), text("Infeed")),
-    );
+    )
+    .unwrap();
     machine
         .add_unit(UnitId::from(M20_U2_ID), None, "2", text("Outfeed"))
         .unwrap();

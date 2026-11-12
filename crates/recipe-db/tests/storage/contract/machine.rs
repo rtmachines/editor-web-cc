@@ -8,12 +8,14 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use super::harness::{Harness, begin};
-use super::images::{assert_shape, machine_shape, text, unit_shape, without_times};
+use super::images::{
+    assert_shape, field, machine_shape, s7_machine_shape, text, unit_shape, without_times,
+};
 use super::locks::{LOCK_NOT_AVAILABLE, try_row_lock};
 use super::postgres_harness::PgHarness;
 use super::seed::{
     archive, code, insert, machine, machine_id, machine_with_archived_unit, name, path, read,
-    unit_id,
+    s7_machine, unit_id,
 };
 use crate::support::Role;
 
@@ -299,6 +301,30 @@ async fn the_platform_of_the_machine_is_kept(h: &dyn Harness) {
     assert_eq!(reloaded.platform(), PlcPlatform::TwinCat3);
 }
 
+async fn an_s7_machine_keeps_its_data_block_number(h: &dyn Harness) {
+    let built = s7_machine(22, "M22", "37");
+
+    let inserted = insert(h, &built).await;
+    let mut tx = begin(h).await;
+    let locked = tx
+        .plant()
+        .lock_machine_shared(built.id())
+        .await
+        .unwrap()
+        .expect("the machine exists");
+
+    assert_shape(&inserted.machine, &s7_machine_shape(false));
+    assert_eq!(field(&inserted.machine, "db_number"), 37);
+    assert_eq!(field(&locked.before, "db_number"), 37);
+    assert_eq!(locked.state, built);
+    assert_eq!(read(h, built.id()).await, Some(built));
+}
+
+contract_case!(
+    an_s7_machine_keeps_its_data_block_number,
+    an_s7_machine_keeps_its_data_block_number_memory,
+    an_s7_machine_keeps_its_data_block_number_postgres
+);
 contract_case!(
     insert_machine_then_lock_shared,
     insert_machine_then_lock_shared_memory,

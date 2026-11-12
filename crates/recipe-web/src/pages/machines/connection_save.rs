@@ -61,7 +61,6 @@ fn target_of(error: &PlantError, is_s7: bool) -> Option<String> {
         PlantError::ConnectionFieldNotOnPlatform { field, .. }
         | PlantError::ConnectionFieldMissing { field, .. }
         | PlantError::ConnectionFieldNotInMode { field, .. } => *field,
-        PlantError::ConnectionDataBlockOutOfRange { .. } => "db_number",
         PlantError::CommModeNotOnPlatform { .. } => "comm_mode",
         PlantError::AddressNotAmsNetId { .. } => "address",
         _other => return None,

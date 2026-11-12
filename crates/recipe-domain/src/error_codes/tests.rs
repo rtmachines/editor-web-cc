@@ -18,6 +18,8 @@ fn range_check_accepts_codes_inside_the_ranges() {
     for code in [
         "E-PLT-001",
         "E-PLT-049",
+        "E-PLT-050",
+        "E-PLT-069",
         "E-RCP-050",
         "E-RCP-069",
         "E-WEB-019",
@@ -29,7 +31,7 @@ fn range_check_accepts_codes_inside_the_ranges() {
 #[test]
 fn range_check_rejects_codes_outside_the_ranges() {
     for code in [
-        "E-PLT-050",
+        "E-PLT-070",
         "E-RCP-070",
         "E-IDN-020",
         "E-PLT-1",
@@ -160,6 +162,19 @@ fn plc_connection_codes_are_in_registry() {
         ("E-PLT-029", ErrorCode::PLT_029),
         ("E-WEB-013", ErrorCode::WEB_013),
         ("E-WEB-014", ErrorCode::WEB_014),
+    ];
+    for (text, code) in added {
+        assert_eq!(code.as_str(), text);
+        assert_eq!(ErrorCode::find(text), Some(code), "{text}");
+    }
+}
+
+/// The codes of the change `machine-data-block-number` (`reliability.md` section 1.2).
+#[test]
+fn machine_data_block_codes_are_in_registry() {
+    let added = [
+        ("E-PLT-050", ErrorCode::PLT_050),
+        ("E-PLT-051", ErrorCode::PLT_051),
     ];
     for (text, code) in added {
         assert_eq!(code.as_str(), text);

@@ -34,9 +34,14 @@ fn stored(units: Vec<StoredUnit>) -> StoredMachine {
         code: MachineCode::parse("M1").unwrap(),
         name: name("Press"),
         platform: PlcPlatform::S7_1500,
+        db_number: Some(DataBlockNumber::parse("7").unwrap()),
         archived_at: None,
         units,
     }
+}
+
+fn main_unit() -> Vec<StoredUnit> {
+    vec![stored_unit(1, "U1", None)]
 }
 
 fn paths(machine: &Machine) -> Vec<String> {
@@ -178,5 +183,70 @@ fn missing_parent_is_reported_before_an_archived_parent() {
     assert!(matches!(
         result,
         Err(PlantError::ParentNotFound { path: p }) if p == path("U1.7.1")
+    ));
+}
+
+#[test]
+fn stored_live_s7_machine_keeps_its_data_block_number() {
+    let machine = Machine::try_from(stored(main_unit())).unwrap();
+    assert_eq!(
+        machine.db_number(),
+        Some(DataBlockNumber::parse("7").unwrap())
+    );
+}
+
+#[test]
+fn stored_live_s7_machine_without_a_data_block_number_fails_with_data_block_missing() {
+    let mut row = stored(main_unit());
+    row.db_number = None;
+    assert!(matches!(
+        Machine::try_from(row),
+        Err(PlantError::DataBlockMissing {
+            platform: PlcPlatform::S7_1500,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn stored_archived_s7_machine_without_a_data_block_number_builds() {
+    let mut row = stored(main_unit());
+    row.db_number = None;
+    row.archived_at = Some(ts(10));
+    let machine = Machine::try_from(row).unwrap();
+    assert_eq!(machine.db_number(), None);
+    assert!(!machine.is_live());
+}
+
+#[test]
+fn stored_iec_machine_with_a_data_block_number_fails_with_data_block_not_on_platform() {
+    let mut row = stored(main_unit());
+    row.platform = PlcPlatform::TwinCat3;
+    assert!(matches!(
+        Machine::try_from(row),
+        Err(PlantError::DataBlockNotOnPlatform {
+            platform: PlcPlatform::TwinCat3,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn stored_iec_machine_without_a_data_block_number_builds() {
+    let mut row = stored(main_unit());
+    row.platform = PlcPlatform::CodesysIec;
+    row.db_number = None;
+    assert_eq!(Machine::try_from(row).unwrap().db_number(), None);
+}
+
+#[test]
+fn stored_s7_300_machine_with_a_number_above_the_platform_limit_fails_with_data_block_out_of_range()
+{
+    let mut row = stored(main_unit());
+    row.platform = PlcPlatform::S7_300;
+    row.db_number = Some(DataBlockNumber::parse("65535").unwrap());
+    assert!(matches!(
+        Machine::try_from(row),
+        Err(PlantError::DataBlockOutOfRange { number: 65535, .. })
     ));
 }

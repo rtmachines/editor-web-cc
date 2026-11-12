@@ -15,8 +15,8 @@ use parking_lot::Mutex;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, Role};
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Unit, UnitId,
-    UnitPath, UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId,
+    PlcTypeRecord, Unit, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
     LangCode, Ordinal, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
@@ -342,6 +342,15 @@ impl PlantRepository for CountingTransaction {
         self.inner.plant().rename_machine(id, name).await
     }
 
+    async fn set_machine_data_block(
+        &mut self,
+        id: MachineId,
+        number: DataBlockNumber,
+    ) -> Result<RowImage, StorageError> {
+        self.count();
+        self.inner.plant().set_machine_data_block(id, number).await
+    }
+
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {
         self.count();
         self.inner.plant().archive_machine(id).await
@@ -445,8 +454,10 @@ fn machine_with(units: u128) -> Machine {
         MachineCode::parse("M1").unwrap(),
         text("Press"),
         PLATFORM,
+        None,
         (uid(101), text("Main")),
-    );
+    )
+    .unwrap();
     for k in 2..=units {
         machine
             .add_unit(

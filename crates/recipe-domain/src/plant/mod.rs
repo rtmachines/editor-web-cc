@@ -5,6 +5,7 @@
 
 mod array_dimension;
 mod connection;
+mod data_block_number;
 mod error;
 mod errors;
 mod ids;
@@ -32,9 +33,10 @@ mod unit_usage;
 pub use array_dimension::{ArrayDimension, ArrayDimensionReason, ArrayDimensions};
 pub use connection::{
     AmsNetId, AmsNetIdReason, CommMode, ConnectionFields, ConnectionPlan, ConnectionTextReason,
-    DataBlockNumber, HostReason, ModeReason, PasswordPlan, PasswordState, PlcAddress,
-    PlcConnection, PlcHost, PlcLogin, PlcPassword, Rack, RangeReason, Slot, TcpPort,
+    HostReason, ModeReason, PasswordPlan, PasswordState, PlcAddress, PlcConnection, PlcHost,
+    PlcLogin, PlcPassword, Rack, RangeReason, Slot, TcpPort,
 };
+pub use data_block_number::{DataBlockNumber, check_data_block};
 pub use error::{DerivedTypeReason, PlantError, TypeLimit};
 pub use errors::PlantErrors;
 pub use ids::{MachineId, PlcConnectionId, PlcTypeId, UnitId};

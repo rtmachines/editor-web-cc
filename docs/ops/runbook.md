@@ -37,6 +37,7 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
 - [Check the stored data against the platform ranges](#check-the-stored-data-against-the-platform-ranges)
 - [Check the stored type rows against the identifier rules](#check-the-stored-type-rows-against-the-identifier-rules)
 - [Check the stored data against the S7 layout rules](#check-the-stored-data-against-the-s7-layout-rules)
+- [Check the live S7 machines for a PLC connection record](#check-the-live-s7-machines-for-a-plc-connection-record)
 - [Check the TwinCAT version before you add a TwinCat3 machine](#check-the-twincat-version-before-you-add-a-twincat3-machine)
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
@@ -1136,6 +1137,42 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 3. Sign off each row of `nested_array` and `layout_changed`.
 4. Write the result into the [change log of the site](#change-log-of-the-site).
 
+## Check the live S7 machines for a PLC connection record
+
+Migration `0013` moves the data block number to the machine (ADR-0156).
+Migration `0014` copies the number from the PLC connection record of the machine.
+A live machine on `S7_300`, `S7_1200`, or `S7_1500` without that record has no number to copy.
+Migration `0013` stops on such a machine before it adds the column and changes nothing.
+The query lists these machines. It writes nothing.
+The output has one column, `code`, ordered by `code`.
+An archived machine and a machine on `CodesysIec` or `TwinCat3` are not in the output.
+
+1. Run the query. The previous release can still run.
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 <<'SQL'
+SELECT machine.code
+FROM machine
+WHERE machine.archived_at IS NULL
+  AND machine.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
+  AND NOT EXISTS (
+      SELECT 1 FROM plc_connection WHERE plc_connection.machine_id = machine.id
+  )
+ORDER BY machine.code;
+SQL
+```
+
+2. Save the PLC connection of each listed machine with the previous release.
+3. Run the query again. It must return 0 rows.
+4. Write the result into the [change log of the site](#change-log-of-the-site).
+5. Continue with the upgrade when the query returns 0 rows.
+
+If you skip this check, `migrate` stops with this message. The list names the same machines:
+
+```text
+migration 0013 stopped: live S7 machines without a PLC connection record: <codes>. Save the PLC connection of each listed machine with the previous release (docs/ops/runbook.md).
+```
+
 ## Check the TwinCAT version before you add a TwinCat3 machine
 
 The editor does not read the TwinCAT version of a controller.
@@ -1166,6 +1203,10 @@ A rollback needs the images of the previous release. See the section "Keep the i
    3. Run the section "Check the stored data against the S7 layout rules" from the directory `deploy/` of the new release.
    Run it after the identifier check and before step 3.
    Continue only when the owner signed off each row.
+   4. Run the section "Check the live S7 machines for a PLC connection record".
+   Run it after the S7 layout check and before step 3.
+   Save the PLC connection of each listed machine with the previous release.
+   Continue only when the query returns 0 rows.
 3. Run `docker compose run --rm --no-deps backup restore-test`. `.env` still holds the previous tag. Continue only after the test passes.
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.
@@ -1191,7 +1232,7 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 ```
 
    4. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
-11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
+11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`. Between the commit of `0013` and the row lock of `0014`, a previous-release command that updates a live S7 machine fails with `E-DB-003`.
 12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6).
 13. Start the guard step. Write the start time into the change log ([rule](#change-log-of-the-site)). Run `docker compose exec -u postgres db psql -d recipe`.
 14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
@@ -1397,7 +1438,7 @@ Never run two `app` containers at the same time (ADR-0096).
 The old `app` has no guard lock of the last Administrator, so the two versions do not exclude each other.
 Step 18 replaces the one container of `app`.
 
-The old `app` of step 12 keeps running on the old schema only when the migration follows the expand pattern.
+The old `app` of step 18 keeps running on the old schema only when the migration follows the expand pattern.
 A release with two or more migration files can fail after the first file. Then no image matches the schema.
 Choose one of two actions (ADR-0083). The first is a forward fix. The second is a restore of the `_premigrate` dump with the second list of the section "Rollback".
 
@@ -1441,6 +1482,12 @@ RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app
 3. Run the four commands of the upgrade with the tag of `.env`.
 
 Warning: `.env` holds the new tag, so a later `docker compose up -d` gives `app` the new image again (ADR-0083).
+
+After a rollback with the expand pattern, the previous release cannot create an S7 machine.
+Migration `0013` adds a check that refuses its `INSERT` with `E-DB-003`. No wrong row appears (ADR-0156).
+The previous release can still read and save the PLC connection of an existing machine.
+A trigger of migration `0014` writes each data block number that the previous release saves into the machine (ADR-0157).
+The machine number therefore stays equal to the number of the PLC connection.
 
 If the migration did not follow the expand pattern, use the `_premigrate` dump.
 Warning: this restore loses every change and audit entry after the `_premigrate` dump.

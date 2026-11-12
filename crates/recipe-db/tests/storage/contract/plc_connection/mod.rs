@@ -5,17 +5,18 @@
 
 mod fixtures;
 mod postgres_locks;
+mod postgres_sync;
 
 use recipe_app::error::{
     PLC_CONNECTION_MACHINE_PLATFORM, PLC_CONNECTION_MACHINE_UNIQUE, StorageError,
 };
 use recipe_app::ports::{PasswordWrite, SealedSecret};
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::plant::{MachineId, PasswordState, PlcConnection, PlcPlatform};
+use recipe_domain::plant::{DataBlockNumber, MachineId, PasswordState, PlcConnection, PlcPlatform};
 
 use super::harness::{Harness, begin, commit};
 use super::images::{Kind, assert_shape, changed_keys, field, text};
-use super::seed::machine_id;
+use super::seed::{code, machine_id};
 use fixtures::{
     connection_text, iec_connection, insert_connection, s7_connection, save_machine, sealed,
 };
@@ -104,7 +105,7 @@ async fn a_machine_without_a_record_gives_none_on_every_method(h: &dyn Harness) 
 
 async fn insert_of_an_s7_record_starts_at_row_version_1_and_reads_back(h: &dyn Harness) {
     let machine = save_machine(h, 2, "M2", PlcPlatform::S7_1500).await;
-    let built = s7_connection("192.168.1.20", "0", "2", "10");
+    let built = s7_connection("192.168.1.20", "0", "2");
     let mut tx = begin(h).await;
 
     let image = tx
@@ -121,7 +122,7 @@ async fn insert_of_an_s7_record_starts_at_row_version_1_and_reads_back(h: &dyn H
     assert_eq!(text(&image, "host"), "192.168.1.20");
     assert_eq!(field(&image, "rack"), 0);
     assert_eq!(field(&image, "slot"), 2);
-    assert_eq!(field(&image, "db_number"), 10);
+    assert_eq!(field(&image, "db_number"), 1);
     let mut tx = begin(h).await;
     let stored = tx
         .plc_connections()
@@ -158,7 +159,7 @@ async fn insert_of_an_iec_record_with_a_password_reads_back_the_password_state(h
 
 async fn a_second_record_of_one_machine_gives_the_unique_constraint(h: &dyn Harness) {
     let machine = save_machine(h, 4, "M4", PlcPlatform::S7_1500).await;
-    let built = s7_connection("192.168.1.20", "0", "2", "10");
+    let built = s7_connection("192.168.1.20", "0", "2");
     insert_connection(h, machine, &built, None).await;
     let mut tx = begin(h).await;
 
@@ -176,7 +177,7 @@ async fn a_second_record_of_one_machine_gives_the_unique_constraint(h: &dyn Harn
 }
 
 async fn an_insert_for_a_missing_machine_gives_the_platform_key(h: &dyn Harness) {
-    let built = s7_connection("192.168.1.20", "0", "2", "10");
+    let built = s7_connection("192.168.1.20", "0", "2");
     let mut tx = begin(h).await;
 
     let error = tx
@@ -194,7 +195,7 @@ async fn an_insert_for_a_missing_machine_gives_the_platform_key(h: &dyn Harness)
 
 async fn an_insert_of_the_wrong_shape_gives_the_check_error(h: &dyn Harness) {
     let machine = save_machine(h, 5, "M5", PlcPlatform::TwinCat3).await;
-    let built = s7_connection("192.168.1.20", "0", "2", "10");
+    let built = s7_connection("192.168.1.20", "0", "2");
     let mut tx = begin(h).await;
 
     let error = tx
@@ -246,14 +247,8 @@ async fn lock_for_update_gives_the_state_and_the_image_before_the_change(h: &dyn
 
 async fn an_update_adds_1_to_the_row_version_and_gives_the_image_after_the_change(h: &dyn Harness) {
     let machine = save_machine(h, 8, "M8", PlcPlatform::S7_1500).await;
-    insert_connection(
-        h,
-        machine,
-        &s7_connection("192.168.1.20", "0", "2", "10"),
-        None,
-    )
-    .await;
-    let second = s7_connection("192.168.1.21", "1", "3", "11");
+    insert_connection(h, machine, &s7_connection("192.168.1.20", "0", "2"), None).await;
+    let second = s7_connection("192.168.1.21", "1", "3");
     let mut tx = begin(h).await;
     let locked = tx
         .plc_connections()
@@ -273,7 +268,7 @@ async fn an_update_adds_1_to_the_row_version_and_gives_the_image_after_the_chang
     assert_eq!(field(&image, "row_version"), 2);
     assert_eq!(
         changed_keys(&locked.before, &image),
-        vec!["db_number", "host", "rack", "row_version", "slot"]
+        vec!["host", "rack", "row_version", "slot"]
     );
     let mut tx = begin(h).await;
     let stored = tx
@@ -357,7 +352,7 @@ async fn an_update_without_the_password_of_the_mode_gives_the_check_error(h: &dy
 
 async fn an_update_of_a_missing_record_gives_a_defect_error(h: &dyn Harness) {
     let machine = save_machine(h, 11, "M11", PlcPlatform::S7_1500).await;
-    let built = s7_connection("192.168.1.20", "0", "2", "10");
+    let built = s7_connection("192.168.1.20", "0", "2");
     let mut tx = begin(h).await;
 
     let error = tx
@@ -394,13 +389,7 @@ async fn lock_shared_reads_the_sealed_password_of_an_iec_record(h: &dyn Harness)
 
 async fn lock_shared_of_an_s7_record_gives_no_sealed_password(h: &dyn Harness) {
     let machine = save_machine(h, 13, "M13", PlcPlatform::S7_300).await;
-    insert_connection(
-        h,
-        machine,
-        &s7_connection("192.168.1.20", "0", "2", "10"),
-        None,
-    )
-    .await;
+    insert_connection(h, machine, &s7_connection("192.168.1.20", "0", "2"), None).await;
     let mut tx = begin(h).await;
 
     let shared = tx
@@ -416,7 +405,7 @@ async fn lock_shared_of_an_s7_record_gives_no_sealed_password(h: &dyn Harness) {
 
 async fn a_dropped_transaction_writes_no_record(h: &dyn Harness) {
     let machine = save_machine(h, 14, "M14", PlcPlatform::S7_1500).await;
-    let built = s7_connection("192.168.1.20", "0", "2", "10");
+    let built = s7_connection("192.168.1.20", "0", "2");
     let mut tx = begin(h).await;
     tx.plc_connections()
         .insert_connection(machine, &built, None)
@@ -433,6 +422,219 @@ async fn a_dropped_transaction_writes_no_record(h: &dyn Harness) {
             .unwrap()
             .is_none()
     );
+}
+
+/// The machine and its record keep the same number after `set_machine_data_block` (design D6, D7).
+async fn set_machine_data_block_changes_both_columns_and_bumps_the_record(h: &dyn Harness) {
+    let machine = save_machine(h, 20, "M20", PlcPlatform::S7_1500).await;
+    insert_connection(h, machine, &s7_connection("192.168.1.20", "0", "2"), None).await;
+    let mut tx = begin(h).await;
+    tx.plant()
+        .lock_machine_for_no_key_update(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+
+    let image = tx
+        .plant()
+        .set_machine_data_block(machine, DataBlockNumber::parse("42").unwrap())
+        .await
+        .unwrap();
+    commit(h, tx, machine).await;
+
+    assert_eq!(field(&image, "db_number"), 42);
+    let mut tx = begin(h).await;
+    let stored_machine = tx
+        .plant()
+        .machine_by_id(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+    assert_eq!(
+        stored_machine.db_number(),
+        Some(DataBlockNumber::parse("42").unwrap())
+    );
+    let stored = tx
+        .plc_connections()
+        .connection_by_machine(machine)
+        .await
+        .unwrap()
+        .expect("the record exists");
+    assert_eq!(stored.row_version, 2);
+    assert_eq!(
+        connection_text(&stored.connection),
+        connection_text(&s7_connection("192.168.1.20", "0", "2"))
+    );
+}
+
+/// The current number changes neither the record nor its `row_version` (design D7, ADR-0157 (j)).
+async fn set_machine_data_block_with_the_current_number_leaves_the_record_unchanged(
+    h: &dyn Harness,
+) {
+    let machine = save_machine(h, 23, "M23", PlcPlatform::S7_1500).await;
+    insert_connection(h, machine, &s7_connection("192.168.1.20", "0", "2"), None).await;
+    let mut tx = begin(h).await;
+    tx.plant()
+        .lock_machine_for_no_key_update(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+
+    let image = tx
+        .plant()
+        .set_machine_data_block(machine, DataBlockNumber::parse("1").unwrap())
+        .await
+        .unwrap();
+    commit(h, tx, machine).await;
+
+    assert_eq!(field(&image, "db_number"), 1);
+    let mut tx = begin(h).await;
+    let stored = tx
+        .plc_connections()
+        .connection_by_machine(machine)
+        .await
+        .unwrap()
+        .expect("the record exists");
+    assert_eq!(stored.row_version, 1);
+    assert_eq!(
+        connection_text(&stored.connection),
+        connection_text(&s7_connection("192.168.1.20", "0", "2"))
+    );
+}
+
+async fn set_machine_data_block_without_a_record_changes_only_the_machine(h: &dyn Harness) {
+    let machine = save_machine(h, 21, "M21", PlcPlatform::S7_1500).await;
+    let mut tx = begin(h).await;
+    tx.plant()
+        .lock_machine_for_no_key_update(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+
+    let image = tx
+        .plant()
+        .set_machine_data_block(machine, DataBlockNumber::parse("42").unwrap())
+        .await
+        .unwrap();
+    commit(h, tx, machine).await;
+
+    assert_eq!(field(&image, "db_number"), 42);
+    let mut tx = begin(h).await;
+    let stored_machine = tx
+        .plant()
+        .machine_by_id(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+    assert_eq!(
+        stored_machine.db_number(),
+        Some(DataBlockNumber::parse("42").unwrap())
+    );
+    assert!(
+        tx.plc_connections()
+            .connection_by_machine(machine)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// The S7 record keeps a copy of `machine.db_number` on insert and on update (design D7). The
+/// domain value has no number, so the case reads the copy from the row image.
+async fn an_s7_record_copies_the_machine_number_on_insert_and_update(h: &dyn Harness) {
+    let machine = save_machine(h, 22, "M22", PlcPlatform::S7_1500).await;
+    let inserted =
+        insert_connection(h, machine, &s7_connection("192.168.1.20", "0", "2"), None).await;
+    assert_eq!(field(&inserted, "db_number"), 1);
+    let mut tx = begin(h).await;
+    tx.plant()
+        .lock_machine_for_no_key_update(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+    tx.plant()
+        .set_machine_data_block(machine, DataBlockNumber::parse("42").unwrap())
+        .await
+        .unwrap();
+    commit(h, tx, machine).await;
+    let mut tx = begin(h).await;
+    tx.plc_connections()
+        .lock_connection_for_update(machine)
+        .await
+        .unwrap()
+        .expect("the record exists");
+
+    let updated = tx
+        .plc_connections()
+        .update_connection(
+            machine,
+            &s7_connection("192.168.1.21", "1", "3"),
+            &PasswordWrite::Keep,
+        )
+        .await
+        .unwrap();
+    commit(h, tx, machine).await;
+
+    assert_eq!(field(&updated, "db_number"), 42);
+    assert_eq!(text(&updated, "host"), "192.168.1.21");
+}
+
+async fn an_iec_record_stores_no_number(h: &dyn Harness) {
+    let machine = save_machine(h, 23, "M23", PlcPlatform::TwinCat3).await;
+
+    let inserted = insert_connection(
+        h,
+        machine,
+        &ads_connection(Some("svc")),
+        Some(&sealed(&[1])),
+    )
+    .await;
+
+    assert_shape(&inserted, &iec_shape(true));
+}
+
+/// The connection read of `ExportPlcConnection` gives the number of the machine (design D7,
+/// ADR-0156 (g)). The use case locks the machine and then the record, and takes the number from
+/// the machine state.
+async fn the_export_read_path_gives_the_machine_number_after_a_change(h: &dyn Harness) {
+    let machine = save_machine(h, 24, "M24", PlcPlatform::S7_1500).await;
+    insert_connection(h, machine, &s7_connection("192.168.1.20", "0", "2"), None).await;
+    let mut tx = begin(h).await;
+    tx.plant()
+        .lock_machine_for_no_key_update(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+    tx.plant()
+        .set_machine_data_block(machine, DataBlockNumber::parse("200").unwrap())
+        .await
+        .unwrap();
+    commit(h, tx, machine).await;
+    let mut tx = begin(h).await;
+
+    let resolved = tx
+        .plant()
+        .export_machine_by_code(code("M24"))
+        .await
+        .unwrap()
+        .expect("the machine exists");
+    let locked = tx
+        .plant()
+        .lock_machine_shared(machine)
+        .await
+        .unwrap()
+        .expect("the machine exists");
+    let shared = tx
+        .plc_connections()
+        .lock_connection_shared(machine)
+        .await
+        .unwrap()
+        .expect("the record exists");
+
+    let expected = Some(DataBlockNumber::parse("200").unwrap());
+    assert_eq!(resolved.db_number(), expected);
+    assert_eq!(locked.state.db_number(), expected);
+    assert_eq!(shared.stored.row_version, 2);
 }
 
 contract_case!(
@@ -509,4 +711,34 @@ contract_case!(
     a_dropped_transaction_writes_no_record,
     a_dropped_transaction_writes_no_record_memory,
     a_dropped_transaction_writes_no_record_postgres
+);
+contract_case!(
+    set_machine_data_block_changes_both_columns_and_bumps_the_record,
+    set_machine_data_block_changes_both_columns_and_bumps_the_record_memory,
+    set_machine_data_block_changes_both_columns_and_bumps_the_record_postgres
+);
+contract_case!(
+    set_machine_data_block_with_the_current_number_leaves_the_record_unchanged,
+    set_machine_data_block_with_the_current_number_leaves_the_record_unchanged_memory,
+    set_machine_data_block_with_the_current_number_leaves_the_record_unchanged_postgres
+);
+contract_case!(
+    set_machine_data_block_without_a_record_changes_only_the_machine,
+    set_machine_data_block_without_a_record_changes_only_the_machine_memory,
+    set_machine_data_block_without_a_record_changes_only_the_machine_postgres
+);
+contract_case!(
+    an_s7_record_copies_the_machine_number_on_insert_and_update,
+    an_s7_record_copies_the_machine_number_on_insert_and_update_memory,
+    an_s7_record_copies_the_machine_number_on_insert_and_update_postgres
+);
+contract_case!(
+    an_iec_record_stores_no_number,
+    an_iec_record_stores_no_number_memory,
+    an_iec_record_stores_no_number_postgres
+);
+contract_case!(
+    the_export_read_path_gives_the_machine_number_after_a_change,
+    the_export_read_path_gives_the_machine_number_after_a_change_memory,
+    the_export_read_path_gives_the_machine_number_after_a_change_postgres
 );

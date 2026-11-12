@@ -13,7 +13,8 @@ use crate::test_support::recipes::HOLD_KEY;
 /// The name of the rename. Its markup must show escaped inside the state.
 const MARKUP_NAME: &str = "name=%3Cscript%3Ealert(1)%3C%2Fscript%3E";
 /// The form of a new machine. The main unit holds markup.
-const MACHINE_FORM: &str = "code=M95&name=Line&plc_platform=S7_300&main_unit_name=Infeed";
+const MACHINE_FORM: &str =
+    "code=M95&name=Line&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
 
 /// Return the number in the first link `href="/audit/N"` of `html`.
 fn first_entry_id(html: &str) -> u64 {

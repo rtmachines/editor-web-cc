@@ -53,11 +53,13 @@ fn machine(n: u128, code: &str) -> Machine {
         MachineCode::parse(code).unwrap(),
         text("Press"),
         PlcPlatform::TwinCat3,
+        None,
         (
             uid(n.checked_mul(100).unwrap().checked_add(1).unwrap()),
             text("Main"),
         ),
     )
+    .unwrap()
 }
 
 fn archived_machine(n: u128, code: &str) -> Machine {
@@ -104,6 +106,7 @@ fn machine_image(n: u128, code: &str, name: &str, archived_at: Value) -> Value {
         "code": code,
         "name": name,
         "plc_platform": "TwinCat3",
+        "db_number": null,
         "archived_at": archived_at,
         "created_at": now_text(),
         "updated_at": now_text(),

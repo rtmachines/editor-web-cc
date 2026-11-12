@@ -35,12 +35,12 @@ pub(crate) fn status_of(code: ErrorCode) -> StatusCode {
         "E-PLT-002" | "E-PLT-003" | "E-PLT-005" | "E-PLT-006" | "E-PLT-013" | "E-PLT-016"
         | "E-PLT-017" | "E-PLT-018" | "E-PLT-021" | "E-PLT-022" | "E-PLT-023" | "E-PLT-024"
         | "E-PLT-025" | "E-PLT-026" | "E-PLT-028" | "E-PLT-031" | "E-PLT-032" | "E-PLT-035"
-        | "E-PLT-036" | "E-RCP-003" | "E-RCP-004" | "E-RCP-005" | "E-RCP-006" | "E-RCP-008"
-        | "E-RCP-013" | "E-RCP-016" | "E-RCP-017" | "E-RCP-018" | "E-RCP-019" | "E-RCP-020"
-        | "E-RCP-021" | "E-RCP-022" | "E-RCP-023" | "E-RCP-024" | "E-RCP-027" | "E-RCP-028"
-        | "E-RCP-029" | "E-RCP-032" | "E-RCP-035" | "E-RCP-036" | "E-RCP-052" | "E-RCP-053"
-        | "E-RCP-054" | "E-RCP-055" | "E-RCP-056" | "E-RCP-057" | "E-IDN-006" | "E-IDN-008"
-        | "E-WEB-008" => StatusCode::UNPROCESSABLE_ENTITY,
+        | "E-PLT-036" | "E-PLT-050" | "E-PLT-051" | "E-RCP-003" | "E-RCP-004" | "E-RCP-005"
+        | "E-RCP-006" | "E-RCP-008" | "E-RCP-013" | "E-RCP-016" | "E-RCP-017" | "E-RCP-018"
+        | "E-RCP-019" | "E-RCP-020" | "E-RCP-021" | "E-RCP-022" | "E-RCP-023" | "E-RCP-024"
+        | "E-RCP-027" | "E-RCP-028" | "E-RCP-029" | "E-RCP-032" | "E-RCP-035" | "E-RCP-036"
+        | "E-RCP-052" | "E-RCP-053" | "E-RCP-054" | "E-RCP-055" | "E-RCP-056" | "E-RCP-057"
+        | "E-IDN-006" | "E-IDN-008" | "E-WEB-008" => StatusCode::UNPROCESSABLE_ENTITY,
         _unlisted => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

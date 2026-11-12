@@ -17,10 +17,11 @@ use crate::test_support::{Fixture, Reply, TestSession, get_with, post_fields};
 /// The header of an HTMX request.
 const HTMX: (&str, &str) = ("hx-request", "true");
 /// The form of a valid new machine. A test replaces one value.
-const MACHINE_FIELDS: [(&str, &str); 4] = [
+const MACHINE_FIELDS: [(&str, &str); 5] = [
     ("code", "M99"),
     ("name", "Created"),
     ("plc_platform", "S7_300"),
+    ("db_number", "1"),
     ("main_unit_name", "Infeed"),
 ];
 /// The raw query values that `http` accepts. Each one follows `q=` of the machine list.
@@ -58,8 +59,9 @@ const REFUSED_GETS: [(&str, &str); 19] = [
 ];
 
 /// A `POST` target with `{}` where the payload goes, a valid body, and the code of the answer.
-const REFUSED_POSTS: [(&str, &str, &str); 7] = [
+const REFUSED_POSTS: [(&str, &str, &str); 8] = [
     ("/machines/{}/rename", "name=Renamed", "E-WEB-005"),
+    ("/machines/{}/data-block", "db_number=5", "E-WEB-005"),
     ("/machines/{}/archive", "", "E-WEB-005"),
     (
         "/machines/{}/units",
@@ -243,7 +245,11 @@ async fn plant_xss_next_field_of_each_plant_page_that_accepts_a_query_holds_the_
 #[tokio::test]
 async fn plant_xss_machine_fields_that_the_server_refuses_give_their_error_code() {
     for payload in payloads() {
-        for field in ["code", "plc_platform"] {
+        for field in ["code", "plc_platform", "db_number"] {
+            // An empty `db_number` is no value, so it reaches the domain check (E-PLT-050).
+            if field == "db_number" && payload.is_empty() {
+                continue;
+            }
             let plant = plant();
             let reply = plant
                 .post("/machines", &machine_body(field, &payload))
@@ -251,12 +257,38 @@ async fn plant_xss_machine_fields_that_the_server_refuses_give_their_error_code(
             let what = format!("POST /machines {field}");
             assert_refused(&reply, "E-WEB-008", &payload, &what);
             assert_error_panel(&reply, &what);
-            if field == "code" && !payload.is_empty() {
+            if field != "plc_platform" && !payload.is_empty() {
                 // ADR-0041 (e): the out-of-band form shows the sent text escaped.
                 let value = format!("value=\"{}\"", askama_escape(&payload));
                 assert!(reply.body.contains(&value), "{what}: {}", reply.body);
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn plant_xss_data_block_number_payloads_give_their_error_code_and_show_escaped_in_the_form() {
+    let action = "/machines/M7/data-block";
+    for payload in payloads() {
+        let plant = plant();
+        let before = plant.fixture.snapshot();
+        let reply = plant
+            .post(action, &format!("db_number={}", encode(&payload)))
+            .await;
+        // An empty text is no value, so it reaches the domain check of an S7 machine.
+        let code = if payload.is_empty() {
+            "E-PLT-050"
+        } else {
+            "E-WEB-008"
+        };
+        assert_refused(&reply, code, &payload, action);
+        assert_error_panel(&reply, action);
+        if !payload.is_empty() {
+            // ADR-0041 (e): the out-of-band form shows the sent text escaped.
+            let value = format!("value=\"{}\"", askama_escape(&payload));
+            assert!(reply.body.contains(&value), "{action}: {}", reply.body);
+        }
+        assert_eq!(plant.fixture.snapshot(), before, "{action}");
     }
 }
 

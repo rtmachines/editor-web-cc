@@ -29,7 +29,7 @@ use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
     AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
-    SetPlcConnection,
+    SetMachineDataBlock, SetPlcConnection,
 };
 use crate::ports::{AuditEntryId, AuditFilter, TimeRange};
 use crate::recipe::{
@@ -95,6 +95,24 @@ async fn rename_machine_checks_the_permission_first() {
         .execute(&operator(), &meta(), scenarios::rename_machine_input())
         .await;
     assert_refused(&fixture, result, RenameMachine::OPERATION, "RenameMachine");
+}
+
+#[tokio::test]
+async fn set_machine_data_block_checks_the_permission_first() {
+    let fixture = scenarios::plant();
+    let result = SetMachineDataBlock::new(fixture.context())
+        .execute(
+            &operator(),
+            &meta(),
+            scenarios::set_machine_data_block_input(),
+        )
+        .await;
+    assert_refused(
+        &fixture,
+        result,
+        SetMachineDataBlock::OPERATION,
+        "SetMachineDataBlock",
+    );
 }
 
 #[tokio::test]

@@ -128,11 +128,13 @@ pub(crate) fn machine(n: u128, code: &str) -> Machine {
         MachineCode::parse(code).unwrap(),
         text("Press"),
         PlcPlatform::TwinCat3,
+        None,
         (
             uid(n.checked_mul(100).unwrap().checked_add(1).unwrap()),
             text("Main"),
         ),
     )
+    .unwrap()
 }
 
 /// A recipe of machine `m` whose versions have the given numbers, states, and identifiers.

@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, StateAction};
 use recipe_domain::plant::{
-    MachineCode, MachineId, PlantError, PlcConnection, PlcConnectionId, PlcPassword, PlcPlatform,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlantError, PlcConnection, PlcConnectionId,
+    PlcPassword, PlcPlatform,
 };
 use recipe_domain::recipe::ReferenceNumber;
 use serde_json::json;
@@ -12,7 +13,7 @@ use serde_json::json;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, Missing};
-use crate::ports::{CredentialCipher, Isolation, NonEmpty, Transaction};
+use crate::ports::{CredentialCipher, Isolation, NonEmpty, StoredConnection, Transaction};
 
 /// The `schema_version` of the connection document (`api.md` section 6.5).
 const CONNECTION_SCHEMA_VERSION: &str = "1";
@@ -41,10 +42,34 @@ pub struct ExportedPlcConnection {
     pub recipe: ReferenceNumber,
     /// The `row_version` of the record.
     pub row_version: i64,
+    /// The data block number of the machine. It is `None` on an IEC platform (ADR-0156 (g)).
+    ///
+    /// The field `connection.db_number` of the document takes this value, not the copy in the record.
+    pub db_number: Option<DataBlockNumber>,
     /// The settings of the record.
     pub connection: PlcConnection,
     /// The opened password, or `None` when the record holds none.
     pub password: Option<PlcPassword>,
+}
+
+/// Build the exported record from the locked machine, the stored record, and the opened password.
+fn build_exported(
+    machine: MachineId,
+    state: &Machine,
+    recipe: ReferenceNumber,
+    stored: StoredConnection,
+    password: Option<PlcPassword>,
+) -> ExportedPlcConnection {
+    ExportedPlcConnection {
+        machine,
+        code: state.code(),
+        platform: state.platform(),
+        recipe,
+        row_version: stored.row_version,
+        db_number: state.db_number(),
+        connection: stored.connection,
+        password,
+    }
 }
 
 /// The result of the timed part: the open transaction, the id of the record row, and the record.
@@ -184,20 +209,15 @@ impl ExportPlcConnection {
             .map(|sealed| self.cipher.open(machine, &sealed))
             .transpose()
             .map_err(|_fault| AppError::SecretUnreadable { code })?;
-        let exported = ExportedPlcConnection {
+        let id = shared.stored.id;
+        let exported = build_exported(
             machine,
-            code,
-            platform: locked.state.platform(),
-            recipe: input.recipe,
-            row_version: shared.stored.row_version,
-            connection: shared.stored.connection,
+            &locked.state,
+            input.recipe,
+            shared.stored,
             password,
-        };
-        Ok(Prepared {
-            tx,
-            id: shared.stored.id,
-            exported,
-        })
+        );
+        Ok(Prepared { tx, id, exported })
     }
 
     /// Resolve the machine of the URL by the `{code}` rule of `api.md` section 2.7.

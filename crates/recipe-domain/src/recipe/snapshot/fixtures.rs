@@ -145,6 +145,9 @@ fn units_of(owner: MachineId, is_machine_archived: bool, shift: u128) -> LiveUni
         code: MachineCode::parse("M7").unwrap(),
         name: Text::parse("Press").unwrap(),
         platform: PLATFORM,
+        db_number: PLATFORM
+            .max_data_block()
+            .map(|_| crate::plant::DataBlockNumber::parse("1").unwrap()),
         archived_at: is_machine_archived.then(|| at(9)),
         units: vec![
             unit(LIVE_UNIT, "U1", false),

@@ -16,7 +16,7 @@ use recipe_app::plant::{
     CreateMachine, CreateMachineInput, GetMachineForm, MachineForm, MachineFormInput,
 };
 use recipe_app::ports::NonEmpty;
-use recipe_domain::plant::{MachineCode, PlantError, PlcPlatform};
+use recipe_domain::plant::{DataBlockNumber, MachineCode, PlantError, PlcPlatform};
 use recipe_domain::text::Text;
 use serde::Deserialize;
 
@@ -33,13 +33,16 @@ use crate::state::WebState;
 /// The fields of the form of `POST /machines`.
 ///
 /// The names are the `name` attributes of the form (design D5). The error of a name field uses
-/// the `id` of its input, for example `machine_name`.
+/// the `id` of its input, for example `machine_name`. The field `db_number` is optional.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CreateFields {
     code: String,
     name: String,
     plc_platform: String,
+    /// The data block number. An absent field and an empty text are no value (design D5).
+    #[serde(default)]
+    db_number: String,
     main_unit_name: String,
     /// The session token. The CSRF layer checked it before the handler runs.
     #[serde(default, rename = "csrf_token")]
@@ -47,7 +50,7 @@ pub(crate) struct CreateFields {
 }
 
 impl CreateFields {
-    /// Turn the four fields into the input of `CreateMachine`. Read every field (ADR-0041 (a)).
+    /// Turn the five fields into the input of `CreateMachine`. Read every field (ADR-0041 (a)).
     ///
     /// # Errors
     ///
@@ -65,6 +68,17 @@ impl CreateFields {
             "plc_platform",
             FieldReason::Platform,
         );
+        // An empty text is no value. A text that does not parse is one line under the input.
+        let db_number = match self.db_number.as_str() {
+            "" => Some(None),
+            text => lines
+                .field(
+                    DataBlockNumber::parse(text),
+                    DB_NUMBER_INPUT,
+                    FieldReason::ConnectionDataBlock,
+                )
+                .map(Some),
+        };
         let main_unit_name = lines.field(
             Text::parse(&self.main_unit_name),
             "main_unit_name",
@@ -75,12 +89,16 @@ impl CreateFields {
                 code: code?,
                 name: name?,
                 platform: platform?,
+                db_number: db_number?,
                 main_unit_name: main_unit_name?,
             })
         })();
         lines.finish(input)
     }
 }
+
+/// The `id` and the name of the input of the data block number (design D8).
+const DB_NUMBER_INPUT: &str = "db_number";
 
 /// One option of the list of platforms.
 struct PlatformOption {
@@ -95,6 +113,7 @@ struct NewMachineForm {
     code: String,
     name: String,
     platform: String,
+    db_number: String,
     main_unit: String,
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
@@ -123,6 +142,7 @@ impl NewMachineForm {
             code: String::new(),
             name: String::new(),
             platform: String::new(),
+            db_number: String::new(),
             main_unit: String::new(),
             oob: false,
             errors: FormErrors::default(),
@@ -141,6 +161,7 @@ impl NewMachineForm {
             code: fields.code.clone(),
             name: fields.name.clone(),
             platform: fields.plc_platform.clone(),
+            db_number: fields.db_number.clone(),
             main_unit: fields.main_unit_name.clone(),
             oob: true,
             errors,
@@ -252,11 +273,17 @@ pub(crate) async fn create(
     see_other_path(&format!("/machines/{code}"), request.request_id(), [])
 }
 
-/// Return the input that a refused `CreateMachine` names: the code of `E-PLT-001`.
+/// Return the input that a refused `CreateMachine` names: the code of `E-PLT-001`, or the data
+/// block number of `E-PLT-024`, `E-PLT-050`, and `E-PLT-051`.
 fn code_input(error: &AppError) -> Option<String> {
-    matches!(
-        error,
-        AppError::Plant(PlantError::DuplicateMachineCode { .. })
-    )
-    .then(|| "code".to_owned())
+    let AppError::Plant(inner) = error else {
+        return None;
+    };
+    match inner {
+        PlantError::DuplicateMachineCode { .. } => Some("code".to_owned()),
+        PlantError::DataBlockOutOfRange { .. }
+        | PlantError::DataBlockMissing { .. }
+        | PlantError::DataBlockNotOnPlatform { .. } => Some(DB_NUMBER_INPUT.to_owned()),
+        _other => None,
+    }
 }

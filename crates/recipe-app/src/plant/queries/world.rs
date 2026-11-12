@@ -31,8 +31,12 @@ pub(super) fn machine_of(platform: PlcPlatform, n: u128, code: &str, name: &str)
         MachineCode::parse(code).unwrap(),
         text(name),
         platform,
+        platform
+            .max_data_block()
+            .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (uid(unit_id), text("Main")),
     )
+    .unwrap()
 }
 
 /// Add live units with the given paths, in the order of the slice.

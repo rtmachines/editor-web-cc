@@ -82,12 +82,13 @@ Static files. `GET /static/*` serves the files of section 9, the style sheets `s
 |---|---|---|---|---|---|---|
 | GET | `/machines` | `ListMachines` | `RecipeView` | `q`, `page`, `show_archived`, optional `archived` | `200` list of live machines, `page.machines` rows per page. `show_archived=1` adds the archived machines, each with a link to `/machines/by-id/{uuid}` | - |
 | GET | `/machines/new` | `GetMachineForm` | `MachineManage` | - | `200` form | - |
-| POST | `/machines` | `CreateMachine` | `MachineManage` | `code`, `name`, `plc_platform`, `main_unit_name` | `303` to `/machines/{code}` | `409 E-PLT-001` |
+| POST | `/machines` | `CreateMachine` | `MachineManage` | `code`, `name`, `plc_platform`, `db_number`, `main_unit_name` | `303` to `/machines/{code}` | `409 E-PLT-001`, `422 E-PLT-024`, `422 E-PLT-050`, `422 E-PLT-051` |
 | GET | `/machines/{code}` | `GetMachine` | `RecipeView` | optional `archived` | `200` page of the live machine with this code, with the unit tree | `404 E-WEB-005` |
 | GET | `/machines/by-id/{uuid}` | `GetMachine` | `RecipeView` | - | `200` machine page of a live or an archived machine, with the unit tree. Read-only for an archived machine | `404 E-WEB-005` |
 | POST | `/machines/{code}/rename` | `RenameMachine` | `MachineManage` | `name` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010` |
+| POST | `/machines/{code}/data-block` | `SetMachineDataBlock` | `MachineManage` | `db_number` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010`, `422 E-PLT-024`, `422 E-PLT-050`, `422 E-PLT-051` |
 | GET | `/machines/{code}/connection/edit` | `GetPlcConnectionForm` | `MachineManage` | - | `200` form with the connection fields of the platform of the machine and the hidden field `row_version` | `404 E-WEB-005` |
-| POST | `/machines/{code}/connection` | `SetPlcConnection` | `MachineManage` | `row_version`, `host`, `rack`, `slot`, `db_number`, `port`, `address`, `comm_mode`, `login`, `password` | `200` fragment with `HX-Trigger: {"rowVersion": <new>}`. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010`, `422 E-PLT-022`, `422 E-PLT-023`, `422 E-PLT-024`, `422 E-PLT-025`, `422 E-PLT-026`, `422 E-PLT-028`, `409 E-WEB-013` |
+| POST | `/machines/{code}/connection` | `SetPlcConnection` | `MachineManage` | `row_version`, `host`, `rack`, `slot`, `port`, `address`, `comm_mode`, `login`, `password` | `200` fragment with `HX-Trigger: {"rowVersion": <new>}`. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010`, `422 E-PLT-022`, `422 E-PLT-023`, `422 E-PLT-025`, `422 E-PLT-026`, `422 E-PLT-028`, `409 E-WEB-013` |
 | POST | `/machines/{code}/archive` | `ArchiveMachine` | `MachineManage` | CSRF token | `303` to `/machines?archived={code}` (ADR-0037) | `404 E-WEB-005`, `409 E-PLT-011` |
 | GET | `/machines/{code}/units` | `GetUnitTree` | `RecipeView` | - | `200` fragment of the whole unit tree. A request without `HX-Request` gets the page of the tree (ADR-0037) | `404 E-WEB-005` |
 | GET | `/machines/{code}/units/new` | `GetUnitForm` | `UnitManage` | optional `parent_path` | `200` form | `404 E-WEB-005` |
@@ -101,6 +102,8 @@ Static files. `GET /static/*` serves the files of section 9, the style sheets `s
 A malformed `parent_path` of `GetUnitForm` gives the code of `UnitPath` (section 1). A valid `parent_path` of a unit that is not live gives `404 E-WEB-005`. A live parent of depth 5 gives `422 E-PLT-002`, because its child would have six levels.
 
 `archived` holds the code or the unit path of the last archive. The page shows a success message only when the query finds that machine or unit archived (ADR-0037).
+
+Data block number (ADR-0156). `recipe-web` turns an empty `db_number` text into no value. The rule of the number is in `domain-model.md` 2.1. The machine page shows the number of an S7 machine and its edit form. The connection form has no `db_number` field.
 
 PLC connection record (ADR-0154). The machine page shows the record without the password. It shows the text "password stored" or "no password" in place of the password. The rules of the edit form follow:
 
@@ -366,6 +369,7 @@ Legend: ✓ allowed, ✗ denied, (c) allowed with the condition in the last colu
 | Retire version without replacement (`RetireVersion`) | `VersionRetire` | ✓ | ✗ | ✗ | ✗ | A28 |
 | Discard `Draft` (`DiscardDraft`) | `VersionDiscard` | ✓ | ✓ | ✗ | ✗ | - |
 | Create, rename, archive machine (`CreateMachine`, `RenameMachine`, `ArchiveMachine`). Form query `GetMachineForm` with the purpose `CreateMachine` or `RenameMachine` | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9 |
+| Set the data block number of a machine (`SetMachineDataBlock`) | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9, A48. ADR-0156 (e) |
 | Edit the PLC connection record of a machine (`SetPlcConnection`). Form query `GetPlcConnectionForm` | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9, A47. ADR-0154 (i) |
 | Add, rename, archive unit (`AddUnit`, `RenameUnit`, `ArchiveUnit`). Form query `GetUnitForm` with the purpose `AddUnit` or `RenameUnit` | `UnitManage` | ✓ | ✓ | ✗ | ✗ | A9 |
 | Define UDT revision (`DefineUdt`). Form query `GetUdtForm` with the purpose `DefineUdt` | `UdtManage` | ✓ | ✓ | ✗ | ✗ | A9 |
@@ -670,7 +674,7 @@ The connection record is not part of the export documents v1 and v2. It is not p
 | `connection.host` | string | `PlcHost` |
 | `connection.rack` | integer | Only on `S7_300`, `S7_1200`, and `S7_1500`. `Rack` |
 | `connection.slot` | integer | Only on `S7_300`, `S7_1200`, and `S7_1500`. `Slot` |
-| `connection.db_number` | integer | Only on `S7_300`, `S7_1200`, and `S7_1500`. `DataBlockNumber`. The default data block for a parameter without `s7_address` |
+| `connection.db_number` | integer | Only on `S7_300`, `S7_1200`, and `S7_1500`. `DataBlockNumber`. The value is `machine.db_number`, not a field of the record (ADR-0156 (g)). The default data block for a parameter without `s7_address` |
 | `connection.port` | integer | Only on `CodesysIec` and `TwinCat3`. `TcpPort` |
 | `connection.address` | string | Only on `CodesysIec` and `TwinCat3`. `PlcAddress`. An AMS Net ID with the mode `Ads` |
 | `connection.comm_mode` | string | Only on `CodesysIec` and `TwinCat3`. `CommMode` |

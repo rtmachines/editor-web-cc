@@ -22,6 +22,8 @@ pub const COVERED: &[&str] = &[
     "machine_code_format",
     "machine_name_length",
     "machine_platform_value",
+    "machine_db_number_shape",
+    "machine_db_number_range",
     "machine_code_live_unique",
     "unit_pkey",
     "unit_path_format",
@@ -55,6 +57,27 @@ async fn insert_machine(
     .bind(platform)
     .fetch_one(conn)
     .await
+}
+
+/// Insert a machine with a data block number and an optional archive time. Return its id.
+async fn insert_machine_with_number(
+    conn: &mut PgConnection,
+    code: &str,
+    platform: &str,
+    db_number: Option<i32>,
+    archived: bool,
+) -> Result<Uuid, sqlx::Error> {
+    let archived_at = if archived { "now()" } else { "NULL" };
+    let statement = format!(
+        "INSERT INTO machine (code, name, plc_platform, db_number, archived_at) \
+         VALUES ($1, 'Press', $2, $3, {archived_at}) RETURNING id"
+    );
+    sqlx::query_scalar(&statement)
+        .bind(code)
+        .bind(platform)
+        .bind(db_number)
+        .fetch_one(conn)
+        .await
 }
 
 /// Set the archive time of a machine.
@@ -135,6 +158,83 @@ async fn machine_platform_value_rejects_an_unknown_platform() {
     let result = insert_machine(&mut conn, "M7004", "Press", "S7_400").await;
 
     assert_constraint(result, CHECK_VIOLATION, "machine_platform_value");
+}
+
+#[tokio::test]
+async fn machine_db_number_shape_rejects_a_live_s7_row_without_a_number() {
+    let mut conn = connection().await;
+
+    let result = insert_machine_with_number(&mut conn, "M7100", "S7_1500", None, false).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_db_number_shape");
+}
+
+#[tokio::test]
+async fn machine_db_number_shape_rejects_an_iec_row_with_a_number() {
+    let mut conn = connection().await;
+
+    let result = insert_machine_with_number(&mut conn, "M7101", TWIN_CAT, Some(10), false).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_db_number_shape");
+}
+
+#[tokio::test]
+async fn machine_db_number_shape_accepts_an_archived_s7_row_without_a_number() {
+    let mut conn = connection().await;
+
+    insert_machine_with_number(&mut conn, "M7102", "S7_300", None, true)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn machine_db_number_range_rejects_16001_on_s7_300() {
+    let mut conn = connection().await;
+
+    let result = insert_machine_with_number(&mut conn, "M7103", "S7_300", Some(16001), false).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_db_number_range");
+}
+
+#[tokio::test]
+async fn machine_db_number_range_rejects_60000_on_s7_1500() {
+    let mut conn = connection().await;
+
+    let result =
+        insert_machine_with_number(&mut conn, "M7104", "S7_1500", Some(60000), false).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_db_number_range");
+}
+
+#[tokio::test]
+async fn machine_db_number_range_rejects_0_on_s7_300() {
+    let mut conn = connection().await;
+
+    let result = insert_machine_with_number(&mut conn, "M7107", "S7_300", Some(0), false).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_db_number_range");
+}
+
+#[tokio::test]
+async fn machine_db_number_range_rejects_60000_on_s7_1200() {
+    let mut conn = connection().await;
+
+    let result =
+        insert_machine_with_number(&mut conn, "M7108", "S7_1200", Some(60000), false).await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_db_number_range");
+}
+
+#[tokio::test]
+async fn machine_db_number_range_accepts_the_platform_limits() {
+    let mut conn = connection().await;
+
+    insert_machine_with_number(&mut conn, "M7105", "S7_300", Some(16000), false)
+        .await
+        .unwrap();
+    insert_machine_with_number(&mut conn, "M7106", "S7_1500", Some(59999), false)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]

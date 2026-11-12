@@ -121,11 +121,15 @@ pub(super) fn seed_machine_on(
         code,
         Text::parse("Empty line").unwrap(),
         platform,
+        platform
+            .max_data_block()
+            .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (
             unit_id(0x7357_0f01_0000_0000_0000_0000_0000_0000 | u128::from(number)),
             Text::parse("Infeed").unwrap(),
         ),
-    );
+    )
+    .unwrap();
     fixture.store.seed_machine(&machine);
     (code, id)
 }

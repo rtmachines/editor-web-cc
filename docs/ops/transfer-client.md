@@ -189,6 +189,9 @@ A missing, malformed, or unknown `recipe` gives `404 E-WEB-005`.
 A machine without a connection record gives `404 E-PLT-027`.
 An archived machine gives `409 E-PLT-010`.
 
+The value of `db_number` comes from the machine (`machine.db_number`).
+The user sets it at `CreateMachine` or with the data block form of the machine page.
+The field name and type do not change (ADR-0156 (g)).
 The field `db_number` is the default data block of the machine.
 The adapter uses `db_number` only for a parameter without `s7_address`.
 A parameter with `s7_address` keeps the data block of its address.

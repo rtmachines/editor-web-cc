@@ -47,16 +47,30 @@ pub(crate) const VERSION_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0
 /// `S7_1500` is the platform, because `S7_300` keeps the `DATE` end 72683 in both rule sets
 /// (ADR-0120).
 pub(crate) fn seed_date_world(world: &World, count: i64, state: VersionState) {
-    let machine_id = MachineId::from(MACHINE_ID);
+    let unit_id = seed_date_machine(world);
+    seed_date_type(world);
+    seed_date_recipe(world, state);
+    seed_date_parameter(world, unit_id, count);
+}
+
+/// Seed the machine `M30` and return the identifier of its unit.
+fn seed_date_machine(world: &World) -> UnitId {
     let unit_id = UnitId::from(Uuid::from_u128(0x7357_0012_0000_0000_0000_0000_001e_0001));
     let machine = Machine::create(
-        machine_id,
+        MachineId::from(MACHINE_ID),
         MachineCode::parse("M30").unwrap(),
         Text::parse("Dating line").unwrap(),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
+    unit_id
+}
+
+/// Seed the type `DATE` of `S7_1500`.
+fn seed_date_type(world: &World) {
     let primitive = Primitive::Date;
     let row = PlcType::try_from(PlcTypeRecord {
         id: PlcTypeId::from(DATE_TYPE_ID),
@@ -71,9 +85,13 @@ pub(crate) fn seed_date_world(world: &World, count: i64, state: VersionState) {
     })
     .unwrap();
     world.fixture.store.seed_type(&row);
+}
+
+/// Seed the recipe `R-400` with its version 1 in the state `state`.
+fn seed_date_recipe(world: &World, state: VersionState) {
     let recipe = Recipe::try_from(StoredRecipe {
         id: RecipeId::from(RECIPE_ID),
-        machine: machine_id,
+        machine: MachineId::from(MACHINE_ID),
         reference: ReferenceNumber::parse("R-400").unwrap(),
         name: Text::parse("Dating recipe").unwrap(),
         deleted_at: None,
@@ -90,6 +108,10 @@ pub(crate) fn seed_date_world(world: &World, count: i64, state: VersionState) {
         .fixture
         .store
         .seed_recipe(&recipe, PlcPlatform::S7_1500, creator);
+}
+
+/// Seed the parameter `DUE` with the stored count `count` into the version 1.
+fn seed_date_parameter(world: &World, unit_id: UnitId, count: i64) {
     let parameter = StoredParameter {
         id: ParameterId::from(DUE_ID),
         key: ParameterKey::from(DUE_ID),

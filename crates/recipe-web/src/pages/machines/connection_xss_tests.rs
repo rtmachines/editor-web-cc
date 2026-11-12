@@ -32,12 +32,11 @@ const IEC_FIELDS: [(&str, &str); 7] = [
     ("password", "S3cret-PLC"),
 ];
 /// A valid form of the S7 machine `M7`. A test replaces the host.
-const S7_FIELDS: [(&str, &str); 5] = [
+const S7_FIELDS: [(&str, &str); 4] = [
     ("row_version", "0"),
     ("host", "10.0.0.5"),
     ("rack", "0"),
     ("slot", "2"),
-    ("db_number", "1"),
 ];
 
 /// Return the form body of `fields` with the value of `field` replaced by `value`.

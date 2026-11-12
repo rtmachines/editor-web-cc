@@ -19,7 +19,7 @@ use crate::test_support::{Fixture, post_fields};
 /// The path of the connection route of the S7 machine `M7`.
 const SAVE_PATH: &str = "/machines/M7/connection";
 /// A valid save of `M7`.
-const S7_BODY: &str = "row_version=0&host=10.0.0.5&rack=0&slot=2&db_number=1";
+const S7_BODY: &str = "row_version=0&host=10.0.0.5&rack=0&slot=2";
 /// The stale-save sentence in English (`reliability.md` section 1.2, `E-WEB-013`).
 const STALE_SENTENCE: &str = "Another user changed the connection settings of machine M7.";
 

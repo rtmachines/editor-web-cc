@@ -62,7 +62,6 @@ struct ConnectionFormView {
     host: String,
     rack: String,
     slot: String,
-    db_number: String,
     port: String,
     address: String,
     modes: Vec<ModeOption>,
@@ -87,7 +86,6 @@ pub(super) struct InputTexts {
     pub(super) host: String,
     pub(super) rack: String,
     pub(super) slot: String,
-    pub(super) db_number: String,
     pub(super) port: String,
     pub(super) address: String,
     pub(super) mode: String,
@@ -99,16 +97,10 @@ impl InputTexts {
     fn of(connection: Option<&PlcConnection>) -> Self {
         match connection {
             None => Self::default(),
-            Some(PlcConnection::S7 {
-                host,
-                rack,
-                slot,
-                db_number,
-            }) => Self {
+            Some(PlcConnection::S7 { host, rack, slot }) => Self {
                 host: host.to_string(),
                 rack: rack.value().to_string(),
                 slot: slot.value().to_string(),
-                db_number: db_number.value().to_string(),
                 ..Self::default()
             },
             Some(PlcConnection::Iec {
@@ -156,7 +148,6 @@ impl ConnectionFormView {
             host: stored.host,
             rack: stored.rack,
             slot: stored.slot,
-            db_number: stored.db_number,
             port: stored.port,
             address: stored.address,
             modes,
@@ -185,7 +176,6 @@ impl ConnectionFormView {
             host: texts.host,
             rack: texts.rack,
             slot: texts.slot,
-            db_number: texts.db_number,
             port: texts.port,
             address: texts.address,
             mode: texts.mode,
@@ -210,7 +200,7 @@ impl ConnectionFormView {
 }
 
 /// The inputs of the S7 shape of the form, by their `id`.
-const S7_INPUTS: [&str; 4] = ["host", "rack", "slot", "db_number"];
+const S7_INPUTS: [&str; 3] = ["host", "rack", "slot"];
 /// The inputs of the IEC shape of the form, by their `id`.
 const IEC_INPUTS: [&str; 6] = ["host", "port", "address", "comm_mode", "login", "password"];
 

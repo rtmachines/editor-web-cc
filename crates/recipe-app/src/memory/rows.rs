@@ -2,7 +2,7 @@
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
-    MachineCode, MachineId, PlantError, PlcPlatform, PlcType, UnitId, UnitPath,
+    DataBlockNumber, MachineCode, MachineId, PlantError, PlcPlatform, PlcType, UnitId, UnitPath,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -16,6 +16,7 @@ pub(crate) struct MachineRow {
     pub(crate) code: MachineCode,
     pub(crate) name: Text,
     pub(crate) platform: PlcPlatform,
+    pub(crate) db_number: Option<DataBlockNumber>,
     pub(crate) archived_at: Option<Timestamp>,
     pub(crate) created_at: Timestamp,
     pub(crate) updated_at: Timestamp,

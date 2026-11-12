@@ -172,6 +172,9 @@ fn units(platform: PlcPlatform) -> LiveUnits {
         code: MachineCode::parse("M12").unwrap(),
         name: Text::parse("Filler 2").unwrap(),
         platform,
+        db_number: platform
+            .max_data_block()
+            .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         archived_at: None,
         units: ["U1", "U1.2"].map(unit).to_vec(),
     })

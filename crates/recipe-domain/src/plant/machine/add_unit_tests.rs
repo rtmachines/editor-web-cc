@@ -15,8 +15,10 @@ pub(super) fn new_machine() -> Machine {
         code(),
         name("Press"),
         PlcPlatform::TwinCat3,
+        None,
         (uid(1), name("Main")),
     )
+    .unwrap()
 }
 
 fn archived_machine() -> Machine {
@@ -25,6 +27,7 @@ fn archived_machine() -> Machine {
         code: code(),
         name: name("Press"),
         platform: PlcPlatform::TwinCat3,
+        db_number: None,
         archived_at: Some(ts(5)),
         units: vec![],
     };

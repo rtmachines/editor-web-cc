@@ -1,7 +1,9 @@
 //! The use case `CreateMachine` (`domain-model.md` section 5.1, `data-model.md` section 6).
 
 use recipe_domain::audit::{AuditContext, AuditEntry, AuditTarget, RowAction, RowChange};
-use recipe_domain::plant::{Machine, MachineCode, MachineId, PlantError, PlcPlatform, UnitId};
+use recipe_domain::plant::{
+    DataBlockNumber, Machine, MachineCode, MachineId, PlantError, PlcPlatform, UnitId,
+};
 use recipe_domain::text::Text;
 use uuid::Uuid;
 
@@ -19,6 +21,8 @@ pub struct CreateMachineInput {
     pub name: Text,
     /// The PLC platform of the new machine. It never changes (I21).
     pub platform: PlcPlatform,
+    /// The data block number. An S7 platform needs it and an IEC platform has none (ADR-0156).
+    pub db_number: Option<DataBlockNumber>,
     /// The name of the main unit `U1`.
     pub main_unit_name: Text,
 }
@@ -58,6 +62,8 @@ impl CreateMachine {
     /// # Errors
     ///
     /// Returns `Forbidden` when the role lacks `MachineManage`.
+    /// Returns `PlantError::DataBlockMissing` (`E-PLT-050`), `DataBlockNotOnPlatform` (`E-PLT-051`),
+    /// or `DataBlockOutOfRange` (`E-PLT-024`) before the transaction opens.
     /// Returns `PlantError::DuplicateMachineCode` (`E-PLT-001`) when a live machine has the code.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
@@ -78,8 +84,9 @@ impl CreateMachine {
             code,
             input.name,
             input.platform,
+            input.db_number,
             (output.main_unit, input.main_unit_name),
-        );
+        )?;
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;
         let inserted = tx.plant().insert_machine(&machine).await.map_err(|error| {
             map_storage(error, |constraint| {

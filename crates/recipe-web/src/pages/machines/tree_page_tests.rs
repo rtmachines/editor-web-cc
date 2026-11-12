@@ -430,7 +430,7 @@ async fn machines_tree_of_an_archived_machine_has_no_link_and_no_button_to_add()
 async fn machines_tree_escapes_the_name_of_a_unit() {
     let world = world();
     let payload = "<img src=x onerror=alert(1)>";
-    let body = "code=M95&name=Line&plc_platform=S7_300&main_unit_name=%3Cimg+src%3Dx+onerror%3Dalert(1)%3E";
+    let body = "code=M95&name=Line&plc_platform=S7_300&db_number=1&main_unit_name=%3Cimg+src%3Dx+onerror%3Dalert(1)%3E";
     let created = world.post(&world.engineer, "/machines", body, false).await;
     assert_eq!(created.status, StatusCode::SEE_OTHER, "{}", created.body);
     for path in ["/machines/M95", "/machines/M95/units"] {

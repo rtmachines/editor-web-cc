@@ -86,8 +86,10 @@ fn machine(number: u16, text: &str) -> Machine {
         MachineCode::parse(&format!("M{number}")).unwrap(),
         name(text),
         PlcPlatform::TwinCat3,
+        None,
         (unit_id(number, 0), name("Infeed")),
     )
+    .unwrap()
 }
 
 /// Build `M30`: the main unit `U1` with the 64 live units `U1.1` to `U1.64` under it.

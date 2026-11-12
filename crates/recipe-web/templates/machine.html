@@ -4,6 +4,7 @@
 {% import "components/alert.html" as alerts %}
 {% import "components/danger.html" as dangers %}
 {% import "components/field.html" as fields %}
+{#- The block data_block_form renders alone as the out-of-band form of the data block answers (ADR-0041 (e)). Its input is required, because a live S7 machine always has a number. -#}
 {#- The block rename_form renders alone as the out-of-band form of the rename answers (ADR-0041 (e) and (h)). It stands outside the test of live, because form.shown is true only for a live machine. -#}
 {% block content %}
 {{ headings::h1(layout, layout.title) }}
@@ -17,7 +18,11 @@
 <dd><span id="machine-name">{{ name }}</span></dd>
 <dt>{{ t.get("field-plc-platform") }}</dt>
 <dd>{{ platform }}</dd>
-{% if let Some(when) = archived_at %}<dt>{{ t.get("machine-archived-at") }}</dt>
+{% if let Some(number) = db_number %}<dt>{{ t.get("field-db-number") }}</dt>
+<dd class="data"><span id="machine-db-number">{{ number }}</span></dd>
+{% else if is_s7 %}<dt>{{ t.get("field-db-number") }}</dt>
+<dd>{{ t.get("machine-db-number-none") }}</dd>
+{% endif %}{% if let Some(when) = archived_at %}<dt>{{ t.get("machine-archived-at") }}</dt>
 <dd class="data">{{ when }}</dd>
 {% endif %}</dl>
 <h2>{{ t.get("machine-connection-title") }}</h2>
@@ -37,6 +42,11 @@
 <input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
 {{ fields::named(t, "machine_name", "name", t.get("field-machine-name"), String::new(), "text", true, false, 200, "off", form.name, form.errors.lines("machine_name")) }}
 <p class="actions"><button type="submit" id="machine-rename-submit">{{ t.get("machine-rename-submit") }}</button></p>
+</form>
+{% endif %}{% endblock %}{% block data_block_form %}{% if data_block_form.shown %}<form id="machine-data-block-form" method="post" action="{{ data_block_form.action }}" hx-boost="true" hx-target="#machine-db-number" hx-swap="innerHTML" hx-push-url="false" hx-sync="closest form:drop"{% if data_block_form.oob %} hx-swap-oob="true"{% endif %}>
+<input type="hidden" name="csrf_token" value="{{ data_block_form.csrf_token }}">
+{{ fields::named(t, "db_number", "db_number", t.get("field-db-number"), data_block_form.hint(t), "text", true, true, 5, "off", data_block_form.db_number, data_block_form.errors.lines("db_number")) }}
+<p class="actions"><button type="submit" id="machine-data-block-submit">{{ t.get("machine-data-block-submit") }}</button></p>
 </form>
 {% endif %}{% endblock %}{% if can_archive %}{{ dangers::danger(t, t.get("machine-archive-summary"), t.with_arg("machine-archive-warning", "code", code), t.with_arg("machine-archive-submit", "code", code), archive_action, layout.csrf_token) }}
 {% endif %}<p><a class="target-link" href="/machines">{{ t.get("machines-title") }}</a></p>

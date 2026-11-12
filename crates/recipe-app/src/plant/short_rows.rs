@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use recipe_domain::audit::AuditEntry;
-use recipe_domain::plant::{Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage};
+use recipe_domain::plant::{
+    DataBlockNumber, Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage,
+};
 use recipe_domain::text::Text;
 
 use crate::context::AppContext;
@@ -163,6 +165,14 @@ impl PlantRepository for ShortRowsTransaction {
         name: &Text,
     ) -> Result<RowImage, StorageError> {
         self.inner.plant().rename_machine(id, name).await
+    }
+
+    async fn set_machine_data_block(
+        &mut self,
+        id: MachineId,
+        number: DataBlockNumber,
+    ) -> Result<RowImage, StorageError> {
+        self.inner.plant().set_machine_data_block(id, number).await
     }
 
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {

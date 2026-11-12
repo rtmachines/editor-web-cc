@@ -19,7 +19,7 @@ const FORM_START: &str = "<form id=\"connection-form\" ";
 /// The attribute that swaps the form out of band (ADR-0041 (e)).
 const OOB: &str = " hx-swap-oob=\"true\"";
 /// A body for the S7 machine `M7` with a bad host and a rack of 8.
-const S7_BAD_BODY: &str = "row_version=0&host=-bad-&rack=8&slot=2&db_number=1";
+const S7_BAD_BODY: &str = "row_version=0&host=-bad-&rack=8&slot=2";
 /// A secret that a test types into the password field.
 const SECRET: &str = "S3cret-PLC";
 
@@ -52,7 +52,7 @@ async fn post(world: &World, machine: &str, body: &str) -> crate::test_support::
 async fn a_bad_host_gives_one_422_with_one_line_under_the_host() {
     let world = world();
     let before = world.fixture.snapshot();
-    let body = "row_version=0&host=-bad-&rack=0&slot=2&db_number=1";
+    let body = "row_version=0&host=-bad-&rack=0&slot=2";
     let reply = post(&world, "M7", body).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
@@ -80,7 +80,7 @@ async fn a_bad_host_gives_one_422_with_one_line_under_the_host() {
 #[tokio::test]
 async fn a_rack_of_8_gives_one_422_with_one_line_under_the_rack() {
     let world = world();
-    let body = "row_version=0&host=10.0.0.5&rack=8&slot=2&db_number=1";
+    let body = "row_version=0&host=10.0.0.5&rack=8&slot=2";
     let reply = post(&world, "M7", body).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
@@ -217,7 +217,7 @@ async fn a_port_on_an_s7_1500_machine_gives_one_422_e_plt_022_in_the_summary() {
     let world = world();
     seed(&world, 105, PlcPlatform::S7_1500);
     let before = world.fixture.snapshot();
-    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&db_number=1&port=4840";
+    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&port=4840";
     let reply = post(&world, "M105", body).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-022");
     assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
@@ -233,23 +233,11 @@ async fn a_port_on_an_s7_1500_machine_gives_one_422_e_plt_022_in_the_summary() {
 async fn every_fault_of_the_domain_is_a_line_of_the_same_answer() {
     let world = world();
     // An S7 machine with a port, an address, and a login: three faults in one answer.
-    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&db_number=1&port=4840&address=a&login=b";
+    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&port=4840&address=a&login=b";
     let reply = post(&world, "M7", body).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-022");
     assert!(reply.body.contains("Errors: 3."), "{}", reply.body);
     assert_eq!(summary_lines(&reply.body), 3, "{}", reply.body);
-}
-
-#[tokio::test]
-async fn a_data_block_above_the_limit_puts_e_plt_024_under_the_data_block() {
-    let world = world();
-    let body = "row_version=0&host=10.0.0.5&rack=0&slot=1&db_number=16001";
-    let reply = post(&world, "M7", body).await;
-    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-024");
-    assert!(reply.body.contains("href=\"#db_number\""), "{}", reply.body);
-    let form = oob_form(&reply.body);
-    assert_line_under(form, "db_number", "E-PLT-024");
-    assert!(form.contains("value=\"16001\""), "{form}");
 }
 
 #[tokio::test]
@@ -293,7 +281,7 @@ async fn an_unknown_or_repeated_key_gives_one_line_and_no_out_of_band_form() {
     let world = world();
     for body in [
         format!("{S7_BAD_BODY}&extra=1"),
-        "row_version=0&host=10.0.0.5&host=10.0.0.6&rack=0&slot=2&db_number=1".to_owned(),
+        "row_version=0&host=10.0.0.5&host=10.0.0.6&rack=0&slot=2".to_owned(),
         "row_version=0&host=10.0.0.5&rack%5B%5D=0".to_owned(),
     ] {
         let reply = post(&world, "M7", &body).await;

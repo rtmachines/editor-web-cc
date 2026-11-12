@@ -194,6 +194,13 @@ fn overlap_parameter(
 /// `ST_Bytes@1` the size 4, so the version had no overlap when it was approved. The current layout
 /// gives the size 6, and the struct then shares the byte 4 with `MODE`.
 fn seed_overlap_world(world: &World) {
+    let (machine_id, unit_id) = seed_overlap_machine(world);
+    let bytes = seed_bytes_struct(world, machine_id);
+    seed_overlap_recipe(world, (machine_id, unit_id), bytes);
+}
+
+/// Seed the machine `M32` and return its identifier with the identifier of its unit.
+fn seed_overlap_machine(world: &World) -> (MachineId, UnitId) {
     let machine_id = MachineId::from(Uuid::from_u128(0x7357_0001_0000_0000_0000_0000_0000_0020));
     let unit_id = UnitId::from(Uuid::from_u128(0x7357_0012_0000_0000_0000_0000_0020_0001));
     let machine = Machine::create(
@@ -201,9 +208,16 @@ fn seed_overlap_world(world: &World) {
         MachineCode::parse("M32").unwrap(),
         Text::parse("Byte line").unwrap(),
         PlcPlatform::S7_1500,
+        Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
         (unit_id, Text::parse("Infeed").unwrap()),
-    );
+    )
+    .unwrap();
     world.fixture.store.seed_machine(&machine);
+    (machine_id, unit_id)
+}
+
+/// Seed the four primitive rows and the struct `ST_Bytes@1`. Return the struct identifier.
+fn seed_bytes_struct(world: &World, machine_id: MachineId) -> PlcTypeId {
     let mut members = Vec::new();
     for (n, (name, primitive)) in (1_u128..).zip(BYTES_MEMBERS) {
         world
@@ -231,6 +245,15 @@ fn seed_overlap_world(world: &World) {
         .fixture
         .store
         .seed_type(&PlcType::try_from(record).unwrap());
+    bytes
+}
+
+/// Seed the approved version 1 of `R-420` and its two parameters.
+fn seed_overlap_recipe(
+    world: &World,
+    (machine_id, unit_id): (MachineId, UnitId),
+    bytes: PlcTypeId,
+) {
     let recipe = Recipe::try_from(StoredRecipe {
         id: RecipeId::from(Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0000_0420)),
         machine: machine_id,

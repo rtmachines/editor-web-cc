@@ -5,7 +5,8 @@
 //! `test_support::plant` (design D20 U13). This file keeps only what the machine pages alone need.
 
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, UnitId, UnitPath, UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit,
+    UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -37,11 +38,13 @@ fn machine(number: u32, name: &str) -> Machine {
         MachineCode::parse(&format!("M{number}")).unwrap(),
         Text::parse(name).unwrap(),
         PlcPlatform::TwinCat3,
+        None,
         (
             UnitId::from(id_of(UNIT_TAG, number)),
             Text::parse("Infeed").unwrap(),
         ),
     )
+    .unwrap()
 }
 
 /// Seed `count` live machines with the codes `M101`, `M102`, and so on, all with one name.
@@ -73,6 +76,62 @@ pub(super) fn seed_machine_with_archived_unit(fixture: &Fixture) {
         .archive_unit(&spare, at, &UnitUsage::default())
         .unwrap();
     fixture.store.seed_machine(&machine);
+}
+
+/// Seed the live machine `M<number>` with the platform and the optional data block number.
+pub(super) fn seed_live_machine(
+    fixture: &Fixture,
+    number: u32,
+    platform: PlcPlatform,
+    db_number: Option<&str>,
+) {
+    let created = Machine::create(
+        MachineId::from(id_of(MACHINE_TAG, number)),
+        MachineCode::parse(&format!("M{number}")).unwrap(),
+        Text::parse("Live line").unwrap(),
+        platform,
+        db_number.map(|text| DataBlockNumber::parse(text).unwrap()),
+        (
+            UnitId::from(id_of(UNIT_TAG, number)),
+            Text::parse("Infeed").unwrap(),
+        ),
+    );
+    fixture.store.seed_machine(&created.unwrap());
+}
+
+/// Return the path of the page `GET /machines/by-id/{uuid}` of the machine `M<number>`.
+pub(super) fn by_id_path(number: u32) -> String {
+    format!("/machines/by-id/{}", id_of(MACHINE_TAG, number))
+}
+
+/// Seed the archived machine `M<number>` with the platform and the optional data block number.
+///
+/// The stored record is the only way to build an archived S7 machine without a number (ADR-0156).
+pub(super) fn seed_archived_machine(
+    fixture: &Fixture,
+    number: u32,
+    platform: PlcPlatform,
+    db_number: Option<&str>,
+) {
+    let stored = StoredMachine {
+        id: MachineId::from(id_of(MACHINE_TAG, number)),
+        code: MachineCode::parse(&format!("M{number}")).unwrap(),
+        name: Text::parse("Retired line").unwrap(),
+        platform,
+        db_number: db_number.map(|text| DataBlockNumber::parse(text).unwrap()),
+        archived_at: Some(Timestamp::from(
+            OffsetDateTime::from_unix_timestamp(ARCHIVED_AT_SECONDS).unwrap(),
+        )),
+        units: vec![StoredUnit {
+            id: UnitId::from(id_of(UNIT_TAG, number)),
+            path: UnitPath::parse("U1").unwrap(),
+            name: Text::parse("Infeed").unwrap(),
+            archived_at: None,
+        }],
+    };
+    fixture
+        .store
+        .seed_machine(&Machine::try_from(stored).unwrap());
 }
 
 /// Return the row of the table that holds `needle`.

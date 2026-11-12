@@ -41,77 +41,61 @@ fn limit_word(limit: TypeLimit) -> LineArg {
     }
 }
 
+/// Pair an argument name with the text of its value.
+fn kv(name: &'static str, value: &impl std::fmt::Display) -> (&'static str, String) {
+    (name, value.to_string())
+}
+
 /// Return the fields of the error that are data: the name of the argument and its text.
 ///
 /// The match has no wildcard, so a new variant of `PlantError` stops the build here.
 fn data_fields(error: &PlantError) -> Vec<(&'static str, String)> {
+    use PlantError as E;
     match error {
-        PlantError::UnitDepthExceeded { path } => vec![("path", path.clone())],
-        PlantError::ParentNotFound { path }
-        | PlantError::DuplicateUnitPath { path }
-        | PlantError::UnitArchived { path }
-        | PlantError::UnitNotFound { path } => vec![("path", path.to_string())],
-        PlantError::DuplicateMachineCode { code }
-        | PlantError::MachineArchived { code }
-        | PlantError::MachineNotFound { code } => vec![("code", code.to_string())],
-        PlantError::LastMainUnit { code, path } => {
-            vec![("code", code.to_string()), ("path", path.to_string())]
+        E::UnitDepthExceeded { path } => vec![kv("path", path)],
+        E::ParentNotFound { path }
+        | E::DuplicateUnitPath { path }
+        | E::UnitArchived { path }
+        | E::UnitNotFound { path } => vec![kv("path", path)],
+        E::DuplicateMachineCode { code }
+        | E::MachineArchived { code }
+        | E::MachineNotFound { code }
+        | E::ConnectionNotConfigured { code }
+        | E::DataBlockMissing { code, .. }
+        | E::DataBlockNotOnPlatform { code, .. } => vec![kv("code", code)],
+        E::LastMainUnit { code, path } => vec![kv("code", code), kv("path", path)],
+        E::MachineHasDraft { code, reference }
+        | E::ConnectionRecipeMismatch { code, reference } => {
+            vec![kv("code", code), kv("reference", reference)]
         }
-        PlantError::MachineHasDraft { code, reference } => {
-            vec![
-                ("code", code.to_string()),
-                ("reference", reference.to_string()),
-            ]
+        E::UnitReferencedByDraft { path, reference }
+        | E::UnitReferencedByApproved { path, reference } => {
+            vec![kv("path", path), kv("reference", reference)]
         }
-        PlantError::UnitReferencedByDraft { path, reference }
-        | PlantError::UnitReferencedByApproved { path, reference } => {
-            vec![
-                ("path", path.to_string()),
-                ("reference", reference.to_string()),
-            ]
-        }
-        PlantError::TypeCycle { type_name }
-        | PlantError::DuplicateTypeName { type_name }
-        | PlantError::StructHasNoMembers { type_name } => {
-            vec![("type_name", type_name.to_string())]
-        }
-        PlantError::MemberTypeNotOnPlatform {
+        E::TypeCycle { type_name }
+        | E::DuplicateTypeName { type_name }
+        | E::StructHasNoMembers { type_name } => vec![kv("type_name", type_name)],
+        E::TypeTooLarge { type_name, .. } => vec![kv("type_name", type_name)],
+        E::MemberTypeNotOnPlatform {
             type_name, member, ..
         }
-        | PlantError::DuplicateMemberName { type_name, member } => {
-            vec![
-                ("type_name", type_name.to_string()),
-                ("member", member.to_string()),
-            ]
+        | E::DuplicateMemberName { type_name, member } => {
+            vec![kv("type_name", type_name), kv("member", member)]
         }
-        PlantError::TypeTooLarge { type_name, .. } => vec![("type_name", type_name.clone())],
-        PlantError::DerivedTypeInvalid { type_expr, .. } => vec![("type_expr", type_expr.clone())],
-        PlantError::InvalidUnitPath { text } => vec![("text", text.clone())],
-        PlantError::ConnectionFieldNotOnPlatform { code, field, .. }
-        | PlantError::ConnectionFieldMissing { code, field } => {
-            vec![("code", code.to_string()), ("field", (*field).to_owned())]
+        E::DerivedTypeInvalid { type_expr, .. } => vec![kv("type_expr", type_expr)],
+        E::InvalidUnitPath { text } => vec![kv("text", text)],
+        E::ConnectionFieldNotOnPlatform { code, field, .. }
+        | E::ConnectionFieldMissing { code, field } => {
+            vec![kv("code", code), kv("field", field)]
         }
-        PlantError::ConnectionDataBlockOutOfRange { code, number, max } => vec![
-            ("code", code.to_string()),
-            ("number", number.to_string()),
-            ("max", max.to_string()),
-        ],
-        PlantError::CommModeNotOnPlatform { code, mode, .. } => {
-            vec![("code", code.to_string()), ("mode", mode.to_string())]
+        E::DataBlockOutOfRange { code, number, max } => {
+            vec![kv("code", code), kv("number", number), kv("max", max)]
         }
-        PlantError::AddressNotAmsNetId { code, address } => {
-            vec![("code", code.to_string()), ("address", address.to_string())]
+        E::CommModeNotOnPlatform { code, mode, .. } => vec![kv("code", code), kv("mode", mode)],
+        E::AddressNotAmsNetId { code, address } => vec![kv("code", code), kv("address", address)],
+        E::ConnectionFieldNotInMode { code, field, mode } => {
+            vec![kv("code", code), kv("field", field), kv("mode", mode)]
         }
-        PlantError::ConnectionNotConfigured { code } => vec![("code", code.to_string())],
-        PlantError::ConnectionFieldNotInMode { code, field, mode } => vec![
-            ("code", code.to_string()),
-            ("field", (*field).to_owned()),
-            ("mode", mode.to_string()),
-        ],
-        PlantError::ConnectionRecipeMismatch { code, reference } => vec![
-            ("code", code.to_string()),
-            ("reference", reference.to_string()),
-        ],
     }
 }
 
@@ -124,7 +108,9 @@ pub(super) fn plant_line_args(error: &PlantError) -> Vec<(&'static str, LineArg)
     match error {
         PlantError::MemberTypeNotOnPlatform { platform, .. }
         | PlantError::ConnectionFieldNotOnPlatform { platform, .. }
-        | PlantError::CommModeNotOnPlatform { platform, .. } => {
+        | PlantError::CommModeNotOnPlatform { platform, .. }
+        | PlantError::DataBlockMissing { platform, .. }
+        | PlantError::DataBlockNotOnPlatform { platform, .. } => {
             args.push(("platform", LineArg::word(platform_key(*platform), platform)));
         }
         PlantError::TypeTooLarge { limit, .. } => args.push(("limit", limit_word(*limit))),

@@ -98,8 +98,10 @@ fn large_machine() -> Machine {
         MachineCode::parse("M40").unwrap(),
         text("Warehouse"),
         PlcPlatform::TwinCat3,
+        None,
         (unit_id(1), text("Unit 1")),
-    );
+    )
+    .unwrap();
     for unit in 2..=UNITS {
         machine
             .add_unit(

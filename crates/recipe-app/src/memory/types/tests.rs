@@ -46,6 +46,7 @@ fn machine(n: u128, code: &str) -> Machine {
         MachineCode::parse(code).unwrap(),
         Text::parse("Press").unwrap(),
         PlcPlatform::TwinCat3,
+        None,
         (
             UnitId::from(Uuid::from_u128(
                 n.checked_mul(100).unwrap().checked_add(1).unwrap(),
@@ -53,6 +54,7 @@ fn machine(n: u128, code: &str) -> Machine {
             Text::parse("Main").unwrap(),
         ),
     )
+    .unwrap()
 }
 
 /// A store with the global primitive rows and the machines M1 and M2.

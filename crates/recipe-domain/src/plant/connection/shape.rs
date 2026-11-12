@@ -1,8 +1,8 @@
 //! Platform shape of a PLC connection (ADR-0154, design decision D3).
 
 use super::{
-    AmsNetId, CommMode, ConnectionFields, DataBlockNumber, PasswordPlan, PasswordState, PlcAddress,
-    PlcHost, PlcLogin, PlcPassword, Rack, Slot, TcpPort,
+    AmsNetId, CommMode, ConnectionFields, PasswordPlan, PasswordState, PlcAddress, PlcHost,
+    PlcLogin, PlcPassword, Rack, Slot, TcpPort,
 };
 use crate::plant::{MachineCode, PlantError, PlantErrors, PlcPlatform};
 
@@ -17,8 +17,6 @@ pub enum PlcConnection {
         rack: Rack,
         /// Slot of the PLC.
         slot: Slot,
-        /// Default data block of the machine.
-        db_number: DataBlockNumber,
     },
     /// A PLC with an IEC 61131-3 runtime.
     Iec {
@@ -107,20 +105,6 @@ impl Faults {
             });
         }
         value
-    }
-
-    /// Record `E-PLT-024` when the data block number is above the limit of the platform.
-    fn check_data_block(&mut self, number: DataBlockNumber) {
-        let Some(max) = self.platform.max_data_block() else {
-            return;
-        };
-        if number.value() > max {
-            self.errors.push(PlantError::ConnectionDataBlockOutOfRange {
-                code: self.machine,
-                number: number.value(),
-                max,
-            });
-        }
     }
 
     /// Record `E-PLT-025` when the platform does not permit the mode.
@@ -225,21 +209,11 @@ fn s7_plan(faults: &mut Faults, fields: ConnectionFields) -> Option<ConnectionPl
     let host = faults.require("host", fields.host);
     let rack = faults.require("rack", fields.rack);
     let slot = faults.require("slot", fields.slot);
-    let db_number = faults.require("db_number", fields.db_number);
-    if let Some(number) = db_number {
-        faults.check_data_block(number);
-    }
-    let (Some(host), Some(rack), Some(slot), Some(db_number)) = (host, rack, slot, db_number)
-    else {
+    let (Some(host), Some(rack), Some(slot)) = (host, rack, slot) else {
         return None;
     };
     Some(ConnectionPlan {
-        connection: PlcConnection::S7 {
-            host,
-            rack,
-            slot,
-            db_number,
-        },
+        connection: PlcConnection::S7 { host, rack, slot },
         password: None,
     })
 }
@@ -280,7 +254,6 @@ fn iec_plan(
     faults.refuse_on_platform(&[
         ("rack", fields.rack.is_some()),
         ("slot", fields.slot.is_some()),
-        ("db_number", fields.db_number.is_some()),
     ]);
     let host = faults.require("host", fields.host);
     let port = faults.require("port", fields.port);

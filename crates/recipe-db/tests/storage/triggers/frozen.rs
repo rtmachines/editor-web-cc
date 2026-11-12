@@ -29,7 +29,7 @@ async fn set_machine_platform(
     conn: &mut PgConnection,
     machine: Uuid,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
-    sqlx::query("UPDATE machine SET plc_platform = 'S7_300' WHERE id = $1")
+    sqlx::query("UPDATE machine SET plc_platform = 'S7_300', db_number = 1 WHERE id = $1")
         .bind(machine)
         .execute(conn)
         .await
