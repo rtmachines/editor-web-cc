@@ -53,7 +53,7 @@
 
 ## 7. End-to-end suite and operator documents
 
-- [ ] 7.1 (e2e) [mechanical] Fill `db_number` for each S7 machine in `e2e/tests/support/pages.ts` and `e2e/tests/jcs.spec.ts`. Check: `cd e2e && npm test` passes on the dev stack.
+- [x] 7.1 (e2e) [mechanical] Fill `db_number` for each S7 machine in `e2e/tests/support/pages.ts`. `e2e/tests/jcs.spec.ts` creates no machine and needs no change. Check: the Playwright job passed on main at ea3b782 and ea06f51.
 - [x] 7.2 (docs/ops) Add a query before the upgrade to `docs/ops/runbook.md`. It lists each live S7 machine without a record. Also add the rollback limit of design D2. Check: `ste-lint.py` and the query on the dev stack.
 - [x] 7.3 (docs/ops) Name the machine as the source of `db_number` in `docs/ops/transfer-client.md`. Add the change to `CHANGELOG.md`. Check: `ste-lint.py`.
 - [x] 7.4 (docs/user) Add the data block field to the machine steps of `docs/user/tutorial-first-recipe.md` and `docs/user/reference-screens.md`. Check: `ste-lint.py`.
