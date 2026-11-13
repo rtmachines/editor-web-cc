@@ -82,6 +82,8 @@ pub struct UnitForm {
     /// The live machine.
     pub machine: Machine,
     /// The live units of depth 1 to 4 in the order of the path. Each one can have a child.
+    /// The web form does not render this list. It shows the fixed parent instead (design D3 of the
+    /// change `ui-form-fixes`).
     pub parents: Vec<Unit>,
     /// The chosen parent, or `None` for a main unit.
     pub parent: Option<UnitPath>,
@@ -91,8 +93,9 @@ pub struct UnitForm {
 
 /// Prepares the form that adds a unit.
 ///
-/// The query solves one problem: the form must offer only the parents that can have a child and
-/// must propose a free segment. A segment of an archived unit stays in use, because the path of a
+/// The query returns the live parents that can have a child and proposes a free segment. The web
+/// form does not render the parent list. It shows the fixed parent instead (design D3 of the
+/// change `ui-form-fixes`). A segment of an archived unit stays in use, because the path of a
 /// unit never returns to the pool.
 #[derive(Clone)]
 pub struct GetUnitForm {

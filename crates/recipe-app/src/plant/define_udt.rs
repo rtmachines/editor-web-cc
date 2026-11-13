@@ -86,6 +86,7 @@ impl DefineUdt {
     /// Returns `PlantError::DuplicateTypeName` (`E-PLT-015`) when a new struct uses a name that exists in any letter case. The error names the stored spelling when the command finds the stored name in its read of the type rows. When a parallel command commits the other spelling first, the unique index refuses the row and the error names the input spelling.
     /// Returns `PlantError::MemberTypeNotOnPlatform` (`E-PLT-006`) for a member type that is not on the platform.
     /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) for any other bad member type.
+    /// Returns `PlantError::RevisionUnchanged` (`E-PLT-052`) when a revision has the members of the latest revision.
     /// Returns `PlantError::StructHasNoMembers` (`E-PLT-016`) or `DuplicateMemberName` (`E-PLT-021`).
     /// Returns `PlantError::TypeCycle` (`E-PLT-005`) or `TypeTooLarge` (`E-PLT-018`) for a bad tree.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
@@ -110,14 +111,15 @@ impl DefineUdt {
         let machine = require_live(locked, input.code)?.state;
         tx.types().lock_derived_types(machine_id, &keys).await?;
         let rows = tx.types().type_rows(machine_id).await?;
-        let (revision, supersedes) = next_revision(&rows, machine_id, &input)?;
+        let next = next_revision(&rows, machine_id, &input)?;
         let platform = machine.platform();
         let mut derived = DerivedTypes::new(machine_id, platform, rows, audit_context(user, meta));
         let members = ensure_members(&mut derived, tx.types(), &input, platform).await?;
+        ensure_changed(&input, next.latest.as_ref(), &members)?;
         let row = struct_row(
             &input,
             (machine_id, platform),
-            (revision, supersedes),
+            (next.number, next.supersedes),
             members,
         )?;
         check_tree(&derived, (machine_id, platform), &row)?;
@@ -130,7 +132,7 @@ impl DefineUdt {
             .await?;
         Ok(DefineUdtOutput {
             type_id: row.id(),
-            revision,
+            revision: next.number,
         })
     }
 }
@@ -231,33 +233,62 @@ fn udt_defined_entry(
     )
 }
 
-/// Return the revision of the new row and the row that it supersedes.
+/// The revision number of the new row, the row that it supersedes, and the latest revision.
+struct NextRevision {
+    /// The revision number of the new row.
+    number: u32,
+    /// The row that the new row supersedes. It is `None` for a new struct.
+    supersedes: Option<PlcTypeId>,
+    /// The number and the members of the latest revision. It is `None` for a new struct.
+    latest: Option<(u32, Vec<TypeMember>)>,
+}
+
+/// The latest struct row of the machine whose name matches the input, as a tuple.
 ///
-/// A new struct needs a name that no struct of the machine has in any letter case, and gets
-/// revision 1. The duplicate error names the stored spelling. A revision needs a used name in the
-/// exact case and gets the highest revision plus one (ADR-0143 (g), (j)).
-fn next_revision(
-    rows: &[PlcType],
+/// The tuple holds the revision, the row id, the stored name, and the members. A new struct matches
+/// a name in any letter case. A revision matches a name in the exact case.
+fn latest_struct_row<'a>(
+    rows: &'a [PlcType],
     machine: MachineId,
     input: &DefineUdtInput,
-) -> Result<(u32, Option<PlcTypeId>), AppError> {
+) -> Option<(u32, PlcTypeId, &'a TypeName, &'a [TypeMember])> {
     let same_name = |name: &TypeName| match input.mode {
         DefineUdtMode::New => name.as_str().eq_ignore_ascii_case(input.name.as_str()),
         DefineUdtMode::Revision => *name == input.name,
     };
-    let latest = rows
-        .iter()
+    rows.iter()
         .filter(|row| row.machine() == Some(machine))
         .filter_map(|row| match row.shape() {
-            RecordShape::Struct { name, revision, .. } if same_name(name) => {
-                Some((*revision, row.id(), name))
-            }
+            RecordShape::Struct {
+                name,
+                revision,
+                members,
+                ..
+            } if same_name(name) => Some((*revision, row.id(), name, members.as_slice())),
             _ => None,
         })
-        .max_by_key(|(revision, _, _)| *revision);
+        .max_by_key(|(revision, ..)| *revision)
+}
+
+/// Return the revision of the new row, the row that it supersedes, and the latest revision.
+///
+/// A new struct needs a name that no struct of the machine has in any letter case, and gets
+/// revision 1. The duplicate error names the stored spelling. A revision needs a used name in the
+/// exact case and gets the highest revision plus one (ADR-0143 (g), (j)). The result holds the
+/// members of the latest revision, so the use case reads the rows once (ADR-0159 (c)).
+fn next_revision(
+    rows: &[PlcType],
+    machine: MachineId,
+    input: &DefineUdtInput,
+) -> Result<NextRevision, AppError> {
+    let latest = latest_struct_row(rows, machine, input);
     match (input.mode, latest) {
-        (DefineUdtMode::New, None) => Ok((1, None)),
-        (DefineUdtMode::New, Some((_, _, stored))) => Err(PlantError::DuplicateTypeName {
+        (DefineUdtMode::New, None) => Ok(NextRevision {
+            number: 1,
+            supersedes: None,
+            latest: None,
+        }),
+        (DefineUdtMode::New, Some((_, _, stored, _))) => Err(PlantError::DuplicateTypeName {
             type_name: stored.clone(),
         }
         .into()),
@@ -267,15 +298,39 @@ fn next_revision(
                 name: input.name.clone(),
             },
         }),
-        (DefineUdtMode::Revision, Some((revision, id, _))) => {
+        (DefineUdtMode::Revision, Some((revision, id, _, members))) => {
             let next = revision
                 .checked_add(1)
                 .ok_or_else(|| PlantError::DerivedTypeInvalid {
                     type_expr: format!("{}@{revision}", input.name),
                     reason: DerivedTypeReason::RowShape,
                 })?;
-            Ok((next, Some(id)))
+            Ok(NextRevision {
+                number: next,
+                supersedes: Some(id),
+                latest: Some((revision, members.to_vec())),
+            })
         }
+    }
+}
+
+/// Refuse a revision whose members equal the members of the latest revision (ADR-0159 (b)).
+///
+/// The lists are equal when they have the same count and, at each position, the same member name in
+/// the exact case and the same type row. A new struct has no latest revision and passes.
+fn ensure_changed(
+    input: &DefineUdtInput,
+    latest: Option<&(u32, Vec<TypeMember>)>,
+    members: &[TypeMember],
+) -> Result<(), PlantError> {
+    match latest {
+        Some((revision, stored)) if stored.as_slice() == members => {
+            Err(PlantError::RevisionUnchanged {
+                type_name: input.name.clone(),
+                revision: *revision,
+            })
+        }
+        _ => Ok(()),
     }
 }
 
@@ -322,3 +377,5 @@ fn check_tree(
 mod name_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod unchanged_tests;

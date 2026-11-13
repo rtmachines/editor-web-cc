@@ -8,7 +8,7 @@
 <input type="hidden" name="row_version" value="{{ row.row_version }}">
 {{ fields::named(t, row.name_id, "name", t.with_arg("field-translation-name", "lang", row.lang), String::new(), "text", true, false, 200, "off", row.name, row.errors.lines(row.name_id.as_str()), row.lang) }}
 {{ fields::lines(t, row.description_id, "description", t.with_arg("field-translation-description", "lang", row.lang), String::new(), false, 4000, row.lang, row.description, row.errors.lines(row.description_id.as_str())) }}
-<p class="actions"><button type="submit" id="translation-{{ row.lang }}-save" class="btn btn-primary">{{ t.with_arg("translation-save-submit", "lang", row.lang) }}</button></p>
+<p class="actions"><button type="submit" id="translation-{{ row.lang }}-save" class="btn btn-primary">{{ t.with_arg("translation-save-submit", "lang", row.lang) }}</button><span class="htmx-indicator">{{ t.get("form-in-progress") }}</span></p>
 </form>{%- endmacro -%}
 {%- macro translation_row(t, row) -%}<div class="translation-row" id="translation-{{ row.lang }}">
 <h3{% if row.focus %} tabindex="-1" autofocus{% endif %}>{{ row.lang }}</h3>

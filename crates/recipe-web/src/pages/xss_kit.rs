@@ -11,8 +11,8 @@ use super::test_helpers::{
 use crate::components_tests::assert_fixed_svg_tags;
 use crate::test_support::{Reply, post_fields};
 
-/// The most `<script>` tags that an answer may hold. They are the three files of `base.html`.
-const MAX_SCRIPT_TAGS: usize = 3;
+/// The most `<script>` tags that an answer may hold. They are the four files of `base.html`.
+const MAX_SCRIPT_TAGS: usize = 4;
 /// The markup that a payload brings into a page. A page holds none of it.
 ///
 /// An `<svg` tag is not in the list. A page may hold the fixed icon tags of `design-system.md`
@@ -148,10 +148,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "4 scripts")]
-    fn assert_safe_refuses_an_answer_with_more_than_three_script_tags() {
-        let body = "<script src=\"a.js\"></script>".repeat(4);
-        assert_safe(&reply_of(&body), "x", "four scripts");
+    #[should_panic(expected = "5 scripts")]
+    fn assert_safe_refuses_an_answer_with_more_than_four_script_tags() {
+        let body = "<script src=\"a.js\"></script>".repeat(5);
+        assert_safe(&reply_of(&body), "x", "five scripts");
     }
 
     #[test]

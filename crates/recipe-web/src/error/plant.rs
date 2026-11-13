@@ -6,7 +6,7 @@
 
 use fluent::FluentArgs;
 use recipe_domain::plant::limits::{MAX_DEPTH, MAX_LEAVES, MAX_MEMBERS};
-use recipe_domain::plant::{DerivedTypeReason, PlantError, TypeLimit};
+use recipe_domain::plant::{DerivedTypeReason, PlantError, PlantError as E, TypeLimit};
 
 use super::LineArg;
 use crate::i18n::{Bundles, Lang};
@@ -41,60 +41,63 @@ fn limit_word(limit: TypeLimit) -> LineArg {
     }
 }
 
-/// Pair an argument name with the text of its value.
-fn kv(name: &'static str, value: &impl std::fmt::Display) -> (&'static str, String) {
-    (name, value.to_string())
+/// Pair argument names with the text of their values.
+fn kv<const N: usize>(
+    pairs: [(&'static str, &dyn std::fmt::Display); N],
+) -> Vec<(&'static str, String)> {
+    pairs.map(|(name, value)| (name, value.to_string())).into()
 }
 
 /// Return the fields of the error that are data: the name of the argument and its text.
 ///
 /// The match has no wildcard, so a new variant of `PlantError` stops the build here.
 fn data_fields(error: &PlantError) -> Vec<(&'static str, String)> {
-    use PlantError as E;
     match error {
-        E::UnitDepthExceeded { path } => vec![kv("path", path)],
+        E::UnitDepthExceeded { path } => kv([("path", path)]),
         E::ParentNotFound { path }
         | E::DuplicateUnitPath { path }
         | E::UnitArchived { path }
-        | E::UnitNotFound { path } => vec![kv("path", path)],
+        | E::UnitNotFound { path } => kv([("path", path)]),
         E::DuplicateMachineCode { code }
         | E::MachineArchived { code }
         | E::MachineNotFound { code }
         | E::ConnectionNotConfigured { code }
         | E::DataBlockMissing { code, .. }
-        | E::DataBlockNotOnPlatform { code, .. } => vec![kv("code", code)],
-        E::LastMainUnit { code, path } => vec![kv("code", code), kv("path", path)],
+        | E::DataBlockNotOnPlatform { code, .. } => kv([("code", code)]),
+        E::LastMainUnit { code, path } => kv([("code", code), ("path", path)]),
         E::MachineHasDraft { code, reference }
         | E::ConnectionRecipeMismatch { code, reference } => {
-            vec![kv("code", code), kv("reference", reference)]
+            kv([("code", code), ("reference", reference)])
         }
         E::UnitReferencedByDraft { path, reference }
         | E::UnitReferencedByApproved { path, reference } => {
-            vec![kv("path", path), kv("reference", reference)]
+            kv([("path", path), ("reference", reference)])
         }
         E::TypeCycle { type_name }
         | E::DuplicateTypeName { type_name }
-        | E::StructHasNoMembers { type_name } => vec![kv("type_name", type_name)],
-        E::TypeTooLarge { type_name, .. } => vec![kv("type_name", type_name)],
+        | E::StructHasNoMembers { type_name } => kv([("type_name", type_name)]),
+        E::TypeTooLarge { type_name, .. } => kv([("type_name", type_name)]),
+        E::RevisionUnchanged {
+            type_name,
+            revision,
+        } => kv([("type_name", type_name), ("revision", revision)]),
         E::MemberTypeNotOnPlatform {
             type_name, member, ..
         }
         | E::DuplicateMemberName { type_name, member } => {
-            vec![kv("type_name", type_name), kv("member", member)]
+            kv([("type_name", type_name), ("member", member)])
         }
-        E::DerivedTypeInvalid { type_expr, .. } => vec![kv("type_expr", type_expr)],
-        E::InvalidUnitPath { text } => vec![kv("text", text)],
+        E::DerivedTypeInvalid { type_expr, .. } => kv([("type_expr", type_expr)]),
+        E::InvalidUnitPath { text } => kv([("text", text)]),
         E::ConnectionFieldNotOnPlatform { code, field, .. }
-        | E::ConnectionFieldMissing { code, field } => {
-            vec![kv("code", code), kv("field", field)]
-        }
+        | E::ConnectionFieldMissing { code, field } => kv([("code", code), ("field", field)]),
         E::DataBlockOutOfRange { code, number, max } => {
-            vec![kv("code", code), kv("number", number), kv("max", max)]
+            kv([("code", code), ("number", number), ("max", max)])
         }
-        E::CommModeNotOnPlatform { code, mode, .. } => vec![kv("code", code), kv("mode", mode)],
-        E::AddressNotAmsNetId { code, address } => vec![kv("code", code), kv("address", address)],
+        E::CommModeNotOnPlatform { code, mode, .. } => kv([("code", code), ("mode", mode)]),
+        E::AddressNotAmsNetId { code, address } => kv([("code", code), ("address", address)]),
         E::ConnectionFieldNotInMode { code, field, mode } => {
-            vec![kv("code", code), kv("field", field), kv("mode", mode)]
+            kv([("code", code), ("field", field), ("mode", mode)])
         }
     }
 }

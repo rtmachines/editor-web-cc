@@ -12,8 +12,8 @@ use super::{Bundles, EN_SOURCE, Lang, PL_SOURCE};
 use crate::pages::Texts;
 use crate::test_support::{Fixture, get_with};
 
-/// The 18 codes of the plant errors that have a message in the bundles (design D13).
-const PLANT_CODES: [&str; 18] = [
+/// The 19 codes of the plant errors that have a message in the bundles (design D13).
+const PLANT_CODES: [&str; 19] = [
     "E-PLT-001",
     "E-PLT-002",
     "E-PLT-003",
@@ -32,6 +32,7 @@ const PLANT_CODES: [&str; 18] = [
     "E-PLT-017",
     "E-PLT-018",
     "E-PLT-021",
+    "E-PLT-052",
 ];
 
 #[test]

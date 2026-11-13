@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 use crate::canon::{Bare, Canon, canon, canon_whole};
 use crate::inputs::{Inputs, RELIABILITY};
 use crate::lines::{unquote, without_comment};
-use crate::rules::{check_required_keys, request_timeout_fits_drain, stop_sum_holds};
+use crate::rules::{
+    check_required_keys, htmx_timeout_exceeds_request_timeout, request_timeout_fits_drain,
+    stop_sum_holds,
+};
 use crate::table::{HEADING_SETTINGS, Table};
 use crate::topology::check_address_plan;
 
@@ -13,6 +16,7 @@ const DRAIN_ROW: &str = "| `shutdown.drain` / `app.stop_grace_period` | 30 s / 4
 const POOL_ROW: &str = "| `shutdown.pool_close` / `shutdown.runtime_stop` | 5 s / 3 s.";
 const INTERNAL_ROW: &str = "| `shutdown.internal_drain` | 0 s.";
 const REQUEST_ROW: &str = "| `http.request_timeout` | 30 s |";
+const HTMX_ROW: &str = "| `htmx.request_timeout` | 45 s.";
 
 /// The table 7.11 of the document after one change.
 fn settings_after(from: &str, to: &str) -> Table {
@@ -113,6 +117,40 @@ fn the_request_timeout_fits_the_drain_and_fails_above_it() {
         "| `http.request_timeout` | 29 s |",
     ));
     assert!(below.faults.is_empty(), "{}", below.message());
+}
+
+#[test]
+fn the_htmx_timeout_exceeds_the_request_timeout_strictly() {
+    // reliability.md 7.11 and ADR-0158 (j): 30 s is below 45 s.
+    assert!(
+        htmx_timeout_exceeds_request_timeout(&settings())
+            .faults
+            .is_empty()
+    );
+    // Equal values fail, because the rule is strict.
+    let equal = htmx_timeout_exceeds_request_timeout(&settings_after(
+        HTMX_ROW,
+        "| `htmx.request_timeout` | 30 s.",
+    ));
+    assert!(
+        equal.has_fault_for("htmx.request_timeout"),
+        "{}",
+        equal.message()
+    );
+    let below = htmx_timeout_exceeds_request_timeout(&settings_after(
+        HTMX_ROW,
+        "| `htmx.request_timeout` | 20 s.",
+    ));
+    assert!(
+        below.has_fault_for("htmx.request_timeout"),
+        "{}",
+        below.message()
+    );
+    let above = htmx_timeout_exceeds_request_timeout(&settings_after(
+        HTMX_ROW,
+        "| `htmx.request_timeout` | 31 s.",
+    ));
+    assert!(above.faults.is_empty(), "{}", above.message());
 }
 
 #[test]

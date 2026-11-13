@@ -14,11 +14,12 @@ use crate::test_support::{Fixture, Reply, TestSession, icon_tag, text};
 
 /// The languages of the tests with the value of the cookie `recipe_lang`.
 pub(super) const LANGS: [(Lang, &str); 2] = [(Lang::Pl, "pl"), (Lang::En, "en")];
-/// The three scripts that a page loads, in the order of `base.html`.
-const SCRIPTS: [&str; 3] = [
+/// The four scripts that a page loads, in the order of `base.html`.
+const SCRIPTS: [&str; 4] = [
     "<script src=\"/static/htmx.min.js\"></script>",
     "<script src=\"/static/row-version.js\" defer></script>",
     "<script src=\"/static/tree.js\" defer></script>",
+    "<script src=\"/static/request-state.js\" defer></script>",
 ];
 
 // --- Helpers ------------------------------------------------------------------------------------
@@ -63,7 +64,7 @@ pub(super) fn assert_layout(body: &str, lang: Lang, code: &str) {
     assert!(body.contains("<meta name=\"htmx-config\""));
 }
 
-/// Assert the two style sheets in their order, the three scripts, and no inline style.
+/// Assert the two style sheets in their order, the four scripts, and no inline style.
 pub(super) fn assert_assets(body: &str) {
     let app = at(body, "<link rel=\"stylesheet\" href=\"/static/app.css\">");
     let components = at(
@@ -72,7 +73,7 @@ pub(super) fn assert_assets(body: &str) {
     );
     assert!(app < components, "app.css comes first: {body}");
     assert_eq!(body.matches("<link").count(), 2, "{body}");
-    assert_eq!(body.matches("<script").count(), 3, "{body}");
+    assert_eq!(body.matches("<script").count(), 4, "{body}");
     let positions: Vec<usize> = SCRIPTS.iter().map(|tag| at(body, tag)).collect();
     assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(!body.contains("<style"));

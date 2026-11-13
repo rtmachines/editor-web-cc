@@ -296,6 +296,38 @@ fn components_alert_is_one_element_with_icon_code_sentence_and_reference() {
     }
 }
 
+/// Render the macro `alert` with a code, a sentence, and the given reference.
+fn render_alert(reference: &str) -> String {
+    AlertPage {
+        severity: "error",
+        code: "E-WEB-015".to_owned(),
+        message: "Message.".to_owned(),
+        reference: reference.to_owned(),
+    }
+    .render()
+    .unwrap()
+}
+
+#[test]
+fn components_alert_with_an_empty_reference_has_no_reference_element() {
+    let html = render_alert("");
+    assert!(!html.contains("alert-ref"), "{html}");
+    assert!(
+        html.contains("<span class=\"alert-code\">E-WEB-015</span>"),
+        "{html}"
+    );
+    assert!(html.contains("<span>Message.</span>"), "{html}");
+}
+
+#[test]
+fn components_alert_with_a_reference_keeps_the_reference_element() {
+    let html = render_alert("Reference 1.");
+    assert!(
+        html.contains("<span class=\"alert-ref\">Reference 1.</span>"),
+        "{html}"
+    );
+}
+
 /// Render the alert with one field line that has an input and one that has none.
 fn render_field_lines(link: bool) -> String {
     let line = |field: &str, has_input: bool| FieldLine {

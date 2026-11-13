@@ -418,3 +418,84 @@ async fn types_add_member_of_an_unknown_machine_or_struct_gives_404() {
     }
     assert_eq!(world.fixture.snapshot(), before);
 }
+
+// --- Order of the buttons (F4) ------------------------------------------------------------------
+
+const NEW_FORM: &str = "/machines/M7/types/new";
+const REVISION_FORM: &str = "/machines/M7/types/new?from=ST_Zone";
+
+/// Return the ids of the `type="submit"` buttons of `#udt-form`, in DOM order.
+fn submit_button_ids(body: &str) -> Vec<String> {
+    let form = between(body, "<form id=\"udt-form\"", "</form>");
+    form.split("<button")
+        .skip(1)
+        .filter_map(|rest| rest.split_once('>').map(|(tag, _)| tag))
+        .filter(|tag| tag.contains("type=\"submit\""))
+        .filter_map(|tag| {
+            let id = tag.split_once("id=\"")?.1;
+            Some(id.split_once('"')?.0.to_owned())
+        })
+        .collect()
+}
+
+/// Build the body of an `add=1` request with `count` rows.
+fn add_body_with_rows(count: usize) -> String {
+    let rows: Vec<(String, String)> = (0..count)
+        .map(|index| (format!("m{index}"), "INT".to_owned()))
+        .collect();
+    let borrowed: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|(name, type_text)| (name.as_str(), type_text.as_str()))
+        .collect();
+    form_body(Some("ST_Big"), &borrowed, &[("add", "1")])
+}
+
+#[tokio::test]
+async fn types_form_puts_the_define_button_before_the_add_button_of_a_new_type() {
+    let world = world();
+    let reply = get_as(&world, &world.engineer, NEW_FORM, &[]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(
+        submit_button_ids(&reply.body),
+        ["udt-define-submit", "udt-add-member"]
+    );
+}
+
+#[tokio::test]
+async fn types_form_puts_the_define_button_before_the_add_button_of_a_revision() {
+    let world = world();
+    let reply = get_as(&world, &world.engineer, REVISION_FORM, &[]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(
+        submit_button_ids(&reply.body),
+        ["udt-define-submit", "udt-add-member"]
+    );
+}
+
+#[tokio::test]
+async fn types_form_with_1023_rows_keeps_the_define_button_first() {
+    let world = world();
+    let reply = post_as(&world, &world.engineer, NEW, &add_body_with_rows(1022), &[]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("id=\"members-1022-name\""));
+    assert!(!reply.body.contains("id=\"members-1023-name\""));
+    assert_eq!(
+        submit_button_ids(&reply.body),
+        ["udt-define-submit", "udt-add-member"]
+    );
+}
+
+#[tokio::test]
+async fn types_form_at_1024_rows_has_only_the_define_button_and_the_limit_notice() {
+    let world = world();
+    let reply = post_as(&world, &world.engineer, NEW, &add_body_with_rows(1023), &[]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("id=\"members-1023-name\""));
+    assert_eq!(submit_button_ids(&reply.body), ["udt-define-submit"]);
+    let define = reply.body.find("id=\"udt-define-submit\"").unwrap();
+    let notice = reply
+        .body
+        .find("The form holds the maximum of 1024 members.")
+        .unwrap();
+    assert!(define < notice, "the notice follows the define button");
+}

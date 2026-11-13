@@ -1,6 +1,7 @@
 //! The layout of every full page: top bar, navigation, language switch (design D5).
 
 use recipe_app::auth::Operation;
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 
 use crate::error::WebError;
@@ -272,6 +273,18 @@ impl<'a> Layout<'a> {
     /// Return true when the answer is the content of `main` and not the full page.
     pub(crate) const fn is_content(&self) -> bool {
         matches!(self.shape, Shape::Content)
+    }
+
+    /// Return the sentence of the lost-answer alert in the UI language (ADR-0158 (e)).
+    pub(crate) fn transport_error_sentence(&self) -> String {
+        self.t.get("error-E-WEB-015")
+    }
+
+    /// Return the code of the lost-answer alert in `#transport-error` (ADR-0158 (e)).
+    ///
+    /// The template of `base.html` reads the code here, so no template holds the text.
+    pub(crate) const fn transport_error_code(&self) -> &'static str {
+        ErrorCode::WEB_015.as_str()
     }
 
     /// Return the layout with the switch target `path` for a content answer of a `POST`.

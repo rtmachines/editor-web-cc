@@ -82,10 +82,32 @@ pub fn request_timeout_fits_drain(table: &Table) -> Report {
     report
 }
 
+/// The rule of the browser limit.
+///
+/// Source: `reliability.md` 7.11 row `htmx.request_timeout` and ADR-0158 (j):
+/// `http.request_timeout < htmx.request_timeout`.
+pub fn htmx_timeout_exceeds_request_timeout(table: &Table) -> Report {
+    let mut report = Report::default();
+    let request = millis_of(&mut report, table, "http.request_timeout");
+    let htmx = millis_of(&mut report, table, "htmx.request_timeout");
+    if let (Some(request), Some(htmx)) = (request, htmx)
+        && request >= htmx
+    {
+        report.fail(
+            DOCUMENT,
+            "htmx.request_timeout",
+            format!("above {request} ms (http.request_timeout)"),
+            format!("{htmx} ms"),
+        );
+    }
+    report
+}
+
 /// Both sum rules.
 pub fn check_sum_rules(table: &Table) -> Report {
     let mut report = stop_sum_holds(table);
     report.absorb(request_timeout_fits_drain(table));
+    report.absorb(htmx_timeout_exceeds_request_timeout(table));
     report
 }
 

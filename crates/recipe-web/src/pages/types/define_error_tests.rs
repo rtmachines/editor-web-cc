@@ -717,3 +717,40 @@ async fn types_define_puts_the_error_of_the_use_case_under_its_input() {
         assert_eq!(world.fixture.snapshot(), before, "{code}");
     }
 }
+
+/// ADR-0159 (f), spec "Unchanged revision refused": `E-PLT-052` stands in the summary with no
+/// field line. The out-of-band form keeps the sent rows and marks no input.
+///
+/// The test sends the members of `ST_Zone@2`: `speed` as `INT` and `temp_max` as `REAL`.
+#[tokio::test]
+async fn types_define_error_e_plt_052_an_unchanged_revision_stands_in_the_summary_only() {
+    let world = world();
+    let body = form_body(None, &[("speed", "INT"), ("temp_max", "REAL")], &[]);
+    let reply = refused(&world, REVISIONS, &body, StatusCode::CONFLICT, "E-PLT-052").await;
+    assert!(
+        reply.body.contains(
+            "Revision 2 of type ST_Zone has the same members. Change a member before you create the revision."
+        ),
+        "{}",
+        reply.body
+    );
+    assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
+    assert!(
+        !reply.body.contains("class=\"target-link\""),
+        "the line links to no input: {}",
+        reply.body
+    );
+    let tag =
+        "<form id=\"udt-form\" method=\"post\" action=\"/machines/M7/types/ST_Zone/revisions\"";
+    let form = reply.body.split(tag).nth(1).unwrap();
+    assert!(form.contains(" hx-swap-oob=\"true\">"), "{form}");
+    for value in ["speed", "temp_max", "INT", "REAL"] {
+        assert!(
+            form.contains(&format!("value=\"{value}\"")),
+            "{value}: {form}"
+        );
+    }
+    assert!(!form.contains("class=\"field-error\""), "{form}");
+    assert!(!form.contains("aria-invalid"), "{form}");
+    assert_clean_html(&reply.body);
+}

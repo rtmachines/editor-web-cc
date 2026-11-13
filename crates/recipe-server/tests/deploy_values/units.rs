@@ -45,6 +45,7 @@ const DURATION_KEYS: &[&str] = &[
     "security.key_rotation_overlap",
     "i18n.lang_cookie_max_age",
     "http.request_timeout",
+    "htmx.request_timeout",
     "http.body_read_timeout",
     "http.accept_error_pause",
     "proxy.upstream_keepalive",

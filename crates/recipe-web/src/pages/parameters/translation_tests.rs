@@ -437,3 +437,32 @@ async fn parameters_translation_save_with_crlf_stores_lf() {
     );
     assert!(!page.body.contains("Linia 1\r"), "{}", page.body);
 }
+
+/// ADR-0158 (k), design D4: the save form of a translation row holds the indicator of
+/// `form-in-progress` after its save button. The delete form of the row has none.
+#[tokio::test]
+async fn parameters_translation_row_has_the_indicator_in_the_save_form_only() {
+    let world = recipe_world();
+    let reply = world
+        .get_en(&world.engineer, &parameter_path(LINE_KEY, ""))
+        .await;
+    let main = main_of(&reply.body);
+    let indicator = "<span class=\"htmx-indicator\">The server processes the request.</span>";
+    let save_form = main
+        .split("<form id=\"translation-pl-form\"")
+        .nth(1)
+        .and_then(|rest| rest.split("</form>").next())
+        .unwrap();
+    assert_eq!(save_form.matches(indicator).count(), 1, "{save_form}");
+    let save = save_form.find("id=\"translation-pl-save\"").unwrap();
+    assert!(save < save_form.find(indicator).unwrap(), "{save_form}");
+    let delete_button = main.find("id=\"translation-pl-delete\"").unwrap();
+    let delete_start = main[..delete_button].rfind("<form").unwrap();
+    let delete_end = delete_button + main[delete_button..].find("</form>").unwrap();
+    let delete_form = &main[delete_start..delete_end];
+    assert!(
+        delete_form.starts_with("<form method=\"post\""),
+        "{delete_form}"
+    );
+    assert!(!delete_form.contains("htmx-indicator"), "{delete_form}");
+}

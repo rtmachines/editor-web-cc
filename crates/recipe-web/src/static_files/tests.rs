@@ -166,6 +166,12 @@ fn script_tree_is_a_short_strict_iife_without_forbidden_words() {
 }
 
 #[test]
+fn script_request_state_is_a_short_strict_iife_without_forbidden_words() {
+    let source = std::str::from_utf8(REQUEST_STATE_BYTES).unwrap();
+    assert_eq!(script_problems(source, 40), Vec::<String>::new());
+}
+
+#[test]
 fn script_problems_find_a_long_script() {
     let source = format!(
         "(function () {{\n\"use strict\";\n{}}})();\n",
@@ -217,7 +223,7 @@ fn script_selector_calls_reject_a_built_argument() {
 }
 
 #[test]
-fn static_files_table_lists_the_five_files_with_their_media_types() {
+fn static_files_table_lists_the_six_files_with_their_media_types() {
     let listed: Vec<(&str, &str)> = STATIC_FILES
         .iter()
         .map(|file| (file.path, file.media_type))
@@ -230,6 +236,7 @@ fn static_files_table_lists_the_five_files_with_their_media_types() {
             ("/static/components.css", "text/css; charset=utf-8"),
             ("/static/row-version.js", "application/javascript"),
             ("/static/tree.js", "application/javascript"),
+            ("/static/request-state.js", "application/javascript"),
         ]
     );
     for file in &STATIC_FILES {

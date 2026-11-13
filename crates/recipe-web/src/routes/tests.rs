@@ -275,6 +275,7 @@ fn expected_routes() -> Vec<(String, &'static str)> {
     routes.push(("GET".to_owned(), "/static/components.css"));
     routes.push(("GET".to_owned(), "/static/row-version.js"));
     routes.push(("GET".to_owned(), "/static/tree.js"));
+    routes.push(("GET".to_owned(), "/static/request-state.js"));
     routes.extend(
         font_paths()
             .into_iter()

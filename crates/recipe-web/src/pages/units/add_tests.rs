@@ -99,7 +99,10 @@ async fn units_add_renews_the_form_for_the_same_parent_without_autofocus() {
         .unwrap();
     let form = rest.split("</form>").next().unwrap();
     assert!(rest.starts_with("<h2>New unit under U1.2</h2>"), "{rest}");
-    assert!(form.contains("<option value=\"U1.2\" selected>"), "{form}");
+    assert!(
+        form.contains("<input type=\"hidden\" name=\"parent_path\" value=\"U1.2\">"),
+        "{form}"
+    );
     let (_pre, segment) = form.split_once("<input id=\"segment\"").unwrap();
     let segment = segment.split('>').next().unwrap();
     assert!(
@@ -157,23 +160,23 @@ async fn units_add_answer_hx_attributes_are_literals_and_the_html_is_clean() {
 }
 
 #[tokio::test]
-async fn units_add_escapes_the_name_in_the_tree_and_in_the_list_of_parents() {
+async fn units_add_escapes_the_name_in_the_tree_and_in_the_form_of_an_error_answer() {
     let world = world();
     let payload = "<img src=x onerror=alert(1)>";
-    let body = "parent_path=U1.1&segment=9&name=%3Cimg+src%3Dx+onerror%3Dalert(1)%3E";
-    let reply = htmx_post(&world, ROUTE, body).await;
+    let escaped = "&#60;img src=x onerror=alert(1)&#62;";
+    let name = "name=%3Cimg+src%3Dx+onerror%3Dalert(1)%3E";
+    let reply = htmx_post(&world, ROUTE, &format!("parent_path=U1.1&segment=9&{name}")).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert!(!reply.body.contains(payload), "{}", reply.body);
-    assert!(
-        reply.body.contains("&#60;img src=x onerror=alert(1)&#62;"),
-        "{}",
-        reply.body
-    );
+    assert!(reply.body.contains(escaped), "{}", reply.body);
     assert_clean_html(&reply.body);
-    let form = world
-        .get_form(&world.engineer, "/machines/M7/units/new")
-        .await;
-    assert!(!form.body.contains(payload), "{}", form.body);
+    // A bad segment makes the answer swap the form with the sent name in the name input.
+    let reply = htmx_post(&world, ROUTE, &format!("parent_path=U1.1&segment=x&{name}")).await;
+    assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-017");
+    let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
+    assert!(form.contains(&format!("value=\"{escaped}\"")), "{form}");
+    assert!(!reply.body.contains(payload), "{}", reply.body);
+    assert_clean_html(&reply.body);
 }
 
 // --- Success without HTMX -----------------------------------------------------------------------
@@ -310,7 +313,8 @@ async fn units_add_names_the_field_of_a_bad_name_and_creates_nothing() {
     assert_eq!(world.audit_count(), before);
 }
 
-/// Spec "Every field error at once": a bad parent, segment, and name give three lines and the form.
+/// Spec "Every field error at once": a bad parent, segment, and name give three summary lines. The
+/// form holds a line under the segment and the name only, because the parent has no input.
 #[tokio::test]
 async fn units_add_lists_every_bad_field_and_swaps_the_form_with_the_sent_texts() {
     let world = world();
@@ -320,15 +324,24 @@ async fn units_add_lists_every_bad_field_and_swaps_the_form_with_the_sent_texts(
     assert_eq!(reply.header("hx-push-url"), "false");
     assert!(reply.body.contains("Errors: 3."), "{}", reply.body);
     assert!(reply.body.contains("E-WEB-008"), "{}", reply.body);
-    for id in ["parent_path", "segment", "unit_name"] {
+    for id in ["segment", "unit_name"] {
         assert!(reply.body.contains(&format!("href=\"#{id}\"")), "{id}");
     }
+    assert!(
+        !reply.body.contains("href=\"#parent_path\""),
+        "the parent has no input to link: {}",
+        reply.body
+    );
     let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
-    assert_eq!(form.matches("aria-invalid=\"true\"").count(), 3, "{form}");
-    for id in ["parent_path", "segment", "unit_name"] {
+    assert_eq!(form.matches("aria-invalid=\"true\"").count(), 2, "{form}");
+    for id in ["segment", "unit_name"] {
         let line = format!("<div class=\"field-error\" id=\"{id}-error\">");
         assert!(form.contains(&line), "{id}: {form}");
     }
+    assert!(
+        !form.contains("id=\"parent_path-error\""),
+        "the fixed parent has no line under an input: {form}"
+    );
     assert!(form.contains("value=\"&#60;b&#62;\""), "{form}");
     assert!(
         form.contains("<button type=\"submit\" id=\"unit-create-submit\""),
@@ -350,8 +363,11 @@ async fn units_add_keeps_the_chosen_parent_in_the_form_of_an_error_answer() {
     let reply = htmx_post(&world, ROUTE, "parent_path=U1.2&segment=5&name=+").await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     let form = reply.body.split(OOB_FORM_TAG).nth(1).unwrap();
-    assert!(form.contains("<option value=\"U1.2\" selected>"), "{form}");
-    assert_eq!(form.matches(" selected").count(), 1, "{form}");
+    assert!(
+        form.contains("<input type=\"hidden\" name=\"parent_path\" value=\"U1.2\">"),
+        "{form}"
+    );
+    assert!(!form.contains("<select"), "{form}");
     assert_eq!(form.matches("aria-invalid=\"true\"").count(), 1, "{form}");
     assert!(form.contains("id=\"unit_name-error\""), "{form}");
 }
@@ -460,26 +476,12 @@ async fn units_add_puts_a_bad_segment_under_the_segment_input() {
 async fn units_add_puts_the_error_of_the_use_case_under_its_input() {
     let world = world();
     let before = world.audit_count();
-    let cases = [
-        (
-            ROUTE,
-            "parent_path=U1.2&segment=1&name=A",
-            "segment",
-            "E-PLT-004",
-        ),
-        (
-            ROUTE,
-            "parent_path=U1.9&segment=1&name=A",
-            "parent_path",
-            "E-PLT-003",
-        ),
-        (
-            "/machines/M31/units",
-            "parent_path=U2&segment=1&name=A",
-            "parent_path",
-            "E-PLT-009",
-        ),
-    ];
+    let cases = [(
+        ROUTE,
+        "parent_path=U1.2&segment=1&name=A",
+        "segment",
+        "E-PLT-004",
+    )];
     for (path, body, id, code) in cases {
         let reply = htmx_post(&world, path, body).await;
         assert_eq!(reply.header("hx-retarget"), "#error-panel", "{body}");
@@ -488,5 +490,121 @@ async fn units_add_puts_the_error_of_the_use_case_under_its_input() {
         assert!(form.contains("value=\"A\""), "{body}: {form}");
         assert_clean_html(&reply.body);
     }
+    assert_eq!(world.audit_count(), before);
+}
+
+/// Design D3, spec "Parent error without a link": the form has no parent input, so an error of the
+/// parent stands in the summary of `#error-panel` without a link. The out-of-band form keeps the
+/// sent parent in the hidden field and has no mark and no line for the parent.
+#[tokio::test]
+async fn units_add_puts_an_error_of_the_parent_in_the_summary_without_a_link() {
+    let world = world();
+    let before = world.audit_count();
+    let cases = [
+        // The use case refuses a parent that does not exist.
+        (ROUTE, "U9", StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-003"),
+        (ROUTE, "U1.9", StatusCode::UNPROCESSABLE_ENTITY, "E-PLT-003"),
+        // The use case refuses an archived parent.
+        (
+            "/machines/M31/units",
+            "U2",
+            StatusCode::CONFLICT,
+            "E-PLT-009",
+        ),
+        // The handler refuses a malformed parent before the use case runs.
+        (
+            ROUTE,
+            "U1..2",
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "E-PLT-017",
+        ),
+    ];
+    for (path, parent, status, code) in cases {
+        let body = format!("parent_path={parent}&segment=1&name=A");
+        let reply = htmx_post(&world, path, &body).await;
+        assert_htmx_error(&reply, status, code);
+        assert_eq!(reply.header("hx-retarget"), "#error-panel", "{body}");
+        assert!(reply.body.contains("Errors: 1."), "{body}: {}", reply.body);
+        assert!(
+            !reply.body.contains("href=\"#parent_path\""),
+            "{body}: {}",
+            reply.body
+        );
+        let (summary, form) = reply.body.split_once("<form id=\"unit-add-form\"").unwrap();
+        assert!(summary.contains(code), "{body}: {summary}");
+        assert!(!summary.contains("target-link"), "{body}: {summary}");
+        let hidden = format!("<input type=\"hidden\" name=\"parent_path\" value=\"{parent}\">");
+        assert!(form.contains(&hidden), "{body}: {form}");
+        assert!(!form.contains("aria-invalid"), "{body}: {form}");
+        assert!(!form.contains("field-error"), "{body}: {form}");
+        assert_clean_html(&reply.body);
+    }
+    assert_eq!(world.audit_count(), before);
+}
+
+/// Design D3: the parent `U1` has the used segment `1`. The answer is `409 E-PLT-004`. The form of
+/// the answer keeps `U1` in the one hidden field and in the text line, and has no parent `select`.
+#[tokio::test]
+async fn units_add_with_a_used_segment_keeps_the_parent_in_a_hidden_field_and_a_text_line() {
+    let world = world();
+    let before = world.audit_count();
+    let reply = htmx_post(
+        &world,
+        "/machines/M31/units",
+        "parent_path=U1&segment=1&name=A",
+    )
+    .await;
+    assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-004");
+    let (_before, rest) = reply.body.split_once("<form id=\"unit-add-form\"").unwrap();
+    let (tag, form) = rest.split_once('>').unwrap();
+    assert!(tag.contains("hx-swap-oob=\"true\""), "{tag}");
+    let hidden = "<input type=\"hidden\" name=\"parent_path\" value=\"U1\">";
+    assert_eq!(form.matches("name=\"parent_path\"").count(), 1, "{form}");
+    assert!(form.contains(hidden), "{form}");
+    let (_head, line) = form
+        .split_once("<p class=\"field\" id=\"parent-line\">")
+        .unwrap();
+    let (line, _tail) = line.split_once("</p>").unwrap();
+    assert!(line.contains("<span class=\"data\">U1</span>"), "{line}");
+    assert!(!form.contains("<select"), "{form}");
+    assert_eq!(world.audit_count(), before);
+}
+
+/// Design D3: a plain `POST` without HTMX, the parent `U1`, the free segment `2`, and an empty
+/// name. The answer is `422 E-WEB-008` as a full page. The form of the page keeps the parent in
+/// the one hidden field and in the text line, and keeps the sent segment. The form of an error
+/// answer has no `h2`, because it starts with the `form` tag (design D9).
+#[tokio::test]
+async fn units_add_without_htmx_keeps_the_parent_in_the_form_of_the_error_page() {
+    let world = world();
+    let before = world.audit_count();
+    let reply = world
+        .post(
+            &world.engineer,
+            "/machines/M31/units",
+            "parent_path=U1&segment=2&name=",
+            false,
+        )
+        .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    assert!(reply.body.contains("E-WEB-008"), "{}", reply.body);
+    assert!(reply.body.contains("<main"), "{}", reply.body);
+    let (_before, rest) = reply.body.split_once("<form id=\"unit-add-form\"").unwrap();
+    let (_tag, form) = rest.split_once('>').unwrap();
+    let hidden = "<input type=\"hidden\" name=\"parent_path\" value=\"U1\">";
+    assert_eq!(form.matches("name=\"parent_path\"").count(), 1, "{form}");
+    assert!(form.contains(hidden), "{form}");
+    let (_head, line) = form
+        .split_once("<p class=\"field\" id=\"parent-line\">")
+        .unwrap();
+    let (line, _tail) = line.split_once("</p>").unwrap();
+    assert!(line.contains("<span class=\"data\">U1</span>"), "{line}");
+    assert!(form.contains("name=\"segment\""), "{form}");
+    assert!(form.contains("value=\"2\""), "{form}");
     assert_eq!(world.audit_count(), before);
 }

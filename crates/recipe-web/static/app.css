@@ -547,6 +547,10 @@ input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="
   opacity: 1;
 }
 
+form[aria-busy="true"] {
+  cursor: progress;
+}
+
 /* Forced colors */
 
 @media (forced-colors: active) {

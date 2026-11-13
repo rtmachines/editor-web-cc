@@ -5,11 +5,13 @@
 
 use axum::http::StatusCode;
 
-use super::test_kit::{FORM_TARGET, NEW_FORM, get_form_fragment, position};
+use super::test_kit::{
+    ADD, FORM_TARGET, INT_FIELDS, NEW_FORM, changed, form, get_form_fragment, position,
+};
 use crate::i18n::Lang;
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_clean_html, assert_error, field_value};
-use crate::test_support::plant::{ENGLISH, HTMX, POLISH, main_of};
+use crate::test_support::plant::{ENGLISH, HTMX, POLISH, TARGET_CONTENT, main_of};
 use crate::test_support::text;
 
 /// The opening tag of the boosted form of a new parameter of the draft 3 of `R-100`.
@@ -101,6 +103,37 @@ async fn parameters_new_form_as_content_has_the_stand_alone_form() {
     assert!(!reply.body.contains("#parameter-rows"), "{}", reply.body);
 }
 
+/// Guard of the change `ui-form-fixes`, design D1: the form that the link of the second page of
+/// the version page loads stays the stand-alone page form, and its save goes to the version page.
+///
+/// The link sends `HX-Request: true` and `HX-Target: content`. The test passes before the change.
+#[tokio::test]
+async fn parameters_new_form_of_a_content_request_saves_with_303_to_the_version_page() {
+    let world = recipe_world();
+    let reply = world
+        .get(&world.engineer, NEW_FORM, &[ENGLISH, HTMX, TARGET_CONTENT])
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains(PAGE_FORM_TAG), "{}", reply.body);
+    assert!(
+        !reply.body.contains("id=\"parameter-rows\""),
+        "{}",
+        reply.body
+    );
+    assert!(!reply.body.contains("#parameter-rows"), "{}", reply.body);
+    let row_version = field_value(&reply.body, "row_version");
+    let pairs = changed(&INT_FIELDS, &[("row_version", Some(row_version.as_str()))]);
+    let audit = world.audit_count();
+    let saved = world
+        .post_with(&world.engineer, ADD, &form(&pairs), &[HTMX, TARGET_CONTENT])
+        .await;
+    assert_eq!(saved.status, StatusCode::SEE_OTHER, "{}", saved.body);
+    assert_eq!(saved.header("location"), "/recipes/R-100/versions/3");
+    assert_eq!(saved.header("hx-redirect"), "", "{:?}", saved.headers);
+    assert_eq!(saved.header("hx-location"), "", "{:?}", saved.headers);
+    assert!(world.audit_count() > audit);
+}
+
 #[tokio::test]
 async fn parameters_new_form_refuses_an_operator_and_a_version_that_is_not_a_draft() {
     let world = recipe_world();
@@ -175,4 +208,22 @@ async fn parameters_new_form_in_read_only_mode_still_refuses_an_operator() {
         .get(&world.operator, NEW_FORM, &[ENGLISH, HTMX, FORM_TARGET])
         .await;
     assert_error(&reply, StatusCode::FORBIDDEN, "E-WEB-002", "operator");
+}
+
+/// ADR-0158 (k), design D4: the new form of a parameter holds the indicator of `form-in-progress`
+/// after its save button.
+#[tokio::test]
+async fn parameters_new_form_has_the_indicator_after_the_save_button() {
+    let world = recipe_world();
+    let reply = get_form_fragment(&world, NEW_FORM).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.body.as_str();
+    let indicator = "<span class=\"htmx-indicator\">The server processes the request.</span>";
+    assert_eq!(body.matches(indicator).count(), 1, "{body}");
+    let save = position(body, "id=\"parameter-add-submit\"");
+    assert!(save < position(body, indicator), "{body}");
+    assert!(
+        position(body, indicator) < position(body, "</form>"),
+        "{body}"
+    );
 }

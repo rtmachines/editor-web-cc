@@ -181,3 +181,18 @@ fn machine_data_block_codes_are_in_registry() {
         assert_eq!(ErrorCode::find(text), Some(code), "{text}");
     }
 }
+
+/// The code of the change `ui-form-fixes` (`reliability.md` section 1.2).
+#[test]
+fn revision_unchanged_code_is_in_registry() {
+    assert_eq!(ErrorCode::PLT_052.as_str(), "E-PLT-052");
+    assert_eq!(ErrorCode::find("E-PLT-052"), Some(ErrorCode::PLT_052));
+}
+
+/// The code of the change `ui-request-state` (`reliability.md` section 1.2).
+#[test]
+fn lost_answer_code_is_in_registry() {
+    assert_eq!(ErrorCode::WEB_015.as_str(), "E-WEB-015");
+    assert_eq!(ErrorCode::find("E-WEB-015"), Some(ErrorCode::WEB_015));
+    assert!(REGISTRY.contains(&ErrorCode::WEB_015));
+}

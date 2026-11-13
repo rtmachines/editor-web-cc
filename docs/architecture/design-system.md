@@ -15,7 +15,7 @@ The values live in `crates/recipe-web/static/app.css` as CSS custom properties o
 
 The style rules live in two style sheets (ADR-0037):
 
-- `static/app.css` holds the tokens, the fonts, the base elements, the targets, and the focus. It also holds the page layout, the top bar, and the base rules of the fields and the buttons. It holds the utilities `.actions`, `.target-link`, `.data`, and `.htmx-indicator` too.
+- `static/app.css` holds the tokens, the fonts, the base elements, the targets, and the focus. It also holds the page layout, the top bar, and the base rules of the fields and the buttons. It holds the utilities `.actions`, `.target-link`, `.data`, and `.htmx-indicator` too. It holds the busy cursor of a form that waits for an answer: `form[aria-busy="true"]` has `cursor: progress` (ADR-0158 (n)). That rule stands beside `.htmx-indicator`, so a form without an indicator also shows its request.
 - `static/components.css` holds the components of sections 10.4 and 10.6 to 10.11, and of sections 10.12, 10.13, and 10.14. It also holds the parts of section 10.5 that step P3.2 adds. These are the select, the checkbox, the list proposals, the repeated rows, and the danger disclosure. It also holds the multi-line text field of section 10.5 (ADR-0112).
 
 Every full page links `app.css` first and `components.css` second. Only `app.css` holds `:root`.
@@ -512,6 +512,8 @@ The look of an error fragment:
 - one sentence in `--font-sans`,
 - the reference with the `request_id` in `--font-mono` at `--text-sm`.
 
+The fragment of a lost answer (`E-WEB-015`) has no reference element `.alert-ref`. The browser got no answer, so it has no `request_id`. The server may have run the request. The macro `alert` renders `.alert-ref` only for a reference that is not empty.
+
 An error message has the ground `--color-error-bg`, the edge `--color-error-edge`, and the icon in `--color-error-fg`.
 
 The notice:
@@ -534,7 +536,8 @@ The full error page:
 - A success message goes into `#toast` with the `alert-success` icon (ADR-0036).
 - The same answer clears `#error-panel` with an out-of-band swap (`hx-swap-oob`). The value of that attribute is a literal, never a variable.
 - The toast has the ground `--color-topbar` and the text `--color-on-action`. The `alert-success` icon has the color `--color-success-bg`.
-- The message stays until the next success answer or the next HTMX error answer, because no script may delete it. Every HTMX error answer ends with an empty `#toast` out of band (ADR-0047 (b)). The answer of the backstop panic layer is the one exception (`api.md` section 5.1, ADR-0057 (e)).
+- The message stays until the next success answer or the next HTMX error answer, because no script may delete it. The one script exception is a lost answer (last item of this list). Every HTMX error answer ends with an empty `#toast` out of band (ADR-0047 (b)). The answer of the backstop panic layer is the one exception (`api.md` section 5.1, ADR-0057 (e)).
+- On a lost answer, the script `request-state.js` empties `#toast` and shows the error fragment of `E-WEB-015` in `#error-panel` (ADR-0158 (f)). This is the only case where a script empties `#toast`.
 - `#toast` sticks at the top of the view with `position: sticky` and `top: 0`. `html` has `scroll-padding-top`, so a focused element does not hide under the toast (WCAG 2.4.11, ADR-0047 (c)).
 - A one-time password stays in the page content. Its container has no live role.
 

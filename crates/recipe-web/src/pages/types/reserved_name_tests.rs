@@ -87,7 +87,8 @@ async fn types_reserved_name_the_form_of_a_new_revision_of_int_gives_e_plt_013_r
     let world = world();
     seed_reserved_struct(&world);
     let before = world.fixture.snapshot();
-    let body = form_body(None, &[("speed", "INT")], &[]);
+    // The form adds one member, so the revision differs from `Int@1` and E-PLT-052 does not apply.
+    let body = form_body(None, &[("speed", "INT"), ("torque", "INT")], &[]);
     let reply = post_htmx(&world, &world.engineer, INT_REVISIONS, &body).await;
     assert_eq!(
         reply.status,

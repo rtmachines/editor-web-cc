@@ -120,7 +120,7 @@ async fn types_form_of_a_new_revision_proposes_no_revision_of_its_own_struct() {
 }
 
 #[tokio::test]
-async fn types_form_puts_the_add_button_before_the_create_button() {
+async fn types_form_puts_the_create_button_before_the_add_button() {
     let world = world();
     let reply = get_as(&world, &world.engineer, NEW, &[]).await;
     let main = main_of(&reply.body);
@@ -128,7 +128,7 @@ async fn types_form_puts_the_add_button_before_the_create_button() {
         .find("<button type=\"submit\" name=\"add\" value=\"1\"")
         .unwrap();
     let create = main.find("Create type</button>").unwrap();
-    assert!(add < create, "{main}");
+    assert!(create < add, "{main}");
     assert!(main.contains(">Add a member</button>"), "{main}");
     assert_eq!(main.matches("name=\"add\"").count(), 1);
     assert!(!main.contains("The form holds the maximum of 1024 members."));
