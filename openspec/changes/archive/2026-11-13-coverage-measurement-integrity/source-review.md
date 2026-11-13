@@ -231,3 +231,19 @@ The gate exits 0. Every crate shows `ok`.
 
 The summary lists the required files with uncovered lines. It also lists the 47 declaration-only files.
 No crate reaches 100 %. The total uncovered count is 880 lines.
+
+### CI run
+
+| Fact | Value |
+|---|---|
+| Pull request | #61, commit 07455e7 |
+| Workflow run | 43436528774 |
+| `Coverage` job | Success, 10 min 10 s. The job uses the pinned cargo-llvm-cov 0.6.24. |
+| Artifact | `coverage-report-30027d676b3f19c684525f498a6ca11df352fda2`, 13.6 MB. Kept until 2026-11-27. |
+| CI gate result | Every crate shows `ok`. |
+| `recipe-server` in CI | 96.35 %, 109 uncovered lines |
+| `recipe-server` in the local run | 96.18 %, 114 uncovered lines |
+| Other five crates | Same values in CI and in the local run |
+| Other CI jobs | Every other CI job passes. |
+
+The SHA in the artifact name is the merge commit that GitHub builds for the pull request.

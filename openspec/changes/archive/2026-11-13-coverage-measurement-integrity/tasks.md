@@ -145,7 +145,7 @@ Dependencies: groups 1 through 4.
 - [x] 5.1 (review, Opus and Codex) Review the diff with `code-review` on Opus and a parallel Codex review.
   - Check that each scenario of the spec delta has a passing behavioral test.
   - A Sonnet agent fixes each CRITICAL and HIGH finding, one finding per agent. Estimate: 2 h, plus fix rounds.
-- [ ] 5.2 (verification, orchestrator) Run the checks with `superpowers:verification-before-completion`.
+- [x] 5.2 (verification, orchestrator) Run the checks with `superpowers:verification-before-completion`.
   - Run the full local measurement of task 1.1 again. Apply the gate with `--report` and `--inventory`. Record the result in `source-review.md`.
   - Run the commands of section 6. Show their output before a claim of success.
   - Report the CI result of the `Coverage` job and the artifact name to the owner. Estimate: 1.5 h, plus the run time.
