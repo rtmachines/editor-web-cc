@@ -24,6 +24,9 @@ use crate::config::{self, secret_line};
 /// The most bytes that the subcommand reads from stdin. A password has at most 128 characters.
 const STDIN_LIMIT_BYTES: u64 = 1024;
 
+/// One byte more than [`STDIN_LIMIT_BYTES`], so a read can tell "exactly the limit" from "too long".
+const STDIN_READ_LIMIT_BYTES: u64 = STDIN_LIMIT_BYTES + 1;
+
 /// The stdin of the process with the answer to "is this a terminal".
 ///
 /// The type solves one problem: a test must inject the text of stdin and the terminal check.
@@ -60,7 +63,7 @@ impl<R: BufRead> StdinInput<R> {
 fn read_bounded(source: impl Read, name: &str) -> Result<String> {
     let mut text = String::new();
     source
-        .take(STDIN_LIMIT_BYTES.saturating_add(1))
+        .take(STDIN_READ_LIMIT_BYTES)
         .read_to_string(&mut text)
         .with_context(|| format!("cannot read the password from {name}"))?;
     let length = u64::try_from(text.len()).unwrap_or(u64::MAX);

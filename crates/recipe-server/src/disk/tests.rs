@@ -160,7 +160,8 @@ async fn a_reader_that_ends_at_the_limit_leaves_no_mark() {
 
     // The reader ends first. The timeout branch looks at the state afterwards.
     call.finish();
-    call.mark_if_running();
+    call.mark_if_running()
+        .expect("the count has room for one mark");
 
     assert!(
         !space.is_stalled(&data_path()),
@@ -177,7 +178,8 @@ async fn a_running_call_that_reaches_the_limit_leaves_a_mark_until_it_ends() {
     let space = probe.adapter(LONG_LIMIT);
     let call = Call::new(data_path(), space.stalled_handle());
 
-    call.mark_if_running();
+    call.mark_if_running()
+        .expect("the count has room for one mark");
     assert!(space.is_stalled(&data_path()));
 
     call.finish();

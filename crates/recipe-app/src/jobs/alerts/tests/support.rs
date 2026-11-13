@@ -25,8 +25,9 @@ use crate::memory::{
 };
 use crate::operations::{AlertCounters, ReadinessState};
 use crate::ports::{
-    AlertCondition, AlertWebhook, CheckOutcome, CheckResult, OperationsReads, OperationsSnapshot,
-    ReplicationState, RoleCheck, ScheduledCheck, SnapshotWindows, TimeStateKey, WebhookFault,
+    AlertCondition, AlertWebhook, CheckOutcome, CheckResult, DiskSpace, OperationsReads,
+    OperationsSnapshot, ReplicationState, RoleCheck, ScheduledCheck, SnapshotWindows, TimeStateKey,
+    WebhookFault,
 };
 
 /// The time of the database at the start of a test, in Unix seconds.
@@ -244,6 +245,28 @@ pub(super) fn rig_on(
     webhook: MemoryWebhook,
     port: Arc<dyn AlertWebhook>,
 ) -> Rig {
+    build_rig(settings, webhook, port, None)
+}
+
+/// Build a healthy job with default settings, where the job reads free space through `disk`.
+///
+/// The field `Rig::disk` stays a memory double that the job does not read.
+pub(super) fn rig_with_disk(disk: Arc<dyn DiskSpace>) -> Rig {
+    let webhook = MemoryWebhook::default();
+    build_rig(
+        AlertSettings::default(),
+        webhook.clone(),
+        Arc::new(webhook),
+        Some(disk),
+    )
+}
+
+fn build_rig(
+    settings: AlertSettings,
+    webhook: MemoryWebhook,
+    port: Arc<dyn AlertWebhook>,
+    disk_port: Option<Arc<dyn DiskSpace>>,
+) -> Rig {
     let operations = StubOperations::healthy();
     let disk = MemoryDiskSpace::default();
     let backups = MemoryBackupDirectory::default();
@@ -262,7 +285,7 @@ pub(super) fn rig_on(
         AlertPorts {
             operations: Arc::new(operations.clone()),
             webhook: port,
-            disk: Arc::new(disk.clone()),
+            disk: disk_port.unwrap_or_else(|| Arc::new(disk.clone())),
             backups: Arc::new(backups.clone()),
             checks: Arc::new(checks.clone()),
         },

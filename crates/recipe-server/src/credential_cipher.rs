@@ -22,8 +22,6 @@ const NONCE_LENGTH: usize = 12;
 const TAG_LENGTH: usize = 16;
 /// The version byte of the sealed form.
 const VERSION: u8 = 1;
-/// The length of the version byte plus the nonce.
-const HEADER_LENGTH: usize = 1 + NONCE_LENGTH;
 
 /// The 32 bytes of the key of the cipher.
 ///
@@ -91,10 +89,12 @@ impl CredentialCipher for AesGcmCipher {
             .cipher
             .encrypt(&nonce, payload)
             .map_err(|_failed| CipherFault::Cipher)?;
-        let mut sealed = Vec::with_capacity(HEADER_LENGTH.saturating_add(encrypted.len()));
-        sealed.push(VERSION);
-        sealed.extend_from_slice(&nonce_bytes);
-        sealed.extend_from_slice(&encrypted);
+        let sealed = [
+            [VERSION].as_slice(),
+            nonce_bytes.as_slice(),
+            encrypted.as_slice(),
+        ]
+        .concat();
         Ok(SealedSecret::from_bytes(sealed))
     }
 

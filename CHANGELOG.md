@@ -54,6 +54,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The scan of the backup directory has a time limit. A scan that waits longer than `health.disk_check_interval` is a read fault (ADR-0151).
 - The CI job `test` runs the step "Check the production refusal of insecure cookies" (`bash deploy/ci/rust-tests.sh secure`) after "Run tests". The job `compose` no longer runs this step (ADR-0062 (b), ADR-0127).
 - `SetPlcConnection` no longer takes `db_number`. This is a BREAKING change for a form post that sends the field. The value comes from the machine (ADR-0156).
+- ADR-0161 states the bound of the stalled reads of a path. A path holds at most one stalled call for each pair of a job and an adapter. The behavior does not change.
 
 ### Fixed
 

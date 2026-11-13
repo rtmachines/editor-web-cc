@@ -2394,7 +2394,7 @@ The job `disk_check` measures the free space of `pgdata` every `health.disk_chec
 The values of `disk.*` are code defaults and not configuration keys (`reliability.md` 7.11). A change needs a new release.
 
 Each page shows the read-only banner (ADR-0071). The server writes no log line when the mode changes, so the banner shows the mode.
-Every query, `Login`, `Logout`, and `ExportVersion` still work (A24 in `overview.md` 9).
+`Login`, `Logout`, every query, every export, and `ExportPlcConnection` continue (A24 in `overview.md` 9).
 Every other command returns `503` with the code `E-WEB-006`.
 
 To end the mode, do these steps:

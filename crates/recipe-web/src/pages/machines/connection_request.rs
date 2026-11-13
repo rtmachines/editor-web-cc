@@ -24,8 +24,12 @@ use crate::pages::recipes::fields::FieldLines;
 ///
 /// The type solves one problem: the typed password must not reach a log line, an error value, or a
 /// serialized answer. It has a `Debug` that hides the text, no `Serialize`, no `Clone`, and no
-/// `Display`. It clears its buffer on drop.
+/// `Display`. It clears its buffer on drop, and the assertion below fails the build if it does not.
 pub(super) struct SecretField(Zeroizing<String>);
+
+// The buffer of the password must clear itself on drop. A plain `String` field does not
+// implement `ZeroizeOnDrop`, so this assertion then fails the build in every profile.
+const _: fn(&SecretField) -> &dyn zeroize::ZeroizeOnDrop = |field| &field.0;
 
 impl<'de> Deserialize<'de> for SecretField {
     /// Read the text of the field and move it into the buffer.

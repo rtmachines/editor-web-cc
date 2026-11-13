@@ -108,7 +108,10 @@ pub trait TypeCatalog: Send {
 
     /// Run `pg_advisory_xact_lock(2, hashtext(machine_id || ':' || name))` for each key.
     ///
-    /// The adapter takes the keys in the given order. The caller sorts them.
+    /// The PostgreSQL adapter computes the key values, removes duplicate values, sorts them, and
+    /// locks in that order (ADR-0144 (a) to (c)). The memory adapter locks in the given order
+    /// (ADR-0144 (d)). `recipe-app` collects the keys without duplicate texts through
+    /// `derived_type_locks`.
     async fn lock_derived_types(
         &mut self,
         machine: MachineId,

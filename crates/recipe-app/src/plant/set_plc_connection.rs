@@ -124,28 +124,13 @@ impl SetPlcConnection {
         )?;
         let password = self.password_write(unlocked.machine, plan.password)?;
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;
-        let machine = tx
-            .plant()
-            .lock_machine_for_no_key_update(unlocked.machine)
-            .await?
-            .ok_or(AppError::NotFound {
-                entity: Missing::Machine(input.code),
-            })?;
-        if !machine.state.is_live() {
-            return Err(PlantError::MachineArchived { code: input.code }.into());
-        }
-        let locked = tx
-            .plc_connections()
-            .lock_connection_for_update(unlocked.machine)
-            .await?;
-        let actual = locked.as_ref().map_or(0, |held| held.state.row_version);
-        if actual != input.expected_row_version {
-            return Err(AppError::ConnectionConcurrentEdit {
-                code: input.code,
-                expected: input.expected_row_version,
-                actual,
-            });
-        }
+        let locked = lock_for_write(
+            tx.as_mut(),
+            unlocked.machine,
+            input.code,
+            input.expected_row_version,
+        )
+        .await?;
         let written = write_record(
             tx.as_mut(),
             unlocked.machine,
@@ -220,6 +205,48 @@ impl SetPlcConnection {
             password: stored.map_or(PasswordState::Absent, |record| record.password),
         })
     }
+}
+
+/// Step 4 and step 5 of design D6: lock the machine and the record, then compare the `row_version`.
+///
+/// The function locks the machine `FOR NO KEY UPDATE` and then the record `FOR UPDATE`
+/// (ADR-0015). It returns the held record, or `None` for the first save of the machine.
+///
+/// # Errors
+///
+/// Returns `NotFound` (`E-WEB-005`) when the machine row is gone.
+/// Returns `PlantError::MachineArchived` (`E-PLT-010`) when the machine is archived.
+/// Returns `ConnectionConcurrentEdit` (`E-WEB-013`) when the `row_version` is stale.
+/// Returns `AppError::Storage` when a lock statement fails.
+async fn lock_for_write(
+    tx: &mut dyn Transaction,
+    machine: MachineId,
+    code: MachineCode,
+    expected_row_version: i64,
+) -> Result<Option<Locked<StoredConnection>>, AppError> {
+    let locked_machine = tx
+        .plant()
+        .lock_machine_for_no_key_update(machine)
+        .await?
+        .ok_or(AppError::NotFound {
+            entity: Missing::Machine(code),
+        })?;
+    if !locked_machine.state.is_live() {
+        return Err(PlantError::MachineArchived { code }.into());
+    }
+    let locked = tx
+        .plc_connections()
+        .lock_connection_for_update(machine)
+        .await?;
+    let actual = locked.as_ref().map_or(0, |held| held.state.row_version);
+    if actual != expected_row_version {
+        return Err(AppError::ConnectionConcurrentEdit {
+            code,
+            expected: expected_row_version,
+            actual,
+        });
+    }
+    Ok(locked)
 }
 
 /// Return the sealed password that a first save stores. `Keep` and `Clear` store none.

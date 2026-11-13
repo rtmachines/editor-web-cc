@@ -1,13 +1,19 @@
 //! Tests of the condition `low_disk` (ADR-0073 (e), (f), ADR-0075 (e), `reliability.md` 3.7).
 
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use parking_lot::Mutex;
 use tracing::Level;
 
 use super::support::{
-    LogCapture, Rig, TOTAL, UNREADABLE_TEXT, backups_path, pgdata, rig, run, sent_by_one_run,
-    space, volumes, walarchive,
+    LogCapture, Rig, TOTAL, UNREADABLE_TEXT, backups_path, pgdata, rig, rig_with_disk, run,
+    sent_by_one_run, space, volumes, walarchive,
 };
 use crate::memory::{DiskFailure, DiskReading};
-use crate::ports::{AlertCondition, FreeSpace};
+use crate::ports::{AlertCondition, DiskFault, DiskSpace, FreeSpace};
 
 /// Free blocks below the warning threshold: 14.9 %.
 const LOW: u64 = 149;
@@ -20,6 +26,72 @@ async fn the_job_reads_the_three_volumes_once_in_each_run() {
     run(&rig).await.unwrap();
     let paths: Vec<_> = volumes().into_iter().map(|(_, path)| path).collect();
     assert_eq!(rig.disk.queries(), paths);
+}
+
+/// The number of yields that hold one call of [`PeakDisk`] in flight.
+const HOLD_YIELDS: usize = 3;
+
+/// A disk double that counts the calls of `free_space` in flight for each path.
+///
+/// It solves one problem: a test must show that one run never reads one path twice at once.
+#[derive(Default)]
+struct PeakDisk {
+    /// The calls that have started and not ended, for each path.
+    in_flight: Mutex<HashMap<PathBuf, usize>>,
+    /// The highest number of calls in flight, for each path.
+    peaks: Mutex<HashMap<PathBuf, usize>>,
+}
+
+impl PeakDisk {
+    /// Record the start of a call for `path`.
+    fn enter(&self, path: &Path) {
+        let mut in_flight = self.in_flight.lock();
+        let now = in_flight.entry(path.to_path_buf()).or_default();
+        *now = now.saturating_add(1);
+        let peak = *now;
+        let mut peaks = self.peaks.lock();
+        let highest = peaks.entry(path.to_path_buf()).or_default();
+        *highest = (*highest).max(peak);
+    }
+
+    /// Record the end of a call for `path`.
+    fn leave(&self, path: &Path) {
+        if let Some(now) = self.in_flight.lock().get_mut(path) {
+            *now = now.saturating_sub(1);
+        }
+    }
+
+    /// Return the peak for `path`, or 0 when the job never read it.
+    fn peak(&self, path: &Path) -> usize {
+        self.peaks.lock().get(path).copied().unwrap_or(0)
+    }
+}
+
+#[async_trait]
+impl DiskSpace for PeakDisk {
+    async fn free_space(&self, path: &Path) -> Result<FreeSpace, DiskFault> {
+        self.enter(path);
+        for _ in 0..HOLD_YIELDS {
+            tokio::task::yield_now().await;
+        }
+        self.leave(path);
+        Ok(FreeSpace {
+            available_blocks: TOTAL / 2,
+            total_blocks: TOTAL,
+        })
+    }
+}
+
+#[tokio::test]
+async fn one_run_reads_each_volume_at_most_once_at_a_time() {
+    // ADR-0161: one run of `alerts` reads one path at most once at a time.
+    // The test does not forbid a read of two different paths at the same time.
+    let disk = Arc::new(PeakDisk::default());
+    let rig = rig_with_disk(Arc::clone(&disk) as Arc<dyn DiskSpace>);
+    run(&rig).await.unwrap();
+    for (_, path) in volumes() {
+        assert_eq!(disk.peak(&path), 1, "path {}", path.display());
+    }
 }
 
 #[tokio::test]
