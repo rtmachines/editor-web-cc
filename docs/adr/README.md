@@ -136,7 +136,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0124](0124-no-open-transaction-in-a-released-connection.md) | No open transaction in a released connection | Accepted. Amends ADR-0058 (m) | 2026-11-04 |
 | [0125](0125-end-of-an-accept-loop-stops-the-server.md) | The end of an accept loop stops the server | Accepted. Amends ADR-0057 (h), ADR-0058 (l) and (o), and ADR-0090 (b) | 2026-11-04 |
 | [0126](0126-marker-of-the-english-base-text.md) | Marker of the English base text in each UI language | Accepted. Amends ADR-0012 and the translation sentence of `api.md` section 8 | 2026-11-04 |
-| [0127](0127-test-gates.md) | Test gates on production code, PUBLIC rights, and rewrite forms | Accepted. Amended by ADR-0136 (rewrite forms). Amended by ADR-0153 | 2026-11-04 |
+| [0127](0127-test-gates.md) | Test gates on production code, PUBLIC rights, and rewrite forms | Accepted. Amended by ADR-0136 (rewrite forms). Amended by ADR-0153. Amended by ADR-0162 (coverage file accounting) | 2026-11-04 |
 | [0128](0128-ci-jobs-of-the-load-level-and-the-end-to-end-smoke.md) | CI jobs of the Load level and the End-to-end smoke | Accepted. Amends ADR-0064 (o). Amended by ADR-0129 (item (w) counts the field `stage` of the log line) | 2026-11-05 |
 | [0129](0129-stage-in-the-log-line-of-a-timeout.md) | Stage in the log line of a timeout | Accepted | 2026-11-05 |
 | [0130](0130-unlock-completes-when-the-unlock-event-fails.md) | Unlock completes when the unlock event fails | Accepted. Amends ADR-0035 (j) | 2026-11-05 |
@@ -171,6 +171,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0159](0159-unchanged-udt-revision.md) | Refusal of an unchanged UDT revision | Accepted | 2026-11-12 |
 | [0160](0160-add-link-after-the-last-page.md) | Add link after the last page of the parameter table | Accepted. Amends ADR-0043 (i) (the link "Add a parameter" on a page after the last page) | 2026-11-12 |
 | [0161](0161-bound-of-the-stalled-calls-of-a-path.md) | Bound of the stalled calls of a path | Accepted. Amends ADR-0133 (the consequence of one blocking thread per path) | 2026-11-13 |
+| [0162](0162-coverage-measurement-integrity.md) | Complete file accounting for the line coverage gate | Accepted. Amends ADR-0127 (h), (i), and (w) | 2026-11-13 |
 
 ## Decision map
 
@@ -211,7 +212,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Audit log insert and definer functions | 0098 (insert columns of `audit_log`, qualified operators of two definer functions) |
 | STE lint scope and script location in CI | 0023 + 0135 (OpenSpec specs in the scope) |
 | Browser tests | 0048 (Playwright regression suite on the dev server, smoke suite on the Compose stack). Also 0128 (the files `e2e/compose/` and `playwright.compose.config.ts`, the setup project `smoke-login` without a trace, the project `smoke-compose` in the job `compose`). Also 0128 (passwords only in the environment of `smoke.sh`, a scan of the artifacts for passwords, own RFC 8785 hash check) |
-| Test gates | 0127 (the coverage gate finds test code from the source, a crate without a reported line fails). Also 0127 (the grant test reads the rights of `PUBLIC`, a script rejects the rewrite forms and `DO` blocks). Also 0127 (the exact pin of `cargo-llvm-cov`, the branch protection of `main`). Also 0136 (14 more rewrite forms of the migration check). Also 0153 (the form `add column of a constrained domain`, the set of constrained domains over all files, no exemption by a domain of the same file). Load level: 0128 (the job `load` on `workflow_dispatch` and a push to `main`, a musl leg and a `cc-debian13` leg, seed through HTTP, flood with `oha`, memory check). Also 0128 (a red `load` on `main` blocks the next release, the pull-request job `ci-scripts` runs the tests of `deploy/ci/`) |
+| Test gates | 0127 (the coverage gate finds test code from the source, a crate without a reported line fails). Also 0127 (the grant test reads the rights of `PUBLIC`, a script rejects the rewrite forms and `DO` blocks). Also 0127 (the exact pin of `cargo-llvm-cov`, the branch protection of `main`). Also 0136 (14 more rewrite forms of the migration check). Also 0153 (the form `add column of a constrained domain`, the set of constrained domains over all files, no exemption by a domain of the same file). Load level: 0128 (the job `load` on `workflow_dispatch` and a push to `main`, a musl leg and a `cc-debian13` leg, seed through HTTP, flood with `oha`, memory check). Also 0128 (a red `load` on `main` blocks the next release, the pull-request job `ci-scripts` runs the tests of `deploy/ci/`). Also 0162 (complete file accounting of the line coverage gate, amends 0127 (h), (i), and (w)) |
 
 ## How to add an ADR
 
