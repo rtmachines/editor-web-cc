@@ -156,7 +156,7 @@ async fn a_revision_gets_the_next_number_and_supersedes_the_last_one() {
         902,
         ("ST_Zone", 2),
         Some(901),
-        &[("setpoint", real())],
+        &[("setpoint", real()), ("old", real())],
     ));
     let output = run(
         &fixture,

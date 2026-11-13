@@ -367,3 +367,23 @@ async fn parameters_new_form_tags_the_english_base_inputs_with_lang_en_in_pl() {
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert_english_base_inputs_are_tagged(&reply.body, "new");
 }
+
+/// ADR-0158 (k), design D4: the edit form of a parameter holds the indicator of
+/// `form-in-progress` after its save button.
+#[tokio::test]
+async fn parameters_page_edit_form_has_the_indicator_after_the_save_button() {
+    let world = recipe_world();
+    let reply = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let form = main_of(&reply.body)
+        .split("<form id=\"parameter-edit-form\"")
+        .nth(1)
+        .and_then(|rest| rest.split("</form>").next())
+        .unwrap();
+    let indicator = "<span class=\"htmx-indicator\">The server processes the request.</span>";
+    assert_eq!(form.matches(indicator).count(), 1, "{form}");
+    let save = position(form, "id=\"parameter-save-submit\"");
+    assert!(save < position(form, indicator), "{form}");
+}

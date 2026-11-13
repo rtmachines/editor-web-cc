@@ -104,7 +104,8 @@ async fn machines_list_hides_the_archived_machines_without_the_filter() {
     let reply = world.get_en(&world.engineer, "/machines").await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert!(!reply.body.contains("/machines/by-id/"), "{}", reply.body);
-    assert!(!reply.body.contains("M12"), "{}", reply.body);
+    // The icon paths of the page hold "M12", so the test looks for the code as link text.
+    assert!(!reply.body.contains(">M12</a>"), "{}", reply.body);
 }
 
 #[tokio::test]

@@ -144,7 +144,7 @@ fn unit_samples() -> Vec<Sample> {
     ]
 }
 
-/// The 7 samples of the errors about a type.
+/// The 8 samples of the errors about a type.
 fn type_samples() -> Vec<Sample> {
     vec![
         (
@@ -195,10 +195,18 @@ fn type_samples() -> Vec<Sample> {
             "Type ST_Zone has two members with the name speed. Give each member a different name.",
             "Typ ST_Zone ma dwa składniki o nazwie speed. Nadaj każdemu składnikowi inną nazwę.",
         ),
+        (
+            PlantError::RevisionUnchanged {
+                type_name: zone(),
+                revision: 3,
+            },
+            "Revision 3 of type ST_Zone has the same members. Change a member before you create the revision.",
+            "Rewizja 3 typu ST_Zone ma te same składniki. Zmień składnik, zanim utworzysz rewizję.",
+        ),
     ]
 }
 
-/// One sample of each of the 18 variants with a message, the English and the Polish sentence.
+/// One sample of each of the 19 variants with a message, the English and the Polish sentence.
 fn samples() -> Vec<Sample> {
     [machine_samples(), unit_samples(), type_samples()].concat()
 }
@@ -215,7 +223,7 @@ fn assert_sentence(body: &str, sentence: &str, what: &str) {
 #[tokio::test]
 async fn plant_error_args_give_every_placeable_a_value_in_both_languages() {
     let samples = samples();
-    assert_eq!(samples.len(), 18);
+    assert_eq!(samples.len(), 19);
     for (error, english, polish) in samples {
         let what = error.code().as_str();
         assert_sentence(&body_of(error.clone(), Lang::En).await, english, what);

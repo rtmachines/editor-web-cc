@@ -81,6 +81,8 @@ struct VersionPage<'a> {
     outdated: OutdatedList,
     table: ParameterTable,
     add_href: Option<String>,
+    /// True after the last page. The page then holds no `#parameter-rows` for the form to target.
+    after_end: bool,
     actions: VersionActions,
 }
 
@@ -157,6 +159,8 @@ impl<'a> VersionPage<'a> {
         let keys: BTreeSet<ParameterKey> = view.outdated.iter().map(|item| item.key).collect();
         let (kind, key) = state_badge(detail.state);
         let machine = &view.machine;
+        let table = ParameterTable::new(t, &base, list, &keys, page);
+        let after_end = table.after_end;
         Ok(Self {
             t,
             kind,
@@ -179,7 +183,8 @@ impl<'a> VersionPage<'a> {
             recipe_href: format!("/recipes/{reference}"),
             recipe_text: t.with_arg("recipe-title", "reference", reference),
             outdated,
-            table: ParameterTable::new(t, &base, list, &keys, page),
+            table,
+            after_end,
             add_href: add_href(request, view, &base, list)?,
             actions: version_actions(t, request, view)?,
             layout,

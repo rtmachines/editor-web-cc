@@ -61,6 +61,8 @@ mod sweep_tests;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 mod texts;
+#[cfg(test)]
+mod transport_error_tests;
 pub(crate) mod types;
 pub(crate) mod units;
 mod users;

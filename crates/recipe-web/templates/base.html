@@ -9,13 +9,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}'>
+<meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}],"timeout":45000}'>
 <title>{{ layout.title }} · {{ layout.t.get("app-name") }}</title>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/components.css">
 <script src="/static/htmx.min.js"></script>
 <script src="/static/row-version.js" defer></script>
 <script src="/static/tree.js" defer></script>
+<script src="/static/request-state.js" defer></script>
 </head>
 <body hx-history="false"{% if !layout.csrf_token.is_empty() %} hx-headers='{"X-CSRF-Token":"{{ layout.csrf_token }}"}'{% endif %}>
 <a class="skip-link" href="#content">{{ layout.t.get("skip-to-content") }}</a>
@@ -41,5 +42,7 @@
 <div id="toast" role="status" aria-live="polite">{% if let Some(text) = layout.toast %}{{ toasts::success(text) }}{% endif %}</div>
 {% block content %}{% endblock %}
 {% if !layout.is_content() %}</main>
+{% let no_reference = String::new() -%}
+<template id="transport-error"><div data-transport-error>{{ alerts::alert("error", layout.transport_error_code(), layout.transport_error_sentence(), no_reference) }}</div></template>
 </body>
 </html>{% endif %}

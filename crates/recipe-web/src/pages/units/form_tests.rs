@@ -17,8 +17,6 @@ const FORM_TAG: &str = "<form id=\"unit-add-form\" method=\"post\" action=\"/mac
 /// The opening tag of the form of the page. The page has no `#unit-tree`, so the form is plain.
 const PLAIN_FORM_TAG: &str =
     "<form id=\"unit-add-form\" method=\"post\" action=\"/machines/M7/units\">";
-/// The number of live units of `M7` with depth 1 to 4. Each one is a parent in the list.
-const M7_PARENTS: usize = 42;
 
 /// Return the markup of the form of a fragment or a page, from `<form` to `</form>`.
 fn form_of(body: &str) -> &str {
@@ -70,48 +68,65 @@ async fn units_form_fragment_names_the_parent_in_an_h2_and_nothing_else_around_i
     }
 }
 
-#[tokio::test]
-async fn units_form_fragment_lists_none_and_the_live_parents_and_selects_the_chosen_one() {
-    let world = world();
-    let body = fragment(&world, "?parent_path=U1.2").await;
-    let form = form_of(&body);
-    assert!(
-        form.contains("<label for=\"parent_path\">Parent unit</label>"),
-        "{form}"
-    );
-    assert!(
-        form.contains("<select id=\"parent_path\" name=\"parent_path\">"),
-        "{form}"
-    );
-    let none = "<option value=\"\">None. The unit is a main unit.</option>";
-    assert!(form.contains(none), "{form}");
-    assert!(
-        form.contains("<option value=\"U1.2\" selected>U1.2 Unit U1.2</option>"),
-        "{form}"
-    );
-    assert_eq!(form.matches(" selected").count(), 1, "{form}");
-    assert_eq!(
-        form.matches("<option").count(),
-        M7_PARENTS.checked_add(1).unwrap(),
-        "none and the units of depth 1 to 4"
-    );
-    assert!(
-        !form.contains("<option value=\"U1.2.4.5.6\""),
-        "a unit of depth 5 is no parent"
-    );
+/// The hidden field that keeps the parent of the form (design D3).
+fn hidden_parent(value: &str) -> String {
+    format!("<input type=\"hidden\" name=\"parent_path\" value=\"{value}\">")
+}
+
+/// Assert that the form has no control that changes the parent.
+fn assert_no_parent_control(form: &str) {
+    for control in ["<select", "<option", "id=\"parent_path\""] {
+        assert!(!form.contains(control), "{control}: {form}");
+    }
 }
 
 #[tokio::test]
-async fn units_form_fragment_without_a_parent_selects_none_and_proposes_the_next_main_number() {
+async fn units_form_fragment_keeps_the_parent_in_a_hidden_field_and_shows_it_in_a_text_line() {
+    let world = world();
+    let path = "/machines/M31/units/new?parent_path=U1";
+    let reply = world.get_form(&world.engineer, path).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(
+        reply.body.starts_with("<h2>New unit under U1</h2>"),
+        "{}",
+        reply.body
+    );
+    let (_before, rest) = reply
+        .body
+        .split_once("<form id=\"unit-add-form\" method=\"post\" action=\"/machines/")
+        .unwrap();
+    let form = rest.split("</form>").next().unwrap();
+    assert_no_parent_control(form);
+    assert_eq!(form.matches("name=\"parent_path\"").count(), 1, "{form}");
+    let hidden = hidden_parent("U1");
+    let line =
+        "<p class=\"field\" id=\"parent-line\">Parent unit: <span class=\"data\">U1</span></p>";
+    let segment = "<div class=\"field\"><label for=\"segment\">";
+    let at = |needle: &str| form.find(needle).expect(needle);
+    assert!(
+        at(&hidden) < at(line),
+        "the hidden field stands first: {form}"
+    );
+    assert!(
+        at(line) < at(segment),
+        "the text line stands before the segment: {form}"
+    );
+    assert!(input_of(form, "segment").contains("value=\"2\""), "{form}");
+}
+
+#[tokio::test]
+async fn units_form_fragment_without_a_parent_keeps_an_empty_hidden_field_and_proposes_the_next_main_number()
+ {
     let world = world();
     let body = fragment(&world, "").await;
     assert!(body.starts_with("<h2>New main unit</h2>"), "{body}");
     let form = form_of(&body);
-    assert!(
-        form.contains("<option value=\"\" selected>None. The unit is a main unit.</option>"),
-        "{form}"
-    );
-    assert_eq!(form.matches(" selected").count(), 1, "{form}");
+    assert_no_parent_control(form);
+    assert_eq!(form.matches("name=\"parent_path\"").count(), 1, "{form}");
+    assert!(form.contains(&hidden_parent("")), "{form}");
+    let line =
+        "<p class=\"field\" id=\"parent-line\">Parent unit: None. The unit is a main unit.</p>";
+    assert!(form.contains(line), "{form}");
     assert!(input_of(form, "segment").contains("value=\"2\""), "{form}");
 }
 

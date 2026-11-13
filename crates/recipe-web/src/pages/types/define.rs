@@ -189,7 +189,7 @@ fn member_row(rows: &[SentRow], member: &MemberName, skip: usize) -> Option<usiz
 ///
 /// `E-PLT-015` names the name input of a new struct. `E-PLT-021` names the second row with the
 /// member name. `E-PLT-006` and `E-PLT-013` name the type input of the first matching row. Any
-/// other error names no input.
+/// other error names no input, for example `E-PLT-052` of an unchanged revision (ADR-0159 (f)).
 fn refused_input(error: &AppError, target: &Target, rows: &[SentRow]) -> Option<String> {
     let AppError::Plant(error) = error else {
         return None;

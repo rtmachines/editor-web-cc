@@ -36,14 +36,6 @@ pub(super) struct NewQuery {
     parent_path: Option<String>,
 }
 
-/// One option of the list of parents.
-pub(super) struct ParentOption {
-    /// The unit path, or an empty text for the option "None".
-    pub(super) value: String,
-    /// The text of the option: the unit path and the unit name, or the word for "None".
-    pub(super) text: String,
-}
-
 /// Where a form stands, so one template serves the fragment, the page, and the renewed form.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Place {
@@ -65,7 +57,7 @@ pub(super) enum Place {
 /// What `unit-form.html` shows.
 ///
 /// The type solves one problem: the fragment, the page, and the answer of an add show the same
-/// form. One view gives them the same fields, so they agree on the list of parents and the
+/// form. One view gives them the same fields, so they agree on the parent and the
 /// proposed segment. The struct that includes the template has the fields `t` and `form`.
 pub(super) struct FormView {
     /// True when the form has the literal `hx-*` attributes of design D6.
@@ -76,9 +68,8 @@ pub(super) struct FormView {
     pub(super) action: String,
     /// The text of the `h2`: the new unit under the parent, or a new main unit.
     pub(super) heading: String,
-    /// The option "None" and the live parents of depth 1 to 4.
-    pub(super) parents: Vec<ParentOption>,
-    /// The value of the chosen option: the parent path, or an empty text for a main unit.
+    /// The parent path, or an empty text for a main unit. It is the value of the hidden field
+    /// `parent_path` and the text of the line that names the parent.
     pub(super) selected: String,
     /// The text of the segment input: the proposed segment or the sent text. `None` when all 64
     /// are in use.
@@ -98,16 +89,6 @@ pub(super) struct FormView {
 impl FormView {
     /// Build the view from the result of `GetUnitForm`.
     pub(super) fn new(t: Texts<'_>, form: &UnitForm, csrf_token: String, place: Place) -> Self {
-        let none = ParentOption {
-            value: String::new(),
-            text: t.get("unit-parent-none"),
-        };
-        let parents = std::iter::once(none)
-            .chain(form.parents.iter().map(|unit| ParentOption {
-                value: unit.path().to_string(),
-                text: format!("{} {}", unit.path(), unit.name()),
-            }))
-            .collect();
         let heading = form.parent.as_ref().map_or_else(
             || t.get("unit-new-main"),
             |parent| t.with_arg("unit-new-under", "path", parent),
@@ -122,7 +103,6 @@ impl FormView {
             autofocus,
             action: format!("/machines/{}/units", form.machine.code()),
             heading,
-            parents,
             selected: form
                 .parent
                 .as_ref()

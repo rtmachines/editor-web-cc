@@ -30,6 +30,9 @@ pub(crate) const ROW_VERSION_BYTES: &[u8] = include_bytes!("../static/row-versio
 /// The script that opens and closes the groups of a tree (`design-system.md` section 10.8).
 pub(crate) const TREE_BYTES: &[u8] = include_bytes!("../static/tree.js");
 
+/// The script that shows the state of a request on its form (`api.md` section 9, ADR-0158).
+pub(crate) const REQUEST_STATE_BYTES: &[u8] = include_bytes!("../static/request-state.js");
+
 /// The media type of a script.
 const JAVASCRIPT: &str = "application/javascript";
 
@@ -101,8 +104,8 @@ pub(crate) struct StaticFile {
     pub(crate) media_type: &'static str,
 }
 
-/// The five files of `api.md` section 9, in the order of the route table.
-pub(crate) const STATIC_FILES: [StaticFile; 5] = [
+/// The six files of `api.md` section 9, in the order of the route table.
+pub(crate) const STATIC_FILES: [StaticFile; 6] = [
     StaticFile {
         path: "/static/htmx.min.js",
         bytes: HTMX_BYTES,
@@ -126,6 +129,11 @@ pub(crate) const STATIC_FILES: [StaticFile; 5] = [
     StaticFile {
         path: "/static/tree.js",
         bytes: TREE_BYTES,
+        media_type: JAVASCRIPT,
+    },
+    StaticFile {
+        path: "/static/request-state.js",
+        bytes: REQUEST_STATE_BYTES,
         media_type: JAVASCRIPT,
     },
 ];

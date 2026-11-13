@@ -124,7 +124,7 @@ PLC connection record (ADR-0154). The machine page shows the record without the 
 | GET | `/machines/{code}/types/new` | `GetUdtForm` | `UdtManage` | optional `from` (ADR-0037) | `200` form. With `from`, the form of a new revision of `from` with the members of its latest revision | `404 E-WEB-005` |
 | POST | `/machines/{code}/types` | `DefineUdt` | `UdtManage` | `name`, `members[i].name`, `members[i].type` (a `TypeExpr`), optional `add` (ADR-0037) | `303` to the new type. With `add=1`, the query `GetUdtForm` runs in place of `DefineUdt`. Then `200` with the form, the sent rows, and one more empty row | `422 E-PLT-005`, `422 E-PLT-006`, `422 E-PLT-013`, `409 E-PLT-015`, `422 E-PLT-016`, `422 E-PLT-018`, `422 E-PLT-021` |
 | GET | `/machines/{code}/types/{name}` | `GetTypeTree` | `RecipeView` | optional `rev` | `200` type tree of the latest revision, or of `rev`. A machine on `S7_300`, `S7_1200`, or `S7_1500` also gets the S7 layout (ADR-0108 (h)) | `404 E-WEB-005` |
-| POST | `/machines/{code}/types/{name}/revisions` | `DefineUdt` | `UdtManage` | same as `POST /types`. The server sets `supersedes` | `303` to the new revision | same as `POST /types` |
+| POST | `/machines/{code}/types/{name}/revisions` | `DefineUdt` | `UdtManage` | same as `POST /types`. The server sets `supersedes` | `303` to the new revision | same as `POST /types`, and `409 E-PLT-052` (ADR-0159) |
 | GET | `/machines/{code}/types/{name}/usage` | `GetTypeUsage` | `RecipeView` | optional `rev`, `page` | `200` list of recipes and parameters that use the revision, directly or through another type. `page.type_usage` rows per page | `404 E-WEB-005` |
 
 A malformed `from` gives `404 E-WEB-005`, as a malformed `{name}` does. A `rev` that is not a revision number, or a revision that does not exist, gives `404 E-WEB-005`. The usage list shows the versions `Draft`, `Approved`, and `Retired` of the recipes that are not deleted (ADR-0037).
@@ -452,7 +452,7 @@ Every error fragment shows:
 - one sentence in the UI language that tells the user what to do,
 - the `request_id`.
 
-The same code appears in the structured log of the request. A user can report the code and the `request_id`. The operator finds the log line with them (R36). The answer of the backstop of section 5.1 is the one exception.
+The same code appears in the structured log of the request. A user can report the code and the `request_id`. The operator finds the log line with them (R36). Two answers are exceptions. The first is the answer of the backstop of section 5.1. The second is `E-WEB-015`. The server renders its template in each full page and the browser script copies it. The browser got no answer, so the fragment has no reference and no `request_id`. The server may have run the request. The operator can look for a log line by the time and the user (ADR-0158 (e), (i)).
 
 ### 5.3 Content negotiation
 
@@ -843,7 +843,9 @@ The answer of the backstop of section 5.1 is the one exception. It gets only `X-
 
 Caddy sets HSTS, CSP, `nosniff`, and `Referrer-Policy` only as defaults. A default applies only when the answer has no value. The answers of `app` therefore keep their own values, and the answers of Caddy get the same headers. Caddy deletes the header `Server` (ADR-0065 (f), (g)).
 
-HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`, `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`. By default HTMX 2 does not swap a 4xx or 5xx response, and `HX-Retarget` does not change that. The value of `responseHandling` swaps it, so `conflict.html`, `field-errors.html`, and `error.html` reach the page (sections 4 and 5.3).
+HTMX configuration, set in a `<meta name="htmx-config">` tag: `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`, `methodsThatUseUrlParams: ["get"]`, `includeIndicatorStyles: false`, `timeout: 45000`, `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`. By default HTMX 2 does not swap a 4xx or 5xx response, and `HX-Retarget` does not change that. The value of `responseHandling` swaps it, so `conflict.html`, `field-errors.html`, and `error.html` reach the page (sections 4 and 5.3).
+
+The value of `timeout` is the setting `htmx.request_timeout` in milliseconds (`reliability.md` 7.11). It is above `http.request_timeout`, so the server answer `503 E-WEB-009` arrives first (ADR-0158 (j)).
 
 The value of `methodsThatUseUrlParams` keeps the parameters of every method other than `GET` in the body. No route uses `DELETE` (ADR-0040).
 
@@ -858,6 +860,16 @@ Permitted client-side scripts. No other script exists in the application:
 | `static/htmx.min.js` | HTMX 2, vendored and pinned (ADR-0001) | unchanged upstream file |
 | `static/row-version.js` | Updates hidden `row_version` fields from `HX-Trigger` (section 4) | 20 lines |
 | `static/tree.js` | Expand and collapse of the unit tree, the type tree, and the groups of the leaf grid (ADR-0039), keyboard focus | 50 lines |
+| `static/request-state.js` | Locks a form while its request runs, and shows the message of a lost answer (ADR-0158) | 40 lines |
+
+Rules for `static/request-state.js` (ADR-0158):
+
+- On `htmx:beforeRequest`, the script locks the form that holds the requesting element (`elt.closest("form")`). It sets `aria-busy="true"` on that form. It sets `readonly` on the text inputs and the `textarea` elements of that form (ADR-0158 (b)).
+- The script counts the open requests of a form. It unlocks the form on `htmx:afterRequest` and on `htmx:onLoadError` of the last open request only (ADR-0158 (d)).
+- While a form is busy, the script refuses a change of a `select`, a check box, and a radio button of that form. It lets through Tab, each key with Ctrl, Alt, or Meta, and the keys F1 to F12. So the shortcuts of the browser work (ADR-0158 (c)).
+- On the next `htmx:beforeRequest`, the script deletes the message of a lost answer from `#error-panel` (ADR-0158 (h)).
+- On `htmx:sendError` or `htmx:timeout`, the script copies `#transport-error` into `#error-panel` and empties `#toast`. This message uses the fragment of `design-system.md` section 10.6 (ADR-0158 (e), (f)).
+- Section 10.7 of `design-system.md` gives the rule of the toast.
 
 Rules for templates:
 

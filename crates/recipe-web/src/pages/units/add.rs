@@ -31,8 +31,6 @@ use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
 
-/// The `id` of the parent list of the form.
-const PARENT_INPUT: &str = "parent_path";
 /// The `id` of the segment input of the form.
 const SEGMENT_INPUT: &str = "segment";
 /// The `id` of the name input of the form.
@@ -58,14 +56,15 @@ impl AddFields {
     ///
     /// # Errors
     ///
-    /// Returns the line of the error of `UnitPath` under the parent list, for example `E-PLT-017`.
+    /// Returns the line of the error of `UnitPath` without a target, for example `E-PLT-017`. The
+    /// form has no parent input, so the line stands in the summary only (design D3).
     fn parent(&self) -> Result<Option<UnitPath>, FieldError> {
         if self.parent_path.is_empty() {
             return Ok(None);
         }
         UnitPath::parse(&self.parent_path)
             .map(Some)
-            .map_err(|error| FieldError::plant(&error, Some(PARENT_INPUT.to_owned())))
+            .map_err(|error| FieldError::plant(&error, None))
     }
 
     /// Read the segment as `AddUnit` reads it: one segment, and at most 5 levels with `parent`.
@@ -125,24 +124,24 @@ impl AddFields {
     }
 }
 
-/// Return the input that a refused `AddUnit` names: the parent list or the segment.
+/// Return the input that a refused `AddUnit` names: the segment, or none for an error of the parent.
+///
+/// The form has no parent input, so `ParentNotFound` and `UnitArchived` get no target (design D3).
 fn add_input(error: &AppError) -> Option<String> {
     let AppError::Plant(error) = error else {
         return None;
     };
-    let id = match error {
-        PlantError::ParentNotFound { .. } | PlantError::UnitArchived { .. } => PARENT_INPUT,
+    match error {
         PlantError::DuplicateUnitPath { .. }
         | PlantError::InvalidUnitPath { .. }
-        | PlantError::UnitDepthExceeded { .. } => SEGMENT_INPUT,
-        _other => return None,
-    };
-    Some(id.to_owned())
+        | PlantError::UnitDepthExceeded { .. } => Some(SEGMENT_INPUT.to_owned()),
+        _other => None,
+    }
 }
 
 /// Run `GetUnitForm` for a main unit with `purpose`. The query checks that permission first.
 ///
-/// The form of an error answer shows the sent parent and segment, so it needs only the parents.
+/// The form of an error answer shows the sent parent and segment, so it needs no parent of its own.
 /// Each write route runs it before its field check, so a role without the right gets
 /// `403 E-WEB-002` and no form (ADR-0046 (a)).
 pub(super) async fn unit_form(

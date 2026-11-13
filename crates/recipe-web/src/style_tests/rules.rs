@@ -586,6 +586,19 @@ fn rules_htmx_indicator_changes_only_opacity() {
 }
 
 #[test]
+fn rules_a_busy_form_sets_only_the_progress_cursor() {
+    let sheet = app_sheet();
+    let rules = rules_of(&sheet, "form[aria-busy=\"true\"]", None);
+    assert_eq!(rules.len(), 1, "one rule for a busy form");
+    let decls: Vec<(&str, &str)> = rules
+        .iter()
+        .flat_map(|rule| rule.decls.iter())
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect();
+    assert_eq!(decls, [("cursor", "progress")]);
+}
+
+#[test]
 fn rules_font_faces_match_the_font_table_of_the_design() {
     let sheet = sheet();
     let faces: Vec<&Rule> = sheet

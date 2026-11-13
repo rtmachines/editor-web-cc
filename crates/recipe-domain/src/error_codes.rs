@@ -74,6 +74,8 @@ impl ErrorCode {
     pub const PLT_050: Self = Self::new("E-PLT-050");
     /// E-PLT-051, `PlantError::DataBlockNotOnPlatform`.
     pub const PLT_051: Self = Self::new("E-PLT-051");
+    /// E-PLT-052, `PlantError::RevisionUnchanged`.
+    pub const PLT_052: Self = Self::new("E-PLT-052");
 
     /// E-RCP-001, `RecipeError::DuplicateReference`.
     pub const RCP_001: Self = Self::new("E-RCP-001");
@@ -270,6 +272,8 @@ impl ErrorCode {
     pub const WEB_013: Self = Self::new("E-WEB-013");
     /// E-WEB-014, `AppError::SecretUnreadable`.
     pub const WEB_014: Self = Self::new("E-WEB-014");
+    /// E-WEB-015, the script `request-state.js`. No Rust error type returns it.
+    pub const WEB_015: Self = Self::new("E-WEB-015");
 
     const fn new(text: &'static str) -> Self {
         Self(text)
@@ -362,6 +366,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::PLT_038,
     ErrorCode::PLT_050,
     ErrorCode::PLT_051,
+    ErrorCode::PLT_052,
     ErrorCode::RCP_001,
     ErrorCode::RCP_002,
     ErrorCode::RCP_003,
@@ -420,6 +425,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::WEB_012,
     ErrorCode::WEB_013,
     ErrorCode::WEB_014,
+    ErrorCode::WEB_015,
 ];
 
 /// Return true when `code` has the format and a number range of section 1.2.

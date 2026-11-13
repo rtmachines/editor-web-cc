@@ -4,16 +4,19 @@
 //! ADR-0043 (e), (i), and (j), design D7.
 
 use axum::http::StatusCode;
+use recipe_domain::recipe::VersionState;
 
 use super::actions_tests::assert_no_action_form;
 use crate::i18n::Lang;
-use crate::pages::recipes::test_world::recipe_world;
+use crate::pages::recipes::test_world::{recipe_world, seed_recipe_of_m20};
 use crate::pages::test_helpers::{assert_clean_html, assert_error};
 use crate::test_support::plant::main_of;
 use crate::test_support::{icon_tag, text};
 
 /// The link that loads the form of a new parameter of the draft of `R-100` into `#parameter-form`.
 const ADD_LINK: &str = "<a class=\"target-link\" href=\"/recipes/R-100/versions/3/parameters/new\" hx-boost=\"true\" hx-target=\"#parameter-form\" hx-swap=\"innerHTML\" hx-push-url=\"false\">Add a parameter</a>";
+/// The link of the draft of `R-100` after the last page. It loads the page form into `#content`.
+const ADD_LINK_AFTER_END: &str = "<a class=\"target-link\" href=\"/recipes/R-100/versions/3/parameters/new\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\">Add a parameter</a>";
 /// The tags of the draft of `R-100` in the order unit path, ordinal, and tag.
 const TAGS: [&str; 8] = [
     "LINE",
@@ -116,6 +119,37 @@ async fn versions_page_of_a_process_engineer_on_the_draft_holds_the_add_link() {
     assert!(main.contains("<div id=\"parameter-form\"></div>"), "{main}");
     assert!(main.contains("<div id=\"outdated-list\">"), "{main}");
     assert!(main.contains("<div id=\"parameter-table\">"), "{main}");
+}
+
+#[tokio::test]
+async fn versions_page_after_the_last_page_links_the_add_form_into_content() {
+    let world = recipe_world();
+    let reply = world
+        .get_en(&world.engineer, "/recipes/R-100/versions/3?page=2")
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    assert!(!main.contains("id=\"parameter-rows\""), "{main}");
+    assert!(main.contains(ADD_LINK_AFTER_END), "{main}");
+    assert!(!main.contains(ADD_LINK), "{main}");
+}
+
+/// Guard of design D1: an empty draft is not "after the last page", so its first page keeps the
+/// link into `#parameter-form`. The test passes before and after the `after_end` link.
+#[tokio::test]
+async fn versions_page_first_page_of_a_draft_without_parameters_keeps_the_add_link_into_the_form() {
+    let world = recipe_world();
+    seed_recipe_of_m20(&world.fixture, (803, "R-803"), &[VersionState::LiveDraft]);
+    let reply = world
+        .get_en(&world.engineer, "/recipes/R-803/versions/1")
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let add_link = ADD_LINK.replace("R-100/versions/3", "R-803/versions/1");
+    assert!(main.contains("<tbody id=\"parameter-rows\">"), "{main}");
+    assert!(main.contains(&add_link), "{main}");
+    let after_end = ADD_LINK_AFTER_END.replace("R-100/versions/3", "R-803/versions/1");
+    assert!(!main.contains(&after_end), "{main}");
 }
 
 #[tokio::test]

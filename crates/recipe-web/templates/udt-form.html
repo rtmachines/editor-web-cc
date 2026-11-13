@@ -15,8 +15,8 @@
 {% endfor %}<datalist id="type-choices">{% for choice in form.choices %}<option value="{{ choice }}">{% endfor %}</datalist>
 <span class="field-hint">{{ t.get("udt-empty-rows-hint") }}</span>
 </fieldset>
-<div class="actions">{% if form.at_max %}{{ alerts::notice("info", t.get("udt-max-rows")) }}{% else %}<button type="submit" name="add" value="1" id="udt-add-member" class="btn btn-secondary">{{ t.get("udt-add-member") }}</button>{% endif %}
-<button type="submit" id="udt-define-submit" class="btn btn-primary">{% if form.revision %}{{ t.get("udt-revision-submit") }}{% else %}{{ t.get("udt-create-submit") }}{% endif %}</button></div>
+<div class="actions"><button type="submit" id="udt-define-submit" class="btn btn-primary">{% if form.revision %}{{ t.get("udt-revision-submit") }}{% else %}{{ t.get("udt-create-submit") }}{% endif %}</button>
+{% if form.at_max %}{{ alerts::notice("info", t.get("udt-max-rows")) }}{% else %}<button type="submit" name="add" value="1" id="udt-add-member" class="btn btn-secondary">{{ t.get("udt-add-member") }}</button>{% endif %}</div>
 </form>{% endif %}{% endblock %}
 <p><a class="target-link" href="{{ list_href }}">{{ list_text }}</a></p>
 {% endblock %}

@@ -107,7 +107,11 @@ async fn static_files_components_css_needs_no_session() {
 #[tokio::test]
 async fn static_files_each_script_needs_no_session() {
     let router = app();
-    for path in ["/static/row-version.js", "/static/tree.js"] {
+    for path in [
+        "/static/row-version.js",
+        "/static/tree.js",
+        "/static/request-state.js",
+    ] {
         let response = get(&router, path).await;
         assert_eq!(response.status(), 200, "{path}");
         assert_eq!(

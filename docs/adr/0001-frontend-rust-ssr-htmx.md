@@ -1,6 +1,6 @@
 # ADR-0001: Frontend with Rust server-side rendering and HTMX
 
-Status: Accepted. Amended by ADR-0015 (row-version.js) and ADR-0039 (the value editor sends the whole value in one form)
+Status: Accepted. Amended by ADR-0015 (row-version.js) and ADR-0039 (the value editor sends the whole value in one form). Amended by ADR-0158 (the list of scripts)
 Date: 2026-10-12
 Deciders: project owner
 

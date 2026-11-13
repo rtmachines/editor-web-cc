@@ -83,6 +83,7 @@ The server reads the name and every member row before it defines the type. It sh
 | `E-PLT-006` | Member `x` uses a type that does not exist on the platform | Use a type of the platform of the machine, for example `INT` and not `LREAL` on `S7_300` |
 | `E-PLT-021` | Two members have the same name | Give each member a different name. The line stands under the second row |
 | `E-PLT-005` | The type contains itself | Delete the member that names the type. This includes a member of an earlier revision of the same type, for example `ST_Zone@1` (ADR-0038) |
+| `E-PLT-052` | The revision has the same members as the latest revision | Change a member, for example its name or its type expression. Then select **Create revision** again |
 | `E-PLT-015` | The type name exists on the machine | Open the existing type and select **New revision** |
 | `E-PLT-016` | The type has no members | Fill at least one member row |
 | `E-PLT-018` | The type is larger than the limit | Use fewer elements, fewer members, or fewer levels |
@@ -91,6 +92,6 @@ The server reads the name and every member row before it defines the type. It sh
 
 The reasons of `E-WEB-008` and the other lines are in the bundle `en`. The type name `new` is not valid, and neither is a primitive name. A type name and a member name start with a letter or an underscore. They have 1 to 64 letters, digits, and underscores.
 
-The errors `E-PLT-005`, `E-PLT-006`, `E-PLT-015`, `E-PLT-016`, `E-PLT-018`, and `E-PLT-021` come from the command. The server returns one of them for each save. Fix it and select **Create type** or **Create revision** again.
+The errors `E-PLT-005`, `E-PLT-006`, `E-PLT-015`, `E-PLT-016`, `E-PLT-018`, `E-PLT-021`, and `E-PLT-052` come from the command. The server returns one of them for each save. Fix it and select **Create type** or **Create revision** again.
 
 The full list of codes is in `reliability.md` section 1.2.

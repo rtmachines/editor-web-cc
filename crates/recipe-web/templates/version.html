@@ -43,7 +43,7 @@
 {#- Each rebind form starts with its own h2. So the parameter table has its own h2 before #parameter-table, outside that element. The h2 stays on every version page and in place when a rebind swaps the table. #}
 <h2>{{ t.get("parameters-caption") }}</h2>
 <div id="parameter-table">{% include "parameter-table.html" %}</div>
-{% if let Some(href) = add_href %}<p class="actions"><a class="target-link" href="{{ href }}" hx-boost="true" hx-target="#parameter-form" hx-swap="innerHTML" hx-push-url="false">{{ t.get("parameter-add-link") }}</a></p>
+{% if let Some(href) = add_href %}<p class="actions">{% if after_end %}<a class="target-link" href="{{ href }}" hx-boost="true" hx-target="#content" hx-push-url="true">{{ t.get("parameter-add-link") }}</a>{% else %}<a class="target-link" href="{{ href }}" hx-boost="true" hx-target="#parameter-form" hx-swap="innerHTML" hx-push-url="false">{{ t.get("parameter-add-link") }}</a>{% endif %}</p>
 {% endif %}<div id="parameter-form"></div>
 {% if let Some(danger) = actions.danger %}<h2>{{ t.get("version-actions-heading") }}</h2>
 {{ dangers::danger_versioned(t, danger.summary, danger.notice, danger.button, danger.action, layout.csrf_token, actions.row_version) }}

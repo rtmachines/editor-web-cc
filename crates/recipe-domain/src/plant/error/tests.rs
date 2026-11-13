@@ -409,6 +409,16 @@ fn plant_samples() -> Vec<(PlantError, Vec<(&'static str, String)>)> {
             vec![("type_name", zone().to_string())],
         ),
         (
+            PlantError::RevisionUnchanged {
+                type_name: zone(),
+                revision: 3,
+            },
+            vec![
+                ("type_name", zone().to_string()),
+                ("revision", "3".to_owned()),
+            ],
+        ),
+        (
             PlantError::TypeTooLarge {
                 type_name: "ST_Zone".to_owned(),
                 limit: TypeLimit::Members,
@@ -584,11 +594,11 @@ fn registry_matches_reliability() {
     let rows = plant_doc_rows();
     let expected: Vec<String> = (1..=6)
         .chain(8..=29)
-        .chain(50..=51)
+        .chain(50..=52)
         .map(|number| format!("E-PLT-{number:03}"))
         .collect();
 
-    // Assertion 1: the doc has the 30 domain rows, in order.
+    // Assertion 1: the doc has the 31 domain rows, in order.
     let doc_codes: Vec<String> = rows.iter().map(|row| row.0.clone()).collect();
     assert_eq!(doc_codes, expected);
 
@@ -741,4 +751,19 @@ fn connection_errors_have_their_code_registry_row_and_text() {
         assert!(REGISTRY.contains(&expected), "{text}");
         assert_eq!(error.to_string(), message);
     }
+}
+
+#[test]
+fn revision_unchanged_has_code_plt_052_and_the_adr_0159_text() {
+    let error = PlantError::RevisionUnchanged {
+        type_name: TypeName::parse("ST_Zone").unwrap(),
+        revision: 3,
+    };
+    assert_eq!(error.code(), ErrorCode::PLT_052);
+    assert_eq!(error.code().as_str(), "E-PLT-052");
+    assert!(REGISTRY.contains(&ErrorCode::PLT_052));
+    assert_eq!(
+        error.to_string(),
+        "Revision 3 of type ST_Zone has the same members. Change a member before you create the revision."
+    );
 }

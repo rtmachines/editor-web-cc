@@ -1,6 +1,6 @@
 # ADR-0049: Approval preview and lifecycle actions
 
-Status: Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer in (k)). Amended by ADR-0110 (item (f): several danger actions on one page, a unique notice id for each)
+Status: Accepted. Amended by ADR-0052 (export link in the action area). Amended by ADR-0057 (no `HX-*` header on the answer of the backstop panic layer in (k)). Amended by ADR-0110 (item (f): several danger actions on one page, a unique notice id for each). Amended by ADR-0158 (the list of forms with an indicator in (j))
 Date: 2026-10-16
 Deciders: project owner
 

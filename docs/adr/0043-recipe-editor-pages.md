@@ -1,6 +1,6 @@
 # ADR-0043: Pages of the recipe editor
 
-Status: Accepted. Amended by ADR-0044 (bound of the rebind forms). Amended by ADR-0108 (item (e): the compare form of a deleted recipe). Amended by ADR-0108 (item (j): the columns of the parameter table)
+Status: Accepted. Amended by ADR-0044 (bound of the rebind forms). Amended by ADR-0108 (item (e): the compare form of a deleted recipe). Amended by ADR-0108 (item (j): the columns of the parameter table). Amended by ADR-0160 (item (i): the link "Add a parameter" on a page after the last page)
 Date: 2026-10-15
 Deciders: project owner
 

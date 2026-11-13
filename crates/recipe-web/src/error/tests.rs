@@ -23,7 +23,7 @@ use crate::routes::{Access, RouteEntry, assemble, table};
 use crate::test_support::{PEER, install, state};
 
 const BODY_LIMIT: usize = 1024 * 1024;
-const HTMX_CONFIG: &str = r#"{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]}"#;
+const HTMX_CONFIG: &str = r#"{"allowEval":false,"allowScriptTags":false,"selfRequestsOnly":true,"historyCacheSize":0,"methodsThatUseUrlParams":["get"],"includeIndicatorStyles":false,"responseHandling":[{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}],"timeout":45000}"#;
 
 fn login() -> Login {
     Login::parse("anna").unwrap()
@@ -350,10 +350,10 @@ async fn error_mapping_page_has_no_inline_script_style_or_handler() {
         assert!(!body.contains("|safe"), "{case}");
         assert!(!body.contains(" onclick="), "{case}");
         assert!(!body.contains(" onload="), "{case}");
-        assert_eq!(body.matches("<script").count(), 3, "{case}");
+        assert_eq!(body.matches("<script").count(), 4, "{case}");
         assert_eq!(
             body.matches(r#"<script src="/static/"#).count(),
-            3,
+            4,
             "{case}"
         );
     }

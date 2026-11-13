@@ -342,6 +342,16 @@ pub enum PlantError {
         /// The platform of the machine.
         platform: PlcPlatform,
     },
+    /// A new revision has the members of the latest revision (`E-PLT-052`).
+    #[error(
+        "Revision {revision} of type {type_name} has the same members. Change a member before you create the revision."
+    )]
+    RevisionUnchanged {
+        /// The struct with the unchanged revision.
+        type_name: TypeName,
+        /// The latest revision of the struct.
+        revision: u32,
+    },
 }
 
 impl PlantError {
@@ -380,6 +390,7 @@ impl PlantError {
             Self::ConnectionRecipeMismatch { .. } => ErrorCode::PLT_029,
             Self::DataBlockMissing { .. } => ErrorCode::PLT_050,
             Self::DataBlockNotOnPlatform { .. } => ErrorCode::PLT_051,
+            Self::RevisionUnchanged { .. } => ErrorCode::PLT_052,
         }
     }
 }

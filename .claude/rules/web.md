@@ -19,6 +19,7 @@ Source: `docs/architecture/api.md` §1 to §9, ADR-0001, ADR-0008, ADR-0015. Loa
 The `<meta name="htmx-config">` tag sets these values:
 
 - `allowEval: false`, `allowScriptTags: false`, `selfRequestsOnly: true`, `historyCacheSize: 0`.
+- `timeout: 45000`. This is `htmx.request_timeout` in milliseconds (ADR-0158).
 - `methodsThatUseUrlParams: ["get"]`. Then `hx-delete` sends a form body like `hx-post`.
 - `includeIndicatorStyles: false`. The rules for `.htmx-indicator` are in `static/app.css`.
 - `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`.
@@ -35,7 +36,7 @@ Every response sends this `Content-Security-Policy`:
 default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 ```
 
-- Only three scripts exist: `static/htmx.min.js` (vendored HTMX 2, unchanged), `static/row-version.js` (at most 20 lines), `static/tree.js` (at most 50 lines).
+- Only four scripts exist: `static/htmx.min.js` (vendored HTMX 2, unchanged), `static/row-version.js` (at most 20 lines), `static/tree.js` (at most 50 lines), `static/request-state.js` (at most 40 lines).
 - Do not add a script, an inline script, an inline style, or an inline event handler.
 - User data never appears in an `hx-*` attribute or in a `<script>` tag.
 - A URL with user data goes into a form `action` or a link `href` with `hx-boost="true"`. Each `hx-*` attribute of a page template holds a literal (ADR-0037).
@@ -53,7 +54,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; o
 - A guard on `/export/` refuses a `Sec-Fetch-Site` other than `same-origin` or `none`, and `HX-Request: true`. It gives `403 E-WEB-007` as JSON and a `csrf_rejected` event (ADR-0055).
 - Every form on a draft page has the hidden field `row_version`. Every mutating request on a draft sends it.
 - A success sets `HX-Trigger: {"rowVersion": <new>}`. A mismatch gives `409 E-WEB-001` with `conflict.html`.
-- Every error fragment shows its code `E-<CTX>-<nnn>`, one sentence in the UI language, and the `request_id`.
+- Every error fragment shows its code `E-<CTX>-<nnn>`, one sentence in the UI language, and the `request_id`. The fragment of `E-WEB-015` (a lost answer: the server renders its template and `request-state.js` copies it into `#error-panel`) has no `request_id` (ADR-0158).
 - An HTMX error response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036). It also sets `HX-Push-Url: false` (ADR-0037 (z)).
 - The backstop `CatchPanicLayer` is the one exception to the two rules above and to the JSON answer of `/export/`. It answers a plain `text/plain` `500` with `X-Request-Id`. The body holds the code `E-WEB-010` and the English text of its row in `reliability.md` section 1.2 without the reference. It sets no `HX-*` header (ADR-0057 (d), (e), api.md §5.1). Its other security headers come only from the defaults of Caddy (ADR-0057 (j)).
 - Tokens, components, icons, and touch targets come from `docs/architecture/design-system.md`. No page shows a state by color alone.

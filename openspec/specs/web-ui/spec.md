@@ -54,7 +54,7 @@ A change of a parameter value SHALL change the `row_version` of the version, not
 - **THEN** the server returns `409 E-WEB-001` with the fragment `conflict.html`
 
 ### Requirement: Second request of a form
-Every approve form, every save form, and every retire, discard, delete, and restore form SHALL have the attribute `hx-sync="closest form:drop"`. The browser SHALL drop a second request of such a form while the first request is in flight. The approve, retire, discard, delete, and restore forms SHALL also have an indicator with the text of `form-in-progress`. They SHALL NOT have the attribute `hx-disabled-elt`, so a refused request keeps the focus on the button (R39, I12, ADR-0049).
+Every approve form, every save form, and every retire, discard, delete, and restore form SHALL have the attribute `hx-sync="closest form:drop"`. The browser SHALL drop a second request of such a form while the first request is in flight. No form SHALL have the attribute `hx-disabled-elt`, so a refused request keeps the focus on the button (R39, I12, ADR-0049).
 
 #### Scenario: Second request while a request is in flight
 - **GIVEN** a save form of the draft version 3 with a request in flight
@@ -65,6 +65,15 @@ Every approve form, every save form, and every retire, discard, delete, and rest
 - **GIVEN** the page of the approved version 2 of `R-100` for the Administrator `admin`
 - **WHEN** the test reads the retire form
 - **THEN** the form has `hx-sync="closest form:drop"` and no `hx-disabled-elt`
+
+### Requirement: Indicator of a form in flight
+The approve, retire, discard, delete, and restore forms SHALL have an indicator with the text of `form-in-progress`. Three save forms of a draft SHALL have that indicator too. They are the edit form and the new form of a parameter, and the save form of a translation row (R39, ADR-0049, ADR-0158).
+
+#### Scenario: Indicator of a save form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the draft version 3 of `R-100` with the parameter `LIMIT`
+- **WHEN** `anowak` sends `GET` for the edit page of `LIMIT`
+- **THEN** the edit form and the save form of each translation row hold an element with the class `htmx-indicator` and the text of `form-in-progress`
+- **AND** no form of the page has `hx-disabled-elt`
 
 ### Requirement: Idempotent approval
 When `ApproveVersion` returns `AlreadyApproved`, the server SHALL render the version page with status `200` (R39, I12).
@@ -162,7 +171,7 @@ A caught panic, a failed `spawn_blocking` task, or an unexpected database error 
 - **AND** the answer has no `HX-*` header and no JSON body
 
 ### Requirement: Error fragment content
-Every error fragment SHALL show the error code `E-<CTX>-<nnn>`, one sentence in the UI language that tells the user what to do, and the `request_id`. Each code of the routes of `api.md` sections 2.2 and 2.3 SHALL have its sentence in the bundles `pl` and `en` (R10, R36).
+Every error fragment SHALL show the error code `E-<CTX>-<nnn>`, one sentence in the UI language that tells the user what to do, and the `request_id`. The fragment of `E-WEB-015` is the one exception among the fragments: it has no `request_id`, because no answer arrived. Each code of the routes of `api.md` sections 2.2 and 2.3 SHALL have its sentence in the bundles `pl` and `en`. The code `E-WEB-015` SHALL also have its sentence in both bundles (R10, R36, R39).
 
 #### Scenario: Validation error fragment
 - **GIVEN** a ProcessEngineer with the UI language `en`
@@ -177,6 +186,12 @@ Every error fragment SHALL show the error code `E-<CTX>-<nnn>`, one sentence in 
 - **WHEN** `anowak` sends an HTMX request for `GET /machines/M7/units/X1`
 - **THEN** the server returns `422 E-PLT-017`
 - **AND** the fragment shows the sentence of `error-E-PLT-017` from the bundle `pl`
+
+#### Scenario: Fragment of a lost answer
+- **GIVEN** the UI language `en`
+- **WHEN** the server renders the template `#transport-error` of a full page
+- **THEN** the fragment shows `E-WEB-015` and the sentence of `error-E-WEB-015` from the bundle `en`
+- **AND** the fragment has no element `.alert-ref`
 
 ### Requirement: Full error page
 A request without the header `HX-Request` SHALL get a full error page. The page SHALL have the content of the error fragment and the page layout (R01, R36, R39).
@@ -383,7 +398,7 @@ Every response SHALL carry the headers `Content-Security-Policy`, `X-Content-Typ
 - **THEN** the response carries the same security headers as a success response
 
 ### Requirement: Static files
-`GET /static/*` SHALL serve the vendored HTMX 2 file, the style sheets `app.css` and `components.css`, the scripts `row-version.js` and `tree.js`, and the 8 font files of `design-system.md` section 5. Each file SHALL be unchanged and SHALL have its media type. The route SHALL need no session. The response SHALL set `Cache-Control: public, max-age` with the value of `static.cache_max_age` (R39).
+`GET /static/*` SHALL serve the vendored HTMX 2 file, the style sheets `app.css` and `components.css`. It SHALL also serve the scripts `row-version.js`, `tree.js`, and `request-state.js`, and the 8 font files of `design-system.md` section 5. Each file SHALL be unchanged and SHALL have its media type. The route SHALL need no session. The response SHALL set `Cache-Control: public, max-age` with the value of `static.cache_max_age` (R39).
 
 #### Scenario: HTMX file without a session
 - **GIVEN** a browser without a session
@@ -413,13 +428,18 @@ Every response SHALL carry the headers `Content-Security-Policy`, `X-Content-Typ
 - **WHEN** a user sends `GET /static/fonts/other.woff2`
 - **THEN** the server returns `404` with `Cache-Control: no-store`
 
+#### Scenario: Request state script without a session
+- **GIVEN** a browser without a session
+- **WHEN** a user sends `GET /static/request-state.js`
+- **THEN** the server returns `200` with a JavaScript media type and `X-Content-Type-Options: nosniff`
+
 ### Requirement: HTMX configuration of every page
-Every full page SHALL hold the `htmx-config` meta tag with the values of `api.md` section 9. Its `<body>` SHALL have `hx-history="false"`. With a session, the `<body>` of every full page except the full error page SHALL also have `hx-headers` with the header `X-CSRF-Token` (R38, R39).
+Every full page SHALL hold the `htmx-config` meta tag with the values of `api.md` section 9. The values SHALL include `timeout` with the value of `htmx.request_timeout` in milliseconds. Its `<body>` SHALL have `hx-history="false"`. With a session, the `<body>` of every full page except the full error page SHALL also have `hx-headers` with the header `X-CSRF-Token`. Every full page SHALL hold the template `#transport-error` outside `main` (R38, R39).
 
 #### Scenario: Profile page
 - **GIVEN** the Operator `mhoffman` with an open session
 - **WHEN** an Operator sends `GET /me`
-- **THEN** the page holds the `htmx-config` meta tag with `"allowEval":false` and `"selfRequestsOnly":true`
+- **THEN** the page holds the `htmx-config` meta tag with `"allowEval":false`, `"selfRequestsOnly":true`, and `"timeout":45000`
 - **AND** the `<body>` holds `hx-history="false"` and the CSRF token of the session in `hx-headers`
 
 #### Scenario: Full error page with a session
@@ -428,8 +448,13 @@ Every full page SHALL hold the `htmx-config` meta tag with the values of `api.md
 - **THEN** the page holds the `htmx-config` meta tag and `hx-history="false"`
 - **AND** the `<body>` holds no `hx-headers`
 
+#### Scenario: Template of the lost answer
+- **GIVEN** a browser without a session
+- **WHEN** a user sends `GET /login`
+- **THEN** the page holds `<template id="transport-error">` after `main`
+
 ### Requirement: No inline script or style
-A page SHALL load only the scripts `htmx.min.js`, `row-version.js`, and `tree.js` from `/static/`. `row-version.js` SHALL have at most 20 lines, and `tree.js` SHALL have at most 50 lines. A page SHALL hold no inline script, no `<style>` element, no `style` attribute, and no inline event handler (R38).
+A page SHALL load only the scripts `htmx.min.js`, `row-version.js`, `tree.js`, and `request-state.js` from `/static/`. `row-version.js` SHALL have at most 20 lines, `tree.js` SHALL have at most 50 lines, and `request-state.js` SHALL have at most 40 lines. A page SHALL hold no inline script, no `<style>` element, no `style` attribute, and no inline event handler (R38).
 
 #### Scenario: User list page
 - **GIVEN** the Administrator `akowal` with an open session
@@ -440,13 +465,13 @@ A page SHALL load only the scripts `htmx.min.js`, `row-version.js`, and `tree.js
 #### Scenario: Scripts of a page
 - **GIVEN** the Operator `mhoffman` with an open session
 - **WHEN** `mhoffman` sends `GET /recipes`
-- **THEN** the page loads `/static/htmx.min.js`, `/static/row-version.js`, and `/static/tree.js` and no other script
+- **THEN** the page loads `/static/htmx.min.js`, `/static/row-version.js`, `/static/tree.js`, and `/static/request-state.js` and no other script
 - **AND** the page holds no `<style>` element
 
 #### Scenario: Size of the scripts
-- **GIVEN** the files `static/row-version.js` and `static/tree.js`
+- **GIVEN** the files `static/row-version.js`, `static/tree.js`, and `static/request-state.js`
 - **WHEN** the script test counts their lines
-- **THEN** `row-version.js` has at most 20 lines and `tree.js` has at most 50 lines
+- **THEN** `row-version.js` has at most 20 lines, `tree.js` has at most 50 lines, and `request-state.js` has at most 40 lines
 
 ### Requirement: Escaped user text
 A page SHALL show every text from a request or from the database as escaped text. User text SHALL NOT appear inside an `hx-*` attribute or a `<script>` element. A template SHALL use no unescaped output except `|safe` on a literal (R38).
@@ -938,6 +963,44 @@ The link "Add a sub-unit" SHALL load the unit form into `#unit-form` with an `h2
 - **WHEN** `anowak` sends `GET /machines/M7/units/new?parent_path=U1`
 - **THEN** the form shows the sentence of `unit-no-free-segment` and no create button
 
+#### Scenario: Proposed segment saves in the browser
+- **GIVEN** the ProcessEngineer `anowak` on the machine page of `M7` with the units `U1` and `U1.1`
+- **WHEN** `anowak` follows "Add a sub-unit" of `U1`, types a name, and sends the form with the proposed segment
+- **THEN** the tree shows the new unit `U1.2`
+- **AND** `#error-panel` is empty
+
+### Requirement: Parent of the unit form
+The unit form SHALL keep the parent of its link in a hidden field `parent_path` and SHALL show no control that changes the parent. The form SHALL show the parent in a text line. The `h2`, the text line, the proposed segment, and the sent parent SHALL always name the same parent. The form of an error answer SHALL keep that parent. An error of the parent SHALL stand in the summary without a link (R06, R07, R39, ADR-0041).
+
+#### Scenario: Fixed parent of a sub-unit form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7` with the units `U1` and `U1.1`
+- **WHEN** `anowak` sends `GET /machines/M7/units/new?parent_path=U1`
+- **THEN** the form holds a hidden field `parent_path` with the value `U1` and no `select`
+- **AND** the `h2` and the text line of the parent hold `U1`, and the segment input holds `2`
+
+#### Scenario: Fixed parent of a main unit form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7` with the main unit `U1`
+- **WHEN** `anowak` sends `GET /machines/M7/units/new`
+- **THEN** the form holds a hidden field `parent_path` with an empty value and no `select`
+- **AND** the `h2` names a new main unit, the text line shows the text of `unit-parent-none`, and the segment input holds `2`
+
+#### Scenario: Error answer keeps the parent
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7` with the units `U1` and `U1.1`
+- **WHEN** `anowak` sends an HTMX `POST /machines/M7/units` with the parent `U1`, the segment `1`, and a name
+- **THEN** the server returns `409 E-PLT-004` with `HX-Retarget: #error-panel`
+- **AND** the form of the answer holds the hidden field `parent_path` with the value `U1`
+
+#### Scenario: Plain error page keeps the parent
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7` with the unit `U1`
+- **WHEN** `anowak` sends `POST /machines/M7/units` without `HX-Request` with the parent `U1`, the segment `2`, and an empty name
+- **THEN** the page holds the form with the text line of the parent `U1` and the hidden field `parent_path` with the value `U1`
+
+#### Scenario: Parent error without a link
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7` with the archived unit `U2`
+- **WHEN** `anowak` sends an HTMX `POST /machines/M7/units` with the parent `U2`, the parent `U9` that does not exist, or the parent `U1..2`
+- **THEN** the summary of `#error-panel` holds the line of `E-PLT-009`, `E-PLT-003`, or `E-PLT-017`
+- **AND** the answer holds no `href="#parent_path"`
+
 ### Requirement: Places of the unit form
 The machine page and the full page of `GET /machines/{code}/units` SHALL both hold `#unit-tree` and an empty `#unit-form`. So the link "Add a sub-unit" works on both pages (R06, R39).
 
@@ -986,6 +1049,47 @@ The machine page and the full page of `GET /machines/{code}/units` SHALL both ho
 - **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7`
 - **WHEN** `anowak` sends `GET /machines/M7/types/new?csrf_token=abc`
 - **THEN** the server returns `422 E-WEB-008`
+
+### Requirement: Create button of the UDT form
+The button that creates the type or the revision SHALL be the first submit button of the form in the DOM order. The button "Add a member" SHALL come after it. Enter in an input SHALL therefore send the form without `add` at every count of rows (R13, R39, A44).
+
+#### Scenario: Create button first at each count of rows
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7`
+- **WHEN** the server renders the UDT form with 1 row, with 1023 rows, or with 1024 rows
+- **THEN** the first submit button of the form is the button that creates the type
+- **AND** the form with 1 row and the form with 1023 rows have the button "Add a member" after it
+
+#### Scenario: Create button first in the revision form
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the struct `ST_Zone@2` of the machine `M7`
+- **WHEN** `anowak` sends `GET /machines/M7/types/new?from=ST_Zone`
+- **THEN** the first submit button of the form is the button that creates the revision
+
+#### Scenario: Enter in the form of a new type in the browser
+- **GIVEN** the ProcessEngineer `anowak` with the UDT form of the machine `M7`, the name `ST_Enter`, and 1, 1023, or 1024 rows of `INT`
+- **WHEN** `anowak` presses Enter in the name input of the struct or in a type input of a row
+- **THEN** the browser sends exactly one `POST` and that `POST` has no field `add`
+- **AND** the machine `M7` holds the struct `ST_Enter@1` with that count of members
+
+#### Scenario: Enter in a revision form in the browser
+- **GIVEN** the ProcessEngineer `anowak` with the revision form of `ST_Zone@2` of the machine `M7` with 1, 1023, or 1024 rows
+- **WHEN** `anowak` changes the type of one row and presses Enter in a type input
+- **THEN** the browser sends exactly one `POST` and that `POST` has no field `add`
+- **AND** the machine `M7` holds the struct `ST_Zone@3`
+
+### Requirement: Refusal of an unchanged revision in the UDT form
+The `plant-model` requirement "Struct revision" states the refusal of an unchanged revision with `E-PLT-052`. For that refusal the server SHALL return `409`. The server SHALL show the error in the summary of `#error-panel` with no field line. The form SHALL keep the sent rows (R06, R07, ADR-0159).
+
+#### Scenario: Unchanged revision refused
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the struct `ST_Zone@2` of the machine `M7`
+- **WHEN** `anowak` sends `POST /machines/M7/types/ST_Zone/revisions` with the members of `ST_Zone@2` in the same order
+- **THEN** the server returns `409 E-PLT-052` with `HX-Retarget: #error-panel`
+- **AND** the summary of `#error-panel` holds the error with no field line
+- **AND** the form keeps the sent rows
+
+#### Scenario: Revision with a changed member case
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the struct `ST_Zone@2` with the member `temp_max`
+- **WHEN** `anowak` sends the revision with the member `Temp_Max` and the same type
+- **THEN** the server returns `303` to the type page of `ST_Zone@3`
 
 ### Requirement: UDT definition through the form
 A valid `POST /machines/{code}/types` SHALL answer `303` to the type page. A valid `POST /machines/{code}/types/{name}/revisions` SHALL answer `303` to the type page of the new revision. The server SHALL skip a member row with an empty name and an empty type. A rejected HTMX request SHALL put the error into `#error-panel` and SHALL keep the form (R13, R19, R39).
@@ -1168,7 +1272,7 @@ The version page SHALL show an action form or an action link when the matrix row
 - **AND** the page shows no edit form of a parameter
 
 ### Requirement: Form of a new parameter
-The link Add a parameter of the version page SHALL load the form of a new parameter into `#parameter-form`. The button Show value fields SHALL run `GetParameterForm` with the sent type and SHALL write nothing. `AddParameter` SHALL answer the row of the new parameter and SHALL clear `#parameter-form` out of band (R08, R25).
+On a version page that holds `#parameter-rows`, the link Add a parameter SHALL load the form of a new parameter into `#parameter-form`. The button Show value fields SHALL run `GetParameterForm` with the sent type and SHALL write nothing. `AddParameter` SHALL answer the row of the new parameter and SHALL clear `#parameter-form` out of band (R08, R25).
 
 #### Scenario: Value fields of a typed array
 - **GIVEN** the ProcessEngineer `anowak` with the form of a new parameter of the draft version 3 of `R-100`
@@ -1185,6 +1289,34 @@ The link Add a parameter of the version page SHALL load the form of a new parame
 - **GIVEN** the application in read-only mode and the form of a new parameter
 - **WHEN** the ProcessEngineer `anowak` sends the form with `fields=1`
 - **THEN** the server returns `503 E-WEB-006`
+
+### Requirement: Form of a new parameter after the last page
+A version page after the last page of its parameter list has no `#parameter-rows`. On that page the link Add a parameter SHALL load the page form of a new parameter into `#content` and SHALL push its address. That form SHALL target `#content` and no other region of the version page (R25, R39).
+
+#### Scenario: Add link after the last page
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the draft version 3 of `R-100` with 3 parameters
+- **WHEN** `anowak` sends `GET /recipes/R-100/versions/3?page=2`
+- **THEN** the page shows the text of a page after the last page and no `#parameter-rows`
+- **AND** the link Add a parameter has `hx-target="#content"` and `hx-push-url="true"`
+
+#### Scenario: Add link on a page with rows
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the draft version 3 of `R-100` with 3 parameters
+- **WHEN** `anowak` sends `GET /recipes/R-100/versions/3`
+- **THEN** the page holds `#parameter-rows`
+- **AND** the link Add a parameter has `hx-target="#parameter-form"`
+
+#### Scenario: Add link on the first page of an empty draft
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the draft version 4 of `R-100` without parameters
+- **WHEN** `anowak` sends `GET /recipes/R-100/versions/4`
+- **THEN** the page shows the empty text and holds `#parameter-rows`
+- **AND** the link Add a parameter has `hx-target="#parameter-form"`
+
+#### Scenario: Save from a stale page in the browser
+- **GIVEN** the ProcessEngineer `anowak` on the page `/recipes/R-100/versions/3?page=2` of a draft with 3 parameters
+- **WHEN** `anowak` follows Add a parameter, shows the value fields of `INT`, and saves the form with a value
+- **THEN** the browser sends exactly one `POST` with `fields=1` and exactly one `POST` that saves
+- **AND** the console shows no `htmx:targetError`
+- **AND** the version page then lists the new parameter
 
 ### Requirement: Form rendered again keeps the input
 A form that the server renders again without a write SHALL keep every sent text and the sent `row_version`. Only a `GET` of the page SHALL give a new `row_version`. A save from a stale form SHALL get `409 E-WEB-001` (R31, R39, I12).
@@ -2723,3 +2855,109 @@ A new data block number SHALL bump the connection record of the machine. A save 
 - **WHEN** `anowak` saves the loaded connection form through HTMX
 - **THEN** the server returns `409 E-WEB-013` with `HX-Retarget: #error-panel`
 - **AND** the PLC connection record of `M5` keeps its values
+
+### Requirement: Request state of a form
+While an HTMX request of a form is in flight, the form SHALL have `aria-busy="true"`. Each text input and each `textarea` of the form SHALL be `readonly`. Each `select`, check box, and radio button of the form SHALL refuse a change. The focus SHALL stay on its control. After the last end of the request, the form SHALL lose `aria-busy` and each `readonly` that the lock set. The ends are an answer, a network error, an abort, a timeout, and a failed handling of the answer (R31, R39, A44).
+
+#### Scenario: Typing during a save that answers 200
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT` and a save request in flight
+- **WHEN** `anowak` types `22` into the value input
+- **THEN** the value input keeps the sent text and the focus
+- **AND** after the answer `200` the value input shows the saved value and is not `readonly`
+
+#### Scenario: Typing during a save that answers 422
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT`, the value `abc`, and a save request in flight
+- **WHEN** `anowak` types `33` into the value input
+- **THEN** the value input keeps `abc`
+- **AND** after the answer `422 E-RCP-005` the value input shows `abc` with its error line and is not `readonly`
+
+#### Scenario: Typing during a save of a translation row
+- **GIVEN** the ProcessEngineer `anowak` with the translation row `de` and a save request in flight
+- **WHEN** `anowak` types a text into the name input of the row
+- **THEN** the name input keeps the sent text
+- **AND** after the answer `200` the name input is not `readonly`
+
+#### Scenario: Typing during a translation save that answers 422
+- **GIVEN** the ProcessEngineer `anowak` with the translation row `de`, a name that the server refuses, and a save request in flight
+- **WHEN** `anowak` types a text into the description input of the row
+- **THEN** the description input keeps the sent text
+- **AND** after the answer `422` the row shows its error line and no input of the row is `readonly`
+
+#### Scenario: Enter and click start the same lock
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT`
+- **WHEN** `anowak` sends the form once with Enter in the value input and once with a click on the save button
+- **THEN** in both cases the form has `aria-busy="true"` while the request is in flight
+
+#### Scenario: Unlock after a network error
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT` and the value `44`
+- **WHEN** the save request fails with a network error
+- **THEN** the form has no `aria-busy`, the value input is not `readonly`, and it holds `44`
+
+#### Scenario: Unlock after an abort
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT` and a save request in flight
+- **WHEN** the browser aborts the request
+- **THEN** the form has no `aria-busy` and the value input is not `readonly`
+- **AND** the value input keeps its text and the focus
+
+#### Scenario: Unlock after an answer with a missing target
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT`
+- **WHEN** the save answer carries `HX-Retarget` with an id that the page does not hold
+- **THEN** the form has no `aria-busy` and the value input is not `readonly`
+
+#### Scenario: Readonly of the page stays
+- **GIVEN** the edit form of `LIMIT` with one input that has `readonly` before the send
+- **WHEN** a save request of the form ends with a network error
+- **THEN** that input is still `readonly`
+- **AND** each other text input of the form is not `readonly`
+
+### Requirement: Lock rules of a busy form
+A form with several requests in flight SHALL keep its lock until the last request ends. The lock SHALL let through Tab, each key with Ctrl, Alt, or Meta, and the keys F1 to F12. So the shortcuts of the browser work (R31, R39, A44).
+
+#### Scenario: Two requests of one form
+- **GIVEN** a form with two requests in flight, for example a boosted filter form and a boosted link inside it
+- **WHEN** the first request ends
+- **THEN** the form still has `aria-busy="true"` and its text inputs are still `readonly`
+- **AND** after the second request ends the form has no `aria-busy` and no input that the lock set is `readonly`
+
+#### Scenario: Shortcuts of the browser during a request
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT`, a `select` in it, and a save request in flight
+- **WHEN** `anowak` presses Ctrl+R or F5 on the `select`
+- **THEN** the script does not call `preventDefault`, so the browser keeps its shortcut
+- **AND** a press of the Arrow Down key on the `select` stays refused
+
+### Requirement: Message of a lost answer
+When an HTMX request ends with a network error or with a timeout, the page SHALL put the message `E-WEB-015` into `#error-panel` and SHALL empty `#toast`. The page SHALL also show the top of the panel. The message SHALL have `role="alert"`, the code, and one sentence in the UI language. It SHALL say that the result is not known and SHALL have no reference. The next HTMX request SHALL delete the message (R31, R39, A44).
+
+#### Scenario: Network error before the send
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT`, the UI language `en`, and the value `44`
+- **WHEN** the save request fails with a network error before the server gets it
+- **THEN** `#error-panel` holds a fragment with `role="alert"` and the code `E-WEB-015`
+- **AND** the value input holds `44`
+
+#### Scenario: Answer lost after the server saved
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT` and the value `55`
+- **WHEN** the server saves `55` and the browser gets a network error in place of the answer
+- **THEN** `#error-panel` holds the message `E-WEB-015` that the result is not known
+- **AND** a new load of the page shows `55`
+
+#### Scenario: Timeout of a request
+- **GIVEN** the ProcessEngineer `anowak` with the edit form of `LIMIT`
+- **WHEN** the save request gets no answer within `htmx.request_timeout`
+- **THEN** `#error-panel` holds the message `E-WEB-015`
+- **AND** the form has no `aria-busy`
+
+#### Scenario: Lost answer after a success
+- **GIVEN** the ProcessEngineer `anowak` on the edit page of `LIMIT` with the success message of a save in `#toast`
+- **WHEN** the next save request fails with a network error
+- **THEN** `#toast` is empty
+- **AND** `#error-panel` holds the message `E-WEB-015`
+
+#### Scenario: Next request deletes the message
+- **GIVEN** a page that shows the message `E-WEB-015` after a network error before the send
+- **WHEN** the user sends the same form again and the server answers `200`
+- **THEN** `#error-panel` holds no message `E-WEB-015`
+
+#### Scenario: Message in Polish
+- **GIVEN** the UI language `pl`
+- **WHEN** the server renders a full page
+- **THEN** the template `#transport-error` holds the code `E-WEB-015` and the sentence of `error-E-WEB-015` from the bundle `pl`

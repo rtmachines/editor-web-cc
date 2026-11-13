@@ -92,6 +92,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-PLT-038` | `StorageError::Constraint`, trigger function `freeze_identifiers` (data-model.md 4.8) | 409 | The unit path or the machine of a unit cannot change while a version uses the unit. Reference: {request_id}. |
 | `E-PLT-050` | `PlantError::DataBlockMissing { code, platform }` | 422 | Machine {code} on platform {platform} needs a data block number. Enter a number. |
 | `E-PLT-051` | `PlantError::DataBlockNotOnPlatform { code, platform }` | 422 | Platform {platform} of machine {code} has no data block number. Delete the number. |
+| `E-PLT-052` | `PlantError::RevisionUnchanged { type_name, revision }` | 409 | Revision {revision} of type {type_name} has the same members. Change a member before you create the revision. |
 | `E-RCP-001` | `RecipeError::DuplicateReference { reference }` | 409 | Reference number {reference} is already in use. |
 | `E-RCP-002` | `RecipeError::VersionNotEditable { reference, number, status }` | 409 | Version {number} of recipe {reference} is {status}. Create a new draft to make changes. |
 | `E-RCP-003` | `RecipeError::S7AddressRequired { tag }` | 422 | Parameter {tag} needs a PLC address. The machine uses an S7-300 controller. |
@@ -177,6 +178,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-WEB-012` | `WebError::MissingBasicCredentials` | 401 | The request has no valid Basic credentials. Send the login and the password of a transfer account. |
 | `E-WEB-013` | `AppError::ConnectionConcurrentEdit { code, expected, actual }` | 409 | Another user changed the connection settings of machine {code}. Reload the page and apply your change again. |
 | `E-WEB-014` | `AppError::SecretUnreadable { code }` | 500 | The server cannot read the stored PLC password of machine {code}. Enter the password again or contact the administrator. Reference: {request_id}. |
+| `E-WEB-015` | The script `request-state.js` | - | The server sent no answer. The result of the action is not known. Reload the page and check the data before you try again. |
 
 A trigger code (`E-PLT-030..038`, `E-RCP-030..036`, `E-AUD-003`) reaches the user only when a domain check did not fire first. No command of the application changes a security event, so `E-AUD-003` always marks a defect. The HTTP layer returns the status of the row: 409 for a state rule, 422 for a shape rule. The event log gets an `ERROR` line, because the domain check should have caught the condition. This registry is the authority for every code. `data-model.md` section 4.11 maps each trigger code to its function.
 
@@ -958,6 +960,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `i18n.lang_cookie_max_age` | 365 days. Cookie `recipe_lang` | api.md 8 |
 | `approval.separation_of_duties` | `true` | 7.12, api.md 3.2, ADR-0022 (A34) |
 | `http.request_timeout` | 30 s | 7.3, 7.4 |
+| `htmx.request_timeout` | 45 s. The `timeout` of the HTMX configuration. The check `http.request_timeout < htmx.request_timeout` holds, so the answer `503 E-WEB-009` arrives first (ADR-0158 (j)) | api.md 9 |
 | `http.body_read_timeout` | 10 s | 7.1, 7.4 |
 | `http.accept_error_pause` | 1 s. The pause of the accept loop after a fault of `accept` that is not a connection fault, for example too many open files. A code default (ADR-0085) | ADR-0058 (a) |
 | `http.body_limit.form` | 256 KiB | api.md 7.6 |

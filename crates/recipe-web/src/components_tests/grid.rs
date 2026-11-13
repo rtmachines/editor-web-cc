@@ -386,7 +386,7 @@ fn grid_component_the_save_button_is_the_first_submit_button_of_the_form() {
         ["parameter-save", "parameter-show-fields", "grid-mode-0"]
     );
     assert!(
-        html.contains("<div class=\"actions\"><button type=\"submit\" id=\"parameter-save\" class=\"btn btn-primary\">Save parameter</button> <button type=\"submit\" id=\"parameter-show-fields\" name=\"fields\" value=\"1\" class=\"btn btn-secondary\">Show value fields</button></div>"),
+        html.contains("<div class=\"actions\"><button type=\"submit\" id=\"parameter-save\" class=\"btn btn-primary\">Save parameter</button> <button type=\"submit\" id=\"parameter-show-fields\" name=\"fields\" value=\"1\" class=\"btn btn-secondary\">Show value fields</button><span class=\"htmx-indicator\">The server processes the request.</span></div>"),
         "{html}"
     );
 }
