@@ -35,6 +35,10 @@ const BASE_BACKUP_FILE: &str = "base-backup.result";
 /// The largest size of a result file in bytes (`reliability.md` section 7.11, `check_result.max_bytes`).
 const MAX_RESULT_BYTES: u64 = 256;
 
+/// One byte more than [`MAX_RESULT_BYTES`] (`reliability.md` section 7.11, `check_result.max_bytes`),
+/// so a read finds a file that grew.
+const READ_LIMIT_BYTES: u64 = MAX_RESULT_BYTES + 1;
+
 /// The one accepted form of `finished_at` (design D4).
 ///
 /// The `T` and the `Z` are literals. The RFC 3339 parser is no choice here, because it also
@@ -174,9 +178,7 @@ fn read_result_file(path: &Path) -> io::Result<Reading> {
     };
     let mut content = Vec::new();
     // One byte above the limit shows a file that grew after the metadata call.
-    let read = file
-        .take(MAX_RESULT_BYTES.saturating_add(1))
-        .read_to_end(&mut content)?;
+    let read = file.take(READ_LIMIT_BYTES).read_to_end(&mut content)?;
     if u64::try_from(read).is_ok_and(|size| size <= MAX_RESULT_BYTES) {
         Ok(Reading::Content(content))
     } else {

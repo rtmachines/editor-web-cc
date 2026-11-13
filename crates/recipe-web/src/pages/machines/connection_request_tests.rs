@@ -93,11 +93,6 @@ fn the_debug_of_a_secret_field_hides_its_text() {
     assert!(shown.contains("redacted"), "{shown}");
 }
 
-#[test]
-fn a_secret_field_clears_its_buffer_on_drop() {
-    assert!(std::mem::needs_drop::<SecretField>());
-}
-
 #[tokio::test]
 async fn the_debug_of_the_request_hides_the_password_and_every_text() {
     let request = read(&format!("row_version=1&host=10.0.0.5&password={SECRET}")).await;

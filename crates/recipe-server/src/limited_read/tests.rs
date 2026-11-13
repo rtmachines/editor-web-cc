@@ -220,7 +220,8 @@ async fn a_reader_that_ends_at_the_limit_leaves_no_mark() {
 
     // The reader ends first. The timeout branch looks at the state afterwards.
     call.finish();
-    call.mark_if_running();
+    call.mark_if_running()
+        .expect("the count has room for one mark");
 
     assert!(
         !is_stalled(&stalled, &data_path()),
@@ -233,7 +234,8 @@ async fn a_running_call_that_reaches_the_limit_leaves_a_mark_until_it_ends() {
     let stalled = StalledPaths::default();
     let call = Call::new(data_path(), Arc::clone(&stalled));
 
-    call.mark_if_running();
+    call.mark_if_running()
+        .expect("the count has room for one mark");
     assert!(is_stalled(&stalled, &data_path()));
 
     call.finish();
@@ -245,7 +247,9 @@ async fn a_call_that_did_not_mark_the_path_leaves_the_mark_of_a_running_call() {
     let stalled = StalledPaths::default();
     let marking = Call::new(data_path(), Arc::clone(&stalled));
     let unmarked = Call::new(data_path(), Arc::clone(&stalled));
-    marking.mark_if_running();
+    marking
+        .mark_if_running()
+        .expect("the count has room for one mark");
 
     // The second call ends without a mark of its own.
     unmarked.finish();
@@ -263,8 +267,12 @@ async fn two_marks_on_one_path_clear_one_by_one() {
     let stalled = StalledPaths::default();
     let first = Call::new(data_path(), Arc::clone(&stalled));
     let second = Call::new(data_path(), Arc::clone(&stalled));
-    first.mark_if_running();
-    second.mark_if_running();
+    first
+        .mark_if_running()
+        .expect("the count has room for one mark");
+    second
+        .mark_if_running()
+        .expect("the count has room for one mark");
 
     first.finish();
     assert!(
@@ -273,6 +281,24 @@ async fn two_marks_on_one_path_clear_one_by_one() {
     );
     second.finish();
     assert!(!is_stalled(&stalled, &data_path()));
+}
+
+#[tokio::test]
+async fn a_count_at_the_maximum_stays_unchanged_and_the_path_stays_stalled() {
+    let stalled = StalledPaths::default();
+    stalled.lock().insert(data_path(), usize::MAX);
+    let call = Call::new(data_path(), Arc::clone(&stalled));
+
+    // The add overflows, so this call keeps no mark and takes none away.
+    let fault = call.mark_if_running();
+    assert!(
+        matches!(fault, Err(LimitFault::MarkOverflow)),
+        "got {fault:?}"
+    );
+    call.finish();
+
+    assert_eq!(stalled.lock().get(&data_path()).copied(), Some(usize::MAX));
+    assert!(is_stalled(&stalled, &data_path()));
 }
 
 #[tokio::test]

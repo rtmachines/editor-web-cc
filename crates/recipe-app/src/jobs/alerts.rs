@@ -536,6 +536,7 @@ impl Alerts {
     /// Read the three volumes and return true when `low_disk` is active for one of them.
     ///
     /// Each low or unreadable volume writes its own line with the field `volume` (ADR-0075 (e)).
+    /// It waits for each read. ADR-0161 needs one read of a path at a time in one run.
     async fn low_disk(&self) -> bool {
         let mut any = false;
         for (name, path) in self.volumes.named() {

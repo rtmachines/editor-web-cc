@@ -18,6 +18,7 @@ use parking_lot::Mutex;
 ///
 /// Several calls on one path can reach the limit, and each of them adds one mark. A call takes
 /// away only its own mark, so the path stays stalled while any marking call still runs.
+/// A path holds at most one mark for each pair of a job and an adapter (ADR-0161).
 pub(crate) type StalledPaths = Arc<Mutex<HashMap<PathBuf, usize>>>;
 
 /// Return `true` while a call that reached the limit still runs on `path`.
@@ -27,7 +28,7 @@ pub(crate) fn is_stalled(stalled: &StalledPaths, path: &Path) -> bool {
 
 /// The reason why `read_with_limit` gives no value.
 ///
-/// The type solves one problem: each adapter must map the three reasons to the fault of its own
+/// The type solves one problem: each adapter must map the four reasons to the fault of its own
 /// port. The type owns no error code, because the adapter turns it into a port fault at once.
 #[derive(Debug)]
 pub(crate) enum LimitFault {
@@ -37,6 +38,9 @@ pub(crate) enum LimitFault {
     TimedOut,
     /// The blocking task ended without a value, for example after a panic of the reader.
     Join(tokio::task::JoinError),
+    /// The call reached the limit, but the count of marks of the path is at its maximum.
+    /// The call therefore keeps no mark.
+    MarkOverflow,
 }
 
 impl LimitFault {
@@ -48,6 +52,9 @@ impl LimitFault {
             Self::Stalled => timed_out("a read of the path stalled"),
             Self::TimedOut => timed_out("the read of the path took too long"),
             Self::Join(join_fault) => io::Error::other(join_fault),
+            Self::MarkOverflow => {
+                timed_out("the read of the path took too long, and the path has too many marks")
+            }
         }
     }
 }
@@ -82,6 +89,10 @@ impl Call {
     }
 
     /// The blocking task ended: set `Done` and take away the mark of this call, if it added one.
+    ///
+    /// A marked call always has its mark in the count, so a count that cannot go down (`None`)
+    /// cannot occur. The entry then goes away, like a count of zero. This function never
+    /// panics, because it runs in `Drop`.
     pub(crate) fn finish(&self) {
         let mut stalled = self.stalled.lock();
         self.done.store(true, Ordering::SeqCst);
@@ -91,20 +102,34 @@ impl Call {
         let Some(marks) = stalled.get_mut(&self.path) else {
             return;
         };
-        *marks = marks.saturating_sub(1);
-        if *marks == 0 {
-            stalled.remove(&self.path);
+        match marks.checked_sub(1) {
+            Some(remaining) if remaining > 0 => *marks = remaining,
+            Some(_) | None => {
+                stalled.remove(&self.path);
+            }
         }
     }
 
     /// The call reached the limit: add one mark only while the state is `Running`.
-    pub(crate) fn mark_if_running(&self) {
+    ///
+    /// A call that is done or already marked changes nothing and gives `Ok`.
+    ///
+    /// # Errors
+    ///
+    /// Gives `LimitFault::MarkOverflow` if the count cannot go up (`None`). The count stays and
+    /// this call keeps no mark.
+    pub(crate) fn mark_if_running(&self) -> Result<(), LimitFault> {
         let mut stalled = self.stalled.lock();
         if self.done.load(Ordering::SeqCst) || self.marked.swap(true, Ordering::SeqCst) {
-            return;
+            return Ok(());
         }
         let marks = stalled.entry(self.path.clone()).or_insert(0);
-        *marks = marks.saturating_add(1);
+        let Some(added) = marks.checked_add(1) else {
+            self.marked.store(false, Ordering::SeqCst);
+            return Err(LimitFault::MarkOverflow);
+        };
+        *marks = added;
+        Ok(())
     }
 }
 
@@ -120,7 +145,8 @@ impl Drop for FinishOnDrop {
 /// Run `read` on `path` in a blocking task and wait at most `limit` for its value.
 ///
 /// A path with a mark gives `LimitFault::Stalled` at once and starts no task. A call that reaches
-/// the limit marks its path and gives `LimitFault::TimedOut`. The blocking task clears that mark
+/// the limit marks its path and gives `LimitFault::TimedOut`. If the count of marks is at its
+/// maximum, the call gives `LimitFault::MarkOverflow`. The blocking task clears that mark
 /// when it ends. Calls below the limit run side by side (ADR-0133 (c) to (e)).
 pub(crate) async fn read_with_limit<T, F>(
     limit: Duration,
@@ -145,7 +171,7 @@ where
         Ok(Ok(value)) => Ok(value),
         Ok(Err(join_fault)) => Err(LimitFault::Join(join_fault)),
         Err(_elapsed) => {
-            call.mark_if_running();
+            call.mark_if_running()?;
             Err(LimitFault::TimedOut)
         }
     }
