@@ -35,3 +35,13 @@ node_modules/
 # Deploy secrets and env file (ADR-0062 (p)).
 /deploy/.env
 /deploy/secrets/
+
+# Local agent tools and their caches. Each developer installs them.
+/.agents/
+/.claude/agents/
+/.claude/skills/
+/.claude/hooks/context-watch.py
+/.claude/settings.local.json
+/.codex/
+/.serena/
+/skills-lock.json
