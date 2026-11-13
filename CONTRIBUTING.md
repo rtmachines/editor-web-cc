@@ -98,8 +98,14 @@ cargo test --workspace --all-features --locked
 bash deploy/ci/rust-tests.sh secure
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo deny --locked check
-cargo llvm-cov --workspace --all-features --locked --json --summary-only --output-path target/llvm-cov-summary.json
-python3 -I tools/coverage-gate.py target/llvm-cov-summary.json
+python3 -I -B tools/test_coverage_gate.py
+python3 -I -B tools/test_coverage_report.py
+python3 -I -B tools/test_coverage_inventory.py
+python3 -I -B tools/test_coverage_summary.py
+python3 -I -B tools/test_coverage_cli.py
+python3 -I -B tools/coverage-gate.py --write-inventory target/coverage-inventory.json
+cargo llvm-cov --workspace --all-features --locked --json --output-path target/llvm-cov-report.json
+python3 -I -B tools/coverage-gate.py --report target/llvm-cov-report.json --inventory target/coverage-inventory.json
 bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'
 ```
 
@@ -113,11 +119,33 @@ The gate fails on an inline test module in `src/`. Move such a module to its own
 
 The gate fails on a production file with a test file name: `tests.rs`, `*_tests.rs`, or `*-tests.rs`. It also fails on a production file in a `tests/`, `examples/`, or `benches/` directory under `src/`.
 
-The gate fails on a crate with production files and no line in the report. A crate without a production file shows "no code".
+The gate fails on a required production file with no line in the report. A declaration-only file needs no report entry. A crate without a production file shows "no code".
+
+A crate that passes the percentage shows `incomplete` in its row when a required file is missing or has zero lines. The summary prints each other-configuration file as `<path> (<configuration>)`. It lists the build scripts under `build-time code outside the metric, not counted:`.
 
 Run `python3 -I tools/coverage-gate.py --source-only` to scan the source without a report.
 
-Run `python3 -I -B tools/test_coverage_gate.py` to run the tests of the gate.
+Run the five files `tools/test_coverage_*.py` with `python3 -I -B` to test the gate.
+
+The gate exits with one of three codes:
+
+| Exit | Meaning |
+|---|---|
+| 0 | Every check passes. Accounting is complete and each crate has at least 80 % lines. |
+| 1 | Coverage deficit: a crate below 80 %. Incomplete accounting: a required file without lines, an untracked file without a report entry, or a violated source rule. |
+| 2 | Input or policy error: a bad report, path, counter, policy, inventory, or argument, or a bad inventory file entry. A report entry for an untracked file, a directory outside a Git work tree, or a `#[path]` attribute in `src/` also gives this code. |
+
+Exit 2 wins over exit 1. The gate prints no percentage after an input or policy error.
+
+`tools/coverage-policy.json` holds exact-path entries for target-gated files and files of another configuration (ADR-0162). The rules of an entry:
+
+- An entry names one exact path. A wildcard entry fails with exit 2.
+- Each entry has a path, a source hash, a configuration, a reason, and evidence.
+- A duplicate, stale, unused, or incomplete entry fails with exit 2.
+- A missing report entry never creates a policy entry.
+- A declaration-only file needs no entry.
+
+The CI job `Coverage` uploads the report and the inventory as the artifact `coverage-report-<commit SHA>` and keeps it 14 days.
 
 ### Browser regression suite
 

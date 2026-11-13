@@ -533,7 +533,9 @@ Each value object has one constructor `parse(input) -> Result<Self, Error>` and 
 
 Coverage target: 80 % line coverage per crate, measured with `cargo llvm-cov`. The CI job fails below the target.
 
-The gate counts production code only. It finds test code from the source. It fails on an inline test module. It fails on a production file with a test file name. It fails on a crate that has production files and no reported line (ADR-0127 (a) to (i)).
+The gate counts production code only. It finds test code from the source. It fails on an inline test module. It fails on a production file with a test file name. It fails on a required production file that has no reported line (ADR-0127 (a) to (i)).
+
+A declaration-only file needs no report entry (ADR-0162). The gate first reconciles the report with an inventory of the tracked source files (ADR-0162).
 
 ## 7. Operations for 24/7
 

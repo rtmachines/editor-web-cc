@@ -1,10 +1,12 @@
 """Check the coverage gate with temporary Rust workspaces and synthetic reports."""
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,11 +24,21 @@ class WorkspaceTestCase(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = pathlib.Path(directory.name)
         self.report = self.root / "coverage.json"
+        self.git("init", "-q")
 
-    def write(self, relative, content):
+    def git(self, *arguments):
+        subprocess.run(
+            ["git", "-C", str(self.root), *arguments],
+            check=True,
+            capture_output=True,
+        )
+
+    def write(self, relative, content, track=True):
         path = self.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8", newline="\n")
+        if track:
+            self.git("add", "--", relative)
         return path
 
     def crate(self, files, name="sample"):
@@ -122,8 +134,8 @@ class AttributeTests(WorkspaceTestCase):
             ("crates/sample/src/fixtures.rs", 90, 90),
         ])
         output = self.assert_exit(self.run_gate(self.report), 1 if test_only else 0)
-        row = (r"sample\s+5\s+10\s+50\.00\s+BELOW TARGET" if test_only else
-               r"sample\s+95\s+100\s+95\.00\s+ok")
+        row = (r"sample\s+5\s+10\s+50\.00\s+5\s+BELOW TARGET" if test_only else
+               r"sample\s+95\s+100\s+95\.00\s+5\s+ok")
         self.assertRegex(output, row)
 
     def test_raw_memory_literals_do_not_hide_production_gap(self):
@@ -188,10 +200,11 @@ class AttributeTests(WorkspaceTestCase):
 
 
 class ModuleResolutionTests(WorkspaceTestCase):
-    def check_excluded(self, files, excluded, production="lib.rs"):
+    def check_excluded(self, files, excluded, production="lib.rs", also=()):
         self.crate(files)
         self.coverage(
             [(f"crates/sample/src/{production}", 10, 10)]
+            + [(f"crates/sample/src/{name}", 10, 10) for name in also]
             + [(f"crates/sample/src/{name}", 10, 0) for name in excluded]
         )
         self.assert_exit(self.run_gate(self.report), 0)
@@ -213,14 +226,14 @@ class ModuleResolutionTests(WorkspaceTestCase):
             "lib.rs": "mod service;\n",
             "service/mod.rs": "#[cfg(test)]\nmod fixtures;\n",
             "service/fixtures.rs": PRODUCTION,
-        }, ["service/fixtures.rs"])
+        }, ["service/fixtures.rs"], also=["service/mod.rs"])
 
     def test_named_file_resolves_child_file(self):
         self.check_excluded({
             "lib.rs": "mod service;\n",
             "service.rs": "#[cfg(test)]\nmod fixtures;\n",
             "service/fixtures.rs": PRODUCTION,
-        }, ["service/fixtures.rs"])
+        }, ["service/fixtures.rs"], also=["service.rs"])
 
     def test_lib_resolves_directory_module(self):
         self.check_excluded({
@@ -239,14 +252,14 @@ class ModuleResolutionTests(WorkspaceTestCase):
             "lib.rs": "mod service;\n",
             "service/mod.rs": "#[cfg(test)]\nmod fixtures;\n",
             "service/fixtures/mod.rs": PRODUCTION,
-        }, ["service/fixtures/mod.rs"])
+        }, ["service/fixtures/mod.rs"], also=["service/mod.rs"])
 
     def test_named_file_resolves_directory_module(self):
         self.check_excluded({
             "lib.rs": "mod service;\n",
             "service.rs": "#[cfg(test)]\nmod fixtures;\n",
             "service/fixtures/mod.rs": PRODUCTION,
-        }, ["service/fixtures/mod.rs"])
+        }, ["service/fixtures/mod.rs"], also=["service.rs"])
 
     def test_test_directory_excludes_every_descendant(self):
         self.check_excluded({
@@ -272,7 +285,7 @@ class ModuleResolutionTests(WorkspaceTestCase):
             "service/fixtures/world.rs": PRODUCTION,
             "service/fixtures/nested/support.rs": PRODUCTION,
         }, ["service/fixtures/mod.rs", "service/fixtures/world.rs",
-            "service/fixtures/nested/support.rs"])
+            "service/fixtures/nested/support.rs"], also=["service/mod.rs"])
 
     def test_test_directory_does_not_hide_similar_production_directory(self):
         self.crate({
@@ -305,8 +318,8 @@ class SharedModuleTests(WorkspaceTestCase):
             ("crates/sample/src/common/fixtures.rs", 900, 900),
         ])
         output = self.assert_exit(self.run_gate(self.report), 0 if both_test else 1)
-        row = r"sample\s+10\s+10\s+100\.00\s+ok" if both_test else (
-            r"sample\s+10\s+100\s+10\.00\s+BELOW TARGET"
+        row = r"sample\s+10\s+10\s+100\.00\s+0\s+ok" if both_test else (
+            r"sample\s+10\s+100\s+10\.00\s+90\s+BELOW TARGET"
         )
         self.assertRegex(output, row)
 
@@ -535,10 +548,158 @@ class ReportTests(WorkspaceTestCase):
         ])
         self.assert_exit(self.run_gate(self.report), 1)
 
+    def test_missing_module_in_present_crate_fails(self):
+        self.crate({"lib.rs": "mod risk;\n" + PRODUCTION, "risk.rs": PRODUCTION})
+        self.coverage([("crates/sample/src/lib.rs", 10, 10)])
+        output = self.assert_exit(self.run_gate(self.report), 1)
+        self.assertIn("crates/sample/src/risk.rs", output)
+        self.assert_row_incomplete(output)
+
+    def assert_row_incomplete(self, output):
+        row = next(line for line in output.splitlines() if line.startswith("sample "))
+        self.assertIn("incomplete", row)
+        self.assertNotIn(" ok", row)
+
+    def test_required_file_with_zero_reported_lines_fails(self):
+        self.crate({"lib.rs": "mod risk;\n" + PRODUCTION, "risk.rs": PRODUCTION})
+        self.coverage([
+            ("crates/sample/src/lib.rs", 10, 10),
+            ("crates/sample/src/risk.rs", 0, 0),
+        ])
+        output = self.assert_exit(self.run_gate(self.report), 1)
+        self.assertIn("crates/sample/src/risk.rs", output)
+        self.assert_row_incomplete(output)
+
+    def test_new_tracked_file_without_report_entry_fails(self):
+        self.crate({"lib.rs": PRODUCTION})
+        self.write("crates/sample/src/added.rs", PRODUCTION)
+        self.coverage([("crates/sample/src/lib.rs", 10, 10)])
+        output = self.assert_exit(self.run_gate(self.report), 1)
+        self.assertIn("crates/sample/src/added.rs", output)
+
+    def test_untracked_source_file_fails(self):
+        self.crate({"lib.rs": PRODUCTION})
+        self.write("crates/sample/src/loose.rs", PRODUCTION, track=False)
+        output = self.assert_exit(self.run_gate("--source-only"), 1)
+        self.assertIn("crates/sample/src/loose.rs", output)
+
+    def test_directory_outside_git_is_an_input_error(self):
+        self.crate({"lib.rs": PRODUCTION})
+        shutil.rmtree(self.root / ".git")
+        self.assert_exit(self.run_gate("--source-only"), 2)
+
     def test_exactly_eighty_percent_production_passes(self):
         self.crate({"lib.rs": PRODUCTION})
         self.coverage([("crates/sample/src/lib.rs", 10, 8)])
         self.assert_exit(self.run_gate(self.report), 0)
+
+    def test_declaration_only_file_needs_no_report_entry(self):
+        self.crate({"lib.rs": "mod names;\n" + PRODUCTION, "names.rs": "pub const A: u8 = 1;\n"})
+        self.coverage([("crates/sample/src/lib.rs", 10, 10)])
+        self.assert_exit(self.run_gate(self.report), 0)
+
+    def test_declaration_only_crate_without_report_is_no_code(self):
+        self.crate({"lib.rs": "pub struct A;\n"})
+        self.coverage([])
+        self.assert_exit(self.run_gate(self.report), 0)
+
+    def test_declaration_only_file_with_reported_lines_counts_as_required(self):
+        self.crate({"lib.rs": "mod names;\n" + PRODUCTION, "names.rs": "pub const A: u8 = 1;\n"})
+        self.coverage([
+            ("crates/sample/src/lib.rs", 10, 10),
+            ("crates/sample/src/names.rs", 10, 0),
+        ])
+        output = self.assert_exit(self.run_gate(self.report), 1)
+        self.assertRegex(output, r"sample\s+10\s+20\s+50\.00\s+10\s+BELOW TARGET")
+
+
+class PolicyTests(WorkspaceTestCase):
+    PATH = "crates/sample/src/other.rs"
+
+    def entry(self, **changes):
+        entry = {
+            "path": self.PATH,
+            "sha256": hashlib.sha256(PRODUCTION.encode()).hexdigest(),
+            "configuration": "windows",
+            "reason": "Compiled on Windows only.",
+            "evidence": "other.rs line 1: cfg(windows)",
+        }
+        return {**entry, **changes}
+
+    def policy(self, entries):
+        self.write(
+            "tools/coverage-policy.json",
+            json.dumps({"schema_version": 1, "entries": entries}),
+        )
+
+    def setup_crate(self):
+        self.crate({"lib.rs": "mod other;\n" + PRODUCTION, "other.rs": PRODUCTION})
+        self.coverage([("crates/sample/src/lib.rs", 10, 10)])
+
+    def test_valid_entry_needs_no_report_entry(self):
+        self.setup_crate()
+        self.policy([self.entry()])
+        self.assert_exit(self.run_gate(self.report), 0)
+
+    def test_empty_entries_are_valid(self):
+        self.setup_crate()
+        self.coverage([("crates/sample/src/lib.rs", 10, 10), (self.PATH, 10, 10)])
+        self.policy([])
+        self.assert_exit(self.run_gate(self.report), 0)
+
+    def test_each_source_fault_is_an_input_error(self):
+        faults = {
+            "stale hash": [self.entry(sha256="0" * 64)],
+            "duplicate": [self.entry(), self.entry()],
+            "wildcard": [self.entry(path="crates/sample/src/*.rs")],
+            "unused": [self.entry(path="crates/sample/src/gone.rs")],
+            "empty field": [self.entry(reason="")],
+        }
+        for name, entries in faults.items():
+            with self.subTest(name):
+                self.setup_crate()
+                self.policy(entries)
+                for argument in (self.report, "--source-only"):
+                    output = self.assert_exit(self.run_gate(argument), 2)
+                    if name == "stale hash":
+                        self.assertIn(self.PATH, output)
+
+    def test_executable_function_in_declaration_module_needs_a_report_entry(self):
+        self.crate({"lib.rs": "mod names;\n" + PRODUCTION, "names.rs": "pub const A: u8 = 1;\n"})
+        self.coverage([("crates/sample/src/lib.rs", 10, 10)])
+        self.assert_exit(self.run_gate(self.report), 0)
+        self.write("crates/sample/src/names.rs", "pub const A: u8 = 1;\npub fn f() -> u8 { 1 }\n")
+        output = self.assert_exit(self.run_gate(self.report), 1)
+        self.assertIn("names.rs", output)
+
+    def test_entry_for_declaration_only_file_is_an_input_error(self):
+        self.crate({"lib.rs": "mod other;\n" + PRODUCTION, "other.rs": "pub struct A;\n"})
+        self.coverage([("crates/sample/src/lib.rs", 10, 10)])
+        digest = hashlib.sha256(b"pub struct A;\n").hexdigest()
+        self.policy([self.entry(sha256=digest)])
+        self.assert_exit(self.run_gate(self.report), 2)
+
+    def test_entry_for_reported_file_is_an_input_error(self):
+        self.setup_crate()
+        self.coverage([("crates/sample/src/lib.rs", 10, 10), (self.PATH, 10, 10)])
+        self.policy([self.entry()])
+        output = self.assert_exit(self.run_gate(self.report), 2)
+        self.assertIn("other.rs", output)
+
+    def test_malformed_policy_file_is_an_input_error(self):
+        for content in ("not json", "[]", '{"schema_version": 1}', '{"schema_version": 2, "entries": []}'):
+            with self.subTest(content):
+                self.setup_crate()
+                self.write("tools/coverage-policy.json", content)
+                self.assert_exit(self.run_gate(self.report), 2)
+
+
+def load_gate():
+    """Load coverage-gate.py as a module, because its file name has a hyphen."""
+    spec = importlib.util.spec_from_file_location("coverage_gate_paths", GATE)
+    gate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    return gate
 
 
 if __name__ == "__main__":
