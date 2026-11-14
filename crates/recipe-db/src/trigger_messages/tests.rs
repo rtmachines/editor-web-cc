@@ -5,9 +5,9 @@ use recipe_domain::error_codes::{ErrorCode, REGISTRY};
 
 use super::user_message;
 
-/// The 16 trigger codes of the plant and recipe ranges, the trigger code `E-AUD-003`, and the code
+/// The 17 trigger codes of the plant and recipe ranges, the trigger code `E-AUD-003`, and the code
 /// of the check constraint without a trigger code.
-const TRIGGER_CODES: [&str; 18] = [
+const TRIGGER_CODES: [&str; 19] = [
     "E-PLT-030",
     "E-PLT-031",
     "E-PLT-032",
@@ -24,6 +24,7 @@ const TRIGGER_CODES: [&str; 18] = [
     "E-RCP-034",
     "E-RCP-035",
     "E-RCP-036",
+    "E-RCP-037",
     "E-AUD-003",
     "E-DB-003",
 ];

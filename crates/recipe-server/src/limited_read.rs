@@ -148,6 +148,9 @@ impl Drop for FinishOnDrop {
 /// the limit marks its path and gives `LimitFault::TimedOut`. If the count of marks is at its
 /// maximum, the call gives `LimitFault::MarkOverflow`. The blocking task clears that mark
 /// when it ends. Calls below the limit run side by side (ADR-0133 (c) to (e)).
+///
+/// A caller that drops this future before `limit` leaves its running call without a mark
+/// (ADR-0172 (ai)). The operator needs no step for this case (ADR-0172 (aj)).
 pub(crate) async fn read_with_limit<T, F>(
     limit: Duration,
     stalled: &StalledPaths,

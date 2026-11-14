@@ -15,6 +15,8 @@
 mod app;
 #[path = "error_registry/audit.rs"]
 mod audit;
+#[path = "error_registry/check_result.rs"]
+mod check_result;
 #[path = "error_registry/export.rs"]
 mod export;
 #[path = "error_registry/identity.rs"]
@@ -91,6 +93,11 @@ const SCOPE: &[ScopeEntry] = &[
         "AppError",
         app::samples,
         include_str!("error_registry/app.rs"),
+    ),
+    (
+        "CheckResultFault",
+        check_result::samples,
+        include_str!("error_registry/check_result.rs"),
     ),
     (
         "WebError",

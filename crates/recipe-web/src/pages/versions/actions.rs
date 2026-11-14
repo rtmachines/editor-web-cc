@@ -26,6 +26,7 @@ use crate::pages::form_fields::Choice;
 use crate::pages::path_values::page as read_page;
 use crate::pages::render::see_other_path;
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
 
@@ -305,8 +306,9 @@ pub(crate) struct VersionedFields {
 
 /// `POST /recipes/{ref}/versions/{n}/retire`: retire the version and show its page with a toast.
 ///
-/// The command commits, and then the read of the version page can fail (design D7).
-/// The route then keeps the error answer of the read.
+/// The command commits, and then the read of the version page can fail (ADR-0163).
+/// The route then answers the notice that the change is saved. `RetireVersion` returns no new
+/// `row_version`, so that answer sets no `HX-Trigger`.
 /// A repeat of the retire with the stale `row_version` gives `409 E-WEB-001`.
 pub(crate) async fn retire(
     State(state): State<WebState>,
@@ -332,9 +334,14 @@ pub(crate) async fn retire(
     let toast = t.with_arg("toast-version-retired", "number", number);
     let target = (reference.clone(), number);
     let page = (None, read_page(None)?);
-    let answer = version_answer(&state, &request, target, page, Some(toast)).await?;
-    let response = with_row_version(answer.html.into_response(), answer.row_version, request_id)?;
     let href = format!("/recipes/{reference}/versions/{number}");
+    let answer = match version_answer(&state, &request, target, page, Some(toast)).await {
+        Ok(answer) => answer,
+        Err(fault) => {
+            return saved_notice(request.is_htmx(), request_id, t, &fault, &href, None);
+        }
+    };
+    let response = with_row_version(answer.html.into_response(), answer.row_version, request_id)?;
     with_push_url(response, &href, request_id)
 }
 

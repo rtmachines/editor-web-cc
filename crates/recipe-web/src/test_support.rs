@@ -205,7 +205,11 @@ impl Fixture {
             idle_timeout: IDLE_TIMEOUT,
         });
         TestSession {
-            cookie: format!("__Host-recipe_session={}", token.to_hex()),
+            cookie: format!(
+                "{}={}",
+                crate::cookies::session_cookie_name(self.state.settings().secure),
+                token.to_hex()
+            ),
             csrf: csrf.to_hex(),
         }
     }
@@ -473,14 +477,15 @@ pub(crate) fn cookie_pair(set_cookie: &str) -> String {
 
 /// Send a same-origin form with a valid pre-session token and the extra form fields.
 ///
-/// The request carries the cookie `__Host-recipe_csrf` and the field `csrf_pre`.
+/// The request carries the pre-session cookie and the field `csrf_pre`.
 pub(crate) async fn post_pre_session(
     fixture: &Fixture,
     path: &str,
     fields: &str,
     headers: &[(&str, &str)],
 ) -> Reply {
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let cookie = cookie_pair(token.set_cookie().to_str().unwrap());
     let body = format!("{fields}&csrf_pre={}", token.nonce());
     let mut builder = request(Method::POST, path)

@@ -5,7 +5,7 @@
 //! `303` to the machine page. A rejected HTMX request puts its error into `#error-panel`. A request
 //! with bad fields also gets the form with the sent texts out of band (ADR-0041 (e)). A domain
 //! error of `AddUnit` gets the same form with only its line, for example `E-PLT-004` under the
-//! segment.
+//! segment. A read that fails after the commit gives the notice answer of ADR-0163.
 
 use askama::Template;
 use axum::extract::rejection::{FormRejection, PathRejection};
@@ -17,7 +17,7 @@ use recipe_app::plant::{
     AddUnit, AddUnitInput, GetUnitForm, GetUnitTree, UnitForm, UnitFormInput, UnitTreeInput,
 };
 use recipe_app::ports::NonEmpty;
-use recipe_domain::plant::{MachineCode, PlantError, UnitPath};
+use recipe_domain::plant::{Machine, MachineCode, PlantError, UnitPath};
 use recipe_domain::text::Text;
 use serde::Deserialize;
 
@@ -28,6 +28,7 @@ use crate::pages::machines::tree::{Scope, UnitTree};
 use crate::pages::path_values::path_code;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
 
@@ -229,13 +230,12 @@ pub(super) async fn add(
     tree_answer(&state, &request, (code, parent), &added.path).await
 }
 
-/// Answer a valid HTMX request: the tree with the new unit `path` in focus and the renewed form.
-async fn tree_answer(
+/// Read the tree and the renewed form after the command of `AddUnit` committed.
+async fn read_after_add(
     state: &WebState,
     request: &PageRequest,
     (code, parent): (MachineCode, Option<UnitPath>),
-    path: &UnitPath,
-) -> Result<Response, WebError> {
+) -> Result<(Machine, UnitForm), WebError> {
     let app = state.identity().app().clone();
     let auth = request.auth()?;
     let meta = request.meta();
@@ -253,7 +253,27 @@ async fn tree_answer(
             },
         )
         .await?;
+    Ok((machine, next))
+}
+
+/// Answer a valid HTMX request: the tree with the new unit `path` in focus and the renewed form.
+///
+/// The command committed before this function runs. A failed read gives the notice answer, so the
+/// error does not hide the saved unit (ADR-0163). `AddUnitOutput` holds no row version.
+async fn tree_answer(
+    state: &WebState,
+    request: &PageRequest,
+    (code, parent): (MachineCode, Option<UnitPath>),
+    path: &UnitPath,
+) -> Result<Response, WebError> {
     let t = Texts::new(state.bundles(), request.lang());
+    let (machine, next) = match read_after_add(state, request, (code, parent)).await {
+        Ok(read) => read,
+        Err(fault) => {
+            let href = format!("/machines/{code}");
+            return saved_notice(true, request.request_id(), t, &fault, &href, None);
+        }
+    };
     let tree = UnitTree::build(
         &machine,
         Scope::Live,

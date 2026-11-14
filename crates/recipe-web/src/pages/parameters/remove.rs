@@ -3,7 +3,8 @@
 //!
 //! An HTMX request with `HX-Target: content` gets the content of the version page with the toast
 //! and `HX-Push-Url` with the address of the version. Any other HTMX request gets the parameter
-//! table and the toast. A request without HTMX gets `303` to the version page.
+//! table and the toast. A request without HTMX gets `303` to the version page. When the read of an
+//! HTMX answer fails after the commit, the answer is the notice of ADR-0163.
 
 use askama::Template;
 use axum::body::{Body, to_bytes};
@@ -28,6 +29,8 @@ use crate::pages::draft_reply::{conflict, success, with_change_number, with_push
 use crate::pages::path_values::Page;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
+use crate::pages::texts::Texts;
 use crate::pages::versions::page::version;
 use crate::state::WebState;
 
@@ -155,10 +158,41 @@ pub(crate) async fn remove(
     if !request.is_htmx() {
         return see_other_path(&target.version_href(), request_id, []);
     }
+    let lang = request.lang();
+    let row_version = output.row_version;
     let toast = with_change_number(ctx.texts(), &toast, &output);
+    let answer = htmx_answer(state.clone(), request, (&target, output, toast)).await;
+    answer.or_else(|fault| {
+        let texts = Texts::new(state.bundles(), lang);
+        saved_notice(
+            true,
+            request_id,
+            texts,
+            &fault,
+            &target.version_href(),
+            Some(row_version),
+        )
+    })
+}
+
+/// Answer an HTMX request after the removal: the version page or the table, both with the toast.
+///
+/// The function solves one problem: its reads run after the commit, so the caller turns the error
+/// of any step into the notice answer (ADR-0163).
+async fn htmx_answer(
+    state: WebState,
+    request: PageRequest,
+    (target, output, toast): (&Target, DraftOutput, String),
+) -> Result<Response, WebError> {
     if request.hx_target() == Some(CONTENT) {
-        return version_content(state.clone(), request, (&target, output, toast)).await;
+        return version_content(state, request, (target, output, toast)).await;
     }
+    let request_id = request.request_id();
+    let ctx = Ctx {
+        state: &state,
+        request: &request,
+        target,
+    };
     let mut body = table_body(ctx, None, FIRST_PAGE).await?;
     body.0.push_str(&toast_html(toast, true, request_id)?);
     success(&output, body, request_id)

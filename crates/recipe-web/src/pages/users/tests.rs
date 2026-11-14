@@ -316,6 +316,25 @@ async fn pages_users_new_form_has_login_role_and_the_token() {
     assert_clean_html(&reply.body);
 }
 
+/// Design D11 (b), ADR-0172: the form of a new user drops a second submit while the first runs.
+/// The answer stays the full result page, so the boosted form does not push a URL.
+#[tokio::test]
+async fn user_new_form_drops_a_second_submit() {
+    let (fixture, admin) = world();
+    let reply = get_as(&fixture, &admin, "/users/new").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let found = tags(&reply.body);
+    let form = found
+        .iter()
+        .find(|tag| tag.name == "form" && tag.attribute("id") == Some("user-new-form"))
+        .expect("the page holds the form user-new-form");
+    assert_eq!(form.attribute("action"), Some("/users"));
+    assert_eq!(form.attribute("method"), Some("post"));
+    assert_eq!(form.attribute("hx-boost"), Some("true"));
+    assert_eq!(form.attribute("hx-sync"), Some("closest form:drop"));
+    assert_eq!(form.attribute("hx-push-url"), Some("false"));
+}
+
 /// Assert that the page has the select `role` with a label and `aria-required="true"`.
 ///
 /// Return the values of the options that carry the attribute `selected`.

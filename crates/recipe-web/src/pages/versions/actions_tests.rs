@@ -6,6 +6,7 @@
 //! version 2, and the live draft 3. `R-300` is deleted.
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 use recipe_domain::audit::AuditAction;
 
 use crate::pages::recipes::test_world::recipe_world;
@@ -270,6 +271,49 @@ async fn actions_retire_answers_the_version_page_with_the_toast_and_the_address(
     let h1 = h1.split('>').next().unwrap();
     assert!(h1.contains("aria-describedby=\"toast\""), "{h1}");
     assert!(!reply.body.contains(RETIRE_FORM_TAG), "{}", reply.body);
+    assert_eq!(actions_since(&world, before), [AuditAction::VersionRetired]);
+}
+
+/// ADR-0163: the retire committed and the read of the version page failed. The answer is the
+/// notice, not an error. The notice sets no `HX-Trigger`, because the output of `RetireVersion`
+/// holds no new `row_version`.
+#[tokio::test]
+async fn retire_with_failed_read_after_commit_shows_saved_notice() {
+    let world = recipe_world();
+    let before = world.audit_count();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let path = "/recipes/R-100/versions/2/retire";
+    let reply = post_content(&world, &world.admin, path, "row_version=1").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast", "{:?}", reply.headers);
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert!(reply.header("hx-trigger").is_empty(), "{:?}", reply.headers);
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    assert_eq!(actions_since(&world, before), [AuditAction::VersionRetired]);
+}
+
+/// ADR-0163: a request without HTMX gets `303` to the version page, which reads the state again.
+#[tokio::test]
+async fn retire_with_failed_read_after_commit_without_htmx_redirects_to_the_version_page() {
+    let world = recipe_world();
+    let before = world.audit_count();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let path = "/recipes/R-100/versions/2/retire";
+    let reply = world
+        .post_with(&world.admin, path, "row_version=1", &[])
+        .await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    assert_eq!(reply.header("location"), "/recipes/R-100/versions/2");
     assert_eq!(actions_since(&world, before), [AuditAction::VersionRetired]);
 }
 

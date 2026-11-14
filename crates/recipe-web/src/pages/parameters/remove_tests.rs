@@ -3,6 +3,7 @@
 //! Spec "Deletion of a parameter", design D7, ADR-0040 (c) and (f), `api.md` section 2.6.
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 
 use super::test_kit::{ADD, INT_FIELDS, assert_panel_error, changed, parameter_path, post_htmx};
 use crate::pages::recipes::test_world::recipe_world;
@@ -206,4 +207,66 @@ async fn parameters_new_row_shows_the_type_text_of_the_table() {
             "{tag}"
         );
     }
+}
+
+/// ADR-0163: the table answer of a removal whose read fails after the commit is the notice.
+#[tokio::test]
+async fn remove_with_failed_read_after_commit_shows_saved_notice() {
+    let world = recipe_world();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let path = parameter_path(SPEED_KEY, "/delete");
+    let reply = post_htmx(&world, &path, &[("row_version", "1")]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    let table = world.get(&world.engineer, TABLE, &[ENGLISH, HTMX]).await;
+    assert!(!table.body.contains(">SPEED</a>"), "{}", table.body);
+}
+
+/// ADR-0163: the content answer of a removal whose read fails after the commit is the notice.
+#[tokio::test]
+async fn remove_for_the_content_with_failed_read_after_commit_shows_saved_notice() {
+    let world = recipe_world();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let path = parameter_path(SPEED_KEY, "/delete");
+    let reply = world
+        .post_with(&world.engineer, &path, "row_version=1", &HTMX_CONTENT)
+        .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast");
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+}
+
+/// ADR-0163: a request without HTMX reads nothing after the commit, so the fault does not matter.
+#[tokio::test]
+async fn remove_without_htmx_ignores_a_read_fault_after_commit() {
+    let world = recipe_world();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let path = parameter_path(SPEED_KEY, "/delete");
+    let reply = world
+        .post(&world.engineer, &path, "row_version=1", false)
+        .await;
+    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
+    assert_eq!(reply.header("location"), "/recipes/R-100/versions/3");
+    assert_eq!(reply.header("hx-trigger"), "");
 }

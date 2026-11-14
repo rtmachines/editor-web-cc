@@ -70,6 +70,7 @@ password-hint = Użyj od 12 do 128 znaków. Nie używaj hasła z listy haseł z 
 password-must-change = Musisz zmienić hasło jednorazowe, zanim otworzysz inne strony.
 password-submit = Zmień hasło
 password-changed = Hasło zostało zmienione.
+saved-notice = Zmiana jest zapisana. Załaduj stronę ponownie.
 
 # Lista użytkowników
 users-title = Użytkownicy
@@ -418,6 +419,8 @@ error-E-PLT-029 = Receptura { $reference } nie należy do maszyny { $code }. Uż
 error-E-WEB-013 = Inny użytkownik zmienił ustawienia połączenia maszyny { $code }. Odśwież stronę i zastosuj zmianę ponownie.
 error-E-WEB-014 = Serwer nie może odczytać zapisanego hasła PLC maszyny { $code }. Wpisz hasło ponownie lub skontaktuj się z administratorem.
 error-E-WEB-015 = Serwer nie odesłał odpowiedzi. Wynik operacji jest nieznany. Odśwież stronę i sprawdź dane, zanim spróbujesz ponownie.
+error-E-WEB-016 = Serwer nie może odczytać pliku wyniku: { $check }.
+error-E-WEB-017 = Plik wyniku jest uszkodzony: { $check }.
 type-reason-grammar = tekst nie pasuje do gramatyki typu
 type-reason-unknown-struct = struktura albo rewizja nie istnieje na tej maszynie
 type-reason-not-on-platform = typ nie istnieje na platformie maszyny
@@ -495,6 +498,7 @@ error-E-RCP-033 = Stan wersji ani zamrożona kolumna wersji nie mogą zmienić s
 error-E-RCP-034 = Numer referencyjny ani maszyna receptury nie mogą się zmienić, gdy używa ich wersja.
 error-E-RCP-035 = Wersja ma więcej niż 4 000 parametrów.
 error-E-RCP-036 = Wersja ma więcej niż 32 768 wierszy limitów.
+error-E-RCP-037 = Nowa wersja musi być aktywną wersją roboczą.
 error-E-RCP-050 = Parametr { $tag } w wersji { $number } receptury { $reference } nie ma tłumaczenia dla { $lang }.
 error-E-RCP-051 = Parametr { $key } nie istnieje w wersji { $number } receptury { $reference }.
 error-E-RCP-052 = Przepięcie { $type_name } nie jest możliwe: { $reason }.

@@ -406,7 +406,8 @@ async fn login_with(fixture: &Fixture, cookie: &str, field: &str, extra: &[(&str
 #[tokio::test]
 async fn csrf_issued_cookie_has_the_attributes_of_api_section_7_3() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let text = token.set_cookie().to_str().unwrap().to_owned();
     let mut parts = text.split("; ");
     let pair = parts.next().unwrap();
@@ -434,7 +435,8 @@ async fn csrf_issued_cookie_has_the_attributes_of_api_section_7_3() {
 #[tokio::test]
 async fn csrf_issued_nonce_is_32_hex_characters_from_a_fallible_source() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let text = token.set_cookie().to_str().unwrap().to_owned();
     let value = text.split(';').next().unwrap();
     let (_name, pair) = value.split_once('=').unwrap();
@@ -451,8 +453,10 @@ async fn csrf_issued_nonce_is_32_hex_characters_from_a_fallible_source() {
 #[tokio::test]
 async fn csrf_issued_tokens_are_new_each_time_and_signed_under_the_first_key() {
     let fixture = Fixture::new();
-    let first = issue_pre_session(fixture.state.csrf_keys()).unwrap();
-    let second = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let first =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
+    let second =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     assert_ne!(first.nonce(), second.nonce());
     let pair = cookie_pair(first.set_cookie().to_str().unwrap());
     let value = pair.strip_prefix("__Host-recipe_csrf=").unwrap();
@@ -465,7 +469,8 @@ async fn csrf_issued_tokens_are_new_each_time_and_signed_under_the_first_key() {
 #[tokio::test]
 async fn csrf_debug_of_the_issued_token_hides_the_nonce() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let shown = format!("{token:?}");
     assert!(!shown.contains(token.nonce()), "{shown}");
     assert!(shown.contains("[redacted]"), "{shown}");
@@ -475,7 +480,8 @@ async fn csrf_debug_of_the_issued_token_hides_the_nonce() {
 async fn csrf_login_with_an_open_session_accepts_the_pre_session_token_alone() {
     let fixture = Fixture::new();
     let session = fixture.seed_session(1, Role::Operator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let both = format!(
         "{}; {}",
         session.cookie,
@@ -525,7 +531,8 @@ async fn csrf_cookie_signed_by_the_old_key_of_a_two_line_file_is_accepted() {
 #[tokio::test]
 async fn csrf_cookie_with_a_changed_nonce_is_rejected() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let pair = cookie_pair(token.set_cookie().to_str().unwrap());
     let value = pair.strip_prefix("__Host-recipe_csrf=").unwrap();
     let (nonce, tag) = value.split_once('.').unwrap();
@@ -539,8 +546,10 @@ async fn csrf_cookie_with_a_changed_nonce_is_rejected() {
 #[tokio::test]
 async fn csrf_field_that_differs_from_the_nonce_of_the_cookie_is_rejected() {
     let fixture = Fixture::new();
-    let first = issue_pre_session(fixture.state.csrf_keys()).unwrap();
-    let second = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let first =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
+    let second =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let cookie = cookie_pair(first.set_cookie().to_str().unwrap());
     let reply = login_with(&fixture, &cookie, second.nonce(), &[]).await;
     assert_rejected(&fixture, &reply, "other nonce");
@@ -549,7 +558,8 @@ async fn csrf_field_that_differs_from_the_nonce_of_the_cookie_is_rejected() {
 #[tokio::test]
 async fn csrf_missing_malformed_or_uppercase_pre_session_parts_are_rejected() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let pair = cookie_pair(token.set_cookie().to_str().unwrap());
     let value = pair.strip_prefix("__Host-recipe_csrf=").unwrap().to_owned();
     let nonce = token.nonce().to_owned();
@@ -610,7 +620,8 @@ async fn csrf_lang_accepts_the_session_token_of_the_open_session() {
 async fn csrf_lang_with_a_session_also_accepts_the_pre_session_token() {
     let fixture = Fixture::new();
     let session = fixture.seed_session(1, Role::Operator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let cookies = format!(
         "{}; {}",
         session.cookie,
@@ -632,7 +643,8 @@ async fn csrf_lang_with_a_session_also_accepts_the_pre_session_token() {
 async fn csrf_lang_with_a_session_and_csrf_pre_only_sets_the_language_cookie() {
     let fixture = Fixture::new();
     let session = fixture.seed_session(1, Role::Operator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let cookies = format!(
         "{}; {}",
         session.cookie,
@@ -761,7 +773,8 @@ async fn csrf_rejection_logs_one_warning_and_no_token() {
     let (logs, _guard) = capture_logs();
     let fixture = Fixture::new();
     let session = fixture.seed_session(1, Role::Administrator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let pre_cookie = cookie_pair(token.set_cookie().to_str().unwrap());
     let cookies = format!("{}; {pre_cookie}", session.cookie);
     let wrong_header = "f".repeat(64);

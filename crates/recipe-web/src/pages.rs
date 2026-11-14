@@ -54,6 +54,7 @@ mod render;
 mod request;
 #[cfg(test)]
 mod review_fix_tests;
+pub(crate) mod saved_notice;
 pub(crate) mod security_events;
 #[cfg(test)]
 mod session_end_tests;

@@ -469,7 +469,7 @@ pub(super) fn logged(error: &WebError, ctx: &ErrorContext<'_>) -> (ErrorCode, St
 ///
 /// `E-IDN-007` is the redirect to `/me/password`. `E-WEB-004` redirects to `/login` and ends the
 /// session cookie with `Max-Age=0`, but only when `htmx` is false.
-pub(super) fn session_redirect(shown: ErrorCode, htmx: bool) -> Option<Response> {
+pub(super) fn session_redirect(shown: ErrorCode, htmx: bool, secure: bool) -> Option<Response> {
     if shown == ErrorCode::IDN_007 {
         return Some(redirect(PASSWORD_PATH));
     }
@@ -479,7 +479,7 @@ pub(super) fn session_redirect(shown: ErrorCode, htmx: bool) -> Option<Response>
     let mut response = redirect(LOGIN_PATH);
     response
         .headers_mut()
-        .append(SET_COOKIE, clear_session_cookie());
+        .append(SET_COOKIE, clear_session_cookie(secure));
     Some(response)
 }
 
@@ -490,7 +490,7 @@ pub(super) fn session_redirect(shown: ErrorCode, htmx: bool) -> Option<Response>
 /// (`api.md` section 5.3). The same answer sets `HX-Push-Url: false`, so the URL stays.
 pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     let (shown, status) = logged(error, ctx);
-    if let Some(response) = session_redirect(shown, ctx.htmx) {
+    if let Some(response) = session_redirect(shown, ctx.htmx, ctx.state.settings().secure) {
         return response;
     }
     let body = body_of(error, shown, status, ctx);
@@ -498,7 +498,10 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     let headers = response.headers_mut();
     if shown == ErrorCode::WEB_004 {
         headers.insert(HX_REDIRECT, HeaderValue::from_static(LOGIN_PATH));
-        headers.append(SET_COOKIE, clear_session_cookie());
+        headers.append(
+            SET_COOKIE,
+            clear_session_cookie(ctx.state.settings().secure),
+        );
     } else if ctx.htmx {
         headers.insert(HX_RETARGET, HeaderValue::from_static(ERROR_PANEL));
         headers.insert(HX_RESWAP, HeaderValue::from_static(ERROR_RESWAP));

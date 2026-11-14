@@ -18,7 +18,7 @@ use recipe_domain::audit::{SecurityEvent, UserAgent};
 use subtle::ConstantTimeEq as _;
 
 use crate::client::ClientAddr;
-use crate::cookies::{CSRF_COOKIE, request_cookie};
+use crate::cookies::{csrf_cookie_name, request_cookie};
 use crate::error::{ByteLimit, WebError};
 use crate::limits::request_limit;
 use crate::pipeline::request_id_of;
@@ -68,7 +68,7 @@ pub(crate) fn is_mutating(method: &Method) -> bool {
 enum TokenKind {
     /// The token of the session.
     Session,
-    /// The signed double-submit token of the cookie `__Host-recipe_csrf`.
+    /// The signed double-submit token of the pre-session cookie.
     PreSession,
     /// Either of the two.
     Either,
@@ -160,7 +160,7 @@ fn session_token_matches(
 
 /// Tell whether the request carries a valid pre-session token.
 fn pre_session_matches(state: &WebState, headers: &HeaderMap, body: &[u8], is_form: bool) -> bool {
-    let cookie = request_cookie(headers, CSRF_COOKIE);
+    let cookie = request_cookie(headers, csrf_cookie_name(state.settings().secure));
     let field = is_form
         .then(|| form::form_field(body, PRE_SESSION_FIELD))
         .flatten();

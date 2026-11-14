@@ -141,6 +141,36 @@ async fn a_failed_begin_returns_its_storage_error_and_opens_nothing() {
 }
 
 #[tokio::test]
+async fn fail_begin_after_commit_fails_the_first_begin_after_a_commit() {
+    let store = MemoryStore::default();
+    store.fail_begin_after_commit(Fault::Unavailable);
+    let tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    commit(&store, Box::new(tx), &[1]).await.unwrap();
+    let unit_of_work: &dyn UnitOfWork = &store;
+    let error = unit_of_work.begin(Isolation::ReadOnly).await.err().unwrap();
+    assert_eq!(error.code(), ErrorCode::DB_005);
+    assert!(store.begin_memory(Isolation::ReadOnly).is_ok());
+}
+
+#[tokio::test]
+async fn fail_begin_after_commit_lets_the_begin_before_the_commit_pass() {
+    let store = MemoryStore::default();
+    store.fail_begin_after_commit(Fault::Unavailable);
+    assert!(store.begin_memory(Isolation::ReadOnly).is_ok());
+    assert!(store.begin_memory(Isolation::ReadCommitted).is_ok());
+}
+
+#[tokio::test]
+async fn clear_failures_removes_the_fault_of_fail_begin_after_commit() {
+    let store = MemoryStore::default();
+    store.fail_begin_after_commit(Fault::Unavailable);
+    store.clear_failures();
+    let tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    commit(&store, Box::new(tx), &[1]).await.unwrap();
+    assert!(store.begin_memory(Isolation::ReadOnly).is_ok());
+}
+
+#[tokio::test]
 async fn clear_failures_lets_the_next_commit_pass() {
     let store = MemoryStore::default();
     store.fail_finish(Fault::Deadlock);
