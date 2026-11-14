@@ -47,8 +47,8 @@ The ste-lint Check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 7. Group G7: F-07 text, F-18 text
 
-- [ ] 7.1 (docs/architecture) [opus] F-07, D12. Write the detached tasks in `reliability.md`. In §1.1, add the `WARN` line of a lost event, and remove the handler line of ADR-0130. Change §2.2 (row `JoinHandle`) and §2.4 rules 6 and 7. Change §7.3 steps 3 to 5, and add the row `identity.detached_tasks` with the value 8 to §7.11. Add the new `TaskStage` and `TimeoutStage`. Name the log place and the catch place in `CLAUDE.md` and `.claude/rules/rust.md`. Change the commit paths of the four use cases in `domain-model.md` §5. Red test: none. Check: ste-lint on `docs/architecture/reliability.md docs/architecture/domain-model.md`.
-- [ ] 7.2 (docs/architecture) [mechanical] [haiku] F-18, D6. State in `data-model.md` §1.3 that `TypedLogin` refuses a control character and the database checks the length only. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
+- [x] 7.1 (docs/architecture) [opus] F-07, D12. Write the detached tasks in `reliability.md`. In §1.1, add the `WARN` line of a lost event, and remove the handler line of ADR-0130. Change §2.2 (row `JoinHandle`) and §2.4 rules 6 and 7. Change §7.3 steps 3 to 5, and add the row `identity.detached_tasks` with the value 8 to §7.11. Add the new `TaskStage` and `TimeoutStage`. Name the log place and the catch place in `CLAUDE.md` and `.claude/rules/rust.md`. Change the commit paths of the four use cases in `domain-model.md` §5. Red test: none. Check: ste-lint on `docs/architecture/reliability.md docs/architecture/domain-model.md`.
+- [x] 7.2 (docs/architecture) [mechanical] [haiku] F-18, D6. State in `data-model.md` §1.3 that `TypedLogin` refuses a control character and the database checks the length only. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
 
 ## 8. Group G8: code foundations
 

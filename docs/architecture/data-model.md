@@ -78,7 +78,7 @@ Exceptions to the rules above:
 | `machine.name`, `unit.name`, `recipe.name`, `parameter.name_en`, `parameter_translation.name` | 1 to 200 characters |
 | `parameter.description_en`, `parameter_translation.description`, `recipe_version.change_note` | `description_en` and `change_note`: 1 to 4 000. `parameter_translation.description`: 0 to 4 000 |
 | `parameter.tag` | 1 to 64, pattern `^[A-Z][A-Z0-9_]{0,63}$` |
-| `app_user.login`, `login_attempt.login` | 3 to 64 for a valid login. `login_attempt.login` accepts 1 to 64 with no control character (ADR-0035) |
+| `app_user.login`, `login_attempt.login` | 3 to 64 for a valid login. `login_attempt.login` accepts 1 to 64 characters. The value object `TypedLogin` refuses a control character. The database checks only the length of `login_attempt.login` (ADR-0168) |
 | `parameter.value` | `pg_column_size` at most 1 048 576 bytes |
 | `security_event.user_agent` | at most 256 characters (`http.user_agent_max`, `reliability.md` 7.11) |
 | `plc_connection.host` | 1 to 253 characters. An IPv4 address or an RFC 1123 host name (ADR-0154 (f), section 3.18) |
