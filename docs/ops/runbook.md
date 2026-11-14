@@ -2535,6 +2535,18 @@ The `ERROR` lines are in `docker compose logs walarchive`.
 | `mktemp: failed to create directory via template '/run/pgpass/run.XXXXXX': Permission denied` | The image `recipe-pgtools` of 0.1.0 has no mount point `/run/pgpass`. After a restart of the container, uid 999 cannot write into the tmpfs. The same fault can stop `backup` of 0.1.0 (ADR-0104). | Step 23 of the section "Upgrade" replaces the container with the image of the fix. The restore test of step 3 and the segment check do not need the old containers. |
 | `cannot load wal-identity.sh` | The image `recipe-pgtools` lacks the file of the guard. | Compare the image ID with the release notes as in step 5 of the section "Load the images". |
 
+## A lost one-time password
+
+A `503 E-WEB-009` after `POST /users` or after a password reset can lose the one-time password (ADR-0172 (a)).
+Use this procedure to get a new one-time password. It needs no database command.
+
+1. Open `/users` as an administrator. Find the login of the user in the list.
+2. If the user is not in the list, create the user again at `/users/new`. Then stop.
+3. If the user is in the list, open the user page.
+4. Open the section "Reset the password".
+5. Select "Reset password for <login>". The new one-time password appears once.
+6. Give the new one-time password to the user at once.
+
 ## Known gaps
 
 The documents do not yet close the gaps below. Each bullet gives the workaround of this page, if one exists.

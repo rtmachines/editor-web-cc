@@ -32,8 +32,8 @@ The ste-lint Check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 4. Group G4: F-19 text, F-06 text
 
-- [ ] 4.1 (docs/architecture) [opus] F-19, D8. Add the row `E-RCP-037` to `reliability.md` §1.2 first. Add `data-model.md` §4.14, its row of §4.11, the sentence of §5.2, and migration 0016 to §8. Extend I4 in `domain-model.md` §3. Red test: none. Check: ste-lint on `docs/architecture/reliability.md docs/architecture/data-model.md docs/architecture/domain-model.md`.
-- [ ] 4.2 (docs/architecture) [mechanical] [haiku] F-06, D11. Add the create form to the `hx-sync` list of `api.md` §4 and `.claude/rules/web.md`. Add the step of D11 (a) to `docs/ops/runbook.md`. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/ops/runbook.md`.
+- [x] 4.1 (docs/architecture) [opus] F-19, D8. Add the row `E-RCP-037` to `reliability.md` §1.2 first. Add `data-model.md` §4.14, its row of §4.11, the sentence of §5.2, and migration 0016 to §8. Extend I4 in `domain-model.md` §3. Red test: none. Check: ste-lint on `docs/architecture/reliability.md docs/architecture/data-model.md docs/architecture/domain-model.md`.
+- [x] 4.2 (docs/architecture) [mechanical] [haiku] F-06, D11. Add the create form to the `hx-sync` list of `api.md` §4 and `.claude/rules/web.md`. Add the step of D11 (a) to `docs/ops/runbook.md`. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/ops/runbook.md`.
 
 ## 5. Group G5: F-09 text, F-16 text
 

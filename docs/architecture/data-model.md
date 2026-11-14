@@ -1692,6 +1692,7 @@ CREATE TRIGGER parameter_limit_size_budget
 | `E-RCP-034` | 4.8 | Reference number or machine change while referenced | 409 |
 | `E-RCP-035` | 4.10 | More than 4 000 parameters in a version | 422 |
 | `E-RCP-036` | 4.10 | More than 32 768 limit rows in a version | 422 |
+| `E-RCP-037` | 4.14 | Insert of a version that is not a live draft with `row_version` 1 | 409 |
 | `E-AUD-002` | check of 4.9 | Hash chain break | 500. Raised by the nightly job `audit_chain_check`. Never returned to a user request |
 | `E-AUD-003` | `security_event_guard` of 5.4 | An update of `security_event` that changes another column than `count`, or changes `count` by another value than 1 | 500. No command of the application causes it |
 
@@ -1751,6 +1752,34 @@ CREATE TRIGGER plc_connection_sync_db_number
 - The function runs as the role of the command. `recipe_app` has `UPDATE (db_number)` on `machine` (5.2). The trigger `machine_set_updated_at` of 3.1 sets `updated_at`.
 - The function raises no error of its own, so 4.11 has no row for it. A number outside the platform range fails a range `CHECK` with SQLSTATE `23514`. `recipe-db` maps it to `E-DB-003`, and the transaction writes nothing.
 - The command already holds `machine FOR NO KEY UPDATE` (section 6), so the `UPDATE` takes no new lock. The entry `PlcConnectionSet` holds the number, so the machine write adds no audit entry.
+
+### 4.14 `recipe_version_insert_draft` (I4, ADR-0169)
+
+A new row of `recipe_version` is a live draft with `row_version` 1. The trigger refuses every other new row, for every role. The `CHECK recipe_version_status_fields` of 3.10 then covers the approval columns and the hash of the new draft.
+
+```sql
+CREATE FUNCTION recipe_version_insert_draft() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
+BEGIN
+    IF NEW.status IS DISTINCT FROM 'draft'
+       OR NEW.row_version IS DISTINCT FROM 1
+       OR NEW.deleted_at IS NOT NULL
+    THEN
+        RAISE EXCEPTION 'E-RCP-037 new version % is not a live draft', NEW.id
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER recipe_version_insert_draft
+    BEFORE INSERT ON recipe_version
+    FOR EACH ROW EXECUTE FUNCTION recipe_version_insert_draft();
+```
+
+- The insert of `CreateVersion` (section 6) names none of the three columns. The column defaults of 3.10 therefore give a live draft with `row_version` 1.
+- The trigger fires before the `CHECK` constraints of 3.10. A new row that is not a live draft therefore gets `E-RCP-037` and not the name of a `CHECK`.
+- ADR-0169 (k) to (p) gives the `EXECUTE` grant of the function and its lines in the restore test.
 
 ## 5. Roles and grants
 
@@ -1945,7 +1974,7 @@ GRANT DELETE ON session, login_attempt, draft_editor, parameter, parameter_limit
 --   draft_editor              : no UPDATE
 ```
 
-`recipe_app` has no `CREATE`, `TRUNCATE`, or `REFERENCES` privilege. `DELETE` on `parameter` and its children is allowed because trigger 4.1 limits it to a live draft. `row_version` is not in the UPDATE grant of `recipe_version`. Trigger 4.4 sets it.
+`recipe_app` has no `CREATE`, `TRUNCATE`, or `REFERENCES` privilege. `DELETE` on `parameter` and its children is allowed because trigger 4.1 limits it to a live draft. `row_version` is not in the UPDATE grant of `recipe_version`. Trigger 4.4 sets it. Trigger 4.14 limits the `INSERT` grant of `recipe_app` on `recipe_version` to a new draft (ADR-0169).
 
 `0003_grants.sql` shipped, so the SQL block above stays as it is. Section 5.4 narrows the `INSERT` grant of `recipe_app` on `security_event` to columns and adds a guard trigger (ADR-0035). `0008_audit_log_insert_columns.sql` revokes the table-level `INSERT` on `audit_log` from `recipe_app`. It then grants `INSERT` on eleven columns only (ADR-0098 (b), (c)).
 
@@ -2300,9 +2329,9 @@ Notes:
 
 - Tool: `sqlx migrate`. Files live in `migrations/` at the repository root. The crate `recipe-db` embeds them with `sqlx::migrate!("../../migrations")`.
 - Name: `NNNN_description.sql`, four digits, forward-only. There is no down migration. A mistake is corrected by a new migration. A shipped migration is never edited. `sqlx` verifies the checksum of every applied migration at start and refuses to run when a file changed.
-- Files of the first release, of ADR-0098, of ADR-0109, of ADR-0143 to ADR-0145, of ADR-0154, of ADR-0156, and of ADR-0157:
+- Files of the first release, of ADR-0098, of ADR-0109, of ADR-0143 to ADR-0145, of ADR-0154, of ADR-0156, of ADR-0157, and of ADR-0169:
   - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`. It does not hold the parts of section 3 that `0009`, `0011`, `0012`, and `0013` add.
-  - `0002_triggers.sql`: functions and triggers of section 4, except 4.13. `0014` adds 4.13.
+  - `0002_triggers.sql`: functions and triggers of section 4, except 4.13 and 4.14. `0014` adds 4.13, and `0016` adds 4.14.
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
   - `0004_seed_plc_types.sql`: the rows of section 7 with UUIDs that never change, so the domain can reference them as constants. Each row carries its `leaf_class`. The insert uses `ON CONFLICT DO NOTHING`, and `sqlx` never re-runs an applied migration.
   - `0005_security_event_guard.sql`: the column grant and the guard trigger of section 5.4 (ADR-0035).
@@ -2316,6 +2345,7 @@ Notes:
   - `0013_machine_db_number.sql`: one transaction. Its first statement is `LOCK TABLE machine IN ACCESS EXCLUSIVE MODE`, so no other statement on `machine` runs until the file ends. The list `EXEMPT` permits it (ADR-0157 (i), (i1)). Then a check of the stored rows stops the file when a live S7 machine has no `plc_connection` row. The message names the code of each such machine, and the file changes nothing (ADR-0156 (h)). Then the file adds the column `machine.db_number` of section 3.1 without a default, so it rewrites no table. It adds both checks as `NOT VALID` and the grant of section 5.2 (ADR-0156).
   - `0014_machine_db_number_copy.sql`: one transaction. First it locks every `machine` row `FOR NO KEY UPDATE` in the order of `id` (ADR-0157 (g)). Then one `UPDATE machine ... FROM plc_connection` copies the number of each record with `db_number IS NOT NULL` into its machine (ADR-0156 (i), ADR-0157 (h)). The statement takes a `ROW EXCLUSIVE` lock, not an exclusive lock. The trigger `machine_set_updated_at` sets `updated_at`. The copy writes no audit row (ADR-0156 (i)). Then the file creates the function and the trigger of 4.13 (ADR-0157 (a)).
   - `0015_machine_db_number_validate.sql`: `VALIDATE CONSTRAINT` on the two checks of `0013` (ADR-0156).
+  - `0016_recipe_version_insert.sql`: the function and the trigger of 4.14 (ADR-0169). The file does not scan or rewrite a table (ADR-0169 (f)).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.
