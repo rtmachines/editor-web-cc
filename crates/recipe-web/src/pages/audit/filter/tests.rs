@@ -2,7 +2,7 @@
 
 use super::{address, not_listed, present, time_range, uuid};
 use crate::error::{FieldError, FieldReason, WebError};
-use crate::pages::recipes::fields::FieldLines;
+use crate::pages::form_fields::FieldLines;
 
 /// Return the number of bad lines that `time_range` adds for the two fields.
 fn bad_lines(from: Option<&str>, to: Option<&str>) -> usize {

@@ -9,8 +9,8 @@ use recipe_app::recipe::VersionList;
 use recipe_domain::recipe::ReferenceNumber;
 
 use crate::pages::path_values::Page;
-use crate::pages::recipes::{pager_links, state_badge};
-use crate::pages::render::{instant, page_url};
+use crate::pages::recipes::state_badge;
+use crate::pages::render::{instant, page_url, pager_links};
 use crate::pages::texts::Texts;
 
 /// One row of the version table.

@@ -17,7 +17,7 @@ use recipe_domain::plant::{LeafClass, LeafPath, PlcTypeId, TypeTree};
 use recipe_domain::recipe::{ParameterKey, RebindLeaves, RecipeError, VersionState};
 
 use crate::error::{FormErrors, WebError};
-use crate::pages::recipes::Choice;
+use crate::pages::form_fields::Choice;
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 

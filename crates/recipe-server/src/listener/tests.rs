@@ -695,3 +695,58 @@ async fn drain_ends_at_the_deadline_when_a_finished_connection_blocks_in_its_log
         .unwrap();
     assert_eq!(outcome.cut(), 1);
 }
+
+/// A subscriber that keeps the level of each event, so a test can count the lines of one level.
+#[derive(Clone, Default)]
+struct LevelRecorder(Arc<parking_lot::Mutex<Vec<tracing::Level>>>);
+
+impl LevelRecorder {
+    fn errors(&self) -> usize {
+        self.0
+            .lock()
+            .iter()
+            .filter(|level| **level == tracing::Level::ERROR)
+            .count()
+    }
+}
+
+impl tracing::Subscriber for LevelRecorder {
+    fn enabled(&self, _metadata: &tracing::Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn event(&self, event: &tracing::Event<'_>) {
+        self.0.lock().push(*event.metadata().level());
+    }
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panic_of_a_connection_task_writes_no_error_line_in_the_loop() {
+    let mut panicking = tokio::task::JoinSet::new();
+    panicking.spawn(async {
+        // A failed parse stands for any bug that panics a connection task.
+        let _number: u8 = "not a number".parse().unwrap();
+    });
+    let joined = panicking.join_next().await.unwrap();
+    assert!(joined.as_ref().is_err_and(tokio::task::JoinError::is_panic));
+    let accept_loop = AcceptLoop::new(app(), settings(), CancellationToken::new());
+    let connections = super::Connections::new(&accept_loop);
+    let recorder = LevelRecorder::default();
+    tracing::subscriber::with_default(recorder.clone(), || {
+        connections.collect(joined);
+        tracing::error!("control event of the test");
+    });
+    assert_eq!(recorder.errors(), 1, "only the control event is at ERROR");
+}

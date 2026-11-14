@@ -18,8 +18,8 @@ use recipe_domain::identity::{Login, Role};
 use serde::Deserialize;
 
 use super::draft_reply::refused;
-use super::recipes::fields::FieldLines;
-use super::render::render;
+use super::form_fields::{FieldLines, TokenFields};
+use super::render::{page_url, pager_links, render};
 use super::request::PageRequest;
 use super::texts::Texts;
 use crate::error::{FieldError, FieldReason, WebError, display_chain};
@@ -50,15 +50,6 @@ pub(crate) struct CreateFields {
 #[serde(deny_unknown_fields)]
 pub(crate) struct RoleFields {
     role: String,
-    /// The session token. The CSRF layer checked it before the handler runs.
-    #[serde(default, rename = "csrf_token")]
-    _csrf_token: Option<String>,
-}
-
-/// The fields of a form that carries only the CSRF token.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct TokenFields {
     /// The session token. The CSRF layer checked it before the handler runs.
     #[serde(default, rename = "csrf_token")]
     _csrf_token: Option<String>,
@@ -141,14 +132,8 @@ async fn refuse_role(state: &WebState, request: &PageRequest, login: &Login) -> 
     })
 }
 
-/// Build the address of one page of the list.
-fn page_url(q: &str, page: u32) -> String {
-    if q.is_empty() {
-        format!("/users?page={page}")
-    } else {
-        format!("/users?q={q}&page={page}")
-    }
-}
+/// The path of the user list.
+const LIST_PATH: &str = "/users";
 
 /// `GET /users`: list the users, one page at a time.
 pub(crate) async fn list(
@@ -163,7 +148,7 @@ pub(crate) async fn list(
     let checked = query.check()?;
     let input = ListUsersInput {
         q: checked.q.clone(),
-        page: checked.index,
+        page: checked.page.index,
     };
     let users = ListUsers::new(state.identity().clone())
         .execute(request.auth()?, &request.meta(), input)
@@ -171,21 +156,18 @@ pub(crate) async fn list(
     let q = checked.q.unwrap_or_default();
     let full_page = usize::try_from(state.identity().settings().page_users)
         .is_ok_and(|size| users.len() >= size);
-    let after_end = users.is_empty() && checked.page > 1;
-    let previous = (checked.page > 1 && !after_end)
-        .then(|| checked.page.checked_sub(1))
-        .flatten()
-        .map(|page| page_url(&q, page));
-    let next = full_page
-        .then(|| checked.page.checked_add(1))
-        .flatten()
-        .map(|page| page_url(&q, page));
+    let after_end = users.is_empty() && checked.page.index > 0;
+    let pairs: Vec<(&str, &str)> = (!q.is_empty())
+        .then_some(("q", q.as_str()))
+        .into_iter()
+        .collect();
+    let (previous, next) = pager_links(LIST_PATH, (checked.page, full_page, after_end), &pairs);
     let pager = UsersPager {
         previous,
         next,
-        current: checked.page,
+        current: checked.page.number,
         after_end,
-        first: page_url(&q, 1),
+        first: page_url(LIST_PATH, &pairs, 1),
     };
     let texts = Texts::new(state.bundles(), request.lang());
     let page = UsersPage::new(texts, &request, &q, &users, pager)?;

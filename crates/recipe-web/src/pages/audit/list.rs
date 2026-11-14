@@ -24,9 +24,8 @@ use super::filter::{AUDIT_PATH, not_listed, optional, present, time_range, uuid,
 use super::rows::{AuditRowView, entity_word, label_text};
 use crate::error::{FieldReason, WebError};
 use crate::layout::{Layout, NavTarget};
+use crate::pages::form_fields::{Choice, FieldLines};
 use crate::pages::path_values::{cursor, query_values};
-use crate::pages::recipes::Choice;
-use crate::pages::recipes::fields::FieldLines;
 use crate::pages::render::{cursor_url, render};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;

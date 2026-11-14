@@ -75,10 +75,10 @@ fn new_name(text: Option<&str>) -> Result<TypeName, FieldError> {
 
 /// Read one member row. A row with an empty name and an empty type gives `None`.
 ///
-/// A row with only one of them gives the reason `MemberRows` for the empty input. A name that is
-/// not a `MemberName` gives the reason `MemberName`. A type that is not a `TypeExpr` gives the
-/// error of the domain (`E-PLT-013`) under the type input, because the type expression has its
-/// own code. The row checks both inputs, so it can give two lines (ADR-0041 (a)).
+/// The row checks both inputs, so it can give two lines (ADR-0041 (a)). An empty input gives the
+/// reason `MemberRows`. A name that is not a `MemberName` gives the reason `MemberName`. A type
+/// that is not a `TypeExpr` gives the error of the domain (`E-PLT-013`) under the type input,
+/// because the type expression has its own code. The lines keep the order name, then type.
 ///
 /// # Errors
 ///
@@ -87,18 +87,30 @@ fn member_input(
     row: u16,
     sent: &SentRow,
 ) -> Result<Option<(MemberName, TypeExpr)>, Vec<FieldError>> {
-    let bad = |field, reason| vec![FieldError::bad_row(row, field, reason)];
-    match (sent.name.is_empty(), sent.type_text.is_empty()) {
-        (true, true) => return Ok(None),
-        (true, false) => return Err(bad(RowField::Name, FieldReason::MemberRows)),
-        (false, true) => return Err(bad(RowField::Type, FieldReason::MemberRows)),
-        (false, false) => {}
+    if sent.name.is_empty() && sent.type_text.is_empty() {
+        return Ok(None);
     }
-    let name = MemberName::parse(&sent.name)
-        .map_err(|_reason| FieldError::bad_row(row, RowField::Name, FieldReason::MemberName));
-    let type_input = format!("members-{row}-{}", RowField::Type.id_suffix());
-    let type_expr = TypeExpr::parse(&sent.type_text)
-        .map_err(|error| FieldError::plant(&error, Some(type_input)));
+    let name = if sent.name.is_empty() {
+        Err(FieldError::bad_row(
+            row,
+            RowField::Name,
+            FieldReason::MemberRows,
+        ))
+    } else {
+        MemberName::parse(&sent.name)
+            .map_err(|_reason| FieldError::bad_row(row, RowField::Name, FieldReason::MemberName))
+    };
+    let type_expr = if sent.type_text.is_empty() {
+        Err(FieldError::bad_row(
+            row,
+            RowField::Type,
+            FieldReason::MemberRows,
+        ))
+    } else {
+        let type_input = format!("members-{row}-{}", RowField::Type.id_suffix());
+        TypeExpr::parse(&sent.type_text)
+            .map_err(|error| FieldError::plant(&error, Some(type_input)))
+    };
     match (name, type_expr) {
         (Ok(name), Ok(type_expr)) => Ok(Some((name, type_expr))),
         (name, type_expr) => Err(name.err().into_iter().chain(type_expr.err()).collect()),

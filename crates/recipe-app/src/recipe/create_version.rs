@@ -12,11 +12,11 @@ use recipe_domain::recipe::{
     ReferenceNumber, SnapshotItem, StoredParameter, VersionSnapshot, check_budgets,
 };
 use recipe_domain::text::LongText;
-use uuid::Uuid;
 
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, Missing, RECIPE_VERSION_ONE_LIVE_DRAFT, map_storage};
+use crate::identity::random_uuid;
 use crate::ports::{Isolation, Locked, NewVersion, NonEmpty, Transaction};
 
 /// The parsed request of `CreateVersion`.
@@ -147,7 +147,7 @@ async fn read_inputs(ctx: &AppContext, input: &CreateVersionInput) -> Result<Rea
 fn check_root_and_machine(recipe: &Recipe, machine: &Machine) -> Result<(), AppError> {
     recipe
         .clone()
-        .create_version(RecipeVersionId::from(Uuid::new_v4()))?;
+        .create_version(RecipeVersionId::from(random_uuid()?))?;
     if machine.is_live() {
         Ok(())
     } else {
@@ -368,7 +368,7 @@ impl CreateVersion {
         checked: Option<BaseChecked>,
     ) -> Result<CreateVersionOutput, AppError> {
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;
-        let version = RecipeVersionId::from(Uuid::new_v4());
+        let version = RecipeVersionId::from(random_uuid()?);
         let unit_uses = checked.as_ref().map(|base| base.unit_uses.as_slice());
         let number =
             lock_and_number(tx.as_mut(), target, &input.reference, version, unit_uses).await?;

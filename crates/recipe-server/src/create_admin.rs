@@ -59,20 +59,22 @@ impl<R: BufRead> StdinInput<R> {
 /// Read at most [`STDIN_LIMIT_BYTES`] bytes of `source` as text.
 ///
 /// The function solves one problem: a source that is too long must not fill the memory. It reads
-/// one byte more than the limit, so it can tell "exactly the limit" from "too long".
+/// one byte more than the limit, so it can tell "exactly the limit" from "too long". It tests the
+/// length of the bytes before it decodes them, so a cut inside a character still gives "too long".
 fn read_bounded(source: impl Read, name: &str) -> Result<String> {
-    let mut text = String::new();
+    let mut bytes = Vec::new();
     source
         .take(STDIN_READ_LIMIT_BYTES)
-        .read_to_string(&mut text)
+        .read_to_end(&mut bytes)
         .with_context(|| format!("cannot read the password from {name}"))?;
-    let length = u64::try_from(text.len()).unwrap_or(u64::MAX);
+    let length = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
     if length > STDIN_LIMIT_BYTES {
         return Err(anyhow!(
             "{name} holds more than {STDIN_LIMIT_BYTES} bytes. That is too long for a password"
         ));
     }
-    Ok(text)
+    String::from_utf8(bytes)
+        .map_err(|_| anyhow!("cannot read the password from {name}: the text is not valid UTF-8"))
 }
 
 /// The checked input of `create-admin`.

@@ -1,10 +1,13 @@
-//! The field errors of one form or one query string (ADR-0041 (a)).
+//! The items that the forms of several page modules share: the field lines, the select option, and
+//! the token-only form.
 //!
-//! The module solves one problem: a form answer must list every bad field at once. A reader of a
+//! The module solves one problem: several page modules use these items, so no single page module owns
+//! them. A form answer must list every bad field at once (ADR-0041 (a)). A reader of a
 //! field returns `WebError::BadRequest`. [`FieldLines`] turns each of these errors into a line and
 //! keeps the other errors, so the handler reads every field before it answers.
 
 use recipe_app::ports::NonEmpty;
+use serde::Deserialize;
 
 use crate::error::{FieldError, FieldReason, WebError};
 
@@ -113,4 +116,33 @@ impl FieldLines {
             })
         })
     }
+}
+
+/// One option of a select: the sent value and the shown text.
+///
+/// The text comes from the bundles or is data, for example a machine code and its name.
+pub(crate) struct Choice {
+    /// The value that the form sends.
+    pub(crate) value: String,
+    /// The text that the option shows.
+    pub(crate) text: String,
+}
+
+impl Choice {
+    /// Build an option from its value and its text.
+    pub(crate) fn new(value: &str, text: String) -> Self {
+        Self {
+            value: value.to_owned(),
+            text,
+        }
+    }
+}
+
+/// The fields of a form that carries only the CSRF token.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TokenFields {
+    /// The session token. The CSRF layer checked it before the handler runs.
+    #[serde(default, rename = "csrf_token")]
+    _csrf_token: Option<String>,
 }

@@ -18,7 +18,7 @@ use super::{platform_text, query_values};
 use crate::error::{FieldReason, WebError};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::path_values::{Page, archived_machine, flag, page as read_page};
-use crate::pages::render::{page_url, render};
+use crate::pages::render::{page_url, pager_links, render};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
@@ -148,29 +148,6 @@ fn kept_pairs(q: &str, include_archived: bool) -> Vec<(&str, &str)> {
     .collect()
 }
 
-/// Build the addresses of the previous and the next page. An empty address omits its link.
-///
-/// A page after the end has no previous link, because the page before it can lie after the end too.
-fn pager_links(
-    page: Page,
-    has_next: bool,
-    after_end: bool,
-    pairs: &[(&str, &str)],
-) -> (String, String) {
-    let previous = page
-        .number
-        .checked_sub(1)
-        .filter(|number| *number > 0 && !after_end)
-        .map(|number| page_url(LIST_PATH, pairs, number))
-        .unwrap_or_default();
-    let next = has_next
-        .then(|| page.number.checked_add(1))
-        .flatten()
-        .map(|number| page_url(LIST_PATH, pairs, number))
-        .unwrap_or_default();
-    (previous, next)
-}
-
 impl<'a> MachinesPage<'a> {
     /// Build the page from the checked query and one page of machines.
     ///
@@ -194,7 +171,8 @@ impl<'a> MachinesPage<'a> {
         }
         let pairs = kept_pairs(&checked.q, checked.filter.include_archived);
         let after_end = list.rows.is_empty() && checked.page.index > 0;
-        let (previous_url, next_url) = pager_links(checked.page, list.has_next, after_end, &pairs);
+        let (previous_url, next_url) =
+            pager_links(LIST_PATH, (checked.page, list.has_next, after_end), &pairs);
         Ok(Self {
             layout,
             t,

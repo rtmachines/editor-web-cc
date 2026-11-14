@@ -13,9 +13,9 @@ use recipe_domain::plant::{
     StringLength, TypeExpr, TypeName, TypeTree,
 };
 use recipe_domain::recipe::ArrayShape;
-use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::identity::random_uuid;
 use crate::ports::TypeCatalog;
 
 /// The type rows of one machine inside one transaction, and the rows that `EnsureDerivedType` adds.
@@ -231,7 +231,7 @@ impl DerivedTypes {
         shape: RecordShape,
     ) -> Result<PlcTypeId, AppError> {
         let record = PlcTypeRecord {
-            id: PlcTypeId::from(Uuid::new_v4()),
+            id: PlcTypeId::from(random_uuid()?),
             machine: Some(self.machine),
             platforms: BTreeSet::from([self.platform]),
             shape,

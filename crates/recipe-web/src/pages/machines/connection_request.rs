@@ -18,7 +18,7 @@ use zeroize::Zeroizing;
 
 use super::connection::InputTexts;
 use crate::error::{FieldError, FieldReason, WebError};
-use crate::pages::recipes::fields::FieldLines;
+use crate::pages::form_fields::FieldLines;
 
 /// The text of the password field of the connection form.
 ///

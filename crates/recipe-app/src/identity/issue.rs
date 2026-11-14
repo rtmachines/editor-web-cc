@@ -62,12 +62,13 @@ pub fn new_request_id() -> Result<RequestId, AppError> {
 /// Create a version 4 UUID from the random bytes of the system.
 ///
 /// The function solves one problem: `Uuid::new_v4` panics when the operating system gives no
-/// random bytes. `new_request_id`, `CreateUser`, and `bootstrap_administrator` share this function.
+/// random bytes. `new_request_id`, `CreateUser`, `bootstrap_administrator`, and the plant and
+/// recipe commands that create identifiers share this function.
 ///
 /// # Errors
 ///
 /// Returns `AppError::TaskFailed` with the stage `Token` (`E-WEB-011`) when the read fails.
-pub(super) fn random_uuid() -> Result<uuid::Uuid, AppError> {
+pub(crate) fn random_uuid() -> Result<uuid::Uuid, AppError> {
     let bytes = random_bytes::<UUID_BYTES>()?;
     Ok(uuid::Builder::from_random_bytes(bytes).into_uuid())
 }

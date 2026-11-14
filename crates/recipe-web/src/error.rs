@@ -32,14 +32,6 @@ pub use conflict::ConflictView;
 pub(crate) use form::FormErrors;
 pub use form::RenderedForm;
 pub(crate) use layer::render_errors;
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "the form handlers of wave 4 and later call it"
-    )
-)]
-pub(crate) use lists::{DraftFault, draft_lines};
 pub use lists::{FieldError, LineArg, item_lines, leaf_lines};
 pub(crate) use lists::{SHOWN_LINES, line_view, more_text};
 pub(crate) use log::display_chain;
@@ -263,8 +255,6 @@ impl IntoResponse for WebError {
 pub(crate) use view::FieldLine;
 #[cfg(test)]
 mod connection_tests;
-#[cfg(test)]
-mod draft_lines_tests;
 #[cfg(test)]
 mod export_json_tests;
 #[cfg(test)]

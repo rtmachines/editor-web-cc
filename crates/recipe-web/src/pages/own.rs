@@ -16,14 +16,13 @@ use recipe_domain::identity::{IdentityError, NewPassword, Password, TypedLogin, 
 use serde::Deserialize;
 
 use super::draft_reply::refused;
-use super::recipes::fields::FieldLines;
 use super::render::{render, see_other};
 use super::request::PageRequest;
 use super::texts::Texts;
-use super::users::TokenFields;
 use crate::cookies::{clear_session_cookie, session_cookie};
 use crate::csrf::issue_pre_session;
 use crate::error::{FieldError, FieldReason, Retry, WebError};
+use crate::pages::form_fields::{FieldLines, TokenFields};
 use crate::state::WebState;
 
 mod templates;

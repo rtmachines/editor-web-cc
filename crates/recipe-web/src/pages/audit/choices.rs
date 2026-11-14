@@ -10,7 +10,7 @@ use recipe_app::ports::AuditEntityType;
 use recipe_domain::audit::AuditAction;
 
 use super::rows::{action_word, entity_word};
-use crate::pages::recipes::Choice;
+use crate::pages::form_fields::Choice;
 use crate::pages::texts::Texts;
 
 /// A group of actions: the key of its label and its actions.

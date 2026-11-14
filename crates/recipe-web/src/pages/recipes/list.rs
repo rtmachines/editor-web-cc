@@ -16,12 +16,11 @@ use recipe_domain::recipe::VersionState;
 use recipe_domain::text::Text;
 use serde::Deserialize;
 
-use super::fields::FieldLines;
-use super::{Choice, pager_links};
 use crate::error::{FieldReason, WebError};
 use crate::layout::{Layout, NavTarget};
+use crate::pages::form_fields::{Choice, FieldLines};
 use crate::pages::path_values::{Page, flag, machine_code, page as read_page, query_values};
-use crate::pages::render::{page_url, render};
+use crate::pages::render::{page_url, pager_links, render};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 use crate::state::WebState;

@@ -7,7 +7,6 @@ use recipe_domain::plant::{
     DerivedTypeReason, MachineCode, MachineId, MemberName, PlantError, PlatformTypes, PlcPlatform,
     PlcType, PlcTypeId, PlcTypeRecord, RecordShape, TypeExpr, TypeMember, TypeName, TypeTree,
 };
-use uuid::Uuid;
 
 use super::current_type::require_current_type;
 use super::derived_lock::derived_type_locks;
@@ -19,6 +18,7 @@ use crate::error::{
     AppError, Missing, PLC_TYPE_MEMBER_NAME_CI_UNIQUE, PLC_TYPE_MEMBER_NAME_UNIQUE,
     PLC_TYPE_NAMED_UNIQUE, PLC_TYPE_STRUCT_NAME_CI_UNIQUE, map_storage,
 };
+use crate::identity::random_uuid;
 use crate::ports::{Isolation, NonEmpty, RowImage, TypeCatalog};
 
 /// Whether `DefineUdt` creates a new struct or a new revision of a struct.
@@ -172,7 +172,7 @@ fn struct_row(
     members: Vec<TypeMember>,
 ) -> Result<PlcType, AppError> {
     let row = PlcType::try_from(PlcTypeRecord {
-        id: PlcTypeId::from(Uuid::new_v4()),
+        id: PlcTypeId::from(random_uuid()?),
         machine: Some(machine),
         platforms: BTreeSet::from([platform]),
         shape: RecordShape::Struct {

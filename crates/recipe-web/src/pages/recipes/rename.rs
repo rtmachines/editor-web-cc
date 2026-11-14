@@ -17,11 +17,11 @@ use recipe_domain::recipe::ReferenceNumber;
 use recipe_domain::text::Text;
 use serde::Deserialize;
 
-use super::fields::FieldLines;
 use super::form::recipe_form;
 use super::path_reference;
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
 use crate::pages::draft_reply::{refusal_lines, refused, with_form};
+use crate::pages::form_fields::FieldLines;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;

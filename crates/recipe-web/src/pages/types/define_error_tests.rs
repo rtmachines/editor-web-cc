@@ -9,18 +9,24 @@ use axum::http::{Method, StatusCode};
 
 use super::test_kit::{form_body, post_as, post_htmx, seed_cycle};
 use crate::pages::test_helpers::{assert_clean_html, summary_lines};
-use crate::test_support::plant::{HTMX, POLISH, World, world};
-use crate::test_support::{Reply, call, post_fields, request};
+use crate::test_support::plant::{World, world};
+use crate::test_support::{Reply, call, request};
 
-const NEW: &str = "/machines/M7/types";
+pub(super) const NEW: &str = "/machines/M7/types";
 const REVISIONS: &str = "/machines/M7/types/ST_Zone/revisions";
 /// The header that an error answer sets for the swap.
 const RESWAP: &str = "innerHTML show:#error-panel:top";
 /// The opening tag of the form of a new struct when an error answer swaps it (ADR-0041 (e)).
-const OOB_NEW_TAG: &str = "<form id=\"udt-form\" method=\"post\" action=\"/machines/M7/types\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\" hx-swap-oob=\"true\">";
+pub(super) const OOB_NEW_TAG: &str = "<form id=\"udt-form\" method=\"post\" action=\"/machines/M7/types\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\" hx-swap-oob=\"true\">";
 
 /// Send an HTMX request as the ProcessEngineer and assert the error answer.
-async fn refused(world: &World, path: &str, body: &str, status: StatusCode, code: &str) -> Reply {
+pub(super) async fn refused(
+    world: &World,
+    path: &str,
+    body: &str,
+    status: StatusCode,
+    code: &str,
+) -> Reply {
     let before = world.fixture.snapshot();
     let reply = post_htmx(world, &world.engineer, path, body).await;
     assert_eq!(reply.status, status, "{code}: {}", reply.body);
@@ -39,7 +45,7 @@ async fn refused(world: &World, path: &str, body: &str, status: StatusCode, code
 ///
 /// A line of a list of errors (ADR-0041 (d)) links with its code and its sentence. The sentence of
 /// `E-WEB-008` holds the label of the field.
-fn has_line(body: &str, id: &str, label: &str) -> bool {
+pub(super) fn has_line(body: &str, id: &str, label: &str) -> bool {
     let link = format!("<a class=\"target-link\" href=\"#{id}\">");
     body.split(&link)
         .skip(1)
@@ -401,139 +407,6 @@ async fn types_define_error_puts_the_line_of_the_name_under_the_name_input() {
 }
 
 /// A bad member name and a bad type in another row give both lines with their own codes.
-#[tokio::test]
-async fn types_define_error_lists_a_bad_member_name_and_a_bad_type_with_their_codes() {
-    let world = world();
-    let rows = [("9a", "INT"), ("ok", "FOO"), ("", "")];
-    let body = form_body(Some("ST_Press"), &rows, &[]);
-    let reply = refused(
-        &world,
-        NEW,
-        &body,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "E-WEB-008",
-    )
-    .await;
-    assert!(reply.body.contains("Errors: 2."), "{}", reply.body);
-    assert!(reply.body.contains("E-PLT-013"), "{}", reply.body);
-    assert!(
-        has_line(&reply.body, "members-1-type", "FOO"),
-        "{}",
-        reply.body
-    );
-    assert!(
-        has_line(&reply.body, "members-0-name", "Name of member 1"),
-        "{}",
-        reply.body
-    );
-}
-
-#[tokio::test]
-async fn types_define_error_e_web_008_a_malformed_member_name_names_its_row() {
-    let world = world();
-    let body = form_body(Some("ST_Zone"), &[("9speed", "INT"), ("ok", "INT")], &[]);
-    let reply = refused(
-        &world,
-        NEW,
-        &body,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "E-WEB-008",
-    )
-    .await;
-    assert!(
-        has_line(&reply.body, "members-0-name", "Name of member 1"),
-        "{}",
-        reply.body
-    );
-    let second = form_body(Some("ST_Press"), &[("ok", "INT"), ("bad name", "INT")], &[]);
-    let reply = refused(
-        &world,
-        NEW,
-        &second,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "E-WEB-008",
-    )
-    .await;
-    assert!(
-        has_line(&reply.body, "members-1-name", "Name of member 2"),
-        "{}",
-        reply.body
-    );
-}
-
-#[tokio::test]
-async fn types_define_error_e_web_008_the_label_of_a_row_follows_the_language() {
-    let world = world();
-    let body = form_body(Some("ST_Press"), &[("9speed", "INT")], &[]);
-    let headers = [HTMX, POLISH];
-    let router = world.fixture.router();
-    let reply = post_fields(&router, NEW, Some(&world.engineer), &headers, &body).await;
-    assert_eq!(
-        reply.status,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "{}",
-        reply.body
-    );
-    assert!(
-        has_line(&reply.body, "members-0-name", "Nazwa składnika 1"),
-        "{}",
-        reply.body
-    );
-}
-
-#[tokio::test]
-async fn types_define_error_e_web_008_a_row_with_only_one_field_names_the_empty_one() {
-    let world = world();
-    let only_name = form_body(Some("ST_Press"), &[("speed", "INT"), ("zone", "")], &[]);
-    let reply = refused(
-        &world,
-        NEW,
-        &only_name,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "E-WEB-008",
-    )
-    .await;
-    assert!(
-        has_line(&reply.body, "members-1-type", "Type of member 2"),
-        "{}",
-        reply.body
-    );
-    let only_type = form_body(Some("ST_Press"), &[("", "INT")], &[]);
-    let reply = refused(
-        &world,
-        NEW,
-        &only_type,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "E-WEB-008",
-    )
-    .await;
-    assert!(
-        has_line(&reply.body, "members-0-name", "Name of member 1"),
-        "{}",
-        reply.body
-    );
-    assert!(reply.body.contains("Clear both fields"), "{}", reply.body);
-}
-
-#[tokio::test]
-async fn types_define_error_e_web_008_a_gap_in_the_indices_keeps_the_numbers_of_the_rows() {
-    let world = world();
-    let body = "name=ST_Press&members[4].name=speed&members[4].type=INT&members[9].name=&members[9].type=INT";
-    let reply = refused(
-        &world,
-        NEW,
-        body,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "E-WEB-008",
-    )
-    .await;
-    assert!(
-        has_line(&reply.body, "members-1-name", "Name of member 2"),
-        "{}",
-        reply.body
-    );
-}
-
 #[tokio::test]
 async fn types_define_error_e_web_008_more_than_1024_rows() {
     let world = world();

@@ -3,7 +3,7 @@
 //!
 //! The module solves one problem: each area of the recipe editor owns its route rows and its
 //! tests. The module also holds the parts that the recipe pages and the version pages share. These
-//! are the choices of a select, the pager links, the state badge, and the path value `{ref}`.
+//! are the state badge and the path value `{ref}`.
 
 use axum::extract::Path;
 use axum::extract::rejection::PathRejection;
@@ -13,12 +13,10 @@ use recipe_app::auth::Operation;
 use recipe_app::error::{AppError, Missing};
 use recipe_domain::recipe::{ReferenceNumber, VersionState};
 
-use super::path_values::{Page, reference};
-use super::render::page_url;
+use super::path_values::reference;
 use crate::error::WebError;
 use crate::routes::{RouteEntry, operation_row};
 
-pub(crate) mod fields;
 mod form;
 mod lifecycle;
 mod list;
@@ -74,49 +72,6 @@ pub(crate) fn rows() -> Vec<RouteEntry> {
             post(lifecycle::restore),
         ),
     ]
-}
-
-/// One option of a select: the sent value and the shown text.
-///
-/// The text comes from the bundles or is data, for example a machine code and its name.
-pub(crate) struct Choice {
-    /// The value that the form sends.
-    pub(crate) value: String,
-    /// The text that the option shows.
-    pub(crate) text: String,
-}
-
-impl Choice {
-    /// Build an option from its value and its text.
-    pub(crate) fn new(value: &str, text: String) -> Self {
-        Self {
-            value: value.to_owned(),
-            text,
-        }
-    }
-}
-
-/// Build the addresses of the previous and the next page of a list. An empty address omits its link.
-///
-/// `state` holds the page, whether a next page exists, and whether the page lies after the end.
-/// A page after the end has no previous link, because the page before it can lie after the end too.
-pub(crate) fn pager_links(
-    path: &str,
-    (page, has_next, after_end): (Page, bool, bool),
-    pairs: &[(&str, &str)],
-) -> (String, String) {
-    let previous = page
-        .number
-        .checked_sub(1)
-        .filter(|number| *number > 0 && !after_end)
-        .map(|number| page_url(path, pairs, number))
-        .unwrap_or_default();
-    let next = has_next
-        .then(|| page.number.checked_add(1))
-        .flatten()
-        .map(|number| page_url(path, pairs, number))
-        .unwrap_or_default();
-    (previous, next)
 }
 
 /// Return the kind of the badge of a version state and the key of its word (`design-system.md` 9).

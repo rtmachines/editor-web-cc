@@ -23,10 +23,15 @@ fn header() -> ExportHeader {
 
 /// The parameters of the example in `api.md` section 6.2.
 fn example_parameters() -> Vec<Parameter> {
+    example_parameters_with_speed_max(250)
+}
+
+/// The example parameters with `speed_max` as the upper bound of the limit of `SPEED`.
+fn example_parameters_with_speed_max(speed_max: i64) -> Vec<Parameter> {
     let mut speed = stored_parameter(1, ("U1", "SPEED"), INT, json!(120));
     speed.key = ParameterKey::parse("1f3a6b2c-8d9e-4f00-a1b2-c3d4e5f60718").unwrap();
     speed.s7_address = Some(S7Address::parse("DB1.DBW0").unwrap());
-    speed.limits = vec![range_limit("", Some(10), Some(250))];
+    speed.limits = vec![range_limit("", Some(10), Some(speed_max))];
     let mut zone = stored_parameter(
         2,
         ("U1.2", "ZONE1"),
@@ -153,10 +158,7 @@ fn names_and_ordinals_are_not_inputs_of_the_hash() {
 #[test]
 fn a_changed_limit_gives_another_hash() {
     let before = body_of(&example_parameters());
-    let mut speed = stored_parameter(1, ("U1", "SPEED"), INT, json!(120));
-    speed.key = ParameterKey::parse("1f3a6b2c-8d9e-4f00-a1b2-c3d4e5f60718").unwrap();
-    speed.limits = vec![range_limit("", Some(10), Some(251))];
-    let after = body_of(&[Parameter::from(speed)]);
+    let after = body_of(&example_parameters_with_speed_max(251));
     assert_ne!(before.sha256().unwrap(), after.sha256().unwrap());
 }
 

@@ -118,3 +118,37 @@ fn architecture_scan_finds_a_planted_name() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(found[0].ends_with("planted.rs"));
 }
+
+/// Return true when `source` defines `pub(crate) struct <name>` as an item of its own.
+fn defines_shared_struct(source: &str, name: &str) -> bool {
+    let header = format!("pub(crate) struct {name}");
+    source.match_indices(&header).any(|(at, _)| {
+        source
+            .get(at..)
+            .and_then(|rest| rest.strip_prefix(header.as_str()))
+            .and_then(|rest| rest.chars().next())
+            .is_none_or(|next| !(next.is_alphanumeric() || next == '_'))
+    })
+}
+
+#[test]
+fn shared_form_items_live_in_the_form_fields_module() {
+    let pages = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pages");
+    let module = fs::read_to_string(pages.join("form_fields.rs"))
+        .expect("pages/form_fields.rs holds the shared form items");
+    for name in ["FieldLines", "Choice", "TokenFields"] {
+        assert!(
+            defines_shared_struct(&module, name),
+            "form_fields.rs does not define pub(crate) struct {name}"
+        );
+        let elsewhere: Vec<PathBuf> = rust_files(&pages)
+            .into_iter()
+            .filter(|path| !path.ends_with("form_fields.rs"))
+            .filter(|path| defines_shared_struct(&fs::read_to_string(path).unwrap(), name))
+            .collect();
+        assert!(
+            elsewhere.is_empty(),
+            "{name} is also defined in {elsewhere:?}"
+        );
+    }
+}

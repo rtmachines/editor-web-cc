@@ -46,6 +46,7 @@ pub use doubles::BlockingHasher;
 pub use doubles::PanickingHasher;
 pub use gate::{HashGate, HashPermit};
 pub use hasher::{Argon2Hasher, Argon2Params, HashFailure, PasswordHasher};
+pub(crate) use issue::random_uuid;
 pub use issue::{IssuedSession, NONCE_BYTES, new_request_id, random_nonce};
 pub use login::{Login, LoginInput, LoginOutcome};
 pub use logout::Logout;
