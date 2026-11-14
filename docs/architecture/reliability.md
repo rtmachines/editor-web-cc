@@ -457,7 +457,9 @@ A request that passes layer (a) is well-formed. A value that passes layer (b) is
 
 ### 4.3 Domain value objects
 
-Each value object has one constructor `parse(input) -> Result<Self, Error>` and no public `new`. `Error` is the error type of its row in section 1.2, or a reason when no row exists (section 1.1, ADR-0025). A value object instance is valid by construction. `domain-model.md` section 2 is the authority for every grammar. A row that names `domain-model.md` does not repeat the grammar.
+Each value object has one input constructor `parse(input) -> Result<Self, Error>` and no public `new`, except the stored-data constructor below. `Error` is the error type of its row in section 1.2, or a reason when no row exists (section 1.1, ADR-0025). A value object instance is valid by construction. `domain-model.md` section 2 is the authority for every grammar. A row that names `domain-model.md` does not repeat the grammar.
+
+A value object can have a second public constructor `from_stored(stored, ..., rules)` for stored data (ADR-0166 (a)). The last parameter is a `RuleSet`. A caller that reads stored data and does not write it passes `RuleSet::Earlier` (ADR-0166 (c)). The stored form and the input form of one value can differ, so each form has its own constructor. `parse` and `from_stored` share one check function (ADR-0166 (d)). `VersionState::from_stored` is outside this exception (ADR-0166 (aa)).
 
 | Value object | Grammar or rule |
 |---|---|

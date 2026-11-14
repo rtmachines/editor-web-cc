@@ -44,7 +44,7 @@ Permitted exceptions (reliability §2.3):
 
 - Every identifier is a newtype, for example `MachineId`, `UnitId`, `PlcTypeId`, `RecipeId`, `RecipeVersionId`, `UserId`, `ParameterKey`.
 - A bare `Uuid`, `String`, or integer never stands for a domain identifier in a signature.
-- A value object has one `parse(input) -> Result<Self, Error>` and no public `new`. Code does not check it again (reliability §4.3).
+- A value object has one `parse(input) -> Result<Self, Error>` and no public `new`. Exception: stored data has a `from_stored` constructor ([ADR-0166](../../docs/adr/0166-constructor-for-stored-data.md)). Code does not check it again (reliability §4.3).
 - Use the Rust names of `domain-model.md`. `data-model.md` §1.2 maps them to SQL names.
 - A new name has no weasel word: `Service`, `Manager`, `Helper`, `Util`, `Data`, `Info`.
 - `as_` is a free view, `to_` allocates, `into_` consumes. A field accessor has no `get_` prefix.

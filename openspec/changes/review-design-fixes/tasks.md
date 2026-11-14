@@ -42,8 +42,8 @@ The ste-lint Check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 6. Group G6: F-13 text, F-17 text
 
-- [ ] 6.1 (docs/architecture) [mechanical] [haiku] F-13, D4. Copy the `from_stored` rule of ADR-0166 into `reliability.md` §4.3, `CLAUDE.md`, and `.claude/rules/rust.md`. Name the stored form and the input form apart. `VersionState::from_stored` takes no rule set and is out of the scope of ADR-0166 (aa). Red test: none. Check: ste-lint on `docs/architecture/reliability.md`.
-- [ ] 6.2 (docs/architecture) [mechanical] [haiku] F-17, D6. Add the rows `plc_type_member` and `draft_editor` to the exception table of `data-model.md` §1.1. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
+- [x] 6.1 (docs/architecture) [mechanical] [haiku] F-13, D4. Copy the `from_stored` rule of ADR-0166 into `reliability.md` §4.3, `CLAUDE.md`, and `.claude/rules/rust.md`. Name the stored form and the input form apart. `VersionState::from_stored` takes no rule set and is out of the scope of ADR-0166 (aa). Red test: none. Check: ste-lint on `docs/architecture/reliability.md`.
+- [x] 6.2 (docs/architecture) [mechanical] [haiku] F-17, D6. Add the rows `plc_type_member` and `draft_editor` to the exception table of `data-model.md` §1.1. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
 
 ## 7. Group G7: F-07 text, F-18 text
 

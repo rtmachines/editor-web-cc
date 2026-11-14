@@ -37,6 +37,8 @@ Exceptions to the rules above:
 | `parameter_limit`, `parameter_translation` | Composite primary key, no `id`. No `updated_at`, although `ReplaceLimits` and `UpsertTranslation` change the rows | Child rows of one parameter. The touch statement of section 6 records the last change on the version row |
 | `plc_type` | `created_at` cannot be set by `recipe_app` (column-level INSERT grant) | Trigger 4.6 uses `created_at = now()` to detect the creating transaction |
 | `audit_chain_head` | One row with the key `singleton BOOLEAN`. No `id`, no `created_at` | The row holds the end of the audit hash chain (4.9) |
+| `plc_type_member` | Composite primary key `(struct_type_id, ordinal)`. No `id`. No `updated_at`, and `recipe_app` has no `UPDATE` grant | Child rows of one struct type. `recipe_app` inserts and reads the rows, and never changes them (section 5.2) |
+| `draft_editor` | Composite primary key `(recipe_version_id, user_id)`. No `id`. `first_edit_at` instead of `created_at`. No `updated_at` | Set of users who changed one draft. The row records the first edit only (section 3.11) |
 
 ### 1.2 Name mapping (Rust ↔ SQL)
 
