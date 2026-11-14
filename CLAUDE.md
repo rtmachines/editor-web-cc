@@ -64,9 +64,9 @@ Dependency rule:
 - In read-only mode, every command except `Login`, `Logout`, `ExportVersion`, and `ExportPlcConnection` returns `503 E-WEB-006` and writes nothing (A24, ADR-0154).
 - Every error code has exactly one row in `reliability.md` §1.2. Add the row before the variant that returns the code. Never reuse a code.
 - Every error type has `code()`, except the marker `AcceptLoopEnded` of `recipe-server` (`reliability.md` §1.1, ADR-0125 (c)). An error variant never carries a password, a hash, a session token, or a cookie value (`reliability.md` §1.1).
-- Log each error once: in the `WebError` to HTTP mapping, in the backstop panic layer, or in the supervisor of a background job. A job logs a handled fault once at `WARN` (`reliability.md` §1.1). The handler of `POST /users/{login}/unlock` also logs a lost event `unlock` once at `WARN` (ADR-0130).
+- Log each error once: in the `WebError` to HTTP mapping, in the backstop panic layer, or in the supervisor of a background job. A job logs a handled fault once at `WARN` (`reliability.md` §1.1). The detached task of `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check logs a lost security event once at `WARN`. The handler never logs it (ADR-0172). A handler logs a failed read after a committed command once at `WARN` and gives a success answer (ADR-0163).
 - Every numeric setting comes from `reliability.md` §7.11. A value repeated elsewhere must equal that table.
-- A value object has one `parse` constructor and no public `new`. Code does not check it again after construction (`reliability.md` §4.3).
+- A value object has one `parse` constructor and no public `new`. Exception: stored data has a `from_stored` constructor ([ADR-0166](docs/adr/0166-constructor-for-stored-data.md)). Code does not check it again after construction (`reliability.md` §4.3).
 - This applies to `UnitPath`, `S7Address`, `TypeExpr`, `IecLiteral`, `LeafPath`, and every other value object.
 - A numeric, duration, or instant leaf in JSONB is canonical decimal text. A time leaf is an integer count of its base unit (`reliability.md` §4.4, A43).
 

@@ -4,6 +4,7 @@
 //! of a form", ADR-0039 (e), (h), (i), ADR-0041 (e) and (h).
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 
 use super::add_error_tests::assert_value_line_holds;
 use super::test_kit::{SPEED_FIELDS, assert_panel_error, changed, form, parameter_path, post_htmx};
@@ -317,6 +318,39 @@ async fn parameters_edit_without_htmx_goes_to_the_parameter_page() {
         .await;
     assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
     assert_eq!(reply.header("location"), parameter_path(SPEED_KEY, ""));
+}
+
+#[tokio::test]
+async fn save_with_failed_read_after_commit_shows_saved_notice() {
+    // ADR-0163: the command commits, then the read of the clean form fails.
+    let world = recipe_world();
+    let pairs = changed(
+        &SPEED_FIELDS,
+        &[
+            ("value", Some("3500")),
+            ("limits[0].min", Some("3000")),
+            ("limits[0].max", Some("4000")),
+        ],
+    );
+    let path = parameter_path(SPEED_KEY, "/definition");
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    let page = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert!(page.body.contains("value=\"3500\""), "{}", page.body);
 }
 
 #[tokio::test]

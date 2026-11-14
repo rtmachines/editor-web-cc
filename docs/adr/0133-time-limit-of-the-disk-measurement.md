@@ -1,6 +1,6 @@
 # ADR-0133: Time limit of the disk measurement
 
-Status: Accepted. Amends ADR-0073 (d). Amended by ADR-0161 (bound of the stalled calls of a path)
+Status: Accepted. Amends ADR-0073 (d). Amended by ADR-0161 (bound of the stalled calls of a path). Amended by ADR-0172 (the mark covers a call whose caller waits to the limit)
 Date: 2026-11-05
 Deciders: project owner
 

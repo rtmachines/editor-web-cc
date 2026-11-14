@@ -1,6 +1,6 @@
 # ADR-0120: Earlier rule set for stored data
 
-Status: Accepted. Amended by ADR-0139 (item (a): the earlier set keeps `0..=2^64-1` ns for `LDATE` and `LDT` on `CodesysIec` and `TwinCat3`. Item (g): `CreateVersion` also copies a base with such a stored count). Amended by ADR-0140 (item (a): the earlier set has no data block rule). Amended by ADR-0143 (item (a): the earlier set accepts a stored struct name that is a reserved word). Amended by ADR-0148 (item (a): the earlier set accepts a stored array type whose element is an array on `S7_1200` and `S7_1500`)
+Status: Accepted. Amended by ADR-0139 (item (a): the earlier set keeps `0..=2^64-1` ns for `LDATE` and `LDT` on `CodesysIec` and `TwinCat3`. Item (g): `CreateVersion` also copies a base with such a stored count). Amended by ADR-0140 (item (a): the earlier set has no data block rule). Amended by ADR-0143 (item (a): the earlier set accepts a stored struct name that is a reserved word). Amended by ADR-0148 (item (a): the earlier set accepts a stored array type whose element is an array on `S7_1200` and `S7_1500`). Amended by ADR-0166 (item (i): the parsers of a stored value and a stored limit are the constructors `from_stored`)
 Date: 2026-11-03
 Deciders: project owner
 

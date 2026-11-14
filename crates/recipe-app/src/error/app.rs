@@ -28,6 +28,8 @@ pub enum TimeoutStage {
     Request,
     /// The wait for a diff permit and the diff of two versions (ADR-0050 (g)).
     Diff,
+    /// The wait for a slot of `identity.detached_tasks` (ADR-0172 (w)).
+    DetachedSlot,
 }
 
 impl fmt::Display for TimeoutStage {
@@ -38,6 +40,7 @@ impl fmt::Display for TimeoutStage {
             Self::Export => "export",
             Self::Request => "request",
             Self::Diff => "diff",
+            Self::DetachedSlot => "security step slot",
         })
     }
 }
@@ -57,6 +60,8 @@ pub enum TaskStage {
     Token,
     /// The diff of two versions (ADR-0050 (g)).
     Diff,
+    /// The detached task of a security step that ended without a result (ADR-0172 (aa)).
+    Detached,
 }
 
 impl fmt::Display for TaskStage {
@@ -67,6 +72,7 @@ impl fmt::Display for TaskStage {
             Self::Export => "export",
             Self::Token => "token generation",
             Self::Diff => "diff",
+            Self::Detached => "security step",
         })
     }
 }

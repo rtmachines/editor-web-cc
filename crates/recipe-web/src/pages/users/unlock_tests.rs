@@ -1,4 +1,4 @@
-//! Tests of the unlock route of the user pages (ADR-0130).
+//! Tests of the unlock route of the user pages (ADR-0130, ADR-0172 (r)).
 
 use axum::http::StatusCode;
 use recipe_app::memory::Fault;
@@ -28,7 +28,7 @@ async fn pages_users_unlock_clears_the_login_delay_with_the_client_address() {
 }
 
 #[tokio::test]
-async fn pages_users_unlock_with_a_lost_event_is_a_success_with_one_warn_line() {
+async fn pages_users_unlock_with_a_lost_event_is_a_success_with_one_warn_line_of_the_use_case() {
     let (fixture, admin) = world();
     for _attempt in 0..3 {
         let _reply = login(&fixture, "user2", WRONG_FIELD).await;
@@ -51,6 +51,10 @@ async fn pages_users_unlock_with_a_lost_event_is_a_success_with_one_warn_line() 
     let warnings: Vec<&str> = text.lines().filter(|line| line.contains("WARN")).collect();
     assert_eq!(warnings.len(), 1, "{text}");
     let line = warnings.first().unwrap();
+    assert!(
+        line.contains("security event lost after a committed step"),
+        "{line}"
+    );
     assert!(line.contains("error_code=E-DB-005"), "{line}");
     assert!(
         line.contains(&format!("request_id={}", reply.header("x-request-id"))),

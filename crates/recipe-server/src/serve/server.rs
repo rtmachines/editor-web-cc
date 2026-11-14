@@ -6,7 +6,12 @@
 
 use std::sync::Arc;
 
+use recipe_app::identity::DetachedTasks;
+#[cfg(test)]
+use recipe_app::identity::IdentityContext;
 use recipe_db::CloseOutcome;
+#[cfg(test)]
+use recipe_web::WebState;
 use recipe_web::{HealthState, ReadOnlyMode};
 use tokio::runtime::Runtime;
 use tokio::task::{JoinError, JoinHandle};
@@ -171,6 +176,8 @@ pub(super) struct ServerParts {
     pub internal: ListenerHandle,
     /// The supervisor with the loops of step 9.
     pub supervisor: Supervisor,
+    /// The detached tasks of the use case context. The stop drains them before the pool close.
+    pub detached: DetachedTasks,
     /// The close of the main pool.
     pub main_pool: Arc<dyn PoolClose>,
     /// The close of the health pool.
@@ -187,6 +194,9 @@ pub(super) struct ServerParts {
     pub read_only: ReadOnlyMode,
     /// The times of the stop.
     pub shutdown: ShutdownSettings,
+    /// A clone of the web state that the router holds. Only the tests of the close read it.
+    #[cfg(test)]
+    pub web: Option<WebState>,
 }
 
 /// A server that passed all ten steps of the start.
@@ -217,6 +227,17 @@ impl Server {
     #[must_use]
     pub(super) const fn health(&self) -> &HealthState {
         &self.parts.health
+    }
+
+    /// The use case context of the web state. The use cases spawn their detached tasks through it.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) fn identity(&self) -> &IdentityContext {
+        self.parts
+            .web
+            .as_ref()
+            .expect("the start of a test stores the web state")
+            .identity()
     }
 
     /// The flag of the read-only mode.

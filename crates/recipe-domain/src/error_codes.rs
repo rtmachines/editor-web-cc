@@ -243,6 +243,8 @@ impl ErrorCode {
     pub const RCP_035: Self = Self::new("E-RCP-035");
     /// E-RCP-036, `StorageError::Constraint`, trigger `version_size_budget`.
     pub const RCP_036: Self = Self::new("E-RCP-036");
+    /// E-RCP-037, `StorageError::Constraint`, trigger `recipe_version_insert_draft`.
+    pub const RCP_037: Self = Self::new("E-RCP-037");
 
     /// E-WEB-001, `AppError::ConcurrentEdit`.
     pub const WEB_001: Self = Self::new("E-WEB-001");
@@ -274,6 +276,10 @@ impl ErrorCode {
     pub const WEB_014: Self = Self::new("E-WEB-014");
     /// E-WEB-015, the script `request-state.js`. No Rust error type returns it.
     pub const WEB_015: Self = Self::new("E-WEB-015");
+    /// E-WEB-016, `CheckResultFault::Unreadable`.
+    pub const WEB_016: Self = Self::new("E-WEB-016");
+    /// E-WEB-017, `CheckResultFault::Malformed`.
+    pub const WEB_017: Self = Self::new("E-WEB-017");
 
     const fn new(text: &'static str) -> Self {
         Self(text)
@@ -403,6 +409,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::RCP_034,
     ErrorCode::RCP_035,
     ErrorCode::RCP_036,
+    ErrorCode::RCP_037,
     ErrorCode::RCP_050,
     ErrorCode::RCP_051,
     ErrorCode::RCP_052,
@@ -426,6 +433,8 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::WEB_013,
     ErrorCode::WEB_014,
     ErrorCode::WEB_015,
+    ErrorCode::WEB_016,
+    ErrorCode::WEB_017,
 ];
 
 /// Return true when `code` has the format and a number range of section 1.2.

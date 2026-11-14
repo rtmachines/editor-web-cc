@@ -127,3 +127,21 @@ fn the_plan_keeps_the_other_numbers_at_their_default() {
     assert_eq!(plan.settings.heartbeat_interval, seconds(300));
     assert!(plan.webhook_url.is_none());
 }
+
+#[test]
+fn serve_settings_copy_session_secure_into_web_settings() {
+    for secure in [true, false] {
+        let mut values = configured();
+        values.session_secure = secure;
+        let plan = Plan::new(
+            values,
+            key_ring(),
+            key_ring(),
+            None,
+            cipher(),
+            CidrList::default(),
+            Vec::new(),
+        );
+        assert_eq!(plan.settings.web.secure, secure);
+    }
+}

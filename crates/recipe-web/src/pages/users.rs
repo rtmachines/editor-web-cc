@@ -7,13 +7,12 @@
 use axum::extract::rejection::{FormRejection, PathRejection, QueryRejection};
 use axum::extract::{Form, Path, Query, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::error::{AppError, Missing, StorageError};
+use recipe_app::error::{AppError, Missing};
 use recipe_app::identity::{
     ActivateUser, CreateUser, CreateUserInput, DeactivateUser, GetUser, GetUserForm, ListUsers,
-    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin, UnlockOutcome,
+    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin,
 };
 use recipe_app::ports::NonEmpty;
-use recipe_domain::audit::RequestId;
 use recipe_domain::identity::{Login, Role};
 use serde::Deserialize;
 
@@ -21,8 +20,9 @@ use super::draft_reply::refused;
 use super::form_fields::{FieldLines, TokenFields};
 use super::render::{page_url, pager_links, render};
 use super::request::PageRequest;
+use super::saved_notice::saved_notice;
 use super::texts::Texts;
-use crate::error::{FieldError, FieldReason, WebError, display_chain};
+use crate::error::{FieldError, FieldReason, WebError};
 use crate::state::WebState;
 use fluent::FluentArgs;
 use query::ListQuery;
@@ -214,9 +214,10 @@ fn command_result(
 ///
 /// The function solves one problem: the facts and the action forms of the user page must show
 /// the state that the command made (design D1). A request without HTMX gets the full result
-/// page, so it runs no query. A read error goes to the `WebError` mapping. After a commit, the
-/// command has taken effect, and a second try of it is harmless. `reset_password` calls the
-/// function before the command, so a read error can never hide the one-time password.
+/// page, so it runs no query. The function returns the read error and logs nothing. A handler that
+/// calls it after the commit answers with `answered`, which turns the error into the notice of
+/// ADR-0163. `reset_password` calls the function before the command, so a read error can never
+/// hide the one-time password and it goes to the `WebError` mapping.
 async fn refreshed(
     state: &WebState,
     request: &PageRequest,
@@ -230,6 +231,36 @@ async fn refreshed(
         .execute(request.auth()?, &request.meta(), login)
         .await?;
     Ok(Some(UserView::new(texts, request, &detail, true)?))
+}
+
+/// Answer a user command that committed: the result fragment, or the notice when the read fails.
+///
+/// The function solves one problem: the command is committed, so a failed read of the user must
+/// not give an error answer that hides the saved change (ADR-0163). The notice answer writes the
+/// one `WARN` line of the read fault. The four user commands give no new `row_version`, so the
+/// answer sets no `HX-Trigger` (design D1).
+async fn answered(
+    state: &WebState,
+    request: &PageRequest,
+    texts: Texts<'_>,
+    login: &Login,
+    text: String,
+) -> Result<Response, WebError> {
+    match refreshed(state, request, texts, login).await {
+        Ok(refresh) => {
+            let fragment = ResultFragment::new(texts, text, None, false, login.to_string())
+                .with_refresh(refresh);
+            command_result(request, texts, fragment)
+        }
+        Err(fault) => saved_notice(
+            request.is_htmx(),
+            request.request_id(),
+            texts,
+            &fault,
+            &format!("{LIST_PATH}/{login}"),
+            None,
+        ),
+    }
 }
 
 /// Format a message that names a login.
@@ -320,10 +351,7 @@ pub(crate) async fn set_role(
     args.set("login", login.to_string());
     args.set("role", texts.role(role));
     let text = texts.with("user-role-changed", &args);
-    let refresh = refreshed(&state, &request, texts, &login).await?;
-    let fragment =
-        ResultFragment::new(texts, text, None, false, login.to_string()).with_refresh(refresh);
-    command_result(&request, texts, fragment)
+    answered(&state, &request, texts, &login, text).await
 }
 
 /// `POST /users/{login}/deactivate`: deactivate the user and end the sessions.
@@ -340,12 +368,7 @@ pub(crate) async fn deactivate(
         .await?;
     let texts = Texts::new(state.bundles(), request.lang());
     let text = message(texts, "user-deactivated", &login);
-    let refresh = refreshed(&state, &request, texts, &login).await?;
-    command_result(
-        &request,
-        texts,
-        ResultFragment::new(texts, text, None, false, login.to_string()).with_refresh(refresh),
-    )
+    answered(&state, &request, texts, &login, text).await
 }
 
 /// `POST /users/{login}/activate`: activate the user.
@@ -362,12 +385,7 @@ pub(crate) async fn activate(
         .await?;
     let texts = Texts::new(state.bundles(), request.lang());
     let text = message(texts, "user-activated", &login);
-    let refresh = refreshed(&state, &request, texts, &login).await?;
-    command_result(
-        &request,
-        texts,
-        ResultFragment::new(texts, text, None, false, login.to_string()).with_refresh(refresh),
-    )
+    answered(&state, &request, texts, &login, text).await
 }
 
 /// `POST /users/{login}/reset-password`: make a new one-time password and show it once.
@@ -398,23 +416,10 @@ pub(crate) async fn reset_password(
     command_result(&request, texts, fragment)
 }
 
-/// Write the one `WARN` line of an unlock whose security event is lost (ADR-0130).
-///
-/// The function solves one problem: the unlock is committed and the answer is a success, so no
-/// error mapping logs the lost event. This line is the one log place of that fault.
-///
-/// The field `chain` holds the `Display` chain of the fault, as the line of `log_error` does.
-fn log_lost_unlock_event(lost: &StorageError, request_id: RequestId) {
-    tracing::warn!(
-        error_code = %lost.code(),
-        request_id = %request_id,
-        chain = %display_chain(lost),
-        event = "unlock",
-        "security event lost after a committed unlock"
-    );
-}
-
 /// `POST /users/{login}/unlock`: clear the login delay of the user.
+///
+/// The use case writes the one `WARN` line of a lost event `unlock`, so the handler writes none
+/// (ADR-0172 (r)).
 pub(crate) async fn unlock(
     State(state): State<WebState>,
     path: Result<Path<String>, PathRejection>,
@@ -423,26 +428,20 @@ pub(crate) async fn unlock(
 ) -> Result<Response, WebError> {
     let login = path_login(path)?;
     let Form(_fields) = form?;
-    let outcome = UnlockLogin::new(state.identity().clone())
+    UnlockLogin::new(state.identity().clone())
         .execute(request.auth()?, &request.meta(), &login, request.client())
         .await?;
-    if let UnlockOutcome::EventLost(lost) = &outcome {
-        log_lost_unlock_event(lost, request.request_id());
-    }
     let texts = Texts::new(state.bundles(), request.lang());
     let text = message(texts, "user-unlocked", &login);
-    let refresh = refreshed(&state, &request, texts, &login).await?;
-    command_result(
-        &request,
-        texts,
-        ResultFragment::new(texts, text, None, false, login.to_string()).with_refresh(refresh),
-    )
+    answered(&state, &request, texts, &login, text).await
 }
 
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]
 mod form_error_tests;
+#[cfg(test)]
+mod new_user_tests;
 #[cfg(test)]
 mod read_only_tests;
 #[cfg(test)]

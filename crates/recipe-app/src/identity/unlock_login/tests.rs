@@ -1,20 +1,32 @@
 //! Tests of the use case `UnlockLogin` (task 4.5, design D8 i, j, and q).
 
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
+use std::time::Duration;
 
-use recipe_domain::audit::{AuditAction, AuditTarget, SecurityEventKind};
+use async_trait::async_trait;
+use recipe_domain::audit::{AuditAction, AuditTarget, RequestId, SecurityEvent, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::identity::{Login, Role, TypedLogin};
+use recipe_domain::identity::{Login, Password, Role, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio::sync::Notify;
+use tokio::time::Instant;
+use tracing::Level;
+use uuid::Uuid;
 
-use super::{UnlockLogin, UnlockOutcome};
-use crate::auth::Operation;
+use super::UnlockLogin;
+use crate::auth::{Operation, RequestMeta};
 use crate::context::UseCase;
 use crate::error::{AppError, Missing, StorageError};
-use crate::identity::fixtures::{IdentityFixture, actor_id, anna_id};
-use crate::memory::Fault;
+use crate::identity::fixtures::{DRAIN_WAIT, IdentityFixture, LogCapture, actor_id, anna_id};
+use crate::identity::{IdentityContext, Login as LoginUseCase, LoginInput};
+use crate::memory::{Fault, MemorySink};
+use crate::ports::SecurityEventSink;
+
+/// The time that the caller waits before a test drops its future.
+const CALLER_WAIT: Duration = Duration::from_millis(10);
 
 /// The start of the clock of a fixture, in Unix seconds.
 const START_SECONDS: i64 = 1_000_000;
@@ -254,19 +266,16 @@ async fn the_permission_check_comes_first_for_an_operator_and_a_process_engineer
 }
 
 #[tokio::test]
-async fn a_failed_unlock_event_completes_the_unlock_and_reports_the_lost_event() {
+async fn a_failed_unlock_event_completes_the_unlock_and_writes_one_warn_line() {
+    let (capture, _guard) = LogCapture::install();
     let fixture = fixture();
     seed_failures(&fixture, "anna", 4);
     let (auth, meta) = fixture.actor(Role::Administrator).await;
     fixture.sink.fail_with(Fault::Unavailable);
-    let outcome = UnlockLogin::new(fixture.context.clone())
+    UnlockLogin::new(fixture.context.clone())
         .execute(&auth, &meta, &anna(), admin_ip())
         .await
         .unwrap();
-    assert!(
-        matches!(outcome, UnlockOutcome::EventLost(StorageError::Unavailable)),
-        "{outcome:?}"
-    );
     assert_eq!(attempts_of(&fixture, "anna"), 0);
     let entries = fixture.store.audit_entries();
     assert_eq!(entries.len(), 1);
@@ -275,6 +284,120 @@ async fn a_failed_unlock_event_completes_the_unlock_and_reports_the_lost_event()
         AuditAction::LoginUnlocked
     );
     assert!(fixture.sink.events().is_empty());
+    assert_one_lost_event_line(&capture, &meta);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unlock_writes_its_event_after_the_caller_drops_the_future() {
+    let fixture = fixture();
+    seed_failures(&fixture, "anna", 4);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let gated = GatedSink::new(fixture.sink.clone());
+    let unlock = UnlockLogin::new(gated.install(&fixture));
+
+    let dropped = tokio::time::timeout(
+        CALLER_WAIT,
+        unlock.execute(&auth, &meta, &anna(), admin_ip()),
+    )
+    .await;
+    assert!(dropped.is_err(), "the caller must time out first");
+    assert!(fixture.sink.events().is_empty());
+
+    gated.release();
+    assert_eq!(unlock.ctx.detached().drain(DRAIN_WAIT).await, 0);
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Unlock);
+    assert_eq!(attempts_of(&fixture, "anna"), 0);
+    assert_eq!(fixture.store.audit_entries().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unlock_writes_exactly_one_warn_line_when_the_event_fails_after_a_drop() {
+    let (capture, _guard) = LogCapture::install();
+    let fixture = fixture();
+    seed_failures(&fixture, "anna", 4);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    fixture.sink.fail_with(Fault::Unavailable);
+    let gated = GatedSink::new(fixture.sink.clone());
+    let unlock = UnlockLogin::new(gated.install(&fixture));
+
+    let dropped = tokio::time::timeout(
+        CALLER_WAIT,
+        unlock.execute(&auth, &meta, &anna(), admin_ip()),
+    )
+    .await;
+    assert!(dropped.is_err(), "the caller must time out first");
+    assert_eq!(capture.count(), 0, "the event write has not run yet");
+
+    gated.release();
+    assert_eq!(unlock.ctx.detached().drain(DRAIN_WAIT).await, 0);
+    assert_one_lost_event_line(&capture, &meta);
+    assert!(fixture.sink.events().is_empty());
+    assert_eq!(attempts_of(&fixture, "anna"), 0);
+    assert_eq!(fixture.store.audit_entries().len(), 1);
+}
+
+/// Start `count` logins. Each one waits for an Argon2 permit that the test holds.
+fn start_waiting_logins(
+    fixture: &IdentityFixture,
+    count: usize,
+) -> Vec<tokio::task::JoinHandle<Result<(), AppError>>> {
+    (0..count)
+        .map(|index| {
+            let login = LoginUseCase::new(fixture.context.clone());
+            let meta = RequestMeta::new(
+                RequestId::from(Uuid::from_u128(0x100 + index as u128)),
+                None,
+                None,
+                None,
+            );
+            let input = LoginInput {
+                login: typed("anna"),
+                password: Password::parse("wrong-password-phrase").unwrap(),
+                client_ip: failing_ip(),
+                old_session: None,
+            };
+            tokio::spawn(async move { login.execute(&meta, input).await.map(drop) })
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn unlock_gets_a_slot_while_logins_wait_for_a_permit() {
+    let fixture = fixture();
+    seed_failures(&fixture, "anna", 4);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let gate = &fixture.context.gate;
+    let mut held = Vec::new();
+    for _ in 0..gate.available_permits() {
+        held.push(gate.acquire().await.unwrap());
+    }
+    let slots = fixture.context.settings.detached_tasks;
+    let logins = start_waiting_logins(&fixture, slots.checked_add(2).unwrap());
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(logins.iter().all(|login| !login.is_finished()));
+
+    let started = Instant::now();
+    UnlockLogin::new(fixture.context.clone())
+        .execute(&auth, &meta, &anna(), admin_ip())
+        .await
+        .unwrap();
+    let waited = started.elapsed();
+    let limit = fixture.context.settings.argon2_acquire_timeout;
+    assert!(waited < limit, "the unlock waited {waited:?} for a slot");
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Unlock);
+    assert_eq!(attempts_of(&fixture, "anna"), 0);
+
+    drop(held);
+    for login in logins {
+        let _outcome = login.await.unwrap();
+    }
+    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
 }
 
 #[tokio::test]
@@ -291,4 +414,60 @@ async fn a_failed_commit_deletes_nothing_and_writes_no_event() {
     assert_eq!(attempts_of(&fixture, "anna"), 4);
     assert!(fixture.store.audit_entries().is_empty());
     assert!(fixture.sink.events().is_empty());
+}
+
+/// Assert that the capture holds the one `WARN` line of a lost `unlock` event.
+fn assert_one_lost_event_line(capture: &LogCapture, meta: &RequestMeta) {
+    let lines = capture.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = lines.first().unwrap();
+    assert_eq!(line.level, Level::WARN);
+    assert_eq!(line.field("event"), Some("\"unlock\""));
+    assert!(line.field("error_code").is_some(), "{line:?}");
+    assert!(line.field("chain").is_some(), "{line:?}");
+    let request_id = line.field("request_id").unwrap();
+    assert!(
+        request_id.contains(&meta.request_id().to_string()),
+        "{line:?}"
+    );
+}
+
+// ---- a sink that waits for the test ----
+
+/// A sink that holds every `record` call until the test releases it.
+///
+/// The type solves one problem: a test must drop the future of the caller while the use case
+/// awaits the security event.
+#[derive(Clone)]
+struct GatedSink {
+    inner: MemorySink,
+    release: Arc<Notify>,
+}
+
+impl GatedSink {
+    fn new(inner: MemorySink) -> Self {
+        Self {
+            inner,
+            release: Arc::new(Notify::new()),
+        }
+    }
+
+    /// Return a copy of the context of `fixture` whose sink is this one.
+    fn install(&self, fixture: &IdentityFixture) -> IdentityContext {
+        let mut context = fixture.context.clone();
+        context.app.security = Arc::new(self.clone());
+        context
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[async_trait]
+impl SecurityEventSink for GatedSink {
+    async fn record(&self, event: SecurityEvent) -> Result<(), StorageError> {
+        self.release.notified().await;
+        self.inner.record(event).await
+    }
 }

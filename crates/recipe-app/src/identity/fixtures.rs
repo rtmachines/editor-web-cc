@@ -1,14 +1,27 @@
 //! Test support of the identity use cases: a context over a `MemoryStore`.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
+use std::task::Poll;
+use std::time::Duration as StdDuration;
 
-use recipe_domain::audit::RequestId;
+use async_trait::async_trait;
+use parking_lot::Mutex;
+use recipe_domain::audit::{RequestId, SecurityEvent};
 use recipe_domain::identity::{
     CsrfToken, KeyRing, Login, NewPassword, OneTimePassword, Password, PasswordHash, Role,
     SessionId, SessionToken, UserId,
 };
 use time::OffsetDateTime;
+use tokio::sync::Notify;
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id, Record};
+use tracing::subscriber::{DefaultGuard, NoSubscriber};
+use tracing::{Dispatch, Event, Level, Metadata, Subscriber};
+use tracing_core::span::Current;
 use uuid::Uuid;
 
 use super::{
@@ -18,9 +31,10 @@ use super::{
 use crate::auth::RequestMeta;
 use crate::blocking::AppSettings;
 use crate::context::AppContext;
+use crate::error::StorageError;
 use crate::memory::fixtures::RaceStore;
 use crate::memory::{JournalEntry, MemoryClock, MemorySink, MemoryStore};
-use crate::ports::{Isolation, NewSession, NewUser, UnitOfWork, UserRow};
+use crate::ports::{Isolation, NewSession, NewUser, SecurityEventSink, UnitOfWork, UserRow};
 
 /// A key file with one valid key of 64 lower-case hex characters.
 const LOGIN_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
@@ -241,5 +255,197 @@ impl IdentityFixture {
             hasher,
             context,
         }
+    }
+}
+
+/// The wait of a test for the drain of the detached tasks.
+pub(crate) const DRAIN_WAIT: StdDuration = StdDuration::from_secs(5);
+
+/// Poll `future` once and drop it, as a timeout or a closed connection drops a request.
+///
+/// The first poll must end at a wait. A future that completes on it makes the drop test nothing,
+/// so the function panics then.
+pub(crate) async fn poll_once_then_drop<F: Future>(future: F) {
+    let mut future = std::pin::pin!(future);
+    std::future::poll_fn(|cx| {
+        let first_poll = future.as_mut().poll(cx);
+        assert!(
+            first_poll.is_pending(),
+            "poll_once_then_drop: the future completed on its first poll, so the drop tests nothing"
+        );
+        Poll::Ready(())
+    })
+    .await;
+}
+
+/// One event that the code wrote.
+#[derive(Clone, Debug)]
+pub(crate) struct Logged {
+    pub(crate) level: Level,
+    pub(crate) fields: Vec<(String, String)>,
+}
+
+impl Logged {
+    pub(crate) fn field(&self, name: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// A registered dispatch that no thread installs. It lives until the test process ends.
+///
+/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
+/// dispatch, a callsite takes its interest from the thread that hits it first.
+static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
+
+/// The metadata that `current_span` reports for every span.
+///
+/// `Span::current()` needs `'static` metadata, and a `new_span` call gives only a borrowed one.
+/// The test code reads no metadata of a current span, so one probe span serves for all.
+/// `install` builds it while the capture is the default, so it holds metadata and not `None`.
+static CURRENT_SPAN_METADATA: LazyLock<Option<&'static Metadata<'static>>> =
+    LazyLock::new(|| tracing::error_span!("log_capture").metadata());
+
+/// The fields of the open spans and the stack of the entered span ids.
+#[derive(Default)]
+struct SpanState {
+    next_id: u64,
+    fields: HashMap<u64, Vec<(String, String)>>,
+    entered: Vec<u64>,
+}
+
+/// A subscriber that keeps every event of its thread.
+///
+/// An event also holds the fields of the spans that are entered when it fires. A field of the
+/// event wins over a span field of the same name. A test thus sees the `request_id` of a span.
+#[derive(Clone, Default)]
+pub(crate) struct LogCapture {
+    events: Arc<Mutex<Vec<Logged>>>,
+    spans: Arc<Mutex<SpanState>>,
+}
+
+impl LogCapture {
+    pub(crate) fn install() -> (Self, DefaultGuard) {
+        LazyLock::force(&KEEPALIVE);
+        let capture = Self::default();
+        let guard = tracing::subscriber::set_default(capture.clone());
+        LazyLock::force(&CURRENT_SPAN_METADATA);
+        (capture, guard)
+    }
+
+    pub(crate) fn events(&self) -> Vec<Logged> {
+        self.events.lock().clone()
+    }
+
+    pub(crate) fn count(&self) -> usize {
+        self.events.lock().len()
+    }
+}
+
+#[derive(Default)]
+struct FieldCopy {
+    fields: Vec<(String, String)>,
+}
+
+impl Visit for FieldCopy {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+        self.fields
+            .push((field.name().to_owned(), format!("{value:?}")));
+    }
+}
+
+impl Subscriber for LogCapture {
+    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, span: &Attributes<'_>) -> Id {
+        let mut copy = FieldCopy::default();
+        span.record(&mut copy);
+        let mut state = self.spans.lock();
+        state.next_id = state.next_id.saturating_add(1);
+        let id = state.next_id;
+        state.fields.insert(id, copy.fields);
+        Id::from_u64(id)
+    }
+
+    fn record(&self, span: &Id, values: &Record<'_>) {
+        let mut copy = FieldCopy::default();
+        values.record(&mut copy);
+        let mut state = self.spans.lock();
+        if let Some(fields) = state.fields.get_mut(&span.into_u64()) {
+            fields.extend(copy.fields);
+        }
+    }
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        let mut copy = FieldCopy::default();
+        event.record(&mut copy);
+        let mut fields = copy.fields;
+        let state = self.spans.lock();
+        for id in state.entered.iter().rev() {
+            for (name, value) in state.fields.get(id).into_iter().flatten().rev() {
+                if !fields.iter().any(|(key, _)| key == name) {
+                    fields.push((name.clone(), value.clone()));
+                }
+            }
+        }
+        drop(state);
+        self.events.lock().push(Logged {
+            level: *event.metadata().level(),
+            fields,
+        });
+    }
+
+    fn current_span(&self) -> Current {
+        let Some(metadata) = *CURRENT_SPAN_METADATA else {
+            return Current::none();
+        };
+        match self.spans.lock().entered.last() {
+            Some(id) => Current::new(Id::from_u64(*id), metadata),
+            None => Current::none(),
+        }
+    }
+
+    fn enter(&self, span: &Id) {
+        self.spans.lock().entered.push(span.into_u64());
+    }
+
+    fn exit(&self, span: &Id) {
+        let mut state = self.spans.lock();
+        if let Some(position) = state.entered.iter().rposition(|id| *id == span.into_u64()) {
+            state.entered.remove(position);
+        }
+    }
+}
+
+/// A sink that stops in `record` until a test releases it, then writes into `inner`.
+#[derive(Clone)]
+pub(crate) struct HeldSink {
+    inner: MemorySink,
+    pub(crate) entered: Arc<Notify>,
+    pub(crate) release: Arc<Notify>,
+}
+
+impl HeldSink {
+    pub(crate) fn over(inner: MemorySink) -> Self {
+        Self {
+            inner,
+            entered: Arc::new(Notify::new()),
+            release: Arc::new(Notify::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl SecurityEventSink for HeldSink {
+    async fn record(&self, event: SecurityEvent) -> Result<(), StorageError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        self.inner.record(event).await
     }
 }

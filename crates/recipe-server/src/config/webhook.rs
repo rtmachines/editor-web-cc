@@ -53,6 +53,8 @@ pub enum WebhookFileFault {
     CarriageReturn,
     /// The file holds a second line.
     SeveralLines,
+    /// The file holds a NUL byte anywhere.
+    NulByte,
     /// The URL has a scheme other than `https`.
     NotHttps,
     /// The text does not parse as a URL with a scheme and a host.
@@ -64,6 +66,7 @@ impl fmt::Display for WebhookFileFault {
         f.write_str(match self {
             Self::CarriageReturn => "holds a carriage return",
             Self::SeveralLines => "holds more than one line",
+            Self::NulByte => "holds a NUL byte",
             Self::NotHttps => "does not use the scheme https",
             Self::NotAnAbsoluteUrl => "holds a text that is not an absolute URL",
         })
@@ -77,14 +80,15 @@ impl fmt::Display for WebhookFileFault {
 ///
 /// # Errors
 ///
-/// Returns a [`WebhookFileFault`] for a carriage return, a second line, a text that is not an
-/// absolute URL, or a scheme other than `https`.
+/// Returns a [`WebhookFileFault`] for a carriage return, a NUL byte, a second line, a text that is
+/// not an absolute URL, or a scheme other than `https`.
 pub fn parse_webhook_text(text: &str) -> Result<Option<WebhookUrl>, WebhookFileFault> {
     let line = match secret_line(text) {
         Ok(line) => line,
         Err(SecretFault::Empty) => return Ok(None),
         Err(SecretFault::CarriageReturn) => return Err(WebhookFileFault::CarriageReturn),
         Err(SecretFault::SeveralLines) => return Err(WebhookFileFault::SeveralLines),
+        Err(SecretFault::NulByte) => return Err(WebhookFileFault::NulByte),
     };
     let uri: Uri = line
         .parse()

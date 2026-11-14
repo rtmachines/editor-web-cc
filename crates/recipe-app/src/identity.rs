@@ -10,6 +10,7 @@ mod change_own_password;
 mod context;
 mod create_user;
 mod deactivate_user;
+mod detached;
 #[cfg(any(test, feature = "memory"))]
 mod doubles;
 #[cfg(test)]
@@ -40,6 +41,7 @@ pub use change_own_password::{ChangeOwnPassword, ChangeOwnPasswordInput};
 pub use context::IdentityContext;
 pub use create_user::{CreateUser, CreateUserInput};
 pub use deactivate_user::DeactivateUser;
+pub use detached::{DetachedResult, DetachedSlot, DetachedTasks, record_security_event};
 #[cfg(any(test, feature = "memory"))]
 pub use doubles::BlockingHasher;
 #[cfg(test)]
@@ -59,4 +61,4 @@ pub use reset_password::ResetPassword;
 pub use retry::serializable_once_more;
 pub use set_user_role::{SetUserRole, SetUserRoleInput};
 pub use settings::IdentitySettings;
-pub use unlock_login::{UnlockLogin, UnlockOutcome};
+pub use unlock_login::UnlockLogin;

@@ -33,6 +33,7 @@ use crate::error::{FieldError, WebError};
 use crate::pages::draft_reply::{conflict, refused, with_push_url, with_row_version};
 use crate::pages::path_values::page as read_page;
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
 use crate::pages::texts::Texts;
 use crate::pages::versions::page::version_answer;
 use crate::pages::versions::path_version;
@@ -167,7 +168,7 @@ async fn refusal(
 /// `POST /recipes/{ref}/versions/{n}/approve`: approve the draft and show the version page.
 ///
 /// The command commits, and then the read of the version page can fail (design D7).
-/// The route then keeps the error answer of the read.
+/// The route then answers with the saved notice and not with the error of the read (ADR-0163).
 /// A replay of the approval then gives `AlreadyApproved` and writes no audit entry.
 pub(crate) async fn approve(
     State(state): State<WebState>,
@@ -197,9 +198,15 @@ pub(crate) async fn approve(
     let t = Texts::new(state.bundles(), request.lang());
     let text = toast(t, number, &output);
     let page = (None, read_page(None)?);
-    let answer = version_answer(&state, &request, target, page, Some(text)).await?;
+    let href = format!("/recipes/{reference}/versions/{number}");
+    let answer = match version_answer(&state, &request, target, page, Some(text)).await {
+        Ok(answer) => answer,
+        // The output of `ApproveVersion` holds no new `row_version`, so the notice sets none.
+        Err(fault) => {
+            return saved_notice(request.is_htmx(), request_id, t, &fault, &href, None);
+        }
+    };
     let response = answer.html.into_response();
     let response = with_row_version(response, answer.row_version, request_id)?;
-    let href = format!("/recipes/{reference}/versions/{number}");
     with_push_url(response, &href, request_id)
 }

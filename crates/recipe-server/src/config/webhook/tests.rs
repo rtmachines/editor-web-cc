@@ -28,6 +28,7 @@ fn webhook_empty_text_means_no_webhook() {
 fn webhook_refusals_are_typed() {
     let cases = [
         (format!("{URL}\r\n"), WebhookFileFault::CarriageReturn),
+        (format!("{URL}\0"), WebhookFileFault::NulByte),
         (format!("{URL}\n{URL}\n"), WebhookFileFault::SeveralLines),
         (format!("\n{URL}"), WebhookFileFault::SeveralLines),
         (URL.replace("https", "http"), WebhookFileFault::NotHttps),

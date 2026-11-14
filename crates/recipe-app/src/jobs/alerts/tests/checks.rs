@@ -7,6 +7,7 @@
 use std::io;
 use std::time::Duration;
 
+use recipe_domain::error_codes::ErrorCode;
 use tracing::Level;
 
 use super::support::{
@@ -234,6 +235,23 @@ async fn an_unreadable_result_is_active_with_one_fault_line_and_one_alert_line()
         assert_eq!(events[1].level, Level::WARN);
         assert_eq!(events[1].field("alert"), Some(quoted(case).as_str()));
         assert_eq!(rig.webhook.calls(), vec![vec![case.condition]], "{case:?}");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn alerts_warn_line_of_a_check_fault_holds_error_code() {
+    for case in CASES {
+        let (logs, _guard) = LogCapture::install();
+        let rig = rig();
+        rig.checks.set_unreadable(case.check);
+        run(&rig).await.unwrap();
+        let events = logs.events();
+        assert_eq!(events[0].message, fault_text(case), "{case:?}");
+        assert_eq!(
+            events[0].field("error_code"),
+            Some(ErrorCode::WEB_016.as_str()),
+            "{case:?}"
+        );
     }
 }
 

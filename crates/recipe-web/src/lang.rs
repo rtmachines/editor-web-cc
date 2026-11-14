@@ -83,7 +83,7 @@ pub(crate) async fn switch(
     response
         .headers_mut()
         .insert(LOCATION, location_of(&form.next));
-    if let Some(value) = lang_cookie(lang, max_age) {
+    if let Some(value) = lang_cookie(lang, max_age, state.settings().secure) {
         response.headers_mut().insert(SET_COOKIE, value);
     }
     Ok(response)

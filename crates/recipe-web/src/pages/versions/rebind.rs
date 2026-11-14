@@ -2,6 +2,7 @@
 //!
 //! A valid HTMX rebind gets the parameter table, the new outdated list out of band, the toast, and
 //! `HX-Trigger` with the new `row_version`. A rebind without HTMX gets `303` to the version page.
+//! A read that fails after the commit gets the saved notice (ADR-0163).
 //! A list of `E-RCP-028`, `E-RCP-029`, or `E-RCP-005` gets one line per entry and the form with
 //! the sent texts out of band (ADR-0041). A stale `row_version` gets the conflict.
 
@@ -32,6 +33,7 @@ use crate::pages::parameters::fields::{FieldSet, SentFields, read_form};
 use crate::pages::path_values::page as read_page;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
 
@@ -325,12 +327,20 @@ pub(crate) async fn rebind(
             return Err(refusal(&state, &request, error, parts).await);
         }
     };
+    let page = format!("/recipes/{reference}/versions/{number}");
     if !request.is_htmx() {
-        let page = format!("/recipes/{reference}/versions/{number}");
         return see_other_path(&page, request.request_id(), []);
     }
     let to_text = form.map_or_else(|| hidden.to.to_string(), |form| form.to_text);
-    rebound(&state, &request, (&reference, number), (&output, &to_text)).await
+    let answer = rebound(&state, &request, (&reference, number), (&output, &to_text)).await;
+    match answer {
+        Ok(response) => Ok(response),
+        Err(fault) => {
+            let t = Texts::new(state.bundles(), request.lang());
+            let row_version = Some(output.row_version);
+            saved_notice(true, request.request_id(), t, &fault, &page, row_version)
+        }
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use std::fmt;
 use std::io;
 
 use async_trait::async_trait;
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::timestamp::Timestamp;
 
 /// A check that runs each week and leaves a result file.
@@ -45,9 +46,8 @@ impl fmt::Display for ScheduledCheck {
 
 /// Why the result of a scheduled check cannot be read.
 ///
-/// This is a reason type. It owns no error code, like `BackupFault` (ADR-0025, ADR-0073 (b),
-/// ADR-0151 (j3)). Each variant names its check, so a log line of the fault tells the restore
-/// test from the base backup. The text names the check and no path.
+/// This is an error type with `code()` (ADR-0165). Each variant names its check, so a log line of
+/// the fault tells the restore test from the base backup. The text names the check and no path.
 #[derive(Debug)]
 pub enum CheckResultFault {
     /// The result file exists and cannot be read.
@@ -63,6 +63,17 @@ pub enum CheckResultFault {
         /// The check whose result file is malformed.
         check: ScheduledCheck,
     },
+}
+
+impl CheckResultFault {
+    /// Return the stable code of the fault.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        match self {
+            Self::Unreadable { .. } => ErrorCode::WEB_016,
+            Self::Malformed { .. } => ErrorCode::WEB_017,
+        }
+    }
 }
 
 impl fmt::Display for CheckResultFault {

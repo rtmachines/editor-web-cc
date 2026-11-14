@@ -2,6 +2,7 @@
 //! without user data in an hx attribute").
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 
 use super::test_world::world;
 use crate::i18n::Lang;
@@ -9,7 +10,7 @@ use crate::pages::test_helpers::{
     assert_clean_html, assert_htmx_error, assert_no_user_text_in_hx_attributes, hx_pairs,
 };
 use crate::test_support::plant::{HTMX, World, cookie_of, text_with};
-use crate::test_support::{icon_tag, text};
+use crate::test_support::{capture_logs, icon_tag, text};
 
 /// The path of the route.
 const ROUTE: &str = "/machines/M7/units";
@@ -202,6 +203,37 @@ async fn units_add_without_htmx_redirects_to_the_machine_page_and_the_unit_exist
         "{}",
         page.body
     );
+}
+
+#[tokio::test]
+async fn add_unit_with_failed_read_after_commit_shows_saved_notice() {
+    let world = world();
+    let (logs, _guard) = capture_logs();
+    let before = world.audit_count();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let reply = htmx_post(&world, ROUTE, "parent_path=U1.2&segment=5&name=Added").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert!(
+        reply.headers.get("hx-trigger").is_none(),
+        "the output of AddUnit holds no row version"
+    );
+    assert!(
+        reply.body.contains(&text(Lang::En, "saved-notice")),
+        "{}",
+        reply.body
+    );
+    let panel = "<div id=\"error-panel\" hx-swap-oob=\"innerHTML\"></div>";
+    assert!(reply.body.contains(panel), "{}", reply.body);
+    assert_eq!(world.audit_count(), before.checked_add(1).unwrap());
+    let text = logs.text();
+    let warns: Vec<&str> = text.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warns.len(), 1, "{text}");
+    assert!(warns[0].contains("error_code=E-DB-005"), "{text}");
 }
 
 #[tokio::test]

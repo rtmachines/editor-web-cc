@@ -4,6 +4,7 @@
 //! (l), ADR-0041, ADR-0039 (e) and (f), ADR-0008, design D6, D7, D9, and D10.
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 use recipe_domain::plant::Primitive;
 use recipe_domain::recipe::ParameterKey;
 
@@ -13,6 +14,7 @@ use super::rebind_world::{
 };
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::summary_lines;
+use crate::test_support::capture_logs;
 use crate::test_support::plant::World;
 use crate::test_support::recipes::LINE_KEY;
 
@@ -205,4 +207,35 @@ async fn rebind_with_an_old_row_version_from_a_second_session_gives_the_conflict
         "{}",
         second.body
     );
+}
+
+#[tokio::test]
+async fn rebind_with_failed_read_after_commit_shows_saved_notice() {
+    let world = recipe_world();
+    let body = body_v3(&world, "1", &ALL, "12.5");
+    let before = world.fixture.store.audit_entries().len();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let reply = world.post(&world.engineer, REBIND, &body, true).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast", "{:?}", reply.headers);
+    assert_eq!(reply.header("hx-reswap"), "innerHTML");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    let logs = logs.text();
+    assert_eq!(
+        logs.matches("read failed after a committed change").count(),
+        1,
+        "{logs}"
+    );
+    let after = world.fixture.store.audit_entries().len();
+    assert!(after > before, "the command committed its entries");
 }

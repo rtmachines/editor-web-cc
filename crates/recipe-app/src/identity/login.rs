@@ -1,6 +1,7 @@
 //! The use case `Login` (`domain-model.md` section 5.3, `data-model.md` section 6, design D6).
 
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use recipe_domain::audit::{
     AuditEntry, AuditTarget, LoginHmac, LoginSubject, SecurityEvent, StateAction,
@@ -11,9 +12,10 @@ use recipe_domain::identity::{
 };
 use serde_json::json;
 
+use super::detached::{RefusalSender, record_security_event};
 use super::issue::IssuedSession;
 use super::no_session::require_no_session;
-use super::throttle::{Gate, Requester, begin_attempt, reject_throttled};
+use super::throttle::{Gate, Requester, begin_attempt, throttled_event};
 use super::{HashPermit, IdentityContext};
 use crate::auth::{CurrentUser, Operation, RequestMeta};
 use crate::context::{UseCase, audit_context};
@@ -103,16 +105,24 @@ impl Login {
 
     /// Run the login.
     ///
+    /// The request future takes the Argon2 permit and a slot of `identity.detached_tasks`. A
+    /// detached task then runs T1, the password check, and the write of the failure event, so a
+    /// dropped request still leaves its event (ADR-0172). T2 runs here, only for a waiting caller.
+    /// After a passed check, the task keeps its slot until T2 decides. A refusal of T2 sends its
+    /// event to the task, which writes it, so a drop during that write loses nothing (ADR-0173).
+    ///
     /// # Errors
     ///
-    /// Returns `Timeout` (`E-WEB-009`) when no Argon2 permit is free in time.
+    /// Returns `Timeout` (`E-WEB-009`) when no Argon2 permit or no detached slot is free in time.
     /// Returns `LoginThrottled` (`E-IDN-005`) inside a delay or when the address budget is used up.
     /// Returns `InvalidCredentials` (`E-IDN-003`) for an unknown login, a wrong password, or a user
     /// that changed after the check.
     /// Returns `UserInactive` (`E-IDN-004`) for an inactive user.
-    /// Returns `TaskFailed` (`E-WEB-011`) when the hash task or the read of random bytes fails.
+    /// Returns `TaskFailed` (`E-WEB-011`) when the hash task, the detached task, or the read of
+    /// random bytes fails.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails. A
-    /// failed write of a security event also returns the storage error (ADR-0035 t).
+    /// failed write of a security event gives the refusal as without the fault and one `WARN` line
+    /// of the task (ADR-0172 (q)).
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
@@ -128,103 +138,60 @@ impl Login {
         } = input;
         let requester = Requester::of(meta, client_ip);
         let permit = self.ctx.gate.acquire().await?;
-        let attempt = match begin_attempt(&self.ctx, &login, client_ip).await? {
-            Gate::Open(attempt) => attempt,
-            Gate::Throttled { retry_after } => {
-                drop(permit);
-                return reject_throttled(&self.ctx, &requester, &login, retry_after).await;
-            }
+        let slot = self.ctx.detached.acquire().await?;
+        let attempt = Attempt {
+            ctx: self.ctx.clone(),
+            requester: requester.clone(),
+            login,
+            password,
         };
-        let (stored, matched, permit) = check_password(&self.ctx, permit, &login, password).await?;
-        drop(permit);
-        let user = self.judge(&requester, &login, stored, matched).await?;
-        self.grant(meta, &requester, user, attempt, old_session)
+        let sink = Arc::clone(&self.ctx.app.security);
+        let ((user, attempt), refusal) = self
+            .ctx
+            .detached
+            .spawn_judged(slot, sink, attempt.judge(permit))
+            .await??;
+        self.grant(meta, &requester, (user, attempt), old_session, refusal)
             .await
     }
 
-    /// Return the active user whose password matched. Else write the event and return the error.
-    async fn judge(
-        &self,
-        requester: &Requester,
-        typed: &TypedLogin,
-        stored: Option<UserRow>,
-        matched: bool,
-    ) -> Result<UserRow, AppError> {
-        let Some(row) = stored else {
-            let hmac = LoginHmac::compute(&self.ctx.login_keys, typed);
-            let subject = LoginSubject::Unknown(hmac);
-            return self
-                .refuse(
-                    login_failed(requester, subject),
-                    IdentityError::InvalidCredentials {
-                        cause: CredentialFailure::UnknownLogin,
-                    },
-                )
-                .await;
-        };
-        if !row.is_active {
-            let event = SecurityEvent::login_rejected_inactive(
-                row.id,
-                requester.request_id,
-                requester.client_ip,
-                requester.user_agent.clone(),
-            );
-            return self.refuse(event, IdentityError::UserInactive).await;
-        }
-        if !matched {
-            let event = login_failed(requester, LoginSubject::User(row.id));
-            return self.refuse(event, changed_user()).await;
-        }
-        if !row.role.is_person() {
-            // The hash check ran in full, so the time does not show the role (ADR-0109 (c)).
-            let event = SecurityEvent::login_failed_technical_account(
-                row.id,
-                requester.request_id,
-                requester.client_ip,
-                requester.user_agent.clone(),
-            );
-            return self.refuse(event, changed_user()).await;
-        }
-        Ok(row)
-    }
-
-    /// Write a failure event and return the error of the login.
-    async fn refuse<T>(&self, event: SecurityEvent, error: IdentityError) -> Result<T, AppError> {
-        self.ctx.app.security.record(event).await?;
-        Err(error.into())
-    }
-
-    /// Write the event for a user that changed after the check and return the error (ADR-0035 m).
+    /// Send the event for a user that changed after the check and return the error (ADR-0035 m).
     ///
-    /// The caller has dropped the transaction. The sink uses its own short transaction.
+    /// The caller has dropped the transaction. The detached task writes the event in the short
+    /// transaction of the sink, and this call waits until it has done so (ADR-0173 (e), (g)).
     async fn refuse_changed<T>(
-        &self,
         requester: &Requester,
         id: UserId,
         still_active: bool,
+        refusal: RefusalSender,
     ) -> Result<T, AppError> {
-        if still_active {
-            let event = login_failed(requester, LoginSubject::User(id));
-            return self.refuse(event, changed_user()).await;
-        }
-        let event = SecurityEvent::login_rejected_inactive(
-            id,
-            requester.request_id,
-            requester.client_ip,
-            requester.user_agent.clone(),
-        );
-        self.refuse(event, changed_user()).await
+        let event = if still_active {
+            login_failed(requester, LoginSubject::User(id))
+        } else {
+            SecurityEvent::login_rejected_inactive(
+                id,
+                requester.request_id,
+                requester.client_ip,
+                requester.user_agent.clone(),
+            )
+        };
+        refusal.refuse(event).await;
+        Err(changed_user().into())
     }
 
     /// T2: lock the user, check the credentials again, and create the session.
+    ///
+    /// `passed` holds the checked row and the key of the attempt. The decision of T2 ends the wait
+    /// of the task: a refusal sends the event through `refusal`, and a grant drops it.
     async fn grant(
         &self,
         meta: &RequestMeta,
         requester: &Requester,
-        checked: UserRow,
-        attempt: AttemptId,
+        passed: (UserRow, AttemptId),
         old_session: Option<SessionId>,
+        refusal: RefusalSender,
     ) -> Result<LoginOutcome, AppError> {
+        let (checked, attempt) = passed;
         let issued = IssuedSession::generate()?;
         let mut tx = self.ctx.app.uow.begin(Isolation::ReadCommitted).await?;
         let locked = tx
@@ -235,10 +202,9 @@ impl Login {
         let Some(user) = locked.as_ref().filter(|row| is_unchanged(&checked, row)) else {
             let still_active = locked.as_ref().is_none_or(|row| row.is_active);
             drop(tx);
-            return self
-                .refuse_changed(requester, checked.id, still_active)
-                .await;
+            return Self::refuse_changed(requester, checked.id, still_active, refusal).await;
         };
+        drop(refusal);
         tx.attempts().mark_succeeded(attempt).await?;
         if let Some(old) = &old_session {
             tx.sessions().delete(old).await?;
@@ -259,6 +225,109 @@ impl Login {
             must_change_password: user.must_change_password,
         })
     }
+}
+
+/// The data of the detached span of `Login`: T1, the password check, and the failure event.
+///
+/// The type solves one problem: the task must own everything it uses, because the request future
+/// can drop at any `.await` (ADR-0172).
+struct Attempt {
+    ctx: IdentityContext,
+    requester: Requester,
+    login: TypedLogin,
+    password: Password,
+}
+
+impl Attempt {
+    /// Run T1 and the password check, and write the event of a refusal.
+    ///
+    /// The task holds the permit during the hash and drops it before the event write. A refusal
+    /// writes its event here and returns its error. A pass returns the checked row and the key of
+    /// the attempt for T2.
+    async fn judge(self, permit: HashPermit) -> Result<(UserRow, AttemptId), AppError> {
+        let Self {
+            ctx,
+            requester,
+            login,
+            password,
+        } = self;
+        let attempt = match begin_attempt(&ctx, &login, requester.client_ip).await? {
+            Gate::Open(attempt) => attempt,
+            Gate::Throttled { retry_after } => {
+                drop(permit);
+                return throttle(&ctx, &requester, &login, retry_after).await;
+            }
+        };
+        let (stored, matched, permit) = check_password(&ctx, permit, &login, password).await?;
+        drop(permit);
+        let user = pass_or_refuse(&ctx, &requester, &login, stored, matched).await?;
+        Ok((user, attempt))
+    }
+}
+
+/// Return the active person whose password matched. Else write the event and return the error.
+async fn pass_or_refuse(
+    ctx: &IdentityContext,
+    requester: &Requester,
+    typed: &TypedLogin,
+    stored: Option<UserRow>,
+    matched: bool,
+) -> Result<UserRow, AppError> {
+    let Some(row) = stored else {
+        let hmac = LoginHmac::compute(&ctx.login_keys, typed);
+        let subject = LoginSubject::Unknown(hmac);
+        let error = IdentityError::InvalidCredentials {
+            cause: CredentialFailure::UnknownLogin,
+        };
+        return refuse(ctx, login_failed(requester, subject), error).await;
+    };
+    if !row.is_active {
+        let event = SecurityEvent::login_rejected_inactive(
+            row.id,
+            requester.request_id,
+            requester.client_ip,
+            requester.user_agent.clone(),
+        );
+        return refuse(ctx, event, IdentityError::UserInactive).await;
+    }
+    if !matched {
+        let event = login_failed(requester, LoginSubject::User(row.id));
+        return refuse(ctx, event, changed_user()).await;
+    }
+    if !row.role.is_person() {
+        // The hash check ran in full, so the time does not show the role (ADR-0109 (c)).
+        let event = SecurityEvent::login_failed_technical_account(
+            row.id,
+            requester.request_id,
+            requester.client_ip,
+            requester.user_agent.clone(),
+        );
+        return refuse(ctx, event, changed_user()).await;
+    }
+    Ok(row)
+}
+
+/// Write the event `login_throttled` and return `E-IDN-005`.
+async fn throttle<T>(
+    ctx: &IdentityContext,
+    requester: &Requester,
+    login: &TypedLogin,
+    retry_after: u64,
+) -> Result<T, AppError> {
+    let event = throttled_event(ctx, requester, login);
+    refuse(ctx, event, IdentityError::LoginThrottled { retry_after }).await
+}
+
+/// Write a failure event and return the error of the login.
+///
+/// A failed write gives one `WARN` line and no storage error (ADR-0172 (o), (q)).
+async fn refuse<T>(
+    ctx: &IdentityContext,
+    event: SecurityEvent,
+    error: IdentityError,
+) -> Result<T, AppError> {
+    record_security_event(ctx.app.security.as_ref(), event).await;
+    Err(error.into())
 }
 
 /// Read the user in a read-only transaction and end that transaction.
@@ -315,5 +384,7 @@ fn is_unchanged(checked: &UserRow, locked: &UserRow) -> bool {
         && locked.password_hash == checked.password_hash
 }
 
+#[cfg(test)]
+mod detached;
 #[cfg(test)]
 mod tests;

@@ -17,11 +17,12 @@ Source: `docs/architecture/reliability.md` §1, §2, §8. Load the skills `idiom
 - A unit test compiles every regex pattern, so a bad pattern fails the build.
 - `parking_lot::Mutex` replaces `std::sync::Mutex`. Never call `block_on` inside async code.
 - Argon2id hashing and snapshot checks run in `spawn_blocking`. Map the `JoinError` to `AppError::TaskFailed { stage }`.
-- Application code never calls `catch_unwind`. §2.4 rule 6 names the eight places that catch a panic (ADR-0057 (h), ADR-0058 (f), ADR-0092, ADR-0125 (f)).
+- Application code never calls `catch_unwind`. §2.4 rule 6 names the nine places that catch a panic (ADR-0057 (h), ADR-0058 (f), ADR-0092, ADR-0125 (f), ADR-0172).
 - The places are the inner `CatchPanicLayer`, the backstop `CatchPanicLayer`, and the supervisor of the jobs. The supervisor also covers the `JoinSet` of the job loops.
 - The next two places are the join of a `spawn_blocking` task and the `JoinSet` of the connection tasks.
 - The sixth place is the `JoinSet` of the webhook calls of one run of `alerts`.
 - The seventh place is the join of the task of an accept loop. The eighth place is the join of the watchdog thread.
+- The ninth place is the `JoinSet` of the detached tasks of the identity use cases. A panic there only frees its slot and writes no line.
 
 Permitted exceptions (reliability §2.3):
 
@@ -37,14 +38,14 @@ Permitted exceptions (reliability §2.3):
 - Add the row to `reliability.md` §1.2 first. Then add the variant and its row in `crates/recipe-domain/src/error_codes.rs`.
 - A variant carries the values that identify the failure, such as `reference`, `number`, `tag`, and `leaf`. It never carries a secret.
 - `?` converts between layers through `From`. Use `map_err` only when it adds context.
-- Lower layers add context and propagate. Only the `WebError` mapping, the backstop panic layer, and the supervisor of the jobs log an error. A job logs a handled fault once at `WARN` (reliability §1.1). The handler of `POST /users/{login}/unlock` also logs a lost event `unlock` once at `WARN` (ADR-0130).
+- Lower layers add context and propagate. Only the `WebError` mapping, the backstop panic layer, and the supervisor of the jobs log an error. A job logs a handled fault once at `WARN` (reliability §1.1). The detached task of `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check logs a lost security event once at `WARN`. The handler never logs it (ADR-0172). A handler logs a failed read after a committed command once at `WARN` and gives a success answer (ADR-0163).
 - `Debug` on a type that holds a secret redacts it. Write that `Debug` by hand.
 
 ## Types and naming (skill `idiomatic-rust`, `NAMING.md`)
 
 - Every identifier is a newtype, for example `MachineId`, `UnitId`, `PlcTypeId`, `RecipeId`, `RecipeVersionId`, `UserId`, `ParameterKey`.
 - A bare `Uuid`, `String`, or integer never stands for a domain identifier in a signature.
-- A value object has one `parse(input) -> Result<Self, Error>` and no public `new`. Code does not check it again (reliability §4.3).
+- A value object has one `parse(input) -> Result<Self, Error>` and no public `new`. Exception: stored data has a `from_stored` constructor ([ADR-0166](../../docs/adr/0166-constructor-for-stored-data.md)). Code does not check it again (reliability §4.3).
 - Use the Rust names of `domain-model.md`. `data-model.md` §1.2 maps them to SQL names.
 - A new name has no weasel word: `Service`, `Manager`, `Helper`, `Util`, `Data`, `Info`.
 - `as_` is a free view, `to_` allocates, `into_` consumes. A field accessor has no `get_` prefix.

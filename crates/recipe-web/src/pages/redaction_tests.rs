@@ -98,7 +98,11 @@ impl Run {
 
     /// Send `POST /login` with a pre-session token that the run knows.
     async fn post_login(&mut self, fields: &str) -> Reply {
-        let token = issue_pre_session(self.fixture.state.csrf_keys()).unwrap();
+        let token = issue_pre_session(
+            self.fixture.state.csrf_keys(),
+            self.fixture.state.settings().secure,
+        )
+        .unwrap();
         let pair = cookie_pair(token.set_cookie().to_str().unwrap());
         self.learn(&pair_value(&pair));
         let nonce = token.nonce().to_string();

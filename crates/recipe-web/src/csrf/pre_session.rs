@@ -1,7 +1,7 @@
 //! The pre-session CSRF token (design D12, ADR-0035 s, `api.md` section 7.3).
 //!
 //! A signed double-submit cookie protects `POST /login` and `POST /lang` before a session exists.
-//! The cookie `__Host-recipe_csrf` holds `hex(nonce) "." hex(HMAC-SHA256(nonce))`. The form field
+//! The cookie `__Host-recipe_csrf` (`recipe_csrf` with `session.secure` false, ADR-0171) holds `hex(nonce) "." hex(HMAC-SHA256(nonce))`. The form field
 //! `csrf_pre` holds the hex nonce. A browser keeps the cookie for its session only.
 
 use std::fmt;
@@ -12,7 +12,7 @@ use recipe_app::error::AppError;
 use recipe_app::identity::{NONCE_BYTES, random_nonce};
 use recipe_domain::identity::KeyRing;
 
-use crate::cookies::CSRF_COOKIE;
+use crate::cookies::csrf_cookie_name;
 use crate::hex::{from_lower_hex, to_hex};
 
 /// Bytes in the HMAC-SHA256 tag.
@@ -38,8 +38,9 @@ impl PreSession {
 
     /// Return the `Set-Cookie` value of the cookie `__Host-recipe_csrf`.
     ///
-    /// The cookie has `HttpOnly`, `Secure`, `SameSite=Strict`, and `Path=/`. It has no `Max-Age`
-    /// and no `Domain`, as the prefix `__Host-` requires.
+    /// The cookie has `HttpOnly`, `SameSite=Strict`, and `Path=/`. It has no `Max-Age` and no
+    /// `Domain`. With `secure` true it also has `Secure` and the prefix `__Host-`. With `secure`
+    /// false it has neither, and the name is `recipe_csrf` (ADR-0171).
     #[must_use]
     pub const fn set_cookie(&self) -> &HeaderValue {
         &self.set_cookie
@@ -57,19 +58,22 @@ impl fmt::Debug for PreSession {
 
 /// Issue a new pre-session token signed under the first key of `keys`.
 ///
+/// The value of `secure` is `WebSettings::secure`. It selects the name and the `Secure` attribute
+/// of the cookie.
+///
 /// The nonce has 128 random bits from `recipe_app::identity::random_nonce`. It has no panic path.
 ///
 /// # Errors
 ///
 /// Returns `AppError::TaskFailed` with the stage `Token` (`E-WEB-011`) when the system gives no
 /// random bytes.
-pub fn issue_pre_session(keys: &KeyRing) -> Result<PreSession, AppError> {
+pub fn issue_pre_session(keys: &KeyRing, secure: bool) -> Result<PreSession, AppError> {
     let nonce_bytes = random_nonce()?;
     let nonce = to_hex(&nonce_bytes);
     let tag = to_hex(&keys.sign(&nonce_bytes));
-    let cookie = Cookie::build((CSRF_COOKIE, format!("{nonce}.{tag}")))
+    let cookie = Cookie::build((csrf_cookie_name(secure), format!("{nonce}.{tag}")))
         .http_only(true)
-        .secure(true)
+        .secure(secure)
         .same_site(SameSite::Strict)
         .path("/")
         .build();

@@ -20,7 +20,7 @@ use crate::test_support::{
     cookie_pair, get_with, request,
 };
 
-const SAME_ORIGIN: (&str, &str) = ("sec-fetch-site", "same-origin");
+pub(super) const SAME_ORIGIN: (&str, &str) = ("sec-fetch-site", "same-origin");
 const HOST: &str = "recipes.plant.local";
 const PRE_COOKIE: &str = "__Host-recipe_csrf";
 
@@ -36,7 +36,12 @@ fn unhex(text: &str) -> Vec<u8> {
 }
 
 /// Send a urlencoded form with the method `POST` and the given headers.
-async fn post(router: &Router, path: &str, headers: &[(&str, &str)], body: &str) -> Reply {
+pub(super) async fn post(
+    router: &Router,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> Reply {
     send(router, Method::POST, path, headers, body).await
 }
 
@@ -56,7 +61,7 @@ async fn send(
 }
 
 /// Assert the answer of a rejected request: `403 E-WEB-007`, no handler, and one event.
-fn assert_rejected(fixture: &Fixture, reply: &Reply, what: &str) {
+pub(super) fn assert_rejected(fixture: &Fixture, reply: &Reply, what: &str) {
     assert_eq!(
         reply.status,
         StatusCode::FORBIDDEN,
@@ -78,7 +83,7 @@ fn assert_accepted(fixture: &Fixture, reply: &Reply, what: &str) {
     assert!(fixture.sink.events().is_empty(), "{what}");
 }
 
-fn session_headers<'a>(
+pub(super) fn session_headers<'a>(
     session: &'a TestSession,
     extra: &[(&'a str, &'a str)],
 ) -> Vec<(&'a str, &'a str)> {
@@ -406,7 +411,8 @@ async fn login_with(fixture: &Fixture, cookie: &str, field: &str, extra: &[(&str
 #[tokio::test]
 async fn csrf_issued_cookie_has_the_attributes_of_api_section_7_3() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let text = token.set_cookie().to_str().unwrap().to_owned();
     let mut parts = text.split("; ");
     let pair = parts.next().unwrap();
@@ -434,7 +440,8 @@ async fn csrf_issued_cookie_has_the_attributes_of_api_section_7_3() {
 #[tokio::test]
 async fn csrf_issued_nonce_is_32_hex_characters_from_a_fallible_source() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let text = token.set_cookie().to_str().unwrap().to_owned();
     let value = text.split(';').next().unwrap();
     let (_name, pair) = value.split_once('=').unwrap();
@@ -451,8 +458,10 @@ async fn csrf_issued_nonce_is_32_hex_characters_from_a_fallible_source() {
 #[tokio::test]
 async fn csrf_issued_tokens_are_new_each_time_and_signed_under_the_first_key() {
     let fixture = Fixture::new();
-    let first = issue_pre_session(fixture.state.csrf_keys()).unwrap();
-    let second = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let first =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
+    let second =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     assert_ne!(first.nonce(), second.nonce());
     let pair = cookie_pair(first.set_cookie().to_str().unwrap());
     let value = pair.strip_prefix("__Host-recipe_csrf=").unwrap();
@@ -465,7 +474,8 @@ async fn csrf_issued_tokens_are_new_each_time_and_signed_under_the_first_key() {
 #[tokio::test]
 async fn csrf_debug_of_the_issued_token_hides_the_nonce() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let shown = format!("{token:?}");
     assert!(!shown.contains(token.nonce()), "{shown}");
     assert!(shown.contains("[redacted]"), "{shown}");
@@ -475,7 +485,8 @@ async fn csrf_debug_of_the_issued_token_hides_the_nonce() {
 async fn csrf_login_with_an_open_session_accepts_the_pre_session_token_alone() {
     let fixture = Fixture::new();
     let session = fixture.seed_session(1, Role::Operator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let both = format!(
         "{}; {}",
         session.cookie,
@@ -525,7 +536,8 @@ async fn csrf_cookie_signed_by_the_old_key_of_a_two_line_file_is_accepted() {
 #[tokio::test]
 async fn csrf_cookie_with_a_changed_nonce_is_rejected() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let pair = cookie_pair(token.set_cookie().to_str().unwrap());
     let value = pair.strip_prefix("__Host-recipe_csrf=").unwrap();
     let (nonce, tag) = value.split_once('.').unwrap();
@@ -539,8 +551,10 @@ async fn csrf_cookie_with_a_changed_nonce_is_rejected() {
 #[tokio::test]
 async fn csrf_field_that_differs_from_the_nonce_of_the_cookie_is_rejected() {
     let fixture = Fixture::new();
-    let first = issue_pre_session(fixture.state.csrf_keys()).unwrap();
-    let second = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let first =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
+    let second =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let cookie = cookie_pair(first.set_cookie().to_str().unwrap());
     let reply = login_with(&fixture, &cookie, second.nonce(), &[]).await;
     assert_rejected(&fixture, &reply, "other nonce");
@@ -549,7 +563,8 @@ async fn csrf_field_that_differs_from_the_nonce_of_the_cookie_is_rejected() {
 #[tokio::test]
 async fn csrf_missing_malformed_or_uppercase_pre_session_parts_are_rejected() {
     let fixture = Fixture::new();
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let pair = cookie_pair(token.set_cookie().to_str().unwrap());
     let value = pair.strip_prefix("__Host-recipe_csrf=").unwrap().to_owned();
     let nonce = token.nonce().to_owned();
@@ -579,121 +594,6 @@ async fn csrf_missing_malformed_or_uppercase_pre_session_parts_are_rejected() {
         let reply = login_with(&fixture, &cookie, &field, &[]).await;
         assert_rejected(&fixture, &reply, what);
     }
-}
-
-// --- POST /lang --------------------------------------------------------------------------------
-
-#[tokio::test]
-async fn csrf_lang_accepts_the_pre_session_token_without_a_session() {
-    let fixture = Fixture::new();
-    let reply = crate::test_support::post_pre_session(&fixture, "/lang", "lang=en", &[]).await;
-    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
-    assert!(fixture.sink.events().is_empty());
-}
-
-#[tokio::test]
-async fn csrf_lang_accepts_the_session_token_of_the_open_session() {
-    let fixture = Fixture::new();
-    let session = fixture.seed_session(1, Role::Operator, false);
-    let router = fixture.router();
-    let with_header = session_headers(&session, &[SAME_ORIGIN, ("x-csrf-token", &session.csrf)]);
-    let reply = post(&router, "/lang", &with_header, "lang=en").await;
-    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
-    let with_field = session_headers(&session, &[SAME_ORIGIN]);
-    let body = format!("lang=pl&csrf_token={}", session.csrf);
-    let reply = post(&router, "/lang", &with_field, &body).await;
-    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
-    assert!(fixture.sink.events().is_empty());
-}
-
-#[tokio::test]
-async fn csrf_lang_with_a_session_also_accepts_the_pre_session_token() {
-    let fixture = Fixture::new();
-    let session = fixture.seed_session(1, Role::Operator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
-    let cookies = format!(
-        "{}; {}",
-        session.cookie,
-        cookie_pair(token.set_cookie().to_str().unwrap())
-    );
-    let body = format!("lang=en&csrf_pre={}", token.nonce());
-    let reply = post(
-        &fixture.router(),
-        "/lang",
-        &[SAME_ORIGIN, ("cookie", &cookies)],
-        &body,
-    )
-    .await;
-    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
-}
-
-/// Scenario "Language switch with a session and the pre-session token" (ADR-0131).
-#[tokio::test]
-async fn csrf_lang_with_a_session_and_csrf_pre_only_sets_the_language_cookie() {
-    let fixture = Fixture::new();
-    let session = fixture.seed_session(1, Role::Operator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
-    let cookies = format!(
-        "{}; {}",
-        session.cookie,
-        cookie_pair(token.set_cookie().to_str().unwrap())
-    );
-    // The body has `csrf_pre` and no `csrf_token`, and the request has no `X-CSRF-Token`.
-    let body = format!("lang=en&csrf_pre={}", token.nonce());
-    let reply = post(
-        &fixture.router(),
-        "/lang",
-        &[SAME_ORIGIN, ("cookie", &cookies)],
-        &body,
-    )
-    .await;
-    assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
-    assert!(
-        reply.header("set-cookie").starts_with("recipe_lang=en"),
-        "{}",
-        reply.header("set-cookie")
-    );
-    assert!(fixture.sink.events().is_empty());
-}
-
-/// Scenario "Language switch with a session and a wrong token" (ADR-0131).
-#[tokio::test]
-async fn csrf_lang_with_a_session_and_a_wrong_csrf_token_gives_e_web_007() {
-    let fixture = Fixture::new();
-    let session = fixture.seed_session(1, Role::Operator, false);
-    let wrong = "cd".repeat(32);
-    assert_ne!(wrong, session.csrf);
-    let headers = session_headers(&session, &[SAME_ORIGIN]);
-    let body = format!("lang=en&csrf_token={wrong}");
-    let reply = post(&fixture.router(), "/lang", &headers, &body).await;
-    assert_rejected(&fixture, &reply, "wrong session token");
-    assert_eq!(reply.header("set-cookie"), "");
-}
-
-#[tokio::test]
-async fn csrf_lang_without_a_token_or_with_a_foreign_token_is_rejected() {
-    let fixture = Fixture::new();
-    let reply = post(&fixture.router(), "/lang", &[SAME_ORIGIN], "lang=en").await;
-    assert_rejected(&fixture, &reply, "no token");
-    let fixture = Fixture::new();
-    let session = fixture.seed_session(1, Role::Operator, false);
-    let other = fixture.seed_session(2, Role::Operator, false);
-    let headers = session_headers(&session, &[SAME_ORIGIN, ("x-csrf-token", &other.csrf)]);
-    let reply = post(&fixture.router(), "/lang", &headers, "lang=en").await;
-    assert_rejected(&fixture, &reply, "token of another session");
-}
-
-#[tokio::test]
-async fn csrf_lang_session_token_without_a_session_is_rejected() {
-    let fixture = Fixture::new();
-    let reply = post(
-        &fixture.router(),
-        "/lang",
-        &[SAME_ORIGIN, ("x-csrf-token", &"ab".repeat(32))],
-        &format!("lang=en&csrf_token={}", "ab".repeat(32)),
-    )
-    .await;
-    assert_rejected(&fixture, &reply, "no session");
 }
 
 // --- Order, the event, and the log -------------------------------------------------------------
@@ -761,7 +661,8 @@ async fn csrf_rejection_logs_one_warning_and_no_token() {
     let (logs, _guard) = capture_logs();
     let fixture = Fixture::new();
     let session = fixture.seed_session(1, Role::Administrator, false);
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let pre_cookie = cookie_pair(token.set_cookie().to_str().unwrap());
     let cookies = format!("{}; {pre_cookie}", session.cookie);
     let wrong_header = "f".repeat(64);

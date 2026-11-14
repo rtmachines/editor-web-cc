@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::Sha256;
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
@@ -340,6 +341,19 @@ fn the_check_result_fault_has_its_display_text_without_a_path() {
             assert!(!text.contains('/') && !text.contains('\\'));
             assert!(!text.contains("json"));
         }
+    }
+}
+
+#[test]
+fn the_check_result_fault_has_a_code_for_each_variant() {
+    for check in [ScheduledCheck::RestoreTest, ScheduledCheck::BaseBackup] {
+        let unreadable = CheckResultFault::Unreadable {
+            check,
+            source: io::Error::from(io::ErrorKind::NotFound),
+        };
+        let malformed = CheckResultFault::Malformed { check };
+        assert_eq!(unreadable.code(), ErrorCode::WEB_016);
+        assert_eq!(malformed.code(), ErrorCode::WEB_017);
     }
 }
 

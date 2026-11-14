@@ -29,7 +29,7 @@ async fn page_request(method: Method, uri: &str) -> PageRequest {
     let request = Request::builder().method(method).uri(uri).body(()).unwrap();
     let (mut parts, ()) = request.into_parts();
     parts.extensions.insert(ClientAddr::of(PEER.ip()));
-    PageRequest::from_request_parts(&mut parts, &())
+    PageRequest::from_request_parts(&mut parts, &Fixture::new().state)
         .await
         .map_err(|_rejection| "rejected")
         .unwrap()
@@ -224,7 +224,7 @@ async fn page_request_hx_target_is_the_header_value_or_none() {
         .unwrap();
     let (mut parts, ()) = request.into_parts();
     parts.extensions.insert(ClientAddr::of(PEER.ip()));
-    let with = PageRequest::from_request_parts(&mut parts, &())
+    let with = PageRequest::from_request_parts(&mut parts, &Fixture::new().state)
         .await
         .map_err(|_rejection| "rejected")
         .unwrap();

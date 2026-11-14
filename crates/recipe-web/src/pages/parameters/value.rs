@@ -27,8 +27,10 @@ use super::remove::toast_html;
 use super::reply::{Ctx, Target, command_lines, load, missing_key};
 use crate::error::{FieldError, WebError};
 use crate::pages::draft_reply::{conflict, success, with_change_number};
+use crate::pages::hrefs::parameter_href;
 use crate::pages::render::render;
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
 use crate::state::WebState;
 
 /// Build the error of lines without a form: the page has no form of the route.
@@ -63,8 +65,31 @@ fn key_of(ctx: Ctx<'_>) -> Result<recipe_domain::recipe::ParameterKey, WebError>
     })
 }
 
+/// Answer a committed change with `answer`, or with the notice when the answer fails (ADR-0163).
+///
+/// The command committed before `answer` ran, so an error of the read or the render must not hide
+/// the saved change. The output of the command holds the new `row_version`.
+fn or_saved_notice(
+    ctx: Ctx<'_>,
+    output: &DraftOutput,
+    answer: Result<Response, WebError>,
+) -> Result<Response, WebError> {
+    let Err(fault) = answer else {
+        return answer;
+    };
+    let href = parameter_href(&ctx.target.reference, ctx.target.number, &key_of(ctx)?);
+    saved_notice(
+        ctx.request.is_htmx(),
+        ctx.request.request_id(),
+        ctx.texts(),
+        &fault,
+        &href,
+        Some(output.row_version),
+    )
+}
+
 /// Read the parameter again and answer its read-only grid with the new `row_version`.
-async fn values_answer(ctx: Ctx<'_>, output: DraftOutput) -> Result<Response, WebError> {
+async fn values_answer(ctx: Ctx<'_>, output: &DraftOutput) -> Result<Response, WebError> {
     let view = read_parameter(ctx).await?;
     let request_id = ctx.request.request_id();
     let texts = GridTexts::stored(&view).map_err(|_fault| WebError::Internal { request_id })?;
@@ -72,9 +97,9 @@ async fn values_answer(ctx: Ctx<'_>, output: DraftOutput) -> Result<Response, We
     let tag = view.parameter.tag.to_string();
     let grid = grid_of(t, texts, ctx.state.settings().form_array_chunk, &tag);
     let mut body = render(&GridValuesFragment { t, view: &grid }, request_id)?;
-    let sentence = with_change_number(t, &t.with_arg("value-saved", "tag", &tag), &output);
+    let sentence = with_change_number(t, &t.with_arg("value-saved", "tag", &tag), output);
     body.0.push_str(&toast_html(sentence, true, request_id)?);
-    success(&output, body, request_id)
+    success(output, body, request_id)
 }
 
 /// Read the limits with `GetLimits` and render the rows. A time bound shows as an IEC literal (A43).
@@ -98,6 +123,16 @@ async fn limits_body(ctx: Ctx<'_>) -> Result<(axum::response::Html<String>, Stri
         root_label: tag.clone(),
     };
     Ok((render(&fragment, ctx.request.request_id())?, tag))
+}
+
+/// Read the limits again and answer their rows with the toast of the saved limits.
+async fn limits_answer(ctx: Ctx<'_>, output: &DraftOutput) -> Result<Response, WebError> {
+    let (mut body, tag) = limits_body(ctx).await?;
+    let t = ctx.texts();
+    let sentence = with_change_number(t, &t.with_arg("limits-saved", "tag", tag), output);
+    let request_id = ctx.request.request_id();
+    body.0.push_str(&toast_html(sentence, true, request_id)?);
+    success(output, body, request_id)
 }
 
 /// Build the context of a fragment route.
@@ -136,7 +171,7 @@ pub(crate) async fn set_value(
         .execute(request.auth()?.user(), &request.meta(), input)
         .await;
     match result {
-        Ok(output) => values_answer(ctx, output).await,
+        Ok(output) => or_saved_notice(ctx, &output, values_answer(ctx, &output).await),
         Err(error) => Err(command_failed(ctx, error).await),
     }
 }
@@ -192,14 +227,7 @@ pub(crate) async fn replace_limits(
         .execute(request.auth()?.user(), &request.meta(), input)
         .await;
     match result {
-        Ok(output) => {
-            let (mut body, tag) = limits_body(ctx).await?;
-            let t = ctx.texts();
-            let sentence = with_change_number(t, &t.with_arg("limits-saved", "tag", tag), &output);
-            let request_id = request.request_id();
-            body.0.push_str(&toast_html(sentence, true, request_id)?);
-            success(&output, body, request_id)
-        }
+        Ok(output) => or_saved_notice(ctx, &output, limits_answer(ctx, &output).await),
         Err(error) => Err(command_failed(ctx, error).await),
     }
 }

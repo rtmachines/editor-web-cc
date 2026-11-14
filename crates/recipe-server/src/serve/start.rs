@@ -222,6 +222,12 @@ impl Steps<'_> {
         let (main, health_pool) = self.open_pools().await?;
         between_steps().await;
         let web = wiring::web_state(self.host, self.plan, &main, self.counters).await?;
+        // The one set of the process. The stop drains it before the pool close (ADR-0172 (af)).
+        self.resources.detached = Some(web.identity().detached().clone());
+        #[cfg(test)]
+        {
+            self.resources.web = Some(web.clone());
+        }
         let (jobs, health) = self.first_disk_check(&main, &web).await?;
         between_steps().await;
         self.compare_settings(&main).await?;
