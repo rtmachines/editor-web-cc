@@ -44,6 +44,71 @@ fn caddyfiles_never_enable_credential_logging() {
     }
 }
 
+/// The permitted differences of the two Caddyfiles. Each pair becomes one marker.
+const PERMITTED_PAIRS: [(&str, [&str; 2]); 2] = [
+    (
+        "<global-option>",
+        ["auto_https disable_certs", "skip_install_trust"],
+    ),
+    (
+        "<tls>",
+        [
+            "tls /run/secrets/tls_cert /run/secrets/tls_key",
+            "tls internal",
+        ],
+    ),
+];
+
+/// The Caddyfile that a line list comes from. It selects the permitted line of each pair.
+#[derive(Clone, Copy)]
+enum Side {
+    Production,
+    Development,
+}
+
+/// The trimmed code lines of a Caddyfile. Only the permitted line of its own side becomes the
+/// marker of its pair, so a line of the other side stays visible and breaks the comparison.
+fn marked_lines(text: &str, side: Side) -> Vec<&str> {
+    let index = match side {
+        Side::Production => 0,
+        Side::Development => 1,
+    };
+    code_lines(text)
+        .into_iter()
+        .map(str::trim)
+        .map(|line| {
+            PERMITTED_PAIRS
+                .iter()
+                .find(|(_, pair)| pair.get(index) == Some(&line))
+                .map_or(line, |(marker, _)| *marker)
+        })
+        .collect()
+}
+
+#[test]
+fn caddyfiles_differ_only_in_the_named_lines() {
+    let inputs = crate::inputs::Inputs::load();
+    let production = inputs.text("deploy/Caddyfile");
+    let development = inputs.text("deploy/Caddyfile.dev");
+    assert_eq!(
+        marked_lines(production, Side::Production),
+        marked_lines(development, Side::Development),
+        "the Caddyfiles must differ only in the tls line, the auto_https line, and skip_install_trust"
+    );
+    for (file, text) in [
+        ("deploy/Caddyfile", production),
+        ("deploy/Caddyfile.dev", development),
+    ] {
+        let line_two = text.lines().nth(1).unwrap_or_default();
+        for item in ["tls", "auto_https", "skip_install_trust"] {
+            assert!(
+                line_two.contains(item),
+                "{file}: line 2 must name `{item}`, but it is `{line_two}`"
+            );
+        }
+    }
+}
+
 /// The upstream keep-alive, the HSTS age, and the port of `reverse_proxy` of a Caddyfile
 /// (`reliability.md` 7.11 rows `proxy.upstream_keepalive`, `http.hsts_max_age`, `http.public_port`).
 pub fn check_caddyfile(file: &str, text: &str, table: &Table) -> Report {

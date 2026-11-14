@@ -96,6 +96,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 bash deploy/ci/rust-tests.sh secure
+bash deploy/ci/rust-tests.sh release-toolchain
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features --locked
 cargo deny --locked check
 python3 -I -B tools/test_coverage_gate.py
@@ -110,6 +111,8 @@ bash -O globstar -O nullglob -c 'python3 -I tools/ste-lint/ste-lint.py docs/{arc
 ```
 
 The `secure` mode tests the refusal of `session.secure=false` in a build without the `dev` feature (ADR-0062 (b)).
+
+The `release-toolchain` mode needs `rustup` and network access. It installs the toolchain of `ENV RUSTUP_TOOLCHAIN=` in `deploy/Dockerfile`.
 
 The `openspec` job checks the specifications with the local command `openspec validate --all --strict`.
 
@@ -167,6 +170,8 @@ The jobs `compose`, `upgrade`, `restore-switch`, and `pitr-recovery` of `.github
 The job `load` of `.github/workflows/ci.yml` runs only on a push to `main` and on a manual dispatch (ADR-0128 (a)). A pull request does not start it. A red `load` job on `main` blocks the next release (ADR-0128 (d)).
 
 The job `ci-scripts` runs on each pull request without Docker. It runs `deploy/ci/check.sh`, which runs the Python unit tests and the structure checks of `deploy/ci` (ADR-0128 (e)).
+
+The job `release-toolchain` checks `recipe-server` on each pull request with the toolchain version from `deploy/Dockerfile`.
 
 ## Pull requests
 

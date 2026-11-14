@@ -700,6 +700,8 @@ jobs:
         run: rustup toolchain install
       - name: Cache the Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
@@ -716,10 +718,29 @@ jobs:
         run: rustup toolchain install
       - name: Cache the Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run tests
         run: cargo test --workspace --all-features --locked
       - name: Check the production refusal of insecure cookies
         run: bash deploy/ci/rust-tests.sh secure
+
+  release-toolchain:
+    name: Release toolchain check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-toolchain-${{ hashFiles('deploy/Dockerfile') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the release toolchain
+        run: bash deploy/ci/rust-tests.sh release-toolchain
 
   doc:
     name: Documentation
@@ -736,6 +757,8 @@ jobs:
         run: rustup toolchain install
       - name: Cache the Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the documentation
         run: cargo doc --workspace --no-deps --all-features --locked
 
@@ -782,6 +805,8 @@ jobs:
         run: rustup component add llvm-tools-preview
       - name: Cache the Rust build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:

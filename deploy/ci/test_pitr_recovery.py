@@ -2103,7 +2103,7 @@ case "$*" in
     # A scratch volume leaves the list after volume rm, unless STUB_VOLUME_STAYS is set.
     echo recipe-ci-1-1_pgdata
     for name in $(grep '^volume create ' "$STUB_LOG" | awk '{print $NF}'); do
-      if [[ -n ${STUB_VOLUME_STAYS:-} ]] || ! grep -q "^volume rm $name\$" "$STUB_LOG"; then echo "$name"; fi
+      if [[ -n ${STUB_VOLUME_STAYS:-} ]] || ! grep -q "^volume rm $name\\$" "$STUB_LOG"; then echo "$name"; fi
     done ;;
   "volume create "*) exit "${STUB_VOLUME_CREATE_STATUS:-0}" ;;
   "volume inspect "*) echo "${STUB_LABEL:-recipe-ci-1-1}" ;;

@@ -7,6 +7,12 @@ for script in deploy/ci/*.sh
 do
   bash -n "$script"
 done
+python3 -I -B -W error - <<'PY'
+from pathlib import Path
+
+for path in sorted(Path('deploy/ci').glob('*.py')):
+    compile(path.read_bytes(), str(path), 'exec')
+PY
 for test in deploy/ci/test_*.py
 do
   python3 -I -B "$test"

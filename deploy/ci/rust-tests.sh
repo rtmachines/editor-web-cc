@@ -9,6 +9,16 @@ fail() {
 }
 
 case ${1:?} in
+  release-toolchain)
+    root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+    mapfile -t versions < <(sed -nE 's/^ENV[[:blank:]]+RUSTUP_TOOLCHAIN=(.*)$/\1/p' "$root/deploy/Dockerfile")
+    [[ ${#versions[@]} -eq 1 ]] || fail "Dockerfile must set exactly one release toolchain"
+    [[ ${versions[0]} =~ ^([0-9]+\.[0-9]+\.[0-9]+)([[:blank:]]+\\)?[[:blank:]]*$ ]] ||
+      fail "Dockerfile release toolchain must have the form n.n.n"
+    version=${BASH_REMATCH[1]}
+    rustup toolchain install "$version" --profile minimal
+    RUSTUP_TOOLCHAIN="$version" cargo check --release --locked --package recipe-server
+    ;;
   setup)
     sudo apt-get update -qq
     sudo apt-get install --yes --no-install-recommends musl-tools
@@ -43,5 +53,5 @@ case ${1:?} in
         }
       '
     ;;
-  *) fail "usage: rust-tests.sh setup|panic|secure" ;;
+  *) fail "usage: rust-tests.sh setup|panic|secure|release-toolchain" ;;
 esac
