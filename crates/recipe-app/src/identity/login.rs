@@ -1,6 +1,7 @@
 //! The use case `Login` (`domain-model.md` section 5.3, `data-model.md` section 6, design D6).
 
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use recipe_domain::audit::{
     AuditEntry, AuditTarget, LoginHmac, LoginSubject, SecurityEvent, StateAction,
@@ -11,7 +12,7 @@ use recipe_domain::identity::{
 };
 use serde_json::json;
 
-use super::detached::record_security_event;
+use super::detached::{RefusalSender, record_security_event};
 use super::issue::IssuedSession;
 use super::no_session::require_no_session;
 use super::throttle::{Gate, Requester, begin_attempt, throttled_event};
@@ -107,6 +108,8 @@ impl Login {
     /// The request future takes the Argon2 permit and a slot of `identity.detached_tasks`. A
     /// detached task then runs T1, the password check, and the write of the failure event, so a
     /// dropped request still leaves its event (ADR-0172). T2 runs here, only for a waiting caller.
+    /// After a passed check, the task keeps its slot until T2 decides. A refusal of T2 sends its
+    /// event to the task, which writes it, so a drop during that write loses nothing (ADR-0173).
     ///
     /// # Errors
     ///
@@ -142,46 +145,53 @@ impl Login {
             login,
             password,
         };
-        let (user, attempt) = self
+        let sink = Arc::clone(&self.ctx.app.security);
+        let ((user, attempt), refusal) = self
             .ctx
             .detached
-            .spawn(slot, attempt.judge(permit))
+            .spawn_judged(slot, sink, attempt.judge(permit))
             .await??;
-        self.grant(meta, &requester, user, attempt, old_session)
+        self.grant(meta, &requester, (user, attempt), old_session, refusal)
             .await
     }
 
-    /// Write the event for a user that changed after the check and return the error (ADR-0035 m).
+    /// Send the event for a user that changed after the check and return the error (ADR-0035 m).
     ///
-    /// The caller has dropped the transaction. The sink uses its own short transaction.
+    /// The caller has dropped the transaction. The detached task writes the event in the short
+    /// transaction of the sink, and this call waits until it has done so (ADR-0173 (e), (g)).
     async fn refuse_changed<T>(
-        &self,
         requester: &Requester,
         id: UserId,
         still_active: bool,
+        refusal: RefusalSender,
     ) -> Result<T, AppError> {
-        if still_active {
-            let event = login_failed(requester, LoginSubject::User(id));
-            return refuse(&self.ctx, event, changed_user()).await;
-        }
-        let event = SecurityEvent::login_rejected_inactive(
-            id,
-            requester.request_id,
-            requester.client_ip,
-            requester.user_agent.clone(),
-        );
-        refuse(&self.ctx, event, changed_user()).await
+        let event = if still_active {
+            login_failed(requester, LoginSubject::User(id))
+        } else {
+            SecurityEvent::login_rejected_inactive(
+                id,
+                requester.request_id,
+                requester.client_ip,
+                requester.user_agent.clone(),
+            )
+        };
+        refusal.refuse(event).await;
+        Err(changed_user().into())
     }
 
     /// T2: lock the user, check the credentials again, and create the session.
+    ///
+    /// `passed` holds the checked row and the key of the attempt. The decision of T2 ends the wait
+    /// of the task: a refusal sends the event through `refusal`, and a grant drops it.
     async fn grant(
         &self,
         meta: &RequestMeta,
         requester: &Requester,
-        checked: UserRow,
-        attempt: AttemptId,
+        passed: (UserRow, AttemptId),
         old_session: Option<SessionId>,
+        refusal: RefusalSender,
     ) -> Result<LoginOutcome, AppError> {
+        let (checked, attempt) = passed;
         let issued = IssuedSession::generate()?;
         let mut tx = self.ctx.app.uow.begin(Isolation::ReadCommitted).await?;
         let locked = tx
@@ -192,10 +202,9 @@ impl Login {
         let Some(user) = locked.as_ref().filter(|row| is_unchanged(&checked, row)) else {
             let still_active = locked.as_ref().is_none_or(|row| row.is_active);
             drop(tx);
-            return self
-                .refuse_changed(requester, checked.id, still_active)
-                .await;
+            return Self::refuse_changed(requester, checked.id, still_active, refusal).await;
         };
+        drop(refusal);
         tx.attempts().mark_succeeded(attempt).await?;
         if let Some(old) = &old_session {
             tx.sessions().delete(old).await?;
@@ -375,5 +384,7 @@ fn is_unchanged(checked: &UserRow, locked: &UserRow) -> bool {
         && locked.password_hash == checked.password_hash
 }
 
+#[cfg(test)]
+mod detached;
 #[cfg(test)]
 mod tests;

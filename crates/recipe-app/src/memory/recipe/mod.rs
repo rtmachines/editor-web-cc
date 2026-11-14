@@ -297,7 +297,9 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<SharedVersion>, StorageError> {
-        let Some(row) = self.state().versions.get(&version) else {
+        self.run_lock_version_hook();
+        let state = self.committed_state();
+        let Some(row) = state.versions.get(&version) else {
             return Ok(None);
         };
         let shared = SharedVersion {

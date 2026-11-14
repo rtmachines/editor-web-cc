@@ -1,14 +1,12 @@
 //! Tests of the use case `ChangeOwnPassword` (task 4.2, design D7, ADR-0035 b and m).
 
-use std::fmt::Debug;
 use std::future::Future as _;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use parking_lot::Mutex;
 use recipe_domain::audit::{
     AuditAction, AuditTarget, LoginHmac, RequestId, SecurityEvent, SecurityEventKind, SessionRef,
 };
@@ -16,17 +14,14 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{IdentityError, NewPassword, Password, SessionId, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id, Record};
-use tracing::subscriber::{DefaultGuard, NoSubscriber};
-use tracing::{Dispatch, Event, Level, Metadata, Subscriber};
+use tracing::Level;
 use uuid::Uuid;
 
 use super::{ChangeOwnPassword, ChangeOwnPasswordInput};
 use crate::auth::{Operation, RequestMeta};
 use crate::context::UseCase;
 use crate::error::{AppError, StorageError, TimeoutStage};
-use crate::identity::fixtures::{IdentityFixture, anna_id, fake_hash};
+use crate::identity::fixtures::{IdentityFixture, LogCapture, anna_id, fake_hash};
 use crate::identity::{Authenticated, IdentityContext, authenticate};
 use crate::memory::{Fault, MemorySink, MemoryStore};
 use crate::ports::{SecurityEventSink, UserRow};
@@ -588,86 +583,4 @@ async fn start_and_drop(context: &IdentityContext, auth: &Authenticated, current
     );
     drop(request);
     assert_eq!(context.detached().drain(Duration::from_secs(5)).await, 0);
-}
-
-// ---- log capture ----
-
-/// One event that the code wrote.
-#[derive(Clone, Debug)]
-struct Logged {
-    level: Level,
-    fields: Vec<(String, String)>,
-}
-
-impl Logged {
-    fn field(&self, name: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
-
-/// A registered dispatch that no thread installs. It lives until the test process ends.
-///
-/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
-/// dispatch, a callsite takes its interest from the thread that hits it first.
-static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
-
-/// A subscriber that keeps every event of its thread.
-#[derive(Clone, Default)]
-struct LogCapture {
-    events: Arc<Mutex<Vec<Logged>>>,
-}
-
-impl LogCapture {
-    fn install() -> (Self, DefaultGuard) {
-        LazyLock::force(&KEEPALIVE);
-        let capture = Self::default();
-        let guard = tracing::subscriber::set_default(capture.clone());
-        (capture, guard)
-    }
-
-    fn events(&self) -> Vec<Logged> {
-        self.events.lock().clone()
-    }
-}
-
-#[derive(Default)]
-struct FieldCopy {
-    fields: Vec<(String, String)>,
-}
-
-impl Visit for FieldCopy {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        self.fields
-            .push((field.name().to_owned(), format!("{value:?}")));
-    }
-}
-
-impl Subscriber for LogCapture {
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        true
-    }
-
-    fn new_span(&self, _span: &Attributes<'_>) -> Id {
-        Id::from_u64(1)
-    }
-
-    fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-    fn event(&self, event: &Event<'_>) {
-        let mut copy = FieldCopy::default();
-        event.record(&mut copy);
-        self.events.lock().push(Logged {
-            level: *event.metadata().level(),
-            fields: copy.fields,
-        });
-    }
-
-    fn enter(&self, _span: &Id) {}
-
-    fn exit(&self, _span: &Id) {}
 }

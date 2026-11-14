@@ -2,28 +2,24 @@
 
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use parking_lot::Mutex;
 use recipe_domain::audit::SecurityEvent;
 use recipe_domain::identity::UserId;
 use tokio::sync::Notify;
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id, Record};
-use tracing::subscriber::{DefaultGuard, NoSubscriber};
-use tracing::{Dispatch, Event, Level, Metadata, Subscriber};
+use tracing::Level;
 use uuid::Uuid;
 
-use super::{DetachedTasks, record_security_event};
+use super::{DetachedTasks, TaskOutput, record_security_event};
 use crate::error::{AppError, TaskStage, TimeoutStage};
+use crate::identity::fixtures::{DRAIN_WAIT, LogCapture};
 use crate::identity::new_request_id;
 use crate::memory::{Fault, MemorySink};
 use crate::ports::SecurityEventSink;
 
 const SLOT_WAIT: Duration = Duration::from_secs(2);
-const DRAIN_WAIT: Duration = Duration::from_secs(5);
 
 fn tasks(slots: usize) -> DetachedTasks {
     DetachedTasks::new(slots, SLOT_WAIT)
@@ -198,6 +194,51 @@ async fn lost_event_gives_one_warn_line_for_a_cancel_before_the_send_after_the_s
     }
 }
 
+/// A bare number is a task result that holds no error.
+impl TaskOutput for u8 {
+    fn failure(&self) -> Option<&AppError> {
+        None
+    }
+}
+
+fn timeout_error() -> AppError {
+    AppError::Timeout {
+        stage: TimeoutStage::Request,
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_result_with_a_closed_receiver_writes_one_warn_line() {
+    let (capture, _guard) = LogCapture::install();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let handle = tasks.spawn(slot, async { Err::<(), AppError>(timeout_error()) });
+    drop(handle);
+
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+
+    let lines = capture.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = lines.first().unwrap();
+    assert_eq!(line.level, Level::WARN);
+    let code = timeout_error().code().to_string();
+    assert_eq!(line.field("error_code"), Some(code.as_str()), "{line:?}");
+    assert!(line.field("chain").is_some(), "{line:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ok_result_with_a_closed_receiver_writes_no_line() {
+    let (capture, _guard) = LogCapture::install();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let handle = tasks.spawn(slot, async { Ok::<(), AppError>(()) });
+    drop(handle);
+
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+
+    assert_eq!(capture.count(), 0, "{:?}", capture.events());
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_recorded_event_writes_no_line() {
     let (capture, _guard) = LogCapture::install();
@@ -218,7 +259,7 @@ async fn detached_drain_returns_zero_when_the_tasks_end_in_time() {
     });
 
     assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
-    assert!(tasks.acquire().await.is_ok());
+    assert_eq!(tasks.free_slots(), 2);
 }
 
 /// A guard that sets a flag when its task future drops.
@@ -251,9 +292,53 @@ async fn detached_drain_aborts_the_rest_after_the_deadline_and_returns_their_cou
         "the abort must drop the body"
     );
     assert_eq!(tasks.tracked(), 0);
-    assert!(
-        tasks.acquire().await.is_ok(),
-        "the abort must free the slot"
+    assert_eq!(tasks.free_slots(), 2, "the abort must free the slot");
+}
+
+fn is_slot_refusal<T: Debug>(result: &Result<T, AppError>) -> bool {
+    matches!(
+        result,
+        Err(AppError::Timeout {
+            stage: TimeoutStage::DetachedSlot
+        })
+    )
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_spawn_after_the_drain_does_not_run_its_work() {
+    let tasks = tasks(2);
+    let slot = tasks.acquire().await.unwrap();
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+    let ran = Arc::new(AtomicBool::new(false));
+
+    let result = tasks.spawn(slot, {
+        let ran = Arc::clone(&ran);
+        async move {
+            ran.store(true, Ordering::SeqCst);
+        }
+    });
+    let outcome = result.await;
+    tokio::task::yield_now().await;
+
+    assert!(is_slot_refusal(&outcome), "{outcome:?}");
+    assert!(!ran.load(Ordering::SeqCst), "the work must never start");
+    assert_eq!(tasks.tracked(), 0);
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_acquire_after_the_drain_fails_at_once() {
+    let tasks = tasks(2);
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+    let before = tokio::time::Instant::now();
+
+    let refused = tasks.acquire().await;
+
+    assert!(is_slot_refusal(&refused), "{refused:?}");
+    assert_eq!(
+        tokio::time::Instant::now(),
+        before,
+        "the refusal must not wait for the slot limit"
     );
 }
 
@@ -264,88 +349,47 @@ enum Cancel {
     AfterReceive,
 }
 
-// ---- log capture ----
+#[tokio::test(start_paused = true)]
+async fn spawn_judged_writes_the_refused_event_once_and_returns_the_slot() {
+    let sink = MemorySink::default();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let handle = tasks.spawn_judged(slot, Arc::new(sink.clone()), async {
+        Ok::<u8, AppError>(7)
+    });
 
-/// One event that the code wrote.
-#[derive(Clone, Debug)]
-struct Logged {
-    level: Level,
-    fields: Vec<(String, String)>,
+    let (value, refusal) = handle.await.unwrap().unwrap();
+    refusal.refuse(unlock_event()).await;
+
+    assert_eq!(value, 7);
+    assert_eq!(
+        sink.events().len(),
+        1,
+        "the write ended before refuse returned"
+    );
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+    assert_eq!(tasks.free_slots(), 1);
 }
 
-impl Logged {
-    fn field(&self, name: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
+#[tokio::test(start_paused = true)]
+async fn spawn_judged_holds_the_slot_until_the_sender_drops_and_then_writes_nothing() {
+    let sink = MemorySink::default();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let handle = tasks.spawn_judged(slot, Arc::new(sink.clone()), async {
+        Ok::<u8, AppError>(7)
+    });
 
-/// A registered dispatch that no thread installs. It lives until the test process ends.
-///
-/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
-/// dispatch, a callsite takes its interest from the thread that hits it first.
-static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
+    let (_value, refusal) = handle.await.unwrap().unwrap();
+    tokio::task::yield_now().await;
+    assert_eq!(
+        tasks.free_slots(),
+        0,
+        "the task waits for the decision of T2"
+    );
+    drop(refusal);
+    tokio::task::yield_now().await;
 
-/// A subscriber that keeps every event of its thread.
-#[derive(Clone, Default)]
-struct LogCapture {
-    events: Arc<Mutex<Vec<Logged>>>,
-}
-
-impl LogCapture {
-    fn install() -> (Self, DefaultGuard) {
-        LazyLock::force(&KEEPALIVE);
-        let capture = Self::default();
-        let guard = tracing::subscriber::set_default(capture.clone());
-        (capture, guard)
-    }
-
-    fn events(&self) -> Vec<Logged> {
-        self.events.lock().clone()
-    }
-
-    fn count(&self) -> usize {
-        self.events.lock().len()
-    }
-}
-
-#[derive(Default)]
-struct FieldCopy {
-    fields: Vec<(String, String)>,
-}
-
-impl Visit for FieldCopy {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        self.fields
-            .push((field.name().to_owned(), format!("{value:?}")));
-    }
-}
-
-impl Subscriber for LogCapture {
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        true
-    }
-
-    fn new_span(&self, _span: &Attributes<'_>) -> Id {
-        Id::from_u64(1)
-    }
-
-    fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-    fn event(&self, event: &Event<'_>) {
-        let mut copy = FieldCopy::default();
-        event.record(&mut copy);
-        self.events.lock().push(Logged {
-            level: *event.metadata().level(),
-            fields: copy.fields,
-        });
-    }
-
-    fn enter(&self, _span: &Id) {}
-
-    fn exit(&self, _span: &Id) {}
+    assert_eq!(tasks.free_slots(), 1);
+    assert!(sink.events().is_empty());
 }

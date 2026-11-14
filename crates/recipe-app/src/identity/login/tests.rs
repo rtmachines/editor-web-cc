@@ -1,13 +1,7 @@
 //! Tests of the use case `Login` (task 4.1, design D6, `data-model.md` section 6).
 
-use std::fmt::Debug;
-use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, LazyLock};
-use std::task::Poll;
-use std::time::Duration as StdDuration;
 
-use parking_lot::Mutex;
 use recipe_domain::audit::{
     AuditAction, AuditTarget, LoginHmac, RequestId, SecurityEventKind, SessionRef, UserAgent,
 };
@@ -19,10 +13,6 @@ use recipe_domain::identity::{
 use recipe_domain::timestamp::Timestamp;
 use serde_json::json;
 use time::{Duration, OffsetDateTime};
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id, Record};
-use tracing::subscriber::{DefaultGuard, NoSubscriber};
-use tracing::{Dispatch, Event, Level, Metadata, Subscriber};
 use uuid::Uuid;
 
 use super::{Login, LoginInput};
@@ -34,9 +24,8 @@ use crate::identity::no_session::require_no_session;
 use crate::memory::{Fault, MemoryStore};
 use crate::ports::{NewSession, NewUser};
 
-const PASSWORD: &str = "correct-horse-battery";
+pub(super) const PASSWORD: &str = "correct-horse-battery";
 const START_SECONDS: i64 = 1_000_000;
-const DRAIN_WAIT: StdDuration = StdDuration::from_secs(5);
 
 fn user_id() -> UserId {
     UserId::from(Uuid::from_u128(11))
@@ -55,7 +44,7 @@ fn request_id() -> RequestId {
     RequestId::from(Uuid::from_u128(0x77))
 }
 
-fn meta() -> RequestMeta {
+pub(super) fn meta() -> RequestMeta {
     RequestMeta::new(
         request_id(),
         Some(ip()),
@@ -64,7 +53,7 @@ fn meta() -> RequestMeta {
     )
 }
 
-fn input(login: &str, password: &str) -> LoginInput {
+pub(super) fn input(login: &str, password: &str) -> LoginInput {
     LoginInput {
         login: TypedLogin::parse(login).unwrap(),
         password: Password::parse(password).unwrap(),
@@ -83,20 +72,20 @@ fn seed_user(store: &MemoryStore, role: Role, must_change_password: bool) {
     });
 }
 
-fn fixture() -> IdentityFixture {
+pub(super) fn fixture() -> IdentityFixture {
     let fixture = IdentityFixture::new();
     seed_user(&fixture.store, Role::Operator, false);
     fixture
 }
 
-fn deactivate(store: &MemoryStore) {
+pub(super) fn deactivate(store: &MemoryStore) {
     store.update_state(|state, _now| {
         state.users.get_mut(&user_id()).unwrap().is_active = false;
     });
 }
 
 /// A fixture whose user changes between the password check and T2.
-fn racing_fixture(change: fn(&mut crate::ports::UserRow)) -> IdentityFixture {
+pub(super) fn racing_fixture(change: fn(&mut crate::ports::UserRow)) -> IdentityFixture {
     let fixture = IdentityFixture::with_race(move |store| {
         store.update_state(|state, _now| change(state.users.get_mut(&user_id()).unwrap()));
     });
@@ -104,19 +93,19 @@ fn racing_fixture(change: fn(&mut crate::ports::UserRow)) -> IdentityFixture {
     fixture
 }
 
-fn reset(row: &mut crate::ports::UserRow) {
+pub(super) fn reset(row: &mut crate::ports::UserRow) {
     row.password_hash = fake_hash("a-one-time-password");
     row.session_epoch = row.session_epoch.checked_add(1).unwrap();
 }
 
-fn seed_failures(store: &MemoryStore, seconds_ago: &[i64]) {
+pub(super) fn seed_failures(store: &MemoryStore, seconds_ago: &[i64]) {
     let login = TypedLogin::parse("anna").unwrap();
     for ago in seconds_ago {
         store.seed_attempt(&login, ip(), at(ago.checked_neg().unwrap()), false);
     }
 }
 
-fn wrong_password() -> impl Fn(&AppError) -> bool {
+pub(super) fn wrong_password() -> impl Fn(&AppError) -> bool {
     |error| {
         matches!(
             error,
@@ -581,7 +570,7 @@ async fn a_reset_between_the_check_and_t2_gives_e_idn_003_and_no_session() {
 }
 
 /// Assert that the sink holds exactly one event of the user with the given kind.
-fn assert_one_event(fixture: &IdentityFixture, kind: SecurityEventKind) {
+pub(super) fn assert_one_event(fixture: &IdentityFixture, kind: SecurityEventKind) {
     let events = fixture.sink.events();
     assert_eq!(events.len(), 1, "{events:?}");
     let event = events.first().unwrap();
@@ -686,265 +675,4 @@ fn an_operation_with_a_session_requirement_fails_closed() {
         ),
         "{error:?}"
     );
-}
-
-/// Poll `future` once and drop it, as a timeout or a closed connection drops a request.
-///
-/// `Login` takes its permit and its slot, starts its detached task, and waits for the result. The
-/// first poll ends at that wait, so the drop leaves the task as the only part that runs on.
-async fn poll_once_then_drop<F: Future>(future: F) {
-    let mut future = std::pin::pin!(future);
-    std::future::poll_fn(|cx| {
-        let _pending = future.as_mut().poll(cx);
-        Poll::Ready(())
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn login_writes_login_failed_after_the_caller_drops_the_future() {
-    let fixture = fixture();
-    let login = Login::new(fixture.context.clone());
-
-    poll_once_then_drop(login.execute(&meta(), input("anna", "not-the-password"))).await;
-    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
-
-    assert_one_event(&fixture, SecurityEventKind::LoginFailed);
-    let state = fixture.store.state();
-    assert_eq!(state.attempts.len(), 1);
-    assert!(state.sessions.is_empty());
-    assert_eq!(fixture.context.gate().available_permits(), 4);
-}
-
-#[tokio::test]
-async fn login_writes_login_throttled_after_the_caller_drops_the_future() {
-    let fixture = fixture();
-    seed_failures(&fixture.store, &[10, 9, 8, 1]);
-    let login = Login::new(fixture.context.clone());
-
-    poll_once_then_drop(login.execute(&meta(), input("anna", PASSWORD))).await;
-    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
-
-    let events = fixture.sink.events();
-    assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(
-        events.first().unwrap().kind(),
-        SecurityEventKind::LoginThrottled
-    );
-    assert_eq!(fixture.hasher.verify_calls(), 0, "no password is checked");
-    assert_eq!(fixture.context.gate().available_permits(), 4);
-}
-
-#[tokio::test]
-async fn login_creates_no_session_after_the_caller_drops_the_future() {
-    let fixture = fixture();
-    let login = Login::new(fixture.context.clone());
-
-    poll_once_then_drop(login.execute(&meta(), input("anna", PASSWORD))).await;
-    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
-
-    let state = fixture.store.state();
-    assert!(
-        state.sessions.is_empty(),
-        "T2 runs only for a waiting caller"
-    );
-    assert!(fixture.store.audit_entries().is_empty());
-    assert_eq!(state.attempts.len(), 1);
-    assert!(state.attempts.values().all(|row| !row.succeeded));
-    assert!(fixture.sink.events().is_empty());
-    assert_eq!(fixture.context.gate().available_permits(), 4);
-}
-
-#[tokio::test]
-async fn login_refuses_with_one_warn_line_when_the_event_fails() {
-    type Check = fn(&AppError) -> bool;
-    let wrong: Check = |error| wrong_password()(error);
-    let unknown: Check = |error| {
-        matches!(
-            error,
-            AppError::Identity(IdentityError::InvalidCredentials {
-                cause: CredentialFailure::UnknownLogin
-            })
-        )
-    };
-    let inactive: Check = |error| matches!(error, AppError::Identity(IdentityError::UserInactive));
-    let throttled: Check = |error| {
-        matches!(
-            error,
-            AppError::Identity(IdentityError::LoginThrottled { retry_after: 4 })
-        )
-    };
-    let throttled_fixture = fixture();
-    seed_failures(&throttled_fixture.store, &[10, 9, 8, 1]);
-    let inactive_fixture = fixture();
-    deactivate(&inactive_fixture.store);
-    let cases = [
-        (
-            "wrong password",
-            fixture(),
-            input("anna", "wrong-password"),
-            "login_failed",
-            wrong,
-        ),
-        (
-            "unknown login",
-            fixture(),
-            input("nobody", PASSWORD),
-            "login_failed",
-            unknown,
-        ),
-        (
-            "inactive user",
-            inactive_fixture,
-            input("anna", PASSWORD),
-            "login_rejected_inactive",
-            inactive,
-        ),
-        (
-            "throttled attempt",
-            throttled_fixture,
-            input("anna", PASSWORD),
-            "login_throttled",
-            throttled,
-        ),
-        (
-            "user changed before T2",
-            racing_fixture(reset),
-            input("anna", PASSWORD),
-            "login_failed",
-            wrong,
-        ),
-    ];
-    for (name, fixture, request, kind, answers) in cases {
-        let (capture, _guard) = LogCapture::install();
-        fixture.sink.fail_with(Fault::Unavailable);
-
-        let error = Login::new(fixture.context.clone())
-            .execute(&meta(), request)
-            .await
-            .unwrap_err();
-
-        assert!(answers(&error), "{name}: {error:?}");
-        let lines = capture.events();
-        assert_eq!(lines.len(), 1, "{name}: {lines:?}");
-        let line = lines.first().unwrap();
-        assert_eq!(line.level, Level::WARN, "{name}");
-        assert_eq!(
-            line.field("event"),
-            Some(format!("{kind:?}").as_str()),
-            "{name}"
-        );
-        assert!(line.field("request_id").is_some(), "{name}: {line:?}");
-        assert!(fixture.sink.events().is_empty(), "{name}");
-        assert_eq!(fixture.context.gate().available_permits(), 4, "{name}");
-    }
-}
-
-#[tokio::test]
-async fn a_recorded_event_writes_no_warn_line() {
-    let (capture, _guard) = LogCapture::install();
-    let fixture = fixture();
-
-    Login::new(fixture.context.clone())
-        .execute(&meta(), input("anna", "not-the-password"))
-        .await
-        .unwrap_err();
-
-    assert_one_event(&fixture, SecurityEventKind::LoginFailed);
-    assert_eq!(capture.events().len(), 0);
-}
-
-#[tokio::test]
-async fn a_storage_failure_at_t1_in_the_task_returns_the_error_and_frees_the_slot() {
-    let fixture = fixture();
-    fixture.store.fail_begin(Fault::Unavailable);
-    let error = Login::new(fixture.context.clone())
-        .execute(&meta(), input("anna", PASSWORD))
-        .await
-        .unwrap_err();
-    assert!(matches!(error, AppError::Storage(_)), "{error:?}");
-    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
-    assert!(fixture.context.detached().acquire().await.is_ok());
-}
-
-// ---- log capture ----
-
-/// One event that the code wrote.
-#[derive(Clone, Debug)]
-struct Logged {
-    level: Level,
-    fields: Vec<(String, String)>,
-}
-
-impl Logged {
-    fn field(&self, name: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
-
-/// A registered dispatch that no thread installs. It lives until the test process ends.
-///
-/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
-/// dispatch, a callsite takes its interest from the thread that hits it first.
-static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
-
-/// A subscriber that keeps every event of its thread.
-#[derive(Clone, Default)]
-struct LogCapture {
-    events: Arc<Mutex<Vec<Logged>>>,
-}
-
-impl LogCapture {
-    fn install() -> (Self, DefaultGuard) {
-        LazyLock::force(&KEEPALIVE);
-        let capture = Self::default();
-        let guard = tracing::subscriber::set_default(capture.clone());
-        (capture, guard)
-    }
-
-    fn events(&self) -> Vec<Logged> {
-        self.events.lock().clone()
-    }
-}
-
-#[derive(Default)]
-struct FieldCopy {
-    fields: Vec<(String, String)>,
-}
-
-impl Visit for FieldCopy {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        self.fields
-            .push((field.name().to_owned(), format!("{value:?}")));
-    }
-}
-
-impl Subscriber for LogCapture {
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        true
-    }
-
-    fn new_span(&self, _span: &Attributes<'_>) -> Id {
-        Id::from_u64(1)
-    }
-
-    fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-    fn event(&self, event: &Event<'_>) {
-        let mut copy = FieldCopy::default();
-        event.record(&mut copy);
-        self.events.lock().push(Logged {
-            level: *event.metadata().level(),
-            fields: copy.fields,
-        });
-    }
-
-    fn enter(&self, _span: &Id) {}
-
-    fn exit(&self, _span: &Id) {}
 }

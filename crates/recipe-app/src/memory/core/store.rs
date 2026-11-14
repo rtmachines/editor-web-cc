@@ -177,9 +177,6 @@ impl MemoryStore {
     ///
     /// Returns the fault that `fail_begin` set. The journal then holds no `Begin` line.
     pub fn begin_memory(&self, isolation: Isolation) -> Result<MemoryTransaction, StorageError> {
-        if isolation == Isolation::ReadCommitted {
-            self.run_lock_version_hook();
-        }
         let mut shared = self.shared.lock();
         if let Some(fault) = shared.take_queued(FaultPoint::Begin) {
             return Err(fault.into());
@@ -338,20 +335,20 @@ impl MemoryStore {
         }
     }
 
-    /// Run `hook` once, just before the version lock of the next `ReadCommitted` transaction.
+    /// Run `hook` once, just before the next `lock_version_shared`.
     ///
     /// The method solves one problem: the export reads the recipe in a `ReadOnly` transaction,
     /// and another request can commit before the export locks the version in its
-    /// `ReadCommitted` transaction (step 3). The hook makes that commit. It runs when the
-    /// transaction begins, so the working copy of the transaction holds the change, as the lock
-    /// of PostgreSQL reads the latest row. A hook can arm the next hook. A second call replaces
-    /// a hook that did not run yet.
+    /// `ReadCommitted` transaction (step 3). The hook makes that commit. It runs inside
+    /// `lock_version_shared`, and the lock then reads the latest committed row, as the lock of
+    /// PostgreSQL does. A `begin` does not run the hook. A hook can arm the next hook. A second
+    /// call replaces a hook that did not run yet.
     pub fn on_lock_version_shared(&self, hook: impl FnOnce(&Self) + Send + 'static) {
         self.shared.lock().lock_version_hook = LockVersionHook(Some(Box::new(hook)));
     }
 
     /// Take the hook of `on_lock_version_shared` out of the store and run it without a lock.
-    fn run_lock_version_hook(&self) {
+    pub(super) fn run_lock_version_hook(&self) {
         let hook = self.shared.lock().lock_version_hook.0.take();
         if let Some(hook) = hook {
             hook(self);

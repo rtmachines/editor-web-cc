@@ -9,6 +9,8 @@ use std::time::Duration;
 
 use recipe_app::identity::DetachedTasks;
 use recipe_db::CloseOutcome;
+#[cfg(test)]
+use recipe_web::WebState;
 use recipe_web::{HealthState, ReadOnlyMode};
 use tokio::runtime::Runtime;
 use tokio::time::Instant;
@@ -28,6 +30,9 @@ pub(super) struct Resources {
     pub detached: Option<DetachedTasks>,
     pub internal: Option<ListenerHandle>,
     pub public: Option<ListenerHandle>,
+    /// A clone of the web state that the router holds. Only the tests of the close read it.
+    #[cfg(test)]
+    pub web: Option<WebState>,
 }
 
 /// The resources of a start that is open or half open.
@@ -55,6 +60,8 @@ impl From<ServerParts> for Opened {
                 detached: Some(parts.detached),
                 internal: Some(parts.internal),
                 public: Some(parts.public),
+                #[cfg(test)]
+                web: parts.web,
             },
             shutdown: parts.shutdown,
         }
@@ -80,6 +87,8 @@ impl Opened {
             detached,
             internal,
             public,
+            #[cfg(test)]
+            web,
         } = self.resources;
         match (
             main_pool,
@@ -111,6 +120,8 @@ impl Opened {
                 health,
                 read_only,
                 shutdown: self.shutdown,
+                #[cfg(test)]
+                web,
             }),
             (main_pool, health_pool, health, supervisor, detached, internal, public) => {
                 Err(Box::new(Self {
@@ -124,6 +135,8 @@ impl Opened {
                         detached,
                         internal,
                         public,
+                        #[cfg(test)]
+                        web,
                     },
                     shutdown: self.shutdown,
                 }))

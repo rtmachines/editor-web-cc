@@ -2,13 +2,15 @@
 
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
 
 use recipe_domain::audit::{BasicRefusal, LoginHmac, LoginSubject, SecurityEvent};
 use recipe_domain::identity::{CredentialFailure, IdentityError, Password, TypedLogin};
 
+use super::detached::{RefusalSender, record_security_event};
 use super::login::{check_password, login_failed};
 use super::throttle::{Gate, Requester, begin_attempt, throttled_event};
-use super::{HashPermit, IdentityContext, record_security_event};
+use super::{HashPermit, IdentityContext};
 use crate::auth::{CurrentUser, RequestMeta};
 use crate::error::AppError;
 use crate::ports::{AttemptId, BasicChange, BasicConfirmation, UserRow};
@@ -60,7 +62,9 @@ pub struct BasicPrincipal {
 /// hash, so the hash work is the same in every case. A person account fails after the hash check.
 /// The Basic permit travels with the Argon2 permit into the task, so both stay held until the hash
 /// ends. When the caller drops the future, the task still writes the event. T2 runs in the request
-/// future. The function writes no audit entry.
+/// future. After a passed check, the task keeps its slot until T2 decides. A refusal of T2 sends its
+/// event to the task, which writes it, so a drop during that write loses nothing (ADR-0173). The
+/// function writes no audit entry.
 ///
 /// The client address comes from `meta`. A request without one uses the address `0.0.0.0`.
 ///
@@ -85,8 +89,10 @@ pub async fn authenticate_basic(
     let hash_permit = ctx.acquire_basic().await?;
     let slot = ctx.detached().acquire().await?;
     let span = checked_span(ctx.clone(), requester.clone(), login, password, hash_permit);
-    let Checked { row, attempt } = ctx.detached().spawn(slot, span).await??;
-    confirm(ctx, &requester, attempt, &row).await?;
+    let sink = Arc::clone(&ctx.app.security);
+    let (Checked { row, attempt }, refusal) =
+        ctx.detached().spawn_judged(slot, sink, span).await??;
+    confirm(ctx, &requester, attempt, &row, refusal).await?;
     Ok(BasicPrincipal {
         user: CurrentUser::new(row.id, row.login, row.role),
     })
@@ -173,22 +179,26 @@ async fn judge(
 
 /// Run T2 of design D2 step 6. If the account changed during the hash check, refuse.
 ///
-/// T2 needs no permit and writes no audit entry. It runs in read-only mode too (A24).
+/// T2 needs no permit and writes no audit entry. It runs in read-only mode too (A24). The decision
+/// of T2 ends the wait of the task: a refusal sends its event through `refusal`, and a grant drops
+/// it (ADR-0173).
 async fn confirm(
     ctx: &IdentityContext,
     requester: &Requester,
     attempt: AttemptId,
     row: &UserRow,
+    refusal: RefusalSender,
 ) -> Result<(), AppError> {
     let confirmation = ctx
         .attempts
         .confirm_basic(attempt, row.id, &row.password_hash)
         .await?;
     let BasicConfirmation::Changed { reason } = confirmation else {
+        drop(refusal);
         return Ok(());
     };
     let cause = CredentialFailure::WrongPassword;
-    let (event, refusal) = match reason {
+    let (event, basic_refusal) = match reason {
         BasicChange::Inactive => {
             let event = SecurityEvent::login_rejected_inactive(
                 row.id,
@@ -211,7 +221,10 @@ async fn confirm(
             BasicRefusal::WrongPassword,
         ),
     };
-    refuse(ctx, event, refusal, cause).await
+    refusal
+        .refuse(event.with_basic_refusal(basic_refusal))
+        .await;
+    Err(IdentityError::InvalidCredentials { cause }.into())
 }
 
 /// Write the event with the reason and the scheme, and return `E-IDN-003`.
@@ -227,5 +240,7 @@ async fn refuse<T>(
     Err(IdentityError::InvalidCredentials { cause }.into())
 }
 
+#[cfg(test)]
+mod detached;
 #[cfg(test)]
 mod tests;

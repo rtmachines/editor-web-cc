@@ -88,6 +88,11 @@ impl MemoryTransaction {
         MemoryStore::from_shared(Arc::clone(&self.shared)).run_read_draft_hook();
     }
 
+    /// Run the hook of `MemoryStore::on_lock_version_shared`, when one is set.
+    pub(crate) fn run_lock_version_hook(&self) {
+        MemoryStore::from_shared(Arc::clone(&self.shared)).run_lock_version_hook();
+    }
+
     /// Return a copy of the state that `read_draft` sees at the isolation level of the transaction.
     ///
     /// A `RepeatableRead` transaction gets its working copy, which is the state at `begin`. This

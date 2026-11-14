@@ -526,6 +526,16 @@ fn two_picks_and_two_locks(second: RecipeVersionId) -> Vec<JournalEntry> {
     ]
 }
 
+/// The journal lines of an export whose second pick finds no approved version.
+fn two_picks_and_one_lock() -> Vec<JournalEntry> {
+    vec![
+        JournalEntry::Begin(Isolation::ReadOnly),
+        JournalEntry::Begin(Isolation::ReadCommitted),
+        lock_line("recipe_version", LockMode::ForShare, vid(101).to_string()),
+        JournalEntry::Begin(Isolation::ReadOnly),
+    ]
+}
+
 #[tokio::test]
 async fn approved_export_picks_again_after_an_approval_before_the_lock() {
     let (fixture, approvals) = approvals_fixture().await;
@@ -577,6 +587,29 @@ async fn approved_export_gives_404_after_a_second_loss_of_the_approved_state() {
     assert_eq!(
         journal_after(&fixture.store, own_lines),
         two_picks_and_two_locks(approvals.version_two)
+    );
+}
+
+#[tokio::test]
+async fn approved_export_gives_404_when_the_second_pick_finds_no_approved_version() {
+    let (fixture, approvals) = approvals_fixture().await;
+    let own_lines = fixture.store.journal().len();
+    let entries_before = fixture.store.audit_entries().len();
+    let none = approvals.none;
+    fixture
+        .store
+        .on_lock_version_shared(move |store| store.update_state(|state, _| *state = none));
+    let writer = RecordingWriter::shared();
+    let error = export_approved_to(&fixture, Role::Operator, &writer)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::EXP_001);
+    assert!(writer.calls().is_empty());
+    assert_eq!(fixture.store.audit_entries().len(), entries_before);
+    // Two picks and one lock: the second pick finds no approved version, so no third pick runs.
+    assert_eq!(
+        journal_after(&fixture.store, own_lines),
+        two_picks_and_one_lock()
     );
 }
 

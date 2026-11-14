@@ -245,6 +245,8 @@ pub(crate) async fn csrf_layer(
 }
 
 #[cfg(test)]
+mod lang_tests;
+#[cfg(test)]
 mod limit_tests;
 #[cfg(test)]
 mod tests;

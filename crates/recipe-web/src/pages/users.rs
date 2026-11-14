@@ -441,6 +441,8 @@ mod actions_tests;
 #[cfg(test)]
 mod form_error_tests;
 #[cfg(test)]
+mod new_user_tests;
+#[cfg(test)]
 mod read_only_tests;
 #[cfg(test)]
 mod technical_tests;

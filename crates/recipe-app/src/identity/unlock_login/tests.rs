@@ -1,37 +1,32 @@
 //! Tests of the use case `UnlockLogin` (task 4.5, design D8 i, j, and q).
 
-use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use parking_lot::Mutex;
-use recipe_domain::audit::{AuditAction, AuditTarget, SecurityEvent, SecurityEventKind};
+use recipe_domain::audit::{AuditAction, AuditTarget, RequestId, SecurityEvent, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::identity::{Login, Role, TypedLogin};
+use recipe_domain::identity::{Login, Password, Role, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::Notify;
-use tracing::field::{Field, Visit};
-use tracing::span::{Attributes, Id, Record};
-use tracing::subscriber::{DefaultGuard, NoSubscriber};
-use tracing::{Dispatch, Event, Level, Metadata, Subscriber};
+use tokio::time::Instant;
+use tracing::Level;
+use uuid::Uuid;
 
 use super::UnlockLogin;
 use crate::auth::{Operation, RequestMeta};
 use crate::context::UseCase;
 use crate::error::{AppError, Missing, StorageError};
-use crate::identity::IdentityContext;
-use crate::identity::fixtures::{IdentityFixture, actor_id, anna_id};
+use crate::identity::fixtures::{DRAIN_WAIT, IdentityFixture, LogCapture, actor_id, anna_id};
+use crate::identity::{IdentityContext, Login as LoginUseCase, LoginInput};
 use crate::memory::{Fault, MemorySink};
 use crate::ports::SecurityEventSink;
 
 /// The time that the caller waits before a test drops its future.
 const CALLER_WAIT: Duration = Duration::from_millis(10);
-/// The deadline of the drain of the detached tasks in a test.
-const DRAIN_WAIT: Duration = Duration::from_secs(5);
 
 /// The start of the clock of a fixture, in Unix seconds.
 const START_SECONDS: i64 = 1_000_000;
@@ -343,6 +338,68 @@ async fn unlock_writes_exactly_one_warn_line_when_the_event_fails_after_a_drop()
     assert_eq!(fixture.store.audit_entries().len(), 1);
 }
 
+/// Start `count` logins. Each one waits for an Argon2 permit that the test holds.
+fn start_waiting_logins(
+    fixture: &IdentityFixture,
+    count: usize,
+) -> Vec<tokio::task::JoinHandle<Result<(), AppError>>> {
+    (0..count)
+        .map(|index| {
+            let login = LoginUseCase::new(fixture.context.clone());
+            let meta = RequestMeta::new(
+                RequestId::from(Uuid::from_u128(0x100 + index as u128)),
+                None,
+                None,
+                None,
+            );
+            let input = LoginInput {
+                login: typed("anna"),
+                password: Password::parse("wrong-password-phrase").unwrap(),
+                client_ip: failing_ip(),
+                old_session: None,
+            };
+            tokio::spawn(async move { login.execute(&meta, input).await.map(drop) })
+        })
+        .collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn unlock_gets_a_slot_while_logins_wait_for_a_permit() {
+    let fixture = fixture();
+    seed_failures(&fixture, "anna", 4);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let gate = &fixture.context.gate;
+    let mut held = Vec::new();
+    for _ in 0..gate.available_permits() {
+        held.push(gate.acquire().await.unwrap());
+    }
+    let slots = fixture.context.settings.detached_tasks;
+    let logins = start_waiting_logins(&fixture, slots.checked_add(2).unwrap());
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(logins.iter().all(|login| !login.is_finished()));
+
+    let started = Instant::now();
+    UnlockLogin::new(fixture.context.clone())
+        .execute(&auth, &meta, &anna(), admin_ip())
+        .await
+        .unwrap();
+    let waited = started.elapsed();
+    let limit = fixture.context.settings.argon2_acquire_timeout;
+    assert!(waited < limit, "the unlock waited {waited:?} for a slot");
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Unlock);
+    assert_eq!(attempts_of(&fixture, "anna"), 0);
+
+    drop(held);
+    for login in logins {
+        let _outcome = login.await.unwrap();
+    }
+    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
+}
+
 #[tokio::test]
 async fn a_failed_commit_deletes_nothing_and_writes_no_event() {
     let fixture = fixture();
@@ -413,90 +470,4 @@ impl SecurityEventSink for GatedSink {
         self.release.notified().await;
         self.inner.record(event).await
     }
-}
-
-// ---- log capture ----
-
-/// One event that the code wrote.
-#[derive(Clone, Debug)]
-struct Logged {
-    level: Level,
-    fields: Vec<(String, String)>,
-}
-
-impl Logged {
-    fn field(&self, name: &str) -> Option<&str> {
-        self.fields
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
-
-/// A registered dispatch that no thread installs. It lives until the test process ends.
-///
-/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
-/// dispatch, a callsite takes its interest from the thread that hits it first.
-static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
-
-/// A subscriber that keeps every event of its thread.
-#[derive(Clone, Default)]
-struct LogCapture {
-    events: Arc<Mutex<Vec<Logged>>>,
-}
-
-impl LogCapture {
-    fn install() -> (Self, DefaultGuard) {
-        LazyLock::force(&KEEPALIVE);
-        let capture = Self::default();
-        let guard = tracing::subscriber::set_default(capture.clone());
-        (capture, guard)
-    }
-
-    fn events(&self) -> Vec<Logged> {
-        self.events.lock().clone()
-    }
-
-    fn count(&self) -> usize {
-        self.events.lock().len()
-    }
-}
-
-#[derive(Default)]
-struct FieldCopy {
-    fields: Vec<(String, String)>,
-}
-
-impl Visit for FieldCopy {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-        self.fields
-            .push((field.name().to_owned(), format!("{value:?}")));
-    }
-}
-
-impl Subscriber for LogCapture {
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        true
-    }
-
-    fn new_span(&self, _span: &Attributes<'_>) -> Id {
-        Id::from_u64(1)
-    }
-
-    fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-    fn event(&self, event: &Event<'_>) {
-        let mut copy = FieldCopy::default();
-        event.record(&mut copy);
-        self.events.lock().push(Logged {
-            level: *event.metadata().level(),
-            fields: copy.fields,
-        });
-    }
-
-    fn enter(&self, _span: &Id) {}
-
-    fn exit(&self, _span: &Id) {}
 }

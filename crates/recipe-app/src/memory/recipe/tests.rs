@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::Sha256;
 use recipe_domain::plant::UnitUsage;
@@ -216,6 +219,20 @@ async fn lock_version_shared_takes_for_share_and_returns_the_stored_hash() {
             vid(11).to_string()
         )]
     );
+}
+
+#[tokio::test]
+async fn the_lock_hook_runs_at_the_lock_and_not_at_a_begin() {
+    let store = store_with_approved();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&runs);
+    store.on_lock_version_shared(move |_| {
+        counter.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut tx = begin(&store);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    tx.recipes().lock_version_shared(vid(11)).await.unwrap();
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

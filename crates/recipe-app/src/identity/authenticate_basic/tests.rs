@@ -1,6 +1,6 @@
 //! Tests of `authenticate_basic`: steps 2 to 7 of design D2 (tasks 3.4 and 3.5).
 
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
@@ -28,13 +28,13 @@ use crate::identity::{
 use crate::memory::{MemoryClock, MemorySink, MemoryStore};
 use crate::ports::NewUser;
 
-const PASSWORD: &str = "correct-horse-battery";
+pub(super) const PASSWORD: &str = "correct-horse-battery";
 const WRONG_PASSWORD: &str = "not-the-password";
 const START_SECONDS: i64 = 1_000_000;
 const LOGIN_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const PERSON_ROLES: [Role; 3] = [Role::Administrator, Role::ProcessEngineer, Role::Operator];
 
-fn user_id() -> UserId {
+pub(super) fn user_id() -> UserId {
     UserId::from(Uuid::from_u128(11))
 }
 
@@ -46,7 +46,7 @@ fn request_id() -> RequestId {
     RequestId::from(Uuid::from_u128(0x77))
 }
 
-fn meta() -> RequestMeta {
+pub(super) fn meta() -> RequestMeta {
     RequestMeta::new(
         request_id(),
         Some(ip()),
@@ -55,7 +55,7 @@ fn meta() -> RequestMeta {
     )
 }
 
-fn credentials(login: &str, password: &str) -> BasicCredentials {
+pub(super) fn credentials(login: &str, password: &str) -> BasicCredentials {
     BasicCredentials {
         login: TypedLogin::parse(login).unwrap(),
         password: Password::parse(password).unwrap(),
@@ -76,7 +76,7 @@ type DuringCheck = Box<dyn FnOnce() + Send>;
 ///
 /// A test can set one change that runs inside the next call, so that a reset or a deactivation
 /// happens between T1 and T2.
-struct RecordingHasher {
+pub(super) struct RecordingHasher {
     params: Argon2Params,
     calls: Mutex<Vec<Call>>,
     during_check: Mutex<Option<DuringCheck>>,
@@ -96,7 +96,7 @@ impl RecordingHasher {
         self.calls.lock().clone()
     }
 
-    fn change_during_check(&self, change: impl FnOnce() + Send + 'static) {
+    pub(super) fn change_during_check(&self, change: impl FnOnce() + Send + 'static) {
         *self.during_check.lock() = Some(Box::new(change));
     }
 }
@@ -119,11 +119,11 @@ impl PasswordHasher for RecordingHasher {
     }
 }
 
-struct Fixture {
-    store: MemoryStore,
-    sink: MemorySink,
-    hasher: Arc<RecordingHasher>,
-    context: IdentityContext,
+pub(super) struct Fixture {
+    pub(super) store: MemoryStore,
+    pub(super) sink: MemorySink,
+    pub(super) hasher: Arc<RecordingHasher>,
+    pub(super) context: IdentityContext,
 }
 
 impl Fixture {
@@ -163,7 +163,7 @@ impl Fixture {
     }
 
     /// Build a fixture with the account `anna` of `role`.
-    fn with_anna(role: Role) -> Self {
+    pub(super) fn with_anna(role: Role) -> Self {
         let fixture = Self::new();
         fixture.store.seed_user(&NewUser {
             id: user_id(),
@@ -179,7 +179,11 @@ impl Fixture {
         deactivate_user(&self.store);
     }
 
-    async fn check(&self, login: &str, password: &str) -> Result<BasicPrincipal, AppError> {
+    pub(super) async fn check(
+        &self,
+        login: &str,
+        password: &str,
+    ) -> Result<BasicPrincipal, AppError> {
         authenticate_basic(&self.context, credentials(login, password), &meta()).await
     }
 
@@ -222,7 +226,7 @@ fn deactivate_user(store: &MemoryStore) {
     });
 }
 
-fn reset_password(store: &MemoryStore) {
+pub(super) fn reset_password(store: &MemoryStore) {
     store.update_state(|state, _now| {
         state.users.get_mut(&user_id()).unwrap().password_hash = fake_hash("a-new-password-1");
     });
@@ -486,7 +490,7 @@ async fn a_role_change_during_the_hash_check_gives_e_idn_003() {
 }
 
 /// Assert that a refused T2 left a failed attempt, no session, no audit entry, and free permits.
-fn assert_no_trace_of_success(fixture: &Fixture) {
+pub(super) fn assert_no_trace_of_success(fixture: &Fixture) {
     let state = fixture.store.state();
     assert_eq!(state.attempts.len(), 1);
     assert!(state.attempts.values().all(|row| !row.succeeded));

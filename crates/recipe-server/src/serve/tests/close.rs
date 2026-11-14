@@ -131,7 +131,7 @@ fn the_report_never_writes_an_error_line() {
 fn the_close_of_a_started_server_waits_for_a_detached_task_of_its_context() {
     let host = StubHost::new();
     let server = expect_running(&host);
-    let tasks = server.detached().clone();
+    let tasks = server.identity().detached().clone();
     let done = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&done);
     server.runtime().block_on(async move {
