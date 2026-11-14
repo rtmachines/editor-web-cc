@@ -32,6 +32,8 @@ memory = []
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }
 parking_lot = { workspace = true }
 time = { workspace = true, features = ["parsing"] }
+# The test subscriber `LogCapture` names the return type of `Subscriber::current_span`.
+tracing-core = { workspace = true }
 
 [lints]
 workspace = true

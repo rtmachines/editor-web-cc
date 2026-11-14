@@ -207,12 +207,20 @@ fn timeout_error() -> AppError {
     }
 }
 
+const REQUEST_ID: &str = "req-42";
+
+/// A span like the `http_request` span of `recipe-web`. It shows the id as text.
+fn request_span() -> tracing::Span {
+    tracing::error_span!("http_request", request_id = %REQUEST_ID)
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_failed_result_with_a_closed_receiver_writes_one_warn_line() {
     let (capture, _guard) = LogCapture::install();
     let tasks = tasks(1);
     let slot = tasks.acquire().await.unwrap();
-    let handle = tasks.spawn(slot, async { Err::<(), AppError>(timeout_error()) });
+    let handle = request_span()
+        .in_scope(|| tasks.spawn(slot, async { Err::<(), AppError>(timeout_error()) }));
     drop(handle);
 
     assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
@@ -224,6 +232,44 @@ async fn a_failed_result_with_a_closed_receiver_writes_one_warn_line() {
     let code = timeout_error().code().to_string();
     assert_eq!(line.field("error_code"), Some(code.as_str()), "{line:?}");
     assert!(line.field("chain").is_some(), "{line:?}");
+    assert_eq!(line.field("request_id"), Some(REQUEST_ID), "{line:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sent_error_that_the_handle_drops_unpolled_writes_one_warn_line() {
+    let (capture, _guard) = LogCapture::install();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let handle = request_span()
+        .in_scope(|| tasks.spawn(slot, async { Err::<(), AppError>(timeout_error()) }));
+
+    // The task sends the `Err` and ends. The handle still holds the value.
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+    assert_eq!(capture.count(), 0, "{:?}", capture.events());
+    drop(handle);
+
+    let lines = capture.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = lines.first().unwrap();
+    assert_eq!(line.level, Level::WARN);
+    let code = timeout_error().code().to_string();
+    assert_eq!(line.field("error_code"), Some(code.as_str()), "{line:?}");
+    assert_eq!(line.field("request_id"), Some(REQUEST_ID), "{line:?}");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_result_that_the_caller_received_writes_no_line_on_drop() {
+    let (capture, _guard) = LogCapture::install();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let mut handle = tasks.spawn(slot, async { Err::<(), AppError>(timeout_error()) });
+
+    let received = (&mut handle).await.unwrap();
+    assert!(received.is_err());
+    drop(handle);
+
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+    assert_eq!(capture.count(), 0, "{:?}", capture.events());
 }
 
 #[tokio::test(start_paused = true)]
@@ -392,4 +438,95 @@ async fn spawn_judged_holds_the_slot_until_the_sender_drops_and_then_writes_noth
 
     assert_eq!(tasks.free_slots(), 1);
     assert!(sink.events().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn spawn_judged_with_an_error_and_a_closed_receiver_writes_one_warn_line_and_returns_the_slot()
+ {
+    let (capture, _guard) = LogCapture::install();
+    let sink = MemorySink::default();
+    let tasks = tasks(1);
+    let release = Arc::new(Notify::new());
+    let slot = tasks.acquire().await.unwrap();
+    let handle = request_span().in_scope(|| {
+        let release = Arc::clone(&release);
+        tasks.spawn_judged(slot, Arc::new(sink.clone()), async move {
+            release.notified().await;
+            Err::<u8, AppError>(timeout_error())
+        })
+    });
+    drop(handle);
+
+    release.notify_one();
+    assert_eq!(tasks.drain(DRAIN_WAIT).await, 0);
+
+    let lines = capture.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = lines.first().unwrap();
+    assert_eq!(line.level, Level::WARN);
+    let code = timeout_error().code().to_string();
+    assert_eq!(line.field("error_code"), Some(code.as_str()), "{line:?}");
+    assert_eq!(line.field("request_id"), Some(REQUEST_ID), "{line:?}");
+    assert!(sink.events().is_empty());
+    assert_eq!(tasks.free_slots(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn spawn_judged_with_an_ok_and_a_closed_receiver_ends_the_task_and_writes_nothing() {
+    let (capture, _guard) = LogCapture::install();
+    let sink = MemorySink::default();
+    let tasks = tasks(1);
+    let release = Arc::new(Notify::new());
+    let slot = tasks.acquire().await.unwrap();
+    let handle = request_span().in_scope(|| {
+        let release = Arc::clone(&release);
+        tasks.spawn_judged(slot, Arc::new(sink.clone()), async move {
+            release.notified().await;
+            Ok::<u8, AppError>(7)
+        })
+    });
+    drop(handle);
+
+    release.notify_one();
+
+    assert_eq!(
+        tasks.drain(DRAIN_WAIT).await,
+        0,
+        "the task must end, not wait for a verdict"
+    );
+    assert_eq!(capture.count(), 0, "{:?}", capture.events());
+    assert!(sink.events().is_empty());
+    assert_eq!(tasks.free_slots(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn spawn_judged_with_an_ok_that_the_handle_drops_unpolled_ends_the_task_and_writes_nothing() {
+    let (capture, _guard) = LogCapture::install();
+    let sink = MemorySink::default();
+    let tasks = tasks(1);
+    let slot = tasks.acquire().await.unwrap();
+    let handle = request_span().in_scope(|| {
+        tasks.spawn_judged(slot, Arc::new(sink.clone()), async {
+            Ok::<u8, AppError>(7)
+        })
+    });
+
+    // The work has no await point, so the task sends the `Ok` and waits for the verdict.
+    tokio::task::yield_now().await;
+    assert_eq!(
+        tasks.free_slots(),
+        0,
+        "the task waits for the decision of T2"
+    );
+    assert!(!handle.receiver.is_empty(), "the task must have sent");
+    drop(handle);
+
+    assert_eq!(
+        tasks.drain(DRAIN_WAIT).await,
+        0,
+        "the dropped sender must end the task"
+    );
+    assert_eq!(capture.count(), 0, "{:?}", capture.events());
+    assert!(sink.events().is_empty());
+    assert_eq!(tasks.free_slots(), 1);
 }

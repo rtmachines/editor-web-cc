@@ -6,6 +6,7 @@ use std::task::Poll;
 
 use async_trait::async_trait;
 use recipe_domain::audit::SecurityEventKind;
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{CredentialFailure, IdentityError};
 use tokio::sync::Notify;
 use tracing::Level;
@@ -15,7 +16,7 @@ use super::tests::{
     PASSWORD, assert_one_event, deactivate, fixture, input, meta, racing_fixture, reset,
     seed_failures, wrong_password,
 };
-use crate::error::{AppError, StorageError};
+use crate::error::{AppError, StorageError, TimeoutStage};
 use crate::identity::fixtures::{
     DRAIN_WAIT, HeldSink, IdentityFixture, LogCapture, poll_once_then_drop,
 };
@@ -313,5 +314,29 @@ async fn a_drop_during_the_t2_await_ends_the_task_with_no_write_and_returns_the_
     assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
     assert!(fixture.sink.events().is_empty());
     assert!(fixture.store.state().sessions.is_empty());
+    assert_eq!(fixture.context.gate().available_permits(), 4);
+}
+
+#[tokio::test]
+async fn login_after_the_drain_fails_at_once_with_e_web_009_and_commits_no_attempt() {
+    let fixture = fixture();
+    assert_eq!(fixture.context.detached().drain(DRAIN_WAIT).await, 0);
+    let login = Login::new(fixture.context.clone());
+
+    let outcome = login.execute(&meta(), input("anna", PASSWORD)).await;
+
+    let error = outcome.expect_err("a login after the drain must fail");
+    assert_eq!(error.code(), ErrorCode::WEB_009, "{error:?}");
+    assert!(matches!(
+        error,
+        AppError::Timeout {
+            stage: TimeoutStage::DetachedSlot
+        }
+    ));
+    let state = fixture.store.state();
+    assert!(state.attempts.is_empty(), "T1 must not run after the drain");
+    assert!(state.sessions.is_empty());
+    assert!(fixture.sink.events().is_empty());
+    assert_eq!(fixture.hasher.verify_calls(), 0, "no password is checked");
     assert_eq!(fixture.context.gate().available_permits(), 4);
 }

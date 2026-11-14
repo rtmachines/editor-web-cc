@@ -49,6 +49,7 @@ sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "r
 
 # Observability.
 tracing = "0.1.44"
+tracing-core = "0.1.36"
 tracing-subscriber = "0.3.23"
 
 # Errors. `anyhow` is for recipe-server only (Assumption A37).

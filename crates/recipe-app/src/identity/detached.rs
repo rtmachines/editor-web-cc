@@ -47,8 +47,10 @@ impl<T: Send + 'static> TaskOutput for Result<T, AppError> {
 
 /// Write the one `WARN` line of an error that no future receives.
 ///
-/// The task is the one log place of that error (ADR-0173 (o)). The line holds the `error_code` and
-/// the `chain`. The `request_id` comes from the span of the task. An `Ok` result writes no line.
+/// The detached code is the one log place of that error (ADR-0173 (o)). The task calls this
+/// function when its send fails. The drop of an unpolled [`DetachedResult`] calls it for a value
+/// that the task sent and no future took. The line holds the `error_code` and the `chain`. The
+/// `request_id` comes from the span of the task. An `Ok` result writes no line.
 fn log_unreceived(output: &impl TaskOutput) {
     if let Some(error) = output.failure() {
         tracing::warn!(
@@ -135,8 +137,10 @@ impl DetachedTasks {
     /// frees its slot (ADR-0172 (ab)). The task runs inside the span of the caller, so its lines
     /// keep the `request_id` (ADR-0172 (t)). A dropped handle does not stop the task.
     ///
-    /// When no future waits for the result and the result is an `Err`, the task writes the one
-    /// `WARN` line of that error. A result with `Ok` writes no line (ADR-0173 (m) to (r)).
+    /// When no future takes the result and the result is an `Err`, the detached code writes the one
+    /// `WARN` line of that error. The task writes it when its send fails. The drop of the handle
+    /// writes it when the task sent the `Err` and the handle dropped before a poll took it, inside
+    /// the span of the caller. A result with `Ok` writes no line (ADR-0173 (m) to (r)).
     ///
     /// A spawn after `drain` does not start `work`. The handle resolves at once to
     /// `AppError::Timeout` with the stage `DetachedSlot` (`E-WEB-009`), as a missing slot does.
@@ -160,6 +164,7 @@ impl DetachedTasks {
         DetachedResult {
             receiver,
             is_refused,
+            span: Span::current(),
         }
     }
 
@@ -173,9 +178,10 @@ impl DetachedTasks {
     /// the task with no write (ADR-0173 (c) to (f), (h), (j)).
     ///
     /// An `Err` of `work` goes to the handle at once and the task ends. A closed receiver and an
-    /// `Err` give the one `WARN` line of [`spawn`](Self::spawn). A closed receiver and an `Ok`
-    /// write no line. The rules of `spawn` for the span, the reaper, and the drain hold here too.
-    pub fn spawn_judged<T, F>(
+    /// `Err` give the one `WARN` line of [`spawn`](Self::spawn), also when the handle drops after
+    /// the send. A closed receiver and an `Ok` write no line. The rules of `spawn` for the span,
+    /// the reaper, and the drain hold here too.
+    pub(crate) fn spawn_judged<T, F>(
         &self,
         slot: DetachedSlot,
         sink: Arc<dyn SecurityEventSink>,
@@ -214,6 +220,7 @@ impl DetachedTasks {
         DetachedResult {
             receiver,
             is_refused,
+            span: Span::current(),
         }
     }
 
@@ -287,14 +294,28 @@ pub struct DetachedSlot {
 /// panic to an error. A closed sender gives `AppError::TaskFailed` with the stage `Detached`
 /// (`E-WEB-011`, ADR-0172 (aa)). A spawn after the drain gives `AppError::Timeout` with the stage
 /// `DetachedSlot` (`E-WEB-009`).
+///
+/// A drop of the handle also drops a value that the task sent and no poll took. The drop writes
+/// the one `WARN` line of an `Err` value inside the span of the spawn (ADR-0173 (m)). A value that
+/// a poll took, or that the task failed to send, writes no line here.
 #[derive(Debug)]
 #[must_use = "a dropped handle discards the result, and the task still runs"]
-pub struct DetachedResult<T> {
+pub struct DetachedResult<T: TaskOutput> {
     receiver: oneshot::Receiver<T>,
     is_refused: bool,
+    span: Span,
 }
 
-impl<T> Future for DetachedResult<T> {
+impl<T: TaskOutput> Drop for DetachedResult<T> {
+    fn drop(&mut self) {
+        if let Ok(unreceived) = self.receiver.try_recv() {
+            let _entered = self.span.enter();
+            log_unreceived(&unreceived);
+        }
+    }
+}
+
+impl<T: TaskOutput> Future for DetachedResult<T> {
     type Output = Result<T, AppError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -322,7 +343,7 @@ struct Refusal {
 /// drops the sender on a grant.
 #[derive(Debug)]
 #[must_use = "a dropped sender tells the task that T2 granted"]
-pub struct RefusalSender {
+pub(crate) struct RefusalSender {
     sender: oneshot::Sender<Refusal>,
 }
 
@@ -333,7 +354,7 @@ impl RefusalSender {
     /// once and writes the one `WARN` line when the write fails (ADR-0173 (e), (g), (h)). When
     /// the task is gone, the call returns at once and the caller still gives its refusal
     /// (ADR-0173 (i)).
-    pub async fn refuse(self, event: SecurityEvent) {
+    pub(crate) async fn refuse(self, event: SecurityEvent) {
         let (written, ended) = oneshot::channel();
         if self.sender.send(Refusal { event, written }).is_ok() {
             // An `Err` means that the task ended before it reported the write.

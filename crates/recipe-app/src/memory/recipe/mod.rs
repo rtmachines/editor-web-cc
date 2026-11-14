@@ -298,6 +298,7 @@ impl RecipeRepository for MemoryTransaction {
         version: RecipeVersionId,
     ) -> Result<Option<SharedVersion>, StorageError> {
         self.run_lock_version_hook();
+        self.refresh_after_lock()?;
         let state = self.committed_state();
         let Some(row) = state.versions.get(&version) else {
             return Ok(None);
