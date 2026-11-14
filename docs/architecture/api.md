@@ -265,6 +265,15 @@ Connection route (ADR-0154 (j) to (jc)):
 - The answer sets `Cache-Control: no-store`. In read-only mode the route stays available (A24).
 - The document has no change marker. The transfer client reads the document directly before each load and keeps no copy.
 
+Second pick of the three `/approved` routes (ADR-0164):
+
+- An approval can retire the picked version before the export locks it. Then the export picks the approved version once more and locks the new pick.
+- The second lock checks the state again. A state other than `Approved` there gives `404 E-EXP-001`.
+- A second pick that finds no approved version also gives `404 E-EXP-001`. No third pick runs.
+- Thus two concurrent approvals in one export still give a transient `404 E-EXP-001`. The client rule of the polling rule below stays in force.
+- The second pick does not run the Basic check of section 7.7 again. The route by number has no second pick.
+- `data-model.md` 6 gives the flow of the second pick.
+
 Polling rule. The client reads the list and compares `content_sha256` with its last value. It runs an export only after a change (ADR-0109 (ag)). An approval can occur between the list and the export. The client therefore trusts `version.number` and `content_sha256` of the document, not the values of the list row (ADR-0109 (ah)).
 
 The export routes accept only `GET`. A `HEAD` request gets the answer of a method that the route table does not list. The use case does not run, and the audit log gets no entry (ADR-0054). The version page links to the export of its version (ADR-0052). A navigation guard refuses a cross-site or same-site request and an HTMX request before the use case (section 7.3, ADR-0055).

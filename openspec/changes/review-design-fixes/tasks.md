@@ -27,8 +27,8 @@ The ste-lint Check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 3. Group G3: F-02 text, F-12 text
 
-- [ ] 3.1 (docs/architecture) [opus] F-02, D2. Write the second pick, the second check under the lock, and the `404` without a third pick in `api.md` §2.7 and the row `ExportVersion` of `data-model.md` §6. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/architecture/data-model.md`.
-- [ ] 3.2 (docs/architecture) [opus] F-12 and the F-03 note, D3. Change `reliability.md` §1.1 for `PlantErrors`, `CheckResultFault`, and `SnapshotItem`. Add the rows `E-WEB-016` and `E-WEB-017` to §1.2. Change the row `E-PLT-020`. Red test: none. Check: ste-lint on `docs/architecture/reliability.md`.
+- [x] 3.1 (docs/architecture) [opus] F-02, D2. Write the second pick, the second check under the lock, and the `404` without a third pick in `api.md` §2.7 and the row `ExportVersion` of `data-model.md` §6. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/architecture/data-model.md`.
+- [x] 3.2 (docs/architecture) [opus] F-12 and the F-03 note, D3. Change `reliability.md` §1.1 for `PlantErrors`, `CheckResultFault`, and `SnapshotItem`. Add the rows `E-WEB-016` and `E-WEB-017` to §1.2. Change the row `E-PLT-020`. Red test: none. Check: ste-lint on `docs/architecture/reliability.md`.
 
 ## 4. Group G4: F-19 text, F-06 text
 
