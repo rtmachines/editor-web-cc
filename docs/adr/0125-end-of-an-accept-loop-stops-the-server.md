@@ -1,6 +1,6 @@
 # ADR-0125: The end of an accept loop stops the server
 
-Status: Accepted. Amends ADR-0057 (h), ADR-0058 (l) and (o), and ADR-0090 (b)
+Status: Accepted. Amends ADR-0057 (h), ADR-0058 (l) and (o), and ADR-0090 (b). Amended by ADR-0172 (the join of a detached task of an identity command is a ninth place that catches a panic)
 Date: 2026-11-04
 Deciders: project owner
 

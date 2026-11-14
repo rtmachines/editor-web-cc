@@ -62,7 +62,7 @@ Owner decision 2026-11-14: D1 covers the four handlers of `users.rs`. The doc co
 - The `WARN` line of the job `alerts` for this fault gets the field `error_code` (`reliability.md` §1.1).
 - `reliability.md` §1.1 lists `CheckResultFault` as an error type and not as a reason. It lists `SnapshotItem`. The §1.2 row of `E-PLT-020` names `SnapshotItem::UnknownUnit`.
 - The registry test adds `CheckResultFault` to `SCOPE`. `SnapshotItem` stays in `EXCLUDED`, because its `code()` passes on the inner code.
-- ADR-0165 amends ADR-0027, ADR-0151 (j3), and ADR-0154 (the sentence "`PlantErrors` owns no code").
+- ADR-0165 amends ADR-0027, ADR-0151 (j3), and ADR-0154. The sentence "`PlantErrors` owns no code" in `reliability.md` §1.1 also changes.
 
 Owner decision 2026-11-14: `CheckResultFault::Unreadable` gets `E-WEB-016`, and `CheckResultFault::Malformed` gets `E-WEB-017`. `WEB` is the context of cross-cutting application results (§1.2).
 
@@ -89,19 +89,19 @@ Owner decision 2026-11-14: `secret_line` refuses a NUL byte too, so `01-roles.sh
 - One ADR holds the three, because they share one decision. The text follows the shipped code and DDL. No migration and no code change follow (fix plan §1, F-18).
 - F-15: the rows `CreateUser`, `ResetPassword`, and `CreateRecipe` of §6 name the read in a read-only transaction before the command transaction. The pattern of the row `SetMachineDataBlock` applies (`reliability.md` §7.4).
 - F-17: the exception table of §1.1 gets rows for `plc_type_member` and `draft_editor`.
-- F-18: §1.3 says that `LoginText` refuses a control character and that the database checks the length only.
+- F-18: §1.3 says that `TypedLogin` refuses a control character and that the database checks the length only.
 
 Owner decision 2026-11-14: one ADR 0168 holds F-15, F-17, and F-18.
 
 ### D7. `search_path` of the audit guard function (F-16, ADR-0167)
 
-- The event-trigger function of `audit_owner` keeps `search_path = pg_catalog, pg_temp` (`data-model.md` §5.1). The narrower path is safer (fix plan §1).
+- The event-trigger function that the superuser `postgres` creates and owns keeps `search_path = pg_catalog, pg_temp` (`data-model.md` §5.1). The narrower path is safer (fix plan §1).
 - `data-model.md` §1.1 and `.claude/rules/sql.md` name this exception. No migration.
 - ADR-0167 amends ADR-0098.
 
 ### D8. A new version row is a draft (F-19, ADR-0169)
 
-- Migration `0016_recipe_version_insert.sql` adds the function `recipe_version_insert_draft()` and a `BEFORE INSERT` trigger on `recipe_version`.
+- Migration `0016_recipe_version_insert.sql` adds the function `recipe_version_insert_draft()` and a `BEFORE INSERT` trigger named `recipe_version_insert_draft` on `recipe_version`.
 - The trigger refuses a row with a status other than `draft`, a `row_version` other than 1, or a `deleted_at`. The `CHECK recipe_version_status_fields` then covers the approval columns and the hash.
 - The new code `E-RCP-037` has the status 409. `reliability.md` §1.2 gets the row first. `data-model.md` §4 gets a new section and a row of §4.11. `domain-model.md` §3 extends I4 to an insert.
 - `data-model.md` §5.2 gets one sentence: the trigger limits the `INSERT` grant of `recipe_app` on `recipe_version` to a new draft.
@@ -130,10 +130,10 @@ Owner decision 2026-11-14: one ADR 0168 holds F-15, F-17, and F-18.
 
 - Only a build with the feature `dev` accepts `session.secure=false` (ADR-0062 (b)). With `false`, no cookie has `Secure`.
 - A browser refuses a cookie with the prefix `__Host-` and without `Secure`. The session cookie is then `recipe_session`, and the pre-session cookie is `recipe_csrf`.
-- `recipe_lang` drops `Secure` and keeps its name. `HttpOnly`, `SameSite=Strict`, and `Path=/` stay on each cookie.
+- `recipe_lang` drops `Secure` and keeps its name. `SameSite=Strict` and `Path=/` stay on each cookie. `HttpOnly` stays on the session cookie and the pre-session cookie.
 - The server keeps `Strict-Transport-Security`. A browser ignores it on plain HTTP.
-- `WebSettings` holds the value. `WebSettings::default()` keeps `secure = true`. `ServeSettings::new` in `serve/plan.rs` copies the configured value.
-- Each writer and each reader of the cookies takes the name from `WebSettings`, so one process uses one set of names. The writers are in `cookies.rs`, `csrf/pre_session.rs`, and `i18n.rs`. `CLEAR_SESSION_FALLBACK` in `cookies.rs` follows the value too.
+- `WebSettings` holds the value. `WebSettings::default()` keeps `secure = true`. `Plan::new` in `serve/plan.rs` builds the settings from `ServeSettings::default()` and copies the configured value.
+- Each writer and each reader of the cookies takes the name from `WebSettings`, so one process uses one set of names. The writers are in `cookies.rs` and `csrf/pre_session.rs`. `lang_cookie` in `cookies.rs` writes the language cookie, and `lang.rs` calls it. `CLEAR_SESSION_FALLBACK` in `cookies.rs` follows the value too.
 - The readers are `session.rs` (`SESSION_COOKIE`), `pages/request.rs` (`SESSION_COOKIE`), and `csrf.rs` (`CSRF_COOKIE`).
 - Round-trip tests run for both values: a login, then a `GET` with the session cookie, then a logout. Also `GET /login`, then `POST /login` with the pre-session cookie.
 - Alternative: no effect of the key. Rejected, because the key then records a value that no code applies. The owner asked for a code change (fix plan §1).

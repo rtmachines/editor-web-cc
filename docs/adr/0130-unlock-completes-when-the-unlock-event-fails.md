@@ -1,6 +1,6 @@
 # ADR-0130: Unlock completes when the unlock event fails
 
-Status: Accepted. Amends ADR-0035 (j)
+Status: Accepted. Amends ADR-0035 (j). Amended by ADR-0172 (the detached task of `UnlockLogin` writes the `WARN` line of a lost event, not the handler)
 Date: 2026-11-05
 Deciders: project owner
 
