@@ -1492,6 +1492,13 @@ On the recipe and plant forms, a changed body SHALL give one line `422 E-WEB-008
 - **THEN** the server returns `422 E-WEB-008` with two lines
 - **AND** each member name input has an error line under it
 
+#### Scenario: Member row with a bad name and no type
+- **GIVEN** the ProcessEngineer `anowak` with an open session and the machine `M7`
+- **WHEN** `anowak` sends an HTMX `POST /machines/M7/types` with one member row with the name `9bad` and an empty type
+- **THEN** the server returns `422 E-WEB-008` with two lines
+- **AND** the name input and the type input of the row each have an error line under them
+- **AND** the server creates no type
+
 #### Scenario: Unknown key in the add form
 - **GIVEN** the ProcessEngineer `anowak` with an open session and the draft version 3 of `R-100`
 - **WHEN** `anowak` sends an HTMX `POST /recipes/R-100/versions/3/parameters` with the tag `bad tag`, the unknown key `bogus`, and the value key `value[*]`
