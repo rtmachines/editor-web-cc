@@ -205,6 +205,7 @@ task-stage-password-hash = password hash
 task-stage-validation = validation
 task-stage-export = export
 task-stage-token = token generation
+task-stage-detached = security step
 
 # Operations
 operation-create-machine = Create machine

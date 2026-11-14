@@ -5,10 +5,13 @@
 //! one fixed order. A finished server converts into the same type.
 
 use std::sync::Arc;
+use std::time::Duration;
 
+use recipe_app::identity::DetachedTasks;
 use recipe_db::CloseOutcome;
 use recipe_web::{HealthState, ReadOnlyMode};
 use tokio::runtime::Runtime;
+use tokio::time::Instant;
 
 use super::host::{PoolClose, Signal, WatchdogControl};
 use super::plan::ShutdownSettings;
@@ -22,6 +25,7 @@ pub(super) struct Resources {
     pub health_pool: Option<Arc<dyn PoolClose>>,
     pub health: Option<HealthState>,
     pub supervisor: Option<Supervisor>,
+    pub detached: Option<DetachedTasks>,
     pub internal: Option<ListenerHandle>,
     pub public: Option<ListenerHandle>,
 }
@@ -48,6 +52,7 @@ impl From<ServerParts> for Opened {
                 health_pool: Some(parts.health_pool),
                 health: Some(parts.health),
                 supervisor: Some(parts.supervisor),
+                detached: Some(parts.detached),
                 internal: Some(parts.internal),
                 public: Some(parts.public),
             },
@@ -72,15 +77,25 @@ impl Opened {
             health_pool,
             health,
             supervisor,
+            detached,
             internal,
             public,
         } = self.resources;
-        match (main_pool, health_pool, health, supervisor, internal, public) {
+        match (
+            main_pool,
+            health_pool,
+            health,
+            supervisor,
+            detached,
+            internal,
+            public,
+        ) {
             (
                 Some(main_pool),
                 Some(health_pool),
                 Some(health),
                 Some(supervisor),
+                Some(detached),
                 Some(internal),
                 Some(public),
             ) => Ok(ServerParts {
@@ -89,6 +104,7 @@ impl Opened {
                 public,
                 internal,
                 supervisor,
+                detached,
                 main_pool,
                 health_pool,
                 watchdog: self.watchdog,
@@ -96,28 +112,35 @@ impl Opened {
                 read_only,
                 shutdown: self.shutdown,
             }),
-            (main_pool, health_pool, health, supervisor, internal, public) => Err(Box::new(Self {
-                watchdog: self.watchdog,
-                runtime: self.runtime,
-                resources: Resources {
-                    main_pool,
-                    health_pool,
-                    health,
-                    supervisor,
-                    internal,
-                    public,
-                },
-                shutdown: self.shutdown,
-            })),
+            (main_pool, health_pool, health, supervisor, detached, internal, public) => {
+                Err(Box::new(Self {
+                    watchdog: self.watchdog,
+                    runtime: self.runtime,
+                    resources: Resources {
+                        main_pool,
+                        health_pool,
+                        health,
+                        supervisor,
+                        detached,
+                        internal,
+                        public,
+                    },
+                    shutdown: self.shutdown,
+                }))
+            }
         }
     }
 
     /// Close everything in the stop order and report what the drain cut.
     ///
-    /// The drain waits for the public listener and the jobs to end. It counts what it cuts.
+    /// The drain waits for the public listener, the jobs, and the detached tasks to end. It counts
+    /// what it cuts. It writes one `WARN` line when it aborts a detached task.
     ///
     /// The order is: turn readiness off, disarm the watchdog, stop the public listener and the
     /// jobs.
+    /// The detached tasks drain after the public listener, because a request in flight can still
+    /// spawn one. They share the one deadline of the jobs, and the abort line comes before the pool
+    /// lines.
     /// Then it closes both pools and writes one `WARN` line for each pool that timed out.
     /// Then it stops the internal listener.
     /// Last, it ends the watchdog thread and stops the runtime (ADR-0087, ADR-0090).
@@ -148,10 +171,20 @@ async fn close_resources(
     if let Some(public) = &resources.public {
         public.stop();
     }
-    let (cut_public, cut_jobs) = tokio::join!(
-        join_listener(resources.public),
+    // The listener, the jobs, and the detached tasks share the one deadline of `shutdown.drain`
+    // (7.3 steps 3 and 4, ADR-0172 (ag)). A request in flight can spawn a detached task until the
+    // listener has joined. So the detached drain starts after that join and takes the rest of the
+    // deadline. The pools close after both arms.
+    let drain_started = Instant::now();
+    let ((cut_public, aborted_detached), cut_jobs) = tokio::join!(
+        async {
+            let cut = join_listener(resources.public).await;
+            let rest = shutdown.drain.saturating_sub(drain_started.elapsed());
+            (cut, drain_detached(resources.detached, rest).await)
+        },
         drain_jobs(resources.supervisor, shutdown)
     );
+    warn_if_aborted(aborted_detached);
     // Both closes run at once, so both share one budget of `shutdown.pool_close` (7.3 step 5).
     let (main_pool, health_pool) = tokio::join!(
         close_pool(resources.main_pool, shutdown),
@@ -210,6 +243,24 @@ async fn drain_jobs(supervisor: Option<Supervisor>, shutdown: ShutdownSettings) 
     match supervisor {
         Some(supervisor) => supervisor.drain(shutdown.drain).await.cut(),
         None => 0,
+    }
+}
+
+/// Wait for the detached tasks for at most `rest` and return the number of aborted tasks.
+async fn drain_detached(detached: Option<DetachedTasks>, rest: Duration) -> usize {
+    match detached {
+        Some(detached) => detached.drain(rest).await,
+        None => 0,
+    }
+}
+
+/// Write the one `WARN` line of the aborted detached tasks. A count of 0 gets no line (ADR-0172 (ah)).
+fn warn_if_aborted(aborted: usize) {
+    if aborted > 0 {
+        tracing::warn!(
+            aborted,
+            "the drain aborted detached tasks and their security events may be lost"
+        );
     }
 }
 

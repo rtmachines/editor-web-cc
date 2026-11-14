@@ -13,6 +13,8 @@ const DEFAULT_ARGON2_PERMITS: usize = 4;
 const DEFAULT_ACQUIRE_TIMEOUT_SECONDS: u64 = 2;
 /// Default of `export.basic_permits`.
 const DEFAULT_EXPORT_BASIC_PERMITS: usize = 1;
+/// Default of `identity.detached_tasks`: two times `argon2.permits` (ADR-0172 (v)).
+const DEFAULT_DETACHED_TASKS: usize = 8;
 /// Default of `session.idle_timeout` in seconds: 30 minutes.
 const DEFAULT_IDLE_TIMEOUT_SECONDS: u64 = 30 * 60;
 /// Default of `session.absolute_timeout` in seconds: 12 hours.
@@ -38,6 +40,8 @@ pub struct IdentitySettings {
     /// The Basic checks that wait for or hold an Argon2 permit at one time
     /// (`export.basic_permits`, ADR-0109 (n)).
     pub export_basic_permits: usize,
+    /// The open detached tasks of the security steps (`identity.detached_tasks`, ADR-0172 (u)).
+    pub detached_tasks: usize,
     /// The login throttle.
     pub throttle: ThrottlePolicy,
     /// The idle time after which a session ends (`session.idle_timeout`).
@@ -69,6 +73,7 @@ impl Default for IdentitySettings {
             argon2_permits: DEFAULT_ARGON2_PERMITS,
             argon2_acquire_timeout: Duration::from_secs(DEFAULT_ACQUIRE_TIMEOUT_SECONDS),
             export_basic_permits: DEFAULT_EXPORT_BASIC_PERMITS,
+            detached_tasks: DEFAULT_DETACHED_TASKS,
             throttle: ThrottlePolicy::default(),
             session_idle_timeout: Duration::from_secs(DEFAULT_IDLE_TIMEOUT_SECONDS),
             session_absolute_timeout: Duration::from_secs(DEFAULT_ABSOLUTE_TIMEOUT_SECONDS),

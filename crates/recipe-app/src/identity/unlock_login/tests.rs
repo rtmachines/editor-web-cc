@@ -1,20 +1,37 @@
 //! Tests of the use case `UnlockLogin` (task 4.5, design D8 i, j, and q).
 
+use std::fmt::Debug;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
-use recipe_domain::audit::{AuditAction, AuditTarget, SecurityEventKind};
+use async_trait::async_trait;
+use parking_lot::Mutex;
+use recipe_domain::audit::{AuditAction, AuditTarget, SecurityEvent, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{Login, Role, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tokio::sync::Notify;
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id, Record};
+use tracing::subscriber::{DefaultGuard, NoSubscriber};
+use tracing::{Dispatch, Event, Level, Metadata, Subscriber};
 
-use super::{UnlockLogin, UnlockOutcome};
-use crate::auth::Operation;
+use super::UnlockLogin;
+use crate::auth::{Operation, RequestMeta};
 use crate::context::UseCase;
 use crate::error::{AppError, Missing, StorageError};
+use crate::identity::IdentityContext;
 use crate::identity::fixtures::{IdentityFixture, actor_id, anna_id};
-use crate::memory::Fault;
+use crate::memory::{Fault, MemorySink};
+use crate::ports::SecurityEventSink;
+
+/// The time that the caller waits before a test drops its future.
+const CALLER_WAIT: Duration = Duration::from_millis(10);
+/// The deadline of the drain of the detached tasks in a test.
+const DRAIN_WAIT: Duration = Duration::from_secs(5);
 
 /// The start of the clock of a fixture, in Unix seconds.
 const START_SECONDS: i64 = 1_000_000;
@@ -254,19 +271,16 @@ async fn the_permission_check_comes_first_for_an_operator_and_a_process_engineer
 }
 
 #[tokio::test]
-async fn a_failed_unlock_event_completes_the_unlock_and_reports_the_lost_event() {
+async fn a_failed_unlock_event_completes_the_unlock_and_writes_one_warn_line() {
+    let (capture, _guard) = LogCapture::install();
     let fixture = fixture();
     seed_failures(&fixture, "anna", 4);
     let (auth, meta) = fixture.actor(Role::Administrator).await;
     fixture.sink.fail_with(Fault::Unavailable);
-    let outcome = UnlockLogin::new(fixture.context.clone())
+    UnlockLogin::new(fixture.context.clone())
         .execute(&auth, &meta, &anna(), admin_ip())
         .await
         .unwrap();
-    assert!(
-        matches!(outcome, UnlockOutcome::EventLost(StorageError::Unavailable)),
-        "{outcome:?}"
-    );
     assert_eq!(attempts_of(&fixture, "anna"), 0);
     let entries = fixture.store.audit_entries();
     assert_eq!(entries.len(), 1);
@@ -275,6 +289,58 @@ async fn a_failed_unlock_event_completes_the_unlock_and_reports_the_lost_event()
         AuditAction::LoginUnlocked
     );
     assert!(fixture.sink.events().is_empty());
+    assert_one_lost_event_line(&capture, &meta);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unlock_writes_its_event_after_the_caller_drops_the_future() {
+    let fixture = fixture();
+    seed_failures(&fixture, "anna", 4);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let gated = GatedSink::new(fixture.sink.clone());
+    let unlock = UnlockLogin::new(gated.install(&fixture));
+
+    let dropped = tokio::time::timeout(
+        CALLER_WAIT,
+        unlock.execute(&auth, &meta, &anna(), admin_ip()),
+    )
+    .await;
+    assert!(dropped.is_err(), "the caller must time out first");
+    assert!(fixture.sink.events().is_empty());
+
+    gated.release();
+    assert_eq!(unlock.ctx.detached().drain(DRAIN_WAIT).await, 0);
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Unlock);
+    assert_eq!(attempts_of(&fixture, "anna"), 0);
+    assert_eq!(fixture.store.audit_entries().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn unlock_writes_exactly_one_warn_line_when_the_event_fails_after_a_drop() {
+    let (capture, _guard) = LogCapture::install();
+    let fixture = fixture();
+    seed_failures(&fixture, "anna", 4);
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    fixture.sink.fail_with(Fault::Unavailable);
+    let gated = GatedSink::new(fixture.sink.clone());
+    let unlock = UnlockLogin::new(gated.install(&fixture));
+
+    let dropped = tokio::time::timeout(
+        CALLER_WAIT,
+        unlock.execute(&auth, &meta, &anna(), admin_ip()),
+    )
+    .await;
+    assert!(dropped.is_err(), "the caller must time out first");
+    assert_eq!(capture.count(), 0, "the event write has not run yet");
+
+    gated.release();
+    assert_eq!(unlock.ctx.detached().drain(DRAIN_WAIT).await, 0);
+    assert_one_lost_event_line(&capture, &meta);
+    assert!(fixture.sink.events().is_empty());
+    assert_eq!(attempts_of(&fixture, "anna"), 0);
+    assert_eq!(fixture.store.audit_entries().len(), 1);
 }
 
 #[tokio::test]
@@ -291,4 +357,146 @@ async fn a_failed_commit_deletes_nothing_and_writes_no_event() {
     assert_eq!(attempts_of(&fixture, "anna"), 4);
     assert!(fixture.store.audit_entries().is_empty());
     assert!(fixture.sink.events().is_empty());
+}
+
+/// Assert that the capture holds the one `WARN` line of a lost `unlock` event.
+fn assert_one_lost_event_line(capture: &LogCapture, meta: &RequestMeta) {
+    let lines = capture.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = lines.first().unwrap();
+    assert_eq!(line.level, Level::WARN);
+    assert_eq!(line.field("event"), Some("\"unlock\""));
+    assert!(line.field("error_code").is_some(), "{line:?}");
+    assert!(line.field("chain").is_some(), "{line:?}");
+    let request_id = line.field("request_id").unwrap();
+    assert!(
+        request_id.contains(&meta.request_id().to_string()),
+        "{line:?}"
+    );
+}
+
+// ---- a sink that waits for the test ----
+
+/// A sink that holds every `record` call until the test releases it.
+///
+/// The type solves one problem: a test must drop the future of the caller while the use case
+/// awaits the security event.
+#[derive(Clone)]
+struct GatedSink {
+    inner: MemorySink,
+    release: Arc<Notify>,
+}
+
+impl GatedSink {
+    fn new(inner: MemorySink) -> Self {
+        Self {
+            inner,
+            release: Arc::new(Notify::new()),
+        }
+    }
+
+    /// Return a copy of the context of `fixture` whose sink is this one.
+    fn install(&self, fixture: &IdentityFixture) -> IdentityContext {
+        let mut context = fixture.context.clone();
+        context.app.security = Arc::new(self.clone());
+        context
+    }
+
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+
+#[async_trait]
+impl SecurityEventSink for GatedSink {
+    async fn record(&self, event: SecurityEvent) -> Result<(), StorageError> {
+        self.release.notified().await;
+        self.inner.record(event).await
+    }
+}
+
+// ---- log capture ----
+
+/// One event that the code wrote.
+#[derive(Clone, Debug)]
+struct Logged {
+    level: Level,
+    fields: Vec<(String, String)>,
+}
+
+impl Logged {
+    fn field(&self, name: &str) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+/// A registered dispatch that no thread installs. It lives until the test process ends.
+///
+/// It solves one problem of `tracing-core` 0.1.36 (tokio-rs/tracing#3611). With one live
+/// dispatch, a callsite takes its interest from the thread that hits it first.
+static KEEPALIVE: LazyLock<Dispatch> = LazyLock::new(|| Dispatch::new(NoSubscriber::default()));
+
+/// A subscriber that keeps every event of its thread.
+#[derive(Clone, Default)]
+struct LogCapture {
+    events: Arc<Mutex<Vec<Logged>>>,
+}
+
+impl LogCapture {
+    fn install() -> (Self, DefaultGuard) {
+        LazyLock::force(&KEEPALIVE);
+        let capture = Self::default();
+        let guard = tracing::subscriber::set_default(capture.clone());
+        (capture, guard)
+    }
+
+    fn events(&self) -> Vec<Logged> {
+        self.events.lock().clone()
+    }
+
+    fn count(&self) -> usize {
+        self.events.lock().len()
+    }
+}
+
+#[derive(Default)]
+struct FieldCopy {
+    fields: Vec<(String, String)>,
+}
+
+impl Visit for FieldCopy {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+        self.fields
+            .push((field.name().to_owned(), format!("{value:?}")));
+    }
+}
+
+impl Subscriber for LogCapture {
+    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
+        true
+    }
+
+    fn new_span(&self, _span: &Attributes<'_>) -> Id {
+        Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        let mut copy = FieldCopy::default();
+        event.record(&mut copy);
+        self.events.lock().push(Logged {
+            level: *event.metadata().level(),
+            fields: copy.fields,
+        });
+    }
+
+    fn enter(&self, _span: &Id) {}
+
+    fn exit(&self, _span: &Id) {}
 }

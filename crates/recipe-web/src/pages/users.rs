@@ -7,13 +7,12 @@
 use axum::extract::rejection::{FormRejection, PathRejection, QueryRejection};
 use axum::extract::{Form, Path, Query, State};
 use axum::response::{IntoResponse, Response};
-use recipe_app::error::{AppError, Missing, StorageError};
+use recipe_app::error::{AppError, Missing};
 use recipe_app::identity::{
     ActivateUser, CreateUser, CreateUserInput, DeactivateUser, GetUser, GetUserForm, ListUsers,
-    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin, UnlockOutcome,
+    ListUsersInput, ResetPassword, SetUserRole, SetUserRoleInput, UnlockLogin,
 };
 use recipe_app::ports::NonEmpty;
-use recipe_domain::audit::RequestId;
 use recipe_domain::identity::{Login, Role};
 use serde::Deserialize;
 
@@ -23,7 +22,7 @@ use super::render::{page_url, pager_links, render};
 use super::request::PageRequest;
 use super::saved_notice::saved_notice;
 use super::texts::Texts;
-use crate::error::{FieldError, FieldReason, WebError, display_chain};
+use crate::error::{FieldError, FieldReason, WebError};
 use crate::state::WebState;
 use fluent::FluentArgs;
 use query::ListQuery;
@@ -417,23 +416,10 @@ pub(crate) async fn reset_password(
     command_result(&request, texts, fragment)
 }
 
-/// Write the one `WARN` line of an unlock whose security event is lost (ADR-0130).
-///
-/// The function solves one problem: the unlock is committed and the answer is a success, so no
-/// error mapping logs the lost event. This line is the one log place of that fault.
-///
-/// The field `chain` holds the `Display` chain of the fault, as the line of `log_error` does.
-fn log_lost_unlock_event(lost: &StorageError, request_id: RequestId) {
-    tracing::warn!(
-        error_code = %lost.code(),
-        request_id = %request_id,
-        chain = %display_chain(lost),
-        event = "unlock",
-        "security event lost after a committed unlock"
-    );
-}
-
 /// `POST /users/{login}/unlock`: clear the login delay of the user.
+///
+/// The use case writes the one `WARN` line of a lost event `unlock`, so the handler writes none
+/// (ADR-0172 (r)).
 pub(crate) async fn unlock(
     State(state): State<WebState>,
     path: Result<Path<String>, PathRejection>,
@@ -442,12 +428,9 @@ pub(crate) async fn unlock(
 ) -> Result<Response, WebError> {
     let login = path_login(path)?;
     let Form(_fields) = form?;
-    let outcome = UnlockLogin::new(state.identity().clone())
+    UnlockLogin::new(state.identity().clone())
         .execute(request.auth()?, &request.meta(), &login, request.client())
         .await?;
-    if let UnlockOutcome::EventLost(lost) = &outcome {
-        log_lost_unlock_event(lost, request.request_id());
-    }
     let texts = Texts::new(state.bundles(), request.lang());
     let text = message(texts, "user-unlocked", &login);
     answered(&state, &request, texts, &login, text).await

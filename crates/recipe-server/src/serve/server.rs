@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use recipe_app::identity::DetachedTasks;
 use recipe_db::CloseOutcome;
 use recipe_web::{HealthState, ReadOnlyMode};
 use tokio::runtime::Runtime;
@@ -171,6 +172,8 @@ pub(super) struct ServerParts {
     pub internal: ListenerHandle,
     /// The supervisor with the loops of step 9.
     pub supervisor: Supervisor,
+    /// The detached tasks of the use case context. The stop drains them before the pool close.
+    pub detached: DetachedTasks,
     /// The close of the main pool.
     pub main_pool: Arc<dyn PoolClose>,
     /// The close of the health pool.
@@ -217,6 +220,13 @@ impl Server {
     #[must_use]
     pub(super) const fn health(&self) -> &HealthState {
         &self.parts.health
+    }
+
+    /// The detached tasks that the stop drains.
+    #[cfg(test)]
+    #[must_use]
+    pub(super) const fn detached(&self) -> &DetachedTasks {
+        &self.parts.detached
     }
 
     /// The flag of the read-only mode.

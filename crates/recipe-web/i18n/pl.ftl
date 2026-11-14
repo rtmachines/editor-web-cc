@@ -205,6 +205,7 @@ task-stage-password-hash = obliczenie skrótu hasła
 task-stage-validation = walidacja
 task-stage-export = eksport
 task-stage-token = generowanie tokenu
+task-stage-detached = krok zabezpieczeń
 
 # Operations
 operation-create-machine = Utworzenie maszyny

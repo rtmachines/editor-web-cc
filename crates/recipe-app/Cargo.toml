@@ -18,14 +18,15 @@ argon2 = { workspace = true }
 getrandom = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-parking_lot = { workspace = true, optional = true }
+# The detached tasks hold their `JoinSet` behind a `parking_lot::Mutex` (ADR-0172 (y)).
+parking_lot = { workspace = true }
 # The in-memory clock starts at an OffsetDateTime and advances by a Duration.
 # `UnlockLogin` writes the time of an attempt as RFC 3339 text, so the crate always needs `time`.
 time = { workspace = true, features = ["formatting"] }
 
 [features]
 # In-memory adapters for tests (design.md D2). recipe-server never enables it.
-memory = ["dep:parking_lot"]
+memory = []
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt", "test-util"] }

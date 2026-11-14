@@ -140,6 +140,7 @@ pub(super) const fn task_stage_key(stage: TaskStage) -> &'static str {
         TaskStage::Export => "task-stage-export",
         TaskStage::Token => "task-stage-token",
         TaskStage::Diff => "task-stage-diff",
+        TaskStage::Detached => "task-stage-detached",
     }
 }
 

@@ -1,5 +1,9 @@
 //! The close of a running server and the warning lines of its report.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
 use recipe_db::CloseOutcome;
 
 use super::expect_running;
@@ -119,4 +123,27 @@ fn the_report_never_writes_an_error_line() {
     }
     .log();
     assert!(logs.at_level("ERROR").is_empty());
+}
+
+/// ADR-0172 (af): the one set of detached tasks is the set of the use case context. The stop of a
+/// started server drains it before the pool close.
+#[test]
+fn the_close_of_a_started_server_waits_for_a_detached_task_of_its_context() {
+    let host = StubHost::new();
+    let server = expect_running(&host);
+    let tasks = server.detached().clone();
+    let done = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&done);
+    server.runtime().block_on(async move {
+        let slot = tasks.acquire().await.expect("a free slot");
+        let _handle = tasks.spawn(slot, async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            flag.store(true, Ordering::SeqCst);
+        });
+    });
+    let _report = server.close();
+    assert!(
+        done.load(Ordering::SeqCst),
+        "the close did not drain the task"
+    );
 }

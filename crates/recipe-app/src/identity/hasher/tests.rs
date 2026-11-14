@@ -259,6 +259,16 @@ fn the_default_settings_equal_the_table() {
         u64::try_from(settings.export_basic_permits).unwrap(),
         number_at(basic, 0)
     );
+
+    let detached = settings_cell("identity.detached_tasks");
+    assert_eq!(
+        u64::try_from(settings.detached_tasks).unwrap(),
+        detached.split(',').next().unwrap().parse::<u64>().unwrap()
+    );
+    assert_eq!(
+        settings.detached_tasks,
+        settings.argon2_permits.checked_mul(2).unwrap()
+    );
 }
 
 #[test]

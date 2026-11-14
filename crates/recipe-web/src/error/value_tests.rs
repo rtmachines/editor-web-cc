@@ -165,6 +165,7 @@ fn values_every_password_reason_and_task_stage_has_its_key() {
         TaskStage::Export,
         TaskStage::Token,
         TaskStage::Diff,
+        TaskStage::Detached,
     ] {
         assert_in_both(&bundles, task_stage_key(stage));
         let english = bundles

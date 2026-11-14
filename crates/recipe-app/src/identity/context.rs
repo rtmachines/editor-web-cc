@@ -5,6 +5,7 @@ use std::sync::Arc;
 use recipe_domain::identity::{KeyRing, breached_password_count};
 
 use super::basic_permit::BasicGate;
+use super::detached::DetachedTasks;
 use super::{HashGate, HashPermit, IdentitySettings};
 use crate::context::AppContext;
 use crate::error::AppError;
@@ -27,6 +28,8 @@ pub struct IdentityContext {
     pub(crate) gate: HashGate,
     /// The gate in front of the Basic checks of the export routes (`export.basic_permits`).
     pub(crate) basic_gate: BasicGate,
+    /// The detached tasks of the security steps (`identity.detached_tasks`, ADR-0172).
+    pub(crate) detached: DetachedTasks,
     /// The key ring of the login HMAC in security events.
     pub(crate) login_keys: KeyRing,
     /// The settings of `reliability.md` section 7.11 for the identity use cases.
@@ -52,12 +55,14 @@ impl IdentityContext {
             settings.export_basic_permits,
             settings.argon2_acquire_timeout,
         );
+        let detached = DetachedTasks::new(settings.detached_tasks, settings.argon2_acquire_timeout);
         Self {
             app,
             attempts,
             sessions,
             gate,
             basic_gate,
+            detached,
             login_keys,
             settings,
         }
@@ -96,6 +101,14 @@ impl IdentityContext {
         let basic = self.basic_gate.acquire().await?;
         let hash = self.gate.acquire().await?;
         Ok(hash.holding(basic))
+    }
+
+    /// Return the detached tasks of the security steps.
+    ///
+    /// A clone shares the slots and the task set. The stop of the server drains them (ADR-0172 (af)).
+    #[must_use]
+    pub const fn detached(&self) -> &DetachedTasks {
+        &self.detached
     }
 
     /// Return the key ring of the login HMAC.
