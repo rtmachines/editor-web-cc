@@ -100,12 +100,12 @@ Each F-01 test asserts `HX-Trigger` with `rowVersion` when the output holds the 
 
 ## 14. Group G14: verification
 
-- [ ] 14.1 (workspace) [mechanical] [haiku] Run `cargo fmt --check`. It reports no difference.
-- [ ] 14.2 (workspace) [mechanical] [haiku] Run `cargo clippy --all-targets --all-features -- -D warnings`. It reports no warning.
-- [ ] 14.3 (workspace) [mechanical] [haiku] Run `cargo test --workspace --all-features --locked`. Every test passes.
-- [ ] 14.4 (openspec) [mechanical] [haiku] Run `openspec validate review-design-fixes --strict` and `openspec validate --specs --strict`. Both pass.
-- [ ] 14.5 (docs) [sonnet] Run the ste-lint command of `CLAUDE.md` "Commands" on the scope of ADR-0023 and ADR-0135. It reports 0 hard violations.
-- [ ] 14.6 (e2e) [sonnet] Run `cd e2e && npm ci && E2E_PASSWORD=<12 to 128 characters> npm test` on the dev stack. Every browser test passes.
+- [x] 14.1 (workspace) [mechanical] [haiku] Run `cargo fmt --check`. It reports no difference.
+- [x] 14.2 (workspace) [mechanical] [haiku] Run `cargo clippy --all-targets --all-features -- -D warnings`. It reports no warning.
+- [x] 14.3 (workspace) [mechanical] [haiku] Run `cargo test --workspace --all-features --locked`. Every test passes.
+- [x] 14.4 (openspec) [mechanical] [haiku] Run `openspec validate review-design-fixes --strict` and `openspec validate --specs --strict`. Both pass.
+- [x] 14.5 (docs) [sonnet] Run the ste-lint command of `CLAUDE.md` "Commands" on the scope of ADR-0023 and ADR-0135. It reports 0 hard violations.
+- [x] 14.6 (e2e) [sonnet] Run `cd e2e && npm ci && E2E_PASSWORD=<12 to 128 characters> npm test` on the dev stack. Every browser test passes.
 
 ## Workflow follow-up
 
