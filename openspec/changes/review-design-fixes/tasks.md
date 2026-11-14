@@ -37,8 +37,8 @@ The ste-lint Check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 5. Group G5: F-09 text, F-16 text
 
-- [ ] 5.1 (docs/architecture) [opus] F-09, D10. Write the cookie names and attributes for `session.secure=false` in `api.md` §7.1, §7.3, and §8. Change the rows `session.cookie_name` and `session.secure` of `reliability.md` §7.11. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/architecture/reliability.md`.
-- [ ] 5.2 (docs/architecture) [mechanical] [haiku] F-16, D7. Add the `search_path` exception of the audit guard function to `data-model.md` §1.1 and `.claude/rules/sql.md`. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
+- [x] 5.1 (docs/architecture) [opus] F-09, D10. Write the cookie names and attributes for `session.secure=false` in `api.md` §7.1, §7.3, and §8. Change the rows `session.cookie_name` and `session.secure` of `reliability.md` §7.11. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/architecture/reliability.md`.
+- [x] 5.2 (docs/architecture) [mechanical] [haiku] F-16, D7. Add the `search_path` exception of the audit guard function to `data-model.md` §1.1 and `.claude/rules/sql.md`. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
 
 ## 6. Group G6: F-13 text, F-17 text
 

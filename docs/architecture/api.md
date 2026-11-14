@@ -430,7 +430,7 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | Connection record changed by another user (`E-WEB-013`) | `409` | `error.html` in `#error-panel`. It shows the code, one sentence, and the `request_id`. It does not use `conflict.html` |
 | Database rule without a domain code (`StorageError` of `recipe-app`: `E-DB-003`, `E-DB-006`, `E-DB-007`) | `409` | `error.html`. The event log gets an `ERROR` line |
 | Concurrent edit (`E-WEB-001`) | `409` | `conflict.html` (section 4) |
-| Database trigger (`E-PLT-030..038`, `E-RCP-030..036`) | `409` for a state rule, `422` for a shape rule, as `reliability.md` section 1.2 gives | `error.html`. The event log gets an `ERROR` line, because the domain check should have fired first |
+| Database trigger (`E-PLT-030..038`, `E-RCP-030..037`) | `409` for a state rule, `422` for a shape rule, as `reliability.md` section 1.2 gives | `error.html`. The event log gets an `ERROR` line, because the domain check should have fired first |
 | No permission (`E-WEB-002`) | `403` | `error.html` with the operation name |
 | CSRF token missing or wrong (`E-WEB-007`) | `403` | `error.html` |
 | No session, expired session (`E-WEB-004`) | `401` | `HX-Redirect: /login` for HTMX, `303` to `/login` otherwise. `E-WEB-004` is the only code with `HX-Redirect` |
@@ -731,15 +731,21 @@ Sessions follow ADR-0014. The session store is the `session` table in PostgreSQL
 
 | Attribute | Value |
 |---|---|
-| Name | `__Host-recipe_session` |
+| Name | `__Host-recipe_session`. With `session.secure=false`, the name is `recipe_session` |
 | `HttpOnly` | yes |
-| `Secure` | yes. The server refuses to start when `session.secure` is `false`, except in a build with the `dev` feature |
+| `Secure` | yes. With `session.secure=false`, no. The server refuses to start when `session.secure` is `false`, except in a build with the `dev` feature |
 | `SameSite` | `Strict` |
 | `Path` | `/` |
-| `Domain` | not set, as the `__Host-` prefix requires |
+| `Domain` | not set, as the `__Host-` prefix requires. `recipe_session` also has no `Domain` |
 | Content | a random 128-bit token only. The database stores `SHA-256(token)` as `session.id`. No user data in the cookie |
 
-The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11).
+The setting `session.secure` sets `Secure` on each cookie of the server (ADR-0171). Only a build with the `dev` feature accepts `false` (ADR-0062 (b)).
+
+- With `false`, no cookie has `Secure`. Section 7.3 gives the pre-session cookie, and section 8 gives the language cookie.
+- With `false`, the session cookie and the pre-session cookie lose the prefix `__Host-`, because a browser refuses that prefix without `Secure`.
+- Each cookie keeps its other attributes. One process uses one set of cookie names.
+
+The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The value of `session.secure` does not change this header. A browser ignores it on plain HTTP (ADR-0171 (e)).
 
 The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035).
 
@@ -763,7 +769,7 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 - `SameSite=Strict` is the first line of defense.
 - Every mutating request from an authenticated session carries a token bound to the session. Forms send it in the hidden field `csrf_token`. HTMX requests send it in the header `X-CSRF-Token`. The `hx-headers` attribute on `<body>` sets the header. `Login` creates the token. `ChangeOwnPassword` creates a new session with a new token and returns `HX-Refresh: true`, so the browser loads the page again with the new token in `hx-headers`.
 - `POST /login` and `POST /lang` without a session use a pre-session token: a signed double-submit cookie `__Host-recipe_csrf` and the field `csrf_pre`. `GET /login` sets the cookie. The key of the Docker secret `csrf_signing_key` signs it (`security.csrf_signing_key_file`, `reliability.md` 7.11).
-- The pre-session cookie holds a 128-bit nonce and its HMAC-SHA256 under the first key. It has `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, and no `Max-Age`. The field `csrf_pre` holds the nonce. `POST /login` always accepts this token, also with a session (ADR-0035). `POST /lang` accepts the CSRF token of the session or a valid `csrf_pre`, with or without a session (ADR-0131).
+- The pre-session cookie holds a 128-bit nonce and its HMAC-SHA256 under the first key. It has `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, and no `Max-Age`. With `session.secure=false`, the cookie is `recipe_csrf` without `Secure` (section 7.1, ADR-0171). The field `csrf_pre` holds the nonce. `POST /login` always accepts this token, also with a session (ADR-0035). `POST /lang` accepts the CSRF token of the session or a valid `csrf_pre`, with or without a session (ADR-0131).
 - A mutating request is a request with any method except `GET`, `HEAD`, and `OPTIONS` (ADR-0035).
 - Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. An `Origin` matches the site when it equals `https://` followed by the `Host` header (ADR-0035). A request without either is rejected.
 - A mutating request without a valid token or without a valid origin gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8). When the event cannot be written, the request gets the storage error (ADR-0035).
@@ -839,7 +845,7 @@ Answers:
 ## 8. Internationalization
 
 - The plain cookie `recipe_lang` stores the UI language. The session does not store it. The default is `pl` (R10). `en` is the second supported language (A17).
-- Cookie `recipe_lang`: value `pl` or `en`, `Max-Age` from `i18n.lang_cookie_max_age` (`reliability.md` 7.11), `Secure`, `SameSite=Strict`, `Path=/`. It holds no secret, so it needs no `HttpOnly`. The server checks the value on every request. Any other value counts as missing, and the UI uses `pl`.
+- Cookie `recipe_lang`: value `pl` or `en`, `Max-Age` from `i18n.lang_cookie_max_age` (`reliability.md` 7.11), `Secure`, `SameSite=Strict`, `Path=/`. With `session.secure=false`, the cookie keeps its name and has no `Secure` (section 7.1, ADR-0171). It holds no secret, so it needs no `HttpOnly`. The server checks the value on every request. Any other value counts as missing, and the UI uses `pl`.
 - The server ignores `Accept-Language`. A plant workstation often has an English operating system and a Polish operator.
 - `POST /lang` sets the cookie and returns `303` to the `next` field when it is a same-origin relative path. The path starts with `/`, and its second character is neither `/` nor `\`. The path holds no `\` and no control or white-space character (ADR-0035). Otherwise it returns `303` to `/recipes`. The server never redirects to the `Referer` header. `POST /lang` works before login and in read-only mode, because it writes no database row. The language change is not audited.
 - Parameter names and descriptions show the translation for the UI language when one exists. Otherwise the English base text appears with a marker `(en)`. The rule applies to a parameter name or description without a label. The rule also covers the added and the old-only parameters of the diff and the preview (ADR-0152). A labeled field of the English base text shows the English base text in each UI language (ADR-0126 (f)). With the UI language `en`, the English base text appears without the marker (ADR-0126). In a page of another language, the English base text has `lang="en"`, and the marker stands outside it.

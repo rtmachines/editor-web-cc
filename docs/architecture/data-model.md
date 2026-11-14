@@ -19,7 +19,7 @@ This document defines the PostgreSQL 16 schema. SQL names come from this documen
 - Every foreign key column has an index, unless a unique constraint or a primary key already starts with that column.
 - Entity tables have `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. Tables that the application updates in place also have `updated_at`, set by trigger.
 - Soft delete uses a nullable `deleted_at` or `archived_at` column (ADR-0021).
-- Every function sets `search_path = pg_catalog, public, pg_temp`. A `SECURITY DEFINER` function also schema-qualifies every table, function, operator, and type name. A type keyword of the SQL standard, such as `BIGINT` or `INTERVAL`, needs no schema (ADR-0022, ADR-0098).
+- Every function sets `search_path = pg_catalog, public, pg_temp`. A `SECURITY DEFINER` function also schema-qualifies every table, function, operator, and type name. A type keyword of the SQL standard, such as `BIGINT` or `INTERVAL`, needs no schema (ADR-0022, ADR-0098). The one exception is the event-trigger function `audit_guard.audit_objects_dropped()`, which the superuser owns and which sets `search_path = pg_catalog, pg_temp` (section 5.1, [ADR-0167](../adr/0167-search-path-of-the-audit-guard.md)).
 - Isolation is `READ COMMITTED`. Commands lock rows in one order: `machine` → `recipe` → `recipe_version` → `unit` → children. Section 6 gives the sequence per command.
 - Expected scale is Assumption A19. Size budgets are Assumption A26. No table is partitioned.
 - The schema is `public`. Roles are in section 5.

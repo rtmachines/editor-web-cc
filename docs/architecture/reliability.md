@@ -944,9 +944,9 @@ This table is the single source for every numeric setting. A key of the first co
 | `session.idle_timeout` | 30 min | 7.12, api.md 7.2 |
 | `session.absolute_timeout` | 12 h | 7.12, api.md 7.2, data-model.md 3.6 |
 | `session.cleanup_interval` | 10 min | 2.4, api.md 7.2, data-model.md 3.6 |
-| `session.cookie_name` | `__Host-recipe_session`, Secure, HttpOnly, SameSite=Strict, Path=/ | api.md 7.1 |
+| `session.cookie_name` | `__Host-recipe_session`, Secure, HttpOnly, SameSite=Strict, Path=/. With `session.secure=false`: `recipe_session` without Secure (ADR-0171) | api.md 7.1 |
 | `session.token_bits` | 128. The database stores SHA-256 of the token | api.md 7.1 |
-| `session.secure` | `true`. `false` refuses to start without the `dev` feature | 7.12, api.md 7.1 |
+| `session.secure` | `true`. `false` refuses to start without the `dev` feature. In a `dev` build, no cookie has Secure with `false` (ADR-0171) | 7.12, api.md 7.1, api.md 7.3, api.md 8 |
 | `login.delay_after_failures` | 3 failures per (login, client_ip) in 15 min | api.md 7.4, data-model.md 6 |
 | `login.delay_formula` | `2^(n-3)` s, cap 60 s | api.md 7.4, data-model.md 6 |
 | `login.ip_budget` | 100 failures per client_ip in 15 min, then 429 | api.md 7.4, data-model.md 6 |
