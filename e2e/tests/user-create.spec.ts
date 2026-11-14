@@ -1,10 +1,12 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { adminCookies, seedSweepData } from './support/pages';
 
 // Design D11 (b) of the change review-design-fixes (F-06, ADR-0172): the form of a new user
 // drops a second submit while the first request runs. The server answers the first request after
-// a delay, so the double click falls inside that window. The test counts the requests
-// `POST /users` and reads the one-time password on the result page.
+// a delay. The test clicks once, waits until that request has left, and clicks again inside the
+// delay. A `dblclick()` does not work here: it fires both clicks in one task, so even a plain form
+// sends one request. The test counts the requests `POST /users` and reads the one-time password
+// on the result page.
 
 /** The seed step hashes passwords, so a debug build of the dev server needs time. */
 const SEED_TIMEOUT_MS = 180_000;
@@ -58,8 +60,10 @@ test.describe('form of a new user, language en', () => {
   test('A double submit sends one request and shows the one-time password', async ({ page }) => {
     const consoleErrors = collectConsoleErrors(page);
     const posts: string[] = [];
+    const isUserPost = (request: Request): boolean =>
+      request.method() === 'POST' && new URL(request.url()).pathname === '/users';
     page.on('request', (request) => {
-      if (request.method() === 'POST' && new URL(request.url()).pathname === '/users') {
+      if (isUserPost(request)) {
         posts.push(request.url());
       }
     });
@@ -76,10 +80,22 @@ test.describe('form of a new user, language en', () => {
     await page.goto('/users/new');
     const form = page.locator('#user-new-form');
     await expect(form).toBeVisible();
-    await expect(form).toHaveAttribute('hx-sync', 'closest form:drop');
     await form.locator('input[name="login"]').fill(uniqueLogin());
 
-    await form.locator('#user-new-submit').dblclick();
+    const submit = form.locator('#user-new-submit');
+    const firstPost = page.waitForRequest(isUserPost);
+    // A locator action waits for a navigation that an earlier click started, and a plain form
+    // starts one. So both clicks are mouse clicks at the centre of the button.
+    const box = await submit.boundingBox();
+    if (!box) {
+      throw new Error('The submit button has no box.');
+    }
+    const centreX = box.x + box.width / 2;
+    const centreY = box.y + box.height / 2;
+    await page.mouse.click(centreX, centreY);
+    await firstPost;
+    // The first request is in flight and its answer waits for ANSWER_DELAY_MS.
+    await page.mouse.click(centreX, centreY);
 
     const password = page.locator('#one-time-password');
     await expect(password).toBeVisible();
