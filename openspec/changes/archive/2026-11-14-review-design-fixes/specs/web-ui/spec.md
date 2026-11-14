@@ -3,10 +3,10 @@
 ### Requirement: Notice after a committed change with a failed read
 When a command commits and the read of its answer fails, the server SHALL answer an HTMX request with `200` and a notice in `#toast`. The notice SHALL say "The change is saved. Reload the page." The answer SHALL empty `#error-panel` and SHALL set `HX-Trigger` with `rowVersion` when the command gives the new value. The server SHALL write one `WARN` line with the code of the read fault and the `request_id`. A request without HTMX SHALL get `303` to the page of the changed object (R31, R35, R39).
 
-#### Scenario: Parameter removal with a failed read of the version page
+#### Scenario: Parameter deletion with a failed read of the version page
 - **GIVEN** the ProcessEngineer `anowak` with an open session and the parameter `SPEED` of the draft version 3 of `R-100` with `row_version` 7
 - **AND** a read of the version page after the commit that fails with `E-DB-004`
-- **WHEN** `anowak` sends an HTMX request that removes `SPEED` with `row_version` 7
+- **WHEN** `anowak` sends an HTMX request that deletes `SPEED` with `row_version` 7
 - **THEN** the server returns `200` with the notice in `#toast`
 - **AND** the response empties `#error-panel` out of band
 - **AND** the response sets the header `HX-Trigger` to `{"rowVersion": 8}`
