@@ -397,7 +397,7 @@ The protocol implements ADR-0008 and ADR-0015 for every `Draft`.
 1. `GET /recipes/{ref}/versions/{n}` renders the current `row_version` of the version into a hidden field `row_version` of every form on the page.
 2. Every mutating request on that version sends `row_version`.
 3. The use case locks the recipe row and then the version row with `FOR UPDATE` and compares `row_version` with the sent value. A mismatch rolls back and returns `Err(ConcurrentEdit { reference, number, expected, actual })`. The application never sets `row_version`. The database trigger function `bump_row_version` increments it on every update of the version row (`data-model.md` section 4.4).
-4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page. The one exception is a discard success: it answers `303` without `HX-Trigger` (ADR-0049 (f)).
+4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page. The one exception is a discard success: it answers `303` without `HX-Trigger` (ADR-0049 (f)). The notice answer of section 5.4 sets `HX-Trigger` only when the command output holds the new `row_version` (ADR-0163 (f)). `DraftOutput` holds it. The outputs of `ApproveVersion`, `RetireVersion`, `AddUnit`, `SetUserRole`, `DeactivateUser`, `ActivateUser`, and `UnlockLogin` do not hold it (ADR-0163 (g)).
 5. On conflict the server returns `409 E-WEB-001` with the fragment `conflict.html`. The fragment shows: the current server `row_version`, the login of the last editor, the time of the last change, and one link "Reload version". The link goes to the version page with `hx-boost="true"` (ADR-0043). The unsaved input stays in the form until the reload. The time is `updated_at` of the version, and the last editor is the actor of the audit entry of that time (ADR-0043).
 6. The `409` response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036). The original target of the request does not change. HTMX swaps the `409` fragment because of the `responseHandling` value of section 9.
 7. Every approve and save form has `hx-sync="closest form:drop"`. A second click while a request is in flight is dropped in the browser. The retire, discard, delete, and restore forms have the same attribute (ADR-0049).
@@ -461,6 +461,20 @@ The same code appears in the structured log of the request. A user can report th
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
 - The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`. `message` is the sentence of the code in the UI language, without the reference. The answer has no `HX-*` header, also for an HTMX request. On the two session routes, a request without a valid session gets `303` to `/login`, and a session with `must_change_password` gets `303` to `/me/password` (ADR-0053). On a transfer route, `message` uses the UI language of the request, and the default is `pl` (ADR-0109 (r)).
 - The answer of the backstop of section 5.1 is the one exception to these rules (ADR-0057 (e)).
+
+### 5.4 Success answer after a failed read
+
+Some handlers run a command and then read the new state for the answer. ADR-0163 (a) and (b) name these handlers. The read runs in a new transaction after the commit.
+
+When that read fails, the command stored the change. The handler then gives a success answer and no error answer (ADR-0163):
+
+- An HTMX request gets `200` with a fixed notice in `#toast`. The `en` text is "The change is saved. Reload the page." (ADR-0163 (c), (j)).
+- The answer sets `HX-Retarget: #toast`, `HX-Reswap: innerHTML`, and `HX-Push-Url: false` (ADR-0163 (d)).
+- The answer also holds an empty `#error-panel` with `hx-swap-oob="innerHTML"`. A stale error line then goes away (ADR-0163 (e)).
+- Section 4 step 4 gives the rule of `HX-Trigger` for this answer.
+- The answer swaps no form out of band, because no read gives the saved form. This case is the only exception to ADR-0041 (h) (ADR-0163 (k)).
+- A request without `HX-Request` gets `303` to the page of the changed object. The `GET` of that page reads the state again (ADR-0163 (h)).
+- `reliability.md` section 1.1 gives the log line of the failed read.
 
 ## 6. Export document (v1 and v2) and connection document
 

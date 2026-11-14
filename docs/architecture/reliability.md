@@ -38,6 +38,8 @@ Rules:
 - The backstop panic layer of 2.4 rule 3 writes the line of its own `E-WEB-010` answer, because `render_errors` does not run for it (ADR-0057 (g)).
 - A caught panic gives two `ERROR` lines: the event of the panic hook and the line of `E-WEB-010`. These are two events, so the rule above stays true (ADR-0057 (f)).
 - The handler of `POST /users/{login}/unlock` logs a lost security event `unlock` once at `WARN`. The line holds `error_code` and `request_id`. `UnlockLogin` completes and does not log the fault (ADR-0130 (a), (b), (c)).
+- A handler of `api.md` section 5.4 logs a failed read after a committed command once at `WARN`. The line holds `error_code`, `request_id`, and `chain` (ADR-0163 (i)).
+- The shared function of the notice answer in `recipe-web` writes this line. The `WebError` mapping does not run for it (ADR-0163 (j)).
 - A background job logs a handled fault once at `WARN` and continues, for example a `WebhookFault`. It returns `Err` only for an error of level `ERROR` of 3.3. The supervisor logs that `Err` once inside the span `job` of 3.2 (ADR-0060 (p), (q), ADR-0088 (a)). The one exception is the failed snapshot read of the job `alerts` in 3.7. The supervisor logs it at `WARN` (ADR-0089 (d)).
 - The log line of an error holds its code and the `Display` text of each error in the chain. It never holds the `Debug` output of an error, because the `Debug` of a database error holds the row values of the detail (ADR-0035).
 - The log line of `AppError::Timeout` also has the field `stage` with the `Display` text of `TimeoutStage`. The line of another error has no field `stage`, and the chain holds no stage text (ADR-0129).

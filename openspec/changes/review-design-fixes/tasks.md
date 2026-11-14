@@ -21,9 +21,9 @@ The ste-lint Check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 2. Group G2: index, F-01 text, F-15 text
 
-- [ ] 2.1 (docs/adr) [mechanical] [haiku] All findings, D14. Add the rows 0163 to 0172 to the index of `docs/adr/README.md`. Copy the new Status lines of the 15 ADRs of tasks 1.1 to 1.12 into their index cells. Update the decision map. Red test: none. Check: ste-lint on `docs/adr/README.md`.
-- [ ] 2.2 (docs/architecture) [opus] F-01, D1. Write the notice answer with the empty `#error-panel` in `api.md` §4 and §5. Add the new log place to `reliability.md` §1.1, `CLAUDE.md`, and `.claude/rules/rust.md`. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/architecture/reliability.md`.
-- [ ] 2.3 (docs/architecture) [mechanical] [haiku] F-15, D6. Add the read before the transaction to the rows `CreateUser`, `ResetPassword`, and `CreateRecipe` of `data-model.md` §6. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
+- [x] 2.1 (docs/adr) [mechanical] [haiku] All findings, D14. Add the rows 0163 to 0172 to the index of `docs/adr/README.md`. Copy the new Status lines of the 15 ADRs of tasks 1.1 to 1.12 into their index cells. Update the decision map. Red test: none. Check: ste-lint on `docs/adr/README.md`.
+- [x] 2.2 (docs/architecture) [opus] F-01, D1. Write the notice answer with the empty `#error-panel` in `api.md` §4 and §5. Add the new log place to `reliability.md` §1.1, `CLAUDE.md`, and `.claude/rules/rust.md`. Red test: none. Check: ste-lint on `docs/architecture/api.md docs/architecture/reliability.md`.
+- [x] 2.3 (docs/architecture) [mechanical] [haiku] F-15, D6. Add the read before the transaction to the rows `CreateUser`, `ResetPassword`, and `CreateRecipe` of `data-model.md` §6. Red test: none. Check: ste-lint on `docs/architecture/data-model.md`.
 
 ## 3. Group G3: F-02 text, F-12 text
 
