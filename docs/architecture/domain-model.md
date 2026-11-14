@@ -670,13 +670,15 @@ Commit paths. Each write goes through one port of `recipe-app` (ADR-0015):
 Detached span (ADR-0172). `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check of `AuthenticateBasic` can commit a step and then write a security event. A dropped request future does not lose that event:
 
 1. The request future takes the `HashGate` permit or the Basic permit, so the gate wait stays cancellable. `UnlockLogin` takes no permit (ADR-0172 (h)).
-2. Before the first transaction, the request future takes a slot of `identity.detached_tasks`. A late slot gives `E-WEB-009`, and nothing commits (`reliability.md` 1.1, ADR-0172 (w)).
+2. After the permit and before the first transaction, the request future takes a slot of `identity.detached_tasks` (ADR-0173 (s)). A late slot gives `E-WEB-009`, and nothing commits (`reliability.md` 1.1, ADR-0172 (w)).
 3. The request future moves the permit and the slot into a detached task (ADR-0172 (i)).
 4. The task runs the span from the first transaction to the write of the security event. For `UnlockLogin`, the span is the commit of `LoginUnlocked` and the event `unlock`.
 5. The task sends its judge result through a `oneshot`. Then the request future runs T2 of `Login`, `replace` of `ChangeOwnPassword`, or the step after the judge of the Basic check (ADR-0172 (j), (k)).
-6. When the receiver is closed, the task skips that step, because no future waits for it (ADR-0172 (l)).
+6. After a passed judge of `Login` or of the Basic check, the task keeps its slot and waits for the verdict of T2 (ADR-0173 (c), (d)).
+7. On a T2 refusal, the request future sends the event to the task and waits for the end of the write. On a grant, the task ends with no write (ADR-0173 (e) to (g)).
+8. When the receiver is closed, the task skips that step, because no future waits for it. An `Err` result then gives one `WARN` line (ADR-0172 (l), ADR-0173 (m)).
 
-The four use cases share one function that writes the event. A failed write gives the one `WARN` line of the task (`reliability.md` 1.1). The use case then gives the answer that it gives without the fault (ADR-0172 (m) to (q)). A panic of the task gives `E-WEB-011` (`reliability.md` 2.4 rule 7).
+The four use cases share one function that writes the event. A failed write gives the one `WARN` line of the task (`reliability.md` 1.1). The use case then gives the answer that it gives without the fault (ADR-0172 (m) to (q)). A panic of the task gives `E-WEB-011` (`reliability.md` 2.4 rule 7). A drop during an await of T2 before its decision writes no event (ADR-0173 (k)).
 
 The jobs and the health router also use ports that write nothing to the database (ADR-0060 (a) to (f)):
 

@@ -1,6 +1,6 @@
 # ADR-0172: Dropped future after a committed step
 
-Status: Accepted. Amends ADR-0125 (f), ADR-0130 (b) and (c), and ADR-0133 (c)
+Status: Accepted. Amends ADR-0125 (f), ADR-0130 (b) and (c), and ADR-0133 (c). Amended by ADR-0173 (the event of a T2 refusal, a lost error result, the slot order, the slot after the drain)
 Date: 2026-11-14
 Deciders: project owner
 

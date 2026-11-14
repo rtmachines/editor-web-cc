@@ -32,15 +32,16 @@ Rules:
 - `SetUserRole` and `DeactivateUser` run in `READ COMMITTED` with no retry. They take the class-4 guard lock of the last Administrator first (ADR-0096). Only the first-administrator operation of `create-admin` runs in `SERIALIZABLE`. It runs once more on `Deadlock { cause: Serialization }`, also when it comes from the audit insert or from the commit. A second serialization failure returns `E-DB-001` (ADR-0035). Every other command runs in `READ COMMITTED` with no retry. `40P01` maps to `E-DB-001` and is logged at `ERROR`, because a deadlock is a bug in the lock order (ADR-0015).
 - `recipe-app` maps `StorageError::Duplicate` to the domain duplicate error of the use case (`DuplicateReference`, `DuplicateMachineCode`, `DuplicateUnitPath`, `DuplicateLogin`, `DuplicateTag`, `DuplicateTypeName`, `DuplicateMemberName`, `DraftAlreadyExists`) by the constraint name. A `Duplicate` with an unknown constraint name stays `AppError::Storage` with code `E-DB-006`. The same rule maps `StorageError::MissingReference` by the constraint name, for example `unit_parent_exists` to `ParentNotFound`. An unknown name gives `E-DB-007`.
 - `AppError::Timeout { stage }` owns `E-WEB-009`. The Argon2 permit, the snapshot validation, the export, and the diff of two versions (ADR-0050) use it. The request timeout layer of `recipe-web` returns `AppError::Timeout { stage: Request }` (ADR-0058 (g)), so every timeout has one code.
-- A slot of `identity.detached_tasks` that does not come within `argon2.acquire_timeout` also gives `Timeout { stage: DetachedSlot }`. Nothing commits (ADR-0172 (w)).
+- A slot of `identity.detached_tasks` that does not come within `argon2.acquire_timeout` also gives `Timeout { stage: DetachedSlot }`. Nothing commits (ADR-0172 (w)). After the drain of 7.3, the slot wait and the spawn fail at once with this error (ADR-0173 (x), (y)).
 - A body that does not arrive within the body deadline of 7.4 also gives `AppError::Timeout { stage: Request }` (`E-WEB-009`). Every other error of the body read stays `E-WEB-003` (ADR-0058 (j)).
 - `AppError::TaskFailed { stage }` owns `E-WEB-011`. The use case maps the `JoinError` of a `spawn_blocking` task to it (2.4). It also maps the closed sender of a detached task to it (ADR-0172 (aa)). `E-WEB-010` stays the code of a panic that one of the two panic layers of 2.4 rule 3 catches.
 - An error is logged exactly once. The log statement is in the `WebError` to HTTP mapping in `recipe-web`. Lower layers add context and propagate. They do not log the error.
 - The backstop panic layer of 2.4 rule 3 writes the line of its own `E-WEB-010` answer, because `render_errors` does not run for it (ADR-0057 (g)).
 - A caught panic gives two `ERROR` lines: the event of the panic hook and the line of `E-WEB-010`. These are two events, so the rule above stays true (ADR-0057 (f)).
-- The detached task of 2.4 rule 7 logs a lost security event once at `WARN`. It writes the line before it sends its result (ADR-0172 (m), (n)).
+- The detached task of 2.4 rule 7 logs a lost security event once at `WARN`. It writes the line before it sends its result. It also writes the event of a T2 refusal (ADR-0172 (m), (n), ADR-0173 (e), (h)).
 - The line holds `error_code` and `request_id`. The task runs with `.instrument(Span::current())`, so the line keeps the span of the request (ADR-0172 (t)).
 - The use case does not return the storage fault of the event. The handler never logs a lost event (ADR-0172 (o), (r)).
+- When no request future receives an `Err` result, the task logs it once at `WARN` with `error_code` and `chain` (ADR-0173 (m) to (p)).
 - After a lost event, `UnlockLogin` completes (ADR-0130 (a)). `Login`, `ChangeOwnPassword`, and the Basic check give their refusal or their throttle answer (ADR-0172 (p), (q)).
 - A handler of `api.md` section 5.4 logs a failed read after a committed command once at `WARN`. The line holds `error_code`, `request_id`, and `chain` (ADR-0163 (i)).
 - The shared function of the notice answer in `recipe-web` writes this line. The `WebError` mapping does not run for it (ADR-0163 (j)).
@@ -287,12 +288,12 @@ A panic in application code is a bug, not an error. The system contains it and k
    - the join of the watchdog thread in `Watchdog::stop`. A panic there sets `watchdog_panicked`, and the stop continues (ADR-0125 (f)).
    - the `JoinSet` of the detached tasks of rule 7. A panic there only frees its slot (ADR-0172 (ab), (ad)).
 7. A panic inside a `spawn_blocking` task (Argon2id hashing, snapshot validation, export rebuild, diff of two versions) reaches the use case as a `JoinError`. The use case maps it to `AppError::TaskFailed { stage }`, which returns `500 E-WEB-011`. The panic hook of rule 2 logs the panic.
-   - `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check run a detached task from their first transaction to the security event (`domain-model.md` 5, ADR-0172 (g), (i)).
+   - `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check run a detached task from their first transaction to the security event (`domain-model.md` 5, ADR-0172 (g), (i)). The task of `Login` and of the Basic check keeps its slot until T2 decides (ADR-0173 (d)).
    - The detached tasks run in one `JoinSet` behind a `parking_lot::Mutex`. Each task holds an owned permit of `identity.detached_tasks` as its slot (ADR-0172 (x), (y)).
    - The slot drops when the task ends, also after an error and during the unwind of a panic (ADR-0172 (x)).
    - Each spawn first reaps every finished task with `try_join_next`. The `JoinSet` therefore holds at most `identity.detached_tasks` open tasks and the tasks that ended since the last spawn (ADR-0172 (z)).
    - A panic inside a detached task closes its `oneshot` sender. The use case maps the closed sender to `AppError::TaskFailed { stage: Detached }` (`E-WEB-011`, ADR-0172 (aa)).
-   - The reaper writes no line for a panic. The panic hook of rule 2 logs the panic. While the client waits, the `WebError` mapping also logs the `TaskFailed` (ADR-0172 (ab), (ac)).
+   - The reaper writes no line for a panic. The panic hook of rule 2 logs the panic. While the client waits, the `WebError` mapping also logs the `TaskFailed` (ADR-0172 (ab), (ac)). With no client, the task logs a `TaskFailed` of its `spawn_blocking` work at `WARN` (1.1, ADR-0173 (q)).
 
 A panic is a visible signal. The job `alerts` raises an alert when more than `alerts.panic_count` panic events occur in `alerts.panic_window` (section 3.7).
 
@@ -632,7 +633,7 @@ ADR-0090 (b) holds a pool close that reaches its limit. ADR-0061 (f) holds a sig
 
 1. The process receives `SIGTERM` from Docker, or an accept loop ends (ADR-0125 (i)). Both events start the stop.
 2. Readiness turns off, and the watchdog stops. The public listener stops accepting new connections. The supervised jobs get the cancel.
-3. Requests in flight, open job iterations, and the detached tasks of 2.4 rule 7 continue together. They share the one deadline of `shutdown.drain` (ADR-0172 (af), (ag)). Open transactions commit or roll back as their use case finishes. The internal listener still serves `/healthz` with `ok` and `/readyz` with `not ready`.
+3. Requests in flight, open job iterations, and the detached tasks of 2.4 rule 7 continue together. They share the one deadline of `shutdown.drain` (ADR-0172 (af), (ag)). The drain of the detached tasks closes their slots, so a new identity command gets `E-WEB-009` at once (ADR-0173 (x), (y)). Open transactions commit or roll back as their use case finishes. The internal listener still serves `/healthz` with `ok` and `/readyz` with `not ready`.
 4. After `shutdown.drain`, the server aborts the open connections and does not wait for them. Their transactions roll back (ADR-0087 (d)). The supervisor aborts the open job iterations in the same way (ADR-0060 (j)).
    - The server also aborts the open detached tasks with one `WARN` line that gives their count. Their transactions roll back (ADR-0172 (ah)).
 5. Both pools close after the drain of the detached tasks (ADR-0172 (af)), within `shutdown.pool_close`. The pool close waits for the connections of the aborted tasks. A pool whose close reaches the limit gets one `WARN` line that names the pool, and the stop continues (ADR-0090 (b), 1.1). Then the internal listener stops with the drain `shutdown.internal_drain` of 0 s. It cuts its connections at once (ADR-0087 (a)).
