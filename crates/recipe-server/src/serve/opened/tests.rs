@@ -1,12 +1,14 @@
 //! The time budget of the close of both pools (`reliability.md` section 7.3 step 5, ADR-0090 (b)).
 
 use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::Router;
 use recipe_app::error::AppError;
+use recipe_app::identity::DetachedTasks;
 use recipe_app::jobs::RunKind;
 use recipe_db::CloseOutcome;
 use recipe_domain::audit::RequestId;
@@ -314,5 +316,180 @@ async fn join_of_a_panicked_listener_writes_a_warn_line_and_no_error_line() {
             line.contains("\"level\":\"WARN\"") && line.contains("\"listener\":\"Public\"")
         }),
         "no WARN line with the field listener: {lines:?}"
+    );
+}
+
+/// A detached set with room for the tasks of one test.
+fn detached_set() -> DetachedTasks {
+    DetachedTasks::new(8, Duration::from_secs(1))
+}
+
+/// Start a detached task that sleeps for `sleep` and then sets `done`.
+async fn spawn_detached_sleeper(tasks: &DetachedTasks, sleep: Duration, done: Arc<AtomicBool>) {
+    let slot = tasks.acquire().await.unwrap();
+    let _result = tasks.spawn(slot, async move {
+        tokio::time::sleep(sleep).await;
+        done.store(true, Ordering::SeqCst);
+    });
+}
+
+/// A value that sets its flag when it drops. A task that holds it shows its abort.
+struct DropFlag(Arc<AtomicBool>);
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+}
+
+/// Start a detached task that never ends. The flag is set when the abort drops its future.
+async fn spawn_detached_hanger(tasks: &DetachedTasks, dropped: Arc<AtomicBool>) {
+    let slot = tasks.acquire().await.unwrap();
+    let _result = tasks.spawn(slot, async move {
+        let _flag = DropFlag(dropped);
+        std::future::pending::<()>().await;
+    });
+}
+
+/// ADR-0172 (af) and `reliability.md` section 7.3 steps 3 and 5: a detached task that ends inside
+/// the drain ends before the pool close starts.
+#[tokio::test(start_paused = true)]
+async fn stop_waits_for_detached_tasks_before_the_pool_close() {
+    let shutdown = ShutdownSettings::default();
+    let logs = LogCapture::start();
+    let detached = detached_set();
+    let task_time = Duration::from_secs(2);
+    let done = Arc::new(AtomicBool::new(false));
+    spawn_detached_sleeper(&detached, task_time, Arc::clone(&done)).await;
+    let main_pool = Arc::new(SlowPool::default());
+    let health_pool = Arc::new(SlowPool::default());
+    let resources = Resources {
+        main_pool: Some(main_pool.clone()),
+        health_pool: Some(health_pool.clone()),
+        detached: Some(detached),
+        ..Resources::default()
+    };
+    let started = Instant::now();
+    close_resources(resources, &IdleWatchdog, shutdown).await;
+    assert!(done.load(Ordering::SeqCst), "the task did not end");
+    assert_eq!(main_pool.close_started_after(started), Some(task_time));
+    assert_eq!(health_pool.close_started_after(started), Some(task_time));
+    let lines = logs.lines();
+    assert!(
+        lines.iter().all(|line| !line.contains("detached")),
+        "a drain without an abort wrote a line: {lines:?}"
+    );
+}
+
+/// ADR-0172 (ag) and (ah): the detached task shares the deadline of `shutdown.drain` with the job
+/// run. The abort writes one `WARN` line with the count. The pool close follows.
+#[tokio::test(start_paused = true)]
+async fn stop_aborts_a_detached_task_that_outlives_the_drain() {
+    let shutdown = ShutdownSettings::default();
+    let logs = LogCapture::start();
+    let detached = detached_set();
+    let dropped = [
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    ];
+    for flag in &dropped {
+        spawn_detached_hanger(&detached, Arc::clone(flag)).await;
+    }
+    let supervisor = supervisor_with_hanging_job().await;
+    let main_pool = Arc::new(SlowPool::default());
+    let health_pool = Arc::new(SlowPool::default());
+    let resources = Resources {
+        main_pool: Some(main_pool.clone()),
+        health_pool: Some(health_pool.clone()),
+        supervisor: Some(supervisor),
+        detached: Some(detached),
+        ..Resources::default()
+    };
+    let started = Instant::now();
+    let report = close_resources(resources, &IdleWatchdog, shutdown).await;
+    assert_eq!(
+        started.elapsed(),
+        shutdown.drain.checked_add(shutdown.pool_close).unwrap()
+    );
+    assert_eq!(report.cut_jobs, 1);
+    assert!(dropped.iter().all(|flag| flag.load(Ordering::SeqCst)));
+    assert_eq!(main_pool.close_started_after(started), Some(shutdown.drain));
+    assert_eq!(
+        health_pool.close_started_after(started),
+        Some(shutdown.drain)
+    );
+    let lines = logs.lines();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[0].contains("\"level\":\"WARN\"") && lines[0].contains("\"aborted\":2"),
+        "{lines:?}"
+    );
+    assert!(lines[1].contains("request pool"), "{lines:?}");
+    assert!(lines[2].contains("health pool"), "{lines:?}");
+}
+
+/// A public listener that ends after `after`. Just before it ends, it spawns a detached task that
+/// takes `task_time`. This is a request that continues in step 3 of `reliability.md` section 7.3.
+async fn public_listener_that_spawns_a_detached_task(
+    tasks: DetachedTasks,
+    after: Duration,
+    task_time: Duration,
+    done: Arc<AtomicBool>,
+) -> ListenerHandle {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let stop = CancellationToken::new();
+    let stopped = stop.clone();
+    let settings = ListenerSettings {
+        header_read_timeout: Duration::from_secs(30),
+        drain_deadline: Duration::ZERO,
+        accept_error_pause: Duration::from_millis(10),
+    };
+    let task = tokio::spawn(async move {
+        stopped.cancelled().await;
+        tokio::time::sleep(after).await;
+        spawn_detached_sleeper(&tasks, task_time, done).await;
+        AcceptLoop::new(Router::new(), settings, stopped)
+            .run(listener)
+            .await
+    });
+    ListenerHandle::new(ListenerKind::Public, stop, task)
+}
+
+/// ADR-0172 (af) and (ah): a request in flight can spawn a detached task after the drain has begun.
+/// The drain waits for that task before the pool close starts. No abort line exists.
+#[tokio::test(start_paused = true)]
+async fn stop_drains_a_detached_task_that_a_request_spawns_during_the_drain() {
+    let shutdown = ShutdownSettings::default();
+    let logs = LogCapture::start();
+    let detached = detached_set();
+    let listener_time = Duration::from_secs(1);
+    let task_time = Duration::from_secs(1);
+    let done = Arc::new(AtomicBool::new(false));
+    let public = public_listener_that_spawns_a_detached_task(
+        detached.clone(),
+        listener_time,
+        task_time,
+        Arc::clone(&done),
+    )
+    .await;
+    let main_pool = Arc::new(SlowPool::default());
+    let health_pool = Arc::new(SlowPool::default());
+    let resources = Resources {
+        main_pool: Some(main_pool.clone()),
+        health_pool: Some(health_pool.clone()),
+        detached: Some(detached),
+        public: Some(public),
+        ..Resources::default()
+    };
+    let started = Instant::now();
+    close_resources(resources, &IdleWatchdog, shutdown).await;
+    let both = listener_time.checked_add(task_time).unwrap();
+    assert!(done.load(Ordering::SeqCst), "the task did not end");
+    assert_eq!(main_pool.close_started_after(started), Some(both));
+    assert_eq!(health_pool.close_started_after(started), Some(both));
+    let lines = logs.lines();
+    assert!(
+        lines.iter().all(|line| !line.contains("detached")),
+        "a drain without an abort wrote a line: {lines:?}"
     );
 }

@@ -30,8 +30,10 @@ pub(crate) fn status_of(code: ErrorCode) -> StatusCode {
         | "E-PLT-037" | "E-PLT-038" | "E-PLT-052" | "E-RCP-001" | "E-RCP-002" | "E-RCP-007"
         | "E-RCP-009" | "E-RCP-010" | "E-RCP-011" | "E-RCP-012" | "E-RCP-014" | "E-RCP-015"
         | "E-RCP-025" | "E-RCP-026" | "E-RCP-030" | "E-RCP-031" | "E-RCP-033" | "E-RCP-034"
-        | "E-IDN-001" | "E-IDN-002" | "E-IDN-009" | "E-IDN-010" | "E-IDN-011" | "E-EXP-003"
-        | "E-DB-003" | "E-DB-006" | "E-DB-007" | "E-WEB-001" | "E-WEB-013" => StatusCode::CONFLICT,
+        | "E-RCP-037" | "E-IDN-001" | "E-IDN-002" | "E-IDN-009" | "E-IDN-010" | "E-IDN-011"
+        | "E-EXP-003" | "E-DB-003" | "E-DB-006" | "E-DB-007" | "E-WEB-001" | "E-WEB-013" => {
+            StatusCode::CONFLICT
+        }
         "E-PLT-002" | "E-PLT-003" | "E-PLT-005" | "E-PLT-006" | "E-PLT-013" | "E-PLT-016"
         | "E-PLT-017" | "E-PLT-018" | "E-PLT-021" | "E-PLT-022" | "E-PLT-023" | "E-PLT-024"
         | "E-PLT-025" | "E-PLT-026" | "E-PLT-028" | "E-PLT-031" | "E-PLT-032" | "E-PLT-035"

@@ -9,6 +9,7 @@ PUBLIC:machine_platform_frozen()|EXECUTE
 PUBLIC:plc_connection_sync_db_number()|EXECUTE
 PUBLIC:plc_type_immutable()|EXECUTE
 PUBLIC:plc_type_struct_has_member()|EXECUTE
+PUBLIC:recipe_version_insert_draft()|EXECUTE
 PUBLIC:recipe_version_transition()|EXECUTE
 PUBLIC:set_updated_at()|EXECUTE
 PUBLIC:version_size_budget()|EXECUTE

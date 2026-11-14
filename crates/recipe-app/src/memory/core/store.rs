@@ -24,6 +24,9 @@ pub(super) struct Faults {
     pub(super) insert_unit: Option<Fault>,
     pub(super) insert_struct: Option<Fault>,
     pub(super) insert_version: Option<Fault>,
+    /// The fault of `fail_begin_after_commit` and the number of committed audit entries when
+    /// the method armed it.
+    pub(super) begin_after_commit: Option<(Fault, usize)>,
 }
 
 /// The change that a race test makes. It gets the store.
@@ -43,6 +46,20 @@ impl fmt::Debug for ReadDraftHook {
     }
 }
 
+/// A change that runs once, just before the lock of the next `ReadCommitted` transaction.
+#[derive(Default)]
+pub(super) struct LockVersionHook(Option<Hook>);
+
+impl fmt::Debug for LockVersionHook {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(if self.0.is_some() {
+            "LockVersionHook(set)"
+        } else {
+            "LockVersionHook(empty)"
+        })
+    }
+}
+
 /// The state that all clones of a store and all its transactions share.
 #[derive(Debug)]
 pub(super) struct Shared {
@@ -56,6 +73,7 @@ pub(super) struct Shared {
     pub(super) queued_faults: Vec<(FaultPoint, Fault)>,
     pub(super) clock: MemoryClock,
     pub(super) read_draft_hook: ReadDraftHook,
+    pub(super) lock_version_hook: LockVersionHook,
     /// The security event sink of the store. It shares the clock (ADR-0051 (a)).
     pub(super) sink: MemorySink,
 }
@@ -81,6 +99,7 @@ impl Shared {
             sink: MemorySink::with_clock(clock.clone()),
             clock,
             read_draft_hook: ReadDraftHook::default(),
+            lock_version_hook: LockVersionHook::default(),
         }
     }
 
@@ -165,6 +184,12 @@ impl MemoryStore {
         if let Some(fault) = shared.faults.begin {
             return Err(fault.into());
         }
+        if let Some((fault, armed_at)) = shared.faults.begin_after_commit
+            && shared.audit.len() > armed_at
+        {
+            shared.faults.begin_after_commit = None;
+            return Err(fault.into());
+        }
         shared.journal.push(JournalEntry::Begin(isolation));
         let visible = VisibleLogs {
             audit: shared.audit.len(),
@@ -234,6 +259,19 @@ impl MemoryStore {
         self.shared.lock().faults.begin = Some(fault);
     }
 
+    /// Make the first `begin_memory` after the next commit fail with `fault`. Later calls succeed.
+    ///
+    /// The method solves one problem: a handler reads the state after its command committed,
+    /// and a test needs that read to fail while the command succeeds. A `begin` before the
+    /// commit passes, so the command runs. A commit is a growth of the committed audit log,
+    /// because every command commit writes at least one entry. The failure leaves no `Begin`
+    /// line in the journal. `pool_transaction` does not take part.
+    pub fn fail_begin_after_commit(&self, fault: Fault) {
+        let mut shared = self.shared.lock();
+        let committed = shared.audit.len();
+        shared.faults.begin_after_commit = Some((fault, committed));
+    }
+
     /// Make the next `times` calls at `point` fail with `fault`. Later calls succeed.
     ///
     /// The method solves one problem: a retry test needs a failure that happens once or twice
@@ -292,6 +330,26 @@ impl MemoryStore {
     /// Take the hook of `on_read_draft` out of the store and run it without a lock.
     pub(super) fn run_read_draft_hook(&self) {
         let hook = self.shared.lock().read_draft_hook.0.take();
+        if let Some(hook) = hook {
+            hook(self);
+        }
+    }
+
+    /// Run `hook` once, just before the next `lock_version_shared`.
+    ///
+    /// The method solves one problem: the export reads the recipe in a `ReadOnly` transaction,
+    /// and another request can commit before the export locks the version in its
+    /// `ReadCommitted` transaction (step 3). The hook makes that commit. It runs inside
+    /// `lock_version_shared`, and the lock then reads the latest committed row, as the lock of
+    /// PostgreSQL does. A `begin` does not run the hook. A hook can arm the next hook. A second
+    /// call replaces a hook that did not run yet.
+    pub fn on_lock_version_shared(&self, hook: impl FnOnce(&Self) + Send + 'static) {
+        self.shared.lock().lock_version_hook = LockVersionHook(Some(Box::new(hook)));
+    }
+
+    /// Take the hook of `on_lock_version_shared` out of the store and run it without a lock.
+    pub(super) fn run_lock_version_hook(&self) {
+        let hook = self.shared.lock().lock_version_hook.0.take();
         if let Some(hook) = hook {
             hook(self);
         }

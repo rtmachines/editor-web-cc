@@ -71,8 +71,9 @@ pub(crate) struct PasswordFields {
 fn session_header(
     request: &PageRequest,
     token: &recipe_domain::identity::SessionToken,
+    secure: bool,
 ) -> Result<HeaderValue, WebError> {
-    session_cookie(token).map_err(|_invalid| WebError::Internal {
+    session_cookie(token, secure).map_err(|_invalid| WebError::Internal {
         request_id: request.request_id(),
     })
 }
@@ -83,7 +84,7 @@ pub(crate) async fn login_form(
     request: PageRequest,
 ) -> Result<Response, WebError> {
     GetLoginForm::new().execute()?;
-    let pre_session = issue_pre_session(state.csrf_keys())?;
+    let pre_session = issue_pre_session(state.csrf_keys(), state.settings().secure)?;
     let texts = Texts::new(state.bundles(), request.lang());
     let page = LoginPage::new(
         texts,
@@ -139,7 +140,7 @@ async fn start_session(
     let outcome = Login::new(state.identity().clone())
         .execute(&request.meta(), input)
         .await?;
-    let cookie = session_header(request, outcome.token())?;
+    let cookie = session_header(request, outcome.token(), state.settings().secure)?;
     let location = if outcome.must_change_password() {
         PASSWORD_PAGE
     } else {
@@ -150,7 +151,7 @@ async fn start_session(
 
 /// Store a fresh pre-session token next to the error, so the answer shows the form again.
 fn retry_login(state: &WebState, error: WebError) -> Response {
-    match issue_pre_session(state.csrf_keys()) {
+    match issue_pre_session(state.csrf_keys(), state.settings().secure) {
         Ok(pre_session) => {
             let mut response = error.into_response();
             response
@@ -173,7 +174,10 @@ pub(crate) async fn logout(
     Logout::new(state.identity().clone())
         .execute(auth, &request.meta())
         .await?;
-    Ok(see_other(LOGIN_PAGE, [clear_session_cookie()]))
+    Ok(see_other(
+        LOGIN_PAGE,
+        [clear_session_cookie(state.settings().secure)],
+    ))
 }
 
 /// `GET /me`: show the own profile.
@@ -275,7 +279,7 @@ pub(crate) async fn change_password(
         }
         Err(error) => return Err(error.into()),
     };
-    let cookie = session_header(&request, issued.token())?;
+    let cookie = session_header(&request, issued.token(), state.settings().secure)?;
     if !request.is_htmx() {
         return Ok(see_other(AFTER_LOGIN, [cookie]));
     }

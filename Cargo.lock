@@ -2555,6 +2555,7 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
+ "tracing-core",
  "uuid",
 ]
 

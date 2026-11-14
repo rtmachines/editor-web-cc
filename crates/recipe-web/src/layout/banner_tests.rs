@@ -135,7 +135,8 @@ async fn content(fixture: &Fixture, session: &TestSession, code: &str, path: &st
 /// Send a failed login: a valid pre-session token and the login `typed`. The password is too short,
 /// so the answer comes before any hash.
 async fn failed_login(fixture: &Fixture, code: &str, typed: &str) -> Reply {
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     let cookie = format!(
         "{}; recipe_lang={code}",
         cookie_pair(token.set_cookie().to_str().unwrap())

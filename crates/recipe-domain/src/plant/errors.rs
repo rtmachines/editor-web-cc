@@ -3,13 +3,14 @@
 use std::fmt;
 
 use super::PlantError;
+use crate::error_codes::ErrorCode;
 
 /// One or more errors of the Plant Model context, in a fixed order (ADR-0027).
 ///
 /// One connection request lists every field fault at once (ADR-0041).
 /// The first entry is stored apart, so the list cannot be empty.
 /// The first entry is boxed, so a `Result` of this type stays small (`clippy::result_large_err`).
-/// The list owns no code. Each entry owns its code, as in `RecipeErrors`.
+/// The list owns no row of its own. `code` passes on the code of the first entry, as in `RecipeErrors` (ADR-0165).
 #[derive(Debug)]
 pub struct PlantErrors {
     first: Box<PlantError>,
@@ -26,6 +27,12 @@ impl PlantErrors {
     #[must_use]
     pub fn first(&self) -> &PlantError {
         &self.first
+    }
+
+    /// Return the code of the first entry (`reliability.md` section 1.2).
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        self.first.code()
     }
 
     /// Return the number of entries. The count is never zero.

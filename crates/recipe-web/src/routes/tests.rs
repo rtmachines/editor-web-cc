@@ -430,7 +430,8 @@ struct Credentials {
 }
 
 fn pre_credential(fixture: &Fixture) -> Credential {
-    let token = issue_pre_session(fixture.state.csrf_keys()).unwrap();
+    let token =
+        issue_pre_session(fixture.state.csrf_keys(), fixture.state.settings().secure).unwrap();
     Credential {
         cookie: cookie_pair(token.set_cookie().to_str().unwrap()),
         token: token.nonce().to_owned(),

@@ -139,6 +139,18 @@ fn config_secret_line_names_the_fault() {
 }
 
 #[test]
+fn secret_line_refuses_a_nul_byte() {
+    for content in ["a\0b", "a\0b\n", "\0", "\0\n", "secret\0"] {
+        assert_eq!(
+            secret_line(content),
+            Err(SecretFault::NulByte),
+            "{content:?}"
+        );
+    }
+    assert_eq!(SecretFault::NulByte.describe(), "holds a NUL byte");
+}
+
+#[test]
 fn config_secret_with_a_carriage_return_gives_an_error_without_the_content() {
     let dir = Sandbox::new();
     for content in [

@@ -10,7 +10,7 @@ use super::tests::{
     me_status, one_time_password, post_as, world,
 };
 use crate::pages::test_helpers::assert_clean_html;
-use crate::test_support::{deactivate_user, get_with};
+use crate::test_support::{Fixture, LogBuffer, Reply, capture_logs, deactivate_user, get_with};
 
 // --- The out-of-band refresh of the user page (task 1.4, design D1) ------------------------------
 
@@ -376,4 +376,91 @@ fn pages_users_user_templates_hold_no_colon_literal() {
     for (name, text) in templates {
         assert!(!text.contains(": "), "{name} holds a colon literal");
     }
+}
+
+// --- The notice after a committed command whose read fails (task 9.8, ADR-0163) -----------------
+
+/// Assert the notice answer of a committed command whose read of the user failed.
+///
+/// The user commands give no new `row_version`, so the answer holds no `HX-Trigger` (design D1).
+fn assert_saved_notice(fixture: &Fixture, audit_before: usize, reply: &Reply, logs: &LogBuffer) {
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert!(reply.headers.get("hx-trigger").is_none());
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    assert!(
+        reply
+            .body
+            .contains("<div id=\"error-panel\" hx-swap-oob=\"innerHTML\"></div>"),
+        "{}",
+        reply.body
+    );
+    assert!(fixture.store.audit_entries().len() > audit_before);
+    let text = logs.text();
+    let warnings: Vec<&str> = text.lines().filter(|line| line.contains("WARN")).collect();
+    assert_eq!(warnings.len(), 1, "{text}");
+    assert!(
+        warnings
+            .first()
+            .unwrap()
+            .contains(&format!("request_id={}", reply.header("x-request-id"))),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn set_role_with_failed_read_after_commit_shows_saved_notice() {
+    let (fixture, admin) = world();
+    let audit_before = fixture.store.audit_entries().len();
+    fixture.store.fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let reply = post_as(
+        &fixture,
+        &admin,
+        "/users/user2/role",
+        "role=process_engineer",
+        true,
+    )
+    .await;
+    assert_saved_notice(&fixture, audit_before, &reply, &logs);
+}
+
+#[tokio::test]
+async fn deactivate_with_failed_read_after_commit_shows_saved_notice() {
+    let (fixture, admin) = world();
+    let audit_before = fixture.store.audit_entries().len();
+    fixture.store.fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let reply = post_as(&fixture, &admin, "/users/user2/deactivate", "", true).await;
+    assert_saved_notice(&fixture, audit_before, &reply, &logs);
+}
+
+#[tokio::test]
+async fn activate_with_failed_read_after_commit_shows_saved_notice() {
+    let (fixture, admin) = world();
+    deactivate_user(&fixture, "user2").await;
+    let audit_before = fixture.store.audit_entries().len();
+    fixture.store.fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let reply = post_as(&fixture, &admin, "/users/user2/activate", "", true).await;
+    assert_saved_notice(&fixture, audit_before, &reply, &logs);
+}
+
+#[tokio::test]
+async fn unlock_with_failed_read_after_commit_shows_saved_notice() {
+    let (fixture, admin) = world();
+    for _attempt in 0..2 {
+        let failed = login(&fixture, "user2", WRONG_FIELD).await;
+        assert_eq!(failed.status, StatusCode::UNAUTHORIZED);
+    }
+    let audit_before = fixture.store.audit_entries().len();
+    fixture.store.fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let reply = post_as(&fixture, &admin, "/users/user2/unlock", "", true).await;
+    assert_saved_notice(&fixture, audit_before, &reply, &logs);
 }

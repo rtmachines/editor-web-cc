@@ -4,12 +4,14 @@
 //! answer the read-only limit rows. A time bound shows as an IEC literal (A43).
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 use recipe_domain::audit::SecurityEventKind;
 
 use super::fields::max_pairs;
 use super::test_kit::{assert_panel_error, parameter_path, post_htmx};
 use crate::pages::recipes::test_world::recipe_world;
 use crate::pages::test_helpers::{assert_htmx_error, summary_lines};
+use crate::test_support::capture_logs;
 use crate::test_support::plant::{ENGLISH, HTMX, World};
 use crate::test_support::recipes::{GRID_KEY, HOLD_KEY, SPEED_KEY};
 
@@ -257,4 +259,56 @@ async fn parameters_limits_a_bad_key_with_a_bad_bound_pair_gives_one_line() {
         ("bogus", "1"),
     ];
     assert_one_line_for_a_bad_key("/limits", &pairs).await;
+}
+
+/// Assert the notice answer of a committed change whose read failed (ADR-0163).
+///
+/// `row_version` is the new value of the draft: the output of both commands holds it.
+fn assert_saved_notice(reply: &crate::test_support::Reply, logs: &str) {
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast");
+    assert_eq!(reply.header("hx-reswap"), "innerHTML");
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert_eq!(reply.header("hx-trigger"), "{\"rowVersion\": 2}");
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    assert_eq!(
+        logs.matches("read failed after a committed change").count(),
+        1,
+        "{logs}"
+    );
+}
+
+#[tokio::test]
+async fn set_value_with_failed_read_after_commit_shows_saved_notice() {
+    let world = recipe_world();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let path = parameter_path(SPEED_KEY, "/value");
+    let reply = post_htmx(&world, &path, &[("row_version", "1"), ("value", "1500")]).await;
+    assert_saved_notice(&reply, &logs.text());
+}
+
+#[tokio::test]
+async fn replace_limits_with_failed_read_after_commit_shows_saved_notice() {
+    let world = recipe_world();
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let (logs, _guard) = capture_logs();
+    let pairs = [
+        ("row_version", "1"),
+        ("limits[0].leaf_path", ""),
+        ("limits[0].min", "T#1s"),
+        ("limits[0].max", "T#2m"),
+    ];
+    let reply = post_htmx(&world, &parameter_path(HOLD_KEY, "/limits"), &pairs).await;
+    assert_saved_notice(&reply, &logs.text());
 }

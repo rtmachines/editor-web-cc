@@ -240,8 +240,9 @@ pub struct Plan {
 impl Plan {
     /// Build a plan from checked values and the default numbers.
     ///
-    /// The values override five numbers of the default: the trusted networks, the translation
-    /// languages, both session timeouts, and the rule of the separation of duties.
+    /// The values override six numbers of the default: the trusted networks, the translation
+    /// languages, both session timeouts, the rule of the separation of duties, and the cookie
+    /// flag `session.secure`.
     #[must_use]
     pub fn new(
         configured: ConfiguredSettings,
@@ -255,6 +256,7 @@ impl Plan {
         let mut settings = ServeSettings::default();
         settings.web.trusted_proxies = trusted_proxies;
         settings.web.translation_langs = translation_langs;
+        settings.web.secure = configured.session_secure;
         settings.identity.session_idle_timeout = configured.idle_timeout;
         settings.identity.session_absolute_timeout = configured.absolute_timeout;
         settings.app.approval_policy.separation_of_duties = configured.separation_of_duties;

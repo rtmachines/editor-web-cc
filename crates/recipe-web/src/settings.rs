@@ -70,6 +70,8 @@ pub struct WebSettings {
     pub form_array_chunk: usize,
     /// The bound on the new member leaves of all rebind forms of one version page (`form.rebind_leaves`).
     pub form_rebind_leaves: usize,
+    /// True when the cookies carry `Secure` and the prefix `__Host-` (`session.secure`, ADR-0171).
+    pub secure: bool,
 }
 
 impl Default for WebSettings {
@@ -91,6 +93,7 @@ impl Default for WebSettings {
                 .unwrap_or_default(),
             form_array_chunk: DEFAULT_ARRAY_CHUNK,
             form_rebind_leaves: DEFAULT_REBIND_LEAVES,
+            secure: true,
         }
     }
 }

@@ -48,6 +48,7 @@ pub struct MemoryTransaction {
     now: Timestamp,
     isolation: Isolation,
     visible: VisibleLogs,
+    has_written: bool,
 }
 
 impl MemoryTransaction {
@@ -65,6 +66,7 @@ impl MemoryTransaction {
             now,
             isolation,
             visible,
+            has_written: false,
         }
     }
 
@@ -86,6 +88,32 @@ impl MemoryTransaction {
     /// Run the hook of `MemoryStore::on_read_draft`, when one is set.
     pub(crate) fn run_read_draft_hook(&self) {
         MemoryStore::from_shared(Arc::clone(&self.shared)).run_read_draft_hook();
+    }
+
+    /// Run the hook of `MemoryStore::on_lock_version_shared`, when one is set.
+    pub(crate) fn run_lock_version_hook(&self) {
+        MemoryStore::from_shared(Arc::clone(&self.shared)).run_lock_version_hook();
+    }
+
+    /// Replace the working copy with the latest committed state, as a lock of PostgreSQL does.
+    ///
+    /// The method solves one problem: a lock in `READ COMMITTED` reads the latest row, so the
+    /// reads after it must not see the older copy of `begin`, and `finish` must not write that
+    /// copy back over a commit. Only a `ReadCommitted` transaction without a write refreshes.
+    /// A `ReadCommitted` transaction that wrote returns an error, because a refresh would drop
+    /// its writes and a merge of the untouched parts has no model in PostgreSQL. Every other
+    /// level keeps its copy.
+    pub(crate) fn refresh_after_lock(&mut self) -> Result<(), StorageError> {
+        if self.isolation != Isolation::ReadCommitted {
+            return Ok(());
+        }
+        if self.has_written {
+            return Err(StorageError::invariant(
+                "the test store cannot refresh a transaction that wrote before a lock",
+            ));
+        }
+        self.state = self.shared.lock().state.clone();
+        Ok(())
     }
 
     /// Return a copy of the state that `read_draft` sees at the isolation level of the transaction.
@@ -164,6 +192,7 @@ impl MemoryTransaction {
 
     /// Return the working copy of the state for a write.
     pub const fn state_mut(&mut self) -> &mut MemoryState {
+        self.has_written = true;
         &mut self.state
     }
 }

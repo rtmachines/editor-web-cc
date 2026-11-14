@@ -265,6 +265,15 @@ Connection route (ADR-0154 (j) to (jc)):
 - The answer sets `Cache-Control: no-store`. In read-only mode the route stays available (A24).
 - The document has no change marker. The transfer client reads the document directly before each load and keeps no copy.
 
+Second pick of the three `/approved` routes (ADR-0164):
+
+- An approval can retire the picked version before the export locks it. Then the export picks the approved version once more and locks the new pick.
+- The second lock checks the state again. A state other than `Approved` there gives `404 E-EXP-001`.
+- A second pick that finds no approved version also gives `404 E-EXP-001`. No third pick runs.
+- Thus two concurrent approvals in one export still give a transient `404 E-EXP-001`. The client rule of the polling rule below stays in force.
+- The second pick does not run the Basic check of section 7.7 again. The route by number has no second pick.
+- `data-model.md` 6 gives the flow of the second pick.
+
 Polling rule. The client reads the list and compares `content_sha256` with its last value. It runs an export only after a change (ADR-0109 (ag)). An approval can occur between the list and the export. The client therefore trusts `version.number` and `content_sha256` of the document, not the values of the list row (ADR-0109 (ah)).
 
 The export routes accept only `GET`. A `HEAD` request gets the answer of a method that the route table does not list. The use case does not run, and the audit log gets no entry (ADR-0054). The version page links to the export of its version (ADR-0052). A navigation guard refuses a cross-site or same-site request and an HTMX request before the use case (section 7.3, ADR-0055).
@@ -397,10 +406,10 @@ The protocol implements ADR-0008 and ADR-0015 for every `Draft`.
 1. `GET /recipes/{ref}/versions/{n}` renders the current `row_version` of the version into a hidden field `row_version` of every form on the page.
 2. Every mutating request on that version sends `row_version`.
 3. The use case locks the recipe row and then the version row with `FOR UPDATE` and compares `row_version` with the sent value. A mismatch rolls back and returns `Err(ConcurrentEdit { reference, number, expected, actual })`. The application never sets `row_version`. The database trigger function `bump_row_version` increments it on every update of the version row (`data-model.md` section 4.4).
-4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page. The one exception is a discard success: it answers `303` without `HX-Trigger` (ADR-0049 (f)).
+4. On success the response carries the new value in the header `HX-Trigger: {"rowVersion": <new>}`. The static script `row-version.js` updates every hidden `row_version` field on the page. The one exception is a discard success: it answers `303` without `HX-Trigger` (ADR-0049 (f)). The notice answer of section 5.4 sets `HX-Trigger` only when the command output holds the new `row_version` (ADR-0163 (f)). `DraftOutput` holds it. The outputs of `ApproveVersion`, `RetireVersion`, `AddUnit`, `SetUserRole`, `DeactivateUser`, `ActivateUser`, and `UnlockLogin` do not hold it (ADR-0163 (g)).
 5. On conflict the server returns `409 E-WEB-001` with the fragment `conflict.html`. The fragment shows: the current server `row_version`, the login of the last editor, the time of the last change, and one link "Reload version". The link goes to the version page with `hx-boost="true"` (ADR-0043). The unsaved input stays in the form until the reload. The time is `updated_at` of the version, and the last editor is the actor of the audit entry of that time (ADR-0043).
 6. The `409` response sets `HX-Retarget: #error-panel` and `HX-Reswap: innerHTML show:#error-panel:top` (ADR-0036). The original target of the request does not change. HTMX swaps the `409` fragment because of the `responseHandling` value of section 9.
-7. Every approve and save form has `hx-sync="closest form:drop"`. A second click while a request is in flight is dropped in the browser. The retire, discard, delete, and restore forms have the same attribute (ADR-0049).
+7. Every approve and save form has `hx-sync="closest form:drop"`. A second click while a request is in flight is dropped in the browser. The retire, discard, delete, and restore forms have the same attribute (ADR-0049). The create form `user-new-form` has it too (ADR-0172 (d)).
 8. Idempotent approve: the version is already `Approved`, and the sent `row_version` equals the approved `row_version` minus one. Then `ApproveVersion` returns `Ok(ApprovalOutcome::AlreadyApproved)` and writes no audit entry. The server renders the version page with `200`.
 
 A parameter edit changes the `row_version` of the version, not only of the parameter row. Two users who edit two different parameters of the same `Draft` get a conflict on the second save. This is intended. A `Draft` is one unit of work for approval.
@@ -421,7 +430,7 @@ Read requests do not use `row_version`. An `Approved` version is immutable, but 
 | Connection record changed by another user (`E-WEB-013`) | `409` | `error.html` in `#error-panel`. It shows the code, one sentence, and the `request_id`. It does not use `conflict.html` |
 | Database rule without a domain code (`StorageError` of `recipe-app`: `E-DB-003`, `E-DB-006`, `E-DB-007`) | `409` | `error.html`. The event log gets an `ERROR` line |
 | Concurrent edit (`E-WEB-001`) | `409` | `conflict.html` (section 4) |
-| Database trigger (`E-PLT-030..038`, `E-RCP-030..036`) | `409` for a state rule, `422` for a shape rule, as `reliability.md` section 1.2 gives | `error.html`. The event log gets an `ERROR` line, because the domain check should have fired first |
+| Database trigger (`E-PLT-030..038`, `E-RCP-030..037`) | `409` for a state rule, `422` for a shape rule, as `reliability.md` section 1.2 gives | `error.html`. The event log gets an `ERROR` line, because the domain check should have fired first |
 | No permission (`E-WEB-002`) | `403` | `error.html` with the operation name |
 | CSRF token missing or wrong (`E-WEB-007`) | `403` | `error.html` |
 | No session, expired session (`E-WEB-004`) | `401` | `HX-Redirect: /login` for HTMX, `303` to `/login` otherwise. `E-WEB-004` is the only code with `HX-Redirect` |
@@ -461,6 +470,20 @@ The same code appears in the structured log of the request. A user can report th
 - A request without `HX-Request` gets a full error page with the same content and the page layout.
 - The export endpoints return `application/json` errors: `{"code": "E-EXP-001", "message": "...", "request_id": "..."}`. `message` is the sentence of the code in the UI language, without the reference. The answer has no `HX-*` header, also for an HTMX request. On the two session routes, a request without a valid session gets `303` to `/login`, and a session with `must_change_password` gets `303` to `/me/password` (ADR-0053). On a transfer route, `message` uses the UI language of the request, and the default is `pl` (ADR-0109 (r)).
 - The answer of the backstop of section 5.1 is the one exception to these rules (ADR-0057 (e)).
+
+### 5.4 Success answer after a failed read
+
+Some handlers run a command and then read the new state for the answer. ADR-0163 (a) and (b) name these handlers. The read runs in a new transaction after the commit.
+
+When that read fails, the command stored the change. The handler then gives a success answer and no error answer (ADR-0163):
+
+- An HTMX request gets `200` with a fixed notice in `#toast`. The `en` text is "The change is saved. Reload the page." (ADR-0163 (c), (j)).
+- The answer sets `HX-Retarget: #toast`, `HX-Reswap: innerHTML`, and `HX-Push-Url: false` (ADR-0163 (d)).
+- The answer also holds an empty `#error-panel` with `hx-swap-oob="innerHTML"`. A stale error line then goes away (ADR-0163 (e)).
+- Section 4 step 4 gives the rule of `HX-Trigger` for this answer.
+- The answer swaps no form out of band, because no read gives the saved form. This case is the only exception to ADR-0041 (h) (ADR-0163 (k)).
+- A request without `HX-Request` gets `303` to the page of the changed object. The `GET` of that page reads the state again (ADR-0163 (h)).
+- `reliability.md` section 1.1 gives the log line of the failed read.
 
 ## 6. Export document (v1 and v2) and connection document
 
@@ -708,15 +731,21 @@ Sessions follow ADR-0014. The session store is the `session` table in PostgreSQL
 
 | Attribute | Value |
 |---|---|
-| Name | `__Host-recipe_session` |
+| Name | `__Host-recipe_session`. With `session.secure=false`, the name is `recipe_session` |
 | `HttpOnly` | yes |
-| `Secure` | yes. The server refuses to start when `session.secure` is `false`, except in a build with the `dev` feature |
+| `Secure` | yes. With `session.secure=false`, no. The server refuses to start when `session.secure` is `false`, except in a build with the `dev` feature |
 | `SameSite` | `Strict` |
 | `Path` | `/` |
-| `Domain` | not set, as the `__Host-` prefix requires |
+| `Domain` | not set, as the `__Host-` prefix requires. `recipe_session` also has no `Domain` |
 | Content | a random 128-bit token only. The database stores `SHA-256(token)` as `session.id`. No user data in the cookie |
 
-The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11).
+The setting `session.secure` sets `Secure` on each cookie of the server (ADR-0171). Only a build with the `dev` feature accepts `false` (ADR-0062 (b)).
+
+- With `false`, no cookie has `Secure`. Section 7.3 gives the pre-session cookie, and section 8 gives the language cookie.
+- With `false`, the session cookie and the pre-session cookie lose the prefix `__Host-`, because a browser refuses that prefix without `Secure`.
+- Each cookie keeps its other attributes. One process uses one set of cookie names.
+
+The server sends `Strict-Transport-Security` with `max-age` set to `http.hsts_max_age` and `includeSubDomains` on every response (`reliability.md` 7.11). The value of `session.secure` does not change this header. A browser ignores it on plain HTTP (ADR-0171 (e)).
 
 The server reads `X-Forwarded-For` and `X-Forwarded-Proto` only from the trusted-proxy CIDR list in the configuration. A request from another address uses the socket address as `client_ip`. The server maps every address to its canonical form first, so `::ffff:a.b.c.d` and `a.b.c.d` are one address. The right-most entry of `X-Forwarded-For` that is not a trusted proxy is the client. An entry that is not an address gives `422 E-WEB-008`. A request from a trusted proxy without `X-Forwarded-For` gives `500 E-WEB-010` (ADR-0035).
 
@@ -740,7 +769,7 @@ A session row holds `user_id` and the `session_epoch` of the user at login. On e
 - `SameSite=Strict` is the first line of defense.
 - Every mutating request from an authenticated session carries a token bound to the session. Forms send it in the hidden field `csrf_token`. HTMX requests send it in the header `X-CSRF-Token`. The `hx-headers` attribute on `<body>` sets the header. `Login` creates the token. `ChangeOwnPassword` creates a new session with a new token and returns `HX-Refresh: true`, so the browser loads the page again with the new token in `hx-headers`.
 - `POST /login` and `POST /lang` without a session use a pre-session token: a signed double-submit cookie `__Host-recipe_csrf` and the field `csrf_pre`. `GET /login` sets the cookie. The key of the Docker secret `csrf_signing_key` signs it (`security.csrf_signing_key_file`, `reliability.md` 7.11).
-- The pre-session cookie holds a 128-bit nonce and its HMAC-SHA256 under the first key. It has `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, and no `Max-Age`. The field `csrf_pre` holds the nonce. `POST /login` always accepts this token, also with a session (ADR-0035). `POST /lang` accepts the CSRF token of the session or a valid `csrf_pre`, with or without a session (ADR-0131).
+- The pre-session cookie holds a 128-bit nonce and its HMAC-SHA256 under the first key. It has `HttpOnly`, `Secure`, `SameSite=Strict`, `Path=/`, and no `Max-Age`. With `session.secure=false`, the cookie is `recipe_csrf` without `Secure` (section 7.1, ADR-0171). The field `csrf_pre` holds the nonce. `POST /login` always accepts this token, also with a session (ADR-0035). `POST /lang` accepts the CSRF token of the session or a valid `csrf_pre`, with or without a session (ADR-0131).
 - A mutating request is a request with any method except `GET`, `HEAD`, and `OPTIONS` (ADR-0035).
 - Every mutating request must carry an `Origin` header that matches the site, or `Sec-Fetch-Site: same-origin`. An `Origin` matches the site when it equals `https://` followed by the `Host` header (ADR-0035). A request without either is rejected.
 - A mutating request without a valid token or without a valid origin gets `403 E-WEB-007` and writes a `security_event` of kind `csrf_rejected` through the port `SecurityEventSink`. These events aggregate per client address and minute (`data-model.md` 3.8). When the event cannot be written, the request gets the storage error (ADR-0035).
@@ -816,7 +845,7 @@ Answers:
 ## 8. Internationalization
 
 - The plain cookie `recipe_lang` stores the UI language. The session does not store it. The default is `pl` (R10). `en` is the second supported language (A17).
-- Cookie `recipe_lang`: value `pl` or `en`, `Max-Age` from `i18n.lang_cookie_max_age` (`reliability.md` 7.11), `Secure`, `SameSite=Strict`, `Path=/`. It holds no secret, so it needs no `HttpOnly`. The server checks the value on every request. Any other value counts as missing, and the UI uses `pl`.
+- Cookie `recipe_lang`: value `pl` or `en`, `Max-Age` from `i18n.lang_cookie_max_age` (`reliability.md` 7.11), `Secure`, `SameSite=Strict`, `Path=/`. With `session.secure=false`, the cookie keeps its name and has no `Secure` (section 7.1, ADR-0171). It holds no secret, so it needs no `HttpOnly`. The server checks the value on every request. Any other value counts as missing, and the UI uses `pl`.
 - The server ignores `Accept-Language`. A plant workstation often has an English operating system and a Polish operator.
 - `POST /lang` sets the cookie and returns `303` to the `next` field when it is a same-origin relative path. The path starts with `/`, and its second character is neither `/` nor `\`. The path holds no `\` and no control or white-space character (ADR-0035). Otherwise it returns `303` to `/recipes`. The server never redirects to the `Referer` header. `POST /lang` works before login and in read-only mode, because it writes no database row. The language change is not audited.
 - Parameter names and descriptions show the translation for the UI language when one exists. Otherwise the English base text appears with a marker `(en)`. The rule applies to a parameter name or description without a label. The rule also covers the added and the old-only parameters of the diff and the preview (ADR-0152). A labeled field of the English base text shows the English base text in each UI language (ADR-0126 (f)). With the UI language `en`, the English base text appears without the marker (ADR-0126). In a page of another language, the English base text has `lang="en"`, and the marker stands outside it.

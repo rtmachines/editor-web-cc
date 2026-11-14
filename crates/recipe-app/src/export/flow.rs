@@ -201,14 +201,25 @@ struct Checked {
     machine: Machine,
 }
 
+/// Which pick of the approved version a lock follows (ADR-0164).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pick {
+    /// The pick of step 2. A lost approved state ends the transaction and starts the second pick.
+    First,
+    /// The second pick. A lost approved state is an error, and no third pick runs.
+    Second,
+}
+
 /// Lock the version `FOR SHARE`, read the recipe again, check the state, and read the machine.
 ///
-/// These are steps 1 and 2 of design D6 (c) inside the transaction of the command.
+/// These are steps 1 and 2 of design D6 (c) inside the transaction of the command. The function
+/// returns `None` when the route `/approved` of the first pick finds a state other than
+/// `Approved` under the lock. Another request changed the approved version after step 2.
 async fn lock_and_check(
     tx: &mut dyn Transaction,
-    target: Target<'_>,
+    (target, pick): (Target<'_>, Pick),
     found: Found,
-) -> Result<Checked, AppError> {
+) -> Result<Option<Checked>, AppError> {
     let shared: SharedVersion = tx
         .recipes()
         .lock_version_shared(found.version)
@@ -217,6 +228,10 @@ async fn lock_and_check(
             entity: Missing::version(found.recipe.reference(), found.number),
         })?;
     let found = reread_recipe(tx, target, found).await?;
+    let approved_route = matches!(target, Target::Approved(_));
+    if approved_route && pick == Pick::First && shared.state != VersionState::Approved {
+        return Ok(None);
+    }
     let status = check_exportable(shared.state, target, found.recipe.reference(), found.number)?;
     let machine_id = found.recipe.machine();
     let machine =
@@ -226,12 +241,12 @@ async fn lock_and_check(
             .ok_or_else(|| AppError::NotFound {
                 entity: Missing::MachineId(machine_id),
             })?;
-    Ok(Checked {
+    Ok(Some(Checked {
         shared,
         found,
         status,
         machine,
-    })
+    }))
 }
 
 /// Read the instant and the login of the approval of the locked version (step 3).
@@ -270,19 +285,31 @@ struct Prepared {
     written: Written,
 }
 
+/// The result of one attempt to lock and write.
+enum Attempt {
+    /// The document is written. The transaction is open.
+    Written(Box<Prepared>),
+    /// The first pick lost its approved state. The attempt returns the permit that it did not use.
+    Lost(ExportPermit),
+}
+
 /// Lock and check the version, read its rows, and write the document (steps 1 to 5).
 ///
 /// The function returns the open transaction. The caller commits it after the limit
 /// `timeout.export`, and a timeout or an error drops the transaction, which rolls it back.
-/// The blocking task of step 5 takes `permit` (ADR-0056 (c)).
+/// The blocking task of step 5 takes `permit` only after the state check (ADR-0056 (c)).
+/// The first pick of the route `/approved` can return `Attempt::Lost`. The function then drops the
+/// transaction and holds no lock (ADR-0164).
 async fn lock_and_write(
     ctx: &AppContext,
     (writer, user): (&Arc<dyn DocumentWriter>, &CurrentUser),
     (target, found, scope): (Target<'_>, Found, &ExportScope),
-    permit: ExportPermit,
-) -> Result<Prepared, AppError> {
+    (pick, permit): (Pick, ExportPermit),
+) -> Result<Attempt, AppError> {
     let mut tx = ctx.uow.begin(Isolation::ReadCommitted).await?;
-    let checked = lock_and_check(tx.as_mut(), target, found).await?;
+    let Some(checked) = lock_and_check(tx.as_mut(), (target, pick), found).await? else {
+        return Ok(Attempt::Lost(permit));
+    };
     let (version, number) = (checked.found.version, checked.found.number);
     let reference = checked.found.recipe.reference().clone();
     let (approved_at, approved_by) = read_approval(tx.as_mut(), version).await?;
@@ -308,7 +335,7 @@ async fn lock_and_write(
         (stored, scope.clone()),
     )
     .await?;
-    Ok(Prepared {
+    Ok(Attempt::Written(Box::new(Prepared {
         tx,
         recipe: checked.shared.recipe,
         version,
@@ -316,7 +343,34 @@ async fn lock_and_write(
         number,
         status: checked.status,
         written,
-    })
+    })))
+}
+
+/// Pick, lock, and write. The route `/approved` picks a second time after a lost approved state.
+///
+/// The function solves one problem: an approval can retire the picked version between step 2 and
+/// the lock of step 3. The second pick reads the recipe again and locks the new version. It
+/// skips the machine check, because the machine of a recipe never changes. A third pick never
+/// runs, so a second loss gives `E-EXP-001` (ADR-0164, ADR-0015: one version lock at a time).
+async fn pick_lock_and_write(
+    ctx: &AppContext,
+    who: (&Arc<dyn DocumentWriter>, &CurrentUser),
+    (target, machine, scope): (Target<'_>, Option<MachineCode>, &ExportScope),
+    permit: ExportPermit,
+) -> Result<Prepared, AppError> {
+    let found = find(ctx, target, machine).await?;
+    let first = lock_and_write(ctx, who, (target, found, scope), (Pick::First, permit)).await?;
+    let permit = match first {
+        Attempt::Written(prepared) => return Ok(*prepared),
+        Attempt::Lost(permit) => permit,
+    };
+    let found = find(ctx, target, None).await?;
+    let reference = found.recipe.reference().clone();
+    let second = lock_and_write(ctx, who, (target, found, scope), (Pick::Second, permit)).await?;
+    match second {
+        Attempt::Written(prepared) => Ok(*prepared),
+        Attempt::Lost(_) => Err(ExportError::NoApprovedVersion { reference }.into()),
+    }
 }
 
 /// Commit the entry `VersionExported` and build the result, outside `timeout.export`.
@@ -357,7 +411,8 @@ async fn commit_export(
 /// The function solves one problem: both routes read, lock, check, write, and audit in the same
 /// way. `timeout.export` covers the wait for a permit of `export.permits`, the reads, the locks,
 /// the rebuild, the hash compare, and the writer. The wait for the permit comes before the first
-/// read opens a transaction (ADR-0056 (b)). The commit runs after that limit, so a client that
+/// read opens a transaction (ADR-0056 (b)). The second pick of the route `/approved` runs inside
+/// that limit and keeps the permit (ADR-0164). The commit runs after that limit, so a client that
 /// gets `E-WEB-009` finds no entry. The caller has checked the permission of its route.
 ///
 /// # Errors
@@ -380,8 +435,8 @@ pub(super) async fn export_version(
         .blocking
         .export(async {
             let permit = ctx.export_gate.acquire().await?;
-            let found = find(ctx, target, machine).await?;
-            lock_and_write(ctx, (writer, who.0), (target, found, scope), permit).await
+            let flow = (target, machine, scope);
+            pick_lock_and_write(ctx, (writer, who.0), flow, permit).await
         })
         .await
         .inspect_err(|error| count_hash_mismatch(ctx, error))?;

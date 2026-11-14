@@ -3,7 +3,7 @@
 {% import "components/alert.html" as alerts %}
 {% block content %}
 <h1>{{ t.get("user-new-title") }}</h1>
-{% block form %}{% if form.blocked %}{{ alerts::notice("warning", t.get("readonly-form-unavailable")) }}{% else %}<form id="user-new-form" method="post" action="/users"{% if form.oob %} hx-swap-oob="true"{% endif %}>
+{% block form %}{% if form.blocked %}{{ alerts::notice("warning", t.get("readonly-form-unavailable")) }}{% else %}<form id="user-new-form" method="post" action="/users" hx-boost="true" hx-push-url="false" hx-sync="closest form:drop"{% if form.oob %} hx-swap-oob="true"{% endif %}>
 <input type="hidden" name="csrf_token" value="{{ form.csrf_token }}">
 {{ fields::named(t, "login", "login", t.get("user-new-label-login"), t.get("user-new-hint"), "text", true, true, 64, "off", form.login, form.errors.lines("login")) }}
 {{ fields::select(t, "role", t.get("user-new-label-role"), String::new(), form.roles.as_slice(), form.selected_role, true, form.errors.lines("role")) }}

@@ -1,3 +1,9 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use recipe_domain::audit::{
+    AuditContext, AuditEntry, AuditTarget, RequestId, RowAction, RowChange,
+};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::Sha256;
 use recipe_domain::plant::UnitUsage;
@@ -10,7 +16,7 @@ use crate::memory::fixtures::{
     rid, store, text, uid, user, vid,
 };
 use crate::memory::{LockMode, MemoryStore, MemoryTransaction};
-use crate::ports::{Isolation, NewVersion, Transaction};
+use crate::ports::{Isolation, NewVersion, NonEmpty, Transaction, UnitOfWork};
 
 const HASH: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -216,6 +222,56 @@ async fn lock_version_shared_takes_for_share_and_returns_the_stored_hash() {
             vid(11).to_string()
         )]
     );
+}
+
+#[tokio::test]
+async fn the_lock_hook_runs_at_the_lock_and_not_at_a_begin() {
+    let store = store_with_approved();
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&runs);
+    store.on_lock_version_shared(move |_| {
+        counter.fetch_add(1, Ordering::SeqCst);
+    });
+    let mut tx = begin(&store);
+    assert_eq!(runs.load(Ordering::SeqCst), 0);
+    tx.recipes().lock_version_shared(vid(11)).await.unwrap();
+    assert_eq!(runs.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_hook_change_that_keeps_the_version_approved_survives_the_lock_and_the_commit() {
+    let store = store_with_approved();
+    store.on_lock_version_shared(|store| {
+        store.update_state(|state, _| {
+            if let Some(row) = state.versions.get_mut(&vid(11)) {
+                row.approved_by = Some(user(7));
+            }
+        });
+    });
+    let mut tx = begin(&store);
+    tx.recipes().lock_version_shared(vid(11)).await.unwrap();
+    let read = |tx: &MemoryTransaction| tx.state().versions.get(&vid(11)).unwrap().approved_by;
+    assert_eq!(read(&tx), Some(user(7)));
+    let entry = AuditEntry::row(
+        RowAction::MachineCreated,
+        AuditTarget::machine(mid(1)),
+        RowChange::Create {
+            after: json!({ "n": "1" }),
+        },
+        AuditContext {
+            actor: None,
+            request_id: RequestId::from(uuid::Uuid::from_u128(1)),
+            client_ip: None,
+            session_ref: None,
+        },
+    );
+    let unit_of_work: &dyn UnitOfWork = &store;
+    unit_of_work
+        .commit(Box::new(tx), NonEmpty::try_from(vec![entry]).unwrap())
+        .await
+        .unwrap();
+    let committed = store.state().versions.get(&vid(11)).unwrap().approved_by;
+    assert_eq!(committed, Some(user(7)));
 }
 
 #[tokio::test]

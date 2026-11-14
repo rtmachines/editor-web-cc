@@ -24,8 +24,8 @@ use support::temp::{TempDir, random_secret};
 
 const LABEL_VALUE: &str = "recipe-server";
 const MIN_SECRET_LENGTH: usize = 32;
-/// `0001` to `0015` (`data-model.md` section 8).
-const EXPECTED_MIGRATIONS: i64 = 15;
+/// `0001` to `0016` (`data-model.md` section 8).
+const EXPECTED_MIGRATIONS: i64 = 16;
 /// A port that no server listens on. The case with a missing secret file uses it.
 const CLOSED_PORT: u16 = 1;
 

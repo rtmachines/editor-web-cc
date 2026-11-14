@@ -1,6 +1,6 @@
 # ADR-0019: Export integrity and the export format
 
-Status: Accepted. Amended by ADR-0109 (HTTP Basic in place of the planned tokens, export document v2 for the unit scope). Amended by ADR-0119 (`loadable` is `false` when a value, a limit, or an S7 address breaks a current rule)
+Status: Accepted. Amended by ADR-0109 (HTTP Basic in place of the planned tokens, export document v2 for the unit scope). Amended by ADR-0119 (`loadable` is `false` when a value, a limit, or an S7 address breaks a current rule). Amended by ADR-0164 (a second pick of the approved version on the route `/approved` after a concurrent approval)
 Date: 2026-10-12
 Deciders: project owner
 

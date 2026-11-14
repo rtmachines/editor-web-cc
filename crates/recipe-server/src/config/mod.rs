@@ -203,6 +203,8 @@ pub enum SecretFault {
     CarriageReturn,
     /// The file holds a line feed before its last character.
     SeveralLines,
+    /// The file holds a NUL byte anywhere.
+    NulByte,
 }
 
 impl SecretFault {
@@ -212,17 +214,21 @@ impl SecretFault {
             Self::Empty => "is empty",
             Self::CarriageReturn => "holds a carriage return",
             Self::SeveralLines => "holds more than one line",
+            Self::NulByte => "holds a NUL byte",
         }
     }
 }
 
 /// Return the one line of a secret file.
 ///
-/// The rule of ADR-0031: the file holds exactly one non-empty line and no carriage return.
-/// One trailing line feed is allowed and removed. `01-roles.sh` reads the same rule.
+/// The rule of ADR-0031: the file holds exactly one non-empty line, no carriage return, and no
+/// NUL byte. One trailing line feed is allowed and removed. `01-roles.sh` reads the same rule.
 pub fn secret_line(text: &str) -> Result<&str, SecretFault> {
     if text.contains('\r') {
         return Err(SecretFault::CarriageReturn);
+    }
+    if text.contains('\0') {
+        return Err(SecretFault::NulByte);
     }
     let line = text.strip_suffix('\n').unwrap_or(text);
     if line.contains('\n') {

@@ -9,7 +9,7 @@ use recipe_app::identity::{Authenticated, authenticate};
 use recipe_domain::identity::SessionToken;
 use tracing::Span;
 
-use crate::cookies::{SESSION_COOKIE, request_cookie};
+use crate::cookies::{request_cookie, session_cookie_name};
 use crate::error::WebError;
 use crate::routes::Access;
 use crate::state::WebState;
@@ -70,8 +70,11 @@ pub(crate) async fn session_layer(
     let session = if need == SessionNeed::Ignore {
         None
     } else {
-        let token = request_cookie(request.headers(), SESSION_COOKIE)
-            .and_then(|text| SessionToken::parse(&text).ok());
+        let token = request_cookie(
+            request.headers(),
+            session_cookie_name(state.settings().secure),
+        )
+        .and_then(|text| SessionToken::parse(&text).ok());
         match token {
             Some(token) => authenticate(state.identity(), &token).await?,
             None => None,

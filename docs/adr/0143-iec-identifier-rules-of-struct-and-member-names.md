@@ -1,6 +1,6 @@
 # ADR-0143: IEC identifier rules of struct and member names
 
-Status: Accepted. Amends ADR-0024 (duplicate member names) and ADR-0120 (a) (earlier rule set)
+Status: Accepted. Amends ADR-0024 (duplicate member names) and ADR-0120 (a) (earlier rule set). Amended by ADR-0166 (items (i) and (i1): the stored reads use the constructors `from_stored` of `TypeName`, `TypeExpr`, and `PlcType`)
 Date: 2026-11-07
 Deciders: project owner
 

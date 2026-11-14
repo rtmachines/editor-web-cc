@@ -1,6 +1,6 @@
 //! Tests of `authenticate_basic`: steps 2 to 7 of design D2 (tasks 3.4 and 3.5).
 
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
 
@@ -28,13 +28,13 @@ use crate::identity::{
 use crate::memory::{MemoryClock, MemorySink, MemoryStore};
 use crate::ports::NewUser;
 
-const PASSWORD: &str = "correct-horse-battery";
+pub(super) const PASSWORD: &str = "correct-horse-battery";
 const WRONG_PASSWORD: &str = "not-the-password";
 const START_SECONDS: i64 = 1_000_000;
 const LOGIN_KEY: &str = "0101010101010101010101010101010101010101010101010101010101010101";
 const PERSON_ROLES: [Role; 3] = [Role::Administrator, Role::ProcessEngineer, Role::Operator];
 
-fn user_id() -> UserId {
+pub(super) fn user_id() -> UserId {
     UserId::from(Uuid::from_u128(11))
 }
 
@@ -46,7 +46,7 @@ fn request_id() -> RequestId {
     RequestId::from(Uuid::from_u128(0x77))
 }
 
-fn meta() -> RequestMeta {
+pub(super) fn meta() -> RequestMeta {
     RequestMeta::new(
         request_id(),
         Some(ip()),
@@ -55,7 +55,7 @@ fn meta() -> RequestMeta {
     )
 }
 
-fn credentials(login: &str, password: &str) -> BasicCredentials {
+pub(super) fn credentials(login: &str, password: &str) -> BasicCredentials {
     BasicCredentials {
         login: TypedLogin::parse(login).unwrap(),
         password: Password::parse(password).unwrap(),
@@ -76,7 +76,7 @@ type DuringCheck = Box<dyn FnOnce() + Send>;
 ///
 /// A test can set one change that runs inside the next call, so that a reset or a deactivation
 /// happens between T1 and T2.
-struct RecordingHasher {
+pub(super) struct RecordingHasher {
     params: Argon2Params,
     calls: Mutex<Vec<Call>>,
     during_check: Mutex<Option<DuringCheck>>,
@@ -96,7 +96,7 @@ impl RecordingHasher {
         self.calls.lock().clone()
     }
 
-    fn change_during_check(&self, change: impl FnOnce() + Send + 'static) {
+    pub(super) fn change_during_check(&self, change: impl FnOnce() + Send + 'static) {
         *self.during_check.lock() = Some(Box::new(change));
     }
 }
@@ -119,11 +119,11 @@ impl PasswordHasher for RecordingHasher {
     }
 }
 
-struct Fixture {
-    store: MemoryStore,
-    sink: MemorySink,
-    hasher: Arc<RecordingHasher>,
-    context: IdentityContext,
+pub(super) struct Fixture {
+    pub(super) store: MemoryStore,
+    pub(super) sink: MemorySink,
+    pub(super) hasher: Arc<RecordingHasher>,
+    pub(super) context: IdentityContext,
 }
 
 impl Fixture {
@@ -163,7 +163,7 @@ impl Fixture {
     }
 
     /// Build a fixture with the account `anna` of `role`.
-    fn with_anna(role: Role) -> Self {
+    pub(super) fn with_anna(role: Role) -> Self {
         let fixture = Self::new();
         fixture.store.seed_user(&NewUser {
             id: user_id(),
@@ -179,7 +179,11 @@ impl Fixture {
         deactivate_user(&self.store);
     }
 
-    async fn check(&self, login: &str, password: &str) -> Result<BasicPrincipal, AppError> {
+    pub(super) async fn check(
+        &self,
+        login: &str,
+        password: &str,
+    ) -> Result<BasicPrincipal, AppError> {
         authenticate_basic(&self.context, credentials(login, password), &meta()).await
     }
 
@@ -222,7 +226,7 @@ fn deactivate_user(store: &MemoryStore) {
     });
 }
 
-fn reset_password(store: &MemoryStore) {
+pub(super) fn reset_password(store: &MemoryStore) {
     store.update_state(|state, _now| {
         state.users.get_mut(&user_id()).unwrap().password_hash = fake_hash("a-new-password-1");
     });
@@ -486,7 +490,7 @@ async fn a_role_change_during_the_hash_check_gives_e_idn_003() {
 }
 
 /// Assert that a refused T2 left a failed attempt, no session, no audit entry, and free permits.
-fn assert_no_trace_of_success(fixture: &Fixture) {
+pub(super) fn assert_no_trace_of_success(fixture: &Fixture) {
     let state = fixture.store.state();
     assert_eq!(state.attempts.len(), 1);
     assert!(state.attempts.values().all(|row| !row.succeeded));
@@ -504,6 +508,11 @@ fn debug_of_the_credentials_redacts_the_password() {
 
 /// Build a context over a memory store with the account `anna` and a hasher that blocks.
 fn blocking_context(hasher: &Arc<BlockingHasher>) -> IdentityContext {
+    blocking_parts(hasher).0
+}
+
+/// Build the context of [`blocking_context`] and the sink that records its security events.
+fn blocking_parts(hasher: &Arc<BlockingHasher>) -> (IdentityContext, MemorySink) {
     let clock = MemoryClock::new(OffsetDateTime::from_unix_timestamp(START_SECONDS).unwrap());
     let store = MemoryStore::with_clock(clock.clone());
     store.seed_user(&NewUser {
@@ -521,14 +530,31 @@ fn blocking_context(hasher: &Arc<BlockingHasher>) -> IdentityContext {
         AppSettings::default(),
     );
     let gate = HashGate::new(4, settings.argon2_acquire_timeout, hasher.clone());
-    IdentityContext::new(
+    let sink = store.sink();
+    let context = IdentityContext::new(
         app,
         Arc::new(store.clone()),
         Arc::new(store),
         gate,
         KeyRing::parse(LOGIN_KEY).unwrap(),
         settings,
-    )
+    );
+    (context, sink)
+}
+
+/// Wait until the sink holds `expected` events, or until ten real seconds pass.
+async fn wait_for_events(sink: &MemorySink, expected: usize) -> bool {
+    let deadline = std::time::Instant::now()
+        .checked_add(std::time::Duration::from_secs(10))
+        .unwrap();
+    while sink.events().len() != expected {
+        if std::time::Instant::now() > deadline {
+            return false;
+        }
+        tokio::task::yield_now().await;
+        std::thread::yield_now();
+    }
+    true
 }
 
 /// Wait until the Argon2 gate has `expected` free permits, or until ten real seconds pass.
@@ -597,4 +623,44 @@ async fn a_dropped_check_keeps_its_basic_permit_until_the_hash_ends() {
         "permits stayed held"
     );
     assert!(context.acquire_basic().await.is_ok());
+}
+
+#[tokio::test(start_paused = true)]
+async fn basic_check_writes_login_failed_after_the_caller_drops_the_future() {
+    let hasher = Arc::new(BlockingHasher::new());
+    let _release = ReleaseOnDrop(Arc::clone(&hasher));
+    let (context, sink) = blocking_parts(&hasher);
+    let task = {
+        let context = context.clone();
+        tokio::spawn(async move {
+            authenticate_basic(&context, credentials("nobody", PASSWORD), &meta())
+                .await
+                .map(|_principal| ())
+        })
+    };
+    assert!(hasher.wait_started(1).await, "the hash did not start");
+    assert!(
+        sink.events().is_empty(),
+        "the event exists before the hash ends"
+    );
+
+    // The client disconnects after T1 committed: the caller drops the future during the hash.
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    hasher.release();
+
+    assert!(wait_for_events(&sink, 1).await, "no event after the drop");
+    let events = sink.events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    let event = events.into_iter().next().unwrap();
+    assert_eq!(event.kind(), SecurityEventKind::LoginFailed);
+    assert_eq!(event.request_id(), request_id());
+    assert_eq!(
+        event.detail(),
+        Some(&json!({"reason": "unknown_login", "scheme": "basic"}))
+    );
+    assert!(
+        wait_for_hash_permits(&context, 4).await,
+        "permits stayed held"
+    );
 }

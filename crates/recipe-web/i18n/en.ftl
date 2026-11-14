@@ -70,6 +70,7 @@ password-hint = Use 12 to 128 characters. Do not use a password from the breache
 password-must-change = You must change the one-time password before you use other pages.
 password-submit = Change password
 password-changed = The password is changed.
+saved-notice = The change is saved. Reload the page.
 
 # The user list
 users-title = Users
@@ -204,6 +205,7 @@ task-stage-password-hash = password hash
 task-stage-validation = validation
 task-stage-export = export
 task-stage-token = token generation
+task-stage-detached = security step
 
 # Operations
 operation-create-machine = Create machine
@@ -418,6 +420,8 @@ error-E-PLT-029 = Recipe { $reference } does not belong to machine { $code }. Us
 error-E-WEB-013 = Another user changed the connection settings of machine { $code }. Reload the page and apply your change again.
 error-E-WEB-014 = The server cannot read the stored PLC password of machine { $code }. Enter the password again or contact the administrator.
 error-E-WEB-015 = The server sent no answer. The result of the action is not known. Reload the page and check the data before you try again.
+error-E-WEB-016 = The result file of the { $check } cannot be read.
+error-E-WEB-017 = The result file of the { $check } is malformed.
 type-reason-grammar = the text does not match the type grammar
 type-reason-unknown-struct = the struct or the revision does not exist on the machine
 type-reason-not-on-platform = the type does not exist on the platform of the machine
@@ -495,6 +499,7 @@ error-E-RCP-033 = The version status or a frozen column of the version cannot ch
 error-E-RCP-034 = The reference number or the machine of a recipe cannot change while a version uses it.
 error-E-RCP-035 = The version has more than 4 000 parameters.
 error-E-RCP-036 = The version has more than 32 768 limit rows.
+error-E-RCP-037 = A new version must be a live draft.
 error-E-RCP-050 = Parameter { $tag } in version { $number } of recipe { $reference } has no translation for { $lang }.
 error-E-RCP-051 = Parameter { $key } does not exist in version { $number } of recipe { $reference }.
 error-E-RCP-052 = The rebind of { $type_name } is not possible: { $reason }.

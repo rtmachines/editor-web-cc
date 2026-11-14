@@ -27,7 +27,7 @@ const CHALLENGE: &str = "RecipeExport realm=\"export\"";
 /// answer carries `WWW-Authenticate: RecipeExport realm="export"` (ADR-0109 (o)).
 pub(crate) fn json_answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
     let (shown, status) = logged(error, ctx);
-    if let Some(response) = session_redirect(shown, false) {
+    if let Some(response) = session_redirect(shown, false, ctx.state.settings().secure) {
         return response;
     }
     let message = sentence_of(error, shown, &args_of(error, ctx), ctx);

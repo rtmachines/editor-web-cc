@@ -196,3 +196,16 @@ fn lost_answer_code_is_in_registry() {
     assert_eq!(ErrorCode::find("E-WEB-015"), Some(ErrorCode::WEB_015));
     assert!(REGISTRY.contains(&ErrorCode::WEB_015));
 }
+
+/// The codes of `CheckResultFault` (`reliability.md` section 1.2).
+#[test]
+fn check_result_fault_codes_are_in_registry() {
+    for (code, text) in [
+        (ErrorCode::WEB_016, "E-WEB-016"),
+        (ErrorCode::WEB_017, "E-WEB-017"),
+    ] {
+        assert_eq!(code.as_str(), text);
+        assert_eq!(ErrorCode::find(text), Some(code));
+        assert!(REGISTRY.contains(&code));
+    }
+}

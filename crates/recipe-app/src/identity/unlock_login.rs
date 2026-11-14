@@ -1,4 +1,4 @@
-//! The use case `UnlockLogin` (design D8 i, j, and q, `data-model.md` section 6).
+//! The use case `UnlockLogin` (design D8 i, j, and q, `data-model.md` section 6, ADR-0172).
 
 use std::net::IpAddr;
 
@@ -7,23 +7,12 @@ use recipe_domain::identity::{Login, TypedLogin, UserId};
 use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 
+use super::detached::record_security_event;
 use super::{Authenticated, IdentityContext};
 use crate::auth::{Operation, RequestMeta, authorize};
 use crate::context::{UseCase, audit_context};
 use crate::error::{AppError, Missing, StorageError};
 use crate::ports::{AttemptRow, Isolation, Locked, NonEmpty};
-
-/// The result of an unlock that committed.
-///
-/// The type solves one problem: the write of the security event `unlock` follows the commit, so
-/// its fault must not hide a completed unlock (ADR-0130). The caller logs a lost event once.
-#[derive(Debug)]
-pub enum UnlockOutcome {
-    /// The unlock committed and the security event `unlock` is in the table.
-    Recorded,
-    /// The unlock committed and the write of the security event `unlock` failed.
-    EventLost(StorageError),
-}
 
 /// Removes the failed attempts of a login.
 ///
@@ -31,6 +20,8 @@ pub enum UnlockOutcome {
 /// out, and the audit log must show which attempts the unlock removed. The unlock deletes every
 /// attempt of the login in one transaction. The entry `LoginUnlocked` holds at most
 /// `audit.unlock_rows` of them and the full count. The security event `unlock` follows the commit.
+/// A detached task runs the commit and the event, so a dropped request future does not lose the
+/// event (ADR-0172 (g)).
 #[derive(Clone)]
 pub struct UnlockLogin {
     ctx: IdentityContext,
@@ -52,15 +43,22 @@ impl UnlockLogin {
     /// `client_ip` is the canonical address of the request. The event `unlock` needs an address,
     /// as `Login` does, so the caller passes it and the case of a missing address cannot occur.
     ///
+    /// The request future checks the permission and takes a slot of the detached tasks. A detached
+    /// task then runs the commit and the write of the event, so a dropped request future loses
+    /// neither of them (ADR-0172 (g), (i)). `UnlockLogin` takes no permit of the hash gate
+    /// (ADR-0172 (h)).
+    ///
     /// # Errors
     ///
     /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
+    /// Returns `Timeout` (`E-WEB-009`) when no slot comes in time. Nothing commits then.
     /// Returns `NotFound` (`E-WEB-005`) when the login is unknown.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails
     /// before the commit or at the commit.
+    /// Returns `TaskFailed` (`E-WEB-011`) when the detached task panics.
     ///
-    /// A failed write of the event `unlock` after the commit is no error. The method returns
-    /// `UnlockOutcome::EventLost` with the storage error, and the caller logs it (ADR-0130).
+    /// A failed write of the event `unlock` after the commit is no error. The task writes the one
+    /// `WARN` line of a lost event and the method returns `Ok` (ADR-0130 (a), ADR-0172 (o), (p)).
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
@@ -68,7 +66,7 @@ impl UnlockLogin {
         meta: &RequestMeta,
         login: &Login,
         client_ip: IpAddr,
-    ) -> Result<UnlockOutcome, AppError> {
+    ) -> Result<(), AppError> {
         authorize(
             Self::OPERATION,
             auth.user(),
@@ -76,6 +74,27 @@ impl UnlockLogin {
             self.ctx.app.security.as_ref(),
         )
         .await?;
+        let slot = self.ctx.detached().acquire().await?;
+        let unlock = self.clone();
+        let (auth, meta, login) = (auth.clone(), meta.clone(), login.clone());
+        self.ctx
+            .detached()
+            .spawn(slot, async move {
+                unlock
+                    .commit_and_record(&auth, &meta, &login, client_ip)
+                    .await
+            })
+            .await?
+    }
+
+    /// Run the detached span: delete the attempts, commit, and write the event `unlock`.
+    async fn commit_and_record(
+        &self,
+        auth: &Authenticated,
+        meta: &RequestMeta,
+        login: &Login,
+        client_ip: IpAddr,
+    ) -> Result<(), AppError> {
         let target = self.delete_attempts(auth, meta, login).await?;
         let event = SecurityEvent::unlock(
             target,
@@ -84,10 +103,8 @@ impl UnlockLogin {
             client_ip,
             meta.user_agent().cloned(),
         );
-        Ok(match self.ctx.app.security.record(event).await {
-            Ok(()) => UnlockOutcome::Recorded,
-            Err(lost) => UnlockOutcome::EventLost(lost),
-        })
+        record_security_event(self.ctx.app.security.as_ref(), event).await;
+        Ok(())
     }
 
     /// Delete the attempts and commit `LoginUnlocked`. Return the user that was unlocked.

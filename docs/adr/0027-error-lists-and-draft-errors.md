@@ -1,6 +1,6 @@
 # ADR-0027: Error lists and the error of a draft command
 
-Status: Accepted. Amended by ADR-0041 (the draft commands of a value and of limits return `RecipeErrors`)
+Status: Accepted. Amended by ADR-0041 (the draft commands of a value and of limits return `RecipeErrors`). Amended by ADR-0165 (a carrier owns no row of `reliability.md` §1.2, and its `code()` returns an inner code)
 Date: 2026-10-13
 Deciders: project owner
 

@@ -598,7 +598,7 @@ mod tests {
     /// Send `POST /login` with a valid pre-session token.
     async fn log_in(app: &(Router, WebState), login: &str, password_field: &str) -> Response<Body> {
         let (router, state) = app;
-        let pre = issue_pre_session(state.csrf_keys()).unwrap();
+        let pre = issue_pre_session(state.csrf_keys(), state.settings().secure).unwrap();
         let cookie = pre
             .set_cookie()
             .to_str()

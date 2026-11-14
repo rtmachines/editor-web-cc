@@ -11,7 +11,7 @@ Source: `docs/architecture/data-model.md` §1, §4 to §6, §8 and `reliability.
 - An enumerated column is `TEXT` with `CHECK (... IN (...))`. No `CREATE TYPE ... AS ENUM`.
 - Every foreign key column has an index, unless a primary key or a unique constraint starts with that column.
 - Soft delete uses a nullable `deleted_at` or `archived_at` column (ADR-0021).
-- Every function sets `search_path = pg_catalog, public, pg_temp`. A `SECURITY DEFINER` function also schema-qualifies every table, function, operator, and type name. A type keyword such as `BIGINT` needs no schema (ADR-0098).
+- Every function sets `search_path = pg_catalog, public, pg_temp`. A `SECURITY DEFINER` function also schema-qualifies every table, function, operator, and type name. A type keyword such as `BIGINT` needs no schema (ADR-0098). The one exception is the event-trigger function `audit_guard.audit_objects_dropped()`, which the superuser owns and which sets `search_path = pg_catalog, pg_temp` (data-model §5.1, [ADR-0167](../../docs/adr/0167-search-path-of-the-audit-guard.md)).
 - §1.1 lists the tables that are exceptions. §1.2 maps Rust names to SQL names. §1.3 gives the text limits.
 - A trigger error message starts with its code from `reliability.md` §1.2. §4.11 maps each trigger code to its function.
 

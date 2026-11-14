@@ -1,0 +1,3 @@
+{% import "components/toast.html" as toasts -%}
+{#- The notice after a committed change whose read failed (ADR-0163 (c) and (e)). HTMX puts this answer into #toast. The empty error panel goes out of band, so a stale error line goes away. The hx-swap-oob value is a literal. -#}
+{{ toasts::success(text) }}<div id="error-panel" hx-swap-oob="innerHTML"></div>

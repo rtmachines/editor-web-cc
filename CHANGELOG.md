@@ -25,6 +25,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Migrations `0013` to `0015` add and fill the data block number of a machine. Migration `0013` stops when a live S7 machine has no PLC connection record. The runbook section "Check the live S7 machines for a PLC connection record" names the check (ADR-0156).
 - The CI job `release-toolchain` runs `cargo check --release` of `recipe-server` on each pull request. It uses the toolchain of `deploy/Dockerfile`.
 - The compile step of `deploy/ci/check.sh` runs with `-W error` for every `deploy/ci/*.py`.
+- Migration `0016_recipe_version_insert.sql` adds the trigger `recipe_version_insert_draft`. The database refuses a new version row that is not a live draft with `E-RCP-037` (ADR-0169).
 
 ### Changed
 
@@ -57,6 +58,16 @@ This file records the notable changes of the recipe editor. The format follows [
 - The CI job `test` runs the step "Check the production refusal of insecure cookies" (`bash deploy/ci/rust-tests.sh secure`) after "Run tests". The job `compose` no longer runs this step (ADR-0062 (b), ADR-0127).
 - `SetPlcConnection` no longer takes `db_number`. This is a BREAKING change for a form post that sends the field. The value comes from the machine (ADR-0156).
 - ADR-0161 states the bound of the stalled reads of a path. A path holds at most one stalled call for each pair of a job and an adapter. The behavior does not change.
+- `PlantErrors` and `CheckResultFault` have a `code()` method. The two variants of `CheckResultFault` have the codes `E-WEB-016` and `E-WEB-017` (ADR-0165).
+- The `WARN` line of the job `alerts` for a result-file fault has the field `error_code` (ADR-0165).
+- `reliability.md` names `from_stored` as the second constructor of the stored parsers (ADR-0166).
+- The audit guard function keeps `search_path = pg_catalog, pg_temp`, a named exception to ADR-0098 (ADR-0167).
+- `data-model.md` names the read before the command transaction of `CreateUser`, `ResetPassword`, and `CreateRecipe` (ADR-0168).
+- The exception table of `data-model.md` §1.1 lists `plc_type_member` and `draft_editor` (ADR-0168).
+- `data-model.md` §1.3 says that `TypedLogin` refuses a control character and that the database checks only the length (ADR-0168).
+- The service `db` keeps its four secret mounts. The accepted risk of their clear text in `db` is recorded (ADR-0170).
+- With `session.secure=false` in a `dev` build, no cookie has `Secure`. The session and pre-session cookies also drop the `__Host-` prefix (ADR-0171).
+- The stall mark of `read_with_limit` covers a call whose caller waits to the limit. The operator needs no step for a dropped call (ADR-0172).
 
 ### Fixed
 
@@ -75,6 +86,11 @@ This file records the notable changes of the recipe editor. The format follows [
 - `create-admin` checks the byte limit before it decodes UTF-8. An input over the limit that ends inside a UTF-8 character gives "too long".
 - A redirect refuses a site path that holds an ASCII control character, such as a tab. It answers `E-WEB-010`.
 - `deploy/db/initdb/01-roles.sh` refuses a secret file that holds a NUL byte.
+- `recipe-server` refuses a secret file that holds a NUL byte, as `01-roles.sh` does (ADR-0031).
+- An HTMX request whose read fails after a committed change gets `200` and a notice to reload the page (ADR-0163). A request without HTMX gets `303` to the page of the changed object (ADR-0163).
+- The route `/approved` picks the approved version again when a concurrent approval retires the first pick. A second pick without an approved version gives `404 E-EXP-001` (ADR-0164).
+- The create form of a user drops a second submit while the first one runs. A repeated click no longer gives a duplicate-login refusal (ADR-0172).
+- A login, password change, user unlock, or Basic check writes its security event even when the client closes the connection (ADR-0172). At a stop, the server drains these tasks before it closes the pools (ADR-0172).
 - The `rust-cache` steps of CI save the cache only on `main`.
 
 ### Known gaps
@@ -87,6 +103,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
 - The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
 - No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
+- A client that times out after the commit of a user creation gets no password (ADR-0172). The Administrator runs `ResetPassword` for that user to get a new one-time password (ADR-0172).
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
 ## [0.7.1] - 2026-11-06

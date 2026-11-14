@@ -2,7 +2,7 @@
 
 use std::net::IpAddr;
 
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRef, FromRequestParts};
 use axum::http::request::Parts;
 use recipe_app::auth::{Operation, RequestMeta};
 use recipe_app::error::AppError;
@@ -10,8 +10,9 @@ use recipe_app::identity::Authenticated;
 use recipe_domain::audit::{RequestId, UserAgent};
 use recipe_domain::identity::{SessionId, SessionToken};
 
+use crate::WebState;
 use crate::client::ClientAddr;
-use crate::cookies::{SESSION_COOKIE, request_cookie};
+use crate::cookies::{request_cookie, session_cookie_name};
 use crate::error::WebError;
 use crate::i18n::Lang;
 use crate::layout::ReadOnlyFlag;
@@ -140,10 +141,14 @@ impl PageRequest {
     }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for PageRequest {
+impl<S> FromRequestParts<S> for PageRequest
+where
+    S: Send + Sync,
+    WebState: FromRef<S>,
+{
     type Rejection = WebError;
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let request_id = request_id_in(&parts.extensions);
         let Some(client) = parts.extensions.get::<ClientAddr>().copied() else {
             return Err(WebError::Internal { request_id });
@@ -162,9 +167,12 @@ impl<S: Send + Sync> FromRequestParts<S> for PageRequest {
             .get(HX_TARGET)
             .and_then(|value| value.to_str().ok())
             .map(str::to_owned);
-        let cookie_session = request_cookie(&parts.headers, SESSION_COOKIE)
-            .and_then(|text| SessionToken::parse(&text).ok())
-            .map(|token| SessionId::of(&token));
+        let cookie_session = request_cookie(
+            &parts.headers,
+            session_cookie_name(WebState::from_ref(state).settings().secure),
+        )
+        .and_then(|text| SessionToken::parse(&text).ok())
+        .map(|token| SessionId::of(&token));
         let get_target = (parts.method == axum::http::Method::GET)
             .then(|| parts.uri.path_and_query().map(ToString::to_string))
             .flatten();

@@ -8,6 +8,7 @@ mod frozen;
 pub mod hash_chain;
 mod immutable_types;
 mod transition;
+mod version_insert;
 mod version_mutable;
 
 use crate::support::{

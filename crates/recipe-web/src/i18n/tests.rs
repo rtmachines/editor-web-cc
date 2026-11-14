@@ -349,7 +349,7 @@ fn i18n_texts_of_the_design_table_exist_in_both_bundles() {
 }
 
 /// The texts of the error value tables of design D13: key, English text, Polish text.
-const ERROR_VALUE_TEXTS: [(&str, &str, &str); 92] = [
+const ERROR_VALUE_TEXTS: [(&str, &str, &str); 93] = [
     (
         "reason-form",
         "the form has a missing field, an unknown field, or a wrong content type",
@@ -453,6 +453,7 @@ const ERROR_VALUE_TEXTS: [(&str, &str, &str); 92] = [
     ("task-stage-validation", "validation", "walidacja"),
     ("task-stage-export", "export", "eksport"),
     ("task-stage-token", "token generation", "generowanie tokenu"),
+    ("task-stage-detached", "security step", "krok zabezpieczeń"),
     (
         "operation-create-machine",
         "Create machine",

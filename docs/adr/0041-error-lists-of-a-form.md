@@ -1,6 +1,6 @@
 # ADR-0041: Error lists of a form
 
-Status: Accepted. Amended by ADR-0046 (a form route runs its form query before it reads the fields in (a)). Amended by ADR-0050 (point (d): a query value without an input gives a line with no link). Amended by ADR-0132 (item (g): the own password form and the users forms give a line per bad field). Amended by ADR-0138 (item (a): a changed form body gives one line)
+Status: Accepted. Amended by ADR-0046 (a form route runs its form query before it reads the fields in (a)). Amended by ADR-0050 (point (d): a query value without an input gives a line with no link). Amended by ADR-0132 (item (g): the own password form and the users forms give a line per bad field). Amended by ADR-0138 (item (a): a changed form body gives one line). Amended by ADR-0163 (item (h): a failed read after a commit gives a notice and no form)
 Date: 2026-10-15
 Deciders: project owner
 

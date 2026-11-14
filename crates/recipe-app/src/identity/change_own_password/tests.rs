@@ -1,24 +1,30 @@
 //! Tests of the use case `ChangeOwnPassword` (task 4.2, design D7, ADR-0035 b and m).
 
+use std::future::Future as _;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::Arc;
+use std::task::Poll;
+use std::time::Duration;
 
+use async_trait::async_trait;
 use recipe_domain::audit::{
-    AuditAction, AuditTarget, LoginHmac, RequestId, SecurityEventKind, SessionRef,
+    AuditAction, AuditTarget, LoginHmac, RequestId, SecurityEvent, SecurityEventKind, SessionRef,
 };
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::{IdentityError, NewPassword, Password, SessionId, TypedLogin};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
+use tracing::Level;
 use uuid::Uuid;
 
 use super::{ChangeOwnPassword, ChangeOwnPasswordInput};
 use crate::auth::{Operation, RequestMeta};
 use crate::context::UseCase;
-use crate::error::{AppError, TimeoutStage};
-use crate::identity::authenticate;
-use crate::identity::fixtures::{IdentityFixture, anna_id, fake_hash};
-use crate::memory::{Fault, MemoryStore};
-use crate::ports::UserRow;
+use crate::error::{AppError, StorageError, TimeoutStage};
+use crate::identity::fixtures::{IdentityFixture, LogCapture, anna_id, fake_hash};
+use crate::identity::{Authenticated, IdentityContext, authenticate};
+use crate::memory::{Fault, MemorySink, MemoryStore};
+use crate::ports::{SecurityEventSink, UserRow};
 
 const PASSWORD: &str = "correct-horse-battery";
 const NEW_PASSWORD: &str = "brand-new-secret-phrase";
@@ -261,7 +267,8 @@ async fn a_throttled_change_gives_e_idn_005_and_checks_no_password() {
 }
 
 #[tokio::test]
-async fn a_failed_throttle_event_write_returns_the_storage_error() {
+async fn a_failed_throttle_event_write_gives_the_throttle_answer_and_one_warn_line() {
+    let (capture, _guard) = LogCapture::install();
     let fixture = fixture();
     let token = fixture.seed_anna_session(1);
     let auth = fixture.authenticated(&token).await;
@@ -275,7 +282,93 @@ async fn a_failed_throttle_event_write_returns_the_storage_error() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(error, AppError::Storage(_)), "{error:?}");
+    assert!(
+        matches!(
+            error,
+            AppError::Identity(IdentityError::LoginThrottled { retry_after: 4 })
+        ),
+        "{error:?}"
+    );
+    assert!(fixture.sink.events().is_empty());
+    let lines = capture.events();
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let line = lines.first().unwrap();
+    assert_eq!(line.level, Level::WARN);
+    assert_eq!(line.field("event"), Some("\"login_throttled\""));
+    assert!(line.field("request_id").is_some(), "{line:?}");
+    assert_eq!(fixture.context.gate().available_permits(), 4);
+}
+
+#[tokio::test]
+async fn throttled_change_writes_its_event_after_the_caller_drops_the_future() {
+    let fixture = fixture();
+    let token = fixture.seed_anna_session(1);
+    let auth = fixture.authenticated(&token).await;
+    seed_failures(&fixture.store, &[10, 9, 8, 1]);
+    let context = yielding_context(&fixture);
+
+    start_and_drop(&context, &auth, PASSWORD).await;
+
+    let events = fixture.sink.events();
+    assert_eq!(events.len(), 1);
+    let event = events.first().unwrap();
+    assert_eq!(event.kind(), SecurityEventKind::LoginThrottled);
+    assert_eq!(event.client_ip(), Some(ip()));
+    assert_eq!(context.gate().available_permits(), 4);
+    assert_eq!(fixture.hasher.verify_calls(), 0);
+}
+
+#[tokio::test]
+async fn change_keeps_the_old_password_after_the_caller_drops_the_future() {
+    let fixture = fixture();
+    let token = fixture.seed_anna_session(1);
+    let auth = fixture.authenticated(&token).await;
+
+    start_and_drop(&fixture.context, &auth, PASSWORD).await;
+
+    let row = user_row(&fixture.store);
+    assert_eq!(row.password_hash, fake_hash(PASSWORD));
+    assert_eq!(row.session_epoch, 0);
+    assert!(row.must_change_password);
+    let state = fixture.store.state();
+    assert!(state.sessions.contains_key(&SessionId::of(&token)));
+    assert_eq!(state.sessions.len(), 1);
+    assert_eq!(state.attempts.len(), 1, "T1 committed its attempt");
+    assert!(state.attempts.values().all(|attempt| !attempt.succeeded));
+    assert!(fixture.store.audit_entries().is_empty());
+    assert_eq!(fixture.hasher.hash_calls(), 0, "no hash for a gone client");
+    assert_eq!(fixture.context.gate().available_permits(), 4);
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_free_detached_slot_gives_e_web_009_and_inserts_no_attempt() {
+    let fixture = fixture();
+    let token = fixture.seed_anna_session(1);
+    let auth = fixture.authenticated(&token).await;
+    let mut held = Vec::new();
+    for _ in 0..fixture.context.settings.detached_tasks {
+        held.push(fixture.context.detached().acquire().await.unwrap());
+    }
+    let error = ChangeOwnPassword::new(fixture.context.clone())
+        .execute(
+            &auth,
+            &meta(auth.session_id()),
+            input(PASSWORD, NEW_PASSWORD),
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            AppError::Timeout {
+                stage: TimeoutStage::DetachedSlot
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(fixture.store.state().attempts.is_empty());
+    assert_eq!(fixture.context.gate().available_permits(), 4);
+    drop(held);
 }
 
 #[tokio::test]
@@ -452,4 +545,42 @@ async fn the_issued_session_hides_its_secrets_in_debug() {
     assert!(!shown.contains(&issued.token().to_hex()), "{shown}");
     assert!(!shown.contains(&issued.csrf_token().to_hex()), "{shown}");
     assert!(shown.contains("[redacted]"), "{shown}");
+}
+
+// ---- helpers for a dropped request ----
+
+/// A sink that pauses once before it writes, so a request that waits for it can be dropped.
+struct YieldingSink {
+    inner: MemorySink,
+}
+
+#[async_trait]
+impl SecurityEventSink for YieldingSink {
+    async fn record(&self, event: SecurityEvent) -> Result<(), StorageError> {
+        tokio::task::yield_now().await;
+        self.inner.record(event).await
+    }
+}
+
+/// Return the context of `fixture` with a sink that pauses before each write.
+fn yielding_context(fixture: &IdentityFixture) -> IdentityContext {
+    let mut context = fixture.context.clone();
+    context.app.security = Arc::new(YieldingSink {
+        inner: fixture.sink.clone(),
+    });
+    context
+}
+
+/// Start the change, drop its future at the first pause, and wait for the detached task.
+async fn start_and_drop(context: &IdentityContext, auth: &Authenticated, current: &str) {
+    let use_case = ChangeOwnPassword::new(context.clone());
+    let request_meta = meta(auth.session_id());
+    let mut request = Box::pin(use_case.execute(auth, &request_meta, input(current, NEW_PASSWORD)));
+    let polled = std::future::poll_fn(|cx| Poll::Ready(request.as_mut().poll(cx))).await;
+    assert!(
+        polled.is_pending(),
+        "the request must still wait: {polled:?}"
+    );
+    drop(request);
+    assert_eq!(context.detached().drain(Duration::from_secs(5)).await, 0);
 }

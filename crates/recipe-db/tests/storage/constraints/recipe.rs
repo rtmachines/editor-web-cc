@@ -5,7 +5,7 @@
 //! of one recipe first discards the live draft, because `recipe_version_one_live_draft` allows one
 //! live draft per recipe.
 
-use sqlx::PgConnection;
+use sqlx::{Connection, PgConnection, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::support::fixtures::{self, TWIN_CAT};
@@ -171,6 +171,39 @@ async fn insert_version(conn: &mut PgConnection, row: &VersionRow) -> Result<Uui
     .bind(row.retired_at)
     .bind(row.deleted_at)
     .fetch_one(conn)
+    .await
+}
+
+/// Start a transaction in which the trigger `recipe_version_insert_draft` is off.
+///
+/// The trigger refuses a new row that is not a live draft before any `CHECK` runs (ADR-0169 (s)).
+/// A test that must break a `CHECK` on insert uses this transaction. The test never commits it, so
+/// the rollback on drop restores the trigger and every other change of the test.
+async fn without_insert_guard(conn: &mut PgConnection) -> Transaction<'_, Postgres> {
+    let mut tx = conn.begin().await.unwrap();
+    sqlx::query("ALTER TABLE recipe_version DISABLE TRIGGER recipe_version_insert_draft")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx
+}
+
+/// Insert a live draft and set the columns of the `SET` clause. The `UPDATE` follows the allowed
+/// transitions of trigger 4.7, so the `CHECK` of the test is the first to fail.
+async fn update_new_draft(
+    conn: &mut PgConnection,
+    setup: &Setup,
+    set_clause: &'static str,
+) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    let version = insert_version(conn, &VersionRow::draft(setup, 1))
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "UPDATE recipe_version SET {set_clause} WHERE id = $1"
+    ))
+    .bind(version)
+    .bind(setup.user)
+    .execute(conn)
     .await
 }
 
@@ -360,12 +393,18 @@ async fn recipe_version_created_by_fkey_rejects_an_unknown_user() {
 async fn recipe_version_approved_by_fkey_rejects_an_unknown_approver() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
-    let row = VersionRow {
-        approved_by: Some(Uuid::nil()),
-        ..VersionRow::approved(&s, 1)
-    };
+    let version = insert_version(&mut conn, &VersionRow::draft(&s, 1))
+        .await
+        .unwrap();
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = sqlx::query(
+        "UPDATE recipe_version SET status = 'approved', approved_by = $2, approved_at = now(), \
+             content_sha256 = repeat('b', 64) WHERE id = $1",
+    )
+    .bind(version)
+    .bind(Uuid::nil())
+    .execute(&mut conn)
+    .await;
 
     assert_constraint(
         result,
@@ -446,16 +485,16 @@ async fn recipe_version_based_on_same_recipe_rejects_a_base_version_of_another_r
 
 /// `recipe_version_status_value` and `recipe_version_status_fields` both reject an unknown status.
 /// PostgreSQL checks the CHECK constraints in name order, and `recipe_version_status_fields` sorts
-/// first. This test therefore drops `recipe_version_status_fields` in the disposable database
-/// before it inserts the row. The status value CHECK is then the only one that can fail.
+/// first. This test therefore turns off the insert trigger and drops `recipe_version_status_fields`
+/// inside a transaction that it never commits. The status value CHECK is then the only one that
+/// can fail.
 #[tokio::test]
 async fn recipe_version_status_value_rejects_an_unknown_status() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
-    // PostgreSQL checks CHECK constraints in name order, and `status_fields` also rejects an
-    // unknown status. The owner drops it, so the test database names `status_value` alone.
+    let mut tx = without_insert_guard(&mut conn).await;
     sqlx::query("ALTER TABLE recipe_version DROP CONSTRAINT recipe_version_status_fields")
-        .execute(&mut conn)
+        .execute(&mut *tx)
         .await
         .unwrap();
     let row = VersionRow {
@@ -463,7 +502,7 @@ async fn recipe_version_status_value_rejects_an_unknown_status() {
         ..VersionRow::draft(&s, 1)
     };
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = insert_version(&mut tx, &row).await;
 
     assert_constraint(result, CHECK_VIOLATION, "recipe_version_status_value");
 }
@@ -474,12 +513,13 @@ async fn recipe_version_status_value_rejects_an_unknown_status() {
 async fn an_unknown_status_is_reported_by_status_fields_when_both_checks_exist() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
+    let mut tx = without_insert_guard(&mut conn).await;
     let row = VersionRow {
         status: "pending",
         ..VersionRow::draft(&s, 1)
     };
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = insert_version(&mut tx, &row).await;
 
     assert_constraint(result, CHECK_VIOLATION, "recipe_version_status_fields");
 }
@@ -502,12 +542,13 @@ async fn recipe_version_change_note_length_rejects_an_empty_change_note() {
 async fn recipe_version_row_version_positive_rejects_a_row_version_of_zero() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
+    let mut tx = without_insert_guard(&mut conn).await;
     let row = VersionRow {
         row_version: 0,
         ..VersionRow::draft(&s, 1)
     };
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = insert_version(&mut tx, &row).await;
 
     assert_constraint(
         result,
@@ -520,12 +561,14 @@ async fn recipe_version_row_version_positive_rejects_a_row_version_of_zero() {
 async fn recipe_version_hash_format_rejects_a_hash_that_is_not_lowercase_hex() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
-    let row = VersionRow {
-        content_sha256: Some("Z".repeat(64)),
-        ..VersionRow::approved(&s, 1)
-    };
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = update_new_draft(
+        &mut conn,
+        &s,
+        "status = 'approved', approved_by = $2, approved_at = now(), \
+         content_sha256 = repeat('Z', 64)",
+    )
+    .await;
 
     assert_constraint(result, CHECK_VIOLATION, "recipe_version_hash_format");
 }
@@ -549,12 +592,13 @@ async fn recipe_version_status_fields_rejects_a_draft_with_an_approval_time() {
 async fn recipe_version_status_fields_rejects_an_approved_version_without_a_hash() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
-    let row = VersionRow {
-        content_sha256: None,
-        ..VersionRow::approved(&s, 1)
-    };
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = update_new_draft(
+        &mut conn,
+        &s,
+        "status = 'approved', approved_by = $2, approved_at = now()",
+    )
+    .await;
 
     assert_constraint(result, CHECK_VIOLATION, "recipe_version_status_fields");
 }
@@ -563,13 +607,15 @@ async fn recipe_version_status_fields_rejects_an_approved_version_without_a_hash
 async fn recipe_version_status_fields_rejects_a_retired_version_without_a_retirement_time() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
-    let row = VersionRow {
-        status: "retired",
-        retired_at: false,
-        ..VersionRow::approved(&s, 1)
-    };
+    let version = insert_version(&mut conn, &VersionRow::draft(&s, 1))
+        .await
+        .unwrap();
+    fixtures::approve(&mut conn, version, s.user).await;
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = sqlx::query("UPDATE recipe_version SET status = 'retired' WHERE id = $1")
+        .bind(version)
+        .execute(&mut conn)
+        .await;
 
     assert_constraint(result, CHECK_VIOLATION, "recipe_version_status_fields");
 }
@@ -578,12 +624,13 @@ async fn recipe_version_status_fields_rejects_a_retired_version_without_a_retire
 async fn recipe_version_deleted_only_draft_rejects_a_discarded_approved_version() {
     let mut conn = connection().await;
     let s = setup(&mut conn).await;
+    let mut tx = without_insert_guard(&mut conn).await;
     let row = VersionRow {
         deleted_at: true,
         ..VersionRow::approved(&s, 1)
     };
 
-    let result = insert_version(&mut conn, &row).await;
+    let result = insert_version(&mut tx, &row).await;
 
     assert_constraint(result, CHECK_VIOLATION, "recipe_version_deleted_only_draft");
 }

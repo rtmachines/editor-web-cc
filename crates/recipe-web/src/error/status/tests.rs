@@ -49,7 +49,7 @@ const FIXTURE: &str = "\
 |---|---|---|---|
 | `E-WEB-001` | `WebError::A` | 409 | First. |
 | `E-WEB-015` | `WebError::B` | - | No HTTP answer. |
-| `E-WEB-016` | `WebError::C` | 503 | Third. |
+| `E-WEB-099` | `WebError::C` | 503 | Third. |
 ";
 
 #[test]
@@ -57,7 +57,7 @@ fn status_parser_skips_a_row_without_http_answer() {
     let rows = statuses_of(FIXTURE);
     assert_eq!(
         rows,
-        vec![("E-WEB-001".to_owned(), 409), ("E-WEB-016".to_owned(), 503)]
+        vec![("E-WEB-001".to_owned(), 409), ("E-WEB-099".to_owned(), 503)]
     );
 }
 

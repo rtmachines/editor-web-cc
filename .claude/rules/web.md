@@ -25,7 +25,7 @@ The `<meta name="htmx-config">` tag sets these values:
 - `responseHandling: [{"code":"204","swap":false},{"code":"[23]..","swap":true},{"code":"[45]..","swap":true,"error":true},{"code":"...","swap":false}]`.
 - Without that `responseHandling`, HTMX 2 does not swap `conflict.html`, `field-errors.html`, or `error.html`.
 - `<body>` has `hx-history="false"` and `hx-headers` with the header `X-CSRF-Token`.
-- Every approve form and save form has `hx-sync="closest form:drop"`. The retire, discard, delete, and restore forms have it too (ADR-0049).
+- Every approve form and save form has `hx-sync="closest form:drop"`. The retire, discard, delete, and restore forms have it too (ADR-0049). The create form `user-new-form` has it too (ADR-0172 (e)).
 - The approve, retire, discard, delete, and restore forms have no `hx-disabled-elt`, so the focus stays on the button (ADR-0049 (j)).
 
 ## CSP and scripts (api.md §9)

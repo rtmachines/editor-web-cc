@@ -7,7 +7,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportStatus;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{Machine, PlcPlatform};
-use recipe_domain::recipe::{RecipeDeleter, VersionState};
+use recipe_domain::recipe::{RecipeDeleter, RecipeVersionId, VersionState};
 use serde_json::json;
 
 use super::test_doubles::{RecordingWriter, port};
@@ -19,14 +19,14 @@ use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::AppError;
 use crate::memory::fixtures::{
-    Fixture, actor, field, lock_line, meta, parameter_on, recipe_with, reference, rid,
+    Fixture, actor, field, lock_line, long_text, meta, parameter_on, recipe_with, reference, rid,
     second_engineer, text, timestamp, uid, user, vid,
 };
-use crate::memory::{JournalEntry, LockMode, MemoryStore};
+use crate::memory::{JournalEntry, LockMode, MemoryState, MemoryStore};
 use crate::ports::{DocumentWriter, Isolation};
 use crate::recipe::{
-    ApproveVersion, ApproveVersionInput, RenameRecipe, RenameRecipeInput, RetireVersion,
-    RetireVersionInput,
+    ApproveVersion, ApproveVersionInput, CreateVersion, CreateVersionInput, RenameRecipe,
+    RenameRecipeInput, RetireVersion, RetireVersionInput,
 };
 
 pub(super) const PLATFORM: PlcPlatform = PlcPlatform::TwinCat3;
@@ -436,6 +436,181 @@ async fn an_operator_is_forbidden_on_the_route_by_number_and_allowed_on_the_appr
     assert_eq!(fixture.store.journal().len(), own_lines);
     assert_eq!(fixture.store.audit_entries().len(), before);
     export_approved(&fixture, Role::Operator).await.unwrap();
+}
+
+/// The committed states of `R-1` after two approvals, and the identifier of version 2.
+struct Approvals {
+    /// Version 1 is retired and version 2 is approved.
+    second: MemoryState,
+    /// Both versions are retired.
+    none: MemoryState,
+    version_two: RecipeVersionId,
+}
+
+/// Approve version 2 and retire it, and keep the two later states.
+///
+/// The fixture ends in the state before the approval of version 2. The test arms a hook that
+/// moves it forward.
+async fn approvals_fixture() -> (Fixture, Approvals) {
+    let (fixture, _machine) = approved_fixture().await;
+    let created = CreateVersion::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            CreateVersionInput {
+                reference: reference("R-1"),
+                based_on: Some(1),
+                change_note: long_text("Next version"),
+            },
+        )
+        .await
+        .unwrap();
+    let first = fixture.store.state();
+    let row_version = fixture
+        .store
+        .state()
+        .version_row_version(created.version)
+        .unwrap();
+    ApproveVersion::new(fixture.context())
+        .execute(
+            &second_engineer(),
+            &meta(),
+            ApproveVersionInput {
+                reference: reference("R-1"),
+                number: created.number,
+                expected_row_version: row_version,
+                allow_outdated: false,
+            },
+        )
+        .await
+        .unwrap();
+    let second = fixture.store.state();
+    let row_version = fixture
+        .store
+        .state()
+        .version_row_version(created.version)
+        .unwrap();
+    RetireVersion::new(fixture.context())
+        .execute(
+            &actor(Role::Administrator),
+            &meta(),
+            RetireVersionInput {
+                reference: reference("R-1"),
+                number: created.number,
+                expected_row_version: row_version,
+            },
+        )
+        .await
+        .unwrap();
+    let none = fixture.store.state();
+    fixture
+        .store
+        .update_state(|state, _| *state = first.clone());
+    let approvals = Approvals {
+        second,
+        none,
+        version_two: created.version,
+    };
+    (fixture, approvals)
+}
+
+/// The journal lines of an export that picks twice and locks one version at a time.
+fn two_picks_and_two_locks(second: RecipeVersionId) -> Vec<JournalEntry> {
+    vec![
+        JournalEntry::Begin(Isolation::ReadOnly),
+        JournalEntry::Begin(Isolation::ReadCommitted),
+        lock_line("recipe_version", LockMode::ForShare, vid(101).to_string()),
+        JournalEntry::Begin(Isolation::ReadOnly),
+        JournalEntry::Begin(Isolation::ReadCommitted),
+        lock_line("recipe_version", LockMode::ForShare, second.to_string()),
+    ]
+}
+
+/// The journal lines of an export whose second pick finds no approved version.
+fn two_picks_and_one_lock() -> Vec<JournalEntry> {
+    vec![
+        JournalEntry::Begin(Isolation::ReadOnly),
+        JournalEntry::Begin(Isolation::ReadCommitted),
+        lock_line("recipe_version", LockMode::ForShare, vid(101).to_string()),
+        JournalEntry::Begin(Isolation::ReadOnly),
+    ]
+}
+
+#[tokio::test]
+async fn approved_export_picks_again_after_an_approval_before_the_lock() {
+    let (fixture, approvals) = approvals_fixture().await;
+    let own_lines = fixture.store.journal().len();
+    let second = approvals.second;
+    fixture
+        .store
+        .on_lock_version_shared(move |store| store.update_state(|state, _| *state = second));
+    let writer = RecordingWriter::shared();
+    let exported = export_approved_to(&fixture, Role::Operator, &writer)
+        .await
+        .unwrap();
+    assert_eq!(exported.number, 2);
+    assert_eq!(exported.status, ExportStatus::Approved);
+    assert_eq!(writer.calls().len(), 1);
+    assert_eq!(
+        journal_after(&fixture.store, own_lines),
+        two_picks_and_two_locks(approvals.version_two)
+    );
+    let entries = fixture.store.audit_entries();
+    let entry = entries.last().unwrap();
+    assert_eq!(entry.action(), AuditAction::VersionExported);
+    assert_eq!(
+        entry.target(),
+        &AuditTarget::recipe_version(rid(1), approvals.version_two)
+    );
+}
+
+#[tokio::test]
+async fn approved_export_gives_404_after_a_second_loss_of_the_approved_state() {
+    let (fixture, approvals) = approvals_fixture().await;
+    let own_lines = fixture.store.journal().len();
+    let entries_before = fixture.store.audit_entries().len();
+    let (second, none) = (approvals.second, approvals.none);
+    fixture.store.on_lock_version_shared(move |store| {
+        store.update_state(|state, _| *state = second);
+        store.on_lock_version_shared(move |store| {
+            store.update_state(|state, _| *state = none);
+        });
+    });
+    let writer = RecordingWriter::shared();
+    let error = export_approved_to(&fixture, Role::Operator, &writer)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::EXP_001);
+    assert!(writer.calls().is_empty());
+    assert_eq!(fixture.store.audit_entries().len(), entries_before);
+    // Two picks and two locks, and no third pick.
+    assert_eq!(
+        journal_after(&fixture.store, own_lines),
+        two_picks_and_two_locks(approvals.version_two)
+    );
+}
+
+#[tokio::test]
+async fn approved_export_gives_404_when_the_second_pick_finds_no_approved_version() {
+    let (fixture, approvals) = approvals_fixture().await;
+    let own_lines = fixture.store.journal().len();
+    let entries_before = fixture.store.audit_entries().len();
+    let none = approvals.none;
+    fixture
+        .store
+        .on_lock_version_shared(move |store| store.update_state(|state, _| *state = none));
+    let writer = RecordingWriter::shared();
+    let error = export_approved_to(&fixture, Role::Operator, &writer)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::EXP_001);
+    assert!(writer.calls().is_empty());
+    assert_eq!(fixture.store.audit_entries().len(), entries_before);
+    // Two picks and one lock: the second pick finds no approved version, so no third pick runs.
+    assert_eq!(
+        journal_after(&fixture.store, own_lines),
+        two_picks_and_one_lock()
+    );
 }
 
 mod counters;

@@ -9,7 +9,7 @@ use recipe_domain::error_codes::ErrorCode;
 use super::sample::Sample;
 
 /// The codes that a `Constraint` value carries: the trigger codes and `E-DB-003`.
-const CONSTRAINT_CODES: [ErrorCode; 18] = [
+const CONSTRAINT_CODES: [ErrorCode; 19] = [
     ErrorCode::PLT_030,
     ErrorCode::PLT_031,
     ErrorCode::PLT_032,
@@ -26,6 +26,7 @@ const CONSTRAINT_CODES: [ErrorCode; 18] = [
     ErrorCode::RCP_034,
     ErrorCode::RCP_035,
     ErrorCode::RCP_036,
+    ErrorCode::RCP_037,
     ErrorCode::AUD_003,
     ErrorCode::DB_003,
 ];

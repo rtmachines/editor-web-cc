@@ -522,7 +522,7 @@ impl Alerts {
         let at = moment.after(started.elapsed());
         match read {
             Err(fault) => {
-                tracing::warn!("{fault}");
+                tracing::warn!(error_code = %fault.code(), "{fault}");
                 true
             }
             Ok(Some(result)) => match result.outcome {

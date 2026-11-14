@@ -28,6 +28,7 @@ use crate::error::{FormErrors, WebError};
 use crate::pages::draft_reply::{success, with_change_number, with_form};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
+use crate::pages::saved_notice::saved_notice;
 use crate::state::WebState;
 
 /// Build the input of `UpdateParameterDefinition`. The form always sends the value and the limits.
@@ -67,8 +68,8 @@ async fn saved(
 ) -> Result<Response, WebError> {
     let request = ctx.request;
     let request_id = request.request_id();
+    let page = format!("{}/parameters/{key}", ctx.target.version_href());
     if !request.is_htmx() {
-        let page = format!("{}/parameters/{key}", ctx.target.version_href());
         return see_other_path(&page, request_id, []);
     }
     let t = ctx.texts();
@@ -76,7 +77,15 @@ async fn saved(
     let toast = with_change_number(t, &sentence, &output);
     let summary = SummaryView::saved(key, definition, toast);
     let body = render(&SummaryFragment { t, summary }, request_id)?;
-    let mut clean = stored_shown(ctx, &read_parameter(ctx).await?)?;
+    // The command is committed. A failed read gives the notice and not an error (ADR-0163).
+    let stored = match read_parameter(ctx).await {
+        Ok(stored) => stored,
+        Err(fault) => {
+            let row_version = Some(output.row_version);
+            return saved_notice(true, request_id, t, &fault, &page, row_version);
+        }
+    };
+    let mut clean = stored_shown(ctx, &stored)?;
     // `HX-Trigger` sends this `row_version`. A newer write of another user then gives a conflict.
     clean.texts.row_version = output.row_version.to_string();
     let csrf = request.csrf_token();

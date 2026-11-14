@@ -18,13 +18,13 @@ use uuid::Uuid;
 use super::{Login, LoginInput};
 use crate::auth::{Operation, RequestMeta};
 use crate::context::UseCase;
-use crate::error::{AppError, StorageError, TimeoutStage};
+use crate::error::{AppError, TimeoutStage};
 use crate::identity::fixtures::{IdentityFixture, fake_hash};
 use crate::identity::no_session::require_no_session;
 use crate::memory::{Fault, MemoryStore};
 use crate::ports::{NewSession, NewUser};
 
-const PASSWORD: &str = "correct-horse-battery";
+pub(super) const PASSWORD: &str = "correct-horse-battery";
 const START_SECONDS: i64 = 1_000_000;
 
 fn user_id() -> UserId {
@@ -44,7 +44,7 @@ fn request_id() -> RequestId {
     RequestId::from(Uuid::from_u128(0x77))
 }
 
-fn meta() -> RequestMeta {
+pub(super) fn meta() -> RequestMeta {
     RequestMeta::new(
         request_id(),
         Some(ip()),
@@ -53,7 +53,7 @@ fn meta() -> RequestMeta {
     )
 }
 
-fn input(login: &str, password: &str) -> LoginInput {
+pub(super) fn input(login: &str, password: &str) -> LoginInput {
     LoginInput {
         login: TypedLogin::parse(login).unwrap(),
         password: Password::parse(password).unwrap(),
@@ -72,20 +72,20 @@ fn seed_user(store: &MemoryStore, role: Role, must_change_password: bool) {
     });
 }
 
-fn fixture() -> IdentityFixture {
+pub(super) fn fixture() -> IdentityFixture {
     let fixture = IdentityFixture::new();
     seed_user(&fixture.store, Role::Operator, false);
     fixture
 }
 
-fn deactivate(store: &MemoryStore) {
+pub(super) fn deactivate(store: &MemoryStore) {
     store.update_state(|state, _now| {
         state.users.get_mut(&user_id()).unwrap().is_active = false;
     });
 }
 
 /// A fixture whose user changes between the password check and T2.
-fn racing_fixture(change: fn(&mut crate::ports::UserRow)) -> IdentityFixture {
+pub(super) fn racing_fixture(change: fn(&mut crate::ports::UserRow)) -> IdentityFixture {
     let fixture = IdentityFixture::with_race(move |store| {
         store.update_state(|state, _now| change(state.users.get_mut(&user_id()).unwrap()));
     });
@@ -93,19 +93,19 @@ fn racing_fixture(change: fn(&mut crate::ports::UserRow)) -> IdentityFixture {
     fixture
 }
 
-fn reset(row: &mut crate::ports::UserRow) {
+pub(super) fn reset(row: &mut crate::ports::UserRow) {
     row.password_hash = fake_hash("a-one-time-password");
     row.session_epoch = row.session_epoch.checked_add(1).unwrap();
 }
 
-fn seed_failures(store: &MemoryStore, seconds_ago: &[i64]) {
+pub(super) fn seed_failures(store: &MemoryStore, seconds_ago: &[i64]) {
     let login = TypedLogin::parse("anna").unwrap();
     for ago in seconds_ago {
         store.seed_attempt(&login, ip(), at(ago.checked_neg().unwrap()), false);
     }
 }
 
-fn wrong_password() -> impl Fn(&AppError) -> bool {
+pub(super) fn wrong_password() -> impl Fn(&AppError) -> bool {
     |error| {
         matches!(
             error,
@@ -426,38 +426,6 @@ async fn an_inactive_user_gets_one_dummy_check_and_e_idn_004_even_with_the_right
 }
 
 #[tokio::test]
-async fn a_failed_event_write_returns_the_storage_error_and_the_attempt_still_counts() {
-    let cases = [("anna", "wrong-password"), ("nobody", PASSWORD)];
-    for (login, password) in cases {
-        let fixture = fixture();
-        fixture.sink.fail_with(Fault::Unavailable);
-        let error = Login::new(fixture.context.clone())
-            .execute(&meta(), input(login, password))
-            .await
-            .unwrap_err();
-        assert!(
-            matches!(error, AppError::Storage(StorageError::Unavailable)),
-            "{login}: {error:?}"
-        );
-        assert_eq!(fixture.store.state().attempts.len(), 1, "{login}");
-        assert_eq!(fixture.context.gate().available_permits(), 4, "{login}");
-    }
-}
-
-#[tokio::test]
-async fn a_failed_event_write_of_an_inactive_user_returns_the_storage_error() {
-    let fixture = fixture();
-    deactivate(&fixture.store);
-    fixture.sink.fail_with(Fault::Unavailable);
-    let error = Login::new(fixture.context.clone())
-        .execute(&meta(), input("anna", PASSWORD))
-        .await
-        .unwrap_err();
-    assert!(matches!(error, AppError::Storage(_)), "{error:?}");
-    assert_eq!(fixture.store.state().attempts.len(), 1);
-}
-
-#[tokio::test]
 async fn four_failures_with_the_last_one_second_ago_give_e_idn_005_with_retry_after_4() {
     let fixture = fixture();
     seed_failures(&fixture.store, &[10, 9, 8, 1]);
@@ -602,7 +570,7 @@ async fn a_reset_between_the_check_and_t2_gives_e_idn_003_and_no_session() {
 }
 
 /// Assert that the sink holds exactly one event of the user with the given kind.
-fn assert_one_event(fixture: &IdentityFixture, kind: SecurityEventKind) {
+pub(super) fn assert_one_event(fixture: &IdentityFixture, kind: SecurityEventKind) {
     let events = fixture.sink.events();
     assert_eq!(events.len(), 1, "{events:?}");
     let event = events.first().unwrap();
@@ -610,21 +578,6 @@ fn assert_one_event(fixture: &IdentityFixture, kind: SecurityEventKind) {
     assert_eq!(event.user(), Some(user_id()));
     assert_eq!(event.login_hmac(), None);
     assert_eq!(event.request_id(), request_id());
-}
-
-#[tokio::test]
-async fn a_failed_event_write_after_a_race_returns_the_storage_error() {
-    let fixture = racing_fixture(reset);
-    fixture.sink.fail_with(Fault::Unavailable);
-    let error = Login::new(fixture.context.clone())
-        .execute(&meta(), input("anna", PASSWORD))
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(error, AppError::Storage(StorageError::Unavailable)),
-        "{error:?}"
-    );
-    assert_eq!(fixture.context.gate().available_permits(), 4);
 }
 
 #[tokio::test]

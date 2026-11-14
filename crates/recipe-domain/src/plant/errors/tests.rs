@@ -1,5 +1,6 @@
 use super::*;
-use crate::plant::UnitPath;
+use crate::error_codes::ErrorCode;
+use crate::plant::{MachineCode, UnitPath};
 
 fn missing(text: &str) -> PlantError {
     PlantError::UnitNotFound {
@@ -73,4 +74,13 @@ fn display_writes_one_line_for_each_entry_without_trailing_newline() {
 fn list_is_a_std_error() {
     fn takes_error(_: &dyn std::error::Error) {}
     takes_error(&PlantErrors::from(missing("U1")));
+}
+
+#[test]
+fn plant_errors_code_is_code_of_first_entry() {
+    let mut errors = PlantErrors::from(missing("U1"));
+    errors.push(PlantError::MachineNotFound {
+        code: MachineCode::parse("M1").unwrap(),
+    });
+    assert_eq!(errors.code(), ErrorCode::PLT_020);
 }

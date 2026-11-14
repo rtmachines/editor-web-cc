@@ -3,6 +3,7 @@
 //! "Errors of the approval").
 
 use axum::http::StatusCode;
+use recipe_app::memory::Fault;
 use recipe_domain::audit::AuditAction;
 
 use super::preview_tests::part_of;
@@ -86,6 +87,36 @@ async fn approve_answers_the_version_page_with_the_toast_of_both_versions() {
     let entry = entries.last().unwrap();
     assert!(entry.contains("\"content_sha256\":\""), "{entry}");
     assert!(entry.contains("\"allow_outdated\":false"), "{entry}");
+}
+
+/// ADR-0163: the approval committed and the read of the version page failed. The answer is the
+/// notice, not an error. The notice sets no `HX-Trigger`, because the output of `ApproveVersion`
+/// holds no new `row_version`.
+#[tokio::test]
+async fn approve_with_failed_read_after_commit_shows_saved_notice() {
+    let world = audit_world().await;
+    let before = approvals(&world).len();
+    let sent = world.data.r500_v2_row_version;
+    world
+        .fixture
+        .store
+        .fail_begin_after_commit(Fault::Unavailable);
+    let reply = admin_approves(&world, &format!("row_version={sent}")).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.header("hx-retarget"), "#toast", "{:?}", reply.headers);
+    assert_eq!(reply.header("hx-push-url"), "false");
+    assert!(
+        !reply.headers.contains_key("hx-trigger"),
+        "{:?}",
+        reply.headers
+    );
+    assert!(
+        reply.body.contains("The change is saved. Reload the page."),
+        "{}",
+        reply.body
+    );
+    let entries = approvals(&world);
+    assert_eq!(entries.len(), before.checked_add(1).unwrap(), "{entries:?}");
 }
 
 #[tokio::test]

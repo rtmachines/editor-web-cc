@@ -137,9 +137,11 @@ async fn bump_a_rejected_update_leaves_the_row_version_unchanged() {
 async fn bump_fires_before_the_transition_trigger() {
     let (mut conn, _draft) = plant().await;
 
+    // Bit 16 of `tgtype` marks a trigger for `UPDATE`. The insert trigger of 4.14 is not in the order.
     let names: Vec<String> = sqlx::query_scalar(
         "SELECT tgname::text FROM pg_trigger \
          WHERE tgrelid = 'recipe_version'::regclass AND NOT tgisinternal \
+           AND tgtype::int & 16 <> 0 \
          ORDER BY tgname COLLATE \"C\"",
     )
     .fetch_all(&mut conn)
