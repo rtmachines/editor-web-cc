@@ -96,7 +96,7 @@ Each F-01 test asserts `HX-Trigger` with `rowVersion` when the output holds the 
 
 ## 13. Group G13: release note
 
-- [ ] 13.1 (CHANGELOG.md) [mechanical] [haiku] All findings. Add one line for each changed behavior under "Unreleased". Red test: none. Check: ste-lint on `CHANGELOG.md`.
+- [x] 13.1 (CHANGELOG.md) [mechanical] [haiku] All findings. Add one line for each changed behavior under "Unreleased". Red test: none. Check: ste-lint on `CHANGELOG.md`.
 
 ## 14. Group G14: verification
 
