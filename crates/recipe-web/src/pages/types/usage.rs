@@ -12,7 +12,7 @@ use crate::error::WebError;
 use crate::layout::Layout;
 use crate::pages::hrefs::{parameter_href, recipe_href, version_href};
 use crate::pages::path_values::{Page, page, path_code_type, revision};
-use crate::pages::render::{page_url, render};
+use crate::pages::render::{page_url, pager_links, render};
 use crate::pages::{PageRequest, Texts};
 use crate::state::WebState;
 
@@ -89,26 +89,14 @@ fn usage_row(t: Texts<'_>, line: &TypeUsageLine) -> UsageRow {
 /// Build the addresses of the previous, the next, and the first page.
 ///
 /// An empty text means that the page has no such neighbor. The `rev` of the request is the
-/// revision that the use case resolved, so the links stay on one revision. A page after the end
-/// has no previous link, because the page before it can lie after the end too.
-fn pager_links(usage: &TypeUsage, current: Page) -> (String, String, String) {
+/// revision that the use case resolved, so the links stay on one revision.
+fn usage_pager_links(usage: &TypeUsage, current: Page) -> (String, String, String) {
     let path = format!("{}/usage", type_href(usage.machine.code(), &usage.name));
     let revision = usage.revision.to_string();
-    let link = |number: Option<u32>| {
-        number
-            .map(|number| page_url(&path, &[("rev", revision.as_str())], number))
-            .unwrap_or_default()
-    };
+    let pairs = [("rev", revision.as_str())];
     let after_end = usage.rows.is_empty() && current.index > 0;
-    let previous = current
-        .number
-        .checked_sub(1)
-        .filter(|number| *number > 0 && !after_end);
-    let next = usage
-        .has_next
-        .then(|| current.number.checked_add(1))
-        .flatten();
-    (link(previous), link(next), link(Some(1)))
+    let (previous, next) = pager_links(&path, (current, usage.has_next, after_end), &pairs);
+    (previous, next, page_url(&path, &pairs, 1))
 }
 
 /// `GET /machines/{code}/types/{name}/usage`: list the parameters that use a revision.
@@ -136,7 +124,7 @@ pub(super) async fn show(
     let t = Texts::new(state.bundles(), request.lang());
     let title = named_revision(t, "usage-title", &usage.name, usage.revision);
     let layout = Layout::for_session(t, &request, title.clone(), current_nav())?;
-    let (previous, next, first_url) = pager_links(&usage, current);
+    let (previous, next, first_url) = usage_pager_links(&usage, current);
     let after_end = usage.rows.is_empty() && current.index > 0;
     let view = UsagePage {
         layout,

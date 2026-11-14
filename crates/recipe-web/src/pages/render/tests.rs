@@ -11,10 +11,11 @@ use uuid::Uuid;
 
 use askama::Template;
 
-use super::{cursor_url, page_url, query_url, see_other_path};
+use super::{cursor_url, page_url, pager_links, query_url, see_other_path};
 use crate::error::WebError;
 use crate::i18n::{Bundles, Lang};
 use crate::pages::Texts;
+use crate::pages::path_values::Page;
 
 /// The id of the request that the tests pass to `see_other_path`.
 fn request_id() -> RequestId {
@@ -83,6 +84,15 @@ fn render_see_other_path_refuses_a_location_that_leaves_the_site() {
     ] {
         let error = see_other_path(location, request_id(), []).unwrap_err();
         assert!(matches!(error, WebError::Internal { .. }), "{location:?}");
+    }
+}
+
+#[test]
+fn see_other_path_refuses_a_control_character() {
+    for location in ["/\t/evil.com", "/a\u{7f}b"] {
+        let error = see_other_path(location, request_id(), []).unwrap_err();
+        assert!(matches!(error, WebError::Internal { .. }), "{location:?}");
+        assert_eq!(error.code(), ErrorCode::WEB_010, "{location:?}");
     }
 }
 
@@ -244,4 +254,25 @@ fn render_see_other_path_error_carries_the_id_of_the_request() {
             "{location:?}"
         );
     }
+}
+
+/// Build the `Page` of a page number of the URL.
+fn page_of(number: u32) -> Page {
+    Page {
+        number,
+        index: number.saturating_sub(1),
+    }
+}
+
+#[test]
+fn pager_links_encode_the_search_text_and_omit_the_previous_link_after_the_end() {
+    let pairs = [("q", "a&b")];
+    let (previous, next) = pager_links("/machines", (page_of(2), true, false), &pairs);
+    assert_eq!(previous, "/machines?q=a%26b&page=1");
+    assert_eq!(next, "/machines?q=a%26b&page=3");
+    let (previous, next) = pager_links("/machines", (page_of(3), false, true), &pairs);
+    assert_eq!(previous, "");
+    assert_eq!(next, "");
+    let (previous, next) = pager_links("/machines", (page_of(1), false, false), &[]);
+    assert_eq!((previous.as_str(), next.as_str()), ("", ""));
 }

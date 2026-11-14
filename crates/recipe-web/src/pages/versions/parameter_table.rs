@@ -16,8 +16,8 @@ use recipe_domain::text::Text;
 use crate::error::{FieldError, LineView};
 use crate::i18n::Lang;
 use crate::pages::path_values::Page;
-use crate::pages::recipes::pager_links;
 use crate::pages::render::page_url;
+use crate::pages::render::pager_links;
 use crate::pages::texts::Texts;
 
 /// One row of the parameter table.
@@ -355,10 +355,6 @@ fn unit_links(t: Texts<'_>, base: &str, units: &[UnitCount], shown: &str) -> Vec
 /// ADR-0043 (i)).
 #[derive(Template)]
 #[template(path = "parameter-row.html")]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the answer of AddParameter of wave 5 renders it")
-)]
 pub(crate) struct ParameterRowFragment<'a> {
     /// The texts of the UI language.
     pub(crate) t: Texts<'a>,

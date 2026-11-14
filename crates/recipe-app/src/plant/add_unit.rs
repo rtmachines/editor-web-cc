@@ -3,7 +3,6 @@
 use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{MachineCode, MachineId, PlantError, UnitId, UnitPath};
 use recipe_domain::text::Text;
-use uuid::Uuid;
 
 use super::resolve::live_machine_id;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
@@ -11,6 +10,7 @@ use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{
     AppError, Missing, StorageError, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE, map_storage,
 };
+use crate::identity::random_uuid;
 use crate::ports::{Isolation, Locked, NonEmpty, RowImage};
 
 /// The parsed request of `AddUnit`.
@@ -93,7 +93,7 @@ impl AddUnit {
         }
         let unit = machine
             .add_unit(
-                UnitId::from(Uuid::new_v4()),
+                UnitId::from(random_uuid()?),
                 input.parent_path.as_ref(),
                 &input.segment,
                 input.name,

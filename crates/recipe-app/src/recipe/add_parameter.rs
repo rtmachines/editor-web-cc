@@ -7,7 +7,6 @@ use recipe_domain::recipe::{
     ValueInput,
 };
 use recipe_domain::text::{LongText, Text};
-use uuid::Uuid;
 
 use super::definition_steps::{lock_live_unit, map_tag_error, resolve_type};
 use super::draft_session::{DraftOutput, DraftTarget, MachineLock, OpenDraft, TouchedDraft};
@@ -15,6 +14,7 @@ use super::queries::value_text;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, StorageError};
+use crate::identity::random_uuid;
 use crate::plant::require_current_type;
 use crate::ports::{NonEmpty, RowImage};
 
@@ -118,8 +118,8 @@ impl AddParameter {
             .require_no_nested_array(open.draft.platform())?;
         let unit = lock_live_unit(&mut open, &input.unit_path).await?;
         let resolved = resolve_type(&mut open, &input.type_expr, audit_context(user, meta)).await?;
-        let key = ParameterKey::from(Uuid::new_v4());
-        let id = ParameterId::from(Uuid::new_v4());
+        let key = ParameterKey::from(random_uuid()?);
+        let id = ParameterId::from(random_uuid()?);
         let tag = input.tag.clone();
         let number = input.number;
         let new = new_parameter(input, unit, resolved.type_id, (id, key));

@@ -22,12 +22,11 @@ use serde::Deserialize;
 use super::add::unit_form;
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
 use crate::pages::draft_reply::{refusal_lines, refused, with_form};
+use crate::pages::form_fields::{FieldLines, TokenFields};
 use crate::pages::path_values::path_code_unit;
-use crate::pages::recipes::fields::FieldLines;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
-use crate::pages::users::TokenFields;
 use crate::state::WebState;
 
 /// The fields of the form of `POST .../units/{path}/rename`.

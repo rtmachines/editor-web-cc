@@ -22,6 +22,7 @@ mod diff_view;
 mod draft_reply;
 pub(crate) mod export;
 pub(crate) mod export_api;
+pub(crate) mod form_fields;
 pub(crate) mod history;
 mod hrefs;
 #[cfg(test)]

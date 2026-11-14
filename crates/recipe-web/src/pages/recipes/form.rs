@@ -20,12 +20,11 @@ use recipe_domain::recipe::{RecipeError, ReferenceNumber};
 use recipe_domain::text::{LongText, Text};
 use serde::Deserialize;
 
-use super::Choice;
-use super::fields::FieldLines;
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
 use crate::form_text::crlf_to_lf;
 use crate::layout::{Layout, NavTarget};
 use crate::pages::draft_reply::{refusal_lines, refused};
+use crate::pages::form_fields::{Choice, FieldLines};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;

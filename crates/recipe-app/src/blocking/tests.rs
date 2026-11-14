@@ -449,18 +449,23 @@ fn a_diff_whose_caller_drops_the_future_while_queued_never_runs_and_frees_the_pe
 async fn a_diff_after_its_deadline_does_not_start_the_work() {
     let blocking = Blocking::default();
     let (gate, permit) = one_permit().await;
-    let ran = Arc::new(AtomicBool::new(false));
-    let flag = Arc::clone(&ran);
+    // The closure owns the sender. A run of the closure sends a value. A drop without a run
+    // closes the channel, so the receiver gives `Err` and needs no sleep.
+    let (ran_sender, ran) = tokio::sync::oneshot::channel::<()>();
     let passed = tokio::time::Instant::now();
 
     let error = blocking
-        .diff(passed, permit, move || flag.store(true, Ordering::SeqCst))
+        .diff(passed, permit, move || {
+            let _ = ran_sender.send(());
+        })
         .await
         .unwrap_err();
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    let outcome = tokio::time::timeout(Duration::from_secs(5), ran)
+        .await
+        .expect("the closure drops without a run, so the receiver answers at once");
 
     assert_eq!(error.code(), ErrorCode::WEB_009);
-    assert!(!ran.load(Ordering::SeqCst));
+    assert!(outcome.is_err(), "the closure ran");
     assert_eq!(gate.available(), 1);
 }
 

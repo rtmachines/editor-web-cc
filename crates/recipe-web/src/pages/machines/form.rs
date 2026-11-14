@@ -24,7 +24,7 @@ use super::platform_text;
 use crate::error::{FieldError, FieldReason, FormErrors, WebError};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::draft_reply::{refusal_lines, refused};
-use crate::pages::recipes::fields::FieldLines;
+use crate::pages::form_fields::FieldLines;
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;

@@ -14,7 +14,7 @@ use recipe_domain::recipe::{ParameterValue, RuleFault, RuleField, ValueFault};
 use super::fields::SentFields;
 use super::grid::{GridSource, GridView, LimitTexts, ValueTexts};
 use crate::error::{FieldError, FormErrors, LineView};
-use crate::pages::recipes::Choice;
+use crate::pages::form_fields::Choice;
 use crate::pages::texts::Texts;
 
 /// The texts of the definition fields as the form shows them.

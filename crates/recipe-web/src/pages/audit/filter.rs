@@ -14,7 +14,7 @@ use recipe_app::ports::TimeRange;
 use uuid::Uuid;
 
 use crate::error::{FieldReason, WebError};
-use crate::pages::recipes::fields::FieldLines;
+use crate::pages::form_fields::FieldLines;
 
 /// The length of a UUID in the hyphenated form.
 const HYPHENATED_UUID_LENGTH: usize = 36;

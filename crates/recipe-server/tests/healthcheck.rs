@@ -30,17 +30,14 @@ const REQUEST_WAIT: Duration = Duration::from_secs(10);
 /// The pause between two polls of the non-blocking `accept`.
 const ACCEPT_POLL: Duration = Duration::from_millis(5);
 
-/// The shortest span of a probe that waits for the whole budget of 3 s.
+/// The shortest run of a probe that waits for the whole budget.
 ///
-/// The span runs from the `accept` of the listener to the close of the connection. The child
-/// starts its clock before it connects. The listener clock therefore starts late. The accept poll
-/// delay and the scheduling delay of the listener thread cause this. A loaded host can make the
-/// scheduling delay long. The value is the budget minus 500 ms. It covers both delays and a
-/// socket timeout that ends early on some systems. A budget of 2 s or less still fails this floor.
-const SPAN_FLOOR: Duration = Duration::from_millis(2500);
-
-/// The longest span of a probe with a silent listener. A budget of 10 s or more breaks it.
-const SPAN_CEILING: Duration = Duration::from_secs(4);
+/// This is the value of `watchdog.probe_timeout` in `reliability.md` section 7.11. The test does
+/// not read the constant `PROBE_BUDGET`, so a change of that constant does not move the floor.
+/// The clock runs in this process from before the spawn of the child to its exit. That span holds
+/// the whole probe, also on a slow runner. No ceiling exists, because a slow runner can only
+/// make the span longer. `CHILD_LIMIT` is the hang guard.
+const PROBE_BUDGET_FLOOR: Duration = Duration::from_secs(3);
 
 const PORT_VARIABLE: &str = "RECIPE_HTTP__INTERNAL_PORT";
 
@@ -112,13 +109,6 @@ fn answer_once_within(
     (address, handle)
 }
 
-/// What a silent listener saw: the request text and how long the client kept the connection.
-struct SilentOutcome {
-    request: String,
-    /// The time from the `accept` to the close of the connection by the client.
-    span: Duration,
-}
-
 /// Read until the peer closes the connection. A read error counts as a close.
 ///
 /// The read timeout of the stream ends the wait, so the function cannot hang.
@@ -131,22 +121,17 @@ fn wait_for_close(stream: &mut TcpStream) {
     }
 }
 
-/// Accept one connection, read the request, send nothing, and time the client.
+/// Accept one connection, read the request, send nothing, and hold the connection open.
 ///
 /// The server holds the connection open until the client closes it. The handle returns the
-/// request text and the span from the `accept` to the close. The clock runs in this thread, so the
-/// start of the child process does not count.
-fn silent_once() -> (SocketAddr, JoinHandle<SilentOutcome>) {
+/// request text.
+fn silent_once() -> (SocketAddr, JoinHandle<String>) {
     let (listener, address) = bind_nonblocking();
     let handle = std::thread::spawn(move || {
         let mut stream = accept_within(&listener, ACCEPT_WAIT);
-        let accepted = Instant::now();
         let request = read_request(&mut stream);
         wait_for_close(&mut stream);
-        SilentOutcome {
-            request,
-            span: accepted.elapsed(),
-        }
+        request
     });
     (address, handle)
 }
@@ -208,30 +193,34 @@ fn a_fake_server_without_a_connection_ends_at_its_accept_bound() {
     let (_address, server) =
         answer_once_within(b"HTTP/1.1 200 OK\r\n\r\n", Duration::from_millis(100));
 
-    let started = Instant::now();
     let outcome = server.join();
-    let elapsed = started.elapsed();
 
-    assert!(outcome.is_err(), "the server ended without a connection");
-    assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+    let payload = outcome.expect_err("the server ended without a connection");
+    let text = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .expect("the panic text is a string");
+    assert!(text.contains("no connection in 100ms"), "{text}");
 }
 
 #[test]
 fn a_listener_that_stays_silent_gives_exit_code_1_at_the_budget_of_3_s() {
     let (address, server) = silent_once();
 
+    let started = Instant::now();
     let output = healthcheck(&address.port().to_string(), &[]);
+    let elapsed = started.elapsed();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(output.status.code(), Some(1), "{stdout}");
     assert!(stdout.contains("the health probe failed"), "{stdout}");
-    let SilentOutcome { request, span } = server.join().unwrap();
+    let request = server.join().unwrap();
     assert!(request.starts_with("GET /readyz HTTP/1.1\r\n"), "{request}");
     assert!(
-        span >= SPAN_FLOOR,
-        "the client gave up early after {span:?}"
+        elapsed >= PROBE_BUDGET_FLOOR,
+        "the child gave up early after {elapsed:?}"
     );
-    assert!(span < SPAN_CEILING, "the client waited {span:?}");
 }
 
 #[test]

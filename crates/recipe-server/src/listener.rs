@@ -251,13 +251,13 @@ impl Connections {
         self.open.record(self.tasks.len());
     }
 
-    /// Take one finished task out of the set. Log a panic once and go on.
+    /// Take one finished task out of the set.
+    ///
+    /// The method writes no log line for a panic. The panic hook already logs and counts it, so a
+    /// second line here would log one panic twice (ADR-0058 (f), `reliability.md` section 2.4
+    /// rule 6). The loop goes on with the next task.
     fn collect(&self, joined: Result<(), JoinError>) {
-        if let Err(error) = joined
-            && error.is_panic()
-        {
-            tracing::error!("a connection task panicked, the loop goes on");
-        }
+        drop(joined);
         #[cfg(test)]
         self.open.record(self.tasks.len());
     }

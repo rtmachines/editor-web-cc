@@ -5,10 +5,6 @@
 //! type tree. [`GridView::build`] walks the tree once and returns a flat list of rows in preorder.
 //! The macros of `components/grid.html` write each row. The view also gives the `id` of the input
 //! of each fault, so each error line stands under its input (design D9, ADR-0039 (n)).
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the parameter handlers of wave 5 call it")
-)]
 
 use std::collections::{BTreeMap, BTreeSet};
 

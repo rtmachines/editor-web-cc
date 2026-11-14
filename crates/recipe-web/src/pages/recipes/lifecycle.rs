@@ -12,9 +12,9 @@ use recipe_app::recipe::{DeleteRecipe, DeleteRecipeInput, RestoreRecipe, Restore
 
 use super::path_reference;
 use crate::error::WebError;
+use crate::pages::form_fields::TokenFields;
 use crate::pages::render::see_other_path;
 use crate::pages::request::PageRequest;
-use crate::pages::users::TokenFields;
 use crate::state::WebState;
 
 /// `POST /recipes/{ref}/delete`: delete the recipe and discard its live draft.

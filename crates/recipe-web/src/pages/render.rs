@@ -9,6 +9,7 @@ use recipe_domain::audit::RequestId;
 use recipe_domain::timestamp::Timestamp;
 
 use crate::error::WebError;
+use crate::pages::path_values::Page;
 
 /// Render a template. A failure is a defect of the server and gives `E-WEB-010`.
 ///
@@ -54,7 +55,7 @@ pub(crate) fn see_other(
 ///
 /// The function solves one problem: `see_other` takes a `&'static str`, so it cannot build the
 /// address of a machine or a unit. This function checks the text instead. The location must be a
-/// path of this site: one `/` first, no `\`, and ASCII only. It must also be a valid header value.
+/// path of this site: one `/` first, no `\`, no control character, and ASCII only. It must also be a valid header value.
 /// A location from a value object always passes. The check stops a later caller that passes text
 /// of a user from sending the browser to another site.
 ///
@@ -114,6 +115,32 @@ pub(crate) fn page_url(path: &str, query: &[(&str, &str)], page: u32) -> String 
     query_url(path, &pairs)
 }
 
+/// Build the addresses of the previous and the next page of a list. An empty address omits its link.
+///
+/// The function solves one problem. The machine list, the recipe list, the usage list, the user
+/// list, and the version tables need one rule for their pager. [`page_url`] encodes `pairs`, so a
+/// search text stays whole in the link. The tuple holds the page, whether a next page exists, and
+/// whether the page lies after the end. A page after the end has no previous link, because the page
+/// before it can lie after the end too. `path` comes from code, never from the request.
+pub(crate) fn pager_links(
+    path: &str,
+    (page, has_next, after_end): (Page, bool, bool),
+    pairs: &[(&str, &str)],
+) -> (String, String) {
+    let previous = page
+        .number
+        .checked_sub(1)
+        .filter(|number| *number > 0 && !after_end)
+        .map(|number| page_url(path, pairs, number))
+        .unwrap_or_default();
+    let next = has_next
+        .then(|| page.number.checked_add(1))
+        .flatten()
+        .map(|number| page_url(path, pairs, number))
+        .unwrap_or_default();
+    (previous, next)
+}
+
 /// Build the address of a page of a cursor list: the path, the filters, and the cursor `before`.
 ///
 /// The function solves one problem: the audit pages, the security events, and the history page
@@ -130,12 +157,14 @@ pub(crate) fn cursor_url(path: &str, pairs: &[(&str, &str)], before: Option<u64>
     query_url(path, &query)
 }
 
-/// Return true when `location` is a path of this site: one `/` first, no `\`, and ASCII only.
+/// Return true when `location` is a path of this site: one `/` first, no `\`, no control
+/// character, and ASCII only. A browser drops a tab, so `/\t/host` would become `//host`.
 fn is_site_path(location: &str) -> bool {
     location.is_ascii()
         && location.starts_with('/')
         && !location.starts_with("//")
         && !location.contains('\\')
+        && !location.chars().any(|c| c.is_ascii_control())
 }
 
 /// Build the `303` answer for a location that is a valid header value.

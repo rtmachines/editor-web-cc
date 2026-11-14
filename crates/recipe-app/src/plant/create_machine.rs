@@ -5,11 +5,11 @@ use recipe_domain::plant::{
     DataBlockNumber, Machine, MachineCode, MachineId, PlantError, PlcPlatform, UnitId,
 };
 use recipe_domain::text::Text;
-use uuid::Uuid;
 
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
 use crate::context::{AppContext, UseCase, audit_context};
 use crate::error::{AppError, MACHINE_CODE_LIVE_UNIQUE, StorageError, map_storage};
+use crate::identity::random_uuid;
 use crate::ports::{InsertedMachine, Isolation, NonEmpty};
 
 /// The parsed request of `CreateMachine`.
@@ -76,8 +76,8 @@ impl CreateMachine {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let code = input.code;
         let output = CreateMachineOutput {
-            machine: MachineId::from(Uuid::new_v4()),
-            main_unit: UnitId::from(Uuid::new_v4()),
+            machine: MachineId::from(random_uuid()?),
+            main_unit: UnitId::from(random_uuid()?),
         };
         let machine = Machine::create(
             output.machine,

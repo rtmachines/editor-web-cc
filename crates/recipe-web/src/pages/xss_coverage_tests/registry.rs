@@ -135,7 +135,7 @@ pub(super) const TABLE: &[Entry] = &[
     ("pages/users.rs", "CreateFields", "csrf_token", CSRF),
     ("pages/users.rs", "RoleFields", "role", ROLE),
     ("pages/users.rs", "RoleFields", "csrf_token", CSRF),
-    ("pages/users.rs", "TokenFields", "csrf_token", CSRF),
+    ("pages/form_fields.rs", "TokenFields", "csrf_token", CSRF),
     (
         "pages/approval/approve.rs",
         "ApproveFields",

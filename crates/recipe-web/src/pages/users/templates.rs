@@ -98,10 +98,10 @@ pub(crate) struct UsersPage<'a> {
 ///
 /// The type solves one problem: the handler computes the pager once, and the page only shows it.
 pub(super) struct UsersPager {
-    /// The address of the previous page, or `None` for the first page and for a page after the end.
-    pub(super) previous: Option<String>,
-    /// The address of the next page, or `None` when the page is not full.
-    pub(super) next: Option<String>,
+    /// The address of the previous page, or empty for the first page and for a page after the end.
+    pub(super) previous: String,
+    /// The address of the next page, or empty when the page is not full.
+    pub(super) next: String,
     /// The number of the current page, counted from 1.
     pub(super) current: u32,
     /// True for a page after the last page.
@@ -128,8 +128,8 @@ impl<'a> UsersPage<'a> {
             t,
             q,
             rows: users.iter().map(|user| UserRow::of(t, user)).collect(),
-            previous_url: pager.previous.unwrap_or_default(),
-            next_url: pager.next.unwrap_or_default(),
+            previous_url: pager.previous,
+            next_url: pager.next,
             current: pager.current,
             after_end: pager.after_end,
             first_url: pager.first,

@@ -453,8 +453,9 @@ fn adr_0117_a_bound_outside_the_type_range_hides_the_precision_faults() {
 #[test]
 fn adr_0117_a_request_real_bound_with_7_digits_passes() {
     let tree = primitive_tree(REAL);
-    let limit = parse(&range("", Some("-100.0001"), Some("1234.567")), &tree);
-    assert!(limit.is_ok());
+    let limit = parse(&range("", Some("-100.0001"), Some("1234.567")), &tree).unwrap();
+    assert_eq!(limit.min(), Some("-100.0001".parse().unwrap()));
+    assert_eq!(limit.max(), Some("1234.567".parse().unwrap()));
 }
 
 #[test]
@@ -478,8 +479,9 @@ fn adr_0117_a_request_lreal_bound_with_16_digits_gives_a_precision_fault() {
 #[test]
 fn adr_0117_a_request_lreal_bound_with_15_digits_passes() {
     let tree = primitive_tree(LREAL);
-    let limit = parse(&range("", None, Some("0.123456789012345")), &tree);
-    assert!(limit.is_ok());
+    let limit = parse(&range("", None, Some("0.123456789012345")), &tree).unwrap();
+    assert_eq!(limit.min(), None);
+    assert_eq!(limit.max(), Some("0.123456789012345".parse().unwrap()));
 }
 
 #[test]

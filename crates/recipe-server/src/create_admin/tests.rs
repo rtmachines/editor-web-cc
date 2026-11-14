@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use recipe_domain::identity::{Login, NewPassword};
 
-use super::{CreateAdminInput, StdinInput, read_password};
+use super::{CreateAdminInput, STDIN_LIMIT_BYTES, StdinInput, read_password};
 
 const PASSWORD: &str = "Zq7-plant-recipe-ok";
 
@@ -142,6 +142,30 @@ fn create_admin_oversized_stdin_fails() {
     let message = format!("{error:#}");
     assert!(message.contains("too long"), "{message}");
     assert!(!message.contains("aaaa"), "{message}");
+}
+
+#[test]
+fn a_long_input_cut_inside_a_character_is_too_long() {
+    let mut bytes = vec![b'a'; usize::try_from(STDIN_LIMIT_BYTES).unwrap()];
+    bytes.extend_from_slice("é".as_bytes());
+    let mut stdin = StdinInput::new(Cursor::new(bytes), false);
+
+    let error = read_password(None, &mut stdin).unwrap_err();
+
+    let message = format!("{error:#}");
+    assert!(message.contains("too long"), "{message}");
+}
+
+#[test]
+fn create_admin_stdin_that_is_not_valid_utf8_fails_without_the_text() {
+    let mut stdin = StdinInput::new(Cursor::new(b"Zq7-plant-recipe-\xff".to_vec()), false);
+
+    let error = read_password(None, &mut stdin).unwrap_err();
+
+    let message = format!("{error:#}");
+    assert!(message.contains("not valid UTF-8"), "{message}");
+    assert!(!message.contains("Zq7-plant-recipe"), "{message}");
+    assert!(!message.contains('\u{fffd}'), "{message}");
 }
 
 #[test]

@@ -66,6 +66,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - `UpdateParameterDefinition` checks a changed type before the unit lock and the first `plc_type` insert.
 - `restore-test` and `basebackup-once` ignore `TERM`, `INT`, and `HUP` after the result decision. A late signal no longer gives a `passed` file with a failed exit code (ADR-0151).
 - The added and the old-only parameters of the diff and the approval preview show the shown name (ADR-0152). The parameter form tags its English inputs with `lang="en"`. The submit buttons of the password form and the new user form get a fixed `id`. Then the focus stays on the button after an out-of-band swap (ADR-0041 (e)).
+- The plant and recipe commands create identifiers with `random_uuid`. A missing source of random bytes gives `E-WEB-011` and no panic.
+- The user list uses the shared pager links. A page number that is not canonical, such as `01` or `+2`, gives `422 E-WEB-008`.
+- The UDT form checks both inputs of a member row. It shows one line for each input that is empty or bad.
+- The accept loop writes no `ERROR` line for a panic of a connection task. The panic hook logs and counts the panic (ADR-0058 (f)).
+- `create-admin` checks the byte limit before it decodes UTF-8. An input over the limit that ends inside a UTF-8 character gives "too long".
+- A redirect refuses a site path that holds an ASCII control character, such as a tab. It answers `E-WEB-010`.
 
 ### Known gaps
 

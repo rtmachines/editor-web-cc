@@ -297,12 +297,15 @@ fn a_fake_server_without_a_connection_ends_at_its_accept_bound() {
     let accept_wait = Duration::from_millis(100);
     let (_address, server) = serve_once_within(reply("HTTP/1.1 200 OK\r\n\r\n"), accept_wait);
 
-    let started = Instant::now();
     let outcome = server.join();
-    let elapsed = started.elapsed();
 
-    assert!(outcome.is_err(), "the server ended without a connection");
-    assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
+    let payload = outcome.expect_err("the server ended without a connection");
+    let text = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied())
+        .expect("the panic text is a string");
+    assert!(text.contains("no connection in 100ms"), "{text}");
 }
 
 #[test]

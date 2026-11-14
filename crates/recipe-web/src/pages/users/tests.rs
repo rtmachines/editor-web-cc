@@ -224,6 +224,55 @@ async fn pages_users_list_rejects_a_bad_q_or_page_with_422() {
     }
 }
 
+/// Design D3: the user list reads `page` like the other lists.
+#[tokio::test]
+async fn users_list_refuses_a_page_number_that_is_not_canonical() {
+    let (fixture, admin) = world();
+    // `%2B` is a plus sign. A `+` in a query string decodes to a space.
+    for path in ["/users?page=01", "/users?page=%2B2"] {
+        let reply = get_as(&fixture, &admin, path).await;
+        assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY, "{path}");
+        assert!(reply.body.contains("E-WEB-008"), "{path}: {}", reply.body);
+    }
+}
+
+/// Design D3: every link of the pager keeps `q` and the page number.
+/// The encoding of `q` is not observable, because its alphabet holds only characters that the
+/// encoder keeps. The test has no red state of its own. Leaving out the pair `("q", q)` fails it.
+#[tokio::test]
+async fn users_pager_links_keep_q_and_the_page_number() {
+    let (fixture, admin) = world();
+    // 200 users of the search `user` fill two pages. `user1` is the Administrator.
+    for n in 3..=201 {
+        fixture.seed_session(n, Role::Operator, false);
+    }
+    let middle = get_as(&fixture, &admin, "/users?q=user&page=2").await;
+    assert_eq!(middle.status, StatusCode::OK, "{}", middle.body);
+    assert!(
+        middle
+            .body
+            .contains("href=\"/users?q=user&#38;page=1\">Previous page</a>"),
+        "{}",
+        middle.body
+    );
+    assert!(
+        middle
+            .body
+            .contains("href=\"/users?q=user&#38;page=3\">Next page</a>"),
+        "{}",
+        middle.body
+    );
+    let after_end = get_as(&fixture, &admin, "/users?q=user&page=9").await;
+    assert_eq!(after_end.status, StatusCode::OK, "{}", after_end.body);
+    assert!(
+        after_end.body.contains(
+            "<a class=\"target-link\" href=\"/users?q=user&#38;page=1\">Go to the first page</a>"
+        ),
+        "{}",
+        after_end.body
+    );
+}
+
 #[tokio::test]
 async fn pages_users_list_is_forbidden_for_an_operator_before_any_lookup() {
     let (fixture, _admin) = world();

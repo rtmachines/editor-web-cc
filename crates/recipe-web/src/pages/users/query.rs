@@ -3,6 +3,7 @@
 use serde::Deserialize;
 
 use crate::error::{FieldReason, WebError};
+use crate::pages::path_values::{self, Page};
 
 /// The most characters of the search text.
 const Q_MAX_CHARS: usize = 64;
@@ -19,10 +20,8 @@ pub(crate) struct ListQuery {
 pub(super) struct ListRequest {
     /// The text that a login must contain, or `None` for every user.
     pub(super) q: Option<String>,
-    /// The page number of the URL. The first page is 1.
-    pub(super) page: u32,
-    /// The page number of the use case. The first page is 0.
-    pub(super) index: u32,
+    /// The page of the list.
+    pub(super) page: Page,
 }
 
 /// Tell whether a character belongs to the alphabet of a login after folding to lower case.
@@ -36,8 +35,9 @@ impl ListQuery {
     /// # Errors
     ///
     /// Returns `WebError::BadRequest` (`E-WEB-008`) for a search text with more than 64
-    /// characters or a character outside the alphabet of a login, and for a page that is not a
-    /// whole number from 1. The error holds a fixed text, never the typed value.
+    /// characters or a character outside the alphabet of a login.
+    /// It also returns that error for a page that is not a
+    /// canonical whole number from 1 (`path_values::page`). The error holds a fixed text, never the typed value.
     pub(super) fn check(self) -> Result<ListRequest, WebError> {
         let q = match self.q.as_deref() {
             None | Some("") => None,
@@ -54,19 +54,7 @@ impl ListQuery {
                 Some(folded)
             }
         };
-        let bad_page = WebError::BadRequest {
-            field: "page",
-            reason: FieldReason::Page,
-        };
-        let page = match self.page.as_deref() {
-            None => 1,
-            Some(text) => text.parse::<u32>().map_err(|_not_a_number| bad_page)?,
-        };
-        // The URL counts from 1 and the use case from 0. Page 0 has no predecessor.
-        let index = page.checked_sub(1).ok_or(WebError::BadRequest {
-            field: "page",
-            reason: FieldReason::Page,
-        })?;
-        Ok(ListRequest { q, page, index })
+        let page = path_values::page(self.page.as_deref())?;
+        Ok(ListRequest { q, page })
     }
 }

@@ -8,9 +8,7 @@ use recipe_app::ports::NonEmpty;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::IdentityError;
 use recipe_domain::plant::{LeafPath, PlantError};
-use recipe_domain::recipe::{
-    DraftError, ParameterTag, RecipeError, RecipeErrors, SnapshotError, SnapshotItem,
-};
+use recipe_domain::recipe::{ParameterTag, RecipeError, RecipeErrors, SnapshotError, SnapshotItem};
 
 use super::leaf_of;
 use super::plant::plant_line_args;
@@ -277,44 +275,6 @@ impl FieldError {
     /// Build the line of one error of the Plant Model, for example `E-PLT-020` under `unit_path`.
     pub(crate) fn plant(error: &PlantError, target: Option<String>) -> Self {
         Self::plant_line(error, None, target)
-    }
-}
-
-/// One fault of a draft command: an error of Recipe Management or of the Plant Model.
-///
-/// The type solves one problem: the caller of [`draft_lines`] names the input of each fault, and
-/// a `DraftError` holds faults of both contexts.
-#[derive(Clone, Copy, Debug)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the form handlers of wave 4 and later call it")
-)]
-pub(crate) enum DraftFault<'a> {
-    /// An error of the Recipe Management context.
-    Recipe(&'a RecipeError),
-    /// An error of the Plant Model context.
-    Plant(&'a PlantError),
-}
-
-/// Return one line for each fault of the error of a draft command, in the order of the error.
-///
-/// `target` gives the input `id` of each fault. A fault of a leaf can take the input of its leaf
-/// (use `leaf_of`), and a fault of a field can take the input of that field (design D9).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the form handlers of wave 4 and later call it")
-)]
-pub(crate) fn draft_lines(
-    error: &DraftError,
-    target: &dyn Fn(DraftFault<'_>) -> Option<String>,
-) -> Vec<FieldError> {
-    let recipe = |error: &RecipeError| FieldError::recipe(error, target(DraftFault::Recipe(error)));
-    match error {
-        DraftError::Recipe(inner) => vec![recipe(inner)],
-        DraftError::List(errors) => errors.iter().map(recipe).collect(),
-        DraftError::Plant(inner) => {
-            vec![FieldError::plant(inner, target(DraftFault::Plant(inner)))]
-        }
     }
 }
 
