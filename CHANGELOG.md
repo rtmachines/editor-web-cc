@@ -23,6 +23,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The Compose smoke suite checks the exported content after the hash check. The check uses `exportContentFaults`. It covers the machine, reference, version, unit, and parameter values.
 - Each live S7 machine has a data block number (`machine.db_number`). `CreateMachine` takes `db_number`. A new command `SetMachineDataBlock` and a new route `POST /machines/{code}/data-block` change it. The command needs `MachineManage` (ADR-0156).
 - Migrations `0013` to `0015` add and fill the data block number of a machine. Migration `0013` stops when a live S7 machine has no PLC connection record. The runbook section "Check the live S7 machines for a PLC connection record" names the check (ADR-0156).
+- The CI job `release-toolchain` runs `cargo check --release` of `recipe-server` on each pull request. It uses the toolchain of `deploy/Dockerfile`.
+- The compile step of `deploy/ci/check.sh` runs with `-W error` for every `deploy/ci/*.py`.
 
 ### Changed
 
@@ -72,6 +74,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The accept loop writes no `ERROR` line for a panic of a connection task. The panic hook logs and counts the panic (ADR-0058 (f)).
 - `create-admin` checks the byte limit before it decodes UTF-8. An input over the limit that ends inside a UTF-8 character gives "too long".
 - A redirect refuses a site path that holds an ASCII control character, such as a tab. It answers `E-WEB-010`.
+- `deploy/db/initdb/01-roles.sh` refuses a secret file that holds a NUL byte.
+- The `rust-cache` steps of CI save the cache only on `main`.
 
 ### Known gaps
 

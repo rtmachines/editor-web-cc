@@ -17,7 +17,7 @@
 #   SECRET_DIR      the directory of the four secret files. The default is /run/secrets.
 #                   Production never sets it. The script tests set it.
 #
-# A secret file holds exactly one line, without a carriage return (ADR-0031).
+# A secret file holds exactly one line, without a carriage return and without a NUL byte (ADR-0031).
 # The script checks every input before the first change. The backquote commands of psql run
 # in a shell, and the shell expands $SECRET_DIR from the exported environment.
 set -euo pipefail
@@ -35,10 +35,13 @@ fail() {
 # The database image mounts the file at this fixed path.
 source /etc/recipe-db/cluster-access.sh
 
-# Check that a secret file is readable and holds exactly one non-empty line without "\r".
+# Check that a secret file is readable and holds exactly one non-empty line without "\r" or NUL.
 check_secret_file() {
-  local path=$1 content
+  local path=$1 content nul_count
   [ -r "$path" ] || fail "cannot read $path"
+  # Bash drops a NUL byte in a command substitution, so the count runs before it.
+  nul_count=$(tr -cd '\000' <"$path" | wc -c)
+  [ "$nul_count" -eq 0 ] || fail "$path holds a NUL byte"
   # The trailing "x" keeps the final newline through the command substitution.
   content=$(cat "$path"; printf x)
   content=${content%x}

@@ -90,6 +90,16 @@ fn the_script_stops_on_a_secret_file_with_a_carriage_return() {
 }
 
 #[test]
+fn the_script_stops_on_a_secret_file_with_a_nul_byte() {
+    let run = run_script("nul-byte", "app", "pass\\0word\\n", VALID_SUBNET);
+    assert_stopped(&run);
+    assert!(
+        run.stderr.contains("app_password holds a NUL byte"),
+        "{run:?}"
+    );
+}
+
+#[test]
 fn the_script_stops_on_a_secret_file_with_a_second_line() {
     assert_stopped(&run_script(
         "second-line",
