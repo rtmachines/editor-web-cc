@@ -8,11 +8,11 @@ use std::time::Duration;
 
 use recipe_domain::audit::SecurityEvent;
 use recipe_domain::identity::UserId;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, oneshot};
 use tracing::Level;
 use uuid::Uuid;
 
-use super::{DetachedTasks, TaskOutput, record_security_event};
+use super::{DetachedTasks, TaskOutput, record_security_event, take_unreceived};
 use crate::error::{AppError, TaskStage, TimeoutStage};
 use crate::identity::fixtures::{DRAIN_WAIT, LogCapture};
 use crate::identity::new_request_id;
@@ -529,4 +529,86 @@ async fn spawn_judged_with_an_ok_that_the_handle_drops_unpolled_ends_the_task_an
     assert_eq!(capture.count(), 0, "{:?}", capture.events());
     assert!(sink.events().is_empty());
     assert_eq!(tasks.free_slots(), 1);
+}
+
+#[test]
+fn a_send_after_the_drop_check_returns_the_value_to_the_task() {
+    let (sender, mut receiver) = oneshot::channel::<u8>();
+
+    let taken = take_unreceived(&mut receiver);
+
+    assert_eq!(taken, None);
+    assert_eq!(
+        sender.send(7),
+        Err(7),
+        "the task must get the value back and write the line"
+    );
+}
+
+#[test]
+fn a_value_sent_before_the_drop_check_is_taken() {
+    let (sender, mut receiver) = oneshot::channel::<u8>();
+    assert_eq!(sender.send(7), Ok(()));
+
+    let taken = take_unreceived(&mut receiver);
+
+    assert_eq!(taken, Some(7));
+}
+
+const DETACHED_SOURCE: &str = include_str!("../detached.rs");
+
+/// Return the code lines of the production part of `detached.rs`, without comment lines.
+fn production_code_lines() -> Vec<&'static str> {
+    DETACHED_SOURCE
+        .lines()
+        .take_while(|line| *line != "#[cfg(test)]")
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect()
+}
+
+/// Return the lines of the item that starts with `header`, up to its closing brace at column 0.
+fn item_lines(lines: &[&'static str], header: &str) -> Vec<&'static str> {
+    let start = lines
+        .iter()
+        .position(|line| line.starts_with(header))
+        .expect("the item header must exist in detached.rs");
+    let mut item: Vec<&'static str> = lines.iter().skip(start).copied().collect();
+    let end = item.iter().position(|line| *line == "}").unwrap();
+    item.truncate(end);
+    item
+}
+
+fn count_containing(lines: &[&str], needle: &str) -> usize {
+    lines.iter().filter(|line| line.contains(needle)).count()
+}
+
+fn position_containing(lines: &[&str], needle: &str) -> Option<usize> {
+    lines.iter().position(|line| line.contains(needle))
+}
+
+#[test]
+fn detached_result_drop_takes_the_value_only_through_take_unreceived() {
+    let lines = production_code_lines();
+    let drop_body = item_lines(&lines, "impl<T: TaskOutput> Drop for DetachedResult<T>");
+    let take_body = item_lines(&lines, "fn take_unreceived");
+
+    assert_eq!(
+        count_containing(&drop_body, "take_unreceived("),
+        1,
+        "the drop must call take_unreceived: {drop_body:#?}"
+    );
+    assert_eq!(
+        (
+            count_containing(&lines, ".try_recv("),
+            count_containing(&take_body, ".try_recv(")
+        ),
+        (1, 1),
+        "the one try_recv call must sit inside take_unreceived"
+    );
+    let close = position_containing(&take_body, ".close()");
+    let try_recv = position_containing(&take_body, ".try_recv(");
+    assert!(
+        close.is_some() && close < try_recv,
+        "take_unreceived must call close() before try_recv(): {take_body:#?}"
+    );
 }

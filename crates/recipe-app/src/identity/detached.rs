@@ -297,7 +297,8 @@ pub struct DetachedSlot {
 ///
 /// A drop of the handle also drops a value that the task sent and no poll took. The drop writes
 /// the one `WARN` line of an `Err` value inside the span of the spawn (ADR-0173 (m)). A value that
-/// a poll took, or that the task failed to send, writes no line here.
+/// a poll took, or that the task failed to send, writes no line here. The drop first closes the
+/// receiver, so a later send fails and the task writes the line.
 #[derive(Debug)]
 #[must_use = "a dropped handle discards the result, and the task still runs"]
 pub struct DetachedResult<T: TaskOutput> {
@@ -308,11 +309,17 @@ pub struct DetachedResult<T: TaskOutput> {
 
 impl<T: TaskOutput> Drop for DetachedResult<T> {
     fn drop(&mut self) {
-        if let Ok(unreceived) = self.receiver.try_recv() {
+        if let Some(unreceived) = take_unreceived(&mut self.receiver) {
             let _entered = self.span.enter();
             log_unreceived(&unreceived);
         }
     }
+}
+
+/// Take a value that no poll took, so a send after this check fails and its task writes the line.
+fn take_unreceived<T>(receiver: &mut oneshot::Receiver<T>) -> Option<T> {
+    receiver.close();
+    receiver.try_recv().ok()
 }
 
 impl<T: TaskOutput> Future for DetachedResult<T> {
