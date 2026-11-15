@@ -91,6 +91,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - The route `/approved` picks the approved version again when a concurrent approval retires the first pick. A second pick without an approved version gives `404 E-EXP-001` (ADR-0164).
 - The create form of a user drops a second submit while the first one runs. A repeated click no longer gives a duplicate-login refusal (ADR-0172).
 - A login, password change, user unlock, or Basic check writes its security event even when the client closes the connection (ADR-0172). At a stop, the server drains these tasks before it closes the pools (ADR-0172).
+- When T2 of a login or of a Basic check refuses, the detached task writes the security event. A dropped request no longer loses that event (ADR-0173).
+- An error of a detached task that no request receives gives one `WARN` line with `error_code`, `chain`, and `request_id` (ADR-0173).
+- After the drain at a stop, a new login, password change, user unlock, or Basic check gets `E-WEB-009` at once (ADR-0173).
 - The `rust-cache` steps of CI save the cache only on `main`.
 
 ### Known gaps
