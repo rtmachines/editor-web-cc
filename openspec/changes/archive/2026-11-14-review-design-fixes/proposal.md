@@ -19,7 +19,7 @@ The change satisfies R10, R17, R18, R20, R21, R29, R30, R31, R32, R34, R35, R36,
 - F-25: an ADR keeps the secret mounts of `db` and records the accepted risk.
 - F-09: `session.secure=false` in a `dev` build removes `Secure` and the prefix `__Host-` from the cookies.
 - F-06, F-07, F-22: a decision for each dropped future after a committed step. F-07 gets a detached task for the security event.
-- Ten new ADRs, 0163 to 0172.
+- Eleven new ADRs, 0163 to 0173.
 - `CHANGELOG.md` gets one line for each changed behavior.
 
 ## Capabilities

@@ -38,7 +38,7 @@ Permitted exceptions (reliability §2.3):
 - Add the row to `reliability.md` §1.2 first. Then add the variant and its row in `crates/recipe-domain/src/error_codes.rs`.
 - A variant carries the values that identify the failure, such as `reference`, `number`, `tag`, and `leaf`. It never carries a secret.
 - `?` converts between layers through `From`. Use `map_err` only when it adds context.
-- Lower layers add context and propagate. Only the `WebError` mapping, the backstop panic layer, and the supervisor of the jobs log an error. A job logs a handled fault once at `WARN` (reliability §1.1). The detached task of `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check logs a lost security event once at `WARN`. The handler never logs it (ADR-0172). A handler logs a failed read after a committed command once at `WARN` and gives a success answer (ADR-0163).
+- Lower layers add context and propagate. Only the `WebError` mapping, the backstop panic layer, and the supervisor of the jobs log an error. A job logs a handled fault once at `WARN` (reliability §1.1). The detached task of `Login`, `ChangeOwnPassword`, `UnlockLogin`, and the Basic check logs a lost security event once at `WARN`. The handler never logs it (ADR-0172). The drop of a detached result logs an error that no request received once at `WARN` (ADR-0173 (m)). A handler logs a failed read after a committed command once at `WARN` and gives a success answer (ADR-0163).
 - `Debug` on a type that holds a secret redacts it. Write that `Debug` by hand.
 
 ## Types and naming (skill `idiomatic-rust`, `NAMING.md`)
