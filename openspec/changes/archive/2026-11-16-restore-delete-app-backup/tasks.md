@@ -124,14 +124,14 @@ The letters in parentheses after ADR-0175 name its items.
 
 ## 5. Gate
 
-- [ ] 5.1 (deploy/ci) Run the local checks and the CI dispatch:
+- [x] 5.1 (deploy/ci) Run the local checks and the CI dispatch:
   1. `bash deploy/ci/check.sh` passes. It runs each `deploy/ci/test_*.py`.
   2. `openspec validate restore-delete-app-backup --strict` reports valid.
   3. The `ste-lint.py` command of `CLAUDE.md` reports 0 hard violations. Run it with `globstar` on `openspec/changes/restore-delete-app-backup/**/*.md` too.
   4. `grep -rn 'stop app backup' docs/architecture docs/ops docs/adr deploy .github openspec/specs` prints only the ADR lines that quote the old command.
   5. On the order of the owner, push the branch with `git push -u origin fix/restore-delete-app-backup`. The dispatch runs the commit of the remote branch.
   6. Run `gh workflow run CI --ref fix/restore-delete-app-backup`. The jobs `restore-switch` and `pitr-recovery` do not run on a pull request (ADR-0094).
-  7. Both jobs pass in that run. Record the URL of the run in the pull request.
+  7. Both jobs pass in that run. Record the URL of the run in the pull request. Run 43924213123 (workflow_dispatch on fix/restore-delete-app-backup, commit c23b762): every job passed, including restore-switch and pitr-recovery.
 
 ## Workflow follow-up
 

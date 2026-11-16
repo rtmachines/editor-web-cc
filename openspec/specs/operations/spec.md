@@ -1160,6 +1160,26 @@ The switch SHALL delete the containers of `proxy`, `app`, `backup`, `walarchive`
 - **THEN** the operator keeps the old volume name and runs `docker compose up -d --no-deps db`
 - **AND** the operator runs the first step of the switch again before the name changes
 
+### Requirement: Containers of app and backup in a restore into production
+After `restore-test` passes and before the operator creates the new volume, a restore into production SHALL delete the containers of `app` and `backup` with `docker compose rm -s -f app backup`. After the delete, each start of `app` or `backup` in the restore SHALL use `docker compose up -d --no-deps`. The rollback after an upgrade SHALL keep its own first step (R31, R34).
+
+#### Scenario: Restart of Docker during a restore
+- **GIVEN** a restore into production after the delete of the containers of `app` and `backup`
+- **WHEN** the Docker daemon starts again before the switch
+- **THEN** Docker starts no container of `app` and no container of `backup`
+- **AND** the old cluster gets no write of `app`, and no `backup-once` and no `restore-test` runs
+
+#### Scenario: Failed fill of the new volume
+- **GIVEN** a restore into production after the delete of the containers of `app` and `backup`
+- **WHEN** `restore-volume` fails and the operator ends the attempt
+- **THEN** the operator creates `app` and `backup` again with `docker compose up -d --no-deps`
+
+#### Scenario: Rollback restore
+- **GIVEN** a rollback with the `_premigrate` set
+- **WHEN** the operator starts the restore
+- **THEN** the operator stops `backup` before the check of the set
+- **AND** the operator deletes `app` only after that check passes
+
 ### Requirement: Volume switch after a recovery from the WAL archive
 The switch SHALL compare the new volume with the last line of `pitr-volume`. After a recovery from the WAL archive, the timeline SHALL also equal that line, and the switch SHALL need no state of the old volume. The switch SHALL refuse a volume with the file `pitr-drill` (R31, R34).
 
@@ -1532,7 +1552,7 @@ After the promotion, `pitr-volume` SHALL check the recovered cluster before the 
 - **AND** the last line `pitr volume completed` holds the system identifier, the new timeline, the newest audit entry, and `heartbeat.last_at`
 
 ### Requirement: Order of a recovery from the WAL archive
-A recovery of production from the WAL archive SHALL stop `app` and `backup` first. When `db` runs, the operator SHALL then read the marker entry, and the flush check SHALL pass before `walarchive` stops. `pitr-volume` SHALL fill a new volume, and the switch SHALL follow. The new WAL line SHALL start before `app`. The operator SHALL truncate `session` and `login_attempt` before `app` starts (R31, R34, A35).
+A recovery of production from the WAL archive SHALL first delete the containers of `app` and `backup`. When `db` runs, the operator SHALL then read the marker entry, and the flush check SHALL pass before `walarchive` stops. `pitr-volume` SHALL fill a new volume before the switch. The new WAL line SHALL start before `app`. The operator SHALL truncate `session` and `login_attempt` before `app` starts. Later starts of `app` and `backup` SHALL use `docker compose up -d --no-deps` (R31, R34, A35).
 
 #### Scenario: Recovery after the loss of the pgdata disk
 - **GIVEN** a `db` that does not start, and an intact WAL archive disk
@@ -1544,6 +1564,12 @@ A recovery of production from the WAL archive SHALL stop `app` and `backup` firs
 - **GIVEN** a session that the old cluster deleted after the recovery point
 - **WHEN** the operator truncates `session` before the start of `app`
 - **THEN** the session token of that session does not authenticate
+
+#### Scenario: Restart of Docker during a recovery
+- **GIVEN** a recovery after `docker compose rm -s -f app backup`
+- **WHEN** the Docker daemon starts again before the start of `app`
+- **THEN** Docker starts no container of `app` and no container of `backup`
+- **AND** no audit entry of `app` reaches the old cluster
 
 ### Requirement: Recovery drill
 The runbook SHALL give a recovery drill. The drill SHALL run `pitr-volume` with a target time and `--drill` on a drill volume while the stack runs. The drill SHALL change no volume of production and no file of `/wal`. The free space of the target disk SHALL stay at or above `disk.warn_percent`. After each upgrade, the operator SHALL record the time of the fill and of the last base backup (R31, R34).
