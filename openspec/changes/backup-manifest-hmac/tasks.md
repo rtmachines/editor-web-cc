@@ -145,7 +145,7 @@ The letters in parentheses after ADR-0174 name its items.
 - [x] 6.4 (deploy/ci) First add failing cases to `deploy/ci/test_upgrade_checks.py` and `deploy/ci/test_upgrade_manifest.py` for a new subcommand of `deploy/ci/upgrade_checks.py`. The subcommand takes the probe result and prints the Compose files and the expected key state:
   - The result "no check" gives `compose.yaml` and `compose.previous.yaml`, and "no key".
   - The result "check" gives only `compose.yaml`, and "key".
-  - A second subcommand reads the output of `docker compose config --format json`. It prints "key" when `backup`, `backup-premigrate`, and `restore-volume` each have `backup_manifest_key`, and "no key" when none has it.
+  - A second subcommand reads the output of `docker compose --profile restore config --format json`. It prints "key" when `backup`, `backup-premigrate`, and `restore-volume` each have `backup_manifest_key`, and "no key" when none has it.
   - A configuration where only some of the three services have the key is a fault.
   - Then write the two subcommands. Check: `bash deploy/ci/check.sh` passes.
 - [x] 6.5 (deploy/ci) First add a failing check to `deploy/ci/upgrade.sh` after line 274. A container of the previous image must have the key state that the subcommand of task 6.4 gives. Then make these changes:
@@ -463,7 +463,7 @@ The letters in parentheses after ADR-0174 name its items.
   - At line 866, add this text. After a failed upgrade, the switch back starts only `backup` at its end, by the rule above. `app` and `proxy` stay stopped.
   - At line 866, also add: after a failed upgrade, the check after the start inspects only `backup`. It checks the WAL stream in `db` and does not wait for the alert `replication`.
   - Give the reason: the job `alerts` runs in `app` (line 905), and `app` stays stopped.
-  - After each exit, `docker compose config` must show `backup_manifest_key` on the three services.
+  - After each exit, `docker compose --profile restore config` must show `backup_manifest_key` on the three services.
   - Step for a Sonnet agent: run `ste-lint.py docs/architecture/reliability.md`. Check: it reports 0 hard violations.
 - [x] 7.4 (docs/ops) Change `docs/ops/runbook.md`, sections "Create the secret files" and "Copy the backups off site":
   - The ninth random value, its mode and owner, and one offline copy apart from the backup disk.
@@ -540,7 +540,7 @@ The letters in parentheses after ADR-0174 name its items.
   - Add one sentence about an interrupt. After an interrupt, the operator deletes a left file `.env.??????`. `.env` stays unchanged because the `mv` is atomic.
   - Add text about the owner. `chown --reference` of an operator without root fails when another uid owns `.env`, for example root after a `sudo` edit.
   - Then the function keeps `.env` and returns a code other than 0. Give the fix: give `.env` back to the operator, for example with `sudo chown`, and run the function again.
-  - The three places of the exit link to that section. Then `docker compose config` must show `backup_manifest_key` on the three services. The places are:
+  - The three places of the exit link to that section. Then `docker compose --profile restore config` must show `backup_manifest_key` on the three services. The places are:
     1. The upgrade step that sets the new tag in the copied `.env` (line 1212). Step 7 of "Major upgrade" (line 1679) writes `<new tag>` with step 6 of "Load the images" (line 301). Step 7 therefore links there too. `<write tag>` is the new release tag.
     2. The rollback step that sets the new tag again (lines 672 and 1511), in the plain rollback only. `<write tag>` is the new release tag, which equals `<tag>` there.
     3. Step 3 of "Switch back" (line 1567). Use it only when the probe of ADR-0174 (aa) finds the tag check in the image of `<tag>`. Else `COMPOSE_FILE` stays. `<write tag>` is the `<tag>` of that section, the tag of the old volume.

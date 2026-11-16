@@ -112,7 +112,8 @@ check_previous_manifest_key() {
   local plan expected actual mounted
   plan=$(upgrade_check manifest-plan "$PREVIOUS_MANIFEST_PROBE") || fail "cannot read the expected manifest key state"
   read -r expected _ <<<"$plan"
-  previous_compose config --format json >"$CI_STATE/previous-manifest-config.json" \
+  # Without its profile, the Compose output omits restore-volume.
+  previous_compose --profile restore config --format json >"$CI_STATE/previous-manifest-config.json" \
     || fail "cannot read the previous image Compose configuration"
   actual=$(upgrade_check manifest-key "$CI_STATE/previous-manifest-config.json") \
     || fail "cannot check the previous image manifest key state"

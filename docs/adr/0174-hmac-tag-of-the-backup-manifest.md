@@ -275,7 +275,7 @@ Known limits:
   - At each place, the exit writes the tag of that place. The first two places write the new tag. The third place always writes the tag of the old volume.
   - After the rollback of §7.10 step 6, the old volume runs the new tag, so the third place writes the new tag.
   - Only after a failed upgrade is the tag of the old volume the previous tag. There the new tag would start the new `backup` on the schema of a failed `migrate`.
-  - A `COMPOSE_FILE` in the shell of the operator takes precedence over `deploy/.env`. The exit therefore also runs `unset COMPOSE_FILE`. Then `docker compose config` must show `backup_manifest_key` on the three services.
+  - A `COMPOSE_FILE` in the shell of the operator takes precedence over `deploy/.env`. The exit therefore also runs `unset COMPOSE_FILE`. Then `docker compose --profile restore config` must show `backup_manifest_key` on the three services.
   - The residual risk is the time between command 1 and command 3 of case 2. The operator runs the commands one after the other.
   - The owner puts this short time into the class of the online writer of (b). The project adds no other measure for it.
   - The retention of the previous image deletes the four files of an old set and keeps its tag file. Such a tag file has no manifest, so no reader takes it for a set (i).

@@ -69,9 +69,12 @@ compose() {
   printf 'compose %s %s %s\n' "$RECIPE_VERSION" "$UPGRADE_COMPOSE_DIR/deploy/compose.yaml" "$*" >>"$CI_STATE/calls"
   if [[ $FAULT == compose ]]; then fail 'stub compose failed'; fi
   if [[ " $* " == *' config '* ]]; then
+    # Like Compose, the output holds restore-volume only with its profile restore.
+    local -a names=(backup backup-premigrate)
+    if [[ " $* " == *' --profile restore '* ]]; then names+=(restore-volume); fi
     "$PYTHON" -I -c 'import json,sys; print(json.dumps({"services": {n: {"secrets":
       [{"source": "backup_manifest_key"}] if sys.argv[1] == "key" else []}
-      for n in ("backup", "backup-premigrate", "restore-volume")}}))' "$KEY_STATE"
+      for n in sys.argv[2:]}}))' "$KEY_STATE" "${names[@]}"
   elif [[ " $* " == *' --entrypoint sh '* ]]; then
     if [[ $FAULT == container ]]; then fail 'stub container failed'; fi
     printf '%s\n' "${CONTAINER_KEY_STATE:-$KEY_STATE}"

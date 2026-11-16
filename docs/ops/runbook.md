@@ -1660,7 +1660,7 @@ Each place below names its value of `<write tag>`:
    Then this place must not write the new release tag, because the new `backup` would start on the schema of the failed `migrate`.
    This place does not create `backup`. Step 1 of "Switch back" deletes the containers, and step 8 creates `backup` with the key.
 
-After the exit, the configuration must show `backup_manifest_key` on `backup`, `backup-premigrate`, and `restore-volume`. Print it with `docker compose config`.
+After the exit, the configuration must show `backup_manifest_key` on `backup`, `backup-premigrate`, and `restore-volume`. Print it with `docker compose --profile restore config`.
 
 The other edits that write a previous tag need no exit. Step 12 of "Upgrade", step 2 of "Rollback", and the fault list of "Upgrade" write the previous tag.
 They set `COMPOSE_FILE` when the probe finds no tag check.

@@ -172,7 +172,7 @@ Each edit that writes a tag with the tag check into `deploy/.env` SHALL delete `
 #### Scenario: Exit in the next upgrade
 - **GIVEN** a copied `deploy/.env` with the previous tag and `COMPOSE_FILE` in step 2 of the next upgrade
 - **WHEN** the operator sets the new tag, deletes `COMPOSE_FILE`, and runs `unset COMPOSE_FILE`
-- **THEN** `docker compose config` shows `backup_manifest_key` on the three services
+- **THEN** `docker compose --profile restore config` shows `backup_manifest_key` on the three services
 - **AND** the running container of `backup` stays unchanged until command 1 of step 5
 
 ### Requirement: Exit in the switch back
