@@ -1,5 +1,6 @@
 """Check the job pitr-recovery and its script without Docker (pitr-recovery design.md D8)."""
 
+import hashlib
 import os
 import pathlib
 import re
@@ -1966,10 +1967,181 @@ REFUSALS_SEGMENTS = "".join(f"{name}\n" for name in (
     "000000010000000000000006.partial",
 ))
 
+
+class ComposeRecoveryTests(unittest.TestCase):
+    SET = "recipe_20261030_1205_now"
+
+    def run_recovery(self, env_extra=None):
+        with tempfile.TemporaryDirectory() as name:
+            directory = pathlib.Path(name)
+            scripts = directory / "workspace" / "deploy" / "ci"
+            scripts.mkdir(parents=True)
+            for file in ("recovery.sh", "common.sh"):
+                shutil.copyfile(CI / file, scripts / file)
+            write_stub(scripts / "memory.sh", '''
+memory_exec() { local service=$1; shift; compose exec -T "$service" "$@"; }
+memory_pitr() { echo memory_pitr >>"$STUB_LOG"; }
+''')
+            write_stub(scripts / "modes.sh", 'echo modes >>"$STUB_LOG"')
+            stubs = directory / "bin"
+            stubs.mkdir()
+            for file, body in (("sudo", STEP_SUDO_STUB), ("docker", STEP_DOCKER_STUB),
+                               ("python3", STEP_PYTHON_STUB)):
+                write_stub(stubs / file, body)
+            root = directory / "runner" / PROJECT
+            state = root / "state"
+            state.mkdir(parents=True)
+            backups = root / "backups"
+            backups.mkdir()
+            originals = self.write_set(backups)
+            env = os.environ.copy()
+            for key in [key for key in env if key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_", "STUB_"))]:
+                del env[key]
+            env.update({"GITHUB_ACTIONS": "true", "GITHUB_WORKSPACE": str(directory / "workspace"),
+                        "RUNNER_TEMP": str(directory / "runner"), "COMPOSE_PROJECT_NAME": PROJECT,
+                        "PATH": f"{stubs}{os.pathsep}{env['PATH']}", "STUB_LOG": str(directory / "calls.log"),
+                        "STUB_COMPOSE_RECOVERY": "1"})
+            env.update(env_extra or {})
+            done = subprocess.run([shutil.which("bash"), str(scripts / "recovery.sh")], env=env,
+                                  capture_output=True, text=True, check=False, timeout=15)
+            remaining = {path.name: path.read_bytes() for path in backups.iterdir() if path.is_file()}
+            copied = {path.name: path.read_bytes() for path in (state / "copied").glob("*")}
+            return done, pathlib.Path(env["STUB_LOG"]).read_text(), remaining, originals, copied
+
+    def write_set(self, backups):
+        files = {f"{self.SET}.dump": b"PGDMP fixture dump\n", f"{self.SET}.counts": b"public.recipe|1\n",
+                 "globals_20261030_1205_now.sql": b"-- fixture globals\n"}
+        manifest = "".join(f"{hashlib.sha256(files[file]).hexdigest()}  {file}\n"
+                           for file in (f"{self.SET}.dump", "globals_20261030_1205_now.sql", f"{self.SET}.counts"))
+        files[f"{self.SET}.dump.sha256"] = manifest.encode()
+        # This opaque tag fixture contains no key. The pgtools suites check the cryptography.
+        files[f"{self.SET}.dump.sha256.hmac"] = b"unchanged fixture tag\n"
+        for file, content in files.items():
+            (backups / file).write_bytes(content)
+            (backups / file).chmod(0o600)
+        return files
+
+    def assert_copy_deleted(self, remaining, originals):
+        self.assertEqual({name: data for name, data in remaining.items() if name != "restore-test.result"}, originals)
+
+    def test_pass_logs_the_tag_file_and_real_restore_of_the_now_set(self):
+        done, log, remaining, originals, _ = self.run_recovery()
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertIn(f"{self.SET}.dump.sha256.hmac", done.stdout)
+        self.assertIn(f"real pg_restore passed for {self.SET}", done.stdout)
+        self.assertIn(f'"message":"restore test passed","set":"{self.SET}"', done.stdout)
+        self.assert_copy_deleted(remaining, originals)
+
+    def test_refusal_logs_the_d4_message_and_failed_result(self):
+        done, log, remaining, originals, _ = self.run_recovery()
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(log.count("exec -T backup restore-test\n"), 2, log)
+        self.assertIn('"level":"ERROR","job":"restore-test","message":"the tag of the set does not match the manifest"',
+                      done.stdout)
+        self.assertNotIn('"fault"', done.stdout)
+        self.assertIn('"result":"failed"', done.stdout)
+        self.assertIn(b'"result":"failed"', remaining["restore-test.result"])
+        self.assert_copy_deleted(remaining, originals)
+        self.assertLess(log.index("exec -T backup restore-test\n", log.index("exec -T backup restore-test\n") + 1),
+                        log.index("exec -T walarchive basebackup-once\n"))
+
+    def test_copy_changes_one_dump_byte_and_rebuilds_the_manifest_with_the_old_tag(self):
+        done, log, _, originals, copied = self.run_recovery()
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        manifests = sorted(name for name in copied if name.endswith(".dump.sha256"))
+        self.assertEqual(len(manifests), 2, log)
+        manifest = manifests[-1]
+        self.assertGreater(manifest, f"{self.SET}.dump.sha256")
+        changed = copied[manifest.removesuffix(".sha256")]
+        original = originals[f"{self.SET}.dump"]
+        self.assertEqual(len(changed), len(original))
+        self.assertEqual(sum(left != right for left, right in zip(changed, original)), 1)
+        self.assertEqual(copied[manifest + ".hmac"], originals[f"{self.SET}.dump.sha256.hmac"])
+        entries = [line.split("  ") for line in copied[manifest].decode().splitlines()]
+        base = manifest.removesuffix(".dump.sha256")
+        self.assertEqual([file for _, file in entries],
+                         [f"{base}.dump", f"globals_{base.removeprefix('recipe_')}.sql", f"{base}.counts"])
+        for digest, file in entries:
+            self.assertEqual(hashlib.sha256(copied[file]).hexdigest(), digest)
+        for file in [file for _, file in entries] + [manifest, manifest + ".hmac"]:
+            self.assertRegex(log, rf"sudo install -o 999 -g 999 -m 0600 .* /\S+/{re.escape(file)}\n")
+
+    def test_pass_requires_a_successful_restore_of_the_now_set(self):
+        cases = ({"STUB_RESTORE_TEST_OUTPUT": ""}, {"STUB_RESTORE_TEST_STATUS": "1"},
+                 {"STUB_RESTORE_TEST_OUTPUT": '{"message":"restore test passed","set":"recipe_20261030_1205"}'})
+        for env in cases:
+            with self.subTest(env=env):
+                done, log, remaining, originals, copied = self.run_recovery(env)
+                self.assertNotEqual(done.returncode, 0, done.stdout + log)
+                self.assertNotIn("real pg_restore passed", done.stdout)
+                self.assertNotIn("sudo install ", log)
+                self.assertFalse(copied)
+                self.assert_copy_deleted(remaining, originals)
+
+    def test_missing_tag_stops_before_the_copy(self):
+        done, log, remaining, originals, copied = self.run_recovery({"STUB_NO_TAG": "1"})
+        self.assertNotEqual(done.returncode, 0, done.stdout + log)
+        self.assertIn("tag file", done.stderr)
+        self.assertNotIn("sudo install ", log)
+        self.assertFalse(copied)
+        self.assert_copy_deleted(remaining, originals)
+
+    def test_refusal_requires_the_d4_error_for_the_copied_set(self):
+        cases = ({"STUB_TAG_ERROR": "the newest set has no tag file"},
+                 {"STUB_TAG_ERROR": "the manifest of the newest set does not verify"},
+                 {"STUB_TAG_ERROR_LEVEL": "INFO"}, {"STUB_TAG_ERROR_SET": self.SET},
+                 {"STUB_TAG_ERROR_EXTRA": ',"fault":"tag-mismatch"'}, {"STUB_TAG_ERROR_COUNT": "2"},
+                 {"STUB_TAG_ERROR_COUNT": "0"}, {"STUB_REFUSAL_STATUS": "0"})
+        for env in cases:
+            with self.subTest(env=env):
+                done, log, remaining, originals, _ = self.run_recovery(env)
+                self.assertNotEqual(done.returncode, 0, done.stdout + log)
+                self.assertNotIn("exec -T walarchive basebackup-once", log)
+                self.assert_copy_deleted(remaining, originals)
+
+    def test_refusal_requires_the_failed_result(self):
+        for result in ("passed", "unknown", "missing"):
+            with self.subTest(result=result):
+                done, log, remaining, originals, _ = self.run_recovery({"STUB_TAG_RESULT": result})
+                self.assertNotEqual(done.returncode, 0, done.stdout + log)
+                self.assertNotIn("exec -T walarchive basebackup-once", log)
+                self.assert_copy_deleted(remaining, originals)
+
+    def test_failed_copy_deletes_every_partial_file(self):
+        done, log, remaining, originals, _ = self.run_recovery({"STUB_INSTALL_FAIL_AT": "3"})
+        self.assertNotEqual(done.returncode, 0, done.stdout + log)
+        self.assertIn("sudo rm -f -- ", log)
+        self.assert_copy_deleted(remaining, originals)
+
+    def test_cleanup_refuses_a_copy_left_behind(self):
+        for status in ("0", "1"):
+            with self.subTest(status=status):
+                done, log, remaining, originals, _ = self.run_recovery({"STUB_COPY_STAYS": status})
+                self.assertNotEqual(done.returncode, 0, done.stdout + log)
+                self.assertIn("cannot delete the set copy", done.stderr)
+                self.assertNotIn("exec -T walarchive basebackup-once", log)
+                self.assertGreater(len(remaining), len(originals))
+
+
 STEP_SUDO_STUB = """
 while [[ ${1:-} == --* ]]; do shift; done
 if [[ ${1:-} == docker ]]; then exec "$@"; fi
 echo "sudo $*" >>"$STUB_LOG"
+if [[ ${STUB_COMPOSE_RECOVERY:-} == 1 ]]; then
+  case "$*" in
+    "install "*)
+      count=$(grep -c '^sudo install ' "$STUB_LOG")
+      [[ $count != "${STUB_INSTALL_FAIL_AT:-0}" ]] || { echo 'install: cannot copy file' >&2; exit 1; }
+      args=()
+      while (( $# )); do
+        case $1 in -o|-g) shift 2 ;; *) args+=("$1"); shift ;; esac
+      done
+      exec "${args[@]}" ;;
+    "rm "*) if [[ -n ${STUB_COPY_STAYS:-} ]]; then exit "$STUB_COPY_STAYS"; fi; exec "$@" ;;
+    "test -f "*.hmac) if [[ ${STUB_NO_TAG:-0} != 0 ]]; then exit "$STUB_NO_TAG"; fi; exec "$@" ;;
+    "test "*"/backups/"*|"cat "*|"bash "*|"dd "*) exec "$@" ;;
+  esac
+fi
 case "$*" in
   "test -f "*.dump.sha256) exit 1 ;;
   "test -f "*) exit "${STUB_PARTIAL_STATUS:-0}" ;;
@@ -2057,6 +2229,22 @@ case "$*" in
     fi ;;
   *"exec -T backup backup-now") exit "${STUB_BACKUP_NOW_STATUS:-0}" ;;
   *"exec -T backup restore-test")
+    if [[ ${STUB_COMPOSE_RECOVERY:-} == 1 ]] && [[ $(grep -c 'exec -T backup restore-test$' "$STUB_LOG") -eq 2 ]]; then
+      mkdir "$CI_STATE/copied"
+      cp -- "$RECIPE_BACKUP_DIR/"* "$CI_STATE/copied/"
+      manifests=("$RECIPE_BACKUP_DIR/"*.dump.sha256)
+      newest=${manifests[${#manifests[@]}-1]##*/}
+      set=${newest%.dump.sha256}
+      for ((i=0; i<${STUB_TAG_ERROR_COUNT:-1}; i++)); do
+        printf '{"level":"%s","job":"restore-test","message":"%s","set":"%s"%s}\\n' \\
+          "${STUB_TAG_ERROR_LEVEL:-ERROR}" "${STUB_TAG_ERROR:-the tag of the set does not match the manifest}" \\
+          "${STUB_TAG_ERROR_SET:-$set}" "${STUB_TAG_ERROR_EXTRA:-}"
+      done
+      if [[ ${STUB_TAG_RESULT:-failed} != missing ]]; then
+        printf '{"result":"%s","finished_at":"2026-10-30T12:06:00Z"}\\n' "${STUB_TAG_RESULT:-failed}" >"$RECIPE_BACKUP_DIR/restore-test.result"
+      fi
+      exit "${STUB_REFUSAL_STATUS:-1}"
+    fi
     printf '%s\n' "${STUB_RESTORE_TEST_OUTPUT-$RESTORE_TEST_LINE}"
     exit "${STUB_RESTORE_TEST_STATUS:-0}" ;;
   *" -e PITR_CI=1 "*" pitr-check")

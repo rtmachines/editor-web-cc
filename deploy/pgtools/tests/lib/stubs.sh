@@ -90,6 +90,9 @@ if [ -n "${STUB_PG_DUMP_FAIL:-}" ]; then
   exit 1
 fi
 printf 'DUMP-%s\n' "$$" >"$file"
+if [ -n "${STUB_CHANGE_PUBLISHED_DUMP:-}" ]; then
+  cp -- "$file" "$STUB_DIR/pg_dump.bytes"
+fi
 echo "EVENT pg_dump done" >>"$STUB_LOG"
 EOF
 }
@@ -128,15 +131,62 @@ make_stubs() {
 #   STUB_RM_ALLOW_TEMP=1    the stub of rm deletes a temp file, so the run can publish its files.
 # Without a variable, the stub of rm fails on a temp file only.
 # The stub of sync fails at its n-th call when STUB_SYNC_FAIL_AT=n.
-make_extra_stubs() {
-  local dir=$ROOT/stubs
-  mkdir -p "$ROOT/rmstub"
-  cat >"$dir/supercronic" <<'EOF'
+# STUB_MANIFEST_PUBLISH_FAIL=1 refuses the manifest link after the tag publish.
+# STUB_CREATE_TEMP_TAG inserts a file, link, or dangling-link after the counts publish.
+# STUB_RECORD_DELETES=1 records regular-file deletes through the default rm stub.
+make_stub_ln() {
+  cat >"$ROOT/stubs/ln" <<'EOF'
 #!/usr/bin/env bash
-echo "EVENT supercronic" >>"$STUB_LOG"
-echo "ARGV supercronic $*" >>"$STUB_LOG"
+target=${@: -1}
+if [ -n "${STUB_MANIFEST_PUBLISH_FAIL:-}" ] && [ "${target##*/}" = "recipe_${STUB_TS}.dump.sha256" ]; then
+  echo 'EVENT manifest publish refused' >>"$STUB_LOG"
+  exit 1
+fi
+"$REAL_LN" "$@" || exit "$?"
+echo "PUBLISH ${target##*/}" >>"$STUB_LOG"
+if [ -n "${STUB_CREATE_TEMP_TAG:-}" ] && [ "${target##*/}" = "recipe_${STUB_TS}.counts" ]; then
+  tag=$BACKUP_DIR/.tmp-recipe_${STUB_TS}.dump.sha256.hmac
+  case $STUB_CREATE_TEMP_TAG in
+    file) printf 'FOREIGN' >"$tag" ;;
+    link) "$REAL_LN" -s -- "${STUB_DIR%/*}/tag-target" "$tag" || exit 1 ;;
+    dangling-link) "$REAL_LN" -s -- "${STUB_DIR%/*}/missing-target" "$tag" || exit 1 ;;
+    *) exit 1 ;;
+  esac
+  echo 'EVENT temp tag inserted' >>"$STUB_LOG"
+fi
+if [ -n "${STUB_CHANGE_PUBLISHED_DUMP:-}" ] && [ "${target##*/}" = "globals_${STUB_TS}.sql" ]; then
+  dump=$BACKUP_DIR/recipe_${STUB_TS}.dump
+  manifest=$dump.sha256
+  [ -f "$dump" ] && [ ! -e "$BACKUP_DIR/.tmp-${manifest##*/}" ] && [ ! -e "$manifest" ] || exit 1
+  printf 'X' | dd of="$dump" bs=1 count=1 conv=notrunc status=none || exit 1
+  echo "EVENT published dump changed before manifest" >>"$STUB_LOG"
+fi
 EOF
-  cat >"$dir/sync" <<'EOF'
+}
+
+make_stub_rm() {
+  cat >"$ROOT/stubs/rm" <<'EOF'
+#!/usr/bin/env bash
+if [ -n "${STUB_RECORD_DELETES:-}" ]; then
+  for path in "$@"; do
+    case $path in "$BACKUP_DIR"/*) echo "DELETE ${path##*/}" >>"$STUB_LOG" ;; esac
+  done
+fi
+exec "$REAL_RM" "$@"
+EOF
+  cat >"$ROOT/rmstub/rm" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case $a in */.tmp-*) [ -n "${STUB_RM_ALLOW_TEMP:-}" ] || exit 1 ;; esac
+  case $a in */recipe_*.dump) [ -z "${STUB_RM_REFUSE_FINAL:-}" ] || exit 1 ;; esac
+  case $a in */recipe_*.counts) [ -z "${STUB_RM_REFUSE_COUNTS:-}" ] || exit 1 ;; esac
+done
+exec "$REAL_RM" "$@"
+EOF
+}
+
+make_stub_sync() {
+  cat >"$ROOT/stubs/sync" <<'EOF'
 #!/usr/bin/env bash
 # It records which files of the new set and whether an old manifest exist at the time of the call.
 # With STUB_SYNC_FAIL_AT=n, the n-th call fails.
@@ -153,19 +203,30 @@ old=no
 [ -e "$f.dump.sha256" ] && manifest=yes
 [ -n "${STUB_OLD_MANIFEST:-}" ] && [ -e "$STUB_OLD_MANIFEST" ] && old=yes
 echo "SYNC tmp_dump=$tmp_dump dump=$dump tmp_manifest=$tmp_manifest manifest=$manifest old=$old" >>"$STUB_LOG"
+tmp_tag=no
+tag=no
+[ -e "$t.dump.sha256.hmac" ] && tmp_tag=yes
+[ -e "$f.dump.sha256.hmac" ] && tag=yes
+echo "TAG_SYNC tmp_tag=$tmp_tag tag=$tag" >>"$STUB_LOG"
 if [ "$(grep -c '^SYNC ' "$STUB_LOG")" = "${STUB_SYNC_FAIL_AT:-0}" ]; then
   exit 1
 fi
 exit 0
 EOF
-  cat >"$ROOT/rmstub/rm" <<'EOF'
+}
+
+make_extra_stubs() {
+  local dir=$ROOT/stubs
+  REAL_LN=$(command -v ln)
+  export REAL_LN
+  mkdir -p "$ROOT/rmstub"
+  make_stub_ln
+  make_stub_rm
+  make_stub_sync
+  cat >"$dir/supercronic" <<'EOF'
 #!/usr/bin/env bash
-for a in "$@"; do
-  case $a in */.tmp-*) [ -n "${STUB_RM_ALLOW_TEMP:-}" ] || exit 1 ;; esac
-  case $a in */recipe_*.dump) [ -z "${STUB_RM_REFUSE_FINAL:-}" ] || exit 1 ;; esac
-  case $a in */recipe_*.counts) [ -z "${STUB_RM_REFUSE_COUNTS:-}" ] || exit 1 ;; esac
-done
-exec "$REAL_RM" "$@"
+echo "EVENT supercronic" >>"$STUB_LOG"
+echo "ARGV supercronic $*" >>"$STUB_LOG"
 EOF
-  chmod 0755 "$dir/supercronic" "$dir/sync" "$ROOT/rmstub/rm"
+  chmod 0755 "$dir/ln" "$dir/rm" "$dir/supercronic" "$dir/sync" "$ROOT/rmstub/rm"
 }

@@ -1,5 +1,6 @@
 """Check the job restore-switch and its script without Docker."""
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -383,7 +384,53 @@ case "$args" in
   *" --entrypoint test "*)
     exit "${STUB_DRILL_STATUS:-1}"
     ;;
+  *" --entrypoint find "*)
+    [[ ${STUB_TARGET_READ_FAIL:-} != 1 ]] || { echo 'find: cannot read target directory' >&2; exit 1; }
+    if [[ -f $STUB_DIR/initdb ]]; then echo /var/lib/postgresql/data/PG_VERSION; fi
+    ;;
   *" compose "*" run "*" restore-volume "*)
+    directory=$RECIPE_BACKUP_DIR
+    for arg in "$@"; do
+      if [[ $arg == *:/backups:ro ]]; then directory=${arg%:/backups:ro}; fi
+    done
+    if [[ $directory != "$RECIPE_BACKUP_DIR" ]]; then
+      [[ -f $directory/.backup-marker && -f $directory/.scratch/.lock ]] || exit 2
+      if [[ ! -f $directory/$STUB_SET.dump.sha256.hmac ]]; then
+        kind=NO_TAG; message='the newest set has no tag file'
+      elif ! cmp -s "$directory/$STUB_SET.dump" "$RECIPE_BACKUP_DIR/$STUB_SET.dump"; then
+        kind=CHANGED; message='the tag of the set does not match the manifest'
+        if ! (cd "$directory" && sha256sum -c --strict "$STUB_SET.dump.sha256") >/dev/null 2>&1; then
+          message='the manifest of the newest set does not verify'
+        elif cmp -s "$directory/$STUB_SET.dump.sha256.hmac" "$RECIPE_BACKUP_DIR/$STUB_SET.dump.sha256.hmac"; then
+          echo 'stub changed dump has a new manifest and the old tag' >>"$STUB_LOG"
+        else
+          exit 2
+        fi
+      else
+        if [[ -n ${STUB_CHECK_OUTPUT+x} ]]; then
+          printf '%s\n' "$STUB_CHECK_OUTPUT"
+        else
+          printf '{"level":"INFO","job":"restore-volume","message":"the set passed the check","set":"%s"}\n' "$STUB_SET"
+        fi
+        printf '%s' "${STUB_CHECK_STDERR:-}" >&2
+        exit "${STUB_CHECK_STATUS:-0}"
+      fi
+      prefix=STUB_${kind}
+      variable=${prefix}_STARTED
+      if [[ ${!variable:-} == 1 ]]; then echo '{"message":"restore volume started"}'; fi
+      variable=${prefix}_INITDB
+      if [[ ${!variable:-} == 1 ]]; then touch "$STUB_DIR/initdb"; fi
+      variable=${prefix}_MESSAGE; message=${!variable-$message}
+      variable=${prefix}_FAULT; extra=${!variable:-}
+      variable=${prefix}_ERROR_COUNT
+      for ((line=0; line<${!variable:-1}; line++)); do
+        # Alternate streams, so the caller must count both.
+        printf '{"level":"ERROR","job":"restore-volume","message":"%s","set":"%s"%s}\n' \
+          "$message" "$STUB_SET" "$extra" >&$((line % 2 + 1))
+      done
+      variable=${prefix}_STATUS
+      exit "${!variable:-1}"
+    fi
     echo '{"level":"INFO","message":"restore volume start"}'
     if [[ -n ${STUB_RESTORE_LAST+x} ]]; then
       echo "$STUB_RESTORE_LAST"
@@ -391,6 +438,7 @@ case "$args" in
       printf '{"level":"INFO","message":"restore volume completed","set":"%s","system_identifier":"%s"}\n' \
         "$STUB_SET" "${STUB_NEW_ID:-2222}"
     fi
+    exit "${STUB_RESTORE_STATUS:-0}"
     ;;
   *" compose "*" ps -aq db "*) echo abc123def ;;
   " kill "*)
@@ -432,6 +480,41 @@ exit 0
 """
 
 
+SUDO_RESTORE_STUB = r"""
+while [[ ${1:-} == --* ]]; do shift; done
+if [[ ${1:-} == docker ]]; then exec "$@"; fi
+echo "sudo $*" >>"$STUB_LOG"
+case "$1" in
+  install)
+    if [[ -n ${STUB_COPY_FAIL:-} && $* == *"$STUB_COPY_FAIL"* ]]; then exit 1; fi
+    # Exercise real copies without changing ownership on the host.
+    args=()
+    while (( $# )); do
+      case "$1" in -o|-g) shift 2 ;; *) args+=("$1"); shift ;; esac
+    done
+    exec "${args[@]}"
+    ;;
+  rm)
+    if [[ $* == *"-rf -- "* ]]; then
+      [[ ${STUB_REMOVE_COPY_FAIL:-} != 1 ]] || { echo 'rm: cannot remove set copy' >&2; exit 1; }
+      [[ ${STUB_LEAVE_COPY:-} != 1 ]] || exit 0
+    fi
+    ;;
+esac
+exec "$@"
+"""
+
+
+def restore_tree():
+    """Build a set with real checksums and an opaque tag for the command stubs."""
+    files = {f"{STUB_SET}.dump": "original dump\n", f"{STUB_SET}.counts": "public.recipe|1\n",
+             "globals_20260101_0000_now.sql": "original globals\n"}
+    manifest = "".join(f"{hashlib.sha256(text.encode()).hexdigest()}  {name}\n" for name, text in files.items())
+    files[f"{STUB_SET}.dump.sha256"] = manifest
+    files[f"{STUB_SET}.dump.sha256.hmac"] = "opaque stub tag\n"
+    return {f"backups/{name}": text for name, text in files.items()}
+
+
 class StubbedSubcommandTests(unittest.TestCase):
     def setUp(self):
         self.bash = shutil.which("bash")
@@ -442,6 +525,11 @@ class StubbedSubcommandTests(unittest.TestCase):
                        sudo_stub=SUDO_STUB, stub_python=False, read=(), stub_files=None, python_stub=None,
                        extra_stubs=None, driver=None):
         """Run one subcommand with stubs. Return the process, the call log, and the files of CI_STATE."""
+        if name == "restore":
+            tree = {**restore_tree(), **(tree or {})}
+            if sudo_stub == SUDO_STUB:
+                sudo_stub = SUDO_RESTORE_STUB
+            read = (*read, *restore_tree())
         with tempfile.TemporaryDirectory() as temp:
             directory = pathlib.Path(temp)
             stubs = directory / "bin"
@@ -518,6 +606,11 @@ class StubbedSubcommandTests(unittest.TestCase):
 
 
 class RestoreBehaviorTests(StubbedSubcommandTests):
+    def assert_copy_removed(self, files):
+        self.assertNotIn("backups/restore-switch-tag", files["tree.list"])
+        for name, text in restore_tree().items():
+            self.assertEqual(files["read:" + name], text, name)
+
     def test_restore_runs_the_steps_in_order(self):
         done, log, _ = self.run_subcommand("restore")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -547,6 +640,138 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
                 self.assertIn("CI: restore: the last line of restore-volume is wrong.", done.stderr)
                 self.assertNotIn("new.system-identifier", files)
                 self.assertNotIn("volume rm", log)
+
+    def test_all_four_cases_run_and_report_their_pass(self):
+        done, log, files = self.run_subcommand("restore")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertInOrder(log, [
+            r"restore-volume --check-only 20260101_0000_now\n",
+            r"--entrypoint find .*\n",
+            r"restore-volume 20260101_0000_now\n",
+            r"--entrypoint find .*\n",
+            r"restore-volume --check-only 20260101_0000_now\n",
+            r"stub changed dump has a new manifest and the old tag\n",
+            r"sudo rm -rf -- .*?/restore-switch-tag\n",
+            r"restore-volume 20260101_0000_now\n",
+        ])
+        for message in (
+                "--check-only accepted the tagged set without a target volume.",
+                "the set without a tag stopped before initdb with exactly one ERROR line.",
+                "--check-only refused the changed dump with exactly one ERROR line.",
+                "restore-volume completed the real restore of the tagged set."):
+            self.assertIn("CI: restore: PASS " + message, done.stdout)
+        for name, message in (("restore-no-tag.log", "the newest set has no tag file"),
+                              ("restore-check-only-changed.log", "the tag of the set does not match the manifest")):
+            lines = [json.loads(line) for line in files[name].splitlines()]
+            self.assertEqual(lines, [{"level": "ERROR", "job": "restore-volume", "message": message, "set": STUB_SET}])
+        self.assert_copy_removed(files)
+
+    def test_check_only_uses_no_target_and_refusals_use_only_the_copy(self):
+        done, log, files = self.run_subcommand("restore")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        calls = [line for line in log.splitlines() if " run " in line and " restore-volume " in line]
+        self.assertEqual(len(calls), 4)
+        for index in (0, 2):
+            self.assertIn("--check-only", calls[index])
+            self.assertNotIn(":/var/lib/postgresql/data", calls[index])
+        for call in calls[:3]:
+            self.assertIn("/restore-switch-tag:/backups:ro", call)
+        self.assertNotIn("/restore-switch-tag:", calls[3])
+        self.assert_copy_removed(files)
+
+    def test_each_refusal_rejects_a_wrong_error_count(self):
+        for kind in ("NO_TAG", "CHANGED"):
+            for count in (0, 2):
+                with self.subTest(kind=kind, count=count):
+                    done, _, files = self.run_subcommand("restore", stub_env={f"STUB_{kind}_ERROR_COUNT": str(count)})
+                    self.assertEqual(done.returncode, 1)
+                    self.assertIn(f"the refused set gave {count} ERROR lines. Expected 1.", done.stderr)
+                    self.assertNotIn("new.volume", files)
+                    self.assert_copy_removed(files)
+
+    def test_each_refusal_rejects_a_wrong_error_text(self):
+        for kind in ("NO_TAG", "CHANGED"):
+            with self.subTest(kind=kind):
+                done, _, files = self.run_subcommand("restore", stub_env={f"STUB_{kind}_MESSAGE": "setup failed"})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("the refused set stopped for another reason.", done.stderr)
+                self.assert_copy_removed(files)
+
+    def test_each_refusal_rejects_a_fault_field(self):
+        for kind in ("NO_TAG", "CHANGED"):
+            with self.subTest(kind=kind):
+                done, _, files = self.run_subcommand("restore", stub_env={f"STUB_{kind}_FAULT": ',"fault":"tag-missing"'})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("the refused set has a fault field.", done.stderr)
+                self.assert_copy_removed(files)
+
+    def test_each_refusal_rejects_a_wrong_exit_code(self):
+        for kind in ("NO_TAG", "CHANGED"):
+            for status in (0, 2):
+                with self.subTest(kind=kind, status=status):
+                    done, _, files = self.run_subcommand("restore", stub_env={f"STUB_{kind}_STATUS": str(status)})
+                    self.assertEqual(done.returncode, 1)
+                    self.assertIn(f"gave exit code {status}. Expected 1.", done.stderr)
+                    self.assert_copy_removed(files)
+
+    def test_each_refusal_rejects_a_restore_start(self):
+        for kind in ("NO_TAG", "CHANGED"):
+            with self.subTest(kind=kind):
+                done, _, files = self.run_subcommand("restore", stub_env={f"STUB_{kind}_STARTED": "1"})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("the refused set reached the restore steps.", done.stderr)
+                self.assert_copy_removed(files)
+
+    def test_missing_tag_refusal_must_leave_the_target_empty(self):
+        done, _, files = self.run_subcommand("restore", stub_env={"STUB_NO_TAG_INITDB": "1"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("the refused set wrote into the target volume.", done.stderr)
+        self.assert_copy_removed(files)
+
+    def test_an_unreadable_target_stops_the_case(self):
+        done, _, files = self.run_subcommand("restore", stub_env={"STUB_TARGET_READ_FAIL": "1"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("cannot read the target volume.", done.stderr)
+        self.assert_copy_removed(files)
+
+    def test_tagged_check_only_rejects_failure_and_bad_output(self):
+        cases = (({"STUB_CHECK_STATUS": "1"}, "--check-only refused the tagged set."),
+                 ({"STUB_CHECK_OUTPUT": "wrong line"}, "--check-only did not report the tagged set."),
+                 ({"STUB_CHECK_STDERR": '{"level":"ERROR","message":"bad"}\n'},
+                  "--check-only wrote to stderr for the tagged set."))
+        for env, message in cases:
+            with self.subTest(env=env):
+                done, _, files = self.run_subcommand("restore", stub_env=env)
+                self.assertEqual(done.returncode, 1)
+                self.assertIn(message, done.stderr)
+                self.assert_copy_removed(files)
+
+    def test_each_copy_step_failure_removes_the_copy(self):
+        for part in ("-d", ".backup-marker", ".scratch/.lock", f"{STUB_SET}.dump",
+                     f"{STUB_SET}.counts", "globals_20260101_0000_now.sql", f"{STUB_SET}.dump.sha256.hmac"):
+            with self.subTest(part=part):
+                done, log, files = self.run_subcommand("restore", stub_env={"STUB_COPY_FAIL": part})
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("CI: restore: cannot ", done.stderr)
+                self.assertNotIn(" restore-volume ", log)
+                self.assert_copy_removed(files)
+
+    def test_real_restore_failure_does_not_save_the_volume(self):
+        done, _, files = self.run_subcommand("restore", stub_env={"STUB_RESTORE_STATUS": "1"})
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("restore-volume refused the tagged set.", done.stderr)
+        self.assertNotIn("new.volume", files)
+        self.assert_copy_removed(files)
+
+    def test_cleanup_failure_and_a_copy_left_behind_fail_the_job(self):
+        for env in ({"STUB_REMOVE_COPY_FAIL": "1"}, {"STUB_LEAVE_COPY": "1"},
+                    {"STUB_LEAVE_COPY": "1", "STUB_CHECK_STATUS": "1"}):
+            with self.subTest(env=env):
+                done, _, files = self.run_subcommand("restore", stub_env=env)
+                self.assertEqual(done.returncode, 1)
+                self.assertIn("cannot delete the set copy.", done.stderr)
+                self.assertIn("backups/restore-switch-tag", files["tree.list"])
+                self.assertNotIn("new.volume", files)
 
 
 class SwitchBehaviorTests(StubbedSubcommandTests):

@@ -123,7 +123,7 @@ fn a_copy_from_a_build_stage_needs_no_entry() {
 
 /// One change of the Dockerfile or of the allow list of the pgtools context, and the fault that follows.
 /// The fault must name the library file.
-const LIBRARY_COPIES: [ContextCase; 5] = [
+const LIBRARY_COPIES: [ContextCase; 9] = [
     // The Dockerfile drops the library, and the allow list drops it too. Only this check sees it.
     (
         PGTOOLS_DOCKERFILE,
@@ -141,16 +141,41 @@ const LIBRARY_COPIES: [ContextCase; 5] = [
     // The library lands outside the directory of the other library files.
     (
         PGTOOLS_DOCKERFILE,
-        " lib/wal-identity.sh lib/check-result.sh /etc/pgtools/",
-        " lib/check-result.sh /etc/pgtools/\nCOPY --chmod=0644 lib/wal-identity.sh /usr/local/lib/",
+        " lib/wal-identity.sh lib/check-result.sh lib/manifest-tag.sh lib/manifest-tag.pl /etc/pgtools/",
+        " lib/check-result.sh lib/manifest-tag.sh lib/manifest-tag.pl /etc/pgtools/\nCOPY --chmod=0644 lib/wal-identity.sh /usr/local/lib/",
         "lib/wal-identity.sh",
     ),
-    // The new library lands outside that directory too.
+    // The new libraries land outside that directory too.
     (
         PGTOOLS_DOCKERFILE,
-        " lib/check-result.sh /etc/pgtools/",
-        " /etc/pgtools/\nCOPY --chmod=0644 lib/check-result.sh /usr/local/lib/",
+        " lib/check-result.sh lib/manifest-tag.sh lib/manifest-tag.pl /etc/pgtools/",
+        " lib/manifest-tag.sh lib/manifest-tag.pl /etc/pgtools/\nCOPY --chmod=0644 lib/check-result.sh /usr/local/lib/",
         "lib/check-result.sh",
+    ),
+    (
+        PGTOOLS_DOCKERFILE,
+        " lib/manifest-tag.sh lib/manifest-tag.pl /etc/pgtools/",
+        " lib/manifest-tag.pl /etc/pgtools/\nCOPY --chmod=0644 lib/manifest-tag.sh /usr/local/lib/",
+        "lib/manifest-tag.sh",
+    ),
+    (
+        PGTOOLS_DOCKERFILE,
+        " lib/manifest-tag.pl /etc/pgtools/",
+        " /etc/pgtools/\nCOPY --chmod=0644 lib/manifest-tag.pl /usr/local/lib/",
+        "lib/manifest-tag.pl",
+    ),
+    // The Dockerfile copies the tag libraries, and the allow list does not admit them.
+    (
+        PGTOOLS_CONTEXT_LIST,
+        "!lib/manifest-tag.sh\n",
+        "",
+        "lib/manifest-tag.sh",
+    ),
+    (
+        PGTOOLS_CONTEXT_LIST,
+        "!lib/manifest-tag.pl\n",
+        "",
+        "lib/manifest-tag.pl",
     ),
     // A COPY from a stage does not count as a copy of the library.
     (

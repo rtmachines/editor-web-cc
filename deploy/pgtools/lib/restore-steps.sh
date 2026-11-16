@@ -89,15 +89,93 @@ select_set() {
   set_paths "$set_stamp"
 }
 
-# check_manifest: the manifest lists exactly the three files of the set, and each hash is right.
+# copy_manifest_tag: ADR-0174 (w). Read no other file of the selected set here.
+copy_manifest_tag() {
+  local tag_path=$BACKUP_DIR/$manifest_name.hmac
+  manifest_copy=$work_dir/$manifest_name
+  tag_copy=$work_dir/$manifest_name.hmac
+  if [ ! -f "$tag_path" ] || [ -L "$tag_path" ]; then
+    fail "the newest set has no tag file" "\"set\":\"$base\""
+  fi
+  copy_manifest_file "$BACKUP_DIR/$manifest_name" "$manifest_copy" MAX_FILE_BYTES manifest-size \
+    "cannot copy the manifest"
+  chmod 0600 -- "$manifest_copy" || fail "cannot set the manifest copy permissions"
+  copy_manifest_file "$tag_path" "$tag_copy" MAX_TAG_BYTES tag-size "cannot copy the manifest tag file"
+  chmod 0600 -- "$tag_copy" || fail "cannot set the manifest tag copy permissions"
+}
+
+# copy_manifest_file <source> <copy> <constant> <size fault> <copy error>: bound the private copy.
+# Read the trusted Perl declaration so both readers use the same limit without a second numeric value.
+copy_manifest_file() {
+  local limit bytes library_dir=${BASH_SOURCE[0]%/*}
+  limit=$(sed -n "s/^use constant $3 => \([0-9][0-9]*\);$/\1/p" -- "$library_dir/manifest-tag.pl") \
+    || fail "cannot read the manifest size limit"
+  [[ $limit =~ ^[1-9][0-9]*$ ]] || fail "cannot read the manifest size limit"
+  head -c "$((limit + 1))" -- "$1" >"$2" || fail "$5"
+  bytes=$(wc -c <"$2") || fail "$5"
+  if [ "$bytes" -gt "$limit" ]; then
+    # shellcheck source=../lib/manifest-tag.sh
+    source "$library_dir/manifest-tag.sh" || fail "cannot load the manifest tag library"
+    printf '%s\n' "$4" >"$work_dir/manifest-tag.err" || fail "cannot record the manifest size fault"
+    fail_manifest_check
+  fi
+}
+
+# fail_manifest_check: map the library fault to a fixed message and an optional line number.
+fail_manifest_check() {
+  local fault message line fields="\"set\":\"$base\""
+  fault=$(cat -- "$work_dir/manifest-tag.err")
+  IFS=$'\t' read -r message line < <(manifest_tag_message "$fault")
+  [ -z "$line" ] || fields="$fields,\"line\":$line"
+  fail "$message" "$fields"
+}
+
+# check_manifest_key <key file>: load the wrappers only for callers that use the tag gate.
+check_manifest_key() {
+  local key_file=$1
+  # shellcheck source=../lib/manifest-tag.sh
+  source "${BASH_SOURCE[0]%/*}/manifest-tag.sh" || fail "cannot load the manifest tag library"
+  manifest_tag_key_ids "$key_file" >/dev/null 2>"$work_dir/manifest-tag.err" \
+    || fail_manifest_check
+  manifest_tag_check_location "$key_file" 2>"$work_dir/manifest-tag.err" \
+    || fail_manifest_check
+}
+
+# check_manifest_tag <key file>: authenticate the private manifest before any other set file is read.
+check_manifest_tag() {
+  manifest_tag_check "$1" \
+    "$manifest_copy" "$tag_copy" 2>"$work_dir/manifest-tag.err" \
+    || fail_manifest_check
+}
+
+# copy_counts <manifest>: bind the private counts copy to the authenticated manifest.
+# Later checks and the comparison of restored rows read this copy through counts_path.
+copy_counts() {
+  local counts_copy=$work_dir/${counts_path##*/} expected copy_hash
+  if [ ! -f "$counts_path" ] || [ -L "$counts_path" ]; then
+    fail "the newest set lacks a regular file" "\"set\":\"$base\""
+  fi
+  cat -- "$counts_path" >"$counts_copy" || fail "cannot copy the counts file"
+  chmod 0600 -- "$counts_copy" || fail "cannot set the counts copy permissions"
+  expected=$(awk -v name="${counts_path##*/}" \
+    'substr($0, 67) == name { print substr($0, 1, 64) }' "$1") \
+    || fail "cannot read the manifest of the newest set"
+  copy_hash=$(sha256sum -- "$counts_copy") || fail "cannot hash the counts copy"
+  [ "${copy_hash%% *}" = "$expected" ] || fail "the counts copy does not match the manifest"
+  counts_path=$counts_copy
+}
+
+# check_manifest <checked manifest>: list exactly the three files and check each hash.
 check_manifest() {
+  [ -n "${1:-}" ] || fail "the checked manifest argument is missing"
   local listed expected file globals_hash copy_hash
+  local manifest=$1
   for file in "$dump_path" "$globals_path" "$counts_path"; do
     if [ ! -f "$file" ] || [ -L "$file" ]; then
       fail "the newest set lacks a regular file" "\"set\":\"$base\""
     fi
   done
-  listed=$(sed -E -e 's/^[0-9a-f]{64} [ *]//' -- "$BACKUP_DIR/$manifest_name" | sort) \
+  listed=$(sed -E -e 's/^[0-9a-f]{64} [ *]//' -- "$manifest" | sort) \
     || fail "cannot read the manifest of the newest set"
   expected=$(printf '%s\n' "${dump_path##*/}" "${globals_path##*/}" "${counts_path##*/}" | sort)
   [ "$listed" = "$expected" ] || fail "the manifest does not list exactly the files of the set"
@@ -105,9 +183,9 @@ check_manifest() {
   cat -- "$globals_path" >"$globals_copy" || fail "cannot copy the globals file"
   chmod 0600 -- "$globals_copy" || fail "cannot set the globals copy permissions"
   globals_hash=$(awk -v name="${globals_path##*/}" \
-    'substr($0, 67) == name { print substr($0, 1, 64) }' "$BACKUP_DIR/$manifest_name") \
+    'substr($0, 67) == name { print substr($0, 1, 64) }' "$manifest") \
     || fail "cannot read the manifest of the newest set"
-  if ! (cd "$BACKUP_DIR" && sha256sum -c --strict -- "$manifest_name") \
+  if ! (cd "$BACKUP_DIR" && sha256sum -c --strict -- "$manifest") \
     >"$work_dir/manifest.out" 2>&1; then
     cat -- "$work_dir/manifest.out" >&2
     fail "the manifest of the newest set does not verify" "\"set\":\"$base\""

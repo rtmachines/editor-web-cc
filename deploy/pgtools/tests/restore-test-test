@@ -80,12 +80,16 @@ source "$HERE/lib/restore-run-cases.sh" || exit 1
 ROOT=$(mktemp -d)
 trap cleanup EXIT
 
+prepare_restore_tag_key || exit 1
 make_restore_stubs
 case_restore_static_rules
 case_restore_steps_library
 case_restore_usage
 case_restore_missing_marker
 case_restore_no_set
+case_restore_bad_tag
+case_restore_bad_tag_before_set_reads
+case_restore_manifest_swap_after_tag
 case_restore_manifest_mismatch
 case_restore_manifest_files
 case_restore_set_selection

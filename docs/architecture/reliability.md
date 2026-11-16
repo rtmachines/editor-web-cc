@@ -611,6 +611,12 @@ A key file holds one key per line, the newest key first. Each line holds the 32 
 
 Rotation: the operator adds the new key as the first line. Both keys are accepted for `security.key_rotation_overlap`. Then the operator deletes the old line.
 
+The Docker secret `backup_manifest_key` is the HMAC key of the backup manifest (ADR-0174 (m)). Three services mount it: `backup`, `backup-premigrate`, and `restore-volume`. Its host file has the mode `0400` and the owner uid 999. `secrets.backup_manifest_key_file` of 7.11 names the file. It follows the key file grammar above with at most `backup_manifest.max_keys` lines.
+
+The key file and `BACKUP_DIR` must lie on two different filesystems (ADR-0174 (p)). A script that finds one filesystem for both stops with one `ERROR` line.
+
+The rotation of `backup_manifest_key` is separate from `security.key_rotation_overlap` (ADR-0174 (q)). A key line stays while a kept set, a `_premigrate` set, or an off-site copy needs it. `backup_manifest.max_keys` sets the limit.
+
 ### 7.2 Health endpoints
 
 | Endpoint | Checks | Use |
@@ -711,7 +717,12 @@ Dump (ADR-0066 (e) to (l), ADR-0074 (b), (c)):
 - The `backup` service runs `pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt` daily at `backup.time` to the `backups` volume. The same run writes the globals file with `pg_dumpall --globals-only --no-role-passwords -l recipe`, because roles are not inside a `pg_dump`. The file holds no password. A restore sets the role passwords from the secret files (ADR-0033).
 - One run writes one set: `recipe_<YYYYMMDD_HHMM><suffix>.dump`, `globals_<YYYYMMDD_HHMM><suffix>.sql`, and `recipe_<YYYYMMDD_HHMM><suffix>.counts`. `<suffix>` is empty for the daily run, `_premigrate` for `backup-premigrate`, and `_now` for `backup-now`.
 - The manifest `recipe_<YYYYMMDD_HHMM><suffix>.dump.sha256` covers the three files. The script writes it last. A set without a manifest is not complete. The restore script checks the manifest before it restores.
+- The tag file `recipe_<YYYYMMDD_HHMM><suffix>.dump.sha256.hmac` lies in the same directory as the manifest and has the mode `0600`. It holds one line: `hmac-sha256-v1 <key id> <tag>`. The tag is HMAC-SHA-256 over the label `recipe-backup-manifest-v1`, one line feed, and the manifest bytes (ADR-0174 (e) to (h)). The key is the secret `backup_manifest_key` of 7.1.
+- The tag file name does not match the set grammar below. The tag file therefore never counts as a set (ADR-0174 (i)).
 - A run writes each file of a new set first under the temp name `.tmp-<final name>` in the same directory. It publishes the file with a hard link (`ln -T` without `-f`) and then deletes the temp name. A publish never replaces a file (ADR-0074 (b)).
+- The script hashes each file of the set under its temp name, before it publishes the file (ADR-0174 (t)). It checks the key file in step 2, before the snapshot session starts (ADR-0174 (s)).
+- Step 5 of `backup-once` publishes the three data files. It writes the manifest and then the tag file under temp names. It runs `sync`, publishes the tag file, and publishes the manifest last (ADR-0174 (u)).
+- A failed step publishes no manifest. The cleanup deletes the temp names and the published files of the run, the tag file included. The retention deletes the manifest first and then the tag file with the other files of the set.
 - A temp name never counts as a set. The temp files of a killed run stay until the operator deletes them.
 - A reader finds a manifest only by the anchored grammar `^recipe_[0-9]{8}_[0-9]{4}(_premigrate|_now)?\.dump\.sha256$` of the whole name. `[0-9]` stands for the ASCII digits only (ADR-0074 (c)).
 - The retention, `backup-health`, `restore-test`, and the adapter of `BackupDirectory` use this grammar. A name that does not match is not a set, and the retention never deletes it.
@@ -766,7 +777,7 @@ Copies and restore:
 - After a rollback with the expand pattern, `app` runs the previous image, and `backup` and `walarchive` keep the new image (ADR-0083 (c)).
 - The script uses a private scratch cluster on the backup disk. It runs `initdb` with the arguments of 7.1 and with `--auth-local=peer --auth-host=scram-sha-256`. The scratch server listens on `127.0.0.1` only and uses the `scratch.*` settings of 7.11.
 - The script runs these steps (ADR-0067):
-  1. It selects the newest complete set and checks its manifest with `sha256sum -c --strict`. It then checks each line of the globals file against the role grammar of five statement forms (ADR-0095 (a), (b)). A line outside the grammar stops the test before any PostgreSQL tool runs.
+  1. It selects the newest complete set and takes a private copy of its manifest and its tag file. It checks the key file with the rules of 7.1. It checks the tag over the copy of the manifest (ADR-0174 (w)). A missing tag file, an unknown key id, or a different tag stops the test. The test never selects an older set. No option skips this check (ADR-0174 (x)). It then checks the copy of the manifest with `sha256sum -c --strict`. Last, it checks each line of the globals file against the role grammar of five statement forms (ADR-0095 (a), (b)). A line outside the grammar stops the test before any PostgreSQL tool runs.
   2. It compares the names of the entries `FUNCTION`, `TRIGGER`, and `EVENT TRIGGER` of `pg_restore -l`. It compares them with the names of the lines of these kinds in `deploy/pgtools/restore-code.expected`. A storage test compares that file with a database after `01-roles.sh` and every migration. An unknown entry stops the test (ADR-0076 (b)). An entry of the kind `PROCEDURE`, `AGGREGATE`, `MATERIALIZED VIEW`, or `OPERATOR` also stops the test (ADR-0078 (b)).
   3. It restores the globals file only after step 1 accepts it (ADR-0095 (f)). It then sets a random password for each login role.
   4. It restores the section `pre-data` of the dump into the scratch cluster. It compares the SHA-256 of each function, `CHECK` constraint, and generated column with the lines of these kinds in `restore-code.expected`. A difference stops the test before the data load (ADR-0067 (h) to (l), ADR-0076 (c)). The restore of `pre-data` can run the code of a generated column before this comparison, as the scratch superuser. That code can write files as uid 999, hide its change from the comparison, or keep the restore from ending. ADR-0084 accepts this residual risk.
@@ -785,9 +796,11 @@ Restore into production (ADR-0103):
 - When the set to restore is not the newest set, steps 1 to 8 of `restore-volume` (ADR-0103 (i)) are the test of that set. The login check of step 8 of the restore test then has no equal before the switch.
 - Then the switch of 7.8 runs. The operator sets the role passwords in `db` from the secret files (ADR-0033). Then the new WAL line starts.
 - Then the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Last, the operator runs `docker compose up -d --no-deps app`, then `docker compose up -d --no-deps proxy backup`. The wait of the bullet "After a restore into production" follows.
-- `restore-volume` runs in a temporary container of `recipe-pgtools` with `network_mode: none`. It mounts no secret. Its image has the tag of the schema of the set (ADR-0083 (a)).
+- `restore-volume` runs in a temporary container of `recipe-pgtools` with `network_mode: none`. It mounts one secret, `backup_manifest_key`. It reads no password, sets no known password, and joins no network (ADR-0174 (y)). Its image has the tag of the schema of the set (ADR-0083 (a)).
 - The script refuses a target that is not empty. It also refuses a run as a user other than uid 999 with the name `postgres` (ADR-0105 (r)). It takes `flock` on the existing lock of the restore test and opens it read-only (ADR-0103 (i)).
 - It runs the gates of steps 1 and 2 of the restore test and writes nothing to `/backups`. Then it runs `initdb` with the arguments of 7.1.
+- The command `restore-volume --check-only <stamp>` runs the check of step 1 of the restore test with the same functions as a full restore (ADR-0174 (w)). It needs no target volume and runs no PostgreSQL tool.
+- On a pass, `--check-only` writes one `INFO` line "the set passed the check" and exits with code 0. On a fault, it writes the `ERROR` line of a full restore and exits with a code other than 0.
 - It restores the checked globals file and the dump. It runs the comparisons, the counts, and the audit chain check of steps 4 to 7 of the restore test.
 - The script sets no known password. Until the operator sets the passwords after the switch, no password login succeeds (ADR-0103 (k)).
 - Its temporary server has no TCP listener and keeps `fsync` on. It uses the `scratch.*` sizes and the waits `restore_volume.start_timeout` and `restore_volume.stop_timeout` of 7.11 (ADR-0103 (j)).
@@ -797,6 +810,15 @@ Restore into production (ADR-0103):
 - It also compares the values of ADR-0103 (m) with the file `restore-roles.expected` of its image. The values are `pg_hba.conf`, the access lists, the role attributes, the role memberships, the role settings, and the grants. A storage test compares that file with a cluster of `01-roles.sh` and all migrations (ADR-0103 (m)). The file holds a placeholder for the subnet. The script puts `COMPOSE_SUBNET` into it before the comparison.
 - A difference ends the run. The user accepts the residual risk of a catalog change that these comparisons cannot find (ADR-0103 (o)).
 - Last, the script stops the server with a clean shutdown. Its last line holds the system identifier of the new cluster. After a failed run, the operator deletes the new volume.
+
+Known limits of the manifest tag (ADR-0174 (ag) to (ak)):
+
+- The tag protects against an offline writer of the backup disk. An online writer is a known limit (ADR-0174 (a), (b)).
+- An online writer can defeat the tag at three points. It can change a temp file before the hash, write into the dump after the check, or change the scratch cluster of `restore-test` in `/backups/.scratch` (ADR-0174 (ag)). The project adds no measure for them.
+- The key lies in the container where the SQL of a set runs as superuser. Code of the class of ADR-0084 can read the key, and a holder of the key can sign a crafted set (ADR-0174 (ah)). The operator rotates the key after such an incident (7.1).
+- The tag does not cover the modification time of a file. `backup-health` and the adapter of `BackupDirectory` read the age from that time. The alert `backup_age` therefore gives no proof of a replay (ADR-0174 (ai)).
+- An image from before ADR-0174 ignores the tag file of each set of its schema. This limit holds only from the release before ADR-0174 to the first release with it. 7.10 and ADR-0174 (aj) give the cases and the safeguards.
+- The server of `pitr-check` and `pitr-volume` reads the configuration files and the catalog of a base backup. The base backup and the WAL archive get no tag, and an offline writer of `/wal` can change a base backup (ADR-0174 (d), (ak)).
 
 WAL line after a switch (ADR-0103 (r) to (v)):
 
@@ -852,7 +874,7 @@ Volume switch (ADR-0103 (e) to (g)):
 
 - Each start of `db` or `app` on a data volume uses the `compose.yaml` and the tag that fit that volume (ADR-0105 (a)).
 - A `compose.yaml` fits when its `db` image has the PostgreSQL major version of the volume. A tag fits when ADR-0083 permits its `app` image on the schema of the volume.
-- A run can fail before the operator sets the new name. Before `app` and `backup` start again, the operator sets the tag of the old volume in `deploy/.env` (ADR-0105 (c)).
+- A run can fail before the operator sets the new name. Before `app` and `backup` start again, the operator sets the tag of the old volume in `deploy/.env` (ADR-0105 (c)). After a failed upgrade, only `backup` starts again, by the rule of 7.10 step 6. `deploy/.env` keeps the previous tag and `COMPOSE_FILE` (ADR-0174 (aj)).
 
 - A new volume gets the name `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>`. The time is UTC.
 - The switch stops and deletes the containers of `proxy`, `app`, `backup`, `walarchive`, and `db`. It never runs `docker compose down` and never `docker compose start`.
@@ -862,8 +884,9 @@ Volume switch (ADR-0103 (e) to (g)):
 - The state must be `shut down`. The system identifier must equal the field `system_identifier` of the line `restore volume completed`. Else the operator stops, deletes no volume, and runs the switch back at once (ADR-0103 (f)).
 - Then the operator runs `docker compose up -d --no-deps db`. `docker inspect` of `db` then shows the new volume. After the start of `app` and `backup`, `docker inspect` of each container shows the new volume (ADR-0103 (f)).
 - A switch back uses the same steps with the old name. It needs no state of the volume that it leaves and never starts `db` on that volume. Its system identifier must equal the identifier that the first switch wrote into the change log (ADR-0103 (f), (g)).
-- Before `db` starts, a switch back sets the tag of the volume that it returns to. The operator reads that tag from the change log (ADR-0105 (d)).
-- After `db` starts, a switch back starts `walarchive` before `app`. After the move of the old segments, the new WAL line of 7.7 starts first (ADR-0103 (g)). Then the operator starts `app`, then `proxy` and `backup`.
+- Before `db` starts, a switch back sets the tag of the volume that it returns to. The operator reads that tag from the change log (ADR-0105 (d)). When that tag has the tag check, that step also runs the exit of 7.10 step 6. The switch back creates no `backup` again, because its last step creates `backup` (ADR-0174 (aj)).
+- After `db` starts, a switch back starts `walarchive` before `app`. After the move of the old segments, the new WAL line of 7.7 starts first (ADR-0103 (g)). Then the operator starts `app`, then `proxy` and `backup`. After a failed upgrade, the switch back starts only `backup` at its end, by the rule of 7.10 step 6. `app` and `proxy` stay stopped.
+- After a failed upgrade, the check after the start inspects only `backup`. It checks the WAL stream in `db` and does not wait for the alert `replication`. The job `alerts` runs in `app`, and `app` stays stopped (ADR-0174 (aj)).
 - The change log also holds the timeline of each volume that a switch leaves. A switch back compares the system identifier and the timeline (ADR-0106 (l)).
 - A switch after a recovery from the WAL archive needs no state of the old volume and never starts `db` on it (ADR-0106 (j)).
 - It compares the identifier and the timeline of the new volume with the line `pitr volume completed`. It refuses a drill volume.
@@ -909,7 +932,9 @@ Disk space policy (Assumption A24):
 
 ### 7.10 Upgrade procedure
 
-1. Read the release notes. Note whether the migration follows the expand pattern.
+Before step 1, create the key file of the secret `backup_manifest_key` (7.1, 7.7).
+
+1. Read the release notes. Note whether the migration follows the expand pattern. Note the new release tag. Only command 1 of the `_premigrate` restore in step 6 uses it, as `<new tag>` (ADR-0174 (aj)).
 2. Load the new image files with `docker load`. Compare the SHA-256 of each file before the load and the image ID after it (ADR-0064 (j), (k)). Do not stop the running stack yet.
    - Install the files of the new release into a new directory `deploy/`. Copy `.env` of the running release into it, and keep the old directory (ADR-0105 (e), (i)).
    - Run every later command in the new directory. The `compose.yaml` of 0.1.0 ignores `RECIPE_PGDATA_VOLUME`, so the name check needs the new files.
@@ -925,12 +950,18 @@ Disk space policy (Assumption A24):
    - A difference stops the step, and the step writes no file. Else the container writes `/wal/.system-identifier`. The release notes name this step (ADR-0105 (n)).
    - Without a complete segment and without a `.partial` file, the step writes no file. Then run `SELECT pg_switch_wal()` in `db`, wait for a complete segment, and run the step again (ADR-0104 (d)).
    - Then set `RECIPE_VERSION` in `deploy/.env` to the new release tag. The step therefore runs with the previous tag.
+   - The edit that sets the new tag also deletes `COMPOSE_FILE` from `deploy/.env`. Then run `unset COMPOSE_FILE`. The copied `.env` can hold `COMPOSE_FILE` from a rollback (ADR-0174 (aj)).
+   - The runbook section "Leave the file compose.previous.yaml" of `docs/ops/runbook.md` gives the commands of this exit.
+   - This step does not create `backup` again. Command 1 of step 5 gives `backup` the new image and the key.
+   - A new container in this step breaks the rule to keep the running stack. Its weekly `restore-test` checks the newest set, which has no tag, and can give a false alert `restore_test` (ADR-0174 (aj)).
 3. The old image checks the newest set in a new container: `RECIPE_VERSION=<previous tag> docker compose run --rm --no-deps backup restore-test` (ADR-0105 (g)). Then five commands run in this order (ADR-0097 (h), (h4)):
    1. `docker compose up -d backup-premigrate`. It writes the rollback set `_premigrate`. Wait for exit code 0. In the first release with the mount of ADR-0103 (l), this command replaces `db` once on the same volume. `app` loses its connections for the start time of `db` (ADR-0105 (k)).
    2. `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time, and that dump fails in the same UTC minute (ADR-0082). Wait for exit code 0 of `migrate`.
-   3. On failure of command 1 or 2, stop here. Set the previous tag in `deploy/.env` again. The old `app` keeps running on the old schema when the migration follows the expand pattern. A release with two or more migration files can fail after the first file, so use a forward correction or the `_premigrate` restore (ADR-0083).
+   3. On failure of command 1 or 2, stop here. Set the previous tag in `deploy/.env`. When the probe finds no tag check, also set `COMPOSE_FILE` there. Then, for the same probe result, run `docker compose up -d --no-deps --force-recreate backup` (ADR-0174 (aj)). The old `app` keeps running on the old schema when the migration follows the expand pattern. A release with two or more migration files can fail after the first file, so use a forward correction or the `_premigrate` restore (ADR-0083). That restore uses the rollback bullet of step 6 with its command 1.
    4. The guard step: the superuser replaces `audit_guard.audit_objects_dropped()` with `CREATE OR REPLACE FUNCTION` of the new `01-roles.sh`. This step is the only place that replaces the function on an older volume.
    5. A query computes the SHA-256 of `pg_get_functiondef` of the function, with `search_path = pg_catalog`. It must equal field 4 of the line `FUNCTION|audit_guard audit_objects_dropped()` of the new `deploy/pgtools/restore-code.expected`. No `backup-now` runs before the hash matches. The release notes name commands 4 and 5 as a "manual superuser step".
+   - A probe decides the overlay. The previous image has the tag check when it holds `/etc/pgtools/manifest-tag.pl`. When the probe finds no tag check, each Compose command of this step that runs `backup`, `backup-premigrate`, or `restore-volume` with the previous image adds `deploy/compose.previous.yaml` (ADR-0174 (aa)).
+   - Without the edit of command 3, no Compose command creates `backup` in a failed upgrade. The running previous container keeps its weekly `restore-test`, and the signed `_premigrate` set of command 1 can be the newest set. The recreate of command 3 ends that test (ADR-0174 (aj)).
    - A failure of command 4 or 5 leaves the new schema and the old guard. The operator runs commands 4 and 5 again (`docs/ops/runbook.md`, section "Upgrade").
 4. `docker compose up -d --no-deps app`. Docker replaces the container. Compose starts no one-shot service again, because step 3 ran them (ADR-0082 (a)). Downtime is the graceful shutdown window plus startup, under 60 s.
 5. Check `/readyz` on the internal listener, log in, open one recipe, export one version and check its hash. Then run these four commands while the new `app` serves (ADR-0083 (b), ADR-0151 (m)):
@@ -942,10 +973,48 @@ Disk space policy (Assumption A24):
    - In the first release with the guard of 7.7, the new `walarchive` of command 1 needs the file of step 2. Without the file, it refuses to start (ADR-0104 (a)).
    - In the first upgrade to a release with ADR-0151, the alerts `restore_test` and `base_backup` can be active. This holds from step 4 until step 5 ends (ADR-0151 (n)).
 6. Rollback: `RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app`. Without `--no-deps`, the previous `migrate` runs against the newer schema and fails, and `app` does not start (ADR-0082 (b)). `deploy/.env` keeps the new tag, because the schema stays newer (ADR-0083 (c)).
-   - If the migration did not follow the expand pattern, restore the `_premigrate` dump into a new volume in the order of 7.7, "Restore into production". Set the previous tag in `deploy/.env` before `restore-volume` runs (ADR-0103 (b), (q)).
-   - If `restore-volume` or a check fails before the switch sets the new name, set the new tag in `deploy/.env` again. Then start `app` and `backup`. The old volume holds the newer schema (ADR-0105 (c)).
+   - If the migration did not follow the expand pattern, restore the `_premigrate` dump into a new volume. Use the order of 7.7, "Restore into production" (ADR-0103 (b), (q)). The previous image does not check the tag of that set. Three commands run first, in this order (ADR-0174 (aj)):
+      1. In the new `deploy/`, run `env -u COMPOSE_FILE RECIPE_VERSION=<new tag> docker compose -f compose.yaml run --rm restore-volume --check-only <stamp>`.
+      2. Only on exit code 0, set the previous tag in `deploy/.env`. When the probe finds no tag check, also set `COMPOSE_FILE` there.
+      3. Run `restore-volume <stamp>` with the previous image, in the order of 7.7.
+   - Command 1 runs in two states of `deploy/.env`. In the plain rollback, `deploy/.env` still holds the new tag.
+   - After command 3 of step 3, `deploy/.env` holds the previous tag, and command 2 is already done.
+   - The option `-f compose.yaml` and `env -u COMPOSE_FILE` ignore each `COMPOSE_FILE`. The variable `RECIPE_VERSION` selects the new image in both states.
+   - Without these parts, the second state runs the check with the previous image. That image stops with `usage: restore-volume <stamp>` (the usage check of `restore-volume`).
+   - The order of the commands matters. The new image with `deploy/compose.previous.yaml` has no key, so its check stops. The previous image has no mode `--check-only`.
+   - Stop `backup` before command 1. Only after a pass of command 1, delete the container of `app` with `docker compose rm -s -f app`. Both steps come before `restore-volume <stamp>` (7.7). This order applies to both states of `deploy/.env`.
+   - A weekly `restore-test` of a running `backup` can hold the lock that `take_lock` of `restore-volume` takes. Command 1 then stops with a fault that the set does not cause. A failed check leaves the running `app` unchanged.
+   - `app` has `restart: always` in `compose.yaml`. A stopped container starts again after a reboot or a restart of Docker.
+   - Its writes then make the lost period of the rollback longer, and no message shows them. That reason applies to the plain rollback too. There, the later `docker compose up -d --no-deps app` creates the container again.
+   - A failed check stops the rollback. The bullets below give the next step of each state of `deploy/.env`.
+   - In the plain rollback, a failed check or a failed `restore-volume` before the switch sets the new name needs this step. Set the new tag in `deploy/.env` again, delete `COMPOSE_FILE` from `deploy/.env`, and run `unset COMPOSE_FILE`. Then start `app` and `backup`. Create `backup` with `docker compose up -d --no-deps --force-recreate backup`. The old volume holds the newer schema (ADR-0105 (c), ADR-0174 (aj)).
+   - This bullet and its exit apply only to the plain rollback. The runbook section "Leave the file compose.previous.yaml" gives the commands of the exit.
    - After the switch and the role passwords, `walarchive` starts with the previous tag of `deploy/.env`, and the new WAL line of 7.7 runs. Both happen before `app` starts (ADR-0103 (q), (s)).
    - Then the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Then run `docker compose up -d --no-deps app`, then `docker compose up -d --no-deps proxy backup` (ADR-0083 (d), ADR-0103 (b), (q)). `backup` and `walarchive` then run the image of the schema (7.7).
+   - After a failed upgrade, a failed check or a failed `restore-volume <stamp>` keeps the previous tag and `COMPOSE_FILE` in `deploy/.env`. No step then starts a container of the new image.
+   - In both cases, start only `backup` again with `docker compose up -d --no-deps backup`. After a failed check, `app` keeps running. After a failed `restore-volume <stamp>`, `app` stays stopped.
+   - After a failed `restore-volume <stamp>`, first run `docker compose rm -s -f app` again. It changes nothing after the delete above. The runbook section of that state then needs no earlier step.
+   - The reason: a stopped container of the previous `app` starts again after a reboot, on the schema of the failed `migrate`.
+   - After a failed check, `app` keeps running, so that state needs no change. The switch back needs no `rm`, because its step 1 deletes the containers (7.8).
+   - `app` stays stopped until a forward correction of ADR-0083, a new restore, or a restore with `pitr-volume` (ADR-0106).
+   - While `app` stays stopped, no job `alerts` runs. The operator runs two checks once a day, after `backup.time` plus `backup.max_age_alert` minus 24 h (7.11). With the values of 7.11, this time is 04:00 UTC.
+      1. The stream check: a query of `pg_stat_replication` in `db` shows one row with the state `streaming` and a `flush_lsn`.
+      2. The dump check: a complete daily set has a stamp with the current UTC day (ADR-0066 (e)).
+   - The dump check lists `recipe_<day>_[0-9][0-9][0-9][0-9].dump.sha256` in `/backups`. The four digits follow ADR-0074 (c), so a foreign name such as `recipe_<day>_abcd.dump.sha256` does not count.
+   - The dump check sets `LC_ALL=C` for the match, as ADR-0074 (c) requires. The runbook uses `docker compose exec -T -e LC_ALL=C backup` for this.
+   - The check reads the stamp and not the age. `backup-health` takes the age from the modification time of the manifest (`stat -c %Y` in `backup-health`). An age check therefore hides a failed dump until 04:00 UTC plus the dump time.
+   - The check time has one reason. An earlier check can run before the end of the dump of the day and give a false fault.
+   - At the later start of `app`, wait until the alert `replication` is inactive (3.7).
+   - The operator starts `app` earlier only after the operator checks that the schema of the old volume works with the previous image. An example is a migration of the expand pattern (step 3).
+   - The owner chose this rule for three reasons (ADR-0174 (aj)):
+      1. The old volume holds the schema of the failed `migrate`, and ADR-0083 warns of a schema that matches no image.
+      2. Each write after a restart of `app` makes the lost period longer.
+      3. The project gives data safety priority over availability.
+   - The runbook section "Failed rollback restore after a failed upgrade" gives the commands of this state.
+   - The exit of `deploy/compose.previous.yaml` has three places. They are step 2, the bullet above for the plain rollback, and the step of the switch back that sets the tag (7.8).
+   - The exit writes the tag of its place. At step 2 and at that bullet, it writes the new release tag. At the switch back, it always writes the tag of the old volume.
+   - After the plain rollback, the tag of the old volume is the new release tag. Only after a failed upgrade is it the previous tag.
+   - After each exit, `docker compose config` must show `backup_manifest_key` on `backup`, `backup-premigrate`, and `restore-volume`.
 7. Concurrent index on an audit object (`data-model.md` 5.1). The operator connects as `recipe_migrator` and runs these statements in one `psql` session: `GRANT CREATE ON SCHEMA public TO audit_owner`, `SET ROLE audit_owner`, `CREATE INDEX CONCURRENTLY`, `RESET ROLE`, `REVOKE CREATE ON SCHEMA public FROM audit_owner`. The next migration records the index with `CREATE INDEX IF NOT EXISTS`. That migration needs an entry in the list `EXEMPT` of `deploy/ci/migration_rewrite.py` with the ADR that adds the index (ADR-0136).
 8. Major PostgreSQL upgrade (at least twice in 10 years): follow `docs/ops/runbook.md` section "Major upgrade". It uses `pg_dumpall --globals-only` plus `pg_dump -Fc` and a restore test of that set. Then `restore-volume` of the new release fills a new `db` volume with the same `initdb` arguments. The switch of 7.8 follows (ADR-0103 (b), (p)). The rollback after the switch is a switch back to the old volume. There is no `pg_upgrade` (ADR-0020).
    - Each start of `db` on the old volume runs in the directory `deploy/` of the old release. That directory holds the `compose.yaml` of the old major version (ADR-0105 (e), (f)).
@@ -981,6 +1050,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `secrets.app_password_file` | `/run/secrets/app_password`. Password of `recipe_app`, read by the initdb script and by `recipe-server serve` (ADR-0031, ADR-0062) | 7.1, 7.12, data-model.md 5.1 |
 | `secrets.backup_password_file` | `/run/secrets/backup_password`. Password of `recipe_backup`, read by the initdb script (ADR-0031) | 7.1, 7.7, data-model.md 5.1 |
 | `secrets.postgres_password_file` | `/run/secrets/postgres_password`. Password of the superuser. Read by the image of `db` only (ADR-0069) | 7.1 |
+| `secrets.backup_manifest_key_file` | `/run/secrets/backup_manifest_key`. The HMAC key file of the backup manifest, read by `backup-once`, `backup-entry`, `restore-test`, and `restore-volume` (ADR-0174 (m)) | 7.1, 7.7 |
 | `i18n.lang_cookie_max_age` | 365 days. Cookie `recipe_lang` | api.md 8 |
 | `approval.separation_of_duties` | `true` | 7.12, api.md 3.2, ADR-0022 (A34) |
 | `http.request_timeout` | 30 s | 7.3, 7.4 |
@@ -1080,6 +1150,9 @@ This table is the single source for every numeric setting. A key of the first co
 | `alerts.security_window` | 15 min | 3.7 |
 | `backup.time` / `backup.retention` | 02:00 UTC / 30 days. The retention covers every set (ADR-0066 (k)) | 7.7 |
 | `backup.max_age_alert` | 26 h | 3.7, 7.1, 7.7 |
+| `backup_manifest.max_keys` | 2 lines in the file of `secrets.backup_manifest_key_file`. The first line holds the newest key (ADR-0174 (n)) | 7.7 |
+| `backup_manifest.max_tag_bytes` | 4096 bytes. The read limit of `lib/manifest-tag.pl` for a tag file (ADR-0174 (k)) | 7.7 |
+| `backup_manifest.max_file_bytes` | 65536 bytes. The read limit of `lib/manifest-tag.pl` for a manifest or a key file (ADR-0174 (k)) | 7.7 |
 | `restore_test.time` | Sunday 05:00 UTC (ADR-0067 (a)) | 7.7 |
 | `restore_test.max_age_alert` | 8 days. A weekly check needs a limit above 7 days (ADR-0151 (j)) | 3.7, 7.7 |
 | `basebackup.time` / `basebackup.retention` | Sunday 03:30 UTC / 4 base backups (ADR-0068 (f), (i)) | 7.7 |

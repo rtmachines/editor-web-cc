@@ -51,6 +51,32 @@ case_restore_steps_library() {
   done
   expect_ok "steps library: restore-test sources the library" \
     grep -Eq '^source .*restore-steps\.sh' "$BIN/restore-test"
+  case_restore_manifest_argument
+}
+
+# A valid disk manifest must not replace the required checked copy.
+case_restore_manifest_argument() {
+  new_restore_case manifest-argument
+  env PATH="$ROOT/stubs:$PATH" STUB_LOG="$CASE/stub/log" STUB_DIR="$CASE/stub" \
+    bash -euo pipefail -c '
+      source "$1" || { echo "cannot load the restore steps" >&2; exit 1; }
+      JOB=restore-test
+      BACKUP_DIR=$2
+      work_dir=$3
+      error_logged=0
+      set_paths "$4"
+      check_manifest
+      psql --no-psqlrc --command "SELECT 1"
+    ' _ "$HERE/../lib/restore-steps.sh" "$B" "$CASE/pgpass" "$RESTORE_NAME" \
+    >"$CASE/out" 2>"$CASE/err"
+  RC=$?
+  expect_eq "manifest argument: exit code" "$RC" 1
+  expect_eq "manifest argument: one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_eq "manifest argument: one output line" "$(wc -l <"$CASE/out")" 1
+  expect_ok "manifest argument: fixed message" error_has 'the checked manifest argument is missing'
+  expect_eq "manifest argument: no stderr" "$(wc -c <"$CASE/err")" 0
+  expect_eq "manifest argument: no SQL step ran" "$(wc -c <"$CASE/stub/log")" 0
+  expect_no "manifest argument: no globals copy" test -e "$CASE/pgpass/globals_$RESTORE_NAME.sql"
 }
 
 case_restore_usage() {
@@ -86,7 +112,183 @@ case_restore_no_set() {
   expect_eq "no set: no tool ran" "$(wc -c <"$CASE/stub/log")" 0
 }
 
-# The manifest is the first check. A changed dump stops the test before any tool starts.
+# A bad tag of the newest set must never select a valid older set.
+case_restore_bad_tag() {
+  local variant tag before newest message
+  for variant in missing link malformed unknown-key different-tag changed-dump; do
+    new_restore_case "tag-$variant"
+    newest=$RESTORE_NAME
+    make_restore_set "" 2
+    RESTORE_NAME=$newest
+    RESTORE_BASE=recipe_$newest
+    tag=$B/$RESTORE_BASE.dump.sha256.hmac
+    case $variant in
+      missing) rm -- "$tag" ;;
+      link) mv -- "$tag" "$CASE/tag"; ln -s "$CASE/tag" "$tag" ;;
+      malformed) printf 'bad tag line\n' >"$tag" ;;
+      unknown-key)
+        awk '{$2 = ($2 == "0000000000000000" ? "1111111111111111" : "0000000000000000"); print}' \
+          "$tag" >"$CASE/tag"
+        cp -- "$CASE/tag" "$tag"
+        ;;
+      different-tag)
+        awk '{z = sprintf("%064d", 0); $3 = ($3 == z ? "1" substr(z, 2) : z); print}' \
+          "$tag" >"$CASE/tag"
+        cp -- "$CASE/tag" "$tag"
+        ;;
+      changed-dump)
+        cp -- "$tag" "$CASE/tag"
+        printf 'changed dump\n' >>"$B/$RESTORE_BASE.dump"
+        write_manifest "$RESTORE_NAME"
+        cp -- "$CASE/tag" "$tag"
+        ;;
+    esac
+    before=$(set_listing)
+    restore_run
+    restore_failed_checks "tag $variant" "$before"
+    case $variant in
+      missing|link) message='the newest set has no tag file' ;;
+      malformed) message='the tag file of the set has a bad line' ;;
+      unknown-key) message='the tag of the set comes from an unknown key' ;;
+      different-tag|changed-dump) message='the tag of the set does not match the manifest' ;;
+    esac
+    restore_manifest_error "tag $variant" "$message"
+    expect_eq "tag $variant: no PostgreSQL tool or older set is read" "$(wc -c <"$CASE/stub/log")" 0
+    expect_eq "tag $variant: no read fault" "$(wc -c <"$CASE/err")" 0
+  done
+  restore_key_refusal_cases
+  restore_oversized_copy_cases
+}
+
+# Observe the private copies before cleanup without changing the copy or the tag check.
+restore_copy_size_stub() {
+  mkdir -- "$CASE/copy-stubs"
+  cat >"$CASE/copy-stubs/rm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+for path in "$@"; do
+  if [[ $path == "$BACKUP_PGPASS_DIR"/run.* ]] && [ -d "$path" ]; then
+    for file in "$path"/*.dump.sha256 "$path"/*.dump.sha256.hmac; do
+      [ -f "$file" ] || continue
+      printf '%s %s\n' "${file##*/}" "$(wc -c <"$file")" >>"$STUB_DIR/copy-sizes"
+    done
+  fi
+done
+exec "$REAL_RM" "$@"
+EOF
+  chmod 0755 "$CASE/copy-stubs/rm"
+}
+
+# A later size rejection cannot compensate for an unbounded copy into the private directory.
+restore_oversized_copy_cases() {
+  local kind constant limit file message before
+  for kind in manifest tag; do
+    new_restore_case "oversized-copy-$kind"
+    file=$RESTORE_BASE.dump.sha256
+    constant=MAX_FILE_BYTES
+    message='the manifest exceeds the size limit'
+    if [ "$kind" = tag ]; then
+      file=$file.hmac
+      constant=MAX_TAG_BYTES
+      message='the tag file of the set exceeds the size limit'
+    fi
+    limit=$(sed -n "s/^use constant $constant => \([0-9][0-9]*\);$/\1/p" \
+      "$HERE/../lib/manifest-tag.pl")
+    expect_ok "$kind copy: the library declares the limit" test "${limit:-0}" -gt 0
+    head -c "$((limit * 2 + 1))" /dev/zero >"$B/$file"
+    restore_copy_size_stub
+    before=$(set_listing)
+    restore_run "PATH=$CASE/copy-stubs:$ROOT/stubs:$PATH"
+    restore_failed_checks "$kind copy size" "$before"
+    restore_manifest_error "$kind copy size" "$message"
+    expect_eq "$kind copy: at most limit plus one bytes reach the private directory" \
+      "$(grep -F -- "$file " "$CASE/stub/copy-sizes")" "$file $((limit + 1))"
+    expect_eq "$kind copy: no PostgreSQL tool ran" "$(wc -c <"$CASE/stub/log")" 0
+    expect_eq "$kind copy: no read fault" "$(wc -c <"$CASE/err")" 0
+  done
+}
+
+# Check key faults before any PostgreSQL tool runs. The second key line is deliberately invalid.
+restore_key_refusal_cases() {
+  local variant key before message line
+  for variant in missing location bad-line-2; do
+    new_restore_case "key-$variant"
+    key=$CASE/key
+    line=''
+    case $variant in
+      missing) message='the manifest key file is missing' ;;
+      location)
+        cp -- "$RESTORE_TAG_KEY_FILE" "$key"
+        message='the manifest key file lies on the backup disk'
+        ;;
+      bad-line-2)
+        cp -- "$RESTORE_TAG_KEY_FILE" "$key"
+        printf '\ninvalid\n' >>"$key"
+        message='the manifest key file has a bad line'
+        line=2
+        ;;
+    esac
+    before=$(set_listing)
+    restore_run "BACKUP_MANIFEST_KEY_FILE=$key"
+    restore_failed_checks "key $variant" "$before"
+    restore_manifest_error "key $variant" "$message" "$line"
+    expect_eq "key $variant: no tool ran" "$(wc -c <"$CASE/stub/log")" 0
+    expect_eq "key $variant: no read fault" "$(wc -c <"$CASE/err")" 0
+  done
+}
+
+# The tag gate precedes each read of the other three files of the set.
+case_restore_bad_tag_before_set_reads() {
+  new_restore_case tag-before-set-reads
+  printf 'bad tag line\n' >"$B/$RESTORE_BASE.dump.sha256.hmac"
+  local file before
+  for file in "$B/$RESTORE_BASE.dump" "$B/globals_$RESTORE_NAME.sql" "$B/$RESTORE_BASE.counts"; do
+    rm -- "$file"
+    mkdir -- "$file"
+  done
+  before=$(set_listing)
+  restore_run
+  restore_failed_checks "tag before set reads" "$before"
+  restore_manifest_error "tag before set reads" 'the tag file of the set has a bad line'
+  expect_eq "tag before set reads: no read fault" "$(wc -c <"$CASE/err")" 0
+  expect_eq "tag before set reads: no tool ran" "$(wc -c <"$CASE/stub/log")" 0
+}
+
+# The wrapper invokes Perl. This PATH stub changes only the disk manifest after a successful check.
+case_restore_manifest_swap_after_tag() {
+  new_restore_case manifest-swap-after-tag
+  mkdir -- "$CASE/tag-stubs"
+  sed -E "1s/^[0-9a-f]{64}/$(printf '%064d' 0)/" "$B/$RESTORE_BASE.dump.sha256" \
+    >"$CASE/stub/manifest.swapped"
+  cat >"$CASE/tag-stubs/perl" <<'EOF'
+#!/usr/bin/env bash
+umask 077
+"$REAL_PERL" "$@" || exit $?
+if [ "${1##*/}" = manifest-tag.pl ] && [ "${2:-}" = check ]; then
+  printf '%s\n' "$4" "$5" >"$STUB_DIR/tag.paths"
+  stat -c %a -- "$4" "$5" >"$STUB_DIR/tag.modes"
+  cp -- "$STUB_DIR/manifest.swapped" "$DISK_MANIFEST"
+fi
+EOF
+  chmod 0755 "$CASE/tag-stubs/perl"
+  restore_run "REAL_PERL=$(command -v perl)" "PATH=$CASE/tag-stubs:$ROOT/stubs:$PATH" \
+    "DISK_MANIFEST=$B/$RESTORE_BASE.dump.sha256"
+  if [ "$RC" -ne 0 ]; then cat -- "$CASE/out" >&2; fi
+  expect_eq "manifest swap: exit code" "$RC" 0
+  expect_eq "manifest swap: no ERROR line" "$(error_count "$CASE/out")" 0
+  expect_ok "manifest swap: the disk manifest changed" \
+    cmp -s -- "$CASE/stub/manifest.swapped" "$B/$RESTORE_BASE.dump.sha256"
+  expect_eq "manifest swap: the tag check reads two private copies" \
+    "$(grep -cF "$CASE/pgpass/run." "$CASE/stub/tag.paths")" 2
+  expect_eq "manifest swap: private copies have mode 0600" \
+    "$(cat "$CASE/stub/tag.modes")" $'600\n600'
+  expect_eq "manifest swap: the restore reaches post-data" "$(event_count 'pg_restore post-data')" 1
+  restore_result_checks "manifest swap result" passed
+  expect_eq "manifest swap: no private copy stays" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+}
+
+# A changed dump stops the test before any PostgreSQL tool starts.
 case_restore_manifest_mismatch() {
   local file
   for file in dump globals counts; do
@@ -118,6 +320,7 @@ case_restore_manifest_files() {
         ;;
     esac
     local before
+    sign_restore_manifest "$RESTORE_NAME"
     before=$(set_listing)
     restore_run
     restore_failed_checks "manifest files ($variant)" "$before"

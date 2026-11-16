@@ -82,6 +82,7 @@ services:
       - /run/pgpass
     secrets:
       - backup_password
+      - backup_manifest_key
     cap_drop:
       - ALL
     security_opt:
@@ -277,6 +278,7 @@ services:
       - /run/pgpass
     secrets:
       - backup_password
+      - backup_manifest_key
     cap_drop:
       - ALL
     security_opt:
@@ -352,11 +354,14 @@ services:
   # "docker compose run --rm -v <new volume>:/var/lib/postgresql/data restore-volume <stamp>".
   # The entrypoint is the script, so the stamp is its argument. The image holds the client rules
   # (cluster-access.sh), so the service mounts no file of deploy/db and no pgdata.
-  # It mounts no secret and joins no network. COMPOSE_SUBNET feeds the client rules.
+  # It mounts only backup_manifest_key (ADR-0174 (y)). It reads no password and sets no known password.
+  # It joins no network. COMPOSE_SUBNET feeds the client rules.
   # container.backup_memory 512 MiB, container.small_cpus 0.5 (ADR-0103 (h)).
   restore-volume:
     image: recipe-pgtools:${RECIPE_VERSION:?}
     entrypoint: ["restore-volume"]
+    secrets:
+      - backup_manifest_key
     profiles:
       - restore
     restart: "no"
@@ -447,6 +452,8 @@ secrets:
     file: ${RECIPE_SECRETS_DIR:?}/app_password
   backup_password:
     file: ${RECIPE_SECRETS_DIR:?}/backup_password
+  backup_manifest_key:
+    file: ${RECIPE_SECRETS_DIR:?}/backup_manifest_key
   replicator_password:
     file: ${RECIPE_SECRETS_DIR:?}/replicator_password
   login_hmac_key:

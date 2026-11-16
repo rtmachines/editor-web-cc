@@ -36,6 +36,23 @@ case_health_age() {
   expect_eq "health: set younger than 26 hours is healthy" "$RC" 0
 }
 
+case_health_tag_age() {
+  if ! make_other_fs_pgdata; then
+    skip "health tag age case needs a second filesystem (no usable $OTHER_FS_DIR)"
+    return
+  fi
+  health_case health-tag-age
+  make_set "" 0
+  touch -d "27 hours ago" "$B/$LAST_BASE.dump.sha256"
+  printf 'hmac-sha256-v1 %016d %064d\n' 0 0 >"$B/$LAST_BASE.dump.sha256.hmac"
+  health_run
+  expect_eq "health: new tag does not make an old manifest healthy" "$RC" 1
+  expect_eq "health: old manifest with new tag gives one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "health: manifest age is the named fault" \
+    grep -Fq '"message":"no complete set is younger than the maximum age"' "$CASE/out"
+  PGDATA_TEST=
+}
+
 case_health_suffixes() {
   health_case health-premigrate
   make_set _premigrate 0

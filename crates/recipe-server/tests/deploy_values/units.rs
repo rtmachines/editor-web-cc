@@ -188,6 +188,9 @@ const EXPLAINED: &[(&str, &str)] = &[
     ("security_event.purge_batch", "rows"),
     ("restore_test.detail_length", "characters"),
     ("pitr_check.log_tail", "lines"),
+    ("backup_manifest.max_keys", "lines"),
+    ("backup_manifest.max_tag_bytes", "bytes"),
+    ("backup_manifest.max_file_bytes", "bytes"),
 ];
 
 /// The type of a key. A key that no list names is a count.

@@ -73,6 +73,36 @@ def check_images(config, tag):
             raise ValueError(f"the image tag of {service} differs from the release tag")
 
 
+def manifest_plan(probe):
+    """Return the key state and Compose files for the image probe of ADR-0174 (aa)."""
+    if probe == "no-check":
+        return "no-key", "compose.yaml", "compose.previous.yaml"
+    if probe == "check":
+        return "key", "compose.yaml"
+    raise ValueError("unknown manifest check probe result")
+
+
+def manifest_key_state(config):
+    """Read the key mounts of the three services from Compose JSON."""
+    if not isinstance(config, dict) or not isinstance(config.get("services"), dict):
+        raise TypeError("expected a Compose services object")
+    states = []
+    for name in ("backup", "backup-premigrate", "restore-volume"):
+        service = config["services"][name]
+        if not isinstance(service, dict):
+            raise TypeError("expected a Compose service object")
+        secrets = service.get("secrets", [])
+        if not isinstance(secrets, list):
+            raise TypeError("expected a Compose secrets list")
+        for secret in secrets:
+            if not isinstance(secret, dict) or not isinstance(secret.get("source"), str):
+                raise TypeError("expected a Compose secret source")
+        states.append(any(secret["source"] == "backup_manifest_key" for secret in secrets))
+    if any(states) != all(states):
+        raise ValueError("the manifest key mounts differ between services")
+    return "key" if all(states) else "no-key"
+
+
 def pgdata_volume_name(config):
     """Return the volume name that the new stack gives to pgdata."""
     name = config["volumes"]["pgdata"]["name"]
@@ -105,6 +135,11 @@ def main():
     if sys.argv[1] == "previous-commit":
         check_previous_commit(*sys.argv[2:])
         return
+    if sys.argv[1] == "manifest-plan":
+        if len(sys.argv) != 3:
+            raise ValueError("expected one manifest check probe result")
+        print(*manifest_plan(sys.argv[2]))
+        return
     action, path, *arguments = sys.argv[1:]
     source = pathlib.Path(path).read_text(encoding="utf-8")
     if action == "guard":
@@ -117,6 +152,12 @@ def main():
         check_images(json.loads(source), arguments[0])
     elif action == "volume-name":
         print(pgdata_volume_name(json.loads(source)))
+    elif action == "manifest-key" and not arguments:
+        try:
+            state = manifest_key_state(json.loads(source))
+        except TypeError:
+            raise ValueError("invalid Compose configuration") from None
+        print(state)
     elif action == "wal-identity":
         check_wal_identity_log(source, arguments[0])
     else:

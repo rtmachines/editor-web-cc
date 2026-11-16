@@ -19,6 +19,9 @@ services:
     network_mode: none
     environment:
       BACKUP_DIR: /backups/upgrade-rollback
+      COMPOSE_SUBNET: ${COMPOSE_SUBNET:?}
+    # previous_compose adds the key mount only after the probe returns check.
+    secrets: []
     volumes:
       - backups:/backups
     tmpfs:

@@ -26,6 +26,9 @@ This file records the notable changes of the recipe editor. The format follows [
 - The CI job `release-toolchain` runs `cargo check --release` of `recipe-server` on each pull request. It uses the toolchain of `deploy/Dockerfile`.
 - The compile step of `deploy/ci/check.sh` runs with `-W error` for every `deploy/ci/*.py`.
 - Migration `0016_recipe_version_insert.sql` adds the trigger `recipe_version_insert_draft`. The database refuses a new version row that is not a live draft with `E-RCP-037` (ADR-0169).
+- `backup-once` writes a tag file `recipe_<stamp>.dump.sha256.hmac` for each backup set. The tag is an HMAC-SHA-256 of the manifest (ADR-0174).
+- `backup-once` computes the tag with the key `backup_manifest_key`. `restore-test` and `restore-volume` check the tag before a PostgreSQL tool reads the set. A missing or bad tag stops the run.
+- **BREAKING** Before the upgrade, create the secret file `backup_manifest_key`. Step 2 of "Create the secret files" in `docs/ops/runbook.md` gives the command.
 
 ### Changed
 

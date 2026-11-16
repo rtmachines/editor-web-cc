@@ -8,8 +8,9 @@
 #
 # Steps (the numbers are the steps of ADR-0067):
 #   1. The marker, the lock, and the newest complete set (ADR-0074 (c)).
-#      Copy the globals file once into the private tmpfs directory with mode 0600.
-#      Run sha256sum -c --strict on the manifest and compare the copy's hash with its manifest entry.
+#      Copy the manifest and its tag into the private tmpfs directory with mode 0600.
+#      Check the key and the tag before any read of the other set files (ADR-0174 (w)).
+#      Check the private manifest and bind private globals and counts copies to its hashes.
 #      A mismatch stops the test before any PostgreSQL tool runs.
 #      Check the counts file and the globals copy, including the role grammar of ADR-0095.
 #   2. Each FUNCTION, TRIGGER, and EVENT TRIGGER entry of pg_restore --list names a line of
@@ -36,6 +37,7 @@
 #   BACKUP_PGPASS_DIR   the tmpfs for the secret files, default /run/pgpass
 #   RESTORE_CODE_DIR    the directory of restore-code.sql and restore-code.expected, default /etc/pgtools
 #   RESTORE_GLOBALS_DIR the directory of globals-grammar.sh, restore-steps.sh, and check-result.sh, default /etc/pgtools
+#   BACKUP_MANIFEST_KEY_FILE the key file, default /run/secrets/backup_manifest_key
 #   PGDATABASE          the name of the database in the dump, default recipe
 set -euo pipefail
 umask 077
@@ -60,6 +62,7 @@ SCRATCH_SETTINGS=(
 BACKUP_DIR=${BACKUP_DIR:-/backups}
 PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
 CODE_DIR=${RESTORE_CODE_DIR:-/etc/pgtools}
+MANIFEST_KEY_FILE=${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}
 DB_NAME=${PGDATABASE:-recipe}
 # No variable of libpq may point a tool to the production cluster.
 unset PGHOST PGHOSTADDR PGPORT PGUSER PGPASSWORD PGPASSFILE PGSERVICE PGSERVICEFILE \
@@ -84,6 +87,8 @@ server_started=0
 set_stamp=""
 base=""
 manifest_name=""
+manifest_copy=""
+tag_copy=""
 dump_path=""
 globals_path=""
 globals_copy=""
@@ -289,7 +294,11 @@ delete_stale_runs
 [ -d "$PGPASS_DIR" ] || fail "the directory of the secret files is missing"
 work_dir=$(mktemp -d "$PGPASS_DIR/run.XXXXXX") || fail "cannot create the directory of the secret files"
 select_set
-check_manifest
+copy_manifest_tag
+check_manifest_key "$MANIFEST_KEY_FILE"
+check_manifest_tag "$MANIFEST_KEY_FILE"
+check_manifest "$manifest_copy"
+copy_counts "$manifest_copy"
 check_counts
 check_globals
 log INFO "restore test started" "\"set\":\"$base\""

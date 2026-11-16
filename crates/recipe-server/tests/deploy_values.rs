@@ -45,6 +45,10 @@ mod override_mutations;
 mod overrides;
 #[path = "deploy_values/port_mutations.rs"]
 mod port_mutations;
+#[path = "deploy_values/previous.rs"]
+mod previous;
+#[path = "deploy_values/previous_mutations.rs"]
+mod previous_mutations;
 #[path = "deploy_values/rule_mutations.rs"]
 mod rule_mutations;
 #[path = "deploy_values/rules.rs"]
@@ -94,7 +98,7 @@ fn pgtools_creates_a_searchable_config_directory_before_copy() {
     for instruction in [
         "COPY --chmod=0644 crontab.backup crontab.walarchive /etc/pgtools/",
         "COPY --chmod=0644 restore-code.sql restore-code.expected restore-roles.sql restore-roles.expected /etc/pgtools/",
-        "COPY --chmod=0644 lib/globals-grammar.sh lib/recovery-steps.sh lib/restore-steps.sh lib/wal-identity.sh lib/check-result.sh /etc/pgtools/",
+        "COPY --chmod=0644 lib/globals-grammar.sh lib/recovery-steps.sh lib/restore-steps.sh lib/wal-identity.sh lib/check-result.sh lib/manifest-tag.sh lib/manifest-tag.pl /etc/pgtools/",
         "COPY --chmod=0644 --from=db cluster-access.sh /etc/pgtools/cluster-access.sh",
     ] {
         let copy = position(instruction);

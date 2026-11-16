@@ -73,6 +73,44 @@ exec "$REAL_COMM" "$@"
 STUB
 }
 
+# The Perl stub of task 4.1 changes only the disk manifest after a successful tag check.
+# The case puts this directory first on PATH for one run.
+make_volume_manifest_swap_stub() {
+  mkdir -- "$CASE/tag-stubs"
+  sed -E "1s/^[0-9a-f]{64}/$(printf '%064d' 0)/" "$B/$RESTORE_BASE.dump.sha256" \
+    >"$CASE/stub/manifest.swapped"
+  cat >"$CASE/tag-stubs/perl" <<'STUB'
+#!/usr/bin/env bash
+umask 077
+"$REAL_PERL" "$@" || exit $?
+if [ "${1##*/}" = manifest-tag.pl ] && [ "${2:-}" = check ]; then
+  printf '%s\n' "$4" "$5" >"$STUB_DIR/tag.paths"
+  stat -c %a -- "$4" "$5" >"$STUB_DIR/tag.modes"
+  cp -- "$STUB_DIR/manifest.swapped" "$DISK_MANIFEST"
+fi
+STUB
+  chmod 0755 "$CASE/tag-stubs/perl"
+}
+
+# A check-only run must not list the target. Other find calls use the real tool.
+make_volume_target_read_stub() {
+  mkdir -p -- "$CASE/check-stubs"
+  cat >"$CASE/check-stubs/find" <<'STUB'
+#!/usr/bin/env bash
+umask 077
+for arg in "$@"; do
+  case $arg in
+    "$PGDATA"|"$PGDATA"/*)
+      printf '%s\n' 'EVENT target read' >>"$STUB_LOG"
+      exit 1
+      ;;
+  esac
+done
+exec "$REAL_FIND" "$@"
+STUB
+  chmod 0755 "$CASE/check-stubs/find"
+}
+
 make_volume_stubs() {
   make_restore_stubs
   make_stub_pg_controldata

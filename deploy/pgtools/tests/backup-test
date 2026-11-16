@@ -77,6 +77,7 @@ case_retention_all_old
 case_retention_mixed
 case_retention_keeps_temp_and_foreign
 case_retention_keeps_restore_results
+case_retention_tag_order
 failed_run_case dump-fails STUB_PG_DUMP_FAIL=1
 failed_run_case dumpall-fails STUB_DUMPALL_FAIL=1
 case_psql_not_usable
@@ -88,15 +89,20 @@ case_cleanup_delete_fails
 case_publish_delete_fails
 case_published_delete_fails
 case_published_delete_continues
+case_manifest_publish_tag_cleanup
 case_sync_after_manifest
 case_name_exists
 case_temp_name_exists
+case_tag_name_exists
+case_temp_tag_exclusive
 case_rename_never_replaces
 case_parallel_runs
 case_secret_file_rules
 case_health_second_fs
+case_health_tag_age
 case_health_same_fs
 case_health_no_pg_version
+source "$HERE/lib/manifest-tag-cases.sh" || exit 1
 
 [ "$SKIPPED" -eq 0 ] || printf 'backup-test: %d skipped\n' "$SKIPPED"
 printf 'backup-test: %d passed, %d failed\n' "$PASSED" "$FAILED"

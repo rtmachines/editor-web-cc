@@ -11,8 +11,9 @@ use crate::table::Table;
 const COMPOSE: &str = "deploy/compose.yaml";
 const SECRET_MOUNT: &str = "/run/secrets/";
 /// The services with a `secrets:` list and the key of 7.11 for each secret in it (`reliability.md` 7.1, "Secrets").
-const SECRET_LISTS: [(&str, &str); 10] = [
+const SECRET_LISTS: [(&str, &str); 13] = [
     ("backup-premigrate", "secrets.backup_password_file"),
+    ("backup-premigrate", "secrets.backup_manifest_key_file"),
     ("migrate", "secrets.migrator_password_file"),
     ("app", "secrets.app_password_file"),
     ("db", "secrets.postgres_password_file"),
@@ -21,6 +22,8 @@ const SECRET_LISTS: [(&str, &str); 10] = [
     ("db", "secrets.backup_password_file"),
     ("db", "secrets.replicator_password_file"),
     ("backup", "secrets.backup_password_file"),
+    ("backup", "secrets.backup_manifest_key_file"),
+    ("restore-volume", "secrets.backup_manifest_key_file"),
     ("walarchive", "secrets.replicator_password_file"),
 ];
 /// The keys of the four login passwords that the initdb script reads (`reliability.md` 7.11).

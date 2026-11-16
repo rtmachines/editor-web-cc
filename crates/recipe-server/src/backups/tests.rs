@@ -290,6 +290,7 @@ fn the_grammar_accepts_the_names_of_a_manifest_only() {
         ".tmp-recipe_20261023_0200.dump.sha256",
         "xrecipe_20261023_0200.dump.sha256",
         "recipe_20261023_0200.dump.sha256.bak",
+        "recipe_20261023_0200.dump.sha256.hmac",
         "recipe_20261023_0200.dump.sha256\n",
         "recipe_20261023_0200.dump",
         "recipe_20261023_0200.counts",

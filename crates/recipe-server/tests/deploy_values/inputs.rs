@@ -8,7 +8,9 @@ use crate::compose::{
     check_db_command, check_environment, check_grace_periods, check_healthchecks, check_limits,
     check_ports,
 };
-use crate::defaults::{check_dockerfile_ports, check_script_defaults, check_secret_dir};
+use crate::defaults::{
+    check_dockerfile_ports, check_manifest_limits, check_script_defaults, check_secret_dir,
+};
 use crate::fault::Report;
 use crate::files::{
     DB_CONTEXT_LIST, PGTOOLS_CONTEXT_LIST, PGTOOLS_DOCKERFILE, check_caddyfile,
@@ -17,7 +19,8 @@ use crate::files::{
     parse_env,
 };
 use crate::lines::Compose;
-use crate::overrides::{BUILD, DEV, check_override};
+use crate::overrides::{BUILD, DEV, PREVIOUS, check_override};
+use crate::previous::check_previous;
 use crate::rules::{check_required_keys, check_sum_rules};
 use crate::secrets::{check_initdb, check_secret_lists};
 use crate::table::{HEADING_POSTGRES, HEADING_SETTINGS, Table};
@@ -30,6 +33,10 @@ pub const RELIABILITY: &str = "docs/architecture/reliability.md";
 pub const COMPOSE: &str = "deploy/compose.yaml";
 pub const COMPOSE_DEV: &str = "deploy/compose.dev.yaml";
 pub const COMPOSE_BUILD: &str = "deploy/compose.build.yaml";
+/// The override for an image without the tag check, and its crontab (ADR-0174 (aa)).
+pub const COMPOSE_PREVIOUS: &str = "deploy/compose.previous.yaml";
+pub const CRONTAB_PREVIOUS: &str = "deploy/crontab.previous";
+pub const CRONTAB_BACKUP: &str = "deploy/pgtools/crontab.backup";
 pub const ENV_EXAMPLE: &str = "deploy/.env.example";
 pub const INITDB: &str = "deploy/db/initdb/01-roles.sh";
 pub const CLUSTER_ACCESS: &str = "deploy/db/cluster-access.sh";
@@ -42,7 +49,7 @@ const CADDYFILES: [&str; 2] = ["deploy/Caddyfile", "deploy/Caddyfile.dev"];
 /// The crontab files, and the key of `reliability.md` 7.11 and the command for each line.
 const CRONTABS: [(&str, &[(&str, &str)]); 2] = [
     (
-        "deploy/pgtools/crontab.backup",
+        CRONTAB_BACKUP,
         &[
             ("backup.time", "backup-once"),
             ("restore_test.time", "restore-test"),
@@ -71,6 +78,8 @@ const SCRIPT_DIRECTORY: &str = "deploy/pgtools/bin/";
 /// The libraries of `deploy/pgtools/lib/` that hold a constant or a setting of 7.11. A library has no default.
 const LIBRARY_SCRIPTS: [&str; 2] = ["recovery-steps.sh", "wal-identity.sh"];
 const LIBRARY_DIRECTORY: &str = "deploy/pgtools/lib/";
+/// The Perl library of the manifest tag. It holds the three size limits of `backup_manifest.*` (ADR-0174 (k)).
+pub const MANIFEST_TAG_PERL: &str = "deploy/pgtools/lib/manifest-tag.pl";
 
 /// A file under test: the path from the repository root and its text.
 #[derive(Clone)]
@@ -132,6 +141,8 @@ impl Inputs {
             COMPOSE.to_owned(),
             COMPOSE_DEV.to_owned(),
             COMPOSE_BUILD.to_owned(),
+            COMPOSE_PREVIOUS.to_owned(),
+            CRONTAB_PREVIOUS.to_owned(),
             ENV_EXAMPLE.to_owned(),
             INITDB.to_owned(),
             CLUSTER_ACCESS.to_owned(),
@@ -145,6 +156,7 @@ impl Inputs {
         paths.extend(CRONTABS.iter().map(|(path, _)| (*path).to_owned()));
         paths.extend(SCRIPTS.map(|name| format!("{SCRIPT_DIRECTORY}{name}")));
         paths.extend(LIBRARY_SCRIPTS.map(|name| format!("{LIBRARY_DIRECTORY}{name}")));
+        paths.push(MANIFEST_TAG_PERL.to_owned());
         let files = paths
             .into_iter()
             .map(|path| Source {
@@ -283,6 +295,16 @@ pub fn check_all(inputs: &Inputs) -> Report {
         inputs.text(COMPOSE_BUILD),
         &BUILD,
     ));
+    report.absorb(check_override(
+        COMPOSE_PREVIOUS,
+        inputs.text(COMPOSE_PREVIOUS),
+        &PREVIOUS,
+    ));
+    report.absorb(check_previous(
+        inputs.text(COMPOSE_PREVIOUS),
+        inputs.text(CRONTAB_PREVIOUS),
+        inputs.text(CRONTAB_BACKUP),
+    ));
     report.absorb(check_env_example(inputs.text(ENV_EXAMPLE)));
     report.absorb(check_initdb(
         inputs.text(INITDB),
@@ -311,6 +333,10 @@ pub fn check_all(inputs: &Inputs) -> Report {
     }
     report.absorb(check_crontabs(inputs, &settings));
     report.absorb(check_scripts(inputs, &settings));
+    report.absorb(check_manifest_limits(
+        inputs.text(MANIFEST_TAG_PERL),
+        &settings,
+    ));
     report.absorb(check_sum_rules(&settings));
     let required = check_required_keys(&settings, &report.covered);
     report.absorb(required);

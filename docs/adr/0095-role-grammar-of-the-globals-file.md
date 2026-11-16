@@ -1,6 +1,6 @@
 # ADR-0095: Role grammar of the globals file in the restore test
 
-Status: Accepted. Amended by ADR-0103 (the check also runs in `restore-volume`)
+Status: Accepted. Amended by ADR-0103 (the check also runs in `restore-volume`). Amended by ADR-0174 (item (h): the HMAC tag of the manifest closes the path for an offline writer of the backup disk)
 Date: 2026-10-25
 Deciders: project owner
 

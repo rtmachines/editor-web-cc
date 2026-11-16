@@ -27,12 +27,118 @@ volume_work_copy() { printf '%s\n' "$CASE/stub/work"; }
 
 # volume_gate_case <name> <text in the ERROR line> [VAR=value ...]: the case is ready. The run is refused.
 volume_gate_case() {
-  local name=$1 text=$2 before
+  local name=$1 text=$2 before expected
   shift 2
+  if [ "${VOLUME_GATE_VALID_TAG:-0}" -eq 1 ]; then
+    expect_ok "check-only: $name: fixture tag is valid" manifest_tag_check "$RESTORE_TAG_KEY_FILE" \
+      "$B/$RESTORE_BASE.dump.sha256" "$B/$RESTORE_BASE.dump.sha256.hmac"
+  fi
   before=$(set_listing)
   volume_run "$@"
+  if [ "${VOLUME_GATE_CHECK_ONLY:-0}" -eq 1 ]; then
+    expected=$(volume_error_fields)
+    name="check-only: $name"
+    volume_check_run_stamp "$name" "$RESTORE_NAME" "$@"
+    expect_eq "$name: the ERROR line matches the full restore" "$(volume_error_fields)" "$expected"
+  fi
   volume_gate_checks "$name" "$before"
   expect_ok "$name: the ERROR line holds [$text]" error_has "$text"
+}
+
+# new_volume_gate_case <name>: keep reused check-only fixtures separate from full-restore fixtures.
+new_volume_gate_case() {
+  local prefix=""
+  [ "${VOLUME_GATE_CHECK_ONLY:-0}" -eq 0 ] || prefix=check-only-
+  new_volume_case "$prefix$1"
+}
+
+# volume_error_fields: compare all ERROR fields except the time of the run.
+volume_error_fields() {
+  sed -n '/"level":"ERROR"/s/^{"timestamp":"[^"]*",//p' "$CASE/out"
+}
+
+# volume_check_state: all case files outside the work directory and the output files of the harness.
+# The flock stub records its read-only lock call in flock.log.
+volume_check_state() {
+  {
+    find "$CASE" -mindepth 1 \( -path "$CASE/pgpass" -o -path "$CASE/out" -o -path "$CASE/err" \
+      -o -path "$CASE/rc" -o -path "$CASE/stub/flock.log" \) -prune -o \
+      -printf '%p %y %s %m %T@ %l\n'
+    find "$CASE" \( -path "$CASE/pgpass" -o -path "$CASE/out" -o -path "$CASE/err" \
+      -o -path "$CASE/rc" -o -path "$CASE/stub/flock.log" \) -prune -o \
+      -type f -exec sha256sum -- {} +
+  } | LC_ALL=C sort
+}
+
+# volume_check_run_stamp <name> <stamp> [VAR=value ...]: run only the offline gates.
+volume_check_run_stamp() {
+  local name=$1 stamp=$2 before
+  shift 2
+  make_volume_target_read_stub
+  before=$(volume_check_state)
+  run_script "RESTORE_CODE_DIR=$CASE/code" "RESTORE_GLOBALS_DIR=$ROOT/etc" PGDATABASE=recipe \
+    "COMPOSE_SUBNET=$VOLUME_SUBNET" "REAL_FLOCK=$REAL_FLOCK" LANG=en_US.utf8 \
+    "REAL_FIND=$(command -v find)" "PATH=$CASE/check-stubs:$ROOT/stubs:$PATH" "$@" \
+    -- restore-volume --check-only "$stamp"
+  expect_eq "$name: no PostgreSQL tool, list, or target read" "$(wc -c <"$CASE/stub/log")" 0
+  expect_no "$name: no restore start line" grep -qF 'restore volume started' "$CASE/out"
+  expect_eq "$name: no file outside the work directory changes" "$(volume_check_state)" "$before"
+  expect_eq "$name: no private copy stays" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+  expect_no "$name: no key in output or tool log" \
+    grep -qFf "$RESTORE_TAG_KEY_FILE" "$CASE/out" "$CASE/err" "$CASE/stub/log"
+}
+
+# The offline check needs no target. A nonempty target must also stay unchanged.
+case_volume_check_only_pass() {
+  local kind name
+  for kind in missing nonempty; do
+    name="check-only: target $kind"
+    new_volume_case "check-only-$kind"
+    if [ "$kind" = missing ]; then
+      rmdir -- "$CASE/pgdata"
+    else
+      printf '16\n' >"$CASE/pgdata/PG_VERSION"
+    fi
+    volume_check_run_stamp "$name" "$RESTORE_NAME"
+    expect_eq "$name: exit code" "$RC" 0
+    expect_eq "$name: one output line" "$(wc -l <"$CASE/out")" 1
+    expect_eq "$name: no ERROR line" "$(error_count "$CASE/out")" 0
+    expect_ok "$name: one INFO line with the set" \
+      grep -qF "\"level\":\"INFO\",\"job\":\"restore-volume\",\"message\":\"the set passed the check\",\"set\":\"$RESTORE_BASE\"}" "$CASE/out"
+    expect_ok "$name: JSON output" volume_json_ok "$CASE/out"
+    expect_eq "$name: no read fault" "$(wc -c <"$CASE/err")" 0
+    expect_eq "$name: the existing lock was taken" "$(cat "$CASE/stub/flock.log")" $'ARGV flock -n 9\nFDMODE 0'
+  done
+}
+
+# Reuse the refusal cases of task 4.2 and the three signed gate fixtures.
+case_volume_check_only_gates() {
+  local VOLUME_GATE_CHECK_ONLY=1 VOLUME_GATE_VALID_TAG=0
+  case_volume_gate_tag
+  case_volume_gate_tag_before_set_reads
+  case_volume_gate_key
+  VOLUME_GATE_VALID_TAG=1
+  case_volume_gate_manifest
+  case_volume_gate_counts
+  case_volume_gate_globals
+}
+
+# The offline mode still checks the user, the stamp, and COMPOSE_SUBNET before taking the lock.
+case_volume_check_only_inputs() {
+  local VOLUME_GATE_CHECK_ONLY=1 fault text
+  local envs=()
+  for fault in uid user stamp subnet; do
+    new_volume_gate_case "input-$fault"
+    envs=()
+    case $fault in
+      uid) envs=(STUB_ID_UID=0); text='restore-volume must run as uid 999' ;;
+      user) envs=(STUB_ID_NAME=appuser); text='restore-volume must run as the user postgres' ;;
+      stamp) RESTORE_NAME=../bad; text='the stamp is outside the grammar of the set names' ;;
+      subnet) envs=(COMPOSE_SUBNET=); text='COMPOSE_SUBNET is not an IPv4 subnet with a prefix length' ;;
+    esac
+    volume_gate_case "input $fault" "$text" "${envs[@]}"
+    expect_eq "check-only input $fault: no lock call" "$(wc -c <"$CASE/stub/flock.log")" 0
+  done
 }
 
 # The functions that the two scripts share live in the library (design D3).
@@ -99,11 +205,134 @@ case_volume_gate_set() {
   expect_eq "older set with a bad dump: no tool ran" "$(wc -c <"$CASE/stub/log")" 0
 }
 
+# volume_backup_state: include all backup entries and the contents of each regular file.
+volume_backup_state() {
+  listing
+  (cd "$B" && find . -type f -exec sha256sum -- {} + | LC_ALL=C sort)
+}
+
+# volume_tag_gate_case <name> <message> <line> [VAR=value ...]: refuse before any set tool runs.
+volume_tag_gate_case() {
+  local name=$1 message=$2 line=$3 before
+  shift 3
+  before=$(volume_backup_state)
+  volume_gate_case "$name" "$message" "$@"
+  restore_manifest_error "$name" "$message" "$line"
+  expect_eq "$name: no PostgreSQL tool or older set is read" "$(wc -c <"$CASE/stub/log")" 0
+  expect_eq "$name: no read fault" "$(wc -c <"$CASE/err")" 0
+  expect_eq "$name: all backup entries and contents stay unchanged" "$(volume_backup_state)" "$before"
+  expect_no "$name: no key in output or tool log" \
+    grep -qFf "$RESTORE_TAG_KEY_FILE" "$CASE/out" "$CASE/err" "$CASE/stub/log"
+}
+
+# volume_damage_tag <variant>: use the same faults as the refusal cases of restore-test.
+volume_damage_tag() {
+  local tag=$B/$RESTORE_BASE.dump.sha256.hmac
+  case $1 in
+    missing) rm -- "$tag" ;;
+    link) mv -- "$tag" "$CASE/tag"; ln -s "$CASE/tag" "$tag" ;;
+    malformed) printf 'bad tag line\n' >"$tag" ;;
+    unknown-key)
+      awk '{$2 = ($2 == "0000000000000000" ? "1111111111111111" : "0000000000000000"); print}' \
+        "$tag" >"$CASE/tag"
+      cp -- "$CASE/tag" "$tag"
+      ;;
+    different-tag)
+      awk '{z = sprintf("%064d", 0); $3 = ($3 == z ? "1" substr(z, 2) : z); print}' \
+        "$tag" >"$CASE/tag"
+      cp -- "$CASE/tag" "$tag"
+      ;;
+    changed-dump)
+      cp -- "$tag" "$CASE/tag"
+      printf 'changed dump\n' >>"$B/$RESTORE_BASE.dump"
+      write_manifest "$RESTORE_NAME"
+      cp -- "$CASE/tag" "$tag"
+      ;;
+  esac
+}
+
+# Step 3: no bad tag can fall back to the valid older set.
+case_volume_gate_tag() {
+  local variant newest message
+  for variant in missing link malformed unknown-key different-tag changed-dump; do
+    new_volume_gate_case "gate-tag-$variant"
+    newest=$RESTORE_NAME
+    make_restore_set "" 2
+    RESTORE_NAME=$newest
+    RESTORE_BASE=recipe_$newest
+    volume_damage_tag "$variant"
+    case $variant in
+      missing|link) message='the newest set has no tag file' ;;
+      malformed) message='the tag file of the set has a bad line' ;;
+      unknown-key) message='the tag of the set comes from an unknown key' ;;
+      different-tag|changed-dump) message='the tag of the set does not match the manifest' ;;
+    esac
+    volume_tag_gate_case "tag $variant" "$message" ''
+  done
+}
+
+# Step 3: the tag check precedes every read of the dump, globals file, and counts file.
+case_volume_gate_tag_before_set_reads() {
+  new_volume_gate_case gate-tag-before-set-reads
+  volume_damage_tag malformed
+  local file
+  for file in "$B/$RESTORE_BASE.dump" "$B/globals_$RESTORE_NAME.sql" "$B/$RESTORE_BASE.counts"; do
+    rm -- "$file"
+    mkdir -- "$file"
+  done
+  volume_tag_gate_case "tag before set reads" 'the tag file of the set has a bad line' ''
+}
+
+# Step 3: a key must exist and must lie on another filesystem than the backup directory.
+case_volume_gate_key() {
+  new_volume_gate_case gate-key-missing
+  volume_tag_gate_case "missing key" 'the manifest key file is missing' '' \
+    "BACKUP_MANIFEST_KEY_FILE=$CASE/no-key"
+  new_volume_gate_case gate-key-location
+  cp -- "$RESTORE_TAG_KEY_FILE" "$CASE/key"
+  volume_tag_gate_case "key on backup filesystem" 'the manifest key file lies on the backup disk' '' \
+    "BACKUP_MANIFEST_KEY_FILE=$CASE/key"
+  new_volume_gate_case gate-key-bad-line-2
+  cp -- "$RESTORE_TAG_KEY_FILE" "$CASE/key"
+  printf '\ninvalid\n' >>"$CASE/key"
+  volume_tag_gate_case "key bad line 2" 'the manifest key file has a bad line' 2 \
+    "BACKUP_MANIFEST_KEY_FILE=$CASE/key"
+}
+
+# A disk manifest swap after the tag check cannot change the private manifest of the restore.
+case_volume_manifest_swap_after_tag() {
+  new_volume_case manifest-swap-after-tag
+  make_volume_manifest_swap_stub
+  volume_run "REAL_PERL=$(command -v perl)" "PATH=$CASE/tag-stubs:$ROOT/stubs:$PATH" \
+    "DISK_MANIFEST=$B/$RESTORE_BASE.dump.sha256"
+  if [ "$RC" -ne 0 ]; then cat -- "$CASE/out" >&2; fi
+  expect_eq "manifest swap: exit code" "$RC" 0
+  expect_eq "manifest swap: no ERROR line" "$(error_count "$CASE/out")" 0
+  expect_eq "manifest swap: no read fault" "$(wc -c <"$CASE/err")" 0
+  expect_ok "manifest swap: the disk manifest changed" \
+    cmp -s -- "$CASE/stub/manifest.swapped" "$B/$RESTORE_BASE.dump.sha256"
+  expect_eq "manifest swap: the tag check reads two private copies" \
+    "$(grep -cF "$CASE/pgpass/run." "$CASE/stub/tag.paths")" 2
+  expect_eq "manifest swap: private copies have mode 0600" \
+    "$(cat "$CASE/stub/tag.modes")" $'600\n600'
+  expect_eq "manifest swap: initdb ran once" "$(event_count initdb)" 1
+  expect_ok "manifest swap: the target holds PG_VERSION" test -f "$CASE/pgdata/PG_VERSION"
+  expect_eq "manifest swap: the restore completes all steps" "$(event_sequence)" "$VOLUME_SEQ_DONE"
+  expect_eq "manifest swap: one completed line" "$(grep -c 'restore volume completed' "$CASE/out")" 1
+  expect_ok "manifest swap: the completed line is last" \
+    grep -qF '"level":"INFO","job":"restore-volume","message":"restore volume completed"' \
+    <<<"$(tail -n 1 "$CASE/out")"
+  expect_ok "manifest swap: the output is JSON of the job restore-volume" volume_json_ok "$CASE/out"
+  expect_eq "manifest swap: no private copy stays" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+  expect_no "manifest swap: no key in output or tool log" \
+    grep -qFf "$RESTORE_TAG_KEY_FILE" "$CASE/out" "$CASE/err" "$CASE/stub/log"
+}
+
 # Step 3: the manifest lists the three files of the set, and each hash is right.
 case_volume_gate_manifest() {
   local file variant
   for file in dump globals counts; do
-    new_volume_case "gate-mismatch-$file"
+    new_volume_gate_case "gate-mismatch-$file"
     case $file in
       dump) printf 'changed' >>"$B/$RESTORE_BASE.dump" ;;
       globals) printf 'changed' >>"$B/globals_$RESTORE_NAME.sql" ;;
@@ -113,23 +342,24 @@ case_volume_gate_manifest() {
     expect_eq "manifest mismatch ($file): no tool ran" "$(wc -c <"$CASE/stub/log")" 0
   done
   for variant in no-dump extra-line other-name; do
-    new_volume_case "gate-files-$variant"
+    new_volume_gate_case "gate-files-$variant"
     case $variant in
       no-dump) sed -i '1d' "$B/$RESTORE_BASE.dump.sha256" ;;
       extra-line) printf '%s  other.txt\n' "$(hash_of other)" >>"$B/$RESTORE_BASE.dump.sha256" ;;
       other-name) sed -i "s/recipe_$RESTORE_NAME.counts/..\/counts/" "$B/$RESTORE_BASE.dump.sha256" ;;
     esac
+    sign_restore_manifest "$RESTORE_NAME"
     volume_gate_case "manifest files ($variant)" "manifest"
     expect_eq "manifest files ($variant): no tool ran" "$(wc -c <"$CASE/stub/log")" 0
   done
-  new_volume_case gate-set-file-missing
+  new_volume_gate_case gate-set-file-missing
   rm -- "$B/$RESTORE_BASE.counts"
   volume_gate_case "counts file missing" "the newest set lacks a regular file"
 }
 
 # Step 3: a line of the counts file outside the grammar stops the run.
 case_volume_gate_counts() {
-  new_volume_case gate-counts
+  new_volume_gate_case gate-counts
   printf 'not a count line\n' >>"$B/$RESTORE_BASE.counts"
   write_manifest "$RESTORE_NAME"
   volume_gate_case "counts file" "the counts file has a bad line"
@@ -140,7 +370,7 @@ case_volume_gate_counts() {
 volume_globals_case() {
   local name=$1 text=$2
   shift 2
-  new_volume_case "$name"
+  new_volume_gate_case "$name"
   printf '%s\n' "$@" >"$B/globals_$RESTORE_NAME.sql"
   write_manifest "$RESTORE_NAME"
   volume_gate_case "$name" "$text"

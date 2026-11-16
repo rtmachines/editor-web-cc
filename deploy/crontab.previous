@@ -1,0 +1,7 @@
+# Rollback schedule (ADR-0174 (aa)).
+# Each Compose command adds compose.previous.yaml only when it runs backup, backup-premigrate,
+# or restore-volume with an image without /etc/pgtools/manifest-tag.pl.
+# The rolled-back backup runs the nightly dump and no weekly restore-test.
+# backup.time is 02:00 (reliability.md section 7.11, ADR-0066).
+CRON_TZ=UTC
+0 2 * * * backup-once

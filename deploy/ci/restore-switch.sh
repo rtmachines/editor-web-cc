@@ -43,6 +43,99 @@ prepare() {
 # A legal image tag has 1 to 128 characters and starts with a letter, a digit, or an underscore.
 TAG_PATTERN='^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$'
 
+require_restore_error() {
+  # Count both output streams. A setup fault must not pass as a refused set.
+  local file=$1 message=$2 count
+  count=$(grep -c '"level":"ERROR"' "$file" || true)
+  [[ $count == 1 ]] || fail "restore: the refused set gave $count ERROR lines. Expected 1."
+  grep -Fq '"level":"ERROR","job":"restore-volume","message":"'"$message"'"' "$file" \
+    || fail "restore: the refused set stopped for another reason."
+  if grep -Fq '"fault"' "$file"
+  then
+    fail "restore: the refused set has a fault field."
+  fi
+  if grep -Fq '"message":"restore volume started"' "$file"
+  then
+    fail "restore: the refused set reached the restore steps."
+  fi
+}
+
+require_empty_restore_volume() {
+  # initdb writes into its target. An empty target proves that the tag gate stopped before initdb.
+  local first
+  first=$(docker run --rm --network none --security-opt no-new-privileges:true --cap-drop ALL \
+    -v "$1:/var/lib/postgresql/data:ro" --entrypoint find "recipe-pgtools:${RECIPE_VERSION:?}" \
+    /var/lib/postgresql/data -mindepth 1 -maxdepth 1 -print -quit) \
+    || fail "restore: cannot read the target volume."
+  [[ -z $first ]] || fail "restore: the refused set wrote into the target volume."
+}
+
+check_tagged_set() (
+  # A private copy keeps the source set intact. The EXIT trap also deletes a failed case's copy.
+  local backup_set=$1 stamp=$2 volume=$3 directory=$RECIPE_BACKUP_DIR/restore-switch-tag
+  local source_directory=$RECIPE_BACKUP_DIR file output status=0
+  trap 'status=$?; trap - EXIT; remove_restore_copy "$directory"; exit "$status"' EXIT
+  trap 'exit 143' TERM
+  trap 'exit 130' INT
+  trap 'exit 129' HUP
+  sudo install -d -o 999 -g 999 -m 0700 "$directory" "$directory/.scratch" \
+    || fail "restore: cannot create the set copy directory."
+  for file in .backup-marker .scratch/.lock
+  do
+    sudo install -o 999 -g 999 -m 0600 /dev/null "$directory/$file" \
+      || fail "restore: cannot create the marker or lock of the set copy."
+  done
+  for file in "$backup_set.dump" "$backup_set.counts" "globals_$stamp.sql" \
+    "$backup_set.dump.sha256" "$backup_set.dump.sha256.hmac"
+  do
+    sudo install -o 999 -g 999 -m 0600 "$RECIPE_BACKUP_DIR/$file" "$directory/$file" \
+      || fail "restore: cannot copy a file of the tagged set."
+  done
+  output=$(compose run --rm --no-deps -T -v "$directory:/backups:ro" restore-volume --check-only "$stamp" \
+    2>"$CI_STATE/restore-check-only.err") || fail "restore: --check-only refused the tagged set."
+  printf '%s\n' "$output" >"$CI_STATE/restore-check-only.log"
+  [[ ! -s $CI_STATE/restore-check-only.err ]] || fail "restore: --check-only wrote to stderr for the tagged set."
+  [[ $output == *'"level":"INFO","job":"restore-volume","message":"the set passed the check","set":"'"$backup_set"'"}' \
+    && $output != *$'\n'* ]] || fail "restore: --check-only did not report the tagged set."
+  log "restore: PASS --check-only accepted the tagged set without a target volume."
+  check_missing_tag "$backup_set" "$stamp" "$volume" "$directory"
+  check_changed_dump "$backup_set" "$stamp" "$directory" "$source_directory"
+)
+
+remove_restore_copy() {
+  sudo rm -rf -- "$1" && sudo test ! -e "$1" \
+    || fail "restore: cannot delete the set copy."
+}
+
+check_missing_tag() {
+  local backup_set=$1 stamp=$2 volume=$3 directory=$4 status=0
+  sudo rm -- "$directory/$backup_set.dump.sha256.hmac" || fail "restore: cannot remove the copied tag."
+  require_empty_restore_volume "$volume"
+  compose run --rm --no-deps -T -v "$directory:/backups:ro" \
+    -v "$volume:/var/lib/postgresql/data" restore-volume "$stamp" \
+    >"$CI_STATE/restore-no-tag.log" 2>&1 || status=$?
+  [[ $status == 1 ]] || fail "restore: the set without a tag gave exit code $status. Expected 1."
+  require_restore_error "$CI_STATE/restore-no-tag.log" "the newest set has no tag file"
+  require_empty_restore_volume "$volume"
+  log "restore: PASS the set without a tag stopped before initdb with exactly one ERROR line."
+}
+
+check_changed_dump() {
+  local backup_set=$1 stamp=$2 directory=$3 source_directory=$4 status=0
+  sudo install -o 999 -g 999 -m 0600 "$source_directory/$backup_set.dump.sha256.hmac" \
+    "$directory/$backup_set.dump.sha256.hmac" || fail "restore: cannot restore the copied tag."
+  printf '\nCI changed dump\n' | sudo tee -a "$directory/$backup_set.dump" >/dev/null \
+    || fail "restore: cannot change the copied dump."
+  # Keep the old tag. New checksums force the refusal to prove the tag check.
+  sudo bash -c 'cd "$1" && sha256sum -- "$2.dump" "globals_$3.sql" "$2.counts" >"$2.dump.sha256"' \
+    restore-switch "$directory" "$backup_set" "$stamp" || fail "restore: cannot compute the copied manifest."
+  compose run --rm --no-deps -T -v "$directory:/backups:ro" restore-volume --check-only "$stamp" \
+    >"$CI_STATE/restore-check-only-changed.log" 2>&1 || status=$?
+  [[ $status == 1 ]] || fail "restore: --check-only of the changed dump gave exit code $status. Expected 1."
+  require_restore_error "$CI_STATE/restore-check-only-changed.log" "the tag of the set does not match the manifest"
+  log "restore: PASS --check-only refused the changed dump with exactly one ERROR line."
+}
+
 restore() {
   # ADR-0103 (b) steps 2 to 4. db keeps running on the old volume.
   local backup_set stamp volume last pattern
@@ -51,19 +144,22 @@ restore() {
   [[ $backup_set =~ ^recipe_([0-9]{8}_[0-9]{4}_now)$ ]] || fail "restore: the backup set name is invalid."
   stamp=${BASH_REMATCH[1]}
   log "restore: stop app and backup"
-  compose stop app backup
+  compose stop app backup || fail "restore: cannot stop app and backup."
   # ADR-0103 (e) gives the name. The label lets delete_ci_volumes find the volume.
   volume=recipe-editor_pgdata_$(date -u +%Y%m%d_%H%M%S)
-  docker volume create --label "recipe.ci=$COMPOSE_PROJECT_NAME" "$volume" >/dev/null
+  docker volume create --label "recipe.ci=$COMPOSE_PROJECT_NAME" "$volume" >/dev/null \
+    || fail "restore: cannot create the target volume."
+  check_tagged_set "$backup_set" "$stamp" "$volume"
   log "restore: run restore-volume for the set $backup_set into the volume $volume"
   compose run --rm --no-deps -T -v "$volume:/var/lib/postgresql/data" restore-volume "$stamp" \
-    | tee "$CI_STATE/restore-volume.log"
+    | tee "$CI_STATE/restore-volume.log" || fail "restore: restore-volume refused the tagged set."
   last=$(tail -n 1 "$CI_STATE/restore-volume.log")
   pattern='"message":"restore volume completed".*"set":"'$backup_set'","system_identifier":"([0-9]{1,20})"\}$'
   [[ $last =~ $pattern ]] || fail "restore: the last line of restore-volume is wrong."
   printf '%s\n' "$volume" >"$CI_STATE/new.volume"
   printf '%s\n' "${BASH_REMATCH[1]}" >"$CI_STATE/new.system-identifier"
   log "restore: the volume $volume holds the system identifier ${BASH_REMATCH[1]}"
+  log "restore: PASS restore-volume completed the real restore of the tagged set."
 }
 
 # These patterns match the lines that 01-roles.sh and the image entrypoint write on the first start.
