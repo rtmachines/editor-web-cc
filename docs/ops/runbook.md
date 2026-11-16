@@ -474,6 +474,23 @@ A service that you stopped with `docker compose stop` can start again after a re
 After a failed rollback restore after a failed upgrade, `app` stays stopped and has no container. Steps 1 and 4 cannot pass in that state.
 Use the section [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade), and do not start `app` for these steps.
 
+From step 2 of [Restore into production](#restore-into-production) until the procedure starts `app` and `backup` again, the two services can have no container.
+The same holds from step 1 of [Recover from the WAL archive](#recover-from-the-wal-archive).
+In that window, `proxy` cannot become `healthy`, because its healthcheck calls `http://app:9000/healthz`.
+Skip step 4 in that window. Step 4 runs `docker compose exec app`.
+
+In that window, step 1 waits only for `db` and `walarchive`, and only for a service that `docker compose ps -a` lists.
+The switch deletes the containers of `db` and `walarchive`, and later steps create them again.
+Until step 8 of the recovery deletes the container of `db`, skip this wait when `db` did not run at step 1 of the recovery.
+Such a `db` cannot become `healthy`, and the healthcheck of `walarchive` needs a running `db`.
+
+After step 1 of this section, continue the procedure at the step where it stopped.
+Three cases need an action before you continue:
+
+- If the reboot came between step 4 and step 8 of the recovery, `walarchive` runs again. Run step 4 of the recovery again.
+- If the reboot stopped step 4 of the restore or step 6 of the recovery, the new volume is not complete. Delete it with `docker volume rm <new volume>`. Then start again at step 3 of the restore or at step 5 of the recovery.
+- If the reboot stopped step 7 of the restore or step 10 of the recovery, the shell lost the variable `target`. Set `target` to the directory that sub-step 1 made. If sub-step 1 made no directory, run sub-step 1 again.
+
 1. Run `docker compose ps -a`. Wait until `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
 2. If a service restarts, run `docker compose logs <service>`. For `app`, use the section "Alarms, read-only mode, and restart loop".
 3. Check that the host mounts the second disk. A missing host directory stops the start of `backup` and `walarchive`.
@@ -664,10 +681,13 @@ The login check of step 8 of `restore-test` then has no equal before the switch.
 
 1. Run the restore test as in "Run the restore test". Continue only after it passes. The test checks the newest complete set.
    Read the name of the set in the line `restore test passed`. Restore that set.
-2. Stop `app` and `backup`. No write after this point reaches the restored cluster, and no retention deletes the set:
+2. Delete the containers of `app` and `backup`. No write after this point reaches the restored cluster, and no retention deletes the set.
+   A restart of Docker or of the host starts a stopped container with `restart: always` again, on the old volume.
+   Optional: first copy the logs of the two containers with `docker compose logs --no-color app backup > <file>`, because `rm` deletes them.
+   Then delete the two containers:
 
 ```bash
-docker compose stop app backup
+docker compose rm -s -f app backup
 ```
 
 3. Create the new volume. The command prints its name, which has the form `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>` in UTC (ADR-0103 (e)):
@@ -687,9 +707,9 @@ docker compose run --rm --no-deps -T -v "<new volume>:/var/lib/postgresql/data" 
    Delete the new volume with `docker volume rm <new volume>`, fix the cause, and start again at step 3 (ADR-0103 (i)).
    To end the attempt, set `RECIPE_VERSION` in `.env` to `<tag>`. Do this before you start a container.
    For a plain rollback, `<tag>` is the new release tag. Run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as `<tag>`.
-   Then start `app` and `backup` as in "Stop, start, and restart". Create `backup` again with `docker compose up -d --no-deps --force-recreate backup`.
+   Then start `app` with `docker compose up -d --no-deps app`. Create `backup` again with `docker compose up -d --no-deps --force-recreate backup`.
    For a failed upgrade, `.env` keeps the previous tag and `COMPOSE_FILE`. Start no `app` and no container of the new image. See [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade).
-   In every other case, start `app` and `backup` as in "Stop, start, and restart".
+   In every other case, start `app` with `docker compose up -d --no-deps app`. Then start `backup` with `docker compose up -d --no-deps backup`.
    In a plain rollback, the old volume fits `<tag>` only.
    After a failed upgrade, the old volume holds the schema of the failed `migrate`. That schema can match no image (ADR-0083).
    In a major upgrade, run these commands in the directory of `<old tag>` (section "Major upgrade", ADR-0105 (c), (e)).
@@ -929,10 +949,13 @@ Choose the target before step 1:
 - A manual statement as a superuser writes no audit entry. Use its start time from the [change log of the site](#change-log-of-the-site), cut to the full second.
 - Without such a record, the target is an estimate of the operator. The values of step 7 then matter most.
 
-1. Stop `app` and `backup`. After this point, `app` writes no audit entry:
+1. Delete the containers of `app` and `backup`. After this point, `app` writes no audit entry.
+   A restart of Docker or of the host starts a stopped container with `restart: always` again, on the old volume.
+   Optional: first copy the logs of the two containers with `docker compose logs --no-color app backup > <file>`, because `rm` deletes them.
+   Then delete the two containers:
 
 ```bash
-docker compose stop app backup
+docker compose rm -s -f app backup
 ```
 
 2. If `db` runs, read the newest audit entry. Note `chain_seq` and the hash:

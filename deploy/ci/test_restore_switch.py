@@ -6,12 +6,13 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 CI = pathlib.Path(__file__).resolve().parent
@@ -273,11 +274,14 @@ class RestoreSwitchTextTests(unittest.TestCase):
 
     def test_restore_follows_the_order_of_adr_0103_b(self):
         self.positions(shell_function("restore"), [
-            "compose stop app backup",
+            "compose rm -s -f app backup",
             "docker volume create --label",
             "restore-volume",
             "new.system-identifier",
         ])
+
+    def test_restore_never_keeps_stopped_app_and_backup_containers(self):
+        self.assertNotIn("stop app backup", shell_function("restore"))
 
     def test_restore_mounts_the_new_volume_into_the_service(self):
         body = shell_function("restore")
@@ -450,6 +454,12 @@ case "$args" in
     echo "$RECIPE_PGDATA_VOLUME" >"$STUB_DIR/db.volume"
     if [[ $RECIPE_PGDATA_VOLUME == "$STUB_OLD" ]]; then echo "in production" >"$STUB_DIR/old.state"; fi
     ;;
+  *" compose "*" rm -s -f app backup"*)
+    if [[ ${STUB_REMOVE_APP_STATUS:-0} != 0 ]]; then
+      echo 'stub: cannot delete app and backup' >&2
+    fi
+    exit "${STUB_REMOVE_APP_STATUS:-0}"
+    ;;
   *" compose "*" stop "*)
     if [[ $args == *" db "* && -e $STUB_DIR/db.running ]]; then
       rm -f "$STUB_DIR/db.running"
@@ -606,6 +616,72 @@ class StubbedSubcommandTests(unittest.TestCase):
 
 
 class RestoreBehaviorTests(StubbedSubcommandTests):
+    def assert_no_forbidden_docker_commands(self, log):
+        value_options = {"--project-name", "-p", "-f", "--file", "--profile", "--ansi",
+                         "--env-file", "--project-directory", "--progress", "--parallel"}
+        for line in log.splitlines():
+            tokens = shlex.split(line)
+            if tokens[:1] == ["docker"]:
+                tokens = tokens[1:]
+            if tokens[:1] == ["compose"]:
+                position = 1
+                while position < len(tokens) and tokens[position].startswith("-"):
+                    option = tokens[position]
+                    position += 1
+                    if option in value_options:
+                        position += 1
+                self.assertNotIn(tokens[position:position + 1],
+                                 (["down"], ["start"], ["restart"], ["kill"]), line)
+            else:
+                self.assertNotEqual(tokens[:1], ["kill"], line)
+                self.assertNotEqual(tokens[:2], ["volume", "rm"], line)
+
+    def test_command_guard_allows_start_in_a_checkout_path(self):
+        self.assert_no_forbidden_docker_commands(
+            "compose --project-name recipe-ci-1-1 -f /tmp/start/deploy/compose.yaml rm -s -f app backup\n")
+
+    def test_command_guard_rejects_forbidden_docker_commands(self):
+        for command in ("volume rm data", "compose --project-name recipe-ci-1-1 -f /tmp/start/compose.yaml down",
+                        "compose -f /tmp/compose.yaml kill app", "compose start app",
+                        "kill recipe-ci-app", "docker kill recipe-ci-app",
+                        "compose -p x restart backup"):
+            with self.subTest(command=command), self.assertRaises(AssertionError):
+                self.assert_no_forbidden_docker_commands(command + "\n")
+
+    def test_command_guard_skips_compose_option_values(self):
+        options = ("--project-name", "-p", "-f", "--file", "--profile", "--ansi",
+                   "--env-file", "--project-directory", "--progress", "--parallel")
+        for option in options:
+            for argument in (f'{option} "start in checkout"', f'{option}="start in checkout"'):
+                with self.subTest(argument=argument):
+                    self.assert_no_forbidden_docker_commands(f"compose {argument} rm -s -f app backup\n")
+                    with self.assertRaises(AssertionError):
+                        self.assert_no_forbidden_docker_commands(f"compose {argument} start app\n")
+        with self.assertRaises(AssertionError):
+            self.assert_no_forbidden_docker_commands("docker compose --dry-run restart backup\n")
+
+    def test_command_guard_rejects_restore_mutants(self):
+        anchor = '  compose rm -s -f app backup || fail "restore: cannot delete app and backup."'
+        original = script_text()
+        self.assertEqual(original.count(anchor), 1)
+        commands = ("compose --profile restore start app", "compose --ansi never start app",
+                    "docker kill recipe-ci-app", "compose -p x restart backup")
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            for name in ("common.sh", "switch-steps.sh"):
+                shutil.copyfile(CI / name, directory / name)
+            mutant = directory / SCRIPT.name
+            for command in commands:
+                with self.subTest(command=command):
+                    mutant.write_text(original.replace(anchor, anchor + f"\n  {command} || true"),
+                                      encoding="utf-8", newline="\n")
+                    with patch.object(sys.modules[__name__], "SCRIPT", mutant):
+                        done, log, _ = self.run_subcommand("restore")
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    self.assertIn(command.removeprefix("docker ").removeprefix("compose "), log)
+                    with self.assertRaises(AssertionError):
+                        self.assert_no_forbidden_docker_commands(log)
+
     def assert_copy_removed(self, files):
         self.assertNotIn("backups/restore-switch-tag", files["tree.list"])
         for name, text in restore_tree().items():
@@ -615,11 +691,17 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
         done, log, _ = self.run_subcommand("restore")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertInOrder(log, [
-            r"compose --project-name recipe-ci-1-1 .* stop app backup\n",
+            r"compose --project-name recipe-ci-1-1 .* rm -s -f app backup\n",
             rf"volume create --label recipe\.ci={PROJECT} recipe-editor_pgdata_\d{{8}}_\d{{6}}\n",
             r"compose .* run --rm --no-deps -T -v recipe-editor_pgdata_\d{8}_\d{6}:/var/lib/postgresql/data restore-volume 20260101_0000_now\n",
         ])
-        self.assertNotRegex(log, r"\b(down|volume rm|kill|start)\b")
+        self.assert_no_forbidden_docker_commands(log)
+
+    def test_restore_fails_when_the_services_cannot_be_deleted(self):
+        done, log, _ = self.run_subcommand("restore", stub_env={"STUB_REMOVE_APP_STATUS": "1"})
+        self.assertEqual(done.returncode, 1, done.stderr + log)
+        self.assertIn("CI: restore: cannot delete app and backup.", done.stderr)
+        self.assertNotIn("volume create", log)
 
     def test_restore_saves_the_volume_and_the_identifier(self):
         done, _, files = self.run_subcommand("restore")
@@ -2768,6 +2850,74 @@ def script_assignment(name):
     if found is None:
         raise KeyError(name)
     return found.group(1) or found.group(2)
+
+
+class RunbookRestoreDeleteTests(unittest.TestCase):
+    DELETE_COMMAND = "docker compose rm -s -f app backup"
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("test_upgrade_runbook", CI / "test_upgrade_runbook.py")
+        self.runbook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.runbook)
+
+    def test_step_2_deletes_app_and_backup_in_one_bash_line(self):
+        step = self.runbook.runbook_step("Restore into production", "2. ")
+        blocks = self.runbook.runbook_bash_blocks(step)
+        self.assertEqual(blocks, [self.DELETE_COMMAND],
+                         f"restore step 2 must have one Bash block with only {self.DELETE_COMMAND!r}")
+
+    def test_restore_function_uses_the_runbook_delete_command(self):
+        command = re.escape(self.DELETE_COMMAND.removeprefix("docker "))
+        self.assertRegex(shell_function("restore"), rf"(?m)^\s*{command}(?:\s*\|\|[^\n]+)?$",
+                         "restore() must execute compose rm -s -f app backup")
+
+    def test_step_4_names_each_start_after_the_delete(self):
+        step = self.runbook.runbook_step("Restore into production", "4. Fill the new volume.")
+        spans = self.runbook.runbook_inline_code_spans(step)
+        problems = []
+        for service, expected in (("app", 2), ("backup", 1)):
+            command = f"docker compose up -d --no-deps {service}"
+            count = spans.count(command)
+            if count != expected:
+                problems.append(f"expected {expected} exact inline spans {command!r}, found {count}")
+        obsolete = 'as in "Stop, start, and restart"'
+        if obsolete in step:
+            problems.append(f"replace the obsolete text {obsolete!r} with the explicit start commands")
+        self.assertFalse(problems, "restore step 4: " + ". ".join(problems))
+
+    def test_step_9_names_each_start_after_the_audit_record(self):
+        step = self.runbook.runbook_step(
+            "Restore into production", "9. Start `app` after a record of the restored audit time")
+        for number, command in ((4, "docker compose up -d --no-deps app"),
+                                (5, "docker compose up -d --no-deps proxy backup")):
+            with self.subTest(substep=number):
+                substep = re.search(rf"(?ms)^   {number}\. (.*?)(?=^   \d+\. |\Z)", step)
+                self.assertIsNotNone(substep, f"restore step 9 must have sub-step {number}")
+                spans = self.runbook.runbook_inline_code_spans(substep.group(1))
+                if number == 4:
+                    self.assertIn(command, spans)
+                else:
+                    self.assertEqual(spans, [command])
+
+    def test_section_has_no_start_app_or_start_backup_command(self):
+        section = self.runbook.runbook_heading_section("Restore into production", 3)
+        self.assertEqual(self.runbook.runbook_deleted_service_starts(section), [],
+                         "restore section must use up -d --no-deps for app and backup after the delete")
+
+    def test_section_guard_rejects_service_lists_and_double_backticks(self):
+        for section in ("Run `docker compose start proxy backup`.",
+                        "Run ``docker compose start app``.",
+                        "Run `docker compose -f compose.yaml start proxy backup`.",
+                        "```text\ndocker compose restart app\n```",
+                        "```bash\ndocker compose start proxy app\n```"):
+            with self.subTest(section=section), patch.object(
+                    self.runbook, "runbook_heading_section", return_value=section), self.assertRaises(AssertionError):
+                self.test_section_has_no_start_app_or_start_backup_command()
+
+    def test_section_guard_allows_bare_start_and_other_services(self):
+        section = "Never run `docker compose start` here. `docker compose start proxy` names no deleted service."
+        with patch.object(self.runbook, "runbook_heading_section", return_value=section):
+            self.test_section_has_no_start_app_or_start_backup_command()
 
 
 class RunbookWalLineTests(unittest.TestCase):

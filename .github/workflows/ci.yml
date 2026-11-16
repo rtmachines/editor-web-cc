@@ -595,7 +595,7 @@ jobs:
       - name: Refuse a late target and a gap in the WAL (D8 refusals)
         timeout-minutes: 10
         run: bash deploy/ci/pitr-recovery.sh refusals
-      # Allow 8 minutes to stop app and backup, kill db, stop walarchive, and delete pg_control.
+      # Allow 8 minutes to delete app and backup, kill db, stop walarchive, and delete pg_control.
       - name: Crash the database and lose pg_control (D8 crash)
         timeout-minutes: 8
         run: bash deploy/ci/pitr-recovery.sh crash

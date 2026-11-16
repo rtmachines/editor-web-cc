@@ -143,8 +143,8 @@ restore() {
   backup_set=$(<"$CI_STATE/backup.set")
   [[ $backup_set =~ ^recipe_([0-9]{8}_[0-9]{4}_now)$ ]] || fail "restore: the backup set name is invalid."
   stamp=${BASH_REMATCH[1]}
-  log "restore: stop app and backup"
-  compose stop app backup || fail "restore: cannot stop app and backup."
+  log "restore: delete app and backup"
+  compose rm -s -f app backup || fail "restore: cannot delete app and backup."
   # ADR-0103 (e) gives the name. The label lets delete_ci_volumes find the volume.
   volume=recipe-editor_pgdata_$(date -u +%Y%m%d_%H%M%S)
   docker volume create --label "recipe.ci=$COMPOSE_PROJECT_NAME" "$volume" >/dev/null \

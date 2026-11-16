@@ -473,8 +473,8 @@ crash() {
   db_id=$(container db)
   # ADR-0106 (p) measures the recovery time from step 5. The clock starts before the stop. The file comes last.
   started=$(date +%s)
-  log "crash: the recovery time starts at $started. Stop app and backup"
-  compose stop app backup || fail "crash: cannot stop app and backup."
+  log "crash: the recovery time starts at $started. Delete app and backup"
+  compose rm -s -f app backup || fail "crash: cannot delete app and backup."
   log "crash: read the WAL position and wait for its flush"
   wait_marker_flush crash
   printf '%s\n' "$FLUSHED_POSITION" >"$CI_STATE/expected.lsn"

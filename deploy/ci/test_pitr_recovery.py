@@ -1,6 +1,7 @@
 """Check the job pitr-recovery and its script without Docker (pitr-recovery design.md D8)."""
 
 import hashlib
+import importlib.util
 import os
 import pathlib
 import re
@@ -9,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 
 CI = pathlib.Path(__file__).resolve().parent
@@ -1033,7 +1035,7 @@ class StepTests(unittest.TestCase):
             r"^compose --project-name recipe-ci-1-1 .* ps -aq db$",
             r"^inspect --format \{\{range \.Mounts\}\}",
             r"^volume inspect --format .* " + OLD_VOLUME + "$",
-            r"^compose --project-name recipe-ci-1-1 .* stop app backup$",
+            r"^compose --project-name recipe-ci-1-1 .* rm -s -f app backup$",
             r"SELECT pg_current_wal_lsn\(\)",
             r"flush_lsn >=",
             r"pg_walfile_name",
@@ -1068,7 +1070,7 @@ class StepTests(unittest.TestCase):
     def test_crash_stops_the_writers_before_it_reads_the_position(self):
         done, log, _ = self.run_step("crash", state=self.crash_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertLess(log.index("stop app backup"), log.index("pg_current_wal_lsn"))
+        self.assertLess(log.index("rm -s -f app backup"), log.index("pg_current_wal_lsn"))
         self.assertLess(log.index("kill -s SIGKILL db"), log.index("stop walarchive"))
         self.assertNotIn("pg_switch_wal", log)
 
@@ -1076,7 +1078,7 @@ class StepTests(unittest.TestCase):
         done, log, _ = self.run_step("crash", state=self.crash_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
         self.assertEqual(log.count("clock +%s"), 1, log)
-        self.assertLess(log.index("clock +%s"), log.index("stop app backup"))
+        self.assertLess(log.index("clock +%s"), log.index("rm -s -f app backup"))
 
     def test_crash_requires_the_state_of_markers(self):
         for missing in ("marker2.seq", "marker2.hash"):
@@ -1120,16 +1122,16 @@ class StepTests(unittest.TestCase):
 
     def test_crash_fails_when_db_does_not_use_the_old_volume(self):
         done, log, _ = self.run_step("crash", {"STUB_DB_VOLUME": "other_volume"}, self.crash_state())
-        self.assert_stopped_before(done, log, "CI: crash: db does not use the volume " + OLD_VOLUME + ".", "stop ")
+        self.assert_stopped_before(done, log, "CI: crash: db does not use the volume " + OLD_VOLUME + ".", "rm -s -f app backup")
 
     def test_crash_fails_when_the_old_volume_has_no_label_of_the_job(self):
         done, log, _ = self.run_step("crash", {"STUB_LABEL": "other-project"}, self.crash_state())
         self.assert_stopped_before(
-            done, log, "CI: crash: the old volume " + OLD_VOLUME + " has no label of this job.", "stop ")
+            done, log, "CI: crash: the old volume " + OLD_VOLUME + " has no label of this job.", "rm -s -f app backup")
 
     def test_crash_fails_when_the_services_do_not_stop(self):
-        done, log, _ = self.run_step("crash", {"STUB_STOP_APP_STATUS": "1"}, self.crash_state())
-        self.assert_stopped_before(done, log, "CI: crash: cannot stop app and backup.", "pg_current_wal_lsn")
+        done, log, _ = self.run_step("crash", {"STUB_REMOVE_APP_STATUS": "1"}, self.crash_state())
+        self.assert_stopped_before(done, log, "CI: crash: cannot delete app and backup.", "pg_current_wal_lsn")
 
     def test_crash_fails_when_db_is_already_dead_at_kill_time(self):
         done, log, state = self.run_step("crash", {"STUB_KILL_STATUS": "1"}, self.crash_state())
@@ -1968,6 +1970,46 @@ REFUSALS_SEGMENTS = "".join(f"{name}\n" for name in (
 ))
 
 
+class RunbookRecoveryDeleteTests(unittest.TestCase):
+    DELETE_COMMAND = "docker compose rm -s -f app backup"
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("test_upgrade_runbook", CI / "test_upgrade_runbook.py")
+        self.runbook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.runbook)
+
+    def test_step_1_deletes_app_and_backup_in_one_bash_line(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "1. ")
+        blocks = self.runbook.runbook_bash_blocks(step)
+        self.assertEqual(blocks, [self.DELETE_COMMAND],
+                         f"recovery step 1 must have one Bash block with only {self.DELETE_COMMAND!r}")
+
+    def test_crash_function_uses_the_runbook_delete_command(self):
+        command = re.escape(self.DELETE_COMMAND.removeprefix("docker "))
+        self.assertRegex(shell_function("crash"), rf"(?m)^\s*{command}(?:\s*\|\|[^\n]+)?$",
+                         "crash() must execute compose rm -s -f app backup")
+
+    def test_section_has_no_start_app_or_start_backup_command(self):
+        section = self.runbook.runbook_heading_section("Recover from the WAL archive", 3)
+        self.assertEqual(self.runbook.runbook_deleted_service_starts(section), [],
+                         "recovery section must use up -d --no-deps for app and backup after the delete")
+
+    def test_section_guard_rejects_service_lists_and_double_backticks(self):
+        for section in ("Run `docker compose start proxy backup`.",
+                        "Run ``docker compose start app``.",
+                        "Run `docker compose -f compose.yaml start proxy backup`.",
+                        "```text\ndocker compose restart app\n```",
+                        "```bash\ndocker compose start proxy app\n```"):
+            with self.subTest(section=section), patch.object(
+                    self.runbook, "runbook_heading_section", return_value=section), self.assertRaises(AssertionError):
+                self.test_section_has_no_start_app_or_start_backup_command()
+
+    def test_section_guard_allows_bare_start_and_other_services(self):
+        section = "Never run `docker compose start` here. `docker compose start proxy` names no deleted service."
+        with patch.object(self.runbook, "runbook_heading_section", return_value=section):
+            self.test_section_has_no_start_app_or_start_backup_command()
+
+
 class ComposeRecoveryTests(unittest.TestCase):
     SET = "recipe_20261030_1205_now"
 
@@ -2265,7 +2307,7 @@ case "$*" in
     echo "PITR_MARKER_SEQ=${PITR_MARKER_SEQ:-} PITR_MARKER_HASH=${PITR_MARKER_HASH:-}" >>"$STUB_LOG"
     printf '%s\\n' "$STUB_RECOVER_OUTPUT"
     exit "${STUB_RECOVER_STATUS:-0}" ;;
-  *" stop app backup") exit "${STUB_STOP_APP_STATUS:-0}" ;;
+  *" rm -s -f app backup") exit "${STUB_REMOVE_APP_STATUS:-0}" ;;
   *" stop walarchive") exit "${STUB_STOP_WALARCHIVE_STATUS:-0}" ;;
   *" kill -s SIGKILL db") exit "${STUB_KILL_STATUS:-0}" ;;
   "inspect --format {{.State.Running}} {{.State.ExitCode}} "*) echo "${STUB_DB_STATE:-false 137}" ;;

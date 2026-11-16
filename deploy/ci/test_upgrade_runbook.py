@@ -20,6 +20,21 @@ def shell_function(name, file="upgrade.sh"):
     return f"{name}() {{" + source.split(marker, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
 
 
+def runbook_fence(line, fence):
+    """Return the next fence state as its full marker and info string."""
+    if fence is not None:
+        marker, _ = fence
+        closing = rf" {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}\s*"
+        return None if re.fullmatch(closing, line) else fence
+    opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+    if opening is None:
+        return None
+    marker, info = opening.groups()
+    if marker[0] == "`" and "`" in info:
+        return None
+    return marker, info.strip()
+
+
 def runbook_heading_section(title, level):
     """Return one unique section, including its lower-level headings."""
     runbook = pathlib.Path(__file__).resolve().parents[2] / "docs" / "ops" / "runbook.md"
@@ -27,13 +42,9 @@ def runbook_heading_section(title, level):
     headings = []
     fence = None
     for index, line in enumerate(lines):
-        stripped = line.strip()
-        if fence is not None:
-            if stripped.startswith(fence):
-                fence = None
-            continue
-        if stripped.startswith(("```", "~~~")):
-            fence = stripped[:3]
+        previous = fence
+        fence = runbook_fence(line, fence)
+        if previous is not None or fence is not None:
             continue
         heading = re.match(r"^(#+) ", line)
         if heading:
@@ -52,21 +63,248 @@ def runbook_bash_blocks(section):
     blocks = []
     fence = None
     body = []
-    bash = False
     for line in section.splitlines():
-        stripped = line.strip()
-        if fence is not None:
-            if stripped.startswith(fence):
-                if bash:
+        previous = fence
+        fence = runbook_fence(line, fence)
+        if previous is not None:
+            if fence is None:
+                if previous[1] == "bash":
                     blocks.append("\n".join(body))
-                fence = None
             else:
                 body.append(line)
-        elif stripped.startswith(("```", "~~~")):
-            fence = stripped[:3]
-            bash = stripped[3:].strip() == "bash"
+        elif fence is not None:
             body = []
     return blocks
+
+
+def runbook_code_span_offsets(block):
+    """Yield full code span bounds within one prose block, including delimiters."""
+    token = re.compile(r"\\[\\`]|`+")
+    offset = 0
+    while opening := token.search(block, offset):
+        offset = opening.end()
+        if opening.group().startswith("\\"):
+            continue
+        # Inside a span, backslashes are literal, including before its closer.
+        closing = next((end for end in re.finditer(r"`+", block[offset:])
+                        if end.group() == opening.group()), None)
+        if closing is None:
+            continue
+        offset += closing.end()
+        yield opening.start(), offset
+
+
+def runbook_inline_code_spans(text):
+    """Return spans with matching backtick runs in prose blocks outside fences."""
+    spans = []
+    fence = None
+    blocks = []
+    lines = []
+    for line in text.splitlines():
+        previous = fence
+        fence = runbook_fence(line, fence)
+        if previous is not None or fence is not None or not line.strip():
+            if lines:
+                blocks.append("\n".join(lines))
+                lines = []
+        else:
+            lines.append(line)
+    if lines:
+        blocks.append("\n".join(lines))
+    for block in blocks:
+        for start, end in runbook_code_span_offsets(block):
+            content = block[start:end].strip("`").replace("\n", " ")
+            if content.startswith(" ") and content.endswith(" ") and content.strip(" "):
+                content = content[1:-1]
+            spans.append(content)
+    return spans
+
+
+def runbook_deleted_service_starts(section):
+    """Return inline spans and fenced lines that start or restart a deleted service."""
+    commands = runbook_inline_code_spans(section)
+    fence = None
+    for line in section.splitlines():
+        previous = fence
+        fence = runbook_fence(line, fence)
+        if previous is not None and fence is not None:
+            commands.append(line)
+    value_options = {"--project-name", "-p", "-f", "--file", "--profile", "--ansi",
+                     "--env-file", "--project-directory", "--progress", "--parallel"}
+    forbidden = []
+    for command in commands:
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            tokens = command.split()
+        for index, token in enumerate(tokens):
+            if token == "docker" and tokens[index + 1:index + 2] == ["compose"]:
+                position = index + 2
+            elif token == "docker-compose":
+                position = index + 1
+            else:
+                continue
+            while position < len(tokens) and tokens[position].startswith("-"):
+                option = tokens[position]
+                position += 2 if option in value_options else 1
+            if position >= len(tokens) or tokens[position] not in ("start", "restart"):
+                continue
+            services = []
+            for service in tokens[position + 1:]:
+                if service in ("&&", "||", ";", "|") or service.startswith((">", "<")):
+                    break
+                services.append(service)
+            if {"app", "backup"}.intersection(services):
+                forbidden.append(command)
+                break
+    return forbidden
+
+
+class RunbookDeletedServiceStartsTests(unittest.TestCase):
+    def test_global_options_before_start_and_restart(self):
+        options = ("--project-name", "-p", "-f", "--file", "--profile", "--ansi",
+                   "--env-file", "--project-directory", "--progress", "--parallel")
+        for option in options:
+            forms = (f"{option} x", f"{option}=x") if option.startswith("--") else (f"{option} x",)
+            for form in forms:
+                for subcommand in ("start", "restart"):
+                    command = f"docker compose {form} {subcommand} proxy backup"
+                    with self.subTest(command=command):
+                        self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
+
+    def test_forbidden_commands_and_each_compose_pair(self):
+        commands = ("docker compose -f x start app",
+                    "docker compose --profile=x start backup",
+                    "docker compose restart app",
+                    "docker compose -p x restart proxy backup",
+                    "docker compose start proxy backup && echo ok",
+                    "docker-compose --compatibility restart backup",
+                    "docker compose logs app && docker compose restart app",
+                    "docker-compose start app && docker compose restart backup")
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
+
+    def test_commands_in_fences_with_any_info_string(self):
+        command = "docker compose start app"
+        for info in ("", "text", "sql", "yaml", "bash"):
+            for marker in ("```", "~~~"):
+                with self.subTest(info=info, marker=marker):
+                    section = f"{marker}{info}\n{command}\n{marker}"
+                    self.assertEqual(runbook_deleted_service_starts(section), [command])
+
+    def test_allowed_commands(self):
+        commands = ("docker compose start", "docker compose restart",
+                    "docker compose up -d --no-deps app", "docker compose start proxy",
+                    "docker compose logs --no-color app backup > start.txt",
+                    "docker compose -f /srv/start/app/compose.yaml rm -s -f app",
+                    "docker compose -f 'start app' rm -s -f app",
+                    "docker compose start app-copy backup-copy")
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [])
+
+    def test_shell_operators_end_the_service_list(self):
+        for operator in ("&&", "||", ";", "|", ">", ">start.txt", "<", "<start.txt"):
+            command = f"docker compose start proxy {operator} echo app backup"
+            with self.subTest(operator=operator):
+                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [])
+
+    def test_shell_quotes_and_whitespace_fallback(self):
+        for command in ("docker compose -f 'compose file.yaml' start 'app'",
+                        "docker compose start app 'unclosed"):
+            with self.subTest(command=command):
+                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
+
+
+class RunbookInlineCodeSpansTests(unittest.TestCase):
+    def test_two_spans_on_one_line(self):
+        self.assertEqual(runbook_inline_code_spans("Run `first` and `second`."),
+                         ["first", "second"])
+
+    def test_spans_inside_fenced_blocks_do_not_count(self):
+        for fence in ("```", "~~~"):
+            with self.subTest(fence=fence):
+                text = f"`before`\n  {fence}bash\nprintf `hidden`\n  {fence}\n`after`"
+                self.assertEqual(runbook_inline_code_spans(text), ["before", "after"])
+
+    def test_line_without_a_backtick_has_no_span(self):
+        self.assertEqual(runbook_inline_code_spans("No code on this line."), [])
+
+    def test_double_backtick_span(self):
+        self.assertEqual(runbook_inline_code_spans("Run ``docker compose start app``."),
+                         ["docker compose start app"])
+
+    def test_span_can_hold_a_backtick(self):
+        self.assertEqual(runbook_inline_code_spans("Run `` a`b ``."), ["a`b"])
+
+    def test_unmatched_backtick_run_has_no_span(self):
+        self.assertEqual(runbook_inline_code_spans("Run ``unmatched ` tail."), [])
+
+    def test_only_an_exact_backtick_run_closes_a_span(self):
+        self.assertEqual(runbook_inline_code_spans("`a``b`"), ["a``b"])
+
+    def test_space_normalization_preserves_all_spaces_and_single_ends(self):
+        self.assertEqual(runbook_inline_code_spans("`  ` ` a` `b ` `  c  `"),
+                         ["  ", " a", "b ", " c "])
+
+    def test_span_can_cross_a_line_break(self):
+        for ending in ("\n", "\r\n", "\r"):
+            with self.subTest(ending=ending):
+                text = f"Run `docker compose{ending}start proxy backup`."
+                self.assertEqual(runbook_inline_code_spans(text),
+                                 ["docker compose start proxy backup"])
+
+    def test_line_endings_become_spaces_without_collapsing_other_whitespace(self):
+        text = "Run `\nfoo  \n bar\t\n` now."
+        self.assertEqual(runbook_inline_code_spans(text), ["foo    bar\t"])
+
+    def test_span_cannot_cross_a_paragraph_or_fence(self):
+        for separator in ("\n\n", "\n \t\n", "\n```bash\n`hidden`\n```\n"):
+            with self.subTest(separator=separator):
+                self.assertEqual(runbook_inline_code_spans(f"`first{separator}second`"), [])
+
+    def test_escaped_backtick_without_another_opener_has_no_span(self):
+        # CommonMark 2.4: the escape leaves only one unescaped backtick, with no closer.
+        self.assertEqual(runbook_inline_code_spans(r"\`docker compose start app`"), [])
+
+    def test_escaped_backtick_before_an_unescaped_opener(self):
+        # The first backtick is literal. The next backtick opens the span (CommonMark 2.4).
+        self.assertEqual(runbook_inline_code_spans(r"Run \``docker compose start app`."),
+                         ["docker compose start app"])
+
+    def test_escaped_backslash_does_not_escape_the_opener(self):
+        for count in (2, 4):
+            with self.subTest(count=count):
+                self.assertEqual(runbook_inline_code_spans("\\" * count + "`code`"), ["code"])
+        self.assertEqual(runbook_inline_code_spans("\\" * 3 + "`code`"), [])
+
+    def test_backslashes_inside_a_span_stay_literal(self):
+        # CommonMark 6.1: a backslash cannot escape the closing backtick inside a span.
+        self.assertEqual(runbook_inline_code_spans(r"`foo\`bar`"), ["foo\\"])
+        self.assertEqual(runbook_inline_code_spans(r"``foo\`bar``"), [r"foo\`bar"])
+
+
+class RunbookFenceTests(unittest.TestCase):
+    def test_fences_keep_their_body_out_of_prose_and_inside_bash(self):
+        cases = (
+            ("````bash", "```\n`hidden`\n### Hidden", "````"),
+            ("```bash", "```bash\n`hidden`\n### Hidden", "```"),
+            ("~~~~bash", "~~~\n```\n`hidden`\n### Hidden", "~~~~"),
+            ("   ````bash", "  ```\n`hidden`\n### Hidden", "   ````` \t"),
+        )
+        for opener, body, closer in cases:
+            with self.subTest(opener=opener, body=body):
+                text = f"#### Target\n`before`\n{opener}\n{body}\n{closer}\n`after`"
+                self.assertEqual(runbook_inline_code_spans(text), ["before", "after"])
+                self.assertEqual(runbook_bash_blocks(text), [body])
+                with mock.patch.object(pathlib.Path, "read_text", return_value=text + "\n### Next"):
+                    self.assertEqual(runbook_heading_section("Target", 4), text)
+
+    def test_four_spaces_do_not_open_a_fence(self):
+        text = "    ```bash\n`visible`"
+        self.assertEqual(runbook_inline_code_spans(text), ["visible"])
+        self.assertEqual(runbook_bash_blocks(text), [])
 
 
 class RunbookHeadingSectionTests(unittest.TestCase):
@@ -121,6 +359,141 @@ class RunbookHeadingSectionTests(unittest.TestCase):
         text = "#### Target\nbody\n### Next\n#### Target \t\n"
         with self.assertRaisesRegex(AssertionError, "exactly once, found 2"):
             self.section(text)
+
+
+class RunbookHostRebootTests(unittest.TestCase):
+    required_sentences = (
+        "From step 2 of [Restore into production](#restore-into-production) "
+        "until the procedure starts app and backup again, the two services can have no container.",
+        "The same holds from step 1 of [Recover from the WAL archive](#recover-from-the-wal-archive).",
+        "In that window, proxy cannot become healthy, because its healthcheck calls http://app:9000/healthz.",
+        "Skip step 4 in that window.",
+        "Step 4 runs docker compose exec app.",
+        "In that window, step 1 waits only for db and walarchive, "
+        "and only for a service that docker compose ps -a lists.",
+        "The switch deletes the containers of db and walarchive, and later steps create them again.",
+        "Until step 8 of the recovery deletes the container of db, "
+        "skip this wait when db did not run at step 1 of the recovery.",
+        "Such a db cannot become healthy, and the healthcheck of walarchive needs a running db.",
+        "After step 1 of this section, continue the procedure at the step where it stopped.",
+        "Three cases need an action before you continue:",
+        "If the reboot came between step 4 and step 8 of the recovery, walarchive runs again.",
+        "Run step 4 of the recovery again.",
+        "If the reboot stopped step 4 of the restore or step 6 of the recovery, the new volume is not complete.",
+        # Two literals, so that deploy_values does not read this test text as a volume deletion.
+        "Delete it with docker volume"
+        " rm <new volume>.",
+        "Then start again at step 3 of the restore or at step 5 of the recovery.",
+        "If the reboot stopped step 7 of the restore or step 10 of the recovery, the shell lost the variable target.",
+        "Set target to the directory that sub-step 1 made.",
+        "If sub-step 1 made no directory, run sub-step 1 again.",
+    )
+
+    def prose_paragraphs(self):
+        section = runbook_heading_section("After a host reboot", 3)
+        prose = []
+        fence = None
+        for line in section.splitlines():
+            previous = fence
+            fence = runbook_fence(line, fence)
+            if previous is not None:
+                continue
+            if fence is not None:
+                prose.append("")
+                continue
+            prose.append(line)
+        return re.split(r"\n\s*\n", "\n".join(prose))
+
+    @staticmethod
+    def sentence_count(paragraph):
+        for start, end in reversed(list(runbook_code_span_offsets(paragraph))):
+            paragraph = paragraph[:start] + paragraph[end:]
+        return len(re.findall(r"\.(?:\s|$)", paragraph))
+
+    def test_sentence_count_ignores_url_dots_and_code_spans(self):
+        cases = (
+            ("Read https://example.org/status. Run `one. two.` now.\n"
+             "Call `http://app:9000/healthz`.", 3),
+            ("Run ``a`b. c`` now.", 1),
+            ("Run ``a`b.\nc`` now.", 1),
+            ("Run ``a. b`c`` now.", 1),
+            ("Run ``a.\nb`c`` now.", 1),
+            ("Run `one.\ntwo` now.", 1),
+            (r"Keep \`first. second` in prose.", 2),
+        )
+        for paragraph, expected in cases:
+            with self.subTest(paragraph=paragraph):
+                self.assertEqual(self.sentence_count(paragraph), expected,
+                                 "sentence counter must ignore URL dots and periods inside code spans")
+
+    def test_restore_and_recovery_window_has_conditional_wait_and_skip(self):
+        text = " ".join("\n".join(self.prose_paragraphs()).replace("`", "").split())
+        links = (
+            "[Restore into production](#restore-into-production)",
+            "[Recover from the WAL archive](#recover-from-the-wal-archive)",
+        )
+        for link in links:
+            self.assertIn(link, text, f"After a host reboot: missing link {link}")
+        phrase = "until the procedure starts app and backup again"
+        with self.subTest(phrase=phrase):
+            self.assertIn(phrase, text, f"After a host reboot: missing phrase: {phrase}")
+        for sentence in self.required_sentences:
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, text, f"After a host reboot: missing sentence: {sentence}")
+        old_texts = (
+            "If db did not run at step 1 of the recovery, step 1 waits for no service.",
+            "can never show healthy",
+            "waits only until db and walarchive show healthy",
+            "Before step 8 of the recovery, skip this wait when db did not run at step 1 of the recovery.",
+            "If the reboot came between step 4 and step 8 of the recovery, run step 4 again first.",
+            "Then continue the procedure at the step where it stopped.",
+        )
+        for old_text in old_texts:
+            with self.subTest(old_text=old_text):
+                self.assertNotIn(old_text, text, f"After a host reboot: obsolete text remains: {old_text}")
+
+    def test_recovery_restart_instruction_follows_the_wait(self):
+        text = " ".join("\n".join(self.prose_paragraphs()).replace("`", "").split())
+        markers = (
+            "In that window, step 1 waits only for",
+            "After step 1 of this section, continue the procedure at the step where it stopped.",
+            "Run step 4 of the recovery again.",
+        )
+        for marker in markers:
+            self.assertIn(marker, text, f"After a host reboot: missing order marker: {marker}")
+        self.assertLess(text.index(markers[0]), text.index(markers[1]),
+                        "After a host reboot: wait before continuing the procedure")
+        self.assertLess(text.index(markers[1]), text.index(markers[2]),
+                        "After a host reboot: repeat recovery step 4 after the wait")
+
+    def assert_block_sentence_limits(self, paragraph):
+        if paragraph.startswith("- "):
+            for item in re.split(r"\n(?=- )", paragraph):
+                self.assertLessEqual(self.sentence_count(item), 3,
+                                     f"After a host reboot: list item exceeds three sentences: {item}")
+            return
+        self.assertLessEqual(self.sentence_count(paragraph), 6,
+                             f"After a host reboot: paragraph exceeds six sentences: {paragraph}")
+
+    def test_list_sentence_limit_applies_to_each_item(self):
+        self.assert_block_sentence_limits(
+            "- First. Second. Third.\n"
+            "- Fourth. Fifth. Sixth.\n"
+            "- Seventh. Eighth. Ninth."
+        )
+        self.assert_block_sentence_limits("- First.\n  Second. Third.")
+        with self.assertRaisesRegex(AssertionError, "list item exceeds three sentences"):
+            self.assert_block_sentence_limits("- First.\n  Second. Third. Fourth.")
+        self.assert_block_sentence_limits("First. Second. Third. Fourth. Fifth. Sixth.")
+        with self.assertRaisesRegex(AssertionError, "paragraph exceeds six sentences"):
+            self.assert_block_sentence_limits("First. Second. Third. Fourth. Fifth. Sixth. Seventh.")
+
+    def test_window_paragraphs_have_at_most_six_sentences(self):
+        for paragraph in self.prose_paragraphs():
+            text = " ".join(paragraph.replace("`", "").split())
+            if any(sentence in text for sentence in self.required_sentences):
+                with self.subTest(paragraph=text):
+                    self.assert_block_sentence_limits(paragraph)
 
 
 class RunbookOverlayTests(unittest.TestCase):
