@@ -198,14 +198,15 @@ The directory `RECIPE_SECRETS_DIR` belongs to `root` and has the mode `0700`. Ea
 install -d -m 0700 -o root -g root "$RECIPE_SECRETS_DIR"
 ```
 
-2. Create the eight random values with the command below.
+2. Create the nine random values with the command below.
 
 ```bash
 ( umask 077 && openssl rand -hex 32 > "$RECIPE_SECRETS_DIR/<name>" )
 ```
 
-Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`, `plc_credential_key`.
+Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`, `plc_credential_key`, `backup_manifest_key`.
 The file `plc_credential_key` holds one line of 64 lower-case hex characters. The key has no rotation (ADR-0154).
+The file `backup_manifest_key` holds one line of 64 lower-case hex characters. A key rotation adds a second line (ADR-0174 (n), (q)).
 
 3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it.
 4. Leave `alerts_webhook_url` empty when the plant has no webhook:
@@ -219,7 +220,7 @@ install -m 0600 /dev/null "$RECIPE_SECRETS_DIR/alerts_webhook_url"
 
 | File | Reader | Owner and mode |
 |---|---|---|
-| `postgres_password`, `backup_password`, `replicator_password` | uid 999 | `999`, `0400` |
+| `postgres_password`, `backup_password`, `replicator_password`, `backup_manifest_key` | uid 999 | `999`, `0400` |
 | `login_hmac_key`, `csrf_signing_key`, `plc_credential_key`, `alerts_webhook_url` | uid 65532 | `65532`, `0400` |
 | `tls_cert`, `tls_key` | uid 0 | `0`, `0400` |
 | `app_password`, `migrator_password` | uid 999 and uid 65532 | `0`, `0400`, then an ACL |
@@ -227,8 +228,8 @@ install -m 0600 /dev/null "$RECIPE_SECRETS_DIR/alerts_webhook_url"
 7. Set the owner and the mode with one `chown` and one `chmod` for each row:
 
 ```bash
-chown 999 "$RECIPE_SECRETS_DIR"/{postgres_password,backup_password,replicator_password}
-chmod 0400 "$RECIPE_SECRETS_DIR"/{postgres_password,backup_password,replicator_password}
+chown 999 "$RECIPE_SECRETS_DIR"/{postgres_password,backup_password,replicator_password,backup_manifest_key}
+chmod 0400 "$RECIPE_SECRETS_DIR"/{postgres_password,backup_password,replicator_password,backup_manifest_key}
 chown 65532 "$RECIPE_SECRETS_DIR"/{login_hmac_key,csrf_signing_key,plc_credential_key,alerts_webhook_url}
 chmod 0400 "$RECIPE_SECRETS_DIR"/{login_hmac_key,csrf_signing_key,plc_credential_key,alerts_webhook_url}
 chown 0 "$RECIPE_SECRETS_DIR"/{tls_cert,tls_key}
@@ -246,6 +247,15 @@ setfacl -m u:999:r,u:65532:r "$RECIPE_SECRETS_DIR/migrator_password"
 
 9. Check each file with `stat -c '%a %u' <file>`. The two files with an ACL show the mode `440`.
 10. Check the ACL of both files with `getfacl`. The owning group has no right.
+
+11. List the disk of the key file and the disk of the backup directory:
+
+```bash
+df --output=source "$RECIPE_SECRETS_DIR/backup_manifest_key" "$RECIPE_BACKUP_DIR"
+```
+
+12. Check that the column `Filesystem` of the two data lines differs. If the lines are equal, move `RECIPE_SECRETS_DIR` to another disk (ADR-0174 (p)).
+13. Copy the file `backup_manifest_key` to one offline medium. Keep the medium apart from the backup disk and the off-site copy (ADR-0174 (r)).
 
 ADR-0062 (l) to (o) gives the rules of this section.
 The section "Alert webhook" gives the rules of the URL of step 3.
@@ -461,6 +471,8 @@ When the Docker service starts, Docker starts the containers with the policy `al
 Docker does not apply `depends_on` then. `app` can fail its start while `db` is not ready, and Docker starts it again (ADR-0061 (b)).
 The one-shot services do not run, because their policy is `no`.
 A service that you stopped with `docker compose stop` can start again after a reboot.
+After a failed rollback restore after a failed upgrade, `app` stays stopped and has no container. Steps 1 and 4 cannot pass in that state.
+Use the section [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade), and do not start `app` for these steps.
 
 1. Run `docker compose ps -a`. Wait until `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
 2. If a service restarts, run `docker compose logs <service>`. For `app`, use the section "Alarms, read-only mode, and restart loop".
@@ -485,6 +497,8 @@ If the alert `replication` stays active, use the section "A gap in the WAL strea
 1. Run `docker compose exec backup restore-test`.
 2. Check that the exit code is 0 and the output holds the line `restore test passed`.
 3. Check that the line names the set that you expect (ADR-0067).
+
+At each restore drill, also run the section "Compare the offline copy" (ADR-0174 (r)).
 
 ### Statement outside the role grammar
 
@@ -514,7 +528,7 @@ This section names the files to copy, the host directories, and the check of a c
 
 | What | Host path | Files to copy |
 |---|---|---|
-| Sets | `$RECIPE_BACKUP_DIR` | For each set: `recipe_<stamp>.dump`, `globals_<stamp>.sql`, `recipe_<stamp>.counts`, and `recipe_<stamp>.dump.sha256` |
+| Sets | `$RECIPE_BACKUP_DIR` | For each set: `recipe_<stamp>.dump`, `globals_<stamp>.sql`, `recipe_<stamp>.counts`, `recipe_<stamp>.dump.sha256`, and `recipe_<stamp>.dump.sha256.hmac` |
 | Base backups | `$RECIPE_WALARCHIVE_DIR/base` | Each directory `base_<YYYYMMDD_HHMMSS>` |
 | WAL segments | `$RECIPE_WALARCHIVE_DIR` | The segment files and the `.partial` file at the top of the directory |
 
@@ -643,6 +657,8 @@ Delete no volume and no file of the WAL archive during the procedure. ADR-0103 (
 A recovery from the WAL archive gives a recovery point of minutes (`reliability.md` 7.7, ADR-0068 (l), R31).
 The section [Recover from the WAL archive](#recover-from-the-wal-archive) gives the steps for that recovery.
 
+On a new host, run the section "Restore the key file on a new host" before step 1.
+
 If the set is not the newest set, steps 1 to 8 of `restore-volume` are the test of that set (ADR-0103 (b)).
 The login check of step 8 of `restore-test` then has no equal before the switch.
 
@@ -660,7 +676,7 @@ docker compose stop app backup
 docker volume create "recipe-editor_pgdata_$(date -u +%Y%m%d_%H%M%S)"
 ```
 
-4. Fill the new volume. The container has no network and no secret. `db` keeps running on the old volume:
+4. Fill the new volume. The container has no network. It mounts one secret, the file `backup_manifest_key` (ADR-0174 (y)). `db` keeps running on the old volume:
 
 ```bash
 docker compose run --rm --no-deps -T -v "<new volume>:/var/lib/postgresql/data" restore-volume <stamp>
@@ -669,8 +685,14 @@ docker compose run --rm --no-deps -T -v "<new volume>:/var/lib/postgresql/data" 
    The last output line holds `restore volume completed`, the name of the set, and the field `system_identifier`. Note that field.
    If the command exits with a code other than 0, read its `ERROR` line. The new volume holds no production data and `.env` does not name it.
    Delete the new volume with `docker volume rm <new volume>`, fix the cause, and start again at step 3 (ADR-0103 (i)).
-   To end the attempt, set `RECIPE_VERSION` in `.env` to `<tag>`. Then start `app` and `backup` as in "Stop, start, and restart".
-   The old volume fits `<tag>` only. In a major upgrade, run these commands in the directory of `<old tag>` (section "Major upgrade", ADR-0105 (c), (e)).
+   To end the attempt, set `RECIPE_VERSION` in `.env` to `<tag>`. Do this before you start a container.
+   For a plain rollback, `<tag>` is the new release tag. Run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as `<tag>`.
+   Then start `app` and `backup` as in "Stop, start, and restart". Create `backup` again with `docker compose up -d --no-deps --force-recreate backup`.
+   For a failed upgrade, `.env` keeps the previous tag and `COMPOSE_FILE`. Start no `app` and no container of the new image. See [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade).
+   In every other case, start `app` and `backup` as in "Stop, start, and restart".
+   In a plain rollback, the old volume fits `<tag>` only.
+   After a failed upgrade, the old volume holds the schema of the failed `migrate`. That schema can match no image (ADR-0083).
+   In a major upgrade, run these commands in the directory of `<old tag>` (section "Major upgrade", ADR-0105 (c), (e)).
 
 5. Run the switch (ADR-0103 (f)). Never run `docker compose down` or `docker compose start` here:
    1. Stop the five containers and delete them. The commands delete containers only:
@@ -1191,7 +1213,10 @@ A rollback needs the images of the previous release. See the section "Keep the i
 
 ### Upgrade
 
+Before step 1, do the text block "Manifest key file before step 1" and run the "Probe of the previous image". Both are after step 24.
+
 1. Read the release notes. Note whether the migration follows the expand pattern. Note the line "manual superuser step".
+   Note the new release tag. Only command 1 of the `_premigrate` restore in the section "Rollback" uses it, as `<new tag>`.
 2. Do the three parts below in this order: the installation, the name check, and the segment check.
    Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
    1. Run the section "Check the stored data against the platform ranges" from the directory `deploy/` of the new release.
@@ -1207,9 +1232,26 @@ A rollback needs the images of the previous release. See the section "Keep the i
    Run it after the S7 layout check and before step 3.
    Save the PLC connection of each listed machine with the previous release.
    Continue only when the query returns 0 rows.
-3. Run `docker compose run --rm --no-deps backup restore-test`. `.env` still holds the previous tag. Continue only after the test passes.
+3. Run the restore test of the previous image in a new container. `.env` still holds the previous tag. Continue only after the test passes.
+   Run only one of the two commands.
+
+   If the probe of the previous image printed `check`, run this command:
+
+```bash
+docker compose run --rm --no-deps backup restore-test
+```
+
+   If the probe printed `no-check`, run this command:
+
+```bash
+docker compose -f compose.yaml -f compose.previous.yaml run --rm --no-deps backup restore-test
+```
+
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag.
+   Run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as the new release tag.
+   The copied `.env` can hold `COMPOSE_FILE` from an earlier rollback. That section deletes it.
+   This step does not create `backup`. Command 1 of the four commands gives `backup` the new image and the key.
 6. Run steps 6 and 7 of the section "Create the environment file". The image tags show the new tag.
    Then do the steps of "Key file of step 6".
 7. If the plant has a device, use steps 1 to 3 of "A plant device in front of Caddy" again.
@@ -1233,7 +1275,11 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
    4. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
 11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`. Between the commit of `0013` and the row lock of `0014`, a previous-release command that updates a live S7 machine fails with `E-DB-003`.
-12. If `backup-premigrate` or `migrate` fails, stop. Set the previous tag in `.env`. Check it (step 6).
+12. If `backup-premigrate` or `migrate` fails, stop. Do the parts below in this order.
+   1. Set the previous tag in `.env`. Check it (step 6).
+   2. If the probe of the previous image printed `no-check`, add the line `COMPOSE_FILE=compose.yaml:compose.previous.yaml` to `.env`. Delete each older line `COMPOSE_FILE`.
+   3. For the same probe result, run `docker compose up -d --no-deps --force-recreate backup`. The running `backup` then runs the previous image without the key and without the weekly `restore-test`.
+   4. For a `_premigrate` restore after this failure, use step 1 of the section "Rollback". `<new tag>` there is the tag that step 1 of this list noted.
 13. Start the guard step. Write the start time into the change log ([rule](#change-log-of-the-site)). Run `docker compose exec -u postgres db psql -d recipe`.
 14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
 
@@ -1264,6 +1310,25 @@ grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.exp
 22. Log in, open one recipe, and export one version. Check its hash as `api.md` section 6 describes.
 23. Run the four commands of the list below, while the new `app` serves.
 24. Run the [Recovery drill](#recovery-drill) after the four commands pass (ADR-0106 (o)).
+
+Manifest key file before step 1 (ADR-0174):
+The new Compose file mounts the secret `backup_manifest_key` in `backup`, `backup-premigrate`, and `restore-volume`. A release before ADR-0174 has no such file.
+Run steps 2, 7, 9, and 11 to 13 of the section "Create the secret files" for `backup_manifest_key` only. The steps 2 and 13 name the value and the offline copy.
+Never replace an existing file. A new key makes a restore refuse each set of the old key (ADR-0174 (x)).
+
+Probe of the previous image (ADR-0174 (aa)):
+An image has the tag check when it holds `/etc/pgtools/manifest-tag.pl`. Run the probe once, before step 3. Note the result.
+The command prints `check` or `no-check`. It uses no key and no mount:
+
+```bash
+docker run --rm --network none --entrypoint sh recipe-pgtools:<previous tag> -c 'if test -f /etc/pgtools/manifest-tag.pl; then printf "check\n"; else printf "no-check\n"; fi'
+```
+
+When the result is `no-check`, the previous image never gets the key.
+Each Compose command that runs `backup`, `backup-premigrate`, or `restore-volume` with that image adds the file `compose.previous.yaml`.
+After a failed upgrade and in a rollback, `COMPOSE_FILE` in `.env` names `compose.yaml` and `compose.previous.yaml` while `.env` holds that tag.
+The file `compose.previous.yaml` also turns off the weekly `restore-test` of the previous `backup` until the next upgrade.
+When the result is `check`, no step adds the file, and the previous image gets the key.
 
 Key file of step 6 (ADR-0154):
 The new `app` refuses to start when the file `plc_credential_key` is missing or has a wrong form.
@@ -1444,15 +1509,15 @@ Choose one of two actions (ADR-0083). The first is a forward fix. The second is 
 
 Recovery after a failure between two steps (ADR-0097 (h2)):
 
-- Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop.
-- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old.
+- Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop. If the probe printed `no-check`, also do parts 2 and 3 of step 12.
+- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old. For a `_premigrate` restore, use step 1 of the section "Rollback".
 - A step from 13 to 17 fails: the schema is new and the guard function is old. Run steps 13 to 17 again. Run no `backup-now` until step 17 passes.
 - A step of the segment check fails: nothing changed, and the step wrote no file. Read the `ERROR` line. Stop the upgrade, except for the case without a complete segment and without a `.partial` file. The error `the file .system-identifier exists, but the sync of the directory failed` is the exception. The file exists, so a second run prints `The segment check does not run.` Check the disk of the WAL archive before the next step.
 - A command of the list of step 23 fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
 
 The four commands give the new image of `recipe-pgtools` to `backup` and `walarchive`:
 
-1. Run `docker compose up -d --no-deps backup walarchive`.
+1. Run `docker compose up -d --no-deps backup walarchive`. This command gives `backup` the new image and the key.
 2. Run `docker compose exec backup backup-now`.
 3. Run `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
    - If the test names a `_premigrate` set of the same UTC minute, rerun commands 2 and 3 later.
@@ -1500,15 +1565,55 @@ A rollback restore to the schema of 0.1.0 has no procedure, because the image of
 
 Use these placeholders in addition to the placeholders of [Restore into production](#restore-into-production):
 
-- `<tag>` is the new tag. It is the value of `RECIPE_VERSION` in `.env` now, and it is the tag of the old cluster.
+- `<tag>` is the tag that the old volume runs. It is the value of `RECIPE_VERSION` in `.env` now.
+  In the plain rollback, `<tag>` is the new tag. After a failed upgrade, `<tag>` is the previous tag.
+- `<new tag>` is the new release tag that step 1 of the section "Upgrade" notes. Only command 1 of step 1 uses it. In the plain rollback, it equals `<tag>`.
 - `<stamp>` is the name of the `_premigrate` set, for example `<YYYYMMDD_HHMM>_premigrate`.
 
-1. Stop `app` and `backup`. Then create the new volume. Run steps 2 and 3 of "Restore into production".
+1. Stop `backup`. Run the check of the set below, which is command 1. Only after it passes, delete `app`.
+   Then create the new volume. Run step 3 of "Restore into production".
+   Run no step 2 of that list, because the commands below already stop `backup` and delete `app`.
    Skip step 1 of that list. Steps 1 to 8 of `restore-volume` test the `_premigrate` set (ADR-0103 (b)).
-2. Set `RECIPE_VERSION` in `.env` to the previous tag. Load the values into the shell again with `. ./.env`.
+   For a failed upgrade, see [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade).
+
+```bash
+docker compose stop backup
+env -u COMPOSE_FILE RECIPE_VERSION=<new tag> docker compose -f compose.yaml run --rm restore-volume --check-only <stamp>
+```
+
+   Run the next block only after command 1 exits with the code 0.
+
+```bash
+docker compose rm -s -f app
+```
+
+   Command 1 checks the tag of the set with the new image. This step applies to both states of `.env`.
+   In a plain rollback, `.env` holds the new tag. After a failed upgrade, `.env` holds the previous tag and `COMPOSE_FILE`.
+   The option `-f` and `env -u COMPOSE_FILE` ignore each `COMPOSE_FILE`. The variable `RECIPE_VERSION` selects the new image in both states.
+   Without these parts, the second state runs the check with the previous image. That image stops with `usage: restore-volume <stamp>`. This stop looks like a failed check.
+   The order of the parts matters. The new image with the file `compose.previous.yaml` has no key, so its check stops. The previous image has no mode `--check-only`.
+   Stop `backup` before command 1. A weekly `restore-test` of a running `backup` can hold the lock of `restore-volume`.
+   Command 1 then stops with a fault that the set does not cause.
+   Delete `app` only after command 1 passes. A failed check then leaves the running `app` unchanged.
+   The reason of the delete is the later start of `app`. `app` has `restart: always`, so a stopped container starts again after a reboot or a restart of the container engine.
+   Its writes then make the lost period of the rollback longer, and no message shows them. After a failed upgrade, the previous `app` also starts on the schema of the failed `migrate`.
+   The delete applies to both states of `.env`. In a plain rollback, the later start of `app` creates the container again.
+   A failed command 1 stops the rollback. In a plain rollback, `.env` still holds the new tag.
+   Then run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as the new release tag.
+   After that, start `app` and `backup`. Create `backup` again as step 4 of "Restore into production" says.
+   After a failed upgrade, a failed command 1 keeps the previous tag and `COMPOSE_FILE` in `.env`. No step then starts a container of the new image.
+   Start only `backup` again with the first block of the section linked above. `app` keeps running.
+
+2. Set `RECIPE_VERSION` in `.env` to the previous tag. Do this only after command 1 of step 1 passes.
+   If the probe of the previous image printed `no-check`, add the line `COMPOSE_FILE=compose.yaml:compose.previous.yaml` to `.env`. Delete each older line `COMPOSE_FILE`.
+   Run the probe again when you did not note its result. See the section "Upgrade".
+   Load the values into the shell again with `. ./.env`.
    `walarchive` and `backup` then start with the previous image (ADR-0103 (q)).
 3. Fill the new volume. Run step 4 of "Restore into production" with `<stamp>` of the `_premigrate` set.
    If step 4 fails, end the attempt as step 4 says. `.env` then holds `<tag>` again, because the old volume holds the newer schema (ADR-0105 (c)).
+   For a plain rollback, run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as `<tag>`, the new release tag.
+   Run it before you start `app` and `backup`.
+   For a failed upgrade, `.env` keeps the previous tag and `COMPOSE_FILE`. Start only `backup`. See [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade).
 4. Run the switch. Run step 5 of "Restore into production". If its sub-step 7 fails, run the [Switch back](#switch-back) at once.
 5. Set the role passwords. Run step 6 of "Restore into production".
 6. Start the new WAL line. Run step 7 of "Restore into production". `walarchive` starts with the previous tag, before `app` (ADR-0103 (q), (s)).
@@ -1536,6 +1641,128 @@ After a rollback with the expand pattern, `.env` keeps the new tag. A later comm
 Every command that starts or recreates `app` therefore passes the previous tag in the same way as step 1 of the rollback.
 Put `RECIPE_VERSION=<previous tag>` before `docker compose`. Keep the other options of the command, for example `--force-recreate`.
 This holds until the section "Upgrade" sets a new tag.
+
+#### Leave the file compose.previous.yaml
+
+Use this section when an edit of `.env` writes a tag whose image has the tag check (ADR-0174 (aj)).
+The function writes `RECIPE_VERSION=<write tag>` and deletes each line `COMPOSE_FILE` from `.env`. Then it runs `unset COMPOSE_FILE`.
+A `COMPOSE_FILE` in the shell takes precedence over `.env`, so the function clears it too.
+Each place below names its value of `<write tag>`:
+
+1. Step 5 of "Upgrade" and step 7 of "Major upgrade". `<write tag>` is the new release tag.
+   Step 6 of "Load the images" also writes that tag, but a first installation has no `COMPOSE_FILE`, so it needs no exit.
+   These places do not create `backup`. The four commands of "Upgrade" give `backup` the new image and the key.
+2. Step 3 of "Rollback" and step 4 of "Restore into production", in the plain rollback only. `<write tag>` is the new release tag, which equals `<tag>` there.
+   Only these places then create `backup` again. The command is in step 4 of "Restore into production".
+3. Step 3 of "Switch back". Use it only when the probe of ADR-0174 (aa) finds the tag check in the image of `<tag>`. Else `COMPOSE_FILE` stays.
+   `<write tag>` is the `<tag>` of that section, the tag of the old volume. It always writes that tag.
+   After the plain rollback, that tag is the new release tag. Only after a failed upgrade is it the previous tag.
+   Then this place must not write the new release tag, because the new `backup` would start on the schema of the failed `migrate`.
+   This place does not create `backup`. Step 1 of "Switch back" deletes the containers, and step 8 creates `backup` with the key.
+
+After the exit, the configuration must show `backup_manifest_key` on `backup`, `backup-premigrate`, and `restore-volume`. Print it with `docker compose --profile restore config`.
+
+The other edits that write a previous tag need no exit. Step 12 of "Upgrade", step 2 of "Rollback", and the fault list of "Upgrade" write the previous tag.
+They set `COMPOSE_FILE` when the probe finds no tag check.
+
+The function runs `perl` on the Docker host. Run `perl -v` once before the upgrade. Install Perl from the distribution if the command fails.
+In `deploy/`, paste the block, then run `leave_previous_overlay . <write tag>`.
+
+```bash
+leave_previous_overlay() {
+  local directory=$1 write_tag=$2 temp=''
+  if ! {
+    temp=$(mktemp "$directory/.env.XXXXXX") &&
+    perl -e 'my $tag = shift @ARGV;
+      open my $env, "<", shift @ARGV or exit 1;
+      $_ = "";
+      while (1) {
+        my $count = read $env, my $chunk, 65536;
+        defined $count or exit 1;
+        last if $count == 0;
+        $_ .= $chunk;
+      }
+      close $env or exit 1;
+      if (length $_) {
+        s/^(?:COMPOSE_FILE|RECIPE_VERSION)=[^\n]*(?:\n|\z)//mg;
+        print "RECIPE_VERSION=$tag\n$_" or exit 1;
+      }
+      close(STDOUT) or exit 1;' "$write_tag" "$directory/.env" >"$temp" &&
+    chown --reference="$directory/.env" -- "$temp" &&
+    chmod --reference="$directory/.env" -- "$temp" &&
+    mv -f -- "$temp" "$directory/.env"
+  }
+  then
+    rm -f -- "$temp" || printf 'ERROR: cannot delete the environment temp file.\n' >&2
+    printf 'ERROR: cannot leave the previous Compose overlay.\n' >&2
+    return 1
+  fi
+  unset COMPOSE_FILE
+}
+```
+
+After an interrupt, delete a left file `.env.??????` in `deploy/`. `.env` stays unchanged, because `mv` is atomic.
+The function copies the owner of `.env` with `chown --reference`. An operator without root cannot do this when another uid owns `.env`.
+An example is `.env` that belongs to root after an edit with `sudo`.
+Then the function keeps `.env` and returns a code other than 0.
+Give `.env` back to the operator, for example with `sudo chown`. Then run the function again.
+
+#### Failed rollback restore after a failed upgrade
+
+Use this section after a failed upgrade, when the `_premigrate` restore of the section "Rollback" fails.
+`.env` then holds the previous tag and `COMPOSE_FILE`. No step starts a container of the new image.
+Only `backup` starts again. `app` stays stopped until the owner decides the next action.
+
+After a failed check, `app` keeps running, and the first block applies.
+After a failed full restore, `app` stays stopped, and the second block applies.
+After a switch back, `app` stays stopped, and the first block applies. Step 1 of "Switch back" already deleted the container of `app`.
+
+After a failed check, or at step 8 of "Switch back", start only `backup`:
+
+```bash
+docker compose up -d --no-deps backup
+```
+
+After a failed `restore-volume <stamp>`, delete the container of `app` before the start of `backup`:
+
+```bash
+docker compose rm -s -f app
+docker compose up -d --no-deps backup
+```
+
+Step 1 of "Rollback" already deleted the container of `app`. The `rm` line of the second block repeats that delete and changes nothing then.
+The line keeps this state free of a link to an earlier step.
+The reason of the delete is the start after a reboot. A stopped `app` with `restart: always` starts again after a reboot (section "After a host reboot").
+
+`app` stays stopped until a forward correction of ADR-0083, a new restore, or a restore with `pitr-volume` (ADR-0106).
+The operator starts `app` earlier only after the operator checks that the schema of the old volume works with the previous image.
+An example is a migration of the expand pattern. The owner chose this rule for three reasons (ADR-0174 (aj)):
+
+1. The old volume holds the schema of the failed `migrate`. That schema can match no image (ADR-0083).
+2. Each write after a restart of `app` makes the lost period longer.
+3. The project gives data safety priority over availability.
+
+Start `app` with the section "Stop, start, and restart" after that confirmation.
+After that start, wait until the alert `replication` is inactive (step 14 of "A gap in the WAL stream").
+
+While `app` stays stopped, no job `alerts` runs. Run two checks once a day, after 04:00 UTC.
+The time is `backup.time` plus `backup.max_age_alert` minus 24 h (`reliability.md` §7.11). The daily run then has the margin of the alert `backup_age`.
+
+1. Run the stream check of step 9 of "A gap in the WAL stream". It passes on one row with the state `streaming` and a `flush_lsn`.
+2. Run the dump check below. It passes when it prints a name and exits with the code 0.
+
+For the daily dump check, list the complete daily sets of the current UTC day:
+
+```bash
+docker compose exec -T -e LC_ALL=C backup sh -c 'ls /backups/recipe_$(date -u +%Y%m%d)_[0-9][0-9][0-9][0-9].dump.sha256'
+```
+
+The option `-e LC_ALL=C` sets the locale of the match (ADR-0074 (c)).
+The glob `[0-9][0-9][0-9][0-9]` matches only the four digits of the time of a daily set.
+A `_premigrate` set, a `_now` set, or a foreign name such as `recipe_<day>_abcd.dump.sha256` does not count.
+A foreign name would hide a missing set of the day and give a false pass.
+The check reads the stamp and not the age. `backup-health` takes the age from the modification time of the manifest, so an age check hides a failed dump.
+The stream check does not compare the lag with `wal.max_lag_bytes`. The wait for the alert `replication` after the start of `app` does.
 
 ### Switch back
 
@@ -1565,6 +1792,13 @@ docker run --rm --network none --security-opt no-new-privileges:true -e LC_ALL=C
    Their values are `<left identifier>` and `<left timeline>`.
    If the output holds no timeline, write the word `unreadable` in place of the timeline (ADR-0106 (j)).
 3. Write `<old volume>` as `RECIPE_PGDATA_VOLUME` and `<tag>` as `RECIPE_VERSION` in `.env` (ADR-0105 (d)).
+   Run the block "Probe of the previous image (ADR-0174 (aa))" with the image `recipe-pgtools:<tag>` and use its result, `check` or `no-check`.
+   If the probe of ADR-0174 (aa) finds the tag check in the image of `<tag>`, run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as `<tag>`.
+   Else keep `COMPOSE_FILE`. It must name `compose.yaml` and `compose.previous.yaml` while `.env` holds a tag without the tag check.
+   This tag belongs to the old volume. After a plain rollback, it is the new release tag.
+   Only after a failed upgrade is it the previous tag. Each previous image in a later release has the tag check.
+   Step 8 with the new release tag would start the new `backup` on the schema of the failed `migrate`.
+   ADR-0174 (aj) forbids that start.
    Then run sub-steps 5 and 6 of step 5 of "Restore into production".
    The name that sub-step 6 prints must equal `<old volume>`.
 4. Run the command of sub-step 2 of step 5 of "Restore into production" with `<old volume>`.
@@ -1584,6 +1818,8 @@ docker compose up -d --no-deps walarchive
       Use `<left identifier>` in place of `<old identifier>`, and `<left timeline>` in place of `<old timeline>`.
       If the change log holds no timeline for `<left volume>`, or holds the word `unreadable`, write the first line only in sub-step 3 (ADR-0106 (l)).
 8. Start `app`, and then `proxy` and `backup` (ADR-0103 (g)):
+   After a failed upgrade, start only `backup`. `app` and `proxy` stay stopped.
+   See [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade).
 
 ```bash
 docker compose up -d --no-deps app
@@ -1591,6 +1827,12 @@ docker compose up -d --no-deps proxy backup
 ```
 
 9. Run sub-step 6 of step 9 of "Restore into production". Then wait until the alert `replication` is inactive.
+   After a failed upgrade, step 1 deleted the container of `app`, and the job `alerts` runs in `app`.
+   Sub-step 6 then inspects the service `backup` only.
+   Do not wait for the alert. Run the stream check of step 9 of "A gap in the WAL stream" instead.
+   That check is a query in `db` and needs no `app`. It passes on one row with the state `streaming` and a `flush_lsn`.
+   `app` can stay stopped for a long time, and `pitr-volume` needs the WAL archive. A wait at the later start of `app` leaves the stream unchecked until then.
+   The later start of `app` waits for the alert `replication`, as the section linked in step 8 says.
 
 ### Keep the images for a rollback
 
@@ -1677,6 +1919,7 @@ If a step before step 8 fails, change into the directory of `<old tag>`. Then ru
    The restart of sub-step 3 of step 5 of "Restore into production" and the switch back run in that directory.
 6. Do the installation and the name check of step 2 of "Upgrade" (ADR-0105 (i), (j)). A refusal stops the procedure.
 7. Load the new images as in "Load the images". Do not stop `db`. Step 6 of that section writes `<new tag>` into `.env`.
+   Then run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as `<new tag>`, the new release tag.
 8. Fill the new volume and run the switch. Run steps 2 to 5 of "Restore into production".
    Skip step 1 of that list, because steps 3 and 4 above are the test. Use the `_now` set of step 2 as `<stamp>`.
    - Step 4 runs `restore-volume` with the `recipe-pgtools` image of `<new tag>`. That image builds on the `db` image of the new major version (ADR-0103 (p)).
@@ -1713,6 +1956,7 @@ The old volume stays unchanged.
 
 The files `login_hmac_key` and `csrf_signing_key` hold one key per line, the newest key first (ADR-0035).
 The file `plc_credential_key` is not part of this section. It holds one key and has no rotation (ADR-0154).
+The file `backup_manifest_key` has its own subsection, "Rotate the manifest key".
 
 1. Run the command below once for each key file. Use `login_hmac_key` and `csrf_signing_key` for `<name>`.
 
@@ -1761,6 +2005,129 @@ An event of a login that belongs to a user stays visible, because the filter als
 
 The key `csrf_signing_key` signs the pre-session cookie of the login page. After step 12, a login page that was open before step 4 may fail.
 The user then gets `403 E-WEB-007`. The user opens the login page again to get a new cookie.
+
+### Rotate the manifest key
+
+The file `backup_manifest_key` signs the manifest of each set (ADR-0174).
+The file holds at most 2 lines. Each line is one key of 64 lower-case hex characters, and the first line is the newest key (ADR-0174 (n)).
+`backup-once` signs with the first line. A restore accepts a tag of either line (ADR-0174 (o)).
+This rotation is separate from `security.key_rotation_overlap`. A key line stays while a kept set, a `_premigrate` set, or an off-site copy needs it (ADR-0174 (q)).
+The key id of a set is the second field of its tag file `recipe_<stamp>.dump.sha256.hmac`.
+
+No host account and no other container uses uid 999. The host file belongs to uid 999 and has the mode `0400`.
+A process with uid 999 or root, or a container with uid 999, is an online writer. An online writer is a known limit of the tag (ADR-0174 (b)).
+Use these placeholders:
+
+- `<tag>` is the value of `RECIPE_VERSION` in `.env`. The image `recipe-pgtools:<tag>` must hold `/etc/pgtools/manifest-tag.pl`.
+- `<copy>` is the path of the file `backup_manifest_key` on the offline medium.
+
+The command below prints the key id of each line of a key file, in file order. It prints no key:
+
+```bash
+docker run --rm --network none --security-opt no-new-privileges:true -v "$RECIPE_SECRETS_DIR/backup_manifest_key:/run/secrets/backup_manifest_key:ro" --entrypoint perl "recipe-pgtools:<tag>" /etc/pgtools/manifest-tag.pl key-ids /run/secrets/backup_manifest_key
+```
+
+#### Routine rotation
+
+Use the routine rotation on the schedule of the site.
+
+1. Write the new key as the first line and keep the old key as the second line. The command prints no key:
+
+```bash
+( umask 077 && { openssl rand -hex 32; cat "$RECIPE_SECRETS_DIR/backup_manifest_key"; } > "$RECIPE_SECRETS_DIR/backup_manifest_key.new" )
+```
+
+2. Run the two commands of step 2 of "Key rotation" on the new file. Check that both numbers are 2.
+3. Set the owner and the mode of the new file. Then move it over the old file:
+
+```bash
+chown 999 "$RECIPE_SECRETS_DIR/backup_manifest_key.new"
+chmod 0400 "$RECIPE_SECRETS_DIR/backup_manifest_key.new"
+mv "$RECIPE_SECRETS_DIR/backup_manifest_key.new" "$RECIPE_SECRETS_DIR/backup_manifest_key"
+```
+
+4. Run `docker compose up -d --force-recreate --no-deps backup`. Run `docker compose ps backup` until `backup` shows `healthy`.
+5. Run the section "Run a backup now". Check that the new set has the new key id as the second field of its tag file.
+6. Copy the new key file to the offline medium. Run the section "Compare the offline copy".
+7. Copy the secret files again, as the section "Copy the backups off site" says.
+8. Delete the old line only when no kept set, no `_premigrate` set, and no off-site copy has its key id. List the key ids of the sets of the host:
+
+```bash
+cut -d' ' -f2 "$RECIPE_BACKUP_DIR"/recipe_*.dump.sha256.hmac | sort | uniq -c
+```
+
+9. Run the same command in the directory of each off-site copy. Delete the old line only when no line shows the old key id.
+10. Delete the old line from the key file. This step deletes one key and no data.
+11. Run the two commands of step 2 of "Key rotation" on the file. Check that both numbers are 1.
+12. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/backup_manifest_key"`. Check that the output is `400 999`.
+13. Run `ls -A "$RECIPE_SECRETS_DIR"`. Check that the list holds no editor copy of the key file.
+14. Run step 4 again. Copy the new key file to the offline medium and run the section "Compare the offline copy".
+
+A set of the old key that stays on the host or off site needs the old line. Delete the line later, when no such set remains.
+
+#### Compromise rotation
+
+Use the compromise rotation after each incident of the class of ADR-0084.
+The SQL of a set of such an incident can read the key (ADR-0174 (q), known limit (ah)).
+The new file holds only the new key. A restore then refuses each set of the old key.
+
+1. Write a file with only the new key. The command prints no key:
+
+```bash
+( umask 077 && openssl rand -hex 32 > "$RECIPE_SECRETS_DIR/backup_manifest_key.new" )
+```
+
+2. Run the two commands of step 2 of "Key rotation" on the new file. Check that both numbers are 1.
+3. Run the commands of step 3 of the routine rotation.
+4. Run step 4 and step 5 of the routine rotation.
+5. Copy the new key file to the offline medium. Run the section "Compare the offline copy".
+6. Copy the secret files again, as the section "Copy the backups off site" says.
+
+The sets of the old key stay on the disk but no restore accepts them. Plan a new set for each use of the old sets.
+
+#### Compare the offline copy
+
+Keep one offline copy of the key file. Keep it apart from the backup disk and the off-site copy (ADR-0174 (r)).
+Run these steps at each copy and at each restore drill, as in "Run the restore test".
+
+1. Compare the copy with the host file. The command prints nothing when both files are equal:
+
+```bash
+cmp -- <copy> "$RECIPE_SECRETS_DIR/backup_manifest_key"
+```
+
+2. Print the key ids of the host file with the command at the start of this section.
+3. Print the key id of the newest tag file: `cut -d' ' -f2 "$RECIPE_BACKUP_DIR/recipe_<stamp>.dump.sha256.hmac"`.
+4. Check that the key id of step 3 equals a key id of step 2.
+5. If a step shows a difference, write the host file again to the medium. Then run the steps again.
+
+The copy keeps each key that a kept set or an off-site copy needs.
+
+#### Restore the key file on a new host
+
+Do these steps before the first restore on a new host. A restore refuses each set without a valid tag (ADR-0174 (x)).
+
+1. Create the secret directory as in step 1 of "Create the secret files".
+2. Copy the key file from the offline medium. The command writes the mode `0600` first:
+
+```bash
+( umask 077 && cat <copy> > "$RECIPE_SECRETS_DIR/backup_manifest_key" )
+```
+
+3. Set the owner and the mode, as in step 7 of "Create the secret files":
+
+```bash
+chown 999 "$RECIPE_SECRETS_DIR/backup_manifest_key"
+chmod 0400 "$RECIPE_SECRETS_DIR/backup_manifest_key"
+```
+
+4. Run `stat -c '%a %u' "$RECIPE_SECRETS_DIR/backup_manifest_key"`. Check that the output is `400 999`.
+5. Run steps 11 and 12 of "Create the secret files". Check that the key file and the backup disk have two different filesystems (ADR-0174 (p)).
+6. Print the key ids of the file with the command at the start of this section.
+7. Print the key ids of the sets that you restore, with the command of step 8 of the routine rotation. Check that each of them is in the list of step 6.
+
+The Compose file mounts the file as `/run/secrets/backup_manifest_key` in the services `backup`, `backup-premigrate`, and `restore-volume`.
+No other service mounts it. Compose reads the host file when it starts the container (ADR-0174 (m)).
 
 ## Certificate rotation
 
@@ -2496,6 +2863,9 @@ The script `backup-entry` writes the message about the marker file too. Then the
 
 The nightly run, `backup-now`, and `backup-premigrate` run the same script. `backup-now` prints the line on the terminal.
 Read the other runs with `docker compose logs backup` and `docker compose logs backup-premigrate`.
+The rows about the manifest key file come from `backup-once`, from `backup-entry` at the start of `backup`, and from `restore-test` and `restore-volume`.
+The rows about the tag file come from `restore-test` and `restore-volume` (ADR-0174 (w)).
+`restore-volume` prints its line on the console. Only the message `the manifest key file has a bad line` has the field `line`. It names the line of the key file.
 
 | Message | Cause | Action |
 |---|---|---|
@@ -2505,6 +2875,38 @@ Read the other runs with `docker compose logs backup` and `docker compose logs b
 | `cannot read the password file of recipe_backup` or a message that starts with `the password file of recipe_backup` | The file `backup_password` is unreadable, is empty, or has a wrong form. | Check the owner and the mode as in the section "Create the secret files". The file holds one line and no carriage return. |
 | `cannot publish a file of the set without replacing a file` | The filesystem of the second disk may lack hard links (ADR-0074 (e)). | Check the filesystem as in step 1 of the section "Prepare the second disk". |
 | `pg_dump failed`, `pg_dumpall failed`, or `the snapshot session ended before it answered` | The tool or the database stopped the run. | Read the lines above the message. Run `docker compose ps db`. No document gives a further action. |
+| `the manifest key file is missing` | The container has no file `/run/secrets/backup_manifest_key`. The Compose file may lack the secret, or the host file is missing. | Run the steps of the section "Create the secret files" for `backup_manifest_key`. After a rollback, read the section "Leave the file compose.previous.yaml". |
+| `cannot read the manifest key file` | The file exists, but the user of the container cannot read it. It may be a link or have a wrong owner or mode. | Check the owner and the mode as in the section "Create the secret files". Do not print the file. |
+| `the manifest key file exceeds the size limit` | The file is larger than the limit of the tag program. It may hold more than the 2 key lines. | Write the file again as the section "Rotate the manifest key" says. Do not print the file. |
+| `the manifest key file has a bad line` | The field `line` names a line that is not 64 lower-case hex characters. | Compare the file with the rules of the section "Rotate the manifest key". Do not print the file. |
+| `the manifest key file holds a carriage return` or `the manifest key file holds a NUL byte` | An editor changed the file. | Write the file again as the section "Create the secret files" says. Do not print the file. |
+| `the manifest key file has too many lines` | The file holds more than 2 lines (ADR-0174 (n)). | Delete the oldest line as the section "Rotate the manifest key" says. |
+| `the manifest key file lies on the backup disk` | `RECIPE_SECRETS_DIR` is on the filesystem of `RECIPE_BACKUP_DIR` (ADR-0174 (p)). | Run steps 11 and 12 of the section "Create the secret files". |
+| `cannot check the filesystem of the manifest key file` | The command `stat` failed for the key file or for `RECIPE_BACKUP_DIR` (ADR-0174 (p)). | Check that the host mounts `RECIPE_BACKUP_DIR`. Check the key file as in the section "Create the secret files". |
+| `the manifest tag program failed` | The tag program gave a fault that has no own message. The field `line` is absent. | Read the lines above the message. Check the key file as in the section "Create the secret files". Do not print the file. |
+| `the newest set has no tag file` | The newest set has no file `recipe_<stamp>.dump.sha256.hmac`. A previous image wrote the set, or a writer deleted the file. The field `set` names the set. | Do not restore the set. Run `backup-now` with the image that has the tag check. Then run the restore test again (ADR-0174 (x)). |
+| `the tag file of the set has a bad line` | The tag file of the set has a wrong form. The field `set` names the set. | Do not edit the file. Run `backup-now` again, then run the restore test again. |
+| `cannot read the tag file of the set` | The tag file exists, but the user of the container cannot read it. | Do not edit the file. Run `backup-now` again, then run the restore test again. |
+| `the tag file of the set exceeds the size limit` | The tag file is larger than the limit. A writer may have changed it. The field `set` names the set. | Do not restore the set. Run `backup-now` again, then run the restore test again. |
+| `the tag of the set comes from an unknown key` | The tag names a key that no line of `backup_manifest_key` holds. The key may be lost or rotated out (ADR-0174 (q)). | Put the old key line back from the offline copy. See the subsection "Compare the offline copy". |
+| `the tag of the set does not match the manifest` | Someone changed the manifest or the tag file after the run wrote them. The set may be crafted. | Do not restore the set. Use an older set whose tag matches, or use the section "Compromise rotation". |
+| `cannot read the manifest` | The manifest of the set exists, but the tag program cannot read it. | Do not restore the set. Use an older set whose tag matches. |
+| `the manifest exceeds the size limit` | The manifest is larger than the limit. A writer may have changed it. The field `set` names the set. | Do not restore the set. Use an older set whose tag matches, or use the section "Compromise rotation". |
+| `cannot load the manifest tag library` | The image `recipe-pgtools` lacks the file `manifest-tag.sh`, or the file is unreadable. | Compare the image ID with the release notes as in step 5 of the section "Load the images". |
+| `cannot write the manifest tag file` | `backup-once` could not create the temp tag file in `RECIPE_BACKUP_DIR`. The disk may be full or read-only, or a file of that name exists. | Use the section "Low disk space". Check the filesystem as in step 1 of the section "Prepare the second disk". |
+| `cannot copy the manifest` | `restore-test` or `restore-volume` could not copy the manifest into its private directory. | Check the free space of the private directory and the state of the backup disk. Run the command again. |
+| `cannot copy the manifest tag file` | `restore-test` or `restore-volume` could not copy the tag file into its private directory. | Check the free space of the private directory and the state of the backup disk. Run the command again. |
+| `cannot set the manifest copy permissions` | `chmod` failed on the private copy of the manifest. | Check the private directory as in the section "Create the secret files". Run the command again. |
+| `cannot set the manifest tag copy permissions` | `chmod` failed on the private copy of the tag file. | Check the private directory as in the section "Create the secret files". Run the command again. |
+| `cannot read the manifest size limit` | The restore script found no valid size limit in the file `manifest-tag.pl` of the image. | Compare the image ID with the release notes as in step 5 of the section "Load the images". |
+| `cannot record the manifest size fault` | The restore script could not write the fault file in its private directory. | Check the free space of the private directory. Run the command again. |
+| `the checked manifest argument is missing` | A restore script called a check without the path of the checked manifest. This is a fault of the image. | Compare the image ID with the release notes as in step 5 of the section "Load the images". |
+| `cannot read the manifest of the newest set` | The restore script could not read the private copy of the manifest. | Check the free space of the private directory. Run the command again. |
+| `the counts copy does not match the manifest` | The hash of the private counts copy differs from the hash in the manifest. The set may be crafted. | Do not restore the set. Use an older set whose tag matches, or use the section "Compromise rotation". |
+| `cannot copy the counts file` | `restore-test` or `restore-volume` could not copy the counts file into its private directory. | Check the free space of the private directory and the state of the backup disk. Run the command again. |
+| `cannot set the counts copy permissions` | `chmod` failed on the private copy of the counts file. | Check the private directory as in the section "Create the secret files". Run the command again. |
+| `cannot hash the counts copy` | The command `sha256sum` failed on the private copy of the counts file. | Check the free space of the private directory. Run the command again. |
+| `the newest set lacks a regular file` | A file of the newest set is missing or is not a regular file. The field `set` names the set. | Do not restore the set. Run `backup-now`, then run the restore test again. |
 
 A run of `backup-once` has no time limit (ADR-0074 (d)). If `db` does not answer, the run holds the lock.
 Then each later run and `backup-premigrate` stops with `another backup run holds the lock`. The held run deletes nothing.
@@ -2563,6 +2965,14 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
 - The login throttle counts failures per login and address and per address, but not per login over all addresses. A client with many addresses therefore gets many guesses against one login. The alert `failed_logins` reports such a flood, but it does not stop it ([ADR-0150](../adr/0150-no-per-login-limit-over-all-addresses.md)). Follow the row `failed_logins` of the section [Alarms](#alarms).
 - A wrong current password in `ChangeOwnPassword` writes no security event. The alert `failed_logins` therefore does not count it. [ADR-0150](../adr/0150-no-per-login-limit-over-all-addresses.md) records this as a residual risk.
+- Only an image that checks the tag restores a set with a tag file (ADR-0174 (z)). Case 2 of ADR-0174 (aj) is the one exception, and the section "Rollback" gives its check.
+- An online writer defeats the tag of the manifest at three points (ADR-0174 (ag)). It can change a temp file before the hash, write into the dump file after the check, or change the scratch cluster of `restore-test`. No workaround.
+- The key lies in the container where the SQL of a set runs as a superuser (ADR-0174 (ah)). A holder of the key or of a shell as uid 999 in `backup` can sign a crafted set. After such an incident, use the section "Compromise rotation".
+- The tag does not cover the modification time of a file (ADR-0174 (ai)). A writer can delete newer sets and change the times, so the alert `backup_age` gives no proof of a replay. Only the tag check of a restore proves a set.
+- The previous image of the first release with the tag ignores the tag file of each set of its schema (ADR-0174 (aj)). The sections "Upgrade" and "Rollback" give the safeguards.
+  - The retention of that image deletes the four files of an old set and keeps its tag file. Such a tag file has no manifest, so no reader takes it for a set. It is harmless, and the operator can delete it.
+  - The limit ends with the second release that holds the tag check, because its previous image has the check.
+- The server of `pitr-check` and `pitr-volume` reads the configuration files and the catalog of a base backup (ADR-0174 (ak)). An online writer of `/wal` has the power of the online writer above. An offline writer of `/wal` can change a base backup. The tag adds no check for it. No workaround.
 - No document gives a procedure for the cases below. Each item links the section where the case appears. That section gives the part of the procedure that exists.
   - Alarms: an action for `panics`, `audit_chain_broken`, `export_hash_mismatch`, and `security_events` ([Alarms](#alarms))
   - Alarms: a fix when `not_ready` comes from a migration with another checksum ([Alarms](#alarms))

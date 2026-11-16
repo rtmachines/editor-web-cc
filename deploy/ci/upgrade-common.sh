@@ -62,10 +62,50 @@ backup_now() {
   upgrade_check backup "$CI_STATE/$1.log" _now >"$CI_STATE/$1.set"
 }
 
+# Replace the environment file before the shell leaves the previous overlay.
+leave_previous_overlay() {
+  local directory=$1 write_tag=$2 temp=''
+  if ! {
+    temp=$(mktemp "$directory/.env.XXXXXX") &&
+    perl -e 'my $tag = shift @ARGV;
+      open my $env, "<", shift @ARGV or exit 1;
+      $_ = "";
+      while (1) {
+        my $count = read $env, my $chunk, 65536;
+        defined $count or exit 1;
+        last if $count == 0;
+        $_ .= $chunk;
+      }
+      close $env or exit 1;
+      if (length $_) {
+        s/^(?:COMPOSE_FILE|RECIPE_VERSION)=[^\n]*(?:\n|\z)//mg;
+        print "RECIPE_VERSION=$tag\n$_" or exit 1;
+      }
+      close(STDOUT) or exit 1;' "$write_tag" "$directory/.env" >"$temp" &&
+    chown --reference="$directory/.env" -- "$temp" &&
+    chmod --reference="$directory/.env" -- "$temp" &&
+    mv -f -- "$temp" "$directory/.env"
+  }
+  then
+    rm -f -- "$temp" || printf 'ERROR: cannot delete the environment temp file.\n' >&2
+    printf 'ERROR: cannot leave the previous Compose overlay.\n' >&2
+    return 1
+  fi
+  unset COMPOSE_FILE
+}
+
 restore_tag_on_failure() {
   local status=$?
   if (( status != 0 ))
   then
+    if [[ ${PREVIOUS_MANIFEST_PROBE:-} == no-check && ${UPGRADE_STEP3_STARTED:-} == true ]]
+    then
+      # ADR-0174 (aj). Keep the new tree until the previous schedule replaces the CI schedule.
+      UPGRADE_COMPOSE_DIR=$GITHUB_WORKSPACE
+      RECIPE_VERSION=ci-previous compose -f "$GITHUB_WORKSPACE/deploy/compose.previous.yaml" \
+        up -d --no-deps --force-recreate backup \
+        || { printf 'CI: cannot recreate the previous backup after the failed upgrade.\n' >&2; status=1; }
+    fi
     # Upgrade step 12. Select the previous tag without replacing the running app.
     export RECIPE_VERSION=ci-previous
     UPGRADE_COMPOSE_DIR=$UPGRADE_PREVIOUS_DIR

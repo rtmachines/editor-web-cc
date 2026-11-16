@@ -63,10 +63,35 @@ write_set_files() {
   printf 'public.machine|3\npublic.recipe|5\n' >"$B/recipe_$1.counts"
 }
 
+# prepare_restore_tag_key: keep the fixture key on a different filesystem from the sets.
+# Only restore-test-test calls this helper. Other suites keep their current fixtures.
+prepare_restore_tag_key() {
+  local dir
+  dir=$(mktemp -d "${OTHER_FS_DIR:-/dev/shm}/restore-key.XXXXXX") || return 1
+  SHM_DIRS+=("$dir")
+  if [ "$(stat -c %d -- "$dir")" = "$(stat -c %d -- "$ROOT")" ]; then
+    bad "restore fixtures need a key on another filesystem"
+    return 1
+  fi
+  RESTORE_TAG_KEY_FILE=$dir/key
+  od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"$RESTORE_TAG_KEY_FILE" || return 1
+  export BACKUP_MANIFEST_KEY_FILE=$RESTORE_TAG_KEY_FILE
+}
+
+# sign_restore_manifest <stamp>: sign the fixture with the library itself.
+sign_restore_manifest() {
+  [ -n "${RESTORE_TAG_KEY_FILE:-}" ] || return 0
+  # shellcheck source=../../lib/manifest-tag.sh
+  source "$HERE/../lib/manifest-tag.sh" || return 1
+  manifest_tag_sign "$RESTORE_TAG_KEY_FILE" "$B/recipe_$1.dump.sha256" \
+    >"$B/recipe_$1.dump.sha256.hmac"
+}
+
 # write_manifest <suffix+timestamp>: the manifest of sha256sum, as backup-once writes it.
 write_manifest() {
   (cd "$B" && sha256sum -- "recipe_$1.dump" "globals_$1.sql" "recipe_$1.counts") \
-    >"$B/recipe_$1.dump.sha256"
+    >"$B/recipe_$1.dump.sha256" || return 1
+  sign_restore_manifest "$1"
 }
 
 # make_restore_set <suffix> <days-old>: a complete set with a manifest that verifies.
@@ -135,3 +160,13 @@ failed_restore_case() {
 
 # error_has <text>: the one ERROR line holds the text.
 error_has() { grep '"level":"ERROR"' "$CASE/out" | grep -qF -- "$1"; }
+
+# restore_manifest_error <name> <message> [line]: only the fixed message, set, and optional number.
+restore_manifest_error() {
+  local fields="\"message\":\"$2\",\"set\":\"$RESTORE_BASE\""
+  [ -z "${3:-}" ] || fields="$fields,\"line\":$3"
+  expect_ok "$1: exact manifest ERROR fields" error_has "$fields}"
+  expect_no "$1: no fault field" grep -q '"fault":' "$CASE/out"
+  expect_no "$1: no key in output or tool log" \
+    grep -qFf "$RESTORE_TAG_KEY_FILE" "$CASE/out" "$CASE/err" "$CASE/stub/log"
+}

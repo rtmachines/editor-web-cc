@@ -7,7 +7,7 @@
 use crate::canon::Bare;
 use crate::compose::port_text;
 use crate::fault::Report;
-use crate::inputs::{DOCKERFILE, INITDB};
+use crate::inputs::{DOCKERFILE, INITDB, MANIFEST_TAG_PERL};
 use crate::lines::{code_lines, without_comment};
 use crate::secrets::INITDB_SECRETS;
 use crate::table::Table;
@@ -15,7 +15,7 @@ use crate::table::Table;
 const SCRIPT_DIRECTORY: &str = "deploy/pgtools/bin/";
 /// A default of a script: the script, the variable, and the key of 7.11.
 /// The rows `db.user` and `db.backup_user` do not exist, so the `PGUSER` defaults are not here.
-const SCRIPT_DEFAULTS: [(&str, &str, &str); 11] = [
+const SCRIPT_DEFAULTS: [(&str, &str, &str); 15] = [
     ("backup-once", "PGHOST", "db.host"),
     ("backup-once", "PGPORT", "db.port"),
     ("backup-once", "PGDATABASE", "db.name"),
@@ -23,6 +23,16 @@ const SCRIPT_DEFAULTS: [(&str, &str, &str); 11] = [
         "backup-once",
         "BACKUP_SECRET_FILE",
         "secrets.backup_password_file",
+    ),
+    (
+        "backup-once",
+        "BACKUP_MANIFEST_KEY_FILE",
+        "secrets.backup_manifest_key_file",
+    ),
+    (
+        "backup-entry",
+        "BACKUP_MANIFEST_KEY_FILE",
+        "secrets.backup_manifest_key_file",
     ),
     ("basebackup-once", "PGHOST", "db.host"),
     ("basebackup-once", "PGPORT", "db.port"),
@@ -32,6 +42,16 @@ const SCRIPT_DEFAULTS: [(&str, &str, &str); 11] = [
         "secrets.replicator_password_file",
     ),
     ("restore-test", "PGDATABASE", "db.name"),
+    (
+        "restore-test",
+        "BACKUP_MANIFEST_KEY_FILE",
+        "secrets.backup_manifest_key_file",
+    ),
+    (
+        "restore-volume",
+        "BACKUP_MANIFEST_KEY_FILE",
+        "secrets.backup_manifest_key_file",
+    ),
     ("walarchive-entry", "PGHOST", "db.host"),
     ("walarchive-entry", "PGPORT", "db.port"),
     (
@@ -125,5 +145,54 @@ pub fn check_dockerfile_ports(text: &str, table: &Table) -> Report {
         &want,
         Some(found),
     );
+    report
+}
+
+/// A size limit of `lib/manifest-tag.pl`: the Perl constant and the key of 7.11.
+const MANIFEST_LIMITS: [(&str, &str); 3] = [
+    ("MAX_TAG_BYTES", "backup_manifest.max_tag_bytes"),
+    ("MAX_FILE_BYTES", "backup_manifest.max_file_bytes"),
+    ("MAX_KEYS", "backup_manifest.max_keys"),
+];
+
+/// The value of each Perl declaration `use constant NAME => value;` on the code lines, in file order.
+fn perl_constant_values<'a>(lines: &[&'a str], name: &str) -> Vec<&'a str> {
+    let opener = format!("use constant {name} =>");
+    lines
+        .iter()
+        .copied()
+        .filter_map(|line| line.trim_start().strip_prefix(opener.as_str()))
+        .filter_map(|rest| rest.split_once(';').map(|(value, _)| value.trim()))
+        .collect()
+}
+
+/// Each size limit of `lib/manifest-tag.pl` equals its key in 7.11. A missing constant is a fault.
+pub fn check_manifest_limits(text: &str, table: &Table) -> Report {
+    let mut report = Report::default();
+    let lines = code_lines(text);
+    for (name, key) in MANIFEST_LIMITS {
+        report.cover(key);
+        let label = format!("constant {name} ({key})");
+        let found = perl_constant_values(&lines, name);
+        if found.is_empty() {
+            report.compare(
+                MANIFEST_TAG_PERL,
+                &label,
+                table.expected(key),
+                None,
+                Bare::Plain,
+            );
+        }
+        for value in found {
+            let expected = table.expected(key);
+            report.compare(
+                MANIFEST_TAG_PERL,
+                &label,
+                expected,
+                Some(value),
+                Bare::Plain,
+            );
+        }
+    }
     report
 }

@@ -7,6 +7,11 @@ for script in deploy/ci/*.sh
 do
   bash -n "$script"
 done
+if ! perl_syntax=$(perl -c deploy/pgtools/lib/manifest-tag.pl 2>&1)
+then
+  printf '%s\n' "$perl_syntax" >&2
+  exit 1
+fi
 python3 -I -B -W error - <<'PY'
 from pathlib import Path
 

@@ -48,6 +48,48 @@ case_happy_path() {
   expect_no "happy: non-JSON line on stdout" grep -qvE '^\{.*\}$' "$CASE/out"
   expect_eq "happy: no ERROR line" "$(error_count "$CASE/out")" 0
   expect_ok "happy: completion line" grep -q '"message":"backup completed"' "$CASE/out"
+  case_manifest_tag_write
+  case_temp_file_hashes
+}
+
+# The manifest describes the writer's bytes before publish (ADR-0174 (t)).
+case_temp_file_hashes() {
+  new_case temp-file-hashes
+  run_script STUB_CHANGE_PUBLISHED_DUMP=1 -- backup-once ""
+  expect_eq "temp hashes: exit code" "$RC" 0
+  expect_ok "temp hashes: pg_dump copy exists" test -f "$CASE/stub/pg_dump.bytes"
+  expect_ok "temp hashes: hook ran before manifest write" grep -qxF \
+    'EVENT published dump changed before manifest' "$CASE/stub/log"
+  expect_eq "temp hashes: exactly one published byte changed" \
+    "$(cmp -l -- "$CASE/stub/pg_dump.bytes" "$B/recipe_$TS.dump" | wc -l)" 1
+  local expected_hash
+  expected_hash=$(sha256sum <"$CASE/stub/pg_dump.bytes")
+  expected_hash=${expected_hash%% *}
+  expect_ok "temp hashes: manifest holds the pg_dump hash" \
+    grep -qxF "$expected_hash  recipe_$TS.dump" "$B/recipe_$TS.dump.sha256"
+  expect_ok "temp hashes: no temp file stays" no_temp_files
+}
+
+# The installed library checks the tag that the installed writer publishes (ADR-0174 (g), (u)).
+case_manifest_tag_write() {
+  new_case manifest-tag-write
+  run_script -- backup-once ""
+  expect_eq "manifest tag write: exit code" "$RC" 0
+  local tag=$B/recipe_$TS.dump.sha256.hmac
+  expect_ok "manifest tag write: tag exists" test -f "$tag"
+  expect_eq "manifest tag write: tag mode" "$(stat -c %a "$tag" 2>/dev/null)" 600
+  expect_ok "manifest tag write: library accepts tag" bash -c \
+    'source /etc/pgtools/manifest-tag.sh && manifest_tag_check "$@"' \
+    bash "$TEST_MANIFEST_KEY_FILE" "$B/recipe_$TS.dump.sha256" "$tag"
+  expect_eq "manifest tag write: publish order" \
+    "$(grep '^PUBLISH ' "$CASE/stub/log" | tr '\n' ',')" \
+    "PUBLISH recipe_$TS.dump,PUBLISH globals_$TS.sql,PUBLISH recipe_$TS.counts,PUBLISH recipe_$TS.dump.sha256.hmac,PUBLISH recipe_$TS.dump.sha256,"
+  expect_eq "manifest tag write: sync precedes tag publish" \
+    "$(grep '^TAG_SYNC ' "$CASE/stub/log" | tr '\n' ',')" \
+    "TAG_SYNC tmp_tag=no tag=no,TAG_SYNC tmp_tag=yes tag=no,TAG_SYNC tmp_tag=no tag=yes,"
+  expect_ok "manifest tag write: no temp file stays" no_temp_files
+  expect_no "manifest tag write: key in output or argv" \
+    grep -qFf "$TEST_MANIFEST_KEY_FILE" "$CASE/out" "$CASE/err" "$CASE/stub/log"
 }
 
 # Before the first migration the database has no table. backup-premigrate must still succeed
@@ -235,6 +277,67 @@ case_rename_never_replaces() {
   done
 }
 
+# The name check precedes step 2, also for dangling links (ADR-0174 (u)).
+case_tag_name_exists() {
+  local kind object file before
+  for kind in tag temp-tag; do
+    for object in file link dangling-link; do
+      new_case "exists-$kind-$object"
+      file=recipe_$TS.dump.sha256.hmac
+      [ "$kind" != temp-tag ] || file=.tmp-$file
+      printf 'FOREIGN' >"$CASE/tag-target"
+      case $object in
+        file) printf 'FOREIGN' >"$B/$file" ;;
+        link) ln -s -- "$CASE/tag-target" "$B/$file" ;;
+        dangling-link) ln -s -- "$CASE/missing-target" "$B/$file" ;;
+      esac
+      # An invalid password file proves that the name check runs before step 2.
+      rm -- "$CASE/secret"
+      before=$(listing)
+      run_script -- backup-once ""
+      expect_eq "exists ($kind $object): exit code" "$RC" 1
+      expect_eq "exists ($kind $object): one ERROR line" "$(error_count "$CASE/out")" 1
+      expect_ok "exists ($kind $object): name fault" grep -qF \
+        "\"message\":\"a file with a name of the new set exists\",\"file\":\"$file\"" "$CASE/out"
+      expect_eq "exists ($kind $object): listing is unchanged" "$(listing)" "$before"
+      expect_eq "exists ($kind $object): target is unchanged" "$(cat "$CASE/tag-target")" FOREIGN
+      expect_no "exists ($kind $object): dangling target stays absent" test -e "$CASE/missing-target"
+      expect_no "exists ($kind $object): no start line" grep -q '"message":"backup started"' "$CASE/out"
+      expect_eq "exists ($kind $object): no tool ran" "$(wc -c <"$CASE/stub/log")" 0
+      expect_eq "exists ($kind $object): no pgpass file" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+    done
+  done
+}
+
+# A name inserted after step 1 must make the exclusive open fail without following a link.
+case_temp_tag_exclusive() {
+  local object tag
+  for object in file link dangling-link; do
+    new_case "temp-tag-exclusive-$object"
+    tag=$B/.tmp-recipe_$TS.dump.sha256.hmac
+    printf 'FOREIGN' >"$CASE/tag-target"
+    run_script "STUB_CREATE_TEMP_TAG=$object" -- backup-once ""
+    expect_eq "exclusive ($object): exit code" "$RC" 1
+    expect_eq "exclusive ($object): one ERROR line" "$(error_count "$CASE/out")" 1
+    expect_ok "exclusive ($object): write fault" grep -qF \
+      '"message":"cannot write the manifest tag file"' "$CASE/out"
+    expect_ok "exclusive ($object): hook ran" grep -qxF 'EVENT temp tag inserted' "$CASE/stub/log"
+    expect_eq "exclusive ($object): target is unchanged" "$(cat "$CASE/tag-target")" FOREIGN
+    expect_no "exclusive ($object): dangling target stays absent" test -e "$CASE/missing-target"
+    case $object in
+      file) expect_eq "exclusive ($object): foreign file stays" "$(cat "$tag" 2>/dev/null)" FOREIGN ;;
+      link) expect_eq "exclusive ($object): link stays" "$(readlink -- "$tag")" "$CASE/tag-target" ;;
+      dangling-link)
+        expect_eq "exclusive ($object): link stays" "$(readlink -- "$tag")" "$CASE/missing-target" ;;
+    esac
+    expect_eq "exclusive ($object): no published file stays" \
+      "$(find "$B" -maxdepth 1 -name "*_$TS*" ! -name '.tmp-*' | wc -l)" 0
+    expect_eq "exclusive ($object): only the foreign temp name stays" \
+      "$(find "$B" -maxdepth 1 -name '.tmp-*' -printf '%f\n')" "${tag##*/}"
+    expect_eq "exclusive ($object): pgpass directory is empty" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+  done
+}
+
 case_parallel_runs() {
   new_case parallel
   local rc_a rc_b
@@ -276,6 +379,95 @@ case_secret_file_rules() {
   expect_eq "secret (no final newline): exit code" "$RC" 0
   expect_eq "secret (no final newline): pgpass line" "$(cat "$CASE/stub/pgpass.seen")" \
     'db:5432:recipe:recipe_backup:abc'
+  case_manifest_key_rules
+}
+
+# A bad key stops step 2 before the snapshot session starts (ADR-0174 (n), (p), (s)).
+case_manifest_key_rules() {
+  local variant key_file before message line
+  for variant in missing same-filesystem malformed nul carriage-return three-lines bad-second; do
+    new_case "manifest-key-$variant"
+    manifest_key_fixture "$variant"
+    before=$(listing)
+    run_script "BACKUP_MANIFEST_KEY_FILE=$key_file" -- backup-once ""
+    manifest_key_error "manifest key ($variant)"
+    expect_eq "manifest key ($variant): no tool ran" "$(wc -c <"$CASE/stub/log")" 0
+    expect_eq "manifest key ($variant): listing is unchanged" "$(listing)" "$before"
+    expect_eq "manifest key ($variant): no pgpass file" "$(find "$CASE/pgpass" -mindepth 1 | wc -l)" 0
+  done
+  case_manifest_sign_fault
+}
+
+# Each caller must report the fixed text and the numeric line from the key reader.
+manifest_key_fixture() {
+  key_file=$CASE/manifest-key
+  line=''
+  cp "$TEST_MANIFEST_KEY_FILE" "$key_file"
+  case $1 in
+    missing) rm -- "$key_file"; message='the manifest key file is missing' ;;
+    same-filesystem) message='the manifest key file lies on the backup disk' ;;
+    malformed)
+      head -c 63 -- "$TEST_MANIFEST_KEY_FILE" >"$key_file"
+      message='the manifest key file has a bad line'; line=1
+      ;;
+    nul) printf '\000' >>"$key_file"; message='the manifest key file holds a NUL byte' ;;
+    carriage-return) printf '\r' >>"$key_file"; message='the manifest key file holds a carriage return' ;;
+    three-lines)
+      cat "$TEST_MANIFEST_KEY_FILE" "$TEST_MANIFEST_KEY_FILE" >>"$key_file"
+      message='the manifest key file has too many lines'
+      ;;
+    bad-second)
+      head -c 63 -- "$TEST_MANIFEST_KEY_FILE" >>"$key_file"
+      printf '\n' >>"$key_file"
+      message='the manifest key file has a bad line'; line=2
+      ;;
+  esac
+}
+
+manifest_key_error() {
+  expect_eq "$1: exit code" "$RC" 1
+  expect_eq "$1: one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "$1: fixed message and line" grep -qF \
+    "\"message\":\"$message\"${line:+,\"line\":$line}}" "$CASE/out"
+  expect_no "$1: no fault field" grep -qF '"fault":' "$CASE/out"
+  expect_no "$1: no stderr" test -s "$CASE/err"
+  expect_ok "$1: no key in output or argv" perl -e '
+    local $/;
+    open my $key, "<:raw", shift @ARGV or exit 1;
+    my $hex = <$key>;
+    $hex =~ s/\n\z//;
+    my @keys = ($hex, pack("H*", $hex), substr($hex, 0, 63));
+    for my $path (@ARGV) {
+      open my $file, "<:raw", $path or exit 1;
+      my $output = <$file> // "";
+      for my $bytes (@keys) { exit 1 if index($output, $bytes) >= 0; }
+    }
+  ' "$TEST_MANIFEST_KEY_FILE" "$CASE/out" "$CASE/err" "$CASE/stub/log"
+}
+
+# Change the key after the start check. The signing fault must use the same mapper.
+case_manifest_sign_fault() {
+  new_case manifest-sign-fault
+  local key_file=$TEST_MANIFEST_KEY_FILE.sign message='the manifest key file has a bad line' line=2
+  cp "$TEST_MANIFEST_KEY_FILE" "$key_file"
+  mkdir "$CASE/sign-stubs"
+  cp "$ROOT/stubs/pg_dumpall" "$CASE/stub/pg_dumpall"
+  cat >"$CASE/sign-stubs/pg_dumpall" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+bash "$STUB_DIR/pg_dumpall" "$@"
+head -c 63 -- "$BACKUP_MANIFEST_KEY_FILE" >>"$BACKUP_MANIFEST_KEY_FILE"
+printf '\n' >>"$BACKUP_MANIFEST_KEY_FILE"
+EOF
+  chmod 0755 "$CASE/sign-stubs/pg_dumpall"
+  run_script "PATH=$CASE/sign-stubs:$ROOT/stubs:$PATH" "BACKUP_MANIFEST_KEY_FILE=$key_file" -- backup-once ""
+  manifest_key_error 'manifest sign fault'
+  expect_ok "manifest sign fault: globals writer ran" grep -qxF 'EVENT pg_dumpall done' "$CASE/stub/log"
+  expect_no "manifest sign fault: no manifest" test -e "$B/recipe_$TS.dump.sha256"
+  expect_ok "manifest sign fault: no temp file stays" no_temp_files
+  expect_eq "manifest sign fault: no published file stays" \
+    "$(find "$B" -maxdepth 1 -name "*_$TS*" | wc -l)" 0
 }
 
 case_psql_not_usable() {
@@ -309,7 +501,7 @@ case_session_exit_status() {
     grep -q '^EVENT pg_dumpall' "$CASE/stub/log"
 }
 
-# The service backup refuses to start without the marker file (ADR-0066 (b)).
+# The service backup checks the marker and manifest key before supercronic starts (ADR-0174 (v)).
 case_entry() {
   new_case entry-no-marker
   printf '# crontab\n' >"$CASE/crontab"
@@ -326,6 +518,19 @@ case_entry() {
   expect_eq "entry: supercronic ran once" "$(grep -c '^EVENT supercronic' "$CASE/stub/log")" 1
   expect_ok "entry: supercronic arguments" grep -qxF \
     "ARGV supercronic -json -passthrough-logs $CASE/crontab" "$CASE/stub/log"
+  case_entry_key_rules
+}
+
+case_entry_key_rules() {
+  local variant key_file message line
+  for variant in missing same-filesystem malformed nul carriage-return three-lines bad-second; do
+    new_case "entry-key-$variant"
+    printf '# crontab\n' >"$CASE/crontab"
+    manifest_key_fixture "$variant"
+    run_script "BACKUP_CRONTAB=$CASE/crontab" "BACKUP_MANIFEST_KEY_FILE=$key_file" -- backup-entry
+    manifest_key_error "entry key ($variant)"
+    expect_eq "entry key ($variant): supercronic did not run" "$(wc -c <"$CASE/stub/log")" 0
+  done
 }
 
 # A failed delete of a temp file must not keep the pgpass file (CR-O2-4).

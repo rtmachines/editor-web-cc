@@ -18,18 +18,40 @@ pub struct Allowed {
     pub services: Option<&'static [&'static str]>,
     /// The keys that a service of the file may hold.
     pub keys: &'static [&'static str],
+    /// The keys that only one named service may hold in addition to `keys`.
+    pub service_keys: &'static [(&'static str, &'static [&'static str])],
+}
+
+impl Allowed {
+    fn allows(&self, service: &str, key: &str) -> bool {
+        self.keys.contains(&key)
+            || self
+                .service_keys
+                .iter()
+                .any(|(name, keys)| *name == service && keys.contains(&key))
+    }
 }
 
 /// `compose.dev.yaml` changes the port, the volumes, and the secrets of `proxy`.
 pub const DEV: Allowed = Allowed {
     services: Some(&["proxy"]),
     keys: &["ports", "volumes", "secrets"],
+    service_keys: &[],
 };
 
 /// `compose.build.yaml` adds `build:` to the services of an image of the project.
 pub const BUILD: Allowed = Allowed {
     services: None,
     keys: &["build"],
+    service_keys: &[],
+};
+
+/// `compose.previous.yaml` changes the secrets of three services for an image without the tag check.
+/// It also sets `BACKUP_CRONTAB` of `backup` and mounts `crontab.previous` there (ADR-0174 (aa)).
+pub const PREVIOUS: Allowed = Allowed {
+    services: Some(&["backup", "backup-premigrate", "restore-volume"]),
+    keys: &["secrets"],
+    service_keys: &[("backup", &["environment", "volumes"])],
 };
 
 fn key_of(text: &str) -> &str {
@@ -68,7 +90,7 @@ fn check_service_line(
         }
     } else if level == KEY_INDENT && !text.starts_with("- ") {
         let key = key_of(text);
-        if !allowed.keys.contains(&key) {
+        if !allowed.allows(service, key) {
             let expected = format!("only {} in an override", allowed.keys.join(", "));
             report.fail(path, &format!("{service}.{key}"), expected, text);
         }

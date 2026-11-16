@@ -35,11 +35,14 @@ const PGPASS_SERVICES: [&str; 5] = [
     "restore-volume",
     "walarchive",
 ];
-/// The one-shot services outside the seven. Each has `network_mode: none`, no secret, and no network.
+/// The one-shot services outside the seven. Each has `network_mode: none` and no network.
+/// None mounts a secret, except the manifest key on `restore-volume`.
 const ISOLATED_SERVICES: [&str; 3] = ["pitr-check", "pitr-volume", "restore-volume"];
 /// The service that fills a new volume (ADR-0103 (h), design D6) and its mounts and variable.
 const RESTORE_SERVICE: &str = "restore-volume";
 const RESTORE_PROFILE: &str = "restore";
+/// The one secret that `restore-volume` mounts: the HMAC key of the backup manifest (ADR-0174 (m)).
+const RESTORE_SECRET: &str = "backup_manifest_key";
 /// The backup disk is read-only. The operator mounts the target volume with `-v` at run time.
 const RESTORE_BACKUPS_MOUNT: &str = "backups:/backups:ro";
 const RESTORE_SUBNET_VARIABLE: &str = "${COMPOSE_SUBNET:?}";
@@ -53,11 +56,12 @@ const PITR_ENTRYPOINT: &str = "/usr/local/bin/pitr-volume";
 /// The services with `read_only: true` (`reliability.md` 7.1).
 const READ_ONLY_SERVICES: [&str; 2] = ["app", "proxy"];
 /// The Docker secrets of `reliability.md` 7.1 and design D9, one host file for each.
-const SECRETS: [&str; 10] = [
+const SECRETS: [&str; 11] = [
     "postgres_password",
     "migrator_password",
     "app_password",
     "backup_password",
+    "backup_manifest_key",
     "replicator_password",
     "login_hmac_key",
     "csrf_signing_key",
@@ -205,8 +209,9 @@ fn check_service_networks(report: &mut Report, compose: &Compose) {
     }
 }
 
-/// `pitr-check`, `pitr-volume`, and `restore-volume` have `network_mode: none` and mount no secret.
-/// No other service has a `network_mode`. Design D10 and the comments in `compose.yaml`.
+/// `pitr-check`, `pitr-volume`, and `restore-volume` have `network_mode: none`. The first two mount no
+/// secret. `restore-volume` mounts only the manifest key (ADR-0174 (m)). No other service has a
+/// `network_mode`. Design D10 and the comments in `compose.yaml`.
 fn check_isolation(report: &mut Report, service: &Service) {
     let mode = service.scalar("network_mode");
     if !ISOLATED_SERVICES.contains(&service.name) {
@@ -222,11 +227,21 @@ fn check_isolation(report: &mut Report, service: &Service) {
     }
     expect_scalar(report, service, "network_mode", "none");
     let secrets = service.list("secrets");
-    if !secrets.is_empty() {
+    let allowed: &[&str] = if service.name == RESTORE_SERVICE {
+        &[RESTORE_SECRET]
+    } else {
+        &[]
+    };
+    if secrets.iter().any(|name| !allowed.contains(&name.as_str())) {
+        let want = if allowed.is_empty() {
+            "no secret".to_owned()
+        } else {
+            format!("no secret except {allowed:?}")
+        };
         report.fail(
             FILE,
             &format!("{}.secrets", service.name),
-            "no secret",
+            want,
             format!("{secrets:?}"),
         );
     }

@@ -1,0 +1,21 @@
+# Rollback override (ADR-0174 (aa)).
+# Each Compose command adds compose.previous.yaml only when it runs backup, backup-premigrate,
+# or restore-volume with an image without /etc/pgtools/manifest-tag.pl.
+# The rolled-back backup runs the nightly dump and no weekly restore-test.
+# The tag !override replaces the secrets of compose.yaml. A plain list would add to them.
+# The tag !reset removes all secrets of restore-volume.
+name: recipe-editor
+
+services:
+  backup:
+    secrets: !override
+      - backup_password
+    environment:
+      BACKUP_CRONTAB: /etc/pgtools/crontab.previous
+    volumes:
+      - ./crontab.previous:/etc/pgtools/crontab.previous:ro
+  backup-premigrate:
+    secrets: !override
+      - backup_password
+  restore-volume:
+    secrets: !reset []

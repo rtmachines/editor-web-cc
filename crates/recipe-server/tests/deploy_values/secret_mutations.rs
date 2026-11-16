@@ -4,7 +4,7 @@
 
 use crate::inputs::{Mutation, assert_mutations_fail};
 
-const SECRET_AND_ROLE: [Mutation; 15] = [
+const SECRET_AND_ROLE: [Mutation; 17] = [
     // The environment variable of `migrate` and of `db` that holds a secret path.
     (
         "compose.yaml",
@@ -36,6 +36,13 @@ const SECRET_AND_ROLE: [Mutation; 15] = [
         "- postgres_password",
         "- postgres_pass",
         "secrets.postgres_password_file",
+    ),
+    // `backup`, `backup-premigrate`, and `restore-volume` list the manifest key (ADR-0174 (m)).
+    (
+        "compose.yaml",
+        "- backup_manifest_key",
+        "- backup_manifest_ke",
+        "secrets.backup_manifest_key_file",
     ),
     // The initdb script reads the file of each login password.
     (
@@ -100,6 +107,12 @@ const SECRET_AND_ROLE: [Mutation; 15] = [
         "`/run/secrets/postgres_password`. Password of",
         "`/run/secrets/postgres_pw`. Password of",
         "secrets.postgres_password_file",
+    ),
+    (
+        "reliability.md",
+        "`/run/secrets/backup_manifest_key`. The HMAC key file",
+        "`/run/secrets/backup_manifest_k`. The HMAC key file",
+        "secrets.backup_manifest_key_file",
     ),
 ];
 

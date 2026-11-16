@@ -58,15 +58,68 @@ fn a_network_mode_on_another_service_is_a_fault() {
 }
 
 #[test]
-fn a_secret_on_an_isolated_service_is_a_fault() {
+fn a_secret_on_pitr_check_or_pitr_volume_is_a_fault() {
     let block = format!("{NETWORK_NONE}    secrets:\n      - app_password\n");
     let with_block = Inputs::load().with_replaced("compose.yaml", NETWORK_NONE, &block);
     let flow = format!("{NETWORK_NONE}    secrets: [app_password]\n");
     let with_flow = Inputs::load().with_replaced("compose.yaml", NETWORK_NONE, &flow);
-    for service in ISOLATED {
+    for service in ["pitr-check", "pitr-volume"] {
         assert_fault(&with_block, &format!("{service}.secrets"));
         assert_fault(&with_flow, &format!("{service}.secrets"));
     }
+    // The manifest key is no exception on these two services (ADR-0174 (m)).
+    let key = format!("{NETWORK_NONE}    secrets:\n      - backup_manifest_key\n");
+    let with_key = Inputs::load().with_replaced("compose.yaml", NETWORK_NONE, &key);
+    for service in ["pitr-check", "pitr-volume"] {
+        assert_fault(&with_key, &format!("{service}.secrets"));
+    }
+}
+
+/// The secrets of `compose.yaml` that `restore-volume` must not mount (ADR-0174 (m)).
+const OTHER_SECRETS: [&str; 10] = [
+    "postgres_password",
+    "migrator_password",
+    "app_password",
+    "backup_password",
+    "replicator_password",
+    "login_hmac_key",
+    "csrf_signing_key",
+    "alerts_webhook_url",
+    "tls_cert",
+    "tls_key",
+];
+
+/// A copy of `compose.yaml` that lists these secrets first on `restore-volume`.
+fn restore_with_secrets(names: &[&str]) -> Inputs {
+    let items: String = names
+        .iter()
+        .map(|name| format!("      - {name}\n"))
+        .collect();
+    let block = format!("{RESTORE_ENTRYPOINT}    secrets:\n{items}");
+    Inputs::load().with_replaced("compose.yaml", RESTORE_ENTRYPOINT, &block)
+}
+
+fn has_isolation_fault(inputs: &Inputs, key: &str) -> bool {
+    check_all(inputs)
+        .faults
+        .iter()
+        .any(|fault| fault.key == key)
+}
+
+#[test]
+fn restore_volume_permits_only_the_manifest_key_as_a_secret() {
+    for other in OTHER_SECRETS {
+        assert_fault(&restore_with_secrets(&[other]), "restore-volume.secrets");
+        let with_key = restore_with_secrets(&["backup_manifest_key", other]);
+        assert_fault(&with_key, "restore-volume.secrets");
+    }
+    assert!(
+        !has_isolation_fault(
+            &restore_with_secrets(&["backup_manifest_key"]),
+            "restore-volume.secrets"
+        ),
+        "the manifest key alone must be allowed on restore-volume"
+    );
 }
 
 #[test]

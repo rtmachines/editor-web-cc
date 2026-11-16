@@ -20,6 +20,8 @@
 # Shell libraries.
 !lib/check-result.sh
 !lib/globals-grammar.sh
+!lib/manifest-tag.sh
+!lib/manifest-tag.pl
 !lib/restore-steps.sh
 !lib/wal-identity.sh
 !lib/recovery-steps.sh

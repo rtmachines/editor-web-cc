@@ -94,10 +94,12 @@ case_restore_roles_in_image() {
 ROOT=$(mktemp -d)
 trap cleanup EXIT
 
-# The directory of the libraries of the script. It holds the three files that the image installs
+# The directory of the libraries of the script. It holds the files that the image installs
 # in /etc/pgtools, copied from their sources.
 mkdir "$ROOT/etc"
-cp -- "$HERE/../lib/restore-steps.sh" "$HERE/../lib/globals-grammar.sh" "$DB_DIR/cluster-access.sh" "$ROOT/etc/"
+cp -- "$HERE/../lib/restore-steps.sh" "$HERE/../lib/globals-grammar.sh" \
+  "$HERE/../lib/manifest-tag.sh" "$HERE/../lib/manifest-tag.pl" "$DB_DIR/cluster-access.sh" "$ROOT/etc/"
+prepare_restore_tag_key || exit 1
 
 case_cluster_access_in_image
 case_restore_roles_in_image
@@ -125,9 +127,16 @@ else
   case_volume_steps_library
   case_volume_gate_inputs
   case_volume_gate_set
+  case_volume_gate_tag
+  case_volume_gate_tag_before_set_reads
+  case_volume_gate_key
+  case_volume_manifest_swap_after_tag
   case_volume_gate_manifest
   case_volume_gate_counts
   case_volume_gate_globals
+  case_volume_check_only_pass
+  case_volume_check_only_gates
+  case_volume_check_only_inputs
   case_volume_gate_names
   case_volume_initdb_arguments
   case_volume_initdb_environment

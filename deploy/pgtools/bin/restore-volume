@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # restore-volume: restore a backup set into a new, empty volume and prepare it as a data directory.
 #
-# Source: ADR-0103 (h) to (o), ADR-0067, ADR-0095, reliability.md sections 7.7 and 7.11, design D4.
+# Source: ADR-0103 (h) to (o), ADR-0067, ADR-0095, ADR-0174 (w), reliability.md sections 7.7 and 7.11, design D4.
 # The operator runs it in a temporary container of the image recipe-pgtools while db runs on the
 # old volume: docker compose run --rm -v <new volume>:/var/lib/postgresql/data restore-volume <stamp>
+# The command restore-volume --check-only <stamp> checks the set without a target volume.
+# It checks the user, stamp, subnet, lock, tag, manifest, counts, and globals, then stops before check_names.
+# It runs no PostgreSQL tool and writes only in its private work directory.
+# On a pass, it writes one INFO line "the set passed the check" with the field set and exits with code 0.
 #
 # Steps (the numbers are the steps of ADR-0103 (i)):
 #   1. Refuse a target that is not empty, a stamp outside the grammar of the set names, and a bad
@@ -11,8 +15,10 @@
 #   2. Open the existing lock /backups/.scratch/.lock read-only and take flock on it.
 #      A missing lock file stops the run. The script never creates the lock file and never runs the
 #      cleanup of stale runs of restore-test.
-#   3. The gates of steps 1 and 2 of restore-test: the manifest, the role grammar, the name list,
-#      and the refused kinds. The script writes nothing to /backups.
+#   3. Select the set of the stamp and copy its manifest and tag into the private work directory.
+#      Check the key, then the tag over the private manifest, before reading another set file.
+#      Check the manifest, the counts, the role grammar, the name list, and the refused kinds.
+#      The manifest, counts, and globals checks use private copies. The script writes nothing to /backups.
 #   4. initdb into the target with the arguments of reliability.md section 7.1.
 #   5. A temporary server on a private socket, with every setting passed by pg_ctl -o.
 #   6. The globals file, the dump, the code comparisons, the counts, and the audit chain check.
@@ -24,15 +30,16 @@
 # A trap runs on each exit. It stops the temporary server when it runs and deletes the work directory
 # in /run/pgpass. It deletes no file of the target. The operator deletes the new volume after a failure.
 #
-# The script reads no production password and holds no secret. Every output line is one JSON object.
+# The script reads the manifest key secret and no production password. Every output line is one JSON object.
 #
 # Environment. The defaults are the production values. The test script sets the others.
 #   COMPOSE_SUBNET      the Compose subnet of the client rules, mandatory, for example 172.28.0.0/16
 #   PGDATA              the target data directory, default /var/lib/postgresql/data (the image sets it)
 #   BACKUP_DIR          the backup disk, default /backups
 #   BACKUP_PGPASS_DIR   the tmpfs for the work directory and its secret files, default /run/pgpass
+#   BACKUP_MANIFEST_KEY_FILE the manifest key path, default /run/secrets/backup_manifest_key
 #   RESTORE_CODE_DIR    the directory of restore-code.* and restore-roles.*, default /etc/pgtools
-#   RESTORE_GLOBALS_DIR the directory of restore-steps.sh, globals-grammar.sh, and cluster-access.sh,
+#   RESTORE_GLOBALS_DIR the directory of restore-steps.sh, globals-grammar.sh, manifest-tag.*, and cluster-access.sh,
 #                       default /etc/pgtools
 #   PGDATABASE          the name of the database in the dump, default recipe
 set -euo pipefail
@@ -66,6 +73,7 @@ top_level_baseline=""
 
 BACKUP_DIR=${BACKUP_DIR:-/backups}
 PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
+MANIFEST_KEY_FILE=${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}
 CODE_DIR=${RESTORE_CODE_DIR:-/etc/pgtools}
 TARGET_DIR=${PGDATA:-/var/lib/postgresql/data}
 DB_NAME=${PGDATABASE:-recipe}
@@ -82,12 +90,15 @@ source "${RESTORE_GLOBALS_DIR:-/etc/pgtools}/cluster-access.sh" \
   || { echo "restore-volume: cannot load cluster-access.sh" >&2; exit 1; }
 
 error_logged=0
+check_only=0
 stamp=""
 work_dir=""
 superuser=""
 set_stamp=""
 base=""
 manifest_name=""
+manifest_copy=""
+tag_copy=""
 dump_path=""
 globals_path=""
 globals_copy=""
@@ -159,6 +170,7 @@ check_inputs() {
     *) fail "BACKUP_DIR must be an absolute path" ;;
   esac
   [[ $DB_NAME =~ $ROLE_GRAMMAR ]] || fail "bad PGDATABASE"
+  [ "$check_only" -eq 0 ] || return 0
   [ -d "$TARGET_DIR" ] || fail "the target directory is missing"
   first=$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 -print -quit) \
     || fail "cannot read the target directory"
@@ -176,9 +188,10 @@ take_lock() {
   flock -n 9 || fail "another restore test or restore volume holds the lock"
 }
 
-# run_gates: step 3. The gates of steps 1 and 2 of restore-test, for the set of the stamp. The work
-# directory in the tmpfs holds the private copy of the globals file and the files of the later steps.
-# The script writes nothing to the backup disk.
+# run_gates: step 3. Follow ADR-0174 (w) for the set of the stamp.
+# The tmpfs work directory holds private copies of the manifest, tag, counts, and globals files.
+# Authenticate the private manifest before reading the dump, counts, or globals file.
+# The script writes nothing to the backup disk. The check-only path stops after check_globals.
 run_gates() {
   local file
   [ -f "$BACKUP_DIR/$MARKER_NAME" ] || fail "the marker file of the backup disk is missing"
@@ -194,9 +207,15 @@ run_gates() {
   if [ ! -f "$BACKUP_DIR/$manifest_name" ] || [ -L "$BACKUP_DIR/$manifest_name" ]; then
     fail "no complete backup set found for the stamp" "\"stamp\":\"$stamp\""
   fi
-  check_manifest
+  copy_manifest_tag
+  check_manifest_key "$MANIFEST_KEY_FILE"
+  check_manifest_tag "$MANIFEST_KEY_FILE"
+  check_manifest "$manifest_copy"
+  copy_counts "$manifest_copy"
   check_counts
   check_globals
+  [ "$check_only" -eq 0 ] || return 0
+  # The full restore continues with the name list, which runs pg_restore.
   log INFO "restore volume started" "\"set\":\"$base\""
   check_names
 }
@@ -344,7 +363,11 @@ flush_disks() {
 
 # --- run ----------------------------------------------------------------------------------
 
-[ "$#" -eq 1 ] || fail "usage: restore-volume <stamp>"
+if [ "$#" -eq 2 ] && [ "$1" = --check-only ]; then
+  check_only=1
+  shift
+fi
+[ "$#" -eq 1 ] || fail "usage: restore-volume <stamp> or restore-volume --check-only <stamp>"
 stamp=$1
 
 # Step 1: the target, the stamp, and COMPOSE_SUBNET.
@@ -355,6 +378,10 @@ take_lock
 
 # Step 3: the gates of restore-test for the set of the stamp.
 run_gates
+if [ "$check_only" -eq 1 ]; then
+  log INFO "the set passed the check" "\"set\":\"$base\""
+  exit 0
+fi
 
 # Step 4: initdb into the target.
 init_cluster

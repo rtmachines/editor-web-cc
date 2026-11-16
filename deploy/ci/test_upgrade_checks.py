@@ -248,6 +248,45 @@ class UpgradeChecksTests(unittest.TestCase):
             with self.subTest(config=bad), self.assertRaises((ValueError, KeyError)):
                 self.checks.pgdata_volume_name(bad)
 
+    def manifest_cli(self, action, argument):
+        script = str(pathlib.Path(__file__).with_name("upgrade_checks.py"))
+        return subprocess.run([sys.executable, "-I", "-B", script, action, argument],
+                              capture_output=True, text=True, check=False)
+
+    def test_manifest_plan_selects_the_files_and_key_state(self):
+        for probe, output in (("no-check", "no-key compose.yaml compose.previous.yaml\n"),
+                              ("check", "key compose.yaml\n")):
+            with self.subTest(probe=probe):
+                done = self.manifest_cli("manifest-plan", probe)
+                self.assertEqual((done.returncode, done.stdout, done.stderr), (0, output, ""))
+
+    def test_manifest_key_checks_every_service_and_rejects_bad_inputs(self):
+        services = ("backup", "backup-premigrate", "restore-volume")
+        cases = [("manifest-plan", probe, None) for probe in ("", "other", "no check", "CHECK")]
+        for mask in range(8):
+            config = {"services": {name: {"secrets": [{"source": "backup_password"}] +
+                      ([{"source": "backup_manifest_key", "target": "renamed"}] if mask & (1 << index) else [])}
+                      for index, name in enumerate(services)}}
+            config["secrets"] = {"backup_manifest_key": {"file": "/run/manifest-key"}}
+            cases.append(("manifest-key", json.dumps(config), {0: "no-key\n", 7: "key\n"}.get(mask)))
+        cases.append(("manifest-key", json.dumps({"services": {name: {} for name in services}}), "no-key\n"))
+        for name in services:
+            cases.append(("manifest-key", json.dumps({"services": {n: {} for n in services if n != name}}), None))
+        for secrets in ([], None, {}, "backup_manifest_key", [None], [{}], [{"source": 1}]):
+            config = {"services": {name: {"secrets": secrets} for name in services}}
+            cases.append(("manifest-key", json.dumps(config), "no-key\n" if secrets == [] else None))
+        for source in ("{", "[]", "null", "{}", '{"services": []}', '{"services": {"backup": null}}'):
+            cases.append(("manifest-key", source, None))
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / "compose.json"
+            for action, source, output in cases:
+                with self.subTest(action=action, source=source):
+                    path.write_text(source, encoding="utf-8")
+                    done = self.manifest_cli(action, str(path) if action == "manifest-key" else source)
+                    expected = (0, output, "") if output else (1, "", ("CI: the upgrade gate failed. "
+                                "Check the input and the preceding job output.\n"))
+                    self.assertEqual((done.returncode, done.stdout, done.stderr), expected)
+
     def test_segment_check_log_must_match_the_state_of_the_identifier_file(self):
         passed = ("The segment check passed. The segment 000000010000000000000003"
                   " holds the system identifier of db.\n")
@@ -255,6 +294,8 @@ class UpgradeChecksTests(unittest.TestCase):
         self.checks.check_wal_identity_log(passed, "ran")
         self.checks.check_wal_identity_log(passed.replace("0003 ", "0003.partial "), "ran")
         self.checks.check_wal_identity_log(skipped, "skipped")
+        with WalIdentityCase(self, segment_sysid=5) as case:
+            self.checks.check_wal_identity_log(case.run("5").stdout, "ran")
         wrong_name = passed.replace("000000010000000000000003", "0000000100000000000003")
         for output, mode in ((skipped, "ran"), (passed, "skipped"), ("", "ran"), ("", "skipped"),
                              (passed + passed, "ran"), (skipped + passed, "skipped"), (wrong_name, "ran"),
@@ -296,8 +337,7 @@ class UpgradeSmokeTests(unittest.TestCase):
             r"WHERE table_schema = 'public' AND table_name = 'machine'\s+"
             r"AND column_name = 'db_number'\s*\) THEN\s+"
             r"(?P<head>.*?)\s+ELSE\s+(?P<previous>.*?)\s+END IF;\s+END;\s+\$\$;",
-            sql, re.S,
-        )
+            sql, re.S)
         self.assertIsNotNone(block, "the seed must select the insert by the machine schema")
         for schema, columns, values in (
             ("previous", "code, name, plc_platform", "'M2', 'CI S7 machine', 'S7_300'"),
@@ -309,8 +349,7 @@ class UpgradeSmokeTests(unittest.TestCase):
         self.assertIn(
             "INSERT INTO plc_connection (machine_id, plc_platform, host, rack, slot, db_number)\n"
             "SELECT id, plc_platform, '192.168.1.20', 0, 2, 100 FROM machine WHERE code = 'M2';",
-            sql,
-        )
+            sql)
 
     def test_seed_gives_each_machine_a_live_main_unit(self):
         # A machine needs a live unit of depth 1 (domain-model.md section 2.1). Else GET /machines/{code} returns E-DB-008.
@@ -508,7 +547,7 @@ class UpgradeScriptTests(unittest.TestCase):
         source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
         self.assertFalse("compose exec -T walarchive" in source, "upgrade.sh must not use compose exec into walarchive")
         step = source.split("\nwrite_wal_identity() {", 1)[1].split("\n}\n", 1)[0]
-        run_form = r"RECIPE_VERSION=ci-previous\s+compose run --rm --no-deps -T --entrypoint sh walarchive"
+        run_form = r"previous_compose run --rm --no-deps -T --entrypoint sh walarchive"
         run = re.search(run_form, step)
         self.assertIsNotNone(run, "the step must run in a new container with the previous tag")
         self.assertLess(step.index("db_system_identifier"), step.index("pg_switch_wal"))
@@ -528,7 +567,7 @@ class UpgradeScriptTests(unittest.TestCase):
     def test_restore_test_runs_in_a_new_previous_container_before_the_premigrate_backup(self):
         source = pathlib.Path(__file__).with_name("upgrade.sh").read_text(encoding="utf-8")
         body = source.split("\nupgrade() {", 1)[1].split("\n}\n", 1)[0]
-        run_form = "RECIPE_VERSION=ci-previous compose run --rm --no-deps -T backup restore-test"
+        run_form = "previous_compose run --rm --no-deps -T backup restore-test"
         self.assertEqual(body.count(run_form), 1)
         start = body.index(run_form)
         self.assertLess(body.index("\n  write_wal_identity\n"), start)
@@ -540,18 +579,6 @@ class UpgradeScriptTests(unittest.TestCase):
             r'(?s)^[^\n]*\| tee "\$CI_STATE/old-restore\.log"\n\s*upgrade_check restore "\$CI_STATE/old-restore\.log" "\$\(cat "\$CI_STATE/old-now\.set"\)"',
         )
 
-    def test_wal_identity_step_writes_the_file_from_a_partial_file_of_the_same_system(self):
-        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
-            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(5))
-            result = case.run("5")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            lines = [line for line in result.stdout.splitlines() if line.strip()]
-            self.assertEqual(len(lines), 1, result.stdout)
-            self.assertIn("segment check passed", lines[0])
-            self.assertEqual(case.file.read_bytes(), b"5\n")
-            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
-                             [".system-identifier", "000000010000000000000001.partial"])
-
     def test_wal_identity_step_reads_the_newest_partial_file(self):
         with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
             (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(9))
@@ -559,30 +586,6 @@ class UpgradeScriptTests(unittest.TestCase):
             result = case.run("5")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(case.file.read_bytes(), b"5\n")
-
-    def test_wal_identity_step_refuses_a_partial_file_of_another_system(self):
-        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
-            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(7))
-            result = case.run("5")
-            self.assertEqual(result.returncode, 1)
-            lines = [line for line in result.stderr.splitlines() if line.strip()]
-            self.assertEqual(len(lines), 1, result.stderr)
-            self.assertIn("holds another system identifier", lines[0])
-            self.assertEqual(result.stdout, "")
-            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
-                             ["000000010000000000000001.partial"])
-
-    def test_wal_identity_step_refuses_a_partial_file_without_a_long_header(self):
-        with WalIdentityCase(self, segment_sysid=5, with_segment=False) as case:
-            (case.directory / "000000010000000000000001.partial").write_bytes(wal_header(5, info=0x0001))
-            result = case.run("5")
-            self.assertEqual(result.returncode, 1)
-            lines = [line for line in result.stderr.splitlines() if line.strip()]
-            self.assertEqual(len(lines), 1, result.stderr)
-            self.assertIn("has no long header", lines[0])
-            self.assertEqual(result.stdout, "")
-            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
-                             ["000000010000000000000001.partial"])
 
     def test_wal_identity_step_ignores_a_matching_partial_file_when_a_complete_segment_exists(self):
         with WalIdentityCase(self, segment_sysid=6) as case:
@@ -636,32 +639,39 @@ class UpgradeScriptTests(unittest.TestCase):
             self.assertNotIn("segment check passed", result.stdout)
             self.assertEqual(case.file.read_text(), "99\n")
 
-    def test_wal_identity_step_refuses_a_segment_with_another_system_identifier(self):
-        with WalIdentityCase(self, segment_sysid=5) as case:
-            result = case.run("6")
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("holds another system identifier", result.stderr)
-            self.assertFalse(case.file.exists())
-            self.assertEqual(list(case.directory.glob(".system-identifier*")), [])
-
-    def test_wal_identity_step_refuses_a_page_without_a_long_header(self):
-        with WalIdentityCase(self, segment_sysid=5, info=0x0001) as case:
-            result = case.run("5")
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("has no long header", result.stderr)
-            self.assertFalse(case.file.exists())
+    def test_wal_identity_step_refuses_a_wrong_system_or_a_missing_long_header(self):
+        for partial in (False, True):
+            for identifier, info, message in ((6, 0x0002, "holds another system identifier"),
+                                              (5, 0x0001, "has no long header")):
+                with self.subTest(partial=partial, identifier=identifier, info=info), \
+                     WalIdentityCase(self, segment_sysid=5, info=info, with_segment=not partial) as case:
+                    name = "000000010000000000000001" + (".partial" if partial else "")
+                    if partial:
+                        (case.directory / name).write_bytes(wal_header(5, info))
+                    result = case.run(str(identifier))
+                    self.assertEqual((result.returncode, result.stdout), (1, ""))
+                    self.assertEqual(len(result.stderr.strip().splitlines()), 1, result.stderr)
+                    self.assertIn(message, result.stderr)
+                    self.assertEqual([path.name for path in case.directory.iterdir()], [name])
 
     def test_wal_identity_step_writes_one_line_with_mode_600_for_the_same_system(self):
-        with WalIdentityCase(self, segment_sysid=1234567890123456789) as case:
-            (case.directory / "000000010000000000000002.partial").write_bytes(wal_header(7))
-            result = case.run("1234567890123456789")
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("segment 000000010000000000000001 holds", result.stdout)
-            self.assertEqual(case.file.read_bytes(), b"1234567890123456789\n")
-            if os.name == "posix":
-                self.assertEqual(case.file.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
-                             [".system-identifier", "000000010000000000000001", "000000010000000000000002.partial"])
+        for partial in (False, True):
+            with self.subTest(partial=partial), \
+                 WalIdentityCase(self, segment_sysid=1234567890123456789, with_segment=not partial) as case:
+                name = "000000010000000000000001" + (".partial" if partial else "")
+                if partial:
+                    (case.directory / name).write_bytes(wal_header(1234567890123456789))
+                else:
+                    (case.directory / "000000010000000000000002.partial").write_bytes(wal_header(7))
+                result = case.run("1234567890123456789")
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                self.assertEqual(len(result.stdout.strip().splitlines()), 1, result.stdout)
+                self.assertIn("segment " + name + " holds", result.stdout)
+                self.assertEqual(case.file.read_bytes(), b"1234567890123456789\n")
+                if os.name == "posix":
+                    self.assertEqual(case.file.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(sorted(path.name for path in case.directory.iterdir()),
+                                 [".system-identifier", name] + ([] if partial else ["000000010000000000000002.partial"]))
 
     def test_name_check_passes_for_the_same_volume_and_stops_for_another(self):
         case = NameCheckCase(self)
@@ -784,6 +794,7 @@ class UpgradeScriptTests(unittest.TestCase):
         check = step.index('upgrade_check wal-identity "$CI_STATE/wal-identity.log"')
         self.assertLess(run, check)
         self.assertLess(check, step.index("sudo cat"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -520,7 +520,7 @@ fn a_changed_capability_security_option_or_secret_list_is_a_fault() {
     assert_mutations_fail(&SECURITY);
 }
 
-const LOGGING_AND_SECRETS: [Mutation; 7] = [
+const LOGGING_AND_SECRETS: [Mutation; 8] = [
     (
         "compose.yaml",
         "max-size: 50m",
@@ -562,6 +562,12 @@ const LOGGING_AND_SECRETS: [Mutation; 7] = [
         "file: ${RECIPE_SECRETS_DIR:?}/csrf_signing_key",
         "file: ${RECIPE_SECRETS_DIR:?}/csrf_key",
         "secrets.csrf_signing_key.file",
+    ),
+    (
+        "compose.yaml",
+        "file: ${RECIPE_SECRETS_DIR:?}/backup_manifest_key",
+        "file: ${RECIPE_SECRETS_DIR:?}/backup_manifest",
+        "secrets.backup_manifest_key.file",
     ),
 ];
 

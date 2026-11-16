@@ -183,6 +183,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | [0171](0171-cookies-without-secure-in-a-dev-build.md) | Cookies without Secure in a dev build | Accepted. Amends ADR-0062 (b) | 2026-11-14 |
 | [0172](0172-dropped-future-after-a-committed-step.md) | Dropped future after a committed step | Accepted. Amends ADR-0125 (f), ADR-0130 (b) and (c), and ADR-0133 (c). Amended by ADR-0173 (the event of a T2 refusal, a lost error result, the slot order, the slot after the drain) | 2026-11-14 |
 | [0173](0173-detached-event-of-a-t2-refusal.md) | Detached event of a T2 refusal | Accepted. Amends ADR-0172 (k), (l), (n), and (w) | 2026-11-14 |
+| [0174](0174-hmac-tag-of-the-backup-manifest.md) | HMAC tag of the backup manifest | Accepted. Amends ADR-0066 (e), (f), (h), ADR-0067 step 1, ADR-0074 (b), (c), ADR-0095 (h), and ADR-0103 (h), (i) | 2026-11-15 |
 
 ## Decision map
 
@@ -218,6 +219,7 @@ ADR-0014 to ADR-0022 come from the design review of 2026-10-12. They replace or 
 | Dependencies of the application layer | 0029 + 0035 (Argon2, random bytes, semaphore) |
 | Stored settings, security event retention | 0022 + 0062 (the keys of `serve`) + 0063 (fingerprint of the webhook URL) + 0079 (locks and statements of the startup comparison). Also 0155 (the path of the PLC key file as the 19th key of `serve`) |
 | Role grammar of the globals file in the restore test | 0095 (role grammar of the globals file, check before the restore step runs it) + 0103 (k) (the same check in `restore-volume`) |
+| HMAC tag of the backup manifest | 0174 (tag file of each set, key `backup_manifest_key` outside the backup disk, tag check before each restore, no key for an old image) |
 | Last administrator guard | 0096 (guard lock of the last Administrator, `READ COMMITTED` with the lock first) |
 | Drop guard of the audit objects | 0097 (names without a schema in the drop guard) |
 | Audit log insert and definer functions | 0098 (insert columns of `audit_log`, qualified operators of two definer functions) |

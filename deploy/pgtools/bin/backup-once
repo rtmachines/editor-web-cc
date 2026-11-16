@@ -4,15 +4,16 @@
 # The suffix is empty (daily run), _premigrate (service backup-premigrate), or _now (backup-now).
 # Source: ADR-0066 (e) to (o), ADR-0033, ADR-0031, design D10, reliability.md section 7.7.
 #
-# A set has four files: recipe_<ts><suffix>.dump, globals_<ts><suffix>.sql,
-# recipe_<ts><suffix>.counts, and the manifest recipe_<ts><suffix>.dump.sha256. The manifest comes
-# last. The counts file has one line "<schema>.<table>|<rows>" for each table of the snapshot,
+# A set has five files: recipe_<ts><suffix>.dump, globals_<ts><suffix>.sql,
+# recipe_<ts><suffix>.counts, recipe_<ts><suffix>.dump.sha256.hmac, and the manifest recipe_<ts><suffix>.dump.sha256.
+# The manifest comes last. The counts file has one line "<schema>.<table>|<rows>" for each table of the snapshot,
 # except session and login_attempt.
 #
 # Environment. The defaults are the production values. The test script sets the others.
 #   BACKUP_DIR          the backup disk, default /backups
 #   BACKUP_PGPASS_DIR   the tmpfs for the pgpass file, default /run/pgpass
 #   BACKUP_SECRET_FILE  the password file of recipe_backup, default /run/secrets/backup_password
+#   BACKUP_MANIFEST_KEY_FILE  the manifest key file, default /run/secrets/backup_manifest_key
 #   PGHOST PGPORT PGDATABASE PGUSER   the connection, default db, 5432, recipe, recipe_backup
 set -euo pipefail
 umask 077
@@ -28,6 +29,7 @@ LOCK_NAME=.lock
 BACKUP_DIR=${BACKUP_DIR:-/backups}
 PGPASS_DIR=${BACKUP_PGPASS_DIR:-/run/pgpass}
 SECRET_FILE=${BACKUP_SECRET_FILE:-/run/secrets/backup_password}
+MANIFEST_KEY_FILE=${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}
 export PGHOST=${PGHOST:-db}
 export PGPORT=${PGPORT:-5432}
 export PGDATABASE=${PGDATABASE:-recipe}
@@ -148,6 +150,19 @@ check_secret_file() {
   fi
 }
 
+# check_manifest_key: check the grammar and the filesystem before the snapshot session.
+check_manifest_key() {
+  local fault message line
+  if ! fault=$(manifest_tag_key_ids "$MANIFEST_KEY_FILE" 2>&1 >/dev/null); then
+    IFS=$'\t' read -r message line < <(manifest_tag_message "$fault")
+    fail "$message" "${line:+\"line\":$line}"
+  fi
+  if ! fault=$(manifest_tag_check_location "$MANIFEST_KEY_FILE" 2>&1); then
+    IFS=$'\t' read -r message line < <(manifest_tag_message "$fault")
+    fail "$message" "${line:+\"line\":$line}"
+  fi
+}
+
 # write_pgpass: one libpq line. sed escapes \ and : in the password (libpq rule).
 write_pgpass() {
   [ -d "$PGPASS_DIR" ] || fail "the directory of the pgpass file is missing"
@@ -186,6 +201,25 @@ WHERE c.relkind = 'r'
 ORDER BY n.nspname, c.relname \gexec
 SQL
 
+# write_manifest_tag: create the temp tag exclusively and track only the file we created.
+write_manifest_tag() {
+  local tag_fd fault message line
+  # Bash noclobber creates a missing file with O_CREAT and O_EXCL (ADR-0174 (u)).
+  # It opens an existing file that is not a regular file, but only an online writer can make one.
+  set -C
+  if ! { exec {tag_fd}>"$tmp_tag"; } 2>/dev/null; then
+    set +C
+    fail "cannot write the manifest tag file"
+  fi
+  set +C
+  tmp_files+=("$tmp_tag")
+  if ! fault=$(manifest_tag_sign "$MANIFEST_KEY_FILE" "$tmp_manifest" 2>&1 >&"$tag_fd"); then
+    IFS=$'\t' read -r message line < <(manifest_tag_message "$fault")
+    fail "$message" "${line:+\"line\":$line}"
+  fi
+  exec {tag_fd}>&-
+}
+
 # publish <tmp path> <final path>: a hard link never replaces a file. Then the temp name goes.
 publish() {
   ln -T -- "$1" "$2" || fail "cannot publish a file of the set without replacing a file"
@@ -209,7 +243,8 @@ newest_name() {
 # delete_set <timestamp> <suffix>: the manifest goes first, so a half-deleted set is incomplete.
 delete_set() {
   local ts=$1 suffix=$2 file
-  for file in "recipe_${ts}${suffix}.dump.sha256" "recipe_${ts}${suffix}.dump" \
+  for file in "recipe_${ts}${suffix}.dump.sha256" "recipe_${ts}${suffix}.dump.sha256.hmac" \
+    "recipe_${ts}${suffix}.dump" \
     "recipe_${ts}${suffix}.counts" "globals_${ts}${suffix}.sql"; do
     safe_remove "$BACKUP_DIR/$file"
   done
@@ -263,7 +298,8 @@ dump_name=$base.dump
 globals_name=globals_${ts}${suffix}.sql
 counts_name=$base.counts
 manifest_name=$base.dump.sha256
-for name in "$dump_name" "$globals_name" "$counts_name" "$manifest_name"; do
+tag_name=$manifest_name.hmac
+for name in "$dump_name" "$globals_name" "$counts_name" "$manifest_name" "$tag_name"; do
   for candidate in "$name" ".tmp-$name"; do
     if [ -e "$BACKUP_DIR/$candidate" ] || [ -L "$BACKUP_DIR/$candidate" ]; then
       fail "a file with a name of the new set exists" "\"file\":\"$candidate\""
@@ -274,11 +310,15 @@ tmp_dump=$BACKUP_DIR/.tmp-$dump_name
 tmp_globals=$BACKUP_DIR/.tmp-$globals_name
 tmp_counts=$BACKUP_DIR/.tmp-$counts_name
 tmp_manifest=$BACKUP_DIR/.tmp-$manifest_name
+tmp_tag=$BACKUP_DIR/.tmp-$tag_name
 manifest_path=$BACKUP_DIR/$manifest_name
 tmp_files=("$tmp_dump" "$tmp_globals" "$tmp_counts" "$tmp_manifest")
 log INFO "backup started" "\"set\":\"$base\""
 
-# Step 2: the pgpass file in the tmpfs.
+# Step 2: the manifest key checks and the pgpass file in the tmpfs.
+# shellcheck source=../lib/manifest-tag.sh
+source /etc/pgtools/manifest-tag.sh 2>/dev/null || fail "cannot load the manifest tag library"
+check_manifest_key
 check_secret_file "$SECRET_FILE"
 write_pgpass
 
@@ -299,21 +339,30 @@ send '\echo COUNTS_DONE'
 wait_for '^COUNTS_DONE$'
 # Before the first migration the database has no table, so the counts file may be empty.
 [ -f "$tmp_counts" ] || fail "the counts file is missing"
+counts_hash=$(sha256sum <"$tmp_counts")
+counts_hash=${counts_hash%% *}
 
 # Step 4: the dump and the globals file.
 pg_dump --format=custom --exclude-table-data=session --exclude-table-data=login_attempt \
   --snapshot="$snapshot" --no-password --file="$tmp_dump" || fail "pg_dump failed"
+dump_hash=$(sha256sum <"$tmp_dump")
+dump_hash=${dump_hash%% *}
 close_session || fail "the snapshot session failed"
 pg_dumpall --globals-only --no-role-passwords -l "$PGDATABASE" --no-password \
   --file="$tmp_globals" || fail "pg_dumpall failed"
+globals_hash=$(sha256sum <"$tmp_globals")
+globals_hash=${globals_hash%% *}
 
-# Step 5: sync, publish the three files, then the manifest last.
+# Step 5: sync, publish the three files, then the tag, and the manifest last.
 sync
 publish "$tmp_dump" "$BACKUP_DIR/$dump_name"
 publish "$tmp_globals" "$BACKUP_DIR/$globals_name"
 publish "$tmp_counts" "$BACKUP_DIR/$counts_name"
-(cd "$BACKUP_DIR" && sha256sum -- "$dump_name" "$globals_name" "$counts_name") >"$tmp_manifest"
+printf '%s  %s\n' "$dump_hash" "$dump_name" "$globals_hash" "$globals_name" \
+  "$counts_hash" "$counts_name" >"$tmp_manifest"
+write_manifest_tag
 sync
+publish "$tmp_tag" "$BACKUP_DIR/$tag_name"
 publish "$tmp_manifest" "$manifest_path"
 # The new manifest must be durable before the retention deletes an old set.
 sync

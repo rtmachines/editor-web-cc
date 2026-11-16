@@ -56,7 +56,7 @@ fn a_changed_connection_default_of_a_script_is_a_fault_that_names_the_key() {
     assert_mutations_fail(&CONNECTION_DEFAULTS);
 }
 
-const SECRET_DEFAULTS: [Mutation; 4] = [
+const SECRET_DEFAULTS: [Mutation; 8] = [
     (
         "backup-once",
         "${BACKUP_SECRET_FILE:-/run/secrets/backup_password}",
@@ -76,6 +76,30 @@ const SECRET_DEFAULTS: [Mutation; 4] = [
         "secrets.replicator_password_file",
     ),
     (
+        "backup-once",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_ke}",
+        "secrets.backup_manifest_key_file",
+    ),
+    (
+        "backup-entry",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_ke}",
+        "secrets.backup_manifest_key_file",
+    ),
+    (
+        "restore-test",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_ke}",
+        "secrets.backup_manifest_key_file",
+    ),
+    (
+        "restore-volume",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_key}",
+        "${BACKUP_MANIFEST_KEY_FILE:-/run/secrets/backup_manifest_ke}",
+        "secrets.backup_manifest_key_file",
+    ),
+    (
         "01-roles.sh",
         "${SECRET_DIR:-/run/secrets}",
         "${SECRET_DIR:-/run/secret}",
@@ -86,6 +110,45 @@ const SECRET_DEFAULTS: [Mutation; 4] = [
 #[test]
 fn a_changed_secret_default_of_a_script_is_a_fault_that_names_the_key() {
     assert_mutations_fail(&SECRET_DEFAULTS);
+}
+
+const MANIFEST_LIMITS: [Mutation; 5] = [
+    (
+        "manifest-tag.pl",
+        "use constant MAX_TAG_BYTES => 4096;",
+        "use constant MAX_TAG_BYTES => 4097;",
+        "backup_manifest.max_tag_bytes",
+    ),
+    (
+        "manifest-tag.pl",
+        "use constant MAX_FILE_BYTES => 65536;",
+        "use constant MAX_FILE_BYTES => 65537;",
+        "backup_manifest.max_file_bytes",
+    ),
+    (
+        "manifest-tag.pl",
+        "use constant MAX_KEYS => 2;",
+        "use constant MAX_KEYS => 3;",
+        "backup_manifest.max_keys",
+    ),
+    // A changed row of the table is a fault in the library that repeats it.
+    (
+        "reliability.md",
+        "| 4096 bytes. The read limit",
+        "| 8192 bytes. The read limit",
+        "backup_manifest.max_tag_bytes",
+    ),
+    (
+        "reliability.md",
+        "| 65536 bytes. The read limit",
+        "| 131072 bytes. The read limit",
+        "backup_manifest.max_file_bytes",
+    ),
+];
+
+#[test]
+fn a_changed_size_limit_of_the_manifest_library_is_a_fault_that_names_the_key() {
+    assert_mutations_fail(&MANIFEST_LIMITS);
 }
 
 const EXPOSED_PORTS: [Mutation; 3] = [

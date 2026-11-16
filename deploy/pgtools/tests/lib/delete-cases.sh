@@ -27,6 +27,35 @@ case_retention_keeps_restore_results() {
   done
 }
 
+# A failed manifest link removes the tag that this run already published (ADR-0174 (u)).
+case_manifest_publish_tag_cleanup() {
+  failed_run_case manifest-publish-tag-cleanup STUB_MANIFEST_PUBLISH_FAIL=1
+  expect_ok "manifest publish: tag was published" grep -qxF \
+    "PUBLISH recipe_$TS.dump.sha256.hmac" "$CASE/stub/log"
+  expect_ok "manifest publish: manifest link failed" grep -qxF \
+    'EVENT manifest publish refused' "$CASE/stub/log"
+  expect_no "manifest publish: no manifest was published" grep -qxF \
+    "PUBLISH recipe_$TS.dump.sha256" "$CASE/stub/log"
+  expect_no "manifest publish: published tag goes" test -e "$B/recipe_$TS.dump.sha256.hmac"
+}
+
+# Retention removes the manifest before the tag of an old set (ADR-0174 (u)).
+case_retention_tag_order() {
+  new_case retention-tag-order
+  make_set _now 45
+  local old=$LAST_BASE
+  printf 'old tag\n' >"$B/$old.dump.sha256.hmac"
+  run_script STUB_RECORD_DELETES=1 -- backup-once ""
+  expect_eq "retention tag: exit code" "$RC" 0
+  expect_ok "retention tag: old set goes" set_absent "$old"
+  expect_no "retention tag: old tag goes" test -e "$B/$old.dump.sha256.hmac"
+  expect_eq "retention tag: manifest goes before tag" \
+    "$(grep -E "^DELETE $old\\.dump\\.sha256(\\.hmac)?$" "$CASE/stub/log" | tr '\n' ',')" \
+    "DELETE $old.dump.sha256,DELETE $old.dump.sha256.hmac,"
+  expect_ok "retention tag: new set stays" set_exists "recipe_$TS"
+  expect_ok "retention tag: new tag stays" test -f "$B/recipe_$TS.dump.sha256.hmac"
+}
+
 # delete_fails_checks <label> <temp files that stay>: the rm stub refuses each temp file.
 delete_fails_checks() {
   local left refused

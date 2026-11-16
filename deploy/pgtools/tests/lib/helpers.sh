@@ -52,6 +52,17 @@ new_case() {
   TS=$("$REAL_DATE" -u +%Y%m%d_%H%M)
 }
 
+# make_manifest_key: one fixed test key on a filesystem other than ROOT.
+make_manifest_key() {
+  local dir
+  [ -d "$OTHER_FS_DIR" ] || return 1
+  dir=$(mktemp -d "$OTHER_FS_DIR/manifest-key.XXXXXX" 2>/dev/null) || return 1
+  SHM_DIRS+=("$dir")
+  [ "$(stat -c %d "$dir")" != "$(stat -c %d "$ROOT")" ] || return 1
+  perl -e 'print unpack("H*", pack("C*", 0..31)), "\n"' >"$dir/key" || return 1
+  TEST_MANIFEST_KEY_FILE=$dir/key
+}
+
 # run_script [VAR=value ...] -- <script> [args...]
 # It writes out, err, and rc with the suffix $OUTTAG and sets RC.
 run_script() {
@@ -63,8 +74,18 @@ run_script() {
   shift
   local script=$1
   shift
+  local key_env=()
+  case $script in
+    backup-once | backup-now | backup-entry)
+      if [ -z "${TEST_MANIFEST_KEY_FILE:-}" ]; then
+        make_manifest_key || { skip "backup cases need a second filesystem (no usable $OTHER_FS_DIR)"; exit "$FAILED"; }
+      fi
+      key_env+=("BACKUP_MANIFEST_KEY_FILE=$TEST_MANIFEST_KEY_FILE")
+      ;;
+  esac
   env PATH="$ROOT/stubs:$PATH" BACKUP_DIR="$B" BACKUP_PGPASS_DIR="$CASE/pgpass" \
     BACKUP_SECRET_FILE="$CASE/secret" PGDATA="${PGDATA_TEST:-$CASE/pgdata}" \
+    "${key_env[@]}" \
     STUB_LOG="$CASE/stub/log" STUB_DIR="$CASE/stub" STUB_TS="$TS" \
     "${envs[@]}" bash "$BIN/$script" "$@" >"$CASE/out${OUTTAG:-}" 2>"$CASE/err${OUTTAG:-}"
   RC=$?
