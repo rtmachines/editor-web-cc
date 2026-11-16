@@ -792,7 +792,7 @@ Copies and restore:
 Restore into production (ADR-0103):
 
 - Every restore into production writes into a new, empty volume. The rule covers a restore of the same major version, the rollback with `_premigrate`, and the major upgrade (ADR-0103 (a)).
-- Each restore uses one order. `restore-test` passes first. Then the operator stops `app` and `backup`, and `restore-volume` fills the new volume while `db` runs on the old volume (ADR-0103 (b)).
+- Each restore uses one order. `restore-test` passes first. Then the operator deletes the containers of `app` and `backup`. `restore-volume` fills the new volume while `db` runs on the old volume (ADR-0103 (b), ADR-0175).
 - When the set to restore is not the newest set, steps 1 to 8 of `restore-volume` (ADR-0103 (i)) are the test of that set. The login check of step 8 of the restore test then has no equal before the switch.
 - Then the switch of 7.8 runs. The operator sets the role passwords in `db` from the secret files (ADR-0033). Then the new WAL line starts.
 - Then the operator truncates `session` and `login_attempt`, re-applies the user changes, and records the values of ADR-0100 (c). Last, the operator runs `docker compose up -d --no-deps app`, then `docker compose up -d --no-deps proxy backup`. The wait of the bullet "After a restore into production" follows.
@@ -852,7 +852,7 @@ Recovery from the WAL archive (ADR-0106):
 - When the operator gives `PITR_EXPECTED_LSN`, the end of the recovery must also lie at or after that position (ADR-0106 (g)).
 - The other checks are the audit chain check of `data-model.md` 4.9, the optional marker entry, the configuration files, and the values of ADR-0103 (m).
 - The last line holds the base backup, the system identifier, the new timeline, the newest audit entry, and `heartbeat.last_at`. The operator compares them before the switch (ADR-0106 (d)).
-- The order of ADR-0106 (i) applies. The operator stops `app` and `backup` and reads the marker entry when `db` runs.
+- The order of ADR-0106 (i) applies. The operator deletes the containers of `app` and `backup` and reads the marker entry when `db` runs (ADR-0175).
 - Then the operator runs the flush check of ADR-0099 (a2) when `db` runs, and stops `walarchive`. Then `pitr-volume` fills the new volume.
 - After the switch, the operator sets the role passwords and starts the new WAL line.
 - Then the operator truncates `session` and `login_attempt` and re-applies the user changes after the recovery point.

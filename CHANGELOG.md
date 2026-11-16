@@ -98,6 +98,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - An error of a detached task that no request receives gives one `WARN` line with `error_code`, `chain`, and `request_id` (ADR-0173).
 - After the drain at a stop, a new login, password change, user unlock, or Basic check gets `E-WEB-009` at once (ADR-0173).
 - The `rust-cache` steps of CI save the cache only on `main`.
+- A restore into production and a recovery from the WAL archive now delete the containers of `app` and `backup`. A restart of Docker or of the host then cannot start them on the old volume (ADR-0175).
 
 ### Known gaps
 
