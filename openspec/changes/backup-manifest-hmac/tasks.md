@@ -556,7 +556,7 @@ The letters in parentheses after ADR-0174 name its items.
   - Step for a Sonnet agent: run `ste-lint.py docs/ops/runbook.md`. Check: it reports 0 hard violations, and `bash deploy/ci/check.sh` passes.
 - [x] 7.7 (openspec/specs) [mechanical] Check that the delta `specs/operations/spec.md` still matches ADR-0174. Check: `openspec validate backup-manifest-hmac --strict` passes.
 - [x] 7.8 (CHANGELOG.md) [mechanical] Add an entry under "Unreleased" for the tag of the backup manifest. Mark as BREAKING the step that creates `backup_manifest_key` before the upgrade. Check: `ste-lint.py CHANGELOG.md` reports 0 hard violations.
-- [ ] 7.9 (deploy) Run the gate: `bash deploy/ci/check.sh`, `cargo test --workspace --all-features --locked`, and the five suites of `deploy/ci/pgtools.sh`. Also run the CI jobs `compose`, `restore-switch`, and `upgrade`, `openspec validate --all`, and the `ste-lint.py` command of `CLAUDE.md`. Check: each command passes.
+- [x] 7.9 (deploy) Run the gate: `bash deploy/ci/check.sh`, `cargo test --workspace --all-features --locked`, and the five suites of `deploy/ci/pgtools.sh`. Also run the CI jobs `compose`, `restore-switch`, and `upgrade`, `openspec validate --all`, and the `ste-lint.py` command of `CLAUDE.md`. Check: each command passes.
 
 ## Changes outside the tasks
 
