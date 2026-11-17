@@ -195,7 +195,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 10. Gate
 
-- [ ] 10.1 (workspace) Run each command and show its output:
+- [x] 10.1 (workspace) Run each command and show its output:
   - `cargo fmt --check`
   - `cargo clippy --all-targets --all-features -- -D warnings`
   - `cargo test --workspace --all-features --locked`
