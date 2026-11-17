@@ -106,7 +106,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
   - On `TwinCat3`, the move of `BUF` passes.
   - A parameter of another struct, stored over the limit, keeps its type, because the command does not move it.
   - RED: `cargo test -p recipe-app --lib adr_0179_rebind`. Then, in `crates/recipe-app/src/recipe/rebind.rs`, run the check of task 4.1 on the resulting type tree of each moved parameter before `apply_rebind`. Name `E-PLT-018` for the S7 count in the doc comment of `execute`. GREEN: `cargo test -p recipe-app --lib rebind`.
-- [ ] 4.4 (recipe-db) In `crates/recipe-db/tests/storage/s7_layout_rules.rs`, seed a struct row and a parameter type with 9 levels on `S7_1500`. Seed a type with 8 levels as a non-hit. Expect the part `nesting`. RED: `cargo test -p recipe-db --test storage s7_layout_rules`. Then add the part `nesting` with the count of ADR-0179 (b) to `deploy/db/check-s7-layout-rules.sql`. GREEN: the same command.
+- [x] 4.4 (recipe-db) In `crates/recipe-db/tests/storage/s7_layout_rules.rs`, seed a struct row and a parameter type with 9 levels on `S7_1500`. Seed a type with 8 levels as a non-hit. Expect the part `nesting`. RED: `cargo test -p recipe-db --test storage s7_layout_rules`. Then add the part `nesting` with the count of ADR-0179 (b) to `deploy/db/check-s7-layout-rules.sql`. GREEN: the same command.
 
 ## 5. WCHAR and WSTRING characters on S7 (ADR-0180)
 

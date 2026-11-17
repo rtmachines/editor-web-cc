@@ -1,13 +1,15 @@
 //! Tests of `deploy/db/check-s7-layout-rules.sql` (ADR-0147, ADR-0148, design D8).
 //!
-//! The query lists four kinds of stored rows. A `nested_array` row is an array of an array on a
+//! The query lists five kinds of stored rows. A `nested_array` row is an array of an array on a
 //! machine with `S7_300`, `S7_1200`, or `S7_1500`, or a parameter whose type tree holds one. A
 //! `layout_changed` row is a parameter with an S7 address whose type tree holds a struct with a
 //! direct `SINT` or `USINT` member, or an array of `BOOL` with more than one dimension. An
 //! `array_bound` row is a parameter with an S7 address whose type tree holds an array bound outside
 //! `-32768..=32767` (ADR-0178). A `bool_array_3d` row is a parameter with an S7 address whose type
-//! tree holds an array of `BOOL` with three dimensions (ADR-0187). The tests compare the exact rows
-//! of the query, run it as `recipe_app`, and show that it writes nothing.
+//! tree holds an array of `BOOL` with three dimensions (ADR-0187). A `nesting` row is a struct row
+//! on an S7 machine, or a parameter with an S7 platform, whose type has more than 8 levels of the
+//! S7 count (ADR-0179). The tests compare the exact rows of the query, run it as `recipe_app`, and
+//! show that it writes nothing.
 
 use std::collections::BTreeSet;
 
@@ -30,6 +32,9 @@ const NESTED: &str = "nested_array";
 const CHANGED: &str = "layout_changed";
 const BOUND: &str = "array_bound";
 const CUBE: &str = "bool_array_3d";
+const NESTING: &str = "nesting";
+/// The largest S7 count of a type that the rule accepts (`type.s7_max_nesting`, ADR-0179 (a)).
+const MAX_NESTING: usize = 8;
 
 /// One row of the query: machine code, reference number, version number, tag, part, and type text.
 /// An array row has no reference number, no version number, and no tag.
@@ -166,6 +171,52 @@ async fn nested_array(conn: &mut PgConnection, plant: &Plant) -> Uuid {
     array_type(conn, plant, inner, &[1], &[3]).await
 }
 
+/// Insert a chain of `levels` structs `ST_N1` to `ST_N<levels>`. Each struct holds the one before
+/// it, and `ST_N1` holds an `INT`. The type `ST_N<n>` has `n` levels. The call returns the ids.
+async fn struct_chain(conn: &mut PgConnection, plant: &Plant, levels: usize) -> Vec<Uuid> {
+    let mut member = fixtures::primitive(conn, "INT").await;
+    let mut chain = Vec::new();
+    for level in 1..=levels {
+        member = struct_of(conn, plant, &format!("ST_N{level}"), member).await;
+        chain.push(member);
+    }
+    chain
+}
+
+/// Seed the rows of the part `nesting` and fill `expected`.
+async fn seed_nesting_hits(conn: &mut PgConnection, expected: &mut Expected) {
+    // S7_1500: a chain of 9 structs. The struct row with 9 levels and a parameter of it are hits.
+    // An array of a struct with 7 levels counts 7 + 2 = 9 levels. Only its parameter is a hit.
+    // The struct with 8 levels is not a hit.
+    let f = plant(conn, S7_1500).await;
+    let chain = struct_chain(conn, &f, MAX_NESTING + 1).await;
+    let deepest = chain[MAX_NESTING];
+    let eighth = chain[MAX_NESTING - 1];
+    let seventh = chain[MAX_NESTING - 2];
+    expected.array_row(&f, NESTING, "ST_N9");
+    parameter(conn, &f, deepest, "DEEP", Some("DB5.DBB0")).await;
+    expected.parameter_row(&f, 1, "DEEP", NESTING, "ST_N9");
+    let wide = array_type(conn, &f, seventh, &[1], &[2]).await;
+    parameter(conn, &f, wide, "DEEP_ARRAY", None).await;
+    expected.parameter_row(&f, 1, "DEEP_ARRAY", NESTING, "ARRAY[1..2] OF ST_N7");
+    parameter(conn, &f, eighth, "EDGE", Some("DB5.DBB10")).await;
+}
+
+/// Seed the rows of the part `nesting` that the query must not list.
+async fn seed_nesting_non_hits(conn: &mut PgConnection) {
+    // S7_1200: a chain of 8 structs and an array of a struct with 6 levels, 8 levels in all.
+    let g = plant(conn, S7_1200).await;
+    let chain = struct_chain(conn, &g, MAX_NESTING).await;
+    parameter(conn, &g, chain[MAX_NESTING - 1], "EIGHT", Some("DB1.DBB0")).await;
+    let array = array_type(conn, &g, chain[MAX_NESTING - 3], &[1], &[2]).await;
+    parameter(conn, &g, array, "EIGHT_ARRAY", Some("DB1.DBB10")).await;
+
+    // TwinCat3 has no limit on the levels.
+    let h = plant(conn, TWIN_CAT).await;
+    let chain = struct_chain(conn, &h, MAX_NESTING + 1).await;
+    parameter(conn, &h, chain[MAX_NESTING], "DEEP", None).await;
+}
+
 /// Seed the rows that the query must list, and fill `expected`.
 async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
     let sint = fixtures::primitive(conn, "SINT").await;
@@ -240,6 +291,7 @@ async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
         .execute(&mut *conn)
         .await
         .unwrap();
+    seed_nesting_hits(conn, expected).await;
 }
 
 /// Seed the rows that the change does not affect. The query must not list them.
@@ -286,6 +338,7 @@ async fn seed_non_hits(conn: &mut PgConnection) {
         .execute(&mut *conn)
         .await
         .unwrap();
+    seed_nesting_non_hits(conn).await;
 }
 
 /// A database with every seeded row, and the rows that the query must list.
@@ -350,7 +403,7 @@ async fn s7_layout_query_lists_exactly_the_hit_rows_as_recipe_app() {
     let found = rows(&mut conn).await;
 
     assert_eq!(user, "recipe_app");
-    assert_eq!(expected.0.len(), 15, "the seed holds 15 hits");
+    assert_eq!(expected.0.len(), 18, "the seed holds 18 hits");
     assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
     let found: BTreeSet<Row> = found.into_iter().collect();
     assert_eq!(found, expected.0);
@@ -434,6 +487,48 @@ async fn adr_0187_s7_layout_query_lists_a_parameter_with_an_address_and_a_three_
     assert_eq!(cube.len(), 1, "rows found: {cube:#?}");
     assert_eq!(cube[0].3.as_deref(), Some("CUBE"));
     assert_eq!(cube[0].5, "ARRAY[1..2,1..2,1..2] OF BOOL");
+}
+
+#[tokio::test]
+async fn adr_0179_s7_layout_query_lists_a_struct_row_and_a_parameter_with_nine_levels() {
+    let (database, expected) = seeded().await;
+    let mut conn = database.connect(Role::App).await;
+
+    let found = rows(&mut conn).await;
+
+    let nesting: BTreeSet<&Row> = found.iter().filter(|row| row.4 == NESTING).collect();
+    let expected_nesting: BTreeSet<&Row> =
+        expected.0.iter().filter(|row| row.4 == NESTING).collect();
+    assert_eq!(nesting.len(), 3, "rows found: {nesting:#?}");
+    assert_eq!(nesting, expected_nesting);
+    let tags: BTreeSet<Option<&str>> = nesting.iter().map(|row| row.3.as_deref()).collect();
+    assert_eq!(
+        tags,
+        BTreeSet::from([None, Some("DEEP"), Some("DEEP_ARRAY")]),
+        "the struct row has no tag"
+    );
+}
+
+#[tokio::test]
+async fn adr_0179_s7_layout_query_skips_eight_levels_and_a_platform_without_the_limit() {
+    let (database, _) = seeded().await;
+    let mut conn = database.connect(Role::App).await;
+
+    let found = rows(&mut conn).await;
+
+    let texts: BTreeSet<&str> = found
+        .iter()
+        .filter(|row| row.4 == NESTING)
+        .map(|row| row.5.as_str())
+        .collect();
+    assert_eq!(texts, BTreeSet::from(["ST_N9", "ARRAY[1..2] OF ST_N7"]));
+    let tags: BTreeSet<&str> = found.iter().filter_map(|row| row.3.as_deref()).collect();
+    assert!(!tags.contains("EDGE"), "a type with 8 levels is listed");
+    assert!(!tags.contains("EIGHT"), "a type with 8 levels is listed");
+    assert!(
+        !tags.contains("EIGHT_ARRAY"),
+        "a type with 8 levels is listed"
+    );
 }
 
 #[tokio::test]

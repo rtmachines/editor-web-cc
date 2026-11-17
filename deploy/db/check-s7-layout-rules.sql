@@ -1,5 +1,5 @@
 -- Check the stored rows against the S7 layout rules (ADR-0147, ADR-0148, ADR-0177, ADR-0178,
--- ADR-0187).
+-- ADR-0187, ADR-0179).
 --
 -- The query lists the stored rows that the current rule set changes or rejects:
 --   nested_array    an array row on a machine with S7_300, S7_1200, or S7_1500 whose element row is
@@ -27,6 +27,10 @@
 BEGIN READ ONLY;
 
 WITH RECURSIVE
+-- The largest S7 count that the rule accepts (`type.s7_max_nesting`, reliability.md section 7.11).
+nesting_limit (max_levels) AS (
+    VALUES (8)
+),
 -- Each type that a parameter uses, with every type below it: the element type of an array and the
 -- member types of a struct. UNION drops a type that two paths reach.
 tree (root_id, type_id) AS (
@@ -95,6 +99,39 @@ cube_row (id) AS (
       AND cardinality(t.dim_lower) = 3
       AND e.kind = 'primitive'
       AND e.name = 'BOOL'
+),
+-- The S7 levels on each path from a struct row or a parameter type to a leaf (ADR-0179 (b)). A
+-- struct below a member or a root counts 1. A struct that is the element of an array counts 3. The
+-- walk stops below the limit, because a larger sum is already a hit.
+nest (root_id, type_id, levels) AS (
+    SELECT r.id, r.id, CASE WHEN r.kind = 'struct' THEN 1 ELSE 0 END
+    FROM plc_type r
+    WHERE r.kind = 'struct'
+       OR EXISTS (SELECT 1 FROM parameter p WHERE p.plc_type_id = r.id)
+    UNION ALL
+    SELECT n.root_id, below.type_id, n.levels + below.cost
+    FROM nest n
+    CROSS JOIN LATERAL (
+        SELECT t.element_type_id AS type_id,
+               CASE WHEN e.kind = 'struct' THEN 3 ELSE 0 END AS cost
+        FROM plc_type t
+        JOIN plc_type e ON e.id = t.element_type_id
+        WHERE t.id = n.type_id AND t.kind = 'array'
+        UNION ALL
+        SELECT mem.member_type_id,
+               CASE WHEN mt.kind = 'struct' THEN 1 ELSE 0 END
+        FROM plc_type_member mem
+        JOIN plc_type mt ON mt.id = mem.member_type_id
+        WHERE mem.struct_type_id = n.type_id
+    ) below
+    WHERE n.levels <= (SELECT max_levels FROM nesting_limit)
+),
+-- A type with more than the limit of S7 levels (ADR-0179).
+nesting_row (id) AS (
+    SELECT n.root_id
+    FROM nest n
+    GROUP BY n.root_id
+    HAVING max(n.levels) > (SELECT max_levels FROM nesting_limit)
 ),
 -- The head of an array type, for example 'ARRAY[1..3,1..2] OF '.
 array_head (id, element_type_id, head) AS (
@@ -197,6 +234,21 @@ FROM (
           JOIN cube_row c ON c.id = x.type_id
           WHERE x.root_id = p.plc_type_id
       )
+    UNION ALL
+    SELECT m.code AS machine_code, NULL::text, NULL::integer, NULL::text,
+           'nesting', l.label
+    FROM nesting_row n
+    JOIN plc_type t ON t.id = n.id AND t.kind = 'struct'
+    JOIN machine m ON m.id = t.machine_id
+    JOIN type_label l ON l.type_id = t.id
+    WHERE m.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
+    UNION ALL
+    SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
+           'nesting', l.label
+    FROM live_parameter p
+    JOIN nesting_row n ON n.id = p.plc_type_id
+    JOIN type_label l ON l.type_id = p.plc_type_id
+    WHERE p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
 ) hit
 ORDER BY hit.machine_code COLLATE "C", hit.reference_number COLLATE "C" NULLS FIRST,
          hit.version_number NULLS FIRST, hit.tag COLLATE "C" NULLS FIRST,
