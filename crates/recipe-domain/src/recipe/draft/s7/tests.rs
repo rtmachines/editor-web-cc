@@ -10,9 +10,7 @@ use crate::plant::fixtures::{
     array_row, id, machine, on_platform, primitive_row, string_row, struct_row, types, types_for,
 };
 use crate::plant::{PlcPlatform, PlcType, Primitive, S7Width, TypeTree, TypeTrees};
-use crate::recipe::{
-    Draft, DraftError, RecipeError, S7AccessReason, StoredParameter, ValueInput, VersionState,
-};
+use crate::recipe::{Draft, DraftError, RecipeError, StoredParameter, ValueInput, VersionState};
 
 const INT: u128 = 1;
 const REAL: u128 = 2;
@@ -726,25 +724,6 @@ fn e_rcp_057_has_a_registry_row() {
     assert_eq!(ErrorCode::RCP_057.as_str(), "E-RCP-057");
 }
 
-/// ADR-0178 (b), ADR-0187 (b): the variant `S7TypeNotAddressable` returns `E-RCP-058` for each
-/// reason, and the code has a registry row.
-#[test]
-fn adr_0178_error_code() {
-    assert!(REGISTRY.contains(&ErrorCode::RCP_058));
-    assert_eq!(ErrorCode::RCP_058.as_str(), "E-RCP-058");
-    for reason in [
-        S7AccessReason::ArrayBoundOutsideInt,
-        S7AccessReason::BoolArrayWithThreeDimensions,
-    ] {
-        let error = RecipeError::S7TypeNotAddressable {
-            tag: tag("SPEED"),
-            address: address("DB1.DBW0"),
-            reason,
-        };
-        assert_eq!(error.code(), ErrorCode::RCP_058, "{reason:?}");
-    }
-}
-
 /// ADR-0140 (c), ADR-0116 (e1): a stored data block above 59999 on `S7_1500` does not block a
 /// command on another parameter. A rule change does not lock a draft.
 #[test]
@@ -767,178 +746,6 @@ fn adr_0140_a_stored_data_block_above_59999_does_not_block_add_parameter_on_s7_1
     assert_eq!(draft.parameters().len(), 2);
 }
 
-const S7_PLATFORMS: [PlcPlatform; 3] = [
-    PlcPlatform::S7_300,
-    PlcPlatform::S7_1200,
-    PlcPlatform::S7_1500,
-];
-
-/// Run `check_definition` for a type at an address.
-fn definition(platform: PlcPlatform, type_n: u128, text: Option<&str>) -> Result<(), DraftError> {
-    super::check_definition(platform, &tag("SPEED"), text.map(address), &tree_of(type_n))
-}
-
-/// Run the approval check for a type at an address.
-fn approval(
-    platform: PlcPlatform,
-    type_n: u128,
-    text: Option<&'static str>,
-) -> Result<(), DraftError> {
-    check_for_approval_rules(platform, &[("SPEED", type_n, text)])
-}
-
-/// The reason of an `E-RCP-058` error. The function fails when the result is another outcome.
-fn access_reason(result: Result<(), DraftError>) -> S7AccessReason {
-    let reason = match recipe_error(result) {
-        RecipeError::S7TypeNotAddressable { reason, .. } => Some(reason),
-        _ => None,
-    };
-    reason.expect("the error is E-RCP-058")
-}
-
-/// Assert that both checks give `E-RCP-058` with `reason` for a type at an address.
-fn assert_not_addressable(
-    platform: PlcPlatform,
-    type_n: u128,
-    text: &'static str,
-    reason: S7AccessReason,
-) {
-    assert_eq!(
-        access_reason(definition(platform, type_n, Some(text))),
-        reason,
-        "check_definition, type {type_n}, {platform:?}"
-    );
-    assert_eq!(
-        access_reason(approval(platform, type_n, Some(text))),
-        reason,
-        "approval check, type {type_n}, {platform:?}"
-    );
-}
-
-/// ADR-0178 (a): the bounds `32767` and `-32768` pass.
-#[test]
-fn adr_0178_the_bounds_32767_and_minus_32768_pass() {
-    for platform in S7_PLATFORMS {
-        for type_n in [UPPER_EDGE, LOWER_EDGE, ST_EDGE] {
-            let text = Some("DB1.DBB0");
-            assert!(definition(platform, type_n, text).is_ok(), "{type_n}");
-            assert!(approval(platform, type_n, text).is_ok(), "{type_n}");
-        }
-    }
-}
-
-/// ADR-0178 (a), (b): the bounds `32768` and `-32769` fail with `E-RCP-058`.
-#[test]
-fn adr_0178_the_bounds_32768_and_minus_32769_give_e_rcp_058() {
-    for platform in S7_PLATFORMS {
-        for type_n in [UPPER_WIDE, LOWER_WIDE] {
-            assert_not_addressable(
-                platform,
-                type_n,
-                "DB1.DBB0",
-                S7AccessReason::ArrayBoundOutsideInt,
-            );
-        }
-    }
-    let error = recipe_error(definition(
-        PlcPlatform::S7_1500,
-        UPPER_WIDE,
-        Some("DB1.DBB0"),
-    ));
-    assert_eq!(error.code(), ErrorCode::RCP_058);
-    assert_eq!(
-        error.to_string(),
-        "Parameter SPEED at DB1.DBB0 has a type that a data block with standard access cannot hold: an array bound is outside -32768 to 32767. Change the type."
-    );
-}
-
-/// ADR-0178 (a): the rule reads struct members and array elements.
-#[test]
-fn adr_0178_a_bound_in_a_struct_member_and_in_an_array_element_fails() {
-    for platform in S7_PLATFORMS {
-        assert_not_addressable(
-            platform,
-            ST_WIDE,
-            "DB1.DBB0",
-            S7AccessReason::ArrayBoundOutsideInt,
-        );
-    }
-    for type_n in [ARRAY_OF_WIDE, ARRAY_OF_ST_WIDE] {
-        assert_not_addressable(
-            PlcPlatform::S7_1500,
-            type_n,
-            "DB1.DBB0",
-            S7AccessReason::ArrayBoundOutsideInt,
-        );
-    }
-}
-
-/// ADR-0178 (a), ADR-0187 (f): a parameter without an address passes.
-#[test]
-fn adr_0178_a_parameter_without_an_address_passes() {
-    let types = [UPPER_WIDE, LOWER_WIDE, ST_WIDE, ARRAY_OF_ST_WIDE, BOOL_3D];
-    for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
-        for type_n in types {
-            assert!(definition(platform, type_n, None).is_ok(), "{type_n}");
-            assert!(approval(platform, type_n, None).is_ok(), "{type_n}");
-        }
-    }
-}
-
-/// ADR-0178 (d): the standard-access rule runs after the end rule.
-#[test]
-fn adr_0178_the_rule_runs_after_the_end_rule() {
-    let result = definition(PlcPlatform::S7_1500, ARRAY_OF_WIDE, Some("DB1.DBB65534"));
-    assert_eq!(recipe_error(result).code(), ErrorCode::RCP_056);
-    let result = approval(PlcPlatform::S7_1500, ARRAY_OF_WIDE, Some("DB1.DBB65534"));
-    assert_eq!(recipe_error(result).code(), ErrorCode::RCP_056);
-}
-
-/// ADR-0178 (c): the layout check after a command skips the address rules, so a stored fault of
-/// another parameter does not refuse the command (ADR-0116 (e1)).
-#[test]
-fn adr_0178_the_layout_check_alone_does_not_apply_the_rule() {
-    for type_n in [UPPER_WIDE, BOOL_3D] {
-        let result = check(PlcPlatform::S7_1500, &[("SPEED", type_n, Some("DB1.DBB0"))]);
-        assert!(result.is_ok(), "{type_n}");
-    }
-}
-
-/// ADR-0187 (a), (b): a `BOOL` array with three dimensions fails, also as a struct member and as
-/// an array element.
-#[test]
-fn adr_0187_a_bool_array_with_three_dimensions_gives_e_rcp_058() {
-    for platform in S7_PLATFORMS {
-        for type_n in [BOOL_3D, ST_BOOL_3D] {
-            assert_not_addressable(
-                platform,
-                type_n,
-                "DB1.DBB0",
-                S7AccessReason::BoolArrayWithThreeDimensions,
-            );
-        }
-    }
-    assert_not_addressable(
-        PlcPlatform::S7_1500,
-        ARRAY_OF_ST_BOOL_3D,
-        "DB1.DBB0",
-        S7AccessReason::BoolArrayWithThreeDimensions,
-    );
-    let error = recipe_error(definition(PlcPlatform::S7_300, BOOL_3D, Some("DB1.DBB0")));
-    assert_eq!(error.code(), ErrorCode::RCP_058);
-    assert_eq!(
-        error.to_string(),
-        "Parameter SPEED at DB1.DBB0 has a type that a data block with standard access cannot hold: a BOOL array with three dimensions has no verified S7 layout. Change the type."
-    );
-}
-
-/// ADR-0187 (a): a `BOOL` array with two dimensions passes.
-#[test]
-fn adr_0187_a_bool_array_with_two_dimensions_passes() {
-    for platform in S7_PLATFORMS {
-        for type_n in [BOOL_2D, ST_BOOL_2D] {
-            assert!(definition(platform, type_n, Some("DB1.DBB0")).is_ok());
-            assert!(approval(platform, type_n, Some("DB1.DBB0")).is_ok());
-        }
-    }
-}
+mod adr_0178;
+mod adr_0187;
+mod support;
