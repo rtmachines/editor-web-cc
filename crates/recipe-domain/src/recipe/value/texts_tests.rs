@@ -590,3 +590,33 @@ fn adr_0118_the_texts_of_a_tree_of_another_root_type_give_wrong_tree() {
         Err(ValueFault::WrongTree)
     );
 }
+
+/// ADR-0183 (b), (c): a based literal, a typed literal, and a digit separator are not decimal text.
+#[test]
+fn adr_0183_based_and_typed_literals_fail() {
+    const BIT_STRING_ROOT: u128 = 40;
+    let bit_strings = [
+        Primitive::Byte,
+        Primitive::Word,
+        Primitive::Dword,
+        Primitive::Lword,
+    ];
+    let integer_literals = ["16#FF", "2#1111_1111", "8#377", "BYTE#16#FF", "1_000"];
+    for type_name in bit_strings {
+        let tree = tree(
+            vec![primitive_row(BIT_STRING_ROOT, type_name)],
+            BIT_STRING_ROOT,
+        );
+        for text in integer_literals {
+            assert_eq!(
+                faults(&tree, &[("", text)]),
+                vec![(String::new(), Expected::Integer { type_name })],
+                "{type_name:?} {text:?}"
+            );
+        }
+    }
+    assert_eq!(
+        faults(&primitive_tree(REAL), &[("", "REAL#1.0")]),
+        vec![(String::new(), Expected::Decimal)]
+    );
+}
