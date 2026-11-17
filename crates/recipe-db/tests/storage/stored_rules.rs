@@ -70,77 +70,112 @@ struct Case {
 /// The seven rows of the matrix, in the order of `design.md`.
 fn matrix() -> Vec<Case> {
     vec![
-        Case {
-            reference: "SR-NESTED-ARRAY",
-            platform: "S7_300",
-            structs: Vec::new(),
-            type_text: "ARRAY[1..2] OF ARRAY[1..3] OF BYTE",
-            address: Some("DB1.DBB0"),
-            value: "[[1,2,3],[4,5,6]]".to_owned(),
-            limits: range_limits(
-                &["[1][1]", "[1][2]", "[1][3]", "[2][1]", "[2][2]", "[2][3]"],
-                "0",
-                "255",
-            ),
-        },
-        Case {
-            reference: "SR-ARRAY-BOUND",
-            platform: "S7_300",
-            structs: Vec::new(),
-            type_text: "ARRAY[32760..32770] OF BYTE",
-            address: Some("DB1.DBB0"),
-            value: "[0,1,2,3,4,5,6,7,8,9,10]".to_owned(),
-            limits: range_limits(&bound_paths(), "0", "255"),
-        },
-        Case {
-            reference: "SR-NESTING",
-            platform: "S7_1500",
-            structs: nesting_structs(),
-            type_text: "ST_Top@1",
-            address: None,
-            value: nesting_value(),
-            limits: range_limits(&[nesting_leaf_path().as_str()], "0", "100"),
-        },
-        Case {
-            reference: "SR-WCHAR",
-            platform: "S7_1500",
-            structs: Vec::new(),
-            type_text: "WCHAR",
-            address: None,
-            value: "\"\\uE000\"".to_owned(),
-            limits: Vec::new(),
-        },
-        Case {
-            reference: "SR-WSTRING",
-            platform: "S7_1200",
-            structs: Vec::new(),
-            type_text: "WSTRING(10)",
-            address: None,
-            value: "\"A\\uD000\"".to_owned(),
-            limits: vec![length_limit("", 10)],
-        },
-        Case {
-            reference: "SR-RESERVED-NAME",
-            platform: "S7_1500",
-            structs: vec![(
-                "PID_Compact".to_owned(),
-                vec![("setpoint", "REAL".to_owned())],
-            )],
-            type_text: "PID_Compact@1",
-            address: None,
-            value: r#"{"setpoint":1.5}"#.to_owned(),
-            limits: range_limits(&[".setpoint"], "0", "10"),
-        },
-        Case {
-            reference: "SR-BOOL-3D",
-            platform: "S7_300",
-            structs: Vec::new(),
-            type_text: "ARRAY[1..2,1..2,1..2] OF BOOL",
-            address: Some("DB1.DBB0"),
-            value: "[[[true,false],[false,true]],[[true,true],[false,false]]]".to_owned(),
-            limits: Vec::new(),
-        },
+        nested_array_case(),
+        array_bound_case(),
+        nesting_case(),
+        wchar_case(),
+        wstring_case(),
+        reserved_name_case(),
+        bool_3d_case(),
     ]
+}
+
+/// The row of a nested array with a limit on each leaf.
+fn nested_array_case() -> Case {
+    Case {
+        reference: "SR-NESTED-ARRAY",
+        platform: "S7_300",
+        structs: Vec::new(),
+        type_text: "ARRAY[1..2] OF ARRAY[1..3] OF BYTE",
+        address: Some("DB1.DBB0"),
+        value: "[[1,2,3],[4,5,6]]".to_owned(),
+        limits: range_limits(
+            &["[1][1]", "[1][2]", "[1][3]", "[2][1]", "[2][2]", "[2][3]"],
+            "0",
+            "255",
+        ),
+    }
+}
+
+/// The row of an array with bounds near the end of the `INT` range.
+fn array_bound_case() -> Case {
+    Case {
+        reference: "SR-ARRAY-BOUND",
+        platform: "S7_300",
+        structs: Vec::new(),
+        type_text: "ARRAY[32760..32770] OF BYTE",
+        address: Some("DB1.DBB0"),
+        value: "[0,1,2,3,4,5,6,7,8,9,10]".to_owned(),
+        limits: range_limits(&bound_paths(), "0", "255"),
+    }
+}
+
+/// The row of a struct that nests nine levels deep.
+fn nesting_case() -> Case {
+    Case {
+        reference: "SR-NESTING",
+        platform: "S7_1500",
+        structs: nesting_structs(),
+        type_text: "ST_Top@1",
+        address: None,
+        value: nesting_value(),
+        limits: range_limits(&[nesting_leaf_path().as_str()], "0", "100"),
+    }
+}
+
+/// The row of a `WCHAR` value in the private use area.
+fn wchar_case() -> Case {
+    Case {
+        reference: "SR-WCHAR",
+        platform: "S7_1500",
+        structs: Vec::new(),
+        type_text: "WCHAR",
+        address: None,
+        value: "\"\\uE000\"".to_owned(),
+        limits: Vec::new(),
+    }
+}
+
+/// The row of a `WSTRING` value with a length limit.
+fn wstring_case() -> Case {
+    Case {
+        reference: "SR-WSTRING",
+        platform: "S7_1200",
+        structs: Vec::new(),
+        type_text: "WSTRING(10)",
+        address: None,
+        value: "\"A\\uD000\"".to_owned(),
+        limits: vec![length_limit("", 10)],
+    }
+}
+
+/// The row of a struct that uses a reserved type name.
+fn reserved_name_case() -> Case {
+    Case {
+        reference: "SR-RESERVED-NAME",
+        platform: "S7_1500",
+        structs: vec![(
+            "PID_Compact".to_owned(),
+            vec![("setpoint", "REAL".to_owned())],
+        )],
+        type_text: "PID_Compact@1",
+        address: None,
+        value: r#"{"setpoint":1.5}"#.to_owned(),
+        limits: range_limits(&[".setpoint"], "0", "10"),
+    }
+}
+
+/// The row of a three-dimensional `BOOL` array.
+fn bool_3d_case() -> Case {
+    Case {
+        reference: "SR-BOOL-3D",
+        platform: "S7_300",
+        structs: Vec::new(),
+        type_text: "ARRAY[1..2,1..2,1..2] OF BOOL",
+        address: Some("DB1.DBB0"),
+        value: "[[[true,false],[false,true]],[[true,true],[false,false]]]".to_owned(),
+        limits: Vec::new(),
+    }
 }
 
 /// A numeric limit on each listed leaf.
@@ -233,45 +268,44 @@ async fn row_version(app: &App, reference: &ReferenceNumber) -> i64 {
         .row_version
 }
 
-/// Create the structs, the recipe, and the parameter of a case as the engineer. Then approve the
-/// version as the administrator.
-async fn approve_case(app: &mut App, engineer: &CurrentUser, case: &Case) {
-    let seed = app.seed_machine(case.platform, &["U1"]).await;
-    for (name, members) in &case.structs {
-        let input = DefineUdtInput {
-            code: seed.code,
-            name: TypeName::parse(name).unwrap(),
-            members: members
-                .iter()
-                .map(|(member, type_text)| {
-                    (
-                        MemberName::parse(member).unwrap(),
-                        TypeExpr::parse(type_text).unwrap(),
-                    )
-                })
-                .collect(),
-            mode: DefineUdtMode::New,
-        };
-        DefineUdt::new(app.context())
-            .execute(&app.user, &new_meta(), input)
-            .await
-            .unwrap();
-    }
-    let reference = ReferenceNumber::parse(case.reference).unwrap();
-    let created = CreateRecipeInput {
-        machine_code: seed.code,
-        reference: reference.clone(),
-        name: text(case.reference),
-        change_note: long_text("Stored row of the matrix"),
+/// Define one struct of a case as the administrator.
+async fn define_struct(
+    app: &App,
+    code: MachineCode,
+    name: &str,
+    members: &[(&'static str, String)],
+) {
+    let input = DefineUdtInput {
+        code,
+        name: TypeName::parse(name).unwrap(),
+        members: members
+            .iter()
+            .map(|(member, type_text)| {
+                (
+                    MemberName::parse(member).unwrap(),
+                    TypeExpr::parse(type_text).unwrap(),
+                )
+            })
+            .collect(),
+        mode: DefineUdtMode::New,
     };
-    CreateRecipe::new(app.context())
-        .execute(engineer, &new_meta(), created)
+    DefineUdt::new(app.context())
+        .execute(&app.user, &new_meta(), input)
         .await
         .unwrap();
+}
+
+/// Add the parameter of a case to the version 1 of its recipe as the engineer.
+async fn add_case_parameter(
+    app: &App,
+    engineer: &CurrentUser,
+    reference: &ReferenceNumber,
+    case: &Case,
+) {
     let parameter = AddParameterInput {
         reference: reference.clone(),
         number: 1,
-        expected_row_version: row_version(app, &reference).await,
+        expected_row_version: row_version(app, reference).await,
         unit_path: UnitPath::parse("U1").unwrap(),
         tag: ParameterTag::parse("VALUE").unwrap(),
         name_en: text("Value"),
@@ -288,6 +322,27 @@ async fn approve_case(app: &mut App, engineer: &CurrentUser, case: &Case) {
         .execute(engineer, &new_meta(), parameter)
         .await
         .unwrap();
+}
+
+/// Create the structs, the recipe, and the parameter of a case as the engineer. Then approve the
+/// version as the administrator.
+async fn approve_case(app: &mut App, engineer: &CurrentUser, case: &Case) {
+    let seed = app.seed_machine(case.platform, &["U1"]).await;
+    for (name, members) in &case.structs {
+        define_struct(app, seed.code, name, members).await;
+    }
+    let reference = ReferenceNumber::parse(case.reference).unwrap();
+    let created = CreateRecipeInput {
+        machine_code: seed.code,
+        reference: reference.clone(),
+        name: text(case.reference),
+        change_note: long_text("Stored row of the matrix"),
+    };
+    CreateRecipe::new(app.context())
+        .execute(engineer, &new_meta(), created)
+        .await
+        .unwrap();
+    add_case_parameter(app, engineer, &reference, case).await;
     let approval = ApproveVersionInput {
         reference: reference.clone(),
         number: 1,
