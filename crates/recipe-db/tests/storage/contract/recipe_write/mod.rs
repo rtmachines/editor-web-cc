@@ -5,5 +5,6 @@
 mod guard;
 mod read_only_locks;
 mod recipes;
+mod refresh_after_lock;
 mod status;
 mod versions;

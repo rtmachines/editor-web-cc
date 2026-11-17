@@ -242,6 +242,7 @@ impl DraftRepository for MemoryTransaction {
         version: RecipeVersionId,
     ) -> Result<Option<StoredDraft>, StorageError> {
         self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let stored = stored_draft(self.state(), version)?;
         if let Some(draft) = &stored {
             self.lock(VERSION_TABLE, LockMode::ForUpdate, &version.to_string());
