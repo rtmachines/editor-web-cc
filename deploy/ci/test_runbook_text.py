@@ -136,6 +136,14 @@ class RunbookDeletedServiceStartsTests(unittest.TestCase):
 
 
 class RunbookDeletedServiceSelectionTests(unittest.TestCase):
+    def test_window_subcommands_refuse_up_with_clustered_timeout(self):
+        command = "docker compose up -dt 10 --no-deps"
+        self.assertEqual(
+            runbook_deleted_service_starts(
+                f"Run `{command}`.", subcommands=("up", "create", "run", "start", "restart")),
+            [command],
+        )
+
     def test_window_subcommands_refuse_unsafe_calls(self):
         commands = ("docker compose up -d --no-deps app backup",
                     "docker compose run --rm backup sh", "docker compose up -d",
@@ -190,6 +198,7 @@ class RunbookInlineCodeSpansTests(unittest.TestCase):
         command = "docker compose start app"
         for marker in ("-", "*", "+", "1.", "1)", "   2."):
             for text in (f"{marker} Type a lone ` here.\n{marker} Run `{command}`.",
+                         f"{marker}\tType a lone ` here.\n{marker}\tRun `{command}`.",
                          f"Text ` here.\n{marker}\nRun `{command}`."):
                 with self.subTest(marker=marker, text=text):
                     self.assertEqual(runbook_inline_code_spans(text), [command])

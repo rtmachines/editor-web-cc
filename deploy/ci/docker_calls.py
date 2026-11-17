@@ -44,6 +44,16 @@ COMPOSE_SUBCOMMAND_VALUE_OPTIONS = {
 }
 
 
+def _option_word_count(option, value_options):
+    """Return the word count of an option and its value."""
+    if option.startswith("--"):
+        return 2 if option in value_options else 1
+    for index, letter in enumerate(option[1:], start=1):
+        if f"-{letter}" in value_options:
+            return 2 if index == len(option) - 1 else 1
+    return 1
+
+
 def forbidden_compose_call(subcommand, arguments, *, services=("app", "backup"),
                            subcommands=("up", "create", "run", "start", "restart")):
     """Return whether a Compose call can start a deleted service."""
@@ -58,7 +68,7 @@ def forbidden_compose_call(subcommand, arguments, *, services=("app", "backup"),
         if word.startswith("-"):
             if word == "--no-deps":
                 no_deps = True
-            position += 2 if word in value_options else 1
+            position += _option_word_count(word, value_options)
         else:
             operands.append(word)
             position += 1
@@ -68,9 +78,28 @@ def forbidden_compose_call(subcommand, arguments, *, services=("app", "backup"),
     return bool(set(services).intersection(operands))
 
 
+def record_window(records, *, start=None, end=None):
+    """Return a slice that excludes the given unique Compose boundary records."""
+    calls = [docker_call(record) for record in records]
+    bounds = []
+    for boundary, offset in ((start, 1), (end, 0)):
+        if boundary is None:
+            bounds.append(None)
+            continue
+        subcommand, arguments = boundary
+        matches = [index for index, call in enumerate(calls)
+                   if call == (True, subcommand, arguments)]
+        if len(matches) != 1:
+            command = " ".join([subcommand, *arguments])
+            raise AssertionError(f"{command}: expected one record, found {len(matches)}")
+        bounds.append(matches[0] + offset)
+    return slice(*bounds)
+
+
 def forbidden_window_calls(records, *, window=slice(None), services=("app", "backup")):
     """Return refused records from a window of a nonempty Docker run."""
-    assert records, "The run has no Docker argument records"
+    if not records:
+        raise AssertionError("The run has no Docker argument records")
     hits = []
     for record in records[window]:
         call = docker_call(record)
@@ -84,19 +113,22 @@ def forbidden_window_calls(records, *, window=slice(None), services=("app", "bac
 
 def forbidden_check_window_calls(records):
     """Return refused records before the two allowed starts of check."""
-    assert records, "The run has no Docker argument records"
+    if not records:
+        raise AssertionError("The run has no Docker argument records")
     calls = [docker_call(record) for record in records]
     truncate = [index for index, call in enumerate(calls)
                 if call is not None and call[:2] == (True, "exec")
                 and call[2][-2:] == ["-c", "TRUNCATE public.session, public.login_attempt"]]
-    assert len(truncate) == 1, "check needs one TRUNCATE record"
+    if not len(truncate) == 1:
+        raise AssertionError("check needs one TRUNCATE record")
     app = truncate[0] + 1
     options = ["-d", "--no-deps", "--wait", "--wait-timeout", "180"]
-    assert app < len(calls) and calls[app] == (True, "up", options + ["app"]), \
-        "The record after TRUNCATE must start app with the required options"
+    if not (app < len(calls) and calls[app] == (True, "up", options + ["app"])):
+        raise AssertionError("The record after TRUNCATE must start app with the required options")
     backup = [index for index in range(app + 1, len(calls))
               if calls[index] == (True, "up", options + ["proxy", "backup"])]
-    assert backup, "check needs the end record that starts proxy and backup"
+    if not backup:
+        raise AssertionError("check needs the end record that starts proxy and backup")
     return (forbidden_window_calls(records, window=slice(0, app))
             + forbidden_window_calls(records, window=slice(app + 1, backup[0]),
                                      services=("backup",)))
@@ -106,7 +138,7 @@ def _skip_global_options(arguments, position, value_options):
     """Return the position after global options and their values."""
     while position < len(arguments) and arguments[position].startswith("-"):
         option = arguments[position]
-        position += 2 if option in value_options else 1
+        position += _option_word_count(option, value_options)
     return position
 
 

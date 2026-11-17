@@ -11,10 +11,10 @@ import tempfile
 import unittest
 from unittest import mock
 
-spec = importlib.util.spec_from_file_location(
+DOCKER_CALLS_SPEC = importlib.util.spec_from_file_location(
     "docker_calls", pathlib.Path(__file__).with_name("docker_calls.py"))
-docker_calls = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(docker_calls)
+docker_calls = importlib.util.module_from_spec(DOCKER_CALLS_SPEC)
+DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
 
 
 def shell_function(name, file="upgrade.sh"):
@@ -110,7 +110,7 @@ def runbook_inline_code_spans(text):
         previous = fence
         fence = runbook_fence(line, fence)
         heading = re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", line)
-        boundary = heading or re.match(r"^ *(?:\||(?:[-*+]|[0-9]+[.)])(?: |$))", line)
+        boundary = heading or re.match(r"^ *(?:\||(?:[-*+]|[0-9]+[.)])(?:[ \t]|$))", line)
         if previous is not None or fence is not None or not line.strip() or boundary:
             if lines:
                 blocks.append("\n".join(lines))
@@ -198,6 +198,10 @@ class RunbookHostRebootTests(unittest.TestCase):
         "If the reboot stopped step 7 of the restore or step 10 of the recovery, the shell lost the variable target.",
         "Set target to the directory that sub-step 1 made.",
         "If sub-step 1 made no directory, run sub-step 1 again.",
+        "In the major upgrade, step 8 runs restore steps 3 and 4, "
+        "and step 10 runs restore step 7.",
+        "In the rollback, step 1 runs restore step 3, step 3 runs restore step 4, "
+        "and step 6 runs restore step 7.",
     )
 
     def prose_paragraphs(self):
@@ -237,7 +241,7 @@ class RunbookHostRebootTests(unittest.TestCase):
                 self.assertEqual(self.sentence_count(paragraph), expected,
                                  "sentence counter must ignore URL dots and periods inside code spans")
 
-    def test_restore_and_recovery_window_has_conditional_wait_and_skip(self):
+    def test_reboot_windows_have_conditional_wait_and_skip(self):
         text = " ".join("\n".join(self.prose_paragraphs()).replace("`", "").split())
         links = (
             "[Restore into production](#restore-into-production)",
@@ -416,7 +420,26 @@ class RunbookMajorUpgradeDeleteTests(unittest.TestCase):
 
     def test_section_has_no_stop_app_command(self):
         section = runbook_heading_section("Major upgrade", 2)
-        self.assertNotIn("docker compose stop app", section)
+        self.assertEqual(runbook_deleted_service_starts(
+            section, services=("app",), subcommands=("stop",)), [])
+
+    def test_stop_app_guard_parses_options_services_and_bash_fences(self):
+        commands = (
+            "docker compose -f compose.yaml stop app",
+            "docker compose stop -t 30 app",
+            "docker compose stop proxy app",
+            "docker compose  stop app",
+        )
+        for command in commands:
+            section = (f"```bash\n{command}\n```" if "  " in command
+                       else f" Run `{command}`. ")
+            with self.subTest(command=command):
+                with mock.patch(f"{__name__}.runbook_heading_section", return_value=section):
+                    with self.assertRaisesRegex(AssertionError, re.escape(command)):
+                        self.test_section_has_no_stop_app_command()
+        with mock.patch(f"{__name__}.runbook_heading_section",
+                        return_value=" Run `docker compose stop db`. "):
+            self.test_section_has_no_stop_app_command()
 
 
 def assert_raw_commands(test, section, allowed, scope):

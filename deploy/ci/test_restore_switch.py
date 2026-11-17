@@ -550,6 +550,63 @@ class DockerSwitchStubTests(unittest.TestCase):
                              b"3\x00a b\x00\x00x\ny\x00")
 
 
+def subcommand_files(directory, state, tree):
+    ci_state = directory / "runner" / PROJECT / "state"
+    ci_state.mkdir(parents=True)
+    run_dir = ci_state.parent
+    for key, value in {"backup.set": STUB_SET + "\n", **(state or {})}.items():
+        (ci_state / key).write_text(value.replace("@RUN@", run_dir.as_posix()), encoding="utf-8", newline="\n")
+    for key, value in (tree or {}).items():
+        path = run_dir / key
+        if value is None:
+            path.mkdir(parents=True, exist_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value.replace("@RUN@", run_dir.as_posix()), encoding="utf-8", newline="\n")
+    return ci_state
+
+
+def subcommand_stubs(directory, stub_files, sudo_stub, docker_stub, stub_python, python_stub, extra_stubs):
+    stubs, stub_dir = directory / "bin", directory / "stub"
+    stubs.mkdir()
+    stub_dir.mkdir()
+    defaults = {"old.state": "shut down\n", "db.volume": OLD_VOLUME + "\n", "db.running": ""}
+    for key, value in {**defaults, **(stub_files or {})}.items():
+        (stub_dir / key).write_text(value, encoding="utf-8", newline="\n")
+    commands = {"sudo": sudo_stub, "docker": docker_stub, "mountpoint": 'exit "${STUB_MOUNTPOINT_STATUS:-1}"',
+                "stat": STAT_STUB, "sleep": "exit 0"}
+    if stub_python:
+        commands["python3"] = python_stub or PYTHON_STUB
+    for key, value in {**commands, **(extra_stubs or {})}.items():
+        write_stub(stubs / key, value)
+
+
+def subcommand_environment(directory, run_dir, stub_env):
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_"))}
+    env.update({"GITHUB_ACTIONS": "true", "GITHUB_WORKSPACE": str(ROOT), "RUNNER_TEMP": str(directory / "runner"),
+                "COMPOSE_PROJECT_NAME": PROJECT, "RECIPE_VERSION": JOB_TAG, "CI_WAIT_ATTEMPTS": "3",
+                "PATH": f"{directory / 'bin'}{os.pathsep}{env['PATH']}", "STUB_LOG": str(directory / "calls.log"),
+                "STUB_DIR": str(directory / "stub"), "STUB_SET": STUB_SET, "STUB_OLD": OLD_VOLUME})
+    env.update({key: value.replace("@RUN@", run_dir.as_posix()) for key, value in (stub_env or {}).items()})
+    return env
+
+
+def subcommand_results(directory, ci_state, read):
+    run_dir, log = ci_state.parent, directory / "calls.log"
+    files = {path.name: path.read_text(encoding="utf-8") for path in ci_state.iterdir()}
+    text = log.read_text(encoding="utf-8") if log.exists() else ""
+    env_log, argv_log = pathlib.Path(str(log) + ".env"), pathlib.Path(str(log) + ".argv")
+    files["env.log"] = env_log.read_text(encoding="utf-8") if env_log.exists() else ""
+    files["argv"] = docker_calls.argument_records(argv_log.read_bytes() if argv_log.exists() else b"")
+    listing = [item.relative_to(run_dir).as_posix() for item in run_dir.rglob("*")
+               if ci_state not in item.parents and item != ci_state]
+    files["tree.list"] = "\n".join(sorted(listing))
+    for pattern in read:
+        found = sorted(run_dir.glob(pattern))
+        files["read:" + pattern] = found[0].read_text(encoding="utf-8") if found else None
+    return text, files
+
+
 class StubbedSubcommandTests(unittest.TestCase):
     def setUp(self):
         self.bash = shutil.which("bash")
@@ -567,71 +624,14 @@ class StubbedSubcommandTests(unittest.TestCase):
             read = (*read, *restore_tree())
         with tempfile.TemporaryDirectory() as temp:
             directory = pathlib.Path(temp)
-            stubs = directory / "bin"
-            stubs.mkdir()
-            stub_dir = directory / "stub"
-            stub_dir.mkdir()
-            (stub_dir / "old.state").write_text("shut down\n", encoding="utf-8")
-            (stub_dir / "db.volume").write_text(OLD_VOLUME + "\n", encoding="utf-8")
-            (stub_dir / "db.running").write_text("", encoding="utf-8")
-            for key, value in (stub_files or {}).items():
-                (stub_dir / key).write_text(value, encoding="utf-8", newline="\n")
-            ci_state = directory / "runner" / PROJECT / "state"
-            ci_state.mkdir(parents=True)
-            run_dir = ci_state.parent
-            for key, value in {"backup.set": STUB_SET + "\n", **(state or {})}.items():
-                text = value.replace("@RUN@", run_dir.as_posix())
-                (ci_state / key).write_text(text, encoding="utf-8", newline="\n")
-            for key, value in (tree or {}).items():
-                path = run_dir / key
-                if value is None:
-                    path.mkdir(parents=True, exist_ok=True)
-                else:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(value.replace("@RUN@", run_dir.as_posix()), encoding="utf-8", newline="\n")
-            log = directory / "calls.log"
-            write_stub(stubs / "sudo", sudo_stub)
-            write_stub(stubs / "docker", docker_stub)
-            write_stub(stubs / "mountpoint", 'exit "${STUB_MOUNTPOINT_STATUS:-1}"')
-            write_stub(stubs / "stat", STAT_STUB)
-            write_stub(stubs / "sleep", "exit 0")
-            if stub_python:
-                write_stub(stubs / "python3", python_stub or PYTHON_STUB)
-            for key, value in (extra_stubs or {}).items():
-                write_stub(stubs / key, value)
-            env = {key: value for key, value in os.environ.items() if not key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_"))}
-            env.update({
-                "GITHUB_ACTIONS": "true",
-                "GITHUB_WORKSPACE": str(ROOT),
-                "RUNNER_TEMP": str(directory / "runner"),
-                "COMPOSE_PROJECT_NAME": PROJECT,
-                "RECIPE_VERSION": JOB_TAG,
-                "CI_WAIT_ATTEMPTS": "3",
-                "PATH": f"{stubs}{os.pathsep}{env['PATH']}",
-                "STUB_LOG": str(log),
-                "STUB_DIR": str(stub_dir),
-                "STUB_SET": STUB_SET,
-                "STUB_OLD": OLD_VOLUME,
-            })
-            env.update({key: value.replace("@RUN@", run_dir.as_posix()) for key, value in (stub_env or {}).items()})
+            subcommand_stubs(directory, stub_files, sudo_stub, docker_stub, stub_python, python_stub, extra_stubs)
+            ci_state = subcommand_files(directory, state, tree)
+            env = subcommand_environment(directory, ci_state.parent, stub_env)
             command = [self.bash, str(SCRIPT), name]
             if driver is not None:
-                # The driver sources the shared steps and runs one shell command, for example a call of switch with an argument.
-                shared = CI.as_posix()
-                command = [self.bash, "-c", f'source "{shared}/common.sh"; source "{shared}/switch-steps.sh"; {driver}']
+                command = [self.bash, "-c", f'source "{CI.as_posix()}/common.sh"; source "{CI.as_posix()}/switch-steps.sh"; {driver}']
             done = subprocess.run(command, capture_output=True, text=True, check=False, env=env)
-            files = {path.name: path.read_text(encoding="utf-8") for path in ci_state.iterdir()}
-            text = log.read_text(encoding="utf-8") if log.exists() else ""
-            env_log = pathlib.Path(str(log) + ".env")
-            files["env.log"] = env_log.read_text(encoding="utf-8") if env_log.exists() else ""
-            argv_log = pathlib.Path(str(log) + ".argv")
-            files["argv"] = docker_calls.argument_records(argv_log.read_bytes() if argv_log.exists() else b"")
-            listing = [item.relative_to(run_dir).as_posix() for item in run_dir.rglob("*")
-                       if ci_state not in item.parents and item != ci_state]
-            files["tree.list"] = "\n".join(sorted(listing))
-            for pattern in read:
-                found = sorted(run_dir.glob(pattern))
-                files["read:" + pattern] = found[0].read_text(encoding="utf-8") if found else None
+            text, files = subcommand_results(directory, ci_state, read)
             return done, text, files
 
     def assertInOrder(self, log, patterns):
@@ -733,8 +733,25 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
                     self.assertEqual(done.returncode, 0, done.stderr)
                     arguments = command.removeprefix("docker ").removeprefix("compose ")
                     self.assertIn(" ".join(shlex.split(arguments)), log)
-                    with self.assertRaises(AssertionError):
+                    _, subcommand, operands = docker_calls.docker_call(self.command_records(command)[0])
+                    message = ".*".join(re.escape(word) for word in [subcommand, *operands])
+                    with self.assertRaisesRegex(AssertionError, message):
                         self.assert_no_forbidden_docker_commands(files["argv"])
+
+    def test_command_mutant_requires_the_expected_service(self):
+        case = RestoreBehaviorTests("test_command_guard_rejects_restore_mutants")
+        guard = case.assert_no_forbidden_docker_commands
+
+        def wrong_service(records):
+            if any(docker_calls.docker_call(record) == (True, "rm", ["-s", "-f", "db"]) for record in records):
+                raise AssertionError("compose rm -s -f app backup")
+            guard(records)
+
+        result = unittest.TestResult()
+        with patch.object(case, "assert_no_forbidden_docker_commands", side_effect=wrong_service):
+            case.run(result)
+        self.assertEqual(len(result.failures), 1)
+        self.assertIn("does not match", result.failures[0][1])
 
     def test_window_guard_rejects_restore_mutants(self):
         anchor = '  compose rm -s -f app backup || fail "restore: cannot delete app and backup."'
@@ -755,8 +772,9 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
                         done, log, files = self.run_subcommand("restore")
                     self.assertEqual(done.returncode, 0, done.stderr)
                     self.assertIn(command.removeprefix("compose "), log)
-                    with self.assertRaises(AssertionError):
-                        self.assert_no_forbidden_docker_commands(files["argv"])
+                    hits = docker_calls.forbidden_window_calls(files["argv"])
+                    expected = docker_calls.docker_call(self.command_records(command)[0])
+                    self.assertEqual([docker_calls.docker_call(record) for record in hits], [expected])
 
     def assert_copy_removed(self, files):
         self.assertNotIn("backups/restore-switch-tag", files["tree.list"])
@@ -1976,8 +1994,9 @@ class CheckBehaviorTests(StubbedSubcommandTests):
                 done, log, files = self.run_check()
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertIn(" up -d --no-deps app backup\n", log)
-            with self.assertRaises(AssertionError):
-                self.assertEqual(docker_calls.forbidden_check_window_calls(files["argv"]), [])
+            hits = docker_calls.forbidden_check_window_calls(files["argv"])
+            self.assertEqual([docker_calls.docker_call(record) for record in hits],
+                             [(True, "up", ["-d", "--no-deps", "app", "backup"])])
 
     def test_check_waits_for_a_minute_without_a_set_before_backup_now(self):
         # backup-once refuses a name of an existing set. Prepare wrote a _now set in the same minute in CI run 41092760611.
@@ -3095,8 +3114,9 @@ class RunbookRestoreDeleteTests(unittest.TestCase):
             with self.subTest(mutant=name):
                 self.assertEqual(section.count(anchor), 1, anchor)
                 mutant = section.replace(anchor, anchor + insertion, 1)
+                command = re.search(r"`([^`]+)`", insertion).group(1)
                 with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
-                    with self.assertRaises(AssertionError):
+                    with self.assertRaisesRegex(AssertionError, re.escape(command)):
                         self.test_restore_window_keeps_app_and_backup_without_a_container()
 
     def test_section_guard_rejects_service_lists_and_double_backticks(self):
