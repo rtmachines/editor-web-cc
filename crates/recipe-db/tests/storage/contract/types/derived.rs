@@ -1,6 +1,7 @@
 //! Contract cases of `TypeCatalog::ensure_derived`.
 
 use recipe_app::error::StorageError;
+use recipe_app::ports::Isolation;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{PlcType, PlcTypeRecord, Primitive, StringKind};
 use serde_json::json;
@@ -287,6 +288,37 @@ async fn a_dropped_transaction_keeps_no_derived_row(h: &dyn Harness) {
     assert!(rows.iter().all(|row| row.machine().is_none()));
 }
 
+/// An existing derived type still gives SQLSTATE `25006` in a read-only level.
+async fn an_existing_derived_type_gives_25006_in_a_read_only_level(h: &dyn Harness) {
+    let built = machine(132, "M132");
+    insert(h, &built).await;
+    ensure(
+        h,
+        built.id(),
+        string_record(&built, type_id(29), StringKind::String, 20),
+    )
+    .await;
+    for isolation in [Isolation::ReadOnly, Isolation::RepeatableRead] {
+        let mut tx = h.unit_of_work().begin(isolation).await.unwrap();
+
+        let error = tx
+            .types()
+            .ensure_derived(string_record(&built, type_id(30), StringKind::String, 20))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(&error, StorageError::Other { sqlstate: Some(state), .. } if state == "25006"),
+            "{isolation:?}: {error:?}"
+        );
+    }
+}
+
+contract_case!(
+    an_existing_derived_type_gives_25006_in_a_read_only_level,
+    an_existing_derived_type_gives_25006_in_a_read_only_level_memory,
+    an_existing_derived_type_gives_25006_in_a_read_only_level_postgres
+);
 contract_case!(
     ensure_derived_inserts_a_string_and_gives_its_image,
     ensure_derived_inserts_a_string_and_gives_its_image_memory,
