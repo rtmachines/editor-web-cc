@@ -33,6 +33,7 @@ use recipe_domain::plant::{
 use recipe_domain::recipe::{
     LimitInput, LimitList, Ordinal, ParameterTag, ReferenceNumber, ValueInput,
 };
+use sqlx::PgConnection;
 
 use crate::atomic::world::{long_text, text};
 use crate::support::app::App;
@@ -407,7 +408,10 @@ fn assert_success(what: &str, output: &Output) {
 }
 
 /// Steps 1 to 3: create an empty database, load the stored dump, and run the migrator.
-async fn restored_and_upgraded() -> App {
+///
+/// The second value is the stored state of `reference`. It is read right after the dump loads,
+/// before the migrator runs, so it is the state that the dump really held.
+async fn restored_and_upgraded(reference: &str) -> (App, StoredRows) {
     let database = TestDatabase::create_empty().await;
     let dump = Path::new(FIXTURE_DIRECTORY).join(FIXTURE_DUMP);
     let name = database.name().to_owned();
@@ -423,18 +427,24 @@ async fn restored_and_upgraded() -> App {
         &dump,
     );
     assert_success("psql", &loaded);
+    let mut session = database.connect(DbRole::Superuser).await;
+    let before = stored_rows(&mut session, reference).await;
+    drop(session);
     migrate(
         &database.target(DbRole::Migrator),
         &MigrateSettings::default(),
     )
     .await
     .unwrap();
-    App::over(database).await
+    (App::over(database).await, before)
 }
+
+/// The rows of `parameter` and `plc_type` as text: the parameters first, then the types.
+type StoredRows = (Vec<String>, Vec<String>);
 
 /// The rows of `parameter` and `plc_type` as text. A stored type text and a stored value do not
 /// change in the upgrade, so the text is equal before and after.
-async fn stored_rows(app: &mut App, reference: &str) -> (Vec<String>, Vec<String>) {
+async fn stored_rows(session: &mut PgConnection, reference: &str) -> StoredRows {
     let parameters = sqlx::query_scalar(
         "SELECT to_jsonb(p)::text FROM parameter p \
          JOIN recipe_version v ON v.id = p.recipe_version_id \
@@ -442,11 +452,11 @@ async fn stored_rows(app: &mut App, reference: &str) -> (Vec<String>, Vec<String
          WHERE r.reference_number = $1 ORDER BY v.number, p.tag",
     )
     .bind(reference)
-    .fetch_all(app.admin())
+    .fetch_all(&mut *session)
     .await
     .unwrap();
     let types = sqlx::query_scalar("SELECT to_jsonb(t)::text FROM plc_type t ORDER BY t.id")
-        .fetch_all(app.admin())
+        .fetch_all(session)
         .await
         .unwrap();
     (parameters, types)
@@ -582,8 +592,7 @@ async fn backup_and_restore(app: &App, reference: &str, expected: &ExportedVersi
 
 /// The eight steps of task 9.2 for one row of the matrix.
 async fn check_stored_row(expected: Expectation) {
-    let mut app = restored_and_upgraded().await;
-    let before = stored_rows(&mut app, expected.reference).await;
+    let (mut app, before) = restored_and_upgraded(expected.reference).await;
     read_row(&mut app, &expected).await;
     let exported = export_of(&app, expected.reference).await;
     assert_eq!(
@@ -592,7 +601,7 @@ async fn check_stored_row(expected: Expectation) {
     );
     assert_eq!(exported.loadable(), expected.loadable);
     assert_document(&exported, expected.reference, expected.loadable);
-    assert_eq!(stored_rows(&mut app, expected.reference).await, before);
+    assert_eq!(stored_rows(app.admin(), expected.reference).await, before);
     copy_row(&mut app, expected.reference).await;
     backup_and_restore(&app, expected.reference, &exported).await;
 }
