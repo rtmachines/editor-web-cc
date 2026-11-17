@@ -138,8 +138,9 @@ impl DraftRepository for MemoryTransaction {
         version: RecipeVersionId,
     ) -> Result<Option<StoredDraft>, StorageError> {
         let stored = stored_draft(self.state(), version)?;
-        if stored.is_some() {
+        if let Some(draft) = &stored {
             self.lock(VERSION_TABLE, LockMode::ForUpdate, &version.to_string());
+            self.record_row_version(version, draft.row_version);
         }
         Ok(stored)
     }
@@ -176,6 +177,7 @@ impl DraftRepository for MemoryTransaction {
         row.bump(now)?;
         let row_version = row.row_version;
         state.editors.entry((version, editor)).or_insert(now);
+        self.record_row_version(version, row_version);
         Ok(row_version)
     }
 

@@ -482,6 +482,7 @@ async fn a_base_version_of_another_recipe_gives_a_missing_reference() {
 async fn discard_version_sets_deleted_at_and_adds_1_to_the_row_version() {
     let store = store_with_draft();
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     let image = tx.recipes().discard_version(vid(11)).await.unwrap();
     let value = image.as_value();
     assert_eq!(field(value, "deleted_at"), json!(now_text()));
@@ -493,6 +494,7 @@ async fn discard_version_sets_deleted_at_and_adds_1_to_the_row_version() {
 async fn discard_version_of_an_approved_version_gives_e_rcp_033() {
     let store = store_with_approved();
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     let error = tx.recipes().discard_version(vid(11)).await.unwrap_err();
     assert!(
         matches!(&error, StorageError::Constraint { code, .. } if *code == ErrorCode::RCP_033),
@@ -504,6 +506,7 @@ async fn discard_version_of_an_approved_version_gives_e_rcp_033() {
 async fn retire_version_sets_the_status_and_adds_1_to_the_row_version() {
     let store = store_with_approved();
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     let image = tx.recipes().retire_version(vid(11)).await.unwrap();
     let value = image.as_value();
     assert_eq!(field(value, "status"), json!("retired"));
@@ -515,6 +518,7 @@ async fn retire_version_sets_the_status_and_adds_1_to_the_row_version() {
 async fn retire_version_of_a_draft_gives_e_rcp_033() {
     let store = store_with_draft();
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     let error = tx.recipes().retire_version(vid(11)).await.unwrap_err();
     assert!(
         matches!(&error, StorageError::Constraint { code, .. } if *code == ErrorCode::RCP_033),
@@ -526,6 +530,7 @@ async fn retire_version_of_a_draft_gives_e_rcp_033() {
 async fn approve_version_stores_the_hash_as_64_hex_characters() {
     let store = store_with_draft();
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     let hash = Sha256::parse(HASH).unwrap();
     let image = tx
         .recipes()
@@ -553,6 +558,7 @@ async fn a_second_approved_version_gives_recipe_version_one_approved() {
         user(9),
     );
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(12)).await.unwrap();
     let hash = Sha256::parse(HASH).unwrap();
     let error = tx
         .recipes()
@@ -595,6 +601,7 @@ async fn a_rollback_keeps_no_recipe_change() {
         .rename_recipe(rid(1), &text("Gone"))
         .await
         .unwrap();
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     tx.recipes().discard_version(vid(11)).await.unwrap();
     drop(tx);
     let state = store.state();

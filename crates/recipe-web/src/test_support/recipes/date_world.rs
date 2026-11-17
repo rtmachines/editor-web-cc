@@ -210,6 +210,7 @@ pub(crate) async fn approve_version_with_real_hash(fixture: &Fixture, target: Ve
     };
     let approver = UserId::from(Uuid::from_u128(1));
     let mut tx = fixture.store.begin(Isolation::ReadCommitted).await.unwrap();
+    tx.recipes().lock_version(version).await.unwrap();
     tx.recipes()
         .approve_version(version, approver, hash)
         .await

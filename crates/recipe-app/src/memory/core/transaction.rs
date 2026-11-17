@@ -1,5 +1,6 @@
 //! The in-memory transaction.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use parking_lot::Mutex;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::timestamp::Timestamp;
 
-use recipe_domain::recipe::ParameterKey;
+use recipe_domain::recipe::{ParameterKey, RecipeVersionId};
 
 use super::journal::{DraftWrite, JournalEntry, Lock, LockMode, WriteKind};
 use super::state::MemoryState;
@@ -49,6 +50,8 @@ pub struct MemoryTransaction {
     isolation: Isolation,
     visible: VisibleLogs,
     has_written: bool,
+    /// The `row_version` that each version lock read, as `PgTransaction` keeps it (ADR-0030).
+    locked_versions: BTreeMap<RecipeVersionId, i64>,
 }
 
 impl MemoryTransaction {
@@ -67,7 +70,21 @@ impl MemoryTransaction {
             isolation,
             visible,
             has_written: false,
+            locked_versions: BTreeMap::new(),
         }
+    }
+
+    /// Record the `row_version` that a lock or a status write left on a version.
+    ///
+    /// The record solves one problem: a status write must follow a lock of the same transaction,
+    /// as in `PgTransaction` (ADR-0030).
+    pub(crate) fn record_row_version(&mut self, version: RecipeVersionId, row_version: i64) {
+        self.locked_versions.insert(version, row_version);
+    }
+
+    /// Return the `row_version` that the last lock or status write of this transaction recorded.
+    pub(crate) fn recorded_row_version(&self, version: RecipeVersionId) -> Option<i64> {
+        self.locked_versions.get(&version).copied()
     }
 
     /// Return the fault that `fail_insert_unit` set, or `None`.
