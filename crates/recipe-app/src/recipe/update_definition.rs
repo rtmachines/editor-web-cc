@@ -8,7 +8,7 @@ use recipe_domain::recipe::{
 };
 use recipe_domain::text::{LongText, Text};
 
-use super::definition_steps::{lock_live_unit, map_tag_error, resolve_type};
+use super::definition_steps::{lock_live_unit, map_tag_error, require_s7_nesting, resolve_type};
 use super::draft_session::{
     DraftOutput, DraftTarget, MachineLock, OpenDraft, TouchedDraft, parameter_diff_entry,
 };
@@ -164,7 +164,8 @@ async fn stage_definition(
 ) -> Result<StagedDefinition, AppError> {
     let parameter = open.parameter_id(input.key)?;
     let stored_type = open.draft.parameter(input.key)?.plc_type();
-    if !expr_names_row(&open.types, stored_type, &input.type_expr) {
+    let is_type_changed = !expr_names_row(&open.types, stored_type, &input.type_expr);
+    if is_type_changed {
         require_current_type(&input.type_expr)?;
         input
             .type_expr
@@ -172,6 +173,9 @@ async fn stage_definition(
     }
     let unit = lock_live_unit(open, &input.unit_path).await?;
     let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
+    if is_type_changed {
+        require_s7_nesting(&resolved, open.draft.platform())?;
+    }
     let update = DefinitionUpdate {
         unit,
         tag: input.tag,
@@ -221,6 +225,8 @@ async fn write_definition(
 
 #[cfg(test)]
 mod adr_0178_tests;
+#[cfg(test)]
+mod adr_0179_tests;
 #[cfg(test)]
 mod errors;
 #[cfg(test)]

@@ -96,6 +96,8 @@ impl SetParameterValue {
 }
 
 #[cfg(test)]
+mod adr_0179_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod texts_tests;
