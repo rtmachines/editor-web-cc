@@ -12,12 +12,15 @@
 --   bool_array_3d   a parameter with an S7 address whose type tree holds an array of BOOL with
 --                   three dimensions (ADR-0187). An Approved version of such a parameter becomes
 --                   not loadable after the upgrade.
+--   nesting         a struct row or a parameter type with more than 8 S7 levels on one path
+--                   (ADR-0179). The type_text shows each struct as name@revision, also in ARRAY[..] OF.
 --
 -- The columns are machine_code, reference_number, version_number, tag, part, and type_text.
 -- For an array row, reference_number, version_number, and tag are empty and type_text is the
 -- array type. For a parameter row, type_text is the type of the parameter.
 -- The query reads every machine, also an archived one, every recipe, and every version.
--- It skips the parameters of a discarded draft.
+-- It skips the parameters of a discarded draft in the parts nested_array and layout_changed. The
+-- parts array_bound, bool_array_3d, and nesting list them, because their rows stay in storage.
 -- A recursive query walks the type tree over the element type and the members of a struct.
 -- The owner reads each row. The query writes nothing.
 --
@@ -163,6 +166,21 @@ type_label (type_id, label) AS (
     JOIN plc_type t ON t.id = c.current_id
     WHERE t.kind <> 'array'
 ),
+-- The text of each type for the part nesting: as type_label, but a struct shows its revision as
+-- name@revision. A standalone struct row has no tag, so the revision tells two revisions apart.
+nesting_label (type_id, label) AS (
+    SELECT t.id, t.name || CASE WHEN t.kind = 'struct' THEN '@' || t.revision::text ELSE '' END
+                        || COALESCE('(' || t.string_length::text || ')', '')
+    FROM plc_type t
+    WHERE t.kind <> 'array'
+    UNION ALL
+    SELECT c.root_id, c.heads || t.name
+                      || CASE WHEN t.kind = 'struct' THEN '@' || t.revision::text ELSE '' END
+                      || COALESCE('(' || t.string_length::text || ')', '')
+    FROM chain c
+    JOIN plc_type t ON t.id = c.current_id
+    WHERE t.kind <> 'array'
+),
 -- A parameter of a version that is not a discarded draft, with the data that the output shows.
 live_parameter AS (
     SELECT p.plc_type_id, p.plc_platform, p.s7_address, p.tag,
@@ -172,6 +190,16 @@ live_parameter AS (
     JOIN recipe r ON r.id = v.recipe_id
     JOIN machine m ON m.id = r.machine_id
     WHERE v.deleted_at IS NULL
+),
+-- A parameter of every version, also a discarded draft, because its rows stay in storage. The parts
+-- array_bound, bool_array_3d, and nesting read it (ADR-0178 (j), ADR-0187 (i), ADR-0179 (k)).
+stored_parameter AS (
+    SELECT p.plc_type_id, p.plc_platform, p.s7_address, p.tag,
+           m.code AS machine_code, r.reference_number, v.number AS version_number
+    FROM parameter p
+    JOIN recipe_version v ON v.id = p.recipe_version_id
+    JOIN recipe r ON r.id = v.recipe_id
+    JOIN machine m ON m.id = r.machine_id
 )
 SELECT hit.machine_code, hit.reference_number, hit.version_number, hit.tag, hit.part,
        hit.type_text
@@ -211,7 +239,7 @@ FROM (
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'array_bound', l.label
-    FROM live_parameter p
+    FROM stored_parameter p
     JOIN type_label l ON l.type_id = p.plc_type_id
     WHERE p.s7_address IS NOT NULL
       AND p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
@@ -224,7 +252,7 @@ FROM (
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'bool_array_3d', l.label
-    FROM live_parameter p
+    FROM stored_parameter p
     JOIN type_label l ON l.type_id = p.plc_type_id
     WHERE p.s7_address IS NOT NULL
       AND p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
@@ -240,14 +268,14 @@ FROM (
     FROM nesting_row n
     JOIN plc_type t ON t.id = n.id AND t.kind = 'struct'
     JOIN machine m ON m.id = t.machine_id
-    JOIN type_label l ON l.type_id = t.id
+    JOIN nesting_label l ON l.type_id = t.id
     WHERE m.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'nesting', l.label
-    FROM live_parameter p
+    FROM stored_parameter p
     JOIN nesting_row n ON n.id = p.plc_type_id
-    JOIN type_label l ON l.type_id = p.plc_type_id
+    JOIN nesting_label l ON l.type_id = p.plc_type_id
     WHERE p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
 ) hit
 ORDER BY hit.machine_code COLLATE "C", hit.reference_number COLLATE "C" NULLS FIRST,

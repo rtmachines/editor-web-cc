@@ -193,12 +193,12 @@ async fn seed_nesting_hits(conn: &mut PgConnection, expected: &mut Expected) {
     let deepest = chain[MAX_NESTING];
     let eighth = chain[MAX_NESTING - 1];
     let seventh = chain[MAX_NESTING - 2];
-    expected.array_row(&f, NESTING, "ST_N9");
+    expected.array_row(&f, NESTING, "ST_N9@1");
     parameter(conn, &f, deepest, "DEEP", Some("DB5.DBB0")).await;
-    expected.parameter_row(&f, 1, "DEEP", NESTING, "ST_N9");
+    expected.parameter_row(&f, 1, "DEEP", NESTING, "ST_N9@1");
     let wide = array_type(conn, &f, seventh, &[1], &[2]).await;
     parameter(conn, &f, wide, "DEEP_ARRAY", None).await;
-    expected.parameter_row(&f, 1, "DEEP_ARRAY", NESTING, "ARRAY[1..2] OF ST_N7");
+    expected.parameter_row(&f, 1, "DEEP_ARRAY", NESTING, "ARRAY[1..2] OF ST_N7@1");
     parameter(conn, &f, eighth, "EDGE", Some("DB5.DBB10")).await;
 }
 
@@ -215,6 +215,48 @@ async fn seed_nesting_non_hits(conn: &mut PgConnection) {
     let h = plant(conn, TWIN_CAT).await;
     let chain = struct_chain(conn, &h, MAX_NESTING + 1).await;
     parameter(conn, &h, chain[MAX_NESTING], "DEEP", None).await;
+}
+
+/// Seed a discarded draft. Its parameters stay stored. The parts `array_bound`, `bool_array_3d`,
+/// and `nesting` list them (ADR-0178 (j), ADR-0187 (i), ADR-0179 (k)). The older parts skip them.
+async fn seed_discarded_hits(conn: &mut PgConnection, expected: &mut Expected) {
+    let boolean = fixtures::primitive(conn, "BOOL").await;
+    let byte = fixtures::primitive(conn, "BYTE").await;
+    let f = plant(conn, S7_1500).await;
+    let wide = array_type(conn, &f, byte, &[32760], &[32770]).await;
+    parameter(conn, &f, wide, "WIDE_DISCARDED", Some("DB1.DBB0")).await;
+    expected.parameter_row(
+        &f,
+        1,
+        "WIDE_DISCARDED",
+        BOUND,
+        "ARRAY[32760..32770] OF BYTE",
+    );
+    let cube = array_type(conn, &f, boolean, &[1, 1, 1], &[2, 2, 2]).await;
+    parameter(conn, &f, cube, "CUBE_DISCARDED", Some("DB1.DBX10.0")).await;
+    expected.parameter_row(
+        &f,
+        1,
+        "CUBE_DISCARDED",
+        CUBE,
+        "ARRAY[1..2,1..2,1..2] OF BOOL",
+    );
+    let chain = struct_chain(conn, &f, MAX_NESTING + 1).await;
+    parameter(
+        conn,
+        &f,
+        chain[MAX_NESTING],
+        "DEEP_DISCARDED",
+        Some("DB1.DBB20"),
+    )
+    .await;
+    expected.array_row(&f, NESTING, "ST_N9@1");
+    expected.parameter_row(&f, 1, "DEEP_DISCARDED", NESTING, "ST_N9@1");
+    sqlx::query("UPDATE recipe_version SET deleted_at = now() WHERE id = $1")
+        .bind(f.version)
+        .execute(&mut *conn)
+        .await
+        .unwrap();
 }
 
 /// Seed the rows that the query must list, and fill `expected`.
@@ -292,6 +334,7 @@ async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
         .await
         .unwrap();
     seed_nesting_hits(conn, expected).await;
+    seed_discarded_hits(conn, expected).await;
 }
 
 /// Seed the rows that the change does not affect. The query must not list them.
@@ -403,7 +446,7 @@ async fn s7_layout_query_lists_exactly_the_hit_rows_as_recipe_app() {
     let found = rows(&mut conn).await;
 
     assert_eq!(user, "recipe_app");
-    assert_eq!(expected.0.len(), 18, "the seed holds 18 hits");
+    assert_eq!(expected.0.len(), 22, "the seed holds 22 hits");
     assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
     let found: BTreeSet<Row> = found.into_iter().collect();
     assert_eq!(found, expected.0);
@@ -470,8 +513,12 @@ async fn adr_0178_s7_layout_query_lists_a_parameter_with_an_address_and_a_wide_b
 
     let bound: Vec<&Row> = found.iter().filter(|row| row.4 == BOUND).collect();
     let tags: BTreeSet<&str> = bound.iter().filter_map(|row| row.3.as_deref()).collect();
-    assert_eq!(bound.len(), 2, "rows found: {bound:#?}");
-    assert_eq!(tags, BTreeSet::from(["WIDE", "WIDE_HOLD"]));
+    assert_eq!(bound.len(), 3, "rows found: {bound:#?}");
+    assert_eq!(
+        tags,
+        BTreeSet::from(["WIDE", "WIDE_HOLD", "WIDE_DISCARDED"]),
+        "a discarded draft stays in the inventory"
+    );
     let expected_bound = expected.0.iter().filter(|row| row.4 == BOUND).count();
     assert_eq!(bound.len(), expected_bound);
 }
@@ -484,9 +531,17 @@ async fn adr_0187_s7_layout_query_lists_a_parameter_with_an_address_and_a_three_
     let found = rows(&mut conn).await;
 
     let cube: Vec<&Row> = found.iter().filter(|row| row.4 == CUBE).collect();
-    assert_eq!(cube.len(), 1, "rows found: {cube:#?}");
-    assert_eq!(cube[0].3.as_deref(), Some("CUBE"));
-    assert_eq!(cube[0].5, "ARRAY[1..2,1..2,1..2] OF BOOL");
+    let tags: BTreeSet<&str> = cube.iter().filter_map(|row| row.3.as_deref()).collect();
+    assert_eq!(cube.len(), 2, "rows found: {cube:#?}");
+    assert_eq!(
+        tags,
+        BTreeSet::from(["CUBE", "CUBE_DISCARDED"]),
+        "a discarded draft stays in the inventory"
+    );
+    assert!(
+        cube.iter()
+            .all(|row| row.5 == "ARRAY[1..2,1..2,1..2] OF BOOL")
+    );
 }
 
 #[tokio::test]
@@ -499,14 +554,51 @@ async fn adr_0179_s7_layout_query_lists_a_struct_row_and_a_parameter_with_nine_l
     let nesting: BTreeSet<&Row> = found.iter().filter(|row| row.4 == NESTING).collect();
     let expected_nesting: BTreeSet<&Row> =
         expected.0.iter().filter(|row| row.4 == NESTING).collect();
-    assert_eq!(nesting.len(), 3, "rows found: {nesting:#?}");
+    assert_eq!(nesting.len(), 5, "rows found: {nesting:#?}");
     assert_eq!(nesting, expected_nesting);
     let tags: BTreeSet<Option<&str>> = nesting.iter().map(|row| row.3.as_deref()).collect();
     assert_eq!(
         tags,
-        BTreeSet::from([None, Some("DEEP"), Some("DEEP_ARRAY")]),
+        BTreeSet::from([
+            None,
+            Some("DEEP"),
+            Some("DEEP_ARRAY"),
+            Some("DEEP_DISCARDED")
+        ]),
         "the struct row has no tag"
     );
+}
+
+#[tokio::test]
+async fn adr_0179_s7_layout_query_tells_two_revisions_of_one_struct_apart() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let f = plant(&mut conn, S7_1500).await;
+    let chain = struct_chain(&mut conn, &f, MAX_NESTING + 1).await;
+    let eighth = chain[MAX_NESTING - 1];
+    let mut tx = sqlx::Connection::begin(&mut conn).await.unwrap();
+    let second_revision: Uuid = sqlx::query_scalar(
+        "INSERT INTO plc_type (kind, name, platforms, machine_id, revision) \
+         VALUES ('struct', 'ST_N9', ARRAY[$1], $2, 2) RETURNING id",
+    )
+    .bind(f.platform)
+    .bind(f.machine)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    fixtures::member(&mut tx, second_revision, 1, eighth).await;
+    tx.commit().await.unwrap();
+    let array = array_type(&mut conn, &f, second_revision, &[1], &[2]).await;
+    parameter(&mut conn, &f, array, "TWO", None).await;
+    let mut expected = Expected::default();
+    expected.array_row(&f, NESTING, "ST_N9@1");
+    expected.array_row(&f, NESTING, "ST_N9@2");
+    expected.parameter_row(&f, 1, "TWO", NESTING, "ARRAY[1..2] OF ST_N9@2");
+
+    let found = rows(&mut database.connect(Role::App).await).await;
+
+    let nesting: BTreeSet<Row> = found.into_iter().filter(|row| row.4 == NESTING).collect();
+    assert_eq!(nesting, expected.0);
 }
 
 #[tokio::test]
@@ -521,7 +613,7 @@ async fn adr_0179_s7_layout_query_skips_eight_levels_and_a_platform_without_the_
         .filter(|row| row.4 == NESTING)
         .map(|row| row.5.as_str())
         .collect();
-    assert_eq!(texts, BTreeSet::from(["ST_N9", "ARRAY[1..2] OF ST_N7"]));
+    assert_eq!(texts, BTreeSet::from(["ST_N9@1", "ARRAY[1..2] OF ST_N7@1"]));
     let tags: BTreeSet<&str> = found.iter().filter_map(|row| row.3.as_deref()).collect();
     assert!(!tags.contains("EDGE"), "a type with 8 levels is listed");
     assert!(!tags.contains("EIGHT"), "a type with 8 levels is listed");
