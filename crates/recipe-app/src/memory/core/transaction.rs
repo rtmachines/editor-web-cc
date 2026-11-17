@@ -226,6 +226,14 @@ impl MemoryTransaction {
         Ok(&mut self.state)
     }
 
+    /// Refuse a `FOR UPDATE` row lock in a `READ ONLY` level, also when no row matches.
+    ///
+    /// The method solves one problem: PostgreSQL refuses the statement with `25006` before it
+    /// reads a row, so a memory row lock must fail the same way (design D7, ADR-0042 (a)).
+    pub fn refuse_row_lock_for_update(&self) -> Result<(), StorageError> {
+        self.refuse_read_only_write()
+    }
+
     /// Return the error of a write in a `READ ONLY` transaction, or `Ok` for the other levels.
     fn refuse_read_only_write(&self) -> Result<(), StorageError> {
         if matches!(

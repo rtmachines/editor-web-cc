@@ -285,6 +285,7 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         recipe: RecipeId,
     ) -> Result<Vec<(RecipeVersionId, RowImage)>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         let locked: Vec<(RecipeVersionId, RowImage)> = self
             .state()
             .versions
@@ -312,6 +313,7 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<RowImage>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         let Some(row) = self.state().versions.get(&version) else {
             return Ok(None);
         };
