@@ -129,7 +129,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
   - Put them in `crates/recipe-domain/src/recipe/draft/earlier_tests.rs` and `crates/recipe-domain/src/recipe/read_check/tests.rs`.
   - In `crates/recipe-domain/src/recipe/rebind/apply/tests.rs`, add a rebind case (ADR-0180 (e)). A new member `mark` of type `WCHAR` with the text `"\u{E000}"` gives `E-RCP-005` on `S7_1500`.
   - Command: `cargo test -p recipe-domain --lib adr_0180`.
-- [ ] 5.3 (recipe-db) In `crates/recipe-db/tests/storage/platform_ranges.rs`, seed a `WCHAR` value `U+E000` and a `WSTRING` value with `U+D000` on `S7_1500`. Seed a `WSTRING` value with `U+D000` on `CodesysIec` as a non-hit. `WCHAR` has no seed row on `CodesysIec`. Expect the part `wide_text`. RED: `cargo test -p recipe-db --test storage platform_ranges`. Then add the part to `deploy/db/check-platform-ranges.sql` and its header comment. GREEN: the same command.
+- [x] 5.3 (recipe-db) In `crates/recipe-db/tests/storage/platform_ranges.rs`, seed a `WCHAR` value `U+E000` and a `WSTRING` value with `U+D000` on `S7_1500`. Seed a `WSTRING` value with `U+D000` on `CodesysIec` as a non-hit. `WCHAR` has no seed row on `CodesysIec`. Expect the part `wide_text`. RED: `cargo test -p recipe-db --test storage platform_ranges`. Then add the part to `deploy/db/check-platform-ranges.sql` and its header comment. GREEN: the same command.
 
 ## 6. Siemens reserved struct names on S7 (ADR-0186)
 
