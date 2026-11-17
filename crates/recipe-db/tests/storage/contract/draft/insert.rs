@@ -424,6 +424,35 @@ async fn the_parameter_above_the_budget_gives_e_rcp_035(h: &dyn Harness) {
     assert_constraint_code(&error, ErrorCode::RCP_035);
 }
 
+async fn an_existing_key_at_the_full_budget_gives_the_unique_violation(h: &dyn Harness) {
+    let d = live_draft(h, 30).await;
+    let mut tx = begin(h).await;
+    tx.drafts().lock_draft(d.version).await.unwrap().unwrap();
+    let mut first_key = None;
+    for n in 1..=u128::from(PARAMETERS_PER_VERSION) {
+        let stored = parameter(&d.plant, n, &format!("P{n}"));
+        first_key.get_or_insert(stored.key);
+        tx.drafts()
+            .insert_parameter(d.version, &domain(&stored))
+            .await
+            .unwrap();
+    }
+    // PostgreSQL checks the unique constraint of the row before the statement trigger of the budget.
+    let mut same_key = parameter(&d.plant, u128::from(PARAMETERS_PER_VERSION) + 1, "ONE_MORE");
+    same_key.key = first_key.unwrap();
+
+    let error = tx
+        .drafts()
+        .insert_parameter(d.version, &domain(&same_key))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, StorageError::Duplicate { constraint } if constraint == "parameter_key_unique"),
+        "{error:?}"
+    );
+}
+
 async fn the_limit_rows_above_the_budget_give_e_rcp_036(h: &dyn Harness) {
     let d = live_draft(h, 29).await;
     let part = LIMIT_ROWS_PER_VERSION / 4;
@@ -533,4 +562,9 @@ contract_case!(
     the_limit_rows_above_the_budget_give_e_rcp_036,
     the_limit_rows_above_the_budget_give_e_rcp_036_memory,
     the_limit_rows_above_the_budget_give_e_rcp_036_postgres
+);
+contract_case!(
+    an_existing_key_at_the_full_budget_gives_the_unique_violation,
+    an_existing_key_at_the_full_budget_gives_the_unique_violation_memory,
+    an_existing_key_at_the_full_budget_gives_the_unique_violation_postgres
 );

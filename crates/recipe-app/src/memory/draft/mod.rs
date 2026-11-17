@@ -92,14 +92,13 @@ impl MemoryTransaction {
             .ok_or_else(|| missing_row(PARAMETER_TABLE))
     }
 
-    /// Check the triggers, the platform `CHECK`, the foreign keys, and the budget of a parameter
+    /// Check the triggers, the platform `CHECK`, the foreign keys, and the tag of a parameter
     /// that is written to `version`.
     ///
     /// The checks run in the order of PostgreSQL: the trigger `enforce_type_platform`, the trigger
-    /// `enforce_unit_machine`, the `CHECK` `parameter_s7_address_platform`, the keys and the tag,
-    /// and the statement trigger `version_size_budget`. The row `except` is the parameter itself.
-    /// It does not count for the tag. A parameter with `except` is a definition change, and the
-    /// budget does not apply to it, because no row is inserted.
+    /// `enforce_unit_machine`, the `CHECK` `parameter_s7_address_platform`, and the tag. The row
+    /// `except` is the parameter itself. It does not count for the tag. The budget is not here.
+    /// `insert_parameter` checks it after the row constraints, as the statement trigger does.
     fn check_parameter_references(
         &self,
         version: RecipeVersionId,
@@ -147,13 +146,11 @@ impl MemoryTransaction {
         if tag_taken {
             return Err(duplicate(PARAMETER_TAG_UNIQUE));
         }
-        if except.is_none() {
-            self.check_insert_budget(version, parameter)?;
-        }
         Ok(())
     }
 
     /// Count the rows of `version` after the insert of `parameter`, as the statement triggers do.
+    /// PostgreSQL runs them after the row constraints of the statement.
     fn check_insert_budget(
         &self,
         version: RecipeVersionId,
@@ -303,6 +300,7 @@ impl DraftRepository for MemoryTransaction {
         {
             return Err(duplicate(PARAMETER_KEY_UNIQUE));
         }
+        self.check_insert_budget(version, parameter)?;
         let platform = state
             .versions
             .get(&version)
