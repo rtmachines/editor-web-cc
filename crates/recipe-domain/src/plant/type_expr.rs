@@ -74,10 +74,11 @@ impl TypeExpr {
         &self.arrays
     }
 
-    /// Refuse an array of an array on `S7_1200` and `S7_1500` (ADR-0148 (a), (b), (d), (i)).
+    /// Refuse an array of an array on `S7_300`, `S7_1200`, and `S7_1500` (ADR-0148 (a), (b),
+    /// (d), (i), ADR-0177 (a)).
     ///
     /// Solves this problem: TIA Portal does not allow an array element that is an array on
-    /// these two platforms. A multi-dimension prefix such as `ARRAY[1..2,1..3] OF BYTE` is
+    /// these three platforms. A multi-dimension prefix such as `ARRAY[1..2,1..3] OF BYTE` is
     /// one prefix and passes. The rule reads only the written text. A struct reference may
     /// name a stored struct with such an array, and this method does not open it
     /// (ADR-0148 (c)). Every other platform accepts the expression.
@@ -86,10 +87,9 @@ impl TypeExpr {
     ///
     /// Returns [`PlantError::DerivedTypeInvalid`] with the reason
     /// [`DerivedTypeReason::NotOnPlatform`] and the text of the expression (`E-PLT-013`) when
-    /// the platform is `S7_1200` or `S7_1500` and the expression has more than one array prefix.
+    /// the platform is an S7 platform and the expression has more than one array prefix.
     pub fn require_no_nested_array(&self, platform: PlcPlatform) -> Result<(), PlantError> {
-        let refuses_nesting = matches!(platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500);
-        if refuses_nesting && self.arrays.len() > 1 {
+        if platform.is_s7() && self.arrays.len() > 1 {
             return Err(invalid(&self.to_string(), DerivedTypeReason::NotOnPlatform));
         }
         Ok(())
