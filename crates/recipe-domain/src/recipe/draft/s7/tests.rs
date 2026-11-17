@@ -27,9 +27,9 @@ const DINT: u128 = 9;
 const UPPER_EDGE: u128 = 10;
 /// `ARRAY[-32768..-32767] OF BYTE`. The lower bound is the lowest that standard access holds.
 const LOWER_EDGE: u128 = 11;
-/// `ARRAY[32768..32771] OF BYTE`.
+/// `ARRAY[32767..32768] OF BYTE`. Only the upper bound is outside.
 const UPPER_WIDE: u128 = 12;
-/// `ARRAY[-32770..-32769] OF BYTE`.
+/// `ARRAY[-32769..-32768] OF BYTE`. Only the lower bound is outside.
 const LOWER_WIDE: u128 = 13;
 /// A struct with the member `UPPER_WIDE`.
 const ST_WIDE: u128 = 14;
@@ -69,8 +69,8 @@ fn rows() -> Vec<PlcType> {
         primitive_row(DINT, Primitive::Dint),
         array_row(UPPER_EDGE, BYTE, &[(32_766, 32_767)]),
         array_row(LOWER_EDGE, BYTE, &[(-32_768, -32_767)]),
-        array_row(UPPER_WIDE, BYTE, &[(32_768, 32_771)]),
-        array_row(LOWER_WIDE, BYTE, &[(-32_770, -32_769)]),
+        array_row(UPPER_WIDE, BYTE, &[(32_767, 32_768)]),
+        array_row(LOWER_WIDE, BYTE, &[(-32_769, -32_768)]),
         struct_row(ST_WIDE, "ST_Wide", &[("a", UPPER_WIDE)]),
         struct_row(ST_EDGE, "ST_Edge", &[("a", UPPER_EDGE)]),
         array_row(ARRAY_OF_WIDE, UPPER_WIDE, &[(1, 2)]),
@@ -888,9 +888,9 @@ fn adr_0178_a_parameter_without_an_address_passes() {
 /// ADR-0178 (d): the standard-access rule runs after the end rule.
 #[test]
 fn adr_0178_the_rule_runs_after_the_end_rule() {
-    let result = definition(PlcPlatform::S7_1500, UPPER_WIDE, Some("DB1.DBB65534"));
+    let result = definition(PlcPlatform::S7_1500, ARRAY_OF_WIDE, Some("DB1.DBB65534"));
     assert_eq!(recipe_error(result).code(), ErrorCode::RCP_056);
-    let result = approval(PlcPlatform::S7_1500, UPPER_WIDE, Some("DB1.DBB65534"));
+    let result = approval(PlcPlatform::S7_1500, ARRAY_OF_WIDE, Some("DB1.DBB65534"));
     assert_eq!(recipe_error(result).code(), ErrorCode::RCP_056);
 }
 
