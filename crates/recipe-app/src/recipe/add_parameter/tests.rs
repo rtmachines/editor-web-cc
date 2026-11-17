@@ -32,6 +32,7 @@ use crate::recipe::test_support::{
 };
 
 mod adr_0177;
+mod adr_0178;
 
 fn limit(min: &str, max: &str) -> LimitInput {
     LimitInput {

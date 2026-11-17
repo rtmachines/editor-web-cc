@@ -220,6 +220,8 @@ async fn write_definition(
 }
 
 #[cfg(test)]
+mod adr_0178_tests;
+#[cfg(test)]
 mod errors;
 #[cfg(test)]
 mod nested_array_tests;
