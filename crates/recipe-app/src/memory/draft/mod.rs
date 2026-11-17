@@ -167,10 +167,13 @@ impl MemoryTransaction {
         if rows().count() >= usize_of(PARAMETERS_PER_VERSION) {
             return Err(trigger(ErrorCode::RCP_035, TOO_MANY_PARAMETERS));
         }
-        let limit_rows: usize = rows()
-            .map(|row| row.limits.len())
-            .chain(std::iter::once(parameter.limits().len()))
-            .sum();
+        let limit_rows = checked_budget_sum(
+            rows()
+                .map(|row| row.limits.len())
+                .chain(std::iter::once(parameter.limits().len())),
+            ErrorCode::RCP_036,
+            TOO_MANY_LIMIT_ROWS,
+        )?;
         check_limit_budget(limit_rows)
     }
 }
@@ -188,6 +191,19 @@ const fn address_fits(platform: PlcPlatform, has_address: bool) -> bool {
 /// A count as `usize`. A count above the range of `usize` cannot occur, so it is the maximum.
 fn usize_of(count: u64) -> usize {
     usize::try_from(count).unwrap_or(usize::MAX)
+}
+
+/// Add the counts of a budget with `checked_add`. A sum that overflows `usize` is above every
+/// budget, so it gives the budget error `code`.
+fn checked_budget_sum(
+    counts: impl IntoIterator<Item = usize>,
+    code: ErrorCode,
+    message: &str,
+) -> Result<usize, StorageError> {
+    counts
+        .into_iter()
+        .try_fold(0_usize, usize::checked_add)
+        .ok_or_else(|| trigger(code, message))
 }
 
 /// The statement trigger `version_size_budget` on `parameter_limit` gives `E-RCP-036` for a
@@ -353,14 +369,16 @@ impl DraftRepository for MemoryTransaction {
         let id = self.parameter_id(version, key)?;
         self.require_live_draft(version)?;
         // PostgreSQL deletes the old rows first, so only the other parameters and the new rows count.
-        let after: usize = self
-            .state()
-            .parameters
-            .values()
-            .filter(|row| row.version == version && row.id != id)
-            .map(|row| row.limits.len())
-            .chain(std::iter::once(rows.len()))
-            .sum();
+        let after = checked_budget_sum(
+            self.state()
+                .parameters
+                .values()
+                .filter(|row| row.version == version && row.id != id)
+                .map(|row| row.limits.len())
+                .chain(std::iter::once(rows.len())),
+            ErrorCode::RCP_036,
+            TOO_MANY_LIMIT_ROWS,
+        )?;
         check_limit_budget(after)?;
         self.editable_parameter(version, key)?.limits = rows;
         self.record_draft_write(WriteKind::Limits, key);
