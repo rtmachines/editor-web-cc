@@ -99,15 +99,20 @@ async fn the_lock_of_another_version_does_not_open_the_guard(h: &dyn Harness) {
 async fn a_lock_of_all_versions_opens_the_guard_of_each_version(h: &dyn Harness) {
     let plant = plant(h, 3, "M3").await;
     let created = create_recipe(h, &plant, 3, "REF-3").await;
-    let draft = created.versions()[0].id();
+    let first = created.versions()[0].id();
+    approve(h, first).await;
+    create_version(h, (created.id(), version_id(1)), 2, Some(first)).await;
+    let draft = version_id(1);
     let mut tx = begin(h).await;
     tx.recipes().lock_versions(created.id()).await.unwrap();
 
-    let image = tx.recipes().discard_version(draft).await.unwrap();
+    let retired = tx.recipes().retire_version(first).await.unwrap();
+    let discarded = tx.recipes().discard_version(draft).await.unwrap();
     commit(h, tx, plant.machine).await;
 
-    assert!(!field(&image, "deleted_at").is_null());
-    assert_eq!(field(&image, "row_version").as_i64(), Some(2));
+    assert_eq!(text(&retired, "status"), "retired");
+    assert!(!field(&discarded, "deleted_at").is_null());
+    assert_eq!(field(&discarded, "row_version").as_i64(), Some(2));
 }
 
 async fn a_lock_does_not_outlive_its_transaction(h: &dyn Harness) {
