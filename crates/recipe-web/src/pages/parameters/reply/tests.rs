@@ -1,12 +1,14 @@
 //! Tests of the field lines of a failed command (ADR-0041 (e), design D5 of `plc-type-ranges`).
 //!
-//! The codes `E-RCP-056` and `E-RCP-057` stand under the input `s7_address`. The code `E-RCP-055`
+//! The codes `E-RCP-056`, `E-RCP-057`, and `E-RCP-058` stand under the input `s7_address`. The code `E-RCP-055`
 //! stands under the input that the grid names for its leaf.
 
 use recipe_app::error::AppError;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{LeafPath, S7Address};
-use recipe_domain::recipe::{ParameterTag, PrecisionField, RecipeError, RecipeErrors};
+use recipe_domain::recipe::{
+    ParameterTag, PrecisionField, RecipeError, RecipeErrors, S7AccessReason,
+};
 
 use super::command_lines;
 use crate::error::{FieldError, leaf_of};
@@ -67,6 +69,18 @@ fn reply_e_rcp_056_stands_under_the_input_s7_address() {
 fn reply_e_rcp_057_stands_under_the_input_s7_address() {
     let found = lines_of(block_out_of_range(), &|_fault| None);
     assert_eq!(found, [(ErrorCode::RCP_057, Some("s7_address".to_owned()))]);
+}
+
+/// ADR-0178 (k): the code `E-RCP-058` stands under the input `s7_address`.
+#[test]
+fn adr_0178_reply_e_rcp_058_stands_under_the_input_s7_address() {
+    let fault = RecipeError::S7TypeNotAddressable {
+        tag: tag(),
+        address: address("DB1.DBB0"),
+        reason: S7AccessReason::BoolArrayWithThreeDimensions,
+    };
+    let found = lines_of(fault, &|_fault| None);
+    assert_eq!(found, [(ErrorCode::RCP_058, Some("s7_address".to_owned()))]);
 }
 
 #[test]
