@@ -90,7 +90,7 @@ The ste-lint check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 7. Changelog
 
-- [ ] 7.1 (CHANGELOG.md) [mechanical] Add one line under `[Unreleased]`, section `Fixed`, for RCB-02 (`reliability.md` §8). RCB-01 gets no line, because it changes no behavior (design D2). Red test: none, because the task changes a document. Check: ste-lint on `CHANGELOG.md`, and the line of RCB-02 holds `E-WEB-005`.
+- [x] 7.1 (CHANGELOG.md) [mechanical] Add one line under `[Unreleased]`, section `Fixed`, for RCB-02 (`reliability.md` §8). RCB-01 gets no line, because it changes no behavior (design D2). Red test: none, because the task changes a document. Check: ste-lint on `CHANGELOG.md`, and the line of RCB-02 holds `E-WEB-005`.
 
 ## 8. Integration checks
 
