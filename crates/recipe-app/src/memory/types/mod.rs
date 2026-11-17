@@ -127,6 +127,8 @@ impl TypeCatalog for MemoryTransaction {
         if !is_derived {
             return Err(check_violation());
         }
+        // PostgreSQL runs the `INSERT ... ON CONFLICT DO NOTHING` also for an existing type.
+        self.refuse_read_only_write()?;
         let existing = self
             .state()
             .types

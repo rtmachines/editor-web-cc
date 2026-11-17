@@ -227,7 +227,10 @@ impl MemoryTransaction {
     }
 
     /// Return the error of a write in a `READ ONLY` transaction, or `Ok` for the other levels.
-    fn refuse_read_only_write(&self) -> Result<(), StorageError> {
+    ///
+    /// A statement that PostgreSQL always runs as a write, such as `INSERT ... ON CONFLICT DO
+    /// NOTHING`, calls this method before it reads the state.
+    pub fn refuse_read_only_write(&self) -> Result<(), StorageError> {
         if matches!(
             self.isolation,
             Isolation::ReadOnly | Isolation::RepeatableRead
