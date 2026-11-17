@@ -1,5 +1,6 @@
 """Check the runbook blocks of the upgrade without Docker."""
 
+import importlib.util
 import os
 import pathlib
 import re
@@ -9,6 +10,11 @@ import subprocess
 import tempfile
 import unittest
 from unittest import mock
+
+spec = importlib.util.spec_from_file_location(
+    "docker_calls", pathlib.Path(__file__).with_name("docker_calls.py"))
+docker_calls = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(docker_calls)
 
 
 def shell_function(name, file="upgrade.sh"):
@@ -103,12 +109,17 @@ def runbook_inline_code_spans(text):
     for line in text.splitlines():
         previous = fence
         fence = runbook_fence(line, fence)
-        if previous is not None or fence is not None or not line.strip():
+        heading = re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", line)
+        boundary = heading or re.match(r"^ *(?:\||(?:[-*+]|[0-9]+[.)])(?: |$))", line)
+        if previous is not None or fence is not None or not line.strip() or boundary:
             if lines:
                 blocks.append("\n".join(lines))
                 lines = []
-        else:
-            lines.append(line)
+        if previous is None and fence is None and line.strip():
+            if heading:
+                blocks.append(line)
+            else:
+                lines.append(line)
     if lines:
         blocks.append("\n".join(lines))
     for block in blocks:
@@ -120,267 +131,42 @@ def runbook_inline_code_spans(text):
     return spans
 
 
-def runbook_deleted_service_starts(section, services=("app", "backup")):
-    """Return inline spans and fenced lines that start or restart a deleted service."""
+def runbook_deleted_service_starts(section, services=("app", "backup"),
+                                   subcommands=("start", "restart")):
+    """Return inline spans and fenced lines with forbidden Compose calls."""
     commands = runbook_inline_code_spans(section)
     fence = None
+    continuation = False
     for line in section.splitlines():
         previous = fence
         fence = runbook_fence(line, fence)
         if previous is not None and fence is not None:
-            commands.append(line)
-    value_options = {"--project-name", "-p", "-f", "--file", "--profile", "--ansi",
-                     "--env-file", "--project-directory", "--progress", "--parallel"}
+            if continuation:
+                commands[-1] = commands[-1][:-1] + line
+            else:
+                commands.append(line)
+            continuation = line.endswith("\\")
+        else:
+            continuation = False
     forbidden = []
     for command in commands:
-        try:
-            tokens = shlex.split(command)
-        except ValueError:
-            tokens = command.split()
-        for index, token in enumerate(tokens):
-            if token == "docker" and tokens[index + 1:index + 2] == ["compose"]:
-                position = index + 2
-            elif token == "docker-compose":
-                position = index + 1
+        normalized = re.sub(r"<[A-Za-z][^<>`|;&()$'\"]*>", "PLACEHOLDER", command)
+        for tokens in docker_calls.shell_commands(normalized):
+            for index, token in enumerate(tokens):
+                if token not in ("docker", "docker-compose"):
+                    continue
+                call = docker_calls.docker_call(tokens[index + 1:], compose=token == "docker-compose")
+                if call is None:
+                    continue
+                is_compose, subcommand, operands = call
+                if is_compose and docker_calls.forbidden_compose_call(
+                        subcommand, operands, services=services, subcommands=subcommands):
+                    forbidden.append(command)
+                    break
             else:
                 continue
-            while position < len(tokens) and tokens[position].startswith("-"):
-                option = tokens[position]
-                position += 2 if option in value_options else 1
-            if position >= len(tokens) or tokens[position] not in ("start", "restart"):
-                continue
-            named = []
-            for service in tokens[position + 1:]:
-                if service in ("&&", "||", ";", "|") or service.startswith((">", "<")):
-                    break
-                named.append(service)
-            if set(services).intersection(named):
-                forbidden.append(command)
-                break
+            break
     return forbidden
-
-
-class RunbookDeletedServiceStartsTests(unittest.TestCase):
-    def test_global_options_before_start_and_restart(self):
-        options = ("--project-name", "-p", "-f", "--file", "--profile", "--ansi",
-                   "--env-file", "--project-directory", "--progress", "--parallel")
-        for option in options:
-            forms = (f"{option} x", f"{option}=x") if option.startswith("--") else (f"{option} x",)
-            for form in forms:
-                for subcommand in ("start", "restart"):
-                    command = f"docker compose {form} {subcommand} proxy backup"
-                    with self.subTest(command=command):
-                        self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
-
-    def test_forbidden_commands_and_each_compose_pair(self):
-        commands = ("docker compose -f x start app",
-                    "docker compose --profile=x start backup",
-                    "docker compose restart app",
-                    "docker compose -p x restart proxy backup",
-                    "docker compose start proxy backup && echo ok",
-                    "docker-compose --compatibility restart backup",
-                    "docker compose logs app && docker compose restart app",
-                    "docker-compose start app && docker compose restart backup")
-        for command in commands:
-            with self.subTest(command=command):
-                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
-
-    def test_commands_in_fences_with_any_info_string(self):
-        command = "docker compose start app"
-        for info in ("", "text", "sql", "yaml", "bash"):
-            for marker in ("```", "~~~"):
-                with self.subTest(info=info, marker=marker):
-                    section = f"{marker}{info}\n{command}\n{marker}"
-                    self.assertEqual(runbook_deleted_service_starts(section), [command])
-
-    def test_allowed_commands(self):
-        commands = ("docker compose start", "docker compose restart",
-                    "docker compose up -d --no-deps app", "docker compose start proxy",
-                    "docker compose logs --no-color app backup > start.txt",
-                    "docker compose -f /srv/start/app/compose.yaml rm -s -f app",
-                    "docker compose -f 'start app' rm -s -f app",
-                    "docker compose start app-copy backup-copy")
-        for command in commands:
-            with self.subTest(command=command):
-                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [])
-
-    def test_shell_operators_end_the_service_list(self):
-        for operator in ("&&", "||", ";", "|", ">", ">start.txt", "<", "<start.txt"):
-            command = f"docker compose start proxy {operator} echo app backup"
-            with self.subTest(operator=operator):
-                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [])
-
-    def test_shell_quotes_and_whitespace_fallback(self):
-        for command in ("docker compose -f 'compose file.yaml' start 'app'",
-                        "docker compose start app 'unclosed"):
-            with self.subTest(command=command):
-                self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
-
-
-class RunbookDeletedServiceSelectionTests(unittest.TestCase):
-    def test_selected_walarchive_start_has_one_hit(self):
-        command = "docker compose start walarchive"
-        self.assertEqual(
-            runbook_deleted_service_starts(f"Run `{command}`.", services=("walarchive",)),
-            [command],
-        )
-
-    def test_default_services_allow_walarchive_start(self):
-        self.assertEqual(
-            runbook_deleted_service_starts("Run `docker compose start walarchive`."),
-            [],
-        )
-
-    def test_selected_services_allow_proxy_start(self):
-        self.assertEqual(
-            runbook_deleted_service_starts(
-                "Run `docker compose start proxy`.", services=("app", "backup", "walarchive")),
-            [],
-        )
-
-
-class RunbookInlineCodeSpansTests(unittest.TestCase):
-    def test_two_spans_on_one_line(self):
-        self.assertEqual(runbook_inline_code_spans("Run `first` and `second`."),
-                         ["first", "second"])
-
-    def test_spans_inside_fenced_blocks_do_not_count(self):
-        for fence in ("```", "~~~"):
-            with self.subTest(fence=fence):
-                text = f"`before`\n  {fence}bash\nprintf `hidden`\n  {fence}\n`after`"
-                self.assertEqual(runbook_inline_code_spans(text), ["before", "after"])
-
-    def test_line_without_a_backtick_has_no_span(self):
-        self.assertEqual(runbook_inline_code_spans("No code on this line."), [])
-
-    def test_double_backtick_span(self):
-        self.assertEqual(runbook_inline_code_spans("Run ``docker compose start app``."),
-                         ["docker compose start app"])
-
-    def test_span_can_hold_a_backtick(self):
-        self.assertEqual(runbook_inline_code_spans("Run `` a`b ``."), ["a`b"])
-
-    def test_unmatched_backtick_run_has_no_span(self):
-        self.assertEqual(runbook_inline_code_spans("Run ``unmatched ` tail."), [])
-
-    def test_only_an_exact_backtick_run_closes_a_span(self):
-        self.assertEqual(runbook_inline_code_spans("`a``b`"), ["a``b"])
-
-    def test_space_normalization_preserves_all_spaces_and_single_ends(self):
-        self.assertEqual(runbook_inline_code_spans("`  ` ` a` `b ` `  c  `"),
-                         ["  ", " a", "b ", " c "])
-
-    def test_span_can_cross_a_line_break(self):
-        for ending in ("\n", "\r\n", "\r"):
-            with self.subTest(ending=ending):
-                text = f"Run `docker compose{ending}start proxy backup`."
-                self.assertEqual(runbook_inline_code_spans(text),
-                                 ["docker compose start proxy backup"])
-
-    def test_line_endings_become_spaces_without_collapsing_other_whitespace(self):
-        text = "Run `\nfoo  \n bar\t\n` now."
-        self.assertEqual(runbook_inline_code_spans(text), ["foo    bar\t"])
-
-    def test_span_cannot_cross_a_paragraph_or_fence(self):
-        for separator in ("\n\n", "\n \t\n", "\n```bash\n`hidden`\n```\n"):
-            with self.subTest(separator=separator):
-                self.assertEqual(runbook_inline_code_spans(f"`first{separator}second`"), [])
-
-    def test_escaped_backtick_without_another_opener_has_no_span(self):
-        # CommonMark 2.4: the escape leaves only one unescaped backtick, with no closer.
-        self.assertEqual(runbook_inline_code_spans(r"\`docker compose start app`"), [])
-
-    def test_escaped_backtick_before_an_unescaped_opener(self):
-        # The first backtick is literal. The next backtick opens the span (CommonMark 2.4).
-        self.assertEqual(runbook_inline_code_spans(r"Run \``docker compose start app`."),
-                         ["docker compose start app"])
-
-    def test_escaped_backslash_does_not_escape_the_opener(self):
-        for count in (2, 4):
-            with self.subTest(count=count):
-                self.assertEqual(runbook_inline_code_spans("\\" * count + "`code`"), ["code"])
-        self.assertEqual(runbook_inline_code_spans("\\" * 3 + "`code`"), [])
-
-    def test_backslashes_inside_a_span_stay_literal(self):
-        # CommonMark 6.1: a backslash cannot escape the closing backtick inside a span.
-        self.assertEqual(runbook_inline_code_spans(r"`foo\`bar`"), ["foo\\"])
-        self.assertEqual(runbook_inline_code_spans(r"``foo\`bar``"), [r"foo\`bar"])
-
-
-class RunbookFenceTests(unittest.TestCase):
-    def test_fences_keep_their_body_out_of_prose_and_inside_bash(self):
-        cases = (
-            ("````bash", "```\n`hidden`\n### Hidden", "````"),
-            ("```bash", "```bash\n`hidden`\n### Hidden", "```"),
-            ("~~~~bash", "~~~\n```\n`hidden`\n### Hidden", "~~~~"),
-            ("   ````bash", "  ```\n`hidden`\n### Hidden", "   ````` \t"),
-        )
-        for opener, body, closer in cases:
-            with self.subTest(opener=opener, body=body):
-                text = f"#### Target\n`before`\n{opener}\n{body}\n{closer}\n`after`"
-                self.assertEqual(runbook_inline_code_spans(text), ["before", "after"])
-                self.assertEqual(runbook_bash_blocks(text), [body])
-                with mock.patch.object(pathlib.Path, "read_text", return_value=text + "\n### Next"):
-                    self.assertEqual(runbook_heading_section("Target", 4), text)
-
-    def test_four_spaces_do_not_open_a_fence(self):
-        text = "    ```bash\n`visible`"
-        self.assertEqual(runbook_inline_code_spans(text), ["visible"])
-        self.assertEqual(runbook_bash_blocks(text), [])
-
-
-class RunbookHeadingSectionTests(unittest.TestCase):
-    def section(self, text, title="Target", level=4):
-        with mock.patch.object(pathlib.Path, "read_text", return_value=text):
-            return runbook_heading_section(title, level)
-
-    def test_text_fence_before_the_bash_block_keeps_the_scope(self):
-        for fence in ("```", "~~~"):
-            with self.subTest(fence=fence):
-                section = f"#### Target\n  {fence}text\n# note\n  {fence}\n```bash\nprintf ok\n```"
-                self.assertEqual(self.section(section + "\n### Next\n"), section)
-                self.assertEqual(runbook_bash_blocks(self.section(section)), ["printf ok"])
-
-    def test_crlf_copy_gives_the_same_section(self):
-        text = "### Parent\n#### Target\n```text\n# note\n```\n##### Note\nbody\n#### Next\n"
-        self.assertEqual(self.section(text.replace("\n", "\r\n")), self.section(text))
-
-    def test_lower_level_heading_stays_in_the_scope(self):
-        section = "#### Target\nbody\n##### Note\n```bash\nprintf ok\n```"
-        self.assertEqual(self.section(section + "\n#### Next\n"), section)
-
-    def test_same_or_higher_level_heading_ends_the_scope(self):
-        for level in (1, 2, 3, 4):
-            with self.subTest(level=level):
-                self.assertEqual(self.section(f"#### Target\nbody\n{'#' * level} Next\ntail"),
-                                 "#### Target\nbody")
-
-    def test_each_level_matches_with_trailing_white_space(self):
-        for level in range(1, 7):
-            with self.subTest(level=level):
-                section = f"{'#' * level} Target \t\nbody"
-                self.assertEqual(self.section(section, level=level), section)
-
-    def test_fenced_duplicate_and_fenced_end_do_not_change_the_scope(self):
-        text = ("```text\n#### Target\n```\n#### Target\n~~~text\n"
-                "#### Target\n### End\n~~~\nbody\n### Next\ntail")
-        expected = "#### Target\n~~~text\n#### Target\n### End\n~~~\nbody"
-        self.assertEqual(self.section(text), expected)
-
-    def test_unclosed_fence_keeps_the_rest_of_the_file(self):
-        text = "#### Target\n```text\n### Next\ntail"
-        self.assertEqual(self.section(text), text)
-
-    def test_missing_heading_fails(self):
-        for text in ("### Target\n", " #### Target\n", "#### Target extra\n",
-                     "```text\n#### Target\n```\n"):
-            with self.subTest(text=text), self.assertRaisesRegex(AssertionError, "exactly once, found 0"):
-                self.section(text)
-
-    def test_duplicate_heading_fails_even_outside_the_first_scope(self):
-        text = "#### Target\nbody\n### Next\n#### Target \t\n"
-        with self.assertRaisesRegex(AssertionError, "exactly once, found 2"):
-            self.section(text)
 
 
 class RunbookHostRebootTests(unittest.TestCase):

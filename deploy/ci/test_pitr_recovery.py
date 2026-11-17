@@ -29,6 +29,10 @@ IMPLEMENTED = STEPS
 CASE_LINES = {"switch": "  switch) switch_recovered ;;"}
 USAGE = "CI: usage: pitr-recovery.sh " + "|".join(IMPLEMENTED)
 
+DOCKER_CALLS_SPEC = importlib.util.spec_from_file_location("docker_calls", CI / "docker_calls.py")
+docker_calls = importlib.util.module_from_spec(DOCKER_CALLS_SPEC)
+DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
+
 
 def workflow_lines():
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -69,6 +73,14 @@ def shell_function(name):
 def write_stub(path, body):
     path.write_text("#!/usr/bin/env bash\n" + body.lstrip("\n"), encoding="utf-8", newline="\n")
     path.chmod(0o755)
+
+
+def step_result(done, log, state_dir):
+    """Collect Docker records, the text log, and state files from one step."""
+    argv_log = pathlib.Path(str(log) + ".argv")
+    done.docker_calls = docker_calls.argument_records(argv_log.read_bytes() if argv_log.exists() else b"")
+    content = {path.name: path.read_text(encoding="utf-8") for path in state_dir.iterdir() if path.is_file()}
+    return done, log.read_text(encoding="utf-8") if log.exists() else "", content
 
 
 class WorkflowTests(unittest.TestCase):
@@ -465,8 +477,55 @@ class StepTests(unittest.TestCase):
         if self.bash is None:
             self.skipTest("bash is not available")
 
+    def test_step_stub_records_spaces_empty_arguments_and_newlines(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = pathlib.Path(name)
+            stub = directory / "docker"
+            log = directory / "calls.log"
+            write_stub(stub, STEP_DOCKER_STUB)
+            env = {**os.environ, "STUB_LOG": str(log)}
+            done = subprocess.run([self.bash, str(stub), "a b", "", "x\ny"],
+                                  capture_output=True, text=True, check=False, env=env)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            records = pathlib.Path(str(log) + ".argv")
+            self.assertTrue(records.is_file(), "The stub wrote no Docker argument records")
+            self.assertEqual(records.read_bytes(), b"3\x00a b\x00\x00x\ny\x00")
+
+    def assert_window_mutant_rejected(self, step, anchor, replacement, state, guard):
+        original = script_text()
+        self.assertEqual(original.count(anchor), 1)
+        with tempfile.TemporaryDirectory() as name:
+            directory = pathlib.Path(name)
+            for source in (SCRIPT, COMMON_FILE, STEPS_FILE):
+                shutil.copyfile(source, directory / source.name)
+            mutant = directory / SCRIPT.name
+            mutant.write_text(original.replace(anchor, replacement), encoding="utf-8", newline="\n")
+            with patch.dict(globals(), SCRIPT=mutant):
+                if step == "check":
+                    done, log, _ = self.run_check(state=state)
+                else:
+                    done, log, _ = self.run_step(step, state=state)
+            self.assertEqual(done.returncode, 0, done.stderr + log)
+            self.assertIn(" up -d --no-deps app backup\n", log)
+            self.assertTrue(getattr(done, "docker_calls", None), "The run has no Docker argument records")
+            with self.assertRaises(AssertionError):
+                self.assertEqual(guard(done.docker_calls), [])
+
+    def test_window_guard_rejects_crash_mutant(self):
+        anchor = '  compose rm -s -f app backup || fail "crash: cannot delete app and backup."'
+        self.assert_window_mutant_rejected(
+            "crash", anchor, anchor + "\n  compose up -d --no-deps app backup",
+            self.crash_state(), docker_calls.forbidden_window_calls)
+
+    def test_window_guard_rejects_check_prefix_mutant(self):
+        anchor = ('  sql -c "TRUNCATE public.session, public.login_attempt" >/dev/null'
+                  ' || fail "check: cannot truncate session and login_attempt."')
+        self.assert_window_mutant_rejected(
+            "check", anchor, "  compose up -d --no-deps app backup || true\n" + anchor,
+            self.check_state(), docker_calls.forbidden_check_window_calls)
+
     def run_step(self, step, env_extra=None, state=None):
-        """Run one step. Return the process, the call log, and the content of the state directory as a dict."""
+        """Return the process with Docker records, the call log, and the state directory content."""
         with tempfile.TemporaryDirectory() as name:
             directory = pathlib.Path(name)
             stubs = directory / "bin"
@@ -513,8 +572,7 @@ class StepTests(unittest.TestCase):
             for file_name, text in (state or {}).items():
                 (state_dir / file_name).write_text(text.replace("@CI_ROOT@", f"{seen}/{PROJECT}"), encoding="utf-8", newline="\n")
             done = subprocess.run([self.bash, str(SCRIPT), step], capture_output=True, text=True, check=False, env=env)
-            content = {path.name: path.read_text(encoding="utf-8") for path in state_dir.iterdir() if path.is_file()}
-            return done, log.read_text(encoding="utf-8") if log.exists() else "", content
+            return step_result(done, log, state_dir)
 
     def markers_state(self):
         # The step prepare leaves the session cookie and the passwords of the administrator.
@@ -1031,6 +1089,7 @@ class StepTests(unittest.TestCase):
     def test_crash_pass_path_runs_the_steps_in_order(self):
         done, log, _ = self.run_step("crash", state=self.crash_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
         self.assert_ordered(log, [
             r"^compose --project-name recipe-ci-1-1 .* ps -aq db$",
             r"^inspect --format \{\{range \.Mounts\}\}",
@@ -1179,6 +1238,7 @@ class StepTests(unittest.TestCase):
     def test_recover_pass_path_runs_the_steps_in_order(self):
         done, log, _ = self.run_step("recover", state=self.recover_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
         self.assert_ordered(log, [
             rf"^volume create --label recipe\.ci=recipe-ci-1-1 {NEW_VOLUME}$",
             rf"^compose --project-name recipe-ci-1-1 .* run --rm --no-deps -T -e PITR_MARKER_SEQ -e PITR_MARKER_HASH "
@@ -1299,6 +1359,7 @@ class StepTests(unittest.TestCase):
     def test_switch_pass_path_runs_the_steps_in_order(self):
         done, log, _ = self.run_switch()
         self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
         self.assert_ordered(log, [
             r"^compose --project-name recipe-ci-1-1 .* stop proxy app backup walarchive$",
             r"^compose --project-name recipe-ci-1-1 .* ps -aq db$",
@@ -1494,6 +1555,7 @@ class StepTests(unittest.TestCase):
     def test_wal_line_pass_path_runs_the_steps_in_order(self):
         done, log, _ = self.run_wal_line()
         self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
         self.assert_ordered(log, [
             r"^compose --project-name recipe-ci-1-1 .* ps -aq walarchive$",
             r"^sudo mkdir -m 0700 -- \S+\.moved-[0-9]{8}_[0-9]{6}$",
@@ -1639,6 +1701,7 @@ class StepTests(unittest.TestCase):
     def test_check_pass_path_runs_the_steps_in_order(self):
         done, log, _ = self.run_check()
         self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(docker_calls.forbidden_check_window_calls(done.docker_calls), [])
         self.assert_ordered(log, [
             r"TRUNCATE public\.session, public\.login_attempt",
             r"^compose --project-name recipe-ci-1-1 .* up -d --no-deps --wait --wait-timeout 180 app$",
@@ -2045,6 +2108,57 @@ class RunbookRecoveryDeleteTests(unittest.TestCase):
         self.assertEqual(self.runbook.runbook_deleted_service_starts(section, ("app", "backup", "walarchive")), [],
                          "recovery section must use up -d --no-deps for app, backup, and walarchive after the delete")
 
+    def test_recovery_window_keeps_app_and_backup_without_a_container(self):
+        section = self.runbook.runbook_heading_section("Recover from the WAL archive", 3)
+        steps = {}
+        for match in re.finditer(r"(?ms)^(\d+)\. .*?(?=^\d+\. |\Z)", section):
+            number = match.group(1)
+            self.assertNotIn(number, steps, f"duplicate recovery step {number}")
+            steps[number] = match.group(0)
+        guard = self.runbook.runbook_deleted_service_starts
+        subcommands = ("up", "create", "run", "start", "restart")
+        for number in range(1, 12):
+            self.assertIn(str(number), steps, f"recovery step {number} must exist")
+        for number in range(1, 11):
+            self.assertEqual(guard(steps[str(number)], subcommands=subcommands), [],
+                             f"recovery step {number} must keep app and backup without a container")
+        step = steps["11"]
+        matches = list(re.finditer(r"(?ms)^    2\. .*?(?=^    \d+\. |\Z)", step))
+        self.assertEqual(len(matches), 1, "recovery step 11 must have one sub-step 2")
+        substep = matches[0].group(0)
+        reference = 'Run step 9 of "Restore into production".'
+        self.assertEqual(substep.count(reference), 1,
+                         "recovery sub-step 11.2 must have one reference to restore step 9")
+        end = matches[0].start() + substep.index(reference)
+        self.assertEqual(guard(step[:end], subcommands=subcommands), [],
+                         "recovery step 11 must keep app and backup without a container before the reference")
+
+    def test_recovery_window_guard_rejects_duplicate_step_numbers(self):
+        section = self.runbook.runbook_heading_section("Recover from the WAL archive", 3)
+        anchor = "5. Create the new volume."
+        self.assertEqual(section.count(anchor), 1)
+        mutant = section.replace(
+            anchor, "5. Run `docker compose up -d --no-deps app`.\n" + anchor, 1)
+        with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
+            with self.assertRaisesRegex(AssertionError, r"duplicate recovery step 5\b"):
+                self.test_recovery_window_keeps_app_and_backup_without_a_container()
+
+    def test_recovery_window_guard_rejects_runbook_mutants(self):
+        section = self.runbook.runbook_heading_section("Recover from the WAL archive", 3)
+        cases = (
+            ("t02_runbook_recovery_step5", "5. Create the new volume.",
+             " Run `docker compose up -d --no-deps app`."),
+            ("t02_runbook_recovery_step11_2", "    2. ",
+             "Run `docker compose up -d --no-deps app`. "),
+        )
+        for name, anchor, insertion in cases:
+            with self.subTest(mutant=name):
+                self.assertEqual(section.count(anchor), 1, anchor)
+                mutant = section.replace(anchor, anchor + insertion, 1)
+                with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
+                    with self.assertRaises(AssertionError):
+                        self.test_recovery_window_keeps_app_and_backup_without_a_container()
+
     def test_section_guard_rejects_service_lists_and_double_backticks(self):
         for section in ("Run `docker compose start proxy backup`.",
                         "Run `docker compose start walarchive`.",
@@ -2271,6 +2385,7 @@ exit 0
 
 # The stub of docker answers the queries of db by their text. The marker row depends on the number of password commands so far.
 STEP_DOCKER_STUB = """
+printf '%s\\0' "$#" "$@" >>"$STUB_LOG.argv"
 RESTORE_TEST_LINE='{"timestamp":"2026-10-30T12:05:00Z","level":"INFO","job":"restore-test","message":"restore test passed","set":"recipe_20261030_1205_now"}'
 echo "$*" >>"$STUB_LOG"
 case "$*" in

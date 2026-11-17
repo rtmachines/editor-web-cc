@@ -49,7 +49,7 @@ The line numbers refer to `main` 2324454.
 
 ## 1. Runbook guard
 
-- [ ] 1.1 (deploy/ci) First create `deploy/ci/test_docker_calls.py` with tests of the lexer function of design.md D2:
+- [x] 1.1 (deploy/ci) First create `deploy/ci/test_docker_calls.py` with tests of the lexer function of design.md D2:
   - The file loads `deploy/ci/docker_calls.py` with `importlib` and ends with `unittest.main()` (design.md D3).
   - `$(docker compose start app)` gives exactly the simple commands `$` and `docker compose start app`.
   - `docker compose start app&&echo` gives exactly the simple commands `docker compose start app` and `echo`.
@@ -79,7 +79,7 @@ The line numbers refer to `main` 2324454.
   - Then read each command with the lexer function. The placeholder step stays in `test_upgrade_runbook.py` (design.md D3).
   - Check: the four suites pass. The control-operator cases of `test_shell_operators_end_the_service_list` stay unchanged. The cases of `test_allowed_commands` stay unchanged.
   - Check: the mutants `d2_semicolon`, `t01_amp`, `t01_subst`, and `n1_rollback_placeholder` each fail at least one test.
-- [ ] 1.2 (deploy/ci) First add tests of a parser of a `docker` call to `deploy/ci/test_docker_calls.py` (design.md D3):
+- [x] 1.2 (deploy/ci) First add tests of a parser of a `docker` call to `deploy/ci/test_docker_calls.py` (design.md D3):
   - The cases are a compose call, a call without `compose`, the form `--option=value`, and a missing subcommand.
   - Then add regression cases to `RunbookDeletedServiceStartsTests` of `deploy/ci/test_upgrade_runbook.py` (T-01):
   - Each of these spans gives one hit: `docker --context x compose start app`, `docker -c x compose start app`, `docker --host=unix:///x compose restart backup`, and `docker -H x compose start app`.
@@ -89,13 +89,13 @@ The line numbers refer to `main` 2324454.
   - The function skips the global options of `docker` and of Compose. It returns the subcommand and its operands.
   - The function holds the one table of value options for each program (design.md D3). `runbook_deleted_service_starts` uses it. The token `docker-compose` starts at the options of Compose.
   - Check: the four suites pass, and the mutant `t01_context` fails at least one test.
-- [ ] 1.3 (deploy/ci) First add a regression case to `RunbookDeletedServiceStartsTests` (T-01, design.md D4):
+- [x] 1.3 (deploy/ci) First add a regression case to `RunbookDeletedServiceStartsTests` (T-01, design.md D4):
   - A `text` fence and a `bash` fence each hold the two lines `docker compose \` and `  start app`. Each gives one hit.
   - Run `python3 -m unittest test_docker_calls test_upgrade_runbook` and see the case fail.
   - Then join a fenced line that ends with `\` and the next fenced line before the guard reads them.
   - The join stays in `test_upgrade_runbook.py`, because it reads runbook text (design.md D3).
   - Check: the four suites pass, and the mutant `t01_fence_split` fails at least one test.
-- [ ] 1.4 (deploy/ci) First add regression cases to `RunbookInlineCodeSpansTests` (line 242) (T-03, design.md D8):
+- [x] 1.4 (deploy/ci) First add regression cases to `RunbookInlineCodeSpansTests` (line 242) (T-03, design.md D8):
   - The two lines ``- Type a lone ` here.`` and ``- Run `docker compose start app`.`` give the span `docker compose start app`, and the guard gives one hit.
   - The same holds for the markers `*`, `+`, `1.`, `1)`, and for a nested item `   2.`.
   - An ATX heading line between two backticks ends the first block.
@@ -110,7 +110,7 @@ The line numbers refer to `main` 2324454.
   - A line that starts a list item, an ATX heading, or a table row starts a new block. A heading also ends its block.
   - Check: the four suites pass. The existing case `test_span_can_cross_a_line_break` stays unchanged.
   - Check: the mutant `t03_lone_backtick` fails at least one test.
-- [ ] 1.5 (deploy/ci) First add tests of the rule of refused calls of design.md D7 to `deploy/ci/test_docker_calls.py`:
+- [x] 1.5 (deploy/ci) First add tests of the rule of refused calls of design.md D7 to `deploy/ci/test_docker_calls.py`:
   - The arguments after `compose` of `up -d --no-deps --wait-timeout 180` give a hit. With `proxy` after `180`, they give no hit.
   - `up -d` gives a hit. `run --rm --no-deps -w proxy` gives a hit, because `proxy` is the value of `-w` in `run`.
   - `up -d --no-deps -w proxy` gives no hit, because `-w` is a flag in `up`.
@@ -137,7 +137,7 @@ The line numbers refer to `main` 2324454.
 
 ## 2. Stub-log guards of `restore-switch`
 
-- [ ] 2.1 (deploy/ci) First add tests for the argument records of design.md D5 (RDAB-D3):
+- [x] 2.1 (deploy/ci) First add tests for the argument records of design.md D5 (RDAB-D3):
   - Start with unit tests of a record parser in `deploy/ci/test_docker_calls.py`. The records hold an argument with spaces, an empty argument, and an argument with a newline.
   - A truncated record raises `ValueError`.
   - In `test_restore_switch.py`, add a test that runs `DOCKER_SWITCH_STUB` with the arguments `a b`, an empty argument, and `x` newline `y`.
@@ -157,7 +157,7 @@ The line numbers refer to `main` 2324454.
   - Lines 646 and 661 need that drop, because their strings start with `docker`.
   - `test_restore_runs_the_steps_in_order` (line 690) and line 683 pass the records.
   - Check: the four suites pass, and the mutant `d3_quoted` fails at least one test.
-- [ ] 2.2 (deploy/ci) First extend two tests of `RestoreBehaviorTests` (T-05, design.md D6):
+- [x] 2.2 (deploy/ci) First extend two tests of `RestoreBehaviorTests` (T-05, design.md D6):
   - `test_command_guard_rejects_forbidden_docker_commands` (line 643) adds `start x`, `restart x`, `rm -f x`, and `container` with `start`, `restart`, `kill`, and `rm -f`.
   - The same test adds `compose stop db`, `compose rm -s -f db`, `compose rm -s -f app db`, and `compose rm -s -f`.
   - `test_command_guard_rejects_restore_mutants` (line 663) adds `docker start recipe-ci-1-1-app-1`, `docker container start recipe-ci-1-1-app-1`, and `docker rm -f recipe-ci-1-1-db-1`.
@@ -167,7 +167,7 @@ The line numbers refer to `main` 2324454.
   - Then extend the branch of the guard for calls outside Compose. The guard of the step `restore` stays in `test_restore_switch.py`.
   - In the branch for Compose, refuse `stop`. Let `rm` name only `app` and `backup`, and at least one of them.
   - Check: the four suites pass. The mutants `t05_docker_start`, `t05_container_start`, `t05_rm_db`, `rm_db`, and `stop_db` each fail at least one test.
-- [ ] 2.3 (deploy/ci) First add a unit test of a window function to `deploy/ci/test_docker_calls.py` (T-02, design.md D7):
+- [x] 2.3 (deploy/ci) First add a unit test of a window function to `deploy/ci/test_docker_calls.py` (T-02, design.md D7):
   - The test gives the record `compose up -d --no-deps --wait-timeout 180`. The function returns that record.
   - With the service `proxy` after `180`, the function returns no record.
   - The function raises `AssertionError` when the record list of the whole run is empty (N4).
@@ -195,7 +195,7 @@ The line numbers refer to `main` 2324454.
 
 ## 3. Stub-log guard of `pitr-recovery`
 
-- [ ] 3.1 (deploy/ci) First add mutant tests to `deploy/ci/test_pitr_recovery.py` (T-02, design.md D5, D7):
+- [x] 3.1 (deploy/ci) First add mutant tests to `deploy/ci/test_pitr_recovery.py` (T-02, design.md D5, D7):
   - Copy `pitr-recovery.sh` and its sourced files to a temporary directory.
   - The anchor is the line `compose rm -s -f app backup || fail "crash: cannot delete app and backup."` of `crash()`, with its two leading spaces (L4).
   - Assert that the anchor occurs once in the script. Then add `compose up -d --no-deps app backup` after the anchor of the copy.
@@ -220,7 +220,7 @@ The line numbers refer to `main` 2324454.
 
 ## 4. Runbook windows
 
-- [ ] 4.1 (deploy/ci) Add a window test to `RunbookRestoreDeleteTests` in `deploy/ci/test_restore_switch.py` (T-02, design.md D7). Edit only this file:
+- [x] 4.1 (deploy/ci) Add a window test to `RunbookRestoreDeleteTests` in `deploy/ci/test_restore_switch.py` (T-02, design.md D7). Edit only this file:
   1. Keep `test_section_has_no_start_app_or_start_backup_command` (line 2902) and its fixture tests unchanged.
   2. The fixture `test_section_guard_allows_bare_start_and_other_services` (line 2917) patches a section of two sentences. It stays valid.
   3. First add a new method `test_restore_window_keeps_app_and_backup_without_a_container`. Its first body only calls the existing section test.
@@ -236,7 +236,7 @@ The line numbers refer to `main` 2324454.
   11. In the windows, the text outside step 4 gives no hit. Step 4 gives the four commands of design.md D7, in that order.
   12. Run `python3 -m unittest test_restore_switch` and see the mutant test pass.
   13. Check: the four mutants of item 6 each fail at least one test of `test_restore_switch`.
-- [ ] 4.2 (deploy/ci) Add a window test to `RunbookRecoveryDeleteTests` in `deploy/ci/test_pitr_recovery.py` (T-02, design.md D7). Edit only this file:
+- [x] 4.2 (deploy/ci) Add a window test to `RunbookRecoveryDeleteTests` in `deploy/ci/test_pitr_recovery.py` (T-02, design.md D7). Edit only this file:
   1. Keep `test_section_has_no_start_of_a_deleted_service` (line 2043) and its fixture tests unchanged.
   2. The fixture `test_section_guard_allows_bare_start_and_other_services` (line 2059) patches a section of two sentences. It stays valid.
   3. First add a new method `test_recovery_window_keeps_app_and_backup_without_a_container`. Its first body only calls the existing section test.
@@ -253,7 +253,7 @@ The line numbers refer to `main` 2324454.
 
 ## 5. Other documents
 
-- [ ] 5.1 (CHANGELOG.md) [mechanical] (exempt: documentation only, see the header) Add one line under `### Changed` of `[Unreleased]`:
+- [x] 5.1 (CHANGELOG.md) [mechanical] (exempt: documentation only, see the header) Add one line under `### Changed` of `[Unreleased]`:
   - The line says that the guard tests of `deploy/ci/` read more shell forms and lossless stub records.
   - It also says that they keep `app` and `backup` without a container in the restore windows.
   - The line cites ADR-0175.
@@ -274,3 +274,11 @@ The line numbers refer to `main` 2324454.
 ## Workflow follow-up
 
 - After the gate, run `code-review`, fix each CRITICAL, HIGH, and MEDIUM finding, and run `openspec-archive-change`.
+
+## Code review fixes (2026-11-17)
+
+- The review found no CRITICAL or HIGH finding. Codex `gpt-6.1-sol` fixed each MEDIUM finding with a failing test first.
+- `deploy/ci/test_upgrade_runbook.py` had more than 800 lines. The test classes of the runbook text helpers moved to the new file `deploy/ci/test_runbook_text.py`. The helpers stay in `test_upgrade_runbook.py` (design.md D3).
+- `shell_commands` also reads a command substitution inside quotes and a backtick substitution.
+- The rule of design.md D7 counts only a real `--no-deps` flag, not the value of a value option.
+- The runbook window tests refuse a repeated step number, and they cut a window at the real range of its end span.

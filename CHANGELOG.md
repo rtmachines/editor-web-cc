@@ -71,6 +71,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - The service `db` keeps its four secret mounts. The accepted risk of their clear text in `db` is recorded (ADR-0170).
 - With `session.secure=false` in a `dev` build, no cookie has `Secure`. The session and pre-session cookies also drop the `__Host-` prefix (ADR-0171).
 - The stall mark of `read_with_limit` covers a call whose caller waits to the limit. The operator needs no step for a dropped call (ADR-0172).
+- The guard tests of `deploy/ci/` read more shell forms and lossless argument records of the Docker stubs. They keep `app` and `backup` without a container in the restore windows (ADR-0175).
 
 ### Fixed
 
