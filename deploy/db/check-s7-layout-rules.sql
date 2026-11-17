@@ -17,7 +17,8 @@
 -- For an array row, reference_number, version_number, and tag are empty and type_text is the
 -- array type. For a parameter row, type_text is the type of the parameter.
 -- The query reads every machine, also an archived one, every recipe, and every version.
--- It skips the parameters of a discarded draft.
+-- It skips the parameters of a discarded draft in the parts nested_array and layout_changed. The
+-- parts array_bound, bool_array_3d, and nesting list them, because their rows stay in storage.
 -- A recursive query walks the type tree over the element type and the members of a struct.
 -- The owner reads each row. The query writes nothing.
 --
@@ -172,6 +173,16 @@ live_parameter AS (
     JOIN recipe r ON r.id = v.recipe_id
     JOIN machine m ON m.id = r.machine_id
     WHERE v.deleted_at IS NULL
+),
+-- A parameter of every version, also a discarded draft, because its rows stay in storage. The parts
+-- array_bound, bool_array_3d, and nesting read it (ADR-0178 (j), ADR-0187 (i), ADR-0179 (k)).
+stored_parameter AS (
+    SELECT p.plc_type_id, p.plc_platform, p.s7_address, p.tag,
+           m.code AS machine_code, r.reference_number, v.number AS version_number
+    FROM parameter p
+    JOIN recipe_version v ON v.id = p.recipe_version_id
+    JOIN recipe r ON r.id = v.recipe_id
+    JOIN machine m ON m.id = r.machine_id
 )
 SELECT hit.machine_code, hit.reference_number, hit.version_number, hit.tag, hit.part,
        hit.type_text
@@ -211,7 +222,7 @@ FROM (
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'array_bound', l.label
-    FROM live_parameter p
+    FROM stored_parameter p
     JOIN type_label l ON l.type_id = p.plc_type_id
     WHERE p.s7_address IS NOT NULL
       AND p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
@@ -224,7 +235,7 @@ FROM (
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'bool_array_3d', l.label
-    FROM live_parameter p
+    FROM stored_parameter p
     JOIN type_label l ON l.type_id = p.plc_type_id
     WHERE p.s7_address IS NOT NULL
       AND p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
@@ -245,7 +256,7 @@ FROM (
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'nesting', l.label
-    FROM live_parameter p
+    FROM stored_parameter p
     JOIN nesting_row n ON n.id = p.plc_type_id
     JOIN type_label l ON l.type_id = p.plc_type_id
     WHERE p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
