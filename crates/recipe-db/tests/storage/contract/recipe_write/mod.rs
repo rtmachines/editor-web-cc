@@ -4,5 +4,6 @@
 
 mod guard;
 mod recipes;
+mod stale_record;
 mod status;
 mod versions;
