@@ -175,7 +175,7 @@ async fn a_revision_gets_the_next_number_and_supersedes_the_last_one() {
 }
 
 #[tokio::test]
-async fn the_journal_holds_the_machine_lock_and_then_the_advisory_keys_in_the_order_of_the_texts() {
+async fn the_journal_holds_the_machine_lock_and_then_the_advisory_key_set() {
     let fixture = fixture(PlcPlatform::TwinCat3);
     run(
         &fixture,

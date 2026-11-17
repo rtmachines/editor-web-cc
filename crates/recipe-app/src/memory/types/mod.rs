@@ -100,6 +100,8 @@ impl TypeCatalog for MemoryTransaction {
         Ok(usage::usage(self.state(), machine, type_id, offset, limit))
     }
 
+    /// Journals one advisory lock per key, in the order of `keys`.
+    /// Only `recipe-db` proves the key order of ADR-0144.
     async fn lock_derived_types(
         &mut self,
         machine: MachineId,
