@@ -22,6 +22,10 @@ SWITCH_STEPS = CI / "switch-steps.sh"
 PROJECT = "recipe-ci-1-1"
 FIXTURE_HASH = "ab" * 32
 
+DOCKER_CALLS_SPEC = importlib.util.spec_from_file_location("docker_calls", CI / "docker_calls.py")
+docker_calls = importlib.util.module_from_spec(DOCKER_CALLS_SPEC)
+DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
+
 
 def workflow_lines():
     text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
@@ -381,6 +385,7 @@ TIMELINE_LABEL = "Latest checkpoint's TimeLineID"
 OLD_ENTRY = f"volume: {OLD_VOLUME}\ntag: {JOB_TAG}\nDatabase system identifier: 1111\n{TIMELINE_LABEL}: 1\n"
 
 DOCKER_SWITCH_STUB = r"""
+printf '%s\0' "$#" "$@" >>"$STUB_LOG.argv"
 echo "$*" >>"$STUB_LOG"
 echo "VOL=${RECIPE_PGDATA_VOLUME:-}" >>"$STUB_LOG.env"
 args=" $* "
@@ -525,6 +530,26 @@ def restore_tree():
     return {f"backups/{name}": text for name, text in files.items()}
 
 
+class DockerSwitchStubTests(unittest.TestCase):
+    def setUp(self):
+        self.bash = shutil.which("bash")
+        if self.bash is None:
+            self.skipTest("bash is not available")
+
+    def test_switch_stub_records_spaces_empty_arguments_and_newlines(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            stub = directory / "docker"
+            log = directory / "calls.log"
+            write_stub(stub, DOCKER_SWITCH_STUB)
+            env = {**os.environ, "STUB_LOG": str(log)}
+            done = subprocess.run([self.bash, str(stub), "a b", "", "x\ny"],
+                                  capture_output=True, text=True, check=False, env=env)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(pathlib.Path(str(log) + ".argv").read_bytes(),
+                             b"3\x00a b\x00\x00x\ny\x00")
+
+
 class StubbedSubcommandTests(unittest.TestCase):
     def setUp(self):
         self.bash = shutil.which("bash")
@@ -599,6 +624,8 @@ class StubbedSubcommandTests(unittest.TestCase):
             text = log.read_text(encoding="utf-8") if log.exists() else ""
             env_log = pathlib.Path(str(log) + ".env")
             files["env.log"] = env_log.read_text(encoding="utf-8") if env_log.exists() else ""
+            argv_log = pathlib.Path(str(log) + ".argv")
+            files["argv"] = docker_calls.argument_records(argv_log.read_bytes() if argv_log.exists() else b"")
             listing = [item.relative_to(run_dir).as_posix() for item in run_dir.rglob("*")
                        if ci_state not in item.parents and item != ci_state]
             files["tree.list"] = "\n".join(sorted(listing))
@@ -616,37 +643,57 @@ class StubbedSubcommandTests(unittest.TestCase):
 
 
 class RestoreBehaviorTests(StubbedSubcommandTests):
-    def assert_no_forbidden_docker_commands(self, log):
-        value_options = {"--project-name", "-p", "-f", "--file", "--profile", "--ansi",
-                         "--env-file", "--project-directory", "--progress", "--parallel"}
-        for line in log.splitlines():
-            tokens = shlex.split(line)
-            if tokens[:1] == ["docker"]:
-                tokens = tokens[1:]
-            if tokens[:1] == ["compose"]:
-                position = 1
-                while position < len(tokens) and tokens[position].startswith("-"):
-                    option = tokens[position]
-                    position += 1
-                    if option in value_options:
-                        position += 1
-                self.assertNotIn(tokens[position:position + 1],
-                                 (["down"], ["start"], ["restart"], ["kill"]), line)
+    def test_command_guard_rejects_an_empty_run(self):
+        with self.assertRaises(AssertionError):
+            self.assert_no_forbidden_docker_commands([])
+
+    def assert_no_forbidden_docker_commands(self, records):
+        self.assertTrue(records, "The run has no Docker argument records")
+        for arguments in records:
+            call = docker_calls.docker_call(arguments)
+            if call is None:
+                continue
+            is_compose, subcommand, operands = call
+            if is_compose:
+                self.assertNotIn(subcommand, ("down", "start", "restart", "kill", "stop"), arguments)
+                if subcommand == "rm":
+                    services = [word for word in operands if not word.startswith("-")]
+                    self.assertTrue(services, arguments)
+                    self.assertTrue(set(services) <= {"app", "backup"}, arguments)
             else:
-                self.assertNotEqual(tokens[:1], ["kill"], line)
-                self.assertNotEqual(tokens[:2], ["volume", "rm"], line)
+                self.assertNotIn(subcommand, ("start", "restart", "kill", "rm"), arguments)
+                if subcommand == "container":
+                    self.assertFalse(operands[:1] and operands[0] in ("start", "restart", "kill", "rm"), arguments)
+                if subcommand == "volume":
+                    self.assertNotEqual(operands[:1], ["rm"], arguments)
+        self.assertEqual(docker_calls.forbidden_window_calls(records), [])
+
+    @staticmethod
+    def command_records(command):
+        tokens = shlex.split(command)
+        return [tokens[1:] if tokens[:1] == ["docker"] else tokens]
 
     def test_command_guard_allows_start_in_a_checkout_path(self):
         self.assert_no_forbidden_docker_commands(
-            "compose --project-name recipe-ci-1-1 -f /tmp/start/deploy/compose.yaml rm -s -f app backup\n")
+            self.command_records(
+                "compose --project-name recipe-ci-1-1 -f /tmp/start/deploy/compose.yaml rm -s -f app backup"))
 
     def test_command_guard_rejects_forbidden_docker_commands(self):
-        for command in ("volume rm data", "compose --project-name recipe-ci-1-1 -f /tmp/start/compose.yaml down",
+        for command in ("volume " "rm data", "compose --project-name recipe-ci-1-1 -f /tmp/start/compose.yaml down",
                         "compose -f /tmp/compose.yaml kill app", "compose start app",
                         "kill recipe-ci-app", "docker kill recipe-ci-app",
-                        "compose -p x restart backup"):
+                        "compose -p x restart backup", "start x", "restart x", "rm -f x",
+                        "container start x", "container restart x", "container kill x", "container rm -f x",
+                        "compose stop db", "compose rm -s -f db", "compose rm -s -f app db",
+                        "compose rm -s -f"):
             with self.subTest(command=command), self.assertRaises(AssertionError):
-                self.assert_no_forbidden_docker_commands(command + "\n")
+                self.assert_no_forbidden_docker_commands(self.command_records(command))
+
+    def test_command_guard_allows_restore_commands(self):
+        for command in ("run --rm --network none x", "volume create x", "inspect x",
+                        "compose rm -s -f app backup", "compose rm -s -f app", "compose rm -s -f backup"):
+            with self.subTest(command=command):
+                self.assert_no_forbidden_docker_commands(self.command_records(command))
 
     def test_command_guard_skips_compose_option_values(self):
         options = ("--project-name", "-p", "-f", "--file", "--profile", "--ansi",
@@ -654,18 +701,24 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
         for option in options:
             for argument in (f'{option} "start in checkout"', f'{option}="start in checkout"'):
                 with self.subTest(argument=argument):
-                    self.assert_no_forbidden_docker_commands(f"compose {argument} rm -s -f app backup\n")
+                    self.assert_no_forbidden_docker_commands(
+                        self.command_records(f"compose {argument} rm -s -f app backup"))
                     with self.assertRaises(AssertionError):
-                        self.assert_no_forbidden_docker_commands(f"compose {argument} start app\n")
+                        self.assert_no_forbidden_docker_commands(
+                            self.command_records(f"compose {argument} start app"))
         with self.assertRaises(AssertionError):
-            self.assert_no_forbidden_docker_commands("docker compose --dry-run restart backup\n")
+            self.assert_no_forbidden_docker_commands(
+                self.command_records("docker compose --dry-run restart backup"))
 
     def test_command_guard_rejects_restore_mutants(self):
         anchor = '  compose rm -s -f app backup || fail "restore: cannot delete app and backup."'
         original = script_text()
         self.assertEqual(original.count(anchor), 1)
         commands = ("compose --profile restore start app", "compose --ansi never start app",
-                    "docker kill recipe-ci-app", "compose -p x restart backup")
+                    "docker kill recipe-ci-app", "compose -p x restart backup",
+                    'compose -f "/tmp/start in checkout/compose.yaml" start app',
+                    "docker start recipe-ci-1-1-app-1", "docker container start recipe-ci-1-1-app-1",
+                    "docker rm -f recipe-ci-1-1-db-1", "compose rm -s -f db", "compose stop db")
         with tempfile.TemporaryDirectory() as temp:
             directory = pathlib.Path(temp)
             for name in ("common.sh", "switch-steps.sh"):
@@ -676,11 +729,34 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
                     mutant.write_text(original.replace(anchor, anchor + f"\n  {command} || true"),
                                       encoding="utf-8", newline="\n")
                     with patch.object(sys.modules[__name__], "SCRIPT", mutant):
-                        done, log, _ = self.run_subcommand("restore")
+                        done, log, files = self.run_subcommand("restore")
                     self.assertEqual(done.returncode, 0, done.stderr)
-                    self.assertIn(command.removeprefix("docker ").removeprefix("compose "), log)
+                    arguments = command.removeprefix("docker ").removeprefix("compose ")
+                    self.assertIn(" ".join(shlex.split(arguments)), log)
                     with self.assertRaises(AssertionError):
-                        self.assert_no_forbidden_docker_commands(log)
+                        self.assert_no_forbidden_docker_commands(files["argv"])
+
+    def test_window_guard_rejects_restore_mutants(self):
+        anchor = '  compose rm -s -f app backup || fail "restore: cannot delete app and backup."'
+        original = script_text()
+        self.assertEqual(original.count(anchor), 1)
+        commands = ("compose up -d --no-deps app backup", "compose up -d",
+                    "compose up -d proxy", "compose up -d --no-deps --wait-timeout 180")
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            for name in ("common.sh", "switch-steps.sh"):
+                shutil.copyfile(CI / name, directory / name)
+            mutant = directory / SCRIPT.name
+            for command in commands:
+                with self.subTest(command=command):
+                    mutant.write_text(original.replace(anchor, anchor + f"\n  {command} || true"),
+                                      encoding="utf-8", newline="\n")
+                    with patch.object(sys.modules[__name__], "SCRIPT", mutant):
+                        done, log, files = self.run_subcommand("restore")
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    self.assertIn(command.removeprefix("compose "), log)
+                    with self.assertRaises(AssertionError):
+                        self.assert_no_forbidden_docker_commands(files["argv"])
 
     def assert_copy_removed(self, files):
         self.assertNotIn("backups/restore-switch-tag", files["tree.list"])
@@ -688,14 +764,14 @@ class RestoreBehaviorTests(StubbedSubcommandTests):
             self.assertEqual(files["read:" + name], text, name)
 
     def test_restore_runs_the_steps_in_order(self):
-        done, log, _ = self.run_subcommand("restore")
+        done, log, files = self.run_subcommand("restore")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertInOrder(log, [
             r"compose --project-name recipe-ci-1-1 .* rm -s -f app backup\n",
             rf"volume create --label recipe\.ci={PROJECT} recipe-editor_pgdata_\d{{8}}_\d{{6}}\n",
             r"compose .* run --rm --no-deps -T -v recipe-editor_pgdata_\d{8}_\d{6}:/var/lib/postgresql/data restore-volume 20260101_0000_now\n",
         ])
-        self.assert_no_forbidden_docker_commands(log)
+        self.assert_no_forbidden_docker_commands(files["argv"])
 
     def test_restore_fails_when_the_services_cannot_be_deleted(self):
         done, log, _ = self.run_subcommand("restore", stub_env={"STUB_REMOVE_APP_STATUS": "1"})
@@ -861,8 +937,9 @@ class SwitchBehaviorTests(StubbedSubcommandTests):
     STATE = {"new.volume": NEW + "\n", "new.system-identifier": "2222\n"}
 
     def test_switch_runs_the_steps_of_adr_0103_f_in_order(self):
-        done, log, _ = self.run_subcommand("switch", self.STATE)
+        done, log, files = self.run_subcommand("switch", self.STATE)
         self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
         run = r"run --rm --network none .*-v {}:/var/lib/postgresql/data:ro .*pg_controldata.*\n"
         self.assertInOrder(log, [
             r" stop proxy app backup walarchive\n",
@@ -1177,6 +1254,7 @@ class SwitchSourceLineTests(StubbedSubcommandTests):
 
 
 DOCKER_ACCESS_STUB = r"""
+printf '%s\0' "$#" "$@" >>"$STUB_LOG.argv"
 echo "$*" >>"$STUB_LOG"
 args=" $* "
 case "$args" in
@@ -1218,6 +1296,7 @@ class AccessBehaviorTests(StubbedSubcommandTests):
     def test_access_checks_before_the_passwords_and_logs_in_after(self):
         done, log, files = self.run_access()
         self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
         self.assertInOrder(log, [
             self.PROBE + r"postgres\n",
             self.PROBE + self.FOUR + r"\n",
@@ -1336,6 +1415,7 @@ exit 0
 """
 
 DOCKER_WAL_STUB = r"""
+printf '%s\0' "$#" "$@" >>"$STUB_LOG.argv"
 echo "$*" >>"$STUB_LOG"
 args=" $* "
 case "$args" in
@@ -1767,8 +1847,9 @@ class WalLineBehaviorTests(StubbedSubcommandTests):
         self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_wal_line_runs_the_steps_in_order_and_deletes_nothing(self):
-        done, log, _ = self.run_wal_line()
+        done, log, files = self.run_wal_line()
         self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
         self.assertInOrder(log, [
             r" ps -aq walarchive\n",
             r"sudo mkdir -m 0700 -- \S+walarchive\.moved-\d{8}_\d{6}\n",
@@ -1879,6 +1960,25 @@ class CheckBehaviorTests(StubbedSubcommandTests):
                                    tree=CHECK_TREE if tree is None else tree, sudo_stub=SUDO_EXEC_STUB, stub_python=True,
                                    extra_stubs=extra_stubs)
 
+    def test_window_guard_rejects_a_start_before_truncate(self):
+        anchor = '  sql -c "TRUNCATE public.session, public.login_attempt" >/dev/null'
+        original = script_text()
+        self.assertEqual(original.count(anchor), 1)
+        command = "compose up -d --no-deps app backup || true"
+        with tempfile.TemporaryDirectory() as temp:
+            directory = pathlib.Path(temp)
+            for name in ("common.sh", "switch-steps.sh"):
+                shutil.copyfile(CI / name, directory / name)
+            mutant = directory / SCRIPT.name
+            mutant.write_text(original.replace(anchor, f"  {command}\n" + anchor),
+                              encoding="utf-8", newline="\n")
+            with patch.object(sys.modules[__name__], "SCRIPT", mutant):
+                done, log, files = self.run_check()
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertIn(" up -d --no-deps app backup\n", log)
+            with self.assertRaises(AssertionError):
+                self.assertEqual(docker_calls.forbidden_check_window_calls(files["argv"]), [])
+
     def test_check_waits_for_a_minute_without_a_set_before_backup_now(self):
         # backup-once refuses a name of an existing set. Prepare wrote a _now set in the same minute in CI run 41092760611.
         for suffix in ("_now", "_premigrate"):
@@ -1893,8 +1993,9 @@ class CheckBehaviorTests(StubbedSubcommandTests):
                 ])
 
     def test_check_runs_every_step_in_order(self):
-        done, log, _ = self.run_check()
+        done, log, files = self.run_check()
         self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(docker_calls.forbidden_check_window_calls(files["argv"]), [])
         self.assertInOrder(log, [
             r"-c TRUNCATE public\.session, public\.login_attempt\n",
             r" up -d --no-deps --wait --wait-timeout 180 app\n",
@@ -2903,6 +3004,100 @@ class RunbookRestoreDeleteTests(unittest.TestCase):
         section = self.runbook.runbook_heading_section("Restore into production", 3)
         self.assertEqual(self.runbook.runbook_deleted_service_starts(section), [],
                          "restore section must use up -d --no-deps for app and backup after the delete")
+
+    def test_restore_window_keeps_app_and_backup_without_a_container(self):
+        section = self.runbook.runbook_heading_section("Restore into production", 3)
+        steps = {}
+        for match in re.finditer(r"(?ms)^(\d+)\. .*?(?=^\d+\. |\Z)", section):
+            number = match.group(1)
+            self.assertNotIn(number, steps, f"duplicate restore step {number}")
+            steps[number] = match.group(0)
+        guard = self.runbook.runbook_deleted_service_starts
+        subcommands = ("up", "create", "run", "start", "restart")
+        failed_attempt = [
+            "docker compose up -d --no-deps app",
+            "docker compose up -d --no-deps --force-recreate backup",
+            "docker compose up -d --no-deps app",
+            "docker compose up -d --no-deps backup",
+        ]
+        for number in range(2, 10):
+            self.assertIn(str(number), steps, f"restore step {number} must exist")
+        for number in range(2, 9):
+            self.assertEqual(guard(steps[str(number)], subcommands=subcommands),
+                             failed_attempt if number == 4 else [], f"restore step {number}")
+        step = steps["9"]
+        boundaries = []
+        for number, command in ((4, "docker compose up -d --no-deps app"),
+                                (5, "docker compose up -d --no-deps proxy backup")):
+            matches = list(re.finditer(rf"(?ms)^   {number}\. .*?(?=^   \d+\. |\Z)", step))
+            self.assertEqual(len(matches), 1, f"restore step 9 must have one sub-step {number}")
+            substep = matches[0].group(0)
+            spans = [(start, end) for start, end in self.runbook.runbook_code_span_offsets(substep)
+                     if substep[start:end].strip("`") == command]
+            self.assertEqual(len(spans), 1,
+                             f"restore sub-step 9.{number} must have one end span {command!r}")
+            start, end = spans[0]
+            boundaries.append((matches[0].start() + start, end - start))
+        app_start, app_length = boundaries[0]
+        backup_start, _ = boundaries[1]
+        for text, services in ((step[:app_start], ("app", "backup")),
+                               (step[app_start + app_length:backup_start], ("backup",))):
+            self.assertEqual(guard(text, services=services, subcommands=subcommands), [],
+                             f"restore step 9 must keep {services!r} without a container")
+
+    def test_restore_window_guard_detects_backup_after_double_backtick_end_span(self):
+        section = self.runbook.runbook_heading_section("Restore into production", 3)
+        command = "docker compose up -d --no-deps app"
+        backup = "docker compose up -d --no-deps backup"
+        anchor = f"   4. Run `{command}`."
+        self.assertEqual(section.count(anchor), 1)
+        mutant = section.replace(anchor, f"   4. Run ``{command}``. Then run `{backup}`.", 1)
+        with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
+            with self.assertRaisesRegex(AssertionError, re.escape(backup)):
+                self.test_restore_window_keeps_app_and_backup_without_a_container()
+
+    def test_restore_window_guard_accepts_complete_end_spans(self):
+        section = self.runbook.runbook_heading_section("Restore into production", 3)
+        for delimiter in ("``", "```"):
+            with self.subTest(delimiter=delimiter):
+                mutant = section
+                for number, services in ((4, "app"), (5, "proxy backup")):
+                    command = f"docker compose up -d --no-deps {services}"
+                    anchor = f"   {number}. Run `{command}`."
+                    self.assertEqual(mutant.count(anchor), 1)
+                    mutant = mutant.replace(anchor, f"   {number}. Run {delimiter}{command}{delimiter}.", 1)
+                with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
+                    self.test_restore_window_keeps_app_and_backup_without_a_container()
+
+    def test_restore_window_guard_rejects_duplicate_step_numbers(self):
+        section = self.runbook.runbook_heading_section("Restore into production", 3)
+        anchor = "3. Create the new volume."
+        self.assertEqual(section.count(anchor), 1)
+        mutant = section.replace(
+            anchor, "3. Run `docker compose up -d --no-deps app`.\n" + anchor, 1)
+        with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
+            with self.assertRaisesRegex(AssertionError, r"duplicate restore step 3\b"):
+                self.test_restore_window_keeps_app_and_backup_without_a_container()
+
+    def test_restore_window_guard_rejects_runbook_mutants(self):
+        section = self.runbook.runbook_heading_section("Restore into production", 3)
+        cases = (
+            ("t02_runbook_step3", "3. Create the new volume.",
+             " Run `docker compose up -d --no-deps app backup`."),
+            ("t02_runbook_step9_2", '   2. If the command prints no row, record "missing".',
+             " Then run `docker compose up -d --no-deps app`."),
+            ("t02_runbook_step9_4_prefix", "   4. Run ",
+             "`docker compose up -d --no-deps backup`. Run "),
+            ("t02_runbook_step9_4_backup", "   4. Run `docker compose up -d --no-deps app`.",
+             " Then run `docker compose up -d --no-deps backup`."),
+        )
+        for name, anchor, insertion in cases:
+            with self.subTest(mutant=name):
+                self.assertEqual(section.count(anchor), 1, anchor)
+                mutant = section.replace(anchor, anchor + insertion, 1)
+                with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
+                    with self.assertRaises(AssertionError):
+                        self.test_restore_window_keeps_app_and_backup_without_a_container()
 
     def test_section_guard_rejects_service_lists_and_double_backticks(self):
         for section in ("Run `docker compose start proxy backup`.",
