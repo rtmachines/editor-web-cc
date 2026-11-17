@@ -230,6 +230,27 @@ async fn app_the_content_hash_of_an_approved_version_is_frozen() {
 }
 
 #[tokio::test]
+async fn app_a_retire_cannot_change_the_content_hash() {
+    let mut s = approved().await;
+
+    let result = run(
+        &mut s.app,
+        "UPDATE recipe_version SET status = 'retired', retired_at = now(), \
+             content_sha256 = repeat('b', 64) WHERE id = $1",
+        s.draft.version,
+    )
+    .await;
+
+    assert_trigger(result, TRANSITION);
+    assert_eq!(
+        status_and_row_version(&mut s.owner, s.draft.version)
+            .await
+            .0,
+        "approved"
+    );
+}
+
+#[tokio::test]
 async fn app_an_approved_version_cannot_be_discarded() {
     let mut s = approved().await;
 
