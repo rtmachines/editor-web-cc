@@ -532,6 +532,7 @@ expected-array-count = an array of { $count } elements
 expected-index = an index inside the INTEGER range
 expected-scalar = a scalar value
 expected-wstring = a string of at most { $length } UTF-16 units without U+0000
+expected-wstring-s7 = a string of at most { $length } characters from U+0001 to { $max }
 expected-string = a string of at most { $length } characters from Latin-1 without U+0000
 expected-char = one character from U+0001 to { $max }
 expected-literal = an IEC literal of type { $type_name }

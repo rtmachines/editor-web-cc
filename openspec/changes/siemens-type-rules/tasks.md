@@ -110,7 +110,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 5. WCHAR and WSTRING characters on S7 (ADR-0180)
 
-- [ ] 5.1 (recipe-domain, recipe-web) The value rule and its expected form (ADR-0180 (a) to (d)).
+- [x] 5.1 (recipe-domain, recipe-web) The value rule and its expected form (ADR-0180 (a) to (d)).
   - RED, domain: in `crates/recipe-domain/src/recipe/value/leaf/tests.rs`, add `adr_0180_*` tests. On `S7_1500` and `S7_1200` with `RuleSet::Current`, these results apply:
     - `WCHAR` `U+D7FF` passes, and `U+E000` gives `E-RCP-005` with `Expected::Char { max: 0xD7FF }`.
     - `WSTRING` `U+CFFF` passes. `U+D000` and `U+1F600` give `E-RCP-005` with the new `WSTRING` form.

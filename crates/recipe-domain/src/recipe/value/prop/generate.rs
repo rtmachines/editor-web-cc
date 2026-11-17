@@ -343,10 +343,10 @@ fn stored_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
     match primitive.leaf_class() {
         LeafClass::Bool => any::<bool>().prop_map(Value::Bool).boxed(),
         LeafClass::Numeric => numeric_leaf(primitive),
-        LeafClass::String => string_leaf(primitive),
+        LeafClass::String => string_leaf(primitive, platform),
         LeafClass::Char => {
             let highest = if primitive == Primitive::Wchar {
-                '\u{FFFF}'
+                S7_WCHAR_HIGHEST
             } else {
                 '\u{FF}'
             };
@@ -357,6 +357,13 @@ fn stored_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
         LeafClass::Duration | LeafClass::Instant => count_leaf(primitive, platform),
     }
 }
+
+/// Highest `WCHAR` scalar of a platform that has the type. Only `S7_1200` and `S7_1500` have it
+/// (ADR-0180 (a)).
+const S7_WCHAR_HIGHEST: char = '\u{D7FF}';
+
+/// Highest `WSTRING` scalar on `S7_1200` and `S7_1500` (ADR-0180 (b)).
+const S7_WSTRING_HIGHEST: char = '\u{CFFF}';
 
 /// Largest mantissa of a `REAL` number: 7 significant digits (ADR-0117).
 const REAL_MANTISSA: i64 = 9_999_999;
@@ -386,15 +393,21 @@ fn numeric_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
         .boxed()
 }
 
-/// Draw a `STRING` of Latin-1 characters, or a `WSTRING` of any characters. No text holds U+0000
-/// (ADR-0137).
+/// Draw a `STRING` of Latin-1 characters, or a `WSTRING` of the characters of its platform. No
+/// text holds U+0000 (ADR-0137). A `WSTRING` on S7 holds no scalar above U+CFFF (ADR-0180 (b)).
 ///
 /// A `WSTRING` holds at most half its length in characters, because a character outside the
 /// BMP takes two UTF-16 units.
-fn string_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
+fn string_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Value> {
     let length = usize::from(MIXED_STRING_LENGTH);
     let characters = if primitive == Primitive::Wstring {
-        let not_nul = any::<char>().prop_map(|c| if c == '\0' { '\u{1}' } else { c });
+        let not_nul = if matches!(platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500) {
+            prop::char::range('\u{1}', S7_WSTRING_HIGHEST).boxed()
+        } else {
+            any::<char>()
+                .prop_map(|c| if c == '\0' { '\u{1}' } else { c })
+                .boxed()
+        };
         prop::collection::vec(not_nul, 0..=length.checked_div(2).unwrap()).boxed()
     } else {
         prop::collection::vec(prop::char::range('\u{1}', '\u{FF}'), 0..=length).boxed()

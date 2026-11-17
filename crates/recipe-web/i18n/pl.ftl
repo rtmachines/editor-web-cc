@@ -532,6 +532,7 @@ expected-array-count = tablica z { $count } elementami
 expected-index = indeks w zakresie INTEGER
 expected-scalar = wartość skalarna
 expected-wstring = tekst o najwyżej { $length } jednostkach UTF-16 bez znaku U+0000
+expected-wstring-s7 = tekst o najwyżej { $length } znakach od U+0001 do { $max }
 expected-string = tekst o najwyżej { $length } znakach z Latin-1 bez znaku U+0000
 expected-char = jeden znak od U+0001 do { $max }
 expected-literal = literał IEC typu { $type_name }

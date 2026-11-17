@@ -88,6 +88,17 @@ fn display_of_a_text_variant_keeps_the_english_phrase() {
             Expected::Char { max: 0xFFFF },
             "one character from U+0001 to U+FFFF",
         ),
+        (
+            Expected::Char { max: 0xD7FF },
+            "one character from U+0001 to U+D7FF",
+        ),
+        (
+            Expected::WstringS7 {
+                length: 10,
+                max: 0xCFFF,
+            },
+            "a string of at most 10 characters from U+0001 to U+CFFF",
+        ),
     ];
     for (expected, text) in cases {
         assert_eq!(expected.to_string(), text, "{expected:?}");

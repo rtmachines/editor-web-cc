@@ -1,6 +1,7 @@
 use serde_json::json;
 
-use crate::plant::{LeafPath, Primitive, RuleSet, TypeTree};
+use crate::plant::fixtures::{id, machine, on_platform, primitive_row, types_for, wstring_row};
+use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TypeTree};
 use crate::recipe::value::test_support::{
     BOOL, BOUNDARIES, CHAR, DATE, INT, LREAL, LTIME, REAL, TIME, WCHAR, integer_tree,
     primitive_tree, string_tree, wstring_tree, zone_tree,
@@ -365,4 +366,117 @@ fn integer_types_accept_their_ends_and_refuse_the_values_next_to_them() {
             assert_eq!(fault(text, &tree), refused, "{name} {text}");
         }
     }
+}
+
+/// The tree of one `WCHAR` parameter on `platform`.
+fn wchar_tree_on(platform: PlcPlatform) -> TypeTree {
+    let rows = on_platform(platform, vec![primitive_row(WCHAR, Primitive::Wchar)]);
+    TypeTree::resolve(id(WCHAR), &types_for(machine(), platform, rows)).unwrap()
+}
+
+/// The tree of one `WSTRING(length)` parameter on `platform`.
+fn wstring_tree_on(platform: PlcPlatform, length: u16) -> TypeTree {
+    let rows = on_platform(platform, vec![wstring_row(50, length)]);
+    TypeTree::resolve(id(50), &types_for(machine(), platform, rows)).unwrap()
+}
+
+const S7_PLATFORMS: [PlcPlatform; 2] = [PlcPlatform::S7_1200, PlcPlatform::S7_1500];
+
+/// The `WSTRING` form that `E-RCP-005` names on S7 (ADR-0180 (d)).
+fn s7_wstring(length: u16) -> Expected {
+    Expected::WstringS7 {
+        length,
+        max: 0xCFFF,
+    }
+}
+
+fn request_under(
+    json: &str,
+    tree: &TypeTree,
+    rules: RuleSet,
+) -> Result<ParameterValue, ValueFault> {
+    let stored = serde_json::from_str::<serde_json::Value>(json).unwrap();
+    ParameterValue::from_stored(&StoredValue::from(stored), tree, rules)
+}
+
+#[test]
+fn adr_0180_wchar_on_s7_accepts_u_d7ff_and_refuses_u_e000() {
+    for platform in S7_PLATFORMS {
+        let tree = wchar_tree_on(platform);
+        assert_eq!(stored_text(r#""퟿""#, &tree), "\"\u{D7FF}\"");
+        assert_eq!(
+            fault(r#""""#, &tree).expected(),
+            Some(&Expected::Char { max: 0xD7FF })
+        );
+    }
+}
+
+#[test]
+fn adr_0180_wstring_on_s7_accepts_u_cfff_and_refuses_u_d000_and_u_1f600() {
+    for platform in S7_PLATFORMS {
+        let tree = wstring_tree_on(platform, 10);
+        assert_eq!(stored_text(r#""A쿿""#, &tree), "\"A\u{CFFF}\"");
+        for text in [r#""A퀀""#, r#""😀""#] {
+            assert_eq!(
+                fault(text, &tree).expected(),
+                Some(&s7_wstring(10)),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn adr_0180_the_earlier_set_accepts_the_values_that_the_current_set_refuses() {
+    for platform in S7_PLATFORMS {
+        let wchar = wchar_tree_on(platform);
+        assert!(request_under(r#""""#, &wchar, RuleSet::Earlier).is_ok());
+        assert!(request_under(r#""""#, &wchar, RuleSet::Current).is_err());
+        let wstring = wstring_tree_on(platform, 10);
+        for text in [r#""A퀀""#, r#""😀""#] {
+            assert!(
+                request_under(text, &wstring, RuleSet::Earlier).is_ok(),
+                "{text}"
+            );
+            assert_eq!(
+                request_under(text, &wstring, RuleSet::Current)
+                    .unwrap_err()
+                    .expected(),
+                Some(&s7_wstring(10)),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn adr_0180_the_earlier_set_still_refuses_u0000_in_a_wstring() {
+    let tree = wstring_tree_on(PlcPlatform::S7_1500, 10);
+    assert!(request_under(r#""A\u0000""#, &tree, RuleSet::Earlier).is_err());
+}
+
+#[test]
+fn adr_0180_wstring_on_codesys_and_twincat_keeps_adr_0137() {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
+        let tree = wstring_tree_on(platform, 10);
+        assert_eq!(stored_text(r#""A퀀""#, &tree), "\"A\u{D000}\"");
+        assert_eq!(stored_text(r#""😀""#, &tree), r#""😀""#);
+        assert_eq!(
+            fault(r#""A\u0000""#, &tree).expected(),
+            Some(&Expected::Wstring { length: 10 })
+        );
+    }
+}
+
+#[test]
+fn adr_0180_wstring_on_s7_keeps_the_length_in_utf16_units() {
+    let tree = wstring_tree_on(PlcPlatform::S7_1500, 2);
+    assert_eq!(fault(r#""ABC""#, &tree).expected(), Some(&s7_wstring(2)));
+    assert_eq!(stored_text(r#""AB""#, &tree), r#""AB""#);
+}
+
+#[test]
+fn adr_0180_a_non_string_value_of_an_s7_wstring_gives_the_s7_form() {
+    let tree = wstring_tree_on(PlcPlatform::S7_1200, 4);
+    assert_eq!(fault("5", &tree).expected(), Some(&s7_wstring(4)));
 }
