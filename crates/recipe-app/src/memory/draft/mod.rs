@@ -4,10 +4,12 @@
 mod tests;
 
 use async_trait::async_trait;
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::UserId;
+use recipe_domain::plant::PlcPlatform;
 use recipe_domain::recipe::{
-    LangCode, Parameter, ParameterId, ParameterKey, RecipeVersionId, StoredDraft, StoredLimit,
-    StoredValue, Translation, VersionState,
+    LIMIT_ROWS_PER_VERSION, LangCode, PARAMETERS_PER_VERSION, Parameter, ParameterId, ParameterKey,
+    RecipeVersionId, StoredDraft, StoredLimit, StoredValue, Translation, VersionState,
 };
 
 use super::recipe::{
@@ -15,7 +17,7 @@ use super::recipe::{
     translation_row_image,
 };
 use super::rows::{
-    corrupt_rows, duplicate, illegal_transition, missing_reference, missing_row,
+    check_violation, corrupt_rows, duplicate, illegal_transition, missing_reference, missing_row,
     version_not_live_draft,
 };
 use super::{LockMode, MemoryState, MemoryTransaction, WriteKind};
@@ -38,6 +40,16 @@ const PARAMETER_VERSION_PLATFORM: &str = "parameter_version_platform";
 const PARAMETER_UNIT_FKEY: &str = "parameter_unit_id_fkey";
 /// The name of the foreign key from `parameter` to `plc_type`.
 const PARAMETER_TYPE_FKEY: &str = "parameter_plc_type_id_fkey";
+/// The message of `E-PLT-031`.
+const TYPE_NOT_ON_PLATFORM: &str = "The type does not exist on the platform of the version.";
+/// The message of `E-PLT-032`.
+const TYPE_OF_ANOTHER_MACHINE: &str = "The type belongs to another machine.";
+/// The message of `E-RCP-032`.
+const UNIT_OF_ANOTHER_MACHINE: &str = "The unit does not belong to the machine of the recipe.";
+/// The message of `E-RCP-035`.
+const TOO_MANY_PARAMETERS: &str = "The version has more than 4000 parameters.";
+/// The message of `E-RCP-036`.
+const TOO_MANY_LIMIT_ROWS: &str = "The version has more than 32768 limit rows.";
 
 impl MemoryTransaction {
     /// Require that `version` exists and is a live draft, as trigger 4.1 does.
@@ -80,9 +92,14 @@ impl MemoryTransaction {
             .ok_or_else(|| missing_row(PARAMETER_TABLE))
     }
 
-    /// Check the foreign keys and the tag of a parameter that is written to `version`.
+    /// Check the triggers, the platform `CHECK`, the foreign keys, and the budget of a parameter
+    /// that is written to `version`.
     ///
-    /// The row `except` is the parameter itself and does not count for the tag.
+    /// The checks run in the order of PostgreSQL: the trigger `enforce_type_platform`, the trigger
+    /// `enforce_unit_machine`, the `CHECK` `parameter_s7_address_platform`, the keys and the tag,
+    /// and the statement trigger `version_size_budget`. The row `except` is the parameter itself.
+    /// It does not count for the tag. A parameter with `except` is a definition change, and the
+    /// budget does not apply to it, because no row is inserted.
     fn check_parameter_references(
         &self,
         version: RecipeVersionId,
@@ -90,11 +107,39 @@ impl MemoryTransaction {
         except: Option<ParameterId>,
     ) -> Result<(), StorageError> {
         let state = self.state();
-        if !state.units.contains_key(&parameter.unit()) {
+        let Some(unit) = state.units.get(&parameter.unit()) else {
             return Err(missing_reference(PARAMETER_UNIT_FKEY));
-        }
-        if !state.types.contains_key(&parameter.plc_type()) {
+        };
+        let Some(plc_type) = state.types.get(&parameter.plc_type()) else {
             return Err(missing_reference(PARAMETER_TYPE_FKEY));
+        };
+        let version_row = state
+            .versions
+            .get(&version)
+            .ok_or_else(|| missing_reference(PARAMETER_VERSION_PLATFORM))?;
+        let recipe_machine = state
+            .recipes
+            .get(&version_row.recipe)
+            .map(|recipe| recipe.machine);
+        if !plc_type
+            .plc_type
+            .platforms()
+            .contains(&version_row.platform)
+        {
+            return Err(trigger(ErrorCode::PLT_031, TYPE_NOT_ON_PLATFORM));
+        }
+        if plc_type
+            .plc_type
+            .machine()
+            .is_some_and(|machine| Some(machine) != recipe_machine)
+        {
+            return Err(trigger(ErrorCode::PLT_032, TYPE_OF_ANOTHER_MACHINE));
+        }
+        if Some(unit.machine) != recipe_machine {
+            return Err(trigger(ErrorCode::RCP_032, UNIT_OF_ANOTHER_MACHINE));
+        }
+        if !address_fits(version_row.platform, parameter.s7_address().is_some()) {
+            return Err(check_violation());
         }
         let tag_taken = state.parameters.values().any(|row| {
             row.version == version && Some(row.id) != except && row.tag == *parameter.tag()
@@ -102,7 +147,66 @@ impl MemoryTransaction {
         if tag_taken {
             return Err(duplicate(PARAMETER_TAG_UNIQUE));
         }
+        if except.is_none() {
+            self.check_insert_budget(version, parameter)?;
+        }
         Ok(())
+    }
+
+    /// Count the rows of `version` after the insert of `parameter`, as the statement triggers do.
+    fn check_insert_budget(
+        &self,
+        version: RecipeVersionId,
+        parameter: &Parameter,
+    ) -> Result<(), StorageError> {
+        let rows = || {
+            self.state()
+                .parameters
+                .values()
+                .filter(move |row| row.version == version)
+        };
+        // The new parameter is the row after the existing rows, so the count exceeds the budget
+        // when the existing rows already fill it.
+        if rows().count() >= usize_of(PARAMETERS_PER_VERSION) {
+            return Err(trigger(ErrorCode::RCP_035, TOO_MANY_PARAMETERS));
+        }
+        let limit_rows: usize = rows()
+            .map(|row| row.limits.len())
+            .chain(std::iter::once(parameter.limits().len()))
+            .sum();
+        check_limit_budget(limit_rows)
+    }
+}
+
+/// The CHECK `parameter_s7_address_platform`: an S7 300 needs an address, a platform without S7
+/// forbids it, and the two other S7 platforms allow both (I5, A31).
+const fn address_fits(platform: PlcPlatform, has_address: bool) -> bool {
+    match platform {
+        PlcPlatform::S7_300 => has_address,
+        PlcPlatform::S7_1200 | PlcPlatform::S7_1500 => true,
+        PlcPlatform::CodesysIec | PlcPlatform::TwinCat3 => !has_address,
+    }
+}
+
+/// A count as `usize`. A count above the range of `usize` cannot occur, so it is the maximum.
+fn usize_of(count: u64) -> usize {
+    usize::try_from(count).unwrap_or(usize::MAX)
+}
+
+/// The statement trigger `version_size_budget` on `parameter_limit` gives `E-RCP-036` for a
+/// version with more limit rows than the budget.
+fn check_limit_budget(limit_rows: usize) -> Result<(), StorageError> {
+    if limit_rows > usize_of(LIMIT_ROWS_PER_VERSION) {
+        return Err(trigger(ErrorCode::RCP_036, TOO_MANY_LIMIT_ROWS));
+    }
+    Ok(())
+}
+
+/// A trigger rejects the write with its code.
+fn trigger(code: ErrorCode, message: &str) -> StorageError {
+    StorageError::Constraint {
+        code,
+        message: message.to_owned(),
     }
 }
 
@@ -248,6 +352,18 @@ impl DraftRepository for MemoryTransaction {
         limits: &[StoredLimit],
     ) -> Result<(), StorageError> {
         let rows = limit_rows(limits, self.now())?;
+        let id = self.parameter_id(version, key)?;
+        self.require_live_draft(version)?;
+        // PostgreSQL deletes the old rows first, so only the other parameters and the new rows count.
+        let after: usize = self
+            .state()
+            .parameters
+            .values()
+            .filter(|row| row.version == version && row.id != id)
+            .map(|row| row.limits.len())
+            .chain(std::iter::once(rows.len()))
+            .sum();
+        check_limit_budget(after)?;
         self.editable_parameter(version, key)?.limits = rows;
         self.record_draft_write(WriteKind::Limits, key);
         Ok(())
