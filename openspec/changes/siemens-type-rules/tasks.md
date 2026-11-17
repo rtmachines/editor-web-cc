@@ -133,7 +133,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 6. Siemens reserved struct names on S7 (ADR-0186)
 
-- [ ] 6.1 (recipe-domain) Add the module `crates/recipe-domain/src/plant/siemens_names.rs` with tests `adr_0186_*`. These cases apply:
+- [x] 6.1 (recipe-domain) Add the module `crates/recipe-domain/src/plant/siemens_names.rs` with tests `adr_0186_*`. These cases apply:
   - The list has 269 names: the 253 names of ADR-0186 (d1) and the 16 words of (d2). No name occurs twice in any case.
   - No name is in `RESERVED_KEYWORDS` or is a primitive name. No name of the list matches the family of (d3).
   - The family `PD_TEL<n>` of (d3) is one pattern: `PD_TEL` and one or more ASCII digits, in any case. A leading zero is a digit of the pattern (ADR-0186 (d3)).
