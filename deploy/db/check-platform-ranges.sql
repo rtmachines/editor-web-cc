@@ -8,7 +8,7 @@
 --   s7_address  a parameter on S7_1200 or S7_1500 with a data block number above 59999
 --   wide_text   a parameter on S7_1200 or S7_1500 whose type tree holds WCHAR or WSTRING, with a
 --               text leaf that the Siemens page refuses (ADR-0180): a character above U+D7FF in a
---               tree with WCHAR only, a character at U+D000 or above in a tree with WSTRING.
+--               WCHAR leaf, a character at U+D000 or above in a WSTRING leaf.
 --               An Approved version of such a parameter becomes not loadable after the upgrade.
 --
 -- The query reads every version status and also soft-deleted rows: a deleted draft, a deleted
@@ -16,8 +16,9 @@
 -- of a nested struct, and an array element. It keeps only the number leaves, so a string or a
 -- boolean leaf gives no error. A ULINT, LWORD, LTIME, REAL, or LREAL leaf in the same type
 -- tree can give a false hit in its value row or in a limit row of that leaf.
--- A wide_text row shows the text leaf. A struct with a WCHAR member and a WSTRING member uses the
--- limit of WSTRING for both, so a WCHAR character from U+D000 to U+D7FF gives a false hit there.
+-- A wide_text row shows the text leaf. The query matches each text leaf with its declared type
+-- and uses the limit of that type. A struct with a WCHAR member and a WSTRING member gives no
+-- false hit.
 -- The owner reads each row. The query writes nothing.
 --
 -- Run it from the directory deploy/ (docs/ops/runbook.md):
@@ -53,15 +54,53 @@ date_root (root_id) AS (
     WHERE t.kind = 'primitive' AND t.name IN ('LDATE', 'LDT')
     GROUP BY r.root_id
 ),
--- The types whose type tree holds WCHAR or WSTRING. The first character that the rule refuses is
--- U+D000 for a tree with WSTRING (ADR-0180 (b)) and U+D800 for a tree with WCHAR only (ADR-0180 (a)).
-wide_root (root_id, first_refused) AS (
-    SELECT r.root_id,
-           CASE WHEN bool_or(t.name = 'WSTRING') THEN 53248 ELSE 55296 END
+-- The types whose type tree holds WCHAR or WSTRING.
+wide_root (root_id) AS (
+    SELECT r.root_id
     FROM reach r
     JOIN plc_type t ON t.id = r.type_id
     WHERE t.kind = 'primitive' AND t.name IN ('WCHAR', 'WSTRING')
     GROUP BY r.root_id
+),
+-- Every value node of an S7 parameter with its declared type. A struct node is a JSON object with
+-- one key for each member. An array node is nested JSON arrays, one level for each dimension.
+-- The column levels counts the array levels that remain, and is NULL outside an array.
+walk (parameter_id, node, type_id, levels) AS (
+    SELECT p.id, p.value, p.plc_type_id, NULL::integer
+    FROM parameter p
+    JOIN wide_root w ON w.root_id = p.plc_type_id
+    WHERE p.plc_platform IN ('S7_1200', 'S7_1500')
+    UNION ALL
+    SELECT w.parameter_id, c.node, c.type_id, c.levels
+    FROM walk w
+    JOIN plc_type t ON t.id = w.type_id
+    CROSS JOIN LATERAL (
+        SELECT w.node -> m.member_name, m.member_type_id, NULL::integer
+        FROM plc_type_member m
+        WHERE t.kind = 'struct'
+          AND jsonb_typeof(w.node) = 'object'
+          AND m.struct_type_id = t.id
+        UNION ALL
+        SELECT e.item,
+               CASE WHEN a.remaining > 1 THEN t.id ELSE t.element_type_id END,
+               CASE WHEN a.remaining > 1 THEN a.remaining - 1 END
+        FROM (SELECT coalesce(w.levels, cardinality(t.dim_lower)) AS remaining) a
+        CROSS JOIN LATERAL jsonb_array_elements(
+            CASE WHEN t.kind = 'array' AND jsonb_typeof(w.node) = 'array' THEN w.node ELSE '[]'::jsonb END
+        ) AS e (item)
+    ) AS c (node, type_id, levels)
+),
+-- The text leaves of WCHAR and WSTRING. The first character that the rule refuses is U+D800 for
+-- WCHAR (ADR-0180 (a)) and U+D000 for WSTRING (ADR-0180 (b)).
+wide_leaf (parameter_id, leaf_text, first_refused) AS (
+    SELECT w.parameter_id,
+           w.node #>> '{}',
+           CASE WHEN t.name = 'WSTRING' THEN 53248 ELSE 55296 END
+    FROM walk w
+    JOIN plc_type t ON t.id = w.type_id
+    WHERE t.kind = 'primitive'
+      AND t.name IN ('WCHAR', 'WSTRING')
+      AND jsonb_typeof(w.node) = 'string'
 ),
 located AS (
     SELECT p.id AS parameter_id,
@@ -115,15 +154,13 @@ FROM (
       AND substring(l.s7_address FROM '^DB([0-9]+)\.')::numeric > 59999
     UNION ALL
     SELECT l.machine_code, l.reference_number, l.version_number, l.version_status, l.tag,
-           'wide_text', leaf.value #>> '{}'
+           'wide_text', w.leaf_text
     FROM located l
-    JOIN wide_root w ON w.root_id = l.plc_type_id
-    CROSS JOIN LATERAL jsonb_path_query(l.value, 'strict $.** ? (@.type() == "string")')
-        AS leaf (value)
+    JOIN wide_leaf w ON w.parameter_id = l.parameter_id
     WHERE l.plc_platform IN ('S7_1200', 'S7_1500')
       AND EXISTS (
           SELECT 1
-          FROM regexp_split_to_table(leaf.value #>> '{}', '') AS c (character)
+          FROM regexp_split_to_table(w.leaf_text, '') AS c (character)
           WHERE ascii(c.character) >= w.first_refused
       )
 ) hit

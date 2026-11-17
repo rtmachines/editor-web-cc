@@ -1144,8 +1144,8 @@ The false hit can be a `value` row, a `limit_min` row, or a `limit_max` row of t
 A row of `wide_text` follows ADR-0180. It is a parameter on `S7_1200` or `S7_1500` with a `WCHAR` or `WSTRING` value that the rule refuses.
 The column `stored_text` holds the text leaf.
 A `WCHAR` value refuses a character above `U+D7FF`. A `WSTRING` value refuses a character from `U+D000` up.
-A type tree with a `WCHAR` member and a `WSTRING` member uses the `WSTRING` limit for both.
-A `WCHAR` character from `U+D000` to `U+D7FF` then gives a false hit.
+The query compares each text leaf with the limit of its own type, also in a struct with both types.
+A `wide_text` row is a true hit. Do not accept it as a false hit.
 An `Approved` version with a `wide_text` row becomes not loadable after the upgrade.
 
 1. Run the query from the directory `deploy/` of the new release:
@@ -1158,7 +1158,7 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 3. Accept each row that needs no change.
 4. Fix a draft row with `SetParameterValue`, `ReplaceLimits`, or `UpdateParameterDefinition`.
 5. Fix an approved row by creating a new version.
-6. Fix each `wide_text` row before the upgrade. An approved `wide_text` row needs a new version.
+6. Fix each `wide_text` row before the upgrade. Replace the refused character in a draft, or create a new version for an approved row.
 7. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the stored type rows against the identifier rules
