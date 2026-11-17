@@ -381,6 +381,72 @@ async fn transition_the_content_hash_of_an_approved_version_is_frozen() {
     assert_trigger(result, TRANSITION);
 }
 
+/// A retire that changes the content hash is not an allowed transition (design D9).
+#[tokio::test]
+async fn transition_a_retire_cannot_change_the_content_hash() {
+    let (mut conn, draft) = approved().await;
+
+    let result = run(
+        &mut conn,
+        "UPDATE recipe_version SET status = 'retired', retired_at = now(), \
+             content_sha256 = repeat('b', 64) WHERE id = $1",
+        draft.version,
+    )
+    .await;
+
+    assert_trigger(result, TRANSITION);
+    assert_eq!(status(&mut conn, draft.version).await, "approved");
+}
+
+/// A retire that changes the change note is not an allowed transition (design D9).
+#[tokio::test]
+async fn transition_a_retire_cannot_change_the_change_note() {
+    let (mut conn, draft) = approved().await;
+
+    let result = run(
+        &mut conn,
+        "UPDATE recipe_version SET status = 'retired', retired_at = now(), \
+             change_note = 'late' WHERE id = $1",
+        draft.version,
+    )
+    .await;
+
+    assert_trigger(result, TRANSITION);
+    assert_eq!(status(&mut conn, draft.version).await, "approved");
+}
+
+/// A draft that stays a draft keeps its number (design D9).
+#[tokio::test]
+async fn transition_a_draft_update_cannot_change_the_number() {
+    let (mut conn, draft) = plant().await;
+
+    let result = run(
+        &mut conn,
+        "UPDATE recipe_version SET number = 2 WHERE id = $1",
+        draft.version,
+    )
+    .await;
+
+    assert_trigger(result, TRANSITION);
+    assert_eq!(status(&mut conn, draft.version).await, "draft");
+}
+
+/// A draft that stays a draft keeps its creator (design D9).
+#[tokio::test]
+async fn transition_a_draft_update_cannot_change_the_creator() {
+    let (mut conn, draft) = plant().await;
+    let other = fixtures::user(&mut conn).await;
+
+    let result = sqlx::query("UPDATE recipe_version SET created_by = $2 WHERE id = $1")
+        .bind(draft.version)
+        .bind(other)
+        .execute(&mut conn)
+        .await;
+
+    assert_trigger(result, TRANSITION);
+    assert_eq!(status(&mut conn, draft.version).await, "draft");
+}
+
 // ---- 3.0 set_updated_at on the five tables ----
 
 /// Run an update with `$1` as the row id. The statement returns `updated_at = now()` and

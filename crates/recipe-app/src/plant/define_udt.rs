@@ -188,6 +188,8 @@ fn struct_row(
 /// Insert the struct row and map the four unique constraints to their plant errors.
 ///
 /// The error names the spelling of the input, because the adapter does not read the stored row.
+/// A member index error names the first member that repeats an earlier member under
+/// `str::to_lowercase`. When no member repeats, the error names the first member.
 async fn insert_struct_row(
     catalog: &mut dyn TypeCatalog,
     row: &PlcType,
@@ -202,7 +204,7 @@ async fn insert_struct_row(
                 .into(),
             ),
             PLC_TYPE_MEMBER_NAME_UNIQUE | PLC_TYPE_MEMBER_NAME_CI_UNIQUE => {
-                input.members.first().map(|(member, _)| {
+                repeated_member(&input.members).map(|member| {
                     PlantError::DuplicateMemberName {
                         type_name: input.name.clone(),
                         member: member.clone(),
@@ -213,6 +215,21 @@ async fn insert_struct_row(
             _ => None,
         })
     })
+}
+
+/// Find the member that a unique index of the member names refuses.
+///
+/// Returns the first member whose name equals the name of an earlier member under
+/// `str::to_lowercase`. Returns the first member when no member repeats. Today the domain check
+/// finds each repeat first, so only an index without a repeat in the request reaches that
+/// fallback.
+fn repeated_member(members: &[(MemberName, TypeExpr)]) -> Option<&MemberName> {
+    let mut seen = BTreeSet::new();
+    members
+        .iter()
+        .map(|(member, _)| member)
+        .find(|member| !seen.insert(member.as_str().to_lowercase()))
+        .or_else(|| members.first().map(|(member, _)| member))
 }
 
 /// Build the audit entry of a defined struct from the image of the inserted row.

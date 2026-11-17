@@ -54,7 +54,7 @@ impl MemoryTransaction {
     ) -> Result<RowImage, StorageError> {
         let now = self.now();
         let row = self
-            .state_mut()
+            .state_for_write()?
             .users
             .get_mut(&id)
             .ok_or_else(|| missing_row(USER_TABLE))?;
@@ -127,7 +127,7 @@ impl UserRepository for MemoryTransaction {
             updated_at: now,
         };
         let image = user_image(&row);
-        self.state_mut().users.insert(row.id, row);
+        self.state_for_write()?.users.insert(row.id, row);
         Ok(image)
     }
 

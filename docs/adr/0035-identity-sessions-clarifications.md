@@ -1,6 +1,6 @@
 # ADR-0035: Identity, sessions, and the guard of security events
 
-Status: Accepted. Amended by ADR-0096 (the known limit of code review M7 for `SetUserRole` and `DeactivateUser`). Amended by ADR-0130 (item (j): a lost event `unlock` does not fail `UnlockLogin`). Amended by ADR-0150 (the known limit of code review M9: no per-login limit over all addresses)
+Status: Accepted. Amended by ADR-0096 (the known limit of code review M7 for `SetUserRole` and `DeactivateUser`). Amended by ADR-0130 (item (j): a lost event `unlock` does not fail `UnlockLogin`). Amended by ADR-0150 (the known limit of code review M9: no per-login limit over all addresses). Amended by ADR-0172 and ADR-0190 (item (t): a lost refusal event of `Login`, `ChangeOwnPassword`, and the Basic check gives the refusal answer. `csrf_rejected` keeps the storage error)
 Date: 2026-10-14
 Deciders: project owner
 

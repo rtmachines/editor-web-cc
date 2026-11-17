@@ -225,14 +225,47 @@ async fn begin_through_the_port_records_its_isolation() {
 }
 
 #[tokio::test]
-async fn a_read_only_transaction_cannot_finish_and_keeps_the_state() {
+async fn a_commit_in_a_read_only_transaction_stops_at_the_audit_write_and_keeps_the_state() {
     let store = MemoryStore::default();
-    let mut tx = store.begin_memory(Isolation::ReadOnly).unwrap();
-    tx.mark("a");
+    let tx = store.begin_memory(Isolation::ReadOnly).unwrap();
     let error = commit(&store, Box::new(tx), &[1]).await.unwrap_err();
-    assert!(matches!(error, AppError::Storage(_)), "{error:?}");
+    // The audit write comes before `finish` and gives 25006 in this level (design D7).
+    assert!(
+        matches!(error, AppError::AuditWriteFailed { .. }),
+        "{error:?}"
+    );
     assert!(markers(&store).is_empty());
     assert!(store.audit_entries().is_empty());
+}
+
+/// A write in a read-only level gives SQLSTATE `25006` and `E-DB-008`, as PostgreSQL does.
+async fn assert_write_refused_at(isolation: Isolation) {
+    let store = MemoryStore::default();
+    let mut tx = store.begin_memory(isolation).unwrap();
+
+    let error = tx.state_for_write().map(|_| ()).unwrap_err();
+    assert!(
+        matches!(&error, StorageError::Other { sqlstate: Some(state), .. } if state == "25006"),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::DB_008);
+
+    let error = tx.append_audit(&entries(&[1])).await.unwrap_err();
+    assert!(
+        matches!(&error, StorageError::Other { sqlstate: Some(state), .. } if state == "25006"),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::DB_008);
+}
+
+#[tokio::test]
+async fn a_write_in_a_read_only_transaction_gives_25006() {
+    assert_write_refused_at(Isolation::ReadOnly).await;
+}
+
+#[tokio::test]
+async fn a_write_in_a_repeatable_read_transaction_gives_25006() {
+    assert_write_refused_at(Isolation::RepeatableRead).await;
 }
 
 #[test]

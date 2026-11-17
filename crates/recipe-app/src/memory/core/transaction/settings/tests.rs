@@ -154,7 +154,7 @@ async fn the_rows_come_in_the_byte_order_of_the_keys() {
 }
 
 /// Put the three state rows into the table and commit, as the memory `MaintenanceStore` does.
-/// The write goes through `state_mut()`, because `upsert` refuses a state key.
+/// The write goes through `state_for_write()`, because `upsert` refuses a state key.
 async fn seed_state_rows(store: &MemoryStore) {
     let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
     let now = tx.now();
@@ -166,7 +166,10 @@ async fn seed_state_rows(store: &MemoryStore) {
             created_at: now,
             updated_at: now,
         };
-        tx.state_mut().settings.insert(key(name), row);
+        tx.state_for_write()
+            .unwrap()
+            .settings
+            .insert(key(name), row);
     }
     let unit_of_work: &dyn UnitOfWork = store;
     unit_of_work.commit(Box::new(tx), entries()).await.unwrap();
@@ -261,10 +264,12 @@ async fn the_state_upsert_and_the_repository_share_the_row_rule_and_the_serial()
             .unwrap(),
     );
 
-    tx.state_mut()
+    tx.state_for_write()
+        .unwrap()
         .upsert_setting(key(DB_HOST), value("other"), later)
         .unwrap();
-    tx.state_mut()
+    tx.state_for_write()
+        .unwrap()
         .upsert_setting(key(PUBLIC_PORT), value("8080"), later)
         .unwrap();
 

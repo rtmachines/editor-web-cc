@@ -3,12 +3,13 @@
 //! Each write changes its own rows and leaves the others unchanged.
 
 use recipe_app::error::StorageError;
-use recipe_domain::recipe::StoredValue;
+use recipe_domain::error_codes::ErrorCode;
+use recipe_domain::recipe::{LIMIT_ROWS_PER_VERSION, StoredLimit, StoredValue};
 use serde_json::{Map, Value, json};
 
-use super::fixtures::{commit_draft, full_parameter, live_draft, number, read_back};
+use super::fixtures::{commit_draft, domain, full_parameter, live_draft, number, read_back};
 use crate::contract::harness::{Harness, begin};
-use crate::contract::recipe_seed::{describe, length, range, seed, translation};
+use crate::contract::recipe_seed::{describe, length, parameter, range, seed, translation};
 
 async fn set_value_changes_only_the_value(h: &dyn Harness) {
     let d = live_draft(h, 40).await;
@@ -177,6 +178,69 @@ async fn replace_limits_with_a_repeated_path_gives_duplicate(h: &dyn Harness) {
     );
 }
 
+/// `count` limit rows with the leaf paths `[0]`, `[1]`, and so on, each with `max_length`.
+fn limit_rows(count: u64, max_length: u16) -> Vec<StoredLimit> {
+    (0..count)
+        .map(|i| length(&format!("[{i}]"), max_length))
+        .collect()
+}
+
+async fn replace_limits_above_the_limit_row_budget_gives_e_rcp_036(h: &dyn Harness) {
+    let d = live_draft(h, 50).await;
+    let part = LIMIT_ROWS_PER_VERSION / 4;
+    let mut tx = begin(h).await;
+    tx.drafts().lock_draft(d.version).await.unwrap().unwrap();
+    for n in 1..=4 {
+        let mut stored = parameter(&d.plant, n, &format!("P{n}"));
+        stored.limits = limit_rows(part, 1);
+        tx.drafts()
+            .insert_parameter(d.version, &domain(&stored))
+            .await
+            .unwrap();
+    }
+    let empty = parameter(&d.plant, 5, "EMPTY");
+    tx.drafts()
+        .insert_parameter(d.version, &domain(&empty))
+        .await
+        .unwrap();
+
+    let error = tx
+        .drafts()
+        .replace_limits(d.version, empty.key, &limit_rows(1, 1))
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, StorageError::Constraint { code, .. } if *code == ErrorCode::RCP_036),
+        "{error:?}"
+    );
+}
+
+async fn replace_limits_counts_the_new_rows_and_not_the_old_rows_of_the_parameter(h: &dyn Harness) {
+    let d = live_draft(h, 51).await;
+    let half = LIMIT_ROWS_PER_VERSION / 2;
+    let mut tx = begin(h).await;
+    tx.drafts().lock_draft(d.version).await.unwrap().unwrap();
+    let mut keys = Vec::new();
+    for n in 1..=2 {
+        let mut stored = parameter(&d.plant, n, &format!("P{n}"));
+        stored.limits = limit_rows(half, 1);
+        keys.push(stored.key);
+        tx.drafts()
+            .insert_parameter(d.version, &domain(&stored))
+            .await
+            .unwrap();
+    }
+    let second = keys.last().copied().unwrap();
+
+    // The old rows and the new rows of the parameter together exceed the budget.
+    // The new rows and the rows of the other parameter equal the budget.
+    tx.drafts()
+        .replace_limits(d.version, second, &limit_rows(half, 2))
+        .await
+        .unwrap();
+}
+
 async fn upsert_translation_inserts_and_then_updates_the_same_language(h: &dyn Harness) {
     let d = live_draft(h, 45).await;
     let original = full_parameter(&d.plant, 1, "WORDS");
@@ -256,4 +320,14 @@ contract_case!(
     upsert_translation_inserts_and_then_updates_the_same_language,
     upsert_translation_inserts_and_then_updates_the_same_language_memory,
     upsert_translation_inserts_and_then_updates_the_same_language_postgres
+);
+contract_case!(
+    replace_limits_above_the_limit_row_budget_gives_e_rcp_036,
+    replace_limits_above_the_limit_row_budget_gives_e_rcp_036_memory,
+    replace_limits_above_the_limit_row_budget_gives_e_rcp_036_postgres
+);
+contract_case!(
+    replace_limits_counts_the_new_rows_and_not_the_old_rows_of_the_parameter,
+    replace_limits_counts_the_new_rows_and_not_the_old_rows_of_the_parameter_memory,
+    replace_limits_counts_the_new_rows_and_not_the_old_rows_of_the_parameter_postgres
 );

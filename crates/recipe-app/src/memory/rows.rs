@@ -4,6 +4,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
     DataBlockNumber, MachineCode, MachineId, PlantError, PlcPlatform, PlcType, UnitId, UnitPath,
 };
+use recipe_domain::recipe::RecipeVersionId;
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
 
@@ -53,6 +54,22 @@ pub(crate) fn missing_row(table: &'static str) -> StorageError {
     StorageError::Other {
         sqlstate: None,
         source: Box::new(MissingRow { table }),
+    }
+}
+
+/// The cause of the storage error for a status write that follows no lock of its version.
+#[derive(Debug, thiserror::Error)]
+#[error("the status write of the version {} has no lock with this row version", .version.as_uuid())]
+struct StatusWriteWithoutLock {
+    version: RecipeVersionId,
+}
+
+/// A status write follows no lock of the same transaction, or its row version is stale
+/// (`E-DB-008`, ADR-0030). The write changed nothing.
+pub(crate) fn without_lock(version: RecipeVersionId) -> StorageError {
+    StorageError::Other {
+        sqlstate: None,
+        source: Box::new(StatusWriteWithoutLock { version }),
     }
 }
 

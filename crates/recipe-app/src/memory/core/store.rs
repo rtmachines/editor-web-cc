@@ -171,7 +171,7 @@ impl MemoryStore {
     /// Open a transaction and return its concrete type.
     ///
     /// The port method `begin` boxes the result. A test and an adapter of a later
-    /// task use this method to reach `lock` and `state_mut`.
+    /// task use this method to reach `lock` and `state_for_write`.
     ///
     /// # Errors
     ///

@@ -667,7 +667,7 @@ The values are in section 7.11. This table gives the key and the mechanism.
 | Request body read | `http.body_read_timeout` | `tower_http::timeout::RequestBodyDeadlineLayer`, one deadline for the whole body. A late body gives `503 E-WEB-009` (ADR-0058 (i), (j)) |
 | SQL statement | `db.statement_timeout` | `statement_timeout` set per connection by the pool `after_connect` hook |
 | Lock wait | `db.lock_timeout` | `lock_timeout` per connection. A timeout becomes `E-DB-001` |
-| Idle in transaction | `db.idle_in_transaction_timeout` | `idle_in_transaction_session_timeout` per connection. Between two statements of a transaction, no use case waits for I/O or for a lock that it does not already hold. Validation runs before the transaction |
+| Idle in transaction | `db.idle_in_transaction_timeout` | `idle_in_transaction_session_timeout` per connection. Between two statements of a transaction, no use case waits for I/O or for a lock that it does not already hold. The parsing of the request and of its value objects runs before the transaction. The conversion of a value against the locked type tree and each other check of the locked state run under the lock. They use the CPU only and wait for no I/O. |
 | Pool acquire | `db.pool_acquire_timeout` | `sqlx::PoolOptions::acquire_timeout`. A timeout becomes `E-DB-004` |
 | Pool idle connection | `db.pool_idle_timeout` | `idle_timeout` |
 | Pool max lifetime | `db.pool_max_lifetime` | `max_lifetime`. Avoids stale connections after a database restart |
