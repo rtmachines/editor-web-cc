@@ -1,7 +1,8 @@
 //! The check of a type text with the current rule set (ADR-0143 (i2), ADR-0120 (c), ADR-0186 (f)).
 
 use recipe_domain::plant::{
-    BaseExpr, PlantError, PlcPlatform, TypeExpr, check_siemens_struct_name,
+    BaseExpr, PlantError, PlcPlatform, TypeExpr, TypeName, check_siemens_struct_name,
+    is_reserved_name,
 };
 
 /// Check the type text that a command writes with the current rule (ADR-0143 (i2)).
@@ -26,4 +27,14 @@ pub(crate) fn require_current_type(
         check_siemens_struct_name(platform, name)?;
     }
     Ok(())
+}
+
+/// Tell whether a stored struct name is no proposal of a type input (ADR-0186 (h), ADR-0143 (i2)).
+///
+/// The function solves one problem: the struct form and the parameter form must leave out the
+/// names that every command refuses. A name is refused when it is a reserved word or a primitive
+/// name, or when the platform is an S7 platform and the name is a Siemens reserved name. The
+/// Siemens part calls [`check_siemens_struct_name`], the check of [`require_current_type`].
+pub(crate) fn is_refused_struct_name(platform: PlcPlatform, name: &TypeName) -> bool {
+    is_reserved_name(name.as_str()) || check_siemens_struct_name(platform, name).is_err()
 }

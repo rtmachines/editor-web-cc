@@ -348,3 +348,35 @@ async fn the_proposals_leave_out_a_stored_struct_with_a_reserved_name() {
         result.choices
     );
 }
+
+/// The proposals of the form for a machine of `platform` that has only the struct `Conf_DNS@1`.
+async fn choices_with_siemens_struct_on(platform: PlcPlatform) -> Vec<String> {
+    let fixture = Fixture::new();
+    fixture
+        .store
+        .seed_machine(&machine_of(platform, MACHINE, "M12", "Press"));
+    let members = [("x", primitive(Primitive::Int))];
+    let siemens = struct_row((MACHINE, platform), ZONE_1, ("Conf_DNS", 1), &members, None);
+    fixture.store.seed_type(&siemens);
+    form(&fixture, None).await.unwrap().choices
+}
+
+#[tokio::test]
+async fn adr_0186_proposals_leave_out_a_stored_siemens_struct_on_an_s7_machine() {
+    let choices = choices_with_siemens_struct_on(PlcPlatform::S7_1500).await;
+
+    assert!(
+        !choices.iter().any(|choice| choice == "Conf_DNS@1"),
+        "{choices:?}"
+    );
+}
+
+#[tokio::test]
+async fn adr_0186_proposals_keep_a_stored_siemens_struct_on_codesys() {
+    let choices = choices_with_siemens_struct_on(PlcPlatform::CodesysIec).await;
+
+    assert!(
+        choices.iter().any(|choice| choice == "Conf_DNS@1"),
+        "{choices:?}"
+    );
+}

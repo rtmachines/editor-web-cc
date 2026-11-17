@@ -13,7 +13,7 @@ mod rename_machine;
 #[cfg(test)]
 mod short_rows;
 
-pub(crate) use current_type::require_current_type;
+pub(crate) use current_type::{is_refused_struct_name, require_current_type};
 pub use define_udt::{DefineUdt, DefineUdtInput, DefineUdtMode, DefineUdtOutput};
 pub(crate) use derived_lock::{derived_type_locks, rebind_locks};
 pub(crate) use ensure_derived::DerivedTypes;
