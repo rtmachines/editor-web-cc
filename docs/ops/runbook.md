@@ -1144,8 +1144,8 @@ The false hit can be a `value` row, a `limit_min` row, or a `limit_max` row of t
 A row of `wide_text` follows ADR-0180. It is a parameter on `S7_1200` or `S7_1500` with a `WCHAR` or `WSTRING` value that the rule refuses.
 The column `stored_text` holds the text leaf.
 A `WCHAR` value refuses a character above `U+D7FF`. A `WSTRING` value refuses a character from `U+D000` up.
-A type tree with a `WCHAR` member and a `WSTRING` member uses the `WSTRING` limit for both.
-A `WCHAR` character from `U+D000` to `U+D7FF` then gives a false hit.
+The query compares each text leaf with the limit of its own type, also in a struct with both types.
+A `wide_text` row is a true hit. Do not accept it as a false hit.
 An `Approved` version with a `wide_text` row becomes not loadable after the upgrade.
 
 1. Run the query from the directory `deploy/` of the new release:
@@ -1158,7 +1158,7 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 3. Accept each row that needs no change.
 4. Fix a draft row with `SetParameterValue`, `ReplaceLimits`, or `UpdateParameterDefinition`.
 5. Fix an approved row by creating a new version.
-6. Fix each `wide_text` row before the upgrade. An approved `wide_text` row needs a new version.
+6. Fix each `wide_text` row before the upgrade. Replace the refused character in a draft, or create a new version for an approved row.
 7. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the stored type rows against the identifier rules
@@ -1196,20 +1196,25 @@ The output has the columns `machine_code`, `reference_number`, `version_number`,
 The column `part` is `nested_array`, `layout_changed`, `array_bound`, `bool_array_3d`, or `nesting`.
 A type row has no reference, no version, and no tag.
 
-The parts have two kinds of result for an upgrade.
+The parts have three kinds of result for an upgrade.
 The first kind refuses only new writes. A listed `Approved` version stays loadable after the upgrade:
 
 - A row of `nested_array` is an array of an array on `S7_300`, `S7_1200`, or `S7_1500`, or a parameter of such a type.
   ADR-0177 adds `S7_300` to the rule of ADR-0148.
 - A row of `nesting` is a struct row or a parameter type with more than 8 S7 levels on `S7_300`, `S7_1200`, or `S7_1500` (ADR-0179).
   A struct counts 1 level. An array of a struct counts 3 levels.
-- A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade (ADR-0147).
 
 The second kind changes `loadable`. A listed `Approved` version becomes not loadable after the upgrade:
 
 - A row of `array_bound` is a parameter with an S7 address and an array bound outside `-32768` to `32767` (ADR-0178).
 - A row of `bool_array_3d` is a parameter with an S7 address and a `BOOL` array with three dimensions (ADR-0187).
 
+The third kind can change `loadable`. The export check of ADR-0119 (b) runs the end rule and the overlap rule on the new layout (ADR-0147 (k1), ADR-0149):
+
+- A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade (ADR-0147).
+  A fault of one of these rules can make a listed `Approved` version not loadable.
+
+A version is not loadable when any part shows a loadability fault for one of its parameters, for example `bool_array_3d`.
 The owner signs off each row of all five parts.
 The owner fixes each row of the second kind before the upgrade. A draft row needs a change. An approved row needs a new version.
 The owner records each listed row in the upgrade ticket.
