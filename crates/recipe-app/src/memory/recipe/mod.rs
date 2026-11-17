@@ -246,6 +246,8 @@ impl RecipeRepository for MemoryTransaction {
     }
 
     async fn lock_recipe(&mut self, id: RecipeId) -> Result<Option<Locked<Recipe>>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let Some(row) = self.state().recipes.get(&id) else {
             return Ok(None);
         };
@@ -261,6 +263,8 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         machine: MachineId,
     ) -> Result<Vec<Recipe>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         // The recipes come from a `BTreeMap` keyed by id, so they are ordered by id.
         let ids: Vec<RecipeId> = self
             .state()
@@ -285,6 +289,8 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         recipe: RecipeId,
     ) -> Result<Vec<(RecipeVersionId, RowImage)>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let locked: Vec<(RecipeVersionId, RowImage)> = self
             .state()
             .versions
@@ -312,6 +318,8 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<RowImage>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let Some(row) = self.state().versions.get(&version) else {
             return Ok(None);
         };
@@ -326,6 +334,7 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<SharedVersion>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         self.run_lock_version_hook();
         self.refresh_after_lock()?;
         let state = self.committed_state();
@@ -437,9 +446,12 @@ impl RecipeRepository for MemoryTransaction {
         approver: UserId,
         hash: Sha256,
     ) -> Result<RowImage, StorageError> {
-        self.guard(version)?;
+        let locked = self.guard(version)?;
         let state = self.state();
         if let Some(row) = state.versions.get(&version) {
+            if row.row_version != locked {
+                return Err(without_lock(version));
+            }
             let has_other_approved = state.versions.values().any(|other| {
                 other.recipe == row.recipe
                     && other.id != version

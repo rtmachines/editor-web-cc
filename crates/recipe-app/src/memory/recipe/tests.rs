@@ -590,6 +590,7 @@ async fn version_parameters_are_ordered_by_tag_and_hold_limits_and_translations(
 async fn a_rollback_keeps_no_recipe_change() {
     let store = store_with_draft();
     let mut tx = begin(&store);
+    tx.recipes().lock_version(vid(11)).await.unwrap();
     tx.recipes()
         .insert_recipe(
             &draft_recipe((2, 1), "R-2", 12),
@@ -601,7 +602,6 @@ async fn a_rollback_keeps_no_recipe_change() {
         .rename_recipe(rid(1), &text("Gone"))
         .await
         .unwrap();
-    tx.recipes().lock_version(vid(11)).await.unwrap();
     tx.recipes().discard_version(vid(11)).await.unwrap();
     drop(tx);
     let state = store.state();
