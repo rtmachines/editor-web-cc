@@ -114,3 +114,6 @@ pub trait Transaction: Send {
     /// Commit the transaction. The token proves that the audit entries are written.
     async fn finish(self: Box<Self>, written: AuditWritten) -> Result<(), StorageError>;
 }
+
+#[cfg(test)]
+mod tests;
