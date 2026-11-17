@@ -1,0 +1,50 @@
+{
+  "schema_version": "1",
+  "exported_at": "2026-10-12T09:30:00Z",
+  "exported_by": "jkowalski",
+  "loadable": true,
+  "content_sha256": "8fb8791f92e30030784f52d26428fa571336f88949ad1b8190298a44404b2018",
+  "machine": {
+    "code": "M12",
+    "name": "Filler 2",
+    "plc_platform": "TwinCat3"
+  },
+  "recipe": {
+    "reference_number": "R-200",
+    "name": "Types of the platform"
+  },
+  "version": {
+    "number": 1,
+    "status": "Approved",
+    "approved_at": "2026-10-12T09:30:00Z",
+    "approved_by": "anowak"
+  },
+  "types": [
+    {
+      "id": "00000000-0000-4000-8000-000000000116",
+      "name": "WSTRING",
+      "revision": 1,
+      "kind": "Primitive",
+      "string_length": 16
+    }
+  ],
+  "parameters": [
+    {
+      "unit_path": "U1",
+      "tag": "WSTRING",
+      "key": "00000000-0000-4000-8000-200000000000",
+      "name_en": "WSTRING",
+      "type_id": "00000000-0000-4000-8000-000000000116",
+      "s7_address": null,
+      "limits": [
+        {
+          "leaf_path": "",
+          "min": null,
+          "max": null,
+          "max_length": "16"
+        }
+      ],
+      "value": "Z𝄞"
+    }
+  ]
+}

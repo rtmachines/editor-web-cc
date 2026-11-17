@@ -411,11 +411,20 @@ fn parameter(index: usize, tag: &str, address: Option<&str>, trees: &TypeTrees) 
         .into_iter()
         .find(|case| case.tag == tag)
         .unwrap();
+    parameter_with_request(index, tag, case.request, &case.limit, address, trees)
+}
+/// A parameter of one tag whose value comes from `request` and whose limit is `limit`.
+fn parameter_with_request(
+    index: usize,
+    tag: &str,
+    request: &str,
+    limit: &Limit,
+    address: Option<&str>,
+    trees: &TypeTrees,
+) -> Parameter {
     let root = type_id(&type_row_id(tag));
     let tree = trees.tree(root).unwrap();
-    let value = ParameterValue::parse(case.request, tree)
-        .unwrap()
-        .to_stored();
+    let value = ParameterValue::parse(request, tree).unwrap().to_stored();
     Parameter::from(StoredParameter {
         id: ParameterId::from(Uuid::from_u128(u128::from(number(index)))),
         key: ParameterKey::parse(&format!("00000000-0000-4000-8000-2{index:011x}")).unwrap(),
@@ -426,7 +435,7 @@ fn parameter(index: usize, tag: &str, address: Option<&str>, trees: &TypeTrees) 
         translations: Vec::new(),
         plc_type: root,
         s7_address: address.map(|text| S7Address::parse(text).unwrap()),
-        limits: limit_of(&case.limit).into_iter().collect(),
+        limits: limit_of(limit).into_iter().collect(),
         value,
         ordinal: Ordinal::parse(number(index)).unwrap(),
     })
@@ -464,19 +473,23 @@ fn version_parameters(
 /// tag. `addresses` gives the address of a tag. A tag without an entry has no address.
 fn document_text(platform: PlcPlatform, tags: &[&str], addresses: &[(&str, &str)]) -> String {
     let (trees, parameters) = version_parameters(platform, tags, addresses);
+    render_document(platform, &trees, &parameters)
+}
+/// The approved version 1 of the recipe `R-200` for the given trees and parameters.
+fn render_document(platform: PlcPlatform, trees: &TypeTrees, parameters: &[Parameter]) -> String {
     let header = ExportHeader {
         machine: MachineCode::parse("M12").unwrap(),
         platform,
         reference: ReferenceNumber::parse("R-200").unwrap(),
         version: 1,
     };
-    let body = HashedBody::build(&header, &parameters, &units(platform), &trees).unwrap();
+    let body = HashedBody::build(&header, parameters, &units(platform), trees).unwrap();
     let names: BTreeMap<ParameterKey, Text> = parameters
         .iter()
         .map(|parameter| (parameter.key(), parameter.name_en().clone()))
         .collect();
     // `ExportVersion` sets the flag from the read check of every parameter (ADR-0119 (a) to (c)).
-    let has_rule_fault = !check_version_parameters(&parameters, &trees)
+    let has_rule_fault = !check_version_parameters(parameters, trees)
         .unwrap()
         .is_empty();
     let facts = DocumentFacts {
@@ -792,4 +805,47 @@ fn consumer_rebuilds_content_sha256_when_the_arrays_arrive_in_reverse_order() {
             case.golden_file
         );
     }
+}
+
+/// The `WSTRING` value of the non-BMP golden file: U+1D11E needs a surrogate pair in UTF-16.
+const NON_BMP_REQUEST: &str = "\"Z\u{1d11e}\"";
+/// The golden file of the `TwinCat3` document with a character outside the BMP.
+const NON_BMP_GOLDEN_FILE: &str = "types_TwinCat3_wstring_non_bmp.json";
+
+/// The document of one `TwinCat3` `WSTRING` parameter that holds U+1D11E.
+fn non_bmp_document_text() -> String {
+    let platform = PlcPlatform::TwinCat3;
+    let trees = trees(platform, &["WSTRING"]);
+    let limit = Limit::Length(STRING_LENGTH);
+    let parameters = [parameter_with_request(
+        0,
+        "WSTRING",
+        NON_BMP_REQUEST,
+        &limit,
+        None,
+        &trees,
+    )];
+    render_document(platform, &trees, &parameters)
+}
+
+/// `CodesysIec` and `TwinCat3` keep the characters outside the BMP (ADR-0180 (c), (f)). No S7
+/// golden file holds one, so this file pins the escape of the JSON writer for them.
+#[test]
+fn writer_output_of_a_twincat3_wstring_with_a_non_bmp_character_equals_its_golden_file() {
+    let written = non_bmp_document_text();
+    assert_eq!(
+        written,
+        golden(NON_BMP_GOLDEN_FILE),
+        "{NON_BMP_GOLDEN_FILE}"
+    );
+    let doc: Value = serde_json::from_str(&written).unwrap();
+    assert_eq!(doc["parameters"][0]["value"], json!("Z\u{1d11e}"));
+    assert_eq!(doc["loadable"], json!(true));
+}
+
+#[test]
+fn consumer_rebuilds_content_sha256_of_the_non_bmp_golden_file() {
+    let doc: Value = serde_json::from_str(&golden(NON_BMP_GOLDEN_FILE)).unwrap();
+    let expected = doc["content_sha256"].as_str().unwrap();
+    assert_eq!(jcs_sha256_hex(&consumer_hashed_body(&doc)), expected);
 }
