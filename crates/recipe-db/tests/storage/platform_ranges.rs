@@ -2,7 +2,8 @@
 //!
 //! The query lists stored data that the current rule set rejects: an `LDATE` or `LDT` value above
 //! `9223372036854775807` on `CodesysIec` or `TwinCat3`, a limit above it, and an S7 data block above
-//! 59999 on `S7_1200` or `S7_1500`. The tests seed hits and non-hits on the harness database. They
+//! 59999 on `S7_1200` or `S7_1500`. It also lists a `WCHAR` or `WSTRING` value on `S7_1200` or
+//! `S7_1500` with a character that the Siemens page refuses (ADR-0180 (l)). The tests seed hits and non-hits on the harness database. They
 //! compare the exact rows of the query, run it as `recipe_app`, and show that it writes nothing.
 
 use std::collections::BTreeSet;
@@ -34,6 +35,14 @@ const LDATE_LAST: &str = "9223286400000000000";
 const LDT_FAR_ABOVE: &str = "10413792000000000000";
 /// `u64::MAX`, the end of `ULINT`.
 const ULINT_END: &str = "18446744073709551615";
+/// The first character above the `WCHAR` range on S7 (ADR-0180 (a)).
+const WCHAR_ABOVE: &str = "\u{E000}";
+/// The last character of the `WCHAR` range on S7 (ADR-0180 (a)).
+const WCHAR_LAST: &str = "\u{D7FF}";
+/// The first character above the `WSTRING` range on S7 (ADR-0180 (b)).
+const WSTRING_ABOVE: &str = "\u{D000}";
+/// The last character of the `WSTRING` range on S7 (ADR-0180 (b)).
+const WSTRING_LAST: &str = "\u{CFFF}";
 /// The SQLSTATE of a write in a read-only transaction.
 const READ_ONLY_SQL_TRANSACTION: &str = "25006";
 
@@ -128,6 +137,24 @@ async fn add(
         .await
         .unwrap();
     id
+}
+
+/// Return the global `WCHAR` or `WSTRING` row that the seed migration gives to the platform.
+async fn wide_type(conn: &mut PgConnection, name: &str, platform: &str) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT id FROM plc_type \
+         WHERE kind = 'primitive' AND name = $1 AND machine_id IS NULL AND $2 = ANY(platforms)",
+    )
+    .bind(name)
+    .bind(platform)
+    .fetch_one(conn)
+    .await
+    .unwrap()
+}
+
+/// A JSON string leaf that holds the text.
+fn json_text(text: &str) -> String {
+    serde_json::Value::String(text.to_owned()).to_string()
 }
 
 /// Insert a limit of the whole parameter.
@@ -360,8 +387,78 @@ async fn seed_limit_and_address_hits(conn: &mut PgConnection, expected: &mut Exp
     expected.hit(&place, "BLOCK_65535_S7_1200", "s7_address", "DB65535.DBW0");
 }
 
+/// Seed the `WCHAR` and `WSTRING` hits on S7 (ADR-0180 (l)). The part is `wide_text`.
+async fn seed_wide_text_hits(conn: &mut PgConnection, expected: &mut Expected) {
+    let wchar = site(conn, S7_1500).await;
+    let wchar_type = wide_type(conn, "WCHAR", S7_1500).await;
+    add(
+        conn,
+        &wchar,
+        wchar_type,
+        "WCHAR_E000_S7_1500",
+        None,
+        &json_text(WCHAR_ABOVE),
+    )
+    .await;
+    let place = settle(conn, &wchar, Fate::Draft).await;
+    expected.hit(&place, "WCHAR_E000_S7_1500", "wide_text", WCHAR_ABOVE);
+
+    let wstring = site(conn, S7_1500).await;
+    let wstring_type = wide_type(conn, "WSTRING", S7_1500).await;
+    let text = format!("ab{WSTRING_ABOVE}");
+    add(
+        conn,
+        &wstring,
+        wstring_type,
+        "WSTRING_D000_S7_1500",
+        None,
+        &json_text(&text),
+    )
+    .await;
+    let place = settle(conn, &wstring, Fate::Approved).await;
+    expected.hit(&place, "WSTRING_D000_S7_1500", "wide_text", &text);
+}
+
+/// Seed the `WCHAR` and `WSTRING` rows that the query must not list (ADR-0180 (a) to (c)).
+async fn seed_wide_text_non_hits(conn: &mut PgConnection) {
+    let codesys = site(conn, CODESYS).await;
+    let wstring_type = wide_type(conn, "WSTRING", CODESYS).await;
+    let text = json_text(WSTRING_ABOVE);
+    add(
+        conn,
+        &codesys,
+        wstring_type,
+        "NO_HIT_WSTRING_D000_CODESYS",
+        None,
+        &text,
+    )
+    .await;
+    settle(conn, &codesys, Fate::Draft).await;
+
+    let wchar = site(conn, S7_1200).await;
+    let wchar_type = wide_type(conn, "WCHAR", S7_1200).await;
+    let text = json_text(WCHAR_LAST);
+    add(conn, &wchar, wchar_type, "NO_HIT_WCHAR_D7FF", None, &text).await;
+    settle(conn, &wchar, Fate::Draft).await;
+
+    let wstring = site(conn, S7_1200).await;
+    let wstring_type = wide_type(conn, "WSTRING", S7_1200).await;
+    let text = json_text(&format!("a{WSTRING_LAST}"));
+    add(
+        conn,
+        &wstring,
+        wstring_type,
+        "NO_HIT_WSTRING_CFFF",
+        None,
+        &text,
+    )
+    .await;
+    settle(conn, &wstring, Fate::Draft).await;
+}
+
 /// Seed the rows that the query must not list.
 async fn seed_non_hits(conn: &mut PgConnection) {
+    seed_wide_text_non_hits(conn).await;
     seed_boundary_non_hits(conn).await;
     seed_platform_non_hits(conn).await;
     seed_wide_non_hit(conn).await;
@@ -451,6 +548,7 @@ async fn seeded() -> (TestDatabase, Expected) {
     let mut expected = Expected::default();
     seed_value_hits(&mut conn, &mut expected).await;
     seed_limit_and_address_hits(&mut conn, &mut expected).await;
+    seed_wide_text_hits(&mut conn, &mut expected).await;
     seed_non_hits(&mut conn).await;
     (database, expected)
 }
@@ -509,7 +607,7 @@ async fn platform_ranges_query_lists_exactly_the_hit_rows_as_recipe_app() {
     let found = rows(&mut conn).await;
 
     assert_eq!(user, "recipe_app");
-    assert_eq!(expected.0.len(), 10, "the seed holds 10 hits");
+    assert_eq!(expected.0.len(), 12, "the seed holds 12 hits");
     assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
     let found: BTreeSet<Row> = found.into_iter().collect();
     assert_eq!(found, expected.0);

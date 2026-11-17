@@ -1,4 +1,4 @@
--- Check the stored data against the platform ranges (ADR-0139 risks, ADR-0140 risks).
+-- Check the stored data against the platform ranges (ADR-0139 risks, ADR-0140 risks, ADR-0180 (l)).
 --
 -- The query lists the stored rows that the current rule set rejects:
 --   value       a parameter on CodesysIec or TwinCat3 whose type tree holds LDATE or LDT,
@@ -6,12 +6,18 @@
 --   limit_min   a limit of such a parameter with min_value above 9223372036854775807
 --   limit_max   a limit of such a parameter with max_value above 9223372036854775807
 --   s7_address  a parameter on S7_1200 or S7_1500 with a data block number above 59999
+--   wide_text   a parameter on S7_1200 or S7_1500 whose type tree holds WCHAR or WSTRING, with a
+--               text leaf that the Siemens page refuses (ADR-0180): a character above U+D7FF in a
+--               tree with WCHAR only, a character at U+D000 or above in a tree with WSTRING.
+--               An Approved version of such a parameter becomes not loadable after the upgrade.
 --
 -- The query reads every version status and also soft-deleted rows: a deleted draft, a deleted
 -- recipe, and an archived machine. It finds a value leaf at each depth: a struct member, a member
 -- of a nested struct, and an array element. It keeps only the number leaves, so a string or a
 -- boolean leaf gives no error. A ULINT, LWORD, LTIME, REAL, or LREAL leaf in the same type
 -- tree can give a false hit in its value row or in a limit row of that leaf.
+-- A wide_text row shows the text leaf. A struct with a WCHAR member and a WSTRING member uses the
+-- limit of WSTRING for both, so a WCHAR character from U+D000 to U+D7FF gives a false hit there.
 -- The owner reads each row. The query writes nothing.
 --
 -- Run it from the directory deploy/ (docs/ops/runbook.md):
@@ -45,6 +51,16 @@ date_root (root_id) AS (
     FROM reach r
     JOIN plc_type t ON t.id = r.type_id
     WHERE t.kind = 'primitive' AND t.name IN ('LDATE', 'LDT')
+    GROUP BY r.root_id
+),
+-- The types whose type tree holds WCHAR or WSTRING. The first character that the rule refuses is
+-- U+D000 for a tree with WSTRING (ADR-0180 (b)) and U+D800 for a tree with WCHAR only (ADR-0180 (a)).
+wide_root (root_id, first_refused) AS (
+    SELECT r.root_id,
+           CASE WHEN bool_or(t.name = 'WSTRING') THEN 53248 ELSE 55296 END
+    FROM reach r
+    JOIN plc_type t ON t.id = r.type_id
+    WHERE t.kind = 'primitive' AND t.name IN ('WCHAR', 'WSTRING')
     GROUP BY r.root_id
 ),
 located AS (
@@ -97,6 +113,19 @@ FROM (
     FROM located l
     WHERE l.plc_platform IN ('S7_1200', 'S7_1500')
       AND substring(l.s7_address FROM '^DB([0-9]+)\.')::numeric > 59999
+    UNION ALL
+    SELECT l.machine_code, l.reference_number, l.version_number, l.version_status, l.tag,
+           'wide_text', leaf.value #>> '{}'
+    FROM located l
+    JOIN wide_root w ON w.root_id = l.plc_type_id
+    CROSS JOIN LATERAL jsonb_path_query(l.value, 'strict $.** ? (@.type() == "string")')
+        AS leaf (value)
+    WHERE l.plc_platform IN ('S7_1200', 'S7_1500')
+      AND EXISTS (
+          SELECT 1
+          FROM regexp_split_to_table(leaf.value #>> '{}', '') AS c (character)
+          WHERE ascii(c.character) >= w.first_refused
+      )
 ) hit
 ORDER BY hit.machine_code, hit.reference_number, hit.version_number, hit.tag, hit.part;
 
