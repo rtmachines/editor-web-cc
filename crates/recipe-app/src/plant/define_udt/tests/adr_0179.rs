@@ -36,7 +36,7 @@ async fn adr_0179_a_struct_with_nine_levels_on_s7_gives_plt_018_and_creates_no_t
         )
         .await
         .unwrap_err();
-        assert_nesting_refused(&error, "ST_Top@1");
+        assert_nesting_refused(&error, "ST_Top");
         assert_eq!(fixture.store.state().types.len(), before, "{platform:?}");
         assert!(fixture.store.audit_entries().is_empty());
     }

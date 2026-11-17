@@ -2,15 +2,18 @@
 
 use std::collections::BTreeSet;
 
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     DerivedTypeReason, MemberName, PlantError, PlcPlatform, PlcType, PlcTypeRecord, RecordShape,
-    TypeMember, TypeName,
+    RuleSet, TypeExpr, TypeMember, TypeName,
 };
 
-use super::{DefineUdtMode, fixture, input, real, run};
-use crate::error::AppError;
+use super::{DefineUdtInput, DefineUdtMode, fixture, input, real, run};
+use crate::error::{AppError, Missing};
+use crate::memory::JournalEntry;
 use crate::memory::fixtures::{Fixture, tid};
+use crate::ports::Isolation;
 
 const S7_PLATFORMS: [PlcPlatform; 3] = [
     PlcPlatform::S7_300,
@@ -131,5 +134,44 @@ async fn adr_0186_a_siemens_name_on_codesys_iec_creates_the_struct() {
         .await
         .unwrap();
         assert_eq!(output.revision, 1);
+    }
+}
+
+/// A missing machine comes before the name fault of a member type (ADR-0186, task 6.2).
+///
+/// The reserved name `Int@1` and the Siemens name `PID_Compact@1` are both refused when the
+/// machine exists. The use case must read the machine first and write nothing.
+#[tokio::test]
+async fn adr_0186_a_missing_machine_comes_before_the_name_fault_of_a_member_type() {
+    for member_type in ["Int@1", "PID_Compact@1"] {
+        let fixture = Fixture::new();
+        let before = fixture.store.state().types.len();
+        let request = DefineUdtInput {
+            members: vec![(
+                MemberName::parse("inner").unwrap(),
+                TypeExpr::from_stored(member_type, RuleSet::Earlier).unwrap(),
+            )],
+            ..input(DefineUdtMode::New, "ST_Holder", &[])
+        };
+        let error = run(&fixture, Role::ProcessEngineer, request)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                AppError::NotFound {
+                    entity: Missing::Machine(_)
+                }
+            ),
+            "{member_type}: {error:?}"
+        );
+        assert_eq!(error.code(), ErrorCode::WEB_005, "{member_type}");
+        assert_eq!(
+            fixture.store.journal(),
+            vec![JournalEntry::Begin(Isolation::ReadOnly)],
+            "{member_type}"
+        );
+        assert!(fixture.store.audit_entries().is_empty());
+        assert_eq!(fixture.store.state().types.len(), before, "{member_type}");
     }
 }
