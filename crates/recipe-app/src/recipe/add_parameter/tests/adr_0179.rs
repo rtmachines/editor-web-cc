@@ -1,11 +1,12 @@
 //! Tests of `AddParameter` for the rule "nesting limit of a type on S7" (ADR-0179).
 
-use recipe_domain::plant::{PlantError, PlcPlatform, S7Address, TypeLimit};
+use recipe_domain::plant::{PlantError, PlcPlatform, S7Address, TypeLimit, UnitPath};
 use serde_json::{Value, json};
 
 use super::{AddParameterInput, assert_nothing_written, empty_draft, input, run};
 use crate::error::AppError;
-use crate::memory::fixtures::{seed_struct_chain, struct_chain_value};
+use crate::memory::fixtures::{Fixture, seed_struct_chain, struct_chain_value};
+use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry};
 use crate::recipe::test_support::stored_parameters;
 
 const S7_PLATFORMS: [PlcPlatform; 3] = [
@@ -108,4 +109,36 @@ async fn adr_0179_a_struct_with_nine_levels_on_twincat_succeeds() {
     .await
     .unwrap();
     assert_eq!(stored_parameters(&fixture).len(), 1);
+}
+
+/// The tables of the locks that the command took, in order.
+fn locked_tables(fixture: &Fixture) -> Vec<&'static str> {
+    fixture
+        .store
+        .journal()
+        .into_iter()
+        .filter_map(|line| match line {
+            JournalEntry::Lock(lock) => Some(lock.table),
+            JournalEntry::Begin(_) => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn adr_0179_a_type_over_the_limit_wins_over_a_missing_unit_and_takes_no_unit_or_type_lock() {
+    for type_text in ["ST_Top@1", "ARRAY[1..2] OF ST_Top@1"] {
+        let fixture = empty_draft(PlcPlatform::S7_1500);
+        seed_struct_chain(&fixture, PlcPlatform::S7_1500, ("ST_Top", 9));
+        let mut request = request(PlcPlatform::S7_1500, type_text, &struct_chain_value(9));
+        request.unit_path = UnitPath::parse("U9").unwrap();
+        let error = run(&fixture, request).await.unwrap_err();
+        assert_nesting_refused(&error, type_text);
+        let tables = locked_tables(&fixture);
+        assert!(!tables.contains(&"unit"), "{type_text}: {tables:?}");
+        assert!(
+            !tables.contains(&DERIVED_TYPE_LOCK_TABLE),
+            "{type_text}: {tables:?}"
+        );
+        assert_nothing_written(&fixture);
+    }
 }

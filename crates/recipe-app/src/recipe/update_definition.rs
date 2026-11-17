@@ -170,12 +170,10 @@ async fn stage_definition(
         input
             .type_expr
             .require_no_nested_array(open.draft.platform())?;
+        require_s7_nesting(open, &input.type_expr)?;
     }
     let unit = lock_live_unit(open, &input.unit_path).await?;
     let resolved = resolve_type(open, &input.type_expr, audit_context(user, meta)).await?;
-    if is_type_changed {
-        require_s7_nesting(&resolved, open.draft.platform())?;
-    }
     let update = DefinitionUpdate {
         unit,
         tag: input.tag,
