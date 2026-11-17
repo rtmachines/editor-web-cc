@@ -246,6 +246,7 @@ impl RecipeRepository for MemoryTransaction {
     }
 
     async fn lock_recipe(&mut self, id: RecipeId) -> Result<Option<Locked<Recipe>>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         let Some(row) = self.state().recipes.get(&id) else {
             return Ok(None);
         };
@@ -261,6 +262,7 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         machine: MachineId,
     ) -> Result<Vec<Recipe>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         // The recipes come from a `BTreeMap` keyed by id, so they are ordered by id.
         let ids: Vec<RecipeId> = self
             .state()
@@ -328,6 +330,7 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<SharedVersion>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         self.run_lock_version_hook();
         self.refresh_after_lock()?;
         let state = self.committed_state();

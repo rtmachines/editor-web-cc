@@ -226,7 +226,7 @@ impl MemoryTransaction {
         Ok(&mut self.state)
     }
 
-    /// Refuse a `FOR UPDATE` row lock in a `READ ONLY` level, also when no row matches.
+    /// Refuse a `FOR UPDATE` or `FOR SHARE` row lock in a `READ ONLY` level, also when no row matches.
     ///
     /// The method solves one problem: PostgreSQL refuses the statement with `25006` before it
     /// reads a row, so a memory row lock must fail the same way (design D7, ADR-0042 (a)).
