@@ -6,8 +6,9 @@
 //! adapters with the same assertions (design D6).
 
 use recipe_app::error::StorageError;
+use recipe_app::ports::Transaction;
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::recipe::RecipeVersionId;
+use recipe_domain::recipe::{RecipeVersionId, VersionState};
 
 use crate::contract::harness::{Harness, begin, commit, fixture_hash};
 use crate::contract::images::{field, text};
@@ -32,6 +33,24 @@ async fn assert_untouched_draft(h: &dyn Harness, version: RecipeVersionId) {
     assert_eq!(field(&image, "row_version").as_i64(), Some(1));
 }
 
+/// Assert, inside the open transaction, that a refused write did not change the version row.
+///
+/// The read takes no lock, so it does not open the guard of the next write. A drop of the
+/// transaction would roll a change back and hide it.
+async fn assert_unchanged_in_transaction(tx: &mut dyn Transaction, version: RecipeVersionId) {
+    let detail = tx
+        .recipe_reads()
+        .version_detail(version)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(detail.state, VersionState::LiveDraft);
+    assert!(detail.approved_by.is_none());
+    assert!(detail.approved_at.is_none());
+    assert!(detail.content_sha256.is_none());
+    assert_eq!(detail.row_version, 1);
+}
+
 async fn a_status_write_without_its_lock_gives_e_db_008_and_writes_nothing(h: &dyn Harness) {
     let plant = plant(h, 1, "M1").await;
     let created = create_recipe(h, &plant, 1, "REF-1").await;
@@ -39,12 +58,15 @@ async fn a_status_write_without_its_lock_gives_e_db_008_and_writes_nothing(h: &d
     let mut tx = begin(h).await;
 
     let discard = tx.recipes().discard_version(draft).await.unwrap_err();
+    assert_unchanged_in_transaction(&mut *tx, draft).await;
     let retire = tx.recipes().retire_version(draft).await.unwrap_err();
+    assert_unchanged_in_transaction(&mut *tx, draft).await;
     let approve = tx
         .recipes()
         .approve_version(draft, h.user(), fixture_hash())
         .await
         .unwrap_err();
+    assert_unchanged_in_transaction(&mut *tx, draft).await;
     drop(tx);
 
     for error in [&discard, &retire, &approve] {
@@ -67,6 +89,7 @@ async fn the_lock_of_another_version_does_not_open_the_guard(h: &dyn Harness) {
         .discard_version(version_id(1))
         .await
         .unwrap_err();
+    assert_unchanged_in_transaction(&mut *tx, version_id(1)).await;
     drop(tx);
 
     assert_unguarded(&error);
@@ -97,6 +120,7 @@ async fn a_lock_does_not_outlive_its_transaction(h: &dyn Harness) {
     let mut second = begin(h).await;
 
     let error = second.recipes().discard_version(draft).await.unwrap_err();
+    assert_unchanged_in_transaction(&mut *second, draft).await;
     drop(second);
 
     assert_unguarded(&error);
