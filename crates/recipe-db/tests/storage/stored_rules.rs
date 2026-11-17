@@ -13,14 +13,12 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::Arc;
 
 use recipe_app::auth::{CurrentUser, RequestMeta};
 use recipe_app::export::{
     ExportApprovedInput, ExportApprovedVersion, ExportScope, ExportedVersion,
 };
 use recipe_app::identity::new_request_id;
-use recipe_app::memory::BodyWriter;
 use recipe_app::plant::{DefineUdt, DefineUdtInput, DefineUdtMode, GetTypeTree, TypeRef};
 use recipe_app::recipe::{
     AddParameter, AddParameterInput, ApproveVersion, ApproveVersionInput, CreateRecipe,
@@ -35,11 +33,13 @@ use recipe_domain::plant::{
 use recipe_domain::recipe::{
     LimitInput, LimitList, Ordinal, ParameterTag, ReferenceNumber, ValueInput,
 };
+use sqlx::PgConnection;
 
 use crate::atomic::world::{long_text, text};
 use crate::support::app::App;
 use crate::support::database::DumpDirectory;
 use crate::support::identity::PASSWORD;
+use crate::support::writers::DocumentFactsWriter;
 use crate::support::{Role as DbRole, TestDatabase, server};
 
 /// The login of the engineer, who edits each draft.
@@ -408,7 +408,10 @@ fn assert_success(what: &str, output: &Output) {
 }
 
 /// Steps 1 to 3: create an empty database, load the stored dump, and run the migrator.
-async fn restored_and_upgraded() -> App {
+///
+/// The second value is the stored state of `reference`. It is read right after the dump loads,
+/// before the migrator runs, so it is the state that the dump really held.
+async fn restored_and_upgraded(reference: &str) -> (App, StoredRows) {
     let database = TestDatabase::create_empty().await;
     let dump = Path::new(FIXTURE_DIRECTORY).join(FIXTURE_DUMP);
     let name = database.name().to_owned();
@@ -424,18 +427,24 @@ async fn restored_and_upgraded() -> App {
         &dump,
     );
     assert_success("psql", &loaded);
+    let mut session = database.connect(DbRole::Superuser).await;
+    let before = stored_rows(&mut session, reference).await;
+    drop(session);
     migrate(
         &database.target(DbRole::Migrator),
         &MigrateSettings::default(),
     )
     .await
     .unwrap();
-    App::over(database).await
+    (App::over(database).await, before)
 }
+
+/// The rows of `parameter` and `plc_type` as text: the parameters first, then the types.
+type StoredRows = (Vec<String>, Vec<String>);
 
 /// The rows of `parameter` and `plc_type` as text. A stored type text and a stored value do not
 /// change in the upgrade, so the text is equal before and after.
-async fn stored_rows(app: &mut App, reference: &str) -> (Vec<String>, Vec<String>) {
+async fn stored_rows(session: &mut PgConnection, reference: &str) -> StoredRows {
     let parameters = sqlx::query_scalar(
         "SELECT to_jsonb(p)::text FROM parameter p \
          JOIN recipe_version v ON v.id = p.recipe_version_id \
@@ -443,11 +452,11 @@ async fn stored_rows(app: &mut App, reference: &str) -> (Vec<String>, Vec<String
          WHERE r.reference_number = $1 ORDER BY v.number, p.tag",
     )
     .bind(reference)
-    .fetch_all(app.admin())
+    .fetch_all(&mut *session)
     .await
     .unwrap();
     let types = sqlx::query_scalar("SELECT to_jsonb(t)::text FROM plc_type t ORDER BY t.id")
-        .fetch_all(app.admin())
+        .fetch_all(session)
         .await
         .unwrap();
     (parameters, types)
@@ -460,10 +469,17 @@ async fn export_of(app: &App, reference: &str) -> ExportedVersion {
         machine: None,
         scope: ExportScope::Version,
     };
-    ExportApprovedVersion::new(app.context(), Arc::new(BodyWriter))
+    ExportApprovedVersion::new(app.context(), DocumentFactsWriter::port())
         .execute(&app.user, &app.meta, input)
         .await
         .unwrap()
+}
+
+/// Assert the flag and the hash inside the bytes of the document, not only the fields of the use case.
+fn assert_document(exported: &ExportedVersion, reference: &str, loadable: bool) {
+    let document: serde_json::Value = serde_json::from_slice(&exported.document).unwrap();
+    assert_eq!(document["loadable"], serde_json::Value::Bool(loadable));
+    assert_eq!(document["content_sha256"], stored_hash(reference));
 }
 
 /// Step 4: `GetVersion` and, for a struct row, `GetTypeTree` read the stored row.
@@ -505,6 +521,29 @@ async fn read_row(app: &mut App, expected: &Expectation) {
     assert_eq!(type_view.revision, 1);
 }
 
+/// The parameter rows of one version as JSON text, each with its limit rows, ordered by tag.
+///
+/// The text holds the type id, the stable parameter key, and every definition field. It leaves out
+/// the identifiers and the creation time that a copy must regenerate.
+async fn version_facts(session: &mut PgConnection, reference: &str, number: i32) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT (to_jsonb(p) - 'id' - 'recipe_version_id' - 'created_at' || jsonb_build_object( \
+             'limits', COALESCE((SELECT jsonb_agg( \
+                 to_jsonb(l) - 'parameter_id' - 'recipe_version_id' - 'created_at' \
+                 ORDER BY l.leaf_path) \
+              FROM parameter_limit l WHERE l.parameter_id = p.id), '[]'::jsonb)))::text \
+         FROM parameter p \
+         JOIN recipe_version v ON v.id = p.recipe_version_id \
+         JOIN recipe r ON r.id = v.recipe_id \
+         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
+    )
+    .bind(reference)
+    .bind(number)
+    .fetch_all(session)
+    .await
+    .unwrap()
+}
+
 /// Step 6: `CreateVersion` copies the approved version into a draft with the same rows.
 async fn copy_row(app: &mut App, reference: &str) {
     let input = CreateVersionInput {
@@ -517,28 +556,8 @@ async fn copy_row(app: &mut App, reference: &str) {
         .await
         .unwrap();
     assert_eq!(created.number, 2);
-    let copied: Vec<(String, Option<String>, String)> = sqlx::query_as(
-        "SELECT p.tag, p.s7_address, p.value::text FROM parameter p \
-         JOIN recipe_version v ON v.id = p.recipe_version_id \
-         JOIN recipe r ON r.id = v.recipe_id \
-         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
-    )
-    .bind(reference)
-    .bind(1_i32)
-    .fetch_all(app.admin())
-    .await
-    .unwrap();
-    let draft: Vec<(String, Option<String>, String)> = sqlx::query_as(
-        "SELECT p.tag, p.s7_address, p.value::text FROM parameter p \
-         JOIN recipe_version v ON v.id = p.recipe_version_id \
-         JOIN recipe r ON r.id = v.recipe_id \
-         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
-    )
-    .bind(reference)
-    .bind(2_i32)
-    .fetch_all(app.admin())
-    .await
-    .unwrap();
+    let copied = version_facts(app.admin(), reference, 1).await;
+    let draft = version_facts(app.admin(), reference, 2).await;
     assert_eq!(copied.len(), 1);
     assert_eq!(draft, copied);
 }
@@ -569,13 +588,14 @@ async fn backup_and_restore(app: &App, reference: &str, expected: &ExportedVersi
     );
     assert_success("pg_restore", &restored);
     let copied = App::over(copy).await;
-    assert_eq!(&export_of(&copied, reference).await, expected);
+    let again = export_of(&copied, reference).await;
+    assert_document(&again, reference, expected.loadable());
+    assert_eq!(&again, expected);
 }
 
 /// The eight steps of task 9.2 for one row of the matrix.
 async fn check_stored_row(expected: Expectation) {
-    let mut app = restored_and_upgraded().await;
-    let before = stored_rows(&mut app, expected.reference).await;
+    let (mut app, before) = restored_and_upgraded(expected.reference).await;
     read_row(&mut app, &expected).await;
     let exported = export_of(&app, expected.reference).await;
     assert_eq!(
@@ -583,7 +603,8 @@ async fn check_stored_row(expected: Expectation) {
         stored_hash(expected.reference)
     );
     assert_eq!(exported.loadable(), expected.loadable);
-    assert_eq!(stored_rows(&mut app, expected.reference).await, before);
+    assert_document(&exported, expected.reference, expected.loadable);
+    assert_eq!(stored_rows(app.admin(), expected.reference).await, before);
     copy_row(&mut app, expected.reference).await;
     backup_and_restore(&app, expected.reference, &exported).await;
 }
