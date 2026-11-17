@@ -164,6 +164,21 @@ type_label (type_id, label) AS (
     JOIN plc_type t ON t.id = c.current_id
     WHERE t.kind <> 'array'
 ),
+-- The text of each type for the part nesting: as type_label, but a struct shows its revision as
+-- name@revision. A standalone struct row has no tag, so the revision tells two revisions apart.
+nesting_label (type_id, label) AS (
+    SELECT t.id, t.name || CASE WHEN t.kind = 'struct' THEN '@' || t.revision::text ELSE '' END
+                        || COALESCE('(' || t.string_length::text || ')', '')
+    FROM plc_type t
+    WHERE t.kind <> 'array'
+    UNION ALL
+    SELECT c.root_id, c.heads || t.name
+                      || CASE WHEN t.kind = 'struct' THEN '@' || t.revision::text ELSE '' END
+                      || COALESCE('(' || t.string_length::text || ')', '')
+    FROM chain c
+    JOIN plc_type t ON t.id = c.current_id
+    WHERE t.kind <> 'array'
+),
 -- A parameter of a version that is not a discarded draft, with the data that the output shows.
 live_parameter AS (
     SELECT p.plc_type_id, p.plc_platform, p.s7_address, p.tag,
@@ -251,14 +266,14 @@ FROM (
     FROM nesting_row n
     JOIN plc_type t ON t.id = n.id AND t.kind = 'struct'
     JOIN machine m ON m.id = t.machine_id
-    JOIN type_label l ON l.type_id = t.id
+    JOIN nesting_label l ON l.type_id = t.id
     WHERE m.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'nesting', l.label
     FROM stored_parameter p
     JOIN nesting_row n ON n.id = p.plc_type_id
-    JOIN type_label l ON l.type_id = p.plc_type_id
+    JOIN nesting_label l ON l.type_id = p.plc_type_id
     WHERE p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
 ) hit
 ORDER BY hit.machine_code COLLATE "C", hit.reference_number COLLATE "C" NULLS FIRST,

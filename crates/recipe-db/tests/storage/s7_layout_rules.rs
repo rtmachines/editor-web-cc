@@ -193,12 +193,12 @@ async fn seed_nesting_hits(conn: &mut PgConnection, expected: &mut Expected) {
     let deepest = chain[MAX_NESTING];
     let eighth = chain[MAX_NESTING - 1];
     let seventh = chain[MAX_NESTING - 2];
-    expected.array_row(&f, NESTING, "ST_N9");
+    expected.array_row(&f, NESTING, "ST_N9@1");
     parameter(conn, &f, deepest, "DEEP", Some("DB5.DBB0")).await;
-    expected.parameter_row(&f, 1, "DEEP", NESTING, "ST_N9");
+    expected.parameter_row(&f, 1, "DEEP", NESTING, "ST_N9@1");
     let wide = array_type(conn, &f, seventh, &[1], &[2]).await;
     parameter(conn, &f, wide, "DEEP_ARRAY", None).await;
-    expected.parameter_row(&f, 1, "DEEP_ARRAY", NESTING, "ARRAY[1..2] OF ST_N7");
+    expected.parameter_row(&f, 1, "DEEP_ARRAY", NESTING, "ARRAY[1..2] OF ST_N7@1");
     parameter(conn, &f, eighth, "EDGE", Some("DB5.DBB10")).await;
 }
 
@@ -250,8 +250,8 @@ async fn seed_discarded_hits(conn: &mut PgConnection, expected: &mut Expected) {
         Some("DB1.DBB20"),
     )
     .await;
-    expected.array_row(&f, NESTING, "ST_N9");
-    expected.parameter_row(&f, 1, "DEEP_DISCARDED", NESTING, "ST_N9");
+    expected.array_row(&f, NESTING, "ST_N9@1");
+    expected.parameter_row(&f, 1, "DEEP_DISCARDED", NESTING, "ST_N9@1");
     sqlx::query("UPDATE recipe_version SET deleted_at = now() WHERE id = $1")
         .bind(f.version)
         .execute(&mut *conn)
@@ -570,6 +570,38 @@ async fn adr_0179_s7_layout_query_lists_a_struct_row_and_a_parameter_with_nine_l
 }
 
 #[tokio::test]
+async fn adr_0179_s7_layout_query_tells_two_revisions_of_one_struct_apart() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let f = plant(&mut conn, S7_1500).await;
+    let chain = struct_chain(&mut conn, &f, MAX_NESTING + 1).await;
+    let eighth = chain[MAX_NESTING - 1];
+    let mut tx = sqlx::Connection::begin(&mut conn).await.unwrap();
+    let second_revision: Uuid = sqlx::query_scalar(
+        "INSERT INTO plc_type (kind, name, platforms, machine_id, revision) \
+         VALUES ('struct', 'ST_N9', ARRAY[$1], $2, 2) RETURNING id",
+    )
+    .bind(f.platform)
+    .bind(f.machine)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    fixtures::member(&mut tx, second_revision, 1, eighth).await;
+    tx.commit().await.unwrap();
+    let array = array_type(&mut conn, &f, second_revision, &[1], &[2]).await;
+    parameter(&mut conn, &f, array, "TWO", None).await;
+    let mut expected = Expected::default();
+    expected.array_row(&f, NESTING, "ST_N9@1");
+    expected.array_row(&f, NESTING, "ST_N9@2");
+    expected.parameter_row(&f, 1, "TWO", NESTING, "ARRAY[1..2] OF ST_N9@2");
+
+    let found = rows(&mut database.connect(Role::App).await).await;
+
+    let nesting: BTreeSet<Row> = found.into_iter().filter(|row| row.4 == NESTING).collect();
+    assert_eq!(nesting, expected.0);
+}
+
+#[tokio::test]
 async fn adr_0179_s7_layout_query_skips_eight_levels_and_a_platform_without_the_limit() {
     let (database, _) = seeded().await;
     let mut conn = database.connect(Role::App).await;
@@ -581,7 +613,7 @@ async fn adr_0179_s7_layout_query_skips_eight_levels_and_a_platform_without_the_
         .filter(|row| row.4 == NESTING)
         .map(|row| row.5.as_str())
         .collect();
-    assert_eq!(texts, BTreeSet::from(["ST_N9", "ARRAY[1..2] OF ST_N7"]));
+    assert_eq!(texts, BTreeSet::from(["ST_N9@1", "ARRAY[1..2] OF ST_N7@1"]));
     let tags: BTreeSet<&str> = found.iter().filter_map(|row| row.3.as_deref()).collect();
     assert!(!tags.contains("EDGE"), "a type with 8 levels is listed");
     assert!(!tags.contains("EIGHT"), "a type with 8 levels is listed");
