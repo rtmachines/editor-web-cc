@@ -180,7 +180,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
   - A plain dump creates each table with its `CHECK` and `NOT NULL` constraints before it loads the data. It creates the foreign keys and the triggers after the data. Thus no trigger runs on a row of the dump.
   - It writes `crates/recipe-db/tests/storage/fixtures/stored_rules.hashes` with one line `<reference> <content_sha256>` for each case. It reads the hash from `recipe_version`.
   - Command: `cargo test -p recipe-db --test storage stored_rules_write_the_fixture -- --ignored`. Run it once, because a second run gives other UUIDs. The two files go into the commit of the task.
-- [ ] 9.2 (recipe-db) Integration task for groups 2 to 6. In `crates/recipe-db/tests/storage/stored_rules.rs`, add one test for each row of the matrix, for example `adr_0180_stored_wstring_exports_with_its_hash`. Each test does these steps:
+- [x] 9.2 (recipe-db) Integration task for groups 2 to 6. In `crates/recipe-db/tests/storage/stored_rules.rs`, add one test for each row of the matrix, for example `adr_0180_stored_wstring_exports_with_its_hash`. Each test does these steps:
   1. Restore. `TestDatabase::create_empty` creates the empty database `<name>` from `template0`.
   2. Load. Run `docker exec -i --user postgres <container_id> psql --set ON_ERROR_STOP=1 --single-transaction --quiet --dbname=<name>` with `fixtures/stored_rules.sql` on the standard input. Assert the exit status 0.
   3. Upgrade. Call `recipe_db::migrate(&server().target(Role::Migrator, <name>), &MigrateSettings::default())` and assert `Ok`. The migrator of this release runs on the data of the earlier release, so this step also tests the upgrade path. Then `App::over` builds the `App` over `<name>`.
