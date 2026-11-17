@@ -370,9 +370,13 @@ fn nested_array_rule(text: &str, platform: PlcPlatform) -> Result<(), PlantError
 }
 
 #[test]
-fn type_expr_array_of_array_is_not_on_s7_1200_and_s7_1500() {
+fn type_expr_array_of_array_is_not_on_the_three_s7_platforms() {
     let text = "ARRAY[1..2] OF ARRAY[1..3] OF BYTE";
-    for platform in [PlcPlatform::S7_1200, PlcPlatform::S7_1500] {
+    for platform in [
+        PlcPlatform::S7_300,
+        PlcPlatform::S7_1200,
+        PlcPlatform::S7_1500,
+    ] {
         let result = nested_array_rule(text, platform);
         assert!(
             matches!(
@@ -391,14 +395,30 @@ fn type_expr_array_of_array_is_not_on_s7_1200_and_s7_1500() {
 
 #[test]
 fn type_expr_array_of_array_passes_on_the_other_platforms() {
-    for platform in [
-        PlcPlatform::S7_300,
-        PlcPlatform::CodesysIec,
-        PlcPlatform::TwinCat3,
-    ] {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
         let result = nested_array_rule("ARRAY[1..2] OF ARRAY[1..3] OF BYTE", platform);
         assert!(result.is_ok(), "{platform:?}: {result:?}");
     }
+}
+
+#[test]
+fn adr_0177_array_of_an_array_fails_on_s7_300() {
+    let text = "ARRAY[1..2] OF ARRAY[1..3] OF BYTE";
+    let result = nested_array_rule(text, PlcPlatform::S7_300);
+    assert!(
+        matches!(
+            &result,
+            Err(PlantError::DerivedTypeInvalid { type_expr, reason })
+                if type_expr == text && *reason == DerivedTypeReason::NotOnPlatform
+        ),
+        "{result:?}"
+    );
+    assert_eq!(
+        result.err().map(|error| error.code().as_str()),
+        Some("E-PLT-013")
+    );
+    let multi = nested_array_rule("ARRAY[1..2,1..3] OF BYTE", PlcPlatform::S7_300);
+    assert!(multi.is_ok(), "{multi:?}");
 }
 
 #[test]
