@@ -521,6 +521,29 @@ async fn read_row(app: &mut App, expected: &Expectation) {
     assert_eq!(type_view.revision, 1);
 }
 
+/// The parameter rows of one version as JSON text, each with its limit rows, ordered by tag.
+///
+/// The text holds the type id, the stable parameter key, and every definition field. It leaves out
+/// the identifiers and the creation time that a copy must regenerate.
+async fn version_facts(session: &mut PgConnection, reference: &str, number: i32) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT (to_jsonb(p) - 'id' - 'recipe_version_id' - 'created_at' || jsonb_build_object( \
+             'limits', COALESCE((SELECT jsonb_agg( \
+                 to_jsonb(l) - 'parameter_id' - 'recipe_version_id' - 'created_at' \
+                 ORDER BY l.leaf_path) \
+              FROM parameter_limit l WHERE l.parameter_id = p.id), '[]'::jsonb)))::text \
+         FROM parameter p \
+         JOIN recipe_version v ON v.id = p.recipe_version_id \
+         JOIN recipe r ON r.id = v.recipe_id \
+         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
+    )
+    .bind(reference)
+    .bind(number)
+    .fetch_all(session)
+    .await
+    .unwrap()
+}
+
 /// Step 6: `CreateVersion` copies the approved version into a draft with the same rows.
 async fn copy_row(app: &mut App, reference: &str) {
     let input = CreateVersionInput {
@@ -533,28 +556,8 @@ async fn copy_row(app: &mut App, reference: &str) {
         .await
         .unwrap();
     assert_eq!(created.number, 2);
-    let copied: Vec<(String, Option<String>, String)> = sqlx::query_as(
-        "SELECT p.tag, p.s7_address, p.value::text FROM parameter p \
-         JOIN recipe_version v ON v.id = p.recipe_version_id \
-         JOIN recipe r ON r.id = v.recipe_id \
-         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
-    )
-    .bind(reference)
-    .bind(1_i32)
-    .fetch_all(app.admin())
-    .await
-    .unwrap();
-    let draft: Vec<(String, Option<String>, String)> = sqlx::query_as(
-        "SELECT p.tag, p.s7_address, p.value::text FROM parameter p \
-         JOIN recipe_version v ON v.id = p.recipe_version_id \
-         JOIN recipe r ON r.id = v.recipe_id \
-         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
-    )
-    .bind(reference)
-    .bind(2_i32)
-    .fetch_all(app.admin())
-    .await
-    .unwrap();
+    let copied = version_facts(app.admin(), reference, 1).await;
+    let draft = version_facts(app.admin(), reference, 2).await;
     assert_eq!(copied.len(), 1);
     assert_eq!(draft, copied);
 }
