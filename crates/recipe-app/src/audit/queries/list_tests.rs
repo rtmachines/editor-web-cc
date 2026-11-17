@@ -8,7 +8,9 @@ use super::test_world::{
 };
 use super::{AuditListInput, ListAuditEntries};
 use crate::blocking::PageSizes;
+use crate::memory::JournalEntry;
 use crate::memory::fixtures::{Fixture, actor, meta, mid, pid, rid};
+use crate::ports::Isolation;
 use crate::ports::{
     AggregateId, AuditEntityType, AuditFilter, AuditRow, CursorPage, EntityFilter, EntityId,
     EntityLabel, TimeRange,
@@ -247,4 +249,16 @@ async fn a_row_names_the_actor_and_the_label_of_the_current_row() {
     let hold = page.rows.iter().find(|row| row.id == entry_id(5)).unwrap();
     assert_eq!(hold.entity_id, EntityId::from(*pid(HOLD).as_uuid()));
     assert_eq!(hold.label, EntityLabel::Missing);
+}
+
+#[tokio::test]
+async fn list_audit_entries_runs_in_one_read_only_transaction() {
+    let fixture = world().await;
+    let mark = fixture.store.journal().len();
+    list(&fixture, Role::Administrator, AuditFilter::default(), None).await;
+    let journal = fixture.store.journal();
+    assert_eq!(
+        journal.get(mark..),
+        Some([JournalEntry::Begin(Isolation::ReadOnly)].as_slice())
+    );
 }

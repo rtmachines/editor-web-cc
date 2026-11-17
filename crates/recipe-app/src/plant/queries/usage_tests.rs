@@ -15,10 +15,12 @@ use super::TypeRef;
 use super::usage::{GetTypeUsage, TypeUsage, TypeUsageInput, TypeUsageLine};
 use crate::blocking::{AppSettings, PageSizes};
 use crate::error::{AppError, Missing};
+use crate::memory::JournalEntry;
 use crate::memory::fixtures::{
     Fixture, actor, meta, mid, parameter_on, pkey, recipe_with, tid, timestamp, uid, user, vid,
 };
 use crate::memory::seed_type_id;
+use crate::ports::Isolation;
 use crate::ports::TypeUsageRow;
 use recipe_domain::plant::Primitive;
 
@@ -411,4 +413,22 @@ async fn a_page_size_that_cannot_add_one_is_a_storage_error() {
         .unwrap_err();
 
     assert!(matches!(error, AppError::Storage(_)), "{error:?}");
+}
+
+#[tokio::test]
+async fn get_type_usage_runs_in_one_read_only_transaction() {
+    let fixture = world();
+    let mark = fixture.store.journal().len();
+    run(
+        &fixture,
+        AppSettings::default(),
+        input("ST_Zone", Some(2), 0),
+    )
+    .await
+    .unwrap();
+    let journal = fixture.store.journal();
+    assert_eq!(
+        journal.get(mark..),
+        Some([JournalEntry::Begin(Isolation::ReadOnly)].as_slice())
+    );
 }
