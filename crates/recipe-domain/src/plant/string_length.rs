@@ -9,11 +9,11 @@ use super::platform::PlcPlatform;
 pub enum StringKind {
     /// `STRING`, one byte per character.
     String,
-    /// `WSTRING`, two bytes per character.
+    /// `WSTRING`, one UTF-16 code unit per character. A character outside the Basic Multilingual Plane counts 2 (ADR-0137 (i)).
     Wstring,
 }
 
-/// Number of characters of a string type. The range depends on the platform.
+/// Number of units of a string type (ADR-0137 (h), (i)). The range depends on the platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StringLength(u16);
 
