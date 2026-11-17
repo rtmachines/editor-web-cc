@@ -225,7 +225,7 @@ async fn begin_through_the_port_records_its_isolation() {
 }
 
 #[tokio::test]
-async fn a_read_only_transaction_cannot_finish_and_keeps_the_state() {
+async fn a_commit_in_a_read_only_transaction_stops_at_the_audit_write_and_keeps_the_state() {
     let store = MemoryStore::default();
     let tx = store.begin_memory(Isolation::ReadOnly).unwrap();
     let error = commit(&store, Box::new(tx), &[1]).await.unwrap_err();

@@ -49,7 +49,7 @@ async fn a_repeatable_read_transaction_reads_like_a_read_only_one() {
 }
 
 #[tokio::test]
-async fn a_repeatable_read_transaction_cannot_finish_and_keeps_the_state() {
+async fn a_commit_in_a_repeatable_read_transaction_stops_at_the_audit_write_and_keeps_the_state() {
     let store = store();
     seed_live(&store, (1, "R-1", "One"), &[(11, VersionState::LiveDraft)]);
     let mut tx = begin(&store, Isolation::RepeatableRead);

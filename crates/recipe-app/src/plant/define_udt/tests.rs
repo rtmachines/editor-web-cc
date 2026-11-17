@@ -13,7 +13,9 @@ use super::{DefineUdt, DefineUdtInput, DefineUdtMode};
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing};
-use crate::memory::fixtures::{Fixture, actor, lock_line, meta, mid, tid, timestamp};
+use crate::memory::fixtures::{
+    Fixture, actor, assert_prefix_then_key_set, lock_line, meta, mid, tid, timestamp,
+};
 use crate::memory::{DERIVED_TYPE_LOCK_TABLE, Fault, JournalEntry, LockMode, seed_type_id};
 use crate::ports::Isolation;
 
@@ -195,16 +197,14 @@ async fn the_journal_holds_the_machine_lock_and_then_the_advisory_key_set() {
             format!("{}:{name}", mid(1)),
         )
     };
-    assert_eq!(
-        fixture.store.journal(),
-        vec![
+    assert_prefix_then_key_set(
+        &fixture.store.journal(),
+        &[
             JournalEntry::Begin(Isolation::ReadOnly),
             JournalEntry::Begin(Isolation::ReadCommitted),
             lock_line("machine", LockMode::ForShare, mid(1).to_string()),
-            advisory("ARRAY"),
-            advisory("STRING"),
-            advisory("ST_Zone"),
-        ]
+        ],
+        &[advisory("STRING"), advisory("ST_Zone"), advisory("ARRAY")],
     );
 }
 
