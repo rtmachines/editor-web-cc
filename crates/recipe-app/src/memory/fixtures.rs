@@ -13,7 +13,8 @@ mod tests;
 
 pub(crate) use actors::{actor, meta, second_engineer};
 pub(crate) use deep::{
-    over_limit_top_parameter, seed_oversized_struct, seed_struct_chain, struct_chain_value,
+    over_limit_top_parameter, seed_oversized_struct, seed_struct_chain, struct_chain_row,
+    struct_chain_value,
 };
 pub(crate) use parameter::parameter_on;
 pub(crate) use plant::machine_on;

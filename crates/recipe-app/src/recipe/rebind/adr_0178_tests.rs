@@ -7,21 +7,22 @@ use serde_json::json;
 
 use super::RebindTypeRevisionInput;
 use super::fixtures::{request, run, typed_struct_row, with_value};
-use crate::memory::fixtures::{Fixture, parameter_on, tid, uid, vid};
+use crate::memory::fixtures::{Fixture, parameter_on, struct_chain_row, tid, uid, vid};
 use crate::memory::seed_type_id;
 use crate::recipe::test_support::{
     CUBE_ARRAY, DRAFT_VERSION, DraftSnapshot, WIDE_MEMBER, assert_not_addressable,
     seed_standard_access_rows, stored_parameters,
 };
 
+// The rows of the four structs come from the range of `seed_struct_chain`. These tests seed no chain.
 /// `ST_Wide@1` with the member `a`.
-const WIDE_1: u128 = 983;
+const WIDE_1: u128 = struct_chain_row(3);
 /// `ST_Wide@2` with the members `a` and `data` of type `ARRAY[40000..40001] OF BYTE`.
-const WIDE_2: u128 = 984;
+const WIDE_2: u128 = struct_chain_row(4);
 /// `ST_Cubed@1` with the member `a`.
-const CUBED_1: u128 = 985;
+const CUBED_1: u128 = struct_chain_row(5);
 /// `ST_Cubed@2` with the members `a` and `bits` of type `ARRAY[1..2,1..2,1..2] OF BOOL`.
-const CUBED_2: u128 = 986;
+const CUBED_2: u128 = struct_chain_row(6);
 /// The key number of the parameter that the tests rebind.
 const PARAMETER: u128 = 11;
 
