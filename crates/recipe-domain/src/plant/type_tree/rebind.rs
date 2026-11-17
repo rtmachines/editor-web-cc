@@ -5,7 +5,7 @@
 use crate::plant::limits::{MAX_DEPTH, MAX_LEAVES};
 use crate::plant::{ArrayDimensions, PlantError, PlcTypeId, TypeLimit};
 
-use super::{TypeNode, TypeTree};
+use super::{S7_ARRAY_OF_STRUCT_EXTRA, TypeNode, TypeTree};
 
 impl TypeTree {
     /// Build the tree of this type after a rebind from the struct `from` to the tree `to`.
@@ -53,6 +53,12 @@ impl TypeTree {
             })
             .filter(|depth| *depth <= MAX_DEPTH)
             .ok_or_else(|| too_large(TypeLimit::Depth))?;
+        let s7_nesting = if chain.is_empty() {
+            Some(to.s7_nesting)
+        } else {
+            to.s7_nesting.checked_add(S7_ARRAY_OF_STRUCT_EXTRA)
+        }
+        .ok_or_else(|| too_large(TypeLimit::Depth))?;
         let root =
             chain
                 .into_iter()
@@ -69,6 +75,7 @@ impl TypeTree {
             root,
             leaf_count,
             depth,
+            s7_nesting,
         }))
     }
 }

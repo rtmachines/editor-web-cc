@@ -431,6 +431,7 @@ type-reason-reserved-name = the struct name is a reserved IEC 61131-3 word or a 
 type-limit-leaves = { $count } leaves
 type-limit-depth = { $count } levels
 type-limit-members = { $count } members
+type-limit-s7-nesting = { $count } levels of the S7 count
 field-platform-choose = Choose a PLC platform
 list-page-after-end = Page { $page } is after the last page.
 list-first-page = Go to the first page

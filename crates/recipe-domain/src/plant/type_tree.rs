@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::limits::{MAX_DEPTH, MAX_LEAVES};
+use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_S7_NESTING};
 use super::{
     ArrayDimensions, DerivedTypeReason, LeafClass, MachineId, MemberName, PlantError, PlcPlatform,
     PlcType, PlcTypeId, Primitive, RecordShape, TypeLimit, TypeName,
@@ -168,6 +168,7 @@ pub struct TypeTree {
     root: TypeNode,
     leaf_count: u32,
     depth: u32,
+    s7_nesting: u32,
 }
 
 impl TypeTree {
@@ -201,6 +202,29 @@ impl TypeTree {
         self.depth
     }
 
+    /// Check the nesting limit of a type on an S7 platform (ADR-0179 (a) to (c)).
+    ///
+    /// The count is the Siemens count. A struct counts 1 level. An array whose element is a
+    /// struct counts 3 levels in place of the 1 level of that struct. A primitive, a string,
+    /// and an array of them count no level. The count of a type is the largest sum on one path.
+    /// Every platform that is not an S7 platform accepts any count. `resolve` does not run this
+    /// check, so a stored type over the limit stays readable (ADR-0179 (g), (i)).
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-PLT-018` with [`TypeLimit::S7Nesting`] and the text of the root type, when
+    /// `platform` is `S7_300`, `S7_1200`, or `S7_1500` and the count is above
+    /// [`MAX_S7_NESTING`].
+    pub fn check_s7_nesting(&self, platform: PlcPlatform) -> Result<(), PlantError> {
+        if platform.is_s7() && self.s7_nesting > MAX_S7_NESTING {
+            return Err(PlantError::TypeTooLarge {
+                type_name: render_node(&self.root),
+                limit: TypeLimit::S7Nesting,
+            });
+        }
+        Ok(())
+    }
+
     /// Resolve the tree of `root` against the rows of one platform.
     ///
     /// The function uses an explicit stack and never recurses. Pass 1 detects
@@ -231,6 +255,7 @@ impl TypeTree {
             root: root_node,
             leaf_count,
             depth: root_metrics.depth,
+            s7_nesting: root_metrics.s7_nesting,
         })
     }
 }
@@ -240,7 +265,14 @@ impl TypeTree {
 struct Metrics {
     leaves: u64,
     depth: u32,
+    /// The levels of the Siemens count of ADR-0179 (b). An array of a struct holds the 3 levels.
+    s7_nesting: u32,
+    /// True for a struct row. The array above it counts 2 more levels.
+    is_struct: bool,
 }
+
+/// The levels that an array adds to its struct element, so that the pair counts 3 (ADR-0179 (b)).
+const S7_ARRAY_OF_STRUCT_EXTRA: u32 = 2;
 
 /// One row on the current path of the walk and the children not yet visited.
 struct Frame {
@@ -302,6 +334,42 @@ fn render_root(root: PlcTypeId, types: &PlatformTypes) -> String {
             }
             None => {
                 parts.push(current.to_string());
+                break;
+            }
+        }
+    }
+    parts.concat()
+}
+
+/// Render the root node as text, such as `ST_Zone@1` or `ARRAY[1..8] OF INT`.
+///
+/// The loop follows only array elements. It stops at the first struct or leaf.
+fn render_node(root: &TypeNode) -> String {
+    let mut parts = Vec::new();
+    let mut current = root;
+    loop {
+        match current {
+            TypeNode::Array {
+                dimensions,
+                element,
+                ..
+            } => {
+                parts.push(format!("ARRAY[{dimensions}] OF "));
+                current = element;
+            }
+            TypeNode::Struct { name, revision, .. } => {
+                parts.push(format!("{name}@{revision}"));
+                break;
+            }
+            TypeNode::Leaf {
+                primitive,
+                string_length,
+                ..
+            } => {
+                parts.push(match string_length {
+                    Some(length) => format!("{}({length})", primitive.name()),
+                    None => primitive.name().to_owned(),
+                });
                 break;
             }
         }
@@ -378,6 +446,8 @@ fn measure(row: &PlcType, done: &BTreeMap<PlcTypeId, Metrics>) -> Result<Metrics
         RecordShape::Primitive { .. } => Ok(Metrics {
             leaves: 1,
             depth: 0,
+            s7_nesting: 0,
+            is_struct: false,
         }),
         RecordShape::Array {
             element,
@@ -392,22 +462,43 @@ fn measure(row: &PlcType, done: &BTreeMap<PlcTypeId, Metrics>) -> Result<Metrics
                 .ok()
                 .and_then(|levels| element.depth.checked_add(levels))
                 .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
-            Ok(Metrics { leaves, depth })
+            let s7_nesting = if element.is_struct {
+                element.s7_nesting.checked_add(S7_ARRAY_OF_STRUCT_EXTRA)
+            } else {
+                Some(element.s7_nesting)
+            }
+            .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
+            Ok(Metrics {
+                leaves,
+                depth,
+                s7_nesting,
+                is_struct: false,
+            })
         }
         RecordShape::Struct { members, .. } => {
             let mut leaves = 0_u64;
             let mut deepest = 0_u32;
+            let mut deepest_s7 = 0_u32;
             for member in members {
                 let metrics = child(&member.type_id)?;
                 leaves = leaves
                     .checked_add(metrics.leaves)
                     .ok_or_else(|| too_large(id, TypeLimit::Leaves))?;
                 deepest = deepest.max(metrics.depth);
+                deepest_s7 = deepest_s7.max(metrics.s7_nesting);
             }
             let depth = deepest
                 .checked_add(1)
                 .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
-            Ok(Metrics { leaves, depth })
+            let s7_nesting = deepest_s7
+                .checked_add(1)
+                .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
+            Ok(Metrics {
+                leaves,
+                depth,
+                s7_nesting,
+                is_struct: true,
+            })
         }
     }
 }

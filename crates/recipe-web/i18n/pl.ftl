@@ -431,6 +431,7 @@ type-reason-reserved-name = nazwa struktury jest zastrzeżonym słowem IEC 61131
 type-limit-leaves = { $count } elementów skalarnych
 type-limit-depth = { $count } poziomów
 type-limit-members = { $count } składników
+type-limit-s7-nesting = { $count } poziomów liczenia S7
 field-platform-choose = Wybierz platformę PLC
 list-page-after-end = Strona { $page } jest za ostatnią stroną.
 list-first-page = Przejdź do pierwszej strony
