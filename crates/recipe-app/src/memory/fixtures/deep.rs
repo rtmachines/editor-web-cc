@@ -12,9 +12,19 @@ use serde_json::{Value, json};
 use super::{Fixture, mid, parameter_on, tid, uid};
 use crate::memory::seed_type_id;
 
-/// The number of the row of the struct with one level. The struct with level `n` has the row
-/// `DEEP_FIRST + n - 1`.
+/// The row number below the first struct. The struct with level `n` has the row `DEEP_FIRST + n`,
+/// so the struct with one level has the row 981.
 const DEEP_FIRST: u128 = 980;
+
+/// The row number of the struct with `level` levels in a chain of `seed_struct_chain`.
+pub(crate) const fn struct_chain_row(level: u128) -> u128 {
+    DEEP_FIRST.checked_add(level).unwrap()
+}
+
+/// The identifier of the struct with `level` levels in a chain of `seed_struct_chain`.
+pub(crate) fn struct_chain_id(level: u32) -> PlcTypeId {
+    tid(struct_chain_row(u128::from(level)))
+}
 
 /// Store a chain of `levels` structs on `platform` and return the identifier of the top struct.
 ///
@@ -35,7 +45,7 @@ pub(crate) fn seed_struct_chain(
         } else {
             format!("ST_L{level}")
         };
-        let id = DEEP_FIRST.checked_add(u128::from(level)).unwrap();
+        let id = struct_chain_row(u128::from(level));
         let row = PlcType::from_stored(
             PlcTypeRecord {
                 id: tid(id),
@@ -87,5 +97,25 @@ pub(crate) fn over_limit_top_parameter(top: PlcTypeId) -> StoredParameter {
         value: StoredValue::from(struct_chain_value(9)),
         limits: vec![limit],
         ..parameter_on(PlcPlatform::S7_1500, 5, "TOP", uid(101), 40)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_row_of_a_level_is_the_first_row_plus_the_level() {
+        assert_eq!(struct_chain_row(1), 981);
+        assert_eq!(struct_chain_row(5), 985);
+        assert_eq!(struct_chain_row(7), 987);
+    }
+
+    #[test]
+    fn the_chain_top_has_the_identifier_of_its_level() {
+        let fixture = Fixture::new();
+        let top = seed_struct_chain(&fixture, PlcPlatform::S7_1500, ("ST_Top", 4));
+        assert_eq!(top, struct_chain_id(4));
+        assert_eq!(struct_chain_id(5), tid(985));
     }
 }

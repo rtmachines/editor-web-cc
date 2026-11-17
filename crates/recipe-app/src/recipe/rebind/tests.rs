@@ -18,7 +18,7 @@ use crate::context::UseCase;
 use crate::error::AppError;
 use crate::memory::fixtures::{
     Fixture, actor, lock_line, meta, mid, over_limit_top_parameter, rid, seed_struct_chain,
-    struct_chain_value, tid, vid,
+    struct_chain_row, struct_chain_value, tid, vid,
 };
 use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode, seed_type_id};
 use crate::ports::Isolation;
@@ -259,9 +259,9 @@ const MID_2: u128 = 971;
 /// `ARRAY[1..2] OF ST_Mid@1`.
 const MID_ARRAY_1: u128 = 972;
 /// The struct `ST_L5@1` of `seed_struct_chain`. It has 5 levels.
-const FIVE_LEVELS: u128 = 985;
+const FIVE_LEVELS: u128 = struct_chain_row(5);
 /// The struct `ST_L7@1` of `seed_struct_chain`. It has 7 levels.
-const SEVEN_LEVELS: u128 = 987;
+const SEVEN_LEVELS: u128 = struct_chain_row(7);
 /// The key number of the parameter `BUF`.
 const BUF: u128 = 11;
 /// The key number of the parameter `MID`.
