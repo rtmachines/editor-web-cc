@@ -10,7 +10,11 @@ use super::tests::approved_fixture;
 use super::{ExportApprovedInput, ExportApprovedVersion, ExportScope, ExportedVersion};
 use crate::auth::RequestMeta;
 use crate::error::AppError;
-use crate::memory::fixtures::{Fixture, actor, mid, reference, uuid};
+use crate::memory::MemoryState;
+use crate::memory::fixtures::{
+    Fixture, actor, long_text, meta, mid, reference, second_engineer, uuid,
+};
+use crate::recipe::{ApproveVersion, ApproveVersionInput, CreateVersion, CreateVersionInput};
 
 fn code(text: &str) -> MachineCode {
     MachineCode::parse(text).unwrap()
@@ -121,4 +125,60 @@ async fn a_request_without_a_session_reference_gives_an_entry_without_one() {
         .find(|entry| entry.action() == AuditAction::VersionExported)
         .unwrap();
     assert_eq!(entry.session_ref(), None);
+}
+
+/// Return the committed state after an approval of version 2, an archive of `M1`, and a new `M1`.
+///
+/// The fixture ends in the state before these changes. The test arms a hook that moves it forward.
+async fn state_with_a_reused_code(fixture: &Fixture) -> MemoryState {
+    let before = fixture.store.state();
+    let created = CreateVersion::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            CreateVersionInput {
+                reference: reference("R-1"),
+                based_on: Some(1),
+                change_note: long_text("Next version"),
+            },
+        )
+        .await
+        .unwrap();
+    let row_version = fixture
+        .store
+        .state()
+        .version_row_version(created.version)
+        .unwrap();
+    ApproveVersion::new(fixture.context())
+        .execute(
+            &second_engineer(),
+            &meta(),
+            ApproveVersionInput {
+                reference: reference("R-1"),
+                number: created.number,
+                expected_row_version: row_version,
+                allow_outdated: false,
+            },
+        )
+        .await
+        .unwrap();
+    archive(fixture, 1);
+    fixture.seed_machine_on(PlcPlatform::TwinCat3, 2, "M1");
+    let after = fixture.store.state();
+    fixture.store.update_state(|state, _| *state = before);
+    after
+}
+
+#[tokio::test]
+async fn a_reused_machine_code_at_the_second_pick_gives_web_005_and_no_entry() {
+    let (fixture, _machine) = approved_fixture().await;
+    let after = state_with_a_reused_code(&fixture).await;
+    fixture
+        .store
+        .on_lock_version_shared(move |store| store.update_state(|state, _| *state = after));
+
+    let error = export_for(&fixture, "M1", &basic_meta()).await.unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::WEB_005);
+    assert_eq!(exported_entries(&fixture), 0);
 }

@@ -99,8 +99,8 @@ fn check_exportable(
 ///
 /// The function solves one problem: the Basic route names a machine, and a recipe of another
 /// machine must look like an unknown recipe. Both give the same `NotFound`, so a client cannot
-/// probe for the references of other machines. The machine column of a recipe never changes, so
-/// one check before the lock is enough.
+/// probe for the references of other machines. The machine column of a recipe never changes, but
+/// the live machine of a code can change. Each pick therefore runs the check.
 async fn check_machine(
     tx: &mut dyn Transaction,
     recipe: &Recipe,
@@ -350,8 +350,9 @@ async fn lock_and_write(
 ///
 /// The function solves one problem: an approval can retire the picked version between step 2 and
 /// the lock of step 3. The second pick reads the recipe again and locks the new version. It
-/// skips the machine check, because the machine of a recipe never changes. A third pick never
-/// runs, so a second loss gives `E-EXP-001` (ADR-0164, ADR-0015: one version lock at a time).
+/// applies the machine filter of the first pick, because the live machine of the code can change
+/// between the two picks (RCB-02). A third pick never runs, so a second loss gives `E-EXP-001`
+/// (ADR-0164, ADR-0015: one version lock at a time).
 async fn pick_lock_and_write(
     ctx: &AppContext,
     who: (&Arc<dyn DocumentWriter>, &CurrentUser),
@@ -364,7 +365,7 @@ async fn pick_lock_and_write(
         Attempt::Written(prepared) => return Ok(*prepared),
         Attempt::Lost(permit) => permit,
     };
-    let found = find(ctx, target, None).await?;
+    let found = find(ctx, target, machine).await?;
     let reference = found.recipe.reference().clone();
     let second = lock_and_write(ctx, who, (target, found, scope), (Pick::Second, permit)).await?;
     match second {
