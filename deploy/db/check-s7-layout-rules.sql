@@ -12,6 +12,8 @@
 --   bool_array_3d   a parameter with an S7 address whose type tree holds an array of BOOL with
 --                   three dimensions (ADR-0187). An Approved version of such a parameter becomes
 --                   not loadable after the upgrade.
+--   nesting         a struct row or a parameter type with more than 8 S7 levels on one path
+--                   (ADR-0179). The type_text shows each struct as name@revision, also in ARRAY[..] OF.
 --
 -- The columns are machine_code, reference_number, version_number, tag, part, and type_text.
 -- For an array row, reference_number, version_number, and tag are empty and type_text is the
