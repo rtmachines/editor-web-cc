@@ -1196,20 +1196,25 @@ The output has the columns `machine_code`, `reference_number`, `version_number`,
 The column `part` is `nested_array`, `layout_changed`, `array_bound`, `bool_array_3d`, or `nesting`.
 A type row has no reference, no version, and no tag.
 
-The parts have two kinds of result for an upgrade.
+The parts have three kinds of result for an upgrade.
 The first kind refuses only new writes. A listed `Approved` version stays loadable after the upgrade:
 
 - A row of `nested_array` is an array of an array on `S7_300`, `S7_1200`, or `S7_1500`, or a parameter of such a type.
   ADR-0177 adds `S7_300` to the rule of ADR-0148.
 - A row of `nesting` is a struct row or a parameter type with more than 8 S7 levels on `S7_300`, `S7_1200`, or `S7_1500` (ADR-0179).
   A struct counts 1 level. An array of a struct counts 3 levels.
-- A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade (ADR-0147).
 
 The second kind changes `loadable`. A listed `Approved` version becomes not loadable after the upgrade:
 
 - A row of `array_bound` is a parameter with an S7 address and an array bound outside `-32768` to `32767` (ADR-0178).
 - A row of `bool_array_3d` is a parameter with an S7 address and a `BOOL` array with three dimensions (ADR-0187).
 
+The third kind can change `loadable`. The export check of ADR-0119 (b) runs the end rule and the overlap rule on the new layout (ADR-0147 (k1), ADR-0149):
+
+- A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade (ADR-0147).
+  A fault of one of these rules can make a listed `Approved` version not loadable.
+
+A version is not loadable when any part shows a loadability fault for one of its parameters, for example `bool_array_3d`.
 The owner signs off each row of all five parts.
 The owner fixes each row of the second kind before the upgrade. A draft row needs a change. An approved row needs a new version.
 The owner records each listed row in the upgrade ticket.
