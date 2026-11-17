@@ -1,7 +1,7 @@
 //! Tests of `deploy/db/check-s7-layout-rules.sql` (ADR-0147, ADR-0148, design D8).
 //!
 //! The query lists two kinds of stored rows. A `nested_array` row is an array of an array on a
-//! machine with `S7_1200` or `S7_1500`, or a parameter whose type tree holds one. A
+//! machine with `S7_300`, `S7_1200`, or `S7_1500`, or a parameter whose type tree holds one. A
 //! `layout_changed` row is a parameter with an S7 address whose type tree holds a struct with a
 //! direct `SINT` or `USINT` member, or an array of `BOOL` with more than one dimension. The tests
 //! compare the exact rows of the query, run it as `recipe_app`, and show that it writes nothing.
@@ -201,8 +201,13 @@ async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
     .await;
     expected.parameter_row(&a, 2, "SMALL_V2", CHANGED, "ST_Small");
 
-    // S7_300: the address is required, so the affected array is a hit.
+    // S7_300: the address is required, so the affected array is a hit. An array of an array is a
+    // hit too (ADR-0177 (g)).
     let b = plant(conn, S7_300).await;
+    let nested = nested_array(conn, &b).await;
+    expected.array_row(&b, NESTED, "ARRAY[1..3] OF ARRAY[1..2] OF INT");
+    parameter(conn, &b, nested, "NESTED", Some("DB3.DBB10")).await;
+    expected.parameter_row(&b, 1, "NESTED", NESTED, "ARRAY[1..3] OF ARRAY[1..2] OF INT");
     let grid = array_type(conn, &b, boolean, &[1, 1], &[3, 3]).await;
     parameter(conn, &b, grid, "GRID", Some("DB3.DBB0")).await;
     expected.parameter_row(&b, 1, "GRID", CHANGED, "ARRAY[1..3,1..3] OF BOOL");
@@ -234,11 +239,6 @@ async fn seed_non_hits(conn: &mut PgConnection) {
     parameter(conn, &a, plain, "PLAIN", Some("DB1.DBB10")).await;
     let bytes = array_type(conn, &a, sint, &[1], &[4]).await;
     parameter(conn, &a, bytes, "BYTES", Some("DB1.DBB20")).await;
-
-    // S7_300 allows an array of an array.
-    let b = plant(conn, S7_300).await;
-    let nested = nested_array(conn, &b).await;
-    parameter(conn, &b, nested, "NESTED", Some("DB3.DBB0")).await;
 
     // TwinCat3 allows an array of an array and has no address.
     let c = plant(conn, TWIN_CAT).await;
@@ -320,14 +320,14 @@ async fn s7_layout_query_lists_exactly_the_hit_rows_as_recipe_app() {
     let found = rows(&mut conn).await;
 
     assert_eq!(user, "recipe_app");
-    assert_eq!(expected.0.len(), 9, "the seed holds 9 hits");
+    assert_eq!(expected.0.len(), 11, "the seed holds 11 hits");
     assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
     let found: BTreeSet<Row> = found.into_iter().collect();
     assert_eq!(found, expected.0);
 }
 
 #[tokio::test]
-async fn s7_layout_query_lists_a_nested_array_only_on_s7_1200_and_s7_1500() {
+async fn adr_0177_s7_layout_query_lists_a_nested_array_on_each_s7_platform() {
     let (database, expected) = seeded().await;
     let mut conn = database.connect(Role::App).await;
 
@@ -341,9 +341,13 @@ async fn s7_layout_query_lists_a_nested_array_only_on_s7_1200_and_s7_1500() {
         .filter(|row| row.4 == NESTED)
         .map(|row| row.0.as_str())
         .collect();
-    assert_eq!(nested.len(), 4, "rows found: {nested:#?}");
+    assert_eq!(nested.len(), 6, "rows found: {nested:#?}");
     assert_eq!(codes, expected_codes);
-    assert_eq!(codes.len(), 2, "one S7_1500 and one S7_1200 machine");
+    assert_eq!(
+        codes.len(),
+        3,
+        "one S7_1500, one S7_1200, and one S7_300 machine"
+    );
     for code in &codes {
         let platform: String =
             sqlx::query_scalar("SELECT plc_platform FROM machine WHERE code = $1")
@@ -352,7 +356,7 @@ async fn s7_layout_query_lists_a_nested_array_only_on_s7_1200_and_s7_1500() {
                 .await
                 .unwrap();
         assert!(
-            [S7_1200, S7_1500].contains(&platform.as_str()),
+            [S7_300, S7_1200, S7_1500].contains(&platform.as_str()),
             "{platform}"
         );
     }

@@ -1,8 +1,8 @@
--- Check the stored rows against the S7 layout rules (ADR-0147, ADR-0148).
+-- Check the stored rows against the S7 layout rules (ADR-0147, ADR-0148, ADR-0177).
 --
 -- The query lists the stored rows that the current rule set changes or rejects:
---   nested_array    an array row on a machine with S7_1200 or S7_1500 whose element row is an array
---                   row, and each parameter of a version whose type tree holds such a row
+--   nested_array    an array row on a machine with S7_300, S7_1200, or S7_1500 whose element row is
+--                   an array row, and each parameter of a version whose type tree holds such a row
 --   layout_changed  a parameter with an S7 address whose type tree holds a struct with a direct SINT
 --                   or USINT member, or an array of BOOL with more than one dimension
 --
@@ -38,7 +38,7 @@ tree (root_id, type_id) AS (
         WHERE mem.struct_type_id = tree.type_id
     ) below
 ),
--- An array row whose element row is an array row (ADR-0148).
+-- An array row whose element row is an array row (ADR-0148, ADR-0177).
 nested_row (id) AS (
     SELECT t.id
     FROM plc_type t
@@ -118,13 +118,13 @@ FROM (
     JOIN plc_type t ON t.id = n.id
     JOIN machine m ON m.id = t.machine_id
     JOIN type_label l ON l.type_id = t.id
-    WHERE m.plc_platform IN ('S7_1200', 'S7_1500')
+    WHERE m.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
     UNION ALL
     SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
            'nested_array', l.label
     FROM live_parameter p
     JOIN type_label l ON l.type_id = p.plc_type_id
-    WHERE p.plc_platform IN ('S7_1200', 'S7_1500')
+    WHERE p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
       AND EXISTS (
           SELECT 1
           FROM tree x
