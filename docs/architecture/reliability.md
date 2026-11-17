@@ -853,7 +853,7 @@ Recovery from the WAL archive (ADR-0106):
 - The other checks are the audit chain check of `data-model.md` 4.9, the optional marker entry, the configuration files, and the values of ADR-0103 (m).
 - The last line holds the base backup, the system identifier, the new timeline, the newest audit entry, and `heartbeat.last_at`. The operator compares them before the switch (ADR-0106 (d)).
 - The order of ADR-0106 (i) applies. The operator deletes the containers of `app` and `backup` and reads the marker entry when `db` runs (ADR-0175).
-- Then the operator runs the flush check of ADR-0099 (a2) when `db` runs, and stops `walarchive`. Then `pitr-volume` fills the new volume.
+- Then the operator runs the flush check of ADR-0099 (a2) when `db` runs, and deletes the container of `walarchive` (ADR-0176). Then `pitr-volume` fills the new volume.
 - After the switch, the operator sets the role passwords and starts the new WAL line.
 - Then the operator truncates `session` and `login_attempt` and re-applies the user changes after the recovery point.
 - Then the operator starts `app`. The wait of ADR-0102, `backup-now`, and `restore-test` end the recovery.
@@ -982,7 +982,7 @@ Before step 1, create the key file of the secret `backup_manifest_key` (7.1, 7.7
    - The option `-f compose.yaml` and `env -u COMPOSE_FILE` ignore each `COMPOSE_FILE`. The variable `RECIPE_VERSION` selects the new image in both states.
    - Without these parts, the second state runs the check with the previous image. That image stops with `usage: restore-volume <stamp>` (the usage check of `restore-volume`).
    - The order of the commands matters. The new image with `deploy/compose.previous.yaml` has no key, so its check stops. The previous image has no mode `--check-only`.
-   - Stop `backup` before command 1. Only after a pass of command 1, delete the container of `app` with `docker compose rm -s -f app`. Both steps come before `restore-volume <stamp>` (7.7). This order applies to both states of `deploy/.env`.
+   - Delete the container of `backup` with `docker compose rm -s -f backup` before command 1 (ADR-0176). Only after a pass of command 1, delete the container of `app` with `docker compose rm -s -f app`. Both steps come before `restore-volume <stamp>` (7.7). This order applies to both states of `deploy/.env`.
    - A weekly `restore-test` of a running `backup` can hold the lock that `take_lock` of `restore-volume` takes. Command 1 then stops with a fault that the set does not cause. A failed check leaves the running `app` unchanged.
    - `app` has `restart: always` in `compose.yaml`. A stopped container starts again after a reboot or a restart of Docker.
    - Its writes then make the lost period of the rollback longer, and no message shows them. That reason applies to the plain rollback too. There, the later `docker compose up -d --no-deps app` creates the container again.

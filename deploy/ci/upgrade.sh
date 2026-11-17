@@ -647,8 +647,8 @@ check_rollback_runbook() {
   [[ $set =~ ^recipe_[0-9]{8}_[0-9]{4}_premigrate$ ]] || fail "the rollback set name is invalid"
   stamp=${set#recipe_}
   prepare_overlay_copy "$scratch"
-  # After upgrade, the signed set exists. Stop backup to release the restore lock.
-  compose stop backup || fail "cannot stop backup before the runbook check"
+  # Delete backup to release the restore lock.
+  compose rm -s -f backup || fail "cannot delete backup before the runbook check"
   (
     cd "$scratch/deploy" || fail "cannot enter the rollback runbook copy"
     # Compose must stat the root-owned secrets. Keep the runbook command unchanged inside this shell.

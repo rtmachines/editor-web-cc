@@ -1,6 +1,6 @@
 # ADR-0174: HMAC tag of the backup manifest
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0176 (item (aj): delete the container of `backup` before command 1)
 Date: 2026-11-15
 Deciders: project owner
 

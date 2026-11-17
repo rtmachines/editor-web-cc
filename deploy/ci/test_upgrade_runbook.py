@@ -120,7 +120,7 @@ def runbook_inline_code_spans(text):
     return spans
 
 
-def runbook_deleted_service_starts(section):
+def runbook_deleted_service_starts(section, services=("app", "backup")):
     """Return inline spans and fenced lines that start or restart a deleted service."""
     commands = runbook_inline_code_spans(section)
     fence = None
@@ -149,12 +149,12 @@ def runbook_deleted_service_starts(section):
                 position += 2 if option in value_options else 1
             if position >= len(tokens) or tokens[position] not in ("start", "restart"):
                 continue
-            services = []
+            named = []
             for service in tokens[position + 1:]:
                 if service in ("&&", "||", ";", "|") or service.startswith((">", "<")):
                     break
-                services.append(service)
-            if {"app", "backup"}.intersection(services):
+                named.append(service)
+            if set(services).intersection(named):
                 forbidden.append(command)
                 break
     return forbidden
@@ -215,6 +215,28 @@ class RunbookDeletedServiceStartsTests(unittest.TestCase):
                         "docker compose start app 'unclosed"):
             with self.subTest(command=command):
                 self.assertEqual(runbook_deleted_service_starts(f"Run `{command}`."), [command])
+
+
+class RunbookDeletedServiceSelectionTests(unittest.TestCase):
+    def test_selected_walarchive_start_has_one_hit(self):
+        command = "docker compose start walarchive"
+        self.assertEqual(
+            runbook_deleted_service_starts(f"Run `{command}`.", services=("walarchive",)),
+            [command],
+        )
+
+    def test_default_services_allow_walarchive_start(self):
+        self.assertEqual(
+            runbook_deleted_service_starts("Run `docker compose start walarchive`."),
+            [],
+        )
+
+    def test_selected_services_allow_proxy_start(self):
+        self.assertEqual(
+            runbook_deleted_service_starts(
+                "Run `docker compose start proxy`.", services=("app", "backup", "walarchive")),
+            [],
+        )
 
 
 class RunbookInlineCodeSpansTests(unittest.TestCase):
@@ -366,19 +388,22 @@ class RunbookHostRebootTests(unittest.TestCase):
         "From step 2 of [Restore into production](#restore-into-production) "
         "until the procedure starts app and backup again, the two services can have no container.",
         "The same holds from step 1 of [Recover from the WAL archive](#recover-from-the-wal-archive).",
-        "In that window, proxy cannot become healthy, because its healthcheck calls http://app:9000/healthz.",
-        "Skip step 4 in that window.",
+        "From step 1 of [Major upgrade](#major-upgrade) until the procedure starts app again, app can have no container.",
+        "In [Rollback](#rollback), step 1 of the restore of the _premigrate set deletes backup.",
+        "From that step until the procedure starts app and backup again, backup can have no container.",
+        "From the pass of command 1 in that step, app can have no container too.",
+        "While app has no container, proxy can stay unhealthy, because its healthcheck calls http://app:9000/healthz.",
+        "Skip step 4 in each window.",
         "Step 4 runs docker compose exec app.",
-        "In that window, step 1 waits only for db and walarchive, "
+        "In each window, step 1 waits only for db and walarchive, "
         "and only for a service that docker compose ps -a lists.",
+        "Step 4 of the recovery deletes the container of walarchive.",
         "The switch deletes the containers of db and walarchive, and later steps create them again.",
         "Until step 8 of the recovery deletes the container of db, "
         "skip this wait when db did not run at step 1 of the recovery.",
         "Such a db cannot become healthy, and the healthcheck of walarchive needs a running db.",
         "After step 1 of this section, continue the procedure at the step where it stopped.",
-        "Three cases need an action before you continue:",
-        "If the reboot came between step 4 and step 8 of the recovery, walarchive runs again.",
-        "Run step 4 of the recovery again.",
+        "Two cases need an action before you continue:",
         "If the reboot stopped step 4 of the restore or step 6 of the recovery, the new volume is not complete.",
         # Two literals, so that deploy_values does not read this test text as a volume deletion.
         "Delete it with docker volume"
@@ -431,6 +456,8 @@ class RunbookHostRebootTests(unittest.TestCase):
         links = (
             "[Restore into production](#restore-into-production)",
             "[Recover from the WAL archive](#recover-from-the-wal-archive)",
+            "[Major upgrade](#major-upgrade)",
+            "[Rollback](#rollback)",
         )
         for link in links:
             self.assertIn(link, text, f"After a host reboot: missing link {link}")
@@ -447,6 +474,12 @@ class RunbookHostRebootTests(unittest.TestCase):
             "Before step 8 of the recovery, skip this wait when db did not run at step 1 of the recovery.",
             "If the reboot came between step 4 and step 8 of the recovery, run step 4 again first.",
             "Then continue the procedure at the step where it stopped.",
+            "If the reboot came between step 4 and step 8 of the recovery, walarchive runs again.",
+            "Run step 4 of the recovery again.",
+            "Three cases need an action before you continue:",
+            "In that window, proxy cannot become healthy",
+            "Skip step 4 in that window.",
+            "In that window, step 1 waits only for",
         )
         for old_text in old_texts:
             with self.subTest(old_text=old_text):
@@ -455,16 +488,16 @@ class RunbookHostRebootTests(unittest.TestCase):
     def test_recovery_restart_instruction_follows_the_wait(self):
         text = " ".join("\n".join(self.prose_paragraphs()).replace("`", "").split())
         markers = (
-            "In that window, step 1 waits only for",
+            "In each window, step 1 waits only for",
             "After step 1 of this section, continue the procedure at the step where it stopped.",
-            "Run step 4 of the recovery again.",
+            "If the reboot stopped step 4 of the restore or step 6 of the recovery, the new volume is not complete.",
         )
         for marker in markers:
             self.assertIn(marker, text, f"After a host reboot: missing order marker: {marker}")
         self.assertLess(text.index(markers[0]), text.index(markers[1]),
                         "After a host reboot: wait before continuing the procedure")
         self.assertLess(text.index(markers[1]), text.index(markers[2]),
-                        "After a host reboot: repeat recovery step 4 after the wait")
+                        "After a host reboot: handle the cases after the wait")
 
     def assert_block_sentence_limits(self, paragraph):
         if paragraph.startswith("- "):
@@ -509,7 +542,8 @@ FAILED_TITLE = "Failed rollback restore after a failed upgrade"
 FAILED_LINK = f"[{FAILED_TITLE}](#failed-rollback-restore-after-a-failed-upgrade)"
 BACKUP_START = "docker compose up -d --no-deps backup"
 APP_REMOVE = "docker compose rm -s -f app"
-BACKUP_STOP = "docker compose stop backup"
+BACKUP_REMOVE = "docker compose rm -s -f backup"
+BACKUP_LOG = "docker compose logs --no-color backup > <file>"
 ROLLBACK_CHECK = (
     "env -u COMPOSE_FILE RECIPE_VERSION=<new tag> docker compose -f compose.yaml "
     "run --rm restore-volume --check-only <stamp>"
@@ -520,9 +554,9 @@ DUMP_CHECK = (
 )
 
 
-def runbook_step(title, start):
+def runbook_step(title, start, level=3):
     """Return a step up to its next unindented step number."""
-    section = runbook_heading_section(title, 3)
+    section = runbook_heading_section(title, level)
     matches = list(re.finditer(r"^" + re.escape(start) + r"[^\n]*", section, re.M))
     if len(matches) != 1:
         raise AssertionError(f"{title}: {start!r} must occur exactly once")
@@ -533,10 +567,70 @@ def runbook_step(title, start):
     return section[matches[0].start():matches[0].end() + end.start()]
 
 
+class RunbookStepTests(unittest.TestCase):
+    def test_step_reads_a_level_two_heading(self):
+        section = "## Major upgrade\n\n1. Delete app.\nKeep the dump.\n\n2. Continue.\n"
+        with mock.patch(f"{__name__}.runbook_heading_section", return_value=section) as heading:
+            self.assertEqual(runbook_step("Major upgrade", "1. Delete", level=2),
+                             "1. Delete app.\nKeep the dump.\n\n")
+        heading.assert_called_once_with("Major upgrade", 2)
+
+    def test_step_defaults_to_a_level_three_heading(self):
+        section = "### Rollback\n\n1. Stop backup.\nCheck the set.\n\n2. Continue.\n"
+        with mock.patch(f"{__name__}.runbook_heading_section", return_value=section) as heading:
+            self.assertEqual(runbook_step("Rollback", "1. Stop"),
+                             "1. Stop backup.\nCheck the set.\n\n")
+        heading.assert_called_once_with("Rollback", 3)
+
+
 def stripped_bash_blocks(section):
     """Strip each command line, including tabs and carriage returns."""
     return [[line.strip() for line in block.splitlines()]
             for block in runbook_bash_blocks(section)]
+
+
+class RunbookMajorUpgradeDeleteTests(unittest.TestCase):
+    def test_step_one_has_only_the_remove_command(self):
+        step = runbook_step("Major upgrade", "1. Delete the container of `app`.", level=2)
+        self.assertEqual(stripped_bash_blocks(step), [[APP_REMOVE]])
+
+    def test_step_one_has_optional_log_copy(self):
+        step = runbook_step("Major upgrade", "1. Delete the container of `app`.", level=2)
+        self.assertIn("docker compose logs --no-color app > <file>",
+                      runbook_inline_code_spans(step))
+
+    def test_step_one_log_copy_precedes_app_remove(self):
+        step = runbook_step("Major upgrade", "1. Delete the container of `app`.", level=2)
+        log = "docker compose logs --no-color app > <file>"
+        self.assertIn(log, runbook_inline_code_spans(step))
+        blocks = runbook_bash_blocks(step)
+        self.assertEqual(stripped_bash_blocks(step), [[APP_REMOVE]])
+        self.assertLess(step.index(log), step.index(blocks[0]),
+                        "step 1: copy the app log before deleting app")
+
+    def test_failed_path_creates_app_on_the_old_volume(self):
+        section = runbook_heading_section("Major upgrade", 2)
+        paragraphs = [paragraph for paragraph in section.split("\n\n")
+                      if paragraph.startswith("If a step before step 8 fails")]
+        self.assertEqual(len(paragraphs), 1)
+        self.assertIn("docker compose up -d --no-deps app",
+                      runbook_inline_code_spans(paragraphs[0]))
+        text = " ".join(paragraphs[0].replace("`", "").split())
+        markers = ("change into the directory of <old tag>",
+                   "docker compose up -d --no-deps app")
+        positions = [text.find(marker) for marker in markers]
+        message = "failed upgrade must select the old directory before creating app"
+        self.assertNotIn(-1, positions, message)
+        self.assertLess(positions[0], positions[1], message)
+
+    def test_section_has_no_start_app_or_start_backup_command(self):
+        section = runbook_heading_section("Major upgrade", 2)
+        self.assertEqual(runbook_deleted_service_starts(section), [],
+                         "major upgrade must use up -d --no-deps after the delete")
+
+    def test_section_has_no_stop_app_command(self):
+        section = runbook_heading_section("Major upgrade", 2)
+        self.assertNotIn("docker compose stop app", section)
 
 
 def assert_raw_commands(test, section, allowed, scope):
@@ -553,17 +647,31 @@ class FailedRollbackRunbookTests(unittest.TestCase):
         return runbook_heading_section(FAILED_TITLE, 4)
 
     def rollback_stop(self):
-        return runbook_step("Rollback", "1. Stop")
+        return runbook_step("Rollback", "1. Delete the container of `backup`.")
 
     def test_ci_rollback_check_equals_the_runbook_command(self):
         blocks = stripped_bash_blocks(self.rollback_stop())
-        checks = [block[1] for block in blocks if len(block) == 2 and block[0] == BACKUP_STOP]
+        checks = [block[1] for block in blocks if len(block) == 2 and block[0] == BACKUP_REMOVE]
         self.assertEqual(len(checks), 1, "step 1: exactly one command-1 block")
         expected = checks[0].replace("<new tag>", "ci-upgrade").replace("<stamp>", '"$stamp"')
         script = shell_function("check_rollback_runbook")
         commands = [line.strip() for line in script.splitlines()
                     if "docker compose" in line and "restore-volume" in line]
         self.assertEqual(commands, [expected], "CI must run the exact runbook check command")
+
+    def test_ci_rollback_check_deletes_backup_and_creates_it_after_the_check(self):
+        script = shell_function("check_rollback_runbook")
+        lines = [line.strip() for line in script.splitlines()]
+        remove = 'compose rm -s -f backup || fail "cannot delete backup before the runbook check"'
+        self.assertTrue(remove in lines, "CI must delete backup before the runbook check")
+        self.assertNotIn("compose stop backup", script)
+        start = "compose up -d --no-deps --wait --wait-timeout 180 backup"
+        self.assertIn(start, script)
+        check = ('env -u COMPOSE_FILE RECIPE_VERSION=ci-upgrade docker compose -f compose.yaml '
+                 'run --rm restore-volume --check-only "$stamp"')
+        self.assertLess(script.index(remove), script.index(check))
+        self.assertLess(script.index(') | tee "$CI_STATE/rollback-runbook.log"'), script.index(start))
+        self.assertNotRegex(script, r"compose\s+(?:start|restart)\b[^\n]*\bbackup\b")
 
     def test_failed_section_has_three_bash_blocks(self):
         self.assertEqual(len(stripped_bash_blocks(self.failed_section())), 3)
@@ -586,12 +694,35 @@ class FailedRollbackRunbookTests(unittest.TestCase):
 
     def test_rollback_stop_raw_commands(self):
         assert_raw_commands(self, self.rollback_stop(),
-                            {BACKUP_STOP, ROLLBACK_CHECK, APP_REMOVE}, "step 1")
+                            {BACKUP_REMOVE, BACKUP_LOG, ROLLBACK_CHECK, APP_REMOVE}, "step 1")
+
+    def test_rollback_log_copy_precedes_command_one(self):
+        blocks = stripped_bash_blocks(self.rollback_stop())
+        log = [BACKUP_LOG]
+        check = [BACKUP_REMOVE, ROLLBACK_CHECK]
+        self.assertEqual(blocks.count(log), 1, "step 1: exactly one backup log block")
+        self.assertEqual(blocks.count(check), 1, "step 1: missing command-1 block")
+        self.assertLess(blocks.index(log), blocks.index(check))
+
+    def test_rollback_backup_remove_equals_the_ci_command(self):
+        blocks = stripped_bash_blocks(self.rollback_stop())
+        checks = [block for block in blocks if ROLLBACK_CHECK in block]
+        self.assertEqual(len(checks), 1, "step 1: exactly one command-1 block")
+        self.assertEqual(checks[0][0], BACKUP_REMOVE)
+        script = shell_function("check_rollback_runbook")
+        self.assertIn(BACKUP_REMOVE.removeprefix("docker "), script)
+        self.assertNotIn("compose stop backup", script)
+
+    def test_rollback_has_no_start_of_a_deleted_service(self):
+        section = runbook_heading_section("Rollback", 3)
+        self.assertEqual(runbook_deleted_service_starts(section), [],
+                         "rollback must use up -d --no-deps after the delete")
 
     def test_each_recovery_step_links_to_the_failed_section(self):
         for title, start in (("Restore into production", "4. Fill the new volume."),
                              ("Rollback", "3. Fill the new volume."),
-                             ("Switch back", "8. Start"), ("Rollback", "1. Stop")):
+                             ("Switch back", "8. Start"),
+                             ("Rollback", "1. Delete the container of `backup`.")):
             with self.subTest(section=title, step=start):
                 self.assertIn(FAILED_LINK, runbook_step(title, start), "missing failed-restore link")
 
@@ -602,7 +733,7 @@ class FailedRollbackRunbookTests(unittest.TestCase):
 
     def test_rollback_check_precedes_remove(self):
         blocks = stripped_bash_blocks(self.rollback_stop())
-        check = [BACKUP_STOP, ROLLBACK_CHECK]
+        check = [BACKUP_REMOVE, ROLLBACK_CHECK]
         self.assertEqual(blocks.count(check), 1, "step 1: missing command-1 block")
         remove = next((index for index, block in enumerate(blocks) if APP_REMOVE in block), len(blocks))
         self.assertLess(blocks.index(check), remove, "step 1: command 1 must precede rm")

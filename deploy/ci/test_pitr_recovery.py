@@ -1043,7 +1043,7 @@ class StepTests(unittest.TestCase):
             r"^sudo test -e .*000000010000000000000003$",
             r"^compose --project-name recipe-ci-1-1 .* kill -s SIGKILL db$",
             r"^inspect --format \{\{\.State\.Running\}\} \{\{\.State\.ExitCode\}\} ",
-            r"^compose --project-name recipe-ci-1-1 .* stop walarchive$",
+            r"^compose --project-name recipe-ci-1-1 .* rm -s -f walarchive$",
             r"^run --rm --network none .* -v " + OLD_VOLUME + r":/var/lib/postgresql/data --entrypoint rm ",
         ])
 
@@ -1071,8 +1071,11 @@ class StepTests(unittest.TestCase):
         done, log, _ = self.run_step("crash", state=self.crash_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
         self.assertLess(log.index("rm -s -f app backup"), log.index("pg_current_wal_lsn"))
-        self.assertLess(log.index("kill -s SIGKILL db"), log.index("stop walarchive"))
+        self.assertLess(log.index("kill -s SIGKILL db"), log.index("rm -s -f walarchive"))
         self.assertNotIn("pg_switch_wal", log)
+
+    def test_crash_has_no_stop_of_walarchive(self):
+        self.assertNotIn("stop walarchive", shell_function("crash"))
 
     def test_crash_reads_the_clock_once_before_it_stops_the_writers(self):
         done, log, _ = self.run_step("crash", state=self.crash_state())
@@ -1136,7 +1139,7 @@ class StepTests(unittest.TestCase):
     def test_crash_fails_when_db_is_already_dead_at_kill_time(self):
         done, log, state = self.run_step("crash", {"STUB_KILL_STATUS": "1"}, self.crash_state())
         self.assert_stopped_before(done, log, "CI: crash: cannot kill db with SIGKILL.", "--entrypoint rm")
-        self.assertNotIn("stop walarchive", log)
+        self.assertNotIn("rm -s -f walarchive", log)
         self.assertNotIn("recovery.start", state)
 
     def test_crash_fails_when_db_does_not_end_with_sigkill(self):
@@ -1146,15 +1149,15 @@ class StepTests(unittest.TestCase):
                 self.assert_stopped_before(done, log, "CI: crash: db did not end with SIGKILL.", "--entrypoint rm")
                 self.assertEqual(len(re.findall(r"^inspect --format \{\{\.State\.Running\}\}", log, re.M)), 3)
 
-    def test_crash_fails_when_walarchive_does_not_stop(self):
-        done, log, _ = self.run_step("crash", {"STUB_STOP_WALARCHIVE_STATUS": "1"}, self.crash_state())
-        self.assert_stopped_before(done, log, "CI: crash: cannot stop walarchive.", "--entrypoint rm")
+    def test_crash_fails_when_walarchive_cannot_be_deleted(self):
+        done, log, _ = self.run_step("crash", {"STUB_REMOVE_WALARCHIVE_STATUS": "1"}, self.crash_state())
+        self.assert_stopped_before(done, log, "CI: crash: cannot delete walarchive.", "--entrypoint rm")
 
     def test_crash_fails_when_the_deletion_of_pg_control_fails(self):
         done, log, state = self.run_step("crash", {"STUB_RM_STATUS": "1"}, self.crash_state())
         self.assertEqual(done.returncode, 1, done.stderr + log)
         self.assertEqual(done.stderr.strip(), "CI: crash: cannot delete global/pg_control of the old volume.")
-        self.assertIn("stop walarchive", log)
+        self.assertIn("rm -s -f walarchive", log)
         self.assertNotIn("recovery.start", state)
 
     def test_crash_text_has_one_deletion_and_no_exit_idiom(self):
@@ -1989,25 +1992,74 @@ class RunbookRecoveryDeleteTests(unittest.TestCase):
         self.assertRegex(shell_function("crash"), rf"(?m)^\s*{command}(?:\s*\|\|[^\n]+)?$",
                          "crash() must execute compose rm -s -f app backup")
 
-    def test_section_has_no_start_app_or_start_backup_command(self):
+    def test_step_4_deletes_walarchive_in_one_bash_line(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "4. ")
+        self.assertEqual(self.runbook.stripped_bash_blocks(step), [["docker compose rm -s -f walarchive"]])
+
+    def test_crash_function_uses_the_runbook_walarchive_delete_command(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "4. ")
+        blocks = self.runbook.stripped_bash_blocks(step)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(len(blocks[0]), 1)
+        command = re.escape(blocks[0][0].removeprefix("docker "))
+        self.assertRegex(shell_function("crash"), rf"(?m)^\s*{command}(?:\s*\|\|[^\n]+)?$",
+                         "crash() must execute the recovery step 4 command")
+
+    def test_step_4_offers_walarchive_log_copy(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "4. ")
+        self.assertIn("docker compose logs --no-color walarchive > <file>",
+                      self.runbook.runbook_inline_code_spans(step))
+
+    def test_step_4_log_copy_precedes_walarchive_delete(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "4. ")
+        log = "docker compose logs --no-color walarchive > <file>"
+        blocks = self.runbook.runbook_bash_blocks(step)
+        self.assertIn(log, self.runbook.runbook_inline_code_spans(step))
+        self.assertEqual(self.runbook.stripped_bash_blocks(step), [["docker compose rm -s -f walarchive"]])
+        self.assertLess(step.index(log), step.index(blocks[0]),
+                        "recovery step 4 must copy walarchive logs before the delete block")
+
+    def test_step_7_recreates_walarchive_after_a_failed_attempt(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "7. Compare")
+        self.assertIn("docker compose up -d --no-deps walarchive", self.runbook.runbook_inline_code_spans(step))
+        self.assertNotIn("Start `walarchive`, if you stopped it in step 4", step)
+
+    def test_step_7_resets_the_tag_before_recreating_walarchive(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "7. Compare")
+        text = " ".join(step.replace("`", "").split())
+        self.assertIn("If <recovery tag> differs from <tag>,", text)
+        markers = ("change into the directory deploy/ of <tag>",
+                   "Set RECIPE_VERSION in .env to <tag>",
+                   "docker compose up -d --no-deps walarchive")
+        positions = [text.find(marker) for marker in markers]
+        self.assertNotIn(-1, positions, "failed recovery must reset the directory and tag before creating walarchive")
+        self.assertEqual(positions, sorted(positions), "failed recovery must reset the directory and tag before creating walarchive")
+
+    def test_step_8_ends_the_attempt_for_a_drill_volume(self):
+        step = self.runbook.runbook_step("Recover from the WAL archive", "8. Run the switch")
+        self.assertIn("This volume is a drill volume. Do not switch. End the attempt as in step 7.", step)
+        self.assertNotIn("Stop. This volume is a drill volume.", step)
+
+    def test_section_has_no_start_of_a_deleted_service(self):
         section = self.runbook.runbook_heading_section("Recover from the WAL archive", 3)
-        self.assertEqual(self.runbook.runbook_deleted_service_starts(section), [],
-                         "recovery section must use up -d --no-deps for app and backup after the delete")
+        self.assertEqual(self.runbook.runbook_deleted_service_starts(section, ("app", "backup", "walarchive")), [],
+                         "recovery section must use up -d --no-deps for app, backup, and walarchive after the delete")
 
     def test_section_guard_rejects_service_lists_and_double_backticks(self):
         for section in ("Run `docker compose start proxy backup`.",
+                        "Run `docker compose start walarchive`.",
                         "Run ``docker compose start app``.",
                         "Run `docker compose -f compose.yaml start proxy backup`.",
                         "```text\ndocker compose restart app\n```",
                         "```bash\ndocker compose start proxy app\n```"):
             with self.subTest(section=section), patch.object(
                     self.runbook, "runbook_heading_section", return_value=section), self.assertRaises(AssertionError):
-                self.test_section_has_no_start_app_or_start_backup_command()
+                self.test_section_has_no_start_of_a_deleted_service()
 
     def test_section_guard_allows_bare_start_and_other_services(self):
         section = "Never run `docker compose start` here. `docker compose start proxy` names no deleted service."
         with patch.object(self.runbook, "runbook_heading_section", return_value=section):
-            self.test_section_has_no_start_app_or_start_backup_command()
+            self.test_section_has_no_start_of_a_deleted_service()
 
 
 class ComposeRecoveryTests(unittest.TestCase):
@@ -2308,7 +2360,7 @@ case "$*" in
     printf '%s\\n' "$STUB_RECOVER_OUTPUT"
     exit "${STUB_RECOVER_STATUS:-0}" ;;
   *" rm -s -f app backup") exit "${STUB_REMOVE_APP_STATUS:-0}" ;;
-  *" stop walarchive") exit "${STUB_STOP_WALARCHIVE_STATUS:-0}" ;;
+  *" rm -s -f walarchive") exit "${STUB_REMOVE_WALARCHIVE_STATUS:-0}" ;;
   *" kill -s SIGKILL db") exit "${STUB_KILL_STATUS:-0}" ;;
   "inspect --format {{.State.Running}} {{.State.ExitCode}} "*) echo "${STUB_DB_STATE:-false 137}" ;;
   "inspect --format {{.State.Running}} "*) echo "${STUB_DB_RUNNING:-false}" ;;

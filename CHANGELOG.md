@@ -99,6 +99,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - After the drain at a stop, a new login, password change, user unlock, or Basic check gets `E-WEB-009` at once (ADR-0173).
 - The `rust-cache` steps of CI save the cache only on `main`.
 - A restore into production and a recovery from the WAL archive now delete the containers of `app` and `backup`. A restart of Docker or of the host then cannot start them on the old volume (ADR-0175).
+- The major upgrade deletes the container of `app`. The recovery from the WAL archive deletes the container of `walarchive`. The rollback deletes the container of `backup`. A reboot of the host in these windows cannot restart an old container (ADR-0176).
 
 ### Known gaps
 

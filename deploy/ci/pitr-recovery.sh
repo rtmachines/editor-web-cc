@@ -471,7 +471,7 @@ crash() {
   [[ $(db_volume) == "$old" ]] || fail "crash: db does not use the volume $old."
   has_job_label "$old" || fail "crash: the old volume $old has no label of this job."
   db_id=$(container db)
-  # ADR-0106 (p) measures the recovery time from step 5. The clock starts before the stop. The file comes last.
+  # ADR-0106 (p) measures the recovery time from step 5. The clock starts before the delete. The file comes last.
   started=$(date +%s)
   log "crash: the recovery time starts at $started. Delete app and backup"
   compose rm -s -f app backup || fail "crash: cannot delete app and backup."
@@ -481,7 +481,7 @@ crash() {
   log "crash: the expected WAL position is $FLUSHED_POSITION. Kill db with SIGKILL"
   compose kill -s SIGKILL db || fail "crash: cannot kill db with SIGKILL."
   retry db_killed "$db_id" || fail "crash: db did not end with SIGKILL."
-  compose stop walarchive || fail "crash: cannot stop walarchive."
+  compose rm -s -f walarchive || fail "crash: cannot delete walarchive."
   # The container mounts only the old volume and deletes only this one file. db is dead, so no process holds the cluster.
   log "crash: delete global/pg_control of the old volume $old"
   docker run --rm --network none --security-opt no-new-privileges:true -v "$old:/var/lib/postgresql/data" \
