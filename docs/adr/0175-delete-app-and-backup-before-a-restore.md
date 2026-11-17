@@ -1,6 +1,6 @@
 # ADR-0175: Delete the containers of app and backup before a restore or a recovery
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0176 (items (h), (i), (j), (k): delete `app` in the major upgrade, `walarchive` in the recovery, and `backup` in the rollback)
 Date: 2026-11-16
 Deciders: project owner
 

@@ -476,18 +476,23 @@ Use the section [Failed rollback restore after a failed upgrade](#failed-rollbac
 
 From step 2 of [Restore into production](#restore-into-production) until the procedure starts `app` and `backup` again, the two services can have no container.
 The same holds from step 1 of [Recover from the WAL archive](#recover-from-the-wal-archive).
-In that window, `proxy` cannot become `healthy`, because its healthcheck calls `http://app:9000/healthz`.
-Skip step 4 in that window. Step 4 runs `docker compose exec app`.
+From step 1 of [Major upgrade](#major-upgrade) until the procedure starts `app` again, `app` can have no container.
+In [Rollback](#rollback), step 1 of the restore of the `_premigrate` set deletes `backup`.
+From that step until the procedure starts `app` and `backup` again, `backup` can have no container.
+From the pass of command 1 in that step, `app` can have no container too.
 
-In that window, step 1 waits only for `db` and `walarchive`, and only for a service that `docker compose ps -a` lists.
+While `app` has no container, `proxy` can stay unhealthy, because its healthcheck calls `http://app:9000/healthz`.
+Skip step 4 in each window. Step 4 runs `docker compose exec app`.
+
+In each window, step 1 waits only for `db` and `walarchive`, and only for a service that `docker compose ps -a` lists.
+Step 4 of the recovery deletes the container of `walarchive`.
 The switch deletes the containers of `db` and `walarchive`, and later steps create them again.
 Until step 8 of the recovery deletes the container of `db`, skip this wait when `db` did not run at step 1 of the recovery.
 Such a `db` cannot become `healthy`, and the healthcheck of `walarchive` needs a running `db`.
 
 After step 1 of this section, continue the procedure at the step where it stopped.
-Three cases need an action before you continue:
+Two cases need an action before you continue:
 
-- If the reboot came between step 4 and step 8 of the recovery, `walarchive` runs again. Run step 4 of the recovery again.
 - If the reboot stopped step 4 of the restore or step 6 of the recovery, the new volume is not complete. Delete it with `docker volume rm <new volume>`. Then start again at step 3 of the restore or at step 5 of the recovery.
 - If the reboot stopped step 7 of the restore or step 10 of the recovery, the shell lost the variable `target`. Set `target` to the directory that sub-step 1 made. If sub-step 1 made no directory, run sub-step 1 again.
 
@@ -975,10 +980,13 @@ docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT pg_current_w
    Run the flush check of step 12 of "A gap in the WAL stream" with `<lsn>` in place of `<position>`. Run it until it returns `t`.
    Only a recovery to the end of the archive uses `<lsn>` as `PITR_EXPECTED_LSN`. With a target time, step 6 does not pass it.
 
-4. Stop `walarchive`. The `.partial` file then stays stable:
+4. Delete the container of `walarchive`. The `.partial` file then stays stable.
+   A restart of Docker or of the host starts a stopped container with `restart: always` again. A running `walarchive` can change the `.partial` file.
+   Optional: first copy the log of the container with `docker compose logs --no-color walarchive > <file>`, because `rm` deletes it.
+   Then delete the container:
 
 ```bash
-docker compose stop walarchive
+docker compose rm -s -f walarchive
 ```
 
 5. Create the new volume. Run step 3 of "Restore into production". The command prints the name of the volume.
@@ -1006,7 +1014,10 @@ docker compose run --rm --no-deps -T -e PITR_EXPECTED_LSN=<lsn> -e PITR_MARKER_S
    4. The field `heartbeat_last_at` shows a time that fits the recovery point.
    5. The field `drill` is `false`.
 
-   To end the attempt, delete the new volume. Start `walarchive`, if you stopped it in step 4.
+   To end the attempt, delete the new volume.
+   If `<recovery tag>` differs from `<tag>`, change into the directory `deploy/` of `<tag>`.
+   Set `RECIPE_VERSION` in `.env` to `<tag>`.
+   If step 4 ran, create `walarchive` again with `docker compose up -d --no-deps walarchive`.
    Then end the attempt as in step 4 of "Restore into production". Do not switch.
 8. Run the switch. Run step 5 of "Restore into production" with `<new volume>`, `<identifier>`, and `<timeline>`. Make these changes (ADR-0106 (j)):
    1. In sub-step 2, use the rule of step 2 of [Switch back](#switch-back). The old volume needs no state. Never start `db` on it.
@@ -1019,8 +1030,8 @@ docker compose run --rm --no-deps -T -e PITR_EXPECTED_LSN=<lsn> -e PITR_MARKER_S
 docker run --rm --network none --security-opt no-new-privileges:true -v "<new volume>:/var/lib/postgresql/data:ro" --entrypoint find "recipe-pgtools:<recovery tag>" /var/lib/postgresql/data -maxdepth 1 -name pitr-drill
 ```
 
-      When the command prints a path, the file exists. Stop. This volume is a drill volume.
-      Also stop when the field `drill` of step 7 is `true`.
+      When the command prints a path, the file exists. This volume is a drill volume. Do not switch. End the attempt as in step 7.
+      Do the same when the field `drill` of step 7 is `true`.
 
    If sub-step 7 fails, run [Switch back](#switch-back) at once. If the old volume was unreadable, no switch back exists. The new volume is then the only cluster.
 9. Set the role passwords. Run step 6 of "Restore into production". The cluster already holds the passwords of production, and the secret files stay the one source.
@@ -1593,14 +1604,21 @@ Use these placeholders in addition to the placeholders of [Restore into producti
 - `<new tag>` is the new release tag that step 1 of the section "Upgrade" notes. Only command 1 of step 1 uses it. In the plain rollback, it equals `<tag>`.
 - `<stamp>` is the name of the `_premigrate` set, for example `<YYYYMMDD_HHMM>_premigrate`.
 
-1. Stop `backup`. Run the check of the set below, which is command 1. Only after it passes, delete `app`.
+1. Delete the container of `backup`. Run the check of the set below, which is command 1. Only after it passes, delete `app`.
    Then create the new volume. Run step 3 of "Restore into production".
-   Run no step 2 of that list, because the commands below already stop `backup` and delete `app`.
+   Run no step 2 of that list, because the commands below already delete `backup` and `app`.
    Skip step 1 of that list. Steps 1 to 8 of `restore-volume` test the `_premigrate` set (ADR-0103 (b)).
    For a failed upgrade, see [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade).
+   Optional: first copy the log of the container of `backup` with the next block, because `rm` deletes it.
 
 ```bash
-docker compose stop backup
+docker compose logs --no-color backup > <file>
+```
+
+   The block of command 1 first deletes the container of `backup`. Then it runs command 1.
+
+```bash
+docker compose rm -s -f backup
 env -u COMPOSE_FILE RECIPE_VERSION=<new tag> docker compose -f compose.yaml run --rm restore-volume --check-only <stamp>
 ```
 
@@ -1615,8 +1633,9 @@ docker compose rm -s -f app
    The option `-f` and `env -u COMPOSE_FILE` ignore each `COMPOSE_FILE`. The variable `RECIPE_VERSION` selects the new image in both states.
    Without these parts, the second state runs the check with the previous image. That image stops with `usage: restore-volume <stamp>`. This stop looks like a failed check.
    The order of the parts matters. The new image with the file `compose.previous.yaml` has no key, so its check stops. The previous image has no mode `--check-only`.
-   Stop `backup` before command 1. A weekly `restore-test` of a running `backup` can hold the lock of `restore-volume`.
-   Command 1 then stops with a fault that the set does not cause.
+   Delete the container of `backup` before command 1. A weekly `restore-test` of a running `backup` can hold the lock of `restore-volume`.
+   Command 1 or the fill of step 3 then stops with a fault that the set does not cause.
+   `backup` has `restart: always`, so a reboot or a restart of the container engine starts a stopped container again.
    Delete `app` only after command 1 passes. A failed check then leaves the running `app` unchanged.
    The reason of the delete is the later start of `app`. `app` has `restart: always`, so a stopped container starts again after a reboot or a restart of the container engine.
    Its writes then make the lost period of the rollback longer, and no message shows them. After a failed upgrade, the previous `app` also starts on the schema of the failed `migrate`.
@@ -1921,7 +1940,15 @@ The next migration records the same index with `CREATE INDEX IF NOT EXISTS` (`da
 A major upgrade of PostgreSQL is a dump and a restore into a new `db` volume.
 The new volume uses the same `initdb` arguments as `compose.yaml`. The project does not use `pg_upgrade` (ADR-0020).
 
-1. Run `docker compose stop app`. The next dump then holds every change.
+1. Delete the container of `app`. The next dump then holds every change.
+   A restart of Docker or of the host starts a stopped container with `restart: always` again, on the old volume.
+   Optional: first copy the log of the container with `docker compose logs --no-color app > <file>`, because `rm` deletes it.
+   Then delete the container:
+
+```bash
+docker compose rm -s -f app
+```
+
 2. Run `docker compose exec backup backup-now`. The new `_now` set holds the globals file and the dump (`reliability.md` 7.7).
 3. Run `docker compose exec backup restore-test`. Continue only after it passes.
 4. Check that the line `restore test passed` names the `_now` set of step 2.
@@ -1936,7 +1963,7 @@ Use the placeholders of [Restore into production](#restore-into-production) and 
 - `<old tag>` is the value of `RECIPE_VERSION` in `.env` before step 7. It is the tag of the old cluster.
 - `<new tag>` is the tag of the new release. It is the tag of the cluster in the new volume.
 
-If a step before step 8 fails, change into the directory of `<old tag>`. Then run `docker compose start app`, so that `app` serves again on the old volume.
+If a step before step 8 fails, change into the directory of `<old tag>`. Then run `docker compose up -d --no-deps app`, so that `app` serves again on the old volume.
 
 5. Write `<old tag>` into the change log of the site. Step 5 of "Restore into production" adds the lines `Database system identifier` and `Latest checkpoint's TimeLineID` of the old cluster to that entry. Keep the directory `deploy/` of `<old tag>` and the images of `<old tag>` (ADR-0105 (e)).
    The restart of sub-step 3 of step 5 of "Restore into production" and the switch back run in that directory.
