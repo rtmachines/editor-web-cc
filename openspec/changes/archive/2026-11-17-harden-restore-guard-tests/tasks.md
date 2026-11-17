@@ -261,7 +261,7 @@ The line numbers refer to `main` 2324454.
 
 ## 6. Gate
 
-- [ ] 6.1 (deploy/ci) Run the local checks and the CI dispatch:
+- [x] 6.1 (deploy/ci) Run the local checks and the CI dispatch:
   1. `bash deploy/ci/check.sh` passes. It runs each `deploy/ci/test_*.py`.
   2. `cargo test -p recipe-server --test deploy_values --locked` passes.
   3. `openspec validate harden-restore-guard-tests --strict` reports valid.
