@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
-    LeafPath, MemberName, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape,
-    RuleSet, TypeMember, TypeName,
+    ArrayDimension, ArrayDimensions, LeafPath, MemberName, PlcPlatform, PlcType, PlcTypeId,
+    PlcTypeRecord, Primitive, RecordShape, RuleSet, TypeMember, TypeName,
 };
 use recipe_domain::recipe::{StoredLimit, StoredParameter, StoredValue};
 use serde_json::{Value, json};
@@ -88,4 +88,58 @@ pub(crate) fn over_limit_top_parameter(top: PlcTypeId) -> StoredParameter {
         limits: vec![limit],
         ..parameter_on(PlcPlatform::S7_1500, 5, "TOP", uid(101), 40)
     }
+}
+
+/// The row of the array `ARRAY[1..10000] OF INT` of machine 1 on `platform`.
+const WIDE_ARRAY: u128 = 960;
+
+/// Store a struct above the leaf limit on `platform` and return its identifier.
+///
+/// The struct `name` has two members `first` and `second`. Each member is `ARRAY[1..10000] OF
+/// INT`, so the struct has 20000 leaves. The limit is 16384 (`reliability.md` section 7.11). The
+/// row passes `RuleSet::Earlier`, as a row that an earlier release stored, so the store takes it.
+pub(crate) fn seed_oversized_struct(
+    fixture: &Fixture,
+    platform: PlcPlatform,
+    name: &str,
+) -> PlcTypeId {
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    let dimensions =
+        ArrayDimensions::parse(vec![ArrayDimension::parse(1, 10_000).unwrap()]).unwrap();
+    let rows = [
+        RecordShape::Array {
+            element: int,
+            dimensions,
+        },
+        RecordShape::Struct {
+            name: TypeName::from_stored(name, RuleSet::Earlier).unwrap(),
+            revision: 1,
+            supersedes: None,
+            members: ["first", "second"]
+                .map(|member| TypeMember {
+                    name: MemberName::parse(member).unwrap(),
+                    type_id: tid(WIDE_ARRAY),
+                })
+                .to_vec(),
+        },
+    ];
+    let mut top = tid(WIDE_ARRAY);
+    for (offset, shape) in rows.into_iter().enumerate() {
+        let id = WIDE_ARRAY
+            .checked_add(u128::try_from(offset).unwrap())
+            .unwrap();
+        top = tid(id);
+        let row = PlcType::from_stored(
+            PlcTypeRecord {
+                id: top,
+                machine: Some(mid(1)),
+                platforms: BTreeSet::from([platform]),
+                shape,
+            },
+            RuleSet::Earlier,
+        )
+        .unwrap();
+        fixture.store.seed_type(&row);
+    }
+    top
 }

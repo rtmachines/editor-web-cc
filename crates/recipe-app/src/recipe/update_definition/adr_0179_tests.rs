@@ -1,6 +1,6 @@
 //! Tests of `UpdateParameterDefinition` for the rule "nesting limit of a type on S7" (ADR-0179).
 
-use recipe_domain::plant::{PlantError, PlcPlatform, S7Address, TypeLimit};
+use recipe_domain::plant::{PlantError, PlcPlatform, S7Address, TypeLimit, UnitPath};
 use serde_json::Value;
 
 use super::UpdateParameterDefinitionInput;
@@ -10,6 +10,7 @@ use crate::memory::fixtures::{
     Fixture, over_limit_top_parameter, parameter_on, seed_struct_chain, struct_chain_value, text,
     uid, vid,
 };
+use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry};
 use crate::recipe::test_support::{DRAFT_VERSION, DraftSnapshot, speed_key, stored_parameters};
 
 /// A draft of a machine on `platform` with the `INT` parameter `SPEED` and no S7 address.
@@ -116,4 +117,30 @@ async fn adr_0179_an_unchanged_stored_type_over_the_limit_does_not_stop_a_rename
         .unwrap();
     assert_eq!(kept.plc_type, top);
     assert_ne!(kept.key, speed_key());
+}
+
+#[tokio::test]
+async fn adr_0179_a_changed_type_over_the_limit_wins_over_a_missing_unit_and_takes_no_lock() {
+    let platform = PlcPlatform::S7_1500;
+    let fixture = draft_with_speed(platform);
+    seed_struct_chain(&fixture, platform, ("ST_Top", 9));
+    let before = DraftSnapshot::capture(&fixture);
+    let request = UpdateParameterDefinitionInput {
+        unit_path: UnitPath::parse("U9").unwrap(),
+        ..retype_request(platform, "ST_Top@1", &struct_chain_value(9))
+    };
+    let error = run(&fixture, request).await.unwrap_err();
+    assert_nesting_refused(&error, "ST_Top@1");
+    let tables: Vec<&str> = fixture
+        .store
+        .journal()
+        .into_iter()
+        .filter_map(|line| match line {
+            JournalEntry::Lock(lock) => Some(lock.table),
+            JournalEntry::Begin(_) => None,
+        })
+        .collect();
+    assert!(!tables.contains(&"unit"), "{tables:?}");
+    assert!(!tables.contains(&DERIVED_TYPE_LOCK_TABLE), "{tables:?}");
+    before.assert_unchanged(&fixture);
 }

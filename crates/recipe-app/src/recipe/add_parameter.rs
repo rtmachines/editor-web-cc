@@ -116,9 +116,9 @@ impl AddParameter {
         input
             .type_expr
             .require_no_nested_array(open.draft.platform())?;
+        require_s7_nesting(&open, &input.type_expr)?;
         let unit = lock_live_unit(&mut open, &input.unit_path).await?;
         let resolved = resolve_type(&mut open, &input.type_expr, audit_context(user, meta)).await?;
-        require_s7_nesting(&resolved, open.draft.platform())?;
         let key = ParameterKey::from(random_uuid()?);
         let id = ParameterId::from(random_uuid()?);
         let tag = input.tag.clone();

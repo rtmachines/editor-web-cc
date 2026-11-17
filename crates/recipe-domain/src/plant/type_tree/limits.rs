@@ -388,3 +388,32 @@ fn adr_0179_render_of_a_string_leaf_root_shows_its_length() {
     let tree = resolved(2, rows).unwrap();
     assert_eq!(render_node(tree.root()), "STRING(10)");
 }
+
+#[test]
+fn adr_0179_expr_count_adds_two_levels_for_an_array_over_a_struct_only() {
+    let tree = resolved(101, struct_chain(7)).unwrap();
+    let plain = TypeExpr::parse("ST_1@1").unwrap();
+    let array = TypeExpr::parse("ARRAY[1..2] OF ST_1@1").unwrap();
+    assert!(
+        tree.check_s7_nesting_of_expr(PlcPlatform::S7_1500, &plain)
+            .is_ok()
+    );
+    let error = tree
+        .check_s7_nesting_of_expr(PlcPlatform::S7_1500, &array)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge { ref type_name, limit: TypeLimit::S7Nesting }
+            if type_name == "ARRAY[1..2] OF ST_1@1"
+    ));
+    assert!(
+        tree.check_s7_nesting_of_expr(PlcPlatform::TwinCat3, &array)
+            .is_ok()
+    );
+    let leaf = resolved(INT, Vec::new()).unwrap();
+    let ints = TypeExpr::parse("ARRAY[1..2] OF INT").unwrap();
+    assert!(
+        leaf.check_s7_nesting_of_expr(PlcPlatform::S7_1500, &ints)
+            .is_ok()
+    );
+}

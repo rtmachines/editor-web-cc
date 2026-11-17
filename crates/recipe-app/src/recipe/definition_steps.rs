@@ -2,7 +2,7 @@
 
 use recipe_domain::audit::{AuditContext, AuditEntry};
 use recipe_domain::plant::{
-    LiveUnit, PlantError, PlcPlatform, PlcTypeId, TypeExpr, TypeTrees, UnitPath,
+    BaseExpr, LiveUnit, PlantError, PlcTypeId, RecordShape, TypeExpr, TypeTree, TypeTrees, UnitPath,
 };
 use recipe_domain::recipe::{ParameterTag, RecipeError};
 
@@ -94,23 +94,38 @@ pub(crate) async fn resolve_type(
 
 /// Count the nesting levels of the new type on an S7 platform (`E-PLT-018`, ADR-0179 (e)).
 ///
-/// The count needs the resolved tree, so the check runs after [`resolve_type`]. It reads only
-/// the type that the command writes. A stored type of another parameter stays unchecked
-/// (ADR-0179 (g), (h)). Every platform that is not an S7 platform accepts any count.
+/// The function runs next to `require_no_nested_array`, before the unit lock and before
+/// [`resolve_type`]. It reads the type rows that the open draft holds, so a refused type takes no
+/// lock and creates no row. It reads only the type that the command writes. A stored type of
+/// another parameter stays unchecked (ADR-0179 (g), (h)). A primitive, a string, and a struct
+/// that the machine does not have pass here. [`resolve_type`] reports a missing struct. Every
+/// platform that is not an S7 platform accepts any count.
 ///
 /// # Errors
 ///
 /// Returns `PlantError::TypeTooLarge` (`E-PLT-018`) with the limit kind `S7Nesting` and the type
-/// text when the count is above the limit. Returns `AppError::Storage` when the tree is missing.
-pub(crate) fn require_s7_nesting(
-    resolved: &ResolvedType,
-    platform: PlcPlatform,
-) -> Result<(), AppError> {
-    let tree = resolved
-        .trees
-        .tree(resolved.type_id)
-        .ok_or_else(|| StorageError::invariant("a new parameter type has no type tree"))?;
-    Ok(tree.check_s7_nesting(platform)?)
+/// text when the count is above the limit. Returns the `PlantError` of the base struct when its
+/// stored tree does not resolve, such as `E-PLT-018` for a stored struct above the leaf limit.
+pub(crate) fn require_s7_nesting(open: &OpenDraft, expr: &TypeExpr) -> Result<(), AppError> {
+    let platform = open.draft.platform();
+    let BaseExpr::Udt { name, revision } = expr.base() else {
+        return Ok(());
+    };
+    if !platform.is_s7() {
+        return Ok(());
+    }
+    let base = open.types.rows().find(|row| {
+        matches!(
+            row.shape(),
+            RecordShape::Struct { name: stored, revision: number, .. }
+                if stored == name && number == revision
+        )
+    });
+    let Some(base) = base else {
+        return Ok(());
+    };
+    let tree = TypeTree::resolve(base.id(), &open.types)?;
+    Ok(tree.check_s7_nesting_of_expr(platform, expr)?)
 }
 
 /// Map a failed write of a parameter tag to the domain error of the command.

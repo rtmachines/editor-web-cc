@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_S7_NESTING};
 use super::{
     ArrayDimensions, DerivedTypeReason, LeafClass, MachineId, MemberName, PlantError, PlcPlatform,
-    PlcType, PlcTypeId, Primitive, RecordShape, TypeLimit, TypeName,
+    PlcType, PlcTypeId, Primitive, RecordShape, TypeExpr, TypeLimit, TypeName,
 };
 
 /// The type rows that one machine can use.
@@ -219,6 +219,40 @@ impl TypeTree {
         if platform.is_s7() && self.s7_nesting > MAX_S7_NESTING {
             return Err(PlantError::TypeTooLarge {
                 type_name: render_node(&self.root),
+                limit: TypeLimit::S7Nesting,
+            });
+        }
+        Ok(())
+    }
+
+    /// Check the nesting limit of the type `expr` whose base struct or primitive is this tree.
+    ///
+    /// The function solves one problem: a command must refuse a type over the limit before it
+    /// locks the unit or inserts a derived array row, so it cannot wait for the resolved tree of
+    /// `expr`. The tree of the base gives the same count. An array over a struct adds the
+    /// 2 levels of ADR-0179 (b). An array over a primitive or a string adds none. Every
+    /// platform that is not an S7 platform accepts any count.
+    ///
+    /// # Errors
+    ///
+    /// Returns `E-PLT-018` with [`TypeLimit::S7Nesting`] and the text of `expr`, when `platform`
+    /// is `S7_300`, `S7_1200`, or `S7_1500` and the count is above [`MAX_S7_NESTING`].
+    pub fn check_s7_nesting_of_expr(
+        &self,
+        platform: PlcPlatform,
+        expr: &TypeExpr,
+    ) -> Result<(), PlantError> {
+        let is_array_of_struct =
+            !expr.arrays().is_empty() && matches!(self.root, TypeNode::Struct { .. });
+        let extra = if is_array_of_struct {
+            S7_ARRAY_OF_STRUCT_EXTRA
+        } else {
+            0
+        };
+        let levels = self.s7_nesting.saturating_add(extra);
+        if platform.is_s7() && levels > MAX_S7_NESTING {
+            return Err(PlantError::TypeTooLarge {
+                type_name: expr.to_string(),
                 limit: TypeLimit::S7Nesting,
             });
         }
