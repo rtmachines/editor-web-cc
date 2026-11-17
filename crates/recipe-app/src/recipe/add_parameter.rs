@@ -106,13 +106,13 @@ impl AddParameter {
         input: AddParameterInput,
     ) -> Result<AddParameterOutput, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
-        require_current_type(&input.type_expr)?;
         let target = DraftTarget {
             reference: &input.reference,
             number: input.number,
             expected_row_version: input.expected_row_version,
         };
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::Shared).await?;
+        require_current_type(&input.type_expr, open.draft.platform())?;
         input
             .type_expr
             .require_no_nested_array(open.draft.platform())?;

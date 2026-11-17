@@ -34,6 +34,7 @@ use crate::recipe::test_support::{
 mod adr_0177;
 mod adr_0178;
 mod adr_0179;
+mod adr_0186;
 
 fn limit(min: &str, max: &str) -> LimitInput {
     LimitInput {
@@ -459,7 +460,7 @@ fn reason_of(error: &AppError) -> Option<DerivedTypeReason> {
 }
 
 #[tokio::test]
-async fn a_type_text_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lock() {
+async fn a_type_text_with_a_reserved_struct_name_gives_plt_013_and_takes_no_advisory_lock() {
     let fixture = Fixture::new();
     seed_speed_draft(&fixture);
     seed_zone_on_int_struct(&fixture);
@@ -467,7 +468,12 @@ async fn a_type_text_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lock
     assert_eq!(error.code(), ErrorCode::PLT_013);
     assert_eq!(reason_of(&error), Some(DerivedTypeReason::ReservedName));
     assert_eq!(stored_parameters(&fixture).len(), 2);
-    assert!(fixture.store.journal().is_empty());
+    assert!(
+        !fixture.store.journal().iter().any(|entry| matches!(
+            entry,
+            crate::memory::JournalEntry::Lock(lock) if lock.table == crate::memory::DERIVED_TYPE_LOCK_TABLE
+        ))
+    );
     assert_nothing_written(&fixture);
 }
 

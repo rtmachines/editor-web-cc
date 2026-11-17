@@ -166,7 +166,7 @@ async fn stage_definition(
     let stored_type = open.draft.parameter(input.key)?.plc_type();
     let is_type_changed = !expr_names_row(&open.types, stored_type, &input.type_expr);
     if is_type_changed {
-        require_current_type(&input.type_expr)?;
+        require_current_type(&input.type_expr, open.draft.platform())?;
         input
             .type_expr
             .require_no_nested_array(open.draft.platform())?;

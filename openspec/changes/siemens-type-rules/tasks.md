@@ -141,7 +141,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
   - Test `adr_0186_the_telegram_family_holds_leading_zeros`: `PD_TEL0`, `PD_TEL03`, and `PD_TEL003` are reserved, as the superset of (d3) says.
   - A check that takes the platform refuses a struct name on the three S7 platforms with `E-PLT-013` and `ReservedName`. It accepts the name on `CodesysIec` and `TwinCat3`.
   - RED: `cargo test -p recipe-domain --lib adr_0186`. Then write the module and export it from `plant/mod.rs`. GREEN: the same command.
-- [ ] 6.2 (recipe-app) Add the use case tests `adr_0186_*` of the requirement "Siemens reserved struct names on S7" in `specs/plant-model/spec.md`. Cover these cases:
+- [x] 6.2 (recipe-app) Add the use case tests `adr_0186_*` of the requirement "Siemens reserved struct names on S7" in `specs/plant-model/spec.md`. Cover these cases:
   - A new struct `PID_Compact` and a new struct `PD_TEL3`, a new revision, a member name, `AddParameter` with a stored struct, and `CodesysIec`.
   - `RebindTypeRevision` from a stored `PID_Compact@1` to a stored `PID_Compact@2` passes. Test a parameter of type `PID_Compact@1` and one of type `ARRAY[1..2] OF PID_Compact@1` (ADR-0186 (i)).
   - RED: `cargo test -p recipe-app --lib adr_0186`. Then call the check in `crates/recipe-app/src/plant/define_udt.rs` for the struct name. Give `require_current_type` in `crates/recipe-app/src/plant/current_type.rs` the platform, so it also refuses a struct reference with a Siemens name on S7. The rebind keeps a stored name.
