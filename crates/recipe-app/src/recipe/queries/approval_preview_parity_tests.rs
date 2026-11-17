@@ -1,14 +1,20 @@
 //! The blockers of `GetApprovalPreview` against the errors of `ApproveVersion` (ADR-0049 (c), design D3).
 
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::plant::{PlcPlatform, PlcTypeId, Primitive, S7Address, UnitPath, UnitUsage};
-use recipe_domain::recipe::StoredParameter;
+use std::collections::BTreeSet;
+
+use recipe_domain::plant::{
+    ArrayDimension, ArrayDimensions, LeafPath, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
+    Primitive, RecordShape, S7Address, UnitPath, UnitUsage,
+};
+use recipe_domain::recipe::{StoredLimit, StoredParameter, StoredValue};
+use serde_json::json;
 
 use super::approval_preview::ApprovalPreview;
 use super::approval_preview_tests::{admin, keys, preview_as, valid_world};
 use crate::error::AppError;
 use crate::memory::fixtures::{
-    Fixture, meta, param, parameter_on, reference, tid, timestamp, uid, vid,
+    Fixture, limit, meta, param, parameter_on, reference, tid, timestamp, uid, vid,
 };
 use crate::memory::seed_type_id;
 use crate::recipe::{ApproveVersion, ApproveVersionInput};
@@ -172,6 +178,48 @@ async fn the_blocker_keys_hold_the_key_of_the_tag_of_an_address_rule_fault() {
 
         assert_eq!(preview.blocker_keys, keys(&[("T1", 1)]), "{code:?}");
     }
+}
+
+/// ADR-0178 (k): the key of a parameter with an `E-RCP-058` fault is in `blocker_keys`.
+///
+/// `T1` is of type `ARRAY[32760..32770] OF BYTE` at `DB1.DBB0` on `S7_300`.
+#[tokio::test]
+async fn adr_0178_the_blocker_keys_hold_the_key_of_an_e_rcp_058_fault() {
+    let platform = PlcPlatform::S7_300;
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    let byte = fixture.seed_primitive_type(900, platform, Primitive::Byte);
+    let array = PlcType::try_from(PlcTypeRecord {
+        id: tid(901),
+        machine: Some(machine.id()),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Array {
+            element: byte,
+            dimensions: ArrayDimensions::parse(vec![
+                ArrayDimension::parse(32_760, 32_770).unwrap(),
+            ])
+            .unwrap(),
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&array);
+    let (_, draft) = fixture.seed_draft(&machine, 1, "R-1");
+    let limits = (32_760..=32_770)
+        .map(|index| StoredLimit {
+            leaf_path: LeafPath::parse(&format!("[{index}]")).unwrap(),
+            ..limit()
+        })
+        .collect();
+    let parameter = StoredParameter {
+        limits,
+        value: StoredValue::from(json!([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])),
+        ..s7_parameter_at(tid(901), "DB1.DBB0")
+    };
+    fixture.store.seed_parameter(draft, &parameter);
+
+    let preview = assert_same_fault(&fixture, 1, ErrorCode::RCP_058).await;
+
+    assert_eq!(preview.blocker_keys, keys(&[("T1", 1)]));
 }
 
 #[tokio::test]
