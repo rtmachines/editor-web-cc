@@ -230,6 +230,8 @@ mod adr_0179_tests;
 #[cfg(test)]
 mod errors;
 #[cfg(test)]
+mod leaf_limit_tests;
+#[cfg(test)]
 mod nested_array_tests;
 #[cfg(test)]
 mod requests;

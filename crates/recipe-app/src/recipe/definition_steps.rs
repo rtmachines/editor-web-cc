@@ -101,15 +101,19 @@ pub(crate) async fn resolve_type(
 /// # Errors
 ///
 /// Returns `PlantError::TypeTooLarge` (`E-PLT-018`) with the limit kind `S7Nesting` and the type
-/// text when the count is above the limit. Returns `AppError::Storage` when the tree is missing.
+/// text when the count is above the limit. Returns the saved `PlantError` of a failed resolution,
+/// such as `E-PLT-018` for a stored struct above the leaf limit. Returns `AppError::Storage` when
+/// the resolution has no entry.
 pub(crate) fn require_s7_nesting(
     resolved: &ResolvedType,
     platform: PlcPlatform,
 ) -> Result<(), AppError> {
     let tree = resolved
         .trees
-        .tree(resolved.type_id)
-        .ok_or_else(|| StorageError::invariant("a new parameter type has no type tree"))?;
+        .get(resolved.type_id)
+        .ok_or_else(|| StorageError::invariant("a new parameter type has no type tree"))?
+        .as_ref()
+        .map_err(Clone::clone)?;
     Ok(tree.check_s7_nesting(platform)?)
 }
 
