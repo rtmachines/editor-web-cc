@@ -121,7 +121,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
   - Domain change: change `crates/recipe-domain/src/recipe/value/leaf.rs`, and add the variant to `expected.rs`.
   - Web change: map the variant in `expected_key` of `crates/recipe-web/src/error/recipe.rs`. Add its key to `crates/recipe-web/i18n/en.ftl` and `crates/recipe-web/i18n/pl.ftl`.
   - GREEN: `cargo test -p recipe-domain --lib value` and `cargo test -p recipe-web --lib`.
-- [ ] 5.2 (recipe-domain) Integration task for task 5.1. Add `adr_0180_*` tests for a stored `WCHAR` `U+E000` on `S7_1500` and a stored `WSTRING(10)` value `"A\u{D000}"` on `S7_1200`. For each value, these results apply:
+- [x] 5.2 (recipe-domain) Integration task for task 5.1. Add `adr_0180_*` tests for a stored `WCHAR` `U+E000` on `S7_1500` and a stored `WSTRING(10)` value `"A\u{D000}"` on `S7_1200`. For each value, these results apply:
   - A draft load passes.
   - `ApproveVersion` gives an item of `E-RCP-020`.
   - `CreateVersion` copies the value.
