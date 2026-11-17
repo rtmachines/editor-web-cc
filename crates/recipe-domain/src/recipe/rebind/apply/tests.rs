@@ -8,8 +8,10 @@ use super::super::test_support::{
     request_with, trees, trees_on, trees_with_zone_3,
 };
 use crate::error_codes::ErrorCode;
-use crate::plant::fixtures::{dimensions, id};
-use crate::plant::{PlcPlatform, PlcTypeId, S7Address, TypeTrees};
+use crate::plant::fixtures::{
+    array_row, dimensions, id, machine, on_platform, primitive_row, struct_row_revision, types_for,
+};
+use crate::plant::{PlcPlatform, PlcTypeId, Primitive, S7Address, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
 use crate::recipe::{
     ArrayShape, Budget, Draft, DraftError, LangCode, ParameterKey, RebindPlan, RebindTargetReason,
@@ -580,6 +582,68 @@ fn adr_0140_rebind_of_a_parameter_in_the_data_block_59999_on_s7_1500_applies() {
 
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_3));
+}
+
+/// `BYTE`, `ARRAY[40000..40001] OF BYTE`, and the two revisions of `ST_Wide` for the tests of
+/// ADR-0178.
+const WIDE_BYTE: u128 = 70;
+const WIDE_ARRAY: u128 = 71;
+const WIDE_1: u128 = 72;
+const WIDE_2: u128 = 73;
+
+/// The trees of `ST_Wide@1` with no member and `ST_Wide@2` with the member `ARRAY[40000..40001]`.
+fn wide_trees() -> TypeTrees {
+    let platform = PlcPlatform::S7_1500;
+    let rows = vec![
+        primitive_row(WIDE_BYTE, Primitive::Byte),
+        array_row(WIDE_ARRAY, WIDE_BYTE, &[(40_000, 40_001)]),
+        struct_row_revision(WIDE_1, "ST_Wide", 1, &[("a", WIDE_BYTE)]),
+        struct_row_revision(
+            WIDE_2,
+            "ST_Wide",
+            2,
+            &[("a", WIDE_BYTE), ("wide", WIDE_ARRAY)],
+        ),
+    ];
+    TypeTrees::resolve(
+        [WIDE_BYTE, WIDE_ARRAY, WIDE_1, WIDE_2].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// Rebind `SPEED` from `ST_Wide@1` to `ST_Wide@2`, with or without an S7 address.
+fn rebind_to_wide(address: Option<&str>) -> (Draft, Result<(), DraftError>) {
+    let mut speed = param(1, "SPEED", WIDE_1, json!({"a": 1}), Vec::new());
+    speed.s7_address = address.map(|text| S7Address::parse(text).unwrap());
+    let mut draft = draft_on(PlcPlatform::S7_1500, vec![speed]);
+    let wide = wide_trees();
+    let values = [
+        (1, ".wide[40000]", number(1)),
+        (1, ".wide[40001]", number(2)),
+    ];
+    let request = request_with(WIDE_1, WIDE_2, &values);
+    let plan = draft.plan_rebind(&request, &wide).unwrap();
+    let result = draft
+        .apply_rebind(plan, &BTreeMap::new(), &wide)
+        .map(|_| ());
+    (draft, result)
+}
+
+#[test]
+fn adr_0178_rebind_to_a_struct_with_a_wide_bound_fails() {
+    let (draft, result) = rebind_to_wide(Some("DB1.DBB0"));
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_058);
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_1));
+}
+
+#[test]
+fn adr_0178_rebind_to_a_struct_with_a_wide_bound_applies_without_an_address() {
+    let (draft, result) = rebind_to_wide(None);
+
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_2));
 }
 
 #[test]

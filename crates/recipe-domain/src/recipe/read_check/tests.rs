@@ -9,7 +9,8 @@ use serde_json::json;
 use super::{RuleFault, RuleField, check_stored_parameter};
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{
-    TIME_TREES_ROOT, id, machine, on_platform, primitive_row, struct_row, time_trees_on, types_for,
+    TIME_TREES_ROOT, array_row, id, machine, on_platform, primitive_row, struct_row, time_trees_on,
+    types_for,
 };
 use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTree, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
@@ -494,4 +495,122 @@ fn adr_0118_two_stored_rows_for_one_leaf_are_a_structure_fault_with_the_current_
         fault.error(),
         DraftError::Recipe(RecipeError::LimitNotApplicable { leaf, .. }) if *leaf == LeafPath::whole()
     ));
+}
+
+/// The type identifier of the `BOOL` row of the standard-access tests.
+const BOOL: u128 = 14;
+
+/// The type identifier of the `BYTE` row of the standard-access tests.
+const BYTE: u128 = 15;
+
+/// The type identifier of `ARRAY[32768..32770] OF BYTE`. Its upper bound is above the `INT` range.
+const WIDE: u128 = 16;
+
+/// The type identifier of `ARRAY[1..2, 1..2, 1..2] OF BOOL`.
+const BOOL_3D: u128 = 17;
+
+/// The type identifier of `ARRAY[1..2, 1..2] OF BOOL`.
+const BOOL_2D: u128 = 18;
+
+/// The type identifier of the struct with the one member `WIDE`.
+const WIDE_IN_STRUCT: u128 = 19;
+
+/// The trees of the standard-access tests on `platform`.
+fn access_trees_on(platform: PlcPlatform) -> TypeTrees {
+    let rows = vec![
+        primitive_row(BOOL, Primitive::Bool),
+        primitive_row(BYTE, Primitive::Byte),
+        array_row(WIDE, BYTE, &[(32_768, 32_770)]),
+        array_row(BOOL_3D, BOOL, &[(1, 2), (1, 2), (1, 2)]),
+        array_row(BOOL_2D, BOOL, &[(1, 2), (1, 2)]),
+        struct_row(WIDE_IN_STRUCT, "WideInStruct", &[("a", WIDE)]),
+    ];
+    TypeTrees::resolve(
+        [
+            id(BOOL),
+            id(BYTE),
+            id(WIDE),
+            id(BOOL_3D),
+            id(BOOL_2D),
+            id(WIDE_IN_STRUCT),
+        ],
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// The stored value of an array of `count` zero bytes.
+fn zero_bytes(count: usize) -> serde_json::Value {
+    json!(vec![0; count])
+}
+
+/// The stored value of `ARRAY[1..2, 1..2, 1..2] OF BOOL`.
+fn false_cube() -> serde_json::Value {
+    json!([
+        [[false, false], [false, false]],
+        [[false, false], [false, false]]
+    ])
+}
+
+/// The stored value of `ARRAY[1..2, 1..2] OF BOOL`.
+fn false_square() -> serde_json::Value {
+    json!([[false, false], [false, false]])
+}
+
+/// ADR-0178 (e): a stored array bound of 32770 on a parameter with an address is a rule fault.
+#[test]
+fn adr_0178_a_stored_bound_above_32767_with_an_address_gives_the_rule_fault_e_rcp_058() {
+    for platform in [PlcPlatform::S7_300, PlcPlatform::S7_1500] {
+        let trees = access_trees_on(platform);
+        let parameter = parameter_with(WIDE, zero_bytes(3), Some("DB1.DBB0"), Vec::new());
+        let result = check_stored_parameter(&parameter, tree_of(&trees, WIDE));
+        let faults = result.unwrap();
+        assert_eq!(
+            found(&faults),
+            [(ErrorCode::RCP_058, RuleField::Address)],
+            "{platform:?}"
+        );
+    }
+}
+
+/// ADR-0178 (e): the rule reads a struct member, so the fault also holds for a struct.
+#[test]
+fn adr_0178_a_stored_bound_above_32767_in_a_struct_member_gives_the_rule_fault_e_rcp_058() {
+    let trees = access_trees_on(PlcPlatform::S7_1500);
+    let value = json!({ "a": zero_bytes(3) });
+    let parameter = parameter_with(WIDE_IN_STRUCT, value, Some("DB1.DBB0"), Vec::new());
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, WIDE_IN_STRUCT)).unwrap();
+    assert_eq!(found(&faults), [(ErrorCode::RCP_058, RuleField::Address)]);
+}
+
+/// ADR-0178 (e): a parameter without an address passes. The bound alone is no fault.
+#[test]
+fn adr_0178_a_stored_bound_above_32767_without_an_address_gives_no_fault() {
+    let trees = access_trees_on(PlcPlatform::S7_1500);
+    let parameter = parameter_with(WIDE, zero_bytes(3), None, Vec::new());
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, WIDE)).unwrap();
+    assert!(faults.is_empty(), "{faults:?}");
+}
+
+/// ADR-0187 (e): a stored `BOOL` array with three dimensions and an address is a rule fault.
+#[test]
+fn adr_0187_a_stored_bool_array_with_three_dimensions_gives_the_rule_fault_e_rcp_058() {
+    for platform in [PlcPlatform::S7_300, PlcPlatform::S7_1500] {
+        let trees = access_trees_on(platform);
+        let parameter = parameter_with(BOOL_3D, false_cube(), Some("DB1.DBX0.0"), Vec::new());
+        let faults = check_stored_parameter(&parameter, tree_of(&trees, BOOL_3D)).unwrap();
+        assert_eq!(
+            found(&faults),
+            [(ErrorCode::RCP_058, RuleField::Address)],
+            "{platform:?}"
+        );
+    }
+}
+
+/// ADR-0187 (e): a stored `BOOL` array with two dimensions gives no fault.
+#[test]
+fn adr_0187_a_stored_bool_array_with_two_dimensions_gives_no_fault() {
+    let trees = access_trees_on(PlcPlatform::S7_1500);
+    let parameter = parameter_with(BOOL_2D, false_square(), Some("DB1.DBX0.0"), Vec::new());
+    let faults = check_stored_parameter(&parameter, tree_of(&trees, BOOL_2D)).unwrap();
+    assert!(faults.is_empty(), "{faults:?}");
 }

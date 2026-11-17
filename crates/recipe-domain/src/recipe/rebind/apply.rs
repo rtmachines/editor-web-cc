@@ -5,7 +5,8 @@ use std::collections::BTreeMap;
 use super::{RebindPlan, RebindTargetReason};
 use crate::plant::{MemberName, PlcPlatform, PlcTypeId, RuleSet, TypeNode, TypeTree, TypeTrees};
 use crate::recipe::draft::{
-    check_data_block_rule, check_end_rule, check_faults, stored_limits_under, stored_value,
+    check_data_block_rule, check_end_rule, check_faults, check_standard_access_rule,
+    stored_limits_under, stored_value,
 };
 use crate::recipe::{
     Draft, DraftError, Parameter, ParameterChange, ParameterKey, ProcessLimit, RecipeError,
@@ -110,8 +111,8 @@ impl Draft {
     /// new type of a struct parameter is the target of the plan. The new type of an array
     /// parameter comes from `new_types`. The tree of each new type must have the shape of the
     /// planned tree. The method reads the planned value and the planned limits again against
-    /// that tree. The method runs the data block rule and the end rule of ADR-0116 (e) for each
-    /// rebound parameter. Then it checks the size budgets and the S7 rules of the changed draft.
+    /// that tree. The method runs the data block rule and the end rule of ADR-0116 (e) and the
+    /// standard access rule of ADR-0178 for each rebound parameter. Then it checks the size budgets and the S7 rules of the changed draft.
     /// The draft changes only after every check passes. The translations stay.
     ///
     /// The result holds one change for each parameter, in tag order.
@@ -123,7 +124,8 @@ impl Draft {
     /// the plan. Returns `E-RCP-005`, `E-RCP-004`, or a limit error when the planned value or a
     /// planned limit fails against the new tree. Returns `E-RCP-057` when a rebound parameter
     /// has a data block number that is too high. Returns `E-RCP-056` when a rebound parameter
-    /// ends after byte 65535 of its data block. Returns `E-RCP-021` when the changed draft is
+    /// ends after byte 65535 of its data block. Returns `E-RCP-058` when a rebound parameter has
+    /// an array that a data block with standard access cannot hold. Returns `E-RCP-021` when the changed draft is
     /// above a size budget.
     pub fn apply_rebind(
         &mut self,
@@ -210,6 +212,7 @@ fn rebound_parameter(
     }
     check_data_block_rule(candidate.platform, old.tag(), old.s7_address())?;
     check_end_rule(old.tag(), old.s7_address(), real)?;
+    check_standard_access_rule(old.tag(), old.s7_address(), real)?;
     let rows = limits.iter().map(ProcessLimit::to_stored).collect();
     Ok(old.rebound(new_type, value.to_stored(), rows))
 }

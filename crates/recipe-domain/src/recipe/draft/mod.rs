@@ -37,6 +37,7 @@ pub use budget::{
 pub use definition::{DefinitionUpdate, Retype};
 pub(crate) use guard::not_on_platform;
 pub use parameter::{Parameter, StoredParameter};
+pub(in crate::recipe) use s7::check_standard_access_rule;
 pub(crate) use s7::overlap_partners;
 pub(in crate::recipe) use s7::{check_data_block_rule, check_end_rule};
 
