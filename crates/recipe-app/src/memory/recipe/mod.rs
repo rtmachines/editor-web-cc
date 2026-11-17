@@ -446,9 +446,12 @@ impl RecipeRepository for MemoryTransaction {
         approver: UserId,
         hash: Sha256,
     ) -> Result<RowImage, StorageError> {
-        self.guard(version)?;
+        let locked = self.guard(version)?;
         let state = self.state();
         if let Some(row) = state.versions.get(&version) {
+            if row.row_version != locked {
+                return Err(without_lock(version));
+            }
             let has_other_approved = state.versions.values().any(|other| {
                 other.recipe == row.recipe
                     && other.id != version
