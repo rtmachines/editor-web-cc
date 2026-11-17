@@ -164,7 +164,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 9. Stored data matrix (design.md, section Stored data matrix)
 
-- [ ] 9.1 (recipe-db) Fixture task. It runs in chain H of wave 2, on the code before the rules of this change.
+- [x] 9.1 (recipe-db) Fixture task. It runs in chain H of wave 2, on the code before the rules of this change.
   - Test support comes first. Task 9.1 and task 9.2 use it.
     - In `crates/recipe-db/tests/storage/support/database.rs`, add `TestDatabase::create_empty`. It creates an empty database from `template0`, owned by `recipe_migrator`.
     - `TestDatabase::create_empty` also runs the three `REVOKE` and `GRANT` statements of `TestDatabase::create` for the new database.

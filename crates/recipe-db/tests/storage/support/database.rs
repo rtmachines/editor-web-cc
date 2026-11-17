@@ -5,11 +5,13 @@
 //! statements of `01-roles.sh` for the new database.
 
 use std::cell::RefCell;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use recipe_db::settings::Connection;
 use sqlx::{ConnectOptions as _, PgConnection};
+use uuid::Uuid;
 
 use super::container::{Role, TEMPLATE_DATABASE, server};
 use super::session::{connect, options};
@@ -55,6 +57,18 @@ pub struct TestDatabase {
 impl TestDatabase {
     /// Create a database from the template, owned by `recipe_migrator`.
     pub async fn create() -> Self {
+        Self::create_from(TEMPLATE_DATABASE).await
+    }
+
+    /// Create an empty database from `template0`, owned by `recipe_migrator`.
+    ///
+    /// It has no table. A test loads a dump into it. The three `REVOKE` and `GRANT` statements
+    /// of `create` run for it too.
+    pub async fn create_empty() -> Self {
+        Self::create_from("template0").await
+    }
+
+    async fn create_from(template: &str) -> Self {
         let number = NEXT_NUMBER.fetch_add(1, Ordering::Relaxed);
         let name = format!("test_{number}");
         let mut admin = options(server(), Role::Superuser, "postgres")
@@ -69,9 +83,7 @@ impl TestDatabase {
             .expect("the lock is free");
         // The name comes from a counter, not from input.
         let statements = [
-            format!(
-                "CREATE DATABASE \"{name}\" TEMPLATE {TEMPLATE_DATABASE} OWNER recipe_migrator"
-            ),
+            format!("CREATE DATABASE \"{name}\" TEMPLATE {template} OWNER recipe_migrator"),
             format!("REVOKE TEMPORARY ON DATABASE \"{name}\" FROM PUBLIC"),
             format!("REVOKE CONNECT ON DATABASE \"{name}\" FROM PUBLIC"),
             format!(
@@ -156,6 +168,44 @@ impl Drop for TestDatabase {
     }
 }
 
+/// A new directory of one test under the temporary folder, for dump files.
+///
+/// The drop removes the directory and its files.
+#[derive(Debug)]
+pub struct DumpDirectory {
+    directory: PathBuf,
+}
+
+impl DumpDirectory {
+    /// Create the directory. Its name is random, and `create_dir` fails when the path exists.
+    pub fn create() -> Self {
+        let directory = std::env::temp_dir().join(format!(
+            "recipe-db-dump-{}-{}",
+            std::process::id(),
+            Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir(&directory).expect("the directory is new");
+        Self { directory }
+    }
+
+    /// The path of a file in the directory.
+    pub fn file(&self, name: &str) -> PathBuf {
+        self.directory.join(name)
+    }
+
+    /// The path of the directory.
+    pub fn path(&self) -> &Path {
+        &self.directory
+    }
+}
+
+impl Drop for DumpDirectory {
+    fn drop(&mut self) {
+        // A leftover directory in the temporary folder does no harm.
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +226,40 @@ mod tests {
             .await
             .expect("the count is read");
         assert_eq!(found, 0, "the database {name} still exists");
+    }
+
+    #[tokio::test]
+    async fn an_empty_database_has_no_table_and_belongs_to_the_migrator() {
+        let database = TestDatabase::create_empty().await;
+        let mut migrator = database.connect(Role::Migrator).await;
+
+        let tables: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema')",
+        )
+        .fetch_one(&mut migrator)
+        .await
+        .expect("the tables are counted");
+        let owner: String = sqlx::query_scalar(
+            "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = current_database()",
+        )
+        .fetch_one(&mut migrator)
+        .await
+        .expect("the owner is read");
+
+        assert_eq!(tables, 0);
+        assert_eq!(owner, "recipe_migrator");
+    }
+
+    #[test]
+    fn a_dump_directory_removes_its_files_when_it_drops() {
+        let directory = DumpDirectory::create();
+        let file = directory.file("one.dump");
+        std::fs::write(&file, b"x").expect("the file is written");
+        let path = directory.path().to_owned();
+
+        assert!(file.exists());
+        drop(directory);
+
+        assert!(!path.exists());
     }
 }
