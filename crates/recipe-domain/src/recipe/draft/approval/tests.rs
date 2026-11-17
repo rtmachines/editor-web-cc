@@ -5,8 +5,8 @@ use serde_json::json;
 use super::super::add::support::{REAL, draft_with, live_unit, trees_on as real_trees_on};
 use super::super::support::{address, check_every, key, stored_draft_with, tag, user};
 use crate::error_codes::{ErrorCode, REGISTRY};
-use crate::plant::fixtures::id;
-use crate::plant::{LeafPath, PlcPlatform, PlcTypeId};
+use crate::plant::fixtures::{PLATFORM, id, machine as fixture_machine, primitive_row, types_for};
+use crate::plant::{LeafPath, PlcPlatform, PlcTypeId, Primitive, TypeTrees};
 use crate::recipe::VersionState;
 use crate::recipe::snapshot::fixtures::{
     ARCHIVED_UNIT, BOOL, INT, RAMPS, ST_RECIPE, STRING_20, ZONE_2, length, limited, on_unit, param,
@@ -89,10 +89,73 @@ fn a_struct_with_limits_on_every_numeric_and_string_leaf_passes() {
     assert!(draft(vec![parameter]).check_limits(&trees()).is_ok());
 }
 
+/// The type number of the primitive `TIME` in `primitive_trees`.
+const TIME_TYPE: u128 = 201;
+/// The type number of the primitive `DATE` in `primitive_trees`.
+const DATE_TYPE: u128 = 202;
+/// The type number of the primitive `CHAR` in `primitive_trees`.
+const CHAR_TYPE: u128 = 203;
+/// The type number of the primitive `WCHAR` in `primitive_trees`.
+const WCHAR_TYPE: u128 = 204;
+
+/// The trees of the primitives `TIME`, `DATE`, `CHAR`, and `WCHAR` on the platform of the fixtures.
+fn primitive_trees() -> TypeTrees {
+    let numbered = [
+        (TIME_TYPE, Primitive::Time),
+        (DATE_TYPE, Primitive::Date),
+        (CHAR_TYPE, Primitive::Char),
+        (WCHAR_TYPE, Primitive::Wchar),
+    ];
+    let rows = numbered
+        .iter()
+        .map(|(n, primitive)| primitive_row(*n, *primitive))
+        .collect();
+    let ids = numbered.iter().map(|(n, _)| id(*n));
+    TypeTrees::resolve(ids, &types_for(fixture_machine(), PLATFORM, rows))
+}
+
 #[test]
-fn bool_char_and_wchar_leaves_need_no_limit() {
+fn a_bool_leaf_needs_no_limit() {
     let draft = draft(vec![param(1, "ACTIVE", BOOL, json!(true))]);
     assert!(draft.check_limits(&trees()).is_ok());
+}
+
+#[test]
+fn a_time_leaf_without_a_limit_gives_one_e_rcp_016_entry() {
+    let draft = draft(vec![param(1, "WAIT", TIME_TYPE, json!(5))]);
+    let error = draft.check_limits(&primitive_trees()).unwrap_err();
+    assert_eq!(
+        list_of(error),
+        vec![(
+            ErrorCode::RCP_016,
+            "WAIT has no process limit. Set a limit before approval.".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_date_leaf_without_a_limit_gives_one_e_rcp_016_entry() {
+    let draft = draft(vec![param(1, "START", DATE_TYPE, json!(5))]);
+    let error = draft.check_limits(&primitive_trees()).unwrap_err();
+    assert_eq!(
+        list_of(error),
+        vec![(
+            ErrorCode::RCP_016,
+            "START has no process limit. Set a limit before approval.".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_char_leaf_without_a_limit_passes_the_limit_check() {
+    let draft = draft(vec![param(1, "MARK", CHAR_TYPE, json!("A"))]);
+    assert!(draft.check_limits(&primitive_trees()).is_ok());
+}
+
+#[test]
+fn a_wchar_leaf_without_a_limit_passes_the_limit_check() {
+    let draft = draft(vec![param(1, "MARK", WCHAR_TYPE, json!("A"))]);
+    assert!(draft.check_limits(&primitive_trees()).is_ok());
 }
 
 #[test]
