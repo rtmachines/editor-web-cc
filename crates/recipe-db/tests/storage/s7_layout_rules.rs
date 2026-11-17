@@ -1,10 +1,13 @@
 //! Tests of `deploy/db/check-s7-layout-rules.sql` (ADR-0147, ADR-0148, design D8).
 //!
-//! The query lists two kinds of stored rows. A `nested_array` row is an array of an array on a
+//! The query lists four kinds of stored rows. A `nested_array` row is an array of an array on a
 //! machine with `S7_300`, `S7_1200`, or `S7_1500`, or a parameter whose type tree holds one. A
 //! `layout_changed` row is a parameter with an S7 address whose type tree holds a struct with a
-//! direct `SINT` or `USINT` member, or an array of `BOOL` with more than one dimension. The tests
-//! compare the exact rows of the query, run it as `recipe_app`, and show that it writes nothing.
+//! direct `SINT` or `USINT` member, or an array of `BOOL` with more than one dimension. An
+//! `array_bound` row is a parameter with an S7 address whose type tree holds an array bound outside
+//! `-32768..=32767` (ADR-0178). A `bool_array_3d` row is a parameter with an S7 address whose type
+//! tree holds an array of `BOOL` with three dimensions (ADR-0187). The tests compare the exact rows
+//! of the query, run it as `recipe_app`, and show that it writes nothing.
 
 use std::collections::BTreeSet;
 
@@ -25,6 +28,8 @@ const S7_1200: &str = "S7_1200";
 const S7_1500: &str = "S7_1500";
 const NESTED: &str = "nested_array";
 const CHANGED: &str = "layout_changed";
+const BOUND: &str = "array_bound";
+const CUBE: &str = "bool_array_3d";
 
 /// One row of the query: machine code, reference number, version number, tag, part, and type text.
 /// An array row has no reference number, no version number, and no tag.
@@ -186,6 +191,20 @@ async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
     parameter(conn, &a, smalls, "SMALLS", Some("DB1.DBB30")).await;
     expected.parameter_row(&a, 1, "SMALLS", CHANGED, "ARRAY[1..2] OF ST_Small");
 
+    // ADR-0178 and ADR-0187: a bound of 32770, the same array inside a struct, and a BOOL array
+    // with three dimensions. The three dimensions are also a change of the layout.
+    let byte = fixtures::primitive(conn, "BYTE").await;
+    let wide = array_type(conn, &a, byte, &[32760], &[32770]).await;
+    parameter(conn, &a, wide, "WIDE", Some("DB1.DBB100")).await;
+    expected.parameter_row(&a, 1, "WIDE", BOUND, "ARRAY[32760..32770] OF BYTE");
+    let wide_holder = struct_of(conn, &a, "ST_Wide", wide).await;
+    parameter(conn, &a, wide_holder, "WIDE_HOLD", Some("DB1.DBB200")).await;
+    expected.parameter_row(&a, 1, "WIDE_HOLD", BOUND, "ST_Wide");
+    let cube = array_type(conn, &a, boolean, &[1, 1, 1], &[2, 2, 2]).await;
+    parameter(conn, &a, cube, "CUBE", Some("DB1.DBX300.0")).await;
+    expected.parameter_row(&a, 1, "CUBE", CUBE, "ARRAY[1..2,1..2,1..2] OF BOOL");
+    expected.parameter_row(&a, 1, "CUBE", CHANGED, "ARRAY[1..2,1..2,1..2] OF BOOL");
+
     // An approved version and a later draft of the same recipe both count.
     fixtures::approve(conn, a.version, a.user).await;
     let second = fixtures::draft_version(conn, a.recipe, S7_1500, 2, a.user).await;
@@ -240,12 +259,23 @@ async fn seed_non_hits(conn: &mut PgConnection) {
     let bytes = array_type(conn, &a, sint, &[1], &[4]).await;
     parameter(conn, &a, bytes, "BYTES", Some("DB1.DBB20")).await;
 
+    // ADR-0178 and ADR-0187: the same shapes without an address, and the bounds at the limits.
+    let byte = fixtures::primitive(conn, "BYTE").await;
+    let wide = array_type(conn, &a, byte, &[32760], &[32770]).await;
+    parameter(conn, &a, wide, "WIDE_NO_ADDRESS", None).await;
+    let cube = array_type(conn, &a, boolean, &[1, 1, 1], &[2, 2, 2]).await;
+    parameter(conn, &a, cube, "CUBE_NO_ADDRESS", None).await;
+    let limits = array_type(conn, &a, byte, &[-32768], &[32767]).await;
+    parameter(conn, &a, limits, "LIMITS", Some("DB1.DBB400")).await;
+
     // TwinCat3 allows an array of an array and has no address.
     let c = plant(conn, TWIN_CAT).await;
     let nested = nested_array(conn, &c).await;
     parameter(conn, &c, nested, "NESTED", None).await;
     let small = struct_of(conn, &c, "ST_Small", sint).await;
     parameter(conn, &c, small, "SMALL", None).await;
+    let wide = array_type(conn, &c, byte, &[32760], &[32770]).await;
+    parameter(conn, &c, wide, "WIDE", None).await;
 
     // A discarded draft keeps its parameter, but the query skips it.
     let e = plant(conn, S7_1500).await;
@@ -320,7 +350,7 @@ async fn s7_layout_query_lists_exactly_the_hit_rows_as_recipe_app() {
     let found = rows(&mut conn).await;
 
     assert_eq!(user, "recipe_app");
-    assert_eq!(expected.0.len(), 11, "the seed holds 11 hits");
+    assert_eq!(expected.0.len(), 15, "the seed holds 15 hits");
     assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
     let found: BTreeSet<Row> = found.into_iter().collect();
     assert_eq!(found, expected.0);
@@ -371,11 +401,39 @@ async fn s7_layout_query_lists_one_changed_row_for_each_affected_parameter() {
 
     let changed: Vec<&Row> = found.iter().filter(|row| row.4 == CHANGED).collect();
     let tags: BTreeSet<&str> = changed.iter().filter_map(|row| row.3.as_deref()).collect();
-    assert_eq!(changed.len(), 5, "rows found: {changed:#?}");
+    assert_eq!(changed.len(), 6, "rows found: {changed:#?}");
     assert_eq!(
         tags,
-        BTreeSet::from(["SMALL", "GRID", "SMALLS", "SMALL_V2"])
+        BTreeSet::from(["SMALL", "GRID", "SMALLS", "SMALL_V2", "CUBE"])
     );
+}
+
+#[tokio::test]
+async fn adr_0178_s7_layout_query_lists_a_parameter_with_an_address_and_a_wide_bound() {
+    let (database, expected) = seeded().await;
+    let mut conn = database.connect(Role::App).await;
+
+    let found = rows(&mut conn).await;
+
+    let bound: Vec<&Row> = found.iter().filter(|row| row.4 == BOUND).collect();
+    let tags: BTreeSet<&str> = bound.iter().filter_map(|row| row.3.as_deref()).collect();
+    assert_eq!(bound.len(), 2, "rows found: {bound:#?}");
+    assert_eq!(tags, BTreeSet::from(["WIDE", "WIDE_HOLD"]));
+    let expected_bound = expected.0.iter().filter(|row| row.4 == BOUND).count();
+    assert_eq!(bound.len(), expected_bound);
+}
+
+#[tokio::test]
+async fn adr_0187_s7_layout_query_lists_a_parameter_with_an_address_and_a_three_dimension_bool() {
+    let (database, _) = seeded().await;
+    let mut conn = database.connect(Role::App).await;
+
+    let found = rows(&mut conn).await;
+
+    let cube: Vec<&Row> = found.iter().filter(|row| row.4 == CUBE).collect();
+    assert_eq!(cube.len(), 1, "rows found: {cube:#?}");
+    assert_eq!(cube[0].3.as_deref(), Some("CUBE"));
+    assert_eq!(cube[0].5, "ARRAY[1..2,1..2,1..2] OF BOOL");
 }
 
 #[tokio::test]

@@ -1,10 +1,17 @@
--- Check the stored rows against the S7 layout rules (ADR-0147, ADR-0148, ADR-0177).
+-- Check the stored rows against the S7 layout rules (ADR-0147, ADR-0148, ADR-0177, ADR-0178,
+-- ADR-0187).
 --
 -- The query lists the stored rows that the current rule set changes or rejects:
 --   nested_array    an array row on a machine with S7_300, S7_1200, or S7_1500 whose element row is
 --                   an array row, and each parameter of a version whose type tree holds such a row
 --   layout_changed  a parameter with an S7 address whose type tree holds a struct with a direct SINT
 --                   or USINT member, or an array of BOOL with more than one dimension
+--   array_bound     a parameter with an S7 address whose type tree holds an array with a bound
+--                   outside -32768 to 32767 (ADR-0178). An Approved version of such a parameter
+--                   becomes not loadable after the upgrade.
+--   bool_array_3d   a parameter with an S7 address whose type tree holds an array of BOOL with
+--                   three dimensions (ADR-0187). An Approved version of such a parameter becomes
+--                   not loadable after the upgrade.
 --
 -- The columns are machine_code, reference_number, version_number, tag, part, and type_text.
 -- For an array row, reference_number, version_number, and tag are empty and type_text is the
@@ -65,6 +72,27 @@ changed_row (id) AS (
     JOIN plc_type e ON e.id = t.element_type_id
     WHERE t.kind = 'array'
       AND cardinality(t.dim_lower) > 1
+      AND e.kind = 'primitive'
+      AND e.name = 'BOOL'
+),
+-- An array row with a bound outside the range of a standard-access array index (ADR-0178).
+bound_row (id) AS (
+    SELECT t.id
+    FROM plc_type t
+    WHERE t.kind = 'array'
+      AND EXISTS (
+          SELECT 1
+          FROM unnest(t.dim_lower, t.dim_upper) AS d (lo, hi)
+          WHERE d.lo < -32768 OR d.lo > 32767 OR d.hi < -32768 OR d.hi > 32767
+      )
+),
+-- An array row of BOOL with three dimensions (ADR-0187).
+cube_row (id) AS (
+    SELECT t.id
+    FROM plc_type t
+    JOIN plc_type e ON e.id = t.element_type_id
+    WHERE t.kind = 'array'
+      AND cardinality(t.dim_lower) = 3
       AND e.kind = 'primitive'
       AND e.name = 'BOOL'
 ),
@@ -141,6 +169,32 @@ FROM (
           SELECT 1
           FROM tree x
           JOIN changed_row c ON c.id = x.type_id
+          WHERE x.root_id = p.plc_type_id
+      )
+    UNION ALL
+    SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
+           'array_bound', l.label
+    FROM live_parameter p
+    JOIN type_label l ON l.type_id = p.plc_type_id
+    WHERE p.s7_address IS NOT NULL
+      AND p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
+      AND EXISTS (
+          SELECT 1
+          FROM tree x
+          JOIN bound_row b ON b.id = x.type_id
+          WHERE x.root_id = p.plc_type_id
+      )
+    UNION ALL
+    SELECT p.machine_code, p.reference_number, p.version_number, p.tag,
+           'bool_array_3d', l.label
+    FROM live_parameter p
+    JOIN type_label l ON l.type_id = p.plc_type_id
+    WHERE p.s7_address IS NOT NULL
+      AND p.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
+      AND EXISTS (
+          SELECT 1
+          FROM tree x
+          JOIN cube_row c ON c.id = x.type_id
           WHERE x.root_id = p.plc_type_id
       )
 ) hit
