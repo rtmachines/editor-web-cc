@@ -121,7 +121,7 @@ impl DefineUdt {
             (next.number, next.supersedes),
             members,
         )?;
-        check_tree(&derived, (machine_id, platform), &row)?;
+        check_tree(&derived, (machine_id, platform), &row, &input.name)?;
         let after = insert_struct_row(tx.types(), &row, &input).await?;
         let defined = udt_defined_entry(user, meta, machine_id, &row, after);
         let (_, created) = derived.into_parts();
@@ -374,16 +374,27 @@ fn member_error(
 /// (`E-PLT-018`). On an S7 platform it also counts the nesting levels (ADR-0179 (d)). It then
 /// compares the struct names on each path, so a struct cannot hold an earlier revision of
 /// itself (ADR-0038).
+///
+/// The S7 nesting error names the struct without its revision, as the scenario of the
+/// requirement "Nesting limit of a type on S7" says.
 fn check_tree(
     derived: &DerivedTypes,
     (machine, platform): (MachineId, PlcPlatform),
     row: &PlcType,
+    name: &TypeName,
 ) -> Result<(), PlantError> {
     let mut rows = derived.rows().to_vec();
     rows.push(row.clone());
     let types = PlatformTypes::collect(machine, platform, rows)?;
     let tree = TypeTree::resolve(row.id(), &types)?;
-    tree.check_s7_nesting(platform)?;
+    tree.check_s7_nesting(platform)
+        .map_err(|error| match error {
+            PlantError::TypeTooLarge { limit, .. } => PlantError::TypeTooLarge {
+                type_name: name.as_str().to_owned(),
+                limit,
+            },
+            other => other,
+        })?;
     tree.check_struct_names()
 }
 
