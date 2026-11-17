@@ -145,6 +145,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-RCP-055` | `RecipeError::PrecisionExceeded { tag, leaf, field, type_name, max_digits }` | 422 | A number of {tag}{leaf} has too many significant digits for {type_name}. Use at most {max_digits} digits. |
 | `E-RCP-056` | `RecipeError::S7AddressPastBlockEnd { tag, address, size }` | 422 | Parameter {tag} at {address} needs {size} bytes. It ends after byte 65535 of the data block. |
 | `E-RCP-057` | `RecipeError::S7DataBlockOutOfRange { tag, address, max }` | 422 | Address {address} of {tag} uses a data block above {max}. The controller of the machine has no such data block. |
+| `E-RCP-058` | `RecipeError::S7TypeNotAddressable { tag, address, reason }` | 422 | Parameter {tag} at {address} has a type that a data block with standard access cannot hold: {reason}. Change the type. |
 | `E-IDN-001` | `IdentityError::DuplicateLogin { login }` | 409 | Login {login} is already in use. |
 | `E-IDN-002` | `IdentityError::LastAdministrator { login }` | 409 | {login} is the last active administrator. Add another administrator first. |
 | `E-IDN-003` | `IdentityError::InvalidCredentials` | 401 | Login or password is not correct. (An unknown login and an inactive user get the same message on purpose, A42. The Basic check of an export route and the refusal of an `ExportClient` account at `Login` return it too.) |
@@ -485,11 +486,11 @@ A value object can have a second public constructor `from_stored(stored, ..., ru
 | `Text` (description, change note) | Not empty after trim, at most 4 000 characters, no control characters except a line end. A line end is LF or CRLF (ADR-0028). `description_en` is required (A36) |
 | `Text` (translation name, description) | Name: not empty, at most 200 characters. Description: 0 to 4 000 characters, may be empty. No control characters except a line end (LF or CRLF) in the description |
 | `LangCode` | `^[a-z]{2,3}(-[A-Z]{2})?$`, not `en` (English is the base text, A17) |
-| `S7Address` | Grammar, width rule, alignment rule, overlap rule, and the end and data block rules of ADR-0116: `domain-model.md` 2.1. Platform rule: required on `S7_300`, optional on `S7_1200` and `S7_1500`, not allowed on `CodesysIec` and `TwinCat3` (A31) |
+| `S7Address` | Grammar, width rule, alignment rule, overlap rule, the end and data block rules of ADR-0116, and the standard-access rule of ADR-0178 and ADR-0187: `domain-model.md` 2.1. Platform rule: required on `S7_300`, optional on `S7_1200` and `S7_1500`, not allowed on `CodesysIec` and `TwinCat3` (A31) |
 | `S7Layout` | `domain-model.md` 2.1: `BOOL` packing, even-byte alignment, struct and array size |
-| `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved word of ADR-0143 (c) in any case. A stored name passes the earlier rule of ADR-0143 (i) |
+| `TypeName` (UDT) | `^[A-Za-z_][A-Za-z0-9_]{0,63}$`, not a reserved word of ADR-0143 (c) in any case. A stored name passes the earlier rule of ADR-0143 (i). On the S7 platforms, a command also refuses a Siemens reserved name of ADR-0186 |
 | `StringLength` | Range per platform: the `StringLength` table of `domain-model.md` 2.1 |
-| `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure of the reason table of `domain-model.md` 2.1 is `E-PLT-013`. The exception is a member of `DefineUdt` whose type is not on the platform: `E-PLT-006`. A type above a size limit is `E-PLT-018` |
+| `TypeExpr` | Grammar, rules, and errors: `domain-model.md` 2.1. Every failure of the reason table of `domain-model.md` 2.1 is `E-PLT-013`. The exception is a member of `DefineUdt` whose type is not on the platform: `E-PLT-006`. A type above a size limit is `E-PLT-018`, also a type above `type.s7_max_nesting` on the S7 platforms (ADR-0179) |
 | `ArrayDimension` | `lower <= upper`, `upper - lower < 65536`, at most 3 dimensions (A38, `domain-model.md` 2.1) |
 | `LeafPath` | Grammar: `domain-model.md` 2.1. The empty path is the parameter itself. `[*]` means every element of that array level. Resolves against the `TypeTree` |
 | `ProcessLimit` | `min <= max` when both set. Inside the type range. `max_length <= string_length`. The limit fields follow the `LeafClass` of the leaf. Not on a `BOOL`, `CHAR`, or `WCHAR` leaf (`domain-model.md` 2.2) |
@@ -505,6 +506,7 @@ A value object can have a second public constructor `from_stored(stored, ..., ru
 - `REAL` and `LREAL` leaves are additionally checked to fit the IEEE 754 single or double range. The range of `Decimal` lies inside both ranges, and a unit test proves it (ADR-0028). The significant digit rule of ADR-0117 is in `domain-model.md` 2.1.
 - A number with a fraction is outside the range of an integer type and gives `E-RCP-005` (ADR-0028).
 - The JSON parser enforces the depth limit `json.max_depth` (section 7.11). `DefineUdt` and `EnsureDerivedType` reject a `TypeTree` deeper than this limit with `E-PLT-018`, so a valid value never reaches it.
+- On `S7_300`, `S7_1200`, and `S7_1500`, `DefineUdt`, `AddParameter`, and `UpdateParameterDefinition` also reject a written type above `type.s7_max_nesting` with `E-PLT-018`. `RebindTypeRevision` rejects a moved type above this limit with the same code. The Siemens count of ADR-0179 (b) gives the levels.
 - Size budgets (Assumption A26, section 7.11): at most 16 384 scalar leaves per parameter. Per version: at most 262 144 leaves, 32 768 limit rows, and 4 000 parameters. `TypeTree` resolution counts leaves. `DefineUdt` and `EnsureDerivedType` reject a type above the per-parameter budget or above `type.max_members` with `E-PLT-018`. `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, `RebindTypeRevision`, and `CreateVersion` check the per-version budgets with `E-RCP-021`. Statement-level triggers on `parameter` and `parameter_limit` are the last line (`E-RCP-035`, `E-RCP-036`).
 - The shape check is exact: an array has at most 3 dimensions (Assumption A38) and exactly `(upper - lower + 1)` elements per dimension. A struct has exactly the member names. No extra key, no missing key.
 - The domain checks the length of a `STRING` or `WSTRING` value against `string_length` in the unit of `StringLength` (`domain-model.md` 2.1, ADR-0137). A `STRING` character outside Latin-1 gives `E-RCP-005` (ADR-0028). `U+0000` in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` value gives `E-RCP-005` (ADR-0137).
@@ -1091,6 +1093,7 @@ This table is the single source for every numeric setting. A key of the first co
 | `json.max_depth` | 32 | 4.4 |
 | `type.max_dimensions` | 3 (A38) | 4.3, 4.4, domain-model.md 2.1, data-model.md 3.3 |
 | `type.max_members` | 1024 | domain-model.md 2.1, data-model.md 3.4 |
+| `type.s7_max_nesting` | 8. The nesting levels of a type on `S7_300`, `S7_1200`, and `S7_1500`, with the Siemens count (ADR-0179) | 4.3, 4.4, domain-model.md 2.1 |
 | `budget.leaves_per_parameter` | 16 384 | 4.4 (A26) |
 | `budget.leaves_per_version` | 262 144 | 4.4 (A26) |
 | `budget.limit_rows_per_version` | 32 768 | 4.4 (A26) |

@@ -1,6 +1,6 @@
 # ADR-0147: S7 layout from the Siemens rules
 
-Status: Accepted. Amends ADR-0017 (S7 layout of a `SINT` or `USINT` struct member and of a `BOOL` array with two dimensions, source marks of the reference table)
+Status: Accepted. Amends ADR-0017 (S7 layout of a `SINT` or `USINT` struct member and of a `BOOL` array with two dimensions, source marks of the reference table). Amended by ADR-0187 (items (g) and (g1): no address for a `BOOL` array with three dimensions)
 Date: 2026-11-08
 Deciders: project owner
 

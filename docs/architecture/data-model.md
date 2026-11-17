@@ -2325,6 +2325,14 @@ Notes:
 - `WSTRING` has two seed rows, both with `machine_id = NULL`. One row has `string_length = 254` and the platforms `S7_1200` and `S7_1500`. The other row has `string_length = 80` and the platforms `CodesysIec` and `TwinCat3`. `WSTRING` without a length in a `TypeExpr` means the seed row of the platform of the machine.
 - S7 layout rules: `S7Address` and `S7Layout` in `domain-model.md` 2.1 define alignment, `BOOL` packing, and overlap. The domain checks them for every parameter with an address (`S7AddressOverlap`, `E-RCP-022`, `S7AddressMisaligned`, `E-RCP-023`). The "S7 size" column is the storage unit of a primitive. The domain computes the layout size of structs and arrays from it and does not store that size.
 - Types that are not in scope: IEC `ENUM`, subrange, and alias (Assumption A39), and `POINTER`, `REFERENCE`, `ANY`. A plant that needs another primitive type adds one migration row.
+- Siemens families that are not in scope (ADR-0185). The S7 platforms reserve their names as struct names (ADR-0186):
+  - parameter and block types: `VARIANT`, `REF_TO`, `TIMER`, `COUNTER`, `BLOCK_FC`, `BLOCK_FB`, `BLOCK_DB`, `BLOCK_SDB`, `VOID`, `PARAMETER`, `INSTANCE`, multi-instances, and formal block parameters
+  - system data types: IEC timer and counter types, system structures, `C_ALARM*`, and `C_NOTIFY*`
+  - system identifiers: `HW_*`, `EVENT_*`, `OB_*`, `CONN_*`, `DB_ANY`, `DB_WWW`, `DB_DYN`, `REMOTE`, `RTM`, and `PIP`
+  - communication and technology types: `TCON_*`, `TADDR_*`, `IF_CONF_*`, `Conf_*`, `TMAIL_*`, `OPC_UA_*`, the technology objects `TO_*`, and FB instance types such as `PID_Compact`
+  - the open array `ARRAY[*]` and the named value type (NVT) of S7-1500
+- The editor models the standard program only (Assumption A50). F data types, F-UDTs, F arrays, F open arrays, and F named value types are not in scope.
+- The column `S7_1200` is the classic S7-1200 family with firmware 4.1 or later (Assumption A49). The S7-1200 G2 is not in scope.
 - `S5TIME` exists on S7-1500 for compatibility. The matrix follows the vendor manuals as of the design date.
 
 ## 8. Migrations

@@ -1,6 +1,6 @@
 # ADR-0114: End of DATE on S7-1200 and S7-1500
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0184 (TIA V21 gives the end 2169-06-06, and the domain keeps 2168-12-31)
 Date: 2026-11-03
 Deciders: project owner
 
