@@ -304,6 +304,14 @@ fn assert_constraint_code(error: &StorageError, expected: ErrorCode) {
     );
 }
 
+/// Assert the message text of a constraint error. Both adapters give the text of `reliability.md` 1.2.
+fn assert_constraint_message(error: &StorageError, expected: &str) {
+    assert!(
+        matches!(error, StorageError::Constraint { message, .. } if message == expected),
+        "{error:?}"
+    );
+}
+
 /// A recipe with a live draft on a `S7_300` machine. The platform needs an S7 address.
 async fn s7_300_draft(h: &dyn Harness, n: u128) -> Draft {
     let built = Machine::create(
@@ -422,6 +430,7 @@ async fn the_parameter_above_the_budget_gives_e_rcp_035(h: &dyn Harness) {
         .unwrap_err();
 
     assert_constraint_code(&error, ErrorCode::RCP_035);
+    assert_constraint_message(&error, "The version has more than 4 000 parameters.");
 }
 
 async fn an_existing_key_at_the_full_budget_gives_the_unique_violation(h: &dyn Harness) {
@@ -476,6 +485,7 @@ async fn the_limit_rows_above_the_budget_give_e_rcp_036(h: &dyn Harness) {
         .unwrap_err();
 
     assert_constraint_code(&error, ErrorCode::RCP_036);
+    assert_constraint_message(&error, "The version has more than 32 768 limit rows.");
 }
 
 contract_case!(

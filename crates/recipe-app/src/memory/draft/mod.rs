@@ -47,9 +47,9 @@ const TYPE_OF_ANOTHER_MACHINE: &str = "The type belongs to another machine.";
 /// The message of `E-RCP-032`.
 const UNIT_OF_ANOTHER_MACHINE: &str = "The unit does not belong to the machine of the recipe.";
 /// The message of `E-RCP-035`.
-const TOO_MANY_PARAMETERS: &str = "The version has more than 4000 parameters.";
+const TOO_MANY_PARAMETERS: &str = "The version has more than 4 000 parameters.";
 /// The message of `E-RCP-036`.
-const TOO_MANY_LIMIT_ROWS: &str = "The version has more than 32768 limit rows.";
+const TOO_MANY_LIMIT_ROWS: &str = "The version has more than 32 768 limit rows.";
 
 impl MemoryTransaction {
     /// Require that `version` exists and is a live draft, as trigger 4.1 does.
