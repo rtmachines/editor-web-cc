@@ -412,3 +412,23 @@ fn type_expr_other_shapes_pass_on_s7_1500() {
         assert!(result.is_ok(), "{text}: {result:?}");
     }
 }
+
+#[test]
+fn adr_0183_string_with_square_brackets_fails() {
+    for text in ["STRING[10]", "WSTRING[10]"] {
+        let result = TypeExpr::parse(text);
+        assert!(
+            matches!(
+                &result,
+                Err(PlantError::DerivedTypeInvalid { type_expr, .. }) if type_expr == text
+            ),
+            "{text}: {result:?}"
+        );
+        assert_eq!(
+            result.err().map(|error| error.code().as_str()),
+            Some("E-PLT-013"),
+            "{text}"
+        );
+    }
+    assert_round_trip("STRING(10)");
+}
