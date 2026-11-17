@@ -1,7 +1,9 @@
 //! The unit and type steps that `AddParameter` and `UpdateParameterDefinition` share (design D11).
 
 use recipe_domain::audit::{AuditContext, AuditEntry};
-use recipe_domain::plant::{LiveUnit, PlantError, PlcTypeId, TypeExpr, TypeTrees, UnitPath};
+use recipe_domain::plant::{
+    LiveUnit, PlantError, PlcPlatform, PlcTypeId, TypeExpr, TypeTrees, UnitPath,
+};
 use recipe_domain::recipe::{ParameterTag, RecipeError};
 
 use super::draft_session::OpenDraft;
@@ -88,6 +90,27 @@ pub(crate) async fn resolve_type(
         trees,
         created,
     })
+}
+
+/// Count the nesting levels of the new type on an S7 platform (`E-PLT-018`, ADR-0179 (e)).
+///
+/// The count needs the resolved tree, so the check runs after [`resolve_type`]. It reads only
+/// the type that the command writes. A stored type of another parameter stays unchecked
+/// (ADR-0179 (g), (h)). Every platform that is not an S7 platform accepts any count.
+///
+/// # Errors
+///
+/// Returns `PlantError::TypeTooLarge` (`E-PLT-018`) with the limit kind `S7Nesting` and the type
+/// text when the count is above the limit. Returns `AppError::Storage` when the tree is missing.
+pub(crate) fn require_s7_nesting(
+    resolved: &ResolvedType,
+    platform: PlcPlatform,
+) -> Result<(), AppError> {
+    let tree = resolved
+        .trees
+        .tree(resolved.type_id)
+        .ok_or_else(|| StorageError::invariant("a new parameter type has no type tree"))?;
+    Ok(tree.check_s7_nesting(platform)?)
 }
 
 /// Map a failed write of a parameter tag to the domain error of the command.

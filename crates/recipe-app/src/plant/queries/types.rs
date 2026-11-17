@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use recipe_domain::plant::{
     Machine, MachineCode, MemberName, PlatformTypes, PlcType, PlcTypeId, Primitive, RecordShape,
-    StringKind, StringLength, TypeMember, TypeName, TypeNode, TypeTree, is_reserved_name,
+    StringKind, StringLength, TypeMember, TypeName, TypeNode, TypeTree,
 };
 
 use super::type_text::type_text;
@@ -15,6 +15,7 @@ use super::{TypeRef, live_machine, pick_revision, revisions_of};
 use crate::auth::{CurrentUser, FormPurpose, Operation, RequestMeta, UdtFormPurpose, authorize};
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
+use crate::plant::is_refused_struct_name;
 use crate::ports::Isolation;
 
 /// One revision of a struct, as the type rows of a machine hold it.
@@ -383,7 +384,8 @@ fn copied_revision(
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
 /// `<name>@<revision>`. No revision of the struct `revised` is a proposal, because a struct
 /// cannot hold an earlier revision of itself (ADR-0038). A struct with a reserved name is no proposal,
-/// because every command refuses it (ADR-0143 (i2)).
+/// because every command refuses it (ADR-0143 (i2)). On an S7 platform, a struct with a Siemens
+/// reserved name is no proposal either (ADR-0186 (h)).
 fn proposals(
     types: &PlatformTypes,
     groups: &BTreeMap<&TypeName, Vec<Revision<'_>>>,
@@ -406,7 +408,9 @@ fn proposals(
         .chain(has_wstring.then_some(Primitive::Wstring));
     let structs = groups
         .iter()
-        .filter(|(name, _)| Some(**name) != revised && !is_reserved_name(name.as_str()))
+        .filter(|(name, _)| {
+            Some(**name) != revised && !is_refused_struct_name(types.platform(), name)
+        })
         .filter_map(|(_, group)| group.first())
         .map(|latest| format!("{}@{}", latest.name, latest.number));
     primitives

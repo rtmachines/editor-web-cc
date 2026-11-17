@@ -282,7 +282,7 @@ async fn a_revision_of_a_stored_struct_with_a_reserved_name_gives_plt_013_and_wr
 }
 
 #[tokio::test]
-async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lock() {
+async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_advisory_lock() {
     let fixture = two_machines();
     fixture
         .store
@@ -305,7 +305,12 @@ async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lo
             ..
         })
     ));
-    assert!(fixture.store.journal().is_empty());
+    assert!(
+        !fixture.store.journal().iter().any(|entry| matches!(
+            entry,
+            crate::memory::JournalEntry::Lock(lock) if lock.table == crate::memory::DERIVED_TYPE_LOCK_TABLE
+        ))
+    );
     assert!(fixture.store.audit_entries().is_empty());
     assert_eq!(
         structs_of(&fixture, STORED_MACHINE),

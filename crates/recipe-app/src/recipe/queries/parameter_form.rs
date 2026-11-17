@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use recipe_domain::plant::{
     Machine, PlatformTypes, PlcType, Primitive, RecordShape, StringKind, StringLength, TypeExpr,
-    TypeName, TypeTree, Unit, UnitPath, is_reserved_name,
+    TypeName, TypeTree, Unit, UnitPath,
 };
 use recipe_domain::recipe::{
     Parameter, ParameterKey, Recipe, RecipeError, ReferenceNumber, RuleFault, StoredParameter,
@@ -23,6 +23,7 @@ use crate::auth::{
 };
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
+use crate::plant::is_refused_struct_name;
 use crate::ports::{Isolation, VersionDetail};
 
 /// The parsed request of `GetParameterForm`.
@@ -176,7 +177,8 @@ fn rule_faults_of(
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
 /// `<name>@<revision>` in the byte order of the name. A struct with a reserved name is no proposal,
-/// because every command refuses it (ADR-0143 (i2)).
+/// because every command refuses it (ADR-0143 (i2)). On an S7 platform, a struct with a Siemens
+/// reserved name is no proposal either (ADR-0186 (h)).
 fn proposals(types: &PlatformTypes) -> Vec<String> {
     let primitives: BTreeSet<Primitive> = types
         .rows()
@@ -196,7 +198,7 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
     let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
     for row in types.rows() {
         if let RecordShape::Struct { name, revision, .. } = row.shape()
-            && !is_reserved_name(name.as_str())
+            && !is_refused_struct_name(types.platform(), name)
         {
             let entry = latest.entry(name).or_insert(*revision);
             *entry = (*entry).max(*revision);

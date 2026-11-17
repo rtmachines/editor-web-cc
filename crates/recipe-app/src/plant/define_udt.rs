@@ -6,6 +6,7 @@ use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{
     DerivedTypeReason, MachineCode, MachineId, MemberName, PlantError, PlatformTypes, PlcPlatform,
     PlcType, PlcTypeId, PlcTypeRecord, RecordShape, TypeExpr, TypeMember, TypeName, TypeTree,
+    check_siemens_struct_name,
 };
 
 use super::current_type::require_current_type;
@@ -98,9 +99,6 @@ impl DefineUdt {
         input: DefineUdtInput,
     ) -> Result<DefineUdtOutput, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
-        for (_, expr) in &input.members {
-            require_current_type(expr)?;
-        }
         let machine_id = live_machine_id(&self.ctx, input.code).await?;
         let keys = derived_type_locks(
             Some(&input.name),
@@ -109,6 +107,7 @@ impl DefineUdt {
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;
         let locked = tx.plant().lock_machine_shared(machine_id).await?;
         let machine = require_live(locked, input.code)?.state;
+        require_current_names(&input, machine.platform())?;
         tx.types().lock_derived_types(machine_id, &keys).await?;
         let rows = tx.types().type_rows(machine_id).await?;
         let next = next_revision(&rows, machine_id, &input)?;
@@ -140,8 +139,20 @@ impl DefineUdt {
 /// Resolve the type expression of each member to a type row, in the order of the members.
 ///
 /// A member type that is not on the platform gets the member name (`E-PLT-006`).
-/// An array of an array on `S7_1200` and `S7_1500` is such a type (ADR-0148). The check runs
-/// before the type is created, so a refused member leaves no new type row.
+/// An array of an array on `S7_300`, `S7_1200`, and `S7_1500` is such a type (ADR-0148,
+/// ADR-0177). The check runs before the type is created, so a refused member leaves no new
+/// type row.
+/// Check the struct name and each member type text with the current rule set (ADR-0186 (e), (f)).
+///
+/// The check is pure and waits for no I/O (`reliability.md` section 7.4).
+fn require_current_names(input: &DefineUdtInput, platform: PlcPlatform) -> Result<(), PlantError> {
+    check_siemens_struct_name(platform, &input.name)?;
+    for (_, expr) in &input.members {
+        require_current_type(expr, platform)?;
+    }
+    Ok(())
+}
+
 async fn ensure_members(
     derived: &mut DerivedTypes,
     catalog: &mut dyn TypeCatalog,
@@ -360,8 +371,9 @@ fn member_error(
 /// Resolve the tree of the new struct over the rows and the new row.
 ///
 /// The check finds a cycle through existing structs (`E-PLT-005`) and a tree above a size limit
-/// (`E-PLT-018`). It then compares the struct names on each path, so a struct cannot hold an
-/// earlier revision of itself (ADR-0038).
+/// (`E-PLT-018`). On an S7 platform it also counts the nesting levels (ADR-0179 (d)). It then
+/// compares the struct names on each path, so a struct cannot hold an earlier revision of
+/// itself (ADR-0038).
 fn check_tree(
     derived: &DerivedTypes,
     (machine, platform): (MachineId, PlcPlatform),
@@ -370,7 +382,9 @@ fn check_tree(
     let mut rows = derived.rows().to_vec();
     rows.push(row.clone());
     let types = PlatformTypes::collect(machine, platform, rows)?;
-    TypeTree::resolve(row.id(), &types)?.check_struct_names()
+    let tree = TypeTree::resolve(row.id(), &types)?;
+    tree.check_s7_nesting(platform)?;
+    tree.check_struct_names()
 }
 
 #[cfg(test)]
