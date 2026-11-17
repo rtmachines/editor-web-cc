@@ -156,7 +156,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 7. Pattern of the S7 address in the export schema v2 (ADR-0189)
 
-- [ ] 7.1 (recipe-export) Add the module `addresses` to `crates/recipe-export/tests/schema.rs` with `adr_0189_*` tests. The forms `DB1.DBX0.7`, `DB2.DBB10`, `DB65535.DBW65534`, `DB12.DBD4`, and null pass the v2 file. The seven forms of ADR-0189 (d) fail with the keyword `pattern`. Each form gives the same answer from `S7Address::parse`. `DB1.DBX0.8` still passes the v1 file. RED: `cargo test -p recipe-export --test schema adr_0189`. Then add the pattern of `design.md`, section Decisions, to `crates/recipe-export/schema/export-v2.schema.json`. GREEN: `cargo test -p recipe-export`.
+- [x] 7.1 (recipe-export) Add the module `addresses` to `crates/recipe-export/tests/schema.rs` with `adr_0189_*` tests. The forms `DB1.DBX0.7`, `DB2.DBB10`, `DB65535.DBW65534`, `DB12.DBD4`, and null pass the v2 file. The seven forms of ADR-0189 (d) fail with the keyword `pattern`. Each form gives the same answer from `S7Address::parse`. `DB1.DBX0.8` still passes the v1 file. RED: `cargo test -p recipe-export --test schema adr_0189`. Then add the pattern of `design.md`, section Decisions, to `crates/recipe-export/schema/export-v2.schema.json`. GREEN: `cargo test -p recipe-export`.
 
 ## 8. Runbook
 

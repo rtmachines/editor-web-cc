@@ -321,7 +321,7 @@
         "key": { "$ref": "#/$defs/uuid" },
         "name_en": { "$ref": "#/$defs/name_text" },
         "type_id": { "$ref": "#/$defs/type_ref" },
-        "s7_address": { "type": ["string", "null"] },
+        "s7_address": { "type": ["string", "null"], "pattern": "^DB(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.(?:DBX(?:[0-9]{1,4}|[0-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])\\.[0-7]|DB[BWD](?:[0-9]{1,4}|[0-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))$" },
         "limits": {
           "description": "Ordered by leaf_path, compared byte by byte.",
           "type": "array",
