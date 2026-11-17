@@ -22,6 +22,7 @@ mod primitive;
 mod s7_address;
 mod s7_layout;
 mod s7_width;
+mod siemens_names;
 mod string_length;
 mod type_expr;
 mod type_name;
@@ -51,6 +52,9 @@ pub use plc_type::{PlcType, PlcTypeRecord, RecordShape, TypeKind, TypeMember};
 pub use primitive::{LeafClass, LeafClassReason, Primitive, PrimitiveReason};
 pub use s7_address::{S7Address, S7AddressReason, S7Width};
 pub use s7_layout::{S7Layout, S7Member, S7Start, s7_members};
+pub use siemens_names::{
+    SIEMENS_RESERVED_NAMES, check_siemens_struct_name, is_siemens_reserved_name,
+};
 pub use string_length::{StringKind, StringLength, StringLengthReason};
 pub use type_expr::{BaseExpr, TypeExpr};
 pub use type_name::{
