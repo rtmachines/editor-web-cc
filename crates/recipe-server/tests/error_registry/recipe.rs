@@ -4,7 +4,7 @@ use recipe_domain::identity::Login;
 use recipe_domain::plant::{LeafPath, PlcPlatform, S7Address, S7Width, TypeName};
 use recipe_domain::recipe::{
     Budget, Expected, LangCode, ParameterKey, ParameterTag, PrecisionField, RebindTargetReason,
-    RecipeError, ReferenceNumber, VersionStatus,
+    RecipeError, ReferenceNumber, S7AccessReason, VersionStatus,
 };
 
 use super::sample::Sample;
@@ -33,6 +33,7 @@ fn name_of(error: &RecipeError) -> &'static str {
         RecipeError::PrecisionExceeded { .. } => "RecipeError::PrecisionExceeded",
         RecipeError::S7AddressPastBlockEnd { .. } => "RecipeError::S7AddressPastBlockEnd",
         RecipeError::S7DataBlockOutOfRange { .. } => "RecipeError::S7DataBlockOutOfRange",
+        RecipeError::S7TypeNotAddressable { .. } => "RecipeError::S7TypeNotAddressable",
         RecipeError::ValueOutOfLimit { .. } => "RecipeError::ValueOutOfLimit",
         RecipeError::ValueShapeMismatch { .. } => "RecipeError::ValueShapeMismatch",
         RecipeError::LimitOutsideTypeRange { .. } => "RecipeError::LimitOutsideTypeRange",
@@ -166,6 +167,11 @@ fn address_errors() -> Vec<RecipeError> {
             tag: tag(),
             address: address(),
             max: 1,
+        },
+        RecipeError::S7TypeNotAddressable {
+            tag: tag(),
+            address: address(),
+            reason: S7AccessReason::ArrayBoundOutsideInt,
         },
     ]
 }

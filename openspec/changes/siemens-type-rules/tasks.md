@@ -65,7 +65,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 3. Standard-access rule and E-RCP-058 (ADR-0178, ADR-0187)
 
-- [ ] 3.1 (recipe-domain, recipe-app, recipe-web, recipe-server) The variant of `E-RCP-058` in every crate (ADR-0178 (b), ADR-0187). This task makes the five tests of the start of this file pass.
+- [x] 3.1 (recipe-domain, recipe-app, recipe-web, recipe-server) The variant of `E-RCP-058` in every crate (ADR-0178 (b), ADR-0187). This task makes the five tests of the start of this file pass.
   - RED, domain: in `crates/recipe-domain/src/recipe/draft/s7/tests.rs`, next to the `RCP_057` assertion, add `adr_0178_error_code`. `ErrorCode::RCP_058` is `E-RCP-058`, and `RecipeError::S7TypeNotAddressable` returns it for each reason.
   - RED, registry: in `crates/recipe-domain/src/recipe/error/registry_tests.rs`, set `DOC_ROW_COUNT` to 38. Add a sample of the variant to `parameter_samples`.
   - RED, web: in `crates/recipe-web/src/error/recipe_tests.rs`, add `adr_0178_message_*` tests. They check the message of each reason in `en` and `pl`, and the status 422.

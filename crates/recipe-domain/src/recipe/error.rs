@@ -50,6 +50,30 @@ pub enum PrecisionField {
     LimitMax,
 }
 
+/// The reason why a type does not fit a data block with standard access (`E-RCP-058`, ADR-0178,
+/// ADR-0187).
+///
+/// The type solves one problem: the message of `E-RCP-058` names its reason, and the bundles of the
+/// web layer hold one text for each value. The enum is not an error type and has no code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum S7AccessReason {
+    /// An array bound is outside `-32768..=32767` (ADR-0178 (b)).
+    ArrayBoundOutsideInt,
+    /// A `BOOL` array with three dimensions has no verified S7 layout (ADR-0187 (b)).
+    BoolArrayWithThreeDimensions,
+}
+
+impl fmt::Display for S7AccessReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::ArrayBoundOutsideInt => "an array bound is outside -32768 to 32767",
+            Self::BoolArrayWithThreeDimensions => {
+                "a BOOL array with three dimensions has no verified S7 layout"
+            }
+        })
+    }
+}
+
 /// Error of the Recipe Management context (`reliability.md` section 1.1).
 ///
 /// The enum has one variant for each code in the range `E-RCP-001` to
@@ -242,6 +266,19 @@ pub enum RecipeError {
         address: S7Address,
         /// The highest data block number of the platform.
         max: u16,
+    },
+    /// The type of a parameter with an address does not fit a data block with standard access
+    /// (`E-RCP-058`, ADR-0178, ADR-0187).
+    #[error(
+        "Parameter {tag} at {address} has a type that a data block with standard access cannot hold: {reason}. Change the type."
+    )]
+    S7TypeNotAddressable {
+        /// The tag of the parameter.
+        tag: ParameterTag,
+        /// The address of the parameter.
+        address: S7Address,
+        /// The rule that the type breaks.
+        reason: S7AccessReason,
     },
     /// A value is outside the process limit of its leaf (`E-RCP-004`).
     #[error("Value {value} of {tag}{leaf} is outside the process limit {min} to {max}.")]
@@ -466,6 +503,7 @@ impl RecipeError {
             Self::PrecisionExceeded { .. } => ErrorCode::RCP_055,
             Self::S7AddressPastBlockEnd { .. } => ErrorCode::RCP_056,
             Self::S7DataBlockOutOfRange { .. } => ErrorCode::RCP_057,
+            Self::S7TypeNotAddressable { .. } => ErrorCode::RCP_058,
         }
     }
 }

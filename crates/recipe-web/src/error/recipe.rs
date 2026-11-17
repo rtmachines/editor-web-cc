@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::LeafPath;
 use recipe_domain::recipe::{
-    Budget, Expected, RebindTargetReason, RecipeError, SnapshotItem, VersionStatus,
+    Budget, Expected, RebindTargetReason, RecipeError, S7AccessReason, SnapshotItem, VersionStatus,
 };
 
 use super::LineArg;
@@ -209,6 +209,9 @@ fn address_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
             ("address", address.to_string()),
             ("size", size.to_string()),
         ],
+        RecipeError::S7TypeNotAddressable { tag, address, .. } => {
+            vec![("tag", tag.to_string()), ("address", address.to_string())]
+        }
         RecipeError::S7AddressWidthMismatch {
             tag,
             address,
@@ -258,6 +261,9 @@ fn word_arg(error: &RecipeError) -> Option<(&'static str, LineArg)> {
         RecipeError::RebindTargetInvalid { reason, .. } => {
             Some(("reason", LineArg::word(rebind_key(*reason), reason)))
         }
+        RecipeError::S7TypeNotAddressable { reason, .. } => {
+            Some(("reason", LineArg::word(s7_access_key(*reason), reason)))
+        }
         _other => None,
     }
 }
@@ -291,6 +297,14 @@ const fn rebind_key(reason: RebindTargetReason) -> &'static str {
         RebindTargetReason::NotNewer => "rebind-reason-not-newer",
         RebindTargetReason::NotUsed => "rebind-reason-not-used",
         RebindTargetReason::PlanMismatch => "rebind-reason-plan-mismatch",
+    }
+}
+
+/// Return the key of the reason why a type does not fit a data block with standard access.
+const fn s7_access_key(reason: S7AccessReason) -> &'static str {
+    match reason {
+        S7AccessReason::ArrayBoundOutsideInt => "s7-access-reason-array-bound",
+        S7AccessReason::BoolArrayWithThreeDimensions => "s7-access-reason-bool-array-3d",
     }
 }
 

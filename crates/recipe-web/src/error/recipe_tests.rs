@@ -12,11 +12,13 @@ use recipe_domain::plant::{
 };
 use recipe_domain::recipe::{
     Budget, Expected, LangCode, ParameterKey, ParameterTag, PrecisionField, RebindTargetReason,
-    RecipeError, RecipeErrors, ReferenceNumber, SnapshotError, SnapshotItem, VersionStatus,
+    RecipeError, RecipeErrors, ReferenceNumber, S7AccessReason, SnapshotError, SnapshotItem,
+    VersionStatus,
 };
 use uuid::Uuid;
 
 use super::lists::{leaf_lines, line_view};
+use super::status::status_of;
 use crate::i18n::{Bundles, Lang};
 
 /// An error, and its English text when that text is not the `Display` of the error.
@@ -371,6 +373,14 @@ fn range_errors() -> Vec<Case> {
             },
             None,
         ),
+        (
+            RecipeError::S7TypeNotAddressable {
+                tag: tag("SPEED"),
+                address: address("DB1.DBW0"),
+                reason: S7AccessReason::ArrayBoundOutsideInt,
+            },
+            None,
+        ),
     ]
 }
 
@@ -428,8 +438,8 @@ fn messages(bundles: &Bundles, index: usize) -> (String, String, String, Option<
 #[test]
 fn recipe_the_cases_cover_each_code_of_recipe_error() {
     let codes: BTreeSet<ErrorCode> = every_case().iter().map(|(error, _)| error.code()).collect();
-    assert_eq!(codes.len(), 37);
-    assert_eq!(every_case().len(), 37);
+    assert_eq!(codes.len(), 38);
+    assert_eq!(every_case().len(), 38);
 }
 
 #[test]
@@ -520,6 +530,58 @@ fn recipe_e_rcp_057_names_the_highest_data_block_of_the_platform_in_both_languag
         };
         assert_eq!(message(&bundles, error(), Lang::En), english, "{max}");
         assert_eq!(message(&bundles, error(), Lang::Pl), polish, "{max}");
+    }
+}
+
+/// The error `E-RCP-058` with a reason.
+fn not_addressable(reason: S7AccessReason) -> RecipeError {
+    RecipeError::S7TypeNotAddressable {
+        tag: tag("SPEED"),
+        address: address("DB1.DBW0"),
+        reason,
+    }
+}
+
+#[test]
+fn adr_0178_message_of_an_array_bound_reason_in_both_languages() {
+    let bundles = Bundles::load().unwrap();
+    let error = || not_addressable(S7AccessReason::ArrayBoundOutsideInt);
+    assert_eq!(
+        message(&bundles, error(), Lang::En),
+        "Parameter SPEED at DB1.DBW0 has a type that a data block with standard access cannot hold: an array bound is outside -32768 to 32767. Change the type."
+    );
+    assert_eq!(
+        message(&bundles, error(), Lang::Pl),
+        "Parametr SPEED pod adresem DB1.DBW0 ma typ, kt\u{f3}rego blok danych ze standardowym dost\u{119}pem nie mo\u{17c}e przechowa\u{107}: granica tablicy le\u{17c}y poza zakresem od -32768 do 32767. Zmie\u{144} typ."
+    );
+}
+
+#[test]
+fn adr_0178_message_of_a_bool_array_reason_in_both_languages() {
+    let bundles = Bundles::load().unwrap();
+    let error = || not_addressable(S7AccessReason::BoolArrayWithThreeDimensions);
+    assert_eq!(
+        message(&bundles, error(), Lang::En),
+        "Parameter SPEED at DB1.DBW0 has a type that a data block with standard access cannot hold: a BOOL array with three dimensions has no verified S7 layout. Change the type."
+    );
+    assert_eq!(
+        message(&bundles, error(), Lang::Pl),
+        "Parametr SPEED pod adresem DB1.DBW0 ma typ, kt\u{f3}rego blok danych ze standardowym dost\u{119}pem nie mo\u{17c}e przechowa\u{107}: tablica BOOL z trzema wymiarami nie ma sprawdzonego uk\u{142}adu S7. Zmie\u{144} typ."
+    );
+}
+
+#[test]
+fn adr_0178_message_status_of_each_reason_is_422() {
+    for reason in [
+        S7AccessReason::ArrayBoundOutsideInt,
+        S7AccessReason::BoolArrayWithThreeDimensions,
+    ] {
+        let code = not_addressable(reason).code();
+        assert_eq!(code, ErrorCode::RCP_058, "{reason:?}");
+        assert_eq!(
+            status_of(code),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
     }
 }
 

@@ -151,6 +151,8 @@ impl ErrorCode {
     pub const RCP_056: Self = Self::new("E-RCP-056");
     /// E-RCP-057, `RecipeError::S7DataBlockOutOfRange`.
     pub const RCP_057: Self = Self::new("E-RCP-057");
+    /// E-RCP-058, `RecipeError::S7TypeNotAddressable`.
+    pub const RCP_058: Self = Self::new("E-RCP-058");
 
     /// E-AUD-001, `AppError::AuditWriteFailed`.
     pub const AUD_001: Self = Self::new("E-AUD-001");
@@ -418,6 +420,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::RCP_055,
     ErrorCode::RCP_056,
     ErrorCode::RCP_057,
+    ErrorCode::RCP_058,
     ErrorCode::WEB_001,
     ErrorCode::WEB_002,
     ErrorCode::WEB_003,

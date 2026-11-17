@@ -10,7 +10,9 @@ use crate::plant::fixtures::{
     id, machine, on_platform, primitive_row, string_row, struct_row, types, types_for,
 };
 use crate::plant::{PlcPlatform, PlcType, Primitive, S7Width, TypeTree, TypeTrees};
-use crate::recipe::{Draft, DraftError, RecipeError, StoredParameter, ValueInput, VersionState};
+use crate::recipe::{
+    Draft, DraftError, RecipeError, S7AccessReason, StoredParameter, ValueInput, VersionState,
+};
 
 const INT: u128 = 1;
 const REAL: u128 = 2;
@@ -661,6 +663,25 @@ fn a_stored_address_past_the_end_does_not_block_add_parameter_or_set_value() {
 fn e_rcp_057_has_a_registry_row() {
     assert!(REGISTRY.contains(&ErrorCode::RCP_057));
     assert_eq!(ErrorCode::RCP_057.as_str(), "E-RCP-057");
+}
+
+/// ADR-0178 (b), ADR-0187 (b): the variant `S7TypeNotAddressable` returns `E-RCP-058` for each
+/// reason, and the code has a registry row.
+#[test]
+fn adr_0178_error_code() {
+    assert!(REGISTRY.contains(&ErrorCode::RCP_058));
+    assert_eq!(ErrorCode::RCP_058.as_str(), "E-RCP-058");
+    for reason in [
+        S7AccessReason::ArrayBoundOutsideInt,
+        S7AccessReason::BoolArrayWithThreeDimensions,
+    ] {
+        let error = RecipeError::S7TypeNotAddressable {
+            tag: tag("SPEED"),
+            address: address("DB1.DBW0"),
+            reason,
+        };
+        assert_eq!(error.code(), ErrorCode::RCP_058, "{reason:?}");
+    }
 }
 
 /// ADR-0140 (c), ADR-0116 (e1): a stored data block above 59999 on `S7_1500` does not block a
