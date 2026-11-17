@@ -639,6 +639,15 @@ fn adr_0178_rebind_to_a_struct_with_a_wide_bound_fails() {
 }
 
 #[test]
+fn adr_0178_d_rebind_with_a_wrong_width_and_a_wide_bound_gives_e_rcp_054_first() {
+    let (draft, result) = rebind_to_wide(Some("DB1.DBW0"));
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_054);
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_1));
+}
+
+#[test]
 fn adr_0178_rebind_to_a_struct_with_a_wide_bound_applies_without_an_address() {
     let (draft, result) = rebind_to_wide(None);
 

@@ -4,10 +4,7 @@ use std::collections::BTreeMap;
 
 use super::{RebindPlan, RebindTargetReason};
 use crate::plant::{MemberName, PlcPlatform, PlcTypeId, RuleSet, TypeNode, TypeTree, TypeTrees};
-use crate::recipe::draft::{
-    check_data_block_rule, check_end_rule, check_faults, check_standard_access_rule,
-    stored_limits_under, stored_value,
-};
+use crate::recipe::draft::{check_definition, check_faults, stored_limits_under, stored_value};
 use crate::recipe::{
     Draft, DraftError, Parameter, ParameterChange, ParameterKey, ProcessLimit, RecipeError,
 };
@@ -210,9 +207,9 @@ fn rebound_parameter(
     {
         return Err(DraftError::from(fault));
     }
-    check_data_block_rule(candidate.platform, old.tag(), old.s7_address())?;
-    check_end_rule(old.tag(), old.s7_address(), real)?;
-    check_standard_access_rule(old.tag(), old.s7_address(), real)?;
+    // One order for every parameter command: platform, data block, width, alignment, end, then
+    // standard access (ADR-0178 (d)).
+    check_definition(candidate.platform, old.tag(), old.s7_address(), real)?;
     let rows = limits.iter().map(ProcessLimit::to_stored).collect();
     Ok(old.rebound(new_type, value.to_stored(), rows))
 }
