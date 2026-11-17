@@ -2,13 +2,16 @@
 //!
 //! The query lists the stored type rows that the identifier rules reject: the rows of a struct
 //! name or a member name that differ only in case, an array row with a bound array that starts at
-//! another subscript than 1, and a struct with a reserved name. The tests drop the two indexes of
+//! another subscript than 1, a struct with a reserved name, and a struct with a Siemens reserved
+//! name on an S7 machine (ADR-0186). The tests drop the two indexes of
 //! ADR-0143 (j) and the array shape constraint, so the rows can exist. They compare the exact rows
 //! of the query, run it as `recipe_app`, and show that it writes nothing.
 
 use std::collections::BTreeSet;
 
-use recipe_domain::plant::{Primitive, RESERVED_KEYWORDS};
+use recipe_domain::plant::{
+    Primitive, RESERVED_KEYWORDS, SIEMENS_RESERVED_NAMES, is_siemens_reserved_name,
+};
 use sqlx::{Connection as _, PgConnection, Row as _};
 use uuid::Uuid;
 
@@ -21,6 +24,13 @@ const QUERY_PATH: &str = concat!(
 );
 const LIST_BEGIN: &str = "-- reserved words: begin";
 const LIST_END: &str = "-- reserved words: end";
+const SIEMENS_BEGIN: &str = "-- siemens names: begin";
+const SIEMENS_END: &str = "-- siemens names: end";
+const PATTERN_BEGIN: &str = "-- siemens telegram pattern: begin";
+const PATTERN_END: &str = "-- siemens telegram pattern: end";
+/// The S7 platforms of ADR-0186 (a).
+const S7_1500: &str = "S7_1500";
+const CODESYS: &str = "CodesysIec";
 /// The SQLSTATE of a write in a read-only transaction.
 const READ_ONLY_SQL_TRANSACTION: &str = "25006";
 
@@ -43,20 +53,25 @@ impl Expected {
     }
 }
 
-/// A machine and its code.
+/// A machine, its code, and its platform.
 struct Site {
     id: Uuid,
     code: String,
+    platform: &'static str,
 }
 
 async fn site(conn: &mut PgConnection) -> Site {
-    let id = fixtures::machine(conn, TWIN_CAT).await;
+    site_on(conn, TWIN_CAT).await
+}
+
+async fn site_on(conn: &mut PgConnection, platform: &'static str) -> Site {
+    let id = fixtures::machine(conn, platform).await;
     let code = sqlx::query_scalar("SELECT code FROM machine WHERE id = $1")
         .bind(id)
         .fetch_one(conn)
         .await
         .unwrap();
-    Site { id, code }
+    Site { id, code, platform }
 }
 
 /// Drop what keeps a stored row from breaking a rule: the two indexes of ADR-0143 (j) and the
@@ -83,11 +98,12 @@ async fn insert_struct(
     let mut tx = conn.begin().await.unwrap();
     let id: Uuid = sqlx::query_scalar(
         "INSERT INTO plc_type (kind, name, platforms, machine_id, revision) \
-         VALUES ('struct', $1, ARRAY['TwinCat3'], $2, $3) RETURNING id",
+         VALUES ('struct', $1, ARRAY[$4], $2, $3) RETURNING id",
     )
     .bind(name)
     .bind(site.id)
     .bind(revision)
+    .bind(site.platform)
     .fetch_one(&mut *tx)
     .await
     .unwrap();
@@ -146,6 +162,16 @@ async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
 
     insert_struct(conn, &plant, "Int", 1, &["speed"]).await;
     expected.hit(code, "Int", 1, "reserved_struct_name", "Int");
+
+    // A Siemens reserved name is a hit on S7 only (ADR-0186). The name `PD_TEL3_IN` is no hit.
+    let s7 = site_on(conn, S7_1500).await;
+    let codesys = site_on(conn, CODESYS).await;
+    for name in ["PID_Compact", "PD_TEL3", "pd_tel03"] {
+        insert_struct(conn, &s7, name, 1, &["speed"]).await;
+        insert_struct(conn, &codesys, name, 1, &["speed"]).await;
+        expected.hit(&s7.code, name, 1, "s7_reserved_struct_name", name);
+    }
+    insert_struct(conn, &s7, "PD_TEL3_IN", 1, &["speed"]).await;
 
     // An archived machine and a reserved word in lower case.
     let archived = site(conn).await;
@@ -228,12 +254,12 @@ async fn fingerprint(conn: &mut PgConnection) -> String {
     .unwrap()
 }
 
-/// The words between the marker lines of the file, one word on each line.
-fn words_of_the_file() -> Vec<String> {
+/// The words between two marker lines of the file, one word on each line.
+fn words_between(begin: &str, end: &str) -> Vec<String> {
     let text = query();
-    let (_, after_begin) = text.split_once(LIST_BEGIN).expect("the begin marker line");
+    let (_, after_begin) = text.split_once(begin).expect("the begin marker line");
     let (list, _) = after_begin
-        .split_once(LIST_END)
+        .split_once(end)
         .expect("the end marker line after the begin marker line");
     list.lines()
         .map(|line| line.trim().trim_end_matches(',').trim_matches(['(', ')']))
@@ -254,7 +280,7 @@ fn identifier_rules_query_lists_the_reserved_words_of_the_domain() {
             .map(|primitive| primitive.name().to_owned()),
     );
 
-    let words = words_of_the_file();
+    let words = words_between(LIST_BEGIN, LIST_END);
     let listed: BTreeSet<String> = words.iter().cloned().collect();
 
     assert!(RESERVED_KEYWORDS.len() > 100, "the keyword list is short");
@@ -278,7 +304,7 @@ async fn identifier_rules_query_lists_exactly_the_hit_rows_as_recipe_app() {
     let found = rows(&mut conn).await;
 
     assert_eq!(user, "recipe_app");
-    assert_eq!(expected.0.len(), 8, "the seed holds 8 hits");
+    assert_eq!(expected.0.len(), 11, "the seed holds 11 hits");
     assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
     let found: BTreeSet<Row> = found.into_iter().collect();
     assert_eq!(found, expected.0);
@@ -296,6 +322,7 @@ async fn identifier_rules_query_lists_two_rows_for_each_case_pair() {
     assert_eq!(count("member_name_case"), 2);
     assert_eq!(count("array_subscript"), 2);
     assert_eq!(count("reserved_struct_name"), 2);
+    assert_eq!(count("s7_reserved_struct_name"), 3);
 }
 
 #[tokio::test]
@@ -366,4 +393,64 @@ async fn identifier_rules_query_lists_no_row_on_a_database_without_hits() {
     let found = rows(&mut conn).await;
 
     assert!(found.is_empty(), "rows found: {found:#?}");
+}
+
+#[test]
+fn adr_0186_query_lists_the_siemens_names_of_the_domain() {
+    let expected: BTreeSet<String> = SIEMENS_RESERVED_NAMES
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+
+    let words = words_between(SIEMENS_BEGIN, SIEMENS_END);
+    let listed: BTreeSet<String> = words.iter().cloned().collect();
+
+    assert_eq!(expected.len(), 269, "the domain list is short");
+    assert_eq!(
+        words.len(),
+        listed.len(),
+        "a name appears twice in the file"
+    );
+    assert_eq!(listed, expected);
+}
+
+#[tokio::test]
+async fn adr_0186_query_pattern_matches_the_telegram_family_of_the_domain() {
+    let lines = words_between(PATTERN_BEGIN, PATTERN_END);
+    assert_eq!(
+        lines.len(),
+        1,
+        "one pattern between the marker lines: {lines:?}"
+    );
+    let pattern = lines.first().expect("the pattern line");
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::App).await;
+    let probes = [
+        "PD_TEL3",
+        "pd_tel3",
+        "Pd_Tel12",
+        "PD_TEL0",
+        "PD_TEL03",
+        "PD_TEL003",
+        "PD_TELx",
+        "PD_TEL",
+        "PD_TEL3_IN",
+        "XPD_TEL3",
+        "PD_TEL3 ",
+        "PD_TEL\u{663}",
+    ];
+
+    for probe in probes {
+        let in_pattern: bool = sqlx::query_scalar("SELECT $1 ~* $2")
+            .bind(probe)
+            .bind(pattern)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            in_pattern,
+            is_siemens_reserved_name(probe),
+            "the pattern and the domain differ on {probe:?}"
+        );
+    }
 }
