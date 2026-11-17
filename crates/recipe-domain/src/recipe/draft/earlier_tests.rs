@@ -11,9 +11,14 @@ use serde_json::json;
 use super::add::support::{REAL, draft_with, limit_row, snapshot, trees_on};
 use super::support::{key, stored_parameter};
 use crate::error_codes::ErrorCode;
-use crate::plant::fixtures::{id, machine, primitive_row, types_for};
-use crate::plant::{LeafPath, PlcPlatform, Primitive, TypeTrees};
-use crate::recipe::{Draft, LimitList, StoredLimit, ValueInput};
+use crate::plant::fixtures::{id, machine, on_platform, primitive_row, types_for, wstring_row};
+use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TypeTrees};
+use crate::recipe::snapshot::check_snapshot;
+use crate::recipe::snapshot::fixtures::units;
+use crate::recipe::{
+    Draft, DraftError, Expected, LimitList, RecipeError, SnapshotError, SnapshotItem, StoredLimit,
+    ValueInput,
+};
 
 /// The type identifier of the `DATE` row of these tests.
 const DATE: u128 = 7;
@@ -202,5 +207,119 @@ fn set_value_against_a_stored_limit_of_the_earlier_set_writes_literals_in_the_me
     let message = error.to_string();
     for literal in ["D#2168-12-31", "D#2169-01-17", "D#2169-04-27"] {
         assert!(message.contains(literal), "{literal} missing in {message}");
+    }
+}
+
+/// The type identifier of the `WCHAR` row of the tests of ADR-0180.
+const WIDE_CHAR: u128 = 40;
+
+/// The type identifier of the `WSTRING(10)` row of the tests of ADR-0180.
+const WIDE_TEXT: u128 = 41;
+
+/// The trees of a `WCHAR` and a `WSTRING(10)` on `platform`.
+fn wide_text_trees_on(platform: PlcPlatform) -> TypeTrees {
+    let rows = vec![
+        primitive_row(WIDE_CHAR, Primitive::Wchar),
+        wstring_row(WIDE_TEXT, 10),
+    ];
+    TypeTrees::resolve(
+        [WIDE_CHAR, WIDE_TEXT].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// A live draft on `platform` with `MARK` of type `n` and the stored text `text`.
+///
+/// A `WSTRING` needs a stored length limit before the approval, so the draft holds one.
+fn wide_text_draft(platform: PlcPlatform, n: u128, text: &str) -> Draft {
+    let mut stored = stored_parameter(1, "MARK", id(n), None);
+    stored.value = json!(text).into();
+    if n == WIDE_TEXT {
+        stored.limits = vec![StoredLimit {
+            leaf_path: LeafPath::parse("").unwrap(),
+            min: None,
+            max: None,
+            max_length: Some(10),
+        }];
+    }
+    draft_with(platform, vec![stored])
+}
+
+/// The two stored values of ADR-0180 as platform, type, text, and the form that the current set names.
+fn wide_text_cases() -> [(PlcPlatform, u128, &'static str, Expected); 2] {
+    [
+        (
+            PlcPlatform::S7_1500,
+            WIDE_CHAR,
+            "\u{E000}",
+            Expected::Char { max: 0xD7FF },
+        ),
+        (
+            PlcPlatform::S7_1200,
+            WIDE_TEXT,
+            "A\u{D000}",
+            Expected::WstringS7 {
+                length: 10,
+                max: 0xCFFF,
+            },
+        ),
+    ]
+}
+
+/// ADR-0180 (g): a draft that holds the stored value loads, because the load reads no value.
+#[test]
+fn adr_0180_a_draft_with_a_stored_wide_text_value_loads() {
+    for (platform, n, text, _) in wide_text_cases() {
+        let draft = wide_text_draft(platform, n, text);
+        assert_eq!(draft.parameters().len(), 1, "{platform:?}");
+    }
+}
+
+/// ADR-0180 (h): `ApproveVersion` checks with the current set and gives an item of `E-RCP-020`.
+#[test]
+fn adr_0180_the_approval_of_a_stored_wide_text_value_gives_the_item_e_rcp_005() {
+    for (platform, n, text, expected) in wide_text_cases() {
+        let draft = wide_text_draft(platform, n, text);
+        let error = draft
+            .check_for_approval(&units(false), &wide_text_trees_on(platform), false)
+            .expect_err("the current set refuses the value");
+        assert_eq!(error.code(), ErrorCode::RCP_020, "{platform:?}: {error}");
+        let items = match error {
+            DraftError::Recipe(RecipeError::ValidationFailed { items }) => Some(items),
+            _ => None,
+        }
+        .expect("a snapshot error");
+        let codes: Vec<ErrorCode> = items.iter().map(SnapshotItem::code).collect();
+        assert_eq!(codes, [ErrorCode::RCP_005], "{platform:?}");
+        let found = match &items[0] {
+            SnapshotItem::Parameter {
+                error:
+                    SnapshotError::Recipe(RecipeError::ValueShapeMismatch {
+                        expected: found, ..
+                    }),
+                ..
+            } => Some(found),
+            _ => None,
+        }
+        .expect("a value fault of a parameter");
+        assert_eq!(*found, expected, "{platform:?}");
+    }
+}
+
+/// ADR-0180 (i): `CreateVersion` checks with the earlier set, so it copies the stored value.
+#[test]
+fn adr_0180_the_snapshot_check_of_create_version_copies_a_stored_wide_text_value() {
+    for (platform, n, text, _) in wide_text_cases() {
+        let draft = wide_text_draft(platform, n, text);
+        let trees = wide_text_trees_on(platform);
+        let outdated = check_snapshot(
+            draft.parameters(),
+            None,
+            &units(false),
+            &trees,
+            RuleSet::Earlier,
+        )
+        .unwrap();
+        assert!(outdated.is_empty(), "{platform:?}: {outdated:?}");
     }
 }

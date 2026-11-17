@@ -10,11 +10,11 @@ use super::{RuleFault, RuleField, check_stored_parameter};
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{
     TIME_TREES_ROOT, array_row, id, machine, on_platform, primitive_row, struct_row, time_trees_on,
-    types_for,
+    types_for, wstring_row,
 };
 use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTree, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
-use crate::recipe::{DraftError, Parameter, ParameterTag, RecipeError, StoredLimit};
+use crate::recipe::{DraftError, Expected, Parameter, ParameterTag, RecipeError, StoredLimit};
 
 /// The type identifier of the `DATE` row of these tests.
 const DATE: u128 = 7;
@@ -613,4 +613,85 @@ fn adr_0187_a_stored_bool_array_with_two_dimensions_gives_no_fault() {
     let parameter = parameter_with(BOOL_2D, false_square(), Some("DB1.DBX0.0"), Vec::new());
     let faults = check_stored_parameter(&parameter, tree_of(&trees, BOOL_2D)).unwrap();
     assert!(faults.is_empty(), "{faults:?}");
+}
+
+/// The type identifier of the `WCHAR` row of the tests of ADR-0180.
+const WIDE_CHAR: u128 = 40;
+
+/// The type identifier of the `WSTRING(10)` row of the tests of ADR-0180.
+const WIDE_TEXT: u128 = 41;
+
+/// The trees of a `WCHAR` and a `WSTRING(10)` on `platform`.
+fn wide_text_trees_on(platform: PlcPlatform) -> TypeTrees {
+    let rows = vec![
+        primitive_row(WIDE_CHAR, Primitive::Wchar),
+        wstring_row(WIDE_TEXT, 10),
+    ];
+    TypeTrees::resolve(
+        [WIDE_CHAR, WIDE_TEXT].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// The faults of a stored value of the type `n` on `platform`, without an address and a limit.
+fn wide_text_faults(platform: PlcPlatform, n: u128, text: &str) -> Vec<RuleFault> {
+    let trees = wide_text_trees_on(platform);
+    let parameter = parameter_with(n, json!(text), None, Vec::new());
+    check_stored_parameter(&parameter, tree_of(&trees, n)).unwrap()
+}
+
+/// ADR-0180 (h), (j): a stored `WCHAR` `U+E000` on `S7_1500` is a rule fault of the whole value.
+///
+/// The approval turns the fault into an item of `E-RCP-020`. The export check lists the fault, so
+/// `loadable` is `false`. A stored `U+D7FF` gives no fault.
+#[test]
+fn adr_0180_a_stored_wchar_u_e000_on_s7_1500_gives_the_rule_fault_e_rcp_005() {
+    let faults = wide_text_faults(PlcPlatform::S7_1500, WIDE_CHAR, "\u{E000}");
+    assert_eq!(
+        found(&faults),
+        [(ErrorCode::RCP_005, RuleField::Value(LeafPath::whole()))]
+    );
+    let error = faults.into_iter().next().unwrap().into_error();
+    assert!(
+        matches!(
+            error,
+            RecipeError::ValueShapeMismatch {
+                expected: Expected::Char { max: 0xD7FF },
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(wide_text_faults(PlcPlatform::S7_1500, WIDE_CHAR, "\u{D7FF}").is_empty());
+}
+
+/// ADR-0180 (h), (j): a stored `WSTRING(10)` value `"A\u{D000}"` on `S7_1200` is a rule fault.
+#[test]
+fn adr_0180_a_stored_wstring_with_u_d000_on_s7_1200_gives_the_rule_fault_e_rcp_005() {
+    let faults = wide_text_faults(PlcPlatform::S7_1200, WIDE_TEXT, "A\u{D000}");
+    assert_eq!(
+        found(&faults),
+        [(ErrorCode::RCP_005, RuleField::Value(LeafPath::whole()))]
+    );
+    let error = faults.into_iter().next().unwrap().into_error();
+    assert!(
+        matches!(
+            error,
+            RecipeError::ValueShapeMismatch {
+                expected: Expected::WstringS7 {
+                    length: 10,
+                    max: 0xCFFF
+                },
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+    assert!(wide_text_faults(PlcPlatform::S7_1200, WIDE_TEXT, "A\u{CFFF}").is_empty());
+}
+
+/// ADR-0180 (c): the rule holds on the S7 platforms only. `TwinCat3` keeps ADR-0137.
+#[test]
+fn adr_0180_a_stored_wstring_with_u_d000_on_twincat3_gives_no_fault() {
+    assert!(wide_text_faults(PlcPlatform::TwinCat3, WIDE_TEXT, "A\u{D000}").is_empty());
 }

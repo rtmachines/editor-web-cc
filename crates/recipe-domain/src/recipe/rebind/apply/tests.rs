@@ -5,7 +5,7 @@ use serde_json::json;
 use super::super::test_support::{
     BIG_1, BIG_2, BIG_ARRAY, BIG_ARRAY_NEW, DINT, FILL, INT, ZONE_2, ZONE_3, ZONES_2, ZONES_2_NEW,
     ZONES_4, ZONES_4_NEW, draft_on, draft_with, key, limit, number, param, plan_of, request,
-    request_with, trees, trees_on, trees_with_zone_3,
+    request_with, request_with_texts, trees, trees_on, trees_with_zone_3,
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{
@@ -14,8 +14,8 @@ use crate::plant::fixtures::{
 use crate::plant::{PlcPlatform, PlcTypeId, Primitive, S7Address, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
 use crate::recipe::{
-    ArrayShape, Budget, Draft, DraftError, LangCode, ParameterKey, RebindPlan, RebindTargetReason,
-    RecipeError, Translation,
+    ArrayShape, Budget, Draft, DraftError, Expected, LangCode, ParameterKey, RebindPlan,
+    RebindTargetReason, RecipeError, Translation,
 };
 use crate::text::Text;
 
@@ -644,6 +644,72 @@ fn adr_0178_rebind_to_a_struct_with_a_wide_bound_applies_without_an_address() {
 
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_2));
+}
+
+/// `WCHAR` and the two revisions of `ST_Mark` for the tests of ADR-0180 (e).
+const MARK_CHAR: u128 = 74;
+const MARK_1: u128 = 75;
+const MARK_2: u128 = 76;
+
+/// The trees of `ST_Mark@1` with the member `a` and `ST_Mark@2` with the new member `mark`.
+fn mark_trees() -> TypeTrees {
+    let platform = PlcPlatform::S7_1500;
+    let rows = vec![
+        primitive_row(INT, Primitive::Int),
+        primitive_row(MARK_CHAR, Primitive::Wchar),
+        struct_row_revision(MARK_1, "ST_Mark", 1, &[("a", INT)]),
+        struct_row_revision(MARK_2, "ST_Mark", 2, &[("a", INT), ("mark", MARK_CHAR)]),
+    ];
+    TypeTrees::resolve(
+        [INT, MARK_CHAR, MARK_1, MARK_2].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// Plan the rebind of `SPEED` from `ST_Mark@1` to `ST_Mark@2` with the text of the new `mark`.
+fn plan_mark(text: &str) -> Result<RebindPlan, DraftError> {
+    let speed = param(1, "SPEED", MARK_1, json!({"a": 1}), Vec::new());
+    let draft = draft_on(PlcPlatform::S7_1500, vec![speed]);
+    let request = request_with_texts(MARK_1, MARK_2, &[(1, ".mark", text)]);
+    draft.plan_rebind(&request, &mark_trees())
+}
+
+/// ADR-0180 (e): the text of a new `WCHAR` member above `U+D7FF` gives `E-RCP-005` on `S7_1500`.
+#[test]
+fn adr_0180_rebind_with_a_new_wchar_member_u_e000_gives_e_rcp_005() {
+    let error = plan_mark("\u{E000}").unwrap_err();
+
+    let entries = match error {
+        DraftError::List(list) => Some(list.into_vec()),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .expect("a list of entries");
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].code(), ErrorCode::RCP_005);
+    assert!(
+        matches!(
+            &entries[0],
+            RecipeError::ValueShapeMismatch { leaf, expected: Expected::Char { max: 0xD7FF }, .. }
+                if leaf.to_string() == ".mark"
+        ),
+        "{:?}",
+        entries[0]
+    );
+}
+
+/// ADR-0180 (e): the text `U+D7FF` passes, and the apply writes the value.
+#[test]
+fn adr_0180_rebind_with_a_new_wchar_member_u_d7ff_applies() {
+    let plan = plan_mark("\u{D7FF}").unwrap();
+    let speed = param(1, "SPEED", MARK_1, json!({"a": 1}), Vec::new());
+    let mut draft = draft_on(PlcPlatform::S7_1500, vec![speed]);
+
+    draft
+        .apply_rebind(plan, &BTreeMap::new(), &mark_trees())
+        .unwrap();
+
+    let value = draft.parameter(key(1)).unwrap().value().as_json().clone();
+    assert_eq!(value, json!({"a": 1, "mark": "\u{D7FF}"}));
 }
 
 #[test]
