@@ -404,7 +404,7 @@ async fn a_rolled_back_type_insert_keeps_nothing() {
 }
 
 #[tokio::test]
-async fn lock_derived_types_records_one_advisory_entry_per_key_in_the_order_of_the_texts() {
+async fn lock_derived_types_records_one_advisory_entry_per_key_of_the_key_set() {
     let store = store();
     let mut tx = begin(&store);
     let members = [
