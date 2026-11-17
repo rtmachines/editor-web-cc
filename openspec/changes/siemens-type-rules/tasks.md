@@ -160,7 +160,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 8. Runbook
 
-- [ ] 8.1 (docs/ops) In `docs/ops/runbook.md`, near the sections of `check-identifier-rules.sql` and `check-s7-layout-rules.sql`, name the new parts `nested_array` on `S7_300`, `array_bound`, `bool_array_3d`, `nesting`, `wide_text`, and `s7_reserved_struct_name`. Say which ADR each part follows and what a listed row means for an upgrade. Use the two kinds of step 2 of the section Migration Plan in `design.md`. Check: `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/ops/**/*.md'` reports 0 hard violations.
+- [x] 8.1 (docs/ops) In `docs/ops/runbook.md`, near the sections of `check-identifier-rules.sql` and `check-s7-layout-rules.sql`, name the new parts `nested_array` on `S7_300`, `array_bound`, `bool_array_3d`, `nesting`, `wide_text`, and `s7_reserved_struct_name`. Say which ADR each part follows and what a listed row means for an upgrade. Use the two kinds of step 2 of the section Migration Plan in `design.md`. Check: `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/ops/**/*.md'` reports 0 hard violations.
 
 ## 9. Stored data matrix (design.md, section Stored data matrix)
 
