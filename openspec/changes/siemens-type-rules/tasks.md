@@ -99,7 +99,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
   - `ApproveVersion` approves that draft (ADR-0179 (i)).
   - `ExportApprovedVersion` of that version gives `loadable` true.
   - RED: `cargo test -p recipe-app --lib adr_0179`. Then call the check of task 4.1 in `crates/recipe-app/src/plant/define_udt.rs`, `crates/recipe-app/src/recipe/add_parameter.rs`, and `crates/recipe-app/src/recipe/update_definition.rs`, next to `require_no_nested_array`. GREEN: `cargo test -p recipe-app --lib`.
-- [ ] 4.3 (recipe-app) The rebind case of ADR-0179 (f). In `crates/recipe-app/src/recipe/rebind/tests.rs`, add `adr_0179_rebind_*` tests with these cases:
+- [x] 4.3 (recipe-app) The rebind case of ADR-0179 (f). In `crates/recipe-app/src/recipe/rebind/tests.rs`, add `adr_0179_rebind_*` tests with these cases:
   - On `S7_1500`, `ST_Mid@1` has six levels, and `ST_Mid@2` has eight levels in the S7 count.
   - A parameter `BUF` of type `ARRAY[1..2] OF ST_Mid@1` moves to `ARRAY[1..2] OF ST_Mid@2`, with ten levels. The command gives `E-PLT-018` with that type text and `TypeLimit::S7Nesting`. The draft does not change.
   - In another draft, a parameter of type `ST_Mid@1` moves to `ST_Mid@2`, with eight levels. The command passes.
