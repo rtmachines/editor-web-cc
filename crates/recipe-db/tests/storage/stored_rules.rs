@@ -10,26 +10,37 @@
 //! A plain dump creates each table with its constraints before it loads the data. It creates
 //! the foreign keys and the triggers after the data. Thus no trigger runs on a row of the dump.
 
-use std::path::PathBuf;
-use std::process::Command;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::sync::Arc;
 
 use recipe_app::auth::{CurrentUser, RequestMeta};
+use recipe_app::export::{
+    ExportApprovedInput, ExportApprovedVersion, ExportScope, ExportedVersion,
+};
 use recipe_app::identity::new_request_id;
-use recipe_app::plant::{DefineUdt, DefineUdtInput, DefineUdtMode};
+use recipe_app::memory::BodyWriter;
+use recipe_app::plant::{DefineUdt, DefineUdtInput, DefineUdtMode, GetTypeTree, TypeRef};
 use recipe_app::recipe::{
     AddParameter, AddParameterInput, ApproveVersion, ApproveVersionInput, CreateRecipe,
-    CreateRecipeInput, GetVersion, GetVersionInput,
+    CreateRecipeInput, CreateVersion, CreateVersionInput, GetVersion, GetVersionInput,
 };
+use recipe_db::migrate;
+use recipe_db::settings::MigrateSettings;
 use recipe_domain::identity::{Login, Role};
-use recipe_domain::plant::{LeafPath, MemberName, S7Address, TypeExpr, TypeName, UnitPath};
+use recipe_domain::plant::{
+    LeafPath, MachineCode, MemberName, S7Address, TypeExpr, TypeName, UnitPath,
+};
 use recipe_domain::recipe::{
     LimitInput, LimitList, Ordinal, ParameterTag, ReferenceNumber, ValueInput,
 };
 
 use crate::atomic::world::{long_text, text};
 use crate::support::app::App;
+use crate::support::database::DumpDirectory;
 use crate::support::identity::PASSWORD;
-use crate::support::server;
+use crate::support::{Role as DbRole, TestDatabase, server};
 
 /// The login of the engineer, who edits each draft.
 const ENGINEER: &str = "engineer";
@@ -344,4 +355,305 @@ async fn stored_rules_write_the_fixture() {
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(directory.join("stored_rules.sql"), dump).unwrap();
     std::fs::write(directory.join("stored_rules.hashes"), hashes).unwrap();
+}
+
+// Task 9.2: the stored rows of the matrix on the migrator of this release.
+
+/// The stored fixture: the full plain dump of the earlier release.
+const FIXTURE_DUMP: &str = "stored_rules.sql";
+/// The stored fixture: one line `<reference> <content_sha256>` for each case.
+const FIXTURE_HASHES: &str = "stored_rules.hashes";
+
+/// What a row of the matrix expects after the upgrade.
+struct Expectation {
+    /// The reference number of the recipe.
+    reference: &'static str,
+    /// The value of `loadable` in the matrix.
+    loadable: bool,
+    /// The struct that `GetTypeTree` reads, or `None` for a row without a struct.
+    struct_name: Option<&'static str>,
+}
+
+/// The stored hash of a reference, from the fixture file.
+fn stored_hash(reference: &str) -> String {
+    let path = Path::new(FIXTURE_DIRECTORY).join(FIXTURE_HASHES);
+    let text = std::fs::read_to_string(path).unwrap();
+    text.lines()
+        .find_map(|line| {
+            let (name, hash) = line.split_once(' ')?;
+            (name == reference).then(|| hash.to_owned())
+        })
+        .ok_or_else(|| format!("the fixture has no hash for {reference}"))
+        .unwrap()
+}
+
+/// Run a `docker exec` command in the database container with a file on the standard input.
+fn exec_with_input(args: &[&str], input: &Path) -> Output {
+    let file = std::fs::File::open(input).unwrap();
+    Command::new("docker")
+        .args(["exec", "-i", "--user", "postgres", &server().container_id])
+        .args(args)
+        .stdin(Stdio::from(file))
+        .output()
+        .expect("docker exec runs")
+}
+
+/// Assert the exit status 0 of a command and show its standard error otherwise.
+fn assert_success(what: &str, output: &Output) {
+    assert!(
+        output.status.success(),
+        "{what} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Steps 1 to 3: create an empty database, load the stored dump, and run the migrator.
+async fn restored_and_upgraded() -> App {
+    let database = TestDatabase::create_empty().await;
+    let dump = Path::new(FIXTURE_DIRECTORY).join(FIXTURE_DUMP);
+    let name = database.name().to_owned();
+    let loaded = exec_with_input(
+        &[
+            "psql",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--single-transaction",
+            "--quiet",
+            &format!("--dbname={name}"),
+        ],
+        &dump,
+    );
+    assert_success("psql", &loaded);
+    migrate(
+        &database.target(DbRole::Migrator),
+        &MigrateSettings::default(),
+    )
+    .await
+    .unwrap();
+    App::over(database).await
+}
+
+/// The rows of `parameter` and `plc_type` as text. A stored type text and a stored value do not
+/// change in the upgrade, so the text is equal before and after.
+async fn stored_rows(app: &mut App, reference: &str) -> (Vec<String>, Vec<String>) {
+    let parameters = sqlx::query_scalar(
+        "SELECT to_jsonb(p)::text FROM parameter p \
+         JOIN recipe_version v ON v.id = p.recipe_version_id \
+         JOIN recipe r ON r.id = v.recipe_id \
+         WHERE r.reference_number = $1 ORDER BY v.number, p.tag",
+    )
+    .bind(reference)
+    .fetch_all(app.admin())
+    .await
+    .unwrap();
+    let types = sqlx::query_scalar("SELECT to_jsonb(t)::text FROM plc_type t ORDER BY t.id")
+        .fetch_all(app.admin())
+        .await
+        .unwrap();
+    (parameters, types)
+}
+
+/// The export of the approved version of a reference through the adapter.
+async fn export_of(app: &App, reference: &str) -> ExportedVersion {
+    let input = ExportApprovedInput {
+        reference: ReferenceNumber::parse(reference).unwrap(),
+        machine: None,
+        scope: ExportScope::Version,
+    };
+    ExportApprovedVersion::new(app.context(), Arc::new(BodyWriter))
+        .execute(&app.user, &app.meta, input)
+        .await
+        .unwrap()
+}
+
+/// Step 4: `GetVersion` and, for a struct row, `GetTypeTree` read the stored row.
+async fn read_row(app: &mut App, expected: &Expectation) {
+    let input = GetVersionInput {
+        reference: ReferenceNumber::parse(expected.reference).unwrap(),
+        number: 1,
+        rebind_bound: 0,
+    };
+    let view = GetVersion::new(app.context())
+        .execute(&app.user, &app.meta, input)
+        .await
+        .unwrap();
+    assert_eq!(
+        view.detail.content_sha256.map(|hash| hash.to_string()),
+        Some(stored_hash(expected.reference))
+    );
+    assert_eq!(view.rule_codes.is_empty(), expected.loadable);
+    let Some(name) = expected.struct_name else {
+        return;
+    };
+    let code: String = sqlx::query_scalar(
+        "SELECT m.code FROM machine m JOIN recipe r ON r.machine_id = m.id \
+         WHERE r.reference_number = $1",
+    )
+    .bind(expected.reference)
+    .fetch_one(app.admin())
+    .await
+    .unwrap();
+    let tree = TypeRef {
+        code: MachineCode::parse(&code).unwrap(),
+        name: TypeName::parse(name).unwrap(),
+        revision: None,
+    };
+    let type_view = GetTypeTree::new(app.context())
+        .execute(&app.user, &app.meta, tree)
+        .await
+        .unwrap();
+    assert_eq!(type_view.revision, 1);
+}
+
+/// Step 6: `CreateVersion` copies the approved version into a draft with the same rows.
+async fn copy_row(app: &mut App, reference: &str) {
+    let input = CreateVersionInput {
+        reference: ReferenceNumber::parse(reference).unwrap(),
+        based_on: Some(1),
+        change_note: long_text("Copy of the stored row"),
+    };
+    let created = CreateVersion::new(app.context())
+        .execute(&app.user, &app.meta, input)
+        .await
+        .unwrap();
+    assert_eq!(created.number, 2);
+    let copied: Vec<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT p.tag, p.s7_address, p.value::text FROM parameter p \
+         JOIN recipe_version v ON v.id = p.recipe_version_id \
+         JOIN recipe r ON r.id = v.recipe_id \
+         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
+    )
+    .bind(reference)
+    .bind(1_i32)
+    .fetch_all(app.admin())
+    .await
+    .unwrap();
+    let draft: Vec<(String, Option<String>, String)> = sqlx::query_as(
+        "SELECT p.tag, p.s7_address, p.value::text FROM parameter p \
+         JOIN recipe_version v ON v.id = p.recipe_version_id \
+         JOIN recipe r ON r.id = v.recipe_id \
+         WHERE r.reference_number = $1 AND v.number = $2 ORDER BY p.tag",
+    )
+    .bind(reference)
+    .bind(2_i32)
+    .fetch_all(app.admin())
+    .await
+    .unwrap();
+    assert_eq!(copied.len(), 1);
+    assert_eq!(draft, copied);
+}
+
+/// Steps 7 and 8: a custom dump, a restore into a second empty database, and the same export.
+async fn backup_and_restore(app: &App, reference: &str, expected: &ExportedVersion) {
+    let files = DumpDirectory::create();
+    let dump = Command::new("docker")
+        .args(["exec", "--user", "postgres", &server().container_id])
+        .args(["pg_dump", "--format=custom"])
+        .arg(format!("--dbname={}", app.database_name()))
+        .output()
+        .expect("docker exec runs");
+    assert_success("pg_dump", &dump);
+    let file = files.file(&format!("{}.dump", app.database_name()));
+    let mut handle = std::fs::File::create(&file).unwrap();
+    handle.write_all(&dump.stdout).unwrap();
+    drop(handle);
+    let copy = TestDatabase::create_empty().await;
+    let restored = exec_with_input(
+        &[
+            "pg_restore",
+            "--exit-on-error",
+            "--single-transaction",
+            &format!("--dbname={}", copy.name()),
+        ],
+        &file,
+    );
+    assert_success("pg_restore", &restored);
+    let copied = App::over(copy).await;
+    assert_eq!(&export_of(&copied, reference).await, expected);
+}
+
+/// The eight steps of task 9.2 for one row of the matrix.
+async fn check_stored_row(expected: Expectation) {
+    let mut app = restored_and_upgraded().await;
+    let before = stored_rows(&mut app, expected.reference).await;
+    read_row(&mut app, &expected).await;
+    let exported = export_of(&app, expected.reference).await;
+    assert_eq!(
+        exported.content_sha256.to_string(),
+        stored_hash(expected.reference)
+    );
+    assert_eq!(exported.loadable(), expected.loadable);
+    assert_eq!(stored_rows(&mut app, expected.reference).await, before);
+    copy_row(&mut app, expected.reference).await;
+    backup_and_restore(&app, expected.reference, &exported).await;
+}
+
+#[tokio::test]
+async fn adr_0177_stored_nested_array_exports_with_its_hash() {
+    check_stored_row(Expectation {
+        reference: "SR-NESTED-ARRAY",
+        loadable: true,
+        struct_name: None,
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn adr_0178_stored_array_bound_exports_with_its_hash_and_is_not_loadable() {
+    check_stored_row(Expectation {
+        reference: "SR-ARRAY-BOUND",
+        loadable: false,
+        struct_name: None,
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn adr_0179_stored_nesting_exports_with_its_hash() {
+    check_stored_row(Expectation {
+        reference: "SR-NESTING",
+        loadable: true,
+        struct_name: Some("ST_Top"),
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn adr_0180_stored_wchar_exports_with_its_hash_and_is_not_loadable() {
+    check_stored_row(Expectation {
+        reference: "SR-WCHAR",
+        loadable: false,
+        struct_name: None,
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn adr_0180_stored_wstring_exports_with_its_hash_and_is_not_loadable() {
+    check_stored_row(Expectation {
+        reference: "SR-WSTRING",
+        loadable: false,
+        struct_name: None,
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn adr_0186_stored_reserved_struct_name_exports_with_its_hash() {
+    check_stored_row(Expectation {
+        reference: "SR-RESERVED-NAME",
+        loadable: true,
+        struct_name: Some("PID_Compact"),
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn adr_0187_stored_bool_array_3d_exports_with_its_hash_and_is_not_loadable() {
+    check_stored_row(Expectation {
+        reference: "SR-BOOL-3D",
+        loadable: false,
+        struct_name: None,
+    })
+    .await;
 }
