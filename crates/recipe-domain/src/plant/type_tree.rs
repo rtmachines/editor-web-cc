@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_S7_NESTING};
 use super::{
     ArrayDimensions, DerivedTypeReason, LeafClass, MachineId, MemberName, PlantError, PlcPlatform,
-    PlcType, PlcTypeId, Primitive, RecordShape, TypeExpr, TypeLimit, TypeName,
+    PlcType, PlcTypeId, Primitive, RecordShape, TypeExpr, TypeLimit, TypeMember, TypeName,
 };
 
 /// The type rows that one machine can use.
@@ -336,6 +336,24 @@ fn too_large(id: PlcTypeId, limit: TypeLimit) -> PlantError {
     }
 }
 
+/// Render the prefix of one array node, such as `ARRAY[1..8] OF `.
+fn array_prefix(dimensions: &ArrayDimensions) -> String {
+    format!("ARRAY[{dimensions}] OF ")
+}
+
+/// Render one struct node, such as `ST_Zone@1`.
+fn struct_text(name: &TypeName, revision: u32) -> String {
+    format!("{name}@{revision}")
+}
+
+/// Render one leaf node, such as `INT` or `STRING(20)`.
+fn leaf_text(primitive: &Primitive, string_length: Option<u16>) -> String {
+    match string_length {
+        Some(length) => format!("{}({length})", primitive.name()),
+        None => primitive.name().to_owned(),
+    }
+}
+
 /// Render the root type as text, such as `ST_Zone` or `ARRAY[1..8] OF INT`.
 ///
 /// The loop follows only array elements. It stops at the first struct or primitive.
@@ -348,11 +366,11 @@ fn render_root(root: PlcTypeId, types: &PlatformTypes) -> String {
                 element,
                 dimensions,
             }) => {
-                parts.push(format!("ARRAY[{dimensions}] OF "));
+                parts.push(array_prefix(dimensions));
                 current = *element;
             }
             Some(RecordShape::Struct { name, revision, .. }) => {
-                parts.push(format!("{name}@{revision}"));
+                parts.push(struct_text(name, *revision));
                 break;
             }
             Some(RecordShape::Primitive {
@@ -360,10 +378,7 @@ fn render_root(root: PlcTypeId, types: &PlatformTypes) -> String {
                 string_length,
                 ..
             }) => {
-                parts.push(match string_length {
-                    Some(length) => format!("{}({length})", primitive.name()),
-                    None => primitive.name().to_owned(),
-                });
+                parts.push(leaf_text(primitive, *string_length));
                 break;
             }
             None => {
@@ -388,11 +403,11 @@ fn render_node(root: &TypeNode) -> String {
                 element,
                 ..
             } => {
-                parts.push(format!("ARRAY[{dimensions}] OF "));
+                parts.push(array_prefix(dimensions));
                 current = element;
             }
             TypeNode::Struct { name, revision, .. } => {
-                parts.push(format!("{name}@{revision}"));
+                parts.push(struct_text(name, *revision));
                 break;
             }
             TypeNode::Leaf {
@@ -400,10 +415,7 @@ fn render_node(root: &TypeNode) -> String {
                 string_length,
                 ..
             } => {
-                parts.push(match string_length {
-                    Some(length) => format!("{}({length})", primitive.name()),
-                    None => primitive.name().to_owned(),
-                });
+                parts.push(leaf_text(primitive, *string_length));
                 break;
             }
         }
@@ -475,7 +487,6 @@ fn cycle_error(child: PlcTypeId, stack: &[Frame], types: &PlatformTypes) -> Plan
 /// Count the leaves and the depth of a row whose children are finished.
 fn measure(row: &PlcType, done: &BTreeMap<PlcTypeId, Metrics>) -> Result<Metrics, PlantError> {
     let id = row.id();
-    let child = |child_id: &PlcTypeId| done.get(child_id).copied().ok_or_else(|| row_shape(id));
     match row.shape() {
         RecordShape::Primitive { .. } => Ok(Metrics {
             leaves: 1,
@@ -486,55 +497,77 @@ fn measure(row: &PlcType, done: &BTreeMap<PlcTypeId, Metrics>) -> Result<Metrics
         RecordShape::Array {
             element,
             dimensions,
-        } => {
-            let element = child(element)?;
-            let leaves = dimensions
-                .element_count()
-                .and_then(|count| element.leaves.checked_mul(count))
-                .ok_or_else(|| too_large(id, TypeLimit::Leaves))?;
-            let depth = u32::try_from(dimensions.len())
-                .ok()
-                .and_then(|levels| element.depth.checked_add(levels))
-                .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
-            let s7_nesting = if element.is_struct {
-                element.s7_nesting.checked_add(S7_ARRAY_OF_STRUCT_EXTRA)
-            } else {
-                Some(element.s7_nesting)
-            }
-            .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
-            Ok(Metrics {
-                leaves,
-                depth,
-                s7_nesting,
-                is_struct: false,
-            })
-        }
-        RecordShape::Struct { members, .. } => {
-            let mut leaves = 0_u64;
-            let mut deepest = 0_u32;
-            let mut deepest_s7 = 0_u32;
-            for member in members {
-                let metrics = child(&member.type_id)?;
-                leaves = leaves
-                    .checked_add(metrics.leaves)
-                    .ok_or_else(|| too_large(id, TypeLimit::Leaves))?;
-                deepest = deepest.max(metrics.depth);
-                deepest_s7 = deepest_s7.max(metrics.s7_nesting);
-            }
-            let depth = deepest
-                .checked_add(1)
-                .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
-            let s7_nesting = deepest_s7
-                .checked_add(1)
-                .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
-            Ok(Metrics {
-                leaves,
-                depth,
-                s7_nesting,
-                is_struct: true,
-            })
-        }
+        } => measure_array(id, finished_child(id, element, done)?, dimensions),
+        RecordShape::Struct { members, .. } => measure_struct(id, members, done),
     }
+}
+
+/// Return the metrics of a child row, or the row shape error of `id` when it is not finished.
+fn finished_child(
+    id: PlcTypeId,
+    child_id: &PlcTypeId,
+    done: &BTreeMap<PlcTypeId, Metrics>,
+) -> Result<Metrics, PlantError> {
+    done.get(child_id).copied().ok_or_else(|| row_shape(id))
+}
+
+/// Count an array row from the metrics of its element.
+fn measure_array(
+    id: PlcTypeId,
+    element: Metrics,
+    dimensions: &ArrayDimensions,
+) -> Result<Metrics, PlantError> {
+    let leaves = dimensions
+        .element_count()
+        .and_then(|count| element.leaves.checked_mul(count))
+        .ok_or_else(|| too_large(id, TypeLimit::Leaves))?;
+    let depth = u32::try_from(dimensions.len())
+        .ok()
+        .and_then(|levels| element.depth.checked_add(levels))
+        .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
+    let s7_nesting = if element.is_struct {
+        element.s7_nesting.checked_add(S7_ARRAY_OF_STRUCT_EXTRA)
+    } else {
+        Some(element.s7_nesting)
+    }
+    .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
+    Ok(Metrics {
+        leaves,
+        depth,
+        s7_nesting,
+        is_struct: false,
+    })
+}
+
+/// Count a struct row from the metrics of its members.
+fn measure_struct(
+    id: PlcTypeId,
+    members: &[TypeMember],
+    done: &BTreeMap<PlcTypeId, Metrics>,
+) -> Result<Metrics, PlantError> {
+    let mut leaves = 0_u64;
+    let mut deepest = 0_u32;
+    let mut deepest_s7 = 0_u32;
+    for member in members {
+        let metrics = finished_child(id, &member.type_id, done)?;
+        leaves = leaves
+            .checked_add(metrics.leaves)
+            .ok_or_else(|| too_large(id, TypeLimit::Leaves))?;
+        deepest = deepest.max(metrics.depth);
+        deepest_s7 = deepest_s7.max(metrics.s7_nesting);
+    }
+    let depth = deepest
+        .checked_add(1)
+        .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
+    let s7_nesting = deepest_s7
+        .checked_add(1)
+        .ok_or_else(|| too_large(id, TypeLimit::Depth))?;
+    Ok(Metrics {
+        leaves,
+        depth,
+        s7_nesting,
+        is_struct: true,
+    })
 }
 
 /// Pass 1: walk depth first, detect cycles, and measure each row.
