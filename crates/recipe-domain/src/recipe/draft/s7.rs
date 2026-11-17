@@ -3,10 +3,12 @@
 use std::collections::BTreeMap;
 
 use crate::plant::{
-    PlantError, PlcPlatform, PlcTypeId, S7Address, S7Layout, S7Start, S7Width, TypeLimit, TypeTree,
-    TypeTrees,
+    ArrayDimensions, PlantError, PlcPlatform, PlcTypeId, Primitive, S7Address, S7Layout, S7Start,
+    S7Width, TypeLimit, TypeNode, TypeTree, TypeTrees,
 };
-use crate::recipe::{Draft, DraftError, Parameter, ParameterKey, ParameterTag, RecipeError};
+use crate::recipe::{
+    Draft, DraftError, Parameter, ParameterKey, ParameterTag, RecipeError, S7AccessReason,
+};
 
 /// Number of bits in one byte.
 const BITS_PER_BYTE: u64 = 8;
@@ -15,6 +17,19 @@ const BITS_PER_BYTE: u64 = 8;
 ///
 /// The number is a fact of the platform family, not a setting.
 const S7_DATA_BLOCK_BYTES: u32 = 65_536;
+
+/// The lowest array bound that a data block with standard access holds (ADR-0178 (i)).
+///
+/// The number is a fact of the platform family, not a setting.
+const STANDARD_ACCESS_LOWEST_BOUND: i32 = -32_768;
+
+/// The highest array bound that a data block with standard access holds (ADR-0178 (i)).
+///
+/// The number is a fact of the platform family, not a setting.
+const STANDARD_ACCESS_HIGHEST_BOUND: i32 = 32_767;
+
+/// The number of dimensions of a `BOOL` array that has no verified S7 layout (ADR-0187 (a)).
+const UNVERIFIED_BOOL_DIMENSIONS: usize = 3;
 
 /// Whether a whole-draft check runs the address rules of ADR-0116.
 ///
@@ -123,6 +138,7 @@ impl Draft {
             check_tree_rules(parameter.tag(), parameter.s7_address(), tree)?;
             if rules == AddressRules::Run {
                 check_end_rule(parameter.tag(), parameter.s7_address(), tree)?;
+                check_standard_access_rule(parameter.tag(), parameter.s7_address(), tree)?;
             }
             if let Some(address) = parameter.s7_address() {
                 occupied.push(Occupied {
@@ -149,7 +165,9 @@ pub(crate) fn check_definition(
     check_platform_rule(platform, tag, address)?;
     check_data_block_rule(platform, tag, address)?;
     check_tree_rules(tag, address, tree)?;
-    check_end_rule(tag, address, tree)
+    check_end_rule(tag, address, tree)?;
+    check_standard_access_rule(tag, address, tree)?;
+    Ok(())
 }
 
 /// Check the end rule of ADR-0116 (a). The rule runs after the alignment rule.
@@ -180,6 +198,77 @@ pub(in crate::recipe) fn check_end_rule(
         size,
     }
     .into())
+}
+
+/// Check the standard-access rule of ADR-0178 (a) and ADR-0187 (a). The rule runs after the end
+/// rule.
+///
+/// A parameter with an address lives in a data block with standard access. Every array of its
+/// type tree has its bounds in `-32768..=32767` and is no `BOOL` array with three dimensions. The
+/// function reads the type of the parameter, the struct members, and the array elements at each
+/// level, with an explicit stack. A parameter without an address passes. The first array that
+/// breaks a rule, in declaration order, gives the reason.
+///
+/// # Errors
+///
+/// Returns `E-RCP-058` with the reason [`S7AccessReason::ArrayBoundOutsideInt`] or
+/// [`S7AccessReason::BoolArrayWithThreeDimensions`].
+pub(in crate::recipe) fn check_standard_access_rule(
+    tag: &ParameterTag,
+    address: Option<S7Address>,
+    tree: &TypeTree,
+) -> Result<(), RecipeError> {
+    let Some(address) = address else {
+        return Ok(());
+    };
+    let mut pending = vec![tree.root()];
+    while let Some(node) = pending.pop() {
+        let reason = match node {
+            TypeNode::Leaf { .. } => None,
+            TypeNode::Array {
+                dimensions,
+                element,
+                ..
+            } => {
+                pending.push(element);
+                array_reason(dimensions, element)
+            }
+            TypeNode::Struct { members, .. } => {
+                pending.extend(members.iter().rev().map(|(_, member)| member));
+                None
+            }
+        };
+        if let Some(reason) = reason {
+            return Err(RecipeError::S7TypeNotAddressable {
+                tag: tag.clone(),
+                address,
+                reason,
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Return the reason why one array does not fit a data block with standard access, if any.
+///
+/// The bound rule comes before the `BOOL` rule.
+fn array_reason(dimensions: &ArrayDimensions, element: &TypeNode) -> Option<S7AccessReason> {
+    let outside = dimensions.iter().any(|dimension| {
+        dimension.lower() < STANDARD_ACCESS_LOWEST_BOUND
+            || dimension.upper() > STANDARD_ACCESS_HIGHEST_BOUND
+    });
+    if outside {
+        return Some(S7AccessReason::ArrayBoundOutsideInt);
+    }
+    let is_bool = matches!(
+        element,
+        TypeNode::Leaf {
+            primitive: Primitive::Bool,
+            ..
+        }
+    );
+    (is_bool && dimensions.len() == UNVERIFIED_BOOL_DIMENSIONS)
+        .then_some(S7AccessReason::BoolArrayWithThreeDimensions)
 }
 
 /// Check the data block rule of ADR-0116 (c) and ADR-0140 (a). The rule needs no type tree.

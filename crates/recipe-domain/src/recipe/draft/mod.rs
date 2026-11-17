@@ -37,6 +37,11 @@ pub use budget::{
 pub use definition::{DefinitionUpdate, Retype};
 pub(crate) use guard::not_on_platform;
 pub use parameter::{Parameter, StoredParameter};
+#[expect(
+    unused_imports,
+    reason = "tasks 3.3 and 3.4 of siemens-type-rules call the rule from rebind and read_check; remove this attribute there"
+)]
+pub(in crate::recipe) use s7::check_standard_access_rule;
 pub(crate) use s7::overlap_partners;
 pub(in crate::recipe) use s7::{check_data_block_rule, check_end_rule};
 
