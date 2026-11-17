@@ -84,7 +84,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 4. Nesting limit on S7 (ADR-0179)
 
-- [ ] 4.1 (recipe-domain, recipe-web) The S7 count and its limit kind (ADR-0179 (a) to (c), (l)).
+- [x] 4.1 (recipe-domain, recipe-web) The S7 count and its limit kind (ADR-0179 (a) to (c), (l)).
   - RED, domain: in `crates/recipe-domain/src/plant/type_tree/limits.rs`, add `adr_0179_*` tests. `MAX_S7_NESTING` equals 8 (`reliability.md` §7.11). The count follows ADR-0179 (b) and (c). A struct counts 1, and an array of a struct counts 3. An array of a primitive or a string counts 0.
   - More domain cases: a type with 8 levels passes on `S7_1500`. A type with 9 levels gives `E-PLT-018` with `TypeLimit::S7Nesting` on the three S7 platforms. `TwinCat3` accepts the type with 9 levels.
   - RED, limit text: in `crates/recipe-domain/src/plant/error/tests.rs`, `TypeLimit::S7Nesting.to_string()` is "8 levels of the S7 count". `TypeLimit::Depth.to_string()` stays "32 levels".
@@ -110,7 +110,7 @@ The orchestrator starts a wave after the previous wave merges. Each chain of a w
 
 ## 5. WCHAR and WSTRING characters on S7 (ADR-0180)
 
-- [ ] 5.1 (recipe-domain, recipe-web) The value rule and its expected form (ADR-0180 (a) to (d)).
+- [x] 5.1 (recipe-domain, recipe-web) The value rule and its expected form (ADR-0180 (a) to (d)).
   - RED, domain: in `crates/recipe-domain/src/recipe/value/leaf/tests.rs`, add `adr_0180_*` tests. On `S7_1500` and `S7_1200` with `RuleSet::Current`, these results apply:
     - `WCHAR` `U+D7FF` passes, and `U+E000` gives `E-RCP-005` with `Expected::Char { max: 0xD7FF }`.
     - `WSTRING` `U+CFFF` passes. `U+D000` and `U+1F600` give `E-RCP-005` with the new `WSTRING` form.

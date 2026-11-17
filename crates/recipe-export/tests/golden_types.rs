@@ -141,11 +141,12 @@ fn type_table() -> [TypeCase; 28] {
             "\"Zone \u{e9}\"",
             Length(STRING_LENGTH),
         ),
-        // The `WSTRING` value holds U+1D11E, a character outside the BMP. The test pins review Q07.
+        // The `WSTRING` value holds U+03A9. A `WSTRING` on S7 holds no scalar above U+CFFF
+        // (ADR-0180 (b)).
         case(
             "WSTRING",
-            "\"Z\u{1d11e}\"",
-            "\"Z\u{1d11e}\"",
+            "\"Z\u{3a9}\"",
+            "\"Z\u{3a9}\"",
             Length(STRING_LENGTH),
         ),
         case("S5TIME", r#""S5T#1s""#, r#""1000""#, Range("0", "9990000")),

@@ -3,7 +3,7 @@
   "exported_at": "2026-10-12T09:30:00Z",
   "exported_by": "jkowalski",
   "loadable": true,
-  "content_sha256": "90a64891f3cde63e595002797eaca5b82590caccaf8cd8954a7eb04ec2bf40e8",
+  "content_sha256": "cac9e99d8a39d8a525a79ed855e2122a469ff270d0bc29323d329c88134f0202",
   "machine": {
     "code": "M12",
     "name": "Filler 2",
@@ -489,7 +489,7 @@
           "max_length": "16"
         }
       ],
-      "value": "Z𝄞"
+      "value": "ZΩ"
     }
   ]
 }

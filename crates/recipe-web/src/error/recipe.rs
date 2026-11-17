@@ -339,6 +339,13 @@ fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String
         Expected::Index => ("expected-index", Vec::new()),
         Expected::Scalar => ("expected-scalar", Vec::new()),
         Expected::Wstring { length } => ("expected-wstring", one("length", length)),
+        Expected::WstringS7 { length, max } => (
+            "expected-wstring-s7",
+            vec![
+                ("length", length.to_string()),
+                ("max", format!("U+{max:04X}")),
+            ],
+        ),
         Expected::String { length } => ("expected-string", one("length", length)),
         Expected::Char { max } => ("expected-char", one("max", format!("U+{max:04X}"))),
         Expected::Literal { type_name } => ("expected-literal", one("type_name", type_name)),

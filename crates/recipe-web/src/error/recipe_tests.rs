@@ -645,6 +645,19 @@ fn shape_phrases() -> Vec<Phrase> {
             "one character from U+0001 to U+FFFF",
             "jeden znak od U+0001 do U+FFFF",
         ),
+        (
+            Expected::Char { max: 0xD7FF },
+            "one character from U+0001 to U+D7FF",
+            "jeden znak od U+0001 do U+D7FF",
+        ),
+        (
+            Expected::WstringS7 {
+                length: 10,
+                max: 0xCFFF,
+            },
+            "a string of at most 10 characters from U+0001 to U+CFFF",
+            "tekst o najwy\u{17c}ej 10 znakach od U+0001 do U+CFFF",
+        ),
     ]
 }
 
@@ -757,5 +770,51 @@ fn recipe_the_polish_message_of_e_rcp_054_names_the_type_of_the_parameter() {
 
 #[test]
 fn recipe_the_expected_forms_cover_each_variant() {
-    assert_eq!(expected_cases().len(), 21);
+    assert_eq!(expected_cases().len(), 23);
+}
+
+/// The message of `E-RCP-005` for `expected` in `lang`.
+fn shape_message(expected: Expected, lang: Lang) -> String {
+    let bundles = Bundles::load().unwrap();
+    let error = RecipeError::ValueShapeMismatch {
+        tag: tag("NOTE"),
+        leaf: leaf(""),
+        expected,
+    };
+    message(&bundles, error, lang)
+}
+
+#[test]
+fn adr_0180_the_english_message_of_a_refused_wstring_names_the_length_and_the_range() {
+    let text = shape_message(
+        Expected::WstringS7 {
+            length: 10,
+            max: 0xCFFF,
+        },
+        Lang::En,
+    );
+    assert!(text.contains("10"), "{text}");
+    assert!(text.contains("U+0001"), "{text}");
+    assert!(text.contains("U+CFFF"), "{text}");
+}
+
+#[test]
+fn adr_0180_the_polish_message_of_a_refused_wchar_names_u_d7ff() {
+    let text = shape_message(Expected::Char { max: 0xD7FF }, Lang::Pl);
+    assert!(text.contains("U+D7FF"), "{text}");
+    assert!(text.contains("Oczekiwano"), "{text}");
+}
+
+#[test]
+fn adr_0180_the_polish_message_of_a_refused_wstring_names_the_length_and_the_range() {
+    let text = shape_message(
+        Expected::WstringS7 {
+            length: 10,
+            max: 0xCFFF,
+        },
+        Lang::Pl,
+    );
+    assert!(text.contains("10"), "{text}");
+    assert!(text.contains("U+0001"), "{text}");
+    assert!(text.contains("U+CFFF"), "{text}");
 }

@@ -42,6 +42,14 @@ pub enum Expected {
         /// The length of the type.
         length: u16,
     },
+    /// A `WSTRING(n)` leaf on `S7_1200` or `S7_1500` needs a string inside its length with
+    /// characters up to the highest code unit of the platform (ADR-0180 (b)).
+    WstringS7 {
+        /// The length of the type in UTF-16 units.
+        length: u16,
+        /// The highest scalar that the platform accepts.
+        max: u32,
+    },
     /// A `STRING(n)` leaf needs a string of Latin-1 characters inside its length.
     String {
         /// The length of the type.
@@ -113,6 +121,10 @@ impl fmt::Display for Expected {
                     "a string of at most {length} UTF-16 units without U+0000"
                 )
             }
+            Self::WstringS7 { length, max } => write!(
+                f,
+                "a string of at most {length} characters from U+0001 to U+{max:04X}"
+            ),
             Self::String { length } => {
                 write!(
                     f,
