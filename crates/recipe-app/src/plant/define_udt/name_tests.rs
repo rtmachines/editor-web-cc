@@ -12,8 +12,9 @@ use recipe_domain::plant::{
 use super::tests::{fixture, input, own_rows, real, run};
 use super::{DefineUdtInput, DefineUdtMode};
 use crate::error::{AppError, Missing};
-use crate::memory::Fault;
-use crate::memory::fixtures::{Fixture, mid, tid};
+use crate::memory::fixtures::{Fixture, lock_line, mid, tid};
+use crate::memory::{Fault, JournalEntry, LockMode};
+use crate::ports::Isolation;
 
 #[tokio::test]
 async fn the_index_plc_type_struct_name_ci_unique_gives_plt_015_and_writes_nothing() {
@@ -305,11 +306,17 @@ async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_ad
             ..
         })
     ));
-    assert!(
-        !fixture.store.journal().iter().any(|entry| matches!(
-            entry,
-            crate::memory::JournalEntry::Lock(lock) if lock.table == crate::memory::DERIVED_TYPE_LOCK_TABLE
-        ))
+    assert_eq!(
+        fixture.store.journal(),
+        vec![
+            JournalEntry::Begin(Isolation::ReadOnly),
+            JournalEntry::Begin(Isolation::ReadCommitted),
+            lock_line(
+                "machine",
+                LockMode::ForShare,
+                mid(STORED_MACHINE).to_string()
+            ),
+        ]
     );
     assert!(fixture.store.audit_entries().is_empty());
     assert_eq!(

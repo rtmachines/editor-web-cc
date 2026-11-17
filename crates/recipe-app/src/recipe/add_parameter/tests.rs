@@ -468,11 +468,12 @@ async fn a_type_text_with_a_reserved_struct_name_gives_plt_013_and_takes_no_advi
     assert_eq!(error.code(), ErrorCode::PLT_013);
     assert_eq!(reason_of(&error), Some(DerivedTypeReason::ReservedName));
     assert_eq!(stored_parameters(&fixture).len(), 2);
-    assert!(
-        !fixture.store.journal().iter().any(|entry| matches!(
-            entry,
-            crate::memory::JournalEntry::Lock(lock) if lock.table == crate::memory::DERIVED_TYPE_LOCK_TABLE
-        ))
+    let mut expected = lock_prefix();
+    expected.pop();
+    assert_eq!(
+        fixture.store.journal(),
+        expected,
+        "the unit lock comes after the check"
     );
     assert_nothing_written(&fixture);
 }
