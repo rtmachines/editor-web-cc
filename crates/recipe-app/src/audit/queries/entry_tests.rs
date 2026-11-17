@@ -9,7 +9,9 @@ use super::{AuditEntryView, GetAuditEntry};
 use crate::error::{AppError, Missing};
 use crate::identity::fixtures::IdentityFixture;
 use crate::identity::{CreateUser, CreateUserInput};
+use crate::memory::JournalEntry;
 use crate::memory::fixtures::{Fixture, actor, meta};
+use crate::ports::Isolation;
 
 /// Run `GetAuditEntry` as `role` on the entry `id`.
 async fn get(fixture: &Fixture, role: Role, id: u64) -> Result<AuditEntryView, AppError> {
@@ -104,4 +106,16 @@ fn the_missing_audit_entry_names_the_full_id_and_a_malformed_id_names_no_value()
 async fn a_process_engineer_reads_the_entry_of_a_deleted_recipe() {
     let fixture = world().await;
     assert!(get(&fixture, Role::ProcessEngineer, 6).await.is_ok());
+}
+
+#[tokio::test]
+async fn get_audit_entry_runs_in_one_read_only_transaction() {
+    let fixture = world().await;
+    let mark = fixture.store.journal().len();
+    get(&fixture, Role::Administrator, 3).await.unwrap();
+    let journal = fixture.store.journal();
+    assert_eq!(
+        journal.get(mark..),
+        Some([JournalEntry::Begin(Isolation::ReadOnly)].as_slice())
+    );
 }

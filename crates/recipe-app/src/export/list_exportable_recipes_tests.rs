@@ -14,6 +14,7 @@ use crate::auth::Operation;
 use crate::blocking::{AppSettings, Blocking};
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError, TimeoutStage};
+use crate::memory::JournalEntry;
 use crate::memory::MemoryStore;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::ports::{Isolation, Transaction, UnitOfWork};
@@ -131,4 +132,19 @@ async fn the_query_writes_no_audit_entry() {
         .await
         .unwrap_err();
     assert_eq!(fixture.store.audit_entries().len(), entries);
+}
+
+#[tokio::test]
+async fn list_exportable_recipes_runs_in_one_read_only_transaction() {
+    let (fixture, _machine) = approved_fixture().await;
+    let mark = fixture.store.journal().len();
+    ListExportableRecipes::new(fixture.context())
+        .execute(&actor(Role::ExportClient), &meta(), input("M1"))
+        .await
+        .unwrap();
+    let journal = fixture.store.journal();
+    assert_eq!(
+        journal.get(mark..),
+        Some([JournalEntry::Begin(Isolation::ReadOnly)].as_slice())
+    );
 }

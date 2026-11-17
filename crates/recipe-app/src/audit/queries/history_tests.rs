@@ -9,6 +9,7 @@ use super::test_world::{M12, R100, R300, context_with_pages, entry_id, ids, worl
 use super::{GetRecipeHistory, RecipeHistory, RecipeHistoryInput};
 use crate::blocking::PageSizes;
 use crate::error::{AppError, Missing};
+use crate::memory::JournalEntry;
 use crate::memory::fixtures::{
     Fixture, actor, draft_recipe, meta, reference, rid, timestamp, user,
 };
@@ -151,4 +152,18 @@ async fn an_unknown_reference_gives_not_found() {
         error,
         AppError::NotFound { entity: Missing::Recipe(found) } if found == reference("R-999")
     ));
+}
+
+#[tokio::test]
+async fn get_recipe_history_runs_in_one_read_only_transaction() {
+    let fixture = world().await;
+    let mark = fixture.store.journal().len();
+    history(&fixture, Role::Operator, "R-100", None)
+        .await
+        .unwrap();
+    let journal = fixture.store.journal();
+    assert_eq!(
+        journal.get(mark..),
+        Some([JournalEntry::Begin(Isolation::ReadOnly)].as_slice())
+    );
 }

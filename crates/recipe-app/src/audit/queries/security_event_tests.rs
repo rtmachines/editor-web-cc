@@ -22,9 +22,11 @@ use crate::blocking::{AppSettings, PageSizes};
 use crate::context::AppContext;
 use crate::identity::IdentityContext;
 use crate::identity::fixtures::IdentityFixture;
+use crate::memory::JournalEntry;
 use crate::memory::fixtures::user;
 use crate::ports::{
-    CursorPage, NewUser, SecurityEventId, SecurityEventRow, SecurityEventSink as _, TimeRange,
+    CursorPage, Isolation, NewUser, SecurityEventId, SecurityEventRow, SecurityEventSink as _,
+    TimeRange,
 };
 
 /// The current key of the login key ring of these tests.
@@ -300,5 +302,21 @@ async fn a_row_names_the_login_of_its_user() {
     assert_eq!(
         logins,
         [None, Some("mhoffman".to_owned()), None, None, None]
+    );
+}
+
+#[tokio::test]
+async fn list_security_events_runs_in_one_read_only_transaction() {
+    let fixture = world().await;
+    let (auth, meta) = fixture.actor(Role::Administrator).await;
+    let mark = fixture.store.journal().len();
+    ListSecurityEvents::new(context(&fixture, 100))
+        .execute(&auth, &meta, no_filter())
+        .await
+        .unwrap();
+    let journal = fixture.store.journal();
+    assert_eq!(
+        journal.get(mark..),
+        Some([JournalEntry::Begin(Isolation::ReadOnly)].as_slice())
     );
 }
