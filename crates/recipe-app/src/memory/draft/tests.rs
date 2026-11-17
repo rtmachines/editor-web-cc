@@ -609,3 +609,22 @@ async fn a_rollback_keeps_no_draft_change() {
         before.iter().map(|p| p.value.clone()).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn checked_budget_sum_adds_the_counts() {
+    let total = super::checked_budget_sum([1_usize, 2, 3], ErrorCode::RCP_036, "message");
+    assert_eq!(total.unwrap(), 6);
+}
+
+#[test]
+fn checked_budget_sum_gives_the_budget_error_on_overflow() {
+    let error =
+        super::checked_budget_sum([usize::MAX, 1], ErrorCode::RCP_036, "message").unwrap_err();
+    assert!(matches!(
+        error,
+        StorageError::Constraint {
+            code: ErrorCode::RCP_036,
+            ..
+        }
+    ));
+}

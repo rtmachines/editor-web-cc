@@ -47,9 +47,9 @@ const TYPE_OF_ANOTHER_MACHINE: &str = "The type belongs to another machine.";
 /// The message of `E-RCP-032`.
 const UNIT_OF_ANOTHER_MACHINE: &str = "The unit does not belong to the machine of the recipe.";
 /// The message of `E-RCP-035`.
-const TOO_MANY_PARAMETERS: &str = "The version has more than 4000 parameters.";
+const TOO_MANY_PARAMETERS: &str = "The version has more than 4 000 parameters.";
 /// The message of `E-RCP-036`.
-const TOO_MANY_LIMIT_ROWS: &str = "The version has more than 32768 limit rows.";
+const TOO_MANY_LIMIT_ROWS: &str = "The version has more than 32 768 limit rows.";
 
 impl MemoryTransaction {
     /// Require that `version` exists and is a live draft, as trigger 4.1 does.
@@ -92,14 +92,13 @@ impl MemoryTransaction {
             .ok_or_else(|| missing_row(PARAMETER_TABLE))
     }
 
-    /// Check the triggers, the platform `CHECK`, the foreign keys, and the budget of a parameter
+    /// Check the triggers, the platform `CHECK`, the foreign keys, and the tag of a parameter
     /// that is written to `version`.
     ///
     /// The checks run in the order of PostgreSQL: the trigger `enforce_type_platform`, the trigger
-    /// `enforce_unit_machine`, the `CHECK` `parameter_s7_address_platform`, the keys and the tag,
-    /// and the statement trigger `version_size_budget`. The row `except` is the parameter itself.
-    /// It does not count for the tag. A parameter with `except` is a definition change, and the
-    /// budget does not apply to it, because no row is inserted.
+    /// `enforce_unit_machine`, the `CHECK` `parameter_s7_address_platform`, and the tag. The row
+    /// `except` is the parameter itself. It does not count for the tag. The budget is not here.
+    /// `insert_parameter` checks it after the row constraints, as the statement trigger does.
     fn check_parameter_references(
         &self,
         version: RecipeVersionId,
@@ -147,13 +146,11 @@ impl MemoryTransaction {
         if tag_taken {
             return Err(duplicate(PARAMETER_TAG_UNIQUE));
         }
-        if except.is_none() {
-            self.check_insert_budget(version, parameter)?;
-        }
         Ok(())
     }
 
     /// Count the rows of `version` after the insert of `parameter`, as the statement triggers do.
+    /// PostgreSQL runs them after the row constraints of the statement.
     fn check_insert_budget(
         &self,
         version: RecipeVersionId,
@@ -170,10 +167,13 @@ impl MemoryTransaction {
         if rows().count() >= usize_of(PARAMETERS_PER_VERSION) {
             return Err(trigger(ErrorCode::RCP_035, TOO_MANY_PARAMETERS));
         }
-        let limit_rows: usize = rows()
-            .map(|row| row.limits.len())
-            .chain(std::iter::once(parameter.limits().len()))
-            .sum();
+        let limit_rows = checked_budget_sum(
+            rows()
+                .map(|row| row.limits.len())
+                .chain(std::iter::once(parameter.limits().len())),
+            ErrorCode::RCP_036,
+            TOO_MANY_LIMIT_ROWS,
+        )?;
         check_limit_budget(limit_rows)
     }
 }
@@ -191,6 +191,19 @@ const fn address_fits(platform: PlcPlatform, has_address: bool) -> bool {
 /// A count as `usize`. A count above the range of `usize` cannot occur, so it is the maximum.
 fn usize_of(count: u64) -> usize {
     usize::try_from(count).unwrap_or(usize::MAX)
+}
+
+/// Add the counts of a budget with `checked_add`. A sum that overflows `usize` is above every
+/// budget, so it gives the budget error `code`.
+fn checked_budget_sum(
+    counts: impl IntoIterator<Item = usize>,
+    code: ErrorCode,
+    message: &str,
+) -> Result<usize, StorageError> {
+    counts
+        .into_iter()
+        .try_fold(0_usize, usize::checked_add)
+        .ok_or_else(|| trigger(code, message))
 }
 
 /// The statement trigger `version_size_budget` on `parameter_limit` gives `E-RCP-036` for a
@@ -303,6 +316,7 @@ impl DraftRepository for MemoryTransaction {
         {
             return Err(duplicate(PARAMETER_KEY_UNIQUE));
         }
+        self.check_insert_budget(version, parameter)?;
         let platform = state
             .versions
             .get(&version)
@@ -355,14 +369,16 @@ impl DraftRepository for MemoryTransaction {
         let id = self.parameter_id(version, key)?;
         self.require_live_draft(version)?;
         // PostgreSQL deletes the old rows first, so only the other parameters and the new rows count.
-        let after: usize = self
-            .state()
-            .parameters
-            .values()
-            .filter(|row| row.version == version && row.id != id)
-            .map(|row| row.limits.len())
-            .chain(std::iter::once(rows.len()))
-            .sum();
+        let after = checked_budget_sum(
+            self.state()
+                .parameters
+                .values()
+                .filter(|row| row.version == version && row.id != id)
+                .map(|row| row.limits.len())
+                .chain(std::iter::once(rows.len())),
+            ErrorCode::RCP_036,
+            TOO_MANY_LIMIT_ROWS,
+        )?;
         check_limit_budget(after)?;
         self.editable_parameter(version, key)?.limits = rows;
         self.record_draft_write(WriteKind::Limits, key);
