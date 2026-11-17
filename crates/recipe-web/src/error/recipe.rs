@@ -325,6 +325,19 @@ fn one(name: &'static str, value: impl ToString) -> Vec<(&'static str, String)> 
     vec![(name, value.to_string())]
 }
 
+/// Return a list of two arguments of a phrase.
+fn two(
+    first: &'static str,
+    first_value: impl ToString,
+    second: &'static str,
+    second_value: impl ToString,
+) -> Vec<(&'static str, String)> {
+    vec![
+        (first, first_value.to_string()),
+        (second, second_value.to_string()),
+    ]
+}
+
 /// Return the key of an expected form and the arguments of its phrase.
 fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String)>) {
     match expected {
@@ -341,10 +354,7 @@ fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String
         Expected::Wstring { length } => ("expected-wstring", one("length", length)),
         Expected::WstringS7 { length, max } => (
             "expected-wstring-s7",
-            vec![
-                ("length", length.to_string()),
-                ("max", format!("U+{max:04X}")),
-            ],
+            two("length", length, "max", format!("U+{max:04X}")),
         ),
         Expected::String { length } => ("expected-string", one("length", length)),
         Expected::Char { max } => ("expected-char", one("max", format!("U+{max:04X}"))),
@@ -365,10 +375,7 @@ fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String
         ),
         Expected::NumberDigits { type_name, digits } => (
             "expected-number-digits",
-            vec![
-                ("type_name", type_name.to_string()),
-                ("digits", digits.to_string()),
-            ],
+            two("type_name", type_name, "digits", digits),
         ),
         Expected::ParameterType => ("expected-parameter-type", Vec::new()),
         Expected::NewValue => ("expected-new-value", Vec::new()),
