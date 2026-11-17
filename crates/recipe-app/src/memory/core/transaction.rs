@@ -34,6 +34,14 @@ pub(super) struct VisibleLogs {
     pub(super) events: usize,
 }
 
+/// The SQLSTATE that PostgreSQL gives for a write in a `READ ONLY` transaction.
+const READ_ONLY_SQL_TRANSACTION: &str = "25006";
+
+/// The cause of the storage error for a write in a read-only transaction.
+#[derive(Debug, thiserror::Error)]
+#[error("cannot execute a write in a read-only transaction")]
+struct WriteInReadOnlyTransaction;
+
 /// An open in-memory transaction.
 ///
 /// It works on a copy of the state. `finish` replaces the shared state and appends
@@ -208,9 +216,28 @@ impl MemoryTransaction {
     }
 
     /// Return the working copy of the state for a write.
-    pub const fn state_mut(&mut self) -> &mut MemoryState {
+    ///
+    /// The method solves one problem: a write in a read-only level must fail, as it does in
+    /// `PgTransaction` (design D7). Both levels of a query are `READ ONLY`, so the method gives
+    /// `StorageError::Other` with the SQLSTATE `25006` for them.
+    pub fn state_for_write(&mut self) -> Result<&mut MemoryState, StorageError> {
+        self.refuse_read_only_write()?;
         self.has_written = true;
-        &mut self.state
+        Ok(&mut self.state)
+    }
+
+    /// Return the error of a write in a `READ ONLY` transaction, or `Ok` for the other levels.
+    fn refuse_read_only_write(&self) -> Result<(), StorageError> {
+        if matches!(
+            self.isolation,
+            Isolation::ReadOnly | Isolation::RepeatableRead
+        ) {
+            return Err(StorageError::Other {
+                sqlstate: Some(READ_ONLY_SQL_TRANSACTION.to_owned()),
+                source: Box::new(WriteInReadOnlyTransaction),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -269,6 +296,7 @@ impl Transaction for MemoryTransaction {
     }
 
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {
+        self.refuse_read_only_write()?;
         let mut shared = self.shared.lock();
         if let Some(fault) = shared.take_queued(FaultPoint::AppendAudit) {
             return Err(fault.into());

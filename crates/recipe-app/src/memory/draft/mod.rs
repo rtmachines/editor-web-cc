@@ -86,7 +86,7 @@ impl MemoryTransaction {
     ) -> Result<&mut ParameterRow, StorageError> {
         let id = self.parameter_id(version, key)?;
         self.require_live_draft(version)?;
-        self.state_mut()
+        self.state_for_write()?
             .parameters
             .get_mut(&id)
             .ok_or_else(|| missing_row(PARAMETER_TABLE))
@@ -270,7 +270,7 @@ impl DraftRepository for MemoryTransaction {
         editor: UserId,
     ) -> Result<i64, StorageError> {
         let now = self.now();
-        let state = self.state_mut();
+        let state = self.state_for_write()?;
         let row = state
             .versions
             .get_mut(&version)
@@ -310,7 +310,7 @@ impl DraftRepository for MemoryTransaction {
             .ok_or_else(|| missing_reference(PARAMETER_VERSION_PLATFORM))?;
         let row = parameter_row((version, platform), parameter, self.now())?;
         let image = parameter_image(&row);
-        self.state_mut().parameters.insert(row.id, row);
+        self.state_for_write()?.parameters.insert(row.id, row);
         Ok(image)
     }
 
@@ -407,7 +407,7 @@ impl DraftRepository for MemoryTransaction {
         let id = self.parameter_id(version, key)?;
         self.require_live_draft(version)?;
         let row = self
-            .state_mut()
+            .state_for_write()?
             .parameters
             .remove(&id)
             .ok_or_else(|| missing_row(PARAMETER_TABLE))?;

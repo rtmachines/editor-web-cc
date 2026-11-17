@@ -13,7 +13,7 @@ use crate::ports::{AttemptId, AttemptRepository, AttemptRow, DeletedAttempts, Lo
 #[async_trait]
 impl AttemptRepository for MemoryTransaction {
     async fn mark_succeeded(&mut self, id: AttemptId) -> Result<(), StorageError> {
-        if let Some(row) = self.state_mut().attempts.get_mut(&id) {
+        if let Some(row) = self.state_for_write()?.attempts.get_mut(&id) {
             row.succeeded = true;
         }
         Ok(())
@@ -24,7 +24,7 @@ impl AttemptRepository for MemoryTransaction {
         login: &TypedLogin,
         keep: u32,
     ) -> Result<DeletedAttempts, StorageError> {
-        let attempts = &mut self.state_mut().attempts;
+        let attempts = &mut self.state_for_write()?.attempts;
         let ids: Vec<AttemptId> = attempts
             .iter()
             .filter(|(_id, row)| row.login == *login)

@@ -66,14 +66,14 @@ impl MemoryTransaction {
     }
 
     /// Add a checked type row and return its image.
-    fn put_type(&mut self, row: PlcType) -> RowImage {
+    fn put_type(&mut self, row: PlcType) -> Result<RowImage, StorageError> {
         let row = TypeRow {
             plc_type: row,
             created_at: self.now(),
         };
         let image = type_image(&row);
-        self.state_mut().types.insert(row.plc_type.id(), row);
-        image
+        self.state_for_write()?.types.insert(row.plc_type.id(), row);
+        Ok(image)
     }
 }
 
@@ -144,7 +144,7 @@ impl TypeCatalog for MemoryTransaction {
         }
         self.check_type_references(&candidate)?;
         let id = candidate.id();
-        let image = self.put_type(candidate);
+        let image = self.put_type(candidate)?;
         Ok(Ensured {
             id,
             created: Some(image),
@@ -185,7 +185,7 @@ impl TypeCatalog for MemoryTransaction {
             return Err(duplicate(TYPE_PKEY));
         }
         self.check_type_references(row)?;
-        Ok(self.put_type(row.clone()))
+        self.put_type(row.clone())
     }
 }
 

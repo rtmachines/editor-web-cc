@@ -81,14 +81,14 @@ impl MemoryTransaction {
     }
 
     fn unit_row_mut(&mut self, id: UnitId) -> Result<&mut UnitRow, StorageError> {
-        self.state_mut()
+        self.state_for_write()?
             .units
             .get_mut(&id)
             .ok_or_else(|| missing_row(UNIT_TABLE))
     }
 
     fn machine_row_mut(&mut self, id: MachineId) -> Result<&mut MachineRow, StorageError> {
-        self.state_mut()
+        self.state_for_write()?
             .machines
             .get_mut(&id)
             .ok_or_else(|| missing_row(MACHINE_TABLE))
@@ -124,7 +124,7 @@ impl MemoryTransaction {
             updated_at: now,
         };
         let image = unit_image(&row);
-        self.state_mut().units.insert(row.id, row);
+        self.state_for_write()?.units.insert(row.id, row);
         Ok(image)
     }
 }
@@ -227,7 +227,7 @@ impl PlantRepository for MemoryTransaction {
             updated_at: now,
         };
         let image = machine_image(&row);
-        self.state_mut().machines.insert(row.id, row);
+        self.state_for_write()?.machines.insert(row.id, row);
         let mut units = Vec::new();
         for unit in machine.units() {
             units.push(self.put_unit(machine.id(), unit)?);
@@ -260,7 +260,7 @@ impl PlantRepository for MemoryTransaction {
         row.db_number = Some(number);
         row.updated_at = now;
         let image = machine_image(row);
-        if let Some(connection) = self.state_mut().connections.get_mut(&id) {
+        if let Some(connection) = self.state_for_write()?.connections.get_mut(&id) {
             connection.copy_data_block(number, now)?;
         }
         Ok(image)

@@ -74,7 +74,7 @@ impl VersionRow {
 
 impl MemoryTransaction {
     fn recipe_row_mut(&mut self, id: RecipeId) -> Result<&mut RecipeRow, StorageError> {
-        self.state_mut()
+        self.state_for_write()?
             .recipes
             .get_mut(&id)
             .ok_or_else(|| missing_row(RECIPE_TABLE))
@@ -102,7 +102,7 @@ impl MemoryTransaction {
         let locked = self.guard(id)?;
         let now = self.now();
         let row = self
-            .state_mut()
+            .state_for_write()?
             .versions
             .get_mut(&id)
             .ok_or_else(|| missing_row(VERSION_TABLE))?;
@@ -128,9 +128,9 @@ impl MemoryTransaction {
         let row = new_version_row(new, platform, now);
         let copies = inherited_parameters(state, new, now);
         let image = version_image(&row);
-        self.state_mut().versions.insert(row.id, row);
+        self.state_for_write()?.versions.insert(row.id, row);
         for copy in copies {
-            self.state_mut().parameters.insert(copy.id, copy);
+            self.state_for_write()?.parameters.insert(copy.id, copy);
         }
         Ok(image)
     }
@@ -376,7 +376,7 @@ impl RecipeRepository for MemoryTransaction {
             updated_at: now,
         };
         let image = recipe_image(&row);
-        self.state_mut().recipes.insert(row.id, row);
+        self.state_for_write()?.recipes.insert(row.id, row);
         let version = self.put_version(&first)?;
         Ok(InsertedRecipe {
             recipe: image,

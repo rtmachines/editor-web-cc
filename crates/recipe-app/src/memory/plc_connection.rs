@@ -363,7 +363,7 @@ impl PlcConnections for MemoryTransaction {
         }
         let shape = ShapeRow::of(connection, self.machine_number(machine))?;
         check_row(&shape, platform, password.is_some())?;
-        let serial = self.state_mut().next_connection_serial()?;
+        let serial = self.state_for_write()?.next_connection_serial()?;
         let now = self.now();
         let row = ConnectionRow {
             id: row_id(serial),
@@ -375,7 +375,7 @@ impl PlcConnections for MemoryTransaction {
             updated_at: now,
         };
         let image = row.image(machine);
-        self.state_mut().connections.insert(machine, row);
+        self.state_for_write()?.connections.insert(machine, row);
         Ok(image)
     }
 
@@ -409,7 +409,7 @@ impl PlcConnections for MemoryTransaction {
             ..existing.clone()
         };
         let image = row.image(machine);
-        self.state_mut().connections.insert(machine, row);
+        self.state_for_write()?.connections.insert(machine, row);
         Ok(image)
     }
 }

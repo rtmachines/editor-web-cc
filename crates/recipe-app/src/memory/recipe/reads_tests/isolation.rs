@@ -7,7 +7,7 @@ use recipe_domain::recipe::VersionState;
 use serde_json::json;
 
 use super::support::{begin, seed_live};
-use crate::error::AppError;
+use crate::error::{AppError, StorageError};
 use crate::memory::JournalEntry;
 use crate::memory::fixtures::{rid, store, text, uuid};
 use crate::ports::{Isolation, NonEmpty, Transaction, UnitOfWork};
@@ -53,17 +53,22 @@ async fn a_repeatable_read_transaction_cannot_finish_and_keeps_the_state() {
     let store = store();
     seed_live(&store, (1, "R-1", "One"), &[(11, VersionState::LiveDraft)]);
     let mut tx = begin(&store, Isolation::RepeatableRead);
-    let after = tx
+    // The write gives 25006 in this level (design D7), so the commit has only the audit entry.
+    let refused = tx
         .recipes()
         .rename_recipe(rid(1), &text("Renamed"))
         .await
-        .unwrap();
+        .unwrap_err();
+    assert!(
+        matches!(&refused, StorageError::Other { sqlstate: Some(state), .. } if state == "25006"),
+        "{refused:?}"
+    );
     let entry = AuditEntry::row(
         RowAction::RecipeRenamed,
         AuditTarget::recipe(rid(1)),
         RowChange::Update {
             before: json!({}),
-            after: after.into_value(),
+            after: json!({}),
         },
         AuditContext {
             actor: None,
@@ -79,7 +84,10 @@ async fn a_repeatable_read_transaction_cannot_finish_and_keeps_the_state() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, AppError::Storage(_)), "{error:?}");
+    assert!(
+        matches!(error, AppError::AuditWriteFailed { .. }),
+        "{error:?}"
+    );
     assert_eq!(
         store.state().recipes.get(&rid(1)).unwrap().name,
         text("One")
