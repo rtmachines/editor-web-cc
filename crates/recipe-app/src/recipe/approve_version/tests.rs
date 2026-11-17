@@ -25,6 +25,7 @@ use crate::memory::{JournalEntry, MemoryStore, seed_type_id};
 use crate::ports::Isolation;
 use crate::recipe::test_support::seed_deleted;
 
+mod adr_0177;
 mod write;
 
 const PLATFORM: PlcPlatform = PlcPlatform::TwinCat3;

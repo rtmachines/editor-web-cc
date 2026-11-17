@@ -31,6 +31,8 @@ use crate::recipe::test_support::{
     speed_key, stored_parameters,
 };
 
+mod adr_0177;
+
 fn limit(min: &str, max: &str) -> LimitInput {
     LimitInput {
         leaf_path: LeafPath::parse("").unwrap(),

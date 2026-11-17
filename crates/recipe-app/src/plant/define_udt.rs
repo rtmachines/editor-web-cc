@@ -140,8 +140,9 @@ impl DefineUdt {
 /// Resolve the type expression of each member to a type row, in the order of the members.
 ///
 /// A member type that is not on the platform gets the member name (`E-PLT-006`).
-/// An array of an array on `S7_1200` and `S7_1500` is such a type (ADR-0148). The check runs
-/// before the type is created, so a refused member leaves no new type row.
+/// An array of an array on `S7_300`, `S7_1200`, and `S7_1500` is such a type (ADR-0148,
+/// ADR-0177). The check runs before the type is created, so a refused member leaves no new
+/// type row.
 async fn ensure_members(
     derived: &mut DerivedTypes,
     catalog: &mut dyn TypeCatalog,
