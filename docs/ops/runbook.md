@@ -1137,9 +1137,16 @@ docker volume rm <drill volume>
 
 The query lists the stored rows that the platform ranges reject. It writes nothing.
 The output has the columns `machine_code`, `reference_number`, `version_number`, `version_status`, `tag`, `part`, and `stored_text`.
-The column `part` is `value`, `limit_min`, `limit_max`, or `s7_address`.
+The column `part` is `value`, `limit_min`, `limit_max`, `s7_address`, or `wide_text`.
 A row can be a false hit when its type tree holds a `ULINT`, `LWORD`, `LTIME`, `REAL`, or `LREAL` leaf.
 The false hit can be a `value` row, a `limit_min` row, or a `limit_max` row of that leaf.
+
+A row of `wide_text` follows ADR-0180. It is a parameter on `S7_1200` or `S7_1500` with a `WCHAR` or `WSTRING` value that the rule refuses.
+The column `stored_text` holds the text leaf.
+A `WCHAR` value refuses a character above `U+D7FF`. A `WSTRING` value refuses a character from `U+D000` up.
+A type tree with a `WCHAR` member and a `WSTRING` member uses the `WSTRING` limit for both.
+A `WCHAR` character from `U+D000` to `U+D7FF` then gives a false hit.
+An `Approved` version with a `wide_text` row becomes not loadable after the upgrade.
 
 1. Run the query from the directory `deploy/` of the new release:
 
@@ -1151,18 +1158,25 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 3. Accept each row that needs no change.
 4. Fix a draft row with `SetParameterValue`, `ReplaceLimits`, or `UpdateParameterDefinition`.
 5. Fix an approved row by creating a new version.
-6. Write the result into the [change log of the site](#change-log-of-the-site).
+6. Fix each `wide_text` row before the upgrade. An approved `wide_text` row needs a new version.
+7. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the stored type rows against the identifier rules
 
 The query lists the stored type rows that the identifier rules of ADR-0143 reject. It writes nothing.
 The output has the columns `machine_code`, `type_name`, `revision`, `part`, and `stored_text`.
 A case pair gives two rows, one for each spelling.
-The column `part` is `struct_name_case`, `member_name_case`, `array_subscript`, or `reserved_struct_name`.
+The column `part` is `struct_name_case`, `member_name_case`, `array_subscript`, `reserved_struct_name`, or `s7_reserved_struct_name`.
 The parts `struct_name_case`, `member_name_case`, and `array_subscript` must give 0 rows before an upgrade.
 Migration `0011` stops the upgrade otherwise.
 The part `reserved_struct_name` is for information. A struct with a reserved name gets no new revision.
 The owner signs off each row of `reserved_struct_name`.
+
+A row of `s7_reserved_struct_name` follows ADR-0186. It is a struct on a machine with `S7_300`, `S7_1200`, or `S7_1500`.
+The name of the struct is a Siemens reserved name or matches the family `PD_TEL<n>`, in any case.
+The part is for information. The rule refuses only new writes. The struct keeps its rows and gets no new revision.
+A listed `Approved` version stays loadable after the upgrade.
+The owner signs off each row of `s7_reserved_struct_name`.
 
 1. Run the query from the directory `deploy/` of the new release:
 
@@ -1172,19 +1186,33 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 
 2. The owner reads each output row.
 3. Stop the upgrade when a row of `struct_name_case`, `member_name_case`, or `array_subscript` remains.
-4. Accept or sign off each row of `reserved_struct_name`.
+4. Accept or sign off each row of `reserved_struct_name` and `s7_reserved_struct_name`.
 5. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the stored data against the S7 layout rules
 
-The query lists the stored rows that the S7 layout rules of ADR-0147 and ADR-0148 affect. It writes nothing.
+The query lists the stored rows that the S7 layout rules of ADR-0147, ADR-0148, ADR-0177, ADR-0178, ADR-0179, and ADR-0187 affect. It writes nothing.
 The output has the columns `machine_code`, `reference_number`, `version_number`, `tag`, `part`, and `type_text`.
-The column `part` is `nested_array` or `layout_changed`.
-
-A row of `nested_array` is an array of an array on `S7_1200` or `S7_1500`, or a parameter of such a type.
+The column `part` is `nested_array`, `layout_changed`, `array_bound`, `bool_array_3d`, or `nesting`.
 A type row has no reference, no version, and no tag.
-A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade.
-The owner signs off each row of both parts.
+
+The parts have two kinds of result for an upgrade.
+The first kind refuses only new writes. A listed `Approved` version stays loadable after the upgrade:
+
+- A row of `nested_array` is an array of an array on `S7_300`, `S7_1200`, or `S7_1500`, or a parameter of such a type.
+  ADR-0177 adds `S7_300` to the rule of ADR-0148.
+- A row of `nesting` is a struct row or a parameter type with more than 8 S7 levels on `S7_300`, `S7_1200`, or `S7_1500` (ADR-0179).
+  A struct counts 1 level. An array of a struct counts 3 levels.
+- A row of `layout_changed` is a parameter with an S7 address whose layout changes with the upgrade (ADR-0147).
+
+The second kind changes `loadable`. A listed `Approved` version becomes not loadable after the upgrade:
+
+- A row of `array_bound` is a parameter with an S7 address and an array bound outside `-32768` to `32767` (ADR-0178).
+- A row of `bool_array_3d` is a parameter with an S7 address and a `BOOL` array with three dimensions (ADR-0187).
+
+The owner signs off each row of all five parts.
+The owner fixes each row of the second kind before the upgrade. A draft row needs a change. An approved row needs a new version.
+The owner records each listed row in the upgrade ticket.
 
 1. Run the query from the directory `deploy/` of the new release:
 
@@ -1193,7 +1221,7 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 ```
 
 2. The owner reads each output row.
-3. Sign off each row of `nested_array` and `layout_changed`.
+3. Sign off each row of `nested_array`, `layout_changed`, `array_bound`, `bool_array_3d`, and `nesting`.
 4. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the live S7 machines for a PLC connection record
