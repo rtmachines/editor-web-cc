@@ -69,3 +69,48 @@ impl DocumentWriter for FailingWriter {
         Err(serialize_error())
     }
 }
+
+/// A writer that writes the hashed body and every fact of the document, except the export instant.
+///
+/// The type solves one problem: `recipe-db` must not depend on `recipe-export` (`overview.md`
+/// section 5, `deny.toml`), so no production writer reaches the database tests. The real writer
+/// is a pure function of the body and the facts. This writer keeps all of them, so a test sees a
+/// change of `loadable`, the status, the stored hash, or any name. The instant `exported_at`
+/// changes in each export, so the bytes leave it out.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DocumentFactsWriter;
+
+impl DocumentFactsWriter {
+    /// Return the writer as a port.
+    pub fn port() -> Arc<dyn DocumentWriter> {
+        Arc::new(Self)
+    }
+}
+
+impl DocumentWriter for DocumentFactsWriter {
+    fn write(&self, body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
+        let names: Vec<(String, String)> = facts
+            .names
+            .iter()
+            .map(|(key, name)| (format!("{key:?}"), name.to_string()))
+            .collect();
+        let document = serde_json::json!({
+            "loadable": facts.loadable(),
+            "content_sha256": facts.content_sha256.to_string(),
+            "status": format!("{:?}", facts.status),
+            "has_rule_fault": facts.has_rule_fault,
+            "exported_by": format!("{:?}", facts.exported_by),
+            "approved_at": format!("{:?}", facts.approved_at),
+            "approved_by": format!("{:?}", facts.approved_by),
+            "machine_name": facts.machine_name.to_string(),
+            "recipe_name": facts.recipe_name.to_string(),
+            "names": names,
+            "body": body,
+        });
+        Ok(serde_json::to_vec_pretty(&document)?)
+    }
+
+    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        Ok(DOCUMENT.to_vec())
+    }
+}

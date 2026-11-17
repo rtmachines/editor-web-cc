@@ -13,14 +13,12 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::Arc;
 
 use recipe_app::auth::{CurrentUser, RequestMeta};
 use recipe_app::export::{
     ExportApprovedInput, ExportApprovedVersion, ExportScope, ExportedVersion,
 };
 use recipe_app::identity::new_request_id;
-use recipe_app::memory::BodyWriter;
 use recipe_app::plant::{DefineUdt, DefineUdtInput, DefineUdtMode, GetTypeTree, TypeRef};
 use recipe_app::recipe::{
     AddParameter, AddParameterInput, ApproveVersion, ApproveVersionInput, CreateRecipe,
@@ -40,6 +38,7 @@ use crate::atomic::world::{long_text, text};
 use crate::support::app::App;
 use crate::support::database::DumpDirectory;
 use crate::support::identity::PASSWORD;
+use crate::support::writers::DocumentFactsWriter;
 use crate::support::{Role as DbRole, TestDatabase, server};
 
 /// The login of the engineer, who edits each draft.
@@ -460,10 +459,17 @@ async fn export_of(app: &App, reference: &str) -> ExportedVersion {
         machine: None,
         scope: ExportScope::Version,
     };
-    ExportApprovedVersion::new(app.context(), Arc::new(BodyWriter))
+    ExportApprovedVersion::new(app.context(), DocumentFactsWriter::port())
         .execute(&app.user, &app.meta, input)
         .await
         .unwrap()
+}
+
+/// Assert the flag and the hash inside the bytes of the document, not only the fields of the use case.
+fn assert_document(exported: &ExportedVersion, reference: &str, loadable: bool) {
+    let document: serde_json::Value = serde_json::from_slice(&exported.document).unwrap();
+    assert_eq!(document["loadable"], serde_json::Value::Bool(loadable));
+    assert_eq!(document["content_sha256"], stored_hash(reference));
 }
 
 /// Step 4: `GetVersion` and, for a struct row, `GetTypeTree` read the stored row.
@@ -569,7 +575,9 @@ async fn backup_and_restore(app: &App, reference: &str, expected: &ExportedVersi
     );
     assert_success("pg_restore", &restored);
     let copied = App::over(copy).await;
-    assert_eq!(&export_of(&copied, reference).await, expected);
+    let again = export_of(&copied, reference).await;
+    assert_document(&again, reference, expected.loadable());
+    assert_eq!(&again, expected);
 }
 
 /// The eight steps of task 9.2 for one row of the matrix.
@@ -583,6 +591,7 @@ async fn check_stored_row(expected: Expectation) {
         stored_hash(expected.reference)
     );
     assert_eq!(exported.loadable(), expected.loadable);
+    assert_document(&exported, expected.reference, expected.loadable);
     assert_eq!(stored_rows(&mut app, expected.reference).await, before);
     copy_row(&mut app, expected.reference).await;
     backup_and_restore(&app, expected.reference, &exported).await;
