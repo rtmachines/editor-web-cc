@@ -496,6 +496,9 @@ Two cases need an action before you continue:
 - If the reboot stopped step 4 of the restore or step 6 of the recovery, the new volume is not complete. Delete it with `docker volume rm <new volume>`. Then start again at step 3 of the restore or at step 5 of the recovery.
 - If the reboot stopped step 7 of the restore or step 10 of the recovery, the shell lost the variable `target`. Set `target` to the directory that sub-step 1 made. If sub-step 1 made no directory, run sub-step 1 again.
 
+In the major upgrade, step 8 runs restore steps 3 and 4, and step 10 runs restore step 7.
+In the rollback, step 1 runs restore step 3, step 3 runs restore step 4, and step 6 runs restore step 7.
+
 1. Run `docker compose ps -a`. Wait until `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
 2. If a service restarts, run `docker compose logs <service>`. For `app`, use the section "Alarms, read-only mode, and restart loop".
 3. Check that the host mounts the second disk. A missing host directory stops the start of `backup` and `walarchive`.
@@ -1005,7 +1008,7 @@ docker compose run --rm --no-deps -T -e PITR_EXPECTED_LSN=<lsn> -e PITR_MARKER_S
    - The line `cannot read heartbeat.last_at of the recovered cluster` shows that the recovered cluster has no row `heartbeat.last_at`.
      No migration creates the row. The job `heartbeat` writes it first, one `heartbeat.interval` after the start of `app`.
      A target time before that first write, on a new site, can give this line. Select a later target time or recover to the end of the archive.
-   - After a failed run, delete the new volume with `docker volume rm <new volume>`. Then end the attempt as in step 7.
+   - After a failed run, end the attempt as in step 7.
 
 7. Compare the values of the last line with your expectation. A value that does not fit ends the attempt:
    1. The field `base_backup` names the base backup that you expect.

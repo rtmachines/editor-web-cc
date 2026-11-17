@@ -1,18 +1,19 @@
 """Check the shared shell lexer and Docker call parser without Docker."""
 
+import ast
 import importlib.util
 import pathlib
 import unittest
 
-spec = importlib.util.spec_from_file_location(
+DOCKER_CALLS_SPEC = importlib.util.spec_from_file_location(
     "docker_calls", pathlib.Path(__file__).with_name("docker_calls.py"))
-docker_calls = importlib.util.module_from_spec(spec)
+docker_calls = importlib.util.module_from_spec(DOCKER_CALLS_SPEC)
 
 
 class ArgumentRecordsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        spec.loader.exec_module(docker_calls)
+        DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
 
     def test_records_preserve_spaces_empty_arguments_and_newlines(self):
         data = b"3\x00a b\x00\x00x\ny\x00"
@@ -39,7 +40,7 @@ class ArgumentRecordsTests(unittest.TestCase):
 class ShellCommandsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        spec.loader.exec_module(docker_calls)
+        DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
 
     def test_command_substitution_splits_into_simple_commands(self):
         self.assertEqual(docker_calls.shell_commands("$(docker compose start app)"),
@@ -95,7 +96,7 @@ class ShellCommandsTests(unittest.TestCase):
 class DockerCallTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        spec.loader.exec_module(docker_calls)
+        DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
 
     def test_compose_call_keeps_subcommand_operands(self):
         arguments = ["compose", "--compatibility", "start", "--attach", "app"]
@@ -127,6 +128,13 @@ class DockerCallTests(unittest.TestCase):
                 self.assertEqual(docker_calls.docker_call(arguments),
                                  (True, "start", ["app"]))
 
+    def test_docker_short_option_clusters_skip_their_values(self):
+        for options in (["-Dl", "debug"], ["-Dldebug"], ["-D"]):
+            with self.subTest(options=options):
+                arguments = options + ["compose", "start", "app"]
+                self.assertEqual(docker_calls.docker_call(arguments),
+                                 (True, "start", ["app"]))
+
     def test_equals_options_keep_the_next_token(self):
         cases = (["--host=unix:///x", "compose", "--file=x", "restart", "backup"],
                  ["--context=x", "compose", "--profile=x", "restart", "backup"])
@@ -152,7 +160,18 @@ class DockerCallTests(unittest.TestCase):
 class ForbiddenComposeCallTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        spec.loader.exec_module(docker_calls)
+        DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
+
+    def test_short_option_clusters_consume_timeout_and_workdir_values(self):
+        cases = (("up -dt 10 --no-deps", True),
+                 ("up -dt 10 --no-deps proxy", False),
+                 ("up -dt10 --no-deps", True),
+                 ("run --rm --no-deps -Tw proxy", True))
+        for command, expected in cases:
+            subcommand, *arguments = command.split()
+            with self.subTest(command=command):
+                self.assertEqual(
+                    docker_calls.forbidden_compose_call(subcommand, arguments), expected)
 
     def test_window_calls_require_no_deps_and_a_service(self):
         cases = (("up -d --no-deps --wait-timeout 180", True),
@@ -237,7 +256,55 @@ class ForbiddenComposeCallTests(unittest.TestCase):
 class WindowCallsTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        spec.loader.exec_module(docker_calls)
+        DOCKER_CALLS_SPEC.loader.exec_module(docker_calls)
+
+    def test_docker_calls_has_no_bare_assert(self):
+        tree = ast.parse(pathlib.Path(docker_calls.__file__).read_text())
+        self.assertEqual([node.lineno for node in ast.walk(tree)
+                          if isinstance(node, ast.Assert)], [])
+
+    def test_record_window_excludes_the_start_and_end_records(self):
+        start = ("rm", ["-s", "-f", "walarchive"])
+        end = ("up", ["-d", "--no-deps", "walarchive"])
+        records = [["compose", "ps"], ["compose", start[0], *start[1]],
+                   ["compose", "start", "app"], ["compose", end[0], *end[1]],
+                   ["compose", "restart", "backup"]]
+        cases = (({}, slice(None)), ({"start": start}, slice(2, None)),
+                 ({"end": end}, slice(None, 3)),
+                 ({"start": start, "end": end}, slice(2, 3)))
+        for boundaries, expected in cases:
+            with self.subTest(boundaries=boundaries):
+                window = docker_calls.record_window(records, **boundaries)
+                self.assertEqual(window, expected)
+                self.assertEqual(records[window], records[expected])
+        self.assertEqual(docker_calls.record_window([]), slice(None))
+
+    def test_record_window_requires_each_boundary_exactly_once(self):
+        boundaries = (("start", ("rm", ["-s", "-f", "walarchive"])),
+                      ("end", ("up", ["-d", "--no-deps", "walarchive"])))
+        for name, (subcommand, arguments) in boundaries:
+            command = " ".join([subcommand, *arguments])
+            duplicates = [["compose", subcommand, *arguments],
+                          ["compose", "-f", "other.yaml", subcommand, *arguments]]
+            for records, count in (([], 0), (duplicates, 2)):
+                with self.subTest(boundary=name, count=count):
+                    with self.assertRaisesRegex(AssertionError, rf"{command}.*{count}"):
+                        docker_calls.record_window(
+                            records, **{name: (subcommand, arguments)})
+
+    def test_record_window_matches_parsed_compose_calls(self):
+        start = ("rm", ["-s", "-f", "walarchive"])
+        end = ("up", ["-d", "--no-deps", "walarchive"])
+        records = [[], ["compose"], ["rm", "-s", "-f", "walarchive"],
+                   ["compose", "rm", "-s", "-f", "backup"],
+                   ["--context", "host", "compose", "-f", "a b.yaml",
+                    "rm", "-s", "-f", "walarchive"],
+                   ["compose", "ps"], ["compose", "up", "-d", "--no-deps", "backup"],
+                   ["up", "-d", "--no-deps", "walarchive"],
+                   ["-H", "host", "compose", "--project-name=recipe",
+                    "--env-file", "recipe.env", "up", "-d", "--no-deps", "walarchive"]]
+        self.assertEqual(docker_calls.record_window(records, start=start, end=end),
+                         slice(5, 8))
 
     def test_window_returns_a_call_without_a_service_after_an_option_value(self):
         record = ["compose", "up", "-d", "--no-deps", "--wait-timeout", "180"]
@@ -257,7 +324,7 @@ class WindowCallsTests(unittest.TestCase):
                 self.assertEqual(docker_calls.forbidden_window_calls(records), [record])
 
     def test_window_rejects_an_empty_run_but_allows_an_empty_slice(self):
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(AssertionError, "The run has no Docker argument records"):
             docker_calls.forbidden_window_calls([])
         records = [["compose", "up", "-d", "--no-deps", "app"]]
         self.assertEqual(docker_calls.forbidden_window_calls(
@@ -295,18 +362,24 @@ class WindowCallsTests(unittest.TestCase):
         self.assertEqual(docker_calls.forbidden_check_window_calls(records), [records[3]])
 
     def test_check_requires_the_truncate_and_both_exact_end_records(self):
-        for records in ([], self.check_records()[1:], self.check_records()[:-1],
-                        self.check_records()[::2]):
-            with self.subTest(records=records), self.assertRaises(AssertionError):
+        app_error = "The record after TRUNCATE must start app with the required options"
+        backup_error = "check needs the end record that starts proxy and backup"
+        cases = (([], "The run has no Docker argument records"),
+                 (self.check_records()[1:], "check needs one TRUNCATE record"),
+                 (self.check_records()[:-1], backup_error),
+                 (self.check_records()[::2], app_error))
+        for records, message in cases:
+            with self.subTest(records=records), self.assertRaisesRegex(AssertionError, message):
                 docker_calls.forbidden_check_window_calls(records)
         records = self.check_records()
         records.insert(1, ["compose", "ps"])
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(AssertionError, app_error):
             docker_calls.forbidden_check_window_calls(records)
         for index in (1, 2):
             records = self.check_records()
             records[index].remove("--no-deps")
-            with self.subTest(index=index), self.assertRaises(AssertionError):
+            message = app_error if index == 1 else backup_error
+            with self.subTest(index=index), self.assertRaisesRegex(AssertionError, message):
                 docker_calls.forbidden_check_window_calls(records)
 
 

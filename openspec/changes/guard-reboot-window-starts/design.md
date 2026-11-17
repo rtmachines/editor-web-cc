@@ -117,7 +117,7 @@ Seven direct probes add detail:
 
 - A test kills each mutant of the table above, by the rule of a kill in "Evidence".
 - Each new test passes on the current scripts and on the current runbook.
-- Each LOW finding F3 to F7 and L-1, L-4, L-5, and L-6 gets its fix. L-2 and L-3 get the fix that the owner chose (Q2 and Q3).
+- Each LOW finding F3 to F7 and L-1, L-4, L-5 (not applied, owner decision 2026-11-17), and L-6 gets its fix. L-2 and L-3 get the fix that the owner chose (Q2 and Q3).
 
 **Non-Goals:**
 
@@ -304,7 +304,7 @@ A bare `docker compose stop` gives no hit. `forbidden_compose_call` refuses only
 - L-4: the index row of ADR-0176 in `docs/adr/README.md` (line 188) gets the amended items.
   The text is "Amends ADR-0175 (h), (i), (j), (k), ADR-0106 (i) step 4 and (p) step 5, and ADR-0174 (aj)".
   The decision map (line 205) names the same items. The text comes from "Related" of ADR-0176.
-- L-5: the runbook says "a restart of Docker" in lines 690, 958, 984, and 1944. Lines 1638 and 1640 say "a restart of the container engine". These two places get "a restart of Docker".
+- L-5: the runbook says "a restart of Docker" in lines 690, 958, 984, and 1944. Lines 1638 and 1640 say "a restart of the container engine". These two places get "a restart of Docker". The owner decided on 2026-11-17 that L-5 stays unfixed, because `test_rollback_stop_raw_commands` refuses these words in step 1 of the rollback.
 - L-6: `test_restore_and_recovery_window_has_conditional_wait_and_skip` (`test_upgrade_runbook.py` line 240) reads four windows. Its new name is `test_reboot_windows_have_conditional_wait_and_skip`.
 
 ### D13. Files and sizes

@@ -19,7 +19,7 @@ The reviews of PR #73 and PR #74 also left LOW findings: F3 to F7 and L-1 to L-6
 - `docker_calls.py`: explicit errors replace `assert` (F4). A short option cluster such as `-dt 10` takes its value (F5). A new helper cuts a record window.
 - The mutant tests assert the exact hits (F3). A tab after a list marker ends a code span block (F6). Names and sizes of F7 change.
 - The stop guard of the major upgrade parses the command (L-1). The test name of L-6 changes.
-- `docs/ops/runbook.md` uses one name for a restart of Docker (L-5). `docs/adr/README.md` names the items that ADR-0176 amends (L-4).
+- `docs/adr/README.md` names the items that ADR-0176 amends (L-4). L-5 stays unfixed (owner decision 2026-11-17, design.md D12).
 - L-2 and L-3 change a procedure step. The owner chose option A for each (design.md "Decisions of the owner (2026-11-17)").
 - `CHANGELOG.md` gets one line.
 

@@ -78,8 +78,8 @@ def write_stub(path, body):
 def step_result(done, log, state_dir):
     """Collect Docker records, the text log, and state files from one step."""
     argv_log = pathlib.Path(str(log) + ".argv")
-    done.docker_calls = docker_calls.argument_records(argv_log.read_bytes() if argv_log.exists() else b"")
     content = {path.name: path.read_text(encoding="utf-8") for path in state_dir.iterdir() if path.is_file()}
+    content["argv"] = docker_calls.argument_records(argv_log.read_bytes() if argv_log.exists() else b"")
     return done, log.read_text(encoding="utf-8") if log.exists() else "", content
 
 
@@ -491,7 +491,7 @@ class StepTests(unittest.TestCase):
             self.assertTrue(records.is_file(), "The stub wrote no Docker argument records")
             self.assertEqual(records.read_bytes(), b"3\x00a b\x00\x00x\ny\x00")
 
-    def assert_window_mutant_rejected(self, step, anchor, replacement, state, guard):
+    def assert_window_mutant_rejected(self, step, anchor, replacement, state, guard, expected):
         original = script_text()
         self.assertEqual(original.count(anchor), 1)
         with tempfile.TemporaryDirectory() as name:
@@ -502,30 +502,45 @@ class StepTests(unittest.TestCase):
             mutant.write_text(original.replace(anchor, replacement), encoding="utf-8", newline="\n")
             with patch.dict(globals(), SCRIPT=mutant):
                 if step == "check":
-                    done, log, _ = self.run_check(state=state)
+                    done, log, files = self.run_check(state=state)
                 else:
-                    done, log, _ = self.run_step(step, state=state)
+                    done, log, files = self.run_step(step, state=state)
             self.assertEqual(done.returncode, 0, done.stderr + log)
-            self.assertIn(" up -d --no-deps app backup\n", log)
-            self.assertTrue(getattr(done, "docker_calls", None), "The run has no Docker argument records")
-            with self.assertRaises(AssertionError):
-                self.assertEqual(guard(done.docker_calls), [])
+            self.assertIn(" " + " ".join([expected[1], *expected[2]]) + "\n", log)
+            self.assertTrue(files["argv"], "The run has no Docker argument records")
+            self.assertEqual([docker_calls.docker_call(record) for record in guard(files["argv"])], [expected])
 
     def test_window_guard_rejects_crash_mutant(self):
         anchor = '  compose rm -s -f app backup || fail "crash: cannot delete app and backup."'
         self.assert_window_mutant_rejected(
             "crash", anchor, anchor + "\n  compose up -d --no-deps app backup",
-            self.crash_state(), docker_calls.forbidden_window_calls)
+            self.crash_state(), docker_calls.forbidden_window_calls,
+            (True, "up", ["-d", "--no-deps", "app", "backup"]))
 
     def test_window_guard_rejects_check_prefix_mutant(self):
         anchor = ('  sql -c "TRUNCATE public.session, public.login_attempt" >/dev/null'
                   ' || fail "check: cannot truncate session and login_attempt."')
         self.assert_window_mutant_rejected(
             "check", anchor, "  compose up -d --no-deps app backup || true\n" + anchor,
-            self.check_state(), docker_calls.forbidden_check_window_calls)
+            self.check_state(), docker_calls.forbidden_check_window_calls,
+            (True, "up", ["-d", "--no-deps", "app", "backup"]))
+
+    def walarchive_window_hits(self, step, records):
+        start = ("rm", ["-s", "-f", "walarchive"]) if step == "crash" else None
+        end = ("up", ["-d", "--no-deps", "walarchive"]) if step == "wal-line" else None
+        return docker_calls.forbidden_window_calls(
+            records, window=docker_calls.record_window(records, start=start, end=end),
+            services=("walarchive",))
+
+    def test_window_guard_rejects_crash_walarchive_mutant(self):
+        anchor = '  compose rm -s -f walarchive || fail "crash: cannot delete walarchive."'
+        self.assert_window_mutant_rejected(
+            "crash", anchor, anchor + "\n  compose up -d --no-deps walarchive || true",
+            self.crash_state(), lambda records: self.walarchive_window_hits("crash", records),
+            (True, "up", ["-d", "--no-deps", "walarchive"]))
 
     def run_step(self, step, env_extra=None, state=None):
-        """Return the process with Docker records, the call log, and the state directory content."""
+        """Return the process, the call log, and state content with Docker records."""
         with tempfile.TemporaryDirectory() as name:
             directory = pathlib.Path(name)
             stubs = directory / "bin"
@@ -1087,9 +1102,10 @@ class StepTests(unittest.TestCase):
         return self.refusals_state()
 
     def test_crash_pass_path_runs_the_steps_in_order(self):
-        done, log, _ = self.run_step("crash", state=self.crash_state())
+        done, log, files = self.run_step("crash", state=self.crash_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
+        self.assertEqual(self.walarchive_window_hits("crash", files["argv"]), [])
         self.assert_ordered(log, [
             r"^compose --project-name recipe-ci-1-1 .* ps -aq db$",
             r"^inspect --format \{\{range \.Mounts\}\}",
@@ -1236,9 +1252,10 @@ class StepTests(unittest.TestCase):
         return state
 
     def test_recover_pass_path_runs_the_steps_in_order(self):
-        done, log, _ = self.run_step("recover", state=self.recover_state())
+        done, log, files = self.run_step("recover", state=self.recover_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
+        self.assertEqual(self.walarchive_window_hits("recover", files["argv"]), [])
         self.assert_ordered(log, [
             rf"^volume create --label recipe\.ci=recipe-ci-1-1 {NEW_VOLUME}$",
             rf"^compose --project-name recipe-ci-1-1 .* run --rm --no-deps -T -e PITR_MARKER_SEQ -e PITR_MARKER_HASH "
@@ -1357,9 +1374,10 @@ class StepTests(unittest.TestCase):
         return self.run_step("switch", env, self.switch_state() if state is None else state)
 
     def test_switch_pass_path_runs_the_steps_in_order(self):
-        done, log, _ = self.run_switch()
+        done, log, files = self.run_switch()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
+        self.assertEqual(self.walarchive_window_hits("switch", files["argv"]), [])
         self.assert_ordered(log, [
             r"^compose --project-name recipe-ci-1-1 .* stop proxy app backup walarchive$",
             r"^compose --project-name recipe-ci-1-1 .* ps -aq db$",
@@ -1547,15 +1565,16 @@ class StepTests(unittest.TestCase):
         # The step switch leaves this state.
         done, log, state = self.run_switch()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        return state
+        return {name: text for name, text in state.items() if name != "argv"}
 
     def run_wal_line(self, env_extra=None, state=None):
         return self.run_step("wal-line", env_extra, self.wal_line_state() if state is None else state)
 
     def test_wal_line_pass_path_runs_the_steps_in_order(self):
-        done, log, _ = self.run_wal_line()
+        done, log, files = self.run_wal_line()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(docker_calls.forbidden_window_calls(done.docker_calls), [])
+        self.assertEqual(docker_calls.forbidden_window_calls(files["argv"]), [])
+        self.assertEqual(self.walarchive_window_hits("wal-line", files["argv"]), [])
         self.assert_ordered(log, [
             r"^compose --project-name recipe-ci-1-1 .* ps -aq walarchive$",
             r"^sudo mkdir -m 0700 -- \S+\.moved-[0-9]{8}_[0-9]{6}$",
@@ -1699,9 +1718,9 @@ class StepTests(unittest.TestCase):
         return self.run_step("check", env, self.check_state() if state is None else state)
 
     def test_check_pass_path_runs_the_steps_in_order(self):
-        done, log, _ = self.run_check()
+        done, log, files = self.run_check()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(docker_calls.forbidden_check_window_calls(done.docker_calls), [])
+        self.assertEqual(docker_calls.forbidden_check_window_calls(files["argv"]), [])
         self.assert_ordered(log, [
             r"TRUNCATE public\.session, public\.login_attempt",
             r"^compose --project-name recipe-ci-1-1 .* up -d --no-deps --wait --wait-timeout 180 app$",
@@ -2156,7 +2175,7 @@ class RunbookRecoveryDeleteTests(unittest.TestCase):
                 self.assertEqual(section.count(anchor), 1, anchor)
                 mutant = section.replace(anchor, anchor + insertion, 1)
                 with patch.object(self.runbook, "runbook_heading_section", return_value=mutant):
-                    with self.assertRaises(AssertionError):
+                    with self.assertRaisesRegex(AssertionError, re.escape("docker compose up -d --no-deps app")):
                         self.test_recovery_window_keeps_app_and_backup_without_a_container()
 
     def test_section_guard_rejects_service_lists_and_double_backticks(self):

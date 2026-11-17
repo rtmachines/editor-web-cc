@@ -106,14 +106,14 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
 
 ## 1. Shared parser
 
-- [ ] 1.1 (deploy/ci) Replace the bare `assert` statements of `docker_calls.py` (F4, design.md D7):
+- [x] 1.1 (deploy/ci) Replace the bare `assert` statements of `docker_calls.py` (F4, design.md D7):
   - First change the structural tests of `WindowCallsTests` (`test_docker_calls.py` line 237) to `assertRaisesRegex` with each message.
   - These are `test_window_rejects_an_empty_run_but_allows_an_empty_slice` (line 259) and `test_check_requires_the_truncate_and_both_exact_end_records` (line 297).
   - Add the test `test_docker_calls_has_no_bare_assert` to `WindowCallsTests`. It parses `docker_calls.py` with `ast` and expects no `ast.Assert` node.
   - Run `python3 -O -m unittest test_docker_calls` and see the two tests and the `ast` test fail. The probe printed `FAILED (failures=2, errors=4)` before these edits.
   - Then replace the five `assert` statements (lines 73, 87, 92, 95, and 99) with `if not ...: raise AssertionError(message)`. Keep each message.
   - Check: `python3 -O -m unittest test_docker_calls` passes. `python3 -m unittest SUITES` passes.
-- [ ] 1.2 (deploy/ci) Read short option clusters (F5, design.md D8):
+- [x] 1.2 (deploy/ci) Read short option clusters (F5, design.md D8):
   - First add cases to `ForbiddenComposeCallTests` (`test_docker_calls.py` line 152):
     - `up -dt 10 --no-deps` gives a hit. `up -dt 10 --no-deps proxy` gives no hit. The second case passes now (header).
     - `up -dt10 --no-deps` gives a hit. This case passes now (header).
@@ -123,7 +123,7 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
   - Run `python3 -m unittest test_docker_calls test_runbook_text` and see the new cases fail.
   - Then add one helper to `docker_calls.py` that gives the count of words of one option. `forbidden_compose_call` and `_skip_global_options` call it.
   - Check: `python3 -m unittest SUITES` passes. The mutants `f5_cluster_ci` and `f5_cluster_runbook` are each killed (header).
-- [ ] 1.3 (deploy/ci) Add `record_window` to `docker_calls.py` (design.md D5):
+- [x] 1.3 (deploy/ci) Add `record_window` to `docker_calls.py` (design.md D5):
   - First add tests to `WindowCallsTests` of `test_docker_calls.py`:
     - With a start record, the slice starts after it. With an end record, the slice ends before it.
     - A start record or an end record that occurs zero times or twice raises `AssertionError` with a message that names the record.
@@ -134,14 +134,14 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
 
 ## 2. Runbook helpers
 
-- [ ] 2.1 (deploy/ci) Accept a tab after a list marker (F6, design.md D9):
+- [x] 2.1 (deploy/ci) Accept a tab after a list marker (F6, design.md D9):
   - First add cases to `test_list_items_end_code_spans` (`test_runbook_text.py` line 189).
   - The two lines ``-<TAB>Type a lone ` here.`` and ``-<TAB>Run `docker compose start app`.`` give the span `docker compose start app`.
   - The same holds for the marker `1.` with a tab.
   - Run `python3 -m unittest test_runbook_text` and see the cases fail.
   - Then change the pattern of `runbook_inline_code_spans` (`test_upgrade_runbook.py` line 113) from `(?: |$)` to `(?:[ \t]|$)`.
   - Check: `python3 -m unittest SUITES` passes, and a test kills the mutant `f6_tab_marker` (header).
-- [ ] 2.2 (deploy/ci) Parse the stop guard of the major upgrade (L-1, design.md D11):
+- [x] 2.2 (deploy/ci) Parse the stop guard of the major upgrade (L-1, design.md D11):
   - First add a fixture test to `RunbookMajorUpgradeDeleteTests` (`test_upgrade_runbook.py` line 378). It patches `runbook_heading_section`.
   - Each of these sections makes `test_section_has_no_stop_app_command` raise `AssertionError` with the command in the message:
     - `` Run `docker compose -f compose.yaml stop app`. `` and `` Run `docker compose stop -t 30 app`. ``
@@ -150,14 +150,14 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
   - Run `python3 -m unittest test_upgrade_runbook` and see the fixture test fail.
   - Then change `test_section_has_no_stop_app_command` (line 417). It calls `runbook_deleted_service_starts` with `services=("app",)` and `subcommands=("stop",)`.
   - Check: `python3 -m unittest SUITES` passes. The mutants `l1_stop_file` and `l1_stop_timeout` are each killed (header).
-- [ ] 2.3 (deploy/ci) [mechanical] (exempt: rename, see the header) Rename two names (L-6, F7, design.md D10, D12):
+- [x] 2.3 (deploy/ci) [mechanical] (exempt: rename, see the header) Rename two names (L-6, F7, design.md D10, D12):
   - Rename `test_restore_and_recovery_window_has_conditional_wait_and_skip` (`test_upgrade_runbook.py` line 240) to `test_reboot_windows_have_conditional_wait_and_skip`.
   - Rename the module-level name `spec` to `DOCKER_CALLS_SPEC` in `test_upgrade_runbook.py` (line 14) and in `test_docker_calls.py` (line 7).
   - Check: `rg -n '^spec\b|test_restore_and_recovery_window_has_conditional_wait_and_skip' deploy/ci` prints nothing. `python3 -m unittest SUITES` passes.
 
 ## 3. Runbook windows of ADR-0176
 
-- [ ] 3.1 (deploy/ci) Create `deploy/ci/test_reboot_windows.py` with the window of the major upgrade (design.md D2, D3, D13):
+- [x] 3.1 (deploy/ci) Create `deploy/ci/test_reboot_windows.py` with the window of the major upgrade (design.md D2, D3, D13):
   1. The file loads `test_upgrade_runbook.py` and `docker_calls.py` with `importlib`. It ends with `unittest.main()`.
   2. Add a class `RunbookMajorUpgradeWindowTests`. Its method `test_major_upgrade_window_keeps_app_without_a_container` first only reads the section.
   3. Add a mutant test. It applies the edit of the rows `g_major_step3_app` and `g_major_step12_up_all` of the table "Mutant edits" (design.md).
@@ -168,7 +168,7 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
   8. The allowed span of the paragraph "If a step before step 8 fails" occurs once. The text before it and after it gives no hit.
   9. Steps 1 to 7 use `services=("app",)`. Steps 8 to the reference use `services=("app", "backup")`.
   10. Check: `python3 -m unittest test_reboot_windows test_upgrade_runbook` passes. The two mutants of item 3 are each killed (header).
-- [ ] 3.2 (deploy/ci) Add the window of the rollback to `test_reboot_windows.py` (design.md D2, D3, D4, Q1 option A):
+- [x] 3.2 (deploy/ci) Add the window of the rollback to `test_reboot_windows.py` (design.md D2, D3, D4, Q1 option A):
   1. Add a class `RunbookRollbackWindowTests`. Its method `test_rollback_window_keeps_app_and_backup_without_a_container` first only reads the section.
   2. Add a mutant test for the rows `g_rollback_step2_backup` and `g_rollback_step7_app`, as task 3.1 does.
   3. Add a test that reads the block of `restore-volume` in `deploy/compose.yaml` (design.md D4).
@@ -178,7 +178,7 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
   6. That block has exactly the lines `docker compose up -d --no-deps app` and `docker compose up -d --no-deps proxy backup`, in this order.
   7. Step 1 gives exactly the hit list `[ROLLBACK_CHECK]`. Steps 2 to 8 give no hit. Each step number from 1 to 8 occurs once in the range.
   8. Check: `python3 -m unittest test_reboot_windows` passes. The two mutants of item 2 are each killed (header).
-- [ ] 3.3 (deploy/ci) Add the window of `walarchive` in the recovery to `test_reboot_windows.py` (design.md D2, D3 items 8 to 10):
+- [x] 3.3 (deploy/ci) Add the window of `walarchive` in the recovery to `test_reboot_windows.py` (design.md D2, D3 items 8 to 10):
   1. Add a class `RunbookRecoveryWalarchiveWindowTests`. Its method `test_recovery_window_keeps_walarchive_without_a_container` first only reads the two sections.
   2. Add a mutant test for the rows `h_recovery_step5_walarchive` and `h_recovery_step9_walarchive`. It expects `assertRaisesRegex` as task 3.1 does.
      It patches `runbook_heading_section` with the function of item 3 for the title "Recover from the WAL archive" (design.md D3 item 10).
@@ -193,12 +193,12 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
      Each of these restore steps occurs once. The span `docker compose up -d --no-deps walarchive` occurs once in sub-step 7.7.
   9. The guard uses `services=("walarchive",)`. Each step number from 4 to 10 occurs once in the recovery range.
   10. Check: `python3 -m unittest test_reboot_windows` passes. The six mutants of items 2 and 3 are each killed (header).
-- [ ] 3.4 (deploy/ci) Add the stop guards of the rollback and the recovery to `test_reboot_windows.py` (L-1, design.md D11):
+- [x] 3.4 (deploy/ci) Add the stop guards of the rollback and the recovery to `test_reboot_windows.py` (L-1, design.md D11):
   - First add fixture tests. `` Run `docker compose stop -t 30 backup`. `` fails the rollback guard, and `` Run `docker compose -f compose.yaml stop walarchive`. `` fails the recovery guard.
   - Run `python3 -m unittest test_reboot_windows` and see the fixture tests fail. The guard methods do not exist yet.
   - Then add the two guard methods. The rollback uses `services=("app", "backup")`. The recovery uses `services=("walarchive",)`. Both use `subcommands=("stop",)`.
   - Check: `python3 -m unittest test_reboot_windows` passes.
-- [ ] 3.5 (deploy/ci) Add the text guard of `check_rollback_runbook` to `test_reboot_windows.py` (design.md D6, Q1 option A):
+- [x] 3.5 (deploy/ci) Add the text guard of `check_rollback_runbook` to `test_reboot_windows.py` (design.md D6, Q1 option A):
   - Add a class `RollbackCheckScriptTests`. Its method `test_check_rollback_runbook_keeps_backup_without_a_container` holds the guard.
   - First add a mutant test. It applies the edit of the row `g_ci_rollback_backup` to a copy of the function text (`upgrade.sh` line 651).
   - The test expects `assertRaisesRegex` with `up -d --no-deps backup`.
@@ -213,11 +213,11 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
 
 ## 4. Records of `pitr-recovery`
 
-- [ ] 4.1 (deploy/ci) (exempt: refactor, see the header) Move the records of `step_result` into its dict (F7, design.md D10):
+- [x] 4.1 (deploy/ci) (exempt: refactor, see the header) Move the records of `step_result` into its dict (F7, design.md D10):
   - `step_result` (`test_pitr_recovery.py` line 78) puts the records under the key `argv`. It sets no attribute on the process object.
   - Each caller reads `files["argv"]`. The callers are at lines 510, 512, 1092, 1241, 1362, 1558, and 1704.
   - Check: `rg -n 'done\.docker_calls' deploy/ci/test_pitr_recovery.py` prints nothing. `python3 -m unittest test_pitr_recovery` passes.
-- [ ] 4.2 (deploy/ci) (exempt: hardening, see the header) Assert the exact hits of the mutant tests (F3, design.md D7):
+- [x] 4.2 (deploy/ci) (exempt: hardening, see the header) Assert the exact hits of the mutant tests (F3, design.md D7):
   - `assert_window_mutant_rejected` (line 494) gets a new parameter `expected`, the expected call, for example `(True, "up", ["-d", "--no-deps", "app", "backup"])`.
   - It derives the log line from `expected`: a space, the subcommand and the operands joined by spaces, and a line break. This replaces the fixed text of line 509.
   - It compares the hits, read with `docker_call`, with `[expected]`. No text of `app` or `backup` stays fixed in the method.
@@ -234,7 +234,7 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
   ```
 
   - Check: `python3 -m unittest test_pitr_recovery` passes in the worktree.
-- [ ] 4.3 (deploy/ci) Guard the records of the `walarchive` window (design.md D5):
+- [x] 4.3 (deploy/ci) Guard the records of the `walarchive` window (design.md D5):
   - First add a mutant test to `StepTests` (line 470). It applies the edit of the row `h_crash_walarchive` (anchor of `crash()` line 484).
   - The test uses the method of task 4.2 with `expected=(True, "up", ["-d", "--no-deps", "walarchive"])`.
   - It passes the guard `lambda records: self.walarchive_window_hits("crash", records)`. The method of task 4.2 calls `guard(records)` with one argument.
@@ -254,7 +254,7 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
 
 ## 5. Tests of `restore-switch`
 
-- [ ] 5.1 (deploy/ci) (exempt: hardening, see the header) Assert the exact hits of the mutant tests (F3, design.md D7):
+- [x] 5.1 (deploy/ci) (exempt: hardening, see the header) Assert the exact hits of the mutant tests (F3, design.md D7):
   - `test_window_guard_rejects_restore_mutants` (`test_restore_switch.py` line 739) compares the hits, read with `docker_call`, with the one inserted call.
   - `test_window_guard_rejects_a_start_before_truncate` (line 1963) does the same with `forbidden_check_window_calls`.
   - `test_command_guard_rejects_restore_mutants` (line 713) uses `assertRaisesRegex` with the subcommand and the first operand of the inserted call.
@@ -270,41 +270,40 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
   ```
 
   - Check: `python3 -m unittest test_restore_switch` passes in the worktree.
-- [ ] 5.2 (deploy/ci) (exempt: refactor, see the header) Split `run_subcommand` (F7, design.md D10):
+- [x] 5.2 (deploy/ci) (exempt: refactor, see the header) Split `run_subcommand` (F7, design.md D10):
   - `run_subcommand` (line 559) keeps its signature and its three return values.
   - Free functions take the state and tree files, the stubs, the environment, and the collection of the files.
   - Check: an `ast` count gives at most 50 lines for `run_subcommand` and for each new function. `python3 -m unittest test_restore_switch` passes.
 
 ## 6. Documents
 
-- [ ] 6.1 (docs/ops) [mechanical] (exempt: documentation only) Use one name for a restart of Docker (L-5, design.md D12):
-  - Order: task 6.1 runs first of the three runbook tasks 6.1, 6.3, and 6.4 (Run order item 7).
-  - In `docs/ops/runbook.md` lines 1638 and 1640, replace "a restart of the container engine" with "a restart of Docker".
-  - Check: `rg -c 'container engine' docs/ops/runbook.md` prints nothing. The `ste-lint.py` command of `CLAUDE.md` reports 0 hard violations.
-- [ ] 6.2 (docs/adr) [mechanical] (exempt: documentation only) Name the amended items of ADR-0176 (L-4, design.md D12):
+- [x] 6.1 (docs/ops) [mechanical] (exempt: documentation only) Use one name for a restart of Docker (L-5, design.md D12):
+  - Owner decision (2026-11-17): L-5 stays unfixed. The runbook keeps the words of lines 1638 and 1640.
+  - Reason: `test_rollback_stop_raw_commands` refuses the word `docker` in step 1 of the rollback, so "a restart of Docker" fails it.
+- [x] 6.2 (docs/adr) [mechanical] (exempt: documentation only) Name the amended items of ADR-0176 (L-4, design.md D12):
   - In `docs/adr/README.md` line 188, the status cell becomes "Accepted. Amends ADR-0175 (h), (i), (j), (k), ADR-0106 (i) step 4 and (p) step 5, and ADR-0174 (aj)".
   - In the decision map (line 205), the text of 0176 names the same items.
   - Check: the `ste-lint.py` command of `CLAUDE.md` reports 0 hard violations.
-- [ ] 6.3 (deploy/ci) Keep one delete of the new volume in the recovery (L-2, Q2 option A):
+- [x] 6.3 (deploy/ci) Keep one delete of the new volume in the recovery (L-2, Q2 option A):
   - Order: task 6.3 starts after tasks 6.1 and 3.5 are complete. Task 6.4 waits for it.
   - First add a test to `test_reboot_windows.py`. Recovery step 6 holds no `docker volume` delete. Step 7 holds `To end the attempt, delete the new volume.`
   - Split the text of the delete into two literals (header, rule of `deploy_values`).
   - Run `python3 -m unittest test_reboot_windows` and see the test fail.
   - Then change `docs/ops/runbook.md` line 1008 to "After a failed run, end the attempt as in step 7."
   - Check: `python3 -m unittest test_reboot_windows test_pitr_recovery` passes. The `ste-lint.py` command reports 0 hard violations.
-- [ ] 6.4 (deploy/ci) Name the major upgrade steps and the rollback steps in "After a host reboot" (L-3, Q3 option A):
+- [x] 6.4 (deploy/ci) Name the major upgrade steps and the rollback steps in "After a host reboot" (L-3, Q3 option A):
   - Order: task 6.4 starts after task 6.3 is complete. It is the last of the three runbook tasks.
   - First add the two sentences of Q3 option A to `RunbookHostRebootTests.required_sentences` (`test_upgrade_runbook.py` line 173).
   - Run `python3 -m unittest test_upgrade_runbook` and see `test_reboot_windows_have_conditional_wait_and_skip` fail.
   - Then add the two sentences after the two cases of the section (`docs/ops/runbook.md` line 497).
   - Check: `python3 -m unittest test_upgrade_runbook` passes. The paragraph and list limits of the class pass. The `ste-lint.py` command reports 0 hard violations.
-- [ ] 6.5 (CHANGELOG.md) [mechanical] (exempt: documentation only) Add one line under `### Changed` of `[Unreleased]`:
+- [x] 6.5 (CHANGELOG.md) [mechanical] (exempt: documentation only) Add one line under `### Changed` of `[Unreleased]`:
   - The line says that the guard tests of `deploy/ci/` keep `app`, `backup`, and `walarchive` without a container in the windows of ADR-0176.
   - Check: `python -I tools/ste-lint/ste-lint.py CHANGELOG.md` reports 0 hard violations.
 
 ## 7. Gate
 
-- [ ] 7.1 (deploy/ci) Run the local checks:
+- [x] 7.1 (deploy/ci) Run the local checks:
   1. `bash deploy/ci/check.sh` passes. It runs each `deploy/ci/test_*.py`, also `test_reboot_windows.py`.
   2. `python3 -O -m unittest test_docker_calls` passes in `deploy/ci`.
   3. `cargo test -p recipe-server --test deploy_values --locked` passes.
@@ -320,3 +319,14 @@ A run of the seven RED selectors of tasks 4.2 and 5.1 on `main` printed `OK` in 
 ## Workflow follow-up
 
 - After the gate, run `code-review`, fix each CRITICAL, HIGH, and MEDIUM finding, and run `openspec-archive-change`.
+
+## Code review fixes (2026-11-17)
+
+The code review of Opus and Codex found two MEDIUM findings and four LOW findings. The owner chose to fix the four LOW findings in this change. Each fix starts with a failing test, except the refactor O-4 and the removal O-3.
+
+- O-1 (MEDIUM): each window guard checks every numbered block, also a block with an unexpected number. Then it requires the exact set of step numbers (`deploy/ci/test_reboot_windows.py`).
+- R2 (MEDIUM): the guard of `check_rollback_runbook` finds `compose` after `if`, `!`, `command`, and an assignment word (`deploy/ci/test_reboot_windows.py`).
+- O-3 (LOW): the duplicate case `up -dt 10 --no-deps` leaves `deploy/ci/test_docker_calls.py`. The case stays in `deploy/ci/test_runbook_text.py`.
+- O-4 (LOW): the three window guards share the functions `window_steps` and `start_span` (`deploy/ci/test_reboot_windows.py`).
+- O-5 (LOW): the exact-hit check names the subcommand and every operand (`deploy/ci/test_restore_switch.py`).
+- O-6 (LOW): the guard of recovery step 6 also finds `docker volume remove` and extra spaces (`deploy/ci/test_reboot_windows.py`).
