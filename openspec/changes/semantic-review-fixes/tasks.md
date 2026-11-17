@@ -94,10 +94,10 @@ The ste-lint check of a doc task is `python -I tools/ste-lint/ste-lint.py <files
 
 ## 8. Integration checks
 
-- [ ] 8.1 (.) Run the lint gate. Check: `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] 8.2 (.) Run every test (Docker). Check: `cargo test --workspace --all-features --locked`
-- [ ] 8.3 (.) Check the format and the docs. Check: `cargo fmt --check` and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --all-features --locked`
-- [ ] 8.4 (.) Check the specs and the STE scope. Check: `openspec validate semantic-review-fixes --strict` prints that the change is valid, and the ste-lint command of `CLAUDE.md` with `openspec/changes/semantic-review-fixes/**/*.md` reports 0 hard violations.
+- [x] 8.1 (.) Run the lint gate. Check: `cargo clippy --all-targets --all-features -- -D warnings`
+- [x] 8.2 (.) Run every test (Docker). Check: `cargo test --workspace --all-features --locked`
+- [x] 8.3 (.) Check the format and the docs. Check: `cargo fmt --check` and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --all-features --locked`
+- [x] 8.4 (.) Check the specs and the STE scope. Check: `openspec validate semantic-review-fixes --strict` prints that the change is valid, and the ste-lint command of `CLAUDE.md` with `openspec/changes/semantic-review-fixes/**/*.md` reports 0 hard violations.
 
 ## Workflow follow-up
 
