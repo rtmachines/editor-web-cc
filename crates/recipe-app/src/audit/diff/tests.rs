@@ -396,3 +396,80 @@ fn a_change_of_a_real_draft_gives_the_diff_of_its_leaf() {
         json!({"value": {".temp_sp": stored.get("temp_sp").cloned().unwrap()}})
     );
 }
+
+/// The trees of a struct cycle on `S7_300` and of `INT`. The cycle root has no tree.
+fn cycle_trees() -> (TypeTrees, PlcTypeId, PlcTypeId) {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PLATFORM, 1, "M1");
+    let mut rows = crate::memory::fixtures::seed_struct_cycle(&fixture, (1, PLATFORM));
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    rows.push(fixture.store.state().plc_type(int).unwrap().clone());
+    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let root = tid(crate::memory::fixtures::STRUCT_CYCLE_ROOT);
+    let trees = TypeTrees::resolve([root, int], &types);
+    (trees, root, int)
+}
+
+fn typed(type_id: PlcTypeId, value: Value) -> Parameter {
+    parameter(StoredParameter {
+        plc_type: type_id,
+        value: StoredValue::from(value),
+        limits: Vec::new(),
+        ..param(1, 101, "TAG")
+    })
+}
+
+#[test]
+fn an_old_type_with_a_cycle_writes_the_whole_stored_value_under_the_empty_key() {
+    let (trees, root, int) = cycle_trees();
+    let before = typed(root, json!({"x": 1}));
+    let after = typed(int, json!(7));
+    let diff = definition_diff_of(Some(&before), Some(&after), &trees).unwrap();
+    assert_eq!(
+        diff.before,
+        json!({"plc_type_id": root.to_string(), "value": {"": {"x": 1}}})
+    );
+    assert_eq!(
+        diff.after,
+        json!({"plc_type_id": int.to_string(), "value": {"": 7}})
+    );
+}
+
+#[test]
+fn an_old_type_with_a_cycle_writes_both_sections_for_equal_sides() {
+    let (trees, root, int) = cycle_trees();
+    let before = typed(root, json!(0));
+    let after = typed(int, json!(0));
+    let diff = definition_diff_of(Some(&before), Some(&after), &trees).unwrap();
+    assert_eq!(diff.before.get("value"), Some(&json!({"": 0})));
+    assert_eq!(diff.after.get("value"), Some(&json!({"": 0})));
+}
+
+#[test]
+fn a_new_type_without_a_tree_keeps_the_error_in_a_definition_diff() {
+    let (trees, root, int) = cycle_trees();
+    let before = typed(int, json!(0));
+    let after = typed(root, json!(0));
+    let error = definition_diff_of(Some(&before), Some(&after), &trees).unwrap_err();
+    assert!(matches!(error, AppError::Plant(_)));
+}
+
+#[test]
+fn an_unchanged_type_without_a_tree_keeps_the_error_in_a_definition_diff() {
+    let (trees, root, _) = cycle_trees();
+    let before = typed(root, json!(0));
+    let after = typed(root, json!(1));
+    let error = definition_diff_of(Some(&before), Some(&after), &trees).unwrap_err();
+    assert!(matches!(error, AppError::Plant(_)));
+}
+
+#[test]
+fn value_and_rebind_diffs_keep_the_error_of_an_old_type_without_a_tree() {
+    let (trees, root, int) = cycle_trees();
+    let before = typed(root, json!(0));
+    let after = typed(int, json!(0));
+    let value = value_diff_of(Some(&before), Some(&after), &trees).unwrap_err();
+    assert!(matches!(value, AppError::Plant(_)));
+    let rebind = rebind_diff_of(Some(&before), Some(&after), &trees).unwrap_err();
+    assert!(matches!(rebind, AppError::Plant(_)));
+}

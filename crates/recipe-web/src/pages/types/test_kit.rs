@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use axum::http::StatusCode;
 use recipe_app::memory::seed_type_id;
 use recipe_domain::plant::{
-    ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, MemberName, PlcPlatform,
-    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName, UnitId,
+    ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, PlcPlatform, PlcType,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, UnitId,
 };
 use recipe_domain::text::Text;
 use uuid::Uuid;
@@ -18,6 +18,9 @@ use uuid::Uuid;
 use crate::i18n::Lang;
 use crate::pages::test_helpers::encode;
 use crate::test_support::plant::{ENGLISH, HTMX_CONTENT, World};
+pub(super) use crate::test_support::plant::{
+    RowOwner, seed_cycle, seed_struct, seed_struct_for, struct_id,
+};
 use crate::test_support::{Fixture, Reply, TestSession, text};
 
 /// Send `GET path` in English as `session`, with the extra headers.
@@ -134,61 +137,6 @@ pub(super) fn seed_machine_on(
     (code, id)
 }
 
-/// The identifier of the struct row that a test seeds with the number `number`.
-pub(super) fn struct_id(number: u128) -> PlcTypeId {
-    PlcTypeId::from(Uuid::from_u128(
-        0x7357_0e00_0000_0000_0000_0000_0000_0000 | number,
-    ))
-}
-
-/// The machine that owns a seeded row, and the platform of that machine.
-pub(super) type RowOwner = (MachineId, PlcPlatform);
-
-/// Seed the struct `name@1` of `M7` with the members `members` and return its identifier.
-///
-/// `MemoryStore::seed_type` writes the row without a check. The member types may name rows that
-/// the test seeds later, so a test can build a tree that no request can make.
-pub(super) fn seed_struct(
-    world: &World,
-    number: u128,
-    name: &str,
-    members: &[(&str, PlcTypeId)],
-) -> PlcTypeId {
-    let owner = (world.ids.m7, PlcPlatform::S7_300);
-    seed_struct_for(world, owner, number, (name, 1), members)
-}
-
-/// Seed the struct `name@revision` of `owner` with the members `members` and return its identifier.
-pub(super) fn seed_struct_for(
-    world: &World,
-    owner: RowOwner,
-    number: u128,
-    (name, revision): (&str, u32),
-    members: &[(&str, PlcTypeId)],
-) -> PlcTypeId {
-    let id = struct_id(number);
-    let row = PlcType::try_from(PlcTypeRecord {
-        id,
-        machine: Some(owner.0),
-        platforms: BTreeSet::from([owner.1]),
-        shape: RecordShape::Struct {
-            name: TypeName::parse(name).unwrap(),
-            revision,
-            supersedes: None,
-            members: members
-                .iter()
-                .map(|(member, type_id)| TypeMember {
-                    name: MemberName::parse(member).unwrap(),
-                    type_id: *type_id,
-                })
-                .collect(),
-        },
-    })
-    .unwrap();
-    world.fixture.store.seed_type(&row);
-    id
-}
-
 /// Seed an array row of `M7` and return its identifier.
 ///
 /// `dimensions` holds the lower and the upper bound of each dimension.
@@ -237,16 +185,6 @@ pub(super) fn primitive_id(primitive: Primitive) -> PlcTypeId {
 /// Return the identifier of the seed row `STRING(254)`, the default string of the S7 platforms.
 pub(super) fn string_id() -> PlcTypeId {
     seed_type_id(Primitive::String, Some(254)).unwrap()
-}
-
-/// Seed the structs `ST_Alpha@1` and `ST_Beta@1` of `M7`, which contain each other.
-///
-/// The store then holds a cycle that no request can make (ADR-0037 u).
-pub(super) fn seed_cycle(world: &World) {
-    let alpha = struct_id(1);
-    let beta = struct_id(2);
-    seed_struct(world, 1, "ST_Alpha", &[("beta", beta)]);
-    seed_struct(world, 2, "ST_Beta", &[("alpha", alpha)]);
 }
 
 /// Return the text from `start` up to the first `end` after it.

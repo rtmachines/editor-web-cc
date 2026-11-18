@@ -60,7 +60,7 @@ impl SummaryView {
             tag: parameter.tag.to_string(),
             name_en: parameter.name_en.to_string(),
             description_en: parameter.description_en.to_string(),
-            type_text: view.type_text.clone(),
+            type_text: view.type_text.clone().unwrap_or_default(),
             s7_address: parameter.s7_address.as_ref().map(ToString::to_string),
             ordinal: parameter.ordinal.value().to_string(),
             toast: String::new(),

@@ -100,10 +100,13 @@ impl ValueView {
     /// struct (ADR-0108 (a)).
     ///
     /// An empty text shows `parameters-value-empty`. `None` shows `parameters-value-composite`.
+    /// `None` with an empty `type_text` gives an empty cell, because the kind of the parameter is
+    /// unknown (ADR-0195 (ad)).
     /// A BOOL value shows the word of `grid-true` or `grid-false`, as the leaf grid does
     /// (ADR-0039). `type_text` is the type text of the parameter, for example `BOOL`.
     pub(crate) fn new(t: Texts<'_>, type_text: &str, leaf_text: Option<&str>) -> Self {
         let (text, is_word) = match leaf_text {
+            None if type_text.is_empty() => (String::new(), true),
             None => (t.get("parameters-value-composite"), true),
             Some("") => (t.get("parameters-value-empty"), true),
             Some(text) => (

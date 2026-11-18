@@ -14,8 +14,8 @@ use crate::recipe::draft::{
     stored_limits_under, stored_value_under,
 };
 use crate::recipe::{
-    DraftError, Expected, Parameter, ParameterTag, ParameterValue, PrecisionField, RecipeError,
-    StoredLimit,
+    DraftError, Expected, Parameter, ParameterKey, ParameterTag, ParameterValue, PrecisionField,
+    RecipeError, StoredLimit,
 };
 
 /// The part of a stored parameter that carries a rule fault.
@@ -143,6 +143,67 @@ impl From<RecipeError> for StructureFault {
 impl From<DraftError> for StructureFault {
     fn from(error: DraftError) -> Self {
         Self(error)
+    }
+}
+
+/// A stored part that breaks a rule of the earlier rule set or that does not resolve (ADR-0195).
+///
+/// The type solves one problem: a draft command must not show a storage defect as a rule error
+/// of the user. The caller gives `500 E-DB-008` and writes one log line. The log line names the
+/// parameter when the site has one.
+///
+/// The type is a plain classification and not an error type. It has no row in `reliability.md`
+/// section 1.2. The inner [`DraftError`] owns the code.
+#[derive(Debug)]
+pub struct StoredDefect {
+    key: Option<ParameterKey>,
+    error: DraftError,
+}
+
+impl StoredDefect {
+    /// Classify the error of a stored part of the parameter `key`.
+    #[must_use]
+    pub fn of_parameter(key: ParameterKey, error: impl Into<DraftError>) -> Self {
+        Self {
+            key: Some(key),
+            error: error.into(),
+        }
+    }
+
+    /// Classify the error of a stored part that belongs to no single parameter.
+    #[must_use]
+    pub fn of_part(error: impl Into<DraftError>) -> Self {
+        Self {
+            key: None,
+            error: error.into(),
+        }
+    }
+
+    /// Return the key of the broken parameter, when the site has one.
+    #[must_use]
+    pub const fn key(&self) -> Option<&ParameterKey> {
+        self.key.as_ref()
+    }
+
+    /// Return the error of the broken part.
+    #[must_use]
+    pub const fn error(&self) -> &DraftError {
+        &self.error
+    }
+
+    /// Return the stable code of the inner error.
+    #[must_use]
+    pub fn code(&self) -> ErrorCode {
+        self.error.code()
+    }
+
+    /// Hand over the key and the error of the broken part.
+    ///
+    /// The one caller is the storage error that keeps both for the log line. The caller must not
+    /// return the inner error to the user, because that error has a 4xx code.
+    #[must_use]
+    pub fn into_parts(self) -> (Option<ParameterKey>, DraftError) {
+        (self.key, self.error)
     }
 }
 

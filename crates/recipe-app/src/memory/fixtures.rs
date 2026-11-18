@@ -2,6 +2,7 @@
 
 mod actors;
 mod context;
+mod cycle;
 mod deep;
 mod parameter;
 mod plant;
@@ -12,6 +13,7 @@ mod seed;
 mod tests;
 
 pub(crate) use actors::{actor, meta, second_engineer};
+pub(crate) use cycle::{ARRAY_CYCLE_ROOT, STRUCT_CYCLE_ROOT, seed_array_cycle, seed_struct_cycle};
 pub(crate) use deep::{
     over_limit_top_parameter, seed_oversized_struct, seed_struct_chain, struct_chain_row,
     struct_chain_value,

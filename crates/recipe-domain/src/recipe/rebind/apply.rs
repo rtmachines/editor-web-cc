@@ -3,10 +3,12 @@
 use std::collections::BTreeMap;
 
 use super::{RebindPlan, RebindTargetReason};
+use crate::error_codes::ErrorCode;
 use crate::plant::{MemberName, PlcPlatform, PlcTypeId, RuleSet, TypeNode, TypeTree, TypeTrees};
 use crate::recipe::draft::{check_definition, check_faults, stored_limits_under, stored_value};
 use crate::recipe::{
     Draft, DraftError, Parameter, ParameterChange, ParameterKey, ProcessLimit, RecipeError,
+    StoredDefect,
 };
 
 /// Return `true` when two trees have the same shape.
@@ -108,9 +110,10 @@ impl Draft {
     /// new type of a struct parameter is the target of the plan. The new type of an array
     /// parameter comes from `new_types`. The tree of each new type must have the shape of the
     /// planned tree. The method reads the planned value and the planned limits again against
-    /// that tree. The method runs the data block rule and the end rule of ADR-0116 (e) and the
-    /// standard access rule of ADR-0178 for each rebound parameter. Then it checks the size budgets and the S7 rules of the changed draft.
-    /// The draft changes only after every check passes. The translations stay.
+    /// that tree. For each rebound parameter, the method runs the platform, width, alignment,
+    /// data block, end, and standard-access rules (ADR-0178 (d)). Then it checks the size budgets
+    /// and the S7 layout of the changed draft. The draft changes only after every check passes.
+    /// The translations stay.
     ///
     /// The result holds one change for each parameter, in tag order.
     ///
@@ -118,12 +121,26 @@ impl Draft {
     ///
     /// Returns `E-PLT-013` when the trees belong to another machine or platform. Returns
     /// `E-RCP-052` with the reason `PlanMismatch` when the draft or a new tree does not match
-    /// the plan. Returns `E-RCP-005`, `E-RCP-004`, or a limit error when the planned value or a
-    /// planned limit fails against the new tree. Returns `E-RCP-057` when a rebound parameter
-    /// has a data block number that is too high. Returns `E-RCP-056` when a rebound parameter
-    /// ends after byte 65535 of its data block. Returns `E-RCP-058` when a rebound parameter has
-    /// an array that a data block with standard access cannot hold. Returns `E-RCP-021` when the changed draft is
-    /// above a size budget.
+    /// the plan. Returns `E-RCP-005` when a planned stored value does not match the new tree.
+    /// Returns the code of a planned limit row that does not match the new tree, such as
+    /// `E-RCP-019`. These errors keep their codes and are not `Stored`.
+    ///
+    /// Returns `Stored` with the key of the parameter when the planned value fails a kept limit,
+    /// such as `E-RCP-004`. A rebound parameter that breaks the platform rule (`E-RCP-003` or
+    /// `E-RCP-053`), the width rule (`E-RCP-054`), or the alignment rule (`E-RCP-023`) also gives
+    /// `Stored` (ADR-0195 (m)). The application layer gives `E-DB-008` for a `Stored` result.
+    ///
+    /// Returns `E-RCP-057` when a rebound parameter has a data block number that is too high.
+    /// Returns `E-RCP-056` when a rebound parameter ends after byte 65535 of its data block.
+    /// Returns `E-RCP-058` when a rebound parameter has an array that a data block with standard
+    /// access cannot hold. Returns `E-PLT-018` when the layout of a rebound parameter is too large.
+    /// These errors keep their codes.
+    ///
+    /// Returns `Stored` with the key of the first parameter of the draft that breaks the platform,
+    /// width, or alignment rule. It also returns `Stored` when a parameter layout is too large
+    /// (`E-PLT-018`). This check covers every parameter of the draft (ADR-0195 (i)).
+    /// Returns `E-RCP-021` when the changed draft is above a size budget. Returns `E-RCP-022` for
+    /// the first overlap that holds a rebound parameter.
     pub fn apply_rebind(
         &mut self,
         plan: RebindPlan,
@@ -176,6 +193,20 @@ fn plan_mismatch(plan: &RebindPlan, trees: &TypeTrees) -> DraftError {
     })
 }
 
+/// Return `true` for the errors that show a stored defect of the address of a parameter.
+///
+/// These are the platform rule, the width rule, and the alignment rule (ADR-0195 (m)). Every other
+/// error of `check_definition` keeps its code.
+fn is_stored_address_rule(error: &DraftError) -> bool {
+    [
+        ErrorCode::RCP_003,
+        ErrorCode::RCP_053,
+        ErrorCode::RCP_054,
+        ErrorCode::RCP_023,
+    ]
+    .contains(&error.code())
+}
+
 /// Build the parameter after the rebind and check it against the real tree.
 fn rebound_parameter(
     old: &Parameter,
@@ -198,21 +229,38 @@ fn rebound_parameter(
         .ok_or_else(mismatch)?;
     let stored = plan.values.get(&candidate.key).ok_or_else(mismatch)?;
     let rows = plan.limits.get(&candidate.key).ok_or_else(mismatch)?;
+    // ADR-0195 (l) applies in `plan_rebind`. These two checks repeat its rules on a tree of the
+    // same shape. Only a plan that does not match the trees reaches an error here. They keep plain
+    // codes.
     let value = stored_value(old.tag(), stored, real)?;
     let limits: Vec<ProcessLimit> = stored_limits_under(old.tag(), rows, real, RuleSet::Earlier)?;
     let earlier = (real, RuleSet::Earlier);
+    let stored = |error: DraftError| {
+        DraftError::Stored(Box::new(StoredDefect::of_parameter(candidate.key, error)))
+    };
+    // The planned value mixes request leaves and stored leaves. An I7 fault between it and a kept
+    // limit gives `Stored` (ADR-0195 (l)).
     if let Some(fault) = check_faults(old.tag(), &value, &limits, earlier)
         .into_iter()
         .next()
     {
-        return Err(DraftError::from(fault));
+        return Err(stored(DraftError::from(fault)));
     }
     // One order for every parameter command: platform, data block, width, alignment, end, then
-    // standard access (ADR-0178 (d)).
-    check_definition(candidate.platform, old.tag(), old.s7_address(), real)?;
+    // standard access (ADR-0178 (d)). The rule errors of the data block, the end, and the standard
+    // access keep their codes (ADR-0195 (m)).
+    check_definition(candidate.platform, old.tag(), old.s7_address(), real).map_err(|error| {
+        if is_stored_address_rule(&error) {
+            stored(error)
+        } else {
+            error
+        }
+    })?;
     let rows = limits.iter().map(ProcessLimit::to_stored).collect();
     Ok(old.rebound(new_type, value.to_stored(), rows))
 }
 
+#[cfg(test)]
+mod stored_platform_tests;
 #[cfg(test)]
 mod tests;

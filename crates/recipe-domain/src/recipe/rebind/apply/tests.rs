@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
+use super::super::map::Mapped;
 use super::super::test_support::{
     BIG_1, BIG_2, BIG_ARRAY, BIG_ARRAY_NEW, DINT, FILL, INT, ZONE_2, ZONE_3, ZONES_2, ZONES_2_NEW,
     ZONES_4, ZONES_4_NEW, draft_on, draft_with, key, limit, number, param, plan_of, request,
@@ -11,8 +12,10 @@ use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{
     array_row, dimensions, id, machine, on_platform, primitive_row, struct_row_revision, types_for,
 };
-use crate::plant::{PlcPlatform, PlcTypeId, Primitive, S7Address, TypeTrees};
-use crate::recipe::draft::support::stored_parameter;
+use crate::plant::{
+    PlantError, PlcPlatform, PlcTypeId, Primitive, S7Address, TypeLimit, TypeTrees,
+};
+use crate::recipe::draft::support::{assert_stored, stored_parameter};
 use crate::recipe::{
     ArrayShape, Budget, Draft, DraftError, Expected, LangCode, ParameterKey, RebindPlan,
     RebindTargetReason, RecipeError, Translation,
@@ -226,14 +229,11 @@ fn new_tree_with_fewer_members_than_the_plan_gives_plan_mismatch_and_no_change()
     assert_eq!(draft.parameters(), before.parameters());
 }
 
-// apply.rs doc: the method reads the planned value again against the new tree and the stored
-// limits. `Draft::load` trusts stored data, so `plan_rebind` does not find a stored value that
-// breaks its stored limit and `apply_rebind` finds it.
-// Open question: domain-model.md section 5.2 does not list `E-RCP-004` for
-// `RebindTypeRevision`. The test pins the current code.
+// A stored value that breaks its stored limit is a stored defect. `plan_rebind` finds it, so the
+// draft does not change (ADR-0195 (l)).
 #[test]
 fn stored_value_above_its_stored_limit_gives_e_rcp_004_and_no_change() {
-    let mut draft = draft_with(vec![param(
+    let draft = draft_with(vec![param(
         1,
         "SPEED",
         ZONE_2,
@@ -241,27 +241,53 @@ fn stored_value_above_its_stored_limit_gives_e_rcp_004_and_no_change() {
         vec![limit(".setpoint", 100)],
     )]);
     let before = draft.clone();
-    let plan = draft
+
+    let error = draft
         .plan_rebind(
             &request_with(ZONE_2, ZONE_3, &[(1, ".temp_max", number(70))]),
             &trees(),
         )
-        .unwrap();
-
-    let error = draft
-        .apply_rebind(plan, &BTreeMap::new(), &trees())
         .unwrap_err();
 
-    assert_eq!(error.code(), ErrorCode::RCP_004);
-    assert!(matches!(
-        &error,
-        DraftError::Recipe(RecipeError::ValueOutOfLimit { tag, leaf, value, min, max, .. })
-            if tag.as_str() == "SPEED"
-                && leaf.to_string() == ".setpoint"
-                && value == "500"
-                && min == "0"
-                && max == "100"
-    ));
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_004);
+    assert_eq!(draft.parameters(), before.parameters());
+}
+
+// A moved parameter with a stored address at an odd byte is a stored defect on the apply path
+// (ADR-0195 (n)). The key is the key of the parameter.
+#[test]
+fn apply_rebind_with_a_stored_odd_byte_gives_stored_with_the_key() {
+    let (draft, result) = rebind_s7_zone(PlcPlatform::S7_1500, "DB1.DBB1");
+
+    assert_stored(&result.unwrap_err(), Some(key(1)), ErrorCode::RCP_023);
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_2));
+}
+
+// A plan from `RebindPlan::new` can hold a value that `plan_rebind` would refuse. The apply step
+// checks the I7 rule again and reports a stored defect.
+#[test]
+fn apply_rebind_with_a_planned_value_above_a_kept_limit_gives_stored() {
+    let mut draft = zone_draft();
+    let before = draft.clone();
+    let good = zone_plan(&draft);
+    let mut values = good.values.clone();
+    values.insert(key(1), json!({"setpoint": 500, "temp_max": 70}).into());
+    let plan = RebindPlan::new(
+        good.from,
+        good.to,
+        good.parameters.clone(),
+        good.old_types.clone(),
+        Mapped {
+            values,
+            limits: good.limits.clone(),
+        },
+    );
+
+    let error = draft
+        .apply_rebind(plan, &new_types(), &trees())
+        .unwrap_err();
+
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_004);
     assert_eq!(draft.parameters(), before.parameters());
 }
 
@@ -559,7 +585,12 @@ fn rebind_to_a_larger_struct_that_ends_at_byte_65535_applies() {
 fn rebind_of_a_parameter_in_a_data_block_above_16000_on_s7_300_gives_e_rcp_057() {
     let (draft, result) = rebind_s7_zone(PlcPlatform::S7_300, "DB16001.DBB0");
 
-    assert_eq!(result.unwrap_err().code(), ErrorCode::RCP_057);
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_057);
+    assert!(matches!(
+        error,
+        DraftError::Recipe(RecipeError::S7DataBlockOutOfRange { .. })
+    ));
     assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_2));
 }
 
@@ -635,6 +666,10 @@ fn adr_0178_rebind_to_a_struct_with_a_wide_bound_fails() {
 
     let error = result.unwrap_err();
     assert_eq!(error.code(), ErrorCode::RCP_058);
+    assert!(matches!(
+        error,
+        DraftError::Recipe(RecipeError::S7TypeNotAddressable { .. })
+    ));
     assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_1));
 }
 
@@ -642,8 +677,7 @@ fn adr_0178_rebind_to_a_struct_with_a_wide_bound_fails() {
 fn adr_0178_d_rebind_with_a_wrong_width_and_a_wide_bound_gives_e_rcp_054_first() {
     let (draft, result) = rebind_to_wide(Some("DB1.DBW0"));
 
-    let error = result.unwrap_err();
-    assert_eq!(error.code(), ErrorCode::RCP_054);
+    assert_stored(&result.unwrap_err(), Some(key(1)), ErrorCode::RCP_054);
     assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_1));
 }
 
@@ -690,7 +724,7 @@ fn adr_0180_rebind_with_a_new_wchar_member_u_e000_gives_e_rcp_005() {
 
     let entries = match error {
         DraftError::List(list) => Some(list.into_vec()),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .expect("a list of entries");
     assert_eq!(entries.len(), 1, "{entries:?}");
@@ -727,4 +761,13 @@ fn plan_mismatch_has_its_phrase() {
         RebindTargetReason::PlanMismatch.to_string(),
         "the plan does not match the draft or the new types"
     );
+}
+
+#[test]
+fn stored_address_rule_selects_only_the_rules_of_a_stored_address() {
+    let layout_fault = DraftError::from(PlantError::TypeTooLarge {
+        type_name: "T".to_owned(),
+        limit: TypeLimit::Leaves,
+    });
+    assert!(!super::is_stored_address_rule(&layout_fault));
 }

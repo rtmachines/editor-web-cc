@@ -66,7 +66,7 @@ impl DefinitionTexts {
             tag: parameter.tag.to_string(),
             name_en: parameter.name_en.to_string(),
             description_en: parameter.description_en.to_string(),
-            type_text: view.type_text.clone(),
+            type_text: view.type_text.clone().unwrap_or_default(),
             s7_address: parameter
                 .s7_address
                 .as_ref()
@@ -111,12 +111,15 @@ impl<'a> GridTexts<'a> {
     /// # Errors
     ///
     /// Returns the fault of a stored value that does not match its tree, a defect of the storage.
+    /// Returns `ValueFault::WrongTree` for a view without a tree (ADR-0195 (ad)). The caller
+    /// answers `500` for it.
     pub(crate) fn stored(view: &'a ParameterView) -> Result<Self, ValueFault> {
-        let value = ParameterValue::try_from((&view.parameter.value, &view.tree))?;
+        let tree = view.tree.as_ref().ok_or(ValueFault::WrongTree)?;
+        let value = ParameterValue::try_from((&view.parameter.value, tree))?;
         Ok(Self {
-            tree: &view.tree,
-            values: ValueTexts::from_stored(&value.texts(&view.tree)?),
-            limits: LimitTexts::from_stored(&view.tree, &view.parameter.limits),
+            tree,
+            values: ValueTexts::from_stored(&value.texts(tree)?),
+            limits: LimitTexts::from_stored(tree, &view.parameter.limits),
             toggle: None,
         })
     }

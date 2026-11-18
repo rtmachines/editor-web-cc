@@ -40,6 +40,7 @@ pub use parameter::{Parameter, StoredParameter};
 pub(in crate::recipe) use s7::check_standard_access_rule;
 pub(crate) use s7::overlap_partners;
 pub(in crate::recipe) use s7::{check_data_block_rule, check_definition, check_end_rule};
+pub use value::is_stored_resolution_defect;
 
 /// The live draft of a version as storage returns it, with its parameters.
 ///

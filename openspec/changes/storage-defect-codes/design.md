@@ -30,7 +30,7 @@ ADR-0195 items (a) to (c). `StoredDefect` lives next to `StructureFault` in `rec
 
 The rule functions stay shared with the approval check and the reads. The caller wraps the error of a stored part:
 
-- `set_value` wraps the error of `stored_limits_under` (`draft/value.rs` line 33).
+- `set_value` wraps the error of `stored_limits_under` (`draft/value.rs` line 33). A conflict of two stored limit rows on one leaf (`E-RCP-019`) is a stored part, so `set_value` wraps it too.
 - `replace_limits` wraps the error of `stored_value_under` (`draft/value.rs` line 63).
 - `set_value` and `replace_limits` wrap a failed resolution of the stored type, as ADR-0195 (w) defines it. That is the `PlantError` of `resolved_tree` (`draft/add/step_definition.rs` lines 93 to 104), matched by variant and reason. The wrapped errors are `PlantError::TypeCycle`, `PlantError::TypeTooLarge`, and `PlantError::DerivedTypeInvalid` with the reason `RowShape`.
 - Every other resolution error stays unwrapped. That is `E-PLT-013` with the reason `NotOnPlatform`, for a root or a member that the platform does not hold (ADR-0195 (x)).

@@ -110,6 +110,17 @@ impl MemoryTransaction {
         self.shared.lock().faults.insert_version
     }
 
+    /// Return `true` once for each `MemoryStore::miss_next` of `lookup`, and `false` after that.
+    pub(crate) fn take_missing(&self, lookup: crate::memory::MissingRow) -> bool {
+        self.shared.lock().take_missing(lookup)
+    }
+
+    /// Count one `type_rows` call and return the identifiers that
+    /// `MemoryStore::duplicate_type_row_on_call` makes due.
+    pub(crate) fn take_type_row_duplicates(&self) -> Vec<recipe_domain::plant::PlcTypeId> {
+        self.shared.lock().take_type_row_duplicates()
+    }
+
     /// Run the hook of `MemoryStore::on_read_draft`, when one is set.
     pub(crate) fn run_read_draft_hook(&self) {
         MemoryStore::from_shared(Arc::clone(&self.shared)).run_read_draft_hook();

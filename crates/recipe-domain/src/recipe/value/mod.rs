@@ -23,6 +23,7 @@ mod texts;
 mod texts_tests;
 mod walk;
 
+pub(in crate::recipe) use check::limit_conflicts;
 pub(in crate::recipe) use decimal::{canonical, parse_decimal, significant_digits};
 pub use expected::Expected;
 pub use fault::{ValueFault, ValueFaults};

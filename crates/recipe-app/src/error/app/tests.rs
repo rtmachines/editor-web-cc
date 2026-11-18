@@ -2,7 +2,9 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::export::ExportError;
 use recipe_domain::identity::{IdentityError, Login};
 use recipe_domain::plant::{MachineCode, MachineId, PlantError, PlantErrors, TypeName, UnitPath};
-use recipe_domain::recipe::{DraftError, RecipeError, RecipeErrors, ReferenceNumber};
+use recipe_domain::recipe::{
+    DraftError, ParameterKey, RecipeError, RecipeErrors, ReferenceNumber, StoredDefect,
+};
 use uuid::Uuid;
 
 use super::*;
@@ -237,6 +239,43 @@ fn draft_error_unwraps_the_list_kind() {
     let error = AppError::from(DraftError::from(RecipeErrors::from(recipe_error())));
     assert!(matches!(error, AppError::Recipes(_)));
     assert_eq!(error.code(), ErrorCode::RCP_007);
+}
+
+fn stored_chain(error: &AppError) -> Vec<String> {
+    let storage = match error {
+        AppError::Storage(storage) => Some(storage),
+        _ => None,
+    }
+    .unwrap();
+    std::iter::successors(std::error::Error::source(storage), |&cause| cause.source())
+        .map(ToString::to_string)
+        .collect()
+}
+
+#[test]
+fn draft_error_stored_with_a_key_gives_e_db_008_and_names_the_key() {
+    let key = ParameterKey::from(uuid::Uuid::from_u128(5));
+    let defect = StoredDefect::of_parameter(key, recipe_error());
+
+    let error = AppError::from(DraftError::Stored(Box::new(defect)));
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    let chain = stored_chain(&error);
+    let first = chain.first().unwrap();
+    assert!(first.contains(&key.to_string()), "{chain:?}");
+    assert!(first.contains(ErrorCode::RCP_007.as_str()), "{chain:?}");
+}
+
+#[test]
+fn draft_error_stored_without_a_key_gives_e_db_008_and_names_the_code() {
+    let defect = StoredDefect::of_part(recipe_error());
+
+    let error = AppError::from(DraftError::Stored(Box::new(defect)));
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    let chain = stored_chain(&error);
+    let first = chain.first().unwrap();
+    assert!(first.contains(ErrorCode::RCP_007.as_str()), "{chain:?}");
 }
 
 #[test]

@@ -341,3 +341,34 @@ async fn remove_in_an_approved_version_gives_rcp_002_and_in_a_deleted_recipe_rcp
         .unwrap_err();
     assert_eq!(gone.code(), ErrorCode::RCP_012);
 }
+
+#[tokio::test]
+async fn upsert_with_two_stored_parameters_of_one_tag_gives_db_008_and_writes_nothing() {
+    let fixture = Fixture::new();
+    seed_speed_draft(&fixture);
+    let twin = crate::memory::fixtures::parameter_on(
+        PlcPlatform::TwinCat3,
+        2,
+        "SPEED",
+        crate::memory::fixtures::uid(101),
+        0,
+    );
+    fixture.store.seed_parameter(vid(DRAFT_VERSION), &twin);
+    let error = UpsertTranslation::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            upsert(translation("de", "Geschwindigkeit", None), 1),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert!(fixture.store.audit_entries().is_empty());
+    assert!(
+        fixture
+            .store
+            .state()
+            .editors_of(vid(DRAFT_VERSION))
+            .is_empty()
+    );
+}

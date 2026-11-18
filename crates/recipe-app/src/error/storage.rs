@@ -4,7 +4,7 @@
 //! It ends before the sentence "Reference: {request_id}.", because only the request knows the reference (design D4).
 
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::recipe::{DraftError, ParameterKey, StructureFault, ValueFault};
+use recipe_domain::recipe::{DraftError, ParameterKey, StoredDefect, StructureFault, ValueFault};
 
 /// The kind of failure behind `StorageError::Deadlock` (design D16, ADR-0035 c).
 ///
@@ -109,6 +109,33 @@ struct BrokenStoredParameter {
     error: DraftError,
 }
 
+/// The cause of a stored part that breaks a rule. The key is present when the site has one.
+#[derive(Debug)]
+struct BrokenStoredPart {
+    key: Option<ParameterKey>,
+    code: ErrorCode,
+    error: DraftError,
+}
+
+impl std::fmt::Display for BrokenStoredPart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.key {
+            Some(key) => write!(
+                f,
+                "the stored parameter {key} breaks a rule with {}",
+                self.code
+            ),
+            None => write!(f, "a stored part breaks a rule with {}", self.code),
+        }
+    }
+}
+
+impl std::error::Error for BrokenStoredPart {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
+}
+
 impl StorageError {
     /// Build the error of a broken port contract, for example a result list that is too short.
     ///
@@ -152,6 +179,22 @@ impl StorageError {
                 code: fault.code(),
                 error: fault.into_error(),
             }),
+        }
+    }
+
+    /// Build the error of a stored part that breaks a rule, a defect of the storage (ADR-0195).
+    ///
+    /// The function solves one problem: the one log line must find the broken part. The source
+    /// chain names the key of the defect when it has one. The chain also names the code of the
+    /// broken rule and the first error of the domain. The code is `E-DB-008`, and `Display`
+    /// hides the details.
+    #[must_use]
+    pub(crate) fn broken_stored_part(defect: StoredDefect) -> Self {
+        let code = defect.code();
+        let (key, error) = defect.into_parts();
+        Self::Other {
+            sqlstate: None,
+            source: Box::new(BrokenStoredPart { key, code, error }),
         }
     }
 

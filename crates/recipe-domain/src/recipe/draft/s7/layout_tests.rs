@@ -93,7 +93,7 @@ fn add_error(
     match try_add(draft, trees, new) {
         Ok(()) => None,
         Err(DraftError::Recipe(error)) => Some(error.code()),
-        Err(DraftError::Plant(_) | DraftError::List(_)) => None,
+        Err(DraftError::Plant(_) | DraftError::List(_) | DraftError::Stored(_)) => None,
     }
 }
 

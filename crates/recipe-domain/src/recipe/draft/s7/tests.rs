@@ -149,14 +149,17 @@ fn check(platform: PlcPlatform, specs: &[Spec]) -> Result<(), DraftError> {
 fn recipe_error(result: Result<(), DraftError>) -> RecipeError {
     let error = result.err().and_then(|error| match error {
         DraftError::Recipe(inner) => Some(inner),
-        DraftError::Plant(_) | DraftError::List(_) => None,
+        DraftError::Plant(_) | DraftError::List(_) | DraftError::Stored(_) => None,
     });
     error.expect("the check returns a RecipeError")
 }
 
 #[test]
 fn s7_300_without_an_address_gives_e_rcp_003() {
-    let error = recipe_error(check(PlcPlatform::S7_300, &[("SPEED", INT, None)]));
+    let error = recipe_error(check_for_approval_rules(
+        PlcPlatform::S7_300,
+        &[("SPEED", INT, None)],
+    ));
     assert_eq!(error.code(), ErrorCode::RCP_003);
     assert_eq!(
         error.to_string(),
@@ -166,7 +169,7 @@ fn s7_300_without_an_address_gives_e_rcp_003() {
 
 #[test]
 fn twincat3_with_an_address_gives_e_rcp_053() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::TwinCat3,
         &[("SPEED", INT, Some("DB1.DBW4"))],
     ));
@@ -179,7 +182,7 @@ fn twincat3_with_an_address_gives_e_rcp_053() {
 
 #[test]
 fn codesys_with_an_address_gives_e_rcp_053() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::CodesysIec,
         &[("SPEED", INT, Some("DB1.DBW4"))],
     ));
@@ -201,7 +204,7 @@ fn twincat3_without_addresses_passes() {
 
 #[test]
 fn int_at_a_double_word_address_gives_e_rcp_054_with_width_w() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::S7_300,
         &[("SPEED", INT, Some("DB1.DBD0"))],
     ));
@@ -221,7 +224,7 @@ fn int_at_a_double_word_address_gives_e_rcp_054_with_width_w() {
 
 #[test]
 fn bool_at_a_byte_address_gives_e_rcp_054_with_width_x() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::S7_300,
         &[("RUN", BOOL, Some("DB1.DBB0"))],
     ));
@@ -242,7 +245,7 @@ fn real_at_a_double_word_address_passes() {
 
 #[test]
 fn int_at_an_odd_offset_gives_e_rcp_023() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::S7_300,
         &[("SPEED", INT, Some("DB1.DBW3"))],
     ));
@@ -255,7 +258,7 @@ fn int_at_an_odd_offset_gives_e_rcp_023() {
 
 #[test]
 fn a_struct_at_an_odd_offset_gives_e_rcp_023() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::S7_300,
         &[("FLAGS", ST_FLAGS, Some("DB1.DBB1"))],
     ));
@@ -408,7 +411,7 @@ fn an_unresolved_parameter_with_an_address_skips_width_alignment_and_overlap() {
 
 #[test]
 fn an_unresolved_parameter_without_an_address_on_s7_300_gives_e_rcp_003() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::S7_300,
         &[("LOST", UNKNOWN, None), ("SPEED", INT, Some("DB1.DBW0"))],
     ));
@@ -417,7 +420,7 @@ fn an_unresolved_parameter_without_an_address_on_s7_300_gives_e_rcp_003() {
 
 #[test]
 fn an_unresolved_parameter_with_an_address_on_twincat3_gives_e_rcp_053() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::TwinCat3,
         &[("LOST", UNKNOWN, Some("DB1.DBW0"))],
     ));
@@ -426,7 +429,7 @@ fn an_unresolved_parameter_with_an_address_on_twincat3_gives_e_rcp_053() {
 
 #[test]
 fn the_first_error_is_the_one_of_the_first_tag() {
-    let error = recipe_error(check(
+    let error = recipe_error(check_for_approval_rules(
         PlcPlatform::S7_300,
         &[
             ("ZETA", INT, Some("DB1.DBW3")),

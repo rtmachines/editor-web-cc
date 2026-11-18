@@ -1,8 +1,8 @@
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::PlcPlatform;
-use recipe_domain::recipe::{ValueInput, VersionState};
+use recipe_domain::plant::{LeafPath, PlcPlatform, Primitive, S7Address};
+use recipe_domain::recipe::{StoredLimit, StoredParameter, ValueInput, VersionState};
 use serde_json::json;
 
 use super::{SetParameterValue, SetParameterValueInput};
@@ -206,6 +206,41 @@ async fn a_value_outside_the_limit_gives_rcp_004_and_writes_nothing() {
         .unwrap_err();
     assert_eq!(error.code(), ErrorCode::RCP_004);
     assert_nothing_written(&fixture);
+}
+
+/// A `DATE` limit `max` above the end of the earlier rule set is a storage defect (ADR-0195).
+#[tokio::test]
+async fn a_stored_date_limit_outside_the_type_range_gives_db_008_and_writes_nothing() {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let date = fixture.seed_primitive_type(960, PlcPlatform::S7_1500, Primitive::Date);
+    let speed = StoredParameter {
+        plc_type: date,
+        value: json!(100).into(),
+        s7_address: Some(S7Address::parse("DB1.DBW0").unwrap()),
+        limits: vec![StoredLimit {
+            leaf_path: LeafPath::parse("").unwrap(),
+            min: None,
+            max: Some(72_900.into()),
+            max_length: None,
+        }],
+        ..parameter_on(PlcPlatform::S7_1500, 1, "SPEED", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(DRAFT_VERSION), &speed);
+    let error = SetParameterValue::new(fixture.context())
+        .execute(&actor(Role::ProcessEngineer), &meta(), input("1", 1))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008, "{error}");
+    assert!(fixture.store.audit_entries().is_empty());
+    let parameters = stored_parameters(&fixture);
+    assert_eq!(parameters.len(), 1);
+    assert_eq!(
+        parameters.first().unwrap().value.as_json(),
+        &json!(100),
+        "the value must stay"
+    );
 }
 
 #[tokio::test]

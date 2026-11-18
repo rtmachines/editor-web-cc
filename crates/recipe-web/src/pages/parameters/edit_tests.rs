@@ -488,3 +488,139 @@ async fn parameters_edit_fields_request_of_the_type_int_at_1_gives_the_grid() {
     );
     assert!(!reply.body.contains("E-PLT-013"), "{}", reply.body);
 }
+
+/// Tests of the page and the repair of a parameter whose stored type does not resolve
+/// (design D8, ADR-0195 (ae)).
+mod unresolved_type_tests {
+    use axum::http::StatusCode;
+
+    use recipe_domain::recipe::RecipeVersionId;
+
+    use super::super::test_kit::{parameter_path, post_htmx};
+    use crate::pages::recipes::test_world::recipe_world;
+    use crate::pages::test_helpers::field_value;
+    use crate::test_support::plant::{APPROVED_ID, POLISH, World, main_of, seed_cycle, struct_id};
+    use crate::test_support::recipes::earlier_name_world::{ZONE_KEY, seed_zone_of_type};
+
+    /// The value input of the grid of a primitive type.
+    const GRID_INPUT: &str = "name=\"value\"";
+
+    /// Seed the struct cycle and `ZONE` of its type on the draft 3 of `R-100`.
+    fn world_with_broken_zone() -> World {
+        let world = recipe_world();
+        seed_cycle(&world);
+        seed_zone_of_type(
+            &world.fixture,
+            world.ids.draft,
+            struct_id(1),
+            serde_json::json!({"beta": {}}).into(),
+        );
+        world
+    }
+
+    /// The definition fields that both posts of the repair send, with the given `row_version`.
+    fn definition_pairs(row_version: &str) -> Vec<(&str, &str)> {
+        vec![
+            ("row_version", row_version),
+            ("unit_path", "U1"),
+            ("tag", "ZONE"),
+            ("name_en", "ZONE"),
+            ("description_en", "A parameter of the press line"),
+            ("type", "INT"),
+            ("s7_address", "DB6.DBW0"),
+            ("ordinal", "20"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn the_engineer_gets_the_definition_form_without_a_grid_and_repairs_the_type() {
+        let world = world_with_broken_zone();
+        let path = parameter_path(ZONE_KEY, "");
+        let page = world.get_en(&world.engineer, &path).await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+        let main = main_of(&page.body);
+        assert!(main.contains("id=\"parameter-edit-form\""), "{main}");
+        assert!(!main.contains(GRID_INPUT), "{main}");
+        assert!(!main.contains("name=\"value_type\""), "{main}");
+        let before = world.fixture.snapshot();
+        let row_version = field_value(main, "row_version");
+        let pairs = definition_pairs(row_version.as_str());
+        let first = post_htmx(&world, &parameter_path(ZONE_KEY, "/definition"), &pairs).await;
+        assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+        assert!(first.body.contains(GRID_INPUT), "{}", first.body);
+        assert_eq!(field_value(&first.body, "value_type"), "INT");
+        assert_eq!(world.fixture.snapshot(), before);
+
+        let first_row_version = field_value(&first.body, "row_version");
+        let first_value_type = field_value(&first.body, "value_type");
+        let mut second_pairs = definition_pairs(first_row_version.as_str());
+        second_pairs.push(("value_type", first_value_type.as_str()));
+        second_pairs.push(("value", "0"));
+        let second = post_htmx(
+            &world,
+            &parameter_path(ZONE_KEY, "/definition"),
+            &second_pairs,
+        )
+        .await;
+        assert_eq!(second.status, StatusCode::OK, "{}", second.body);
+        assert!(
+            second.body.contains("Parameter ZONE is saved."),
+            "{}",
+            second.body
+        );
+
+        let after = world.get(&world.engineer, &path, &[POLISH]).await;
+        assert_eq!(after.status, StatusCode::OK, "{}", after.body);
+        let main = main_of(&after.body);
+        assert!(main.contains(GRID_INPUT), "{main}");
+        assert!(main.contains(&ZONE_KEY.to_string()), "{main}");
+        assert!(main.contains("id=\"translation-pl\""), "{main}");
+        assert!(main.contains("Strefa"), "{main}");
+    }
+
+    #[tokio::test]
+    async fn an_operator_gets_the_read_only_definition_without_a_grid() {
+        let world = world_with_broken_zone();
+        let page = world
+            .get_en(&world.operator, &parameter_path(ZONE_KEY, ""))
+            .await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+        let main = main_of(&page.body);
+        assert!(!main.contains("parameter-edit-form"), "{main}");
+        assert!(!main.contains("leaf-grid"), "{main}");
+        assert!(main.contains("ST_Alpha@1"), "{main}");
+    }
+
+    #[tokio::test]
+    async fn the_engineer_in_read_only_mode_gets_the_read_only_definition_without_a_grid() {
+        let world = world_with_broken_zone();
+        world.fixture.state.read_only().set(true);
+        let page = world
+            .get_en(&world.engineer, &parameter_path(ZONE_KEY, ""))
+            .await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+        let main = main_of(&page.body);
+        assert!(!main.contains("parameter-edit-form"), "{main}");
+        assert!(!main.contains("leaf-grid"), "{main}");
+        assert!(main.contains("ST_Alpha@1"), "{main}");
+    }
+
+    #[tokio::test]
+    async fn an_approved_version_shows_the_read_only_definition_without_a_grid() {
+        let world = recipe_world();
+        seed_cycle(&world);
+        seed_zone_of_type(
+            &world.fixture,
+            RecipeVersionId::from(APPROVED_ID),
+            struct_id(1),
+            serde_json::json!({"beta": {}}).into(),
+        );
+        let path = format!("/recipes/R-100/versions/2/parameters/{ZONE_KEY}");
+        let page = world.get_en(&world.engineer, &path).await;
+        assert_eq!(page.status, StatusCode::OK, "{}", page.body);
+        let main = main_of(&page.body);
+        assert!(!main.contains("parameter-edit-form"), "{main}");
+        assert!(!main.contains("leaf-grid"), "{main}");
+        assert!(main.contains("ST_Alpha@1"), "{main}");
+    }
+}

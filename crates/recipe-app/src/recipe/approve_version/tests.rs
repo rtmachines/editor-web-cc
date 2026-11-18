@@ -413,3 +413,26 @@ async fn an_operator_is_forbidden_with_one_event_and_no_transaction() {
     assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
     assert!(fixture.store.journal().is_empty());
 }
+
+#[tokio::test]
+async fn two_stored_parameters_of_one_tag_give_db_008_after_a_second_root_read() {
+    let fixture = Fixture::new();
+    seed_with(
+        &fixture,
+        PLATFORM,
+        &[
+            parameter_on(PLATFORM, 1, "T1", uid(102), 0),
+            parameter_on(PLATFORM, 2, "T1", uid(102), 0),
+        ],
+    );
+    let error = run(&fixture, 1, 1, false).await.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert_eq!(
+        fixture.store.journal(),
+        vec![
+            JournalEntry::Begin(Isolation::ReadOnly),
+            JournalEntry::Begin(Isolation::ReadOnly),
+        ]
+    );
+    assert!(fixture.store.audit_entries().is_empty());
+}

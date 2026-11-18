@@ -80,13 +80,20 @@ impl MemoryTransaction {
 #[async_trait]
 impl TypeCatalog for MemoryTransaction {
     async fn type_rows(&mut self, machine: MachineId) -> Result<Vec<PlcType>, StorageError> {
-        Ok(self
+        let due = self.take_type_row_duplicates();
+        let mut rows: Vec<PlcType> = self
             .state()
             .types
             .values()
             .filter(|row| row.plc_type.machine().is_none_or(|owner| owner == machine))
             .map(|row| row.plc_type.clone())
-            .collect())
+            .collect();
+        for id in due {
+            if let Some(kept) = rows.iter().find(|row| row.id() == id).cloned() {
+                rows.push(kept);
+            }
+        }
+        Ok(rows)
     }
 
     async fn type_usage(

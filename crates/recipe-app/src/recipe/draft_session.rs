@@ -1,17 +1,17 @@
 //! Steps 2 to 7 of design D10 for the eight draft commands (`data-model.md` section 6).
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, DiffAction};
-use recipe_domain::plant::{PlatformTypes, TypeTrees};
+use recipe_domain::plant::{MachineId, PlatformTypes, PlcPlatform, PlcType, TypeTrees};
 use recipe_domain::recipe::{
-    Draft, Optimistic, ParameterId, ParameterKey, RecipeError, RecipeId, RecipeVersionId,
-    ReferenceNumber,
+    Draft, DraftError, Optimistic, ParameterId, ParameterKey, RecipeError, RecipeId,
+    RecipeVersionId, ReferenceNumber, StoredDefect,
 };
 
 use super::resolve::{ResolvedVersion, resolve_version};
 use crate::audit::StateDiff;
 use crate::auth::{CurrentUser, RequestMeta};
 use crate::context::{AppContext, audit_context};
-use crate::error::{AppError, Missing, conflict};
+use crate::error::{AppError, StorageError, conflict};
 use crate::ports::{Isolation, Locked, NonEmpty, Transaction};
 
 /// The URL values and the row version that every draft command carries.
@@ -106,8 +106,8 @@ async fn lock_machine(
         .lock_machine_shared(resolved.machine)
         .await?
         .map(|_| ())
-        .ok_or(AppError::NotFound {
-            entity: Missing::MachineId(resolved.machine),
+        .ok_or_else(|| {
+            StorageError::invariant("machine row missing after the version lookup").into()
         })
 }
 
@@ -115,15 +115,12 @@ async fn lock_machine(
 async fn lock_live_recipe(
     tx: &mut dyn Transaction,
     resolved: ResolvedVersion,
-    target: DraftTarget<'_>,
 ) -> Result<(), AppError> {
     let Locked { state: recipe, .. } = tx
         .recipes()
         .lock_recipe(resolved.recipe)
         .await?
-        .ok_or_else(|| AppError::NotFound {
-            entity: Missing::Recipe(target.reference.clone()),
-        })?;
+        .ok_or_else(|| StorageError::invariant("recipe row missing after the version lookup"))?;
     if recipe.is_deleted() {
         return Err(RecipeError::RecipeDeleted {
             reference: recipe.reference().clone(),
@@ -143,9 +140,7 @@ async fn lock_current_draft(
         .drafts()
         .lock_draft(resolved.version)
         .await?
-        .ok_or_else(|| AppError::NotFound {
-            entity: Missing::version(target.reference, target.number),
-        })?;
+        .ok_or_else(|| StorageError::invariant("draft row missing after the version lookup"))?;
     let draft = Draft::load(stored)?;
     let actual = draft.row_version();
     let outcome = if actual == target.expected_row_version {
@@ -160,13 +155,30 @@ async fn lock_current_draft(
     Ok(draft)
 }
 
+/// Collect the type rows that the database stored for a machine.
+///
+/// A rule fault of the stored rows is a defect of stored data, not a fault of the request.
+/// The function maps it to `E-DB-008` through a [`StoredDefect`] without a key (ADR-0195).
+///
+/// # Errors
+///
+/// Returns `AppError::Storage` with `E-DB-008` when the rows break a rule of the catalog.
+pub(crate) fn collect_stored_types(
+    machine: MachineId,
+    platform: PlcPlatform,
+    rows: Vec<PlcType>,
+) -> Result<PlatformTypes, AppError> {
+    PlatformTypes::collect(machine, platform, rows)
+        .map_err(|error| DraftError::Stored(Box::new(StoredDefect::of_part(error))).into())
+}
+
 /// Read the type rows of the machine and resolve the tree of every parameter type.
 async fn resolve_trees(
     tx: &mut dyn Transaction,
     draft: &Draft,
 ) -> Result<(TypeTrees, PlatformTypes), AppError> {
     let rows = tx.types().type_rows(draft.machine()).await?;
-    let types = PlatformTypes::collect(draft.machine(), draft.platform(), rows)?;
+    let types = collect_stored_types(draft.machine(), draft.platform(), rows)?;
     let trees = TypeTrees::resolve(
         draft
             .parameters()
@@ -186,11 +198,13 @@ impl OpenDraft {
     ///
     /// # Errors
     ///
-    /// Returns `NotFound` (`E-WEB-005`) when the recipe, the version, or the machine is missing.
+    /// Returns `NotFound` (`E-WEB-005`) when the first read finds no recipe or version for the URL.
+    /// Returns `AppError::Storage` with `E-DB-008` when a lock finds no machine, recipe, or draft
+    /// row that the first read found.
     /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted.
     /// Returns `RecipeError::VersionNotEditable` (`E-RCP-002`) when the version is not a live draft.
     /// Returns `AppError::ConcurrentEdit` (`E-WEB-001`) when the row version is stale.
-    /// Returns a `PlantError` when the type rows break a rule of the catalog.
+    /// Returns `AppError::Storage` with `E-DB-008` when the type rows break a rule of the catalog.
     /// Returns `AppError::Storage` when the database fails.
     pub(crate) async fn open(
         ctx: &AppContext,
@@ -200,7 +214,7 @@ impl OpenDraft {
         let resolved = resolve_version(ctx, target.reference, target.number).await?;
         let mut tx = ctx.uow.begin(Isolation::ReadCommitted).await?;
         lock_machine(tx.as_mut(), resolved, lock).await?;
-        lock_live_recipe(tx.as_mut(), resolved, target).await?;
+        lock_live_recipe(tx.as_mut(), resolved).await?;
         let draft = lock_current_draft(tx.as_mut(), resolved, target).await?;
         let (trees, types) = resolve_trees(tx.as_mut(), &draft).await?;
         Ok(Self {
@@ -285,4 +299,8 @@ pub(crate) fn parameter_diff_entry(
 }
 
 #[cfg(test)]
+mod missing_row_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod type_rows_tests;

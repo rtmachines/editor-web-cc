@@ -20,7 +20,7 @@ use super::rows::{
     check_violation, corrupt_rows, duplicate, illegal_transition, missing_reference, missing_row,
     version_not_live_draft,
 };
-use super::{LockMode, MemoryState, MemoryTransaction, WriteKind};
+use super::{LockMode, MemoryState, MemoryTransaction, MissingRow, WriteKind};
 use crate::error::{PARAMETER_TAG_UNIQUE, StorageError};
 use crate::ports::{DraftRepository, RowImage};
 
@@ -256,6 +256,9 @@ impl DraftRepository for MemoryTransaction {
     ) -> Result<Option<StoredDraft>, StorageError> {
         self.refuse_row_lock_for_update()?;
         self.refresh_after_lock()?;
+        if self.take_missing(MissingRow::Draft) {
+            return Ok(None);
+        }
         let stored = stored_draft(self.state(), version)?;
         if let Some(draft) = &stored {
             self.lock(VERSION_TABLE, LockMode::ForUpdate, &version.to_string());

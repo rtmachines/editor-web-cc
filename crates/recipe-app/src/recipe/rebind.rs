@@ -3,14 +3,14 @@
 use std::collections::BTreeMap;
 
 use recipe_domain::audit::DiffAction;
-use recipe_domain::plant::{LeafPath, PlatformTypes, PlcTypeId, TypeTrees};
+use recipe_domain::plant::{LeafPath, PlcTypeId, TypeTrees};
 use recipe_domain::recipe::{
     MemberValue, ParameterKey, RebindPlan, RebindRequest, ReferenceNumber,
 };
 
 use self::new_types::{ensure_new_types, plan_mismatch};
 use super::draft_session::{
-    DraftOutput, DraftTarget, MachineLock, OpenDraft, parameter_diff_entry,
+    DraftOutput, DraftTarget, MachineLock, OpenDraft, collect_stored_types, parameter_diff_entry,
 };
 use crate::audit::rebind_diff;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
@@ -70,7 +70,16 @@ impl RebindTypeRevision {
     /// Returns `AppError::ConcurrentEdit` (`E-WEB-001`) when the row version is stale.
     /// Returns `RecipeError::RebindTargetInvalid` (`E-RCP-052`) for a target that the rules reject.
     /// Returns one list of `RebindNeedsValue` (`E-RCP-028`) and `RebindDropsLimit` (`E-RCP-029`).
-    /// Returns `RecipeError::ValueShapeMismatch` (`E-RCP-005`) for a sent value that does not fit.
+    /// Returns one of these domain errors:
+    /// - `RecipeError::ValueShapeMismatch` (`E-RCP-005`) for a sent value that does not fit.
+    /// - `E-RCP-055` for a sent number with too many significant digits.
+    /// - `E-RCP-021`, `E-RCP-022`, `E-RCP-056`, `E-RCP-057`, or `E-RCP-058` for a budget, an
+    ///   address overlap, or a data block limit of a rebound parameter.
+    /// - `E-PLT-013` when the trees belong to another machine or platform.
+    /// - `AppError::AuditWriteFailed` when the audit write of the commit fails.
+    ///
+    /// Returns `AppError::Storage` with `E-DB-008` when a stored part breaks the earlier rule
+    /// set (ADR-0195).
     /// Returns `PlantError::TypeTooLarge` (`E-PLT-018`) for a target tree above a size limit.
     /// On an S7 platform, it also returns `E-PLT-018` with `TypeLimit::S7Nesting` and the text of
     /// the resulting type of a moved parameter above the S7 count of 8 levels (ADR-0179 (f)).
@@ -132,7 +141,7 @@ impl RebindTypeRevision {
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::Shared).await?;
         let machine = open.draft.machine();
         let rows = open.tx.types().type_rows(machine).await?;
-        let types = PlatformTypes::collect(machine, open.draft.platform(), rows)?;
+        let types = collect_stored_types(machine, open.draft.platform(), rows)?;
         // A target without a row stays out of the trees, so the domain reports `TargetNotFound`.
         let known_to = types.get(input.to).map(|_| input.to);
         let trees = TypeTrees::resolve(
@@ -172,8 +181,14 @@ pub(super) mod fixtures;
 #[cfg(test)]
 mod kept_member_tests;
 #[cfg(test)]
+mod stored_s7_tests;
+#[cfg(test)]
+mod stored_value_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod texts_tests;
+#[cfg(test)]
+mod type_rows_tests;
 #[cfg(test)]
 mod write_tests;

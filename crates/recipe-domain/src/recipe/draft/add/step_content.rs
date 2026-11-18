@@ -2,7 +2,7 @@
 
 use crate::plant::{LeafPath, PlantError, RuleSet, TypeTree, TypeTrees};
 use crate::recipe::draft::{BudgetCounts, Draft, check_budgets};
-use crate::recipe::value::LeafFault;
+use crate::recipe::value::{LeafFault, limit_conflicts};
 use crate::recipe::{
     DraftError, Expected, LimitFault, LimitList, ParameterTag, ParameterValue, PrecisionField,
     ProcessLimit, RecipeError, RecipeErrors, StoredLimit, StoredValue, ValueFault, ValueFaults,
@@ -120,6 +120,27 @@ pub(in crate::recipe) fn stored_limits_under(
         .map(|row| ProcessLimit::from_stored(row, tree, rules))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|fault| limit_error(tag, fault))
+}
+
+/// Check that no two stored limit rows of a parameter cover one leaf.
+///
+/// Two rows on one leaf cannot come from a request. The caller treats the fault as a storage
+/// defect.
+///
+/// # Errors
+///
+/// Returns `E-RCP-019` for the first leaf that two rows cover. Returns `E-RCP-005` when a row
+/// does not match the tree.
+pub(in crate::recipe) fn stored_limit_conflict(
+    tag: &ParameterTag,
+    limits: &[ProcessLimit],
+    tree: &TypeTree,
+) -> Result<(), RecipeError> {
+    let conflicts = limit_conflicts(limits, tree).map_err(|fault| value_error(tag, fault))?;
+    conflicts
+        .into_iter()
+        .next()
+        .map_or(Ok(()), |fault| Err(value_error(tag, fault)))
 }
 
 /// Check the stored value of a parameter against its type tree under the earlier rule set.

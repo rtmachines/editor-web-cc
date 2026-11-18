@@ -3,12 +3,13 @@
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{LeafPath, PlcPlatform, UnitPath};
-use recipe_domain::recipe::{ParameterKey, RuleField};
+use recipe_domain::recipe::{ParameterKey, RuleField, StoredParameter};
+use serde_json::json;
 
 use super::parameter_form_tests::{DUE_KEY, LATE_KEY, OFFSET_KEY, RATE_KEY, rule_fault_world};
 use super::parameters::{
-    GetLimits, GetParameter, GetTranslations, LimitsView, ParameterRef, ParameterView,
-    TranslationsView,
+    GetLimits, GetParameter, GetTranslations, LimitsView, ListParameters, ListParametersInput,
+    ParameterList, ParameterRef, ParameterView, TranslationsView,
 };
 use super::parameters_tests::{TYPE_TEXTS, typed_world};
 use super::test_world::seed_users;
@@ -17,7 +18,8 @@ use crate::context::UseCase;
 use crate::error::{AppError, Missing};
 use crate::memory::JournalEntry;
 use crate::memory::fixtures::{
-    Fixture, actor, meta, parameter_on, pkey, reference, scenarios, uid, vid,
+    Fixture, STRUCT_CYCLE_ROOT, actor, meta, parameter_on, pkey, reference, scenarios,
+    seed_struct_cycle, tid, uid, vid,
 };
 use crate::ports::Isolation;
 
@@ -94,8 +96,9 @@ async fn get_parameter_returns_the_parameter_its_tree_the_unit_and_the_platform(
 
     assert_eq!(view.parameter.key, pkey(1));
     assert_eq!(view.parameter.tag.to_string(), "SPEED");
-    assert_eq!(view.tree.leaf_count(), 1);
-    assert_eq!(view.tree.root_type(), view.parameter.plc_type);
+    let tree = view.tree.as_ref().unwrap();
+    assert_eq!(tree.leaf_count(), 1);
+    assert_eq!(tree.root_type(), view.parameter.plc_type);
     assert_eq!(view.unit_path, UnitPath::parse("U1").unwrap());
     assert_eq!(view.machine.platform(), PlcPlatform::TwinCat3);
     assert_eq!(view.detail.row_version, 1);
@@ -109,7 +112,7 @@ async fn get_parameter_gives_the_type_text_of_each_kind_of_type() {
     for (key, text) in TYPE_TEXTS {
         let view = parameter(&fixture, Role::Operator, key).await.unwrap();
 
-        assert_eq!(view.type_text, text, "key {key}");
+        assert_eq!(view.type_text.as_deref(), Some(text), "key {key}");
     }
 }
 
@@ -191,7 +194,7 @@ async fn get_limits_returns_the_type_tree_that_the_limits_grid_needs() {
         let view = limits(&fixture, Role::Operator, key).await.unwrap();
         let shown = parameter(&fixture, Role::Operator, key).await.unwrap();
 
-        assert_eq!(view.tree, shown.tree, "key {key}");
+        assert_eq!(Some(&view.tree), shown.tree.as_ref(), "key {key}");
         assert_eq!(view.tree.root_type(), shown.parameter.plc_type, "key {key}");
     }
 }
@@ -261,4 +264,80 @@ async fn a_parameter_of_a_deleted_recipe_is_refused_except_for_the_role_that_res
     assert_eq!(operator_translations.code(), ErrorCode::RCP_012);
     assert!(administrator.recipe.is_deleted());
     assert_eq!(administrator.parameter.key, pkey(1));
+}
+
+/// The key of the parameter of a type that does not resolve.
+const BROKEN_KEY: u128 = 5;
+/// The type number that no stored row holds.
+const MISSING_ROOT: u128 = 999;
+
+/// The draft `R-1` on `M1` with `BROKEN` (key 5) of the type `root`, and the healthy `SPEED`.
+fn broken_world(root: u128) -> Fixture {
+    let fixture = scenarios::zone_draft();
+    seed_users(&fixture);
+    seed_struct_cycle(&fixture, (1, PlcPlatform::TwinCat3));
+    let broken = StoredParameter {
+        plc_type: tid(root),
+        value: json!({"x": 1}).into(),
+        limits: Vec::new(),
+        ..parameter_on(PlcPlatform::TwinCat3, BROKEN_KEY, "BROKEN", uid(101), 1)
+    };
+    fixture.store.seed_parameter(vid(101), &broken);
+    fixture
+}
+
+async fn list(fixture: &Fixture) -> ParameterList {
+    let input = ListParametersInput {
+        reference: reference("R-1"),
+        number: 1,
+        unit: None,
+        page: 0,
+        lang: None,
+    };
+    ListParameters::new(fixture.context())
+        .execute(&actor(Role::Operator), &meta(), input)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn get_parameter_of_a_struct_cycle_gives_a_view_without_a_tree() {
+    let fixture = broken_world(STRUCT_CYCLE_ROOT);
+
+    let view = parameter(&fixture, Role::Operator, BROKEN_KEY)
+        .await
+        .unwrap();
+
+    assert!(view.tree.is_none());
+    assert!(view.type_text.is_some(), "a struct has a type text");
+    assert!(view.rule_faults.is_empty());
+}
+
+#[tokio::test]
+async fn get_parameter_of_a_missing_root_row_gives_a_view_without_a_type_text() {
+    let fixture = broken_world(MISSING_ROOT);
+
+    let view = parameter(&fixture, Role::Operator, BROKEN_KEY)
+        .await
+        .unwrap();
+
+    assert!(view.tree.is_none());
+    assert!(view.type_text.is_none());
+    assert!(view.rule_faults.is_empty());
+}
+
+#[tokio::test]
+async fn list_parameters_keeps_a_healthy_row_next_to_a_missing_root_row() {
+    let fixture = broken_world(MISSING_ROOT);
+
+    let list = list(&fixture).await;
+
+    let broken = pkey(BROKEN_KEY);
+    assert!(!list.value_texts.contains_key(&broken));
+    assert!(!list.rule_faults.contains_key(&broken));
+    let missing = list.rows.iter().find(|row| row.key == broken).unwrap();
+    assert!(!list.type_texts.contains_key(&missing.plc_type));
+    let healthy = list.rows.iter().find(|row| row.key == pkey(11)).unwrap();
+    assert!(list.type_texts.contains_key(&healthy.plc_type));
+    assert_eq!(list.rows.len(), 2);
 }

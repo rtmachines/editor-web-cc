@@ -3,11 +3,11 @@
 use uuid::Uuid;
 
 use super::super::support::{
-    key, parameter, reference, stored_draft, stored_draft_with, tag, user,
+    assert_stored, key, parameter, reference, stored_draft, stored_draft_with, tag, user,
 };
 use crate::error_codes::{ErrorCode, REGISTRY};
 use crate::plant::{PlcPlatform, PlcTypeId};
-use crate::recipe::{Draft, ParameterChange, RecipeError, VersionState, VersionStatus};
+use crate::recipe::{Draft, DraftError, ParameterChange, RecipeError, VersionState, VersionStatus};
 
 /// A type identifier that no tree resolves.
 fn unknown_type() -> PlcTypeId {
@@ -33,11 +33,11 @@ fn a_discarded_draft_gives_e_rcp_002_with_status_draft() {
     assert_eq!(error.code(), ErrorCode::RCP_002);
     assert!(matches!(
         error,
-        RecipeError::VersionNotEditable {
+        DraftError::Recipe(RecipeError::VersionNotEditable {
             number: 3,
             status: VersionStatus::Draft,
             ..
-        }
+        })
     ));
 }
 
@@ -50,6 +50,7 @@ fn an_approved_version_gives_e_rcp_002_with_status_approved() {
         error.to_string(),
         "Version 3 of recipe R-1 is approved. Create a new draft to make changes."
     );
+    assert!(matches!(error, DraftError::Recipe(_)));
 }
 
 #[test]
@@ -59,10 +60,10 @@ fn a_retired_version_gives_e_rcp_002_with_status_retired() {
     assert_eq!(error.code(), ErrorCode::RCP_002);
     assert!(matches!(
         error,
-        RecipeError::VersionNotEditable {
+        DraftError::Recipe(RecipeError::VersionNotEditable {
             status: VersionStatus::Retired,
             ..
-        }
+        })
     ));
 }
 
@@ -70,11 +71,7 @@ fn a_retired_version_gives_e_rcp_002_with_status_retired() {
 fn a_duplicate_tag_gives_e_rcp_014_with_the_tag_of_the_second_parameter() {
     let stored = stored_draft(vec![parameter(1, "SPEED", 5), parameter(2, "SPEED", 5)]);
     let error = Draft::load(stored).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::RCP_014);
-    assert_eq!(
-        error.to_string(),
-        "Parameter tag SPEED is already used in version 3."
-    );
+    assert_stored(&error, Some(key(2)), ErrorCode::RCP_014);
 }
 
 #[test]
@@ -83,10 +80,8 @@ fn a_duplicate_key_gives_e_rcp_014_with_the_tag_of_the_second_parameter() {
     second.key = key(1);
     let stored = stored_draft(vec![parameter(1, "SPEED", 5), second]);
     let error = Draft::load(stored).unwrap_err();
-    assert!(matches!(
-        error,
-        RecipeError::DuplicateTag { ref tag, number: 3 } if tag.as_str() == "TEMP"
-    ));
+    // The second row has the key of the first row, so the defect names that key.
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_014);
 }
 
 #[test]
@@ -180,9 +175,5 @@ fn two_parameters_with_one_identifier_give_e_rcp_014_with_the_second_tag() {
     let mut second = parameter(2, "TEMP", 5);
     second.id = first.id;
     let error = Draft::load(stored_draft(vec![first, second])).unwrap_err();
-    assert_eq!(error.code(), ErrorCode::RCP_014);
-    assert!(matches!(
-        error,
-        RecipeError::DuplicateTag { tag, number: 3 } if tag.as_str() == "TEMP"
-    ));
+    assert_stored(&error, Some(key(2)), ErrorCode::RCP_014);
 }

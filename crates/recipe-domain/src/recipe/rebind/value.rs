@@ -6,11 +6,14 @@ use serde_json::{Map, Value};
 
 use super::build::{build_value, visit_elements};
 use super::level::{StructLevel, kept_members, struct_level};
+use super::map::MapFault;
 use super::{MemberValue, RebindRequest};
 use crate::plant::{LeafPath, LeafSegment, MemberName, TypeNode, TypeTree, extended};
 use crate::recipe::draft::{leaf_error, stored_value};
 use crate::recipe::value::{request_leaf, request_text};
-use crate::recipe::{Expected, ParameterKey, ParameterTag, RecipeError, StoredValue};
+use crate::recipe::{
+    Expected, ParameterKey, ParameterTag, ParameterValue, RecipeError, StoredValue,
+};
 
 /// The inputs that map the value of one parameter.
 pub(super) struct ValueMapping<'a> {
@@ -19,7 +22,7 @@ pub(super) struct ValueMapping<'a> {
     pub(super) request: &'a RebindRequest,
     pub(super) old_tree: &'a TypeTree,
     pub(super) new_tree: &'a TypeTree,
-    pub(super) old_value: &'a StoredValue,
+    pub(super) old_value: &'a ParameterValue,
 }
 
 /// Map the stored value of a parameter to the planned tree.
@@ -29,37 +32,41 @@ pub(super) struct ValueMapping<'a> {
 /// The new value must pass the check against the planned tree. That check reads the kept members
 /// under the earlier rule set, because the rebind does not write them (ADR-0120 (d)).
 ///
+/// Only a bug reaches the defect of the tree shape and the defect of the final check. A kept
+/// member keeps its shape, and a new leaf passes the current rule set. That set lies inside the
+/// earlier one.
+///
 /// # Errors
 ///
-/// Returns every entry of the parameter in leaf order, then one entry per sent path that is no
-/// new leaf. A missing value is `E-RCP-028`. A bad value, a value of a path that is no new leaf,
-/// and a stored value of the wrong shape are `E-RCP-005`. A new number with too many significant
-/// digits is `E-RCP-055`.
-pub(super) fn map_value(input: &ValueMapping<'_>) -> Result<StoredValue, Vec<RecipeError>> {
+/// Returns the defect of the stored value when it has not the shape of the tree or fails under
+/// the planned tree. The caller parsed the old value under the old tree already. Otherwise it
+/// returns every entry of the parameter in leaf order, then one entry per sent path that is no
+/// new leaf. A missing value is `E-RCP-028`. A bad value and a value of a path that is no new
+/// leaf are `E-RCP-005`. A new number with too many significant digits is `E-RCP-055`.
+pub(super) fn map_value(input: &ValueMapping<'_>) -> Result<StoredValue, MapFault> {
     let tag = input.tag;
-    let old = stored_value(tag, input.old_value, input.old_tree).map_err(|error| vec![error])?;
     let (Some(source), Some(target)) = (struct_level(input.old_tree), struct_level(input.new_tree))
     else {
-        return Err(vec![shape_error(tag)]);
+        return Err(MapFault::Defect(shape_error(tag)));
     };
     let kept = kept_members(&source, &target);
-    let mut json = old.as_json().clone();
+    let mut json = input.old_value.as_json().clone();
     let mut found = Found::default();
     let is_shaped = visit_elements(&mut json, &source.chain, &mut |element, prefix| {
         let mapped = map_element(input, (&target, &kept), element, prefix, &mut found);
         *element = mapped;
     });
     if is_shaped.is_none() {
-        return Err(vec![shape_error(tag)]);
+        return Err(MapFault::Defect(shape_error(tag)));
     }
     let mut entries = found.entries;
     entries.extend(unknown_paths(input, &found.used));
     if !entries.is_empty() {
-        return Err(entries);
+        return Err(MapFault::Entries(entries));
     }
     stored_value(tag, &StoredValue::from(json), input.new_tree)
         .map(|value| value.to_stored())
-        .map_err(|error| vec![error])
+        .map_err(MapFault::Defect)
 }
 
 /// The result of the walk over the new leaves: the entries and the leaf paths of the new leaves.

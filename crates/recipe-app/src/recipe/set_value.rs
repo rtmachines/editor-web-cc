@@ -60,6 +60,11 @@ impl SetParameterValue {
     /// Returns `AppError::ConcurrentEdit` (`E-WEB-001`) when the row version is stale.
     /// Returns `RecipeError::ParameterNotFound` (`E-RCP-051`) for an unknown key.
     /// Returns `E-RCP-005`, `E-RCP-004`, or `E-RCP-021` when the value or the draft breaks a rule.
+    /// Returns `E-RCP-055` for a number with too many significant digits.
+    /// Returns `E-RCP-022` for an address overlap that holds the changed parameter.
+    /// Returns `E-PLT-013` for a type that the platform does not hold.
+    /// Returns `AppError::Storage` with `E-DB-008` when a stored part breaks the earlier rule
+    /// set (ADR-0195).
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
@@ -98,6 +103,10 @@ impl SetParameterValue {
 #[cfg(test)]
 mod adr_0179_tests;
 #[cfg(test)]
+mod stored_conflict_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod texts_tests;
+#[cfg(test)]
+mod unresolved_type_tests;

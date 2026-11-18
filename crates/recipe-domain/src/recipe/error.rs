@@ -5,7 +5,7 @@ use crate::identity::Login;
 use crate::plant::{LeafPath, PlantError, PlcPlatform, S7Address, S7Width, TypeName};
 use crate::recipe::{
     Expected, LangCode, ParameterKey, ParameterTag, RebindTargetReason, ReferenceNumber,
-    SnapshotItem, VersionStatus,
+    SnapshotItem, StoredDefect, VersionStatus,
 };
 
 use std::fmt;
@@ -616,6 +616,9 @@ pub enum DraftError {
     /// A list of errors of the Recipe Management context.
     #[error(transparent)]
     List(#[from] RecipeErrors),
+    /// A stored part that breaks the earlier rule set, a defect of the storage (ADR-0195).
+    #[error("A stored part is broken ({}).", .0.code())]
+    Stored(Box<StoredDefect>),
 }
 
 impl DraftError {
@@ -626,6 +629,7 @@ impl DraftError {
             Self::Recipe(error) => error.code(),
             Self::Plant(error) => error.code(),
             Self::List(errors) => errors.code(),
+            Self::Stored(defect) => defect.code(),
         }
     }
 }

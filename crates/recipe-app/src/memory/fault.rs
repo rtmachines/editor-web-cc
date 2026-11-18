@@ -44,6 +44,19 @@ pub enum Fault {
     UnknownMissingReference,
 }
 
+/// A lookup that can find no row on demand (`MemoryStore::miss_next`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MissingRow {
+    /// The call `PlantRepository::lock_machine_shared`.
+    MachineShared,
+    /// The call `RecipeRepository::lock_recipe`.
+    Recipe,
+    /// The call `DraftRepository::lock_draft`.
+    Draft,
+    /// The call `UnitLookup::live_units`.
+    LiveUnits,
+}
+
 /// The place where a queued fault fires (`MemoryStore::fail_next`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaultPoint {

@@ -157,6 +157,21 @@ fn ordered_faults_under(
     Ok(faults)
 }
 
+/// List each leaf that two of the `limits` cover, in the order of the limits.
+///
+/// The check needs no value. A caller uses it for stored rows, where such a pair is a storage
+/// defect.
+///
+/// # Errors
+///
+/// Returns [`ValueFault::WrongTree`] when a limit has a path that `tree` does not hold.
+pub(in crate::recipe) fn limit_conflicts(
+    limits: &[ProcessLimit],
+    tree: &TypeTree,
+) -> Result<Vec<ValueFault>, ValueFault> {
+    covered_leaves(limits, tree).map(|(_, conflicts)| conflicts)
+}
+
 /// Map each concrete leaf path to the limit that covers it, and list each leaf that two limits
 /// cover.
 fn covered_leaves<'a>(

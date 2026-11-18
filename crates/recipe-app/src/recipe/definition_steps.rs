@@ -7,7 +7,7 @@ use recipe_domain::plant::{
 use recipe_domain::recipe::{ParameterTag, RecipeError};
 
 use super::draft_session::OpenDraft;
-use crate::error::{AppError, Missing, PARAMETER_TAG_UNIQUE, StorageError, map_storage};
+use crate::error::{AppError, PARAMETER_TAG_UNIQUE, StorageError, map_storage};
 use crate::plant::{DerivedTypes, derived_type_locks};
 
 /// The type of a definition command, and what the command needs to commit it.
@@ -32,7 +32,8 @@ pub(crate) struct ResolvedType {
 ///
 /// Returns `PlantError::UnitNotFound` (`E-PLT-020`) when the machine has no unit at `path`.
 /// Returns `PlantError::UnitArchived` (`E-PLT-009`) when the unit is archived.
-/// Returns `NotFound` when the machine row is missing, and `AppError::Storage` on a database failure.
+/// Returns `AppError::Storage` with `E-DB-008` when the machine row is missing, and with another
+/// code on a database failure.
 pub(crate) async fn lock_live_unit(
     open: &mut OpenDraft,
     path: &UnitPath,
@@ -48,9 +49,7 @@ pub(crate) async fn lock_live_unit(
         .units()
         .live_units(machine)
         .await?
-        .ok_or_else(|| AppError::NotFound {
-            entity: Missing::machine_id(machine),
-        })?;
+        .ok_or_else(|| StorageError::invariant("machine row missing after the unit lock"))?;
     Ok(units.require(path)?)
 }
 

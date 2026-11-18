@@ -160,12 +160,17 @@ pub(crate) async fn set_value(
     let sent = read_form(form, FieldSet::Value)?;
     let expected_row_version = sent_row_version(&sent)?;
     let view = read_parameter(ctx).await?;
+    let request_id = request.request_id();
+    let tree = view
+        .tree
+        .as_ref()
+        .ok_or(WebError::Internal { request_id })?;
     let input = SetParameterValueInput {
         reference: target.reference.clone(),
         number: target.number,
         expected_row_version,
         key: key_of(ctx)?,
-        value: ValueInput::Texts(sent.leaf_texts(&view.tree)?),
+        value: ValueInput::Texts(sent.leaf_texts(tree)?),
     };
     let result = SetParameterValue::new(state.identity().app().clone())
         .execute(request.auth()?.user(), &request.meta(), input)

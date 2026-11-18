@@ -12,8 +12,9 @@ use recipe_domain::plant::{
     TypeName, TypeTree, Unit, UnitPath,
 };
 use recipe_domain::recipe::{
-    Parameter, ParameterKey, Recipe, RecipeError, ReferenceNumber, RuleFault, StoredParameter,
-    VersionState, check_stored_parameter,
+    DraftError, Parameter, ParameterKey, Recipe, RecipeError, ReferenceNumber, RuleFault,
+    StoredDefect, StoredParameter, VersionState, check_stored_parameter,
+    is_stored_resolution_defect,
 };
 
 use super::parameters::{VersionScope, read_scope, text_of};
@@ -25,6 +26,7 @@ use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
 use crate::plant::is_refused_struct_name;
 use crate::ports::{Isolation, VersionDetail};
+use crate::recipe::draft_session::collect_stored_types;
 
 /// The parsed request of `GetParameterForm`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -91,7 +93,8 @@ fn refuse_deleted(recipe: &Recipe) -> Result<(), AppError> {
     Ok(())
 }
 
-/// Refuse a version that is not a live draft, because only a live draft gets the forms (ADR-0043 (k)).
+/// Refuse a version that is not a live draft, because only a live draft gets the forms
+/// (ADR-0043 (k)).
 fn require_live_draft(reference: &ReferenceNumber, detail: &VersionDetail) -> Result<(), AppError> {
     if detail.state == VersionState::LiveDraft {
         return Ok(());
@@ -118,7 +121,8 @@ fn require_live_unit(machine: &Machine, path: &UnitPath) -> Result<(), AppError>
     })
 }
 
-/// Read the version, the type rows, and the parameter of the key in one `RepeatableRead` transaction.
+/// Read the version, the type rows, and the parameter of the key in one
+/// `RepeatableRead` transaction.
 ///
 /// The transaction ends when the function returns.
 async fn read_form(ctx: &AppContext, input: &GetParameterFormInput) -> Result<FormReads, AppError> {
@@ -153,23 +157,60 @@ async fn read_form(ctx: &AppContext, input: &GetParameterFormInput) -> Result<Fo
 /// Check the stored `parameter` against the rules in force now and list its rule faults.
 ///
 /// The function runs `check_stored_parameter` on the type tree of the parameter. A new parameter
-/// has no faults.
+/// has no faults. With `repairs` set, a stored type that does not resolve gives no faults.
+/// The form then opens, so the user can repair the type (ADR-0195 (ab)).
 ///
 /// # Errors
 ///
-/// Returns `StorageError` (`E-DB-008`) when the parameter breaks the earlier rule set, because that
-/// is a defect of the storage. Returns the error of the type when the tree does not resolve.
+/// Returns `AppError::Storage` (`E-DB-008`) when the parameter breaks the earlier rule set.
+/// It also returns it when its stored type fails to resolve through its stored rows, because
+/// those are defects of the storage.
+/// Returns the error of the type (`E-PLT-013`) when the platform does not hold a member type.
 fn rule_faults_of(
     parameter: Option<&StoredParameter>,
     types: &PlatformTypes,
+    repairs: bool,
 ) -> Result<Arc<[RuleFault]>, AppError> {
     let Some(stored) = parameter else {
         return Ok(Arc::from(Vec::new()));
     };
-    let tree = TypeTree::resolve(stored.plc_type, types)?;
+    let tree = match TypeTree::resolve(stored.plc_type, types) {
+        Ok(tree) => tree,
+        Err(_) if repairs => return Ok(Arc::from(Vec::new())),
+        Err(error) if is_stored_resolution_defect(&error) => {
+            return Err(DraftError::Stored(Box::new(StoredDefect::of_parameter(
+                stored.key, error,
+            )))
+            .into());
+        }
+        Err(error) => return Err(error.into()),
+    };
     let faults = check_stored_parameter(&Parameter::from(stored.clone()), &tree)
         .map_err(|fault| StorageError::broken_stored_parameter(stored.key, fault))?;
     Ok(faults.into())
+}
+
+/// Return the type text of the stored parameter, or `None` when no parameter exists.
+///
+/// With `repairs`, a type that does not resolve gives `None`, so the form opens and the user can
+/// repair the type.
+///
+/// # Errors
+///
+/// Returns the error of `text_of` when the stored type has no type text and `repairs` is false.
+fn stored_type_text(
+    types: &PlatformTypes,
+    parameter: Option<&StoredParameter>,
+    repairs: bool,
+) -> Result<Option<String>, AppError> {
+    match parameter
+        .map(|stored| text_of(types, stored.plc_type))
+        .transpose()
+    {
+        Ok(text) => Ok(text),
+        Err(_) if repairs => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// Return the proposals of the type input, as `GetUdtForm` writes them (`plant/queries/types.rs`).
@@ -219,7 +260,8 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
 /// Prepares the form of a new parameter and the edit form of a parameter.
 ///
 /// The query solves one problem. The form needs the live units, the type proposals, and the
-/// parameter that it edits. It also needs the leaf rows of a type that the catalog may not hold yet.
+/// parameter that it edits. It also needs the leaf rows of a type that the catalog may not
+/// hold yet.
 /// The query reads in one `RepeatableRead` transaction and builds the preview in memory after it.
 /// So a request with `fields=1` writes nothing (ADR-0039 (h)). A deleted recipe has no form for
 /// any role. Only a live draft has a form (ADR-0043 (k)).
@@ -245,12 +287,25 @@ impl GetParameterForm {
     ///
     /// Returns `Forbidden` (`E-WEB-002`) with the command of the purpose when the role lacks its
     /// permission.
-    /// Returns `NotFound` (`E-WEB-005`) when the recipe, the version, the key, or the unit does not exist.
+    /// Returns `NotFound` (`E-WEB-005`) when the recipe, the version, the key, or the unit
+    /// does not exist.
     /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted.
-    /// Returns `RecipeError::VersionNotEditable` (`E-RCP-002`) when the version is not a live draft.
-    /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) or `TypeTooLarge` (`E-PLT-018`) for the type.
+    /// Returns `RecipeError::VersionNotEditable` (`E-RCP-002`) when the version is not a live
+    /// draft.
+    /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) or `TypeTooLarge` (`E-PLT-018`)
+    /// for the preview type. Returns `TypeCycle` (`E-PLT-005`) when the stored rows of the
+    /// preview type form a cycle.
+    /// Returns `DerivedTypeInvalid` for a stored member type that the platform does not hold.
     /// Returns `AppError::Storage` when the database fails.
-    /// Returns `StorageError` (`E-DB-008`) when the stored parameter breaks the earlier rule set.
+    /// Returns `AppError::Storage` (`E-DB-008`) when the stored parameter breaks the earlier rule
+    /// set.
+    /// It also returns `E-DB-008` for two type rows with one identifier.
+    /// For a stored type that does not resolve, it returns `E-DB-008`. Examples are a cycle, a size
+    /// above a limit, and a bad row shape.
+    /// For a stored type without a type text, it returns `E-DB-008`.
+    /// With the purpose `UpdateParameterDefinition`, a stored type that does not resolve gives the
+    /// form without rule faults. The form has no type text when none exists. Two type rows with one
+    /// identifier still give `E-DB-008`.
     /// A part that breaks only the current rule set gives a rule fault in `rule_faults`.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
@@ -271,15 +326,11 @@ impl GetParameterForm {
         if let Some(path) = &input.unit {
             require_live_unit(&machine, path)?;
         }
-        let types =
-            PlatformTypes::collect(machine.id(), machine.platform(), reads.rows.iter().cloned())?;
+        let types = collect_stored_types(machine.id(), machine.platform(), reads.rows.clone())?;
+        let repairs = input.purpose == ParameterFormPurpose::UpdateParameterDefinition;
         let choices = proposals(&types);
-        let type_text = reads
-            .parameter
-            .as_ref()
-            .map(|parameter| text_of(&types, parameter.plc_type))
-            .transpose()?;
-        let rule_faults = rule_faults_of(reads.parameter.as_ref(), &types)?;
+        let type_text = stored_type_text(&types, reads.parameter.as_ref(), repairs)?;
+        let rule_faults = rule_faults_of(reads.parameter.as_ref(), &types, repairs)?;
         let preview = input
             .type_expr
             .as_ref()

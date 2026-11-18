@@ -8,12 +8,15 @@ use recipe_domain::plant::{LiveUnits, MachineId, Unit, UnitId, UnitPath};
 use super::UNIT_TABLE;
 use crate::error::StorageError;
 use crate::memory::rows::corrupt;
-use crate::memory::{LockMode, MemoryTransaction};
+use crate::memory::{LockMode, MemoryTransaction, MissingRow};
 use crate::ports::UnitLookup;
 
 #[async_trait]
 impl UnitLookup for MemoryTransaction {
     async fn live_units(&mut self, machine: MachineId) -> Result<Option<LiveUnits>, StorageError> {
+        if self.take_missing(MissingRow::LiveUnits) {
+            return Ok(None);
+        }
         let found = self.state().try_machine(machine).map_err(corrupt)?;
         Ok(found.map(|machine| machine.live_units()))
     }

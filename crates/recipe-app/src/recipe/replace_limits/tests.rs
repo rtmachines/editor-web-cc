@@ -1,8 +1,8 @@
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{LeafPath, PlcPlatform};
-use recipe_domain::recipe::{LimitInput, LimitList};
+use recipe_domain::plant::{LeafPath, PlcPlatform, Primitive, S7Address};
+use recipe_domain::recipe::{LimitInput, LimitList, StoredParameter};
 use serde_json::json;
 
 use super::{ReplaceLimits, ReplaceLimitsInput};
@@ -284,4 +284,33 @@ async fn an_operator_is_forbidden_and_opens_no_transaction() {
     assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
     assert!(fixture.store.journal().is_empty());
     assert_nothing_written(&fixture);
+}
+
+/// A stored `DATE` value above the end of the earlier rule set is a storage defect (ADR-0195).
+#[tokio::test]
+async fn a_stored_date_value_outside_the_type_range_gives_db_008_and_writes_nothing() {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::S7_1500, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let date = fixture.seed_primitive_type(960, PlcPlatform::S7_1500, Primitive::Date);
+    let speed = StoredParameter {
+        plc_type: date,
+        value: json!(72_900).into(),
+        s7_address: Some(S7Address::parse("DB1.DBW0").unwrap()),
+        limits: Vec::new(),
+        ..parameter_on(PlcPlatform::S7_1500, 1, "SPEED", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(DRAFT_VERSION), &speed);
+    let rows = vec![row("", None, Some("100"), None)];
+    let error = ReplaceLimits::new(fixture.context())
+        .execute(&actor(Role::ProcessEngineer), &meta(), input(rows, 1))
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008, "{error}");
+    assert!(fixture.store.audit_entries().is_empty());
+    let parameters = stored_parameters(&fixture);
+    assert_eq!(parameters.len(), 1);
+    let stored = parameters.first().unwrap();
+    assert!(stored.limits.is_empty(), "the limits must stay");
+    assert_eq!(stored.value.as_json(), &json!(72_900));
 }

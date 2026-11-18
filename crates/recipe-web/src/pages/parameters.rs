@@ -190,6 +190,8 @@ mod remove_tests;
 #[cfg(test)]
 pub(crate) mod route_tests;
 #[cfg(test)]
+mod stored_s7_tests;
+#[cfg(test)]
 pub(crate) mod test_kit;
 #[cfg(test)]
 mod translation_tests;

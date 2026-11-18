@@ -26,7 +26,7 @@ pub use diff::{
 pub use draft::{
     ApprovalReady, BudgetCounts, DefinitionUpdate, Draft, LEAVES_PER_VERSION,
     LIMIT_ROWS_PER_VERSION, NewParameter, PARAMETERS_PER_VERSION, Parameter, ParameterChange,
-    Retype, StoredDraft, StoredParameter, check_budgets,
+    Retype, StoredDraft, StoredParameter, check_budgets, is_stored_resolution_defect,
 };
 pub(crate) use draft::{not_on_platform, overlap_partners};
 pub use error::{Budget, DraftError, PrecisionField, RecipeError, RecipeErrors, S7AccessReason};
@@ -36,7 +36,7 @@ pub use limit::{LimitFault, LimitInput, LimitList, LimitListReason, ProcessLimit
 
 pub use optimistic::Optimistic;
 pub use ordinal::{Ordinal, OrdinalReason};
-pub use read_check::{RuleFault, RuleField, StructureFault, check_stored_parameter};
+pub use read_check::{RuleFault, RuleField, StoredDefect, StructureFault, check_stored_parameter};
 pub use rebind::{
     ArrayShape, MemberValue, RebindLeaves, RebindPlan, RebindRequest, RebindTargetReason,
     rebind_new_leaves,

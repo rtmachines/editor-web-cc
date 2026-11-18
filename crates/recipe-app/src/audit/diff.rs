@@ -54,10 +54,13 @@ pub fn translation_diff(change: &ParameterChange) -> StateDiff {
 /// Build the diff of `ParameterDefinitionUpdated`.
 ///
 /// The diff holds the changed columns. A retype adds the changed value leaves and limits.
+/// A type change from a type without a tree writes the whole old value under the key `""`
+/// and always writes both `value` sections (ADR-0195 (q)).
 ///
 /// # Errors
 ///
-/// Returns `AppError::Plant` when `trees` has no tree for a type of the change.
+/// Returns `AppError::Plant` when `trees` has no tree for the new type of the change,
+/// or for the old type when the type does not change.
 pub fn definition_diff(change: &ParameterChange, trees: &TypeTrees) -> Result<StateDiff, AppError> {
     definition_diff_of(change.before(), change.after(), trees)
 }
@@ -100,9 +103,25 @@ fn definition_diff_of(
 ) -> Result<StateDiff, AppError> {
     let mut builder = Builder::default();
     builder.columns(&columns(before), &columns(after));
-    builder.value(before, after, trees)?;
+    if has_unresolved_old_type(before, after, trees) {
+        builder.stored_value_before(before, after, trees)?;
+    } else {
+        builder.value(before, after, trees)?;
+    }
     builder.limits(before, after);
     Ok(builder.finish())
+}
+
+/// Tell whether the type changes and the old type has no tree (ADR-0195 (q)).
+fn has_unresolved_old_type(
+    before: Option<&Parameter>,
+    after: Option<&Parameter>,
+    trees: &TypeTrees,
+) -> bool {
+    let (Some(before), Some(after)) = (before, after) else {
+        return false;
+    };
+    before.plc_type() != after.plc_type() && tree_of(trees, before.plc_type()).is_err()
 }
 
 fn rebind_diff_of(
@@ -116,6 +135,9 @@ fn rebind_diff_of(
     builder.limits(before, after);
     Ok(builder.finish())
 }
+
+/// The leaf key of the whole stored value. It equals the path of a leaf that is the root itself.
+const WHOLE_VALUE_KEY: &str = "";
 
 /// The two sides of a diff while the builders fill them.
 #[derive(Default)]
@@ -153,6 +175,30 @@ impl Builder {
             &value_leaves(before, trees)?,
             &value_leaves(after, trees)?,
         );
+        Ok(())
+    }
+
+    /// Add the `value` section of a type change from a type that has no tree.
+    ///
+    /// The old side holds the whole stored value under the key `""`. The section stays also when
+    /// both sides are equal. This is an exception to the rule that a diff holds changed fields.
+    fn stored_value_before(
+        &mut self,
+        before: Option<&Parameter>,
+        after: Option<&Parameter>,
+        trees: &TypeTrees,
+    ) -> Result<(), AppError> {
+        let whole = before
+            .map(|parameter| {
+                Fields::from([(
+                    WHOLE_VALUE_KEY.to_owned(),
+                    parameter.value().as_json().clone(),
+                )])
+            })
+            .unwrap_or_default();
+        self.before.insert("value".to_owned(), object(whole));
+        self.after
+            .insert("value".to_owned(), object(value_leaves(after, trees)?));
         Ok(())
     }
 

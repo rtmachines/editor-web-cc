@@ -239,3 +239,5 @@ mod requests;
 mod tests;
 #[cfg(test)]
 mod texts_tests;
+#[cfg(test)]
+mod unresolved_type_tests;
