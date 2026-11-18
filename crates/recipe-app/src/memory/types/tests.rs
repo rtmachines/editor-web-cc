@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::error::{PLC_TYPE_NAMED_UNIQUE, PLC_TYPE_STRUCT_NAME_CI_UNIQUE, StorageError};
+use crate::memory::fixtures::assert_prefix_then_key_set;
 use crate::memory::{
     DERIVED_TYPE_LOCK_TABLE, JournalEntry, Lock, LockMode, MemoryClock, MemoryStore,
     MemoryTransaction, seed_type_id,
@@ -404,7 +405,7 @@ async fn a_rolled_back_type_insert_keeps_nothing() {
 }
 
 #[tokio::test]
-async fn lock_derived_types_records_one_advisory_entry_per_key_in_the_order_of_the_texts() {
+async fn lock_derived_types_records_one_advisory_entry_per_key_of_the_key_set() {
     let store = store();
     let mut tx = begin(&store);
     let members = [
@@ -418,13 +419,14 @@ async fn lock_derived_types_records_one_advisory_entry_per_key_in_the_order_of_t
         .into_iter()
         .filter(|line| matches!(line, JournalEntry::Lock(_)))
         .collect();
-    assert_eq!(
-        locks,
-        vec![
-            lock(format!("{}:ARRAY", mid(1))),
+    assert_prefix_then_key_set(
+        &locks,
+        &[],
+        &[
             lock(format!("{}:STRING", mid(1))),
             lock(format!("{}:ST_A", mid(1))),
-        ]
+            lock(format!("{}:ARRAY", mid(1))),
+        ],
     );
 }
 

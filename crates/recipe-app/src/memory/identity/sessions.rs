@@ -33,16 +33,18 @@ impl SessionRepository for MemoryTransaction {
             last_seen_at: now,
             expires_at: after(now, session.idle_timeout),
         };
-        self.state_mut().sessions.insert(session.id.clone(), stored);
+        self.state_for_write()?
+            .sessions
+            .insert(session.id.clone(), stored);
         Ok(())
     }
 
     async fn delete(&mut self, id: &SessionId) -> Result<bool, StorageError> {
-        Ok(self.state_mut().sessions.remove(id).is_some())
+        Ok(self.state_for_write()?.sessions.remove(id).is_some())
     }
 
     async fn delete_all_of_user(&mut self, user: UserId) -> Result<u64, StorageError> {
-        let sessions = &mut self.state_mut().sessions;
+        let sessions = &mut self.state_for_write()?.sessions;
         let before = sessions.len();
         sessions.retain(|_id, stored| stored.user_id != user);
         let removed = before.saturating_sub(sessions.len());

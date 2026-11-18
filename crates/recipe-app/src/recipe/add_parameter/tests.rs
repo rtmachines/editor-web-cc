@@ -18,8 +18,8 @@ use crate::context::UseCase;
 use crate::error::{AppError, PARAMETER_TAG_UNIQUE, StorageError};
 use crate::memory::fixtures::scenarios::zone_draft;
 use crate::memory::fixtures::{
-    Fixture, actor, field, lock_line, meta, mid, recipe_with, reference, rid, text, tid, uid, user,
-    vid,
+    Fixture, actor, assert_prefix_then_key_set, field, lock_line, meta, mid, recipe_with,
+    reference, rid, text, tid, uid, user, vid,
 };
 use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode};
 use crate::ports::Isolation;
@@ -191,7 +191,7 @@ async fn the_entry_is_a_row_create_with_the_limit_rows() {
 }
 
 #[tokio::test]
-async fn an_array_of_sized_strings_takes_the_array_and_string_keys_in_the_order_of_the_texts() {
+async fn an_array_of_sized_strings_takes_the_array_and_string_key_set() {
     let fixture = Fixture::new();
     seed_speed_draft(&fixture);
     let request = input(
@@ -200,9 +200,11 @@ async fn an_array_of_sized_strings_takes_the_array_and_string_keys_in_the_order_
         Vec::new(),
     );
     run(&fixture, request).await.unwrap();
-    let mut expected = lock_prefix();
-    expected.extend([advisory("ARRAY"), advisory("STRING")]);
-    assert_eq!(fixture.store.journal(), expected);
+    assert_prefix_then_key_set(
+        &fixture.store.journal(),
+        &lock_prefix(),
+        &[advisory("STRING"), advisory("ARRAY")],
+    );
 }
 
 #[tokio::test]

@@ -33,6 +33,7 @@ pub(crate) use rows::{ParameterRow, RecipeRow, VersionRow};
 
 use super::rows::{
     check_violation, corrupt_rows, duplicate, illegal_transition, missing_reference, missing_row,
+    without_lock,
 };
 use super::{LockMode, MemoryState, MemoryTransaction};
 use crate::error::{RECIPE_REFERENCE_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT, StorageError};
@@ -73,34 +74,50 @@ impl VersionRow {
 
 impl MemoryTransaction {
     fn recipe_row_mut(&mut self, id: RecipeId) -> Result<&mut RecipeRow, StorageError> {
-        self.state_mut()
+        self.state_for_write()?
             .recipes
             .get_mut(&id)
             .ok_or_else(|| missing_row(RECIPE_TABLE))
     }
 
+    /// Return the `row_version` that a lock of this transaction recorded, for the guard of a
+    /// status write. A version without a lock gives `E-DB-008` and nothing changes (ADR-0030).
+    fn guard(&self, id: RecipeVersionId) -> Result<i64, StorageError> {
+        self.recorded_row_version(id)
+            .ok_or_else(|| without_lock(id))
+    }
+
     /// Change a version row in a legal transition and return the row after the change.
     ///
-    /// The row must be in the state `from`. Otherwise the trigger `recipe_version_transition`
-    /// rejects the update with `E-RCP-033`.
+    /// The transaction must hold a lock of the version with the current `row_version`. Otherwise
+    /// the write gives `E-DB-008`, as the guarded statement of PostgreSQL does. The row must be
+    /// in the state `from`. Otherwise the trigger `recipe_version_transition` rejects the update
+    /// with `E-RCP-033`. The write records the new `row_version`.
     fn change_version(
         &mut self,
         id: RecipeVersionId,
         from: VersionState,
         change: impl FnOnce(&mut VersionRow, Timestamp),
     ) -> Result<RowImage, StorageError> {
+        let locked = self.guard(id)?;
         let now = self.now();
         let row = self
-            .state_mut()
+            .state_for_write()?
             .versions
             .get_mut(&id)
             .ok_or_else(|| missing_row(VERSION_TABLE))?;
+        if row.row_version != locked {
+            return Err(without_lock(id));
+        }
         if row.state().map_err(|reason| corrupt_rows(&reason))? != from {
             return Err(illegal_transition());
         }
         change(row, now);
         row.bump(now)?;
-        Ok(version_image(row))
+        let image = version_image(row);
+        let row_version = row.row_version;
+        self.record_row_version(id, row_version);
+        Ok(image)
     }
 
     /// Add a version row after the checks of the constraints of `recipe_version`.
@@ -111,9 +128,9 @@ impl MemoryTransaction {
         let row = new_version_row(new, platform, now);
         let copies = inherited_parameters(state, new, now);
         let image = version_image(&row);
-        self.state_mut().versions.insert(row.id, row);
+        self.state_for_write()?.versions.insert(row.id, row);
         for copy in copies {
-            self.state_mut().parameters.insert(copy.id, copy);
+            self.state_for_write()?.parameters.insert(copy.id, copy);
         }
         Ok(image)
     }
@@ -229,6 +246,8 @@ impl RecipeRepository for MemoryTransaction {
     }
 
     async fn lock_recipe(&mut self, id: RecipeId) -> Result<Option<Locked<Recipe>>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let Some(row) = self.state().recipes.get(&id) else {
             return Ok(None);
         };
@@ -244,6 +263,8 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         machine: MachineId,
     ) -> Result<Vec<Recipe>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         // The recipes come from a `BTreeMap` keyed by id, so they are ordered by id.
         let ids: Vec<RecipeId> = self
             .state()
@@ -268,6 +289,8 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         recipe: RecipeId,
     ) -> Result<Vec<(RecipeVersionId, RowImage)>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let locked: Vec<(RecipeVersionId, RowImage)> = self
             .state()
             .versions
@@ -278,6 +301,16 @@ impl RecipeRepository for MemoryTransaction {
         for (id, _) in &locked {
             self.lock(VERSION_TABLE, LockMode::ForUpdate, &id.to_string());
         }
+        let recorded: Vec<(RecipeVersionId, i64)> = self
+            .state()
+            .versions
+            .values()
+            .filter(|row| row.recipe == recipe)
+            .map(|row| (row.id, row.row_version))
+            .collect();
+        for (id, row_version) in recorded {
+            self.record_row_version(id, row_version);
+        }
         Ok(locked)
     }
 
@@ -285,11 +318,15 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<RowImage>, StorageError> {
+        self.refuse_row_lock_for_update()?;
+        self.refresh_after_lock()?;
         let Some(row) = self.state().versions.get(&version) else {
             return Ok(None);
         };
         let image = version_image(row);
+        let row_version = row.row_version;
         self.lock(VERSION_TABLE, LockMode::ForUpdate, &version.to_string());
+        self.record_row_version(version, row_version);
         Ok(Some(image))
     }
 
@@ -297,6 +334,7 @@ impl RecipeRepository for MemoryTransaction {
         &mut self,
         version: RecipeVersionId,
     ) -> Result<Option<SharedVersion>, StorageError> {
+        self.refuse_row_lock_for_update()?;
         self.run_lock_version_hook();
         self.refresh_after_lock()?;
         let state = self.committed_state();
@@ -347,7 +385,7 @@ impl RecipeRepository for MemoryTransaction {
             updated_at: now,
         };
         let image = recipe_image(&row);
-        self.state_mut().recipes.insert(row.id, row);
+        self.state_for_write()?.recipes.insert(row.id, row);
         let version = self.put_version(&first)?;
         Ok(InsertedRecipe {
             recipe: image,
@@ -408,8 +446,12 @@ impl RecipeRepository for MemoryTransaction {
         approver: UserId,
         hash: Sha256,
     ) -> Result<RowImage, StorageError> {
+        let locked = self.guard(version)?;
         let state = self.state();
         if let Some(row) = state.versions.get(&version) {
+            if row.row_version != locked {
+                return Err(without_lock(version));
+            }
             let has_other_approved = state.versions.values().any(|other| {
                 other.recipe == row.recipe
                     && other.id != version

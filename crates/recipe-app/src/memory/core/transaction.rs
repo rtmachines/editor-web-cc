@@ -1,5 +1,6 @@
 //! The in-memory transaction.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,7 +8,7 @@ use parking_lot::Mutex;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::timestamp::Timestamp;
 
-use recipe_domain::recipe::ParameterKey;
+use recipe_domain::recipe::{ParameterKey, RecipeVersionId};
 
 use super::journal::{DraftWrite, JournalEntry, Lock, LockMode, WriteKind};
 use super::state::MemoryState;
@@ -33,6 +34,14 @@ pub(super) struct VisibleLogs {
     pub(super) events: usize,
 }
 
+/// The SQLSTATE that PostgreSQL gives for a write in a `READ ONLY` transaction.
+const READ_ONLY_SQL_TRANSACTION: &str = "25006";
+
+/// The cause of the storage error for a write in a read-only transaction.
+#[derive(Debug, thiserror::Error)]
+#[error("cannot execute a write in a read-only transaction")]
+struct WriteInReadOnlyTransaction;
+
 /// An open in-memory transaction.
 ///
 /// It works on a copy of the state. `finish` replaces the shared state and appends
@@ -49,6 +58,8 @@ pub struct MemoryTransaction {
     isolation: Isolation,
     visible: VisibleLogs,
     has_written: bool,
+    /// The `row_version` that each version lock read, as `PgTransaction` keeps it (ADR-0030).
+    locked_versions: BTreeMap<RecipeVersionId, i64>,
 }
 
 impl MemoryTransaction {
@@ -67,7 +78,21 @@ impl MemoryTransaction {
             isolation,
             visible,
             has_written: false,
+            locked_versions: BTreeMap::new(),
         }
+    }
+
+    /// Record the `row_version` that a lock or a status write left on a version.
+    ///
+    /// The record solves one problem: a status write must follow a lock of the same transaction,
+    /// as in `PgTransaction` (ADR-0030).
+    pub(crate) fn record_row_version(&mut self, version: RecipeVersionId, row_version: i64) {
+        self.locked_versions.insert(version, row_version);
+    }
+
+    /// Return the `row_version` that the last lock or status write of this transaction recorded.
+    pub(crate) fn recorded_row_version(&self, version: RecipeVersionId) -> Option<i64> {
+        self.locked_versions.get(&version).copied()
     }
 
     /// Return the fault that `fail_insert_unit` set, or `None`.
@@ -191,9 +216,39 @@ impl MemoryTransaction {
     }
 
     /// Return the working copy of the state for a write.
-    pub const fn state_mut(&mut self) -> &mut MemoryState {
+    ///
+    /// The method solves one problem: a write in a read-only level must fail, as it does in
+    /// `PgTransaction` (design D7). Both levels of a query are `READ ONLY`, so the method gives
+    /// `StorageError::Other` with the SQLSTATE `25006` for them.
+    pub fn state_for_write(&mut self) -> Result<&mut MemoryState, StorageError> {
+        self.refuse_read_only_write()?;
         self.has_written = true;
-        &mut self.state
+        Ok(&mut self.state)
+    }
+
+    /// Refuse a `FOR UPDATE` or `FOR SHARE` row lock in a `READ ONLY` level, also when no row matches.
+    ///
+    /// The method solves one problem: PostgreSQL refuses the statement with `25006` before it
+    /// reads a row, so a memory row lock must fail the same way (design D7, ADR-0042 (a)).
+    pub fn refuse_row_lock_for_update(&self) -> Result<(), StorageError> {
+        self.refuse_read_only_write()
+    }
+
+    /// Return the error of a write in a `READ ONLY` transaction, or `Ok` for the other levels.
+    ///
+    /// A statement that PostgreSQL always runs as a write, such as `INSERT ... ON CONFLICT DO
+    /// NOTHING`, calls this method before it reads the state.
+    pub fn refuse_read_only_write(&self) -> Result<(), StorageError> {
+        if matches!(
+            self.isolation,
+            Isolation::ReadOnly | Isolation::RepeatableRead
+        ) {
+            return Err(StorageError::Other {
+                sqlstate: Some(READ_ONLY_SQL_TRANSACTION.to_owned()),
+                source: Box::new(WriteInReadOnlyTransaction),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -252,6 +307,7 @@ impl Transaction for MemoryTransaction {
     }
 
     async fn append_audit(&mut self, entries: &NonEmpty<AuditEntry>) -> Result<(), StorageError> {
+        self.refuse_read_only_write()?;
         let mut shared = self.shared.lock();
         if let Some(fault) = shared.take_queued(FaultPoint::AppendAudit) {
             return Err(fault.into());

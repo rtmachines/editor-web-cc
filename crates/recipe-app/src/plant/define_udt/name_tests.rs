@@ -10,11 +10,11 @@ use recipe_domain::plant::{
 };
 
 use super::tests::{fixture, input, own_rows, real, run};
-use super::{DefineUdtInput, DefineUdtMode};
+use super::{DefineUdtInput, DefineUdtMode, insert_struct_row, struct_row};
 use crate::error::{AppError, Missing};
 use crate::memory::fixtures::{Fixture, lock_line, mid, tid};
 use crate::memory::{Fault, JournalEntry, LockMode};
-use crate::ports::Isolation;
+use crate::ports::{Isolation, Transaction};
 
 #[tokio::test]
 async fn the_index_plc_type_struct_name_ci_unique_gives_plt_015_and_writes_nothing() {
@@ -64,6 +64,50 @@ async fn the_index_plc_type_member_name_ci_unique_gives_plt_021_for_the_first_me
     ));
     assert!(fixture.store.audit_entries().is_empty());
     assert!(own_rows(&fixture).is_empty());
+}
+
+#[tokio::test]
+async fn insert_struct_row_names_the_repeated_member_for_each_unique_index() {
+    for fault in [
+        Fault::DuplicateMemberName,
+        Fault::DuplicateMemberNameAnyCase,
+    ] {
+        let fixture = fixture(PlcPlatform::TwinCat3);
+        fixture.store.fail_insert_struct(fault);
+        // The repeat `SPEED` is at index 2. The row holds distinct members, because a row
+        // with a repeat does not build (`PlcType::try_from`).
+        let request = input(
+            DefineUdtMode::New,
+            "ST_Zone",
+            &[("Alpha", "INT"), ("Speed", "INT"), ("SPEED", "INT")],
+        );
+        let row_request = input(DefineUdtMode::New, "ST_Zone", &[("Alpha", "REAL")]);
+        let row = struct_row(
+            &row_request,
+            (mid(1), PlcPlatform::TwinCat3),
+            (1, None),
+            vec![TypeMember {
+                name: MemberName::parse("Alpha").unwrap(),
+                type_id: real(),
+            }],
+        )
+        .unwrap();
+        let mut tx = fixture
+            .store
+            .begin_memory(Isolation::ReadCommitted)
+            .unwrap();
+
+        let error = insert_struct_row(tx.types(), &row, &request)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code(), ErrorCode::PLT_021);
+        assert!(matches!(
+            &error,
+            AppError::Plant(PlantError::DuplicateMemberName { member, .. })
+                if member.as_str() == "SPEED"
+        ));
+    }
 }
 
 /// The number of the machine `M12` of the spec scenarios. It holds the stored struct.

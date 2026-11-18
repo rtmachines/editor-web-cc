@@ -6,7 +6,10 @@ use super::transaction::MemoryTransaction;
 impl MemoryTransaction {
     /// Write a marker into the working copy.
     pub(super) fn mark(&mut self, marker: &str) {
-        self.state_mut().markers.insert(marker.to_owned());
+        self.state_for_write()
+            .unwrap()
+            .markers
+            .insert(marker.to_owned());
     }
 }
 

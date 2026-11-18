@@ -66,7 +66,7 @@ impl SettingRepository for MemoryTransaction {
             return Err(StorageError::invariant("the upsert names a state key"));
         }
         let now = self.now();
-        let row = self.state_mut().put_setting(key, value, now)?;
+        let row = self.state_for_write()?.put_setting(key, value, now)?;
         Ok(SettingWritten {
             id: row.id,
             after: setting_image(key, &row),

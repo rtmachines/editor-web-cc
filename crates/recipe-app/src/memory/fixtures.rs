@@ -232,6 +232,24 @@ pub(crate) fn lock_line(table: &'static str, mode: LockMode, key: String) -> Jou
     JournalEntry::Lock(Lock { table, mode, key })
 }
 
+/// Check a journal as an ordered prefix and then an unordered key set.
+///
+/// ADR-0144: a test cannot name the order of two advisory keys without their key
+/// values. The helper checks the prefix by position and the keys by count and
+/// membership.
+pub(crate) fn assert_prefix_then_key_set(
+    journal: &[JournalEntry],
+    prefix: &[JournalEntry],
+    keys: &[JournalEntry],
+) {
+    assert!(journal.len() >= prefix.len(), "{journal:?}");
+    let (head, tail) = journal.split_at(prefix.len());
+    assert_eq!(head, prefix);
+    assert_eq!(tail.len(), keys.len(), "{tail:?}");
+    assert!(keys.iter().all(|key| tail.contains(key)), "{tail:?}");
+    assert!(tail.iter().all(|line| keys.contains(line)), "{tail:?}");
+}
+
 /// Return the field `name` of an image, or `Null` when the image has no such key.
 pub(crate) fn field(image: &Value, name: &str) -> Value {
     image.get(name).cloned().unwrap_or(Value::Null)
