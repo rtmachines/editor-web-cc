@@ -63,7 +63,7 @@ The parameter table of a version that is not approved SHALL show a parameter who
 ## MODIFIED Requirements
 
 ### Requirement: One edit form of a parameter
-The parameter page of a live `Draft` SHALL hold one edit form with the definition fields, the S7 address, and the leaf grid. The form SHALL send the value and the limits together to `/definition`. The page SHALL hold no second form with a definition field of that parameter. When the reader gets the edit form, a parameter whose stored type does not resolve SHALL get it without the leaf grid. Every other reader SHALL get the read-only definition of that parameter without the value grid (ADR-0195) (R09, R25, I12).
+The parameter page of a live `Draft` SHALL hold one edit form with the definition fields, the S7 address, and the leaf grid. The form SHALL send the value and the limits together to `/definition`. The page SHALL hold no second form with a definition field of that parameter. A parameter whose stored type does not resolve follows the requirement "Parameter page of a type that does not resolve" (ADR-0195) (R09, R25, I12).
 
 #### Scenario: Value and limits in one save
 - **GIVEN** the parameter `SPEED` of type `INT` with the value 1500 and the limit 0 to 3000
@@ -77,7 +77,7 @@ The parameter page of a live `Draft` SHALL hold one edit form with the definitio
 - **THEN** the request holds no field `fields` and no field `limit_mode`
 
 ### Requirement: Field lines of a stored part that breaks a newer rule
-The parameter page, the diff page, and the approval preview SHALL show a stored value, limit, or S7 address unchanged. A part that fails only the current rule set SHALL get a field line with its code, and the answer SHALL stay 200. A part that fails the earlier rule set of ADR-0120 SHALL give `500 E-DB-008`. One exception applies to a parameter whose stored type does not resolve. Its page SHALL show no value grid in every version state. Its row in the table of a version that is not approved SHALL show no value text (ADR-0195) (R12, R38, R39).
+The parameter page, the diff page, and the approval preview SHALL show a stored value, limit, or S7 address unchanged. A part that fails only the current rule set SHALL get a field line with its code, and the answer SHALL stay 200. A part that fails the earlier rule set of ADR-0120 SHALL give `500 E-DB-008`. A parameter whose stored type does not resolve follows the page and table requirements of such a type (ADR-0195) (R12, R38, R39).
 
 #### Scenario: Value with too many digits on the parameter page
 - **GIVEN** the approved version 2 of `R-100` with the stored `REAL` value `16777217` in the parameter `RATE`
