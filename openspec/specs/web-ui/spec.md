@@ -1407,7 +1407,7 @@ A form SHALL send one value field per leaf with the name `value` and the leaf pa
 - **THEN** the server returns `422 E-WEB-008` with one line and reads no more pairs
 
 ### Requirement: One edit form of a parameter
-The parameter page of a live `Draft` SHALL hold one edit form with the definition fields, the S7 address, and the leaf grid. The form SHALL send the value and the limits together to `/definition`. The page SHALL hold no second form with a definition field of that parameter (R09, R25, I12).
+The parameter page of a live `Draft` SHALL hold one edit form with the definition fields, the S7 address, and the leaf grid. The form SHALL send the value and the limits together to `/definition`. The page SHALL hold no second form with a definition field of that parameter. A parameter whose stored type does not resolve follows the requirement "Parameter page of a type that does not resolve" (ADR-0195) (R09, R25, I12).
 
 #### Scenario: Value and limits in one save
 - **GIVEN** the parameter `SPEED` of type `INT` with the value 1500 and the limit 0 to 3000
@@ -2067,7 +2067,7 @@ The parameter table of the version page SHALL have the column Value after the co
 - **THEN** the answer row of `TEMP` shows `85.5` in the column Value
 
 ### Requirement: Faults of the value column
-A value that breaks only a newer rule SHALL get a field line. An S7 address that breaks only a newer rule SHALL get a field line under the address. Another fault SHALL give `500 E-DB-008`. A read check of the table that passes `timeout.validation` SHALL give `503 E-WEB-009` (R08, R12, R30, R39, A43).
+A value that breaks only a newer rule SHALL get a field line. An S7 address that breaks only a newer rule SHALL get a field line under the address. Another fault SHALL give `500 E-DB-008`. A row whose stored type does not resolve SHALL skip the read check and show no value text, except in an approved version (ADR-0195). A read check of the table that passes `timeout.validation` SHALL give `503 E-WEB-009` (R08, R12, R30, R39, A43).
 
 #### Scenario: Stored value that does not match its type
 - **GIVEN** the approved version 2 of `R-100` with the parameter `SPEED : INT`, whose stored value is the text `abc`
@@ -2712,7 +2712,7 @@ In read-only mode a route that answers the form of a blocked command SHALL run i
 - **AND** the page holds no form that sends `POST /me/password`
 
 ### Requirement: Field lines of a stored part that breaks a newer rule
-The parameter page, the diff page, and the approval preview SHALL show a stored value, limit, or S7 address unchanged. A part that fails only the current rule set SHALL get a field line with its code, and the answer SHALL stay 200. A part that fails the earlier rule set of ADR-0120 SHALL give `500 E-DB-008` (R12, R38, R39).
+The parameter page, the diff page, and the approval preview SHALL show a stored value, limit, or S7 address unchanged. A part that fails only the current rule set SHALL get a field line with its code, and the answer SHALL stay 200. A part that fails the earlier rule set of ADR-0120 SHALL give `500 E-DB-008`. A parameter whose stored type does not resolve follows the page and table requirements of such a type (ADR-0195) (R12, R38, R39).
 
 #### Scenario: Value with too many digits on the parameter page
 - **GIVEN** the approved version 2 of `R-100` with the stored `REAL` value `16777217` in the parameter `RATE`
@@ -3050,3 +3050,63 @@ A form answer with `E-RCP-058` SHALL show its line under the input `s7_address`.
 - **GIVEN** the draft version 3 of `R-100` on `M3` with the parameter `BUF` of type `ARRAY[32760..32770] OF BYTE` at `DB1.DBB0`, stored before ADR-0178
 - **WHEN** a ProcessEngineer opens the approval preview of version 3
 - **THEN** the preview shows `E-RCP-058` with a link to the parameter `BUF`
+
+### Requirement: Parameter page of a type that does not resolve
+The page `GET .../parameters/{key}` SHALL show the definition of a parameter whose stored type does not resolve, without the value grid. A user with `ParameterEdit` on a live draft of a live recipe SHALL get the definition form, when the mode permits `UpdateParameterDefinition`. Every other reader SHALL get the read-only definition (R29, R35).
+
+#### Scenario: Edit form of a parameter with a type cycle
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the draft version 3 of `R-100` with the parameter `ZONE` of a stored struct type that contains itself
+- **WHEN** `anowak` opens `GET /recipes/R-100/versions/3/parameters/{key}` for `ZONE`
+- **THEN** the server returns `200` with the definition form of `ZONE`
+- **AND** the page shows no value grid
+
+#### Scenario: Read-only page of a parameter with a type cycle
+- **GIVEN** the Operator `mhoffman` with an open session, and the draft version 3 of `R-100` with the parameter `ZONE` of a stored struct type that contains itself
+- **WHEN** `mhoffman` opens `GET /recipes/R-100/versions/3/parameters/{key}` for `ZONE`
+- **THEN** the server returns `200` with the read-only definition of `ZONE`
+- **AND** the page shows no value grid
+
+#### Scenario: Page of a parameter with a type cycle in read-only mode
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the draft version 3 of `R-100` with the parameter `ZONE` of a stored struct type that contains itself
+- **AND** the system is in read-only mode
+- **WHEN** `anowak` opens `GET /recipes/R-100/versions/3/parameters/{key}` for `ZONE`
+- **THEN** the server returns `200` with the read-only definition of `ZONE`
+- **AND** the page shows no value grid
+
+#### Scenario: New type through the page
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the draft version 3 of `R-100` with the parameter `ZONE` of a stored struct type that contains itself
+- **AND** `ZONE` stands at `DB6.DBB0` and has a translation in `pl`
+- **WHEN** `anowak` opens the page of `ZONE` and sends its edit form with the type `INT` and the S7 address `DB6.DBW0`
+- **THEN** the server shows the edit form with the leaf grid of `INT`
+- **AND** the server writes nothing
+- **WHEN** `anowak` sends that form with its `row_version` and the value `0`
+- **THEN** the server stores `ZONE` with the type `INT` and the value `0`
+- **AND** the page of `ZONE` then shows the value grid of `INT`, the old key, and the translation in `pl`
+
+#### Scenario: Page of an approved version with a type cycle
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the approved version 2 of `R-100` with the parameter `ZONE` of a stored struct type that contains itself
+- **WHEN** `anowak` opens `GET /recipes/R-100/versions/2/parameters/{key}` for `ZONE`
+- **THEN** the server returns `200` with the read-only definition of `ZONE`
+- **AND** the page shows no value grid
+
+### Requirement: Parameter table of a type that does not resolve
+The parameter table of a version that is not approved SHALL show a parameter whose stored type does not resolve without a value text. A row without a type text SHALL get an empty value cell. A row with a type text SHALL show the word of `parameters-value-composite`. The table of an approved version SHALL keep the `500 E-DB-008` of `GetVersion` (ADR-0118 (d), ADR-0119 (l)) (R29, R35).
+
+#### Scenario: Parameter table with a type cycle
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the draft version 3 of `R-100` with the parameter `ZONE` of a stored struct type that contains itself
+- **WHEN** `anowak` opens `GET /recipes/R-100/versions/3/parameters`
+- **THEN** the server returns `200` with a row of `ZONE` without a value text
+- **AND** the value cell of `ZONE` shows the word of `parameters-value-composite`
+
+#### Scenario: Parameter table with a missing type row
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the draft version 3 of `R-100` with the parameter `GRID`
+- **AND** the platform does not hold the stored type row of `GRID`
+- **WHEN** `anowak` opens `GET /recipes/R-100/versions/3/parameters`
+- **THEN** the server returns `200` with a row of `GRID` without a type text
+- **AND** the value cell of `GRID` is empty
+
+#### Scenario: Parameter table of an approved version with a missing type row
+- **GIVEN** the ProcessEngineer `anowak` with an open session, and the approved version 2 of `R-100` with the parameter `ZONE`
+- **AND** the platform does not hold the stored type row of `ZONE`
+- **WHEN** `anowak` opens `GET /recipes/R-100/versions/2/parameters`
+- **THEN** the server returns `500 E-DB-008`
