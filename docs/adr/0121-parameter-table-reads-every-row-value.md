@@ -1,6 +1,6 @@
 # ADR-0121: The parameter table reads the value of every row
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0195 (item (c): the page and the table of a type that does not resolve)
 Date: 2026-11-04
 Deciders: project owner
 

@@ -1,6 +1,6 @@
 # ADR-0195: Codes of a storage defect in a command
 
-Status: Proposed. Amends the sections §6, §9.2, and §10 of `data-model.md`. Amends the sections §2.4, §5, §5.2, and §5.3 of `domain-model.md`. Amends `reliability.md` §1.1, `api.md` §2 and §5.1, and `design-system.md` §10.4. Amends ADR-0018 (the one list of the rebind). Amends ADR-0027 (the variants and the conversion of `DraftError`, the list of the rebind plan). Amends ADR-0041 (b) (the one list of the faults of a value and its limits). Amends ADR-0028 (the code of a type that does not resolve, its replacement by `UpdateParameterDefinition`). Amends ADR-0120 (d) (the code of a stored part in a command). Amends ADR-0005 (the diff of a type without a tree). Amends ADR-0039 (i), ADR-0043 (k), ADR-0118 (a) and (d), and ADR-0121 (c) (the page and the table of a type that does not resolve)
+Status: Accepted. Amends the sections §6, §9.2, and §10 of `data-model.md`. Amends the sections §2.4, §5, §5.2, and §5.3 of `domain-model.md`. Amends `reliability.md` §1.1, `api.md` §2 and §5.1, and `design-system.md` §10.4. Amends ADR-0018 (the one list of the rebind). Amends ADR-0027 (the variants and the conversion of `DraftError`, the list of the rebind plan). Amends ADR-0041 (b) (the one list of the faults of a value and its limits). Amends ADR-0028 (the code of a type that does not resolve, its replacement by `UpdateParameterDefinition`). Amends ADR-0120 (d) (the code of a stored part in a command). Amends ADR-0005 (the diff of a type without a tree). Amends ADR-0039 (i), ADR-0043 (k), ADR-0118 (a) and (d), and ADR-0121 (c) (the page and the table of a type that does not resolve)
 Date: 2026-11-18
 Deciders: project owner
 
@@ -26,7 +26,7 @@ A draft command reaches `AppError` through `From<DraftError> for AppError`. That
 
 The domain checks the stored parts and the request parts in the same functions. Each site below reads a stored part only:
 
-- `Draft::set_value` reads the stored limits with the earlier set (`draft/value.rs` line 33). The new value is the request part (line 34).
+- `Draft::set_value` reads the stored limits with the earlier set (`draft/value.rs` line 33). The new value is the request part (line 34). A conflict of two stored limit rows on one leaf is a stored part, not a request part.
 - `Draft::replace_limits` reads the stored value with the earlier set (`draft/value.rs` line 63). The new limit rows and the process-limit check I7 are the request part (lines 61 and 64, ADR-0120 (e)).
 - Both methods call `resolved_tree` (`draft/value.rs` lines 31 and 60). It returns the stored error of a failed resolution (`draft/add/step_definition.rs` lines 93 to 103).
 - `TypeTree::resolve` gives `E-PLT-005` for a cycle through a struct and `E-PLT-018` above a size limit (`crates/recipe-domain/src/plant/type_tree.rs` lines 271 to 292 and 473 to 485).
@@ -179,7 +179,7 @@ The mechanism:
 
 The sites that give `Stored`:
 
-- (f) `SetParameterValue`: a stored limit that fails the earlier set.
+- (f) `SetParameterValue`: a stored limit that fails the earlier set. A conflict of two stored limit rows on one leaf (`E-RCP-019`) is a stored part in `SetParameterValue`.
 - (g) `ReplaceLimits`: a stored value that fails the earlier set.
 - (h) `SetParameterValue` and `ReplaceLimits`: a failed resolution of the stored parameter type, as item (w) defines it. A type that the platform does not hold keeps `E-PLT-013` (ADR-0028, ADR-0194 (l)).
 - (i) `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, and `RebindTypeRevision`: a fault of the platform rule, the width rule, or the alignment rule in the whole-draft check. An overflow of the layout in `occupy` also gives `Stored`. An overlap keeps `E-RCP-022` (ADR-0149 (a), (h)). The check for approval keeps the code of the rule.

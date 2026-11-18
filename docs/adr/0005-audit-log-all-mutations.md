@@ -1,6 +1,6 @@
 # ADR-0005: Append-only audit log for every mutating operation
 
-Status: Accepted. Amended by ADR-0022 (hash chain, security_event table, diff state, indexes) and ADR-0029 (child rows and source of a full row)
+Status: Accepted. Amended by ADR-0022 (hash chain, security_event table, diff state, indexes) and ADR-0029 (child rows and source of a full row). Amended by ADR-0195 (the diff of a type without a tree)
 Date: 2026-10-12
 Deciders: project owner
 

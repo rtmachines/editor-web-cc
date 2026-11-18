@@ -1,6 +1,6 @@
 # ADR-0018: UDT revisions and the rebind of recipe drafts
 
-Status: Accepted. Amended by ADR-0146 (a member of one shape keeps its value and its limits)
+Status: Accepted. Amended by ADR-0146 (a member of one shape keeps its value and its limits). Amended by ADR-0195 (the one list of the rebind)
 Date: 2026-10-12
 Deciders: project owner
 
