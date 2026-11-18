@@ -141,12 +141,19 @@ For the purpose `UpdateParameterDefinition`, the parameter form query SHALL retu
 - **THEN** the query returns the form with the preview of `INT`
 - **AND** the form holds no type text of the stored type
 
+### Requirement: Platform, width, and alignment rules on every parameter
+`AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, and `RebindTypeRevision` SHALL apply the platform rule to every parameter of the draft. They SHALL apply the width rule and the alignment rule to every parameter whose type resolves. A fault of these three rules in a stored address that the request does not supply SHALL give `500 E-DB-008` (ADR-0195) (R12, R14, R38).
+
+#### Scenario: New parameter next to a stored address with the wrong width
+- **GIVEN** the draft version 3 of `R-100` on the platform `S7_300` with the stored parameter `SPEED` of type `DINT` at `DB1.DBW0`
+- **WHEN** a ProcessEngineer runs `AddParameter` with the tag `FEED`, the type `INT`, and the address `DB2.DBW0`
+- **THEN** the system returns `500 E-DB-008`
+- **AND** the draft holds no parameter `FEED`
+
 ## MODIFIED Requirements
 
 ### Requirement: Draft commands on stored data that breaks a newer rule
-A draft command SHALL check the value or the limit that it writes with the current rules. It SHALL check a stored value or limit that it reads and does not write with the earlier rule set of ADR-0120. The process-limit check between the two parts SHALL still run. A draft command SHALL apply the data block rule, the end rule, and the standard-access rule only to the parameters that it writes (ADR-0116 (e1)).
-
-`AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, `ReplaceLimits`, and `RebindTypeRevision` SHALL apply the platform rule to every parameter of the draft. They SHALL apply the width rule and the alignment rule to every parameter whose type resolves. A fault of these three rules in a stored address that the request does not supply SHALL give `500 E-DB-008` (ADR-0195) (R12, R14, R38).
+A draft command SHALL check the value or the limit that it writes with the current rules (R12, R14, R38). It SHALL check a stored value or limit that it reads and does not write with the earlier rule set of ADR-0120. The process-limit check between the two parts SHALL still run. A draft command SHALL apply the data block rule, the end rule, and the standard-access rule only to the parameters that it writes (ADR-0116 (e1)).
 
 #### Scenario: Command on another parameter
 - **GIVEN** the draft version 3 of `R-100` on the platform `S7_1500` with the stored `DATE` value `72700` in the parameter `DUE`
@@ -182,12 +189,6 @@ A draft command SHALL check the value or the limit that it writes with the curre
 - **GIVEN** the draft version 3 of `R-100` on the platform `S7_300` with the stored parameter `SPEED` of type `DINT` at `DB1.DBD65534`
 - **WHEN** a ProcessEngineer runs `AddParameter` with the tag `FEED`, the type `INT`, and the address `DB2.DBW0`
 - **THEN** the system adds the parameter
-
-#### Scenario: New parameter next to a stored address with the wrong width
-- **GIVEN** the draft version 3 of `R-100` on the platform `S7_300` with the stored parameter `SPEED` of type `DINT` at `DB1.DBW0`
-- **WHEN** a ProcessEngineer runs `AddParameter` with the tag `FEED`, the type `INT`, and the address `DB2.DBW0`
-- **THEN** the system returns `500 E-DB-008`
-- **AND** the draft holds no parameter `FEED`
 
 ### Requirement: Every fault of a value and of its limits
 `AddParameter`, `UpdateParameterDefinition`, `SetParameterValue`, and `ReplaceLimits` SHALL check every leaf and every limit row. They SHALL return every fault of one parameter in one list. The faults of the leaves SHALL come first in preorder, and the faults of the limit rows SHALL follow in their order. A stored part that the command only reads SHALL instead give one `500 E-DB-008` and no list when it fails the earlier rule set (ADR-0195) (R36, A36).
