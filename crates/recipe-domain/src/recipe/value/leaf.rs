@@ -13,6 +13,12 @@ const LATIN_1_MAX: u32 = 0xFF;
 /// Highest scalar of a `WCHAR` (`domain-model.md` section 2.1).
 const WCHAR_MAX: u32 = 0xFFFF;
 
+/// Highest scalar of a `WCHAR` on `S7_1200` and `S7_1500` (ADR-0180 (a)).
+const S7_WCHAR_MAX: u32 = 0xD7FF;
+
+/// Highest scalar of a `WSTRING` character on `S7_1200` and `S7_1500` (ADR-0180 (b)).
+const S7_WSTRING_MAX: u32 = 0xCFFF;
+
 /// Largest count of significant digits of a `REAL` number or bound (ADR-0117 (a)).
 const REAL_MAX_DIGITS: u8 = 7;
 
@@ -87,30 +93,49 @@ pub(super) fn convert(value: &Value, leaf: LeafType) -> Result<Value, LeafFault>
             _ => Err(Expected::Bool.into()),
         },
         LeafClass::String => string(value, leaf).map_err(LeafFault::from),
-        LeafClass::Char => character(value, leaf.primitive).map_err(LeafFault::from),
+        LeafClass::Char => character(value, leaf).map_err(LeafFault::from),
         LeafClass::Duration | LeafClass::Instant => time(value, leaf).map_err(LeafFault::from),
     }
+}
+
+/// Tell whether the wide text rule of an S7 platform applies to the leaf (ADR-0180 (c), (f)).
+///
+/// The rule applies on `S7_1200` and `S7_1500` in the current rule set. The earlier set keeps
+/// ADR-0137 on every platform.
+const fn has_s7_wide_text_rule(leaf: LeafType) -> bool {
+    matches!(leaf.rules, RuleSet::Current)
+        && matches!(leaf.platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500)
 }
 
 /// Convert a `STRING` or `WSTRING` leaf.
 ///
 /// The text must fit the length of the type and must hold no U+0000, because PostgreSQL refuses
-/// that scalar in JSONB (ADR-0137).
+/// that scalar in JSONB (ADR-0137). A `WSTRING` on S7 also holds no scalar above U+CFFF
+/// (ADR-0180 (b)).
 fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     let is_wide = leaf.primitive == Primitive::Wstring;
     let length = leaf.string_length.unwrap_or_default();
-    let expected = if is_wide {
-        Expected::Wstring { length }
-    } else {
-        Expected::String { length }
+    let is_s7_wide = is_wide && has_s7_wide_text_rule(leaf);
+    let expected = match (is_wide, is_s7_wide) {
+        (false, _) => Expected::String { length },
+        (true, false) => Expected::Wstring { length },
+        (true, true) => Expected::WstringS7 {
+            length,
+            max: S7_WSTRING_MAX,
+        },
     };
     let Value::String(text) = value else {
         return Err(expected);
     };
-    let is_narrow = text.chars().all(|c| u32::from(c) <= LATIN_1_MAX);
+    let highest = match (is_wide, is_s7_wide) {
+        (false, _) => LATIN_1_MAX,
+        (true, false) => u32::from(char::MAX),
+        (true, true) => S7_WSTRING_MAX,
+    };
+    let is_in_range = text.chars().all(|c| u32::from(c) <= highest);
     let units = string_length_units(text, leaf.primitive);
     let has_nul = text.contains('\0');
-    if (is_wide || is_narrow) && !has_nul && units <= usize::from(length) {
+    if is_in_range && !has_nul && units <= usize::from(length) {
         Ok(value.clone())
     } else {
         Err(expected)
@@ -132,11 +157,12 @@ pub(super) fn string_length_units(text: &str, primitive: Primitive) -> usize {
 /// Convert a `CHAR` or `WCHAR` leaf.
 ///
 /// The text must hold one scalar from U+0001 up to the highest scalar of the type (ADR-0137).
-fn character(value: &Value, primitive: Primitive) -> Result<Value, Expected> {
-    let highest = if primitive == Primitive::Wchar {
-        WCHAR_MAX
-    } else {
-        LATIN_1_MAX
+/// A `WCHAR` on S7 stops at U+D7FF (ADR-0180 (a)).
+fn character(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
+    let highest = match leaf.primitive {
+        Primitive::Wchar if has_s7_wide_text_rule(leaf) => S7_WCHAR_MAX,
+        Primitive::Wchar => WCHAR_MAX,
+        _ => LATIN_1_MAX,
     };
     let is_valid = match value {
         Value::String(text) => {

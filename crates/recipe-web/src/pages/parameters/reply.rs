@@ -456,7 +456,8 @@ fn field_of(error: &RecipeError) -> Option<&'static str> {
         | RecipeError::S7AddressNotAllowed { .. }
         | RecipeError::S7AddressWidthMismatch { .. }
         | RecipeError::S7AddressPastBlockEnd { .. }
-        | RecipeError::S7DataBlockOutOfRange { .. } => Some("s7_address"),
+        | RecipeError::S7DataBlockOutOfRange { .. }
+        | RecipeError::S7TypeNotAddressable { .. } => Some("s7_address"),
         _other => None,
     }
 }

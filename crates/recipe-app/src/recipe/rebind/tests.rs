@@ -3,22 +3,26 @@
 use recipe_domain::audit::SecurityEventKind;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{LeafPath, PlcPlatform};
+use recipe_domain::plant::{LeafPath, PlantError, PlcPlatform, Primitive, TypeLimit};
 use recipe_domain::recipe::{RebindTargetReason, RecipeError, StoredLimit};
 use serde_json::json;
 
 use super::fixtures::{
-    DROP_1, DROP_2, OTHER_2, ZONE_1, ZONE_2, empty_draft, request, run, seed_parameter, seed_rows,
-    with_value, zone_draft, zone_request, zones_draft, zones_request, zones_value,
+    DROP_1, DROP_2, OTHER_2, ZONE_1, ZONE_2, array_row, empty_draft, request, run, seed_parameter,
+    seed_rows, typed_struct_row, with_value, zone_draft, zone_request, zones_draft, zones_request,
+    zones_value,
 };
 use super::{RebindTypeRevision, RebindTypeRevisionInput};
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::AppError;
-use crate::memory::fixtures::{Fixture, actor, lock_line, meta, mid, rid, tid, vid};
-use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode};
+use crate::memory::fixtures::{
+    Fixture, actor, lock_line, meta, mid, over_limit_top_parameter, rid, seed_struct_chain,
+    struct_chain_row, struct_chain_value, tid, vid,
+};
+use crate::memory::{DERIVED_TYPE_LOCK_TABLE, JournalEntry, LockMode, seed_type_id};
 use crate::ports::Isolation;
-use crate::recipe::test_support::{DRAFT_VERSION, DraftSnapshot};
+use crate::recipe::test_support::{DRAFT_VERSION, DraftSnapshot, stored_parameters};
 
 fn lock_prefix() -> Vec<JournalEntry> {
     vec![
@@ -246,4 +250,151 @@ async fn an_operator_is_forbidden_and_opens_no_transaction() {
     assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
     assert!(fixture.store.journal().is_empty());
     assert!(fixture.store.audit_entries().is_empty());
+}
+
+/// `ST_Mid@1` with the S7 count 6.
+const MID_1: u128 = 970;
+/// `ST_Mid@2` with the S7 count 8.
+const MID_2: u128 = 971;
+/// `ARRAY[1..2] OF ST_Mid@1`.
+const MID_ARRAY_1: u128 = 972;
+/// The struct `ST_L5@1` of `seed_struct_chain`. It has 5 levels.
+const FIVE_LEVELS: u128 = struct_chain_row(5);
+/// The struct `ST_L7@1` of `seed_struct_chain`. It has 7 levels.
+const SEVEN_LEVELS: u128 = struct_chain_row(7);
+/// The key number of the parameter `BUF`.
+const BUF: u128 = 11;
+/// The key number of the parameter `MID`.
+const MID: u128 = 12;
+
+/// The leaf path of the `INT` at the bottom of the member `deep` of `ST_Mid@2`.
+fn deep_leaf(prefix: &str) -> String {
+    format!("{prefix}.deep{}.leaf", ".inner".repeat(6))
+}
+
+/// The value of `ST_Mid@1`.
+fn mid_value() -> serde_json::Value {
+    json!({"a": 1, "old": struct_chain_value(5)})
+}
+
+/// A draft on `platform` with the nine-level struct `ST_Over@1` stored with `RuleSet::Earlier`,
+/// the structs `ST_Mid@1` and `ST_Mid@2`, and the array of `ST_Mid@1`.
+///
+/// `ST_Mid@1` has 6 levels in the S7 count. `ST_Mid@2` has 8 levels, so an array of it has 10.
+fn mid_draft(platform: PlcPlatform) -> (Fixture, recipe_domain::plant::PlcTypeId) {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let top = seed_struct_chain(&fixture, platform, ("ST_Over", 9));
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    let rows = [
+        typed_struct_row(
+            platform,
+            (MID_1, "ST_Mid", 1),
+            None,
+            &[("a", int), ("old", tid(FIVE_LEVELS))],
+        ),
+        typed_struct_row(
+            platform,
+            (MID_2, "ST_Mid", 2),
+            Some(MID_1),
+            &[
+                ("a", int),
+                ("old", tid(FIVE_LEVELS)),
+                ("deep", tid(SEVEN_LEVELS)),
+            ],
+        ),
+        array_row(platform, MID_ARRAY_1, tid(MID_1), 2),
+    ];
+    for row in &rows {
+        fixture.store.seed_type(row);
+    }
+    (fixture, top)
+}
+
+/// Add the parameter `BUF` of type `ARRAY[1..2] OF ST_Mid@1`.
+fn seed_buf(fixture: &Fixture, platform: PlcPlatform) {
+    let value = json!([mid_value(), mid_value()]);
+    seed_parameter(
+        fixture,
+        platform,
+        (BUF, "BUF"),
+        (MID_ARRAY_1, value),
+        Vec::new(),
+    );
+}
+
+/// Add the parameter `MID` of type `ST_Mid@1`.
+fn seed_mid(fixture: &Fixture, platform: PlcPlatform) {
+    seed_parameter(
+        fixture,
+        platform,
+        (MID, "MID"),
+        (MID_1, mid_value()),
+        Vec::new(),
+    );
+}
+
+/// The request `ST_Mid@1` to `ST_Mid@2` with a value of `deep` for each leaf of `BUF` and `MID`.
+fn mid_request() -> RebindTypeRevisionInput {
+    let input = request(MID_1, MID_2);
+    let input = with_value(input, (MID, &deep_leaf("")), &json!(0));
+    (1..=2).fold(input, |input, index| {
+        with_value(input, (BUF, &deep_leaf(&format!("[{index}]"))), &json!(0))
+    })
+}
+
+fn type_of(fixture: &Fixture, tag: &str) -> recipe_domain::plant::PlcTypeId {
+    stored_parameters(fixture)
+        .into_iter()
+        .find(|row| row.tag.as_str() == tag)
+        .unwrap()
+        .plc_type
+}
+
+#[tokio::test]
+async fn adr_0179_rebind_an_array_of_ten_levels_on_s7_gives_plt_018_and_changes_nothing() {
+    let (fixture, _) = mid_draft(PlcPlatform::S7_1500);
+    seed_buf(&fixture, PlcPlatform::S7_1500);
+    let before = DraftSnapshot::capture(&fixture);
+    let error = run(&fixture, mid_request()).await.unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            AppError::Plant(PlantError::TypeTooLarge { type_name, limit: TypeLimit::S7Nesting })
+                if type_name == "ARRAY[1..2] OF ST_Mid@2"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::PLT_018);
+    before.assert_unchanged(&fixture);
+    assert_eq!(fixture.store.journal(), lock_prefix());
+}
+
+#[tokio::test]
+async fn adr_0179_rebind_a_struct_of_eight_levels_on_s7_passes() {
+    let (fixture, _) = mid_draft(PlcPlatform::S7_1500);
+    seed_mid(&fixture, PlcPlatform::S7_1500);
+    run(&fixture, mid_request()).await.unwrap();
+    assert_eq!(type_of(&fixture, "MID"), tid(MID_2));
+}
+
+#[tokio::test]
+async fn adr_0179_rebind_an_array_of_ten_levels_on_twincat3_passes() {
+    let (fixture, _) = mid_draft(PlcPlatform::TwinCat3);
+    seed_buf(&fixture, PlcPlatform::TwinCat3);
+    run(&fixture, mid_request()).await.unwrap();
+    assert_ne!(type_of(&fixture, "BUF"), tid(MID_ARRAY_1));
+}
+
+#[tokio::test]
+async fn adr_0179_rebind_keeps_the_type_of_a_stored_parameter_that_it_does_not_move() {
+    let (fixture, top) = mid_draft(PlcPlatform::S7_1500);
+    seed_mid(&fixture, PlcPlatform::S7_1500);
+    fixture
+        .store
+        .seed_parameter(vid(DRAFT_VERSION), &over_limit_top_parameter(top));
+    run(&fixture, mid_request()).await.unwrap();
+    assert_eq!(type_of(&fixture, "MID"), tid(MID_2));
+    assert_eq!(type_of(&fixture, "TOP"), top);
 }

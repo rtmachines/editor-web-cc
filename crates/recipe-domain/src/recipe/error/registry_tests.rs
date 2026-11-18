@@ -6,13 +6,13 @@ use crate::error_codes::REGISTRY;
 use crate::identity::Login;
 use crate::plant::{LeafPath, PlcPlatform, S7Address, S7Width, TypeName};
 use crate::recipe::{
-    Expected, LangCode, ParameterKey, ParameterTag, RebindTargetReason, SnapshotError,
-    SnapshotItem, VersionStatus,
+    Expected, LangCode, ParameterKey, ParameterTag, RebindTargetReason, S7AccessReason,
+    SnapshotError, SnapshotItem, VersionStatus,
 };
 use std::collections::BTreeSet;
 
-/// The number of `E-RCP` domain rows: `E-RCP-001..029` and `E-RCP-050..057`.
-const DOC_ROW_COUNT: usize = 37;
+/// The number of `E-RCP` domain rows: `E-RCP-001..029` and `E-RCP-050..058`.
+const DOC_ROW_COUNT: usize = 38;
 
 /// One domain row of `reliability.md` section 1.2 that an owner `RecipeError::` names.
 struct DocRow {
@@ -365,6 +365,18 @@ fn parameter_samples() -> Vec<Sample> {
                 ("tag", tag().to_string()),
                 ("address", address().to_string()),
                 ("max", "16000".to_owned()),
+            ],
+        ),
+        (
+            RecipeError::S7TypeNotAddressable {
+                tag: tag(),
+                address: address(),
+                reason: S7AccessReason::ArrayBoundOutsideInt,
+            },
+            vec![
+                ("tag", tag().to_string()),
+                ("address", address().to_string()),
+                ("reason", S7AccessReason::ArrayBoundOutsideInt.to_string()),
             ],
         ),
         (

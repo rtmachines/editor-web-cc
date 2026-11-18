@@ -1,6 +1,6 @@
 # ADR-0166: Constructor for stored data
 
-Status: Accepted. Amends ADR-0120 (i) (parsers of a stored part) and ADR-0143 (i) and (i1) (stored names and stored types)
+Status: Accepted. Amends ADR-0120 (i) (parsers of a stored part) and ADR-0143 (i) and (i1) (stored names and stored types). Amended by ADR-0180 (items (m) to (s): `RuleSet::Earlier` skips the S7 rule of `WCHAR` and `WSTRING`)
 Date: 2026-11-14
 Deciders: project owner
 

@@ -6,7 +6,7 @@ mod catalog;
 mod clock;
 mod constraint;
 mod container;
-mod database;
+pub mod database;
 mod document;
 pub mod fault;
 pub mod fixtures;

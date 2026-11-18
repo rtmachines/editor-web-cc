@@ -2,17 +2,22 @@
 
 use std::collections::BTreeSet;
 
+use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
-    LeafPath, Machine, MemberName, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
-    RuleSet, TypeMember, TypeName, UnitPath, UnitUsage,
+    ArrayDimension, ArrayDimensions, LeafPath, Machine, MemberName, PlcPlatform, PlcType,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, TypeMember, TypeName, UnitPath,
+    UnitUsage,
 };
 use recipe_domain::recipe::{
-    LimitInput, ParameterKey, Recipe, RecipeDeleter, StoredParameter, StoredValue,
+    LimitInput, ParameterKey, Recipe, RecipeDeleter, RecipeError, S7AccessReason, StoredLimit,
+    StoredParameter, StoredValue,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 
+use crate::error::AppError;
 use crate::memory::fixtures::{Fixture, mid, parameter_on, pkey, tid, timestamp, uid, user, vid};
 use crate::memory::seed_type_id;
+use crate::recipe::rebind::fixtures::typed_struct_row;
 
 /// The number of the version that [`seed_speed_draft`] stores.
 pub(super) const DRAFT_VERSION: u128 = 101;
@@ -178,4 +183,123 @@ pub(super) fn seed_deleted(
         .store
         .seed_recipe(&recipe, machine.platform(), user(2));
     recipe
+}
+
+/// The global `BYTE` row that [`seed_standard_access_rows`] stores.
+pub(super) const BYTE_TYPE: u128 = 960;
+/// `ARRAY[32760..32770] OF BYTE`, a type with a bound above 32767.
+pub(super) const WIDE_ARRAY: u128 = 961;
+/// `ARRAY[40000..40001] OF BYTE`, the member of [`WIDE_STRUCT`].
+pub(super) const WIDE_MEMBER: u128 = 962;
+/// `ST_Buf@1` with the member `data` of type `ARRAY[40000..40001] OF BYTE`.
+pub(super) const WIDE_STRUCT: u128 = 963;
+/// `ARRAY[1..2,1..2,1..2] OF BOOL`, a `BOOL` array with three dimensions.
+pub(super) const CUBE_ARRAY: u128 = 964;
+/// `ST_Cube@1` with the member `bits` of type `ARRAY[1..2,1..2,1..2] OF BOOL`.
+pub(super) const CUBE_STRUCT: u128 = 965;
+
+/// An array row of the machine 1 with the bounds `(lower, upper)` of each dimension.
+fn array_row_with_bounds(
+    platform: PlcPlatform,
+    id: u128,
+    element: PlcTypeId,
+    bounds: &[(i32, i32)],
+) -> PlcType {
+    let dimensions = bounds
+        .iter()
+        .map(|(lower, upper)| ArrayDimension::parse(*lower, *upper).unwrap())
+        .collect();
+    PlcType::try_from(PlcTypeRecord {
+        id: tid(id),
+        machine: Some(mid(1)),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Array {
+            element,
+            dimensions: ArrayDimensions::parse(dimensions).unwrap(),
+        },
+    })
+    .unwrap()
+}
+
+/// Store the rows that the tests of ADR-0178 and ADR-0187 need: a global `BYTE` row, the arrays
+/// [`WIDE_ARRAY`] and [`CUBE_ARRAY`], and the structs [`WIDE_STRUCT`] and [`CUBE_STRUCT`].
+///
+/// The rows are rows from before the rules, so a stored parameter can hold them. The seed of the
+/// memory store has `BOOL` but no `BYTE`.
+pub(super) fn seed_standard_access_rows(fixture: &Fixture, platform: PlcPlatform) {
+    let byte = fixture.seed_primitive_type(BYTE_TYPE, platform, Primitive::Byte);
+    let bool_row = seed_type_id(Primitive::Bool, None).unwrap();
+    let rows = [
+        array_row_with_bounds(platform, WIDE_ARRAY, byte, &[(32_760, 32_770)]),
+        array_row_with_bounds(platform, WIDE_MEMBER, byte, &[(40_000, 40_001)]),
+        typed_struct_row(
+            platform,
+            (WIDE_STRUCT, "ST_Buf", 1),
+            None,
+            &[("data", tid(WIDE_MEMBER))],
+        ),
+        array_row_with_bounds(platform, CUBE_ARRAY, bool_row, &[(1, 2), (1, 2), (1, 2)]),
+        typed_struct_row(
+            platform,
+            (CUBE_STRUCT, "ST_Cube", 1),
+            None,
+            &[("bits", tid(CUBE_ARRAY))],
+        ),
+    ];
+    for row in &rows {
+        fixture.store.seed_type(row);
+    }
+}
+
+/// The value of [`WIDE_ARRAY`]: 11 bytes of 0.
+pub(super) fn wide_array_value() -> Value {
+    Value::Array(vec![json!(0); 11])
+}
+
+/// The value of [`WIDE_STRUCT`]: the member `data` with 2 bytes of 0.
+pub(super) fn wide_struct_value() -> Value {
+    json!({"data": [0, 0]})
+}
+
+/// A cube of booleans with `side` elements in each of the three dimensions.
+pub(super) fn bool_cube(side: usize) -> Value {
+    let row = Value::Array(vec![json!(false); side]);
+    let plane = Value::Array(vec![row; side]);
+    Value::Array(vec![plane; side])
+}
+
+/// The limit of every byte of a one-dimension array: 0 to 255 on the leaf path `[*]`.
+pub(super) fn byte_elements_limit() -> StoredLimit {
+    StoredLimit {
+        leaf_path: LeafPath::parse("[*]").unwrap(),
+        min: Some("0".parse().unwrap()),
+        max: Some("255".parse().unwrap()),
+        max_length: None,
+    }
+}
+
+/// Assert that `error` is `E-RCP-058` for the tag `tag` at `DB1.DBB0` with `reason`, and that its
+/// message names the tag, the address, and the reason (ADR-0178 (b), ADR-0187).
+pub(super) fn assert_not_addressable(error: &AppError, tag: &str, reason: S7AccessReason) {
+    assert_eq!(error.code(), ErrorCode::RCP_058);
+    assert!(
+        matches!(
+            error,
+            AppError::Recipe(RecipeError::S7TypeNotAddressable { reason: found, .. })
+                if *found == reason
+        ),
+        "{error:?}"
+    );
+    let reason_text = match reason {
+        S7AccessReason::ArrayBoundOutsideInt => "an array bound is outside -32768 to 32767",
+        S7AccessReason::BoolArrayWithThreeDimensions => {
+            "a BOOL array with three dimensions has no verified S7 layout"
+        }
+    };
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Parameter {tag} at DB1.DBB0 has a type that a data block with standard access cannot hold: {reason_text}. Change the type."
+        )
+    );
 }

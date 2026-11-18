@@ -29,7 +29,7 @@ pub use draft::{
     Retype, StoredDraft, StoredParameter, check_budgets,
 };
 pub(crate) use draft::{not_on_platform, overlap_partners};
-pub use error::{Budget, DraftError, PrecisionField, RecipeError, RecipeErrors};
+pub use error::{Budget, DraftError, PrecisionField, RecipeError, RecipeErrors, S7AccessReason};
 pub use ids::{ParameterId, ParameterKey, ParameterKeyReason, RecipeId, RecipeVersionId};
 pub use lang_code::{LangCode, Translation};
 pub use limit::{LimitFault, LimitInput, LimitList, LimitListReason, ProcessLimit, StoredLimit};

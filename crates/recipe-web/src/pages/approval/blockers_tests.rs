@@ -7,7 +7,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{LeafPath, MachineCode, PlantError, S7Address, UnitId};
 use recipe_domain::recipe::{
     ParameterKey, ParameterTag, PrecisionField, RecipeError, RecipeErrors, ReferenceNumber,
-    SnapshotError, SnapshotItem,
+    S7AccessReason, SnapshotError, SnapshotItem,
 };
 use uuid::Uuid;
 
@@ -163,6 +163,22 @@ fn approve_preview_blocker_of_the_plant_model_is_a_line_with_its_code_and_no_lin
     assert_eq!(view.code, "E-PLT-010");
     assert_eq!(view.href, "");
     assert!(!view.message.is_empty());
+}
+
+/// ADR-0178 (k): the blocker line of `E-RCP-058` shows its code and links its parameter.
+#[test]
+fn adr_0178_blocker_line_of_e_rcp_058_links_its_parameter() {
+    let fault = RecipeError::S7TypeNotAddressable {
+        tag: tag("ZONE_B"),
+        address: S7Address::parse("DB1.DBB0").unwrap(),
+        reason: S7AccessReason::ArrayBoundOutsideInt,
+    };
+    let lines = blocker_lines(AppError::Recipe(fault), &keys(), BASE).unwrap();
+    assert_eq!(codes_and_links(&lines), vec![(ErrorCode::RCP_058, href(2))]);
+    let views = lines.into_list(&Bundles::load().unwrap(), Lang::En).views;
+    let view = views.first().unwrap();
+    assert_eq!(view.code, "E-RCP-058");
+    assert_eq!(view.href, href(2).unwrap());
 }
 
 /// Return the three errors of the range rules (ADR-0116, ADR-0117) for the tag `ZONE_A`.

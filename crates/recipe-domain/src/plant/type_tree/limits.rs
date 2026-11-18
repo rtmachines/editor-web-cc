@@ -3,7 +3,7 @@
 use super::fixtures::{array_row, id, primitive_row, string_row, struct_row, types};
 use super::*;
 use crate::error_codes::ErrorCode;
-use crate::plant::limits::{MAX_DEPTH, MAX_LEAVES};
+use crate::plant::limits::{MAX_DEPTH, MAX_LEAVES, MAX_S7_NESTING};
 
 const INT: u128 = 1;
 
@@ -170,7 +170,15 @@ fn string_array_over_the_leaf_limit_names_the_string_length() {
 
 /// Metrics of a finished child row, built by hand to reach the overflow arms.
 fn finished(child: u128, leaves: u64, depth: u32) -> BTreeMap<PlcTypeId, Metrics> {
-    BTreeMap::from([(id(child), Metrics { leaves, depth })])
+    BTreeMap::from([(
+        id(child),
+        Metrics {
+            leaves,
+            depth,
+            s7_nesting: 0,
+            is_struct: false,
+        },
+    )])
 }
 
 #[test]
@@ -232,4 +240,180 @@ fn measure_reports_leaves_when_a_struct_overflows_u64() {
 fn render_root_of_a_missing_row_is_its_identifier() {
     // Fault injection: `walk` enters every row of the root chain before it renders the root.
     assert_eq!(render_root(id(99), &types(Vec::new())), id(99).to_string());
+}
+
+/// The S7 platforms of ADR-0179 (a).
+const S7_PLATFORMS: [PlcPlatform; 3] = [
+    PlcPlatform::S7_300,
+    PlcPlatform::S7_1200,
+    PlcPlatform::S7_1500,
+];
+
+/// Resolve `root` and return its count of the S7 levels.
+fn s7_count(root: u128, rows: Vec<PlcType>) -> u32 {
+    resolved(root, rows).unwrap().s7_nesting
+}
+
+#[test]
+fn adr_0179_max_s7_nesting_equals_the_value_of_section_7_11() {
+    assert_eq!(MAX_S7_NESTING, 8);
+}
+
+#[test]
+fn adr_0179_struct_counts_one_level() {
+    assert_eq!(s7_count(101, struct_chain(1)), 1);
+}
+
+#[test]
+fn adr_0179_chain_of_structs_counts_one_level_for_each_struct() {
+    assert_eq!(s7_count(101, struct_chain(5)), 5);
+}
+
+#[test]
+fn adr_0179_array_of_a_struct_counts_three_levels() {
+    let mut rows = struct_chain(1);
+    rows.push(array_row(10, 101, &[(1, 2)]));
+    assert_eq!(s7_count(10, rows), 3);
+}
+
+#[test]
+fn adr_0179_array_of_an_array_of_a_struct_counts_three_levels() {
+    let mut rows = struct_chain(1);
+    rows.push(array_row(10, 101, &[(1, 2)]));
+    rows.push(array_row(11, 10, &[(1, 2)]));
+    assert_eq!(s7_count(11, rows), 3);
+}
+
+#[test]
+fn adr_0179_array_of_a_primitive_or_a_string_counts_zero_levels() {
+    assert_eq!(s7_count(10, vec![array_row(10, INT, &[(1, 2)])]), 0);
+    let rows = vec![string_row(2, 10), array_row(10, 2, &[(1, 2)])];
+    assert_eq!(s7_count(10, rows), 0);
+    assert_eq!(s7_count(INT, Vec::new()), 0);
+}
+
+#[test]
+fn adr_0179_struct_with_an_array_of_a_struct_counts_one_and_three_levels() {
+    let rows = vec![
+        struct_row(101, "ST_Inner", &[("m", INT)]),
+        array_row(10, 101, &[(1, 2)]),
+        struct_row(102, "ST_Top", &[("a", 10)]),
+    ];
+    assert_eq!(s7_count(102, rows), 4);
+}
+
+#[test]
+fn adr_0179_count_is_the_largest_sum_on_one_path() {
+    let rows = vec![
+        struct_row(101, "ST_Leaf", &[("m", INT)]),
+        struct_row(102, "ST_Mid", &[("m", 101)]),
+        array_row(10, 101, &[(1, 2)]),
+        struct_row(
+            103,
+            "ST_Top",
+            &[("shallow", INT), ("deep", 102), ("wide", 10)],
+        ),
+    ];
+    // The path through `wide` counts 1 + 3. The path through `deep` counts 1 + 1 + 1.
+    assert_eq!(s7_count(103, rows), 4);
+}
+
+#[test]
+fn adr_0179_eight_levels_pass_on_s7_1500() {
+    let tree = resolved(101, struct_chain(8)).unwrap();
+    assert!(tree.check_s7_nesting(PlcPlatform::S7_1500).is_ok());
+}
+
+#[test]
+fn adr_0179_nine_levels_fail_with_s7_nesting_on_the_three_s7_platforms() {
+    let tree = resolved(101, struct_chain(9)).unwrap();
+    for platform in S7_PLATFORMS {
+        let result = tree.check_s7_nesting(platform).map(|()| tree.clone());
+        assert_eq!(
+            too_large(result),
+            Some(("ST_1@1".to_owned(), TypeLimit::S7Nesting)),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn adr_0179_nine_levels_of_one_array_of_a_struct_name_the_array_type() {
+    let mut rows = struct_chain(7);
+    rows.push(array_row(10, 101, &[(1, 2)]));
+    let tree = resolved(10, rows).unwrap();
+    assert_eq!(tree.s7_nesting, 9);
+    let result = tree
+        .check_s7_nesting(PlcPlatform::S7_1500)
+        .map(|()| tree.clone());
+    assert_eq!(
+        too_large(result),
+        Some(("ARRAY[1..2] OF ST_1@1".to_owned(), TypeLimit::S7Nesting))
+    );
+}
+
+#[test]
+fn adr_0179_nine_levels_pass_on_twincat3_and_codesys() {
+    let tree = resolved(101, struct_chain(9)).unwrap();
+    assert!(tree.check_s7_nesting(PlcPlatform::TwinCat3).is_ok());
+    assert!(tree.check_s7_nesting(PlcPlatform::CodesysIec).is_ok());
+}
+
+#[test]
+fn adr_0179_resolve_does_not_apply_the_s7_limit() {
+    assert!(resolved(101, struct_chain(9)).is_ok());
+}
+
+#[test]
+fn adr_0179_measure_reports_depth_when_the_s7_count_overflows_u32() {
+    // Fault injection: `check_limits` keeps every real child at depth 32 or less.
+    let row = struct_row(10, "ST_A", &[("x", 2)]);
+    let mut done = finished(2, 1, 0);
+    if let Some(metrics) = done.get_mut(&id(2)) {
+        metrics.s7_nesting = u32::MAX;
+    }
+    let error = measure(&row, &done).unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge {
+            limit: TypeLimit::Depth,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn adr_0179_render_of_a_string_leaf_root_shows_its_length() {
+    let rows = vec![string_row(2, 10)];
+    let tree = resolved(2, rows).unwrap();
+    assert_eq!(render_node(tree.root()), "STRING(10)");
+}
+
+#[test]
+fn adr_0179_expr_count_adds_two_levels_for_an_array_over_a_struct_only() {
+    let tree = resolved(101, struct_chain(7)).unwrap();
+    let plain = TypeExpr::parse("ST_1@1").unwrap();
+    let array = TypeExpr::parse("ARRAY[1..2] OF ST_1@1").unwrap();
+    assert!(
+        tree.check_s7_nesting_of_expr(PlcPlatform::S7_1500, &plain)
+            .is_ok()
+    );
+    let error = tree
+        .check_s7_nesting_of_expr(PlcPlatform::S7_1500, &array)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge { ref type_name, limit: TypeLimit::S7Nesting }
+            if type_name == "ARRAY[1..2] OF ST_1@1"
+    ));
+    assert!(
+        tree.check_s7_nesting_of_expr(PlcPlatform::TwinCat3, &array)
+            .is_ok()
+    );
+    let leaf = resolved(INT, Vec::new()).unwrap();
+    let ints = TypeExpr::parse("ARRAY[1..2] OF INT").unwrap();
+    assert!(
+        leaf.check_s7_nesting_of_expr(PlcPlatform::S7_1500, &ints)
+            .is_ok()
+    );
 }

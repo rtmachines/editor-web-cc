@@ -272,6 +272,8 @@ mod reason_tests;
 #[cfg(test)]
 mod recipe_answer_tests;
 #[cfg(test)]
+mod recipe_expected_tests;
+#[cfg(test)]
 mod recipe_tests;
 #[cfg(test)]
 mod refused_page_tests;

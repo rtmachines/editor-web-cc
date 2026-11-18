@@ -167,6 +167,12 @@ fn type_limits_show_the_numbers_of_section_7_11() {
 }
 
 #[test]
+fn adr_0179_the_s7_nesting_limit_names_eight_levels_of_the_s7_count() {
+    assert_eq!(TypeLimit::S7Nesting.to_string(), "8 levels of the S7 count");
+    assert_eq!(TypeLimit::Depth.to_string(), "32 levels");
+}
+
+#[test]
 fn type_errors_have_their_code_registry_row_and_text() {
     let name = TypeName::parse("ST_Zone").unwrap();
     let member = MemberName::parse("speed").unwrap();

@@ -10,8 +10,8 @@ use std::slice;
 use crate::error_codes::ErrorCode;
 use crate::plant::{LeafPath, RuleSet, S7Address, TypeTree};
 use crate::recipe::draft::{
-    check_data_block_rule, check_end_rule, check_faults, leaf_error, stored_limits_under,
-    stored_value_under,
+    check_data_block_rule, check_end_rule, check_faults, check_standard_access_rule, leaf_error,
+    stored_limits_under, stored_value_under,
 };
 use crate::recipe::{
     DraftError, Expected, Parameter, ParameterTag, ParameterValue, PrecisionField, RecipeError,
@@ -48,7 +48,7 @@ impl RuleField {
 /// A stored part that passes the earlier rule set and breaks the current rule set (ADR-0118 (c)).
 ///
 /// The error holds the code and the values of the field line. Its code is `E-RCP-005`,
-/// `E-RCP-006`, `E-RCP-055`, `E-RCP-056`, or `E-RCP-057`.
+/// `E-RCP-006`, `E-RCP-055`, `E-RCP-056`, `E-RCP-057`, or `E-RCP-058`.
 ///
 /// The check of a whole version adds `E-RCP-022` on the address. The version check finds an
 /// overlap of two addresses, so the single-parameter read check never returns that code
@@ -153,8 +153,8 @@ impl From<DraftError> for StructureFault {
 /// The check reuses the stored parsers and the address rules of the commands. It needs no draft.
 ///
 /// The faults come in this order: the value, the limit rows in stored order (`min` before `max`),
-/// and the address (`E-RCP-057` before `E-RCP-056`). The value gives one fault for each leaf that
-/// breaks the current set, in tree order. Each fault keeps its own leaf and code.
+/// and the address (`E-RCP-057`, then `E-RCP-056`, then `E-RCP-058`). The value gives one fault for
+/// each leaf that breaks the current set, in tree order. Each fault keeps its own leaf and code.
 ///
 /// # Errors
 ///
@@ -294,7 +294,8 @@ fn row_error(parameter: &Parameter, row: &StoredLimit, tree: &TypeTree) -> Resul
     .map(|_| ())
 }
 
-/// Check the data block rule and the end rule of the address (ADR-0116). A fault is a rule fault.
+/// Check the data block rule, the end rule, and the standard-access rule of the address
+/// (ADR-0116, ADR-0178, ADR-0187). A fault is a rule fault.
 fn address_faults(
     parameter: &Parameter,
     tree: &TypeTree,
@@ -307,6 +308,7 @@ fn address_faults(
         Err(DraftError::Recipe(error)) => faults.push(error),
         Err(other) => return Err(other.into()),
     }
+    faults.extend(check_standard_access_rule(tag, address, tree).err());
     Ok(faults
         .into_iter()
         .map(|error| RuleFault {

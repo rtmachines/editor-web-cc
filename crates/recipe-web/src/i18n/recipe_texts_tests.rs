@@ -46,6 +46,7 @@ const RCP_ERROR_KEYS: &[&str] = &[
     "error-E-RCP-055",
     "error-E-RCP-056",
     "error-E-RCP-057",
+    "error-E-RCP-058",
 ];
 
 /// The error codes `E-PLT` that the recipe pages add to D13.
@@ -97,6 +98,8 @@ const EXPECTED_KEYS: &[&str] = &[
     "rebind-reason-not-newer",
     "rebind-reason-not-used",
     "rebind-reason-plan-mismatch",
+    "s7-access-reason-array-bound",
+    "s7-access-reason-bool-array-3d",
 ];
 
 /// The states, the missing messages, and the operation names of D13.

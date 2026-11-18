@@ -476,3 +476,33 @@ fn plant_error_args_give_each_connection_error_its_data() {
         assert_eq!(data_args(&error), expected, "{error:?}");
     }
 }
+
+#[tokio::test]
+async fn adr_0179_the_message_of_the_s7_nesting_limit_names_eight_levels() {
+    let error = PlantError::TypeTooLarge {
+        type_name: "ST_Top@1".to_owned(),
+        limit: TypeLimit::S7Nesting,
+    };
+    let en = body_of(error.clone(), Lang::En).await;
+    let pl = body_of(error, Lang::Pl).await;
+    assert!(
+        en.contains("larger than the limit 8 levels of the S7 count."),
+        "{en}"
+    );
+    assert!(
+        pl.contains("przekracza limit 8 poziomów liczenia S7."),
+        "{pl}"
+    );
+}
+
+#[tokio::test]
+async fn adr_0179_the_depth_limit_still_names_thirty_two_levels() {
+    let error = PlantError::TypeTooLarge {
+        type_name: "ST_Top@1".to_owned(),
+        limit: TypeLimit::Depth,
+    };
+    let en = body_of(error.clone(), Lang::En).await;
+    let pl = body_of(error, Lang::Pl).await;
+    assert!(en.contains("larger than the limit 32 levels."), "{en}");
+    assert!(pl.contains("przekracza limit 32 poziomów."), "{pl}");
+}

@@ -5,7 +5,7 @@
 use crate::plant::limits::{MAX_DEPTH, MAX_LEAVES};
 use crate::plant::{ArrayDimensions, PlantError, PlcTypeId, TypeLimit};
 
-use super::{TypeNode, TypeTree};
+use super::{S7_ARRAY_OF_STRUCT_EXTRA, TypeNode, TypeTree};
 
 impl TypeTree {
     /// Build the tree of this type after a rebind from the struct `from` to the tree `to`.
@@ -34,25 +34,18 @@ impl TypeTree {
             type_name: name.to_string(),
             limit,
         };
-        let leaf_count = chain
-            .iter()
-            .try_fold(u64::from(to.leaf_count()), |leaves, (_, dimensions)| {
-                dimensions
-                    .element_count()
-                    .and_then(|count| leaves.checked_mul(count))
-            })
-            .and_then(|leaves| u32::try_from(leaves).ok())
+        let leaf_count = chain_leaves(&chain, to.leaf_count())
             .filter(|leaves| *leaves <= MAX_LEAVES)
             .ok_or_else(|| too_large(TypeLimit::Leaves))?;
-        let depth = chain
-            .iter()
-            .try_fold(to.depth(), |depth, (_, dimensions)| {
-                u32::try_from(dimensions.len())
-                    .ok()
-                    .and_then(|levels| depth.checked_add(levels))
-            })
+        let depth = chain_depth(&chain, to.depth())
             .filter(|depth| *depth <= MAX_DEPTH)
             .ok_or_else(|| too_large(TypeLimit::Depth))?;
+        let s7_nesting = if chain.is_empty() {
+            Some(to.s7_nesting)
+        } else {
+            to.s7_nesting.checked_add(S7_ARRAY_OF_STRUCT_EXTRA)
+        }
+        .ok_or_else(|| too_large(TypeLimit::Depth))?;
         let root =
             chain
                 .into_iter()
@@ -69,8 +62,36 @@ impl TypeTree {
             root,
             leaf_count,
             depth,
+            s7_nesting,
         }))
     }
+}
+
+/// Multiply the leaves of the new struct by the element count of every array of the chain.
+///
+/// Returns `None` on an overflow.
+fn chain_leaves(chain: &[(PlcTypeId, &ArrayDimensions)], struct_leaves: u32) -> Option<u32> {
+    chain
+        .iter()
+        .try_fold(u64::from(struct_leaves), |leaves, (_, dimensions)| {
+            dimensions
+                .element_count()
+                .and_then(|count| leaves.checked_mul(count))
+        })
+        .and_then(|leaves| u32::try_from(leaves).ok())
+}
+
+/// Add the levels of every array of the chain to the depth of the new struct.
+///
+/// Returns `None` on an overflow.
+fn chain_depth(chain: &[(PlcTypeId, &ArrayDimensions)], struct_depth: u32) -> Option<u32> {
+    chain
+        .iter()
+        .try_fold(struct_depth, |depth, (_, dimensions)| {
+            u32::try_from(dimensions.len())
+                .ok()
+                .and_then(|levels| depth.checked_add(levels))
+        })
 }
 
 /// Collect the array nodes from the root down to the struct `from`, outermost first.

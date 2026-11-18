@@ -7,7 +7,7 @@ use super::super::add::support::{
 use super::super::support::{address, check_every, key, stored_draft_with, stored_parameter, tag};
 use crate::error_codes::{ErrorCode, REGISTRY};
 use crate::plant::fixtures::{
-    id, machine, on_platform, primitive_row, string_row, struct_row, types, types_for,
+    array_row, id, machine, on_platform, primitive_row, string_row, struct_row, types, types_for,
 };
 use crate::plant::{PlcPlatform, PlcType, Primitive, S7Width, TypeTree, TypeTrees};
 use crate::recipe::{Draft, DraftError, RecipeError, StoredParameter, ValueInput, VersionState};
@@ -21,6 +21,32 @@ const ST_FLAGS: u128 = 6;
 const ST_MIX: u128 = 7;
 const STRING_254: u128 = 8;
 const DINT: u128 = 9;
+/// `ARRAY[32766..32767] OF BYTE`. The upper bound is the highest that standard access holds.
+const UPPER_EDGE: u128 = 10;
+/// `ARRAY[-32768..-32767] OF BYTE`. The lower bound is the lowest that standard access holds.
+const LOWER_EDGE: u128 = 11;
+/// `ARRAY[32767..32768] OF BYTE`. Only the upper bound is outside.
+const UPPER_WIDE: u128 = 12;
+/// `ARRAY[-32769..-32768] OF BYTE`. Only the lower bound is outside.
+const LOWER_WIDE: u128 = 13;
+/// A struct with the member `UPPER_WIDE`.
+const ST_WIDE: u128 = 14;
+/// A struct with the member `UPPER_EDGE`.
+const ST_EDGE: u128 = 15;
+/// `ARRAY[1..2] OF UPPER_WIDE`.
+const ARRAY_OF_WIDE: u128 = 16;
+/// `ARRAY[1..2] OF ST_WIDE`.
+const ARRAY_OF_ST_WIDE: u128 = 17;
+/// `ARRAY[1..2, 1..2, 1..2] OF BOOL`.
+const BOOL_3D: u128 = 18;
+/// `ARRAY[1..2, 1..2] OF BOOL`.
+const BOOL_2D: u128 = 19;
+/// A struct with the member `BOOL_3D`.
+const ST_BOOL_3D: u128 = 20;
+/// `ARRAY[1..2] OF ST_BOOL_3D`.
+const ARRAY_OF_ST_BOOL_3D: u128 = 21;
+/// A struct with the member `BOOL_2D`.
+const ST_BOOL_2D: u128 = 22;
 const UNKNOWN: u128 = 99;
 
 /// The type rows of the tests. The trees come from the shared fixtures.
@@ -39,6 +65,19 @@ fn rows() -> Vec<PlcType> {
         struct_row(ST_MIX, "ST_Mix", &[("a", BOOL), ("b", INT), ("c", BYTE)]),
         string_row(STRING_254, 254),
         primitive_row(DINT, Primitive::Dint),
+        array_row(UPPER_EDGE, BYTE, &[(32_766, 32_767)]),
+        array_row(LOWER_EDGE, BYTE, &[(-32_768, -32_767)]),
+        array_row(UPPER_WIDE, BYTE, &[(32_767, 32_768)]),
+        array_row(LOWER_WIDE, BYTE, &[(-32_769, -32_768)]),
+        struct_row(ST_WIDE, "ST_Wide", &[("a", UPPER_WIDE)]),
+        struct_row(ST_EDGE, "ST_Edge", &[("a", UPPER_EDGE)]),
+        array_row(ARRAY_OF_WIDE, UPPER_WIDE, &[(1, 2)]),
+        array_row(ARRAY_OF_ST_WIDE, ST_WIDE, &[(1, 2)]),
+        array_row(BOOL_3D, BOOL, &[(1, 2), (1, 2), (1, 2)]),
+        array_row(BOOL_2D, BOOL, &[(1, 2), (1, 2)]),
+        struct_row(ST_BOOL_3D, "ST_Bool3d", &[("a", BOOL_3D)]),
+        array_row(ARRAY_OF_ST_BOOL_3D, ST_BOOL_3D, &[(1, 2)]),
+        struct_row(ST_BOOL_2D, "ST_Bool2d", &[("a", BOOL_2D)]),
     ]
 }
 
@@ -48,7 +87,29 @@ fn trees() -> TypeTrees {
 
 fn trees_on(platform: PlcPlatform) -> TypeTrees {
     let ids = [
-        INT, REAL, BOOL, BYTE, STRING_3, ST_FLAGS, ST_MIX, STRING_254, DINT, UNKNOWN,
+        INT,
+        REAL,
+        BOOL,
+        BYTE,
+        STRING_3,
+        ST_FLAGS,
+        ST_MIX,
+        STRING_254,
+        DINT,
+        UPPER_EDGE,
+        LOWER_EDGE,
+        UPPER_WIDE,
+        LOWER_WIDE,
+        ST_WIDE,
+        ST_EDGE,
+        ARRAY_OF_WIDE,
+        ARRAY_OF_ST_WIDE,
+        BOOL_3D,
+        BOOL_2D,
+        ST_BOOL_3D,
+        ARRAY_OF_ST_BOOL_3D,
+        ST_BOOL_2D,
+        UNKNOWN,
     ]
     .map(id);
     TypeTrees::resolve(
@@ -684,3 +745,7 @@ fn adr_0140_a_stored_data_block_above_59999_does_not_block_add_parameter_on_s7_1
     assert!(added.is_ok(), "{added:?}");
     assert_eq!(draft.parameters().len(), 2);
 }
+
+mod adr_0178;
+mod adr_0187;
+mod support;

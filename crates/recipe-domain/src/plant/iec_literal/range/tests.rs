@@ -385,6 +385,13 @@ fn ldt_range_per_platform() {
         try_count(p, PlcPlatform::S7_1500, -1),
         Err(IecLiteralReason::OutOfRange)
     );
+    for rules in [RuleSet::Current, RuleSet::Earlier] {
+        assert_eq!(
+            count_under(p, PlcPlatform::S7_1500, I63_MAX + 1, rules),
+            Err(IecLiteralReason::OutOfRange),
+            "{rules:?}"
+        );
+    }
     assert_absent(p, &[PlcPlatform::S7_1200, PlcPlatform::S7_300]);
 }
 
@@ -570,6 +577,18 @@ fn adr_0139_the_literal_after_the_last_ldt_and_ldate_is_out_of_range() {
             "{platform:?}"
         );
     }
+}
+
+#[test]
+fn adr_0139_the_ldt_literal_after_the_last_s7_1500_count_is_out_of_range() {
+    assert_eq!(
+        parse(
+            Primitive::Ldt,
+            PlcPlatform::S7_1500,
+            "LDT#2262-04-11-23:47:16.854775808"
+        ),
+        Err(IecLiteralReason::OutOfRange)
+    );
 }
 
 #[test]

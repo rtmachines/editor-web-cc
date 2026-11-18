@@ -5,15 +5,17 @@ use serde_json::json;
 use super::super::test_support::{
     BIG_1, BIG_2, BIG_ARRAY, BIG_ARRAY_NEW, DINT, FILL, INT, ZONE_2, ZONE_3, ZONES_2, ZONES_2_NEW,
     ZONES_4, ZONES_4_NEW, draft_on, draft_with, key, limit, number, param, plan_of, request,
-    request_with, trees, trees_on, trees_with_zone_3,
+    request_with, request_with_texts, trees, trees_on, trees_with_zone_3,
 };
 use crate::error_codes::ErrorCode;
-use crate::plant::fixtures::{dimensions, id};
-use crate::plant::{PlcPlatform, PlcTypeId, S7Address, TypeTrees};
+use crate::plant::fixtures::{
+    array_row, dimensions, id, machine, on_platform, primitive_row, struct_row_revision, types_for,
+};
+use crate::plant::{PlcPlatform, PlcTypeId, Primitive, S7Address, TypeTrees};
 use crate::recipe::draft::support::stored_parameter;
 use crate::recipe::{
-    ArrayShape, Budget, Draft, DraftError, LangCode, ParameterKey, RebindPlan, RebindTargetReason,
-    RecipeError, Translation,
+    ArrayShape, Budget, Draft, DraftError, Expected, LangCode, ParameterKey, RebindPlan,
+    RebindTargetReason, RecipeError, Translation,
 };
 use crate::text::Text;
 
@@ -580,6 +582,143 @@ fn adr_0140_rebind_of_a_parameter_in_the_data_block_59999_on_s7_1500_applies() {
 
     assert!(result.is_ok(), "{result:?}");
     assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(ZONE_3));
+}
+
+/// `BYTE`, `ARRAY[40000..40001] OF BYTE`, and the two revisions of `ST_Wide` for the tests of
+/// ADR-0178.
+const WIDE_BYTE: u128 = 70;
+const WIDE_ARRAY: u128 = 71;
+const WIDE_1: u128 = 72;
+const WIDE_2: u128 = 73;
+
+/// The trees of `ST_Wide@1` with no member and `ST_Wide@2` with the member `ARRAY[40000..40001]`.
+fn wide_trees() -> TypeTrees {
+    let platform = PlcPlatform::S7_1500;
+    let rows = vec![
+        primitive_row(WIDE_BYTE, Primitive::Byte),
+        array_row(WIDE_ARRAY, WIDE_BYTE, &[(40_000, 40_001)]),
+        struct_row_revision(WIDE_1, "ST_Wide", 1, &[("a", WIDE_BYTE)]),
+        struct_row_revision(
+            WIDE_2,
+            "ST_Wide",
+            2,
+            &[("a", WIDE_BYTE), ("wide", WIDE_ARRAY)],
+        ),
+    ];
+    TypeTrees::resolve(
+        [WIDE_BYTE, WIDE_ARRAY, WIDE_1, WIDE_2].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// Rebind `SPEED` from `ST_Wide@1` to `ST_Wide@2`, with or without an S7 address.
+fn rebind_to_wide(address: Option<&str>) -> (Draft, Result<(), DraftError>) {
+    let mut speed = param(1, "SPEED", WIDE_1, json!({"a": 1}), Vec::new());
+    speed.s7_address = address.map(|text| S7Address::parse(text).unwrap());
+    let mut draft = draft_on(PlcPlatform::S7_1500, vec![speed]);
+    let wide = wide_trees();
+    let values = [
+        (1, ".wide[40000]", number(1)),
+        (1, ".wide[40001]", number(2)),
+    ];
+    let request = request_with(WIDE_1, WIDE_2, &values);
+    let plan = draft.plan_rebind(&request, &wide).unwrap();
+    let result = draft
+        .apply_rebind(plan, &BTreeMap::new(), &wide)
+        .map(|_| ());
+    (draft, result)
+}
+
+#[test]
+fn adr_0178_rebind_to_a_struct_with_a_wide_bound_fails() {
+    let (draft, result) = rebind_to_wide(Some("DB1.DBB0"));
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_058);
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_1));
+}
+
+#[test]
+fn adr_0178_d_rebind_with_a_wrong_width_and_a_wide_bound_gives_e_rcp_054_first() {
+    let (draft, result) = rebind_to_wide(Some("DB1.DBW0"));
+
+    let error = result.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_054);
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_1));
+}
+
+#[test]
+fn adr_0178_rebind_to_a_struct_with_a_wide_bound_applies_without_an_address() {
+    let (draft, result) = rebind_to_wide(None);
+
+    assert!(result.is_ok(), "{result:?}");
+    assert_eq!(draft.parameter(key(1)).unwrap().plc_type(), id(WIDE_2));
+}
+
+/// `WCHAR` and the two revisions of `ST_Mark` for the tests of ADR-0180 (e).
+const MARK_CHAR: u128 = 74;
+const MARK_1: u128 = 75;
+const MARK_2: u128 = 76;
+
+/// The trees of `ST_Mark@1` with the member `a` and `ST_Mark@2` with the new member `mark`.
+fn mark_trees() -> TypeTrees {
+    let platform = PlcPlatform::S7_1500;
+    let rows = vec![
+        primitive_row(INT, Primitive::Int),
+        primitive_row(MARK_CHAR, Primitive::Wchar),
+        struct_row_revision(MARK_1, "ST_Mark", 1, &[("a", INT)]),
+        struct_row_revision(MARK_2, "ST_Mark", 2, &[("a", INT), ("mark", MARK_CHAR)]),
+    ];
+    TypeTrees::resolve(
+        [INT, MARK_CHAR, MARK_1, MARK_2].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    )
+}
+
+/// Plan the rebind of `SPEED` from `ST_Mark@1` to `ST_Mark@2` with the text of the new `mark`.
+fn plan_mark(text: &str) -> Result<RebindPlan, DraftError> {
+    let speed = param(1, "SPEED", MARK_1, json!({"a": 1}), Vec::new());
+    let draft = draft_on(PlcPlatform::S7_1500, vec![speed]);
+    let request = request_with_texts(MARK_1, MARK_2, &[(1, ".mark", text)]);
+    draft.plan_rebind(&request, &mark_trees())
+}
+
+/// ADR-0180 (e): the text of a new `WCHAR` member above `U+D7FF` gives `E-RCP-005` on `S7_1500`.
+#[test]
+fn adr_0180_rebind_with_a_new_wchar_member_u_e000_gives_e_rcp_005() {
+    let error = plan_mark("\u{E000}").unwrap_err();
+
+    let entries = match error {
+        DraftError::List(list) => Some(list.into_vec()),
+        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+    }
+    .expect("a list of entries");
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].code(), ErrorCode::RCP_005);
+    assert!(
+        matches!(
+            &entries[0],
+            RecipeError::ValueShapeMismatch { leaf, expected: Expected::Char { max: 0xD7FF }, .. }
+                if leaf.to_string() == ".mark"
+        ),
+        "{:?}",
+        entries[0]
+    );
+}
+
+/// ADR-0180 (e): the text `U+D7FF` passes, and the apply writes the value.
+#[test]
+fn adr_0180_rebind_with_a_new_wchar_member_u_d7ff_applies() {
+    let plan = plan_mark("\u{D7FF}").unwrap();
+    let speed = param(1, "SPEED", MARK_1, json!({"a": 1}), Vec::new());
+    let mut draft = draft_on(PlcPlatform::S7_1500, vec![speed]);
+
+    draft
+        .apply_rebind(plan, &BTreeMap::new(), &mark_trees())
+        .unwrap();
+
+    let value = draft.parameter(key(1)).unwrap().value().as_json().clone();
+    assert_eq!(value, json!({"a": 1, "mark": "\u{D7FF}"}));
 }
 
 #[test]

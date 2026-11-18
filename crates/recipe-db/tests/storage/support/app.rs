@@ -75,6 +75,35 @@ impl App {
         let database = TestDatabase::create().await;
         let mut migrator = database.connect(Role::Migrator).await;
         let user_id = fixtures::user(&mut migrator).await;
+        Self::assemble(database, migrator, user_id, pool).await
+    }
+
+    /// Build the pool as `recipe_app` and the context over an existing database.
+    ///
+    /// The database holds the administrator of the fixture already, so `over` reads his `id` from
+    /// `app_user` and inserts no user. A restored dump is an example of such a database.
+    pub async fn over(database: TestDatabase) -> Self {
+        let mut migrator = database.connect(Role::Migrator).await;
+        let user_id: Uuid = sqlx::query_scalar(
+            "SELECT id FROM app_user WHERE role = 'administrator' ORDER BY login LIMIT 1",
+        )
+        .fetch_one(&mut migrator)
+        .await
+        .unwrap();
+        Self::assemble(database, migrator, user_id, &PoolSettings::default()).await
+    }
+
+    /// The name of the test database. `pg_dump` takes this name.
+    pub fn database_name(&self) -> &str {
+        self._database.name()
+    }
+
+    async fn assemble(
+        database: TestDatabase,
+        migrator: PgConnection,
+        user_id: Uuid,
+        pool: &PoolSettings,
+    ) -> Self {
         let connected = Database::connect(&database.target(Role::App), pool)
             .await
             .unwrap();
@@ -223,5 +252,28 @@ impl App {
     /// Assert that the head and the number of audit rows did not change.
     pub async fn assert_chain_unchanged(&mut self, before: &ChainHead) {
         assert_eq!(&self.head().await, before);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn over_takes_the_administrator_of_the_database_and_inserts_no_user() {
+        let database = TestDatabase::create().await;
+        let mut migrator = database.connect(Role::Migrator).await;
+        let administrator = fixtures::user(&mut migrator).await;
+        let name = database.name().to_owned();
+
+        let mut app = App::over(database).await;
+
+        assert_eq!(app.user.user(), UserId::from(administrator));
+        assert_eq!(app.database_name(), name);
+        let users: i64 = sqlx::query_scalar("SELECT count(*) FROM app_user")
+            .fetch_one(app.admin())
+            .await
+            .unwrap();
+        assert_eq!(users, 1);
     }
 }

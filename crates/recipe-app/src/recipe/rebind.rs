@@ -72,6 +72,8 @@ impl RebindTypeRevision {
     /// Returns one list of `RebindNeedsValue` (`E-RCP-028`) and `RebindDropsLimit` (`E-RCP-029`).
     /// Returns `RecipeError::ValueShapeMismatch` (`E-RCP-005`) for a sent value that does not fit.
     /// Returns `PlantError::TypeTooLarge` (`E-PLT-018`) for a target tree above a size limit.
+    /// On an S7 platform, it also returns `E-PLT-018` with `TypeLimit::S7Nesting` and the text of
+    /// the resulting type of a moved parameter above the S7 count of 8 levels (ADR-0179 (f)).
     /// Returns `AppError::Storage` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
@@ -148,6 +150,11 @@ impl RebindTypeRevision {
             new_member_values: input.new_member_values,
         };
         let plan = open.draft.plan_rebind(&request, &trees)?;
+        // ADR-0179 (f): only a moved parameter counts, so a stored type over the limit stays.
+        let platform = open.draft.platform();
+        for tree in plan.parameters().values() {
+            tree.check_s7_nesting(platform)?;
+        }
         let keys = rebind_locks(&plan.array_shapes());
         if !keys.is_empty() {
             open.tx.types().lock_derived_types(machine, &keys).await?;
@@ -156,6 +163,10 @@ impl RebindTypeRevision {
     }
 }
 
+#[cfg(test)]
+mod adr_0178_tests;
+#[cfg(test)]
+mod adr_0186_tests;
 #[cfg(test)]
 pub(super) mod fixtures;
 #[cfg(test)]

@@ -12,8 +12,8 @@ use recipe_domain::plant::{
 use super::tests::{fixture, input, own_rows, real, run};
 use super::{DefineUdtInput, DefineUdtMode, insert_struct_row, struct_row};
 use crate::error::{AppError, Missing};
-use crate::memory::Fault;
-use crate::memory::fixtures::{Fixture, mid, tid};
+use crate::memory::fixtures::{Fixture, lock_line, mid, tid};
+use crate::memory::{Fault, JournalEntry, LockMode};
 use crate::ports::{Isolation, Transaction};
 
 #[tokio::test]
@@ -327,7 +327,7 @@ async fn a_revision_of_a_stored_struct_with_a_reserved_name_gives_plt_013_and_wr
 }
 
 #[tokio::test]
-async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lock() {
+async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_advisory_lock() {
     let fixture = two_machines();
     fixture
         .store
@@ -350,7 +350,18 @@ async fn a_member_type_with_a_reserved_struct_name_gives_plt_013_and_takes_no_lo
             ..
         })
     ));
-    assert!(fixture.store.journal().is_empty());
+    assert_eq!(
+        fixture.store.journal(),
+        vec![
+            JournalEntry::Begin(Isolation::ReadOnly),
+            JournalEntry::Begin(Isolation::ReadCommitted),
+            lock_line(
+                "machine",
+                LockMode::ForShare,
+                mid(STORED_MACHINE).to_string()
+            ),
+        ]
+    );
     assert!(fixture.store.audit_entries().is_empty());
     assert_eq!(
         structs_of(&fixture, STORED_MACHINE),

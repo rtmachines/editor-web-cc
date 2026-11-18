@@ -8,7 +8,7 @@ use recipe_domain::recipe::{
 };
 use recipe_domain::text::{LongText, Text};
 
-use super::definition_steps::{lock_live_unit, map_tag_error, resolve_type};
+use super::definition_steps::{lock_live_unit, map_tag_error, require_s7_nesting, resolve_type};
 use super::draft_session::{DraftOutput, DraftTarget, MachineLock, OpenDraft, TouchedDraft};
 use super::queries::value_text;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
@@ -106,16 +106,17 @@ impl AddParameter {
         input: AddParameterInput,
     ) -> Result<AddParameterOutput, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
-        require_current_type(&input.type_expr)?;
         let target = DraftTarget {
             reference: &input.reference,
             number: input.number,
             expected_row_version: input.expected_row_version,
         };
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::Shared).await?;
+        require_current_type(&input.type_expr, open.draft.platform())?;
         input
             .type_expr
             .require_no_nested_array(open.draft.platform())?;
+        require_s7_nesting(&open, &input.type_expr)?;
         let unit = lock_live_unit(&mut open, &input.unit_path).await?;
         let resolved = resolve_type(&mut open, &input.type_expr, audit_context(user, meta)).await?;
         let key = ParameterKey::from(random_uuid()?);

@@ -265,6 +265,7 @@ fn tags_of(error: &RecipeError) -> Vec<&ParameterTag> {
         | RecipeError::S7AddressWidthMismatch { tag, .. }
         | RecipeError::S7AddressPastBlockEnd { tag, .. }
         | RecipeError::S7DataBlockOutOfRange { tag, .. }
+        | RecipeError::S7TypeNotAddressable { tag, .. }
         | RecipeError::TypeRevisionOutdated { tag, .. } => vec![tag],
         _ => Vec::new(),
     }

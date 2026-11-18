@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::LeafPath;
 use recipe_domain::recipe::{
-    Budget, Expected, RebindTargetReason, RecipeError, SnapshotItem, VersionStatus,
+    Budget, Expected, RebindTargetReason, RecipeError, S7AccessReason, SnapshotItem, VersionStatus,
 };
 
 use super::LineArg;
@@ -209,6 +209,9 @@ fn address_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
             ("address", address.to_string()),
             ("size", size.to_string()),
         ],
+        RecipeError::S7TypeNotAddressable { tag, address, .. } => {
+            vec![("tag", tag.to_string()), ("address", address.to_string())]
+        }
         RecipeError::S7AddressWidthMismatch {
             tag,
             address,
@@ -258,6 +261,9 @@ fn word_arg(error: &RecipeError) -> Option<(&'static str, LineArg)> {
         RecipeError::RebindTargetInvalid { reason, .. } => {
             Some(("reason", LineArg::word(rebind_key(*reason), reason)))
         }
+        RecipeError::S7TypeNotAddressable { reason, .. } => {
+            Some(("reason", LineArg::word(s7_access_key(*reason), reason)))
+        }
         _other => None,
     }
 }
@@ -294,6 +300,14 @@ const fn rebind_key(reason: RebindTargetReason) -> &'static str {
     }
 }
 
+/// Return the key of the reason why a type does not fit a data block with standard access.
+const fn s7_access_key(reason: S7AccessReason) -> &'static str {
+    match reason {
+        S7AccessReason::ArrayBoundOutsideInt => "s7-access-reason-array-bound",
+        S7AccessReason::BoolArrayWithThreeDimensions => "s7-access-reason-bool-array-3d",
+    }
+}
+
 /// Return the phrase `expected-*` of an expected form with its data (design D3).
 ///
 /// The highest scalar of `Expected::Char` is `U+` and at least four upper-case hex digits.
@@ -311,6 +325,19 @@ fn one(name: &'static str, value: impl ToString) -> Vec<(&'static str, String)> 
     vec![(name, value.to_string())]
 }
 
+/// Return a list of two arguments of a phrase.
+fn two(
+    first: &'static str,
+    first_value: impl ToString,
+    second: &'static str,
+    second_value: impl ToString,
+) -> Vec<(&'static str, String)> {
+    vec![
+        (first, first_value.to_string()),
+        (second, second_value.to_string()),
+    ]
+}
+
 /// Return the key of an expected form and the arguments of its phrase.
 fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String)>) {
     match expected {
@@ -325,6 +352,10 @@ fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String
         Expected::Index => ("expected-index", Vec::new()),
         Expected::Scalar => ("expected-scalar", Vec::new()),
         Expected::Wstring { length } => ("expected-wstring", one("length", length)),
+        Expected::WstringS7 { length, max } => (
+            "expected-wstring-s7",
+            two("length", length, "max", format!("U+{max:04X}")),
+        ),
         Expected::String { length } => ("expected-string", one("length", length)),
         Expected::Char { max } => ("expected-char", one("max", format!("U+{max:04X}"))),
         Expected::Literal { type_name } => ("expected-literal", one("type_name", type_name)),
@@ -344,10 +375,7 @@ fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String
         ),
         Expected::NumberDigits { type_name, digits } => (
             "expected-number-digits",
-            vec![
-                ("type_name", type_name.to_string()),
-                ("digits", digits.to_string()),
-            ],
+            two("type_name", type_name, "digits", digits),
         ),
         Expected::ParameterType => ("expected-parameter-type", Vec::new()),
         Expected::NewValue => ("expected-new-value", Vec::new()),

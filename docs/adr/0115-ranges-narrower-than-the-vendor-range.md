@@ -1,6 +1,6 @@
 # ADR-0115: Ranges narrower than the vendor range
 
-Status: Accepted. Amended by ADR-0139 (a fourth range: `LDATE` and `LDT` on `CodesysIec` and `TwinCat3` start at 1970-01-01). Amended by ADR-0141 (a fifth range: `STRING(n)` and `WSTRING(n)` on `CodesysIec` and `TwinCat3` stay `1..=255`)
+Status: Accepted. Amended by ADR-0139 (a fourth range: `LDATE` and `LDT` on `CodesysIec` and `TwinCat3` start at 1970-01-01). Amended by ADR-0141 (a fifth range: `STRING(n)` and `WSTRING(n)` on `CodesysIec` and `TwinCat3` stay `1..=255`). Amended by ADR-0188 (the `DTL` row: the domain range equals the current Siemens range)
 Date: 2026-11-03
 Deciders: project owner
 

@@ -502,3 +502,52 @@ async fn the_proposals_leave_out_a_stored_struct_with_a_reserved_name() {
         result.choices
     );
 }
+
+/// The proposals of the form of a draft on a machine of `platform` with the struct `Conf_DNS@1`.
+async fn choices_with_siemens_struct_on(platform: PlcPlatform) -> Vec<String> {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let record = PlcTypeRecord {
+        id: tid(702),
+        machine: Some(crate::memory::fixtures::mid(1)),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Struct {
+            name: recipe_domain::plant::TypeName::parse("Conf_DNS").unwrap(),
+            revision: 1,
+            supersedes: None,
+            members: vec![recipe_domain::plant::TypeMember {
+                name: recipe_domain::plant::MemberName::parse("x").unwrap(),
+                type_id: seed_type_id(Primitive::Int, None).unwrap(),
+            }],
+        },
+    };
+    fixture
+        .store
+        .seed_type(&PlcType::from_stored(record, recipe_domain::plant::RuleSet::Current).unwrap());
+    form(&fixture, input(None, None, None))
+        .await
+        .unwrap()
+        .choices
+}
+
+#[tokio::test]
+async fn adr_0186_proposals_leave_out_a_stored_siemens_struct_on_an_s7_machine() {
+    let choices = choices_with_siemens_struct_on(PlcPlatform::S7_1500).await;
+
+    assert!(
+        !choices.iter().any(|choice| choice == "Conf_DNS@1"),
+        "{choices:?}"
+    );
+}
+
+#[tokio::test]
+async fn adr_0186_proposals_keep_a_stored_siemens_struct_on_codesys() {
+    let choices = choices_with_siemens_struct_on(PlcPlatform::CodesysIec).await;
+
+    assert!(
+        choices.iter().any(|choice| choice == "Conf_DNS@1"),
+        "{choices:?}"
+    );
+}

@@ -19,6 +19,10 @@ use crate::memory::fixtures::{
 use crate::memory::{DERIVED_TYPE_LOCK_TABLE, Fault, JournalEntry, LockMode, seed_type_id};
 use crate::ports::Isolation;
 
+mod adr_0177;
+mod adr_0179;
+mod adr_0186;
+
 pub(super) fn input(mode: DefineUdtMode, name: &str, members: &[(&str, &str)]) -> DefineUdtInput {
     DefineUdtInput {
         code: MachineCode::parse("M1").unwrap(),

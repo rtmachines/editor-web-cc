@@ -1,6 +1,6 @@
 # ADR-0148: No array of an array on S7-1200 and S7-1500
 
-Status: Accepted. Amends ADR-0017 (cases of `E-PLT-013`) and ADR-0120 (a) (earlier rule set)
+Status: Accepted. Amends ADR-0017 (cases of `E-PLT-013`) and ADR-0120 (a) (earlier rule set). Amended by ADR-0177 (items (i) and (j): the rule also holds on `S7_300`)
 Date: 2026-11-08
 Deciders: project owner
 

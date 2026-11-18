@@ -172,3 +172,12 @@ fn deep_trees(levels: u32) -> (TypeTree, TypeTree) {
         TypeTree::resolve(id(previous), &all).unwrap(),
     )
 }
+
+#[test]
+fn adr_0179_rebind_counts_an_array_of_the_target_struct_as_three_levels() {
+    let target = tree(ZONE_3);
+    assert_eq!(target.s7_nesting, 1);
+    assert_eq!(rebound(ZONE_2, ZONE_2, ZONE_3).unwrap().s7_nesting, 1);
+    assert_eq!(rebound(ZONE_2, ARRAY_4, ZONE_3).unwrap().s7_nesting, 3);
+    assert_eq!(rebound(ZONE_2, OUTER, ZONE_3).unwrap().s7_nesting, 3);
+}

@@ -7,16 +7,16 @@ use std::collections::BTreeSet;
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Login;
-use recipe_domain::plant::{
-    LeafPath, MemberName, PlcPlatform, Primitive, S7Address, S7Width, TypeName,
-};
+use recipe_domain::plant::{LeafPath, PlcPlatform, S7Address, S7Width, TypeName};
 use recipe_domain::recipe::{
     Budget, Expected, LangCode, ParameterKey, ParameterTag, PrecisionField, RebindTargetReason,
-    RecipeError, RecipeErrors, ReferenceNumber, SnapshotError, SnapshotItem, VersionStatus,
+    RecipeError, RecipeErrors, ReferenceNumber, S7AccessReason, SnapshotError, SnapshotItem,
+    VersionStatus,
 };
 use uuid::Uuid;
 
 use super::lists::{leaf_lines, line_view};
+use super::status::status_of;
 use crate::i18n::{Bundles, Lang};
 
 /// An error, and its English text when that text is not the `Display` of the error.
@@ -26,11 +26,11 @@ fn reference() -> ReferenceNumber {
     ReferenceNumber::parse("R-100").unwrap()
 }
 
-fn tag(text: &str) -> ParameterTag {
+pub(super) fn tag(text: &str) -> ParameterTag {
     ParameterTag::parse(text).unwrap()
 }
 
-fn leaf(text: &str) -> LeafPath {
+pub(super) fn leaf(text: &str) -> LeafPath {
     LeafPath::parse(text).unwrap()
 }
 
@@ -371,6 +371,14 @@ fn range_errors() -> Vec<Case> {
             },
             None,
         ),
+        (
+            RecipeError::S7TypeNotAddressable {
+                tag: tag("SPEED"),
+                address: address("DB1.DBW0"),
+                reason: S7AccessReason::ArrayBoundOutsideInt,
+            },
+            None,
+        ),
     ]
 }
 
@@ -410,7 +418,7 @@ fn every_case() -> Vec<Case> {
 }
 
 /// Return the message of the one line of `error` in `lang`.
-fn message(bundles: &Bundles, error: RecipeError, lang: Lang) -> String {
+pub(super) fn message(bundles: &Bundles, error: RecipeError, lang: Lang) -> String {
     let lines = leaf_lines(&RecipeErrors::from(error), &|_path: &LeafPath| None);
     line_view(lines.first().unwrap(), bundles, lang).message
 }
@@ -428,8 +436,8 @@ fn messages(bundles: &Bundles, index: usize) -> (String, String, String, Option<
 #[test]
 fn recipe_the_cases_cover_each_code_of_recipe_error() {
     let codes: BTreeSet<ErrorCode> = every_case().iter().map(|(error, _)| error.code()).collect();
-    assert_eq!(codes.len(), 37);
-    assert_eq!(every_case().len(), 37);
+    assert_eq!(codes.len(), 38);
+    assert_eq!(every_case().len(), 38);
 }
 
 #[test]
@@ -523,160 +531,54 @@ fn recipe_e_rcp_057_names_the_highest_data_block_of_the_platform_in_both_languag
     }
 }
 
-/// An expected form with its English and its Polish phrase.
-type Phrase = (Expected, &'static str, &'static str);
-
-/// Every expected form, each with its English and Polish phrase.
-fn expected_cases() -> Vec<Phrase> {
-    let mut cases = shape_phrases();
-    cases.extend(typed_phrases());
-    cases.extend(text_phrases());
-    cases
-}
-
-/// The expected forms of a shape, a string, and a character.
-fn shape_phrases() -> Vec<Phrase> {
-    let members = vec![
-        MemberName::parse("min").unwrap(),
-        MemberName::parse("max").unwrap(),
-    ];
-    vec![
-        (Expected::Json, "valid JSON text", "poprawny tekst JSON"),
-        (
-            Expected::Depth { levels: 32 },
-            "a value with at most 32 levels",
-            "warto\u{15b}\u{107} o najwy\u{17c}ej 32 poziomach",
-        ),
-        (
-            Expected::Object { members },
-            "an object with the members min, max",
-            "obiekt ze sk\u{142}adnikami min, max",
-        ),
-        (Expected::Array, "an array", "tablica"),
-        (
-            Expected::ArrayCount { count: 8 },
-            "an array of 8 elements",
-            "tablica z 8 elementami",
-        ),
-        (
-            Expected::Index,
-            "an index inside the INTEGER range",
-            "indeks w zakresie INTEGER",
-        ),
-        (
-            Expected::Scalar,
-            "a scalar value",
-            "warto\u{15b}\u{107} skalarna",
-        ),
-        (
-            Expected::Wstring { length: 10 },
-            "a string of at most 10 UTF-16 units without U+0000",
-            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 bez znaku U+0000",
-        ),
-        (
-            Expected::String { length: 20 },
-            "a string of at most 20 characters from Latin-1 without U+0000",
-            "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znaku U+0000",
-        ),
-        (
-            Expected::Char { max: 0xFFFF },
-            "one character from U+0001 to U+FFFF",
-            "jeden znak od U+0001 do U+FFFF",
-        ),
-    ]
-}
-
-/// The expected forms with a type name.
-fn typed_phrases() -> Vec<Phrase> {
-    let int = Primitive::Int;
-    vec![
-        (
-            Expected::Literal {
-                type_name: Primitive::Time,
-            },
-            "an IEC literal of type TIME",
-            "litera\u{142} IEC typu TIME",
-        ),
-        (
-            Expected::Count {
-                type_name: Primitive::Time,
-            },
-            "a count of type TIME",
-            "liczba jednostek typu TIME",
-        ),
-        (
-            Expected::Integer { type_name: int },
-            "an integer of type INT",
-            "liczba ca\u{142}kowita typu INT",
-        ),
-        (
-            Expected::NumberRange {
-                type_name: int,
-                low: "-32768".parse().unwrap(),
-                high: "32767".parse().unwrap(),
-            },
-            "a number of type INT from -32768 to 32767",
-            "liczba typu INT od -32768 do 32767",
-        ),
-        (
-            Expected::NumberDigits {
-                type_name: Primitive::Real,
-                digits: 7,
-            },
-            "a number of type REAL with at most 7 significant digits",
-            "liczba typu REAL z najwy\u{17c}ej 7 cyframi znacz\u{105}cymi",
-        ),
-    ]
-}
-
-/// The expected forms of a parameter value and of the leaf texts.
-fn text_phrases() -> Vec<Phrase> {
-    vec![
-        (
-            Expected::ParameterType,
-            "a value of the type of the parameter",
-            "warto\u{15b}\u{107} typu parametru",
-        ),
-        (
-            Expected::NewValue,
-            "a new value for the new type",
-            "nowa warto\u{15b}\u{107} dla nowego typu",
-        ),
-        (Expected::Bool, "TRUE or FALSE", "TRUE albo FALSE"),
-        (
-            Expected::Decimal,
-            "a decimal number with a dot, for example 1.5",
-            "liczba dziesi\u{119}tna z kropk\u{105}, na przyk\u{142}ad 1.5",
-        ),
-        (
-            Expected::Leaf,
-            "a value for this field",
-            "warto\u{15b}\u{107} tego pola",
-        ),
-        (
-            Expected::KnownLeaf,
-            "a path of the type of the parameter",
-            "\u{15b}cie\u{17c}ka z typu parametru",
-        ),
-    ]
+/// The error `E-RCP-058` with a reason.
+fn not_addressable(reason: S7AccessReason) -> RecipeError {
+    RecipeError::S7TypeNotAddressable {
+        tag: tag("SPEED"),
+        address: address("DB1.DBW0"),
+        reason,
+    }
 }
 
 #[test]
-fn recipe_each_expected_form_gives_its_phrase_in_both_languages() {
+fn adr_0178_message_of_an_array_bound_reason_in_both_languages() {
     let bundles = Bundles::load().unwrap();
-    for (expected, en, pl) in expected_cases() {
-        let fault = || RecipeError::ValueShapeMismatch {
-            tag: tag("T"),
-            leaf: leaf(""),
-            expected: expected.clone(),
-        };
+    let error = || not_addressable(S7AccessReason::ArrayBoundOutsideInt);
+    assert_eq!(
+        message(&bundles, error(), Lang::En),
+        "Parameter SPEED at DB1.DBW0 has a type that a data block with standard access cannot hold: an array bound is outside -32768 to 32767. Change the type."
+    );
+    assert_eq!(
+        message(&bundles, error(), Lang::Pl),
+        "Parametr SPEED pod adresem DB1.DBW0 ma typ, kt\u{f3}rego blok danych ze standardowym dost\u{119}pem nie mo\u{17c}e przechowa\u{107}: granica tablicy le\u{17c}y poza zakresem od -32768 do 32767. Zmie\u{144} typ."
+    );
+}
+
+#[test]
+fn adr_0178_message_of_a_bool_array_reason_in_both_languages() {
+    let bundles = Bundles::load().unwrap();
+    let error = || not_addressable(S7AccessReason::BoolArrayWithThreeDimensions);
+    assert_eq!(
+        message(&bundles, error(), Lang::En),
+        "Parameter SPEED at DB1.DBW0 has a type that a data block with standard access cannot hold: a BOOL array with three dimensions has no verified S7 layout. Change the type."
+    );
+    assert_eq!(
+        message(&bundles, error(), Lang::Pl),
+        "Parametr SPEED pod adresem DB1.DBW0 ma typ, kt\u{f3}rego blok danych ze standardowym dost\u{119}pem nie mo\u{17c}e przechowa\u{107}: tablica BOOL z trzema wymiarami nie ma sprawdzonego uk\u{142}adu S7. Zmie\u{144} typ."
+    );
+}
+
+#[test]
+fn adr_0178_message_status_of_each_reason_is_422() {
+    for reason in [
+        S7AccessReason::ArrayBoundOutsideInt,
+        S7AccessReason::BoolArrayWithThreeDimensions,
+    ] {
+        let code = not_addressable(reason).code();
+        assert_eq!(code, ErrorCode::RCP_058, "{reason:?}");
         assert_eq!(
-            message(&bundles, fault(), Lang::En),
-            format!("Value of T does not match the type. Expected {en}."),
-        );
-        assert_eq!(
-            message(&bundles, fault(), Lang::Pl),
-            format!("Warto\u{15b}\u{107} parametru T nie pasuje do typu. Oczekiwano: {pl}."),
+            status_of(code),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
         );
     }
 }
@@ -691,9 +593,4 @@ fn recipe_the_polish_message_of_e_rcp_054_names_the_type_of_the_parameter() {
     };
     let pl = message(&bundles, error, Lang::Pl);
     assert!(pl.contains("nie pasuje do typu parametru SPEED."), "{pl}");
-}
-
-#[test]
-fn recipe_the_expected_forms_cover_each_variant() {
-    assert_eq!(expected_cases().len(), 21);
 }
