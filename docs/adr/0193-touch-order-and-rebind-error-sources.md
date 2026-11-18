@@ -1,6 +1,6 @@
 # ADR-0193: Touch order of five draft rows, error sources of the rebind row
 
-Status: Accepted. Amends `data-model.md` §6 and `domain-model.md` §3 and §5.2
+Status: Accepted. Amends `data-model.md` §6 and `domain-model.md` §3 and §5.2. Amended by ADR-0194 (item (f): the error cell of `RemoveTranslation`)
 Date: 2026-11-18
 Deciders: project owner
 
