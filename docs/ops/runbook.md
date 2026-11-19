@@ -690,7 +690,7 @@ The login check of step 8 of `restore-test` then has no equal before the switch.
 1. Run the restore test as in "Run the restore test". Continue only after it passes. The test checks the newest complete set.
    Read the name of the set in the line `restore test passed`. Restore that set.
 2. Delete the containers of `app` and `backup`. No write after this point reaches the restored cluster, and no retention deletes the set.
-   A restart of Docker or of the host starts a stopped container with `restart: always` again, on the old volume.
+   A restart of the container engine or of the host starts a stopped container with `restart: always` again, on the old volume.
    Optional: first copy the logs of the two containers with `docker compose logs --no-color app backup > <file>`, because `rm` deletes them.
    Then delete the two containers:
 
@@ -958,7 +958,7 @@ Choose the target before step 1:
 - Without such a record, the target is an estimate of the operator. The values of step 7 then matter most.
 
 1. Delete the containers of `app` and `backup`. After this point, `app` writes no audit entry.
-   A restart of Docker or of the host starts a stopped container with `restart: always` again, on the old volume.
+   A restart of the container engine or of the host starts a stopped container with `restart: always` again, on the old volume.
    Optional: first copy the logs of the two containers with `docker compose logs --no-color app backup > <file>`, because `rm` deletes them.
    Then delete the two containers:
 
@@ -984,7 +984,7 @@ docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT pg_current_w
    Only a recovery to the end of the archive uses `<lsn>` as `PITR_EXPECTED_LSN`. With a target time, step 6 does not pass it.
 
 4. Delete the container of `walarchive`. The `.partial` file then stays stable.
-   A restart of Docker or of the host starts a stopped container with `restart: always` again. A running `walarchive` can change the `.partial` file.
+   A restart of the container engine or of the host starts a stopped container with `restart: always` again. A running `walarchive` can change the `.partial` file.
    Optional: first copy the log of the container with `docker compose logs --no-color walarchive > <file>`, because `rm` deletes it.
    Then delete the container:
 
@@ -1977,7 +1977,7 @@ A major upgrade of PostgreSQL is a dump and a restore into a new `db` volume.
 The new volume uses the same `initdb` arguments as `compose.yaml`. The project does not use `pg_upgrade` (ADR-0020).
 
 1. Delete the container of `app`. The next dump then holds every change.
-   A restart of Docker or of the host starts a stopped container with `restart: always` again, on the old volume.
+   A restart of the container engine or of the host starts a stopped container with `restart: always` again, on the old volume.
    Optional: first copy the log of the container with `docker compose logs --no-color app > <file>`, because `rm` deletes it.
    Then delete the container:
 
