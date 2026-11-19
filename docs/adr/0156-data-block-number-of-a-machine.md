@@ -1,6 +1,6 @@
 # ADR-0156: Data block number of a machine
 
-Status: Accepted. Amends ADR-0154 (c) and (d). Amended by ADR-0157 (a sync trigger keeps the machine number equal to the copy in the expand period)
+Status: Accepted. Amends ADR-0154 (c) and (d). Amended by ADR-0157 (a sync trigger keeps the machine number equal to the copy in the expand period). Amended by ADR-0197 (no release up to 0.8.0 is the previous release of (h) and of the rollback consequence, the upgrade path from 0.7.1)
 Date: 2026-11-12
 Deciders: project owner
 

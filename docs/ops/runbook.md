@@ -303,13 +303,27 @@ To delete a rule of an old subnet, run its command again with `-D` in place of `
 
 ### Load the images
 
+The Git tag of a release has the form `vX.Y.Z`, for example `v0.8.0`.
+The image tag and the value of `RECIPE_VERSION` have the form `X.Y.Z` without `v`, for example `0.8.0`.
+`compose.yaml` builds the image names `recipe-server:${RECIPE_VERSION}` and `recipe-pgtools:${RECIPE_VERSION}`.
+In this runbook, a release tag such as `<new tag>` or `<previous tag>` is the image tag, for example `0.8.0`.
+`<version>` below is that image tag too.
+
 1. Run `sha256sum <image file>` for each image file of the release.
-2. Compare each result with the SHA-256 in the release notes (ADR-0064 (k)).
+2. Compare each result with the SHA-256 in the body of the GitHub release of the tag (ADR-0064 (k)).
 3. Run `docker load -i <image file>` for each file.
 4. Run `docker image inspect --format '{{.Id}}' recipe-server:<version>`. Run the same command for `recipe-pgtools:<version>`.
-5. Compare each image ID with the release notes.
-6. Set `RECIPE_VERSION` in `.env` to the release tag.
-7. Run steps 6 and 7 of the section "Create the environment file". The image tags show the release tag.
+5. Compare each image ID with the body of the GitHub release of the tag.
+6. Set `RECIPE_VERSION` in `.env` to the image tag, for example `0.8.0`. Never write the Git tag `v0.8.0`.
+7. Run steps 6 and 7 of the section "Create the environment file".
+   Check that the image lines show `recipe-server:<version>` and `recipe-pgtools:<version>`.
+
+From release 0.8.0, the body of the GitHub release of the tag holds the SHA-256 of each `docker save` file and both image IDs.
+The maintainer adds these values after the build from the tag (ADR-0064 (k)). `CHANGELOG.md` does not hold them.
+
+The GitHub release of an earlier release may not hold these values.
+When that release holds no values, stop before step 3. Do not load the image files.
+Record the reason in the [change log of the site](#change-log-of-the-site).
 
 ### Start the stack
 
@@ -419,7 +433,7 @@ Use these steps after a stop of the same release. After a change of `RECIPE_VERS
 
 Do not run `docker compose up -d` here. Compose then runs `backup-premigrate` and `migrate` again.
 The run of `backup-premigrate` writes a new `_premigrate` set of the current schema.
-That new set is then the newest one. The section "Rollback" restores the newest `_premigrate` set.
+That new set is then the newest one. [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) in the section "Rollback" restores the newest `_premigrate` set.
 
 The option `--no-deps` skips the `depends_on` checks (ADR-0082), so the steps wait for `healthy` by hand.
 
@@ -497,6 +511,7 @@ Two cases need an action before you continue:
 - If the reboot stopped step 7 of the restore or step 10 of the recovery, the shell lost the variable `target`. Set `target` to the directory that sub-step 1 made. If sub-step 1 made no directory, run sub-step 1 again.
 
 In the major upgrade, step 8 runs restore steps 3 and 4, and step 10 runs restore step 7.
+Each rollback step in the section "After a host reboot" is a step of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
 In the rollback, step 1 runs restore step 3, step 3 runs restore step 4, and step 6 runs restore step 7.
 
 1. Run `docker compose ps -a`. Wait until `db`, `app`, `proxy`, `backup`, and `walarchive` show `healthy`.
@@ -1155,11 +1170,34 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 ```
 
 2. The owner reads each output row.
-3. Accept each row that needs no change.
+3. Accept each row of `value`, `limit_min`, `limit_max`, and `s7_address` that needs no change.
 4. Fix a draft row with `SetParameterValue`, `ReplaceLimits`, or `UpdateParameterDefinition`.
 5. Fix an approved row by creating a new version.
-6. Fix each `wide_text` row before the upgrade. Replace the refused character in a draft, or create a new version for an approved row.
-7. Write the result into the [change log of the site](#change-log-of-the-site).
+6. Before step 3 of "Upgrade", fix each `wide_text` row of a version to fix. Use the rule below.
+7. Sign off each other `wide_text` row. Record each such row in the upgrade ticket.
+8. If a version to fix has no fix, stop the upgrade before step 3. Record the reason in the ticket.
+9. Run the query again. Check the end criterion below.
+10. Write the result into the [change log of the site](#change-log-of-the-site).
+
+Fix rule of the upgrade checks:
+This rule applies to the `wide_text` rows of this section.
+It also applies to the `array_bound` and `bool_array_3d` rows of the section "Check the stored data against the S7 layout rules".
+
+- A version to fix is a live draft, or the `Approved` version of a live recipe on a live machine.
+- A live draft is a draft that nobody discarded. A live recipe has no `deleted_at`. A live machine is not archived.
+- Fix a live draft in the draft. Replace the refused value, or change the type of the parameter.
+- Fix an `Approved` version with a new approved version without the fault. A new draft copies its base, so change the faulty parameter in that draft.
+- The approval of the new version sets the old version to `Retired`.
+- Each other listed row needs only the sign-off of the owner. Examples are a discarded draft, a `Retired` version, a deleted recipe, and an archived machine.
+
+The query reads every version and also the soft-deleted rows. A fixed old version therefore stays in the output with the status `Retired`.
+End criterion: no `wide_text` row of the second run names a version to fix, and the owner signed off each remaining `wide_text` row.
+Check each remaining row in the editor:
+
+- The version table of the recipe page `/recipes/<reference_number>` shows the status of each listed version.
+- An Administrator sees a deleted recipe with the state "Deleted". Every other role gets `409 E-RCP-012` (`api.md` §2.4).
+- The machine link of the recipe page shows the state of the machine. A link to `/machines/by-id/<id>` names an archived machine.
+- Do not use `/machines/<machine_code>`. That path names the live machine with the code, also when a new machine reuses the code of an archived machine (`api.md` §2.2, A32).
 
 ## Check the stored type rows against the identifier rules
 
@@ -1215,9 +1253,10 @@ The third kind can change `loadable`. The export check of ADR-0119 (b) runs the 
   A fault of one of these rules can make a listed `Approved` version not loadable.
 
 A version is not loadable when any part shows a loadability fault for one of its parameters, for example `bool_array_3d`.
-The owner signs off each row of all five parts.
-The owner fixes each row of the second kind before the upgrade. A draft row needs a change. An approved row needs a new version.
-The owner records each listed row in the upgrade ticket.
+The owner fixes each row of the second kind that names a version to fix, before the upgrade.
+The section "Check the stored data against the platform ranges" holds the fix rule of the upgrade checks.
+That rule defines a version to fix and its fix.
+The owner signs off each other row of all five parts. The owner records each listed row in the upgrade ticket.
 
 1. Run the query from the directory `deploy/` of the new release:
 
@@ -1226,8 +1265,19 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 ```
 
 2. The owner reads each output row.
-3. Sign off each row of `nested_array`, `layout_changed`, `array_bound`, `bool_array_3d`, and `nesting`.
-4. Write the result into the [change log of the site](#change-log-of-the-site).
+3. Before step 3 of "Upgrade", fix each `array_bound` and `bool_array_3d` row of a version to fix.
+4. If a version to fix has no fix, stop the upgrade before step 3. Record the reason in the ticket.
+5. Run the query again. Check that no `array_bound` or `bool_array_3d` row names a version to fix.
+6. Sign off each remaining row of `nested_array`, `layout_changed`, `array_bound`, `bool_array_3d`, and `nesting`.
+7. Record each listed row in the upgrade ticket.
+8. Check the end criterion below.
+9. Write the result into the [change log of the site](#change-log-of-the-site).
+
+The query reads every version and every machine, also an archived one. A fixed old version therefore stays in the output.
+The output has no status column. Check each remaining row with a version in the editor, as the platform-ranges section says.
+A type row names no recipe and no version. The owner signs off a type row without a check of a recipe page.
+
+End criterion: no `array_bound` or `bool_array_3d` row of the second run names a version to fix, and the owner signed off each remaining row.
 
 ## Check the live S7 machines for a PLC connection record
 
@@ -1238,6 +1288,9 @@ Migration `0013` stops on such a machine before it adds the column and changes n
 The query lists these machines. It writes nothing.
 The output has one column, `code`, ordered by `code`.
 An archived machine and a machine on `CodesysIec` or `TwinCat3` are not in the output.
+
+Release 0.7.1 is the only supported start release of the upgrade to 0.8.0 (ADR-0197).
+On a database of 0.7.1, do not do steps 1 to 5. Do the steps for 0.7.1 at the end of this section.
 
 1. Run the query. The previous release can still run.
 
@@ -1265,6 +1318,45 @@ If you skip this check, `migrate` stops with this message. The list names the sa
 migration 0013 stopped: live S7 machines without a PLC connection record: <codes>. Save the PLC connection of each listed machine with the previous release (docs/ops/runbook.md).
 ```
 
+On a database of 0.7.1, the files `0011` and `0012` stay committed after this stop (ADR-0197 (g1)).
+Do all four parts of step 12 of the section "Upgrade", also the `_premigrate` restore of part 4.
+The `app` of 0.7.1 keeps running on this schema until step 1 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) deletes it.
+The restore loses every write after the `_premigrate` dump, also the writes of that `app`.
+After a failed check in that step 1, `app` keeps running, as [Failed rollback restore after a failed upgrade](#failed-rollback-restore-after-a-failed-upgrade) says.
+
+The steps for 0.7.1 follow ADR-0197.
+An installation of an older release first upgrades to 0.7.1. Then it does these steps.
+
+A database of 0.7.1 has no table `plc_connection`, so the query of step 1 fails there.
+Release 0.7.1 also cannot save a PLC connection record.
+
+The project supports the upgrade from 0.7.1 only when the database holds no live S7 machine.
+A live S7 machine is a machine on `S7_300`, `S7_1200`, or `S7_1500` that is not archived.
+
+1. Run the query below. Release 0.7.1 can still run.
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 <<'SQL'
+SELECT machine.code
+FROM machine
+WHERE machine.archived_at IS NULL
+  AND machine.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
+ORDER BY machine.code;
+SQL
+```
+
+2. Write the result into the [change log of the site](#change-log-of-the-site).
+3. If the query returns 0 rows, continue with the upgrade. No user creates an S7 machine until `migrate` ends.
+4. If the query returns a row, stop the upgrade. Make the new installation of 0.8.0 on another host (ADR-0197).
+
+In step 4, change nothing on the host of 0.7.1. Release 0.7.1 keeps running.
+On the other host, use the sections "Host preparation" and "First start, first administrator, and image transfer".
+
+The new installation does not hold the data of 0.7.1 (ADR-0197).
+The project does not support the new installation on the host of 0.7.1.
+Both releases use the Compose project name `recipe-editor`, so a stack of 0.8.0 there replaces the containers of 0.7.1.
+The bind volumes `backups` and `walarchive` of that stack keep the directories of 0.7.1.
+
 ## Check the TwinCAT version before you add a TwinCat3 machine
 
 The editor does not read the TwinCAT version of a controller.
@@ -1283,24 +1375,33 @@ A rollback needs the images of the previous release. See the section "Keep the i
 
 ### Upgrade
 
+On a database of 0.7.1, start with the section "Check the live S7 machines for a PLC connection record".
+Do its steps for 0.7.1 in the directory `deploy/` of 0.7.1, before each other step and text block of this section.
+If the query returns a row, step 4 there stops the upgrade (ADR-0197).
+
 Before step 1, do the text block "Manifest key file before step 1" and run the "Probe of the previous image". Both are after step 24.
 
 1. Read the release notes. Note whether the migration follows the expand pattern. Note the line "manual superuser step".
-   Note the new release tag. Only command 1 of the `_premigrate` restore in the section "Rollback" uses it, as `<new tag>`.
-2. Do the three parts below in this order: the installation, the name check, and the segment check.
+   Note the new release tag. It is the image tag without `v`, for example `0.8.0` for the Git tag `v0.8.0` (section "Load the images").
+   Only command 1 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) uses it, as `<new tag>`.
+2. On a database of 0.7.1, start this step only when the query before step 1 returned 0 rows (ADR-0197).
+   An upgrade to 0.8.0 starts only from 0.7.1. Upgrade an older installation to 0.7.1 first.
+   Then do the three parts below in this order: the installation, the name check, and the segment check.
    Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
    1. Run the section "Check the stored data against the platform ranges" from the directory `deploy/` of the new release.
    Run it after the segment check and before step 3.
-   Continue only when the query returns 0 rows or the owner accepted each row.
+   Continue when the query returns 0 rows. Else continue only when the end criterion of that section holds.
+   The owner also accepts or signs off each other row there. If a version to fix cannot get its fix, stop the upgrade.
    2. Run the section "Check the stored type rows against the identifier rules" from the directory `deploy/` of the new release.
    Run it after the platform-ranges check and before step 3.
    Continue only when the parts `struct_name_case`, `member_name_case`, and `array_subscript` give 0 rows.
    3. Run the section "Check the stored data against the S7 layout rules" from the directory `deploy/` of the new release.
    Run it after the identifier check and before step 3.
-   Continue only when the owner signed off each row.
+   Continue only when the end criterion of that section holds. If a version to fix cannot get its fix, stop the upgrade.
    4. Run the section "Check the live S7 machines for a PLC connection record".
    Run it after the S7 layout check and before step 3.
-   Save the PLC connection of each listed machine with the previous release.
+   On a database of 0.8.0 or later, skip this part. Migration `0013` already ran there (ADR-0197).
+   On a database of 0.7.1, run the query of the steps for 0.7.1 again. With a row, do step 4 there (ADR-0197).
    Continue only when the query returns 0 rows.
 3. Run the restore test of the previous image in a new container. `.env` still holds the previous tag. Continue only after the test passes.
    Run only one of the two commands.
@@ -1318,9 +1419,10 @@ docker compose -f compose.yaml -f compose.previous.yaml run --rm --no-deps backu
 ```
 
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
-5. Set `RECIPE_VERSION` in `.env` to the new release tag.
+5. Set `RECIPE_VERSION` in `.env` to the new release tag, for example `0.8.0`. Never write the Git tag `v0.8.0`.
    Run [Leave the file compose.previous.yaml](#leave-the-file-composepreviousyaml) with `<write tag>` as the new release tag.
    The copied `.env` can hold `COMPOSE_FILE` from an earlier rollback. That section deletes it.
+
    This step does not create `backup`. Command 1 of the four commands gives `backup` the new image and the key.
 6. Run steps 6 and 7 of the section "Create the environment file". The image tags show the new tag.
    Then do the steps of "Key file of step 6".
@@ -1344,12 +1446,17 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 ```
 
    4. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
-11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`. Between the commit of `0013` and the row lock of `0014`, a previous-release command that updates a live S7 machine fails with `E-DB-003`.
+11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
 12. If `backup-premigrate` or `migrate` fails, stop. Do the parts below in this order.
-   1. Set the previous tag in `.env`. Check it (step 6).
+   When `0013` stops on a database of 0.7.1, do all four parts. Part 4 is then required (ADR-0197 (g1)).
+   1. Set the previous tag in `.env`. Run steps 6 and 7 of the section "Create the environment file".
+   Check that the image lines show `recipe-server:<previous tag>` and `recipe-pgtools:<previous tag>`.
+   After a failed upgrade from 0.7.1, they show `recipe-server:0.7.1` and `recipe-pgtools:0.7.1`.
    2. If the probe of the previous image printed `no-check`, add the line `COMPOSE_FILE=compose.yaml:compose.previous.yaml` to `.env`. Delete each older line `COMPOSE_FILE`.
    3. For the same probe result, run `docker compose up -d --no-deps --force-recreate backup`. The running `backup` then runs the previous image without the key and without the weekly `restore-test`.
-   4. For a `_premigrate` restore after this failure, use step 1 of the section "Rollback". `<new tag>` there is the tag that step 1 of this list noted.
+   4. Skip this part after a failed `backup-premigrate`. The case "Step 8 or 9 fails" below step 24 applies then.
+   For a `_premigrate` restore after a failed `migrate`, use [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
+   `<stamp>` there is the `_premigrate` set that step 8 of this upgrade wrote. `<new tag>` there is the tag that step 1 of "Upgrade" noted.
 13. Start the guard step. Write the start time into the change log ([rule](#change-log-of-the-site)). Run `docker compose exec -u postgres db psql -d recipe`.
 14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
 
@@ -1575,12 +1682,13 @@ Step 18 replaces the one container of `app`.
 
 The old `app` of step 18 keeps running on the old schema only when the migration follows the expand pattern.
 A release with two or more migration files can fail after the first file. Then no image matches the schema.
-Choose one of two actions (ADR-0083). The first is a forward fix. The second is a restore of the `_premigrate` dump with the second list of the section "Rollback".
+Choose one of two actions (ADR-0083). The first is a forward fix. The second is a restore of the `_premigrate` dump with [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
 
 Recovery after a failure between two steps (ADR-0097 (h2)):
 
 - Step 8 or 9 fails: nothing changed. Set the previous tag in `.env` and stop. If the probe printed `no-check`, also do parts 2 and 3 of step 12.
-- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old. For a `_premigrate` restore, use step 1 of the section "Rollback".
+- Step 11 fails: follow step 12 and ADR-0083. The guard function stays old. For a `_premigrate` restore, use [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
+  When `0013` stops on a database of 0.7.1, do all four parts of step 12.
 - A step from 13 to 17 fails: the schema is new and the guard function is old. Run steps 13 to 17 again. Run no `backup-now` until step 17 passes.
 - A step of the segment check fails: nothing changed, and the step wrote no file. Read the `ERROR` line. Stop the upgrade, except for the case without a complete segment and without a `.partial` file. The error `the file .system-identifier exists, but the sync of the directory failed` is the exception. The file exists, so a second run prints `The segment check does not run.` Check the disk of the WAL archive before the next step.
 - A command of the list of step 23 fails: keep the new `app` and every set. Read the `ERROR` line (ADR-0083 (f)).
@@ -1591,7 +1699,11 @@ The four commands give the new image of `recipe-pgtools` to `backup` and `walarc
 2. Run `docker compose exec backup backup-now`.
 3. Run `docker compose exec backup restore-test`. Check that the test passes and names the `_now` set.
    - If the test names a `_premigrate` set of the same UTC minute, rerun commands 2 and 3 later.
-4. Run `docker compose exec walarchive basebackup-once`.
+4. First note the UTC time with `date -u +%Y-%m-%dT%H:%M:%SZ`.
+   Then run `docker compose exec walarchive basebackup-once` and check that it ends with exit code 0.
+   Then run `docker compose exec walarchive cat /wal/base-backup.result`. Check that the key `result` is `passed`.
+   Check also that the key `finished_at` is equal to that time or later (`reliability.md` 7.7, ADR-0151 (b1)).
+   Start step 24 only after this check passes.
 
 Command 1 can stop a job that runs at `backup.time` or `basebackup.time`. Step 2 avoids these times.
 
@@ -1607,6 +1719,29 @@ A data volume created before ADR-0123 can hold a role password in the log of db.
 
 Check first that the images of the previous tag exist (section "Keep the images for a rollback").
 
+Choose the path before you run a command. This section has two paths:
+
+- [Roll back on the newer schema](#roll-back-on-the-newer-schema) starts the previous `app` on the newer schema. Use it only when the migration follows the expand pattern.
+- [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) restores the `_premigrate` dump into a new volume. Use it in every other case.
+
+The migrations `0011` to `0016` of 0.8.0 do not follow the expand pattern as one release (ADR-0197).
+A rollback from 0.8.0 to 0.7.1 therefore always uses [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set). Never use the other path for it.
+After that restore, the database has the schema of 0.7.1, and release 0.7.1 runs on that schema.
+The restore loses every write from the dump to the stop of `app`, of 0.7.1 and of 0.8.0, also the PLC connection records.
+
+After a rollback, the project does not support release 0.7.1 on the schema of 0.8.0.
+On that schema, a check of migration `0013` refuses the `INSERT` of a live S7 machine of 0.7.1 with `E-DB-003` (ADR-0156).
+
+The command `SetPlcConnection` of release 0.8.0 takes no data block number.
+It copies the number of the machine into the PLC connection record.
+The trigger of migration `0014` copies a direct write of `plc_connection.db_number` into the machine (ADR-0157).
+`SetMachineDataBlock` of 0.8.0 writes `plc_connection.db_number` too, but only after it writes the same number into `machine`.
+The trigger then finds equal values and changes no machine number (ADR-0157 (f)).
+
+#### Roll back on the newer schema
+
+Use this path only when the migration follows the expand pattern. Never use it for a rollback from 0.8.0 to 0.7.1.
+
 1. Run the command below to start the previous `app` on the newer schema:
 
 ```bash
@@ -1618,13 +1753,9 @@ RECIPE_VERSION=<previous tag> docker compose up -d --no-deps app
 
 Warning: `.env` holds the new tag, so a later `docker compose up -d` gives `app` the new image again (ADR-0083).
 
-After a rollback with the expand pattern, the previous release cannot create an S7 machine.
-Migration `0013` adds a check that refuses its `INSERT` with `E-DB-003`. No wrong row appears (ADR-0156).
-The previous release can still read and save the PLC connection of an existing machine.
-A trigger of migration `0014` writes each data block number that the previous release saves into the machine (ADR-0157).
-The machine number therefore stays equal to the number of the PLC connection.
+#### Roll back with the _premigrate set
 
-If the migration did not follow the expand pattern, use the `_premigrate` dump.
+Use this path when the migration does not follow the expand pattern. Use it also for a `_premigrate` restore after a failed upgrade.
 Warning: this restore loses every change and audit entry after the `_premigrate` dump.
 The lost period runs from the `_premigrate` dump to the stop of `app`.
 No test checks the `_premigrate` set. The test before the upgrade checks a set of the same schema (ADR-0083).
@@ -1716,7 +1847,7 @@ The `walarchive` of 0.1.0 has no guard and streams another system into `/wal`.
 #### Start app after a rollback
 
 After a rollback with the expand pattern, `.env` keeps the new tag. A later command can then start `app` with the new image (ADR-0083).
-Every command that starts or recreates `app` therefore passes the previous tag in the same way as step 1 of the rollback.
+Use the previous tag for every command that starts or recreates `app`, as step 1 of [Roll back on the newer schema](#roll-back-on-the-newer-schema) does.
 Put `RECIPE_VERSION=<previous tag>` before `docker compose`. Keep the other options of the command, for example `--force-recreate`.
 This holds until the section "Upgrade" sets a new tag.
 
@@ -1730,7 +1861,7 @@ Each place below names its value of `<write tag>`:
 1. Step 5 of "Upgrade" and step 7 of "Major upgrade". `<write tag>` is the new release tag.
    Step 6 of "Load the images" also writes that tag, but a first installation has no `COMPOSE_FILE`, so it needs no exit.
    These places do not create `backup`. The four commands of "Upgrade" give `backup` the new image and the key.
-2. Step 3 of "Rollback" and step 4 of "Restore into production", in the plain rollback only. `<write tag>` is the new release tag, which equals `<tag>` there.
+2. Step 3 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) and step 4 of "Restore into production". Use them in the plain rollback only. `<write tag>` is the new release tag, which equals `<tag>` there.
    Only these places then create `backup` again. The command is in step 4 of "Restore into production".
 3. Step 3 of "Switch back". Use it only when the probe of ADR-0174 (aa) finds the tag check in the image of `<tag>`. Else `COMPOSE_FILE` stays.
    `<write tag>` is the `<tag>` of that section, the tag of the old volume. It always writes that tag.
@@ -1740,7 +1871,7 @@ Each place below names its value of `<write tag>`:
 
 After the exit, the configuration must show `backup_manifest_key` on `backup`, `backup-premigrate`, and `restore-volume`. Print it with `docker compose --profile restore config`.
 
-The other edits that write a previous tag need no exit. Step 12 of "Upgrade", step 2 of "Rollback", and the fault list of "Upgrade" write the previous tag.
+The other edits that write a previous tag need no exit. Step 12 of "Upgrade", step 2 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set), and the fault list of "Upgrade" write the previous tag.
 They set `COMPOSE_FILE` when the probe finds no tag check.
 
 The function runs `perl` on the Docker host. Run `perl -v` once before the upgrade. Install Perl from the distribution if the command fails.
@@ -1787,7 +1918,7 @@ Give `.env` back to the operator, for example with `sudo chown`. Then run the fu
 
 #### Failed rollback restore after a failed upgrade
 
-Use this section after a failed upgrade, when the `_premigrate` restore of the section "Rollback" fails.
+Use this section after a failed upgrade, when the `_premigrate` restore of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) fails.
 `.env` then holds the previous tag and `COMPOSE_FILE`. No step starts a container of the new image.
 Only `backup` starts again. `app` stays stopped until the owner decides the next action.
 
@@ -1808,7 +1939,7 @@ docker compose rm -s -f app
 docker compose up -d --no-deps backup
 ```
 
-Step 1 of "Rollback" already deleted the container of `app`. The `rm` line of the second block repeats that delete and changes nothing then.
+Step 1 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) already deleted the container of `app`. The `rm` line of the second block repeats that delete and changes nothing then.
 The line keeps this state free of a link to an earlier step.
 The reason of the delete is the start after a reboot. A stopped `app` with `restart: always` starts again after a reboot (section "After a host reboot").
 
@@ -2496,7 +2627,7 @@ The host lines of `pg_hba.conf` name the subnet, so they change too.
 3. Run steps 6 and 7 of the section "Create the environment file". The new values show.
 4. Write the lines of `pg_hba.conf` with the new subnet. Use steps 5 to 8 of the section "An older volume".
 5. Run `docker compose down`. The command deletes the containers and the networks. It deletes no volume.
-6. After a rollback, read the warning in the section "Rollback" first.
+6. After a rollback on the newer schema, read the warning of [Roll back on the newer schema](#roll-back-on-the-newer-schema) first.
 7. Start the stack with the steps of the section "Start the whole stack again". Do not run `docker compose up -d`.
 8. Run the check of the section "Check the client rules of the database".
 9. Run the section "Check the host firewall" again.
@@ -3051,7 +3182,7 @@ The documents do not yet close the gaps below. Each bullet gives the workaround 
 - A throttled login is a separate case. It ends by time, because there is no permanent lockout (`domain-model.md` 2.3, `login.delay_formula`, `login.ip_budget`). Wait, then log in again.
 - The login throttle counts failures per login and address and per address, but not per login over all addresses. A client with many addresses therefore gets many guesses against one login. The alert `failed_logins` reports such a flood, but it does not stop it ([ADR-0150](../adr/0150-no-per-login-limit-over-all-addresses.md)). Follow the row `failed_logins` of the section [Alarms](#alarms).
 - A wrong current password in `ChangeOwnPassword` writes no security event. The alert `failed_logins` therefore does not count it. [ADR-0150](../adr/0150-no-per-login-limit-over-all-addresses.md) records this as a residual risk.
-- Only an image that checks the tag restores a set with a tag file (ADR-0174 (z)). Case 2 of ADR-0174 (aj) is the one exception, and the section "Rollback" gives its check.
+- Only an image that checks the tag restores a set with a tag file (ADR-0174 (z)). Case 2 of ADR-0174 (aj) is the one exception, and step 1 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) gives its check.
 - An online writer defeats the tag of the manifest at three points (ADR-0174 (ag)). It can change a temp file before the hash, write into the dump file after the check, or change the scratch cluster of `restore-test`. No workaround.
 - The key lies in the container where the SQL of a set runs as a superuser (ADR-0174 (ah)). A holder of the key or of a shell as uid 999 in `backup` can sign a crafted set. After such an incident, use the section "Compromise rotation".
 - The tag does not cover the modification time of a file (ADR-0174 (ai)). A writer can delete newer sets and change the times, so the alert `backup_age` gives no proof of a replay. Only the tag check of a restore proves a set.

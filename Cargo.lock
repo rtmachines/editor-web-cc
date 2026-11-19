@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "recipe-app"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -2561,7 +2561,7 @@ dependencies = [
 
 [[package]]
 name = "recipe-db"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "recipe-app",
@@ -2579,7 +2579,7 @@ dependencies = [
 
 [[package]]
 name = "recipe-domain"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "hmac 0.13.0",
  "proptest",
@@ -2596,7 +2596,7 @@ dependencies = [
 
 [[package]]
 name = "recipe-export"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "jsonschema",
  "recipe-domain",
@@ -2611,7 +2611,7 @@ dependencies = [
 
 [[package]]
 name = "recipe-server"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2646,7 +2646,7 @@ dependencies = [
 
 [[package]]
 name = "recipe-web"
-version = "0.7.1"
+version = "0.8.0"
 dependencies = [
  "askama",
  "axum",
