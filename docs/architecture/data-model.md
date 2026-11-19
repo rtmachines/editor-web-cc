@@ -1134,7 +1134,7 @@ CREATE TRIGGER plc_connection_a_bump
 - A page query and `SetPlcConnection` read only `password_sealed IS NOT NULL`. Only `ExportPlcConnection` reads the ciphertext (section 6).
 - The record is not part of the export documents v1 and v2 or of `content_sha256` (ADR-0154 (k)).
 - `machine.db_number` of 3.1 holds the data block number (ADR-0156). `plc_connection.db_number` is a copy of it for a rollback (ADR-0156 (j)). Each command keeps the copy equal to `machine.db_number`. `recipe-db` writes the copy in SQL, and the domain never reads it. The copy writes no audit entry.
-- This copy is the expand step. `plc_connection_shape` stays as it is, so the previous release can read and write the record after a rollback. The trigger `plc_connection_sync_db_number` of 4.13 writes each number that the previous release saves into `machine.db_number` (ADR-0157).
+- This copy is the expand step. `plc_connection_shape` stays as it is, so the previous release can read and write the record after a rollback. The trigger `plc_connection_sync_db_number` of 4.13 writes each number that the previous release saves into `machine.db_number` (ADR-0157). No release up to 0.8.0 saves its own number in the copy, because 0.7.1 has no `plc_connection` and 0.8.0 copies `machine.db_number` (ADR-0197 (d), (e)).
 - A later contract change drops the trigger of 4.13 and its function, then drops `plc_connection.db_number` and relaxes `plc_connection_shape` (ADR-0156 (k), ADR-0157 (k)).
 
 ## 4. Triggers and functions
@@ -1731,7 +1731,7 @@ Note: `0007_audit_definer_operators.sql` replaces the body of this function (ADR
 
 ### 4.13 `plc_connection_sync_db_number` (ADR-0157)
 
-This trigger exists only in the expand period of ADR-0156. `SetPlcConnection` of the previous release writes the data block number into `plc_connection` only. The trigger writes that number into `machine.db_number` in the same transaction. The new release writes the copy from `machine.db_number` (3.18), so the trigger changes no row on its writes.
+This trigger exists only in the expand period of ADR-0156. `SetPlcConnection` of the previous release writes the data block number into `plc_connection` only. The trigger writes that number into `machine.db_number` in the same transaction. The new release writes the copy from `machine.db_number` (3.18), so the trigger changes no row on its writes. `SetPlcConnection` of 0.8.0 copies `machine.db_number`, so up to 0.8.0 only a direct write of `plc_connection.db_number` makes the trigger change a row (ADR-0197 (d), (e)).
 
 ```sql
 CREATE FUNCTION plc_connection_sync_db_number() RETURNS trigger

@@ -1,6 +1,6 @@
 # ADR-0157: Sync trigger for the data block copy in the expand period
 
-Status: Accepted. Amends ADR-0156 (h), (i), (j), and (k)
+Status: Accepted. Amends ADR-0156 (h), (i), (j), and (k). Amended by ADR-0197 (no release up to 0.8.0 saves its own number in the copy, the rollback limits for 0.7.1)
 Date: 2026-11-12
 Deciders: project owner
 

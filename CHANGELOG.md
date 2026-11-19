@@ -4,36 +4,72 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-19
+
 ### Added
 
 - Assumption A46: every `TwinCat3` machine runs TwinCAT 3.1.4026.0 or later. The editor does not check the version. The runbook names the check before a plant adds a `TwinCat3` machine (ADR-0142).
+- Assumption A49: `S7_1200` is the classic S7-1200 family with firmware 4.1 or later. The S7-1200 G2 is not in scope. The editor does not check the firmware (ADR-0182).
+- Assumption A50: the editor models the standard program of an S7 CPU only. A recipe parameter never targets an F-DB. The note of `data-model.md` §7 names the excluded families (ADR-0185).
 - Migration `0011_plc_type_rules.sql` adds two unique indexes. They refuse two struct names of one machine and revision, or two member names of one struct, that differ only in case (ADR-0143).
 - Migration `0011_plc_type_rules.sql` also replaces the function `dims_valid`. The PostgreSQL arrays `dim_lower` and `dim_upper` must start at the subscript 1. An IEC bound such as `ARRAY[0..9]` stays valid (ADR-0145).
 - Migration `0011_plc_type_rules.sql` stops when a stored row breaks a new rule. It checks every machine, also an archived one. The rows are two struct names or two member names that differ only in case. They also include an array row whose `dim_lower` or `dim_upper` starts at another subscript. The whole file then rolls back, so the database keeps no index and no history row. A forward correction of such a row needs a new decision (ADR-0143, ADR-0145).
 - Migration `0011_plc_type_rules.sql` takes a `SHARE` lock on `plc_type` and `plc_type_member`. Writes to both tables wait until the file ends (ADR-0143).
-- The runbook has the query `deploy/db/check-identifier-rules.sql`. Run it before the upgrade. The upgrade stops while a row of the part `struct_name_case`, `member_name_case`, or `array_subscript` remains. A row of `reserved_struct_name` is for information only (ADR-0143).
-- The runbook has the query `deploy/db/check-platform-ranges.sql`. It lists the stored values, limits, and S7 addresses that the new ranges of `LDATE`, `LDT`, and the data block number refuse (ADR-0139, ADR-0140).
-- The runbook has the query `deploy/db/check-s7-layout-rules.sql`. It lists the stored arrays of an array on `S7_1200` and `S7_1500`, and the S7 addresses whose layout changes (ADR-0147, ADR-0148).
+- **BREAKING** On a database of 0.7.1, first run the query of the live S7 machines, before the secret files and the other checks (ADR-0197). The text before step 1 of the section "Upgrade" in `docs/ops/runbook.md` gives this order. Then run the four checks of step 2 of that section, in this order. Each check has a required result:
+  - The platform-ranges check is the query `deploy/db/check-platform-ranges.sql`. It lists the stored values, limits, and S7 addresses that the new ranges of `LDATE`, `LDT`, and the data block number refuse (ADR-0139, ADR-0140). Its part `wide_text` lists the `WCHAR` and `WSTRING` values that the new S7 character range refuses (ADR-0180). The end criterion of the runbook section "Check the stored data against the platform ranges" must hold before step 3. That section gives the fix rule, which defines a version to fix, and the rows that the owner accepts or signs off. If a fix is not possible, stop the upgrade.
+  - The identifier check is the query `deploy/db/check-identifier-rules.sql`. The parts `struct_name_case`, `member_name_case`, and `array_subscript` must give 0 rows. The owner signs off each row of `reserved_struct_name` and `s7_reserved_struct_name` (ADR-0143, ADR-0145 (c), ADR-0186).
+  - The S7 layout check is the query `deploy/db/check-s7-layout-rules.sql`. It lists the stored arrays of an array on `S7_300`, `S7_1200`, and `S7_1500`, and the S7 addresses whose layout changes (ADR-0147, ADR-0148, ADR-0177). The same fix rule applies to the parts `array_bound` and `bool_array_3d` (ADR-0178, ADR-0187). The owner signs off each other row of these parts and each row of the other parts, for example `nesting` (ADR-0179). The end criterion holds when no `array_bound` or `bool_array_3d` row names a version to fix.
+  - The check of the live S7 machines runs the query again before step 3. It must return 0 rows (ADR-0197).
 - Tests pin the answer of the form readers to a changed form body: one line `E-WEB-008` (ADR-0138).
+- Tests pin two rules. `STRING[n]` gives `E-PLT-013`. A based literal, a typed literal, or the separator `_` in a `Numeric` leaf gives `E-RCP-005` (ADR-0183).
 - The job `alerts` gets two conditions, `restore_test` and `base_backup`, after `backup_age` (ADR-0151).
 - `restore-test` writes the result file `/backups/restore-test.result` (ADR-0151).
 - `basebackup-once` writes the result file `/wal/base-backup.result` (ADR-0151).
 - The migration check `deploy/ci/migration_rewrite.py` rejects the form `add column of a constrained domain`. The check reports a domain with a volatile `DEFAULT` as the form `volatile default` (ADR-0153 amends ADR-0136 and ADR-0127 (p)).
 - The XSS corpus tests send each payload through the password fields of `POST /login` and `POST /me/password`. A guard test requires a corpus test or a stated reason for each field of each form struct in `recipe-web`.
 - The Compose smoke suite checks the exported content after the hash check. The check uses `exportContentFaults`. It covers the machine, reference, version, unit, and parameter values.
+- Each machine can have one PLC connection record for an external adapter. The editor never opens a connection to a PLC. Assumption A47 records this reading of R03 (ADR-0154).
+- Migration `0012_plc_connection.sql` adds the table `plc_connection`. The table holds at most one row for each machine and only the fields of the platform of that machine (ADR-0154).
+- `GET /machines/{code}/connection/edit` only shows the form. `POST /machines/{code}/connection` runs the command `SetPlcConnection`. Both routes need `MachineManage`. The command compares a `row_version` and writes the audit action `PlcConnectionSet` (ADR-0154).
+- `SetPlcConnection` takes no `db_number`. The data block number of the record comes from the machine. A form post with the field `db_number` gives `422 E-WEB-008` with one line (ADR-0156, ADR-0138).
+- AES-256-GCM encrypts the PLC password. The password never appears in HTML, a form value, an audit entry, a log line, an error, or `Debug` output (ADR-0154).
+- The route `GET /export/v1/machines/{code}/connection?recipe={ref}` gives the record and the password as JSON. It needs `VersionExport` and the HTTP Basic login of an `ExportClient` account (ADR-0154).
+- The connection route commits the audit action `PlcConnectionExported` before it builds the answer. It also runs in read-only mode (ADR-0154).
+- A recipe of another machine gives `404 E-PLT-029` on the connection route, and an archived machine gives `409 E-PLT-010`. A reused machine code never gives the controller of a new machine (ADR-0154).
+- The connection record is not part of the export documents or of `content_sha256` (ADR-0154).
 - Each live S7 machine has a data block number (`machine.db_number`). `CreateMachine` takes `db_number`. A new command `SetMachineDataBlock` and a new route `POST /machines/{code}/data-block` change it. The command needs `MachineManage` (ADR-0156).
-- Migrations `0013` to `0015` add and fill the data block number of a machine. Migration `0013` stops when a live S7 machine has no PLC connection record. The runbook section "Check the live S7 machines for a PLC connection record" names the check (ADR-0156).
+- Migrations `0013` to `0015` add and fill the data block number of a machine. Migration `0013` stops when a live S7 machine has no PLC connection record. On a database of 0.7.1, the file stops on each live S7 machine, because the database holds no PLC connection record. The runbook section "Check the live S7 machines for a PLC connection record" names the check for 0.7.1 (ADR-0156, ADR-0197).
+- Migration `0013` takes an `ACCESS EXCLUSIVE` lock on `machine` as its first statement. The lock stays until the file ends. A waiting statement can fail with `E-DB-001` after `db.lock_timeout` (ADR-0157 (i), ADR-0197 (h)).
+- Migration `0014` adds the trigger `plc_connection_sync_db_number`. It copies a changed `plc_connection.db_number` into `machine.db_number` (ADR-0157).
 - The CI job `release-toolchain` runs `cargo check --release` of `recipe-server` on each pull request. It uses the toolchain of `deploy/Dockerfile`.
 - The compile step of `deploy/ci/check.sh` runs with `-W error` for every `deploy/ci/*.py`.
+- The coverage gate builds its source inventory from the tracked files under `crates/*/src/`. A required production file without a report entry fails the gate (ADR-0162).
 - Migration `0016_recipe_version_insert.sql` adds the trigger `recipe_version_insert_draft`. The database refuses a new version row that is not a live draft with `E-RCP-037` (ADR-0169).
 - `backup-once` writes a tag file `recipe_<stamp>.dump.sha256.hmac` for each backup set. The tag is an HMAC-SHA-256 of the manifest (ADR-0174).
 - `backup-once` computes the tag with the key `backup_manifest_key`. `restore-test` and `restore-volume` check the tag before a PostgreSQL tool reads the set. A missing or bad tag stops the run.
-- **BREAKING** Before the upgrade, create the secret file `backup_manifest_key`. Step 2 of "Create the secret files" in `docs/ops/runbook.md` gives the command.
+- **BREAKING** Before the upgrade, create the secret file `backup_manifest_key`. Step 2 of "Create the secret files" in `docs/ops/runbook.md` gives the command. The text block "Manifest key file before step 1" in the section "Upgrade" names the steps for this key only. Run the "Probe of the previous image" before step 3 (ADR-0174).
+- **BREAKING** The project supports the upgrade from 0.7.1 only when the database holds no live S7 machine. A live S7 machine is a machine on `S7_300`, `S7_1200`, or `S7_1500` that is not archived. Otherwise stop the upgrade and change nothing on the host of 0.7.1. Make a new installation of 0.8.0 on another host. The runbook section "Check the live S7 machines for a PLC connection record" gives this rule in step 4 of its steps for 0.7.1 (ADR-0197).
+- Release 0.7.1 is the only supported start release of the upgrade to 0.8.0. An older installation first upgrades to 0.7.1 (ADR-0197).
+- **BREAKING** The migrations `0011` to `0016` do not follow the expand pattern as one release. A rollback to 0.7.1 restores the `_premigrate` dump into a new volume (section "Rollback", subsection "Roll back with the _premigrate set"). The restore loses every write after the dump. When `0013` stops on a database of 0.7.1, `0011` and `0012` stay committed. Then do all four parts of step 12 of the section "Upgrade". Part 4 restores the `_premigrate` set of step 8 of the same upgrade (ADR-0197 (g1)).
+- The limit "0.7.1 cannot create an S7 machine" applies only when 0.7.1 runs on the schema of 0.8.0. After a rollback, the project does not support that case (ADR-0197 (g)).
+- Manual superuser step: steps 13 to 17 of the section "Upgrade" run in every upgrade. The audit guard function does not change, so the expected hash equals the value of 0.7.1 (`reliability.md` 7.10).
+- **BREAKING** Before the upgrade, create the secret file `plc_credential_key`. The new `app` refuses to start without it. The text block "Key file of step 6" in the section "Upgrade" of `docs/ops/runbook.md` gives the steps (ADR-0154).
+- The first start of the new `app` writes one `SettingChanged` entry for the new key `security.plc_credential_key_file`. The old value is `null`. The setting holds the path of the file and never the key. The entry also occurs in read-only mode (ADR-0155).
+- The new script `static/request-state.js` locks a form while its request runs. The form gets `aria-busy="true"`, and its text inputs become `readonly` (ADR-0158).
+- The HTMX configuration gets `timeout` of 45 s (`htmx.request_timeout`). The value is above `http.request_timeout`, so `503 E-WEB-009` arrives first (ADR-0158).
+- The edit form and the new form of a parameter and the form of a translation row show the indicator `form-in-progress` (ADR-0158).
 
 ### Changed
 
 - The XSS coverage guard test is a module directory of four files. No test changed.
-- The export flag `loadable` is `true` only when the version is `Approved` at export time and no value, limit, or address breaks a rule (ADR-0119). The flag is now also `false` in more cases. A stored `LDATE` or `LDT` count is above the new end (ADR-0139). A stored data block number is above 59 999 (ADR-0140). A stored S7 address can end after byte 65535 under the new S7 layout, for example in a struct with a `SINT` member (ADR-0147). Two parameters overlap, and `E-RCP-022` names the fault (ADR-0149). The hashed body and `content_sha256` do not change.
+- The export flag `loadable` is `true` only when the version is `Approved` at export time and no value, limit, or address breaks a rule (ADR-0119). The flag is now also `false` in these cases. The hashed body and `content_sha256` do not change.
+  - A stored `LDATE` or `LDT` count is above the new end (ADR-0139).
+  - A stored data block number is above 59 999 (ADR-0140).
+  - A stored S7 address can end after byte 65535 under the new S7 layout, for example in a struct with a `SINT` member (ADR-0147).
+  - Two parameters overlap, and `E-RCP-022` names the fault (ADR-0149).
+  - A parameter with an S7 address has an array bound outside -32768 to 32767 (ADR-0178).
+  - The type of a parameter with an S7 address holds a `BOOL` array with three dimensions (ADR-0187).
+  - A stored `WCHAR` or `WSTRING` value on S7 breaks the new character range (ADR-0180).
 - The export check and the version page of an `Approved` version also check the overlap of S7 addresses. The check covers every parameter of the version. The notice of the version page names `E-RCP-022` (ADR-0149).
 - A command that writes parameters reports an overlap only for a pair with at least one written parameter. `ApproveVersion` checks every pair and refuses a stored overlap with `E-RCP-022` (ADR-0149).
 - On `CodesysIec` and `TwinCat3`, an `LDATE` or `LDT` count is `0` to `2^63-1` ns. The last `LDT` is 2262-04-11-23:47:16.854775807. A value above the end gives `E-RCP-005`, and a limit gives `E-RCP-006`. The editor refuses the dates before 1970, as before (ADR-0139).
@@ -44,22 +80,32 @@ This file records the notable changes of the recipe editor. The format follows [
 - A struct name compares without case on one machine, and a member name compares without case in one struct. `st_zone` next to `ST_Zone` gives `E-PLT-015`. The members `speed` and `Speed` give `E-PLT-021` (ADR-0143).
 - A new struct name cannot be a reserved word. The list has 211 words: the keywords of IEC 61131-3 and TwinCAT 3 and the 29 primitive names. The struct form gives `E-WEB-008` with the field `type_name`. A type text with such a struct gives `E-PLT-013` with the reserved-name reason (ADR-0143).
 - A stored struct with a reserved name keeps working but gets no new revision. Define a struct with a new name, then move each parameter with `UpdateParameterDefinition` (ADR-0143).
-- On `S7_1200` and `S7_1500`, an array cannot have an array as element. A type text with two `ARRAY[...] OF` prefixes in a row gives `E-PLT-013`. A member of `DefineUdt` gives `E-PLT-006`. A stored type of this kind stays readable (ADR-0148).
+- On `S7_300`, `S7_1200`, and `S7_1500`, an array cannot have an array as element. A type text with two `ARRAY[...] OF` prefixes in a row gives `E-PLT-013`. A member of `DefineUdt` gives `E-PLT-006`. A stored type of this kind stays readable (ADR-0148, ADR-0177).
 - `RebindTypeRevision` keeps a member with its value and limits. Both revisions must have a member of that name, and the two member types must have one shape. Two revisions of one struct are two shapes (ADR-0146).
 - The S7 layout of a struct puts a `SINT` or `USINT` member at the next even byte. In a `BOOL` array with two dimensions, each line of the last index starts at the next byte (ADR-0147).
-- A `BOOL` array with three dimensions uses an interim size until a TIA Portal measurement decides. The size can refuse an address but never lets two parameters share a byte (ADR-0147).
+- The type page uses an interim size for a `BOOL` array with three dimensions until a TIA Portal measurement decides (ADR-0147, ADR-0187).
+- On `S7_300`, `S7_1200`, and `S7_1500`, a parameter with an address has every array bound in `-32768` to `32767`. A break gives the new code `E-RCP-058`. `ApproveVersion` checks every parameter (ADR-0178).
+- The code `E-RCP-058` also refuses a parameter with an address whose type holds a `BOOL` array with three dimensions. A parameter without an address keeps such a type (ADR-0187).
+- On `S7_300`, `S7_1200`, and `S7_1500`, a type has at most 8 levels in the Siemens count. A struct counts 1 level, and an array of a struct counts 3 levels. A break gives `E-PLT-018` (ADR-0179).
+- `RebindTypeRevision` counts the resulting type of each parameter that it moves on these platforms. A type over 8 levels gives `E-PLT-018`, and the command changes nothing (ADR-0179).
+- On `S7_1200` and `S7_1500`, a `WCHAR` value is one character in `U+0001` to `U+D7FF`. Each UTF-16 code unit of a `WSTRING` value is in `0x0001` to `0xCFFF`. A refused value gives `E-RCP-005` (ADR-0180).
+- On the S7 platforms, a new struct name cannot be a Siemens reserved name. The list has 269 names and the family `PD_TEL<n>`. `DefineUdt` gives `E-PLT-013` with the reserved-name reason (ADR-0186).
 - Each composite row of the S7 layout reference table now has a source mark. The mark `Documented` names the Siemens rules that the row follows. 21 of the 22 rows have it, and the row A03 keeps `Unverified` (ADR-0147).
-- The type proposals of the parameter form and the struct form leave out a stored struct with a reserved name (ADR-0143).
+- The type proposals of the parameter form and the struct form leave out a stored struct with a reserved name (ADR-0143, ADR-0186).
+- `DefineUdt` in the mode `Revision` refuses members that equal the latest revision with `409 E-PLT-052`. The command writes nothing (ADR-0159).
+- The schema `export-v2.schema.json` gets a `pattern` for the string form of `parameters[].s7_address`. The writer, the hashed body, and `content_sha256` do not change (ADR-0189).
+- A draft command gives `500 E-DB-008` when a stored part that it reads and does not write breaks the earlier rule set. The part of the request keeps the code of its rule (ADR-0195).
+- A stored type that the platform does not hold keeps `422 E-PLT-013`. `UpdateParameterDefinition` can replace a parameter type that does not resolve (ADR-0195).
+- `ListParameters` and `GetParameter` return a view without a tree for a type that does not resolve. The parameter page shows the definition without the value grid (ADR-0195).
 - The expected form of a text fault changed in the `en` and `pl` bundles. The text for a `CHAR` or `WCHAR` names `U+0001`. The text for a `STRING` or `WSTRING` says "without `U+0000`" (ADR-0137).
 - A form body that the editor HTML cannot send gives `422 E-WEB-008` with one line. Such a body has an unknown key, a repeated key, a malformed key, or a `[*]` segment. The answer lists no other bad field. The code does not change (ADR-0138).
 - The documents give one unit for a string length. A `STRING(n)` counts characters, and a `WSTRING(n)` counts UTF-16 code units. The code already used these units (ADR-0137).
 - The documents record that `STRING(n)` and `WSTRING(n)` on `CodesysIec` and `TwinCat3` stay at the length 1 to 255. They also give `LTOD` the range `0` to `86_399_999_999_999` ns and every `STRING` and `WSTRING` the width `B`. The code does not change (ADR-0141, ADR-0139).
 - The documents record that the login throttle has no per-login limit over all addresses. The alert `failed_logins` is the control (ADR-0150). The behavior does not change.
 - The top directory of `/wal` gets the mode `0711` (ADR-0151).
-- Step 5 of the upgrade procedure in `reliability.md` §7.10 gets command 4: `docker compose exec walarchive basebackup-once` (ADR-0151).
+- **BREAKING** Step 5 of the upgrade procedure in `reliability.md` §7.10 gets command 4: `docker compose exec walarchive basebackup-once`. The operator reads `/wal/base-backup.result` after command 4 of step 23 in the section "Upgrade" of `docs/ops/runbook.md` and continues only on `passed` (ADR-0151). In the first upgrade, the alerts `restore_test` and `base_backup` can be active from step 18 until step 23 of that runbook section ends. These steps are steps 4 and 5 of `reliability.md` §7.10. The alerts are transient (ADR-0151 (n)).
 - The scan of the backup directory has a time limit. A scan that waits longer than `health.disk_check_interval` is a read fault (ADR-0151).
 - The CI job `test` runs the step "Check the production refusal of insecure cookies" (`bash deploy/ci/rust-tests.sh secure`) after "Run tests". The job `compose` no longer runs this step (ADR-0062 (b), ADR-0127).
-- `SetPlcConnection` no longer takes `db_number`. This is a BREAKING change for a form post that sends the field. The value comes from the machine (ADR-0156).
 - ADR-0161 states the bound of the stalled reads of a path. A path holds at most one stalled call for each pair of a job and an adapter. The behavior does not change.
 - `PlantErrors` and `CheckResultFault` have a `code()` method. The two variants of `CheckResultFault` have the codes `E-WEB-016` and `E-WEB-017` (ADR-0165).
 - The `WARN` line of the job `alerts` for a result-file fault has the field `error_code` (ADR-0165).
@@ -68,16 +114,21 @@ This file records the notable changes of the recipe editor. The format follows [
 - `data-model.md` names the read before the command transaction of `CreateUser`, `ResetPassword`, and `CreateRecipe` (ADR-0168).
 - The exception table of `data-model.md` §1.1 lists `plc_type_member` and `draft_editor` (ADR-0168).
 - `data-model.md` §1.3 says that `TypedLogin` refuses a control character and that the database checks only the length (ADR-0168).
-- The service `db` keeps its four secret mounts. The accepted risk of their clear text in `db` is recorded (ADR-0170).
+- The service `db` keeps its four secret mounts. ADR-0170 records the accepted risk of clear-text secrets in `db`.
 - With `session.secure=false` in a `dev` build, no cookie has `Secure`. The session and pre-session cookies also drop the `__Host-` prefix (ADR-0171).
 - The stall mark of `read_with_limit` covers a call whose caller waits to the limit. The operator needs no step for a dropped call (ADR-0172).
 - The guard tests of `deploy/ci/` read more shell forms and lossless argument records of the Docker stubs. They keep `app` and `backup` without a container in the restore windows (ADR-0175).
 - The guard tests of `deploy/ci/` keep `app`, `backup`, and `walarchive` without a container in the windows of ADR-0176.
+- The CI job `Coverage` installs `cargo-llvm-cov@0.9.1` in place of 0.6.24. This version reads the test binaries of Rust 1.100.0 (ADR-0196).
+- The documents record that `DATE` on the S7 platforms keeps its end although TIA V21 allows dates up to 2169-06-06 (ADR-0184). The code does not change.
+- The documents record that the `DTL` range equals the Siemens range (ADR-0188). They also record that the transfer client writes each `STRING` or `CHAR` character as one byte of ISO 8859-1 (ADR-0181). The code does not change.
+- ADR-0190 records the scope of ADR-0172 (q). After a failed write of `login_failed`, `login_rejected_inactive`, or `login_throttled`, the request still gives its refusal or its throttle answer. The event `csrf_rejected` keeps ADR-0035 (t).
+- The operation rows of `domain-model.md` and `data-model.md` follow the shipped code. ADR-0192 states that input parsing runs before the transaction and the checks of the locked state run under the lock (ADR-0191 to ADR-0194). The code does not change.
 
 ### Fixed
 
 - A value with `U+0000` in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` leaf gives `422 E-RCP-005` with a field line. Before, the write failed in PostgreSQL and the user got a storage error (ADR-0137).
-- The editor reads a JSON number as its exact decimal value. It no longer rounds. It refuses a value outside the range or the scale of its type (ADR-0120).
+- The JSON number parser reads a number as its exact decimal value. It now accepts a wider set of texts, for example `150e-29`, which it refused before. It refuses a value outside the range or the scale of its type (ADR-0120).
 - A stored `S5TIME` or `LDATE` limit bound follows the count rules of a stored value. A message always shows a time bound as an IEC literal (ADR-0120).
 - Two commands that need several derived types take their class-2 locks in the ascending order of the key values. This order closes a path to the deadlock `40P01` (ADR-0144).
 - A database CHECK refuses an array row whose `dim_lower` or `dim_upper` starts at another subscript than 1. This is the PostgreSQL subscript, not the IEC bound. The application never writes such a row. Before, `dims_valid` passed such a row, and one shape could get two rows (ADR-0145).
@@ -103,19 +154,30 @@ This file records the notable changes of the recipe editor. The format follows [
 - A restore into production and a recovery from the WAL archive now delete the containers of `app` and `backup`. A restart of Docker or of the host then cannot start them on the old volume (ADR-0175).
 - The second pick of `/approved` on a route with `{code}` applies the machine filter (ADR-0109 (h), (j)). When a new machine reuses the code, a recipe of the archived machine gives `404 E-WEB-005`. Before, the second pick could export the recipe of an archived machine.
 - The major upgrade deletes the container of `app`. The recovery from the WAL archive deletes the container of `walarchive`. The rollback deletes the container of `backup`. A reboot of the host in these windows cannot restart an old container (ADR-0176).
+- On a version page after the last page, the save of the opened page form sent no request. The link "Add a parameter" now opens the page form in `#content`, and a save gives `303` to the version page (ADR-0160).
+- Enter in the UDT form no longer adds a member row. The button "Create type" is now the first submit button (ADR-0037 (h)).
+- The unit form has no parent select. It keeps the parent of its link in a hidden field and shows it as text. Before, a changed parent kept the first heading, and the save gave `E-PLT-004`.
+- The answer of a save no longer deletes text that the user typed after the send. The form stays read-only while its request runs (ADR-0158).
+- A network error or a timeout shows `E-WEB-015` in `#error-panel`. The text says that the result is not known. Before, the page showed nothing (ADR-0158).
 
 ### Known gaps
 
 - The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
-- The tests with `#[cfg(unix)]` and the shell-based tests of `deploy/ci` ran only in CI on Linux, not on the Windows development host.
-- When a struct holds a `BOOL` array with three dimensions, the type page shows a guess for the offsets of the later members (ADR-0147).
-- The row A03 of the S7 layout reference table stays `Unverified`. It is a `BOOL` array with three dimensions. Rule S-AR4 of the Siemens documentation has two readings, and only a TIA Portal measurement can decide (ADR-0017, ADR-0147, Q10).
+- When a struct holds a `BOOL` array with three dimensions, the type page shows a guess for the offsets of the later members (ADR-0147, ADR-0187).
+- A write or an approval refuses a parameter with an address on an S7 platform whose type holds a `BOOL` array with three dimensions. It gives `E-RCP-058` until a TIA Portal measurement decides the layout. A stored parameter of this kind stays and gives `loadable` false (ADR-0187).
+- The row A03 of the S7 layout reference table stays `Unverified`. It is a `BOOL` array with three dimensions. Rule S-AR4 of the Siemens documentation has two readings, and only a TIA Portal measurement can decide (ADR-0017, ADR-0147, ADR-0187, Q10).
 - The migration check passes some statements, for example `REINDEX`, `ALTER TABLE ... ATTACH PARTITION`, and `EXECUTE format(...)`. ADR-0136 lists these residual risks. The review of a migration checks them.
 - Some low-severity review items stay open by decision. The project owner did not rename `parse_text` of `TimeStateKey`. Several files of `recipe-app` keep their own copies of the helpers `NEVER` and `epoch_seconds`.
 - The English success toasts use the passive voice, for example "Parameter SPEED is saved." The project owner keeps this one style for all toasts.
 - No test with a real transfer client over HTTPS ran. The tests of the export routes use the HTTP test suite and the Compose stack of CI.
-- A client that times out after the commit of a user creation gets no password (ADR-0172). The Administrator runs `ResetPassword` for that user to get a new one-time password (ADR-0172).
-- The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
+- A client that times out after the commit of a user creation or of a password reset gets no one-time password (ADR-0172 (a)). The Administrator runs `ResetPassword` for that user to get a new one (ADR-0172 (b)).
+- The file `plc_credential_key` has no rotation (section "Create the secret files" of `docs/ops/runbook.md`). A lost key makes every stored PLC password unreadable. A user enters each password again (ADR-0154).
+- The tag of the backup manifest does not stop an online writer of the backup disk. The previous image of the first release with the tag ignores the tag file. The runbook section "Known gaps" lists both limits (ADR-0174 (b), (aj)).
+- ADR-0195 leaves some sites with their old codes for a stored part that breaks the earlier rule set. `CreateVersion` and `ApproveVersion` keep `E-RCP-020`. Some commands and queries give `E-PLT-013` for two kept type rows with one identifier.
+- No CI job ran the in-place upgrade from 0.7.1 (ADR-0197).
+- The GitHub releases up to `v0.7.1` hold no SHA-256 and no image ID. The step "Load the images" in `docs/ops/runbook.md` therefore stops before `docker load` for their image files. This blocks a reload of the 0.7.1 images, for example on the path of an older installation through 0.7.1 or for a rollback image. A later change adds a source for these values.
+- The `plant-model` requirement "Copy of the data block number in the connection record" keeps the scenario "The previous release saves a new data block number". No release shipped that client. A later OpenSpec change fixes it (ADR-0197).
+- The section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md) has the full list of the operations gaps.
 
 ## [0.7.1] - 2026-11-06
 
@@ -641,7 +703,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - The type page does not show the S7 layout of a type.
 - The operations gaps are in the section "Known gaps" of [docs/ops/runbook.md](docs/ops/runbook.md). This file does not repeat them.
 
-[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/rtmachines/editor-web-cc/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.8.0
 [0.7.1]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.7.1
 [0.7.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.7.0
 [0.6.0]: https://github.com/rtmachines/editor-web-cc/releases/tag/v0.6.0

@@ -6,18 +6,19 @@ The application runs 24/7 on one on-premises Docker host. Caddy handles TLS. The
 
 ## Status
 
-This repository holds release 0.7.1. It has the route groups of `docs/architecture/api.md` section 2 and the Compose stack of `docs/architecture/reliability.md` section 7. It has the backup, the restore, the volume switch of ADR-0103, and the recovery from the WAL archive of ADR-0106.
+This repository holds release 0.8.0. It has the route groups of `docs/architecture/api.md` section 2 and the Compose stack of `docs/architecture/reliability.md` section 7. It has the backup, the restore, the volume switch of ADR-0103, and the recovery from the WAL archive of ADR-0106.
 
-The version page and the type page have the additions of ADR-0108. The export routes of ADR-0109 serve a transfer client with HTTP Basic authentication. The UI changes of ADR-0110 to ADR-0113 protect the data of a draft and show the read-only mode on each page. Release 0.7.0 adds the S7 range and address rules of ADR-0114 to ADR-0121. It also adds the runtime fixes and the test gates of ADR-0122 to ADR-0133. Release 0.7.1 adds the test of ADR-0134, the STE lint of the specs (ADR-0135), and 14 forms of the migration check (ADR-0136). The [changelog](CHANGELOG.md) lists every change.
+The version page and the type page have the additions of ADR-0108. The export routes of ADR-0109 serve a transfer client with HTTP Basic authentication. The UI changes of ADR-0110 to ADR-0113 protect the data of a draft and show the read-only mode on each page. Release 0.7.0 adds the S7 range and address rules of ADR-0114 to ADR-0121. It also adds the runtime fixes and the test gates of ADR-0122 to ADR-0133. Release 0.7.1 adds the test of ADR-0134, the STE lint of the specs (ADR-0135), and 14 forms of the migration check (ADR-0136). Release 0.8.0 adds the PLC connection record of a machine (ADR-0154) and the data block number of a machine (ADR-0156). It also adds the per-platform type rules. ADR-0197 sets the upgrade path rules for a database of 0.7.1. The [changelog](CHANGELOG.md) lists every change.
 
-The branch `main` also holds the unreleased changes of ADR-0137 to ADR-0173. The section `Unreleased` of the [changelog](CHANGELOG.md) lists them and the current known gaps.
-
-## Known gaps of 0.7.1
+## Known gaps of 0.8.0
 
 - The soak test of `reliability.md` section 6 is not implemented. No soak script and no nightly CI job exist. The 2 h local soak run with an RSS chart did not run, so no `docs/ops/soak-<date>.md` exists.
-- The tests with `#[cfg(unix)]` and the shell-based tests of `deploy/ci` ran only in CI on Linux.
-- No test with a real transfer client over HTTPS ran.
+- The row A03 of the S7 layout reference table stays `Unverified`. A write or an approval refuses a parameter with an address in a `BOOL` array with three dimensions on an S7 platform (ADR-0187).
 - The migration check passes some statements that ADR-0136 lists as residual risks.
+- No test with a real transfer client over HTTPS ran.
+- The file `plc_credential_key` has no rotation. A lost key makes every stored PLC password unreadable (ADR-0154).
+- No CI job ran the in-place upgrade from 0.7.1 (ADR-0197).
+- The GitHub releases up to `v0.7.1` hold no SHA-256 and no image ID. The step "Load the images" of the runbook stops for their image files.
 - The operations gaps are in the section [Known gaps](docs/ops/runbook.md#known-gaps) of the runbook.
 
 The section "Known gaps" of the [changelog](CHANGELOG.md) is the authority for this list.

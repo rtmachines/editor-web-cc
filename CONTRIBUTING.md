@@ -180,3 +180,38 @@ A pull request needs:
 1. green CI,
 2. one review,
 3. an entry in `CHANGELOG.md` when behavior changes.
+
+## Release
+
+This section describes the release steps of the maintainer. Commit `7f102d1` (release 0.7.1) is the model for the file changes.
+
+1. Update the release files as commit `7f102d1` does.
+   - `CHANGELOG.md`: Move the entries of `## [Unreleased]` under `## [X.Y.Z] - <date>`. Keep `## [Unreleased]` empty.
+   - `CHANGELOG.md`: Point `[Unreleased]` to `vX.Y.Z...HEAD`. Add the link ref `[X.Y.Z]`.
+   - `CHANGELOG.md`: Update the section "Known gaps" for `X.Y.Z`.
+   - `Cargo.toml`: Set the workspace `version` to `X.Y.Z`.
+   - `Cargo.lock`: Update the version of the workspace crates.
+   - `README.md`: Update the release line and the list "Known gaps of X.Y.Z".
+   - `deploy/.env.example`: Set `RECIPE_VERSION` to `X.Y.Z`.
+2. Run the checks of section "Local checks" and merge the pull request after one review.
+3. Check that the job `load` is green on `main` for the merge commit that gets the tag (ADR-0128 (d)).
+4. Tag that commit `vX.Y.Z` and push the tag.
+5. Build both images from the tag, as ADR-0064 (i) describes. Save each image with `docker save`, as ADR-0064 (j) requires.
+6. Compute the SHA-256 of each file. Read the image ID of each local image with `docker image inspect --format '{{.Id}}'`.
+7. Put the SHA-256 values and the image IDs into the body of the GitHub release of `vX.Y.Z`.
+
+Run the release build in the directory `deploy/` and export `RECIPE_VERSION=X.Y.Z` first. The release build adds `--env-file .env.example`, but the header of `deploy/compose.build.yaml` gives the form without it. Compose needs more required values than `RECIPE_VERSION`. Without the env file, Compose stops with `required variable ... is missing a value`.
+
+```bash
+docker compose --env-file .env.example -f compose.yaml -f compose.build.yaml build
+```
+
+The command builds both images.
+
+To check the configuration, run `docker compose --env-file .env.example -f compose.yaml -f compose.build.yaml config --images` in `deploy/`. The output must list `recipe-server:X.Y.Z` and `recipe-pgtools:X.Y.Z`. This command reads the configuration only. It does not show that the build made the images. Use the image IDs of step 6 in step 7. The script `deploy/ci/upgrade.sh` builds its previous-release images with `docker buildx build`.
+
+The value of `RECIPE_VERSION` is `X.Y.Z` without `v`, while the Git tag is `vX.Y.Z`. The image names are `recipe-server:X.Y.Z` and `recipe-pgtools:X.Y.Z`.
+
+No document gives the `docker save` command or the names of the image files. For step 6, use the commands of steps 1 and 4 of section "Load the images" in `docs/ops/runbook.md`.
+
+`CHANGELOG.md` does not hold the SHA-256 values or the image IDs (ADR-0064 (k)).
