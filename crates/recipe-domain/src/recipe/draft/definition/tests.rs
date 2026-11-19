@@ -52,7 +52,7 @@ fn a_retype_with_a_bad_text_and_a_bad_row_gives_one_list() {
     );
     let texts: Vec<String> = match error {
         DraftError::List(list) => list.into_vec(),
-        DraftError::Recipe(_) | DraftError::Plant(_) => Vec::new(),
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => Vec::new(),
     }
     .iter()
     .map(ToString::to_string)
@@ -90,7 +90,7 @@ fn a_retype_with_a_bad_leaf_keeps_the_range_fault_of_another_leaf() {
     );
     let texts: Vec<String> = match error {
         DraftError::List(list) => list.into_vec(),
-        DraftError::Recipe(_) | DraftError::Plant(_) => Vec::new(),
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => Vec::new(),
     }
     .iter()
     .map(ToString::to_string)
@@ -140,7 +140,7 @@ fn a_retype_to_char_with_a_nul_form_text_gives_e_rcp_005_and_keeps_the_type() {
     );
     let list = match error {
         DraftError::List(list) => Some(list),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap();
     assert!(

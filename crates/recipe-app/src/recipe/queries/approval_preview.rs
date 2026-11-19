@@ -102,6 +102,8 @@ struct PreviewRead {
 ///
 /// Returns `NotFound` (`E-WEB-005`) for an unknown recipe or version number. Returns
 /// `E-RCP-012` for a deleted recipe and `E-RCP-007` for a version that is not a live draft.
+/// Returns `AppError::Storage` with `E-DB-008` when the stored draft holds two parameters with
+/// one tag, key, or identifier (ADR-0195 (j)).
 async fn read_draft_of(
     tx: &mut dyn Transaction,
     input: &ApprovalPreviewInput,
@@ -185,6 +187,8 @@ impl GetApprovalPreview {
     /// Returns `AppError::Plant` when a type of a pair does not resolve and no blocker exists.
     /// Returns `AppError::Storage` (`E-DB-008`) when a stored value or limit row of a pair does
     /// not fit its type and no blocker exists.
+    /// Returns `AppError::Storage` with `E-DB-008` when the stored draft holds two parameters with
+    /// one tag, key, or identifier (ADR-0195 (j)).
     /// With a blocker, the result holds the blockers and no diff (design D3).
     /// Returns `AppError::Storage` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]

@@ -92,3 +92,19 @@ pub(in crate::recipe) fn stored_draft_with(
 pub(super) fn stored_draft(parameters: Vec<StoredParameter>) -> StoredDraft {
     stored_draft_with(VersionState::LiveDraft, PlcPlatform::TwinCat3, parameters)
 }
+
+/// Assert that `error` is a stored defect with the given parameter key and inner code.
+pub(in crate::recipe) fn assert_stored(
+    error: &DraftError,
+    key: Option<ParameterKey>,
+    code: crate::error_codes::ErrorCode,
+) {
+    let defect = match error {
+        DraftError::Stored(defect) => Some(defect),
+        _ => None,
+    }
+    .expect("expected a stored defect");
+    assert_eq!(defect.key(), key.as_ref(), "{error:?}");
+    assert_eq!(defect.code(), code, "{error:?}");
+    assert_eq!(error.code(), code, "{error:?}");
+}

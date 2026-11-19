@@ -418,6 +418,7 @@ The parameter table of the version page (ADR-0108 (a)):
 - The cell shows at most `table.value_chars` characters (`reliability.md` section 7.11). A longer text ends with `…`.
 - An empty text shows the word of the key `parameters-value-empty` in `--color-text-muted`.
 - An array or a struct shows the word of the key `parameters-value-composite` in `--color-text-muted`.
+- A parameter whose stored type has no type text shows an empty value cell, because its kind is unknown (ADR-0195).
 - The word, not the color, tells the state of the cell (section 2).
 
 The leaf grid (ADR-0039):

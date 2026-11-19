@@ -1,6 +1,6 @@
 # ADR-0118: Stored values that break a newer rule
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0195 (items (a) and (d): the page and the table of a type that does not resolve)
 Date: 2026-11-03
 Deciders: project owner
 

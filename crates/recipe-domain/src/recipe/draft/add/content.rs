@@ -34,7 +34,7 @@ fn reject(new: NewParameter, code: ErrorCode) -> String {
 fn entry_texts(error: DraftError) -> Vec<String> {
     match error {
         DraftError::List(list) => Some(list.into_vec()),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap()
     .iter()
@@ -158,7 +158,7 @@ fn a_form_text_with_a_nul_for_a_string_gives_e_rcp_005_and_adds_nothing() {
     let error = assert_rejected(&mut draft, &trees, new, ErrorCode::RCP_005);
     let list = match error {
         DraftError::List(list) => Some(list),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap();
     assert!(

@@ -276,3 +276,179 @@ fn the_transaction_and_the_unit_of_work_are_send() {
     assert_send_sync::<Arc<dyn UnitOfWork>>();
     assert_send_sync::<MemoryStore>();
 }
+
+/// A store with the machine M1 and the recipe R1 whose version V11 is a live draft.
+fn store_with_draft() -> MemoryStore {
+    let store = crate::memory::fixtures::store();
+    store.seed_recipe(
+        &crate::memory::fixtures::draft_recipe((1, 1), "R-1", 11),
+        recipe_domain::plant::PlcPlatform::TwinCat3,
+        crate::memory::fixtures::user(9),
+    );
+    store
+}
+
+#[tokio::test]
+async fn the_hook_on_lock_recipe_gives_none_once_and_then_the_row() {
+    use crate::memory::MissingRow;
+    use crate::memory::fixtures::rid;
+
+    let store = store_with_draft();
+    store.miss_next(MissingRow::Recipe);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    assert!(tx.recipes().lock_recipe(rid(1)).await.unwrap().is_none());
+    assert!(store.markers().is_empty(), "a missed lock leaves no line");
+    let locked = tx.recipes().lock_recipe(rid(1)).await.unwrap();
+    assert_eq!(locked.unwrap().state.id(), rid(1));
+}
+
+#[tokio::test]
+async fn the_hook_on_lock_machine_shared_gives_none_once_and_then_the_row() {
+    use crate::memory::MissingRow;
+    use crate::memory::fixtures::mid;
+
+    let store = store_with_draft();
+    store.miss_next(MissingRow::MachineShared);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    assert!(
+        tx.plant()
+            .lock_machine_shared(mid(1))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        tx.plant()
+            .lock_machine_shared(mid(1))
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn the_hook_on_lock_draft_gives_none_once_and_then_the_row() {
+    use crate::memory::MissingRow;
+    use crate::memory::fixtures::vid;
+
+    let store = store_with_draft();
+    store.miss_next(MissingRow::Draft);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    assert!(tx.drafts().lock_draft(vid(11)).await.unwrap().is_none());
+    assert!(tx.drafts().lock_draft(vid(11)).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn the_hook_on_live_units_gives_none_once_and_then_the_units() {
+    use crate::memory::MissingRow;
+    use crate::memory::fixtures::mid;
+
+    let store = store_with_draft();
+    store.miss_next(MissingRow::LiveUnits);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    assert!(tx.units().live_units(mid(1)).await.unwrap().is_none());
+    assert!(tx.units().live_units(mid(1)).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn a_hook_of_one_lookup_does_not_touch_another_lookup() {
+    use crate::memory::MissingRow;
+    use crate::memory::fixtures::{mid, rid};
+
+    let store = store_with_draft();
+    store.miss_next(MissingRow::Recipe);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    assert!(
+        tx.plant()
+            .lock_machine_shared(mid(1))
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(tx.recipes().lock_recipe(rid(1)).await.unwrap().is_none());
+}
+
+/// Count the rows of `rows` with the identifier `id`.
+fn count_rows(
+    rows: &[recipe_domain::plant::PlcType],
+    id: recipe_domain::plant::PlcTypeId,
+) -> usize {
+    rows.iter().filter(|row| row.id() == id).count()
+}
+
+#[tokio::test]
+async fn the_hook_on_type_rows_adds_a_duplicate_to_the_first_call_only() {
+    use crate::memory::fixtures::{mid, store};
+    use crate::memory::seed_type_id;
+    use recipe_domain::plant::Primitive;
+
+    let store = store();
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    store.duplicate_type_row_on_call(1, int);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    let first = tx.types().type_rows(mid(1)).await.unwrap();
+    assert_eq!(count_rows(&first, int), 2);
+    let second = tx.types().type_rows(mid(1)).await.unwrap();
+    assert_eq!(count_rows(&second, int), 1);
+}
+
+#[tokio::test]
+async fn the_hook_on_type_rows_adds_a_duplicate_to_the_second_call_only() {
+    use crate::memory::fixtures::{mid, store};
+    use crate::memory::seed_type_id;
+    use recipe_domain::plant::Primitive;
+
+    let store = store();
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    store.duplicate_type_row_on_call(2, int);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    let first = tx.types().type_rows(mid(1)).await.unwrap();
+    let second = tx.types().type_rows(mid(1)).await.unwrap();
+    let third = tx.types().type_rows(mid(1)).await.unwrap();
+    assert_eq!(count_rows(&first, int), 1);
+    assert_eq!(count_rows(&second, int), 2);
+    assert_eq!(count_rows(&third, int), 1);
+}
+
+#[tokio::test]
+async fn the_hook_on_type_rows_with_call_zero_never_fires() {
+    use crate::memory::fixtures::{mid, store};
+    use crate::memory::seed_type_id;
+    use recipe_domain::plant::Primitive;
+
+    let store = store();
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    store.duplicate_type_row_on_call(0, int);
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    let first = tx.types().type_rows(mid(1)).await.unwrap();
+    let second = tx.types().type_rows(mid(1)).await.unwrap();
+    assert_eq!(count_rows(&first, int), 1);
+    assert_eq!(count_rows(&second, int), 1);
+}
+
+#[tokio::test]
+async fn clear_failures_clears_a_pending_type_row_duplicate() {
+    use crate::memory::fixtures::{mid, store};
+    use crate::memory::seed_type_id;
+    use recipe_domain::plant::Primitive;
+
+    let store = store();
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    store.duplicate_type_row_on_call(1, int);
+    store.clear_failures();
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    let rows = tx.types().type_rows(mid(1)).await.unwrap();
+    assert_eq!(count_rows(&rows, int), 1);
+}
+
+#[tokio::test]
+async fn clear_failures_clears_a_pending_miss() {
+    use crate::memory::MissingRow;
+    use crate::memory::fixtures::rid;
+
+    let store = store_with_draft();
+    store.miss_next(MissingRow::Recipe);
+    store.clear_failures();
+    let mut tx = store.begin_memory(Isolation::ReadCommitted).unwrap();
+    assert!(tx.recipes().lock_recipe(rid(1)).await.unwrap().is_some());
+}

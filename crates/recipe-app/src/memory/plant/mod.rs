@@ -31,7 +31,7 @@ use super::recipe::resolve_machine;
 use super::rows::{
     MachineRow, UnitRow, corrupt, corrupt_rows, duplicate, missing_reference, missing_row,
 };
-use super::{LockMode, MemoryTransaction};
+use super::{LockMode, MemoryTransaction, MissingRow};
 use crate::error::{MACHINE_CODE_LIVE_UNIQUE, StorageError, UNIT_PARENT_EXISTS, UNIT_PATH_UNIQUE};
 use crate::ports::{
     InsertedMachine, Locked, MachineFilter, MachineSummary, PlantRepository, RowImage,
@@ -193,6 +193,9 @@ impl PlantRepository for MemoryTransaction {
         &mut self,
         id: MachineId,
     ) -> Result<Option<Locked<Machine>>, StorageError> {
+        if self.take_missing(MissingRow::MachineShared) {
+            return Ok(None);
+        }
         self.lock_machine(id, LockMode::ForShare)
     }
 

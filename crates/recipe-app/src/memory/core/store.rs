@@ -6,13 +6,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use recipe_domain::audit::AuditEntry;
+use recipe_domain::plant::PlcTypeId;
 use recipe_domain::timestamp::Timestamp;
 
 use super::journal::{DraftWrite, JournalEntry};
 use super::state::MemoryState;
 use super::transaction::{MemoryTransaction, VisibleLogs};
 use crate::error::StorageError;
-use crate::memory::{Fault, FaultPoint, MemoryClock, MemorySink};
+use crate::memory::{Fault, FaultPoint, MemoryClock, MemorySink, MissingRow};
 use crate::ports::Clock as _;
 use crate::ports::{Isolation, Transaction, UnitOfWork};
 
@@ -71,11 +72,22 @@ pub(super) struct Shared {
     pub(super) draft_writes: Vec<DraftWrite>,
     pub(super) faults: Faults,
     pub(super) queued_faults: Vec<(FaultPoint, Fault)>,
+    /// The lookups that return `None` once, although the row exists (`miss_next`).
+    pub(super) missing_rows: Vec<MissingRow>,
+    /// The pending duplicates of `type_rows` (`duplicate_type_row_on_call`).
+    pub(super) type_row_duplicates: Vec<TypeRowDuplicate>,
     pub(super) clock: MemoryClock,
     pub(super) read_draft_hook: ReadDraftHook,
     pub(super) lock_version_hook: LockVersionHook,
     /// The security event sink of the store. It shares the clock (ADR-0051 (a)).
     pub(super) sink: MemorySink,
+}
+
+/// A duplicate row that `type_rows` adds when its call counter reaches zero.
+#[derive(Debug)]
+pub(super) struct TypeRowDuplicate {
+    calls_left: u32,
+    id: PlcTypeId,
 }
 
 impl Default for Shared {
@@ -96,6 +108,8 @@ impl Shared {
             draft_writes: Vec::new(),
             faults: Faults::default(),
             queued_faults: Vec::new(),
+            missing_rows: Vec::new(),
+            type_row_duplicates: Vec::new(),
             sink: MemorySink::with_clock(clock.clone()),
             clock,
             read_draft_hook: ReadDraftHook::default(),
@@ -110,6 +124,33 @@ impl Shared {
             .iter()
             .position(|(queued, _fault)| *queued == point)?;
         Some(self.queued_faults.remove(index).1)
+    }
+
+    /// Take one pending miss of `lookup` out of the list and return `true`, or return `false`.
+    pub(super) fn take_missing(&mut self, lookup: MissingRow) -> bool {
+        let Some(index) = self
+            .missing_rows
+            .iter()
+            .position(|queued| *queued == lookup)
+        else {
+            return false;
+        };
+        self.missing_rows.remove(index);
+        true
+    }
+
+    /// Count one call of `type_rows` and return the identifiers whose duplicate is due.
+    pub(super) fn take_type_row_duplicates(&mut self) -> Vec<PlcTypeId> {
+        let mut due = Vec::new();
+        self.type_row_duplicates.retain_mut(|pending| {
+            pending.calls_left = pending.calls_left.saturating_sub(1);
+            if pending.calls_left == 0 {
+                due.push(pending.id);
+                return false;
+            }
+            true
+        });
+        due
     }
 }
 
@@ -355,11 +396,42 @@ impl MemoryStore {
         }
     }
 
+    /// Make the next call of `lookup` return `Ok(None)`, although the row exists.
+    ///
+    /// The method solves one problem: a command reads a row that it just read or that the
+    /// plant must hold. Only a defect of the storage makes such a row vanish between two reads.
+    /// The miss models that defect. It fires once per call of the method, it takes no
+    /// lock, and it writes no journal line. A second call queues one more miss.
+    pub fn miss_next(&self, lookup: MissingRow) {
+        self.shared.lock().missing_rows.push(lookup);
+    }
+
+    /// Add one more row with the identifier `id` to the result of the `call`-th next `type_rows`.
+    ///
+    /// The method solves one problem: the storage keeps one row for each type identifier.
+    /// A command can meet two rows with one identifier only through a defect of the storage.
+    /// The extra row copies the kept row with that identifier. Call 1 is the next call. A call
+    /// that holds no row with that identifier gets no extra row. A call of 0 never fires.
+    pub fn duplicate_type_row_on_call(&self, call: u32, id: PlcTypeId) {
+        if call == 0 {
+            return;
+        }
+        self.shared
+            .lock()
+            .type_row_duplicates
+            .push(TypeRowDuplicate {
+                calls_left: call,
+                id,
+            });
+    }
+
     /// Stop all failures that the `fail_*` methods started.
     pub fn clear_failures(&self) {
         let mut shared = self.shared.lock();
         shared.faults = Faults::default();
         shared.queued_faults.clear();
+        shared.missing_rows.clear();
+        shared.type_row_duplicates.clear();
     }
 }
 

@@ -30,7 +30,7 @@ use crate::ports::Isolation;
 use crate::recipe::test_support::seed_zone_on_int_struct;
 
 /// The draft `R-1` with the parameter `ZONE1` (key 11) of `ST_Zone@1`, and `ST_Zone@2`.
-fn world() -> Fixture {
+pub(super) fn world() -> Fixture {
     let fixture = scenarios::zone_draft();
     seed_users(&fixture);
     fixture
@@ -45,7 +45,11 @@ fn s7_world() -> Fixture {
     fixture
 }
 
-fn input(key: Option<u128>, type_text: Option<&str>, unit: Option<&str>) -> GetParameterFormInput {
+pub(super) fn input(
+    key: Option<u128>,
+    type_text: Option<&str>,
+    unit: Option<&str>,
+) -> GetParameterFormInput {
     GetParameterFormInput {
         purpose: crate::auth::ParameterFormPurpose::AddParameter,
         reference: reference("R-1"),
@@ -56,7 +60,7 @@ fn input(key: Option<u128>, type_text: Option<&str>, unit: Option<&str>) -> GetP
     }
 }
 
-async fn form_as(
+pub(super) async fn form_as(
     fixture: &Fixture,
     role: Role,
     input: GetParameterFormInput,

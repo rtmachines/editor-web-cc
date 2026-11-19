@@ -18,6 +18,8 @@ mod replace_limits;
 mod resolve;
 mod set_value;
 #[cfg(test)]
+mod stored_s7_tests;
+#[cfg(test)]
 mod test_support;
 mod translation;
 mod update_definition;

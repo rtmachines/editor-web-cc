@@ -8,14 +8,15 @@ use super::super::test_support::{
 };
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::dimensions;
-use crate::plant::{LeafSegment, MemberName, Primitive};
+use crate::plant::{LeafSegment, Primitive};
+use crate::recipe::draft::support::assert_stored;
 use crate::recipe::{DraftError, Expected, ParameterTag, RecipeError};
 
 /// The entries of a rejected plan, as text of code and message.
 fn entries(error: DraftError) -> Vec<RecipeError> {
     match error {
         DraftError::List(list) => Some(list.into_vec()),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap()
 }
@@ -422,16 +423,7 @@ fn stored_value_of_the_wrong_shape_gives_e_rcp_005() {
         .plan_rebind(&request(ZONE_2, ZONE_3), &trees())
         .unwrap_err();
 
-    let list = entries(error);
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].code(), ErrorCode::RCP_005);
-    let object = Expected::Object {
-        members: vec![MemberName::parse("setpoint").unwrap()],
-    };
-    assert!(matches!(
-        &list[0],
-        RecipeError::ValueShapeMismatch { expected, .. } if *expected == object
-    ));
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_005);
 }
 
 #[test]

@@ -30,6 +30,8 @@ mod diff_tests;
 mod outdated;
 mod parameter_form;
 #[cfg(test)]
+mod parameter_form_stored_tests;
+#[cfg(test)]
 mod parameter_form_tests;
 #[cfg(test)]
 mod parameter_reads_tests;

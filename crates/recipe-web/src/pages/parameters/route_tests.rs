@@ -197,3 +197,128 @@ pub(crate) fn sweep_pages() -> Vec<(&'static str, String)> {
         ),
     ]
 }
+
+/// Tests of the table of a draft with a parameter whose type does not resolve (ADR-0195 (ad)).
+#[cfg(test)]
+mod unresolved_type_tests {
+    use axum::http::StatusCode;
+    use recipe_domain::plant::PlcTypeId;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    use crate::i18n::Lang;
+    use crate::pages::recipes::test_world::recipe_world;
+    use crate::test_support::plant::{ENGLISH, HTMX, World, main_of, seed_cycle, struct_id};
+    use crate::test_support::recipes::earlier_name_world::{ZONE_KEY, seed_zone_of_type};
+    use crate::test_support::text;
+
+    /// The page of the draft 3 of `R-100`. It holds the parameter table.
+    const DRAFT_PAGE: &str = "/recipes/R-100/versions/3";
+
+    /// Return the table row that links to the parameter `ZONE`.
+    fn zone_row(body: &str) -> String {
+        let anchor = format!("/parameters/{ZONE_KEY}");
+        let (head, tail) = body.split_once(&anchor).unwrap();
+        let start = head.rfind("<tr>").unwrap();
+        let end = tail.find("</tr>").unwrap();
+        format!(
+            "{}{anchor}{}",
+            head.get(start..).unwrap(),
+            tail.get(..end).unwrap()
+        )
+    }
+
+    /// The named route of the parameter table. A request with `HX-Request` gets the fragment.
+    const TABLE_ROUTE: &str = "/recipes/R-100/versions/3/parameters";
+
+    /// Seed a parameter `ZONE` whose root type is in a struct cycle.
+    fn seed_cycle_zone(world: &World) {
+        seed_cycle(world);
+        seed_zone_of_type(
+            &world.fixture,
+            world.ids.draft,
+            struct_id(1),
+            json!({"beta": {}}).into(),
+        );
+    }
+
+    /// Seed a parameter `ZONE` whose root type has no row.
+    fn seed_missing_root_zone(world: &World) {
+        let missing = PlcTypeId::from(Uuid::from_u128(0x7357_0e00_0000_0000_0000_0000_0000_0f99));
+        seed_zone_of_type(&world.fixture, world.ids.draft, missing, json!(5).into());
+    }
+
+    /// Assert the row of a struct cycle: the type name and the composite word.
+    fn assert_cycle_row(body: &str) {
+        let row = zone_row(body);
+        let row = row.as_str();
+        let word = text(Lang::En, "parameters-value-composite");
+        assert!(row.contains("ST_Alpha@1"), "{row}");
+        assert!(
+            row.contains(&format!("<td class=\"value-note\">{word}</td>")),
+            "{row}"
+        );
+    }
+
+    /// Assert the row of a missing root row: empty type cell and empty value cell.
+    fn assert_missing_root_row(body: &str) {
+        let row = zone_row(body);
+        let row = row.as_str();
+        let word = text(Lang::En, "parameters-value-composite");
+        assert!(!row.contains(&word), "{row}");
+        assert!(
+            row.contains("<td class=\"data\"></td><td class=\"value-note\"></td>"),
+            "{row}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_table_shows_the_composite_word_for_a_parameter_of_a_struct_cycle() {
+        let world = recipe_world();
+        seed_cycle_zone(&world);
+
+        let reply = world.get_en(&world.engineer, DRAFT_PAGE).await;
+
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert_cycle_row(main_of(&reply.body));
+    }
+
+    #[tokio::test]
+    async fn the_table_shows_an_empty_type_and_an_empty_value_for_a_missing_root_row() {
+        let world = recipe_world();
+        seed_missing_root_zone(&world);
+
+        let reply = world.get_en(&world.engineer, DRAFT_PAGE).await;
+
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert_missing_root_row(main_of(&reply.body));
+    }
+
+    #[tokio::test]
+    async fn the_table_fragment_shows_the_composite_word_for_a_parameter_of_a_struct_cycle() {
+        let world = recipe_world();
+        seed_cycle_zone(&world);
+
+        let reply = world
+            .get(&world.engineer, TABLE_ROUTE, &[ENGLISH, HTMX])
+            .await;
+
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(!reply.body.contains("<main"), "{}", reply.body);
+        assert_cycle_row(&reply.body);
+    }
+
+    #[tokio::test]
+    async fn the_table_fragment_shows_an_empty_type_and_an_empty_value_for_a_missing_root_row() {
+        let world = recipe_world();
+        seed_missing_root_zone(&world);
+
+        let reply = world
+            .get(&world.engineer, TABLE_ROUTE, &[ENGLISH, HTMX])
+            .await;
+
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert!(!reply.body.contains("<main"), "{}", reply.body);
+        assert_missing_root_row(&reply.body);
+    }
+}

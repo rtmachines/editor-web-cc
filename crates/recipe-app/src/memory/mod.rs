@@ -46,7 +46,7 @@ pub use clock::MemoryClock;
 pub use credential_cipher::{CipherCall, MemoryCredentialCipher};
 pub use disk::{DiskFailure, DiskReading, MemoryDiskSpace};
 pub use document_writer::BodyWriter;
-pub use fault::{Fault, FaultPoint};
+pub use fault::{Fault, FaultPoint, MissingRow};
 pub use identity::LOGIN_LOCK_TABLE;
 pub use maintenance::{MaintenanceMethod, MemoryMaintenance, SECURITY_PURGE_BATCH};
 pub use operations::{MemoryOperations, OperationsMethod};

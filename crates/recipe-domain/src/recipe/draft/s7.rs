@@ -6,6 +6,7 @@ use crate::plant::{
     ArrayDimensions, PlantError, PlcPlatform, PlcTypeId, Primitive, S7Address, S7Layout, S7Start,
     S7Width, TypeLimit, TypeNode, TypeTree, TypeTrees,
 };
+use crate::recipe::read_check::StoredDefect;
 use crate::recipe::{
     Draft, DraftError, Parameter, ParameterKey, ParameterTag, RecipeError, S7AccessReason,
 };
@@ -89,9 +90,11 @@ impl Draft {
     /// # Errors
     ///
     /// Returns `E-PLT-013` when the trees belong to another machine or platform, or when they
-    /// do not hold the type of a parameter. Returns `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or `E-RCP-023` for the first parameter
-    /// that breaks a rule. Otherwise returns `E-RCP-022` for the first overlap that holds a
-    /// parameter of `written`. Returns a `PlantError` when the layout of a type overflows.
+    /// do not hold the type of a parameter. Returns `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or
+    /// `E-RCP-023` inside a stored defect with the key of the first parameter that breaks a rule.
+    /// Returns `E-PLT-018` inside a stored defect with the key of the parameter whose layout
+    /// overflows. Otherwise returns `E-RCP-022` for the first overlap that holds a parameter of
+    /// `written`.
     pub(super) fn check_s7_layout(
         &self,
         trees: &TypeTrees,
@@ -101,19 +104,21 @@ impl Draft {
     }
 
     /// Check the S7 rules for approval: the rules of [`Draft::check_s7_layout`] and the data
-    /// block rule and end rule of ADR-0116 for every parameter.
+    /// block rule, the end rule, and the standard-access rule (ADR-0178 (a)) for every parameter.
     ///
-    /// Each parameter gets its checks in the order of ADR-0116 (f). The method does not run the
-    /// rules for a command that keeps a stored address (ADR-0116 (e1)). This keeps a rule change
-    /// from locking a draft. The method reports every overlap of the draft, also a stored overlap
-    /// of two parameters that no command wrote (ADR-0149 (c)).
+    /// Each parameter gets its checks in the order of ADR-0116 (f), as amended by ADR-0178 (d).
+    /// The method does not run the rules for a command that keeps a stored address (ADR-0116
+    /// (e1)). This keeps a rule change from locking a draft. The method reports every overlap of
+    /// the draft, also a stored overlap of two parameters that no command wrote (ADR-0149 (c)).
     ///
     /// # Errors
     ///
     /// Returns the errors of [`Draft::check_s7_layout`], with `E-RCP-022` for the first overlap
-    /// of the draft. Returns `E-RCP-057` for the first
-    /// parameter whose data block number is too high for the platform. Returns `E-RCP-056` for the
-    /// first parameter that ends after byte 65535 of its data block.
+    /// of the draft. The rule errors of a parameter, and an overflow of its layout (`E-PLT-018`),
+    /// keep their codes and are not stored defects. Returns `E-RCP-057` for the first parameter
+    /// whose data block number is too high for the platform. Returns `E-RCP-056` for the first
+    /// parameter that ends after byte 65535 of its data block. Returns `E-RCP-058` for the first
+    /// parameter with an array that a data block with standard access cannot hold.
     pub(crate) fn check_s7_layout_for_approval(&self, trees: &TypeTrees) -> Result<(), DraftError> {
         self.check_layout(trees, AddressRules::Run, OverlapScope::Every)
     }
@@ -128,26 +133,46 @@ impl Draft {
         let parameters = self.parameters();
         let mut occupied = Vec::new();
         for parameter in &parameters {
-            check_platform_rule(self.platform(), parameter.tag(), parameter.s7_address())?;
+            check_platform_rule(self.platform(), parameter.tag(), parameter.s7_address())
+                .map_err(|error| stored_under(rules, parameter.key(), error))?;
             if rules == AddressRules::Run {
                 check_data_block_rule(self.platform(), parameter.tag(), parameter.s7_address())?;
             }
             let Some(tree) = self.held_tree(trees, parameter.plc_type())? else {
                 continue;
             };
-            check_tree_rules(parameter.tag(), parameter.s7_address(), tree)?;
+            check_tree_rules(parameter.tag(), parameter.s7_address(), tree)
+                .map_err(|error| stored_under(rules, parameter.key(), error))?;
             if rules == AddressRules::Run {
                 check_end_rule(parameter.tag(), parameter.s7_address(), tree)?;
                 check_standard_access_rule(parameter.tag(), parameter.s7_address(), tree)?;
             }
             if let Some(address) = parameter.s7_address() {
+                let own = occupy(parameter.tag(), parameter.plc_type(), address, tree)
+                    .map_err(|error| stored_under(rules, parameter.key(), error))?;
                 occupied.push(Occupied {
                     reported: scope.reports(parameter.key()),
-                    ..occupy(parameter.tag(), parameter.plc_type(), address, tree)?
+                    ..own
                 });
             }
         }
         find_overlap(occupied)
+    }
+}
+
+/// Classify the error of a stored parameter for a check that skips the address rules.
+///
+/// The function solves one problem. A command must not show a stored address that breaks
+/// a rule of the earlier rule set as an error of the user (ADR-0195 (i)). The approval check
+/// keeps its codes.
+fn stored_under(
+    rules: AddressRules,
+    key: ParameterKey,
+    error: impl Into<DraftError>,
+) -> DraftError {
+    match rules {
+        AddressRules::Skip => DraftError::Stored(Box::new(StoredDefect::of_parameter(key, error))),
+        AddressRules::Run => error.into(),
     }
 }
 
@@ -457,6 +482,8 @@ fn find_overlap(mut occupied: Vec<Occupied<'_>>) -> Result<(), DraftError> {
 mod layout_tests;
 #[cfg(test)]
 mod prop;
+#[cfg(test)]
+mod stored_rule_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

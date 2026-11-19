@@ -211,13 +211,15 @@ impl AppError {
     }
 }
 
-/// Unwrap the inner error of a draft command (ADR-0027). The conversion adds no variant.
+/// Unwrap the inner error of a draft command (ADR-0027).
+/// A stored defect becomes `E-DB-008` (ADR-0195).
 impl From<DraftError> for AppError {
     fn from(error: DraftError) -> Self {
         match error {
             DraftError::Recipe(inner) => Self::Recipe(inner),
             DraftError::Plant(inner) => Self::Plant(inner),
             DraftError::List(inner) => Self::Recipes(inner),
+            DraftError::Stored(defect) => Self::Storage(StorageError::broken_stored_part(*defect)),
         }
     }
 }

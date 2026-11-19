@@ -13,6 +13,7 @@ use crate::plant::fixtures::{
     id, machine, on_platform, primitive_row, struct_row_revision, types_for,
 };
 use crate::plant::{LeafPath, PlcPlatform, Primitive, TypeTrees};
+use crate::recipe::draft::support::assert_stored;
 use crate::recipe::{Draft, DraftError, RebindRequest, StoredLimit};
 
 const INT: u128 = 1;
@@ -122,7 +123,7 @@ fn rebind_refuses_a_date_above_the_earlier_end() {
 
     let error = rebind(&mut draft, &extra_request()).unwrap_err();
 
-    assert_eq!(error.code(), ErrorCode::RCP_005, "{error}");
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_005);
     assert_eq!(draft.parameters(), before.parameters());
 }
 

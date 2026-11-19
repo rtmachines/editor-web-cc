@@ -35,7 +35,7 @@ use super::rows::{
     check_violation, corrupt_rows, duplicate, illegal_transition, missing_reference, missing_row,
     without_lock,
 };
-use super::{LockMode, MemoryState, MemoryTransaction};
+use super::{LockMode, MemoryState, MemoryTransaction, MissingRow};
 use crate::error::{RECIPE_REFERENCE_UNIQUE, RECIPE_VERSION_ONE_LIVE_DRAFT, StorageError};
 use crate::ports::{InsertedRecipe, Locked, NewVersion, RecipeRepository, RowImage, SharedVersion};
 
@@ -248,6 +248,9 @@ impl RecipeRepository for MemoryTransaction {
     async fn lock_recipe(&mut self, id: RecipeId) -> Result<Option<Locked<Recipe>>, StorageError> {
         self.refuse_row_lock_for_update()?;
         self.refresh_after_lock()?;
+        if self.take_missing(MissingRow::Recipe) {
+            return Ok(None);
+        }
         let Some(row) = self.state().recipes.get(&id) else {
             return Ok(None);
         };

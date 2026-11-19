@@ -14,7 +14,7 @@ use super::world::{archived, array_row, machine_of, struct_row};
 use crate::auth::Operation;
 use crate::context::UseCase;
 use crate::error::{AppError, Missing};
-use crate::memory::fixtures::{Fixture, actor, meta, tid};
+use crate::memory::fixtures::{Fixture, actor, meta, seed_struct_cycle, tid};
 use crate::memory::{JournalEntry, seed_type_id};
 use crate::ports::Isolation;
 
@@ -383,10 +383,7 @@ async fn an_unknown_machine_is_not_found_for_the_tree() {
 #[tokio::test]
 async fn two_structs_that_contain_each_other_give_the_cycle_error() {
     let fixture = zones_world();
-    let left = struct_row(owner(), 940, ("ST_Left", 1), &[("right", tid(941))], None);
-    let right = struct_row(owner(), 941, ("ST_Right", 1), &[("left", tid(940))], None);
-    fixture.store.seed_type(&left);
-    fixture.store.seed_type(&right);
+    seed_struct_cycle(&fixture, owner());
 
     let error = tree(&fixture, "ST_Left", None).await.unwrap_err();
 

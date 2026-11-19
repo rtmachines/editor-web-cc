@@ -157,13 +157,12 @@ pub(super) fn text_of(types: &PlatformTypes, id: PlcTypeId) -> Result<String, Ap
 }
 
 /// Write the type text of each type that `rows` use, over the type rows of `types`.
-fn texts_of(
-    types: &PlatformTypes,
-    rows: &[ParameterRow],
-) -> Result<BTreeMap<PlcTypeId, String>, AppError> {
+///
+/// A type without a type text has no entry (ADR-0195 (ad)).
+fn texts_of(types: &PlatformTypes, rows: &[ParameterRow]) -> BTreeMap<PlcTypeId, String> {
     let used: BTreeSet<PlcTypeId> = rows.iter().map(|row| row.plc_type).collect();
     used.into_iter()
-        .map(|id| Ok((id, text_of(types, id)?)))
+        .filter_map(|id| type_text(types, id).map(|text| (id, text)))
         .collect()
 }
 
@@ -205,15 +204,12 @@ fn leaf_text(tree: &TypeTree, value: &StoredValue) -> Result<String, ValueFault>
 
 /// Resolve the tree of each type that `rows` use.
 ///
-/// Every row needs its tree, because the read check also runs the address rules (ADR-0118). So an
-/// array, a struct, and a primitive type each get an entry.
-fn row_trees(
-    types: &PlatformTypes,
-    rows: &[ParameterRow],
-) -> Result<BTreeMap<PlcTypeId, TypeTree>, AppError> {
+/// The read check also runs the address rules (ADR-0118), so an array, a struct, and a primitive
+/// type each get an entry. A type that does not resolve has no entry (ADR-0195 (ad)).
+fn row_trees(types: &PlatformTypes, rows: &[ParameterRow]) -> BTreeMap<PlcTypeId, TypeTree> {
     let used: BTreeSet<PlcTypeId> = rows.iter().map(|row| row.plc_type).collect();
     used.into_iter()
-        .map(|id| Ok((id, TypeTree::resolve(id, types)?)))
+        .filter_map(|id| TypeTree::resolve(id, types).ok().map(|tree| (id, tree)))
         .collect()
 }
 
@@ -255,15 +251,19 @@ fn checked_parameter(row: &ParameterRow, value: &StoredValue) -> Result<Paramete
 
 /// Write the value text and find the rule faults of each row of the page.
 ///
+/// A row whose type has no tree gets no text and no fault (ADR-0195 (ad)). Its read check needs
+/// the tree, so it skips the check of ADR-0121 (c).
+///
 /// The text comes from `value_text` and exists for a primitive row only. The faults come from the
 /// read check `check_stored_parameter` (ADR-0118), so no second rule exists here. The check runs
 /// for every row, because the address rules apply to an array and to a struct too.
 ///
 /// # Errors
 ///
-/// Returns `StorageError` (`E-DB-008`) when a row has no value or no tree, when a value does not
-/// match its tree, or when a part breaks the earlier rule set. All three cases are defects of
-/// the storage. The second and third case name the parameter key.
+/// Returns `StorageError` (`E-DB-008`) when a row with a tree has no value.
+/// It returns the same error when a value does not match its tree, or when a part breaks the
+/// earlier rule set. All three cases are defects of the storage. The second and third case name
+/// the parameter key.
 fn value_reads_of(
     rows: &[ParameterRow],
     trees: &BTreeMap<PlcTypeId, TypeTree>,
@@ -271,9 +271,9 @@ fn value_reads_of(
 ) -> Result<ValueReads, AppError> {
     let mut reads = ValueReads::default();
     for row in rows {
-        let tree = trees
-            .get(&row.plc_type)
-            .ok_or_else(|| StorageError::invariant("a parameter type has no type tree"))?;
+        let Some(tree) = trees.get(&row.plc_type) else {
+            continue;
+        };
         let value = values
             .get(&row.key)
             .ok_or_else(|| StorageError::invariant("a parameter has no stored value"))?;
@@ -336,7 +336,8 @@ impl ListParameters {
     /// Returns `Forbidden` (`E-WEB-002`) when the role lacks the permission.
     /// Returns `NotFound` (`E-WEB-005`) when the recipe, the version, or the unit does not exist.
     /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted and the role cannot restore it.
-    /// Returns `AppError::Storage` when the database fails.
+    /// Returns `AppError::Storage` when the database fails. A row whose type does not resolve
+    /// has no value text and no rule fault, and the call does not fail (ADR-0195 (ad)).
     /// Returns `AppError::Timeout` (`E-WEB-009`) with the stage `Validation` when the value check
     /// passes `timeout.validation`.
     /// Returns `AppError::TaskFailed` (`E-WEB-011`) with the stage `Validation` when it fails.
@@ -366,10 +367,10 @@ impl ListParameters {
         let (rows, has_next) = cut_page(rows, size);
         let machine = &scope.machine;
         let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
-        let trees = row_trees(&types, &rows)?;
+        let trees = row_trees(&types, &rows);
         let values = read_row_values(tx.as_mut(), scope.detail.id, &rows).await?;
         drop(tx);
-        let type_texts = texts_of(&types, &rows)?;
+        let type_texts = texts_of(&types, &rows);
         let (rows, reads) = self
             .ctx
             .settings
@@ -473,13 +474,16 @@ pub struct ParameterView {
     pub unit_path: UnitPath,
     /// The parameter with its value, its limits, and its translations.
     pub parameter: StoredParameter,
-    /// The resolved tree of the type of the parameter.
-    pub tree: TypeTree,
-    /// The type text of the parameter type, for example `ST_Zone@2` or `STRING(20)`.
-    pub type_text: String,
+    /// The resolved tree of the type of the parameter, or `None` when the type does not resolve
+    /// (ADR-0195 (ad)).
+    pub tree: Option<TypeTree>,
+    /// The type text of the parameter type, for example `ST_Zone@2` or `STRING(20)`, or `None`
+    /// when the type has no text (ADR-0195 (ad)).
+    pub type_text: Option<String>,
     /// The rule faults of the stored parameter, each with its field (ADR-0118, design D7).
     ///
-    /// The list is empty for a parameter that meets the current rules.
+    /// The list is empty for a parameter that meets the current rules and for a view without
+    /// a tree.
     pub rule_faults: Arc<[RuleFault]>,
 }
 
@@ -512,7 +516,8 @@ impl GetParameter {
     /// Returns `NotFound` (`E-WEB-005`) when the recipe, the version, or the key does not exist.
     /// Returns `RecipeError::RecipeDeleted` (`E-RCP-012`) when the recipe is deleted and the role cannot restore it.
     /// Returns `AppError::Plant` when the type rows break a rule of the domain.
-    /// Returns `AppError::Storage` when the database fails.
+    /// Returns `AppError::Storage` when the database fails. A type that does not resolve gives a
+    /// view without a tree and without rule faults (ADR-0195 (ad)).
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(
         &self,
@@ -527,12 +532,15 @@ impl GetParameter {
         let rows = tx.types().type_rows(machine.id()).await?;
         drop(tx);
         let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
-        let tree = TypeTree::resolve(found.parameter.plc_type, &types)?;
-        let type_text = text_of(&types, found.parameter.plc_type)?;
+        let tree = TypeTree::resolve(found.parameter.plc_type, &types).ok();
+        let type_text = type_text(&types, found.parameter.plc_type);
         let unit_path = unit_path_of(&machine, found.parameter.unit)?;
         let key = found.parameter.key;
-        let rule_faults = check_stored_parameter(&Parameter::from(found.parameter.clone()), &tree)
-            .map_err(|fault| StorageError::broken_stored_parameter(key, fault))?;
+        let rule_faults = match &tree {
+            Some(tree) => check_stored_parameter(&Parameter::from(found.parameter.clone()), tree)
+                .map_err(|fault| StorageError::broken_stored_parameter(key, fault))?,
+            None => Vec::new(),
+        };
         Ok(ParameterView {
             recipe: found.scope.recipe,
             machine,

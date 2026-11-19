@@ -3,7 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Draft, Parameter, StoredDraft};
-use crate::recipe::{ParameterKey, RecipeError, Transition};
+use crate::recipe::read_check::StoredDefect;
+use crate::recipe::{DraftError, ParameterKey, RecipeError, Transition};
 
 impl Draft {
     /// Build a draft from its stored form.
@@ -13,16 +14,17 @@ impl Draft {
     ///
     /// # Errors
     ///
-    /// Returns `E-RCP-002` when the version is not a live draft.
-    /// Returns `E-RCP-014` with the tag of the second parameter when two parameters share a tag,
-    /// a key, or an identifier.
-    pub fn load(stored: StoredDraft) -> Result<Self, RecipeError> {
+    /// Returns `DraftError::Recipe` with `E-RCP-002` when the version is not a live draft.
+    /// Returns `DraftError::Stored` with `E-RCP-014` and the key of the second parameter when two
+    /// parameters share a tag, a key, or an identifier (ADR-0195).
+    pub fn load(stored: StoredDraft) -> Result<Self, DraftError> {
         if stored.state.apply(Transition::Edit).is_err() {
             return Err(RecipeError::VersionNotEditable {
                 reference: stored.reference,
                 number: stored.number,
                 status: stored.state.status(),
-            });
+            }
+            .into());
         }
         let mut tags = BTreeSet::new();
         let mut ids = BTreeSet::new();
@@ -32,10 +34,12 @@ impl Draft {
             let is_new_tag = tags.insert(parameter.tag().clone());
             let is_new_id = ids.insert(parameter.id());
             if !is_new_tag || !is_new_id || parameters.contains_key(&parameter.key()) {
-                return Err(RecipeError::DuplicateTag {
+                let duplicate = RecipeError::DuplicateTag {
                     tag: parameter.tag().clone(),
                     number: stored.number,
-                });
+                };
+                let defect = StoredDefect::of_parameter(parameter.key(), duplicate);
+                return Err(DraftError::Stored(Box::new(defect)));
             }
             parameters.insert(parameter.key(), parameter);
         }

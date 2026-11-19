@@ -611,3 +611,13 @@ async fn a_draft_date_past_the_current_end_gives_the_blocker_rcp_005() {
     let error = approve_error(&fixture, &admin()).await;
     assert_eq!(blocker.to_string(), error.to_string());
 }
+
+#[tokio::test]
+async fn two_stored_parameters_of_one_tag_give_db_008() {
+    let fixture = world();
+    let first = param(1, 101, "A");
+    let second = param(2, 101, "A");
+    seed(&fixture, &[], &[first, second]);
+    let error = preview_as(&fixture, &admin(), 2).await.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008);
+}

@@ -35,7 +35,9 @@ use uuid::Uuid;
 
 use super::Fixture;
 
+mod structs;
 mod world;
+pub(crate) use structs::{RowOwner, seed_cycle, seed_struct, seed_struct_for, struct_id};
 pub(crate) use world::{
     ENGLISH, HTMX, HTMX_CONTENT, POLISH, TARGET_CONTENT, World, cookie_of, main_of, text_with,
     world,

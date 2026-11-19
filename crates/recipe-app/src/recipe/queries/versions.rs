@@ -314,7 +314,7 @@ async fn read_approved_rows(
 /// Return the distinct codes of the rule faults of `approved`, in code order, and the machine.
 ///
 /// The function runs on a blocking thread. A structure fault is a storage defect and gives
-/// `E-DB-008` (ADR-0119 (k)).
+/// `E-DB-008` (ADR-0119 (l) and ADR-0118 (d)).
 fn check_rule_codes(
     machine: Machine,
     approved: ApprovedRows,

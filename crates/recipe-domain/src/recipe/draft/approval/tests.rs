@@ -501,6 +501,27 @@ fn adr_0117_the_approval_of_a_stored_real_limit_with_8_digits_gives_the_item_e_r
     assert_eq!(codes, vec![ErrorCode::RCP_055]);
 }
 
+/// Guard (ADR-0120 (f)): a stored value outside the type range is an item of the approval list.
+#[test]
+fn the_approval_of_a_stored_int_value_40000_gives_the_item_e_rcp_005_and_not_stored() {
+    let parameter = limited(
+        param(1, "SPEED", INT, json!(40_000)),
+        vec![range("", 0, 100)],
+    );
+    let draft = draft(vec![parameter]);
+    let error = draft
+        .check_for_approval(&units(false), &trees(), false)
+        .expect_err("the approval must fail");
+    assert_eq!(plain_code(&error), ErrorCode::RCP_020);
+    let items = match &error {
+        DraftError::Recipe(RecipeError::ValidationFailed { items }) => Some(items),
+        _ => None,
+    }
+    .expect("a snapshot error");
+    let codes: Vec<ErrorCode> = items.iter().map(SnapshotItem::code).collect();
+    assert!(codes.contains(&ErrorCode::RCP_005), "{codes:?}");
+}
+
 /// The approver with the user number `n`. The login names the number.
 fn approver(n: u128) -> crate::recipe::Approver {
     crate::recipe::Approver {

@@ -4,14 +4,16 @@ use rust_decimal::Decimal;
 use serde_json::json;
 
 use super::super::add::support::{
-    CHAR, INT, NOT_ASKED, REAL, draft_with, draft_with_speed, limit_row, snapshot, texts_input,
-    trees_on,
+    CHAR, INT, NOT_ASKED, REAL, TABLE, draft_with, draft_with_speed, limit_row, snapshot,
+    texts_input, trees_on,
 };
-use super::super::edit_support::{draft_with_content, draft_with_table, stored_limit_to};
-use super::super::support::{key, stored_parameter};
+use super::super::edit_support::{
+    draft_with_content, draft_with_table, stored_limit_on, stored_limit_to,
+};
+use super::super::support::{assert_stored, key, stored_parameter};
 use crate::error_codes::ErrorCode;
-use crate::plant::fixtures::{id, machine, primitive_row, types_for};
-use crate::plant::{PlcPlatform, Primitive, TypeTrees};
+use crate::plant::fixtures::{array_row, id, machine, primitive_row, struct_row, types_for};
+use crate::plant::{DerivedTypeReason, PlantError, PlcPlatform, PlcType, Primitive, TypeTrees};
 use crate::recipe::snapshot::fixtures::{param, units};
 use crate::recipe::{
     Draft, DraftError, Expected, LimitInput, LimitList, Parameter, PrecisionField, RecipeError,
@@ -34,7 +36,7 @@ fn json(text: &str) -> ValueInput {
 fn entry_texts(error: DraftError) -> Vec<String> {
     match error {
         DraftError::List(list) => Some(list.into_vec()),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap()
     .iter()
@@ -91,6 +93,7 @@ fn a_new_value_inside_the_limit_keeps_limits_and_translations() {
 fn a_value_above_the_stored_limit_gives_e_rcp_004() {
     let mut draft = draft_with_content();
     let error = set_value_rejected(&mut draft, "250", ErrorCode::RCP_004);
+    assert!(!matches!(error, DraftError::Stored(_)));
     assert_eq!(
         error.to_string(),
         "Value 250 of SPEED is outside the process limit 0 to 200."
@@ -108,7 +111,7 @@ fn a_json_string_for_an_int_gives_e_rcp_005() {
     };
     let list = match error {
         DraftError::List(list) => Some(list),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap();
     assert!(matches!(
@@ -135,7 +138,7 @@ fn a_nul_for_a_char_gives_e_rcp_005_and_keeps_the_value() {
     let error = set_value_rejected(&mut draft, r#""\u0000""#, ErrorCode::RCP_005);
     let list = match error {
         DraftError::List(list) => Some(list),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap();
     assert!(matches!(
@@ -153,7 +156,33 @@ fn a_stored_limit_outside_the_type_range_gives_e_rcp_006() {
     let mut stored = stored_parameter(1, "SPEED", id(INT), None);
     stored.limits = vec![stored_limit_to(40_000)];
     let mut draft = draft_with(PlcPlatform::TwinCat3, vec![stored]);
-    set_value_rejected(&mut draft, "1", ErrorCode::RCP_006);
+    let error = set_value_rejected(&mut draft, "1", ErrorCode::RCP_006);
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_006);
+}
+
+/// A stored pair of limits that cover one leaf is a storage defect (ADR-0195 (f)).
+#[test]
+fn two_stored_limits_on_one_leaf_give_a_stored_e_rcp_019_for_a_value() {
+    let mut stored = stored_parameter(1, "SPEED_TABLE", id(TABLE), None);
+    stored.value = json!([1, 2, 3, 4, 5, 6, 7, 8]).into();
+    stored.limits = vec![stored_limit_on("[*]", 3000), stored_limit_on("[2]", 10)];
+    let mut draft = draft_with(PlcPlatform::TwinCat3, vec![stored]);
+    let error = set_value_rejected(&mut draft, "[1,2,3,4,5,6,7,8]", ErrorCode::RCP_019);
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_019);
+}
+
+/// A limit of the request that the type does not accept keeps `E-RCP-019` and is no stored defect.
+///
+/// `LimitList::parse` rejects two rows on one leaf, so a request cannot hold a conflict.
+#[test]
+fn a_requested_limit_that_the_type_rejects_keeps_e_rcp_019_for_replace_limits() {
+    let mut draft = draft_with_speed();
+    let row = LimitInput {
+        max_length: Some(5),
+        ..limit_row("", None, None)
+    };
+    let error = replace_rejected(&mut draft, vec![row], ErrorCode::RCP_019);
+    assert!(!matches!(error, DraftError::Stored(_)));
 }
 
 #[test]
@@ -229,6 +258,7 @@ fn a_bad_leaf_and_a_leaf_above_the_limit_give_both_faults_in_leaf_order() {
 fn a_single_fault_of_a_value_stays_a_list() {
     let mut draft = draft_with_content();
     let error = set_value_rejected(&mut draft, "250", ErrorCode::RCP_004);
+    assert!(!matches!(error, DraftError::Stored(_)));
     assert_eq!(entry_texts(error).len(), 1);
 }
 
@@ -316,7 +346,19 @@ fn a_stored_value_of_the_wrong_form_gives_e_rcp_005_for_limits() {
     stored.value = json!("text").into();
     let mut draft = draft_with(PlcPlatform::TwinCat3, vec![stored]);
     let rows = vec![limit_row("", None, Some("5"))];
-    replace_rejected(&mut draft, rows, ErrorCode::RCP_005);
+    let error = replace_rejected(&mut draft, rows, ErrorCode::RCP_005);
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_005);
+}
+
+#[test]
+fn a_new_limit_outside_the_type_range_gives_e_rcp_006_and_not_stored() {
+    let mut draft = draft_with(
+        PlcPlatform::TwinCat3,
+        vec![param(1, "SPEED", INT, json!(1))],
+    );
+    let rows = vec![limit_row("", None, Some("40000"))];
+    let error = replace_rejected(&mut draft, rows, ErrorCode::RCP_006);
+    assert!(!matches!(error, DraftError::Stored(_)));
 }
 
 #[test]
@@ -364,7 +406,7 @@ fn precision_fields(error: DraftError) -> Vec<PrecisionField> {
     let errors = match error {
         DraftError::List(list) => list.into_vec(),
         DraftError::Recipe(single) => vec![single],
-        DraftError::Plant(_) => Vec::new(),
+        DraftError::Plant(_) | DraftError::Stored(_) => Vec::new(),
     };
     errors
         .into_iter()
@@ -394,7 +436,7 @@ fn a_request_value_with_29_fraction_digits_gives_e_rcp_005() {
     let error = set_value_rejected(&mut draft, "1e-29", ErrorCode::RCP_005);
     let list = match error {
         DraftError::List(list) => Some(list),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap();
     assert!(matches!(
@@ -413,7 +455,7 @@ fn a_request_limit_min_with_29_fraction_digits_gives_e_rcp_006() {
     let error = replace_rejected(&mut draft, rows, ErrorCode::RCP_006);
     let list = match error {
         DraftError::List(list) => Some(list),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap();
     assert!(matches!(
@@ -453,7 +495,10 @@ fn adr_0117_the_approval_item_of_a_stored_real_16777217_names_the_field_value() 
         .expect_err("the approval must fail");
     let items = match error {
         DraftError::Recipe(RecipeError::ValidationFailed { items }) => items,
-        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::List(_) => Vec::new(),
+        DraftError::Recipe(_)
+        | DraftError::Plant(_)
+        | DraftError::List(_)
+        | DraftError::Stored(_) => Vec::new(),
     };
     let fields: Vec<PrecisionField> = items
         .iter()
@@ -478,7 +523,10 @@ fn adr_0117_the_approval_of_a_stored_real_16777217_gives_the_item_e_rcp_055() {
     assert_eq!(error.code(), ErrorCode::RCP_020, "{error}");
     let items = match error {
         DraftError::Recipe(RecipeError::ValidationFailed { items }) => Some(items),
-        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::List(_) => None,
+        DraftError::Recipe(_)
+        | DraftError::Plant(_)
+        | DraftError::List(_)
+        | DraftError::Stored(_) => None,
     }
     .expect("a snapshot error");
     let codes: Vec<ErrorCode> = items.iter().map(SnapshotItem::code).collect();
@@ -548,4 +596,109 @@ fn adr_0114_a_maximum_of_2169_06_06_gives_e_rcp_006() {
         .expect_err("the command must fail");
     assert_eq!(error.code(), ErrorCode::RCP_006, "{error}");
     assert_eq!(snapshot(&draft), before);
+}
+
+/// How a failed resolution of the stored type must leave a command.
+#[derive(Clone, Copy)]
+enum Outcome {
+    /// A `Stored` defect with this inner code.
+    Stored(ErrorCode),
+    /// The unwrapped `E-PLT-013` with the reason `NotOnPlatform`.
+    NotOnPlatform,
+}
+
+const ROOT: u128 = 10;
+
+/// One resolution failure: its name, the rows of the type, and the outcome.
+fn resolution_cases() -> Vec<(&'static str, Vec<PlcType>, Outcome)> {
+    let ints = || vec![primitive_row(INT, Primitive::Int)];
+    let with = |mut rows: Vec<PlcType>| {
+        let mut all = ints();
+        all.append(&mut rows);
+        all
+    };
+    vec![
+        (
+            "a struct cycle",
+            with(vec![
+                struct_row(ROOT, "ST_A", &[("b", 11)]),
+                struct_row(11, "ST_B", &[("a", ROOT)]),
+            ]),
+            Outcome::Stored(ErrorCode::PLT_005),
+        ),
+        (
+            "a type with too many leaves",
+            with(vec![array_row(ROOT, INT, &[(1, 20_000)])]),
+            Outcome::Stored(ErrorCode::PLT_018),
+        ),
+        (
+            "an array-only cycle",
+            with(vec![
+                array_row(ROOT, 11, &[(1, 2)]),
+                array_row(11, ROOT, &[(1, 2)]),
+            ]),
+            Outcome::Stored(ErrorCode::PLT_013),
+        ),
+        (
+            "an asked root without a row",
+            ints(),
+            Outcome::NotOnPlatform,
+        ),
+        (
+            "a struct with a member that the platform lacks",
+            with(vec![struct_row(ROOT, "ST_A", &[("x", INT), ("y", 99)])]),
+            Outcome::NotOnPlatform,
+        ),
+    ]
+}
+
+fn unresolved_draft_and_trees(rows: Vec<PlcType>) -> (Draft, TypeTrees) {
+    let trees = TypeTrees::resolve(
+        [id(ROOT)],
+        &types_for(machine(), PlcPlatform::TwinCat3, rows),
+    );
+    let stored = stored_parameter(1, "SPEED", id(ROOT), None);
+    (draft_with(PlcPlatform::TwinCat3, vec![stored]), trees)
+}
+
+fn assert_outcome(error: &DraftError, outcome: Outcome, name: &str) {
+    match outcome {
+        Outcome::Stored(code) => assert_stored(error, Some(key(1)), code),
+        Outcome::NotOnPlatform => assert!(
+            matches!(
+                error,
+                DraftError::Plant(PlantError::DerivedTypeInvalid {
+                    reason: DerivedTypeReason::NotOnPlatform,
+                    ..
+                })
+            ),
+            "{name}: {error:?}"
+        ),
+    }
+}
+
+#[test]
+fn a_failed_resolution_of_the_stored_type_gives_stored_for_a_value() {
+    for (name, rows, outcome) in resolution_cases() {
+        let (mut draft, trees) = unresolved_draft_and_trees(rows);
+        let before = snapshot(&draft);
+        let error = draft
+            .set_value(key(1), &json("1"), &trees)
+            .expect_err("the command must fail");
+        assert_outcome(&error, outcome, name);
+        assert_eq!(snapshot(&draft), before, "{name}");
+    }
+}
+
+#[test]
+fn a_failed_resolution_of_the_stored_type_gives_stored_for_limits() {
+    for (name, rows, outcome) in resolution_cases() {
+        let (mut draft, trees) = unresolved_draft_and_trees(rows);
+        let before = snapshot(&draft);
+        let error = draft
+            .replace_limits(key(1), &limits(Vec::new()), &trees)
+            .expect_err("the command must fail");
+        assert_outcome(&error, outcome, name);
+        assert_eq!(snapshot(&draft), before, "{name}");
+    }
 }

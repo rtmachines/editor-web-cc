@@ -187,3 +187,53 @@ fn draft_error_of_a_list_has_the_code_of_its_first_entry() {
     let error = DraftError::from(errors);
     assert_eq!(error.code(), ErrorCode::RCP_027);
 }
+
+fn stored_key() -> crate::recipe::ParameterKey {
+    crate::recipe::ParameterKey::from(uuid::Uuid::from_u128(9))
+}
+
+#[test]
+fn stored_with_a_key_gives_the_inner_code_and_the_key() {
+    let defect = crate::recipe::StoredDefect::of_parameter(stored_key(), reference_deleted());
+    assert_eq!(defect.code(), ErrorCode::RCP_012);
+    assert_eq!(defect.key(), Some(&stored_key()));
+    let error = DraftError::Stored(Box::new(defect));
+    assert_eq!(error.code(), ErrorCode::RCP_012);
+    crate::recipe::draft::support::assert_stored(&error, Some(stored_key()), ErrorCode::RCP_012);
+}
+
+#[test]
+fn stored_without_a_key_gives_the_inner_code_and_no_key() {
+    let defect = crate::recipe::StoredDefect::of_part(reference_deleted());
+    assert_eq!(defect.key(), None);
+    let error = DraftError::Stored(Box::new(defect));
+    assert_eq!(error.code(), ErrorCode::RCP_012);
+    crate::recipe::draft::support::assert_stored(&error, None, ErrorCode::RCP_012);
+}
+
+#[test]
+fn stored_into_parts_returns_the_key_and_the_inner_error() {
+    let defect = crate::recipe::StoredDefect::of_parameter(stored_key(), reference_deleted());
+    let (key, error) = defect.into_parts();
+    assert_eq!(key, Some(stored_key()));
+    assert_eq!(error.code(), ErrorCode::RCP_012);
+    let (key, error) = crate::recipe::StoredDefect::of_part(reference_deleted()).into_parts();
+    assert_eq!(key, None);
+    assert_eq!(error.code(), ErrorCode::RCP_012);
+}
+
+#[test]
+fn stored_keeps_the_code_of_an_inner_plant_error() {
+    let inner = PlantError::DuplicateMachineCode {
+        code: crate::plant::MachineCode::parse("M1").unwrap(),
+    };
+    let expected = inner.code();
+    let error = DraftError::Stored(Box::new(crate::recipe::StoredDefect::of_part(inner)));
+    assert_eq!(error.code(), expected);
+}
+
+fn reference_deleted() -> RecipeError {
+    RecipeError::RecipeDeleted {
+        reference: reference(),
+    }
+}

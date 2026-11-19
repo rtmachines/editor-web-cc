@@ -41,7 +41,11 @@ impl Draft {
     ///
     /// Returns `E-PLT-013` when the trees belong to another machine or platform. Returns
     /// `E-RCP-052` with the reason of the first failed check. Returns `E-PLT-018` when a
-    /// planned tree is above a size limit.
+    /// planned tree is above a size limit. Returns `Stored` with the key of the first parameter
+    /// with a stored defect. Its code is the code of the inner error. Otherwise it returns a
+    /// list of the entries of every parameter in tag order. For each parameter, the list holds
+    /// `E-RCP-028`, `E-RCP-005`, or `E-RCP-055` for each fault of the value, then `E-RCP-029`
+    /// for each dropped limit. The code of the list is the code of its first entry.
     pub fn plan_rebind(
         &self,
         request: &RebindRequest,

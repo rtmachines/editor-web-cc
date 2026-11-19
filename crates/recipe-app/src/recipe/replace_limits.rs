@@ -60,6 +60,10 @@ impl ReplaceLimits {
     /// Returns `RecipeError::ParameterNotFound` (`E-RCP-051`) for an unknown key.
     /// Returns `E-RCP-004`, `E-RCP-006`, `E-RCP-017`, `E-RCP-018`, `E-RCP-019`, or `E-RCP-021`
     /// when the limits or the draft break a rule.
+    /// Returns `E-RCP-055` for a limit with too many significant digits.
+    /// Returns `E-RCP-022` for an address overlap that holds the changed parameter.
+    /// Returns `AppError::Storage` with `E-DB-008` when a stored part breaks the earlier rule
+    /// set (ADR-0195).
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
     pub async fn execute(

@@ -8,12 +8,14 @@
 use std::collections::BTreeSet;
 
 use recipe_app::memory::seed_type_id;
+use recipe_domain::plant::UnitId;
 use recipe_domain::plant::{
     MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
     RecordShape, RuleSet, S7Address, TypeMember, TypeName, TypeTree, UnitPath,
 };
 use recipe_domain::recipe::{
-    Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, StoredParameter,
+    LangCode, Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, RecipeVersionId,
+    StoredParameter, StoredValue, Translation,
 };
 use recipe_domain::text::{LongText, Text};
 use uuid::Uuid;
@@ -65,14 +67,7 @@ pub(crate) fn seed_int_named_parameter(fixture: &Fixture) {
     let types = PlatformTypes::collect(plant.m7, PlcPlatform::S7_300, vec![int_row, row]).unwrap();
     let tree = TypeTree::resolve(PlcTypeId::from(INT_STRUCT_ID), &types).unwrap();
     let value = ParameterValue::parse(r#"{"speed":5}"#, &tree).unwrap();
-    let unit = fixture
-        .store
-        .state()
-        .machine(plant.m7)
-        .unwrap()
-        .unit(&UnitPath::parse("U1").unwrap())
-        .unwrap()
-        .id();
+    let unit = u1_of_m7(fixture, &plant);
     let parameter = StoredParameter {
         id: ParameterId::from(ZONE_ID),
         key: ParameterKey::from(ZONE_KEY),
@@ -88,4 +83,49 @@ pub(crate) fn seed_int_named_parameter(fixture: &Fixture) {
         ordinal: Ordinal::parse(ZONE_ORDINAL).unwrap(),
     };
     fixture.store.seed_parameter(plant.draft, &parameter);
+}
+
+/// Return the identifier of the unit `U1` of `M7`.
+fn u1_of_m7(fixture: &Fixture, plant: &PlantIds) -> UnitId {
+    fixture
+        .store
+        .state()
+        .machine(plant.m7)
+        .unwrap()
+        .unit(&UnitPath::parse("U1").unwrap())
+        .unwrap()
+        .id()
+}
+
+/// Add the parameter `ZONE` of the type `plc_type` with the stored value `value` to `version`.
+///
+/// `ZONE` stands on `U1` of `M7` at `DB6.DBB0` and has one translation in `pl`. The caller
+/// seeds the rows of the type, so a test can store a type that does not resolve. Call it after
+/// `seed_recipes`. The version is a version of a recipe of `M7`, for example `R-100`.
+pub(crate) fn seed_zone_of_type(
+    fixture: &Fixture,
+    version: RecipeVersionId,
+    plc_type: PlcTypeId,
+    value: StoredValue,
+) {
+    let plant = fixture.seed_plant();
+    let parameter = StoredParameter {
+        id: ParameterId::from(ZONE_ID),
+        key: ParameterKey::from(ZONE_KEY),
+        unit: u1_of_m7(fixture, &plant),
+        tag: ParameterTag::parse("ZONE").unwrap(),
+        name_en: Text::parse("ZONE").unwrap(),
+        description_en: LongText::parse("A parameter of the press line").unwrap(),
+        translations: vec![Translation {
+            lang: LangCode::parse("pl").unwrap(),
+            name: Text::parse("Strefa").unwrap(),
+            description: None,
+        }],
+        plc_type,
+        s7_address: Some(S7Address::parse("DB6.DBB0").unwrap()),
+        limits: Vec::new(),
+        value,
+        ordinal: Ordinal::parse(ZONE_ORDINAL).unwrap(),
+    };
+    fixture.store.seed_parameter(version, &parameter);
 }

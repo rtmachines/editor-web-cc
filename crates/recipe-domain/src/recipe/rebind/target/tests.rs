@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::error_codes::ErrorCode;
 use crate::plant::fixtures::{
-    array_row, id, machine, other_machine, primitive_row, struct_row, struct_row_revision,
-    types_for,
+    array_row, id, machine, on_platform, other_machine, primitive_row, struct_row,
+    struct_row_revision, types_for,
 };
-use crate::plant::{LeafPath, PlcPlatform, Primitive, TypeTrees};
+use crate::plant::{LeafPath, PlcPlatform, Primitive, S7Address, TypeTrees};
 use crate::recipe::draft::support::{stored_draft_with, stored_parameter};
 use crate::recipe::{
     Draft, DraftError, ParameterKey, RebindRequest, RebindTargetReason, RecipeError, VersionState,
@@ -348,4 +348,42 @@ fn target_not_found_has_its_phrase() {
         RebindTargetReason::TargetNotFound.to_string(),
         "the target revision does not exist on the machine of the draft"
     );
+}
+
+// The address check runs after a plan without entries. A missing sent value gives the list, and a
+// stored odd byte of the same parameter does not show up (ADR-0195 (n)).
+#[test]
+fn a_missing_sent_value_and_a_stored_odd_byte_give_the_list_and_not_stored() {
+    let platform = PlcPlatform::S7_1500;
+    let rows = vec![
+        primitive_row(INT, Primitive::Int),
+        primitive_row(BOOL, Primitive::Bool),
+        struct_row_revision(ZONE_2, "ST_Zone", 2, &[("temp", INT)]),
+        struct_row_revision(ZONE_3, "ST_Zone", 3, &[("temp", INT), ("active", BOOL)]),
+    ];
+    let trees = TypeTrees::resolve(
+        [INT, BOOL, ZONE_2, ZONE_3].map(id),
+        &types_for(machine(), platform, on_platform(platform, rows)),
+    );
+    let mut zone = stored_parameter(1, "ZONE", id(ZONE_2), None);
+    zone.value = serde_json::json!({"temp": 1}).into();
+    zone.s7_address = Some(S7Address::parse("DB1.DBB1").unwrap());
+    let draft = Draft::load(stored_draft_with(
+        VersionState::LiveDraft,
+        platform,
+        vec![zone],
+    ))
+    .unwrap();
+
+    let error = draft
+        .plan_rebind(&request(ZONE_2, ZONE_3), &trees)
+        .unwrap_err();
+
+    let list = match error {
+        DraftError::List(list) => Some(list),
+        _ => None,
+    }
+    .expect("a list of entries");
+    let codes: Vec<ErrorCode> = list.into_vec().iter().map(RecipeError::code).collect();
+    assert_eq!(codes, vec![ErrorCode::RCP_028]);
 }

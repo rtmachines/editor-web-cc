@@ -73,22 +73,28 @@ fn is_editable(request: &PageRequest, view: &ParameterView) -> Result<bool, WebE
 
 /// Build the grid of the stored value and the stored limits of `view` (A43).
 ///
+/// A view without a tree has no grid, because the stored type does not resolve (design D8,
+/// ADR-0195 (ae)).
+///
 /// # Errors
 ///
 /// Returns `E-WEB-010` when the stored value does not match its tree, a defect of the storage.
-fn stored_grid(ctx: Ctx<'_>, view: &ParameterView) -> Result<GridView, WebError> {
+fn stored_grid(ctx: Ctx<'_>, view: &ParameterView) -> Result<Option<GridView>, WebError> {
+    if view.tree.is_none() {
+        return Ok(None);
+    }
     let texts = GridTexts::stored(view).map_err(|_fault| WebError::Internal {
         request_id: ctx.request.request_id(),
     })?;
     let tag = view.parameter.tag.to_string();
     let chunk = ctx.state.settings().form_array_chunk;
-    Ok(grid_of(ctx.texts(), texts, chunk, &tag))
+    Ok(Some(grid_of(ctx.texts(), texts, chunk, &tag)))
 }
 
 /// Build what the edit form shows for the stored parameter: the stored texts and the grid.
 ///
 /// The edit form of the page and the clean form after a save use it, so both show the canonical
-/// texts of the store (ADR-0041 (h), A43).
+/// texts of the store (ADR-0041 (h), A43). A view without a tree gives a form without a grid.
 ///
 /// # Errors
 ///
@@ -96,8 +102,12 @@ fn stored_grid(ctx: Ctx<'_>, view: &ParameterView) -> Result<GridView, WebError>
 pub(crate) fn stored_shown(ctx: Ctx<'_>, view: &ParameterView) -> Result<Shown, WebError> {
     Ok(Shown {
         texts: DefinitionTexts::stored(view),
-        grid: Some(stored_grid(ctx, view)?),
-        value_type: view.type_text.clone(),
+        grid: stored_grid(ctx, view)?,
+        value_type: view
+            .tree
+            .as_ref()
+            .and(view.type_text.clone())
+            .unwrap_or_default(),
         notice: String::new(),
     })
 }
@@ -121,7 +131,14 @@ struct Body {
 async fn form_or_grid(ctx: Ctx<'_>, view: &ParameterView) -> Result<Body, WebError> {
     let t = ctx.texts();
     if !is_editable(ctx.request, view)? {
-        let grid = stored_grid(ctx, view)?;
+        let Some(grid) = stored_grid(ctx, view)? else {
+            return Ok(Body {
+                form: None,
+                values: None,
+                faults: FormErrors::default(),
+                address: Vec::new(),
+            });
+        };
         let faults = fault_errors(t, &view.rule_faults, &grid);
         let address = address_lines(t, &view.rule_faults, &grid);
         return Ok(Body {

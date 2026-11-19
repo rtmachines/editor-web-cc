@@ -1,18 +1,22 @@
 use serde_json::json;
 
+use super::super::map::MapFault;
 use super::super::test_support::{
-    MODE_1, MODE_2, OLD_1, OLD_2, OLDS_1, RAMP_1, RAMP_2, ZONE_2, ZONE_3, ZONES_2, draft_with, key,
-    limit, number, param, plan_of, request, request_with, trees,
+    INT, MODE_1, MODE_2, OLD_1, OLD_2, OLDS_1, RAMP_1, RAMP_2, ZONE_2, ZONE_3, ZONES_2, draft_with,
+    key, limit, number, param, plan_of, request, request_with, trees,
 };
+use super::{LimitMapping, map_limits};
 use crate::error_codes::ErrorCode;
 use crate::plant::LeafPath;
+use crate::plant::fixtures::id;
+use crate::recipe::draft::support::assert_stored;
 use crate::recipe::{DraftError, ParameterTag, RecipeError};
 
 /// The entries of a rejected plan.
 fn entries(error: DraftError) -> Vec<RecipeError> {
     match error {
         DraftError::List(list) => Some(list.into_vec()),
-        DraftError::Recipe(_) | DraftError::Plant(_) => None,
+        DraftError::Recipe(_) | DraftError::Plant(_) | DraftError::Stored(_) => None,
     }
     .unwrap()
 }
@@ -103,12 +107,12 @@ fn limit_of_an_array_root_on_a_kept_member_stays() {
     assert_eq!(plan.limits(key(1)), Some(&[second][..]));
 }
 
-// limit.rs doc: a kept limit that the planned tree rejects is an entry. `Draft::load` trusts
-// stored rows, so a stored row with a minimum above its maximum reaches the rebind.
-// Open question: domain-model.md section 5.2 does not list `E-RCP-018` for
-// `RebindTypeRevision`. The test pins the current code.
+// `Draft::load` trusts stored rows, so a stored row with a minimum above its maximum reaches the
+// rebind. The old tree rejects it first. A kept member has the same shape in both trees, so the
+// plan cannot reach the check against the planned tree. The later checks reject this row too, so
+// the test does not isolate the old-tree check. The next test calls `map_limits` directly.
 #[test]
-fn kept_limit_that_the_planned_tree_rejects_gives_e_rcp_018() {
+fn stored_limit_that_the_old_tree_rejects_gives_e_rcp_018() {
     let draft = draft_with(vec![param(
         1,
         "SPEED",
@@ -120,23 +124,12 @@ fn kept_limit_that_the_planned_tree_rejects_gives_e_rcp_018() {
 
     let error = draft.plan_rebind(&request, &trees()).unwrap_err();
 
-    assert_eq!(error.code(), ErrorCode::RCP_018);
-    let list = entries(error);
-    assert_eq!(list.len(), 1);
-    assert!(matches!(
-        &list[0],
-        RecipeError::MinGreaterThanMax { tag, leaf, min, max }
-            if tag.as_str() == "SPEED"
-                && leaf.to_string() == ".setpoint"
-                && min == "0"
-                && max == "-5"
-    ));
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_018);
 }
 
-// limit.rs doc: the entries of dropped limits come first, in the order of the rows. The error
-// of the first rejected kept limit comes last.
+// A stored defect stops the plan before the entries of the dropped limits (ADR-0195 (n)).
 #[test]
-fn dropped_limit_comes_before_the_error_of_a_rejected_kept_limit() {
+fn stored_defect_of_the_old_tree_comes_before_the_entry_of_a_dropped_limit() {
     let draft = draft_with(vec![param(
         1,
         "OLD",
@@ -149,8 +142,74 @@ fn dropped_limit_comes_before_the_error_of_a_rejected_kept_limit() {
         .plan_rebind(&request(OLD_1, OLD_2), &trees())
         .unwrap_err();
 
-    let codes: Vec<ErrorCode> = entries(error).iter().map(RecipeError::code).collect();
-    assert_eq!(codes, [ErrorCode::RCP_029, ErrorCode::RCP_018]);
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_018);
+}
+
+// The bad row is on a member that the rebind removes. Only the old-tree check of `map_limits`
+// gives the stored defect. Without it the row becomes the entry `E-RCP-029` (ADR-0195 (n)).
+#[test]
+fn stored_limit_with_bad_bounds_on_a_removed_member_gives_a_stored_defect() {
+    let draft = draft_with(vec![param(
+        1,
+        "OLD",
+        OLD_1,
+        json!({"setpoint": 1, "old_max": 9}),
+        vec![limit(".old_max", -5)],
+    )]);
+
+    let error = draft
+        .plan_rebind(&request(OLD_1, OLD_2), &trees())
+        .unwrap_err();
+
+    assert_stored(&error, Some(key(1)), ErrorCode::RCP_018);
+}
+
+// The old tree accepts the row. The planned tree is a leaf that has no member `setpoint`, so
+// every row stays and only the check against the planned tree rejects it.
+#[test]
+fn kept_limit_that_only_the_planned_tree_rejects_gives_e_rcp_017() {
+    let trees = trees();
+    let tag = ParameterTag::parse("SPEED").unwrap();
+    let rows = [limit(".setpoint", 100)];
+    let accepted = LimitMapping {
+        tag: &tag,
+        old_tree: trees.tree(id(ZONE_2)).unwrap(),
+        new_tree: trees.tree(id(ZONE_2)).unwrap(),
+        rows: &rows,
+    };
+    assert!(matches!(map_limits(&accepted), Ok(kept) if kept == rows));
+    let rejected = LimitMapping {
+        new_tree: trees.tree(id(INT)).unwrap(),
+        ..accepted
+    };
+
+    assert!(matches!(
+        map_limits(&rejected),
+        Err(MapFault::Defect(error)) if error.code() == ErrorCode::RCP_017
+    ));
+}
+
+#[test]
+fn stored_limit_on_a_path_that_the_old_struct_lacks_gives_a_stored_defect() {
+    let draft = draft_with(vec![param(
+        1,
+        "SPEED",
+        ZONE_2,
+        json!({"setpoint": 5}),
+        vec![limit(".ghost", 10)],
+    )]);
+    let request = request_with(ZONE_2, ZONE_3, &[(1, ".temp_max", number(70))]);
+
+    let error = draft.plan_rebind(&request, &trees()).unwrap_err();
+
+    assert!(matches!(error, DraftError::Stored(_)), "{error:?}");
+    assert_eq!(
+        match &error {
+            DraftError::Stored(defect) => defect.key().copied(),
+            _ => None,
+        },
+        Some(key(1))
+    );
 }
 
 #[test]

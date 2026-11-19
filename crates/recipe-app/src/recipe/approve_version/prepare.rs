@@ -161,6 +161,8 @@ fn check_and_hash(snapshot: Snapshot) -> Result<(ApprovalReady, Sha256), AppErro
 ///
 /// Returns `NotFound` (`E-WEB-005`) for an unknown recipe or version number.
 /// Returns the domain errors of the root, of `Draft::load`, and of `check_for_approval`.
+/// Returns `AppError::Storage` with `E-DB-008` when the stored draft holds two parameters with
+/// one tag, key, or identifier (ADR-0195 (j)).
 /// Returns `Timeout` (`E-WEB-009`) or `TaskFailed` (`E-WEB-011`) when the check does not complete.
 pub(super) async fn prepare(
     ctx: &AppContext,

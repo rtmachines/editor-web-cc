@@ -27,6 +27,8 @@ mod earlier_tests;
 #[cfg(test)]
 mod kept_member_tests;
 #[cfg(test)]
+mod stored_defect_tests;
+#[cfg(test)]
 mod test_support;
 mod value;
 
