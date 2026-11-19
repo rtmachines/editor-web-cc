@@ -4,6 +4,46 @@ This file records the notable changes of the recipe editor. The format follows [
 
 ## [Unreleased]
 
+### Added
+
+- ADR-0198 defines the place of the release notes. The release notes are the body of the GitHub release of the tag.
+- A test of `deploy/ci/test_upgrade_runbook.py` checks that each CI job that runs `deploy/ci/prepare.sh` gives that step a limit of 10 minutes.
+  The test also checks that five CI jobs run that script.
+- A second test checks that the budget comment of the CI job `upgrade` equals the sum of its step limits.
+- The runbook checks of `deploy/ci/test_upgrade_runbook.py` read code blocks inside list items and nested list items.
+  A test checks that the section "Upgrade" has 18 Bash blocks.
+
+### Changed
+
+- The runbook section "Keep the images for a rollback" skips the image ID comparison for releases up to 0.7.1 (ADR-0198 (d)).
+  Their release notes hold no image ID. The operator records the skip in the change log of the site.
+- Step 5 of that section says that "Load the images" loads no image of a release up to 0.7.1. The operator then stops and records the missing image.
+  The section "Keep the images for a rollback" also tells the operator to keep the images of such a release on the host.
+- The runbook rule that `plc_credential_key` has no rotation cites `reliability.md` §7.1.
+- Step 4 of the runbook section "Check the stored type rows against the identifier rules" uses only the verb "Sign off".
+- Step 2 of the runbook section "Upgrade" names both actions of the owner in the platform-ranges check.
+  The owner accepts the rows of its step 3 and signs off the rows of its step 7.
+- Step 3 of the runbook section "Restore into production" creates the new volume only when `docker volume ls` succeeds and does not list the name.
+  Otherwise the command prints an `ERROR` line and ends with exit code 1. The name check reads the volume list without a pipe.
+- The runbook section "Restore into production" says that only one operator runs it at a time.
+- The runbook section "Copy the backups off site" keeps `backup_manifest_key` out of the off-site copy (ADR-0174 (r)).
+- Step 7 of the subsection "Routine rotation" of the runbook section "Rotate the manifest key" keeps the key file out of the off-site copy.
+  Step 6 of its subsection "Compromise rotation" does the same.
+- The runbook section "Load the images" uses the term "release notes" and cites ADR-0198.
+- Step 7 of the section "Release" of `CONTRIBUTING.md` puts the `CHANGELOG.md` section of the release into the body of the GitHub release. The step adds the SHA-256 values and the image IDs.
+- The CI step "Prepare the disks and secrets" has a limit of 10 minutes in five jobs. The budget comment of the job `upgrade` gives 83 minutes.
+- The job limits of `restore-switch` and `pitr-recovery` rise to 130 and 160 minutes.
+
+### Fixed
+
+- The runbook section "Upgrade" renders as one ordered list of 24 steps. Each step shows its number.
+- The runbook section "Check the live S7 machines for a PLC connection record" deletes its old steps 1 to 5.
+  These steps needed an earlier release to save a PLC connection record.
+- That section gives the real condition of the stop of migration `0013`. It says that the advice of the message does not apply to 0.7.1.
+- Step 2 of the runbook section "Upgrade" names its three text blocks below step 24. The operator does them before the four checks.
+- Part 4 of step 12 of the section "Upgrade" names the case "Step 8 or 9 fails" by its text block.
+  That text block is "Recovery after a failure between two steps".
+
 ## [0.8.0] - 2026-11-19
 
 ### Added

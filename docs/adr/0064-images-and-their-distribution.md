@@ -1,6 +1,6 @@
 # ADR-0064: Images and their distribution
 
-Status: Accepted. Amended by ADR-0128 (for the login flood, item (o) applies only the memory bounds of the container limit)
+Status: Accepted. Amended by ADR-0128 (for the login flood, item (o) applies only the memory bounds of the container limit). Amended by ADR-0198 (item (k): the release notes are the body of the GitHub release of the tag)
 Date: 2026-10-23
 Deciders: project owner
 

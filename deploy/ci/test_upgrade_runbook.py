@@ -1,4 +1,4 @@
-"""Check the runbook blocks of the upgrade without Docker."""
+"""Check the upgrade workflow and runbook blocks without Docker."""
 
 import importlib.util
 import os
@@ -26,19 +26,44 @@ def shell_function(name, file="upgrade.sh"):
     return f"{name}() {{" + source.split(marker, 1)[1].split("\n}\n", 1)[0] + "\n}\n"
 
 
-def runbook_fence(line, fence):
-    """Return the next fence state as its full marker and info string."""
+def runbook_fence(line, fence, list_indent):
+    """Return the next fence state as its marker, info string, and body indent."""
     if fence is not None:
-        marker, _ = fence
+        marker, _, _ = fence
         closing = rf" {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}\s*"
         return None if re.fullmatch(closing, line) else fence
-    opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+    opening = re.match(r"^( {0,3})(`{3,}|~{3,})(.*)$", line)
     if opening is None:
         return None
-    marker, info = opening.groups()
+    indent, marker, info = opening.groups()
     if marker[0] == "`" and "`" in info:
         return None
-    return marker, info.strip()
+    return marker, info.strip(), list_indent + len(indent) if list_indent else 0
+
+
+def runbook_fence_lines(lines):
+    """Yield each line and its fence states before and after the line."""
+    list_indents = [0]
+    fence = None
+    for line in lines:
+        if line.strip():
+            indent = len(line) - len(line.lstrip(" "))
+            while indent < list_indents[-1]:
+                list_indents.pop()
+                fence = None
+        content = line[list_indents[-1]:]
+        previous = fence
+        if fence is None:
+            # Four spaces relative to the enclosing item can start indented code.
+            while item := re.match(r" {0,3}(?:[-+*]|[0-9]{1,9}[.)])(?= |$)", content):
+                rest = content[item.end():]
+                spaces = len(rest) - len(rest.lstrip(" "))
+                padding = spaces if rest.strip() and 1 <= spaces <= 4 else 1
+                width = item.end() + padding
+                list_indents.append(list_indents[-1] + width)
+                content = content[width:]
+        fence = runbook_fence(content, fence, list_indents[-1])
+        yield line, previous, fence
 
 
 def runbook_heading_section(title, level):
@@ -46,10 +71,7 @@ def runbook_heading_section(title, level):
     runbook = pathlib.Path(__file__).resolve().parents[2] / "docs" / "ops" / "runbook.md"
     lines = runbook.read_text(encoding="utf-8").splitlines()
     headings = []
-    fence = None
-    for index, line in enumerate(lines):
-        previous = fence
-        fence = runbook_fence(line, fence)
+    for index, (line, previous, fence) in enumerate(runbook_fence_lines(lines)):
         if previous is not None or fence is not None:
             continue
         heading = re.match(r"^(#+) ", line)
@@ -67,19 +89,16 @@ def runbook_heading_section(title, level):
 def runbook_bash_blocks(section):
     """Return Bash blocks, excluding text inside other fences."""
     blocks = []
-    fence = None
-    body = []
-    for line in section.splitlines():
-        previous = fence
-        fence = runbook_fence(line, fence)
-        if previous is not None:
-            if fence is None:
-                if previous[1] == "bash":
-                    blocks.append("\n".join(body))
-            else:
-                body.append(line)
-        elif fence is not None:
-            body = []
+    body = None
+    for line, previous, fence in runbook_fence_lines(section.splitlines()):
+        if previous is None or fence is None:
+            if body is not None:
+                blocks.append("\n".join(body))
+            body = [] if fence is not None and fence[1] == "bash" else None
+        elif body is not None:
+            body.append(re.sub(rf"^ {{0,{previous[2]}}}", "", line))
+    if body is not None:
+        blocks.append("\n".join(body))
     return blocks
 
 
@@ -103,12 +122,9 @@ def runbook_code_span_offsets(block):
 def runbook_inline_code_spans(text):
     """Return spans with matching backtick runs in prose blocks outside fences."""
     spans = []
-    fence = None
     blocks = []
     lines = []
-    for line in text.splitlines():
-        previous = fence
-        fence = runbook_fence(line, fence)
+    for line, previous, fence in runbook_fence_lines(text.splitlines()):
         heading = re.match(r"^ {0,3}#{1,6}(?:[ \t]|$)", line)
         boundary = heading or re.match(r"^ *(?:\||(?:[-*+]|[0-9]+[.)])(?:[ \t]|$))", line)
         if previous is not None or fence is not None or not line.strip() or boundary:
@@ -135,11 +151,8 @@ def runbook_deleted_service_starts(section, services=("app", "backup"),
                                    subcommands=("start", "restart")):
     """Return inline spans and fenced lines with forbidden Compose calls."""
     commands = runbook_inline_code_spans(section)
-    fence = None
     continuation = False
-    for line in section.splitlines():
-        previous = fence
-        fence = runbook_fence(line, fence)
+    for line, previous, fence in runbook_fence_lines(section.splitlines()):
         if previous is not None and fence is not None:
             if continuation:
                 commands[-1] = commands[-1][:-1] + line
@@ -167,6 +180,67 @@ def runbook_deleted_service_starts(section, services=("app", "backup"),
                 continue
             break
     return forbidden
+
+
+class UpgradeWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        workflow = pathlib.Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci.yml"
+        self.workflow = workflow.read_text(encoding="utf-8")
+
+    def jobs(self):
+        jobs = re.search(r"(?ms)^jobs:[ \t]*(?:#[^\n]*)?\n(.*?)(?=^[^\s#]|\Z)", self.workflow)
+        self.assertIsNotNone(jobs, "missing CI jobs")
+        return dict(re.findall(r"(?ms)^  ([\w-]+):[ \t]*(?:#[^\n]*)?\n(.*?)(?=^  [\w-]+:|\Z)",
+                               jobs.group(1)))
+
+    def test_upgrade_step_limits_match_the_budget_comment_and_stay_below_the_job_limit(self):
+        body = self.jobs()["upgrade"]
+        limit = re.search(r"(?m)^    timeout-minutes: (\d+)$", body)
+        named = re.search(r"(?m)^ +# The step limits sum to (\d+) minutes\b", body)
+        self.assertIsNotNone(limit, "missing upgrade job limit")
+        self.assertIsNotNone(named, "missing upgrade step budget comment")
+        steps = [int(value) for value in re.findall(r"(?m)^        timeout-minutes: (\d+)$", body)]
+        self.assertTrue(steps)
+        total = sum(steps)
+        self.assertEqual(int(named.group(1)), total)
+        self.assertLess(total, int(limit.group(1)))
+
+    def assert_prepare_step_timeouts(self):
+        """Check prepare steps and return the jobs that run them."""
+        prepare_jobs = set()
+        for name, body in self.jobs().items():
+            steps = re.search(r"(?ms)^    steps:[ \t]*(?:#[^\n]*)?\n(.*?)(?=^    [\w-]+:|\Z)", body)
+            if steps is None:
+                continue
+            items = re.split(r"(?m)^      -(?:[ \t]+|$)", steps.group(1))[1:]
+            # Align the first key of each step with its other keys.
+            mappings = ["        " + item for item in items]
+            command = r"(?m)^        run: ([\"']?)bash deploy/ci/prepare\.sh\1(?:[ \t]+#[^\n]*)?[ \t]*$"
+            prepare = [step for step in mappings if re.search(command, step)]
+            if not prepare:
+                continue
+            prepare_jobs.add(name)
+            self.assertEqual(len(prepare), 1, f"{name}: expected one step that runs prepare.sh")
+            timeout = r"(?m)^        timeout-minutes: 10(?:[ \t]+#[^\n]*)?[ \t]*$"
+            self.assertIsNotNone(re.search(timeout, prepare[0]),
+                                 f"{name}: prepare.sh needs timeout-minutes: 10")
+        return prepare_jobs
+
+    def test_prepare_step_has_a_ten_minute_timeout_in_each_job(self):
+        self.assertEqual(self.assert_prepare_step_timeouts(),
+                         {"compose", "load", "upgrade", "restore-switch", "pitr-recovery"})
+
+    def test_prepare_timeout_on_following_unnamed_step_is_rejected(self):
+        self.workflow = ("jobs:\n"
+                         "  compose:\n"
+                         "    runs-on: ubuntu-24.04\n"
+                         "    steps:\n"
+                         "      - name: Prepare the disks and secrets\n"
+                         "        run: bash deploy/ci/prepare.sh\n"
+                         "      - run: echo next\n"
+                         "        timeout-minutes: 10\n")
+        with self.assertRaisesRegex(AssertionError, "compose.*timeout-minutes: 10"):
+            self.assert_prepare_step_timeouts()
 
 
 class RunbookHostRebootTests(unittest.TestCase):
@@ -207,10 +281,7 @@ class RunbookHostRebootTests(unittest.TestCase):
     def prose_paragraphs(self):
         section = runbook_heading_section("After a host reboot", 3)
         prose = []
-        fence = None
-        for line in section.splitlines():
-            previous = fence
-            fence = runbook_fence(line, fence)
+        for line, previous, fence in runbook_fence_lines(section.splitlines()):
             if previous is not None:
                 continue
             if fence is not None:
@@ -358,6 +429,33 @@ def runbook_step(title, start, level=3):
 
 
 class RunbookStepTests(unittest.TestCase):
+    def test_upgrade_has_eighteen_bash_blocks(self):
+        section = runbook_heading_section("Upgrade", 3)
+        self.assertEqual(len(runbook_bash_blocks(section)), 18)
+
+    def test_indented_example_code_cannot_open_a_list_or_fence(self):
+        for prefix, indent in (("", ""), ("1. Example\n\n", "   ")):
+            with self.subTest(prefix=prefix):
+                example = ("    1. Example\n", "       ```bash\n",
+                           "       echo example\n", "       ```\n")
+                section = prefix + "".join(indent + line for line in example)
+                self.assertEqual(runbook_bash_blocks(section), [])
+
+    def test_bash_fence_can_open_on_a_list_marker_line(self):
+        section = "1. ```bash\n   echo first\n     echo indented\n   ```\n"
+        self.assertEqual(runbook_bash_blocks(section), ["echo first\n  echo indented"])
+
+    def test_bash_fence_ends_at_its_nested_list_item_boundary(self):
+        section = ("1. Outer\n\n"
+                   "   - First\n\n"
+                   "     ```bash\n"
+                   "     echo first\n"
+                   "   - Second\n\n"
+                   "     ```bash\n"
+                   "     echo second\n"
+                   "     ```\n")
+        self.assertEqual(runbook_bash_blocks(section), ["echo first", "echo second"])
+
     def test_step_reads_a_level_two_heading(self):
         section = "## Major upgrade\n\n1. Delete app.\nKeep the dump.\n\n2. Continue.\n"
         with mock.patch(f"{__name__}.runbook_heading_section", return_value=section) as heading:

@@ -198,7 +198,7 @@ This section describes the release steps of the maintainer. Commit `7f102d1` (re
 4. Tag that commit `vX.Y.Z` and push the tag.
 5. Build both images from the tag, as ADR-0064 (i) describes. Save each image with `docker save`, as ADR-0064 (j) requires.
 6. Compute the SHA-256 of each file. Read the image ID of each local image with `docker image inspect --format '{{.Id}}'`.
-7. Put the SHA-256 values and the image IDs into the body of the GitHub release of `vX.Y.Z`.
+7. Put the `CHANGELOG.md` section of `X.Y.Z` into the body of the GitHub release of `vX.Y.Z`. Add the SHA-256 values and the image IDs (ADR-0198).
 
 Run the release build in the directory `deploy/` and export `RECIPE_VERSION=X.Y.Z` first. The release build adds `--env-file .env.example`, but the header of `deploy/compose.build.yaml` gives the form without it. Compose needs more required values than `RECIPE_VERSION`. Without the env file, Compose stops with `required variable ... is missing a value`.
 
