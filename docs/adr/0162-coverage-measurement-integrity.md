@@ -1,6 +1,6 @@
 # ADR-0162: Complete file accounting for the line coverage gate
 
-Status: Accepted. Amends ADR-0127 (h), (i), and (w)
+Status: Accepted. Amends ADR-0127 (h), (i), and (w). Amended by ADR-0196 (tool version 0.9.1 in item (s))
 Date: 2026-11-13
 Deciders: project owner
 
