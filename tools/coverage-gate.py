@@ -265,7 +265,7 @@ def test_files(declarations: dict[pathlib.Path, list[Module]]) -> set[pathlib.Pa
 
 
 def default_ignored(path: pathlib.Path) -> bool:
-    """Copy the cargo-llvm-cov 0.6.24 default test filename filter."""
+    """Copy the default test filename filter of cargo-llvm-cov 0.6.24 and 0.9.1."""
     return re.search(
         r"(^|/)(tests|examples|benches)/|/(tests\.rs|[0-9a-zA-Z_-]+[_-]tests\.rs)$",
         path.as_posix(),

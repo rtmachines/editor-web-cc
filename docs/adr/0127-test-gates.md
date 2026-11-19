@@ -1,6 +1,6 @@
 # ADR-0127: Test gates on production code, PUBLIC rights, and rewrite forms
 
-Status: Accepted. Amended by ADR-0136 (rewrite forms). Amended by ADR-0153. Amended by ADR-0162 (coverage file accounting)
+Status: Accepted. Amended by ADR-0136 (rewrite forms). Amended by ADR-0153. Amended by ADR-0162 (coverage file accounting). Amended by ADR-0196 (tool version 0.9.1 in items (f) and (v) and in the consequence of the exact pin)
 Date: 2026-11-04
 Deciders: project owner
 

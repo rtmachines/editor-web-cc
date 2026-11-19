@@ -106,8 +106,8 @@ def check_job(body: str, other_refs: list[str], existing_tests: set[str]) -> lis
     rules = (
         (field(body, "name", 4) == "Coverage", "job-name: keep the name Coverage"),
         (field(body, "timeout-minutes", 4) == "45", "job-timeout: keep the 45-minute timeout"),
-        (any(field(step, "tool", 10) == "cargo-llvm-cov@0.6.24" for step in steps),
-         "coverage-version: keep cargo-llvm-cov@0.6.24"),
+        (any(field(step, "tool", 10) == "cargo-llvm-cov@0.9.1" for step in steps),
+         "coverage-version: keep cargo-llvm-cov@0.9.1"),
         ("--summary-only" not in body, "no-summary-only: measure the full report"),
         (test_step >= 0, "coverage-tests: run exactly the five python3 -I -B commands in one step"),
         (set(TEST_FILES) <= existing_tests, "coverage-test-files: keep all five test files"),
@@ -137,7 +137,7 @@ FIXTURE = """    name: Coverage
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8
         with:
-          tool: cargo-llvm-cov@0.6.24
+          tool: cargo-llvm-cov@0.9.1
       - name: Test the coverage tools
         run: |
           python3 -I -B tools/test_coverage_gate.py
@@ -170,7 +170,7 @@ def mutations() -> list[tuple[str, str]]:
     replacements = (
         ("job-name", "name: Coverage", "name: Other"),
         ("job-timeout", "timeout-minutes: 45", "timeout-minutes: 44"),
-        ("coverage-version", "cargo-llvm-cov@0.6.24", "cargo-llvm-cov@0.6.23"),
+        ("coverage-version", "cargo-llvm-cov@0.9.1", "cargo-llvm-cov@0.9.0"),
         ("no-summary-only", "--json --output-path", "--json --summary-only --output-path"),
         ("inventory-command", "--write-inventory", "--source-only"),
         ("measurement-command", "--workspace --all-features", "--workspace"),
