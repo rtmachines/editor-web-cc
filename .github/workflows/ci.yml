@@ -61,6 +61,7 @@ jobs:
         run: bash deploy/ci/check.sh
       - name: Prepare the disks and secrets (D11 steps 1 and 2)
         run: bash deploy/ci/prepare.sh
+        timeout-minutes: 10
       - name: Set up Buildx (D11 step 3)
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build recipe-server
@@ -178,6 +179,7 @@ jobs:
         run: bash deploy/ci/check.sh
       - name: Prepare the disks and secrets
         id: prepare
+        timeout-minutes: 10
         run: bash deploy/ci/prepare.sh
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -396,11 +398,12 @@ jobs:
         run: bash deploy/ci/check.sh
       - name: Prepare the disks and secrets
         run: bash deploy/ci/prepare.sh
+        timeout-minutes: 10
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       # Allow 35 minutes to build and start the previous release and write its backup.
       # Allow 30 minutes for the checks of steps 2 and 3, the upgrade, and three restore tests.
-      # The step limits sum to 73 minutes with diagnostics and cleanup, below the job limit.
+      # The step limits sum to 83 minutes, with diagnostics and cleanup included. This is below the job limit.
       - name: Build the previous images and write the old backup (before step 2)
         timeout-minutes: 35
         run: bash deploy/ci/upgrade.sh previous
@@ -441,8 +444,9 @@ jobs:
     # ADR-0094: Run the stack test on manual dispatch and pushes to main. Dispatch this job on a branch.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    # The step limits sum to 111 minutes, with 3 for diagnostics and 5 for cleanup. This leaves 9 minutes below the job limit.
-    timeout-minutes: 120
+    # The step limits sum to 121 minutes, with 3 minutes for diagnostics and 5 minutes for cleanup.
+    # This leaves 9 minutes below the job limit.
+    timeout-minutes: 130
     permissions:
       contents: read
     env:
@@ -462,6 +466,7 @@ jobs:
         run: bash deploy/ci/check.sh
       - name: Prepare the disks and secrets
         run: bash deploy/ci/prepare.sh
+        timeout-minutes: 10
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build recipe-server
@@ -536,8 +541,9 @@ jobs:
     # ADR-0094: Run the stack test on manual dispatch and pushes to main. Dispatch this job on a branch.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
-    # The step limits sum to 140 minutes, with 3 for diagnostics and 5 for cleanup. This leaves 10 minutes below the job limit.
-    timeout-minutes: 150
+    # The step limits sum to 150 minutes, with 3 minutes for diagnostics and 5 minutes for cleanup.
+    # This leaves 10 minutes below the job limit.
+    timeout-minutes: 160
     permissions:
       contents: read
     env:
@@ -557,6 +563,7 @@ jobs:
         run: bash deploy/ci/check.sh
       - name: Prepare the disks and secrets
         run: bash deploy/ci/prepare.sh
+        timeout-minutes: 10
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build recipe-server
