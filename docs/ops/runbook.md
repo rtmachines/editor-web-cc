@@ -205,7 +205,7 @@ install -d -m 0700 -o root -g root "$RECIPE_SECRETS_DIR"
 ```
 
 Run the command once for each name: `postgres_password`, `migrator_password`, `app_password`, `backup_password`, `replicator_password`, `login_hmac_key`, `csrf_signing_key`, `plc_credential_key`, `backup_manifest_key`.
-The file `plc_credential_key` holds one line of 64 lower-case hex characters. The key has no rotation (ADR-0154).
+The file `plc_credential_key` holds one line of 64 lower-case hex characters. The key has no rotation (`reliability.md` 7.1).
 The file `backup_manifest_key` holds one line of 64 lower-case hex characters. A key rotation adds a second line (ADR-0174 (n), (q)).
 
 3. Create the file `alerts_webhook_url`. Write the URL of the webhook into it.
@@ -310,19 +310,20 @@ In this runbook, a release tag such as `<new tag>` or `<previous tag>` is the im
 `<version>` below is that image tag too.
 
 1. Run `sha256sum <image file>` for each image file of the release.
-2. Compare each result with the SHA-256 in the body of the GitHub release of the tag (ADR-0064 (k)).
+2. Compare each result with the SHA-256 in the release notes of the tag (ADR-0064 (k), ADR-0198).
 3. Run `docker load -i <image file>` for each file.
 4. Run `docker image inspect --format '{{.Id}}' recipe-server:<version>`. Run the same command for `recipe-pgtools:<version>`.
-5. Compare each image ID with the body of the GitHub release of the tag.
+5. Compare each image ID with the release notes of the tag.
 6. Set `RECIPE_VERSION` in `.env` to the image tag, for example `0.8.0`. Never write the Git tag `v0.8.0`.
 7. Run steps 6 and 7 of the section "Create the environment file".
    Check that the image lines show `recipe-server:<version>` and `recipe-pgtools:<version>`.
 
-From release 0.8.0, the body of the GitHub release of the tag holds the SHA-256 of each `docker save` file and both image IDs.
-The maintainer adds these values after the build from the tag (ADR-0064 (k)). `CHANGELOG.md` does not hold them.
+The release notes of a release are the body of the GitHub release of its Git tag (ADR-0198).
+From release 0.8.0, the release notes hold the SHA-256 of each `docker save` file and the image ID of each image.
+The maintainer adds these values after the build from the tag (ADR-0198 (c)). `CHANGELOG.md` does not hold them.
 
-The GitHub release of an earlier release may not hold these values.
-When that release holds no values, stop before step 3. Do not load the image files.
+The release notes of an earlier release may not hold these values.
+When the release notes hold no values, stop before step 3. Do not load the image files.
 Record the reason in the [change log of the site](#change-log-of-the-site).
 
 ### Start the stack
@@ -608,16 +609,20 @@ No document gives the steps that restore a set from a copy to the host.
 
 Copy these host files too, with the same protection:
 
-- The file `deploy/.env` and the files of `RECIPE_SECRETS_DIR`. Step 6 of "Restore into production" reads the secret files.
+- The file `deploy/.env` and the files of `RECIPE_SECRETS_DIR`, except `backup_manifest_key`. Step 6 of "Restore into production" reads the secret files.
 - The files `Caddyfile` and `compose.yaml`, if you edited them. A release replaces both files (section "A plant device in front of Caddy").
 - The image files and the release notes of the running release and of the previous release. A release moves the images as files (ADR-0064 (j), (k)).
 
 Copy the secret files again after the sections "Key rotation", "Certificate rotation", and "Change a database password".
 
+Keep the file `backup_manifest_key` out of the off-site copy of the backups and the secret files.
+Keep its offline copy apart from the backup disk and the off-site copy (ADR-0174 (r)). The site may keep that offline medium off site.
+On a new host, the section "Restore the key file on a new host" reads the key from the offline medium.
+
 The file `plc_credential_key` is part of the secret backup.
 The database holds the PLC passwords only in encrypted form (ADR-0154).
 Without the key file, a restore cannot read the stored PLC passwords.
-The key has no rotation (ADR-0154). A new key makes every stored PLC password unreadable.
+The key has no rotation (`reliability.md` 7.1). A new key makes every stored PLC password unreadable.
 An operator must then type each PLC password again.
 
 The audit copy of step 8 of "Restore into production" is the off-site copy of a set.
@@ -676,6 +681,8 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 ### Restore into production
 
+Only one operator runs this section at a time.
+
 The restore writes into a new volume and never into the volume of the running `db` (ADR-0103 (a)).
 The command `restore-volume` fills the new volume while `db` runs on the old volume.
 Then the switch makes the new volume the volume of `db` (ADR-0103 (b)). The old volume stays unchanged.
@@ -713,11 +720,24 @@ The login check of step 8 of `restore-test` then has no equal before the switch.
 docker compose rm -s -f app backup
 ```
 
-3. Create the new volume. The command prints its name, which has the form `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>` in UTC (ADR-0103 (e)):
+3. Create the new volume. The command prints its name, which has the form `recipe-editor_pgdata_<YYYYMMDD_HHMMSS>` in UTC (ADR-0103 (e)).
+   `docker volume create` uses an existing volume of that name. The command therefore refuses a name that exists.
+   It also stops when the volume list fails. Each refusal prints an `ERROR` line and ends with exit code 1:
 
 ```bash
-docker volume create "recipe-editor_pgdata_$(date -u +%Y%m%d_%H%M%S)"
+new_volume="recipe-editor_pgdata_$(date -u +%Y%m%d_%H%M%S)"
+if ! volumes="$(docker volume ls --quiet)"; then
+  printf 'ERROR: the volume list failed.\n' >&2; false
+elif grep -Fqx -- "$new_volume" <<<"$volumes"; then
+  printf 'ERROR: the volume %s exists.\n' "$new_volume" >&2; false
+else
+  docker volume create "$new_volume"
+fi
 ```
+
+   After the `ERROR` line of a name that exists, run the command again.
+   After the `ERROR` line of the volume list, fix the cause first. Then run the command again.
+   The refused command created no volume and deleted no volume.
 
 4. Fill the new volume. The container has no network. It mounts one secret, the file `backup_manifest_key` (ADR-0174 (y)). `db` keeps running on the old volume:
 
@@ -1224,7 +1244,7 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 
 2. The owner reads each output row.
 3. Stop the upgrade when a row of `struct_name_case`, `member_name_case`, or `array_subscript` remains.
-4. Accept or sign off each row of `reserved_struct_name` and `s7_reserved_struct_name`.
+4. Sign off each row of `reserved_struct_name` and `s7_reserved_struct_name`.
 5. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the stored data against the S7 layout rules
@@ -1285,38 +1305,25 @@ Migration `0013` moves the data block number to the machine (ADR-0156).
 Migration `0014` copies the number from the PLC connection record of the machine.
 A live machine on `S7_300`, `S7_1200`, or `S7_1500` without that record has no number to copy.
 Migration `0013` stops on such a machine before it adds the column and changes nothing.
-The query lists these machines. It writes nothing.
+The query of step 1 of the steps for 0.7.1 below lists each live S7 machine. It writes nothing.
+A database of 0.7.1 holds no PLC connection record, so each machine in that list has no record.
 The output has one column, `code`, ordered by `code`.
 An archived machine and a machine on `CodesysIec` or `TwinCat3` are not in the output.
 
 Release 0.7.1 is the only supported start release of the upgrade to 0.8.0 (ADR-0197).
-On a database of 0.7.1, do not do steps 1 to 5. Do the steps for 0.7.1 at the end of this section.
+On a database of 0.8.0 or later, skip this section. Migration `0013` already ran there (ADR-0197).
+On a database of 0.7.1, do the steps for 0.7.1 below.
 
-1. Run the query. The previous release can still run.
-
-```bash
-docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 <<'SQL'
-SELECT machine.code
-FROM machine
-WHERE machine.archived_at IS NULL
-  AND machine.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
-  AND NOT EXISTS (
-      SELECT 1 FROM plc_connection WHERE plc_connection.machine_id = machine.id
-  )
-ORDER BY machine.code;
-SQL
-```
-
-2. Save the PLC connection of each listed machine with the previous release.
-3. Run the query again. It must return 0 rows.
-4. Write the result into the [change log of the site](#change-log-of-the-site).
-5. Continue with the upgrade when the query returns 0 rows.
-
-If you skip this check, `migrate` stops with this message. The list names the same machines:
+On an upgrade from 0.7.1, migration `0013` stops when it finds a live S7 machine without a PLC connection record.
+Then `migrate` prints this message and stops.
+The list names each such machine that exists when migration `0013` takes its lock (ADR-0197 (h)):
 
 ```text
 migration 0013 stopped: live S7 machines without a PLC connection record: <codes>. Save the PLC connection of each listed machine with the previous release (docs/ops/runbook.md).
 ```
+
+The second sentence of the message does not apply to 0.7.1. Release 0.7.1 cannot save a PLC connection record (ADR-0197).
+Do the next paragraph. Then read the steps for 0.7.1 below. Their step 4 applies when the query returns a row.
 
 On a database of 0.7.1, the files `0011` and `0012` stay committed after this stop (ADR-0197 (g1)).
 Do all four parts of step 12 of the section "Upgrade", also the `_premigrate` restore of part 4.
@@ -1327,7 +1334,7 @@ After a failed check in that step 1, `app` keeps running, as [Failed rollback re
 The steps for 0.7.1 follow ADR-0197.
 An installation of an older release first upgrades to 0.7.1. Then it does these steps.
 
-A database of 0.7.1 has no table `plc_connection`, so the query of step 1 fails there.
+A database of 0.7.1 has no table `plc_connection`.
 Release 0.7.1 also cannot save a PLC connection record.
 
 The project supports the upgrade from 0.7.1 only when the database holds no live S7 machine.
@@ -1386,12 +1393,17 @@ Before step 1, do the text block "Manifest key file before step 1" and run the "
    Only command 1 of [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set) uses it, as `<new tag>`.
 2. On a database of 0.7.1, start this step only when the query before step 1 returned 0 rows (ADR-0197).
    An upgrade to 0.8.0 starts only from 0.7.1. Upgrade an older installation to 0.7.1 first.
-   Then do the three parts below in this order: the installation, the name check, and the segment check.
+
+   Three text blocks of this step stand below step 24. Do them now, in this order:
+   First do "Installation of step 2". Then do "Name check of step 2". Then do "Segment check of step 2".
+   Then run the four checks below.
+
    Avoid the times `backup.time`, `basebackup.time`, and `restore_test.time` of `reliability.md` 7.11 for the whole upgrade.
    1. Run the section "Check the stored data against the platform ranges" from the directory `deploy/` of the new release.
    Run it after the segment check and before step 3.
    Continue when the query returns 0 rows. Else continue only when the end criterion of that section holds.
-   The owner also accepts or signs off each other row there. If a version to fix cannot get its fix, stop the upgrade.
+   The owner also accepts each row of step 3 of that section. The owner signs off each row of step 7 of that section.
+   If a version to fix cannot get its fix, stop the upgrade.
    2. Run the section "Check the stored type rows against the identifier rules" from the directory `deploy/` of the new release.
    Run it after the platform-ranges check and before step 3.
    Continue only when the parts `struct_name_case`, `member_name_case`, and `array_subscript` give 0 rows.
@@ -1408,15 +1420,15 @@ Before step 1, do the text block "Manifest key file before step 1" and run the "
 
    If the probe of the previous image printed `check`, run this command:
 
-```bash
-docker compose run --rm --no-deps backup restore-test
-```
+   ```bash
+   docker compose run --rm --no-deps backup restore-test
+   ```
 
    If the probe printed `no-check`, run this command:
 
-```bash
-docker compose -f compose.yaml -f compose.previous.yaml run --rm --no-deps backup restore-test
-```
+   ```bash
+   docker compose -f compose.yaml -f compose.previous.yaml run --rm --no-deps backup restore-test
+   ```
 
 4. Load the new images as in the section "Load the images". Do not stop the running stack.
 5. Set `RECIPE_VERSION` in `.env` to the new release tag, for example `0.8.0`. Never write the Git tag `v0.8.0`.
@@ -1432,52 +1444,52 @@ docker compose -f compose.yaml -f compose.previous.yaml run --rm --no-deps backu
    - `app` loses its connections for the start time of `db` (ADR-0105 (k)).
 9. Wait for exit code 0 of `backup-premigrate` with `docker compose ps -a backup-premigrate`.
 10. Write the change log entry of the upgrade, then run `migrate`. A recovery to a target time reads this entry (ADR-0106 (e)).
-   1. Read the identifier and the timeline of the cluster from `db`. Write both lines into the entry:
+    1. Read the identifier and the timeline of the cluster from `db`. Write both lines into the entry:
 
-```bash
-docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT 'Database system identifier: ' || system_identifier FROM pg_control_system() UNION ALL SELECT 'Latest checkpoint''s TimeLineID: ' || timeline_id FROM pg_control_checkpoint()"
-```
+       ```bash
+       docker compose exec -T -u postgres db psql -d recipe -At -c "SELECT 'Database system identifier: ' || system_identifier FROM pg_control_system() UNION ALL SELECT 'Latest checkpoint''s TimeLineID: ' || timeline_id FROM pg_control_checkpoint()"
+       ```
 
-   2. Write the previous tag and the new tag into the entry. The previous tag is the value of `RECIPE_VERSION` before step 5.
-   3. Read the time and write it into the entry as the start time of `migrate`. Do this before sub-step 4:
+    2. Write the previous tag and the new tag into the entry. The previous tag is the value of `RECIPE_VERSION` before step 5.
+    3. Read the time and write it into the entry as the start time of `migrate`. Do this before sub-step 4:
 
-```bash
-date -u +%Y-%m-%dT%H:%M:%SZ
-```
+       ```bash
+       date -u +%Y-%m-%dT%H:%M:%SZ
+       ```
 
-   4. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
+    4. Run `docker compose up -d --no-deps migrate`. Without `--no-deps`, Compose runs `backup-premigrate` a second time.
 11. Wait for exit code 0 of `migrate` with `docker compose ps -a migrate`.
 12. If `backup-premigrate` or `migrate` fails, stop. Do the parts below in this order.
-   When `0013` stops on a database of 0.7.1, do all four parts. Part 4 is then required (ADR-0197 (g1)).
-   1. Set the previous tag in `.env`. Run steps 6 and 7 of the section "Create the environment file".
-   Check that the image lines show `recipe-server:<previous tag>` and `recipe-pgtools:<previous tag>`.
-   After a failed upgrade from 0.7.1, they show `recipe-server:0.7.1` and `recipe-pgtools:0.7.1`.
-   2. If the probe of the previous image printed `no-check`, add the line `COMPOSE_FILE=compose.yaml:compose.previous.yaml` to `.env`. Delete each older line `COMPOSE_FILE`.
-   3. For the same probe result, run `docker compose up -d --no-deps --force-recreate backup`. The running `backup` then runs the previous image without the key and without the weekly `restore-test`.
-   4. Skip this part after a failed `backup-premigrate`. The case "Step 8 or 9 fails" below step 24 applies then.
-   For a `_premigrate` restore after a failed `migrate`, use [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
-   `<stamp>` there is the `_premigrate` set that step 8 of this upgrade wrote. `<new tag>` there is the tag that step 1 of "Upgrade" noted.
+    When `0013` stops on a database of 0.7.1, do all four parts. Part 4 is then required (ADR-0197 (g1)).
+    1. Set the previous tag in `.env`. Run steps 6 and 7 of the section "Create the environment file".
+       Check that the image lines show `recipe-server:<previous tag>` and `recipe-pgtools:<previous tag>`.
+       After a failed upgrade from 0.7.1, they show `recipe-server:0.7.1` and `recipe-pgtools:0.7.1`.
+    2. If the probe of the previous image printed `no-check`, add the line `COMPOSE_FILE=compose.yaml:compose.previous.yaml` to `.env`. Delete each older line `COMPOSE_FILE`.
+    3. For the same probe result, run `docker compose up -d --no-deps --force-recreate backup`. The running `backup` then runs the previous image without the key and without the weekly `restore-test`.
+    4. Skip this part after a failed `backup-premigrate`. The case "Step 8 or 9 fails" of the text block "Recovery after a failure between two steps" applies then.
+       For a `_premigrate` restore after a failed `migrate`, use [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
+       `<stamp>` there is the `_premigrate` set that step 8 of this upgrade wrote. `<new tag>` there is the tag that step 1 of "Upgrade" noted.
 13. Start the guard step. Write the start time into the change log ([rule](#change-log-of-the-site)). Run `docker compose exec -u postgres db psql -d recipe`.
 14. In a second terminal, print the guard statement with the command below. Paste the output into `psql`.
 
-```bash
-sed -n '/^CREATE FUNCTION audit_guard\.audit_objects_dropped()/,/^\$\$;$/p' db/initdb/01-roles.sh \
-  | sed '1s/^CREATE FUNCTION/CREATE OR REPLACE FUNCTION/'
-```
+    ```bash
+    sed -n '/^CREATE FUNCTION audit_guard\.audit_objects_dropped()/,/^\$\$;$/p' db/initdb/01-roles.sh \
+      | sed '1s/^CREATE FUNCTION/CREATE OR REPLACE FUNCTION/'
+    ```
 
-The command prints the statement of the new `01-roles.sh` from `CREATE OR REPLACE FUNCTION` to the line `$$;`.
+    The command prints the statement of the new `01-roles.sh` from `CREATE OR REPLACE FUNCTION` to the line `$$;`.
 15. Compute the hash of the function in the same session:
 
-```sql
-SET search_path = pg_catalog;
-SELECT encode(sha256(convert_to(pg_get_functiondef('audit_guard.audit_objects_dropped()'::regprocedure), 'UTF8')), 'hex');
-```
+    ```sql
+    SET search_path = pg_catalog;
+    SELECT encode(sha256(convert_to(pg_get_functiondef('audit_guard.audit_objects_dropped()'::regprocedure), 'UTF8')), 'hex');
+    ```
 
 16. Leave `psql` with `\q`. Read field 4 of the expected line:
 
-```bash
-grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.expected | cut -d'|' -f4
-```
+    ```bash
+    grep -F 'FUNCTION|audit_guard audit_objects_dropped()|' pgtools/restore-code.expected | cut -d'|' -f4
+    ```
 
 17. Compare the two hashes. Continue only when they are equal. Otherwise run steps 13 to 17 again.
 18. Run `docker compose up -d --no-deps app`. Docker replaces the container of `app` only.
@@ -2056,7 +2068,11 @@ Keep these images on the host:
 
 No document says how long a release stays rollback-ready. Delete the images of a release only when you decide that you will not roll back to it.
 Keep the image files and the release notes of that release (section "Copy the backups off site").
-You can then load the images again with the section "Load the images".
+You can then load the images of release 0.8.0 or later again with the section "Load the images".
+
+For a release up to 0.7.1, that section loads no image (ADR-0198 (d)).
+Keep the tagged images of such a release on the host while a rollback to it stays possible.
+
 Docker stores the images in its root directory. That is the disk of `pgdata` (section "Low disk space").
 
 Check the images after each upgrade:
@@ -2065,7 +2081,12 @@ Check the images after each upgrade:
 2. Check that each list shows the tag of the running release and the previous tag.
 3. Run `docker image inspect --format '{{.Id}}' recipe-server:<previous tag>`. Run the same command for `recipe-pgtools:<previous tag>`.
 4. Compare each image ID with the release notes of the previous release.
+   If the release notes hold no image ID (releases up to 0.7.1), skip this comparison (ADR-0198 (d)).
+   Record the skip in the [change log of the site](#change-log-of-the-site).
 5. If an image is missing, load it with steps 1 to 5 of the section "Load the images".
+   For a release up to 0.7.1, that section stops before step 3 and loads no image (ADR-0198 (d)).
+   Then stop this check. Record the missing image in the [change log of the site](#change-log-of-the-site).
+   Without that image, a rollback to that release stops.
 6. After such a load, do not run steps 6 and 7 of that section.
 
 To free disk space, run the command below. It deletes only dangling images. A dangling image has no tag:
@@ -2172,7 +2193,7 @@ The old volume stays unchanged.
 ## Key rotation
 
 The files `login_hmac_key` and `csrf_signing_key` hold one key per line, the newest key first (ADR-0035).
-The file `plc_credential_key` is not part of this section. It holds one key and has no rotation (ADR-0154).
+The file `plc_credential_key` is not part of this section. It holds one key and has no rotation (`reliability.md` 7.1).
 The file `backup_manifest_key` has its own subsection, "Rotate the manifest key".
 
 1. Run the command below once for each key file. Use `login_hmac_key` and `csrf_signing_key` for `<name>`.
@@ -2266,7 +2287,7 @@ mv "$RECIPE_SECRETS_DIR/backup_manifest_key.new" "$RECIPE_SECRETS_DIR/backup_man
 4. Run `docker compose up -d --force-recreate --no-deps backup`. Run `docker compose ps backup` until `backup` shows `healthy`.
 5. Run the section "Run a backup now". Check that the new set has the new key id as the second field of its tag file.
 6. Copy the new key file to the offline medium. Run the section "Compare the offline copy".
-7. Copy the secret files again, as the section "Copy the backups off site" says.
+7. Keep the key file out of the off-site copy (ADR-0174 (r)). Step 6 updates the offline copy.
 8. Delete the old line only when no kept set, no `_premigrate` set, and no off-site copy has its key id. List the key ids of the sets of the host:
 
 ```bash
@@ -2298,7 +2319,7 @@ The new file holds only the new key. A restore then refuses each set of the old 
 3. Run the commands of step 3 of the routine rotation.
 4. Run step 4 and step 5 of the routine rotation.
 5. Copy the new key file to the offline medium. Run the section "Compare the offline copy".
-6. Copy the secret files again, as the section "Copy the backups off site" says.
+6. Keep the key file out of the off-site copy (ADR-0174 (r)). Step 5 updates the offline copy.
 
 The sets of the old key stay on the disk but no restore accepts them. Plan a new set for each use of the old sets.
 
@@ -2477,7 +2498,7 @@ These keys have a procedure:
 | Add a trusted proxy | `http.trusted_proxies`, a comma list of networks | Section "A plant device in front of Caddy" |
 | Change or disable the webhook | The file named by `alerts.webhook_url_file` | Sections "Change the webhook" and "Disable the webhook" |
 | Change the login or CSRF key | The files named by `security.login_hmac_key_file` and `security.csrf_signing_key_file` | Section "Key rotation" |
-| Keep the PLC credential key | The file named by `security.plc_credential_key_file` | Sections "Create the secret files" and "Upgrade". The key has no rotation (ADR-0154) |
+| Keep the PLC credential key | The file named by `security.plc_credential_key_file` | Sections "Create the secret files" and "Upgrade". The key has no rotation (`reliability.md` 7.1) |
 | Change the password of the role `recipe_app` | The file named by `secrets.app_password_file` | Section "Change a database password" |
 
 No document describes a change of the other keys. These are `db.host`, `db.port`, `db.name`, `db.app_user`, `http.public_port`, and `http.internal_port`.
