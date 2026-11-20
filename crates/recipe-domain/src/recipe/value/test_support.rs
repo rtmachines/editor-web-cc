@@ -1,9 +1,10 @@
 //! Type trees that the tests of the value module share.
 
+use crate::plant::fixtures::{PLATFORM, machine};
 use crate::plant::fixtures::{
     array_row, id, primitive_row, string_row, struct_row, types, wstring_row,
 };
-use crate::plant::{PlcType, Primitive, TypeTree};
+use crate::plant::{PlatformTypes, PlcType, Primitive, StringEncoding, TypeTree};
 
 pub(crate) const INT: u128 = 1;
 pub(crate) const REAL: u128 = 2;
@@ -47,6 +48,14 @@ pub(crate) fn primitive_tree(root: u128) -> TypeTree {
 /// The tree of a `STRING(length)` parameter.
 pub(crate) fn string_tree(length: u16) -> TypeTree {
     tree(vec![string_row(50, length)], 50)
+}
+
+/// The tree of a `STRING(length)` parameter on a machine with the given `encoding`.
+pub(crate) fn encoded_string_tree(length: u16, encoding: StringEncoding) -> TypeTree {
+    let types =
+        PlatformTypes::collect_encoded(machine(), PLATFORM, encoding, [string_row(50, length)])
+            .expect("fixture ids are unique");
+    TypeTree::resolve(id(50), &types).unwrap()
 }
 
 /// The tree of a `WSTRING(length)` parameter.

@@ -70,6 +70,11 @@ fn shape_phrases() -> Vec<Phrase> {
             "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znaku U+0000",
         ),
         (
+            Expected::StringUtf8 { length: 20 },
+            "a string of at most 20 UTF-8 bytes without U+0000",
+            "tekst o najwy\u{17c}ej 20 bajtach UTF-8 bez znaku U+0000",
+        ),
+        (
             Expected::Char { max: 0xFFFF },
             "one character from U+0001 to U+FFFF",
             "jeden znak od U+0001 do U+FFFF",
@@ -187,7 +192,7 @@ fn recipe_each_expected_form_gives_its_phrase_in_both_languages() {
 
 #[test]
 fn recipe_the_expected_forms_cover_each_variant() {
-    assert_eq!(expected_cases().len(), 24);
+    assert_eq!(expected_cases().len(), 25);
 }
 
 /// The message of `E-RCP-005` for `expected` in `lang`.

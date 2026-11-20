@@ -5,7 +5,9 @@ use serde_json::{Number, Value};
 use super::decimal::{MAX_SIGNIFICANT_DIGITS, canonical, parse_decimal, significant_digits};
 use super::expected::Expected;
 use super::numeric::{is_integer, numeric_range};
-use crate::plant::{IecLiteral, LeafClass, PlcPlatform, Primitive, RuleSet, TimeType};
+use crate::plant::{
+    IecLiteral, LeafClass, PlcPlatform, Primitive, RuleSet, StringEncoding, TimeType,
+};
 
 /// Highest scalar of a `CHAR` and of a `STRING` character (Latin-1, ADR-0028).
 const LATIN_1_MAX: u32 = 0xFF;
@@ -83,6 +85,8 @@ pub(super) struct LeafType {
     pub(super) primitive: Primitive,
     pub(super) string_length: Option<u16>,
     pub(super) platform: PlcPlatform,
+    /// The `STRING` encoding of the machine (ADR-0202).
+    pub(super) string_encoding: StringEncoding,
     pub(super) mode: Mode,
     /// The rule set of the check. A request uses [`RuleSet::Current`] (ADR-0120).
     pub(super) rules: RuleSet,
@@ -131,8 +135,10 @@ const fn has_ucs2_wide_text_rule(leaf: LeafType) -> bool {
 /// one choice, so the two cannot differ.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Repertoire {
-    /// A `STRING`: Latin-1 (ADR-0028).
+    /// A `STRING` on a `Latin1` machine: Latin-1 (ADR-0028).
     Latin1,
+    /// A `STRING` on a `Utf8` machine: every scalar except `U+0000` (ADR-0202 (f)).
+    Utf8,
     /// A `WSTRING` with the rule of ADR-0137: every scalar.
     Utf16,
     /// A `WSTRING` on S7: scalars up to U+CFFF (ADR-0180 (b)).
@@ -145,13 +151,24 @@ impl Repertoire {
     /// Choose the repertoire of a leaf.
     const fn of(leaf: LeafType) -> Self {
         if !matches!(leaf.primitive, Primitive::Wstring) {
-            Self::Latin1
+            Self::of_string(leaf.string_encoding)
         } else if has_s7_wide_text_rule(leaf) {
             Self::S7Wide
         } else if has_ucs2_wide_text_rule(leaf) {
             Self::Ucs2
         } else {
             Self::Utf16
+        }
+    }
+
+    /// Choose the repertoire of a `STRING` leaf from the encoding of its machine.
+    ///
+    /// The rule has no branch of [`RuleSet`], because the encoding cannot change after the
+    /// first version (ADR-0202 (m)).
+    const fn of_string(encoding: StringEncoding) -> Self {
+        match encoding {
+            StringEncoding::Latin1 => Self::Latin1,
+            StringEncoding::Utf8 => Self::Utf8,
         }
     }
 
@@ -162,7 +179,7 @@ impl Repertoire {
     const fn highest(self) -> u32 {
         match self {
             Self::Latin1 => LATIN_1_MAX,
-            Self::Utf16 => UNICODE_MAX,
+            Self::Utf8 | Self::Utf16 => UNICODE_MAX,
             Self::S7Wide => S7_WSTRING_MAX,
             Self::Ucs2 => UCS2_MAX,
         }
@@ -172,6 +189,7 @@ impl Repertoire {
     const fn expected(self, length: u16) -> Expected {
         match self {
             Self::Latin1 => Expected::String { length },
+            Self::Utf8 => Expected::StringUtf8 { length },
             Self::Utf16 => Expected::Wstring { length },
             Self::S7Wide => Expected::WstringS7 {
                 length,
@@ -185,7 +203,8 @@ impl Repertoire {
 /// Convert a `STRING` or `WSTRING` leaf.
 ///
 /// The text must fit the length of the type and must hold no U+0000, because PostgreSQL refuses
-/// that scalar in JSONB (ADR-0137). A `WSTRING` on S7 also holds no scalar above U+CFFF
+/// that scalar in JSONB (ADR-0137). A `STRING` on a `Utf8` machine counts UTF-8 bytes
+/// (ADR-0202 (f)). A `WSTRING` on S7 also holds no scalar above U+CFFF
 /// (ADR-0180 (b)). A `WSTRING` on CODESYS and TwinCAT holds no scalar above U+FFFF
 /// (ADR-0201 (a)).
 fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
@@ -196,7 +215,7 @@ fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     };
     let highest = repertoire.highest();
     let is_in_range = text.chars().all(|c| u32::from(c) <= highest);
-    let units = string_length_units(text, leaf.primitive);
+    let units = string_length_units(text, leaf.primitive, leaf.string_encoding);
     let has_nul = text.contains('\0');
     if is_in_range && !has_nul && units <= usize::from(length) {
         Ok(value.clone())
@@ -207,13 +226,18 @@ fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
 
 /// Count the length units of the text of a string leaf.
 ///
-/// A `WSTRING` counts UTF-16 units and a `STRING` counts characters (ADR-0137). The value check
-/// and the limit check both call this function, so the two checks cannot differ.
-pub(super) fn string_length_units(text: &str, primitive: Primitive) -> usize {
-    if primitive == Primitive::Wstring {
-        text.encode_utf16().count()
-    } else {
-        text.chars().count()
+/// A `WSTRING` counts UTF-16 units. A `STRING` counts characters on a `Latin1` machine and
+/// UTF-8 bytes on a `Utf8` machine (ADR-0137, ADR-0202 (f)). The value check and the limit check
+/// both call this function, so the two checks cannot differ.
+pub(super) fn string_length_units(
+    text: &str,
+    primitive: Primitive,
+    encoding: StringEncoding,
+) -> usize {
+    match (primitive, encoding) {
+        (Primitive::Wstring, _) => text.encode_utf16().count(),
+        (_, StringEncoding::Utf8) => text.len(),
+        (_, StringEncoding::Latin1) => text.chars().count(),
     }
 }
 

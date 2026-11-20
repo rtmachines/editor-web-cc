@@ -540,6 +540,7 @@ expected-wstring = tekst o najwyżej { $length } jednostkach UTF-16 bez znaku U+
 expected-wstring-s7 = tekst o najwyżej { $length } znakach od U+0001 do { $max }
 expected-wstring-iec = tekst o najwyżej { $length } jednostkach UTF-16 od U+0001 do U+D7FF i od U+E000 do U+FFFF
 expected-string = tekst o najwyżej { $length } znakach z Latin-1 bez znaku U+0000
+expected-string-utf8 = tekst o najwyżej { $length } bajtach UTF-8 bez znaku U+0000
 expected-char = jeden znak od U+0001 do { $max }
 expected-literal = literał IEC typu { $type_name }
 expected-count = liczba jednostek typu { $type_name }

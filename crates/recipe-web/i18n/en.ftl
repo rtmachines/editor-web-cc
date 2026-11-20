@@ -540,6 +540,7 @@ expected-wstring = a string of at most { $length } UTF-16 units without U+0000
 expected-wstring-s7 = a string of at most { $length } characters from U+0001 to { $max }
 expected-wstring-iec = a string of at most { $length } UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF
 expected-string = a string of at most { $length } characters from Latin-1 without U+0000
+expected-string-utf8 = a string of at most { $length } UTF-8 bytes without U+0000
 expected-char = one character from U+0001 to { $max }
 expected-literal = an IEC literal of type { $type_name }
 expected-count = a count of type { $type_name }
