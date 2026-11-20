@@ -277,6 +277,7 @@ operation-get-login-form = Open login form
 operation-get-own-password-form = Open password form
 operation-set-plc-connection = Save PLC connection
 operation-set-machine-data-block = Set data block number
+operation-set-machine-string-encoding = Set STRING encoding
 operation-get-plc-connection-form = Open PLC connection form
 operation-export-plc-connection = Read PLC connection
 
@@ -524,6 +525,8 @@ error-E-PLT-038 = The unit path or the machine of a unit cannot change while a v
 error-E-PLT-050 = Machine { $code } on platform { $platform } needs a data block number. Enter a number.
 error-E-PLT-051 = Platform { $platform } of machine { $code } has no data block number. Delete the number.
 error-E-PLT-052 = Revision { $revision } of type { $type_name } has the same members. Change a member before you create the revision.
+error-E-PLT-053 = Platform { $platform } of machine { $code } has no STRING encoding { $encoding }. Select Latin1.
+error-E-PLT-054 = The STRING encoding of machine { $code } cannot change, because the machine has a recipe version.
 expected-json = valid JSON text
 expected-depth = a value with at most { $levels } levels
 expected-object = an object with the members { $members }

@@ -64,7 +64,11 @@ fn data_fields(error: &PlantError) -> Vec<(&'static str, String)> {
         | E::MachineNotFound { code }
         | E::ConnectionNotConfigured { code }
         | E::DataBlockMissing { code, .. }
-        | E::DataBlockNotOnPlatform { code, .. } => kv([("code", code)]),
+        | E::DataBlockNotOnPlatform { code, .. }
+        | E::StringEncodingFrozen { code } => kv([("code", code)]),
+        E::StringEncodingNotOnPlatform { code, encoding, .. } => {
+            kv([("code", code), ("encoding", encoding)])
+        }
         E::LastMainUnit { code, path } => kv([("code", code), ("path", path)]),
         E::MachineHasDraft { code, reference }
         | E::ConnectionRecipeMismatch { code, reference } => {
@@ -114,7 +118,8 @@ pub(super) fn plant_line_args(error: &PlantError) -> Vec<(&'static str, LineArg)
         | PlantError::ConnectionFieldNotOnPlatform { platform, .. }
         | PlantError::CommModeNotOnPlatform { platform, .. }
         | PlantError::DataBlockMissing { platform, .. }
-        | PlantError::DataBlockNotOnPlatform { platform, .. } => {
+        | PlantError::DataBlockNotOnPlatform { platform, .. }
+        | PlantError::StringEncodingNotOnPlatform { platform, .. } => {
             args.push(("platform", LineArg::word(platform_key(*platform), platform)));
         }
         PlantError::TypeTooLarge { limit, .. } => args.push(("limit", limit_word(*limit))),

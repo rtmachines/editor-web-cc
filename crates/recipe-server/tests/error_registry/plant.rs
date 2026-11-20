@@ -2,7 +2,7 @@
 
 use recipe_domain::plant::{
     CommMode, DerivedTypeReason, MachineCode, MemberName, PlantError, PlcAddress, PlcPlatform,
-    TypeLimit, TypeName, UnitPath,
+    StringEncoding, TypeLimit, TypeName, UnitPath,
 };
 use recipe_domain::recipe::ReferenceNumber;
 
@@ -44,6 +44,8 @@ fn name_of(error: &PlantError) -> &'static str {
         PlantError::DataBlockMissing { .. } => "PlantError::DataBlockMissing",
         PlantError::DataBlockNotOnPlatform { .. } => "PlantError::DataBlockNotOnPlatform",
         PlantError::RevisionUnchanged { .. } => "PlantError::RevisionUnchanged",
+        PlantError::StringEncodingNotOnPlatform { .. } => "PlantError::StringEncodingNotOnPlatform",
+        PlantError::StringEncodingFrozen { .. } => "PlantError::StringEncodingFrozen",
     }
 }
 
@@ -182,6 +184,12 @@ fn connection_errors() -> Vec<PlantError> {
             code: code(),
             platform: PlcPlatform::TwinCat3,
         },
+        PlantError::StringEncodingNotOnPlatform {
+            code: code(),
+            encoding: StringEncoding::Utf8,
+            platform: PlcPlatform::S7_1500,
+        },
+        PlantError::StringEncodingFrozen { code: code() },
     ]
 }
 
