@@ -25,7 +25,8 @@ pub(crate) use seed::Fixture;
 
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
-    LeafPath, Machine, MachineCode, MachineId, PlcPlatform, PlcTypeId, Primitive, UnitId, UnitPath,
+    LeafPath, Machine, MachineCode, MachineId, PlcPlatform, PlcTypeId, Primitive, StoredMachine,
+    StoredUnit, StringEncoding, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
     LangCode, Ordinal, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -141,6 +142,28 @@ pub(crate) fn machine(n: u128, code: &str) -> Machine {
             text("Main"),
         ),
     )
+    .unwrap()
+}
+
+/// A live `CodesysIec` machine that holds `Utf8`, with the unit U1 whose id is `n * 100 + 1`.
+///
+/// `Machine::create` cannot build it before task 11.11.
+pub(crate) fn utf8_machine(n: u128, code: &str) -> Machine {
+    Machine::try_from(StoredMachine {
+        id: mid(n),
+        code: MachineCode::parse(code).unwrap(),
+        name: text("Press"),
+        platform: PlcPlatform::CodesysIec,
+        db_number: None,
+        string_encoding: StringEncoding::Utf8,
+        archived_at: None,
+        units: vec![StoredUnit {
+            id: uid(n.checked_mul(100).unwrap().checked_add(1).unwrap()),
+            path: UnitPath::parse("U1").unwrap(),
+            name: text("Main"),
+            archived_at: None,
+        }],
+    })
     .unwrap()
 }
 

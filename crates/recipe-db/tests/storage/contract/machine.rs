@@ -503,7 +503,7 @@ async fn postgres_only_a_missing_machine_takes_no_lock() {
 }
 
 /// A live `CodesysIec` machine with the unit `U1`. Only this platform family can hold `Utf8`.
-fn codesys_machine(n: u128, code_text: &str) -> Machine {
+pub(super) fn codesys_machine(n: u128, code_text: &str) -> Machine {
     Machine::create(
         machine_id(n),
         code(code_text),

@@ -1,12 +1,19 @@
 //! Contract cases of `lock_draft`, `read_draft`, and `touch_draft`.
 
-use recipe_domain::plant::PlcPlatform;
+use recipe_domain::plant::{PlcPlatform, PlcTypeId, StringEncoding};
 use recipe_domain::recipe::{ReferenceNumber, VersionState};
+use uuid::Uuid;
 
 use super::fixtures::{commit_draft, full_parameter, live_draft, read_back};
 use crate::contract::harness::{Harness, begin};
 use crate::contract::images::{field, text};
-use crate::contract::recipe_seed::{approve, describe, parameter, seed, version_id};
+use crate::contract::machine::codesys_machine;
+use crate::contract::postgres_harness::PgHarness;
+use crate::contract::recipe_seed::{
+    Plant, approve, create_recipe, describe, parameter, seed, version_id,
+};
+use crate::contract::seed::insert;
+use crate::support::Role;
 
 async fn lock_draft_reads_the_header_the_editors_and_the_parameters(h: &dyn Harness) {
     let d = live_draft(h, 1).await;
@@ -124,3 +131,56 @@ contract_case!(
     a_status_write_after_a_lock_and_a_touch_passes_the_guard_memory,
     a_status_write_after_a_lock_and_a_touch_passes_the_guard_postgres
 );
+
+/// Postgres only: the read path and the lock path give the encoding of the machine (ADR-0202).
+///
+/// `Machine::create` stores `Latin1` until task 11.11, so the case sets `Utf8` with SQL as
+/// `recipe_app`, which holds the column grant.
+#[tokio::test]
+async fn adr_0202_stored_draft_reads_the_string_encoding() {
+    let h = PgHarness::create().await;
+    let latin1 = codesys_machine(70, "M70");
+    let utf8 = codesys_machine(71, "M71");
+    insert(&h, &latin1).await;
+    insert(&h, &utf8).await;
+    let mut app = h.database.connect(Role::App).await;
+    sqlx::query("UPDATE machine SET string_encoding = 'Utf8' WHERE id = $1")
+        .bind(*utf8.id().as_uuid())
+        .execute(&mut app)
+        .await
+        .unwrap();
+    let latin1_recipe = create_recipe(&h, &plant_of(&latin1), 70, "REF-70").await;
+    let utf8_recipe = create_recipe(&h, &plant_of(&utf8), 71, "REF-71").await;
+    let latin1_version = latin1_recipe.versions()[0].id();
+    let utf8_version = utf8_recipe.versions()[0].id();
+    let mut tx = begin(&h).await;
+
+    let read_utf8 = tx.drafts().read_draft(utf8_version).await.unwrap().unwrap();
+    let read_latin1 = tx
+        .drafts()
+        .read_draft(latin1_version)
+        .await
+        .unwrap()
+        .unwrap();
+    let locked_utf8 = tx.drafts().lock_draft(utf8_version).await.unwrap().unwrap();
+    let locked_latin1 = tx
+        .drafts()
+        .lock_draft(latin1_version)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(read_utf8.string_encoding, StringEncoding::Utf8);
+    assert_eq!(read_latin1.string_encoding, StringEncoding::Latin1);
+    assert_eq!(locked_utf8.string_encoding, StringEncoding::Utf8);
+    assert_eq!(locked_latin1.string_encoding, StringEncoding::Latin1);
+}
+
+/// The plant of a machine with no type. The case reads no type.
+fn plant_of(machine: &recipe_domain::plant::Machine) -> Plant {
+    Plant {
+        machine: machine.id(),
+        unit: machine.units().next().unwrap().id(),
+        dint: PlcTypeId::from(Uuid::nil()),
+    }
+}

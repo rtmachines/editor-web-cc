@@ -5,8 +5,8 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, DerivedTypeReason, MemberName, PlantError, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeMember,
-    TypeName, TypeTrees,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding,
+    TypeExpr, TypeMember, TypeName, TypeTrees,
 };
 use recipe_domain::recipe::{
     ArrayShape, Draft, RebindRequest, StoredDraft, StoredParameter, StoredValue, VersionState,
@@ -367,6 +367,7 @@ async fn rebind_shape(fixture: &Fixture) -> ArrayShape {
         reference: reference("R-100"),
         machine: mid(1),
         platform: PlcPlatform::TwinCat3,
+        string_encoding: StringEncoding::Latin1,
         version: vid(1),
         number: 1,
         state: VersionState::LiveDraft,

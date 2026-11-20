@@ -2,8 +2,7 @@ use recipe_domain::audit::{
     AuditContext, AuditEntry, AuditTarget, RequestId, RowAction, RowChange,
 };
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit, StringEncoding,
-    UnitId, UnitPath, UnitUsage,
+    Machine, MachineCode, MachineId, PlcPlatform, StringEncoding, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{ReferenceNumber, VersionState};
 use recipe_domain::text::Text;
@@ -662,30 +661,10 @@ async fn lock_units_shared_orders_the_units_by_id_and_skips_unknown_ids() {
     );
 }
 
-/// A live `CodesysIec` machine that holds `Utf8`. `Machine::create` cannot build it before task 11.11.
-fn utf8_machine(n: u128, code: &str) -> Machine {
-    Machine::try_from(StoredMachine {
-        id: mid(n),
-        code: MachineCode::parse(code).unwrap(),
-        name: text("Press"),
-        platform: PlcPlatform::CodesysIec,
-        db_number: None,
-        string_encoding: StringEncoding::Utf8,
-        archived_at: None,
-        units: vec![StoredUnit {
-            id: uid(n.checked_mul(100).unwrap().checked_add(1).unwrap()),
-            path: path("U1"),
-            name: text("Main"),
-            archived_at: None,
-        }],
-    })
-    .unwrap()
-}
-
 #[tokio::test]
 async fn adr_0202_stored_machine_reads_its_string_encoding() {
     let store = store();
-    store.seed_machine(&utf8_machine(1, "M1"));
+    store.seed_machine(&fixtures::utf8_machine(1, "M1"));
     store.seed_machine(&machine(2, "M2"));
     let mut tx = begin(&store, Isolation::ReadCommitted);
 

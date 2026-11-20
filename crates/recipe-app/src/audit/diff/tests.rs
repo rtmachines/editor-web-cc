@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     LeafPath, MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, S7Address, TypeMember, TypeName, TypeTrees,
+    RecordShape, S7Address, StringEncoding, TypeMember, TypeName, TypeTrees,
 };
 use recipe_domain::recipe::{
     Draft, Parameter, ParameterKey, StoredDraft, StoredLimit, StoredParameter, StoredValue,
@@ -375,6 +375,7 @@ fn a_change_of_a_real_draft_gives_the_diff_of_its_leaf() {
         reference: reference("R-1"),
         machine: mid(1),
         platform: PLATFORM,
+        string_encoding: StringEncoding::Latin1,
         version: vid(11),
         number: 1,
         state: VersionState::LiveDraft,

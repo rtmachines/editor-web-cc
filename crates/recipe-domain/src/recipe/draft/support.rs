@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::identity::UserId;
 use crate::plant::TypeTrees;
 use crate::plant::fixtures::id;
-use crate::plant::{MachineId, PlcPlatform, PlcTypeId, S7Address, UnitId};
+use crate::plant::{MachineId, PlcPlatform, PlcTypeId, S7Address, StringEncoding, UnitId};
 use crate::recipe::{
     Draft, DraftError, Ordinal, ParameterId, ParameterKey, ParameterTag, RecipeVersionId,
     ReferenceNumber, StoredDraft, StoredParameter, VersionState,
@@ -78,6 +78,7 @@ pub(in crate::recipe) fn stored_draft_with(
         reference: reference(),
         machine: MachineId::from(Uuid::from_u128(0xAA)),
         platform,
+        string_encoding: StringEncoding::Latin1,
         version: RecipeVersionId::from(Uuid::from_u128(30)),
         number: 3,
         state,
