@@ -429,4 +429,6 @@ impl PlantError {
 }
 
 #[cfg(test)]
+mod connection_tests;
+#[cfg(test)]
 mod tests;
