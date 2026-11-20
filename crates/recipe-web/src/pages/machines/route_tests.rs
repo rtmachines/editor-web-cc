@@ -23,6 +23,9 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
     let manage = [Login, Page, Page, Forbidden, Password, Login];
     let created = Redirect("/machines/M99");
     let connected = Redirect("/machines/M7");
+    // The machine M7 is an S7 machine with a version, so the encoding Latin1 passes the platform
+    // check and then gives E-PLT-054 (the tests of `machine_string_encoding_tests` cover success).
+    let frozen = Conflict("E-PLT-054");
     vec![
         (endpoint(Method::GET, "/machines", ""), view),
         (endpoint(Method::GET, "/machines/new", ""), manage),
@@ -52,6 +55,14 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
         (
             endpoint(Method::POST, "/machines/{code}/data-block", "db_number=2"),
             [Login, connected, connected, Forbidden, Password, Login],
+        ),
+        (
+            endpoint(
+                Method::POST,
+                "/machines/{code}/string-encoding",
+                "string_encoding=Latin1",
+            ),
+            [Login, frozen, frozen, Forbidden, Password, Login],
         ),
         (
             endpoint(

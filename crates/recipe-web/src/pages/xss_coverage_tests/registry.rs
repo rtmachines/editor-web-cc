@@ -211,6 +211,18 @@ pub(super) const TABLE: &[Entry] = &[
         CSRF,
     ),
     (
+        "pages/machines/string_encoding_commands.rs",
+        "StringEncodingFields",
+        "string_encoding",
+        STRING_ENCODING,
+    ),
+    (
+        "pages/machines/string_encoding_commands.rs",
+        "StringEncodingFields",
+        "csrf_token",
+        CSRF,
+    ),
+    (
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "slot",

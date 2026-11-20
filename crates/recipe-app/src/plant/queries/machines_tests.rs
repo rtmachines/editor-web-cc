@@ -492,6 +492,35 @@ async fn get_machine_opens_one_read_only_transaction_and_writes_nothing() {
 }
 
 #[tokio::test]
+async fn adr_0202_get_machine_has_version_is_false_without_a_recipe() {
+    let fixture = Fixture::new();
+    fixture.seed_machine_on(PlcPlatform::CodesysIec, 1, "M1");
+
+    let view = get(&fixture, MachineRef::Code(code("M1")), None)
+        .await
+        .unwrap();
+
+    assert!(!view.has_version);
+}
+
+#[tokio::test]
+async fn adr_0202_get_machine_has_version_is_true_with_a_draft_and_stays_in_the_read_transaction() {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(PlcPlatform::CodesysIec, 1, "M1");
+    fixture.seed_draft(&machine, 2, "R-2");
+
+    let view = get(&fixture, MachineRef::Code(code("M1")), None)
+        .await
+        .unwrap();
+
+    assert!(view.has_version);
+    assert_eq!(
+        fixture.store.journal(),
+        [JournalEntry::Begin(Isolation::ReadOnly)]
+    );
+}
+
+#[tokio::test]
 async fn the_machine_form_offers_the_five_platforms_and_reads_no_port() {
     let fixture = Fixture::new();
 

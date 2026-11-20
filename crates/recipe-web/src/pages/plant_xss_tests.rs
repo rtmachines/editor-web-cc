@@ -60,9 +60,14 @@ const REFUSED_GETS: [(&str, &str); 19] = [
 ];
 
 /// A `POST` target with `{}` where the payload goes, a valid body, and the code of the answer.
-const REFUSED_POSTS: [(&str, &str, &str); 8] = [
+const REFUSED_POSTS: [(&str, &str, &str); 9] = [
     ("/machines/{}/rename", "name=Renamed", "E-WEB-005"),
     ("/machines/{}/data-block", "db_number=5", "E-WEB-005"),
+    (
+        "/machines/{}/string-encoding",
+        "string_encoding=Utf8",
+        "E-WEB-005",
+    ),
     ("/machines/{}/archive", "", "E-WEB-005"),
     (
         "/machines/{}/units",

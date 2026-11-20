@@ -4,10 +4,12 @@
 //! `seed_plant` does not hold. The world, the sessions, and the senders live once in
 //! `test_support::plant` (design D20 U13). This file keeps only what the machine pages alone need.
 
+use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit,
     StringEncoding, UnitId, UnitPath, UnitUsage,
 };
+use recipe_domain::recipe::{Recipe, RecipeId, RecipeVersionId, ReferenceNumber};
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
@@ -19,6 +21,12 @@ use crate::test_support::Fixture;
 const MACHINE_TAG: u32 = 0x7357_0010;
 /// The first field of the identifier of a unit that `seed_machines` makes.
 const UNIT_TAG: u32 = 0x7357_0011;
+/// The first field of the identifier of a recipe that `seed_live_machine_with_draft` makes.
+const RECIPE_TAG: u32 = 0x7357_0014;
+/// The first field of the identifier of a version that `seed_live_machine_with_draft` makes.
+const VERSION_TAG: u32 = 0x7357_0015;
+/// The number of the user who creates the recipe of `seed_live_machine_with_draft`.
+const CREATOR_NUMBER: u128 = 1;
 /// The number of the first machine that `seed_machines` makes.
 const FIRST_NUMBER: u32 = 101;
 /// The instant of the archive of the unit that `seed_machine_with_archived_unit` makes.
@@ -99,6 +107,21 @@ pub(super) fn seed_live_machine(
         ),
     );
     fixture.store.seed_machine(&created.unwrap());
+}
+
+/// Seed the live machine `M<number>` with the platform and no data block number, and give it the
+/// recipe `R-3<number>` with the draft version 1.
+pub(super) fn seed_live_machine_with_draft(fixture: &Fixture, number: u32, platform: PlcPlatform) {
+    seed_live_machine(fixture, number, platform, None);
+    let recipe = Recipe::create(
+        RecipeId::from(id_of(RECIPE_TAG, number)),
+        MachineId::from(id_of(MACHINE_TAG, number)),
+        ReferenceNumber::parse(&format!("R-3{number:02}")).unwrap(),
+        Text::parse("Draft recipe").unwrap(),
+        RecipeVersionId::from(id_of(VERSION_TAG, number)),
+    );
+    let creator = UserId::from(Uuid::from_u128(CREATOR_NUMBER));
+    fixture.store.seed_recipe(&recipe, platform, creator);
 }
 
 /// Return the path of the page `GET /machines/by-id/{uuid}` of the machine `M<number>`.
