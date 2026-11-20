@@ -38,6 +38,7 @@ mod security_events;
 mod seed;
 mod settings;
 mod stored_rules;
+mod stored_rules_iec;
 mod support;
 mod triggers;
 mod unit_of_work;
