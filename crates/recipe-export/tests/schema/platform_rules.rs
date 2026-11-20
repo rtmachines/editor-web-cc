@@ -111,7 +111,7 @@ fn v2_schema() -> Value {
 }
 
 /// A valid document v2 on `platform`. Every type reference is a UUID of its `types` list (a3).
-fn base(platform: PlcPlatform) -> Value {
+pub(super) fn base(platform: PlcPlatform) -> Value {
     let address = if platform.is_s7() {
         json!("DB1.DBB0")
     } else {
@@ -213,7 +213,7 @@ fn parameter_with(primitive: Primitive, value: Value) -> Value {
     })
 }
 
-fn assert_fails_at(doc: &Value, path: &str, keyword: &str) {
+pub(super) fn assert_fails_at(doc: &Value, path: &str, keyword: &str) {
     let found = v2_failures(doc);
     let expected = (path.to_owned(), keyword.to_owned());
     assert!(
@@ -222,7 +222,7 @@ fn assert_fails_at(doc: &Value, path: &str, keyword: &str) {
     );
 }
 
-fn assert_passes(doc: &Value) {
+pub(super) fn assert_passes(doc: &Value) {
     assert_eq!(v2_failures(doc), Vec::new());
 }
 

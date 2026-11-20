@@ -844,8 +844,14 @@ fn latin1_parameter(
 
 /// The scope body and the facts of the unit `U1` of a `Latin1` `CodesysIec` version `R-200` v1.
 ///
-/// The machine holds no `string_encoding` yet. A `STRING` value counts characters as Latin-1.
+/// A `STRING` value counts characters as Latin-1.
 fn latin1_scope() -> (ScopeBody, ScopeFacts) {
+    codesys_scope(StringEncoding::Latin1)
+}
+
+/// The scope body and the facts of the unit `U1` of a `CodesysIec` version `R-200` v1, with the
+/// encoding that the machine row gives.
+fn codesys_scope(encoding: StringEncoding) -> (ScopeBody, ScopeFacts) {
     let platform = PlcPlatform::CodesysIec;
     let trees = latin1_trees();
     let parameters = [
@@ -883,11 +889,7 @@ fn latin1_scope() -> (ScopeBody, ScopeFacts) {
     document.has_rule_fault = !check_version_parameters(&parameters, &trees)
         .unwrap()
         .is_empty();
-    let scope = ScopeBody::build(
-        &body,
-        &UnitPath::parse("U1").unwrap(),
-        StringEncoding::Latin1,
-    );
+    let scope = ScopeBody::build(&body, &UnitPath::parse("U1").unwrap(), encoding);
     let facts = ScopeFacts {
         document,
         scope_sha256: scope.sha256().unwrap(),
@@ -937,4 +939,50 @@ fn adr_0202_latin1_codesys_unit_document() {
         .collect();
     assert!(names.contains("ST_Coil"), "{names:?}");
     assert!(names.contains("ST_One"), "{names:?}");
+}
+
+/// The object `machine` of a `Utf8` document v2: the encoding follows the platform (ADR-0202 (j1)).
+const UTF8_MACHINE_OBJECT: &str = concat!(
+    "  \"machine\": {\n",
+    "    \"code\": \"M12\",\n",
+    "    \"name\": \"Filler 2\",\n",
+    "    \"plc_platform\": \"CodesysIec\",\n",
+    "    \"string_encoding\": \"Utf8\"\n",
+    "  },\n",
+);
+
+#[test]
+fn adr_0202_utf8_unit_document_has_the_encoding_directly_after_the_platform() {
+    let (scope, facts) = codesys_scope(StringEncoding::Utf8);
+    let text = String::from_utf8(write_scoped(&scope, &facts).unwrap()).unwrap();
+    assert!(text.contains(UTF8_MACHINE_OBJECT), "{text}");
+
+    let doc: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(doc["machine"]["string_encoding"], "Utf8");
+    assert_passes_schema(&validator_of(SCHEMA_V2_PATH), &doc, "a Utf8 unit document");
+}
+
+#[test]
+fn adr_0202_utf8_unit_document_differs_from_the_latin1_document_in_the_encoding_and_the_hash() {
+    let (latin1_scope, latin1_facts) = latin1_scope();
+    let (utf8_scope, utf8_facts) = codesys_scope(StringEncoding::Utf8);
+    let latin1 = String::from_utf8(write_scoped(&latin1_scope, &latin1_facts).unwrap()).unwrap();
+    let utf8 = String::from_utf8(write_scoped(&utf8_scope, &utf8_facts).unwrap()).unwrap();
+    assert_ne!(latin1_facts.scope_sha256, utf8_facts.scope_sha256);
+    let line_of_hash = |text: &str| {
+        text.lines()
+            .find(|line| line.contains("\"scope_sha256\""))
+            .unwrap()
+            .to_owned()
+    };
+    let without_encoding = utf8
+        .replace(",\n    \"string_encoding\": \"Utf8\"", "")
+        .replace(&line_of_hash(&utf8), &line_of_hash(&latin1));
+    assert_eq!(without_encoding, latin1);
+}
+
+#[test]
+fn adr_0202_v1_document_never_holds_the_encoding() {
+    let text = written(example());
+    assert!(!text.contains("string_encoding"), "{text}");
 }

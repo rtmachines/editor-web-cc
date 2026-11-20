@@ -137,6 +137,15 @@ impl ScopeBody {
         self.machine.plc_platform
     }
 
+    /// Return the STRING encoding of the machine.
+    ///
+    /// The v2 writer writes `machine.string_encoding` only when this value is `Utf8`
+    /// (ADR-0202 (j1)).
+    #[must_use]
+    pub const fn string_encoding(&self) -> StringEncoding {
+        self.machine.string_encoding
+    }
+
     /// Return the reference number of the recipe, the value of `recipe.reference_number`.
     #[must_use]
     pub const fn reference_number(&self) -> &ReferenceNumber {
