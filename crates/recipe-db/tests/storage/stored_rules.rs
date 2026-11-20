@@ -250,12 +250,12 @@ fn nesting_value() -> String {
 }
 
 /// The data of a new request.
-fn new_meta() -> RequestMeta {
+pub(crate) fn new_meta() -> RequestMeta {
     RequestMeta::new(new_request_id().unwrap(), None, None, None)
 }
 
 /// The row version of the version 1 of a recipe, read through `GetVersion`.
-async fn row_version(app: &App, reference: &ReferenceNumber) -> i64 {
+pub(crate) async fn row_version(app: &App, reference: &ReferenceNumber) -> i64 {
     let input = GetVersionInput {
         reference: reference.clone(),
         number: 1,
@@ -297,7 +297,7 @@ async fn define_struct(
 }
 
 /// Add the parameter of a case to the version 1 of its recipe as the engineer.
-async fn add_case_parameter(
+pub(crate) async fn add_case_parameter(
     app: &App,
     engineer: &CurrentUser,
     reference: &ReferenceNumber,
@@ -444,7 +444,7 @@ fn stored_hash(reference: &str) -> String {
 }
 
 /// Run a `docker exec` command in the database container with a file on the standard input.
-fn exec_with_input(args: &[&str], input: &Path) -> Output {
+pub(crate) fn exec_with_input(args: &[&str], input: &Path) -> Output {
     let file = std::fs::File::open(input).unwrap();
     Command::new("docker")
         .args(["exec", "-i", "--user", "postgres", &server().container_id])
@@ -455,7 +455,7 @@ fn exec_with_input(args: &[&str], input: &Path) -> Output {
 }
 
 /// Assert the exit status 0 of a command and show its standard error otherwise.
-fn assert_success(what: &str, output: &Output) {
+pub(crate) fn assert_success(what: &str, output: &Output) {
     assert!(
         output.status.success(),
         "{what} failed: {}",
@@ -468,8 +468,16 @@ fn assert_success(what: &str, output: &Output) {
 /// The second value is the stored state of `reference`. It is read right after the dump loads,
 /// before the migrator runs, so it is the state that the dump really held.
 async fn restored_and_upgraded(reference: &str) -> (App, StoredRows) {
+    restored_and_upgraded_from(FIXTURE_DUMP, reference).await
+}
+
+/// Steps 1 to 3 for the plain dump file `fixture` in the fixture directory.
+pub(crate) async fn restored_and_upgraded_from(
+    fixture: &str,
+    reference: &str,
+) -> (App, StoredRows) {
     let database = TestDatabase::create_empty().await;
-    let dump = Path::new(FIXTURE_DIRECTORY).join(FIXTURE_DUMP);
+    let dump = Path::new(FIXTURE_DIRECTORY).join(fixture);
     let name = database.name().to_owned();
     let loaded = exec_with_input(
         &[
@@ -496,11 +504,11 @@ async fn restored_and_upgraded(reference: &str) -> (App, StoredRows) {
 }
 
 /// The rows of `parameter` and `plc_type` as text: the parameters first, then the types.
-type StoredRows = (Vec<String>, Vec<String>);
+pub(crate) type StoredRows = (Vec<String>, Vec<String>);
 
 /// The rows of `parameter` and `plc_type` as text. A stored type text and a stored value do not
 /// change in the upgrade, so the text is equal before and after.
-async fn stored_rows(session: &mut PgConnection, reference: &str) -> StoredRows {
+pub(crate) async fn stored_rows(session: &mut PgConnection, reference: &str) -> StoredRows {
     let parameters = sqlx::query_scalar(
         "SELECT to_jsonb(p)::text FROM parameter p \
          JOIN recipe_version v ON v.id = p.recipe_version_id \
@@ -601,7 +609,7 @@ async fn version_facts(session: &mut PgConnection, reference: &str, number: i32)
 }
 
 /// Step 6: `CreateVersion` copies the approved version into a draft with the same rows.
-async fn copy_row(app: &mut App, reference: &str) {
+pub(crate) async fn copy_row(app: &mut App, reference: &str) {
     let input = CreateVersionInput {
         reference: ReferenceNumber::parse(reference).unwrap(),
         based_on: Some(1),
@@ -620,6 +628,14 @@ async fn copy_row(app: &mut App, reference: &str) {
 
 /// Steps 7 and 8: a custom dump, a restore into a second empty database, and the same export.
 async fn backup_and_restore(app: &App, reference: &str, expected: &ExportedVersion) {
+    let copied = backup_into_copy(app).await;
+    let again = export_of(&copied, reference).await;
+    assert_document(&again, reference, expected.loadable());
+    assert_eq!(&again, expected);
+}
+
+/// Steps 7 and 8 without the export: dump `app` and restore the dump into a second database.
+pub(crate) async fn backup_into_copy(app: &App) -> App {
     let files = DumpDirectory::create();
     let dump = Command::new("docker")
         .args(["exec", "--user", "postgres", &server().container_id])
@@ -643,10 +659,7 @@ async fn backup_and_restore(app: &App, reference: &str, expected: &ExportedVersi
         &file,
     );
     assert_success("pg_restore", &restored);
-    let copied = App::over(copy).await;
-    let again = export_of(&copied, reference).await;
-    assert_document(&again, reference, expected.loadable());
-    assert_eq!(&again, expected);
+    App::over(copy).await
 }
 
 /// The eight steps of task 9.2 for one row of the matrix.

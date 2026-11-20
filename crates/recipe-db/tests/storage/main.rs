@@ -32,6 +32,7 @@ mod reset_password;
 mod restore_code;
 mod restore_roles;
 mod roles;
+mod rollback_query;
 mod s7_layout_rules;
 mod scenario;
 mod schema;
