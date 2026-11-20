@@ -39,6 +39,8 @@ The rules behind the steps are in [reliability.md](../architecture/reliability.m
 - [Check the stored data against the S7 layout rules](#check-the-stored-data-against-the-s7-layout-rules)
 - [Check the live S7 machines for a PLC connection record](#check-the-live-s7-machines-for-a-plc-connection-record)
 - [Check the TwinCAT version before you add a TwinCat3 machine](#check-the-twincat-version-before-you-add-a-twincat3-machine)
+- [Check the CODESYS version and the LREAL size before you add a CodesysIec machine](#check-the-codesys-version-and-the-lreal-size-before-you-add-a-codesysiec-machine)
+- [Select the STRING encoding of a CodesysIec or TwinCat3 machine](#select-the-string-encoding-of-a-codesysiec-or-twincat3-machine)
 - [Upgrade and rollback](#upgrade-and-rollback)
   - [Upgrade](#upgrade)
   - [Rollback](#rollback)
@@ -1375,6 +1377,34 @@ Assumption A46 requires this version for each TwinCat3 machine (ADR-0142).
 2. Compare the version with 3.1.4026.0.
 3. If the version is lower, the machine does not meet A46. Update the controller before you add the machine.
 
+## Check the CODESYS version and the LREAL size before you add a CodesysIec machine
+
+The editor does not read the CODESYS version or the compiler settings of a controller.
+The operator checks both before a plant adds a CodesysIec machine.
+The types `LDATE`, `LTOD`, and `LDT` need CODESYS V3.5 SP16 or later.
+Assumption A52 requires this version for each CodesysIec machine (ADR-0200).
+Some CODESYS targets compile `LREAL` as `REAL`.
+Assumption A51 requires an eight-byte binary64 `LREAL` for each CodesysIec machine (ADR-0199).
+
+1. Read the CODESYS version of the controller project in the CODESYS Development System.
+2. Compare the version with V3.5 SP16.
+3. If the version is lower, the machine does not meet A52. Update the project before you add the machine.
+4. Read the compiled symbol size of an `LREAL` variable for the target device.
+5. Compare the size with 8 bytes.
+6. If the size is not 8 bytes, the machine does not meet A51. Do not add the machine.
+
+## Select the STRING encoding of a CodesysIec or TwinCat3 machine
+
+The editor does not read the `STRING` encoding of a PLC project.
+The operator selects the encoding of the PLC project when a plant adds a CodesysIec or TwinCat3 machine (ADR-0202).
+An S7 machine is always `Latin1`.
+
+1. Read the `STRING` encoding of the PLC project. The value is Latin-1 or UTF-8.
+2. Before you select `Utf8`, update the transfer client to the v2 schema with the optional field `machine.string_encoding` (ADR-0202).
+3. In the form of the new machine, select `Latin1` or `Utf8` to match the PLC project.
+4. To change the encoding later, use the page of the machine. The page offers the change only while the machine has no recipe version.
+5. For a `Utf8` machine, tell the transfer system to use the export v2. A v1 document of a `Utf8` machine is never loadable.
+
 ## Upgrade and rollback
 
 The steps follow `reliability.md` 7.10 (ADR-0082, ADR-0083).
@@ -1754,6 +1784,33 @@ The trigger then finds equal values and changes no machine number (ADR-0157 (f))
 
 Use this path only when the migration follows the expand pattern. Never use it for a rollback from 0.8.0 to 0.7.1.
 
+The migrations `0017` and `0018` follow the expand pattern. A rollback from the release with these migrations has one more condition (ADR-0202 (q)).
+The previous release does not read `machine.string_encoding`. It can export a `Utf8` machine with `loadable` `true`, and the transfer client then writes Latin-1 bytes.
+The previous release also reads the unknown audit action `MachineStringEncodingSet` as corrupt.
+For a rollback from the release with `0017` and `0018`, do these steps before you start the previous `app`:
+
+1. Run `docker compose stop app`. No user can then change an encoding.
+2. Run the query below. It counts the `Utf8` machines and the audit entries of the encoding command.
+
+```bash
+docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 <<'SQL'
+SELECT
+  (SELECT count(*) FROM machine WHERE machine.string_encoding = 'Utf8') AS utf8_machines,
+  (SELECT count(*) FROM audit_log WHERE audit_log.action = 'MachineStringEncodingSet') AS encoding_entries;
+SQL
+```
+
+3. Write the result into the [change log of the site](#change-log-of-the-site).
+4. If both counts are 0, start the previous `app` with the steps below.
+5. If a count is not 0, do not use this path. Select one of the two paths of step 6 or step 7.
+6. To roll forward, run `docker compose up -d app`. The new release starts again. Then fix the fault in a newer release.
+7. To go back to the previous release, use [Roll back with the _premigrate set](#roll-back-with-the-_premigrate-set).
+
+The restore of step 7 loses every write from the dump to the stop of `app`.
+The count includes archived machines. An audit entry of the encoding stays also after a change back to `Latin1`.
+
+Then do the steps below:
+
 1. Run the command below to start the previous `app` on the newer schema:
 
 ```bash
@@ -1859,7 +1916,7 @@ The `walarchive` of 0.1.0 has no guard and streams another system into `/wal`.
 #### Start app after a rollback
 
 After a rollback with the expand pattern, `.env` keeps the new tag. A later command can then start `app` with the new image (ADR-0083).
-Use the previous tag for every command that starts or recreates `app`, as step 1 of [Roll back on the newer schema](#roll-back-on-the-newer-schema) does.
+Use the previous tag for every command that starts or recreates `app`, as the command with `RECIPE_VERSION=<previous tag>` of [Roll back on the newer schema](#roll-back-on-the-newer-schema) does.
 Put `RECIPE_VERSION=<previous tag>` before `docker compose`. Keep the other options of the command, for example `--force-recreate`.
 This holds until the section "Upgrade" sets a new tag.
 

@@ -1,6 +1,6 @@
 # ADR-0137: No U+0000 in a text value, and the unit of a string length
 
-Status: Accepted. Amends ADR-0028 (value and text rules) and ADR-0022 (range of a `CHAR` value). Amended by ADR-0180 (items (a) and (b): the `WCHAR` and `WSTRING` characters on `S7_1200` and `S7_1500`)
+Status: Accepted. Amends ADR-0028 (value and text rules) and ADR-0022 (range of a `CHAR` value). Amended by ADR-0180 (items (a) and (b): the `WCHAR` and `WSTRING` characters on `S7_1200` and `S7_1500`). Amended by ADR-0201 (items (a) and (b): the `WSTRING` characters on `CodesysIec` and `TwinCat3`). Amended by ADR-0202 (items (b) and (h): on a `Utf8` machine, a `STRING` character is any Unicode scalar except `U+0000`, and a `STRING(n)` length counts UTF-8 bytes)
 Date: 2026-11-07
 Deciders: project owner
 

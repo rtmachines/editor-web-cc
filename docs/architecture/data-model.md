@@ -67,6 +67,7 @@ Exceptions to the rules above:
 | `u32` fields: `RecipeVersion.number`, `PlcType.revision`, `PlcType.size_bytes`, `Parameter.ordinal` | `INTEGER` (`i32`). The adapter converts with `i32::try_from` and `u32::try_from` and returns an error for a value outside the `INTEGER` range. It never uses `as` |
 | `u16` fields: `PlcType.string_length`, `ProcessLimit.max_length` | `SMALLINT` (`i16`). The adapter converts with `i16::try_from` and `u16::try_from` and returns an error for a value outside the `SMALLINT` range. It never uses `as` |
 | `Machine.db_number: Option<DataBlockNumber>` | `machine.db_number` as `INTEGER`, because 65 535 is outside the `SMALLINT` range. `plc_connection.db_number` holds a copy (3.18). The adapter converts with `try_from` and never uses `as` |
+| `Machine.string_encoding` (`StringEncoding`: `Latin1`, `Utf8`) | `machine.string_encoding` (`Latin1`, `Utf8`), with the same spelling as `machine.plc_platform` (ADR-0202) |
 | `Rack`, `Slot`, `TcpPort` of `PlcConnection` | `plc_connection.rack` and `slot` as `SMALLINT`. `plc_connection.port` as `INTEGER`, because 65 535 is outside the `SMALLINT` range. The adapter converts with `try_from` and never uses `as` |
 | `PlcConnection::Iec.mode` (`CommMode`) | `plc_connection.comm_mode` (`Ads`, `OpcUa`, `CodesysV3`, `ModbusTcp`) |
 | `SealedSecret` of the PLC password | `plc_connection.password_sealed` |
@@ -332,6 +333,8 @@ CREATE TABLE machine (
     plc_platform  TEXT NOT NULL,
     -- Data block number of an S7 machine (ADR-0156). NULL on CodesysIec and TwinCat3.
     db_number     INTEGER,
+    -- STRING encoding of the PLC project (ADR-0202). Latin1 on every S7 machine.
+    string_encoding TEXT NOT NULL DEFAULT 'Latin1',
     archived_at   TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -354,6 +357,11 @@ CREATE TABLE machine (
         OR (plc_platform = 'S7_300' AND db_number BETWEEN 1 AND 16000)
         OR (plc_platform IN ('S7_1200', 'S7_1500') AND db_number BETWEEN 1 AND 59999)
     ),
+    CONSTRAINT machine_string_encoding_value CHECK (string_encoding IN ('Latin1', 'Utf8')),
+    -- Utf8 only on CodesysIec and TwinCat3 (ADR-0202 (b)).
+    CONSTRAINT machine_string_encoding_platform CHECK (
+        string_encoding = 'Latin1' OR plc_platform IN ('CodesysIec', 'TwinCat3')
+    ),
     -- Target for the composite FK that propagates the platform (I5).
     CONSTRAINT machine_id_platform_unique UNIQUE (id, plc_platform)
 );
@@ -366,6 +374,8 @@ CREATE TRIGGER machine_set_updated_at
 `machine_code_live_unique` is a partial unique index. A code is unique among live machines. An archived machine frees its code, and a new machine can use it (Assumption A32, ADR-0021). `/machines/{code}` resolves to the live machine. The history of an archived machine stays reachable at `/machines/by-id/{uuid}` (`api.md` 2.2). Trigger 4.8 still freezes the code of a machine that a non-draft version references.
 
 The column `db_number` holds the data block number of an S7 machine (ADR-0156 (a), (b)). Migration `0013_machine_db_number.sql` adds the column and both checks as `NOT VALID`. Migration `0014_machine_db_number_copy.sql` copies the number of each `plc_connection` row with a number into its machine (ADR-0156 (i), ADR-0157 (h)). Migration `0015_machine_db_number_validate.sql` runs `VALIDATE CONSTRAINT` on both checks. The domain refuses a bad number first, and `recipe-db` maps a check violation to `E-DB-003` (`reliability.md` 1.2).
+
+The column `string_encoding` holds the `STRING` encoding of the machine (ADR-0202). Migration `0017_machine_string_encoding.sql` adds the column with a constant default, so every stored machine gets `Latin1`. It adds both checks as `NOT VALID`. Migration `0018_machine_string_encoding_validate.sql` runs `VALIDATE CONSTRAINT` on them. `SetMachineStringEncoding` changes the column only while no recipe of the machine has a version row (section 6).
 
 ### 3.2 `unit`
 
@@ -2000,6 +2010,12 @@ The `UPDATE` grant lets `recipe_app` lock a record `FOR UPDATE` and `FOR SHARE` 
 GRANT UPDATE (db_number) ON machine TO recipe_app;
 ```
 
+`0017_machine_string_encoding.sql` adds the column `string_encoding` to the `UPDATE` grant of `recipe_app` on `machine` (section 3.1, ADR-0202). The updatable columns of `machine` are then `name`, `db_number`, `string_encoding`, `archived_at`, and `updated_at`. `crates/recipe-db/tests/grants.expected` gets the row `machine.string_encoding|UPDATE`.
+
+```sql
+GRANT UPDATE (string_encoding) ON machine TO recipe_app;
+```
+
 ### 5.3 Grant test
 
 CI starts a fresh cluster, runs `01-roles.sh`, and applies every migration of `migrations/` as `recipe_migrator`. A failed statement in `0003_grants.sql` therefore fails the job. Then a storage test (`reliability.md` section 6) runs as `recipe_app`. It compares `information_schema.role_table_grants`, `information_schema.role_column_grants`, and `information_schema.role_routine_grants` with a checked-in list in `crates/recipe-db/tests/grants.expected`.
@@ -2216,7 +2232,7 @@ Rules:
 
 - Isolation is `READ COMMITTED` for every command. `SetUserRole` and `DeactivateUser` take the guard lock of the last Administrator first. They have no retry (ADR-0096 (a), (b)).
 - Lock order: `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015). A command takes only the locks that it needs, always in this order. The identity commands use this order: the class-4 guard lock, then `app_user`, then `session`, then `audit_chain_head` (ADR-0096 (e)).
-- `RenameMachine`, `SetMachineDataBlock`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` start with `SELECT archived_at FROM machine WHERE id = $m FOR NO KEY UPDATE`.
+- `RenameMachine`, `SetMachineDataBlock`, `SetMachineStringEncoding`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` start with `SELECT archived_at FROM machine WHERE id = $m FOR NO KEY UPDATE`.
 - `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` start with `SELECT archived_at FROM machine WHERE id = $m FOR SHARE`. A recipe command reads `recipe.machine_id` without a lock before this statement. The column never changes.
 - Every recipe command then runs `SELECT deleted_at, machine_id FROM recipe WHERE id = $r FOR UPDATE` and requires `deleted_at IS NULL` (`RecipeDeleted`, `E-RCP-012`). A recipe command without a machine lock starts with this statement. There are two exceptions. `CreateRecipe` has no recipe row yet. `RestoreRecipe` takes the same lock and requires `deleted_at IS NOT NULL`.
 - An insert into `plc_type` checks the foreign key `machine_id` with `FOR KEY SHARE` on the machine row. Every caller of `EnsureDerivedType` and `DefineUdt` already holds `FOR SHARE` on that row. The insert therefore waits for no other transaction.
@@ -2235,9 +2251,10 @@ Rules:
 
 | Command | Isolation | Lock sequence | Statements | Audit action | Guard / errors |
 |---|---|---|---|---|---|
-| `CreateMachine` | RC | none | Before the transaction: run `check_data_block` on `plc_platform` and the `db_number` of the request (`reliability.md` 7.4). In the transaction: `INSERT machine` with `code`, `name`, `plc_platform`, and `db_number`. `INSERT unit` with path `U1` and the `main_unit_name` of the request as `name` | `MachineCreated` (`after_state` holds `db_number`), `UnitAdded` | `machine_code_live_unique` → `DuplicateMachineCode`. A number fault → `DataBlockOutOfRange` (`E-PLT-024`), `DataBlockMissing` (`E-PLT-050`), or `DataBlockNotOnPlatform` (`E-PLT-051`) before the transaction. `machine_db_number_shape` and `machine_db_number_range` are the last line |
+| `CreateMachine` | RC | none | Before the transaction: run `check_data_block` on `plc_platform` and the `db_number` of the request (`reliability.md` 7.4). Check the `string_encoding` of the request against `plc_platform` (ADR-0202 (b)). In the transaction: `INSERT machine` with `code`, `name`, `plc_platform`, `db_number`, and `string_encoding`. `INSERT unit` with path `U1` and the `main_unit_name` of the request as `name` | `MachineCreated` (`after_state` holds `db_number` and `string_encoding`), `UnitAdded` | `machine_code_live_unique` → `DuplicateMachineCode`. A number fault → `DataBlockOutOfRange` (`E-PLT-024`), `DataBlockMissing` (`E-PLT-050`), or `DataBlockNotOnPlatform` (`E-PLT-051`) before the transaction. `Utf8` on an S7 platform → `StringEncodingNotOnPlatform` (`E-PLT-053`) before the transaction. `machine_db_number_shape`, `machine_db_number_range`, and the two checks of `string_encoding` are the last line |
 | `RenameMachine` | RC | `machine FOR NO KEY UPDATE` | `UPDATE machine SET name` | `MachineRenamed` | `archived_at IS NOT NULL` → `MachineArchived` |
 | `SetMachineDataBlock` | RC | `machine FOR NO KEY UPDATE` | Before the transaction: read `machine.plc_platform` without a lock. The platform never changes. Run `check_data_block` on the platform and the `db_number` of the request (`reliability.md` 7.4). In the transaction: `UPDATE machine SET db_number`. Then `UPDATE plc_connection SET db_number = $n WHERE machine_id = $m AND db_number IS DISTINCT FROM $n` writes the copy of ADR-0156 (j) when the record exists. A new number bumps `plc_connection.row_version` through `plc_connection_a_bump`. An open connection form then gets `ConnectionConcurrentEdit` on save. The current number changes no record (ADR-0157 (j)). The command compares no `row_version`, as `RenameMachine` | `MachineDataBlockSet` with the full `machine` row before and after (section 10). The copy writes no entry | `archived_at IS NOT NULL` → `MachineArchived` (`E-PLT-010`). A number fault → `DataBlockOutOfRange` (`E-PLT-024`), `DataBlockMissing` (`E-PLT-050`), or `DataBlockNotOnPlatform` (`E-PLT-051`) before the transaction. `machine_db_number_shape` and `machine_db_number_range` are the last line |
+| `SetMachineStringEncoding` | RC | `machine FOR NO KEY UPDATE` | Before the transaction: read `machine.plc_platform` without a lock. The platform never changes. Check the `string_encoding` of the request against the platform (ADR-0202 (b)). In the transaction: `SELECT EXISTS (SELECT 1 FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id WHERE r.machine_id = $m)`. Every row counts, also a discarded draft and a version of a deleted recipe. Then `UPDATE machine SET string_encoding`. The lock conflicts with the `FOR SHARE` lock of `CreateRecipe`, `RestoreRecipe`, and `CreateVersion`, so no version row appears before the commit (ADR-0202 (d3)). The command compares no `row_version`, as `RenameMachine` | `MachineStringEncodingSet` with the full `machine` row before and after (section 10) | `archived_at IS NOT NULL` → `MachineArchived` (`E-PLT-010`). A version row → `StringEncodingFrozen` (`E-PLT-054`). `Utf8` on an S7 platform → `StringEncodingNotOnPlatform` (`E-PLT-053`) before the transaction. The two checks of `string_encoding` are the last line |
 | `ArchiveMachine` | RC | `machine FOR NO KEY UPDATE`, then every recipe of the machine `FOR UPDATE` (`SELECT id FROM recipe WHERE machine_id = $m ORDER BY id FOR UPDATE`) | Require no live draft (`SELECT 1 FROM recipe_version v JOIN recipe r ... WHERE status='draft' AND v.deleted_at IS NULL`). `UPDATE machine SET archived_at = now()`. Recipes stay readable | `MachineArchived` | Draft found → `MachineHasDraft` |
 | `AddUnit` | RC | `machine FOR SHARE`, then parent `unit FOR SHARE` | `INSERT unit` with the path from `parent_path` and `segment`, and `name` | `UnitAdded` | `unit_path_unique` → `DuplicateUnitPath`. `UnitPath::parse` of `parent_path` and `segment` → `InvalidUnitPath` (`E-PLT-017`, a malformed text or segment) or `UnitDepthExceeded` (`E-PLT-002`, more than 5 segments). `unit_path_format` and `unit_depth_range` are the last line. No unit with `parent_path` on the machine → `ParentNotFound` (`E-PLT-003`). `unit_parent_exists` → `ParentNotFound` (second line). Parent archived → `UnitArchived`. Machine archived → `MachineArchived` |
 | `RenameUnit` | RC | `machine FOR NO KEY UPDATE`, then `unit FOR UPDATE` | `UPDATE unit SET name` | `UnitRenamed` | `UnitArchived` |
@@ -2319,10 +2336,13 @@ The draft says "required" types without a list. This matrix is the seed content 
 
 Notes:
 
-- One name per type in every document. `LDT` stands for `LDATE_AND_TIME` on CODESYS and TwinCAT 3. `LTOD` stands for `LTIME_OF_DAY`. `TIME_OF_DAY` and `DATE_AND_TIME` are never written as `TOD` or `DT`. The prefixes `TOD#` and `DT#` of `IecLiteral` (`domain-model.md` 2.1) are literal syntax, not type names.
+- One name per type in every document. `LDT` stands for `LDATE_AND_TIME` on CODESYS and TwinCAT 3. `LTOD` stands for `LTIME_OF_DAY`. `TIME_OF_DAY` and `DATE_AND_TIME` are never written as `TOD` or `DT`. The prefixes `TOD#` and `DT#` of `IecLiteral` (`domain-model.md` 2.1) are literal syntax, not type names. A request can use the vendor aliases `TOD`, `DT`, `LTIME_OF_DAY`, and `LDATE_AND_TIME`. `TypeExpr::parse` maps them to the catalog names, and no document holds an alias (ADR-0206).
 - A value of a `duration` or `instant` leaf is the integer count of the "Unit" column. The UI shows it as an IEC literal. The "S7 size" column does not change the count.
 - On `TwinCat3`, `LDATE`, `LTOD`, and `LDT` need TwinCAT 3.1.4026.0 or later (Assumption A46, ADR-0142).
-- `DATE` is 4 bytes on CODESYS and TwinCAT 3. `size_bytes` holds the S7 size because every platform with an address needs an address width. The domain holds the IEC sizes in code.
+- On `CodesysIec`, `LDATE`, `LTOD`, and `LDT` need CODESYS V3.5 SP16 or later (Assumption A52, ADR-0200). `LREAL` is an eight-byte binary64 number (Assumption A51, ADR-0199).
+- `size_bytes` holds the S7 size on every platform. The editor holds no CODESYS or TwinCAT size and models no layout there (Assumptions A31, A53, ADR-0207). Some vendor sizes differ (ADR-0209 (c)):
+  - `DATE` and `DATE_AND_TIME` have 4 bytes on CODESYS and TwinCAT 3.
+  - `STRING(n)` has `n + 1` bytes, and `WSTRING(n)` has `2(n + 1)` bytes there.
 - String length ranges per platform: the `StringLength` table of `domain-model.md` 2.1 is the definition. The domain checks them. `plc_type_string_length_range` allows 1 to 16382 on every platform.
 - `STRING` has two seed rows, both with `machine_id = NULL`. One row has `string_length = 254` and the platforms `S7_300`, `S7_1200` and `S7_1500`. The other row has `string_length = 80` and the platforms `CodesysIec` and `TwinCat3`. `STRING` without a length in a `TypeExpr` means the seed row of the platform of the machine (`domain-model.md` 2.1). A `STRING(20)` for one machine is a `primitive` row with `machine_id` set, `name = 'STRING'`, `string_length = 20`, and `platforms = ARRAY[machine.plc_platform]`, created by `EnsureDerivedType`. The same rule applies to `WSTRING(n)`.
 - `WSTRING` has two seed rows, both with `machine_id = NULL`. One row has `string_length = 254` and the platforms `S7_1200` and `S7_1500`. The other row has `string_length = 80` and the platforms `CodesysIec` and `TwinCat3`. `WSTRING` without a length in a `TypeExpr` means the seed row of the platform of the machine.
@@ -2334,6 +2354,12 @@ Notes:
   - system identifiers: `HW_*`, `EVENT_*`, `OB_*`, `CONN_*`, `DB_ANY`, `DB_WWW`, `DB_DYN`, `REMOTE`, `RTM`, and `PIP`
   - communication and technology types: `TCON_*`, `TADDR_*`, `IF_CONF_*`, `Conf_*`, `TMAIL_*`, `OPC_UA_*`, the technology objects `TO_*`, and FB instance types such as `PID_Compact`
   - the open array `ARRAY[*]` and the named value type (NVT) of S7-1500
+- CODESYS and TwinCAT families that are not in scope (ADR-0209). `CodesysIec` and `TwinCat3` reserve some of their names as struct names (ADR-0203):
+  - `BIT`, the native integers `__XINT`, `__UXINT`, `__XWORD`, `XINT`, `UXINT`, `XWORD`, and `PVOID`
+  - the vector type `__VECTOR`, the compiler types `VERSION` and `__SYSTEM.*`, and library types such as `SysTime`, `RTS_SYSTIMEDATE`, `T_FILETIME`, `TIMESTRUCT`, `T_AmsNetID`, and `ST_AmsAddr`
+  - the DUT forms `UNION` and struct `EXTENDS`, `INTERFACE` variables, and function block instances
+  - the generic families `ANY_*`, and the open array `ARRAY[*]`
+  - the types of the CODESYS Safety Extension, such as `SAFEBOOL` and `SAFEINT`, and every safety program of either vendor
 - The editor models the standard program only (Assumption A50). F data types, F-UDTs, F arrays, F open arrays, and F named value types are not in scope.
 - The column `S7_1200` is the classic S7-1200 family with firmware 4.1 or later (Assumption A49). The S7-1200 G2 is not in scope.
 - `S5TIME` exists on S7-1500 for compatibility. The matrix follows the vendor manuals as of the design date.
@@ -2342,7 +2368,7 @@ Notes:
 
 - Tool: `sqlx migrate`. Files live in `migrations/` at the repository root. The crate `recipe-db` embeds them with `sqlx::migrate!("../../migrations")`.
 - Name: `NNNN_description.sql`, four digits, forward-only. There is no down migration. A mistake is corrected by a new migration. A shipped migration is never edited. `sqlx` verifies the checksum of every applied migration at start and refuses to run when a file changed.
-- Files of the first release, of ADR-0098, of ADR-0109, of ADR-0143 to ADR-0145, of ADR-0154, of ADR-0156, of ADR-0157, and of ADR-0169:
+- Files of the first release, of ADR-0098, of ADR-0109, of ADR-0143 to ADR-0145, of ADR-0154, of ADR-0156, of ADR-0157, of ADR-0169, and of ADR-0202:
   - `0001_schema.sql`: functions of 3.0 and 3.3, tables and indexes of section 3, and the one row of `audit_chain_head`. It does not hold the parts of section 3 that `0009`, `0011`, `0012`, and `0013` add.
   - `0002_triggers.sql`: functions and triggers of section 4, except 4.13 and 4.14. `0014` adds 4.13, and `0016` adds 4.14.
   - `0003_grants.sql`: grants and ownership transfer of section 5.2, in the order given there.
@@ -2359,6 +2385,8 @@ Notes:
   - `0014_machine_db_number_copy.sql`: one transaction. First it locks every `machine` row `FOR NO KEY UPDATE` in the order of `id` (ADR-0157 (g)). Then one `UPDATE machine ... FROM plc_connection` copies the number of each record with `db_number IS NOT NULL` into its machine (ADR-0156 (i), ADR-0157 (h)). The statement takes a `ROW EXCLUSIVE` lock, not an exclusive lock. The trigger `machine_set_updated_at` sets `updated_at`. The copy writes no audit row (ADR-0156 (i)). Then the file creates the function and the trigger of 4.13 (ADR-0157 (a)).
   - `0015_machine_db_number_validate.sql`: `VALIDATE CONSTRAINT` on the two checks of `0013` (ADR-0156).
   - `0016_recipe_version_insert.sql`: the function and the trigger of 4.14 (ADR-0169). The file does not scan or rewrite a table (ADR-0169 (f)).
+  - `0017_machine_string_encoding.sql`: one transaction. It adds the column `machine.string_encoding` of section 3.1 with the constant default `'Latin1'`, so it rewrites no table. It adds both checks as `NOT VALID` and the grant of section 5.2 (ADR-0202 (n), (o)).
+  - `0018_machine_string_encoding_validate.sql`: `VALIDATE CONSTRAINT` on the two checks of `0017` (ADR-0202 (o)).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.
@@ -2414,7 +2442,7 @@ Parameter `ZONE_1` with `plc_type_id = ST_Zone` has this `value`:
 Rules that the domain checks before the row is written (I7):
 
 - The object has exactly the member names `temp_sp`, `active`, `ramps`, `label`. No extra key. No missing key.
-- `ramps` has exactly 3 elements. Index 1 of the PLC is JSON index 0. A two-dimensional array `ARRAY[0..1,1..2]` is a JSON array of 2 arrays of 2 elements.
+- `ramps` has exactly 3 elements. Index 1 of the PLC is JSON index 0. A two-dimensional array `ARRAY[0..1,1..2]` is a JSON array of 2 arrays of 2 elements. The first dimension is the outer JSON level, and the last index changes fastest (ADR-0209 (e)). `ARRAY[1..2,1..3] OF INT` is a JSON array of 2 arrays of 3 elements.
 - `85.5` is a valid `REAL`. The domain writes numbers in canonical decimal form (`150`, not `1.5e2`), so the stored text is stable. `"Zone A"` has at most 16 characters.
 
 Matching `parameter_limit` rows for `ZONE_1` (Assumption A36, ADR-0022: every numeric, string, duration, and instant leaf has a limit):
@@ -2451,7 +2479,7 @@ Keys of the diff are leaf paths. `ParameterDefinitionUpdated` uses column names 
 
 | Context | Actions |
 |---|---|
-| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineDataBlockSet`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated`, `PlcConnectionSet` |
+| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineDataBlockSet`, `MachineStringEncodingSet`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated`, `PlcConnectionSet` |
 | Recipe Management | `RecipeCreated`, `RecipeRenamed`, `RecipeDeleted`, `RecipeRestored`, `VersionCreated`, `DraftDiscarded`, `VersionApproved`, `VersionRetired`, `ParameterAdded`, `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, `TranslationRemoved`, `ParameterRemoved`, `TypeRevisionRebound` |
 | Identity and Access | `UserLoggedIn`, `UserLoggedOut`, `UserCreated`, `UserRoleSet`, `UserDeactivated`, `UserActivated`, `PasswordReset`, `OwnPasswordChanged`, `LoginUnlocked` |
 | Export | `VersionExported`, `PlcConnectionExported` |
@@ -2471,6 +2499,7 @@ State rule for `before_state` and `after_state` (the same rule as ADR-0005 and `
 - An export with HTTP Basic has the `ExportClient` account as actor. `exported_by` holds its login. The entry holds no session reference, because the request has no session (ADR-0109 (mb)). `PlcConnectionExported` follows the same actor rule and holds no session reference (ADR-0154 (j)).
 - `VersionApproved` adds `allow_outdated` to the full row.
 - `MachineDataBlockSet` stores the full `machine` row in both states, as `MachineRenamed`. The copy in `plc_connection` writes no entry (ADR-0156 (j)).
+- `MachineStringEncodingSet` stores the full `machine` row in both states, as `MachineDataBlockSet` (ADR-0202 (d4)).
 
 `aggregate_type` and `aggregate_id` per entity type:
 

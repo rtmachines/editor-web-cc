@@ -1,6 +1,6 @@
 # ADR-0181: Latin-1 bytes of STRING and CHAR in the transfer
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0202 (item (b): a `Utf8` machine gets the UTF-8 bytes of each `STRING` character)
 Date: 2026-11-17
 Deciders: project owner
 
