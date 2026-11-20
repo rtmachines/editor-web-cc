@@ -339,3 +339,31 @@ fn adr_0117_nan_and_infinity_fail() {
         }
     }
 }
+
+// ADR-0209 (e) and (f): the first dimension is the outer JSON level and the last index changes
+// fastest. `ARRAY[1..2,1..3] OF INT` is 2 arrays of 3 elements, so the leaf `[2,1]` sits at the
+// JSON position `[1][0]`. A refusal is `ValueFault::Mismatch`, which becomes `E-RCP-005`.
+#[test]
+fn adr_0209_first_dimension_is_the_outer_json_level() {
+    use crate::plant::LeafPath;
+
+    let tree = int_array_tree(&[(1, 2), (1, 3)]);
+    let value = ParameterValue::parse("[[1,2,3],[4,5,6]]", &tree).unwrap();
+    let leaves = value.texts(&tree).unwrap();
+    let leaf = LeafPath::parse("[2,1]").unwrap();
+    let held = leaves.iter().find(|leaf_text| leaf_text.path == leaf);
+    assert_eq!(held.map(|leaf_text| leaf_text.text.as_str()), Some("4"));
+    let last = LeafPath::parse("[1,3]").unwrap();
+    let held = leaves.iter().find(|leaf_text| leaf_text.path == last);
+    assert_eq!(held.map(|leaf_text| leaf_text.text.as_str()), Some("3"));
+
+    // 3 arrays of 2 elements is the transposed shape. The outer level must hold 2 elements.
+    let fault = fault("[[1,2],[3,4],[5,6]]", &tree);
+    assert_eq!(
+        fault,
+        ValueFault::Mismatch {
+            leaf: LeafPath::whole(),
+            expected: Expected::ArrayCount { count: 2 },
+        }
+    );
+}
