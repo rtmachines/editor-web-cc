@@ -112,7 +112,13 @@ impl DefineUdt {
         let rows = tx.types().type_rows(machine_id).await?;
         let next = next_revision(&rows, machine_id, &input)?;
         let platform = machine.platform();
-        let mut derived = DerivedTypes::new(machine_id, platform, rows, audit_context(user, meta));
+        let mut derived = DerivedTypes::new(
+            machine_id,
+            platform,
+            machine.string_encoding(),
+            rows,
+            audit_context(user, meta),
+        );
         let members = ensure_members(&mut derived, tx.types(), &input, platform).await?;
         ensure_changed(&input, next.latest.as_ref(), &members)?;
         let row = struct_row(

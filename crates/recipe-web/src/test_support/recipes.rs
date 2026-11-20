@@ -34,6 +34,7 @@ pub(crate) mod large;
 mod parameters;
 pub(crate) mod platform_range_world;
 mod settings;
+pub(crate) mod utf8_world;
 
 use std::collections::BTreeSet;
 

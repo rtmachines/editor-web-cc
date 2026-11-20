@@ -28,6 +28,8 @@ mod diff_page_tests;
 #[cfg(test)]
 mod diff_tests;
 #[cfg(test)]
+mod draft_read_paths_tests;
+#[cfg(test)]
 mod machine_read_paths_tests;
 mod outdated;
 mod parameter_form;

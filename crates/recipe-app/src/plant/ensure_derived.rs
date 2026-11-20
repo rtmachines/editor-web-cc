@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use recipe_domain::audit::{AuditContext, AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{
     ArrayDimensions, BaseExpr, DerivedTypeReason, MachineId, PlantError, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringKind,
-    StringLength, TypeExpr, TypeName, TypeTree,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding,
+    StringKind, StringLength, TypeExpr, TypeName, TypeTree,
 };
 use recipe_domain::recipe::ArrayShape;
 
@@ -29,6 +29,7 @@ use crate::ports::TypeCatalog;
 pub(crate) struct DerivedTypes {
     machine: MachineId,
     platform: PlcPlatform,
+    string_encoding: StringEncoding,
     rows: Vec<PlcType>,
     context: AuditContext,
     entries: Vec<AuditEntry>,
@@ -37,18 +38,20 @@ pub(crate) struct DerivedTypes {
 impl DerivedTypes {
     /// Build the working set from the rows of `TypeCatalog::type_rows`.
     ///
-    /// `platform` is the platform of the machine. `context` is the audit context of the
-    /// calling command.
+    /// `platform` and `string_encoding` come from the machine. `context` is the audit context of
+    /// the calling command.
     #[must_use]
     pub(crate) const fn new(
         machine: MachineId,
         platform: PlcPlatform,
+        string_encoding: StringEncoding,
         rows: Vec<PlcType>,
         context: AuditContext,
     ) -> Self {
         Self {
             machine,
             platform,
+            string_encoding,
             rows,
             context,
             entries: Vec::new(),
@@ -74,7 +77,12 @@ impl DerivedTypes {
     ///
     /// Returns `E-PLT-013` when two rows share an identifier.
     pub(crate) fn platform_types(&self) -> Result<PlatformTypes, PlantError> {
-        PlatformTypes::collect(self.machine, self.platform, self.rows.iter().cloned())
+        PlatformTypes::collect_encoded(
+            self.machine,
+            self.platform,
+            self.string_encoding,
+            self.rows.iter().cloned(),
+        )
     }
 
     /// Give the rows and the entries to the caller.

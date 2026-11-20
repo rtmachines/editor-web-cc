@@ -6,7 +6,7 @@ use super::super::support::{
     assert_stored, key, parameter, reference, stored_draft, stored_draft_with, tag, user,
 };
 use crate::error_codes::{ErrorCode, REGISTRY};
-use crate::plant::{PlcPlatform, PlcTypeId};
+use crate::plant::{PlcPlatform, PlcTypeId, StringEncoding};
 use crate::recipe::{Draft, DraftError, ParameterChange, RecipeError, VersionState, VersionStatus};
 
 /// A type identifier that no tree resolves.
@@ -24,6 +24,18 @@ fn a_live_draft_loads_with_its_version_data() {
     assert_eq!(draft.created_by(), user(1));
     let editors: Vec<_> = draft.editors().iter().copied().collect();
     assert_eq!(editors, vec![user(2), user(3)]);
+}
+
+#[test]
+fn adr_0202_a_loaded_draft_keeps_the_string_encoding_of_its_machine() {
+    for encoding in [StringEncoding::Latin1, StringEncoding::Utf8] {
+        let stored = super::super::StoredDraft {
+            string_encoding: encoding,
+            ..stored_draft(Vec::new())
+        };
+        let draft = Draft::load(stored).unwrap();
+        assert_eq!(draft.string_encoding(), encoding);
+    }
 }
 
 #[test]

@@ -37,6 +37,7 @@ fn working_set(rows: Vec<PlcType>, platform: PlcPlatform) -> DerivedTypes {
     DerivedTypes::new(
         mid(1),
         platform,
+        StringEncoding::Latin1,
         rows,
         audit_context(&actor(Role::ProcessEngineer), &meta()),
     )

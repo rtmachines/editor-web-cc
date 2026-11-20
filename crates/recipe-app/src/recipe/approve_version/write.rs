@@ -41,7 +41,8 @@ async fn recheck(
 ) -> Result<Result<(), AppError>, AppError> {
     let machine = draft.machine();
     let rows = tx.types().type_rows(machine).await?;
-    let types = PlatformTypes::collect(machine, draft.platform(), rows)?;
+    let types =
+        PlatformTypes::collect_encoded(machine, draft.platform(), draft.string_encoding(), rows)?;
     let trees = TypeTrees::resolve(draft.parameters().iter().map(|p| p.plc_type()), &types);
     let checked = draft
         .check_limits(&trees)

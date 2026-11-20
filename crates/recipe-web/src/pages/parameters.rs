@@ -177,6 +177,8 @@ mod add_s7_1500_tests;
 #[cfg(test)]
 mod add_tests;
 #[cfg(test)]
+mod adr_0202_tests;
+#[cfg(test)]
 mod adr_0206_tests;
 #[cfg(test)]
 mod conflict_tests;

@@ -79,7 +79,7 @@ async fn ensured(
         .unwrap();
     let rows = tx.types().type_rows(mid(1)).await.unwrap();
     let context = audit_context(&actor(Role::ProcessEngineer), &meta());
-    let mut derived = DerivedTypes::new(mid(1), platform, rows, context);
+    let mut derived = DerivedTypes::new(mid(1), platform, StringEncoding::Latin1, rows, context);
     let id = derived.ensure_expr(tx.types(), &expr(text)).await?;
     Ok(TypeTree::resolve(id, &derived.platform_types()?)?)
 }
