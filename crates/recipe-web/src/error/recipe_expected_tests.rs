@@ -260,3 +260,13 @@ fn adr_0201_value_form_names_the_two_ranges() {
         assert!(pl.contains(part), "{part}: {pl}");
     }
 }
+
+#[test]
+fn adr_0202_expected_string_utf8_names_the_length_in_bytes() {
+    let en = shape_message(Expected::StringUtf8 { length: 4 }, Lang::En);
+    assert!(en.contains('4'), "{en}");
+    assert!(en.contains("bytes"), "{en}");
+    let pl = shape_message(Expected::StringUtf8 { length: 4 }, Lang::Pl);
+    assert!(pl.contains('4'), "{pl}");
+    assert!(pl.contains("bajt"), "{pl}");
+}
