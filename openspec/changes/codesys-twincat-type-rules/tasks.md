@@ -348,30 +348,30 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 11. STRING encoding: rules, use cases, pages, and export (ADR-0202, wave 4)
 
-- [ ] 11.1 (recipe-db) Machine read. Add `adr_0202_stored_machine_reads_its_string_encoding` to the machine adapter tests. RED: `cargo test -p recipe-db --test storage adr_0202_stored_machine`.
+- [x] 11.1 (recipe-db) Machine read. Add `adr_0202_stored_machine_reads_its_string_encoding` to the machine adapter tests. RED: `cargo test -p recipe-db --test storage adr_0202_stored_machine`.
   - `Machine` and `StoredMachine` of `recipe-domain` get `string_encoding`.
   - The six statements of `design.md`, section Carrier of the encoding, read the column. The memory adapter of `recipe-app` reads and writes it.
   - `machine_image` of `crates/recipe-app/src/memory/images.rs` writes the field of the row in place of the literal `"Latin1"` of task 2.4.
   - `CreateMachineInput` gets the encoding only in task 11.11. Until then, a test gets a `Utf8` machine through `MemoryStore::seed_machine` (`crates/recipe-app/src/memory/plant/seed.rs:13`) with a `Machine` that holds `Utf8`.
   - The `recipe-web` test worlds already call `seed_machine`, so the tests of tasks 11.5 to 11.8 in `recipe-app` and in `recipe-web` use this path.
   - GREEN: the same command and `cargo test -p recipe-app --lib machine`.
-- [ ] 11.2 (recipe-db) Draft read. Add `adr_0202_stored_draft_reads_the_string_encoding`. RED: `cargo test -p recipe-db --test storage adr_0202_stored_draft`.
+- [x] 11.2 (recipe-db) Draft read. Add `adr_0202_stored_draft_reads_the_string_encoding`. RED: `cargo test -p recipe-db --test storage adr_0202_stored_draft`.
   - `StoredDraft` of `recipe-domain` gets `string_encoding`. `SELECT_HEADER` and `LOCK_HEADER` of `draft_rows.rs` join `machine`, as `design.md` states. `LOCK_HEADER` keeps `FOR UPDATE OF v`.
   - Change every struct literal of `StoredDraft`. Find them with `rg -n 'StoredDraft \{' crates`. The memory draft adapter of `recipe-app` sets the field.
   - GREEN: the same command and `cargo test -p recipe-app --lib draft`.
-- [ ] 11.3 (recipe-domain) Carrier. Add `adr_0202_type_tree_holds_the_string_encoding`. RED: `cargo test -p recipe-domain --lib adr_0202_type_tree`.
+- [x] 11.3 (recipe-domain) Carrier. Add `adr_0202_type_tree_holds_the_string_encoding`. RED: `cargo test -p recipe-domain --lib adr_0202_type_tree`.
   - Add `PlatformTypes::collect_encoded(machine, platform, string_encoding, rows)` and `TypeTree::string_encoding()`.
   - `collect_encoded` keeps the filter of the owner: a row is kept when it is global or belongs to `machine`. The platform and the encoding cannot tell two machines apart.
   - The old `PlatformTypes::collect` stays until task 11.9 and gives `Latin1`. Its doc comment says that task 11.9 deletes it.
   - GREEN: `cargo test -p recipe-domain --lib type_tree`.
-- [ ] 11.4 (recipe-domain) Value rule. In `recipe/value/leaf/tests.rs`, add the `adr_0202_*` value tests of the requirement "STRING values on a Utf8 machine" and of the modified requirement on `max_length`. Each test name starts with `adr_0202_utf8_`. RED: `cargo test -p recipe-domain --lib adr_0202_utf8`.
+- [x] 11.4 (recipe-domain) Value rule. In `recipe/value/leaf/tests.rs`, add the `adr_0202_*` value tests of the requirement "STRING values on a Utf8 machine" and of the modified requirement on `max_length`. Each test name starts with `adr_0202_utf8_`. RED: `cargo test -p recipe-domain --lib adr_0202_utf8`.
   - Add `adr_0202_utf8_two_byte_scalars_respect_capacity`. In UTF-8, `"\u{FF}"` and `"\u{100}"` have 2 bytes each. `adr_0137_last_latin_1_character` of task 1.4 does not change.
   - On a `Utf8` machine, `STRING(1)` refuses both values with `Expected::StringUtf8`, and `STRING(2)` accepts both values.
   - Then add the rule and `Expected::StringUtf8 { length }` of `design.md`. Map the variant to `expected-string-utf8` in `recipe-web`, with texts in both bundles.
   - Add the `recipe-web` test `adr_0202_expected_string_utf8_names_the_length_in_bytes`. It writes the line of `Expected::StringUtf8 { length: 4 }` in `en` and in `pl`, and each line names the length 4 in bytes.
   - The draft trees of a request get the encoding only in task 11.6. Thus task 11.6 adds the HTMX test of the value form.
   - GREEN: `cargo test -p recipe-domain --lib leaf` and `cargo test -p recipe-web --lib expected`.
-- [ ] 11.5 (recipe-app) Machine read path group. Move these call sites to `collect_encoded` with the encoding of `Machine`:
+- [x] 11.5 (recipe-app) Machine read path group. Move these call sites to `collect_encoded` with the encoding of `Machine`:
   - `plant/queries/types.rs` (3), `plant/queries/usage.rs` (2), `plant/define_udt.rs` (`check_tree`), `recipe/queries/parameters.rs` (3), `recipe/create_version.rs`, and `recipe/queries/preview.rs`.
   - `check_tree` of `plant/define_udt.rs` gets the encoding from the `Machine` of `execute`. `plant/ensure_derived.rs` and `DerivedTypes::new` do not change in this task. Task 11.6 changes them.
   - `preview_tree` gets the encoding as an argument. Its production caller in `GetParameterForm::execute` of `recipe/queries/parameter_form.rs` passes the encoding of the `Machine` of the form.
@@ -382,7 +382,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The same test asks the add form for the preview of `STRING(10)`, without a parameter. It asserts that `preview.string_encoding()` of the returned tree gives `Utf8`.
   - The edit form checks the stored value through `collect_stored_types`, which task 11.6 moves. Thus this task does not test the edit form.
   - GREEN: `cargo test -p recipe-app --lib adr_0202_machine_read_paths`.
-- [ ] 11.6 (recipe-app) Draft read path group. Move `recipe/draft_session.rs`, `recipe/approve_version/write.rs`, and `plant/ensure_derived.rs` to `collect_encoded`.
+- [x] 11.6 (recipe-app) Draft read path group. Move `recipe/draft_session.rs`, `recipe/approve_version/write.rs`, and `plant/ensure_derived.rs` to `collect_encoded`.
   - `Draft::load` of `crates/recipe-domain/src/recipe/draft/load.rs` copies the encoding from `StoredDraft` into `Draft`. `Draft::string_encoding()` returns it. `write.rs:44` reads it there.
   - `collect_stored_types` of `draft_session.rs` takes the encoding. Its callers pass it: `draft_session.rs:181` and `recipe/rebind.rs:144` from `Draft`, and the call in `GetParameterForm::execute` of `recipe/queries/parameter_form.rs` from `Machine`.
   - `DerivedTypes::new` of `plant/ensure_derived.rs` takes the encoding, and `platform_types()` at `ensure_derived.rs:77` passes it to `collect_encoded`.
@@ -393,25 +393,25 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The same test opens the edit form of the parameter with the stored value `"Łódź"`. The form has no rule fault.
   - Add the `recipe-web` HTMX test `adr_0202_value_form_names_the_length_in_bytes` of the scenario "STRING bytes in the parameter form of a Utf8 machine" of `specs/web-ui/spec.md`.
   - GREEN: `cargo test -p recipe-app --lib adr_0202_draft_read_paths` and `cargo test -p recipe-web --lib adr_0202_value_form`.
-- [ ] 11.7 (recipe-app) Version read path group. Move `recipe/queries/versions.rs`, `diff.rs`, `outdated.rs`, `approval_preview.rs`, and `recipe/approve_version/prepare.rs` to `collect_encoded`.
+- [x] 11.7 (recipe-app) Version read path group. Move `recipe/queries/versions.rs`, `diff.rs`, `outdated.rs`, `approval_preview.rs`, and `recipe/approve_version/prepare.rs` to `collect_encoded`.
   - Each call site reads the encoding from the `Machine` of the version. `prepare.rs:150` does not read it from `ExportHeader` (ADR-0202 (k)).
   - `Snapshot` of `approve_version/prepare.rs` gets the field `string_encoding`. `read_snapshot` sets it from its `Machine` before the blocking closure. `check_and_hash` reads it there.
   - RED first: `adr_0202_version_read_paths_carry_utf8`. `ApproveVersion` approves a draft with the `STRING(10)` value `"Łódź"` (7 UTF-8 bytes) on a `Utf8` machine. The version, diff, and outdated queries read it.
   - GREEN: `cargo test -p recipe-app --lib adr_0202_version_read_paths`.
-- [ ] 11.8 (recipe-app) Export read path. Move `export/document.rs` to `collect_encoded` with the encoding of the `Machine` of `read_rows`.
+- [x] 11.8 (recipe-app) Export read path. Move `export/document.rs` to `collect_encoded` with the encoding of the `Machine` of `read_rows`.
   - RED first: `adr_0202_export_read_path_carries_utf8`. The export of an approved version with the `STRING(10)` value `"Łódź"` (7 UTF-8 bytes) on a `Utf8` machine gives `has_rule_fault` `false`.
   - GREEN: `cargo test -p recipe-app --lib adr_0202_export_read_path`.
-- [ ] 11.9 (workspace) [mechanical] Delete the old `PlatformTypes::collect`. Rename `collect_encoded` to `collect` in every crate.
+- [x] 11.9 (workspace) [mechanical] Delete the old `PlatformTypes::collect`. Rename `collect_encoded` to `collect` in every crate.
   - RED first: in the tests of `plant/type_tree`, add `adr_0202_collect_takes_the_string_encoding`. It calls `PlatformTypes::collect(machine, platform, StringEncoding::Utf8, rows)` and asserts `TypeTree::string_encoding()`.
   - RED: `cargo test -p recipe-domain --lib adr_0202_collect` fails to compile, because the old `collect` has three arguments.
   - Then delete the old function and rename the new one. The new `collect` keeps the argument `machine`.
   - Each test and each test support call passes `StringEncoding::Latin1`, or the encoding of its machine.
   - GREEN: `cargo test -p recipe-domain --lib adr_0202_collect` passes.
   - Check: `rg -n 'collect_encoded' crates` prints nothing. `cargo test --workspace --all-features --locked` passes.
-- [ ] 11.10 (recipe-domain) Add the audit action `MachineStringEncodingSet` and its entry kind with the full `machine` row in both states. Map it in `crates/recipe-web/src/pages/audit/choices.rs`. Change the count of the action tests to 39.
+- [x] 11.10 (recipe-domain) Add the audit action `MachineStringEncodingSet` and its entry kind with the full `machine` row in both states. Map it in `crates/recipe-web/src/pages/audit/choices.rs`. Change the count of the action tests to 39.
   - Add the key `audit-action-machine-string-encoding-set` to `crates/recipe-web/i18n/en-approval.ftl` and `pl-approval.ftl`, beside `audit-action-machine-data-block-set`. The test `rows_each_action_has_a_word_in_both_bundles_and_none_equals_its_key` reads each action of `AuditAction::ALL`.
   - RED and GREEN: `cargo test -p recipe-domain --lib audit` and `cargo test -p recipe-web --lib audit`.
-- [ ] 11.11 (recipe-app) `CreateMachineInput` gets `string_encoding`. One task changes every builder of the input, so the task compiles. RED first: `adr_0202_create_machine_*` and `adr_0202_machine_form_*` tests.
+- [x] 11.11 (recipe-app) `CreateMachineInput` gets `string_encoding`. One task changes every builder of the input, so the task compiles. RED first: `adr_0202_create_machine_*` and `adr_0202_machine_form_*` tests.
   - `CreateMachine` checks the encoding against the platform before its transaction. `MachineCreated` holds the encoding in `after_state`.
   - The builders: `crates/recipe-web/src/pages/machines/form.rs`, `crates/recipe-db/tests/storage/atomic/plant.rs`, `plant/create_machine/tests.rs`, and `memory/fixtures/scenarios.rs` of `recipe-app`.
   - Add `string_encoding` to `INSERT_MACHINE` of `crates/recipe-db/src/transaction/machines.rs` and to its binds in `insert`. Without it, the column default stores `Latin1` for each new machine.
@@ -422,13 +422,13 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The row uses a `Cover::NoText` constant with a reason, as `ROLE` does. The field holds a closed set of values, and the form never shows the sent text.
   - The web tests follow the requirement "STRING encoding field of the machine form" in `specs/web-ui/spec.md`.
   - GREEN: `cargo test -p recipe-app --lib adr_0202_create_machine`, `cargo test -p recipe-web --lib adr_0202_machine_form`, `cargo test -p recipe-web --lib xss`, and `cargo test -p recipe-db --test storage adr_0202_create_machine`.
-- [ ] 11.12 (recipe-app) Port and adapters. Add the methods `machine_has_version` and the update of the encoding to `PlantRepository`, with no default body. RED first: the freeze tests.
+- [x] 11.12 (recipe-app) Port and adapters. Add the methods `machine_has_version` and the update of the encoding to `PlantRepository`, with no default body. RED first: the freeze tests.
   - Implement both methods in each implementer: `crates/recipe-db/src/transaction/plant.rs`, `memory/plant/mod.rs`, `plant/short_rows.rs`, and `recipe/queries/count_tests.rs` of `recipe-app`.
   - The `recipe-db` adapter uses the query of `data-model.md` §6. A test double that does not use the method gives an error, not `false`.
   - Add `adr_0202_machine_has_version_*` tests in `recipe-db` for the port method: each row of a discarded draft and of a deleted recipe counts.
   - The audit failure test needs the command of task 11.13, so task 11.13 adds it.
   - GREEN: `cargo test -p recipe-db --test storage adr_0202_machine_has_version` and `cargo test -p recipe-app --lib plant`.
-- [ ] 11.13 (recipe-app) Add `crates/recipe-app/src/plant/set_machine_string_encoding.rs` after the pattern of `set_machine_data_block.rs`.
+- [x] 11.13 (recipe-app) Add `crates/recipe-app/src/plant/set_machine_string_encoding.rs` after the pattern of `set_machine_data_block.rs`.
   - First write the race test `adr_0202_encoding_change_and_create_recipe_serialize` in `crates/recipe-db/tests/storage/race/`. It covers both orders of the requirement "No new version during a change of the STRING encoding".
   - Then write `adr_0202_set_machine_string_encoding_fails_in_the_audit_insert_and_keeps_the_encoding` in `crates/recipe-db/tests/storage/atomic/plant.rs`. It follows `set_machine_data_block_fails_in_the_audit_insert_and_changes_neither_table`.
   - Also write the `adr_0202_set_machine_string_encoding_*` tests with the memory adapter. RED: the three commands of GREEN fail.
@@ -437,7 +437,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The use case checks `MachineManage` first and the platform before its transaction. Under the machine lock, it calls `machine_has_version`.
   - Add the operation to `crates/recipe-app/src/auth/first_statement.rs` and to `crates/recipe-app/src/audit/coverage/plant.rs`.
   - GREEN: `cargo test -p recipe-app --lib adr_0202_set_machine_string_encoding`, `cargo test -p recipe-db --test storage adr_0202_encoding_change`, and `cargo test -p recipe-db --test storage adr_0202_set_machine_string_encoding`.
-- [ ] 11.14 (recipe-web) The machine page shows the encoding. Add the route `POST /machines/{code}/string-encoding`, its form, and the fragment `machine-string-encoding-set.html`, after the pattern of the data block form.
+- [x] 11.14 (recipe-web) The machine page shows the encoding. Add the route `POST /machines/{code}/string-encoding`, its form, and the fragment `machine-string-encoding-set.html`, after the pattern of the data block form.
   - The page query gives `has_version`. The page shows the form only on a live `CodesysIec` or `TwinCat3` machine without a version, and not in read-only mode.
   - Add the `adr_0202_machine_page_*` tests of the requirement "STRING encoding on the machine page". RED: `cargo test -p recipe-web --lib adr_0202_machine_page` fails.
   - The route uses the access of the operation `SetMachineStringEncoding`. Thus the gate of `crates/recipe-web/src/gates.rs` gives `503 E-WEB-006` in read-only mode.
@@ -447,20 +447,20 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Add the rows of the fields `string_encoding` and `csrf_token` of the new request struct to `pages/xss_coverage_tests/registry.rs`, after the rows of `DataBlockFields`. The row of `csrf_token` uses `CSRF`.
   - The row of `string_encoding` uses the `Cover::NoText` constant of task 11.11.
   - GREEN: the RED command and `cargo test -p recipe-web --lib xss_coverage`.
-- [ ] 11.15 (recipe-domain) In the module `export`, give `ScopeBody` a machine struct of its own with an optional `string_encoding`, as `design.md` places it. RED: `cargo test -p recipe-domain --lib -- adr_0202_scope_body adr_0202_v1_body` fails.
+- [x] 11.15 (recipe-domain) In the module `export`, give `ScopeBody` a machine struct of its own with an optional `string_encoding`, as `design.md` places it. RED: `cargo test -p recipe-domain --lib -- adr_0202_scope_body adr_0202_v1_body` fails.
   - Add `adr_0202_scope_body_holds_utf8_only` and `adr_0202_v1_body_has_no_encoding`. A `Latin1` scope body gives the same bytes as before.
   - `ScopeBody::build(whole, scope, string_encoding)` takes the encoding as a parameter, because `HashedBody` never holds it (ADR-0202 (k)).
   - Change the three callers. `write_scope` of `crates/recipe-app/src/export/document.rs:178` gets a new parameter with the encoding of the `Machine` of `read_rows`.
   - `crates/recipe-export/tests/golden.rs:510` and `crates/recipe-domain/src/export/scope/tests.rs:74` pass `StringEncoding::Latin1`.
   - GREEN: the RED command, `cargo test -p recipe-app --lib export`, and `cargo test -p recipe-export --test golden`.
-- [ ] 11.16 (recipe-export) The v2 writer writes `machine.string_encoding` directly after `machine.plc_platform` for a `Utf8` machine only. RED: `cargo test -p recipe-export adr_0202` fails.
+- [x] 11.16 (recipe-export) The v2 writer writes `machine.string_encoding` directly after `machine.plc_platform` for a `Utf8` machine only. RED: `cargo test -p recipe-export adr_0202` fails.
   - The v2 schema file gets the optional property with the enum `["Utf8"]`. An `if` and `then` pair permits it only on `CodesysIec` and `TwinCat3` (ADR-0202 (j3)). Change its description sentence on a new field, as ADR-0202 (j5) states.
   - Add `adr_0202_*` schema tests. A document without the field passes on each of the five platforms: `CodesysIec`, `TwinCat3`, `S7_300`, `S7_1200`, and `S7_1500`.
   - A document with `Utf8` passes on `CodesysIec` and `TwinCat3`.
   - A document with `Utf8` fails on `S7_300`, `S7_1200`, and `S7_1500`. A document with the explicit value `Latin1` fails.
   - Each golden v2 document stays byte-identical, also `recipe_R-200_v1_U1_CodesysIec.json` of task 10.3 (ADR-0202 (j2)).
   - GREEN: `cargo test -p recipe-export`.
-- [ ] 11.17 (recipe-domain) The `loadable` flag of a v1 document, as `design.md`, section Export of the encoding, places it (ADR-0202 (l)). The v1 hashed body does not change (ADR-0202 (k)). RED first: the tests of this task fail.
+- [x] 11.17 (recipe-domain) The `loadable` flag of a v1 document, as `design.md`, section Export of the encoding, places it (ADR-0202 (l)). The v1 hashed body does not change (ADR-0202 (k)). RED first: the tests of this task fail.
   - `DocumentFacts` gets `string_encoding` and `v1_loadable()`. The v1 writer in `crates/recipe-export/src/document.rs:136` writes `facts.v1_loadable()`. The v2 writer keeps `loadable()`.
   - `write_scope` of `crates/recipe-app/src/export/document.rs` selects the same flag for `Written` and `ExportedVersion`. `has_rule_fault` keeps its meaning.
   - Add `adr_0202_v1_of_utf8_is_not_loadable` and `adr_0202_v2_of_utf8_keeps_loadable` in `recipe-app`.
@@ -473,18 +473,18 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
     - The `ExportClient` account `plc-m10` sends `GET /export/v1/machines/M10/recipes/R-300/approved` with HTTP Basic. The helper gives `false`.
     - The `ExportClient` account `plc-m10` sends `GET /export/v2/machines/M10/recipes/R-300/approved/units/U1` with HTTP Basic. The helper gives `true`.
   - GREEN: `cargo test -p recipe-app --lib -- adr_0202_v1_of_utf8 adr_0202_v2_of_utf8` and `cargo test -p recipe-web --lib adr_0202_export_bytes`.
-- [ ] 11.18 (recipe-export) Add the golden file `crates/recipe-export/tests/golden/recipe_R-300_v1_U1_TwinCat3_Utf8.json` and the test `adr_0202_utf8_twincat_unit_document` in `golden.rs`. RED: the test fails before the file exists.
+- [x] 11.18 (recipe-export) Add the golden file `crates/recipe-export/tests/golden/recipe_R-300_v1_U1_TwinCat3_Utf8.json` and the test `adr_0202_utf8_twincat_unit_document` in `golden.rs`. RED: the test fails before the file exists.
   - The production writer writes the v2 document of a `TwinCat3` version on a `Utf8` machine with fixed export metadata. The version holds a `STRING(10)` value `"Łódź"`. The value has 7 UTF-8 bytes.
   - The test compares the bytes, rebuilds `scope_sha256` from the scope body, and checks the document against the v2 schema file.
   - Each parameter has `s7_address` `null`, and the document holds no layout (A31, A53).
   - With task 10.3, the golden files cover both encodings.
   - GREEN: `cargo test -p recipe-export --test golden adr_0202`.
-- [ ] 11.19 (recipe-web) The version page of an Approved version of a `Utf8` machine shows the notice of the v1 document (`specs/web-ui/spec.md`). RED: `cargo test -p recipe-web --lib adr_0202_version_notice` fails.
+- [x] 11.19 (recipe-web) The version page of an Approved version of a `Utf8` machine shows the notice of the v1 document (`specs/web-ui/spec.md`). RED: `cargo test -p recipe-web --lib adr_0202_version_notice` fails.
   - Add the key `version-export-encoding-notice` beside `version-export-rule-notice` in `en.ftl` and `pl.ftl`, with the texts of the requirement.
   - The export link names the notice in `aria-describedby`. A version with a rule fault on a `Utf8` machine shows both notices, and the link names both. The rule notice keeps its rule codes.
   - Tests: a healthy and a faulty version under `Latin1` and under `Utf8`. Each case shows only the notices of its state.
   - GREEN: the RED command.
-- [ ] 11.20 (recipe-app) Integration task for tasks 11.4 to 11.17. Add the `adr_0202_*` use case tests of the three requirements on `STRING` values in `specs/recipe-management/spec.md`. Add the export tests of the requirement "STRING encoding in the export document v2". Command: `cargo test -p recipe-app --lib adr_0202`.
+- [x] 11.20 (recipe-app) Integration task for tasks 11.4 to 11.17. Add the `adr_0202_*` use case tests of the three requirements on `STRING` values in `specs/recipe-management/spec.md`. Add the export tests of the requirement "STRING encoding in the export document v2". Command: `cargo test -p recipe-app --lib adr_0202`.
 
 ## 12. Gate
 
