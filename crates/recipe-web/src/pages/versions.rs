@@ -141,6 +141,8 @@ fn lifecycle_rows() -> Vec<RouteEntry> {
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]
+mod adr_0202_notice_tests;
+#[cfg(test)]
 mod compare_form_tests;
 #[cfg(test)]
 mod compare_read_only_tests;

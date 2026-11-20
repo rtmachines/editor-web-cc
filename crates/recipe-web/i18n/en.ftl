@@ -667,6 +667,7 @@ version-platform = PLC platform
 version-export-link = Export version { $number } as JSON
 version-export-retired-notice = The file name starts with RETIRED_. The file marks this version as not loadable into a PLC.
 version-export-rule-notice = The current rules refuse parts of this version. The export file marks this version as not loadable into a PLC. Rule codes: { $codes }.
+version-export-encoding-notice = This machine uses UTF-8 for STRING values. The v1 export file marks this version as not loadable into a PLC. Use the v2 export of each unit.
 version-compare-n = Version
 version-compare-m = Compare with version
 version-compare-submit = Compare

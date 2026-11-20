@@ -29,6 +29,10 @@ pub(crate) const APPROVED_REFERENCE: &str = "R-300";
 /// The key of the parameter `LABEL`, a `STRING(4)`.
 pub(crate) const LABEL_KEY: Uuid = Uuid::from_u128(0x7357_0007_0000_0000_0000_0000_0f40_0001);
 
+/// The stored value of `NOTE` that breaks a current rule of `CodesysIec` (ADR-0201 (a)).
+///
+/// The scalar `U+1F600` lies outside the Basic Multilingual Plane. The earlier rule set accepts it.
+const OUTSIDE_PLANE_NOTE: &str = "A\u{1F600}";
 /// The length of the `STRING` of `LABEL`.
 const LABEL_LENGTH: u32 = 4;
 /// The identifier of the machine `M10`.
@@ -41,6 +45,12 @@ const RECIPE_ID: Uuid = Uuid::from_u128(0x7357_0004_0000_0000_0000_0000_0f40_000
 const VERSION_ID: Uuid = Uuid::from_u128(0x7357_0005_0000_0000_0000_0000_0f40_0001);
 /// The identifier of the type `STRING(4)` of `M10`.
 const STRING_TYPE_ID: Uuid = Uuid::from_u128(0x7357_0013_0000_0000_0000_0000_0f40_0001);
+/// The identifier of the type `WSTRING(10)` of `M10`.
+const WSTRING_TYPE_ID: Uuid = Uuid::from_u128(0x7357_0013_0000_0000_0000_0000_0f40_0002);
+/// The identifier of the parameter `NOTE`.
+const NOTE_ID: Uuid = Uuid::from_u128(0x7357_0006_0000_0000_0000_0000_0f40_0002);
+/// The length of the `WSTRING` of `NOTE`.
+const NOTE_LENGTH: u32 = 10;
 /// The identifier of the parameter `LABEL`.
 const LABEL_ID: Uuid = Uuid::from_u128(0x7357_0006_0000_0000_0000_0000_0f40_0001);
 
@@ -92,7 +102,7 @@ fn string_row() -> PlcType {
 /// The parameter `LABEL` is a `STRING(4)` with the value `"abc"` on the unit `U1`.
 pub(crate) fn utf8_world() -> World {
     let world = world();
-    seed_label_recipe(&world, REFERENCE);
+    seed_label_recipe(&world, REFERENCE, "abc");
     world
 }
 
@@ -102,7 +112,26 @@ pub(crate) fn utf8_world() -> World {
 /// the real content hash, because an export route checks the stored hash first.
 pub(crate) async fn utf8_approved_world() -> World {
     let world = world();
-    seed_label_recipe(&world, APPROVED_REFERENCE);
+    seed_label_recipe(&world, APPROVED_REFERENCE, "abc");
+    approve_label_recipe(&world).await;
+    world
+}
+
+/// Build the plant world as `utf8_approved_world` does, with one more parameter in version 1.
+///
+/// The parameter `NOTE` is a `WSTRING(10)` with the value `"A\u{1F600}"`. The current rules of
+/// `CodesysIec` refuse that scalar, and the earlier rules accept it. The approved version then
+/// breaks a current rule with `E-RCP-005`, as a part stored under an earlier rule set does.
+pub(crate) async fn utf8_approved_faulty_world() -> World {
+    let world = world();
+    seed_label_recipe(&world, APPROVED_REFERENCE, "abc");
+    seed_note(&world);
+    approve_label_recipe(&world).await;
+    world
+}
+
+/// Approve the version 1 of `R-300` with the real content hash.
+async fn approve_label_recipe(world: &World) {
     let target = VersionTarget {
         version: RecipeVersionId::from(VERSION_ID),
         recipe: RecipeId::from(RECIPE_ID),
@@ -110,11 +139,49 @@ pub(crate) async fn utf8_approved_world() -> World {
         reference: ReferenceNumber::parse(APPROVED_REFERENCE).unwrap(),
     };
     approve_version_with_real_hash(&world.fixture, target).await;
-    world
+}
+
+/// Seed the row `WSTRING(10)` of `M10` and the parameter `NOTE` of version 1 of `R-300`.
+fn seed_note(world: &World) {
+    let store = &world.fixture.store;
+    let length =
+        StringLength::parse(StringKind::Wstring, PlcPlatform::CodesysIec, NOTE_LENGTH).unwrap();
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: PlcTypeId::from(WSTRING_TYPE_ID),
+        machine: Some(MachineId::from(MACHINE_ID)),
+        platforms: BTreeSet::from([PlcPlatform::CodesysIec]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::Wstring,
+            leaf_class: Primitive::Wstring.leaf_class(),
+            size_bytes: length.size_bytes(StringKind::Wstring).unwrap(),
+            string_length: Some(length.value()),
+        },
+    })
+    .unwrap();
+    store.seed_type(&row);
+    store.seed_parameter(
+        RecipeVersionId::from(VERSION_ID),
+        &StoredParameter {
+            id: ParameterId::from(NOTE_ID),
+            key: ParameterKey::from(NOTE_ID),
+            unit: UnitId::from(UNIT_ID),
+            tag: ParameterTag::parse("NOTE").unwrap(),
+            name_en: text("Note"),
+            description_en: LongText::parse("A wide note of ten units").unwrap(),
+            translations: Vec::new(),
+            plc_type: PlcTypeId::from(WSTRING_TYPE_ID),
+            s7_address: None,
+            limits: Vec::new(),
+            value: StoredValue::from(json!(OUTSIDE_PLANE_NOTE)),
+            ordinal: Ordinal::parse(1).unwrap(),
+        },
+    );
 }
 
 /// Seed `M10`, its `STRING(4)` row, and the recipe `reference` with its live draft version 1.
-fn seed_label_recipe(world: &World, reference: &str) {
+///
+/// The parameter `LABEL` holds the stored text `value`.
+fn seed_label_recipe(world: &World, reference: &str, value: &str) {
     let store = &world.fixture.store;
     store.seed_machine(&machine());
     store.seed_type(&string_row());
@@ -144,7 +211,7 @@ fn seed_label_recipe(world: &World, reference: &str) {
             plc_type: PlcTypeId::from(STRING_TYPE_ID),
             s7_address: None,
             limits: Vec::new(),
-            value: StoredValue::from(json!("abc")),
+            value: StoredValue::from(json!(value)),
             ordinal: Ordinal::parse(0).unwrap(),
         },
     );

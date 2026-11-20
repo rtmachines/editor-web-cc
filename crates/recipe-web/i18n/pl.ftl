@@ -667,6 +667,7 @@ version-platform = Platforma PLC
 version-export-link = Eksportuj wersję { $number } do pliku JSON
 version-export-retired-notice = Nazwa pliku zaczyna się od RETIRED_. Plik oznacza, że tej wersji nie można załadować do PLC.
 version-export-rule-notice = Aktualne reguły odrzucają części tej wersji. Plik eksportu oznacza, że tej wersji nie można załadować do PLC. Kody reguł: { $codes }.
+version-export-encoding-notice = Ta maszyna używa UTF-8 dla wartości STRING. Plik eksportu v1 oznacza, że tej wersji nie można załadować do PLC. Użyj eksportu v2 każdej jednostki.
 version-compare-n = Wersja
 version-compare-m = Porównaj z wersją
 version-compare-submit = Porównaj
