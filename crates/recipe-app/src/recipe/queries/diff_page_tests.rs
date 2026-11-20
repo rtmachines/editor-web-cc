@@ -44,7 +44,13 @@ async fn a_first_approval_gives_every_parameter_as_added_with_its_limit_rows() {
         .unwrap();
     let rows = tx.types().type_rows(machine.id()).await.unwrap();
     drop(tx);
-    let types = PlatformTypes::collect(machine.id(), PlcPlatform::TwinCat3, rows).unwrap();
+    let types = PlatformTypes::collect(
+        machine.id(),
+        PlcPlatform::TwinCat3,
+        machine.string_encoding(),
+        rows,
+    )
+    .unwrap();
     let old: Vec<Parameter> = read.sides.old.into_iter().map(Parameter::from).collect();
     let new: Vec<Parameter> = read.sides.new.into_iter().map(Parameter::from).collect();
     let trees = TypeTrees::resolve(new.iter().map(Parameter::plc_type), &types);
@@ -212,7 +218,13 @@ async fn s7_1500_page(old: &StoredParameter, new: &StoredParameter) -> Result<Di
     .await?;
     let rows = tx.types().type_rows(machine.id()).await?;
     drop(tx);
-    let types = PlatformTypes::collect(machine.id(), PlcPlatform::S7_1500, rows).unwrap();
+    let types = PlatformTypes::collect(
+        machine.id(),
+        PlcPlatform::S7_1500,
+        machine.string_encoding(),
+        rows,
+    )
+    .unwrap();
     let old: Vec<Parameter> = read.sides.old.into_iter().map(Parameter::from).collect();
     let new: Vec<Parameter> = read.sides.new.into_iter().map(Parameter::from).collect();
     let trees = TypeTrees::resolve(old.iter().chain(&new).map(Parameter::plc_type), &types);

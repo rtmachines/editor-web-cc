@@ -180,7 +180,7 @@ fn compare(
     type_rows: Vec<PlcType>,
     leaf_rows: u32,
 ) -> Result<(Machine, DiffPage), AppError> {
-    let types = PlatformTypes::collect_encoded(
+    let types = PlatformTypes::collect(
         machine.id(),
         machine.platform(),
         machine.string_encoding(),

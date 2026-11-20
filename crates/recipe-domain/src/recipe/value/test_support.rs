@@ -52,9 +52,8 @@ pub(crate) fn string_tree(length: u16) -> TypeTree {
 
 /// The tree of a `STRING(length)` parameter on a machine with the given `encoding`.
 pub(crate) fn encoded_string_tree(length: u16, encoding: StringEncoding) -> TypeTree {
-    let types =
-        PlatformTypes::collect_encoded(machine(), PLATFORM, encoding, [string_row(50, length)])
-            .expect("fixture ids are unique");
+    let types = PlatformTypes::collect(machine(), PLATFORM, encoding, [string_row(50, length)])
+        .expect("fixture ids are unique");
     TypeTree::resolve(id(50), &types).unwrap()
 }
 

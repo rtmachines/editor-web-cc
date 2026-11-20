@@ -135,7 +135,7 @@ impl ListTypes {
     ) -> Result<TypeList, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
-        let types = PlatformTypes::collect_encoded(
+        let types = PlatformTypes::collect(
             machine.id(),
             machine.platform(),
             machine.string_encoding(),
@@ -246,7 +246,7 @@ impl GetTypeTree {
     ) -> Result<TypeView, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
-        let types = PlatformTypes::collect_encoded(
+        let types = PlatformTypes::collect(
             machine.id(),
             machine.platform(),
             machine.string_encoding(),
@@ -340,7 +340,7 @@ impl GetUdtForm {
         )
         .await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
-        let types = PlatformTypes::collect_encoded(
+        let types = PlatformTypes::collect(
             machine.id(),
             machine.platform(),
             machine.string_encoding(),

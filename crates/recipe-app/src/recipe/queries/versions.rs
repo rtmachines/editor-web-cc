@@ -320,7 +320,7 @@ fn check_rule_codes(
     approved: ApprovedRows,
 ) -> Result<(Machine, Vec<ErrorCode>), AppError> {
     let ApprovedRows { parameters, types } = approved;
-    let types = PlatformTypes::collect_encoded(
+    let types = PlatformTypes::collect(
         machine.id(),
         machine.platform(),
         machine.string_encoding(),

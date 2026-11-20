@@ -366,7 +366,7 @@ impl ListParameters {
         let type_rows = tx.types().type_rows(scope.machine.id()).await?;
         let (rows, has_next) = cut_page(rows, size);
         let machine = &scope.machine;
-        let types = PlatformTypes::collect_encoded(
+        let types = PlatformTypes::collect(
             machine.id(),
             machine.platform(),
             machine.string_encoding(),
@@ -536,7 +536,7 @@ impl GetParameter {
         let machine = found.scope.machine;
         let rows = tx.types().type_rows(machine.id()).await?;
         drop(tx);
-        let types = PlatformTypes::collect_encoded(
+        let types = PlatformTypes::collect(
             machine.id(),
             machine.platform(),
             machine.string_encoding(),
@@ -622,7 +622,7 @@ impl GetLimits {
         let machine = found.scope.machine;
         let rows = tx.types().type_rows(machine.id()).await?;
         drop(tx);
-        let types = PlatformTypes::collect_encoded(
+        let types = PlatformTypes::collect(
             machine.id(),
             machine.platform(),
             machine.string_encoding(),

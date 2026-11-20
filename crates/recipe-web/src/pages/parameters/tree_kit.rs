@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, MachineId, MemberName, PlatformTypes, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringKind, StringLength, TypeMember,
-    TypeName, TypeTree,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding, StringKind, StringLength,
+    TypeMember, TypeName, TypeTree,
 };
 use recipe_domain::recipe::{LeafText, ParameterValue};
 use uuid::Uuid;
@@ -121,8 +121,13 @@ impl Kit {
 
     /// Resolve the tree of `root` from the rows of the kit.
     pub(crate) fn tree(&self, root: PlcTypeId) -> TypeTree {
-        let types =
-            PlatformTypes::collect(MachineId::from(MACHINE), PLATFORM, self.rows.clone()).unwrap();
+        let types = PlatformTypes::collect(
+            MachineId::from(MACHINE),
+            PLATFORM,
+            StringEncoding::Latin1,
+            self.rows.clone(),
+        )
+        .unwrap();
         TypeTree::resolve(root, &types).unwrap()
     }
 }

@@ -426,7 +426,7 @@ fn check_tree(
 ) -> Result<(), PlantError> {
     let mut rows = derived.rows().to_vec();
     rows.push(row.clone());
-    let types = PlatformTypes::collect_encoded(machine, platform, encoding, rows)?;
+    let types = PlatformTypes::collect(machine, platform, encoding, rows)?;
     let tree = TypeTree::resolve(row.id(), &types)?;
     tree.check_s7_nesting(platform)
         .map_err(|error| match error {

@@ -709,8 +709,7 @@ fn adr_0202_utf8_latin1_machine_keeps_the_latin_1_rule() {
 
 /// The tree of the root `root` on a `Utf8` machine over the rows `rows`.
 fn utf8_tree(rows: Vec<crate::plant::PlcType>, root: u128) -> TypeTree {
-    let types =
-        PlatformTypes::collect_encoded(machine(), PLATFORM, StringEncoding::Utf8, rows).unwrap();
+    let types = PlatformTypes::collect(machine(), PLATFORM, StringEncoding::Utf8, rows).unwrap();
     TypeTree::resolve(id(root), &types).unwrap()
 }
 

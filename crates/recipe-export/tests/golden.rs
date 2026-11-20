@@ -150,7 +150,8 @@ fn trees(platform: PlcPlatform) -> TypeTrees {
         ),
         array_row(platform, INT_ARRAY, INT, (1, 3)),
     ];
-    let catalog = PlatformTypes::collect(machine_id(), platform, rows).unwrap();
+    let catalog =
+        PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows).unwrap();
     let ids = [INT, REAL, STRING_16, ZONE_TEMP, INT_ARRAY].map(type_id);
     TypeTrees::resolve(ids, &catalog)
 }
@@ -801,7 +802,8 @@ fn latin1_trees() -> TypeTrees {
         ),
         stored_struct(ST_ONE_ROW, "ST_One", &[("value", INT)]),
     ];
-    let catalog = PlatformTypes::collect(machine_id(), platform, rows).unwrap();
+    let catalog =
+        PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows).unwrap();
     TypeTrees::resolve(
         [STRING_4_ROW, ST_COIL_ROW, ST_ONE_ROW].map(type_id),
         &catalog,

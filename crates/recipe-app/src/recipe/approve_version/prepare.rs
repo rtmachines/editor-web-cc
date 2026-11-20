@@ -153,7 +153,7 @@ fn check_and_hash(snapshot: Snapshot) -> Result<(ApprovalReady, Sha256), AppErro
         string_encoding,
         allow_outdated,
     } = snapshot;
-    let types = PlatformTypes::collect_encoded(machine, header.platform, string_encoding, types)?;
+    let types = PlatformTypes::collect(machine, header.platform, string_encoding, types)?;
     let trees = TypeTrees::resolve(draft.parameters().iter().map(|p| p.plc_type()), &types);
     let token = draft.check_for_approval(&units, &trees, allow_outdated)?;
     let body = HashedBody::build(&header, token.draft().parameters(), &units, &trees)?;

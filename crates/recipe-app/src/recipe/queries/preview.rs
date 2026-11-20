@@ -196,6 +196,6 @@ pub(super) fn preview_tree(
         added: 0,
     };
     let root = types.resolve(expr)?;
-    let platform_types = PlatformTypes::collect_encoded(machine, platform, encoding, types.rows)?;
+    let platform_types = PlatformTypes::collect(machine, platform, encoding, types.rows)?;
     Ok(TypeTree::resolve(root, &platform_types)?)
 }

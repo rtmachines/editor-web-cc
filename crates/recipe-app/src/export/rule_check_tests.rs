@@ -79,7 +79,13 @@ async fn body_hash_of_version_one(fixture: &Fixture, machine: &Machine) -> Sha25
         .collect();
     let units = tx.units().live_units(machine.id()).await.unwrap().unwrap();
     let rows = tx.types().type_rows(machine.id()).await.unwrap();
-    let types = PlatformTypes::collect(machine.id(), machine.platform(), rows).unwrap();
+    let types = PlatformTypes::collect(
+        machine.id(),
+        machine.platform(),
+        machine.string_encoding(),
+        rows,
+    )
+    .unwrap();
     let trees = TypeTrees::resolve(parameters.iter().map(Parameter::plc_type), &types);
     let header = ExportHeader {
         machine: machine.code(),

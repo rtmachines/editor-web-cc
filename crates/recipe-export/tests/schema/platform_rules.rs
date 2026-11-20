@@ -679,7 +679,8 @@ mod stored_rows {
             stored_row(platform, (BOOL_ID, None), fixed(Primitive::Bool)),
             stored_row(platform, (ROOT_ID, Some(machine_id())), case.root.clone()),
         ];
-        let catalog = PlatformTypes::collect(machine_id(), platform, rows).expect("a catalog");
+        let catalog = PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows)
+            .expect("a catalog");
         let trees = TypeTrees::resolve([type_id(ROOT_ID)], &catalog);
         let parameters = [parameter(case, &trees)];
         let header = ExportHeader {

@@ -14,7 +14,8 @@ use recipe_app::recipe::{GetVersion, GetVersionInput};
 use recipe_domain::audit::RequestId;
 use recipe_domain::identity::{Role, SessionToken};
 use recipe_domain::plant::{
-    MachineCode, PlatformTypes, PlcPlatform, PlcTypeId, Primitive, RecordShape, TypeTree,
+    MachineCode, PlatformTypes, PlcPlatform, PlcTypeId, Primitive, RecordShape, StringEncoding,
+    TypeTree,
 };
 use recipe_domain::recipe::{ParameterKey, ReferenceNumber, StoredParameter, VersionState};
 use uuid::Uuid;
@@ -62,7 +63,13 @@ async fn tree_of(fixture: &Fixture, ids: &RecipeIds, type_id: PlcTypeId) -> Type
         .type_rows(ids.plant.m7)
         .await
         .unwrap();
-    let types = PlatformTypes::collect(ids.plant.m7, PlcPlatform::S7_300, rows).unwrap();
+    let types = PlatformTypes::collect(
+        ids.plant.m7,
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        rows,
+    )
+    .unwrap();
     TypeTree::resolve(type_id, &types).unwrap()
 }
 

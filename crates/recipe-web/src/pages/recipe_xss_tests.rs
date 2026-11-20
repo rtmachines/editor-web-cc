@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use axum::http::StatusCode;
 use recipe_domain::plant::{
     MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, StringKind, StringLength, TypeTree, UnitPath,
+    RecordShape, StringEncoding, StringKind, StringLength, TypeTree, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, RecipeVersionId,
@@ -721,8 +721,13 @@ fn seed_string_254(world: &World) -> TypeTree {
     })
     .unwrap();
     world.fixture.store.seed_type(&row);
-    let types =
-        PlatformTypes::collect(MachineId::from(M7_ID), PlcPlatform::S7_300, vec![row]).unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(M7_ID),
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        vec![row],
+    )
+    .unwrap();
     TypeTree::resolve(PlcTypeId::from(STRING_254_ID), &types).unwrap()
 }
 

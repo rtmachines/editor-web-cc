@@ -262,7 +262,7 @@ pub(super) fn outdated_parameters(
 /// The function solves one problem: the outdated list reads trees that no caller sees, so a test
 /// checks the encoding on the catalog that the list resolves.
 fn catalog_of(machine: &Machine, types: Vec<PlcType>) -> Result<PlatformTypes, PlantError> {
-    PlatformTypes::collect_encoded(
+    PlatformTypes::collect(
         machine.id(),
         machine.platform(),
         machine.string_encoding(),

@@ -194,7 +194,7 @@ fn validate_base(
     (machine, platform, encoding): (MachineId, PlcPlatform, StringEncoding),
     base: BaseRead,
 ) -> Result<Vec<ParameterTag>, AppError> {
-    let types = PlatformTypes::collect_encoded(machine, platform, encoding, base.types)?;
+    let types = PlatformTypes::collect(machine, platform, encoding, base.types)?;
     let snapshot = VersionSnapshot::from(base.parameters);
     let parameters = snapshot.parameters();
     let trees = TypeTrees::resolve(parameters.iter().map(|p| p.plc_type()), &types);

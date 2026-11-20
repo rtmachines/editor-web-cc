@@ -113,7 +113,8 @@ fn type_row(platform: PlcPlatform, tag: &str) -> PlcType {
 
 fn trees(platform: PlcPlatform, tags: &[&str]) -> TypeTrees {
     let rows: Vec<PlcType> = tags.iter().map(|tag| type_row(platform, tag)).collect();
-    let catalog = PlatformTypes::collect(machine_id(), platform, rows).unwrap();
+    let catalog =
+        PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows).unwrap();
     TypeTrees::resolve(tags.iter().map(|tag| type_id(&type_row_id(tag))), &catalog)
 }
 

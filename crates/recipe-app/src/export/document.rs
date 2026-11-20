@@ -143,7 +143,7 @@ pub(super) async fn read_rows(
             entity: Missing::MachineId(machine_id),
         })?;
     let rows = tx.types().type_rows(machine_id).await?;
-    let types = PlatformTypes::collect_encoded(
+    let types = PlatformTypes::collect(
         machine_id,
         machine.platform(),
         machine.string_encoding(),

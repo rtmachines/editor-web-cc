@@ -26,23 +26,6 @@ pub struct PlatformTypes {
 }
 
 impl PlatformTypes {
-    /// Keep the rows that `machine` can use on `platform`, with the encoding `Latin1`.
-    ///
-    /// A row is kept when its platform set contains `platform` and it is global or belongs to
-    /// `machine`. Task 11.9 of `codesys-twincat-type-rules` deletes this function. Use
-    /// [`PlatformTypes::collect_encoded`] instead.
-    ///
-    /// # Errors
-    ///
-    /// Returns `E-PLT-013` with the reason `RowShape` when two kept rows share one identifier.
-    pub fn collect(
-        machine: MachineId,
-        platform: PlcPlatform,
-        rows: impl IntoIterator<Item = PlcType>,
-    ) -> Result<Self, PlantError> {
-        Self::collect_encoded(machine, platform, StringEncoding::Latin1, rows)
-    }
-
     /// Keep the rows that `machine` can use on `platform` and carry its STRING encoding.
     ///
     /// A row is kept when its platform set contains `platform` and it is global or belongs to
@@ -51,7 +34,7 @@ impl PlatformTypes {
     /// # Errors
     ///
     /// Returns `E-PLT-013` with the reason `RowShape` when two kept rows share one identifier.
-    pub fn collect_encoded(
+    pub fn collect(
         machine: MachineId,
         platform: PlcPlatform,
         string_encoding: StringEncoding,

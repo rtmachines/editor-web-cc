@@ -20,8 +20,8 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, MemberName, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, TypeMember,
-    TypeName, TypeTree, UnitId, UnitPath, UnitUsage,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address,
+    StringEncoding, TypeMember, TypeName, TypeTree, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
     LangCode, Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeId,
@@ -328,7 +328,13 @@ fn line_tree() -> TypeTree {
         primitive_row(Primitive::Real),
     ];
     rows.extend(m7_type_rows());
-    let types = PlatformTypes::collect(MachineId::from(M7_ID), PlcPlatform::S7_300, rows).unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(M7_ID),
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        rows,
+    )
+    .unwrap();
     TypeTree::resolve(PlcTypeId::from(LINE_V1_ID), &types).unwrap()
 }
 

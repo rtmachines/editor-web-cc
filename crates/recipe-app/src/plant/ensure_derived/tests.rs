@@ -354,7 +354,9 @@ async fn rebind_shape(fixture: &Fixture) -> ArrayShape {
     }
     let mut tx = fixture.store.begin_memory(Isolation::ReadOnly).unwrap();
     let rows = tx.types().type_rows(mid(1)).await.unwrap();
-    let platform_types = PlatformTypes::collect(mid(1), PlcPlatform::TwinCat3, rows).unwrap();
+    let platform_types =
+        PlatformTypes::collect(mid(1), PlcPlatform::TwinCat3, StringEncoding::Latin1, rows)
+            .unwrap();
     let trees = TypeTrees::resolve([tid(901), tid(902), tid(903)], &platform_types);
     let parameter = StoredParameter {
         plc_type: tid(903),

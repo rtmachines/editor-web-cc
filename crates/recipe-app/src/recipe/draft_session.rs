@@ -172,7 +172,7 @@ pub(crate) fn collect_stored_types(
     string_encoding: StringEncoding,
     rows: Vec<PlcType>,
 ) -> Result<PlatformTypes, AppError> {
-    PlatformTypes::collect_encoded(machine, platform, string_encoding, rows)
+    PlatformTypes::collect(machine, platform, string_encoding, rows)
         .map_err(|error| DraftError::Stored(Box::new(StoredDefect::of_part(error))).into())
 }
 

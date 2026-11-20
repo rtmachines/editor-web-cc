@@ -425,7 +425,7 @@ fn check(
         page,
     } = read;
     let approver_blocker = draft.check_approver(approver, &policy).err();
-    let types = PlatformTypes::collect_encoded(
+    let types = PlatformTypes::collect(
         machine.id(),
         machine.platform(),
         machine.string_encoding(),

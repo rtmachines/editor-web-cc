@@ -223,7 +223,8 @@ fn global_primitive_and_own_struct_are_kept() {
 fn duplicate_identifier_is_a_row_shape_error() {
     let mut rows = seeds();
     rows.push(primitive_row(INT, Primitive::Int));
-    let error = PlatformTypes::collect(machine(), PLATFORM, rows).unwrap_err();
+    let error =
+        PlatformTypes::collect(machine(), PLATFORM, StringEncoding::Latin1, rows).unwrap_err();
     assert_eq!(error.code(), ErrorCode::PLT_013);
     assert!(matches!(
         error,
@@ -242,7 +243,9 @@ fn row_of_another_machine_off_the_platform_has_no_label() {
         struct_row(10, "ST_Own", &[("x", INT)]),
         primitive_row(INT, Primitive::Int),
     ];
-    let collected = PlatformTypes::collect(machine(), PlcPlatform::S7_300, rows).unwrap();
+    let collected =
+        PlatformTypes::collect(machine(), PlcPlatform::S7_300, StringEncoding::Latin1, rows)
+            .unwrap();
     assert_eq!(collected.label(id(50)), None);
     assert_eq!(collected.label(id(10)), Some("ST_Own@1".to_owned()));
 }
@@ -258,15 +261,32 @@ fn adr_0202_type_tree_holds_the_string_encoding() {
         ]
     };
     let encoded =
-        PlatformTypes::collect_encoded(machine(), PLATFORM, StringEncoding::Utf8, rows()).unwrap();
+        PlatformTypes::collect(machine(), PLATFORM, StringEncoding::Utf8, rows()).unwrap();
     assert_eq!(encoded.string_encoding(), StringEncoding::Utf8);
     assert!(encoded.get(id(10)).is_some());
     assert!(encoded.get(id(50)).is_none());
     let tree = TypeTree::resolve(id(10), &encoded).unwrap();
     assert_eq!(tree.string_encoding(), StringEncoding::Utf8);
 
-    let old = PlatformTypes::collect(machine(), PLATFORM, rows()).unwrap();
+    let old = PlatformTypes::collect(machine(), PLATFORM, StringEncoding::Latin1, rows()).unwrap();
     assert_eq!(old.string_encoding(), StringEncoding::Latin1);
     let old_tree = TypeTree::resolve(id(10), &old).unwrap();
     assert_eq!(old_tree.string_encoding(), StringEncoding::Latin1);
+}
+
+// ADR-0202 (m): `collect` takes the STRING encoding of the machine as its third argument.
+#[test]
+fn adr_0202_collect_takes_the_string_encoding() {
+    let rows = || {
+        vec![
+            primitive_row(INT, Primitive::Int),
+            struct_row(10, "ST_Own", &[("x", INT)]),
+        ]
+    };
+    for encoding in [StringEncoding::Latin1, StringEncoding::Utf8] {
+        let collected = PlatformTypes::collect(machine(), PLATFORM, encoding, rows()).unwrap();
+        assert_eq!(collected.string_encoding(), encoding);
+        let tree = TypeTree::resolve(id(10), &collected).unwrap();
+        assert_eq!(tree.string_encoding(), encoding);
+    }
 }

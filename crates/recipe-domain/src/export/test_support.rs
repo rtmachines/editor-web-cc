@@ -8,7 +8,8 @@ use uuid::Uuid;
 
 use crate::plant::{
     ArrayDimension, ArrayDimensions, MachineId, MemberName, PlatformTypes, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName, TypeTrees,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding, TypeMember, TypeName,
+    TypeTrees,
 };
 
 /// The identifier of `STRING(16)` in the example of `api.md` section 6.2.
@@ -134,7 +135,7 @@ pub(crate) fn catalog(platform: PlcPlatform) -> PlatformTypes {
         ),
         struct_row(LABEL_BOX, platform, ("LabelBox", 1), &[("text", STRING_16)]),
     ];
-    PlatformTypes::collect(machine_id(), platform, rows).unwrap()
+    PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows).unwrap()
 }
 
 /// The trees of every test type on `platform`.

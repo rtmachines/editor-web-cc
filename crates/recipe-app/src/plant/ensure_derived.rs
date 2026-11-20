@@ -77,7 +77,7 @@ impl DerivedTypes {
     ///
     /// Returns `E-PLT-013` when two rows share an identifier.
     pub(crate) fn platform_types(&self) -> Result<PlatformTypes, PlantError> {
-        PlatformTypes::collect_encoded(
+        PlatformTypes::collect(
             self.machine,
             self.platform,
             self.string_encoding,

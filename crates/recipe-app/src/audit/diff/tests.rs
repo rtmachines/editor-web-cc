@@ -66,7 +66,8 @@ fn rig() -> Rig {
         .into_iter()
         .map(|id| state.plc_type(id).unwrap().clone())
         .collect();
-    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine.id(), PLATFORM, machine.string_encoding(), rows).unwrap();
     let trees = TypeTrees::resolve([int, tid(900), tid(901)], &types);
     Rig {
         trees,
@@ -326,7 +327,8 @@ fn an_array_leaf_is_read_by_its_plc_index() {
     .unwrap();
     fixture.store.seed_type(&array);
     let rows = vec![fixture.store.state().plc_type(int).unwrap().clone(), array];
-    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine.id(), PLATFORM, machine.string_encoding(), rows).unwrap();
     let trees = TypeTrees::resolve([tid(910)], &types);
     let make = |first, second| {
         parameter(StoredParameter {
@@ -405,7 +407,8 @@ fn cycle_trees() -> (TypeTrees, PlcTypeId, PlcTypeId) {
     let mut rows = crate::memory::fixtures::seed_struct_cycle(&fixture, (1, PLATFORM));
     let int = seed_type_id(Primitive::Int, None).unwrap();
     rows.push(fixture.store.state().plc_type(int).unwrap().clone());
-    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine.id(), PLATFORM, machine.string_encoding(), rows).unwrap();
     let root = tid(crate::memory::fixtures::STRUCT_CYCLE_ROOT);
     let trees = TypeTrees::resolve([root, int], &types);
     (trees, root, int)
