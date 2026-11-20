@@ -110,7 +110,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The comment at `crates/recipe-domain/src/plant/string_length.rs:61` names the units. A `STRING` length counts characters on a `Latin1` machine and UTF-8 bytes on a `Utf8` machine. A `WSTRING` length counts UTF-16 code units (ADR-0137 (i), ADR-0202).
   - `migrations/0001_schema.sql:95` shipped and does not change.
   - Check: `RUSTDOCFLAGS="-D warnings" cargo doc -p recipe-domain --no-deps` passes, and `grep -n 'two bytes per character' crates/recipe-domain/src/plant/primitive.rs` prints nothing.
-- [ ] 1.9 (docs) [mechanical] Verification only, for review items R06, R07, R10, and for A51 and A52. It changes no file. A missing text is a defect, and the agent reports it.
+- [x] 1.9 (docs) [mechanical] Verification only, for review items R06, R07, R10, and for A51 and A52. It changes no file. A missing text is a defect, and the agent reports it.
   - Review item R06: `data-model.md` §7 holds the size note of ADR-0209 (c).
   - Review item R07: `data-model.md` §7 holds the list of the excluded type families of ADR-0209 (a).
   - Review item R10: the row `parameters[].value` of `api.md` §6.1 holds three examples. They are `16#E9` (`é` on `Latin1`), the two bytes `16#C3` and `16#A9` (`é` on `Utf8`), and `16#20AC` (`€` in a `WSTRING`).
