@@ -18,17 +18,21 @@
 --                         a member row of a struct on a machine with CodesysIec or TwinCat3 whose
 --                         name is one of the 184 keywords of ADR-0203 (d), in any case
 --                         (ADR-0203 (m))
+--   codesys_one_member_struct
+--                         a struct row on a machine with CodesysIec that has exactly one member
+--                         (ADR-0204 (h)). The column stored_text holds the struct name.
 --
 -- The columns are machine_code, type_name, revision, part, and stored_text. For a member row,
 -- type_name and revision are those of the struct and stored_text is the member name. For an array
 -- row, type_name names the element type and stored_text holds both bound arrays.
 -- The query reads every machine, also an archived one, and every revision.
 -- The first three parts stop migration 0011. The parts reserved_struct_name,
--- s7_reserved_struct_name, iec_reserved_struct_name, and iec_keyword_member_name are for
--- information: a struct with such a name keeps its rows and gets no new revision.
+-- s7_reserved_struct_name, iec_reserved_struct_name, iec_keyword_member_name, and
+-- codesys_one_member_struct are for information: such a struct keeps its rows. A reserved name
+-- gets no new revision.
 -- The two parts of ADR-0203 list every stored struct row and every stored member row of the
--- platform. A struct that no parameter names, and a revision that is not the named one, are rows
--- too.
+-- platform. The part of ADR-0204 lists every stored struct row with one member. A struct that no
+-- parameter names, and a revision that is not the named one, are rows too.
 -- The owner reads each row. The query writes nothing.
 --
 -- Run it from the directory deploy/ (docs/ops/runbook.md):
@@ -680,6 +684,11 @@ FROM (
     JOIN struct_row s ON s.id = mem.struct_type_id
     WHERE s.plc_platform IN ('CodesysIec', 'TwinCat3')
       AND upper(mem.member_name) IN (SELECT k.word FROM iec_member_keyword k)
+    UNION ALL
+    SELECT s.machine_code, s.name, s.revision, 'codesys_one_member_struct', s.name
+    FROM struct_row s
+    WHERE s.plc_platform = 'CodesysIec'
+      AND (SELECT count(*) FROM plc_type_member mem WHERE mem.struct_type_id = s.id) = 1
 ) hit
 ORDER BY hit.machine_code COLLATE "C", hit.type_name COLLATE "C", hit.revision,
          hit.part COLLATE "C", hit.stored_text COLLATE "C";

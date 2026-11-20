@@ -4,7 +4,8 @@
 //! name or a member name that differ only in case, an array row with a bound array that starts at
 //! another subscript than 1, a struct with a reserved name, a struct with a Siemens reserved name
 //! on an S7 machine (ADR-0186), and a struct with a reserved name or a member with a keyword name
-//! on a CODESYS or TwinCAT machine (ADR-0203). The tests drop the two indexes of
+//! on a CODESYS or TwinCAT machine (ADR-0203), and a struct with one member on a CODESYS machine
+//! (ADR-0204). The tests drop the two indexes of
 //! ADR-0143 (j) and the array shape constraint, so the rows can exist. They compare the exact rows
 //! of the query, run it as `recipe_app`, and show that it writes nothing.
 
@@ -40,6 +41,8 @@ const IEC_EXTRA_END: &str = "-- iec extra keywords: end";
 const IEC_STRUCT_PART: &str = "iec_reserved_struct_name";
 /// The part of a stored member with a reserved keyword name on CODESYS or TwinCAT (ADR-0203 (m)).
 const IEC_MEMBER_PART: &str = "iec_keyword_member_name";
+/// The part of a stored struct with one member on CODESYS (ADR-0204 (h)).
+const ONE_MEMBER_PART: &str = "codesys_one_member_struct";
 /// The S7 platforms of ADR-0186 (a).
 const S7_1500: &str = "S7_1500";
 const CODESYS: &str = "CodesysIec";
@@ -180,7 +183,7 @@ async fn seed_hits(conn: &mut PgConnection, expected: &mut Expected) {
     let codesys = site_on(conn, CODESYS).await;
     for name in ["PID_Compact", "PD_TEL3", "pd_tel03"] {
         insert_struct(conn, &s7, name, 1, &["speed"]).await;
-        insert_struct(conn, &codesys, name, 1, &["speed"]).await;
+        insert_struct(conn, &codesys, name, 1, &["speed", "limit"]).await;
         expected.hit(&s7.code, name, 1, "s7_reserved_struct_name", name);
     }
     insert_struct(conn, &s7, "PD_TEL3_IN", 1, &["speed"]).await;
@@ -496,7 +499,7 @@ async fn adr_0203_query_lists_the_iec_rows_and_no_s7_row() {
     let codesys = site_on(&mut conn, CODESYS).await;
     insert_struct(&mut conn, &twincat, "VERSION", 1, &["speed"]).await;
     insert_struct(&mut conn, &s7, "VERSION", 1, &["speed"]).await;
-    insert_struct(&mut conn, &codesys, "ST_Keyed", 1, &["END_IF"]).await;
+    insert_struct(&mut conn, &codesys, "ST_Keyed", 1, &["END_IF", "speed"]).await;
     insert_struct(&mut conn, &s7, "ST_Keyed", 1, &["END_IF"]).await;
     let mut expected = Expected::default();
     expected.hit(&twincat.code, "VERSION", 1, IEC_STRUCT_PART, "VERSION");
@@ -614,5 +617,59 @@ fn adr_0203_sql_lists_equal_the_domain_lists() {
             .iter()
             .all(|name| !keywords.contains(name.as_str())),
         "a primitive name is a keyword"
+    );
+}
+
+/// The rows of the part of ADR-0204 (h), as a set.
+fn one_member_rows(found: Vec<Row>) -> BTreeSet<Row> {
+    found
+        .into_iter()
+        .filter(|row| row.3 == ONE_MEMBER_PART)
+        .collect()
+}
+
+#[tokio::test]
+async fn adr_0204_one_member_struct_lists_only_codesys() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let codesys = site_on(&mut conn, CODESYS).await;
+    let twincat = site_on(&mut conn, TWIN_CAT).await;
+    let s7 = site_on(&mut conn, S7_1500).await;
+    let archived = site_on(&mut conn, CODESYS).await;
+    let mut expected = Expected::default();
+
+    // A one-member struct on CODESYS is a hit, also in a later revision, also with a name that
+    // no parameter uses, and also on an archived machine. The member name is no part of the row.
+    insert_struct(&mut conn, &codesys, "ST_One", 1, &["speed"]).await;
+    insert_struct(&mut conn, &codesys, "ST_One", 2, &["limit"]).await;
+    insert_struct(&mut conn, &codesys, "ST_Unused", 1, &["speed"]).await;
+    insert_struct(&mut conn, &archived, "ST_Old", 1, &["speed"]).await;
+    sqlx::query("UPDATE machine SET archived_at = now() WHERE id = $1")
+        .bind(archived.id)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    for (site, name, revision) in [
+        (&codesys, "ST_One", 1),
+        (&codesys, "ST_One", 2),
+        (&codesys, "ST_Unused", 1),
+        (&archived, "ST_Old", 1),
+    ] {
+        expected.hit(&site.code, name, revision, ONE_MEMBER_PART, name);
+    }
+
+    // The same shape is no hit on TwinCAT and on S7. A struct with two members is no hit.
+    insert_struct(&mut conn, &twincat, "ST_One", 1, &["speed"]).await;
+    insert_struct(&mut conn, &s7, "ST_One", 1, &["speed"]).await;
+    insert_struct(&mut conn, &codesys, "ST_Two", 1, &["speed", "limit"]).await;
+    insert_struct(&mut conn, &twincat, "ST_Two", 1, &["speed", "limit"]).await;
+
+    let mut conn = database.connect(Role::App).await;
+    let found = rows(&mut conn).await;
+
+    assert_eq!(
+        one_member_rows(found),
+        expected.0,
+        "only the one-member structs of CODESYS machines are listed"
     );
 }
