@@ -100,6 +100,7 @@ fn machine_shape_with(archived: bool, db_number: Kind) -> Vec<(&'static str, Kin
         ("name", Kind::String),
         ("plc_platform", Kind::String),
         ("db_number", db_number),
+        ("string_encoding", Kind::String),
         (
             "archived_at",
             if archived { Kind::String } else { Kind::Null },

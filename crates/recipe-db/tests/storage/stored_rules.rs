@@ -43,28 +43,29 @@ use crate::support::writers::DocumentFactsWriter;
 use crate::support::{Role as DbRole, TestDatabase, server};
 
 /// The login of the engineer, who edits each draft.
-const ENGINEER: &str = "engineer";
+pub(crate) const ENGINEER: &str = "engineer";
 /// The directory of the two fixture files, from the root of the crate.
-const FIXTURE_DIRECTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/storage/fixtures");
+pub(crate) const FIXTURE_DIRECTORY: &str =
+    concat!(env!("CARGO_MANIFEST_DIR"), "/tests/storage/fixtures");
 /// The levels of the struct `ST_Top` of the nesting row. The count of ADR-0179 is nine.
 const NESTING_LEVELS: u32 = 9;
 
 /// The data of one row of the matrix.
-struct Case {
+pub(crate) struct Case {
     /// The reference number of the recipe.
-    reference: &'static str,
+    pub(crate) reference: &'static str,
     /// The platform of the machine.
-    platform: &'static str,
+    pub(crate) platform: &'static str,
     /// The structs that `DefineUdt` creates before the parameter, the innermost first.
-    structs: Vec<(String, Vec<(&'static str, String)>)>,
+    pub(crate) structs: Vec<(String, Vec<(&'static str, String)>)>,
     /// The type text of the parameter.
-    type_text: &'static str,
+    pub(crate) type_text: &'static str,
     /// The S7 address of the parameter, or `None`.
-    address: Option<&'static str>,
+    pub(crate) address: Option<&'static str>,
     /// The JSON text of the value.
-    value: String,
+    pub(crate) value: String,
     /// The limits of the leaves.
-    limits: Vec<LimitInput>,
+    pub(crate) limits: Vec<LimitInput>,
 }
 
 /// The seven rows of the matrix, in the order of `design.md`.
@@ -179,7 +180,7 @@ fn bool_3d_case() -> Case {
 }
 
 /// A numeric limit on each listed leaf.
-fn range_limits(paths: &[&str], min: &str, max: &str) -> Vec<LimitInput> {
+pub(crate) fn range_limits(paths: &[&str], min: &str, max: &str) -> Vec<LimitInput> {
     paths
         .iter()
         .map(|path| LimitInput {
@@ -192,7 +193,7 @@ fn range_limits(paths: &[&str], min: &str, max: &str) -> Vec<LimitInput> {
 }
 
 /// A length limit on one leaf.
-fn length_limit(path: &str, length: u16) -> LimitInput {
+pub(crate) fn length_limit(path: &str, length: u16) -> LimitInput {
     LimitInput {
         leaf_path: LeafPath::parse(path).unwrap(),
         min: None,
@@ -326,7 +327,7 @@ async fn add_case_parameter(
 
 /// Create the structs, the recipe, and the parameter of a case as the engineer. Then approve the
 /// version as the administrator.
-async fn approve_case(app: &mut App, engineer: &CurrentUser, case: &Case) {
+pub(crate) async fn approve_case(app: &mut App, engineer: &CurrentUser, case: &Case) {
     let seed = app.seed_machine(case.platform, &["U1"]).await;
     for (name, members) in &case.structs {
         define_struct(app, seed.code, name, members).await;
@@ -372,7 +373,7 @@ async fn hash_lines(app: &mut App) -> String {
 
 /// The standard output of `pg_dump --format=plain` of a database: the schema and the data of
 /// every table, also `_sqlx_migrations`.
-fn plain_dump(database: &str) -> Vec<u8> {
+pub(crate) fn plain_dump(database: &str) -> Vec<u8> {
     let output = Command::new("docker")
         .args(["exec", "--user", "postgres", &server().container_id])
         .args(["pg_dump", "--format=plain"])

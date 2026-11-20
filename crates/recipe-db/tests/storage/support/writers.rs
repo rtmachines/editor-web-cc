@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use recipe_app::ports::DocumentWriter;
-use recipe_domain::export::{DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts};
+use recipe_domain::export::{
+    DocumentFacts, ExportError, HashedBody, ScopeBody, ScopeFacts, Sha256,
+};
 
 /// The bytes that [`RecordingWriter`] returns as the document.
 const DOCUMENT: &[u8] = b"{\"recorded\":true}";
@@ -77,6 +79,10 @@ impl DocumentWriter for FailingWriter {
 /// is a pure function of the body and the facts. This writer keeps all of them, so a test sees a
 /// change of `loadable`, the status, the stored hash, or any name. The instant `exported_at`
 /// changes in each export, so the bytes leave it out.
+///
+/// Each document holds the canonical bytes of the body (`canonical_body`) and its hash
+/// (`body_sha256`). A test compares these two values before and after an upgrade, so a change of
+/// the body is visible byte for byte. The document of a scope export also holds `scope_sha256`.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DocumentFactsWriter;
 
@@ -87,30 +93,51 @@ impl DocumentFactsWriter {
     }
 }
 
+/// The fields that the document of a whole version and the document of a scope share.
+fn shared_fields(
+    facts: &DocumentFacts,
+    canonical_body: String,
+    body_sha256: Sha256,
+) -> serde_json::Map<String, serde_json::Value> {
+    let names: Vec<(String, String)> = facts
+        .names
+        .iter()
+        .map(|(key, name)| (format!("{key:?}"), name.to_string()))
+        .collect();
+    let document = serde_json::json!({
+        "loadable": facts.loadable(),
+        "content_sha256": facts.content_sha256.to_string(),
+        "status": format!("{:?}", facts.status),
+        "has_rule_fault": facts.has_rule_fault,
+        "exported_by": format!("{:?}", facts.exported_by),
+        "approved_at": format!("{:?}", facts.approved_at),
+        "approved_by": format!("{:?}", facts.approved_by),
+        "machine_name": facts.machine_name.to_string(),
+        "recipe_name": facts.recipe_name.to_string(),
+        "names": names,
+        "canonical_body": canonical_body,
+        "body_sha256": body_sha256.to_string(),
+    });
+    document
+        .as_object()
+        .cloned()
+        .expect("the json! macro of an object gives an object")
+}
+
 impl DocumentWriter for DocumentFactsWriter {
     fn write(&self, body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8>, ExportError> {
-        let names: Vec<(String, String)> = facts
-            .names
-            .iter()
-            .map(|(key, name)| (format!("{key:?}"), name.to_string()))
-            .collect();
-        let document = serde_json::json!({
-            "loadable": facts.loadable(),
-            "content_sha256": facts.content_sha256.to_string(),
-            "status": format!("{:?}", facts.status),
-            "has_rule_fault": facts.has_rule_fault,
-            "exported_by": format!("{:?}", facts.exported_by),
-            "approved_at": format!("{:?}", facts.approved_at),
-            "approved_by": format!("{:?}", facts.approved_by),
-            "machine_name": facts.machine_name.to_string(),
-            "recipe_name": facts.recipe_name.to_string(),
-            "names": names,
-            "body": body,
-        });
-        Ok(serde_json::to_vec_pretty(&document)?)
+        let mut fields = shared_fields(facts, body.canonical_text()?, body.sha256()?);
+        fields.insert("body".to_owned(), serde_json::to_value(body)?);
+        Ok(serde_json::to_vec_pretty(&fields)?)
     }
 
-    fn write_scoped(&self, _body: &ScopeBody, _facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
-        Ok(DOCUMENT.to_vec())
+    fn write_scoped(&self, body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, ExportError> {
+        let mut fields = shared_fields(&facts.document, body.canonical_text()?, body.sha256()?);
+        fields.insert(
+            "scope_sha256".to_owned(),
+            serde_json::Value::String(facts.scope_sha256.to_string()),
+        );
+        fields.insert("body".to_owned(), serde_json::to_value(body)?);
+        Ok(serde_json::to_vec_pretty(&fields)?)
     }
 }

@@ -107,6 +107,7 @@ fn machine_image(n: u128, code: &str, name: &str, archived_at: Value) -> Value {
         "name": name,
         "plc_platform": "TwinCat3",
         "db_number": null,
+        "string_encoding": "Latin1",
         "archived_at": archived_at,
         "created_at": now_text(),
         "updated_at": now_text(),
