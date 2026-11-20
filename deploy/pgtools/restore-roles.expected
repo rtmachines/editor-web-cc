@@ -47,6 +47,7 @@ GRANT|login_attempt|SELECT
 GRANT|machine.archived_at|UPDATE
 GRANT|machine.db_number|UPDATE
 GRANT|machine.name|UPDATE
+GRANT|machine.string_encoding|UPDATE
 GRANT|machine.updated_at|UPDATE
 GRANT|machine|INSERT
 GRANT|machine|SELECT

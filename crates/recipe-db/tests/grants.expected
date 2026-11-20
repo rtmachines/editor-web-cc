@@ -51,6 +51,7 @@ login_attempt|SELECT
 machine.archived_at|UPDATE
 machine.db_number|UPDATE
 machine.name|UPDATE
+machine.string_encoding|UPDATE
 machine.updated_at|UPDATE
 machine|INSERT
 machine|SELECT

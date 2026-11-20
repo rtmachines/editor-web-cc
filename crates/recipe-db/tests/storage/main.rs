@@ -19,6 +19,8 @@ mod migration_0011;
 mod migration_0013;
 mod migration_0014;
 mod migration_0015;
+mod migration_0017;
+mod migration_0018;
 mod operations;
 mod operations_schema;
 mod platform_ranges;

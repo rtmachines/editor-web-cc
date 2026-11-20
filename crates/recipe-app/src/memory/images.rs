@@ -43,6 +43,8 @@ pub(super) fn machine_image(row: &MachineRow) -> RowImage {
             row.db_number
                 .map_or(Value::Null, |n| Value::from(n.value())),
         ),
+        // Task 11.1 of `codesys-twincat-type-rules` replaces the literal with the field of the row.
+        ("string_encoding", Value::String("Latin1".to_owned())),
         ("archived_at", optional_time(row.archived_at)),
         ("created_at", time_value(row.created_at)),
         ("updated_at", time_value(row.updated_at)),
