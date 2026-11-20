@@ -177,6 +177,11 @@ fn adr_0209_open_array_pointer_and_reference_fail() {
 }
 
 #[test]
+fn adr_0141_wstring_of_length_zero_fails() {
+    assert_eq!(reason_of("WSTRING(0)"), Some(DerivedTypeReason::Grammar));
+}
+
+#[test]
 fn type_expr_primitive_name_with_at_is_unknown_struct() {
     assert_eq!(reason_of("INT@1"), Some(DerivedTypeReason::UnknownStruct));
 }
