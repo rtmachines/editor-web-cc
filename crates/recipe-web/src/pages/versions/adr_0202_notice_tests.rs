@@ -4,6 +4,7 @@
 //! Four cases cover the export area of an Approved version: healthy and faulty, each on a `Latin1`
 //! machine and on a `Utf8` machine. A fault is a stored part that breaks a current rule. The rule
 //! notice stands first and the encoding notice second. The link names the notices in the same order.
+//! A fifth case covers a Retired version on a `Utf8` machine. It shows only its own notice.
 
 use axum::http::StatusCode;
 use recipe_domain::recipe::VersionState;
@@ -130,6 +131,35 @@ async fn adr_0202_version_notice_utf8_faulty_shows_the_rule_notice_then_the_enco
         "{area}"
     );
     assert_notices(&reply.body, &[RULE_ID, ENCODING_ID]);
+}
+
+#[tokio::test]
+async fn adr_0202_version_notice_utf8_retired_shows_only_the_retired_notice() {
+    let world = utf8_approved_world().await;
+    // Only the Administrator exports a Retired version, so only the Administrator sees its link.
+    // The approval of the seed raises the change number of version 1 from 1 to 2.
+    let retire = world
+        .post_with(
+            &world.admin,
+            &format!("{}/retire", utf8_page()),
+            "row_version=2",
+            &[],
+        )
+        .await;
+    assert_eq!(retire.status, StatusCode::OK, "{}", retire.body);
+    let reply = world.get_en(&world.admin, &utf8_page()).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let main = main_of(&reply.body);
+    let area = export_area(main);
+    assert!(
+        area.contains(&format!(
+            "<div id=\"{RULE_ID}\"><div class=\"alert alert-info\">"
+        )),
+        "{area}"
+    );
+    assert!(!main.contains(ENCODING_ID), "{main}");
+    assert!(!main.contains(ENCODING_EN), "{main}");
+    assert_notices(&reply.body, &[RULE_ID]);
 }
 
 #[tokio::test]

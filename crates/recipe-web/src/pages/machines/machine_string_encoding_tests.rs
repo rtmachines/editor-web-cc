@@ -210,6 +210,11 @@ async fn adr_0202_machine_page_has_no_form_on_a_machine_with_a_version() {
         assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
         assert!(reply.body.contains(&fact("Latin1")), "{}", reply.body);
         assert!(!has_encoding_form(&reply.body), "{}", reply.body);
+        assert!(
+            !reply.body.contains("machine-string-encoding-form"),
+            "{}",
+            reply.body
+        );
     }
 }
 
@@ -224,6 +229,24 @@ async fn adr_0202_machine_page_frozen_encoding_through_htmx_gives_409_e_plt_054(
     assert_eq!(reply.header("hx-retarget"), "#error-panel");
     assert_eq!(reply.header("hx-push-url"), "false");
     assert_unchanged(&world, &before).await;
+}
+
+#[tokio::test]
+async fn adr_0202_a_frozen_encoding_answer_removes_the_form() {
+    let world = world_with_m9_and_draft();
+    let reply = world
+        .post(&world.engineer, ROUTE, "string_encoding=Utf8", true)
+        .await;
+    assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-054");
+    assert_eq!(reply.header("hx-retarget"), "#error-panel");
+    assert!(
+        reply
+            .body
+            .contains("<form id=\"machine-string-encoding-form\" hx-swap-oob=\"true\"></form>"),
+        "{}",
+        reply.body
+    );
+    assert!(!has_encoding_form(&reply.body), "{}", reply.body);
 }
 
 #[tokio::test]

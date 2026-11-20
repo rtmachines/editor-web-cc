@@ -99,5 +99,11 @@ async fn types_reserved_name_the_form_of_a_new_revision_of_int_gives_e_plt_013_r
     assert!(reply.body.contains("E-PLT-013"), "{}", reply.body);
     let reason = text(Lang::En, "type-reason-reserved-name");
     assert!(reply.body.contains(&reason), "{}", reply.body);
+    // The form of a revision has no name input, so the line has no link (ADR-0050 (d)).
+    assert!(
+        !reply.body.contains("class=\"target-link\""),
+        "{}",
+        reply.body
+    );
     assert_eq!(world.fixture.snapshot(), before, "nothing is written");
 }

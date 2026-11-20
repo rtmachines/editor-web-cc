@@ -84,17 +84,20 @@ fn target_of(error: &AppError) -> Option<String> {
     }
 }
 
-/// Build the error with the lines and the form with the sent text.
+/// Build the error with the lines and the form with the sent text. `keep_form` is false when the
+/// answer removes the form out of band, because the machine got a version (ADR-0202 (p)).
 fn refused_encoding(
     state: &WebState,
     request: &PageRequest,
     code: MachineCode,
     (sent, lines): (String, NonEmpty<FieldError>),
+    keep_form: bool,
 ) -> WebError {
     let t = Texts::new(state.bundles(), request.lang());
     refused(state, request, lines, |errors| StringEncodingFormBlock {
         t,
         string_encoding_form: StringEncodingForm::new(code, sent, request.csrf_token())
+            .shown(keep_form)
             .out_of_band(errors),
     })
 }
@@ -142,8 +145,12 @@ async fn run(
         Ok(output) => return Ok(output),
         Err(error) => error,
     };
+    let keep_form = !matches!(
+        error,
+        AppError::Plant(PlantError::StringEncodingFrozen { .. })
+    );
     Err(match refusal_lines(error, target_of) {
-        Ok(lines) => refused_encoding(state, request, code, (sent, lines)),
+        Ok(lines) => refused_encoding(state, request, code, (sent, lines), keep_form),
         Err(other) => other,
     })
 }
@@ -173,6 +180,7 @@ pub(super) async fn set(
                 &request,
                 code,
                 (fields.string_encoding, lines),
+                true,
             ));
         }
     };
