@@ -174,22 +174,24 @@ impl Machine {
     /// Create a live machine with its main unit `U1` (`domain-model.md` section 5.1, `CreateMachine`).
     ///
     /// The caller supplies the identifiers. A live S7 machine needs a data block number.
-    /// An IEC machine has none (ADR-0156). The machine gets the encoding `Latin1`.
-    /// Task 11.11 of `codesys-twincat-type-rules` adds the encoding as an argument.
+    /// An IEC machine has none (ADR-0156). An S7 machine has the encoding `Latin1` only (ADR-0202).
     ///
     /// # Errors
     ///
     /// Returns the error of [`check_data_block`]: [`PlantError::DataBlockMissing`],
     /// [`PlantError::DataBlockNotOnPlatform`], or [`PlantError::DataBlockOutOfRange`].
+    /// Returns the error of [`check_string_encoding`]: [`PlantError::StringEncodingNotOnPlatform`].
     pub fn create(
         id: MachineId,
         code: MachineCode,
         name: Text,
         platform: PlcPlatform,
         db_number: Option<DataBlockNumber>,
+        string_encoding: StringEncoding,
         main: (UnitId, Text),
     ) -> Result<Self, PlantError> {
         check_data_block(code, platform, db_number)?;
+        check_string_encoding(code, platform, string_encoding)?;
         let (main_id, main_name) = main;
         let path = UnitPath::first_main();
         let main_unit = Unit {
@@ -204,7 +206,7 @@ impl Machine {
             name,
             platform,
             db_number,
-            string_encoding: StringEncoding::Latin1,
+            string_encoding,
             archived_at: None,
             units: BTreeMap::from([(path, main_unit)]),
         })

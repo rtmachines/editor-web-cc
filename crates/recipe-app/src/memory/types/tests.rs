@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafClass, Machine, MachineCode, MachineId, MemberName,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeMember,
-    TypeName, UnitId,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding,
+    TypeExpr, TypeMember, TypeName, UnitId,
 };
 use recipe_domain::text::Text;
 use serde_json::{Value, json};
@@ -48,6 +48,7 @@ fn machine(n: u128, code: &str) -> Machine {
         Text::parse("Press").unwrap(),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (
             UnitId::from(Uuid::from_u128(
                 n.checked_mul(100).unwrap().checked_add(1).unwrap(),

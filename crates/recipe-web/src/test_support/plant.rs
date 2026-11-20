@@ -198,6 +198,7 @@ fn m7_machine() -> Machine {
         text("Press line"),
         PlcPlatform::S7_300,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id(M7_NUMBER, &path("U1")), text("Infeed")),
     )
     .unwrap();
@@ -225,6 +226,7 @@ fn m12_machine() -> Machine {
         text("Old press line"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(M12_NUMBER, &path("U1")), text("Infeed")),
     )
     .unwrap();

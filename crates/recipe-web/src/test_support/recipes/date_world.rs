@@ -13,7 +13,7 @@ use recipe_domain::export::{ExportHeader, HashedBody};
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
-    Primitive, RecordShape, S7Address, TypeTrees, UnitId,
+    Primitive, RecordShape, S7Address, StringEncoding, TypeTrees, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -62,6 +62,7 @@ fn seed_date_machine(world: &World) -> UnitId {
         Text::parse("Dating line").unwrap(),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

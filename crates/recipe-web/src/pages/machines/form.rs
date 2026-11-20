@@ -16,7 +16,7 @@ use recipe_app::plant::{
     CreateMachine, CreateMachineInput, GetMachineForm, MachineForm, MachineFormInput,
 };
 use recipe_app::ports::NonEmpty;
-use recipe_domain::plant::{DataBlockNumber, MachineCode, PlantError, PlcPlatform};
+use recipe_domain::plant::{DataBlockNumber, MachineCode, PlantError, PlcPlatform, StringEncoding};
 use recipe_domain::text::Text;
 use serde::Deserialize;
 
@@ -43,6 +43,8 @@ pub(crate) struct CreateFields {
     /// The data block number. An absent field and an empty text are no value (design D5).
     #[serde(default)]
     db_number: String,
+    /// The `STRING` encoding. Like `plc_platform`, the field is required (ADR-0202).
+    string_encoding: String,
     main_unit_name: String,
     /// The session token. The CSRF layer checked it before the handler runs.
     #[serde(default, rename = "csrf_token")]
@@ -50,7 +52,7 @@ pub(crate) struct CreateFields {
 }
 
 impl CreateFields {
-    /// Turn the five fields into the input of `CreateMachine`. Read every field (ADR-0041 (a)).
+    /// Turn the six fields into the input of `CreateMachine`. Read every field (ADR-0041 (a)).
     ///
     /// # Errors
     ///
@@ -79,6 +81,11 @@ impl CreateFields {
                 )
                 .map(Some),
         };
+        let string_encoding = lines.field(
+            StringEncoding::parse(&self.string_encoding),
+            STRING_ENCODING_INPUT,
+            FieldReason::Choice,
+        );
         let main_unit_name = lines.field(
             Text::parse(&self.main_unit_name),
             "main_unit_name",
@@ -90,6 +97,7 @@ impl CreateFields {
                 name: name?,
                 platform: platform?,
                 db_number: db_number?,
+                string_encoding: string_encoding?,
                 main_unit_name: main_unit_name?,
             })
         })();
@@ -99,6 +107,18 @@ impl CreateFields {
 
 /// The `id` and the name of the input of the data block number (design D8).
 const DB_NUMBER_INPUT: &str = "db_number";
+
+/// The `id` and the name of the select of the `STRING` encoding (ADR-0202).
+const STRING_ENCODING_INPUT: &str = "string_encoding";
+
+/// The encoding that the form selects first (ADR-0202).
+const DEFAULT_ENCODING: StringEncoding = StringEncoding::Latin1;
+
+/// One option of the list of encodings. The text is the name of the encoding.
+struct EncodingOption {
+    value: &'static str,
+    text: &'static str,
+}
 
 /// One option of the list of platforms.
 struct PlatformOption {
@@ -114,6 +134,8 @@ struct NewMachineForm {
     name: String,
     platform: String,
     db_number: String,
+    encodings: [EncodingOption; 2],
+    string_encoding: String,
     main_unit: String,
     /// True when the answer swaps the form out of band (ADR-0041 (e)).
     oob: bool,
@@ -143,6 +165,11 @@ impl NewMachineForm {
             name: String::new(),
             platform: String::new(),
             db_number: String::new(),
+            encodings: StringEncoding::ALL.map(|encoding| EncodingOption {
+                value: encoding.as_str(),
+                text: encoding.as_str(),
+            }),
+            string_encoding: DEFAULT_ENCODING.to_string(),
             main_unit: String::new(),
             oob: false,
             errors: FormErrors::default(),
@@ -162,6 +189,7 @@ impl NewMachineForm {
             name: fields.name.clone(),
             platform: fields.plc_platform.clone(),
             db_number: fields.db_number.clone(),
+            string_encoding: fields.string_encoding.clone(),
             main_unit: fields.main_unit_name.clone(),
             oob: true,
             errors,
@@ -273,8 +301,8 @@ pub(crate) async fn create(
     see_other_path(&format!("/machines/{code}"), request.request_id(), [])
 }
 
-/// Return the input that a refused `CreateMachine` names: the code of `E-PLT-001`, or the data
-/// block number of `E-PLT-024`, `E-PLT-050`, and `E-PLT-051`.
+/// Return the input that a refused `CreateMachine` names: the code of `E-PLT-001`, the data
+/// block number of `E-PLT-024`, `E-PLT-050`, and `E-PLT-051`, or the encoding of `E-PLT-053`.
 fn code_input(error: &AppError) -> Option<String> {
     let AppError::Plant(inner) = error else {
         return None;
@@ -284,6 +312,7 @@ fn code_input(error: &AppError) -> Option<String> {
         PlantError::DataBlockOutOfRange { .. }
         | PlantError::DataBlockMissing { .. }
         | PlantError::DataBlockNotOnPlatform { .. } => Some(DB_NUMBER_INPUT.to_owned()),
+        PlantError::StringEncodingNotOnPlatform { .. } => Some(STRING_ENCODING_INPUT.to_owned()),
         _other => None,
     }
 }

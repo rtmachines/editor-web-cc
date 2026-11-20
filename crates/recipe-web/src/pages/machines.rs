@@ -149,6 +149,8 @@ mod connection_xss_tests;
 #[cfg(test)]
 mod data_block_commands_tests;
 #[cfg(test)]
+mod form_encoding_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
 mod list_tests;

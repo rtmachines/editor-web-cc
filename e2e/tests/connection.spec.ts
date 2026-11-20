@@ -46,7 +46,7 @@ async function createTwinCatMachine(context: BrowserContext): Promise<string> {
   }
   const code = `M${MACHINE_NUMBER_BASE + Math.floor(Math.random() * MACHINE_NUMBER_SPAN)}`;
   const created = await context.request.post('/machines', {
-    form: { code, name: `TwinCat line ${code}`, plc_platform: 'TwinCat3', main_unit_name: 'Line' },
+    form: { code, name: `TwinCat line ${code}`, plc_platform: 'TwinCat3', string_encoding: 'Latin1', main_unit_name: 'Line' },
     headers: { 'X-CSRF-Token': csrf, 'Sec-Fetch-Site': SAME_ORIGIN },
     maxRedirects: 0,
   });

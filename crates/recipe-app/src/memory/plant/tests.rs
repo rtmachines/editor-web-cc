@@ -54,6 +54,7 @@ fn machine(n: u128, code: &str) -> Machine {
         text("Press"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (
             uid(n.checked_mul(100).unwrap().checked_add(1).unwrap()),
             text("Main"),

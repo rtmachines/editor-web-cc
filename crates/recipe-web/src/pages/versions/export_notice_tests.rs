@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, MemberName, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
-    Primitive, RecordShape, S7Address, TypeMember, TypeName, UnitId,
+    Primitive, RecordShape, S7Address, StringEncoding, TypeMember, TypeName, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -209,6 +209,7 @@ fn seed_overlap_machine(world: &World) -> (MachineId, UnitId) {
         Text::parse("Byte line").unwrap(),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

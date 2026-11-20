@@ -510,6 +510,7 @@ pub(super) fn codesys_machine(n: u128, code_text: &str) -> Machine {
         name("Press"),
         PlcPlatform::CodesysIec,
         None,
+        StringEncoding::Latin1,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
     .unwrap()
@@ -517,7 +518,7 @@ pub(super) fn codesys_machine(n: u128, code_text: &str) -> Machine {
 
 /// Postgres only: each of the six machine statements reads the column `string_encoding`.
 ///
-/// `recipe_app` has the column grant, and `Machine::create` stores `Latin1` until task 11.11.
+/// `recipe_app` has the column grant, so the case sets `Utf8` with SQL.
 #[tokio::test]
 async fn adr_0202_stored_machine_reads_its_string_encoding() {
     let h = PgHarness::create().await;

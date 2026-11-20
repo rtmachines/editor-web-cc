@@ -100,6 +100,7 @@ fn large_machine() -> Machine {
         text("Warehouse"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(1), text("Unit 1")),
     )
     .unwrap();

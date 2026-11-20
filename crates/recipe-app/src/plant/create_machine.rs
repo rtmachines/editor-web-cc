@@ -2,7 +2,8 @@
 
 use recipe_domain::audit::{AuditContext, AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, MachineCode, MachineId, PlantError, PlcPlatform, UnitId,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlantError, PlcPlatform, StringEncoding,
+    UnitId,
 };
 use recipe_domain::text::Text;
 
@@ -23,6 +24,8 @@ pub struct CreateMachineInput {
     pub platform: PlcPlatform,
     /// The data block number. An S7 platform needs it and an IEC platform has none (ADR-0156).
     pub db_number: Option<DataBlockNumber>,
+    /// The `STRING` encoding of the new machine. An S7 platform has `Latin1` only (ADR-0202).
+    pub string_encoding: StringEncoding,
     /// The name of the main unit `U1`.
     pub main_unit_name: Text,
 }
@@ -64,6 +67,7 @@ impl CreateMachine {
     /// Returns `Forbidden` when the role lacks `MachineManage`.
     /// Returns `PlantError::DataBlockMissing` (`E-PLT-050`), `DataBlockNotOnPlatform` (`E-PLT-051`),
     /// or `DataBlockOutOfRange` (`E-PLT-024`) before the transaction opens.
+    /// Returns `PlantError::StringEncodingNotOnPlatform` (`E-PLT-053`) before the transaction opens.
     /// Returns `PlantError::DuplicateMachineCode` (`E-PLT-001`) when a live machine has the code.
     /// Returns `AppError::Storage` or `AppError::AuditWriteFailed` when the database fails.
     #[tracing::instrument(name = "use_case", skip_all, fields(operation = %Self::OPERATION))]
@@ -85,6 +89,7 @@ impl CreateMachine {
             input.name,
             input.platform,
             input.db_number,
+            input.string_encoding,
             (output.main_unit, input.main_unit_name),
         )?;
         let mut tx = self.ctx.uow.begin(Isolation::ReadCommitted).await?;

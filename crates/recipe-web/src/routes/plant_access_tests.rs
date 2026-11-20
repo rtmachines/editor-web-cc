@@ -64,8 +64,8 @@ fn plant_access_the_area_rows_of_the_matrix_hold_every_route_of_the_three_areas(
 const FORM_ROUTES: [(&str, &str, &str, &str); 6] = [
     (
         "/machines",
-        "code=&name=&plc_platform=&main_unit_name=",
-        "code=M50&name=A&plc_platform=S7-1500&main_unit_name=B&extra=1",
+        "code=&name=&plc_platform=&string_encoding=Latin1&main_unit_name=",
+        "code=M50&name=A&plc_platform=S7-1500&string_encoding=Latin1&main_unit_name=B&extra=1",
         "CreateMachine",
     ),
     (

@@ -313,7 +313,7 @@ async fn plant_sweep_redirects_hold_no_token_and_send_the_csp() {
     let commands = [
         (
             "/machines",
-            "code=M99&name=C&plc_platform=S7_300&db_number=1&main_unit_name=I",
+            "code=M99&name=C&plc_platform=S7_300&string_encoding=Latin1&db_number=1&main_unit_name=I",
         ),
         ("/machines/M7/rename", "name=Renamed"),
         (

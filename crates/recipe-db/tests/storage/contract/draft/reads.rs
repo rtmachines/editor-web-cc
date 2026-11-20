@@ -134,8 +134,7 @@ contract_case!(
 
 /// Postgres only: the read path and the lock path give the encoding of the machine (ADR-0202).
 ///
-/// `Machine::create` stores `Latin1` until task 11.11, so the case sets `Utf8` with SQL as
-/// `recipe_app`, which holds the column grant.
+/// The case sets `Utf8` with SQL as `recipe_app`, which holds the column grant.
 #[tokio::test]
 async fn adr_0202_stored_draft_reads_the_string_encoding() {
     let h = PgHarness::create().await;

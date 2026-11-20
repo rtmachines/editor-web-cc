@@ -1,7 +1,7 @@
 use recipe_domain::audit::{AggregateType, AuditAction, SecurityEventKind};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
-use recipe_domain::plant::{DataBlockNumber, MachineCode, PlcPlatform, UnitPath};
+use recipe_domain::plant::{DataBlockNumber, MachineCode, PlcPlatform, StringEncoding, UnitPath};
 use serde_json::json;
 
 use super::{CreateMachine, CreateMachineInput};
@@ -15,11 +15,21 @@ fn input(code: &str) -> CreateMachineInput {
 }
 
 fn input_on(code: &str, platform: PlcPlatform, db_number: Option<&str>) -> CreateMachineInput {
+    input_with_encoding(code, platform, db_number, StringEncoding::Latin1)
+}
+
+fn input_with_encoding(
+    code: &str,
+    platform: PlcPlatform,
+    db_number: Option<&str>,
+    string_encoding: StringEncoding,
+) -> CreateMachineInput {
     CreateMachineInput {
         code: MachineCode::parse(code).unwrap(),
         name: text("Press 7"),
         platform,
         db_number: db_number.map(|number| DataBlockNumber::parse(number).unwrap()),
+        string_encoding,
         main_unit_name: text("Feeder"),
     }
 }
@@ -193,4 +203,59 @@ async fn an_iec_machine_without_a_number_stores_none_and_a_null_image_field() {
     let entries = fixture.store.audit_entries();
     let after = entries.first().unwrap().after().unwrap();
     assert_eq!(after.get("db_number"), Some(&json!(null)));
+}
+
+#[tokio::test]
+async fn adr_0202_create_machine_stores_utf8_on_an_iec_platform() {
+    let fixture = Fixture::new();
+    let output = CreateMachine::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            input_with_encoding("M10", PlcPlatform::CodesysIec, None, StringEncoding::Utf8),
+        )
+        .await
+        .unwrap();
+    let machine = fixture.store.state().machine(output.machine).unwrap();
+    assert_eq!(machine.string_encoding(), StringEncoding::Utf8);
+    let entries = fixture.store.audit_entries();
+    let after = entries.first().unwrap().after().unwrap();
+    assert_eq!(after.get("string_encoding"), Some(&json!("Utf8")));
+}
+
+#[tokio::test]
+async fn adr_0202_create_machine_stores_latin1_on_an_s7_platform() {
+    let fixture = Fixture::new();
+    let output = CreateMachine::new(fixture.context())
+        .execute(&actor(Role::ProcessEngineer), &meta(), input("M7"))
+        .await
+        .unwrap();
+    let machine = fixture.store.state().machine(output.machine).unwrap();
+    assert_eq!(machine.string_encoding(), StringEncoding::Latin1);
+    let entries = fixture.store.audit_entries();
+    let after = entries.first().unwrap().after().unwrap();
+    assert_eq!(after.get("string_encoding"), Some(&json!("Latin1")));
+}
+
+#[tokio::test]
+async fn adr_0202_create_machine_refuses_utf8_on_an_s7_platform_before_the_transaction() {
+    let fixture = Fixture::new();
+    let machines_before = fixture.store.state().machines.len();
+    let error = CreateMachine::new(fixture.context())
+        .execute(
+            &actor(Role::ProcessEngineer),
+            &meta(),
+            input_with_encoding(
+                "M7",
+                PlcPlatform::S7_1500,
+                Some("100"),
+                StringEncoding::Utf8,
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_053);
+    assert!(fixture.store.journal().is_empty());
+    assert!(fixture.store.audit_entries().is_empty());
+    assert_eq!(fixture.store.state().machines.len(), machines_before);
 }

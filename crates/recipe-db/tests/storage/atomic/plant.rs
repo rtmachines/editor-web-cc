@@ -9,7 +9,8 @@ use recipe_app::plant::{
     RenameMachineInput, RenameUnit, RenameUnitInput, SetMachineDataBlock, SetMachineDataBlockInput,
 };
 use recipe_domain::plant::{
-    DataBlockNumber, MachineCode, MemberName, PlcPlatform, TypeExpr, TypeName, UnitPath,
+    DataBlockNumber, MachineCode, MemberName, PlcPlatform, StringEncoding, TypeExpr, TypeName,
+    UnitPath,
 };
 use recipe_domain::text::Text;
 
@@ -34,6 +35,7 @@ fn create_input(code: &str) -> CreateMachineInput {
         name: text("Press"),
         platform: PlcPlatform::TwinCat3,
         db_number: None,
+        string_encoding: StringEncoding::Latin1,
         main_unit_name: text("Feeder"),
     }
 }
@@ -59,6 +61,39 @@ async fn create_machine_commits_the_machine_the_unit_and_two_entries() {
             .await,
         1
     );
+    app.assert_chain_moved(&before, &["MachineCreated", "UnitAdded"])
+        .await;
+}
+
+#[tokio::test]
+async fn adr_0202_create_machine_commits_utf8() {
+    let mut app = App::create().await;
+    let before = app.head().await;
+    let input = CreateMachineInput {
+        platform: PlcPlatform::CodesysIec,
+        string_encoding: StringEncoding::Utf8,
+        ..create_input("M803")
+    };
+
+    let output = CreateMachine::new(app.context())
+        .execute(&app.user, &app.meta, input)
+        .await
+        .unwrap();
+
+    let machine = *output.machine.as_uuid();
+    let stored: String = sqlx::query_scalar("SELECT string_encoding FROM machine WHERE id = $1")
+        .bind(machine)
+        .fetch_one(app.admin())
+        .await
+        .unwrap();
+    assert_eq!(stored, "Utf8");
+    let audited: String = sqlx::query_scalar(
+        "SELECT after_state->>'string_encoding' FROM audit_log WHERE action = 'MachineCreated'",
+    )
+    .fetch_one(app.admin())
+    .await
+    .unwrap();
+    assert_eq!(audited, "Utf8");
     app.assert_chain_moved(&before, &["MachineCreated", "UnitAdded"])
         .await;
 }

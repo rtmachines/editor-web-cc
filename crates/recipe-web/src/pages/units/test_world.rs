@@ -87,6 +87,7 @@ fn machine(number: u16, text: &str) -> Machine {
         name(text),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(number, 0), name("Infeed")),
     )
     .unwrap()

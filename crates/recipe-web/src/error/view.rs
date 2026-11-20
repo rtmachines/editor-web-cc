@@ -25,7 +25,7 @@ pub(crate) struct FieldLine {
 /// The recipe pages add the field ids of design D6. The audit list and the security events add the
 /// visible filter inputs of ADR-0051. A hidden field has no entry. A line of `WebError::BadQuery`
 /// never links (ADR-0050 (e)). The connection form adds its inputs (ADR-0154).
-const INPUT_FIELDS: [&str; 45] = [
+const INPUT_FIELDS: [&str; 46] = [
     "login",
     "password",
     "current_password",
@@ -68,6 +68,7 @@ const INPUT_FIELDS: [&str; 45] = [
     "rack",
     "slot",
     "db_number",
+    "string_encoding",
     "port",
     "address",
     "comm_mode",

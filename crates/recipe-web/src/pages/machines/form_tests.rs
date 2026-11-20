@@ -11,8 +11,7 @@ use crate::test_support::plant::{cookie_of, main_of, world};
 use crate::test_support::text;
 
 /// A valid body of the form.
-const GOOD: &str =
-    "code=M99&name=Press+line+2&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
+const GOOD: &str = "code=M99&name=Press+line+2&plc_platform=S7_300&string_encoding=Latin1&db_number=1&main_unit_name=Infeed";
 /// The opening tag of the create form (design D6). The fixed `id` serves the out-of-band swap.
 const FORM_TAG: &str = "<form id=\"machine-new-form\" method=\"post\" action=\"/machines\" hx-boost=\"true\" hx-target=\"#content\" hx-push-url=\"true\" hx-sync=\"closest form:drop\">";
 /// The opening tag of the same form when an error answer swaps it out of band (ADR-0041 (e)).
@@ -33,57 +32,57 @@ const PLATFORMS: [(&str, &str); 5] = [
 /// A body with one bad field, the name of the field in the error, and the key of the reason.
 const BAD_FIELDS: [(&str, &str, &str); 11] = [
     (
-        "code=X7&name=A&plc_platform=S7_300&main_unit_name=B",
+        "code=X7&name=A&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=B",
         "code",
         "reason-machine-code",
     ),
     (
-        "code=M0&name=A&plc_platform=S7_300&main_unit_name=B",
+        "code=M0&name=A&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=B",
         "code",
         "reason-machine-code",
     ),
     (
-        "code=M99&name=+&plc_platform=S7_300&main_unit_name=B",
+        "code=M99&name=+&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=B",
         "machine_name",
         "reason-name",
     ),
     (
-        "code=M99&name=%01&plc_platform=S7_300&main_unit_name=B",
+        "code=M99&name=%01&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=B",
         "machine_name",
         "reason-name",
     ),
     (
-        "code=M99&name=A&plc_platform=S7-300&main_unit_name=B",
+        "code=M99&name=A&plc_platform=S7-300&string_encoding=Latin1&main_unit_name=B",
         "plc_platform",
         "reason-platform",
     ),
     (
-        "code=M99&name=A&plc_platform=&main_unit_name=B",
+        "code=M99&name=A&plc_platform=&string_encoding=Latin1&main_unit_name=B",
         "plc_platform",
         "reason-platform",
     ),
     (
-        "code=M99&name=A&plc_platform=s7_300&main_unit_name=B",
+        "code=M99&name=A&plc_platform=s7_300&string_encoding=Latin1&main_unit_name=B",
         "plc_platform",
         "reason-platform",
     ),
     (
-        "code=M99&name=A&plc_platform=S7_300&main_unit_name=+",
+        "code=M99&name=A&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=+",
         "main_unit_name",
         "reason-name",
     ),
     (
-        "code=M99&name=A&plc_platform=S7_300&db_number=0&main_unit_name=B",
+        "code=M99&name=A&plc_platform=S7_300&string_encoding=Latin1&db_number=0&main_unit_name=B",
         "db_number",
         "reason-connection-data-block",
     ),
     (
-        "code=M99&name=A&plc_platform=S7_300&db_number=65536&main_unit_name=B",
+        "code=M99&name=A&plc_platform=S7_300&string_encoding=Latin1&db_number=65536&main_unit_name=B",
         "db_number",
         "reason-connection-data-block",
     ),
     (
-        "code=M99&name=A&plc_platform=S7_300&db_number=abc&main_unit_name=B",
+        "code=M99&name=A&plc_platform=S7_300&string_encoding=Latin1&db_number=abc&main_unit_name=B",
         "db_number",
         "reason-connection-data-block",
     ),
@@ -185,7 +184,8 @@ async fn machines_form_marks_the_platform_list_as_required() {
         );
         assert!(form.contains(&label), "{lang}: {form}");
         assert!(form.contains("<select id=\"plc_platform\" name=\"plc_platform\" aria-required=\"true\" aria-describedby=\"plc_platform-hint\">"), "{lang}: {form}");
-        assert_eq!(form.matches("aria-required=\"true\"").count(), 4, "{form}");
+        // The code, the name, the platform, the encoding, and the main unit name are required.
+        assert_eq!(form.matches("aria-required=\"true\"").count(), 5, "{form}");
     }
 }
 
@@ -209,8 +209,9 @@ async fn machines_form_starts_the_platform_list_with_the_selected_empty_option()
             let option = format!("<option value=\"{value}\">{}</option>", text(lang, key));
             assert!(form.contains(&option), "{lang} {value}: {form}");
         }
-        assert_eq!(form.matches("<option").count(), 6);
-        assert_eq!(form.matches(" selected").count(), 1, "{form}");
+        // The platform list has six options. The encoding list adds two (ADR-0202).
+        assert_eq!(form.matches("<option").count(), 8);
+        assert_eq!(form.matches(" selected").count(), 2, "{form}");
     }
 }
 
@@ -325,7 +326,8 @@ async fn machines_create_accepts_the_token_field_of_a_plain_form_and_an_htmx_req
     let body = format!("{GOOD}&csrf_token={}", world.engineer.csrf);
     let plain = world.post(&world.engineer, "/machines", &body, false).await;
     assert_eq!(plain.status, StatusCode::SEE_OTHER, "{}", plain.body);
-    let htmx_body = "code=M98&name=Second&plc_platform=TwinCat3&main_unit_name=Infeed";
+    let htmx_body =
+        "code=M98&name=Second&plc_platform=TwinCat3&string_encoding=Latin1&main_unit_name=Infeed";
     let htmx = world.post(&world.admin, "/machines", htmx_body, true).await;
     assert_eq!(htmx.status, StatusCode::SEE_OTHER, "{}", htmx.body);
     assert_eq!(htmx.header("location"), "/machines/M98");
@@ -345,7 +347,7 @@ async fn machines_create_is_forbidden_for_an_operator_and_creates_nothing() {
 #[tokio::test]
 async fn machines_create_with_the_code_of_a_live_machine_puts_e_plt_001_under_the_code() {
     let world = world();
-    let body = "code=M7&name=Again&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
+    let body = "code=M7&name=Again&plc_platform=S7_300&string_encoding=Latin1&db_number=1&main_unit_name=Infeed";
     let before = world.audit_count();
     let reply = world.post(&world.engineer, "/machines", body, true).await;
     assert_htmx_error(&reply, StatusCode::CONFLICT, "E-PLT-001");
@@ -368,8 +370,8 @@ async fn machines_create_with_the_code_of_a_live_machine_puts_e_plt_001_under_th
 async fn machines_create_reads_an_empty_data_block_as_no_value_for_an_iec_machine() {
     let world = world();
     let bodies = [
-        "code=M96&name=Iec&plc_platform=CodesysIec&db_number=&main_unit_name=Infeed",
-        "code=M95&name=Iec&plc_platform=TwinCat3&main_unit_name=Infeed",
+        "code=M96&name=Iec&plc_platform=CodesysIec&string_encoding=Latin1&db_number=&main_unit_name=Infeed",
+        "code=M95&name=Iec&plc_platform=TwinCat3&string_encoding=Latin1&main_unit_name=Infeed",
     ];
     for body in bodies {
         let reply = world.post(&world.engineer, "/machines", body, false).await;
@@ -389,8 +391,8 @@ async fn machines_create_s7_300_without_a_number_puts_e_plt_050_under_the_data_b
     let world = world();
     let before = world.audit_count();
     let bodies = [
-        "code=M99&name=Press&plc_platform=S7_300&db_number=&main_unit_name=Infeed",
-        "code=M99&name=Press&plc_platform=S7_300&main_unit_name=Infeed",
+        "code=M99&name=Press&plc_platform=S7_300&string_encoding=Latin1&db_number=&main_unit_name=Infeed",
+        "code=M99&name=Press&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=Infeed",
     ];
     for body in bodies {
         let reply = world.post(&world.engineer, "/machines", body, true).await;
@@ -421,12 +423,12 @@ async fn machines_create_puts_the_other_data_block_refusals_under_the_data_block
     let before = world.audit_count();
     let cases = [
         (
-            "code=M99&name=Iec&plc_platform=CodesysIec&db_number=5&main_unit_name=Infeed",
+            "code=M99&name=Iec&plc_platform=CodesysIec&string_encoding=Latin1&db_number=5&main_unit_name=Infeed",
             "E-PLT-051",
             "5",
         ),
         (
-            "code=M99&name=Press&plc_platform=S7_300&db_number=16001&main_unit_name=Infeed",
+            "code=M99&name=Press&plc_platform=S7_300&string_encoding=Latin1&db_number=16001&main_unit_name=Infeed",
             "E-PLT-024",
             "16001",
         ),
@@ -461,7 +463,7 @@ async fn machines_create_puts_the_other_data_block_refusals_under_the_data_block
 #[tokio::test]
 async fn machines_create_checks_the_data_block_only_when_every_field_parses() {
     let world = world();
-    let body = "code=M99&name=+&plc_platform=S7_300&main_unit_name=Infeed";
+    let body = "code=M99&name=+&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=Infeed";
     let reply = world.post(&world.engineer, "/machines", body, true).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     assert!(!reply.body.contains("E-PLT-050"), "{}", reply.body);
@@ -498,7 +500,7 @@ async fn machines_create_names_the_field_and_the_reason_of_each_bad_value() {
 async fn machines_create_lists_every_bad_field_and_swaps_the_form_with_the_sent_texts() {
     let world = world();
     let before = world.audit_count();
-    let body = "code=%3Cb%3E&name=+&plc_platform=S7-300&main_unit_name=%01";
+    let body = "code=%3Cb%3E&name=+&plc_platform=S7-300&string_encoding=Latin1&main_unit_name=%01";
     let reply = world.post(&world.engineer, "/machines", body, true).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     assert_eq!(reply.header("hx-push-url"), "false");
@@ -531,7 +533,8 @@ async fn machines_create_lists_every_bad_field_and_swaps_the_form_with_the_sent_
 #[tokio::test]
 async fn machines_create_keeps_the_chosen_platform_in_the_form_of_an_error_answer() {
     let world = world();
-    let body = "code=X7&name=Press&plc_platform=TwinCat3&main_unit_name=Infeed";
+    let body =
+        "code=X7&name=Press&plc_platform=TwinCat3&string_encoding=Latin1&main_unit_name=Infeed";
     let reply = world.post(&world.engineer, "/machines", body, true).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     assert!(reply.body.contains("Errors: 1."), "{}", reply.body);
@@ -540,7 +543,8 @@ async fn machines_create_keeps_the_chosen_platform_in_the_form_of_an_error_answe
         form.contains("<option value=\"TwinCat3\" selected>"),
         "{form}"
     );
-    assert_eq!(form.matches(" selected").count(), 1, "{form}");
+    // One selected platform and the selected default encoding.
+    assert_eq!(form.matches(" selected").count(), 2, "{form}");
     assert!(form.contains("value=\"Press\""), "{form}");
     assert!(form.contains("value=\"Infeed\""), "{form}");
     assert_eq!(form.matches("aria-invalid=\"true\"").count(), 1, "{form}");
@@ -550,8 +554,8 @@ async fn machines_create_keeps_the_chosen_platform_in_the_form_of_an_error_answe
 async fn machines_create_rejects_a_missing_or_an_unknown_field() {
     let world = world();
     let bodies = [
-        "code=M99&name=A&plc_platform=S7_300",
-        "code=M99&name=A&plc_platform=S7_300&main_unit_name=B&extra=1",
+        "code=M99&name=A&plc_platform=S7_300&string_encoding=Latin1",
+        "code=M99&name=A&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=B&extra=1",
         "",
     ];
     for body in bodies {
@@ -570,7 +574,7 @@ async fn machines_create_an_unknown_key_with_an_empty_code_gives_one_line() {
     let world = world();
     let before = world.audit_count();
     let snapshot = world.fixture.snapshot();
-    let body = "code=&name=A&plc_platform=S7_300&main_unit_name=B&bogus=1";
+    let body = "code=&name=A&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=B&bogus=1";
     let reply = world.post(&world.engineer, "/machines", body, true).await;
     assert_htmx_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-WEB-008");
     assert_eq!(summary_lines(&reply.body), 1, "{}", reply.body);
@@ -595,8 +599,7 @@ async fn machines_create_an_unknown_key_with_an_empty_code_gives_one_line() {
 #[tokio::test]
 async fn machines_create_stores_a_name_with_markup_and_the_list_shows_it_escaped() {
     let world = world();
-    let body =
-        "code=M97&name=%3Cb%3Ex%3C%2Fb%3E&plc_platform=S7_300&db_number=1&main_unit_name=Infeed";
+    let body = "code=M97&name=%3Cb%3Ex%3C%2Fb%3E&plc_platform=S7_300&string_encoding=Latin1&db_number=1&main_unit_name=Infeed";
     let reply = world.post(&world.engineer, "/machines", body, false).await;
     assert_eq!(reply.status, StatusCode::SEE_OTHER, "{}", reply.body);
     let list = world.get_en(&world.engineer, "/machines?q=M97").await;

@@ -30,7 +30,7 @@ pub(crate) fn route_rows() -> Vec<(Endpoint, [Want; 6])> {
             endpoint(
                 Method::POST,
                 "/machines",
-                "code=M99&name=Created&plc_platform=S7_300&db_number=1&main_unit_name=Infeed",
+                "code=M99&name=Created&plc_platform=S7_300&string_encoding=Latin1&db_number=1&main_unit_name=Infeed",
             ),
             [Login, created, created, Forbidden, Password, Login],
         ),

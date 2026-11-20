@@ -238,6 +238,7 @@ fn seed_composite_machine(world: &World) -> UnitId {
         Text::parse("Composite line").unwrap(),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

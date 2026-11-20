@@ -30,7 +30,7 @@ const REVISION_ADD_BODY: &str = "members[0].name=a&members[0].type=INT&add=1";
 const COMMANDS: [(&str, &str); 12] = [
     (
         "/machines",
-        "code=M99&name=C&plc_platform=S7_300&db_number=1&main_unit_name=I",
+        "code=M99&name=C&plc_platform=S7_300&string_encoding=Latin1&db_number=1&main_unit_name=I",
     ),
     ("/machines/{code}/rename", "name=Renamed"),
     ("/machines/{code}/archive", ""),

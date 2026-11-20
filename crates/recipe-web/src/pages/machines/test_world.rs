@@ -39,6 +39,7 @@ fn machine(number: u32, name: &str) -> Machine {
         Text::parse(name).unwrap(),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (
             UnitId::from(id_of(UNIT_TAG, number)),
             Text::parse("Infeed").unwrap(),
@@ -91,6 +92,7 @@ pub(super) fn seed_live_machine(
         Text::parse("Live line").unwrap(),
         platform,
         db_number.map(|text| DataBlockNumber::parse(text).unwrap()),
+        StringEncoding::Latin1,
         (
             UnitId::from(id_of(UNIT_TAG, number)),
             Text::parse("Infeed").unwrap(),

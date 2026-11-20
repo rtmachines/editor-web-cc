@@ -51,6 +51,7 @@ pub fn machine(n: u128, code_text: &str) -> Machine {
         name("Press"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
     .unwrap()
@@ -64,6 +65,7 @@ pub fn s7_machine(n: u128, code_text: &str, db_number: &str) -> Machine {
         name("Press"),
         PlcPlatform::S7_1500,
         Some(DataBlockNumber::parse(db_number).unwrap()),
+        StringEncoding::Latin1,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
     .unwrap()

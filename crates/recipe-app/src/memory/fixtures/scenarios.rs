@@ -175,6 +175,7 @@ pub(crate) fn create_machine_input() -> CreateMachineInput {
         name: text("Press 7"),
         platform: PlcPlatform::S7_300,
         db_number: Some(recipe_domain::plant::DataBlockNumber::parse("100").unwrap()),
+        string_encoding: recipe_domain::plant::StringEncoding::Latin1,
         main_unit_name: text("Feeder"),
     }
 }

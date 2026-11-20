@@ -29,7 +29,7 @@ use recipe_db::Database;
 use recipe_db::settings::PoolSettings;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::UserId;
-use recipe_domain::plant::{Machine, MachineCode, MachineId, PlcPlatform, UnitId};
+use recipe_domain::plant::{Machine, MachineCode, MachineId, PlcPlatform, StringEncoding, UnitId};
 use recipe_domain::recipe::{ParameterKey, RecipeVersionId, StoredValue};
 use recipe_domain::text::Text;
 use serde_json::json;
@@ -64,6 +64,7 @@ fn new_machine() -> Machine {
         Text::parse("Press").unwrap(),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (UnitId::from(Uuid::new_v4()), Text::parse("Feeder").unwrap()),
     )
     .unwrap()

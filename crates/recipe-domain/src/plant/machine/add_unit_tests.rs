@@ -16,6 +16,7 @@ pub(super) fn new_machine() -> Machine {
         name("Press"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (uid(1), name("Main")),
     )
     .unwrap()

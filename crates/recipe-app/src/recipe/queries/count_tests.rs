@@ -16,7 +16,7 @@ use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, Role};
 use recipe_domain::plant::{
     DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId,
-    PlcTypeRecord, Unit, UnitId, UnitPath, UnitUsage,
+    PlcTypeRecord, StringEncoding, Unit, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
     LangCode, Ordinal, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
@@ -455,6 +455,7 @@ fn machine_with(units: u128) -> Machine {
         text("Press"),
         PLATFORM,
         None,
+        StringEncoding::Latin1,
         (uid(101), text("Main")),
     )
     .unwrap();

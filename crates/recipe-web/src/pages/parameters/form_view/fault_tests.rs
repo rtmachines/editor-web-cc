@@ -13,7 +13,7 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafPath, Machine, MachineCode, MachineId, PlcPlatform,
-    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, UnitId,
+    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, StringEncoding, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -108,6 +108,7 @@ fn seed_version_on_s7_1500(world: &World, state: VersionState) {
         text("Test line"),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (UnitId::from(UNIT_ID), text("Infeed")),
     )
     .unwrap();

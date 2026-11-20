@@ -53,8 +53,8 @@ const SELECT_UNITS: &str = "\
 SELECT id, path, name, archived_at FROM unit WHERE machine_id = $1 ORDER BY id";
 
 const INSERT_MACHINE: &str = "\
-INSERT INTO machine (id, code, name, plc_platform, db_number, archived_at) \
-VALUES ($1, $2, $3, $4, $5, $6) RETURNING to_jsonb(machine)";
+INSERT INTO machine (id, code, name, plc_platform, db_number, string_encoding, archived_at) \
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING to_jsonb(machine)";
 
 const INSERT_UNIT: &str = "\
 INSERT INTO unit (id, machine_id, path, name, archived_at) \
@@ -246,6 +246,7 @@ pub(super) async fn insert(
         .bind(machine.name().as_str())
         .bind(machine.platform().as_str())
         .bind(machine.db_number().map(|number| i32::from(number.value())))
+        .bind(machine.string_encoding().as_str())
         .bind(machine.archived_at().map(|at| *at.as_offset_date_time()))
         .fetch_one(&mut *connection)
         .await
