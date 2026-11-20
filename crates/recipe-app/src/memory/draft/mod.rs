@@ -234,10 +234,14 @@ fn stored_draft(
     let Some(recipe) = state.recipes.get(&row.recipe) else {
         return Ok(None);
     };
+    let Some(machine) = state.machines.get(&recipe.machine) else {
+        return Ok(None);
+    };
     Ok(Some(StoredDraft {
         reference: recipe.reference.clone(),
         machine: recipe.machine,
         platform: row.platform,
+        string_encoding: machine.string_encoding,
         version,
         number: row.number,
         state: row.state().map_err(|reason| corrupt_rows(&reason))?,

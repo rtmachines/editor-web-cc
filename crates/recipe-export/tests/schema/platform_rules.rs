@@ -111,7 +111,7 @@ fn v2_schema() -> Value {
 }
 
 /// A valid document v2 on `platform`. Every type reference is a UUID of its `types` list (a3).
-fn base(platform: PlcPlatform) -> Value {
+pub(super) fn base(platform: PlcPlatform) -> Value {
     let address = if platform.is_s7() {
         json!("DB1.DBB0")
     } else {
@@ -213,7 +213,7 @@ fn parameter_with(primitive: Primitive, value: Value) -> Value {
     })
 }
 
-fn assert_fails_at(doc: &Value, path: &str, keyword: &str) {
+pub(super) fn assert_fails_at(doc: &Value, path: &str, keyword: &str) {
     let found = v2_failures(doc);
     let expected = (path.to_owned(), keyword.to_owned());
     assert!(
@@ -222,7 +222,7 @@ fn assert_fails_at(doc: &Value, path: &str, keyword: &str) {
     );
 }
 
-fn assert_passes(doc: &Value) {
+pub(super) fn assert_passes(doc: &Value) {
     assert_eq!(v2_failures(doc), Vec::new());
 }
 
@@ -464,7 +464,8 @@ mod stored_rows {
     use recipe_domain::plant::{
         DataBlockNumber, LeafClass, Machine, MachineCode, MachineId, MemberName, PlatformTypes,
         PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet,
-        StoredMachine, StoredUnit, TypeMember, TypeName, TypeTrees, UnitId, UnitPath,
+        StoredMachine, StoredUnit, StringEncoding, TypeMember, TypeName, TypeTrees, UnitId,
+        UnitPath,
     };
     use recipe_domain::recipe::{
         Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue,
@@ -631,6 +632,7 @@ mod stored_rows {
             db_number: platform
                 .max_data_block()
                 .map(|_| DataBlockNumber::parse("1").expect("a data block number")),
+            string_encoding: StringEncoding::Latin1,
             archived_at: None,
             units: vec![unit],
         })
@@ -677,7 +679,8 @@ mod stored_rows {
             stored_row(platform, (BOOL_ID, None), fixed(Primitive::Bool)),
             stored_row(platform, (ROOT_ID, Some(machine_id())), case.root.clone()),
         ];
-        let catalog = PlatformTypes::collect(machine_id(), platform, rows).expect("a catalog");
+        let catalog = PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows)
+            .expect("a catalog");
         let trees = TypeTrees::resolve([type_id(ROOT_ID)], &catalog);
         let parameters = [parameter(case, &trees)];
         let header = ExportHeader {
@@ -706,8 +709,13 @@ mod stored_rows {
             content_sha256: body.sha256().expect("a content hash"),
             names,
             has_rule_fault,
+            string_encoding: StringEncoding::Latin1,
         };
-        let scope = ScopeBody::build(&body, &UnitPath::parse("U1").expect("a unit path"));
+        let scope = ScopeBody::build(
+            &body,
+            &UnitPath::parse("U1").expect("a unit path"),
+            StringEncoding::Latin1,
+        );
         let facts = ScopeFacts {
             document,
             scope_sha256: scope.sha256().expect("a scope hash"),

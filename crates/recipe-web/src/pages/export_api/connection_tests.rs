@@ -16,7 +16,7 @@ use recipe_domain::audit::AuditAction;
 use recipe_domain::identity::{Role, UserId};
 use recipe_domain::plant::{
     CommMode, DataBlockNumber, Machine, MachineCode, MachineId, PlcAddress, PlcConnection, PlcHost,
-    PlcLogin, PlcPassword, PlcPlatform, Rack, Slot, TcpPort, UnitId,
+    PlcLogin, PlcPassword, PlcPlatform, Rack, Slot, StringEncoding, TcpPort, UnitId,
 };
 use recipe_domain::recipe::{Recipe, RecipeId, RecipeVersionId, ReferenceNumber};
 use recipe_domain::text::Text;
@@ -93,6 +93,7 @@ fn seed_machine(fixture: &Fixture, number: u32, platform: PlcPlatform) -> Machin
         platform
             .max_data_block()
             .map(|_| DataBlockNumber::parse("100").unwrap()),
+        StringEncoding::Latin1,
         (unit, Text::parse("Infeed").unwrap()),
     )
     .unwrap();
@@ -381,6 +382,7 @@ async fn connection_route_resolves_the_live_machine_of_a_reused_code_and_refuses
         Text::parse("Reused code").unwrap(),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     MemberName, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet,
-    TypeExpr, TypeMember, TypeName,
+    StringEncoding, TypeExpr, TypeMember, TypeName,
 };
 
 use super::type_text::{expr_names_row, type_text};
@@ -97,7 +97,7 @@ async fn open_with(extra: &[PlcType]) -> (Fixture, MemoryTransaction, DerivedTyp
         .unwrap();
     let rows = tx.types().type_rows(mid(1)).await.unwrap();
     let context = audit_context(&actor(Role::ProcessEngineer), &meta());
-    let types = DerivedTypes::new(mid(1), PLATFORM, rows, context);
+    let types = DerivedTypes::new(mid(1), PLATFORM, StringEncoding::Latin1, rows, context);
     (fixture, tx, types)
 }
 

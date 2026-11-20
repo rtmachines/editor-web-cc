@@ -12,7 +12,7 @@ use super::leaf::{LeafFault, LeafType, Mode, convert, string_length_units};
 use super::leaves::{ValueLeaf, value_leaves};
 use super::numeric::numeric_range;
 use super::{canonical, parse_decimal};
-use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TimeType, TypeTree};
+use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, StringEncoding, TimeType, TypeTree};
 use crate::recipe::limit::{ProcessLimit, bound_text};
 
 impl ParameterValue {
@@ -93,6 +93,7 @@ impl ParameterValue {
                     primitive: leaf.primitive,
                     string_length: leaf.string_length,
                     platform: tree.platform(),
+                    string_encoding: tree.string_encoding(),
                     mode: Mode::Stored,
                     rules,
                 };
@@ -150,7 +151,15 @@ fn ordered_faults_under(
         if let Some(fault) = shape.remove(&leaf.path) {
             faults.push(fault);
         } else if let Some(limit) = cover.get(&leaf.path) {
-            faults.extend(check_leaf(leaf, limit, (tree.platform(), rules)).err());
+            faults.extend(
+                check_leaf(
+                    leaf,
+                    limit,
+                    (tree.platform(), rules),
+                    tree.string_encoding(),
+                )
+                .err(),
+            );
         }
     }
     faults.extend(shape.into_values());
@@ -204,6 +213,7 @@ fn check_leaf(
     leaf: &ValueLeaf<'_>,
     limit: &ProcessLimit,
     (platform, rules): (PlcPlatform, RuleSet),
+    string_encoding: StringEncoding,
 ) -> Result<(), ValueFault> {
     let fault = |value: String, min: String, max: String| ValueFault::OutOfLimit {
         leaf: leaf.path.clone(),
@@ -215,7 +225,7 @@ fn check_leaf(
         let Value::String(text) = leaf.value else {
             return Err(ValueFault::WrongTree);
         };
-        let length = string_length_units(text, leaf.primitive);
+        let length = string_length_units(text, leaf.primitive, string_encoding);
         return if length > usize::from(max_length) {
             Err(fault(
                 length.to_string(),

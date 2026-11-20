@@ -27,6 +27,10 @@ mod diff_page;
 mod diff_page_tests;
 #[cfg(test)]
 mod diff_tests;
+#[cfg(test)]
+mod draft_read_paths_tests;
+#[cfg(test)]
+mod machine_read_paths_tests;
 mod outdated;
 mod parameter_form;
 #[cfg(test)]
@@ -54,6 +58,8 @@ mod source_tests;
 mod test_world;
 #[cfg(test)]
 mod version_gate_tests;
+#[cfg(test)]
+mod version_read_paths_tests;
 #[cfg(test)]
 mod version_tests;
 mod versions;

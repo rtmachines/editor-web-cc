@@ -16,7 +16,7 @@ use axum::http::StatusCode;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     LeafPath, Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
-    Primitive, RecordShape, UnitId,
+    Primitive, RecordShape, StringEncoding, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -178,6 +178,7 @@ pub(crate) fn seed_two_versions_on_s7_1500(world: &World) {
         text("Test line"),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (UnitId::from(RULE_UNIT), text("Infeed")),
     )
     .unwrap();

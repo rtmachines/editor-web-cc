@@ -61,6 +61,12 @@ pub enum Expected {
         /// The length of the type.
         length: u16,
     },
+    /// A `STRING(n)` leaf of a `Utf8` machine needs a string inside its length in UTF-8 bytes
+    /// without `U+0000` (ADR-0202 (f)).
+    StringUtf8 {
+        /// The length of the type in UTF-8 bytes.
+        length: u16,
+    },
     /// A `CHAR` or `WCHAR` leaf needs one Unicode scalar inside the range of the type.
     Char {
         /// The highest scalar of the type.
@@ -140,6 +146,9 @@ impl fmt::Display for Expected {
                     f,
                     "a string of at most {length} characters from Latin-1 without U+0000"
                 )
+            }
+            Self::StringUtf8 { length } => {
+                write!(f, "a string of at most {length} UTF-8 bytes without U+0000")
             }
             Self::Char { max } => write!(f, "one character from U+0001 to U+{max:04X}"),
             Self::Literal { type_name } => write!(f, "an IEC literal of type {type_name}"),

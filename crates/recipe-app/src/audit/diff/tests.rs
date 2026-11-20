@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     LeafPath, MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, S7Address, TypeMember, TypeName, TypeTrees,
+    RecordShape, S7Address, StringEncoding, TypeMember, TypeName, TypeTrees,
 };
 use recipe_domain::recipe::{
     Draft, Parameter, ParameterKey, StoredDraft, StoredLimit, StoredParameter, StoredValue,
@@ -66,7 +66,8 @@ fn rig() -> Rig {
         .into_iter()
         .map(|id| state.plc_type(id).unwrap().clone())
         .collect();
-    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine.id(), PLATFORM, machine.string_encoding(), rows).unwrap();
     let trees = TypeTrees::resolve([int, tid(900), tid(901)], &types);
     Rig {
         trees,
@@ -326,7 +327,8 @@ fn an_array_leaf_is_read_by_its_plc_index() {
     .unwrap();
     fixture.store.seed_type(&array);
     let rows = vec![fixture.store.state().plc_type(int).unwrap().clone(), array];
-    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine.id(), PLATFORM, machine.string_encoding(), rows).unwrap();
     let trees = TypeTrees::resolve([tid(910)], &types);
     let make = |first, second| {
         parameter(StoredParameter {
@@ -375,6 +377,7 @@ fn a_change_of_a_real_draft_gives_the_diff_of_its_leaf() {
         reference: reference("R-1"),
         machine: mid(1),
         platform: PLATFORM,
+        string_encoding: StringEncoding::Latin1,
         version: vid(11),
         number: 1,
         state: VersionState::LiveDraft,
@@ -404,7 +407,8 @@ fn cycle_trees() -> (TypeTrees, PlcTypeId, PlcTypeId) {
     let mut rows = crate::memory::fixtures::seed_struct_cycle(&fixture, (1, PLATFORM));
     let int = seed_type_id(Primitive::Int, None).unwrap();
     rows.push(fixture.store.state().plc_type(int).unwrap().clone());
-    let types = PlatformTypes::collect(machine.id(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine.id(), PLATFORM, machine.string_encoding(), rows).unwrap();
     let root = tid(crate::memory::fixtures::STRUCT_CYCLE_ROOT);
     let trees = TypeTrees::resolve([root, int], &types);
     (trees, root, int)

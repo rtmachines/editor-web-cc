@@ -13,7 +13,7 @@ const HTMX_ENGLISH: [(&str, &str); 2] = [("hx-request", "true"), ("cookie", "rec
 async fn error_push_url_a_refused_machine_form_keeps_the_url() {
     let fixture = Fixture::new();
     let session = fixture.seed_session(2, Role::ProcessEngineer, false);
-    let body = "code=X1&name=Line&plc_platform=S7_300&main_unit_name=Infeed";
+    let body = "code=X1&name=Line&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=Infeed";
     let reply = post_fields(
         &fixture.router(),
         "/machines",

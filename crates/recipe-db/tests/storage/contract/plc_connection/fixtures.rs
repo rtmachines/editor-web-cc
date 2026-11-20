@@ -3,7 +3,7 @@
 use recipe_app::ports::{RowImage, SealedSecret};
 use recipe_domain::plant::{
     CommMode, DataBlockNumber, Machine, MachineId, PlcAddress, PlcConnection, PlcHost, PlcLogin,
-    PlcPlatform, Rack, Slot, TcpPort,
+    PlcPlatform, Rack, Slot, StringEncoding, TcpPort,
 };
 
 use crate::contract::harness::{Harness, begin, commit};
@@ -24,6 +24,7 @@ pub async fn save_machine(
         platform
             .max_data_block()
             .map(|_| DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
     .unwrap();

@@ -1,5 +1,5 @@
 use recipe_domain::error_codes::ErrorCode;
-use recipe_domain::plant::{LeafPath, PlcPlatform, Primitive};
+use recipe_domain::plant::{LeafPath, PlcPlatform, Primitive, StringEncoding};
 use recipe_domain::recipe::{
     Draft, Parameter, StoredLimit, StoredParameter, StoredValue, Translation, VersionState,
 };
@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::error::{PARAMETER_TAG_UNIQUE, StorageError};
 use crate::memory::fixtures::{
     draft_recipe, field, lang, lock_line, locks, long_text, mid, now_text, param, pid, pkey,
-    recipe_with, reference, store, text, tid, uid, user, vid,
+    recipe_with, reference, store, text, tid, uid, user, utf8_machine, vid,
 };
 use crate::memory::{
     DraftWrite, LockMode, MemoryState, MemoryStore, MemoryTransaction, WriteKind, seed_type_id,
@@ -627,4 +627,26 @@ fn checked_budget_sum_gives_the_budget_error_on_overflow() {
             ..
         }
     ));
+}
+
+#[tokio::test]
+async fn adr_0202_stored_draft_reads_the_string_encoding() {
+    let store = store_with_draft();
+    store.seed_machine(&utf8_machine(2, "M2"));
+    store.seed_recipe(
+        &draft_recipe((2, 2), "R-2", 21),
+        PlcPlatform::CodesysIec,
+        user(9),
+    );
+    let mut tx = begin(&store);
+
+    let read_latin1 = tx.drafts().read_draft(vid(11)).await.unwrap().unwrap();
+    let read_utf8 = tx.drafts().read_draft(vid(21)).await.unwrap().unwrap();
+    let locked_latin1 = tx.drafts().lock_draft(vid(11)).await.unwrap().unwrap();
+    let locked_utf8 = tx.drafts().lock_draft(vid(21)).await.unwrap().unwrap();
+
+    assert_eq!(read_latin1.string_encoding, StringEncoding::Latin1);
+    assert_eq!(read_utf8.string_encoding, StringEncoding::Utf8);
+    assert_eq!(locked_latin1.string_encoding, StringEncoding::Latin1);
+    assert_eq!(locked_utf8.string_encoding, StringEncoding::Utf8);
 }

@@ -135,7 +135,12 @@ impl ListTypes {
     ) -> Result<TypeList, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
-        let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
+        let types = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            rows,
+        )?;
         let rows = grouped(&types)
             .into_values()
             .flat_map(|group| {
@@ -241,7 +246,12 @@ impl GetTypeTree {
     ) -> Result<TypeView, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
-        let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
+        let types = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            rows,
+        )?;
         let revisions = revisions_of(&types, &input.name);
         let (revision, id) = pick_revision(&revisions, &input)?;
         let tree = TypeTree::resolve(id, &types)?;
@@ -330,7 +340,12 @@ impl GetUdtForm {
         )
         .await?;
         let (machine, rows) = read_catalog(&self.ctx, input.code).await?;
-        let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
+        let types = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            rows,
+        )?;
         let groups = grouped(&types);
         let (from, members) = match &input.from {
             Some(name) => copied_revision(&types, &groups, input.code, name)?,

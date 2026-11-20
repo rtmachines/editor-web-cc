@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, DerivedTypeReason, MemberName, PlantError, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName, TypeTree,
+    PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape, StringEncoding, TypeMember,
+    TypeName, TypeTree,
 };
 use recipe_domain::recipe::StoredParameter;
 use serde_json::json;
@@ -138,7 +139,7 @@ fn resolution(fixture: &Fixture, root: u128) -> Result<TypeTree, PlantError> {
         .values()
         .map(|row| row.plc_type.clone())
         .collect();
-    let types = PlatformTypes::collect(mid(1), PLATFORM, rows).unwrap();
+    let types = PlatformTypes::collect(mid(1), PLATFORM, StringEncoding::Latin1, rows).unwrap();
     TypeTree::resolve(tid(root), &types)
 }
 

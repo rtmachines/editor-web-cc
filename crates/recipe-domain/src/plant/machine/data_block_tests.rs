@@ -19,6 +19,7 @@ fn create(
         name("Press"),
         platform,
         db_number,
+        StringEncoding::Latin1,
         (uid(1), name("Main")),
     )
 }

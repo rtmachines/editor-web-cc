@@ -3,7 +3,7 @@
 use rust_decimal::Decimal;
 use serde_json::json;
 
-use crate::plant::{MemberName, PlcPlatform, Primitive, TypeTree};
+use crate::plant::{MemberName, PlcPlatform, Primitive, StringEncoding, TypeTree};
 use crate::recipe::value::test_support::{
     BOOL, CHAR, INT, REAL, TIME, WCHAR, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
@@ -239,7 +239,11 @@ fn a_stored_literal_for_a_time_leaf_expects_the_count_of_its_type() {
 #[test]
 fn a_request_leaf_at_a_struct_node_expects_a_scalar() {
     let tree = zone_tree();
-    let result = request_leaf(&json!(1), tree.root(), PlcPlatform::TwinCat3);
+    let result = request_leaf(
+        &json!(1),
+        tree.root(),
+        (PlcPlatform::TwinCat3, StringEncoding::Latin1),
+    );
     assert_eq!(result, Err(LeafFault::from(Expected::Scalar)));
 }
 
@@ -262,6 +266,10 @@ fn a_limit_fault_has_no_expectation() {
 fn adr_0039_a_request_text_at_a_struct_node_expects_a_scalar() {
     use crate::recipe::value::request_text;
     let tree = zone_tree();
-    let result = request_text("1", tree.root(), PlcPlatform::TwinCat3);
+    let result = request_text(
+        "1",
+        tree.root(),
+        (PlcPlatform::TwinCat3, StringEncoding::Latin1),
+    );
     assert_eq!(result, Err(LeafFault::from(Expected::Scalar)));
 }

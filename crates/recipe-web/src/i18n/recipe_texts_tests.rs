@@ -76,6 +76,7 @@ const EXPECTED_KEYS: &[&str] = &[
     "expected-wstring",
     "expected-wstring-iec",
     "expected-string",
+    "expected-string-utf8",
     "expected-char",
     "expected-literal",
     "expected-count",

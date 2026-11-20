@@ -15,8 +15,8 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafPath, MemberName, PlatformTypes, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, StringKind, StringLength,
-    TypeMember, TypeName, TypeTree, UnitPath,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, StringEncoding, StringKind,
+    StringLength, TypeMember, TypeName, TypeTree, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, StoredLimit, StoredParameter,
@@ -203,7 +203,13 @@ fn seed_parameter(world: &World, seeded: Seeded<'_>) {
         .iter()
         .map(|id| state.plc_type(*id).cloned().unwrap())
         .collect();
-    let types = PlatformTypes::collect(world.ids.m7, PlcPlatform::S7_300, rows).unwrap();
+    let types = PlatformTypes::collect(
+        world.ids.m7,
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        rows,
+    )
+    .unwrap();
     let tree = TypeTree::resolve(seeded.plc_type, &types).unwrap();
     let machine = state.machine(world.ids.m7).unwrap();
     let unit = machine

@@ -6,7 +6,7 @@ use super::super::type_tree::fixtures::{
 use crate::error_codes::ErrorCode;
 use crate::plant::{
     MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
-    TypeMember, TypeName,
+    StringEncoding, TypeMember, TypeName,
 };
 
 use super::*;
@@ -67,7 +67,9 @@ fn missing_row_is_labelled_with_its_identifier() {
 #[test]
 fn row_dropped_for_the_platform_keeps_its_label() {
     let rows = vec![wstring_row(10, 10), primitive_row(INT, Primitive::Int)];
-    let collected = PlatformTypes::collect(machine(), PlcPlatform::S7_300, rows).unwrap();
+    let collected =
+        PlatformTypes::collect(machine(), PlcPlatform::S7_300, StringEncoding::Latin1, rows)
+            .unwrap();
     assert_eq!(collected.label(id(10)), Some("WSTRING(10)".to_owned()));
     assert!(collected.get(id(10)).is_none());
     let trees = TypeTrees::resolve([id(10)], &collected);

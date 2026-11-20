@@ -6,7 +6,8 @@ use recipe_app::ports::{
     InsertedMachine, Locked, MachineFilter, MachineSummary, PlantRepository, RowImage,
 };
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, StringEncoding, Unit, UnitId, UnitPath,
+    UnitUsage,
 };
 use recipe_domain::text::Text;
 
@@ -81,6 +82,18 @@ impl PlantRepository for PgTransaction {
         number: DataBlockNumber,
     ) -> Result<RowImage, StorageError> {
         machines::set_data_block(&mut self.tx, id, number).await
+    }
+
+    async fn machine_has_version(&mut self, id: MachineId) -> Result<bool, StorageError> {
+        machines::has_version(&mut self.tx, id).await
+    }
+
+    async fn set_machine_string_encoding(
+        &mut self,
+        id: MachineId,
+        encoding: StringEncoding,
+    ) -> Result<RowImage, StorageError> {
+        machines::set_string_encoding(&mut self.tx, id, encoding).await
     }
 
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {

@@ -393,6 +393,7 @@ async fn commit_export(
                 hash,
                 scope,
                 has_rule_fault,
+                loadable,
             },
     } = prepared;
     let entry = exported_entry((recipe, version), (hash, scope.as_ref()), (user, meta));
@@ -404,6 +405,7 @@ async fn commit_export(
         status,
         content_sha256: hash,
         has_rule_fault,
+        loadable,
     })
 }
 

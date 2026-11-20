@@ -70,7 +70,8 @@ fn refused_page<'a>(world: &World, reply: &'a Reply, status: StatusCode, form_id
 #[tokio::test]
 async fn error_refused_page_of_the_machine_form_keeps_the_sent_texts_in_the_session_layout() {
     let world = recipe_world();
-    let body = "code=X1&name=Kept+line&plc_platform=S7_300&main_unit_name=Infeed";
+    let body =
+        "code=X1&name=Kept+line&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=Infeed";
     let reply = world.post(&world.engineer, "/machines", body, false).await;
     let form = refused_page(
         &world,
@@ -214,7 +215,7 @@ async fn error_refused_page_of_each_plant_form_has_a_plain_form_and_no_missing_t
         ),
         (
             "/machines",
-            "code=X1&name=Kept+line&plc_platform=S7_300&main_unit_name=Infeed",
+            "code=X1&name=Kept+line&plc_platform=S7_300&string_encoding=Latin1&main_unit_name=Infeed",
             "machine-new-form",
         ),
         ("/machines/M7/rename", "name=+", "machine-rename-form"),

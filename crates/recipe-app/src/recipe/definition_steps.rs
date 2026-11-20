@@ -72,7 +72,13 @@ pub(crate) async fn resolve_type(
     let keys = derived_type_locks(None, [expr]);
     open.tx.types().lock_derived_types(machine, &keys).await?;
     let rows = open.tx.types().type_rows(machine).await?;
-    let mut derived = DerivedTypes::new(machine, open.draft.platform(), rows, context);
+    let mut derived = DerivedTypes::new(
+        machine,
+        open.draft.platform(),
+        open.draft.string_encoding(),
+        rows,
+        context,
+    );
     let type_id = derived.ensure_expr(open.tx.types(), expr).await?;
     let types = derived.platform_types()?;
     let trees = TypeTrees::resolve(

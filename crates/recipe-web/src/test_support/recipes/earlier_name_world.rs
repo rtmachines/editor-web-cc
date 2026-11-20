@@ -11,7 +11,7 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::plant::UnitId;
 use recipe_domain::plant::{
     MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, RuleSet, S7Address, TypeMember, TypeName, TypeTree, UnitPath,
+    RecordShape, RuleSet, S7Address, StringEncoding, TypeMember, TypeName, TypeTree, UnitPath,
 };
 use recipe_domain::recipe::{
     LangCode, Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, RecipeVersionId,
@@ -64,7 +64,13 @@ pub(crate) fn seed_int_named_parameter(fixture: &Fixture) {
     let int_row = fixture.store.state().plc_type(int).cloned().unwrap();
     let row = int_struct_row(&plant, int);
     fixture.store.seed_type(&row);
-    let types = PlatformTypes::collect(plant.m7, PlcPlatform::S7_300, vec![int_row, row]).unwrap();
+    let types = PlatformTypes::collect(
+        plant.m7,
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        vec![int_row, row],
+    )
+    .unwrap();
     let tree = TypeTree::resolve(PlcTypeId::from(INT_STRUCT_ID), &types).unwrap();
     let value = ParameterValue::parse(r#"{"speed":5}"#, &tree).unwrap();
     let unit = u1_of_m7(fixture, &plant);

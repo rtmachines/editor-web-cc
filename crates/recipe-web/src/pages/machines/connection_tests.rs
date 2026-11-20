@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use recipe_app::ports::SealedSecret;
 use recipe_domain::plant::{
     CommMode, DataBlockNumber, Machine, MachineCode, MachineId, PlcAddress, PlcConnection, PlcHost,
-    PlcLogin, PlcPlatform, Rack, Slot, TcpPort, UnitId,
+    PlcLogin, PlcPlatform, Rack, Slot, StringEncoding, TcpPort, UnitId,
 };
 use recipe_domain::text::Text;
 use uuid::Uuid;
@@ -50,6 +50,7 @@ pub(super) fn seed(world: &World, number: u32, platform: PlcPlatform) -> Machine
         platform
             .max_data_block()
             .map(|_| DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

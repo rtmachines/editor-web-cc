@@ -5,7 +5,8 @@ use crate::export::test_rows::{length_limit, range_limit, stored_parameter, unit
 use crate::export::test_support::{INT, ZONE_TEMP, machine_id, trees};
 use crate::export::{ExportHeader, HashedBody, Sha256};
 use crate::plant::{
-    Machine, MachineCode, PlcPlatform, S7Address, StoredMachine, StoredUnit, UnitPath,
+    Machine, MachineCode, PlcPlatform, S7Address, StoredMachine, StoredUnit, StringEncoding,
+    UnitPath,
 };
 use crate::recipe::{Ordinal, Parameter, ParameterKey, ReferenceNumber};
 use crate::text::Text;
@@ -139,6 +140,7 @@ fn names_and_ordinals_are_not_inputs_of_the_hash() {
         db_number: PLATFORM
             .max_data_block()
             .map(|_| crate::plant::DataBlockNumber::parse("1").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units: ["U1", "U1.2"]
             .map(|path| StoredUnit {

@@ -20,7 +20,7 @@ use recipe_domain::identity::Login;
 use recipe_domain::plant::{
     LeafPath, LiveUnits, Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, PlcType,
     PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, S7Address, StoredMachine,
-    StoredUnit, TypeTrees, UnitId, UnitPath,
+    StoredUnit, StringEncoding, TypeTrees, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue, ReferenceNumber,
@@ -113,7 +113,8 @@ fn type_row(platform: PlcPlatform, tag: &str) -> PlcType {
 
 fn trees(platform: PlcPlatform, tags: &[&str]) -> TypeTrees {
     let rows: Vec<PlcType> = tags.iter().map(|tag| type_row(platform, tag)).collect();
-    let catalog = PlatformTypes::collect(machine_id(), platform, rows).unwrap();
+    let catalog =
+        PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows).unwrap();
     TypeTrees::resolve(tags.iter().map(|tag| type_id(&type_row_id(tag))), &catalog)
 }
 
@@ -133,6 +134,7 @@ fn units(platform: PlcPlatform) -> LiveUnits {
         db_number: platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units: vec![unit],
     })
@@ -278,6 +280,7 @@ fn render_document(platform: PlcPlatform, trees: &TypeTrees, parameters: &[Param
         content_sha256: body.sha256().unwrap(),
         names,
         has_rule_fault,
+        string_encoding: StringEncoding::Latin1,
     };
     String::from_utf8(write_document(&body, &facts).unwrap()).unwrap()
 }

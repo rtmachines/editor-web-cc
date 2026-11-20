@@ -35,6 +35,7 @@ fn stored(units: Vec<StoredUnit>) -> StoredMachine {
         name: name("Press"),
         platform: PlcPlatform::S7_1500,
         db_number: Some(DataBlockNumber::parse("7").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units,
     }
@@ -248,5 +249,30 @@ fn stored_s7_300_machine_with_a_number_above_the_platform_limit_fails_with_data_
     assert!(matches!(
         Machine::try_from(row),
         Err(PlantError::DataBlockOutOfRange { number: 65535, .. })
+    ));
+}
+
+#[test]
+fn adr_0202_a_stored_machine_keeps_its_string_encoding() {
+    let mut record = stored(main_unit());
+    record.platform = PlcPlatform::CodesysIec;
+    record.db_number = None;
+    record.string_encoding = StringEncoding::Utf8;
+
+    let machine = Machine::try_from(record).unwrap();
+
+    assert_eq!(machine.string_encoding(), StringEncoding::Utf8);
+}
+
+#[test]
+fn adr_0202_a_stored_utf8_machine_on_an_s7_platform_is_corrupt() {
+    let mut record = stored(main_unit());
+    record.string_encoding = StringEncoding::Utf8;
+
+    let result = Machine::try_from(record);
+
+    assert!(matches!(
+        result,
+        Err(PlantError::StringEncodingNotOnPlatform { .. })
     ));
 }

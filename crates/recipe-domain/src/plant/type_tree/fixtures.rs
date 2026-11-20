@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::plant::{
     ArrayDimension, ArrayDimensions, MachineId, MemberName, PlatformTypes, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName, TypeTrees,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding, TypeMember, TypeName,
+    TypeTrees,
 };
 
 /// Platform of every machine row that these builders create.
@@ -193,12 +194,14 @@ pub(crate) fn types_for(
     platform: PlcPlatform,
     rows: Vec<PlcType>,
 ) -> PlatformTypes {
-    PlatformTypes::collect(owner, platform, rows).expect("fixture ids are unique")
+    PlatformTypes::collect(owner, platform, StringEncoding::Latin1, rows)
+        .expect("fixture ids are unique")
 }
 
 /// Collect rows into the types of `machine()` on `PLATFORM`.
 pub(crate) fn types(rows: Vec<PlcType>) -> PlatformTypes {
-    PlatformTypes::collect(machine(), PLATFORM, rows).expect("fixture ids are unique")
+    PlatformTypes::collect(machine(), PLATFORM, StringEncoding::Latin1, rows)
+        .expect("fixture ids are unique")
 }
 
 /// The type identifier of the single row in [`time_trees_on`].

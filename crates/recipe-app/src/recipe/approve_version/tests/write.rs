@@ -48,7 +48,8 @@ async fn expected_hash(store: &MemoryStore) -> String {
         .unwrap()
         .unwrap();
     let rows = tx.types().type_rows(draft.machine()).await.unwrap();
-    let types = PlatformTypes::collect(draft.machine(), PLATFORM, rows).unwrap();
+    let types =
+        PlatformTypes::collect(draft.machine(), PLATFORM, draft.string_encoding(), rows).unwrap();
     let trees = TypeTrees::resolve(draft.parameters().iter().map(|p| p.plc_type()), &types);
     let header = ExportHeader {
         machine: MachineCode::parse("M1").unwrap(),

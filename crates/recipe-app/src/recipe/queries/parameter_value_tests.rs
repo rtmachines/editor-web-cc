@@ -7,7 +7,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
-    Primitive, RecordShape, TypeTree,
+    Primitive, RecordShape, StringEncoding, TypeTree,
 };
 use recipe_domain::recipe::{Ordinal, ParameterKey, StoredParameter, StoredValue, ValueFault};
 use serde_json::json;
@@ -140,7 +140,7 @@ fn rows() -> Vec<PlcType> {
 }
 
 fn tree(id: PlcTypeId) -> TypeTree {
-    let types = PlatformTypes::collect(mid(1), PLATFORM, rows()).unwrap();
+    let types = PlatformTypes::collect(mid(1), PLATFORM, StringEncoding::Latin1, rows()).unwrap();
     TypeTree::resolve(id, &types).unwrap()
 }
 

@@ -171,6 +171,7 @@ audit-entity-app-setting = Ustawienie
 audit-action-machine-created = Utworzono maszynę
 audit-action-machine-renamed = Zmieniono nazwę maszyny
 audit-action-machine-data-block-set = Ustawiono numer bloku DB
+audit-action-machine-string-encoding-set = Ustawiono kodowanie STRING
 audit-action-machine-archived = Zarchiwizowano maszynę
 audit-action-unit-added = Dodano jednostkę
 audit-action-unit-renamed = Zmieniono nazwę jednostki

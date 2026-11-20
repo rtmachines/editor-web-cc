@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, PlcPlatform, PlcType, PlcTypeRecord, Primitive, RecordShape,
-    TypeName,
+    StringEncoding, TypeName,
 };
 use recipe_domain::recipe::{RecipeError, StoredParameter, StoredValue};
 use serde_json::{Value, json};
@@ -15,7 +15,9 @@ use serde_json::{Value, json};
 use super::super::test_world::seed_users;
 use super::super::versions::{GetVersion, GetVersionInput, VersionView};
 use crate::error::AppError;
-use crate::memory::fixtures::{Fixture, actor, meta, mid, parameter_on, reference, tid, uid, vid};
+use crate::memory::fixtures::{
+    Fixture, actor, meta, mid, parameter_on, reference, tid, uid, utf8_machine, vid,
+};
 use crate::recipe::rebind::fixtures::{primitive_id, typed_struct_row};
 use crate::recipe::test_support::DRAFT_VERSION;
 use crate::recipe::{RebindTypeRevision, RebindTypeRevisionInput, StructRevision};
@@ -340,4 +342,13 @@ async fn each_reader_gets_the_struct_that_holds_a_nested_outdated_struct() {
             "{tag} uses the struct directly"
         );
     }
+}
+
+#[test]
+fn adr_0202_version_read_paths_outdated_list_resolves_the_types_as_utf8() {
+    let machine = utf8_machine(1, "M1");
+
+    let types = super::catalog_of(&machine, Vec::new()).unwrap();
+
+    assert_eq!(types.string_encoding(), StringEncoding::Utf8);
 }

@@ -6,7 +6,7 @@
 
 use axum::http::StatusCode;
 use recipe_domain::identity::UserId;
-use recipe_domain::plant::{Machine, MachineCode, MachineId, PlcPlatform, UnitId};
+use recipe_domain::plant::{Machine, MachineCode, MachineId, PlcPlatform, StringEncoding, UnitId};
 use recipe_domain::recipe::{
     Recipe, RecipeId, RecipeVersionId, ReferenceNumber, StoredRecipe, StoredVersionHeader,
     VersionState,
@@ -44,6 +44,7 @@ fn s7_1500_world() -> World {
         text("Test line"),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (UnitId::from(UNIT_ID), text("Infeed")),
     )
     .unwrap();

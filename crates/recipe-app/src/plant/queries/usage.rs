@@ -95,7 +95,12 @@ impl GetTypeUsage {
         let read = self.read(&input.type_ref, offset, limit).await?;
         let size = usize::try_from(size).unwrap_or(usize::MAX);
         let has_next = read.rows.len() > size;
-        let types = PlatformTypes::collect(read.machine.id(), read.machine.platform(), read.types)?;
+        let types = PlatformTypes::collect(
+            read.machine.id(),
+            read.machine.platform(),
+            read.machine.string_encoding(),
+            read.types,
+        )?;
         let rows = read
             .rows
             .into_iter()
@@ -125,7 +130,12 @@ impl GetTypeUsage {
         let mut tx = self.ctx.uow.begin(Isolation::ReadOnly).await?;
         let machine = live_machine(tx.plant(), type_ref.code).await?;
         let known = tx.types().type_rows(machine.id()).await?;
-        let known = PlatformTypes::collect(machine.id(), machine.platform(), known)?;
+        let known = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            known,
+        )?;
         let (revision, type_id) = pick_revision(&revisions_of(&known, &type_ref.name), type_ref)?;
         let rows = tx
             .types()

@@ -8,7 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_S7_NESTING};
 use super::{
     ArrayDimensions, DerivedTypeReason, LeafClass, MachineId, MemberName, PlantError, PlcPlatform,
-    PlcType, PlcTypeId, Primitive, RecordShape, TypeExpr, TypeLimit, TypeMember, TypeName,
+    PlcType, PlcTypeId, Primitive, RecordShape, StringEncoding, TypeExpr, TypeLimit, TypeMember,
+    TypeName,
 };
 
 /// The type rows that one machine can use.
@@ -19,15 +20,16 @@ use super::{
 pub struct PlatformTypes {
     machine: MachineId,
     platform: PlcPlatform,
+    string_encoding: StringEncoding,
     rows: BTreeMap<PlcTypeId, PlcType>,
     dropped: BTreeMap<PlcTypeId, String>,
 }
 
 impl PlatformTypes {
-    /// Keep the rows that `machine` can use on `platform`.
+    /// Keep the rows that `machine` can use on `platform` and carry its STRING encoding.
     ///
     /// A row is kept when its platform set contains `platform` and it is global or belongs to
-    /// `machine`.
+    /// `machine`. The platform and the encoding cannot tell two machines apart (ADR-0202 (m)).
     ///
     /// # Errors
     ///
@@ -35,6 +37,7 @@ impl PlatformTypes {
     pub fn collect(
         machine: MachineId,
         platform: PlcPlatform,
+        string_encoding: StringEncoding,
         rows: impl IntoIterator<Item = PlcType>,
     ) -> Result<Self, PlantError> {
         let mut kept = BTreeMap::new();
@@ -56,6 +59,7 @@ impl PlatformTypes {
         Ok(Self {
             machine,
             platform,
+            string_encoding,
             rows: kept,
             dropped,
         })
@@ -88,6 +92,12 @@ impl PlatformTypes {
     #[must_use]
     pub const fn platform(&self) -> PlcPlatform {
         self.platform
+    }
+
+    /// Return the STRING encoding of the machine of these rows.
+    #[must_use]
+    pub const fn string_encoding(&self) -> StringEncoding {
+        self.string_encoding
     }
 
     /// Return the row with this identifier, if it exists on the platform.
@@ -165,6 +175,7 @@ impl TypeNode {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeTree {
     platform: PlcPlatform,
+    string_encoding: StringEncoding,
     root: TypeNode,
     leaf_count: u32,
     depth: u32,
@@ -176,6 +187,12 @@ impl TypeTree {
     #[must_use]
     pub const fn platform(&self) -> PlcPlatform {
         self.platform
+    }
+
+    /// Return the STRING encoding of the machine of the rows that built this tree.
+    #[must_use]
+    pub const fn string_encoding(&self) -> StringEncoding {
+        self.string_encoding
     }
 
     /// Return the root node.
@@ -286,6 +303,7 @@ impl TypeTree {
         let root_node = built.nodes.remove(&root).ok_or_else(|| row_shape(root))?;
         Ok(Self {
             platform: types.platform(),
+            string_encoding: types.string_encoding(),
             root: root_node,
             leaf_count,
             depth: root_metrics.depth,

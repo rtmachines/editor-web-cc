@@ -354,7 +354,12 @@ impl GetParameterForm {
         if let Some(path) = &input.unit {
             require_live_unit(&machine, path)?;
         }
-        let types = collect_stored_types(machine.id(), machine.platform(), reads.rows.clone())?;
+        let types = collect_stored_types(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            reads.rows.clone(),
+        )?;
         let repairs = input.purpose == ParameterFormPurpose::UpdateParameterDefinition;
         let choices = proposals(&types);
         let type_text = stored_type_text(&types, reads.parameter.as_ref(), repairs)?;
@@ -365,7 +370,10 @@ impl GetParameterForm {
         let preview = input
             .type_expr
             .as_ref()
-            .map(|expr| preview_tree(machine.id(), machine.platform(), reads.rows, expr))
+            .map(|expr| {
+                let kind = (machine.platform(), machine.string_encoding());
+                preview_tree(machine.id(), kind, reads.rows, expr)
+            })
             .transpose()?;
         let units = machine
             .units()

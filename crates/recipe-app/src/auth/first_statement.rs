@@ -29,7 +29,7 @@ use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
     AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
-    SetMachineDataBlock, SetPlcConnection,
+    SetMachineDataBlock, SetMachineStringEncoding, SetPlcConnection,
 };
 use crate::ports::{AuditEntryId, AuditFilter, TimeRange};
 use crate::recipe::{
@@ -112,6 +112,24 @@ async fn set_machine_data_block_checks_the_permission_first() {
         result,
         SetMachineDataBlock::OPERATION,
         "SetMachineDataBlock",
+    );
+}
+
+#[tokio::test]
+async fn adr_0202_set_machine_string_encoding_checks_the_permission_first() {
+    let fixture = scenarios::plant();
+    let result = SetMachineStringEncoding::new(fixture.context())
+        .execute(
+            &operator(),
+            &meta(),
+            scenarios::set_machine_string_encoding_input(),
+        )
+        .await;
+    assert_refused(
+        &fixture,
+        result,
+        SetMachineStringEncoding::OPERATION,
+        "SetMachineStringEncoding",
     );
 }
 

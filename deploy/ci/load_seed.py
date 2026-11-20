@@ -92,6 +92,7 @@ def seed(client, *, clock=time.monotonic):
     started = clock()
     create(client, "/machines/new", "/machines",
            {"code": MACHINE, "name": "Load machine", "plc_platform": "CodesysIec",
+            "string_encoding": "Latin1",
             "main_unit_name": "Line"}, f"/machines/{MACHINE}")
     types = f"/machines/{MACHINE}/types"
     create(client, types + "/new", types, define_udt_body(), types + f"/{UDT}")

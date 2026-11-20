@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::identity::UserId;
-use crate::plant::{MachineId, PlcPlatform};
+use crate::plant::{MachineId, PlcPlatform, StringEncoding};
 use crate::recipe::{ParameterKey, RecipeVersionId, ReferenceNumber, VersionState};
 
 mod add;
@@ -53,6 +53,8 @@ pub struct StoredDraft {
     pub machine: MachineId,
     /// The PLC platform of the machine.
     pub platform: PlcPlatform,
+    /// The STRING encoding of the machine (ADR-0202 (m)).
+    pub string_encoding: StringEncoding,
     /// The identifier of the version.
     pub version: RecipeVersionId,
     /// The number of the version in its recipe.
@@ -78,6 +80,7 @@ pub struct Draft {
     reference: ReferenceNumber,
     machine: MachineId,
     platform: PlcPlatform,
+    string_encoding: StringEncoding,
     version: RecipeVersionId,
     number: u32,
     row_version: i64,
@@ -121,6 +124,12 @@ impl Draft {
     #[must_use]
     pub const fn platform(&self) -> PlcPlatform {
         self.platform
+    }
+
+    /// Return the STRING encoding of the machine (ADR-0202 (m)).
+    #[must_use]
+    pub const fn string_encoding(&self) -> StringEncoding {
+        self.string_encoding
     }
 
     /// Return the user who created the draft.

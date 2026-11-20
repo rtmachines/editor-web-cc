@@ -86,7 +86,13 @@ fn seed_dint(world: &World, (n, tag, address): (u32, &str, &str)) {
     let unit = machine.unit(&UnitPath::parse("U1").unwrap()).unwrap().id();
     let rows = vec![state.plc_type(type_id).cloned().unwrap()];
     drop(state);
-    let types = PlatformTypes::collect(machine.id(), PlcPlatform::S7_1500, rows).unwrap();
+    let types = PlatformTypes::collect(
+        machine.id(),
+        PlcPlatform::S7_1500,
+        machine.string_encoding(),
+        rows,
+    )
+    .unwrap();
     let tree = TypeTree::resolve(type_id, &types).unwrap();
     let value = ParameterValue::parse("7", &tree).unwrap().to_stored();
     let parameter = StoredParameter {

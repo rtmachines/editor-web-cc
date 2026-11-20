@@ -5,7 +5,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use recipe_domain::audit::AuditEntry;
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, StringEncoding, Unit, UnitId, UnitPath,
+    UnitUsage,
 };
 use recipe_domain::text::Text;
 
@@ -173,6 +174,21 @@ impl PlantRepository for ShortRowsTransaction {
         number: DataBlockNumber,
     ) -> Result<RowImage, StorageError> {
         self.inner.plant().set_machine_data_block(id, number).await
+    }
+
+    async fn machine_has_version(&mut self, id: MachineId) -> Result<bool, StorageError> {
+        self.inner.plant().machine_has_version(id).await
+    }
+
+    async fn set_machine_string_encoding(
+        &mut self,
+        id: MachineId,
+        encoding: StringEncoding,
+    ) -> Result<RowImage, StorageError> {
+        self.inner
+            .plant()
+            .set_machine_string_encoding(id, encoding)
+            .await
     }
 
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {

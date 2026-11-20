@@ -1,7 +1,9 @@
 //! Steps 2 to 7 of design D10 for the eight draft commands (`data-model.md` section 6).
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, DiffAction};
-use recipe_domain::plant::{MachineId, PlatformTypes, PlcPlatform, PlcType, TypeTrees};
+use recipe_domain::plant::{
+    MachineId, PlatformTypes, PlcPlatform, PlcType, StringEncoding, TypeTrees,
+};
 use recipe_domain::recipe::{
     Draft, DraftError, Optimistic, ParameterId, ParameterKey, RecipeError, RecipeId,
     RecipeVersionId, ReferenceNumber, StoredDefect,
@@ -157,6 +159,7 @@ async fn lock_current_draft(
 
 /// Collect the type rows that the database stored for a machine.
 ///
+/// `string_encoding` is the STRING encoding of the machine (ADR-0202 (m)).
 /// A rule fault of the stored rows is a defect of stored data, not a fault of the request.
 /// The function maps it to `E-DB-008` through a [`StoredDefect`] without a key (ADR-0195).
 ///
@@ -166,9 +169,10 @@ async fn lock_current_draft(
 pub(crate) fn collect_stored_types(
     machine: MachineId,
     platform: PlcPlatform,
+    string_encoding: StringEncoding,
     rows: Vec<PlcType>,
 ) -> Result<PlatformTypes, AppError> {
-    PlatformTypes::collect(machine, platform, rows)
+    PlatformTypes::collect(machine, platform, string_encoding, rows)
         .map_err(|error| DraftError::Stored(Box::new(StoredDefect::of_part(error))).into())
 }
 
@@ -178,7 +182,12 @@ async fn resolve_trees(
     draft: &Draft,
 ) -> Result<(TypeTrees, PlatformTypes), AppError> {
     let rows = tx.types().type_rows(draft.machine()).await?;
-    let types = collect_stored_types(draft.machine(), draft.platform(), rows)?;
+    let types = collect_stored_types(
+        draft.machine(),
+        draft.platform(),
+        draft.string_encoding(),
+        rows,
+    )?;
     let trees = TypeTrees::resolve(
         draft
             .parameters()

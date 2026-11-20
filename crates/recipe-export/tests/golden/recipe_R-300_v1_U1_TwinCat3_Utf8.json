@@ -1,0 +1,48 @@
+{
+  "schema_version": "2",
+  "exported_at": "2026-10-12T09:30:00Z",
+  "exported_by": "jkowalski",
+  "loadable": true,
+  "content_sha256": "b68d59a7964c7d63d9386367e78aaa6bae128a1efb04d778c5be13fb0b5503dc",
+  "scope_sha256": "a20782526cdb6ca4c5d080db127bd43b0027f58bd1700436234b1fcbe45a93b1",
+  "machine": {
+    "code": "M10",
+    "name": "Packer 10",
+    "plc_platform": "TwinCat3",
+    "string_encoding": "Utf8"
+  },
+  "recipe": {
+    "reference_number": "R-300",
+    "name": "Jar 0.3 l"
+  },
+  "version": {
+    "number": 1,
+    "status": "Approved",
+    "approved_at": "2026-10-11T14:02:10Z",
+    "approved_by": "anowak"
+  },
+  "scope": {
+    "unit_path": "U1"
+  },
+  "types": [
+    {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "name": "STRING",
+      "revision": 1,
+      "kind": "Primitive",
+      "string_length": 10
+    }
+  ],
+  "parameters": [
+    {
+      "unit_path": "U1",
+      "tag": "LABEL",
+      "key": "6f8a0dc3-4e50-4c6d-9e7f-8091a2b3c4d5",
+      "name_en": "Label",
+      "type_id": "00000000-0000-4000-8000-000000000021",
+      "s7_address": null,
+      "limits": [],
+      "value": "Łódź"
+    }
+  ]
+}

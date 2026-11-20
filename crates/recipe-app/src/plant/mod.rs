@@ -21,6 +21,7 @@ pub(crate) use queries::{expr_names_row, type_text};
 mod rename_unit;
 mod resolve;
 mod set_machine_data_block;
+mod set_machine_string_encoding;
 mod set_plc_connection;
 
 pub use add_unit::{AddUnit, AddUnitInput, AddUnitOutput};
@@ -39,5 +40,8 @@ pub use rename_machine::{RenameMachine, RenameMachineInput, RenameMachineOutput}
 pub use rename_unit::{RenameUnit, RenameUnitInput, RenameUnitOutput};
 pub use set_machine_data_block::{
     SetMachineDataBlock, SetMachineDataBlockInput, SetMachineDataBlockOutput,
+};
+pub use set_machine_string_encoding::{
+    SetMachineStringEncoding, SetMachineStringEncodingInput, SetMachineStringEncodingOutput,
 };
 pub use set_plc_connection::{SetPlcConnection, SetPlcConnectionInput, SetPlcConnectionOutput};

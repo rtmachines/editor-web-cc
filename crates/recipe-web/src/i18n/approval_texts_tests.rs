@@ -177,6 +177,7 @@ const D8_KEYS: &[&str] = &[
     "audit-action-machine-created",
     "audit-action-machine-renamed",
     "audit-action-machine-data-block-set",
+    "audit-action-machine-string-encoding-set",
     "audit-action-machine-archived",
     "audit-action-unit-added",
     "audit-action-unit-renamed",

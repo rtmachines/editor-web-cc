@@ -11,8 +11,8 @@ use crate::export::test_support::{
 use crate::export::{ExportHeader, HashedBody};
 use crate::identity::UserId;
 use crate::plant::{
-    ArrayDimension, ArrayDimensions, MachineCode, MemberName, PlcPlatform, Primitive, TypeName,
-    TypeNode, UnitPath,
+    ArrayDimension, ArrayDimensions, MachineCode, MemberName, PlcPlatform, Primitive,
+    StringEncoding, TypeName, TypeNode, UnitPath,
 };
 use crate::recipe::{
     Draft, Parameter, RecipeError, ReferenceNumber, SnapshotItem, StoredDraft, StoredParameter,
@@ -242,6 +242,7 @@ fn a_draft_and_a_version_snapshot_give_equal_bodies() {
         reference: ReferenceNumber::parse("R-100").unwrap(),
         machine: crate::export::test_support::machine_id(),
         platform,
+        string_encoding: StringEncoding::Latin1,
         version: crate::recipe::RecipeVersionId::from(Uuid::from_u128(30)),
         number: 3,
         state: VersionState::LiveDraft,

@@ -70,6 +70,11 @@ fn shape_phrases() -> Vec<Phrase> {
             "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znaku U+0000",
         ),
         (
+            Expected::StringUtf8 { length: 20 },
+            "a string of at most 20 UTF-8 bytes without U+0000",
+            "tekst o najwy\u{17c}ej 20 bajtach UTF-8 bez znaku U+0000",
+        ),
+        (
             Expected::Char { max: 0xFFFF },
             "one character from U+0001 to U+FFFF",
             "jeden znak od U+0001 do U+FFFF",
@@ -187,7 +192,7 @@ fn recipe_each_expected_form_gives_its_phrase_in_both_languages() {
 
 #[test]
 fn recipe_the_expected_forms_cover_each_variant() {
-    assert_eq!(expected_cases().len(), 24);
+    assert_eq!(expected_cases().len(), 25);
 }
 
 /// The message of `E-RCP-005` for `expected` in `lang`.
@@ -254,4 +259,14 @@ fn adr_0201_value_form_names_the_two_ranges() {
     for part in ["10", "U+0001 do U+D7FF", "U+E000 do U+FFFF"] {
         assert!(pl.contains(part), "{part}: {pl}");
     }
+}
+
+#[test]
+fn adr_0202_expected_string_utf8_names_the_length_in_bytes() {
+    let en = shape_message(Expected::StringUtf8 { length: 4 }, Lang::En);
+    assert!(en.contains('4'), "{en}");
+    assert!(en.contains("bytes"), "{en}");
+    let pl = shape_message(Expected::StringUtf8 { length: 4 }, Lang::Pl);
+    assert!(pl.contains('4'), "{pl}");
+    assert!(pl.contains("bajt"), "{pl}");
 }

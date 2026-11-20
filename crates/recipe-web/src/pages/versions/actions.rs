@@ -15,6 +15,7 @@ use recipe_app::auth::Operation;
 use recipe_app::recipe::{
     DiscardDraft, DiscardDraftInput, RetireVersion, RetireVersionInput, VersionView,
 };
+use recipe_domain::plant::StringEncoding;
 use recipe_domain::recipe::{VersionHeader, VersionState};
 use serde::Deserialize;
 
@@ -29,6 +30,11 @@ use crate::pages::request::PageRequest;
 use crate::pages::saved_notice::saved_notice;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
+
+/// The id of the block of the rule notice and of the retired notice in the export area.
+const RULE_NOTICE_ID: &str = "export-notice";
+/// The id of the block of the encoding notice in the export area (ADR-0202 (l)).
+const ENCODING_NOTICE_ID: &str = "export-encoding-notice";
 
 /// The keys of the summary, the notice, and the button of the retire action (design D8).
 const RETIRE_KEYS: [&str; 3] = ["retire-summary", "retire-notice", "retire-button"];
@@ -60,23 +66,27 @@ pub(crate) struct CompareForm {
 
 /// The export link of an Approved or a Retired version (ADR-0052 (b), (c), and (e)).
 ///
-/// The link is a plain download link and not a boosted one. The page shows the notice, when the
-/// link has one, before it.
+/// The link is a plain download link and not a boosted one. The page shows the notices, when the
+/// link has some, before it.
 pub(crate) struct ExportLink {
     /// The address of the export route, for example `/export/v1/recipes/R-100/approved`.
     pub(crate) href: String,
     /// The text of the link, which names the version and the file type.
     pub(crate) text: String,
-    /// The notice before the link, or `None`. The link then names the notice in `aria-describedby`.
-    pub(crate) notice: Option<ExportNotice>,
+    /// The notices before the link, in the order of the page. The link names each one in
+    /// `aria-describedby`. The list is empty when the link has no notice.
+    pub(crate) notices: Vec<ExportNotice>,
 }
 
 /// The notice in the export area of a version that the file marks as not loadable (ADR-0119 (l)).
 ///
-/// The type solves one problem: a Retired version and an Approved version with a rule fault show
-/// the same markup with another severity and another sentence. The severity comes from code.
+/// The type solves one problem: a Retired version, an Approved version with a rule fault, and an
+/// Approved version of a `Utf8` machine show the same markup with another id, another severity, and
+/// another sentence. The id and the severity come from code (ADR-0202 (l)).
 pub(crate) struct ExportNotice {
-    /// The severity of the alert: `info` for a Retired version, `warning` for a rule fault.
+    /// The id of the block. The link names it in `aria-describedby`.
+    pub(crate) id: &'static str,
+    /// The severity of the alert: `warning` for a rule fault, `info` for the others.
     pub(crate) severity: &'static str,
     /// The sentence of the notice, in the language of the page.
     pub(crate) text: String,
@@ -205,19 +215,23 @@ fn export_link(
 ) -> Result<Option<ExportLink>, WebError> {
     let number = view.detail.number;
     let reference = view.recipe.reference();
-    let (operation, href, notice) = match view.detail.state {
+    let (operation, href, notices) = match view.detail.state {
         VersionState::Approved => (
             Operation::ExportApprovedVersion,
             format!("/export/v1/recipes/{reference}/approved"),
-            rule_notice(t, view),
+            rule_notice(t, view)
+                .into_iter()
+                .chain(encoding_notice(t, view))
+                .collect(),
         ),
         VersionState::Retired => (
             Operation::ExportVersionByNumber,
             format!("/export/v1/recipes/{reference}/versions/{number}"),
-            Some(ExportNotice {
+            vec![ExportNotice {
+                id: RULE_NOTICE_ID,
                 severity: "info",
                 text: t.get("version-export-retired-notice"),
-            }),
+            }],
         ),
         VersionState::LiveDraft | VersionState::Discarded => return Ok(None),
     };
@@ -225,7 +239,7 @@ fn export_link(
     Ok(shown.then(|| ExportLink {
         href,
         text: t.with_arg("version-export-link", "number", number),
-        notice,
+        notices,
     }))
 }
 
@@ -239,8 +253,23 @@ fn rule_notice(t: Texts<'_>, view: &VersionView) -> Option<ExportNotice> {
     }
     let codes: Vec<&str> = view.rule_codes.iter().map(|code| code.as_str()).collect();
     Some(ExportNotice {
+        id: RULE_NOTICE_ID,
         severity: "warning",
         text: t.with_arg("version-export-rule-notice", "codes", codes.join(", ")),
+    })
+}
+
+/// Build the notice of the v1 document of a `Utf8` machine, or `None` (ADR-0202 (l)).
+///
+/// The function solves one problem: the v1 document of a `Utf8` machine is not loadable, because
+/// the v1 schema has no field for the encoding. The page must tell the reader before the link to
+/// use the v2 export. Only an Approved version shows it. A Retired version shows only its own
+/// notice.
+fn encoding_notice(t: Texts<'_>, view: &VersionView) -> Option<ExportNotice> {
+    (view.machine.string_encoding() == StringEncoding::Utf8).then(|| ExportNotice {
+        id: ENCODING_NOTICE_ID,
+        severity: "info",
+        text: t.get("version-export-encoding-notice"),
     })
 }
 

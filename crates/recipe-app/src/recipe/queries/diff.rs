@@ -180,7 +180,12 @@ fn compare(
     type_rows: Vec<PlcType>,
     leaf_rows: u32,
 ) -> Result<(Machine, DiffPage), AppError> {
-    let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
+    let types = PlatformTypes::collect(
+        machine.id(),
+        machine.platform(),
+        machine.string_encoding(),
+        type_rows,
+    )?;
     let PageRead {
         plan,
         summary,

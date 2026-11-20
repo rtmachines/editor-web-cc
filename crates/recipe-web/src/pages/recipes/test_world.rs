@@ -6,7 +6,9 @@
 
 use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
-use recipe_domain::plant::{MachineId, PlatformTypes, PlcPlatform, Primitive, TypeTree, UnitId};
+use recipe_domain::plant::{
+    MachineId, PlatformTypes, PlcPlatform, Primitive, StringEncoding, TypeTree, UnitId,
+};
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeId,
     RecipeVersionId, ReferenceNumber, StoredParameter, StoredRecipe, StoredValue,
@@ -110,8 +112,13 @@ pub(crate) fn seed_many_recipes(fixture: &Fixture, count: u32) {
 fn zero_int(fixture: &Fixture) -> StoredValue {
     let int = seed_type_id(Primitive::Int, None).unwrap();
     let rows = vec![fixture.store.state().plc_type(int).cloned().unwrap()];
-    let types =
-        PlatformTypes::collect(MachineId::from(M20_ID), PlcPlatform::TwinCat3, rows).unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(M20_ID),
+        PlcPlatform::TwinCat3,
+        StringEncoding::Latin1,
+        rows,
+    )
+    .unwrap();
     let tree = TypeTree::resolve(int, &types).unwrap();
     ParameterValue::parse("0", &tree).unwrap().to_stored()
 }

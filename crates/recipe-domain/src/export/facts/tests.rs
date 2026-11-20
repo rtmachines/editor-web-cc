@@ -5,6 +5,7 @@ use time::{Date, Month, PrimitiveDateTime, Time, UtcOffset};
 use crate::error_codes::ErrorCode;
 use crate::export::{DocumentFacts, ExportError, ExportStatus, SCHEMA_VERSION, Sha256, utc_text};
 use crate::identity::Login;
+use crate::plant::StringEncoding;
 use crate::text::Text;
 use crate::timestamp::Timestamp;
 
@@ -22,6 +23,14 @@ fn instant(
 }
 
 fn facts(status: ExportStatus, has_rule_fault: bool) -> DocumentFacts {
+    facts_on(status, has_rule_fault, StringEncoding::Latin1)
+}
+
+fn facts_on(
+    status: ExportStatus,
+    has_rule_fault: bool,
+    string_encoding: StringEncoding,
+) -> DocumentFacts {
     let at = instant((2026, Month::October, 11), (14, 2, 10), 0, 0);
     DocumentFacts {
         exported_at: at,
@@ -34,6 +43,7 @@ fn facts(status: ExportStatus, has_rule_fault: bool) -> DocumentFacts {
         content_sha256: Sha256::from([0_u8; 32]),
         names: BTreeMap::new(),
         has_rule_fault,
+        string_encoding,
     }
 }
 
@@ -109,4 +119,31 @@ fn a_retired_document_is_not_loadable() {
 #[test]
 fn the_schema_version_is_one() {
     assert_eq!(SCHEMA_VERSION, "1");
+}
+
+#[test]
+fn adr_0202_v1_loadable_of_a_latin1_document_equals_loadable() {
+    for status in [ExportStatus::Approved, ExportStatus::Retired] {
+        for has_rule_fault in [false, true] {
+            let facts = facts_on(status, has_rule_fault, StringEncoding::Latin1);
+
+            assert_eq!(facts.v1_loadable(), facts.loadable());
+        }
+    }
+}
+
+#[test]
+fn adr_0202_v1_loadable_of_a_utf8_document_is_false() {
+    for status in [ExportStatus::Approved, ExportStatus::Retired] {
+        for has_rule_fault in [false, true] {
+            let facts = facts_on(status, has_rule_fault, StringEncoding::Utf8);
+
+            assert!(!facts.v1_loadable(), "{status:?} {has_rule_fault}");
+        }
+    }
+}
+
+#[test]
+fn adr_0202_loadable_of_a_utf8_document_ignores_the_encoding() {
+    assert!(facts_on(ExportStatus::Approved, false, StringEncoding::Utf8).loadable());
 }
