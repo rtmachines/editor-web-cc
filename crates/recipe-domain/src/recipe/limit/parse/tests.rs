@@ -776,3 +776,28 @@ fn reliability_4_4_a_bound_text_of_a_time_type_with_a_fraction_is_its_decimal_te
         "1500"
     );
 }
+
+// ADR-0117: NaN and infinity are no bound of a limit. The text of a bound is decimal text. A
+// refused bound is `LimitFault::OutsideTypeRange`, which is `E-RCP-006`.
+#[test]
+fn adr_0117_nan_and_infinity_fail() {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::S7_1500] {
+        for primitive in [Primitive::Real, Primitive::Lreal] {
+            let tree = time_tree_on(platform, primitive);
+            let context = format!("{primitive} on {platform:?}");
+            assert!(
+                parse(&range("", Some("1.5"), Some("2.5")), &tree).is_ok(),
+                "{context}"
+            );
+            for text in ["NaN", "inf", "-inf", "Infinity", "-Infinity"] {
+                for row in [range("", Some(text), None), range("", None, Some(text))] {
+                    let fault = parse(&row, &tree).unwrap_err();
+                    assert!(
+                        matches!(fault, LimitFault::OutsideTypeRange { .. }),
+                        "{context} {text}: {fault:?}"
+                    );
+                }
+            }
+        }
+    }
+}
