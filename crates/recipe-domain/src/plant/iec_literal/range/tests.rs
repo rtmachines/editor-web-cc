@@ -626,3 +626,57 @@ fn adr_0139_the_earlier_set_keeps_the_old_end_of_ldt_and_ldate() {
         );
     }
 }
+
+/// ADR-0115, review item R09: each literal at an end of the base unit table
+/// (`domain-model.md` section 2.1) gives the exact count of the base unit.
+/// One step outside each end gives `OutOfRange`. The ends hold on `CodesysIec`
+/// and `TwinCat3`.
+#[test]
+fn adr_0115_iec_ends_of_time_literals() {
+    // (type, literal at an end, count of the base unit)
+    let at_ends: [(Primitive, &str, i128); 8] = [
+        (Primitive::Time, "T#0ms", 0),
+        (Primitive::Time, "T#49d17h2m47s295ms", 4_294_967_295),
+        (Primitive::Ltime, "LT#0ns", 0),
+        (
+            Primitive::Ltime,
+            "LT#213503d23h34m33s709ms551us615ns",
+            U64_MAX,
+        ),
+        (Primitive::Date, "D#1970-01-01", 0),
+        (Primitive::Date, "D#2106-02-07", 49_710),
+        (Primitive::DateAndTime, "DT#1970-01-01-00:00:00", 0),
+        (
+            Primitive::DateAndTime,
+            "DT#2106-02-07-06:28:15",
+            4_294_967_295,
+        ),
+    ];
+    // (type, literal one step outside an end)
+    let outside: [(Primitive, &str); 8] = [
+        (Primitive::Time, "T#-1ms"),
+        (Primitive::Time, "T#49d17h2m47s296ms"),
+        (Primitive::Ltime, "LT#-1ns"),
+        (Primitive::Ltime, "LT#213503d23h34m33s709ms551us616ns"),
+        (Primitive::Date, "D#1969-12-31"),
+        (Primitive::Date, "D#2106-02-08"),
+        (Primitive::DateAndTime, "DT#1969-12-31-23:59:59"),
+        (Primitive::DateAndTime, "DT#2106-02-07-06:28:16"),
+    ];
+    for platform in IEC {
+        for (primitive, text, count) in at_ends {
+            assert_eq!(
+                parse(primitive, platform, text),
+                Ok(count),
+                "{text} on {platform:?}"
+            );
+        }
+        for (primitive, text) in outside {
+            assert_eq!(
+                parse(primitive, platform, text),
+                Err(IecLiteralReason::OutOfRange),
+                "{text} on {platform:?}"
+            );
+        }
+    }
+}
