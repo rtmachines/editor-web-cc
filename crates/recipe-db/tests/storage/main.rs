@@ -24,6 +24,7 @@ mod migration_0018;
 mod operations;
 mod operations_schema;
 mod platform_ranges;
+mod platform_ranges_iec;
 mod plc_connection;
 mod pool;
 mod race;
