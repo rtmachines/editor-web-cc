@@ -105,6 +105,8 @@ fn named_revision(texts: Texts<'_>, key: &str, name: &TypeName, revision: u32) -
 }
 
 #[cfg(test)]
+mod adr_0206_tests;
+#[cfg(test)]
 mod define_error_tests;
 #[cfg(test)]
 mod define_member_error_tests;
@@ -114,6 +116,8 @@ mod define_tests;
 mod form_rows_tests;
 #[cfg(test)]
 mod form_tests;
+#[cfg(test)]
+mod iec_names_tests;
 #[cfg(test)]
 mod list_tests;
 #[cfg(test)]

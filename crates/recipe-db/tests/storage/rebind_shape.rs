@@ -1,7 +1,8 @@
 //! Rebind across the seed row of `STRING` on PostgreSQL (ADR-0146 (c), (g), (h), design D5).
 //!
 //! A struct revision 1 holds a member `label` of type `STRING(80)`, which is a row of the
-//! machine. Revision 2 holds `label` of type `STRING`, which is the seed row. The two rows have one
+//! machine. Revision 2 holds `label` of type `STRING`, which is the seed row. Both hold a second
+//! member `count` of type `INT`, because a struct on `CodesysIec` has 2 members (ADR-0204). The two rows have one
 //! type shape, so a rebind without new member values keeps the value and the limits of the
 //! parameter. The rebind writes the limit rows again, so the test does not compare `created_at`.
 
@@ -69,15 +70,23 @@ async fn draft(app: &mut App) -> Draft {
     }
 }
 
-/// Run `DefineUdt` for `ST_Text` with the member `label` of the listed type.
+/// Run `DefineUdt` for `ST_Text` with the member `label` of the listed type and the member `count`.
+///
+/// A struct on `CodesysIec` has at least 2 members (ADR-0204).
 async fn define_text(app: &mut App, seed: &Seeded, label: &str, mode: DefineUdtMode) -> Uuid {
     let input = DefineUdtInput {
         code: seed.code,
         name: TypeName::parse("ST_Text").unwrap(),
-        members: vec![(
-            MemberName::parse("label").unwrap(),
-            TypeExpr::parse(label).unwrap(),
-        )],
+        members: vec![
+            (
+                MemberName::parse("label").unwrap(),
+                TypeExpr::parse(label).unwrap(),
+            ),
+            (
+                MemberName::parse("count").unwrap(),
+                TypeExpr::parse("INT").unwrap(),
+            ),
+        ],
         mode,
     };
     let output = DefineUdt::new(app.context())
@@ -116,7 +125,7 @@ async fn add_label(app: &mut App, draft: &Draft) {
         type_expr: TypeExpr::parse("ST_Text@1").unwrap(),
         s7_address: None,
         ordinal: Ordinal::parse(1).unwrap(),
-        value: ValueInput::Json("{\"label\": \"ABC\"}".to_owned()),
+        value: ValueInput::Json("{\"label\": \"ABC\", \"count\": 1}".to_owned()),
         limits: LimitList::parse(vec![limit]).unwrap(),
     };
     AddParameter::new(app.context())

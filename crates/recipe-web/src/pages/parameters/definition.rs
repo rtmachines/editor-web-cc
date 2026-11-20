@@ -4,11 +4,12 @@
 //! each definition field, keeps a line for each bad one, and still parses the next field. A value
 //! object with its own code gives that code, for example `E-PLT-017` for a unit path.
 
-use recipe_domain::plant::{RuleSet, S7Address, TypeExpr, UnitPath};
+use recipe_domain::plant::{S7Address, TypeExpr, UnitPath};
 use recipe_domain::recipe::{Ordinal, ParameterTag};
 use recipe_domain::text::{LongText, Text};
 
 use super::fields::SentFields;
+use super::request_type::request_type_expr;
 use crate::error::{FieldError, FieldReason};
 use crate::form_text::crlf_to_lf;
 
@@ -137,10 +138,7 @@ pub(crate) fn check(sent: &SentFields) -> Checked {
         "description_en",
         FieldReason::Description,
     );
-    let type_expr = lines.plant(
-        TypeExpr::from_stored(trimmed(sent, "type"), RuleSet::Earlier),
-        "type",
-    );
+    let type_expr = lines.plant(request_type_expr(trimmed(sent, "type")), "type");
     let s7 = lines.field(
         s7_address(trimmed(sent, "s7_address")),
         "s7_address",

@@ -24,7 +24,7 @@ use crate::auth::{
 };
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
-use crate::plant::is_refused_struct_name;
+use crate::plant::{check_iec_struct, expr_names_row, is_refused_struct, require_current_type};
 use crate::ports::{Isolation, VersionDetail};
 use crate::recipe::draft_session::collect_stored_types;
 
@@ -213,6 +213,32 @@ fn stored_type_text(
     }
 }
 
+/// Check the type text of the preview with the current rule set (ADR-0206 (d3)).
+///
+/// The function solves one problem: the preview of the form must show the reason that the command
+/// gives, before it resolves the text. It calls [`require_current_type`] and then
+/// [`check_iec_struct`] (ADR-0203 (j1), ADR-0204 (d1)). It skips both for an unchanged type text of
+/// an edit form. The purpose of such a form is `UpdateParameterDefinition`, and it edits `stored`.
+/// The canonical text of `expr` names the stored type, as `UpdateParameterDefinition` compares it.
+///
+/// # Errors
+///
+/// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) with the reason of the failed check.
+fn require_form_type(
+    types: &PlatformTypes,
+    expr: &TypeExpr,
+    (purpose, stored): (ParameterFormPurpose, Option<&StoredParameter>),
+) -> Result<(), AppError> {
+    let is_unchanged = purpose == ParameterFormPurpose::UpdateParameterDefinition
+        && stored.is_some_and(|parameter| expr_names_row(types, parameter.plc_type, expr));
+    if is_unchanged {
+        return Ok(());
+    }
+    require_current_type(expr, types.platform())?;
+    check_iec_struct(types, expr)?;
+    Ok(())
+}
+
 /// Return the proposals of the type input, as `GetUdtForm` writes them (`plant/queries/types.rs`).
 ///
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
@@ -239,7 +265,7 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
     let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
     for row in types.rows() {
         if let RecordShape::Struct { name, revision, .. } = row.shape()
-            && !is_refused_struct_name(types.platform(), name)
+            && !is_refused_struct(types.platform(), row)
         {
             let entry = latest.entry(name).or_insert(*revision);
             *entry = (*entry).max(*revision);
@@ -293,7 +319,9 @@ impl GetParameterForm {
     /// Returns `RecipeError::VersionNotEditable` (`E-RCP-002`) when the version is not a live
     /// draft.
     /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) or `TypeTooLarge` (`E-PLT-018`)
-    /// for the preview type. Returns `TypeCycle` (`E-PLT-005`) when the stored rows of the
+    /// for the preview type. The type text of the add form and a changed type text of the edit
+    /// form first meet the current rule set, so a reserved struct name gives `E-PLT-013` with the
+    /// reason "reserved name" (ADR-0206 (d3)). Returns `TypeCycle` (`E-PLT-005`) when the stored rows of the
     /// preview type form a cycle.
     /// Returns `DerivedTypeInvalid` for a stored member type that the platform does not hold.
     /// Returns `AppError::Storage` when the database fails.
@@ -331,6 +359,9 @@ impl GetParameterForm {
         let choices = proposals(&types);
         let type_text = stored_type_text(&types, reads.parameter.as_ref(), repairs)?;
         let rule_faults = rule_faults_of(reads.parameter.as_ref(), &types, repairs)?;
+        if let Some(expr) = &input.type_expr {
+            require_form_type(&types, expr, (input.purpose, reads.parameter.as_ref()))?;
+        }
         let preview = input
             .type_expr
             .as_ref()

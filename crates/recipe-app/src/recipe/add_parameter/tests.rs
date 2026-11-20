@@ -35,6 +35,10 @@ mod adr_0177;
 mod adr_0178;
 mod adr_0179;
 mod adr_0186;
+mod adr_0201;
+mod adr_0203;
+mod adr_0204;
+mod adr_0206;
 mod leaf_limit;
 
 fn limit(min: &str, max: &str) -> LimitInput {

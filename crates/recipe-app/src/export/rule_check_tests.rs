@@ -421,3 +421,73 @@ async fn a_unit_export_is_not_loadable_when_a_parameter_outside_the_unit_breaks_
     assert_eq!(body.parameters().len(), 1);
     assert!(!facts.document.loadable());
 }
+
+/// Return the parameter `NOTE` of the seed type `WSTRING(80)` with the stored value `value`.
+///
+/// The value `"A😀"` breaks the rule of ADR-0201 on `TwinCat3`. The earlier rule set accepted it.
+fn seed_wstring_note(fixture: &Fixture, platform: PlcPlatform, value: &str) -> StoredParameter {
+    let note = StoredParameter {
+        plc_type: seed_type_id(Primitive::Wstring, Some(80)).unwrap(),
+        value: StoredValue::from(json!(value)),
+        limits: Vec::new(),
+        ..parameter_on(platform, 1, "NOTE", uid(102), 0)
+    };
+    fixture.store.seed_parameter(vid(101), &note);
+    note
+}
+
+#[tokio::test]
+async fn adr_0201_a_stored_character_outside_the_basic_plane_is_not_loadable_and_keeps_the_hash() {
+    // ADR-0201 (i): the export check uses the current rule set. The hashed body and the stored
+    // hash do not change. The document still holds the stored value.
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
+        let fixture = Fixture::new();
+        fixture.seed_actors();
+        let machine = fixture.seed_machine_on(platform, 1, "M1");
+        fixture.seed_approved_and_draft(&machine, 1, "R-1");
+        seed_wstring_note(&fixture, platform, "A😀");
+        let stored = body_hash_of_version_one(&fixture, &machine).await;
+        store_hash(&fixture, stored);
+        let writer = RecordingWriter::shared();
+
+        let exported = ExportApprovedVersion::new(fixture.context(), port(&writer))
+            .execute(
+                &actor(Role::Operator),
+                &meta(),
+                ExportApprovedInput {
+                    reference: reference("R-1"),
+                    machine: None,
+                    scope: ExportScope::Version,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(!exported.loadable(), "{platform:?}");
+        assert!(exported.has_rule_fault, "{platform:?}");
+        assert_eq!(exported.content_sha256, stored, "{platform:?}");
+        let (body, facts) = writer.last();
+        assert!(!facts.loadable(), "{platform:?}");
+        let entry = serde_json::to_value(body.parameters().first().unwrap()).unwrap();
+        assert_eq!(entry["value"], json!("A😀"), "{platform:?}");
+        assert_eq!(fixture.store.audit_entries().len(), 1, "{platform:?}");
+    }
+}
+
+#[tokio::test]
+async fn adr_0201_a_stored_text_of_the_basic_plane_is_loadable() {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
+        let fixture = Fixture::new();
+        fixture.seed_actors();
+        let machine = fixture.seed_machine_on(platform, 1, "M1");
+        fixture.seed_approved_and_draft(&machine, 1, "R-1");
+        seed_wstring_note(&fixture, platform, "A\u{D7FF}\u{E000}\u{FFFF}");
+        let stored = body_hash_of_version_one(&fixture, &machine).await;
+        store_hash(&fixture, stored);
+
+        let exported = export_approved(&fixture, Role::Operator).await.unwrap();
+
+        assert!(exported.loadable(), "{platform:?}");
+        assert_eq!(exported.content_sha256, stored, "{platform:?}");
+    }
+}

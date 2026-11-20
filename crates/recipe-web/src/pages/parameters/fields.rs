@@ -11,9 +11,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use axum::extract::RawForm;
 use axum::extract::rejection::RawFormRejection;
 use recipe_domain::plant::limits::{MAX_DEPTH, MAX_LEAVES};
-use recipe_domain::plant::{LeafClass, LeafPath, LeafSegment, RuleSet, TypeExpr, TypeTree};
+use recipe_domain::plant::{LeafClass, LeafPath, LeafSegment, TypeExpr, TypeTree};
 use recipe_domain::recipe::{LeafTexts, LimitInput, LimitList, MemberValue, ParameterKey};
 
+use super::request_type::request_type_expr;
 use crate::error::{FieldError, FieldReason, WebError};
 use crate::hex::hex_value;
 use crate::pages::path_values::flag;
@@ -404,8 +405,7 @@ impl Parts {
             .plain
             .get("value_type")
             .map(|text| {
-                TypeExpr::from_stored(text, RuleSet::Earlier)
-                    .map_err(|_error| bad("value_type", FieldReason::Reload))
+                request_type_expr(text).map_err(|_error| bad("value_type", FieldReason::Reload))
             })
             .transpose()?;
         Ok(SentFields {

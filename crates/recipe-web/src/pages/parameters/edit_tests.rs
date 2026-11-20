@@ -423,7 +423,7 @@ async fn parameters_edit_a_bad_key_with_a_bad_tag_gives_one_line_and_no_form() {
 }
 
 /// The definition fields of the stored parameter `ZONE` (type `Int@1`).
-const ZONE_FIELDS: [(&str, &str); 10] = [
+pub(super) const ZONE_FIELDS: [(&str, &str); 10] = [
     ("row_version", "1"),
     ("unit_path", "U1"),
     ("tag", "ZONE"),

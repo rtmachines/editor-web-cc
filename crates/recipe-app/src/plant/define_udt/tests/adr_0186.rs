@@ -129,7 +129,7 @@ async fn adr_0186_a_siemens_name_on_codesys_iec_creates_the_struct() {
         let output = run(
             &fixture,
             Role::ProcessEngineer,
-            input(DefineUdtMode::New, name, &[("a", "REAL")]),
+            input(DefineUdtMode::New, name, &[("a", "REAL"), ("b", "REAL")]),
         )
         .await
         .unwrap();
