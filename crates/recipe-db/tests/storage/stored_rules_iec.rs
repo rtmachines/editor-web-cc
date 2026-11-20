@@ -278,6 +278,43 @@ fn stored_hashes(reference: &str) -> (String, String) {
     (fields[1].to_owned(), fields[2].to_owned())
 }
 
+/// The stored `recipe_version.content_sha256` of a reference and the `scope_sha256` of each of its
+/// `VersionExported` entries of the unit export. It reads the rows and runs no export.
+///
+/// The SQL is the SQL of `hash_lines`, limited to one reference.
+async fn stored_hash_rows(app: &mut App, reference: &str) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT v.content_sha256, a.after_state->>'scope_sha256' \
+         FROM audit_log a \
+         JOIN recipe_version v ON v.id = a.entity_id \
+         JOIN recipe r ON r.id = v.recipe_id \
+         WHERE a.action = 'VersionExported' AND a.after_state->>'scope_sha256' IS NOT NULL \
+         AND v.status = 'approved' AND r.reference_number = $1 ORDER BY a.id",
+    )
+    .bind(reference)
+    .fetch_all(app.admin())
+    .await
+    .unwrap()
+}
+
+/// ADR-0202 (j2): the upgrade changes no stored hash. The stored content hash of the version and
+/// the scope hash of each `VersionExported` entry equal the two hashes of the fixture line.
+async fn assert_stored_hashes(app: &mut App, reference: &str) {
+    let (content, scope_hash) = stored_hashes(reference);
+    let rows = stored_hash_rows(app, reference).await;
+    assert!(
+        !rows.is_empty(),
+        "{reference}: the database has a VersionExported entry of the unit export"
+    );
+    for (stored_content, stored_scope) in rows {
+        assert_eq!(
+            stored_content, content,
+            "{reference}: stored content_sha256"
+        );
+        assert_eq!(stored_scope, scope_hash, "{reference}: stored scope_sha256");
+    }
+}
+
 /// The fixture entry of a reference: the keys `reference`, `unit`, and `version`.
 fn stored_exports(reference: &str) -> Value {
     let text = std::fs::read_to_string(Path::new(FIXTURE_DIRECTORY).join(FIXTURE_EXPORTS)).unwrap();
@@ -398,10 +435,12 @@ async fn read_row(app: &mut App, expected: &Expectation) {
 async fn check_stored_row(expected: Expectation) {
     let (mut app, before) = restored_and_upgraded_from(FIXTURE_DUMP, expected.reference).await;
     read_row(&mut app, &expected).await;
+    assert_stored_hashes(&mut app, expected.reference).await;
     assert_exports(&app, &expected).await;
     assert_eq!(stored_rows(app.admin(), expected.reference).await, before);
     copy_row(&mut app, expected.reference).await;
-    let restored = backup_into_copy(&app).await;
+    let mut restored = backup_into_copy(&app).await;
+    assert_stored_hashes(&mut restored, expected.reference).await;
     assert_exports(&restored, &expected).await;
 }
 
