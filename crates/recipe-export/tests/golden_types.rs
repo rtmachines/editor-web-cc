@@ -48,7 +48,10 @@ const STRING_LENGTH: u16 = 16;
 
 #[path = "golden_types/table.rs"]
 mod table;
-use table::{Limit, S7_300_ADDRESSES, S7_300_TAGS, S7_1200_TAGS, S7_1500_TAGS, type_table};
+use table::{
+    CODESYS_TAGS, Limit, S7_300_ADDRESSES, S7_300_TAGS, S7_1200_TAGS, S7_1500_TAGS,
+    codesys_type_table, platform_type_table, type_table,
+};
 
 fn type_id(text: &str) -> PlcTypeId {
     PlcTypeId::from(Uuid::parse_str(text).unwrap())
@@ -62,10 +65,12 @@ fn unit_id() -> UnitId {
     UnitId::from(Uuid::from_u128(1))
 }
 
-/// The row of a tag. A fixed-size primitive gets an id that no string row uses.
+/// The row of a tag. A fixed-size primitive gets an id that no string row uses. The index is the
+/// position of the tag in the S7 table, or after it for a tag that only CODESYS has.
 fn type_row_id(tag: &str) -> String {
     let index = type_table()
         .iter()
+        .chain(codesys_type_table().iter())
         .position(|case| case.tag == tag)
         .unwrap();
     match tag {
@@ -158,8 +163,14 @@ fn number(index: usize) -> u32 {
     u32::try_from(index).unwrap().checked_add(1).unwrap()
 }
 
-fn parameter(index: usize, tag: &str, address: Option<&str>, trees: &TypeTrees) -> Parameter {
-    let case = type_table()
+fn parameter(
+    platform: PlcPlatform,
+    index: usize,
+    tag: &str,
+    address: Option<&str>,
+    trees: &TypeTrees,
+) -> Parameter {
+    let case = platform_type_table(platform)
         .into_iter()
         .find(|case| case.tag == tag)
         .unwrap();
@@ -215,7 +226,7 @@ fn version_parameters(
                 .iter()
                 .find(|(address_tag, _)| address_tag == tag)
                 .map(|(_, address)| *address);
-            parameter(index, tag, address, &trees)
+            parameter(platform, index, tag, address, &trees)
         })
         .collect();
     (trees, parameters)
@@ -286,7 +297,7 @@ fn string_entry(id: &str, name: &str) -> Value {
     })
 }
 
-fn platform_cases() -> [PlatformCase; 3] {
+fn platform_cases() -> [PlatformCase; 5] {
     [
         PlatformCase {
             platform: PlcPlatform::S7_300,
@@ -309,6 +320,26 @@ fn platform_cases() -> [PlatformCase; 3] {
             platform: PlcPlatform::S7_1500,
             golden_file: "types_S7_1500.json",
             tags: &S7_1500_TAGS,
+            addresses: &[],
+            types: json!([
+                string_entry(STRING_16, "STRING"),
+                string_entry(WSTRING_16, "WSTRING")
+            ]),
+        },
+        PlatformCase {
+            platform: PlcPlatform::CodesysIec,
+            golden_file: "types_CodesysIec.json",
+            tags: &CODESYS_TAGS,
+            addresses: &[],
+            types: json!([
+                string_entry(STRING_16, "STRING"),
+                string_entry(WSTRING_16, "WSTRING")
+            ]),
+        },
+        PlatformCase {
+            platform: PlcPlatform::TwinCat3,
+            golden_file: "types_TwinCat3.json",
+            tags: &CODESYS_TAGS,
             addresses: &[],
             types: json!([
                 string_entry(STRING_16, "STRING"),
@@ -345,9 +376,12 @@ fn by_tag(doc: &Value) -> BTreeMap<String, &Value> {
         .collect()
 }
 
-fn assert_values_and_limits(doc: &Value, tags: &[&str]) {
+fn assert_values_and_limits(doc: &Value, platform: PlcPlatform, tags: &[&str]) {
     let parameters = by_tag(doc);
-    for case in type_table().iter().filter(|case| tags.contains(&case.tag)) {
+    for case in platform_type_table(platform)
+        .iter()
+        .filter(|case| tags.contains(&case.tag))
+    {
         assert!(
             parameters.contains_key(case.tag),
             "{}: no parameter in the document",
@@ -369,7 +403,7 @@ fn assert_values_and_limits(doc: &Value, tags: &[&str]) {
 fn each_s7_type_document_holds_the_expected_value_and_limit_of_each_type() {
     for case in platform_cases() {
         let doc = platform_document(&case);
-        assert_values_and_limits(&doc, case.tags);
+        assert_values_and_limits(&doc, case.platform, case.tags);
     }
 }
 
@@ -600,4 +634,70 @@ fn consumer_rebuilds_content_sha256_of_the_non_bmp_golden_file() {
     let doc: Value = serde_json::from_str(&golden(NON_BMP_GOLDEN_FILE)).unwrap();
     let expected = doc["content_sha256"].as_str().unwrap();
     assert_eq!(jcs_sha256_hex(&consumer_hashed_body(&doc)), expected);
+}
+
+/// The platforms of the CODESYS and TwinCAT 3 golden files with their file names.
+const CODESYS_GOLDEN_FILES: [(PlcPlatform, &str, &str); 2] = [
+    (
+        PlcPlatform::CodesysIec,
+        "types_CodesysIec.json",
+        "CodesysIec",
+    ),
+    (PlcPlatform::TwinCat3, "types_TwinCat3.json", "TwinCat3"),
+];
+
+/// The ends and the `LREAL` value that the golden files of `CodesysIec` and `TwinCat3` must hold.
+/// The texts are written by hand from `domain-model.md` section 2.1 and ADR-0117. They do not come
+/// from the type table.
+const CODESYS_EXPECTED_VALUES: [(&str, &str); 14] = [
+    ("LWORD", "18446744073709551615"),
+    ("LINT", "-9223372036854775808"),
+    ("ULINT", "18446744073709551615"),
+    ("LREAL", "123456789.012345"),
+    ("TIME", "4294967295"),
+    ("LTIME", "18446744073709551615"),
+    ("DATE", "49710"),
+    ("LDATE", "9223286400000000000"),
+    ("TIME_OF_DAY", "45000500"),
+    ("LTOD", "86399999999999"),
+    ("DATE_AND_TIME", "4294967295"),
+    ("LDT", "9223372036854775807"),
+    ("DWORD", "4294967295"),
+    ("UDINT", "4294967295"),
+];
+
+/// The tags that the matrix gives to S7 only (`data-model.md` section 7).
+const NOT_ON_CODESYS: [&str; 4] = ["CHAR", "WCHAR", "DTL", "S5TIME"];
+
+/// Each golden file of `CodesysIec` and `TwinCat3` holds the 25 primitives of the matrix, the
+/// 64-bit ends, and an `LREAL` number of 15 digits (ADR-0199, review item R09). The platform is the
+/// only difference between the two files, so the content hashes differ.
+#[test]
+fn adr_0199_golden_types_of_codesys_and_twincat() {
+    let mut hashes = Vec::new();
+    for (platform, file, name) in CODESYS_GOLDEN_FILES {
+        let doc: Value = serde_json::from_str(&golden(file)).unwrap();
+        assert_eq!(doc["machine"]["plc_platform"], json!(name), "{file}");
+        assert_eq!(doc["loadable"], json!(true), "{file}: loadable");
+        let parameters = by_tag(&doc);
+        let found: BTreeSet<&str> = parameters.keys().map(String::as_str).collect();
+        let expected: BTreeSet<&str> = CODESYS_TAGS.iter().copied().collect();
+        assert_eq!(found, expected, "{file}: tags");
+        for tag in NOT_ON_CODESYS {
+            assert!(!parameters.contains_key(tag), "{file}: {tag} is not here");
+        }
+        for (tag, text) in CODESYS_EXPECTED_VALUES {
+            assert_eq!(parameters[tag]["value"], json!(text), "{file}: {tag}");
+        }
+        for parameter in parameters.values() {
+            assert_eq!(parameter["s7_address"], Value::Null, "{file}: no address");
+        }
+        assert_eq!(
+            document_text(platform, &CODESYS_TAGS, &[]),
+            golden(file),
+            "{file}: writer output"
+        );
+        hashes.push(doc["content_sha256"].as_str().unwrap().to_owned());
+    }
+    assert_ne!(hashes[0], hashes[1], "the platform is part of the hash");
 }
