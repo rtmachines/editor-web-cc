@@ -5,6 +5,7 @@
 
 mod approve;
 mod derived_locks;
+mod encoding_change;
 mod identity;
 mod order;
 mod plc_connection;

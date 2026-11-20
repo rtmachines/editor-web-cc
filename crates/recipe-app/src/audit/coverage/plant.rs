@@ -9,7 +9,7 @@ use crate::memory::fixtures::scenarios;
 use crate::memory::fixtures::{Fixture, actor, meta};
 use crate::plant::{
     AddUnit, ArchiveMachine, ArchiveUnit, CreateMachine, DefineUdt, RenameMachine, RenameUnit,
-    SetMachineDataBlock,
+    SetMachineDataBlock, SetMachineStringEncoding,
 };
 
 #[tokio::test]
@@ -76,6 +76,32 @@ async fn set_machine_data_block_writes_one_machine_entry() {
         "SetMachineDataBlock",
         &[(
             AuditAction::MachineDataBlockSet,
+            "machine",
+            AggregateType::Machine,
+        )],
+    );
+}
+
+#[tokio::test]
+async fn adr_0202_set_machine_string_encoding_writes_one_machine_entry() {
+    let fixture = scenarios::plant();
+    let user = actor(Role::Administrator);
+    let request = meta();
+    SetMachineStringEncoding::new(fixture.context())
+        .execute(
+            &user,
+            &request,
+            scenarios::set_machine_string_encoding_input(),
+        )
+        .await
+        .unwrap();
+    assert_trail(
+        &fixture.store.audit_entries(),
+        &user,
+        &request,
+        "SetMachineStringEncoding",
+        &[(
+            AuditAction::MachineStringEncodingSet,
             "machine",
             AggregateType::Machine,
         )],

@@ -7,6 +7,7 @@ use recipe_app::plant::{
     AddUnit, AddUnitInput, ArchiveMachine, ArchiveMachineInput, ArchiveUnit, ArchiveUnitInput,
     CreateMachine, CreateMachineInput, DefineUdt, DefineUdtInput, DefineUdtMode, RenameMachine,
     RenameMachineInput, RenameUnit, RenameUnitInput, SetMachineDataBlock, SetMachineDataBlockInput,
+    SetMachineStringEncoding, SetMachineStringEncodingInput,
 };
 use recipe_domain::plant::{
     DataBlockNumber, MachineCode, MemberName, PlcPlatform, StringEncoding, TypeExpr, TypeName,
@@ -16,7 +17,7 @@ use recipe_domain::text::Text;
 
 use crate::support::app::{App, Seeded};
 use crate::support::fault::{FAULT, assert_audit_fault, assert_statement_fault};
-use crate::support::fixtures::TWIN_CAT;
+use crate::support::fixtures::{self, TWIN_CAT};
 
 fn text(value: &str) -> Text {
     Text::parse(value).unwrap()
@@ -249,6 +250,80 @@ async fn set_machine_data_block_fails_in_the_copy_and_leaves_the_machine_number_
 
     assert_statement_fault(&error);
     assert_eq!(data_block_state(&mut app, seed.id).await, "100 100 1");
+    app.assert_chain_unchanged(&before).await;
+}
+
+// SetMachineStringEncoding
+
+const MACHINE_ENCODING: &str = "SELECT string_encoding FROM machine WHERE id = $1";
+
+fn set_encoding_input(seed: &Seeded) -> SetMachineStringEncodingInput {
+    SetMachineStringEncodingInput {
+        code: seed.code,
+        string_encoding: StringEncoding::Utf8,
+    }
+}
+
+async fn encoding_of(app: &mut App, machine: uuid::Uuid) -> String {
+    sqlx::query_scalar(MACHINE_ENCODING)
+        .bind(machine)
+        .fetch_one(app.admin())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn adr_0202_set_machine_string_encoding_commits_the_encoding_and_one_entry() {
+    let mut app = App::create().await;
+    let seed = machine(&mut app).await;
+    let before = app.head().await;
+    assert_eq!(encoding_of(&mut app, seed.id).await, "Latin1");
+
+    SetMachineStringEncoding::new(app.context())
+        .execute(&app.user, &app.meta, set_encoding_input(&seed))
+        .await
+        .unwrap();
+
+    assert_eq!(encoding_of(&mut app, seed.id).await, "Utf8");
+    app.assert_chain_moved(&before, &["MachineStringEncodingSet"])
+        .await;
+}
+
+#[tokio::test]
+async fn adr_0202_set_machine_string_encoding_fails_in_the_audit_insert_and_keeps_the_encoding() {
+    let mut app = App::create().await;
+    let seed = machine(&mut app).await;
+    let before = app.head().await;
+    app.install_probe("audit_log", "BEFORE", "INSERT", FAULT)
+        .await;
+
+    let error = SetMachineStringEncoding::new(app.context())
+        .execute(&app.user, &app.meta, set_encoding_input(&seed))
+        .await
+        .unwrap_err();
+
+    assert_audit_fault(&error);
+    assert_eq!(encoding_of(&mut app, seed.id).await, "Latin1");
+    app.assert_chain_unchanged(&before).await;
+}
+
+#[tokio::test]
+async fn adr_0202_set_machine_string_encoding_with_a_version_gives_e_plt_054_and_keeps_the_encoding()
+ {
+    let mut app = App::create().await;
+    let seed = machine(&mut app).await;
+    let creator = *app.user.user().as_uuid();
+    let recipe = fixtures::recipe(app.migrator(), seed.id, TWIN_CAT, creator).await;
+    fixtures::draft_version(app.migrator(), recipe, TWIN_CAT, 1, creator).await;
+    let before = app.head().await;
+
+    let error = SetMachineStringEncoding::new(app.context())
+        .execute(&app.user, &app.meta, set_encoding_input(&seed))
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), recipe_domain::error_codes::ErrorCode::PLT_054);
+    assert_eq!(encoding_of(&mut app, seed.id).await, "Latin1");
     app.assert_chain_unchanged(&before).await;
 }
 

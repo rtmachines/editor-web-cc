@@ -25,7 +25,7 @@ use crate::memory::{BodyWriter, seed_type_id};
 use crate::plant::{
     AddUnitInput, ArchiveMachineInput, ArchiveUnitInput, CreateMachineInput, DefineUdtInput,
     DefineUdtMode, RenameMachineInput, RenameUnitInput, SetMachineDataBlockInput,
-    SetPlcConnectionInput,
+    SetMachineStringEncodingInput, SetPlcConnectionInput,
 };
 use crate::ports::DocumentWriter;
 use crate::recipe::{
@@ -193,6 +193,14 @@ pub(crate) fn set_machine_data_block_input() -> SetMachineDataBlockInput {
     SetMachineDataBlockInput {
         code: MachineCode::parse("M1").unwrap(),
         db_number: Some(recipe_domain::plant::DataBlockNumber::parse("7").unwrap()),
+    }
+}
+
+/// The request of `SetMachineStringEncoding` for `M1` with the encoding `Utf8`.
+pub(crate) fn set_machine_string_encoding_input() -> SetMachineStringEncodingInput {
+    SetMachineStringEncodingInput {
+        code: MachineCode::parse("M1").unwrap(),
+        string_encoding: recipe_domain::plant::StringEncoding::Utf8,
     }
 }
 
