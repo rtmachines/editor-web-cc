@@ -400,7 +400,7 @@ pub(super) const fn iec_wstring(length: u16) -> Expected {
 
 /// The stored value of the parameter that [`seed_utf8_label`] writes. It has 4 characters, 7 UTF-8
 /// bytes, and the character `Ł`, which is outside Latin-1.
-pub(super) const UTF8_LABEL: &str = "Łódź";
+pub(crate) const UTF8_LABEL: &str = "Łódź";
 
 /// The identifier of the `STRING(10)` row that [`utf8_label_fixture`] stores.
 const LABEL_TYPE: u128 = 951;
@@ -412,7 +412,7 @@ const LABEL_LENGTH: u16 = 10;
 ///
 /// The fixture holds no recipe. The caller seeds the versions and then [`seed_utf8_label`]. The
 /// machine is the second result.
-pub(super) fn utf8_label_fixture() -> (Fixture, Machine) {
+pub(crate) fn utf8_label_fixture() -> (Fixture, Machine) {
     let fixture = Fixture::new();
     let machine = utf8_machine(1, "M1");
     fixture.store.seed_machine(&machine);
@@ -439,7 +439,7 @@ pub(super) fn utf8_label_fixture() -> (Fixture, Machine) {
 ///
 /// The parameter sits on the unit 101 and has the limit `max_length` of 10 on the leaf path `""`.
 /// It has the key 1 on every version and the identifier `1000 + version`.
-pub(super) fn seed_utf8_label(fixture: &Fixture, version: u128, value: &str) {
+pub(crate) fn seed_utf8_label(fixture: &Fixture, version: u128, value: &str) {
     let limit = StoredLimit {
         leaf_path: LeafPath::parse("").unwrap(),
         min: None,

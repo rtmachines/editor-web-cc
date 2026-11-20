@@ -143,7 +143,12 @@ pub(super) async fn read_rows(
             entity: Missing::MachineId(machine_id),
         })?;
     let rows = tx.types().type_rows(machine_id).await?;
-    let types = PlatformTypes::collect(machine_id, machine.platform(), rows)?;
+    let types = PlatformTypes::collect_encoded(
+        machine_id,
+        machine.platform(),
+        machine.string_encoding(),
+        rows,
+    )?;
     let trees = TypeTrees::resolve(parameters.iter().map(Parameter::plc_type), &types);
     let header = ExportHeader {
         machine: machine.code(),

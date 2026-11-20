@@ -20,7 +20,7 @@ mod set_value;
 #[cfg(test)]
 mod stored_s7_tests;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 mod translation;
 mod update_definition;
 
