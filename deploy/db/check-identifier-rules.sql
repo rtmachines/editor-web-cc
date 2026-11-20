@@ -11,14 +11,24 @@
 --                         a struct row on a machine with S7_300, S7_1200, or S7_1500 whose name is
 --                         a Siemens reserved name or matches the family PD_TEL<n>, in any case
 --                         (ADR-0186 (k))
+--   iec_reserved_struct_name
+--                         a struct row on a machine with CodesysIec or TwinCat3 whose name is one
+--                         of the 15 struct names of ADR-0203 (c), in any case (ADR-0203 (m))
+--   iec_keyword_member_name
+--                         a member row of a struct on a machine with CodesysIec or TwinCat3 whose
+--                         name is one of the 184 keywords of ADR-0203 (d), in any case
+--                         (ADR-0203 (m))
 --
 -- The columns are machine_code, type_name, revision, part, and stored_text. For a member row,
 -- type_name and revision are those of the struct and stored_text is the member name. For an array
 -- row, type_name names the element type and stored_text holds both bound arrays.
 -- The query reads every machine, also an archived one, and every revision.
--- The first three parts stop migration 0011. The parts reserved_struct_name and
--- s7_reserved_struct_name are for information: a struct with such a name keeps its rows and gets
--- no new revision.
+-- The first three parts stop migration 0011. The parts reserved_struct_name,
+-- s7_reserved_struct_name, iec_reserved_struct_name, and iec_keyword_member_name are for
+-- information: a struct with such a name keeps its rows and gets no new revision.
+-- The two parts of ADR-0203 list every stored struct row and every stored member row of the
+-- platform. A struct that no parameter names, and a revision that is not the named one, are rows
+-- too.
 -- The owner reads each row. The query writes nothing.
 --
 -- Run it from the directory deploy/ (docs/ops/runbook.md):
@@ -532,6 +542,83 @@ siemens_telegram (pattern) AS (
         -- siemens telegram pattern: end
     )
 ),
+-- The 15 struct names of ADR-0203 (c). One name on each line.
+-- A test compares the lines with IEC_RESERVED_STRUCT_NAMES of recipe-domain.
+iec_struct_name (name) AS (
+    SELECT unnest(ARRAY[
+        -- iec struct names: begin
+        'UNION',
+        'END_UNION',
+        'BIT',
+        '__XINT',
+        '__UXINT',
+        '__XWORD',
+        'PVOID',
+        'XINT',
+        'UXINT',
+        'XWORD',
+        'VERSION',
+        'RTS_SYSTIMEDATE',
+        'T_FILETIME',
+        'TIMESTRUCT',
+        'ST_AmsAddr'
+        -- iec struct names: end
+    ])
+),
+-- The 2 keywords of ADR-0203 (c1). One word on each line.
+-- A test compares the lines with IEC_EXTRA_KEYWORDS of recipe-domain.
+iec_extra_keyword (word) AS (
+    SELECT unnest(ARRAY[
+        -- iec extra keywords: begin
+        'UNION',
+        'END_UNION'
+        -- iec extra keywords: end
+    ])
+),
+-- The 29 primitive names. One name on each line. A test compares the lines with Primitive::ALL.
+-- They are in the list of reserved words and are no reserved member names (ADR-0203 (d)).
+primitive_name (word) AS (
+    SELECT unnest(ARRAY[
+        -- primitive names: begin
+        'BOOL',
+        'BYTE',
+        'WORD',
+        'DWORD',
+        'LWORD',
+        'SINT',
+        'USINT',
+        'INT',
+        'UINT',
+        'DINT',
+        'UDINT',
+        'LINT',
+        'ULINT',
+        'REAL',
+        'LREAL',
+        'STRING',
+        'WSTRING',
+        'CHAR',
+        'WCHAR',
+        'TIME',
+        'LTIME',
+        'DATE',
+        'LDATE',
+        'TIME_OF_DAY',
+        'LTOD',
+        'DATE_AND_TIME',
+        'LDT',
+        'DTL',
+        'S5TIME'
+        -- primitive names: end
+    ])
+),
+-- The 184 keywords of ADR-0203 (d): the reserved words of ADR-0143 (c) without the primitive
+-- names (the 182 keywords of ADR-0143 (d)), and the 2 extra keywords.
+iec_member_keyword (word) AS (
+    SELECT r.word FROM reserved r WHERE r.word NOT IN (SELECT p.word FROM primitive_name p)
+    UNION
+    SELECT x.word FROM iec_extra_keyword x
+),
 -- A struct row, with the machine that owns it.
 struct_row AS (
     SELECT t.id, m.code AS machine_code, m.plc_platform, t.machine_id, t.name, t.revision
@@ -582,6 +669,17 @@ FROM (
     WHERE s.plc_platform IN ('S7_300', 'S7_1200', 'S7_1500')
       AND (upper(s.name) IN (SELECT upper(n.name) FROM siemens_reserved n)
            OR s.name ~* (SELECT g.pattern FROM siemens_telegram g))
+    UNION ALL
+    SELECT s.machine_code, s.name, s.revision, 'iec_reserved_struct_name', s.name
+    FROM struct_row s
+    WHERE s.plc_platform IN ('CodesysIec', 'TwinCat3')
+      AND upper(s.name) IN (SELECT upper(n.name) FROM iec_struct_name n)
+    UNION ALL
+    SELECT s.machine_code, s.name, s.revision, 'iec_keyword_member_name', mem.member_name
+    FROM plc_type_member mem
+    JOIN struct_row s ON s.id = mem.struct_type_id
+    WHERE s.plc_platform IN ('CodesysIec', 'TwinCat3')
+      AND upper(mem.member_name) IN (SELECT k.word FROM iec_member_keyword k)
 ) hit
 ORDER BY hit.machine_code COLLATE "C", hit.type_name COLLATE "C", hit.revision,
          hit.part COLLATE "C", hit.stored_text COLLATE "C";

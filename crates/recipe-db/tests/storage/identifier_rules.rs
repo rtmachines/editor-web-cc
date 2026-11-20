@@ -2,15 +2,17 @@
 //!
 //! The query lists the stored type rows that the identifier rules reject: the rows of a struct
 //! name or a member name that differ only in case, an array row with a bound array that starts at
-//! another subscript than 1, a struct with a reserved name, and a struct with a Siemens reserved
-//! name on an S7 machine (ADR-0186). The tests drop the two indexes of
+//! another subscript than 1, a struct with a reserved name, a struct with a Siemens reserved name
+//! on an S7 machine (ADR-0186), and a struct with a reserved name or a member with a keyword name
+//! on a CODESYS or TwinCAT machine (ADR-0203). The tests drop the two indexes of
 //! ADR-0143 (j) and the array shape constraint, so the rows can exist. They compare the exact rows
 //! of the query, run it as `recipe_app`, and show that it writes nothing.
 
 use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
-    Primitive, RESERVED_KEYWORDS, SIEMENS_RESERVED_NAMES, is_siemens_reserved_name,
+    IEC_EXTRA_KEYWORDS, IEC_RESERVED_STRUCT_NAMES, Primitive, RESERVED_KEYWORDS,
+    SIEMENS_RESERVED_NAMES, is_siemens_reserved_name,
 };
 use sqlx::{Connection as _, PgConnection, Row as _};
 use uuid::Uuid;
@@ -28,6 +30,16 @@ const SIEMENS_BEGIN: &str = "-- siemens names: begin";
 const SIEMENS_END: &str = "-- siemens names: end";
 const PATTERN_BEGIN: &str = "-- siemens telegram pattern: begin";
 const PATTERN_END: &str = "-- siemens telegram pattern: end";
+const IEC_STRUCT_BEGIN: &str = "-- iec struct names: begin";
+const IEC_STRUCT_END: &str = "-- iec struct names: end";
+const PRIMITIVE_BEGIN: &str = "-- primitive names: begin";
+const PRIMITIVE_END: &str = "-- primitive names: end";
+const IEC_EXTRA_BEGIN: &str = "-- iec extra keywords: begin";
+const IEC_EXTRA_END: &str = "-- iec extra keywords: end";
+/// The part of a stored struct with a reserved struct name on CODESYS or TwinCAT (ADR-0203 (m)).
+const IEC_STRUCT_PART: &str = "iec_reserved_struct_name";
+/// The part of a stored member with a reserved keyword name on CODESYS or TwinCAT (ADR-0203 (m)).
+const IEC_MEMBER_PART: &str = "iec_keyword_member_name";
 /// The S7 platforms of ADR-0186 (a).
 const S7_1500: &str = "S7_1500";
 const CODESYS: &str = "CodesysIec";
@@ -453,4 +465,154 @@ async fn adr_0186_query_pattern_matches_the_telegram_family_of_the_domain() {
             "the pattern and the domain differ on {probe:?}"
         );
     }
+}
+
+/// The rows of the two parts of ADR-0203 (m), as a set.
+fn iec_rows(found: Vec<Row>) -> BTreeSet<Row> {
+    found
+        .into_iter()
+        .filter(|row| row.3 == IEC_STRUCT_PART || row.3 == IEC_MEMBER_PART)
+        .collect()
+}
+
+/// Insert a struct revision with the given member names.
+async fn insert_struct_with(
+    conn: &mut PgConnection,
+    site: &Site,
+    name: &str,
+    revision: i32,
+    members: &[String],
+) {
+    let names: Vec<&str> = members.iter().map(String::as_str).collect();
+    insert_struct(conn, site, name, revision, &names).await;
+}
+
+#[tokio::test]
+async fn adr_0203_query_lists_the_iec_rows_and_no_s7_row() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let twincat = site_on(&mut conn, TWIN_CAT).await;
+    let s7 = site_on(&mut conn, S7_1500).await;
+    let codesys = site_on(&mut conn, CODESYS).await;
+    insert_struct(&mut conn, &twincat, "VERSION", 1, &["speed"]).await;
+    insert_struct(&mut conn, &s7, "VERSION", 1, &["speed"]).await;
+    insert_struct(&mut conn, &codesys, "ST_Keyed", 1, &["END_IF"]).await;
+    insert_struct(&mut conn, &s7, "ST_Keyed", 1, &["END_IF"]).await;
+    let mut expected = Expected::default();
+    expected.hit(&twincat.code, "VERSION", 1, IEC_STRUCT_PART, "VERSION");
+    expected.hit(&codesys.code, "ST_Keyed", 1, IEC_MEMBER_PART, "END_IF");
+
+    let mut conn = database.connect(Role::App).await;
+    let found = rows(&mut conn).await;
+
+    assert_eq!(found.len(), 2, "rows found: {found:#?}");
+    assert_eq!(iec_rows(found), expected.0);
+}
+
+#[tokio::test]
+async fn adr_0203_query_lists_every_stored_struct_and_member_of_the_domain_lists() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let codesys = site_on(&mut conn, CODESYS).await;
+    let twincat = site_on(&mut conn, TWIN_CAT).await;
+    let s7 = site_on(&mut conn, S7_1500).await;
+    let archived = site_on(&mut conn, TWIN_CAT).await;
+    let mut expected = Expected::default();
+
+    // Each struct name, in the case of the list on CODESYS and in lower case on TwinCAT.
+    // A struct of another revision and a struct of an archived machine are hits too.
+    for name in IEC_RESERVED_STRUCT_NAMES {
+        let lower = name.to_ascii_lowercase();
+        insert_struct(&mut conn, &codesys, name, 1, &["speed"]).await;
+        insert_struct(&mut conn, &twincat, &lower, 1, &["speed"]).await;
+        insert_struct(&mut conn, &s7, name, 1, &["speed"]).await;
+        expected.hit(&codesys.code, name, 1, IEC_STRUCT_PART, name);
+        expected.hit(&twincat.code, &lower, 1, IEC_STRUCT_PART, &lower);
+    }
+    insert_struct(&mut conn, &codesys, "VERSION", 2, &["speed"]).await;
+    expected.hit(&codesys.code, "VERSION", 2, IEC_STRUCT_PART, "VERSION");
+    insert_struct(&mut conn, &archived, "BIT", 1, &["speed"]).await;
+    sqlx::query("UPDATE machine SET archived_at = now() WHERE id = $1")
+        .bind(archived.id)
+        .execute(&mut conn)
+        .await
+        .unwrap();
+    expected.hit(&archived.code, "BIT", 1, IEC_STRUCT_PART, "BIT");
+
+    // Each keyword as a member name, in the case of the list on CODESYS, in lower case on
+    // TwinCAT, and in no row on S7.
+    let keywords: Vec<String> = RESERVED_KEYWORDS
+        .iter()
+        .chain(IEC_EXTRA_KEYWORDS.iter())
+        .map(|word| (*word).to_owned())
+        .collect();
+    let lower: Vec<String> = keywords.iter().map(|word| word.to_lowercase()).collect();
+    insert_struct_with(&mut conn, &codesys, "ST_Keywords", 1, &keywords).await;
+    insert_struct_with(&mut conn, &twincat, "ST_Keywords", 4, &lower).await;
+    insert_struct_with(&mut conn, &s7, "ST_Keywords", 1, &keywords).await;
+    for word in &keywords {
+        expected.hit(&codesys.code, "ST_Keywords", 1, IEC_MEMBER_PART, word);
+    }
+    for word in &lower {
+        expected.hit(&twincat.code, "ST_Keywords", 4, IEC_MEMBER_PART, word);
+    }
+
+    // A primitive name and a type name of ADR-0203 (c2) are no reserved member names.
+    let allowed: Vec<String> = Primitive::ALL
+        .iter()
+        .map(|primitive| primitive.name().to_owned())
+        .chain(
+            IEC_RESERVED_STRUCT_NAMES
+                .iter()
+                .skip(2)
+                .map(|name| (*name).to_owned()),
+        )
+        .collect();
+    insert_struct_with(&mut conn, &codesys, "ST_Allowed", 1, &allowed).await;
+    insert_struct_with(&mut conn, &twincat, "ST_Allowed", 1, &allowed).await;
+
+    let mut conn = database.connect(Role::App).await;
+    let found = iec_rows(rows(&mut conn).await);
+
+    assert_eq!(expected.0.len(), 30 + 1 + 1 + 184 * 2);
+    assert_eq!(found, expected.0);
+}
+
+#[test]
+fn adr_0203_sql_lists_equal_the_domain_lists() {
+    let structs = words_between(IEC_STRUCT_BEGIN, IEC_STRUCT_END);
+    let expected: BTreeSet<String> = IEC_RESERVED_STRUCT_NAMES
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
+    assert_eq!(expected.len(), 15, "the domain list is short");
+    assert_eq!(structs.len(), expected.len(), "a name appears twice");
+    assert_eq!(structs.into_iter().collect::<BTreeSet<_>>(), expected);
+
+    let extras = words_between(IEC_EXTRA_BEGIN, IEC_EXTRA_END);
+    let expected: BTreeSet<String> = IEC_EXTRA_KEYWORDS
+        .iter()
+        .map(|word| (*word).to_owned())
+        .collect();
+    assert_eq!(extras.len(), expected.len(), "a word appears twice");
+    assert_eq!(extras.into_iter().collect::<BTreeSet<_>>(), expected);
+
+    // The member keywords are the reserved words without the primitive names, and the extras.
+    // The 182 keywords and the 29 primitive names are disjoint, so the 211 reserved words of the
+    // file less the primitive names are the 182 keywords of the domain.
+    let primitives = words_between(PRIMITIVE_BEGIN, PRIMITIVE_END);
+    let expected: BTreeSet<String> = Primitive::ALL
+        .iter()
+        .map(|primitive| primitive.name().to_owned())
+        .collect();
+    assert_eq!(primitives.len(), expected.len(), "a name appears twice");
+    assert_eq!(primitives.into_iter().collect::<BTreeSet<_>>(), expected);
+    let keywords: BTreeSet<&str> = RESERVED_KEYWORDS.iter().copied().collect();
+    assert_eq!(keywords.len(), 182);
+    assert!(
+        expected
+            .iter()
+            .all(|name| !keywords.contains(name.as_str())),
+        "a primitive name is a keyword"
+    );
 }
