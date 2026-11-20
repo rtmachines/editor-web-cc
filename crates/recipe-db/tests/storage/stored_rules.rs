@@ -250,12 +250,12 @@ fn nesting_value() -> String {
 }
 
 /// The data of a new request.
-fn new_meta() -> RequestMeta {
+pub(crate) fn new_meta() -> RequestMeta {
     RequestMeta::new(new_request_id().unwrap(), None, None, None)
 }
 
 /// The row version of the version 1 of a recipe, read through `GetVersion`.
-async fn row_version(app: &App, reference: &ReferenceNumber) -> i64 {
+pub(crate) async fn row_version(app: &App, reference: &ReferenceNumber) -> i64 {
     let input = GetVersionInput {
         reference: reference.clone(),
         number: 1,
@@ -297,7 +297,7 @@ async fn define_struct(
 }
 
 /// Add the parameter of a case to the version 1 of its recipe as the engineer.
-async fn add_case_parameter(
+pub(crate) async fn add_case_parameter(
     app: &App,
     engineer: &CurrentUser,
     reference: &ReferenceNumber,
