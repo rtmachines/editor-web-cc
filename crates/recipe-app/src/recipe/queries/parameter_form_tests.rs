@@ -706,3 +706,45 @@ async fn adr_0204_proposals_keep_a_stored_one_member_struct_on_twincat_and_s7() 
         }
     }
 }
+
+#[tokio::test]
+async fn adr_0204_proposals_leave_out_a_name_whose_latest_revision_is_refused() {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(PlcPlatform::CodesysIec, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    for (id, revision, supersedes, members) in [
+        (715, 1, None, vec!["a", "b"]),
+        (716, 2, Some(tid(715)), vec!["a"]),
+    ] {
+        let record = PlcTypeRecord {
+            id: tid(id),
+            machine: Some(crate::memory::fixtures::mid(1)),
+            platforms: BTreeSet::from([PlcPlatform::CodesysIec]),
+            shape: RecordShape::Struct {
+                name: recipe_domain::plant::TypeName::parse("ST_X").unwrap(),
+                revision,
+                supersedes,
+                members: members
+                    .into_iter()
+                    .map(|member| recipe_domain::plant::TypeMember {
+                        name: recipe_domain::plant::MemberName::parse(member).unwrap(),
+                        type_id: int,
+                    })
+                    .collect(),
+            },
+        };
+        fixture.store.seed_type(&PlcType::try_from(record).unwrap());
+    }
+
+    let choices = form(&fixture, input(None, None, None))
+        .await
+        .unwrap()
+        .choices;
+
+    assert!(
+        !choices.iter().any(|choice| choice.starts_with("ST_X@")),
+        "{choices:?}"
+    );
+}

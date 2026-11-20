@@ -243,7 +243,8 @@ fn require_form_type(
 ///
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
-/// `<name>@<revision>` in the byte order of the name. A struct with a reserved name is no proposal,
+/// `<name>@<revision>` in the byte order of the name. A name whose latest revision is refused is no
+/// proposal, as in `GetUdtForm`. A struct with a reserved name is no proposal,
 /// because every command refuses it (ADR-0143 (i2)). On an S7 platform, a struct with a Siemens
 /// reserved name is no proposal either (ADR-0186 (h)).
 fn proposals(types: &PlatformTypes) -> Vec<String> {
@@ -262,13 +263,13 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
     let strings = [Primitive::String]
         .into_iter()
         .chain(has_wstring.then_some(Primitive::Wstring));
-    let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
+    let mut latest: BTreeMap<&TypeName, (u32, &PlcType)> = BTreeMap::new();
     for row in types.rows() {
-        if let RecordShape::Struct { name, revision, .. } = row.shape()
-            && !is_refused_struct(types.platform(), row)
-        {
-            let entry = latest.entry(name).or_insert(*revision);
-            *entry = (*entry).max(*revision);
+        if let RecordShape::Struct { name, revision, .. } = row.shape() {
+            let entry = latest.entry(name).or_insert((*revision, row));
+            if *revision > entry.0 {
+                *entry = (*revision, row);
+            }
         }
     }
     primitives
@@ -278,7 +279,8 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
         .chain(
             latest
                 .iter()
-                .map(|(name, revision)| format!("{name}@{revision}")),
+                .filter(|(_, (_, row))| !is_refused_struct(types.platform(), row))
+                .map(|(name, (revision, _))| format!("{name}@{revision}")),
         )
         .collect()
 }

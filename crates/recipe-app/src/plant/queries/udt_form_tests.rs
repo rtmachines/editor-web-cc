@@ -502,3 +502,39 @@ async fn adr_0204_proposals_keep_a_stored_one_member_struct_on_twincat_and_s7() 
         }
     }
 }
+
+#[tokio::test]
+async fn adr_0204_proposals_leave_out_a_name_whose_latest_revision_is_refused() {
+    let fixture = Fixture::new();
+    let platform = PlcPlatform::CodesysIec;
+    fixture
+        .store
+        .seed_machine(&machine_of(platform, MACHINE, "M12", "Press"));
+    let int = primitive(Primitive::Int);
+    let rows = [
+        struct_row(
+            (MACHINE, platform),
+            925,
+            ("ST_X", 1),
+            &[("a", int), ("b", int)],
+            None,
+        ),
+        struct_row(
+            (MACHINE, platform),
+            926,
+            ("ST_X", 2),
+            &[("a", int)],
+            Some(925),
+        ),
+    ];
+    for row in &rows {
+        fixture.store.seed_type(row);
+    }
+
+    let choices = form(&fixture, None).await.unwrap().choices;
+
+    assert!(
+        !choices.iter().any(|choice| choice.starts_with("ST_X@")),
+        "{choices:?}"
+    );
+}
