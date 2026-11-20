@@ -178,7 +178,17 @@ pub fn type_table() -> [TypeCase; 28] {
 ///
 /// `LREAL` holds 15 significant digits, the maximum of ADR-0117. `REAL` holds 3 of the 7 digits.
 pub fn codesys_type_table() -> [TypeCase; 25] {
-    use Limit::{Length, None, Range};
+    let mut cases = bits_and_integers()
+        .into_iter()
+        .chain(reals_and_strings())
+        .chain(durations_and_dates())
+        .chain(times_of_day());
+    std::array::from_fn(|_| cases.next().unwrap())
+}
+
+/// The bit strings and the integers of `CodesysIec` and `TwinCat3`.
+fn bits_and_integers() -> [TypeCase; 13] {
+    use Limit::{None, Range};
     [
         case("BOOL", "true", "true", None),
         case("BYTE", "255", r#""255""#, Range("0", "255")),
@@ -223,6 +233,13 @@ pub fn codesys_type_table() -> [TypeCase; 25] {
             r#""18446744073709551615""#,
             Range("0", "18446744073709551615"),
         ),
+    ]
+}
+
+/// The floating-point numbers and the strings of `CodesysIec` and `TwinCat3`.
+fn reals_and_strings() -> [TypeCase; 4] {
+    use Limit::{Length, Range};
+    [
         case("REAL", "1.5e2", r#""150""#, Range("0", "200")),
         // 9 digits before the point and 6 after it: 15 significant digits.
         case(
@@ -244,6 +261,13 @@ pub fn codesys_type_table() -> [TypeCase; 25] {
             "\"Z\u{3a9}\"",
             Length(super::STRING_LENGTH),
         ),
+    ]
+}
+
+/// The durations and the dates of `CodesysIec` and `TwinCat3`.
+fn durations_and_dates() -> [TypeCase; 4] {
+    use Limit::Range;
+    [
         // `TIME` is unsigned on CODESYS and TwinCAT 3.
         case(
             "TIME",
@@ -269,6 +293,13 @@ pub fn codesys_type_table() -> [TypeCase; 25] {
             r#""9223286400000000000""#,
             Range("0", "9223286400000000000"),
         ),
+    ]
+}
+
+/// The times of day and the date and time values of `CodesysIec` and `TwinCat3`.
+fn times_of_day() -> [TypeCase; 4] {
+    use Limit::Range;
+    [
         case(
             "TIME_OF_DAY",
             r#""TOD#12:30:00.5""#,
