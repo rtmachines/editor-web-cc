@@ -2,7 +2,8 @@
 
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
-    DataBlockNumber, MachineCode, MachineId, PlantError, PlcPlatform, PlcType, UnitId, UnitPath,
+    DataBlockNumber, MachineCode, MachineId, PlantError, PlcPlatform, PlcType, StringEncoding,
+    UnitId, UnitPath,
 };
 use recipe_domain::recipe::RecipeVersionId;
 use recipe_domain::text::Text;
@@ -18,6 +19,7 @@ pub(crate) struct MachineRow {
     pub(crate) name: Text,
     pub(crate) platform: PlcPlatform,
     pub(crate) db_number: Option<DataBlockNumber>,
+    pub(crate) string_encoding: StringEncoding,
     pub(crate) archived_at: Option<Timestamp>,
     pub(crate) created_at: Timestamp,
     pub(crate) updated_at: Timestamp,

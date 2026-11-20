@@ -28,6 +28,7 @@ fn archived_machine() -> Machine {
         name: name("Press"),
         platform: PlcPlatform::TwinCat3,
         db_number: None,
+        string_encoding: StringEncoding::Latin1,
         archived_at: Some(ts(5)),
         units: vec![],
     };

@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use crate::error_codes::ErrorCode;
 use crate::plant::{
-    Machine, MachineCode, MachineId, PlantError, PlcPlatform, StoredMachine, StoredUnit, UnitId,
-    UnitPath,
+    Machine, MachineCode, MachineId, PlantError, PlcPlatform, StoredMachine, StoredUnit,
+    StringEncoding, UnitId, UnitPath,
 };
 use crate::text::Text;
 use crate::timestamp::Timestamp;
@@ -38,6 +38,7 @@ fn machine(is_archived: bool) -> Machine {
         name: Text::parse("Press").unwrap(),
         platform: PlcPlatform::TwinCat3,
         db_number: None,
+        string_encoding: StringEncoding::Latin1,
         archived_at: is_archived
             .then(|| Timestamp::from(OffsetDateTime::from_unix_timestamp(9).unwrap())),
         units: vec![

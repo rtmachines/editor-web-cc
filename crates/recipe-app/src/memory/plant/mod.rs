@@ -225,6 +225,7 @@ impl PlantRepository for MemoryTransaction {
             name: machine.name().clone(),
             platform: machine.platform(),
             db_number: machine.db_number(),
+            string_encoding: machine.string_encoding(),
             archived_at: machine.archived_at(),
             created_at: now,
             updated_at: now,

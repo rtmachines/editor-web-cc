@@ -6,7 +6,7 @@
 
 use recipe_domain::plant::{
     DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit,
-    UnitId, UnitPath, UnitUsage,
+    StringEncoding, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -119,6 +119,7 @@ pub(super) fn seed_archived_machine(
         name: Text::parse("Retired line").unwrap(),
         platform,
         db_number: db_number.map(|text| DataBlockNumber::parse(text).unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: Some(Timestamp::from(
             OffsetDateTime::from_unix_timestamp(ARCHIVED_AT_SECONDS).unwrap(),
         )),

@@ -464,7 +464,8 @@ mod stored_rows {
     use recipe_domain::plant::{
         DataBlockNumber, LeafClass, Machine, MachineCode, MachineId, MemberName, PlatformTypes,
         PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet,
-        StoredMachine, StoredUnit, TypeMember, TypeName, TypeTrees, UnitId, UnitPath,
+        StoredMachine, StoredUnit, StringEncoding, TypeMember, TypeName, TypeTrees, UnitId,
+        UnitPath,
     };
     use recipe_domain::recipe::{
         Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue,
@@ -631,6 +632,7 @@ mod stored_rows {
             db_number: platform
                 .max_data_block()
                 .map(|_| DataBlockNumber::parse("1").expect("a data block number")),
+            string_encoding: StringEncoding::Latin1,
             archived_at: None,
             units: vec![unit],
         })

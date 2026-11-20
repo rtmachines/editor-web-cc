@@ -8,7 +8,7 @@ use crate::plant::fixtures::{
 };
 use crate::plant::{
     LeafPath, LiveUnit, Machine, MachineCode, MachineId, PlcPlatform, PlcType, Primitive,
-    StoredMachine, StoredUnit, TypeTrees, UnitId, UnitPath,
+    StoredMachine, StoredUnit, StringEncoding, TypeTrees, UnitId, UnitPath,
 };
 use crate::recipe::{
     Draft, DraftError, LeafTexts, LimitInput, LimitList, NewParameter, Ordinal, Parameter,
@@ -75,6 +75,7 @@ pub(in crate::recipe::draft) fn live_unit_of(owner: MachineId) -> LiveUnit {
         name: Text::parse("Press").unwrap(),
         platform: PlcPlatform::TwinCat3,
         db_number: None,
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units: vec![StoredUnit {
             id: UnitId::from(Uuid::from_u128(700)),

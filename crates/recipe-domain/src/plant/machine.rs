@@ -8,8 +8,8 @@ use crate::text::Text;
 use crate::timestamp::Timestamp;
 
 use super::{
-    DataBlockNumber, LiveUnits, MachineCode, MachineId, PlantError, PlcPlatform, UnitId, UnitPath,
-    UnitUsage, check_data_block,
+    DataBlockNumber, LiveUnits, MachineCode, MachineId, PlantError, PlcPlatform, StringEncoding,
+    UnitId, UnitPath, UnitUsage, check_data_block, check_string_encoding,
 };
 
 /// A unit of a machine, such as `U1.2`.
@@ -85,6 +85,8 @@ pub struct StoredMachine {
     pub platform: PlcPlatform,
     /// The data block number, or `None` for an IEC machine or an archived S7 machine.
     pub db_number: Option<DataBlockNumber>,
+    /// The `STRING` encoding of the machine (ADR-0202).
+    pub string_encoding: StringEncoding,
     /// The instant of archiving, or `None` for a live machine.
     pub archived_at: Option<Timestamp>,
     /// The unit rows of the machine, in any order.
@@ -113,6 +115,7 @@ pub struct Machine {
     name: Text,
     platform: PlcPlatform,
     db_number: Option<DataBlockNumber>,
+    string_encoding: StringEncoding,
     archived_at: Option<Timestamp>,
     units: BTreeMap<UnitPath, Unit>,
 }
@@ -148,6 +151,14 @@ impl Machine {
         self.db_number
     }
 
+    /// Return the `STRING` encoding of the machine (ADR-0202).
+    ///
+    /// Every S7 machine is `Latin1`.
+    #[must_use]
+    pub const fn string_encoding(&self) -> StringEncoding {
+        self.string_encoding
+    }
+
     /// Return the instant of archiving, or `None` for a live machine.
     #[must_use]
     pub const fn archived_at(&self) -> Option<Timestamp> {
@@ -163,7 +174,8 @@ impl Machine {
     /// Create a live machine with its main unit `U1` (`domain-model.md` section 5.1, `CreateMachine`).
     ///
     /// The caller supplies the identifiers. A live S7 machine needs a data block number.
-    /// An IEC machine has none (ADR-0156).
+    /// An IEC machine has none (ADR-0156). The machine gets the encoding `Latin1`.
+    /// Task 11.11 of `codesys-twincat-type-rules` adds the encoding as an argument.
     ///
     /// # Errors
     ///
@@ -192,6 +204,7 @@ impl Machine {
             name,
             platform,
             db_number,
+            string_encoding: StringEncoding::Latin1,
             archived_at: None,
             units: BTreeMap::from([(path, main_unit)]),
         })
@@ -423,9 +436,11 @@ impl TryFrom<StoredMachine> for Machine {
     /// A failure means corrupt storage, because the commands keep the tree valid.
     /// The checks run in this order: duplicate path, missing parent,
     /// archived parent of a live unit, no live main unit, and the data block rule
-    /// (ADR-0156). An archived S7 machine may have no number.
+    /// (ADR-0156). An archived S7 machine may have no number. Then comes the encoding rule
+    /// (ADR-0202): `Utf8` on an S7 platform is corrupt storage.
     fn try_from(stored: StoredMachine) -> Result<Self, PlantError> {
         check_stored_data_block(&stored)?;
+        check_string_encoding(stored.code, stored.platform, stored.string_encoding)?;
         let units = index_units(stored.units)?;
         check_parents(&units)?;
         check_live_main_unit(&units, stored.code)?;
@@ -435,6 +450,7 @@ impl TryFrom<StoredMachine> for Machine {
             name: stored.name,
             platform: stored.platform,
             db_number: stored.db_number,
+            string_encoding: stored.string_encoding,
             archived_at: stored.archived_at,
             units,
         })

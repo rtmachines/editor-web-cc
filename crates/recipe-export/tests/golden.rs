@@ -19,8 +19,8 @@ use recipe_domain::identity::Login;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafPath, LiveUnits, Machine, MachineCode, MachineId,
     MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, RuleSet, S7Address, StoredMachine, StoredUnit, TypeMember, TypeName, TypeTrees,
-    UnitId, UnitPath,
+    RecordShape, RuleSet, S7Address, StoredMachine, StoredUnit, StringEncoding, TypeMember,
+    TypeName, TypeTrees, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue, ReferenceNumber,
@@ -176,6 +176,7 @@ fn units(platform: PlcPlatform) -> LiveUnits {
         db_number: platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units: ["U1", "U1.2"].map(unit).to_vec(),
     })

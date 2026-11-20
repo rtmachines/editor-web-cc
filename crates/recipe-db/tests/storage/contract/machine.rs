@@ -3,7 +3,7 @@
 //! Each case runs on `MemoryStore` and on `Database` with the same assertions.
 
 use recipe_app::error::{MACHINE_CODE_LIVE_UNIQUE, StorageError};
-use recipe_domain::plant::PlcPlatform;
+use recipe_domain::plant::{Machine, PlcPlatform, StringEncoding};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
@@ -500,4 +500,101 @@ async fn postgres_only_a_missing_machine_takes_no_lock() {
         .unwrap();
 
     assert!(locked.is_none());
+}
+
+/// A live `CodesysIec` machine with the unit `U1`. Only this platform family can hold `Utf8`.
+fn codesys_machine(n: u128, code_text: &str) -> Machine {
+    Machine::create(
+        machine_id(n),
+        code(code_text),
+        name("Press"),
+        PlcPlatform::CodesysIec,
+        None,
+        (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
+    )
+    .unwrap()
+}
+
+/// Postgres only: each of the six machine statements reads the column `string_encoding`.
+///
+/// `recipe_app` has the column grant, and `Machine::create` stores `Latin1` until task 11.11.
+#[tokio::test]
+async fn adr_0202_stored_machine_reads_its_string_encoding() {
+    let h = PgHarness::create().await;
+    let latin1 = codesys_machine(60, "M60");
+    let utf8 = codesys_machine(61, "M61");
+    insert(&h, &latin1).await;
+    insert(&h, &utf8).await;
+    let mut app = h.database.connect(Role::App).await;
+    sqlx::query("UPDATE machine SET string_encoding = 'Utf8' WHERE id = $1")
+        .bind(*utf8.id().as_uuid())
+        .execute(&mut app)
+        .await
+        .unwrap();
+
+    let mut tx = begin(&h).await;
+    assert_eq!(
+        tx.plant()
+            .machine_by_code(code("M60"))
+            .await
+            .unwrap()
+            .unwrap()
+            .string_encoding(),
+        StringEncoding::Latin1
+    );
+    assert_eq!(
+        tx.plant()
+            .machine_by_code(code("M61"))
+            .await
+            .unwrap()
+            .unwrap()
+            .string_encoding(),
+        StringEncoding::Utf8
+    );
+    assert_eq!(
+        tx.plant()
+            .export_machine_by_code(code("M61"))
+            .await
+            .unwrap()
+            .unwrap()
+            .string_encoding(),
+        StringEncoding::Utf8
+    );
+    assert_eq!(
+        tx.plant()
+            .machine_by_id(utf8.id())
+            .await
+            .unwrap()
+            .unwrap()
+            .string_encoding(),
+        StringEncoding::Utf8
+    );
+    let shared = tx
+        .plant()
+        .lock_machine_shared(utf8.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(shared.state.string_encoding(), StringEncoding::Utf8);
+    assert_eq!(text(&shared.before, "string_encoding"), "Utf8");
+    drop(tx);
+    let mut tx = begin(&h).await;
+    let exclusive = tx
+        .plant()
+        .lock_machine_for_no_key_update(utf8.id())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exclusive.state.string_encoding(), StringEncoding::Utf8);
+    drop(tx);
+
+    archive(&h, utf8.id()).await;
+    let mut tx = begin(&h).await;
+    let archived = tx
+        .plant()
+        .archived_machine_by_code(code("M61"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(archived.string_encoding(), StringEncoding::Utf8);
 }
