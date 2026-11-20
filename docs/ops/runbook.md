@@ -1174,7 +1174,7 @@ docker volume rm <drill volume>
 
 The query lists the stored rows that the platform ranges reject. It writes nothing.
 The output has the columns `machine_code`, `reference_number`, `version_number`, `version_status`, `tag`, `part`, and `stored_text`.
-The column `part` is `value`, `limit_min`, `limit_max`, `s7_address`, or `wide_text`.
+The column `part` is `value`, `limit_min`, `limit_max`, `s7_address`, `wide_text`, or `iec_wide_text`.
 A row can be a false hit when its type tree holds a `ULINT`, `LWORD`, `LTIME`, `REAL`, or `LREAL` leaf.
 The false hit can be a `value` row, a `limit_min` row, or a `limit_max` row of that leaf.
 
@@ -1184,6 +1184,13 @@ A `WCHAR` value refuses a character above `U+D7FF`. A `WSTRING` value refuses a 
 The query compares each text leaf with the limit of its own type, also in a struct with both types.
 A `wide_text` row is a true hit. Do not accept it as a false hit.
 An `Approved` version with a `wide_text` row becomes not loadable after the upgrade.
+
+A row of `iec_wide_text` follows ADR-0201 (k). It is a parameter on `CodesysIec` or `TwinCat3` with a `WSTRING` value that the rule refuses.
+The column `stored_text` holds the text leaf.
+The rule refuses each character outside `U+0001` to `U+D7FF` and `U+E000` to `U+FFFF`. This includes each character outside the Basic Multilingual Plane.
+An `iec_wide_text` row is a true hit. Do not accept it as a false hit.
+An `Approved` version with an `iec_wide_text` row stays readable. It becomes not loadable after the upgrade (ADR-0201 (i)).
+The part `iec_wide_text` gives the kind of result that changes `loadable`. It is the only such new part of the CODESYS and TwinCAT rules. The parts of the next section refuse only new writes.
 
 1. Run the query from the directory `deploy/` of the new release:
 
@@ -1195,14 +1202,14 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 3. Accept each row of `value`, `limit_min`, `limit_max`, and `s7_address` that needs no change.
 4. Fix a draft row with `SetParameterValue`, `ReplaceLimits`, or `UpdateParameterDefinition`.
 5. Fix an approved row by creating a new version.
-6. Before step 3 of "Upgrade", fix each `wide_text` row of a version to fix. Use the rule below.
-7. Sign off each other `wide_text` row. Record each such row in the upgrade ticket.
+6. Before step 3 of "Upgrade", fix each `wide_text` and `iec_wide_text` row of a version to fix. Use the rule below.
+7. Sign off each other `wide_text` and `iec_wide_text` row. Record each such row in the upgrade ticket.
 8. If a version to fix has no fix, stop the upgrade before step 3. Record the reason in the ticket.
 9. Run the query again. Check the end criterion below.
 10. Write the result into the [change log of the site](#change-log-of-the-site).
 
 Fix rule of the upgrade checks:
-This rule applies to the `wide_text` rows of this section.
+This rule applies to the `wide_text` and `iec_wide_text` rows of this section.
 It also applies to the `array_bound` and `bool_array_3d` rows of the section "Check the stored data against the S7 layout rules".
 
 - A version to fix is a live draft, or the `Approved` version of a live recipe on a live machine.
@@ -1213,7 +1220,7 @@ It also applies to the `array_bound` and `bool_array_3d` rows of the section "Ch
 - Each other listed row needs only the sign-off of the owner. Examples are a discarded draft, a `Retired` version, a deleted recipe, and an archived machine.
 
 The query reads every version and also the soft-deleted rows. A fixed old version therefore stays in the output with the status `Retired`.
-End criterion: no `wide_text` row of the second run names a version to fix, and the owner signed off each remaining `wide_text` row.
+End criterion: no `wide_text` or `iec_wide_text` row of the second run names a version to fix, and the owner signed off each remaining row of these parts.
 Check each remaining row in the editor:
 
 - The version table of the recipe page `/recipes/<reference_number>` shows the status of each listed version.
@@ -1223,10 +1230,10 @@ Check each remaining row in the editor:
 
 ## Check the stored type rows against the identifier rules
 
-The query lists the stored type rows that the identifier rules of ADR-0143 reject. It writes nothing.
+The query lists the stored type rows that the identifier rules of ADR-0143, ADR-0203, and ADR-0204 reject. It writes nothing.
 The output has the columns `machine_code`, `type_name`, `revision`, `part`, and `stored_text`.
 A case pair gives two rows, one for each spelling.
-The column `part` is `struct_name_case`, `member_name_case`, `array_subscript`, `reserved_struct_name`, or `s7_reserved_struct_name`.
+The column `part` is `struct_name_case`, `member_name_case`, `array_subscript`, `reserved_struct_name`, `s7_reserved_struct_name`, `iec_reserved_struct_name`, `iec_keyword_member_name`, or `codesys_one_member_struct`.
 The parts `struct_name_case`, `member_name_case`, and `array_subscript` must give 0 rows before an upgrade.
 Migration `0011` stops the upgrade otherwise.
 The part `reserved_struct_name` is for information. A struct with a reserved name gets no new revision.
@@ -1238,6 +1245,23 @@ The part is for information. The rule refuses only new writes. The struct keeps 
 A listed `Approved` version stays loadable after the upgrade.
 The owner signs off each row of `s7_reserved_struct_name`.
 
+The three parts `iec_reserved_struct_name`, `iec_keyword_member_name`, and `codesys_one_member_struct` are for information.
+Each rule of these parts refuses only a new write. A listed row keeps its struct, its members, and its parameters.
+A listed `Approved` version stays loadable after the upgrade. These parts give the kind of result that the rule refuses only for new writes.
+After the upgrade, a command that writes a type text naming a listed struct revision gives `E-PLT-013`. `DefineUdt` also gives `E-PLT-013` for a new struct or revision with a refused name.
+`RebindTypeRevision` keeps a listed struct, as in the S7 rule above.
+The owner signs off each row of these three parts.
+
+- A row of `iec_reserved_struct_name` follows ADR-0203 (m). It is a struct on a machine with `CodesysIec` or `TwinCat3`. The name of the struct is one of the 15 names of ADR-0203 (c), in any case.
+- A row of `iec_keyword_member_name` follows ADR-0203 (m). It is a member of a struct on a machine with `CodesysIec` or `TwinCat3`. The name of the member is one of the 184 keywords of ADR-0203 (d), in any case.
+- A row of `codesys_one_member_struct` follows ADR-0204 (h). It is a struct with one member on a machine with `CodesysIec`. The part lists no struct of a `TwinCat3` machine.
+
+The check of a new type text follows only the struct revision that the text names directly.
+A prohibited struct that lies deeper is legacy data. A struct member, or an array element of a struct, can hold it.
+The earlier rule set accepts it, and `RebindTypeRevision` keeps it (ADR-0203 (k), ADR-0204 (e)).
+The three parts list it, because they read each stored struct row and each stored member row.
+The owner signs off such a row like each other row of these parts.
+
 1. Run the query from the directory `deploy/` of the new release:
 
 ```bash
@@ -1246,7 +1270,7 @@ docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/che
 
 2. The owner reads each output row.
 3. Stop the upgrade when a row of `struct_name_case`, `member_name_case`, or `array_subscript` remains.
-4. Sign off each row of `reserved_struct_name` and `s7_reserved_struct_name`.
+4. Sign off each row of `reserved_struct_name`, `s7_reserved_struct_name`, `iec_reserved_struct_name`, `iec_keyword_member_name`, and `codesys_one_member_struct`.
 5. Write the result into the [change log of the site](#change-log-of-the-site).
 
 ## Check the stored data against the S7 layout rules
