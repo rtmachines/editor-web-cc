@@ -285,6 +285,30 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
         .collect()
 }
 
+/// Builds the preview tree of the requested type text, or `None` without one.
+///
+/// The step solves one problem. `execute` stays short, and the preview stays a pure in-memory
+/// step after the read transaction (ADR-0039 (h)).
+fn preview_of(
+    machine: &Machine,
+    rows: Vec<PlcType>,
+    type_expr: Option<&TypeExpr>,
+) -> Result<Option<TypeTree>, AppError> {
+    let kind = (machine.platform(), machine.string_encoding());
+    type_expr
+        .map(|expr| preview_tree(machine.id(), kind, rows, expr))
+        .transpose()
+}
+
+/// Returns the live units of the machine in the order of the path.
+fn live_units(machine: &Machine) -> Vec<Unit> {
+    machine
+        .units()
+        .filter(|unit| unit.is_live())
+        .cloned()
+        .collect()
+}
+
 /// Prepares the form of a new parameter and the edit form of a parameter.
 ///
 /// The query solves one problem. The form needs the live units, the type proposals, and the
@@ -369,19 +393,8 @@ impl GetParameterForm {
         if let Some(expr) = &input.type_expr {
             require_form_type(&types, expr, (input.purpose, reads.parameter.as_ref()))?;
         }
-        let preview = input
-            .type_expr
-            .as_ref()
-            .map(|expr| {
-                let kind = (machine.platform(), machine.string_encoding());
-                preview_tree(machine.id(), kind, reads.rows, expr)
-            })
-            .transpose()?;
-        let units = machine
-            .units()
-            .filter(|unit| unit.is_live())
-            .cloned()
-            .collect();
+        let preview = preview_of(&machine, reads.rows, input.type_expr.as_ref())?;
+        let units = live_units(&machine);
         Ok(ParameterForm {
             recipe: reads.scope.recipe,
             machine,
