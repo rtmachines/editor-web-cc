@@ -68,29 +68,29 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Check: `grep -rnE '0(199|20[0-9]) \(proposed' docs/adr` prints nothing. Before the task, it prints 24 lines.
   - Check: `grep -nE '^\| \[0(199|20[0-9])\].*\| Proposed' docs/adr/README.md` prints nothing. Before the task, it prints 11 lines.
   - Check: `ste-lint.py` on the changed files reports 0 hard violations.
-- [ ] 1.1 (recipe-domain) Pin task for review item R02. In `crates/recipe-domain/src/plant/type_expr/tests.rs`, add `adr_0209_open_array_pointer_and_reference_fail`.
+- [x] 1.1 (recipe-domain) Pin task for review item R02. In `crates/recipe-domain/src/plant/type_expr/tests.rs`, add `adr_0209_open_array_pointer_and_reference_fail`.
   - `TypeExpr::parse` gives `DerivedTypeReason::Grammar` for each of these texts: `ARRAY[*] OF INT`, `ARRAY[*,*] OF INT`, `ARRAY[1..2,*] OF INT`, `POINTER TO INT`, and `REFERENCE TO INT`.
   - The parser does not read the platform, so the test has no loop over the platforms.
   - Command: `cargo test -p recipe-domain --lib adr_0209_open_array` (expect pass).
-- [ ] 1.2 (recipe-domain) Pin task for review item R05. Add `adr_0141_wstring_of_length_zero_fails` in two files.
+- [x] 1.2 (recipe-domain) Pin task for review item R05. Add `adr_0141_wstring_of_length_zero_fails` in two files.
   - In `plant/type_expr/tests.rs`, `TypeExpr::parse("WSTRING(0)")` gives `DerivedTypeReason::Grammar`. The parser runs once, with no platform loop.
   - In `plant/string_length/tests.rs`, `StringLength::parse(StringKind::Wstring, platform, 0)` gives `StringLengthReason::OutOfRange` on `CodesysIec`, `TwinCat3`, `S7_1200`, and `S7_1500`. This check reads the platform.
   - The two reasons are fixed. `parse_string` of `plant/type_expr.rs` refuses the text `0` with `Grammar`, and `StringLength::parse` refuses the length 0 with `OutOfRange`.
   - Another reason is a defect. The agent stops and reports it.
   - Command: `cargo test -p recipe-domain --lib adr_0141_wstring_of_length_zero` (expect pass).
-- [ ] 1.3 (recipe-domain) Pin task for review item R03. Add `adr_0117_nan_and_infinity_fail` in `recipe/value/parse/tests.rs` and in `recipe/limit/parse/tests.rs`.
+- [x] 1.3 (recipe-domain) Pin task for review item R03. Add `adr_0117_nan_and_infinity_fail` in `recipe/value/parse/tests.rs` and in `recipe/limit/parse/tests.rs`.
   - The test uses three routes: the JSON value, `ParameterValue::from_texts`, and `ProcessLimit::parse`. Each route uses a `REAL` and an `LREAL` leaf on `CodesysIec` and `S7_1500`.
   - The JSON route accepts the JSON number `1.5`. The numeric path of the leaf reads only `Value::Number`.
   - The JSON route refuses the JSON strings `"NaN"`, `"inf"`, `"-inf"`, `"Infinity"`, and `"-Infinity"`. JSON has no number for these values.
   - The form route and the limit route accept the text `1.5`. They refuse the texts `NaN`, `inf`, `-inf`, `Infinity`, and `-Infinity`.
   - A refused value gives `E-RCP-005`. A refused limit gives `E-RCP-006`.
   - Command: `cargo test -p recipe-domain --lib adr_0117_nan_and_infinity` (expect pass).
-- [ ] 1.4 (recipe-domain) Pin task for review item R04. In `crates/recipe-domain/src/recipe/value/leaf/tests.rs`, add `adr_0137_last_latin_1_character`.
+- [x] 1.4 (recipe-domain) Pin task for review item R04. In `crates/recipe-domain/src/recipe/value/leaf/tests.rs`, add `adr_0137_last_latin_1_character`.
   - A `STRING(1)` leaf on `S7_1500`, on `CodesysIec`, and on `TwinCat3` accepts `"\u{FF}"`. It gives `Expected::String` for `"\u{100}"`.
   - Every machine of this wave has the encoding `Latin1`. The doc comment of the test says so. Task 11.4 adds the `Utf8` cases in a separate test, `adr_0202_utf8_two_byte_scalars_respect_capacity`.
   - Command: `cargo test -p recipe-domain --lib adr_0137_last_latin_1` (expect pass).
-- [ ] 1.5 (recipe-domain) Pin task for ADR-0209 (f) and review item R11. In `crates/recipe-domain/src/recipe/value/parse/tests.rs`, add `adr_0209_first_dimension_is_the_outer_json_level`. `ARRAY[1..2,1..3] OF INT` accepts `[[1,2,3],[4,5,6]]`, and the leaf `[2,1]` holds `4`. It refuses `[[1,2],[3,4],[5,6]]` with `E-RCP-005`. Command: `cargo test -p recipe-domain --lib adr_0209_first_dimension` (expect pass).
-- [ ] 1.6 (recipe-domain) Pin task for review item R09, literal part. In `crates/recipe-domain/src/plant/iec_literal/range/tests.rs`, add `adr_0115_iec_ends_of_time_literals`. Take the ends from `domain-model.md` §2.1, base unit table. On `CodesysIec` and `TwinCat3`, each literal at an end parses:
+- [x] 1.5 (recipe-domain) Pin task for ADR-0209 (f) and review item R11. In `crates/recipe-domain/src/recipe/value/parse/tests.rs`, add `adr_0209_first_dimension_is_the_outer_json_level`. `ARRAY[1..2,1..3] OF INT` accepts `[[1,2,3],[4,5,6]]`, and the leaf `[2,1]` holds `4`. It refuses `[[1,2],[3,4],[5,6]]` with `E-RCP-005`. Command: `cargo test -p recipe-domain --lib adr_0209_first_dimension` (expect pass).
+- [x] 1.6 (recipe-domain) Pin task for review item R09, literal part. In `crates/recipe-domain/src/plant/iec_literal/range/tests.rs`, add `adr_0115_iec_ends_of_time_literals`. Take the ends from `domain-model.md` §2.1, base unit table. On `CodesysIec` and `TwinCat3`, each literal at an end parses:
   - `TIME`: `T#0ms` gives the count 0, and `T#49d17h2m47s295ms` gives 4294967295 milliseconds.
   - `LTIME`: `LT#0ns` gives 0, and `LT#213503d23h34m33s709ms551us615ns` gives 18446744073709551615 nanoseconds.
   - `DATE`: `D#1970-01-01` gives 0, and `D#2106-02-07` gives 49710 days.
@@ -99,12 +99,12 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The literal one step outside each end gives `IecLiteralReason::OutOfRange`, for example `T#-1ms`, `T#49d17h2m47s296ms`, and `D#2106-02-08`.
   - Another reason is a defect. The agent stops and reports it.
   - Command: `cargo test -p recipe-domain --lib adr_0115_iec_ends` (expect pass).
-- [ ] 1.7 (recipe-export) Pin task for review item R09, export part. In `crates/recipe-export/tests/golden_types.rs`, extend `platform_cases` to `CodesysIec` and `TwinCat3`.
+- [x] 1.7 (recipe-export) Pin task for review item R09, export part. In `crates/recipe-export/tests/golden_types.rs`, extend `platform_cases` to `CodesysIec` and `TwinCat3`.
   - Add the golden files `types_CodesysIec.json` and `types_TwinCat3.json` beside the S7 files.
   - Add `adr_0199_golden_types_of_codesys_and_twincat`.
   - Check each 64-bit end and each `LREAL` value of the new files by hand against `domain-model.md` §2.1 and `data-model.md` §7. Use only values that the rules of this change accept.
   - Command: `cargo test -p recipe-export --test golden_types adr_0199` (expect pass).
-- [ ] 1.8 (recipe-domain) [mechanical] Review item R08, comments only.
+- [x] 1.8 (recipe-domain) [mechanical] Review item R08, comments only.
   - The comment at `crates/recipe-domain/src/plant/primitive.rs:41` gives the unit of a `WSTRING` length as UTF-16 code units, and cites ADR-0137 (i).
   - The comment at `primitive.rs:39` says that a `STRING` holds one byte per character on a `Latin1` machine and UTF-8 bytes on a `Utf8` machine (ADR-0202).
   - The comment at `crates/recipe-domain/src/plant/string_length.rs:61` names the units. A `STRING` length counts characters on a `Latin1` machine and UTF-8 bytes on a `Utf8` machine. A `WSTRING` length counts UTF-16 code units (ADR-0137 (i), ADR-0202).
@@ -176,14 +176,14 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 3. WSTRING characters on CODESYS and TwinCAT (ADR-0201)
 
-- [ ] 3.1 (recipe-domain) In `recipe/value/leaf/tests.rs`, add the `adr_0201_*` tests of the requirement "WSTRING characters on CODESYS and TwinCAT" in `specs/recipe-management/spec.md`. RED: `cargo test -p recipe-domain --lib adr_0201`.
+- [x] 3.1 (recipe-domain) In `recipe/value/leaf/tests.rs`, add the `adr_0201_*` tests of the requirement "WSTRING characters on CODESYS and TwinCAT" in `specs/recipe-management/spec.md`. RED: `cargo test -p recipe-domain --lib adr_0201`.
   - Then add the branch of `design.md` to `recipe/value/leaf.rs` and the variant `Expected::WstringIec { length }`. `ParameterValue::from_stored` under `RuleSet::Earlier` keeps ADR-0137 (b).
   - In `recipe-web`, map the variant to the key `expected-wstring-iec` in `expected_key`, with texts in `en.ftl` and `pl.ftl`.
   - Change each test that expects a character outside the Basic Multilingual Plane to pass on these platforms.
   - Add the `recipe-web` test `adr_0201_value_form_names_the_two_ranges` of the requirement "Texts of the new type reasons and expected forms".
   - GREEN: `cargo test -p recipe-domain --lib adr_0201`, `cargo test -p recipe-web --lib adr_0201_value_form`, and `cargo test -p recipe-web --lib expected`.
   - The end command can show one failure: the test of `types_TwinCat3_wstring_non_bmp.json` in `recipe-export --test golden_types`. Task 3.2, the next task of chain F, fixes it.
-- [ ] 3.2 (recipe-export) In `crates/recipe-export/tests/golden_types.rs`, change the test of `types_TwinCat3_wstring_non_bmp.json` (ADR-0201 (i), ADR-0202 (j2)).
+- [x] 3.2 (recipe-export) In `crates/recipe-export/tests/golden_types.rs`, change the test of `types_TwinCat3_wstring_non_bmp.json` (ADR-0201 (i), ADR-0202 (j2)).
   - Build the value through `ParameterValue::from_stored` under `RuleSet::Earlier`, because `ParameterValue::parse` now refuses it. Rename the test to start with `adr_0201_`.
   - The affected file gets `loadable` `false` and a rule fault. Its hashed body bytes and its `content_sha256` equal the values before the change. Only `loadable` changes.
   - Add `adr_0201_unaffected_golden_is_byte_identical`. The file `types_TwinCat3.json` of task 1.7 keeps its exact bytes.
@@ -196,7 +196,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 4. Reserved names on CODESYS and TwinCAT (ADR-0203)
 
-- [ ] 4.1 (recipe-domain) Add the lists and the check of ADR-0203. RED: `cargo test -p recipe-domain --lib adr_0203`.
+- [x] 4.1 (recipe-domain) Add the lists and the check of ADR-0203. RED: `cargo test -p recipe-domain --lib adr_0203`.
   - Add `crates/recipe-domain/src/plant/iec_names.rs` with the 15 struct names and the 2 extra keywords, as `design.md` places them.
   - Add `is_iec_reserved_struct_name`, `is_iec_reserved_member_name`, and `check_iec_names(platform, name, members)` for ADR-0203 (a) and (d). The struct row constructor does not change.
   - `check_iec_names` checks only the names. Task 5.1 adds the count of the members as a separate function.
@@ -226,7 +226,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 5. Two members of a struct on CODESYS (ADR-0204)
 
-- [ ] 5.1 (recipe-domain) Add the check of ADR-0204 (a). RED: `cargo test -p recipe-domain --lib adr_0204`.
+- [x] 5.1 (recipe-domain) Add the check of ADR-0204 (a). RED: `cargo test -p recipe-domain --lib adr_0204`.
   - Add `check_codesys_members(platform, members)` in `plant/iec_names.rs`. It is separate from `check_iec_names` of task 4.1, and no use case calls it in this task.
   - Add `adr_0204_one_member_fails_on_codesys` and `adr_0204_one_member_passes_on_twincat` for `check_codesys_members`.
   - Add `DerivedTypeReason::TooFewMembers`. Map it in `recipe-web` to the key `type-reason-too-few-members`, with texts in `en.ftl` and `pl.ftl`.
@@ -249,7 +249,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 6. Long prefixes of IEC literals (ADR-0205)
 
-- [ ] 6.1 (recipe-domain) In the tests of `plant/iec_literal`, add `adr_0205_long_prefixes_give_the_short_count`. RED: `cargo test -p recipe-domain --lib adr_0205`.
+- [x] 6.1 (recipe-domain) In the tests of `plant/iec_literal`, add `adr_0205_long_prefixes_give_the_short_count`. RED: `cargo test -p recipe-domain --lib adr_0205`.
   - Each of the 8 long prefixes gives the count of its short prefix, and `Display` writes the short prefix.
   - These texts fail: `ltime#1us` (lower case) and `S5TIME#1s` (no long prefix of `S5T#`). The test asserts the reason that the code gives for an unknown prefix.
   - On a `DTL` leaf of `S7_1500`, `DATE_AND_TIME#2024-01-01-00:00:00` fails with `IecLiteralReason::Prefix`, because the long prefix names `DATE_AND_TIME` (ADR-0205 (b)).
@@ -258,7 +258,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 7. Vendor aliases of type names (ADR-0206)
 
-- [ ] 7.1 (recipe-domain) In `crates/recipe-domain/src/plant/type_expr/tests.rs`, add `adr_0206_aliases_give_the_catalog_name`. RED: `cargo test -p recipe-domain --lib adr_0206`.
+- [x] 7.1 (recipe-domain) In `crates/recipe-domain/src/plant/type_expr/tests.rs`, add `adr_0206_aliases_give_the_catalog_name`. RED: `cargo test -p recipe-domain --lib adr_0206`.
   - Under `TypeExpr::parse`, the 4 aliases give the catalog name, also as the element of an array.
   - `TypeExpr::parse` gives `DerivedTypeReason::ReservedName` for `DT@1`, `TOD@1`, `LTIME_OF_DAY@1`, and `LDATE_AND_TIME@1` (ADR-0206 (d1), (d2)).
   - `T`, `D`, and `LD` stay grammar errors. `TypeExpr::from_stored("TOD", RuleSet::Earlier)` gives `DerivedTypeReason::Grammar`.
@@ -296,7 +296,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 8. Rules of the export schema v2 (ADR-0208)
 
-- [ ] 8.1 (recipe-export) Add the module `platform_rules` to `crates/recipe-export/tests/schema.rs` with `adr_0208_*` tests. RED: `cargo test -p recipe-export --test schema adr_0208`.
+- [x] 8.1 (recipe-export) Add the module `platform_rules` to `crates/recipe-export/tests/schema.rs` with `adr_0208_*` tests. RED: `cargo test -p recipe-export --test schema adr_0208`.
   - Each failing document starts from a valid document and changes only one type position of ADR-0208 (a1): `parameters[].type_id`, `types[].members[].type_id`, or `types[].element_type_id`.
   - Every reference of a test document is a valid UUID of its `types` list, and it passes (ADR-0208 (a3)). A bare `STRING` and a bare `WSTRING` fail (ADR-0208 (a2)).
   - Each other item of ADR-0208 (b) to (d) gets one passing and one failing document.
