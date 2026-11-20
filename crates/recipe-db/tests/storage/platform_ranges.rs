@@ -43,6 +43,10 @@ const WCHAR_LAST: &str = "\u{D7FF}";
 const WSTRING_ABOVE: &str = "\u{D000}";
 /// The last character of the `WSTRING` range on S7 (ADR-0180 (b)).
 const WSTRING_LAST: &str = "\u{CFFF}";
+/// A character outside the Basic Multilingual Plane (ADR-0201 (a)).
+const NON_BMP: &str = "\u{1F600}";
+/// The last character of the Basic Multilingual Plane (ADR-0201 (a)).
+const BMP_LAST: &str = "\u{FFFF}";
 /// The SQLSTATE of a write in a read-only transaction.
 const READ_ONLY_SQL_TRANSACTION: &str = "25006";
 
@@ -750,4 +754,62 @@ async fn platform_ranges_query_lists_no_row_on_a_database_without_hits() {
     let found = rows(&mut conn).await;
 
     assert!(found.is_empty(), "rows found: {found:#?}");
+}
+
+#[tokio::test]
+async fn adr_0201_iec_wide_text_lists_only_iec_rows() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let mut expected = Expected::default();
+    let text = format!("A{NON_BMP}");
+
+    let twin_cat = site(&mut conn, TWIN_CAT).await;
+    let wstring = wide_type(&mut conn, "WSTRING", TWIN_CAT).await;
+    add(
+        &mut conn,
+        &twin_cat,
+        wstring,
+        "WSTRING_NON_BMP_TWIN_CAT",
+        None,
+        &json_text(&text),
+    )
+    .await;
+    let place = settle(&mut conn, &twin_cat, Fate::Approved).await;
+    expected.hit(&place, "WSTRING_NON_BMP_TWIN_CAT", "iec_wide_text", &text);
+
+    let last = site(&mut conn, TWIN_CAT).await;
+    let wstring = wide_type(&mut conn, "WSTRING", TWIN_CAT).await;
+    let last_text = format!("A{BMP_LAST}");
+    add(
+        &mut conn,
+        &last,
+        wstring,
+        "NO_HIT_WSTRING_FFFF_TWIN_CAT",
+        None,
+        &json_text(&last_text),
+    )
+    .await;
+    settle(&mut conn, &last, Fate::Draft).await;
+
+    let s7 = site(&mut conn, S7_1500).await;
+    let wstring = wide_type(&mut conn, "WSTRING", S7_1500).await;
+    add(
+        &mut conn,
+        &s7,
+        wstring,
+        "NO_HIT_WSTRING_NON_BMP_S7_1500",
+        None,
+        &json_text(&text),
+    )
+    .await;
+    settle(&mut conn, &s7, Fate::Draft).await;
+
+    let mut app = database.connect(Role::App).await;
+    let found: BTreeSet<Row> = rows(&mut app)
+        .await
+        .into_iter()
+        .filter(|row| row.5 == "iec_wide_text")
+        .collect();
+
+    assert_eq!(found, expected.0);
 }
