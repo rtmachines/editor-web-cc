@@ -188,8 +188,8 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The affected file gets `loadable` `false` and a rule fault. Its hashed body bytes and its `content_sha256` equal the values before the change. Only `loadable` changes.
   - Add `adr_0201_unaffected_golden_is_byte_identical`. The file `types_TwinCat3.json` of task 1.7 keeps its exact bytes.
   - RED: `cargo test -p recipe-export --test golden_types adr_0201` fails before the change of the golden file. GREEN: the same command and `cargo test -p recipe-export`.
-- [ ] 3.3 (recipe-app) Integration task for task 3.1. Add the use case tests `adr_0201_*` of the requirement "WSTRING characters on CODESYS and TwinCAT". They cover these cases: `SetParameterValue`, `AddParameter`, the rebind, a stored value in a draft, `ApproveVersion` with `E-RCP-020`, `CreateVersion`, and the export with `loadable` `false`. Command: `cargo test -p recipe-app --lib adr_0201`.
-- [ ] 3.4 (recipe-db) In `crates/recipe-db/tests/storage/platform_ranges.rs`, add `adr_0201_iec_wide_text_lists_only_iec_rows`.
+- [x] 3.3 (recipe-app) Integration task for task 3.1. Add the use case tests `adr_0201_*` of the requirement "WSTRING characters on CODESYS and TwinCAT". They cover these cases: `SetParameterValue`, `AddParameter`, the rebind, a stored value in a draft, `ApproveVersion` with `E-RCP-020`, `CreateVersion`, and the export with `loadable` `false`. Command: `cargo test -p recipe-app --lib adr_0201`.
+- [x] 3.4 (recipe-db) In `crates/recipe-db/tests/storage/platform_ranges.rs`, add `adr_0201_iec_wide_text_lists_only_iec_rows`.
   - Seed a stored `WSTRING` value outside the Basic Multilingual Plane on `TwinCat3` and on `S7_1500`. Expect only the `TwinCat3` row in the part `iec_wide_text`.
   - RED: `cargo test -p recipe-db --test storage platform_ranges::adr_0201`.
   - Then add the part `iec_wide_text` to `deploy/db/check-platform-ranges.sql` with a header comment that names ADR-0201 (k). GREEN: the same command.
@@ -205,7 +205,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Add `DerivedTypeReason::ReservedMemberName`. Extend `derived_type_reasons_have_their_phrase` in `plant/error/tests.rs`.
   - Map the reason in `crates/recipe-web/src/error/plant.rs` to the key `type-reason-reserved-member-name`, with texts in `en.ftl` and `pl.ftl`. Add a key test.
   - GREEN: `cargo test -p recipe-domain --lib adr_0203` and `cargo test -p recipe-web --lib plant`.
-- [ ] 4.2 (recipe-app) Enforce ADR-0203 in the use cases, as `design.md` places it (ADR-0203 (i1) to (i3), (j), (k), (l)).
+- [x] 4.2 (recipe-app) Enforce ADR-0203 in the use cases, as `design.md` places it (ADR-0203 (i1) to (i3), (j), (k), (l)).
   - First add the `adr_0203_*` use case tests of the requirement "Reserved names on CODESYS and TwinCAT" in `specs/plant-model/spec.md`. RED: `cargo test -p recipe-app --lib adr_0203` fails.
   - The two preview scenarios of that requirement are not part of this task. They are "Stored reserved struct in the preview of the parameter form" and "Stored keyword member in the preview of the parameter form". Task 7.3 tests them.
   - The tests cover `AddParameter`, a changed and an unchanged `UpdateParameterDefinition`, and `DefineUdt` with a struct name, a member name, and a member type.
@@ -219,7 +219,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Add the `recipe-web` test `adr_0203_struct_form_names_the_reserved_member_name` of the requirement "Texts of the new type reasons and expected forms".
   - A test of any crate that defines such a struct through `DefineUdt` changes in this task. It gets another name, or it builds the row through `from_stored`.
   - GREEN: `cargo test -p recipe-app --lib adr_0203` and `cargo test -p recipe-web --lib adr_0203`.
-- [ ] 4.3 (recipe-db) In `crates/recipe-db/tests/storage/identifier_rules.rs`, add the `adr_0203_*` tests.
+- [x] 4.3 (recipe-db) In `crates/recipe-db/tests/storage/identifier_rules.rs`, add the `adr_0203_*` tests.
   - Seed a stored struct `VERSION@1` on `TwinCat3`, `VERSION@1` on `S7_1500`, and a stored member `END_IF` on `CodesysIec`. Expect only the IEC rows in the parts `iec_reserved_struct_name` and `iec_keyword_member_name`.
   - Add `adr_0203_sql_lists_equal_the_domain_lists`.
   - RED: `cargo test -p recipe-db --test storage identifier_rules::adr_0203`. Then add both parts to `deploy/db/check-identifier-rules.sql`. GREEN: the same command.
@@ -232,7 +232,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Add `DerivedTypeReason::TooFewMembers`. Map it in `recipe-web` to the key `type-reason-too-few-members`, with texts in `en.ftl` and `pl.ftl`.
   - The struct row constructor does not change. An empty member list still gives `E-PLT-016`.
   - GREEN: `cargo test -p recipe-domain --lib adr_0204` and `cargo test -p recipe-web --lib plant`.
-- [ ] 5.2 (recipe-app) Enforce ADR-0204 in the use cases, as `design.md` places it (ADR-0204 (c1) to (c3), (d), (e), (f)).
+- [x] 5.2 (recipe-app) Enforce ADR-0204 in the use cases, as `design.md` places it (ADR-0204 (c1) to (c3), (d), (e), (f)).
   - First add the `adr_0204_*` use case tests of the requirement "Two members of a struct on CODESYS". RED: `cargo test -p recipe-app --lib adr_0204` fails.
   - The scenario "Stored one-member struct in the preview of the parameter form" is not part of this task. Task 7.3 tests it.
   - The tests cover the cases of task 4.2 with the stored struct `ST_One@1` with one member on `CodesysIec`. They include a member of type `ST_One@1` in `DefineUdt`.
@@ -243,7 +243,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - A test of any crate that defines a one-member struct on `CodesysIec` through `DefineUdt` changes in this task. It gets a second member, or it builds the row through `from_stored`.
   - Candidates: `crates/recipe-db/tests/storage/rebind_shape.rs`, `plant/queries/udt_form_tests.rs`, `plant/define_udt/tests/adr_0177.rs`, `adr_0186.rs`, and `recipe/queries/parameter_form_tests.rs` of `recipe-app`.
   - GREEN: `cargo test -p recipe-app --lib adr_0204`, `cargo test -p recipe-web --lib adr_0204`, and `cargo test -p recipe-db --test storage rebind_shape`.
-- [ ] 5.3 (recipe-db) In `identifier_rules.rs`, add `adr_0204_one_member_struct_lists_only_codesys`.
+- [x] 5.3 (recipe-db) In `identifier_rules.rs`, add `adr_0204_one_member_struct_lists_only_codesys`.
   - Seed a stored struct with one member on `CodesysIec` and on `TwinCat3`. Expect only the `CodesysIec` row in the part `codesys_one_member_struct`.
   - RED: `cargo test -p recipe-db --test storage identifier_rules::adr_0204`. Then add the part to `deploy/db/check-identifier-rules.sql`. GREEN: the same command.
 
@@ -254,7 +254,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - These texts fail: `ltime#1us` (lower case) and `S5TIME#1s` (no long prefix of `S5T#`). The test asserts the reason that the code gives for an unknown prefix.
   - On a `DTL` leaf of `S7_1500`, `DATE_AND_TIME#2024-01-01-00:00:00` fails with `IecLiteralReason::Prefix`, because the long prefix names `DATE_AND_TIME` (ADR-0205 (b)).
   - Then change `literal_prefix` in `plant/iec_literal/mod.rs`. GREEN: `cargo test -p recipe-domain --lib iec_literal`.
-- [ ] 6.2 (recipe-app) Integration task for task 6.1. Add the `adr_0205_*` use case tests of the requirement "Long prefixes of IEC literals": a value, a limit through `ReplaceLimits`, and a refused lower-case prefix. Command: `cargo test -p recipe-app --lib adr_0205`.
+- [x] 6.2 (recipe-app) Integration task for task 6.1. Add the `adr_0205_*` use case tests of the requirement "Long prefixes of IEC literals": a value, a limit through `ReplaceLimits`, and a refused lower-case prefix. Command: `cargo test -p recipe-app --lib adr_0205`.
 
 ## 7. Vendor aliases of type names (ADR-0206)
 
@@ -264,8 +264,8 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - `T`, `D`, and `LD` stay grammar errors. `TypeExpr::from_stored("TOD", RuleSet::Earlier)` gives `DerivedTypeReason::Grammar`.
   - In `type_expr_malformed_texts_are_grammar_errors`, delete the text `DT`, because a bare `DT` now maps to `DATE_AND_TIME`.
   - Then change `parse_base` in `plant/type_expr.rs`, as `design.md` places it. GREEN: `cargo test -p recipe-domain --lib type_expr`.
-- [ ] 7.2 (recipe-app) Integration task for task 7.1. Add the `adr_0206_*` use case tests of the requirement "Vendor aliases of type names". A request with `TOD` stores `TIME_OF_DAY`, and the export of the approved version holds `TIME_OF_DAY`. A request with `DT@1` gives `E-PLT-013` with the reason "reserved name". Command: `cargo test -p recipe-app --lib adr_0206`.
-- [ ] 7.3 (recipe-web, recipe-app) Add the parse path of a request type text and the check of the form query (ADR-0206 (d3)). `design.md` places both. RED: `cargo test -p recipe-web --lib adr_0206` and `cargo test -p recipe-app --lib -- adr_0206_preview adr_0203_preview adr_0204_preview` fail.
+- [x] 7.2 (recipe-app) Integration task for task 7.1. Add the `adr_0206_*` use case tests of the requirement "Vendor aliases of type names". A request with `TOD` stores `TIME_OF_DAY`, and the export of the approved version holds `TIME_OF_DAY`. A request with `DT@1` gives `E-PLT-013` with the reason "reserved name". Command: `cargo test -p recipe-app --lib adr_0206`.
+- [x] 7.3 (recipe-web, recipe-app) Add the parse path of a request type text and the check of the form query (ADR-0206 (d3)). `design.md` places both. RED: `cargo test -p recipe-web --lib adr_0206` and `cargo test -p recipe-app --lib -- adr_0206_preview adr_0203_preview adr_0204_preview` fail.
   - First add the `adr_0206_*` HTTP tests: the preview `fields=1`, `AddParameter`, an edit, the element of an array, and the type of a struct member. Each sends `TOD` and gets `TIME_OF_DAY`.
   - An edit form that sends the unchanged stored reference `Int@1` keeps it.
   - The machine of one HTTP test has no struct `DT@1`. The preview `fields=1` and the save of the add form send `DT@1`. Each answer shows `E-PLT-013` with the reason "reserved name", and not "unknown struct".
@@ -305,7 +305,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 9. Runbook and rollback check
 
-- [ ] 9.1 (docs/ops) In `docs/ops/runbook.md`, name the new parts near the existing runbook sections of the two ops queries of `deploy/db/`. The task reads no query file.
+- [x] 9.1 (docs/ops) In `docs/ops/runbook.md`, name the new parts near the existing runbook sections of the two ops queries of `deploy/db/`. The task reads no query file.
   - The parts are `iec_wide_text`, `iec_reserved_struct_name`, `iec_keyword_member_name`, and `codesys_one_member_struct`.
   - Say which ADR each part follows and what a listed row means for an upgrade. Use the two kinds of step 2 of the section Migration Plan in `design.md`.
   - Say that a prohibited struct deeper than the directly named revision is legacy data, and that these parts list it (`design.md`, Decisions).
@@ -337,8 +337,8 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - No captured scope body holds `machine.string_encoding`. `ExportedVersion::loadable()` gives the flag of the matrix.
   - Command: `cargo test -p recipe-db --test storage stored_rules_iec`.
   - Evidence: the report shows the line `test result: ok. 6 passed; 0 failed; 1 ignored;` of this command.
-- [ ] 10.2 (recipe-export) Integration task for ADR-0208 (f). In `crates/recipe-export/tests/schema/platform_rules.rs`, add `adr_0208_stored_rows_pass_the_schema`. It builds the rows of ADR-0201, ADR-0203, and ADR-0204 of the matrix through `from_stored` under `RuleSet::Earlier`. Each v2 document passes the v2 schema file. Command: `cargo test -p recipe-export --test schema adr_0208_stored_rows`.
-- [ ] 10.3 (recipe-export) Pin task for ADR-0202 (j2). In `crates/recipe-export/tests/golden.rs`, add `adr_0202_latin1_codesys_unit_document`.
+- [x] 10.2 (recipe-export) Integration task for ADR-0208 (f). In `crates/recipe-export/tests/schema/platform_rules.rs`, add `adr_0208_stored_rows_pass_the_schema`. It builds the rows of ADR-0201, ADR-0203, and ADR-0204 of the matrix through `from_stored` under `RuleSet::Earlier`. Each v2 document passes the v2 schema file. Command: `cargo test -p recipe-export --test schema adr_0208_stored_rows`.
+- [x] 10.3 (recipe-export) Pin task for ADR-0202 (j2). In `crates/recipe-export/tests/golden.rs`, add `adr_0202_latin1_codesys_unit_document`.
   - The production writer `write_scoped` writes the v2 document of a `CodesysIec` version with fixed export metadata, as the other tests of `golden.rs` do.
   - The version holds a `STRING(4)` parameter with the value `"é"`. On a `Latin1` machine, `é` is one character.
   - The version also holds the two `CodesysIec` struct rows of the matrix, `ST_Coil@1` and `ST_One@1`, built through `from_stored`. The `TwinCat3` rows and the `WSTRING` rows are not in this version.
