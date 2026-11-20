@@ -351,6 +351,23 @@ impl PlantRepository for CountingTransaction {
         self.inner.plant().set_machine_data_block(id, number).await
     }
 
+    async fn machine_has_version(&mut self, id: MachineId) -> Result<bool, StorageError> {
+        self.count();
+        self.inner.plant().machine_has_version(id).await
+    }
+
+    async fn set_machine_string_encoding(
+        &mut self,
+        id: MachineId,
+        encoding: StringEncoding,
+    ) -> Result<RowImage, StorageError> {
+        self.count();
+        self.inner
+            .plant()
+            .set_machine_string_encoding(id, encoding)
+            .await
+    }
+
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {
         self.count();
         self.inner.plant().archive_machine(id).await

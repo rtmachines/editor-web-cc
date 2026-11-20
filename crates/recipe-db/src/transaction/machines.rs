@@ -72,6 +72,14 @@ UPDATE machine SET db_number = $2 WHERE id = $1 RETURNING to_jsonb(machine)";
 const COPY_DATA_BLOCK_TO_CONNECTION: &str = "\
 UPDATE plc_connection SET db_number = $2 WHERE machine_id = $1 AND db_number IS DISTINCT FROM $2";
 
+/// Every version row of the machine counts, also a discarded draft and a version of a deleted
+/// recipe (`SetMachineStringEncoding`, ADR-0202 (d)).
+const MACHINE_HAS_VERSION: &str = "\
+SELECT EXISTS (SELECT 1 FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id WHERE r.machine_id = $1)";
+
+const SET_MACHINE_STRING_ENCODING: &str = "\
+UPDATE machine SET string_encoding = $2 WHERE id = $1 RETURNING to_jsonb(machine)";
+
 const ARCHIVE_MACHINE: &str = "\
 UPDATE machine SET archived_at = now() WHERE id = $1 RETURNING to_jsonb(machine)";
 
@@ -315,6 +323,33 @@ pub(super) async fn set_data_block(
         .bind(*id.as_uuid())
         .bind(i32::from(number.value()))
         .execute(connection)
+        .await
+        .map_err(map_error)?;
+    Ok(RowImage::new(image))
+}
+
+/// Tell whether any `recipe_version` row belongs to a recipe of the machine (ADR-0202 (d)).
+pub(super) async fn has_version(
+    connection: &mut PgConnection,
+    id: MachineId,
+) -> Result<bool, StorageError> {
+    sqlx::query_scalar(MACHINE_HAS_VERSION)
+        .bind(*id.as_uuid())
+        .fetch_one(connection)
+        .await
+        .map_err(map_error)
+}
+
+/// Set `machine.string_encoding` and return the image after the change (`SetMachineStringEncoding`).
+pub(super) async fn set_string_encoding(
+    connection: &mut PgConnection,
+    id: MachineId,
+    encoding: StringEncoding,
+) -> Result<RowImage, StorageError> {
+    let image: Value = sqlx::query_scalar(SET_MACHINE_STRING_ENCODING)
+        .bind(*id.as_uuid())
+        .bind(encoding.as_str())
+        .fetch_one(connection)
         .await
         .map_err(map_error)?;
     Ok(RowImage::new(image))

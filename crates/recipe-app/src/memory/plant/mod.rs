@@ -21,7 +21,8 @@ pub(super) fn check_offset(offset: u64) -> Result<(), StorageError> {
 
 use async_trait::async_trait;
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, MachineCode, MachineId, Unit, UnitId, UnitPath, UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, StringEncoding, Unit, UnitId, UnitPath,
+    UnitUsage,
 };
 use recipe_domain::recipe::VersionState;
 use recipe_domain::text::Text;
@@ -268,6 +269,29 @@ impl PlantRepository for MemoryTransaction {
             connection.copy_data_block(number, now)?;
         }
         Ok(image)
+    }
+
+    async fn machine_has_version(&mut self, id: MachineId) -> Result<bool, StorageError> {
+        // Every version row counts, also a discarded draft and a version of a deleted recipe.
+        let state = self.state();
+        Ok(state.versions.values().any(|version| {
+            state
+                .recipes
+                .get(&version.recipe)
+                .is_some_and(|recipe| recipe.machine == id)
+        }))
+    }
+
+    async fn set_machine_string_encoding(
+        &mut self,
+        id: MachineId,
+        encoding: StringEncoding,
+    ) -> Result<RowImage, StorageError> {
+        let now = self.now();
+        let row = self.machine_row_mut(id)?;
+        row.string_encoding = encoding;
+        row.updated_at = now;
+        Ok(machine_image(row))
     }
 
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {
