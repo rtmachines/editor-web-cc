@@ -429,6 +429,7 @@ type-reason-not-on-platform = typ nie istnieje na platformie maszyny
 type-reason-out-of-range = granica, wymiar albo długość jest poza zakresem
 type-reason-row-shape = zapisany wiersz typu nie pasuje do swojego rodzaju
 type-reason-reserved-name = nazwa struktury jest zastrzeżonym słowem IEC 61131-3 albo nazwą typu prostego
+type-reason-reserved-member-name = nazwa składnika jest zastrzeżonym słowem kluczowym IEC 61131-3
 type-limit-leaves = { $count } elementów skalarnych
 type-limit-depth = { $count } poziomów
 type-limit-members = { $count } składników

@@ -61,6 +61,9 @@ pub enum DerivedTypeReason {
     RowShape,
     /// The struct name is a reserved IEC 61131-3 word or a primitive name (ADR-0143 (c)).
     ReservedName,
+    /// The member name is a reserved IEC 61131-3 keyword on `CodesysIec` or `TwinCat3`
+    /// (ADR-0203 (d)).
+    ReservedMemberName,
 }
 
 impl fmt::Display for DerivedTypeReason {
@@ -74,6 +77,7 @@ impl fmt::Display for DerivedTypeReason {
             Self::ReservedName => {
                 "the struct name is a reserved IEC 61131-3 word or a primitive name"
             }
+            Self::ReservedMemberName => "the member name is a reserved IEC 61131-3 keyword",
         })
     }
 }
