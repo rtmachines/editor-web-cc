@@ -8,13 +8,14 @@
 use axum::response::Response;
 use recipe_app::ports::NonEmpty;
 use recipe_app::recipe::ParameterForm;
-use recipe_domain::plant::{RuleSet, TypeExpr};
+use recipe_domain::plant::TypeExpr;
 use recipe_domain::recipe::{LeafTexts, LimitList};
 
 use super::definition::{Checked, Definition, check};
 use super::fields::SentFields;
 use super::form_view::Shown;
 use super::reply::{Ctx, load_shown, refuse, sent_shown, show_form};
+use super::request_type::request_type_expr;
 use crate::error::{FieldError, WebError};
 
 /// What a save sends to its command after every check of the web layer.
@@ -80,7 +81,7 @@ async fn fields(ctx: Ctx<'_>, sent: &SentFields) -> Result<Response, WebError> {
     if text.is_empty() {
         return again(ctx, sent, None, "").await;
     }
-    match TypeExpr::from_stored(text, RuleSet::Earlier) {
+    match request_type_expr(text) {
         Ok(expr) => again(ctx, sent, Some(expr), "").await,
         Err(error) => {
             let line = FieldError::plant(&error, Some("type".to_owned()));

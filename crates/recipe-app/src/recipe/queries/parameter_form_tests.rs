@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     LeafPath, MachineCode, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape,
-    S7Address, TypeExpr, UnitPath,
+    RuleSet, S7Address, TypeExpr, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, RecipeError, RuleField, StoredLimit, StoredParameter, StoredValue, VersionState,
@@ -57,6 +57,24 @@ pub(super) fn input(
         key: key.map(pkey),
         type_expr: type_text.map(|text| TypeExpr::parse(text).unwrap()),
         unit: unit.map(|text| UnitPath::parse(text).unwrap()),
+    }
+}
+
+/// The input of a form request with the type text `type_text`, as the request parser builds it
+/// after a refusal: with the earlier rule set (ADR-0206 (d3)).
+///
+/// `input` cannot build these requests, because it parses with the current rule set and the
+/// purpose `AddParameter`.
+pub(super) fn input_as(
+    purpose: crate::auth::ParameterFormPurpose,
+    key: Option<u128>,
+    type_text: &str,
+) -> GetParameterFormInput {
+    GetParameterFormInput {
+        purpose,
+        key: key.map(pkey),
+        type_expr: Some(TypeExpr::from_stored(type_text, RuleSet::Earlier).unwrap()),
+        ..input(None, None, None)
     }
 }
 
