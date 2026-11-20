@@ -248,6 +248,11 @@ On `CodesysIec`, the system SHALL create a struct only with 2 to 1024 members. O
 - **THEN** the type proposals hold `ST_Zone@1`
 - **AND** the type proposals do not hold `ST_One@1`
 
+#### Scenario: Proposals leave out a name whose latest revision is refused
+- **GIVEN** the machine `M9` with the struct `ST_X@1` with two members and the struct `ST_X@2` with one member, both stored before ADR-0204
+- **WHEN** a ProcessEngineer opens the parameter form of a draft of `M9`
+- **THEN** the type proposals hold no revision of `ST_X`
+
 ### Requirement: Vendor aliases of type names
 A written type text SHALL accept the aliases `TOD`, `DT`, `LTIME_OF_DAY`, and `LDATE_AND_TIME` of a primitive name on every platform. The system SHALL store, show, and export the catalog name. `DT@1` SHALL stay a struct reference text. A written `DT@1`, `TOD@1`, `LTIME_OF_DAY@1`, or `LDATE_AND_TIME@1` SHALL give `E-PLT-013` with the reason "reserved name". `T`, `D`, and `LD` SHALL stay grammar errors (R11, R12, R38, ADR-0206).
 
