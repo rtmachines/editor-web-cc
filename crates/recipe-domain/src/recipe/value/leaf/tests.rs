@@ -1,6 +1,8 @@
 use serde_json::json;
 
-use crate::plant::fixtures::{id, machine, on_platform, primitive_row, types_for, wstring_row};
+use crate::plant::fixtures::{
+    id, machine, on_platform, primitive_row, string_row, types_for, wstring_row,
+};
 use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TypeTree};
 use crate::recipe::value::test_support::{
     BOOL, BOUNDARIES, CHAR, DATE, INT, LREAL, LTIME, REAL, TIME, WCHAR, integer_tree,
@@ -380,6 +382,12 @@ fn wstring_tree_on(platform: PlcPlatform, length: u16) -> TypeTree {
     TypeTree::resolve(id(50), &types_for(machine(), platform, rows)).unwrap()
 }
 
+/// The tree of one `STRING(length)` parameter on `platform`.
+fn string_tree_on(platform: PlcPlatform, length: u16) -> TypeTree {
+    let rows = on_platform(platform, vec![string_row(50, length)]);
+    TypeTree::resolve(id(50), &types_for(machine(), platform, rows)).unwrap()
+}
+
 const S7_PLATFORMS: [PlcPlatform; 2] = [PlcPlatform::S7_1200, PlcPlatform::S7_1500];
 
 /// The `WSTRING` form that `E-RCP-005` names on S7 (ADR-0180 (d)).
@@ -479,4 +487,28 @@ fn adr_0180_wstring_on_s7_keeps_the_length_in_utf16_units() {
 fn adr_0180_a_non_string_value_of_an_s7_wstring_gives_the_s7_form() {
     let tree = wstring_tree_on(PlcPlatform::S7_1200, 4);
     assert_eq!(fault("5", &tree).expected(), Some(&s7_wstring(4)));
+}
+
+/// ADR-0137 pin for review item R04. Every machine of this wave has the encoding `Latin1`.
+/// U+00FF is the last Latin-1 character and U+0100 is the first scalar outside it.
+#[test]
+fn adr_0137_last_latin_1_character() {
+    let platforms = [
+        PlcPlatform::S7_1500,
+        PlcPlatform::CodesysIec,
+        PlcPlatform::TwinCat3,
+    ];
+    for platform in platforms {
+        let tree = string_tree_on(platform, 1);
+        assert_eq!(
+            stored_text(r#""\u00FF""#, &tree),
+            "\"\u{FF}\"",
+            "{platform:?}"
+        );
+        assert_eq!(
+            fault(r#""\u0100""#, &tree).expected(),
+            Some(&Expected::String { length: 1 }),
+            "{platform:?}"
+        );
+    }
 }
