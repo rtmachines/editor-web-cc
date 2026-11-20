@@ -638,7 +638,8 @@ fn text_member<'a>(object: &'a Value, key: &str) -> &'a str {
 
 /// Rebuild the scope hashed body from a parsed v2 document by the rule of `api.md` section 6.4.
 ///
-/// The function sorts the arrays by the keys of section 6.3 and drops `name_en`.
+/// The function sorts the arrays by the keys of section 6.3 and drops `name_en`. It keeps
+/// `machine.string_encoding` only when the document holds it (ADR-0202 (j1), (k)).
 fn consumer_scope_body(doc: &Value) -> Value {
     let mut types = doc["types"].as_array().unwrap().clone();
     types.sort_by(|a, b| text_member(a, "id").cmp(text_member(b, "id")));
@@ -655,11 +656,15 @@ fn consumer_scope_body(doc: &Value) -> Value {
         let limits = object.get_mut("limits").unwrap().as_array_mut().unwrap();
         limits.sort_by(|a, b| text_member(a, "leaf_path").cmp(text_member(b, "leaf_path")));
     }
+    let mut machine = serde_json::json!({
+        "code": doc["machine"]["code"],
+        "plc_platform": doc["machine"]["plc_platform"],
+    });
+    if let Some(encoding) = doc["machine"].get("string_encoding") {
+        machine["string_encoding"] = encoding.clone();
+    }
     serde_json::json!({
-        "machine": {
-            "code": doc["machine"]["code"],
-            "plc_platform": doc["machine"]["plc_platform"],
-        },
+        "machine": machine,
         "recipe": { "reference_number": doc["recipe"]["reference_number"] },
         "version": { "number": doc["version"]["number"] },
         "scope": doc["scope"],
@@ -986,4 +991,101 @@ fn adr_0202_utf8_unit_document_differs_from_the_latin1_document_in_the_encoding_
 fn adr_0202_v1_document_never_holds_the_encoding() {
     let text = written(example());
     assert!(!text.contains("string_encoding"), "{text}");
+}
+
+/// The golden file of the `Utf8` `TwinCat3` unit document (ADR-0202 (j2), (k), (l)).
+const UTF8_TWINCAT_FILE: &str = "recipe_R-300_v1_U1_TwinCat3_Utf8.json";
+/// The type row of `STRING(10)` of the `Utf8` `TwinCat3` machine.
+const STRING_10_ROW: &str = "00000000-0000-4000-8000-000000000021";
+
+/// The type trees of a `Utf8` `TwinCat3` machine: `STRING(10)`.
+fn utf8_twincat_trees() -> TypeTrees {
+    let platform = PlcPlatform::TwinCat3;
+    let rows = vec![primitive_row(
+        platform,
+        STRING_10_ROW,
+        Primitive::String,
+        Some(10),
+    )];
+    let catalog =
+        PlatformTypes::collect(machine_id(), platform, StringEncoding::Utf8, rows).unwrap();
+    TypeTrees::resolve([STRING_10_ROW].map(type_id), &catalog)
+}
+
+/// The scope body and the facts of the unit `U1` of a `Utf8` `TwinCat3` version `R-300` v1.
+///
+/// The parameter holds `"Łódź"`: four characters and seven bytes.
+fn utf8_twincat_scope() -> (ScopeBody, ScopeFacts) {
+    let platform = PlcPlatform::TwinCat3;
+    let trees = utf8_twincat_trees();
+    let parameters = [parameter(Spec {
+        n: 1,
+        key: "6f8a0dc3-4e50-4c6d-9e7f-8091a2b3c4d5",
+        unit_tag: ("U1", "LABEL"),
+        name: "Label",
+        plc_type: STRING_10_ROW,
+        address: None,
+        limits: Vec::new(),
+        value: r#""Łódź""#,
+    })];
+    let header = ExportHeader {
+        machine: MachineCode::parse("M10").unwrap(),
+        platform,
+        reference: ReferenceNumber::parse("R-300").unwrap(),
+        version: 1,
+    };
+    let body = HashedBody::build(&header, &parameters, &units(platform), &trees).unwrap();
+    let times = (
+        utc(2026, (10, 12), (9, 30, 0)),
+        utc(2026, (10, 11), (14, 2, 10)),
+    );
+    let mut document = facts(&body, &parameters, ExportStatus::Approved, times);
+    document.machine_name = Text::parse("Packer 10").unwrap();
+    document.recipe_name = Text::parse("Jar 0.3 l").unwrap();
+    document.string_encoding = StringEncoding::Utf8;
+    document.has_rule_fault = !check_version_parameters(&parameters, &trees)
+        .unwrap()
+        .is_empty();
+    let scope = ScopeBody::build(&body, &UnitPath::parse("U1").unwrap(), StringEncoding::Utf8);
+    let facts = ScopeFacts {
+        document,
+        scope_sha256: scope.sha256().unwrap(),
+    };
+    (scope, facts)
+}
+
+/// Pins the bytes of the production writer for a `Utf8` `TwinCat3` machine (ADR-0202 (j2)).
+#[test]
+fn adr_0202_utf8_twincat_unit_document() {
+    let (scope, facts) = utf8_twincat_scope();
+    let text = String::from_utf8(write_scoped(&scope, &facts).unwrap()).unwrap();
+    assert_eq!(text, golden(UTF8_TWINCAT_FILE));
+
+    let doc: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        consumer_scope_sha256(&doc),
+        text_member(&doc, "scope_sha256")
+    );
+    assert_passes_schema(&validator_of(SCHEMA_V2_PATH), &doc, UTF8_TWINCAT_FILE);
+    assert_eq!(doc["machine"]["string_encoding"], "Utf8");
+    assert_eq!(doc["machine"]["plc_platform"], "TwinCat3");
+    assert_eq!(doc["loadable"], true);
+
+    assert!(doc.get("layout").is_none(), "{text}");
+    let parameters = doc["parameters"].as_array().unwrap();
+    assert_eq!(parameters.len(), 1);
+    for parameter in parameters {
+        assert_eq!(
+            parameter.get("s7_address"),
+            Some(&Value::Null),
+            "{parameter}"
+        );
+        assert!(parameter.get("layout").is_none(), "{parameter}");
+    }
+    let label = parameters
+        .iter()
+        .find(|parameter| parameter["type_id"] == STRING_10_ROW)
+        .unwrap();
+    assert_eq!(label["value"], "Łódź");
+    assert_eq!("Łódź".len(), 7);
 }
