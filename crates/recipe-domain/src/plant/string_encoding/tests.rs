@@ -28,11 +28,6 @@ fn adr_0202_string_encoding_rejects_any_other_text() {
 }
 
 #[test]
-fn adr_0202_string_encoding_default_is_latin1() {
-    assert_eq!(StringEncoding::default(), StringEncoding::Latin1);
-}
-
-#[test]
 fn adr_0202_utf8_fails_on_s7() {
     for platform in [
         PlcPlatform::S7_300,

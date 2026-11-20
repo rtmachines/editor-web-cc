@@ -352,3 +352,5 @@ fn numeric_expected(primitive: Primitive) -> Expected {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod utf8_tests;

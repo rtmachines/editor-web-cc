@@ -9,10 +9,9 @@ use crate::plant::{MachineCode, PlantError, PlcPlatform};
 /// A `Latin1` machine writes one byte for each character. A `Utf8` machine writes the UTF-8
 /// bytes of each character, and the capacity of `STRING(n)` counts bytes. Every S7 machine is
 /// `Latin1`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StringEncoding {
     /// One Latin-1 byte for each character.
-    #[default]
     Latin1,
     /// UTF-8 bytes. Only `CodesysIec` and `TwinCat3` machines use it.
     Utf8,

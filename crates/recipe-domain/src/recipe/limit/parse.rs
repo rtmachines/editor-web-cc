@@ -251,4 +251,6 @@ fn is_inside_type(
 }
 
 #[cfg(test)]
+mod precision_tests;
+#[cfg(test)]
 mod tests;
