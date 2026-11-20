@@ -101,6 +101,192 @@
         }
       }
     }
+,
+    {
+      "description": "Type references and string lengths on CodesysIec (ADR-0208 (a), (b)).",
+      "if": {
+        "required": ["machine"],
+        "properties": {
+          "machine": {
+            "required": ["plc_platform"],
+            "properties": { "plc_platform": { "const": "CodesysIec" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_CodesysIec" } } }
+          },
+          "types": {
+            "items": {
+              "properties": {
+                "element_type_id": { "$ref": "#/$defs/type_ref_CodesysIec" },
+                "members": { "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_CodesysIec" } } } }
+              },
+              "allOf": [
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "STRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 255 } } }
+                },
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "WSTRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 255 } } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Type references and string lengths on TwinCat3 (ADR-0208 (a), (b)).",
+      "if": {
+        "required": ["machine"],
+        "properties": {
+          "machine": {
+            "required": ["plc_platform"],
+            "properties": { "plc_platform": { "const": "TwinCat3" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_TwinCat3" } } }
+          },
+          "types": {
+            "items": {
+              "properties": {
+                "element_type_id": { "$ref": "#/$defs/type_ref_TwinCat3" },
+                "members": { "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_TwinCat3" } } } }
+              },
+              "allOf": [
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "STRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 255 } } }
+                },
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "WSTRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 255 } } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Type references and string lengths on S7_1200 (ADR-0208 (a), (b)).",
+      "if": {
+        "required": ["machine"],
+        "properties": {
+          "machine": {
+            "required": ["plc_platform"],
+            "properties": { "plc_platform": { "const": "S7_1200" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_S7_1200" } } }
+          },
+          "types": {
+            "items": {
+              "properties": {
+                "element_type_id": { "$ref": "#/$defs/type_ref_S7_1200" },
+                "members": { "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_S7_1200" } } } }
+              },
+              "allOf": [
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "STRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 254 } } }
+                },
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "WSTRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 16382 } } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Type references and string lengths on S7_1500 (ADR-0208 (a), (b)).",
+      "if": {
+        "required": ["machine"],
+        "properties": {
+          "machine": {
+            "required": ["plc_platform"],
+            "properties": { "plc_platform": { "const": "S7_1500" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_S7_1500" } } }
+          },
+          "types": {
+            "items": {
+              "properties": {
+                "element_type_id": { "$ref": "#/$defs/type_ref_S7_1500" },
+                "members": { "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_S7_1500" } } } }
+              },
+              "allOf": [
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "STRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 254 } } }
+                },
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "WSTRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 16382 } } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Type references and string lengths on S7_300 (ADR-0208 (a), (b)).",
+      "if": {
+        "required": ["machine"],
+        "properties": {
+          "machine": {
+            "required": ["plc_platform"],
+            "properties": { "plc_platform": { "const": "S7_300" } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "parameters": {
+            "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_S7_300" } } }
+          },
+          "types": {
+            "items": {
+              "properties": {
+                "element_type_id": { "$ref": "#/$defs/type_ref_S7_300" },
+                "members": { "items": { "properties": { "type_id": { "$ref": "#/$defs/type_ref_S7_300" } } } }
+              },
+              "allOf": [
+                {
+                  "if": { "required": ["kind", "name"], "properties": { "kind": { "const": "Primitive" }, "name": { "const": "STRING" } } },
+                  "then": { "properties": { "string_length": { "maximum": 254 } } }
+                },
+                {
+                  "if": { "required": ["kind"], "properties": { "kind": { "const": "Primitive" } } },
+                  "then": { "properties": { "name": { "const": "STRING" } } }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
   ],
   "$defs": {
     "uuid": {
@@ -157,6 +343,97 @@
         { "type": "array", "items": { "$ref": "#/$defs/value" } },
         { "type": "object", "additionalProperties": { "$ref": "#/$defs/value" } }
       ]
+    },
+    "type_ref_CodesysIec": {
+      "description": "A type_ref on CodesysIec: the primitive names with yes in the column of data-model.md section 7, except STRING and WSTRING (ADR-0208 (a)).",
+      "anyOf": [
+        {
+          "enum": [
+            "BOOL", "BYTE", "WORD", "DWORD", "LWORD", "SINT", "USINT", "INT",
+            "UINT", "DINT", "UDINT", "LINT", "ULINT", "REAL", "LREAL", "TIME",
+            "LTIME", "DATE", "LDATE", "TIME_OF_DAY", "LTOD", "DATE_AND_TIME",
+            "LDT"
+          ]
+        },
+        { "$ref": "#/$defs/uuid" }
+      ]
+    },
+    "type_ref_TwinCat3": {
+      "description": "A type_ref on TwinCat3: the primitive names with yes in the column of data-model.md section 7, except STRING and WSTRING (ADR-0208 (a)).",
+      "anyOf": [
+        {
+          "enum": [
+            "BOOL", "BYTE", "WORD", "DWORD", "LWORD", "SINT", "USINT", "INT",
+            "UINT", "DINT", "UDINT", "LINT", "ULINT", "REAL", "LREAL", "TIME",
+            "LTIME", "DATE", "LDATE", "TIME_OF_DAY", "LTOD", "DATE_AND_TIME",
+            "LDT"
+          ]
+        },
+        { "$ref": "#/$defs/uuid" }
+      ]
+    },
+    "type_ref_S7_1200": {
+      "description": "A type_ref on S7_1200: the primitive names with yes in the column of data-model.md section 7, except STRING and WSTRING (ADR-0208 (a)).",
+      "anyOf": [
+        {
+          "enum": [
+            "BOOL", "BYTE", "WORD", "DWORD", "SINT", "USINT", "INT", "UINT",
+            "DINT", "UDINT", "REAL", "LREAL", "CHAR", "WCHAR", "TIME", "DATE",
+            "TIME_OF_DAY", "DTL"
+          ]
+        },
+        { "$ref": "#/$defs/uuid" }
+      ]
+    },
+    "type_ref_S7_1500": {
+      "description": "A type_ref on S7_1500: the primitive names with yes in the column of data-model.md section 7, except STRING and WSTRING (ADR-0208 (a)).",
+      "anyOf": [
+        {
+          "enum": [
+            "BOOL", "BYTE", "WORD", "DWORD", "LWORD", "SINT", "USINT", "INT",
+            "UINT", "DINT", "UDINT", "LINT", "ULINT", "REAL", "LREAL", "CHAR",
+            "WCHAR", "TIME", "LTIME", "DATE", "TIME_OF_DAY", "LTOD",
+            "DATE_AND_TIME", "LDT", "DTL", "S5TIME"
+          ]
+        },
+        { "$ref": "#/$defs/uuid" }
+      ]
+    },
+    "type_ref_S7_300": {
+      "description": "A type_ref on S7_300: the primitive names with yes in the column of data-model.md section 7, except STRING and WSTRING (ADR-0208 (a)).",
+      "anyOf": [
+        {
+          "enum": [
+            "BOOL", "BYTE", "WORD", "DWORD", "INT", "DINT", "REAL", "CHAR", "TIME",
+            "DATE", "TIME_OF_DAY", "DATE_AND_TIME", "S5TIME"
+          ]
+        },
+        { "$ref": "#/$defs/uuid" }
+      ]
+    },
+    "primitive_names_decimal": {
+      "description": "The primitives of the classes numeric, duration, and instant (ADR-0208 (d)).",
+      "enum": [
+        "BYTE", "WORD", "DWORD", "LWORD", "SINT", "USINT", "INT", "UINT",
+        "DINT", "UDINT", "LINT", "ULINT", "REAL", "LREAL", "TIME", "LTIME",
+        "S5TIME", "DATE", "LDATE", "TIME_OF_DAY", "LTOD", "DATE_AND_TIME",
+        "LDT", "DTL"
+      ]
+    },
+    "primitive_names_char": {
+      "description": "The primitives of the class char (ADR-0208 (d)).",
+      "enum": ["CHAR", "WCHAR"]
+    },
+    "decimal_text": {
+      "description": "Canonical decimal text of reliability.md section 4.4.",
+      "type": "string",
+      "pattern": "^(0|-?[1-9][0-9]*(\\.[0-9]*[1-9])?|-?0\\.[0-9]*[1-9])$"
+    },
+    "char_text": {
+      "description": "A CHAR or WCHAR value: a string with one character.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1
     },
     "machine": {
       "type": "object",
@@ -245,6 +522,7 @@
           "description": "Ordered by the member ordinal.",
           "type": "array",
           "minItems": 1,
+          "maxItems": 1024,
           "items": { "$ref": "#/$defs/member" }
         }
       },
@@ -328,7 +606,24 @@
           "items": { "$ref": "#/$defs/limit" }
         },
         "value": { "$ref": "#/$defs/value" }
-      }
+      },
+      "allOf": [
+        {
+          "description": "A BOOL value is a boolean (ADR-0208 (d)).",
+          "if": { "required": ["type_id"], "properties": { "type_id": { "const": "BOOL" } } },
+          "then": { "properties": { "value": { "type": "boolean" } } }
+        },
+        {
+          "description": "A CHAR or WCHAR value is a string with one character (ADR-0208 (d)).",
+          "if": { "required": ["type_id"], "properties": { "type_id": { "$ref": "#/$defs/primitive_names_char" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/char_text" } } }
+        },
+        {
+          "description": "A numeric, duration, or instant value is canonical decimal text (ADR-0208 (d)). The schema checks no range and no leaf below a UUID reference (ADR-0208 (e)).",
+          "if": { "required": ["type_id"], "properties": { "type_id": { "$ref": "#/$defs/primitive_names_decimal" } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/decimal_text" } } }
+        }
+      ]
     }
   }
 }
