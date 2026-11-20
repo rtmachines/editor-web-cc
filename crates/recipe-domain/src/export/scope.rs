@@ -4,19 +4,42 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use super::body::{HashedBody, MachineBody, RecipeBody, VersionBody};
+use super::body::{HashedBody, RecipeBody, VersionBody};
 use super::hash::{canonical_text_of, sha256_of};
 use super::parameters::ParameterEntry;
 use super::type_reference::TypeReference;
 use super::types::TypeEntry;
 use super::{ExportError, Sha256};
-use crate::plant::{MachineCode, PlcPlatform, PlcTypeId, UnitPath};
+use crate::plant::{MachineCode, PlcPlatform, PlcTypeId, StringEncoding, UnitPath};
 use crate::recipe::ReferenceNumber;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 struct ScopeMarker {
     #[serde(serialize_with = "super::display_text")]
     unit_path: UnitPath,
+}
+
+fn is_latin1(encoding: &StringEncoding) -> bool {
+    *encoding == StringEncoding::Latin1
+}
+
+/// The `machine` object of the scope hashed body.
+///
+/// The type solves one problem: the scope body holds the encoding of a `Utf8` machine, but the
+/// hashed body of v1 never holds it (ADR-0202 (j1), (k)). The object has the fields of the `machine`
+/// object of the v1 body. It skips `string_encoding` for `Latin1`, so a `Latin1` scope body keeps
+/// its bytes and its hash.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+struct ScopeMachine {
+    #[serde(serialize_with = "super::display_text")]
+    code: MachineCode,
+    #[serde(serialize_with = "super::display_text")]
+    plc_platform: PlcPlatform,
+    #[serde(
+        serialize_with = "super::display_text",
+        skip_serializing_if = "is_latin1"
+    )]
+    string_encoding: StringEncoding,
 }
 
 /// The JSON object that `scope_sha256` covers.
@@ -28,7 +51,7 @@ struct ScopeMarker {
 /// no name and no ordinal.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ScopeBody {
-    machine: MachineBody,
+    machine: ScopeMachine,
     recipe: RecipeBody,
     version: VersionBody,
     scope: ScopeMarker,
@@ -73,8 +96,12 @@ impl ScopeBody {
     /// path segments, not text, so `U10` is not below `U1`. The arrays keep the orders of
     /// `api.md` section 6.3 because the filter keeps the order of the whole body. The result can
     /// be empty. The caller refuses an empty scope with `E-EXP-005` (ADR-0109 (x)).
+    ///
+    /// `string_encoding` is the encoding of the machine. The whole body never holds it, so the
+    /// caller reads it from the machine row at each export (ADR-0202 (j1)). The body holds it only
+    /// for `Utf8`.
     #[must_use]
-    pub fn build(whole: &HashedBody, scope: &UnitPath) -> Self {
+    pub fn build(whole: &HashedBody, scope: &UnitPath, string_encoding: StringEncoding) -> Self {
         let parameters: Vec<ParameterEntry> = whole
             .parameters()
             .iter()
@@ -83,7 +110,11 @@ impl ScopeBody {
             .collect();
         let types = type_closure(whole.types(), &parameters);
         Self {
-            machine: whole.machine.clone(),
+            machine: ScopeMachine {
+                code: whole.machine.code,
+                plc_platform: whole.machine.plc_platform,
+                string_encoding,
+            },
             recipe: whole.recipe.clone(),
             version: whole.version.clone(),
             scope: ScopeMarker {

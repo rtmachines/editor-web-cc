@@ -710,7 +710,11 @@ mod stored_rows {
             names,
             has_rule_fault,
         };
-        let scope = ScopeBody::build(&body, &UnitPath::parse("U1").expect("a unit path"));
+        let scope = ScopeBody::build(
+            &body,
+            &UnitPath::parse("U1").expect("a unit path"),
+            StringEncoding::Latin1,
+        );
         let facts = ScopeFacts {
             document,
             scope_sha256: scope.sha256().expect("a scope hash"),

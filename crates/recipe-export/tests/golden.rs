@@ -510,7 +510,11 @@ fn scope_example() -> (ScopeBody, ScopeFacts) {
 /// The scope body and the facts of one unit of the example of `api.md` section 6.2.
 fn scope_example_of(unit_path: &str) -> (ScopeBody, ScopeFacts) {
     let (whole, document) = example();
-    let scope = ScopeBody::build(&whole, &UnitPath::parse(unit_path).unwrap());
+    let scope = ScopeBody::build(
+        &whole,
+        &UnitPath::parse(unit_path).unwrap(),
+        StringEncoding::Latin1,
+    );
     let scope_sha256 = scope.sha256().unwrap();
     let facts = ScopeFacts {
         document,
@@ -879,7 +883,11 @@ fn latin1_scope() -> (ScopeBody, ScopeFacts) {
     document.has_rule_fault = !check_version_parameters(&parameters, &trees)
         .unwrap()
         .is_empty();
-    let scope = ScopeBody::build(&body, &UnitPath::parse("U1").unwrap());
+    let scope = ScopeBody::build(
+        &body,
+        &UnitPath::parse("U1").unwrap(),
+        StringEncoding::Latin1,
+    );
     let facts = ScopeFacts {
         document,
         scope_sha256: scope.sha256().unwrap(),

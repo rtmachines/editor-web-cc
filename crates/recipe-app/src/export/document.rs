@@ -9,7 +9,9 @@ use recipe_domain::export::{
     Sha256, check_version_parameters,
 };
 use recipe_domain::identity::Login;
-use recipe_domain::plant::{LiveUnits, Machine, PlantError, PlatformTypes, TypeTrees, UnitPath};
+use recipe_domain::plant::{
+    LiveUnits, Machine, PlantError, PlatformTypes, StringEncoding, TypeTrees, UnitPath,
+};
 use recipe_domain::recipe::{Parameter, RecipeVersionId, ReferenceNumber};
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -25,6 +27,8 @@ pub(super) struct BodyRows {
     parameters: Vec<Parameter>,
     units: LiveUnits,
     trees: TypeTrees,
+    /// The encoding of the machine. The scope body holds it for `Utf8` (ADR-0202 (j1)).
+    string_encoding: StringEncoding,
 }
 
 impl BodyRows {
@@ -161,6 +165,7 @@ pub(super) async fn read_rows(
         parameters,
         units,
         trees,
+        string_encoding: machine.string_encoding(),
     })
 }
 
@@ -175,12 +180,12 @@ pub(super) async fn read_rows(
 fn write_scope(
     writer: &dyn DocumentWriter,
     (body, facts): (&HashedBody, DocumentFacts),
-    (scope, header): (&ExportScope, &ExportHeader),
+    (scope, header, string_encoding): (&ExportScope, &ExportHeader, StringEncoding),
 ) -> Result<(Vec<u8>, Option<ScopeAudit>), ExportError> {
     let ExportScope::Unit(path) = scope else {
         return Ok((writer.write(body, &facts)?, None));
     };
-    let scoped = ScopeBody::build(body, path);
+    let scoped = ScopeBody::build(body, path, string_encoding);
     if scoped.is_empty() {
         return Err(ExportError::EmptyScope {
             reference: header.reference.clone(),
@@ -242,8 +247,11 @@ pub(super) async fn write_document(
                 })?;
             let has_rule_fault = !found.is_empty();
             let facts = facts.complete(&rows, hash, has_rule_fault);
-            let (document, scope) =
-                write_scope(writer.as_ref(), (&body, facts), (&scope, &rows.header))?;
+            let (document, scope) = write_scope(
+                writer.as_ref(),
+                (&body, facts),
+                (&scope, &rows.header, rows.string_encoding),
+            )?;
             Ok(Written {
                 document,
                 hash,
