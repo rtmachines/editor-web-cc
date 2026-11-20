@@ -55,6 +55,22 @@ fn zero_length_is_out_of_range_on_every_platform() {
 }
 
 #[test]
+fn adr_0141_wstring_of_length_zero_fails() {
+    for platform in [
+        PlcPlatform::CodesysIec,
+        PlcPlatform::TwinCat3,
+        PlcPlatform::S7_1200,
+        PlcPlatform::S7_1500,
+    ] {
+        assert_eq!(
+            StringLength::parse(WSTRING, platform, 0),
+            Err(StringLengthReason::OutOfRange),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
 fn length_beyond_u16_is_out_of_range() {
     assert_eq!(
         StringLength::parse(STRING, PlcPlatform::CodesysIec, 65_536),
