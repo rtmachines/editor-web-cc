@@ -555,3 +555,71 @@ async fn adr_0186_proposals_keep_a_stored_siemens_struct_on_codesys() {
         "{choices:?}"
     );
 }
+
+/// The proposals of the form of a draft on a machine of `platform` with `VERSION@1`, `ST_Coil@1`,
+/// and `ST_Zone@1`. `ST_Coil@1` has the keyword member `END_IF`.
+async fn choices_with_iec_structs_on(platform: PlcPlatform) -> Vec<String> {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    for (id, name, members) in [
+        (710, "VERSION", vec!["a"]),
+        (711, "ST_Coil", vec!["END_IF", "S"]),
+        (712, "ST_Zone", vec!["a"]),
+    ] {
+        let record = PlcTypeRecord {
+            id: tid(id),
+            machine: Some(crate::memory::fixtures::mid(1)),
+            platforms: BTreeSet::from([platform]),
+            shape: RecordShape::Struct {
+                name: recipe_domain::plant::TypeName::parse(name).unwrap(),
+                revision: 1,
+                supersedes: None,
+                members: members
+                    .into_iter()
+                    .map(|member| recipe_domain::plant::TypeMember {
+                        name: recipe_domain::plant::MemberName::parse(member).unwrap(),
+                        type_id: int,
+                    })
+                    .collect(),
+            },
+        };
+        fixture.store.seed_type(&PlcType::try_from(record).unwrap());
+    }
+    form(&fixture, input(None, None, None))
+        .await
+        .unwrap()
+        .choices
+}
+
+#[tokio::test]
+async fn adr_0203_proposals_leave_out_a_stored_reserved_struct_and_a_keyword_member_struct() {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
+        let choices = choices_with_iec_structs_on(platform).await;
+        assert!(
+            choices.iter().any(|choice| choice == "ST_Zone@1"),
+            "{choices:?}"
+        );
+        assert!(
+            !choices.iter().any(|choice| choice == "VERSION@1"),
+            "{choices:?}"
+        );
+        assert!(
+            !choices.iter().any(|choice| choice == "ST_Coil@1"),
+            "{choices:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn adr_0203_proposals_keep_a_stored_reserved_struct_on_an_s7_machine() {
+    let choices = choices_with_iec_structs_on(PlcPlatform::S7_1500).await;
+    for expected in ["ST_Zone@1", "VERSION@1", "ST_Coil@1"] {
+        assert!(
+            choices.iter().any(|choice| choice == expected),
+            "{choices:?}"
+        );
+    }
+}

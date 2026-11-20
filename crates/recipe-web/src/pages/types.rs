@@ -115,6 +115,8 @@ mod form_rows_tests;
 #[cfg(test)]
 mod form_tests;
 #[cfg(test)]
+mod iec_names_tests;
+#[cfg(test)]
 mod list_tests;
 #[cfg(test)]
 mod reserved_name_tests;

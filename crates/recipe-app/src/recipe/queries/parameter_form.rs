@@ -24,7 +24,7 @@ use crate::auth::{
 };
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
-use crate::plant::is_refused_struct_name;
+use crate::plant::is_refused_struct;
 use crate::ports::{Isolation, VersionDetail};
 use crate::recipe::draft_session::collect_stored_types;
 
@@ -239,7 +239,7 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
     let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
     for row in types.rows() {
         if let RecordShape::Struct { name, revision, .. } = row.shape()
-            && !is_refused_struct_name(types.platform(), name)
+            && !is_refused_struct(types.platform(), row)
         {
             let entry = latest.entry(name).or_insert(*revision);
             *entry = (*entry).max(*revision);

@@ -179,6 +179,8 @@ mod adr_0186_tests;
 #[cfg(test)]
 mod adr_0201_tests;
 #[cfg(test)]
+mod adr_0203_tests;
+#[cfg(test)]
 pub(super) mod fixtures;
 #[cfg(test)]
 mod kept_member_tests;

@@ -380,3 +380,71 @@ async fn adr_0186_proposals_keep_a_stored_siemens_struct_on_codesys() {
         "{choices:?}"
     );
 }
+
+/// The proposals of the form for a machine of `platform` with `VERSION@1`, `ST_Coil@1`, and `ST_Zone@1`.
+///
+/// `ST_Coil@1` has the keyword member `END_IF`.
+async fn choices_with_iec_structs_on(platform: PlcPlatform) -> Vec<String> {
+    let fixture = Fixture::new();
+    fixture
+        .store
+        .seed_machine(&machine_of(platform, MACHINE, "M12", "Press"));
+    let int = primitive(Primitive::Int);
+    let rows = [
+        struct_row(
+            (MACHINE, platform),
+            920,
+            ("VERSION", 1),
+            &[("a", int)],
+            None,
+        ),
+        struct_row(
+            (MACHINE, platform),
+            921,
+            ("ST_Coil", 1),
+            &[("END_IF", int), ("S", int)],
+            None,
+        ),
+        struct_row(
+            (MACHINE, platform),
+            922,
+            ("ST_Zone", 1),
+            &[("a", int)],
+            None,
+        ),
+    ];
+    for row in &rows {
+        fixture.store.seed_type(row);
+    }
+    form(&fixture, None).await.unwrap().choices
+}
+
+#[tokio::test]
+async fn adr_0203_proposals_leave_out_a_stored_reserved_struct_and_a_keyword_member_struct() {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
+        let choices = choices_with_iec_structs_on(platform).await;
+        assert!(
+            choices.iter().any(|choice| choice == "ST_Zone@1"),
+            "{choices:?}"
+        );
+        assert!(
+            !choices.iter().any(|choice| choice == "VERSION@1"),
+            "{choices:?}"
+        );
+        assert!(
+            !choices.iter().any(|choice| choice == "ST_Coil@1"),
+            "{choices:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn adr_0203_proposals_keep_a_stored_reserved_struct_on_an_s7_machine() {
+    let choices = choices_with_iec_structs_on(PlcPlatform::S7_1500).await;
+    for expected in ["ST_Zone@1", "VERSION@1", "ST_Coil@1"] {
+        assert!(
+            choices.iter().any(|choice| choice == expected),
+            "{choices:?}"
+        );
+    }
+}

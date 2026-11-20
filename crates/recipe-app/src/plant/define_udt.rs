@@ -6,10 +6,10 @@ use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{
     DerivedTypeReason, MachineCode, MachineId, MemberName, PlantError, PlatformTypes, PlcPlatform,
     PlcType, PlcTypeId, PlcTypeRecord, RecordShape, TypeExpr, TypeMember, TypeName, TypeTree,
-    check_siemens_struct_name,
+    check_iec_names, check_siemens_struct_name,
 };
 
-use super::current_type::require_current_type;
+use super::current_type::{check_iec_struct_in, require_current_type};
 use super::derived_lock::derived_type_locks;
 use super::ensure_derived::DerivedTypes;
 use super::resolve::{live_machine_id, require_live};
@@ -141,6 +141,11 @@ impl DefineUdt {
 /// The check is pure and waits for no I/O (`reliability.md` section 7.4).
 fn require_current_names(input: &DefineUdtInput, platform: PlcPlatform) -> Result<(), PlantError> {
     check_siemens_struct_name(platform, &input.name)?;
+    check_iec_names(
+        platform,
+        &input.name,
+        input.members.iter().map(|(member, _)| member),
+    )?;
     for (_, expr) in &input.members {
         require_current_type(expr, platform)?;
     }
@@ -163,6 +168,7 @@ async fn ensure_members(
     for (name, expr) in &input.members {
         expr.require_no_nested_array(platform)
             .map_err(|error| member_error(error.into(), &input.name, name, platform))?;
+        check_iec_struct_in(platform, derived.rows(), expr)?;
         let type_id = derived
             .ensure_expr(catalog, expr)
             .await

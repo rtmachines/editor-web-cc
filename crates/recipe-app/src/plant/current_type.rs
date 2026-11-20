@@ -1,8 +1,8 @@
 //! The check of a type text with the current rule set (ADR-0143 (i2), ADR-0120 (c), ADR-0186 (f)).
 
 use recipe_domain::plant::{
-    BaseExpr, PlantError, PlcPlatform, TypeExpr, TypeName, check_siemens_struct_name,
-    is_reserved_name,
+    BaseExpr, PlantError, PlatformTypes, PlcPlatform, PlcType, RecordShape, TypeExpr,
+    check_iec_names, check_siemens_struct_name, is_reserved_name,
 };
 
 /// Check the type text that a command writes with the current rule (ADR-0143 (i2)).
@@ -29,12 +29,64 @@ pub(crate) fn require_current_type(
     Ok(())
 }
 
-/// Tell whether a stored struct name is no proposal of a type input (ADR-0186 (h), ADR-0143 (i2)).
+/// Tell whether a stored struct row is no proposal of a type input (ADR-0203 (j), ADR-0186 (h)).
 ///
 /// The function solves one problem: the struct form and the parameter form must leave out the
-/// names that every command refuses. A name is refused when it is a reserved word or a primitive
-/// name, or when the platform is an S7 platform and the name is a Siemens reserved name. The
-/// Siemens part calls [`check_siemens_struct_name`], the check of [`require_current_type`].
-pub(crate) fn is_refused_struct_name(platform: PlcPlatform, name: &TypeName) -> bool {
-    is_reserved_name(name.as_str()) || check_siemens_struct_name(platform, name).is_err()
+/// structs that every command refuses. A row is refused when its name is a reserved word or a
+/// primitive name. It is also refused on an S7 platform when the name is a Siemens reserved name,
+/// and on `CodesysIec` and `TwinCat3` when [`check_iec_names`] refuses the name or a member name.
+/// A row that is no struct is no refused struct. The Siemens part calls
+/// [`check_siemens_struct_name`], the check of [`require_current_type`].
+pub(crate) fn is_refused_struct(platform: PlcPlatform, row: &PlcType) -> bool {
+    let RecordShape::Struct { name, members, .. } = row.shape() else {
+        return false;
+    };
+    is_reserved_name(name.as_str())
+        || check_siemens_struct_name(platform, name).is_err()
+        || check_iec_names(platform, name, members.iter().map(|member| &member.name)).is_err()
+}
+
+/// Check the stored struct revision that a type text names directly (ADR-0203 (i1)).
+///
+/// The function solves one problem: a command writes a type text, and the stored revision that
+/// the text names can hold a reserved name that the command did not write. The function finds
+/// the revision that the base of `expr` names in `types`, also as the element of an array. It
+/// calls [`check_iec_names`] on that row. It does not follow the members of the revision into
+/// a deeper struct. A base that is no struct, and a struct that `types` does not hold, pass. The
+/// later resolution reports a missing struct. The check is pure and reads no row.
+///
+/// # Errors
+///
+/// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) with the reason `ReservedName` or
+/// `ReservedMemberName` as [`check_iec_names`] gives it.
+pub(crate) fn check_iec_struct(types: &PlatformTypes, expr: &TypeExpr) -> Result<(), PlantError> {
+    check_iec_struct_in(types.platform(), types.rows(), expr)
+}
+
+/// The check of [`check_iec_struct`] over the rows `rows` of one platform.
+///
+/// `DefineUdt` calls it with the rows of its working set, which are no `PlatformTypes`.
+pub(crate) fn check_iec_struct_in<'a>(
+    platform: PlcPlatform,
+    rows: impl IntoIterator<Item = &'a PlcType>,
+    expr: &TypeExpr,
+) -> Result<(), PlantError> {
+    let BaseExpr::Udt { name, revision } = expr.base() else {
+        return Ok(());
+    };
+    let stored = rows.into_iter().find_map(|row| match row.shape() {
+        RecordShape::Struct {
+            name: found,
+            revision: number,
+            members,
+            ..
+        } if found == name && number == revision && row.platforms().contains(&platform) => {
+            Some(members)
+        }
+        _ => None,
+    });
+    let Some(members) = stored else {
+        return Ok(());
+    };
+    check_iec_names(platform, name, members.iter().map(|member| &member.name))
 }

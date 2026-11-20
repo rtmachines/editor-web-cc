@@ -15,7 +15,7 @@ use super::{TypeRef, live_machine, pick_revision, revisions_of};
 use crate::auth::{CurrentUser, FormPurpose, Operation, RequestMeta, UdtFormPurpose, authorize};
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
-use crate::plant::is_refused_struct_name;
+use crate::plant::is_refused_struct;
 use crate::ports::Isolation;
 
 /// One revision of a struct, as the type rows of a machine hold it.
@@ -408,10 +408,13 @@ fn proposals(
         .chain(has_wstring.then_some(Primitive::Wstring));
     let structs = groups
         .iter()
-        .filter(|(name, _)| {
-            Some(**name) != revised && !is_refused_struct_name(types.platform(), name)
-        })
+        .filter(|(name, _)| Some(**name) != revised)
         .filter_map(|(_, group)| group.first())
+        .filter(|latest| {
+            types
+                .get(latest.id)
+                .is_none_or(|row| !is_refused_struct(types.platform(), row))
+        })
         .map(|latest| format!("{}@{}", latest.name, latest.number));
     primitives
         .into_iter()

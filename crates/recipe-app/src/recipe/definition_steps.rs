@@ -8,7 +8,7 @@ use recipe_domain::recipe::{ParameterTag, RecipeError};
 
 use super::draft_session::OpenDraft;
 use crate::error::{AppError, PARAMETER_TAG_UNIQUE, StorageError, map_storage};
-use crate::plant::{DerivedTypes, derived_type_locks};
+use crate::plant::{DerivedTypes, check_iec_struct, derived_type_locks};
 
 /// The type of a definition command, and what the command needs to commit it.
 ///
@@ -125,6 +125,23 @@ pub(crate) fn require_s7_nesting(open: &OpenDraft, expr: &TypeExpr) -> Result<()
     };
     let tree = TypeTree::resolve(base.id(), &open.types)?;
     Ok(tree.check_s7_nesting_of_expr(platform, expr)?)
+}
+
+/// Check the stored struct revision that the new type names on `CodesysIec` and `TwinCat3`
+/// (`E-PLT-013`, ADR-0203 (i1)).
+///
+/// The function runs next to [`require_s7_nesting`], before the unit lock and before
+/// [`resolve_type`]. It reads the type rows that the open draft holds, so a refused type takes no
+/// lock and creates no row. It reads only the revision that `expr` names directly, as
+/// [`check_iec_struct`] does. A stored type of another parameter stays unchecked. The S7
+/// platforms accept every name.
+///
+/// # Errors
+///
+/// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) with the reason `ReservedName` or
+/// `ReservedMemberName` when the revision has a name or a member name that ADR-0203 reserves.
+pub(crate) fn require_iec_struct(open: &OpenDraft, expr: &TypeExpr) -> Result<(), AppError> {
+    Ok(check_iec_struct(&open.types, expr)?)
 }
 
 /// Map a failed write of a parameter tag to the domain error of the command.

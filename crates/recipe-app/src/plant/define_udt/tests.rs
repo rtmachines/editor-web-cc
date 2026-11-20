@@ -22,6 +22,7 @@ use crate::ports::Isolation;
 mod adr_0177;
 mod adr_0179;
 mod adr_0186;
+mod adr_0203;
 
 pub(super) fn input(mode: DefineUdtMode, name: &str, members: &[(&str, &str)]) -> DefineUdtInput {
     DefineUdtInput {
