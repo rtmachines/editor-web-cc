@@ -120,7 +120,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 2. STRING encoding: codes, catalog, and storage (ADR-0202, wave 1)
 
-- [ ] 2.1 (recipe-domain) Add the codes of ADR-0202. RED: `cargo test -p recipe-domain --lib registry_matches_reliability`, `cargo test -p recipe-web --lib error_mapping_status_table`, and `cargo test -p recipe-server --test error_registry` fail.
+- [x] 2.1 (recipe-domain) Add the codes of ADR-0202. RED: `cargo test -p recipe-domain --lib registry_matches_reliability`, `cargo test -p recipe-web --lib error_mapping_status_table`, and `cargo test -p recipe-server --test error_registry` fail.
   - Add the value object `StringEncoding` in `crates/recipe-domain/src/plant/string_encoding.rs` with `parse` for `Latin1` and `Utf8`, and with `as_str`. Add `adr_0202_string_encoding_parses_two_values`.
   - Add the function that gives `E-PLT-053` for `Utf8` on `S7_300`, `S7_1200`, and `S7_1500`, with `adr_0202_utf8_fails_on_s7`.
   - Add `PlantError::StringEncodingNotOnPlatform { code, encoding, platform }` and `PlantError::StringEncodingFrozen { code }`. Add their rows to `error_codes.rs`, and change the code ranges of `registry_matches_reliability` to include 53 and 54.
@@ -130,7 +130,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Chain A owns both bundles in wave 1, so chain B adds no key. A key without its operation breaks no test of chain A, because the unused-key guard reads only `en-approval.ftl` and `pl-approval.ftl`.
   - In `crates/recipe-server/tests/error_registry/plant.rs`, add one sample of each variant.
   - GREEN: the three RED commands, `cargo test -p recipe-domain --lib plant::error`, and `cargo test -p recipe-domain --lib adr_0202` pass.
-- [ ] 2.2 (recipe-app) Add the operation `SetMachineStringEncoding` to the catalog. It needs `MachineManage` and stops in read-only mode (A24). RED: `cargo test -p recipe-app --lib matrix_doc` fails after task 1.0.
+- [x] 2.2 (recipe-app) Add the operation `SetMachineStringEncoding` to the catalog. It needs `MachineManage` and stops in read-only mode (A24). RED: `cargo test -p recipe-app --lib matrix_doc` fails after task 1.0.
   - Add the entry to `auth/operation/catalog.rs`, to `MATRIX` and `STOPPED_IN_READ_ONLY` in `auth/matrix.rs`, and to `TABLE` and `COMMAND_NAMES` in `auth/operation/tests.rs`.
   - In `auth/operation/tests.rs`, change the counts. Rename `catalog_has_73_distinct_operations` to `catalog_has_74_distinct_operations` and assert 74. The names test asserts 72 in place of 71.
   - Rename `exactly_37_variants_are_commands` to `exactly_38_variants_are_commands` and assert 38 command variants.
@@ -139,7 +139,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - `STOPPED_IN_READ_ONLY` of `auth/matrix.rs` changes from 32 to 33 entries.
   - Add `adr_0202_set_machine_string_encoding_needs_machine_manage`. The Administrator and the ProcessEngineer pass, and the Operator and the ExportClient fail.
   - GREEN: `cargo test -p recipe-app --lib auth`.
-- [ ] 2.3 (recipe-db) Fixture task. It runs first in chain C of wave 1, on the code before this change and before `0017` exists.
+- [x] 2.3 (recipe-db) Fixture task. It runs first in chain C of wave 1, on the code before this change and before `0017` exists.
   - Add `crates/recipe-db/tests/storage/stored_rules_iec.rs` and its line `mod stored_rules_iec;` in `main.rs`. Add the ignored test `adr_0202_stored_rules_iec_write_the_fixture`.
   - In `crates/recipe-db/tests/storage/support/writers.rs`, `DocumentFactsWriter::write` (line 91) and `DocumentFactsWriter::write_scoped` (line 113) capture the body and the facts.
   - Each capture holds the canonical bytes of the hashed body or of the scope body, its hash, `status`, and `has_rule_fault`. It holds no `exported_at`.
@@ -151,7 +151,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - It writes `fixtures/stored_rules_iec.hashes` with one line `<reference> <content_sha256> <scope_sha256>` for each case.
   - It writes `fixtures/stored_rules_iec.exports.json` with the two captures and the `loadable` value of `ExportedVersion` for each case.
   - Command: `cargo test -p recipe-db --test storage adr_0202_stored_rules_iec_write_the_fixture -- --ignored`. Run it once, because a second run gives other UUIDs. The three files go into the commit of the task.
-- [ ] 2.4 (recipe-db) Add the migrations of `design.md`, section STRING encoding. RED: `cargo test -p recipe-db --test storage schema` and `cargo test -p recipe-db --test storage constraints` fail.
+- [x] 2.4 (recipe-db) Add the migrations of `design.md`, section STRING encoding. RED: `cargo test -p recipe-db --test storage schema` and `cargo test -p recipe-db --test storage constraints` fail.
   - Add `migrations/0017_machine_string_encoding.sql` and `migrations/0018_machine_string_encoding_validate.sql`.
   - Add the pieces of `0017` to `PIECES_AFTER_0001` in `crates/recipe-db/tests/storage/support/document.rs`.
   - `RETURNING to_jsonb(machine)` gives the new key `string_encoding` after `0017`. The shared contract compares the exact keys of each `machine` image on both adapters.
@@ -169,7 +169,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - Check: `python -I deploy/ci/migration_rewrite.py migrations` exits with 0. `deploy/ci/upgrade_smoke.py` needs no change, because the column has a default.
   - GREEN: `cargo test -p recipe-db --test storage adr_0202`, `schema`, `constraints`, `contract`, `restore_roles`, and `restore_code`, each with `cargo test -p recipe-db --test storage`.
   - Then run `cargo test -p recipe-app --lib memory` and `cargo test -p recipe-server --test migrate`.
-- [ ] 2.5 (recipe-db) Compare `0017` with the fourth SQL block of `data-model.md` §5.2. RED: `cargo test -p recipe-db --test storage grants::migration` fails.
+- [x] 2.5 (recipe-db) Compare `0017` with the fourth SQL block of `data-model.md` §5.2. RED: `cargo test -p recipe-db --test storage grants::migration` fails.
   - In `grants/migration.rs`, skip the fourth SQL block of §5.2 by its index 3 in the three tests of `0003`, `0012`, and `0013`.
   - Add `adr_0202_migration_0017_holds_the_fourth_sql_block_of_section_5_2`.
   - GREEN: `cargo test -p recipe-db --test storage grants`.
