@@ -22,12 +22,17 @@ pub struct ExportedVersion {
     pub content_sha256: Sha256,
     /// `true` when a stored part of the version breaks the current rules (ADR-0119).
     pub has_rule_fault: bool,
+    /// The value of `loadable` in the bytes of `document` (ADR-0202 (l)).
+    pub(super) loadable: bool,
 }
 
 impl ExportedVersion {
-    /// Return true only when the version is approved and has no rule fault (`api.md` section 6).
+    /// Return the value of `loadable` in the bytes of the document (`api.md` section 6).
+    ///
+    /// The flag is true only for an approved version without a rule fault. A document v1 of a
+    /// `Utf8` machine is not loadable (ADR-0202 (l)).
     #[must_use]
     pub const fn loadable(&self) -> bool {
-        self.status.loadable() && !self.has_rule_fault
+        self.loadable
     }
 }

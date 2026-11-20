@@ -709,6 +709,7 @@ mod stored_rows {
             content_sha256: body.sha256().expect("a content hash"),
             names,
             has_rule_fault,
+            string_encoding: StringEncoding::Latin1,
         };
         let scope = ScopeBody::build(
             &body,

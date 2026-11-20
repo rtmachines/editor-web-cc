@@ -19,10 +19,13 @@ use recipe_domain::text::{LongText, Text};
 use serde_json::json;
 use uuid::Uuid;
 
+use super::date_world::{VersionTarget, approve_version_with_real_hash};
 use crate::test_support::plant::{World, world};
 
 /// The reference number of the recipe of the world.
 pub(crate) const REFERENCE: &str = "R-410";
+/// The reference number of the recipe of the approved world.
+pub(crate) const APPROVED_REFERENCE: &str = "R-300";
 /// The key of the parameter `LABEL`, a `STRING(4)`.
 pub(crate) const LABEL_KEY: Uuid = Uuid::from_u128(0x7357_0007_0000_0000_0000_0000_0f40_0001);
 
@@ -89,6 +92,29 @@ fn string_row() -> PlcType {
 /// The parameter `LABEL` is a `STRING(4)` with the value `"abc"` on the unit `U1`.
 pub(crate) fn utf8_world() -> World {
     let world = world();
+    seed_label_recipe(&world, REFERENCE);
+    world
+}
+
+/// Build the plant world with the approved version 1 of `R-300` on the `Utf8` machine `M10`.
+///
+/// The parameter `LABEL` is a `STRING(4)` with the value `"abc"` on the unit `U1`. The version has
+/// the real content hash, because an export route checks the stored hash first.
+pub(crate) async fn utf8_approved_world() -> World {
+    let world = world();
+    seed_label_recipe(&world, APPROVED_REFERENCE);
+    let target = VersionTarget {
+        version: RecipeVersionId::from(VERSION_ID),
+        recipe: RecipeId::from(RECIPE_ID),
+        machine: MachineId::from(MACHINE_ID),
+        reference: ReferenceNumber::parse(APPROVED_REFERENCE).unwrap(),
+    };
+    approve_version_with_real_hash(&world.fixture, target).await;
+    world
+}
+
+/// Seed `M10`, its `STRING(4)` row, and the recipe `reference` with its live draft version 1.
+fn seed_label_recipe(world: &World, reference: &str) {
     let store = &world.fixture.store;
     store.seed_machine(&machine());
     store.seed_type(&string_row());
@@ -96,7 +122,7 @@ pub(crate) fn utf8_world() -> World {
     let recipe = Recipe::create(
         RecipeId::from(RECIPE_ID),
         MachineId::from(MACHINE_ID),
-        ReferenceNumber::parse(REFERENCE).unwrap(),
+        ReferenceNumber::parse(reference).unwrap(),
         text("Label recipe"),
         version,
     );
@@ -122,5 +148,4 @@ pub(crate) fn utf8_world() -> World {
             ordinal: Ordinal::parse(0).unwrap(),
         },
     );
-    world
 }

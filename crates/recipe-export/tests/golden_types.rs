@@ -280,6 +280,7 @@ fn render_document(platform: PlcPlatform, trees: &TypeTrees, parameters: &[Param
         content_sha256: body.sha256().unwrap(),
         names,
         has_rule_fault,
+        string_encoding: StringEncoding::Latin1,
     };
     String::from_utf8(write_document(&body, &facts).unwrap()).unwrap()
 }

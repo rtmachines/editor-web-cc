@@ -158,9 +158,9 @@ impl Fixture {
         must_change_password: bool,
     ) -> TestSession {
         self.seed_user_row(
+            &format!("user{n}"),
             n,
-            role,
-            must_change_password,
+            (role, must_change_password),
             PasswordHash::parse(HASH).unwrap(),
         );
         self.session_of(n)
@@ -176,16 +176,41 @@ impl Fixture {
         password: &str,
         must_change_password: bool,
     ) {
-        let hasher = Argon2Hasher::new(TEST_PARAMS).unwrap();
-        let hash = hasher.hash(&NewPassword::parse(password).unwrap()).unwrap();
-        self.seed_user_row(n, role, must_change_password, hash);
+        self.seed_account_as(
+            &format!("user{n}"),
+            n,
+            (role, password),
+            must_change_password,
+        );
     }
 
-    fn seed_user_row(&self, n: u8, role: Role, must_change_password: bool, hash: PasswordHash) {
+    /// Insert the user number `n` with the login `login` and a real hash of `password`.
+    ///
+    /// The function solves one problem: a test names the `ExportClient` account of a machine, for
+    /// example `plc-m10`, and the login `user<n>` of `seed_account` does not fit.
+    pub(crate) fn seed_account_as(
+        &self,
+        login: &str,
+        n: u8,
+        (role, password): (Role, &str),
+        must_change_password: bool,
+    ) {
+        let hasher = Argon2Hasher::new(TEST_PARAMS).unwrap();
+        let hash = hasher.hash(&NewPassword::parse(password).unwrap()).unwrap();
+        self.seed_user_row(login, n, (role, must_change_password), hash);
+    }
+
+    fn seed_user_row(
+        &self,
+        login: &str,
+        n: u8,
+        (role, must_change_password): (Role, bool),
+        hash: PasswordHash,
+    ) {
         let user_id = UserId::from(Uuid::from_u128(u128::from(n)));
         self.store.seed_user(&NewUser {
             id: user_id,
-            login: Login::parse(&format!("user{n}")).unwrap(),
+            login: Login::parse(login).unwrap(),
             password_hash: hash,
             role,
             must_change_password,

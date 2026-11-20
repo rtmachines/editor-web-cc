@@ -136,7 +136,7 @@ pub fn write_document(body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8
         schema_version: SCHEMA_VERSION,
         exported_at: utc_text(facts.exported_at)?,
         exported_by: facts.exported_by.as_str(),
-        loadable: facts.loadable(),
+        loadable: facts.v1_loadable(),
         content_sha256: &facts.content_sha256,
         machine: MachineFields {
             code: body.machine_code(),

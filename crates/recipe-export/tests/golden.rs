@@ -277,6 +277,7 @@ fn facts(
         content_sha256: body.sha256().unwrap(),
         names: names_of(parameters),
         has_rule_fault: false,
+        string_encoding: StringEncoding::Latin1,
     }
 }
 

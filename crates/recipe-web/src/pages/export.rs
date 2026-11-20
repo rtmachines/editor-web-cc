@@ -146,6 +146,8 @@ pub(super) fn named_file_answer(
 #[cfg(test)]
 mod access_tests;
 #[cfg(test)]
+mod adr_0202_tests;
+#[cfg(test)]
 mod error_tests;
 #[cfg(test)]
 mod platform_range_tests;
