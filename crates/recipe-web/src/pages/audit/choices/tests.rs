@@ -18,7 +18,7 @@ fn choices_the_groups_hold_() {
         .flat_map(|group| group.options)
         .map(|choice| choice.value)
         .collect();
-    assert_eq!(values.len(), 38);
+    assert_eq!(values.len(), 39);
     let distinct: BTreeSet<&str> = values.iter().map(String::as_str).collect();
     let expected: BTreeSet<&str> = AuditAction::ALL
         .iter()
