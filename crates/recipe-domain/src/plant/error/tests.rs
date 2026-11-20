@@ -590,7 +590,28 @@ fn connection_samples_machine() -> Vec<(PlantError, Vec<(&'static str, String)>)
                 code: machine_code(),
                 platform: PlcPlatform::TwinCat3,
             },
-            vec![code, ("platform", PlcPlatform::TwinCat3.to_string())],
+            vec![
+                code.clone(),
+                ("platform", PlcPlatform::TwinCat3.to_string()),
+            ],
+        ),
+        (
+            PlantError::StringEncodingNotOnPlatform {
+                code: machine_code(),
+                encoding: StringEncoding::Utf8,
+                platform: PlcPlatform::S7_1500,
+            },
+            vec![
+                code.clone(),
+                ("encoding", StringEncoding::Utf8.to_string()),
+                ("platform", PlcPlatform::S7_1500.to_string()),
+            ],
+        ),
+        (
+            PlantError::StringEncodingFrozen {
+                code: machine_code(),
+            },
+            vec![code],
         ),
     ]
 }
@@ -600,7 +621,7 @@ fn registry_matches_reliability() {
     let rows = plant_doc_rows();
     let expected: Vec<String> = (1..=6)
         .chain(8..=29)
-        .chain(50..=52)
+        .chain(50..=54)
         .map(|number| format!("E-PLT-{number:03}"))
         .collect();
 
@@ -772,4 +793,33 @@ fn revision_unchanged_has_code_plt_052_and_the_adr_0159_text() {
         error.to_string(),
         "Revision 3 of type ST_Zone has the same members. Change a member before you create the revision."
     );
+}
+
+#[test]
+fn adr_0202_string_encoding_errors_have_their_code_registry_row_and_text() {
+    let code = MachineCode::parse("M7").unwrap();
+    let cases = [
+        (
+            PlantError::StringEncodingNotOnPlatform {
+                code,
+                encoding: StringEncoding::Utf8,
+                platform: PlcPlatform::S7_300,
+            },
+            ErrorCode::PLT_053,
+            "E-PLT-053",
+            "Platform S7_300 of machine M7 has no STRING encoding Utf8. Select Latin1.",
+        ),
+        (
+            PlantError::StringEncodingFrozen { code },
+            ErrorCode::PLT_054,
+            "E-PLT-054",
+            "The STRING encoding of machine M7 cannot change, because the machine has a recipe version.",
+        ),
+    ];
+    for (error, expected, text, message) in cases {
+        assert_eq!(error.code(), expected);
+        assert_eq!(error.code().as_str(), text);
+        assert!(REGISTRY.contains(&expected), "{text}");
+        assert_eq!(error.to_string(), message);
+    }
 }

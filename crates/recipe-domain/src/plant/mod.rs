@@ -23,6 +23,7 @@ mod s7_address;
 mod s7_layout;
 mod s7_width;
 mod siemens_names;
+mod string_encoding;
 mod string_length;
 mod type_expr;
 mod type_name;
@@ -55,6 +56,7 @@ pub use s7_layout::{S7Layout, S7Member, S7Start, s7_members};
 pub use siemens_names::{
     SIEMENS_RESERVED_NAMES, check_siemens_struct_name, is_siemens_reserved_name,
 };
+pub use string_encoding::{StringEncoding, StringEncodingReason, check_string_encoding};
 pub use string_length::{StringKind, StringLength, StringLengthReason};
 pub use type_expr::{BaseExpr, TypeExpr};
 pub use type_name::{
