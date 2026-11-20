@@ -4,11 +4,12 @@ use recipe_domain::identity::{Permission, Role};
 
 use super::*;
 
-/// The 36 commands of `domain-model.md` sections 5.1 to 5.4.
-const COMMAND_NAMES: [&str; 36] = [
+/// The 37 commands of `domain-model.md` sections 5.1 to 5.4.
+const COMMAND_NAMES: [&str; 37] = [
     "CreateMachine",
     "RenameMachine",
     "SetMachineDataBlock",
+    "SetMachineStringEncoding",
     "ArchiveMachine",
     "AddUnit",
     "RenameUnit",
@@ -87,7 +88,7 @@ const QUERY_NAMES: [&str; 35] = [
 type Row = (Operation, Requirement, &'static str, bool);
 
 /// The pinned facts of every operation, in the order of `Operation::ALL`.
-const TABLE: [Row; 73] = [
+const TABLE: [Row; 74] = [
     (
         Operation::CreateMachine,
         Requirement::Permission(Permission::MachineManage),
@@ -104,6 +105,12 @@ const TABLE: [Row; 73] = [
         Operation::SetMachineDataBlock,
         Requirement::Permission(Permission::MachineManage),
         "SetMachineDataBlock",
+        true,
+    ),
+    (
+        Operation::SetMachineStringEncoding,
+        Requirement::Permission(Permission::MachineManage),
+        "SetMachineStringEncoding",
         true,
     ),
     (
@@ -544,17 +551,17 @@ fn table_pins_requirement_name_and_command_flag_of_every_operation() {
 }
 
 #[test]
-fn catalog_has_73_distinct_operations() {
+fn catalog_has_74_distinct_operations() {
     let distinct: BTreeSet<Operation> = Operation::ALL.iter().copied().collect();
-    assert_eq!(Operation::ALL.len(), 73);
-    assert_eq!(distinct.len(), 73);
+    assert_eq!(Operation::ALL.len(), 74);
+    assert_eq!(distinct.len(), 74);
 }
 
 #[test]
 fn names_equal_the_commands_and_queries_of_the_domain_model() {
     let expected: BTreeSet<&str> = COMMAND_NAMES.iter().chain(&QUERY_NAMES).copied().collect();
     let actual: BTreeSet<&str> = Operation::ALL.iter().map(|op| op.name()).collect();
-    assert_eq!(expected.len(), 71);
+    assert_eq!(expected.len(), 72);
     assert_eq!(actual, expected);
 }
 
@@ -576,9 +583,9 @@ fn display_gives_the_use_case_name() {
 }
 
 #[test]
-fn exactly_37_variants_are_commands() {
+fn exactly_38_variants_are_commands() {
     let commands = Operation::ALL.iter().filter(|op| op.is_command()).count();
-    assert_eq!(commands, 37);
+    assert_eq!(commands, 38);
     let command_names: BTreeSet<&str> = Operation::ALL
         .iter()
         .filter(|op| op.is_command())
