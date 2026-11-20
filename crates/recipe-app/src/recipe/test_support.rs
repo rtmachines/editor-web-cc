@@ -408,14 +408,8 @@ const LABEL_TYPE: u128 = 951;
 /// The length of the `STRING` row and of the limit `max_length` of the label.
 const LABEL_LENGTH: u16 = 10;
 
-/// A fixture with a `Utf8` machine `M1` on `CodesysIec` and the machine row `STRING(10)`.
-///
-/// The fixture holds no recipe. The caller seeds the versions and then [`seed_utf8_label`]. The
-/// machine is the second result.
-pub(crate) fn utf8_label_fixture() -> (Fixture, Machine) {
-    let fixture = Fixture::new();
-    let machine = utf8_machine(1, "M1");
-    fixture.store.seed_machine(&machine);
+/// Store the machine row `STRING(10)` of `machine` that [`seed_utf8_label`] uses.
+pub(crate) fn seed_label_row(fixture: &Fixture, machine: &Machine) {
     let platform = machine.platform();
     let length =
         StringLength::parse(StringKind::String, platform, u32::from(LABEL_LENGTH)).unwrap();
@@ -432,6 +426,17 @@ pub(crate) fn utf8_label_fixture() -> (Fixture, Machine) {
     })
     .unwrap();
     fixture.store.seed_type(&row);
+}
+
+/// A fixture with a `Utf8` machine `M1` on `CodesysIec` and the machine row `STRING(10)`.
+///
+/// The fixture holds no recipe. The caller seeds the versions and then [`seed_utf8_label`]. The
+/// machine is the second result.
+pub(crate) fn utf8_label_fixture() -> (Fixture, Machine) {
+    let fixture = Fixture::new();
+    let machine = utf8_machine(1, "M1");
+    fixture.store.seed_machine(&machine);
+    seed_label_row(&fixture, &machine);
     (fixture, machine)
 }
 

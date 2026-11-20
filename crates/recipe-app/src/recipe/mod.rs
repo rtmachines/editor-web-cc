@@ -3,6 +3,8 @@
 mod add_parameter;
 #[cfg(test)]
 mod add_parameter_errors;
+#[cfg(test)]
+mod adr_0202_integration_tests;
 mod approve_version;
 mod create_recipe;
 mod create_version;
