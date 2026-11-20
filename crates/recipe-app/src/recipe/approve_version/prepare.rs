@@ -1,7 +1,9 @@
 //! Steps 1 to 3 of design D12: the reads before the transaction and the check with `Blocking`.
 
 use recipe_domain::export::{ExportHeader, HashedBody, Sha256};
-use recipe_domain::plant::{LiveUnits, Machine, MachineId, PlatformTypes, PlcType, TypeTrees};
+use recipe_domain::plant::{
+    LiveUnits, Machine, MachineId, PlatformTypes, PlcType, StringEncoding, TypeTrees,
+};
 use recipe_domain::recipe::{
     ApprovalOutcome, ApprovalReady, Draft, RecipeId, RecipeVersionId, StoredDraft,
 };
@@ -47,6 +49,8 @@ struct Snapshot {
     types: Vec<PlcType>,
     header: ExportHeader,
     machine: MachineId,
+    /// The STRING encoding of the machine. The header and the hashed body do not hold it (ADR-0202 (k)).
+    string_encoding: StringEncoding,
     allow_outdated: bool,
 }
 
@@ -131,6 +135,7 @@ async fn read_snapshot(
         types,
         header,
         machine: machine_id,
+        string_encoding: machine.string_encoding(),
         allow_outdated,
     })
 }
@@ -145,9 +150,10 @@ fn check_and_hash(snapshot: Snapshot) -> Result<(ApprovalReady, Sha256), AppErro
         types,
         header,
         machine,
+        string_encoding,
         allow_outdated,
     } = snapshot;
-    let types = PlatformTypes::collect(machine, header.platform, types)?;
+    let types = PlatformTypes::collect_encoded(machine, header.platform, string_encoding, types)?;
     let trees = TypeTrees::resolve(draft.parameters().iter().map(|p| p.plc_type()), &types);
     let token = draft.check_for_approval(&units, &trees, allow_outdated)?;
     let body = HashedBody::build(&header, token.draft().parameters(), &units, &trees)?;

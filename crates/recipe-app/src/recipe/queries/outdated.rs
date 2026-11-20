@@ -252,9 +252,22 @@ pub(super) fn outdated_parameters(
     if rows.is_empty() {
         return Ok(Outdated::default());
     }
-    let types = PlatformTypes::collect(machine.id(), machine.platform(), types)?;
+    let types = catalog_of(machine, types)?;
     let trees = TypeTrees::resolve(rows.iter().map(|row| row.plc_type), &types);
     outdated_with_trees(rows, (&types, &trees), budget)
+}
+
+/// Collect the type rows of `machine` with its platform and its STRING encoding (ADR-0202 (m)).
+///
+/// The function solves one problem: the outdated list reads trees that no caller sees, so a test
+/// checks the encoding on the catalog that the list resolves.
+fn catalog_of(machine: &Machine, types: Vec<PlcType>) -> Result<PlatformTypes, PlantError> {
+    PlatformTypes::collect_encoded(
+        machine.id(),
+        machine.platform(),
+        machine.string_encoding(),
+        types,
+    )
 }
 
 /// Return the outdated parameters of `rows` with the type trees that the caller resolved.

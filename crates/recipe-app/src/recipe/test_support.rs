@@ -15,7 +15,9 @@ use recipe_domain::recipe::{
 use serde_json::{Value, json};
 
 use crate::error::AppError;
-use crate::memory::fixtures::{Fixture, mid, parameter_on, pkey, tid, timestamp, uid, user, vid};
+use crate::memory::fixtures::{
+    Fixture, mid, parameter_on, pid, pkey, tid, timestamp, uid, user, utf8_machine, vid,
+};
 use crate::memory::seed_type_id;
 use crate::recipe::rebind::fixtures::typed_struct_row;
 
@@ -394,4 +396,63 @@ pub(super) fn expected_forms(error: &AppError) -> Vec<Expected> {
 /// The form that `E-RCP-005` names for a `WSTRING(length)` on `CodesysIec` and `TwinCat3`.
 pub(super) const fn iec_wstring(length: u16) -> Expected {
     Expected::WstringIec { length }
+}
+
+/// The stored value of the parameter that [`seed_utf8_label`] writes. It has 4 characters, 7 UTF-8
+/// bytes, and the character `Ł`, which is outside Latin-1.
+pub(super) const UTF8_LABEL: &str = "Łódź";
+
+/// The identifier of the `STRING(10)` row that [`utf8_label_fixture`] stores.
+const LABEL_TYPE: u128 = 951;
+
+/// The length of the `STRING` row and of the limit `max_length` of the label.
+const LABEL_LENGTH: u16 = 10;
+
+/// A fixture with a `Utf8` machine `M1` on `CodesysIec` and the machine row `STRING(10)`.
+///
+/// The fixture holds no recipe. The caller seeds the versions and then [`seed_utf8_label`]. The
+/// machine is the second result.
+pub(super) fn utf8_label_fixture() -> (Fixture, Machine) {
+    let fixture = Fixture::new();
+    let machine = utf8_machine(1, "M1");
+    fixture.store.seed_machine(&machine);
+    let platform = machine.platform();
+    let length =
+        StringLength::parse(StringKind::String, platform, u32::from(LABEL_LENGTH)).unwrap();
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(LABEL_TYPE),
+        machine: Some(machine.id()),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::String,
+            leaf_class: Primitive::String.leaf_class(),
+            size_bytes: length.size_bytes(StringKind::String).unwrap(),
+            string_length: Some(length.value()),
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+    (fixture, machine)
+}
+
+/// Store the parameter `LABEL` of type `STRING(10)` with the value `value` on version `version`.
+///
+/// The parameter sits on the unit 101 and has the limit `max_length` of 10 on the leaf path `""`.
+/// It has the key 1 on every version and the identifier `1000 + version`.
+pub(super) fn seed_utf8_label(fixture: &Fixture, version: u128, value: &str) {
+    let limit = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: None,
+        max_length: Some(LABEL_LENGTH),
+    };
+    let label = StoredParameter {
+        id: pid(version.checked_add(1000).unwrap()),
+        plc_type: tid(LABEL_TYPE),
+        value: StoredValue::from(json!(value)),
+        limits: vec![limit],
+        ordinal: Ordinal::parse(0).unwrap(),
+        ..parameter_on(PlcPlatform::CodesysIec, 1, "LABEL", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(version), &label);
 }

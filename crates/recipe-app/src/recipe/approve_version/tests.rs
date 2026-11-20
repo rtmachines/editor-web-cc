@@ -29,6 +29,7 @@ mod adr_0177;
 mod adr_0178;
 mod adr_0179;
 mod adr_0201;
+mod adr_0202;
 mod write;
 
 const PLATFORM: PlcPlatform = PlcPlatform::TwinCat3;

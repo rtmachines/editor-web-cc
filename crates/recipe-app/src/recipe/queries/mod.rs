@@ -59,6 +59,8 @@ mod test_world;
 #[cfg(test)]
 mod version_gate_tests;
 #[cfg(test)]
+mod version_read_paths_tests;
+#[cfg(test)]
 mod version_tests;
 mod versions;
 #[cfg(test)]
