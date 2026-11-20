@@ -451,6 +451,8 @@ async fn insert_version_entry(
 
 #[cfg(test)]
 mod adr_0178_tests;
+#[cfg(test)]
+mod adr_0201_tests;
 
 #[cfg(test)]
 mod earlier_range_tests;
