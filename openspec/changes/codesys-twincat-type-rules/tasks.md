@@ -312,7 +312,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
   - The section "Roll back on the newer schema" already holds the pre-check and the query of ADR-0202 (q). That query is the one executable copy. Do not change it.
   - Check that the query has the two predicates of ADR-0202 (q3): `machine.string_encoding = 'Utf8'` and `audit_log.action = 'MachineStringEncodingSet'`.
   - Check: `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/ops/**/*.md'` reports 0 hard violations.
-- [ ] 9.2 (recipe-db) Check task for ADR-0202 (q3). In `crates/recipe-db/tests/storage/`, add `adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries`.
+- [x] 9.2 (recipe-db) Check task for ADR-0202 (q3). In `crates/recipe-db/tests/storage/`, add `adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries`.
   - No test reads a runbook block now. The test adds its own reader of `docs/ops/runbook.md`.
   - The reader finds the heading `#### Roll back on the newer schema`. It takes the lines between the first `<<'SQL'` after that heading and the next line `SQL`. The runbook holds four such blocks.
   - Each case runs in its own empty database.
@@ -323,7 +323,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 10. Stored data matrix (design.md, section Stored data matrix)
 
-- [ ] 10.1 (recipe-db) Integration task for groups 2 to 5 and 11. In `crates/recipe-db/tests/storage/stored_rules_iec.rs`, add one test for each row of the matrix, for example `adr_0201_stored_wstring_exports_with_its_hash`. Each test does the eight steps of task 9.2 of `siemens-type-rules` on `fixtures/stored_rules_iec.sql`:
+- [x] 10.1 (recipe-db) Integration task for groups 2 to 5 and 11. In `crates/recipe-db/tests/storage/stored_rules_iec.rs`, add one test for each row of the matrix, for example `adr_0201_stored_wstring_exports_with_its_hash`. Each test does the eight steps of task 9.2 of `siemens-type-rules` on `fixtures/stored_rules_iec.sql`:
   1. Restore into an empty database with `TestDatabase::create_empty`.
   2. Load the dump with `psql --set ON_ERROR_STOP=1 --single-transaction`.
   3. Upgrade with `recipe_db::migrate`. This step runs `0017` and `0018` on the data of the earlier release. Then `App::over` builds the `App`.
