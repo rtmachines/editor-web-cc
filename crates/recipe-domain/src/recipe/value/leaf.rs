@@ -19,6 +19,12 @@ const S7_WCHAR_MAX: u32 = 0xD7FF;
 /// Highest scalar of a `WSTRING` character on `S7_1200` and `S7_1500` (ADR-0180 (b)).
 const S7_WSTRING_MAX: u32 = 0xCFFF;
 
+/// Highest Unicode scalar, the limit of a `WSTRING` character under ADR-0137 (b).
+const UNICODE_MAX: u32 = 0x0010_FFFF;
+
+/// Highest scalar of a `WSTRING` character on `CodesysIec` and `TwinCat3` (ADR-0201 (a)).
+const UCS2_MAX: u32 = 0xFFFF;
+
 /// Largest count of significant digits of a `REAL` number or bound (ADR-0117 (a)).
 const REAL_MAX_DIGITS: u8 = 7;
 
@@ -107,38 +113,95 @@ const fn has_s7_wide_text_rule(leaf: LeafType) -> bool {
         && matches!(leaf.platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500)
 }
 
+/// Tell whether the UCS-2 rule of ADR-0201 (a) applies to a `WSTRING` leaf.
+///
+/// The rule applies on `CodesysIec` and `TwinCat3` in the current rule set. The earlier set
+/// keeps ADR-0137 (b) (ADR-0201 (e)).
+const fn has_ucs2_wide_text_rule(leaf: LeafType) -> bool {
+    matches!(leaf.rules, RuleSet::Current)
+        && matches!(
+            leaf.platform,
+            PlcPlatform::CodesysIec | PlcPlatform::TwinCat3
+        )
+}
+
+/// The character repertoire of a `STRING` or `WSTRING` leaf.
+///
+/// The type solves one problem: the value check and the expected form of the fault come from
+/// one choice, so the two cannot differ.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Repertoire {
+    /// A `STRING`: Latin-1 (ADR-0028).
+    Latin1,
+    /// A `WSTRING` with the rule of ADR-0137: every scalar.
+    Utf16,
+    /// A `WSTRING` on S7: scalars up to U+CFFF (ADR-0180 (b)).
+    S7Wide,
+    /// A `WSTRING` on CODESYS and TwinCAT: the Basic Multilingual Plane (ADR-0201 (a)).
+    Ucs2,
+}
+
+impl Repertoire {
+    /// Choose the repertoire of a leaf.
+    const fn of(leaf: LeafType) -> Self {
+        if !matches!(leaf.primitive, Primitive::Wstring) {
+            Self::Latin1
+        } else if has_s7_wide_text_rule(leaf) {
+            Self::S7Wide
+        } else if has_ucs2_wide_text_rule(leaf) {
+            Self::Ucs2
+        } else {
+            Self::Utf16
+        }
+    }
+
+    /// Return the highest scalar of the repertoire.
+    ///
+    /// A scalar is never a surrogate, so the highest scalar of the Basic Multilingual Plane
+    /// also bounds the two ranges of ADR-0201 (a).
+    const fn highest(self) -> u32 {
+        match self {
+            Self::Latin1 => LATIN_1_MAX,
+            Self::Utf16 => UNICODE_MAX,
+            Self::S7Wide => S7_WSTRING_MAX,
+            Self::Ucs2 => UCS2_MAX,
+        }
+    }
+
+    /// Return the expected form that a fault of a leaf of this repertoire names.
+    const fn expected(self, length: u16) -> Expected {
+        match self {
+            Self::Latin1 => Expected::String { length },
+            Self::Utf16 => Expected::Wstring { length },
+            Self::S7Wide => Expected::WstringS7 {
+                length,
+                max: S7_WSTRING_MAX,
+            },
+            Self::Ucs2 => Expected::WstringIec { length },
+        }
+    }
+}
+
 /// Convert a `STRING` or `WSTRING` leaf.
 ///
 /// The text must fit the length of the type and must hold no U+0000, because PostgreSQL refuses
 /// that scalar in JSONB (ADR-0137). A `WSTRING` on S7 also holds no scalar above U+CFFF
-/// (ADR-0180 (b)).
+/// (ADR-0180 (b)). A `WSTRING` on CODESYS and TwinCAT holds no scalar above U+FFFF
+/// (ADR-0201 (a)).
 fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
-    let is_wide = leaf.primitive == Primitive::Wstring;
+    let repertoire = Repertoire::of(leaf);
     let length = leaf.string_length.unwrap_or_default();
-    let is_s7_wide = is_wide && has_s7_wide_text_rule(leaf);
-    let expected = match (is_wide, is_s7_wide) {
-        (false, _) => Expected::String { length },
-        (true, false) => Expected::Wstring { length },
-        (true, true) => Expected::WstringS7 {
-            length,
-            max: S7_WSTRING_MAX,
-        },
-    };
     let Value::String(text) = value else {
-        return Err(expected);
+        return Err(repertoire.expected(length));
     };
-    let highest = match (is_wide, is_s7_wide) {
-        (false, _) => LATIN_1_MAX,
-        (true, false) => u32::from(char::MAX),
-        (true, true) => S7_WSTRING_MAX,
-    };
+    let highest = repertoire.highest();
     let is_in_range = text.chars().all(|c| u32::from(c) <= highest);
     let units = string_length_units(text, leaf.primitive);
     let has_nul = text.contains('\0');
     if is_in_range && !has_nul && units <= usize::from(length) {
         Ok(value.clone())
     } else {
-        Err(expected)
+        Err(repertoire.expected(length))
     }
 }
 

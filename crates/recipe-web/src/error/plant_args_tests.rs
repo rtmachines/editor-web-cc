@@ -278,6 +278,11 @@ async fn plant_error_args_write_each_reason_of_a_type_in_the_ui_language() {
             "the struct name is a reserved IEC 61131-3 word or a primitive name",
             "nazwa struktury jest zastrzeżonym słowem IEC 61131-3 albo nazwą typu prostego",
         ),
+        (
+            DerivedTypeReason::ReservedMemberName,
+            "the member name is a reserved IEC 61131-3 keyword",
+            "nazwa składnika jest zastrzeżonym słowem kluczowym IEC 61131-3",
+        ),
     ];
     for (reason, english, polish) in cases {
         let error = PlantError::DerivedTypeInvalid {
@@ -318,6 +323,64 @@ fn plant_error_args_name_the_reserved_name_reason_by_its_key() {
     let bundles = Bundles::load().unwrap();
     assert_eq!(
         bundles.message(Lang::En, "type-reason-reserved-name", None),
+        Some(reason.to_string())
+    );
+}
+
+#[test]
+fn adr_0203_plant_error_args_name_the_reserved_member_name_reason_by_its_key() {
+    let reason = DerivedTypeReason::ReservedMemberName;
+    let error = PlantError::DerivedTypeInvalid {
+        type_expr: "ST_Coil@1".to_owned(),
+        reason,
+    };
+    let word = plant_line_args(&error)
+        .into_iter()
+        .find_map(|(name, arg)| (name == "reason").then_some(arg));
+    assert_eq!(
+        word,
+        Some(LineArg::Word {
+            key: "type-reason-reserved-member-name".to_owned(),
+            args: Vec::new(),
+            fallback: reason.to_string(),
+        })
+    );
+    let bundles = Bundles::load().unwrap();
+    for lang in [Lang::En, Lang::Pl] {
+        let text = bundles.message(lang, "type-reason-reserved-member-name", None);
+        assert!(text.is_some_and(|text| !text.is_empty()), "{lang:?}");
+    }
+    assert_eq!(
+        bundles.message(Lang::En, "type-reason-reserved-member-name", None),
+        Some(reason.to_string())
+    );
+}
+
+#[test]
+fn adr_0204_plant_error_args_name_the_too_few_members_reason_by_its_key() {
+    let reason = DerivedTypeReason::TooFewMembers;
+    let error = PlantError::DerivedTypeInvalid {
+        type_expr: "ST_Coil@1".to_owned(),
+        reason,
+    };
+    let word = plant_line_args(&error)
+        .into_iter()
+        .find_map(|(name, arg)| (name == "reason").then_some(arg));
+    assert_eq!(
+        word,
+        Some(LineArg::Word {
+            key: "type-reason-too-few-members".to_owned(),
+            args: Vec::new(),
+            fallback: reason.to_string(),
+        })
+    );
+    let bundles = Bundles::load().unwrap();
+    for lang in [Lang::En, Lang::Pl] {
+        let text = bundles.message(lang, "type-reason-too-few-members", None);
+        assert!(text.is_some_and(|text| !text.is_empty()), "{lang:?}");
+    }
+    assert_eq!(
+        bundles.message(Lang::En, "type-reason-too-few-members", None),
         Some(reason.to_string())
     );
 }

@@ -99,6 +99,10 @@ fn display_of_a_text_variant_keeps_the_english_phrase() {
             },
             "a string of at most 10 characters from U+0001 to U+CFFF",
         ),
+        (
+            Expected::WstringIec { length: 10 },
+            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF",
+        ),
     ];
     for (expected, text) in cases {
         assert_eq!(expected.to_string(), text, "{expected:?}");
@@ -202,7 +206,7 @@ fn text_faults_of_parse_carry_typed_expectations() {
     );
     assert_eq!(
         expected_of(r#""a😀""#, &wstring_tree(2)),
-        Expected::Wstring { length: 2 }
+        Expected::WstringIec { length: 2 }
     );
     assert_eq!(
         expected_of(r#""ab""#, &primitive_tree(CHAR)),

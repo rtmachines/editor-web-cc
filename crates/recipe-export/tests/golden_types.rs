@@ -19,12 +19,12 @@ use recipe_domain::export::{
 use recipe_domain::identity::Login;
 use recipe_domain::plant::{
     LeafPath, LiveUnits, Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, S7Address, StoredMachine, StoredUnit,
-    TypeTrees, UnitId, UnitPath,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, S7Address, StoredMachine,
+    StoredUnit, TypeTrees, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue, ReferenceNumber,
-    StoredLimit, StoredParameter,
+    StoredLimit, StoredParameter, StoredValue,
 };
 use recipe_domain::text::{LongText, Text};
 use recipe_domain::timestamp::Timestamp;
@@ -48,7 +48,10 @@ const STRING_LENGTH: u16 = 16;
 
 #[path = "golden_types/table.rs"]
 mod table;
-use table::{Limit, S7_300_ADDRESSES, S7_300_TAGS, S7_1200_TAGS, S7_1500_TAGS, type_table};
+use table::{
+    CODESYS_TAGS, Limit, S7_300_ADDRESSES, S7_300_TAGS, S7_1200_TAGS, S7_1500_TAGS,
+    codesys_type_table, platform_type_table, type_table,
+};
 
 fn type_id(text: &str) -> PlcTypeId {
     PlcTypeId::from(Uuid::parse_str(text).unwrap())
@@ -62,10 +65,12 @@ fn unit_id() -> UnitId {
     UnitId::from(Uuid::from_u128(1))
 }
 
-/// The row of a tag. A fixed-size primitive gets an id that no string row uses.
+/// The row of a tag. A fixed-size primitive gets an id that no string row uses. The index is the
+/// position of the tag in the S7 table, or after it for a tag that only CODESYS has.
 fn type_row_id(tag: &str) -> String {
     let index = type_table()
         .iter()
+        .chain(codesys_type_table().iter())
         .position(|case| case.tag == tag)
         .unwrap();
     match tag {
@@ -158,8 +163,14 @@ fn number(index: usize) -> u32 {
     u32::try_from(index).unwrap().checked_add(1).unwrap()
 }
 
-fn parameter(index: usize, tag: &str, address: Option<&str>, trees: &TypeTrees) -> Parameter {
-    let case = type_table()
+fn parameter(
+    platform: PlcPlatform,
+    index: usize,
+    tag: &str,
+    address: Option<&str>,
+    trees: &TypeTrees,
+) -> Parameter {
+    let case = platform_type_table(platform)
         .into_iter()
         .find(|case| case.tag == tag)
         .unwrap();
@@ -177,6 +188,18 @@ fn parameter_with_request(
     let root = type_id(&type_row_id(tag));
     let tree = trees.tree(root).unwrap();
     let value = ParameterValue::parse(request, tree).unwrap().to_stored();
+    parameter_with_stored_value(index, tag, value, limit, address)
+}
+
+/// A parameter of one tag whose stored value is `value` and whose limit is `limit`.
+fn parameter_with_stored_value(
+    index: usize,
+    tag: &str,
+    value: StoredValue,
+    limit: &Limit,
+    address: Option<&str>,
+) -> Parameter {
+    let root = type_id(&type_row_id(tag));
     Parameter::from(StoredParameter {
         id: ParameterId::from(Uuid::from_u128(u128::from(number(index)))),
         key: ParameterKey::parse(&format!("00000000-0000-4000-8000-2{index:011x}")).unwrap(),
@@ -215,7 +238,7 @@ fn version_parameters(
                 .iter()
                 .find(|(address_tag, _)| address_tag == tag)
                 .map(|(_, address)| *address);
-            parameter(index, tag, address, &trees)
+            parameter(platform, index, tag, address, &trees)
         })
         .collect();
     (trees, parameters)
@@ -286,7 +309,7 @@ fn string_entry(id: &str, name: &str) -> Value {
     })
 }
 
-fn platform_cases() -> [PlatformCase; 3] {
+fn platform_cases() -> [PlatformCase; 5] {
     [
         PlatformCase {
             platform: PlcPlatform::S7_300,
@@ -309,6 +332,26 @@ fn platform_cases() -> [PlatformCase; 3] {
             platform: PlcPlatform::S7_1500,
             golden_file: "types_S7_1500.json",
             tags: &S7_1500_TAGS,
+            addresses: &[],
+            types: json!([
+                string_entry(STRING_16, "STRING"),
+                string_entry(WSTRING_16, "WSTRING")
+            ]),
+        },
+        PlatformCase {
+            platform: PlcPlatform::CodesysIec,
+            golden_file: "types_CodesysIec.json",
+            tags: &CODESYS_TAGS,
+            addresses: &[],
+            types: json!([
+                string_entry(STRING_16, "STRING"),
+                string_entry(WSTRING_16, "WSTRING")
+            ]),
+        },
+        PlatformCase {
+            platform: PlcPlatform::TwinCat3,
+            golden_file: "types_TwinCat3.json",
+            tags: &CODESYS_TAGS,
             addresses: &[],
             types: json!([
                 string_entry(STRING_16, "STRING"),
@@ -345,9 +388,12 @@ fn by_tag(doc: &Value) -> BTreeMap<String, &Value> {
         .collect()
 }
 
-fn assert_values_and_limits(doc: &Value, tags: &[&str]) {
+fn assert_values_and_limits(doc: &Value, platform: PlcPlatform, tags: &[&str]) {
     let parameters = by_tag(doc);
-    for case in type_table().iter().filter(|case| tags.contains(&case.tag)) {
+    for case in platform_type_table(platform)
+        .iter()
+        .filter(|case| tags.contains(&case.tag))
+    {
         assert!(
             parameters.contains_key(case.tag),
             "{}: no parameter in the document",
@@ -369,7 +415,7 @@ fn assert_values_and_limits(doc: &Value, tags: &[&str]) {
 fn each_s7_type_document_holds_the_expected_value_and_limit_of_each_type() {
     for case in platform_cases() {
         let doc = platform_document(&case);
-        assert_values_and_limits(&doc, case.tags);
+        assert_values_and_limits(&doc, case.platform, case.tags);
     }
 }
 
@@ -560,30 +606,35 @@ fn consumer_rebuilds_content_sha256_when_the_arrays_arrive_in_reverse_order() {
 }
 
 /// The `WSTRING` value of the non-BMP golden file: U+1D11E needs a surrogate pair in UTF-16.
-const NON_BMP_REQUEST: &str = "\"Z\u{1d11e}\"";
+const NON_BMP_VALUE: &str = "Z\u{1d11e}";
 /// The golden file of the `TwinCat3` document with a character outside the BMP.
 const NON_BMP_GOLDEN_FILE: &str = "types_TwinCat3_wstring_non_bmp.json";
 
 /// The document of one `TwinCat3` `WSTRING` parameter that holds U+1D11E.
+///
+/// `ParameterValue::parse` refuses the value (ADR-0201 (a)). The stored value of an approved
+/// version still holds it, so the test reads it under `RuleSet::Earlier` (ADR-0201 (i)).
 fn non_bmp_document_text() -> String {
     let platform = PlcPlatform::TwinCat3;
     let trees = trees(platform, &["WSTRING"]);
+    let tree = trees.tree(type_id(&type_row_id("WSTRING"))).unwrap();
+    let stored = StoredValue::from(json!(NON_BMP_VALUE));
+    let value = ParameterValue::from_stored(&stored, tree, RuleSet::Earlier)
+        .unwrap()
+        .to_stored();
     let limit = Limit::Length(STRING_LENGTH);
-    let parameters = [parameter_with_request(
-        0,
-        "WSTRING",
-        NON_BMP_REQUEST,
-        &limit,
-        None,
-        &trees,
+    let parameters = [parameter_with_stored_value(
+        0, "WSTRING", value, &limit, None,
     )];
     render_document(platform, &trees, &parameters)
 }
 
-/// `CodesysIec` and `TwinCat3` keep the characters outside the BMP (ADR-0180 (c), (f)). No S7
-/// golden file holds one, so this file pins the escape of the JSON writer for them.
+/// A stored `WSTRING` value outside the BMP on `TwinCat3` makes `loadable` `false` (ADR-0201 (i)).
+/// The hashed body and `content_sha256` do not change (ADR-0202 (j2)). Only `loadable` differs
+/// from the golden file of before ADR-0201. The file also pins the escape of the JSON writer.
 #[test]
-fn writer_output_of_a_twincat3_wstring_with_a_non_bmp_character_equals_its_golden_file() {
+fn adr_0201_writer_output_of_a_stored_twincat3_wstring_with_a_non_bmp_character_equals_its_golden_file()
+ {
     let written = non_bmp_document_text();
     assert_eq!(
         written,
@@ -591,13 +642,115 @@ fn writer_output_of_a_twincat3_wstring_with_a_non_bmp_character_equals_its_golde
         "{NON_BMP_GOLDEN_FILE}"
     );
     let doc: Value = serde_json::from_str(&written).unwrap();
-    assert_eq!(doc["parameters"][0]["value"], json!("Z\u{1d11e}"));
-    assert_eq!(doc["loadable"], json!(true));
+    assert_eq!(doc["parameters"][0]["value"], json!(NON_BMP_VALUE));
+    assert_eq!(doc["loadable"], json!(false));
+    assert_eq!(
+        doc["content_sha256"],
+        json!(NON_BMP_CONTENT_SHA256),
+        "content_sha256 stays as before ADR-0201"
+    );
 }
+
+/// The `content_sha256` of the non-BMP golden file before ADR-0201. Written by hand from the
+/// committed file of task 1.7.
+const NON_BMP_CONTENT_SHA256: &str =
+    "8fb8791f92e30030784f52d26428fa571336f88949ad1b8190298a44404b2018";
 
 #[test]
 fn consumer_rebuilds_content_sha256_of_the_non_bmp_golden_file() {
     let doc: Value = serde_json::from_str(&golden(NON_BMP_GOLDEN_FILE)).unwrap();
     let expected = doc["content_sha256"].as_str().unwrap();
     assert_eq!(jcs_sha256_hex(&consumer_hashed_body(&doc)), expected);
+}
+
+/// The platforms of the CODESYS and TwinCAT 3 golden files with their file names.
+const CODESYS_GOLDEN_FILES: [(PlcPlatform, &str, &str); 2] = [
+    (
+        PlcPlatform::CodesysIec,
+        "types_CodesysIec.json",
+        "CodesysIec",
+    ),
+    (PlcPlatform::TwinCat3, "types_TwinCat3.json", "TwinCat3"),
+];
+
+/// The ends and the `LREAL` value that the golden files of `CodesysIec` and `TwinCat3` must hold.
+/// The texts are written by hand from `domain-model.md` section 2.1 and ADR-0117. They do not come
+/// from the type table.
+const CODESYS_EXPECTED_VALUES: [(&str, &str); 14] = [
+    ("LWORD", "18446744073709551615"),
+    ("LINT", "-9223372036854775808"),
+    ("ULINT", "18446744073709551615"),
+    ("LREAL", "123456789.012345"),
+    ("TIME", "4294967295"),
+    ("LTIME", "18446744073709551615"),
+    ("DATE", "49710"),
+    ("LDATE", "9223286400000000000"),
+    ("TIME_OF_DAY", "45000500"),
+    ("LTOD", "86399999999999"),
+    ("DATE_AND_TIME", "4294967295"),
+    ("LDT", "9223372036854775807"),
+    ("DWORD", "4294967295"),
+    ("UDINT", "4294967295"),
+];
+
+/// The tags that the matrix gives to S7 only (`data-model.md` section 7).
+const NOT_ON_CODESYS: [&str; 4] = ["CHAR", "WCHAR", "DTL", "S5TIME"];
+
+/// Each golden file of `CodesysIec` and `TwinCat3` holds the 25 primitives of the matrix, the
+/// 64-bit ends, and an `LREAL` number of 15 digits (ADR-0199, review item R09). The platform is the
+/// only difference between the two files, so the content hashes differ.
+#[test]
+fn adr_0199_golden_types_of_codesys_and_twincat() {
+    let mut hashes = Vec::new();
+    for (platform, file, name) in CODESYS_GOLDEN_FILES {
+        let doc: Value = serde_json::from_str(&golden(file)).unwrap();
+        assert_eq!(doc["machine"]["plc_platform"], json!(name), "{file}");
+        assert_eq!(doc["loadable"], json!(true), "{file}: loadable");
+        let parameters = by_tag(&doc);
+        let found: BTreeSet<&str> = parameters.keys().map(String::as_str).collect();
+        let expected: BTreeSet<&str> = CODESYS_TAGS.iter().copied().collect();
+        assert_eq!(found, expected, "{file}: tags");
+        for tag in NOT_ON_CODESYS {
+            assert!(!parameters.contains_key(tag), "{file}: {tag} is not here");
+        }
+        for (tag, text) in CODESYS_EXPECTED_VALUES {
+            assert_eq!(parameters[tag]["value"], json!(text), "{file}: {tag}");
+        }
+        for parameter in parameters.values() {
+            assert_eq!(parameter["s7_address"], Value::Null, "{file}: no address");
+        }
+        assert_eq!(
+            document_text(platform, &CODESYS_TAGS, &[]),
+            golden(file),
+            "{file}: writer output"
+        );
+        hashes.push(doc["content_sha256"].as_str().unwrap().to_owned());
+    }
+    assert_ne!(hashes[0], hashes[1], "the platform is part of the hash");
+}
+
+/// The SHA-256 of the file `types_TwinCat3.json` of task 1.7, without `\r`. Computed from the
+/// committed file with `sha256sum`.
+const TWINCAT3_GOLDEN_FILE_SHA256: &str =
+    "6a4b5e05264401513da92a6af2135d994f931d3ba5f826107fa6141d15a68113";
+
+/// ADR-0201 changes only the file with a character outside the BMP (ADR-0202 (j2)). The file
+/// `types_TwinCat3.json` keeps its exact bytes, its `content_sha256`, and `loadable` `true`.
+#[test]
+fn adr_0201_unaffected_golden_is_byte_identical() {
+    use sha2::{Digest, Sha256};
+    let text = golden("types_TwinCat3.json");
+    let file_hash: String = Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(file_hash, TWINCAT3_GOLDEN_FILE_SHA256, "file bytes");
+    let written = document_text(PlcPlatform::TwinCat3, &CODESYS_TAGS, &[]);
+    assert_eq!(written, text, "writer output");
+    let doc: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(doc["loadable"], json!(true));
+    assert_eq!(
+        doc["content_sha256"],
+        json!("5e7ec68c2aca5122b15c115b1c76f9e159af1fb35196dac1a97212962a3fb144")
+    );
 }

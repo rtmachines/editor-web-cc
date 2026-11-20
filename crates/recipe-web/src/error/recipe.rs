@@ -356,6 +356,7 @@ fn expected_key(expected: &Expected) -> (&'static str, Vec<(&'static str, String
             "expected-wstring-s7",
             two("length", length, "max", format!("U+{max:04X}")),
         ),
+        Expected::WstringIec { length } => ("expected-wstring-iec", one("length", length)),
         Expected::String { length } => ("expected-string", one("length", length)),
         Expected::Char { max } => ("expected-char", one("max", format!("U+{max:04X}"))),
         Expected::Literal { type_name } => ("expected-literal", one("type_name", type_name)),

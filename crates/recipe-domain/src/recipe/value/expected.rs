@@ -50,6 +50,12 @@ pub enum Expected {
         /// The highest scalar that the platform accepts.
         max: u32,
     },
+    /// A `WSTRING(n)` leaf on `CodesysIec` or `TwinCat3` needs a string inside its length with
+    /// characters from `U+0001` to `U+D7FF` and from `U+E000` to `U+FFFF` (ADR-0201 (c)).
+    WstringIec {
+        /// The length of the type in UTF-16 units.
+        length: u16,
+    },
     /// A `STRING(n)` leaf needs a string of Latin-1 characters inside its length.
     String {
         /// The length of the type.
@@ -124,6 +130,10 @@ impl fmt::Display for Expected {
             Self::WstringS7 { length, max } => write!(
                 f,
                 "a string of at most {length} characters from U+0001 to U+{max:04X}"
+            ),
+            Self::WstringIec { length } => write!(
+                f,
+                "a string of at most {length} UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF"
             ),
             Self::String { length } => {
                 write!(
