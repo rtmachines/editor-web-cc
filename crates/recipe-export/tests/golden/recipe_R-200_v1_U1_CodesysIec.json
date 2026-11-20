@@ -1,0 +1,102 @@
+{
+  "schema_version": "2",
+  "exported_at": "2026-10-12T09:30:00Z",
+  "exported_by": "jkowalski",
+  "loadable": true,
+  "content_sha256": "f45242cd9aeb55ba5e99c9cde45a3374e38b151823c19917ad790e8eceedd942",
+  "scope_sha256": "52ae453cb00d8272080acbd5a12c2ac21542b615b5eb5706c2280f14e36e8865",
+  "machine": {
+    "code": "M12",
+    "name": "Filler 2",
+    "plc_platform": "CodesysIec"
+  },
+  "recipe": {
+    "reference_number": "R-200",
+    "name": "Bottle 0.5 l"
+  },
+  "version": {
+    "number": 1,
+    "status": "Approved",
+    "approved_at": "2026-10-11T14:02:10Z",
+    "approved_by": "anowak"
+  },
+  "scope": {
+    "unit_path": "U1"
+  },
+  "types": [
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "name": "STRING",
+      "revision": 1,
+      "kind": "Primitive",
+      "string_length": 4
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "name": "ST_Coil",
+      "revision": 1,
+      "kind": "Struct",
+      "string_length": null,
+      "members": [
+        {
+          "name": "END_IF",
+          "type_id": "BOOL"
+        },
+        {
+          "name": "S",
+          "type_id": "BOOL"
+        }
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000014",
+      "name": "ST_One",
+      "revision": 1,
+      "kind": "Struct",
+      "string_length": null,
+      "members": [
+        {
+          "name": "value",
+          "type_id": "INT"
+        }
+      ]
+    }
+  ],
+  "parameters": [
+    {
+      "unit_path": "U1",
+      "tag": "COIL",
+      "key": "4d6f8ba1-2c3e-4a4b-9c5d-6e7f8091a2b3",
+      "name_en": "COIL",
+      "type_id": "00000000-0000-4000-8000-000000000013",
+      "s7_address": null,
+      "limits": [],
+      "value": {
+        "END_IF": true,
+        "S": false
+      }
+    },
+    {
+      "unit_path": "U1",
+      "tag": "LABEL",
+      "key": "3c5e7a90-1b2d-4f3a-8b4c-5d6e7f8091a2",
+      "name_en": "LABEL",
+      "type_id": "00000000-0000-4000-8000-000000000012",
+      "s7_address": null,
+      "limits": [],
+      "value": "é"
+    },
+    {
+      "unit_path": "U1",
+      "tag": "ONE",
+      "key": "5e7a9cb2-3d4f-4b5c-8d6e-7f8091a2b3c4",
+      "name_en": "ONE",
+      "type_id": "00000000-0000-4000-8000-000000000014",
+      "s7_address": null,
+      "limits": [],
+      "value": {
+        "value": "3"
+      }
+    }
+  ]
+}

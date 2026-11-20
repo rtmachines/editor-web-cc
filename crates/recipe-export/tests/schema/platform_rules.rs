@@ -449,3 +449,310 @@ fn adr_0208_i_every_golden_document_v2_passes() {
     }
     assert!(checked >= 1, "at least one golden document v2");
 }
+
+/// The stored rows of ADR-0201, ADR-0203, and ADR-0204 of the matrix in `design.md` (section
+/// "Stored data matrix"). The production writer writes each row, as `ExportVersion` does after
+/// the upgrade. ADR-0208 (f) says that the schema holds no rule that such a row can break.
+mod stored_rows {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use recipe_domain::export::{
+        DocumentFacts, ExportHeader, ExportStatus, HashedBody, ScopeBody, ScopeFacts,
+        check_version_parameters,
+    };
+    use recipe_domain::identity::Login;
+    use recipe_domain::plant::{
+        DataBlockNumber, LeafClass, Machine, MachineCode, MachineId, MemberName, PlatformTypes,
+        PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet,
+        StoredMachine, StoredUnit, TypeMember, TypeName, TypeTrees, UnitId, UnitPath,
+    };
+    use recipe_domain::recipe::{
+        Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ParameterValue,
+        StoredParameter, StoredValue,
+    };
+    use recipe_domain::text::{LongText, Text};
+    use recipe_domain::timestamp::Timestamp;
+    use recipe_export::write_scoped;
+    use time::{Date, Month};
+    use uuid::Uuid;
+
+    use super::{Value, assert_passes, json};
+
+    /// The type row `INT`, which the struct rows of the matrix use.
+    const INT_ID: u128 = 1;
+    /// The type row `BOOL`, which the row of `ST_Coil@1` uses.
+    const BOOL_ID: u128 = 2;
+    /// The type row of the root of a stored case: a `WSTRING(10)` or a struct.
+    const ROOT_ID: u128 = 3;
+    /// The length of the `WSTRING` rows of the matrix.
+    const WSTRING_LENGTH: u16 = 10;
+    /// The size of `WSTRING(10)`: 2n + 4 bytes (`domain-model.md` section 2.1).
+    const WSTRING_SIZE_BYTES: u32 = 24;
+
+    /// One stored case: a recipe with one parameter whose value and type the earlier release wrote.
+    struct StoredCase {
+        /// The name of the case, for the failure text.
+        label: &'static str,
+        platform: PlcPlatform,
+        /// The root type row. The helper adds the `INT` and `BOOL` rows.
+        root: RecordShape,
+        /// The stored value of the parameter.
+        value: Value,
+        /// The `loadable` flag after the upgrade (`design.md`, "Stored data matrix").
+        loadable: bool,
+    }
+
+    fn type_id(n: u128) -> PlcTypeId {
+        PlcTypeId::from(Uuid::from_u128(n))
+    }
+
+    fn machine_id() -> MachineId {
+        MachineId::from(Uuid::from_u128(0xAA))
+    }
+
+    fn unit_id() -> UnitId {
+        UnitId::from(Uuid::from_u128(1))
+    }
+
+    /// A type row under the earlier rule set, as the adapter of `recipe-db` reads a stored row.
+    fn stored_row(
+        platform: PlcPlatform,
+        (id, owner): (u128, Option<MachineId>),
+        shape: RecordShape,
+    ) -> PlcType {
+        PlcType::from_stored(
+            PlcTypeRecord {
+                id: type_id(id),
+                machine: owner,
+                platforms: BTreeSet::from([platform]),
+                shape,
+            },
+            RuleSet::Earlier,
+        )
+        .expect("a stored type row passes the earlier rule set")
+    }
+
+    fn fixed(primitive: Primitive) -> RecordShape {
+        RecordShape::Primitive {
+            primitive,
+            leaf_class: primitive.leaf_class(),
+            size_bytes: primitive.fixed_size_bytes().expect("a fixed size"),
+            string_length: None,
+        }
+    }
+
+    /// The `WSTRING(10)` row.
+    fn wstring() -> RecordShape {
+        RecordShape::Primitive {
+            primitive: Primitive::Wstring,
+            leaf_class: LeafClass::String,
+            size_bytes: WSTRING_SIZE_BYTES,
+            string_length: Some(WSTRING_LENGTH),
+        }
+    }
+
+    fn structure(name: &str, members: &[(&str, u128)]) -> RecordShape {
+        RecordShape::Struct {
+            name: TypeName::from_stored(name, RuleSet::Earlier).expect("a stored struct name"),
+            revision: 1,
+            supersedes: None,
+            members: members
+                .iter()
+                .map(|(member, id)| TypeMember {
+                    name: MemberName::parse(member).expect("a member name"),
+                    type_id: type_id(*id),
+                })
+                .collect(),
+        }
+    }
+
+    /// The five rows of ADR-0201, ADR-0203, and ADR-0204 of the matrix. The values are the stored
+    /// texts of `stored_rules_iec.sql`.
+    fn cases() -> Vec<StoredCase> {
+        let case = |label, platform, root, value, loadable| StoredCase {
+            label,
+            platform,
+            root,
+            value,
+            loadable,
+        };
+        vec![
+            case(
+                "ADR-0201 WSTRING TwinCat3",
+                PlcPlatform::TwinCat3,
+                wstring(),
+                json!("A\u{1f600}"),
+                false,
+            ),
+            case(
+                "ADR-0201 WSTRING CodesysIec",
+                PlcPlatform::CodesysIec,
+                wstring(),
+                json!("Z\u{1d11e}"),
+                false,
+            ),
+            case(
+                "ADR-0203 VERSION@1 TwinCat3",
+                PlcPlatform::TwinCat3,
+                structure("VERSION", &[("major", INT_ID), ("minor", INT_ID)]),
+                json!({ "major": 1, "minor": 2 }),
+                true,
+            ),
+            case(
+                "ADR-0203 ST_Coil@1 CodesysIec",
+                PlcPlatform::CodesysIec,
+                structure("ST_Coil", &[("END_IF", BOOL_ID), ("S", BOOL_ID)]),
+                json!({ "S": false, "END_IF": true }),
+                true,
+            ),
+            case(
+                "ADR-0204 ST_One@1 CodesysIec",
+                PlcPlatform::CodesysIec,
+                structure("ST_One", &[("value", INT_ID)]),
+                json!({ "value": 3 }),
+                true,
+            ),
+        ]
+    }
+
+    /// The machine `M12` with the unit `U1`.
+    fn units(platform: PlcPlatform) -> recipe_domain::plant::LiveUnits {
+        let unit = StoredUnit {
+            id: unit_id(),
+            path: UnitPath::parse("U1").expect("a unit path"),
+            name: Text::parse("U1").expect("a unit name"),
+            archived_at: None,
+        };
+        Machine::try_from(StoredMachine {
+            id: machine_id(),
+            code: MachineCode::parse("M12").expect("a machine code"),
+            name: Text::parse("Filler 2").expect("a machine name"),
+            platform,
+            db_number: platform
+                .max_data_block()
+                .map(|_| DataBlockNumber::parse("1").expect("a data block number")),
+            archived_at: None,
+            units: vec![unit],
+        })
+        .expect("a machine")
+        .live_units()
+    }
+
+    fn timestamp(day: u8) -> Timestamp {
+        let date = Date::from_calendar_date(2026, Month::October, day).expect("a date");
+        Timestamp::from(date.with_hms(9, 30, 0).expect("a time").assume_utc())
+    }
+
+    /// The parameter of a case. Its value goes through `from_stored` under the earlier rule set.
+    fn parameter(case: &StoredCase, trees: &TypeTrees) -> Parameter {
+        let tree = trees.tree(type_id(ROOT_ID)).expect("the tree of the root");
+        let value = ParameterValue::from_stored(
+            &StoredValue::from(case.value.clone()),
+            tree,
+            RuleSet::Earlier,
+        )
+        .expect("a stored value passes the earlier rule set")
+        .to_stored();
+        Parameter::from(StoredParameter {
+            id: ParameterId::from(Uuid::from_u128(1)),
+            key: ParameterKey::parse("00000000-0000-4000-8000-000000000002").expect("a key"),
+            unit: unit_id(),
+            tag: ParameterTag::parse("VALUE").expect("a tag"),
+            name_en: Text::parse("Value").expect("a name"),
+            description_en: LongText::parse("Not in the document").expect("a description"),
+            translations: Vec::new(),
+            plc_type: type_id(ROOT_ID),
+            s7_address: None,
+            limits: Vec::new(),
+            value,
+            ordinal: Ordinal::parse(1).expect("an ordinal"),
+        })
+    }
+
+    /// The v2 document of the unit `U1`, written by the production writer.
+    fn written(case: &StoredCase) -> Value {
+        let platform = case.platform;
+        let rows = vec![
+            stored_row(platform, (INT_ID, None), fixed(Primitive::Int)),
+            stored_row(platform, (BOOL_ID, None), fixed(Primitive::Bool)),
+            stored_row(platform, (ROOT_ID, Some(machine_id())), case.root.clone()),
+        ];
+        let catalog = PlatformTypes::collect(machine_id(), platform, rows).expect("a catalog");
+        let trees = TypeTrees::resolve([type_id(ROOT_ID)], &catalog);
+        let parameters = [parameter(case, &trees)];
+        let header = ExportHeader {
+            machine: MachineCode::parse("M12").expect("a machine code"),
+            platform,
+            reference: recipe_domain::recipe::ReferenceNumber::parse("R-200").expect("a number"),
+            version: 1,
+        };
+        let body = HashedBody::build(&header, &parameters, &units(platform), &trees)
+            .expect("a hashed body");
+        let names: BTreeMap<ParameterKey, Text> = parameters
+            .iter()
+            .map(|parameter| (parameter.key(), parameter.name_en().clone()))
+            .collect();
+        let has_rule_fault = !check_version_parameters(&parameters, &trees)
+            .expect("a read check")
+            .is_empty();
+        let document = DocumentFacts {
+            exported_at: timestamp(12),
+            exported_by: Login::parse("jkowalski").expect("a login"),
+            status: ExportStatus::Approved,
+            approved_at: timestamp(11),
+            approved_by: Login::parse("anowak").expect("a login"),
+            machine_name: Text::parse("Filler 2").expect("a name"),
+            recipe_name: Text::parse("Stored row").expect("a name"),
+            content_sha256: body.sha256().expect("a content hash"),
+            names,
+            has_rule_fault,
+        };
+        let scope = ScopeBody::build(&body, &UnitPath::parse("U1").expect("a unit path"));
+        let facts = ScopeFacts {
+            document,
+            scope_sha256: scope.sha256().expect("a scope hash"),
+        };
+        let bytes = write_scoped(&scope, &facts).expect("the document v2");
+        serde_json::from_slice(&bytes).expect("the writer emits JSON")
+    }
+
+    #[test]
+    fn adr_0208_stored_rows_pass_the_schema() {
+        let cases = cases();
+        assert_eq!(cases.len(), 5, "ADR-0201 (2), ADR-0203 (2), ADR-0204 (1)");
+        for case in &cases {
+            let doc = written(case);
+            assert_passes(&doc);
+            assert_eq!(doc["loadable"], json!(case.loadable), "{}", case.label);
+            assert_eq!(
+                doc["parameters"][0]["value"],
+                case.value_text(),
+                "{}",
+                case.label
+            );
+        }
+    }
+
+    impl StoredCase {
+        /// The value that the document holds: the stored JSON with each number as canonical text.
+        fn value_text(&self) -> Value {
+            match &self.value {
+                Value::Object(members) => Value::Object(
+                    members
+                        .iter()
+                        .map(|(name, member)| (name.clone(), canonical(member)))
+                        .collect(),
+                ),
+                other => canonical(other),
+            }
+        }
+    }
+
+    /// A number leaf is canonical decimal text in a document (`reliability.md` section 4.4).
+    fn canonical(leaf: &Value) -> Value {
+        match leaf {
+            Value::Number(number) => json!(number.to_string()),
+            other => other.clone(),
+        }
+    }
+}
