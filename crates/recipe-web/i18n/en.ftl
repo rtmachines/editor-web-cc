@@ -430,6 +430,7 @@ type-reason-out-of-range = a bound, a dimension, or a length is outside its rang
 type-reason-row-shape = the stored type row does not match its kind
 type-reason-reserved-name = the struct name is a reserved IEC 61131-3 word or a primitive name
 type-reason-reserved-member-name = the member name is a reserved IEC 61131-3 keyword
+type-reason-too-few-members = the struct has too few members on this platform
 type-limit-leaves = { $count } leaves
 type-limit-depth = { $count } levels
 type-limit-members = { $count } members

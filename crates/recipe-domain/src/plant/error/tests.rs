@@ -265,6 +265,10 @@ fn derived_type_reasons_have_their_phrase() {
             DerivedTypeReason::ReservedMemberName,
             "the member name is a reserved IEC 61131-3 keyword",
         ),
+        (
+            DerivedTypeReason::TooFewMembers,
+            "the struct has too few members on this platform",
+        ),
     ];
     for (reason, text) in cases {
         assert_eq!(reason.to_string(), text);

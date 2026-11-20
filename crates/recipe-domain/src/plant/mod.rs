@@ -45,8 +45,8 @@ pub use errors::PlantErrors;
 pub use ids::{MachineId, PlcConnectionId, PlcTypeId, UnitId};
 pub use iec_literal::{IecLiteral, IecLiteralReason, RuleSet, TimeType};
 pub use iec_names::{
-    IEC_EXTRA_KEYWORDS, IEC_RESERVED_STRUCT_NAMES, check_iec_names, is_iec_reserved_member_name,
-    is_iec_reserved_struct_name,
+    IEC_EXTRA_KEYWORDS, IEC_RESERVED_STRUCT_NAMES, check_codesys_members, check_iec_names,
+    is_iec_reserved_member_name, is_iec_reserved_struct_name,
 };
 pub(crate) use leaf_path::extended;
 pub use leaf_path::{LeafPath, LeafPathReason, LeafSegment, LeafTarget};

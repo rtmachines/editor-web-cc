@@ -208,3 +208,52 @@ fn adr_0203_the_check_accepts_every_name_on_the_s7_platforms() {
         }
     }
 }
+
+#[test]
+fn adr_0204_one_member_fails_on_codesys() {
+    let outcome =
+        check_codesys_members(PlcPlatform::CodesysIec, &name("ST_Coil"), &members(&["R"]));
+    assert_eq!(reason_of(&outcome), Some(DerivedTypeReason::TooFewMembers));
+    let error = outcome.unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_013);
+    assert!(
+        matches!(&error, PlantError::DerivedTypeInvalid { type_expr, .. } if type_expr == "ST_Coil"),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn adr_0204_one_member_passes_on_twincat() {
+    let outcome = check_codesys_members(PlcPlatform::TwinCat3, &name("ST_Coil"), &members(&["R"]));
+    assert!(outcome.is_ok(), "{outcome:?}");
+}
+
+#[test]
+fn adr_0204_one_member_passes_on_the_s7_platforms() {
+    for platform in S7_PLATFORMS {
+        let outcome = check_codesys_members(platform, &name("ST_Coil"), &members(&["R"]));
+        assert!(outcome.is_ok(), "{platform:?}: {outcome:?}");
+    }
+}
+
+#[test]
+fn adr_0204_two_members_pass_on_codesys() {
+    let outcome = check_codesys_members(
+        PlcPlatform::CodesysIec,
+        &name("ST_Coil"),
+        &members(&["Open", "Closed"]),
+    );
+    assert!(outcome.is_ok(), "{outcome:?}");
+    let many: Vec<MemberName> = (0..1024)
+        .map(|index| MemberName::parse(&format!("M{index}")).unwrap())
+        .collect();
+    assert!(check_codesys_members(PlcPlatform::CodesysIec, &name("ST_Coil"), &many).is_ok());
+}
+
+#[test]
+fn adr_0204_no_member_is_not_a_reason_of_this_check() {
+    for platform in IEC_PLATFORMS {
+        let outcome = check_codesys_members(platform, &name("ST_Coil"), &[]);
+        assert!(outcome.is_ok(), "{platform:?}: {outcome:?}");
+    }
+}

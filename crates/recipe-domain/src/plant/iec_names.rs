@@ -1,4 +1,5 @@
-//! Reserved struct and member names on `CodesysIec` and `TwinCat3` (ADR-0203).
+//! Reserved struct and member names on `CodesysIec` and `TwinCat3` (ADR-0203), and the member
+//! count of a struct on `CodesysIec` (ADR-0204).
 //!
 //! A CODESYS or TwinCAT project refuses a DUT with the name of a native type or a library
 //! type, and a member with the name of a keyword. A struct of the editor with such a name can
@@ -90,6 +91,33 @@ pub fn check_iec_names<'a>(
     Err(PlantError::DerivedTypeInvalid {
         type_expr: name.to_string(),
         reason,
+    })
+}
+
+/// Refuse a struct with one member on `CodesysIec` (ADR-0204 (a)).
+///
+/// This check solves the problem that a CODESYS DUT needs at least 2 members, while the struct
+/// row constructor accepts 1 to 1024 members on every platform. A use case calls it with the
+/// platform of the machine, after [`check_iec_names`]. `TwinCat3` and the S7 platforms accept
+/// one member. A struct with no member is not a case of this check, because `E-PLT-016` covers
+/// it on every platform.
+///
+/// # Errors
+///
+/// Returns [`PlantError::DerivedTypeInvalid`] (`E-PLT-013`) with
+/// [`DerivedTypeReason::TooFewMembers`] when the platform is `CodesysIec` and the struct has
+/// exactly one member.
+pub fn check_codesys_members<'a>(
+    platform: PlcPlatform,
+    name: &TypeName,
+    members: impl IntoIterator<Item = &'a MemberName>,
+) -> Result<(), PlantError> {
+    if platform != PlcPlatform::CodesysIec || members.into_iter().take(2).count() != 1 {
+        return Ok(());
+    }
+    Err(PlantError::DerivedTypeInvalid {
+        type_expr: name.to_string(),
+        reason: DerivedTypeReason::TooFewMembers,
     })
 }
 

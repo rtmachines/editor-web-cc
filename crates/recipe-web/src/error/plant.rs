@@ -22,6 +22,7 @@ const fn reason_key(reason: DerivedTypeReason) -> &'static str {
         DerivedTypeReason::RowShape => "type-reason-row-shape",
         DerivedTypeReason::ReservedName => "type-reason-reserved-name",
         DerivedTypeReason::ReservedMemberName => "type-reason-reserved-member-name",
+        DerivedTypeReason::TooFewMembers => "type-reason-too-few-members",
     }
 }
 

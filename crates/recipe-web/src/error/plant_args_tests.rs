@@ -356,6 +356,35 @@ fn adr_0203_plant_error_args_name_the_reserved_member_name_reason_by_its_key() {
     );
 }
 
+#[test]
+fn adr_0204_plant_error_args_name_the_too_few_members_reason_by_its_key() {
+    let reason = DerivedTypeReason::TooFewMembers;
+    let error = PlantError::DerivedTypeInvalid {
+        type_expr: "ST_Coil@1".to_owned(),
+        reason,
+    };
+    let word = plant_line_args(&error)
+        .into_iter()
+        .find_map(|(name, arg)| (name == "reason").then_some(arg));
+    assert_eq!(
+        word,
+        Some(LineArg::Word {
+            key: "type-reason-too-few-members".to_owned(),
+            args: Vec::new(),
+            fallback: reason.to_string(),
+        })
+    );
+    let bundles = Bundles::load().unwrap();
+    for lang in [Lang::En, Lang::Pl] {
+        let text = bundles.message(lang, "type-reason-too-few-members", None);
+        assert!(text.is_some_and(|text| !text.is_empty()), "{lang:?}");
+    }
+    assert_eq!(
+        bundles.message(Lang::En, "type-reason-too-few-members", None),
+        Some(reason.to_string())
+    );
+}
+
 #[tokio::test]
 async fn plant_error_args_write_each_limit_with_its_number_and_unit() {
     let cases = [
