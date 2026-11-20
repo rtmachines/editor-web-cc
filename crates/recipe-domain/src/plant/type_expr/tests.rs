@@ -149,7 +149,6 @@ fn type_expr_malformed_texts_are_grammar_errors() {
         "ST_Zone",
         "1ST@1",
         "int",
-        "DT",
         "array[1..2] OF INT",
         "ARRAY[1..2]OF INT",
         "ARRAY [1..2] OF INT",
@@ -469,4 +468,60 @@ fn adr_0183_string_with_square_brackets_fails() {
         );
     }
     assert_round_trip("STRING(10)");
+}
+
+const ALIASES: [(&str, &str); 4] = [
+    ("TOD", "TIME_OF_DAY"),
+    ("DT", "DATE_AND_TIME"),
+    ("LTIME_OF_DAY", "LTOD"),
+    ("LDATE_AND_TIME", "LDT"),
+];
+
+#[test]
+fn adr_0206_aliases_give_the_catalog_name() {
+    for (alias, catalog) in ALIASES {
+        let plain = TypeExpr::parse(alias);
+        assert_eq!(plain.map(|t| t.to_string()).ok().as_deref(), Some(catalog));
+        let array = TypeExpr::parse(&format!("ARRAY[1..2] OF {alias}"));
+        assert_eq!(
+            array.map(|t| t.to_string()).ok(),
+            Some(format!("ARRAY[1..2] OF {catalog}"))
+        );
+    }
+}
+
+#[test]
+fn adr_0206_alias_with_a_revision_is_a_reserved_name() {
+    for (alias, _) in ALIASES {
+        let text = format!("{alias}@1");
+        assert_eq!(
+            reason_of(&text),
+            Some(DerivedTypeReason::ReservedName),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn adr_0206_literal_prefixes_t_d_and_ld_stay_grammar_errors() {
+    for text in ["T", "D", "LD"] {
+        assert_eq!(reason_of(text), Some(DerivedTypeReason::Grammar), "{text}");
+    }
+}
+
+#[test]
+fn adr_0206_earlier_rule_set_does_not_map_an_alias() {
+    for (alias, _) in ALIASES {
+        let refused = TypeExpr::from_stored(alias, RuleSet::Earlier);
+        assert!(
+            matches!(
+                refused,
+                Err(PlantError::DerivedTypeInvalid {
+                    reason: DerivedTypeReason::Grammar,
+                    ..
+                })
+            ),
+            "{alias}"
+        );
+    }
 }

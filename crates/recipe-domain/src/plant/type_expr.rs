@@ -212,9 +212,27 @@ fn parse_base(text: &str, rules: RuleSet) -> Result<BaseExpr, DerivedTypeReason>
     if let Some((kind, tail)) = split_string_keyword(text) {
         return parse_string(kind, tail);
     }
-    Primitive::parse(text)
+    let name = match rules {
+        RuleSet::Current => vendor_alias(text).unwrap_or(text),
+        RuleSet::Earlier => text,
+    };
+    Primitive::parse(name)
         .map(BaseExpr::Primitive)
         .map_err(|_| DerivedTypeReason::Grammar)
+}
+
+/// Map a vendor alias to the catalog name of its type (ADR-0206 (a)).
+///
+/// Problem: a user pastes the spelling of a PLC project, but the stored data keeps one
+/// name for each type. This function is the one place of the mapping.
+fn vendor_alias(text: &str) -> Option<&'static str> {
+    match text {
+        "TOD" => Some("TIME_OF_DAY"),
+        "DT" => Some("DATE_AND_TIME"),
+        "LTIME_OF_DAY" => Some("LTOD"),
+        "LDATE_AND_TIME" => Some("LDT"),
+        _ => None,
+    }
 }
 
 /// Split `STRING` or `WSTRING` from the text that follows it.
