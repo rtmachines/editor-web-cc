@@ -36,9 +36,9 @@ pub enum Primitive {
     Real,
     /// `LREAL`, 64-bit float.
     Lreal,
-    /// `STRING`, one byte per character.
+    /// `STRING`, one byte per character on a `Latin1` machine and UTF-8 bytes on a `Utf8` machine (ADR-0202).
     String,
-    /// `WSTRING`, two bytes per character.
+    /// `WSTRING`, a length counts UTF-16 code units (ADR-0137 (i)).
     Wstring,
     /// `CHAR`, one byte character.
     Char,
