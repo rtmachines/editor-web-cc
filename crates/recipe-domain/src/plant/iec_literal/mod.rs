@@ -140,17 +140,20 @@ impl IecLiteral {
 }
 
 /// Return the type that a literal prefix names, such as `LT` for `LTIME`.
+///
+/// The long prefixes of ADR-0205 (a) are input aliases of the short prefixes. `S5T` and `DTL`
+/// have none (ADR-0205 (b)). A prefix is upper case (ADR-0205 (d)).
 fn literal_prefix(prefix: &str) -> Option<Primitive> {
     match prefix {
-        "T" => Some(Primitive::Time),
-        "LT" => Some(Primitive::Ltime),
+        "T" | "TIME" => Some(Primitive::Time),
+        "LT" | "LTIME" => Some(Primitive::Ltime),
         "S5T" => Some(Primitive::S5Time),
-        "D" => Some(Primitive::Date),
-        "LD" => Some(Primitive::Ldate),
-        "TOD" => Some(Primitive::TimeOfDay),
-        "LTOD" => Some(Primitive::Ltod),
-        "DT" => Some(Primitive::DateAndTime),
-        "LDT" => Some(Primitive::Ldt),
+        "D" | "DATE" => Some(Primitive::Date),
+        "LD" | "LDATE" => Some(Primitive::Ldate),
+        "TOD" | "TIME_OF_DAY" => Some(Primitive::TimeOfDay),
+        "LTOD" | "LTIME_OF_DAY" => Some(Primitive::Ltod),
+        "DT" | "DATE_AND_TIME" => Some(Primitive::DateAndTime),
+        "LDT" | "LDATE_AND_TIME" => Some(Primitive::Ldt),
         "DTL" => Some(Primitive::Dtl),
         _ => None,
     }
