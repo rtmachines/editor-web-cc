@@ -365,6 +365,15 @@ const S7_WCHAR_HIGHEST: char = '\u{D7FF}';
 /// Highest `WSTRING` scalar on `S7_1200` and `S7_1500` (ADR-0180 (b)).
 const S7_WSTRING_HIGHEST: char = '\u{CFFF}';
 
+/// Highest scalar of the lower range of a `WSTRING` on `CodesysIec` and `TwinCat3` (ADR-0201 (a)).
+const UCS2_LOW_HIGHEST: char = '\u{D7FF}';
+
+/// Lowest scalar of the upper range of a `WSTRING` on `CodesysIec` and `TwinCat3` (ADR-0201 (a)).
+const UCS2_HIGH_LOWEST: char = '\u{E000}';
+
+/// Highest `WSTRING` scalar on `CodesysIec` and `TwinCat3` (ADR-0201 (a)).
+const UCS2_HIGHEST: char = '\u{FFFF}';
+
 /// Largest mantissa of a `REAL` number: 7 significant digits (ADR-0117).
 const REAL_MANTISSA: i64 = 9_999_999;
 
@@ -395,6 +404,7 @@ fn numeric_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
 
 /// Draw a `STRING` of Latin-1 characters, or a `WSTRING` of the characters of its platform. No
 /// text holds U+0000 (ADR-0137). A `WSTRING` on S7 holds no scalar above U+CFFF (ADR-0180 (b)).
+/// A `WSTRING` on CODESYS and TwinCAT holds no scalar above U+FFFF (ADR-0201 (a)).
 ///
 /// A `WSTRING` holds at most half its length in characters, because a character outside the
 /// BMP takes two UTF-16 units.
@@ -403,6 +413,12 @@ fn string_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
     let characters = if primitive == Primitive::Wstring {
         let not_nul = if matches!(platform, PlcPlatform::S7_1200 | PlcPlatform::S7_1500) {
             prop::char::range('\u{1}', S7_WSTRING_HIGHEST).boxed()
+        } else if matches!(platform, PlcPlatform::CodesysIec | PlcPlatform::TwinCat3) {
+            prop_oneof![
+                prop::char::range('\u{1}', UCS2_LOW_HIGHEST),
+                prop::char::range(UCS2_HIGH_LOWEST, UCS2_HIGHEST),
+            ]
+            .boxed()
         } else {
             any::<char>()
                 .prop_map(|c| if c == '\0' { '\u{1}' } else { c })

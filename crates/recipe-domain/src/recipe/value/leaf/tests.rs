@@ -57,13 +57,19 @@ fn number_for_a_string_gives_a_fault() {
 
 #[test]
 fn wstring_counts_utf16_units() {
-    let fault = fault(r#""a😀""#, &wstring_tree(2));
+    // The test platform is TwinCAT, so a character outside the Basic Multilingual Plane
+    // is refused first (ADR-0201). The length rule of a surrogate pair is tested on a
+    // platform without that rule: the earlier rule set.
+    let tree = wstring_tree(2);
+    let fault = request_under(r#""a😀""#, &tree, RuleSet::Earlier).unwrap_err();
     assert_eq!(fault.expected(), Some(&Expected::Wstring { length: 2 }));
 }
 
 #[test]
 fn wstring_with_one_surrogate_pair_fits_two_units() {
-    assert_eq!(stored_text(r#""😀""#, &wstring_tree(2)), r#""😀""#);
+    let tree = wstring_tree(2);
+    let value = request_under(r#""😀""#, &tree, RuleSet::Earlier).unwrap();
+    assert_eq!(value.as_json(), &json!("😀"));
 }
 
 #[test]
@@ -124,9 +130,16 @@ fn string_refuses_u0000_at_any_position() {
 
 #[test]
 fn wstring_refuses_u0000_at_any_position() {
+    let tree = wstring_tree(10);
     assert_eq!(
-        fault(r#""A\u0000""#, &wstring_tree(10)).expected(),
+        request_under(r#""A\u0000""#, &tree, RuleSet::Earlier)
+            .unwrap_err()
+            .expected(),
         Some(&Expected::Wstring { length: 10 })
+    );
+    assert_eq!(
+        fault(r#""A\u0000""#, &tree).expected(),
+        Some(&Expected::WstringIec { length: 10 })
     );
 }
 
@@ -464,16 +477,122 @@ fn adr_0180_the_earlier_set_still_refuses_u0000_in_a_wstring() {
 }
 
 #[test]
-fn adr_0180_wstring_on_codesys_and_twincat_keeps_adr_0137() {
-    for platform in [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3] {
+fn adr_0180_wstring_on_codesys_and_twincat_keeps_the_scalars_above_u_cfff() {
+    for platform in IEC_PLATFORMS {
         let tree = wstring_tree_on(platform, 10);
         assert_eq!(stored_text(r#""A퀀""#, &tree), "\"A\u{D000}\"");
-        assert_eq!(stored_text(r#""😀""#, &tree), r#""😀""#);
+    }
+}
+
+const IEC_PLATFORMS: [PlcPlatform; 2] = [PlcPlatform::CodesysIec, PlcPlatform::TwinCat3];
+
+/// The `WSTRING` form that `E-RCP-005` names on CODESYS and TwinCAT (ADR-0201 (c)).
+fn iec_wstring(length: u16) -> Expected {
+    Expected::WstringIec { length }
+}
+
+#[test]
+fn adr_0201_wstring_on_codesys_and_twincat_refuses_a_character_outside_the_basic_plane() {
+    for platform in IEC_PLATFORMS {
+        let tree = wstring_tree_on(platform, 10);
+        for text in [r#""A😀""#, r#""Z𝄞""#, r#""\ud83d\ude00""#] {
+            assert_eq!(
+                fault(text, &tree).expected(),
+                Some(&iec_wstring(10)),
+                "{platform:?} {text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn adr_0201_wstring_on_codesys_and_twincat_accepts_the_ends_of_the_two_ranges() {
+    for platform in IEC_PLATFORMS {
+        let tree = wstring_tree_on(platform, 4);
+        let text = r#""\u0001\ud7ff\ue000\uffff""#;
+        let stored = ParameterValue::parse(text, &tree).unwrap();
         assert_eq!(
-            fault(r#""A\u0000""#, &tree).expected(),
-            Some(&Expected::Wstring { length: 10 })
+            stored.as_json(),
+            &json!("\u{1}\u{D7FF}\u{E000}\u{FFFF}"),
+            "{platform:?}"
         );
     }
+}
+
+#[test]
+fn adr_0201_wstring_on_codesys_and_twincat_refuses_u0000_with_the_iec_form() {
+    for platform in IEC_PLATFORMS {
+        let tree = wstring_tree_on(platform, 10);
+        assert_eq!(
+            fault(r#""A\u0000""#, &tree).expected(),
+            Some(&iec_wstring(10)),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn adr_0201_wstring_on_codesys_and_twincat_counts_each_basic_plane_character_as_one_unit() {
+    for platform in IEC_PLATFORMS {
+        let tree = wstring_tree_on(platform, 2);
+        assert_eq!(stored_text(r#""ŁŻ""#, &tree), r#""ŁŻ""#);
+        assert_eq!(
+            fault(r#""ŁŻŹ""#, &tree).expected(),
+            Some(&iec_wstring(2)),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn adr_0201_a_non_string_value_of_a_wstring_on_codesys_and_twincat_gives_the_iec_form() {
+    for platform in IEC_PLATFORMS {
+        let tree = wstring_tree_on(platform, 4);
+        assert_eq!(
+            fault("5", &tree).expected(),
+            Some(&iec_wstring(4)),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn adr_0201_the_earlier_set_keeps_adr_0137_on_codesys_and_twincat() {
+    for platform in IEC_PLATFORMS {
+        let tree = wstring_tree_on(platform, 10);
+        let stored = request_under(r#""A😀""#, &tree, RuleSet::Earlier).unwrap();
+        assert_eq!(stored.as_json().to_string(), r#""A😀""#, "{platform:?}");
+        assert_eq!(
+            request_under(r#""A😀""#, &tree, RuleSet::Current)
+                .unwrap_err()
+                .expected(),
+            Some(&iec_wstring(10)),
+            "{platform:?}"
+        );
+        assert_eq!(
+            request_under(r#""A\u0000""#, &tree, RuleSet::Earlier)
+                .unwrap_err()
+                .expected(),
+            Some(&Expected::Wstring { length: 10 }),
+            "{platform:?}"
+        );
+    }
+}
+
+#[test]
+fn adr_0201_wstring_on_s7_keeps_the_s7_form_and_the_char_rule_is_unchanged() {
+    for platform in S7_PLATFORMS {
+        let tree = wstring_tree_on(platform, 10);
+        assert_eq!(
+            fault(r#""😀""#, &tree).expected(),
+            Some(&s7_wstring(10)),
+            "{platform:?}"
+        );
+    }
+    assert_eq!(
+        fault(r#""😀""#, &primitive_tree(WCHAR)).expected(),
+        Some(&Expected::Char { max: 0xFFFF })
+    );
 }
 
 #[test]
