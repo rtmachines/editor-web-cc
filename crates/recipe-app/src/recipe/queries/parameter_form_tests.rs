@@ -521,10 +521,13 @@ async fn choices_with_siemens_struct_on(platform: PlcPlatform) -> Vec<String> {
             name: recipe_domain::plant::TypeName::parse("Conf_DNS").unwrap(),
             revision: 1,
             supersedes: None,
-            members: vec![recipe_domain::plant::TypeMember {
-                name: recipe_domain::plant::MemberName::parse("x").unwrap(),
-                type_id: seed_type_id(Primitive::Int, None).unwrap(),
-            }],
+            members: ["x", "y"]
+                .into_iter()
+                .map(|member| recipe_domain::plant::TypeMember {
+                    name: recipe_domain::plant::MemberName::parse(member).unwrap(),
+                    type_id: seed_type_id(Primitive::Int, None).unwrap(),
+                })
+                .collect(),
         },
     };
     fixture
@@ -567,7 +570,7 @@ async fn choices_with_iec_structs_on(platform: PlcPlatform) -> Vec<String> {
     for (id, name, members) in [
         (710, "VERSION", vec!["a"]),
         (711, "ST_Coil", vec!["END_IF", "S"]),
-        (712, "ST_Zone", vec!["a"]),
+        (712, "ST_Zone", vec!["a", "b"]),
     ] {
         let record = PlcTypeRecord {
             id: tid(id),
@@ -621,5 +624,67 @@ async fn adr_0203_proposals_keep_a_stored_reserved_struct_on_an_s7_machine() {
             choices.iter().any(|choice| choice == expected),
             "{choices:?}"
         );
+    }
+}
+
+/// The proposals of the form of a draft on a machine of `platform` with `ST_One@1` and `ST_Zone@1`.
+///
+/// `ST_One@1` has one member and `ST_Zone@1` has two.
+async fn choices_with_one_member_struct_on(platform: PlcPlatform) -> Vec<String> {
+    let fixture = Fixture::new();
+    seed_users(&fixture);
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    for (id, name, members) in [(713, "ST_One", vec!["a"]), (714, "ST_Zone", vec!["a", "b"])] {
+        let record = PlcTypeRecord {
+            id: tid(id),
+            machine: Some(crate::memory::fixtures::mid(1)),
+            platforms: BTreeSet::from([platform]),
+            shape: RecordShape::Struct {
+                name: recipe_domain::plant::TypeName::parse(name).unwrap(),
+                revision: 1,
+                supersedes: None,
+                members: members
+                    .into_iter()
+                    .map(|member| recipe_domain::plant::TypeMember {
+                        name: recipe_domain::plant::MemberName::parse(member).unwrap(),
+                        type_id: int,
+                    })
+                    .collect(),
+            },
+        };
+        fixture.store.seed_type(&PlcType::try_from(record).unwrap());
+    }
+    form(&fixture, input(None, None, None))
+        .await
+        .unwrap()
+        .choices
+}
+
+#[tokio::test]
+async fn adr_0204_proposals_leave_out_a_stored_one_member_struct_on_codesys() {
+    let choices = choices_with_one_member_struct_on(PlcPlatform::CodesysIec).await;
+
+    assert!(
+        choices.iter().any(|choice| choice == "ST_Zone@1"),
+        "{choices:?}"
+    );
+    assert!(
+        !choices.iter().any(|choice| choice == "ST_One@1"),
+        "{choices:?}"
+    );
+}
+
+#[tokio::test]
+async fn adr_0204_proposals_keep_a_stored_one_member_struct_on_twincat_and_s7() {
+    for platform in [PlcPlatform::TwinCat3, PlcPlatform::S7_1500] {
+        let choices = choices_with_one_member_struct_on(platform).await;
+        for expected in ["ST_Zone@1", "ST_One@1"] {
+            assert!(
+                choices.iter().any(|choice| choice == expected),
+                "{platform:?}: {choices:?}"
+            );
+        }
     }
 }

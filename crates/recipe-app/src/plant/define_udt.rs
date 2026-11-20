@@ -6,7 +6,7 @@ use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{
     DerivedTypeReason, MachineCode, MachineId, MemberName, PlantError, PlatformTypes, PlcPlatform,
     PlcType, PlcTypeId, PlcTypeRecord, RecordShape, TypeExpr, TypeMember, TypeName, TypeTree,
-    check_iec_names, check_siemens_struct_name,
+    check_codesys_members, check_iec_names, check_siemens_struct_name,
 };
 
 use super::current_type::{check_iec_struct_in, require_current_type};
@@ -138,10 +138,17 @@ impl DefineUdt {
 
 /// Check the struct name and each member type text with the current rule set (ADR-0186 (e), (f)).
 ///
+/// The names run first (ADR-0203), then the member count on `CodesysIec` (ADR-0204 (b)).
+///
 /// The check is pure and waits for no I/O (`reliability.md` section 7.4).
 fn require_current_names(input: &DefineUdtInput, platform: PlcPlatform) -> Result<(), PlantError> {
     check_siemens_struct_name(platform, &input.name)?;
     check_iec_names(
+        platform,
+        &input.name,
+        input.members.iter().map(|(member, _)| member),
+    )?;
+    check_codesys_members(
         platform,
         &input.name,
         input.members.iter().map(|(member, _)| member),

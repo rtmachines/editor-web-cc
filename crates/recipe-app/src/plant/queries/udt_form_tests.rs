@@ -355,7 +355,10 @@ async fn choices_with_siemens_struct_on(platform: PlcPlatform) -> Vec<String> {
     fixture
         .store
         .seed_machine(&machine_of(platform, MACHINE, "M12", "Press"));
-    let members = [("x", primitive(Primitive::Int))];
+    let members = [
+        ("x", primitive(Primitive::Int)),
+        ("y", primitive(Primitive::Int)),
+    ];
     let siemens = struct_row((MACHINE, platform), ZONE_1, ("Conf_DNS", 1), &members, None);
     fixture.store.seed_type(&siemens);
     form(&fixture, None).await.unwrap().choices
@@ -409,7 +412,7 @@ async fn choices_with_iec_structs_on(platform: PlcPlatform) -> Vec<String> {
             (MACHINE, platform),
             922,
             ("ST_Zone", 1),
-            &[("a", int)],
+            &[("a", int), ("b", int)],
             None,
         ),
     ];
@@ -446,5 +449,56 @@ async fn adr_0203_proposals_keep_a_stored_reserved_struct_on_an_s7_machine() {
             choices.iter().any(|choice| choice == expected),
             "{choices:?}"
         );
+    }
+}
+
+/// The proposals of the form for a machine of `platform` with `ST_One@1` and `ST_Zone@1`.
+///
+/// `ST_One@1` has one member and `ST_Zone@1` has two.
+async fn choices_with_one_member_struct_on(platform: PlcPlatform) -> Vec<String> {
+    let fixture = Fixture::new();
+    fixture
+        .store
+        .seed_machine(&machine_of(platform, MACHINE, "M12", "Press"));
+    let int = primitive(Primitive::Int);
+    let rows = [
+        struct_row((MACHINE, platform), 923, ("ST_One", 1), &[("a", int)], None),
+        struct_row(
+            (MACHINE, platform),
+            924,
+            ("ST_Zone", 1),
+            &[("a", int), ("b", int)],
+            None,
+        ),
+    ];
+    for row in &rows {
+        fixture.store.seed_type(row);
+    }
+    form(&fixture, None).await.unwrap().choices
+}
+
+#[tokio::test]
+async fn adr_0204_proposals_leave_out_a_stored_one_member_struct_on_codesys() {
+    let choices = choices_with_one_member_struct_on(PlcPlatform::CodesysIec).await;
+    assert!(
+        choices.iter().any(|choice| choice == "ST_Zone@1"),
+        "{choices:?}"
+    );
+    assert!(
+        !choices.iter().any(|choice| choice == "ST_One@1"),
+        "{choices:?}"
+    );
+}
+
+#[tokio::test]
+async fn adr_0204_proposals_keep_a_stored_one_member_struct_on_twincat_and_s7() {
+    for platform in [PlcPlatform::TwinCat3, PlcPlatform::S7_1500] {
+        let choices = choices_with_one_member_struct_on(platform).await;
+        for expected in ["ST_Zone@1", "ST_One@1"] {
+            assert!(
+                choices.iter().any(|choice| choice == expected),
+                "{platform:?}: {choices:?}"
+            );
+        }
     }
 }

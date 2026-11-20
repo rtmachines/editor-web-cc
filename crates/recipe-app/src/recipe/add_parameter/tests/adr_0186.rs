@@ -9,13 +9,16 @@ use crate::memory::fixtures::Fixture;
 use crate::recipe::rebind::fixtures::{primitive_id, typed_struct_row};
 use crate::recipe::test_support::stored_parameters;
 
-/// Store `PID_Compact@1` with the member `a` on the machine 1.
+/// Store `PID_Compact@1` with the members `a` and `b` on the machine 1.
 fn seed_pid(fixture: &Fixture, platform: PlcPlatform) {
     let row = typed_struct_row(
         platform,
         (970, "PID_Compact", 1),
         None,
-        &[("a", primitive_id(Primitive::Int))],
+        &[
+            ("a", primitive_id(Primitive::Int)),
+            ("b", primitive_id(Primitive::Int)),
+        ],
     );
     fixture.store.seed_type(&row);
 }
@@ -46,7 +49,7 @@ async fn adr_0186_a_stored_struct_with_a_siemens_name_on_s7_gives_plt_013() {
     ] {
         let fixture = empty_draft(platform);
         seed_pid(&fixture, platform);
-        let error = run(&fixture, pid_input("PID_Compact@1", "{\"a\":1}"))
+        let error = run(&fixture, pid_input("PID_Compact@1", "{\"a\":1,\"b\":2}"))
             .await
             .unwrap_err();
         assert_reserved_name(&error);
@@ -61,7 +64,10 @@ async fn adr_0186_an_array_of_a_stored_struct_with_a_siemens_name_on_s7_gives_pl
     seed_pid(&fixture, PlcPlatform::S7_1500);
     let error = run(
         &fixture,
-        pid_input("ARRAY[1..2] OF PID_Compact@1", "[{\"a\":1},{\"a\":2}]"),
+        pid_input(
+            "ARRAY[1..2] OF PID_Compact@1",
+            "[{\"a\":1,\"b\":2},{\"a\":2}]",
+        ),
     )
     .await
     .unwrap_err();
@@ -74,7 +80,7 @@ async fn adr_0186_an_array_of_a_stored_struct_with_a_siemens_name_on_s7_gives_pl
 async fn adr_0186_a_stored_struct_with_a_siemens_name_on_codesys_iec_adds_the_parameter() {
     let fixture = empty_draft(PlcPlatform::CodesysIec);
     seed_pid(&fixture, PlcPlatform::CodesysIec);
-    run(&fixture, pid_input("PID_Compact@1", "{\"a\":1}"))
+    run(&fixture, pid_input("PID_Compact@1", "{\"a\":1,\"b\":2}"))
         .await
         .unwrap();
     assert_eq!(stored_parameters(&fixture).len(), 1);
@@ -86,7 +92,7 @@ async fn adr_0186_a_stale_row_version_comes_before_the_siemens_name_fault() {
     seed_pid(&fixture, PlcPlatform::S7_1500);
     let request = AddParameterInput {
         expected_row_version: 7,
-        ..pid_input("PID_Compact@1", "{\"a\":1}")
+        ..pid_input("PID_Compact@1", "{\"a\":1,\"b\":2}")
     };
     let error = run(&fixture, request).await.unwrap_err();
     assert_eq!(error.code(), ErrorCode::WEB_001);
