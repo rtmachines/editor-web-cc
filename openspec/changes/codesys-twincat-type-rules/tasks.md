@@ -488,7 +488,7 @@ The work of OQ03 (ADR-0202) has two parts: wave 1 (codes, catalog, storage) and 
 
 ## 12. Gate
 
-- [ ] 12.1 (workspace) Verification only. It changes no file. Run each command and show its output:
+- [x] 12.1 (workspace) Verification only. It changes no file. Run each command and show its output:
   - `cargo fmt --check`
   - `cargo clippy --all-targets --all-features -- -D warnings`
   - `cargo test --workspace --all-features --locked`
