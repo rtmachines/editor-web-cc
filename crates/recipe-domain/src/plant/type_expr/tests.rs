@@ -164,6 +164,19 @@ fn type_expr_malformed_texts_are_grammar_errors() {
 }
 
 #[test]
+fn adr_0209_open_array_pointer_and_reference_fail() {
+    for text in [
+        "ARRAY[*] OF INT",
+        "ARRAY[*,*] OF INT",
+        "ARRAY[1..2,*] OF INT",
+        "POINTER TO INT",
+        "REFERENCE TO INT",
+    ] {
+        assert_eq!(reason_of(text), Some(DerivedTypeReason::Grammar), "{text}");
+    }
+}
+
+#[test]
 fn type_expr_primitive_name_with_at_is_unknown_struct() {
     assert_eq!(reason_of("INT@1"), Some(DerivedTypeReason::UnknownStruct));
 }
