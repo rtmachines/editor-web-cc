@@ -5,10 +5,12 @@
 //! database.
 
 use recipe_app::auth::CurrentUser;
-use recipe_app::plant::{SetMachineStringEncoding, SetMachineStringEncodingInput};
+use recipe_app::plant::{
+    CreateMachine, CreateMachineInput, SetMachineStringEncoding, SetMachineStringEncodingInput,
+};
 use recipe_app::recipe::{ApproveVersion, ApproveVersionInput, CreateRecipe, CreateRecipeInput};
 use recipe_domain::identity::{Login, Role};
-use recipe_domain::plant::StringEncoding;
+use recipe_domain::plant::{MachineCode, PlcPlatform, StringEncoding};
 use recipe_domain::recipe::ReferenceNumber;
 
 use crate::atomic::world::{long_text, text};
@@ -56,7 +58,7 @@ async fn counts(app: &mut App) -> (i64, i64) {
 }
 
 /// Set the encoding of a machine through `SetMachineStringEncoding`.
-async fn set_encoding(app: &App, code: recipe_domain::plant::MachineCode, to: StringEncoding) {
+async fn set_encoding(app: &App, code: MachineCode, to: StringEncoding) {
     SetMachineStringEncoding::new(app.context())
         .execute(
             &app.user,
@@ -70,23 +72,12 @@ async fn set_encoding(app: &App, code: recipe_domain::plant::MachineCode, to: St
         .unwrap();
 }
 
-#[tokio::test]
-async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_on_a_fresh_database() {
-    let mut app = App::create().await;
-
-    assert_eq!(counts(&mut app).await, (0, 0));
-}
-
-#[tokio::test]
-async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_for_a_stored_utf8_value()
-{
-    let mut app = App::create().await;
+/// Approve a version of a machine with the `STRING(4)` value `é`. The value has 2 UTF-8 bytes.
+async fn approve_utf8_value(app: &mut App, code: MachineCode) {
     let id = app
         .seed_user(ENGINEER, Role::ProcessEngineer, PASSWORD)
         .await;
     let engineer = CurrentUser::new(id, Login::parse(ENGINEER).unwrap(), Role::ProcessEngineer);
-    let seed = app.seed_machine("CodesysIec", &["U1"]).await;
-    set_encoding(&app, seed.code, StringEncoding::Utf8).await;
     let case = Case {
         reference: "RB-UTF8",
         platform: "CodesysIec",
@@ -98,7 +89,7 @@ async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_for_a
     };
     let reference = ReferenceNumber::parse(case.reference).unwrap();
     let created = CreateRecipeInput {
-        machine_code: seed.code,
+        machine_code: code,
         reference: reference.clone(),
         name: text(case.reference),
         change_note: long_text("Stored UTF-8 row"),
@@ -107,11 +98,11 @@ async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_for_a
         .execute(&engineer, &new_meta(), created)
         .await
         .unwrap();
-    add_case_parameter(&app, &engineer, &reference, &case).await;
+    add_case_parameter(app, &engineer, &reference, &case).await;
     let approval = ApproveVersionInput {
         reference: reference.clone(),
         number: 1,
-        expected_row_version: row_version(&app, &reference).await,
+        expected_row_version: row_version(app, &reference).await,
         allow_outdated: false,
     };
     ApproveVersion::new(app.context())
@@ -129,6 +120,23 @@ async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_for_a
     .await
     .unwrap();
     assert_eq!(bytes, 2);
+}
+
+#[tokio::test]
+async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_on_a_fresh_database() {
+    let mut app = App::create().await;
+
+    assert_eq!(counts(&mut app).await, (0, 0));
+}
+
+#[tokio::test]
+async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_for_a_stored_utf8_value()
+{
+    let mut app = App::create().await;
+    let seed = app.seed_machine("CodesysIec", &["U1"]).await;
+    set_encoding(&app, seed.code, StringEncoding::Utf8).await;
+    approve_utf8_value(&mut app, seed.code).await;
+
     assert_eq!(counts(&mut app).await, (1, 1));
 }
 
@@ -141,4 +149,25 @@ async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_after
     set_encoding(&app, seed.code, StringEncoding::Latin1).await;
 
     assert_eq!(counts(&mut app).await, (0, 2));
+}
+
+#[tokio::test]
+async fn adr_0202_rollback_query_counts_utf8_machines_and_encoding_entries_for_a_machine_created_as_utf8()
+ {
+    let mut app = App::create().await;
+    let input = CreateMachineInput {
+        code: MachineCode::parse("M901").unwrap(),
+        name: text("Press"),
+        platform: PlcPlatform::CodesysIec,
+        db_number: None,
+        string_encoding: StringEncoding::Utf8,
+        main_unit_name: text("Feeder"),
+    };
+    CreateMachine::new(app.context())
+        .execute(&app.user, &app.meta, input.clone())
+        .await
+        .unwrap();
+    approve_utf8_value(&mut app, input.code).await;
+
+    assert_eq!(counts(&mut app).await, (1, 0));
 }
