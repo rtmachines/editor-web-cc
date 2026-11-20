@@ -6,7 +6,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     DerivedTypeReason, LeafClass, MemberName, PlantError, PlcPlatform, PlcType, PlcTypeRecord,
-    Primitive, RecordShape, TypeExpr, TypeLimit, TypeMember, TypeName, TypeTree,
+    Primitive, RecordShape, StringEncoding, TypeExpr, TypeLimit, TypeMember, TypeName, TypeTree,
 };
 
 use super::preview::preview_tree;
@@ -92,7 +92,13 @@ async fn the_preview_leaves_equal_the_leaves_after_ensure_derived_type() {
 
     for text in EXPRESSIONS {
         let expected = ensured_tree(&fixture, text).await;
-        let preview = preview_tree(mid(1), PLATFORM, rows.clone(), &expr(text)).unwrap();
+        let preview = preview_tree(
+            mid(1),
+            (PLATFORM, StringEncoding::Latin1),
+            rows.clone(),
+            &expr(text),
+        )
+        .unwrap();
 
         assert_eq!(shapes(&preview), shapes(&expected), "{text}");
         assert_eq!(preview.leaf_count(), expected.leaf_count(), "{text}");
@@ -107,7 +113,7 @@ async fn the_preview_adds_no_row_to_the_store() {
 
     preview_tree(
         mid(1),
-        PLATFORM,
+        (PLATFORM, StringEncoding::Latin1),
         rows.clone(),
         &expr("ARRAY[1..4] OF STRING(20)"),
     )
@@ -122,7 +128,13 @@ async fn an_unknown_struct_revision_gives_plt_013() {
     let fixture = scenarios::zone_draft();
     let rows = rows_of(&fixture).await;
 
-    let error = preview_tree(mid(1), PLATFORM, rows, &expr("ST_Zone@9")).unwrap_err();
+    let error = preview_tree(
+        mid(1),
+        (PLATFORM, StringEncoding::Latin1),
+        rows,
+        &expr("ST_Zone@9"),
+    )
+    .unwrap_err();
 
     assert_eq!(error.code(), ErrorCode::PLT_013);
 }
@@ -135,11 +147,16 @@ async fn a_type_that_the_platform_does_not_hold_gives_plt_013() {
 
     let wstring = preview_tree(
         mid(1),
-        PlcPlatform::S7_300,
+        (PlcPlatform::S7_300, StringEncoding::Latin1),
         rows.clone(),
         &expr("WSTRING(10)"),
     );
-    let lreal = preview_tree(mid(1), PlcPlatform::S7_300, rows, &expr("LREAL"));
+    let lreal = preview_tree(
+        mid(1),
+        (PlcPlatform::S7_300, StringEncoding::Latin1),
+        rows,
+        &expr("LREAL"),
+    );
 
     assert_eq!(wstring.unwrap_err().code(), ErrorCode::PLT_013);
     assert_eq!(lreal.unwrap_err().code(), ErrorCode::PLT_013);
@@ -240,7 +257,13 @@ async fn a_bad_expression_gives_the_same_code_and_reason_as_ensure_derived_type(
         let fixture = bad_world(platform);
         let rows = rows_of(&fixture).await;
 
-        let preview = preview_tree(mid(1), platform, rows, &expr(&text)).unwrap_err();
+        let preview = preview_tree(
+            mid(1),
+            (platform, StringEncoding::Latin1),
+            rows,
+            &expr(&text),
+        )
+        .unwrap_err();
         let ensured = ensured(&fixture, platform, &text).await.unwrap_err();
 
         assert_eq!(preview.code(), code, "{text} on {platform:?}: {preview:?}");
@@ -257,8 +280,13 @@ async fn an_array_above_the_leaf_limit_gives_plt_018() {
     let fixture = scenarios::zone_draft();
     let rows = rows_of(&fixture).await;
 
-    let error: AppError =
-        preview_tree(mid(1), PLATFORM, rows, &expr("ARRAY[1..16385] OF INT")).unwrap_err();
+    let error: AppError = preview_tree(
+        mid(1),
+        (PLATFORM, StringEncoding::Latin1),
+        rows,
+        &expr("ARRAY[1..16385] OF INT"),
+    )
+    .unwrap_err();
 
     assert_eq!(error.code(), ErrorCode::PLT_018);
 }

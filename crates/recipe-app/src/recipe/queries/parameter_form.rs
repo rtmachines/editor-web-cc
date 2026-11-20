@@ -365,7 +365,10 @@ impl GetParameterForm {
         let preview = input
             .type_expr
             .as_ref()
-            .map(|expr| preview_tree(machine.id(), machine.platform(), reads.rows, expr))
+            .map(|expr| {
+                let kind = (machine.platform(), machine.string_encoding());
+                preview_tree(machine.id(), kind, reads.rows, expr)
+            })
             .transpose()?;
         let units = machine
             .units()

@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     ArrayDimensions, BaseExpr, DerivedTypeReason, MachineId, PlantError, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringKind,
-    StringLength, TypeExpr, TypeName, TypeTree,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding,
+    StringKind, StringLength, TypeExpr, TypeName, TypeTree,
 };
 use uuid::Uuid;
 
@@ -175,7 +175,8 @@ fn invalid(expr: &TypeExpr, reason: DerivedTypeReason) -> AppError {
 
 /// Resolve the tree of `expr` over `rows` without a write.
 ///
-/// `rows` are the rows of `TypeCatalog::type_rows` for `machine`. The function adds each missing
+/// `rows` are the rows of `TypeCatalog::type_rows` for `machine`. `platform` and `encoding` come
+/// from the same `Machine`. The function adds each missing
 /// derived row in memory, then resolves the tree of the root row.
 ///
 /// # Errors
@@ -184,7 +185,7 @@ fn invalid(expr: &TypeExpr, reason: DerivedTypeReason) -> AppError {
 /// unknown struct revision. Returns `E-PLT-018` when the tree is above a size limit.
 pub(super) fn preview_tree(
     machine: MachineId,
-    platform: PlcPlatform,
+    (platform, encoding): (PlcPlatform, StringEncoding),
     rows: Vec<PlcType>,
     expr: &TypeExpr,
 ) -> Result<TypeTree, AppError> {
@@ -195,6 +196,6 @@ pub(super) fn preview_tree(
         added: 0,
     };
     let root = types.resolve(expr)?;
-    let platform_types = PlatformTypes::collect(machine, platform, types.rows)?;
+    let platform_types = PlatformTypes::collect_encoded(machine, platform, encoding, types.rows)?;
     Ok(TypeTree::resolve(root, &platform_types)?)
 }
