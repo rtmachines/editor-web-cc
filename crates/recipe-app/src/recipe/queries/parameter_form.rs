@@ -243,7 +243,8 @@ fn require_form_type(
 ///
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
-/// `<name>@<revision>` in the byte order of the name. A struct with a reserved name is no proposal,
+/// `<name>@<revision>` in the byte order of the name. A name whose latest revision is refused is no
+/// proposal, as in `GetUdtForm`. A struct with a reserved name is no proposal,
 /// because every command refuses it (ADR-0143 (i2)). On an S7 platform, a struct with a Siemens
 /// reserved name is no proposal either (ADR-0186 (h)).
 fn proposals(types: &PlatformTypes) -> Vec<String> {
@@ -262,13 +263,13 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
     let strings = [Primitive::String]
         .into_iter()
         .chain(has_wstring.then_some(Primitive::Wstring));
-    let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
+    let mut latest: BTreeMap<&TypeName, (u32, &PlcType)> = BTreeMap::new();
     for row in types.rows() {
-        if let RecordShape::Struct { name, revision, .. } = row.shape()
-            && !is_refused_struct(types.platform(), row)
-        {
-            let entry = latest.entry(name).or_insert(*revision);
-            *entry = (*entry).max(*revision);
+        if let RecordShape::Struct { name, revision, .. } = row.shape() {
+            let entry = latest.entry(name).or_insert((*revision, row));
+            if *revision > entry.0 {
+                *entry = (*revision, row);
+            }
         }
     }
     primitives
@@ -278,8 +279,33 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
         .chain(
             latest
                 .iter()
-                .map(|(name, revision)| format!("{name}@{revision}")),
+                .filter(|(_, (_, row))| !is_refused_struct(types.platform(), row))
+                .map(|(name, (revision, _))| format!("{name}@{revision}")),
         )
+        .collect()
+}
+
+/// Builds the preview tree of the requested type text, or `None` without one.
+///
+/// The step solves one problem. `execute` stays short, and the preview stays a pure in-memory
+/// step after the read transaction (ADR-0039 (h)).
+fn preview_of(
+    machine: &Machine,
+    rows: Vec<PlcType>,
+    type_expr: Option<&TypeExpr>,
+) -> Result<Option<TypeTree>, AppError> {
+    let kind = (machine.platform(), machine.string_encoding());
+    type_expr
+        .map(|expr| preview_tree(machine.id(), kind, rows, expr))
+        .transpose()
+}
+
+/// Returns the live units of the machine in the order of the path.
+fn live_units(machine: &Machine) -> Vec<Unit> {
+    machine
+        .units()
+        .filter(|unit| unit.is_live())
+        .cloned()
         .collect()
 }
 
@@ -367,19 +393,8 @@ impl GetParameterForm {
         if let Some(expr) = &input.type_expr {
             require_form_type(&types, expr, (input.purpose, reads.parameter.as_ref()))?;
         }
-        let preview = input
-            .type_expr
-            .as_ref()
-            .map(|expr| {
-                let kind = (machine.platform(), machine.string_encoding());
-                preview_tree(machine.id(), kind, reads.rows, expr)
-            })
-            .transpose()?;
-        let units = machine
-            .units()
-            .filter(|unit| unit.is_live())
-            .cloned()
-            .collect();
+        let preview = preview_of(&machine, reads.rows, input.type_expr.as_ref())?;
+        let units = live_units(&machine);
         Ok(ParameterForm {
             recipe: reads.scope.recipe,
             machine,
