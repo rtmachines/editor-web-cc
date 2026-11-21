@@ -179,6 +179,29 @@ class ScriptTests(unittest.TestCase):
     def test_file_uses_lf(self):
         self.assertNotIn(b"\r", SCRIPT.read_bytes())
 
+    def test_early_end_requirement_matches_the_proof_result(self):
+        proof_class = "S"
+        proof_message = "none"
+        lines = script_text().splitlines()
+
+        if proof_class == "R":
+            required = "1"
+            expected_line = f'EARLY_END_ERROR="{proof_message}"'
+        else:
+            self.assertEqual(proof_class, "S")
+            required = "0"
+            expected_line = "# V-02: change B sets 1 with its fix of ADR-0106 (g) step 2."
+            self.assertEqual(
+                [line for line in lines if line.startswith("EARLY_END_ERROR=")],
+                ['EARLY_END_ERROR=""'],
+            )
+
+        self.assertEqual(
+            [line for line in lines if line.startswith("EARLY_END_REFUSAL_REQUIRED=")],
+            [f"EARLY_END_REFUSAL_REQUIRED={required}"],
+        )
+        self.assertTrue(expected_line in lines, f"Cannot find {expected_line}")
+
     def test_script_sources_the_shared_files_in_order(self):
         text = script_text()
         self.assertTrue(text.startswith("#!/usr/bin/env bash\n"))
@@ -455,6 +478,10 @@ EARLY_END_STATE = f"0/6000060|{EARLY_END_SEGMENT}|96|16777216|8192\n"
 EARLY_END_LINE = RECOVER_LINE.replace('"chain_seq":42', '"chain_seq":41')
 EARLY_END_ERROR_LINE = TARGET_ERROR_LINE.replace("the temporary server did not finish the recovery",
                                                 "the newest audit entry is invalid")
+EARLY_END_HASHES_LINE = (
+    '{"timestamp":"2026-10-30T12:00:06Z","level":"INFO","job":"pitr-volume",'
+    f'"message":"configuration files of the copy hashed","postgresql_conf":"{"0" * 64}"}}'
+)
 EXPECTED_LSN = "0/3000060"
 OLD_VOLUME = "recipe-ci-1-1_pgdata"
 HEARTBEAT_QUERY = r"FROM public\.app_setting WHERE key = 'heartbeat\.last_at'"
@@ -470,6 +497,35 @@ SECRET_VALUES = {name: f"secret-value-of-{name}" for name in ("postgres", "migra
 def password(number):
     """Return the nth password that the stub of openssl prints."""
     return f"{number:064d}"
+
+
+def step_environment(directory, stubs, log, step):
+    """Return the default environment for a step with stubs."""
+    env = os.environ.copy()
+    for key in [key for key in env if key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_", "STUB_"))]:
+        del env[key]
+    env.update({
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_WORKSPACE": str(ROOT),
+        "RUNNER_TEMP": str(directory / "runner"),
+        "COMPOSE_PROJECT_NAME": PROJECT,
+        "RECIPE_VERSION": "ci-pitr-recovery",
+        "CI_WAIT_ATTEMPTS": "3",
+        "PATH": f"{stubs}{os.pathsep}{env['PATH']}",
+        "STUB_LOG": str(log),
+        "STUB_COUNTER": str(directory / "counter"),
+        "STUB_PITR_OUTPUT": DRILL_LINE,
+        "STUB_TARGET_OUTPUT": TARGET_ERROR_LINE,
+        "STUB_GAP_OUTPUT": GAP_ERROR_LINE,
+        "STUB_EARLY_END_POSITION": EARLY_END_STATE.rstrip("\n"),
+        "STUB_EARLY_END_OUTPUT": EARLY_END_LINE,
+        "STUB_RECOVER_OUTPUT": RECOVER_LINE,
+        "STUB_REFUSE_OUTPUT": REFUSE_ERROR_LINE,
+    })
+    if step == "markers":
+        env["STUB_SEGMENT"] = EARLY_END_SEGMENT
+        env["STUB_LSN"] = "0/60000A0"
+    return env
 
 
 class StepTests(unittest.TestCase):
@@ -564,30 +620,7 @@ class StepTests(unittest.TestCase):
             secrets_dir.mkdir()
             for secret_name, secret_value in SECRET_VALUES.items():
                 (secrets_dir / f"{secret_name}_password").write_text(secret_value + "\n", encoding="utf-8", newline="\n")
-            env = os.environ.copy()
-            for key in [key for key in env if key.startswith(("GITHUB_", "RUNNER_", "COMPOSE_", "STUB_"))]:
-                del env[key]
-            env.update({
-                "GITHUB_ACTIONS": "true",
-                "GITHUB_WORKSPACE": str(ROOT),
-                "RUNNER_TEMP": str(directory / "runner"),
-                "COMPOSE_PROJECT_NAME": PROJECT,
-                "RECIPE_VERSION": "ci-pitr-recovery",
-                "CI_WAIT_ATTEMPTS": "3",
-                "PATH": f"{stubs}{os.pathsep}{env['PATH']}",
-                "STUB_LOG": str(log),
-                "STUB_COUNTER": str(directory / "counter"),
-                "STUB_PITR_OUTPUT": DRILL_LINE,
-                "STUB_TARGET_OUTPUT": TARGET_ERROR_LINE,
-                "STUB_GAP_OUTPUT": GAP_ERROR_LINE,
-                "STUB_EARLY_END_POSITION": EARLY_END_STATE.rstrip("\n"),
-                "STUB_EARLY_END_OUTPUT": EARLY_END_LINE,
-                "STUB_RECOVER_OUTPUT": RECOVER_LINE,
-                "STUB_REFUSE_OUTPUT": REFUSE_ERROR_LINE,
-            })
-            if step == "markers":
-                env["STUB_SEGMENT"] = EARLY_END_SEGMENT
-                env["STUB_LSN"] = "0/60000A0"
+            env = step_environment(directory, stubs, log, step)
             env.update(env_extra or {})
             # Bash can read a Windows path in another form. The placeholder gets the form that bash sees.
             seen = ""
@@ -644,6 +677,21 @@ class StepTests(unittest.TestCase):
             rf"^sudo test -f .*{EARLY_END_SEGMENT}\.partial$",
             rf"^sudo test -e .*{EARLY_END_SEGMENT}$",
         ])
+
+    def test_markers_read_the_sizes_in_the_order_of_the_state_file(self):
+        assignment = re.search(r'^EARLY_END_POSITION_SQL="([^"]+)"$', script_text(), re.MULTILINE)
+        self.assertIsNotNone(assignment, "Cannot find EARLY_END_POSITION_SQL.")
+        sql = assignment.group(1).replace("\\\n", "")
+        select_list = re.search(r"\)\s*SELECT\s+(.+?)\s+FROM\s+wal_position\b", sql, re.IGNORECASE | re.DOTALL)
+        self.assertIsNotNone(select_list, "Cannot find the WAL position select list.")
+        self.assertEqual(
+            [column.strip() for column in select_list.group(1).split(",")],
+            ["lsn", "file_name", "file_offset", "seg.setting", "blk.setting"],
+        )
+        for alias, setting in (("seg", "wal_segment_size"), ("blk", "wal_block_size")):
+            self.assertRegex(
+                sql, rf"(?i:\bJOIN\s+pg_settings\s+AS\s+{alias}\s+ON\s+{alias}\.name)\s*=\s*'{setting}'",
+            )
 
     def test_markers_record_the_record_before_marker_2(self):
         done, log, state = self.run_step("markers", {"STUB_SEGMENT": EARLY_END_SEGMENT}, self.markers_state())
@@ -994,13 +1042,39 @@ class StepTests(unittest.TestCase):
         self.assertNotIn("PITR_MARKER_", log)
         self.assertIn("refusals: early end: byte_new=90", done.stdout.splitlines())
 
-    def test_refusals_invert_the_first_byte_when_the_header_crosses_a_page(self):
-        state = self.refusals_state()
-        state["early-end.state"] = f"0/6001FF0|{EARLY_END_SEGMENT}|8176|16777216|8192\n"
-        done, log, _ = self.run_refusals(state=state)
+    def test_refusals_stream_the_early_end_output(self):
+        done, log, _ = self.run_refusals()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertRegex(log, r"(?m)^sudo dd .*\bseek=8176\b")
-        self.assertIn("refusals: early end: byte_new=90", done.stdout.splitlines())
+        self.assertEqual(done.stdout.splitlines().count(EARLY_END_LINE), 1)
+        body = shell_function("run_early_end")
+        self.assertIn('| tee "$log_file"', body)
+        self.assertNotIn('cat "$log_file"', body)
+
+    def test_refusals_invert_the_byte_by_its_value(self):
+        for offset, old, new in ((96, 165, 90), (8176, 18, 237)):
+            with self.subTest(offset=offset):
+                state = self.refusals_state()
+                state["early-end.state"] = f"0/{0x6000000 + offset:X}|{EARLY_END_SEGMENT}|{offset}|16777216|8192\n"
+                done, log, _ = self.run_refusals(state=state)
+                self.assertEqual(done.returncode, 0, done.stderr + log)
+                lines = done.stdout.splitlines()
+                self.assertIn(f"refusals: early end: byte_old={old}", lines)
+                self.assertIn(f"refusals: early end: byte_new={new}", lines)
+
+    def test_refusals_choose_the_byte_by_the_offset_in_the_page(self):
+        for offset, seek in ((859104, 859124), (8168, 8188), (8169, 8169), (8176, 8176)):
+            with self.subTest(offset=offset):
+                state = self.refusals_state()
+                state["early-end.state"] = f"0/{0x6000000 + offset:X}|{EARLY_END_SEGMENT}|{offset}|16777216|8192\n"
+                done, log, _ = self.run_refusals(state=state)
+                self.assertEqual(done.returncode, 0, done.stderr + log)
+                self.assertRegex(log, rf"(?m)^sudo dd .*\bseek={seek}\b")
+
+    def test_refusals_fail_when_the_byte_does_not_change(self):
+        done, _, _ = self.run_refusals({"STUB_EARLY_END_SKIP_DD": "1"})
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("CI: refusals: the byte did not change to its inverse.", done.stderr.splitlines())
+        self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
 
     def test_refusals_log_each_proof_value(self):
         done, log, _ = self.run_refusals()
@@ -1013,10 +1087,28 @@ class StepTests(unittest.TestCase):
         self.assertCountEqual([line for line in done.stdout.splitlines() if line.startswith(prefix)],
                               [f"{prefix}{name}={value}" for name, value in expected.items()])
 
+    def test_refusals_log_the_proof_after_a_failed_command(self):
+        done, _, _ = self.run_refusals({"STUB_EARLY_END_NO_BASE": "1"})
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertRegex(done.stderr, r"(?m)^CI: refusals: .*/wal-copy holds no base backup\.$")
+        lines = done.stdout.splitlines()
+        self.assertIn("refusals: early end: lsn=0/6000060", lines, done.stderr)
+        self.assertIn("refusals: early end: class=I", lines, done.stderr)
+        self.assertNotIn("unbound variable", done.stderr)
+
+    def test_refusals_class_a_precondition_refusal_as_inconclusive(self):
+        line = (
+            '{"timestamp":"2026-10-30T12:00:07Z","level":"ERROR","job":"pitr-volume",'
+            '"message":"the target directory is not empty"}'
+        )
+        done, _, _ = self.run_refusals({"STUB_EARLY_END_STATUS": "1", "STUB_EARLY_END_OUTPUT": line})
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
+
     def test_refusals_accept_a_refusal_of_the_early_end_run(self):
         for line in (EARLY_END_ERROR_LINE, EARLY_END_ERROR_LINE[:-1] + ',"exit_code":7}'):
             with self.subTest(line=line):
-                env = {"STUB_EARLY_END_STATUS": "7", "STUB_EARLY_END_OUTPUT": line}
+                env = {"STUB_EARLY_END_STATUS": "7", "STUB_EARLY_END_OUTPUT": f"{EARLY_END_HASHES_LINE}\n{line}"}
                 done, log, _ = self.run_refusals(env)
                 self.assertEqual(done.returncode, 0, done.stderr + log)
                 for proof in ("class=R", "exit_code=7", f"error_line={line}", f"last_line={line}"):
@@ -1034,16 +1126,38 @@ class StepTests(unittest.TestCase):
                 self.assertEqual(done.returncode, required, done.stderr + log)
                 self.assertIn("refusals: early end: class=S", done.stdout.splitlines())
 
+    def test_refusals_class_a_line_of_another_job_as_inconclusive(self):
+        cases = (
+            (7, EARLY_END_HASHES_LINE + "\n", EARLY_END_ERROR_LINE),
+            (0, "", EARLY_END_LINE),
+        )
+        for status, prefix, line in cases:
+            with self.subTest(status=status):
+                line = line.replace('"job":"pitr-volume"', '"job":"walarchive-entry"')
+                env = {"STUB_EARLY_END_STATUS": str(status), "STUB_EARLY_END_OUTPUT": prefix + line}
+                done, _, _ = self.run_refusals(env)
+                self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+                self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
+
     def test_refusals_fail_on_an_inconclusive_early_end_run(self):
         for status, output in ((0, RECOVER_LINE), (0, EARLY_END_LINE.replace("OwnPasswordChanged", "Login")),
-                               (1, ""), (1, f"{EARLY_END_ERROR_LINE}\n{EARLY_END_ERROR_LINE}"),
-                               (1, f"{EARLY_END_ERROR_LINE}\n{EARLY_END_LINE}")):
+                               (1, ""), (1, f"{EARLY_END_HASHES_LINE}\n{EARLY_END_ERROR_LINE}\n{EARLY_END_ERROR_LINE}"),
+                               (1, f"{EARLY_END_HASHES_LINE}\n{EARLY_END_ERROR_LINE}\n{EARLY_END_LINE}")):
             with self.subTest(status=status, output=output):
                 done, log, state = self.run_refusals({"STUB_EARLY_END_STATUS": str(status), "STUB_EARLY_END_OUTPUT": output})
                 self.assertEqual(done.returncode, 1, done.stdout + log)
                 self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
                 self.assertNotIn("drill.volume", state)
                 self.assertNotIn("refusals.wal-copy", state)
+        env = {
+            "STUB_EARLY_END_STATUS": "0",
+            "STUB_EARLY_END_OUTPUT": f"{EARLY_END_ERROR_LINE}\n{EARLY_END_ERROR_LINE}\n{EARLY_END_LINE}",
+        }
+        for required in (0, 1):
+            with self.subTest(required=required):
+                done, _, _ = self.run_refusals_with_policy(required, "", env)
+                self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+                self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
         for env in ({"STUB_EARLY_END_SEGMENT_MISSING": "1"},
                     {"STUB_SEGMENTS": REFUSALS_SEGMENTS + "000000010000000000000007.partial\n"}):
             with self.subTest(env=env):
@@ -1053,6 +1167,12 @@ class StepTests(unittest.TestCase):
                 self.assertIn("refusals: early end: exit_code=none", done.stdout.splitlines())
                 self.assertNotIn("sudo dd ", log)
                 self.assertNotIn("refusals.wal-copy", state)
+
+    def test_refusals_refuse_a_complete_early_end_segment(self):
+        done, _, _ = self.run_refusals({"STUB_EARLY_END_SEGMENT_COMPLETE": "1"})
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("CI: refusals: the segment for the early end is complete.", done.stderr.splitlines())
+        self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
 
     def test_refusals_write_no_wal_and_switch_no_segment(self):
         # Marker 2 must stay in the .partial file until crash. The step prepare ended the gap segments.
@@ -1119,7 +1239,7 @@ class StepTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr + log)
         real = "/walarchive-disk/walarchive"
         for line in log.splitlines():
-            if re.match(r"^sudo (rm|install|mv|chmod|chown|touch|tee|truncate)\b", line):
+            if re.match(r"^sudo (rm|install|mv|chmod|chown|touch|tee|truncate|ln|link)\b", line):
                 self.assertNotIn(real, line)
             if line.startswith("sudo dd "):
                 self.assertNotIn(real, line)
@@ -1127,6 +1247,15 @@ class StepTests(unittest.TestCase):
                 self.assertTrue(line.endswith("/state/wal-copy/"), line)
         self.assertEqual(len(re.findall(r"^sudo rm -- ", log, re.M)), 1)
         self.assertIn(":/wal:ro pitr-volume", log)
+
+    def test_refusals_never_link_the_wal_copy_to_the_real_archive(self):
+        done, log, _ = self.run_refusals()
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        for line in log.splitlines():
+            self.assertNotRegex(line, r"^sudo ln(?:\s|$)")
+            if line.startswith("sudo cp "):
+                options = line.partition(" -- ")[0]
+                self.assertNotRegex(options, r"\s(?:--link|-[a-zA-Z]*l[a-zA-Z]*)(?:\s|$)", line)
 
     def test_refusals_run_the_gap_run_without_the_expected_position(self):
         # The check of the newest segment alone must refuse the copy, so no run gets PITR_EXPECTED_LSN.
@@ -2503,12 +2632,20 @@ case "$*" in
     if [[ $(grep -c '^sudo cp -a -- ' "$STUB_LOG") == 2 && ${STUB_EARLY_END_SEGMENT_MISSING:-0} == 0 ]]; then
       dir=${@: -1}
       mkdir -p -- "$dir"
-      for offset in 116 8176; do
-        printf '\\245' | dd of="${dir}000000010000000000000006.partial" bs=1 seek="$offset" conv=notrunc status=none
+      partial="${dir}000000010000000000000006.partial"
+      if [[ ${STUB_EARLY_END_SEGMENT_COMPLETE:-0} == 1 ]]; then
+        : >"${partial%.partial}"
+      fi
+      for offset in 96 8168 8169 8176 859104; do
+        printf '\\022' | dd of="$partial" bs=1 seek="$offset" conv=notrunc status=none || exit 1
+        printf '\\245' | dd of="$partial" bs=1 seek="$((offset + 20))" conv=notrunc status=none || exit 1
       done
     fi ;;
   "test -f "*"/state/wal-copy/"*.partial|"test -e "*"/state/wal-copy/"[0-9]*) exec "$@" ;;
-  "od "*"/state/wal-copy/"*.partial|"dd of="*"/state/wal-copy/"*.partial*) exec "$@" ;;
+  "od "*"/state/wal-copy/"*.partial) exec "$@" ;;
+  "dd of="*"/state/wal-copy/"*.partial*)
+    if [[ ${STUB_EARLY_END_SKIP_DD:-0} == 1 ]]; then exit 0; fi
+    exec "$@" ;;
   "rm -rf -- "*"/state/wal-copy") exec "$@" ;;
   "test -f "*.dump.sha256) exit 1 ;;
   "test -f "*) exit "${STUB_PARTIAL_STATUS:-0}" ;;
@@ -2521,6 +2658,8 @@ case "$*" in
     printf '%s' "${STUB_OLD_SEGMENTS-000000010000000000000002
 }" ;;
   "find "*"/base -mindepth"*)
+    if [[ ${STUB_EARLY_END_NO_BASE:-0} == 1 && $2 == */state/wal-copy/base ]] &&
+      [[ $(grep -c '^sudo cp -a -- ' "$STUB_LOG") == 2 ]]; then exit 0; fi
     # The move of the base backups empties the list.
     if ! grep -q '^sudo mv -t [^ ]*/base -- ' "$STUB_LOG"; then printf '%s\\n' "${STUB_BASES:-base_20261030_115900}"; fi ;;
   "find "*".history"*)

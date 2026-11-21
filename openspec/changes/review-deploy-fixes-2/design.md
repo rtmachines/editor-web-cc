@@ -59,9 +59,9 @@ Outcomes. The step sorts the run into exactly one class:
 
 | Class | Observation | Meaning |
 |---|---|---|
-| R (refusal) | Exit code other than 0, and exactly one `ERROR` line of `pitr-volume`, which is its last line. The step records the message | The run refuses the damaged record. The message can differ from the gap line, because check 2 passes for an end inside the newest segment |
-| S (completion) | Exit code 0, last line `pitr volume completed`, `chain_seq` equals marker 1, action `OwnPasswordChanged` | V-02 is proven. The replay ended before marker 2, and marker 2 is lost |
-| I (inconclusive) | Every other result: no `ERROR` line or more than one, a completed line with marker 2, a failed precondition, or a timeout | The proof did not work |
+| R (refusal) | Exit code other than 0. The log holds the configuration-hash line of `pitr-volume`, so `pitr-volume` passed its preconditions. The log holds exactly one `ERROR` line. That line is the last line and comes from `pitr-volume`. The step records the message | The run refuses the damaged record. The message can differ from the gap line, because check 2 passes for an end inside the newest segment |
+| S (completion) | Exit code 0. The log holds no `ERROR` line. The last line is the `INFO` line `pitr volume completed` of `pitr-volume`, with the `chain_seq` of marker 1 and the action `OwnPasswordChanged` | V-02 is proven. The replay ended before marker 2, and marker 2 is lost |
+| I (inconclusive) | Every other result is class I. A refusal before the configuration-hash line is one example. Other examples: no `ERROR` line or more than one, a completed line with marker 2, a failed precondition, or a timeout | The proof did not work |
 
 A timeout of the step kills it, so the log holds no line `class`. This result also counts as class I.
 
@@ -96,7 +96,7 @@ Decision of the owner (2026-11-21): the ADR of change B amends ADR-0106 (p) to n
 Task 1.4 replaces the second sentence of line 1040. The first sentence stays: "If `db` does not run, omit the three options `-e`."
 
 - Result R: "Without them, the script checks only that the recovery ends in the newest segment of the archive. A damaged record in that segment can stop the run. In CI, <check> then wrote the line `<message>`." The text uses the message and the check of "Proof result".
-- Result S: "Without them, the script checks only that the recovery ends in the newest segment of the archive. A damaged record in that segment can end the replay early. The commits after that record are then lost, and the run still completes. Compare the newest audit entry of the last line with your expectation in step 7."
+- Result S: "Without them and without a target time, the end check accepts an end in the newest archive segment or later. A damaged record in that segment can end the replay early. The recovered volume then lacks the commits after that record. The run still completes. Compare the newest audit entry of the last line with your expectation in step 7."
 
 ## Risks / Trade-offs
 
@@ -140,14 +140,14 @@ V-07, manifest time ahead of the clock:
 
 A Haiku agent fills this section from the log of the dispatch (task 1.2). Write each value as the log shows it. Do not round or explain. Write `none` for a row that does not apply.
 
-- Commit of the run:
-- Run URL of the job `pitr-recovery`:
-- Class (R, S, or I):
-- L, segment name, and byte offset from the lines `lsn`, `segment`, and `offset`:
-- Values of `wal_segment_size` and `wal_block_size`:
-- Offset and old and new value of the inverted byte:
-- `chain_seq` of marker 1 and of marker 2:
-- Exit code of `pitr-volume`:
-- `ERROR` line of `pitr-volume`, for class R:
-- Check of `pitr-volume` that writes that line, for class R:
-- Last line of `pitr-volume`:
+- Commit of the run: 2c264e5 (branch `fix/review-deploy-fixes-2`, run 44921173499, 2026-11-21)
+- Run URL of the job `pitr-recovery`: https://github.com/rtmachines/editor-web-cc/actions/runs/44921173499
+- Class (R, S, or I): S. V-02 is proven. The replay ended before marker 2, and `pitr-volume` reported completion.
+- L, segment name, and byte offset from the lines `lsn`, `segment`, and `offset`: `lsn` 0/50D1BE0, `segment` 000000010000000000000005, `offset` 859104.
+- Values of `wal_segment_size` and `wal_block_size`: 16777216 and 8192.
+- Offset and old and new value of the inverted byte: offset 859124, old value 164, new value 91.
+- `chain_seq` of marker 1 and of marker 2: 23 and 24.
+- Exit code of `pitr-volume`: 0.
+- `ERROR` line of `pitr-volume`, for class R: none.
+- Check of `pitr-volume` that writes that line, for class R: none.
+- Last line of `pitr-volume`: `{"timestamp":"2026-11-21T15:56:16Z","level":"INFO","job":"pitr-volume","message":"pitr volume completed","base_backup":"base_20261121_155109","system_identifier":"7710652830984839193","timeline":2,"chain_seq":23,"occurred_at":"2026-11-21T15:56:05.932648Z","action":"OwnPasswordChanged","heartbeat_last_at":"2026-11-21T15:56:04.911859Z","drill":false}`

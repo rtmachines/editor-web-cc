@@ -251,16 +251,18 @@ drill() {
 # The ERROR lines that pitr-volume writes (ADR-0106 (a) and (g) step 2). A target after the newest commit ends the recovery with FATAL.
 TARGET_ERROR="the temporary server did not finish the recovery"
 GAP_ERROR="the recovery ended before the end of the WAL archive"
+# V-02: change B sets 1 with its fix of ADR-0106 (g) step 2.
 EARLY_END_REFUSAL_REQUIRED=0
 EARLY_END_ERROR=""
 # The word @JOB@ becomes the job that writes the line. The step refuse expects a line of walarchive-entry.
 ERROR_LINE_PATTERN='^\{"timestamp":"[^"]+","level":"ERROR","job":"@JOB@","message":"([^"]*)"\}$'
 # pitr-volume can add fields to an ERROR line.
 EARLY_END_ERROR_PATTERN='^\{"timestamp":"[^"]+","level":"ERROR","job":"pitr-volume","message":"([^"]*)"(,.*)?\}$'
+# Step 7 of pitr-volume logs the hashes before it starts the recovery server.
+EARLY_END_HASHES_PATTERN='^\{"timestamp":"[^"]+","level":"INFO","job":"pitr-volume","message":"configuration files of the copy hashed"(,.*)?\}$'
 # The ERROR line of the guard of walarchive-entry for a segment of another timeline (ADR-0106 (m)).
 TIMELINE_ERROR="segments of another timeline are in the WAL archive"
-# The name of the running step and the job that writes its ERROR line. The step refuse sets both.
-# The shared functions use them in their messages. The step refusals runs with the defaults.
+# The shared functions use these names in their messages. The step refuse sets both names.
 ERROR_STEP=refusals
 ERROR_JOB=pitr-volume
 # One hour after the clock of db lies after every commit that the archive can hold when the run starts.
@@ -458,13 +460,15 @@ classify_early_end() {
   local last=${proof[last_line]}
   if [[ ${proof[exit_code]} != 0 ]]
   then
-    if [[ $(grep -c '"level":"ERROR"' "$1" || true) == 1 && $last =~ $EARLY_END_ERROR_PATTERN ]]
+    if grep -Eq "$EARLY_END_HASHES_PATTERN" "$1" \
+      && [[ $(grep -c '"level":"ERROR"' "$1" || true) == 1 && $last =~ $EARLY_END_ERROR_PATTERN ]]
     then
       proof[class]=R
       proof[error_line]=$last
       proof[error_message]=${BASH_REMATCH[1]}
     fi
-  elif [[ $last =~ $PITR_MESSAGE_PATTERN && $last == *'"level":"INFO","job":"pitr-volume",'* \
+  elif [[ $(grep -c '"level":"ERROR"' "$1" || true) == 0 \
+    && $last =~ $PITR_MESSAGE_PATTERN && $last == *'"level":"INFO","job":"pitr-volume",'* \
     && $last =~ $LINE_SEQ_PATTERN && ${BASH_REMATCH[1]} == "${proof[marker1_seq]}" \
     && $last =~ $LINE_ACTION_PATTERN && ${BASH_REMATCH[1]} == "$MARKER_ACTION" ]]
   then
@@ -474,7 +478,7 @@ classify_early_end() {
 
 run_early_end() {
   local log_file=$CI_STATE/early-end.log status=0
-  local -A proof=([class]=I)
+  declare -gA proof=([class]=I)
   trap 'refusals_exit early-end' EXIT
   read_early_end_state
   copy_wal_archive
@@ -483,10 +487,9 @@ run_early_end() {
   log "refusals: run pitr-volume with one damaged record in the copy of /wal"
   create_scratch_volume refusals
   compose run --rm --no-deps -T -v "$SCRATCH_VOLUME:/var/lib/postgresql/data" \
-    -v "$WAL_COPY_DIR:/wal:ro" pitr-volume >"$log_file" || status=$?
+    -v "$WAL_COPY_DIR:/wal:ro" pitr-volume | tee "$log_file" || status=$?
   proof[exit_code]=$status
   proof[last_line]=$(tail -n 1 "$log_file")
-  cat "$log_file"
   delete_drill_volume
   delete_wal_copy
   trap refusals_exit EXIT

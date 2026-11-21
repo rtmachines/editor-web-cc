@@ -12,6 +12,8 @@ This file records the notable changes of the recipe editor. The format follows [
 - A second test checks that the budget comment of the CI job `upgrade` equals the sum of its step limits.
 - The runbook checks of `deploy/ci/test_upgrade_runbook.py` read code blocks inside list items and nested list items.
   A test checks that the section "Upgrade" has 18 Bash blocks.
+- The CI job `pitr-recovery` adds a fourth recovery run in its `refusals` step.
+  The run checks for an early end to WAL replay on a copy of the archive with one damaged record.
 
 ### Changed
 
@@ -33,6 +35,10 @@ This file records the notable changes of the recipe editor. The format follows [
 - Step 7 of the section "Release" of `CONTRIBUTING.md` puts the `CHANGELOG.md` section of the release into the body of the GitHub release. The step adds the SHA-256 values and the image IDs.
 - The CI step "Prepare the disks and secrets" has a limit of 10 minutes in five jobs. The budget comment of the job `upgrade` gives 83 minutes.
 - The job limits of `restore-switch` and `pitr-recovery` rise to 130 and 160 minutes.
+- Step 6 of "Recover from the WAL archive" explains the end check when `db` does not run and the operator gives no target time.
+  The check accepts an end in the newest archive segment or later.
+  A damaged record can end replay early, and the recovered volume can lack later commits.
+  The step tells the operator to compare the newest audit entry with the expected entry.
 
 ### Fixed
 

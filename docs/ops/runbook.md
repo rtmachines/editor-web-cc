@@ -1037,7 +1037,7 @@ docker compose run --rm --no-deps -T -e PITR_EXPECTED_LSN=<lsn> -e PITR_MARKER_S
 ```
 
    - With a target time, omit the three options `-e` and add `--target-time <time>` after `pitr-volume`.
-   - If `db` does not run, omit the three options `-e`. The script then checks the end of the archive without them.
+   - If `db` does not run, omit the three options `-e`. Without them and without a target time, the end check accepts an end in the newest archive segment or later. A damaged record in that segment can end the replay early. The recovered volume then lacks the commits after that record. The run still completes. Compare the newest audit entry of the last line with your expectation in step 7.
    - The last output line is `pitr volume completed`. Note its fields `base_backup`, `system_identifier`, `timeline`, and `drill`.
    - If the command exits with a code other than 0, read its `ERROR` line. The new volume holds no production data.
    - The line `the recovery ended before the end of the WAL archive` shows a gap in the archive. Do not switch to this volume.
