@@ -458,6 +458,11 @@ The server SHALL read `X-Forwarded-For` and `X-Forwarded-Proto` only from an add
 - **WHEN** the request carries the header `X-Forwarded-For: 10.0.0.5`
 - **THEN** the server uses `10.0.0.5` as the client address
 
+#### Scenario: Trusted-proxy entry in IPv4-mapped form
+- **GIVEN** the trusted-proxy list `::ffff:172.28.0.2/128` and a request from the socket address `172.28.0.2`
+- **WHEN** the request carries the header `X-Forwarded-For: 10.0.0.5`
+- **THEN** the server uses `10.0.0.5` as the client address
+
 #### Scenario: Forwarded entry that is not an address
 - **GIVEN** a request from a trusted proxy
 - **WHEN** the request carries the header `X-Forwarded-For: not-an-address`
