@@ -2637,8 +2637,8 @@ case "$*" in
         : >"${partial%.partial}"
       fi
       for offset in 96 8168 8169 8176 859104; do
-        printf '\\022' | dd of="$partial" bs=1 seek="$offset" conv=notrunc status=none || exit 1
-        printf '\\245' | dd of="$partial" bs=1 seek="$((offset + 20))" conv=notrunc status=none || exit 1
+        printf '\\022' | dd of="$partial" bs=1 seek="$offset" conv=notrunc status=none || { echo 'dd: cannot write the partial segment' >&2; exit 1; }
+        printf '\\245' | dd of="$partial" bs=1 seek="$((offset + 20))" conv=notrunc status=none || { echo 'dd: cannot write the partial segment' >&2; exit 1; }
       done
     fi ;;
   "test -f "*"/state/wal-copy/"*.partial|"test -e "*"/state/wal-copy/"[0-9]*) exec "$@" ;;
