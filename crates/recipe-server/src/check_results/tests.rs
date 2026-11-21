@@ -629,7 +629,8 @@ fn the_fault_text_names_the_check_and_no_path() {
 #[cfg(unix)]
 const EVENT_WAIT: Duration = Duration::from_secs(10);
 
-/// Run `open_result_file` on `path` in a helper thread. A blocked open fails the test and not the run.
+/// Run `open_result_file` on `path` in a helper thread. A blocked open fails the test and not the
+/// run.
 #[cfg(unix)]
 fn open_in_helper_thread(path: PathBuf) -> Reading {
     let (sender, receiver) = std::sync::mpsc::channel();
@@ -657,7 +658,8 @@ fn the_opener_refuses_a_link_without_following_it() {
     assert!(matches!(reading, Reading::Rejected), "got {reading:?}");
 }
 
-#[cfg(unix)]
+// rustix has no mknodat on Apple targets, so this test skips them.
+#[cfg(all(unix, not(target_vendor = "apple")))]
 #[test]
 fn the_opener_refuses_a_fifo_without_blocking() {
     use rustix::fs::{CWD, FileType, Mode, mknodat};
@@ -669,4 +671,19 @@ fn the_opener_refuses_a_fifo_without_blocking() {
     let reading = open_in_helper_thread(fifo);
 
     assert!(matches!(reading, Reading::Rejected), "got {reading:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn the_opener_refuses_a_socket_without_an_error() {
+    use std::os::unix::net::UnixListener;
+
+    let sandbox = Sandbox::new();
+    let socket = sandbox.file(ScheduledCheck::RestoreTest);
+    let listener = UnixListener::bind(&socket).expect("the socket path is short enough to bind");
+
+    let reading = open_in_helper_thread(socket);
+
+    assert!(matches!(reading, Reading::Rejected), "got {reading:?}");
+    drop(listener);
 }

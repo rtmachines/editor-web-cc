@@ -185,9 +185,11 @@ fn stored_under(
 /// # Errors
 ///
 /// Returns the error of the first rule that fails. The rules run in this order.
-/// `E-RCP-003` or `E-RCP-053` come from the platform rule, `E-RCP-057` from the data block rule,
-/// `E-RCP-054` or `E-RCP-023` from the tree rules, `E-RCP-056` from the end rule, and
-/// `E-RCP-058` from the standard-access rule.
+/// The platform rule gives `E-RCP-003` or `E-RCP-053`.
+/// The data block rule gives `E-RCP-057`.
+/// The tree rules give `E-RCP-054` or `E-RCP-023`.
+/// The end rule gives `E-RCP-056`.
+/// The standard-access rule gives `E-RCP-058`.
 pub(crate) fn check_definition(
     platform: PlcPlatform,
     tag: &ParameterTag,

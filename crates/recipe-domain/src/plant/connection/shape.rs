@@ -240,7 +240,8 @@ fn s7_plan(faults: &mut Faults, fields: ConnectionFields) -> Option<ConnectionPl
 /// A mode without credentials gives `Clear`. This covers `ModbusTcp` and `Ads` without a login.
 /// A mode with credentials gives `Replace` for a new password and `Keep` for a stored one.
 /// The case of a mode with credentials, no new password, and no stored password is a fault
-/// that `Faults::check_missing_credentials` records. Its plan is `Clear` and the caller never uses it.
+/// that `Faults::check_missing_credentials` records. Its plan is `Clear` and the caller never uses
+/// it.
 fn password_plan(
     mode: CommMode,
     has_login: bool,

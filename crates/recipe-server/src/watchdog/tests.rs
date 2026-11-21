@@ -275,9 +275,15 @@ fn wait_for(calls: &AtomicU32, at_least: u32) {
 fn a_watchdog_that_is_not_armed_never_probes() {
     let gated = start_gated();
 
+    assert_eq!(
+        gated
+            .started
+            .recv_timeout(GATED_INTERVAL * NO_PROBE_INTERVALS),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "a probe ran before arm"
+    );
     stop_bounded(gated.watchdog);
 
-    assert!(gated.started.try_recv().is_err());
     assert!(gated.trips.try_recv().is_err());
 }
 

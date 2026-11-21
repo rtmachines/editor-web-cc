@@ -160,6 +160,8 @@ impl CheckResults for FileCheckResults {
 ///
 /// A missing file is `Reading::Missing`. A link, a directory, another kind of entry, and a file
 /// above the limit are `Reading::Rejected`. The opener never follows a link and never blocks.
+/// Other systems check the metadata first, so a rename between the check and the open can follow
+/// a link (D13, ADR-0060 (c)).
 fn read_result_file(path: &Path) -> io::Result<Reading> {
     let file = match open_result_file(path)? {
         Ok(file) => file,
@@ -178,7 +180,8 @@ fn read_result_file(path: &Path) -> io::Result<Reading> {
 /// Open the regular file at `path`. A refusal is the `Err` of the inner result.
 ///
 /// The flags `NOFOLLOW` and `NONBLOCK` keep a link from giving its target and a FIFO from blocking
-/// the open. The `fstat` of the open descriptor decides, so a rename after the open changes nothing.
+/// the open. The `fstat` of the open descriptor decides, so a rename after the open changes
+/// nothing.
 #[cfg(unix)]
 fn open_result_file(path: &Path) -> io::Result<Result<File, Reading>> {
     use rustix::fs::{FileType, Mode, OFlags, fstat, open};
@@ -189,6 +192,8 @@ fn open_result_file(path: &Path) -> io::Result<Result<File, Reading>> {
         Ok(descriptor) => descriptor,
         Err(Errno::NOENT) => return Ok(Err(Reading::Missing)),
         Err(Errno::LOOP) => return Ok(Err(Reading::Rejected)),
+        // Linux gives `ENXIO` for the open of a socket. A socket is another kind of entry.
+        Err(Errno::NXIO) => return Ok(Err(Reading::Rejected)),
         Err(fault) => return Err(fault.into()),
     };
     let status = fstat(&descriptor)?;
@@ -203,7 +208,8 @@ fn open_result_file(path: &Path) -> io::Result<Result<File, Reading>> {
 
 /// Open the regular file at `path`. A refusal is the `Err` of the inner result.
 ///
-/// Other systems check the metadata of the entry first, like the `DiskSpace` adapter (ADR-0060 (c)).
+/// Other systems check the metadata of the entry first, like the `DiskSpace` adapter (ADR-0060
+/// (c)).
 #[cfg(not(unix))]
 fn open_result_file(path: &Path) -> io::Result<Result<File, Reading>> {
     let metadata = match std::fs::symlink_metadata(path) {

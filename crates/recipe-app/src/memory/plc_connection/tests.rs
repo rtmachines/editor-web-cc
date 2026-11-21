@@ -48,7 +48,8 @@ fn s7() -> PlcConnection {
     }
 }
 
-/// An `Ads` address must be an AMS Net ID, like the table check `plc_connection_ams_net_id` demands.
+/// An `Ads` address must be an AMS Net ID, like the table check `plc_connection_ams_net_id`
+/// demands.
 fn iec(mode: CommMode, login: Option<&str>) -> PlcConnection {
     let address = if mode == CommMode::Ads {
         "5.12.34.56.1.1"

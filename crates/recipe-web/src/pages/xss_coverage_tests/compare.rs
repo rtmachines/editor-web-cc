@@ -96,24 +96,50 @@ fn declares_fn(line: &str, needle: &str) -> bool {
 }
 
 /// Return true when the attribute group above line `index` marks a test and holds no other cfg.
+///
+/// The scan fails closed. A line that stops the scan and is not a blank line, a `}`, or the end
+/// of a statement can end an attribute that spans lines, such as `))]`. The scan did not read it.
 fn is_test_attribute_group(lines: &[&str], index: usize) -> bool {
-    let above = lines
+    let above: Vec<&str> = lines
         .get(..index)
         .unwrap_or_default()
         .iter()
         .rev()
         .map(|line| line.trim())
-        .take_while(|line| line.starts_with("#[") || line.starts_with("//"))
-        .filter(|line| line.starts_with("#["));
+        .collect();
+    let group = above
+        .iter()
+        .take_while(|line| line.starts_with("#[") || line.starts_with("//"));
+    let stop = above
+        .iter()
+        .find(|line| !(line.starts_with("#[") || line.starts_with("//")));
+    if stop.is_some_and(|line| !ends_an_item(line)) {
+        return false;
+    }
     let (mut has_test, mut has_other_cfg) = (false, false);
-    for attribute in above {
-        has_test |= attribute == "#[test]" || attribute == "#[tokio::test]";
-        has_other_cfg |= attribute.starts_with("#[cfg(") && attribute != "#[cfg(test)]";
+    for attribute in group.filter(|line| line.starts_with("#[")) {
+        has_test |= *attribute == "#[test]" || *attribute == "#[tokio::test]";
+        has_other_cfg |= attribute.starts_with("#[cfg(") && *attribute != "#[cfg(test)]";
+        has_other_cfg |= disables_a_test(attribute);
     }
     has_test && !has_other_cfg
 }
 
-/// Return true when a test file of `src/` has a test `fn name(`. The files of this module do not count.
+/// Return true when an attribute line can skip a test: `#[ignore`, or a `#[cfg_attr(` that
+/// names `ignore` or does not close on its line. CI runs no ignored test.
+fn disables_a_test(attribute: &str) -> bool {
+    attribute.starts_with("#[ignore")
+        || (attribute.starts_with("#[cfg_attr(")
+            && (attribute.contains("ignore") || !attribute.ends_with(']')))
+}
+
+/// Return true when a line is blank or closes or opens an item, so no attribute can end on it.
+fn ends_an_item(line: &str) -> bool {
+    line.is_empty() || line == "}" || line.ends_with('{') || line.ends_with(';')
+}
+
+/// Return true when a test file of `src/` has a test `fn name(`. The files of this module do not
+/// count.
 ///
 /// A test `fn` has `#[test]` or `#[tokio::test]` in its attribute group and no `#[cfg(...)]`
 /// other than `#[cfg(test)]`. A plain `fn` or a `fn` under another cfg does not run.
@@ -135,7 +161,8 @@ const INTEGER_TYPES: [&str; 12] = [
     "u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize",
 ];
 
-/// The number of lines that a read and its parse call can span: the line of the read and three more.
+/// The number of lines that a read and its parse call can span: the line of the read and three
+/// more.
 const PARSE_WINDOW_LINES: usize = 4;
 
 /// Remove each `Option<...>` around a type text.
@@ -182,7 +209,7 @@ fn parses_field(text: &str, field: &str, others: &[&str], path: &str) -> bool {
             .iter()
             .skip(start)
             .take(PARSE_WINDOW_LINES)
-            .copied()
+            .map(|line| line.split_once("//").map_or(*line, |(code, _)| code))
             .collect();
         let first = window.first().copied().unwrap_or_default();
         let window = window.join("\n");

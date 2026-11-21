@@ -337,22 +337,21 @@ impl PlcConnections for MemoryTransaction {
         &mut self,
         machine: MachineId,
     ) -> Result<Option<StoredConnection>, StorageError> {
+        let Some(row) = self.state().connections.get(&machine) else {
+            return Ok(None);
+        };
         let code = self.machine_code(machine)?;
-        self.state()
-            .connections
-            .get(&machine)
-            .map(|row| row.stored(code))
-            .transpose()
+        row.stored(code).map(Some)
     }
 
     async fn lock_connection_for_update(
         &mut self,
         machine: MachineId,
     ) -> Result<Option<Locked<StoredConnection>>, StorageError> {
-        let code = self.machine_code(machine)?;
         let Some(row) = self.state().connections.get(&machine) else {
             return Ok(None);
         };
+        let code = self.machine_code(machine)?;
         let locked = Locked {
             state: row.stored(code)?,
             before: row.image(machine),
@@ -365,10 +364,10 @@ impl PlcConnections for MemoryTransaction {
         &mut self,
         machine: MachineId,
     ) -> Result<Option<SharedConnection>, StorageError> {
-        let code = self.machine_code(machine)?;
         let Some(row) = self.state().connections.get(&machine) else {
             return Ok(None);
         };
+        let code = self.machine_code(machine)?;
         let shared = SharedConnection {
             stored: row.stored(code)?,
             sealed: row.sealed.clone(),

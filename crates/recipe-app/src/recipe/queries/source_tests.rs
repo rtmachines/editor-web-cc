@@ -109,15 +109,26 @@ fn every_file_with_an_execute_function_is_listed() {
     }
 }
 
-/// The text of the resolve of the platform types. It runs after the transaction ends (ADR-0042 (f)).
+/// The text of the resolve of the platform types. It runs after the transaction ends (ADR-0042
+/// (f)).
 const RESOLVE: &str = "PlatformTypes::collect(";
 
 /// The text that ends the transaction of a query.
 const END_OF_TRANSACTION: &str = "drop(tx)";
 
-/// Return true when `drop(tx)` comes before the first resolve in `body`.
+/// Return `body` with each line cut at its first `//`, so that a comment never matches.
+fn without_comments(body: &str) -> String {
+    let lines: Vec<&str> = body
+        .lines()
+        .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
+        .collect();
+    lines.join("\n")
+}
+
+/// Return true when `drop(tx)` comes before the first resolve in the code of `body`.
 fn drops_the_transaction_before_the_resolve(body: &str) -> bool {
-    match (body.find(END_OF_TRANSACTION), body.find(RESOLVE)) {
+    let code = without_comments(body);
+    match (code.find(END_OF_TRANSACTION), code.find(RESOLVE)) {
         (Some(drop_at), Some(resolve_at)) => drop_at < resolve_at,
         _ => false,
     }
@@ -152,4 +163,11 @@ fn a_body_that_resolves_before_it_drops_the_transaction_is_found() {
 
     assert!(!drops_the_transaction_before_the_resolve(late));
     assert!(drops_the_transaction_before_the_resolve(early));
+}
+
+#[test]
+fn a_body_with_the_drop_only_in_a_comment_is_found() {
+    let commented = "// drop(tx);\nlet t = PlatformTypes::collect(a);";
+
+    assert!(!drops_the_transaction_before_the_resolve(commented));
 }

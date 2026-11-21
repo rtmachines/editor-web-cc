@@ -103,6 +103,22 @@ async fn a_machine_without_a_record_gives_none_on_every_method(h: &dyn Harness) 
     assert!(shared.unwrap().is_none());
 }
 
+async fn an_unknown_machine_gives_none_on_every_method(h: &dyn Harness) {
+    let machine = machine_id(9);
+    let mut tx = begin(h).await;
+
+    let read = tx.plc_connections().connection_by_machine(machine).await;
+    let for_update = tx
+        .plc_connections()
+        .lock_connection_for_update(machine)
+        .await;
+    let shared = tx.plc_connections().lock_connection_shared(machine).await;
+
+    assert!(read.unwrap().is_none());
+    assert!(for_update.unwrap().is_none());
+    assert!(shared.unwrap().is_none());
+}
+
 async fn insert_of_an_s7_record_starts_at_row_version_1_and_reads_back(h: &dyn Harness) {
     let machine = save_machine(h, 2, "M2", PlcPlatform::S7_1500).await;
     let built = s7_connection("192.168.1.20", "0", "2");
@@ -641,6 +657,11 @@ contract_case!(
     a_machine_without_a_record_gives_none_on_every_method,
     a_machine_without_a_record_gives_none_on_every_method_memory,
     a_machine_without_a_record_gives_none_on_every_method_postgres
+);
+contract_case!(
+    an_unknown_machine_gives_none_on_every_method,
+    an_unknown_machine_gives_none_on_every_method_memory,
+    an_unknown_machine_gives_none_on_every_method_postgres
 );
 contract_case!(
     insert_of_an_s7_record_starts_at_row_version_1_and_reads_back,

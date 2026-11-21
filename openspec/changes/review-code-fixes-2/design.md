@@ -98,17 +98,18 @@ Each row of `2026-11-21-fix-plan.md` §3.1 must pass four checks to stay in this
 
 ### D11. Tests that end on an event (V-32, V-33, V-35)
 
+- Rule: a test waits on events. It may bound one wait with `recv_timeout` of `EVENT_WAIT`. It never calls `thread::sleep`.
 - V-32: the watchdog is a `std` thread on `recv_timeout`, so paused `tokio` time does not apply. The tests use the gated fake of `start_gated` and need no change of production code.
   - Disarm: arm, receive `started`, call `disarm()`, and open the gate. Then `started.recv_timeout(k * interval)` gives `Timeout`, with `k` a named constant above 1. Then `stop_bounded` joins the thread.
   - Arm again: arm, receive `started`, disarm, and open the gate. Then arm again and receive a second `started` within `EVENT_WAIT`.
   - Drop: arm, receive `started`, drop the handle, and open the gate. The thread ends, and `started.recv_timeout(EVENT_WAIT)` gives `Disconnected` and no second start.
-  - Not armed: the test calls `stop_bounded` and asserts that `started` holds no start. An unarmed loop has no event that a test can observe. The test therefore keeps no sleep.
+  - Not armed: the test waits for one full interval of the thread before it sends `Stop` through `stop_bounded`, and asserts that `started` holds no start. An unarmed loop has no event that a test can observe.
 - V-33: a helper thread runs `wait_for_signal` and sends the server back on a channel. The test waits with `recv_timeout(EVENT_WAIT)`, so a lost signal fails with a message. It asserts `stop_cause() == Some(StopCause::Signal)` before `close`.
 - V-35: the e2e test waits for `location.hash` to equal `#parameter-save-submit`. Then the page sends one sentinel `fetch` of `/static/app.css` with `cache: 'no-store'`, so the browser cache cannot hide it. The test waits for that request to finish and asserts that the request list holds only the sentinel. `NO_REQUEST_WINDOW_MS` goes away.
 
 ### D12. XSS guard (V-34)
 
-- Corpus: `has_test_fn` accepts `fn name(` only when the attribute group above it holds `#[test]` or `#[tokio::test]` and no `#[cfg(` other than `#[cfg(test)]`. A `#[cfg]` on the enclosing module stays out of scope.
+- Corpus: `has_test_fn` accepts `fn name(` only when the attribute group above it holds `#[test]` or `#[tokio::test]` and no `#[cfg(` other than `#[cfg(test)]`. A `#[cfg]` on the enclosing module stays out of scope. A corpus fn does not count when its attribute group holds `#[ignore]` or `#[cfg_attr(...)]` naming `ignore`.
 - `NoText`: every `NoText` field that holds text is a `String` (for example `role` of `users.rs` and `page` of `users/query.rs`). A check by field type alone therefore refuses all these entries or permits all of them.
 - New rule, owner approves with `tasks.md`: `Cover::NoText` holds a closed kind. The scan records the Rust name and the type text of each field. Each kind has one check.
   - `Unread`: the Rust name starts with `_`, so no handler can read the field. Each CSRF field uses this kind.
@@ -137,6 +138,13 @@ The owner decided on 2026-11-21 that these three findings move to change B `revi
 - V-20: a refusal with `E-PLT-020` needs a new variant or a new field, because `UnitNotFound` names a path. That changes the owner cell of `E-PLT-020` in `reliability.md` §1.2. The other path is an amendment of ADR-0028. Owner decision: V-20 moves to change B. The tests `units_of_another_machine_give_e_plt_020_items` in `snapshot/tests.rs` and `draft/approval/tests.rs` pin the HEAD behavior.
 - V-28: `CONTRIBUTING.md` line 77 has no fault, because `deny.toml` has `[bans]`. Owner decision: V-28 moves to change B. The amendments ADR of change B adds "a banned dependency edge" to `reliability.md` §8.
 
+The code review of 2026-11-21 left four open points for change B `review-design-fixes-2`:
+
+- A-05: The `Parsed` check matches by module and field name, so two structs with one field name share one check.
+- A-09: The code can read a field that starts with `_`, so the `Unread` kind can be wrong.
+- A-10: A `Corpus` entry can name the test of another field. This gap is older than this change.
+- A-11: The sentinel request of the e2e test misses a request that starts after the sentinel.
+
 ## Settled points
 
 The plan review of 2026-11-21 found these three decisions right.
@@ -152,7 +160,7 @@ The plan review of 2026-11-21 found these three decisions right.
 ## Risks / Trade-offs
 
 - [D6] A stored row that `for_platform` refuses now gives `E-DB-008` on the read. The `CHECK` constraints prevent such a row, so no live data changes.
-- [D11 V-32] The unarmed test is weaker without a sleep. It still fails when a probe runs before the stop.
+- [D11 V-32] The unarmed test waits one full interval of the thread before it sends `Stop`. That wait adds run time to the test.
 - [D12] The scan reads the type text of a field. A type alias hides the real type. → `Typed` and `Secret` accept only the named type texts.
 - [D12] The window of `Parsed` reads source text. A call that spans more than four lines fails the check. → The author moves the path next to the read.
 - [Tasks] Several tasks edit one file. → `tasks.md` gives the order of these tasks.

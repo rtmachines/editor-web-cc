@@ -209,7 +209,8 @@ async fn page_layout_of_the_full_error_page() {
     }
 }
 
-// --- Specs "Navigation by permission", "Language switch on full pages", "Language labels" ---------------------
+// --- Specs "Navigation by permission", "Language switch on full pages", "Language labels"
+// ---------------------
 
 /// Return the markup of the navigation of a page, or an empty text.
 fn nav_of(body: &str) -> String {

@@ -43,7 +43,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - Step 2 of the runbook section "Upgrade" names its three text blocks below step 24. The operator does them before the four checks.
 - Part 4 of step 12 of the section "Upgrade" names the case "Step 8 or 9 fails" by its text block.
   That text block is "Recovery after a failure between two steps".
-- `POST .../definition` for an unchanged type without value fields keeps the stored value and limits. It no longer gives `422 E-RCP-005` (V-05).
+- `POST .../definition` for an unchanged type without value fields and without limit fields keeps the stored value and limits. It no longer gives `422 E-RCP-005` (V-05).
 - `ListParameters` ends its read transaction before it resolves the type trees of a page (V-09).
 - A PLC connection lists each missing login (`E-PLT-023`) at step 2 of the check order (V-12).
 - Both storage adapters build stored PLC connections through `PlcConnection::for_platform`, the one constructor (V-13).

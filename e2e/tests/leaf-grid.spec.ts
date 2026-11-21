@@ -154,7 +154,8 @@ test.describe('jump link after the leaf grid', () => {
       await link.click();
       await expect(save, 'the link brings the save button into view').toBeInViewport();
       await page.waitForFunction(() => window.location.hash === '#parameter-save-submit');
-      // The sentinel fetch ends after any earlier request started. `no-store` keeps the cache from hiding it.
+      // The sentinel fetch ends after any earlier request started. `no-store` keeps the cache from
+      // hiding it.
       await page.evaluate(async (path) => {
         await fetch(path, { cache: 'no-store' });
       }, SENTINEL_PATH);
