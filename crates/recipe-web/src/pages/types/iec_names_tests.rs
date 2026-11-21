@@ -162,21 +162,7 @@ async fn adr_0204_too_few_members_names_no_input() {
         &body,
     )
     .await;
-    assert_eq!(
-        reply.status,
-        StatusCode::UNPROCESSABLE_ENTITY,
-        "{}",
-        reply.body
-    );
-    assert!(reply.body.contains("E-PLT-013"), "{}", reply.body);
-    assert!(
-        !reply.body.contains("class=\"target-link\""),
-        "{}",
-        reply.body
-    );
-    let form = swapped_form(&reply.body);
-    assert!(!form.contains("aria-invalid=\"true\""), "{form}");
-    assert!(!form.contains("class=\"field-error\""), "{form}");
+    assert_no_input_named(&reply);
 }
 
 /// A refused referenced struct keeps its line under the type input of the member row. `type_expr`
@@ -367,6 +353,64 @@ async fn adr_0203_two_revisions_of_the_refused_struct_name_no_input() {
     let rows = [("old", "ST_x@1"), ("new", "ST_x@2")];
     let reply = post_coil(&world, code, &rows).await;
     assert_no_input_named(&reply);
+}
+
+/// ADR-0186 (f), ADR-0050 (d): the refusal of a Siemens reserved name depends on the name only,
+/// so two revisions of it still get the line under the first row that names it.
+#[tokio::test]
+async fn adr_0186_two_revisions_of_a_siemens_reserved_struct_name_the_first_row() {
+    let world = world();
+    let (code, id) = seed_machine_on(&world.fixture, 7, PlcPlatform::S7_300);
+    for (number, revision) in [(1, 1), (2, 2)] {
+        seed_int_struct(
+            &world,
+            (id, PlcPlatform::S7_300),
+            (number, "AXIS_REF", revision),
+            &["a", "b"],
+        );
+    }
+    let rows = [
+        ("speed", "INT"),
+        ("axis", "AXIS_REF@1"),
+        ("axes", "AXIS_REF@2"),
+    ];
+    let reply = post_coil(&world, code, &rows).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    assert_line_under(&reply.body, "members-1-type");
+    let reason = text(Lang::En, "type-reason-reserved-name");
+    assert!(reply.body.contains(&reason), "{}", reply.body);
+}
+
+/// ADR-0203 (i1), ADR-0050 (d): the refusal of an IEC reserved struct name depends on the name
+/// only, so two revisions of it still get the line under the first row that names it.
+#[tokio::test]
+async fn adr_0203_two_revisions_of_an_iec_reserved_struct_name_the_first_row() {
+    let world = world();
+    let (code, id) = seed_machine_on(&world.fixture, 8, PlcPlatform::TwinCat3);
+    for (number, revision) in [(1, 1), (2, 2)] {
+        seed_int_struct(
+            &world,
+            (id, PlcPlatform::TwinCat3),
+            (number, "VERSION", revision),
+            &["a", "b"],
+        );
+    }
+    let rows = [("speed", "INT"), ("old", "VERSION@1"), ("new", "VERSION@2")];
+    let reply = post_coil(&world, code, &rows).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        reply.body
+    );
+    assert_line_under(&reply.body, "members-1-type");
+    let reason = text(Lang::En, "type-reason-reserved-name");
+    assert!(reply.body.contains(&reason), "{}", reply.body);
 }
 
 /// ADR-0050 (d): two members name the same refused revision, so the line goes under the first row.
