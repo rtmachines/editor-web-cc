@@ -3,10 +3,18 @@
 //! The stub fires the signal at an exact point. The start must then close what it opened, in the
 //! order of the unwind, and report `Interrupted`.
 
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+
 use super::{expect_interrupted, expect_running};
 use crate::serve::host::ListenerKind;
+use crate::serve::server::StopCause;
 use crate::serve::test_support::stub::{Event, Point, Pool, StubHost};
 use crate::serve::test_support::{INTERNAL_PORT, LogCapture, PUBLIC_PORT};
+
+/// The longest wait for the stop signal. A lost signal fails the test within this time.
+const EVENT_WAIT: Duration = Duration::from_secs(10);
 
 /// The events of the unwind with the pools in `pools` open, in order.
 fn unwind(pools: &[Pool]) -> Vec<Event> {
@@ -98,8 +106,21 @@ fn an_interrupted_start_writes_no_error_line() {
 #[test]
 fn a_signal_after_the_start_ends_the_wait_of_the_running_server() {
     let host = StubHost::new();
-    let mut server = expect_running(&host);
+    let server = expect_running(&host);
     host.fire.now();
-    server.wait_for_signal();
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut server = server;
+        server.wait_for_signal();
+        // The receiver is gone only after a failed wait, so a failed send needs no report.
+        let _ = done_tx.send(server);
+    });
+    let received = done_rx.recv_timeout(EVENT_WAIT);
+    assert!(
+        received.is_ok(),
+        "the stop signal did not end the wait within {EVENT_WAIT:?}"
+    );
+    let server = received.unwrap();
+    assert_eq!(server.stop_cause(), Some(StopCause::Signal));
     let _report = server.close();
 }

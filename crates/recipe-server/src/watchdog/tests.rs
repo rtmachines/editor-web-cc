@@ -273,13 +273,12 @@ fn wait_for(calls: &AtomicU32, at_least: u32) {
 
 #[test]
 fn a_watchdog_that_is_not_armed_never_probes() {
-    let (watchdog, calls, trips) = start_with_fake(fast_settings(), Err(ProbeFault::Timeout));
+    let gated = start_gated();
 
-    std::thread::sleep(Duration::from_millis(80));
-    stop_bounded(watchdog);
+    stop_bounded(gated.watchdog);
 
-    assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert!(trips.try_recv().is_err());
+    assert!(gated.started.try_recv().is_err());
+    assert!(gated.trips.try_recv().is_err());
 }
 
 #[test]
@@ -309,33 +308,40 @@ fn a_healthy_probe_never_trips() {
 
 #[test]
 fn disarm_stops_the_probes() {
-    let (watchdog, calls, trips) = start_with_fake(fast_settings(), Ok(()));
-    watchdog.arm();
-    wait_for(&calls, 2);
+    let gated = start_gated();
+    gated.watchdog.arm();
+    gated.started.recv_timeout(EVENT_WAIT).unwrap();
 
-    watchdog.disarm();
-    std::thread::sleep(Duration::from_millis(40));
-    let settled = calls.load(Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(60));
-    let later = calls.load(Ordering::SeqCst);
-    stop_bounded(watchdog);
+    gated.watchdog.disarm();
+    gated.gate.send(Ok(())).unwrap();
 
-    assert_eq!(settled, later);
-    assert!(trips.try_recv().is_err());
+    assert_eq!(
+        gated
+            .started
+            .recv_timeout(GATED_INTERVAL * NO_PROBE_INTERVALS),
+        Err(mpsc::RecvTimeoutError::Timeout),
+        "a probe ran after disarm"
+    );
+    stop_bounded(gated.watchdog);
+    assert!(gated.trips.try_recv().is_err());
 }
 
 #[test]
 fn arm_after_disarm_probes_again() {
-    let (watchdog, calls, _trips) = start_with_fake(fast_settings(), Ok(()));
-    watchdog.arm();
-    wait_for(&calls, 1);
-    watchdog.disarm();
-    std::thread::sleep(Duration::from_millis(40));
-    let before = calls.load(Ordering::SeqCst);
+    let gated = start_gated();
+    gated.watchdog.arm();
+    gated.started.recv_timeout(EVENT_WAIT).unwrap();
+    gated.watchdog.disarm();
+    gated.gate.send(Ok(())).unwrap();
 
-    watchdog.arm();
-    wait_for(&calls, before.checked_add(2).unwrap());
-    stop_bounded(watchdog);
+    gated.watchdog.arm();
+
+    gated
+        .started
+        .recv_timeout(EVENT_WAIT)
+        .expect("the watchdog probes again after the new arm");
+    drop(gated.gate);
+    stop_bounded(gated.watchdog);
 }
 
 #[test]
@@ -357,6 +363,12 @@ fn stop_ends_a_thread_that_waits_for_a_long_interval() {
     assert!(trips.try_recv().is_err());
 }
 
+/// The interval of the gated watchdog.
+const GATED_INTERVAL: Duration = Duration::from_millis(5);
+
+/// The number of intervals in which a disarmed watchdog must not start a probe. It is above 1.
+const NO_PROBE_INTERVALS: u32 = 20;
+
 /// A watchdog with a probe that blocks on a gate until the test sends the result.
 struct GatedWatchdog {
     watchdog: Watchdog,
@@ -368,7 +380,7 @@ struct GatedWatchdog {
 /// Start a watchdog that trips at the first failure. Each probe reports its start on `started`.
 fn start_gated() -> GatedWatchdog {
     let settings = WatchdogSettings {
-        interval: Duration::from_millis(5),
+        interval: GATED_INTERVAL,
         failures: 1,
         window: Duration::from_secs(30),
     };
@@ -448,14 +460,16 @@ fn disarm_during_a_probe_drops_the_failed_result() {
 
 #[test]
 fn a_dropped_handle_ends_the_thread() {
-    let (watchdog, calls, _trips) = start_with_fake(fast_settings(), Ok(()));
-    watchdog.arm();
-    wait_for(&calls, 1);
+    let gated = start_gated();
+    gated.watchdog.arm();
+    gated.started.recv_timeout(EVENT_WAIT).unwrap();
 
-    drop(watchdog);
-    std::thread::sleep(Duration::from_millis(60));
-    let settled = calls.load(Ordering::SeqCst);
-    std::thread::sleep(Duration::from_millis(60));
+    drop(gated.watchdog);
+    gated.gate.send(Ok(())).unwrap();
 
-    assert_eq!(calls.load(Ordering::SeqCst), settled);
+    assert_eq!(
+        gated.started.recv_timeout(EVENT_WAIT),
+        Err(mpsc::RecvTimeoutError::Disconnected),
+        "the thread did not end after the handle dropped"
+    );
 }

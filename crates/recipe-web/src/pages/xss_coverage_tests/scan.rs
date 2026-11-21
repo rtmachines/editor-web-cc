@@ -3,13 +3,24 @@
 /// One item of a `#[serde(...)]` attribute: the key and the value of `key = "value"`.
 type SerdeItem = (String, Option<String>);
 
+/// One field that the scan read: its Rust name, its wire name, and its type text.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct ScannedField {
+    pub(super) rust_name: String,
+    pub(super) wire_name: String,
+    pub(super) ty: String,
+}
+
 /// A struct with a `Deserialize` derive that the scan read.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct ScannedStruct {
     pub(super) name: String,
-    /// The wire names of the fields in the order of the source.
-    pub(super) wire_names: Vec<String>,
+    /// The fields in the order of the source.
+    pub(super) fields: Vec<ScannedField>,
 }
+
+/// A field as `read_fields` returns it: the Rust name, the type text, and the `serde` items.
+type ReadField = (String, String, Vec<SerdeItem>);
 
 /// The result of the scan of one source text.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -339,11 +350,11 @@ fn field_name(line: &str) -> Option<String> {
     (is_name && !tail.starts_with(':')).then(|| name.to_owned())
 }
 
-/// Return the text after the comma that ends the first field of the line, or an empty text.
+/// Split the first field of the line into its type text and the text after its comma.
 ///
 /// A comma inside a string, a bracket, or an angle bracket, such as `HashMap<String, String>` or
-/// `(u8, u8)`, ends no field. A `//` comment ends the scan.
-fn after_field(line: &str) -> &str {
+/// `(u8, u8)`, ends no field. A `//` comment ends the scan. The text after it is empty.
+fn split_field(line: &str) -> (&str, &str) {
     let (_, ty) = strip_visibility(line).split_once(':').unwrap_or_default();
     let (mut depth, mut end, mut previous) = (0_usize, 0_usize, ' ');
     for (c, quoted) in mark_quotes(ty) {
@@ -352,13 +363,21 @@ fn after_field(line: &str) -> &str {
             '<' | '(' | '[' | '{' if !quoted => depth = depth.saturating_add(1),
             '>' if !quoted && previous != '-' => depth = depth.saturating_sub(1),
             ')' | ']' | '}' if !quoted => depth = depth.saturating_sub(1),
-            '/' if !quoted && previous == '/' => return "",
-            ',' if !quoted && depth == 0 => return ty.get(end..).unwrap_or_default().trim(),
+            '/' if !quoted && previous == '/' => {
+                return (
+                    ty.get(..end.saturating_sub(2)).unwrap_or_default().trim(),
+                    "",
+                );
+            }
+            ',' if !quoted && depth == 0 => {
+                let head = ty.get(..end.saturating_sub(1)).unwrap_or_default().trim();
+                return (head, ty.get(end..).unwrap_or_default().trim());
+            }
             _ => {}
         }
         previous = c;
     }
-    ""
+    (ty.trim(), "")
 }
 
 /// Return a fault when text other than a `//` comment follows the first field on its line.
@@ -366,7 +385,7 @@ fn after_field(line: &str) -> &str {
 /// Such text can hide a second field or an attribute. The scan reads one field for each line, so it
 /// would lose them.
 fn field_tail_fault(name: &str, line: &str) -> Option<String> {
-    let tail = after_field(line);
+    let (_ty, tail) = split_field(line);
     (!tail.is_empty() && !tail.starts_with("//"))
         .then(|| format!("{name} has text after a field on one line: `{line}`"))
 }
@@ -408,7 +427,7 @@ fn strip_block_comments(line: &str, depth: &mut usize) -> String {
     kept.trim().to_owned()
 }
 
-/// Read the fields up to the closing brace. Each field comes with its `serde` items.
+/// Read the fields up to the closing brace. Each field comes with its type and its `serde` items.
 ///
 /// The function fails closed. A line that is no field, attribute, comment, or blank line gives a
 /// fault that names the struct and the line. The caller adds the file.
@@ -416,7 +435,7 @@ fn read_fields<'a>(
     name: &str,
     lines: &mut impl Iterator<Item = &'a str>,
     faults: &mut Vec<String>,
-) -> Vec<(String, Vec<SerdeItem>)> {
+) -> Vec<ReadField> {
     let mut fields = Vec::new();
     let mut attrs: Vec<String> = Vec::new();
     let mut depth = 0_usize;
@@ -435,7 +454,8 @@ fn read_fields<'a>(
         } else if let Some(field) = field_name(&line) {
             faults.extend(field_tail_fault(name, &line));
             faults.extend(cfg_attr_faults(&attrs, &format!("{name}.{field}")));
-            fields.push((field, serde_items(&attrs)));
+            let (ty, _tail) = split_field(&line);
+            fields.push((field, ty.to_owned(), serde_items(&attrs)));
             attrs.clear();
         } else {
             faults.push(format!("{name} has a line that is no field: `{line}`"));
@@ -488,13 +508,21 @@ fn scan_item<'a>(
             return;
         }
     };
-    let mut wire_names = Vec::new();
-    for (field, field_items) in &fields {
+    let mut scanned = Vec::new();
+    for (rust_name, ty, field_items) in fields {
         scan.faults
-            .extend(key_faults(field_items, &format!("{name}.{field}")));
-        wire_names.push(wire_name(field, field_items));
+            .extend(key_faults(&field_items, &format!("{name}.{rust_name}")));
+        let wire = wire_name(&rust_name, &field_items);
+        scanned.push(ScannedField {
+            rust_name,
+            wire_name: wire,
+            ty,
+        });
     }
-    scan.structs.push(ScannedStruct { name, wire_names });
+    scan.structs.push(ScannedStruct {
+        name,
+        fields: scanned,
+    });
 }
 
 /// Scan one source text for the structs with a `Deserialize` derive.

@@ -8,7 +8,7 @@
 //! Each read runs under the time limit of the module `limited_read`.
 
 use std::fmt;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -158,31 +158,67 @@ impl CheckResults for FileCheckResults {
 
 /// Read the file at `path` without a link and with at most `MAX_RESULT_BYTES` bytes.
 ///
-/// A missing file is `Reading::Missing`. A link, a directory, and a file above the limit are
-/// `Reading::Rejected`. The metadata of a link does not follow it, so a link never gives the
-/// content of its target.
+/// A missing file is `Reading::Missing`. A link, a directory, another kind of entry, and a file
+/// above the limit are `Reading::Rejected`. The opener never follows a link and never blocks.
 fn read_result_file(path: &Path) -> io::Result<Reading> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(fault) if fault.kind() == io::ErrorKind::NotFound => return Ok(Reading::Missing),
-        Err(fault) => return Err(fault),
-    };
-    if !metadata.is_file() || metadata.len() > MAX_RESULT_BYTES {
-        return Ok(Reading::Rejected);
-    }
-    let file = match File::open(path) {
+    let file = match open_result_file(path)? {
         Ok(file) => file,
-        // A run of a script can replace the file between the two calls.
-        Err(fault) if fault.kind() == io::ErrorKind::NotFound => return Ok(Reading::Missing),
-        Err(fault) => return Err(fault),
+        Err(reading) => return Ok(reading),
     };
     let mut content = Vec::new();
-    // One byte above the limit shows a file that grew after the metadata call.
+    // One byte above the limit shows a file that grew after the size check.
     let read = file.take(READ_LIMIT_BYTES).read_to_end(&mut content)?;
     if u64::try_from(read).is_ok_and(|size| size <= MAX_RESULT_BYTES) {
         Ok(Reading::Content(content))
     } else {
         Ok(Reading::Rejected)
+    }
+}
+
+/// Open the regular file at `path`. A refusal is the `Err` of the inner result.
+///
+/// The flags `NOFOLLOW` and `NONBLOCK` keep a link from giving its target and a FIFO from blocking
+/// the open. The `fstat` of the open descriptor decides, so a rename after the open changes nothing.
+#[cfg(unix)]
+fn open_result_file(path: &Path) -> io::Result<Result<File, Reading>> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, open};
+    use rustix::io::Errno;
+
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC;
+    let descriptor = match open(path, flags, Mode::empty()) {
+        Ok(descriptor) => descriptor,
+        Err(Errno::NOENT) => return Ok(Err(Reading::Missing)),
+        Err(Errno::LOOP) => return Ok(Err(Reading::Rejected)),
+        Err(fault) => return Err(fault.into()),
+    };
+    let status = fstat(&descriptor)?;
+    let is_regular = FileType::from_raw_mode(status.st_mode) == FileType::RegularFile;
+    let is_within_limit = u64::try_from(status.st_size).is_ok_and(|size| size <= MAX_RESULT_BYTES);
+    if is_regular && is_within_limit {
+        Ok(Ok(File::from(descriptor)))
+    } else {
+        Ok(Err(Reading::Rejected))
+    }
+}
+
+/// Open the regular file at `path`. A refusal is the `Err` of the inner result.
+///
+/// Other systems check the metadata of the entry first, like the `DiskSpace` adapter (ADR-0060 (c)).
+#[cfg(not(unix))]
+fn open_result_file(path: &Path) -> io::Result<Result<File, Reading>> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(fault) if fault.kind() == io::ErrorKind::NotFound => return Ok(Err(Reading::Missing)),
+        Err(fault) => return Err(fault),
+    };
+    if !metadata.is_file() || metadata.len() > MAX_RESULT_BYTES {
+        return Ok(Err(Reading::Rejected));
+    }
+    match File::open(path) {
+        Ok(file) => Ok(Ok(file)),
+        // A run of a script can replace the file between the two calls.
+        Err(fault) if fault.kind() == io::ErrorKind::NotFound => Ok(Err(Reading::Missing)),
+        Err(fault) => Err(fault),
     }
 }
 

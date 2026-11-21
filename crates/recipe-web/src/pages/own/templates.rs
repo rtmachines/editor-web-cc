@@ -43,6 +43,9 @@ impl<'a> LoginPage<'a> {
 }
 
 /// Build the login page with the error of a failed login on top.
+///
+/// The page answers a `POST`, so it has no language switch (ADR-0036 (j)). The form keeps the
+/// nonce of the new cookie.
 pub(crate) fn login_page_with_error<'a>(
     t: Texts<'a>,
     lang: Lang,
@@ -50,7 +53,9 @@ pub(crate) fn login_page_with_error<'a>(
     view: &'a ErrorView,
     read_only: ReadOnlyFlag,
 ) -> LoginPage<'a> {
-    LoginPage::new(t, lang, nonce, Some(view), read_only)
+    let mut page = LoginPage::new(t, lang, nonce, Some(view), read_only);
+    page.layout.next = None;
+    page
 }
 
 /// The page `me.html`.
