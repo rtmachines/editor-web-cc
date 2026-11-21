@@ -1813,7 +1813,7 @@ The previous release does not read `machine.string_encoding`. It can export a `U
 The previous release also reads the unknown audit action `MachineStringEncodingSet` as corrupt.
 For a rollback from the release with `0017` and `0018`, do these steps before you start the previous `app`:
 
-1. Run `docker compose stop app`. No user can then change an encoding.
+1. Run `docker compose rm -s -f app` to delete the container of `app` (ADR-0176). No user can then change an encoding.
 2. Run the query below. It counts the `Utf8` machines and the audit entries of the encoding command.
 
 ```bash
