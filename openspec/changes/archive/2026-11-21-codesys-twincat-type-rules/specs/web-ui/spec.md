@@ -44,7 +44,7 @@
 - **GIVEN** the ProcessEngineer `anowak` with an open session and the live machine `M9` with the draft version 1 of `R-300`
 - **WHEN** `anowak` sends an HTMX `POST /machines/M9/string-encoding` with the encoding `Utf8`
 - **THEN** the server returns `409 E-PLT-054` with `HX-Retarget: #error-panel`
-- **AND** the answer removes the encoding form out of band
+- **AND** the answer replaces the encoding form out of band with an empty form
 
 #### Scenario: No encoding form on an S7 machine
 - **GIVEN** the ProcessEngineer `anowak` with an open session and the live machine `M5` with the platform `S7_1500` and no recipe

@@ -160,7 +160,7 @@ On a `Latin1` machine, `U+00FF` SHALL be the last permitted character of a `STRI
 ## MODIFIED Requirements
 
 ### Requirement: JSON form of a leaf value
-The system SHALL accept a leaf value only in the JSON form of its leaf class. A `BOOL` leaf SHALL accept only `true` and `false`. A `CHAR` or `WCHAR` leaf SHALL accept one Unicode scalar from `U+0001` to the end of its type range. On a `Latin1` machine, a `STRING` leaf SHALL accept only Latin-1 characters, and the number of characters SHALL fit the type length. On a `Utf8` machine, the UTF-8 bytes of a `STRING` value SHALL fit the type length. A `WSTRING` value SHALL fit the type length in UTF-16 units. A `STRING` or `WSTRING` value SHALL hold no `U+0000` (R11, R12, R31, R38, ADR-0202).
+The system SHALL accept a leaf value only in the JSON form of its leaf class. A `BOOL` leaf SHALL accept only `true` and `false`. A `CHAR` or `WCHAR` leaf SHALL accept one Unicode scalar from `U+0001` to the end of its type range. On a `Latin1` machine, a `STRING` leaf SHALL accept only Latin-1 characters, and their number SHALL fit the type length. A `WSTRING` value SHALL fit the type length in UTF-16 units. A `STRING` or `WSTRING` value SHALL hold no `U+0000` (R11, R12, R31, R38, ADR-0202).
 
 #### Scenario: Number for a BOOL leaf
 - **GIVEN** the parameter `ENABLE` of type `BOOL` in the draft version 3 of `R-100`
