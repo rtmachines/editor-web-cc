@@ -108,3 +108,48 @@ fn every_file_with_an_execute_function_is_listed() {
         );
     }
 }
+
+/// The text of the resolve of the platform types. It runs after the transaction ends (ADR-0042 (f)).
+const RESOLVE: &str = "PlatformTypes::collect(";
+
+/// The text that ends the transaction of a query.
+const END_OF_TRANSACTION: &str = "drop(tx)";
+
+/// Return true when `drop(tx)` comes before the first resolve in `body`.
+fn drops_the_transaction_before_the_resolve(body: &str) -> bool {
+    match (body.find(END_OF_TRANSACTION), body.find(RESOLVE)) {
+        (Some(drop_at), Some(resolve_at)) => drop_at < resolve_at,
+        _ => false,
+    }
+}
+
+#[test]
+fn each_execute_of_the_parameter_queries_drops_the_transaction_before_the_resolve() {
+    let source = include_str!("parameters.rs");
+    let resolving: Vec<&str> = bodies(source)
+        .into_iter()
+        .filter(|body| body.contains(RESOLVE))
+        .collect();
+
+    assert_eq!(
+        resolving.len(),
+        3,
+        "parameters.rs: three execute bodies resolve"
+    );
+    for body in resolving {
+        assert!(
+            drops_the_transaction_before_the_resolve(body),
+            "parameters.rs: the resolve runs before the end of the transaction: {:?}",
+            body.lines().next()
+        );
+    }
+}
+
+#[test]
+fn a_body_that_resolves_before_it_drops_the_transaction_is_found() {
+    let late = "let t = PlatformTypes::collect(a);\ndrop(tx);";
+    let early = "drop(tx);\nlet t = PlatformTypes::collect(a);";
+
+    assert!(!drops_the_transaction_before_the_resolve(late));
+    assert!(drops_the_transaction_before_the_resolve(early));
+}

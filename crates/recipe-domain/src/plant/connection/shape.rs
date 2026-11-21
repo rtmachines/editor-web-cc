@@ -7,6 +7,9 @@ use super::{
 use crate::plant::{MachineCode, PlantError, PlantErrors, PlcPlatform};
 
 /// The connection settings of a PLC. Each platform family has one shape.
+///
+/// [`PlcConnection::for_platform`] is the one constructor. It builds the settings of a request
+/// and the settings of a stored row. A storage adapter calls it for each row that it reads.
 #[derive(Debug)]
 pub enum PlcConnection {
     /// A Siemens S7 PLC.

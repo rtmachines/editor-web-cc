@@ -11,7 +11,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use recipe_app::blocking::{AppSettings, Blocking, ExportSettings};
 use recipe_app::memory::Fault;
-use recipe_app::ports::CredentialCipher;
+use recipe_app::ports::{CredentialCipher, SealedSecret};
 use recipe_domain::audit::AuditAction;
 use recipe_domain::identity::{Role, UserId};
 use recipe_domain::plant::{
@@ -133,6 +133,14 @@ fn s7_record() -> PlcConnection {
         rack: Rack::parse("0").unwrap(),
         slot: Slot::parse("2").unwrap(),
     }
+}
+
+/// Seal a password for an `Ads` record with a login (`plc_connection_credentials`).
+fn sealed_for(fixture: &Fixture, machine: MachineId) -> SealedSecret {
+    fixture
+        .cipher
+        .seal(machine, &PlcPassword::parse(PLC_PASSWORD).unwrap())
+        .unwrap()
 }
 
 /// Build a fixture with the accounts, `M8` with its record and password, and `M9` with its record.
@@ -372,7 +380,9 @@ async fn connection_route_resolves_the_live_machine_of_a_reused_code_and_refuses
     fixture.seed_account(1, Role::ExportClient, ACCOUNT_PASSWORD, false);
     let old = seed_machine(&fixture, 8, PlcPlatform::TwinCat3);
     seed_recipe(&fixture, old, 8, "R-300");
-    fixture.store.seed_connection(old, &ads_record(), None);
+    fixture
+        .store
+        .seed_connection(old, &ads_record(), Some(sealed_for(&fixture, old)));
     archive(&fixture, old);
     let reused = MachineId::from(id_of(0x7357_0e10, 18));
     let unit = UnitId::from(id_of(0x7357_0e11, 18));
@@ -388,7 +398,9 @@ async fn connection_route_resolves_the_live_machine_of_a_reused_code_and_refuses
     .unwrap();
     fixture.store.seed_machine(&new);
     seed_recipe(&fixture, reused, 18, "R-301");
-    fixture.store.seed_connection(reused, &ads_record(), None);
+    fixture
+        .store
+        .seed_connection(reused, &ads_record(), Some(sealed_for(&fixture, reused)));
 
     let old_recipe = client_get(&fixture, M8_ROUTE).await;
     let new_recipe = client_get(&fixture, "/export/v1/machines/M8/connection?recipe=R-301").await;

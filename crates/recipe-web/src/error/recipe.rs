@@ -4,11 +4,10 @@
 //! a budget, a platform, a rebind reason, and an expected form are words of the UI. Each one is a
 //! key of the bundles, so a Polish page never shows the English `Display` (design D13).
 
-use std::collections::BTreeSet;
-
 use recipe_domain::plant::LeafPath;
 use recipe_domain::recipe::{
-    Budget, Expected, RebindTargetReason, RecipeError, S7AccessReason, SnapshotItem, VersionStatus,
+    Budget, Expected, RebindTargetReason, RecipeError, S7AccessReason, VersionStatus,
+    distinct_tag_count,
 };
 
 use super::LineArg;
@@ -86,7 +85,9 @@ fn data_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
         RecipeError::SizeBudgetExceeded { limit, actual, .. } => {
             vec![("limit", limit.to_string()), ("actual", actual.to_string())]
         }
-        RecipeError::ValidationFailed { items } => vec![("count", distinct_tags(items))],
+        RecipeError::ValidationFailed { items } => {
+            vec![("count", distinct_tag_count(items).to_string())]
+        }
         RecipeError::RebindTargetInvalid { type_name, .. } => {
             vec![("type_name", type_name.clone())]
         }
@@ -223,23 +224,6 @@ fn address_fields(error: &RecipeError) -> Vec<(&'static str, String)> {
         ],
         _handled => Vec::new(),
     }
-}
-
-/// Count the distinct tags of the items of `E-RCP-020`, as the `Display` of the error does.
-///
-/// An item of the version has no tag and does not count.
-fn distinct_tags(items: &[SnapshotItem]) -> String {
-    items
-        .iter()
-        .filter_map(|item| match item {
-            SnapshotItem::Parameter { tag, .. } | SnapshotItem::UnknownUnit { tag, .. } => {
-                Some(tag)
-            }
-            SnapshotItem::Version { .. } => None,
-        })
-        .collect::<BTreeSet<_>>()
-        .len()
-        .to_string()
 }
 
 /// Return the argument of an error that is a word of the UI, if the error has one.

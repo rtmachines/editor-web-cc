@@ -115,6 +115,14 @@ async fn pipeline_mapped_ipv6_peer_matches_the_ipv4_trusted_network() {
 }
 
 #[tokio::test]
+async fn pipeline_trusted_proxy_entry_in_mapped_form_forwards_the_client() {
+    let fixture = trusting("::ffff:172.28.0.2/128");
+    let reply = client_from(&fixture, "172.28.0.2:5000", &["10.0.0.5"]).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(reply.body, "10.0.0.5");
+}
+
+#[tokio::test]
 async fn pipeline_mapped_ipv6_peer_is_stored_in_its_ipv4_form() {
     let fixture = Fixture::new();
     let reply = client_from(&fixture, "[::ffff:10.0.0.9]:5000", &[]).await;

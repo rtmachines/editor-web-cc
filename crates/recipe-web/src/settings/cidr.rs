@@ -7,6 +7,8 @@ use std::net::IpAddr;
 const IPV4_BITS: u8 = 32;
 /// Width of an IPv6 address in bits.
 const IPV6_BITS: u8 = 128;
+/// Prefix bits of the IPv4-mapped IPv6 block `::ffff:0:0/96`.
+const MAPPED_PREFIX: u8 = 96;
 
 /// The reason that a text is not a CIDR network.
 ///
@@ -71,13 +73,30 @@ impl Cidr {
         if prefix > width {
             return Err(CidrReason::BadPrefix);
         }
-        Ok(Self { network, prefix })
+        Ok(Self::canonical(network, prefix))
+    }
+
+    /// Map an IPv4-mapped IPv6 network with a prefix of 96 or more to its IPv4 network.
+    ///
+    /// A shorter prefix also covers addresses that are not mapped, so it has no IPv4 form.
+    fn canonical(network: IpAddr, prefix: u8) -> Self {
+        if let IpAddr::V6(v6) = network
+            && let Some(v4) = v6.to_ipv4_mapped()
+            && let Some(v4_prefix) = prefix.checked_sub(MAPPED_PREFIX)
+        {
+            return Self {
+                network: IpAddr::V4(v4),
+                prefix: v4_prefix,
+            };
+        }
+        Self { network, prefix }
     }
 
     /// Return true when `address` lies inside the network.
     ///
     /// An address of the other family never matches. The caller maps an IPv4-mapped IPv6
-    /// address to IPv4 first (design D11, step 4).
+    /// address to IPv4 first (design D11, step 4). `parse` already stores a mapped entry in its
+    /// canonical IPv4 form, so both sides use one form.
     #[must_use]
     pub fn contains(&self, address: IpAddr) -> bool {
         let (wanted, width) = bits_of(self.network);

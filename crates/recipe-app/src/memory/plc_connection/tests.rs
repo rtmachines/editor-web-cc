@@ -48,11 +48,17 @@ fn s7() -> PlcConnection {
     }
 }
 
+/// An `Ads` address must be an AMS Net ID, like the table check `plc_connection_ams_net_id` demands.
 fn iec(mode: CommMode, login: Option<&str>) -> PlcConnection {
+    let address = if mode == CommMode::Ads {
+        "5.12.34.56.1.1"
+    } else {
+        "opc.tcp://plc.local:4840"
+    };
     PlcConnection::Iec {
         host: PlcHost::parse("plc.local").unwrap(),
         port: TcpPort::parse("4840").unwrap(),
-        address: PlcAddress::parse("opc.tcp://plc.local:4840").unwrap(),
+        address: PlcAddress::parse(address).unwrap(),
         mode,
         login: login.map(|text| PlcLogin::parse(text).unwrap()),
     }
@@ -553,4 +559,30 @@ async fn a_drop_without_finish_discards_the_data_block_change() {
         .unwrap()
         .unwrap();
     assert_eq!(stored.row_version, 1);
+}
+
+#[test]
+fn a_stored_row_with_a_mode_that_the_platform_refuses_is_corrupt() {
+    let now = recipe_domain::timestamp::Timestamp::from(OffsetDateTime::UNIX_EPOCH);
+    let row = super::ConnectionRow {
+        id: Uuid::from_u128(1),
+        platform: PlcPlatform::TwinCat3,
+        shape: super::ShapeRow::Iec {
+            host: PlcHost::parse("plc.local").unwrap(),
+            port: TcpPort::parse("4840").unwrap(),
+            address: PlcAddress::parse("opc.tcp://plc.local:4840").unwrap(),
+            mode: CommMode::CodesysV3,
+            login: Some(PlcLogin::parse("operator").unwrap()),
+        },
+        sealed: Some(sealed(1)),
+        row_version: 1,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let error = row
+        .stored(recipe_domain::plant::MachineCode::parse("M2").unwrap())
+        .unwrap_err();
+
+    assert_eq!(error.code(), ErrorCode::DB_008);
 }
