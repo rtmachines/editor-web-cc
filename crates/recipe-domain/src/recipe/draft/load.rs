@@ -47,6 +47,7 @@ impl Draft {
             reference: stored.reference,
             machine: stored.machine,
             platform: stored.platform,
+            string_encoding: stored.string_encoding,
             version: stored.version,
             number: stored.number,
             row_version: stored.row_version,

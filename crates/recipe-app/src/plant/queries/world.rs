@@ -7,8 +7,8 @@ use std::collections::BTreeSet;
 
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafClass, Machine, MachineCode, MemberName, PlcPlatform,
-    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeMember, TypeName, UnitPath,
-    UnitUsage,
+    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding, TypeMember,
+    TypeName, UnitPath, UnitUsage,
 };
 
 use crate::memory::fixtures::{mid, text, tid, timestamp, uid};
@@ -34,6 +34,7 @@ pub(super) fn machine_of(platform: PlcPlatform, n: u128, code: &str, name: &str)
         platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (uid(unit_id), text("Main")),
     )
     .unwrap()

@@ -1,10 +1,12 @@
-use crate::plant::{LeafPath, TypeTree};
+use serde_json::json;
+
+use crate::plant::{LeafPath, RuleSet, TypeTree};
 use crate::recipe::limit::{LimitInput, ProcessLimit, StoredLimit};
 use crate::recipe::value::test_support::{
     INT, REAL, TIME, ZONE_JSON, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
 };
-use crate::recipe::value::{LeafTexts, ParameterValue, ValueFault, ValueFaults};
+use crate::recipe::value::{LeafTexts, ParameterValue, StoredValue, ValueFault, ValueFaults};
 
 fn limit(
     tree: &TypeTree,
@@ -141,9 +143,13 @@ fn string_max_length_counts_characters_and_not_bytes() {
 
 #[test]
 fn wstring_length_counts_utf16_units() {
+    // A stored value of the earlier rule set can hold a character outside the Basic
+    // Multilingual Plane on this platform (ADR-0201 (e)). That character needs two units.
     let tree = wstring_tree(10);
     let limits = [limit(&tree, "", (None, None), Some(2))];
-    let fault = value(r#""a😀""#, &tree).check(&tree, &limits).unwrap_err();
+    let stored = StoredValue::from(json!("a😀"));
+    let earlier = ParameterValue::from_stored(&stored, &tree, RuleSet::Earlier).unwrap();
+    let fault = earlier.check(&tree, &limits).unwrap_err();
     assert_eq!(out_of_limit(fault), texts("", "3", "0", "2"));
 }
 

@@ -170,6 +170,7 @@ export async function seedSweepData(browser: Browser, baseURL: string, password:
       name: 'Sweep line',
       plc_platform: 'S7_300',
       db_number: '100',
+      string_encoding: 'Latin1',
       main_unit_name: 'Infeed',
     });
     await post(admin, `/machines/${MACHINE}/units`, {

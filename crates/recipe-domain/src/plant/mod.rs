@@ -10,6 +10,7 @@ mod error;
 mod errors;
 mod ids;
 mod iec_literal;
+mod iec_names;
 mod leaf_path;
 mod lexical;
 pub mod limits;
@@ -23,6 +24,7 @@ mod s7_address;
 mod s7_layout;
 mod s7_width;
 mod siemens_names;
+mod string_encoding;
 mod string_length;
 mod type_expr;
 mod type_name;
@@ -42,6 +44,10 @@ pub use error::{DerivedTypeReason, PlantError, TypeLimit};
 pub use errors::PlantErrors;
 pub use ids::{MachineId, PlcConnectionId, PlcTypeId, UnitId};
 pub use iec_literal::{IecLiteral, IecLiteralReason, RuleSet, TimeType};
+pub use iec_names::{
+    IEC_EXTRA_KEYWORDS, IEC_RESERVED_STRUCT_NAMES, check_codesys_members, check_iec_names,
+    is_iec_reserved_member_name, is_iec_reserved_struct_name,
+};
 pub(crate) use leaf_path::extended;
 pub use leaf_path::{LeafPath, LeafPathReason, LeafSegment, LeafTarget};
 pub use live_units::{LiveUnit, LiveUnits};
@@ -55,6 +61,7 @@ pub use s7_layout::{S7Layout, S7Member, S7Start, s7_members};
 pub use siemens_names::{
     SIEMENS_RESERVED_NAMES, check_siemens_struct_name, is_siemens_reserved_name,
 };
+pub use string_encoding::{StringEncoding, StringEncodingReason, check_string_encoding};
 pub use string_length::{StringKind, StringLength, StringLengthReason};
 pub use type_expr::{BaseExpr, TypeExpr};
 pub use type_name::{

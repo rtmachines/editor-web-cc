@@ -626,3 +626,173 @@ fn adr_0139_the_earlier_set_keeps_the_old_end_of_ldt_and_ldate() {
         );
     }
 }
+
+/// ADR-0115, review item R09: each literal at an end of the base unit table
+/// (`domain-model.md` section 2.1) gives the exact count of the base unit.
+/// One step outside each end gives `OutOfRange`. The ends hold on `CodesysIec`
+/// and `TwinCat3`.
+#[test]
+fn adr_0115_iec_ends_of_time_literals() {
+    // (type, literal at an end, count of the base unit)
+    let at_ends: [(Primitive, &str, i128); 8] = [
+        (Primitive::Time, "T#0ms", 0),
+        (Primitive::Time, "T#49d17h2m47s295ms", 4_294_967_295),
+        (Primitive::Ltime, "LT#0ns", 0),
+        (
+            Primitive::Ltime,
+            "LT#213503d23h34m33s709ms551us615ns",
+            U64_MAX,
+        ),
+        (Primitive::Date, "D#1970-01-01", 0),
+        (Primitive::Date, "D#2106-02-07", 49_710),
+        (Primitive::DateAndTime, "DT#1970-01-01-00:00:00", 0),
+        (
+            Primitive::DateAndTime,
+            "DT#2106-02-07-06:28:15",
+            4_294_967_295,
+        ),
+    ];
+    // (type, literal one step outside an end)
+    let outside: [(Primitive, &str); 8] = [
+        (Primitive::Time, "T#-1ms"),
+        (Primitive::Time, "T#49d17h2m47s296ms"),
+        (Primitive::Ltime, "LT#-1ns"),
+        (Primitive::Ltime, "LT#213503d23h34m33s709ms551us616ns"),
+        (Primitive::Date, "D#1969-12-31"),
+        (Primitive::Date, "D#2106-02-08"),
+        (Primitive::DateAndTime, "DT#1969-12-31-23:59:59"),
+        (Primitive::DateAndTime, "DT#2106-02-07-06:28:16"),
+    ];
+    for platform in IEC {
+        for (primitive, text, count) in at_ends {
+            assert_eq!(
+                parse(primitive, platform, text),
+                Ok(count),
+                "{text} on {platform:?}"
+            );
+        }
+        for (primitive, text) in outside {
+            assert_eq!(
+                parse(primitive, platform, text),
+                Err(IecLiteralReason::OutOfRange),
+                "{text} on {platform:?}"
+            );
+        }
+    }
+}
+
+/// The 8 long prefixes of ADR-0205 (a), each with its short prefix, its type, and one body.
+const LONG_PREFIXES: [(&str, &str, Primitive, &str); 8] = [
+    ("TIME#", "T#", Primitive::Time, "1h30m"),
+    ("LTIME#", "LT#", Primitive::Ltime, "1us"),
+    ("DATE#", "D#", Primitive::Date, "2026-10-12"),
+    ("LDATE#", "LD#", Primitive::Ldate, "2026-10-12"),
+    ("TIME_OF_DAY#", "TOD#", Primitive::TimeOfDay, "12:30:00"),
+    ("LTIME_OF_DAY#", "LTOD#", Primitive::Ltod, "12:30:00.5"),
+    (
+        "DATE_AND_TIME#",
+        "DT#",
+        Primitive::DateAndTime,
+        "2026-10-12-12:30:00",
+    ),
+    (
+        "LDATE_AND_TIME#",
+        "LDT#",
+        Primitive::Ldt,
+        "2026-10-12-12:30:00.000000001",
+    ),
+];
+
+#[test]
+fn adr_0205_long_prefixes_give_the_short_count() {
+    for platform in IEC {
+        for (long, short, primitive, body) in LONG_PREFIXES {
+            let at = format!("{long}{body} on {platform:?}");
+            let long_text = format!("{long}{body}");
+            let short_text = format!("{short}{body}");
+            let from_long = IecLiteral::parse(ty(primitive, platform), &long_text).unwrap();
+            let from_short = IecLiteral::parse(ty(primitive, platform), &short_text).unwrap();
+            assert_eq!(from_long.count(), from_short.count(), "{at}");
+            assert_eq!(from_long, from_short, "{at}");
+            assert_eq!(from_long.to_string(), from_short.to_string(), "{at}");
+            assert!(from_long.to_string().starts_with(short), "{at}");
+        }
+    }
+}
+
+#[test]
+fn adr_0205_a_long_prefix_displays_the_short_prefix() {
+    let literal =
+        IecLiteral::parse(ty(Primitive::Ltime, PlcPlatform::CodesysIec), "LTIME#1us").unwrap();
+    assert_eq!(literal.count(), 1_000);
+    assert_eq!(literal.to_string(), "LT#1us");
+}
+
+#[test]
+fn adr_0205_a_long_prefix_applies_on_every_platform_that_has_the_type() {
+    for platform in S7 {
+        assert_eq!(
+            parse(Primitive::Time, platform, "TIME#1s"),
+            parse(Primitive::Time, platform, "T#1s"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            parse(Primitive::TimeOfDay, platform, "TIME_OF_DAY#12:30:00"),
+            parse(Primitive::TimeOfDay, platform, "TOD#12:30:00"),
+            "{platform:?}"
+        );
+    }
+    assert_eq!(
+        parse(Primitive::Ltime, PlcPlatform::S7_300, "LTIME#1s"),
+        Err(IecLiteralReason::NotOnPlatform)
+    );
+}
+
+#[test]
+fn adr_0205_a_lower_case_long_prefix_is_a_grammar_error() {
+    assert_eq!(
+        parse(Primitive::Ltime, PlcPlatform::CodesysIec, "ltime#1us"),
+        Err(IecLiteralReason::Grammar)
+    );
+}
+
+#[test]
+fn adr_0205_s5time_has_no_long_prefix() {
+    assert_eq!(
+        parse(Primitive::S5Time, PlcPlatform::S7_1500, "S5TIME#1s"),
+        Err(IecLiteralReason::Grammar)
+    );
+    assert_eq!(
+        parse(Primitive::S5Time, PlcPlatform::S7_1500, "S5T#1s"),
+        Ok(1_000)
+    );
+}
+
+#[test]
+fn adr_0205_dtl_has_no_long_prefix_and_date_and_time_is_not_its_alias() {
+    assert_eq!(
+        parse(
+            Primitive::Dtl,
+            PlcPlatform::S7_1500,
+            "DATE_AND_TIME#2024-01-01-00:00:00"
+        ),
+        Err(IecLiteralReason::Prefix)
+    );
+    assert_eq!(
+        parse(
+            Primitive::Dtl,
+            PlcPlatform::S7_1500,
+            "DTL#2024-01-01-00:00:00"
+        )
+        .map(|_| ()),
+        Ok(())
+    );
+}
+
+#[test]
+fn adr_0205_a_long_prefix_of_another_type_gives_the_prefix_reason() {
+    assert_eq!(
+        parse(Primitive::Time, PlcPlatform::CodesysIec, "LTIME#1us"),
+        Err(IecLiteralReason::Prefix)
+    );
+}

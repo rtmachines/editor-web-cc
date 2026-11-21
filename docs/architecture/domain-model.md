@@ -37,10 +37,11 @@ Domain methods take resolved values only: `&TypeTree`, `&TypeTrees`, `&PlatformT
 | `name` | `Text` | Not empty, max 200 chars |
 | `plc_platform` | `PlcPlatform` | Exactly one per machine. Frozen after the first recipe |
 | `db_number` | `Option<DataBlockNumber>` | The data block number of the machine. The data block rule below applies (A48, ADR-0156) |
+| `string_encoding` | `StringEncoding` | `Latin1` or `Utf8`. The encoding rule below applies (ADR-0202) |
 | `units` | `Vec<Unit>` | At least one live unit of depth 1 |
 | `archived_at` | `Option<Timestamp>` | Soft delete |
 
-`PlcPlatform` (value object, enum): `CodesysIec`, `TwinCat3`, `S7_1200`, `S7_1500`, `S7_300`. `S7_1200` is the classic S7-1200 family with firmware 4.1 or later (Assumption A49). The editor models the standard program only and never targets an F-DB (Assumption A50).
+`PlcPlatform` (value object, enum): `CodesysIec`, `TwinCat3`, `S7_1200`, `S7_1500`, `S7_300`. `S7_1200` is the classic S7-1200 family with firmware 4.1 or later (Assumption A49). The editor models the standard program only and never targets an F-DB (Assumption A50). A `TwinCat3` machine runs TwinCAT 3.1.4026.0 or later (Assumption A46). A `CodesysIec` machine runs CODESYS V3.5 SP16 or later and compiles `LREAL` as binary64 (Assumptions A51, A52).
 
 `DataBlockNumber` (value object, module `plant`): `1..=65535`. Its reason type is `RangeReason`. The data block rule below narrows the range.
 
@@ -58,6 +59,14 @@ Data block rule (ADR-0156 (a), (b)):
 - A number above the limit of the platform is `E-PLT-024 DataBlockOutOfRange`.
 - `TryFrom<StoredMachine>` permits no number only for an archived S7 machine.
 - `db_number` is the default data block for a parameter without `s7_address`. It never changes the address of a parameter (ADR-0156 (c)).
+
+`StringEncoding` (value object, enum, ADR-0202): `Latin1` or `Utf8`. It names the encoding of the `STRING` values of the PLC project of the machine.
+
+Encoding rule (ADR-0202):
+
+- A machine on `S7_300`, `S7_1200`, or `S7_1500` is always `Latin1`. `Utf8` on an S7 platform is `E-PLT-053 StringEncodingNotOnPlatform`.
+- `CreateMachine` sets the encoding. `SetMachineStringEncoding` changes it only while no recipe of the machine has a version row. Each status counts, also a discarded draft and a version of a deleted recipe. Otherwise it is `E-PLT-054 StringEncodingFrozen`.
+- The `StringLength` table and the value rules of section 2.1 read the encoding. Because the encoding never changes after the first version, the rule has no branch of `RuleSet`.
 
 **Unit** (entity inside `Machine`)
 
@@ -90,7 +99,7 @@ Rules:
 | `leaf_class` | `Option<LeafClass>` | Primitives only. The class of the leaf (`LeafClass` below). `None` for a struct and an array |
 | `element_type` | `Option<PlcTypeId>` | Only when `kind = Array` |
 | `dimensions` | `Vec<ArrayDimension>` | Only when `kind = Array`. `ArrayDimension { lower: i32, upper: i32 }`. One to 3 dimensions (Assumption A38). `lower <= upper`. `upper - lower < 65536` |
-| `members` | `Vec<TypeMember>` | Only when `kind = Struct`. Ordered. 1 to 1024 members (`type.max_members`, `reliability.md` 7.11). `TypeMember { name, type_id }` |
+| `members` | `Vec<TypeMember>` | Only when `kind = Struct`. Ordered. 1 to 1024 members (`type.max_members`, `reliability.md` 7.11). On `CodesysIec`, 2 to 1024 members (ADR-0204). `TypeMember { name, type_id }` |
 | `machine` | `Option<MachineId>` | `None` for the global primitive catalog. `Some` for a struct, an array, or a sized string. The seed default rows of `STRING` and `WSTRING` (`data-model.md` 7) are the one exception: they are sized strings with `None` |
 | `supersedes` | `Option<PlcTypeId>` | Previous revision of the same struct |
 
@@ -103,7 +112,7 @@ Shape identity (one row per shape, `data-model.md` 3.3):
 | Struct | `(machine, name, revision)` |
 | Array | `(machine, element_type, dimensions)` |
 
-`StringLength` (value object): the length of a `STRING(n)` or a `WSTRING(n)`. A `STRING` length counts characters, and each character is one Latin-1 byte. A `WSTRING` length counts UTF-16 code units (ADR-0137). This table is the only definition of the range per platform. The range `1..=255` on `CodesysIec` and `TwinCat3` is a deliberate narrowing of the vendor range (ADR-0141).
+`StringLength` (value object): the length of a `STRING(n)` or a `WSTRING(n)`. On a `Latin1` machine, a `STRING` length counts characters, and each character is one Latin-1 byte. On a `Utf8` machine, a `STRING` length counts UTF-8 bytes (ADR-0202). Thus `n` is the payload capacity in bytes on both encodings. A `WSTRING` length counts UTF-16 code units (ADR-0137). This table is the only definition of the range per platform. The range `1..=255` on `CodesysIec` and `TwinCat3` is a deliberate narrowing of the vendor range (ADR-0141).
 
 | Platform | `STRING(n)` | `WSTRING(n)` |
 |---|---|---|
@@ -122,6 +131,10 @@ Rules:
 - The struct names of a machine are unique without case. A new struct `st_zone` next to the stored `ST_Zone` is `E-PLT-015 DuplicateTypeName` (ADR-0143 (a)). A lookup of a struct uses the exact stored spelling.
 - A struct name is not one of the 211 reserved words of ADR-0143 (c) to (e), in any case. The list holds the IEC keywords and the primitive names. A new struct row with such a name is `E-PLT-013 DerivedTypeInvalid` with the reason "reserved name".
 - On `S7_300`, `S7_1200`, and `S7_1500`, a struct name is also not one of the 269 Siemens reserved names of ADR-0186 (d), in any case. It also does not match the family `PD_TEL<n>` of ADR-0186 (d3). The use case runs this rule, because the form does not know the platform. A stored struct with such a name stays readable (ADR-0186 (i)).
+- On `CodesysIec` and `TwinCat3`, a struct name is also not one of the 15 names of ADR-0203 (c), in any case. These are `UNION`, `END_UNION`, and 13 native and library type names. The use case runs this rule. A new struct row with such a name is `E-PLT-013 DerivedTypeInvalid` with the reason "reserved name".
+- On `CodesysIec` and `TwinCat3`, a member name is not one of the 184 keywords of ADR-0203 (d), in any case. A primitive name stays a valid member name. The use case runs this rule. A new struct row with such a member is `E-PLT-013 DerivedTypeInvalid` with the reason "reserved member name". On the S7 platforms, a member name can be a keyword (ADR-0143 (l)).
+- On `CodesysIec`, a new struct row with one member is `E-PLT-013 DerivedTypeInvalid` with the reason "too few members" (ADR-0204). The use case runs this rule. A struct with no member is `E-PLT-016 StructHasNoMembers` on every platform.
+- A stored struct with a name or a member of ADR-0203, or with one member on `CodesysIec`, stays readable. A stored parameter type keeps it (ADR-0203 (k), ADR-0204 (e)).
 - A stored struct name with a reserved word passes the earlier rule set (ADR-0120, ADR-0143 (i)). The struct stays readable, and a stored parameter type keeps it. A new revision of it follows the current rule.
 - All member types of a struct MUST exist on every platform of the struct.
 - A derived type MUST exist on the platform of its machine.
@@ -145,6 +158,7 @@ revision  := [1-9][0-9]{0,9}
 Rules:
 
 - Keywords and primitive names are upper case. The only spaces are the space before `OF` and the space after it.
+- `TypeExpr::parse` maps four vendor aliases of a `primitive` to the catalog names: `TOD` to `TIME_OF_DAY`, `DT` to `DATE_AND_TIME`, `LTIME_OF_DAY` to `LTOD`, and `LDATE_AND_TIME` to `LDT` (ADR-0206). The mapping applies on every platform. The stored type and every document hold the catalog name. `DT@1` stays a `udt` text. `DT` is a keyword of ADR-0143 (d), so a written `DT@1` gives `E-PLT-013` with the reason "reserved name".
 - A `bound` is inside the INTEGER range. Each `dim` follows the `ArrayDimension` rules of the `PlcType` table. An array has 1 to 3 dimensions (Assumption A38).
 - A `length` follows the `StringLength` table for the platform of the machine.
 - `STRING` without a length in a `TypeExpr` means the seed row of the platform of the machine: `STRING(254)` on `S7_300`, `S7_1200` and `S7_1500`, and `STRING(80)` on `CodesysIec` and `TwinCat3` (`data-model.md` 7). `WSTRING` without a length means the seed row of the platform of the machine: `WSTRING(254)` on `S7_1200` and `S7_1500`, `WSTRING(80)` on `CodesysIec` and `TwinCat3`.
@@ -152,6 +166,8 @@ Rules:
 - On `S7_300`, `S7_1200`, and `S7_1500`, a written type has at most `type.s7_max_nesting` levels (`reliability.md` 7.11, ADR-0179). A struct counts 1 level, also the struct at the top. An array of a struct counts 3 levels in place of 1. An array of a primitive or a string counts no level. A type over the limit is `E-PLT-018 TypeTooLarge`. `RebindTypeRevision` also counts the type of each parameter that it moves (ADR-0179 (f)). A stored type over the limit passes the earlier rule set.
 - A `udt` names a struct revision of the same machine. The lookup uses the exact stored spelling.
 - A type text that a command writes follows the current name rule of ADR-0143 (c). Thus a new parameter, a changed parameter type, or a new member cannot name the stored struct `Int@1`. A stored parameter type uses the earlier rule of ADR-0143 (i) and keeps `Int@1`.
+- On `CodesysIec` and `TwinCat3`, a type text that a command writes cannot name a stored struct that breaks a rule of ADR-0203. On `CodesysIec`, it cannot name a stored struct with one member (ADR-0204). The rule covers a named revision also as an array element or as a member type.
+- The command use case of `recipe-app` runs the check of the previous rule on the stored revision (ADR-0203 (i), (l), ADR-0204 (c), (f)). `PlcType::from_stored` runs no rule of a platform on a struct row. A stored parameter type keeps such a struct while a command does not change the type.
 
 Examples: `INT`, `STRING`, `STRING(20)`, `WSTRING(80)`, `ST_Zone@3`, `ARRAY[1..8] OF REAL`, `ARRAY[0..1,1..2] OF ST_Zone@3`, `ARRAY[1..4] OF STRING(16)`.
 
@@ -165,7 +181,9 @@ Errors. Every failure of this table is `E-PLT-013 DerivedTypeInvalid` with a rea
 | The struct name or the revision does not exist on the machine | `ST_Zone@9` |
 | The type does not exist on the platform of the machine | `WSTRING(10)` on `S7_300`, `ARRAY[1..2] OF ARRAY[1..3] OF BYTE` on `S7_1500` (ADR-0148) |
 | A bound, a dimension, or a length is outside its range | `ARRAY[5..1] OF INT`, `STRING(300)` on `S7_1500` |
-| Reserved name: a new struct row has a reserved name of ADR-0143 (c), or a type text that a command writes names such a struct | A new revision of the stored struct `Int`. `AddParameter` with the type `Int@1` |
+| Reserved name: a new struct row has a reserved name of ADR-0143 (c), ADR-0186, or ADR-0203. A type text that a command writes names such a struct | A new revision of the stored struct `Int`. `AddParameter` with the type `Int@1` |
+| Reserved member name: on an IEC platform, a new struct row has a keyword of ADR-0203 (d) as a member. A written type text names such a struct | A member `END_STRUCT` or `R` on `TwinCat3` |
+| Too few members: on `CodesysIec`, a new struct row has one member (ADR-0204). A written type text names such a struct | A struct with the one member `speed` on `CodesysIec` |
 
 `DefineUdt` is the one exception. A member whose `TypeExpr` resolves to a type that is not on the platform is `E-PLT-006 MemberTypeNotOnPlatform`, because the member name is the useful detail. Every other consumer of a `TypeExpr` reports `E-PLT-013` for a type that is not on the platform.
 
@@ -216,7 +234,7 @@ Overlap rule: inside one version, two parameters cannot occupy the same bit of o
 
 Platform rule: an address is required on `S7_300`, optional on `S7_1200` and `S7_1500`, and not allowed on `CodesysIec` and `TwinCat3` (Assumption A31). The width, alignment, and overlap rules apply to every parameter with an address, on every platform.
 
-**S7Layout** (value object): computes the layout size and the alignment of a `TypeTree` on S7. The layout size is computed, not stored. Rules:
+**S7Layout** (value object): computes the layout size and the alignment of a `TypeTree` on S7. The layout size is computed, not stored. On `CodesysIec` and `TwinCat3`, the transfer system writes each leaf through its symbol, so the editor models no layout there (Assumption A53). Rules:
 
 - The storage unit of a primitive is its `size_bytes`. A `BOOL` has the storage unit 1.
 - In a struct, consecutive `BOOL` members pack 8 per byte. The next `BYTE` or `CHAR` member starts at the next byte. Every other non-`BOOL` member starts at the next even byte, also a `SINT` or `USINT` member (ADR-0147).
@@ -238,7 +256,7 @@ A form carries the text of each leaf (ADR-0039). The text of a `Numeric` leaf is
 
 Significant digits (ADR-0117): a `REAL` number has at most 7 significant digits, and an `LREAL` number has at most 15. The count starts at the first digit that is not zero. A number with more digits gives `E-RCP-055 PrecisionExceeded`, and the domain does not round it. The earlier rule set of ADR-0120 (a) allows 28 significant digits for both types.
 
-SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0001..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0001..=U+FFFF` (ADR-0137). On `S7_1200` and `S7_1500`, a `WCHAR` value is in `U+0001..=U+D7FF`, and each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xCFFF` (ADR-0180). The earlier rule set of ADR-0120 keeps the rule of ADR-0137 on every platform.
+SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0001..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0001..=U+FFFF` (ADR-0137). On `S7_1200` and `S7_1500`, a `WCHAR` value is in `U+0001..=U+D7FF`, and each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xCFFF` (ADR-0180). On `CodesysIec` and `TwinCat3`, each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xD7FF` or `0xE000..=0xFFFF` (ADR-0201). The earlier rule set of ADR-0120 keeps the rule of ADR-0137 on every platform. On a `Latin1` machine, a `STRING` character is in `U+0001..=U+00FF` (ADR-0137 (b)). On a `Utf8` machine, a `STRING` character is any Unicode scalar except `U+0000` (ADR-0202).
 
 Base units (Assumption A43). A `Duration` or `Instant` value is an integer count of the base unit of its type. The domain stores, hashes, and limits this count. The stored and hashed value is the decimal text of the count, so a signed and an unsigned 64-bit range both fit. The domain holds each platform range in code.
 
@@ -276,6 +294,7 @@ Rules:
 
 - The prefix names the type: `T#` is `TIME`, `LT#` is `LTIME`, `S5T#` is `S5TIME`, `D#` is `DATE`, and `LD#` is `LDATE`. `TOD#` is `TIME_OF_DAY`, `LTOD#` is `LTOD`, `DT#` is `DATE_AND_TIME`, `LDT#` is `LDT`, and `DTL#` is `DTL`.
 - The prefixes `TOD#` and `DT#` are literal syntax, not type names.
+- The parser also accepts 8 long prefixes as aliases (ADR-0205). `TIME#` is `T#`, `LTIME#` is `LT#`, `DATE#` is `D#`, and `LDATE#` is `LD#`. `TIME_OF_DAY#` is `TOD#`, `LTIME_OF_DAY#` is `LTOD#`, `DATE_AND_TIME#` is `DT#`, and `LDATE_AND_TIME#` is `LDT#`. An alias gives the same count on every platform. A prefix is upper case.
 - The parts of a duration follow the unit order `d`, `h`, `m`, `s`, `ms`, `us`, `ns`. Each unit occurs at most once.
 - The first part has no upper bound. Every later part is less than one unit of the part before it, for example `m` less than 60.
 - `TIME` accepts the units `d` to `ms`. `S5TIME` accepts `h` to `ms`. `LTIME` accepts every unit. Only `TIME` and `LTIME` accept the sign `-`.
@@ -283,7 +302,7 @@ Rules:
 - The date exists in the calendar. The hour is `00..=23`.
 - The count is inside the range of the base-unit table.
 - The canonical literal writes every part that is not zero. Zero is `T#0ms`, `LT#0ns`, or `S5T#0ms`, and its count is `0`. A fraction has no trailing zeros.
-- `parse` and `Display` round-trip.
+- `Display` writes the short prefix. A canonical literal round-trips through `parse` and `Display`. A literal with a long prefix gives the canonical literal with the short prefix.
 - A text that does not parse, or a count outside the range, is `E-RCP-005 ValueShapeMismatch` for a value. For a limit it is `E-RCP-006 LimitOutsideTypeRange`.
 - Pages and error messages show a `Duration` or `Instant` value and its limits as the canonical literal.
 
@@ -440,7 +459,7 @@ Rules per class (`LeafClass`, section 2.1):
 A JSON value with the same shape as the `TypeTree`:
 
 - primitive: the JSON form of its `LeafClass` (section 2.1)
-- array: JSON array with exactly `(upper - lower + 1)` elements per dimension
+- array: JSON array with exactly `(upper - lower + 1)` elements per dimension. The first dimension is the outer JSON level, and the last index changes fastest (ADR-0209 (e)). `ARRAY[1..2,1..3] OF INT` is a JSON array of 2 arrays of 3 elements, and the leaf `[2,1]` is at the JSON position `[1][0]`
 - struct: JSON object with exactly the member names
 
 Canonical text per class:
@@ -547,11 +566,11 @@ State rule for `before` and `after` (the same rule as ADR-0005 and `data-model.m
 
 Migrations. Schema migrations and the seed migration `0004_seed_plc_types.sql` write no audit row. `_sqlx_migrations` is the record of schema and seed changes. A later data migration that changes catalog rows writes one audit row per changed row under `SET ROLE audit_owner`. The row has `actor = None` and `request_id` = the UUID of the migration version (`data-model.md` 5.1 and 10).
 
-`AuditAction` (enum): one name per command result, plus `DerivedTypeCreated` for the internal operation and `SettingChanged` for the startup settings comparison. 38 names:
+`AuditAction` (enum): one name per command result, plus `DerivedTypeCreated` for the internal operation and `SettingChanged` for the startup settings comparison. 39 names:
 
 | Context | Actions |
 |---|---|
-| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineDataBlockSet`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated`, `PlcConnectionSet` |
+| Plant Model | `MachineCreated`, `MachineRenamed`, `MachineDataBlockSet`, `MachineStringEncodingSet`, `MachineArchived`, `UnitAdded`, `UnitRenamed`, `UnitArchived`, `UdtDefined`, `DerivedTypeCreated`, `PlcConnectionSet` |
 | Recipe Management | `RecipeCreated`, `RecipeRenamed`, `RecipeDeleted`, `RecipeRestored`, `VersionCreated`, `DraftDiscarded`, `VersionApproved`, `VersionRetired`, `ParameterAdded`, `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, `TranslationRemoved`, `ParameterRemoved`, `TypeRevisionRebound` |
 | Identity and Access | `UserLoggedIn`, `UserLoggedOut`, `UserCreated`, `UserRoleSet`, `UserDeactivated`, `UserActivated`, `PasswordReset`, `OwnPasswordChanged`, `LoginUnlocked` |
 | Export | `VersionExported`, `PlcConnectionExported` |
@@ -657,7 +676,7 @@ Each command runs in one READ COMMITTED transaction, except `Login` and `ChangeO
 
 Lock order (ADR-0015): `machine` → `recipe` → `recipe_version` → `unit` → children. A command takes only the locks that it needs, always in this order:
 
-- `RenameMachine`, `SetMachineDataBlock`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` take `machine FOR NO KEY UPDATE` first.
+- `RenameMachine`, `SetMachineDataBlock`, `SetMachineStringEncoding`, `ArchiveMachine`, `RenameUnit`, `ArchiveUnit`, and `SetPlcConnection` take `machine FOR NO KEY UPDATE` first.
 - `SetPlcConnection` then takes `plc_connection FOR UPDATE`. `ExportPlcConnection` takes `machine FOR SHARE` and then `plc_connection FOR SHARE` (ADR-0154).
 - `AddUnit`, `CreateRecipe`, `RestoreRecipe`, `CreateVersion`, `AddParameter`, `UpdateParameterDefinition`, `RebindTypeRevision`, and `DefineUdt` take `machine FOR SHARE` first. `DefineUdt` then takes the advisory locks of section 5.1.
 - A recipe command reads `recipe.machine_id` without a lock before it locks the machine. The column never changes.
@@ -711,9 +730,10 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 
 | Command | Aggregate | Result | Errors |
 |---|---|---|---|
-| `CreateMachine` | Machine | New machine with unit `U1` and the `db_number` of the request (section 2.1) | `E-PLT-001 DuplicateMachineCode`, `E-PLT-024 DataBlockOutOfRange`, `E-PLT-050 DataBlockMissing`, `E-PLT-051 DataBlockNotOnPlatform` |
+| `CreateMachine` | Machine | New machine with unit `U1`, the `db_number`, and the `string_encoding` of the request (section 2.1) | `E-PLT-001 DuplicateMachineCode`, `E-PLT-024 DataBlockOutOfRange`, `E-PLT-050 DataBlockMissing`, `E-PLT-051 DataBlockNotOnPlatform`, `E-PLT-053 StringEncodingNotOnPlatform` |
 | `RenameMachine` | Machine | New `name` | `E-PLT-010 MachineArchived` |
 | `SetMachineDataBlock` | Machine | New `db_number` of a live S7 machine. No `row_version` compare, as `RenameMachine`. Locks: `machine FOR NO KEY UPDATE`. Audit entry `MachineDataBlockSet` (ADR-0156 (e)) | `E-PLT-010 MachineArchived`, `E-PLT-024 DataBlockOutOfRange`, `E-PLT-050 DataBlockMissing`, `E-PLT-051 DataBlockNotOnPlatform` |
+| `SetMachineStringEncoding` | Machine | New `string_encoding` of a live machine without a version row (section 2.1, ADR-0202). No `row_version` compare, as `RenameMachine`. Locks: `machine FOR NO KEY UPDATE`. Audit entry `MachineStringEncodingSet` | `E-PLT-010 MachineArchived`, `E-PLT-053 StringEncodingNotOnPlatform`, `E-PLT-054 StringEncodingFrozen` |
 | `ArchiveMachine` | Machine | `archived_at` set | `E-PLT-011 MachineHasDraft` |
 | `AddUnit` | Machine | New unit under a live parent. Locks: `machine FOR SHARE`, then the parent `unit FOR SHARE` | `E-PLT-002 UnitDepthExceeded`, `E-PLT-003 ParentNotFound` (the foreign key `unit_parent_exists`, second line), `E-PLT-004 DuplicateUnitPath`, `E-PLT-009 UnitArchived` (parent), `E-PLT-010 MachineArchived`, `E-PLT-017 InvalidUnitPath` (`parent_path` or `segment`) |
 | `RenameUnit` | Machine | New `name`. Locks: `machine FOR NO KEY UPDATE`, then the unit `FOR UPDATE` | `E-PLT-009 UnitArchived` |
@@ -722,6 +742,8 @@ Each port has an in-memory adapter for the tests. Each job is one iteration `run
 | `SetPlcConnection` | Machine | New or changed PLC connection record (section 2.1). The `row_version` compare treats no record as 0. Locks: `machine FOR NO KEY UPDATE`, then `plc_connection FOR UPDATE`. Audit entry `PlcConnectionSet` without the password and the ciphertext | `E-PLT-010 MachineArchived`, `E-PLT-022 ConnectionFieldNotOnPlatform`, `E-PLT-023 ConnectionFieldMissing`, `E-PLT-025 CommModeNotOnPlatform`, `E-PLT-026 AddressNotAmsNetId`, `E-PLT-028 ConnectionFieldNotInMode`, `E-WEB-011 TaskFailed` (seal of the password), `E-WEB-013 ConnectionConcurrentEdit` |
 
 `SetPlcConnection` runs `PlcConnection::for_platform` and seals a new password before its transaction (`reliability.md` 7.4). It reads the platform and the password state without a lock, because the platform of a machine never changes. The `row_version` compare inside the transaction proves that the password state did not change (ADR-0154 (i)).
+
+`CreateMachine` and `SetMachineStringEncoding` check the encoding against the platform before their transaction. `SetMachineStringEncoding` checks the version rows under its machine lock. The lock conflicts with the `FOR SHARE` lock of `CreateRecipe`, `RestoreRecipe`, and `CreateVersion` (ADR-0202 (d3)).
 
 `CreateMachine` and `SetMachineDataBlock` call `check_data_block` before their transaction (`reliability.md` 7.4). `SetMachineDataBlock` reads the platform without a lock, because the platform of a machine never changes. Two runs at the same time give the last write, and the audit log holds both entries (ADR-0156).
 
@@ -927,3 +949,6 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A48 | Each live machine on `S7_300`, `S7_1200`, or `S7_1500` has one data block number. A `CodesysIec` or `TwinCat3` machine has none. The number is the default data block for a parameter without `s7_address`. It never changes the address of a parameter |
 | A49 | `S7_1200` is the classic S7-1200 family with firmware 4.1 or later. The S7-1200 G2 is not in scope. The editor does not check the firmware |
 | A50 | The editor models the standard program of an S7 CPU only. A recipe parameter never targets an F-DB. F data types, F-UDTs, F arrays, F open arrays, and F named value types are not in scope |
+| A51 | Every `CodesysIec` machine compiles `LREAL` as an eight-byte binary64 number. The 15 significant digits of `LREAL` need it. The editor does not check the compiler. The runbook names the check before a plant adds a `CodesysIec` machine |
+| A52 | Every `CodesysIec` machine runs CODESYS V3.5 SP16 or later. `LDATE`, `LTOD`, and `LDT` need this version. The editor does not check the version. The runbook names the check before a plant adds a `CodesysIec` machine |
+| A53 | On `CodesysIec` and `TwinCat3`, the transfer system writes each leaf through its symbol. The editor therefore models no layout, no `pack_mode`, and no `EXTENDS` on these platforms |

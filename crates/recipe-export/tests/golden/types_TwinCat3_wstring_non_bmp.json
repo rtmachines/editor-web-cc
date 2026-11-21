@@ -2,7 +2,7 @@
   "schema_version": "1",
   "exported_at": "2026-10-12T09:30:00Z",
   "exported_by": "jkowalski",
-  "loadable": true,
+  "loadable": false,
   "content_sha256": "8fb8791f92e30030784f52d26428fa571336f88949ad1b8190298a44404b2018",
   "machine": {
     "code": "M12",

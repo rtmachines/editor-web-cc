@@ -59,6 +59,7 @@ pub(super) fn canonicalize(
                     primitive: *primitive,
                     string_length: *string_length,
                     platform: tree.platform(),
+                    string_encoding: tree.string_encoding(),
                     mode,
                     rules,
                 };

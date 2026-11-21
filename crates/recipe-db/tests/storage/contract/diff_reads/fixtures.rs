@@ -6,7 +6,7 @@
 use recipe_app::ports::{ChangeFlags, DiffSides, Isolation, Transaction};
 use recipe_domain::plant::{
     Machine, MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    TypeTrees,
+    StringEncoding, TypeTrees,
 };
 use recipe_domain::recipe::{
     DiffKind, DiffPair, DiffRows, Parameter, ParameterId, ParameterKey, RecipeVersionId,
@@ -202,7 +202,8 @@ fn domain_rows(
     type_rows: Vec<PlcType>,
     (machine, platform): (MachineId, PlcPlatform),
 ) -> DiffRows {
-    let types = PlatformTypes::collect(machine, platform, type_rows).unwrap();
+    let types =
+        PlatformTypes::collect(machine, platform, StringEncoding::Latin1, type_rows).unwrap();
     let old: Vec<Parameter> = sides.old.into_iter().map(Parameter::from).collect();
     let new: Vec<Parameter> = sides.new.into_iter().map(Parameter::from).collect();
     let ids = old.iter().chain(new.iter()).map(Parameter::plc_type);

@@ -9,6 +9,8 @@ pub enum AuditAction {
     MachineRenamed,
     /// The data block number of a machine was set.
     MachineDataBlockSet,
+    /// The `STRING` encoding of a machine was set.
+    MachineStringEncodingSet,
     /// A machine was archived.
     MachineArchived,
     /// A unit was added to a machine.
@@ -83,10 +85,11 @@ pub enum AuditAction {
 
 impl AuditAction {
     /// Every audit action, in the order of `data-model.md` section 10.
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::MachineCreated,
         Self::MachineRenamed,
         Self::MachineDataBlockSet,
+        Self::MachineStringEncodingSet,
         Self::MachineArchived,
         Self::UnitAdded,
         Self::UnitRenamed,
@@ -131,6 +134,7 @@ impl AuditAction {
             Self::MachineCreated => "MachineCreated",
             Self::MachineRenamed => "MachineRenamed",
             Self::MachineDataBlockSet => "MachineDataBlockSet",
+            Self::MachineStringEncodingSet => "MachineStringEncodingSet",
             Self::MachineArchived => "MachineArchived",
             Self::UnitAdded => "UnitAdded",
             Self::UnitRenamed => "UnitRenamed",

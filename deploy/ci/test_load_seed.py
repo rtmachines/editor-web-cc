@@ -68,6 +68,7 @@ class LoadSeedTests(unittest.TestCase):
         self.run_seed()
         posts = {path: fields for method, path, fields, _ in self.sent if method == "POST"}
         self.assertEqual(posts["/machines"]["plc_platform"], ["CodesysIec"])
+        self.assertEqual(posts["/machines"]["string_encoding"], ["Latin1"])
         fields = posts["/machines/M9000001/types"]
         self.assertEqual(fields["name"], ["ST_Load"])
         members = {key: value for key, value in fields.items() if key.startswith("members[")}

@@ -24,7 +24,7 @@ use crate::auth::{
 };
 use crate::context::{AppContext, UseCase};
 use crate::error::{AppError, Missing, StorageError};
-use crate::plant::is_refused_struct_name;
+use crate::plant::{check_iec_struct, expr_names_row, is_refused_struct, require_current_type};
 use crate::ports::{Isolation, VersionDetail};
 use crate::recipe::draft_session::collect_stored_types;
 
@@ -213,11 +213,38 @@ fn stored_type_text(
     }
 }
 
+/// Check the type text of the preview with the current rule set (ADR-0206 (d3)).
+///
+/// The function solves one problem: the preview of the form must show the reason that the command
+/// gives, before it resolves the text. It calls [`require_current_type`] and then
+/// [`check_iec_struct`] (ADR-0203 (j1), ADR-0204 (d1)). It skips both for an unchanged type text of
+/// an edit form. The purpose of such a form is `UpdateParameterDefinition`, and it edits `stored`.
+/// The canonical text of `expr` names the stored type, as `UpdateParameterDefinition` compares it.
+///
+/// # Errors
+///
+/// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) with the reason of the failed check.
+fn require_form_type(
+    types: &PlatformTypes,
+    expr: &TypeExpr,
+    (purpose, stored): (ParameterFormPurpose, Option<&StoredParameter>),
+) -> Result<(), AppError> {
+    let is_unchanged = purpose == ParameterFormPurpose::UpdateParameterDefinition
+        && stored.is_some_and(|parameter| expr_names_row(types, parameter.plc_type, expr));
+    if is_unchanged {
+        return Ok(());
+    }
+    require_current_type(expr, types.platform())?;
+    check_iec_struct(types, expr)?;
+    Ok(())
+}
+
 /// Return the proposals of the type input, as `GetUdtForm` writes them (`plant/queries/types.rs`).
 ///
 /// First come the primitives of the platform without `STRING` and `WSTRING`. Then come `STRING`,
 /// and `WSTRING` when the platform has it. The latest revision of each struct follows as
-/// `<name>@<revision>` in the byte order of the name. A struct with a reserved name is no proposal,
+/// `<name>@<revision>` in the byte order of the name. A name whose latest revision is refused is no
+/// proposal, as in `GetUdtForm`. A struct with a reserved name is no proposal,
 /// because every command refuses it (ADR-0143 (i2)). On an S7 platform, a struct with a Siemens
 /// reserved name is no proposal either (ADR-0186 (h)).
 fn proposals(types: &PlatformTypes) -> Vec<String> {
@@ -236,13 +263,13 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
     let strings = [Primitive::String]
         .into_iter()
         .chain(has_wstring.then_some(Primitive::Wstring));
-    let mut latest: BTreeMap<&TypeName, u32> = BTreeMap::new();
+    let mut latest: BTreeMap<&TypeName, (u32, &PlcType)> = BTreeMap::new();
     for row in types.rows() {
-        if let RecordShape::Struct { name, revision, .. } = row.shape()
-            && !is_refused_struct_name(types.platform(), name)
-        {
-            let entry = latest.entry(name).or_insert(*revision);
-            *entry = (*entry).max(*revision);
+        if let RecordShape::Struct { name, revision, .. } = row.shape() {
+            let entry = latest.entry(name).or_insert((*revision, row));
+            if *revision > entry.0 {
+                *entry = (*revision, row);
+            }
         }
     }
     primitives
@@ -252,8 +279,33 @@ fn proposals(types: &PlatformTypes) -> Vec<String> {
         .chain(
             latest
                 .iter()
-                .map(|(name, revision)| format!("{name}@{revision}")),
+                .filter(|(_, (_, row))| !is_refused_struct(types.platform(), row))
+                .map(|(name, (revision, _))| format!("{name}@{revision}")),
         )
+        .collect()
+}
+
+/// Builds the preview tree of the requested type text, or `None` without one.
+///
+/// The step solves one problem. `execute` stays short, and the preview stays a pure in-memory
+/// step after the read transaction (ADR-0039 (h)).
+fn preview_of(
+    machine: &Machine,
+    rows: Vec<PlcType>,
+    type_expr: Option<&TypeExpr>,
+) -> Result<Option<TypeTree>, AppError> {
+    let kind = (machine.platform(), machine.string_encoding());
+    type_expr
+        .map(|expr| preview_tree(machine.id(), kind, rows, expr))
+        .transpose()
+}
+
+/// Returns the live units of the machine in the order of the path.
+fn live_units(machine: &Machine) -> Vec<Unit> {
+    machine
+        .units()
+        .filter(|unit| unit.is_live())
+        .cloned()
         .collect()
 }
 
@@ -293,7 +345,9 @@ impl GetParameterForm {
     /// Returns `RecipeError::VersionNotEditable` (`E-RCP-002`) when the version is not a live
     /// draft.
     /// Returns `PlantError::DerivedTypeInvalid` (`E-PLT-013`) or `TypeTooLarge` (`E-PLT-018`)
-    /// for the preview type. Returns `TypeCycle` (`E-PLT-005`) when the stored rows of the
+    /// for the preview type. The type text of the add form and a changed type text of the edit
+    /// form first meet the current rule set, so a reserved struct name gives `E-PLT-013` with the
+    /// reason "reserved name" (ADR-0206 (d3)). Returns `TypeCycle` (`E-PLT-005`) when the stored rows of the
     /// preview type form a cycle.
     /// Returns `DerivedTypeInvalid` for a stored member type that the platform does not hold.
     /// Returns `AppError::Storage` when the database fails.
@@ -326,21 +380,21 @@ impl GetParameterForm {
         if let Some(path) = &input.unit {
             require_live_unit(&machine, path)?;
         }
-        let types = collect_stored_types(machine.id(), machine.platform(), reads.rows.clone())?;
+        let types = collect_stored_types(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            reads.rows.clone(),
+        )?;
         let repairs = input.purpose == ParameterFormPurpose::UpdateParameterDefinition;
         let choices = proposals(&types);
         let type_text = stored_type_text(&types, reads.parameter.as_ref(), repairs)?;
         let rule_faults = rule_faults_of(reads.parameter.as_ref(), &types, repairs)?;
-        let preview = input
-            .type_expr
-            .as_ref()
-            .map(|expr| preview_tree(machine.id(), machine.platform(), reads.rows, expr))
-            .transpose()?;
-        let units = machine
-            .units()
-            .filter(|unit| unit.is_live())
-            .cloned()
-            .collect();
+        if let Some(expr) = &input.type_expr {
+            require_form_type(&types, expr, (input.purpose, reads.parameter.as_ref()))?;
+        }
+        let preview = preview_of(&machine, reads.rows, input.type_expr.as_ref())?;
+        let units = live_units(&machine);
         Ok(ParameterForm {
             recipe: reads.scope.recipe,
             machine,

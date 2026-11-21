@@ -50,9 +50,21 @@ pub enum Expected {
         /// The highest scalar that the platform accepts.
         max: u32,
     },
+    /// A `WSTRING(n)` leaf on `CodesysIec` or `TwinCat3` needs a string inside its length with
+    /// characters from `U+0001` to `U+D7FF` and from `U+E000` to `U+FFFF` (ADR-0201 (c)).
+    WstringIec {
+        /// The length of the type in UTF-16 units.
+        length: u16,
+    },
     /// A `STRING(n)` leaf needs a string of Latin-1 characters inside its length.
     String {
         /// The length of the type.
+        length: u16,
+    },
+    /// A `STRING(n)` leaf of a `Utf8` machine needs a string inside its length in UTF-8 bytes
+    /// without `U+0000` (ADR-0202 (f)).
+    StringUtf8 {
+        /// The length of the type in UTF-8 bytes.
         length: u16,
     },
     /// A `CHAR` or `WCHAR` leaf needs one Unicode scalar inside the range of the type.
@@ -125,11 +137,18 @@ impl fmt::Display for Expected {
                 f,
                 "a string of at most {length} characters from U+0001 to U+{max:04X}"
             ),
+            Self::WstringIec { length } => write!(
+                f,
+                "a string of at most {length} UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF"
+            ),
             Self::String { length } => {
                 write!(
                     f,
                     "a string of at most {length} characters from Latin-1 without U+0000"
                 )
+            }
+            Self::StringUtf8 { length } => {
+                write!(f, "a string of at most {length} UTF-8 bytes without U+0000")
             }
             Self::Char { max } => write!(f, "one character from U+0001 to U+{max:04X}"),
             Self::Literal { type_name } => write!(f, "an IEC literal of type {type_name}"),

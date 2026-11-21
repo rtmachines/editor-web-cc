@@ -3,6 +3,8 @@
 mod add_parameter;
 #[cfg(test)]
 mod add_parameter_errors;
+#[cfg(test)]
+mod adr_0202_integration_tests;
 mod approve_version;
 mod create_recipe;
 mod create_version;
@@ -20,7 +22,7 @@ mod set_value;
 #[cfg(test)]
 mod stored_s7_tests;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 mod translation;
 mod update_definition;
 

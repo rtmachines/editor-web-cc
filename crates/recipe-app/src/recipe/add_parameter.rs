@@ -8,7 +8,9 @@ use recipe_domain::recipe::{
 };
 use recipe_domain::text::{LongText, Text};
 
-use super::definition_steps::{lock_live_unit, map_tag_error, require_s7_nesting, resolve_type};
+use super::definition_steps::{
+    lock_live_unit, map_tag_error, require_iec_struct, require_s7_nesting, resolve_type,
+};
 use super::draft_session::{DraftOutput, DraftTarget, MachineLock, OpenDraft, TouchedDraft};
 use super::queries::value_text;
 use crate::auth::{CurrentUser, Operation, RequestMeta, authorize};
@@ -117,6 +119,7 @@ impl AddParameter {
             .type_expr
             .require_no_nested_array(open.draft.platform())?;
         require_s7_nesting(&open, &input.type_expr)?;
+        require_iec_struct(&open, &input.type_expr)?;
         let unit = lock_live_unit(&mut open, &input.unit_path).await?;
         let resolved = resolve_type(&mut open, &input.type_expr, audit_context(user, meta)).await?;
         let key = ParameterKey::from(random_uuid()?);

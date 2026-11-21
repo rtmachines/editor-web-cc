@@ -22,6 +22,8 @@ mod data_block_form;
 mod form;
 mod list;
 mod page;
+mod string_encoding_commands;
+mod string_encoding_form;
 pub(crate) mod tree;
 mod tree_page;
 
@@ -29,7 +31,7 @@ mod tree_page;
 ///
 /// The rows are `/machines`, `/machines/new`, `/machines/{code}`, `/machines/by-id/{uuid}`,
 /// `/machines/{code}/units`, `/machines/{code}/connection/edit`, and the commands to create,
-/// rename, and archive a machine and to save its connection or its data block number.
+/// rename, and archive a machine and to save its connection, its data block number, or its `STRING` encoding.
 pub(crate) fn rows() -> Vec<RouteEntry> {
     let mut rows = page_rows();
     rows.extend(command_rows());
@@ -107,6 +109,12 @@ fn command_rows() -> Vec<RouteEntry> {
         ),
         operation_row(
             Method::POST,
+            "/machines/{code}/string-encoding",
+            Operation::SetMachineStringEncoding,
+            post(string_encoding_commands::set),
+        ),
+        operation_row(
+            Method::POST,
             "/machines/{code}/connection",
             Operation::SetPlcConnection,
             post(connection_save::save),
@@ -149,6 +157,8 @@ mod connection_xss_tests;
 #[cfg(test)]
 mod data_block_commands_tests;
 #[cfg(test)]
+mod form_encoding_tests;
+#[cfg(test)]
 mod form_tests;
 #[cfg(test)]
 mod list_tests;
@@ -156,6 +166,8 @@ mod list_tests;
 mod machine_connection_tests;
 #[cfg(test)]
 mod machine_data_block_tests;
+#[cfg(test)]
+mod machine_string_encoding_tests;
 #[cfg(test)]
 mod machine_tests;
 #[cfg(test)]

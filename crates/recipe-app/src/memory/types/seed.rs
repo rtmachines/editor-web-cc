@@ -28,6 +28,13 @@ const NOT_S7_300: &[PlcPlatform] = &[
     PlcPlatform::S7_1200,
     PlcPlatform::S7_1500,
 ];
+/// Every platform except `S7_1200`.
+const NOT_S7_1200: &[PlcPlatform] = &[
+    PlcPlatform::CodesysIec,
+    PlcPlatform::TwinCat3,
+    PlcPlatform::S7_1500,
+    PlcPlatform::S7_300,
+];
 /// The platforms with `WSTRING(254)`.
 const S7_WIDE: &[PlcPlatform] = &[PlcPlatform::S7_1200, PlcPlatform::S7_1500];
 
@@ -77,15 +84,38 @@ const SEEDS: [Seed; 11] = [
     seed(Primitive::Ltime, None, LTIME_PLATFORMS),
 ];
 
+/// The seed rows of the time-of-day and date-and-time primitives.
+///
+/// [`MemoryStore::seed_primitive_types`] leaves them out, so a test that counts the seed rows
+/// stays as it is. [`MemoryStore::seed_time_primitive_types`] inserts them. Their numbers start at
+/// [`TIME_SEED_OFFSET`], so they never share an identifier with a row of [`SEEDS`].
+const TIME_SEEDS: [Seed; 4] = [
+    seed(Primitive::TimeOfDay, None, ALL),
+    seed(Primitive::DateAndTime, None, NOT_S7_1200),
+    seed(Primitive::Ltod, None, LTIME_PLATFORMS),
+    seed(Primitive::Ldt, None, LTIME_PLATFORMS),
+];
+
+/// The index that the first row of [`TIME_SEEDS`] gets in the numbering of the seed identifiers.
+const TIME_SEED_OFFSET: usize = 100;
+
+/// Return the index of the row of `primitive` with `string_length` in `rows`.
+fn position(rows: &[Seed], primitive: Primitive, string_length: Option<u16>) -> Option<usize> {
+    rows.iter()
+        .position(|row| row.primitive == primitive && row.string_length == string_length)
+}
+
 /// Return the identifier of a seed row, or `None` when the row is not in the seed.
 ///
 /// The seed has `BOOL`, `INT`, `DINT`, `REAL`, `LREAL`, `TIME`, `STRING(254)`, `STRING(80)`,
-/// `WSTRING(254)`, `WSTRING(80)`, and `LTIME`. A primitive without length takes `None`.
+/// `WSTRING(254)`, `WSTRING(80)`, and `LTIME`. It also gives the identifiers of the rows that
+/// [`MemoryStore::seed_time_primitive_types`] inserts: `TIME_OF_DAY`, `DATE_AND_TIME`, `LTOD`, and
+/// `LDT`. A primitive without length takes `None`.
 #[must_use]
 pub fn seed_type_id(primitive: Primitive, string_length: Option<u16>) -> Option<PlcTypeId> {
-    let index = SEEDS
-        .iter()
-        .position(|row| row.primitive == primitive && row.string_length == string_length)?;
+    let index = position(&SEEDS, primitive, string_length).or_else(|| {
+        position(&TIME_SEEDS, primitive, string_length)?.checked_add(TIME_SEED_OFFSET)
+    })?;
     let number = u128::try_from(index).ok()?.checked_add(1)?;
     Some(PlcTypeId::from(Uuid::from_u128(SEED_ID_PREFIX | number)))
 }
@@ -133,6 +163,16 @@ impl MemoryStore {
     /// [`seed_type_id`] gives their identifiers. `seed_type` adds more rows.
     pub fn seed_primitive_types(&self) {
         for row in SEEDS.iter().filter_map(seed_row) {
+            self.seed_type(&row);
+        }
+    }
+
+    /// Insert the rows `TIME_OF_DAY`, `DATE_AND_TIME`, `LTOD`, and `LDT` of the global catalog.
+    ///
+    /// [`MemoryStore::seed_primitive_types`] does not insert them. Each row has the platforms of
+    /// the matrix. [`seed_type_id`] gives their identifiers.
+    pub fn seed_time_primitive_types(&self) {
+        for row in TIME_SEEDS.iter().filter_map(seed_row) {
             self.seed_type(&row);
         }
     }

@@ -425,7 +425,12 @@ fn check(
         page,
     } = read;
     let approver_blocker = draft.check_approver(approver, &policy).err();
-    let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
+    let types = PlatformTypes::collect(
+        machine.id(),
+        machine.platform(),
+        machine.string_encoding(),
+        type_rows,
+    )?;
     let page = LoadedPage::from(page);
     // One resolve serves the outdated list, the diff, and `check_for_approval`.
     // Each step looks up its own types only.

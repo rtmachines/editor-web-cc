@@ -3,11 +3,11 @@
 //!
 //! The read runs one statement for the version header, one for the editors, and three set
 //! queries for the parameters (`parameter_rows`). The lock variant adds `FOR UPDATE OF v`, so
-//! the statement locks the version row and no row of `recipe`.
+//! the statement locks the version row and no row of `recipe` or `machine`.
 
 use recipe_app::error::StorageError;
 use recipe_domain::identity::UserId;
-use recipe_domain::plant::{MachineId, PlcPlatform};
+use recipe_domain::plant::{MachineId, PlcPlatform, StringEncoding};
 use recipe_domain::recipe::{
     RecipeVersionId, ReferenceNumber, StoredDraft, VersionState, VersionStatus,
 };
@@ -21,14 +21,16 @@ use crate::error::{corrupt, map_error, missing_row};
 /// The version row with the recipe columns that the draft carries.
 const SELECT_HEADER: &str = "\
 SELECT v.id, v.number, v.status, v.deleted_at, v.row_version, v.created_by, v.plc_platform, \
-r.machine_id, r.reference_number \
-FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id WHERE v.id = $1";
+r.machine_id, r.reference_number, m.string_encoding \
+FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id \
+JOIN machine m ON m.id = r.machine_id WHERE v.id = $1";
 
-/// The same statement with the lock. `OF v` leaves the recipe row unlocked.
+/// The same statement with the lock. `OF v` leaves the recipe row and the machine row unlocked.
 const LOCK_HEADER: &str = "\
 SELECT v.id, v.number, v.status, v.deleted_at, v.row_version, v.created_by, v.plc_platform, \
-r.machine_id, r.reference_number \
-FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id WHERE v.id = $1 FOR UPDATE OF v";
+r.machine_id, r.reference_number, m.string_encoding \
+FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id \
+JOIN machine m ON m.id = r.machine_id WHERE v.id = $1 FOR UPDATE OF v";
 
 const SELECT_EDITORS: &str = "\
 SELECT user_id FROM draft_editor WHERE recipe_version_id = $1 ORDER BY user_id";
@@ -54,6 +56,7 @@ struct HeaderRecord {
     plc_platform: String,
     machine_id: Uuid,
     reference_number: String,
+    string_encoding: String,
 }
 
 /// Build the stored draft of a header row, its editors, and its parameters.
@@ -76,6 +79,8 @@ async fn build(
         machine: MachineId::from(record.machine_id),
         platform: PlcPlatform::parse(&record.plc_platform)
             .map_err(|error| corrupt("recipe_version", error))?,
+        string_encoding: StringEncoding::parse(&record.string_encoding)
+            .map_err(|error| corrupt("machine", error))?,
         version,
         number: u32::try_from(record.number).map_err(|error| corrupt("recipe_version", error))?,
         state: VersionState::from_stored(status, record.deleted_at.is_some())

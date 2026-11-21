@@ -8,8 +8,8 @@ use std::collections::BTreeSet;
 use recipe_app::memory::{MemoryTransaction, seed_type_id};
 use recipe_app::ports::{Isolation, Transaction as _};
 use recipe_domain::plant::{
-    MachineCode, MemberName, PlatformTypes, PlcPlatform, PlcType, Primitive, RecordShape, TypeNode,
-    TypeTree, Unit, UnitPath,
+    MachineCode, MemberName, PlatformTypes, PlcPlatform, PlcType, Primitive, RecordShape,
+    StringEncoding, TypeNode, TypeTree, Unit, UnitPath,
 };
 use recipe_domain::recipe::{ReferenceNumber, VersionState};
 
@@ -183,7 +183,8 @@ async fn seed_plant_has_the_revisions_1_and_2_of_st_zone_and_the_revision_1_of_s
 async fn seed_plant_line_holds_an_array_of_st_zone_2_down_the_usage_chain() {
     let (fixture, ids) = seeded();
     let rows = begin(&fixture).types().type_rows(ids.m7).await.unwrap();
-    let types = PlatformTypes::collect(ids.m7, PlcPlatform::S7_300, rows).unwrap();
+    let types =
+        PlatformTypes::collect(ids.m7, PlcPlatform::S7_300, StringEncoding::Latin1, rows).unwrap();
     let tree = TypeTree::resolve(ids.line_v1, &types).unwrap();
     assert_eq!(tree.root_type(), ids.line_v1);
     assert_eq!(tree.leaf_count(), 8);

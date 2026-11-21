@@ -9,7 +9,9 @@ use recipe_domain::export::{
     Sha256, check_version_parameters,
 };
 use recipe_domain::identity::Login;
-use recipe_domain::plant::{LiveUnits, Machine, PlantError, PlatformTypes, TypeTrees, UnitPath};
+use recipe_domain::plant::{
+    LiveUnits, Machine, PlantError, PlatformTypes, StringEncoding, TypeTrees, UnitPath,
+};
 use recipe_domain::recipe::{Parameter, RecipeVersionId, ReferenceNumber};
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -25,6 +27,8 @@ pub(super) struct BodyRows {
     parameters: Vec<Parameter>,
     units: LiveUnits,
     trees: TypeTrees,
+    /// The encoding of the machine. The scope body holds it for `Utf8` (ADR-0202 (j1)).
+    string_encoding: StringEncoding,
 }
 
 impl BodyRows {
@@ -101,6 +105,7 @@ impl KnownFacts {
                 .map(|parameter| (parameter.key(), parameter.name_en().clone()))
                 .collect(),
             has_rule_fault,
+            string_encoding: rows.string_encoding,
         }
     }
 }
@@ -115,6 +120,15 @@ pub(super) struct Written {
     pub(super) scope: Option<ScopeAudit>,
     /// `true` when the rule check found a fault in the whole version.
     pub(super) has_rule_fault: bool,
+    /// The value of `loadable` in the document. The bytes and the result hold this one flag.
+    pub(super) loadable: bool,
+}
+
+/// The document of one export and the flag `loadable` that the document holds.
+struct WrittenDocument {
+    bytes: Vec<u8>,
+    scope: Option<ScopeAudit>,
+    loadable: bool,
 }
 
 /// Read the parameters, the units, and the types of the version (step 4).
@@ -143,7 +157,12 @@ pub(super) async fn read_rows(
             entity: Missing::MachineId(machine_id),
         })?;
     let rows = tx.types().type_rows(machine_id).await?;
-    let types = PlatformTypes::collect(machine_id, machine.platform(), rows)?;
+    let types = PlatformTypes::collect(
+        machine_id,
+        machine.platform(),
+        machine.string_encoding(),
+        rows,
+    )?;
     let trees = TypeTrees::resolve(parameters.iter().map(Parameter::plc_type), &types);
     let header = ExportHeader {
         machine: machine.code(),
@@ -156,13 +175,16 @@ pub(super) async fn read_rows(
         parameters,
         units,
         trees,
+        string_encoding: machine.string_encoding(),
     })
 }
 
 /// Write the document of `scope` from the checked whole body (step 5, after the hash check).
 ///
 /// The function solves one problem: the scope filter must run after the hash check of the whole
-/// version (ADR-0109 (w)). The caller has compared the hash already.
+/// version (ADR-0109 (w)). The caller has compared the hash already. The function also selects
+/// the flag `loadable` of the document: `v1_loadable` for the whole version and `loadable` for a
+/// unit (ADR-0202 (l)). Thus the bytes and `ExportedVersion::loadable` cannot differ.
 ///
 /// # Errors
 ///
@@ -170,12 +192,16 @@ pub(super) async fn read_rows(
 fn write_scope(
     writer: &dyn DocumentWriter,
     (body, facts): (&HashedBody, DocumentFacts),
-    (scope, header): (&ExportScope, &ExportHeader),
-) -> Result<(Vec<u8>, Option<ScopeAudit>), ExportError> {
+    (scope, header, string_encoding): (&ExportScope, &ExportHeader, StringEncoding),
+) -> Result<WrittenDocument, ExportError> {
     let ExportScope::Unit(path) = scope else {
-        return Ok((writer.write(body, &facts)?, None));
+        return Ok(WrittenDocument {
+            bytes: writer.write(body, &facts)?,
+            scope: None,
+            loadable: facts.v1_loadable(),
+        });
     };
-    let scoped = ScopeBody::build(body, path);
+    let scoped = ScopeBody::build(body, path, string_encoding);
     if scoped.is_empty() {
         return Err(ExportError::EmptyScope {
             reference: header.reference.clone(),
@@ -184,6 +210,7 @@ fn write_scope(
         });
     }
     let sha256 = scoped.sha256()?;
+    let loadable = facts.loadable();
     let document = writer.write_scoped(
         &scoped,
         &ScopeFacts {
@@ -195,7 +222,11 @@ fn write_scope(
         unit_path: path.clone(),
         sha256,
     };
-    Ok((document, Some(audit)))
+    Ok(WrittenDocument {
+        bytes: document,
+        scope: Some(audit),
+        loadable,
+    })
 }
 
 /// Build the body, compare its hash with `stored`, and write the document in one blocking task.
@@ -237,13 +268,17 @@ pub(super) async fn write_document(
                 })?;
             let has_rule_fault = !found.is_empty();
             let facts = facts.complete(&rows, hash, has_rule_fault);
-            let (document, scope) =
-                write_scope(writer.as_ref(), (&body, facts), (&scope, &rows.header))?;
+            let written = write_scope(
+                writer.as_ref(),
+                (&body, facts),
+                (&scope, &rows.header, rows.string_encoding),
+            )?;
             Ok(Written {
-                document,
+                document: written.bytes,
                 hash,
-                scope,
+                scope: written.scope,
                 has_rule_fault,
+                loadable: written.loadable,
             })
         })
         .await?

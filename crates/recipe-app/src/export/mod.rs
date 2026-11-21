@@ -165,6 +165,10 @@ impl ExportVersionByNumber {
 #[cfg(test)]
 mod adr_0179_tests;
 #[cfg(test)]
+mod adr_0202_tests;
+#[cfg(test)]
+mod adr_0206_tests;
+#[cfg(test)]
 mod list_exportable_recipes_tests;
 #[cfg(test)]
 mod machine_filter_tests;

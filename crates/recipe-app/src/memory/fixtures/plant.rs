@@ -1,6 +1,6 @@
 //! The machine fixture with three live units.
 
-use recipe_domain::plant::{Machine, MachineCode, PlcPlatform, UnitId, UnitPath};
+use recipe_domain::plant::{Machine, MachineCode, PlcPlatform, StringEncoding, UnitId, UnitPath};
 
 use super::{mid, text, uid};
 
@@ -22,6 +22,7 @@ pub(crate) fn machine_on(platform: PlcPlatform, n: u128, code: &str) -> Machine 
         platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id(n, 1), text("Main")),
     )
     .unwrap();

@@ -1,6 +1,6 @@
 # ADR-0189: Pattern of the S7 address in the export schema v2
 
-Status: Accepted
+Status: Accepted. Amended by ADR-0208 (more rules of the v2 schema file next to the address pattern)
 Date: 2026-11-17
 Deciders: project owner
 

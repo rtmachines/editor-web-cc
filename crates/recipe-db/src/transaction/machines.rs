@@ -6,8 +6,8 @@
 use recipe_app::error::StorageError;
 use recipe_app::ports::{InsertedMachine, Locked, RowImage};
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit, Unit,
-    UnitId, UnitPath,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StoredMachine, StoredUnit,
+    StringEncoding, Unit, UnitId, UnitPath,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -21,12 +21,12 @@ use crate::error::{corrupt, map_error};
 
 /// A live machine by code. The partial unique index `machine_code_live_unique` serves it.
 const SELECT_LIVE_BY_CODE: &str = "\
-SELECT id, code, name, plc_platform, db_number, archived_at FROM machine \
+SELECT id, code, name, plc_platform, db_number, string_encoding, archived_at FROM machine \
 WHERE code = $1 AND archived_at IS NULL";
 
 /// The first archived machine of a code by `id`, as the port contract demands.
 const SELECT_ARCHIVED_BY_CODE: &str = "\
-SELECT id, code, name, plc_platform, db_number, archived_at FROM machine \
+SELECT id, code, name, plc_platform, db_number, string_encoding, archived_at FROM machine \
 WHERE code = $1 AND archived_at IS NOT NULL ORDER BY id LIMIT 1";
 
 /// The machine that the transfer routes pick for a code (ADR-0109 (j)).
@@ -34,27 +34,27 @@ WHERE code = $1 AND archived_at IS NOT NULL ORDER BY id LIMIT 1";
 /// The live machine comes first because `archived_at DESC NULLS FIRST` puts null first. Then comes
 /// the latest archiving. `id DESC` breaks a tie. The `resolved` CTE of `SELECT_EXPORTABLE` in
 /// `exportable.rs` uses the same order, and the memory adapter does too.
-const SELECT_EXPORT_BY_CODE: &str = "SELECT id, code, name, plc_platform, db_number, archived_at FROM machine WHERE code = $1 ORDER BY archived_at DESC NULLS FIRST, id DESC LIMIT 1";
+const SELECT_EXPORT_BY_CODE: &str = "SELECT id, code, name, plc_platform, db_number, string_encoding, archived_at FROM machine WHERE code = $1 ORDER BY archived_at DESC NULLS FIRST, id DESC LIMIT 1";
 
 const SELECT_BY_ID: &str = "\
-SELECT id, code, name, plc_platform, db_number, archived_at FROM machine WHERE id = $1";
+SELECT id, code, name, plc_platform, db_number, string_encoding, archived_at FROM machine WHERE id = $1";
 
 /// `machine FOR SHARE` (`AddUnit`, `CreateRecipe`). The image comes from the locked row.
 const LOCK_SHARED: &str = "\
-SELECT id, code, name, plc_platform, db_number, archived_at, to_jsonb(m) AS image \
+SELECT id, code, name, plc_platform, db_number, string_encoding, archived_at, to_jsonb(m) AS image \
 FROM machine m WHERE id = $1 FOR SHARE";
 
 /// `machine FOR NO KEY UPDATE` (`RenameMachine`, `ArchiveMachine`).
 const LOCK_NO_KEY_UPDATE: &str = "\
-SELECT id, code, name, plc_platform, db_number, archived_at, to_jsonb(m) AS image \
+SELECT id, code, name, plc_platform, db_number, string_encoding, archived_at, to_jsonb(m) AS image \
 FROM machine m WHERE id = $1 FOR NO KEY UPDATE";
 
 const SELECT_UNITS: &str = "\
 SELECT id, path, name, archived_at FROM unit WHERE machine_id = $1 ORDER BY id";
 
 const INSERT_MACHINE: &str = "\
-INSERT INTO machine (id, code, name, plc_platform, db_number, archived_at) \
-VALUES ($1, $2, $3, $4, $5, $6) RETURNING to_jsonb(machine)";
+INSERT INTO machine (id, code, name, plc_platform, db_number, string_encoding, archived_at) \
+VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING to_jsonb(machine)";
 
 const INSERT_UNIT: &str = "\
 INSERT INTO unit (id, machine_id, path, name, archived_at) \
@@ -72,6 +72,14 @@ UPDATE machine SET db_number = $2 WHERE id = $1 RETURNING to_jsonb(machine)";
 const COPY_DATA_BLOCK_TO_CONNECTION: &str = "\
 UPDATE plc_connection SET db_number = $2 WHERE machine_id = $1 AND db_number IS DISTINCT FROM $2";
 
+/// Every version row of the machine counts, also a discarded draft and a version of a deleted
+/// recipe (`SetMachineStringEncoding`, ADR-0202 (d)).
+const MACHINE_HAS_VERSION: &str = "\
+SELECT EXISTS (SELECT 1 FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id WHERE r.machine_id = $1)";
+
+const SET_MACHINE_STRING_ENCODING: &str = "\
+UPDATE machine SET string_encoding = $2 WHERE id = $1 RETURNING to_jsonb(machine)";
+
 const ARCHIVE_MACHINE: &str = "\
 UPDATE machine SET archived_at = now() WHERE id = $1 RETURNING to_jsonb(machine)";
 
@@ -82,6 +90,7 @@ struct MachineRecord {
     name: String,
     plc_platform: String,
     db_number: Option<i32>,
+    string_encoding: String,
     archived_at: Option<OffsetDateTime>,
 }
 
@@ -123,6 +132,8 @@ fn build_machine(record: MachineRecord, units: Vec<UnitRecord>) -> Result<Machin
             .db_number
             .map(|number| DataBlockNumber::parse(&number.to_string()))
             .transpose()
+            .map_err(|error| corrupt("machine", error))?,
+        string_encoding: StringEncoding::parse(&record.string_encoding)
             .map_err(|error| corrupt("machine", error))?,
         archived_at: record.archived_at.map(Timestamp::from),
         units: stored_units,
@@ -243,6 +254,7 @@ pub(super) async fn insert(
         .bind(machine.name().as_str())
         .bind(machine.platform().as_str())
         .bind(machine.db_number().map(|number| i32::from(number.value())))
+        .bind(machine.string_encoding().as_str())
         .bind(machine.archived_at().map(|at| *at.as_offset_date_time()))
         .fetch_one(&mut *connection)
         .await
@@ -311,6 +323,33 @@ pub(super) async fn set_data_block(
         .bind(*id.as_uuid())
         .bind(i32::from(number.value()))
         .execute(connection)
+        .await
+        .map_err(map_error)?;
+    Ok(RowImage::new(image))
+}
+
+/// Tell whether any `recipe_version` row belongs to a recipe of the machine (ADR-0202 (d)).
+pub(super) async fn has_version(
+    connection: &mut PgConnection,
+    id: MachineId,
+) -> Result<bool, StorageError> {
+    sqlx::query_scalar(MACHINE_HAS_VERSION)
+        .bind(*id.as_uuid())
+        .fetch_one(connection)
+        .await
+        .map_err(map_error)
+}
+
+/// Set `machine.string_encoding` and return the image after the change (`SetMachineStringEncoding`).
+pub(super) async fn set_string_encoding(
+    connection: &mut PgConnection,
+    id: MachineId,
+    encoding: StringEncoding,
+) -> Result<RowImage, StorageError> {
+    let image: Value = sqlx::query_scalar(SET_MACHINE_STRING_ENCODING)
+        .bind(*id.as_uuid())
+        .bind(encoding.as_str())
+        .fetch_one(connection)
         .await
         .map_err(map_error)?;
     Ok(RowImage::new(image))

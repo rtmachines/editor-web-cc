@@ -16,7 +16,7 @@ use recipe_domain::audit::AuditEntry;
 use recipe_domain::identity::{Login, Role};
 use recipe_domain::plant::{
     DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId,
-    PlcTypeRecord, Unit, UnitId, UnitPath, UnitUsage,
+    PlcTypeRecord, StringEncoding, Unit, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
     LangCode, Ordinal, ParameterKey, RecipeId, RecipeVersionId, StoredParameter, StoredValue,
@@ -351,6 +351,23 @@ impl PlantRepository for CountingTransaction {
         self.inner.plant().set_machine_data_block(id, number).await
     }
 
+    async fn machine_has_version(&mut self, id: MachineId) -> Result<bool, StorageError> {
+        self.count();
+        self.inner.plant().machine_has_version(id).await
+    }
+
+    async fn set_machine_string_encoding(
+        &mut self,
+        id: MachineId,
+        encoding: StringEncoding,
+    ) -> Result<RowImage, StorageError> {
+        self.count();
+        self.inner
+            .plant()
+            .set_machine_string_encoding(id, encoding)
+            .await
+    }
+
     async fn archive_machine(&mut self, id: MachineId) -> Result<RowImage, StorageError> {
         self.count();
         self.inner.plant().archive_machine(id).await
@@ -455,6 +472,7 @@ fn machine_with(units: u128) -> Machine {
         text("Press"),
         PLATFORM,
         None,
+        StringEncoding::Latin1,
         (uid(101), text("Main")),
     )
     .unwrap();

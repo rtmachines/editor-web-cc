@@ -6,7 +6,7 @@ use uuid::Uuid;
 use super::test_support::{machine_id, type_id};
 use crate::plant::{
     LeafPath, LiveUnits, Machine, MachineCode, PlcPlatform, S7Address, StoredMachine, StoredUnit,
-    UnitId, UnitPath,
+    StringEncoding, UnitId, UnitPath,
 };
 use crate::recipe::{
     Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, StoredLimit, StoredParameter,
@@ -42,6 +42,7 @@ pub(crate) fn units(platform: PlcPlatform) -> LiveUnits {
         db_number: platform
             .max_data_block()
             .map(|_| crate::plant::DataBlockNumber::parse("1").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units: ["U1", "U1.1", "U1.2", "U2", "U10"].map(unit).to_vec(),
     })

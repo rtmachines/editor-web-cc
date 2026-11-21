@@ -1,6 +1,6 @@
 # ADR-0119: Loadable flag and the current rules of values and addresses
 
-Status: Accepted. Amended by ADR-0149 (item (b): the export check and the version page check also run the overlap check of I20). Amended by ADR-0178 and ADR-0187 (item (b): the export check also runs the standard-access rule)
+Status: Accepted. Amended by ADR-0149 (item (b): the export check and the version page check also run the overlap check of I20). Amended by ADR-0178 and ADR-0187 (item (b): the export check also runs the standard-access rule). Amended by ADR-0202 (item (c): a v1 document of a `Utf8` machine has `loadable` `false`)
 Date: 2026-11-03
 Deciders: project owner
 

@@ -1,0 +1,842 @@
+[
+  {
+    "reference": "SR-IEC-KEYWORD-MEMBER",
+    "unit": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.588004 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M5",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "4f55f0f1-8cb9-463a-9c2b-20b0d8d36772",
+              "limits": [],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "b5845c35-8da8-477a-845f-90f2189b1950",
+              "unit_path": "U1",
+              "value": {
+                "END_IF": true,
+                "S": false
+              }
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-KEYWORD-MEMBER"
+          },
+          "scope": {
+            "unit_path": "U1"
+          },
+          "types": [
+            {
+              "id": "b5845c35-8da8-477a-845f-90f2189b1950",
+              "kind": "Struct",
+              "members": [
+                {
+                  "name": "END_IF",
+                  "type_id": "BOOL"
+                },
+                {
+                  "name": "S",
+                  "type_id": "BOOL"
+                }
+              ],
+              "name": "ST_Coil",
+              "revision": 1,
+              "string_length": null
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "e995ef7064e3500d355319dd2fa5e36353b8079b7c1b22d864ebf48c28ba7b67",
+        "canonical_body": "{\"machine\":{\"code\":\"M5\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"4f55f0f1-8cb9-463a-9c2b-20b0d8d36772\",\"limits\":[],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"b5845c35-8da8-477a-845f-90f2189b1950\",\"unit_path\":\"U1\",\"value\":{\"END_IF\":true,\"S\":false}}],\"recipe\":{\"reference_number\":\"SR-IEC-KEYWORD-MEMBER\"},\"scope\":{\"unit_path\":\"U1\"},\"types\":[{\"id\":\"b5845c35-8da8-477a-845f-90f2189b1950\",\"kind\":\"Struct\",\"members\":[{\"name\":\"END_IF\",\"type_id\":\"BOOL\"},{\"name\":\"S\",\"type_id\":\"BOOL\"}],\"name\":\"ST_Coil\",\"revision\":1,\"string_length\":null}],\"version\":{\"number\":1}}",
+        "content_sha256": "185954e961df02479b108120c474dedd1739011868f321282de22b95ae49cc2a",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(4f55f0f1-8cb9-463a-9c2b-20b0d8d36772)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-KEYWORD-MEMBER",
+        "scope_sha256": "e995ef7064e3500d355319dd2fa5e36353b8079b7c1b22d864ebf48c28ba7b67",
+        "status": "Approved"
+      },
+      "loadable": true
+    },
+    "version": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.588004 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M5",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "4f55f0f1-8cb9-463a-9c2b-20b0d8d36772",
+              "limits": [],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "b5845c35-8da8-477a-845f-90f2189b1950",
+              "unit_path": "U1",
+              "value": {
+                "END_IF": true,
+                "S": false
+              }
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-KEYWORD-MEMBER"
+          },
+          "types": [
+            {
+              "id": "b5845c35-8da8-477a-845f-90f2189b1950",
+              "kind": "Struct",
+              "members": [
+                {
+                  "name": "END_IF",
+                  "type_id": "BOOL"
+                },
+                {
+                  "name": "S",
+                  "type_id": "BOOL"
+                }
+              ],
+              "name": "ST_Coil",
+              "revision": 1,
+              "string_length": null
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "185954e961df02479b108120c474dedd1739011868f321282de22b95ae49cc2a",
+        "canonical_body": "{\"machine\":{\"code\":\"M5\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"4f55f0f1-8cb9-463a-9c2b-20b0d8d36772\",\"limits\":[],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"b5845c35-8da8-477a-845f-90f2189b1950\",\"unit_path\":\"U1\",\"value\":{\"END_IF\":true,\"S\":false}}],\"recipe\":{\"reference_number\":\"SR-IEC-KEYWORD-MEMBER\"},\"types\":[{\"id\":\"b5845c35-8da8-477a-845f-90f2189b1950\",\"kind\":\"Struct\",\"members\":[{\"name\":\"END_IF\",\"type_id\":\"BOOL\"},{\"name\":\"S\",\"type_id\":\"BOOL\"}],\"name\":\"ST_Coil\",\"revision\":1,\"string_length\":null}],\"version\":{\"number\":1}}",
+        "content_sha256": "185954e961df02479b108120c474dedd1739011868f321282de22b95ae49cc2a",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(4f55f0f1-8cb9-463a-9c2b-20b0d8d36772)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-KEYWORD-MEMBER",
+        "status": "Approved"
+      },
+      "loadable": true
+    }
+  },
+  {
+    "reference": "SR-IEC-ONE-MEMBER",
+    "unit": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.624037 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M6",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "fd34d17d-a254-43dd-bcab-b7c11c598a63",
+              "limits": [
+                {
+                  "leaf_path": ".value",
+                  "max": "100",
+                  "max_length": null,
+                  "min": "0"
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "444fa16f-c385-47c5-b18a-afc098a6a9f4",
+              "unit_path": "U1",
+              "value": {
+                "value": "3"
+              }
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-ONE-MEMBER"
+          },
+          "scope": {
+            "unit_path": "U1"
+          },
+          "types": [
+            {
+              "id": "444fa16f-c385-47c5-b18a-afc098a6a9f4",
+              "kind": "Struct",
+              "members": [
+                {
+                  "name": "value",
+                  "type_id": "INT"
+                }
+              ],
+              "name": "ST_One",
+              "revision": 1,
+              "string_length": null
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "cc15777a257516d7679cfe6961340d1d12f81dd1387fffce94e889a7c6e49f5e",
+        "canonical_body": "{\"machine\":{\"code\":\"M6\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"fd34d17d-a254-43dd-bcab-b7c11c598a63\",\"limits\":[{\"leaf_path\":\".value\",\"max\":\"100\",\"max_length\":null,\"min\":\"0\"}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"444fa16f-c385-47c5-b18a-afc098a6a9f4\",\"unit_path\":\"U1\",\"value\":{\"value\":\"3\"}}],\"recipe\":{\"reference_number\":\"SR-IEC-ONE-MEMBER\"},\"scope\":{\"unit_path\":\"U1\"},\"types\":[{\"id\":\"444fa16f-c385-47c5-b18a-afc098a6a9f4\",\"kind\":\"Struct\",\"members\":[{\"name\":\"value\",\"type_id\":\"INT\"}],\"name\":\"ST_One\",\"revision\":1,\"string_length\":null}],\"version\":{\"number\":1}}",
+        "content_sha256": "2facdcf5a391ce911375c5bc1468a19f217ff1956458fddae05d968d922ac1cd",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(fd34d17d-a254-43dd-bcab-b7c11c598a63)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-ONE-MEMBER",
+        "scope_sha256": "cc15777a257516d7679cfe6961340d1d12f81dd1387fffce94e889a7c6e49f5e",
+        "status": "Approved"
+      },
+      "loadable": true
+    },
+    "version": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.624037 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M6",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "fd34d17d-a254-43dd-bcab-b7c11c598a63",
+              "limits": [
+                {
+                  "leaf_path": ".value",
+                  "max": "100",
+                  "max_length": null,
+                  "min": "0"
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "444fa16f-c385-47c5-b18a-afc098a6a9f4",
+              "unit_path": "U1",
+              "value": {
+                "value": "3"
+              }
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-ONE-MEMBER"
+          },
+          "types": [
+            {
+              "id": "444fa16f-c385-47c5-b18a-afc098a6a9f4",
+              "kind": "Struct",
+              "members": [
+                {
+                  "name": "value",
+                  "type_id": "INT"
+                }
+              ],
+              "name": "ST_One",
+              "revision": 1,
+              "string_length": null
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "2facdcf5a391ce911375c5bc1468a19f217ff1956458fddae05d968d922ac1cd",
+        "canonical_body": "{\"machine\":{\"code\":\"M6\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"fd34d17d-a254-43dd-bcab-b7c11c598a63\",\"limits\":[{\"leaf_path\":\".value\",\"max\":\"100\",\"max_length\":null,\"min\":\"0\"}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"444fa16f-c385-47c5-b18a-afc098a6a9f4\",\"unit_path\":\"U1\",\"value\":{\"value\":\"3\"}}],\"recipe\":{\"reference_number\":\"SR-IEC-ONE-MEMBER\"},\"types\":[{\"id\":\"444fa16f-c385-47c5-b18a-afc098a6a9f4\",\"kind\":\"Struct\",\"members\":[{\"name\":\"value\",\"type_id\":\"INT\"}],\"name\":\"ST_One\",\"revision\":1,\"string_length\":null}],\"version\":{\"number\":1}}",
+        "content_sha256": "2facdcf5a391ce911375c5bc1468a19f217ff1956458fddae05d968d922ac1cd",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(fd34d17d-a254-43dd-bcab-b7c11c598a63)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-ONE-MEMBER",
+        "status": "Approved"
+      },
+      "loadable": true
+    }
+  },
+  {
+    "reference": "SR-IEC-RESERVED-STRUCT",
+    "unit": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.548983 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M4",
+            "plc_platform": "TwinCat3"
+          },
+          "parameters": [
+            {
+              "key": "11e0cd37-83f3-4c4e-ab9b-1ea8885b478c",
+              "limits": [
+                {
+                  "leaf_path": ".major",
+                  "max": "100",
+                  "max_length": null,
+                  "min": "0"
+                },
+                {
+                  "leaf_path": ".minor",
+                  "max": "100",
+                  "max_length": null,
+                  "min": "0"
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "ce4d1eae-73c4-42ec-b8c7-b02bcb73befd",
+              "unit_path": "U1",
+              "value": {
+                "major": "1",
+                "minor": "2"
+              }
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-RESERVED-STRUCT"
+          },
+          "scope": {
+            "unit_path": "U1"
+          },
+          "types": [
+            {
+              "id": "ce4d1eae-73c4-42ec-b8c7-b02bcb73befd",
+              "kind": "Struct",
+              "members": [
+                {
+                  "name": "major",
+                  "type_id": "INT"
+                },
+                {
+                  "name": "minor",
+                  "type_id": "INT"
+                }
+              ],
+              "name": "VERSION",
+              "revision": 1,
+              "string_length": null
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "e80bc82caa45c250fdee35c994ac6dc110a64e38910618b74416a620a3af94d6",
+        "canonical_body": "{\"machine\":{\"code\":\"M4\",\"plc_platform\":\"TwinCat3\"},\"parameters\":[{\"key\":\"11e0cd37-83f3-4c4e-ab9b-1ea8885b478c\",\"limits\":[{\"leaf_path\":\".major\",\"max\":\"100\",\"max_length\":null,\"min\":\"0\"},{\"leaf_path\":\".minor\",\"max\":\"100\",\"max_length\":null,\"min\":\"0\"}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"ce4d1eae-73c4-42ec-b8c7-b02bcb73befd\",\"unit_path\":\"U1\",\"value\":{\"major\":\"1\",\"minor\":\"2\"}}],\"recipe\":{\"reference_number\":\"SR-IEC-RESERVED-STRUCT\"},\"scope\":{\"unit_path\":\"U1\"},\"types\":[{\"id\":\"ce4d1eae-73c4-42ec-b8c7-b02bcb73befd\",\"kind\":\"Struct\",\"members\":[{\"name\":\"major\",\"type_id\":\"INT\"},{\"name\":\"minor\",\"type_id\":\"INT\"}],\"name\":\"VERSION\",\"revision\":1,\"string_length\":null}],\"version\":{\"number\":1}}",
+        "content_sha256": "279516853a2b79709954f99dcb149cc020bb4b34186e2768293333390ba6f556",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(11e0cd37-83f3-4c4e-ab9b-1ea8885b478c)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-RESERVED-STRUCT",
+        "scope_sha256": "e80bc82caa45c250fdee35c994ac6dc110a64e38910618b74416a620a3af94d6",
+        "status": "Approved"
+      },
+      "loadable": true
+    },
+    "version": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.548983 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M4",
+            "plc_platform": "TwinCat3"
+          },
+          "parameters": [
+            {
+              "key": "11e0cd37-83f3-4c4e-ab9b-1ea8885b478c",
+              "limits": [
+                {
+                  "leaf_path": ".major",
+                  "max": "100",
+                  "max_length": null,
+                  "min": "0"
+                },
+                {
+                  "leaf_path": ".minor",
+                  "max": "100",
+                  "max_length": null,
+                  "min": "0"
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "ce4d1eae-73c4-42ec-b8c7-b02bcb73befd",
+              "unit_path": "U1",
+              "value": {
+                "major": "1",
+                "minor": "2"
+              }
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-RESERVED-STRUCT"
+          },
+          "types": [
+            {
+              "id": "ce4d1eae-73c4-42ec-b8c7-b02bcb73befd",
+              "kind": "Struct",
+              "members": [
+                {
+                  "name": "major",
+                  "type_id": "INT"
+                },
+                {
+                  "name": "minor",
+                  "type_id": "INT"
+                }
+              ],
+              "name": "VERSION",
+              "revision": 1,
+              "string_length": null
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "279516853a2b79709954f99dcb149cc020bb4b34186e2768293333390ba6f556",
+        "canonical_body": "{\"machine\":{\"code\":\"M4\",\"plc_platform\":\"TwinCat3\"},\"parameters\":[{\"key\":\"11e0cd37-83f3-4c4e-ab9b-1ea8885b478c\",\"limits\":[{\"leaf_path\":\".major\",\"max\":\"100\",\"max_length\":null,\"min\":\"0\"},{\"leaf_path\":\".minor\",\"max\":\"100\",\"max_length\":null,\"min\":\"0\"}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"ce4d1eae-73c4-42ec-b8c7-b02bcb73befd\",\"unit_path\":\"U1\",\"value\":{\"major\":\"1\",\"minor\":\"2\"}}],\"recipe\":{\"reference_number\":\"SR-IEC-RESERVED-STRUCT\"},\"types\":[{\"id\":\"ce4d1eae-73c4-42ec-b8c7-b02bcb73befd\",\"kind\":\"Struct\",\"members\":[{\"name\":\"major\",\"type_id\":\"INT\"},{\"name\":\"minor\",\"type_id\":\"INT\"}],\"name\":\"VERSION\",\"revision\":1,\"string_length\":null}],\"version\":{\"number\":1}}",
+        "content_sha256": "279516853a2b79709954f99dcb149cc020bb4b34186e2768293333390ba6f556",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(11e0cd37-83f3-4c4e-ab9b-1ea8885b478c)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-RESERVED-STRUCT",
+        "status": "Approved"
+      },
+      "loadable": true
+    }
+  },
+  {
+    "reference": "SR-IEC-STRING-LATIN1",
+    "unit": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.655034 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M7",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "ce416b86-ee76-4ef0-b6d7-14e926d1a20f",
+              "limits": [
+                {
+                  "leaf_path": "",
+                  "max": null,
+                  "max_length": "4",
+                  "min": null
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "80f884f5-8adc-4c6e-be02-915d6e203bb7",
+              "unit_path": "U1",
+              "value": "é"
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-STRING-LATIN1"
+          },
+          "scope": {
+            "unit_path": "U1"
+          },
+          "types": [
+            {
+              "id": "80f884f5-8adc-4c6e-be02-915d6e203bb7",
+              "kind": "Primitive",
+              "name": "STRING",
+              "revision": 1,
+              "string_length": 4
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "1554590b706476780470c49589c931e1f4ca2fa906ac5cb36eaa279ba8404324",
+        "canonical_body": "{\"machine\":{\"code\":\"M7\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"ce416b86-ee76-4ef0-b6d7-14e926d1a20f\",\"limits\":[{\"leaf_path\":\"\",\"max\":null,\"max_length\":\"4\",\"min\":null}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"80f884f5-8adc-4c6e-be02-915d6e203bb7\",\"unit_path\":\"U1\",\"value\":\"é\"}],\"recipe\":{\"reference_number\":\"SR-IEC-STRING-LATIN1\"},\"scope\":{\"unit_path\":\"U1\"},\"types\":[{\"id\":\"80f884f5-8adc-4c6e-be02-915d6e203bb7\",\"kind\":\"Primitive\",\"name\":\"STRING\",\"revision\":1,\"string_length\":4}],\"version\":{\"number\":1}}",
+        "content_sha256": "ed72ebd29f5551d76020017dcb6a915cef4b861ff4606011c6768fcc6695d03f",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(ce416b86-ee76-4ef0-b6d7-14e926d1a20f)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-STRING-LATIN1",
+        "scope_sha256": "1554590b706476780470c49589c931e1f4ca2fa906ac5cb36eaa279ba8404324",
+        "status": "Approved"
+      },
+      "loadable": true
+    },
+    "version": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.655034 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M7",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "ce416b86-ee76-4ef0-b6d7-14e926d1a20f",
+              "limits": [
+                {
+                  "leaf_path": "",
+                  "max": null,
+                  "max_length": "4",
+                  "min": null
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "80f884f5-8adc-4c6e-be02-915d6e203bb7",
+              "unit_path": "U1",
+              "value": "é"
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-STRING-LATIN1"
+          },
+          "types": [
+            {
+              "id": "80f884f5-8adc-4c6e-be02-915d6e203bb7",
+              "kind": "Primitive",
+              "name": "STRING",
+              "revision": 1,
+              "string_length": 4
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "ed72ebd29f5551d76020017dcb6a915cef4b861ff4606011c6768fcc6695d03f",
+        "canonical_body": "{\"machine\":{\"code\":\"M7\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"ce416b86-ee76-4ef0-b6d7-14e926d1a20f\",\"limits\":[{\"leaf_path\":\"\",\"max\":null,\"max_length\":\"4\",\"min\":null}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"80f884f5-8adc-4c6e-be02-915d6e203bb7\",\"unit_path\":\"U1\",\"value\":\"é\"}],\"recipe\":{\"reference_number\":\"SR-IEC-STRING-LATIN1\"},\"types\":[{\"id\":\"80f884f5-8adc-4c6e-be02-915d6e203bb7\",\"kind\":\"Primitive\",\"name\":\"STRING\",\"revision\":1,\"string_length\":4}],\"version\":{\"number\":1}}",
+        "content_sha256": "ed72ebd29f5551d76020017dcb6a915cef4b861ff4606011c6768fcc6695d03f",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(ce416b86-ee76-4ef0-b6d7-14e926d1a20f)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-STRING-LATIN1",
+        "status": "Approved"
+      },
+      "loadable": true
+    }
+  },
+  {
+    "reference": "SR-IEC-WSTRING-CS",
+    "unit": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.505533 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M3",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "4aa5d1ea-6a10-48b1-8567-81ca2a1faae4",
+              "limits": [
+                {
+                  "leaf_path": "",
+                  "max": null,
+                  "max_length": "10",
+                  "min": null
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "f5092aa6-88a5-4bdc-9b87-99911d260d7a",
+              "unit_path": "U1",
+              "value": "Z𝄞"
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-WSTRING-CS"
+          },
+          "scope": {
+            "unit_path": "U1"
+          },
+          "types": [
+            {
+              "id": "f5092aa6-88a5-4bdc-9b87-99911d260d7a",
+              "kind": "Primitive",
+              "name": "WSTRING",
+              "revision": 1,
+              "string_length": 10
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "24694bd9669164c0271d1015fe4057c02bcf175dfd1684dbd9e595112d1de4cb",
+        "canonical_body": "{\"machine\":{\"code\":\"M3\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"4aa5d1ea-6a10-48b1-8567-81ca2a1faae4\",\"limits\":[{\"leaf_path\":\"\",\"max\":null,\"max_length\":\"10\",\"min\":null}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"f5092aa6-88a5-4bdc-9b87-99911d260d7a\",\"unit_path\":\"U1\",\"value\":\"Z𝄞\"}],\"recipe\":{\"reference_number\":\"SR-IEC-WSTRING-CS\"},\"scope\":{\"unit_path\":\"U1\"},\"types\":[{\"id\":\"f5092aa6-88a5-4bdc-9b87-99911d260d7a\",\"kind\":\"Primitive\",\"name\":\"WSTRING\",\"revision\":1,\"string_length\":10}],\"version\":{\"number\":1}}",
+        "content_sha256": "98ca14c97da1093fef2c961a053155f4c8d3de9861332d743e451d3255bd68f5",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(4aa5d1ea-6a10-48b1-8567-81ca2a1faae4)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-WSTRING-CS",
+        "scope_sha256": "24694bd9669164c0271d1015fe4057c02bcf175dfd1684dbd9e595112d1de4cb",
+        "status": "Approved"
+      },
+      "loadable": true
+    },
+    "version": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.505533 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M3",
+            "plc_platform": "CodesysIec"
+          },
+          "parameters": [
+            {
+              "key": "4aa5d1ea-6a10-48b1-8567-81ca2a1faae4",
+              "limits": [
+                {
+                  "leaf_path": "",
+                  "max": null,
+                  "max_length": "10",
+                  "min": null
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "f5092aa6-88a5-4bdc-9b87-99911d260d7a",
+              "unit_path": "U1",
+              "value": "Z𝄞"
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-WSTRING-CS"
+          },
+          "types": [
+            {
+              "id": "f5092aa6-88a5-4bdc-9b87-99911d260d7a",
+              "kind": "Primitive",
+              "name": "WSTRING",
+              "revision": 1,
+              "string_length": 10
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "98ca14c97da1093fef2c961a053155f4c8d3de9861332d743e451d3255bd68f5",
+        "canonical_body": "{\"machine\":{\"code\":\"M3\",\"plc_platform\":\"CodesysIec\"},\"parameters\":[{\"key\":\"4aa5d1ea-6a10-48b1-8567-81ca2a1faae4\",\"limits\":[{\"leaf_path\":\"\",\"max\":null,\"max_length\":\"10\",\"min\":null}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"f5092aa6-88a5-4bdc-9b87-99911d260d7a\",\"unit_path\":\"U1\",\"value\":\"Z𝄞\"}],\"recipe\":{\"reference_number\":\"SR-IEC-WSTRING-CS\"},\"types\":[{\"id\":\"f5092aa6-88a5-4bdc-9b87-99911d260d7a\",\"kind\":\"Primitive\",\"name\":\"WSTRING\",\"revision\":1,\"string_length\":10}],\"version\":{\"number\":1}}",
+        "content_sha256": "98ca14c97da1093fef2c961a053155f4c8d3de9861332d743e451d3255bd68f5",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(4aa5d1ea-6a10-48b1-8567-81ca2a1faae4)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-WSTRING-CS",
+        "status": "Approved"
+      },
+      "loadable": true
+    }
+  },
+  {
+    "reference": "SR-IEC-WSTRING-TC",
+    "unit": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.473554 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M2",
+            "plc_platform": "TwinCat3"
+          },
+          "parameters": [
+            {
+              "key": "366f8fd3-3ee9-4b04-8f1f-5ffb923b0017",
+              "limits": [
+                {
+                  "leaf_path": "",
+                  "max": null,
+                  "max_length": "10",
+                  "min": null
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "fd56f366-7512-4f11-8285-7cecda5154ff",
+              "unit_path": "U1",
+              "value": "A😀"
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-WSTRING-TC"
+          },
+          "scope": {
+            "unit_path": "U1"
+          },
+          "types": [
+            {
+              "id": "fd56f366-7512-4f11-8285-7cecda5154ff",
+              "kind": "Primitive",
+              "name": "WSTRING",
+              "revision": 1,
+              "string_length": 10
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "8793948aa83f52fff6697228446c749f918d4075c6e128dcf9e97bdc2d1737db",
+        "canonical_body": "{\"machine\":{\"code\":\"M2\",\"plc_platform\":\"TwinCat3\"},\"parameters\":[{\"key\":\"366f8fd3-3ee9-4b04-8f1f-5ffb923b0017\",\"limits\":[{\"leaf_path\":\"\",\"max\":null,\"max_length\":\"10\",\"min\":null}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"fd56f366-7512-4f11-8285-7cecda5154ff\",\"unit_path\":\"U1\",\"value\":\"A😀\"}],\"recipe\":{\"reference_number\":\"SR-IEC-WSTRING-TC\"},\"scope\":{\"unit_path\":\"U1\"},\"types\":[{\"id\":\"fd56f366-7512-4f11-8285-7cecda5154ff\",\"kind\":\"Primitive\",\"name\":\"WSTRING\",\"revision\":1,\"string_length\":10}],\"version\":{\"number\":1}}",
+        "content_sha256": "b6d9a8f1810cf83c46a84697e88b8c06ae2a8d1f29f1d910d2a93e1a67600862",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(366f8fd3-3ee9-4b04-8f1f-5ffb923b0017)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-WSTRING-TC",
+        "scope_sha256": "8793948aa83f52fff6697228446c749f918d4075c6e128dcf9e97bdc2d1737db",
+        "status": "Approved"
+      },
+      "loadable": true
+    },
+    "version": {
+      "capture": {
+        "approved_at": "Timestamp(2026-11-20 12:02:13.473554 +00:00:00)",
+        "approved_by": "Login(\"user1\")",
+        "body": {
+          "machine": {
+            "code": "M2",
+            "plc_platform": "TwinCat3"
+          },
+          "parameters": [
+            {
+              "key": "366f8fd3-3ee9-4b04-8f1f-5ffb923b0017",
+              "limits": [
+                {
+                  "leaf_path": "",
+                  "max": null,
+                  "max_length": "10",
+                  "min": null
+                }
+              ],
+              "s7_address": null,
+              "tag": "VALUE",
+              "type_id": "fd56f366-7512-4f11-8285-7cecda5154ff",
+              "unit_path": "U1",
+              "value": "A😀"
+            }
+          ],
+          "recipe": {
+            "reference_number": "SR-IEC-WSTRING-TC"
+          },
+          "types": [
+            {
+              "id": "fd56f366-7512-4f11-8285-7cecda5154ff",
+              "kind": "Primitive",
+              "name": "WSTRING",
+              "revision": 1,
+              "string_length": 10
+            }
+          ],
+          "version": {
+            "number": 1
+          }
+        },
+        "body_sha256": "b6d9a8f1810cf83c46a84697e88b8c06ae2a8d1f29f1d910d2a93e1a67600862",
+        "canonical_body": "{\"machine\":{\"code\":\"M2\",\"plc_platform\":\"TwinCat3\"},\"parameters\":[{\"key\":\"366f8fd3-3ee9-4b04-8f1f-5ffb923b0017\",\"limits\":[{\"leaf_path\":\"\",\"max\":null,\"max_length\":\"10\",\"min\":null}],\"s7_address\":null,\"tag\":\"VALUE\",\"type_id\":\"fd56f366-7512-4f11-8285-7cecda5154ff\",\"unit_path\":\"U1\",\"value\":\"A😀\"}],\"recipe\":{\"reference_number\":\"SR-IEC-WSTRING-TC\"},\"types\":[{\"id\":\"fd56f366-7512-4f11-8285-7cecda5154ff\",\"kind\":\"Primitive\",\"name\":\"WSTRING\",\"revision\":1,\"string_length\":10}],\"version\":{\"number\":1}}",
+        "content_sha256": "b6d9a8f1810cf83c46a84697e88b8c06ae2a8d1f29f1d910d2a93e1a67600862",
+        "exported_by": "Login(\"admin\")",
+        "has_rule_fault": false,
+        "loadable": true,
+        "machine_name": "machine",
+        "names": [
+          [
+            "ParameterKey(366f8fd3-3ee9-4b04-8f1f-5ffb923b0017)",
+            "Value"
+          ]
+        ],
+        "recipe_name": "SR-IEC-WSTRING-TC",
+        "status": "Approved"
+      },
+      "loadable": true
+    }
+  }
+]

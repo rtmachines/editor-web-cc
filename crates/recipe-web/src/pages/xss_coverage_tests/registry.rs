@@ -22,6 +22,9 @@ const LANG: Cover = Cover::NoText(
 );
 const ROLE: Cover =
     Cover::NoText("A closed set of role names. The form never shows the sent text of this field.");
+const STRING_ENCODING: Cover = Cover::NoText(
+    "A closed set of two encoding names. The form never shows the sent text of this field.",
+);
 const FILTERS: Cover =
     Cover::Corpus("approval_xss_filter_values_that_no_payload_can_satisfy_give_e_web_008");
 const PLANT_GETS: Cover =
@@ -208,6 +211,18 @@ pub(super) const TABLE: &[Entry] = &[
         CSRF,
     ),
     (
+        "pages/machines/string_encoding_commands.rs",
+        "StringEncodingFields",
+        "string_encoding",
+        STRING_ENCODING,
+    ),
+    (
+        "pages/machines/string_encoding_commands.rs",
+        "StringEncodingFields",
+        "csrf_token",
+        CSRF,
+    ),
+    (
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "slot",
@@ -272,6 +287,12 @@ pub(super) const TABLE: &[Entry] = &[
         "CreateFields",
         "db_number",
         PLANT_REFUSED,
+    ),
+    (
+        "pages/machines/form.rs",
+        "CreateFields",
+        "string_encoding",
+        STRING_ENCODING,
     ),
     (
         "pages/machines/form.rs",

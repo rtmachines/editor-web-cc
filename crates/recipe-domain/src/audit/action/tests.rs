@@ -1,11 +1,12 @@
 use super::*;
 use std::collections::BTreeSet;
 
-/// The 38 names of `data-model.md` section 10.
-const EXPECTED: [&str; 38] = [
+/// The 39 names of `data-model.md` section 10.
+const EXPECTED: [&str; 39] = [
     "MachineCreated",
     "MachineRenamed",
     "MachineDataBlockSet",
+    "MachineStringEncodingSet",
     "MachineArchived",
     "UnitAdded",
     "UnitRenamed",
@@ -49,8 +50,8 @@ fn all_holds_38_distinct_names() {
         .iter()
         .map(|action| action.as_str())
         .collect();
-    assert_eq!(AuditAction::ALL.len(), 38);
-    assert_eq!(names.len(), 38);
+    assert_eq!(AuditAction::ALL.len(), 39);
+    assert_eq!(names.len(), 39);
 }
 
 #[test]

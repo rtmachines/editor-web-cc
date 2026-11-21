@@ -1,7 +1,7 @@
 //! Tests of the view model of the unit tree (task 7.4, design D7).
 
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, UnitId, UnitPath, UnitUsage,
+    Machine, MachineCode, MachineId, PlcPlatform, StringEncoding, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -44,6 +44,7 @@ fn machine() -> Machine {
         name("Line"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(1_001), name("Infeed")),
     )
     .unwrap();

@@ -216,6 +216,7 @@ async function seedWithClient(client: SeedClient): Promise<SeededData> {
     code: machineCode,
     name: `Machine ${machineCode}`,
     plc_platform: 'CodesysIec',
+    string_encoding: 'Latin1',
     main_unit_name: 'Line',
   });
   const members: FormFields = {};

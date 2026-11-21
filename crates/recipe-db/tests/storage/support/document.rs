@@ -88,8 +88,9 @@ pub fn document_sql(sections: &[&str], skip: &[(&str, usize)]) -> String {
 ///
 /// Migration 0001 shipped before the piece and never changes. A later migration adds the piece:
 /// 0009 adds the pieces of ADR-0109 as `NOT VALID` constraints, 0011 changes `dims_valid`
-/// (ADR-0145) and adds two unique indexes (ADR-0143), and 0013 adds the column and the two
-/// `NOT VALID` constraints of ADR-0156. The document shows the current schema, so
+/// (ADR-0145) and adds two unique indexes (ADR-0143), 0013 adds the column and the two
+/// `NOT VALID` constraints of ADR-0156, and 0017 adds the column and the two `NOT VALID`
+/// constraints of ADR-0202. The document shows the current schema, so
 /// the comparison with 0001 must undo each piece first. `current` and `shipped` are normalized
 /// text. `current` must occur exactly once in the document text.
 pub struct ShippedPiece {
@@ -102,7 +103,7 @@ pub struct ShippedPiece {
 }
 
 /// The pieces of section 3 that a migration after 0001 changed.
-pub const PIECES_AFTER_0001: [ShippedPiece; 7] = [
+pub const PIECES_AFTER_0001: [ShippedPiece; 9] = [
     ShippedPiece {
         name: "role list of app_user_role_value",
         current: "'operator', 'export_client')",
@@ -144,6 +145,20 @@ pub const PIECES_AFTER_0001: [ShippedPiece; 7] = [
             "OR plc_platform NOT IN ('S7_300', 'S7_1200', 'S7_1500') ",
             "OR (plc_platform = 'S7_300' AND db_number BETWEEN 1 AND 16000) ",
             "OR (plc_platform IN ('S7_1200', 'S7_1500') AND db_number BETWEEN 1 AND 59999) ),"
+        ),
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "column machine.string_encoding (ADR-0202)",
+        current: " string_encoding TEXT NOT NULL DEFAULT 'Latin1',",
+        shipped: "",
+    },
+    ShippedPiece {
+        name: "constraints machine_string_encoding_value and machine_string_encoding_platform (ADR-0202)",
+        current: concat!(
+            " CONSTRAINT machine_string_encoding_value CHECK (string_encoding IN ('Latin1', 'Utf8')), ",
+            "CONSTRAINT machine_string_encoding_platform CHECK ( ",
+            "string_encoding = 'Latin1' OR plc_platform IN ('CodesysIec', 'TwinCat3') ),"
         ),
         shipped: "",
     },

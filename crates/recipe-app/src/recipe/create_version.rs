@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 
 use recipe_domain::audit::{AuditEntry, AuditTarget, RowAction, RowChange};
 use recipe_domain::plant::{
-    LiveUnits, Machine, MachineId, PlantError, PlatformTypes, PlcPlatform, PlcType, TypeTrees,
-    Unit, UnitId,
+    LiveUnits, Machine, MachineId, PlantError, PlatformTypes, PlcPlatform, PlcType, StringEncoding,
+    TypeTrees, Unit, UnitId,
 };
 use recipe_domain::recipe::{
     BudgetCounts, Parameter, ParameterTag, Recipe, RecipeError, RecipeId, RecipeVersionId,
@@ -191,10 +191,10 @@ fn budget_counts(parameters: &[Parameter], trees: &TypeTrees) -> BudgetCounts {
 /// Returns `E-RCP-020` with the items, or `E-RCP-021` for a budget above its limit.
 fn validate_base(
     recipe: &Recipe,
-    (machine, platform): (MachineId, PlcPlatform),
+    (machine, platform, encoding): (MachineId, PlcPlatform, StringEncoding),
     base: BaseRead,
 ) -> Result<Vec<ParameterTag>, AppError> {
-    let types = PlatformTypes::collect(machine, platform, base.types)?;
+    let types = PlatformTypes::collect(machine, platform, encoding, base.types)?;
     let snapshot = VersionSnapshot::from(base.parameters);
     let parameters = snapshot.parameters();
     let trees = TypeTrees::resolve(parameters.iter().map(|p| p.plc_type()), &types);
@@ -224,7 +224,7 @@ async fn check_base(
         .map(|parameter| (parameter.tag.clone(), parameter.unit))
         .collect();
     unit_uses.sort();
-    let target = (machine.id(), machine.platform());
+    let target = (machine.id(), machine.platform(), machine.string_encoding());
     let copy = recipe.clone();
     let outdated = ctx
         .settings
@@ -451,6 +451,8 @@ async fn insert_version_entry(
 
 #[cfg(test)]
 mod adr_0178_tests;
+#[cfg(test)]
+mod adr_0201_tests;
 
 #[cfg(test)]
 mod earlier_range_tests;

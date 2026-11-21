@@ -13,7 +13,7 @@ mod rename_machine;
 #[cfg(test)]
 mod short_rows;
 
-pub(crate) use current_type::{is_refused_struct_name, require_current_type};
+pub(crate) use current_type::{check_iec_struct, is_refused_struct, require_current_type};
 pub use define_udt::{DefineUdt, DefineUdtInput, DefineUdtMode, DefineUdtOutput};
 pub(crate) use derived_lock::{derived_type_locks, rebind_locks};
 pub(crate) use ensure_derived::DerivedTypes;
@@ -21,6 +21,7 @@ pub(crate) use queries::{expr_names_row, type_text};
 mod rename_unit;
 mod resolve;
 mod set_machine_data_block;
+mod set_machine_string_encoding;
 mod set_plc_connection;
 
 pub use add_unit::{AddUnit, AddUnitInput, AddUnitOutput};
@@ -39,5 +40,8 @@ pub use rename_machine::{RenameMachine, RenameMachineInput, RenameMachineOutput}
 pub use rename_unit::{RenameUnit, RenameUnitInput, RenameUnitOutput};
 pub use set_machine_data_block::{
     SetMachineDataBlock, SetMachineDataBlockInput, SetMachineDataBlockOutput,
+};
+pub use set_machine_string_encoding::{
+    SetMachineStringEncoding, SetMachineStringEncodingInput, SetMachineStringEncodingOutput,
 };
 pub use set_plc_connection::{SetPlcConnection, SetPlcConnectionInput, SetPlcConnectionOutput};

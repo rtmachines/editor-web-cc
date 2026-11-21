@@ -1,6 +1,6 @@
 # ADR-0143: IEC identifier rules of struct and member names
 
-Status: Accepted. Amends ADR-0024 (duplicate member names) and ADR-0120 (a) (earlier rule set). Amended by ADR-0166 (items (i) and (i1): the stored reads use the constructors `from_stored` of `TypeName`, `TypeExpr`, and `PlcType`). Amended by ADR-0186 (items (c), (e), (i2), and (i3): the Siemens reserved struct names on the S7 platforms)
+Status: Accepted. Amends ADR-0024 (duplicate member names) and ADR-0120 (a) (earlier rule set). Amended by ADR-0166 (items (i) and (i1): the stored reads use the constructors `from_stored` of `TypeName`, `TypeExpr`, and `PlcType`). Amended by ADR-0186 (items (c), (e), (i2), and (i3): the Siemens reserved struct names on the S7 platforms). Amended by ADR-0203 (items (c), (d), and (l): reserved struct names and member names on `CodesysIec` and `TwinCat3`)
 Date: 2026-11-07
 Deciders: project owner
 

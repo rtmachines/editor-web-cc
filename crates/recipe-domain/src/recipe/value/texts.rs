@@ -19,8 +19,8 @@ use super::numeric::is_integer;
 use super::request_leaf::request_text;
 use super::walk::canonicalize;
 use crate::plant::{
-    IecLiteral, LeafClass, LeafPath, LeafSegment, PlcPlatform, Primitive, RuleSet, TimeType,
-    TypeNode, TypeTree,
+    IecLiteral, LeafClass, LeafPath, LeafSegment, PlcPlatform, Primitive, RuleSet, StringEncoding,
+    TimeType, TypeNode, TypeTree,
 };
 use crate::recipe::limit::ProcessLimit;
 use crate::recipe::rebind::build_value;
@@ -251,7 +251,13 @@ fn texts_json(tree: &TypeTree, texts: &LeafTexts) -> BuiltJson {
     let mut used = vec![false; texts.len()];
     let json = build_value(tree.root(), Vec::new(), &mut |segments, node| {
         let path = LeafPath::from_segments(segments.to_vec());
-        match leaf_from_text(texts, &mut used, &path, node, tree.platform()) {
+        match leaf_from_text(
+            texts,
+            &mut used,
+            &path,
+            node,
+            (tree.platform(), tree.string_encoding()),
+        ) {
             Ok(value) => value,
             Err(fault) => {
                 let fault = ValueFault::from_leaf(path.clone(), fault);
@@ -274,7 +280,7 @@ fn leaf_from_text(
     used: &mut [bool],
     path: &LeafPath,
     node: &TypeNode,
-    platform: PlcPlatform,
+    machine: (PlcPlatform, StringEncoding),
 ) -> Result<Value, LeafFault> {
     let Some((position, text)) = texts.text_at(path) else {
         return Err(Expected::Leaf.into());
@@ -282,7 +288,7 @@ fn leaf_from_text(
     if let Some(flag) = used.get_mut(position) {
         *flag = true;
     }
-    request_text(text, node, platform)
+    request_text(text, node, machine)
 }
 
 /// List a fault for each text whose path the walk did not use, in the order of the form.

@@ -7,7 +7,8 @@
 use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, Primitive, TypeTree, UnitId,
+    Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, Primitive, StringEncoding,
+    TypeTree, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeId,
@@ -99,6 +100,7 @@ fn large_machine() -> Machine {
         text("Warehouse"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(1), text("Unit 1")),
     )
     .unwrap();
@@ -138,8 +140,13 @@ fn zero_value(fixture: &Fixture) -> StoredValue {
     let int = seed_type_id(Primitive::Int, None).unwrap();
     let state = fixture.store.state();
     let rows = vec![state.plc_type(int).cloned().unwrap()];
-    let types =
-        PlatformTypes::collect(MachineId::from(MACHINE_ID), PlcPlatform::TwinCat3, rows).unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(MACHINE_ID),
+        PlcPlatform::TwinCat3,
+        StringEncoding::Latin1,
+        rows,
+    )
+    .unwrap();
     let tree = TypeTree::resolve(int, &types).unwrap();
     ParameterValue::parse("0", &tree).unwrap().to_stored()
 }

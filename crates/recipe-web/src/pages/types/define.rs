@@ -21,7 +21,10 @@ use recipe_app::plant::{
 };
 use recipe_app::ports::NonEmpty;
 use recipe_domain::plant::limits::MAX_MEMBERS;
-use recipe_domain::plant::{MachineCode, MemberName, PlantError, TypeExpr, TypeName};
+use recipe_domain::plant::{
+    DerivedTypeReason, MachineCode, MemberName, PlantError, TypeExpr, TypeName,
+    is_iec_reserved_member_name,
+};
 
 use super::form::{Shown, refused_form, respond};
 use super::form_rows::{SentForm, SentRow, read};
@@ -197,12 +200,53 @@ fn member_row(rows: &[SentRow], member: &MemberName, skip: usize) -> Option<usiz
         .map(|(row, _sent)| row)
 }
 
+/// Return the input that the defined struct itself causes to be refused with `E-PLT-013`.
+///
+/// `ReservedName` names the name input of a new struct. A revision has no name input. The reason
+/// `ReservedMemberName` names the name input of the first row with a reserved member name.
+/// `TooFewMembers` and any other reason name no input (ADR-0050 (d)).
+fn defined_struct_input(
+    reason: DerivedTypeReason,
+    target: &Target,
+    rows: &[SentRow],
+) -> Option<String> {
+    match reason {
+        DerivedTypeReason::ReservedName => {
+            matches!(target, Target::New).then(|| "type_name".to_owned())
+        }
+        DerivedTypeReason::ReservedMemberName => rows
+            .iter()
+            .position(|sent| {
+                MemberName::parse(&sent.name)
+                    .is_ok_and(|member| is_iec_reserved_member_name(member.as_str()))
+            })
+            .map(|row| row_input(row, RowField::Name)),
+        _other => None,
+    }
+}
+
+/// Return the member row whose type text parses to the type expression `type_expr`.
+fn type_row(rows: &[SentRow], type_expr: &str) -> Option<String> {
+    rows.iter()
+        .position(|sent| {
+            TypeExpr::parse(&sent.type_text).is_ok_and(|parsed| parsed.to_string() == type_expr)
+        })
+        .map(|row| row_input(row, RowField::Type))
+}
+
 /// Return the input that a refused `DefineUdt` names (ADR-0041 (e)).
 ///
 /// `E-PLT-015` names the name input of a new struct. `E-PLT-021` names the second row with the
-/// member name. `E-PLT-006` and `E-PLT-013` name the type input of the first matching row. Any
-/// other error names no input, for example `E-PLT-052` of an unchanged revision (ADR-0159 (f)).
-fn refused_input(error: &AppError, target: &Target, rows: &[SentRow]) -> Option<String> {
+/// member name. `E-PLT-006` names the type input of the first matching row. `E-PLT-013` names the
+/// input of the defined struct when `type_expr` is its name (`defined`). Otherwise it names the type
+/// input of the first row with that type, for example a refused referenced struct. Any other error
+/// names no input, for example `E-PLT-052` of an unchanged revision (ADR-0159 (f)).
+fn refused_input(
+    error: &AppError,
+    target: &Target,
+    defined: &TypeName,
+    rows: &[SentRow],
+) -> Option<String> {
     let AppError::Plant(error) = error else {
         return None;
     };
@@ -216,13 +260,12 @@ fn refused_input(error: &AppError, target: &Target, rows: &[SentRow]) -> Option<
         PlantError::MemberTypeNotOnPlatform { member, .. } => {
             member_row(rows, member, 0).map(|row| row_input(row, RowField::Type))
         }
-        PlantError::DerivedTypeInvalid { type_expr, .. } => rows
-            .iter()
-            .position(|sent| {
-                TypeExpr::parse(&sent.type_text)
-                    .is_ok_and(|parsed| parsed.to_string() == *type_expr)
-            })
-            .map(|row| row_input(row, RowField::Type)),
+        PlantError::DerivedTypeInvalid { type_expr, reason }
+            if *type_expr == defined.to_string() =>
+        {
+            defined_struct_input(*reason, target, rows)
+        }
+        PlantError::DerivedTypeInvalid { type_expr, .. } => type_row(rows, type_expr),
         _other => None,
     }
 }
@@ -325,7 +368,7 @@ async fn define(
     let defined = match result {
         Ok(defined) => defined,
         Err(error) => {
-            let named = |refusal: &AppError| refused_input(refusal, &target, &sent.rows);
+            let named = |refusal: &AppError| refused_input(refusal, &target, &name, &sent.rows);
             return Err(match refusal_lines(error, named) {
                 Ok(lines) => refuse(state, request, (code, &target, sent), lines).await,
                 Err(other) => other,

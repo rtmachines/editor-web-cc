@@ -30,11 +30,15 @@ const ROLES: [Role; 4] = [
 /// One row per operation of `api.md` section 3.3, in the order of `Operation::ALL`.
 ///
 /// The columns are Administrator, ProcessEngineer, Operator, and ExportClient.
-const MATRIX: [(Operation, [Access; 4]); 73] = [
+const MATRIX: [(Operation, [Access; 4]); 74] = [
     (Operation::CreateMachine, [Allowed, Allowed, Denied, Denied]),
     (Operation::RenameMachine, [Allowed, Allowed, Denied, Denied]),
     (
         Operation::SetMachineDataBlock,
+        [Allowed, Allowed, Denied, Denied],
+    ),
+    (
+        Operation::SetMachineStringEncoding,
         [Allowed, Allowed, Denied, Denied],
     ),
     (
@@ -274,11 +278,12 @@ const PURPOSES: [(Operation, Operation, Permission); 16] = [
     ),
 ];
 
-/// The 32 commands that stop in read-only mode (Assumption A24, design D7, ADR-0156 (e)).
-const STOPPED_IN_READ_ONLY: [Operation; 32] = [
+/// The 33 commands that stop in read-only mode (Assumption A24, design D7, ADR-0156 (e)).
+const STOPPED_IN_READ_ONLY: [Operation; 33] = [
     Operation::CreateMachine,
     Operation::RenameMachine,
     Operation::SetMachineDataBlock,
+    Operation::SetMachineStringEncoding,
     Operation::ArchiveMachine,
     Operation::AddUnit,
     Operation::RenameUnit,
@@ -453,4 +458,24 @@ fn every_command_outside_the_exempt_list_stops_in_read_only_mode() {
             .all(|operation| operation.is_command()),
         "the stop list holds a query"
     );
+}
+
+#[tokio::test]
+async fn adr_0202_set_machine_string_encoding_needs_machine_manage() {
+    let operation = Operation::SetMachineStringEncoding;
+    assert!(operation.is_command());
+    assert_eq!(
+        operation.requirement(),
+        Requirement::Permission(Permission::MachineManage)
+    );
+    let expected = [Allowed, Allowed, Denied, Denied];
+    for (role, expected) in ROLES.into_iter().zip(expected) {
+        let sink = MemorySink::default();
+        let result = authorize(operation, &actor(role), &meta(), &sink).await;
+        let events = sink.events().len();
+        assert!(
+            is_as_expected(operation, expected, &result, events),
+            "{role:?}: expected {expected:?}, got {result:?} with {events} event(s)"
+        );
+    }
 }

@@ -3,7 +3,8 @@
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
-    DerivedTypeReason, LeafPath, PlantError, PlatformTypes, PlcPlatform, PlcType, TypeTree,
+    DerivedTypeReason, LeafPath, PlantError, PlatformTypes, PlcPlatform, PlcType, StringEncoding,
+    TypeTree,
 };
 use recipe_domain::recipe::{LimitInput, LimitList, StoredParameter, ValueInput};
 use serde_json::json;
@@ -37,7 +38,13 @@ fn draft_with_parameter_of(
 }
 
 fn resolution(rows: &[PlcType], root: u128) -> PlantError {
-    let types = PlatformTypes::collect(mid(1), PLATFORM, rows.iter().cloned()).unwrap();
+    let types = PlatformTypes::collect(
+        mid(1),
+        PLATFORM,
+        StringEncoding::Latin1,
+        rows.iter().cloned(),
+    )
+    .unwrap();
     TypeTree::resolve(tid(root), &types).unwrap_err()
 }
 

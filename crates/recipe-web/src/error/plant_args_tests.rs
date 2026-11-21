@@ -9,7 +9,7 @@ use recipe_app::error::AppError;
 use recipe_domain::audit::RequestId;
 use recipe_domain::plant::{
     CommMode, DerivedTypeReason, MachineCode, MemberName, PlantError, PlcAddress, PlcPlatform,
-    TypeLimit, TypeName, UnitPath,
+    StringEncoding, TypeLimit, TypeName, UnitPath,
 };
 use recipe_domain::recipe::ReferenceNumber;
 use uuid::Uuid;
@@ -61,7 +61,7 @@ async fn body_of(error: PlantError, lang: Lang) -> String {
     String::from_utf8(bytes.to_vec()).unwrap()
 }
 
-/// The 4 samples of the errors about a machine.
+/// The 6 samples of the errors about a machine.
 fn machine_samples() -> Vec<Sample> {
     vec![
         (
@@ -89,6 +89,20 @@ fn machine_samples() -> Vec<Sample> {
             },
             "Machine M7 has a draft in recipe R-100. Approve or discard the draft first.",
             "Maszyna M7 ma wersję roboczą w recepturze R-100. Najpierw zatwierdź albo odrzuć wersję roboczą.",
+        ),
+        (
+            PlantError::StringEncodingNotOnPlatform {
+                code: code(),
+                encoding: StringEncoding::Utf8,
+                platform: PlcPlatform::S7_1500,
+            },
+            "Platform Siemens S7-1500 of machine M7 has no STRING encoding Utf8. Select Latin1.",
+            "Platforma Siemens S7-1500 maszyny M7 nie ma kodowania STRING Utf8. Wybierz Latin1.",
+        ),
+        (
+            PlantError::StringEncodingFrozen { code: code() },
+            "The STRING encoding of machine M7 cannot change, because the machine has a recipe version.",
+            "Kodowania STRING maszyny M7 nie można zmienić, ponieważ maszyna ma wersję receptury.",
         ),
     ]
 }
@@ -206,7 +220,7 @@ fn type_samples() -> Vec<Sample> {
     ]
 }
 
-/// One sample of each of the 19 variants with a message, the English and the Polish sentence.
+/// One sample of each of the 21 variants with a message, the English and the Polish sentence.
 fn samples() -> Vec<Sample> {
     [machine_samples(), unit_samples(), type_samples()].concat()
 }
@@ -223,7 +237,7 @@ fn assert_sentence(body: &str, sentence: &str, what: &str) {
 #[tokio::test]
 async fn plant_error_args_give_every_placeable_a_value_in_both_languages() {
     let samples = samples();
-    assert_eq!(samples.len(), 19);
+    assert_eq!(samples.len(), 21);
     for (error, english, polish) in samples {
         let what = error.code().as_str();
         assert_sentence(&body_of(error.clone(), Lang::En).await, english, what);
@@ -263,6 +277,11 @@ async fn plant_error_args_write_each_reason_of_a_type_in_the_ui_language() {
             DerivedTypeReason::ReservedName,
             "the struct name is a reserved IEC 61131-3 word or a primitive name",
             "nazwa struktury jest zastrzeżonym słowem IEC 61131-3 albo nazwą typu prostego",
+        ),
+        (
+            DerivedTypeReason::ReservedMemberName,
+            "the member name is a reserved IEC 61131-3 keyword",
+            "nazwa składnika jest zastrzeżonym słowem kluczowym IEC 61131-3",
         ),
     ];
     for (reason, english, polish) in cases {
@@ -304,6 +323,64 @@ fn plant_error_args_name_the_reserved_name_reason_by_its_key() {
     let bundles = Bundles::load().unwrap();
     assert_eq!(
         bundles.message(Lang::En, "type-reason-reserved-name", None),
+        Some(reason.to_string())
+    );
+}
+
+#[test]
+fn adr_0203_plant_error_args_name_the_reserved_member_name_reason_by_its_key() {
+    let reason = DerivedTypeReason::ReservedMemberName;
+    let error = PlantError::DerivedTypeInvalid {
+        type_expr: "ST_Coil@1".to_owned(),
+        reason,
+    };
+    let word = plant_line_args(&error)
+        .into_iter()
+        .find_map(|(name, arg)| (name == "reason").then_some(arg));
+    assert_eq!(
+        word,
+        Some(LineArg::Word {
+            key: "type-reason-reserved-member-name".to_owned(),
+            args: Vec::new(),
+            fallback: reason.to_string(),
+        })
+    );
+    let bundles = Bundles::load().unwrap();
+    for lang in [Lang::En, Lang::Pl] {
+        let text = bundles.message(lang, "type-reason-reserved-member-name", None);
+        assert!(text.is_some_and(|text| !text.is_empty()), "{lang:?}");
+    }
+    assert_eq!(
+        bundles.message(Lang::En, "type-reason-reserved-member-name", None),
+        Some(reason.to_string())
+    );
+}
+
+#[test]
+fn adr_0204_plant_error_args_name_the_too_few_members_reason_by_its_key() {
+    let reason = DerivedTypeReason::TooFewMembers;
+    let error = PlantError::DerivedTypeInvalid {
+        type_expr: "ST_Coil@1".to_owned(),
+        reason,
+    };
+    let word = plant_line_args(&error)
+        .into_iter()
+        .find_map(|(name, arg)| (name == "reason").then_some(arg));
+    assert_eq!(
+        word,
+        Some(LineArg::Word {
+            key: "type-reason-too-few-members".to_owned(),
+            args: Vec::new(),
+            fallback: reason.to_string(),
+        })
+    );
+    let bundles = Bundles::load().unwrap();
+    for lang in [Lang::En, Lang::Pl] {
+        let text = bundles.message(lang, "type-reason-too-few-members", None);
+        assert!(text.is_some_and(|text| !text.is_empty()), "{lang:?}");
+    }
+    assert_eq!(
+        bundles.message(Lang::En, "type-reason-too-few-members", None),
         Some(reason.to_string())
     );
 }
@@ -463,6 +540,22 @@ fn connection_state_and_block_cases() -> Vec<Case> {
                 platform: PlcPlatform::TwinCat3,
             },
             pairs(&[("code", "M7"), ("platform", "word:platform-twincat3")]),
+        ),
+        (
+            PlantError::StringEncodingNotOnPlatform {
+                code: code(),
+                encoding: StringEncoding::Utf8,
+                platform: PlcPlatform::S7_1500,
+            },
+            pairs(&[
+                ("code", "M7"),
+                ("encoding", "Utf8"),
+                ("platform", "word:platform-s7-1500"),
+            ]),
+        ),
+        (
+            PlantError::StringEncodingFrozen { code: code() },
+            pairs(&[("code", "M7")]),
         ),
     ]
 }

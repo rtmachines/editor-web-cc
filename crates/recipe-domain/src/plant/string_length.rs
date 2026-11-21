@@ -58,7 +58,9 @@ impl StringLength {
         }
     }
 
-    /// Return the number of characters.
+    /// Return the length in the unit of the string kind. A `STRING` length counts
+    /// characters on a `Latin1` machine and UTF-8 bytes on a `Utf8` machine.
+    /// A `WSTRING` length counts UTF-16 code units (ADR-0137 (i), ADR-0202).
     #[must_use]
     pub const fn value(self) -> u16 {
         self.0

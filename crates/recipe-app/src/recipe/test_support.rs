@@ -5,17 +5,19 @@ use std::collections::BTreeSet;
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafPath, Machine, MemberName, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, TypeMember, TypeName, UnitPath,
-    UnitUsage,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, RuleSet, StringKind, StringLength,
+    TypeMember, TypeName, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
-    LimitInput, ParameterKey, Recipe, RecipeDeleter, RecipeError, S7AccessReason, StoredLimit,
-    StoredParameter, StoredValue,
+    Expected, LimitInput, Ordinal, ParameterKey, Recipe, RecipeDeleter, RecipeError,
+    S7AccessReason, StoredLimit, StoredParameter, StoredValue,
 };
 use serde_json::{Value, json};
 
 use crate::error::AppError;
-use crate::memory::fixtures::{Fixture, mid, parameter_on, pkey, tid, timestamp, uid, user, vid};
+use crate::memory::fixtures::{
+    Fixture, mid, parameter_on, pid, pkey, tid, timestamp, uid, user, utf8_machine, vid,
+};
 use crate::memory::seed_type_id;
 use crate::recipe::rebind::fixtures::typed_struct_row;
 
@@ -302,4 +304,160 @@ pub(super) fn assert_not_addressable(error: &AppError, tag: &str, reason: S7Acce
             "Parameter {tag} at DB1.DBB0 has a type that a data block with standard access cannot hold: {reason_text}. Change the type."
         )
     );
+}
+
+/// The identifier of the row `WSTRING(n)` that [`seed_note_draft`] stores.
+pub(super) const NOTE_TYPE: u128 = 980;
+
+/// The key of the parameter `NOTE` that [`seed_note_draft`] stores.
+pub(super) fn note_key() -> ParameterKey {
+    pkey(7)
+}
+
+/// The row `WSTRING(length)` of machine 1 on `platform` with the identifier `id`.
+pub(super) fn wstring_row(id: u128, platform: PlcPlatform, length: u16) -> PlcType {
+    let size_bytes = StringLength::parse(StringKind::Wstring, platform, u32::from(length))
+        .unwrap()
+        .size_bytes(StringKind::Wstring)
+        .unwrap();
+    PlcType::try_from(PlcTypeRecord {
+        id: tid(id),
+        machine: Some(mid(1)),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::Wstring,
+            leaf_class: Primitive::Wstring.leaf_class(),
+            size_bytes,
+            string_length: Some(length),
+        },
+    })
+    .unwrap()
+}
+
+/// The parameter `NOTE` of type `WSTRING(length)` with the stored value `value`.
+///
+/// The parameter sits on the unit 102. It has the limit `max_length` of `length` on the leaf
+/// path `""`, so the approval finds no missing limit. It has no S7 address.
+pub(super) fn note_parameter(platform: PlcPlatform, length: u16, value: Value) -> StoredParameter {
+    let limit = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: None,
+        max_length: Some(length),
+    };
+    StoredParameter {
+        plc_type: tid(NOTE_TYPE),
+        value: StoredValue::from(value),
+        limits: vec![limit],
+        ordinal: Ordinal::parse(1).unwrap(),
+        ..parameter_on(platform, 7, "NOTE", uid(102), 0)
+    }
+}
+
+/// Store the machine `M1` on `platform`, the row `WSTRING(length)`, and the draft `R-1` (version
+/// 101) with `SPEED` and `NOTE`.
+///
+/// `SPEED` is the `INT` of [`seed_speed_draft`]. `NOTE` holds `stored`. The fixture writes the
+/// rows with no check, as a database that held them before ADR-0201 does.
+pub(super) fn seed_note_draft(platform: PlcPlatform, length: u16, stored: Value) -> Fixture {
+    let fixture = Fixture::new();
+    let machine = fixture.seed_machine_on(platform, 1, "M1");
+    fixture.seed_draft(&machine, 1, "R-1");
+    fixture
+        .store
+        .seed_type(&wstring_row(NOTE_TYPE, platform, length));
+    let speed = parameter_on(platform, 1, "SPEED", uid(102), 0);
+    fixture.store.seed_parameter(vid(DRAFT_VERSION), &speed);
+    fixture.store.seed_parameter(
+        vid(DRAFT_VERSION),
+        &note_parameter(platform, length, stored),
+    );
+    fixture
+}
+
+/// Return the expected forms of the `E-RCP-005` entries in `error`, in the order of the entries.
+///
+/// An error with no `E-RCP-005` entry gives an empty list.
+pub(super) fn expected_forms(error: &AppError) -> Vec<Expected> {
+    let entries: Vec<&RecipeError> = match error {
+        AppError::Recipe(entry) => vec![entry],
+        AppError::Recipes(list) => list.iter().collect(),
+        _ => Vec::new(),
+    };
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            RecipeError::ValueShapeMismatch { expected, .. } => Some(expected.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The form that `E-RCP-005` names for a `WSTRING(length)` on `CodesysIec` and `TwinCat3`.
+pub(super) const fn iec_wstring(length: u16) -> Expected {
+    Expected::WstringIec { length }
+}
+
+/// The stored value of the parameter that [`seed_utf8_label`] writes. It has 4 characters, 7 UTF-8
+/// bytes, and the character `Ł`, which is outside Latin-1.
+pub(crate) const UTF8_LABEL: &str = "Łódź";
+
+/// The identifier of the `STRING(10)` row that [`utf8_label_fixture`] stores.
+const LABEL_TYPE: u128 = 951;
+
+/// The length of the `STRING` row and of the limit `max_length` of the label.
+const LABEL_LENGTH: u16 = 10;
+
+/// Store the machine row `STRING(10)` of `machine` that [`seed_utf8_label`] uses.
+pub(crate) fn seed_label_row(fixture: &Fixture, machine: &Machine) {
+    let platform = machine.platform();
+    let length =
+        StringLength::parse(StringKind::String, platform, u32::from(LABEL_LENGTH)).unwrap();
+    let row = PlcType::try_from(PlcTypeRecord {
+        id: tid(LABEL_TYPE),
+        machine: Some(machine.id()),
+        platforms: BTreeSet::from([platform]),
+        shape: RecordShape::Primitive {
+            primitive: Primitive::String,
+            leaf_class: Primitive::String.leaf_class(),
+            size_bytes: length.size_bytes(StringKind::String).unwrap(),
+            string_length: Some(length.value()),
+        },
+    })
+    .unwrap();
+    fixture.store.seed_type(&row);
+}
+
+/// A fixture with a `Utf8` machine `M1` on `CodesysIec` and the machine row `STRING(10)`.
+///
+/// The fixture holds no recipe. The caller seeds the versions and then [`seed_utf8_label`]. The
+/// machine is the second result.
+pub(crate) fn utf8_label_fixture() -> (Fixture, Machine) {
+    let fixture = Fixture::new();
+    let machine = utf8_machine(1, "M1");
+    fixture.store.seed_machine(&machine);
+    seed_label_row(&fixture, &machine);
+    (fixture, machine)
+}
+
+/// Store the parameter `LABEL` of type `STRING(10)` with the value `value` on version `version`.
+///
+/// The parameter sits on the unit 101 and has the limit `max_length` of 10 on the leaf path `""`.
+/// It has the key 1 on every version and the identifier `1000 + version`.
+pub(crate) fn seed_utf8_label(fixture: &Fixture, version: u128, value: &str) {
+    let limit = StoredLimit {
+        leaf_path: LeafPath::parse("").unwrap(),
+        min: None,
+        max: None,
+        max_length: Some(LABEL_LENGTH),
+    };
+    let label = StoredParameter {
+        id: pid(version.checked_add(1000).unwrap()),
+        plc_type: tid(LABEL_TYPE),
+        value: StoredValue::from(json!(value)),
+        limits: vec![limit],
+        ordinal: Ordinal::parse(0).unwrap(),
+        ..parameter_on(PlcPlatform::CodesysIec, 1, "LABEL", uid(101), 0)
+    };
+    fixture.store.seed_parameter(vid(version), &label);
 }

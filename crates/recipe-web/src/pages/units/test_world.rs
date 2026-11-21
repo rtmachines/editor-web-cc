@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 use recipe_app::memory::seed_type_id;
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, PlatformTypes, PlcPlatform, PlcType, PlcTypeRecord, Primitive,
-    RecordShape, TypeTree, UnitId, UnitPath, UnitUsage,
+    RecordShape, StringEncoding, TypeTree, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, RecipeVersionId,
@@ -87,6 +87,7 @@ fn machine(number: u16, text: &str) -> Machine {
         name(text),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (unit_id(number, 0), name("Infeed")),
     )
     .unwrap()
@@ -140,8 +141,13 @@ fn int_tree() -> TypeTree {
         },
     })
     .unwrap();
-    let types =
-        PlatformTypes::collect(MachineId::from(M7_ID), PlcPlatform::S7_300, vec![row]).unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(M7_ID),
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        vec![row],
+    )
+    .unwrap();
     TypeTree::resolve(id, &types).unwrap()
 }
 

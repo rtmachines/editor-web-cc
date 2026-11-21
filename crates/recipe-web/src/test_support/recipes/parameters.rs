@@ -5,8 +5,8 @@
 
 use recipe_app::memory::{MemoryState, seed_type_id};
 use recipe_domain::plant::{
-    LeafPath, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, Primitive, S7Address, TypeTree,
-    UnitPath,
+    LeafPath, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, Primitive, S7Address, StringEncoding,
+    TypeTree, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, StoredLimit, StoredParameter,
@@ -155,7 +155,8 @@ fn tree_of(state: &MemoryState, plant: &PlantIds, type_id: PlcTypeId) -> TypeTre
         .chain(derived)
         .map(|id| state.plc_type(id).cloned().unwrap())
         .collect();
-    let types = PlatformTypes::collect(plant.m7, PlcPlatform::S7_300, rows).unwrap();
+    let types = PlatformTypes::collect(plant.m7, PlcPlatform::S7_300, StringEncoding::Latin1, rows)
+        .unwrap();
     TypeTree::resolve(type_id, &types).unwrap()
 }
 

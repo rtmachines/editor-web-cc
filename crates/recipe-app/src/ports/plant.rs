@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, Unit, UnitId, UnitPath,
-    UnitUsage,
+    DataBlockNumber, Machine, MachineCode, MachineId, PlcPlatform, StringEncoding, Unit, UnitId,
+    UnitPath, UnitUsage,
 };
 use recipe_domain::text::Text;
 use recipe_domain::timestamp::Timestamp;
@@ -144,6 +144,20 @@ pub trait PlantRepository: Send {
         &mut self,
         id: MachineId,
         number: DataBlockNumber,
+    ) -> Result<RowImage, StorageError>;
+
+    /// Run `SELECT EXISTS (SELECT 1 FROM recipe_version v JOIN recipe r ON r.id = v.recipe_id WHERE r.machine_id = $m)` (`SetMachineStringEncoding`, ADR-0202 (d)).
+    ///
+    /// Every version row counts, also a discarded draft and a version of a deleted recipe.
+    /// The command calls it after `lock_machine_for_no_key_update`. The lock conflicts with the
+    /// `FOR SHARE` lock of the commands that create a version row (ADR-0202 (d3)).
+    async fn machine_has_version(&mut self, id: MachineId) -> Result<bool, StorageError>;
+
+    /// Run `UPDATE machine SET string_encoding` (`SetMachineStringEncoding`, ADR-0202) and return the row after the change.
+    async fn set_machine_string_encoding(
+        &mut self,
+        id: MachineId,
+        encoding: StringEncoding,
     ) -> Result<RowImage, StorageError>;
 
     /// Run `UPDATE machine SET archived_at = now()` (`ArchiveMachine`) and return the row after the change.

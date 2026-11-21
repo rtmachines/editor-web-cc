@@ -8,8 +8,8 @@ use std::fmt;
 
 use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_MEMBERS, MAX_S7_NESTING};
 use super::{
-    CommMode, MachineCode, MemberName, PlcAddress, PlcPlatform, StringLengthReason, TypeName,
-    UnitPath,
+    CommMode, MachineCode, MemberName, PlcAddress, PlcPlatform, StringEncoding, StringLengthReason,
+    TypeName, UnitPath,
 };
 
 /// The size limit that a type breaks (`E-PLT-018`).
@@ -61,6 +61,11 @@ pub enum DerivedTypeReason {
     RowShape,
     /// The struct name is a reserved IEC 61131-3 word or a primitive name (ADR-0143 (c)).
     ReservedName,
+    /// The member name is a reserved IEC 61131-3 keyword on `CodesysIec` or `TwinCat3`
+    /// (ADR-0203 (d)).
+    ReservedMemberName,
+    /// The struct has one member on `CodesysIec`, which needs at least 2 (ADR-0204 (a)).
+    TooFewMembers,
 }
 
 impl fmt::Display for DerivedTypeReason {
@@ -74,6 +79,8 @@ impl fmt::Display for DerivedTypeReason {
             Self::ReservedName => {
                 "the struct name is a reserved IEC 61131-3 word or a primitive name"
             }
+            Self::ReservedMemberName => "the member name is a reserved IEC 61131-3 keyword",
+            Self::TooFewMembers => "the struct has too few members on this platform",
         })
     }
 }
@@ -356,6 +363,26 @@ pub enum PlantError {
         /// The latest revision of the struct.
         revision: u32,
     },
+    /// A machine on an S7 platform has a `Utf8` STRING encoding (`E-PLT-053`).
+    #[error(
+        "Platform {platform} of machine {code} has no STRING encoding {encoding}. Select Latin1."
+    )]
+    StringEncodingNotOnPlatform {
+        /// The code of the machine.
+        code: MachineCode,
+        /// The encoding that the platform does not have.
+        encoding: StringEncoding,
+        /// The platform of the machine.
+        platform: PlcPlatform,
+    },
+    /// The STRING encoding of a machine with a recipe version cannot change (`E-PLT-054`).
+    #[error(
+        "The STRING encoding of machine {code} cannot change, because the machine has a recipe version."
+    )]
+    StringEncodingFrozen {
+        /// The code of the machine.
+        code: MachineCode,
+    },
 }
 
 impl PlantError {
@@ -395,9 +422,13 @@ impl PlantError {
             Self::DataBlockMissing { .. } => ErrorCode::PLT_050,
             Self::DataBlockNotOnPlatform { .. } => ErrorCode::PLT_051,
             Self::RevisionUnchanged { .. } => ErrorCode::PLT_052,
+            Self::StringEncodingNotOnPlatform { .. } => ErrorCode::PLT_053,
+            Self::StringEncodingFrozen { .. } => ErrorCode::PLT_054,
         }
     }
 }
 
+#[cfg(test)]
+mod connection_tests;
 #[cfg(test)]
 mod tests;

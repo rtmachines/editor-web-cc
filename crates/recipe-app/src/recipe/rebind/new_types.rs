@@ -42,7 +42,13 @@ pub(super) async fn ensure_new_types(
 ) -> Result<NewTypes, AppError> {
     let machine = open.draft.machine();
     let rows = open.tx.types().type_rows(machine).await?;
-    let mut derived = DerivedTypes::new(machine, open.draft.platform(), rows, context);
+    let mut derived = DerivedTypes::new(
+        machine,
+        open.draft.platform(),
+        open.draft.string_encoding(),
+        rows,
+        context,
+    );
     let mut ensured = Vec::new();
     for shape in plan.array_shapes() {
         let id = derived.ensure_shape(open.tx.types(), &shape).await?;

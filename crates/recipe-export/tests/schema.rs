@@ -220,6 +220,10 @@ fn v2_loadable_true_with_retired_fails() {
 // A test target file is a crate root, so `#[path]` places the modules under `tests/schema/`.
 #[path = "schema/addresses.rs"]
 mod addresses;
+#[path = "schema/platform_rules.rs"]
+mod platform_rules;
+#[path = "schema/string_encoding.rs"]
+mod string_encoding;
 #[path = "schema/structure.rs"]
 mod structure;
 #[path = "schema/type_rules.rs"]

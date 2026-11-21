@@ -463,3 +463,6 @@ pub(super) async fn insert_struct(
         .map_err(map_error)?;
     Ok(RowImage::new(image))
 }
+
+#[cfg(test)]
+mod tests;

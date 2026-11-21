@@ -164,6 +164,9 @@ pub struct MachineView {
     /// The stored connection, or `None` when the machine has no record. A role with `RecipeView`
     /// reads it, because it holds no password (R31, A47).
     pub connection: Option<MachineConnection>,
+    /// Whether a recipe of the machine has a version row, live or not. Then the `STRING` encoding
+    /// is frozen and the page shows no form for it (ADR-0202 (d)).
+    pub has_version: bool,
 }
 
 /// Shows one machine with its unit tree.
@@ -203,7 +206,7 @@ impl GetMachine {
         input: GetMachineInput,
     ) -> Result<MachineView, AppError> {
         authorize(Self::OPERATION, user, meta, self.ctx.security.as_ref()).await?;
-        let (machine, connection) = self.read(input.machine).await?;
+        let (machine, connection, has_version) = self.read(input.machine).await?;
         let archived = input.archived.filter(|path| {
             machine
                 .unit(path)
@@ -213,16 +216,17 @@ impl GetMachine {
             machine,
             archived,
             connection,
+            has_version,
         })
     }
 
-    /// Read the machine and its connection record in one transaction.
+    /// Read the machine, its connection record, and its version flag in one transaction.
     ///
     /// The transaction ends when the function returns.
     async fn read(
         &self,
         reference: MachineRef,
-    ) -> Result<(Machine, Option<MachineConnection>), AppError> {
+    ) -> Result<(Machine, Option<MachineConnection>, bool), AppError> {
         let mut tx = self.ctx.uow.begin(Isolation::ReadOnly).await?;
         let machine = find_machine(tx.plant(), reference).await?;
         let stored = tx
@@ -233,7 +237,8 @@ impl GetMachine {
             password_set: record.password == PasswordState::Stored,
             connection: record.connection,
         });
-        Ok((machine, connection))
+        let has_version = tx.plant().machine_has_version(machine.id()).await?;
+        Ok((machine, connection, has_version))
     }
 }
 

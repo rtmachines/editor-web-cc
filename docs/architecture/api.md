@@ -82,11 +82,12 @@ Static files. `GET /static/*` serves the files of section 9, the style sheets `s
 |---|---|---|---|---|---|---|
 | GET | `/machines` | `ListMachines` | `RecipeView` | `q`, `page`, `show_archived`, optional `archived` | `200` list of live machines, `page.machines` rows per page. `show_archived=1` adds the archived machines, each with a link to `/machines/by-id/{uuid}` | - |
 | GET | `/machines/new` | `GetMachineForm` | `MachineManage` | - | `200` form | - |
-| POST | `/machines` | `CreateMachine` | `MachineManage` | `code`, `name`, `plc_platform`, `db_number`, `main_unit_name` | `303` to `/machines/{code}` | `409 E-PLT-001`, `422 E-PLT-024`, `422 E-PLT-050`, `422 E-PLT-051` |
+| POST | `/machines` | `CreateMachine` | `MachineManage` | `code`, `name`, `plc_platform`, `db_number`, `string_encoding`, `main_unit_name` | `303` to `/machines/{code}` | `409 E-PLT-001`, `422 E-PLT-024`, `422 E-PLT-050`, `422 E-PLT-051`, `422 E-PLT-053` |
 | GET | `/machines/{code}` | `GetMachine` | `RecipeView` | optional `archived` | `200` page of the live machine with this code, with the unit tree | `404 E-WEB-005` |
 | GET | `/machines/by-id/{uuid}` | `GetMachine` | `RecipeView` | - | `200` machine page of a live or an archived machine, with the unit tree. Read-only for an archived machine | `404 E-WEB-005` |
 | POST | `/machines/{code}/rename` | `RenameMachine` | `MachineManage` | `name` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010` |
 | POST | `/machines/{code}/data-block` | `SetMachineDataBlock` | `MachineManage` | `db_number` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010`, `422 E-PLT-024`, `422 E-PLT-050`, `422 E-PLT-051` |
+| POST | `/machines/{code}/string-encoding` | `SetMachineStringEncoding` | `MachineManage` | `string_encoding` | `200` fragment. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010`, `409 E-PLT-054`, `422 E-PLT-053` |
 | GET | `/machines/{code}/connection/edit` | `GetPlcConnectionForm` | `MachineManage` | - | `200` form with the connection fields of the platform of the machine and the hidden field `row_version` | `404 E-WEB-005` |
 | POST | `/machines/{code}/connection` | `SetPlcConnection` | `MachineManage` | `row_version`, `host`, `rack`, `slot`, `port`, `address`, `comm_mode`, `login`, `password` | `200` fragment with `HX-Trigger: {"rowVersion": <new>}`. A request without `HX-Request` gets `303` to `/machines/{code}` | `404 E-WEB-005`, `409 E-PLT-010`, `422 E-PLT-022`, `422 E-PLT-023`, `422 E-PLT-025`, `422 E-PLT-026`, `422 E-PLT-028`, `409 E-WEB-013` |
 | POST | `/machines/{code}/archive` | `ArchiveMachine` | `MachineManage` | CSRF token | `303` to `/machines?archived={code}` (ADR-0037) | `404 E-WEB-005`, `409 E-PLT-011` |
@@ -381,6 +382,7 @@ Legend: ✓ allowed, ✗ denied, (c) allowed with the condition in the last colu
 | Discard `Draft` (`DiscardDraft`) | `VersionDiscard` | ✓ | ✓ | ✗ | ✗ | - |
 | Create, rename, archive machine (`CreateMachine`, `RenameMachine`, `ArchiveMachine`). Form query `GetMachineForm` with the purpose `CreateMachine` or `RenameMachine` | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9 |
 | Set the data block number of a machine (`SetMachineDataBlock`) | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9, A48. ADR-0156 (e) |
+| Set the STRING encoding of a machine (`SetMachineStringEncoding`) | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9. ADR-0202 (d) |
 | Edit the PLC connection record of a machine (`SetPlcConnection`). Form query `GetPlcConnectionForm` | `MachineManage` | ✓ | ✓ | ✗ | ✗ | A9, A47. ADR-0154 (i) |
 | Add, rename, archive unit (`AddUnit`, `RenameUnit`, `ArchiveUnit`). Form query `GetUnitForm` with the purpose `AddUnit` or `RenameUnit` | `UnitManage` | ✓ | ✓ | ✗ | ✗ | A9 |
 | Define UDT revision (`DefineUdt`). Form query `GetUdtForm` with the purpose `DefineUdt` | `UdtManage` | ✓ | ✓ | ✗ | ✗ | A9 |
@@ -502,7 +504,7 @@ The module `export` of `recipe-domain` builds the hashed body and computes the h
 | `schema_version` | string | no | `"1"`. A breaking change creates `"2"` and `/export/v2/`. Section 6.4 describes `"2"` |
 | `exported_at` | string, RFC 3339 UTC | no | Time of this export |
 | `exported_by` | string | no | `Login` of the user |
-| `loadable` | boolean | no | `true` only when `version.status` is `Approved` at export time and no value, limit, or address breaks a rule (ADR-0119 (c)) |
+| `loadable` | boolean | no | `true` only when `version.status` is `Approved` at export time and no value, limit, or address breaks a rule (ADR-0119 (c)). A v1 document of a `Utf8` machine always has `false` (ADR-0202 (l)) |
 | `content_sha256` | string, 64 hex chars | no | SHA-256 of the hashed body (below). Computed and stored at approval |
 | `machine.code` | string | yes | `MachineCode` |
 | `machine.name` | string | no | Name at export time |
@@ -530,7 +532,7 @@ The module `export` of `recipe-domain` builds the hashed body and computes the h
 | `parameters[].type_id` | string | yes | A type reference |
 | `parameters[].s7_address` | string or null | yes | The stored value when present. Always present on `S7_300`. Null on `CodesysIec` and `TwinCat3` (A31) |
 | `parameters[].limits[]` | `{leaf_path, min, max, max_length}` | yes | `min`, `max`, and `max_length` are JSON strings with the canonical decimal text, or null. A limit of a duration or instant leaf is a count of the base unit (table below). `leaf_path` `[*]` applies to every element of an array. Ordered by `leaf_path` (section 6.3) |
-| `parameters[].value` | JSON | yes | The `ParameterValue` tree. Every numeric, duration, and instant leaf is a JSON string with the canonical decimal text (`reliability.md` 4.4). A duration or instant leaf holds a count of the base unit of its type (table below). A `BOOL` is a JSON boolean. A string or char leaf is a JSON string. The transfer client writes each `STRING` or `CHAR` character as one byte whose value is the scalar value of the character (ISO 8859-1, ADR-0181) |
+| `parameters[].value` | JSON | yes | The `ParameterValue` tree. Every numeric, duration, and instant leaf is a JSON string with the canonical decimal text (`reliability.md` 4.4). A duration or instant leaf holds a count of the base unit of its type (table below). A `BOOL` is a JSON boolean. A string or char leaf is a JSON string. On a `Latin1` machine, the transfer client writes each `STRING` or `CHAR` character as one byte whose value is the scalar value of the character (ISO 8859-1, ADR-0181). On a `Utf8` machine, it writes each `STRING` character as its UTF-8 bytes (ADR-0202). It writes each `WSTRING` or `WCHAR` character as its UTF-16 code units. A `WSTRING(n)` length counts these code units (ADR-0137 (i), ADR-0209 (d)). Examples: in a `STRING`, `é` is the byte `16#E9` on a `Latin1` machine and the bytes `16#C3` `16#A9` on a `Utf8` machine. In a `WSTRING`, `€` is the code unit `16#20AC`. Each array dimension is one JSON level. The first dimension is the outer level (ADR-0209 (e)) |
 
 A type reference (`type_id`, `element_type_id`) is the primitive name for a primitive without a length, for example `INT`. For every other type it is a `types[].id`.
 
@@ -636,6 +638,7 @@ The hash value in the example is a placeholder.
   - `parameters[].limits[]`: by `leaf_path`, compared byte by byte. In the example of 6.2, `.label` comes before `.setpoint`.
   - `types[].members[]`: by the member `ordinal` of `plc_type_member`, which the document gives as the array order.
 - Before the transfer system loads a v1 document into a PLC, it MUST check `loadable`. It MUST also build the hashed body from the document with the array order above, compute its SHA-256, and compare the result with `content_sha256`. Every sort key of the hashed arrays is in the document: `id`, `unit_path`, `tag`, `leaf_path`, and the order of `members[]`.
+- The schema does not check a range, and it does not check a leaf below a type reference with a UUID. A consumer checks them in a type-aware pass after the schema check (ADR-0208 (e)). The pass uses the ranges of `domain-model.md` 2.1 for the platform of the machine.
 
 ### 6.4 Unit scope document (v2)
 
@@ -643,11 +646,12 @@ The v2 document holds the parameters of one unit and of its descendant units. A 
 
 The schema file is `crates/recipe-export/schema/export-v2.schema.json`. As for v1, the file wins when it differs from this section. The v1 routes, the v1 document, and the v1 schema file do not change.
 
-The v2 document holds every field of section 6.1 and two more fields. These fields differ from v1:
+The v2 document holds every field of section 6.1 and three more fields. These fields differ from v1:
 
 | Field | Type | In scope hash | Rule |
 |---|---|---|---|
 | `schema_version` | string | no | `"2"` |
+| `machine.string_encoding` | string | yes | Optional. Present only for a `Utf8` machine, with the value `Utf8`. Absent for a `Latin1` machine (ADR-0202 (j)). The schema permits the field only when `machine.plc_platform` is `CodesysIec` or `TwinCat3` (ADR-0202 (j3)). The system reads it from the machine at each export and does not store it |
 | `scope` | object | yes | `{"unit_path": <path>}`. The path is the `{path}` of the route |
 | `scope_sha256` | string, 64 hex chars | no | Hash of the scope hashed body (below). The system computes it at each export and does not store it |
 | `content_sha256` | string, 64 hex chars | no | The stored hash of the whole version. It does not describe the parameters of this document |
@@ -658,9 +662,16 @@ Every other field has the type and the rule of section 6.1.
 
 The v2 schema file gives `parameters[].s7_address` a pattern. The pattern accepts the data block numbers 1 to 65535, the byte offsets 0 to 65535, and the bit numbers 0 to 7. It accepts the four forms `DB<n>.DBX<o>.<b>`, `DB<n>.DBB<o>`, `DB<n>.DBW<o>`, and `DB<n>.DBD<o>` only (ADR-0189). The v1 schema file does not change.
 
-The v2 document uses the field order of section 6.1 with two insertions. `scope_sha256` comes directly after `content_sha256`. `scope` comes directly after `version`. The top-level order therefore is `schema_version`, `exported_at`, `exported_by`, `loadable`, `content_sha256`, `scope_sha256`, `machine`, `recipe`, `version`, `scope`, `types`, `parameters`.
+The v2 schema file also holds these rules (ADR-0208). The v1 schema file does not hold them:
 
-Scope hashed body: a JSON object with `machine.code`, `machine.plc_platform`, `recipe.reference_number`, `version.number`, `scope`, `types[]`, and `parameters[]` without `name_en`.
+- A type reference sits at `parameters[].type_id`, `types[].members[].type_id`, or `types[].element_type_id`. A primitive name there follows the column of `machine.plc_platform` in `data-model.md` 7. `STRING` and `WSTRING` have a length, so they use a UUID reference. A bare name `STRING` or `WSTRING` fails the schema.
+- `types[].string_length` follows the `StringLength` table of `domain-model.md` 2.1.
+- `types[].members[]` has at most 1024 entries.
+- A parameter whose `type_id` is a primitive name has the JSON kind of its `LeafClass`. A `BOOL` value is a boolean. A `CHAR` or `WCHAR` value is a string with one character. Every other value is a string with the canonical decimal text.
+
+The v2 document uses the field order of section 6.1 with three insertions. `scope_sha256` comes directly after `content_sha256`. `machine.string_encoding` comes directly after `machine.plc_platform`, only for a `Utf8` machine. `scope` comes directly after `version`. The top-level order therefore is `schema_version`, `exported_at`, `exported_by`, `loadable`, `content_sha256`, `scope_sha256`, `machine`, `recipe`, `version`, `scope`, `types`, `parameters`.
+
+Scope hashed body: a JSON object with `machine.code`, `machine.plc_platform`, `machine.string_encoding` (only for a `Utf8` machine), `recipe.reference_number`, `version.number`, `scope`, `types[]`, and `parameters[]` without `name_en`.
 
 ```json
 {

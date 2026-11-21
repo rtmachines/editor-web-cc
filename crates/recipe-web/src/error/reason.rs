@@ -81,7 +81,7 @@ pub enum FieldReason {
     Date,
     /// The filter date `to` is before the filter date `from`.
     DateOrder,
-    /// A filter value is not a value of its fixed list.
+    /// A filter value or a form value is not a value of its fixed list.
     Choice,
     /// A filter identifier is not a UUID in the hyphenated form.
     Uuid,

@@ -12,7 +12,7 @@ use recipe_domain::export::{
     SCHEMA_VERSION, SCOPE_SCHEMA_VERSION, ScopeBody, ScopeFacts, Sha256, TypeEntry, TypeReference,
     utc_text,
 };
-use recipe_domain::plant::{MachineCode, UnitPath};
+use recipe_domain::plant::{MachineCode, StringEncoding, UnitPath};
 use recipe_domain::recipe::ParameterKey;
 use recipe_domain::text::Text;
 use serde::ser::Error as _;
@@ -71,6 +71,9 @@ struct MachineFields<'a> {
     code: MachineCode,
     name: &'a str,
     plc_platform: &'static str,
+    /// Only a `Utf8` machine of a v2 document holds the field (ADR-0202 (j1)).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    string_encoding: Option<&'static str>,
 }
 
 /// The object `recipe`.
@@ -133,12 +136,13 @@ pub fn write_document(body: &HashedBody, facts: &DocumentFacts) -> Result<Vec<u8
         schema_version: SCHEMA_VERSION,
         exported_at: utc_text(facts.exported_at)?,
         exported_by: facts.exported_by.as_str(),
-        loadable: facts.loadable(),
+        loadable: facts.v1_loadable(),
         content_sha256: &facts.content_sha256,
         machine: MachineFields {
             code: body.machine_code(),
             name: facts.machine_name.as_str(),
             plc_platform: body.platform().as_str(),
+            string_encoding: None,
         },
         recipe: RecipeFields {
             reference_number: body.reference_number().as_str(),
@@ -185,6 +189,7 @@ pub fn write_scoped(body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, Exp
             code: body.machine_code(),
             name: document.machine_name.as_str(),
             plc_platform: body.platform().as_str(),
+            string_encoding: utf8_only(body.string_encoding()),
         },
         recipe: RecipeFields {
             reference_number: body.reference_number().as_str(),
@@ -203,6 +208,13 @@ pub fn write_scoped(body: &ScopeBody, facts: &ScopeFacts) -> Result<Vec<u8>, Exp
         parameters,
     };
     Ok(serde_json::to_vec_pretty(&scope_document)?)
+}
+
+/// Return the name of the encoding for `Utf8` and `None` for `Latin1`.
+///
+/// A `Latin1` document adds no byte for the encoding (ADR-0202 (j2)).
+fn utf8_only(encoding: StringEncoding) -> Option<&'static str> {
+    (encoding == StringEncoding::Utf8).then(|| encoding.as_str())
 }
 
 /// Build the fields of one parameter with its `name_en`.

@@ -366,7 +366,12 @@ impl ListParameters {
         let type_rows = tx.types().type_rows(scope.machine.id()).await?;
         let (rows, has_next) = cut_page(rows, size);
         let machine = &scope.machine;
-        let types = PlatformTypes::collect(machine.id(), machine.platform(), type_rows)?;
+        let types = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            type_rows,
+        )?;
         let trees = row_trees(&types, &rows);
         let values = read_row_values(tx.as_mut(), scope.detail.id, &rows).await?;
         drop(tx);
@@ -531,7 +536,12 @@ impl GetParameter {
         let machine = found.scope.machine;
         let rows = tx.types().type_rows(machine.id()).await?;
         drop(tx);
-        let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
+        let types = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            rows,
+        )?;
         let tree = TypeTree::resolve(found.parameter.plc_type, &types).ok();
         let type_text = type_text(&types, found.parameter.plc_type);
         let unit_path = unit_path_of(&machine, found.parameter.unit)?;
@@ -612,7 +622,12 @@ impl GetLimits {
         let machine = found.scope.machine;
         let rows = tx.types().type_rows(machine.id()).await?;
         drop(tx);
-        let types = PlatformTypes::collect(machine.id(), machine.platform(), rows)?;
+        let types = PlatformTypes::collect(
+            machine.id(),
+            machine.platform(),
+            machine.string_encoding(),
+            rows,
+        )?;
         let tree = TypeTree::resolve(found.parameter.plc_type, &types)?;
         Ok(LimitsView {
             detail: found.scope.detail,

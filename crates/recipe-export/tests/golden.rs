@@ -18,8 +18,8 @@ use recipe_domain::identity::Login;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, LeafPath, LiveUnits, Machine, MachineCode, MachineId,
     MemberName, PlatformTypes, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, S7Address, StoredMachine, StoredUnit, TypeMember, TypeName, TypeTrees, UnitId,
-    UnitPath,
+    RecordShape, S7Address, StoredMachine, StoredUnit, StringEncoding, TypeMember, TypeName,
+    TypeTrees, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, Parameter, ParameterId, ParameterKey, ParameterTag, ReferenceNumber, StoredLimit,
@@ -32,6 +32,9 @@ use rust_decimal::Decimal;
 use serde_json::Value;
 use time::{Date, Month, OffsetDateTime, UtcOffset};
 use uuid::Uuid;
+
+#[path = "golden_encoding/encoding.rs"]
+mod encoding;
 
 /// Directory of the golden files.
 const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/");
@@ -149,7 +152,8 @@ fn trees(platform: PlcPlatform) -> TypeTrees {
         ),
         array_row(platform, INT_ARRAY, INT, (1, 3)),
     ];
-    let catalog = PlatformTypes::collect(machine_id(), platform, rows).unwrap();
+    let catalog =
+        PlatformTypes::collect(machine_id(), platform, StringEncoding::Latin1, rows).unwrap();
     let ids = [INT, REAL, STRING_16, ZONE_TEMP, INT_ARRAY].map(type_id);
     TypeTrees::resolve(ids, &catalog)
 }
@@ -175,6 +179,7 @@ fn units(platform: PlcPlatform) -> LiveUnits {
         db_number: platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: None,
         units: ["U1", "U1.2"].map(unit).to_vec(),
     })
@@ -274,6 +279,7 @@ fn facts(
         content_sha256: body.sha256().unwrap(),
         names: names_of(parameters),
         has_rule_fault: false,
+        string_encoding: StringEncoding::Latin1,
     }
 }
 
@@ -507,7 +513,11 @@ fn scope_example() -> (ScopeBody, ScopeFacts) {
 /// The scope body and the facts of one unit of the example of `api.md` section 6.2.
 fn scope_example_of(unit_path: &str) -> (ScopeBody, ScopeFacts) {
     let (whole, document) = example();
-    let scope = ScopeBody::build(&whole, &UnitPath::parse(unit_path).unwrap());
+    let scope = ScopeBody::build(
+        &whole,
+        &UnitPath::parse(unit_path).unwrap(),
+        StringEncoding::Latin1,
+    );
     let scope_sha256 = scope.sha256().unwrap();
     let facts = ScopeFacts {
         document,
@@ -630,7 +640,8 @@ fn text_member<'a>(object: &'a Value, key: &str) -> &'a str {
 
 /// Rebuild the scope hashed body from a parsed v2 document by the rule of `api.md` section 6.4.
 ///
-/// The function sorts the arrays by the keys of section 6.3 and drops `name_en`.
+/// The function sorts the arrays by the keys of section 6.3 and drops `name_en`. It keeps
+/// `machine.string_encoding` only when the document holds it (ADR-0202 (j1), (k)).
 fn consumer_scope_body(doc: &Value) -> Value {
     let mut types = doc["types"].as_array().unwrap().clone();
     types.sort_by(|a, b| text_member(a, "id").cmp(text_member(b, "id")));
@@ -647,11 +658,15 @@ fn consumer_scope_body(doc: &Value) -> Value {
         let limits = object.get_mut("limits").unwrap().as_array_mut().unwrap();
         limits.sort_by(|a, b| text_member(a, "leaf_path").cmp(text_member(b, "leaf_path")));
     }
+    let mut machine = serde_json::json!({
+        "code": doc["machine"]["code"],
+        "plc_platform": doc["machine"]["plc_platform"],
+    });
+    if let Some(encoding) = doc["machine"].get("string_encoding") {
+        machine["string_encoding"] = encoding.clone();
+    }
     serde_json::json!({
-        "machine": {
-            "code": doc["machine"]["code"],
-            "plc_platform": doc["machine"]["plc_platform"],
-        },
+        "machine": machine,
         "recipe": { "reference_number": doc["recipe"]["reference_number"] },
         "version": { "number": doc["version"]["number"] },
         "scope": doc["scope"],

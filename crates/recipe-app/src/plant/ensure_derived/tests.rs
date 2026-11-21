@@ -5,8 +5,8 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, DerivedTypeReason, MemberName, PlantError, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeMember,
-    TypeName, TypeTrees,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding,
+    TypeExpr, TypeMember, TypeName, TypeTrees,
 };
 use recipe_domain::recipe::{
     ArrayShape, Draft, RebindRequest, StoredDraft, StoredParameter, StoredValue, VersionState,
@@ -37,6 +37,7 @@ fn working_set(rows: Vec<PlcType>, platform: PlcPlatform) -> DerivedTypes {
     DerivedTypes::new(
         mid(1),
         platform,
+        StringEncoding::Latin1,
         rows,
         audit_context(&actor(Role::ProcessEngineer), &meta()),
     )
@@ -353,7 +354,9 @@ async fn rebind_shape(fixture: &Fixture) -> ArrayShape {
     }
     let mut tx = fixture.store.begin_memory(Isolation::ReadOnly).unwrap();
     let rows = tx.types().type_rows(mid(1)).await.unwrap();
-    let platform_types = PlatformTypes::collect(mid(1), PlcPlatform::TwinCat3, rows).unwrap();
+    let platform_types =
+        PlatformTypes::collect(mid(1), PlcPlatform::TwinCat3, StringEncoding::Latin1, rows)
+            .unwrap();
     let trees = TypeTrees::resolve([tid(901), tid(902), tid(903)], &platform_types);
     let parameter = StoredParameter {
         plc_type: tid(903),
@@ -367,6 +370,7 @@ async fn rebind_shape(fixture: &Fixture) -> ArrayShape {
         reference: reference("R-100"),
         machine: mid(1),
         platform: PlcPlatform::TwinCat3,
+        string_encoding: StringEncoding::Latin1,
         version: vid(1),
         number: 1,
         state: VersionState::LiveDraft,

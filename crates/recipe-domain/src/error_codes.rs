@@ -76,6 +76,10 @@ impl ErrorCode {
     pub const PLT_051: Self = Self::new("E-PLT-051");
     /// E-PLT-052, `PlantError::RevisionUnchanged`.
     pub const PLT_052: Self = Self::new("E-PLT-052");
+    /// E-PLT-053, `PlantError::StringEncodingNotOnPlatform`.
+    pub const PLT_053: Self = Self::new("E-PLT-053");
+    /// E-PLT-054, `PlantError::StringEncodingFrozen`.
+    pub const PLT_054: Self = Self::new("E-PLT-054");
 
     /// E-RCP-001, `RecipeError::DuplicateReference`.
     pub const RCP_001: Self = Self::new("E-RCP-001");
@@ -375,6 +379,8 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::PLT_050,
     ErrorCode::PLT_051,
     ErrorCode::PLT_052,
+    ErrorCode::PLT_053,
+    ErrorCode::PLT_054,
     ErrorCode::RCP_001,
     ErrorCode::RCP_002,
     ErrorCode::RCP_003,

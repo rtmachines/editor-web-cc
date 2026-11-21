@@ -59,6 +59,7 @@ impl TypeTree {
                 });
         Ok(Some(Self {
             platform: self.platform,
+            string_encoding: self.string_encoding,
             root,
             leaf_count,
             depth,

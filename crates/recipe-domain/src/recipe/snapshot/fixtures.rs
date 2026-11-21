@@ -13,8 +13,8 @@ use crate::plant::fixtures::{
 };
 use crate::plant::{
     LeafPath, LiveUnits, Machine, MachineCode, MachineId, MemberName, PlcPlatform, PlcType,
-    PlcTypeRecord, Primitive, RecordShape, StoredMachine, StoredUnit, TypeMember, TypeName,
-    TypeTrees, UnitId,
+    PlcTypeRecord, Primitive, RecordShape, StoredMachine, StoredUnit, StringEncoding, TypeMember,
+    TypeName, TypeTrees, UnitId,
 };
 use crate::recipe::draft::support::{stored_parameter, tag};
 use crate::recipe::{
@@ -148,6 +148,7 @@ fn units_of(owner: MachineId, is_machine_archived: bool, shift: u128) -> LiveUni
         db_number: PLATFORM
             .max_data_block()
             .map(|_| crate::plant::DataBlockNumber::parse("1").unwrap()),
+        string_encoding: StringEncoding::Latin1,
         archived_at: is_machine_archived.then(|| at(9)),
         units: vec![
             unit(LIVE_UNIT, "U1", false),

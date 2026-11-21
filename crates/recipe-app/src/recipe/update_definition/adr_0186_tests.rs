@@ -26,7 +26,10 @@ fn draft_with_speed(platform: PlcPlatform, speed: StoredParameter) -> Fixture {
         platform,
         (970, "PID_Compact", 1),
         None,
-        &[("a", primitive_id(Primitive::Int))],
+        &[
+            ("a", primitive_id(Primitive::Int)),
+            ("b", primitive_id(Primitive::Int)),
+        ],
     );
     fixture.store.seed_type(&row);
     fixture
@@ -35,7 +38,7 @@ fn draft_with_speed(platform: PlcPlatform, speed: StoredParameter) -> Fixture {
 fn pid_request() -> UpdateParameterDefinitionInput {
     with_retype(
         with_type(speed_request(), "PID_Compact@1"),
-        "{\"a\":1}",
+        "{\"a\":1,\"b\":2}",
         Vec::new(),
     )
 }
@@ -83,7 +86,7 @@ async fn adr_0186_update_definition_renames_a_parameter_that_keeps_a_stored_siem
             s7_address: (platform == PlcPlatform::S7_300)
                 .then(|| S7Address::parse("DB1.DBB0").unwrap()),
             plc_type: tid(970),
-            value: StoredValue::from(json!({"a": 1})),
+            value: StoredValue::from(json!({"a": 1, "b": 2})),
             limits: Vec::new(),
             ..parameter_on(platform, 1, "SPEED", uid(101), 0)
         };

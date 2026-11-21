@@ -3,10 +3,11 @@
 //! The tests use the helpers of `recipe_tests`.
 
 use recipe_domain::plant::{MemberName, Primitive};
-use recipe_domain::recipe::{Expected, RecipeError};
+use recipe_domain::recipe::{Expected, ParameterValue, RecipeError};
 
 use super::recipe_tests::{leaf, message, tag};
 use crate::i18n::{Bundles, Lang};
+use crate::pages::parameters::tree_kit::string_tree;
 
 /// An expected form with its English and its Polish phrase.
 type Phrase = (Expected, &'static str, &'static str);
@@ -59,9 +60,19 @@ fn shape_phrases() -> Vec<Phrase> {
             "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 bez znaku U+0000",
         ),
         (
+            Expected::WstringIec { length: 10 },
+            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF",
+            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 od U+0001 do U+D7FF i od U+E000 do U+FFFF",
+        ),
+        (
             Expected::String { length: 20 },
             "a string of at most 20 characters from Latin-1 without U+0000",
             "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znaku U+0000",
+        ),
+        (
+            Expected::StringUtf8 { length: 20 },
+            "a string of at most 20 UTF-8 bytes without U+0000",
+            "tekst o najwy\u{17c}ej 20 bajtach UTF-8 bez znaku U+0000",
         ),
         (
             Expected::Char { max: 0xFFFF },
@@ -181,7 +192,7 @@ fn recipe_each_expected_form_gives_its_phrase_in_both_languages() {
 
 #[test]
 fn recipe_the_expected_forms_cover_each_variant() {
-    assert_eq!(expected_cases().len(), 23);
+    assert_eq!(expected_cases().len(), 25);
 }
 
 /// The message of `E-RCP-005` for `expected` in `lang`.
@@ -228,4 +239,34 @@ fn adr_0180_the_polish_message_of_a_refused_wstring_names_the_length_and_the_ran
     assert!(text.contains("10"), "{text}");
     assert!(text.contains("U+0001"), "{text}");
     assert!(text.contains("U+CFFF"), "{text}");
+}
+
+/// The message of `E-RCP-005` for a value text that the domain refuses on a `WSTRING(10)` of the
+/// TwinCAT kit, in `lang`.
+fn refused_value_message(json: &str, lang: Lang) -> String {
+    let fault = ParameterValue::parse(json, &string_tree(Primitive::Wstring, 10)).unwrap_err();
+    let expected = fault.expected().unwrap().clone();
+    shape_message(expected, lang)
+}
+
+#[test]
+fn adr_0201_value_form_names_the_two_ranges() {
+    let en = refused_value_message("\"A\u{1F600}\"", Lang::En);
+    for part in ["10", "U+0001 to U+D7FF", "U+E000 to U+FFFF"] {
+        assert!(en.contains(part), "{part}: {en}");
+    }
+    let pl = refused_value_message("\"A\u{1F600}\"", Lang::Pl);
+    for part in ["10", "U+0001 do U+D7FF", "U+E000 do U+FFFF"] {
+        assert!(pl.contains(part), "{part}: {pl}");
+    }
+}
+
+#[test]
+fn adr_0202_expected_string_utf8_names_the_length_in_bytes() {
+    let en = shape_message(Expected::StringUtf8 { length: 4 }, Lang::En);
+    assert!(en.contains('4'), "{en}");
+    assert!(en.contains("bytes"), "{en}");
+    let pl = shape_message(Expected::StringUtf8 { length: 4 }, Lang::Pl);
+    assert!(pl.contains('4'), "{pl}");
+    assert!(pl.contains("bajt"), "{pl}");
 }

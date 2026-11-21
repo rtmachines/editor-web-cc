@@ -15,7 +15,7 @@ use crate::pages::{machines, types, units};
 use crate::test_support::{Fixture, get_with, post_fields};
 
 /// The number of the routes of the machine, unit, and type pages (`api.md` sections 2.2 and 2.3).
-const PLANT_ROUTES: usize = 22;
+const PLANT_ROUTES: usize = 23;
 
 /// Return the matrix rows of the three areas, each with the answer of the six principals.
 fn area_rows() -> Vec<(Endpoint, [Want; 6])> {
@@ -64,8 +64,8 @@ fn plant_access_the_area_rows_of_the_matrix_hold_every_route_of_the_three_areas(
 const FORM_ROUTES: [(&str, &str, &str, &str); 6] = [
     (
         "/machines",
-        "code=&name=&plc_platform=&main_unit_name=",
-        "code=M50&name=A&plc_platform=S7-1500&main_unit_name=B&extra=1",
+        "code=&name=&plc_platform=&string_encoding=Latin1&main_unit_name=",
+        "code=M50&name=A&plc_platform=S7-1500&string_encoding=Latin1&main_unit_name=B&extra=1",
         "CreateMachine",
     ),
     (
@@ -300,7 +300,7 @@ async fn plant_access_a_process_engineer_with_a_bad_field_still_gets_the_lines()
 #[tokio::test]
 async fn plant_access_a_forbidden_answer_records_one_forbidden_event() {
     let rows = forbidden_rows();
-    assert_eq!(rows.len(), 14, "the write routes of the three areas");
+    assert_eq!(rows.len(), 15, "the write routes of the three areas");
     for endpoint in rows {
         let (fixture, session) = world(Principal::Operator).await;
         let session = session.unwrap();

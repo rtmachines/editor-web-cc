@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use recipe_app::memory::seed_type_id;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, UnitId,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding, UnitId,
 };
 use recipe_domain::text::Text;
 use uuid::Uuid;
@@ -127,6 +127,7 @@ pub(super) fn seed_machine_on(
         platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (
             unit_id(0x7357_0f01_0000_0000_0000_0000_0000_0000 | u128::from(number)),
             Text::parse("Infeed").unwrap(),

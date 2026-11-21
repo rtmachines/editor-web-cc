@@ -7,7 +7,7 @@ use crate::export::test_support::{
     INT, LABEL_BOX, STRING_8, STRING_16, STRING_ARRAY, ZONE_TEMP, trees,
 };
 use crate::export::{ExportHeader, HashedBody, Sha256};
-use crate::plant::{MachineCode, PlcPlatform, S7Address, UnitPath};
+use crate::plant::{MachineCode, PlcPlatform, S7Address, StringEncoding, UnitPath};
 use crate::recipe::{Parameter, ParameterKey, ReferenceNumber};
 
 const PLATFORM: PlcPlatform = PlcPlatform::S7_300;
@@ -71,7 +71,7 @@ fn whole() -> HashedBody {
 }
 
 fn scope_of(unit: &str) -> ScopeBody {
-    ScopeBody::build(&whole(), &path(unit))
+    ScopeBody::build(&whole(), &path(unit), StringEncoding::Latin1)
 }
 
 fn json_of(body: &ScopeBody) -> Value {
@@ -318,4 +318,47 @@ fn hash_of_the_scope_differs_from_the_hash_of_the_whole_body_and_of_other_scopes
         scope_of("U1").sha256().unwrap(),
         scope_of("U1.2").sha256().unwrap()
     );
+}
+
+/// The canonical form of the scope `U1.2` for a `Utf8` machine: the field sits after `plc_platform`.
+fn expected_utf8_canonical_text() -> String {
+    expected_canonical_text().replacen(
+        r#""plc_platform":"S7_300"}"#,
+        r#""plc_platform":"S7_300","string_encoding":"Utf8"}"#,
+        1,
+    )
+}
+
+#[test]
+fn adr_0202_scope_body_holds_utf8_only() {
+    let whole = whole();
+    let unit = path("U1.2");
+    let utf8 = ScopeBody::build(&whole, &unit, StringEncoding::Utf8);
+    let latin1 = ScopeBody::build(&whole, &unit, StringEncoding::Latin1);
+    assert_eq!(
+        utf8.canonical_text().unwrap(),
+        expected_utf8_canonical_text()
+    );
+    assert_eq!(latin1.canonical_text().unwrap(), expected_canonical_text());
+    assert_eq!(
+        json_of(&utf8)["machine"],
+        json!({ "code": "M12", "plc_platform": "S7_300", "string_encoding": "Utf8" })
+    );
+    assert_eq!(
+        json_of(&latin1)["machine"],
+        json!({ "code": "M12", "plc_platform": "S7_300" })
+    );
+    assert_ne!(utf8.sha256().unwrap(), latin1.sha256().unwrap());
+}
+
+#[test]
+fn adr_0202_v1_body_has_no_encoding() {
+    let whole = whole();
+    let text = whole.canonical_text().unwrap();
+    assert!(!text.contains("string_encoding"), "{text}");
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(key_set(&value["machine"]), ["code", "plc_platform"]);
+    // A scope body for a `Utf8` machine leaves the v1 body of the same rows as it was.
+    let _ = ScopeBody::build(&whole, &path("U1"), StringEncoding::Utf8);
+    assert_eq!(whole.canonical_text().unwrap(), text);
 }

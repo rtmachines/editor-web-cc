@@ -113,6 +113,7 @@ impl MemoryState {
             name: row.name.clone(),
             platform: row.platform,
             db_number: row.db_number,
+            string_encoding: row.string_encoding,
             archived_at: row.archived_at,
             units,
         })

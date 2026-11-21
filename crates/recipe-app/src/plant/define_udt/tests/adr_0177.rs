@@ -47,7 +47,11 @@ async fn adr_0177_a_member_array_of_an_array_on_codesys_iec_succeeds() {
     let output = run(
         &fixture,
         Role::ProcessEngineer,
-        input(DefineUdtMode::New, "ST_Grid", &[("cells", NESTED_BOOL)]),
+        input(
+            DefineUdtMode::New,
+            "ST_Grid",
+            &[("cells", NESTED_BOOL), ("count", "INT")],
+        ),
     )
     .await
     .unwrap();

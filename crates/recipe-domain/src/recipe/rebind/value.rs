@@ -154,10 +154,10 @@ fn new_leaf(
         entries.push(RecipeError::RebindNeedsValue { tag, leaf });
         return Value::Null;
     };
-    let platform = input.new_tree.platform();
+    let machine = (input.new_tree.platform(), input.new_tree.string_encoding());
     let converted = match given {
-        MemberValue::Json(value) => request_leaf(value, node, platform),
-        MemberValue::Text(text) => request_text(text, node, platform),
+        MemberValue::Json(value) => request_leaf(value, node, machine),
+        MemberValue::Text(text) => request_text(text, node, machine),
     };
     match converted {
         Ok(value) => value,

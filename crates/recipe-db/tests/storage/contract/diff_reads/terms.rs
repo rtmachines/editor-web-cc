@@ -4,7 +4,9 @@
 //! gives a flag or a count that differs from the table of the case and from the domain diff
 //! (ADR-0050, Risks).
 
-use recipe_domain::plant::{Machine, PlcPlatform, PlcTypeId, Primitive, S7Address, StringKind};
+use recipe_domain::plant::{
+    Machine, PlcPlatform, PlcTypeId, Primitive, S7Address, StringEncoding, StringKind,
+};
 use recipe_domain::recipe::{Ordinal, ParameterTag, StoredParameter};
 use serde_json::json;
 
@@ -113,6 +115,7 @@ async fn s7_plant(h: &dyn Harness, n: u128, code_text: &str) -> Plant {
         name("Press"),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit, name("Main unit")),
     )
     .unwrap();

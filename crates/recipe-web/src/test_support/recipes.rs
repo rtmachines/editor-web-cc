@@ -34,6 +34,7 @@ pub(crate) mod large;
 mod parameters;
 pub(crate) mod platform_range_world;
 mod settings;
+pub(crate) mod utf8_world;
 
 use std::collections::BTreeSet;
 
@@ -41,8 +42,8 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, MemberName, PlcPlatform,
-    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringKind, StringLength,
-    TypeMember, TypeName, UnitId,
+    PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding, StringKind,
+    StringLength, TypeMember, TypeName, UnitId,
 };
 use recipe_domain::recipe::{
     Recipe, RecipeId, RecipeVersionId, ReferenceNumber, StoredRecipe, StoredVersionHeader,
@@ -167,6 +168,7 @@ fn m20_machine() -> Machine {
         text("Packing line"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (UnitId::from(M20_U1_ID), text("Infeed")),
     )
     .unwrap();

@@ -17,6 +17,7 @@ use serde::Deserialize;
 use super::commands::RenameForm;
 use super::connection::mode_key;
 use super::data_block_form::DataBlockForm;
+use super::string_encoding_form::StringEncodingForm;
 use super::tree::{Scope, UnitTree};
 use super::{platform_text, query_values};
 use crate::error::WebError;
@@ -119,6 +120,11 @@ struct MachinePage<'a> {
     /// The data block form. It is shown only for a live S7 machine and when
     /// `PageRequest::may_run` permits `SetMachineDataBlock` (ADR-0113).
     data_block_form: DataBlockForm,
+    /// The `STRING` encoding of the machine, `Latin1` or `Utf8`.
+    string_encoding: String,
+    /// The encoding form. It is shown only for a live `CodesysIec` or `TwinCat3` machine without a
+    /// version row, when `PageRequest::may_run` permits `SetMachineStringEncoding` (ADR-0202).
+    string_encoding_form: StringEncodingForm,
 }
 
 impl<'a> MachinePage<'a> {
@@ -144,6 +150,7 @@ impl<'a> MachinePage<'a> {
             .shown(allows(Operation::RenameMachine)?);
         let number = machine.db_number().map(|number| number.value().to_string());
         let data_block_form = data_block_form(machine, request, number.as_deref(), live)?;
+        let string_encoding_form = string_encoding_form(machine, request, view.has_version, live)?;
         Ok(Self {
             layout,
             t,
@@ -175,6 +182,8 @@ impl<'a> MachinePage<'a> {
             archive_action: format!("/machines/{code}/archive"),
             form,
             data_block_form,
+            string_encoding: machine.string_encoding().to_string(),
+            string_encoding_form,
         })
     }
 }
@@ -195,6 +204,27 @@ fn data_block_form(
         request.csrf_token(),
     )
     .with_max(machine.platform().max_data_block())
+    .shown(shown))
+}
+
+/// Build the encoding form of `machine`. It is shown only for a live machine of an IEC platform
+/// without a version row, and when `PageRequest::may_run` permits `SetMachineStringEncoding`
+/// (ADR-0113, ADR-0202).
+fn string_encoding_form(
+    machine: &Machine,
+    request: &PageRequest,
+    has_version: bool,
+    live: bool,
+) -> Result<StringEncodingForm, WebError> {
+    let shown = live
+        && !machine.platform().is_s7()
+        && !has_version
+        && request.may_run(Operation::SetMachineStringEncoding)?;
+    Ok(StringEncodingForm::new(
+        machine.code(),
+        machine.string_encoding().to_string(),
+        request.csrf_token(),
+    )
     .shown(shown))
 }
 

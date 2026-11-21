@@ -1,13 +1,13 @@
 use rust_decimal::Decimal;
 
+use super::precision_tests::stored_fault;
 use crate::plant::fixtures::id;
 use crate::plant::{LeafPath, PlcPlatform, Primitive, RuleSet, TypeTree};
 use crate::recipe::PrecisionField;
-use crate::recipe::limit::fault::LimitFaults;
 use crate::recipe::limit::{LimitFault, LimitInput, ProcessLimit, StoredLimit};
 use crate::recipe::value::test_support::{
-    BOOL, BOUNDARIES, CHAR, INT, LREAL, REAL, ST_ZONE, TIME, integer_tree, primitive_tree,
-    time_tree_on, zone_tree,
+    BOOL, BOUNDARIES, CHAR, INT, LREAL, ST_ZONE, TIME, integer_tree, primitive_tree, time_tree_on,
+    zone_tree,
 };
 
 fn input(path: &str, min: Option<&str>, max: Option<&str>, max_length: Option<u16>) -> LimitInput {
@@ -19,15 +19,20 @@ fn input(path: &str, min: Option<&str>, max: Option<&str>, max_length: Option<u1
     }
 }
 
-fn range(path: &str, min: Option<&str>, max: Option<&str>) -> LimitInput {
+pub(super) fn range(path: &str, min: Option<&str>, max: Option<&str>) -> LimitInput {
     input(path, min, max, None)
 }
 
-fn parse(row: &LimitInput, tree: &TypeTree) -> Result<ProcessLimit, LimitFault> {
+pub(super) fn parse(row: &LimitInput, tree: &TypeTree) -> Result<ProcessLimit, LimitFault> {
     ProcessLimit::parse(row, tree)
 }
 
-fn stored(path: &str, min: Option<i64>, max: Option<i64>, max_length: Option<u16>) -> StoredLimit {
+pub(super) fn stored(
+    path: &str,
+    min: Option<i64>,
+    max: Option<i64>,
+    max_length: Option<u16>,
+) -> StoredLimit {
     StoredLimit {
         leaf_path: LeafPath::parse(path).unwrap(),
         min: min.map(Decimal::from),
@@ -36,7 +41,7 @@ fn stored(path: &str, min: Option<i64>, max: Option<i64>, max_length: Option<u16
     }
 }
 
-fn dec(value: i64) -> Option<Decimal> {
+pub(super) fn dec(value: i64) -> Option<Decimal> {
     Some(Decimal::from(value))
 }
 
@@ -344,243 +349,6 @@ fn bound_text_with_an_underscore_or_a_plus_sign_is_outside_the_type_range() {
     }
 }
 
-/// A stored row with decimal bounds on the whole value.
-fn stored_decimal(min: Option<&str>, max: Option<&str>) -> StoredLimit {
-    StoredLimit {
-        leaf_path: LeafPath::parse("").unwrap(),
-        min: min.map(|text| text.parse().unwrap()),
-        max: max.map(|text| text.parse().unwrap()),
-        max_length: None,
-    }
-}
-
-/// The fault that `from_stored` gives, or `None` when the row passes.
-fn stored_fault(row: &StoredLimit, tree: &TypeTree, rules: RuleSet) -> Option<LimitFault> {
-    ProcessLimit::from_stored(row, tree, rules).err()
-}
-
-fn precision(primitive: Primitive, max_digits: u8, field: PrecisionField) -> LimitFault {
-    LimitFault::PrecisionExceeded {
-        leaf: LeafPath::parse("").unwrap(),
-        field,
-        type_name: primitive,
-        max_digits,
-    }
-}
-
-#[test]
-fn adr_0117_a_request_real_max_with_8_digits_gives_a_precision_fault() {
-    let tree = primitive_tree(REAL);
-    let fault = parse(&range("", None, Some("100.00001")), &tree).unwrap_err();
-    assert_eq!(
-        fault,
-        precision(Primitive::Real, 7, PrecisionField::LimitMax)
-    );
-}
-
-#[test]
-fn adr_0117_a_request_real_min_with_8_digits_gives_a_precision_fault() {
-    let tree = primitive_tree(REAL);
-    let fault = parse(&range("", Some("-100.00001"), None), &tree).unwrap_err();
-    assert_eq!(
-        fault,
-        precision(Primitive::Real, 7, PrecisionField::LimitMin)
-    );
-}
-
-/// The faults that `parse_all` gives, or an empty list when the row passes.
-fn all_faults(row: &LimitInput, tree: &TypeTree) -> Vec<LimitFault> {
-    ProcessLimit::parse_all(row, tree)
-        .err()
-        .map(LimitFaults::into_vec)
-        .unwrap_or_default()
-}
-
-#[test]
-fn adr_0117_a_request_real_row_with_8_digits_in_both_bounds_gives_two_precision_faults() {
-    let tree = primitive_tree(REAL);
-    let row = range("", Some("-100.00001"), Some("100.00001"));
-    assert_eq!(
-        all_faults(&row, &tree),
-        [
-            precision(Primitive::Real, 7, PrecisionField::LimitMin),
-            precision(Primitive::Real, 7, PrecisionField::LimitMax),
-        ]
-    );
-    assert_eq!(
-        parse(&row, &tree).unwrap_err(),
-        precision(Primitive::Real, 7, PrecisionField::LimitMin)
-    );
-}
-
-#[test]
-fn adr_0117_a_request_lreal_row_with_16_digits_in_both_bounds_gives_two_precision_faults() {
-    let tree = primitive_tree(LREAL);
-    let row = range("", Some("-0.1234567890123456"), Some("0.1234567890123456"));
-    assert_eq!(
-        all_faults(&row, &tree),
-        [
-            precision(Primitive::Lreal, 15, PrecisionField::LimitMin),
-            precision(Primitive::Lreal, 15, PrecisionField::LimitMax),
-        ]
-    );
-}
-
-#[test]
-fn adr_0117_a_request_row_with_one_bad_bound_gives_one_precision_fault() {
-    let tree = primitive_tree(REAL);
-    let bad_min = range("", Some("-100.00001"), Some("100.0001"));
-    assert_eq!(
-        all_faults(&bad_min, &tree),
-        [precision(Primitive::Real, 7, PrecisionField::LimitMin)]
-    );
-    let bad_max = range("", Some("-100.0001"), Some("100.00001"));
-    assert_eq!(
-        all_faults(&bad_max, &tree),
-        [precision(Primitive::Real, 7, PrecisionField::LimitMax)]
-    );
-}
-
-#[test]
-fn adr_0117_a_bound_outside_the_type_range_hides_the_precision_faults() {
-    let tree = primitive_tree(REAL);
-    let row = range("", Some("-1.00000001e40"), Some("100.00001"));
-    let faults = all_faults(&row, &tree);
-    assert_eq!(faults.len(), 1, "{faults:?}");
-    assert!(matches!(faults[0], LimitFault::OutsideTypeRange { .. }));
-}
-
-#[test]
-fn adr_0117_a_request_real_bound_with_7_digits_passes() {
-    let tree = primitive_tree(REAL);
-    let limit = parse(&range("", Some("-100.0001"), Some("1234.567")), &tree).unwrap();
-    assert_eq!(limit.min(), Some("-100.0001".parse().unwrap()));
-    assert_eq!(limit.max(), Some("1234.567".parse().unwrap()));
-}
-
-#[test]
-fn adr_0117_a_request_lreal_bound_with_16_digits_gives_a_precision_fault() {
-    let tree = primitive_tree(LREAL);
-    for (row, field) in [
-        (
-            range("", None, Some("0.1234567890123456")),
-            PrecisionField::LimitMax,
-        ),
-        (
-            range("", Some("-0.1234567890123456"), None),
-            PrecisionField::LimitMin,
-        ),
-    ] {
-        let fault = parse(&row, &tree).unwrap_err();
-        assert_eq!(fault, precision(Primitive::Lreal, 15, field));
-    }
-}
-
-#[test]
-fn adr_0117_a_request_lreal_bound_with_15_digits_passes() {
-    let tree = primitive_tree(LREAL);
-    let limit = parse(&range("", None, Some("0.123456789012345")), &tree).unwrap();
-    assert_eq!(limit.min(), None);
-    assert_eq!(limit.max(), Some("0.123456789012345".parse().unwrap()));
-}
-
-#[test]
-fn adr_0117_a_bound_outside_the_type_range_stays_outside_type_range() {
-    let tree = primitive_tree(REAL);
-    let fault = parse(&range("", None, Some("1e40")), &tree).unwrap_err();
-    assert!(matches!(fault, LimitFault::OutsideTypeRange { .. }));
-}
-
-#[test]
-fn adr_0117_a_stored_real_min_with_8_digits_fails_in_the_current_set() {
-    let tree = primitive_tree(REAL);
-    let row = stored_decimal(Some("-100.00001"), None);
-    let fault = stored_fault(&row, &tree, RuleSet::Current);
-    assert_eq!(
-        fault,
-        Some(precision(Primitive::Real, 7, PrecisionField::LimitMin))
-    );
-}
-
-#[test]
-fn adr_0117_a_stored_real_max_with_8_digits_fails_in_the_current_set() {
-    let tree = primitive_tree(REAL);
-    let row = stored_decimal(None, Some("100.00001"));
-    let fault = stored_fault(&row, &tree, RuleSet::Current);
-    assert_eq!(
-        fault,
-        Some(precision(Primitive::Real, 7, PrecisionField::LimitMax))
-    );
-}
-
-#[test]
-fn adr_0120_a_stored_real_bound_with_8_digits_passes_in_the_earlier_set() {
-    let tree = primitive_tree(REAL);
-    let row = stored_decimal(Some("-100.00001"), Some("100.00001"));
-    assert_eq!(stored_fault(&row, &tree, RuleSet::Earlier), None);
-    assert!(ProcessLimit::try_from((&row, &tree)).is_ok());
-}
-
-#[test]
-fn adr_0117_a_stored_lreal_bound_with_16_digits_fails_only_in_the_current_set() {
-    let tree = primitive_tree(LREAL);
-    for (row, field) in [
-        (
-            stored_decimal(None, Some("0.1234567890123456")),
-            PrecisionField::LimitMax,
-        ),
-        (
-            stored_decimal(Some("-0.1234567890123456"), None),
-            PrecisionField::LimitMin,
-        ),
-    ] {
-        let fault = stored_fault(&row, &tree, RuleSet::Current);
-        assert_eq!(fault, Some(precision(Primitive::Lreal, 15, field)));
-        assert_eq!(stored_fault(&row, &tree, RuleSet::Earlier), None);
-    }
-}
-
-#[test]
-fn adr_0117_the_earlier_set_keeps_the_order_check_of_the_bounds() {
-    let tree = primitive_tree(REAL);
-    let row = stored_decimal(Some("100.00002"), Some("100.00001"));
-    let fault = stored_fault(&row, &tree, RuleSet::Earlier);
-    assert!(matches!(fault, Some(LimitFault::MinGreaterThanMax { .. })));
-}
-
-#[test]
-fn real_bound_with_an_exact_decimal_value_gives_the_bound() {
-    let tree = primitive_tree(REAL);
-    let zeros = format!("1.{}", "0".repeat(29));
-    let rows: [(&str, &str); 5] = [
-        ("150e-29", "0.0000000000000000000000000015"),
-        ("10e-29", "0.0000000000000000000000000001"),
-        ("100e-30", "0.0000000000000000000000000001"),
-        (zeros.as_str(), "1"),
-        ("0e99999999999999999999", "0"),
-    ];
-    for (text, expected) in rows {
-        let limit = parse(&range("", None, Some(text)), &tree).unwrap();
-        // `Decimal` equality ignores the scale, so compare the canonical text.
-        let canonical_text = limit.max().map(|bound| bound.to_string());
-        assert_eq!(canonical_text.as_deref(), Some(expected), "bound {text}");
-    }
-}
-
-#[test]
-fn real_bound_beyond_the_scale_or_range_of_a_decimal_is_outside_the_type_range() {
-    let tree = primitive_tree(REAL);
-    for text in ["1e-29", "1e29"] {
-        let refused = LimitFault::OutsideTypeRange {
-            leaf: LeafPath::whole(),
-        };
-        let min = parse(&range("", Some(text), None), &tree).unwrap_err();
-        let max = parse(&range("", None, Some(text)), &tree).unwrap_err();
-        assert_eq!(min, refused, "min {text}");
-        assert_eq!(max, refused, "max {text}");
-    }
-}
-
 const S5TIME_STEP_BREAKER: i64 = 15;
 const LDATE_PART_OF_DAY: i64 = 1;
 const S5TIME_VALID_MAX: i64 = 10_000;
@@ -775,4 +543,29 @@ fn reliability_4_4_a_bound_text_of_a_time_type_with_a_fraction_is_its_decimal_te
         bound_text(Primitive::Int, platform, Decimal::from(1500)),
         "1500"
     );
+}
+
+// ADR-0117: NaN and infinity are no bound of a limit. The text of a bound is decimal text. A
+// refused bound is `LimitFault::OutsideTypeRange`, which is `E-RCP-006`.
+#[test]
+fn adr_0117_nan_and_infinity_fail() {
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::S7_1500] {
+        for primitive in [Primitive::Real, Primitive::Lreal] {
+            let tree = time_tree_on(platform, primitive);
+            let context = format!("{primitive} on {platform:?}");
+            assert!(
+                parse(&range("", Some("1.5"), Some("2.5")), &tree).is_ok(),
+                "{context}"
+            );
+            for text in ["NaN", "inf", "-inf", "Infinity", "-Infinity"] {
+                for row in [range("", Some(text), None), range("", None, Some(text))] {
+                    let fault = parse(&row, &tree).unwrap_err();
+                    assert!(
+                        matches!(fault, LimitFault::OutsideTypeRange { .. }),
+                        "{context} {text}: {fault:?}"
+                    );
+                }
+            }
+        }
+    }
 }

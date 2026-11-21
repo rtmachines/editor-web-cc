@@ -10,7 +10,7 @@ use axum::http::StatusCode;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, MemberName, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord,
-    Primitive, RecordShape, S7Address, TypeMember, TypeName, UnitId,
+    Primitive, RecordShape, S7Address, StringEncoding, TypeMember, TypeName, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -30,10 +30,10 @@ const NOTICE_EN: &str = "The current rules refuse parts of this version. The exp
 /// The text of the notice in Polish.
 const NOTICE_PL: &str = "Aktualne reguły odrzucają części tej wersji. Plik eksportu oznacza, że tej wersji nie można załadować do PLC. Kody reguł: E-RCP-005.";
 /// The stored count at the end of the current `DATE` range, 2168-12-31.
-const CURRENT_DATE_END: i64 = 72_683;
+pub(super) const CURRENT_DATE_END: i64 = 72_683;
 
 /// Return the value of `aria-describedby` of the one export link in `html`.
-fn describedby_of_export_link(html: &str) -> Option<String> {
+pub(super) fn describedby_of_export_link(html: &str) -> Option<String> {
     let anchors: Vec<_> = tags(html)
         .into_iter()
         .filter(|tag| tag.name == "a" && !tag.closing)
@@ -209,6 +209,7 @@ fn seed_overlap_machine(world: &World) -> (MachineId, UnitId) {
         Text::parse("Byte line").unwrap(),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

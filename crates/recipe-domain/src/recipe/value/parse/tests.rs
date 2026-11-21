@@ -289,3 +289,81 @@ fn adr_0117_the_text_of_a_precision_fault_names_the_leaf_the_type_and_the_digit_
     assert!(text.contains(&Primitive::Real.to_string()), "{text}");
     assert!(text.contains("at most 7 digits"), "{text}");
 }
+
+/// The `REAL` and `LREAL` leaves on the two platform families that this test pins (ADR-0117).
+fn real_trees() -> Vec<(crate::plant::PlcPlatform, Primitive, TypeTree)> {
+    use crate::plant::PlcPlatform;
+    use crate::recipe::value::test_support::time_tree_on;
+    let mut trees = Vec::new();
+    for platform in [PlcPlatform::CodesysIec, PlcPlatform::S7_1500] {
+        for primitive in [Primitive::Real, Primitive::Lreal] {
+            trees.push((platform, primitive, time_tree_on(platform, primitive)));
+        }
+    }
+    trees
+}
+
+/// The texts that are not a number of `REAL` or `LREAL`, although IEEE 754 has such values.
+const NOT_FINITE_TEXTS: [&str; 5] = ["NaN", "inf", "-inf", "Infinity", "-Infinity"];
+
+// ADR-0117 and ADR-0115: NaN and infinity are no value of the domain. The JSON route reads only
+// a JSON number, and the form route reads only decimal text. Both refuse with `E-RCP-005`, which
+// is `ValueFault::Mismatch`.
+#[test]
+fn adr_0117_nan_and_infinity_fail() {
+    use crate::plant::LeafPath;
+    use crate::recipe::value::{LeafTexts, ValueFaults};
+
+    fn is_mismatch_at_root(fault: &ValueFault) -> bool {
+        matches!(fault, ValueFault::Mismatch { leaf, .. } if leaf.is_empty())
+    }
+
+    for (platform, primitive, tree) in real_trees() {
+        let context = format!("{primitive} on {platform:?}");
+        assert!(ParameterValue::parse("1.5", &tree).is_ok(), "{context}");
+        let texts = LeafTexts::parse(vec![(LeafPath::whole(), "1.5".to_owned())]).unwrap();
+        assert!(
+            ParameterValue::from_texts(&tree, &texts).is_ok(),
+            "{context}"
+        );
+        for text in NOT_FINITE_TEXTS {
+            let json_fault = fault(&format!("\"{text}\""), &tree);
+            assert!(is_mismatch_at_root(&json_fault), "{context} JSON {text}");
+            let texts = LeafTexts::parse(vec![(LeafPath::whole(), text.to_owned())]).unwrap();
+            let faults: ValueFaults = ParameterValue::from_texts(&tree, &texts).unwrap_err();
+            assert_eq!(faults.len(), 1, "{context} text {text}");
+            assert!(
+                faults.iter().all(is_mismatch_at_root),
+                "{context} text {text}"
+            );
+        }
+    }
+}
+
+// ADR-0209 (e) and (f): the first dimension is the outer JSON level and the last index changes
+// fastest. `ARRAY[1..2,1..3] OF INT` is 2 arrays of 3 elements, so the leaf `[2,1]` sits at the
+// JSON position `[1][0]`. A refusal is `ValueFault::Mismatch`, which becomes `E-RCP-005`.
+#[test]
+fn adr_0209_first_dimension_is_the_outer_json_level() {
+    use crate::plant::LeafPath;
+
+    let tree = int_array_tree(&[(1, 2), (1, 3)]);
+    let value = ParameterValue::parse("[[1,2,3],[4,5,6]]", &tree).unwrap();
+    let leaves = value.texts(&tree).unwrap();
+    let leaf = LeafPath::parse("[2,1]").unwrap();
+    let held = leaves.iter().find(|leaf_text| leaf_text.path == leaf);
+    assert_eq!(held.map(|leaf_text| leaf_text.text.as_str()), Some("4"));
+    let last = LeafPath::parse("[1,3]").unwrap();
+    let held = leaves.iter().find(|leaf_text| leaf_text.path == last);
+    assert_eq!(held.map(|leaf_text| leaf_text.text.as_str()), Some("3"));
+
+    // 3 arrays of 2 elements is the transposed shape. The outer level must hold 2 elements.
+    let fault = fault("[[1,2],[3,4],[5,6]]", &tree);
+    assert_eq!(
+        fault,
+        ValueFault::Mismatch {
+            leaf: LeafPath::whole(),
+            expected: Expected::ArrayCount { count: 2 },
+        }
+    );
+}

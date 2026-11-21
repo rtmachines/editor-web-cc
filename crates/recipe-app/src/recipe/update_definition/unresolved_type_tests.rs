@@ -1,6 +1,6 @@
 //! `UpdateParameterDefinition` replaces a stored type that does not resolve (ADR-0195 (q)).
 
-use recipe_domain::plant::{PlantError, PlatformTypes, PlcPlatform, TypeTree};
+use recipe_domain::plant::{PlantError, PlatformTypes, PlcPlatform, StringEncoding, TypeTree};
 use recipe_domain::recipe::StoredParameter;
 use serde_json::json;
 
@@ -18,7 +18,7 @@ const CYCLE_PARAMETER: u128 = 5;
 async fn a_retype_from_a_struct_cycle_commits_and_audits_the_old_value_under_the_empty_key() {
     let fixture = crate::memory::fixtures::scenarios::zone_draft();
     let rows = seed_struct_cycle(&fixture, (1, PLATFORM));
-    let types = PlatformTypes::collect(mid(1), PLATFORM, rows).unwrap();
+    let types = PlatformTypes::collect(mid(1), PLATFORM, StringEncoding::Latin1, rows).unwrap();
     assert!(matches!(
         TypeTree::resolve(tid(STRUCT_CYCLE_ROOT), &types).unwrap_err(),
         PlantError::TypeCycle { .. }

@@ -141,7 +141,12 @@ impl RebindTypeRevision {
         let mut open = OpenDraft::open(&self.ctx, target, MachineLock::Shared).await?;
         let machine = open.draft.machine();
         let rows = open.tx.types().type_rows(machine).await?;
-        let types = collect_stored_types(machine, open.draft.platform(), rows)?;
+        let types = collect_stored_types(
+            machine,
+            open.draft.platform(),
+            open.draft.string_encoding(),
+            rows,
+        )?;
         // A target without a row stays out of the trees, so the domain reports `TargetNotFound`.
         let known_to = types.get(input.to).map(|_| input.to);
         let trees = TypeTrees::resolve(
@@ -176,6 +181,12 @@ impl RebindTypeRevision {
 mod adr_0178_tests;
 #[cfg(test)]
 mod adr_0186_tests;
+#[cfg(test)]
+mod adr_0201_tests;
+#[cfg(test)]
+mod adr_0203_tests;
+#[cfg(test)]
+mod adr_0204_tests;
 #[cfg(test)]
 pub(super) mod fixtures;
 #[cfg(test)]

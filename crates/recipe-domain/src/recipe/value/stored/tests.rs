@@ -120,6 +120,13 @@ fn stored_text_with_nul_gives_a_fault_under_both_rule_sets() {
     let mut failures = Vec::new();
     for (name, tree, text, expected) in &rows {
         for rules in [RuleSet::Current, RuleSet::Earlier] {
+            // The test platform is TwinCAT. Its current set names the form of ADR-0201 (c).
+            let expected = match (expected, rules) {
+                (Expected::Wstring { length }, RuleSet::Current) => {
+                    &Expected::WstringIec { length: *length }
+                }
+                _ => expected,
+            };
             let stored = StoredValue::from(json!(text));
             let result = ParameterValue::from_stored(&stored, tree, rules);
             let got = result.as_ref().err().and_then(ValueFault::expected);

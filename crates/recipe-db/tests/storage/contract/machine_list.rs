@@ -4,7 +4,7 @@
 
 use recipe_app::error::StorageError;
 use recipe_app::ports::{MachineFilter, MachineSummary};
-use recipe_domain::plant::{Machine, PlcPlatform};
+use recipe_domain::plant::{Machine, PlcPlatform, StringEncoding};
 use recipe_domain::timestamp::Timestamp;
 use time::OffsetDateTime;
 
@@ -45,6 +45,7 @@ fn named(n: u128, code_text: &str, machine_name: &str) -> Machine {
         name(machine_name),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
     .unwrap()

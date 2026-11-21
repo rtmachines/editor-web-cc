@@ -162,3 +162,13 @@ fn error_mapping_database_rule_codes_are_defects() {
         assert!(!is_database_rule(ErrorCode::find(text).unwrap()), "{text}");
     }
 }
+
+#[test]
+fn adr_0202_string_encoding_codes_give_status_422_and_409() {
+    let platform = ErrorCode::find("E-PLT-053").unwrap();
+    assert_eq!(status_of(platform), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(!is_database_rule(platform));
+    let frozen = ErrorCode::find("E-PLT-054").unwrap();
+    assert_eq!(status_of(frozen), StatusCode::CONFLICT);
+    assert!(!is_database_rule(frozen));
+}

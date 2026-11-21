@@ -12,8 +12,8 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, Machine, MachineCode, MachineId, MemberName, PlatformTypes,
-    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringKind,
-    StringLength, TypeMember, TypeName, TypeTree, UnitId, UnitPath,
+    PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive, RecordShape, StringEncoding,
+    StringKind, StringLength, TypeMember, TypeName, TypeTree, UnitId, UnitPath,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, ParameterValue, Recipe, RecipeId,
@@ -89,7 +89,13 @@ fn seed_string_254(world: &World) {
 fn tree_of(world: &World, type_id: PlcTypeId) -> TypeTree {
     let state = world.fixture.store.state();
     let rows = vec![state.plc_type(type_id).cloned().unwrap()];
-    let types = PlatformTypes::collect(MachineId::from(M7_ID), PlcPlatform::S7_300, rows).unwrap();
+    let types = PlatformTypes::collect(
+        MachineId::from(M7_ID),
+        PlcPlatform::S7_300,
+        StringEncoding::Latin1,
+        rows,
+    )
+    .unwrap();
     TypeTree::resolve(type_id, &types).unwrap()
 }
 
@@ -232,6 +238,7 @@ fn seed_composite_machine(world: &World) -> UnitId {
         Text::parse("Composite line").unwrap(),
         PlcPlatform::S7_1500,
         Some(recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

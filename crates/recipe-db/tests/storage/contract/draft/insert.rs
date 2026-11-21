@@ -3,7 +3,7 @@
 use recipe_app::error::{PARAMETER_TAG_UNIQUE, StorageError};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::plant::{
-    DataBlockNumber, Machine, PlcPlatform, Primitive, S7Address, StringKind,
+    DataBlockNumber, Machine, PlcPlatform, Primitive, S7Address, StringEncoding, StringKind,
 };
 use recipe_domain::recipe::{
     LIMIT_ROWS_PER_VERSION, Ordinal, PARAMETERS_PER_VERSION, ParameterTag, StoredLimit,
@@ -320,6 +320,7 @@ async fn s7_300_draft(h: &dyn Harness, n: u128) -> Draft {
         name("Press"),
         PlcPlatform::S7_300,
         Some(DataBlockNumber::parse("10").unwrap()),
+        StringEncoding::Latin1,
         (unit_id(n.checked_mul(10).unwrap()), name("Main unit")),
     )
     .unwrap();

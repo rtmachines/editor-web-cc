@@ -24,6 +24,8 @@ pub const COVERED: &[&str] = &[
     "machine_platform_value",
     "machine_db_number_shape",
     "machine_db_number_range",
+    "machine_string_encoding_value",
+    "machine_string_encoding_platform",
     "machine_code_live_unique",
     "unit_pkey",
     "unit_path_format",
@@ -78,6 +80,26 @@ async fn insert_machine_with_number(
         .bind(db_number)
         .fetch_one(conn)
         .await
+}
+
+/// Insert a machine with an explicit `string_encoding`. Return its id.
+async fn insert_machine_with_encoding(
+    conn: &mut PgConnection,
+    code: &str,
+    platform: &str,
+    db_number: Option<i32>,
+    encoding: &str,
+) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar(
+        "INSERT INTO machine (code, name, plc_platform, db_number, string_encoding) \
+         VALUES ($1, 'Press', $2, $3, $4) RETURNING id",
+    )
+    .bind(code)
+    .bind(platform)
+    .bind(db_number)
+    .bind(encoding)
+    .fetch_one(conn)
+    .await
 }
 
 /// Set the archive time of a machine.
@@ -223,6 +245,42 @@ async fn machine_db_number_range_rejects_60000_on_s7_1200() {
         insert_machine_with_number(&mut conn, "M7108", "S7_1200", Some(60000), false).await;
 
     assert_constraint(result, CHECK_VIOLATION, "machine_db_number_range");
+}
+
+#[tokio::test]
+async fn adr_0202_unknown_string_encoding_fails() {
+    let mut conn = connection().await;
+
+    let result = insert_machine_with_encoding(&mut conn, "M7200", TWIN_CAT, None, "Utf16").await;
+
+    assert_constraint(result, CHECK_VIOLATION, "machine_string_encoding_value");
+}
+
+#[tokio::test]
+async fn adr_0202_utf8_on_s7_fails() {
+    let mut conn = connection().await;
+
+    for (code, platform, number) in [
+        ("M7201", "S7_300", 10),
+        ("M7202", "S7_1200", 10),
+        ("M7203", "S7_1500", 10),
+    ] {
+        let result =
+            insert_machine_with_encoding(&mut conn, code, platform, Some(number), "Utf8").await;
+
+        assert_constraint(result, CHECK_VIOLATION, "machine_string_encoding_platform");
+    }
+}
+
+#[tokio::test]
+async fn adr_0202_utf8_on_iec_inserts() {
+    let mut conn = connection().await;
+
+    for (code, platform) in [("M7204", "CodesysIec"), ("M7205", TWIN_CAT)] {
+        insert_machine_with_encoding(&mut conn, code, platform, None, "Utf8")
+            .await
+            .unwrap();
+    }
 }
 
 #[tokio::test]

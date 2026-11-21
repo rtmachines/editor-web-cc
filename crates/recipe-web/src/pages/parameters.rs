@@ -27,6 +27,7 @@ mod page;
 mod prepare;
 mod remove;
 mod reply;
+mod request_type;
 mod summary;
 mod table;
 mod translation_routes;
@@ -175,6 +176,10 @@ mod add_error_tests;
 mod add_s7_1500_tests;
 #[cfg(test)]
 mod add_tests;
+#[cfg(test)]
+mod adr_0202_tests;
+#[cfg(test)]
+mod adr_0206_tests;
 #[cfg(test)]
 mod conflict_tests;
 #[cfg(test)]

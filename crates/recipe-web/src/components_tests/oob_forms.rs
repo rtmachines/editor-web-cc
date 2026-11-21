@@ -12,10 +12,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// The forms that hold `hx-swap-oob`, as the template file of each form (design D7, table).
-const EXPECTED_FORM_FILES: [&str; 17] = [
+const EXPECTED_FORM_FILES: [&str; 19] = [
     "approve.html",
     "machine-connection.html",
     "machine-new.html",
+    "machine.html",
+    "machine.html",
     "machine.html",
     "machine.html",
     "parameter-form.html",
@@ -406,6 +408,11 @@ fn scan_template(path: &Path, templates: &Templates) -> (Vec<String>, Vec<String
         }
         let body = after.split_once("</form>").expect("form has no end").0;
         forms.push(file.to_owned());
+        // An empty form removes the encoding form after `E-PLT-054` (ADR-0202 (p)). It has no input,
+        // so it needs no submit button.
+        if body.is_empty() {
+            continue;
+        }
         faults.extend(check_form(file, body, templates));
     }
     (forms, faults)

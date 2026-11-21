@@ -3,7 +3,7 @@
 use rust_decimal::Decimal;
 use serde_json::json;
 
-use crate::plant::{MemberName, PlcPlatform, Primitive, TypeTree};
+use crate::plant::{MemberName, PlcPlatform, Primitive, StringEncoding, TypeTree};
 use crate::recipe::value::test_support::{
     BOOL, CHAR, INT, REAL, TIME, WCHAR, int_array_tree, primitive_tree, string_tree, wstring_tree,
     zone_tree,
@@ -98,6 +98,10 @@ fn display_of_a_text_variant_keeps_the_english_phrase() {
                 max: 0xCFFF,
             },
             "a string of at most 10 characters from U+0001 to U+CFFF",
+        ),
+        (
+            Expected::WstringIec { length: 10 },
+            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF",
         ),
     ];
     for (expected, text) in cases {
@@ -202,7 +206,7 @@ fn text_faults_of_parse_carry_typed_expectations() {
     );
     assert_eq!(
         expected_of(r#""a😀""#, &wstring_tree(2)),
-        Expected::Wstring { length: 2 }
+        Expected::WstringIec { length: 2 }
     );
     assert_eq!(
         expected_of(r#""ab""#, &primitive_tree(CHAR)),
@@ -235,7 +239,11 @@ fn a_stored_literal_for_a_time_leaf_expects_the_count_of_its_type() {
 #[test]
 fn a_request_leaf_at_a_struct_node_expects_a_scalar() {
     let tree = zone_tree();
-    let result = request_leaf(&json!(1), tree.root(), PlcPlatform::TwinCat3);
+    let result = request_leaf(
+        &json!(1),
+        tree.root(),
+        (PlcPlatform::TwinCat3, StringEncoding::Latin1),
+    );
     assert_eq!(result, Err(LeafFault::from(Expected::Scalar)));
 }
 
@@ -258,6 +266,10 @@ fn a_limit_fault_has_no_expectation() {
 fn adr_0039_a_request_text_at_a_struct_node_expects_a_scalar() {
     use crate::recipe::value::request_text;
     let tree = zone_tree();
-    let result = request_text("1", tree.root(), PlcPlatform::TwinCat3);
+    let result = request_text(
+        "1",
+        tree.root(),
+        (PlcPlatform::TwinCat3, StringEncoding::Latin1),
+    );
     assert_eq!(result, Err(LeafFault::from(Expected::Scalar)));
 }

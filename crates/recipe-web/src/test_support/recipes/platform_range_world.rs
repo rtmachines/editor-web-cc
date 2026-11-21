@@ -11,7 +11,7 @@ use recipe_app::memory::seed_type_id;
 use recipe_domain::identity::UserId;
 use recipe_domain::plant::{
     Machine, MachineCode, MachineId, PlcPlatform, PlcType, PlcTypeId, PlcTypeRecord, Primitive,
-    RecordShape, S7Address, UnitId,
+    RecordShape, S7Address, StringEncoding, UnitId,
 };
 use recipe_domain::recipe::{
     Ordinal, ParameterId, ParameterKey, ParameterTag, Recipe, RecipeId, RecipeVersionId,
@@ -146,6 +146,7 @@ fn seed_machine(world: &World, spec: &WorldSpec, machine_id: MachineId, unit_id:
         spec.platform
             .max_data_block()
             .map(|_| recipe_domain::plant::DataBlockNumber::parse("1").unwrap()),
+        StringEncoding::Latin1,
         (unit_id, Text::parse("Infeed").unwrap()),
     )
     .unwrap();

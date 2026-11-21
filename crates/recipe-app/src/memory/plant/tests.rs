@@ -2,7 +2,7 @@ use recipe_domain::audit::{
     AuditContext, AuditEntry, AuditTarget, RequestId, RowAction, RowChange,
 };
 use recipe_domain::plant::{
-    Machine, MachineCode, MachineId, PlcPlatform, UnitId, UnitPath, UnitUsage,
+    Machine, MachineCode, MachineId, PlcPlatform, StringEncoding, UnitId, UnitPath, UnitUsage,
 };
 use recipe_domain::recipe::{ReferenceNumber, VersionState};
 use recipe_domain::text::Text;
@@ -54,6 +54,7 @@ fn machine(n: u128, code: &str) -> Machine {
         text("Press"),
         PlcPlatform::TwinCat3,
         None,
+        StringEncoding::Latin1,
         (
             uid(n.checked_mul(100).unwrap().checked_add(1).unwrap()),
             text("Main"),
@@ -107,6 +108,7 @@ fn machine_image(n: u128, code: &str, name: &str, archived_at: Value) -> Value {
         "name": name,
         "plc_platform": "TwinCat3",
         "db_number": null,
+        "string_encoding": "Latin1",
         "archived_at": archived_at,
         "created_at": now_text(),
         "updated_at": now_text(),
@@ -657,5 +659,30 @@ async fn lock_units_shared_orders_the_units_by_id_and_skips_unknown_ids() {
             lock("unit", LockMode::ForShare, uid(130).to_string()),
             lock("unit", LockMode::ForShare, uid(150).to_string()),
         ]
+    );
+}
+
+#[tokio::test]
+async fn adr_0202_stored_machine_reads_its_string_encoding() {
+    let store = store();
+    store.seed_machine(&fixtures::utf8_machine(1, "M1"));
+    store.seed_machine(&machine(2, "M2"));
+    let mut tx = begin(&store, Isolation::ReadCommitted);
+
+    let utf8 = tx.plant().machine_by_id(mid(1)).await.unwrap().unwrap();
+    let latin1 = tx.plant().machine_by_id(mid(2)).await.unwrap().unwrap();
+    let locked = tx
+        .plant()
+        .lock_machine_shared(mid(1))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(utf8.string_encoding(), StringEncoding::Utf8);
+    assert_eq!(latin1.string_encoding(), StringEncoding::Latin1);
+    assert_eq!(locked.state.string_encoding(), StringEncoding::Utf8);
+    assert_eq!(
+        locked.before.as_value().get("string_encoding"),
+        Some(&json!("Utf8"))
     );
 }

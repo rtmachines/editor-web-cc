@@ -8,6 +8,7 @@ use time::UtcOffset;
 
 use super::{ExportError, Sha256};
 use crate::identity::Login;
+use crate::plant::StringEncoding;
 use crate::recipe::ParameterKey;
 use crate::text::Text;
 use crate::timestamp::Timestamp;
@@ -66,6 +67,8 @@ pub struct DocumentFacts {
     pub names: BTreeMap<ParameterKey, Text>,
     /// `true` when the read check finds a rule fault in a parameter of the version (ADR-0119).
     pub has_rule_fault: bool,
+    /// The STRING encoding of the machine. A `Utf8` machine makes a v1 document not loadable.
+    pub string_encoding: StringEncoding,
 }
 
 impl DocumentFacts {
@@ -73,6 +76,16 @@ impl DocumentFacts {
     #[must_use]
     pub const fn loadable(&self) -> bool {
         self.status.loadable() && !self.has_rule_fault
+    }
+
+    /// Return the value of `loadable` in a document v1 (ADR-0202 (l)).
+    ///
+    /// The document v1 has no field for the encoding, so a PLC cannot learn that the `STRING`
+    /// values are UTF-8 bytes. Only a `Latin1` machine gives a loadable v1 document. The hashed
+    /// body of the document v1 does not change (ADR-0202 (k)).
+    #[must_use]
+    pub fn v1_loadable(&self) -> bool {
+        self.loadable() && self.string_encoding == StringEncoding::Latin1
     }
 }
 

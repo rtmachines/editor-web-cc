@@ -48,11 +48,11 @@ const READ_ONLY_SQL_TRANSACTION: &str = "25006";
 
 /// The identity of one row of the query: machine code, reference number, version number, status,
 /// tag, part, and stored text.
-type Row = (String, String, i32, String, String, String, String);
+pub(crate) type Row = (String, String, i32, String, String, String, String);
 
 /// What happens to a version after the seed has filled it.
 #[derive(Clone, Copy)]
-enum Fate {
+pub(crate) enum Fate {
     Draft,
     DeletedDraft,
     Approved,
@@ -60,7 +60,7 @@ enum Fate {
 }
 
 /// A machine with a unit, a recipe, and a live draft with number 1.
-struct Site {
+pub(crate) struct Site {
     platform: &'static str,
     machine: Uuid,
     unit: Uuid,
@@ -70,7 +70,7 @@ struct Site {
 }
 
 /// The place of a version in the output: machine code, reference number, number, and status.
-struct Place {
+pub(crate) struct Place {
     code: String,
     reference: String,
     number: i32,
@@ -79,10 +79,10 @@ struct Place {
 
 /// The rows that the query must list, in the form of the output.
 #[derive(Default)]
-struct Expected(BTreeSet<Row>);
+pub(crate) struct Expected(pub(crate) BTreeSet<Row>);
 
 impl Expected {
-    fn hit(&mut self, place: &Place, tag: &str, part: &str, text: &str) {
+    pub(crate) fn hit(&mut self, place: &Place, tag: &str, part: &str, text: &str) {
         self.0.insert((
             place.code.clone(),
             place.reference.clone(),
@@ -95,7 +95,7 @@ impl Expected {
     }
 }
 
-async fn site(conn: &mut PgConnection, platform: &'static str) -> Site {
+pub(crate) async fn site(conn: &mut PgConnection, platform: &'static str) -> Site {
     let user = fixtures::user(conn).await;
     let machine = fixtures::machine(conn, platform).await;
     let unit = fixtures::unit(conn, machine, "U1").await;
@@ -112,7 +112,7 @@ async fn site(conn: &mut PgConnection, platform: &'static str) -> Site {
 }
 
 /// Insert a parameter of a type with a stored value and an optional S7 address.
-async fn add(
+pub(crate) async fn add(
     conn: &mut PgConnection,
     site: &Site,
     plc_type: Uuid,
@@ -140,7 +140,7 @@ async fn add(
 }
 
 /// Return the global `WCHAR` or `WSTRING` row that the seed migration gives to the platform.
-async fn wide_type(conn: &mut PgConnection, name: &str, platform: &str) -> Uuid {
+pub(crate) async fn wide_type(conn: &mut PgConnection, name: &str, platform: &str) -> Uuid {
     sqlx::query_scalar(
         "SELECT id FROM plc_type \
          WHERE kind = 'primitive' AND name = $1 AND machine_id IS NULL AND $2 = ANY(platforms)",
@@ -153,7 +153,7 @@ async fn wide_type(conn: &mut PgConnection, name: &str, platform: &str) -> Uuid 
 }
 
 /// A JSON string leaf that holds the text.
-fn json_text(text: &str) -> String {
+pub(crate) fn json_text(text: &str) -> String {
     serde_json::Value::String(text.to_owned()).to_string()
 }
 
@@ -220,7 +220,7 @@ async fn wide_struct(conn: &mut PgConnection, site: &Site) -> Uuid {
 }
 
 /// Change the version as the fate says, and return its place in the output.
-async fn settle(conn: &mut PgConnection, site: &Site, fate: Fate) -> Place {
+pub(crate) async fn settle(conn: &mut PgConnection, site: &Site, fate: Fate) -> Place {
     match fate {
         Fate::Draft => {}
         Fate::DeletedDraft => {
@@ -623,7 +623,7 @@ fn query() -> String {
 }
 
 /// Run the file on one connection and return its rows.
-async fn rows(conn: &mut PgConnection) -> Vec<Row> {
+pub(crate) async fn rows(conn: &mut PgConnection) -> Vec<Row> {
     let found = sqlx::raw_sql(&query()).fetch_all(&mut *conn).await.unwrap();
     found
         .iter()
