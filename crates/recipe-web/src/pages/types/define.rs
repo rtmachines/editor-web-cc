@@ -22,7 +22,7 @@ use recipe_app::plant::{
 use recipe_app::ports::NonEmpty;
 use recipe_domain::plant::limits::MAX_MEMBERS;
 use recipe_domain::plant::{
-    DerivedTypeReason, MachineCode, MemberName, PlantError, TypeExpr, TypeName,
+    BaseExpr, DerivedTypeReason, MachineCode, MemberName, PlantError, TypeExpr, TypeName,
     is_iec_reserved_member_name,
 };
 
@@ -225,22 +225,49 @@ fn defined_struct_input(
     }
 }
 
-/// Return the member row whose type text parses to the type expression `type_expr`.
+/// Return the type input of the member row that a refused struct name `type_expr` points at.
+///
+/// An exact match comes first: a row whose type text parses to the text `type_expr`. A refused
+/// stored struct gives only its bare name, for example `ST_Old`, and no revision. Then the rows
+/// whose base type is the struct `type_expr` match, also as the element of an array. When these
+/// rows name more than one revision, the web layer cannot see which revision is refused and
+/// names no input (ADR-0050 (d)). Otherwise it names the first such row.
 fn type_row(rows: &[SentRow], type_expr: &str) -> Option<String> {
-    rows.iter()
-        .position(|sent| {
-            TypeExpr::parse(&sent.type_text).is_ok_and(|parsed| parsed.to_string() == type_expr)
-        })
-        .map(|row| row_input(row, RowField::Type))
+    let parsed: Vec<Option<TypeExpr>> = rows
+        .iter()
+        .map(|sent| TypeExpr::parse(&sent.type_text).ok())
+        .collect();
+    let exact = parsed.iter().position(|expr| {
+        expr.as_ref()
+            .is_some_and(|expr| expr.to_string() == type_expr)
+    });
+    if let Some(row) = exact {
+        return Some(row_input(row, RowField::Type));
+    }
+    let mut named =
+        parsed
+            .iter()
+            .enumerate()
+            .filter_map(|(row, expr)| match expr.as_ref()?.base() {
+                BaseExpr::Udt { name, revision } if name.to_string() == type_expr => {
+                    Some((row, *revision))
+                }
+                _other => None,
+            });
+    let (first_row, first_revision) = named.next()?;
+    named
+        .all(|(_row, revision)| revision == first_revision)
+        .then(|| row_input(first_row, RowField::Type))
 }
 
 /// Return the input that a refused `DefineUdt` names (ADR-0041 (e)).
 ///
 /// `E-PLT-015` names the name input of a new struct. `E-PLT-021` names the second row with the
-/// member name. `E-PLT-006` names the type input of the first matching row. `E-PLT-013` names the
-/// input of the defined struct when `type_expr` is its name (`defined`). Otherwise it names the type
-/// input of the first row with that type, for example a refused referenced struct. Any other error
-/// names no input, for example `E-PLT-052` of an unchanged revision (ADR-0159 (f)).
+/// member name. `E-PLT-006` names the type input of the first matching row.
+/// `E-PLT-013` names the input of the defined struct when `type_expr` is its name (`defined`).
+/// Otherwise `type_row` names the type input of the row of a refused referenced struct. There,
+/// `type_expr` is the full type text or only the bare struct name. Any other error names no input,
+/// for example `E-PLT-052` of an unchanged revision (ADR-0159 (f)).
 fn refused_input(
     error: &AppError,
     target: &Target,
