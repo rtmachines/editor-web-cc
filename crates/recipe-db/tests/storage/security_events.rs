@@ -74,7 +74,7 @@ impl Fixture {
             UserId::from(self.user),
             operation,
             RequestId::from(request),
-            Some(CLIENT_IP),
+            CLIENT_IP,
             Some(UserAgent::from(AGENT)),
         )
     }
@@ -146,7 +146,7 @@ async fn a_mapped_ipv4_address_is_stored_in_its_ipv4_form() {
         f.user_id(),
         "RenameMachine",
         RequestId::from(Uuid::new_v4()),
-        Some(mapped),
+        mapped,
         Some(UserAgent::from(AGENT)),
     );
 

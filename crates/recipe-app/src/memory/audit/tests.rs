@@ -294,7 +294,7 @@ fn forbidden(n: u128, client: IpAddr) -> SecurityEvent {
         UserId::from(Uuid::from_u128(n)),
         "CreateMachine",
         RequestId::from(Uuid::from_u128(n)),
-        Some(client),
+        client,
         None,
     )
 }

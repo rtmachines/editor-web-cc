@@ -73,5 +73,5 @@ pub(super) fn csrf_rejected(n: u128) -> SecurityEvent {
 }
 
 pub(super) fn forbidden(n: u128, operation: &str) -> SecurityEvent {
-    SecurityEvent::forbidden(user_id(n), operation, request_id(n), Some(ip()), None)
+    SecurityEvent::forbidden(user_id(n), operation, request_id(n), ip(), None)
 }

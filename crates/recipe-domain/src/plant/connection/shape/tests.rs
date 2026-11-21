@@ -620,7 +620,7 @@ fn modbus_tcp_with_a_login_and_a_password_lists_both_fields() {
 }
 
 #[test]
-fn credential_faults_follow_the_address_fault() {
+fn a_missing_login_comes_before_the_address_fault() {
     let fields = ConnectionFields {
         password: Some(password()),
         ..ads_fields("PLC1")
@@ -630,7 +630,7 @@ fn credential_faults_follow_the_address_fault() {
         .iter()
         .map(PlantError::code)
         .collect();
-    assert_eq!(codes, vec![ErrorCode::PLT_026, ErrorCode::PLT_023]);
+    assert_eq!(codes, vec![ErrorCode::PLT_023, ErrorCode::PLT_026]);
 }
 
 #[test]
@@ -792,9 +792,27 @@ fn a_request_with_faults_of_every_kind_lists_all_of_them_in_check_order() {
         vec![
             (ErrorCode::PLT_022, "rack"),
             (ErrorCode::PLT_023, "host"),
+            (ErrorCode::PLT_023, "login"),
             (ErrorCode::PLT_025, "comm_mode"),
             (ErrorCode::PLT_026, "address"),
+        ]
+    );
+}
+
+#[test]
+fn a_missing_login_of_the_mode_comes_before_the_mode_fault() {
+    let fields = ConnectionFields {
+        mode: Some(CommMode::CodesysV3),
+        login: None,
+        password: None,
+        ..iec_fields()
+    };
+    assert_eq!(
+        faults(run(PlcPlatform::TwinCat3, fields)),
+        vec![
             (ErrorCode::PLT_023, "login"),
+            (ErrorCode::PLT_023, "password"),
+            (ErrorCode::PLT_025, "comm_mode"),
         ]
     );
 }

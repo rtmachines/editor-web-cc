@@ -153,7 +153,7 @@ async fn the_fixture_sink_fails_with_e_db_005() {
         user(2),
         "CreateMachine",
         meta().request_id(),
-        None,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
         Some(UserAgent::from("test")),
     );
     let error = fixture.sink.record(event).await.unwrap_err();

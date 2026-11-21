@@ -215,7 +215,7 @@ impl IdentityFixture {
         let auth = self.authenticated(&token).await;
         let meta = RequestMeta::new(
             RequestId::from(Uuid::from_u128(0x55)),
-            None,
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
             None,
             Some(auth.session_ref().clone()),
         );

@@ -266,12 +266,18 @@ impl TypeTree {
         } else {
             0
         };
-        let levels = self.s7_nesting.saturating_add(extra);
-        if platform.is_s7() && levels > MAX_S7_NESTING {
-            return Err(PlantError::TypeTooLarge {
-                type_name: expr.to_string(),
-                limit: TypeLimit::S7Nesting,
-            });
+        if !platform.is_s7() {
+            return Ok(());
+        }
+        let too_large = || PlantError::TypeTooLarge {
+            type_name: expr.to_string(),
+            limit: TypeLimit::S7Nesting,
+        };
+        let Some(levels) = self.s7_nesting.checked_add(extra) else {
+            return Err(too_large());
+        };
+        if levels > MAX_S7_NESTING {
+            return Err(too_large());
         }
         Ok(())
     }

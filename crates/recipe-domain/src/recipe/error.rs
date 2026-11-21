@@ -387,7 +387,7 @@ pub enum RecipeError {
         newest: u32,
     },
     /// The snapshot check of a version found problems (`E-RCP-020`).
-    #[error("{} parameters are not valid. See the list.", distinct_tags(.items))]
+    #[error("{} parameters are not valid. See the list.", crate::recipe::distinct_tag_count(.items))]
     ValidationFailed {
         /// Every problem of the snapshot, parameter items first, in tag order.
         items: Vec<SnapshotItem>,
@@ -442,23 +442,6 @@ pub enum RecipeError {
         /// The rule that the request breaks.
         reason: RebindTargetReason,
     },
-}
-
-/// Count the distinct parameter tags of the items of a snapshot check.
-///
-/// An item of the version has no tag and does not count. One parameter with many problems counts
-/// once.
-fn distinct_tags(items: &[SnapshotItem]) -> usize {
-    items
-        .iter()
-        .filter_map(|item| match item {
-            SnapshotItem::Parameter { tag, .. } | SnapshotItem::UnknownUnit { tag, .. } => {
-                Some(tag)
-            }
-            SnapshotItem::Version { .. } => None,
-        })
-        .collect::<std::collections::BTreeSet<_>>()
-        .len()
 }
 
 impl RecipeError {

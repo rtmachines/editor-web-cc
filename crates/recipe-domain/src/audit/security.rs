@@ -143,14 +143,14 @@ impl SecurityEvent {
         user: UserId,
         operation: &str,
         request_id: RequestId,
-        client_ip: Option<IpAddr>,
+        client_ip: IpAddr,
         user_agent: Option<UserAgent>,
     ) -> Self {
         Self {
             kind: SecurityEventKind::Forbidden,
             login_hmac: None,
             user: Some(user),
-            client_ip,
+            client_ip: Some(client_ip),
             user_agent,
             request_id,
             detail: Some(json!({ "operation": operation })),

@@ -68,7 +68,7 @@ fn events() -> [(Timestamp, SecurityEvent); 5] {
         user(MHOFFMAN),
         "CreateMachine",
         request(4),
-        Some(address(2)),
+        address(2),
         None,
     );
     [

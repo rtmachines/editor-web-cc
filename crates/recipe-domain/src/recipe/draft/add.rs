@@ -54,11 +54,12 @@ impl Draft {
     /// # Errors
     ///
     /// Returns the error of the first group that fails. The first group gives one error:
-    /// `E-RCP-014`, `E-PLT-020`, `E-PLT-013`, `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or
-    /// `E-RCP-023`. The second group gives a list with every fault (ADR-0041). The list holds
-    /// `E-RCP-005` and `E-RCP-004` in the preorder of the leaves. Then it holds `E-RCP-017`,
-    /// `E-RCP-019`, `E-RCP-006`, and `E-RCP-018` in the order of the limit rows. The third group
-    /// gives `E-RCP-021` or `E-RCP-022`. A failed type resolution returns its `PlantError`.
+    /// `E-RCP-014`, `E-PLT-020`, `E-PLT-013`, `E-RCP-003`, `E-RCP-053`, `E-RCP-057`, `E-RCP-054`,
+    /// `E-RCP-023`, `E-RCP-056`, or `E-RCP-058`. The second group gives a list with every fault
+    /// (ADR-0041). The list holds `E-RCP-005` and `E-RCP-004` in the preorder of the leaves. Then
+    /// it holds `E-RCP-017`, `E-RCP-019`, `E-RCP-006`, and `E-RCP-018` in the order of the limit
+    /// rows. The third group gives `E-RCP-021` or `E-RCP-022`. A failed type resolution returns its
+    /// `PlantError`.
     pub fn add_parameter(
         &mut self,
         new: NewParameter,

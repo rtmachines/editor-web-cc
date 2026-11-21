@@ -436,10 +436,11 @@ impl TryFrom<StoredMachine> for Machine {
     /// Check the unit rows that storage loaded and build the machine.
     ///
     /// A failure means corrupt storage, because the commands keep the tree valid.
-    /// The checks run in this order: duplicate path, missing parent,
-    /// archived parent of a live unit, no live main unit, and the data block rule
-    /// (ADR-0156). An archived S7 machine may have no number. Then comes the encoding rule
-    /// (ADR-0202): `Utf8` on an S7 platform is corrupt storage.
+    /// The checks run in this order: the data block rule, then the encoding rule.
+    /// An archived S7 machine may have no number (ADR-0156).
+    /// `Utf8` on an S7 platform is corrupt storage (ADR-0202).
+    /// Then come the checks of the unit rows: duplicate path, missing parent,
+    /// archived parent of a live unit, and no live main unit.
     fn try_from(stored: StoredMachine) -> Result<Self, PlantError> {
         check_stored_data_block(&stored)?;
         check_string_encoding(stored.code, stored.platform, stored.string_encoding)?;

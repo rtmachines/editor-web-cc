@@ -44,7 +44,7 @@ fn failed(hmac: LoginHmac, client: IpAddr) -> SecurityEvent {
 fn forbidden(user: UserId, client: IpAddr) -> SecurityEvent {
     let request = new_request_id().unwrap();
     let agent = Some(UserAgent::from("Agent/1"));
-    SecurityEvent::forbidden(user, "ListSecurityEvents", request, Some(client), agent)
+    SecurityEvent::forbidden(user, "ListSecurityEvents", request, client, agent)
 }
 
 /// Record each event through the sink of the adapter, in order.

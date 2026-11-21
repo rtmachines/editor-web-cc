@@ -153,8 +153,8 @@ impl Draft {
     /// Returns `E-RCP-020` with every item of the snapshot check. Returns `E-RCP-008` for a draft
     /// without parameters. Returns the list of `E-RCP-016` entries of [`Draft::check_limits`].
     /// Returns the errors of the S7 layout check: `E-RCP-003`, `E-RCP-053`, `E-RCP-054`,
-    /// `E-RCP-023`, `E-RCP-022`, `E-RCP-057`, or `E-RCP-056`. Returns `E-RCP-024` for the first
-    /// outdated parameter when `allow_outdated` is `false`.
+    /// `E-RCP-023`, `E-RCP-022`, `E-RCP-057`, `E-RCP-056`, or `E-RCP-058`. Returns `E-RCP-024` for
+    /// the first outdated parameter when `allow_outdated` is `false`.
     pub fn check_for_approval(
         self,
         units: &LiveUnits,
