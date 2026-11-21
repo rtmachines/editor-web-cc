@@ -40,9 +40,11 @@ pub enum Primitive {
     String,
     /// `WSTRING`, a length counts UTF-16 code units (ADR-0137 (i)).
     Wstring,
-    /// `CHAR`, one byte character.
+    /// `CHAR`, one byte character. Only the S7 platforms have this type
+    /// (`data-model.md` section 7).
     Char,
-    /// `WCHAR`, two byte character.
+    /// `WCHAR`, one UTF-16 code unit (ADR-0137 (a), ADR-0180 (a)).
+    /// Only `S7_1200` and `S7_1500` have this type.
     Wchar,
     /// `TIME`, a duration in milliseconds.
     Time,
