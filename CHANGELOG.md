@@ -43,6 +43,14 @@ This file records the notable changes of the recipe editor. The format follows [
 - Step 2 of the runbook section "Upgrade" names its three text blocks below step 24. The operator does them before the four checks.
 - Part 4 of step 12 of the section "Upgrade" names the case "Step 8 or 9 fails" by its text block.
   That text block is "Recovery after a failure between two steps".
+- `POST .../definition` for an unchanged type without value fields keeps the stored value and limits. It no longer gives `422 E-RCP-005` (V-05).
+- `ListParameters` ends its read transaction before it resolves the type trees of a page (V-09).
+- A PLC connection lists each missing login (`E-PLT-023`) at step 2 of the check order (V-12).
+- Both storage adapters build stored PLC connections through `PlcConnection::for_platform`, the one constructor (V-13).
+- A trusted-proxy entry in IPv4-mapped IPv6 form with a prefix of 96 or more matches the canonical peer address (V-14).
+- A forbidden result without a client address gives `E-DB-008` and writes no security event (V-21).
+- A failed `POST /login` no longer shows the language switch (V-29).
+- On Unix, the server opens a result file without following links and reads only regular files (V-36).
 
 ## [0.8.0] - 2026-11-19
 

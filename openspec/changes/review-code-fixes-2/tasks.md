@@ -59,17 +59,17 @@ Tasks that edit one file run in sequence. All other tasks can run in parallel.
 
 ## 9. Changelog
 
-- [ ] 9.1 (CHANGELOG.md) [mechanical] Add one line for each changed behavior to `[Unreleased]` under `Fixed` (`reliability.md` §8). The lines name V-05, V-09, V-12, V-13, V-14, V-21, V-29, and V-36. Change C `review-deploy-fixes-2` also adds lines to `[Unreleased]`. The second change to merge rebases this file. — red test: none, because the task changes a document. — Check: `python -I tools/ste-lint/ste-lint.py CHANGELOG.md` reports 0 hard violations
+- [x] 9.1 (CHANGELOG.md) [mechanical] Add one line for each changed behavior to `[Unreleased]` under `Fixed` (`reliability.md` §8). The lines name V-05, V-09, V-12, V-13, V-14, V-21, V-29, and V-36. Change C `review-deploy-fixes-2` also adds lines to `[Unreleased]`. The second change to merge rebases this file. — red test: none, because the task changes a document. — Check: `python -I tools/ste-lint/ste-lint.py CHANGELOG.md` reports 0 hard violations
 
 ## 10. Integration checks
 
-- [ ] 10.1 (.) Run the lint gate. — Check: `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] 10.2 (.) Run every test. — Check: `cargo test --workspace --all-features --locked`
-- [ ] 10.3 (.) Check the format and the docs. — Check: `cargo fmt --check` and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --all-features --locked`
-- [ ] 10.4 (.) Check the dependencies. — Check: `cargo deny --locked check`
-- [ ] 10.5 (.) Check the coverage gate of 80 % lines per crate. — Check: the three commands of `CONTRIBUTING.md` "Local checks": `coverage-gate.py --write-inventory`, `cargo llvm-cov`, and `coverage-gate.py --report`
-- [ ] 10.6 (openspec) Run the validator on the change. — Check: `openspec validate review-code-fixes-2 --strict` and `openspec validate --all`
-- [ ] 10.7 (openspec) Check the STE rules. — Check: `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md openspec/changes/review-code-fixes-2/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'` reports 0 hard violations
+- [x] 10.1 (.) Run the lint gate. — Check: `cargo clippy --all-targets --all-features -- -D warnings`
+- [x] 10.2 (.) Run every test. — Check: `cargo test --workspace --all-features --locked`
+- [x] 10.3 (.) Check the format and the docs. — Check: `cargo fmt --check` and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --all-features --locked`
+- [x] 10.4 (.) Check the dependencies. — Check: `cargo deny --locked check`
+- [x] 10.5 (.) Check the coverage gate of 80 % lines per crate. — Check: the three commands of `CONTRIBUTING.md` "Local checks": `coverage-gate.py --write-inventory`, `cargo llvm-cov`, and `coverage-gate.py --report`
+- [x] 10.6 (openspec) Run the validator on the change. — Check: `openspec validate review-code-fixes-2 --strict` and `openspec validate --all`
+- [x] 10.7 (openspec) Check the STE rules. — Check: `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md openspec/changes/review-code-fixes-2/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'` reports 0 hard violations
 
 ## Workflow follow-up
 
