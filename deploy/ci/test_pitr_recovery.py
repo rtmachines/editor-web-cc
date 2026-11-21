@@ -450,6 +450,11 @@ REFUSE_WRONG_LINE = "CI: refuse: the ERROR line of walarchive-entry is wrong for
 
 # The completed line of a recovery to the end. The marker 2 is the newest audit entry. The run is no drill.
 RECOVER_LINE = DRILL_LINE.replace('"drill":true', '"drill":false').replace('"chain_seq":41', '"chain_seq":42')
+EARLY_END_SEGMENT = "000000010000000000000006"
+EARLY_END_STATE = f"0/6000060|{EARLY_END_SEGMENT}|96|16777216|8192\n"
+EARLY_END_LINE = RECOVER_LINE.replace('"chain_seq":42', '"chain_seq":41')
+EARLY_END_ERROR_LINE = TARGET_ERROR_LINE.replace("the temporary server did not finish the recovery",
+                                                "the newest audit entry is invalid")
 EXPECTED_LSN = "0/3000060"
 OLD_VOLUME = "recipe-ci-1-1_pgdata"
 HEARTBEAT_QUERY = r"FROM public\.app_setting WHERE key = 'heartbeat\.last_at'"
@@ -575,9 +580,14 @@ class StepTests(unittest.TestCase):
                 "STUB_PITR_OUTPUT": DRILL_LINE,
                 "STUB_TARGET_OUTPUT": TARGET_ERROR_LINE,
                 "STUB_GAP_OUTPUT": GAP_ERROR_LINE,
+                "STUB_EARLY_END_POSITION": EARLY_END_STATE.rstrip("\n"),
+                "STUB_EARLY_END_OUTPUT": EARLY_END_LINE,
                 "STUB_RECOVER_OUTPUT": RECOVER_LINE,
                 "STUB_REFUSE_OUTPUT": REFUSE_ERROR_LINE,
             })
+            if step == "markers":
+                env["STUB_SEGMENT"] = EARLY_END_SEGMENT
+                env["STUB_LSN"] = "0/60000A0"
             env.update(env_extra or {})
             # Bash can read a Windows path in another form. The placeholder gets the form that bash sees.
             seen = ""
@@ -601,8 +611,9 @@ class StepTests(unittest.TestCase):
         }
 
     def refusals_state(self):
-        # The step markers leaves the identity of marker 2. The WAL archive then holds the .partial file.
-        return {"marker2.seq": "42\n", "marker2.hash": MARKER_2_HASH + "\n"}
+        # The step markers leaves the two sequences and the WAL position before marker 2.
+        return {"marker1.seq": "41\n", "marker2.seq": "42\n", "marker2.hash": MARKER_2_HASH + "\n",
+                "early-end.state": EARLY_END_STATE}
 
     def assert_ordered(self, log, patterns):
         """Each pattern must match after the end of the match before it."""
@@ -615,7 +626,7 @@ class StepTests(unittest.TestCase):
     # markers
 
     def test_markers_pass_path_runs_the_steps_in_order(self):
-        done, log, _ = self.run_step("markers", state=self.markers_state())
+        done, log, _ = self.run_step("markers", {"STUB_SEGMENT": EARLY_END_SEGMENT}, self.markers_state())
         self.assertEqual(done.returncode, 0, done.stderr + log)
         self.assert_ordered(log, [
             HEARTBEAT_QUERY,
@@ -623,15 +634,24 @@ class StepTests(unittest.TestCase):
             r"ORDER BY chain_seq DESC LIMIT 1",
             r"date_trunc\('second'",
             r"clock_timestamp\(\) >=",
+            r"pg_current_wal_insert_lsn\(\).*pg_walfile_name_offset\(.*\).*wal_segment_size.*wal_block_size",
             PASSWORD_CALL,
             r"ORDER BY chain_seq DESC LIMIT 1",
             r"occurred_at",
             r"SELECT pg_current_wal_lsn\(\)",
             r"flush_lsn >=",
             r"pg_walfile_name",
-            r"^sudo test -f .*000000010000000000000003\.partial$",
-            r"^sudo test -e .*000000010000000000000003$",
+            rf"^sudo test -f .*{EARLY_END_SEGMENT}\.partial$",
+            rf"^sudo test -e .*{EARLY_END_SEGMENT}$",
         ])
+
+    def test_markers_record_the_record_before_marker_2(self):
+        done, log, state = self.run_step("markers", {"STUB_SEGMENT": EARLY_END_SEGMENT}, self.markers_state())
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertEqual(state.get("early-end.state"), EARLY_END_STATE)
+        done, _, _ = self.run_step("markers", {"STUB_SEGMENT": "000000010000000000000007"}, self.markers_state())
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(done.stderr.strip(), "CI: markers: the record before marker 2 is not in the newest segment.")
 
     def test_markers_wait_for_the_heartbeat_row_before_marker_1(self):
         done, log, _ = self.run_step("markers", state=self.markers_state())
@@ -893,6 +913,21 @@ class StepTests(unittest.TestCase):
         env.update(env_extra or {})
         return self.run_step("refusals", env, self.refusals_state() if state is None else state)
 
+    def run_refusals_with_policy(self, required, error, env=None):
+        """Run a temporary script with the given proof policy."""
+        text, count = re.subn(r"(?m)^EARLY_END_REFUSAL_REQUIRED=[01]$", f"EARLY_END_REFUSAL_REQUIRED={required}", script_text())
+        self.assertEqual(count, 1)
+        text, count = re.subn(r"(?m)^EARLY_END_ERROR=.*$", f'EARLY_END_ERROR="{error}"', text)
+        self.assertEqual(count, 1)
+        with tempfile.TemporaryDirectory() as name:
+            directory = pathlib.Path(name)
+            for source in (COMMON_FILE, STEPS_FILE):
+                shutil.copyfile(source, directory / source.name)
+            candidate = directory / SCRIPT.name
+            candidate.write_text(text, encoding="utf-8")
+            with patch.dict(globals(), SCRIPT=candidate):
+                return self.run_refusals(env)
+
     def test_refusals_pass_path_runs_the_steps_in_order(self):
         done, log, _ = self.run_refusals()
         self.assertEqual(done.returncode, 0, done.stderr + log)
@@ -923,9 +958,101 @@ class StepTests(unittest.TestCase):
             rf"^volume inspect --format .* {volume}$",
             rf"^volume rm {volume}$",
             r"^sudo rm -rf -- .*/state/wal-copy$",
+            rf"^sudo cp -a -- {real}/\. .*/state/wal-copy/$",
+            rf"^sudo test -f .*/state/wal-copy/{EARLY_END_SEGMENT}\.partial$",
+            rf"^sudo test -e .*/state/wal-copy/{EARLY_END_SEGMENT}$",
+            r"^sudo od ",
+            r"^sudo dd ",
+            r"^sudo od ",
+            rf"^volume create --label recipe\.ci=recipe-ci-1-1 {volume}$",
+            rf"^compose --project-name recipe-ci-1-1 .* run --rm --no-deps -T "
+            rf"-v {volume}:/var/lib/postgresql/data -v .*/state/wal-copy:/wal:ro pitr-volume$",
+            rf"^volume inspect --format .* {volume}$",
+            rf"^volume rm {volume}$",
+            r"^sudo rm -rf -- .*/state/wal-copy$",
             r"^compose --project-name recipe-ci-1-1 .* ps -aq db$",
             r"^volume ls -q --filter label=recipe\.ci=recipe-ci-1-1$",
         ])
+
+    def test_refusals_run_the_early_end_run_on_a_damaged_copy(self):
+        done, log, _ = self.run_refusals()
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        partial = rf"\S*/state/wal-copy/{EARLY_END_SEGMENT}\.partial"
+        self.assert_ordered(log, [
+            r"^sudo rm -rf -- .*/state/wal-copy$",
+            r"^sudo cp -a -- .*/walarchive-disk/walarchive/\. .*/state/wal-copy/$",
+            rf"^sudo od .* -j 116 .*{partial}$",
+            rf"^sudo dd (?=.*\bof={partial} )(?=.*\bseek=116\b).*\bconv=notrunc$",
+            rf"^sudo od .* -j 116 .*{partial}$",
+            r"^volume create ",
+            r"^compose .* -v \S*/state/wal-copy:/wal:ro pitr-volume$",
+            r"^volume rm ",
+            r"^sudo rm -rf -- .*/state/wal-copy$",
+        ])
+        self.assertEqual(len(re.findall(r"^sudo dd ", log, re.M)), 1)
+        self.assertNotIn("PITR_EXPECTED_LSN", log)
+        self.assertNotIn("PITR_MARKER_", log)
+        self.assertIn("refusals: early end: byte_new=90", done.stdout.splitlines())
+
+    def test_refusals_invert_the_first_byte_when_the_header_crosses_a_page(self):
+        state = self.refusals_state()
+        state["early-end.state"] = f"0/6001FF0|{EARLY_END_SEGMENT}|8176|16777216|8192\n"
+        done, log, _ = self.run_refusals(state=state)
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        self.assertRegex(log, r"(?m)^sudo dd .*\bseek=8176\b")
+        self.assertIn("refusals: early end: byte_new=90", done.stdout.splitlines())
+
+    def test_refusals_log_each_proof_value(self):
+        done, log, _ = self.run_refusals()
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        expected = {"lsn": "0/6000060", "segment": EARLY_END_SEGMENT, "offset": "96", "wal_segment_size": "16777216",
+                    "wal_block_size": "8192", "byte_offset": "116", "byte_old": "165", "byte_new": "90",
+                    "marker1_seq": "41", "marker2_seq": "42", "exit_code": "0", "error_line": "none",
+                    "last_line": EARLY_END_LINE, "class": "S"}
+        prefix = "refusals: early end: "
+        self.assertCountEqual([line for line in done.stdout.splitlines() if line.startswith(prefix)],
+                              [f"{prefix}{name}={value}" for name, value in expected.items()])
+
+    def test_refusals_accept_a_refusal_of_the_early_end_run(self):
+        for line in (EARLY_END_ERROR_LINE, EARLY_END_ERROR_LINE[:-1] + ',"exit_code":7}'):
+            with self.subTest(line=line):
+                env = {"STUB_EARLY_END_STATUS": "7", "STUB_EARLY_END_OUTPUT": line}
+                done, log, _ = self.run_refusals(env)
+                self.assertEqual(done.returncode, 0, done.stderr + log)
+                for proof in ("class=R", "exit_code=7", f"error_line={line}", f"last_line={line}"):
+                    self.assertIn(f"refusals: early end: {proof}", done.stdout.splitlines())
+        done, log, _ = self.run_refusals_with_policy(1, "the newest audit entry is invalid", env)
+        self.assertEqual(done.returncode, 0, done.stderr + log)
+        done, log, _ = self.run_refusals_with_policy(1, "another error", env)
+        self.assertEqual(done.returncode, 1, done.stdout + log)
+        self.assertIn("refusals: early end: class=R", done.stdout.splitlines())
+
+    def test_refusals_accept_a_completion_at_marker_1_only_when_not_required(self):
+        for required in (0, 1):
+            with self.subTest(required=required):
+                done, log, _ = self.run_refusals_with_policy(required, "")
+                self.assertEqual(done.returncode, required, done.stderr + log)
+                self.assertIn("refusals: early end: class=S", done.stdout.splitlines())
+
+    def test_refusals_fail_on_an_inconclusive_early_end_run(self):
+        for status, output in ((0, RECOVER_LINE), (0, EARLY_END_LINE.replace("OwnPasswordChanged", "Login")),
+                               (1, ""), (1, f"{EARLY_END_ERROR_LINE}\n{EARLY_END_ERROR_LINE}"),
+                               (1, f"{EARLY_END_ERROR_LINE}\n{EARLY_END_LINE}")):
+            with self.subTest(status=status, output=output):
+                done, log, state = self.run_refusals({"STUB_EARLY_END_STATUS": str(status), "STUB_EARLY_END_OUTPUT": output})
+                self.assertEqual(done.returncode, 1, done.stdout + log)
+                self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
+                self.assertNotIn("drill.volume", state)
+                self.assertNotIn("refusals.wal-copy", state)
+        for env in ({"STUB_EARLY_END_SEGMENT_MISSING": "1"},
+                    {"STUB_SEGMENTS": REFUSALS_SEGMENTS + "000000010000000000000007.partial\n"}):
+            with self.subTest(env=env):
+                done, log, state = self.run_refusals(env)
+                self.assertEqual(done.returncode, 1, done.stdout + log)
+                self.assertIn("refusals: early end: class=I", done.stdout.splitlines())
+                self.assertIn("refusals: early end: exit_code=none", done.stdout.splitlines())
+                self.assertNotIn("sudo dd ", log)
+                self.assertNotIn("refusals.wal-copy", state)
 
     def test_refusals_write_no_wal_and_switch_no_segment(self):
         # Marker 2 must stay in the .partial file until crash. The step prepare ended the gap segments.
@@ -981,9 +1108,9 @@ class StepTests(unittest.TestCase):
     def test_refusals_delete_each_scratch_volume_and_the_copy(self):
         done, log, state = self.run_refusals()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(len(re.findall(r"^volume create ", log, re.M)), 2)
-        self.assertEqual(len(re.findall(r"^volume rm ", log, re.M)), 2)
-        self.assertEqual(len(re.findall(r"^sudo rm -rf -- ", log, re.M)), 1)
+        self.assertEqual(len(re.findall(r"^volume create ", log, re.M)), 3)
+        self.assertEqual(len(re.findall(r"^volume rm ", log, re.M)), 3)
+        self.assertEqual(len(re.findall(r"^sudo rm -rf -- ", log, re.M)), 2)
         self.assertNotIn("drill.volume", state)
         self.assertNotIn("refusals.wal-copy", state)
 
@@ -993,6 +1120,8 @@ class StepTests(unittest.TestCase):
         real = "/walarchive-disk/walarchive"
         for line in log.splitlines():
             if re.match(r"^sudo (rm|install|mv|chmod|chown|touch|tee|truncate)\b", line):
+                self.assertNotIn(real, line)
+            if line.startswith("sudo dd "):
                 self.assertNotIn(real, line)
             if line.startswith("sudo cp "):
                 self.assertTrue(line.endswith("/state/wal-copy/"), line)
@@ -2370,6 +2499,17 @@ if [[ ${STUB_COMPOSE_RECOVERY:-} == 1 ]]; then
   esac
 fi
 case "$*" in
+  "cp -a -- "*"/state/wal-copy/")
+    if [[ $(grep -c '^sudo cp -a -- ' "$STUB_LOG") == 2 && ${STUB_EARLY_END_SEGMENT_MISSING:-0} == 0 ]]; then
+      dir=${@: -1}
+      mkdir -p -- "$dir"
+      for offset in 116 8176; do
+        printf '\\245' | dd of="${dir}000000010000000000000006.partial" bs=1 seek="$offset" conv=notrunc status=none
+      done
+    fi ;;
+  "test -f "*"/state/wal-copy/"*.partial|"test -e "*"/state/wal-copy/"[0-9]*) exec "$@" ;;
+  "od "*"/state/wal-copy/"*.partial|"dd of="*"/state/wal-copy/"*.partial*) exec "$@" ;;
+  "rm -rf -- "*"/state/wal-copy") exec "$@" ;;
   "test -f "*.dump.sha256) exit 1 ;;
   "test -f "*) exit "${STUB_PARTIAL_STATUS:-0}" ;;
   "test -e "*) exit "${STUB_COMPLETE_STATUS:-1}" ;;
@@ -2387,8 +2527,9 @@ case "$*" in
     # The move of the segment files takes the history files too.
     if ! grep -q '^sudo mv -t [^ ]*moved-[0-9_]* -- ' "$STUB_LOG"; then printf '%s\\n' "${STUB_HISTORY-00000002.history}"; fi ;;
   "find "*"-maxdepth 1 -type f"*)
-    # STUB_COPY_SEGMENTS gives the listing of the copy of /wal. Without it the copy has the listing of the archive.
-    if [[ $* == *"/wal-copy -maxdepth"* && -n ${STUB_COPY_SEGMENTS:-} ]]; then printf '%s' "$STUB_COPY_SEGMENTS"
+    # STUB_COPY_SEGMENTS gives the listing for the gap run. The next copy has the listing of the archive.
+    if [[ $* == *"/wal-copy -maxdepth"* && -n ${STUB_COPY_SEGMENTS:-} ]] && \
+      [[ $(grep -c '^sudo cp -a -- ' "$STUB_LOG") == 1 ]]; then printf '%s' "$STUB_COPY_SEGMENTS"
     elif ! grep -q '^sudo mv -t [^ ]*moved-[0-9_]* -- ' "$STUB_LOG"; then printf '%s' "${STUB_SEGMENTS-000000010000000000000002
 000000010000000000000003.partial
 }"; fi ;;
@@ -2437,6 +2578,7 @@ case "$*" in
       *"occurred_at"*) echo "${STUB_BETWEEN:-t}" ;;
       *"SELECT pg_current_wal_lsn()"*) echo "${STUB_LSN:-0/3000060}" ;;
       *"flush_lsn >="*) echo "${STUB_FLUSH:-t}" ;;
+      *"pg_walfile_name_offset"*) echo "$STUB_EARLY_END_POSITION" ;;
       *"pg_walfile_name"*) echo "${STUB_SEGMENT:-000000010000000000000003}" ;;
     esac ;;
   *"--entrypoint pg_controldata"*)
@@ -2487,6 +2629,10 @@ case "$*" in
     printf '%s\\n' "$STUB_REFUSE_OUTPUT"
     exit "${STUB_REFUSE_STATUS:-1}" ;;
   *":/wal:ro pitr-volume"*)
+    if [[ $(grep -c ':/wal:ro pitr-volume' "$STUB_LOG") == 2 ]]; then
+      if [[ -n $STUB_EARLY_END_OUTPUT ]]; then printf '%s\\n' "$STUB_EARLY_END_OUTPUT"; fi
+      exit "${STUB_EARLY_END_STATUS:-0}"
+    fi
     printf '%s\\n' "$STUB_GAP_OUTPUT"
     exit "${STUB_GAP_STATUS:-1}" ;;
   *"-e PITR_EXPECTED_LSN="*"pitr-volume")
