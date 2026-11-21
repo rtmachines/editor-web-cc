@@ -10,7 +10,8 @@ pub enum StringKind {
     /// `STRING`, a length counts bytes. On a `Utf8` machine, it counts UTF-8 bytes
     /// (ADR-0137 (h), ADR-0202).
     String,
-    /// `WSTRING`, one UTF-16 code unit per character. A character outside the Basic Multilingual Plane counts 2 (ADR-0137 (i)).
+    /// `WSTRING`, one UTF-16 code unit per character.
+    /// A character outside the Basic Multilingual Plane counts 2 (ADR-0137 (i)).
     Wstring,
 }
 
