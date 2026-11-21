@@ -30,8 +30,8 @@ A task that changes `.github/workflows/ci.yml` or a file `deploy/db/check-*.sql`
 
 ## 3. Integration checks
 
-- [ ] 3.1 (.) Run `bash -n deploy/ci/pitr-recovery.sh` and `bash deploy/ci/check.sh`. Then the orchestrator asks the owner for the commit and the push, and dispatches `ci.yml` on the branch as in task 1.2. Check: both commands pass, and the jobs `ci-scripts` and `pitr-recovery` pass.
-- [ ] 3.2 (.) Run `openspec validate review-deploy-fixes-2 --strict`, `openspec validate --specs --strict`, and `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md openspec/changes/review-deploy-fixes-2/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'`. Check: both validations pass, and ste-lint reports 0 hard violations.
+- [x] 3.1 (.) Run `bash -n deploy/ci/pitr-recovery.sh` and `bash deploy/ci/check.sh`. Then the orchestrator asks the owner for the commit and the push, and dispatches `ci.yml` on the branch as in task 1.2. Check: both commands pass, and the jobs `ci-scripts` and `pitr-recovery` pass.
+- [x] 3.2 (.) Run `openspec validate review-deploy-fixes-2 --strict`, `openspec validate --specs --strict`, and `bash -O globstar -O nullglob -c 'python -I tools/ste-lint/ste-lint.py docs/{architecture,adr,ops,user}/**/*.md openspec/specs/**/*.md openspec/changes/review-deploy-fixes-2/**/*.md README.md CONTRIBUTING.md CHANGELOG.md'`. Check: both validations pass, and ste-lint reports 0 hard violations.
 
 ## Order and shared files
 
