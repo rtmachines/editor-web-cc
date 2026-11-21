@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-21
+# The change adds a CI proof and changes one runbook line. No requirement of a spec changes.
+skip_specs: true

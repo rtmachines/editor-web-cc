@@ -33,6 +33,11 @@ TARGET_SQL="SELECT to_char(date_trunc('second', clock_timestamp() AT TIME ZONE '
 DRILL_VOLUME_PATTERN='^recipe-editor_pgdata_drill_[0-9]{8}_[0-9]{6}$'
 LINE_SEQ_PATTERN='"chain_seq":([0-9]+)[,}]'
 LINE_ACTION_PATTERN='"action":"([A-Za-z]+)"'
+EARLY_END_STATE_PATTERN='^[0-9A-F]+/[0-9A-F]+\|([0-9A-F]{24})\|(0|[1-9][0-9]{0,9})\|[1-9][0-9]{0,9}\|[1-9][0-9]{0,9}$'
+# Read the position once. The setting column gives both sizes in bytes.
+EARLY_END_POSITION_SQL="WITH wal_position AS (SELECT pg_current_wal_insert_lsn() AS lsn) \
+SELECT lsn, file_name, file_offset, seg.setting, blk.setting FROM wal_position CROSS JOIN LATERAL pg_walfile_name_offset(lsn) \
+JOIN pg_settings AS seg ON seg.name = 'wal_segment_size' JOIN pg_settings AS blk ON blk.name = 'wal_block_size'"
 
 change_own_password() {
   # The first argument is the current password. The second is the next one.
@@ -78,16 +83,15 @@ require_target_between_markers() {
 }
 
 wait_marker_flush() {
-  # ADR-0077 (c) and ADR-0106 (p) steps 3 and 5. The argument is the step name. The function sets FLUSHED_POSITION.
+  # ADR-0077 (c) and ADR-0106 (p) steps 3 and 5. The argument is the step name.
   # No segment switch runs, so the segment of the position stays a .partial file and never exists as a complete file.
-  local segment
   FLUSHED_POSITION=$(sql -c 'SELECT pg_current_wal_lsn()') || fail "$1: cannot read the WAL position."
   [[ $FLUSHED_POSITION =~ $LSN_PATTERN ]] || fail "$1: the WAL position is invalid."
   retry flush_reached "$FLUSHED_POSITION" || fail "$1: the flush check did not return t."
-  segment=$(sql -c "SELECT pg_walfile_name('$FLUSHED_POSITION'::pg_lsn - 1)") || fail "$1: cannot read the WAL segment name."
-  [[ $segment =~ ^[0-9A-F]{24}$ ]] || fail "$1: the WAL segment name is invalid."
-  sudo test -f "$RECIPE_WALARCHIVE_DIR/$segment.partial" || fail "$1: the marker segment has no .partial file."
-  if sudo test -e "$RECIPE_WALARCHIVE_DIR/$segment"
+  FLUSHED_SEGMENT=$(sql -c "SELECT pg_walfile_name('$FLUSHED_POSITION'::pg_lsn - 1)") || fail "$1: cannot read the WAL segment name."
+  [[ $FLUSHED_SEGMENT =~ ^[0-9A-F]{24}$ ]] || fail "$1: the WAL segment name is invalid."
+  sudo test -f "$RECIPE_WALARCHIVE_DIR/$FLUSHED_SEGMENT.partial" || fail "$1: the marker segment has no .partial file."
+  if sudo test -e "$RECIPE_WALARCHIVE_DIR/$FLUSHED_SEGMENT"
   then
     fail "$1: the marker segment is complete, not partial."
   fi
@@ -120,7 +124,7 @@ markers() {
   # The clock of db gives the second. The answer of the HTTP request proves that the commit is done.
   # Marker 2 commits one second after the target time, so the target time lies between the two commits.
   # The recovered cluster must hold the row heartbeat.last_at, so marker 1 waits for it.
-  local target
+  local target early_end segment
   [[ -s $CI_STATE/new_password && -s $CI_STATE/cookies.json ]] || fail "markers: run prepare first."
   wait_heartbeat_row
   log "markers: commit marker 1 with ChangeOwnPassword"
@@ -131,10 +135,15 @@ markers() {
   retry clock_passed "$target" || fail "markers: the clock of db did not pass the target time."
   printf '%s\n' "$target" >"$CI_STATE/target.time"
   log "markers: commit marker 2 with ChangeOwnPassword"
+  early_end=$(sql -c "$EARLY_END_POSITION_SQL") || fail "markers: cannot read the WAL position before marker 2."
+  [[ $early_end =~ $EARLY_END_STATE_PATTERN ]] || fail "markers: the WAL position before marker 2 is invalid."
+  segment=${BASH_REMATCH[1]}
+  printf '%s\n' "$early_end" >"$CI_STATE/early-end.state"
   commit_marker 2
   require_target_between_markers "$target" "$(<"$CI_STATE/marker1.seq")" "$(<"$CI_STATE/marker2.seq")"
   log "markers: wait for the flush of marker 2"
   wait_marker_flush markers
+  [[ $segment == "$FLUSHED_SEGMENT" ]] || fail "markers: the record before marker 2 is not in the newest segment."
   log "markers: done"
 }
 
@@ -242,12 +251,18 @@ drill() {
 # The ERROR lines that pitr-volume writes (ADR-0106 (a) and (g) step 2). A target after the newest commit ends the recovery with FATAL.
 TARGET_ERROR="the temporary server did not finish the recovery"
 GAP_ERROR="the recovery ended before the end of the WAL archive"
+# V-02: change B sets 1 with its fix of ADR-0106 (g) step 2.
+EARLY_END_REFUSAL_REQUIRED=0
+EARLY_END_ERROR=""
 # The word @JOB@ becomes the job that writes the line. The step refuse expects a line of walarchive-entry.
 ERROR_LINE_PATTERN='^\{"timestamp":"[^"]+","level":"ERROR","job":"@JOB@","message":"([^"]*)"\}$'
+# pitr-volume can add fields to an ERROR line.
+EARLY_END_ERROR_PATTERN='^\{"timestamp":"[^"]+","level":"ERROR","job":"pitr-volume","message":"([^"]*)"(,.*)?\}$'
+# Step 7 of pitr-volume logs the hashes before it starts the recovery server.
+EARLY_END_HASHES_PATTERN='^\{"timestamp":"[^"]+","level":"INFO","job":"pitr-volume","message":"configuration files of the copy hashed"(,.*)?\}$'
 # The ERROR line of the guard of walarchive-entry for a segment of another timeline (ADR-0106 (m)).
 TIMELINE_ERROR="segments of another timeline are in the WAL archive"
-# The name of the running step and the job that writes its ERROR line. The step refuse sets both.
-# The shared functions use them in their messages. The step refusals runs with the defaults.
+# The shared functions use these names in their messages. The step refuse sets both names.
 ERROR_STEP=refusals
 ERROR_JOB=pitr-volume
 # One hour after the clock of db lies after every commit that the archive can hold when the run starts.
@@ -280,6 +295,10 @@ refusals_exit() {
   trap - EXIT
   (delete_drill_volume) || status=1
   (delete_wal_copy) || status=1
+  if [[ ${1:-} == early-end ]]
+  then
+    log_early_end_proof
+  fi
   exit "$status"
 }
 
@@ -371,8 +390,124 @@ make_wal_gap_copy() {
   log "refusals: the copy of /wal lacks the segment $victim"
 }
 
+log_early_end_proof() {
+  local name
+  for name in lsn segment offset wal_segment_size wal_block_size byte_offset byte_old byte_new \
+    marker1_seq marker2_seq exit_code error_line last_line class
+  do
+    printf 'refusals: early end: %s=%s\n' "$name" "${proof[$name]:-none}"
+  done
+}
+
+read_early_end_state() {
+  local row
+  proof[marker2_seq]=$(<"$CI_STATE/marker2.seq") || fail "refusals: cannot read the sequence of marker 2."
+  proof[marker1_seq]=$(<"$CI_STATE/marker1.seq") || fail "refusals: cannot read the sequence of marker 1."
+  [[ ${proof[marker1_seq]} =~ $MARKER_SEQ_PATTERN && ${proof[marker2_seq]} =~ $MARKER_SEQ_PATTERN \
+    && ${proof[marker1_seq]} != "${proof[marker2_seq]}" ]] || fail "refusals: the marker sequences are invalid."
+  row=$(<"$CI_STATE/early-end.state") || fail "refusals: cannot read the WAL position before marker 2."
+  [[ $row =~ $EARLY_END_STATE_PATTERN ]] || fail "refusals: the WAL position before marker 2 is invalid."
+  IFS='|' read -r 'proof[lsn]' 'proof[segment]' 'proof[offset]' \
+    'proof[wal_segment_size]' 'proof[wal_block_size]' <<<"$row"
+}
+
+check_early_end_segment() {
+  local segment=$1 start newest
+  sudo test -f "$WAL_COPY_DIR/$segment.partial" || fail "refusals: the WAL copy has no .partial file for the early end."
+  if sudo test -e "$WAL_COPY_DIR/$segment"
+  then
+    fail "refusals: the segment for the early end is complete."
+  fi
+  start=$(base_start_segment "$WAL_COPY_DIR")
+  newest=$(sudo find "$WAL_COPY_DIR" -maxdepth 1 -type f -regextype posix-extended \
+    -regex "$COMPLETE_SEGMENT_REGEX"'(\.partial)?' -printf '%f\n' \
+    | awk -v timeline="${start:0:8}" 'substr($0, 1, 8) == timeline { sub(/\.partial$/, ""); print }' \
+    | sort | tail -n 1) || fail "refusals: cannot find the newest segment of the WAL copy."
+  [[ $segment == "$newest" ]] || fail "refusals: the record before marker 2 is not in the newest segment of the WAL copy."
+}
+
+read_wal_byte() {
+  local byte
+  byte=$(sudo od -An -j "$2" -N 1 -tu1 -- "$1") || return 1
+  byte=${byte//[[:space:]]/}
+  [[ $byte =~ ^(0|[1-9][0-9]{0,2})$ ]] || return 1
+  printf '%s\n' "$byte"
+}
+
+damage_early_end_record() {
+  local offset=${proof[offset]} segment_size=${proof[wal_segment_size]} block_size=${proof[wal_block_size]}
+  local byte_offset partial="$WAL_COPY_DIR/${proof[segment]}.partial" old inverted octet
+  ((offset < segment_size && block_size >= 24 && segment_size % block_size == 0)) \
+    || fail "refusals: the WAL offset or sizes are invalid."
+  # The record header has 24 bytes. The CRC starts at byte 20.
+  byte_offset=$((offset + 20))
+  if ((offset % block_size > block_size - 24))
+  then
+    byte_offset=$offset
+  fi
+  proof[byte_offset]=$byte_offset
+  old=$(read_wal_byte "$partial" "$byte_offset") || fail "refusals: cannot read the byte to invert."
+  proof[byte_old]=$old
+  inverted=$((old ^ 255))
+  octet=$(printf '%03o' "$inverted")
+  printf '%b' "\\$octet" | sudo dd of="$partial" bs=1 seek="$byte_offset" count=1 oflag=nofollow status=none conv=notrunc \
+    || fail "refusals: cannot invert the byte in the WAL copy."
+  proof[byte_new]=$(read_wal_byte "$partial" "$byte_offset") || fail "refusals: cannot read the inverted byte."
+  [[ ${proof[byte_new]} == "$inverted" ]] || fail "refusals: the byte did not change to its inverse."
+}
+
+classify_early_end() {
+  local last=${proof[last_line]}
+  if [[ ${proof[exit_code]} != 0 ]]
+  then
+    if grep -Eq "$EARLY_END_HASHES_PATTERN" "$1" \
+      && [[ $(grep -c '"level":"ERROR"' "$1" || true) == 1 && $last =~ $EARLY_END_ERROR_PATTERN ]]
+    then
+      proof[class]=R
+      proof[error_line]=$last
+      proof[error_message]=${BASH_REMATCH[1]}
+    fi
+  elif [[ $(grep -c '"level":"ERROR"' "$1" || true) == 0 \
+    && $last =~ $PITR_MESSAGE_PATTERN && $last == *'"level":"INFO","job":"pitr-volume",'* \
+    && $last =~ $LINE_SEQ_PATTERN && ${BASH_REMATCH[1]} == "${proof[marker1_seq]}" \
+    && $last =~ $LINE_ACTION_PATTERN && ${BASH_REMATCH[1]} == "$MARKER_ACTION" ]]
+  then
+    proof[class]=S
+  fi
+}
+
+run_early_end() {
+  local log_file=$CI_STATE/early-end.log status=0
+  declare -gA proof=([class]=I)
+  trap 'refusals_exit early-end' EXIT
+  read_early_end_state
+  copy_wal_archive
+  check_early_end_segment "${proof[segment]}"
+  damage_early_end_record
+  log "refusals: run pitr-volume with one damaged record in the copy of /wal"
+  create_scratch_volume refusals
+  compose run --rm --no-deps -T -v "$SCRATCH_VOLUME:/var/lib/postgresql/data" \
+    -v "$WAL_COPY_DIR:/wal:ro" pitr-volume | tee "$log_file" || status=$?
+  proof[exit_code]=$status
+  proof[last_line]=$(tail -n 1 "$log_file")
+  delete_drill_volume
+  delete_wal_copy
+  trap refusals_exit EXIT
+  classify_early_end "$log_file"
+  log_early_end_proof
+  case ${proof[class]}:$EARLY_END_REFUSAL_REQUIRED in
+    R:0|S:0) ;;
+    R:1)
+      [[ ${proof[error_message]} == "$EARLY_END_ERROR" ]] || fail "refusals: the early end gave a different error."
+      ;;
+    I:*) fail "refusals: the early end run is inconclusive." ;;
+    *) fail "refusals: the early end run must end with the required refusal." ;;
+  esac
+}
+
 refusals() {
-  # ADR-0106 (p) step 4, the second and the third run. Both run on a new scratch volume. No run touches the production volume.
+  # ADR-0106 (p) step 4 gives the second and third runs. D1 of review-deploy-fixes-2 gives the fourth run.
+  # Each run uses a new scratch volume.
   local before after target
   [[ -s $CI_STATE/marker2.seq ]] || fail "refusals: run markers first."
   before=$(production_facts)
@@ -395,6 +530,7 @@ refusals() {
     -v "$SCRATCH_VOLUME:/var/lib/postgresql/data" -v "$WAL_COPY_DIR:/wal:ro" pitr-volume
   delete_drill_volume
   delete_wal_copy
+  run_early_end
   trap - EXIT
   after=$(production_facts)
   [[ $before == "$after" ]] || fail "refusals: a production fact changed during the step."

@@ -598,8 +598,8 @@ jobs:
       - name: Run the drill and refuse its volume (D8 drill)
         timeout-minutes: 15
         run: bash deploy/ci/pitr-recovery.sh drill
-      # Allow 10 minutes for the target after the newest commit and for the gap in the WAL.
-      - name: Refuse a late target and a gap in the WAL (D8 refusals)
+      # Allow 10 minutes for the late target, the WAL gap, and the damaged record.
+      - name: Check a late target, a WAL gap, and an early end (D8 refusals)
         timeout-minutes: 10
         run: bash deploy/ci/pitr-recovery.sh refusals
       # Allow 8 minutes to delete app and backup, kill db, delete walarchive, and delete pg_control.
