@@ -574,33 +574,6 @@ The current link of the top bar SHALL have `aria-current="page"` and SHALL show 
 - **WHEN** the style test reads the rule of `[aria-current]` in the top bar
 - **THEN** the rule sets a bottom border of 3 px and the weight 700
 
-### Requirement: Language switch
-Every full page that answers a `GET` request SHALL hold a form that sends `POST /lang`. The form SHALL send the CSRF token of the session, or the field `csrf_pre` on the login page. The field `next` SHALL hold the path and the query of the request. A full page that answers another method SHALL hold no switch. The login page SHALL always hold the switch with `next` set to `/login`, also as the answer of a failed `POST /login` (R10, A17).
-
-#### Scenario: Language switch on the user list
-- **GIVEN** the Administrator `akowal` with an open session
-- **WHEN** `akowal` sends `GET /users?q=ab`
-- **THEN** the page holds a form that sends `POST /lang` with the field `csrf_token` of the session
-- **AND** the field `next` of the form holds `/users?q=ab`
-
-#### Scenario: Language switch on the login page
-- **GIVEN** a browser without a session
-- **WHEN** a user sends `GET /login`
-- **THEN** the page holds a form that sends `POST /lang` with the field `csrf_pre`
-- **AND** the field `csrf_pre` holds the nonce of the cookie `__Host-recipe_csrf` of the same response
-
-#### Scenario: Language switch after a failed login
-- **GIVEN** a browser without a session
-- **WHEN** a user sends `POST /login` with a wrong password and without the header `HX-Request`
-- **THEN** the login page holds a form that sends `POST /lang` with the field `csrf_pre`
-- **AND** the field `next` of the form holds `/login`
-
-#### Scenario: No switch on the page of a one-time password
-- **GIVEN** the Administrator `akowal` with an open session
-- **WHEN** `akowal` sends `POST /users/anowak/reset-password` without the header `HX-Request`
-- **THEN** the page shows the one-time password
-- **AND** the page holds no form that sends `POST /lang`
-
 ### Requirement: Language labels
 The button of each language SHALL show the name of the language in that language, with the attribute `lang` of that language. The button of the current language SHALL have `aria-current="true"` and the look of the current navigation link (R10, A17, A44).
 
@@ -3243,3 +3216,31 @@ The form line of `E-PLT-013` SHALL name the reason "reserved member name" or "to
 - **GIVEN** the ProcessEngineer `anowak` with an open session and a draft of `M10` with the encoding `Utf8` and the parameter `LABEL` of type `STRING(4)`
 - **WHEN** `anowak` sends an HTMX `POST` of the value form of `LABEL` with the text `ééé`
 - **THEN** the answer shows `E-RCP-005` with a line that names the length 4 in UTF-8 bytes
+
+### Requirement: Language switch on full pages
+Every full page that answers a `GET` request SHALL hold a form that sends `POST /lang`. The form SHALL send the CSRF token of the session, or the field `csrf_pre` on the login page. The field `next` SHALL hold the path and the query of the request. A full page that answers another method SHALL hold no switch. The login page that answers `GET /login` SHALL hold the switch with `next` set to `/login`. The login page that answers a failed `POST /login` SHALL hold no switch (R10, A17).
+
+#### Scenario: Language switch on the user list
+- **GIVEN** the Administrator `akowal` with an open session
+- **WHEN** `akowal` sends `GET /users?q=ab`
+- **THEN** the page holds a form that sends `POST /lang` with the field `csrf_token` of the session
+- **AND** the field `next` of the form holds `/users?q=ab`
+
+#### Scenario: Language switch on the login page
+- **GIVEN** a browser without a session
+- **WHEN** a user sends `GET /login`
+- **THEN** the page holds a form that sends `POST /lang` with the field `csrf_pre`
+- **AND** the field `csrf_pre` holds the nonce of the cookie `__Host-recipe_csrf` of the same response
+
+#### Scenario: No switch after a failed login
+- **GIVEN** a browser without a session
+- **WHEN** a user sends `POST /login` with a wrong password and without the header `HX-Request`
+- **THEN** the login page shows the error and the login form with the field `csrf_pre`
+- **AND** the field `csrf_pre` holds the nonce of the cookie `__Host-recipe_csrf` of the same response
+- **AND** the page holds no form that sends `POST /lang`
+
+#### Scenario: No switch on the page of a one-time password
+- **GIVEN** the Administrator `akowal` with an open session
+- **WHEN** `akowal` sends `POST /users/anowak/reset-password` without the header `HX-Request`
+- **THEN** the page shows the one-time password
+- **AND** the page holds no form that sends `POST /lang`

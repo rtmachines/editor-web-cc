@@ -51,7 +51,8 @@ Tasks that edit one file run in sequence. All other tasks can run in parallel.
 
 ## 7. e2e (V-35)
 
-- [ ] 7.1 (e2e) Apply D11 V-35 in `e2e/tests/leaf-grid.spec.ts`. — red test: none, because the behavior is right. Add `hx-get="/recipes"` to the jump link in its template once. The template is part of the server image, so rebuild the dev image with the `up -d --build` command of `CLAUDE.md` "Commands". Then see both cases fail. Restore the template and rebuild again. — Check: `cd e2e && npm ci && E2E_PASSWORD=<12 to 128 characters> npx playwright test tests/leaf-grid.spec.ts` on the dev stack
+- [x] 7.1 (e2e) Apply D11 V-35 in `e2e/tests/leaf-grid.spec.ts`. — red test: none, because the behavior is right. Add `hx-get="/recipes"` to the jump link in its template once. The template is part of the server image, so rebuild the dev image with the `up -d --build` command of `CLAUDE.md` "Commands". Then see both cases fail. Restore the template and rebuild again. — Check: `cd e2e && npm ci && E2E_PASSWORD=<12 to 128 characters> npx playwright test tests/leaf-grid.spec.ts` on the dev stack
+  - The CI job "Browser regression" ran the check, and the dev stack stayed unchanged. The job passed both cases on pull request #95. With the mutation, run 44941064082 failed both cases.
 
 ## 8. Documents (V-25)
 
