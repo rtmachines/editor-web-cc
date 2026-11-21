@@ -16,7 +16,7 @@ use recipe_app::recipe::{
 use recipe_domain::recipe::{LeafTexts, LimitList, ParameterKey, ValueInput};
 
 use super::definition::Definition;
-use super::fields::{FieldSet, read_form};
+use super::fields::{FieldSet, SentFields, read_form};
 use super::form_view::{ParameterFormFragment, ParameterFormView, Place};
 use super::page::{read_parameter, stored_shown};
 use super::path_parameter;
@@ -31,12 +31,23 @@ use crate::pages::request::PageRequest;
 use crate::pages::saved_notice::saved_notice;
 use crate::state::WebState;
 
-/// Build the input of `UpdateParameterDefinition`. The form always sends the value and the limits.
+/// Return true when the request keeps the stored value and limits (design D1, ADR-0029).
+///
+/// Three facts must hold. The sent `type` equals the stored type text. The request has no value
+/// field. The request has no limit row. The edit form always sends the fields, so only another
+/// client meets this case.
+fn keeps_value(form: &ParameterForm, definition: &Definition, sent: &SentFields) -> bool {
+    form.type_text.as_deref() == Some(definition.type_expr.to_string().as_str())
+        && sent.values().is_empty()
+        && sent.limits().is_empty()
+}
+
+/// Build the input of `UpdateParameterDefinition`. `retype` is `None` when the value is kept.
 fn update_input(
     target: &Target,
     key: ParameterKey,
     definition: Definition,
-    (value, limits): (LeafTexts, LimitList),
+    retype: Option<(LeafTexts, LimitList)>,
 ) -> UpdateParameterDefinitionInput {
     UpdateParameterDefinitionInput {
         reference: target.reference.clone(),
@@ -50,7 +61,7 @@ fn update_input(
         type_expr: definition.type_expr,
         s7_address: definition.s7_address,
         ordinal: definition.ordinal,
-        retype: Some(RetypeInput {
+        retype: retype.map(|(value, limits)| RetypeInput {
             value: ValueInput::Texts(value),
             limits,
         }),
@@ -141,7 +152,8 @@ pub(crate) async fn save(
         Prepared::Answer(answer) => return Ok(answer),
         Prepared::Ready(ready) => *ready,
     };
-    let input = update_input(&target, key, definition.clone(), (value, limits));
+    let retype = (!keeps_value(&form, &definition, &sent)).then_some((value, limits));
+    let input = update_input(&target, key, definition.clone(), retype);
     let result = UpdateParameterDefinition::new(state.identity().app().clone())
         .execute(request.auth()?.user(), &request.meta(), input)
         .await;

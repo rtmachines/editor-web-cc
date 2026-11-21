@@ -215,7 +215,9 @@ impl<'a> Layout<'a> {
         })
     }
 
-    /// Build the layout of the login page. The switch returns to `/login`.
+    /// Build the layout of the page of `GET /login`. The switch returns to `/login`.
+    ///
+    /// A failed `POST /login` clears `next`, so its page has no switch (ADR-0036 (j)).
     pub(crate) fn for_login(
         texts: Texts<'a>,
         lang: Lang,

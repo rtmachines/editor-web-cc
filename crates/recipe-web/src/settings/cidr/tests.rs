@@ -73,3 +73,38 @@ fn empty_list_matches_nothing() {
     let list = CidrList::default();
     assert!(!list.contains(ip("127.0.0.1")));
 }
+
+#[test]
+fn a_mapped_ipv6_entry_matches_the_canonical_ipv4_peer() {
+    let cidr = Cidr::parse("::ffff:172.28.0.2/128").unwrap();
+    assert!(cidr.contains(ip("172.28.0.2")));
+    assert!(!cidr.contains(ip("172.28.0.3")));
+}
+
+#[test]
+fn a_mapped_entry_with_prefix_120_matches_its_ipv4_subnet() {
+    let cidr = Cidr::parse("::ffff:172.28.0.0/120").unwrap();
+    assert!(cidr.contains(ip("172.28.0.7")));
+    assert!(!cidr.contains(ip("172.28.1.7")));
+}
+
+#[test]
+fn a_mapped_entry_with_prefix_96_matches_every_ipv4_peer() {
+    let cidr = Cidr::parse("::ffff:0:0/96").unwrap();
+    assert!(cidr.contains(ip("10.0.0.1")));
+    assert!(cidr.contains(ip("172.28.0.2")));
+}
+
+#[test]
+fn a_mapped_entry_below_prefix_96_stays_ipv6() {
+    let cidr = Cidr::parse("::ffff:0:0/80").unwrap();
+    assert!(!cidr.contains(ip("0.0.0.0")));
+    assert!(!cidr.contains(ip("172.28.0.2")));
+}
+
+#[test]
+fn a_loopback_ipv6_entry_stays_ipv6() {
+    let cidr = Cidr::parse("::1/128").unwrap();
+    assert!(cidr.contains(ip("::1")));
+    assert!(!cidr.contains(ip("0.0.0.1")));
+}

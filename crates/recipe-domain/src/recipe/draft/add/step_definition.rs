@@ -32,7 +32,8 @@ impl Draft {
     /// # Errors
     ///
     /// Returns `E-RCP-014`, `E-PLT-020`, `E-PLT-013`, the `PlantError` of a failed resolution,
-    /// `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or `E-RCP-023` for the first check that fails.
+    /// `E-RCP-003`, `E-RCP-053`, `E-RCP-057`, `E-RCP-054`, `E-RCP-023`, `E-RCP-056`, or
+    /// `E-RCP-058` for the first check that fails.
     pub(super) fn check_new_definition<'t>(
         &self,
         new: &NewParameter,
@@ -59,7 +60,8 @@ impl Draft {
     /// # Errors
     ///
     /// Returns `E-RCP-014`, `E-PLT-020`, `E-PLT-013`, the `PlantError` of a failed resolution,
-    /// `E-RCP-003`, `E-RCP-053`, `E-RCP-054`, or `E-RCP-023` for the first check that fails.
+    /// `E-RCP-003`, `E-RCP-053`, `E-RCP-057`, `E-RCP-054`, `E-RCP-023`, `E-RCP-056`, or
+    /// `E-RCP-058` for the first check that fails.
     pub(in crate::recipe::draft) fn check_definition_parts<'t>(
         &self,
         except: Option<ParameterKey>,

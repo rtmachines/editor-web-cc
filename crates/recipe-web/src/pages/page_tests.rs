@@ -209,7 +209,8 @@ async fn page_layout_of_the_full_error_page() {
     }
 }
 
-// --- Specs "Navigation by permission", "Language switch", "Language labels" ---------------------
+// --- Specs "Navigation by permission", "Language switch on full pages", "Language labels"
+// ---------------------
 
 /// Return the markup of the navigation of a page, or an empty text.
 fn nav_of(body: &str) -> String {
@@ -426,7 +427,7 @@ async fn page_switch_escapes_quotes_in_next() {
 }
 
 #[tokio::test]
-async fn page_switch_after_a_failed_login_keeps_the_nonce_of_the_new_cookie() {
+async fn a_failed_login_page_has_no_switch_and_keeps_csrf_pre() {
     let fixture = Fixture::new();
     let reply = crate::test_support::post_pre_session(
         &fixture,
@@ -436,21 +437,18 @@ async fn page_switch_after_a_failed_login_keeps_the_nonce_of_the_new_cookie() {
     )
     .await;
     assert!(reply.body.contains("<html lang="), "{}", reply.body);
-    let switch = switch_of(&reply.body);
-    assert!(
-        switch.contains(" method=\"post\" action=\"/lang\""),
-        "{switch}"
-    );
-    let nonce = field_value(&switch, "csrf_pre");
+    assert!(!reply.body.contains("action=\"/lang\""), "{}", reply.body);
+    assert!(switch_of(&reply.body).is_empty());
+    let form = at(&reply.body, "<form method=\"post\" action=\"/login\"");
+    let login_form = reply.body.get(form..).unwrap();
+    assert_eq!(login_form.matches("name=\"csrf_pre\"").count(), 1);
+    let nonce = field_value(login_form, "csrf_pre");
     let cookie = set_cookie_of(&reply, "__Host-recipe_csrf").unwrap();
     assert!(
         cookie.starts_with(&format!("__Host-recipe_csrf={nonce}.")),
         "{cookie}"
     );
-    assert!(
-        switch.contains("<input type=\"hidden\" id=\"lang-next\" name=\"next\" value=\"/login\">")
-    );
-    assert!(!switch.contains("csrf_token"));
+    assert!(!reply.body.contains("csrf_token"));
 }
 
 // --- Task 5.4: user pages with the components ---------------------------------------------------

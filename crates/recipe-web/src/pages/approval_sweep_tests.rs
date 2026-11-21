@@ -399,7 +399,7 @@ fn entry_ids(list: &Reply) -> Vec<u64> {
 async fn record_event(world: &AuditWorld) {
     let agent = Some(UserAgent::from("Sweep/1.0"));
     let id = new_request_id().unwrap();
-    let event = SecurityEvent::forbidden(world.data.admin_id, "Op", id, Some(EVENT_ADDRESS), agent);
+    let event = SecurityEvent::forbidden(world.data.admin_id, "Op", id, EVENT_ADDRESS, agent);
     world.fixture.sink.record(event).await.unwrap();
 }
 

@@ -4,7 +4,9 @@
 
 use axum::http::StatusCode;
 use recipe_app::ports::SealedSecret;
-use recipe_domain::plant::{MachineId, PlcConnection, PlcHost, PlcPlatform, Rack, Slot};
+use recipe_domain::plant::{
+    CommMode, MachineId, PlcAddress, PlcConnection, PlcHost, PlcPlatform, Rack, Slot, TcpPort,
+};
 
 use super::connection_tests::{ads_record, seed};
 use crate::i18n::Lang;
@@ -127,7 +129,15 @@ async fn machine_page_shows_the_iec_record_and_a_stored_password_state() {
 async fn machine_page_shows_no_password_when_the_record_holds_none() {
     let world = world();
     let id = seed(&world, 101, PlcPlatform::TwinCat3);
-    world.fixture.store.seed_connection(id, &ads_record(), None);
+    // `Ads` without a login holds no password (`plc_connection_credentials`).
+    let record = PlcConnection::Iec {
+        host: PlcHost::parse("192.168.1.10").unwrap(),
+        port: TcpPort::parse("48898").unwrap(),
+        address: PlcAddress::parse("192.168.1.10.1.1").unwrap(),
+        mode: CommMode::Ads,
+        login: None,
+    };
+    world.fixture.store.seed_connection(id, &record, None);
     for lang in [Lang::En, Lang::Pl] {
         let reply = world
             .get(&world.operator, "/machines/M101", &[cookie_of(lang)])

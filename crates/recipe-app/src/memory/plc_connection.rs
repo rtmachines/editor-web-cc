@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use recipe_domain::plant::{
-    CommMode, DataBlockNumber, MachineId, PasswordState, PlcAddress, PlcConnection,
-    PlcConnectionId, PlcHost, PlcLogin, PlcPlatform, Rack, Slot, TcpPort,
+    CommMode, ConnectionFields, DataBlockNumber, MachineCode, MachineId, PasswordState, PlcAddress,
+    PlcConnection, PlcConnectionId, PlcHost, PlcLogin, PlcPlatform, Rack, Slot, TcpPort,
 };
 use recipe_domain::timestamp::Timestamp;
 use serde_json::Value;
@@ -88,14 +88,16 @@ impl ShapeRow {
         })
     }
 
-    fn to_connection(&self) -> PlcConnection {
+    /// Return the fields of the row for `PlcConnection::for_platform`. The password stays empty.
+    fn to_fields(&self) -> ConnectionFields {
         match self {
             Self::S7 {
                 host, rack, slot, ..
-            } => PlcConnection::S7 {
-                host: host.clone(),
-                rack: *rack,
-                slot: *slot,
+            } => ConnectionFields {
+                host: Some(host.clone()),
+                rack: Some(*rack),
+                slot: Some(*slot),
+                ..ConnectionFields::default()
             },
             Self::Iec {
                 host,
@@ -103,12 +105,13 @@ impl ShapeRow {
                 address,
                 mode,
                 login,
-            } => PlcConnection::Iec {
-                host: host.clone(),
-                port: *port,
-                address: address.clone(),
-                mode: *mode,
+            } => ConnectionFields {
+                host: Some(host.clone()),
+                port: Some(*port),
+                address: Some(address.clone()),
+                mode: Some(*mode),
                 login: login.clone(),
+                ..ConnectionFields::default()
             },
         }
     }
@@ -210,17 +213,28 @@ impl ConnectionRow {
         Ok(())
     }
 
-    fn stored(&self) -> StoredConnection {
-        StoredConnection {
+    /// Build the stored record through `PlcConnection::for_platform` (design D6).
+    ///
+    /// # Errors
+    ///
+    /// Returns the error of a broken invariant when the platform refuses the row.
+    fn stored(&self, machine: MachineCode) -> Result<StoredConnection, StorageError> {
+        let password = if self.sealed.is_some() {
+            PasswordState::Stored
+        } else {
+            PasswordState::Absent
+        };
+        let plan =
+            PlcConnection::for_platform(machine, self.platform, self.shape.to_fields(), password)
+                .map_err(|_| {
+                StorageError::invariant("a stored connection breaks the rules of its platform")
+            })?;
+        Ok(StoredConnection {
             id: PlcConnectionId::from(self.id),
-            connection: self.shape.to_connection(),
+            connection: plan.connection,
             row_version: self.row_version,
-            password: if self.sealed.is_some() {
-                PasswordState::Stored
-            } else {
-                PasswordState::Absent
-            },
-        }
+            password,
+        })
     }
 
     /// Return the image of the row. It never holds `password_sealed`.
@@ -258,6 +272,15 @@ impl MemoryTransaction {
             .machines
             .get(&machine)
             .and_then(|row| row.db_number)
+    }
+
+    /// Return the code of a machine. A connection without its machine breaks an invariant.
+    fn machine_code(&self, machine: MachineId) -> Result<MachineCode, StorageError> {
+        self.state()
+            .machines
+            .get(&machine)
+            .map(|row| row.code)
+            .ok_or_else(|| StorageError::invariant("a connection has no machine"))
     }
 
     /// Return the platform of a machine, or a missing reference for the composite foreign key.
@@ -314,11 +337,11 @@ impl PlcConnections for MemoryTransaction {
         &mut self,
         machine: MachineId,
     ) -> Result<Option<StoredConnection>, StorageError> {
-        Ok(self
-            .state()
-            .connections
-            .get(&machine)
-            .map(ConnectionRow::stored))
+        let Some(row) = self.state().connections.get(&machine) else {
+            return Ok(None);
+        };
+        let code = self.machine_code(machine)?;
+        row.stored(code).map(Some)
     }
 
     async fn lock_connection_for_update(
@@ -328,8 +351,9 @@ impl PlcConnections for MemoryTransaction {
         let Some(row) = self.state().connections.get(&machine) else {
             return Ok(None);
         };
+        let code = self.machine_code(machine)?;
         let locked = Locked {
-            state: row.stored(),
+            state: row.stored(code)?,
             before: row.image(machine),
         };
         self.lock(TABLE, LockMode::ForUpdate, &machine.to_string());
@@ -343,8 +367,9 @@ impl PlcConnections for MemoryTransaction {
         let Some(row) = self.state().connections.get(&machine) else {
             return Ok(None);
         };
+        let code = self.machine_code(machine)?;
         let shared = SharedConnection {
-            stored: row.stored(),
+            stored: row.stored(code)?,
             sealed: row.sealed.clone(),
         };
         self.lock(TABLE, LockMode::ForShare, &machine.to_string());

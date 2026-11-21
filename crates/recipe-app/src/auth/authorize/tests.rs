@@ -3,7 +3,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 
 use super::authorize;
-use crate::auth::Operation;
+use crate::auth::{Operation, RequestMeta};
 use crate::error::AppError;
 use crate::memory::fixtures::{actor, meta};
 use crate::memory::{Fault, MemorySink};
@@ -48,6 +48,23 @@ async fn operator_on_rename_machine_is_forbidden_and_leaves_one_event() {
         event.detail(),
         Some(&serde_json::json!({"operation": "RenameMachine"}))
     );
+}
+
+#[tokio::test]
+async fn a_refusal_without_a_client_address_gives_e_db_008_and_writes_no_event() {
+    let sink = MemorySink::default();
+    let request = meta();
+    let request = RequestMeta::new(request.request_id(), None, None, None);
+    let error = authorize(
+        Operation::RenameMachine,
+        &actor(Role::Operator),
+        &request,
+        &sink,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::DB_008);
+    assert!(sink.events().is_empty());
 }
 
 #[tokio::test]

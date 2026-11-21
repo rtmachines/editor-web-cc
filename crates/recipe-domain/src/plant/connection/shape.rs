@@ -7,6 +7,9 @@ use super::{
 use crate::plant::{MachineCode, PlantError, PlantErrors, PlcPlatform};
 
 /// The connection settings of a PLC. Each platform family has one shape.
+///
+/// [`PlcConnection::for_platform`] is the one constructor. It builds the settings of a request
+/// and the settings of a stored row. A storage adapter calls it for each row that it reads.
 #[derive(Debug)]
 pub enum PlcConnection {
     /// A Siemens S7 PLC.
@@ -133,11 +136,11 @@ impl Faults {
         }
     }
 
-    /// Record `E-PLT-023` or `E-PLT-028` for the login and the password of the mode.
+    /// Record `E-PLT-023` for the login and the password that the mode needs.
     ///
     /// `OpcUa` and `CodesysV3` need a login and a password. `Ads` needs both or neither.
-    /// `ModbusTcp` refuses both. A stored password stands for the password of the request.
-    fn check_credentials(
+    /// A stored password stands for the password of the request.
+    fn check_missing_credentials(
         &mut self,
         mode: CommMode,
         has_login: bool,
@@ -146,10 +149,7 @@ impl Faults {
     ) {
         let has_password = has_new_password || stored == PasswordState::Stored;
         match mode {
-            CommMode::ModbusTcp => self.refuse_in_mode(
-                mode,
-                &[("login", has_login), ("password", has_new_password)],
-            ),
+            CommMode::ModbusTcp => {}
             CommMode::OpcUa | CommMode::CodesysV3 => {
                 self.require_flag("login", has_login);
                 self.require_flag("password", has_password);
@@ -158,6 +158,23 @@ impl Faults {
             // is a fault on the password. The two cases cannot occur together.
             CommMode::Ads if has_login => self.require_flag("password", has_password),
             CommMode::Ads => self.require_flag("login", !has_new_password),
+        }
+    }
+
+    /// Record `E-PLT-028` for the login and the password that the mode refuses.
+    ///
+    /// `ModbusTcp` refuses both. The other modes refuse none.
+    fn check_refused_credentials(
+        &mut self,
+        mode: CommMode,
+        has_login: bool,
+        has_new_password: bool,
+    ) {
+        if mode == CommMode::ModbusTcp {
+            self.refuse_in_mode(
+                mode,
+                &[("login", has_login), ("password", has_new_password)],
+            );
         }
     }
 
@@ -223,7 +240,8 @@ fn s7_plan(faults: &mut Faults, fields: ConnectionFields) -> Option<ConnectionPl
 /// A mode without credentials gives `Clear`. This covers `ModbusTcp` and `Ads` without a login.
 /// A mode with credentials gives `Replace` for a new password and `Keep` for a stored one.
 /// The case of a mode with credentials, no new password, and no stored password is a fault
-/// that `Faults::check_credentials` records. Its plan is `Clear` and the caller never uses it.
+/// that `Faults::check_missing_credentials` records. Its plan is `Clear` and the caller never uses
+/// it.
 fn password_plan(
     mode: CommMode,
     has_login: bool,
@@ -259,19 +277,17 @@ fn iec_plan(
     let port = faults.require("port", fields.port);
     let address = faults.require("address", fields.address);
     let mode = faults.require("comm_mode", fields.mode);
+    let has_login = fields.login.is_some();
+    let has_new_password = fields.password.is_some();
     if let Some(mode) = mode {
+        faults.check_missing_credentials(mode, has_login, has_new_password, stored);
         faults.check_mode(mode);
     }
     if let (Some(CommMode::Ads), Some(address)) = (mode, &address) {
         faults.check_ams_net_id(address);
     }
     if let Some(mode) = mode {
-        faults.check_credentials(
-            mode,
-            fields.login.is_some(),
-            fields.password.is_some(),
-            stored,
-        );
+        faults.check_refused_credentials(mode, has_login, has_new_password);
     }
     let (Some(host), Some(port), Some(address), Some(mode)) = (host, port, address, mode) else {
         return None;

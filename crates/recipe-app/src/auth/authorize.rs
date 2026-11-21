@@ -3,7 +3,7 @@
 use recipe_domain::audit::SecurityEvent;
 
 use super::{CurrentUser, Operation, RequestMeta};
-use crate::error::AppError;
+use crate::error::{AppError, StorageError};
 use crate::ports::SecurityEventSink;
 
 /// Check that the role of `user` may run `op`.
@@ -38,6 +38,7 @@ pub async fn authorize(
 /// # Errors
 ///
 /// Returns `AppError::Forbidden` after the event is written.
+/// Returns `AppError::Storage` with `E-DB-008` when the request has no client address.
 /// Returns `AppError::Storage` when the sink cannot write the event.
 pub(crate) async fn refuse(
     op: Operation,
@@ -45,11 +46,14 @@ pub(crate) async fn refuse(
     meta: &RequestMeta,
     sink: &dyn SecurityEventSink,
 ) -> Result<(), AppError> {
+    let Some(client_ip) = meta.client_ip() else {
+        return Err(StorageError::invariant("a refusal has no client address").into());
+    };
     let event = SecurityEvent::forbidden(
         user.user(),
         op.name(),
         meta.request_id(),
-        meta.client_ip(),
+        client_ip,
         meta.user_agent().cloned(),
     );
     sink.record(event).await?;

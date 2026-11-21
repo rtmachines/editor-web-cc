@@ -290,3 +290,27 @@ fn adr_0202_collect_takes_the_string_encoding() {
         assert_eq!(tree.string_encoding(), encoding);
     }
 }
+
+#[test]
+fn a_nesting_count_that_overflows_gives_e_plt_018_on_s7() {
+    let rows = vec![struct_row(20, "ST_A", &[("x", INT)])];
+    let mut tree = TypeTree::resolve(id(20), &with_seeds(rows)).unwrap();
+    tree.s7_nesting = u32::MAX;
+    let expr = TypeExpr::parse("ARRAY[1..2] OF ST_A@1").unwrap();
+    let error = tree
+        .check_s7_nesting_of_expr(PlcPlatform::S7_1500, &expr)
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_018);
+}
+
+#[test]
+fn a_nesting_count_that_overflows_passes_on_codesys() {
+    let rows = vec![struct_row(20, "ST_A", &[("x", INT)])];
+    let mut tree = TypeTree::resolve(id(20), &with_seeds(rows)).unwrap();
+    tree.s7_nesting = u32::MAX;
+    let expr = TypeExpr::parse("ARRAY[1..2] OF ST_A@1").unwrap();
+    assert!(
+        tree.check_s7_nesting_of_expr(PlcPlatform::CodesysIec, &expr)
+            .is_ok()
+    );
+}

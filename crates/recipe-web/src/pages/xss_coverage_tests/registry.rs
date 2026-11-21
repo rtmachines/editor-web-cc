@@ -1,30 +1,38 @@
 //! The table of the XSS corpus coverage: the cover of each field of a request struct.
 
+/// Why a field carries no free text. The comparison checks each kind against the source.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Kind {
+    /// The Rust name starts with `_`, so no handler reads the field.
+    Unread,
+    /// The type is an integer type or `bool`, also inside `Option`.
+    Typed,
+    /// The type is `SecretField`, also inside `Option`.
+    Secret,
+    /// The function that turns the `String` into a value that is not text. The module of the
+    /// struct reads the field next to a call of this path.
+    Parsed(&'static str),
+}
+
 /// What covers one field of a request struct.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Cover {
     /// The name of the corpus test that sends the payloads through the field.
     Corpus(&'static str),
-    /// The reason that the field carries no free text.
-    NoText(&'static str),
+    /// The kind that shows the field carries no free text.
+    NoText(Kind),
 }
 
 /// One entry of the table: the file below `src/`, the struct, the wire name, and the cover.
 pub(super) type Entry = (&'static str, &'static str, &'static str, Cover);
 
-const CSRF: Cover = Cover::NoText(
-    "The CSRF layer compares the token before the handler runs. No handler reads or shows it.",
-);
-const NUMBER: Cover =
-    Cover::NoText("A number or a flag. A bad text gives a form error without the sent text.");
-const LANG: Cover = Cover::NoText(
-    "A closed set of two language codes. The error line does not show the sent text.",
-);
-const ROLE: Cover =
-    Cover::NoText("A closed set of role names. The form never shows the sent text of this field.");
-const STRING_ENCODING: Cover = Cover::NoText(
-    "A closed set of two encoding names. The form never shows the sent text of this field.",
-);
+const CSRF: Cover = Cover::NoText(Kind::Unread);
+const TYPED: Cover = Cover::NoText(Kind::Typed);
+const LANG: Cover = Cover::NoText(Kind::Parsed("Lang::parse"));
+const ROLE: Cover = Cover::NoText(Kind::Parsed("Role::parse"));
+const PAGE: Cover = Cover::NoText(Kind::Parsed("path_values::page"));
+const FORM_STRING_ENCODING: Cover = Cover::NoText(Kind::Parsed("StringEncoding::parse"));
+const COMMAND_STRING_ENCODING: Cover = Cover::NoText(Kind::Parsed("parse_encoding"));
 const FILTERS: Cover =
     Cover::Corpus("approval_xss_filter_values_that_no_payload_can_satisfy_give_e_web_008");
 const PLANT_GETS: Cover =
@@ -47,19 +55,16 @@ const PLANT_DATA_BLOCK: Cover = Cover::Corpus(
 const PLANT_UNIT_REFUSED: Cover =
     Cover::Corpus("plant_xss_unit_fields_that_the_server_refuses_give_their_error_code");
 
-const PLC_NUMBER: Cover = Cover::NoText(
-    "A number. A bad text gives a form error without the sent text. The form shows a number only.",
-);
-const PLC_GRAMMAR: Cover = Cover::NoText(
-    "A value object with a closed grammar parses it. A bad text gives a form error without the sent text.",
-);
+const PLC_ROW_VERSION: Cover = Cover::NoText(Kind::Parsed("parse::<i64>"));
+const PLC_RACK: Cover = Cover::NoText(Kind::Parsed("Rack::parse"));
+const PLC_SLOT: Cover = Cover::NoText(Kind::Parsed("Slot::parse"));
+const PLC_PORT: Cover = Cover::NoText(Kind::Parsed("TcpPort::parse"));
+const PLC_COMM_MODE: Cover = Cover::NoText(Kind::Parsed("CommMode::parse"));
 const PLC_HOST_TEXT: Cover =
     Cover::Corpus("connection_xss_host_payloads_are_refused_and_shown_escaped_in_the_form");
 const PLC_FREE_TEXT: Cover =
     Cover::Corpus("connection_xss_address_and_login_are_stored_and_shown_escaped_on_both_pages");
-const PLC_SECRET: Cover = Cover::NoText(
-    "The password is never shown, echoed, or logged. The form input has no value attribute.",
-);
+const PLC_SECRET: Cover = Cover::NoText(Kind::Secret);
 
 /// Each field of each `Deserialize` struct of `src/`, with the test or the reason that covers it.
 pub(super) const TABLE: &[Entry] = &[
@@ -68,9 +73,7 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/export_api/connection.rs",
         "ConnectionQuery",
         "recipe",
-        Cover::NoText(
-            "A reference number parses it. A bad text gives 404 E-WEB-005 as JSON without the sent text.",
-        ),
+        Cover::NoText(Kind::Parsed("reference")),
     ),
     (
         "lang.rs",
@@ -143,13 +146,13 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/approval/approve.rs",
         "ApproveFields",
         "row_version",
-        NUMBER,
+        TYPED,
     ),
     (
         "pages/approval/approve.rs",
         "ApproveFields",
         "allow_outdated",
-        NUMBER,
+        TYPED,
     ),
     (
         "pages/approval/approve.rs",
@@ -184,7 +187,7 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "row_version",
-        PLC_NUMBER,
+        PLC_ROW_VERSION,
     ),
     (
         "pages/machines/connection_request.rs",
@@ -196,7 +199,7 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "rack",
-        PLC_NUMBER,
+        PLC_RACK,
     ),
     (
         "pages/machines/data_block_commands.rs",
@@ -214,7 +217,7 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/string_encoding_commands.rs",
         "StringEncodingFields",
         "string_encoding",
-        STRING_ENCODING,
+        COMMAND_STRING_ENCODING,
     ),
     (
         "pages/machines/string_encoding_commands.rs",
@@ -226,13 +229,13 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "slot",
-        PLC_NUMBER,
+        PLC_SLOT,
     ),
     (
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "port",
-        PLC_NUMBER,
+        PLC_PORT,
     ),
     (
         "pages/machines/connection_request.rs",
@@ -244,7 +247,7 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/connection_request.rs",
         "ConnectionRequest",
         "comm_mode",
-        PLC_GRAMMAR,
+        PLC_COMM_MODE,
     ),
     (
         "pages/machines/connection_request.rs",
@@ -292,7 +295,7 @@ pub(super) const TABLE: &[Entry] = &[
         "pages/machines/form.rs",
         "CreateFields",
         "string_encoding",
-        STRING_ENCODING,
+        FORM_STRING_ENCODING,
     ),
     (
         "pages/machines/form.rs",
@@ -460,12 +463,12 @@ pub(super) const TABLE: &[Entry] = &[
         "q",
         Cover::Corpus("xss_corpus_search_field_of_get_users_is_escaped"),
     ),
-    ("pages/users/query.rs", "ListQuery", "page", NUMBER),
+    ("pages/users/query.rs", "ListQuery", "page", PAGE),
     (
         "pages/versions/actions.rs",
         "VersionedFields",
         "row_version",
-        NUMBER,
+        TYPED,
     ),
     (
         "pages/versions/actions.rs",

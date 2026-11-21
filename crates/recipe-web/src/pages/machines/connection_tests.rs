@@ -269,7 +269,12 @@ async fn connection_form_without_a_record_is_empty_and_carries_row_version_0() {
 async fn connection_form_with_a_record_shows_its_values_and_its_row_version() {
     let world = world();
     let id = seed(&world, 101, PlcPlatform::TwinCat3);
-    world.fixture.store.seed_connection(id, &ads_record(), None);
+    // `Ads` with a login needs a stored password (`plc_connection_credentials`).
+    let sealed = SealedSecret::from_bytes(b"sealed".to_vec());
+    world
+        .fixture
+        .store
+        .seed_connection(id, &ads_record(), Some(sealed));
     let reply = world
         .get_en(&world.engineer, "/machines/M101/connection/edit")
         .await;
@@ -368,7 +373,12 @@ async fn connection_form_labels_and_title_come_from_the_bundles_in_both_language
 async fn connection_form_has_literal_hx_attributes_the_sync_rule_and_no_user_text_in_them() {
     let world = world();
     let id = seed(&world, 101, PlcPlatform::TwinCat3);
-    world.fixture.store.seed_connection(id, &ads_record(), None);
+    // `Ads` with a login needs a stored password (`plc_connection_credentials`).
+    let sealed = SealedSecret::from_bytes(b"sealed".to_vec());
+    world
+        .fixture
+        .store
+        .seed_connection(id, &ads_record(), Some(sealed));
     for path in [
         "/machines/M7/connection/edit",
         "/machines/M101/connection/edit",

@@ -48,7 +48,8 @@ zeroize = { workspace = true }
 # ADR-0133 (f): the set of stalled paths of the disk adapter is a `parking_lot::Mutex`.
 parking_lot = { workspace = true }
 
-# ADR-0060 (c): `statvfs` of `rustix` builds on Unix only. Windows gets `DiskFault::Unsupported`.
+# ADR-0060 (c): `statvfs` and the open of a result file (ADR-0151, D13) of `rustix` build on Unix only.
+# Windows gets `DiskFault::Unsupported` and the metadata check.
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs", "std"] }
 

@@ -46,7 +46,7 @@ pub use root::{
     ApprovalOutcome, ApprovalPolicy, Approver, Recipe, RecipeDeleter, StoredRecipe,
     StoredRecipeReason, StoredVersionHeader, VersionHeader, breaks_separation_of_duties,
 };
-pub use snapshot::{SnapshotError, SnapshotItem, VersionSnapshot};
+pub use snapshot::{SnapshotError, SnapshotItem, VersionSnapshot, distinct_tag_count};
 pub use state::{
     ForbiddenTransition, Transition, VersionState, VersionStateReason, VersionStatus,
     VersionStatusReason,

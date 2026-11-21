@@ -128,8 +128,8 @@ test.describe('Enter in a value input saves the value', () => {
 
 // Design D7: a plain link after the grid brings the save button back into view at 320 px.
 test.describe('jump link after the leaf grid', () => {
-  /** How long the page may take to start a request after the click, in ms. */
-  const NO_REQUEST_WINDOW_MS = 500;
+  /** The URL of the sentinel request. The page sends it after the jump, so a stray request is already in the list. */
+  const SENTINEL_PATH = '/static/app.css';
   /** Waits for the link only briefly, so a missing link fails fast. */
   const LINK_TIMEOUT_MS = 2000;
 
@@ -153,8 +153,16 @@ test.describe('jump link after the leaf grid', () => {
       page.on('request', (request) => requests.push(`${request.method()} ${request.url()}`));
       await link.click();
       await expect(save, 'the link brings the save button into view').toBeInViewport();
-      await page.waitForTimeout(NO_REQUEST_WINDOW_MS);
-      expect(requests, 'the link sends no request').toEqual([]);
+      await page.waitForFunction(() => window.location.hash === '#parameter-save-submit');
+      // The sentinel fetch ends after any earlier request started. `no-store` keeps the cache from
+      // hiding it.
+      await page.evaluate(async (path) => {
+        await fetch(path, { cache: 'no-store' });
+      }, SENTINEL_PATH);
+      expect(
+        requests.map((request) => request.replace(/^GET https?:\/\/[^/]+/, 'GET ')),
+        'the link sends no request, only the sentinel',
+      ).toEqual([`GET ${SENTINEL_PATH}`]);
     });
   }
 });

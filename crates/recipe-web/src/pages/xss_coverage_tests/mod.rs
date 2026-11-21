@@ -2,7 +2,8 @@
 //!
 //! Each field of a `Deserialize` struct in `src/` is a wire name that a client can fill with any
 //! text. A field needs a corpus test that sends the payloads of `tests/web/xss-corpus.txt` through
-//! it, or a reason that it carries no free text. The guard reads the source files as text and
+//! it, or a kind that shows it carries no free text. The comparison checks the kind against the
+//! source. The guard reads the source files as text and
 //! compares each field with the table `TABLE`. A new request struct without an entry fails the
 //! test.
 //!
@@ -15,14 +16,15 @@
 //! `compare` matches the scan with the table. This file holds the guard and the tests of the scan and of the comparison.
 
 mod compare;
+mod kind_tests;
 mod registry;
 mod scan;
 
 use std::path::Path;
 
 use compare::{SELF_DIR, Source, coverage_faults, read_sources};
-use registry::{Cover, Entry, TABLE};
-use scan::{Scan, ScannedStruct, scan_source};
+use registry::{Cover, Entry, Kind, TABLE};
+use scan::{Scan, ScannedField, ScannedStruct, scan_source};
 
 #[test]
 fn xss_coverage_every_deserialized_field_has_a_corpus_test_or_a_reason() {
@@ -65,6 +67,24 @@ pub(crate) struct Sample {
 }
 "#;
 
+/// Return the wire names of every scanned field in the order of the source.
+fn wire_names(scan: &Scan) -> Vec<&str> {
+    scan.structs
+        .iter()
+        .flat_map(|item| &item.fields)
+        .map(|field| field.wire_name.as_str())
+        .collect()
+}
+
+/// Build the expected field of a scan.
+fn field(rust_name: &str, wire_name: &str, ty: &str) -> ScannedField {
+    ScannedField {
+        rust_name: rust_name.to_owned(),
+        wire_name: wire_name.to_owned(),
+        ty: ty.to_owned(),
+    }
+}
+
 #[test]
 fn xss_coverage_scan_reads_the_wire_names_of_a_struct() {
     let scan = scan_source(SAMPLE);
@@ -73,10 +93,10 @@ fn xss_coverage_scan_reads_the_wire_names_of_a_struct() {
     assert_eq!(scan.faults, Vec::<String>::new());
     let wanted = ScannedStruct {
         name: "Sample".to_owned(),
-        wire_names: vec![
-            "login".to_owned(),
-            "csrf_token".to_owned(),
-            "a,b)]".to_owned(),
+        fields: vec![
+            field("login", "login", "String"),
+            field("_csrf_token", "csrf_token", "Option<String>"),
+            field("odd", "a,b)]", "String"),
         ],
     };
     assert_eq!(scan.structs, [wanted]);
@@ -104,8 +124,8 @@ fn xss_coverage_scan_reads_a_struct_with_empty_braces() {
     assert_eq!(scan.faults, Vec::<String>::new());
     assert_eq!(scan.structs.len(), 1);
     assert_eq!(
-        scan.structs.first().unwrap().wire_names,
-        Vec::<String>::new()
+        scan.structs.first().unwrap().fields,
+        Vec::<ScannedField>::new()
     );
 }
 
@@ -387,12 +407,7 @@ fn xss_coverage_scan_reads_a_field_after_a_leading_block_comment() {
     let scan = scan_source(source);
 
     assert_eq!(scan.faults, Vec::<String>::new());
-    let names: Vec<&str> = scan
-        .structs
-        .iter()
-        .flat_map(|item| &item.wire_names)
-        .map(String::as_str)
-        .collect();
+    let names = wire_names(&scan);
     assert_eq!(names, ["text", "note"]);
 }
 
@@ -403,12 +418,7 @@ fn xss_coverage_scan_reads_a_block_comment_over_several_lines() {
     let scan = scan_source(source);
 
     assert_eq!(scan.faults, Vec::<String>::new());
-    let names: Vec<&str> = scan
-        .structs
-        .iter()
-        .flat_map(|item| &item.wire_names)
-        .map(String::as_str)
-        .collect();
+    let names = wire_names(&scan);
     assert_eq!(names, ["text", "note", "last"]);
 }
 
@@ -419,12 +429,7 @@ fn xss_coverage_scan_keeps_a_comment_marker_inside_a_string() {
     let scan = scan_source(source);
 
     assert_eq!(scan.faults, Vec::<String>::new());
-    let names: Vec<&str> = scan
-        .structs
-        .iter()
-        .flat_map(|item| &item.wire_names)
-        .map(String::as_str)
-        .collect();
+    let names = wire_names(&scan);
     assert_eq!(names, ["a/*b", "b", "c"]);
 }
 
@@ -471,12 +476,7 @@ fn xss_coverage_scan_reads_an_attribute_over_several_lines_and_a_comment_after_i
     let scan = scan_source(source);
 
     assert_eq!(scan.faults, Vec::<String>::new());
-    let names: Vec<&str> = scan
-        .structs
-        .iter()
-        .flat_map(|item| &item.wire_names)
-        .map(String::as_str)
-        .collect();
+    let names = wire_names(&scan);
     assert_eq!(names, ["x]y", "b", "c]"]);
 }
 
@@ -509,11 +509,21 @@ fn source(relative: &str, text: &str) -> Source {
 const REQUEST: &str =
     "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    text: String,\n}\n";
 
+/// A production file with one request struct of one integer field.
+const COUNT_REQUEST: &str =
+    "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    count: u8,\n}\n";
+
+/// The entry of the integer field of `COUNT_REQUEST`.
+const COUNT_ENTRY: Entry = ("pages/form.rs", "Form", "count", Cover::NoText(Kind::Typed));
+
 #[test]
 fn xss_coverage_comparison_passes_when_a_corpus_test_covers_the_field() {
     let sources = [
         source("pages/form.rs", REQUEST),
-        source("pages/form_tests.rs", "async fn xss_covers_text() {}"),
+        source(
+            "pages/form_tests.rs",
+            "#[tokio::test]\nasync fn xss_covers_text() {}",
+        ),
     ];
     let table: &[Entry] = &[(
         "pages/form.rs",
@@ -536,10 +546,10 @@ fn xss_coverage_comparison_names_a_field_without_an_entry() {
 
 #[test]
 fn xss_coverage_comparison_names_an_entry_without_a_field() {
-    let sources = [source("pages/form.rs", REQUEST)];
+    let sources = [source("pages/form.rs", COUNT_REQUEST)];
     let table: &[Entry] = &[
-        ("pages/form.rs", "Form", "text", Cover::NoText("A reason.")),
-        ("pages/form.rs", "Form", "gone", Cover::NoText("A reason.")),
+        COUNT_ENTRY,
+        ("pages/form.rs", "Form", "gone", Cover::NoText(Kind::Typed)),
     ];
 
     let faults = coverage_faults(&sources, table);
@@ -549,10 +559,9 @@ fn xss_coverage_comparison_names_an_entry_without_a_field() {
 
 #[test]
 fn xss_coverage_comparison_names_a_table_that_lists_a_field_twice() {
-    let sources = [source("pages/form.rs", REQUEST)];
-    let entry: Entry = ("pages/form.rs", "Form", "text", Cover::NoText("A reason."));
+    let sources = [source("pages/form.rs", COUNT_REQUEST)];
 
-    let faults = coverage_faults(&sources, &[entry, entry]);
+    let faults = coverage_faults(&sources, &[COUNT_ENTRY, COUNT_ENTRY]);
 
     assert_eq!(faults, ["the table lists a field twice"]);
 }
@@ -561,8 +570,14 @@ fn xss_coverage_comparison_names_a_table_that_lists_a_field_twice() {
 fn xss_coverage_comparison_names_a_corpus_test_that_has_no_fn() {
     let sources = [
         source("pages/form.rs", REQUEST),
-        source("pages/form_tests.rs", "async fn xss_other_name() {}"),
-        source(&format!("{SELF_DIR}mod.rs"), "fn xss_covers_text() {}"),
+        source(
+            "pages/form_tests.rs",
+            "#[tokio::test]\nasync fn xss_other_name() {}",
+        ),
+        source(
+            &format!("{SELF_DIR}mod.rs"),
+            "#[test]\nfn xss_covers_text() {}",
+        ),
     ];
     let table: &[Entry] = &[(
         "pages/form.rs",
@@ -576,19 +591,6 @@ fn xss_coverage_comparison_names_a_corpus_test_that_has_no_fn() {
     assert_eq!(
         faults,
         ["the corpus test of pages/form.rs Form.text has no fn: xss_covers_text"]
-    );
-}
-
-#[test]
-fn xss_coverage_comparison_names_a_reason_entry_without_a_reason() {
-    let sources = [source("pages/form.rs", REQUEST)];
-    let table: &[Entry] = &[("pages/form.rs", "Form", "text", Cover::NoText("  "))];
-
-    let faults = coverage_faults(&sources, table);
-
-    assert_eq!(
-        faults,
-        ["the entry pages/form.rs Form.text has an empty reason"]
     );
 }
 
@@ -612,6 +614,98 @@ fn xss_coverage_comparison_names_a_count_mismatch() {
         faults
             .iter()
             .any(|fault| fault.contains("1 Deserialize derives, but 0 parsed structs")),
+        "{faults:?}"
+    );
+}
+
+/// A comparison input: a corpus `fn` with the given lines above it, and its table.
+fn faults_of_corpus_fn(above: &str) -> Vec<String> {
+    let text = format!("{above}async fn xss_covers_text() {{}}");
+    let sources = [
+        source("pages/form.rs", REQUEST),
+        source("pages/form_tests.rs", &text),
+    ];
+    let table: &[Entry] = &[(
+        "pages/form.rs",
+        "Form",
+        "text",
+        Cover::Corpus("xss_covers_text"),
+    )];
+    coverage_faults(&sources, table)
+}
+
+#[test]
+fn xss_coverage_refuses_a_corpus_fn_without_a_test_attribute() {
+    let faults = faults_of_corpus_fn("");
+
+    assert_eq!(
+        faults,
+        ["the corpus test of pages/form.rs Form.text has no fn: xss_covers_text"]
+    );
+}
+
+#[test]
+fn xss_coverage_refuses_a_corpus_fn_under_a_cfg_that_is_not_test() {
+    let faults = faults_of_corpus_fn("#[tokio::test]\n#[cfg(feature = \"never\")]\n");
+
+    assert_eq!(
+        faults,
+        ["the corpus test of pages/form.rs Form.text has no fn: xss_covers_text"]
+    );
+}
+
+#[test]
+fn xss_coverage_accepts_a_corpus_fn_under_cfg_test_with_a_comment_above() {
+    assert_eq!(
+        faults_of_corpus_fn("#[cfg(test)]\n// A note.\n#[tokio::test]\n"),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn xss_coverage_refuses_a_corpus_fn_under_a_cfg_that_spans_lines() {
+    let above = "#[cfg(any(\n    feature = \"a_long_feature_name_one\",\n    \
+                 feature = \"a_long_feature_name_two\",\n    feature = \"x3\"\n))]\n#[test]\n";
+
+    assert_eq!(
+        faults_of_corpus_fn(above),
+        ["the corpus test of pages/form.rs Form.text has no fn: xss_covers_text"]
+    );
+}
+
+#[test]
+fn xss_coverage_refuses_a_corpus_fn_with_ignore() {
+    assert_eq!(
+        faults_of_corpus_fn("#[test]\n#[ignore]\n"),
+        ["the corpus test of pages/form.rs Form.text has no fn: xss_covers_text"]
+    );
+}
+
+#[test]
+fn xss_coverage_refuses_a_corpus_fn_with_cfg_attr_ignore() {
+    let above = "#[test]\n#[cfg_attr(not(feature = \"x\"), ignore)]\n";
+
+    assert_eq!(
+        faults_of_corpus_fn(above),
+        ["the corpus test of pages/form.rs Form.text has no fn: xss_covers_text"]
+    );
+}
+
+#[test]
+fn xss_coverage_refuses_a_parsed_path_only_in_a_comment() {
+    let text = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    role: String,\n}\nfn handle(form: Form) -> String {\n    form.role // Role::parse\n}\n";
+    let table: &[Entry] = &[(
+        "pages/form.rs",
+        "Form",
+        "role",
+        Cover::NoText(Kind::Parsed("Role::parse")),
+    )];
+
+    let faults = coverage_faults(&[source("pages/form.rs", text)], table);
+
+    assert_eq!(faults.len(), 1, "{faults:?}");
+    assert!(
+        faults[0].contains("pages/form.rs Form.role has the kind Parsed"),
         "{faults:?}"
     );
 }

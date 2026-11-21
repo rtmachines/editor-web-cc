@@ -14,8 +14,8 @@ use recipe_app::ports::{
     StoredConnection,
 };
 use recipe_domain::plant::{
-    CommMode, MachineId, PasswordState, PlcAddress, PlcConnection, PlcConnectionId, PlcHost,
-    PlcLogin, PlcPlatform, Rack, Slot, TcpPort,
+    CommMode, ConnectionFields, MachineCode, MachineId, PasswordState, PlcAddress, PlcConnection,
+    PlcConnectionId, PlcHost, PlcLogin, PlcPlatform, Rack, Slot, TcpPort,
 };
 use serde_json::Value;
 use sqlx::PgConnection;
@@ -30,6 +30,7 @@ const TABLE: &str = "plc_connection";
 /// The record of a machine without a lock (`GetPlcConnectionForm`, `SetPlcConnection` step 2).
 const SELECT_BY_MACHINE: &str = "\
 SELECT id, plc_platform, host, rack, slot, port, address, comm_mode, login, row_version, \
+       (SELECT m.code FROM machine m WHERE m.id = $1) AS machine_code, \
        CASE WHEN plc_platform IN ('CodesysIec', 'TwinCat3') \
             THEN password_sealed IS NOT NULL ELSE false END AS has_password \
 FROM plc_connection WHERE machine_id = $1";
@@ -37,6 +38,7 @@ FROM plc_connection WHERE machine_id = $1";
 /// `plc_connection FOR UPDATE` (`SetPlcConnection`). The image comes from the locked row.
 const LOCK_FOR_UPDATE: &str = "\
 SELECT id, plc_platform, host, rack, slot, port, address, comm_mode, login, row_version, \
+       (SELECT m.code FROM machine m WHERE m.id = $1) AS machine_code, \
        CASE WHEN plc_platform IN ('CodesysIec', 'TwinCat3') \
             THEN password_sealed IS NOT NULL ELSE false END AS has_password, \
        to_jsonb(c) - 'password_sealed' AS image \
@@ -45,6 +47,7 @@ FROM plc_connection c WHERE machine_id = $1 FOR UPDATE";
 /// `plc_connection FOR SHARE` (`ExportPlcConnection`). The only statement that reads the bytes.
 const LOCK_SHARED: &str = "\
 SELECT id, plc_platform, host, rack, slot, port, address, comm_mode, login, row_version, \
+       (SELECT m.code FROM machine m WHERE m.id = $1) AS machine_code, \
        CASE WHEN plc_platform IN ('CodesysIec', 'TwinCat3') THEN password_sealed END AS sealed \
 FROM plc_connection WHERE machine_id = $1 FOR SHARE";
 
@@ -151,6 +154,7 @@ fn bind_columns<'q>(
 struct ConnectionRecord {
     id: Uuid,
     plc_platform: String,
+    machine_code: String,
     host: String,
     rack: Option<i16>,
     slot: Option<i16>,
@@ -183,69 +187,71 @@ struct SharedRecord {
     sealed: Option<Vec<u8>>,
 }
 
-/// Return the value of a required column, or the error of a corrupt row.
-fn required<T>(column: &'static str, value: Option<T>) -> Result<T, StorageError> {
-    value.ok_or_else(|| corrupt(TABLE, format!("the column {column} is null")))
-}
-
-/// Parse a number column through its value object. The value object takes the text of the number.
+/// Parse a number column through its value object. A null column gives `None`.
 fn parse_number<T, E: fmt::Display>(
-    column: &'static str,
     value: Option<impl fmt::Display>,
     parse: impl FnOnce(&str) -> Result<T, E>,
-) -> Result<T, StorageError> {
-    let value = required(column, value)?;
-    parse(&value.to_string()).map_err(|error| corrupt(TABLE, error))
+) -> Result<Option<T>, StorageError> {
+    value
+        .map(|value| parse(&value.to_string()))
+        .transpose()
+        .map_err(|error| corrupt(TABLE, error))
 }
 
-/// Parse a text column through its value object.
+/// Parse a text column through its value object. A null column gives `None`.
 fn parse_text<T, E: fmt::Display>(
-    column: &'static str,
     value: Option<&str>,
     parse: impl FnOnce(&str) -> Result<T, E>,
-) -> Result<T, StorageError> {
-    parse(required(column, value)?).map_err(|error| corrupt(TABLE, error))
+) -> Result<Option<T>, StorageError> {
+    value
+        .map(parse)
+        .transpose()
+        .map_err(|error| corrupt(TABLE, error))
 }
 
-/// Build the connection of a row. The platform decides the shape.
-fn build_connection(record: &ConnectionRecord) -> Result<PlcConnection, StorageError> {
+/// Build the fields of a stored row. The password stays empty, because the row holds none.
+fn stored_fields(record: &ConnectionRecord) -> Result<ConnectionFields, StorageError> {
+    Ok(ConnectionFields {
+        host: Some(PlcHost::parse(&record.host).map_err(|error| corrupt(TABLE, error))?),
+        rack: parse_number(record.rack, Rack::parse)?,
+        slot: parse_number(record.slot, Slot::parse)?,
+        port: parse_number(record.port, TcpPort::parse)?,
+        address: parse_text(record.address.as_deref(), PlcAddress::parse)?,
+        mode: parse_text(record.comm_mode.as_deref(), CommMode::parse)?,
+        login: parse_text(record.login.as_deref(), PlcLogin::parse)?,
+        password: None,
+    })
+}
+
+/// Build the connection of a row through `PlcConnection::for_platform` (design D6).
+///
+/// The function solves one problem: a stored row must meet the rules of a request. A row that
+/// `for_platform` refuses is a defect of the storage and gives `E-DB-008`.
+fn build_connection(
+    record: &ConnectionRecord,
+    password: PasswordState,
+) -> Result<PlcConnection, StorageError> {
     let platform =
         PlcPlatform::parse(&record.plc_platform).map_err(|error| corrupt(TABLE, error))?;
-    let host = PlcHost::parse(&record.host).map_err(|error| corrupt(TABLE, error))?;
-    if platform.is_s7() {
-        Ok(PlcConnection::S7 {
-            host,
-            rack: parse_number("rack", record.rack, Rack::parse)?,
-            slot: parse_number("slot", record.slot, Slot::parse)?,
-        })
-    } else {
-        let login = record
-            .login
-            .as_deref()
-            .map(PlcLogin::parse)
-            .transpose()
-            .map_err(|error| corrupt(TABLE, error))?;
-        Ok(PlcConnection::Iec {
-            host,
-            port: parse_number("port", record.port, TcpPort::parse)?,
-            address: parse_text("address", record.address.as_deref(), PlcAddress::parse)?,
-            mode: parse_text("comm_mode", record.comm_mode.as_deref(), CommMode::parse)?,
-            login,
-        })
-    }
+    let machine =
+        MachineCode::parse(&record.machine_code).map_err(|error| corrupt(TABLE, error))?;
+    PlcConnection::for_platform(machine, platform, stored_fields(record)?, password)
+        .map(|plan| plan.connection)
+        .map_err(|errors| corrupt(TABLE, errors))
 }
 
 /// Build the stored record of a row.
 fn build_stored(record: StoredRecord) -> Result<StoredConnection, StorageError> {
+    let password = if record.has_password {
+        PasswordState::Stored
+    } else {
+        PasswordState::Absent
+    };
     Ok(StoredConnection {
         id: PlcConnectionId::from(record.record.id),
-        connection: build_connection(&record.record)?,
+        connection: build_connection(&record.record, password)?,
         row_version: record.record.row_version,
-        password: if record.has_password {
-            PasswordState::Stored
-        } else {
-            PasswordState::Absent
-        },
+        password,
     })
 }
 
@@ -383,3 +389,6 @@ impl PlcConnections for PgTransaction {
         update(&mut self.tx, machine, connection, password).await
     }
 }
+
+#[cfg(test)]
+mod tests;

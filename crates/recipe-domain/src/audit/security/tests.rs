@@ -32,7 +32,7 @@ fn forbidden_event_holds_user_request_and_operation() {
         user,
         "RenameMachine",
         request,
-        Some(ip),
+        ip,
         Some(UserAgent::from("test-agent")),
     );
     assert_eq!(event.kind(), SecurityEventKind::Forbidden);

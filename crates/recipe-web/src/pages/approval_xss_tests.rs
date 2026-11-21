@@ -322,7 +322,7 @@ async fn record_hostile_event(world: &AuditWorld, payload: &str) {
         world.data.admin_id,
         payload,
         new_request_id().unwrap(),
-        Some(EVENT_ADDRESS),
+        EVENT_ADDRESS,
         Some(UserAgent::from(payload)),
     );
     world.fixture.sink.record(event).await.unwrap();

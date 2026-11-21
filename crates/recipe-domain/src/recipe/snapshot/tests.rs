@@ -565,3 +565,15 @@ fn a_parameter_of_a_type_that_does_not_resolve_gives_one_item_with_the_plant_err
         }] if tag.as_str() == "LOOP" && type_name.as_str() == "ST_A"
     ));
 }
+
+#[test]
+fn the_distinct_tag_count_counts_each_tag_once_and_skips_version_items() {
+    let parameters = vec![
+        on_unit(param(1, "SPEED", INT, json!(40_000)), ARCHIVED_UNIT),
+        on_unit(param(2, "OTHER", INT, json!(5)), 999),
+    ];
+    let items = items_of(check(parameters, false, true));
+    assert_eq!(items.len(), 4);
+
+    assert_eq!(super::distinct_tag_count(&items), 2);
+}

@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv4Addr};
+
 use recipe_domain::audit::{RequestId, SecurityEvent, UserAgent};
 use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::UserId;
@@ -12,7 +14,7 @@ fn event(n: u128) -> SecurityEvent {
         UserId::from(Uuid::from_u128(n)),
         "CreateMachine",
         RequestId::from(Uuid::from_u128(n)),
-        None,
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
         Some(UserAgent::from("test")),
     )
 }

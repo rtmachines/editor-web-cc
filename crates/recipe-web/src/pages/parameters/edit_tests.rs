@@ -140,6 +140,40 @@ async fn parameters_edit_with_a_changed_type_shows_the_new_fields_and_writes_not
     assert_eq!(world.fixture.snapshot(), before);
 }
 
+/// Return the `value` attribute of the text input `name`.
+///
+/// The helper `field_value` needs `value` right after `name`. These inputs have other attributes.
+fn text_input_value(form: &str, name: &str) -> String {
+    let (_before, rest) = form.split_once(&format!("name=\"{name}\" ")).unwrap();
+    let tag = rest.split('>').next().unwrap();
+    let (_attrs, value) = tag.split_once(" value=\"").unwrap();
+    value.split('"').next().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn a_definition_save_without_value_fields_for_the_same_type_keeps_the_value() {
+    let world = recipe_world();
+    let pairs = changed(
+        &SPEED_FIELDS,
+        &[
+            ("name_en", Some("Spindle speed")),
+            ("value", None),
+            ("limits[0].leaf_path", None),
+            ("limits[0].min", None),
+            ("limits[0].max", None),
+        ],
+    );
+    let path = parameter_path(SPEED_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let form = reply.body.split(&oob_form_tag()).nth(1).unwrap();
+    assert!(form.contains("value=\"Spindle speed\""), "{form}");
+    assert_eq!(text_input_value(form, "value"), "1200");
+    assert_eq!(text_input_value(form, "limits[0].min"), "0");
+    assert_eq!(text_input_value(form, "limits[0].max"), "3000");
+    assert!(!form.contains("field-error"), "{form}");
+}
+
 #[tokio::test]
 async fn parameters_edit_keeps_the_spaces_of_a_string_leaf() {
     let world = recipe_world();

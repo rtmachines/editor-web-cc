@@ -365,6 +365,8 @@ impl ListParameters {
             .await?;
         let type_rows = tx.types().type_rows(scope.machine.id()).await?;
         let (rows, has_next) = cut_page(rows, size);
+        let values = read_row_values(tx.as_mut(), scope.detail.id, &rows).await?;
+        drop(tx);
         let machine = &scope.machine;
         let types = PlatformTypes::collect(
             machine.id(),
@@ -373,8 +375,6 @@ impl ListParameters {
             type_rows,
         )?;
         let trees = row_trees(&types, &rows);
-        let values = read_row_values(tx.as_mut(), scope.detail.id, &rows).await?;
-        drop(tx);
         let type_texts = texts_of(&types, &rows);
         let (rows, reads) = self
             .ctx
