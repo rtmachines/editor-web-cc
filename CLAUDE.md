@@ -56,7 +56,7 @@ Dependency rule:
 
 - No panic paths. Outside tests the lints deny `unwrap`, `expect`, `panic!`, indexing, lossy casts, and unchecked arithmetic (`reliability.md` §2).
 - Library crates use `thiserror`. Only `recipe-server` uses `anyhow`, and `main` returns `anyhow::Result<std::process::ExitCode>` (`reliability.md` §1.1, §2.3, A37, ADR-0125 (d)).
-- A command runs in one transaction. `Login` and `ChangeOwnPassword` use the two transactions T1 and T2 (ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2 (ADR-0109 (m)). A command locks rows in the order `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015).
+- A command runs in one transaction, after `READ ONLY` pre-reads that take no lock (ADR-0168, ADR-0213 (a)). `Login` and `ChangeOwnPassword` use the two transactions T1 and T2 (ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2 (ADR-0109 (m)). A command locks rows in the order `machine` → `recipe` → `recipe_version` → `unit` → children (ADR-0015).
 - Inside a transaction, no use case waits for I/O or for a lock that it does not hold. The parsing of the request and of its value objects runs before the transaction. The conversion of a value against the locked type tree and each other check of the locked state run under the lock. They use the CPU only and wait for no I/O (`reliability.md` §7.4).
 - A command writes its audit entries through `UnitOfWork::commit(NonEmpty<AuditEntry>)`. `domain-model.md` §5 gives each commit path and the two cases without an entry.
 - Security events go through `SecurityEventSink` in their own short transaction (ADR-0015, ADR-0022).

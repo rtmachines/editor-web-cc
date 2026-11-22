@@ -2224,7 +2224,7 @@ REVOKE CREATE ON SCHEMA public FROM audit_owner;
 
 ## 6. Transactional operations
 
-Every command runs in exactly one transaction, except `Login` and `ChangeOwnPassword`, which use the two short transactions T1 and T2 (see the rows, ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2. It is not a command (ADR-0109 (m)).
+Every command writes in exactly one transaction, except `Login` and `ChangeOwnPassword`, which use the two short transactions T1 and T2 (see the rows, ADR-0035 (b)). The Basic check of the export routes also uses T1 and T2. It is not a command (ADR-0109 (m)). Before that transaction, a command can read in one `READ ONLY` transaction that takes no lock. The command transaction then locks the rows and checks them again (ADR-0168 (e), ADR-0213 (a)). A row below that names a step "Before the transaction" keeps that step. An error path of `ApproveVersion` can read once more and then ends without a command transaction (ADR-0213 (a)).
 
 A `security_event` row has its own short transaction through the port `SecurityEventSink`. The commit path of each operation is in `domain-model.md` section 5. `EnsureDerivedType` is an internal operation and runs inside the transaction of its caller. The use case opens the transaction through `UnitOfWork`. The audit `INSERT` is part of the same transaction. The `COMMIT` either persists everything or nothing (R29).
 
