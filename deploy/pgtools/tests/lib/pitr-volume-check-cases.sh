@@ -184,6 +184,16 @@ case_pitr_check_clean_tail() {
   pitr_check_tail_passes "clean end at a page boundary" 0 0/4002000
 }
 
+case_pitr_check_nonzero_tail_after_zero_length() {
+  new_pitr_check_case check-nonzero-tail-after-zero-length
+  new_pitr_tail_segment 4
+  write_pitr_wal 8192 SSLQLx4 0xD113 0 1 67117056 0
+  write_pitr_wal 8216 L 0
+  write_pitr_wal 16777215 C 1
+  pitr_check_fails "non-zero tail after a zero length" "$CHECK_END_ERROR" \
+    "STUB_HISTORY_TEXT=$(pitr_history 0/4002000)" --
+}
+
 case_pitr_check_torn_record() {
   new_pitr_check_case check-torn-record
   new_pitr_tail_segment 4

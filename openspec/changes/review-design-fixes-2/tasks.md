@@ -169,6 +169,13 @@ Without Docker on the host, the job `compose` ("Compose stack") of a dispatched 
 - [x] 5.7 (deploy/db, recipe-db, docs/ops) [deploy] V-01, D1 (e), (e1), (e2). Files: `deploy/db/check-platform-ranges.sql` (new part `line_break` and the second header sentence of D1 (e1)), `crates/recipe-db/tests/storage/platform_ranges.rs`, and `docs/ops/runbook.md` (the paragraph of D1 (e2), next to lines 1185 to 1208).
   - Red test: `line_break_lists_a_stored_lf` stores a `STRING` leaf with LF through SQL and expects one row with the part `line_break`. HEAD has no such part.
   - Check: `cargo test -p recipe-db --test storage platform_ranges`, and ste-lint on `docs/ops/runbook.md`.
+- [x] 5.8 (deploy/pgtools, docs/ops) [deploy] V-02, ADR-0221. Files: `deploy/pgtools/bin/pitr-volume` (the helper `wal_tail_state`), `deploy/pgtools/tests/lib/pitr-volume-check-cases.sh`, the entry point `deploy/pgtools/tests/pitr-volume-test`, and `docs/ops/runbook.md` (section "Recover from the WAL archive").
+  - Order: after 5.1, and after 5.7 for the runbook. The dispatch of 5.3 runs after this task.
+  - At a length of 0, the helper reads the bytes from the record start to the end of the newest file (ADR-0221 (a)). A non-zero byte refuses the end.
+  - Red test: a case writes a record length of 0 at the end offset and a later non-zero byte in the newest file. It expects the gap `ERROR` line and an exit code other than 0. HEAD exits with 0.
+  - Guard cases: the clean end (`xl_tot_len = 0`, only zero bytes after it) still passes with no `WARN` line. The cases of a short file of ADR-0221 (b) still refuse the end.
+  - The runbook names the known limit of ADR-0221 (d) and its next step: a run with `--target-time` before the newest commit.
+  - Check: the pgtools check of this group, and ste-lint on `docs/ops/runbook.md`.
 
 ## 6. CHANGELOG
 
@@ -207,7 +214,7 @@ Documents:
 - `docs/architecture/api.md`: 3.2, 3.9, 3.11, 3.12, 3.17, 3.18.
 - `docs/architecture/overview.md`: 3.2, then 3.6.
 - `docs/architecture/data-model.md`: 3.4, then 3.3 (after 4.5).
-- `docs/ops/runbook.md`: 3.14, then 5.4, then 5.6, then 5.7.
+- `docs/ops/runbook.md`: 3.14, then 5.4, then 5.6, then 5.7, then 5.8.
 - `CLAUDE.md` and `.claude/rules/sql.md`: 3.4 only.
 - `design.md` of this change: 1.2 only. The `identity-access` delta of this change: 2.10 only.
 - `CHANGELOG.md`: 6.1 only.
@@ -232,8 +239,9 @@ Other files:
 - `crates/recipe-web/examples/dev_server.rs`: 1.1 (temporary branch only). Task 4.10 does not edit it.
 - `migrations/0019` and `deploy/pgtools/restore-code.expected`: 4.5, then 4.6.
 - `deploy/pgtools/tests/lib/stubs.sh`: 5.6 only. `restore-stubs.sh` and `wal-stubs.sh` are separate files.
-- The pgtools check builds one image and runs every suite: 5.1, 5.4, 5.5, and 5.6 run it one after the other.
-- `deploy/ci/test_pitr_recovery.py` and `deploy/ci/pitr-recovery.sh`: 5.2 only. Task 5.3 runs after 5.1 and 5.2.
+- The pgtools check builds one image and runs every suite: 5.1, 5.4, 5.5, 5.6, and 5.8 run it one after the other.
+- `deploy/pgtools/bin/pitr-volume`, `deploy/pgtools/tests/lib/pitr-volume-check-cases.sh`, and `deploy/pgtools/tests/pitr-volume-test`: 5.1, then 5.8. Task 5.8 runs after 5.7 for the runbook.
+- `deploy/ci/test_pitr_recovery.py` and `deploy/ci/pitr-recovery.sh`: 5.2 only. Task 5.3 runs after 5.1, 5.2, and 5.8.
 
 ## Workflow follow-up
 

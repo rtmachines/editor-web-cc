@@ -53,6 +53,7 @@ The next free number is 0210. The conditional ADR of V-15 is the last number, so
 | 0218 | Failed stop of a scratch server | V-06 | ADR-0067 (g), ADR-0068 |
 | 0219 | Clock rule of `backup-health` | V-07 | ADR-0066 (d) |
 | 0220 | Origin check of a dev build on plain HTTP (conditional) | V-15 | ADR-0035 (e) |
+| 0221 | Zero tail after a record length of 0 | V-02 (code review F1, F01, F02) | ADR-0217 (b) step 5 |
 
 Each ADR copies the shape of ADR-0168 or ADR-0171: Status, Date, Deciders, Context, Decision drivers, Considered options, Decision, Consequences, Related. Each amended ADR gets one "Amended by ADR-NNNN (scope)" note on its Status line. The ADR-0074 typo needs no ADR (D14).
 
@@ -245,11 +246,13 @@ The `ERROR` line is the line of the gap: `the recovery ended before the end of t
 - (d) `docs/ops/runbook.md` names the new check and the next step after a refusal (risk below). Line 1040, which change C wrote, and line 1043 ("shows a gap") change.
 - (e) `reliability.md` §7.7 (line 862) states check 2. It gets the tail rule in the same change.
 
+ADR-0221 records two owner decisions of 2026-11-22 after the code review of this change. First, at a length of 0, step 5 also reads the bytes from the start of the record to the end of the newest file. A non-zero byte refuses the end. The check also refuses a newest file that is shorter than the segment size. Second, a torn last record that crosses into an existing next segment file stays a refusal of the gap check. ADR-0221 (d) records this known limit and the next step, so the THEN of D9 does not hold for that case.
+
 ### D9: The scenario "Recovery after the loss of the pgdata disk" (V-02 open point)
 
 The GIVEN "an intact WAL archive disk" does not cover a damaged archive. An archive with an inverted byte is not intact, also when the disk works. The THEN "`db` runs on the new volume with every commit that the archive received" is then right for each intact archive.
 
-The tail rule of D8 accepts a torn last record after a crash, which is the case of this scenario. So the THEN stays right, and that scenario stays unchanged. With the strict form of D8 (a2), the THEN fails for a torn last record, and the scenario needs a MODIFIED delta. The `operations` delta of "Checks of a recovered cluster" adds the scenario "Damaged record in the newest segment". It states the refusal for the case that is not intact.
+The tail rule of D8 accepts a torn last record after a crash, which is the case of this scenario. So the THEN holds for a torn last record inside the newest segment. The known limit of ADR-0221 is the exception to this THEN, for a torn last record that crosses into an existing next segment. The operations delta modifies the scenario for that case. With the strict form of D8 (a2), the THEN fails for a torn last record, and the scenario needs a MODIFIED delta. The `operations` delta of "Checks of a recovered cluster" adds the scenario "Damaged record in the newest segment". It states the refusal for the case that is not intact.
 
 ### D10: Failed stop of a scratch server (V-06, ADR-0218)
 

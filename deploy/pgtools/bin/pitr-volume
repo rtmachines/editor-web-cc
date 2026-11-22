@@ -574,7 +574,10 @@ seek $wal, $offset, 0 or exit 1;
 my $count = read($wal, my $bytes, 4);
 exit 1 if !defined($count) || $count != 4;
 my $remaining = unpack 'L', $bytes;
-exit 0 if $remaining == 0;
+if ($remaining == 0) {
+    require_zero_tail($wal, $offset);
+    exit 0;
+}
 
 while ($remaining > $space) {
     $offset += $space;

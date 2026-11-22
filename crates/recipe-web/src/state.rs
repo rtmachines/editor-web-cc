@@ -67,6 +67,10 @@ impl WebState {
     /// the event `csrf_rejected` is the sink of the `AppContext` inside `identity`, so the use
     /// cases and the CSRF layer always write to one sink.
     ///
+    /// `value_body_permits` is clamped to the range from 1 to `Semaphore::MAX_PERMITS`. A larger
+    /// count makes `Semaphore::new` panic (no panic path, `reliability.md` §2). A count of 0 makes
+    /// every request on the value routes wait until its timeout.
+    ///
     /// # Errors
     ///
     /// Returns the [`BundleReason`] of the first text bundle that does not load.
@@ -76,7 +80,8 @@ impl WebState {
         csrf_keys: KeyRing,
     ) -> Result<Self, BundleReason> {
         let security = identity.app().security();
-        let value_body_permits = Arc::new(Semaphore::new(settings.value_body_permits));
+        let permits = settings.value_body_permits.clamp(1, Semaphore::MAX_PERMITS);
+        let value_body_permits = Arc::new(Semaphore::new(permits));
         Ok(Self {
             identity,
             settings: Arc::new(settings),

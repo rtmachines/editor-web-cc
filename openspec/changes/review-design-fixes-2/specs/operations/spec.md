@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Checks of a recovered cluster
-After the promotion, `pitr-volume` SHALL check the recovered cluster before the clean stop. A failed check SHALL end the run. The checks SHALL cover the end of the replay, the timeline, the audit chain, and an optional marker entry. Without a target time, the end of the replay SHALL be the end of the archived records. After the record at the end of the replay, the newest segment SHALL hold only zero bytes. A clean end SHALL pass without a `WARN` line. A torn last record with only zero bytes after it SHALL pass with one `WARN` line. That line SHALL say that the newest record may be lost. The checks SHALL also cover the configuration files and the roles of ADR-0103 (m). The last line SHALL hold the values of ADR-0106 (d) (R31, R29, A35, ADR-0217).
+After the promotion, `pitr-volume` SHALL check the recovered cluster before the clean stop. A failed check SHALL end the run. The checks SHALL cover the end of the replay, the timeline, the audit chain, and an optional marker entry. Without a target time, the end of the replay SHALL be the end of the archived records. After the record at the end of the replay, the newest segment SHALL hold only zero bytes. A clean end SHALL pass without a `WARN` line. A record length of 0 SHALL pass only when the newest file holds only zero bytes after it. A newest file that is shorter than the segment size SHALL end the run. A torn last record with only zero bytes after it SHALL pass with one `WARN` line. That line SHALL say that the newest record may be lost. The checks SHALL also cover the configuration files and the roles of ADR-0103 (m). The last line SHALL hold the values of ADR-0106 (d) (R31, R29, A35, ADR-0217, ADR-0221).
 
 #### Scenario: Gap in the archive
 - **GIVEN** a WAL archive with a missing segment between the base backup and the newest segment
@@ -24,6 +24,19 @@ After the promotion, `pitr-volume` SHALL check the recovered cluster before the 
 - **GIVEN** a WAL archive whose newest segment holds only zero bytes after its last complete record
 - **WHEN** `pitr-volume` runs without a target time and without `db`
 - **THEN** the check of the end passes and writes no `WARN` line
+
+#### Scenario: Non-zero bytes after a zero length
+- **GIVEN** a WAL archive whose newest segment holds a record length of 0 at the end of the replay
+- **AND** a non-zero byte after that length in the newest file
+- **WHEN** `pitr-volume` runs without a target time and without `db`
+- **THEN** the script writes the `ERROR` line `the recovery ended before the end of the WAL archive`
+- **AND** the script ends with a code other than 0 and writes no line `pitr volume completed`
+
+#### Scenario: Newest file shorter than the segment size
+- **GIVEN** a WAL archive whose newest file is shorter than the segment size
+- **WHEN** `pitr-volume` runs without a target time and without `db`
+- **THEN** the script writes the `ERROR` line `the recovery ended before the end of the WAL archive`
+- **AND** the script ends with a code other than 0 and writes no line `pitr volume completed`
 
 #### Scenario: End before the expected position
 - **GIVEN** a value `PITR_EXPECTED_LSN` after the end of the recovery
@@ -50,6 +63,28 @@ After the promotion, `pitr-volume` SHALL check the recovered cluster before the 
 - **WHEN** `pitr-volume` stops the server
 - **THEN** `pg_controldata` shows `shut down`
 - **AND** the last line `pitr volume completed` holds the system identifier, the new timeline, the newest audit entry, and `heartbeat.last_at`
+
+### Requirement: Order of a recovery from the WAL archive
+A recovery of production from the WAL archive SHALL first delete the containers of `app` and `backup`. If `db` runs, the operator SHALL read the marker entry, and the flush check SHALL pass before the delete of `walarchive`. `pitr-volume` SHALL fill a new volume before the switch. The new WAL line SHALL start before `app`. The operator SHALL truncate `session` and `login_attempt` before `app` starts. Later starts of `app` and `backup` SHALL use `docker compose up -d --no-deps` (R31, R34, A35).
+
+#### Scenario: Recovery after the loss of the pgdata disk
+- **GIVEN** a `db` that does not start, and an intact WAL archive disk
+- **WHEN** the operator runs the recovery without a target time
+- **THEN** `db` runs on the new volume with every commit that the archive received, when no torn last record crosses into an existing next segment
+- **AND** with such a torn record, the script writes the `ERROR` line `the recovery ended before the end of the WAL archive` (ADR-0221 (d))
+- **AND** the operator runs the recovery again with `--target-time` before the newest commit, and the recovered cluster holds no commit after that time
+- **AND** `walarchive` streams the new WAL line before `app` starts
+
+#### Scenario: Revoked session after the recovery point
+- **GIVEN** a session that the old cluster deleted after the recovery point
+- **WHEN** the operator truncates `session` before the start of `app`
+- **THEN** the session token of that session does not authenticate
+
+#### Scenario: Restart of Docker during a recovery
+- **GIVEN** a recovery after `docker compose rm -s -f app backup`
+- **WHEN** the Docker daemon starts again before the start of `app`
+- **THEN** Docker starts no container of `app` and no container of `backup`
+- **AND** no audit entry of `app` reaches the old cluster
 
 ## ADDED Requirements
 

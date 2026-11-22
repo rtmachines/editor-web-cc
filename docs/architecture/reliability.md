@@ -166,7 +166,7 @@ Message templates are English, ASD-STE100. `{…}` marks a value from the varian
 | `E-IDN-009` | `IdentityError::UserAlreadyActive { login }` | 409 | User {login} is already active. |
 | `E-IDN-010` | `IdentityError::UserAlreadyInactive { login }` | 409 | User {login} is already inactive. |
 | `E-IDN-011` | `IdentityError::TechnicalRoleChange { login }` | 409 | The role of {login} cannot change to or from ExportClient. Create a new user. |
-| `E-IDN-012` | `IdentityError::ThrottlePolicyInvalid { field }` | - | The value of {field} is not valid for the login throttle. No route returns this code. It stops the startup (ADR-0215). |
+| `E-IDN-012` | `IdentityError::ThrottlePolicyInvalid { field }` | - | The value of {field} is not valid for the login throttle. (No route returns this code. No setting builds the policy yet, so no startup check exists. ADR-0215 (f) and (g).) |
 | `E-AUD-001` | `AppError::AuditWriteFailed` | 500 | The change was not saved. The system could not record the audit entry. Contact the administrator. Reference: {request_id}. |
 | `E-AUD-002` | `AuditError::ChainBroken { chain_seq }`, check of data-model.md 4.9 | 500 | Audit entry {chain_seq} does not match the hash chain. Contact the administrator. The job `audit_chain_check` returns this code after a nightly run or a catch-up run. The supervisor writes it to the event log (ADR-0089 (a)). The job `alerts` raises the alert. No user request returns it. |
 | `E-AUD-003` | `StorageError::Constraint { code: "E-AUD-003", .. }`, trigger `security_event_guard` of data-model.md 5.4 | 500 | A security event cannot change. Contact the administrator. Reference: {request_id}. |
@@ -862,7 +862,9 @@ Recovery from the WAL archive (ADR-0106):
 - It holds the lock `/wal/.lock` to its exit. It passes each recovery setting with `pg_ctl -o` and writes none into a configuration file.
 - It waits `pitr_volume.start_timeout` for the recovery and `pitr_volume.stop_timeout` for the clean stop of 7.11.
 - After the promotion, the checks of ADR-0106 (g) are a gate. Without a target time, the recovery must end in the newest segment of `/wal`. A recovery that stops at a gap ends the run.
+- A torn last record that crosses into an existing next segment also ends the run. ADR-0221 (d) names this known limit and the next step.
 - The tail rule of check 2 passes a torn last record with one `WARN` line. It refuses a damaged record that has records after it (ADR-0217 (b), (d)). It runs only without a target time.
+- At a record length of 0, the tail rule also requires only zero bytes to the end of the newest file. It refuses a newest file that is shorter than the segment size (ADR-0221 (a), (b)).
 - When the operator gives `PITR_EXPECTED_LSN`, the end of the recovery must also lie at or after that position (ADR-0106 (g)).
 - The other checks are the audit chain check of `data-model.md` 4.9, the optional marker entry, the configuration files, and the values of ADR-0103 (m).
 - The last line holds the base backup, the system identifier, the new timeline, the newest audit entry, and `heartbeat.last_at`. The operator compares them before the switch (ADR-0106 (d)).

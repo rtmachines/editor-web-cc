@@ -1041,11 +1041,14 @@ docker compose run --rm --no-deps -T -e PITR_EXPECTED_LSN=<lsn> -e PITR_MARKER_S
 
    - With a target time, omit the three options `-e` and add `--target-time <time>` after `pitr-volume`.
    - If `db` does not run, omit the three options `-e`. Without them and without a target time, the end check applies the tail rule (ADR-0217 (b)). Compare the newest audit entry of the last line with your expectation in step 7.
-   - Without a target time, the end check passes a torn last record with one `WARN` line. That line says that the newest record may be lost (ADR-0217 (b)).
+   - Without a target time, the end check can accept a torn last record with one `WARN` line. That line says that the newest record may be lost (ADR-0217 (b)).
    - The last output line is `pitr volume completed`. Note its fields `base_backup`, `system_identifier`, `timeline`, and `drill`.
    - If the command exits with a code other than 0, read its `ERROR` line. The new volume holds no production data.
-   - The line `the recovery ended before the end of the WAL archive` shows a gap or a damaged record in the archive. Do not switch to this volume.
-   - After that refusal, run `pitr-volume` again with `--target-time` before the damaged record. The recovered cluster then holds no commit after that time (ADR-0217).
+   - The line `the recovery ended before the end of the WAL archive` can indicate a gap or a damaged record.
+     It can also indicate a torn last record that crosses into an existing next segment. Do not switch to this volume.
+   - For a damaged record, select a target time before that record (ADR-0217).
+     For the torn record across segments, select a target time before the newest commit (ADR-0221 (d)).
+     Run `pitr-volume` again with `--target-time`. The recovered cluster holds no commit after that time.
    - A base backup from before this release has no file `backup_end_time`. A target inside its run stops the recovery with `FATAL`. Never select a later target, because it can replay the fault.
    - The line `cannot read heartbeat.last_at of the recovered cluster` shows that the recovered cluster has no row `heartbeat.last_at`.
      No migration creates the row. The job `heartbeat` writes it first, one `heartbeat.interval` after the start of `app`.

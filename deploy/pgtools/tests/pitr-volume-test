@@ -116,6 +116,7 @@ else
   case_pitr_check_empty_tail_file
   case_pitr_check_truncated_tail_file
   case_pitr_check_clean_tail
+  case_pitr_check_nonzero_tail_after_zero_length
   case_pitr_check_torn_record
   case_pitr_check_torn_page_crossing
   case_pitr_check_torn_at_page_boundary

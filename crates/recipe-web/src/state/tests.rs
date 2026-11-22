@@ -78,3 +78,39 @@ fn state_holds_no_cipher_until_the_server_hands_one_over() {
     .unwrap();
     assert!(bare.credential_cipher().is_none());
 }
+
+/// Build a state with a chosen count of value body permits.
+fn state_with_value_body_permits(count: usize) -> WebState {
+    let fixture = crate::test_support::Fixture::new();
+    let settings = crate::WebSettings {
+        value_body_permits: count,
+        ..crate::WebSettings::default()
+    };
+    WebState::new(
+        fixture.state.identity().clone(),
+        settings,
+        recipe_domain::identity::KeyRing::parse(crate::test_support::CSRF_KEY_NEW).unwrap(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn zero_value_body_permits_become_one_permit() {
+    let state = state_with_value_body_permits(0);
+    assert_eq!(state.value_body_permits().available_permits(), 1);
+}
+
+#[test]
+fn value_body_permits_above_the_maximum_are_clamped_without_a_panic() {
+    let state = state_with_value_body_permits(usize::MAX);
+    assert_eq!(
+        state.value_body_permits().available_permits(),
+        Semaphore::MAX_PERMITS
+    );
+}
+
+#[test]
+fn value_body_permits_in_range_stay_unchanged() {
+    let state = state_with_value_body_permits(4);
+    assert_eq!(state.value_body_permits().available_permits(), 4);
+}

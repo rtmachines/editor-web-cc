@@ -1,6 +1,6 @@
 # ADR-0217: End of a recovery at the last archived record
 
-Status: Accepted. Amends ADR-0106 (g) step 2, (p) step 4, and `reliability.md` §7.7
+Status: Accepted. Amends ADR-0106 (g) step 2, (p) step 4, and `reliability.md` §7.7. Amended by ADR-0221 (step 5 of item (b))
 Date: 2026-11-22
 Deciders: project owner
 
