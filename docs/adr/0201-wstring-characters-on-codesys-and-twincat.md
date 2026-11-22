@@ -1,6 +1,6 @@
 # ADR-0201: WSTRING characters on CODESYS and TwinCAT
 
-Status: Accepted. Amends ADR-0137 (a) and (b) (the `WSTRING` characters on `CodesysIec` and `TwinCat3`). Amends ADR-0180 (c) (the rule of these two platforms). Amends ADR-0120 (a) and (g) (earlier rule set, copy of a base). Amends ADR-0166 (m) to (s) (the checks that `RuleSet::Earlier` skips)
+Status: Accepted. Amends ADR-0137 (a) and (b) (the `WSTRING` characters on `CodesysIec` and `TwinCat3`). Amends ADR-0180 (c) (the rule of these two platforms). Amends ADR-0120 (a) and (g) (earlier rule set, copy of a base). Amends ADR-0166 (m) to (s) (the checks that `RuleSet::Earlier` skips). Amended by ADR-0210 (item (a): LF and CR at command input only)
 Date: 2026-11-19
 Deciders: project owner
 

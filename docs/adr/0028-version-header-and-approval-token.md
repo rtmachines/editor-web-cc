@@ -1,6 +1,6 @@
 # ADR-0028: Version header, approval token, and draft clarifications
 
-Status: Accepted. Amended by ADR-0029 (the approval token owns the draft). Amended by ADR-0117 (at most 7 significant digits for `REAL` and 15 for `LREAL`). Amended by ADR-0120 (the snapshot check of `CreateVersion` and a stored part that a command does not write use the earlier rule set). Amended by ADR-0137 (no `U+0000` in a text value, unit of a string length). Amended by ADR-0195 (the code of a type that does not resolve, its replacement by `UpdateParameterDefinition`). Amended by ADR-0202 (the rule of a `STRING` character outside Latin-1 applies to a `Latin1` machine only)
+Status: Accepted. Amended by ADR-0029 (the approval token owns the draft). Amended by ADR-0117 (at most 7 significant digits for `REAL` and 15 for `LREAL`). Amended by ADR-0120 (the snapshot check of `CreateVersion` and a stored part that a command does not write use the earlier rule set). Amended by ADR-0137 (no `U+0000` in a text value, unit of a string length). Amended by ADR-0195 (the code of a type that does not resolve, its replacement by `UpdateParameterDefinition`). Amended by ADR-0202 (the rule of a `STRING` character outside Latin-1 applies to a `Latin1` machine only). Amended by ADR-0213 (item (h): foreign `LiveUnits` give one `E-PLT-020` item for each parameter inside `E-RCP-020`, and an empty snapshot gives no item)
 Date: 2026-10-13
 Deciders: project owner
 

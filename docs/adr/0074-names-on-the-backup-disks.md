@@ -1,6 +1,6 @@
 # ADR-0074: Names of the files on the backup disks
 
-Status: Accepted. Amended by ADR-0174 (items (b) and (c): the temp name of the tag file, and the tag file is no set)
+Status: Accepted. Amended by ADR-0174 (items (b) and (c): the temp name of the tag file, and the tag file is not a set)
 Date: 2026-10-23
 Deciders: project owner
 

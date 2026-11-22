@@ -1,6 +1,6 @@
 # ADR-0029: Approval token ownership, audit row images, and application clarifications
 
-Status: Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked), ADR-0039 (transport of `new_member_values`), and ADR-0056 (scope of `timeout.export`). Amended by ADR-0194 (item (k): a new array type of a rebind can also give `E-WEB-011`)
+Status: Accepted. Amended by ADR-0035 (dependencies of recipe-app, row image of LoginUnlocked), ADR-0039 (transport of `new_member_values`), and ADR-0056 (scope of `timeout.export`). Amended by ADR-0194 (item (k): a new array type of a rebind can also give `E-WEB-011`). Amended by ADR-0213 (item (c): `recipe-app` always links `parking_lot` and `time`, and restates ADR-0172 (y) for `parking_lot`, item (i) adds the pair rule)
 Date: 2026-10-13
 Deciders: project owner
 

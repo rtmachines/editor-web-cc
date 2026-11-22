@@ -1,6 +1,6 @@
 # ADR-0106: Recovery of production from the WAL archive
 
-Status: Accepted. Amended by ADR-0175 (items (i) step 1 and (p) step 5: delete the containers of `app` and `backup`). Amended by ADR-0176 (items (i) step 4 and (p) step 5: delete the container of `walarchive`)
+Status: Accepted. Amended by ADR-0175 (items (i) step 1 and (p) step 5: delete the containers of `app` and `backup`). Amended by ADR-0176 (items (i) step 4 and (p) step 5: delete the container of `walarchive`). Amended by ADR-0217 (items (g) step 2 and (p) step 4: the tail rule after the end of the recovery)
 Date: 2026-10-30
 Deciders: project owner
 
