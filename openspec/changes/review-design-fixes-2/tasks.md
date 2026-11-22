@@ -183,7 +183,7 @@ Without Docker on the host, the job `compose` ("Compose stack") of a dispatched 
 
 ## 7. Final gates
 
-- [ ] 7.1 (workspace) Run the gates and show their output. Red test: none, because this task runs checks. Check: each command below passes.
+- [x] 7.1 (workspace) Run the gates and show their output. Red test: none, because this task runs checks. Check: each command below passes.
   - `cargo fmt --check`
   - `cargo clippy --all-targets --all-features -- -D warnings`
   - `cargo test --workspace --all-features --locked`
