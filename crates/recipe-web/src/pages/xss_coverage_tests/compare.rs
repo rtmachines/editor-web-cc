@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
+use super::corpus_field::submits_field;
 use super::registry::{Cover, Entry, Kind};
 use super::scan::{ScannedField, scan_source};
 use crate::test_support::source_walk::{files_below, is_test_path};
@@ -267,90 +268,10 @@ fn reachable_code(items: &[Item], line: usize) -> String {
         .join("\n")
 }
 
-/// Return the index just after the `)` that closes the `(` at `open`, or the text length.
-///
-/// A parenthesis inside a string literal does not count.
-fn after_closing_paren(text: &str, open: usize) -> usize {
-    let (mut depth, mut in_string, mut escaped) = (0_usize, false, false);
-    for (at, c) in text.char_indices().skip_while(|(at, _)| *at < open) {
-        match (in_string, c) {
-            (true, _) if escaped => escaped = false,
-            (true, '\\') => escaped = true,
-            (true, '"') => in_string = false,
-            (true, _) => {}
-            (false, '"') => in_string = true,
-            (false, '(') => depth = depth.saturating_add(1),
-            (false, ')') => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return at.saturating_add(1);
-                }
-            }
-            (false, _) => {}
-        }
-    }
-    text.len()
-}
-
-/// Return the text without the arguments of each call or macro whose name starts with `assert`.
-///
-/// A name in a message or in an argument of an assertion does not submit a field.
-fn without_assertions(code: &str) -> String {
-    let mut kept = String::new();
-    let mut rest = code;
-    while let Some(at) = rest.find("assert") {
-        let start = rest
-            .get(..at)
-            .unwrap_or_default()
-            .rfind(|c: char| !is_word(c))
-            .map_or(0, |end| end.saturating_add(1));
-        let tail = rest.get(start..).unwrap_or_default();
-        let word_len = tail.find(|c: char| !is_word(c)).unwrap_or(tail.len());
-        let word = tail.get(..word_len).unwrap_or_default();
-        let after = tail.get(word_len..).unwrap_or_default().trim_start();
-        let call = after.strip_prefix('!').unwrap_or(after).trim_start();
-        if (word.starts_with("assert") || word.starts_with("debug_assert")) && call.starts_with('(')
-        {
-            kept.push_str(rest.get(..start).unwrap_or_default());
-            let open = rest.len().saturating_sub(call.len());
-            let close = after_closing_paren(rest, open);
-            rest = rest.get(close..).unwrap_or_default();
-        } else {
-            let resume = start.saturating_add(word_len.max(1));
-            kept.push_str(rest.get(..resume).unwrap_or(rest));
-            rest = rest.get(resume..).unwrap_or_default();
-        }
-    }
-    kept.push_str(rest);
-    kept
-}
-
-/// Return true when the code submits the field in a request.
-///
-/// A request holds the name as a quoted text (`("note", ..)`, a list of names), as a form key
-/// (`note=`), or as a key of a struct literal (`note: ..`). The name inside a longer word does not
-/// count.
-fn submits_field(code: &str, field: &str) -> bool {
-    let is_alone = |key: &str, accepts: fn(Option<char>) -> bool| {
-        code.match_indices(key).any(|(at, _)| {
-            let before = code.get(..at).and_then(|head| head.chars().next_back());
-            let after = code
-                .get(at.saturating_add(key.len())..)
-                .and_then(|tail| tail.chars().next());
-            !before.is_some_and(is_word) && accepts(after)
-        })
-    };
-    code.contains(&format!("\"{field}\""))
-        || is_alone(&format!("{field}="), |_| true)
-        || is_alone(&format!("{field}:"), |after| {
-            after.is_some_and(char::is_whitespace)
-        })
-}
-
 /// Return true when the test and the items of its file that it names submit the field.
 fn test_submits_field(source: &Source, line: usize, field: &str) -> bool {
     let code = reachable_code(&items_of(&source.text), line);
-    submits_field(&without_assertions(&code), field)
+    submits_field(&code, field)
 }
 
 /// The integer types of Rust.
@@ -375,7 +296,7 @@ fn without_option(ty: &str) -> &str {
 }
 
 /// Return true when the character can be part of a Rust identifier.
-fn is_word(c: char) -> bool {
+pub(super) fn is_word(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
@@ -398,8 +319,60 @@ fn reads_field(text: &str, field: &str) -> bool {
 }
 
 /// Return the code of a source line without its `//` comment.
+///
+/// A `//` inside a string or a char literal starts no comment. A raw string such as `r#"a//b"#` is
+/// out of scope. The scan reads it as a plain string, so the cut can stay too early or too late.
 fn code_of(line: &str) -> &str {
-    line.split_once("//").map_or(line, |(code, _)| code)
+    let mut in_string = false;
+    let mut skip_to = 0;
+    let mut chars = line.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if at < skip_to {
+            continue;
+        }
+        if in_string {
+            match c {
+                '\\' => skip_to = at.saturating_add(c.len_utf8()).saturating_add(1),
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '\'' => {
+                let rest = line.get(at.saturating_add(1)..).unwrap_or_default();
+                skip_to = at.saturating_add(1).saturating_add(char_literal_len(rest));
+            }
+            '/' if chars.peek().is_some_and(|(_, next)| *next == '/') => {
+                return line.get(..at).unwrap_or(line);
+            }
+            _ => {}
+        }
+    }
+    line
+}
+
+/// Return the byte length of the char literal that follows an opening `'`, with its closing `'`.
+/// Return 0 when the `'` starts a lifetime, such as `'a`.
+fn char_literal_len(rest: &str) -> usize {
+    let mut chars = rest.chars();
+    match chars.next() {
+        Some('\\') => {
+            let escaped = chars.next().map_or(0, char::len_utf8);
+            let tail = rest.get(escaped.saturating_add(1)..).unwrap_or_default();
+            tail.find('\'').map_or(0, |close| {
+                escaped
+                    .saturating_add(1)
+                    .saturating_add(close)
+                    .saturating_add(1)
+            })
+        }
+        Some(first) if first != '\'' && chars.next() == Some('\'') => {
+            first.len_utf8().saturating_add(1)
+        }
+        _ => 0,
+    }
 }
 
 /// Return true when the line declares a function: the word `fn` and a name follow no identifier
@@ -509,18 +482,14 @@ fn impl_header<'a>(lines: &[&'a str], declared: usize) -> &'a str {
         .map_or("", |line| *line)
 }
 
-/// Return true when the function that holds the window names the struct of the entry and no rival.
+/// Return the first line of the function that holds line `start`, and the end of its window.
 ///
-/// The function text runs from its `fn` line to the last line of the window. It stops before the
-/// next `fn` line and at the `}` that closes the function. A method also has the `impl` header of
-/// its block in the text. The window of a function that names a rival belongs to no struct, so it
-/// covers no entry.
-fn window_belongs_to(lines: &[&str], start: usize, owner: &Owner<'_>) -> bool {
+/// The end is the line after the last line of the window. The window stops before the next `fn`
+/// line, after the `}` that closes the function, and after `PARSE_WINDOW_LINES` lines.
+fn function_window(lines: &[&str], start: usize) -> Option<(usize, usize)> {
     let window_end = start.saturating_add(PARSE_WINDOW_LINES).min(lines.len());
     let head = lines.get(..start).unwrap_or_default();
-    let Some(declared) = head.iter().rposition(|line| declares_any_fn(line)) else {
-        return false;
-    };
+    let declared = head.iter().rposition(|line| declares_any_fn(line))?;
     let indent = indent_of(lines.get(declared).copied().unwrap_or_default());
     let function_end = (start.saturating_add(1)..window_end)
         .find(|index| {
@@ -530,8 +499,17 @@ fn window_belongs_to(lines: &[&str], start: usize, owner: &Owner<'_>) -> bool {
             })
         })
         .unwrap_or(window_end);
+    Some((declared, function_end))
+}
+
+/// Return true when the function that holds the window names the struct of the entry and no rival.
+///
+/// The function text runs from its `fn` line to the end of the window. A method also has the
+/// `impl` header of its block in the text. The window of a function that names a rival belongs to
+/// no struct, so it covers no entry.
+fn window_belongs_to(lines: &[&str], declared: usize, end: usize, owner: &Owner<'_>) -> bool {
     let body = lines
-        .get(declared..function_end)
+        .get(declared..end)
         .unwrap_or_default()
         .iter()
         .map(|line| code_of(line))
@@ -545,15 +523,20 @@ fn window_belongs_to(lines: &[&str], start: usize, owner: &Owner<'_>) -> bool {
             .any(|rival| has_bounded(&function, rival, true))
 }
 
-/// Return true when a read of `field` and the call of `path` are within the window, the window
-/// reads no field of `others`, and the window belongs to the struct of `owner`.
+/// Return true when a read of `field` and the call of `path` are in one function and within the
+/// window, the window reads no field of `others`, and the window belongs to the struct of `owner`.
+///
+/// The window ends with the function that holds the read. A call in the next function is no parse.
 fn parses_field(text: &str, field: &str, others: &[&str], path: &str, owner: &Owner<'_>) -> bool {
     let lines: Vec<&str> = text.lines().collect();
     (0..lines.len()).any(|start| {
+        let Some((declared, end)) = function_window(&lines, start) else {
+            return false;
+        };
         let window: Vec<&str> = lines
+            .get(start..end)
+            .unwrap_or_default()
             .iter()
-            .skip(start)
-            .take(PARSE_WINDOW_LINES)
             .map(|line| code_of(line))
             .collect();
         let first = window.first().copied().unwrap_or_default();
@@ -561,7 +544,7 @@ fn parses_field(text: &str, field: &str, others: &[&str], path: &str, owner: &Ow
         reads_field(first, field)
             && has_bounded(&window, path, true)
             && !others.iter().any(|other| reads_field(&window, other))
-            && window_belongs_to(&lines, start, owner)
+            && window_belongs_to(&lines, declared, end, owner)
     })
 }
 

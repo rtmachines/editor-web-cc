@@ -67,6 +67,7 @@
 # The stub of flock needs the variable REAL_FLOCK. It writes the access mode of file descriptor 9
 # (0 is read-only) and the arguments of each call, then it runs the real flock.
 
+PITR_SEGMENT_SIZE=16777216
 # The PostgreSQL tools that a later step of pitr-volume runs. A stub of each one proves "no tool ran".
 PITR_STUB_TOOLS=(initdb pg_ctl pg_controldata pg_isready pg_resetwal pg_verifybackup pg_waldump)
 
@@ -215,8 +216,8 @@ STUB
 # The end query adds one to the position. The stub uses segments of 16 MiB and pages of 8 KiB.
 # The query file of the roles check (--file) gets restore-roles.expected as its answer.
 make_pitr_psql_stub() {
-  cat >"$ROOT/stubs/psql" <<'STUB'
-#!/usr/bin/env bash
+  printf '#!/usr/bin/env bash\nPITR_SEGMENT_SIZE=%s\n' "$PITR_SEGMENT_SIZE" >"$ROOT/stubs/psql"
+  cat >>"$ROOT/stubs/psql" <<'STUB'
 echo "EVENT psql" >>"$STUB_LOG"
 echo "ARGV psql $*" >>"$STUB_LOG"
 [ -z "${STUB_PSQL_FAIL:-}" ] || { echo "psql: error: stub failure" >&2; exit 1; }
@@ -292,7 +293,7 @@ case $sql in
     segment=$((preceding >> 24))
     printf '%s%08X%08X' "${STUB_TIMELINE:-00000002}" $((segment >> 8)) $((segment & 255))
     if [[ $sql == *wal_segment_size* ]]; then
-      printf '|%d|16777216|8192' $((position & 16777215))
+      printf '|%d|%d|8192' $((position & (PITR_SEGMENT_SIZE - 1))) "$PITR_SEGMENT_SIZE"
     fi
     printf '\n'
     ;;
@@ -361,17 +362,17 @@ add_pitr_base() {
   [ "$2" = - ] || printf '%s\n' "$2" >"$dir/backup_end_time"
 }
 
-# add_pitr_segment <timeline> <segment number> [<suffix>]: an empty segment file at the top of /wal.
+# add_pitr_segment <timeline> <segment number> [<suffix>]: a zero-filled file at the top of /wal.
 add_pitr_segment() {
   local name
   name=$(printf '%08X%08X%08X' "$1" 0 "$2")
-  : >"$CASE/wal/$name${3:-}"
+  truncate -s "$PITR_SEGMENT_SIZE" -- "$CASE/wal/$name${3:-}" || bad "cannot size the WAL fixture"
 }
 
 # A tail fixture uses the size and zero fill of a segment from pg_receivewal.
 new_pitr_tail_segment() {
   PITR_TAIL_FILE="$CASE/wal/00000001000000000000000$1${2:-}"
-  truncate -s 16777216 -- "$PITR_TAIL_FILE" || bad "cannot size the WAL fixture"
+  add_pitr_segment 1 "$1" "${2:-}"
 }
 
 write_pitr_wal() {

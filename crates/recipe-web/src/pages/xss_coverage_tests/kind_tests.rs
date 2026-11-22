@@ -67,6 +67,21 @@ fn parsed_entry_counts_a_window_in_a_method_of_its_impl_block() {
 }
 
 #[test]
+fn parsed_entry_refuses_a_parse_call_in_the_next_function() {
+    let text = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    role: String,\n}\nfn read(form: Form) {\n    let role = &form.role;\n}\nfn convert(text: &str) {\n    let role = Role::parse(text);\n}\n";
+    let table: &[Entry] = &[(
+        "pages/form.rs",
+        "Form",
+        "role",
+        Cover::NoText(Kind::Parsed("Role::parse")),
+    )];
+
+    let faults = faults_of(text, table);
+
+    assert_eq!(faults.len(), 1, "{faults:?}");
+}
+
+#[test]
 fn xss_coverage_accepts_the_parsed_kind_on_the_list_query_page() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pages/users/query.rs");
     let text = std::fs::read_to_string(path).unwrap();
@@ -74,7 +89,7 @@ fn xss_coverage_accepts_the_parsed_kind_on_the_list_query_page() {
         source("pages/users/query.rs", &text),
         source(
             "pages/users/query_tests.rs",
-            "#[test]\nfn xss_covers_search() {\n    get(\"/users?q=x\");\n}",
+            "#[test]\nfn xss_covers_search() {\n    get(&format!(\"/users?q={payload}\"));\n}",
         ),
     ];
     let table: &[Entry] = &[
@@ -244,6 +259,34 @@ fn unread_field_with_a_read_of_its_name_fails() {
 }
 
 #[test]
+fn unread_field_read_after_a_slash_slash_inside_a_string_fails() {
+    let text = unread_note_module(
+        "fn handle(form: Form) {\n    let u = \"http://h\"; let n = form._note;\n}\n",
+    );
+
+    assert_eq!(faults_of(&text, UNREAD_NOTE_TABLE), [UNREAD_NOTE_FAULT]);
+}
+
+#[test]
+fn unread_field_read_after_a_slash_slash_inside_a_char_literal_fails() {
+    let text = unread_note_module(
+        "fn handle(form: Form) {\n    let c = '\"'; let u = \"//\"; let n = form._note;\n}\n",
+    );
+
+    assert_eq!(faults_of(&text, UNREAD_NOTE_TABLE), [UNREAD_NOTE_FAULT]);
+}
+
+#[test]
+fn unread_field_in_a_real_comment_after_a_string_passes() {
+    let handler = "fn handle(form: Form) {\n    let u = \"http://h\"; // form._note\n}\n";
+
+    assert_eq!(
+        faults_of(&unread_note_module(handler), UNREAD_NOTE_TABLE),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn unread_field_with_a_read_through_self_fails() {
     let text = unread_note_module(
         "impl Form {\n    fn note(&self) -> &str {\n        &self._note\n    }\n}\n",
@@ -352,7 +395,7 @@ fn corpus_test_accepts_a_form_key_a_pair_or_a_struct_literal() {
 #[test]
 fn corpus_test_accepts_a_name_in_a_helper_or_a_const_of_its_file() {
     let tests = "const FIELDS: [&str; 1] = [\"note\"];\nfn send(field: &str) {\n    post(\"/form\", field);\n}\n#[test]\nfn xss_covers_text() {\n    for field in FIELDS {\n        send(field);\n    }\n}\n";
-    let in_helper = "fn send() {\n    post(\"/form\", \"note=x\");\n}\n#[test]\nfn xss_covers_text() {\n    send();\n}\n";
+    let in_helper = "fn send(payload: &str) {\n    post(\"/form\", &format!(\"note={payload}\"));\n}\n#[test]\nfn xss_covers_text() {\n    send(\"x\");\n}\n";
 
     assert_eq!(faults_of_note_test(tests), Vec::<String>::new());
     assert_eq!(faults_of_note_test(in_helper), Vec::<String>::new());
@@ -368,7 +411,7 @@ fn corpus_test_does_not_follow_a_function_of_another_file() {
         ),
         source(
             "pages/other_tests.rs",
-            "fn send() {\n    post(\"/form\", \"note=x\");\n}\n",
+            "fn send() {\n    post(\"/form\", &format!(\"note={payload}\"));\n}\n",
         ),
     ];
 
@@ -376,4 +419,70 @@ fn corpus_test_does_not_follow_a_function_of_another_file() {
         coverage_faults(&sources, NOTE_CORPUS_TABLE),
         [NOTE_NOT_SUBMITTED]
     );
+}
+
+/// A request struct with the free text fields `login` and `password`.
+const LOGIN_REQUEST: &str = "#[derive(Deserialize)]\n#[serde(deny_unknown_fields)]\nstruct Form {\n    login: String,\n    password: String,\n}\n";
+
+/// The entries that cover `login` and `password` with the corpus test `xss_covers_login`.
+const LOGIN_CORPUS_TABLE: &[Entry] = &[
+    (
+        "pages/form.rs",
+        "Form",
+        "login",
+        Cover::Corpus("xss_covers_login"),
+    ),
+    (
+        "pages/form.rs",
+        "Form",
+        "password",
+        Cover::Corpus("xss_covers_login"),
+    ),
+];
+
+/// The fault of the entry `password` of `LOGIN_CORPUS_TABLE`.
+const PASSWORD_NOT_SUBMITTED: &str =
+    "the corpus test of pages/form.rs Form.password does not submit the field: xss_covers_login";
+
+/// The faults of `LOGIN_CORPUS_TABLE` for a corpus test with the given body.
+fn faults_of_login_test(body: &str) -> Vec<String> {
+    let tests = format!("#[test]\nfn xss_covers_login() {{\n    {body}\n}}\n");
+    let sources = [
+        source("pages/form.rs", LOGIN_REQUEST),
+        source("pages/form_tests.rs", &tests),
+    ];
+    coverage_faults(&sources, LOGIN_CORPUS_TABLE)
+}
+
+#[test]
+fn corpus_test_refuses_a_field_that_only_holds_a_constant() {
+    let body = "let reply = post(\"/form\", &format!(\"login={payload}&password=wrong\"));";
+
+    assert_eq!(faults_of_login_test(body), [PASSWORD_NOT_SUBMITTED]);
+}
+
+#[test]
+fn corpus_test_accepts_a_field_that_holds_the_corpus_value() {
+    let bodies = [
+        "let reply = post(\"/form\", &format!(\"login={p}&password={payload}\"));",
+        "let reply = post(\"/form\", &format!(\"login={}&password={}\", p, q));",
+        "let reply = post(\"/form\", &[\"login=\", &p, \"&password=\", &q].concat());",
+    ];
+    for body in bodies {
+        assert_eq!(faults_of_login_test(body), Vec::<String>::new(), "{body}");
+    }
+}
+
+#[test]
+fn corpus_test_refuses_a_struct_key_with_a_literal_value() {
+    let body = "let reply = post_form(&Form { login: payload, password: \"wrong\" });";
+
+    assert_eq!(faults_of_login_test(body), [PASSWORD_NOT_SUBMITTED]);
+}
+
+#[test]
+fn corpus_test_refuses_a_name_that_a_probe_reads_outside_an_assertion() {
+    let body = "let reply = post(\"/form\", &format!(\"login={payload}\"));\n    let shown = reply.body.contains(\"password\");";
+
+    assert_eq!(faults_of_login_test(body), [PASSWORD_NOT_SUBMITTED]);
 }

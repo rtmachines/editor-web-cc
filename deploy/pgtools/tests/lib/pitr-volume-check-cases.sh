@@ -140,7 +140,7 @@ case_pitr_check_missing_continuation_flag() {
   new_pitr_check_case check-missing-continuation-flag
   new_pitr_tail_segment 4
   write_pitr_wal 8160 L 80
-  write_pitr_wal 8192 SSLQLx4 0xD113 0 1 67117056 0
+  write_pitr_wal 8192 SSLQLx4 0xD113 0 1 67117056 48
   pitr_check_fails "missing continuation flag" "$CHECK_END_ERROR" \
     "STUB_HISTORY_TEXT=$(pitr_history 0/4001FE0)" --
 }
@@ -151,6 +151,20 @@ case_pitr_check_split_record_header() {
   write_pitr_wal 8184 L 40
   pitr_check_fails "split record header" "$CHECK_END_ERROR" \
     "STUB_HISTORY_TEXT=$(pitr_history 0/4001FF8)" --
+}
+
+case_pitr_check_empty_tail_file() {
+  new_pitr_check_case check-empty-tail-file
+  truncate -s 0 -- "$CASE/wal/000000010000000000000004" || bad "cannot empty the WAL fixture"
+  pitr_check_fails "empty newest segment" "$CHECK_END_ERROR" --
+}
+
+case_pitr_check_truncated_tail_file() {
+  new_pitr_check_case check-truncated-tail-file
+  new_pitr_tail_segment 4
+  write_pitr_wal 0 SSLQLx4QLL 0xD113 2 1 67108864 0 7300000000000000001 16777216 8192
+  truncate -s 128 -- "$PITR_TAIL_FILE" || bad "cannot truncate the WAL fixture"
+  pitr_check_fails "newest segment cut before the recovery end" "$CHECK_END_ERROR" --
 }
 
 pitr_check_tail_passes() {

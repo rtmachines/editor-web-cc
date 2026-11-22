@@ -113,6 +113,8 @@ else
   case_pitr_check_wrong_continuation_length
   case_pitr_check_missing_continuation_flag
   case_pitr_check_split_record_header
+  case_pitr_check_empty_tail_file
+  case_pitr_check_truncated_tail_file
   case_pitr_check_clean_tail
   case_pitr_check_torn_record
   case_pitr_check_torn_page_crossing

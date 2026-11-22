@@ -222,21 +222,14 @@ case_pitr_select_none() {
   expect_no "no match: no selected line" grep -q 'base backup selected' "$CASE/out"
 }
 
-# pitr_space_need <base backup name>: the bytes that the copy needs. The base backup size is the
-# du -sb size. The segment files below hold 1000 and 500 bytes. The other files do not count.
-pitr_space_need() {
-  local base
-  base=$(du -sb -- "$CASE/wal/base/$1" | cut -f1)
-  echo $((base + 1500))
-}
-
 # new_pitr_space_case <name>: one base backup and the files at the top of the WAL archive.
 new_pitr_space_case() {
   new_pitr_case "$1"
   clear_pitr_bases
   add_pitr_base "$BASE_A" 2026-01-01T00:10:00Z "2026-01-01 00:00:00 UTC" 5000
-  head -c 1000 /dev/zero >"$CASE/wal/000000010000000000000001"
-  head -c 500 /dev/zero >"$CASE/wal/000000010000000000000002.partial"
+  add_pitr_segment 1 1
+  rm -- "$CASE/wal/000000010000000000000002"
+  add_pitr_segment 1 2 .partial
   head -c 7000 /dev/zero >"$CASE/wal/00000002.history"
   head -c 7000 /dev/zero >"$CASE/wal/000000010000000000000003.backup"
   head -c 7000 /dev/zero >"$CASE/wal/base/.not-a-base"
@@ -244,30 +237,32 @@ new_pitr_space_case() {
 
 # The free bytes minus the copy must stay at or above disk.warn_percent (15) of the disk size.
 case_pitr_free_space() {
-  local need limit
+  local base_bytes segment_bytes need disk_size=1000000000 limit
   new_pitr_space_case space-boundary
-  need=$(pitr_space_need "$BASE_A")
-  limit=150000 # 15 percent of a disk of 1000000 bytes
+  base_bytes=$(du -sb -- "$CASE/wal/base/$BASE_A" | cut -f1)
+  segment_bytes=$((4 * PITR_SEGMENT_SIZE))
+  need=$((base_bytes + segment_bytes))
+  limit=$((disk_size * 15 / 100))
   pitr_select_case "free space exactly at the percent passes" "$BASE_A" \
-    STUB_DF_AVAIL=$((need + limit)) STUB_DF_SIZE=1000000 --
+    STUB_DF_AVAIL=$((need + limit)) STUB_DF_SIZE=$disk_size --
   expect_ok "free space exactly at the percent: the line holds the sizes" \
-    grep -qF "\"base_bytes\":$((need - 1500)),\"segment_bytes\":1500" "$CASE/out"
+    grep -qF "\"base_bytes\":$base_bytes,\"segment_bytes\":$segment_bytes" "$CASE/out"
   pitr_select_case "free space far above the percent passes" "$BASE_A" \
-    STUB_DF_AVAIL=$((need + 900000)) STUB_DF_SIZE=1000000 --
+    STUB_DF_AVAIL=$((need + 900000000)) STUB_DF_SIZE=$disk_size --
   new_pitr_space_case space-one-below
   pitr_refused_case "free space one byte below the percent" "disk.warn_percent" \
-    STUB_DF_AVAIL=$((need + limit - 1)) STUB_DF_SIZE=1000000 --
+    STUB_DF_AVAIL=$((need + limit - 1)) STUB_DF_SIZE=$disk_size --
   new_pitr_space_case space-below-copy
   pitr_refused_case "free space below the size of the copy" "disk.warn_percent" \
-    STUB_DF_AVAIL=$((need - 1)) STUB_DF_SIZE=1000000 --
+    STUB_DF_AVAIL=$((need - 1)) STUB_DF_SIZE=$disk_size --
   new_pitr_space_case space-full
-  pitr_refused_case "a full disk" "disk.warn_percent" STUB_DF_AVAIL=0 STUB_DF_SIZE=1000000 --
+  pitr_refused_case "a full disk" "disk.warn_percent" STUB_DF_AVAIL=0 STUB_DF_SIZE=$disk_size --
   new_pitr_space_case space-segments-count
   pitr_refused_case "the segment files count (the base backup alone would pass)" "disk.warn_percent" \
-    STUB_DF_AVAIL=$((need - 1500 + limit + 1499)) STUB_DF_SIZE=1000000 --
+    STUB_DF_AVAIL=$((need + limit - 1)) STUB_DF_SIZE=$disk_size --
   new_pitr_space_case space-drill
   pitr_refused_case "a drill checks the free space too" "disk.warn_percent" \
-    STUB_DF_AVAIL=$((need + limit - 1)) STUB_DF_SIZE=1000000 -- --target-time 2026-06-01T00:00:00Z --drill
+    STUB_DF_AVAIL=$((need + limit - 1)) STUB_DF_SIZE=$disk_size -- --target-time 2026-06-01T00:00:00Z --drill
   new_pitr_space_case space-df-unreadable
   pitr_refused_case "df prints no numbers" "free space" STUB_DF_TEXT="n/a n/a" --
   new_pitr_space_case space-df-extra

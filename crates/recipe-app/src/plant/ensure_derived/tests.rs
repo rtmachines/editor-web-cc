@@ -462,3 +462,35 @@ async fn leaf_path_of_128_bytes_is_accepted() {
     let mut h = harness(PlcPlatform::TwinCat3).await;
     assert!(h.ensure(&ten_nested_arrays(-21_474_836)).await.is_ok());
 }
+
+/// Seed the rows of `ten_nested_arrays(last)` as stored rows, so no command creates them.
+///
+/// The innermost row has the id 1001 and each outer row has the next id. The call returns the
+/// identifier of the outermost row.
+fn seed_ten_nested_arrays(fixture: &Fixture, last: i32) -> PlcTypeId {
+    let int = seed_type_id(Primitive::Int, None).unwrap();
+    let mut element = int;
+    let mut lower = last;
+    for level in 0..10_u128 {
+        let upper = lower.checked_add(1).unwrap();
+        let id = level.checked_add(1001).unwrap();
+        fixture
+            .store
+            .seed_type(&array_row(id, element, dims(lower, upper)));
+        element = tid(id);
+        lower = -2_147_483_648;
+    }
+    element
+}
+
+#[tokio::test]
+async fn a_stored_array_with_a_leaf_path_above_128_bytes_stays_resolvable() {
+    let h = harness(PlcPlatform::TwinCat3).await;
+    let outer = seed_ten_nested_arrays(&h.fixture, -214_748_364);
+    let mut h = open(h.fixture, PlcPlatform::TwinCat3).await;
+    let before = h.own_rows().await.len();
+    let id = h.ensure(&ten_nested_arrays(-214_748_364)).await.unwrap();
+    assert_eq!(id, outer);
+    assert_eq!(h.own_rows().await.len(), before);
+    assert!(h.types.entries().is_empty());
+}

@@ -129,4 +129,26 @@ async fn blank_limit_row_with_a_value_is_saved() {
     let form = reply.body.split(&oob_form_tag()).nth(1).unwrap();
     assert_eq!(text_input_value(form, "value"), "1500");
     assert!(!form.contains("field-error"), "{form}");
+    // The stored parameter has the new value and no bound: both blank fields removed the limits.
+    let page = world
+        .get_en(&world.engineer, &parameter_path(SPEED_KEY, ""))
+        .await;
+    assert_eq!(
+        text_input_value(&page.body, "value"),
+        "1500",
+        "{}",
+        page.body
+    );
+    assert_eq!(
+        text_input_value(&page.body, "limits[0].min"),
+        "",
+        "{}",
+        page.body
+    );
+    assert_eq!(
+        text_input_value(&page.body, "limits[0].max"),
+        "",
+        "{}",
+        page.body
+    );
 }

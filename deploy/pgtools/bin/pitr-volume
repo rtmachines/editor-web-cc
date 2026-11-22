@@ -560,6 +560,8 @@ my ($record_header, $short_header, $long_header) = (24, 24, 40);
 my $first_is_contrecord = 0x0001;
 exit 1 if $page_size <= $long_header || $segment_size % $page_size || $offset >= $segment_size;
 open my $wal, '<:raw', $file or exit 1;
+my $file_size = -s $wal;
+exit 1 if !defined($file_size) || $file_size < $segment_size;
 
 $offset += ($offset == 0 ? $long_header : $short_header) if $offset % $page_size == 0;
 my $space = $page_size - $offset % $page_size;
@@ -570,9 +572,7 @@ if ($space < $record_header) {
 
 seek $wal, $offset, 0 or exit 1;
 my $count = read($wal, my $bytes, 4);
-exit 1 if !defined($count);
-exit 0 if $count == 0;
-exit 1 if $count != 4;
+exit 1 if !defined($count) || $count != 4;
 my $remaining = unpack 'L', $bytes;
 exit 0 if $remaining == 0;
 
@@ -583,9 +583,8 @@ while ($remaining > $space) {
     $remaining -= $space;
     seek $wal, $offset, 0 or exit 1;
     my $count = read($wal, my $page, $page_size);
-    exit 1 if !defined($count);
+    exit 1 if !defined($count) || $count != $page_size;
     if ($page =~ /[^\0]/) {
-        exit 1 if $count < $short_header;
         # The flag is at byte 2. The remaining length is at byte 16.
         my ($info, $rem_len) = unpack 'x2 S x12 L', $page;
         exit 1 if !($info & $first_is_contrecord) || $rem_len != $remaining;

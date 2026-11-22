@@ -221,6 +221,41 @@ async fn member_insert_with_forged_created_at_gives_e_plt_034() {
     database.keep_until_thread_ends();
 }
 
+/// The `xmin` clause passes here: the struct row version belongs to the current transaction.
+/// Only the `created_at` clause refuses the member (ADR-0212).
+#[tokio::test]
+async fn member_insert_with_own_xmin_and_other_created_at_gives_e_plt_034() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let mut admin = database.connect(Role::Superuser).await;
+    let draft = Draft::create(&mut conn).await;
+    let mut tx = admin.begin().await.unwrap();
+    let id = fixtures::struct_type(&mut tx, draft.machine, TWIN_CAT, "Pair").await;
+    // The update writes a new row version. Its `xmin` is the current transaction.
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE plc_type SET created_at = created_at - interval '1 day' WHERE id = $1")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SET LOCAL session_replication_role = origin")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+
+    let forged = sqlx::query(SECOND_MEMBER)
+        .bind(id)
+        .bind(draft.dint)
+        .execute(&mut *tx)
+        .await;
+
+    assert_trigger(forged, "E-PLT-034");
+    database.keep_until_thread_ends();
+}
+
 #[tokio::test]
 async fn member_insert_without_a_visible_struct_gives_e_plt_035() {
     let (mut conn, draft) = plant().await;
