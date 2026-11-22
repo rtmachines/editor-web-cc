@@ -9,8 +9,10 @@
 //! 1. Set the variable `RECIPE_DEV_PASSWORD`. The password has 12 to 128 characters.
 //! 2. Set the variable `RECIPE_DEV_PORT` to change the port. The default port is 8080.
 //! 3. Optional: set the variable `RECIPE_DEV_READ_ONLY_FILE` to a file path.
-//! 4. Run `cargo run -p recipe-web --example dev_server`.
-//! 5. Open `http://127.0.0.1:8080/login` in Chromium.
+//! 4. Optional: set the variable `RECIPE_DEV_SESSION_SECURE` to `false`. Then the cookies lose
+//!    `Secure` and the prefix `__Host-`, so a browser can log in over plain `http://`.
+//! 5. Run `cargo run -p recipe-web --example dev_server`.
+//! 6. Open `http://127.0.0.1:8080/login` in Chromium.
 //!
 //! With `RECIPE_DEV_READ_ONLY_FILE` set, the server checks that file every 250 ms. The read-only
 //! mode is on while the file exists and off while the file is missing. The e2e suite creates and
@@ -54,6 +56,8 @@ use uuid::Uuid;
 const PORT_VARIABLE: &str = "RECIPE_DEV_PORT";
 /// The variable that holds the password of the three seeded users.
 const PASSWORD_VARIABLE: &str = "RECIPE_DEV_PASSWORD";
+/// The variable that turns off `session.secure`. Only the value `false` is valid.
+const SESSION_SECURE_VARIABLE: &str = "RECIPE_DEV_SESSION_SECURE";
 /// The port when `RECIPE_DEV_PORT` is not set.
 const DEFAULT_PORT: u16 = 8080;
 /// The time between two moves of the clock to the wall time.
@@ -86,6 +90,9 @@ enum DevServerError {
     /// The variable `RECIPE_DEV_PORT` does not hold a port number.
     #[error("RECIPE_DEV_PORT must hold a port number from 1 to 65535")]
     BadPort,
+    /// The variable `RECIPE_DEV_SESSION_SECURE` holds a value other than `false`.
+    #[error("RECIPE_DEV_SESSION_SECURE must hold the value false or no value")]
+    BadSessionSecure,
     /// The password does not meet the password policy.
     #[error("RECIPE_DEV_PASSWORD is not accepted because {reason}")]
     PasswordPolicy {
@@ -178,18 +185,31 @@ fn dev_password(lookup: &impl Fn(&str) -> Option<String>) -> Result<NewPassword,
     NewPassword::parse(&text).map_err(|reason| DevServerError::PasswordPolicy { reason })
 }
 
-/// Make the web settings of the dev server.
+/// Read `session.secure` from `RECIPE_DEV_SESSION_SECURE`.
+///
+/// The function solves one problem: the proof of the Origin check needs plain `http://`. Without
+/// the variable, the value stays `true`, as in production.
+fn session_secure(lookup: &impl Fn(&str) -> Option<String>) -> Result<bool, DevServerError> {
+    match lookup(SESSION_SECURE_VARIABLE).as_deref() {
+        None => Ok(true),
+        Some("false") => Ok(false),
+        Some(_other) => Err(DevServerError::BadSessionSecure),
+    }
+}
+
+/// Make the web settings of the dev server. The argument is the value of `session.secure`.
 ///
 /// The function solves one problem: the e2e suite saves a German translation, and a row for a
 /// language outside `translation_langs` has no edit form. Only this example adds `de`. The
 /// production default stays as `reliability.md` section 7.11 gives it.
-fn dev_web_settings() -> Result<WebSettings, DevServerError> {
+fn dev_web_settings(secure: bool) -> Result<WebSettings, DevServerError> {
     let translation_langs = TRANSLATION_LANGS
         .into_iter()
         .map(|tag| LangCode::parse(tag).map_err(|reason| DevServerError::Lang { reason }))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(WebSettings {
         translation_langs,
+        secure,
         ..WebSettings::default()
     })
 }
@@ -267,6 +287,7 @@ fn build_state(
     password: &NewPassword,
     params: Argon2Params,
     clock: &MemoryClock,
+    secure: bool,
 ) -> Result<WebState, DevServerError> {
     let settings = IdentitySettings {
         argon2: params,
@@ -296,7 +317,7 @@ fn build_state(
         settings,
     );
     // The fake cipher keeps the PLC passwords in memory, so a save of a connection works (ADR-0154).
-    WebState::new(identity, dev_web_settings()?, fresh_key_ring()?)
+    WebState::new(identity, dev_web_settings(secure)?, fresh_key_ring()?)
         .map(|state| state.with_credential_cipher(Arc::new(MemoryCredentialCipher::default())))
         .map_err(|reason| DevServerError::Web { reason })
 }
@@ -359,7 +380,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let address = bind_address(&lookup)?;
     let password = dev_password(&lookup)?;
     let clock = MemoryClock::new(OffsetDateTime::now_utc());
-    let state = build_state(&password, Argon2Params::default(), &clock)?;
+    let secure = session_secure(&lookup)?;
+    let state = build_state(&password, Argon2Params::default(), &clock, secure)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -486,6 +508,19 @@ mod tests {
     // --- Web settings ----------------------------------------------------------------------------
 
     #[test]
+    fn session_secure_is_true_without_the_variable_and_false_for_the_value_false() {
+        let none = |_name: &str| None;
+        assert!(session_secure(&none).unwrap());
+        let off = lookup_of("RECIPE_DEV_SESSION_SECURE", "false");
+        assert!(!session_secure(&off).unwrap());
+        let bad = lookup_of("RECIPE_DEV_SESSION_SECURE", "0");
+        assert!(matches!(
+            session_secure(&bad),
+            Err(DevServerError::BadSessionSecure)
+        ));
+    }
+
+    #[test]
     fn dev_web_settings_list_pl_and_de_while_the_default_lists_only_pl() {
         let langs = |settings: &WebSettings| -> Vec<String> {
             settings
@@ -494,7 +529,7 @@ mod tests {
                 .map(ToString::to_string)
                 .collect()
         };
-        assert_eq!(langs(&dev_web_settings().unwrap()), ["pl", "de"]);
+        assert_eq!(langs(&dev_web_settings(true).unwrap()), ["pl", "de"]);
         assert_eq!(langs(&WebSettings::default()), ["pl"]);
     }
 
@@ -590,7 +625,7 @@ mod tests {
     /// Build the router of the dev server with cheap Argon2 values. Return the state too.
     fn app() -> (Router, WebState) {
         let clock = MemoryClock::new(OffsetDateTime::now_utc());
-        let state = build_state(&password(), CHEAP_ARGON2, &clock).unwrap();
+        let state = build_state(&password(), CHEAP_ARGON2, &clock, true).unwrap();
         let peer = SocketAddr::from((Ipv4Addr::LOCALHOST, PEER_PORT));
         (router(state.clone()).layer(MockConnectInfo(peer)), state)
     }

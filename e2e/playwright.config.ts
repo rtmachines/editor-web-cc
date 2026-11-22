@@ -15,6 +15,13 @@ const port = process.env.RECIPE_DEV_PORT ?? DEFAULT_PORT;
 /** The second instance runs the read-only test (ADR-0113 (h)). It uses the next port. */
 const readOnlyPort = String(Number(port) + 1);
 const readOnlySpec = /read-only\.spec\.ts/;
+/**
+ * The proof of V-15 (task 1.1 of review-design-fixes-2). Its server has `session.secure=false`.
+ * The name `recipes.test` maps to the loopback address, so Chromium sees an untrusted `http://`.
+ */
+const plainHttpPort = String(Number(port) + 2);
+const plainHttpSpec = /v15-plain-http\.spec\.ts/;
+const plainHttpHost = 'recipes.test';
 const password = process.env.E2E_PASSWORD ?? '';
 
 if (password.length < MIN_PASSWORD_LENGTH) {
@@ -42,13 +49,24 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testIgnore: readOnlySpec,
+      testIgnore: [readOnlySpec, plainHttpSpec],
       use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'read-only',
       testMatch: readOnlySpec,
       use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${readOnlyPort}` },
+    },
+    {
+      name: 'v15-plain-http',
+      testMatch: plainHttpSpec,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: `http://${plainHttpHost}:${plainHttpPort}`,
+        launchOptions: {
+          args: [`--host-resolver-rules=MAP ${plainHttpHost} 127.0.0.1`],
+        },
+      },
     },
   ],
   webServer: [
@@ -73,6 +91,20 @@ export default defineConfig({
         RECIPE_DEV_PASSWORD: password,
         RECIPE_DEV_PORT: readOnlyPort,
         RECIPE_DEV_READ_ONLY_FILE: READ_ONLY_FILE,
+      },
+    },
+    {
+      command: 'cargo run -p recipe-web --example dev_server',
+      cwd: repoRoot,
+      url: `http://127.0.0.1:${plainHttpPort}/login`,
+      reuseExistingServer: !process.env.CI,
+      timeout: SERVER_START_TIMEOUT_MS,
+      // The server log shows the logged error of a refusal. Playwright hides it by default.
+      stdout: 'pipe',
+      env: {
+        RECIPE_DEV_PASSWORD: password,
+        RECIPE_DEV_PORT: plainHttpPort,
+        RECIPE_DEV_SESSION_SECURE: 'false',
       },
     },
   ],
