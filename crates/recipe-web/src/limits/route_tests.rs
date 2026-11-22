@@ -3,18 +3,25 @@
 //! The router of these tests holds stub handlers on the real path patterns of the recipe routes.
 //! So the tests check the limit layer and the CSRF buffer without the pages of waves 4 and 5.
 
+use std::hint::black_box;
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::connect_info::MockConnectInfo;
 use axum::http::{Method, StatusCode};
-use axum::routing::post;
+use axum::routing::{MethodRouter, post};
 use recipe_app::auth::Operation;
 use recipe_domain::identity::Role;
+use tokio::sync::Semaphore;
+use tokio::time::Instant;
 
-use super::{largest_limit, route_limit};
+use super::{largest_limit, needs_value_body_permit, route_limit};
+use crate::WebState;
 use crate::routes::{RouteEntry, assemble, operation_row, table};
 use crate::settings::WebSettings;
-use crate::test_support::{Fixture, PEER, Reply, TestSession, call, request};
+use crate::test_support::{Fixture, PEER, REACHED, Reply, TestSession, call, request};
 
 /// The path patterns of the four routes that carry a parameter value.
 pub(crate) const VALUE_PATTERNS: [&str; 4] = [
@@ -201,7 +208,7 @@ fn limits_route_limit_gives_the_form_limit_to_a_method_that_carries_no_value() {
 #[test]
 fn limits_largest_limit_is_the_value_limit_of_the_table() {
     let settings = WebSettings::default();
-    assert_eq!(largest_limit(&settings), 4 * KIB * KIB);
+    assert_eq!(largest_limit(&settings), 16 * KIB * KIB);
     let small = WebSettings {
         body_limit_form: 10,
         body_limit_value: 5,
@@ -271,9 +278,12 @@ fn limits_the_check_of_the_table_accepts_the_real_patterns_and_finds_a_wrong_one
 // --- The value routes ----------------------------------------------------------------------------
 
 #[tokio::test]
-async fn limits_a_value_route_accepts_a_body_above_the_form_limit_up_to_4_mib() {
+async fn limits_a_value_route_accepts_a_body_above_the_form_limit_up_to_16_mib() {
     let (router, session) = limit_router();
-    for (limit, path) in [(300 * KIB, VALUE_PATHS[0]), (4 * KIB * KIB, VALUE_PATHS[2])] {
+    for (limit, path) in [
+        (300 * KIB, VALUE_PATHS[0]),
+        (16 * KIB * KIB, VALUE_PATHS[2]),
+    ] {
         let body = Body::from("a".repeat(limit));
         let reply = send_body(&router, &session, path, (&[], body)).await;
         assert_accepted(&reply, limit, path);
@@ -281,22 +291,22 @@ async fn limits_a_value_route_accepts_a_body_above_the_form_limit_up_to_4_mib() 
 }
 
 #[tokio::test]
-async fn limits_each_value_route_refuses_a_body_above_4_mib() {
+async fn limits_each_value_route_refuses_a_body_above_16_mib() {
     let (router, session) = limit_router();
     for path in VALUE_PATHS {
-        let body = Body::from("a".repeat(4 * KIB * KIB + 1));
+        let body = Body::from("a".repeat(16 * KIB * KIB + 1));
         let reply = send_body(&router, &session, path, (&[], body)).await;
-        assert_too_large(&reply, "4 MiB", path);
+        assert_too_large(&reply, "16 MiB", path);
     }
 }
 
 #[tokio::test]
 async fn limits_a_declared_length_above_the_value_limit_gives_e_web_003() {
     let (router, session) = limit_router();
-    let declared = (4 * KIB * KIB + 1).to_string();
+    let declared = (16 * KIB * KIB + 1).to_string();
     let headers = [("content-length", declared.as_str())];
     let reply = send_body(&router, &session, VALUE_PATHS[1], (&headers, Body::empty())).await;
-    assert_too_large(&reply, "4 MiB", "declared");
+    assert_too_large(&reply, "16 MiB", "declared");
 }
 
 #[tokio::test]
@@ -355,9 +365,9 @@ async fn limits_a_chunked_body_above_the_value_limit_gives_e_web_003() {
     let (router, session) = limit_router();
     let headers = [("transfer-encoding", "chunked")];
     for path in VALUE_PATHS {
-        let body = chunked(4 * KIB * KIB + 1);
+        let body = chunked(16 * KIB * KIB + 1);
         let reply = send_body(&router, &session, path, (&headers, body)).await;
-        assert_too_large(&reply, "4 MiB", path);
+        assert_too_large(&reply, "16 MiB", path);
     }
 }
 
@@ -367,7 +377,7 @@ async fn limits_a_chunked_body_up_to_the_limit_of_its_route_passes() {
     let headers = [("transfer-encoding", "chunked")];
     let cases = [
         (VALUE_PATHS[0], 300 * KIB),
-        (VALUE_PATHS[2], 4 * KIB * KIB),
+        (VALUE_PATHS[2], 16 * KIB * KIB),
         (TRANSLATION_PATH, 64 * KIB),
         (FORM_PATHS[1], 256 * KIB),
     ];
@@ -399,7 +409,7 @@ async fn limits_a_chunked_body_above_the_limit_never_reaches_the_handler() {
         &router,
         &session,
         VALUE_PATHS[0],
-        (&[], chunked(4 * KIB * KIB + 1)),
+        (&[], chunked(16 * KIB * KIB + 1)),
     )
     .await;
     assert_eq!(reply.status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -408,4 +418,178 @@ async fn limits_a_chunked_body_above_the_limit_never_reaches_the_handler() {
         "the handler answered: {}",
         reply.body
     );
+}
+
+// --- The permits of the value routes (ADR-0211 (m) to (o)) --------------------------------------
+
+/// The message of the test panic.
+const PANIC_TEXT: &str = "the test value is missing";
+/// The seconds of `http.body_read_timeout`. The wait for a permit lasts as long.
+const PERMIT_WAIT: Duration = Duration::from_secs(10);
+/// The pause between two looks at the semaphore, and the count of looks. Time is paused, so a
+/// pause costs no real time.
+const POLL_STEP: Duration = Duration::from_millis(1);
+const POLL_LIMIT: u32 = 100;
+/// The value of `http.value_body_permits`.
+const PERMITS: u32 = 4;
+
+async fn reached() -> &'static str {
+    REACHED
+}
+
+/// A handler that panics. `black_box` hides the `None` from the optimizer and from clippy.
+async fn explode() -> &'static str {
+    black_box(None::<&'static str>).expect(PANIC_TEXT)
+}
+
+/// A router with `handler` on the four value patterns and on one form pattern, the session of an
+/// Administrator, and the state of the router.
+fn permit_router(handler: MethodRouter<WebState>) -> (Router, TestSession, WebState) {
+    let fixture = Fixture::new();
+    let session = fixture.seed_session(1, Role::Administrator, false);
+    let row = |path: &'static str| {
+        operation_row(Method::POST, path, Operation::AddParameter, handler.clone())
+    };
+    let mut rows: Vec<RouteEntry> = VALUE_PATTERNS.iter().copied().map(row).collect();
+    rows.extend(FORM_PATTERNS.iter().copied().map(row));
+    let router = assemble(fixture.state.clone(), rows, Router::new()).layer(MockConnectInfo(PEER));
+    (router, session, fixture.state)
+}
+
+/// Send a small form to `path`. Return the answer and the time that it took on the paused clock.
+async fn timed_post(router: &Router, session: &TestSession, path: &str) -> (Reply, Duration) {
+    let started = Instant::now();
+    let reply = send_body(router, session, path, (&[], Body::from("a=b"))).await;
+    (reply, started.elapsed())
+}
+
+#[tokio::test(start_paused = true)]
+async fn fifth_value_body_waits_and_gets_e_web_009() {
+    let (router, session, state) = permit_router(post(reached));
+    let held = Arc::clone(state.value_body_permits())
+        .try_acquire_many_owned(PERMITS)
+        .unwrap();
+    for path in VALUE_PATHS {
+        let (reply, elapsed) = timed_post(&router, &session, path).await;
+        assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        assert!(reply.body.contains("E-WEB-009"), "{path}: {}", reply.body);
+        assert!(!reply.body.contains(REACHED), "{path}: the handler ran");
+        assert_eq!(reply.header("retry-after"), "5", "{path}");
+        assert_eq!(elapsed, PERMIT_WAIT, "{path}");
+    }
+    drop(held);
+    let (reply, _elapsed) = timed_post(&router, &session, VALUE_PATHS[0]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(reply.body, REACHED);
+}
+
+#[tokio::test(start_paused = true)]
+async fn value_body_permits_are_held_until_the_handler_returns() {
+    let gate = Arc::new(Semaphore::new(0));
+    let handler_gate = Arc::clone(&gate);
+    let handler = post(move || {
+        let gate = Arc::clone(&handler_gate);
+        async move {
+            let _open = gate.acquire().await.unwrap();
+            REACHED
+        }
+    });
+    let (router, session, state) = permit_router(handler);
+    let permits = Arc::clone(state.value_body_permits());
+    let held =
+        async |path: &str| send_body(&router, &session, path, (&[], Body::from("a=b"))).await;
+    let driver = async {
+        for _ in 0..POLL_LIMIT {
+            if permits.available_permits() == 0 {
+                break;
+            }
+            tokio::time::sleep(POLL_STEP).await;
+        }
+        assert_eq!(
+            permits.available_permits(),
+            0,
+            "four requests hold a permit"
+        );
+        let (fifth, elapsed) = timed_post(&router, &session, VALUE_PATHS[2]).await;
+        assert_eq!(
+            fifth.status,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "{}",
+            fifth.body
+        );
+        assert!(fifth.body.contains("E-WEB-009"), "{}", fifth.body);
+        assert_eq!(elapsed, PERMIT_WAIT);
+        gate.add_permits(usize::try_from(PERMITS).unwrap());
+    };
+    let (first, second, third, fourth, ()) = tokio::join!(
+        held(VALUE_PATHS[0]),
+        held(VALUE_PATHS[1]),
+        held(VALUE_PATHS[2]),
+        held(VALUE_PATHS[3]),
+        driver
+    );
+    for reply in [first, second, third, fourth] {
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        assert_eq!(reply.body, REACHED);
+    }
+    assert_eq!(permits.available_permits(), 4);
+}
+
+#[tokio::test(start_paused = true)]
+async fn value_body_permit_returns_after_each_kind_of_answer() {
+    let (router, session, state) = permit_router(post(reached));
+    let permits = Arc::clone(state.value_body_permits());
+    let (reply, _elapsed) = timed_post(&router, &session, VALUE_PATHS[0]).await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert_eq!(permits.available_permits(), 4);
+    let too_large = chunked(16 * KIB * KIB + 1);
+    let headers = [("transfer-encoding", "chunked")];
+    let reply = send_body(&router, &session, VALUE_PATHS[1], (&headers, too_large)).await;
+    assert_too_large(&reply, "16 MiB", "an error answer");
+    assert_eq!(permits.available_permits(), 4);
+}
+
+#[tokio::test(start_paused = true)]
+async fn value_body_permit_returns_after_a_panic_of_the_handler() {
+    let (router, session, state) = permit_router(post(explode));
+    let permits = Arc::clone(state.value_body_permits());
+    let (reply, _elapsed) = timed_post(&router, &session, VALUE_PATHS[3]).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "{}",
+        reply.body
+    );
+    assert!(!reply.body.contains(PANIC_TEXT), "{}", reply.body);
+    assert_eq!(permits.available_permits(), 4);
+}
+
+#[tokio::test(start_paused = true)]
+async fn value_body_permit_is_not_taken_on_a_form_route() {
+    let (router, session, state) = permit_router(post(reached));
+    let _held = Arc::clone(state.value_body_permits())
+        .try_acquire_many_owned(PERMITS)
+        .unwrap();
+    for path in FORM_PATHS {
+        let (reply, elapsed) = timed_post(&router, &session, path).await;
+        assert_eq!(reply.status, StatusCode::OK, "{path}: {}", reply.body);
+        assert_eq!(reply.body, REACHED, "{path}");
+        assert_eq!(elapsed, Duration::ZERO, "{path}");
+    }
+}
+
+#[test]
+fn value_body_permit_applies_to_a_post_on_the_four_value_patterns_only() {
+    for pattern in VALUE_PATTERNS {
+        assert!(needs_value_body_permit(&Method::POST, pattern), "{pattern}");
+        for method in [Method::GET, Method::HEAD] {
+            assert!(!needs_value_body_permit(&method, pattern), "{pattern}");
+        }
+    }
+    for pattern in FORM_PATTERNS.into_iter().chain([TRANSLATION_PATTERN, ""]) {
+        assert!(
+            !needs_value_body_permit(&Method::POST, pattern),
+            "{pattern}"
+        );
+    }
 }

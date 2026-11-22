@@ -386,6 +386,95 @@ async fn csrf_bad_origins_are_rejected_even_with_a_valid_token() {
     }
 }
 
+/// Send a request with `Origin: http://<host>`, a valid token, and no `Sec-Fetch-Site`.
+///
+/// The browser sends no `Sec-Fetch-Site` to a plain HTTP host that is not a loopback address.
+async fn post_with_http_origin(secure: bool, host: &str, origin: &str) -> (Fixture, Reply) {
+    post_with_http_origin_and_host(secure, Some(host), origin).await
+}
+
+/// Like `post_with_http_origin`, but `None` sends no `Host` header at all.
+async fn post_with_http_origin_and_host(
+    secure: bool,
+    host: Option<&str>,
+    origin: &str,
+) -> (Fixture, Reply) {
+    let web = WebSettings {
+        secure,
+        ..WebSettings::default()
+    };
+    let fixture = Fixture::with_settings(web, CSRF_KEY_NEW);
+    let session = fixture.seed_session(1, Role::Administrator, false);
+    let mut extra = vec![("origin", origin), ("x-csrf-token", session.csrf.as_str())];
+    if let Some(host) = host {
+        extra.push(("host", host));
+    }
+    let headers = session_headers(&session, &extra);
+    let reply = post(&fixture.router(), "/test/users", &headers, "a=b").await;
+    (fixture, reply)
+}
+
+/// ADR-0220 (b): with `session.secure=false`, a plain HTTP origin of the same host passes.
+#[tokio::test]
+async fn csrf_http_origin_passes_when_secure_is_false() {
+    let (fixture, reply) =
+        post_with_http_origin(false, "192.168.1.20:8080", "http://192.168.1.20:8080").await;
+    assert_accepted(&fixture, &reply, "http origin, secure=false");
+}
+
+/// ADR-0220 (a): with `session.secure=true`, a plain HTTP origin gets `403 E-WEB-007`.
+#[tokio::test]
+async fn csrf_http_origin_is_refused_when_secure_is_true() {
+    let (fixture, reply) =
+        post_with_http_origin(true, "192.168.1.20:8080", "http://192.168.1.20:8080").await;
+    assert_rejected(&fixture, &reply, "http origin, secure=true");
+}
+
+/// ADR-0220 (d): with `session.secure=false`, a plain HTTP origin of another host or port fails.
+#[tokio::test]
+async fn csrf_http_origin_of_another_host_is_refused_when_secure_is_false() {
+    for (host, origin) in [
+        ("192.168.1.20:8080", "http://evil.example"),
+        ("192.168.1.20:8080", "http://192.168.1.20:9090"),
+        ("192.168.1.20:8080", "http://192.168.1.20"),
+    ] {
+        let (fixture, reply) = post_with_http_origin(false, host, origin).await;
+        assert_rejected(&fixture, &reply, origin);
+    }
+}
+
+/// ADR-0220 (d): with `session.secure=false`, an origin that only resembles the `Host` fails.
+///
+/// The cases cover a suffix, a longer host, a port, a prefix, `null`, and an upper-case scheme.
+/// The code compares the scheme byte for byte. A browser always sends a lower-case scheme.
+#[tokio::test]
+async fn csrf_http_origin_near_the_host_is_refused_when_secure_is_false() {
+    let host = "recipes.plant.local";
+    for origin in [
+        "http://recipes.plant.local.evil.example",
+        "http://recipes.plant.local1",
+        "http://recipes.plant.local:8080",
+        "http://evilrecipes.plant.local",
+        "null",
+        "HTTP://recipes.plant.local",
+    ] {
+        let (fixture, reply) = post_with_http_origin(false, host, origin).await;
+        assert_rejected(&fixture, &reply, origin);
+    }
+}
+
+/// ADR-0220 (d): with `session.secure=false`, a missing or empty `Host` never proves the site.
+#[tokio::test]
+async fn csrf_http_origin_without_a_usable_host_is_refused_when_secure_is_false() {
+    for (what, host) in [("missing host", None), ("empty host", Some(""))] {
+        let (fixture, reply) =
+            post_with_http_origin_and_host(false, host, "http://recipes.plant.local").await;
+        assert_rejected(&fixture, &reply, what);
+    }
+    let (fixture, reply) = post_with_http_origin_and_host(false, Some(""), "http://").await;
+    assert_rejected(&fixture, &reply, "bare scheme, empty host");
+}
+
 // --- The pre-session token ---------------------------------------------------------------------
 
 /// Build a cookie value and a nonce from fixed bytes and a signing key file.

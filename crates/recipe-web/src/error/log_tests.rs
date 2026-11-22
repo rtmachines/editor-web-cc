@@ -40,6 +40,7 @@ fn log_a_timeout_writes_its_stage_as_a_field() {
         (TimeoutStage::Request, "request"),
         (TimeoutStage::Diff, "diff"),
         (TimeoutStage::DetachedSlot, "security step slot"),
+        (TimeoutStage::ValueBodyPermit, "value body permit"),
     ];
     for (stage, expected) in cases {
         let line = logged_line(&timeout(stage), ErrorCode::WEB_009, Level::ERROR);
@@ -61,6 +62,7 @@ fn log_a_timeout_keeps_its_user_message_status_and_level() {
         TimeoutStage::Request,
         TimeoutStage::Diff,
         TimeoutStage::DetachedSlot,
+        TimeoutStage::ValueBodyPermit,
     ] {
         let error = timeout(stage);
         let code = error.code();

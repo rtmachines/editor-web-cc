@@ -481,7 +481,7 @@ fn recipe_the_words_of_a_polish_message_come_from_the_polish_bundle() {
     );
     assert_eq!(
         polish(find(ErrorCode::RCP_005)),
-        "Warto\u{15b}\u{107} parametru LABEL[2] nie pasuje do typu. Oczekiwano: jeden znak od U+0001 do U+00FF."
+        "Warto\u{15b}\u{107} parametru LABEL[2] nie pasuje do typu. Oczekiwano: jeden znak od U+0001 do U+00FF bez LF i CR."
     );
     assert_eq!(
         polish(find(ErrorCode::RCP_052)),

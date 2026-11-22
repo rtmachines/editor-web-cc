@@ -1313,26 +1313,33 @@ CREATE TRIGGER machine_platform_frozen
 
 ### 4.6 `plc_type_immutable` (ADR-0006)
 
-A type row and its members never change. Members can be inserted only in the transaction that created the struct row. `now()` is the transaction start time, so `created_at = now()` is true only inside that transaction. The column-level INSERT grant of section 5 excludes `created_at`, so the application cannot set it. A deferred constraint trigger requires at least one member at commit.
+A type row and its members never change. Members can be inserted only in the transaction that created the struct row. A member insert passes only when `xmin` of the struct row equals `pg_current_xact_id()::xid` and `created_at` equals `now()` (ADR-0212). The column-level INSERT grant of section 5 excludes `created_at`, so the application cannot set it. A deferred constraint trigger requires at least one member at commit.
 
 ```sql
-CREATE FUNCTION plc_type_immutable() RETURNS trigger
+CREATE OR REPLACE FUNCTION plc_type_immutable() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $$
 DECLARE
     v_kind    TEXT;
     v_created TIMESTAMPTZ;
+    v_xmin    xid;
 BEGIN
     IF TG_OP IN ('UPDATE', 'DELETE') THEN
         RAISE EXCEPTION 'E-PLT-033 % rows are immutable', TG_TABLE_NAME
             USING ERRCODE = 'check_violation';
     END IF;
     -- INSERT on plc_type_member only.
-    SELECT kind, created_at INTO v_kind, v_created FROM plc_type WHERE id = NEW.struct_type_id;
-    IF v_kind <> 'struct' THEN
+    SELECT kind, created_at, xmin INTO v_kind, v_created, v_xmin
+    FROM plc_type WHERE id = NEW.struct_type_id;
+    -- E-PLT-035 fits a missing row: a type that is not visible is not a struct.
+    IF NOT FOUND OR v_kind IS DISTINCT FROM 'struct' THEN
         RAISE EXCEPTION 'E-PLT-035 type % is not a struct', NEW.struct_type_id
             USING ERRCODE = 'check_violation';
     END IF;
-    IF v_created <> now() THEN
+    -- The xmin test refuses a second transaction with the same start time.
+    -- The created_at test refuses an old struct whose 32-bit xmin matches after a wraparound.
+    IF v_xmin IS DISTINCT FROM pg_current_xact_id()::xid
+       OR v_created IS DISTINCT FROM now()
+    THEN
         RAISE EXCEPTION 'E-PLT-034 members of type % are closed', NEW.struct_type_id
             USING ERRCODE = 'check_violation';
     END IF;
@@ -2387,6 +2394,7 @@ Notes:
   - `0016_recipe_version_insert.sql`: the function and the trigger of 4.14 (ADR-0169). The file does not scan or rewrite a table (ADR-0169 (f)).
   - `0017_machine_string_encoding.sql`: one transaction. It adds the column `machine.string_encoding` of section 3.1 with the constant default `'Latin1'`, so it rewrites no table. It adds both checks as `NOT VALID` and the grant of section 5.2 (ADR-0202 (n), (o)).
   - `0018_machine_string_encoding_validate.sql`: `VALIDATE CONSTRAINT` on the two checks of `0017` (ADR-0202 (o)).
+  - `0019_struct_member_transaction.sql`: one transaction. It runs `CREATE OR REPLACE FUNCTION plc_type_immutable` of section 4.6. The file scans and rewrites no table (ADR-0212).
 - Migrations never create roles (section 5.1) and never seed a user. The first administrator is created by `recipe-server create-admin` (ADR-0020). It reads the password from stdin or from a secret file and hashes it with Argon2id. It inserts the row with `must_change_password = true`. It does nothing when an active administrator exists.
 - Runner: the one-shot Compose service `migrate` runs `recipe-server migrate` as `recipe_migrator` after `db` is healthy and before `app` starts. The `app` container never holds the migrator credential. Every migration runs in one transaction. `sqlx::migrate!` gives no hook inside that transaction, so a `SET LOCAL` is not possible. The runner therefore sets `lock_timeout` to `migrate.lock_timeout` at session level on its connection, before the first migration. On `55P03` (lock not available) the runner retries up to `migrate.retries` times with a pause of `migrate.retry_pause`, then exits non-zero (`reliability.md` 7.11). The upgrade stops and `app` keeps the old image.
 - A migration that needs `CREATE INDEX CONCURRENTLY` starts with the line `-- no-transaction` and contains only that statement. A concurrent index on an audit object is not a migration. Section 5.1 gives the runbook procedure and the migration that records the index.

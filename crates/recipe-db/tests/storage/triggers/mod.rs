@@ -12,7 +12,8 @@ mod version_insert;
 mod version_mutable;
 
 use crate::support::{
-    Role, TestDatabase, created_names, document_sql, migration_sql, missing_names,
+    Role, TestDatabase, created_names, document_sql, function_statement, migration_sql,
+    missing_names, without_function_statement,
 };
 
 /// The sections that `0002_triggers.sql` holds so far, in the order of the document.
@@ -23,14 +24,42 @@ const SECTIONS: [&str; 11] = [
 /// The second block of 4.9 holds the statements of the nightly check.
 const SKIPPED_BLOCKS: [(&str, usize); 1] = [("4.9", 1)];
 const MIGRATION: &str = "0002_triggers.sql";
+const REPLACING_MIGRATION: &str = "0019_struct_member_transaction.sql";
+const SHIPPED_HEAD: &str = "CREATE FUNCTION plc_type_immutable";
+const REPLACING_HEAD: &str = "CREATE OR REPLACE FUNCTION plc_type_immutable";
 
+/// Migration 0019 replaces `plc_type_immutable` (ADR-0212), so section 4.6 shows the 0019 text.
+/// This test leaves that function out on both sides.
+/// The test `migration_0019_equals_the_function_of_section_4_6` compares it.
+/// The other statements of 4.6, such as the triggers, stay in the comparison.
 #[test]
 fn migration_0002_equals_the_sql_blocks_of_its_sections() {
     let document = document_sql(&SECTIONS, &SKIPPED_BLOCKS);
     let file = migration_sql(MIGRATION);
 
     assert!(document.starts_with("CREATE FUNCTION enforce_version_mutable()"));
-    assert_eq!(file, document);
+    assert_eq!(
+        without_function_statement(&file, SHIPPED_HEAD),
+        without_function_statement(&document, REPLACING_HEAD)
+    );
+}
+
+#[test]
+fn migration_0019_equals_the_function_of_section_4_6() {
+    let document = document_sql(&["4.6"], &[]);
+    let file = migration_sql(REPLACING_MIGRATION);
+
+    let in_document = function_statement(&document, REPLACING_HEAD);
+
+    assert!(
+        in_document.contains("pg_current_xact_id()"),
+        "section 4.6 must test the creating transaction: {in_document}"
+    );
+    assert_eq!(function_statement(&file, REPLACING_HEAD), in_document);
+    assert_eq!(
+        file, in_document,
+        "0019 holds the function and nothing else"
+    );
 }
 
 #[tokio::test]

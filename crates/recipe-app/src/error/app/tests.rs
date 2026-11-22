@@ -122,6 +122,10 @@ fn stages_display_in_plain_words() {
     assert_eq!(TaskStage::Validation.to_string(), "validation");
     assert_eq!(TaskStage::Token.to_string(), "token generation");
     assert_eq!(TimeoutStage::Diff.to_string(), "diff");
+    assert_eq!(
+        TimeoutStage::ValueBodyPermit.to_string(),
+        "value body permit"
+    );
     assert_eq!(TaskStage::Diff.to_string(), "diff");
 }
 

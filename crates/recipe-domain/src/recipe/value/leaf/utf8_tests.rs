@@ -161,7 +161,7 @@ fn string_limit(tree: &TypeTree, max_length: u16) -> ProcessLimit {
 fn adr_0202_utf8_expected_form_names_bytes() {
     assert_eq!(
         Expected::StringUtf8 { length: 6 }.to_string(),
-        "a string of at most 6 UTF-8 bytes without U+0000"
+        "a string of at most 6 UTF-8 bytes without U+0000, LF, and CR"
     );
 }
 

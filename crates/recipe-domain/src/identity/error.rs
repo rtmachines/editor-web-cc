@@ -28,7 +28,7 @@ impl CredentialFailure {
 
 /// Error of the Identity and Access context (`reliability.md` section 1.1).
 ///
-/// The enum has one variant for each code in the range `E-IDN-001` to `E-IDN-011`.
+/// The enum has one variant for each code in the range `E-IDN-001` to `E-IDN-012`.
 /// No variant carries a password, a hash, a token, or a cookie value.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum IdentityError {
@@ -91,6 +91,12 @@ pub enum IdentityError {
         /// The login of the user.
         login: Login,
     },
+    /// A value of the login throttle breaks its grammar (`E-IDN-012`, ADR-0215).
+    #[error("The value of {field} is not valid for the login throttle.")]
+    ThrottlePolicyInvalid {
+        /// The name of the field that breaks the grammar.
+        field: &'static str,
+    },
 }
 
 impl From<PasswordReason> for IdentityError {
@@ -115,6 +121,7 @@ impl IdentityError {
             Self::UserAlreadyActive { .. } => ErrorCode::IDN_009,
             Self::UserAlreadyInactive { .. } => ErrorCode::IDN_010,
             Self::TechnicalRoleChange { .. } => ErrorCode::IDN_011,
+            Self::ThrottlePolicyInvalid { .. } => ErrorCode::IDN_012,
         }
     }
 }

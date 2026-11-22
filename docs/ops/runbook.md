@@ -541,6 +541,9 @@ If the alert `replication` stays active, use the section "A gap in the WAL strea
 2. Check that the exit code is 0 and the output holds the line `restore test passed`.
 3. Check that the line names the set that you expect (ADR-0067).
 
+If the `ERROR` line reports a failed stop, find the named directory under `/backups/.scratch` (ADR-0218).
+Stop that scratch server by hand. Delete its scratch directory after the server stops. Run the restore test again.
+
 At each restore drill, also run the section "Compare the offline copy" (ADR-0174 (r)).
 
 ### Statement outside the role grammar
@@ -1174,9 +1177,9 @@ docker volume rm <drill volume>
 
 ## Check the stored data against the platform ranges
 
-The query lists the stored rows that the platform ranges reject. It writes nothing.
+The query lists the stored rows that the platform ranges reject. It also lists stored text leaves with LF or CR. It writes nothing.
 The output has the columns `machine_code`, `reference_number`, `version_number`, `version_status`, `tag`, `part`, and `stored_text`.
-The column `part` is `value`, `limit_min`, `limit_max`, `s7_address`, `wide_text`, or `iec_wide_text`.
+The column `part` is `value`, `limit_min`, `limit_max`, `s7_address`, `wide_text`, `iec_wide_text`, or `line_break`.
 A row can be a false hit when its type tree holds a `ULINT`, `LWORD`, `LTIME`, `REAL`, or `LREAL` leaf.
 The false hit can be a `value` row, a `limit_min` row, or a `limit_max` row of that leaf.
 
@@ -1193,6 +1196,11 @@ The rule refuses each character outside `U+0001` to `U+D7FF` and `U+E000` to `U+
 An `iec_wide_text` row is a true hit. Do not accept it as a false hit.
 An `Approved` version with an `iec_wide_text` row stays readable. It becomes not loadable after the upgrade (ADR-0201 (i)).
 The part `iec_wide_text` gives the kind of result that changes `loadable`. It is the only such new part of the CODESYS and TwinCAT rules. The parts of the next section refuse only new writes.
+
+A row of `line_break` follows ADR-0210. The column `stored_text` holds a text leaf with LF or CR.
+The query lists these leaves on each platform and in each version status.
+The line break has no effect on whether an `Approved` version is loadable.
+Before the next form save of a draft row, the owner changes the value or accepts the loss of the line break.
 
 1. Run the query from the directory `deploy/` of the new release:
 
@@ -3177,6 +3185,13 @@ The script writes one `ERROR` line with a field `message`.
 | `the backup directory is on the filesystem of pgdata` | `RECIPE_BACKUP_DIR` is on the disk of the Docker root directory. | Run steps 4 and 5 of the section "Prepare the second disk". |
 | `the marker file of the backup disk is missing` | The file `.backup-marker` is not in `RECIPE_BACKUP_DIR`. | Run `install -m 0600 -o 999 -g 999 /dev/null "$RECIPE_BACKUP_DIR/.backup-marker"`. |
 | `no complete set is younger than the maximum age` | No run made a set within `backup.max_age_alert`. A run failed, did not end, or did not start. | Use the row `backup_age` of the section "Alarms". Then use the table "Messages of backup-once". |
+| `the manifest time is ahead of the clock` | The manifest time is more than `alerts.interval` ahead of the clock. | Use the clock check below. |
+
+1. Compare the host clock with the modification time of the manifest for the set in the error line.
+2. Compare the host clock with a time server. Fix the clock.
+3. Wait for the next healthcheck (ADR-0219 (i)).
+
+A set stays untrusted until the clock reaches its manifest time minus `alerts.interval`.
 
 The script `backup-entry` writes the message about the marker file too. Then the container `backup` stops and Docker starts it again.
 

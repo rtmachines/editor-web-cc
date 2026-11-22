@@ -115,7 +115,7 @@ async fn the_counts_cover_the_pair_and_the_address(h: &dyn Harness) {
 
 async fn attempts_outside_the_window_and_successes_do_not_count(h: &dyn Harness) {
     let policy = ThrottlePolicy::default();
-    let outside = policy.window.as_secs().checked_add(1).unwrap();
+    let outside = policy.window().as_secs().checked_add(1).unwrap();
     h.seed_attempts(&typed("anna"), FIRST, &[outside, 2 * 3600], false)
         .await;
     h.seed_attempts(&typed("anna"), FIRST, &[10], true).await;
@@ -129,10 +129,9 @@ async fn attempts_outside_the_window_and_successes_do_not_count(h: &dyn Harness)
 }
 
 async fn a_reached_budget_inserts_no_row(h: &dyn Harness) {
-    let policy = ThrottlePolicy {
-        address_budget: 2,
-        ..ThrottlePolicy::default()
-    };
+    // A budget of 2 leaves one free failure (ADR-0215 (j)).
+    let defaults = ThrottlePolicy::default();
+    let policy = ThrottlePolicy::parse(1, defaults.delay_cap(), defaults.window(), 2).unwrap();
     h.seed_attempts(&typed("bob"), FIRST, &[30, 20], false)
         .await;
     h.seed_attempts(&typed("carl"), SECOND, &[10], false).await;

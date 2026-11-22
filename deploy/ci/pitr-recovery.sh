@@ -251,9 +251,8 @@ drill() {
 # The ERROR lines that pitr-volume writes (ADR-0106 (a) and (g) step 2). A target after the newest commit ends the recovery with FATAL.
 TARGET_ERROR="the temporary server did not finish the recovery"
 GAP_ERROR="the recovery ended before the end of the WAL archive"
-# V-02: change B sets 1 with its fix of ADR-0106 (g) step 2.
-EARLY_END_REFUSAL_REQUIRED=0
-EARLY_END_ERROR=""
+EARLY_END_REFUSAL_REQUIRED=1
+EARLY_END_ERROR="the recovery ended before the end of the WAL archive"
 # The word @JOB@ becomes the job that writes the line. The step refuse expects a line of walarchive-entry.
 ERROR_LINE_PATTERN='^\{"timestamp":"[^"]+","level":"ERROR","job":"@JOB@","message":"([^"]*)"\}$'
 # pitr-volume can add fields to an ERROR line.

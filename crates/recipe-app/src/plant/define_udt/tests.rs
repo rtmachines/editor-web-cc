@@ -5,7 +5,7 @@ use recipe_domain::error_codes::ErrorCode;
 use recipe_domain::identity::Role;
 use recipe_domain::plant::{
     ArrayDimension, ArrayDimensions, MachineCode, MemberName, PlantError, PlcPlatform, PlcType,
-    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeMember, TypeName,
+    PlcTypeId, PlcTypeRecord, Primitive, RecordShape, TypeExpr, TypeLimit, TypeMember, TypeName,
 };
 use serde_json::json;
 
@@ -730,4 +730,69 @@ async fn an_operator_is_forbidden_with_one_event_and_no_transaction() {
     assert_eq!(events.first().unwrap().kind(), SecurityEventKind::Forbidden);
     assert!(fixture.store.journal().is_empty());
     assert!(fixture.store.audit_entries().is_empty());
+}
+
+/// Store `ST_Mid@1` with one `REAL` member whose name has 64 characters.
+///
+/// The leaf path of `ST_Mid@1` is `.` and the name, so it has 65 bytes.
+fn seed_mid_struct(fixture: &Fixture) -> String {
+    let member = "n".repeat(64);
+    fixture.store.seed_type(&stored_struct(
+        931,
+        ("ST_Mid", 1),
+        None,
+        &[(member.as_str(), real())],
+    ));
+    member
+}
+
+#[tokio::test]
+async fn leaf_path_above_128_bytes_gives_e_plt_018() {
+    let fixture = fixture(PlcPlatform::TwinCat3);
+    seed_mid_struct(&fixture);
+    let outer = "o".repeat(63);
+    let before = own_rows(&fixture).len();
+    let error = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Top",
+            &[(outer.as_str(), "ST_Mid@1")],
+        ),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            AppError::Plant(PlantError::TypeTooLarge {
+                type_name,
+                limit: TypeLimit::LeafPathBytes,
+            }) if type_name == "ST_Top"
+        ),
+        "{error:?}"
+    );
+    assert_eq!(error.code(), ErrorCode::PLT_018);
+    assert_eq!(own_rows(&fixture).len(), before);
+    assert!(fixture.store.audit_entries().is_empty());
+}
+
+#[tokio::test]
+async fn leaf_path_of_128_bytes_is_accepted() {
+    let fixture = fixture(PlcPlatform::TwinCat3);
+    seed_mid_struct(&fixture);
+    let outer = "o".repeat(62);
+    let output = run(
+        &fixture,
+        Role::ProcessEngineer,
+        input(
+            DefineUdtMode::New,
+            "ST_Top",
+            &[(outer.as_str(), "ST_Mid@1")],
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.revision, 1);
 }

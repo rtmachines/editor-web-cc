@@ -192,6 +192,8 @@ pub(super) mod fixtures;
 #[cfg(test)]
 mod kept_member_tests;
 #[cfg(test)]
+mod line_break_tests;
+#[cfg(test)]
 mod stored_s7_tests;
 #[cfg(test)]
 mod stored_value_tests;

@@ -3,7 +3,9 @@
 use super::fixtures::{array_row, id, primitive_row, string_row, struct_row, types};
 use super::*;
 use crate::error_codes::ErrorCode;
-use crate::plant::limits::{MAX_DEPTH, MAX_LEAVES, MAX_S7_NESTING};
+use crate::plant::limits::{MAX_DEPTH, MAX_LEAF_PATH_BYTES, MAX_LEAVES, MAX_S7_NESTING};
+
+const RELIABILITY: &str = include_str!("../../../../../docs/architecture/reliability.md");
 
 const INT: u128 = 1;
 
@@ -416,4 +418,92 @@ fn adr_0179_expr_count_adds_two_levels_for_an_array_over_a_struct_only() {
         leaf.check_s7_nesting_of_expr(PlcPlatform::S7_1500, &ints)
             .is_ok()
     );
+}
+
+#[test]
+fn leaf_path_bytes_equals_the_row_of_section_7_11() {
+    let prefix = "| `budget.leaf_path_bytes` |";
+    let row = RELIABILITY
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .unwrap();
+    assert!(
+        row.contains(&format!("| {MAX_LEAF_PATH_BYTES} bytes |")),
+        "{row}"
+    );
+}
+
+/// A chain of structs `ST_<n>` from the top row 101. Each struct has one member `name` of the next
+/// struct, and the last struct has the member `name` of `INT`. A path has `.` and the name for
+/// each struct, so it has `levels * (1 + name.len())` bytes.
+fn named_chain(levels: u128, name: &str) -> Vec<PlcType> {
+    (1..=levels)
+        .map(|level| {
+            let next = if level == levels {
+                INT
+            } else {
+                level.checked_add(101).unwrap()
+            };
+            struct_row(
+                level.checked_add(100).unwrap(),
+                &format!("ST_{level}"),
+                &[(name, next)],
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn leaf_path_of_128_bytes_passes_the_check() {
+    let name = "m".repeat(63);
+    let tree = resolved(101, named_chain(2, &name)).unwrap();
+    assert_eq!(tree.longest_leaf_path_bytes(), 128);
+    assert!(tree.check_leaf_path_bytes().is_ok());
+}
+
+#[test]
+fn leaf_path_of_129_bytes_gives_e_plt_018_with_the_leaf_path_limit() {
+    let first = "m".repeat(63);
+    let rows = vec![
+        struct_row(101, "ST_1", &[(first.as_str(), 102)]),
+        struct_row(102, "ST_2", &[(&"n".repeat(64), INT)]),
+    ];
+    let tree = resolved(101, rows).unwrap();
+    assert_eq!(tree.longest_leaf_path_bytes(), 129);
+    let error = tree.check_leaf_path_bytes().unwrap_err();
+    assert_eq!(error.code(), ErrorCode::PLT_018);
+    assert!(matches!(
+        error,
+        PlantError::TypeTooLarge { ref type_name, limit: TypeLimit::LeafPathBytes }
+            if type_name == "ST_1@1"
+    ));
+}
+
+#[test]
+fn a_primitive_has_the_empty_leaf_path() {
+    let tree = TypeTree::resolve(id(INT), &with_int(Vec::new())).unwrap();
+    assert_eq!(tree.longest_leaf_path_bytes(), 0);
+    assert!(tree.check_leaf_path_bytes().is_ok());
+}
+
+#[test]
+fn the_longest_leaf_path_equals_the_longest_text_of_the_leaves() {
+    let rows = vec![
+        array_row(
+            10,
+            INT,
+            &[(-5, 4), (7, 8), (-2_147_483_648, -2_147_483_647)],
+        ),
+        struct_row(101, "ST_1", &[("short", INT), ("grid", 10), ("tail", INT)]),
+        array_row(11, 101, &[(-99, 3)]),
+    ];
+    let tree = resolved(11, rows).unwrap();
+    let longest = tree
+        .leaves()
+        .iter()
+        .map(|leaf| leaf.path().to_string().len())
+        .max()
+        .unwrap();
+    assert_eq!(tree.longest_leaf_path_bytes(), longest);
+    assert_eq!(longest, "[-99].grid[-5,7,-2147483648]".len());
 }

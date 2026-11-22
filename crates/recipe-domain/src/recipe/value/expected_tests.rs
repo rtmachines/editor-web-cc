@@ -74,34 +74,34 @@ fn display_of_a_text_variant_keeps_the_english_phrase() {
         ),
         (
             Expected::Wstring { length: 2 },
-            "a string of at most 2 UTF-16 units without U+0000",
+            "a string of at most 2 UTF-16 units without U+0000, LF, and CR",
         ),
         (
             Expected::String { length: 10 },
-            "a string of at most 10 characters from Latin-1 without U+0000",
+            "a string of at most 10 characters from Latin-1 without U+0000, LF, and CR",
         ),
         (
             Expected::Char { max: 0xFF },
-            "one character from U+0001 to U+00FF",
+            "one character from U+0001 to U+00FF without LF and CR",
         ),
         (
             Expected::Char { max: 0xFFFF },
-            "one character from U+0001 to U+FFFF",
+            "one character from U+0001 to U+FFFF without LF and CR",
         ),
         (
             Expected::Char { max: 0xD7FF },
-            "one character from U+0001 to U+D7FF",
+            "one character from U+0001 to U+D7FF without LF and CR",
         ),
         (
             Expected::WstringS7 {
                 length: 10,
                 max: 0xCFFF,
             },
-            "a string of at most 10 characters from U+0001 to U+CFFF",
+            "a string of at most 10 characters from U+0001 to U+CFFF without LF and CR",
         ),
         (
             Expected::WstringIec { length: 10 },
-            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF",
+            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF without LF and CR",
         ),
     ];
     for (expected, text) in cases {

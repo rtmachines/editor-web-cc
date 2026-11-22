@@ -56,41 +56,41 @@ fn shape_phrases() -> Vec<Phrase> {
         ),
         (
             Expected::Wstring { length: 10 },
-            "a string of at most 10 UTF-16 units without U+0000",
-            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 bez znaku U+0000",
+            "a string of at most 10 UTF-16 units without U+0000, LF, and CR",
+            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 bez znak\u{f3}w U+0000, LF i CR",
         ),
         (
             Expected::WstringIec { length: 10 },
-            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF",
-            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 od U+0001 do U+D7FF i od U+E000 do U+FFFF",
+            "a string of at most 10 UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF without LF and CR",
+            "tekst o najwy\u{17c}ej 10 jednostkach UTF-16 od U+0001 do U+D7FF i od U+E000 do U+FFFF bez LF i CR",
         ),
         (
             Expected::String { length: 20 },
-            "a string of at most 20 characters from Latin-1 without U+0000",
-            "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znaku U+0000",
+            "a string of at most 20 characters from Latin-1 without U+0000, LF, and CR",
+            "tekst o najwy\u{17c}ej 20 znakach z Latin-1 bez znak\u{f3}w U+0000, LF i CR",
         ),
         (
             Expected::StringUtf8 { length: 20 },
-            "a string of at most 20 UTF-8 bytes without U+0000",
-            "tekst o najwy\u{17c}ej 20 bajtach UTF-8 bez znaku U+0000",
+            "a string of at most 20 UTF-8 bytes without U+0000, LF, and CR",
+            "tekst o najwy\u{17c}ej 20 bajtach UTF-8 bez znak\u{f3}w U+0000, LF i CR",
         ),
         (
             Expected::Char { max: 0xFFFF },
-            "one character from U+0001 to U+FFFF",
-            "jeden znak od U+0001 do U+FFFF",
+            "one character from U+0001 to U+FFFF without LF and CR",
+            "jeden znak od U+0001 do U+FFFF bez LF i CR",
         ),
         (
             Expected::Char { max: 0xD7FF },
-            "one character from U+0001 to U+D7FF",
-            "jeden znak od U+0001 do U+D7FF",
+            "one character from U+0001 to U+D7FF without LF and CR",
+            "jeden znak od U+0001 do U+D7FF bez LF i CR",
         ),
         (
             Expected::WstringS7 {
                 length: 10,
                 max: 0xCFFF,
             },
-            "a string of at most 10 characters from U+0001 to U+CFFF",
-            "tekst o najwy\u{17c}ej 10 znakach od U+0001 do U+CFFF",
+            "a string of at most 10 characters from U+0001 to U+CFFF without LF and CR",
+            "tekst o najwy\u{17c}ej 10 znakach od U+0001 do U+CFFF bez LF i CR",
         ),
     ]
 }

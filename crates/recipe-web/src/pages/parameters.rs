@@ -185,6 +185,8 @@ mod conflict_tests;
 #[cfg(test)]
 mod deleted_tests;
 #[cfg(test)]
+mod edit_pair_tests;
+#[cfg(test)]
 mod edit_tests;
 #[cfg(test)]
 mod new_tests;

@@ -26,8 +26,8 @@ pub use constraint::{FOREIGN_KEY_VIOLATION, UNIQUE_VIOLATION, assert_constraint}
 pub use container::{Role, server};
 pub use database::TestDatabase;
 pub use document::{
-    as_shipped_in_0001, check_constraint, created_names, document_sql, init_script_sql,
-    migration_sql, migration_texts,
+    as_shipped_in_0001, check_constraint, created_names, document_sql, function_statement,
+    init_script_sql, migration_sql, migration_texts, without_function_statement,
 };
 pub use session::{connect, connect_error};
 pub use temp_files::TempMigrations;

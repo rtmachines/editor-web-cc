@@ -218,7 +218,7 @@ fn type_errors_have_their_code_registry_row_and_text() {
             },
             ErrorCode::PLT_018,
             "E-PLT-018",
-            "Type ST_Zone is larger than the limit 1024 members. Use fewer elements, fewer members, or fewer levels.",
+            "Type ST_Zone is larger than the limit 1024 members. Use fewer elements, fewer members, fewer levels, or shorter member names.",
         ),
         (
             PlantError::DuplicateMemberName {

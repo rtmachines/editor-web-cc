@@ -282,3 +282,25 @@ async fn parameters_add_in_read_only_mode_gives_e_web_006_also_for_fields_and_li
     }
     assert_eq!(world.fixture.snapshot(), before);
 }
+
+/// ADR-0210, design D1 (a): the form text `A%0AB` of a `STRING(20)` value gives `E-RCP-005`, and
+/// `AddParameter` stores no parameter.
+#[tokio::test]
+async fn form_text_with_a_line_break_gives_e_rcp_005() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = changed(
+        &INT_FIELDS,
+        &[
+            ("type", Some("STRING(20)")),
+            ("value_type", Some("STRING(20)")),
+            ("s7_address", Some("DB9.DBB0")),
+            ("value", Some("A\nB")),
+        ],
+    );
+
+    let reply = post_htmx(&world, ADD, &pairs).await;
+
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-005");
+    assert_eq!(world.fixture.snapshot(), before);
+}

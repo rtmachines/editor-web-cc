@@ -2,7 +2,7 @@
 
 use crate::inputs::{Inputs, Mutation, assert_mutations_fail, check_all};
 
-const SCRIPT_CONSTANTS: [Mutation; 15] = [
+const SCRIPT_CONSTANTS: [Mutation; 16] = [
     // Bash rejects a unit in an arithmetic value, although 720h equals 30 days.
     (
         "backup-once",
@@ -35,6 +35,12 @@ const SCRIPT_CONSTANTS: [Mutation; 15] = [
         "MAX_AGE_SECONDS=93600",
         "MAX_AGE_SECONDS=86400",
         "backup.max_age_alert",
+    ),
+    (
+        "backup-health",
+        "CLOCK_TOLERANCE_SECONDS=60",
+        "CLOCK_TOLERANCE_SECONDS=61",
+        "alerts.interval",
     ),
     (
         "backup-once",

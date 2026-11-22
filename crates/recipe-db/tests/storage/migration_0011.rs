@@ -11,13 +11,12 @@ use sqlx::{Connection as _, PgConnection};
 use uuid::Uuid;
 
 use crate::support::fixtures::{self, TWIN_CAT};
-use crate::support::{Role, TestDatabase, document_sql, migration_sql};
+use crate::support::{Role, TestDatabase, document_sql, function_statement, migration_sql};
 
 const MIGRATION: &str = "0011_plc_type_rules.sql";
 const FIRST_MIGRATION: &str = "0001_schema.sql";
 const FUNCTION_HEAD: &str = "CREATE FUNCTION dims_valid";
 const REPLACING_HEAD: &str = "CREATE OR REPLACE FUNCTION dims_valid";
-const DOLLAR_QUOTE: &str = "$$";
 const STRUCT_INDEX_HEAD: &str = "CREATE UNIQUE INDEX plc_type_struct_name_ci_unique";
 const STRUCT_INDEX_NAME: &str = "plc_type_struct_name_ci_unique";
 const MEMBER_INDEX_HEAD: &str = "CREATE UNIQUE INDEX plc_type_member_name_ci_unique";
@@ -29,18 +28,6 @@ const RULE_CHECK_REGPROC: &str = "plc_type_rule_check()";
 const STOP_MESSAGE: &str = "migration 0011 stopped: 2 array rows start at another subscript \
     than 1, 1 groups of struct names and 1 groups of member names differ only in case. Run \
     deploy/db/check-identifier-rules.sql (docs/ops/runbook.md).";
-
-/// The statement of a function in normalized SQL: from `head` to the `;` after the closing `$$`.
-fn function_statement(sql: &str, head: &str) -> String {
-    let found = sql.find(head);
-    assert!(found.is_some(), "no statement that starts with '{head}'");
-    let start = found.expect("presence asserted above");
-    let tail = sql.get(start..).expect("a find index is a char boundary");
-    let (signature, rest) = tail.split_once(DOLLAR_QUOTE).expect("an opening $$");
-    let (body, after) = rest.split_once(DOLLAR_QUOTE).expect("a closing $$");
-    let (gap, _) = after.split_once(';').expect("a ; after the closing $$");
-    format!("{signature}{DOLLAR_QUOTE}{body}{DOLLAR_QUOTE}{gap};")
-}
 
 #[test]
 fn migration_0011_replaces_dims_valid_with_the_function_of_section_3_3() {

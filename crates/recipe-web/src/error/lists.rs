@@ -266,6 +266,9 @@ fn identity_line_args(error: &IdentityError) -> Vec<(&'static str, LineArg)> {
                 LineArg::word(password_reason_key(*reason), reason),
             )]
         }
+        IdentityError::ThrottlePolicyInvalid { field } => {
+            vec![("field", LineArg::Data((*field).to_owned()))]
+        }
         _other => Vec::new(),
     }
 }

@@ -8,11 +8,17 @@ type Assignment = (&'static str, &'static str, &'static str, Bare);
 
 /// The constants of the pgtools scripts. Each one has a comment with its key in the script.
 /// The file is a name in `deploy/pgtools/bin/`, or a name that ends in `.sh` in `deploy/pgtools/lib/`.
-pub const SCRIPT_ASSIGNMENTS: [Assignment; 24] = [
+pub const SCRIPT_ASSIGNMENTS: [Assignment; 25] = [
     (
         "backup-health",
         "MAX_AGE_SECONDS",
         "backup.max_age_alert",
+        Bare::Seconds,
+    ),
+    (
+        "backup-health",
+        "CLOCK_TOLERANCE_SECONDS",
+        "alerts.interval",
         Bare::Seconds,
     ),
     (

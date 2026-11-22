@@ -39,6 +39,9 @@ This file records the notable changes of the recipe editor. The format follows [
   The check accepts an end in the newest archive segment or later.
   A damaged record can end replay early, and the recovered volume can lack later commits.
   The step tells the operator to compare the newest audit entry with the expected entry.
+- A command refuses LF and CR in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` value with `E-RCP-005` (V-01, ADR-0210). Stored values stay unchanged and readable. The query `deploy/db/check-platform-ranges.sql` lists stored values with LF or CR in its new `line_break` output.
+- `pitr-volume` refuses a recovery that ends before the end of the WAL archive (V-02, ADR-0217). It writes the ERROR line "the recovery ended before the end of the WAL archive". A torn last record with only zero bytes after it passes with one WARN line.
+- The body limit of the four value routes is 16 MiB (`http.body_limit.value`). A leaf path has at most 128 bytes (`budget.leaf_path_bytes`, `E-PLT-018`) (V-04, ADR-0211). At most 4 requests wait for, read, or hold a value body at once (`http.value_body_permits`). A fifth request waits at most `http.body_read_timeout`, then gets `503 E-WEB-009`.
 
 ### Fixed
 
@@ -57,6 +60,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - A forbidden result without a client address gives `E-DB-008` and writes no security event (V-21).
 - A failed `POST /login` no longer shows the language switch (V-29).
 - On Unix, the server opens a result file without following links and reads only regular files (V-36).
+- The trigger of a struct member compares the transaction (`xmin`) and `created_at` of the struct row (V-03, ADR-0212). Migration `0019_struct_member_transaction.sql` adds this rule. A missing struct row gives `E-PLT-035`.
+- The definition form sends value fields and limit fields only as a pair (V-05, ADR-0213 (i)). One part alone gives `422 E-WEB-008`.
+- `restore-test` and `pitr-check` keep the scratch directory and write one ERROR line when the stop of the scratch server fails (V-06, ADR-0218).
+- `backup-health` refuses a backup set whose manifest time is more than `alerts.interval` ahead of the clock (V-07, ADR-0219).
+- With `session.secure=false` in a `dev` build, the Origin check accepts `http://` followed by the `Host` header (V-15, ADR-0220).
+- `ThrottlePolicy::parse` checks the login throttle settings at startup. A bad value stops the startup with `E-IDN-012` (V-18, ADR-0215).
 
 ## [0.8.0] - 2026-11-19
 

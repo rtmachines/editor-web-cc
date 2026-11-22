@@ -130,27 +130,33 @@ impl fmt::Display for Expected {
             Self::Wstring { length } => {
                 write!(
                     f,
-                    "a string of at most {length} UTF-16 units without U+0000"
+                    "a string of at most {length} UTF-16 units without U+0000, LF, and CR"
                 )
             }
             Self::WstringS7 { length, max } => write!(
                 f,
-                "a string of at most {length} characters from U+0001 to U+{max:04X}"
+                "a string of at most {length} characters from U+0001 to U+{max:04X} without LF and CR"
             ),
             Self::WstringIec { length } => write!(
                 f,
-                "a string of at most {length} UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF"
+                "a string of at most {length} UTF-16 units from U+0001 to U+D7FF and from U+E000 to U+FFFF without LF and CR"
             ),
             Self::String { length } => {
                 write!(
                     f,
-                    "a string of at most {length} characters from Latin-1 without U+0000"
+                    "a string of at most {length} characters from Latin-1 without U+0000, LF, and CR"
                 )
             }
             Self::StringUtf8 { length } => {
-                write!(f, "a string of at most {length} UTF-8 bytes without U+0000")
+                write!(
+                    f,
+                    "a string of at most {length} UTF-8 bytes without U+0000, LF, and CR"
+                )
             }
-            Self::Char { max } => write!(f, "one character from U+0001 to U+{max:04X}"),
+            Self::Char { max } => write!(
+                f,
+                "one character from U+0001 to U+{max:04X} without LF and CR"
+            ),
             Self::Literal { type_name } => write!(f, "an IEC literal of type {type_name}"),
             Self::Count { type_name } => write!(f, "a count of type {type_name}"),
             Self::Integer { type_name } => write!(f, "an integer of type {type_name}"),

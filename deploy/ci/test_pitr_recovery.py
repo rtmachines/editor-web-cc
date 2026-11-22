@@ -180,8 +180,8 @@ class ScriptTests(unittest.TestCase):
         self.assertNotIn(b"\r", SCRIPT.read_bytes())
 
     def test_early_end_requirement_matches_the_proof_result(self):
-        proof_class = "S"
-        proof_message = "none"
+        proof_class = "R"
+        proof_message = "the recovery ended before the end of the WAL archive"
         lines = script_text().splitlines()
 
         if proof_class == "R":
@@ -476,8 +476,10 @@ RECOVER_LINE = DRILL_LINE.replace('"drill":true', '"drill":false').replace('"cha
 EARLY_END_SEGMENT = "000000010000000000000006"
 EARLY_END_STATE = f"0/6000060|{EARLY_END_SEGMENT}|96|16777216|8192\n"
 EARLY_END_LINE = RECOVER_LINE.replace('"chain_seq":42', '"chain_seq":41')
-EARLY_END_ERROR_LINE = TARGET_ERROR_LINE.replace("the temporary server did not finish the recovery",
-                                                "the newest audit entry is invalid")
+EARLY_END_ERROR_LINE = (
+    '{"timestamp":"2026-10-30T12:00:07Z","level":"ERROR","job":"pitr-volume",'
+    '"message":"the recovery ended before the end of the WAL archive"}'
+)
 EARLY_END_HASHES_LINE = (
     '{"timestamp":"2026-10-30T12:00:06Z","level":"INFO","job":"pitr-volume",'
     f'"message":"configuration files of the copy hashed","postgresql_conf":"{"0" * 64}"}}'
@@ -518,7 +520,8 @@ def step_environment(directory, stubs, log, step):
         "STUB_TARGET_OUTPUT": TARGET_ERROR_LINE,
         "STUB_GAP_OUTPUT": GAP_ERROR_LINE,
         "STUB_EARLY_END_POSITION": EARLY_END_STATE.rstrip("\n"),
-        "STUB_EARLY_END_OUTPUT": EARLY_END_LINE,
+        "STUB_EARLY_END_OUTPUT": f"{EARLY_END_HASHES_LINE}\n{EARLY_END_ERROR_LINE}",
+        "STUB_EARLY_END_STATUS": "1",
         "STUB_RECOVER_OUTPUT": RECOVER_LINE,
         "STUB_REFUSE_OUTPUT": REFUSE_ERROR_LINE,
     })
@@ -1045,7 +1048,7 @@ class StepTests(unittest.TestCase):
     def test_refusals_stream_the_early_end_output(self):
         done, log, _ = self.run_refusals()
         self.assertEqual(done.returncode, 0, done.stderr + log)
-        self.assertEqual(done.stdout.splitlines().count(EARLY_END_LINE), 1)
+        self.assertEqual(done.stdout.splitlines().count(EARLY_END_ERROR_LINE), 1)
         body = shell_function("run_early_end")
         self.assertIn('| tee "$log_file"', body)
         self.assertNotIn('cat "$log_file"', body)
@@ -1081,8 +1084,8 @@ class StepTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr + log)
         expected = {"lsn": "0/6000060", "segment": EARLY_END_SEGMENT, "offset": "96", "wal_segment_size": "16777216",
                     "wal_block_size": "8192", "byte_offset": "116", "byte_old": "165", "byte_new": "90",
-                    "marker1_seq": "41", "marker2_seq": "42", "exit_code": "0", "error_line": "none",
-                    "last_line": EARLY_END_LINE, "class": "S"}
+                    "marker1_seq": "41", "marker2_seq": "42", "exit_code": "1", "error_line": EARLY_END_ERROR_LINE,
+                    "last_line": EARLY_END_ERROR_LINE, "class": "R"}
         prefix = "refusals: early end: "
         self.assertCountEqual([line for line in done.stdout.splitlines() if line.startswith(prefix)],
                               [f"{prefix}{name}={value}" for name, value in expected.items()])
@@ -1113,18 +1116,15 @@ class StepTests(unittest.TestCase):
                 self.assertEqual(done.returncode, 0, done.stderr + log)
                 for proof in ("class=R", "exit_code=7", f"error_line={line}", f"last_line={line}"):
                     self.assertIn(f"refusals: early end: {proof}", done.stdout.splitlines())
-        done, log, _ = self.run_refusals_with_policy(1, "the newest audit entry is invalid", env)
-        self.assertEqual(done.returncode, 0, done.stderr + log)
-        done, log, _ = self.run_refusals_with_policy(1, "another error", env)
+        done, log, _ = self.run_refusals_with_policy(1, "another error")
         self.assertEqual(done.returncode, 1, done.stdout + log)
         self.assertIn("refusals: early end: class=R", done.stdout.splitlines())
 
-    def test_refusals_accept_a_completion_at_marker_1_only_when_not_required(self):
-        for required in (0, 1):
-            with self.subTest(required=required):
-                done, log, _ = self.run_refusals_with_policy(required, "")
-                self.assertEqual(done.returncode, required, done.stderr + log)
-                self.assertIn("refusals: early end: class=S", done.stdout.splitlines())
+    def test_refusals_reject_a_completion_at_marker_1(self):
+        done, log, _ = self.run_refusals({"STUB_EARLY_END_STATUS": "0", "STUB_EARLY_END_OUTPUT": EARLY_END_LINE})
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr + log)
+        self.assertIn("refusals: early end: class=S", done.stdout.splitlines())
+        self.assertIn("CI: refusals: the early end run must end with the required refusal.", done.stderr.splitlines())
 
     def test_refusals_class_a_line_of_another_job_as_inconclusive(self):
         cases = (

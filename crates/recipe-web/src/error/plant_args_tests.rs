@@ -198,8 +198,8 @@ fn type_samples() -> Vec<Sample> {
                 type_name: "ST_Zone".to_owned(),
                 limit: TypeLimit::Members,
             },
-            "Type ST_Zone is larger than the limit 1024 members. Use fewer elements, fewer members, or fewer levels.",
-            "Typ ST_Zone przekracza limit 1024 składników. Użyj mniej elementów, mniej składników lub mniej poziomów.",
+            "Type ST_Zone is larger than the limit 1024 members. Use fewer elements, fewer members, fewer levels, or shorter member names.",
+            "Typ ST_Zone przekracza limit 1024 składników. Użyj mniej elementów, mniej składników, mniej poziomów lub krótszych nazw składników.",
         ),
         (
             PlantError::DuplicateMemberName {
@@ -598,4 +598,24 @@ async fn adr_0179_the_depth_limit_still_names_thirty_two_levels() {
     let pl = body_of(error, Lang::Pl).await;
     assert!(en.contains("larger than the limit 32 levels."), "{en}");
     assert!(pl.contains("przekracza limit 32 poziomów."), "{pl}");
+}
+
+#[tokio::test]
+async fn adr_0211_the_message_of_the_leaf_path_limit_names_128_bytes() {
+    let error = PlantError::TypeTooLarge {
+        type_name: "ST_Top@1".to_owned(),
+        limit: TypeLimit::LeafPathBytes,
+    };
+    let en = body_of(error.clone(), Lang::En).await;
+    let pl = body_of(error, Lang::Pl).await;
+    assert!(
+        en.contains("larger than the limit 128 bytes of a leaf path."),
+        "{en}"
+    );
+    assert!(en.contains("or shorter member names."), "{en}");
+    assert!(
+        pl.contains("przekracza limit 128 bajtów ścieżki liścia."),
+        "{pl}"
+    );
+    assert!(pl.contains("lub krótszych nazw składników."), "{pl}");
 }

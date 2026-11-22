@@ -570,3 +570,31 @@ fn adr_0149_an_overlap_gives_no_broken_parameter() {
         result.err().map(|broken| broken.code())
     );
 }
+
+/// Guard (ADR-0210 (f), (g)): a stored LF is no rule fault, and the body of the export keeps it.
+#[test]
+fn stored_line_break_stays_loadable() {
+    use crate::export::test_rows::{parameter as row, units};
+    use crate::export::test_support::{STRING_16, trees as export_trees};
+    use crate::export::{ExportHeader, HashedBody};
+    use crate::plant::MachineCode;
+    use crate::recipe::ReferenceNumber;
+
+    let platform = PlcPlatform::S7_1500;
+    let parameters = [row(1, ("U1", "LABEL"), STRING_16, json!("A\nB"))];
+    let trees = export_trees(platform);
+    assert!(
+        check_version_parameters(&parameters, &trees)
+            .unwrap()
+            .is_empty()
+    );
+    let header = ExportHeader {
+        machine: MachineCode::parse("M12").unwrap(),
+        platform,
+        reference: ReferenceNumber::parse("R-100").unwrap(),
+        version: 3,
+    };
+    let body = HashedBody::build(&header, &parameters, &units(platform), &trees).unwrap();
+    let json = serde_json::to_value(body).unwrap();
+    assert_eq!(json["parameters"][0]["value"], json!("A\nB"));
+}

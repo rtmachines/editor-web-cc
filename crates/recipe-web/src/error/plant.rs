@@ -5,7 +5,9 @@
 //! the bundles, so a Polish page shows a Polish sentence with no hole.
 
 use fluent::FluentArgs;
-use recipe_domain::plant::limits::{MAX_DEPTH, MAX_LEAVES, MAX_MEMBERS, MAX_S7_NESTING};
+use recipe_domain::plant::limits::{
+    MAX_DEPTH, MAX_LEAF_PATH_BYTES, MAX_LEAVES, MAX_MEMBERS, MAX_S7_NESTING,
+};
 use recipe_domain::plant::{DerivedTypeReason, PlantError, PlantError as E, TypeLimit};
 
 use super::LineArg;
@@ -36,6 +38,7 @@ fn limit_word(limit: TypeLimit) -> LineArg {
         TypeLimit::Depth => ("type-limit-depth", MAX_DEPTH.to_string()),
         TypeLimit::Members => ("type-limit-members", MAX_MEMBERS.to_string()),
         TypeLimit::S7Nesting => ("type-limit-s7-nesting", MAX_S7_NESTING.to_string()),
+        TypeLimit::LeafPathBytes => ("type-limit-leaf-path", MAX_LEAF_PATH_BYTES.to_string()),
     };
     LineArg::Word {
         key: key.to_owned(),

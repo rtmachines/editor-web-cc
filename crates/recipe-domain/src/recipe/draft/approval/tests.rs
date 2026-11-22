@@ -616,3 +616,17 @@ fn adr_0140_the_fix_path_moves_speed_to_db59999_and_then_the_approval_gives_a_to
         .map(|_| ());
     assert!(result.is_ok(), "{result:?}");
 }
+
+/// Guard (ADR-0210 (f)): the approval check reads a stored LF with `Mode::Stored` and accepts it.
+#[test]
+fn stored_line_break_passes_the_approval_check() {
+    let label = limited(
+        param(1, "LABEL", STRING_20, json!("A\nB")),
+        vec![length("", 20)],
+    );
+    let draft = draft(vec![label]);
+    let result = draft
+        .check_for_approval(&units(false), &trees(), false)
+        .map(|_| ());
+    assert!(result.is_ok(), "{result:?}");
+}

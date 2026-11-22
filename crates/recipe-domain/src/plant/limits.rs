@@ -16,3 +16,6 @@ pub const MAX_S7_NESTING: u32 = 8;
 /// Largest number of dimensions of an array and of indexes in one index segment
 /// (`type.max_dimensions`, `reliability.md` section 7.11, Assumption A38).
 pub const MAX_DIMENSIONS: usize = 3;
+/// Largest number of bytes of the canonical text of a leaf path (`budget.leaf_path_bytes`,
+/// ADR-0211). `DefineUdt` and `EnsureDerivedType` refuse a longer path.
+pub const MAX_LEAF_PATH_BYTES: usize = 128;

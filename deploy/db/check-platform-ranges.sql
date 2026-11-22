@@ -1,6 +1,8 @@
 -- Check the stored data against the platform ranges (ADR-0139 risks, ADR-0140 risks, ADR-0180 (l)).
 --
--- The query lists the stored rows that the current rule set rejects (ADR-0201 (k) adds the part iec_wide_text):
+-- The query lists the stored rows that the current rule set rejects.
+-- The line_break part lists rows that every rule set accepts but the next form save changes.
+--
 --   value       a parameter on CodesysIec or TwinCat3 whose type tree holds LDATE or LDT,
 --               with a value leaf above 9223372036854775807
 --   limit_min   a limit of such a parameter with min_value above 9223372036854775807
@@ -10,23 +12,25 @@
 --               text leaf that the Siemens page refuses (ADR-0180): a character above U+D7FF in a
 --               WCHAR leaf, a character at U+D000 or above in a WSTRING leaf.
 --               An Approved version of such a parameter becomes not loadable after the upgrade.
---   iec_wide_text  a parameter on CodesysIec or TwinCat3 whose type tree holds WSTRING, with a text
---               leaf that holds a character outside the Basic Multilingual Plane (above U+FFFF).
+--   iec_wide_text  a WSTRING leaf on CodesysIec or TwinCat3 with a character above U+FFFF
+--               (ADR-0201 (k)).
 --               ADR-0201 (a) limits a WSTRING on these platforms to UCS-2. An Approved version of
 --               such a parameter becomes not loadable after the upgrade.
+--   line_break    a text leaf with LF or CR on any platform (ADR-0210).
 --
 -- The query reads every version status and also soft-deleted rows: a deleted draft, a deleted
 -- recipe, and an archived machine. It finds a value leaf at each depth: a struct member, a member
--- of a nested struct, and an array element. It keeps only the number leaves, so a string or a
--- boolean leaf gives no error. A ULINT, LWORD, LTIME, REAL, or LREAL leaf in the same type
--- tree can give a false hit in its value row or in a limit row of that leaf.
+-- of a nested struct, and an array element. The date range check keeps only the number leaves.
+-- A ULINT, LWORD, LTIME, REAL, or LREAL leaf in the same type tree can give a false hit in its
+-- value row or in a limit row of that leaf.
 -- A wide_text row shows the text leaf. The query matches each text leaf with its declared type
 -- and uses the limit of that type. A struct with a WCHAR member and a WSTRING member gives no
 -- false hit.
 -- The owner reads each row. The query writes nothing.
 --
 -- Run it from the directory deploy/ (docs/ops/runbook.md):
---   docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 < db/check-platform-ranges.sql
+--   docker compose exec -T -u postgres db psql -d recipe -v ON_ERROR_STOP=1 \
+--     < db/check-platform-ranges.sql
 
 BEGIN READ ONLY;
 
@@ -58,22 +62,22 @@ date_root (root_id) AS (
     WHERE t.kind = 'primitive' AND t.name IN ('LDATE', 'LDT')
     GROUP BY r.root_id
 ),
--- The types whose type tree holds WCHAR or WSTRING.
-wide_root (root_id) AS (
+-- The types whose type tree holds CHAR, WCHAR, STRING, or WSTRING.
+text_root (root_id) AS (
     SELECT r.root_id
     FROM reach r
     JOIN plc_type t ON t.id = r.type_id
-    WHERE t.kind = 'primitive' AND t.name IN ('WCHAR', 'WSTRING')
+    WHERE t.kind = 'primitive' AND t.name IN ('CHAR', 'WCHAR', 'STRING', 'WSTRING')
     GROUP BY r.root_id
 ),
--- Every value node of an S7, CODESYS, or TwinCAT parameter with its declared type. A struct node is a JSON object with
--- one key for each member. An array node is nested JSON arrays, one level for each dimension.
+-- Each value node of a parameter with a text type in its type tree carries its declared type.
+-- A struct node is a JSON object with one key for each member.
+-- An array node has one level of JSON arrays for each dimension.
 -- The column levels counts the array levels that remain, and is NULL outside an array.
 walk (parameter_id, node, type_id, levels) AS (
     SELECT p.id, p.value, p.plc_type_id, NULL::integer
     FROM parameter p
-    JOIN wide_root w ON w.root_id = p.plc_type_id
-    WHERE p.plc_platform IN ('S7_1200', 'S7_1500', 'CodesysIec', 'TwinCat3')
+    JOIN text_root t ON t.root_id = p.plc_type_id
     UNION ALL
     SELECT w.parameter_id, c.node, c.type_id, c.levels
     FROM walk w
@@ -94,17 +98,15 @@ walk (parameter_id, node, type_id, levels) AS (
         ) AS e (item)
     ) AS c (node, type_id, levels)
 ),
--- The text leaves of WCHAR and WSTRING. The first character that the rule refuses is U+D800 for
--- WCHAR (ADR-0180 (a)) and U+D000 for WSTRING (ADR-0180 (b)).
-wide_leaf (parameter_id, type_name, leaf_text, first_refused) AS (
+-- The text leaves with their declared types.
+text_leaf (parameter_id, type_name, leaf_text) AS (
     SELECT w.parameter_id,
            t.name,
-           w.node #>> '{}',
-           CASE WHEN t.name = 'WSTRING' THEN 53248 ELSE 55296 END
+           w.node #>> '{}'
     FROM walk w
     JOIN plc_type t ON t.id = w.type_id
     WHERE t.kind = 'primitive'
-      AND t.name IN ('WCHAR', 'WSTRING')
+      AND t.name IN ('CHAR', 'WCHAR', 'STRING', 'WSTRING')
       AND jsonb_typeof(w.node) = 'string'
 ),
 located AS (
@@ -161,18 +163,20 @@ FROM (
     SELECT l.machine_code, l.reference_number, l.version_number, l.version_status, l.tag,
            'wide_text', w.leaf_text
     FROM located l
-    JOIN wide_leaf w ON w.parameter_id = l.parameter_id
+    JOIN text_leaf w ON w.parameter_id = l.parameter_id
     WHERE l.plc_platform IN ('S7_1200', 'S7_1500')
+      AND w.type_name IN ('WCHAR', 'WSTRING')
       AND EXISTS (
           SELECT 1
           FROM regexp_split_to_table(w.leaf_text, '') AS c (character)
-          WHERE ascii(c.character) >= w.first_refused
+          -- ADR-0180 refuses U+D000 and above for WSTRING and U+D800 and above for WCHAR.
+          WHERE ascii(c.character) >= CASE WHEN w.type_name = 'WSTRING' THEN 53248 ELSE 55296 END
       )
     UNION ALL
     SELECT l.machine_code, l.reference_number, l.version_number, l.version_status, l.tag,
            'iec_wide_text', w.leaf_text
     FROM located l
-    JOIN wide_leaf w ON w.parameter_id = l.parameter_id
+    JOIN text_leaf w ON w.parameter_id = l.parameter_id
     WHERE l.plc_platform IN ('CodesysIec', 'TwinCat3')
       AND w.type_name = 'WSTRING'
       AND EXISTS (
@@ -180,6 +184,12 @@ FROM (
           FROM regexp_split_to_table(w.leaf_text, '') AS c (character)
           WHERE ascii(c.character) > 65535
       )
+    UNION ALL
+    SELECT l.machine_code, l.reference_number, l.version_number, l.version_status, l.tag,
+           'line_break', t.leaf_text
+    FROM located l
+    JOIN text_leaf t ON t.parameter_id = l.parameter_id
+    WHERE strpos(t.leaf_text, chr(10)) > 0 OR strpos(t.leaf_text, chr(13)) > 0
 ) hit
 ORDER BY hit.machine_code, hit.reference_number, hit.version_number, hit.tag, hit.part;
 

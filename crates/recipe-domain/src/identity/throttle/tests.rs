@@ -4,6 +4,7 @@ use proptest::prelude::*;
 use time::OffsetDateTime;
 
 use super::*;
+use crate::error_codes::ErrorCode;
 use crate::timestamp::Timestamp;
 
 const RELIABILITY: &str = include_str!("../../../../../docs/architecture/reliability.md");
@@ -114,16 +115,18 @@ fn typed_login_reason_display_names_the_limits() {
 #[test]
 fn default_policy_equals_the_rows_of_section_7_11() {
     let policy = ThrottlePolicy::default();
-    let free = policy.free_failures;
-    let window_minutes = policy.window.as_secs().checked_div(60).unwrap();
+    let free = policy.free_failures();
+    let window_minutes = policy.window().as_secs().checked_div(60).unwrap();
     assert!(row("login.delay_after_failures").contains(&format!("{free} failures per")));
     assert!(row("login.delay_after_failures").contains(&format!("{window_minutes} min")));
     assert!(row("login.delay_formula").contains(&format!("`2^(n-{free})` s")));
-    assert!(row("login.delay_formula").contains(&format!("cap {} s", policy.delay_cap.as_secs())));
     assert!(
-        row("login.ip_budget")
-            .contains(&format!("{} failures per client_ip", policy.address_budget))
+        row("login.delay_formula").contains(&format!("cap {} s", policy.delay_cap().as_secs()))
     );
+    assert!(row("login.ip_budget").contains(&format!(
+        "{} failures per client_ip",
+        policy.address_budget()
+    )));
     assert!(row("login.ip_budget").contains(&format!("{window_minutes} min")));
 }
 
@@ -325,23 +328,74 @@ fn reliability_7_11_default_throttle_holds_the_login_rows() {
     // `login.delay_after_failures` 3 in 15 min, `login.delay_formula` cap 60 s,
     // `login.ip_budget` 100 in 15 min. The values are typed from the document.
     let throttle = LoginThrottle::default();
-    let expected = ThrottlePolicy {
-        free_failures: 3,
-        delay_cap: Duration::from_secs(60),
-        window: Duration::from_secs(15 * 60),
-        address_budget: 100,
-    };
+    let expected = ThrottlePolicy::parse(
+        3,
+        Duration::from_secs(60),
+        Duration::from_secs(15 * 60),
+        100,
+    )
+    .unwrap();
     assert_eq!(throttle.policy(), &expected);
 }
 
 #[test]
-fn a_throttle_built_with_a_policy_returns_that_policy() {
-    let custom = ThrottlePolicy {
-        free_failures: 5,
-        delay_cap: Duration::from_secs(10),
-        window: Duration::from_secs(60),
-        address_budget: 7,
-    };
+fn a_throttle_built_from_a_policy_returns_that_policy() {
+    let custom = ThrottlePolicy::parse(5, secs(10), secs(60), 7).unwrap();
     assert_ne!(custom, ThrottlePolicy::default());
-    assert_eq!(LoginThrottle::new(custom).policy(), &custom);
+    assert_eq!(LoginThrottle::from(custom).policy(), &custom);
+}
+
+fn secs(seconds: u64) -> Duration {
+    Duration::from_secs(seconds)
+}
+
+/// Assert that `parse` refuses the four values and names `field`, with the code `E-IDN-012`.
+fn assert_refused(
+    free_failures: u32,
+    delay_cap: Duration,
+    window: Duration,
+    address_budget: u32,
+    field: &'static str,
+) {
+    let error =
+        ThrottlePolicy::parse(free_failures, delay_cap, window, address_budget).unwrap_err();
+    assert_eq!(error, IdentityError::ThrottlePolicyInvalid { field });
+    assert_eq!(error.code(), ErrorCode::IDN_012);
+}
+
+#[test]
+fn throttle_policy_parse_refuses_a_bad_field() {
+    assert_refused(0, secs(60), secs(900), 100, "free_failures");
+    assert_refused(100, secs(60), secs(900), 100, "free_failures");
+    assert_refused(1, secs(60), secs(900), 1, "free_failures");
+    assert_refused(3, secs(901), secs(900), 100, "delay_cap");
+    assert_refused(3, Duration::ZERO, secs(900), 100, "delay_cap");
+    assert_refused(3, secs(1), Duration::ZERO, 100, "window");
+    assert_refused(3, secs(1), secs(86_401), 100, "window");
+}
+
+#[test]
+fn throttle_policy_parse_takes_the_defaults_of_section_7_11() {
+    let parsed = ThrottlePolicy::parse(3, secs(60), secs(900), 100).unwrap();
+    assert_eq!(parsed, ThrottlePolicy::default());
+}
+
+#[test]
+fn throttle_policy_parse_includes_both_bounds_of_each_rule() {
+    // `free_failures` from 1 to `address_budget` - 1.
+    assert!(ThrottlePolicy::parse(1, secs(1), secs(1), 2).is_ok());
+    assert!(ThrottlePolicy::parse(99, secs(60), secs(900), 100).is_ok());
+    // `delay_cap` from 1 s to `window`.
+    assert!(ThrottlePolicy::parse(3, secs(900), secs(900), 100).is_ok());
+    // `window` from 1 s to 24 h.
+    assert!(ThrottlePolicy::parse(3, secs(86_400), secs(86_400), 100).is_ok());
+}
+
+#[test]
+fn throttle_policy_accessors_return_the_parsed_values() {
+    let policy = ThrottlePolicy::parse(2, secs(5), secs(30), 9).unwrap();
+    assert_eq!(policy.free_failures(), 2);
+    assert_eq!(policy.delay_cap(), secs(5));
+    assert_eq!(policy.window(), secs(30));
+    assert_eq!(policy.address_budget(), 9);
 }

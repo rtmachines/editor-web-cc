@@ -677,6 +677,25 @@ async fn platform_ranges_query_lists_exactly_the_hit_rows_as_recipe_app() {
 }
 
 #[tokio::test]
+async fn line_break_lists_a_stored_lf() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let draft = site(&mut conn, S7_1500).await;
+    let string_type = wide_type(&mut conn, "STRING", S7_1500).await;
+    let text = "first\nsecond";
+    let tag = "STRING_WITH_LF";
+    add(&mut conn, &draft, string_type, tag, None, &json_text(text)).await;
+    let place = settle(&mut conn, &draft, Fate::Draft).await;
+    let mut expected = Expected::default();
+    expected.hit(&place, tag, "line_break", text);
+
+    let mut conn = database.connect(Role::App).await;
+    let found = rows(&mut conn).await;
+
+    assert_eq!(found, expected.0.into_iter().collect::<Vec<_>>());
+}
+
+#[tokio::test]
 async fn platform_ranges_query_lists_each_hit_once_in_the_order_of_the_output() {
     let (database, _) = seeded().await;
     let mut conn = database.connect(Role::App).await;

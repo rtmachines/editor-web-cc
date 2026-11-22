@@ -101,7 +101,8 @@ impl DerivedTypes {
     /// # Errors
     ///
     /// Returns `E-PLT-013` for a type that is not on the platform, a length out of range, or an
-    /// unknown struct revision. Returns `E-PLT-018` when the resolved tree is above a size limit.
+    /// unknown struct revision. Returns `E-PLT-018` when the resolved tree is above a size limit or
+    /// has a leaf path above `budget.leaf_path_bytes`.
     /// Returns `AppError::Storage` when the catalog fails.
     pub(crate) async fn ensure_expr(
         &mut self,
@@ -131,6 +132,9 @@ impl DerivedTypes {
     }
 
     /// Wrap `element` in the array levels, the innermost level first, and check the final tree.
+    ///
+    /// The check refuses a leaf path above `budget.leaf_path_bytes` (ADR-0211). It runs here and
+    /// not in `resolve`, so a stored type with a longer leaf path stays readable.
     async fn wrap_arrays(
         &mut self,
         catalog: &mut dyn TypeCatalog,
@@ -150,7 +154,7 @@ impl DerivedTypes {
                 .await?;
         }
         if !levels.is_empty() {
-            TypeTree::resolve(current, &self.platform_types()?)?;
+            TypeTree::resolve(current, &self.platform_types()?)?.check_leaf_path_bytes()?;
         }
         Ok(current)
     }

@@ -187,6 +187,8 @@ impl ErrorCode {
     pub const IDN_010: Self = Self::new("E-IDN-010");
     /// E-IDN-011, `IdentityError::TechnicalRoleChange`.
     pub const IDN_011: Self = Self::new("E-IDN-011");
+    /// E-IDN-012, `IdentityError::ThrottlePolicyInvalid`.
+    pub const IDN_012: Self = Self::new("E-IDN-012");
 
     /// E-DB-001, `StorageError::Deadlock`.
     pub const DB_001: Self = Self::new("E-DB-001");
@@ -339,6 +341,7 @@ pub const REGISTRY: &[ErrorCode] = &[
     ErrorCode::IDN_009,
     ErrorCode::IDN_010,
     ErrorCode::IDN_011,
+    ErrorCode::IDN_012,
     ErrorCode::PLT_001,
     ErrorCode::PLT_002,
     ErrorCode::PLT_003,

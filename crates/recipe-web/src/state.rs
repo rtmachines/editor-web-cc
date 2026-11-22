@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use recipe_app::identity::IdentityContext;
 use recipe_app::ports::{CredentialCipher, ReadOnlySwitch, SecurityEventSink};
 use recipe_domain::identity::KeyRing;
+use tokio::sync::Semaphore;
 
 use crate::i18n::{BundleReason, Bundles};
 use crate::settings::WebSettings;
@@ -56,6 +57,7 @@ pub struct WebState {
     csrf_keys: Arc<KeyRing>,
     security: Arc<dyn SecurityEventSink>,
     credential_cipher: Option<Arc<dyn CredentialCipher>>,
+    value_body_permits: Arc<Semaphore>,
 }
 
 impl WebState {
@@ -74,6 +76,7 @@ impl WebState {
         csrf_keys: KeyRing,
     ) -> Result<Self, BundleReason> {
         let security = identity.app().security();
+        let value_body_permits = Arc::new(Semaphore::new(settings.value_body_permits));
         Ok(Self {
             identity,
             settings: Arc::new(settings),
@@ -82,6 +85,7 @@ impl WebState {
             csrf_keys: Arc::new(csrf_keys),
             security,
             credential_cipher: None,
+            value_body_permits,
         })
     }
 
@@ -126,6 +130,12 @@ impl WebState {
     #[must_use]
     pub const fn identity(&self) -> &IdentityContext {
         &self.identity
+    }
+
+    /// Return the semaphore of the value body permits (`http.value_body_permits`, ADR-0211 (n)).
+    #[must_use]
+    pub(crate) fn value_body_permits(&self) -> &Arc<Semaphore> {
+        &self.value_body_permits
     }
 
     /// Return the web settings.

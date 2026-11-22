@@ -28,7 +28,7 @@
 #   9. Check the promoted server (ADR-0106 (g)). Check 1: the server is out of recovery, and its timeline is
 #      above the timeline of the base backup. Check 2, without --target-time only: the switch LSN of the
 #      history file lies in or after the newest segment of the WAL archive on the base timeline, and at or
-#      after PITR_EXPECTED_LSN when the operator gives it. A .partial file counts as its segment.
+#      after PITR_EXPECTED_LSN when the operator gives it. Check the newest segment tail (ADR-0217).
 #      Check 3: the audit chain check of data-model.md 4.9 gives no break, and the head matches the last row.
 #      Check 4, with PITR_MARKER_SEQ and PITR_MARKER_HASH only: exactly one audit_log row has these values.
 #      Check 5: the four configuration files keep the SHA-256 values of step 7, and no recovery.signal or
@@ -86,7 +86,7 @@ LOCATION_RE='^START WAL LOCATION: [0-9A-F]+/[0-9A-F]+ \(file ([0-9A-F]{8})[0-9A-
 # "<parent timeline><TAB><switch LSN><TAB><reason>". The reason can hold spaces.
 TIMELINE_RE='^[0-9A-F]{8}$'
 HISTORY_LINE_RE='^[0-9]+[[:space:]]+([0-9A-F]{1,8}/[0-9A-F]{1,8})([[:space:]].*)?$'
-# The fixed text of check 2 of ADR-0106 (g). The check of the segment and the check of PITR_EXPECTED_LSN share it.
+# The checks of the gap, the tail, and PITR_EXPECTED_LSN use the same text for a refusal.
 RECOVERY_END_ERROR="the recovery ended before the end of the WAL archive"
 START_TIME_RE='^START TIME: ([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2}) UTC$'
 END_TIME_NAME=backup_end_time
@@ -539,21 +539,93 @@ switch_lsn() {
   printf '%s\n' "${BASH_REMATCH[1]}"
 }
 
-# check_recovery_end: ADR-0106 (g) check 2, only without a target time. The recovery ends in the newest
-# segment of /wal on the base timeline or later. Else it stopped at a gap. PITR_EXPECTED_LSN also bounds
-# the end. PostgreSQL compares the positions, because an LSN is a 64-bit number.
+# wal_tail_state: print torn for a possible loss. Print nothing for a clean end.
+# PostgreSQL 16 stores WAL fields in native byte order. A return code of 1 refuses the end.
+wal_tail_state() {
+  perl - "$@" <<'PERL'
+use strict;
+use warnings;
+sub require_zero_tail {
+    my ($wal, $offset) = @_;
+    seek $wal, $offset, 0 or exit 1;
+    while (1) {
+        my $count = read($wal, my $bytes, 65536);
+        exit 1 if !defined($count) || $bytes =~ /[^\0]/;
+        return if $count == 0;
+    }
+}
+
+my ($file, $offset, $segment_size, $page_size) = @ARGV;
+my ($record_header, $short_header, $long_header) = (24, 24, 40);
+my $first_is_contrecord = 0x0001;
+exit 1 if $page_size <= $long_header || $segment_size % $page_size || $offset >= $segment_size;
+open my $wal, '<:raw', $file or exit 1;
+
+$offset += ($offset == 0 ? $long_header : $short_header) if $offset % $page_size == 0;
+my $space = $page_size - $offset % $page_size;
+if ($space < $record_header) {
+    require_zero_tail($wal, $offset);
+    exit 0;
+}
+
+seek $wal, $offset, 0 or exit 1;
+my $count = read($wal, my $bytes, 4);
+exit 1 if !defined($count);
+exit 0 if $count == 0;
+exit 1 if $count != 4;
+my $remaining = unpack 'L', $bytes;
+exit 0 if $remaining == 0;
+
+while ($remaining > $space) {
+    $offset += $space;
+    # No later segment exists on the base timeline. Its bytes count as unwritten.
+    last if $offset == $segment_size;
+    $remaining -= $space;
+    seek $wal, $offset, 0 or exit 1;
+    my $count = read($wal, my $page, $page_size);
+    exit 1 if !defined($count);
+    if ($page =~ /[^\0]/) {
+        exit 1 if $count < $short_header;
+        # The flag is at byte 2. The remaining length is at byte 16.
+        my ($info, $rem_len) = unpack 'x2 S x12 L', $page;
+        exit 1 if !($info & $first_is_contrecord) || $rem_len != $remaining;
+    }
+    $offset += $short_header;
+    $space = $page_size - $short_header;
+}
+my $extent_end = $remaining > $space ? $segment_size : $offset + $remaining;
+require_zero_tail($wal, $extent_end);
+print "torn\n";
+PERL
+}
+
+# Check 2 of ADR-0106 (g) and ADR-0217 runs only without a target time.
 check_recovery_end() {
-  local lsn segment newest ok
+  local lsn position segment offset segment_size page_size newest ok path tail_state
+  local position_re='^([0-9A-F]{24})\|([0-9]{1,10})\|([1-9][0-9]{0,9})\|([1-9][0-9]{0,9})$'
   lsn=$(switch_lsn) || fail "the history file of the new timeline is missing or malformed"
   newest=$(newest_base_segment "$base_tli") || fail "the WAL archive holds no segment of the base timeline"
-  segment=$(scratch_psql "SELECT pg_catalog.pg_walfile_name('$lsn'::pg_catalog.pg_lsn)") \
+  # Add one because pg_walfile_name names the segment of the preceding byte.
+  position=$(scratch_psql "SELECT pg_catalog.pg_walfile_name('$lsn'::pg_catalog.pg_lsn + 1::numeric), \
+    pg_catalog.mod('$lsn'::pg_catalog.pg_lsn - '0/0'::pg_catalog.pg_lsn, seg.setting::numeric), \
+    seg.setting, blk.setting FROM pg_catalog.pg_settings AS seg, pg_catalog.pg_settings AS blk \
+    WHERE seg.name = 'wal_segment_size' AND blk.name = 'wal_block_size'") \
     || fail "cannot read the segment of the end of the recovery"
-  [[ $segment =~ ^[0-9A-F]{24}$ ]] || fail "cannot read the segment of the end of the recovery"
-  [[ ${segment:8:16} > $newest || ${segment:8:16} == "$newest" ]] || fail "$RECOVERY_END_ERROR"
-  [ -n "$PITR_EXPECTED_LSN" ] || return 0
-  ok=$(scratch_psql "SELECT '$lsn'::pg_catalog.pg_lsn >= '$PITR_EXPECTED_LSN'::pg_catalog.pg_lsn") \
-    || fail "cannot compare the end of the recovery with PITR_EXPECTED_LSN"
-  [ "$ok" = "t" ] || fail "$RECOVERY_END_ERROR"
+  [[ $position =~ $position_re ]] || fail "cannot read the segment of the end of the recovery"
+  segment=${BASH_REMATCH[1]:8:16}
+  offset=${BASH_REMATCH[2]} segment_size=${BASH_REMATCH[3]} page_size=${BASH_REMATCH[4]}
+  [[ $segment < $newest ]] && fail "$RECOVERY_END_ERROR"
+  if [ -n "$PITR_EXPECTED_LSN" ]; then
+    ok=$(scratch_psql "SELECT '$lsn'::pg_catalog.pg_lsn >= '$PITR_EXPECTED_LSN'::pg_catalog.pg_lsn") \
+      || fail "cannot compare the end of the recovery with PITR_EXPECTED_LSN"
+    [ "$ok" = "t" ] || fail "$RECOVERY_END_ERROR"
+  fi
+  [ "$segment" = "$newest" ] || return 0
+  path=$WAL_DIR/$base_tli$segment
+  if [ ! -f "$path" ] || [ -L "$path" ]; then path+=.partial; fi
+  [ -f "$path" ] && [ ! -L "$path" ] || fail "$RECOVERY_END_ERROR"
+  tail_state=$(wal_tail_state "$path" "$offset" "$segment_size" "$page_size") || fail "$RECOVERY_END_ERROR"
+  [ "$tail_state" != torn ] || log WARN "The newest record may be lost because it is torn or damaged."
 }
 
 # check_config_files: ADR-0106 (g) check 5, first part. Each configuration file of the copy keeps the

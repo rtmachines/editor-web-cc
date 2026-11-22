@@ -15,7 +15,7 @@ use crate::test_support::recipes::earlier_name_world::{ZONE_KEY, seed_int_named_
 use crate::test_support::recipes::{GRID_KEY, HOLD_KEY, LABEL_KEY, SPEED_KEY, SPEED_TABLE_KEY};
 
 /// The opening tag of the edit form of `SPEED` when an answer swaps it out of band.
-fn oob_form_tag() -> String {
+pub(super) fn oob_form_tag() -> String {
     format!(
         "<form id=\"parameter-edit-form\" method=\"post\" action=\"{}\" hx-boost=\"true\" hx-target=\"#parameter-summary\" hx-swap=\"innerHTML show:none focus-scroll:true\" hx-push-url=\"false\" hx-sync=\"closest form:drop\" hx-swap-oob=\"true\">",
         parameter_path(SPEED_KEY, "/definition")
@@ -105,6 +105,7 @@ async fn parameters_edit_swaps_a_clean_form_with_the_stored_number_texts() {
         ("value[0,2]", "1.5"),
         ("value[1,1]", "2.50"),
         ("value[1,2]", "3.5"),
+        ("limits[0].leaf_path", "[*][*]"),
     ];
     let reply = post_htmx(&world, &parameter_path(GRID_KEY, "/definition"), &pairs).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
@@ -143,7 +144,7 @@ async fn parameters_edit_with_a_changed_type_shows_the_new_fields_and_writes_not
 /// Return the `value` attribute of the text input `name`.
 ///
 /// The helper `field_value` needs `value` right after `name`. These inputs have other attributes.
-fn text_input_value(form: &str, name: &str) -> String {
+pub(super) fn text_input_value(form: &str, name: &str) -> String {
     let (_before, rest) = form.split_once(&format!("name=\"{name}\" ")).unwrap();
     let tag = rest.split('>').next().unwrap();
     let (_attrs, value) = tag.split_once(" value=\"").unwrap();
@@ -188,6 +189,7 @@ async fn parameters_edit_keeps_the_spaces_of_a_string_leaf() {
         ("s7_address", "DB2.DBB2"),
         ("ordinal", "2"),
         ("value", "  Linia A  "),
+        ("limits[0].leaf_path", ""),
     ];
     let path = parameter_path(LABEL_KEY, "/definition");
     let reply = post_htmx(&world, &path, &pairs).await;
@@ -215,6 +217,33 @@ async fn parameters_edit_of_a_string_value_with_a_nul_gives_e_rcp_005_under_the_
         ("s7_address", "DB2.DBB2"),
         ("ordinal", "2"),
         ("value", "\0"),
+        ("limits[0].leaf_path", ""),
+    ];
+    let path = parameter_path(LABEL_KEY, "/definition");
+    let reply = post_htmx(&world, &path, &pairs).await;
+    assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-005");
+    assert_value_line_holds(&reply.body, "E-RCP-005");
+    assert_eq!(world.fixture.snapshot(), before);
+}
+
+/// ADR-0210, design D1 (a): the form text `A%0D%0AB` of a `STRING(20)` value gives `E-RCP-005`
+/// under the value input, and the stored value does not change.
+#[tokio::test]
+async fn parameters_edit_of_a_string_value_with_a_line_break_gives_e_rcp_005_under_the_value() {
+    let world = recipe_world();
+    let before = world.fixture.snapshot();
+    let pairs = [
+        ("row_version", "1"),
+        ("unit_path", "U1"),
+        ("tag", "LABEL"),
+        ("name_en", "LABEL"),
+        ("description_en", "A parameter of the press line"),
+        ("type", "STRING(20)"),
+        ("value_type", "STRING(20)"),
+        ("s7_address", "DB2.DBB2"),
+        ("ordinal", "2"),
+        ("value", "A\r\nB"),
+        ("limits[0].leaf_path", ""),
     ];
     let path = parameter_path(LABEL_KEY, "/definition");
     let reply = post_htmx(&world, &path, &pairs).await;
@@ -241,6 +270,7 @@ async fn parameters_edit_of_a_partial_value_names_the_missing_leaf() {
         "value[1]", "value[2]", "value[3]", "value[4]", "value[6]", "value[7]", "value[8]",
     ];
     pairs.extend(names.iter().map(|name| (*name, "1")));
+    pairs.push(("limits[0].leaf_path", "[*]"));
     let path = parameter_path(SPEED_TABLE_KEY, "/definition");
     let reply = post_htmx(&world, &path, &pairs).await;
     assert_panel_error(&reply, StatusCode::UNPROCESSABLE_ENTITY, "E-RCP-005");
@@ -457,7 +487,7 @@ async fn parameters_edit_a_bad_key_with_a_bad_tag_gives_one_line_and_no_form() {
 }
 
 /// The definition fields of the stored parameter `ZONE` (type `Int@1`).
-pub(super) const ZONE_FIELDS: [(&str, &str); 10] = [
+pub(super) const ZONE_FIELDS: [(&str, &str); 11] = [
     ("row_version", "1"),
     ("unit_path", "U1"),
     ("tag", "ZONE"),
@@ -468,6 +498,7 @@ pub(super) const ZONE_FIELDS: [(&str, &str); 10] = [
     ("s7_address", "DB6.DBB0"),
     ("ordinal", "20"),
     ("value.speed", "5"),
+    ("limits[0].leaf_path", ".speed"),
 ];
 
 /// The tail of the text input `type` when it holds the text `Int@1`.

@@ -17,6 +17,7 @@ const INIT_SCRIPT: &str = concat!(
 );
 const SQL_FENCE: &str = "```sql";
 const CLOSING_FENCE: &str = "```";
+const DOLLAR_QUOTE: &str = "$$";
 
 /// Drop the `--` comments, make each run of white space one space, and trim.
 pub fn normalize(sql: &str) -> String {
@@ -180,6 +181,41 @@ pub fn as_shipped_in_0001(normalized: &str) -> String {
             );
             text.replacen(piece.current, piece.shipped, 1)
         })
+}
+
+/// The byte range of a function statement in normalized SQL: from `head` to the `;` after the
+/// closing `$$`. The call fails when the statement is missing.
+fn function_span(sql: &str, head: &str) -> std::ops::Range<usize> {
+    let found = sql.find(head);
+    assert!(found.is_some(), "no statement that starts with '{head}'");
+    let start = found.expect("presence asserted above");
+    let tail = sql.get(start..).expect("a find index is a char boundary");
+    let (_, rest) = tail.split_once(DOLLAR_QUOTE).expect("an opening $$");
+    let (_, after) = rest.split_once(DOLLAR_QUOTE).expect("a closing $$");
+    let (_, trailing) = after.split_once(';').expect("a ; after the closing $$");
+    let end = sql
+        .len()
+        .checked_sub(trailing.len())
+        .expect("the trailing text is part of the SQL");
+    start..end
+}
+
+/// The statement of a function in normalized SQL: from `head` to the `;` after the closing `$$`.
+pub fn function_statement(sql: &str, head: &str) -> String {
+    let span = function_span(sql, head);
+    sql.get(span)
+        .expect("a span lies on char boundaries")
+        .to_owned()
+}
+
+/// Normalized SQL without the statement of one function. See [`function_statement`].
+pub fn without_function_statement(sql: &str, head: &str) -> String {
+    let span = function_span(sql, head);
+    let before = sql
+        .get(..span.start)
+        .expect("a span lies on char boundaries");
+    let after = sql.get(span.end..).expect("a span lies on char boundaries");
+    format!("{} {}", before.trim_end(), after.trim_start())
 }
 
 /// The text `CONSTRAINT <name> CHECK ( ... )` of a constraint in normalized SQL, up to the

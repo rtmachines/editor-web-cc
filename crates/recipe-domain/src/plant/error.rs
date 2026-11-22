@@ -6,7 +6,7 @@ use crate::recipe::ReferenceNumber;
 
 use std::fmt;
 
-use super::limits::{MAX_DEPTH, MAX_LEAVES, MAX_MEMBERS, MAX_S7_NESTING};
+use super::limits::{MAX_DEPTH, MAX_LEAF_PATH_BYTES, MAX_LEAVES, MAX_MEMBERS, MAX_S7_NESTING};
 use super::{
     CommMode, MachineCode, MemberName, PlcAddress, PlcPlatform, StringEncoding, StringLengthReason,
     TypeName, UnitPath,
@@ -27,6 +27,8 @@ pub enum TypeLimit {
     /// The number of nesting levels of a type on an S7 platform, in the Siemens count
     /// (ADR-0179 (l)).
     S7Nesting,
+    /// The number of bytes of the canonical text of a leaf path (ADR-0211).
+    LeafPathBytes,
 }
 
 impl fmt::Display for TypeLimit {
@@ -36,6 +38,7 @@ impl fmt::Display for TypeLimit {
             Self::Depth => write!(f, "{MAX_DEPTH} levels"),
             Self::Members => write!(f, "{MAX_MEMBERS} members"),
             Self::S7Nesting => write!(f, "{MAX_S7_NESTING} levels of the S7 count"),
+            Self::LeafPathBytes => write!(f, "{MAX_LEAF_PATH_BYTES} bytes of a leaf path"),
         }
     }
 }
@@ -205,7 +208,7 @@ pub enum PlantError {
     },
     /// A type is above a size limit (`E-PLT-018`).
     #[error(
-        "Type {type_name} is larger than the limit {limit}. Use fewer elements, fewer members, or fewer levels."
+        "Type {type_name} is larger than the limit {limit}. Use fewer elements, fewer members, fewer levels, or shorter member names."
     )]
     TypeTooLarge {
         /// The type as text. An array has no name.

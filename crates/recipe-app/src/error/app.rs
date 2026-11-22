@@ -30,6 +30,8 @@ pub enum TimeoutStage {
     Diff,
     /// The wait for a slot of `identity.detached_tasks` (ADR-0172 (w)).
     DetachedSlot,
+    /// The wait for a permit of the value routes (ADR-0211 (o)).
+    ValueBodyPermit,
 }
 
 impl fmt::Display for TimeoutStage {
@@ -41,6 +43,7 @@ impl fmt::Display for TimeoutStage {
             Self::Request => "request",
             Self::Diff => "diff",
             Self::DetachedSlot => "security step slot",
+            Self::ValueBodyPermit => "value body permit",
         })
     }
 }

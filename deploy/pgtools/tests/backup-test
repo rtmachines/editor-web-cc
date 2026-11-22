@@ -32,6 +32,7 @@ FOREIGN_FILES=()
 FOREIGN_MANIFEST_TEXT=""
 LAST_TEMP=()
 OTHER_PGDATA=""
+HEALTH_TEST_EPOCH=1767225600
 SECRET='ab:c\d9'
 SNAPSHOT_ID=00000003-0000001B-1
 PASSED=0
@@ -100,6 +101,8 @@ case_parallel_runs
 case_secret_file_rules
 case_health_second_fs
 case_health_tag_age
+case_health_future_boundary
+case_health_future_older_set
 case_health_same_fs
 case_health_no_pg_version
 source "$HERE/lib/manifest-tag-cases.sh" || exit 1

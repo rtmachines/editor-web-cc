@@ -58,7 +58,7 @@ async fn csrf_layer_gives_413_and_not_403_for_a_body_above_the_limit_with_a_wron
         ("x-csrf-token", "wrong"),
     ];
     let cases = [
-        (VALUE_PATHS[2], 4 * KIB * KIB + 1),
+        (VALUE_PATHS[2], 16 * KIB * KIB + 1),
         (TRANSLATION_PATH, 64 * KIB + 1),
         (FORM_PATHS[1], 256 * KIB + 1),
     ];

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# backup-health: healthcheck of the service backup (ADR-0066 (d)).
+# backup-health: healthcheck of the service backup (ADR-0066 (d), ADR-0219).
 #
 # It exits 0 when all three checks pass. Otherwise it writes one ERROR line and exits 1.
 #   1. The filesystem of BACKUP_DIR differs from the filesystem of PGDATA (stat -c %d).
 #      PGDATA must hold the regular file PG_VERSION. Else the volume of pgdata is not mounted.
 #   2. The marker file of the backup disk exists.
 #   3. A complete set is younger than backup.max_age_alert. Every suffix counts, also _premigrate.
+#      Each complete set has a manifest time within the clock tolerance or earlier.
 # A complete set has the dump, the globals file, the counts file, and the manifest.
 # The check writes nothing and deletes nothing.
 set -euo pipefail
@@ -15,6 +16,7 @@ export LC_ALL=C
 
 JOB=backup-health
 MAX_AGE_SECONDS=93600 # backup.max_age_alert, 26 h, in reliability.md section 7.11
+CLOCK_TOLERANCE_SECONDS=60 # alerts.interval in reliability.md section 7.11
 MARKER_NAME=.backup-marker
 
 BACKUP_DIR=${BACKUP_DIR:-/backups}
@@ -26,9 +28,9 @@ log() {
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$JOB" "$2" "${3:+,$3}"
 }
 
-# fail <message>: write the one ERROR line and stop.
+# fail <message> [<extra JSON fields>]: write the one ERROR line and stop.
 fail() {
-  log ERROR "$1"
+  log ERROR "$1" "${2-}"
   exit 1
 }
 
@@ -62,6 +64,12 @@ for manifest in "$BACKUP_DIR"/recipe_*.dump.sha256; do
   is_file "$BACKUP_DIR/$base.counts" || continue
   is_file "$BACKUP_DIR/globals_${ts}${suffix}.sql" || continue
   age=$((now - $(stat -c %Y -- "$manifest")))
+  if [ "$age" -lt "$((-CLOCK_TOLERANCE_SECONDS))" ]; then
+    fail "the manifest time is ahead of the clock" "\"set\":\"$base\""
+  fi
+  if [ "$age" -lt 0 ]; then
+    age=0
+  fi
   if [ "$age" -lt "$MAX_AGE_SECONDS" ]; then
     newest_set=$base
   fi

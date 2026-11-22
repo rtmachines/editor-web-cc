@@ -285,6 +285,20 @@ case_wal_pitr_stray_file() {
   pitr_expect_clean "pitr stray file"
 }
 
+case_wal_pitr_stop_fails() {
+  pitr_run_case stop-fails STUB_PGCTL_STOP_FAIL=1
+  expect_ok "pitr stop fails: nonzero exit code" test "$RC" -ne 0
+  expect_ok "pitr stop fails: the scratch directory stays" \
+    compgen -G "$W/.pitr-scratch/run.*/data/postmaster.pid" >/dev/null
+  expect_eq "pitr stop fails: one ERROR line" "$(error_count "$CASE/out")" "1"
+  expect_ok "pitr stop fails: the cleanup error follows pitr check passed" \
+    awk '
+      /"message":"pitr check passed"/ { passed = 1 }
+      /"level":"ERROR".*"message":"cannot stop the scratch server of this run"/ { cleanup = passed }
+      END { exit !cleanup }
+    ' "$CASE/out"
+}
+
 case_wal_pitr_gates() {
   pitr_env_cases
   pitr_archive_cases

@@ -722,6 +722,7 @@ fn build_node(row: &PlcType, built: &mut Built) -> Result<TypeNode, PlantError> 
     })
 }
 
+mod leaf_path_bytes;
 mod leaves;
 mod name_cycle;
 mod rebind;

@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use super::LeafFault;
 use crate::plant::fixtures::{
     id, machine, on_platform, primitive_row, string_row, types_for, wstring_row,
 };
@@ -126,6 +127,27 @@ fn string_refuses_u0000_at_any_position() {
         fault(r#""AB\u0000""#, &string_tree(10)).expected(),
         Some(&Expected::String { length: 10 })
     );
+}
+
+#[test]
+fn line_break_in_a_string_value_is_refused() {
+    let fault = fault(r#""A\nB""#, &string_tree(10));
+    assert_eq!(fault.leaf().to_string(), "");
+    assert_eq!(fault.expected(), Some(&Expected::String { length: 10 }));
+}
+
+#[test]
+fn line_break_in_a_char_value_is_refused() {
+    use crate::recipe::value::request_text;
+
+    let tree = primitive_tree(CHAR);
+    let on = (tree.platform(), tree.string_encoding());
+    for text in ["\r", "\n"] {
+        assert_eq!(
+            request_text(text, tree.root(), on),
+            Err(LeafFault::Expected(Expected::Char { max: 0xFF }))
+        );
+    }
 }
 
 #[test]

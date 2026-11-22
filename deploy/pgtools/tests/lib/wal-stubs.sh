@@ -154,6 +154,7 @@ EOF
 #   pg_ctl: start writes postmaster.pid and keeps the -o argument, the label, and the file list for the test.
 #     stop keeps a copy of postgresql.auto.conf in auto.conf.stop.
 #     STUB_CTL_FAIL=1       start fails after it writes a line to the server log
+#     STUB_PGCTL_STOP_FAIL=1  pg_ctl stop fails.
 make_wal_stub_scratch() {
   cat >"$ROOT/stubs/psql" <<'EOF'
 #!/usr/bin/env bash
@@ -245,6 +246,7 @@ if [ "$action" = start ]; then
   [ -z "${STUB_CTL_FAIL:-}" ] || exit 1
   echo 1 >"$pgdata/postmaster.pid"
 else
+  [ -z "${STUB_PGCTL_STOP_FAIL:-}" ] || exit 1
   # The copy of postgresql.auto.conf at the stop call. A missing file gives an empty copy.
   if [ -f "$pgdata/postgresql.auto.conf" ]; then
     cp "$pgdata/postgresql.auto.conf" "$STUB_DIR/auto.conf.stop"

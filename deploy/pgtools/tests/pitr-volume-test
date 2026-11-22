@@ -109,6 +109,20 @@ else
   case_pitr_check_in_recovery
   case_pitr_check_timeline
   case_pitr_check_segment
+  case_pitr_check_damaged_record
+  case_pitr_check_wrong_continuation_length
+  case_pitr_check_missing_continuation_flag
+  case_pitr_check_split_record_header
+  case_pitr_check_clean_tail
+  case_pitr_check_torn_record
+  case_pitr_check_torn_page_crossing
+  case_pitr_check_torn_at_page_boundary
+  case_pitr_check_torn_segment_crossing
+  case_pitr_check_zero_continuation_page
+  case_pitr_check_switched_segment
+  case_pitr_check_segment_boundary_missing
+  case_pitr_check_segment_boundary_records
+  case_pitr_check_segment_boundary_clean
   case_pitr_check_second_timeline
   case_pitr_check_partial
   case_pitr_check_expected_lsn
