@@ -66,6 +66,7 @@ This file records the notable changes of the recipe editor. The format follows [
 - `backup-health` refuses a backup set whose manifest time is more than `alerts.interval` ahead of the clock (V-07, ADR-0219).
 - With `session.secure=false` in a `dev` build, the Origin check accepts `http://` followed by the `Host` header (V-15, ADR-0220).
 - `ThrottlePolicy::parse` refuses a bad field with `E-IDN-012`, and no setting builds the policy yet (V-18, ADR-0215).
+- `Cargo.lock` holds `url` 2.5.9 in place of 2.5.8 (RUSTSEC-2026-0592) and `form_urlencoded` 1.2.3 in place of 1.2.2.
 
 ## [0.8.0] - 2026-11-19
 
