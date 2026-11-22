@@ -436,13 +436,23 @@ A mutating request is a request with any method except `GET`, `HEAD`, and `OPTIO
 - **AND** `mhoffman` stays active
 
 #### Scenario: Origin with another scheme
-- **GIVEN** the Administrator `akowal` with an open session and a valid CSRF token
+- **GIVEN** the setting `session.secure=true`
+- **AND** the Administrator `akowal` with an open session and a valid CSRF token
 - **WHEN** `akowal` sends `POST /users/mhoffman/deactivate` with `Host: recipes.plant.local` and `Origin: http://recipes.plant.local`
 - **THEN** the server rejects the request with `E-WEB-007`
 
 #### Scenario: Origin of the same host
 - **GIVEN** the Administrator `akowal` with an open session and a valid CSRF token
 - **WHEN** `akowal` sends `POST /users/mhoffman/deactivate` with `Host: recipes.plant.local` and `Origin: https://recipes.plant.local`
+- **THEN** the server accepts the request
+
+### Requirement: Plain HTTP origin in a dev build
+With `session.secure=false` in a `dev` build, the system SHALL also accept an `Origin` header that equals `http://` followed by the `Host` header (R38, ADR-0220).
+
+#### Scenario: Plain HTTP origin in a dev build
+- **GIVEN** a `dev` build with the setting `session.secure=false`
+- **AND** the Administrator `akowal` with an open session and a valid CSRF token
+- **WHEN** `akowal` sends `POST /users/mhoffman/deactivate` with `Host: recipes.test:18082` and `Origin: http://recipes.test:18082`
 - **THEN** the server accepts the request
 
 ### Requirement: Client address from trusted proxies
@@ -475,13 +485,19 @@ The server SHALL read `X-Forwarded-For` and `X-Forwarded-Proto` only from an add
 - **AND** the system inserts no login attempt row
 
 ### Requirement: Request body limits
-The server SHALL accept an HTML form body of at most 256 KiB. The four routes that carry a parameter value SHALL accept at most 1 MiB. The route `PUT .../translations/{lang}` SHALL accept at most 64 KiB. A larger request SHALL get `E-WEB-003` (R30, R38).
+The server SHALL accept an HTML form body of at most 256 KiB. The four routes that carry a parameter value SHALL accept at most `http.body_limit.value` (16 MiB). The route `POST .../translations/{lang}` SHALL accept at most 64 KiB. A larger request SHALL get `E-WEB-003` (R30, R38, ADR-0211).
 
 #### Scenario: Form above the limit
 - **GIVEN** the recipe `R-100` and a ProcessEngineer with an open session
 - **WHEN** the ProcessEngineer sends a `RenameRecipe` form with a body of 300 KiB
 - **THEN** the server rejects the request with `E-WEB-003`
 - **AND** the name of `R-100` does not change
+
+#### Scenario: Value form above the limit
+- **GIVEN** the parameter `PROFILE` in the draft version 3 of `R-100` and a ProcessEngineer with an open session
+- **WHEN** the ProcessEngineer sends a `SetParameterValue` form with a body of 17 MiB
+- **THEN** the server rejects the request with `E-WEB-003`
+- **AND** the value of `PROFILE` does not change
 
 ### Requirement: Deactivation of an inactive user
 The system SHALL reject `DeactivateUser` with `E-IDN-010` for a user that is already inactive. The command SHALL change no row and SHALL write no audit entry (A9, A14).
