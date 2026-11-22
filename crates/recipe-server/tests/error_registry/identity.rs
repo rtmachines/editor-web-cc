@@ -18,6 +18,7 @@ fn name_of(error: &IdentityError) -> &'static str {
         IdentityError::UserAlreadyActive { .. } => "IdentityError::UserAlreadyActive",
         IdentityError::UserAlreadyInactive { .. } => "IdentityError::UserAlreadyInactive",
         IdentityError::TechnicalRoleChange { .. } => "IdentityError::TechnicalRoleChange",
+        IdentityError::ThrottlePolicyInvalid { .. } => "IdentityError::ThrottlePolicyInvalid",
     }
 }
 
@@ -43,6 +44,7 @@ pub fn samples() -> Vec<Sample> {
         IdentityError::UserAlreadyActive { login: login() },
         IdentityError::UserAlreadyInactive { login: login() },
         IdentityError::TechnicalRoleChange { login: login() },
+        IdentityError::ThrottlePolicyInvalid { field: "window" },
     ];
     errors
         .iter()

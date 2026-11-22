@@ -1,6 +1,6 @@
 # ADR-0109: Export API for transfer clients with HTTP Basic
 
-Status: Accepted. Amended by ADR-0119 (an `Approved` version is loadable only when it breaks no current rule). Amended by ADR-0164 (item (ah): a second pick of the approved version after a concurrent approval). Amended by ADR-0202 (item (v): the scope hashed body holds `machine.string_encoding` only for a `Utf8` machine). Amended by ADR-0208 (the type and value rules of the v2 schema file)
+Status: Accepted. Amended by ADR-0119 (an `Approved` version is loadable only when it breaks no current rule). Amended by ADR-0164 (item (ah): a second pick of the approved version after a concurrent approval). Amended by ADR-0202 (item (v): the scope hashed body holds `machine.string_encoding` only for a `Utf8` machine). Amended by ADR-0208 (the type and value rules of the v2 schema file). Amended by ADR-0216 (item (ae): Caddy writes no access log)
 Date: 2026-11-02
 Deciders: project owner
 

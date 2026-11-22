@@ -36,9 +36,12 @@ This file records the notable changes of the recipe editor. The format follows [
 - The CI step "Prepare the disks and secrets" has a limit of 10 minutes in five jobs. The budget comment of the job `upgrade` gives 83 minutes.
 - The job limits of `restore-switch` and `pitr-recovery` rise to 130 and 160 minutes.
 - Step 6 of "Recover from the WAL archive" explains the end check when `db` does not run and the operator gives no target time.
-  The check accepts an end in the newest archive segment or later.
-  A damaged record can end replay early, and the recovered volume can lack later commits.
+  The end check follows the tail rule of ADR-0217 (b).
   The step tells the operator to compare the newest audit entry with the expected entry.
+- A command refuses LF and CR in a `CHAR`, `WCHAR`, `STRING`, or `WSTRING` value with `E-RCP-005` (V-01, ADR-0210). Stored values stay unchanged and readable. The query `deploy/db/check-platform-ranges.sql` lists stored values with LF or CR in its new `line_break` output.
+- `pitr-volume` refuses a recovery that ends before the end of the WAL archive (V-02, ADR-0217). It writes the ERROR line "the recovery ended before the end of the WAL archive". A torn last record with only zero bytes after it passes with one WARN line.
+- After a record length of 0, the check also requires only zero bytes to the end of the newest file. The check refuses a newest file that is shorter than the segment size. A torn last record that crosses into an existing next segment is a known limit. The operator runs the recovery with `--target-time` before the newest commit (V-02, ADR-0221).
+- The body limit of the four value routes is 16 MiB (`http.body_limit.value`). A leaf path has at most 128 bytes (`budget.leaf_path_bytes`, `E-PLT-018`) (V-04, ADR-0211). At most 4 requests wait for, read, or hold a value body at once (`http.value_body_permits`). A fifth request waits at most `http.body_read_timeout`, then gets `503 E-WEB-009`.
 
 ### Fixed
 
@@ -57,6 +60,13 @@ This file records the notable changes of the recipe editor. The format follows [
 - A forbidden result without a client address gives `E-DB-008` and writes no security event (V-21).
 - A failed `POST /login` no longer shows the language switch (V-29).
 - On Unix, the server opens a result file without following links and reads only regular files (V-36).
+- The trigger of a struct member compares the transaction (`xmin`) and `created_at` of the struct row (V-03, ADR-0212). Migration `0019_struct_member_transaction.sql` adds this rule. A missing struct row gives `E-PLT-035`.
+- The definition form sends value fields and limit fields only as a pair (V-05, ADR-0213 (i)). One part alone gives `422 E-WEB-008`.
+- `restore-test` and `pitr-check` keep the scratch directory and write one ERROR line when the stop of the scratch server fails (V-06, ADR-0218).
+- `backup-health` refuses a backup set whose manifest time is more than `alerts.interval` ahead of the clock (V-07, ADR-0219).
+- With `session.secure=false` in a `dev` build, the Origin check accepts `http://` followed by the `Host` header (V-15, ADR-0220).
+- `ThrottlePolicy::parse` refuses a bad field with `E-IDN-012`, and no setting builds the policy yet (V-18, ADR-0215).
+- `Cargo.lock` holds `url` 2.5.9 in place of 2.5.8 (RUSTSEC-2026-0592) and `form_urlencoded` 1.2.3 in place of 1.2.2.
 
 ## [0.8.0] - 2026-11-19
 

@@ -276,12 +276,12 @@ fn the_default_throttle_equals_the_table() {
     let policy = IdentitySettings::default().throttle;
 
     let delay = settings_cell("login.delay_after_failures");
-    assert_eq!(u64::from(policy.free_failures), number_at(delay, 0));
-    assert_eq!(policy.window, seconds(number_after(delay, "in"), 60));
+    assert_eq!(u64::from(policy.free_failures()), number_at(delay, 0));
+    assert_eq!(policy.window(), seconds(number_after(delay, "in"), 60));
     let formula = settings_cell("login.delay_formula");
-    assert_eq!(policy.delay_cap, seconds(number_after(formula, "cap"), 1));
+    assert_eq!(policy.delay_cap(), seconds(number_after(formula, "cap"), 1));
     assert_eq!(
-        u64::from(policy.address_budget),
+        u64::from(policy.address_budget()),
         number_at(settings_cell("login.ip_budget"), 0)
     );
     assert_eq!(policy, ThrottlePolicy::default());

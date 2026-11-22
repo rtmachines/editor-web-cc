@@ -1,6 +1,6 @@
 # ADR-0202: STRING encoding of a machine
 
-Status: Accepted. Amends ADR-0181 (b) (the bytes of a `STRING` character on a `Utf8` machine). Amends ADR-0137 (b) and (h) (the characters of a `STRING` value and the unit of a `STRING(n)` length on a `Utf8` machine). Amends ADR-0028 (the rule of a `STRING` character outside Latin-1). Amends ADR-0109 (v) (the scope hashed body). Amends ADR-0119 (c) (`loadable` of a v1 document of a `Utf8` machine)
+Status: Accepted. Amends ADR-0181 (b) (the bytes of a `STRING` character on a `Utf8` machine). Amends ADR-0137 (b) and (h) (the characters of a `STRING` value and the unit of a `STRING(n)` length on a `Utf8` machine). Amends ADR-0028 (the rule of a `STRING` character outside Latin-1). Amends ADR-0109 (v) (the scope hashed body). Amends ADR-0119 (c) (`loadable` of a v1 document of a `Utf8` machine). Amended by ADR-0210 (item (f): LF and CR at command input only)
 Date: 2026-11-19
 Deciders: project owner
 

@@ -6,6 +6,7 @@ import {
   test,
   type Language,
 } from './support/seed';
+import type { Page } from '@playwright/test';
 
 // ADR-0048 (c) and (d): the keyboard path through the leaf grid and the Enter key.
 // A test reads the page and submits the product's own forms. It never changes a style or a script.
@@ -127,17 +128,50 @@ test.describe('Enter in a value input saves the value', () => {
 });
 
 // Design D7: a plain link after the grid brings the save button back into view at 320 px.
+// Design D13: no element of the link or the grid has a delayed trigger.
 test.describe('jump link after the leaf grid', () => {
   /** The URL of the sentinel request. The page sends it after the jump, so a stray request is already in the list. */
   const SENTINEL_PATH = '/static/app.css';
   /** Waits for the link only briefly, so a missing link fails fast. */
   const LINK_TIMEOUT_MS = 2000;
+  /** The fake time between the two sentinels. It is longer than the HTMX timeout of 45000 ms. */
+  const CLOCK_ADVANCE_MS = 60_000;
+  /** Matches an `hx-trigger` with `delay:`, `throttle:`, or `every`. Each delays a request. */
+  const DELAYED_TRIGGER = String.raw`delay:|throttle:|\bevery\b`;
+  /** Selects the jump link, the grid and its frames, and each element inside the grid. */
+  const TRIGGER_SCOPE =
+    'a[href="#parameter-save-submit"], .tree:has(.leaf-grid), .table-wrap:has(.leaf-grid), ' +
+    '.leaf-grid, .leaf-grid *';
+
+  /** Returns one line for each scoped element whose `hx-trigger` starts a delayed request. */
+  async function delayedTriggers(page: Page): Promise<string[]> {
+    return page.locator(TRIGGER_SCOPE).evaluateAll((elements, pattern) => {
+      const delayed = new RegExp(pattern);
+      return elements.flatMap((element) => {
+        const trigger = element.getAttribute('hx-trigger');
+        if (trigger === null || !delayed.test(trigger)) {
+          return [];
+        }
+        const name = `${element.tagName.toLowerCase()}${element.id ? `#${element.id}` : ''}`;
+        return [`${name} hx-trigger="${trigger}"`];
+      });
+    }, DELAYED_TRIGGER);
+  }
+
+  /** Sends the sentinel fetch. It ends after any earlier request started. */
+  async function sendSentinel(page: Page): Promise<void> {
+    // `no-store` keeps the cache from hiding the sentinel.
+    await page.evaluate(async (path) => {
+      await fetch(path, { cache: 'no-store' });
+    }, SENTINEL_PATH);
+  }
 
   for (const subject of ['struct', 'array'] as const) {
     test(`the link after the ${subject} grid shows the save button at 320px without a request`, async ({
       page,
       seed,
     }) => {
+      await page.clock.install();
       await page.setViewportSize({ width: 320, height: VIEWPORT_HEIGHT });
       await page.goto(seed[subject].path);
 
@@ -145,6 +179,8 @@ test.describe('jump link after the leaf grid', () => {
       await expect(link, 'the page has the jump link after the grid').toHaveCount(1, {
         timeout: LINK_TIMEOUT_MS,
       });
+      await expect(page.locator('.leaf-grid'), 'the page has the grid').toHaveCount(1);
+      expect(await delayedTriggers(page), 'no scoped element has a delayed hx-trigger').toEqual([]);
       await link.scrollIntoViewIfNeeded();
       const save = page.locator('#parameter-save-submit');
       await expect(save, 'the save button is above the grid, out of view').not.toBeInViewport();
@@ -153,16 +189,18 @@ test.describe('jump link after the leaf grid', () => {
       page.on('request', (request) => requests.push(`${request.method()} ${request.url()}`));
       await link.click();
       await expect(save, 'the link brings the save button into view').toBeInViewport();
-      await page.waitForFunction(() => window.location.hash === '#parameter-save-submit');
-      // The sentinel fetch ends after any earlier request started. `no-store` keeps the cache from
-      // hiding it.
-      await page.evaluate(async (path) => {
-        await fetch(path, { cache: 'no-store' });
-      }, SENTINEL_PATH);
+      // The fake clock stops `page.waitForFunction`, so this poll runs on the test side.
+      await expect
+        .poll(() => page.evaluate(() => window.location.hash), { message: 'the hash is set' })
+        .toBe('#parameter-save-submit');
+      await sendSentinel(page);
+      // A delayed request fires in the fake time and starts before the second sentinel.
+      await page.clock.runFor(CLOCK_ADVANCE_MS);
+      await sendSentinel(page);
       expect(
         requests.map((request) => request.replace(/^GET https?:\/\/[^/]+/, 'GET ')),
-        'the link sends no request, only the sentinel',
-      ).toEqual([`GET ${SENTINEL_PATH}`]);
+        'the link sends no request, only the two sentinels',
+      ).toEqual([`GET ${SENTINEL_PATH}`, `GET ${SENTINEL_PATH}`]);
     });
   }
 });

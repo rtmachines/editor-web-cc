@@ -1,9 +1,9 @@
-# Sourced by restore-test-test. It holds the cases of the stale scratch directories (ADR-0067 (g)).
+# Sourced by restore-test-test. It tests stale scratch directories and failed stops (ADR-0218).
 #
-# A killed run leaves a directory run.* below .scratch. The next run deletes it. It stops the server
-# of that directory only when the PID of postmaster.pid is a postgres process of that directory.
-# Another process never gets a signal. It reads /proc/<pid>/cmdline, so these cases need Linux
-# procfs, as the image has.
+# A killed run leaves a directory run.* below .scratch. A failed stop keeps that directory.
+# The script stops the server only when postmaster.pid names a postgres process of that directory.
+# Another process never gets a signal. The script reads /proc/<pid>/cmdline, so these cases need
+# Linux procfs.
 
 STALE_FAKE_PID=""
 
@@ -49,6 +49,38 @@ case_restore_stale_scratch() {
   expect_ok "stale: the other entry of .scratch stays" test -f "$B/.scratch/work"
   expect_ok "stale: the target of a link stays" test -f "$CASE/outside/file"
   expect_ok "stale: the log says so" grep -q '"message":"stale scratch directory deleted"' "$CASE/out"
+}
+
+case_restore_stale_stop_fails() {
+  new_stale_case stale-stop-fails
+  local dir=$B/.scratch/run.OLD123
+  start_fake_process postgres "$dir/data"
+  printf '%s\n' "$STALE_FAKE_PID" >"$dir/data/postmaster.pid"
+  restore_run STUB_PGCTL_STOP_FAIL=1
+  stop_fake_process
+
+  expect_ok "stale stop fails: the old run directory stays" test -d "$dir"
+  expect_eq "stale stop fails: one stop for the old run" "$(stale_stop_count)" 1
+  expect_eq "stale stop fails: no initdb" "$(event_count initdb)" 0
+  expect_no "stale stop fails: exit code is not 0" test "$RC" -eq 0
+  expect_eq "stale stop fails: one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "stale stop fails: the ERROR line names the failed stop and directory" \
+    error_has '"message":"cannot stop the stale scratch server","directory":"run.OLD123"'
+  restore_result_checks "stale stop fails result" failed
+}
+
+case_restore_current_stop_fails() {
+  new_restore_case current-stop-fails
+  local dir
+  restore_run STUB_PGCTL_STOP_FAIL=1
+  dir=$(find "$B/.scratch" -mindepth 1 -maxdepth 1 -type d -name 'run.*' -printf '%f\n')
+
+  expect_eq "current stop fails: one run directory stays" "$(scratch_runs)" 1
+  expect_no "current stop fails: exit code is not 0" test "$RC" -eq 0
+  expect_eq "current stop fails: one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "current stop fails: the ERROR line names the failed stop and directory" \
+    error_has "\"message\":\"cannot stop the scratch server of this run\",\"directory\":\"$dir\""
+  restore_result_checks "current stop fails result" failed
 }
 
 # Another process can have the PID of a stale postmaster.pid after a restart of the container.

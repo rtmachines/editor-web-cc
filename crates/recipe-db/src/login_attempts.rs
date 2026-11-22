@@ -123,7 +123,7 @@ impl LoginAttemptStore for PgLoginAttemptStore {
         key: &AttemptKey,
         policy: &ThrottlePolicy,
     ) -> Result<AttemptOutcome, StorageError> {
-        let window = micros(TABLE, policy.window)?;
+        let window = micros(TABLE, policy.window())?;
         let address = canonical_text(key.client_ip);
         let mut tx = self
             .pool

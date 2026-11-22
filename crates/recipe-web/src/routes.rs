@@ -22,7 +22,7 @@ use crate::error::{WebError, render_errors};
 use crate::export_guard::export_guard;
 use crate::export_path::is_export_path;
 use crate::gates::gates;
-use crate::limits::{body_limit, largest_limit};
+use crate::limits::{body_limit, largest_limit, value_body_permit};
 use crate::pages;
 use crate::pipeline::request_id_in;
 use crate::session::session_layer;
@@ -364,8 +364,8 @@ pub(crate) fn assemble(
     }
     let settings = state.settings().clone();
     // A layer that is added later runs earlier. The order of design D5 is therefore the reverse
-    // of this list: render_errors, inner panic layer, request timeout, body deadline, client,
-    // body limit, DefaultBodyLimit, access, session, csrf, gates, handler.
+    // of this list: render_errors, inner panic layer, request timeout, value body permit, body
+    // deadline, client, body limit, DefaultBodyLimit, access, session, csrf, gates, handler.
     let routes = routes
         .merge(unlisted)
         .fallback(not_found)
@@ -377,6 +377,7 @@ pub(crate) fn assemble(
         .layer(from_fn_with_state(state.clone(), body_limit))
         .layer(from_fn_with_state(state.clone(), client_address))
         .layer(timeout::body_deadline(&settings))
+        .layer(from_fn_with_state(state.clone(), value_body_permit))
         .layer(from_fn_with_state(state.clone(), timeout::request_timeout))
         .layer(panic::inner_layer())
         .layer(from_fn_with_state(state.clone(), render_errors))

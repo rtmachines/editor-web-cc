@@ -672,10 +672,21 @@ async fn plc_type_member_no_self_rejects_a_struct_as_its_own_member() {
 
 #[tokio::test]
 async fn plc_type_member_struct_type_id_fkey_rejects_an_unknown_struct() {
-    let mut conn = connection().await;
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
     let dint = fixtures::primitive(&mut conn, "DINT").await;
+    let mut admin = database.connect(Role::Superuser).await;
+    let mut tx = sqlx::Connection::begin(&mut admin).await.unwrap();
+    // Trigger `plc_type_member_immutable` refuses an unknown struct first (`E-PLT-035`).
+    // The rollback below restores it. `session_replication_role` would also turn off the key.
+    sqlx::query("ALTER TABLE plc_type_member DISABLE TRIGGER plc_type_member_immutable")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
 
-    let result = insert_member(&mut conn, Uuid::nil(), 1, "orphan", dint).await;
+    let result = insert_member(&mut tx, Uuid::nil(), 1, "orphan", dint).await;
+    tx.rollback().await.unwrap();
+    database.keep_until_thread_ends();
 
     assert_constraint(
         result,

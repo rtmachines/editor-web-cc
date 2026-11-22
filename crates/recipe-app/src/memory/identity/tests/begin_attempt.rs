@@ -17,11 +17,17 @@ fn key(login: &str, address: u8) -> AttemptKey {
     }
 }
 
+/// Return the default policy with the given address budget and the most free failures that fit.
 fn budget(limit: u32) -> ThrottlePolicy {
-    ThrottlePolicy {
-        address_budget: limit,
-        ..ThrottlePolicy::default()
-    }
+    let defaults = ThrottlePolicy::default();
+    let free_failures = limit.checked_sub(1).unwrap();
+    ThrottlePolicy::parse(
+        free_failures,
+        defaults.delay_cap(),
+        defaults.window(),
+        limit,
+    )
+    .unwrap()
 }
 
 #[tokio::test]

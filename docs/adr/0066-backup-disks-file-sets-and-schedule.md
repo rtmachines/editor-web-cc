@@ -1,6 +1,6 @@
 # ADR-0066: Backup disks, file sets, and schedule
 
-Status: Accepted. Amended by ADR-0074 (names of the files on the backup disks). Amended by ADR-0151 (item (m): the mode `0711` of `/wal`). Amended by ADR-0174 (items (e), (f), and (h) step 5: the tag file of a set, published before the manifest)
+Status: Accepted. Amended by ADR-0074 (names of the files on the backup disks). Amended by ADR-0151 (item (m): the mode `0711` of `/wal`). Amended by ADR-0174 (items (e), (f), and (h) step 5: the tag file of a set, published before the manifest). Amended by ADR-0219 (item (d): a manifest time ahead of the clock)
 Date: 2026-10-23
 Deciders: project owner
 

@@ -677,6 +677,110 @@ async fn platform_ranges_query_lists_exactly_the_hit_rows_as_recipe_app() {
 }
 
 #[tokio::test]
+async fn line_break_lists_a_stored_lf() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let draft = site(&mut conn, S7_1500).await;
+    let string_type = wide_type(&mut conn, "STRING", S7_1500).await;
+    let text = "first\nsecond";
+    let tag = "STRING_WITH_LF";
+    add(&mut conn, &draft, string_type, tag, None, &json_text(text)).await;
+    let place = settle(&mut conn, &draft, Fate::Draft).await;
+    let mut expected = Expected::default();
+    expected.hit(&place, tag, "line_break", text);
+
+    let mut conn = database.connect(Role::App).await;
+    let found = rows(&mut conn).await;
+
+    assert_eq!(found, expected.0.into_iter().collect::<Vec<_>>());
+}
+
+/// Seed one parameter of a global text type on a new site and return its place.
+async fn seed_text(
+    conn: &mut PgConnection,
+    platform: &'static str,
+    type_name: &str,
+    tag: &str,
+    text: &str,
+) -> Place {
+    let text_site = site(conn, platform).await;
+    let text_type = wide_type(conn, type_name, platform).await;
+    add(conn, &text_site, text_type, tag, None, &json_text(text)).await;
+    settle(conn, &text_site, Fate::Draft).await
+}
+
+#[tokio::test]
+async fn line_break_lists_a_stored_cr_a_nested_leaf_and_each_platform_family() {
+    let database = TestDatabase::create().await;
+    let mut conn = database.connect(Role::Migrator).await;
+    let mut expected = Expected::default();
+
+    let cr = "first\rsecond";
+    let place = seed_text(&mut conn, S7_1500, "STRING", "CR_TOP_LEVEL", cr).await;
+    expected.hit(&place, "CR_TOP_LEVEL", "line_break", cr);
+
+    let nested = "a\nb";
+    let nested_site = site(&mut conn, S7_1500).await;
+    let struct_type = wide_struct(&mut conn, &nested_site).await;
+    let value = format!("{{\"m1\":\"a\",\"m2\":{}}}", json_text(nested));
+    add(
+        &mut conn,
+        &nested_site,
+        struct_type,
+        "LF_NESTED",
+        None,
+        &value,
+    )
+    .await;
+    let place = settle(&mut conn, &nested_site, Fate::Draft).await;
+    expected.hit(&place, "LF_NESTED", "line_break", nested);
+
+    let codesys = "x\ny";
+    let place = seed_text(&mut conn, CODESYS, "STRING", "LF_CODESYS", codesys).await;
+    expected.hit(&place, "LF_CODESYS", "line_break", codesys);
+
+    let twin_cat = "x\ry";
+    let place = seed_text(&mut conn, TWIN_CAT, "WSTRING", "CR_TWINCAT", twin_cat).await;
+    expected.hit(&place, "CR_TWINCAT", "line_break", twin_cat);
+
+    seed_text(
+        &mut conn,
+        S7_1500,
+        "STRING",
+        "NO_HIT_PLAIN_S7",
+        "plain text",
+    )
+    .await;
+    seed_text(
+        &mut conn,
+        TWIN_CAT,
+        "STRING",
+        "NO_HIT_PLAIN_TWINCAT",
+        "a b\tc",
+    )
+    .await;
+    let plain_site = site(&mut conn, S7_1200).await;
+    let struct_type = wide_struct(&mut conn, &plain_site).await;
+    let value = format!("{{\"m1\":\"a\",\"m2\":{}}}", json_text("plain nested"));
+    add(
+        &mut conn,
+        &plain_site,
+        struct_type,
+        "NO_HIT_PLAIN_NESTED",
+        None,
+        &value,
+    )
+    .await;
+    settle(&mut conn, &plain_site, Fate::Draft).await;
+
+    let mut conn = database.connect(Role::App).await;
+    let found = rows(&mut conn).await;
+
+    assert_eq!(found.len(), expected.0.len(), "rows found: {found:#?}");
+    assert_eq!(found.into_iter().collect::<BTreeSet<Row>>(), expected.0);
+}
+
+#[tokio::test]
 async fn platform_ranges_query_lists_each_hit_once_in_the_order_of_the_output() {
     let (database, _) = seeded().await;
     let mut conn = database.connect(Role::App).await;

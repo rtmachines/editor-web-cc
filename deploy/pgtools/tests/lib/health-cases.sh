@@ -53,6 +53,50 @@ case_health_tag_age() {
   PGDATA_TEST=
 }
 
+case_health_future_boundary() {
+  if ! make_other_fs_pgdata; then
+    skip "health clock boundary case needs a second filesystem (no usable $OTHER_FS_DIR)"
+    return
+  fi
+  health_case health-future-boundary
+  make_set "" 0
+  touch -d "@$((HEALTH_TEST_EPOCH + 60))" "$B/$LAST_BASE.dump.sha256"
+  health_run "STUB_EPOCH=$HEALTH_TEST_EPOCH"
+  expect_eq "health: manifest 60 s ahead passes" "$RC" 0
+
+  touch -d "@$((HEALTH_TEST_EPOCH + 61))" "$B/$LAST_BASE.dump.sha256"
+  health_run "STUB_EPOCH=$HEALTH_TEST_EPOCH"
+  expect_eq "health: manifest 61 s ahead fails" "$RC" 1
+  expect_eq "health: future manifest gives one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "health: future manifest is the named fault" \
+    grep -Fq '"message":"the manifest time is ahead of the clock"' "$CASE/out"
+  PGDATA_TEST=
+}
+
+case_health_future_older_set() {
+  local older_set
+  if ! make_other_fs_pgdata; then
+    skip "health older set case needs a second filesystem (no usable $OTHER_FS_DIR)"
+    return
+  fi
+  health_case health-future-older-set
+  make_set "" 1
+  older_set=$LAST_BASE
+  touch -d "@$((HEALTH_TEST_EPOCH - 86400))" "$B/$older_set.dump.sha256"
+  make_set "" 0
+  touch -d "@$HEALTH_TEST_EPOCH" "$B/$LAST_BASE.dump.sha256"
+  health_run "STUB_EPOCH=$HEALTH_TEST_EPOCH"
+  expect_eq "health: two trusted sets pass" "$RC" 0
+  expect_ok "health: the newest set is healthy" grep -Fq "\"set\":\"$LAST_BASE\"" "$CASE/out"
+
+  touch -d "@$((HEALTH_TEST_EPOCH + 61))" "$B/$older_set.dump.sha256"
+  health_run "STUB_EPOCH=$HEALTH_TEST_EPOCH"
+  expect_eq "health: an older set 61 s ahead fails beside a healthy set" "$RC" 1
+  expect_eq "health: an older future set gives one ERROR line" "$(error_count "$CASE/out")" 1
+  expect_ok "health: the error names the older set" grep -Fq "\"set\":\"$older_set\"" "$CASE/out"
+  PGDATA_TEST=
+}
+
 case_health_suffixes() {
   health_case health-premigrate
   make_set _premigrate 0

@@ -105,6 +105,14 @@ fn default_rebind_leaves_equals_the_table() {
 }
 
 #[test]
+fn default_value_body_permits_equals_the_table() {
+    let value = cell("http.value_body_permits");
+    let number: usize = value.split_whitespace().next().unwrap().parse().unwrap();
+    assert_eq!(WebSettings::default().value_body_permits, number);
+    assert_eq!(number, 4);
+}
+
+#[test]
 fn translation_langs_hold_no_en_and_no_duplicate() {
     let settings = WebSettings::default();
     let listed: Vec<&str> = settings

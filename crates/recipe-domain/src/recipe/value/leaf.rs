@@ -206,7 +206,7 @@ impl Repertoire {
 /// that scalar in JSONB (ADR-0137). A `STRING` on a `Utf8` machine counts UTF-8 bytes
 /// (ADR-0202 (f)). A `WSTRING` on S7 also holds no scalar above U+CFFF
 /// (ADR-0180 (b)). A `WSTRING` on CODESYS and TwinCAT holds no scalar above U+FFFF
-/// (ADR-0201 (a)).
+/// (ADR-0201 (a)). A request text also holds no LF and no CR (ADR-0210).
 fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     let repertoire = Repertoire::of(leaf);
     let length = leaf.string_length.unwrap_or_default();
@@ -217,11 +217,26 @@ fn string(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     let is_in_range = text.chars().all(|c| u32::from(c) <= highest);
     let units = string_length_units(text, leaf.primitive, leaf.string_encoding);
     let has_nul = text.contains('\0');
-    if is_in_range && !has_nul && units <= usize::from(length) {
+    let has_break = refuses_line_break(leaf.mode) && text.contains(is_line_break);
+    if is_in_range && !has_nul && !has_break && units <= usize::from(length) {
         Ok(value.clone())
     } else {
         Err(repertoire.expected(length))
     }
+}
+
+/// Tell whether a scalar is LF or CR.
+const fn is_line_break(scalar: char) -> bool {
+    matches!(scalar, '\n' | '\r')
+}
+
+/// Tell whether a leaf of this mode refuses LF and CR in its text.
+///
+/// The rule solves one problem: a form save removes a stored LF or CR without a message. So
+/// only a request value gets the rule. A stored value stays readable, approvable, and loadable
+/// (ADR-0210 (a), (f)).
+const fn refuses_line_break(mode: Mode) -> bool {
+    matches!(mode, Mode::Request)
 }
 
 /// Count the length units of the text of a string leaf.
@@ -244,7 +259,8 @@ pub(super) fn string_length_units(
 /// Convert a `CHAR` or `WCHAR` leaf.
 ///
 /// The text must hold one scalar from U+0001 up to the highest scalar of the type (ADR-0137).
-/// A `WCHAR` on S7 stops at U+D7FF (ADR-0180 (a)).
+/// A `WCHAR` on S7 stops at U+D7FF (ADR-0180 (a)). A request text is no LF and no CR
+/// (ADR-0210).
 fn character(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
     let highest = match leaf.primitive {
         Primitive::Wchar if has_s7_wide_text_rule(leaf) => S7_WCHAR_MAX,
@@ -256,7 +272,9 @@ fn character(value: &Value, leaf: LeafType) -> Result<Value, Expected> {
             let mut scalars = text.chars();
             matches!(
                 (scalars.next(), scalars.next()),
-                (Some(c), None) if c != '\0' && u32::from(c) <= highest
+                (Some(c), None) if c != '\0'
+                    && u32::from(c) <= highest
+                    && !(refuses_line_break(leaf.mode) && is_line_break(c))
             )
         }
         _ => false,

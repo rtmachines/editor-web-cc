@@ -1,6 +1,6 @@
 # ADR-0006: Relational PLC type catalog with immutable UDT revisions
 
-Status: Accepted. Amended by ADR-0017 (derived types)
+Status: Accepted. Amended by ADR-0017 (derived types). Amended by ADR-0212 (the member trigger compares the transaction)
 Date: 2026-10-12
 Deciders: project owner
 

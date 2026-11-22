@@ -44,6 +44,10 @@ pub(crate) const SEC_FETCH_SITE: &str = "sec-fetch-site";
 pub(crate) const SAME_ORIGIN: &str = "same-origin";
 /// The scheme of an `Origin` that matches the site. The site runs behind HTTPS only.
 const ORIGIN_PREFIX: &str = "https://";
+/// The scheme of an `Origin` that matches the site in plain HTTP mode (`session.secure=false`).
+///
+/// Only a build with the feature `dev` accepts that setting (ADR-0062 b, ADR-0220).
+const PLAIN_ORIGIN_PREFIX: &str = "http://";
 /// The form field of the session token.
 const SESSION_FIELD: &str = "csrf_token";
 /// The form field of the pre-session token.
@@ -88,24 +92,38 @@ fn token_kind(access: Access) -> TokenKind {
     }
 }
 
-/// Tell whether the request comes from the site (ADR-0035 e).
+/// Tell whether the request comes from the site (ADR-0035 e, ADR-0220).
 ///
 /// `Sec-Fetch-Site: same-origin` passes. Otherwise `Origin` must equal `https://` and the `Host`
+/// header. With `plain_http` set, `Origin` also passes when it equals `http://` and the `Host`
 /// header. `Origin: null`, another scheme, another port, and a missing `Host` fail.
-fn origin_matches(headers: &HeaderMap) -> bool {
+fn origin_matches(headers: &HeaderMap, plain_http: bool) -> bool {
+    // Branch 1: the browser vouches for the site. It sends this header only to a trustworthy URL.
     let fetched_from_site = headers
         .get(SEC_FETCH_SITE)
         .is_some_and(|value| value.as_bytes() == SAME_ORIGIN.as_bytes());
     if fetched_from_site {
         return true;
     }
+    // Branch 2: no vouching header. Without `Origin` and `Host`, nothing proves the site.
     let (Some(origin), Some(host)) = (
         headers.get(ORIGIN).and_then(|value| value.to_str().ok()),
         headers.get(HOST).and_then(|value| value.to_str().ok()),
     ) else {
         return false;
     };
-    !host.is_empty() && origin.strip_prefix(ORIGIN_PREFIX) == Some(host)
+    // An empty `Host` would match a bare scheme. It never proves the site.
+    if host.is_empty() {
+        return false;
+    }
+    // Branch 3: `https://` and the `Host` header always pass.
+    if origin.strip_prefix(ORIGIN_PREFIX) == Some(host) {
+        return true;
+    }
+    // Branch 4: `http://` and the `Host` header pass only in plain HTTP mode. A browser sends no
+    // `Sec-Fetch-Site` to a plain HTTP host that is not a loopback address. Another host, port, or
+    // scheme still fails here.
+    plain_http && origin.strip_prefix(PLAIN_ORIGIN_PREFIX) == Some(host)
 }
 
 /// Read a request body up to `limit` bytes.
@@ -214,7 +232,8 @@ pub(crate) async fn csrf_layer(
     let Some(access) = access.filter(|_listed| is_mutating(request.method())) else {
         return Ok(next.run(request).await);
     };
-    if !origin_matches(request.headers()) {
+    // `session.secure=false` selects plain HTTP mode, as it does for the cookies (ADR-0171).
+    if !origin_matches(request.headers(), !state.settings().secure) {
         return Err(reject(&state, rejection_event(&request)).await);
     }
     let limit = request_limit(state.settings(), &request);

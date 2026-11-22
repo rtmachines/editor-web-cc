@@ -100,6 +100,7 @@ fn identity_args(args: &mut FluentArgs<'static>, error: &IdentityError, ctx: &Er
             "reason",
             password_reason_text(ctx.state.bundles(), ctx.lang, *reason),
         ),
+        IdentityError::ThrottlePolicyInvalid { field } => args.set("field", *field),
         _other => {}
     }
 }

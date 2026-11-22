@@ -16,6 +16,7 @@
 //! `compare` matches the scan with the table. This file holds the guard and the tests of the scan and of the comparison.
 
 mod compare;
+mod corpus_field;
 mod kind_tests;
 mod registry;
 mod scan;
@@ -522,7 +523,7 @@ fn xss_coverage_comparison_passes_when_a_corpus_test_covers_the_field() {
         source("pages/form.rs", REQUEST),
         source(
             "pages/form_tests.rs",
-            "#[tokio::test]\nasync fn xss_covers_text() {}",
+            "#[tokio::test]\nasync fn xss_covers_text() {\n    post(&format!(\"text={payload}\"));\n}",
         ),
     ];
     let table: &[Entry] = &[(
@@ -620,7 +621,9 @@ fn xss_coverage_comparison_names_a_count_mismatch() {
 
 /// A comparison input: a corpus `fn` with the given lines above it, and its table.
 fn faults_of_corpus_fn(above: &str) -> Vec<String> {
-    let text = format!("{above}async fn xss_covers_text() {{}}");
+    let text = format!(
+        "{above}async fn xss_covers_text() {{\n    post(&format!(\"text={{payload}}\"));\n}}"
+    );
     let sources = [
         source("pages/form.rs", REQUEST),
         source("pages/form_tests.rs", &text),

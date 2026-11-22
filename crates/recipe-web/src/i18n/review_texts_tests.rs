@@ -85,8 +85,8 @@ const REVIEW_TEXTS: &[(&str, &str, &str)] = &[
     ),
     (
         "error-E-PLT-018",
-        "Type { $type_name } is larger than the limit { $limit }. Use fewer elements, fewer members, or fewer levels.",
-        "Typ { $type_name } przekracza limit { $limit }. Użyj mniej elementów, mniej składników lub mniej poziomów.",
+        "Type { $type_name } is larger than the limit { $limit }. Use fewer elements, fewer members, fewer levels, or shorter member names.",
+        "Typ { $type_name } przekracza limit { $limit }. Użyj mniej elementów, mniej składników, mniej poziomów lub krótszych nazw składników.",
     ),
     (
         "error-E-PLT-021",

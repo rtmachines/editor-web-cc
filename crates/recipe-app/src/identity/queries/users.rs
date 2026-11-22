@@ -129,7 +129,7 @@ impl GetUser {
             .map_err(|_reason| StorageError::invariant("a login is not a typed login"))?;
         let throttle = tx
             .attempts()
-            .throttle_state(&typed, self.ctx.settings.throttle.window)
+            .throttle_state(&typed, self.ctx.settings.throttle.window())
             .await?;
         Ok(UserDetail { user, throttle })
     }

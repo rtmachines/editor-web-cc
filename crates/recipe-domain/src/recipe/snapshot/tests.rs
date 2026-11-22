@@ -277,6 +277,33 @@ fn units_of_another_machine_give_e_plt_020_items() {
     assert_eq!(codes(&items_of(result)), vec![ErrorCode::PLT_020]);
 }
 
+/// Guard (ADR-0213 (h)): with no parameter, the check compares no machine, so foreign units pass.
+#[test]
+fn empty_snapshot_with_foreign_units_gives_no_item() {
+    let result = VersionSnapshot::from(Vec::new()).check(
+        &recipe(false),
+        &super::fixtures::foreign_units(),
+        &trees(),
+    );
+    assert_eq!(result.unwrap(), Vec::<ParameterTag>::new());
+}
+
+/// Guard (ADR-0213 (h)): the approval of an empty draft gives `E-RCP-008` on another path.
+#[test]
+fn empty_snapshot_approval_of_an_empty_draft_gives_e_rcp_008() {
+    let draft = Draft::load(stored_draft_with(
+        VersionState::LiveDraft,
+        PlcPlatform::S7_1500,
+        Vec::new(),
+    ))
+    .unwrap();
+    let error = draft
+        .check_for_approval(&super::fixtures::foreign_units(), &trees(), false)
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(error.code(), ErrorCode::RCP_008, "{error}");
+}
+
 #[test]
 fn the_count_of_e_rcp_020_counts_parameters_and_not_items() {
     let parameters = vec![limited(

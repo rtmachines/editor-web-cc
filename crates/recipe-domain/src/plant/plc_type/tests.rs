@@ -304,7 +304,7 @@ fn struct_with_1025_members_is_plt_018_with_the_members_limit() {
     assert_eq!(error.code().as_str(), "E-PLT-018");
     assert_eq!(
         error.to_string(),
-        "Type ST_Zone is larger than the limit 1024 members. Use fewer elements, fewer members, or fewer levels."
+        "Type ST_Zone is larger than the limit 1024 members. Use fewer elements, fewer members, fewer levels, or shorter member names."
     );
 }
 

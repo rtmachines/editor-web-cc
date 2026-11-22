@@ -158,11 +158,13 @@ const LABEL_KEYS: &[&str] = &["login.delay_formula", "audit.check_time", "backup
 const EXPLAINED: &[(&str, &str)] = &[
     ("container.small_cpus", "each"),
     ("check_result.max_bytes", "bytes"),
+    ("budget.leaf_path_bytes", "bytes"),
     ("login.delay_after_failures", "failures"),
     ("login.ip_budget", "failures"),
     ("login_attempt.purge_batch", "rows"),
     ("password.max", "characters"),
     ("http.user_agent_max", "characters"),
+    ("http.value_body_permits", "requests"),
     ("log.session_ref_length", "hex"),
     ("setting.value_max", "characters"),
     ("page.parameters", "rows"),

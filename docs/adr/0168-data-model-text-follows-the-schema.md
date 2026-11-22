@@ -1,6 +1,6 @@
 # ADR-0168: Text of the data model follows the schema and the code
 
-Status: Accepted. Amends `data-model.md` §1.1, §1.3, and §6
+Status: Accepted. Amends `data-model.md` §1.1, §1.3, and §6. Amended by ADR-0213 (item (a): a `READ ONLY` read before the command transaction for every command)
 Date: 2026-11-14
 Deciders: project owner
 

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use recipe_app::identity::IdentityContext;
 use recipe_app::ports::{CredentialCipher, ReadOnlySwitch, SecurityEventSink};
 use recipe_domain::identity::KeyRing;
+use tokio::sync::Semaphore;
 
 use crate::i18n::{BundleReason, Bundles};
 use crate::settings::WebSettings;
@@ -56,6 +57,7 @@ pub struct WebState {
     csrf_keys: Arc<KeyRing>,
     security: Arc<dyn SecurityEventSink>,
     credential_cipher: Option<Arc<dyn CredentialCipher>>,
+    value_body_permits: Arc<Semaphore>,
 }
 
 impl WebState {
@@ -64,6 +66,10 @@ impl WebState {
     /// `csrf_keys` is the key file `csrf_signing_key`, the newest key first. The sink that records
     /// the event `csrf_rejected` is the sink of the `AppContext` inside `identity`, so the use
     /// cases and the CSRF layer always write to one sink.
+    ///
+    /// `value_body_permits` is clamped to the range from 1 to `Semaphore::MAX_PERMITS`. A larger
+    /// count makes `Semaphore::new` panic (no panic path, `reliability.md` §2). A count of 0 makes
+    /// every request on the value routes wait until its timeout.
     ///
     /// # Errors
     ///
@@ -74,6 +80,8 @@ impl WebState {
         csrf_keys: KeyRing,
     ) -> Result<Self, BundleReason> {
         let security = identity.app().security();
+        let permits = settings.value_body_permits.clamp(1, Semaphore::MAX_PERMITS);
+        let value_body_permits = Arc::new(Semaphore::new(permits));
         Ok(Self {
             identity,
             settings: Arc::new(settings),
@@ -82,6 +90,7 @@ impl WebState {
             csrf_keys: Arc::new(csrf_keys),
             security,
             credential_cipher: None,
+            value_body_permits,
         })
     }
 
@@ -126,6 +135,12 @@ impl WebState {
     #[must_use]
     pub const fn identity(&self) -> &IdentityContext {
         &self.identity
+    }
+
+    /// Return the semaphore of the value body permits (`http.value_body_permits`, ADR-0211 (n)).
+    #[must_use]
+    pub(crate) fn value_body_permits(&self) -> &Arc<Semaphore> {
+        &self.value_body_permits
     }
 
     /// Return the web settings.

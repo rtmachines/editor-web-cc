@@ -25,8 +25,8 @@
 #   7. The audit chain check of data-model.md section 4.9.
 #   8. Each login role logs in over 127.0.0.1 with its password. A wrong password must fail.
 #   9. One JSON result line. A failed step writes one ERROR line and exits with 1.
-# A trap stops the scratch server and deletes the scratch directory on each exit. The marker,
-# the lock, the directory .scratch, and every file of a set stay.
+# A trap stops the scratch server on exit. A failed stop keeps the scratch directory (ADR-0218).
+# The marker, the lock, the directory .scratch, and every file of a set stay.
 #
 # The test reads no production password. No tool reaches the production cluster: the script
 # clears the variables PG* and every call names the private socket or 127.0.0.1.
@@ -128,7 +128,7 @@ cleanup() {
     stop_server "$data_dir" || stopped=0
   fi
   if [ "$stopped" -eq 0 ]; then
-    log ERROR "cannot stop the scratch server of this run"
+    log ERROR "cannot stop the scratch server of this run" "\"directory\":\"$(clean "${scratch##*/}")\""
     status=1
   elif [ -n "$scratch" ] && ! remove_dir "$scratch" "$BACKUP_DIR/$SCRATCH_NAME"; then
     log ERROR "cannot delete the scratch directory of this run"
@@ -175,7 +175,8 @@ is_scratch_postmaster() {
 
 # delete_stale_runs: a killed run leaves a directory run.* below .scratch. The lock proves that
 # no other run lives, so every such directory is stale. A symbolic link is never followed.
-# The script stops a server only when is_scratch_postmaster agrees. Else it deletes the directory.
+# The script stops a server only when is_scratch_postmaster agrees.
+# A failed stop keeps the directory.
 delete_stale_runs() {
   local dir
   for dir in "$BACKUP_DIR/$SCRATCH_NAME"/run.*; do
@@ -183,7 +184,8 @@ delete_stale_runs() {
       continue
     fi
     if [ -f "$dir/data/postmaster.pid" ] && is_scratch_postmaster "$dir/data"; then
-      stop_server "$dir/data" || true
+      stop_server "$dir/data" \
+        || fail "cannot stop the stale scratch server" "\"directory\":\"$(clean "${dir##*/}")\""
     fi
     remove_dir "$dir" "$BACKUP_DIR/$SCRATCH_NAME" || fail "cannot delete a stale scratch directory"
     log INFO "stale scratch directory deleted" "\"directory\":\"$(clean "${dir##*/}")\""

@@ -6,6 +6,7 @@
 use std::fmt;
 use std::time::Duration;
 
+use super::IdentityError;
 use crate::timestamp::Timestamp;
 
 /// Longest number of characters of a typed login (`reliability.md` section 4.3).
@@ -22,6 +23,12 @@ const WINDOW_SECONDS: u64 = 15 * 60;
 
 /// Failures of one address in the window before it is blocked (`login.ip_budget`).
 const ADDRESS_BUDGET: u32 = 100;
+
+/// Longest window of the throttle (ADR-0215 (b)).
+const WINDOW_MAX: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Shortest window and shortest delay cap of the throttle (ADR-0215 (b)).
+const SECOND: Duration = Duration::from_secs(1);
 
 /// Nanoseconds in one second.
 const NANOS_PER_SECOND: u128 = 1_000_000_000;
@@ -86,16 +93,14 @@ impl fmt::Debug for TypedLogin {
 /// The values of `reliability.md` section 7.11 that the login throttle uses.
 ///
 /// One struct gives the decision and the store one source for these numbers.
+/// It solves one problem: a value outside the grammar of ADR-0215 must not reach either reader.
+/// The fields are private. Only [`ThrottlePolicy::parse`] and the default build a policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ThrottlePolicy {
-    /// Failures of a pair that pass without a delay.
-    pub free_failures: u32,
-    /// Longest delay after a failure.
-    pub delay_cap: Duration,
-    /// Length of the window that the counts cover.
-    pub window: Duration,
-    /// Failures of one address in the window that block the address.
-    pub address_budget: u32,
+    free_failures: u32,
+    delay_cap: Duration,
+    window: Duration,
+    address_budget: u32,
 }
 
 impl Default for ThrottlePolicy {
@@ -110,6 +115,64 @@ impl Default for ThrottlePolicy {
 }
 
 impl ThrottlePolicy {
+    /// Parse the four values of the throttle (ADR-0215 (b)). Each range includes both bounds.
+    ///
+    /// `window` is from 1 s to 24 h. `delay_cap` is from 1 s to `window`.
+    /// `free_failures` is from 1 to `address_budget` - 1.
+    /// The check runs in that order, because a bound of one rule is the value of another.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IdentityError::ThrottlePolicyInvalid`] (`E-IDN-012`) with the name of the first
+    /// field that breaks its rule.
+    pub fn parse(
+        free_failures: u32,
+        delay_cap: Duration,
+        window: Duration,
+        address_budget: u32,
+    ) -> Result<Self, IdentityError> {
+        let invalid = |field| IdentityError::ThrottlePolicyInvalid { field };
+        if !(SECOND..=WINDOW_MAX).contains(&window) {
+            return Err(invalid("window"));
+        }
+        if !(SECOND..=window).contains(&delay_cap) {
+            return Err(invalid("delay_cap"));
+        }
+        if free_failures < 1 || free_failures >= address_budget {
+            return Err(invalid("free_failures"));
+        }
+        Ok(Self {
+            free_failures,
+            delay_cap,
+            window,
+            address_budget,
+        })
+    }
+
+    /// Return the failures of a pair that pass without a delay.
+    #[must_use]
+    pub const fn free_failures(&self) -> u32 {
+        self.free_failures
+    }
+
+    /// Return the longest delay after a failure.
+    #[must_use]
+    pub const fn delay_cap(&self) -> Duration {
+        self.delay_cap
+    }
+
+    /// Return the length of the window that the counts cover.
+    #[must_use]
+    pub const fn window(&self) -> Duration {
+        self.window
+    }
+
+    /// Return the failures of one address in the window that block the address.
+    #[must_use]
+    pub const fn address_budget(&self) -> u32 {
+        self.address_budget
+    }
+
     /// Return the delay after `failures` failures of a pair: `2^(n-3)` seconds up to the cap.
     ///
     /// The result is zero below the free failures. The calculation cannot overflow.
@@ -169,13 +232,14 @@ pub struct LoginThrottle {
     policy: ThrottlePolicy,
 }
 
-impl LoginThrottle {
-    /// Build a throttle with the given values.
-    #[must_use]
-    pub const fn new(policy: ThrottlePolicy) -> Self {
+impl From<ThrottlePolicy> for LoginThrottle {
+    /// Build a throttle from a policy. The policy passed the grammar in `parse`.
+    fn from(policy: ThrottlePolicy) -> Self {
         Self { policy }
     }
+}
 
+impl LoginThrottle {
     /// Return the values of the throttle.
     #[must_use]
     pub const fn policy(&self) -> &ThrottlePolicy {

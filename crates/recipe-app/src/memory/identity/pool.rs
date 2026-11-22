@@ -54,7 +54,7 @@ fn count_failures(
     policy: &ThrottlePolicy,
     client_ip: &IpAddr,
 ) -> AttemptCount {
-    let start = before(now, policy.window);
+    let start = before(now, policy.window());
     let failures: Vec<&AttemptRow> = state
         .attempts
         .values()

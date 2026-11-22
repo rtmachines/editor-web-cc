@@ -4,8 +4,8 @@
 use super::*;
 use crate::error_codes::REGISTRY;
 
-/// The number of `E-IDN` rows: `E-IDN-001..011`.
-const DOC_ROW_COUNT: usize = 11;
+/// The number of `E-IDN` rows: `E-IDN-001..012`.
+const DOC_ROW_COUNT: usize = 12;
 
 /// One `E-IDN` row of `reliability.md` section 1.2 that an owner `IdentityError::` names.
 struct DocRow {
@@ -121,6 +121,11 @@ fn samples() -> Vec<Sample> {
             "E-IDN-011",
             vec![("login", "anna".to_owned())],
         ),
+        (
+            IdentityError::ThrottlePolicyInvalid { field: "window" },
+            "E-IDN-012",
+            vec![("field", "window".to_owned())],
+        ),
     ]
 }
 
@@ -142,7 +147,8 @@ fn each_sample_matches_its_doc_row_by_code_and_variant() {
 #[test]
 fn display_text_equals_the_message_of_the_doc_row() {
     // Rows 004 and 007 hold a note and not a message. Two tests below cover them.
-    let skipped = ["E-IDN-004", "E-IDN-007"];
+    // Row 012 holds a note after the message. A test below covers its first sentence.
+    let skipped = ["E-IDN-004", "E-IDN-007", "E-IDN-012"];
     for (row, (error, _, fields)) in doc_rows().iter().zip(samples()) {
         if skipped.contains(&row.code.as_str()) {
             continue;
@@ -165,6 +171,19 @@ fn every_idn_row_and_the_guard_row_are_in_the_registry() {
     assert_eq!(ErrorCode::find("E-AUD-003"), Some(ErrorCode::AUD_003));
     assert_eq!(ErrorCode::find("E-IDN-010"), Some(ErrorCode::IDN_010));
     assert_eq!(ErrorCode::find("E-IDN-011"), Some(ErrorCode::IDN_011));
+    assert_eq!(ErrorCode::find("E-IDN-012"), Some(ErrorCode::IDN_012));
+}
+
+#[test]
+fn throttle_policy_invalid_shows_the_first_sentence_of_its_doc_row() {
+    let rows = doc_rows();
+    let row = rows.iter().find(|row| row.code == "E-IDN-012").unwrap();
+    let first_sentence = row.message.split_inclusive(". ").next().unwrap().trim_end();
+    let error = IdentityError::ThrottlePolicyInvalid { field: "delay_cap" };
+    assert_eq!(
+        error.to_string(),
+        fill(first_sentence, &[("field", "delay_cap".to_owned())])
+    );
 }
 
 #[test]

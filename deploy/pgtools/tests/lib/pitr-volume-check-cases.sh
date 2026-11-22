@@ -17,6 +17,7 @@
 # pitr_tool_calls), and lib/pitr-volume-start-cases.sh (START_TARGET_TIME).
 
 CHECK_END_ERROR="the recovery ended before the end of the WAL archive"
+CHECK_TAIL_WARNING="The newest record may be lost because it is torn or damaged."
 CHECK_RECOVERY_ERROR="the recovered cluster is still in recovery"
 CHECK_TIMELINE_ERROR="the timeline of the recovered cluster is not above the timeline of the base backup"
 CHECK_HISTORY_ERROR="the history file of the new timeline is missing or malformed"
@@ -115,6 +116,149 @@ case_pitr_check_segment() {
   new_pitr_check_case check-segment-none
   rm -f -- "$CASE"/wal/0*
   pitr_check_fails "no segment of the base timeline" "holds no segment of the base timeline" --
+}
+
+case_pitr_check_damaged_record() {
+  new_pitr_check_case check-damaged-record
+  rm -- "$CASE/wal/000000010000000000000004"
+  new_pitr_tail_segment 4 .partial
+  write_pitr_wal 256 L 32
+  write_pitr_wal 288 C 1
+  pitr_check_fails "damaged record in the newest segment" "$CHECK_END_ERROR" --
+}
+
+case_pitr_check_wrong_continuation_length() {
+  new_pitr_check_case check-wrong-continuation-length
+  new_pitr_tail_segment 4
+  write_pitr_wal 8160 L 80
+  write_pitr_wal 8192 SSLQLx4 0xD113 1 1 67117056 56
+  pitr_check_fails "wrong continuation length" "$CHECK_END_ERROR" \
+    "STUB_HISTORY_TEXT=$(pitr_history 0/4001FE0)" --
+}
+
+case_pitr_check_missing_continuation_flag() {
+  new_pitr_check_case check-missing-continuation-flag
+  new_pitr_tail_segment 4
+  write_pitr_wal 8160 L 80
+  write_pitr_wal 8192 SSLQLx4 0xD113 0 1 67117056 48
+  pitr_check_fails "missing continuation flag" "$CHECK_END_ERROR" \
+    "STUB_HISTORY_TEXT=$(pitr_history 0/4001FE0)" --
+}
+
+case_pitr_check_split_record_header() {
+  new_pitr_check_case check-split-record-header
+  new_pitr_tail_segment 4
+  write_pitr_wal 8184 L 40
+  pitr_check_fails "split record header" "$CHECK_END_ERROR" \
+    "STUB_HISTORY_TEXT=$(pitr_history 0/4001FF8)" --
+}
+
+case_pitr_check_empty_tail_file() {
+  new_pitr_check_case check-empty-tail-file
+  truncate -s 0 -- "$CASE/wal/000000010000000000000004" || bad "cannot empty the WAL fixture"
+  pitr_check_fails "empty newest segment" "$CHECK_END_ERROR" --
+}
+
+case_pitr_check_truncated_tail_file() {
+  new_pitr_check_case check-truncated-tail-file
+  new_pitr_tail_segment 4
+  write_pitr_wal 0 SSLQLx4QLL 0xD113 2 1 67108864 0 7300000000000000001 16777216 8192
+  truncate -s 128 -- "$PITR_TAIL_FILE" || bad "cannot truncate the WAL fixture"
+  pitr_check_fails "newest segment cut before the recovery end" "$CHECK_END_ERROR" --
+}
+
+pitr_check_tail_passes() {
+  local label=$1 warnings=$2 position=$3
+  pitr_check_passes "$label" "STUB_HISTORY_TEXT=$(pitr_history "$position")" --
+  expect_eq "$label: WARN count" "$(grep -c '"level":"WARN"' "$CASE/out" || true)" "$warnings"
+  if [ "$warnings" -eq 1 ]; then
+    expect_ok "$label: WARN names the possible loss" \
+      grep -qF "\"level\":\"WARN\",\"job\":\"pitr-volume\",\"message\":\"$CHECK_TAIL_WARNING\"" "$CASE/out"
+  fi
+}
+
+case_pitr_check_clean_tail() {
+  new_pitr_check_case check-clean-tail
+  new_pitr_tail_segment 4
+  write_pitr_wal 8192 SSLQLx4 0xD113 0 1 67117056 0
+  pitr_check_tail_passes "clean end at a page boundary" 0 0/4002000
+}
+
+case_pitr_check_nonzero_tail_after_zero_length() {
+  new_pitr_check_case check-nonzero-tail-after-zero-length
+  new_pitr_tail_segment 4
+  write_pitr_wal 8192 SSLQLx4 0xD113 0 1 67117056 0
+  write_pitr_wal 8216 L 0
+  write_pitr_wal 16777215 C 1
+  pitr_check_fails "non-zero tail after a zero length" "$CHECK_END_ERROR" \
+    "STUB_HISTORY_TEXT=$(pitr_history 0/4002000)" --
+}
+
+case_pitr_check_torn_record() {
+  new_pitr_check_case check-torn-record
+  new_pitr_tail_segment 4
+  write_pitr_wal 256 LC 48 1
+  pitr_check_tail_passes "torn last record" 1 0/4000100
+}
+
+case_pitr_check_torn_page_crossing() {
+  new_pitr_check_case check-torn-page-crossing
+  new_pitr_tail_segment 4
+  write_pitr_wal 8160 L 80
+  write_pitr_wal 8192 SSLQLx4 0xD113 1 1 67117056 48
+  write_pitr_wal 8256 C 1
+  pitr_check_tail_passes "torn record across a page" 1 0/4001FE0
+}
+
+case_pitr_check_torn_at_page_boundary() {
+  new_pitr_check_case check-torn-at-page-boundary
+  new_pitr_tail_segment 4
+  write_pitr_wal 8160 L 32
+  write_pitr_wal 8191 C 1
+  pitr_check_tail_passes "torn record at a page boundary" 1 0/4001FE0
+}
+
+case_pitr_check_torn_segment_crossing() {
+  new_pitr_check_case check-torn-segment-crossing
+  new_pitr_tail_segment 4
+  write_pitr_wal 16777184 L 80
+  pitr_check_tail_passes "torn record across a segment" 1 0/4FFFFE0
+}
+
+case_pitr_check_zero_continuation_page() {
+  new_pitr_check_case check-zero-continuation-page
+  new_pitr_tail_segment 4
+  write_pitr_wal 8160 L 80
+  pitr_check_tail_passes "all-zero continuation page" 1 0/4001FE0
+}
+
+case_pitr_check_switched_segment() {
+  new_pitr_check_case check-switched-segment
+  new_pitr_tail_segment 4
+  write_pitr_wal 256 LLQCC 24 0 0 64 0
+  pitr_check_tail_passes "switched segment" 0 0/5000000
+}
+
+case_pitr_check_segment_boundary_missing() {
+  new_pitr_check_case check-segment-boundary-missing
+  pitr_check_tail_passes "segment boundary without the next segment" 0 0/5000000
+}
+
+case_pitr_check_segment_boundary_records() {
+  new_pitr_check_case check-segment-boundary-records
+  new_pitr_tail_segment 5
+  write_pitr_wal 0 SSLQLx4QLL 0xD113 2 1 83886080 0 7300000000000000001 16777216 8192
+  write_pitr_wal 40 L 32
+  write_pitr_wal 72 L 32
+  pitr_check_fails "segment boundary with records" "$CHECK_END_ERROR" \
+    "STUB_HISTORY_TEXT=$(pitr_history 0/5000000)" --
+}
+
+case_pitr_check_segment_boundary_clean() {
+  new_pitr_check_case check-segment-boundary-clean
+  new_pitr_tail_segment 5
+  write_pitr_wal 0 SSLQLx4QLL 0xD113 2 1 83886080 0 7300000000000000001 16777216 8192
+  pitr_check_tail_passes "segment boundary with a clean next segment" 0 0/5000000
 }
 
 # new_pitr_second_timeline_case <name>: a check case with a base backup on timeline 2. /wal holds the

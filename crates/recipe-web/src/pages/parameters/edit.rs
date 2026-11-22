@@ -13,6 +13,7 @@ use recipe_app::recipe::{
     DraftOutput, ParameterForm, RetypeInput, UpdateParameterDefinition,
     UpdateParameterDefinitionInput,
 };
+use recipe_domain::plant::{LeafClass, TypeNode};
 use recipe_domain::recipe::{LeafTexts, LimitList, ParameterKey, ValueInput};
 
 use super::definition::Definition;
@@ -24,12 +25,17 @@ use super::prepare::{Prepared, Ready, prepare};
 use super::reply::{Ctx, Target, failed, load};
 use super::summary::{SummaryFragment, SummaryView};
 use super::translations::{TranslationsBase, TranslationsBaseFragment};
-use crate::error::{FormErrors, WebError};
+use crate::error::{FieldReason, FormErrors, WebError};
 use crate::pages::draft_reply::{success, with_change_number, with_form};
 use crate::pages::render::{render, see_other_path};
 use crate::pages::request::PageRequest;
 use crate::pages::saved_notice::saved_notice;
 use crate::state::WebState;
+
+/// Return true when the sent `type` equals the stored type text.
+fn same_type(form: &ParameterForm, definition: &Definition) -> bool {
+    form.type_text.as_deref() == Some(definition.type_expr.to_string().as_str())
+}
 
 /// Return true when the request keeps the stored value and limits (design D1, ADR-0029).
 ///
@@ -37,9 +43,51 @@ use crate::state::WebState;
 /// field. The request has no limit row. The edit form always sends the fields, so only another
 /// client meets this case.
 fn keeps_value(form: &ParameterForm, definition: &Definition, sent: &SentFields) -> bool {
-    form.type_text.as_deref() == Some(definition.type_expr.to_string().as_str())
-        && sent.values().is_empty()
-        && sent.limits().is_empty()
+    same_type(form, definition) && sent.values().is_empty() && sent.limits().is_empty()
+}
+
+/// Return true when a leaf of `node` takes a limit. A `BOOL` or `CHAR` leaf takes none.
+fn takes_limit(node: &TypeNode) -> bool {
+    match node {
+        TypeNode::Leaf { leaf_class, .. } => {
+            !matches!(leaf_class, LeafClass::Bool | LeafClass::Char)
+        }
+        TypeNode::Array { element, .. } => takes_limit(element),
+        TypeNode::Struct { members, .. } => {
+            members.iter().any(|(_name, member)| takes_limit(member))
+        }
+    }
+}
+
+/// Check that the value fields and the limit fields come as a pair (ADR-0213 (i), design D5).
+///
+/// The rule applies when the type does not change. A type change needs both parts, and the
+/// command checks them. A type without a leaf that takes a limit has no limit fields.
+///
+/// # Errors
+///
+/// Returns one line `E-WEB-008` when the request has one part alone. The use case does not run.
+fn check_pair(
+    form: &ParameterForm,
+    definition: &Definition,
+    sent: &SentFields,
+) -> Result<(), WebError> {
+    if !same_type(form, definition) {
+        return Ok(());
+    }
+    let has_values = !sent.values().is_empty();
+    let has_limits = !sent.limits().is_empty();
+    let wants_limits = form
+        .preview
+        .as_ref()
+        .is_some_and(|tree| takes_limit(tree.root()));
+    if (has_values && !has_limits && wants_limits) || (has_limits && !has_values) {
+        return Err(WebError::BadRequest {
+            field: "form",
+            reason: FieldReason::Form,
+        });
+    }
+    Ok(())
 }
 
 /// Build the input of `UpdateParameterDefinition`. `retype` is `None` when the value is kept.
@@ -152,6 +200,7 @@ pub(crate) async fn save(
         Prepared::Answer(answer) => return Ok(answer),
         Prepared::Ready(ready) => *ready,
     };
+    check_pair(&form, &definition, &sent)?;
     let retype = (!keeps_value(&form, &definition, &sent)).then_some((value, limits));
     let input = update_input(&target, key, definition.clone(), retype);
     let result = UpdateParameterDefinition::new(state.identity().app().clone())

@@ -314,3 +314,22 @@ fn a_nesting_count_that_overflows_passes_on_codesys() {
             .is_ok()
     );
 }
+
+#[test]
+fn stored_type_with_long_leaf_path_resolves() {
+    let rows = vec![
+        struct_row(20, "ST_A", &[(&"a".repeat(64), 21)]),
+        struct_row(21, "ST_B", &[(&"b".repeat(64), 22)]),
+        struct_row(22, "ST_C", &[(&"c".repeat(64), INT)]),
+    ];
+    let collected = PlatformTypes::collect(machine(), PLATFORM, StringEncoding::Latin1, {
+        let mut all = seeds();
+        all.extend(rows);
+        all
+    })
+    .unwrap();
+    let tree = TypeTree::resolve(id(20), &collected).unwrap();
+    assert_eq!(tree.longest_leaf_path_bytes(), 195);
+    assert!(tree.check_leaf_path_bytes().is_err());
+    assert_eq!(tree.leaf_count(), 1);
+}

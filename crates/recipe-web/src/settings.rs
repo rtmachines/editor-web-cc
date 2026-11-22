@@ -17,8 +17,10 @@ const DEFAULT_REQUEST_TIMEOUT_SECONDS: u64 = 30;
 const DEFAULT_BODY_READ_TIMEOUT_SECONDS: u64 = 10;
 /// Default of `http.body_limit.form`: 256 KiB.
 const DEFAULT_BODY_LIMIT_FORM: usize = 256 * 1024;
-/// Default of `http.body_limit.value`: 4 MiB (ADR-0039).
-const DEFAULT_BODY_LIMIT_VALUE: usize = 4 * 1024 * 1024;
+/// Default of `http.body_limit.value`: 16 MiB (ADR-0211 (i)).
+const DEFAULT_BODY_LIMIT_VALUE: usize = 16 * 1024 * 1024;
+/// Default of `http.value_body_permits`: 4 requests at the same time (ADR-0211 (m)).
+const DEFAULT_VALUE_BODY_PERMITS: usize = 4;
 /// Default of `http.body_limit.translation`: 64 KiB.
 const DEFAULT_BODY_LIMIT_TRANSLATION: usize = 64 * 1024;
 /// Default of `i18n.translation_langs`: the one language `pl` (ADR-0043).
@@ -52,6 +54,9 @@ pub struct WebSettings {
     pub body_limit_value: usize,
     /// The body limit of a translation (`http.body_limit.translation`).
     pub body_limit_translation: usize,
+    /// The count of value-route requests that wait for, read, or hold a body at the same time
+    /// (`http.value_body_permits`).
+    pub value_body_permits: usize,
     /// The `max-age` of `GET /static/*` (`static.cache_max_age`).
     pub static_cache_max_age: Duration,
     /// The `max-age` of `Strict-Transport-Security` (`http.hsts_max_age`).
@@ -82,6 +87,7 @@ impl Default for WebSettings {
             body_limit_form: DEFAULT_BODY_LIMIT_FORM,
             body_limit_value: DEFAULT_BODY_LIMIT_VALUE,
             body_limit_translation: DEFAULT_BODY_LIMIT_TRANSLATION,
+            value_body_permits: DEFAULT_VALUE_BODY_PERMITS,
             static_cache_max_age: Duration::from_secs(SECONDS_PER_DAY),
             hsts_max_age: Duration::from_secs(DEFAULT_HSTS_MAX_AGE_SECONDS),
             retry_after: Duration::from_secs(DEFAULT_RETRY_AFTER_SECONDS),

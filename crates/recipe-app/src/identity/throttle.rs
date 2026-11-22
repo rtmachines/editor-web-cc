@@ -58,7 +58,7 @@ pub(super) async fn begin_attempt(
     let policy = ctx.settings.throttle;
     let outcome = ctx.attempts.begin_attempt(&key, &policy).await?;
     if let ThrottleDecision::Throttled { retry_after } =
-        LoginThrottle::new(policy).decide(&outcome.count)
+        LoginThrottle::from(policy).decide(&outcome.count)
     {
         return Ok(Gate::Throttled { retry_after });
     }

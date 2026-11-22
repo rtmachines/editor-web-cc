@@ -1,6 +1,6 @@
 # ADR-0180: WCHAR and WSTRING characters on S7
 
-Status: Accepted. Amends ADR-0137 (a) and (b) (the `WCHAR` and `WSTRING` characters on S7). Amends ADR-0120 (a) and (g) (earlier rule set, copy of a base). Amends ADR-0166 (m) to (s) (the checks that `RuleSet::Earlier` skips). Amended by ADR-0201 (item (c): `CodesysIec` and `TwinCat3` get the UCS-2 rule of `WSTRING`)
+Status: Accepted. Amends ADR-0137 (a) and (b) (the `WCHAR` and `WSTRING` characters on S7). Amends ADR-0120 (a) and (g) (earlier rule set, copy of a base). Amends ADR-0166 (m) to (s) (the checks that `RuleSet::Earlier` skips). Amended by ADR-0201 (item (c): `CodesysIec` and `TwinCat3` get the UCS-2 rule of `WSTRING`). Amended by ADR-0210 (items (a), (b): LF and CR at command input only)
 Date: 2026-11-17
 Deciders: project owner
 

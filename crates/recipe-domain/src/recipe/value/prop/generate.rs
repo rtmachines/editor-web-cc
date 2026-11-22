@@ -351,7 +351,7 @@ fn stored_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
                 '\u{FF}'
             };
             prop::char::range('\u{1}', highest)
-                .prop_map(|c| Value::String(c.to_string()))
+                .prop_map(|c| Value::String(without_line_break(c).to_string()))
                 .boxed()
         }
         LeafClass::Duration | LeafClass::Instant => count_leaf(primitive, platform),
@@ -402,8 +402,13 @@ fn numeric_leaf(primitive: Primitive) -> BoxedStrategy<Value> {
         .boxed()
 }
 
+/// Map LF and CR to another character, because a request refuses them (ADR-0210).
+fn without_line_break(c: char) -> char {
+    if matches!(c, '\n' | '\r') { '\u{1}' } else { c }
+}
+
 /// Draw a `STRING` of Latin-1 characters, or a `WSTRING` of the characters of its platform. No
-/// text holds U+0000 (ADR-0137). A `WSTRING` on S7 holds no scalar above U+CFFF (ADR-0180 (b)).
+/// text holds U+0000 (ADR-0137), LF, or CR (ADR-0210). A `WSTRING` on S7 holds no scalar above U+CFFF (ADR-0180 (b)).
 /// A `WSTRING` on CODESYS and TwinCAT holds no scalar above U+FFFF (ADR-0201 (a)).
 ///
 /// A `WSTRING` holds at most half its length in characters, because a character outside the
@@ -429,7 +434,7 @@ fn string_leaf(primitive: Primitive, platform: PlcPlatform) -> BoxedStrategy<Val
         prop::collection::vec(prop::char::range('\u{1}', '\u{FF}'), 0..=length).boxed()
     };
     characters
-        .prop_map(|text| Value::String(text.into_iter().collect()))
+        .prop_map(|text| Value::String(text.into_iter().map(without_line_break).collect()))
         .boxed()
 }
 

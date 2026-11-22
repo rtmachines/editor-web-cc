@@ -20,8 +20,9 @@
 #   4. The checks of ADR-0068 (n) after the end of the recovery: the recovery is complete, exactly one
 #      audit_log row has the chain_seq and the entry_hash of the marker, and the audit chain check
 #      of data-model.md 4.9 passes.
-# A trap stops the scratch server and deletes the scratch directory on each exit. The marker file, the
-# lock file, the directory .pitr-scratch, and every base backup stay.
+# On exit, a trap stops the scratch server if its PID file exists.
+# A failed stop keeps the scratch directory. Otherwise, the trap deletes the directory of this run.
+# The marker file, the lock file, the directory .pitr-scratch, and every base backup stay.
 #
 # Environment. The defaults are the production values. The test script sets the others.
 #   PITR_CI            must be 1
@@ -83,13 +84,13 @@ fail() {
   exit 1
 }
 
-# cleanup stops the scratch server and deletes the scratch directory of this run on each exit.
+# cleanup keeps the scratch directory if the server does not stop.
 cleanup() {
   local status=$?
   trap - EXIT
   if [ -n "$data_dir" ] && [ -f "$data_dir/postmaster.pid" ]; then
     pg_ctl --pgdata="$data_dir" --mode=immediate --wait --timeout="$STOP_TIMEOUT_SECONDS" stop \
-      >/dev/null 2>&1 || true
+      >/dev/null 2>&1 || fail "cannot stop the scratch server of this run"
   fi
   case $scratch in
     "$WAL_DIR/$SCRATCH_NAME"/run.*)

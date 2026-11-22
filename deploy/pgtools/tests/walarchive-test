@@ -108,6 +108,7 @@ case_wal_base_guard_timeline_passed
 case_wal_base_parallel
 case_wal_pitr_gates
 case_wal_pitr_runs
+case_wal_pitr_stop_fails
 bash "$HERE/pitr-start-test" || bad "pitr startup regression tests"
 
 [ "$SKIPPED" -eq 0 ] || printf 'walarchive-test: %d skipped\n' "$SKIPPED"

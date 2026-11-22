@@ -412,12 +412,13 @@ fn member_error(
 /// Resolve the tree of the new struct over the rows and the new row.
 ///
 /// The check finds a cycle through existing structs (`E-PLT-005`) and a tree above a size limit
-/// (`E-PLT-018`). On an S7 platform it also counts the nesting levels (ADR-0179 (d)). It then
+/// (`E-PLT-018`). On an S7 platform it also counts the nesting levels (ADR-0179 (d)). It also
+/// refuses a leaf path above `budget.leaf_path_bytes` (ADR-0211). It then
 /// compares the struct names on each path, so a struct cannot hold an earlier revision of
 /// itself (ADR-0038).
 ///
-/// The S7 nesting error names the struct without its revision, as the scenario of the
-/// requirement "Nesting limit of a type on S7" says.
+/// The S7 nesting error and the leaf path error name the struct without its revision, as the
+/// scenario of the requirement "Nesting limit of a type on S7" says.
 fn check_tree(
     derived: &DerivedTypes,
     (machine, platform, encoding): (MachineId, PlcPlatform, StringEncoding),
@@ -429,6 +430,7 @@ fn check_tree(
     let types = PlatformTypes::collect(machine, platform, encoding, rows)?;
     let tree = TypeTree::resolve(row.id(), &types)?;
     tree.check_s7_nesting(platform)
+        .and_then(|()| tree.check_leaf_path_bytes())
         .map_err(|error| match error {
             PlantError::TypeTooLarge { limit, .. } => PlantError::TypeTooLarge {
                 type_name: name.as_str().to_owned(),

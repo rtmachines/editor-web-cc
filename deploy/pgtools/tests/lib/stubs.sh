@@ -5,6 +5,8 @@ make_stub_date() {
 #!/usr/bin/env bash
 if [ "$*" = "-u +%Y%m%d_%H%M" ] && [ -n "${STUB_TS:-}" ]; then
   echo "$STUB_TS"
+elif [ "$*" = "+%s" ] && [ -n "${STUB_EPOCH:-}" ]; then
+  echo "$STUB_EPOCH"
 else
   exec "$REAL_DATE" "$@"
 fi

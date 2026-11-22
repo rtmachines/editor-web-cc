@@ -187,7 +187,7 @@ Errors. Every failure of this table is `E-PLT-013 DerivedTypeInvalid` with a rea
 
 `DefineUdt` is the one exception. A member whose `TypeExpr` resolves to a type that is not on the platform is `E-PLT-006 MemberTypeNotOnPlatform`, because the member name is the useful detail. Every other consumer of a `TypeExpr` reports `E-PLT-013` for a type that is not on the platform.
 
-A resolved type above a size limit is `E-PLT-018 TypeTooLarge`. The limits are 16 384 leaves (`budget.leaves_per_parameter`), `json.max_depth` levels, and 1024 members of a struct (`type.max_members`). On the S7 platforms, a fourth limit is `type.s7_max_nesting` levels in the Siemens count (ADR-0179). `reliability.md` 7.11 holds the values.
+A resolved type above a size limit is `E-PLT-018 TypeTooLarge`. The limits are 16 384 leaves (`budget.leaves_per_parameter`), `json.max_depth` levels, 1024 members of a struct (`type.max_members`), and `budget.leaf_path_bytes` bytes of a leaf path (ADR-0211). On the S7 platforms, a fifth limit is `type.s7_max_nesting` levels in the Siemens count (ADR-0179). `reliability.md` 7.11 holds the values.
 
 `TypeTree` (value object): the fully resolved tree of one `PlcType`. The domain uses it to check a `ParameterValue`, the `leaf_path` of a `ProcessLimit`, and the S7 layout.
 
@@ -202,7 +202,7 @@ member    := [A-Za-z_][A-Za-z0-9_]{0,63}
 index     := -?[0-9]{1,10}
 ```
 
-The empty path is the parameter itself when the type is a primitive. An index segment has one index per array dimension, at most 3 (Assumption A38). An index value is inside the INTEGER range `-2147483648..=2147483647`. `[*]` means every element of the array at that position. `[*]` never shares a segment with an index.
+The empty path is the parameter itself when the type is a primitive. An index segment has one index per array dimension, at most 3 (Assumption A38). An index value is inside the INTEGER range `-2147483648..=2147483647`. `[*]` means every element of the array at that position. `[*]` never shares a segment with an index. The canonical text of a leaf path has at most `budget.leaf_path_bytes` bytes (`reliability.md` 7.11). `DefineUdt` and `EnsureDerivedType` refuse a longer path with `E-PLT-018` (ADR-0211). A stored type keeps its longer path.
 
 Examples: `.setpoint`, `[3]`, `[1,2]`, `.zones[2].temp_max`, `.zones[*].temp_max`. This grammar is the only definition. `data-model.md` 3.13 and `reliability.md` 4.3 cite it.
 
@@ -256,7 +256,7 @@ A form carries the text of each leaf (ADR-0039). The text of a `Numeric` leaf is
 
 Significant digits (ADR-0117): a `REAL` number has at most 7 significant digits, and an `LREAL` number has at most 15. The count starts at the first digit that is not zero. A number with more digits gives `E-RCP-055 PrecisionExceeded`, and the domain does not round it. The earlier rule set of ADR-0120 (a) allows 28 significant digits for both types.
 
-SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0001..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0001..=U+FFFF` (ADR-0137). On `S7_1200` and `S7_1500`, a `WCHAR` value is in `U+0001..=U+D7FF`, and each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xCFFF` (ADR-0180). On `CodesysIec` and `TwinCat3`, each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xD7FF` or `0xE000..=0xFFFF` (ADR-0201). The earlier rule set of ADR-0120 keeps the rule of ADR-0137 on every platform. On a `Latin1` machine, a `STRING` character is in `U+0001..=U+00FF` (ADR-0137 (b)). On a `Utf8` machine, a `STRING` character is any Unicode scalar except `U+0000` (ADR-0202).
+SQL values (`data-model.md` 3.3): `numeric`, `string`, `bool`, `char`, `duration`, `instant`. A `CHAR` value is one Unicode scalar in `U+0001..=U+00FF`. A `WCHAR` value is one Unicode scalar in `U+0001..=U+FFFF` (ADR-0137). On `S7_1200` and `S7_1500`, a `WCHAR` value is in `U+0001..=U+D7FF`, and each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xCFFF` (ADR-0180). On `CodesysIec` and `TwinCat3`, each UTF-16 code unit of a `WSTRING` value is in `0x0001..=0xD7FF` or `0xE000..=0xFFFF` (ADR-0201). The earlier rule set of ADR-0120 keeps the rule of ADR-0137 on every platform. On a `Latin1` machine, a `STRING` character is in `U+0001..=U+00FF` (ADR-0137 (b)). On a `Utf8` machine, a `STRING` character is any Unicode scalar except `U+0000` (ADR-0202). These ranges apply to a stored value. A value that a command receives also holds no LF (`U+000A`) and no CR (`U+000D`) on every platform (ADR-0210).
 
 Base units (Assumption A43). A `Duration` or `Instant` value is an integer count of the base unit of its type. The domain stores, hashes, and limits this count. The stored and hashed value is the decimal text of the count, so a signed and an unsigned 64-bit range both fit. The domain holds each platform range in code.
 
@@ -525,6 +525,9 @@ Session rules:
 - After 3 failures per `(login, client_ip)` in 15 minutes, an attempt within `2^(n-3)` seconds after the last failure is `LoginThrottled`. The delay is capped at 60 seconds.
 - After 100 failures per `client_ip` in 15 minutes, every attempt from that address is `LoginThrottled`.
 - There is no permanent lockout. `UnlockLogin` (Administrator) clears the counters of one login.
+- `ThrottlePolicy` is the value object of the four values. It has one constructor `ThrottlePolicy::parse(free_failures, delay_cap, window, address_budget)` and no public `new` (ADR-0215).
+- The grammar has three rules. `free_failures` is from 1 to `address_budget` − 1. `delay_cap` is from 1 s to `window`. `window` is from 1 s to 24 h. Each range includes both bounds.
+- A value that breaks the grammar returns `E-IDN-012` (`IdentityError::ThrottlePolicyInvalid { field }`). `field` names the field that breaks the grammar.
 - Order (ADR-0014): the use case takes an Argon2 permit. A permit timeout returns `E-WEB-009`. T1, under the advisory lock of class 1 on the login (`data-model.md` 1.4), counts the failures, inserts the attempt row with `succeeded = false`, and commits.
 - T1 inserts the attempt row only while the per-IP budget is not reached. After that, T1 inserts nothing, and the use case returns `LoginThrottled` from the count alone.
 - When the attempt is throttled, the use case releases the permit and returns `LoginThrottled`. Otherwise it runs the password check and releases the permit.
@@ -561,7 +564,7 @@ State rule for `before` and `after` (the same rule as ADR-0005 and `data-model.m
 - Five actions store a diff object of the changed fields: `ParameterDefinitionUpdated`, `ParameterValueSet`, `LimitsReplaced`, `TranslationUpserted`, and `TypeRevisionRebound`. One exception applies. When `ParameterDefinitionUpdated` replaces a type without a tree, it writes both value sections, also for equal sides (ADR-0195).
 - Every other action stores the full row of the changed entity as JSON, without `password_hash`. This includes `ParameterAdded` and `ParameterRemoved`. A create stores the row in `after`, a delete stores it in `before`, and an update stores it in both.
 - The full row of a parameter holds its limit rows and its translation rows. The full row of a struct holds its member rows (ADR-0029).
-- Three actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`. The actor of `VersionExported` can be an `ExportClient` account (ADR-0109 (ab)).
+- Four actions store a specific state object instead of a row. `UserLoggedIn` and `UserLoggedOut` store `session_ref`. `VersionExported` stores the version id, the schema version, and `content_sha256`. `PlcConnectionExported` stores `machine_id`, `row_version`, the schema version, and the reference number of the recipe (ADR-0154 (j)). The actor of `VersionExported` can be an `ExportClient` account (ADR-0109 (ab)).
 - `VersionApproved` adds `allow_outdated` to the full row.
 
 Migrations. Schema migrations and the seed migration `0004_seed_plc_types.sql` write no audit row. `_sqlx_migrations` is the record of schema and seed changes. A later data migration that changes catalog rows writes one audit row per changed row under `SET ROLE audit_owner`. The row has `actor = None` and `request_id` = the UUID of the migration version (`data-model.md` 5.1 and 10).
@@ -928,7 +931,7 @@ pub fn diff_pairs(pairs: &[DiffPair], trees: &TypeTrees, leaf_rows: u32) -> Diff
 | A22 | Login throttling is a progressive delay per (login, client IP) and a per-IP budget. There is no permanent lockout. An Administrator can unlock a login |
 | A24 | When free space on the data volume is below 5 %, the application enters read-only mode. A failed measurement of the free space also turns the mode on. `Login`, `Logout`, every query, and every export continue. Every other command returns 503 `E-WEB-006`. The only audit actions in read-only mode are `UserLoggedIn`, `UserLoggedOut`, `VersionExported`, `PlcConnectionExported`, and the `SettingChanged` entries of the startup settings comparison. `Login` keeps its `login_attempt` rows and the `security_event` rows of a failed or throttled login, so the login throttle still works. The mode ends above 10 %. Only a measurement that succeeds can end the mode |
 | A25 | One installation serves one production line. The draft's "production line" has no entity |
-| A26 | Size budgets: 16 384 leaves per parameter, 262 144 leaves and 32 768 limit rows per version, 4 000 parameters per version |
+| A26 | Size budgets: 16 384 leaves per parameter, 262 144 leaves and 32 768 limit rows per version, 4 000 parameters per version. A leaf path has at most 128 bytes (`budget.leaf_path_bytes`). |
 | A27 | A reference number matches `[A-Z0-9][A-Z0-9_-]{0,49}`. Input is folded to upper case |
 | A28 | A Draft can be discarded. An Administrator can retire an Approved version without a replacement |
 | A29 | A new UDT revision does not create versions. It marks parameters as outdated. The engineer rebinds them in a new Draft. An approval with outdated parameters needs the request flag `allow_outdated`, and the audit entry records the flag |

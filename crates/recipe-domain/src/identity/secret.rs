@@ -215,7 +215,8 @@ impl fmt::Display for TokenReason {
 pub struct SessionToken([u8; SESSION_TOKEN_BYTES]);
 
 impl SessionToken {
-    /// Build a token from random bytes that the application supplies.
+    /// Build a token from 16 random bytes that the application supplies.
+    /// The operating system random source makes these bytes trusted, as ADR-0214 records.
     #[must_use]
     pub const fn from_bytes(bytes: [u8; SESSION_TOKEN_BYTES]) -> Self {
         Self(bytes)
@@ -289,7 +290,8 @@ impl fmt::Debug for SessionId {
 pub struct CsrfToken([u8; CSRF_TOKEN_BYTES]);
 
 impl CsrfToken {
-    /// Build a token from random bytes that the application supplies.
+    /// Build a token from 32 random bytes that the application supplies.
+    /// The operating system random source makes these bytes trusted, as ADR-0214 records.
     #[must_use]
     pub const fn from_bytes(bytes: [u8; CSRF_TOKEN_BYTES]) -> Self {
         Self(bytes)
