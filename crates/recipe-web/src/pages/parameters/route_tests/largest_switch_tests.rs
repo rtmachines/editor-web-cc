@@ -230,7 +230,7 @@ const FIELDS_PAGE_PL: Pin = Pin {
     name: "largest_switch_fields_page_pl",
     len: 22_518_742,
     sha256: "2493e8ea459f09e65560812efc3328bd28aa9f0b2b9801758315093d050de3b5",
-    request_peak: 218_481_018,
+    request_peak: 208_481_018,
     render_peak: 106_203_306,
 };
 
