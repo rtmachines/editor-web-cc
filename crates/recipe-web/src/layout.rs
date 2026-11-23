@@ -333,6 +333,17 @@ pub(crate) struct SessionFrame {
 }
 
 impl SessionFrame {
+    /// Build session parts without a request, for the tests of the refused page. The
+    /// navigation is empty.
+    #[cfg(test)]
+    pub(crate) fn for_test(csrf_token: &str, user_login: &str) -> Self {
+        Self {
+            nav: Vec::new(),
+            csrf_token: csrf_token.to_owned(),
+            user_login: user_login.to_owned(),
+        }
+    }
+
     /// Copy the session parts of `request`, or return `None` when the request has no session.
     pub(crate) fn of(texts: Texts<'_>, request: &PageRequest) -> Option<Self> {
         let auth = request.auth().ok()?;

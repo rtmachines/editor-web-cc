@@ -13,10 +13,15 @@ const CHOICES: [&str; 5] = ["[*]", "[1]", "[2]", "[3]", "[4]"];
 
 /// Build one limit row of texts.
 fn limit(path: &str) -> LimitTexts {
+    bounded(path, "0", "1")
+}
+
+/// Build one limit row of the bounds `min` to `max`.
+fn bounded(path: &str, min: &str, max: &str) -> LimitTexts {
     LimitTexts {
         path: LeafPath::parse(path).unwrap(),
-        min: "0".to_owned(),
-        max: "1".to_owned(),
+        min: min.to_owned(),
+        max: max.to_owned(),
         max_length: String::new(),
     }
 }
@@ -79,23 +84,38 @@ fn grid_index_levels_the_mode_check_does_not_scan_every_row_for_each_level() {
     assert!(set.checks() <= leaves, "{} checks", set.checks());
 }
 
+/// Assert the mode of each level of `cases` for the limit rows `rows` of the nested tree.
+fn assert_modes(rows: Vec<LimitTexts>, cases: &[(&str, bool)]) {
+    let set = LimitSet::new(&nested_tree(), rows, None);
+    for (level, each) in cases {
+        assert_eq!(set.is_each(level), *each, "level: {level}");
+    }
+}
+
 #[test]
 fn grid_index_levels_nested_all_rows_and_index_rows_give_the_mode_of_each_level() {
-    let rows = vec![limit("[*].x[2].w[*].v[1]"), limit("[3].x[*].w[1].v[*]")];
-    let set = LimitSet::new(&nested_tree(), rows, None);
+    let rows = vec![limit("[*].x[2].w[*].v[1]")];
     let cases = [
-        ("[*]", true),
+        ("[*]", false),
         ("[*].x[*]", true),
-        ("[3].x[*]", false),
-        ("[3].x[*].w[*]", true),
         ("[*].x[2].w[*]", false),
         ("[*].x[2].w[*].v[*]", true),
+        ("[1].x[*]", false),
+    ];
+    assert_modes(rows, &cases);
+}
+
+#[test]
+fn grid_index_levels_nested_index_rows_below_an_outer_index_give_the_mode_of_each_level() {
+    let rows = vec![limit("[3].x[*].w[1].v[*]")];
+    let cases = [
+        ("[*]", true),
+        ("[3].x[*]", false),
+        ("[3].x[*].w[*]", true),
         ("[3].x[*].w[1].v[*]", false),
         ("[1].x[*]", false),
     ];
-    for (level, each) in cases {
-        assert_eq!(set.is_each(level), each, "level: {level}");
-    }
+    assert_modes(rows, &cases);
 }
 
 #[test]
@@ -126,4 +146,71 @@ fn grid_index_levels_a_join_removes_the_mode_of_the_joined_rows() {
     for (level, each) in cases {
         assert_eq!(set.is_each(level), each, "level: {level}");
     }
+}
+
+#[test]
+fn grid_index_levels_a_switch_of_an_inner_type_level_gives_the_mode_of_each_array_level() {
+    let mut rows = vec![limit("[1].x[1].w[*].v[*]")];
+    rows.extend((1..=4).map(|index| limit(&format!("[2].x[{index}].w[*].v[*]"))));
+    let toggle = LeafPath::parse("[*].x[*]").unwrap();
+    let set = LimitSet::new(&nested_tree(), rows, Some(&toggle));
+    let cases = [
+        ("[*]", true),
+        ("[1].x[*]", false),
+        ("[2].x[*]", false),
+        ("[2].x[*].w[*]", false),
+        ("[2].x[1].w[*]", false),
+    ];
+    for (level, each) in cases {
+        assert_eq!(set.is_each(level), each, "level: {level}");
+    }
+    assert!(set.get("[2].x[*].w[*].v[*]").is_some());
+    assert!(set.get("[1].x[*].w[*].v[*]").is_none());
+    assert_eq!(set.unequal_count("[*].x[*]"), 1);
+    assert_eq!(set.unequal_count("[*]"), 0);
+}
+
+/// The bound of the row visits of a switch: two passes over the 2^14 limit rows.
+const VISIT_BOUND: usize = 2 * (1 << 14);
+
+/// Resolve `ARRAY[1..1024] OF ARRAY[1..16] OF INT`. The tree has 2^14 leaves and 2^10 array
+/// levels at the type level `[*][*]`.
+fn wide_tree() -> TypeTree {
+    let mut kit = Kit::new();
+    let int = kit.primitive(Primitive::Int);
+    let inner = kit.array(int, &[(1, 16)]);
+    let root = kit.array(inner, &[(1, 1024)]);
+    kit.tree(root)
+}
+
+#[test]
+fn grid_index_levels_a_switch_back_of_a_type_level_makes_at_most_two_visits_for_each_row() {
+    let rows = (1..=1024)
+        .flat_map(|outer| (1..=16).map(move |inner| (outer, inner)))
+        .map(|(outer, inner)| {
+            let max = if (outer, inner) == (5, 3) { 99 } else { outer };
+            bounded(&format!("[{outer}][{inner}]"), "0", &max.to_string())
+        })
+        .collect();
+    let toggle = LeafPath::parse("[*][*]").unwrap();
+    let set = LimitSet::new(&wide_tree(), rows, Some(&toggle));
+    assert_eq!(set.get("[7][*]").map(|row| row.max.as_str()), Some("7"));
+    assert!(set.get("[7][3]").is_none());
+    assert!(set.get("[5][*]").is_none());
+    assert_eq!(set.unequal_count("[*][*]"), 1);
+    assert!(!set.is_each("[7][*]"));
+    assert!(set.visits() <= VISIT_BOUND, "{} visits", set.visits());
+}
+
+#[test]
+fn grid_index_levels_a_switch_to_a_limit_per_element_of_a_type_level_makes_at_most_two_visits() {
+    let rows = (1..=1024)
+        .map(|outer| bounded(&format!("[{outer}][*]"), "0", &outer.to_string()))
+        .collect();
+    let toggle = LeafPath::parse("[*][*]").unwrap();
+    let set = LimitSet::new(&wide_tree(), rows, Some(&toggle));
+    assert_eq!(set.get("[7][16]").map(|row| row.max.as_str()), Some("7"));
+    assert!(set.get("[7][*]").is_none());
+    assert!(set.is_each("[7][*]"));
+    assert!(set.visits() <= VISIT_BOUND, "{} visits", set.visits());
 }

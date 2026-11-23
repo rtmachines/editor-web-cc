@@ -1,6 +1,6 @@
 # ADR-0039: Form of a parameter value
 
-Status: Accepted. Amended by ADR-0045 (groups of a nested array in (l)). Amended by ADR-0138 (item (b): the answer to a bad key has one line). Amended by ADR-0195 (item (i): the page and the table of a type that does not resolve). Amended by ADR-0211 (item (g): 16 MiB from the budgets)
+Status: Accepted. Amended by ADR-0045 (groups of a nested array in (l)). Amended by ADR-0138 (item (b): the answer to a bad key has one line). Amended by ADR-0195 (item (i): the page and the table of a type that does not resolve). Amended by ADR-0211 (item (g): 16 MiB from the budgets). Amended by ADR-0223 (item (k): one mode row for each type level)
 Date: 2026-10-15
 Deciders: project owner
 

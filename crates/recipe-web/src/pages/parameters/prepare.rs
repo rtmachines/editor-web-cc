@@ -13,7 +13,6 @@ use recipe_domain::recipe::{LeafTexts, LimitList};
 
 use super::definition::{Checked, Definition, check};
 use super::fields::SentFields;
-use super::form_view::Shown;
 use super::reply::{Ctx, load_shown, refuse, sent_shown, show_form};
 use super::request_type::request_type_expr;
 use crate::error::{FieldError, WebError};
@@ -24,8 +23,8 @@ pub(crate) struct Ready {
     pub(crate) form: ParameterForm,
     /// The definition fields.
     pub(crate) definition: Definition,
-    /// What the form shows with the sent texts. An error answer of the command reuses it.
-    pub(crate) shown: Shown,
+    /// The type of the preview tree. `failed` builds the sent grid from it after a refusal.
+    pub(crate) previewed: Option<TypeExpr>,
     /// The texts of the leaves of the value.
     pub(crate) value: LeafTexts,
     /// The limit rows.
@@ -111,7 +110,32 @@ fn leaf_texts(
     }
 }
 
+/// Build the error answer of a save that a check refused, with the grid of the sent texts.
+///
+/// `limit_error` is true when the limit rows had a bad field. The grid then gives the input of the
+/// line of each bad maximum length.
+fn refuse_checked(
+    ctx: Ctx<'_>,
+    (form, sent, previewed): (&ParameterForm, &SentFields, Option<&TypeExpr>),
+    mut lines: Vec<FieldError>,
+    limit_error: bool,
+) -> WebError {
+    let shown = sent_shown(ctx, form, sent, previewed);
+    if limit_error && let Err(bad) = sent.limit_list(shown.grid.as_ref()) {
+        lines.extend(bad);
+    }
+    match NonEmpty::try_from(lines) {
+        Ok(lines) => refuse(ctx, form, shown, lines),
+        Err(_empty) => WebError::Internal {
+            request_id: ctx.request.request_id(),
+        },
+    }
+}
+
 /// Run the form query with the preview of `type_expr` and build the input of the command.
+///
+/// A save that passes every check builds no grid (ADR-0223 (p)). The limit rows parse without the
+/// grid, because the grid only names the input of a line.
 async fn ready(
     ctx: Ctx<'_>,
     sent: &SentFields,
@@ -119,24 +143,23 @@ async fn ready(
     type_expr: TypeExpr,
 ) -> Result<Ready, WebError> {
     let loaded = load_shown(ctx, Some(type_expr), None).await?;
-    let shown = sent_shown(ctx, &loaded.form, sent, loaded.previewed.as_ref());
     let mut lines = checked.lines;
     lines.extend(loaded.line);
     let value = leaf_texts(&loaded.form, sent, &mut lines)?;
-    let limits = sent.limit_list().map_err(|bad| lines.extend(bad)).ok();
-    match (
-        NonEmpty::try_from(lines),
-        (checked.definition, value, limits),
-    ) {
-        (Ok(lines), _parts) => Err(refuse(ctx, &loaded.form, shown, lines)),
-        (Err(_empty), (Some(definition), Some(value), Some(limits))) => Ok(Ready {
+    let limits = sent.limit_list(None);
+    if !lines.is_empty() || limits.is_err() {
+        let parts = (&loaded.form, sent, loaded.previewed.as_ref());
+        return Err(refuse_checked(ctx, parts, lines, limits.is_err()));
+    }
+    match (checked.definition, value, limits) {
+        (Some(definition), Some(value), Ok(limits)) => Ok(Ready {
             form: loaded.form,
             definition,
-            shown,
+            previewed: loaded.previewed,
             value,
             limits,
         }),
-        (Err(_empty), _missing) => Err(WebError::Internal {
+        _missing => Err(WebError::Internal {
             request_id: ctx.request.request_id(),
         }),
     }

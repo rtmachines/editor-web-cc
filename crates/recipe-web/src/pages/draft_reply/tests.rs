@@ -11,10 +11,11 @@ use recipe_app::ports::NonEmpty;
 use recipe_domain::audit::RequestId;
 use uuid::Uuid;
 
-use super::{refused, with_form};
+use super::{refused, refused_exact, with_form};
 use crate::WebState;
 use crate::error::{FieldError, FieldReason, FormErrors, RenderedForm, WebError};
 use crate::i18n::Lang;
+use crate::pages::parameters::big_grid_kit::big_fragment;
 use crate::pages::{PageRequest, Texts};
 use crate::routes::{Access, RouteEntry, assemble};
 use crate::test_support::{PEER, Reply, get_with, state};
@@ -60,6 +61,24 @@ async fn refuse(
     }))
 }
 
+/// Answer the capacity and the length of the form that `refused_exact` renders (task 4.1).
+async fn probe_exact(
+    State(state): State<WebState>,
+    request: PageRequest,
+) -> Result<String, WebError> {
+    let lang = request.lang();
+    let error = refused_exact(&state, &request, tag_line(), |_errors| {
+        big_fragment(Texts::new(state.bundles(), lang), true)
+    });
+    let WebError::Fields {
+        form: Some(form), ..
+    } = error
+    else {
+        return Err(error);
+    };
+    Ok(format!("{} {}", form.capacity(), form.as_str().len()))
+}
+
 async fn broken(
     State(state): State<WebState>,
     request: PageRequest,
@@ -91,6 +110,7 @@ fn router() -> Router {
         route("/test/refused", get(refuse)),
         route("/test/broken", get(broken)),
         route("/test/saved", get(saved)),
+        route("/test/probe-exact", get(probe_exact)),
     ];
     assemble(state(), rows, Router::new()).layer(MockConnectInfo(PEER))
 }
@@ -247,4 +267,14 @@ fn draft_reply_a_rendered_form_must_open_with_a_form_tag_with_an_id_and_the_oob_
     let page = form(&state, Lang::En, false, FormErrors::default());
     let result = RenderedForm::from_template(&page, RequestId::from(Uuid::nil()));
     assert!(matches!(result, Err(WebError::Internal { .. })));
+}
+
+#[tokio::test]
+async fn render_exact_refused_exact_gives_a_form_with_a_capacity_equal_to_its_length() {
+    let reply = ask("/test/probe-exact", true).await;
+
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let (capacity, length) = reply.body.split_once(' ').unwrap();
+    assert_eq!(capacity, length, "capacity and length of the form");
+    assert!(length.parse::<usize>().unwrap() >= 1024 * 1024, "{length}");
 }

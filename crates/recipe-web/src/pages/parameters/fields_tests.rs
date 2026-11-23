@@ -341,7 +341,7 @@ fn fields_a_blank_limit_row_is_not_a_limit() {
         ("limits[2].min", ""),
     ])
     .unwrap();
-    let list = sent.limit_list().unwrap();
+    let list = sent.limit_list(None).unwrap();
     let rows: Vec<(String, Option<&str>, Option<&str>)> = list
         .rows()
         .iter()
@@ -369,7 +369,7 @@ fn fields_every_bad_maximum_length_gets_a_line_under_its_input() {
         ("limits[3].max_length", "0"),
     ])
     .unwrap();
-    let lines = sent.limit_list().err().unwrap();
+    let lines = sent.limit_list(None).err().unwrap();
     let targets: Vec<Option<&str>> = lines.iter().map(|line| line.target()).collect();
     assert_eq!(
         targets,
@@ -391,7 +391,7 @@ fn fields_two_limit_rows_of_one_level_with_every_element_and_an_index_are_a_line
         ("limits[1].min", "1"),
     ])
     .unwrap();
-    let lines = sent.limit_list().err().unwrap();
+    let lines = sent.limit_list(None).err().unwrap();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines.first().unwrap().target(), None);
 }
@@ -405,12 +405,22 @@ fn fields_the_button_show_value_fields_sends_one() {
 
 #[test]
 fn fields_the_limit_mode_names_one_array_level() {
-    for level in ["[*]", ".zones[*]", "[*].ramps[*]", "[1].ramps[*]"] {
+    for level in ["[*]", ".zones[*]", "[*].ramps[*]", "[*][*]"] {
         let sent = read_form(&[("limit_mode", level)]).unwrap();
         assert_eq!(sent.limit_mode(), Some(&path(level)), "{level}");
     }
     assert_eq!(read_form(&[]).unwrap().limit_mode(), None);
-    for bad in ["", "[1]", ".zones", "x", "[*].a"] {
+    for bad in [
+        "",
+        "[1]",
+        ".zones",
+        "x",
+        "[*].a",
+        "[1].ramps[*]",
+        "[1][*]",
+        ".zones[2].ramps[*]",
+        "[1,2][*]",
+    ] {
         assert_bad(
             read_form(&[("limit_mode", bad)]),
             "limit_mode",

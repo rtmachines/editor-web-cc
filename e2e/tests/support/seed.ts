@@ -40,6 +40,13 @@ const STRUCT_VALUES: Readonly<Record<string, string>> = {
   'value.gain': '2.5',
 };
 
+/** The type of the nested array `NEST`: an outer array of two arrays of three elements. */
+const NEST_TYPE = 'ARRAY[1..2] OF ARRAY[1..3] OF INT';
+/** The value of each element of `NEST`. It lies inside the limit of its leaf. */
+const NEST_VALUE = '7';
+/** The limit that every leaf of `NEST` gets. */
+const NEST_LIMIT = { min: '0', max: '100' } as const;
+
 /** One seeded parameter: its tag and the path of its edit page. */
 export interface SeededParameter {
   readonly tag: string;
@@ -62,6 +69,8 @@ export interface SeededData {
   readonly array: SeededParameter;
   /** The parameter with a primitive type. */
   readonly primitive: SeededParameter;
+  /** The parameter with a nested array type and one limit on each leaf: two type levels. */
+  readonly nest: SeededParameter;
 }
 
 /** The fields and the texts of a form, as the browser would send them. */
@@ -164,6 +173,21 @@ function hiddenLimitPaths(html: string): FormFields {
   return fields;
 }
 
+/**
+ * Builds one limit row for each value field, for example `value[1][2]` gives the leaf `[1][2]`.
+ * The rows make a limit on each element, so the grid shows a limit for each element.
+ */
+function limitRowsOfElements(_shownBody: string, valueFields: readonly string[]): FormFields {
+  const fields: FormFields = {};
+  const elements = valueFields.filter((name) => name.startsWith('value['));
+  elements.forEach((name, index) => {
+    fields[`limits[${index}].leaf_path`] = name.replace(/^value/, '');
+    fields[`limits[${index}].min`] = NEST_LIMIT.min;
+    fields[`limits[${index}].max`] = NEST_LIMIT.max;
+  });
+  return fields;
+}
+
 /** Adds one parameter in the two steps of the form: show the value fields, then save. */
 async function addParameter(
   client: SeedClient,
@@ -172,6 +196,7 @@ async function addParameter(
   type: string,
   valueOf: (fieldName: string) => string,
   known: ReadonlySet<string>,
+  limitsOf: (shownBody: string, valueFields: readonly string[]) => FormFields = hiddenLimitPaths,
 ): Promise<SeededParameter> {
   const form = await client.get(`${draftPath}/parameters/new?unit=${MAIN_UNIT_PATH}`);
   const definition: FormFields = {
@@ -185,13 +210,14 @@ async function addParameter(
   };
   const shown = await client.post(`${draftPath}/parameters`, { ...definition, fields: '1' });
   const values: FormFields = {};
-  for (const name of valueFieldNames(shown.body)) {
+  const valueFields = valueFieldNames(shown.body);
+  for (const name of valueFields) {
     values[name] = valueOf(name);
   }
   await client.post(`${draftPath}/parameters`, {
     ...definition,
     ...values,
-    ...hiddenLimitPaths(shown.body),
+    ...limitsOf(shown.body, valueFields),
     value_type: type,
   });
   const page = await client.get(draftPath);
@@ -204,7 +230,7 @@ async function addParameter(
 }
 
 /**
- * Makes a machine, a UDT, a recipe with a draft, and three parameters through the forms.
+ * Makes a machine, a UDT, a recipe with a draft, and four parameters through the forms.
  * The names hold a random number, so two runs never collide in the in-memory store.
  */
 async function seedWithClient(client: SeedClient): Promise<SeededData> {
@@ -260,6 +286,15 @@ async function seedWithClient(client: SeedClient): Promise<SeededData> {
     () => '7',
     new Set([struct.path, array.path]),
   );
+  const nest = await addParameter(
+    client,
+    draftPath,
+    'NEST',
+    NEST_TYPE,
+    () => NEST_VALUE,
+    new Set([struct.path, array.path, primitive.path]),
+    limitRowsOfElements,
+  );
   return {
     machineCode,
     recipeReference,
@@ -269,6 +304,7 @@ async function seedWithClient(client: SeedClient): Promise<SeededData> {
     struct,
     array,
     primitive,
+    nest,
   };
 }
 

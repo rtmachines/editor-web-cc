@@ -5,6 +5,7 @@
 //! `#error-panel`, and the clean form out of band with the stored texts and the new `row_version`.
 //! A save without HTMX gets `303` to the parameter page.
 
+use askama::Template;
 use axum::extract::rejection::{PathRejection, RawFormRejection};
 use axum::extract::{Path, RawForm, State};
 use axum::response::{Html, Response};
@@ -13,6 +14,7 @@ use recipe_app::recipe::{
     DraftOutput, ParameterForm, RetypeInput, UpdateParameterDefinition,
     UpdateParameterDefinitionInput,
 };
+use recipe_domain::audit::RequestId;
 use recipe_domain::plant::{LeafClass, TypeNode};
 use recipe_domain::recipe::{LeafTexts, LimitList, ParameterKey, ValueInput};
 
@@ -25,9 +27,9 @@ use super::prepare::{Prepared, Ready, prepare};
 use super::reply::{Ctx, Target, failed, load};
 use super::summary::{SummaryFragment, SummaryView};
 use super::translations::{TranslationsBase, TranslationsBaseFragment};
-use crate::error::{FieldReason, FormErrors, WebError};
+use crate::error::{FieldReason, FormErrors, WebError, counted_len};
 use crate::pages::draft_reply::{success, with_change_number, with_form};
-use crate::pages::render::{render, see_other_path};
+use crate::pages::render::see_other_path;
 use crate::pages::request::PageRequest;
 use crate::pages::saved_notice::saved_notice;
 use crate::state::WebState;
@@ -116,6 +118,36 @@ fn update_input(
     }
 }
 
+/// Join the summary, the clean form, and the base block into the body of a saved answer.
+///
+/// The function solves one problem: the clean form can be 1 MiB, and `push_str` doubles a buffer.
+/// It counts the three parts, reserves their sum, and renders each part into that buffer, so the
+/// capacity equals the length (design D3, ADR-0223). It takes built templates, so it does no I/O.
+///
+/// # Errors
+///
+/// Returns `WebError::Internal` (`E-WEB-010`) when a part cannot render or the form fails the
+/// check of `with_form`.
+pub(super) fn saved_body<S: Template, F: Template, B: Template>(
+    (summary, form, base): (&S, &F, &B),
+    request_id: RequestId,
+) -> Result<Html<String>, WebError> {
+    let defect = |_failed: askama::Error| WebError::Internal { request_id };
+    let length = [counted_len(summary), counted_len(form), counted_len(base)]
+        .into_iter()
+        .try_fold(0_usize, |sum, part| {
+            part.map_err(defect).and_then(|bytes| {
+                sum.checked_add(bytes)
+                    .ok_or(WebError::Internal { request_id })
+            })
+        })?;
+    let mut text = String::with_capacity(length);
+    summary.render_into(&mut text).map_err(defect)?;
+    let Html(mut text) = with_form(Html(text), form, request_id)?;
+    base.render_into(&mut text).map_err(defect)?;
+    Ok(Html(text))
+}
+
 /// Answer a valid save: the summary and the clean form, or `303` to the page without HTMX.
 ///
 /// The clean form reads the parameter again, so it shows the canonical texts of the store and not
@@ -134,8 +166,10 @@ async fn saved(
     let t = ctx.texts();
     let sentence = t.with_arg("parameter-saved", "tag", &definition.tag);
     let toast = with_change_number(t, &sentence, &output);
-    let summary = SummaryView::saved(key, definition, toast);
-    let body = render(&SummaryFragment { t, summary }, request_id)?;
+    let summary = SummaryFragment {
+        t,
+        summary: SummaryView::saved(key, definition, toast),
+    };
     // The command is committed. A failed read gives the notice and not an error (ADR-0163).
     let stored = match read_parameter(ctx).await {
         Ok(stored) => stored,
@@ -150,15 +184,14 @@ async fn saved(
     let csrf = request.csrf_token();
     let place = (clean, Place::OutOfBand);
     let view = ParameterFormView::new(t, form, place, csrf, FormErrors::default());
-    let body = with_form(body, &ParameterFormFragment { t, form: view }, request_id)?;
+    let form = ParameterFormFragment { t, form: view };
     // The base block of the translations follows the new English texts (ADR-0111 (i)). No row.
     let base = TranslationsBase {
         name_en: definition.name_en.to_string(),
         description_en: definition.description_en.to_string(),
     };
-    let Html(mut text) = body;
-    text.push_str(&render(&TranslationsBaseFragment { t, base }, request_id)?.0);
-    let body = Html(text);
+    let base = TranslationsBaseFragment { t, base };
+    let body = saved_body((&summary, &form, &base), request_id)?;
     success(&output, body, request_id)
 }
 
@@ -193,7 +226,7 @@ pub(crate) async fn save(
     let Ready {
         form,
         definition,
-        shown,
+        previewed,
         value,
         limits,
     } = match prepare(ctx, &sent).await? {
@@ -208,6 +241,6 @@ pub(crate) async fn save(
         .await;
     match result {
         Ok(output) => saved(ctx, (&form, &definition), (key, output)).await,
-        Err(error) => Err(failed(ctx, &form, shown, error).await),
+        Err(error) => Err(failed(ctx, (&form, &sent, previewed.as_ref()), error).await),
     }
 }

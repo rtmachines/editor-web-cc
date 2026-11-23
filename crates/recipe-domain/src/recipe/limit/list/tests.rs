@@ -50,6 +50,17 @@ fn different_prefixes_with_all_and_index_are_allowed() {
 }
 
 #[test]
+fn limit_list_star_and_index_per_array_level() {
+    let mixed = vec![row("[1][*]"), row("[2][1]")];
+    assert!(LimitList::parse(mixed).is_ok());
+    let same_level = vec![row("[1][*]"), row("[1][1]")];
+    assert_eq!(
+        LimitList::parse(same_level),
+        Err(LimitListReason::StarAndIndex)
+    );
+}
+
+#[test]
 fn two_all_elements_rows_at_one_level_are_allowed() {
     let rows = vec![row(".zones[*].a"), row(".zones[*].b")];
     assert!(LimitList::parse(rows).is_ok());

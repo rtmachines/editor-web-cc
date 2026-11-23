@@ -204,3 +204,22 @@ test.describe('jump link after the leaf grid', () => {
     });
   }
 });
+
+test.describe('mode rows of a nested array', () => {
+  /** The type levels of `ARRAY[1..2] OF ARRAY[1..3] OF INT`: the outer array and its elements. */
+  const TYPE_LEVELS = 2;
+  /** The leaves of `NEST`: two arrays of three elements. */
+  const LEAVES = 6;
+
+  test('the grid of NEST has one mode button for each type level', async ({ page, seed }) => {
+    await page.goto(seed.nest.path);
+    await expect(
+      page.locator('.leaf-grid input[name^="value["]'),
+      'the grid has one value input for each leaf',
+    ).toHaveCount(LEAVES);
+    await expect(
+      page.locator('.leaf-grid button[name="limit_mode"]'),
+      'the grid has one mode button for each type level, not for each array level',
+    ).toHaveCount(TYPE_LEVELS);
+  });
+});

@@ -8,7 +8,7 @@ use axum::response::{Html, IntoResponse, Response};
 use recipe_domain::audit::RequestId;
 use recipe_domain::timestamp::Timestamp;
 
-use crate::error::WebError;
+use crate::error::{WebError, render_counted};
 use crate::pages::path_values::Page;
 
 /// Render a template. A failure is a defect of the server and gives `E-WEB-010`.
@@ -21,6 +21,25 @@ pub(crate) fn render<T: Template>(
     request_id: RequestId,
 ) -> Result<Html<String>, WebError> {
     page.render()
+        .map(Html)
+        .map_err(|_failed| WebError::Internal { request_id })
+}
+
+/// Render a template into a buffer of the exact length of its output (design D3, ADR-0223).
+///
+/// The function solves one problem: `render` grows the `String` by doubling, so a page of 1 MiB
+/// holds a buffer that is up to twice as large for the whole life of the answer. This function
+/// renders twice. The first pass only counts the bytes. The second pass fills a buffer of that
+/// length, so the capacity equals the length. A failure gives `E-WEB-010`.
+///
+/// # Errors
+///
+/// Returns `WebError::Internal` when the template cannot render.
+pub(crate) fn render_exact<T: Template>(
+    page: &T,
+    request_id: RequestId,
+) -> Result<Html<String>, WebError> {
+    render_counted(page)
         .map(Html)
         .map_err(|_failed| WebError::Internal { request_id })
 }
@@ -178,5 +197,7 @@ fn redirect(location: HeaderValue, cookies: impl IntoIterator<Item = HeaderValue
     response
 }
 
+#[cfg(test)]
+mod exact_tests;
 #[cfg(test)]
 mod tests;

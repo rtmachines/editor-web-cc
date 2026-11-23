@@ -87,6 +87,7 @@ fn grid_fault_of_a_value_names_the_value_input_and_of_a_limit_its_limit_input() 
             LeafInput::Value => "value-0",
             LeafInput::Limit => "limits-0-min",
             LeafInput::LimitMax => "limits-0-max",
+            LeafInput::LimitMaxLength => "limits-0-max_length",
         };
         assert_eq!(view.input_of(&fault), Some(want.to_owned()), "{fault}");
     }

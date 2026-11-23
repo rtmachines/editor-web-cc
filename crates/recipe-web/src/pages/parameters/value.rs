@@ -5,9 +5,10 @@
 //! routes answer the read-only limit rows. The page holds no form for them, so an error answer
 //! lists its lines in `#error-panel` and swaps no form.
 
+use askama::Template;
 use axum::extract::rejection::{PathRejection, QueryRejection, RawFormRejection};
 use axum::extract::{Path, Query, RawForm, State};
-use axum::response::{IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Response};
 use recipe_app::auth::ParameterFormPurpose;
 use recipe_app::error::AppError;
 use recipe_app::ports::NonEmpty;
@@ -15,6 +16,7 @@ use recipe_app::recipe::{
     DraftOutput, GetLimits, ParameterRef, ReplaceLimits, ReplaceLimitsInput, SetParameterValue,
     SetParameterValueInput,
 };
+use recipe_domain::audit::RequestId;
 use recipe_domain::recipe::ValueInput;
 
 use super::definition::row_version;
@@ -25,7 +27,7 @@ use super::page::{NoQuery, no_query, parameter_page, read_parameter};
 use super::path_parameter;
 use super::remove::toast_html;
 use super::reply::{Ctx, Target, command_lines, load, missing_key};
-use crate::error::{FieldError, WebError};
+use crate::error::{FieldError, WebError, counted_len};
 use crate::pages::draft_reply::{conflict, success, with_change_number};
 use crate::pages::hrefs::parameter_href;
 use crate::pages::render::render;
@@ -88,6 +90,32 @@ fn or_saved_notice(
     )
 }
 
+/// Join the fragment of the grid and the toast into the body of the answer of a saved value.
+///
+/// The function solves one problem: the grid can be 1 MiB, and `push_str` of the toast doubles a
+/// buffer. It counts the fragment, adds the length of the built toast, and reserves that sum, so
+/// the capacity equals the length (design D3, ADR-0223). The caller builds the toast first, so its
+/// length is known before the fragment renders.
+///
+/// # Errors
+///
+/// Returns `WebError::Internal` (`E-WEB-010`) when the fragment cannot render.
+pub(super) fn values_body(
+    fragment: &GridValuesFragment<'_>,
+    toast: &str,
+    request_id: RequestId,
+) -> Result<Html<String>, WebError> {
+    let defect = |_failed: askama::Error| WebError::Internal { request_id };
+    let length = counted_len(fragment)
+        .map_err(defect)?
+        .checked_add(toast.len())
+        .ok_or(WebError::Internal { request_id })?;
+    let mut text = String::with_capacity(length);
+    fragment.render_into(&mut text).map_err(defect)?;
+    text.push_str(toast);
+    Ok(Html(text))
+}
+
 /// Read the parameter again and answer its read-only grid with the new `row_version`.
 async fn values_answer(ctx: Ctx<'_>, output: &DraftOutput) -> Result<Response, WebError> {
     let view = read_parameter(ctx).await?;
@@ -96,9 +124,9 @@ async fn values_answer(ctx: Ctx<'_>, output: &DraftOutput) -> Result<Response, W
     let t = ctx.texts();
     let tag = view.parameter.tag.to_string();
     let grid = grid_of(t, texts, ctx.state.settings().form_array_chunk, &tag);
-    let mut body = render(&GridValuesFragment { t, view: &grid }, request_id)?;
     let sentence = with_change_number(t, &t.with_arg("value-saved", "tag", &tag), output);
-    body.0.push_str(&toast_html(sentence, true, request_id)?);
+    let toast = toast_html(sentence, true, request_id)?;
+    let body = values_body(&GridValuesFragment { t, view: &grid }, &toast, request_id)?;
     success(output, body, request_id)
 }
 
@@ -214,7 +242,7 @@ pub(crate) async fn replace_limits(
     let sent = read_form(form, FieldSet::Limits)?;
     let expected_row_version = sent_row_version(&sent)?;
     let limits = sent
-        .limit_list()
+        .limit_list(None)
         .map_err(|lines| match NonEmpty::try_from(lines) {
             Ok(lines) => lines_error(lines),
             Err(_empty) => WebError::Internal {

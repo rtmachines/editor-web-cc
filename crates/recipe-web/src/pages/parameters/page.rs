@@ -25,7 +25,7 @@ use crate::error::{FormErrors, LineView, WebError};
 use crate::layout::{Layout, NavTarget};
 use crate::pages::hrefs::parameter_href;
 use crate::pages::path_values::query_values;
-use crate::pages::render::render;
+use crate::pages::render::render_exact;
 use crate::pages::request::PageRequest;
 use crate::state::WebState;
 
@@ -211,7 +211,7 @@ pub(crate) async fn parameter_page(ctx: Ctx<'_>) -> Result<Response, WebError> {
         version_href: ctx.target.version_href(),
         version_text: version_text(ctx),
     };
-    Ok(render(&page, ctx.request.request_id())?.into_response())
+    Ok(render_exact(&page, ctx.request.request_id())?.into_response())
 }
 
 /// Return the address of the parameter page of `ctx`.

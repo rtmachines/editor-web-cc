@@ -58,11 +58,19 @@ fn path_parameter(
 }
 
 #[cfg(test)]
+pub(crate) mod big_grid_kit;
+#[cfg(test)]
 mod fields_tests;
+#[cfg(test)]
+mod grid_builds_tests;
 #[cfg(test)]
 mod grid_jump_tests;
 #[cfg(test)]
 mod grid_tests;
+#[cfg(test)]
+mod mixed_budget_tests;
+#[cfg(test)]
+mod nest_page_tests;
 #[cfg(test)]
 mod nested_group_tests;
 #[cfg(test)]
@@ -183,6 +191,8 @@ mod adr_0206_tests;
 #[cfg(test)]
 mod conflict_tests;
 #[cfg(test)]
+mod definition_saved_tests;
+#[cfg(test)]
 mod deleted_tests;
 #[cfg(test)]
 mod edit_pair_tests;
@@ -204,3 +214,5 @@ pub(crate) mod test_kit;
 mod translation_tests;
 #[cfg(test)]
 mod value_tests;
+#[cfg(test)]
+mod values_body_tests;

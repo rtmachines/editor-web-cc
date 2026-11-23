@@ -16,6 +16,8 @@ use crate::error::{FormErrors, leaf_of};
 use crate::pages::Texts;
 
 #[cfg(test)]
+pub(crate) mod build_count;
+#[cfg(test)]
 mod fault_tests;
 #[cfg(test)]
 mod index_level_tests;
@@ -23,6 +25,8 @@ mod index_level_tests;
 mod limit_tests;
 mod limits;
 mod texts;
+#[cfg(test)]
+mod type_level_tests;
 mod walk;
 
 pub(crate) use limits::{LimitTexts, ValueTexts};
@@ -35,7 +39,7 @@ pub(crate) struct GridSource<'a> {
     pub(crate) values: ValueTexts,
     /// The limit rows: the stored limits or the sent rows.
     pub(crate) limits: Vec<LimitTexts>,
-    /// The array level of the pressed mode button (`limit_mode`), if any (ADR-0039 (k)).
+    /// The type level of the pressed mode button (`limit_mode`), if any (ADR-0223).
     pub(crate) toggle: Option<&'a LeafPath>,
     /// The number of elements in one group (`form.array_chunk`). Zero gives no group.
     pub(crate) chunk: usize,
@@ -62,14 +66,25 @@ pub(crate) enum LeafInput {
     Limit,
     /// The `max` input of the limit row of the leaf. A row without it has none.
     LimitMax,
+    /// The `max_length` input of the limit row of the leaf. Only a `String` leaf has one.
+    LimitMaxLength,
 }
 
-/// The `id` of the value input, of the first limit input, and of the `max` input of one leaf path.
+/// The `id` of the value input and of each limit input of one leaf path.
 #[derive(Default)]
 struct LeafIds {
     value: Option<String>,
     limit: Option<String>,
     limit_max: Option<String>,
+    limit_max_length: Option<String>,
+}
+
+/// Return the `id` of the limit input `field` of the limit row number `index`.
+///
+/// An example is `limits-0-min`. The walk of the grid and the lines of a sent limit row both
+/// build the `id` here, so the line and its input cannot differ.
+pub(crate) fn limit_input_id(index: impl std::fmt::Display, field: &str) -> String {
+    format!("limits-{index}-{field}")
 }
 
 /// One hint above the grid. Each input of its class names it in `aria-describedby`.
@@ -205,11 +220,11 @@ pub(crate) struct HiddenField {
     pub(crate) value: String,
 }
 
-/// The row with the mode button of one array level (ADR-0039 (k)).
+/// The row with the mode button of one type level (ADR-0039 (k), ADR-0223).
 pub(crate) struct ModeRow {
     /// The fixed `id` of the button, for example `grid-mode-0`.
     pub(crate) id: String,
-    /// The leaf path of the level, for example `.zones[*]`. The button sends it as `limit_mode`.
+    /// The type level, for example `[*].arr[*]`. The button sends it as `limit_mode`.
     pub(crate) level: String,
     /// The label of the button.
     pub(crate) label: String,
@@ -232,6 +247,8 @@ pub(crate) struct ToggleRow {
 impl GridView {
     /// Build the grid of a tree in the language of `t` (design D8).
     pub(crate) fn build(source: GridSource<'_>, t: Texts<'_>) -> Self {
+        #[cfg(test)]
+        build_count::record();
         walk::build(source, t)
     }
 
@@ -246,6 +263,7 @@ impl GridView {
             LeafInput::Value => ids.value.clone(),
             LeafInput::Limit => ids.limit.clone(),
             LeafInput::LimitMax => ids.limit_max.clone(),
+            LeafInput::LimitMaxLength => ids.limit_max_length.clone(),
         }
     }
 

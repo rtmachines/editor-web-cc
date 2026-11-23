@@ -23,9 +23,9 @@ use super::grid::GridView;
 use super::summary::{ParameterNoticeFragment, ParameterPage};
 use crate::error::{FieldError, FormErrors, WebError, leaf_of};
 use crate::layout::{Layout, NavTarget};
-use crate::pages::draft_reply::{conflict, domain_line, refused};
+use crate::pages::draft_reply::{conflict, domain_line, refused_exact};
 use crate::pages::hrefs::version_href;
-use crate::pages::render::render;
+use crate::pages::render::{render, render_exact};
 use crate::pages::request::PageRequest;
 use crate::pages::texts::Texts;
 use crate::state::WebState;
@@ -340,7 +340,7 @@ pub(crate) fn form_fragment(
     };
     let view = ParameterFormView::new(t, form, (shown, Place::Fragment), csrf, errors);
     let fragment = ParameterFormFragment { t, form: view };
-    Ok(render(&fragment, request.request_id())?.into_response())
+    Ok(render_exact(&fragment, request.request_id())?.into_response())
 }
 
 /// Render the page of the form: the full page, or the content of `main` (ADR-0037 (w)).
@@ -378,7 +378,7 @@ pub(crate) fn form_page(
         version_href: ctx.target.version_href(),
         version_text: version_text(ctx),
     };
-    Ok(render(&page, request.request_id())?.into_response())
+    Ok(render_exact(&page, request.request_id())?.into_response())
 }
 
 /// Answer the form again after a request without a write (ADR-0039 (h)).
@@ -434,7 +434,7 @@ pub(crate) fn refuse(
     } else {
         Place::OutOfBand
     };
-    refused(ctx.state, ctx.request, lines, |errors| {
+    refused_exact(ctx.state, ctx.request, lines, |errors| {
         let shown = Shown {
             grid: shown.grid.map(|grid| grid.with_errors(&errors)),
             ..shown
@@ -509,15 +509,19 @@ pub(crate) fn command_lines(
 /// form with the lines. The grid gives the input of a fault of a leaf. A domain error without an
 /// input also gives the form, with one line that stands only in the summary (ADR-0041 (e)). Any
 /// other error stays as it is.
+///
+/// `(form, sent, previewed)` are the data of the form, the sent fields, and the type of the
+/// preview tree. The function builds the sent grid only for a refusal of the command.
 pub(crate) async fn failed(
     ctx: Ctx<'_>,
-    form: &ParameterForm,
-    shown: Shown,
+    (form, sent, previewed): (&ParameterForm, &SentFields, Option<&TypeExpr>),
     error: AppError,
 ) -> WebError {
     if matches!(error, AppError::ConcurrentEdit { .. }) {
         return conflict(ctx.state, ctx.request, error).await;
     }
+    // The grid comes after the refusal, so a conflict and a success build none (ADR-0223 (p)).
+    let shown = sent_shown(ctx, form, sent, previewed);
     let lines = {
         let grid: Option<&GridView> = shown.grid.as_ref();
         command_lines(&error, &|fault| grid.and_then(|grid| grid.input_of(fault)))

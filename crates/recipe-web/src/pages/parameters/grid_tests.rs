@@ -519,7 +519,7 @@ fn grid_the_switch_back_with_unequal_limits_leaves_all_empty_with_a_notice() {
     let mode = modes.first().unwrap();
     assert_eq!(
         mode.notice,
-        "The elements of [*] have different limits. Enter one limit for all elements."
+        "The elements of [*] have different limits. Array levels with different limits: 1. Enter one limit for all elements."
     );
     assert_eq!(mode.current, "[*]: one limit for all elements");
 }
@@ -647,7 +647,7 @@ fn grid_an_array_inside_a_group_forms_no_group_of_its_own() {
 #[test]
 fn grid_a_limit_mode_that_names_no_array_level_is_ignored() {
     let plain = grid(&zones_tree(), ValueTexts::default(), Vec::new(), None);
-    let level = LeafPath::parse("[1].hold[*]").unwrap();
+    let level = LeafPath::parse("[*].hold[*]").unwrap();
     let pressed = grid(
         &zones_tree(),
         ValueTexts::default(),

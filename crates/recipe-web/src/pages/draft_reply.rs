@@ -13,7 +13,9 @@ use recipe_domain::recipe::RecipeError;
 
 use super::render::instant;
 use super::{PageRequest, Texts};
-use crate::error::{ConflictView, FieldError, FormErrors, RenderedForm, WebError};
+use crate::error::{
+    ConflictView, FieldError, FormErrors, RenderedForm, WebError, is_out_of_band_form,
+};
 use crate::layout::SessionFrame;
 use crate::state::WebState;
 
@@ -41,11 +43,50 @@ where
     T: Template,
     F: FnOnce(FormErrors) -> T,
 {
+    refused_by(state, request, lines, form, RenderedForm::from_template)
+}
+
+/// Build the error of a form as [`refused`] does, with a buffer of the exact length (design D3).
+///
+/// The function solves one problem: a form of 1 MiB must not keep a buffer that doubling made up
+/// to twice as large. The form renders through `RenderedForm::from_template_exact`. A caller
+/// uses it only for a form that can be large, because it renders the form twice.
+pub(crate) fn refused_exact<T, F>(
+    state: &WebState,
+    request: &PageRequest,
+    lines: NonEmpty<FieldError>,
+    form: F,
+) -> WebError
+where
+    T: Template,
+    F: FnOnce(FormErrors) -> T,
+{
+    refused_by(
+        state,
+        request,
+        lines,
+        form,
+        RenderedForm::from_template_exact,
+    )
+}
+
+/// Build the error of a form with the renderer `render` of its template.
+fn refused_by<T, F>(
+    state: &WebState,
+    request: &PageRequest,
+    lines: NonEmpty<FieldError>,
+    form: F,
+    render: fn(&T, RequestId) -> Result<RenderedForm, WebError>,
+) -> WebError
+where
+    T: Template,
+    F: FnOnce(FormErrors) -> T,
+{
     let errors = FormErrors::new(lines.iter(), state.bundles(), request.lang());
     let frame = (!request.is_htmx())
         .then(|| SessionFrame::of(Texts::new(state.bundles(), request.lang()), request))
         .flatten();
-    match RenderedForm::from_template(&form(errors), request.request_id()) {
+    match render(&form(errors), request.request_id()) {
         Ok(rendered) => WebError::Fields {
             lines,
             form: Some(rendered.with_frame(frame)),
@@ -93,6 +134,9 @@ pub(crate) fn domain_line(error: &AppError, target: Option<String>) -> Option<Fi
 /// Append the clean form to the body of a success answer (ADR-0041 (h)).
 ///
 /// The form holds the saved texts and no error line. It swaps out of band, as in [`refused`].
+/// The form renders straight into the buffer of `body`, so no string of its own and no copy
+/// exist (design D3). The check of the first tag reads the new part of that buffer. A caller
+/// that knows the final length reserves it in `body` first, so no write grows the buffer.
 ///
 /// # Errors
 ///
@@ -102,10 +146,14 @@ pub(crate) fn with_form<T: Template>(
     form: &T,
     request_id: RequestId,
 ) -> Result<Html<String>, WebError> {
-    let rendered = RenderedForm::from_template(form, request_id)?;
     let Html(mut text) = body;
-    text.push_str(rendered.as_str());
-    Ok(Html(text))
+    let start = text.len();
+    form.render_into(&mut text)
+        .map_err(|_failed| WebError::Internal { request_id })?;
+    match text.get(start..) {
+        Some(appended) if is_out_of_band_form(appended) => Ok(Html(text)),
+        _other => Err(WebError::Internal { request_id }),
+    }
 }
 
 /// Build the success answer of a draft command with `HX-Trigger: {"rowVersion": <n>}` (`api.md` 4).
@@ -217,3 +265,5 @@ mod tests;
 pub(crate) mod toast_number_tests;
 #[cfg(test)]
 mod toast_tests;
+#[cfg(test)]
+mod with_form_tests;

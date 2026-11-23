@@ -265,6 +265,7 @@ const GRID_KEYS: &[&str] = &[
     "grid-mode-current-all",
     "grid-mode-current-each",
     "grid-mode-join-notice",
+    "grid-mode-mixed-notice",
     "grid-hint-integer",
     "grid-hint-number",
     "grid-hint-duration",
