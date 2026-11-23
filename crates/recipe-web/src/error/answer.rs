@@ -535,5 +535,4 @@ pub(crate) fn answer(error: &WebError, ctx: &ErrorContext<'_>) -> Response {
 }
 
 #[cfg(test)]
-#[path = "refused_htmx_tests.rs"]
 mod refused_htmx_tests;
