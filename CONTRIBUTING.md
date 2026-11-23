@@ -173,6 +173,9 @@ The job `ci-scripts` runs on each pull request without Docker. It runs `deploy/c
 
 The job `release-toolchain` checks `recipe-server` on each pull request with the toolchain version from `deploy/Dockerfile`.
 
+The CI job `heap` runs on each pull request. It runs the ignored measurement tests of `recipe-web` in parallel shards with `--cfg heap_measure`.
+The shard `rest` runs every ignored test that no other shard selects (ADR-0223).
+
 ## Pull requests
 
 A pull request needs:

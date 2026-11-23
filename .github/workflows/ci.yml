@@ -732,6 +732,51 @@ jobs:
       - name: Check the production refusal of insecure cookies
         run: bash deploy/ci/rust-tests.sh secure
 
+  heap:
+    name: Heap (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    # Use the first branch run to set the final timeout.
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: page
+            args: largest_page largest_read largest_mode_rows
+          - shard: refused
+            args: largest_refused
+          - shard: switch
+            args: largest_switch
+          - shard: again
+            args: largest_again
+          - shard: rest
+            args: >-
+              --skip largest_page --skip largest_read --skip largest_mode_rows
+              --skip largest_refused --skip largest_switch --skip largest_again
+    env:
+      RUSTFLAGS: --cfg heap_measure
+      CARGO_TARGET_DIR: target/heap
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the toolchain of rust-toolchain.toml
+        run: rustup toolchain install
+      - name: Cache the Rust build
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: heap
+          workspaces: . -> target/heap
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Run heap measurement tests
+        run: >-
+          cargo test -p recipe-web --all-features --locked --
+          --ignored --test-threads=1 ${{ matrix.args }}
+      - name: Run clippy with the heap allocator
+        if: matrix.shard == 'rest'
+        run: cargo clippy -p recipe-web --all-targets --all-features --locked -- -D warnings
+
   release-toolchain:
     name: Release toolchain check
     runs-on: ubuntu-latest

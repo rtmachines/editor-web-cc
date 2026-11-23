@@ -127,7 +127,8 @@ fn is_test_attribute_group(lines: &[&str], index: usize) -> bool {
 }
 
 /// Return true when an attribute line can skip a test: `#[ignore`, or a `#[cfg_attr(` that
-/// names `ignore` or does not close on its line. CI runs no ignored test.
+/// names `ignore` or does not close on its line. Only the CI job `heap` runs ignored tests.
+/// It runs the measurement tests of `recipe-web`.
 fn disables_a_test(attribute: &str) -> bool {
     attribute.starts_with("#[ignore")
         || (attribute.starts_with("#[cfg_attr(")
