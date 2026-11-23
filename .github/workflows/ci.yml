@@ -735,24 +735,30 @@ jobs:
   heap:
     name: Heap (${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # Use the first branch run to set the final timeout.
-    timeout-minutes: 150
+    # CI run 45253475331 (2026-11-23) took page 63, rest 46, switch 44, again 30, refused 28 minutes.
+    # Each timeout is about 1.5 times that run.
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - shard: page
             args: largest_page largest_read largest_mode_rows
+            timeout: 95
           - shard: refused
             args: largest_refused
+            timeout: 45
           - shard: switch
             args: largest_switch
+            timeout: 65
           - shard: again
             args: largest_again
+            timeout: 45
           - shard: rest
             args: >-
               --skip largest_page --skip largest_read --skip largest_mode_rows
               --skip largest_refused --skip largest_switch --skip largest_again
+            timeout: 70
     env:
       RUSTFLAGS: --cfg heap_measure
       CARGO_TARGET_DIR: target/heap
