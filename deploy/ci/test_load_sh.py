@@ -78,6 +78,9 @@ elif name == "load_value":
             (app_cgroup() / "memory.events").write_text("oom 1\noom_kill 1\nmax 1\n")
             if os.environ.get("STUB_VALUE_FAILURE") == "round":
                 sys.exit(1)
+    elif (os.environ.get("STUB_VALUE_FAILURE") == "single-2"
+          and args[0] == "single" and option("--round") == "2"):
+        sys.exit(2)
     elif os.environ.get("STUB_VALUE_FAILURE") == args[0]:
         sys.exit(1)
 elif name == "oha":
@@ -122,6 +125,10 @@ elif name == "docker":
                 assert "v.number = 1" in query and "v.status = 'draft'" in query
                 assert "reference_number" in query and all(
                     f"'LOAD-V{number}'" in query for number in range(1, 6))
+                if os.environ.get("STUB_VALUE_FAILURE") == "versions":
+                    sys.exit(3)
+                if os.environ.get("STUB_VALUE_FAILURE") == "missing-versions":
+                    sys.exit(0)
                 version = 4 if app_id()[0] == "c" else 3
                 print(json.dumps({"row_versions": {
                     f"LOAD-V{number}": 4 if number == 5 else version
@@ -449,9 +456,39 @@ class LoadScriptTests(unittest.TestCase):
     def test_value_stops_before_recreate_when_the_precheck_fails(self):
         result = self.run_load("value", STUB_VALUE_FAILURE="check-precheck")
         self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(self.value_events()[-1:], [("check-precheck", "")], result.stderr)
         self.assertFalse((self.state / "recreated").exists())
-        self.assertFalse((self.state / "load-memory-value-precheck.json").exists())
+        self.assertTrue((self.state / "load-memory-value-precheck.json").is_file(), result.stderr)
+        self.assertEqual(self.value_events()[-2:], [("check-precheck", ""), ("reading", "a")])
+
+    def test_value_reads_memory_when_the_second_single_fails(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="single-2")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertTrue((self.state / "load-memory-value-precheck.json").is_file(), result.stderr)
+        self.assertEqual(self.value_events(), [("single", "1"), ("single", "2"), ("reading", "a")])
+
+    def test_value_reads_memory_when_the_version_read_fails(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="versions")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertTrue((self.state / "load-memory-value-precheck.json").is_file(), result.stderr)
+        self.assertEqual(self.value_events(), [
+            ("single", "1"), ("single", "2"), ("versions", ""), ("reading", "a"),
+        ])
+
+    def test_value_reads_memory_when_versions_are_missing(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="missing-versions")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("expected five draft versions for value phase precheck", result.stderr)
+        self.assertTrue((self.state / "load-memory-value-precheck.json").is_file(), result.stderr)
+        self.assertEqual(self.value_events(), [
+            ("single", "1"), ("single", "2"), ("versions", ""), ("reading", "a"),
+        ])
+
+    def test_value_keeps_the_precheck_status_when_the_reading_fails(self):
+        result = self.run_load("value", STUB_VALUE_FAILURE="single-2", STUB_INSPECT_ID="invalid")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("expected a 64-character lowercase hexadecimal app container ID",
+                      result.stderr)
+        self.assertEqual(self.value_events(), [("single", "1"), ("single", "2")])
 
     def assert_round_one_stop(self, failure):
         result = self.run_load("value", STUB_VALUE_FAILURE=failure)

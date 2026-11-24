@@ -20,7 +20,7 @@ It satisfies R30 and R31 and uses A26.
 - The load job seeds five drafts and logs in before the flood. After the flood, it runs a pre-check.
   - The client holds back the last byte. At the barrier of each round, `anon` of `app` must rise by 4 × the body length.
   - The leg fails on a wrong answer, no overlap, a missing value, or a round 2 OOM kill, restart, or peak of 384 MiB.
-- Route tests and the Python generator pin the length and SHA-256 of both bodies.
+- Route tests and the Python generator pin both bodies. A `recipe-db` test stores the round 2 value in PostgreSQL.
 
 ## Capabilities
 
@@ -35,7 +35,7 @@ None.
 ## Impact
 
 - `deploy/ci/`: five scripts with tests. `.github/workflows/ci.yml`: new steps in job `load`.
-- `crates/recipe-web/src/`: new route tests.
+- `crates/recipe-web/src/` and `crates/recipe-db/tests/`: new tests.
 - `docs/adr/`: ADR-0222, two Status lines, the index. `reliability.md` §6 and §7.8.
 - No change to the server code or an error code.
 
@@ -43,5 +43,5 @@ None.
 
 - A change of a limit or a setting. The owner decides on a peak at the ceiling.
 - A streaming form parser and the soak test of §6.
-- The 268 MiB sum of ADR-0211 (p), because the leg runs no Argon2.
+- The 268 MiB sum of ADR-0211 (p).
 - A permit check by the leg.

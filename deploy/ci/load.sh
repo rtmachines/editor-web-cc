@@ -214,16 +214,28 @@ value_round() {
   return "$reading_status"
 }
 
-run_value() {
+value_precheck() {
   local number
   for number in 1 2
   do
     value_client single --round "$number" --reference LOAD-V5 \
-      --url https://localhost:8443 --cacert "$CI_STATE/root.crt"
+      --url https://localhost:8443 --cacert "$CI_STATE/root.crt" || return "$?"
   done
-  read_value_versions precheck
+  read_value_versions precheck || return "$?"
   value_client check-precheck
-  read_memory value-precheck
+}
+
+run_value() {
+  local precheck_status=0 reading_status=0
+  (value_precheck) || precheck_status=$?
+  # Keep the pre-check reading after a failure. Return the first failure.
+  (read_memory value-precheck) || reading_status=$?
+  if (( precheck_status != 0 )); then
+    return "$precheck_status"
+  fi
+  if (( reading_status != 0 )); then
+    return "$reading_status"
+  fi
   value_round 1
   read_value_versions 1
   value_client check-round --round 1

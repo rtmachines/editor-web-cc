@@ -17,7 +17,7 @@ use recipe_app::recipe::{RetypeInput, UpdateParameterDefinition, UpdateParameter
 use recipe_domain::recipe::{ParameterKey, ValueInput};
 
 use super::largest_form_tests::{
-    KEY, LEAVES, TYPE_LEVEL_MODE_ROWS, form_pairs, largest_form_world,
+    KEY, LEAVES, TYPE_LEVEL_MODE_ROWS, WIDE_LEVELS, form_pairs, form_pairs_of, largest_form_world,
 };
 use super::measure_kit::{
     ANSWER_LIMIT, ENGINEER_SESSION, Pin, Rendered, change_a_sum, check_status, count,
@@ -41,12 +41,12 @@ pub(super) const BODY_BYTES: usize = 16_758_074;
 /// The SHA-256 of the body in lowercase hexadecimal.
 pub(super) const BODY_SHA256: &str =
     "bef1574257ef4baa65a9f61e4b96f981255100359efeedfee6d3a7b1077dd6bd";
-/// Return `form_pairs` with `description_en` and the alias prefix.
+/// Return `form_pairs_of(wide)` with `description_en` and the alias prefix.
 ///
 /// Solves the problem that the round 1 body and the round 2 body need one alias map. Each `LDT`
 /// text of a value, a minimum, and a maximum gets the prefix `LDATE_AND_TIME#`.
-pub(super) fn aliased_pairs(description_en: &str) -> Vec<(String, String)> {
-    form_pairs()
+pub(super) fn aliased_pairs(description_en: &str, wide: usize) -> Vec<(String, String)> {
+    form_pairs_of(wide)
         .into_iter()
         .map(|(name, text)| {
             let aliased =
@@ -62,7 +62,7 @@ pub(super) fn aliased_pairs(description_en: &str) -> Vec<(String, String)> {
 
 /// Return the pairs of the form of round 1: the alias form with the long text.
 fn refused_pairs() -> Vec<(String, String)> {
-    aliased_pairs(&"x".repeat(PADDING))
+    aliased_pairs(&"x".repeat(PADDING), WIDE_LEVELS)
 }
 
 /// Return the body of round 1 and check its length and SHA-256.

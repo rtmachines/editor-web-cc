@@ -1,6 +1,6 @@
 # ADR-0223: Memory of the grid answers
 
-Status: Accepted. Amends ADR-0039 (k), ADR-0045 (b) and ADR-0138 (c)
+Status: Accepted. Amends ADR-0039 (k), ADR-0045 (b) and ADR-0138 (c). Amended by ADR-0222 (items (v) and (w): round 1 uses the 4 096-leaf body of `value-body-memory-load` D9)
 Date: 2026-11-22
 Deciders: project owner
 

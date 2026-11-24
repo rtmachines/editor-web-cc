@@ -74,6 +74,18 @@ Each request of a round SHALL go to its own draft, and both rounds SHALL use the
 - **THEN** each request gets `303` with the `Location` of the parameter page of its key
 - **AND** the `row_version` of each draft is larger than before the leg
 
+#### Scenario: Round 2 value in PostgreSQL
+- **GIVEN** the value of the round 2 body, with 32 array levels and 4 096 leaves
+- **WHEN** the store writes the value into a `parameter` row of PostgreSQL
+- **THEN** the check `parameter_value_size` accepts the row
+
+#### Scenario: Refused round 2 body in the pre-check
+- **GIVEN** a pre-check in which the round 2 body to `LOAD-V5` gets `409`
+- **WHEN** the leg checks the pre-check
+- **THEN** the leg fails before it replaces `app` and names the status
+- **AND** the leg keeps the reading `value-precheck`
+- **AND** the summary shows the OOM counts and the restart count of that reading
+
 #### Scenario: Wrong redirect in the pre-check
 - **GIVEN** a pre-check in which the round 2 body to `LOAD-V5` gets `303` with a `Location` of another page
 - **WHEN** the leg checks the pre-check
